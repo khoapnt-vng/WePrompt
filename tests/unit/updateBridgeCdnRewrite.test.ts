@@ -70,15 +70,31 @@ vi.mock('electron-log', () => ({
   },
 }));
 
-const originalUpdateBaseUrl = process.env.WEPROMPT_UPDATE_BASE_URL;
+const originalEnvironment = {
+  WEPROMPT_UPDATE_BASE_URL: process.env.WEPROMPT_UPDATE_BASE_URL,
+  AIONUI_DISABLE_AUTO_UPDATE: process.env.AIONUI_DISABLE_AUTO_UPDATE,
+  AIONUI_E2E_TEST: process.env.AIONUI_E2E_TEST,
+  CI: process.env.CI,
+  GITHUB_ACTIONS: process.env.GITHUB_ACTIONS,
+};
+
+const restoreEnvironment = () => {
+  for (const [key, value] of Object.entries(originalEnvironment)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+};
 
 beforeEach(() => {
   process.env.WEPROMPT_UPDATE_BASE_URL = 'https://updates.weprompt.test/releases';
+  delete process.env.AIONUI_DISABLE_AUTO_UPDATE;
+  delete process.env.AIONUI_E2E_TEST;
+  delete process.env.CI;
+  delete process.env.GITHUB_ACTIONS;
 });
 
 afterEach(() => {
-  if (originalUpdateBaseUrl === undefined) delete process.env.WEPROMPT_UPDATE_BASE_URL;
-  else process.env.WEPROMPT_UPDATE_BASE_URL = originalUpdateBaseUrl;
+  restoreEnvironment();
 });
 
 const getCheckHandler = async ({ initialize = true }: { initialize?: boolean } = {}) => {

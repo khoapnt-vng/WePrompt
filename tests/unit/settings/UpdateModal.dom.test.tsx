@@ -68,9 +68,28 @@ vi.mock('@/common', () => ({
 
 import UpdateModal from '@/renderer/components/settings/UpdateModal';
 
+const originalEnvironment = {
+  WEPROMPT_UPDATE_BASE_URL: process.env.WEPROMPT_UPDATE_BASE_URL,
+  AIONUI_DISABLE_AUTO_UPDATE: process.env.AIONUI_DISABLE_AUTO_UPDATE,
+  AIONUI_E2E_TEST: process.env.AIONUI_E2E_TEST,
+  CI: process.env.CI,
+  GITHUB_ACTIONS: process.env.GITHUB_ACTIONS,
+};
+
+const restoreEnvironment = () => {
+  for (const [key, value] of Object.entries(originalEnvironment)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+};
+
 describe('UpdateModal manual install fallback', () => {
   beforeEach(() => {
     process.env.WEPROMPT_UPDATE_BASE_URL = 'https://updates.weprompt.test/releases';
+    delete process.env.AIONUI_DISABLE_AUTO_UPDATE;
+    delete process.env.AIONUI_E2E_TEST;
+    delete process.env.CI;
+    delete process.env.GITHUB_ACTIONS;
     vi.stubGlobal('__APP_VERSION__', '2.1.15');
     mocks.manualProgressHandler = null;
     mocks.autoStatusHandler = null;
@@ -120,7 +139,7 @@ describe('UpdateModal manual install fallback', () => {
   });
 
   afterEach(() => {
-    delete process.env.WEPROMPT_UPDATE_BASE_URL;
+    restoreEnvironment();
     cleanup();
     vi.clearAllMocks();
     vi.unstubAllGlobals();

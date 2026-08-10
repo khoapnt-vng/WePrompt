@@ -20,6 +20,21 @@ const menuMock = {
   setApplicationMenu: mocks.setApplicationMenu,
 };
 
+const originalEnvironment = {
+  WEPROMPT_UPDATE_BASE_URL: process.env.WEPROMPT_UPDATE_BASE_URL,
+  AIONUI_DISABLE_AUTO_UPDATE: process.env.AIONUI_DISABLE_AUTO_UPDATE,
+  AIONUI_E2E_TEST: process.env.AIONUI_E2E_TEST,
+  CI: process.env.CI,
+  GITHUB_ACTIONS: process.env.GITHUB_ACTIONS,
+};
+
+const restoreEnvironment = () => {
+  for (const [key, value] of Object.entries(originalEnvironment)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+};
+
 vi.mock('electron', () => ({
   app: appMock,
   Menu: menuMock,
@@ -71,11 +86,15 @@ describe('update actions in application and tray menus', () => {
     vi.resetModules();
     vi.clearAllMocks();
     delete process.env.WEPROMPT_UPDATE_BASE_URL;
+    delete process.env.AIONUI_DISABLE_AUTO_UPDATE;
+    delete process.env.AIONUI_E2E_TEST;
+    delete process.env.CI;
+    delete process.env.GITHUB_ACTIONS;
     Object.defineProperty(process, 'platform', { configurable: true, value: 'darwin' });
   });
 
   afterEach(() => {
-    delete process.env.WEPROMPT_UPDATE_BASE_URL;
+    restoreEnvironment();
     Object.defineProperty(process, 'platform', { configurable: true, value: originalPlatform });
   });
 
