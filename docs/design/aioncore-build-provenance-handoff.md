@@ -1,5 +1,10 @@
 # AionCore Build & Provenance — Handoff to Platform (khoapnt)
 
+> **Superseded for the Sprint 3 release-line decision (2026-08-10).** See
+> [aioncore-sprint3-release-line.md](aioncore-sprint3-release-line.md) for the accepted tag, corrected
+> BUG-013 provenance, branch/tag policy, and required build-SHA control. The historical handoff
+> below is retained unchanged for context.
+
 **Date:** 2026-08-08 · **From:** minhtq (Controller) · **Status:** decision requested
 **Companions:** [epic003-backend-decision-record.md](epic003-backend-decision-record.md) (DR-1/2/3),
 BUG-040 in `TASKS.md`, held branch `chore/aioncore-v0162-bump`.
