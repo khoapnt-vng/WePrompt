@@ -45,7 +45,9 @@ const SUBMISSION_DEADLINE_MS = 5 * 60_000;
 const REMOTE_POLL_ATTEMPT_TIMEOUT_MS = 60_000;
 const REMOTE_POLL_DEADLINE_MS = 30 * 60_000;
 // BUG-027: CI load can exhaust these two tests' fixed filesystem poll budget.
-// Tracking: https://github.com/khoapnt-vng/WePrompt/blob/sprint3/TASKS.md#bug-027p3creative-studio-jobmanagertestts-capped-backoff-test-flakes-in-full-suite-position
+// Tracking: search BUG-027 in https://github.com/khoapnt-vng/WePrompt/blob/sprint3/TASKS.md
+// (TASKS.md records bugs as list items, not headings, so a generated heading
+// anchor does not resolve.)
 const BUG_027_CI_RETRY = process.env.CI ? 2 : 0;
 
 const provider: IProvider = {
