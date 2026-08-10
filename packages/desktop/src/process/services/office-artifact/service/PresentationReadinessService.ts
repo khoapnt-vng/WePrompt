@@ -72,6 +72,7 @@ export type PresentationReadinessServiceResult =
 type FileIdentity = PresentationArtifactIdentity & {
   readonly device: bigint;
   readonly inode: bigint;
+  readonly ctimeNs: bigint;
 };
 
 type ReadinessFailureOptions = {
@@ -113,6 +114,11 @@ class ReadinessFailure extends Error {
 
 function fail(code: PresentationReadinessBlockerCode, slideNumber: number | null = null): never {
   throw new ReadinessFailure({ code, slideNumber });
+}
+
+function requireComparableCtimeNs(value: unknown, slideNumber: number | null = null): bigint {
+  if (typeof value !== 'bigint' || value <= BigInt(0)) fail('EVIDENCE_MISSING', slideNumber);
+  return value;
 }
 
 function failureResult(...blockers: readonly PresentationReadinessBlocker[]): PresentationReadinessServiceResult {
@@ -418,6 +424,7 @@ async function writeInspectionCopy(
     });
     await handle.chmod(0o600);
     const opened = await handle.stat({ bigint: true });
+    const ctimeNs = requireComparableCtimeNs(opened.ctimeNs);
     let linked: Awaited<ReturnType<typeof lstat>>;
     try {
       linked = await lstat(filePath);
@@ -435,7 +442,7 @@ async function writeInspectionCopy(
     ) {
       fail('HASH_MISMATCH');
     }
-    return { ...identity, device: opened.dev, inode: opened.ino };
+    return { ...identity, device: opened.dev, inode: opened.ino, ctimeNs };
   } finally {
     await handle.close();
   }
@@ -483,6 +490,7 @@ async function inspectRegularFile(
       }
     }
     const before = await handle.stat({ bigint: true });
+    const beforeCtimeNs = requireComparableCtimeNs(before.ctimeNs, slideNumber);
     if (!before.isFile() || before.nlink !== BigInt(1) || !sameOpenFile(linked, before)) {
       fail(missingCode, slideNumber);
     }
@@ -505,12 +513,13 @@ async function inspectRegularFile(
     }
 
     const after = await handle.stat({ bigint: true });
+    const afterCtimeNs = requireComparableCtimeNs(after.ctimeNs, slideNumber);
     if (
       after.dev !== before.dev ||
       after.ino !== before.ino ||
       after.size !== before.size ||
       after.mtimeNs !== before.mtimeNs ||
-      after.ctimeNs !== before.ctimeNs
+      afterCtimeNs !== beforeCtimeNs
     ) {
       fail('HASH_MISMATCH', slideNumber);
     }
@@ -523,6 +532,7 @@ async function inspectRegularFile(
       byteLength,
       device: before.dev,
       inode: before.ino,
+      ctimeNs: beforeCtimeNs,
     };
   } finally {
     await handle.close();
@@ -564,7 +574,8 @@ async function assertInspectionCopy(filePath: string, expected: FileIdentity): P
     observed.sha256 !== expected.sha256 ||
     observed.byteLength !== expected.byteLength ||
     observed.device !== expected.device ||
-    observed.inode !== expected.inode
+    observed.inode !== expected.inode ||
+    observed.ctimeNs !== expected.ctimeNs
   ) {
     fail('HASH_MISMATCH');
   }
