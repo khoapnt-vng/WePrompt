@@ -123,17 +123,23 @@ describe('PresentationRuntimeEventClient', () => {
     vi.restoreAllMocks();
   });
 
-  it('authenticates with the explicit backend token and rotates connection generations', () => {
+  it('opens each socket with its explicit backend credential and no token in the URL', () => {
     const harness = createHarness();
+    const runtimeGlobals = globalThis as typeof globalThis & { __backendLocalToken?: string };
+    runtimeGlobals.__backendLocalToken = 'wrong-global-token';
 
-    harness.client.connect({ port: 43123, token: TOKEN });
-    harness.client.connect({ port: 43124, token: 'rotated&token' });
+    try {
+      harness.client.connect({ port: 43123, token: TOKEN });
+      harness.client.connect({ port: 43124, token: 'rotated&token' });
+    } finally {
+      delete runtimeGlobals.__backendLocalToken;
+    }
 
-    expect(harness.urls).toEqual([
-      'ws://127.0.0.1:43123/ws?local_token=backend-secret-token',
-      'ws://127.0.0.1:43124/ws?local_token=rotated%26token',
+    expect(harness.urls).toEqual(['ws://127.0.0.1:43123/ws', 'ws://127.0.0.1:43124/ws']);
+    expect(harness.socketOptions).toEqual([
+      { headers: { Authorization: 'Bearer backend-secret-token' }, maxPayload: 256 * 1024 },
+      { headers: { Authorization: 'Bearer rotated&token' }, maxPayload: 256 * 1024 },
     ]);
-    expect(harness.socketOptions).toEqual([{ maxPayload: 256 * 1024 }, { maxPayload: 256 * 1024 }]);
     expect(harness.sockets[0]?.close).toHaveBeenCalledTimes(1);
   });
 

@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { localTokenAuthHeaders } from '@/common/adapter/httpBridge';
+
 const MAX_FRAME_BYTES = 256 * 1024;
 const MAX_PENDING_TUPLES = 32;
 const MAX_SEEN_TUPLES = 64;
@@ -53,7 +55,7 @@ type SocketLike = {
 };
 
 export type PresentationRuntimeEventClientOptions = {
-  createSocket: (url: string, options: { maxPayload: number }) => SocketLike;
+  createSocket: (url: string, options: { headers: Record<string, string>; maxPayload: number }) => SocketLike;
   onTerminalEvent: (
     event: PresentationRuntimeTerminalEvent,
     authority: PresentationTerminalEventAuthority
@@ -218,8 +220,11 @@ export class PresentationRuntimeEventClient {
     this.socketEpoch += 1;
     const epoch = this.socketEpoch;
     this.clearConnectionState();
-    const url = `ws://127.0.0.1:${credentials.port}/ws?local_token=${encodeURIComponent(credentials.token)}`;
-    const socket = this.options.createSocket(url, { maxPayload: MAX_FRAME_BYTES });
+    const url = `ws://127.0.0.1:${credentials.port}/ws`;
+    const socket = this.options.createSocket(url, {
+      headers: localTokenAuthHeaders(credentials.token),
+      maxPayload: MAX_FRAME_BYTES,
+    });
     this.socket = socket;
     socket.on('open', () => {
       if (this.isCurrentSocket(socket, generation, epoch)) this.reconnectAttempt = 0;
