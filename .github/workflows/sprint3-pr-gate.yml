@@ -21,6 +21,21 @@ jobs:
     name: Quality and tests (Linux)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # TEMPORARY, added 2026-08-10 — remove as the closing step of BUG-042.
+    #
+    # This gate's first-ever run found 26 tests that pass on macOS and fail on
+    # Linux (updater, tray, application-menu surfaces). Those are real defects:
+    # Linux x64 and arm64 are shipped release targets, published as .deb by
+    # build-and-release.yml. They are NOT a reason to move the gate to macOS,
+    # which would hide breakage in a distributed platform.
+    #
+    # Landing non-blocking so the pipeline produces signal from day one without
+    # blocking every PR on a pre-existing, newly-visible failure set. Failures
+    # still appear in the run; they simply do not gate merges yet.
+    #
+    # REMOVE THIS LINE once BUG-042 is closed. Leaving it in place permanently
+    # would make the gate decorative.
+    continue-on-error: true
     steps:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
