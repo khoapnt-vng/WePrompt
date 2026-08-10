@@ -7,6 +7,22 @@ the guard fails closed when durable file-identity evidence is unavailable.
 
 ## Observation
 
+> **Addendum added during integration, 2026-08-10 — evidence unavailable to the original audit.**
+> This document was written believing the failure was observed only on a **Linux** CI host, and
+> its mechanism section reasons from Linux inode reuse accordingly. That framing is now too
+> narrow: the same test **also failed on a macOS 15.7.7 GitHub runner**
+> (run `31402821168`, head `6c49121c5`, job `Quality and tests (macOS)`), while passing locally
+> on Darwin 24.6.0 — including under `CI=true GITHUB_ACTIONS=true`, which rules out the
+> environment-variable cause that explains the other 25 BUG-042 failures.
+>
+> The discriminator is therefore **not the operating system and not the CI environment
+> variables**, but something about the **CI runners' filesystems** shared by both hosted images
+> and absent on the developer Mac. That makes the Windows verdict below _more_ concerning, not
+> less: a mechanism that degrades on two different hosted filesystems is unlikely to be a
+> property of one kernel. Treat the Linux-specific inode-reuse reasoning as one candidate among
+> several rather than the leading explanation, and re-run the probe on a hosted runner before
+> concluding.
+
 - **Verified — repository record:** Linux is not a release target. BUG-043 remains relevant
   because Windows is shipped and has no recorded execution of this suite. The Linux CI result
   returned `ok: true` for the combined same-byte-replacement/hardlink-drift test while sibling
