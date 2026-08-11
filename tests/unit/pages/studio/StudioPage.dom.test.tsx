@@ -1135,7 +1135,13 @@ describe('StudioPage and useStudioProject', () => {
   it('prefills a generated reference prompt without changing the scene draft when edited', async () => {
     const opening = scene({ visualPrompt: '  A brushed-steel travel mug  ' });
     bridge.getProject.invoke.mockResolvedValue(
-      ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
+      ok(
+        project('project-1', {
+          aspectRatio: '9:16',
+          sceneOrder: [opening.id],
+          scenes: { [opening.id]: opening },
+        })
+      )
     );
     bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
     renderRoute();
@@ -1145,14 +1151,9 @@ describe('StudioPage and useStudioProject', () => {
       name: 'conversation.creativeStudio.reference.dialogTitle',
     });
     const referencePrompt = within(dialog).getByLabelText('conversation.creativeStudio.reference.promptLabel');
-    expect(referencePrompt)
-      .toHaveValue(`Product reference sheet. Pure white catalog background with thin labeled dividers.
-[SECTION 1]: Three-view turnaround — straight-on, 3/4 angle, side profile.
-[SECTION 2]: In-context scale reference.
-[SECTION 3]: Macro close-ups of material and texture.
-[SECTION 4]: A flat color swatch.
-Identical geometry, placement, and material finish in every section.
-Subject: A brushed-steel travel mug`);
+    expect(referencePrompt).toHaveValue(
+      'A single cinematic frame, 9:16, no text, no labels, no collage, no split panels. A brushed-steel travel mug'
+    );
 
     fireEvent.change(referencePrompt, { target: { value: 'Edited reference-only prompt' } });
 

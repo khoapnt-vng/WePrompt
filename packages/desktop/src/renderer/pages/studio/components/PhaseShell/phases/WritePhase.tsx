@@ -163,6 +163,7 @@ export const WritePhase: React.FC<WritePhaseProps> = ({ controller, layoutMode =
                 <ScriptRow
                   key={scene.id}
                   projectId={project.id}
+                  aspectRatio={project.aspectRatio}
                   scene={project.scenes[scene.id] ?? scene}
                   draft={draft}
                   index={index}

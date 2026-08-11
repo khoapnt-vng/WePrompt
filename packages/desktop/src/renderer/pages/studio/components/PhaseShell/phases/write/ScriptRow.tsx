@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 
 import type {
   StudioAsset,
+  StudioAspectRatio,
   StudioEditableScene,
   StudioMediaKind,
   StudioScene,
@@ -20,7 +21,7 @@ import type {
 import type { SelectedSceneSaveState } from '../../../../hooks/useStoryboardEditor';
 import type { StudioSceneDurationBounds } from '../../../../studioRouteConstraints';
 import type { StudioSceneStatus } from '../../../../studioReadiness';
-import { buildProductSheetPrompt } from '../../../Generation/referencePrompt';
+import { buildFirstFramePrompt } from '../../../Generation/referencePrompt';
 import { createManagedStudioAssetUrl } from '../../../Preview/StagePreview';
 
 import styles from './write.module.css';
@@ -31,6 +32,7 @@ const MAX_SCENE_TITLE_CHARS = 256;
 
 export type ScriptRowProps = {
   projectId: string;
+  aspectRatio: StudioAspectRatio;
   scene: StudioScene;
   draft: StudioEditableScene;
   index: number;
@@ -70,6 +72,7 @@ const SAVE_STATUS_KEYS = {
 /** Controlled, sortable script row. Draft ownership stays in useStoryboardEditor. */
 export const ScriptRow: React.FC<ScriptRowProps> = ({
   projectId,
+  aspectRatio,
   scene,
   draft,
   index,
@@ -411,7 +414,7 @@ export const ScriptRow: React.FC<ScriptRowProps> = ({
                 disabled={importingReference || mutationPending}
                 icon={<Magic aria-hidden='true' />}
                 onClick={() => {
-                  setReferencePrompt(buildProductSheetPrompt(scene.visualPrompt));
+                  setReferencePrompt(buildFirstFramePrompt(scene.visualPrompt, aspectRatio));
                   setReferenceDialogVisible(true);
                 }}
               >

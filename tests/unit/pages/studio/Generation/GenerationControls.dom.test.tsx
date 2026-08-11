@@ -18,7 +18,7 @@ import {
   GenerationControls,
   type GenerationControlsProps,
 } from '@renderer/pages/studio/components/Generation/GenerationControls';
-import { buildProductSheetPrompt } from '@renderer/pages/studio/components/Generation/referencePrompt';
+import { buildFirstFramePrompt } from '@renderer/pages/studio/components/Generation/referencePrompt';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -126,16 +126,11 @@ const createProps = (overrides: Partial<GenerationControlsProps> = {}): Generati
   ...overrides,
 });
 
-describe('buildProductSheetPrompt', () => {
-  it('wraps a trimmed visual prompt in the product reference sheet template', () => {
-    expect(buildProductSheetPrompt('  A brushed-steel travel mug  '))
-      .toBe(`Product reference sheet. Pure white catalog background with thin labeled dividers.
-[SECTION 1]: Three-view turnaround — straight-on, 3/4 angle, side profile.
-[SECTION 2]: In-context scale reference.
-[SECTION 3]: Macro close-ups of material and texture.
-[SECTION 4]: A flat color swatch.
-Identical geometry, placement, and material finish in every section.
-Subject: A brushed-steel travel mug`);
+describe('buildFirstFramePrompt', () => {
+  it('builds a single cinematic first frame with the project aspect ratio and trimmed visual prompt', () => {
+    expect(buildFirstFramePrompt('  A brushed-steel travel mug  ', '4:3')).toBe(
+      'A single cinematic frame, 4:3, no text, no labels, no collage, no split panels. A brushed-steel travel mug'
+    );
   });
 });
 
