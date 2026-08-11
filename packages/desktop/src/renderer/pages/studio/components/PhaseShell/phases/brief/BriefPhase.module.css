@@ -158,7 +158,7 @@
 }
 
 .saveStatus {
-  composes: meta from '../../../../StudioTypography.module.css';
+  composes: body from '../../../../StudioTypography.module.css';
 }
 
 .phase[data-layout='compact'] .content {
