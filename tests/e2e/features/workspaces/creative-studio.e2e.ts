@@ -478,9 +478,10 @@ test.describe('Creative Studio workspace', () => {
 
       await expect(shotRow.locator('[role="status"][data-state="saved"]')).toHaveText('Scene saved');
       await expect(page.locator('[data-studio-layout-root] > header [role="status"]')).toHaveText('Saved');
-      const pacing = writePhase.getByRole('region', { name: 'Pacing' });
-      await expect(pacing.getByRole('status')).toHaveText('5s total · 18s goal');
-      await expect(pacing.getByRole('alert')).toHaveText('Storyboard timing does not match the project target.');
+      // The pacing bar is gone; the off-target warning now lives in the shell advisory slot.
+      await expect(page.locator('[data-studio-layout-root] > [role="alert"]')).toHaveText(
+        'Storyboard timing does not match the project target.'
+      );
       const continueToProduce = page.getByRole('button', { name: 'Continue to Produce' });
       await expect(continueToProduce).toBeEnabled();
 
@@ -563,7 +564,8 @@ test.describe('Creative Studio workspace', () => {
           ];
         })
       );
-      await expect(page.getByRole('region', { name: 'Pacing' }).getByRole('status')).toHaveText('15s total · 15s goal');
+      // A seeded 3x5s shape hits the 15s target exactly, so no shell advisory is raised.
+      await expect(page.locator('[data-studio-layout-root] > [role="alert"]')).toHaveCount(0);
       await expect(page.getByText('Untitled scene', { exact: true })).toHaveCount(0);
       expect(await readCanonicalStudioSnapshot(page, shapeProjectId)).toMatchObject({
         routes: fakeCatalogRoutes,

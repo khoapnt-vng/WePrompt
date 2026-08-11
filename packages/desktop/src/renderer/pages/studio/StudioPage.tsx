@@ -984,8 +984,10 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
   const advisory: StudioPhaseControllers['advisory'] =
     shellIssueMessageKey !== null
       ? { messageKey: shellIssueMessageKey, anchor: 'shell' }
-      : activePhase === 'write' && readiness.durationDeltaSeconds !== 0
-        ? { messageKey: 'conversation.creativeStudio.review.durationMismatch', anchor: 'pacing' }
+      : // Review-time concern with no Write-phase render site since the pacing bar was
+        // removed, so it rides the shell advisory slot instead of vanishing silently.
+        activePhase === 'write' && readiness.durationDeltaSeconds !== 0
+        ? { messageKey: 'conversation.creativeStudio.review.durationMismatch', anchor: 'shell' }
         : activePhase === 'produce' && readiness.readySceneIds.length === 0
           ? { messageKey: 'conversation.creativeStudio.review.noReadyScenes', anchor: 'batch' }
           : activePhase === 'produce' && readiness.durationDeltaSeconds !== 0

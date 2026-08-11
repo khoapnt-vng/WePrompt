@@ -931,7 +931,6 @@
         "textChargeDisclosure": "Hikâye panosu taslağı yapılandırdığınız metin modelini kullanır. Sağlayıcınız model kullanımı için ücret alabilir.",
         "draftStoryboard": "Hikâye panosu taslağı oluştur",
         "addShot": "Çekim ekle",
-        "fitToGoal": "Hedefe uydur",
         "noScenes": "Başlamak için bir çekim ekleyin veya hikâye panosu taslağı oluşturun.",
         "scriptTableTitle": "Senaryo",
         "scriptTableHelp": "Her çekim için tek satırda metni, görseli, süreyi ve çıktıyı birlikte şekillendirin.",
@@ -949,10 +948,7 @@
           "middle": "Ortadaki çekim",
           "closing": "Kapanış çekimi"
         },
-        "needsTitle": "Başlık gerekli",
-        "pacingTitle": "Tempo",
-        "pacingSummary": "Toplam {{total}} sn · Hedef {{target}} sn",
-        "goalMarker": "{{seconds}} sn hedef"
+        "needsTitle": "Başlık gerekli"
       },
       "produce": {
         "connectEngine": "Bir motor bağlayın — yaklaşık bir dakika, tüm çalışma alanı için yalnızca bir kez",

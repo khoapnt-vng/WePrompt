@@ -928,7 +928,6 @@
         "textChargeDisclosure": "起草故事板会使用您配置的文本模型。提供商可能会对模型使用收费。",
         "draftStoryboard": "起草故事板",
         "addShot": "添加镜头",
-        "fitToGoal": "匹配目标",
         "noScenes": "添加镜头或起草故事板即可开始。",
         "scriptTableTitle": "脚本",
         "scriptTableHelp": "每个镜头一行，同时调整文案、画面、时长和输出。",
@@ -946,10 +945,7 @@
           "middle": "中段镜头",
           "closing": "收尾镜头"
         },
-        "needsTitle": "需要标题",
-        "pacingTitle": "节奏",
-        "pacingSummary": "总时长 {{total}} 秒 · 目标 {{target}} 秒",
-        "goalMarker": "目标 {{seconds}} 秒"
+        "needsTitle": "需要标题"
       },
       "produce": {
         "connectEngine": "连接一个引擎——大约一分钟，整个工作区只需设置一次",

@@ -764,7 +764,6 @@
         "textChargeDisclosure": "Drafting a storyboard uses your configured text model. Your provider may charge for model use.",
         "draftStoryboard": "Draft storyboard",
         "addShot": "Add shot",
-        "fitToGoal": "Fit to goal",
         "noScenes": "Add a shot or draft a storyboard to begin.",
         "scriptTableTitle": "Script",
         "scriptTableHelp": "One row per shot. Shape the words, visuals, timing, and output together.",
@@ -782,10 +781,7 @@
           "middle": "Middle shot",
           "closing": "Closing shot"
         },
-        "needsTitle": "Needs title",
-        "pacingTitle": "Pacing",
-        "pacingSummary": "{{total}}s total · {{target}}s goal",
-        "goalMarker": "{{seconds}}s goal"
+        "needsTitle": "Needs title"
       },
       "produce": {
         "connectEngine": "Connect an engine — about a minute, once for the whole workspace",

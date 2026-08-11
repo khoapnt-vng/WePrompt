@@ -22,7 +22,7 @@ import type { GenerationBatchReviewRequest, GenerationSingleReviewRequest } from
 
 export type StudioPhaseAdvisory = {
   messageKey: string;
-  anchor: 'shell' | 'pacing' | 'batch';
+  anchor: 'shell' | 'batch';
 };
 
 export type StudioPhaseControllers = {

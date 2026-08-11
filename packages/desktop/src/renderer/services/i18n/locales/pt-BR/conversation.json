@@ -936,7 +936,6 @@
         "textChargeDisclosure": "O rascunho do storyboard usa o modelo de texto configurado. O provedor pode cobrar pelo uso do modelo.",
         "draftStoryboard": "Criar rascunho do storyboard",
         "addShot": "Adicionar tomada",
-        "fitToGoal": "Ajustar à meta",
         "noScenes": "Adicione uma tomada ou crie um rascunho do storyboard para começar.",
         "scriptTableTitle": "Roteiro",
         "scriptTableHelp": "Uma linha por tomada para ajustar texto, visual, duração e saída em conjunto.",
@@ -954,10 +953,7 @@
           "middle": "Tomada intermediária",
           "closing": "Tomada de encerramento"
         },
-        "needsTitle": "Precisa de título",
-        "pacingTitle": "Ritmo",
-        "pacingSummary": "{{total}} s no total · meta de {{target}} s",
-        "goalMarker": "Meta de {{seconds}} s"
+        "needsTitle": "Precisa de título"
       },
       "produce": {
         "connectEngine": "Conecte um mecanismo — cerca de um minuto, uma vez para todo o espaço de trabalho",

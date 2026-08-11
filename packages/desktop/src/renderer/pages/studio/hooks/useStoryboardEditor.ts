@@ -1391,6 +1391,14 @@ export const useStoryboardEditor = ({
     });
   }, [enqueueIntent, suggestedExpandedTargetSeconds]);
 
+  /**
+   * NO UI CALLER. The only chain into this was the Write phase pacing bar's "Fit to goal"
+   * button, removed on 2026-08-11 at the product owner's request. The main-process
+   * `fitStoryboard` capability behind it is deliberately retained for the Creative Director
+   * to drive once project-level settings become proposable — it is kept, not abandoned.
+   * `latestFitOutcome` / `latestFitCatalogVersion` / `clearLatestFitOutcome` are orphaned
+   * alongside it. Do not treat this as live code when reading the Write phase.
+   */
   const fitToTarget = useCallback(
     async (catalogVersion: string): Promise<StudioFitStoryboardOutcome | null> => {
       if (projectRef.current === null) return null;

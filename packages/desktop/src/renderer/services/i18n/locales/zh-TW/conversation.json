@@ -928,7 +928,6 @@
         "textChargeDisclosure": "起草分鏡會使用您設定的文字模型。供應商可能會收取模型使用費。",
         "draftStoryboard": "起草分鏡",
         "addShot": "新增鏡頭",
-        "fitToGoal": "符合目標",
         "noScenes": "新增鏡頭或起草分鏡即可開始。",
         "scriptTableTitle": "腳本",
         "scriptTableHelp": "每個鏡頭一列，同時調整文字、畫面、時長與輸出。",
@@ -946,10 +945,7 @@
           "middle": "中段鏡頭",
           "closing": "收尾鏡頭"
         },
-        "needsTitle": "需要標題",
-        "pacingTitle": "節奏",
-        "pacingSummary": "總時長 {{total}} 秒 · 目標 {{target}} 秒",
-        "goalMarker": "目標 {{seconds}} 秒"
+        "needsTitle": "需要標題"
       },
       "produce": {
         "connectEngine": "連接一個引擎——大約一分鐘，整個工作區只需設定一次",

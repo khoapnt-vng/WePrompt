@@ -794,82 +794,11 @@ describe('WritePhase', () => {
     expect(props.openSingleGenerationReview).not.toHaveBeenCalled();
   });
 
-  it('keeps Fit to goal at summary level and contains no media-generation or spend action', () => {
-    const phaseEditor = editor('scene-1', { hasUnsavedSceneDrafts: false });
-    const props = controller({ editor: phaseEditor });
-    render(<WritePhase controller={props} />);
+  it('contains no media-generation or spend action anywhere in Write', () => {
+    render(<WritePhase controller={controller({ editor: editor('scene-1', { hasUnsavedSceneDrafts: false }) })} />);
 
-    const fitButton = screen.getByRole('button', {
-      name: 'conversation.creativeStudio.phase.write.fitToGoal',
-    });
-    expect(fitButton).toBeEnabled();
-    fireEvent.click(fitButton);
-    expect(phaseEditor.fitToTarget).toHaveBeenCalledWith('0123456789abcdef');
     expect(screen.queryByRole('button', { name: /render|generate image|generate video/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/credit|session spend|estimated cost/i)).not.toBeInTheDocument();
-  });
-
-  it('renders proportional pacing blocks, positions the goal marker, and selects a clicked shot', () => {
-    const phaseEditor = editor('scene-1', { hasUnsavedSceneDrafts: false });
-    render(<WritePhase controller={controller({ editor: phaseEditor })} />);
-
-    const pacing = screen.getByRole('region', {
-      name: 'conversation.creativeStudio.phase.write.pacingTitle',
-    });
-    const blocks = [...pacing.querySelectorAll<HTMLElement>('[data-pacing-scene]')];
-    expect(blocks.map((block) => block.style.flexGrow)).toEqual(['5', '6']);
-    expect(pacing.querySelector<HTMLElement>('[data-pacing-shot-span]')).toHaveStyle({
-      width: `${(11 / 15) * 100}%`,
-    });
-    expect(pacing.querySelector<HTMLElement>('[data-pacing-goal]')).toHaveStyle({
-      left: `${(15 / 11) * 100}%`,
-    });
-
-    fireEvent.click(within(pacing).getAllByRole('button')[1]!);
-    expect(phaseEditor.selectScene).toHaveBeenCalledWith('scene-2');
-  });
-
-  it('announces the Write timing advisory politely at the pacing bar', () => {
-    render(
-      <WritePhase
-        controller={controller({
-          advisory: {
-            messageKey: 'conversation.creativeStudio.review.durationMismatch',
-            anchor: 'pacing',
-          },
-        })}
-      />
-    );
-
-    const advisory = screen.getByText('conversation.creativeStudio.review.durationMismatch');
-    expect(advisory).toHaveAttribute('role', 'status');
-    expect(advisory).toHaveAttribute('aria-live', 'polite');
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-  });
-
-  it('keeps unreachable fit errors assertive', () => {
-    const fitOutcome = {
-      status: 'unreachable' as const,
-      reason: 'target_out_of_bounds' as const,
-      project,
-      lockedSceneIds: [],
-      minimumTotalSeconds: 18,
-      maximumTotalSeconds: 24,
-    };
-    render(
-      <WritePhase
-        controller={controller({
-          editor: editor('scene-1', {
-            latestFitOutcome: fitOutcome,
-            latestFitCatalogVersion: catalog.catalogVersion,
-          }),
-        })}
-      />
-    );
-
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      'conversation.creativeStudio.storyboard.fitUnreachable.target_out_of_bounds'
-    );
   });
 
   it('docks the assistant in the inline right column and keeps the drawer trigger for narrower layouts', () => {

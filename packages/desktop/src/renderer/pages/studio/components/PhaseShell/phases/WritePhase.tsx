@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@arco-design/web-react';
 
@@ -16,10 +16,8 @@ import { StudioConversationSurface } from './StudioConversationSurface';
 import { useBriefConversation } from './brief/useBriefConversation';
 import type { WritePhaseController } from '../types';
 import type { StudioLayoutMode } from '../useStudioLayoutMode';
-import { PacingBar, ScriptRow, ScriptTable } from './write';
+import { ScriptRow, ScriptTable } from './write';
 import styles from './write/write.module.css';
-
-const ACTIVE_JOB_STATUSES = new Set(['queued_local', 'submitting', 'queued_remote', 'running', 'needs_attention']);
 
 export type WritePhaseProps = {
   controller: WritePhaseController;
@@ -34,7 +32,6 @@ export const WritePhase: React.FC<WritePhaseProps> = ({ controller, layoutMode =
     editor,
     models,
     writeFocusIntent,
-    advisory,
     mutationPending,
     openDraftReview,
     openSingleGenerationReview,
@@ -57,28 +54,6 @@ export const WritePhase: React.FC<WritePhaseProps> = ({ controller, layoutMode =
       : null;
   const firstSceneIssue = saveConflict ?? editor.saveIssues[0] ?? null;
   const panelConflict = firstSceneIssue?.code === 'stale_project' ? firstSceneIssue : nonSaveConflict;
-  const currentFitOutcome =
-    editor.latestFitOutcome !== null &&
-    editor.latestFitOutcome.project.id === project.id &&
-    editor.latestFitOutcome.project.revision === project.revision &&
-    editor.latestFitCatalogVersion === models.catalog?.catalogVersion
-      ? editor.latestFitOutcome
-      : null;
-  const hasLockedScenes = useMemo(
-    () =>
-      Object.values(project.assets).some(
-        (asset) => asset.sceneId !== null && asset.managedAsset.collection === 'assets'
-      ) || Object.values(project.jobs).some((job) => ACTIVE_JOB_STATUSES.has(job.status)),
-    [project.assets, project.jobs]
-  );
-  const fitDisabled =
-    editor.hasUnsavedSceneDrafts ||
-    editor.conflict !== null ||
-    models.loading ||
-    models.catalog === null ||
-    !models.catalog.catalogVersion ||
-    mutationPending ||
-    models.pendingRole !== null;
   const generationBlocked =
     editor.hasUnsavedProjectDraft ||
     editor.hasUnsavedSceneDrafts ||
@@ -228,24 +203,6 @@ export const WritePhase: React.FC<WritePhaseProps> = ({ controller, layoutMode =
               );
             })}
           </ScriptTable>
-          <PacingBar
-            orderedScenes={editor.orderedScenes}
-            selectedSceneId={editor.selectedSceneId}
-            targetDurationSeconds={project.targetDurationSeconds}
-            durationTotalSeconds={editor.durationTotalSeconds}
-            durationMatchesTarget={editor.durationMatchesTarget}
-            fitDisabled={fitDisabled}
-            fitOutcome={currentFitOutcome}
-            hasLockedScenes={hasLockedScenes || (currentFitOutcome?.lockedSceneIds.length ?? 0) > 0}
-            advisoryMessageKey={advisory?.anchor === 'pacing' ? advisory.messageKey : null}
-            onSelectScene={editor.selectScene}
-            onFitToGoal={() => {
-              const catalogVersion = models.catalog?.catalogVersion;
-              if (fitDisabled || !catalogVersion) return;
-              editor.clearLatestFitOutcome();
-              void editor.fitToTarget(catalogVersion);
-            }}
-          />
         </div>
 
         <div className={styles.assistantSlot} data-write-assistant-column data-layout={layoutMode}>

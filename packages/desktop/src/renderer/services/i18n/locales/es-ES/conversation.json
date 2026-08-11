@@ -931,7 +931,6 @@
         "textChargeDisclosure": "El borrador del guion gráfico usa el modelo de texto configurado. El proveedor puede cobrar por el uso del modelo.",
         "draftStoryboard": "Crear borrador del guion gráfico",
         "addShot": "Añadir plano",
-        "fitToGoal": "Ajustar al objetivo",
         "noScenes": "Añade un plano o crea un borrador del guion gráfico para empezar.",
         "scriptTableTitle": "Guion",
         "scriptTableHelp": "Una fila por plano para ajustar juntos el texto, la imagen, la duración y la salida.",
@@ -949,10 +948,7 @@
           "middle": "Plano intermedio",
           "closing": "Plano de cierre"
         },
-        "needsTitle": "Falta el título",
-        "pacingTitle": "Ritmo",
-        "pacingSummary": "{{total}} s en total · objetivo de {{target}} s",
-        "goalMarker": "Objetivo de {{seconds}} s"
+        "needsTitle": "Falta el título"
       },
       "produce": {
         "connectEngine": "Conecta un motor — aproximadamente un minuto, una sola vez para todo el espacio de trabajo",

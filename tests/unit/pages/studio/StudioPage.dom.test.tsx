@@ -294,12 +294,6 @@ const selectStudioPhase = async (router: StudioTestRouter, phase: StudioPhase): 
   ).toHaveTextContent(`conversation.creativeStudio.phase.nav.${phase}`);
 };
 
-const fitStoryboardToGoal = async (): Promise<void> => {
-  fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.phase.write.fitToGoal' }));
-  await waitFor(() => expect(bridge.fitStoryboard.invoke).toHaveBeenCalledTimes(1));
-  await act(async () => {});
-};
-
 type ResizeObservation = {
   callback: ResizeObserverCallback;
   disconnect: ReturnType<typeof vi.fn>;
@@ -1851,56 +1845,7 @@ describe('StudioPage and useStudioProject', () => {
     await waitFor(() => expect(bridge.submitScenes.invoke).toHaveBeenCalledTimes(1));
   });
 
-  it('fits 18 seconds to 15 with one atomic command, no scene updates, and keeps the batch gate open', async () => {
-    const opening = scene({ id: 'scene-1', durationSeconds: 6 });
-    const reveal = scene({ id: 'scene-2', title: 'Reveal', durationSeconds: 6 });
-    const closing = scene({ id: 'scene-3', title: 'Closing', durationSeconds: 6 });
-    const initial = project('project-1', {
-      targetDurationSeconds: 15,
-      sceneOrder: [opening.id, reveal.id, closing.id],
-      scenes: { [opening.id]: opening, [reveal.id]: reveal, [closing.id]: closing },
-    });
-    const fitted = project('project-1', {
-      revision: 3,
-      targetDurationSeconds: 15,
-      sceneOrder: [opening.id, reveal.id, closing.id],
-      scenes: {
-        [opening.id]: { ...opening, durationSeconds: 5 },
-        [reveal.id]: { ...reveal, durationSeconds: 5 },
-        [closing.id]: { ...closing, durationSeconds: 5 },
-      },
-    });
-    bridge.getProject.invoke.mockResolvedValue(ok(initial));
-    bridge.listRoutes.invoke.mockResolvedValue(ok({ ...routesWithImage(), catalogVersion: '0123456789abcdef' }));
-    bridge.fitStoryboard.invoke.mockResolvedValueOnce(
-      ok<StudioFitStoryboardOutcome>({
-        status: 'applied',
-        project: fitted,
-        changedSceneIds: ['scene-1', 'scene-2', 'scene-3'],
-        lockedSceneIds: [],
-      })
-    );
-    const { router } = renderRoute();
-
-    await fitStoryboardToGoal();
-
-    await waitFor(() =>
-      expect(bridge.fitStoryboard.invoke).toHaveBeenCalledExactlyOnceWith({
-        projectId: 'project-1',
-        expectedRevision: 2,
-        catalogVersion: '0123456789abcdef',
-      })
-    );
-    expect(bridge.updateScene.invoke).not.toHaveBeenCalled();
-    await waitFor(() =>
-      expect(screen.queryByRole('button', { name: 'conversation.creativeStudio.phase.write.fitToGoal' })).toBeNull()
-    );
-    await selectStudioPhase(router, 'produce');
-    const { batchAction } = await findBatchAction();
-    expect(batchAction).toBeEnabled();
-  });
-
-  it('keeps batch generation available and explains an unreachable advisory fit', async () => {
+  it('advises on an off-target storyboard without gating batch generation', async () => {
     const opening = scene({ durationSeconds: 18 });
     const initial = project('project-1', {
       targetDurationSeconds: 15,
@@ -1909,95 +1854,18 @@ describe('StudioPage and useStudioProject', () => {
     });
     bridge.getProject.invoke.mockResolvedValue(ok(initial));
     bridge.listRoutes.invoke.mockResolvedValue(ok({ ...routesWithImage(), catalogVersion: '0123456789abcdef' }));
-    bridge.fitStoryboard.invoke.mockResolvedValueOnce(
-      ok<StudioFitStoryboardOutcome>({
-        status: 'unreachable',
-        reason: 'target_out_of_bounds',
-        project: initial,
-        lockedSceneIds: [],
-        minimumTotalSeconds: 1,
-        maximumTotalSeconds: 12,
-      })
-    );
     const { router } = renderRoute();
 
-    await fitStoryboardToGoal();
+    // Write no longer carries a pacing bar, so the mismatch rides the shell advisory slot.
+    expect(await screen.findByRole('alert')).toHaveTextContent('conversation.creativeStudio.review.durationMismatch');
 
-    expect(
-      await screen.findByText('conversation.creativeStudio.storyboard.fitUnreachable.target_out_of_bounds')
-    ).toBeInTheDocument();
     await selectStudioPhase(router, 'produce');
     const { batchAction, activityPanel } = await findBatchAction();
     expect(batchAction).toBeEnabled();
     expect(within(activityPanel).getByText('conversation.creativeStudio.review.durationMismatch')).toBeVisible();
   });
 
-  it('hides unreachable fit feedback after a canonical routing update refreshes the catalog', async () => {
-    let onUpdate: ((event: { projectId: string }) => void) | undefined;
-    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
-      onUpdate = listener;
-      return () => {};
-    });
-    const opening = scene({ durationSeconds: 18 });
-    const initial = project('project-1', {
-      targetDurationSeconds: 15,
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-    });
-    const revisedRoute = imageRoute({
-      choiceId: 'choice_image_new',
-      providerId: 'provider-image-new',
-      providerName: 'New image provider',
-      model: 'image-model-new',
-    });
-    const revised = project('project-1', {
-      revision: 3,
-      targetDurationSeconds: 15,
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-      routing: {
-        storyboard: null,
-        image: {
-          choiceId: revisedRoute.choiceId,
-          providerId: revisedRoute.providerId,
-          model: revisedRoute.model,
-        },
-        video: null,
-      },
-    });
-    let canonicalProject = initial;
-    bridge.getProject.invoke.mockImplementation(async () => ok(canonicalProject));
-    bridge.listRoutes.invoke
-      .mockResolvedValueOnce(ok({ ...routesWithImage(), catalogVersion: 'catalog-1' }))
-      .mockResolvedValue(ok({ ...routesWithImage(revisedRoute), catalogVersion: 'catalog-2' }));
-    bridge.fitStoryboard.invoke.mockResolvedValueOnce(
-      ok<StudioFitStoryboardOutcome>({
-        status: 'unreachable',
-        reason: 'target_out_of_bounds',
-        project: initial,
-        lockedSceneIds: [],
-        minimumTotalSeconds: 1,
-        maximumTotalSeconds: 12,
-      })
-    );
-    renderRoute();
-
-    await fitStoryboardToGoal();
-    expect(
-      await screen.findByText('conversation.creativeStudio.storyboard.fitUnreachable.target_out_of_bounds')
-    ).toBeInTheDocument();
-
-    canonicalProject = revised;
-    await act(async () => onUpdate?.({ projectId: 'project-1' }));
-    await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(2));
-    await waitFor(() =>
-      expect(
-        screen.queryByText('conversation.creativeStudio.storyboard.fitUnreachable.target_out_of_bounds')
-      ).not.toBeInTheDocument()
-    );
-  });
-
-  it('keeps fit disabled for the entire reference import mutation', async () => {
+  it('keeps write actions disabled for the entire reference import mutation', async () => {
     const opening = scene({ durationSeconds: 10 });
     const initial = project('project-1', {
       targetDurationSeconds: 15,
@@ -2013,18 +1881,17 @@ describe('StudioPage and useStudioProject', () => {
       })
     );
     renderRoute();
-    const fit = await screen.findByRole('button', { name: 'conversation.creativeStudio.phase.write.fitToGoal' });
+    const addReference = await screen.findByRole('button', {
+      name: 'conversation.creativeStudio.phase.write.addReference',
+    });
 
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: 'conversation.creativeStudio.phase.write.addReference',
-      })
-    );
+    fireEvent.click(addReference);
     await waitFor(() => expect(bridge.chooseAndImportReference.invoke).toHaveBeenCalledOnce());
-    expect(fit).toBeDisabled();
+    // Held across the whole in-flight window, not just re-queried after it settles.
+    expect(addReference).toBeDisabled();
 
     resolveImport(ok({ status: 'cancelled' }));
-    await waitFor(() => expect(fit).toBeEnabled());
+    await waitFor(() => expect(addReference).toBeEnabled());
   });
 
   it('keeps model selection behind Model Settings instead of exposing Produce selectors', async () => {
@@ -3048,9 +2915,10 @@ describe('StudioPage and useStudioProject', () => {
     fireEvent.change(titleInput, { target: { value: 'Unresolved opening edit' } });
     fireEvent.blur(titleInput);
     await waitFor(() => expect(bridge.updateScene.invoke).toHaveBeenCalledTimes(1));
-    fireEvent.click(
-      screen.getAllByRole('button', { name: 'conversation.creativeStudio.timeline.selectSceneAccessible' })[1]
-    );
+    // Selection moves off the edited row. The pacing bar's shot blocks used to be the handle
+    // for this; ScriptRow selects on focus capture, so focusing the next row is the equivalent.
+    const revealRow = screen.getByRole('region', { name: 'Reveal' });
+    within(revealRow).getByLabelText('conversation.creativeStudio.inspector.titleLabel').focus();
     await act(async () => firstSave.resolve(failure()));
     const unresolvedOpeningRow = await screen.findByRole('region', { name: 'Unresolved opening edit' });
     expect(within(unresolvedOpeningRow).getByText('conversation.creativeStudio.errors.storage')).toBeInTheDocument();

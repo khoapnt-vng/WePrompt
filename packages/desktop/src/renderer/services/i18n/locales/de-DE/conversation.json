@@ -930,7 +930,6 @@
         "textChargeDisclosure": "Der Storyboard-Entwurf verwendet dein konfiguriertes Textmodell. Der Anbieter kann die Modellnutzung berechnen.",
         "draftStoryboard": "Storyboard entwerfen",
         "addShot": "Einstellung hinzufügen",
-        "fitToGoal": "An Ziel anpassen",
         "noScenes": "Füge eine Einstellung hinzu oder entwirf ein Storyboard, um zu beginnen.",
         "scriptTableTitle": "Drehbuch",
         "scriptTableHelp": "Eine Zeile pro Einstellung, um Text, Bild, Dauer und Ausgabe gemeinsam zu gestalten.",
@@ -948,10 +947,7 @@
           "middle": "Mittlere Einstellung",
           "closing": "Schlusseinstellung"
         },
-        "needsTitle": "Titel fehlt",
-        "pacingTitle": "Tempo",
-        "pacingSummary": "Insgesamt {{total}} s · Ziel {{target}} s",
-        "goalMarker": "Ziel {{seconds}} s"
+        "needsTitle": "Titel fehlt"
       },
       "produce": {
         "connectEngine": "Engine verbinden — etwa eine Minute, einmal für den gesamten Arbeitsbereich",

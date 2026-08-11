@@ -928,7 +928,6 @@
         "textChargeDisclosure": "ストーリーボードの下書きには設定済みのテキストモデルを使用します。プロバイダーから利用料が請求される場合があります。",
         "draftStoryboard": "ストーリーボードを下書き",
         "addShot": "ショットを追加",
-        "fitToGoal": "目標に合わせる",
         "noScenes": "ショットを追加するか、ストーリーボードを下書きして開始します。",
         "scriptTableTitle": "台本",
         "scriptTableHelp": "1ショットにつき1行で、言葉、映像、尺、出力をまとめて整えます。",
@@ -946,10 +945,7 @@
           "middle": "中間ショット",
           "closing": "締めのショット"
         },
-        "needsTitle": "タイトルが必要",
-        "pacingTitle": "ペース",
-        "pacingSummary": "合計 {{total}} 秒 · 目標 {{target}} 秒",
-        "goalMarker": "目標 {{seconds}} 秒"
+        "needsTitle": "タイトルが必要"
       },
       "produce": {
         "connectEngine": "エンジンを接続 — 約1分、ワークスペース全体で一度だけ",
