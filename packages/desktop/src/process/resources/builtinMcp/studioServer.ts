@@ -1,0 +1,200 @@
+/**
+ * @license
+ * Copyright 2025 AionUi (aionui.com)
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+// Built-in MCP server for one Creative Studio project. This subprocess can
+// read a bounded script view and write durable proposal records. It never
+// writes project.json; the main-process store remains the sole project writer.
+
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { z } from 'zod';
+import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
+import type { StudioEditableScene, StudioProject } from '@/common/types/project/creativeStudioTypes';
+import { BUILTIN_STUDIO_NAME } from '@process/resources/builtinMcp/constants';
+import {
+  StudioProposalWriteError,
+  writeProposalRecord,
+} from '@process/resources/builtinMcp/studioProposalWriter';
+
+export type StudioServerEnv = {
+  projectId: string;
+  projectDir: string;
+  pendingDir: string;
+};
+
+export type StudioToolResult = {
+  content: Array<{ type: 'text'; text: string }>;
+  isError?: boolean;
+};
+
+export type ProposeStoryboardInput = {
+  base_revision: number;
+  scene_order: string[];
+  scenes: Record<string, StudioEditableScene>;
+};
+
+const SAFE_ID = /^[A-Za-z0-9_-]+$/;
+
+const editableSceneSchema = z
+  .object({
+    title: z.string().max(256),
+    purpose: z.string().max(2048),
+    visualPrompt: z.string().max(4096),
+    narration: z.string().max(4096),
+    onScreenText: z.string().max(1024),
+    mediaKind: z.enum(['image', 'video']),
+    durationSeconds: z.number().int().min(1).max(60),
+    referenceAssetId: z.string().regex(SAFE_ID).nullable(),
+  })
+  .strict();
+
+export function parseStudioServerEnv(env: Record<string, string | undefined>): StudioServerEnv | null {
+  const projectId = env[STUDIO_ENV.projectId];
+  const projectDir = env[STUDIO_ENV.projectDir];
+  const pendingDir = env[STUDIO_ENV.pendingDir];
+  if (!projectId || !projectDir || !pendingDir) return null;
+  return { projectId, projectDir, pendingDir };
+}
+
+const errorResult = (message: string): StudioToolResult => ({
+  content: [{ type: 'text', text: message }],
+  isError: true,
+});
+
+const readProject = async (config: StudioServerEnv): Promise<StudioProject> =>
+  JSON.parse(await readFile(path.join(config.projectDir, 'project.json'), 'utf8')) as StudioProject;
+
+export function createReadStoryboardHandler(
+  config: StudioServerEnv | null
+): (_input: Record<string, never>) => Promise<StudioToolResult> {
+  return async () => {
+    if (!config) return errorResult('Creative Studio project is unavailable.');
+    try {
+      const project = await readProject(config);
+      const scenes = Object.fromEntries(
+        project.sceneOrder.flatMap((sceneId) => {
+          const scene = project.scenes[sceneId];
+          if (!scene) return [];
+          return [
+            [
+              sceneId,
+              {
+                title: scene.title,
+                purpose: scene.purpose,
+                visualPrompt: scene.visualPrompt,
+                narration: scene.narration,
+                onScreenText: scene.onScreenText,
+                mediaKind: scene.mediaKind,
+                durationSeconds: scene.durationSeconds,
+                hasReference: scene.referenceAssetId !== null,
+                hasSelectedTake: scene.selectedAssetId !== null,
+              },
+            ],
+          ];
+        })
+      );
+      const view = {
+        revision: project.revision,
+        name: project.name,
+        brief: project.brief,
+        aspectRatio: project.aspectRatio,
+        targetDurationSeconds: project.targetDurationSeconds,
+        sceneOrder: project.sceneOrder,
+        scenes,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(view, null, 2) }] };
+    } catch (error) {
+      return errorResult(
+        `Creative Studio project is unavailable: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  };
+}
+
+export function createProposeStoryboardHandler(
+  config: StudioServerEnv | null
+): (input: ProposeStoryboardInput) => Promise<StudioToolResult> {
+  return async ({ base_revision, scene_order, scenes }) => {
+    if (!config) return errorResult('Creative Studio project is unavailable.');
+    const sceneIds = Object.keys(scenes);
+    const orderSet = new Set(scene_order);
+    if (
+      orderSet.size !== scene_order.length ||
+      sceneIds.length !== scene_order.length ||
+      !sceneIds.every((sceneId) => orderSet.has(sceneId))
+    ) {
+      return errorResult('scene_order and scenes must contain exactly the same unique scene ids.');
+    }
+
+    try {
+      const project = await readProject(config);
+      if (project.revision !== base_revision) {
+        return errorResult(
+          `The project is at revision ${project.revision}; you proposed against ${base_revision}. ` +
+            'Call read_storyboard and redraft.'
+        );
+      }
+      const record = await writeProposalRecord({
+        pendingDir: config.pendingDir,
+        projectId: config.projectId,
+        baseRevision: base_revision,
+        payload: { kind: 'replace_storyboard', sceneOrder: scene_order, scenes },
+      });
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Proposal ${record.id} recorded for user review; the user decides what happens next.`,
+          },
+        ],
+      };
+    } catch (error) {
+      if (error instanceof StudioProposalWriteError) return errorResult(error.message);
+      return errorResult(`Creative Studio proposal could not be recorded: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+}
+
+async function main() {
+  const config = parseStudioServerEnv(process.env);
+  const server = new McpServer({ name: BUILTIN_STUDIO_NAME, version: '1.0.0' });
+
+  server.tool(
+    'read_storyboard',
+    "Read the Studio project's current script: revision, settings, and every scene's editable fields plus whether it has a reference image and a selected take. Always call this before proposing.",
+    {},
+    createReadStoryboardHandler(config)
+  );
+  server.tool(
+    'propose_storyboard',
+    'Record a complete replacement script as a proposal the user reviews in Brief. Requires base_revision from your latest read_storyboard. The proposal is a whole-script replacement: include EVERY scene you want to keep, not only changes.',
+    {
+      base_revision: z
+        .number()
+        .int()
+        .positive()
+        .describe('The revision you saw in read_storyboard. Re-read if your last read is stale.'),
+      scene_order: z.array(z.string().regex(SAFE_ID)).min(1).max(24),
+      scenes: z.record(z.string().regex(SAFE_ID), editableSceneSchema),
+    },
+    createProposeStoryboardHandler(config)
+  );
+
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
+
+// Only start the stdio loop when executed as the bundle entry, so importing
+// handlers from tests does not boot a server. The typeof guard matters under
+// vitest's ESM transform, where a bare `require` reference throws.
+if (typeof require !== 'undefined' && require.main === module) {
+  main().catch((error) => {
+    console.error('[StudioMCP] Fatal error:', error);
+    process.exit(1);
+  });
+}

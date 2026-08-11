@@ -6,7 +6,7 @@
  * @vitest-environment node
  */
 
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -24,6 +24,7 @@ import type {
   StudioTextModelOption,
   StudioUpdateModelSelectionRequest,
 } from '@/common/types/project/creativeStudioTypes';
+import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
 import type { IProvider } from '@/common/config/storage';
 import type { GenerationProviderAdapter } from '@process/services/creative-studio/adapters';
 import { STUDIO_E2E_BOUNDARY_SENTINELS } from '@process/services/creative-studio/adapters/e2eFakeAdapter';
@@ -39,6 +40,11 @@ import {
   StudioStoryboardPlannerError,
   type StudioStoryboardPlanner,
 } from '@process/services/creative-studio/planning/storyboardPlanner';
+import {
+  createProposeStoryboardHandler,
+  createReadStoryboardHandler,
+  parseStudioServerEnv,
+} from '@process/resources/builtinMcp/studioServer';
 
 const makeInput = (overrides: Partial<CreateStudioProjectInput> = {}): CreateStudioProjectInput => ({
   name: 'Launch film',
@@ -132,6 +138,36 @@ const storyboardProposal = {
       durationSeconds: 4,
     },
   ],
+};
+
+const studioServerProjectFixture = {
+  schemaVersion: 1,
+  id: 'project_1',
+  revision: 7,
+  name: 'Coffee teaser',
+  brief: 'A 10-second teaser for a mountain coffee brand',
+  aspectRatio: '16:9',
+  targetDurationSeconds: 10,
+  sceneOrder: ['scene_1'],
+  scenes: {
+    scene_1: {
+      id: 'scene_1',
+      title: 'Sunrise',
+      purpose: '',
+      visualPrompt: '',
+      narration: '',
+      onScreenText: '',
+      mediaKind: 'image',
+      durationSeconds: 5,
+      referenceAssetId: null,
+      selectedAssetId: null,
+      assetIds: [],
+      jobIds: [],
+      reviewState: 'draft',
+    },
+  },
+  assets: {},
+  jobs: {},
 };
 
 const storyboardOptions: StudioTextModelOption[] = [
@@ -4000,5 +4036,92 @@ describe('CreativeStudioService', () => {
       ).rejects.toMatchObject({ code: 'planning_unavailable' });
       expect(harness.draft).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('Studio MCP server', () => {
+  it('parses env only when all three keys are present', () => {
+    expect(parseStudioServerEnv({})).toBeNull();
+    const env = {
+      [STUDIO_ENV.projectId]: 'project_1',
+      [STUDIO_ENV.projectDir]: '/tmp/p',
+      [STUDIO_ENV.pendingDir]: '/tmp/p/proposals/pending',
+    };
+
+    expect(parseStudioServerEnv(env)).toEqual({
+      projectId: 'project_1',
+      projectDir: '/tmp/p',
+      pendingDir: '/tmp/p/proposals/pending',
+    });
+  });
+
+  it('read_storyboard returns revision, settings and scenes without operational state', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'studio-server-'));
+    await writeFile(path.join(dir, 'project.json'), JSON.stringify(studioServerProjectFixture));
+    const handler = createReadStoryboardHandler({ projectId: 'project_1', projectDir: dir, pendingDir: '' });
+
+    const result = await handler({});
+    const text = result.content[0].text;
+    expect(text).toContain('"revision": 7');
+    expect(text).toContain('Sunrise');
+    expect(text).not.toContain('jobIds');
+  });
+
+  it('propose_storyboard writes a record and reports recorded but never accepted', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'studio-server-'));
+    await writeFile(path.join(dir, 'project.json'), JSON.stringify(studioServerProjectFixture));
+    const pendingDir = path.join(dir, 'proposals', 'pending');
+    await mkdir(pendingDir, { recursive: true });
+    await mkdir(path.join(dir, 'proposals', 'slots'), { recursive: true });
+    const handler = createProposeStoryboardHandler({ projectId: 'project_1', projectDir: dir, pendingDir });
+
+    const result = await handler({
+      base_revision: 7,
+      scene_order: ['scene_1'],
+      scenes: {
+        scene_1: {
+          title: 'Sunrise over the terraces',
+          purpose: 'Origin',
+          visualPrompt: 'Golden hour terraces',
+          narration: 'It starts at 1,600 meters.',
+          onScreenText: '',
+          mediaKind: 'image',
+          durationSeconds: 5,
+          referenceAssetId: null,
+        },
+      },
+    });
+
+    const text = result.content[0].text;
+    expect(text).toContain('recorded');
+    expect(text).not.toMatch(/accepted|applied/i);
+  });
+
+  it('propose_storyboard fails typed when base_revision differs from the project file', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'studio-server-'));
+    await writeFile(path.join(dir, 'project.json'), JSON.stringify(studioServerProjectFixture));
+    const pendingDir = path.join(dir, 'proposals', 'pending');
+    await mkdir(pendingDir, { recursive: true });
+    const handler = createProposeStoryboardHandler({ projectId: 'project_1', projectDir: dir, pendingDir });
+
+    const result = await handler({
+      base_revision: 3,
+      scene_order: ['scene_1'],
+      scenes: {
+        scene_1: {
+          title: 'Sunrise',
+          purpose: '',
+          visualPrompt: '',
+          narration: '',
+          onScreenText: '',
+          mediaKind: 'image',
+          durationSeconds: 5,
+          referenceAssetId: null,
+        },
+      },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('read_storyboard');
   });
 });
