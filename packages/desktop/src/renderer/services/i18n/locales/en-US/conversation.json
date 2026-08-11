@@ -714,6 +714,24 @@
     "nav": {
       "title": "Creative Studio"
     },
+    "brief": {
+      "composerPlaceholder": "Describe the video you want…",
+      "composerSend": "Send",
+      "conversationTitle": "Brief conversation",
+      "danglingNotice": "This project's brief conversation is no longer available.",
+      "danglingStartFresh": "Start a new conversation",
+      "proposalTitle": "Proposed script",
+      "proposalMeta": "Based on revision {{revision}} · {{createdAt}}",
+      "proposalSummary": "{{added}} added · {{removed}} removed · {{changed}} changed",
+      "proposalAccept": "Accept script",
+      "proposalReject": "Reject",
+      "proposalAccepted": "Script applied",
+      "proposalRejected": "Rejected",
+      "proposalExpired": "Expired",
+      "proposalStale": "The script changed while this proposal was waiting. Ask for a redraft.",
+      "proposalRepropose": "Ask for a redraft",
+      "proposalFlushRefused": "Your unsaved edits could not be saved, so the proposal was not applied. Fix the edits and try again."
+    },
     "close": {
       "saveAndClose": "Save and close",
       "discard": "Discard and close",

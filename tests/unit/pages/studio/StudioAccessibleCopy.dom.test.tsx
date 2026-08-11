@@ -59,6 +59,15 @@ vi.mock('@dnd-kit/sortable', async () => {
   };
 });
 
+vi.mock('@renderer/pages/studio/components/PhaseShell/phases/brief/useBriefConversation', () => ({
+  useBriefConversation: () => ({
+    state: { kind: 'absent' },
+    errorMessageKey: null,
+    sendFirstMessage: vi.fn(async () => {}),
+    recreate: vi.fn(),
+  }),
+}));
+
 const localeRoot = join(process.cwd(), 'packages/desktop/src/renderer/services/i18n/locales');
 
 const loadConversationLocale = (locale: string): typeof conversation =>

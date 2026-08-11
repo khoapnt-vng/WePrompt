@@ -879,6 +879,24 @@
     "nav": {
       "title": "創意工作室"
     },
+    "brief": {
+      "composerPlaceholder": "描述你想製作的影片…",
+      "composerSend": "傳送",
+      "conversationTitle": "簡報對話",
+      "danglingNotice": "此專案的簡報對話已無法使用。",
+      "danglingStartFresh": "開始新對話",
+      "proposalTitle": "提議的腳本",
+      "proposalMeta": "基於修訂版 {{revision}} · {{createdAt}}",
+      "proposalSummary": "新增 {{added}} · 移除 {{removed}} · 修改 {{changed}}",
+      "proposalAccept": "接受腳本",
+      "proposalReject": "拒絕",
+      "proposalAccepted": "腳本已套用",
+      "proposalRejected": "已拒絕",
+      "proposalExpired": "已過期",
+      "proposalStale": "此提案等待期間腳本已變更。請要求重新起草。",
+      "proposalRepropose": "要求重新起草",
+      "proposalFlushRefused": "無法儲存你尚未儲存的編輯，因此未套用此提案。請修正這些編輯後再試一次。"
+    },
     "close": {
       "saveAndClose": "儲存並關閉",
       "discard": "捨棄變更並關閉",

@@ -885,6 +885,24 @@
     "nav": {
       "title": "Creative Studio"
     },
+    "brief": {
+      "composerPlaceholder": "Descreva o vídeo que você quer…",
+      "composerSend": "Enviar",
+      "conversationTitle": "Conversa do briefing",
+      "danglingNotice": "A conversa de briefing deste projeto não está mais disponível.",
+      "danglingStartFresh": "Iniciar uma nova conversa",
+      "proposalTitle": "Roteiro proposto",
+      "proposalMeta": "Com base na revisão {{revision}} · {{createdAt}}",
+      "proposalSummary": "Adições: {{added}} · remoções: {{removed}} · alterações: {{changed}}",
+      "proposalAccept": "Aceitar roteiro",
+      "proposalReject": "Rejeitar",
+      "proposalAccepted": "Roteiro aplicado",
+      "proposalRejected": "Rejeitado",
+      "proposalExpired": "Expirado",
+      "proposalStale": "O roteiro mudou enquanto esta proposta aguardava. Peça uma nova versão.",
+      "proposalRepropose": "Pedir nova versão",
+      "proposalFlushRefused": "Não foi possível salvar suas edições não salvas, por isso a proposta não foi aplicada. Corrija as edições e tente novamente."
+    },
     "close": {
       "saveAndClose": "Salvar e fechar",
       "discard": "Descartar e fechar",

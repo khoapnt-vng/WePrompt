@@ -879,6 +879,24 @@
     "nav": {
       "title": "Creative Studio"
     },
+    "brief": {
+      "composerPlaceholder": "Опишите нужное видео…",
+      "composerSend": "Отправить",
+      "conversationTitle": "Обсуждение брифа",
+      "danglingNotice": "Обсуждение брифа для этого проекта больше недоступно.",
+      "danglingStartFresh": "Начать новое обсуждение",
+      "proposalTitle": "Предложенный сценарий",
+      "proposalMeta": "На основе ревизии {{revision}} · {{createdAt}}",
+      "proposalSummary": "Добавлено: {{added}} · удалено: {{removed}} · изменено: {{changed}}",
+      "proposalAccept": "Принять сценарий",
+      "proposalReject": "Отклонить",
+      "proposalAccepted": "Сценарий применён",
+      "proposalRejected": "Отклонено",
+      "proposalExpired": "Срок истёк",
+      "proposalStale": "Пока предложение ожидало решения, сценарий изменился. Запросите новую версию.",
+      "proposalRepropose": "Запросить новую версию",
+      "proposalFlushRefused": "Не удалось сохранить несохранённые правки, поэтому предложение не применено. Исправьте правки и повторите попытку."
+    },
     "close": {
       "saveAndClose": "Сохранить и закрыть",
       "discard": "Не сохранять и закрыть",

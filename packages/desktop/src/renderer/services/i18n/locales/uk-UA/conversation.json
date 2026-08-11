@@ -879,6 +879,24 @@
     "nav": {
       "title": "Creative Studio"
     },
+    "brief": {
+      "composerPlaceholder": "Опишіть потрібне відео…",
+      "composerSend": "Надіслати",
+      "conversationTitle": "Обговорення брифу",
+      "danglingNotice": "Обговорення брифу для цього проєкту більше недоступне.",
+      "danglingStartFresh": "Почати нове обговорення",
+      "proposalTitle": "Запропонований сценарій",
+      "proposalMeta": "На основі ревізії {{revision}} · {{createdAt}}",
+      "proposalSummary": "Додано: {{added}} · видалено: {{removed}} · змінено: {{changed}}",
+      "proposalAccept": "Прийняти сценарій",
+      "proposalReject": "Відхилити",
+      "proposalAccepted": "Сценарій застосовано",
+      "proposalRejected": "Відхилено",
+      "proposalExpired": "Термін минув",
+      "proposalStale": "Поки пропозиція очікувала рішення, сценарій змінився. Запросіть нову версію.",
+      "proposalRepropose": "Запросити нову версію",
+      "proposalFlushRefused": "Не вдалося зберегти незбережені зміни, тому пропозицію не застосовано. Виправте зміни й повторіть спробу."
+    },
     "close": {
       "saveAndClose": "Зберегти й закрити",
       "discard": "Не зберігати й закрити",
