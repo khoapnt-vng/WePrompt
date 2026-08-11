@@ -923,7 +923,7 @@
       },
       "write": {
         "title": "Yaz",
-        "continueToProduce": "Üretime devam et",
+        "continueToProduce": "Devam et",
         "askAssistant": "Asistana sor",
         "assistantTitle": "Yazım asistanı",
         "assistantDescription": "Kısa açıklamanızdan bir storyboard taslağı oluşturun.",
@@ -966,7 +966,7 @@
         "render": "İşle",
         "renderAnother": "Yeniden işle",
         "openPreview": "{{title}} önizlemesini aç",
-        "reviewCut": "Kurguyu incele",
+        "reviewCut": "Devam et",
         "modelsTitle": "Modeller",
         "activityTitle": "Oluşturma etkinliği",
         "activityEmpty": "Çalışan bir oluşturma işi yok.",

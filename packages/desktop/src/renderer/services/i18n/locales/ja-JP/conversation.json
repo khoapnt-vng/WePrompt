@@ -920,7 +920,7 @@
       },
       "write": {
         "title": "構成",
-        "continueToProduce": "生成へ進む",
+        "continueToProduce": "続行",
         "askAssistant": "アシスタントに相談",
         "assistantTitle": "構成アシスタント",
         "assistantDescription": "ブリーフをもとにストーリーボードの下書きを作成します。",
@@ -963,7 +963,7 @@
         "render": "レンダリング",
         "renderAnother": "もう一度レンダリング",
         "openPreview": "{{title}} のプレビューを開く",
-        "reviewCut": "編集結果を確認",
+        "reviewCut": "続行",
         "modelsTitle": "モデル",
         "activityTitle": "生成状況",
         "activityEmpty": "実行中の生成ジョブはありません。",

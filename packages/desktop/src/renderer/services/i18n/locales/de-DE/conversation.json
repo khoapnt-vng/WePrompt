@@ -922,7 +922,7 @@
       },
       "write": {
         "title": "Schreiben",
-        "continueToProduce": "Weiter zu Produzieren",
+        "continueToProduce": "Weiter",
         "askAssistant": "Assistenten fragen",
         "assistantTitle": "Schreibassistent",
         "assistantDescription": "Erstelle aus deinem Briefing einen Storyboard-Entwurf.",
@@ -965,7 +965,7 @@
         "render": "Rendern",
         "renderAnother": "Erneut rendern",
         "openPreview": "Vorschau für {{title}} öffnen",
-        "reviewCut": "Schnitt prüfen",
+        "reviewCut": "Weiter",
         "modelsTitle": "Modelle",
         "activityTitle": "Erzeugungsaktivität",
         "activityEmpty": "Es werden keine Erzeugungsaufträge ausgeführt.",

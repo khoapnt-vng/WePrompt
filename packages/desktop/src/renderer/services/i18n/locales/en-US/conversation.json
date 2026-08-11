@@ -756,7 +756,7 @@
       },
       "write": {
         "title": "Write",
-        "continueToProduce": "Continue to Produce",
+        "continueToProduce": "Continue",
         "askAssistant": "Ask assistant",
         "assistantTitle": "Writing assistant",
         "assistantDescription": "Draft a storyboard from your brief.",
@@ -799,7 +799,7 @@
         "render": "Render",
         "renderAnother": "Render another",
         "openPreview": "Open {{title}} preview",
-        "reviewCut": "Review cut",
+        "reviewCut": "Continue",
         "modelsTitle": "Models",
         "activityTitle": "Generation activity",
         "activityEmpty": "No generation jobs are running.",

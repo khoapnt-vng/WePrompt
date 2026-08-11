@@ -923,7 +923,7 @@
       },
       "write": {
         "title": "Сценарій",
-        "continueToProduce": "Перейти до створення",
+        "continueToProduce": "Продовжити",
         "askAssistant": "Запитати помічника",
         "assistantTitle": "Помічник зі сценарію",
         "assistantDescription": "Створіть чернетку розкадрування на основі брифу.",
@@ -966,7 +966,7 @@
         "render": "Рендерити",
         "renderAnother": "Рендерити ще",
         "openPreview": "Відкрити попередній перегляд {{title}}",
-        "reviewCut": "Перевірити монтаж",
+        "reviewCut": "Продовжити",
         "modelsTitle": "Моделі",
         "activityTitle": "Хід генерації",
         "activityEmpty": "Зараз немає активних завдань генерації.",

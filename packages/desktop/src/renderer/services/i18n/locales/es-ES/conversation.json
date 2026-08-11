@@ -923,7 +923,7 @@
       },
       "write": {
         "title": "Escribir",
-        "continueToProduce": "Continuar a Producir",
+        "continueToProduce": "Continuar",
         "askAssistant": "Preguntar al asistente",
         "assistantTitle": "Asistente de escritura",
         "assistantDescription": "Crea un borrador de storyboard a partir de tu brief.",
@@ -966,7 +966,7 @@
         "render": "Renderizar",
         "renderAnother": "Renderizar otra vez",
         "openPreview": "Abrir vista previa de {{title}}",
-        "reviewCut": "Revisar montaje",
+        "reviewCut": "Continuar",
         "modelsTitle": "Modelos",
         "activityTitle": "Actividad de generación",
         "activityEmpty": "No hay trabajos de generación en curso.",
