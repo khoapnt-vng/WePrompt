@@ -9,6 +9,7 @@ import { constants as fsConstants, createReadStream, createWriteStream, promises
 import path from 'node:path';
 import { PassThrough, Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { jobOutputRole } from '@/common/types/project/creativeStudioOutputRole';
 import type { StudioAsset, StudioProject } from '@/common/types/project/creativeStudioTypes';
 import { STUDIO_MANAGED_ASSET_COLLECTIONS } from '@/common/types/project/creativeStudioManagedAssetCollections';
 import { CreativeStudioStoreError, reconcilePersistedStudioCuts, type CreativeStudioStore } from './store';
@@ -1096,8 +1097,12 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       deps.store.getVerifiedProjectDirectory(input.projectId),
       deps.store.getProject(input.projectId),
     ]);
+    const scene = project?.scenes[input.sceneId];
     const job = project?.jobs[input.jobId];
-    if (project?.scenes[input.sceneId] && project.scenes[input.sceneId].mediaKind !== input.mediaKind) {
+    const role = job ? jobOutputRole(job) : null;
+    const mediaKindMatchesRole =
+      role === 'reference' ? input.mediaKind === 'image' : scene?.mediaKind === input.mediaKind;
+    if (scene && job && !mediaKindMatchesRole) {
       throw new CreativeStudioMediaError('invalid_media');
     }
     const active =
@@ -1107,20 +1112,25 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     if (
       !projectDir ||
       !project ||
-      !project.scenes[input.sceneId] ||
-      project.scenes[input.sceneId].mediaKind !== input.mediaKind ||
+      !scene ||
+      !mediaKindMatchesRole ||
       !job ||
       job.sceneId !== input.sceneId ||
       !active
     ) {
       throw new CreativeStudioMediaError(project && job ? 'job_inactive' : 'not_found');
     }
-    const perAssetMaxBytes = input.mediaKind === 'video' ? limits.videoOutputMaxBytes : limits.imageOutputMaxBytes;
+    const perAssetMaxBytes =
+      role === 'reference'
+        ? limits.imageOutputMaxBytes
+        : input.mediaKind === 'video'
+          ? limits.videoOutputMaxBytes
+          : limits.imageOutputMaxBytes;
     return {
       projectDir,
       project,
       capacity: await planWriteCapacity(project, projectDir, perAssetMaxBytes, input.declaredByteSize),
-      collection: 'assets',
+      collection: role === 'reference' ? 'references' : 'assets',
     };
   };
 
@@ -1412,22 +1422,43 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         job?.status === 'submitting' ||
         job?.status === 'running' ||
         (job?.status === 'failed' && job.error?.code === 'download_failed');
-      if (!job || !scene || scene.mediaKind !== input.mediaKind || job.sceneId !== input.sceneId || !active) {
+      if (!job || !scene || job.sceneId !== input.sceneId || !active) {
         throw new CreativeStudioMediaError('job_inactive');
+      }
+      const role = jobOutputRole(job);
+      if (role === 'take' && scene.mediaKind !== input.mediaKind) {
+        throw new CreativeStudioMediaError('job_inactive');
+      }
+      if (role === 'reference' && input.mediaKind !== 'image') {
+        throw new CreativeStudioMediaError('invalid_media');
       }
       const usedBytes = Object.values(current.assets).reduce((total, candidate) => total + candidate.byteSize, 0);
       if (usedBytes + asset.byteSize > limits.projectMaxBytes) {
         throw new CreativeStudioMediaError('invalid_media');
       }
+      asset.sourceVisualPrompt = scene.visualPrompt.trim();
       current.assets[asset.id] = asset;
+      // Every scene-owned asset must be reverse-linked in assetIds (store.ts:993) —
+      // exactly as imported references and posters already are — regardless of role.
       scene.assetIds.push(asset.id);
-      scene.selectedAssetId = asset.id;
-      scene.reviewState = 'complete';
+      if (role === 'reference') {
+        scene.referenceAssetId = asset.id;
+        // Deliberately NOT touched: selectedAssetId, reviewState.
+        // A plate must never make a scene look produced. It is distinguished from a
+        // take by collection 'references', which every take predicate filters on.
+      } else {
+        scene.selectedAssetId = asset.id;
+        scene.reviewState = 'complete';
+      }
       job.status = 'succeeded';
       job.outputAssetIds = [asset.id];
       job.error = null;
       delete job.progress;
       job.updatedAt = now();
+      // reconcileCut derives clips solely from selectedTake (store.ts:769/:780), which a
+      // reference commit never changes, so this is a no-op for the reference path today —
+      // but keeping one path means reconciliation starting to read assetIds can't silently
+      // let a plate become a clip without this call already being in place.
       return reconcilePersistedStudioCuts(current);
     });
   };
