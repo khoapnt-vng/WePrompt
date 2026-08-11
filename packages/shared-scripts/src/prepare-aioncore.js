@@ -29,11 +29,13 @@ const {
 
 const aioncoreChecksums = require('./aioncore-checksums');
 const aioncoreTrust = require('./aioncore-trust');
+const { assertGitShaResolvesOnRemote, listRemoteRefs } = require('./verify-git-source-commit');
 
 // Security-patched fork (D-01 loopback token, MCP OAuth discovery/DCR fix).
 // The upstream iOfficeAI/AionCore is unpatched; the desktop app ships the fork.
 const GITHUB_OWNER = 'khoapnt-vng';
 const GITHUB_REPO = 'aioncore';
+const AIONCORE_PUBLISHING_REMOTE = 'https://github.com/khoapnt-vng/aioncore.git';
 
 // Target of the `v0.1.51` tag, which is the release this file's checksums pin.
 // Verified out-of-band on both hosts before use: code.vng.vn/dto/aioncore and
@@ -672,7 +674,7 @@ function listActionsArtifacts(runId) {
   return Array.isArray(response?.artifacts) ? response.artifacts : [];
 }
 
-function assertAcceptedActionsRun(run, runId = 'unknown') {
+function assertAcceptedActionsRun(run, runId = 'unknown', resolveRefs = listRemoteRefs) {
   const status = typeof run?.status === 'string' ? run.status : 'unknown';
   const conclusion = typeof run?.conclusion === 'string' ? run.conclusion : 'unknown';
   const headSha = typeof run?.head_sha === 'string' ? run.head_sha : 'unknown';
@@ -688,22 +690,27 @@ function assertAcceptedActionsRun(run, runId = 'unknown') {
         `${ACCEPTED_AIONCORE_SOURCE_COMMIT}.`
     );
   }
+  assertGitShaResolvesOnRemote({
+    sha: headSha,
+    remoteUrl: AIONCORE_PUBLISHING_REMOTE,
+    resolveRefs,
+  });
 
   return { conclusion, headSha, status };
 }
 
-function getAcceptedActionsRun(runId) {
+function getAcceptedActionsRun(runId, resolveRefs) {
   const run = githubApiGetJson(`repos/${GITHUB_OWNER}/${GITHUB_REPO}/actions/runs/${runId}`);
-  return assertAcceptedActionsRun(run, runId);
+  return assertAcceptedActionsRun(run, runId, resolveRefs);
 }
 
-function downloadAndExtractActionsArtifact(platform, arch, runId) {
+function downloadAndExtractActionsArtifact(platform, arch, runId, resolveRefs) {
   const expectedArtifactName = getActionsArtifactName(platform, arch);
   if (!expectedArtifactName) {
     throw new Error(`Unsupported AionCore Actions artifact target: ${platform}-${arch}`);
   }
 
-  const acceptedRun = getAcceptedActionsRun(runId);
+  const acceptedRun = getAcceptedActionsRun(runId, resolveRefs);
   const artifacts = listActionsArtifacts(runId);
   const availableArtifactNames = artifacts
     .map((artifact) => artifact.name)
@@ -888,10 +895,11 @@ function downloadAndExtractForge(platform, arch, tag) {
  * @param {string} options.platform - Target platform (process.platform)
  * @param {string} options.arch - Target architecture (process.arch)
  * @param {string} options.version - Backend version (default: 'latest')
+ * @param {(remoteUrl: string) => string} [options.resolveAioncoreRefs] - Git ref resolver
  * @returns {{ prepared: true; dir: string; sourceType: string }}
  */
 function prepareAioncore(options) {
-  const { projectRoot, platform, arch, version = 'latest' } = options;
+  const { projectRoot, platform, arch, version = 'latest', resolveAioncoreRefs = listRemoteRefs } = options;
   const runtimeKey = `${platform}-${arch}`;
   const actionsRunId = (process.env.AIONUI_BACKEND_RUN_ID || '').trim();
 
@@ -959,7 +967,7 @@ function prepareAioncore(options) {
 
   // 1. Download from GitHub Actions artifacts when manual build run id is provided.
   if (actionsRunId) {
-    const result = downloadAndExtractActionsArtifact(platform, arch, actionsRunId);
+    const result = downloadAndExtractActionsArtifact(platform, arch, actionsRunId, resolveAioncoreRefs);
     sourcePath = result.binaryPath;
     sourceLineagePath = result.lineagePath;
     tempDir = result.tempDir;

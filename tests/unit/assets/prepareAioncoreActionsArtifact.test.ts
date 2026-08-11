@@ -13,6 +13,8 @@ const {
 const { acceptedMigrationLineage } = require('../../../packages/shared-scripts/src/verify-bundled-aioncore-resources');
 
 const posixFakeToolchainIt = process.platform === 'win32' ? it.skip : it;
+const publishedAioncoreRefs = 'd4d8e87714690cdb230ab7a6987de3ceacbea275\trefs/tags/v0.1.51\n';
+const resolvePublishedAioncoreRefs = () => publishedAioncoreRefs;
 
 function writeFile(filePath: string, contents = 'x') {
   mkdirSync(dirname(filePath), { recursive: true });
@@ -132,24 +134,41 @@ afterEach(() => {
 });
 
 describe('prepare-aioncore GitHub Actions artifact resolver', () => {
-  // Scope note (BUG-040): these cases verify that the resolver *gates on* the
-  // pinned commit and rejects everything else. They cannot verify that the
-  // pinned commit is real or reviewed — a test that feeds the constant back to
-  // the function comparing against it passes for any value, including a
-  // fabricated one. Provenance must be confirmed out-of-band against the
-  // publishing host before the pin is trusted.
+  // Scope note (BUG-040): injected ref output verifies gate behavior without
+  // claiming that a fixture proves real-world provenance. Production obtains
+  // this independent input from git ls-remote on the publishing host.
   it('accepts a completed successful run whose head is the pinned source commit', () => {
     expect(
-      assertAcceptedActionsRun({
-        conclusion: 'success',
-        head_sha: ACCEPTED_AIONCORE_SOURCE_COMMIT,
-        status: 'completed',
-      })
+      assertAcceptedActionsRun(
+        {
+          conclusion: 'success',
+          head_sha: ACCEPTED_AIONCORE_SOURCE_COMMIT,
+          status: 'completed',
+        },
+        'unknown',
+        resolvePublishedAioncoreRefs
+      )
     ).toEqual({
       conclusion: 'success',
       headSha: ACCEPTED_AIONCORE_SOURCE_COMMIT,
       status: 'completed',
     });
+  });
+
+  it('rejects an echoed accepted commit when the publishing host does not advertise it', () => {
+    const unrelatedPublishedRefs = '7061136ee8159d6e2768cabfa40b22d49351e74b\trefs/heads/main\n';
+
+    expect(() =>
+      assertAcceptedActionsRun(
+        {
+          conclusion: 'success',
+          head_sha: ACCEPTED_AIONCORE_SOURCE_COMMIT,
+          status: 'completed',
+        },
+        '27319522909',
+        () => unrelatedPublishedRefs
+      )
+    ).toThrow(/does not resolve on publishing host/);
   });
 
   it.each([
@@ -169,7 +188,7 @@ describe('prepare-aioncore GitHub Actions artifact resolver', () => {
       /is not completed successfully/,
     ],
   ])('rejects %s', (_case, run, expectedMessage) => {
-    expect(() => assertAcceptedActionsRun(run)).toThrow(expectedMessage);
+    expect(() => assertAcceptedActionsRun(run, 'unknown', resolvePublishedAioncoreRefs)).toThrow(expectedMessage);
   });
 
   it.each([
@@ -218,6 +237,7 @@ describe('prepare-aioncore GitHub Actions artifact resolver', () => {
           platform: 'linux',
           arch: 'x64',
           version: 'v0.1.46',
+          resolveAioncoreRefs: resolvePublishedAioncoreRefs,
         })
       ).toThrow(/managed-resources\/manifest\.json/);
     } finally {
