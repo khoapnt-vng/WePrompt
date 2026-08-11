@@ -85,6 +85,31 @@ const addTake = (
   if (selected) scene.selectedAssetId = assetId;
 };
 
+const addReferencePlate = (project: StudioProject, sourceVisualPrompt?: string): void => {
+  project.sceneOrder = ['s1'];
+  project.scenes.s1 = {
+    id: 's1',
+    ...makeScene('s1'),
+    referenceAssetId: 'reference_1',
+    selectedAssetId: null,
+    assetIds: ['reference_1'],
+    jobIds: [],
+    reviewState: 'ready',
+  };
+  project.assets.reference_1 = {
+    id: 'reference_1',
+    projectId: project.id,
+    sceneId: 's1',
+    mediaKind: 'image',
+    mimeType: 'image/png',
+    managedAsset: { collection: 'references', fileName: 'reference_1.png' },
+    byteSize: 1,
+    sha256: 'a'.repeat(64),
+    createdAt: project.createdAt,
+    ...(sourceVisualPrompt === undefined ? {} : { sourceVisualPrompt }),
+  };
+};
+
 const editableCut = (cut: StudioCut): StudioEditableCut => ({
   orderMode: cut.orderMode,
   clipOrder: [...cut.clipOrder],
@@ -292,6 +317,47 @@ describe('CreativeStudioService', () => {
     await expect(service.getProject(project.id)).resolves.toMatchObject({
       briefConversationId: 'conversation_brief',
     });
+  });
+
+  it('projects a reference asset with its managed collection', async () => {
+    const project = await service.createProject(makeInput());
+    await store.updateProject(project.id, (current) => {
+      const next = structuredClone(current);
+      addReferencePlate(next);
+      return next;
+    });
+
+    const rendererProject = await service.getProject(project.id);
+
+    expect(rendererProject?.assets.reference_1.managedAsset.collection).toBe('references');
+  });
+
+  it('projects the visual prompt an asset was generated from', async () => {
+    const project = await service.createProject(makeInput());
+    await store.updateProject(project.id, (current) => {
+      const next = structuredClone(current);
+      addReferencePlate(next, 'Aerial, drifting. Smoke columns.');
+      return next;
+    });
+
+    const rendererProject = await service.getProject(project.id);
+    const asset = Object.values(rendererProject?.assets ?? {}).find((candidate) => candidate.sceneId === 's1');
+
+    expect(asset?.sourceVisualPrompt).toBe('Aerial, drifting. Smoke columns.');
+  });
+
+  it('leaves provenance undefined for an asset that never recorded one', async () => {
+    const project = await service.createProject(makeInput());
+    await store.updateProject(project.id, (current) => {
+      const next = structuredClone(current);
+      addReferencePlate(next);
+      return next;
+    });
+
+    const rendererProject = await service.getProject(project.id);
+    const asset = Object.values(rendererProject?.assets ?? {}).find((candidate) => candidate.sceneId === 's1');
+
+    expect(asset?.sourceVisualPrompt).toBeUndefined();
   });
 
   it('reports the newest verified cut file and its render time without exposing a storage path', async () => {

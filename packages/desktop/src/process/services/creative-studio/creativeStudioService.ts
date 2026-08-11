@@ -697,6 +697,7 @@ const toRendererAsset = (asset: StudioAsset): StudioAsset => ({
   ...(asset.width === undefined ? {} : { width: asset.width }),
   ...(asset.height === undefined ? {} : { height: asset.height }),
   ...(asset.durationSeconds === undefined ? {} : { durationSeconds: asset.durationSeconds }),
+  ...(asset.sourceVisualPrompt === undefined ? {} : { sourceVisualPrompt: asset.sourceVisualPrompt }),
   createdAt: asset.createdAt,
 });
 
