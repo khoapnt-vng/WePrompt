@@ -12,6 +12,7 @@ import {
   fromBackendTeamRunEvent,
   fromBackendTeamRunState,
   normalizeTeamStatus,
+  TeamMemberModelUnresolvedError,
   toBackendAssistant,
 } from '@/common/adapter/teamMapper';
 
@@ -140,12 +141,45 @@ describe('teamMapper', () => {
         assistant_name: 'Aion CLI',
         status: 'pending',
         assistant_id: 'assistant-1',
+        model: 'kimi-k2.6',
       })
     ).toMatchObject({
       name: 'Aion CLI',
       role: 'lead',
       assistant_id: 'assistant-1',
+      model: 'kimi-k2.6',
     });
+  });
+
+  /**
+   * This mapper used to substitute the literal 'default' for a missing model.
+   * For aionrs that value resolves to no provider, so the slot was persisted
+   * with `use_model:null` and its runtime died during warmup with an empty
+   * error — 13ms after create, far from the caller that forgot the model.
+   */
+  it('rejects team payloads whose model was never resolved instead of substituting a placeholder', () => {
+    expect(() =>
+      toBackendAssistant({
+        role: 'leader',
+        assistant_backend: 'aionrs',
+        assistant_name: 'Aion CLI',
+        status: 'pending',
+        assistant_id: 'assistant-1',
+      })
+    ).toThrow(TeamMemberModelUnresolvedError);
+  });
+
+  it('passes an explicitly chosen model through verbatim, including the ACP "default" sentinel', () => {
+    expect(
+      toBackendAssistant({
+        role: 'teammate',
+        assistant_backend: 'claude',
+        assistant_name: 'Claude Code',
+        status: 'pending',
+        assistant_id: 'assistant-claude',
+        model: 'default',
+      })
+    ).toMatchObject({ model: 'default' });
   });
 
   it('omits backend for new assistant-led payloads so the backend can derive it from assistant identity', () => {

@@ -220,7 +220,8 @@
     "codes": {
       "TEAM_ASSISTANT_ID_REQUIRED": "لطفاً قبل از ایجاد تیم، یک دستیار انتخاب کنید.",
       "TEAM_ASSISTANT_NOT_FOUND": "دستیار {{assistantId}} دیگر در دسترس نیست. لیست دستیارها را بازخوانی کنید و دستیار دیگری انتخاب کنید.",
-      "TEAM_ASSISTANT_FIELD_UNSUPPORTED": "به‌جای {{field}} از assistant_id استفاده کنید."
+      "TEAM_ASSISTANT_FIELD_UNSUPPORTED": "به‌جای {{field}} از assistant_id استفاده کنید.",
+      "TEAM_MEMBER_MODEL_UNRESOLVED": "هیچ مدلی برای این عضو تیم در دسترس نیست. در تنظیمات یک ارائه‌دهنده مدل اضافه یا فعال کنید و دوباره تلاش کنید."
     }
   },
   "agentError": {

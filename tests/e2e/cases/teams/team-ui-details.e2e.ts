@@ -1,10 +1,22 @@
 import { test, expect } from '../../fixtures';
-import { cleanupTeamsByName, collapseSidebarButton, createTeam, expandSidebarButton } from '../../helpers';
+import {
+  cleanupTeamsByName,
+  collapseSidebarButton,
+  createTeam,
+  ensureTeamModelProvider,
+  expandSidebarButton,
+} from '../../helpers';
 
 const TEAM_COLLAPSED = 'E2E Collapsed Team';
 const TEAM_WORKSPACE = 'E2E Workspace Team';
 
 test.describe('Team UI Details', () => {
+  // A fresh E2E profile has no model provider; an aionrs lead cannot resolve
+  // a model without one, so create would fail fast. See ensureTeamModelProvider.
+  test.beforeEach(async ({ page }) => {
+    await ensureTeamModelProvider(page);
+  });
+
   test('collapsed sidebar shows team icon and navigates on click', async ({ page }) => {
     await cleanupTeamsByName(page, TEAM_COLLAPSED);
 

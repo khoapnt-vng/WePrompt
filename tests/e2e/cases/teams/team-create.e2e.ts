@@ -10,6 +10,7 @@ import {
   cleanupTeamsByName,
   labelPattern,
   modalCloseButton,
+  ensureTeamModelProvider,
 } from '../../helpers';
 
 /**
@@ -23,6 +24,12 @@ const BACKEND_UI_PATTERN: Record<string, RegExp> = {
 };
 
 test.describe('Team Create', () => {
+  // A fresh E2E profile has no model provider; an aionrs lead cannot resolve a
+  // model without one, so create would fail fast. See ensureTeamModelProvider.
+  test.beforeEach(async ({ page }) => {
+    await ensureTeamModelProvider(page);
+  });
+
   test('sidebar shows team section with create button', async ({ page }) => {
     // Wait for sidebar to render — no fixed timeout, listen for element
     const teamSection = page.locator('text=Teams').or(page.locator('text=团队'));
@@ -205,6 +212,10 @@ async function createTeamWithAgent(
 }
 
 test.describe('Team Create - whitelisted leader types', () => {
+  test.beforeEach(async ({ page }) => {
+    await ensureTeamModelProvider(page);
+  });
+
   for (const backend of TEAM_SUPPORTED_BACKENDS) {
     const pattern = BACKEND_UI_PATTERN[backend] ?? new RegExp(backend, 'i');
     test(`create E2E Team (${backend})`, async ({ page }) => {

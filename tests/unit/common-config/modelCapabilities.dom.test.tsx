@@ -7,7 +7,7 @@
 import React from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { IProvider } from '@/common/config/storage';
+import type { IProvider, ModelType } from '@/common/config/storage';
 
 const mocks = vi.hoisted(() => ({
   close: vi.fn(),
@@ -667,6 +667,31 @@ describe('configured model list', () => {
 
 describe('name-based capability inference (BUG-045 fail-open guard)', () => {
   const provider = { id: 'p1', name: 'p', platform: 'openai', models: [] } as unknown as IProvider;
+
+  it('cannot disable the discovery-only guard through the module public surface', async () => {
+    const capabilityExports = (await import('@/common/utils/modelCapabilities')) as {
+      DISCOVERY_ONLY_CAPABILITIES?: Set<ModelType>;
+    };
+    const exposedGuard = capabilityExports.DISCOVERY_ONLY_CAPABILITIES;
+
+    exposedGuard?.clear();
+    let specificVerdict: boolean | undefined;
+    let providerVerdict: boolean | undefined;
+    try {
+      specificVerdict = hasSpecificModelCapability(provider, 'qwen-thinking', 'reasoning');
+      providerVerdict = hasModelCapability(
+        { ...provider, id: 'tamper-attempt', models: ['qwen-thinking'] },
+        'reasoning'
+      );
+    } finally {
+      exposedGuard?.add('reasoning');
+    }
+
+    expect({ providerVerdict, specificVerdict }).toEqual({
+      providerVerdict: undefined,
+      specificVerdict: undefined,
+    });
+  });
 
   // Every one of these matches CAPABILITY_PATTERNS.reasoning (/o1-|reasoning|think/i).
   // EPIC-003 rules that even an explicit provider-declared reasoning badge is

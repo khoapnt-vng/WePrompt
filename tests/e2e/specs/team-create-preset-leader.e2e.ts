@@ -6,7 +6,7 @@
  * assistant identity.
  */
 import { test, expect } from '../fixtures';
-import { invokeBridge, navigateTo } from '../helpers';
+import { ensureTeamModelProvider, invokeBridge, navigateTo } from '../helpers';
 
 type TTeamBackendAgent = {
   role: string;
@@ -23,6 +23,12 @@ type TTeam = {
 };
 
 test.describe('Team Create - assistant leader', () => {
+  // A fresh E2E profile has no model provider; an aionrs lead cannot resolve
+  // a model without one, so create would fail fast. See ensureTeamModelProvider.
+  test.beforeEach(async ({ page }) => {
+    await ensureTeamModelProvider(page);
+  });
+
   test('can create a team with an assistant leader from the unified assistant list', async ({ page }) => {
     test.setTimeout(120_000);
 

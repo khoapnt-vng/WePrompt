@@ -13,7 +13,7 @@
  * afterwards because the Electron window is shared across specs.
  */
 import { test, expect } from '../../fixtures';
-import { TEAM_SUPPORTED_BACKENDS, cleanupTeamsByName } from '../../helpers';
+import { TEAM_SUPPORTED_BACKENDS, cleanupTeamsByName, ensureTeamModelProvider } from '../../helpers';
 
 const MOBILE_WIDTH = 430;
 const MOBILE_HEIGHT = 900;
@@ -37,6 +37,12 @@ async function setWindowContentSize(
 }
 
 test.describe('Team Create - mobile (narrow screen)', () => {
+  // A fresh E2E profile has no model provider; an aionrs lead cannot resolve
+  // a model without one, so create would fail fast. See ensureTeamModelProvider.
+  test.beforeEach(async ({ page }) => {
+    await ensureTeamModelProvider(page);
+  });
+
   let originalSize: { width: number; height: number } | null = null;
 
   test.beforeEach(async ({ electronApp }) => {

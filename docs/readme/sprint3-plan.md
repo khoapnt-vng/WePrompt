@@ -186,48 +186,84 @@ depth, and fails closed to _unauthenticated_ on a malformed URL. `withLocalToken
 The half of delivery hardening that needs no new infrastructure. This is the direct answer to
 BUG-040.
 
-### T1.1 Define the artifact contract
+> **T1.1, T1.2 and T1.3 are DONE and merged 2026-08-11** — `9d2ef169d` (contract), `e7d2cce6e`
+> (control), `19c437c93` (tests). All three green on hosted CI. **T1.4 remains open and is not
+> ours to close**: it needs a real signed artifact, which is blocked on EG-5.
+>
+> **The chain that produced BUG-040 is now closed at the point it broke.** A pin that does not
+> resolve on the publishing host cannot be accepted, and that check **fails closed when the host
+> is unreachable** — an offline check that passes is worse than no check.
+>
+> **Operational consequence, and it changes the build order:** a build whose source commit is not
+> pushed to a _published branch or tag_ on `khoapnt-vng/aioncore` will now fail packaging.
+> Local-only commits, deleted branches, and merge-request refs are rejected. **Push the commit,
+> then build.** The check also needs network at packaging time.
 
-- [ ] A release artifact must carry: the native binary, the exact source commit,
-      `migration-lineage.json`, required managed resources, SHA-256 checksums, and signing or
-      provenance evidence.
-- [ ] Record the contract in `docs/design/` before changing WePrompt's backend resolver.
-- [ ] Confirm the build archives `migration-lineage.json` **alongside** the binary. Upstream's
-      release workflow archives the binary only, which is why default packaging fails closed.
+### T1.1 Define the artifact contract — **DONE** (`9d2ef169d`)
 
-### T1.2 Bind the pin to a verifiable source
+- [x] [docs/design/aioncore-artifact-contract.md](../design/aioncore-artifact-contract.md) —
+      archive layout, SHA-256 and cosign requirements, nine mandatory pre-pin acceptance
+      conditions, the full PR-to-packaged-acceptance chain with the status of every link, and
+      reviewer commands for verifying an artifact **independently of the build that produced it**.
+- [x] Verified claims carry file:line references; proposed requirements are labelled as proposals;
+      what could not be determined from the repository is listed as such. Audited: **zero invented
+      provenance values**, every cited path exists.
+- [ ] **Nine gaps are named as gaps, not described as current state.** The blocking one is
+      unchanged: release-line archives ship **no** `migration-lineage.json`, while WePrompt
+      requires it in-archive at four call sites. **This document is now the spec for what an
+      AionCore release must emit.**
 
-- [ ] Replace any pin that cannot be resolved on the publishing host.
-- [ ] **Required control:** after every build, assert the built SHA resolves on the
-      source-of-truth host before the artifact is accepted.
+### T1.2 Bind the pin to a verifiable source — **DONE** (`e7d2cce6e`)
 
-  ```bash
-  git ls-remote https://github.com/khoapnt-vng/aioncore.git | grep -q "$BUILT_SHA"
-  ```
+- [x] `packages/shared-scripts/src/verify-git-source-commit.js`, wired into `prepare-aioncore.js`
+      **before** an Actions artifact is accepted. The pin's value is unchanged.
+- [x] Boundaries exercised directly, not assumed:
 
-  This single check is what BUG-040 would have failed. Make it a required release step.
+      | Input | Result |
+      | --- | --- |
+      | Real pin, via peeled `v0.1.51` tag | ACCEPTED |
+      | BUG-040's fabricated SHA | REJECTED |
+      | Prefix only | REJECTED — full 40 characters required |
+      | Merge-request-only ref | REJECTED — review refs are not published provenance |
+      | Host unreachable | **REJECTED** — "could not be queried" |
 
-- [ ] No test fixture may act as the authority for a provenance value. A reviewer obtains the
-      commit, digest, and signing evidence independently from the published build.
+- [x] Exact object-ID matching, not substring: a SHA appearing inside a ref _name_ does not count.
+- [x] **Would it have caught `!79`?** Yes. Removing the production call produces exactly one
+      failure — the regression test added for it. An echoed fabricated constant is still absent
+      from independently obtained host refs.
+- [ ] **Unverifiable offline:** live host reachability. The tests prove injected-resolver
+      semantics; the sandbox has no network.
 
-### T1.3 Re-verify what `!79` claimed but never proved
+### T1.3 Re-verify what `!79` claimed but never proved — **DONE for what is ours** (`19c437c93`)
 
-The fabricated pin removed the presumption of accuracy from that MR's other claims. Three were
-independently confirmed defective and remain open:
+- [x] **Real injected lineage failures**, against the verifier that actually runs: six differences
+      (checksum, missing entry, extra entry, reordering, `latestVersion`, `minimumSupportedVersion`),
+      both typed failures (`manifest_mismatch`, `lineage_mismatch`), and missing
+      `migration-lineage.json` → `missing_file` — the live case.
+- [x] **Preservation proven**, which was the specific half the audit called unproven: a sentinel is
+      byte-identical after rejection, in both the verifier and `prepare-aioncore.js` paths. **Seven
+      separate revert proofs**, including injected deletions to prove those assertions bite.
+- [x] **Not fixture-echo.** The test requires the verifier, never the accepted lineage document,
+      and hand-writes its baseline; changing the production fingerprint fails the
+      independent-baseline test. Contrast the pre-existing lineage tests, which write the module's
+      own input back as the fixture.
+- [ ] **The runtime chain remains unprovable, and cannot be fixed here.** AionCore never emits
+      `database.migration_lineage` — zero hits across the release-line tree — so WePrompt's
+      classifier (`backendStartupFailure.ts:36`) is reachable only by the debug injection. The
+      existing Playwright test is unchanged and still proves only the UI/quit chain. Closing this
+      needs an AionCore change and packaged native acceptance.
+- [ ] Native CI acceptance still cannot pass, for the same EG-5 reason: the archive lacks
+      `migration-lineage.json`.
 
-- [ ] No test injects a real lineage failure and proves the rejection → preservation → quit
-      chain. The quit path is real; the behavioural proof is not. Write it.
-- [ ] The packaged recovery test installs a prebuilt failure object, skips AionCore startup
-      entirely, and is excluded from `bun run test`. Make it real: seed a database, exercise
-      lineage preflight, prove preservation.
-- [ ] Native CI acceptance as written cannot pass, because it consumes an archive that lacks
-      `migration-lineage.json`. Fix or retire the claim.
+### T1.4 Close BUG-040 — **OPEN, and not ours to close**
 
-### T1.4 Close BUG-040
-
-- [ ] Close only with a real signed artifact, independently verified provenance, and genuine
-      packaged recovery evidence. Until then BUG-013 stays **partially hollow**: runtime
-      rejection real, packaged end-to-end acceptance not.
+- [ ] Needs a real signed artifact, independently verified provenance, and genuine packaged
+      recovery evidence. No test substitutes for it.
+- [ ] **Blocked on EG-5.** No AionCore artifact on the release line ships `migration-lineage.json`,
+      and WePrompt errors without it at four call sites — so backend packaging cannot complete at
+      all, before any new migration exists. This is the sprint's true critical path.
+- [ ] Until then BUG-013 stays **partially hollow**: runtime rejection real, packaged end-to-end
+      acceptance not.
 
 ---
 

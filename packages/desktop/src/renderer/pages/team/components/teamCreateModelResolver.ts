@@ -5,7 +5,10 @@
  */
 
 import { ipcBridge } from '@/common';
+import { TeamMemberModelUnresolvedError } from '@/common/adapter/teamMapper';
+import type { IProvider } from '@/common/config/storage';
 import { assistantRuntimeKey, type AssistantDetail } from '@/common/types/agent/assistantTypes';
+import { getAvailableModels } from '@renderer/pages/guid/utils/modelUtils';
 
 /**
  * Resolve the `model` value a team agent should send to `POST /api/teams`.
@@ -17,11 +20,19 @@ import { assistantRuntimeKey, type AssistantDetail } from '@/common/types/agent/
  *
  * This resolver reads assistant-owned defaults first and then falls back to
  * backend-safe defaults when the selected assistant has no explicit model.
+ * That fallback is the load-bearing path, not an edge case: every builtin
+ * aionrs assistant is seeded `mode:'auto'` with no `default_model_value`, and
+ * `last_model_id` stays empty until someone chats with it once — so picking a
+ * never-used assistant as lead lands here.
  *
  * For ACP backends (claude, codex, acp) the model is resolved from the
  * agent's handshake data or cached model info so the backend receives a
  * valid model ID (e.g. "claude-sonnet-4-5-20250514") instead of the bare
  * backend name.
+ *
+ * Every branch returns a value the backend can resolve, or throws
+ * `TeamMemberModelUnresolvedError`. Returning a placeholder is not an option:
+ * see that class for what an unresolvable model does to a slot runtime.
  */
 export async function resolveDefaultTeamAgentModel(params: {
   assistant_id?: string;
@@ -87,6 +98,33 @@ async function resolveGeminiDefaultModel(): Promise<string> {
   return 'auto';
 }
 
+/**
+ * aionrs has no usable model sentinel — a slot needs a concrete model id that
+ * some configured provider actually offers. This mirrors what the single-chat
+ * flow already does for the very same assistants: `useGuidModelSelection`
+ * falls back to the first available model of the first provider that has one.
+ *
+ * The filters are the intersection of both working paths — `enabled !== false`
+ * (as `useModelProviderList`, which backs the team column-header model selector)
+ * and `getAvailableModels` (as the Guid default). That keeps the auto-picked
+ * model one the user can also see and switch away from in that selector.
+ *
+ * Throws rather than returning a placeholder when nothing is configured: no
+ * value we could invent here would start a runtime.
+ */
 async function resolveAionrsDefaultModel(): Promise<string> {
-  return 'default';
+  let providers: IProvider[];
+  try {
+    providers = (await ipcBridge.mode.listProviders.invoke()) ?? [];
+  } catch (error) {
+    throw new TeamMemberModelUnresolvedError('aionrs', { cause: error });
+  }
+
+  for (const provider of providers) {
+    if (provider.enabled === false) continue;
+    const [model] = getAvailableModels(provider);
+    if (model) return model;
+  }
+
+  throw new TeamMemberModelUnresolvedError('aionrs');
 }

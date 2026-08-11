@@ -22,6 +22,12 @@ const inspectionStatControl = vi.hoisted(() => ({
   replacementComplete: false,
 }));
 
+const renderStatControl = vi.hoisted(() => ({
+  slideNumber: null as number | null,
+  ctimeNsByStatCall: [] as unknown[],
+  statCalls: 0,
+}));
+
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
   const controlledDevice = BigInt(43);
@@ -34,19 +40,27 @@ vi.mock('node:fs/promises', async (importOriginal) => {
         return typeof value === 'function' ? value.bind(target) : value;
       },
     });
-  const isControlledPath = (filePath: unknown): boolean =>
+  const isControlledInspectionPath = (filePath: unknown): boolean =>
     typeof filePath === 'string' && filePath.endsWith(`${path.sep}candidate.pptx`);
+  const isControlledRenderPath = (filePath: unknown): boolean =>
+    typeof filePath === 'string' &&
+    renderStatControl.slideNumber !== null &&
+    filePath.endsWith(`${path.sep}slide-${renderStatControl.slideNumber}.png`);
   const controlledCtime = (): bigint | undefined => {
     if (inspectionStatControl.mode === 'zero-ctime') return BigInt(0);
     if (inspectionStatControl.mode === 'missing-ctime') return undefined;
     return inspectionStatControl.replacementComplete ? BigInt(202) : BigInt(101);
+  };
+  const controlledRenderCtime = (): unknown => {
+    const callIndex = renderStatControl.statCalls++;
+    return renderStatControl.ctimeNsByStatCall[callIndex];
   };
 
   return {
     ...actual,
     lstat: async (...args: Parameters<typeof actual.lstat>) => {
       const metadata = await actual.lstat(...args);
-      if (inspectionStatControl.mode === 'off' || !isControlledPath(args[0])) return metadata;
+      if (inspectionStatControl.mode === 'off' || !isControlledInspectionPath(args[0])) return metadata;
       return overrideMetadata(metadata, {
         dev: Number(controlledDevice),
         ino: Number(controlledInode),
@@ -54,17 +68,21 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     },
     open: async (...args: Parameters<typeof actual.open>) => {
       const handle = await actual.open(...args);
-      if (inspectionStatControl.mode === 'off' || !isControlledPath(args[0])) return handle;
+      const controlsInspectionPath = inspectionStatControl.mode !== 'off' && isControlledInspectionPath(args[0]);
+      const controlsRenderPath = isControlledRenderPath(args[0]);
+      if (!controlsInspectionPath && !controlsRenderPath) return handle;
       return new Proxy(handle, {
         get(target, property, receiver) {
           if (property === 'stat') {
             return async (options: { bigint: true }) => {
               const metadata = await target.stat(options);
-              return overrideMetadata(metadata, {
-                ctimeNs: controlledCtime(),
-                dev: controlledDevice,
-                ino: controlledInode,
-              });
+              return controlsRenderPath
+                ? overrideMetadata(metadata, { ctimeNs: controlledRenderCtime() })
+                : overrideMetadata(metadata, {
+                    ctimeNs: controlledCtime(),
+                    dev: controlledDevice,
+                    ino: controlledInode,
+                  });
             };
           }
           const value = Reflect.get(target, property, receiver);
@@ -153,6 +171,9 @@ describe('PresentationReadinessService', () => {
   beforeEach(async () => {
     inspectionStatControl.mode = 'off';
     inspectionStatControl.replacementComplete = false;
+    renderStatControl.slideNumber = null;
+    renderStatControl.ctimeNsByStatCall = [];
+    renderStatControl.statCalls = 0;
     fixtureRoot = await mkdtemp(path.join(tmpdir(), 'presentation-readiness-service-'));
     workspaceSequence = 0;
     runner = {
@@ -280,6 +301,49 @@ describe('PresentationReadinessService', () => {
       ok: false,
       blockers: [{ code: 'EVIDENCE_MISSING', slideNumber: null }],
     });
+  });
+
+  it.each([
+    ['absent', undefined],
+    ['non-bigint', 101],
+    ['zero', BigInt(0)],
+    ['negative', BigInt(-1)],
+  ])('fails closed when render ctime evidence before reading is %s', async (_label, unusableCtimeNs) => {
+    renderStatControl.slideNumber = 2;
+    renderStatControl.ctimeNsByStatCall = [unusableCtimeNs, BigInt(101)];
+
+    await expect(createService().inspect(request)).resolves.toEqual({
+      ok: false,
+      blockers: [{ code: 'EVIDENCE_MISSING', slideNumber: 2 }],
+    });
+    expect(renderStatControl.statCalls).toBe(1);
+  });
+
+  it.each([
+    ['absent', undefined],
+    ['non-bigint', 101],
+    ['zero', BigInt(0)],
+    ['negative', BigInt(-1)],
+  ])('fails closed when render ctime evidence after reading is %s', async (_label, unusableCtimeNs) => {
+    renderStatControl.slideNumber = 3;
+    renderStatControl.ctimeNsByStatCall = [BigInt(101), unusableCtimeNs];
+
+    await expect(createService().inspect(request)).resolves.toEqual({
+      ok: false,
+      blockers: [{ code: 'EVIDENCE_MISSING', slideNumber: 3 }],
+    });
+    expect(renderStatControl.statCalls).toBe(2);
+  });
+
+  it('rejects render ctime evidence that changes while the file is read', async () => {
+    renderStatControl.slideNumber = 2;
+    renderStatControl.ctimeNsByStatCall = [BigInt(101), BigInt(202)];
+
+    await expect(createService().inspect(request)).resolves.toEqual({
+      ok: false,
+      blockers: [{ code: 'HASH_MISMATCH', slideNumber: 2 }],
+    });
+    expect(renderStatControl.statCalls).toBe(2);
   });
 
   it('rejects stale or missing retention evidence before allocating inspection resources', async () => {

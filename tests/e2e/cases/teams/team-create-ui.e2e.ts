@@ -6,11 +6,23 @@
  * Cleanup uses invokeBridge (test data teardown is permitted).
  */
 import { test, expect } from '../../fixtures';
-import { TEAM_SUPPORTED_BACKENDS, TEAM_CREATE_TITLE_LABELS, cleanupTeamsByName, labelPattern } from '../../helpers';
+import {
+  TEAM_SUPPORTED_BACKENDS,
+  TEAM_CREATE_TITLE_LABELS,
+  cleanupTeamsByName,
+  ensureTeamModelProvider,
+  labelPattern,
+} from '../../helpers';
 
 const TEAM_NAME = 'E2E Test Team 001';
 
 test.describe('Team Create - Full UI Flow', () => {
+  // A fresh E2E profile has no model provider; an aionrs lead cannot resolve
+  // a model without one, so create would fail fast. See ensureTeamModelProvider.
+  test.beforeEach(async ({ page }) => {
+    await ensureTeamModelProvider(page);
+  });
+
   test('create team via UI without any API shortcut', async ({ page }) => {
     if (TEAM_SUPPORTED_BACKENDS.size === 0) {
       test.skip();
