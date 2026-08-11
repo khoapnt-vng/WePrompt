@@ -1827,7 +1827,10 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
         const route = built.generation.routes.find(
           (candidate) => candidate.kind === choice.kind && candidate.choiceId === choice.choiceId
         );
-        if (scene?.mediaKind !== choice.kind || !available || route === undefined) {
+        if (scene === undefined) throw new CreativeStudioServiceError('invalid_route');
+        // A reference plate is always generated on an image route, whatever the scene's media kind.
+        const requiredKind = input.outputRole === 'reference' ? 'image' : scene.mediaKind;
+        if (requiredKind !== choice.kind || !available || route === undefined) {
           throw new CreativeStudioServiceError('invalid_route');
         }
         return {
@@ -1845,6 +1848,10 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
           expectedRevision: input.expectedRevision,
           routes: resolvedRoutes,
           catalogVersion: built.generation.generationCatalogVersion,
+          // Forwarded explicitly: submitScenes is assembled field by field and both fields are
+          // optional on an Omit-derived type, so dropping them would never fail the typecheck.
+          ...(input.outputRole === undefined ? {} : { outputRole: input.outputRole }),
+          ...(input.referencePrompt === undefined ? {} : { referencePrompt: input.referencePrompt }),
         })
       ).map(toRendererJob);
     },

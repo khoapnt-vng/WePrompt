@@ -3930,6 +3930,66 @@ describe('CreativeStudioService', () => {
       expect(harness.submitScenes.mock.calls[0]?.[0]).not.toHaveProperty('mode');
     });
 
+    it('forwards the reference output role and prompt to the job manager', async () => {
+      const harness = await createVideoSubmissionHarness();
+      const catalog = await harness.service.listRoutes({ projectId: harness.project.id });
+      const imageChoice = catalog.image.options[0]!;
+
+      await harness.service.submitScenes({
+        projectId: harness.project.id,
+        expectedRevision: harness.project.revision,
+        mode: 'single',
+        sceneIds: ['scene_1'],
+        routes: [{ sceneId: 'scene_1', choiceId: imageChoice.choiceId, kind: 'image' }],
+        catalogVersion: catalog.catalogVersion,
+        outputRole: 'reference',
+        referencePrompt: 'A calm establishing plate',
+      });
+
+      expect(harness.submitScenes).toHaveBeenCalledOnce();
+      expect(harness.submitScenes.mock.calls[0]?.[0]).toMatchObject({
+        outputRole: 'reference',
+        referencePrompt: 'A calm establishing plate',
+        routes: [
+          {
+            sceneId: 'scene_1',
+            providerId: 'provider_1',
+            adapterId: 'weprompt-image-v1',
+            model: 'image-model',
+            kind: 'image',
+          },
+        ],
+      });
+    });
+
+    it('omits both reference fields from an ordinary take submission', async () => {
+      const harness = await createVideoSubmissionHarness();
+
+      await harness.submit('single');
+
+      expect(harness.submitScenes).toHaveBeenCalledOnce();
+      expect(harness.submitScenes.mock.calls[0]?.[0]).not.toHaveProperty('outputRole');
+      expect(harness.submitScenes.mock.calls[0]?.[0]).not.toHaveProperty('referencePrompt');
+    });
+
+    it('rejects a take whose route kind differs from the scene before reaching the job manager', async () => {
+      const harness = await createVideoSubmissionHarness();
+      const catalog = await harness.service.listRoutes({ projectId: harness.project.id });
+      const imageChoice = catalog.image.options[0]!;
+
+      await expect(
+        harness.service.submitScenes({
+          projectId: harness.project.id,
+          expectedRevision: harness.project.revision,
+          mode: 'single',
+          sceneIds: ['scene_1'],
+          routes: [{ sceneId: 'scene_1', choiceId: imageChoice.choiceId, kind: 'image' }],
+          catalogVersion: catalog.catalogVersion,
+        })
+      ).rejects.toMatchObject({ code: 'invalid_route' });
+      expect(harness.submitScenes).not.toHaveBeenCalled();
+    });
+
     it('rejects a single-mode request that includes multiple scenes before resolving provider routes', async () => {
       const harness = await createCatalogHarness();
       const opening = await harness.service.updateScene({

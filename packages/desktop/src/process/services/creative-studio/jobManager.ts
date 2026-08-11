@@ -15,6 +15,7 @@ import type {
   StudioJobErrorCode,
   StudioJobRequest,
   StudioMediaKind,
+  StudioOutputRole,
   StudioProject,
   StudioProviderAdapterId,
   StudioProviderRef,
@@ -22,6 +23,7 @@ import type {
   StudioRetryJobRequest,
   StudioSubmitScenesRequest,
 } from '@/common/types/project/creativeStudioTypes';
+import { jobOutputRole } from '@/common/types/project/creativeStudioOutputRole';
 import {
   ProviderDeadlineError,
   runWithProviderDeadline,
@@ -119,7 +121,20 @@ type ExecutionContext = {
 type PreparedSubmission = ExecutionContext & {
   request: ResolvedStudioGenerationRequest;
   cancellationPolicy: StudioCancellationPolicy;
+  /** Always explicit in memory; only 'reference' is written to the durable record. */
+  outputRole: StudioOutputRole;
 };
+
+/**
+ * What a submission asks the provider to produce. A reference plate is always an image,
+ * whatever the scene's own media kind, and carries its own prompt instead of the scene's.
+ */
+type RequestedOutput = {
+  role: StudioOutputRole;
+  referencePrompt?: string;
+};
+
+const TAKE_OUTPUT: RequestedOutput = { role: 'take' };
 
 class JobMutationSkipped extends Error {
   readonly job: StudioJob;
@@ -262,6 +277,13 @@ const providerIsAvailable = (provider: IProvider, model: string): boolean =>
 
 const providerCredentialsAreUsable = (provider: IProvider): boolean =>
   provider.enabled !== false && provider.api_key.trim().length > 0;
+
+/**
+ * A reference plate is always produced on the image route, whatever the scene's own media kind;
+ * a take follows the scene. Every route, routing-selection and provider-request decision keys off this.
+ */
+const requestedMediaKind = (sceneMediaKind: StudioMediaKind, role: StudioOutputRole): StudioMediaKind =>
+  role === 'reference' ? 'image' : sceneMediaKind;
 
 const routeMatches = (
   candidate: {
@@ -508,10 +530,15 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     project: StudioProject,
     sceneId: string,
     route: StudioResolvedSceneRouteSnapshot,
-    catalogVersion?: string
+    catalogVersion?: string,
+    output: RequestedOutput = TAKE_OUTPUT
   ): Promise<PreparedSubmission> => {
     const scene = project.scenes[sceneId];
-    if (!scene || route.sceneId !== sceneId || route.kind !== scene.mediaKind) {
+    if (!scene || route.sceneId !== sceneId) {
+      throw new StudioJobManagerError('invalid_route');
+    }
+    const requestedKind = requestedMediaKind(scene.mediaKind, output.role);
+    if (route.kind !== requestedKind) {
       throw new StudioJobManagerError('invalid_route');
     }
     let catalog: Awaited<ReturnType<StudioProviderResolver['listGenerationRoutes']>>;
@@ -532,7 +559,9 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       !catalogRoute.constraints.resolutions.includes(project.resolution) ||
       scene.durationSeconds < catalogRoute.constraints.minDurationSeconds ||
       scene.durationSeconds > catalogRoute.constraints.maxDurationSeconds ||
-      (scene.referenceAssetId !== null && !catalogRoute.constraints.supportsFirstFrame)
+      // A reference plate never consumes the scene's own reference as a first frame,
+      // so the route's first-frame capability is irrelevant to it.
+      (output.role !== 'reference' && scene.referenceAssetId !== null && !catalogRoute.constraints.supportsFirstFrame)
     ) {
       throw new StudioJobManagerError('invalid_route');
     }
@@ -553,8 +582,8 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       throw new CreativeStudioStoreError('storage_error', 'Unable to allocate Studio idempotency identity');
     }
     const baseRequest = {
-      prompt: scene.visualPrompt.trim(),
-      mediaKind: scene.mediaKind,
+      prompt: (output.role === 'reference' ? (output.referencePrompt ?? '') : scene.visualPrompt).trim(),
+      mediaKind: requestedKind,
       aspectRatio: project.aspectRatio,
       resolution: project.resolution,
       durationSeconds: scene.durationSeconds,
@@ -564,7 +593,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     const validation = adapter.validateRequest(baseRequest, resolvedProvider);
     if (!validation.ok) throw new StudioJobManagerError('invalid_route');
     let firstFrame: ResolvedStudioGenerationRequest['firstFrame'];
-    if (scene.referenceAssetId !== null) {
+    if (output.role !== 'reference' && scene.referenceAssetId !== null) {
       const reference = project.assets[scene.referenceAssetId];
       if (
         !reference ||
@@ -582,7 +611,8 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     return {
       projectId: project.id,
       sceneId,
-      mediaKind: scene.mediaKind,
+      mediaKind: requestedKind,
+      outputRole: output.role,
       jobId: '',
       adapter,
       provider: resolvedProvider,
@@ -1118,6 +1148,8 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
         providerJobId: null,
         remoteStartedAt: null,
         cancellationPolicy: candidate.cancellationPolicy,
+        // Absent means 'take'; the default is never written so old and new take records stay identical.
+        ...(candidate.outputRole === 'reference' ? { outputRole: 'reference' as const } : {}),
         outputAssetIds: [],
         error: null,
         retryOfJobId: lineage?.retryOfJobId ?? null,
@@ -1182,10 +1214,19 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       input.routes.length !== input.sceneIds.length ||
       typeof input.catalogVersion !== 'string' ||
       input.catalogVersion.length < 1 ||
-      input.catalogVersion.length > 256
+      input.catalogVersion.length > 256 ||
+      (input.outputRole !== undefined && input.outputRole !== 'take' && input.outputRole !== 'reference') ||
+      (input.referencePrompt !== undefined &&
+        (typeof input.referencePrompt !== 'string' ||
+          input.referencePrompt.length > 4 * 1024 ||
+          input.outputRole !== 'reference'))
     ) {
       invalidRequest();
     }
+    const requestedOutput: RequestedOutput = {
+      role: input.outputRole === 'reference' ? 'reference' : 'take',
+      ...(input.referencePrompt === undefined ? {} : { referencePrompt: input.referencePrompt }),
+    };
     const routeByScene = new Map<string, StudioResolvedSceneRouteSnapshot>();
     for (const route of input.routes) {
       if (
@@ -1205,7 +1246,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       if (!route) invalidRequest();
       const scene = project.scenes[sceneId];
       if (!scene) throw new StudioJobManagerError('invalid_route');
-      const selected = project.routing[scene.mediaKind];
+      const selected = project.routing[requestedMediaKind(scene.mediaKind, requestedOutput.role)];
       if (
         selected === null ||
         selected.providerId !== route.providerId ||
@@ -1219,8 +1260,13 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
           const job = project.jobs[jobId];
           return job?.projectId === project.id && job.sceneId === sceneId ? [job] : [];
         }) ?? [];
+      // Duplicate-charge lineage is per (scene, output role): an unresolved take says nothing
+      // about whether a reference plate was already paid for, and the reverse holds too.
       const hasUnresolvedUnknownSubmission = sceneJobs.some(
-        (job) => job.status === 'needs_attention' && job.error?.code === 'submission_unknown'
+        (job) =>
+          job.status === 'needs_attention' &&
+          job.error?.code === 'submission_unknown' &&
+          jobOutputRole(job) === requestedOutput.role
       );
       if (hasUnresolvedUnknownSubmission) {
         throw new StudioJobManagerError('duplicate_charge_acknowledgement_required');
@@ -1228,7 +1274,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       if (scene?.reviewState === 'generating' || sceneJobs.some((job) => !TERMINAL_STATUSES.has(job.status))) {
         throw new StudioJobManagerError('busy');
       }
-      prepared.push(await resolveProvider(project, sceneId, route, input.catalogVersion));
+      prepared.push(await resolveProvider(project, sceneId, route, input.catalogVersion, requestedOutput));
     }
     if (disposed) throw new StudioJobManagerError('invalid_request');
     const persisted = await persistPreparedJobs(project, prepared, input.expectedRevision);
@@ -1366,6 +1412,9 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     if (!previous) throw new CreativeStudioStoreError('not_found', 'Studio job not found');
     const scene = project.scenes[previous.sceneId];
     if (!scene) throw new CreativeStudioStoreError('not_found', 'Studio scene not found');
+    // Retry rebuilds the request from the scene, which only ever reconstructs a take: the
+    // reference prompt is not on the durable record. Refuse rather than charge for the wrong output.
+    if (jobOutputRole(previous) !== 'take') throw new StudioJobManagerError('unsupported');
     const sceneJobs = scene.jobIds.flatMap((jobId) => {
       const job = project.jobs[jobId];
       return job?.projectId === project.id && job.sceneId === scene.id ? [job] : [];
