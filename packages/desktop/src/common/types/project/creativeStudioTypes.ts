@@ -53,7 +53,15 @@ export type StudioMediaChoiceRef = {
 
 /** An app-managed asset identity, deliberately not a filesystem path or URL. */
 export type StudioManagedAssetRef = {
-  collection: 'assets' | 'imports' | 'thumbnails' | 'references';
+  collection:
+    /** A generated take: the finished shot committed to a scene. */
+    | 'assets'
+    /** User-imported reference material. `StudioScene.referenceAssetId` points here today. */
+    | 'imports'
+    /** Captured or provider-generated poster frames for video takes. */
+    | 'thumbnails'
+    /** A generated reference plate (not user-imported); distinct from the `imports` sense of "reference". */
+    | 'references';
   fileName: string;
 };
 
@@ -123,10 +131,15 @@ export type StudioJob = {
   updatedAt: string;
 };
 
-/** Renderer-facing job metadata. Provider task, adapter, and charge identities stay in main. */
+/**
+ * Renderer-facing job metadata. Provider task, adapter, and charge identities stay in main.
+ * `outputRole` is omitted too: the renderer does not consume it yet, and both projections onto this
+ * type (toRendererJob, sanitizeJob) are exhaustive whitelists that would otherwise silently drop it.
+ * Whoever starts wiring it must add it to both projections in the same change.
+ */
 export type StudioRendererJob = Omit<
   StudioJob,
-  'provider' | 'idempotencyKey' | 'providerJobId' | 'remoteStartedAt' | 'cancellationPolicy'
+  'provider' | 'idempotencyKey' | 'providerJobId' | 'remoteStartedAt' | 'cancellationPolicy' | 'outputRole'
 > & {
   provider: StudioMediaChoiceRef;
   /** Main-derived cancellation capability; renderer code never infers it from status or provider metadata. */

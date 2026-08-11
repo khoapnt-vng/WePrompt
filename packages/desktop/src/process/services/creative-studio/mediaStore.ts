@@ -10,6 +10,7 @@ import path from 'node:path';
 import { PassThrough, Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { StudioAsset, StudioProject } from '@/common/types/project/creativeStudioTypes';
+import { STUDIO_MANAGED_ASSET_COLLECTIONS } from '@/common/types/project/creativeStudioManagedAssetCollections';
 import { CreativeStudioStoreError, reconcilePersistedStudioCuts, type CreativeStudioStore } from './store';
 import { downloadRemoteMedia, type RemoteMediaDownloadDeps } from '../remote-media/remoteMediaDownloader';
 
@@ -894,7 +895,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       if (!projectDir || !project) return null;
       const asset = project.assets[assetId] ?? (await readProjectOutputAsset(projectDir, projectId, assetId));
       if (!asset || asset.projectId !== projectId) return null;
-      if (!['assets', 'imports', 'thumbnails'].includes(asset.managedAsset.collection)) return null;
+      if (!STUDIO_MANAGED_ASSET_COLLECTIONS.has(asset.managedAsset.collection)) return null;
       if (!/^[A-Za-z0-9_-]+\.(?:jpg|png|webp|mp4|webm)$/.test(asset.managedAsset.fileName)) return null;
       const collectionDir = path.join(projectDir, asset.managedAsset.collection);
       if (path.dirname(collectionDir) !== projectDir) return null;

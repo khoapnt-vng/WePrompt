@@ -354,7 +354,12 @@ const studioSubmitScenesSchema = z
     catalogVersion: z.string().regex(/^[a-f0-9]{16}$/),
     routes: z.array(studioSceneRouteSnapshotSchema).min(1).max(24),
     outputRole: z.enum(['take', 'reference']).optional(),
-    referencePrompt: z.string().min(1).max(4096).optional(),
+    referencePrompt: z
+      .string()
+      .trim()
+      .min(1)
+      .max(4 * 1024)
+      .optional(),
   })
   .strict()
   .superRefine((input, context) => {

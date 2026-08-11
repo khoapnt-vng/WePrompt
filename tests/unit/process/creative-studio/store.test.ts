@@ -41,6 +41,7 @@ import type {
   StudioRendererProject,
   StudioRouteCatalog,
 } from '@/common/types/project/creativeStudioTypes';
+import { jobOutputRole } from '@/common/types/project/creativeStudioOutputRole';
 import { createCreativeStudioStore, type CreativeStudioStore } from '@process/services/creative-studio/store';
 
 const makeInput = (overrides: Partial<CreateStudioProjectInput> = {}): CreateStudioProjectInput => ({
@@ -1638,6 +1639,40 @@ describe('creative studio project store', () => {
         await rm(outsideDir, { recursive: true, force: true });
       }
     });
+  });
+});
+
+describe('jobOutputRole', () => {
+  const makeBareJob = (overrides: Partial<StudioJob> = {}): StudioJob => ({
+    id: 'job_1',
+    projectId: 'project_1',
+    sceneId: 'scene_1',
+    status: 'succeeded',
+    provider: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'model_1' },
+    idempotencyKey: 'key_1',
+    providerJobId: null,
+    cancellationPolicy: 'none',
+    outputAssetIds: [],
+    error: null,
+    retryOfJobId: null,
+    retryReason: null,
+    duplicateChargeAcknowledged: false,
+    duplicateChargeAcknowledgedAt: null,
+    createdAt: '2026-08-06T00:00:00.000Z',
+    updatedAt: '2026-08-06T00:00:00.000Z',
+    ...overrides,
+  });
+
+  it('defaults an old schema-v1 job that lacks the field to take', () => {
+    expect(jobOutputRole(makeBareJob())).toBe('take');
+  });
+
+  it('reads an explicit take role', () => {
+    expect(jobOutputRole(makeBareJob({ outputRole: 'take' }))).toBe('take');
+  });
+
+  it('reads an explicit reference role', () => {
+    expect(jobOutputRole(makeBareJob({ outputRole: 'reference' }))).toBe('reference');
   });
 });
 

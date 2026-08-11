@@ -16,6 +16,7 @@ import type {
   StudioCutClip,
   StudioCutFilter,
   StudioJob,
+  StudioManagedAssetRef,
   StudioOutputRole,
   StudioProject,
   StudioProjectSummary,
@@ -27,6 +28,7 @@ import type {
   StudioTextModelRef,
 } from '@/common/types/project/creativeStudioTypes';
 import { isCanonicalStudioGeneratedTake } from '@/common/types/project/creativeStudioCanonicalTake';
+import { STUDIO_MANAGED_ASSET_COLLECTIONS } from '@/common/types/project/creativeStudioManagedAssetCollections';
 import { isValidProviderJobId } from '@process/services/creative-studio/adapters/types';
 import { toStudioProjectSummary } from '@/common/types/project/creativeStudioProjectSummary';
 
@@ -129,7 +131,6 @@ const JOB_KEYS = new Set([
   'createdAt',
   'updatedAt',
 ]);
-const ASSET_COLLECTIONS = new Set(['assets', 'imports', 'thumbnails', 'references']);
 const CONNECTION_BINDING_KEYS = new Set([
   'schemaVersion',
   'id',
@@ -571,7 +572,7 @@ const validateAsset = (
     MEDIA_KINDS.has(value.mediaKind) &&
     isNonEmptyString(value.mimeType) &&
     isString(value.managedAsset.collection) &&
-    ASSET_COLLECTIONS.has(value.managedAsset.collection) &&
+    STUDIO_MANAGED_ASSET_COLLECTIONS.has(value.managedAsset.collection as StudioManagedAssetRef['collection']) &&
     isSafeAssetFileName(value.managedAsset.fileName) &&
     isIntegerInRange(value.byteSize, 0, Number.MAX_SAFE_INTEGER) &&
     isString(value.sha256) &&
@@ -830,7 +831,7 @@ const validateJob = (jobId: string, projectId: string, sceneIds: Set<string>, va
         : isCanonicalIsoTimestamp(value.remoteStartedAt))) &&
     isString(value.cancellationPolicy) &&
     CANCELLATION_POLICIES.has(value.cancellationPolicy as StudioCancellationPolicy) &&
-    (!Object.hasOwn(value, 'outputRole') ||
+    (value.outputRole === undefined ||
       (isString(value.outputRole) && JOB_OUTPUT_ROLES.has(value.outputRole as StudioOutputRole))) &&
     asArrayOfSafeIds(value.outputAssetIds) &&
     new Set(value.outputAssetIds).size === value.outputAssetIds.length &&
