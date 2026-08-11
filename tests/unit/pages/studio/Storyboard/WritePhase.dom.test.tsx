@@ -16,10 +16,38 @@ import type {
   StudioRouteCatalog,
   StudioScene,
 } from '@/common/types/project/creativeStudioTypes';
+import type { TChatConversation } from '@/common/config/storage';
 import { WritePhase } from '@renderer/pages/studio/components/PhaseShell/phases/WritePhase';
 import type { WritePhaseController } from '@renderer/pages/studio/components/PhaseShell/types';
 import type { UseStoryboardEditorResult } from '@renderer/pages/studio/hooks/useStoryboardEditor';
 import type { UseStudioModelsResult } from '@renderer/pages/studio/hooks/useStudioModels';
+
+const writeConversationHarness = vi.hoisted(() => ({
+  result: {
+    state: { kind: 'absent' } as { kind: string; conversation?: TChatConversation },
+    errorMessageKey: null,
+    sendFirstMessage: vi.fn(async () => {}),
+    recreate: vi.fn(),
+  },
+  messages: [] as string[],
+  mountedConversationIds: [] as string[],
+}));
+
+vi.mock('@renderer/pages/studio/components/PhaseShell/phases/brief/useBriefConversation', () => ({
+  useBriefConversation: () => writeConversationHarness.result,
+}));
+vi.mock('@renderer/pages/studio/components/PhaseShell/phases/StudioConversationSurface', () => ({
+  StudioConversationSurface: ({ conversation }: { conversation: TChatConversation }) => {
+    writeConversationHarness.mountedConversationIds.push(conversation.id);
+    return (
+      <div>
+        {writeConversationHarness.messages.map((message) => (
+          <p key={message}>{message}</p>
+        ))}
+      </div>
+    );
+  },
+}));
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -252,6 +280,9 @@ describe('WritePhase', () => {
   beforeEach(() => {
     observedTargets.length = 0;
     vi.stubGlobal('ResizeObserver', ResizeObserverMock);
+    writeConversationHarness.result.state = { kind: 'absent' };
+    writeConversationHarness.messages = [];
+    writeConversationHarness.mountedConversationIds = [];
   });
 
   afterEach(() => {
@@ -734,6 +765,28 @@ describe('WritePhase', () => {
     expect(
       screen.queryByRole('complementary', { name: 'conversation.creativeStudio.phase.write.assistantTitle' })
     ).not.toBeInTheDocument();
+  });
+
+  it('mounts the project conversation in Write and renders its existing history', async () => {
+    writeConversationHarness.result.state = {
+      kind: 'ready',
+      conversation: {
+        id: 'conversation_brief',
+        name: 'Launch film',
+        type: 'aionrs',
+        model: { id: 'provider-1', use_model: 'model-1' },
+        created_at: 1,
+        modified_at: 1,
+        extra: { backend: 'aionrs', workspace: '', studio_project_id: project.id },
+      },
+    };
+    writeConversationHarness.messages = ['A 20-second teaser.', 'Five shots, 20 seconds.'];
+
+    render(<WritePhase controller={controller()} layoutMode='inline' />);
+
+    expect(await screen.findByText('Five shots, 20 seconds.')).toBeInTheDocument();
+    expect(writeConversationHarness.mountedConversationIds).toEqual(['conversation_brief']);
+    expect(screen.queryByText(/start a new conversation/i)).not.toBeInTheDocument();
   });
 
   it('selects and focuses the requested visual prompt, then clears the route intent', async () => {

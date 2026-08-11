@@ -6,9 +6,12 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Button } from '@arco-design/web-react';
 
 import { resolveSceneDurationBounds } from '../../../studioRouteConstraints';
 import { AssistantDock } from '../AssistantDock';
+import { StudioConversationSurface } from './StudioConversationSurface';
+import { useBriefConversation } from './brief/useBriefConversation';
 import type { WritePhaseController } from '../types';
 import type { StudioLayoutMode } from '../useStudioLayoutMode';
 import { PacingBar, ScriptRow, ScriptTable } from './write';
@@ -37,6 +40,7 @@ export const WritePhase: React.FC<WritePhaseProps> = ({ controller, layoutMode =
   } = controller;
   const [importingSceneId, setImportingSceneId] = useState<string | null>(null);
   const [assistantOpen, setAssistantOpen] = useState(false);
+  const briefConversation = useBriefConversation(project);
   const saveConflict = editor.conflict?.operation === 'save_scene' ? editor.conflict : null;
   const nonSaveConflict =
     editor.conflict !== null &&
@@ -196,6 +200,10 @@ export const WritePhase: React.FC<WritePhaseProps> = ({ controller, layoutMode =
                   }}
                   onSuggestVisual={() => {
                     editor.selectScene(scene.id);
+                    if (briefConversation.state.kind === 'ready') {
+                      document.querySelector<HTMLElement>('[data-write-conversation] textarea')?.focus();
+                      return;
+                    }
                     if (layoutMode === 'inline') {
                       document.querySelector<HTMLElement>("[data-assistant-presentation='inline']")?.focus();
                     } else {
@@ -229,20 +237,39 @@ export const WritePhase: React.FC<WritePhaseProps> = ({ controller, layoutMode =
         </div>
 
         <div className={styles.assistantSlot} data-write-assistant-column data-layout={layoutMode}>
-          <AssistantDock
-            kind='write'
-            layoutMode={layoutMode}
-            drawerVisible={assistantOpen}
-            storyboard={models.catalog?.storyboard ?? null}
-            catalogLoading={models.loading}
-            drafting={editor.drafting}
-            disabled={mutationPending || models.pendingRole !== null}
-            onOpenChange={setAssistantOpen}
-            onDraftStoryboard={() => {
-              setAssistantOpen(false);
-              openDraftReview();
-            }}
-          />
+          {briefConversation.state.kind === 'ready' ? (
+            <aside
+              data-write-conversation
+              aria-label={t('conversation.creativeStudio.brief.conversationTitle')}
+              className={styles.conversationRail}
+            >
+              <div className={styles.conversationSurface}>
+                <StudioConversationSurface conversation={briefConversation.state.conversation} />
+              </div>
+              <Button
+                long
+                disabled={mutationPending || editor.drafting || models.pendingRole !== null}
+                onClick={openDraftReview}
+              >
+                {t('conversation.creativeStudio.phase.write.draftStoryboard')}
+              </Button>
+            </aside>
+          ) : (
+            <AssistantDock
+              kind='write'
+              layoutMode={layoutMode}
+              drawerVisible={assistantOpen}
+              storyboard={models.catalog?.storyboard ?? null}
+              catalogLoading={models.loading}
+              drafting={editor.drafting}
+              disabled={mutationPending || models.pendingRole !== null}
+              onOpenChange={setAssistantOpen}
+              onDraftStoryboard={() => {
+                setAssistantOpen(false);
+                openDraftReview();
+              }}
+            />
+          )}
         </div>
       </div>
     </section>
