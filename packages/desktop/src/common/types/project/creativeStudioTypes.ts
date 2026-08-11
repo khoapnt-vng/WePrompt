@@ -635,7 +635,7 @@ export type StudioSubmitScenesRequest = StudioProjectRequest & {
   expectedRevision: number;
   routes: StudioSceneGenerationChoice[];
   catalogVersion: string;
-  /** Absent means 'take'. 'reference' is single-mode only in v1; batch submissions stay take-only. */
+  /** Absent means 'take'. Batch submissions may request 'reference' across multiple scenes, same as single mode. */
   outputRole?: StudioOutputRole;
   /** Only meaningful alongside outputRole: 'reference'. */
   referencePrompt?: string;

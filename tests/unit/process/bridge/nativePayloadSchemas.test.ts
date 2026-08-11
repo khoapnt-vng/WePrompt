@@ -1572,7 +1572,7 @@ describe('native bridge payload schemas', () => {
       sceneIds: ['scene_1', 'scene_2'],
       outputRole: 'reference',
       routes: [
-        { sceneId: 'scene_1', choiceId: 'binding_1', kind: 'video' },
+        ...VALID_PAYLOADS['creative-studio.submit-scenes'].routes,
         { sceneId: 'scene_2', choiceId: 'binding_2', kind: 'video' },
       ],
     };
