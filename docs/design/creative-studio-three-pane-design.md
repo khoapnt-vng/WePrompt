@@ -1,6 +1,6 @@
 # Creative Studio — the three-pane model
 
-**Drafted:** 2026-08-11 · **Status:** design of record — all decisions settled 2026-08-12 except narrow-width behaviour; ready for an implementation plan
+**Drafted:** 2026-08-11 · **Status:** design of record — **all decisions settled 2026-08-12**; implementation plan at `docs/superpowers/plans/2026-08-12-studio-three-pane.md`
 **Source of truth:** the Claude clickthrough `Creative Studio - Write (Clickthrough).dc.html` (62 pages). Where this document and the clickthrough disagree, the clickthrough wins and this document is wrong.
 **Reconciled against:** `integration/studio-director` @ `9baa9ceb9` ([PR #19](https://github.com/khoapnt-vng/WePrompt/pull/19))
 
@@ -153,9 +153,21 @@ _Context for that decision._ Moving the conversation to the shell leaves Brief w
 
 Today Brief holds three things — the constraints (duration, aspect), the conversation, and the proposal cards. Under this design the conversation **and** the proposal cards move to the Director pane (§3, §4). What remains for Brief's work panel is a compact constraints row, which is close to an empty screen.
 
-### Still open — narrow widths
+### ✅ Narrow widths — settled 2026-08-12: collapse subsumes them, on the existing breakpoints
 
-Container min-width in the mock is 1340px, while `useStudioLayoutMode.ts` defines `inline > 1120`, `drawer 820–1120`, `compact ≤ 820`. Collapse may subsume this — a narrow window could simply collapse the Director pane — but that should be stated rather than assumed, and `compact` still needs a defined behaviour.
+Reuse `useStudioLayoutMode.ts`'s existing modes rather than inventing new ones — they are already built, tested and shipped:
+
+| Mode      | Width        | Side menu                 | Director pane                           |
+| --------- | ------------ | ------------------------- | --------------------------------------- |
+| `inline`  | `> 1120px`   | user preference           | user preference, **pushes** content     |
+| `drawer`  | `820–1120px` | user preference           | force-collapsed; expanding **overlays** |
+| `compact` | `≤ 820px`    | force-collapsed; overlays | force-collapsed; overlays               |
+
+🚨 **The load-bearing rule: auto-collapse must never overwrite the stored preference.** Width-driven collapse is a _presentation_ override, not a change of intent. If narrowing the window writes `collapsed` into storage, then widening it again leaves the pane shut and the user's choice is silently destroyed — worse than having no control. Keep the preference and the effective state as two separate values, and derive the effective one from `max(preference, width constraint)`.
+
+The mock's 1340px min-width is **not** adopted as a hard minimum. It is the width the mock happens to be drawn at; the app must remain usable below it.
+
+Overlay behaviour at `drawer` is not new work — `AssistantDock` already switches between inline and Arco `Drawer` presentation on exactly this breakpoint.
 
 ## 8. What this supersedes from work shipped 2026-08-11
 
