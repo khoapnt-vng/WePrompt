@@ -1,6 +1,6 @@
 # Creative Studio — the three-pane model
 
-**Drafted:** 2026-08-11 · **Status:** design of record — §6 settled 2026-08-12; §7 collapse and scope settled; Brief's work-panel content and narrow widths still open
+**Drafted:** 2026-08-11 · **Status:** design of record — all decisions settled 2026-08-12 except narrow-width behaviour; ready for an implementation plan
 **Source of truth:** the Claude clickthrough `Creative Studio - Write (Clickthrough).dc.html` (62 pages). Where this document and the clickthrough disagree, the clickthrough wins and this document is wrong.
 **Reconciled against:** `integration/studio-director` @ `9baa9ceb9` ([PR #19](https://github.com/khoapnt-vng/WePrompt/pull/19))
 
@@ -136,13 +136,22 @@ Since collapse is user-driven, the choice has to persist; a pane that reopens it
 
 **Produce and Review keep their current content this round.** They live inside the new shell and gain nothing else; they are fixed later. This is a deliberate deferral, not an oversight — Review in particular has an outstanding commission that says its cut strip is not to be built until drawn.
 
-### ⚠️ Still open — Brief's work-panel content
+### ✅ Brief's work-panel content — settled 2026-08-12: the brief text stays
 
-Moving the conversation to the shell leaves Brief without its main content, and the clickthrough never draws it: the mock shows `Brief ✓` as a completed step with Write active, so Brief's own work-area is undrawn.
+**Brief's work panel keeps the brief itself — the constraints row plus the brief text as an editable document.** Chosen on cost: it is the only option that is _net deletion_, and it is explicitly provisional, to be revisited once the shell is real.
+
+Measured against `BriefPhase.tsx` as it stands, all of it already exists — the brief `Input.TextArea` (`:179`, capped at `MAX_PROJECT_BRIEF_CHARS`, 16KB), the duration `InputNumber` (`:110`), the aspect `Select` (`:139`). Implementing this means **removing** the two things that move to the Director pane — `StudioConversationSurface` (`:168`) and `BriefProposalCard` — and keeping the rest. No new components.
+
+The alternatives cost more:
+
+- _Show the script as it stands_ needs a **read-only variant of the Write table**, which does not exist, and leaves two screens showing the same table.
+- _Drop Brief as a phase_ touches `studioPhaseRoute.ts`, `studioPhaseCompletion.ts`, `resolveStudioEntryPhase`, i18n keys and two test files that assert the four-phase set — and contradicts the §7 decision to treat the four phases as one app.
+
+Nothing here forecloses either alternative later: the brief textarea is independent of the script table, so swapping Brief's content is a local change.
+
+_Context for that decision._ Moving the conversation to the shell leaves Brief without its main content, and the clickthrough never draws it: the mock shows `Brief ✓` as a completed step with Write active, so Brief's own work-area is undrawn.
 
 Today Brief holds three things — the constraints (duration, aspect), the conversation, and the proposal cards. Under this design the conversation **and** the proposal cards move to the Director pane (§3, §4). What remains for Brief's work panel is a compact constraints row, which is close to an empty screen.
-
-Needs a decision. Plausible answers: Brief's work panel shows the script as it currently stands, including its empty state; or Brief shows the brief text itself as an editable document; or Brief stops being a work-area phase at all and becomes purely a conversation state, with the rail starting at Write.
 
 ### Still open — narrow widths
 
