@@ -337,14 +337,112 @@ handoff artifact.
 - [ ] Track 0 closed and Track 2 merged. No reasoning slice is admitted before the backend line
       and the pin are settled.
 
-### T5.1 Re-charter — the previous gate is dead
+### T5.1 Re-charter — **COMPLETED 2026-08-11. Verdict: ADMISSIBLE.**
 
-- [ ] **DR-3 no longer applies.** It planned a bump to upstream `v0.1.62` to extend lineage
-      27 → 37 for ten migrations including `project_bind`, `user_scope`, and
-      `conversation_fork`. **None of those exist on the chosen baseline** — verified by grep of
-      the `.sql` and `.rs` trees. Do not start against the old gate.
-- [ ] Re-charter against migrations `001…027` plus the epic's own prepared `038`/`039`, or
-      accept an explicit, costed upstream-merge burden.
+> **EPIC-003 is NOT blocked by the `001…027` baseline.** No plan step reads or writes anything
+> migrations `028–037` would have created, and `027_provider_model_settings.sql` is the correct
+> per-exact-model carrier the AionCore plan builds on. The migration cost is **mechanical**:
+> `038`/`039` become `028`/`029`.
+>
+> **But removing DR-3 exposed what it was masking.** The migration gap was never the real
+> blocker. Six conditions now gate the epic, none of them about migrations, and the first is
+> serious: **DR-2's discovery seam does not exist on the shipped backend.**
+
+**Struck:** DR-3 part 2 (the 27 → 37 pre-epic bump) is **dead — strike it, do not reschedule.**
+Its target was upstream `v0.1.62`, which is not our line. DR-3 part 1 survives intact. The
+baseline work it existed to gate is **already landed**: `ACCEPTED_AIONCORE_SOURCE_COMMIT` =
+`d4d8e877` (`prepare-aioncore.js:42`), `aioncoreVersion` = `v0.1.51`, lineage
+`{minimum 19, latest 27, entries 27}`. Nothing is left to bump.
+
+#### Blocking gates — replace DR-3 with these
+
+- [ ] **EG-1 (blocks all backend and positive-path slices) — re-decide the discovery seam.**
+      **Independently verified by the integrator:** `capabilities.reasoning`, `contract_version`,
+      `capability_revision`, and `floor_version` return **zero hits** across the release-line
+      tree. The `database.migration_lineage` boundary DR-2 names as its working precedent
+      **also does not exist** in AionCore. WePrompt's classifier for it
+      (`backendStartupFailure.ts`) is dead against the shipped binary and exercised only by the
+      debug injection at `index.ts:620`.
+      **DR-2's stated premise is FALSE and must be corrected in the same edit:** it claims
+      WePrompt makes no runtime call to AionCore. It does — `/health` exists
+      (`router/routes.rs:239`) and `packages/web-host/src/backend-launcher.ts` already polls it
+      and blocks readiness on it. Recommended seam is therefore **(a) extend `GET /health`** —
+      the only option where both sides of the wire already exist. Alternatives: (b) extend the
+      `AIONCORE_LISTENING` stdout JSON (launcher-private), (c) build a success-path emitter
+      (highest cost — the new-surface risk DR-2 claimed to avoid).
+      **Passes when:** the decision record names one seam and its literal payload, and a
+      WePrompt parser test pins that exact shape.
+- [ ] **EG-2 (blocking) — re-derive "one source for both floors", or drop the runtime floor from
+      contract v1.** Exactly one floor exists today and it is packaging-time only
+      (`minimumSupportedVersion: 19`). No AionCore build has ever emitted a runtime
+      `floorVersion`, and AionCore does not even produce `migration-lineage.json` — it is
+      injected by the packaging job. DR-2's guard clause has no second consumer to unify with.
+      **Two independently maintained floors drift, and a drifted floor fails OPEN** — the one
+      mode this design exists to exclude.
+- [ ] **EG-3 (blocks the AionRS slice) — establish ownership or de-scope.**
+      **Independently verified:** all six `aion-*` crates are pinned to
+      `git = "https://github.com/iOfficeAI/aionrs.git", tag = "v0.2.6"` (`Cargo.toml:56-61`) —
+      **a repository the team cannot merge into.** No VNG- or khoapnt-owned aionrs remote exists
+      anywhere in the repo or docs. DR-1's procedure is unexecutable against it. Compounding:
+      the AionRS plan's base is tag `v0.2.10` while we ship `v0.2.6` — a four-tag gap no banner
+      mentions. **Passes when:** the pin names a host we own, or the AionRS slice is explicitly
+      de-scoped and its dependants marked blocked.
+- [ ] **EG-4 (blocks positive-path claims) — re-base the capability matrix.**
+      `provider-reasoning-capability-matrix.md` records evidence bases AionRS `4cf42f2d` and
+      AionCore `81ef2589`; **neither is shipped**. It states no credentialed runtime probe was
+      run, so no row has runtime confirmation on any tree — and it is the verbatim fixture source
+      for all three plans, yet **received no staleness banner when they did**. Mitigating: the
+      per-model rows are grounded in provider documentation and are largely
+      baseline-independent; it is the stated bases and envelope shapes that need re-anchoring.
+- [ ] **EG-5 (blocks every backend slice; owned OUTSIDE this epic) — ship
+      `migration-lineage.json` inside the artifact.** No AionCore artifact on this line contains
+      it: `release.yml` archives the binary alone, while WePrompt requires the file **in-archive**
+      at four call sites in `prepare-aioncore.js` and errors without it. **Packaging of any new
+      backend is already broken before `028`/`029` exist.** The generator sits on an unmerged
+      Forge-Aion branch that neither repo tracks.
+- [ ] **EG-6 (cost gate, not correctness) — budget a release cut.** Migrations are compiled into
+      the binary, so `028`/`029` require a new tagged AionCore release before WePrompt can
+      consume them.
+
+#### Plan deltas — apply before execution
+
+- [ ] **PD-1 — Renumber.** `028` and `029` are genuinely free; the line ends at `027` with no
+      gaps. Because the line is VNG-owned we control merge order, so author them as concrete
+      numbers rather than candidates.
+- [ ] **PD-3 — Re-pin all three plans and one adjacent doc.** Each plan pins a base SHA and
+      orders "stop and replan" on mismatch — `81ef2589` (AionCore), `4cf42f2d` (AionRS). **These
+      are guaranteed to fire against `d4d8e877` and halt execution at step one.**
+- [ ] **PD-6 — Lineage regeneration is one atomic release step with zero tolerance.**
+      `prepare-aioncore.js:148-161` does `isDeepStrictEqual` against the accepted lineage and
+      throws an integrity error no caller may fall back from. Sequence it deliberately or the
+      release bricks.
+- [ ] **PD-7 — Add one independent recomputation test BEFORE regenerating.** Every existing
+      WePrompt lineage test is **fixture-echo** — it writes the module's own input as the
+      fixture. This is the BUG-040 pattern in the exact machinery about to change.
+- [ ] **PD-10 — Do not hang reasoning selections off `model_settings`.** Task 7 stores bounded
+      selection sets on assistant, conversation, and cron rows; `model_settings` is a column on
+      `providers`. Migration `029` is required.
+- [ ] **PD-11 — Reconcile the branch/tag mismatch before authoring migrations.** `d4d8e877` is
+      **not** an ancestor of `fix/mcp-oauth-discovery` (the branch the decision record names as
+      the backend line); it is contained in `security/pilot-hardening-d01-d06`. Both trees end at
+      `027`. Decide which branch the new migrations land on.
+- [ ] **PD-12 — Corrected execution order.** The plans' AionRS → AionCore → WePrompt order is
+      backend-first and both ends are blocked. Use instead: **WePrompt fail-closed slice (no
+      backend dependency, startable today) → EG-1 seam decision → EG-3 ownership → AionRS if
+      owned → AionCore emitter + migrations → EG-5 artifact → positive-path WePrompt.**
+
+#### Open questions for the owner
+
+- [ ] **EG-1:** which seam — extend `/health` (recommended), extend `AIONCORE_LISTENING`, or
+      build an emitter?
+- [ ] **EG-2:** does contract v1 carry a runtime floor at all? If "wire it later", drop it from
+      v1 rather than shipping a drift-prone second source.
+- [ ] **EG-3:** can the team obtain an owned AionRS fork? If not, the AionRS slice de-scopes.
+- [ ] **EG-5:** who lands the lineage generator into the AionCore release pipeline, and on which
+      branch? Hard prerequisite for every backend slice, owned outside this epic.
+- [ ] **PD-11:** `028`/`029` on `security/pilot-hardening-d01-d06` or `fix/mcp-oauth-discovery`?
+- [ ] **PD-10 downgrade policy:** is silent loss of a user's reasoning profile after a backend
+      downgrade acceptable? If not, it needs its own column and the migration count grows.
 
 ### T5.2 Carry forward what still holds
 

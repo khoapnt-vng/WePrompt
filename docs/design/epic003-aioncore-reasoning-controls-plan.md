@@ -7,7 +7,9 @@
 >
 > **That gate is dead.** The Sprint 3 release line is the VNG/GitHub `v0.1.51` tag, `d4d8e877`, which carries migrations `001...027` **only** - none of those ten exist on it (verified by grepping the `.sql` and `.rs` trees). Any step here that assumes them, or that assumes migration numbers above `037`, is targeting a baseline we do not ship.
 >
-> **Required first: the T5.1 re-charter** in [the Sprint 3 plan](../readme/sprint3-plan.md). Re-charter against `001...027` plus this epic's own prepared candidates, or accept an explicit, costed upstream-merge burden. Until that is done, the task-level detail below is not actionable, however precise it looks.
+> **The T5.1 re-charter is DONE (2026-08-11) — read it before this plan:** [Sprint 3 plan, T5.1](../readme/sprint3-plan.md). Verdict **ADMISSIBLE** — the epic is NOT blocked by the `001...027` baseline, and the migration cost is mechanical (`038`/`039` become `028`/`029`). **But six non-migration gates now apply (EG-1..EG-6), and the first is serious: DR-2's discovery seam does not exist on the shipped backend** (`capabilities.reasoning` returns zero hits), nor does the precedent DR-2 cites for it. DR-2's premise that WePrompt makes no runtime call to AionCore is also false — `/health` exists and is already polled.
+>
+> **This plan's own base pin will halt you at step one.** It pins a commit that is not what we ship and orders "stop and replan" on mismatch. See T5.1 PD-3. Execution order is also corrected there (PD-12): the WePrompt fail-closed slice is the only one startable today.
 >
 > **What still holds:** DR-2 - contract discovery rides the startup boundary as a success-path `capabilities.reasoning` stage, absent => `unsupported`, one source for both floors. DR-1 changes only in that pins now reference the GitHub release line rather than upstream. See [the corrected release-line record](aioncore-sprint3-release-line.md).
 >
