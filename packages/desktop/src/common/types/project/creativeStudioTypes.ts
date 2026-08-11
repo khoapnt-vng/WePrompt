@@ -113,6 +113,8 @@ export type StudioCancellationPolicy = 'none' | 'queued_only' | 'queued_and_runn
 /** What a job's output becomes once it lands: the scene's finished take, or its supporting reference plate. */
 export type StudioOutputRole = 'take' | 'reference';
 
+export const STUDIO_REFERENCE_PROMPT_MAX_LENGTH = 4 * 1024;
+
 export type StudioJob = {
   id: string;
   projectId: string;

@@ -8,20 +8,21 @@ import { randomUUID } from 'node:crypto';
 import { promises as dns } from 'node:dns';
 import { createReadStream, promises as fs } from 'node:fs';
 import type { IProvider, TProviderWithModel } from '@/common/config/storage';
-import type {
-  StudioJob,
-  StudioCancellationPolicy,
-  StudioJobError,
-  StudioJobErrorCode,
-  StudioJobRequest,
-  StudioMediaKind,
-  StudioOutputRole,
-  StudioProject,
-  StudioProviderAdapterId,
-  StudioProviderRef,
-  StudioRetryDownloadRequest,
-  StudioRetryJobRequest,
-  StudioSubmitScenesRequest,
+import {
+  STUDIO_REFERENCE_PROMPT_MAX_LENGTH,
+  type StudioCancellationPolicy,
+  type StudioJob,
+  type StudioJobError,
+  type StudioJobErrorCode,
+  type StudioJobRequest,
+  type StudioMediaKind,
+  type StudioOutputRole,
+  type StudioProject,
+  type StudioProviderAdapterId,
+  type StudioProviderRef,
+  type StudioRetryDownloadRequest,
+  type StudioRetryJobRequest,
+  type StudioSubmitScenesRequest,
 } from '@/common/types/project/creativeStudioTypes';
 import { jobOutputRole } from '@/common/types/project/creativeStudioOutputRole';
 import {
@@ -130,8 +131,8 @@ type PreparedSubmission = ExecutionContext & {
  * whatever the scene's own media kind, and carries its own prompt instead of the scene's.
  */
 type RequestedOutput = {
-  role: StudioOutputRole;
-  referencePrompt?: string;
+  readonly role: StudioOutputRole;
+  readonly referencePrompt?: string;
 };
 
 const TAKE_OUTPUT: RequestedOutput = { role: 'take' };
@@ -530,8 +531,8 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     project: StudioProject,
     sceneId: string,
     route: StudioResolvedSceneRouteSnapshot,
-    catalogVersion?: string,
-    output: RequestedOutput = TAKE_OUTPUT
+    output: RequestedOutput,
+    catalogVersion?: string
   ): Promise<PreparedSubmission> => {
     const scene = project.scenes[sceneId];
     if (!scene || route.sceneId !== sceneId) {
@@ -1204,6 +1205,8 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     if (disposed) throw new StudioJobManagerError('invalid_request');
     const project = await requireExpectedProject(input.projectId, input.expectedRevision);
     if (disposed) throw new StudioJobManagerError('invalid_request');
+    const referencePrompt =
+      typeof input.referencePrompt === 'string' ? input.referencePrompt.trim() : input.referencePrompt;
     if (
       !Array.isArray(input.sceneIds) ||
       input.sceneIds.length < 1 ||
@@ -1216,16 +1219,17 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       input.catalogVersion.length < 1 ||
       input.catalogVersion.length > 256 ||
       (input.outputRole !== undefined && input.outputRole !== 'take' && input.outputRole !== 'reference') ||
-      (input.referencePrompt !== undefined &&
-        (typeof input.referencePrompt !== 'string' ||
-          input.referencePrompt.length > 4 * 1024 ||
+      (input.outputRole === 'reference' && (typeof referencePrompt !== 'string' || referencePrompt.length === 0)) ||
+      (referencePrompt !== undefined &&
+        (typeof referencePrompt !== 'string' ||
+          referencePrompt.length > STUDIO_REFERENCE_PROMPT_MAX_LENGTH ||
           input.outputRole !== 'reference'))
     ) {
       invalidRequest();
     }
     const requestedOutput: RequestedOutput = {
-      role: input.outputRole === 'reference' ? 'reference' : 'take',
-      ...(input.referencePrompt === undefined ? {} : { referencePrompt: input.referencePrompt }),
+      role: input.outputRole ?? 'take',
+      ...(referencePrompt === undefined ? {} : { referencePrompt }),
     };
     const routeByScene = new Map<string, StudioResolvedSceneRouteSnapshot>();
     for (const route of input.routes) {
@@ -1261,7 +1265,8 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
           return job?.projectId === project.id && job.sceneId === sceneId ? [job] : [];
         }) ?? [];
       // Duplicate-charge lineage is per (scene, output role): an unresolved take says nothing
-      // about whether a reference plate was already paid for, and the reverse holds too.
+      // about whether a reference plate was already paid for, and the reverse holds too. The
+      // cross-role request is still refused as busy while the unresolved job remains non-terminal.
       const hasUnresolvedUnknownSubmission = sceneJobs.some(
         (job) =>
           job.status === 'needs_attention' &&
@@ -1274,7 +1279,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       if (scene?.reviewState === 'generating' || sceneJobs.some((job) => !TERMINAL_STATUSES.has(job.status))) {
         throw new StudioJobManagerError('busy');
       }
-      prepared.push(await resolveProvider(project, sceneId, route, input.catalogVersion, requestedOutput));
+      prepared.push(await resolveProvider(project, sceneId, route, requestedOutput, input.catalogVersion));
     }
     if (disposed) throw new StudioJobManagerError('invalid_request');
     const persisted = await persistPreparedJobs(project, prepared, input.expectedRevision);
@@ -1414,7 +1419,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     if (!scene) throw new CreativeStudioStoreError('not_found', 'Studio scene not found');
     // Retry rebuilds the request from the scene, which only ever reconstructs a take: the
     // reference prompt is not on the durable record. Refuse rather than charge for the wrong output.
-    if (jobOutputRole(previous) !== 'take') throw new StudioJobManagerError('unsupported');
+    if (jobOutputRole(previous) !== 'take') throw new StudioJobManagerError('invalid_request');
     const sceneJobs = scene.jobIds.flatMap((jobId) => {
       const job = project.jobs[jobId];
       return job?.projectId === project.id && job.sceneId === scene.id ? [job] : [];
@@ -1475,7 +1480,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       ...previous.provider,
       kind: scene.mediaKind,
     } satisfies StudioResolvedSceneRouteSnapshot;
-    const prepared = await resolveProvider(project, scene.id, route);
+    const prepared = await resolveProvider(project, scene.id, route, TAKE_OUTPUT);
     if (disposed) throw new StudioJobManagerError('invalid_request');
     const persisted = await persistPreparedJobs(project, [prepared], input.expectedRevision, {
       retryOfJobId: previous.id,

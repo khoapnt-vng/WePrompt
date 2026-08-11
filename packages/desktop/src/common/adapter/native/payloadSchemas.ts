@@ -10,6 +10,7 @@ import {
   OFFICE_ARTIFACT_MAX_SELECTION_MESSAGE_BYTES,
 } from '../../types/office/artifactEditor';
 import { PRESENTATION_RUN_LIMITS } from '../../types/office/presentationRunPolicy';
+import { STUDIO_REFERENCE_PROMPT_MAX_LENGTH } from '../../types/project/creativeStudioTypes';
 import type { NativeBridgeProviderKey, RendererBridgeQueryKey } from './constants';
 
 const MAX_PATH_LENGTH = 4096;
@@ -354,12 +355,7 @@ const studioSubmitScenesSchema = z
     catalogVersion: z.string().regex(/^[a-f0-9]{16}$/),
     routes: z.array(studioSceneRouteSnapshotSchema).min(1).max(24),
     outputRole: z.enum(['take', 'reference']).optional(),
-    referencePrompt: z
-      .string()
-      .trim()
-      .min(1)
-      .max(4 * 1024)
-      .optional(),
+    referencePrompt: z.string().trim().min(1).max(STUDIO_REFERENCE_PROMPT_MAX_LENGTH).optional(),
   })
   .strict()
   .superRefine((input, context) => {

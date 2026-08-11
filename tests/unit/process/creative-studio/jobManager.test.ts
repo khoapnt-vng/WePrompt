@@ -467,6 +467,7 @@ describe('StudioJobManager durable submission', () => {
     });
 
     expect(jobs).toMatchObject([{ id: 'job_1', idempotencyKey: 'key_1', status: 'queued_local' }]);
+    expect((await store.getProject(project.id))!.jobs.job_1).not.toHaveProperty('outputRole');
     await waitFor(() => expect(observedProject?.jobs.job_1.status).toBe('submitting'));
     expect(observedProject?.scenes.scene_1.jobIds).toContain('job_1');
     submission.reject(new Error('transport interrupted'));
@@ -1681,7 +1682,7 @@ describe('StudioJobManager reference output routing', () => {
   });
 
   const referenceProvider: IProvider = { ...provider, models: ['image-model', 'video-model'] };
-  const imageRoute: StudioResolvedSceneRouteSnapshot = { ...route };
+  const imageRoute: StudioResolvedSceneRouteSnapshot = route;
   const videoRoute: StudioResolvedSceneRouteSnapshot = {
     sceneId: 'scene_1',
     providerId: provider.id,
@@ -1690,7 +1691,7 @@ describe('StudioJobManager reference output routing', () => {
     kind: 'video',
   };
 
-  /** A video scene long enough that only an image route's wider duration window admits it. */
+  /** Uses a non-default duration so the request assertion proves the scene duration is forwarded. */
   const videoScene = (): StudioScene =>
     scene({ id: 'scene_1', mediaKind: 'video', durationSeconds: 8, visualPrompt: 'video_prompt' });
 
@@ -1758,7 +1759,10 @@ describe('StudioJobManager reference output routing', () => {
       durationSeconds: 8,
     });
     await waitFor(async () =>
-      expect((await harness.store.getProject(harness.project.id))?.jobs.job_1.status).toBe('failed')
+      expect((await harness.store.getProject(harness.project.id))?.jobs.job_1).toMatchObject({
+        status: 'failed',
+        error: { code: 'no_output' },
+      })
     );
   });
 
@@ -1817,7 +1821,10 @@ describe('StudioJobManager reference output routing', () => {
     expect(submit.mock.calls[0]?.[0]).not.toHaveProperty('firstFrame');
     expect(resolveProviderInput).not.toHaveBeenCalled();
     await waitFor(async () =>
-      expect((await harness.store.getProject(harness.project.id))?.jobs.job_1.status).toBe('failed')
+      expect((await harness.store.getProject(harness.project.id))?.jobs.job_1).toMatchObject({
+        status: 'failed',
+        error: { code: 'no_output' },
+      })
     );
   });
 
@@ -1826,7 +1833,30 @@ describe('StudioJobManager reference output routing', () => {
     { label: 'blank', referencePrompt: '   ' },
   ])('a reference job with a $label referencePrompt is rejected', async ({ referencePrompt }) => {
     const submit = vi.fn();
+    const listGenerationRoutes = vi.fn(async () => catalog([imageRoute, videoRoute]));
+    const harness = await createReferenceHarness(submit, { catalog: listGenerationRoutes });
+
+    await expect(
+      harness.manager.submitScenes({
+        projectId: harness.project.id,
+        expectedRevision: harness.project.revision,
+        sceneIds: ['scene_1'],
+        routes: [imageRoute],
+        catalogVersion: 'stale_catalog',
+        outputRole: 'reference',
+        ...(referencePrompt === undefined ? {} : { referencePrompt }),
+      })
+    ).rejects.toMatchObject({ code: 'invalid_request' });
+
+    expect(submit).not.toHaveBeenCalled();
+    expect(listGenerationRoutes).not.toHaveBeenCalled();
+    expect((await harness.store.getProject(harness.project.id))?.jobs).toEqual({});
+  });
+
+  it('applies the reference prompt limit after trimming', async () => {
+    const submit = vi.fn(async () => ({ kind: 'complete', outputs: [] }));
     const harness = await createReferenceHarness(submit);
+    const referencePrompt = `${'a'.repeat(4090)}${' '.repeat(10)}`;
 
     await expect(
       harness.manager.submitScenes({
@@ -1836,12 +1866,18 @@ describe('StudioJobManager reference output routing', () => {
         routes: [imageRoute],
         catalogVersion: 'catalog_1',
         outputRole: 'reference',
-        ...(referencePrompt === undefined ? {} : { referencePrompt }),
+        referencePrompt,
       })
-    ).rejects.toMatchObject({ code: 'invalid_request' });
+    ).resolves.toMatchObject([{ id: 'job_1', outputRole: 'reference' }]);
 
-    expect(submit).not.toHaveBeenCalled();
-    expect((await harness.store.getProject(harness.project.id))?.jobs).toEqual({});
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    expect(submit.mock.calls[0]?.[0].prompt).toBe('a'.repeat(4090));
+    await waitFor(async () =>
+      expect((await harness.store.getProject(harness.project.id))?.jobs.job_1).toMatchObject({
+        status: 'failed',
+        error: { code: 'no_output' },
+      })
+    );
   });
 
   it('reference lineage does not cross-fire take lineage', async () => {
@@ -1932,7 +1968,7 @@ describe('StudioJobManager reference output routing', () => {
         jobId: 'job_reference',
         expectedRevision: seeded.revision,
       })
-    ).rejects.toMatchObject({ code: 'unsupported' });
+    ).rejects.toMatchObject({ code: 'invalid_request' });
 
     expect(submit).not.toHaveBeenCalled();
     expect(Object.keys((await harness.store.getProject(harness.project.id))!.jobs)).toEqual(['job_reference']);
@@ -1940,6 +1976,68 @@ describe('StudioJobManager reference output routing', () => {
 });
 
 describe('StudioJobManager scheduling', () => {
+  it('uses image semaphore capacity for reference jobs on video scenes', async () => {
+    const scenes = Array.from({ length: 3 }, (_, index) =>
+      scene({
+        id: `scene_${index + 1}`,
+        title: `Scene ${index + 1}`,
+        visualPrompt: `video_prompt_${index + 1}`,
+        mediaKind: 'video',
+      })
+    );
+    const routes = scenes.map(
+      (candidate): StudioResolvedSceneRouteSnapshot => ({
+        sceneId: candidate.id,
+        providerId: provider.id,
+        adapterId: 'weprompt-image-v1',
+        model: 'image-model',
+        kind: 'image',
+      })
+    );
+    const gates: Array<Deferred<ProviderSubmitResult>> = [];
+    let active = 0;
+    let maximumActive = 0;
+    const adapter = controllableAdapter('weprompt-image-v1', {
+      submit: async () => {
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        const gate = deferred<ProviderSubmitResult>();
+        gates.push(gate);
+        try {
+          return await gate.promise;
+        } finally {
+          active -= 1;
+        }
+      },
+    });
+    const harness = await createHarness(adapter, {
+      scenes,
+      routes,
+      jobIds: ['job_1', 'job_2', 'job_3'],
+      idempotencyKeys: ['key_1', 'key_2', 'key_3'],
+    });
+
+    await harness.manager.submitScenes({
+      projectId: harness.project.id,
+      expectedRevision: harness.project.revision,
+      sceneIds: scenes.map((candidate) => candidate.id),
+      routes,
+      catalogVersion: 'catalog_1',
+      outputRole: 'reference',
+      referencePrompt: 'A shared reference plate',
+    });
+
+    await waitFor(() => expect(gates).toHaveLength(2));
+    gates[0]!.reject(Object.assign(new Error('provider failed'), { code: 'no_output' }));
+    await waitFor(() => expect(gates).toHaveLength(3));
+    expect(maximumActive).toBe(2);
+    for (const gate of gates) gate.reject(Object.assign(new Error('provider failed'), { code: 'no_output' }));
+    await waitFor(async () => {
+      const current = await harness.store.getProject(harness.project.id);
+      expect(Object.values(current?.jobs ?? {}).every((job) => job.status === 'failed')).toBe(true);
+    });
+  });
+
   it.each([
     { kind: 'image' as const, adapterId: 'weprompt-image-v1' as const, capacity: 2, count: 3 },
     { kind: 'video' as const, adapterId: 'weprompt-media-gateway-v1' as const, capacity: 1, count: 2 },
