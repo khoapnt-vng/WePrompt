@@ -6,6 +6,7 @@
 
 import { ipcBridge } from '@/common';
 import type { StudioProposal, StudioRendererProject } from '@/common/types/project/creativeStudioTypes';
+import { normaliseStudioProposalDiff } from '@/common/types/project/creativeStudioProposalDiff';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 export type UseStudioProjectResult = {
@@ -110,7 +111,8 @@ export const useStudioProject = (
         setProposalErrorMessageKey(result.error.messageKey);
         return;
       }
-      setProposals(result.data);
+      // A proposal recorded before main computed diffs carries none, so the field is optional on the wire.
+      setProposals(result.data.map((proposal) => ({ ...proposal, diff: normaliseStudioProposalDiff(proposal.diff) })));
       setProposalErrorMessageKey(null);
     } catch {
       if (generationRef.current === generation && latestProposalRequestRef.current === request) {

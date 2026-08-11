@@ -277,6 +277,21 @@ export type StudioProposalPayload = {
   scenes: Record<string, StudioEditableScene>;
 };
 
+export type StudioEditableSceneField = keyof StudioEditableScene;
+
+/** The fields one shot would have rewritten, identified by its 1-based position in the proposed order. */
+export type StudioProposalSceneChange = {
+  position: number;
+  fields: StudioEditableSceneField[];
+};
+
+/** What a proposal would change, matched by shot position. Main computes it; nothing else may claim it. */
+export type StudioProposalDiff = {
+  added: number;
+  removed: number;
+  changed: StudioProposalSceneChange[];
+};
+
 /** Renderer-safe durable proposal state derived from an immutable record and optional decision marker. */
 export type StudioProposal = {
   schemaVersion: 1;
@@ -287,6 +302,13 @@ export type StudioProposal = {
   payload: StudioProposalPayload;
   createdAt: string;
   decidedAt: string | null;
+  /**
+   * Frozen at the moment main first saw this proposal against the project it was drafted from, and never
+   * recomputed — a diff recomputed after acceptance reads as zero changes. Absent means main never observed
+   * the proposal while the project still stood at `baseRevision`, so the truth is unknowable, not empty.
+   * The durable record never carries it: `validateProposalRecord` exact-matches its keys.
+   */
+  diff?: StudioProposalDiff;
 };
 
 export type StudioRecordProposalInput = {

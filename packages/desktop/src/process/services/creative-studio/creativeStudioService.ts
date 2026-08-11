@@ -18,6 +18,7 @@ import type {
   StudioProjectSummary,
   StudioProposal,
   StudioProposalAcceptance,
+  StudioProposalDiff,
   StudioProposalPayload,
   StudioProposalRequest,
   StudioReferenceRequest,
@@ -65,6 +66,7 @@ import type { ISessionMcpServer } from '@/common/config/storage';
 import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
 import { isCanonicalStudioGeneratedTake } from '@/common/types/project/creativeStudioCanonicalTake';
 import { requestedMediaKind } from '@/common/types/project/creativeStudioOutputRole';
+import { computeStudioProposalDiff } from '@/common/types/project/creativeStudioProposalDiff';
 import { BUILTIN_STUDIO_NAME } from '@process/resources/builtinMcp/constants';
 import {
   CreativeStudioStoreError,
@@ -765,7 +767,7 @@ const toRendererProject = (project: StudioProject): StudioRendererProject => {
   };
 };
 
-const toRendererProposal = (proposal: StudioProposal): StudioProposal => ({
+const toRendererProposal = (proposal: StudioProposal, diff?: StudioProposalDiff): StudioProposal => ({
   schemaVersion: proposal.schemaVersion,
   id: proposal.id,
   projectId: proposal.projectId,
@@ -792,6 +794,15 @@ const toRendererProposal = (proposal: StudioProposal): StudioProposal => ({
   },
   createdAt: proposal.createdAt,
   decidedAt: proposal.decidedAt,
+  ...(diff === undefined
+    ? {}
+    : {
+        diff: {
+          added: diff.added,
+          removed: diff.removed,
+          changed: diff.changed.map((change) => ({ position: change.position, fields: [...change.fields] })),
+        },
+      }),
 });
 
 const applyProposalPayload = (project: StudioProject, payload: StudioProposalPayload): StudioProject => {
@@ -943,6 +954,28 @@ type BuiltStudioCatalog = {
 export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): CreativeStudioService => {
   const createSceneId = deps.createSceneId ?? randomUUID;
   const createConnectionId = deps.createConnectionId ?? randomUUID;
+  /**
+   * Proposal diffs frozen at first observation, keyed `${projectId}:${proposalId}`. The subprocess that
+   * drafts a proposal is the agent's own tool, so it never gets to state what it changed; main computes
+   * that against the project the proposal was drafted from. Recomputing later is not an option — once a
+   * proposal is applied the project equals it, and the diff would collapse to nothing. Entries are pruned
+   * against each project listing, so the map tracks the durable proposal ledger rather than growing with it.
+   */
+  const proposalDiffs = new Map<string, StudioProposalDiff>();
+  const proposalDiffKey = (proposal: StudioProposal): string => `${proposal.projectId}:${proposal.id}`;
+  /** A positional diff is only truthful while the project still stands at the revision it was drafted from. */
+  const rememberProposalDiff = (
+    project: StudioProject | null,
+    proposal: StudioProposal
+  ): StudioProposalDiff | undefined => {
+    const key = proposalDiffKey(proposal);
+    const frozen = proposalDiffs.get(key);
+    if (frozen !== undefined) return frozen;
+    if (project === null || project.revision !== proposal.baseRevision) return undefined;
+    const computed = computeStudioProposalDiff(project, proposal.payload);
+    proposalDiffs.set(key, computed);
+    return computed;
+  };
   const notify = (project: StudioProject): StudioRendererProject => {
     deps.onProjectUpdated(project.id);
     return toRendererProject(project);
@@ -1130,7 +1163,13 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
 
     async listProposals(input: StudioProjectRequest): Promise<StudioProposal[]> {
       assertSafeId(input.projectId, 'project id');
-      return (await deps.store.listProposals(input.projectId)).map(toRendererProposal);
+      const project = await deps.store.getProject(input.projectId);
+      const proposals = await deps.store.listProposals(input.projectId);
+      const live = new Set(proposals.map(proposalDiffKey));
+      for (const key of proposalDiffs.keys()) {
+        if (key.startsWith(`${input.projectId}:`) && !live.has(key)) proposalDiffs.delete(key);
+      }
+      return proposals.map((proposal) => toRendererProposal(proposal, rememberProposalDiff(project, proposal)));
     },
 
     async listPendingReferenceRequests(input: StudioProjectRequest): Promise<StudioReferenceRequest[]> {
@@ -1158,7 +1197,8 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
       const accepted = await deps.store.acceptProposal(input.projectId, input.proposalId, applyProposalPayload);
       if (accepted.applied) deps.onProjectUpdated(accepted.project.id);
       return {
-        proposal: toRendererProposal(accepted.proposal),
+        // Only the frozen diff: the applied project now equals the proposal, so recomputing here reads as no change.
+        proposal: toRendererProposal(accepted.proposal, proposalDiffs.get(proposalDiffKey(accepted.proposal))),
         project: toRendererProject(accepted.project),
       };
     },
@@ -1166,7 +1206,8 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
     async rejectProposal(input: StudioProposalRequest): Promise<StudioProposal> {
       assertSafeId(input.projectId, 'project id');
       assertSafeId(input.proposalId, 'proposal id');
-      return toRendererProposal(await deps.store.rejectProposal(input.projectId, input.proposalId));
+      const rejected = await deps.store.rejectProposal(input.projectId, input.proposalId);
+      return toRendererProposal(rejected, proposalDiffs.get(proposalDiffKey(rejected)));
     },
 
     async proposeStoryboard(input: ProposeStudioStoryboardInput): Promise<StudioRendererProject> {

@@ -10,24 +10,29 @@ import { useTranslation } from 'react-i18next';
 
 import type {
   StudioCommandResult,
-  StudioEditableScene,
+  StudioEditableSceneField,
   StudioProposal,
+  StudioProposalDiff,
   StudioProposalAcceptance,
   StudioProposalRequest,
   StudioRendererProject,
 } from '@/common/types/project/creativeStudioTypes';
+import {
+  computeStudioProposalDiff,
+  normaliseStudioProposalDiff,
+} from '@/common/types/project/creativeStudioProposalDiff';
 import type { UseStoryboardEditorResult } from '@/renderer/pages/studio/hooks/useStoryboardEditor';
 
-const EDITABLE_SCENE_FIELDS = [
-  'title',
-  'purpose',
-  'visualPrompt',
-  'narration',
-  'onScreenText',
-  'mediaKind',
-  'durationSeconds',
-  'referenceAssetId',
-] as const satisfies readonly (keyof StudioEditableScene)[];
+const SCENE_FIELD_LABEL_KEYS = {
+  title: 'conversation.creativeStudio.brief.proposalField.title',
+  purpose: 'conversation.creativeStudio.brief.proposalField.purpose',
+  visualPrompt: 'conversation.creativeStudio.brief.proposalField.visualPrompt',
+  narration: 'conversation.creativeStudio.brief.proposalField.narration',
+  onScreenText: 'conversation.creativeStudio.brief.proposalField.onScreenText',
+  mediaKind: 'conversation.creativeStudio.brief.proposalField.mediaKind',
+  durationSeconds: 'conversation.creativeStudio.brief.proposalField.durationSeconds',
+  referenceAssetId: 'conversation.creativeStudio.brief.proposalField.referenceAssetId',
+} as const satisfies Record<StudioEditableSceneField, string>;
 
 export type BriefProposalAction = (
   request: StudioProposalRequest
@@ -45,20 +50,16 @@ export type BriefProposalCardProps = {
   onRepropose: () => Promise<void>;
 };
 
-const sceneChanged = (current: StudioEditableScene, proposed: StudioEditableScene): boolean =>
-  EDITABLE_SCENE_FIELDS.some((field) => current[field] !== proposed[field]);
-
-const proposalDiff = (project: StudioRendererProject, proposal: StudioProposal) => {
-  const proposedIds = new Set(proposal.payload.sceneOrder);
-  const currentIds = new Set(project.sceneOrder);
-  const added = proposal.payload.sceneOrder.filter((sceneId) => !currentIds.has(sceneId)).length;
-  const removed = project.sceneOrder.filter((sceneId) => !proposedIds.has(sceneId)).length;
-  const changed = proposal.payload.sceneOrder.filter((sceneId) => {
-    const current = project.scenes[sceneId];
-    const proposed = proposal.payload.scenes[sceneId];
-    return current !== undefined && proposed !== undefined && sceneChanged(current, proposed);
-  }).length;
-  return { added, removed, changed };
+/**
+ * Main freezes a proposal's diff against the project it was drafted from, because a diff recomputed after
+ * acceptance reads as no change at all. Null means the truth is not knowable here: a record written before
+ * main froze anything, seen only after the script had already moved past the revision it was drafted from.
+ */
+const resolveProposalDiff = (project: StudioRendererProject, proposal: StudioProposal): StudioProposalDiff | null => {
+  const frozen = normaliseStudioProposalDiff(proposal.diff);
+  if (frozen !== undefined) return frozen;
+  if (project.revision !== proposal.baseRevision) return null;
+  return computeStudioProposalDiff(project, proposal.payload);
 };
 
 export const BriefProposalCard: React.FC<BriefProposalCardProps> = ({
@@ -74,7 +75,9 @@ export const BriefProposalCard: React.FC<BriefProposalCardProps> = ({
   const [pending, setPending] = useState(false);
   const [messageKey, setMessageKey] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
-  const diff = useMemo(() => proposalDiff(project, proposal), [project, proposal]);
+  const diff = useMemo(() => resolveProposalDiff(project, proposal), [project, proposal]);
+  // Translator-owned, because the enumeration comma is not ", " everywhere (zh and ja want "、").
+  const fieldSeparator = t('conversation.creativeStudio.brief.proposalFieldSeparator');
   const request = { projectId: project.id, proposalId: proposal.id };
 
   const accept = async (): Promise<void> => {
@@ -134,7 +137,33 @@ export const BriefProposalCard: React.FC<BriefProposalCardProps> = ({
           createdAt: new Date(proposal.createdAt).toLocaleString(),
         })}
       </p>
-      <p>{t('conversation.creativeStudio.brief.proposalSummary', diff)}</p>
+      {diff === null ? (
+        <p>{t('conversation.creativeStudio.brief.proposalDiffUnavailable')}</p>
+      ) : diff.added === 0 && diff.removed === 0 && diff.changed.length === 0 ? (
+        <p>{t('conversation.creativeStudio.brief.proposalNoChanges')}</p>
+      ) : (
+        <>
+          <p>
+            {t('conversation.creativeStudio.brief.proposalSummary', {
+              added: diff.added,
+              removed: diff.removed,
+              changed: diff.changed.length,
+            })}
+          </p>
+          {diff.changed.length > 0 && (
+            <ul>
+              {diff.changed.map((change) => (
+                <li key={change.position}>
+                  {t('conversation.creativeStudio.brief.proposalSceneChange', {
+                    position: change.position,
+                    fields: change.fields.map((field) => t(SCENE_FIELD_LABEL_KEYS[field])).join(fieldSeparator),
+                  })}
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
       <ul>
         {proposal.payload.sceneOrder.map((sceneId) => (
           <li key={sceneId}>{proposal.payload.scenes[sceneId]?.title ?? sceneId}</li>

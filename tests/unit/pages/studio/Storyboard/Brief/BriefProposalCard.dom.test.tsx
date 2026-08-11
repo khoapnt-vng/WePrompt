@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
   StudioCommandResult,
+  StudioEditableScene,
   StudioProposal,
   StudioProposalAcceptance,
   StudioRendererProject,
@@ -17,14 +18,43 @@ import type {
 import { BriefProposalCard } from '@renderer/pages/studio/components/PhaseShell/phases/brief/BriefProposalCard';
 import type { UseStoryboardEditorResult } from '@renderer/pages/studio/hooks/useStoryboardEditor';
 
+const FIELD_SEPARATOR_KEY = 'conversation.creativeStudio.brief.proposalFieldSeparator';
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string, values?: Record<string, number>) =>
-      values ? `${key}:${values.added}/${values.removed}/${values.changed}` : key,
+    // The separator resolves to its real en-US value; every other key echoes so assertions read as keys.
+    t: (key: string, values?: Record<string, unknown>) =>
+      key === FIELD_SEPARATOR_KEY
+        ? ', '
+        : values
+          ? `${key}(${Object.entries(values)
+              .map(([name, value]) => `${name}=${String(value)}`)
+              .join(',')})`
+          : key,
   }),
 }));
 
-const project = (): StudioRendererProject => ({
+const summary = (added: number, removed: number, changed: number): string =>
+  `conversation.creativeStudio.brief.proposalSummary(added=${added},removed=${removed},changed=${changed})`;
+
+const sceneChange = (position: number, ...fields: string[]): string =>
+  `conversation.creativeStudio.brief.proposalSceneChange(position=${position},fields=${fields
+    .map((field) => `conversation.creativeStudio.brief.proposalField.${field}`)
+    .join(', ')})`;
+
+const editableScene = (overrides: Partial<StudioEditableScene> = {}): StudioEditableScene => ({
+  title: 'Opening',
+  purpose: 'Introduce',
+  visualPrompt: 'A sunrise',
+  narration: 'Old narration',
+  onScreenText: '',
+  mediaKind: 'image',
+  durationSeconds: 10,
+  referenceAssetId: null,
+  ...overrides,
+});
+
+const project = (overrides: Partial<StudioRendererProject> = {}): StudioRendererProject => ({
   schemaVersion: 1,
   revision: 4,
   id: 'project-1',
@@ -37,14 +67,7 @@ const project = (): StudioRendererProject => ({
   scenes: {
     'scene-1': {
       id: 'scene-1',
-      title: 'Opening',
-      purpose: 'Introduce',
-      visualPrompt: 'A sunrise',
-      narration: 'Old narration',
-      onScreenText: '',
-      mediaKind: 'image',
-      durationSeconds: 10,
-      referenceAssetId: null,
+      ...editableScene(),
       selectedAssetId: null,
       assetIds: [],
       jobIds: [],
@@ -56,9 +79,14 @@ const project = (): StudioRendererProject => ({
   routing: { storyboard: null, image: null, video: null },
   createdAt: '2026-08-11T00:00:00.000Z',
   updatedAt: '2026-08-11T00:00:00.000Z',
+  ...overrides,
 });
 
-const proposal = (): StudioProposal => ({
+/**
+ * `propose_storyboard` is a whole-script replace that mints fresh scene ids on every call, so a redraft
+ * never shares an id with the script it redrafts. This fixture is that real shape, not a stable-id ideal.
+ */
+const proposal = (overrides: Partial<StudioProposal> = {}): StudioProposal => ({
   schemaVersion: 1,
   id: 'proposal-1',
   projectId: 'project-1',
@@ -66,32 +94,12 @@ const proposal = (): StudioProposal => ({
   baseRevision: 4,
   payload: {
     kind: 'replace_storyboard',
-    sceneOrder: ['scene-1', 'scene-2'],
-    scenes: {
-      'scene-1': {
-        title: 'Opening',
-        purpose: 'Introduce',
-        visualPrompt: 'A sunrise',
-        narration: 'New narration',
-        onScreenText: '',
-        mediaKind: 'image',
-        durationSeconds: 10,
-        referenceAssetId: null,
-      },
-      'scene-2': {
-        title: 'Finale',
-        purpose: 'Close',
-        visualPrompt: 'Product hero',
-        narration: '',
-        onScreenText: 'Available now',
-        mediaKind: 'image',
-        durationSeconds: 5,
-        referenceAssetId: null,
-      },
-    },
+    sceneOrder: ['proposed-1'],
+    scenes: { 'proposed-1': editableScene({ narration: 'New narration' }) },
   },
   createdAt: '2026-08-11T01:00:00.000Z',
   decidedAt: null,
+  ...overrides,
 });
 
 const success = <T,>(data: T): StudioCommandResult<T> => ({ ok: true, data });
@@ -111,40 +119,130 @@ describe('BriefProposalCard', () => {
   const rejectProposal = vi.fn(async () => success({ ...proposal(), status: 'rejected' as const }));
   const repropose = vi.fn(async () => {});
 
+  const renderCard = (overrides: { project?: StudioRendererProject; proposal?: StudioProposal } = {}): void => {
+    render(
+      <BriefProposalCard
+        project={overrides.project ?? project()}
+        proposal={overrides.proposal ?? proposal()}
+        editor={editor()}
+        acceptProposal={acceptProposal}
+        rejectProposal={rejectProposal}
+        onRepropose={repropose}
+      />
+    );
+  };
+
   beforeEach(() => {
     acceptProposal.mockClear();
     rejectProposal.mockClear();
     repropose.mockClear();
   });
 
-  it('renders the change summary against the current script', () => {
-    render(
-      <BriefProposalCard
-        project={project()}
-        proposal={proposal()}
-        editor={editor()}
-        acceptProposal={acceptProposal}
-        rejectProposal={rejectProposal}
-        onRepropose={repropose}
-      />
-    );
+  it('names the one field a same-length redraft rewrites instead of reporting a wholesale replacement', () => {
+    renderCard();
 
-    expect(screen.getByText('conversation.creativeStudio.brief.proposalSummary:1/0/1')).toBeInTheDocument();
+    expect(screen.getByText(summary(0, 0, 1))).toBeInTheDocument();
+    expect(screen.getByText(sceneChange(1, 'narration'))).toBeInTheDocument();
+  });
+
+  it('lists every rewritten field of a shot', () => {
+    renderCard({
+      proposal: proposal({
+        payload: {
+          kind: 'replace_storyboard',
+          sceneOrder: ['proposed-1'],
+          scenes: { 'proposed-1': editableScene({ title: 'Cold open', narration: 'New narration' }) },
+        },
+      }),
+    });
+
+    expect(screen.getByText(sceneChange(1, 'title', 'narration'))).toBeInTheDocument();
+  });
+
+  it('counts shots the proposal adds beyond the current script', () => {
+    renderCard({
+      proposal: proposal({
+        payload: {
+          kind: 'replace_storyboard',
+          sceneOrder: ['proposed-1', 'proposed-2'],
+          scenes: { 'proposed-1': editableScene(), 'proposed-2': editableScene({ title: 'Finale' }) },
+        },
+      }),
+    });
+
+    expect(screen.getByText(summary(1, 0, 0))).toBeInTheDocument();
+    expect(screen.queryByText(/proposalSceneChange/)).not.toBeInTheDocument();
+  });
+
+  it('says so plainly when a proposal changes nothing at all', () => {
+    renderCard({
+      proposal: proposal({
+        payload: {
+          kind: 'replace_storyboard',
+          sceneOrder: ['proposed-1'],
+          scenes: { 'proposed-1': editableScene() },
+        },
+      }),
+    });
+
+    expect(screen.getByText('conversation.creativeStudio.brief.proposalNoChanges')).toBeInTheDocument();
+    expect(screen.queryByText(/proposalSummary/)).not.toBeInTheDocument();
+  });
+
+  it('renders the diff main froze rather than recomputing one against the current script', () => {
+    renderCard({
+      // The script has moved on, so a recompute here would be a guess; main's frozen diff is the truth.
+      project: project({ revision: 9 }),
+      proposal: proposal({
+        diff: { added: 0, removed: 0, changed: [{ position: 2, fields: ['onScreenText'] }] },
+      }),
+    });
+
+    expect(screen.getByText(summary(0, 0, 1))).toBeInTheDocument();
+    expect(screen.getByText(sceneChange(2, 'onScreenText'))).toBeInTheDocument();
+  });
+
+  it('admits the summary is unknowable for a legacy proposal the script has already outrun', () => {
+    renderCard({ project: project({ revision: 9 }), proposal: proposal() });
+
+    expect(screen.getByText('conversation.creativeStudio.brief.proposalDiffUnavailable')).toBeInTheDocument();
+    expect(screen.queryByText(/proposalSummary/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/proposalSceneChange/)).not.toBeInTheDocument();
+  });
+
+  it('still computes a legacy proposal locally while the script stands where it was drafted', () => {
+    renderCard({ proposal: proposal({ diff: undefined }) });
+
+    expect(screen.getByText(summary(0, 0, 1))).toBeInTheDocument();
+    expect(screen.getByText(sceneChange(1, 'narration'))).toBeInTheDocument();
+  });
+
+  it('ignores a malformed diff from the boundary instead of rendering it', () => {
+    renderCard({
+      project: project({ revision: 9 }),
+      proposal: proposal({ diff: { added: 1, removed: 0 } as StudioProposal['diff'] }),
+    });
+
+    expect(screen.getByText('conversation.creativeStudio.brief.proposalDiffUnavailable')).toBeInTheDocument();
+  });
+
+  it('lists the proposed scene titles', () => {
+    renderCard({
+      proposal: proposal({
+        payload: {
+          kind: 'replace_storyboard',
+          sceneOrder: ['proposed-1', 'proposed-2'],
+          scenes: { 'proposed-1': editableScene(), 'proposed-2': editableScene({ title: 'Finale' }) },
+        },
+      }),
+    });
+
     expect(screen.getByText('Opening')).toBeInTheDocument();
     expect(screen.getByText('Finale')).toBeInTheDocument();
   });
 
   it('accept invokes acceptProposal and removes the resolved card', async () => {
-    render(
-      <BriefProposalCard
-        project={project()}
-        proposal={proposal()}
-        editor={editor()}
-        acceptProposal={acceptProposal}
-        rejectProposal={rejectProposal}
-        onRepropose={repropose}
-      />
-    );
+    renderCard();
 
     fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.brief.proposalAccept' }));
 
@@ -182,16 +280,7 @@ describe('BriefProposalCard', () => {
   });
 
   it('reject invokes rejectProposal and removes the resolved card', async () => {
-    render(
-      <BriefProposalCard
-        project={project()}
-        proposal={proposal()}
-        editor={editor()}
-        acceptProposal={acceptProposal}
-        rejectProposal={rejectProposal}
-        onRepropose={repropose}
-      />
-    );
+    renderCard();
 
     fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.brief.proposalReject' }));
 

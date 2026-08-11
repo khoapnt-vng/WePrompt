@@ -574,7 +574,99 @@ describe('CreativeStudioService', () => {
 
       expect(rejected.status).toBe('rejected');
       await expect(service.getProject(project.id)).resolves.toEqual(project);
-      await expect(service.listProposals({ projectId: project.id })).resolves.toEqual([rejected]);
+      // The listing is main's first observation of this record, so it freezes the diff the user declined.
+      await expect(service.listProposals({ projectId: project.id })).resolves.toEqual([
+        { ...rejected, diff: { added: 1, removed: 0, changed: [] } },
+      ]);
+    });
+  });
+
+  describe('proposal diff', () => {
+    const storyboard = (narration: string) => ({
+      kind: 'replace_storyboard' as const,
+      sceneOrder: ['drafted_1', 'drafted_2'],
+      scenes: {
+        drafted_1: makeScene('drafted_1'),
+        drafted_2: { ...makeScene('drafted_2'), narration },
+      },
+    });
+
+    const seedStoryboard = async (projectId: string, revision: number): Promise<StudioRendererProject> => {
+      await store.recordProposal({
+        projectId,
+        proposalId: 'proposal_seed',
+        baseRevision: revision,
+        payload: storyboard('First cut of the closing line.'),
+      });
+      const accepted = await service.acceptProposal({ projectId, proposalId: 'proposal_seed' });
+      return accepted.project;
+    };
+
+    it('reports a one-field re-draft as one changed shot even though every proposed scene id is new', async () => {
+      const created = await service.createProject(makeInput());
+      const project = await seedStoryboard(created.id, created.revision);
+      await store.recordProposal({
+        projectId: project.id,
+        proposalId: 'proposal_redraft',
+        baseRevision: project.revision,
+        payload: {
+          kind: 'replace_storyboard',
+          sceneOrder: ['redrafted_1', 'redrafted_2'],
+          scenes: {
+            redrafted_1: makeScene('drafted_1'),
+            redrafted_2: { ...makeScene('drafted_2'), narration: 'Second cut of the closing line.' },
+          },
+        },
+      });
+
+      const [proposal] = await service.listProposals({ projectId: project.id });
+
+      expect(proposal.diff).toEqual({
+        added: 0,
+        removed: 0,
+        changed: [{ position: 2, fields: ['narration'] }],
+      });
+    });
+
+    it('keeps the frozen diff after acceptance instead of recomputing it against the applied script', async () => {
+      const created = await service.createProject(makeInput());
+      const project = await seedStoryboard(created.id, created.revision);
+      await store.recordProposal({
+        projectId: project.id,
+        proposalId: 'proposal_applied',
+        baseRevision: project.revision,
+        payload: storyboard('Rewritten closing line.'),
+      });
+      const [pending] = await service.listProposals({ projectId: project.id });
+
+      const accepted = await service.acceptProposal({ projectId: project.id, proposalId: 'proposal_applied' });
+      const [afterAcceptance] = await service.listProposals({ projectId: project.id });
+
+      expect(pending.diff).toEqual({ added: 0, removed: 0, changed: [{ position: 2, fields: ['narration'] }] });
+      expect(accepted.proposal.diff).toEqual(pending.diff);
+      expect(afterAcceptance.status).toBe('accepted');
+      expect(afterAcceptance.diff).toEqual(pending.diff);
+    });
+
+    it('leaves the diff absent when the script already moved past the revision the proposal was drafted from', async () => {
+      const created = await service.createProject(makeInput());
+      const project = await seedStoryboard(created.id, created.revision);
+      await store.recordProposal({
+        projectId: project.id,
+        proposalId: 'proposal_overtaken',
+        baseRevision: project.revision,
+        payload: storyboard('Rewritten closing line.'),
+      });
+      await service.updateProject({
+        projectId: project.id,
+        expectedRevision: project.revision,
+        name: 'User edit while the proposal waited',
+      });
+
+      const [proposal] = await service.listProposals({ projectId: project.id });
+
+      expect(proposal.status).toBe('pending');
+      expect(proposal.diff).toBeUndefined();
     });
   });
 
