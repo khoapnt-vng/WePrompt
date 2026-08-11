@@ -1444,6 +1444,10 @@
       "proposalStale": "O roteiro mudou enquanto esta proposta aguardava. Peça uma nova versão.",
       "proposalRepropose": "Pedir nova versão",
       "proposalFlushRefused": "Não foi possível salvar suas edições não salvas, por isso a proposta não foi aplicada. Corrija as edições e tente novamente."
+    },
+    "shell": {
+      "showDirector": "Mostrar o Creative Director",
+      "hideDirector": "Ocultar o Creative Director"
     }
   },
   "artifact": {

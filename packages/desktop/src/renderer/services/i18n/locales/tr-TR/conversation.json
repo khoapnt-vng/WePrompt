@@ -1424,6 +1424,10 @@
       "proposalStale": "Bu öneri beklerken senaryo değişti. Yeniden taslak hazırlanmasını isteyin.",
       "proposalRepropose": "Yeniden taslak iste",
       "proposalFlushRefused": "Kaydedilmemiş düzenlemeleriniz kaydedilemediği için öneri uygulanmadı. Düzenlemeleri düzeltip tekrar deneyin."
+    },
+    "shell": {
+      "showDirector": "Kreatif Direktörü göster",
+      "hideDirector": "Kreatif Direktörü gizle"
     }
   },
   "artifact": {

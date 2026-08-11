@@ -1406,6 +1406,10 @@
       "proposalStale": "此提案等待期间脚本已发生变化。请请求重新起草。",
       "proposalRepropose": "请求重新起草",
       "proposalFlushRefused": "无法保存你尚未保存的编辑，因此未应用此提案。请修正这些编辑后重试。"
+    },
+    "shell": {
+      "showDirector": "显示创意总监",
+      "hideDirector": "隐藏创意总监"
     }
   },
   "artifact": {

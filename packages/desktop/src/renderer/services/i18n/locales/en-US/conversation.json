@@ -1257,6 +1257,10 @@
       "proposalStale": "The script changed while this proposal was waiting. Ask for a redraft.",
       "proposalRepropose": "Ask for a redraft",
       "proposalFlushRefused": "Your unsaved edits could not be saved, so the proposal was not applied. Fix the edits and try again."
+    },
+    "shell": {
+      "showDirector": "Show the Creative Director",
+      "hideDirector": "Hide the Creative Director"
     }
   },
   "contextHandoff": {

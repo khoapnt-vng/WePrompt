@@ -29,6 +29,7 @@
   --bg-chat-surface: #fffdf9;
   --bg-artifact-surface: #fffdf9;
   --studio-page-background: #ffffff;
+  --studio-director-surface: #f0eadd;
   --studio-slate-surface: #f0eadd;
   --studio-slate-border: #d4a98d;
   --studio-slate-text: #b4380f;
@@ -131,6 +132,7 @@
   --bg-chat-surface: var(--bg-base);
   --bg-artifact-surface: var(--bg-1);
   --studio-page-background: var(--bg-base);
+  --studio-director-surface: var(--color-fill-1);
   --studio-slate-surface: var(--color-fill-2);
   --studio-slate-border: var(--color-border-2);
   --studio-slate-text: var(--danger);

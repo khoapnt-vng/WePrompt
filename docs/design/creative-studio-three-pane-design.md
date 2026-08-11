@@ -186,6 +186,8 @@ The mock's 1340px min-width is **not** adopted as a hard minimum. It is the widt
 
 Overlay behaviour at `drawer` is not new work — `AssistantDock` already switches between inline and Arco `Drawer` presentation on exactly this breakpoint.
 
+> ⚠️ **Correction, 2026-08-12.** An earlier draft said `AssistantDock` keeps its drawer children mounted while closed, and cited it as precedent. **It does not** — it passes `unmountOnExit`. Arco's `Drawer` also defers mounting until first open. Both defaults tear down the subtree, which would drop a reply streaming into a shut overlay, so the Studio shell passes `mountOnEnter={false}` **and** `unmountOnExit={false}` explicitly. Caught by a test, not by reading.
+
 ## 8. What this supersedes from work shipped 2026-08-11
 
 Not wasted, but re-homed — worth stating so the cost is visible:

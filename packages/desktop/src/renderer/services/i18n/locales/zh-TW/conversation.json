@@ -1406,6 +1406,10 @@
       "proposalStale": "此提案等待期間腳本已變更。請要求重新起草。",
       "proposalRepropose": "要求重新起草",
       "proposalFlushRefused": "無法儲存你尚未儲存的編輯，因此未套用此提案。請修正這些編輯後再試一次。"
+    },
+    "shell": {
+      "showDirector": "顯示創意總監",
+      "hideDirector": "隱藏創意總監"
     }
   },
   "artifact": {

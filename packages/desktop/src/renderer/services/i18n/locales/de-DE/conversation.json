@@ -1423,6 +1423,10 @@
       "proposalStale": "Das Skript wurde geändert, während dieser Vorschlag wartete. Fordern Sie eine neue Fassung an.",
       "proposalRepropose": "Neue Fassung anfordern",
       "proposalFlushRefused": "Ihre ungespeicherten Änderungen konnten nicht gespeichert werden, daher wurde der Vorschlag nicht angewendet. Korrigieren Sie die Änderungen und versuchen Sie es erneut."
+    },
+    "shell": {
+      "showDirector": "Creative Director einblenden",
+      "hideDirector": "Creative Director ausblenden"
     }
   },
   "artifact": {

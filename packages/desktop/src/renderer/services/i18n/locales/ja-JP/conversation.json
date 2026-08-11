@@ -1406,6 +1406,10 @@
       "proposalStale": "この提案を待っている間に台本が変更されました。再作成を依頼してください。",
       "proposalRepropose": "再作成を依頼",
       "proposalFlushRefused": "未保存の編集を保存できなかったため、提案は適用されませんでした。編集を修正してからもう一度お試しください。"
+    },
+    "shell": {
+      "showDirector": "クリエイティブディレクターを表示",
+      "hideDirector": "クリエイティブディレクターを非表示"
     }
   },
   "artifact": {

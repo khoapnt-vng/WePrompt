@@ -1,0 +1,57 @@
+/* Studio's two-pane frame: the always-on Director conversation beside the work panel.
+   The app side menu is not ours — it belongs to the application layout outside this page. */
+
+.shell {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  align-items: stretch;
+}
+
+/* Fixed width from the design: the Director pane does not compete with the work panel for space. */
+.directorPane {
+  display: flex;
+  width: 352px;
+  min-width: 352px;
+  min-height: 0;
+  flex-direction: column;
+  border-right: 1px solid var(--color-border-2);
+  background: var(--studio-director-surface);
+}
+
+/*
+ * Collapsed hides the pane without unmounting it.
+ *
+ * `display: none` would tear down the conversation's DOM, and a reply streaming into it would be
+ * lost the moment someone collapsed the pane. Width and visibility are animated instead so the
+ * subtree survives, which is the same reason the assistant dock keeps its drawer children mounted.
+ */
+.directorPaneCollapsed {
+  width: 0;
+  min-width: 0;
+  border-right: none;
+  overflow: hidden;
+  visibility: hidden;
+}
+
+.workPanel {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.paneToggle {
+  position: absolute;
+  z-index: 2;
+  top: 12px;
+  left: 8px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .directorPane {
+    transition: width 160ms ease;
+  }
+}

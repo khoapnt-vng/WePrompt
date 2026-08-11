@@ -1406,6 +1406,10 @@
       "proposalStale": "이 제안이 대기하는 동안 스크립트가 변경되었습니다. 다시 작성해 달라고 요청하세요.",
       "proposalRepropose": "다시 작성 요청",
       "proposalFlushRefused": "저장하지 않은 편집 내용을 저장할 수 없어 제안을 적용하지 않았습니다. 편집 내용을 수정한 후 다시 시도하세요."
+    },
+    "shell": {
+      "showDirector": "크리에이티브 디렉터 표시",
+      "hideDirector": "크리에이티브 디렉터 숨기기"
     }
   },
   "artifact": {

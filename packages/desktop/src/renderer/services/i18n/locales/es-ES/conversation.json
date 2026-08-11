@@ -1439,6 +1439,10 @@
       "proposalStale": "El guion cambió mientras esta propuesta esperaba. Solicita una nueva versión.",
       "proposalRepropose": "Solicitar nueva versión",
       "proposalFlushRefused": "No se pudieron guardar tus cambios sin guardar, así que la propuesta no se aplicó. Corrige los cambios e inténtalo de nuevo."
+    },
+    "shell": {
+      "showDirector": "Mostrar el Creative Director",
+      "hideDirector": "Ocultar el Creative Director"
     }
   },
   "artifact": {
