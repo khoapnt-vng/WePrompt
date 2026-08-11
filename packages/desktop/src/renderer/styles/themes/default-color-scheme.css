@@ -47,6 +47,8 @@
   --studio-library-control-surface: var(--bg-2);
   --studio-library-control-border: #e1d9c8;
   --studio-library-attach-text: #5e5747;
+  --studio-script-label-surface: var(--text-primary);
+  --studio-script-label-text: var(--text-white);
   --bg-4: #d8cbb6;
   --bg-5: #d0c3ad;
   --bg-6: #8a93a1; /* ink-500 — muted / tertiary text / 禁用·次要文字 */
@@ -150,6 +152,8 @@
   --studio-library-control-surface: var(--color-fill-2);
   --studio-library-control-border: var(--color-border-2);
   --studio-library-attach-text: var(--text-secondary);
+  --studio-script-label-surface: var(--text-primary);
+  --studio-script-label-text: var(--bg-base);
   --bg-4: #2a3344;
   --bg-5: #3b4658;
   --bg-6: #5e7086; /* 禁用/次要文字 */

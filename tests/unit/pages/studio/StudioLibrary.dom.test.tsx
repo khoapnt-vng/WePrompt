@@ -356,6 +356,18 @@ describe('StudioLibrary', () => {
     expect(screen.getByText('SCRIPT ONLY')).toBeInTheDocument();
   });
 
+  it('assigns stable gradients to script-only posters from their project ids', async () => {
+    bridge.listProjects.invoke.mockResolvedValue(
+      ok([summary({ id: 'project-alpha', name: 'Alpha script' }), summary({ id: 'project-beta', name: 'Beta script' })])
+    );
+
+    render(<StudioLibrary />);
+
+    const scriptLabels = await screen.findAllByText('SCRIPT ONLY');
+    expect(scriptLabels[0].closest('[data-gradient]')).toHaveAttribute('data-gradient', '2');
+    expect(scriptLabels[1].closest('[data-gradient]')).toHaveAttribute('data-gradient', '4');
+  });
+
   it('labels a rendered poster with the take first and a zero-padded shot number', async () => {
     bridge.listProjects.invoke.mockResolvedValue(
       ok([

@@ -22,6 +22,16 @@ const RELATIVE_UNITS: ReadonlyArray<{ unit: Intl.RelativeTimeFormatUnit; millise
   { unit: 'year', milliseconds: 31_536_000_000, limit: Number.POSITIVE_INFINITY },
 ];
 
+const SCRIPT_POSTER_GRADIENT_COUNT = 6;
+
+const getScriptPosterGradientIndex = (projectId: string): number => {
+  let hash = 0;
+  for (const character of projectId) {
+    hash = (Math.imul(hash, 31) + character.charCodeAt(0)) >>> 0;
+  }
+  return hash % SCRIPT_POSTER_GRADIENT_COUNT;
+};
+
 export const formatStudioRelativeTime = (timestamp: string, locale: string, now = Date.now()): string => {
   const delta = Date.parse(timestamp) - now;
   const absolute = Math.abs(delta);
@@ -58,7 +68,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project, locale, disab
       cover={
         <div className={styles.poster}>
           {posterSource === null ? (
-            <div className={styles.scriptPoster}>
+            <div className={styles.scriptPoster} data-gradient={getScriptPosterGradientIndex(project.id)}>
               <Tag className={styles.posterLabel}>{t('conversation.creativeStudio.library.scriptOnly')}</Tag>
             </div>
           ) : (
