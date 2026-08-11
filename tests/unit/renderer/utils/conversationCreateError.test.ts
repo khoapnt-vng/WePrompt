@@ -6,6 +6,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { BackendHttpError } from '@/common/adapter/httpBridge';
+import { TeamMemberModelUnresolvedError } from '@/common/adapter/teamMapper';
 import {
   getConversationCreateErrorMessage,
   getConversationRuntimeWorkspaceErrorMessage,
@@ -31,6 +32,8 @@ const t = (key: string, options?: { defaultValue?: string; workspacePath?: strin
       'Make sure the current workspace path exists.',
     'conversation.agentError.codes.WORKSPACE_PATH_RUNTIME_UNAVAILABLE.bodyWithPath':
       'The current Agent failed to run in the workspace path "{{workspacePath}}". Make sure the workspace path exists.',
+    'conversation.createError.codes.TEAM_MEMBER_MODEL_UNRESOLVED':
+      'No model is available for this team member. Add or enable a model provider in Settings, then try again.',
   };
 
   if (
@@ -108,6 +111,16 @@ describe('conversationCreateError', () => {
     expect(normalizeConversationCreateErrorCode(error)).toBe('WORKSPACE_PATH_UNAVAILABLE');
     expect(getConversationCreateErrorMessage(error, t)).toBe(
       'The selected workspace path is unavailable. Make sure the workspace path "/Users/zhoukai/Documents/Archive " exists and is accessible.'
+    );
+  });
+
+  /**
+   * Raised in the renderer before the request goes out, so it carries no
+   * backend code for the payload parsers above to key off.
+   */
+  it('names the cause and the fix when a team slot has no resolvable model', () => {
+    expect(getConversationCreateErrorMessage(new TeamMemberModelUnresolvedError('aionrs'), t)).toBe(
+      'No model is available for this team member. Add or enable a model provider in Settings, then try again.'
     );
   });
 });
