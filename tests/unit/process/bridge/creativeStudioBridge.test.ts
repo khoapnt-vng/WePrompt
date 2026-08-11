@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   getProjectProvider: vi.fn(),
   getBriefSessionServerProvider: vi.fn(),
   listProposalsProvider: vi.fn(),
+  listPendingReferenceRequestsProvider: vi.fn(),
+  dismissReferenceRequestsProvider: vi.fn(),
   acceptProposalProvider: vi.fn(),
   rejectProposalProvider: vi.fn(),
   proposeStoryboardProvider: vi.fn(),
@@ -57,6 +59,8 @@ vi.mock('@/common', () => ({
       getProject: { provider: mocks.getProjectProvider },
       getBriefSessionServer: { provider: mocks.getBriefSessionServerProvider },
       listProposals: { provider: mocks.listProposalsProvider },
+      listPendingReferenceRequests: { provider: mocks.listPendingReferenceRequestsProvider },
+      dismissReferenceRequests: { provider: mocks.dismissReferenceRequestsProvider },
       acceptProposal: { provider: mocks.acceptProposalProvider },
       rejectProposal: { provider: mocks.rejectProposalProvider },
       proposeStoryboard: { provider: mocks.proposeStoryboardProvider },
@@ -139,6 +143,8 @@ describe('initCreativeStudioBridge', () => {
           transport: { type: 'stdio' as const, command: 'node', args: ['/tmp/builtin-mcp-studio.js'] },
         })),
         listProposals: vi.fn(async () => []),
+        listPendingReferenceRequests: vi.fn(async () => []),
+        dismissReferenceRequests: vi.fn(async () => true),
         acceptProposal: vi.fn(),
         rejectProposal: vi.fn(),
         proposeStoryboard: vi.fn(async () => project),
@@ -188,6 +194,8 @@ describe('initCreativeStudioBridge', () => {
     expect(mocks.getProjectProvider).toHaveBeenCalledOnce();
     expect(mocks.getBriefSessionServerProvider).toHaveBeenCalledOnce();
     expect(mocks.listProposalsProvider).toHaveBeenCalledOnce();
+    expect(mocks.listPendingReferenceRequestsProvider).toHaveBeenCalledOnce();
+    expect(mocks.dismissReferenceRequestsProvider).toHaveBeenCalledOnce();
     expect(mocks.acceptProposalProvider).toHaveBeenCalledOnce();
     expect(mocks.rejectProposalProvider).toHaveBeenCalledOnce();
     expect(mocks.proposeStoryboardProvider).toHaveBeenCalledOnce();

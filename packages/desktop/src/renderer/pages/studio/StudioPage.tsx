@@ -56,6 +56,7 @@ type GenerationReviewState = {
   projectRevision: number;
   outputRole?: GenerationSingleReviewRequest['outputRole'];
   referencePrompt?: GenerationSingleReviewRequest['referencePrompt'];
+  referenceRequestIds?: string[];
 };
 
 const routeIdentity = (
@@ -299,6 +300,49 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
   const exportBlocked = generationBlocked;
   const transitionBlocked = generationReview !== null || duplicateChargeJobId !== null || exportVisible;
 
+  useEffect(() => {
+    if (
+      generationReview !== null ||
+      generationBlocked ||
+      project === null ||
+      readiness === null ||
+      studioModels.catalog === null ||
+      studioJobs.referenceRequests.length === 0
+    ) {
+      return;
+    }
+    const catalog = studioModels.catalog;
+    const readySceneIds = new Set(readiness.readySceneIds);
+    const requestedSceneIds = new Set(studioJobs.referenceRequests.map(({ sceneId }) => sceneId));
+    const scenes = project.sceneOrder.flatMap((sceneId) => {
+      const scene = project.scenes[sceneId];
+      if (scene === undefined || !requestedSceneIds.has(sceneId) || !readySceneIds.has(sceneId)) return [];
+      return [
+        toReviewScene(
+          project,
+          scene,
+          projectRouteSnapshot(project, scene, 'reference'),
+          catalogEntries(catalog),
+          undefined,
+          'reference'
+        ),
+      ];
+    });
+    if (scenes.length === 0) return;
+    studioJobs.clearIssue();
+    setGenerationReviewIssueMessageKey(null);
+    setGenerationReview({
+      mode: 'batch',
+      scenes,
+      catalogVersion: catalog.catalogVersion,
+      availableRoutes: catalogEntries(catalog),
+      projectId: project.id,
+      projectRevision: project.revision,
+      outputRole: 'reference',
+      referenceRequestIds: studioJobs.referenceRequests.map(({ id: requestId }) => requestId),
+    });
+  }, [generationBlocked, generationReview, project, readiness, studioJobs, studioModels.catalog]);
+
   const handleDraftStoryboard = useCallback(
     async (replaceExisting: boolean): Promise<void> => {
       if (await editor.proposeStoryboard(replaceExisting)) setDraftModalVisible(false);
@@ -369,6 +413,7 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
   const confirmGeneration = useCallback(
     async ({ sceneIds, routes }: { sceneIds: string[]; routes: StudioSceneGenerationChoice[] }): Promise<void> => {
       if (
+        generationBlocked ||
         generationReview?.catalogVersion === null ||
         generationReview === null ||
         project === null ||
@@ -429,6 +474,9 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
             ...(generationReview.referencePrompt === undefined
               ? {}
               : { referencePrompt: generationReview.referencePrompt }),
+            ...(generationReview.referenceRequestIds === undefined
+              ? {}
+              : { referenceRequestIds: generationReview.referenceRequestIds }),
           });
         } catch {
           setGenerationReviewIssueMessageKey('conversation.creativeStudio.errors.provider');
@@ -450,9 +498,15 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
           ? {}
           : { referencePrompt: generationReview.referencePrompt }),
       });
-      if (submitted) setGenerationReview(null);
+      if (!submitted) return;
+      if (
+        generationReview.referenceRequestIds === undefined ||
+        (await studioJobs.dismissReferenceRequests(generationReview.referenceRequestIds))
+      ) {
+        setGenerationReview(null);
+      }
     },
-    [generationReview, project, readiness, readyScenes, studioJobs, studioModels]
+    [generationBlocked, generationReview, project, readiness, readyScenes, studioJobs, studioModels]
   );
 
   useEffect(() => {
@@ -879,14 +933,19 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
           return scene?.id === sceneId ? total + scene.durationSeconds : total;
         }, 0)}
         submitting={studioJobs.mutationPending || generationReviewRefreshing}
-        submissionBlocked={studioJobs.issue?.operation === 'submit_scenes' && studioJobs.issue.code === 'invalid_route'}
+        submissionBlocked={
+          generationBlocked ||
+          (studioJobs.issue?.operation === 'submit_scenes' && studioJobs.issue.code === 'invalid_route')
+        }
         errorMessageKey={
           studioJobs.issue?.operation === 'submit_scenes'
             ? studioJobs.issue.messageKey
             : generationReviewIssueMessageKey
         }
-        onCancel={() => {
+        onCancel={async () => {
           if (!studioJobs.mutationPending && !generationReviewRefreshing) {
+            const requestIds = generationReview?.referenceRequestIds;
+            if (requestIds !== undefined && !(await studioJobs.dismissReferenceRequests(requestIds))) return;
             studioJobs.clearIssue();
             studioJobs.clearStaleIntent();
             setGenerationReviewIssueMessageKey(null);

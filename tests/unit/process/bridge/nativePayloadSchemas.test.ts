@@ -225,6 +225,11 @@ const VALID_PAYLOADS = {
   'creative-studio.get-project': { projectId: 'project_1' },
   'creative-studio.get-brief-session-server': { projectId: 'project_1' },
   'creative-studio.list-proposals': { projectId: 'project_1' },
+  'creative-studio.list-pending-reference-requests': { projectId: 'project_1' },
+  'creative-studio.dismiss-reference-requests': {
+    projectId: 'project_1',
+    requestIds: ['reference_request_1'],
+  },
   'creative-studio.accept-proposal': { projectId: 'project_1', proposalId: 'proposal_1' },
   'creative-studio.reject-proposal': { projectId: 'project_1', proposalId: 'proposal_1' },
   'creative-studio.propose-storyboard': { projectId: 'project_1', expectedRevision: 1, replaceExisting: false },

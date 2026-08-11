@@ -302,6 +302,12 @@ export function initCreativeStudioBridge(dependencies: CreativeStudioBridgeDepen
   ipcBridge.creativeStudio.listProposals.provider((input) =>
     runCommand(() => dependencies.getService().listProposals(input))
   );
+  ipcBridge.creativeStudio.listPendingReferenceRequests.provider((input) =>
+    runCommand(() => dependencies.getService().listPendingReferenceRequests(input))
+  );
+  ipcBridge.creativeStudio.dismissReferenceRequests.provider((input) =>
+    runCommand(() => dependencies.getService().dismissReferenceRequests(input))
+  );
   ipcBridge.creativeStudio.acceptProposal.provider((input) =>
     runCommand(() => dependencies.getService().acceptProposal(input))
   );

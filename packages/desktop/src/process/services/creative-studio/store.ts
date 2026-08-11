@@ -244,6 +244,7 @@ export type CreativeStudioStore = {
   recordProposal(input: StudioRecordProposalInput): Promise<StudioProposal>;
   listProposals(projectId: string): Promise<StudioProposal[]>;
   listPendingReferenceRequests(projectId: string): Promise<StudioReferenceRequest[]>;
+  dismissReferenceRequests(projectId: string, requestIds: string[]): Promise<void>;
   acceptProposal(
     projectId: string,
     proposalId: string,
@@ -1642,6 +1643,26 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     }
   };
 
+  const releaseReferenceRequestSlots = async (
+    directories: { slots: string },
+    requestIds: ReadonlySet<string>
+  ): Promise<void> => {
+    const entries = await pendingRecordFileEntries(directories.slots);
+    for (const entry of entries) {
+      if (!entry.isFile() || !/^\d+\.slot$/.test(entry.name)) continue;
+      const file = path.join(directories.slots, entry.name);
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const value = await readBoundedPendingRecordJson(file);
+        if (!validateReferenceRequestSlot(value) || !requestIds.has(value.requestId)) continue;
+        // eslint-disable-next-line no-await-in-loop
+        await releaseProposalSlotFile(file);
+      } catch (error) {
+        logError('[CreativeStudio] Reference request slot release failed', error);
+      }
+    }
+  };
+
   const appendProposalDecision = async (
     root: string,
     decisionsDirectory: string,
@@ -2016,6 +2037,46 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
         throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio project id');
       }
       return listReferenceRequestsThroughQueue(projectId);
+    },
+
+    async dismissReferenceRequests(projectId: string, requestIds: string[]): Promise<void> {
+      if (
+        !isSafeId(projectId) ||
+        requestIds.length === 0 ||
+        requestIds.length > STUDIO_PROPOSAL_MAX_PENDING_PER_PROJECT ||
+        new Set(requestIds).size !== requestIds.length ||
+        requestIds.some((requestId) => !isSafeProposalId(requestId))
+      ) {
+        throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio reference request identities');
+      }
+      await enqueue(projectId, async (): Promise<void> => {
+        const root = await canonicalRoot();
+        const project = await readProject(root, projectId);
+        if (project === null) throw new CreativeStudioStoreError('not_found', 'Studio project not found');
+        const directories = await referenceRequestDirectories(root, projectId, false);
+        if (directories === null) return;
+        const requests = await readReferenceRequestRecords(project, directories);
+        const requestedIds = new Set(requestIds);
+        const dismissibleIds = new Set(
+          requests.filter((request) => requestedIds.has(request.id)).map((request) => request.id)
+        );
+        for (const requestId of dismissibleIds) {
+          try {
+            // The bounded queue contains at most 50 records.
+            // eslint-disable-next-line no-await-in-loop
+            await fs.rm(path.join(directories.pending, `${requestId}.json`));
+          } catch (error) {
+            if (!isRecord(error) || error.code !== 'ENOENT') {
+              throw storageError(error, 'Creative Studio reference request could not be dismissed');
+            }
+          }
+        }
+        await releaseReferenceRequestSlots(directories, dismissibleIds);
+        await cleanupReferenceRequestSlots(
+          directories,
+          requests.filter((request) => !dismissibleIds.has(request.id))
+        );
+      });
     },
 
     async rejectProposal(projectId: string, proposalId: string): Promise<StudioProposal> {

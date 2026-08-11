@@ -108,12 +108,14 @@ import type {
   StudioCommandResult,
   StudioChooseAndExportAssetsRequest,
   StudioChooseAndImportReferenceRequest,
+  StudioDismissReferenceRequestsRequest,
   StudioDeleteProjectRequest,
   StudioProjectRequest,
   StudioProjectSummary,
   StudioProposal,
   StudioProposalAcceptance,
   StudioProposalRequest,
+  StudioReferenceRequest,
   StudioPersistCapturedPosterRequest,
   StudioPlaceCutScenesRequest,
   StudioRendererProject,
@@ -1206,6 +1208,13 @@ export const creativeStudio = {
   ),
   listProposals: bridge.buildProvider<StudioCommandResult<StudioProposal[]>, StudioProjectRequest>(
     'creative-studio.list-proposals'
+  ),
+  listPendingReferenceRequests: bridge.buildProvider<
+    StudioCommandResult<StudioReferenceRequest[]>,
+    StudioProjectRequest
+  >('creative-studio.list-pending-reference-requests'),
+  dismissReferenceRequests: bridge.buildProvider<StudioCommandResult<boolean>, StudioDismissReferenceRequestsRequest>(
+    'creative-studio.dismiss-reference-requests'
   ),
   acceptProposal: bridge.buildProvider<StudioCommandResult<StudioProposalAcceptance>, StudioProposalRequest>(
     'creative-studio.accept-proposal'

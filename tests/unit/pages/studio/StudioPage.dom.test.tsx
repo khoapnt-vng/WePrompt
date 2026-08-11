@@ -14,6 +14,7 @@ import type {
   StudioCommandResult,
   StudioFitStoryboardOutcome,
   StudioProposal,
+  StudioReferenceRequest,
   StudioRendererJob,
   StudioRendererProject,
   StudioRouteCatalog,
@@ -37,6 +38,8 @@ const bridge = vi.hoisted(() => ({
   flushUnsavedWork: { provider: vi.fn() },
   getProject: { invoke: vi.fn() },
   listProposals: { invoke: vi.fn() },
+  listPendingReferenceRequests: { invoke: vi.fn() },
+  dismissReferenceRequests: { invoke: vi.fn() },
   listRoutes: { invoke: vi.fn() },
   updateModelSelection: { invoke: vi.fn() },
   updateProject: { invoke: vi.fn() },
@@ -213,6 +216,15 @@ const proposal = (): StudioProposal => ({
   decidedAt: null,
 });
 
+const referenceRequest = (sceneId: string, index: number): StudioReferenceRequest => ({
+  schemaVersion: 1,
+  id: `reference_request_${index}`,
+  projectId: 'project-1',
+  sceneId,
+  status: 'pending',
+  createdAt: `2026-08-11T00:00:0${index}.000Z`,
+});
+
 const imageRoute = (overrides: Partial<StudioRouteCatalogEntry> = {}): StudioRouteCatalogEntry => ({
   choiceId: 'choice_image',
   providerId: 'provider-image',
@@ -380,6 +392,8 @@ describe('StudioPage and useStudioProject', () => {
     vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('11111111-1111-4111-8111-111111111111');
     bridge.getProject.invoke.mockResolvedValue(ok(project()));
     bridge.listProposals.invoke.mockResolvedValue(ok([]));
+    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([]));
+    bridge.dismissReferenceRequests.invoke.mockResolvedValue(ok(true));
     bridge.listRoutes.invoke.mockResolvedValue(ok(routes()));
     bridge.updateModelSelection.invoke.mockResolvedValue(ok(project()));
     bridge.updateProject.invoke.mockImplementation(async () => ok(project()));
@@ -1195,6 +1209,165 @@ describe('StudioPage and useStudioProject', () => {
     });
     expect(within(reviewDialog).getByText('conversation.creativeStudio.reference.reviewTag')).toBeVisible();
     expect(within(reviewDialog).getByText('conversation.creativeStudio.review.chargeNotice')).toBeVisible();
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+  });
+
+  it('presents queued assistant requests in the review modal as one batch', async () => {
+    const first = scene({ id: 'scene-1', mediaKind: 'video' });
+    const second = scene({ id: 'scene-2', title: 'Closing', mediaKind: 'video' });
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(
+        project('project-1', {
+          sceneOrder: [first.id, second.id],
+          scenes: { [first.id]: first, [second.id]: second },
+        })
+      )
+    );
+    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(
+      ok([referenceRequest(first.id, 1), referenceRequest(second.id, 2)])
+    );
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
+
+    renderRoute();
+
+    const reviewDialog = await screen.findByRole('dialog', {
+      name: 'conversation.creativeStudio.review.title',
+    });
+    expect(within(reviewDialog).getAllByText('conversation.creativeStudio.reference.reviewTag')).toHaveLength(2);
+    expect(within(reviewDialog).getByText('conversation.creativeStudio.review.chargeNotice')).toBeVisible();
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+  });
+
+  it('submits a queued reference batch only after approval and then consumes the reviewed requests', async () => {
+    const first = scene({ id: 'scene-1', mediaKind: 'video' });
+    const second = scene({ id: 'scene-2', title: 'Closing', mediaKind: 'video' });
+    const requests = [referenceRequest(first.id, 1), referenceRequest(second.id, 2)];
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(
+        project('project-1', {
+          sceneOrder: [first.id, second.id],
+          scenes: { [first.id]: first, [second.id]: second },
+        })
+      )
+    );
+    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok(requests));
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
+
+    renderRoute();
+
+    const reviewDialog = await screen.findByRole('dialog', {
+      name: 'conversation.creativeStudio.review.title',
+    });
+    fireEvent.click(within(reviewDialog).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
+
+    await waitFor(() =>
+      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: 'project-1',
+        mode: 'batch',
+        sceneIds: [first.id, second.id],
+        expectedRevision: 2,
+        routes: [
+          { sceneId: first.id, choiceId: 'choice_image', kind: 'image' },
+          { sceneId: second.id, choiceId: 'choice_image', kind: 'image' },
+        ],
+        catalogVersion: 'catalog-1',
+        outputRole: 'reference',
+      })
+    );
+    await waitFor(() =>
+      expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: 'project-1',
+        requestIds: requests.map(({ id }) => id),
+      })
+    );
+  });
+
+  it('submits only guard-ready queued scenes when another requested scene already owns a take', async () => {
+    const plated = scene({
+      id: 'scene-1',
+      assetIds: ['asset-1'],
+      reviewState: 'needs_selection',
+    });
+    const ready = scene({ id: 'scene-2', title: 'Closing', mediaKind: 'video' });
+    const requests = [referenceRequest(plated.id, 1), referenceRequest(ready.id, 2)];
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(
+        project('project-1', {
+          sceneOrder: [plated.id, ready.id],
+          scenes: { [plated.id]: plated, [ready.id]: ready },
+          assets: { 'asset-1': asset('asset-1') },
+        })
+      )
+    );
+    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok(requests));
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
+
+    renderRoute();
+
+    const reviewDialog = await screen.findByRole('dialog', {
+      name: 'conversation.creativeStudio.review.title',
+    });
+    expect(within(reviewDialog).queryByRole('article', { name: plated.title })).not.toBeInTheDocument();
+    expect(within(reviewDialog).getByRole('article', { name: ready.title })).toBeVisible();
+    fireEvent.click(within(reviewDialog).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
+
+    await waitFor(() =>
+      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: 'project-1',
+        mode: 'batch',
+        sceneIds: [ready.id],
+        expectedRevision: 2,
+        routes: [{ sceneId: ready.id, choiceId: 'choice_image', kind: 'image' }],
+        catalogVersion: 'catalog-1',
+        outputRole: 'reference',
+      })
+    );
+  });
+
+  it('dismisses queued reference requests without spending and does not reopen the batch', async () => {
+    const opening = scene({ mediaKind: 'video' });
+    const requests = [referenceRequest(opening.id, 1)];
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
+    );
+    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok(requests));
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
+
+    renderRoute();
+
+    const reviewDialog = await screen.findByRole('dialog', {
+      name: 'conversation.creativeStudio.review.title',
+    });
+    fireEvent.click(within(reviewDialog).getByRole('button', { name: 'conversation.creativeStudio.review.cancel' }));
+
+    await waitFor(() =>
+      expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: 'project-1',
+        requestIds: [requests[0]!.id],
+      })
+    );
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await act(async () => {});
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('keeps queued reference approval unavailable while scene drafts are unsaved', async () => {
+    const pending = deferred<StudioCommandResult<StudioReferenceRequest[]>>();
+    const opening = scene({ mediaKind: 'video' });
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
+    );
+    bridge.listPendingReferenceRequests.invoke.mockReturnValue(pending.promise);
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
+
+    renderRoute();
+    const prompt = await screen.findByLabelText('conversation.creativeStudio.inspector.visualPromptLabel');
+    fireEvent.change(prompt, { target: { value: 'Unsaved queued-reference edit' } });
+    await act(async () => pending.resolve(ok([referenceRequest(opening.id, 1)])));
+
+    await waitFor(() => expect(bridge.listPendingReferenceRequests.invoke).toHaveBeenCalled());
+    expect(screen.queryByRole('dialog', { name: 'conversation.creativeStudio.review.title' })).not.toBeInTheDocument();
     expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
   });
 

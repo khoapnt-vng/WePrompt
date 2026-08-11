@@ -78,6 +78,8 @@ export const NATIVE_BRIDGE_PROVIDER_KEYS = [
   'creative-studio.get-project',
   'creative-studio.get-brief-session-server',
   'creative-studio.list-proposals',
+  'creative-studio.list-pending-reference-requests',
+  'creative-studio.dismiss-reference-requests',
   'creative-studio.accept-proposal',
   'creative-studio.reject-proposal',
   'creative-studio.propose-storyboard',

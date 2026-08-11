@@ -19,6 +19,9 @@ import { useStudioJobs } from '@renderer/pages/studio/hooks/useStudioJobs';
 
 const bridge = vi.hoisted(() => ({
   projectUpdated: { on: vi.fn() },
+  proposalUpdated: { on: vi.fn() },
+  listPendingReferenceRequests: { invoke: vi.fn() },
+  dismissReferenceRequests: { invoke: vi.fn() },
   submitScenes: { invoke: vi.fn() },
   cancelJob: { invoke: vi.fn() },
   retryJob: { invoke: vi.fn() },
@@ -134,6 +137,9 @@ describe('useStudioJobs', () => {
       projectUpdatedListener = listener;
       return unsubscribe;
     });
+    bridge.proposalUpdated.on.mockReturnValue(vi.fn());
+    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([]));
+    bridge.dismissReferenceRequests.invoke.mockResolvedValue(ok(true));
     bridge.submitScenes.invoke.mockResolvedValue(ok([]));
     bridge.cancelJob.invoke.mockImplementation(async ({ jobId }: { jobId: string }) => ok(job(jobId)));
     bridge.retryJob.invoke.mockImplementation(async ({ jobId }: { jobId: string }) => ok(job(`${jobId}-retry`)));

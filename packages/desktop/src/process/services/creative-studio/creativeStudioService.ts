@@ -10,6 +10,7 @@ import type {
   StudioBindBriefConversationRequest,
   StudioCut,
   StudioCutClip,
+  StudioDismissReferenceRequestsRequest,
   StudioEditableCut,
   StudioEditableCutClip,
   StudioEditableScene,
@@ -155,6 +156,7 @@ export type CreativeStudioService = {
   getBriefSessionServer(input: StudioProjectRequest): Promise<ISessionMcpServer>;
   listProposals(input: StudioProjectRequest): Promise<StudioProposal[]>;
   listPendingReferenceRequests(input: StudioProjectRequest): Promise<StudioReferenceRequest[]>;
+  dismissReferenceRequests(input: StudioDismissReferenceRequestsRequest): Promise<boolean>;
   acceptProposal(input: StudioProposalRequest): Promise<StudioProposalAcceptance>;
   rejectProposal(input: StudioProposalRequest): Promise<StudioProposal>;
   proposeStoryboard(input: ProposeStudioStoryboardInput): Promise<StudioRendererProject>;
@@ -1134,6 +1136,20 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
     async listPendingReferenceRequests(input: StudioProjectRequest): Promise<StudioReferenceRequest[]> {
       assertSafeId(input.projectId, 'project id');
       return deps.store.listPendingReferenceRequests(input.projectId);
+    },
+
+    async dismissReferenceRequests(input: StudioDismissReferenceRequestsRequest): Promise<boolean> {
+      assertSafeId(input.projectId, 'project id');
+      if (
+        input.requestIds.length === 0 ||
+        input.requestIds.length > 50 ||
+        new Set(input.requestIds).size !== input.requestIds.length
+      ) {
+        throw new CreativeStudioServiceError('invalid_payload');
+      }
+      input.requestIds.forEach((requestId) => assertSafeId(requestId, 'reference request id'));
+      await deps.store.dismissReferenceRequests(input.projectId, input.requestIds);
+      return true;
     },
 
     async acceptProposal(input: StudioProposalRequest): Promise<StudioProposalAcceptance> {

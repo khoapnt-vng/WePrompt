@@ -315,6 +315,10 @@ export type StudioReferenceRequest = {
   createdAt: string;
 };
 
+export type StudioDismissReferenceRequestsRequest = StudioProjectRequest & {
+  requestIds: string[];
+};
+
 export type StudioProjectSummary = {
   id: string;
   name: string;

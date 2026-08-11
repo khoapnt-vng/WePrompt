@@ -607,6 +607,30 @@ describe('creative studio project store', () => {
       }
     });
 
+    it('dismisses only the reviewed reference requests and releases their queue slots', async () => {
+      const project = await store.createProject(makeInput());
+      await store.updateProject(project.id, (current) => addScene(addScene(current, 'scene_1'), 'scene_2'));
+      const paths = await store.resolveProposalPaths(project.id);
+      const dismissed = await writeReferenceRequestRecord({
+        pendingDir: paths.referencePendingDir,
+        projectId: project.id,
+        sceneId: 'scene_1',
+        requestId: 'request_dismissed',
+      });
+      const retained = await writeReferenceRequestRecord({
+        pendingDir: paths.referencePendingDir,
+        projectId: project.id,
+        sceneId: 'scene_2',
+        requestId: 'request_retained',
+      });
+
+      await store.dismissReferenceRequests(project.id, [dismissed.id]);
+
+      await expect(store.listPendingReferenceRequests(project.id)).resolves.toMatchObject([{ id: retained.id }]);
+      expect(existsSync(path.join(paths.referencePendingDir, `${dismissed.id}.json`))).toBe(false);
+      expect(readdirSync(path.join(rootDir, project.id, 'reference-requests', 'slots'))).toHaveLength(1);
+    });
+
     it('keeps proposal and reference-request inboxes independent', async () => {
       const project = await store.createProject(makeInput());
       const updated = await store.updateProject(project.id, (current) => addScene(current, 'scene_1'));
