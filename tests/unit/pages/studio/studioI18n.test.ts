@@ -170,7 +170,6 @@ const taskSevenKeys = [
   'project.notFound',
   'project.title',
   'project.brief',
-  'project.aspectRatio',
   'project.targetDuration',
   'project.resolution',
   'project.sceneCount',
