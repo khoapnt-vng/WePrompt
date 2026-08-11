@@ -173,3 +173,10 @@
   align-items: stretch;
   flex-direction: column;
 }
+
+.briefField {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}

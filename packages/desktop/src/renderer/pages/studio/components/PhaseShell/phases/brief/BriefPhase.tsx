@@ -45,9 +45,7 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
     aspectRatio: project.aspectRatio,
     targetDurationSeconds: project.targetDurationSeconds,
   };
-  const [composerText, setComposerText] = useState(draft.brief);
   const invalidBrief = draft.brief.length > MAX_PROJECT_BRIEF_CHARS;
-  const invalidComposer = composerText.length > MAX_PROJECT_BRIEF_CHARS;
   const invalidDuration =
     !Number.isInteger(draft.targetDurationSeconds) ||
     draft.targetDurationSeconds < 5 ||
@@ -102,6 +100,27 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
       </div>
 
       <div className={styles.content}>
+        <div className={styles.briefField}>
+          <label htmlFor='studio-brief-text' className={styles.constraintLabel}>
+            {t('conversation.creativeStudio.project.brief')}
+          </label>
+          <Input.TextArea
+            id='studio-brief-text'
+            value={draft.brief}
+            error={invalidBrief}
+            maxLength={MAX_PROJECT_BRIEF_CHARS}
+            autoSize={{ minRows: 4, maxRows: 12 }}
+            aria-label={t('conversation.creativeStudio.project.brief')}
+            onChange={(brief) => editor.updateProjectDraft({ brief })}
+            onBlur={flushIfValid}
+          />
+          {invalidBrief && (
+            <span role='alert' className={styles.fieldError}>
+              {t('conversation.creativeStudio.errors.invalidPayload')}
+            </span>
+          )}
+        </div>
+
         <div className={styles.constraintsRow}>
           <div className={styles.constraint}>
             <label htmlFor='studio-brief-duration' className={styles.constraintLabel}>

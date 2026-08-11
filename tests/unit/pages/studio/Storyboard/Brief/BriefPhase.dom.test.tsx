@@ -159,6 +159,37 @@ describe('BriefPhase', () => {
     briefConversationHarness.result.recreate.mockClear();
   });
 
+  /**
+   * The brief text is Brief's work-panel content. It matters that it is here and not only in the
+   * conversation: `invalidBrief` gates Start writing, so without an editor an over-long brief
+   * disables the action with nothing on screen explaining why.
+   */
+  it('edits the brief text and flushes it on blur', () => {
+    const props = controller();
+    render(<BriefPhase controller={props} />);
+
+    const brief = screen.getByLabelText('conversation.creativeStudio.project.brief');
+    expect(brief).toHaveValue('A short launch story');
+
+    fireEvent.change(brief, { target: { value: 'A sharper launch story' } });
+    expect(props.editor.updateProjectDraft).toHaveBeenCalledWith({ brief: 'A sharper launch story' });
+
+    fireEvent.blur(brief);
+    expect(props.editor.flushProjectDraft).toHaveBeenCalled();
+  });
+
+  it('explains an over-long brief rather than only disabling the action', () => {
+    const draft = {
+      brief: 'x'.repeat(16 * 1024 + 1),
+      aspectRatio: '16:9' as const,
+      targetDurationSeconds: 15,
+    };
+    render(<BriefPhase controller={controller({ editor: editor({ projectDraft: draft }) })} />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('conversation.creativeStudio.errors.invalidPayload');
+    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.phase.brief.startWriting' })).toBeDisabled();
+  });
+
   it('renders the project constraints without a duplicate project-name control', () => {
     const props = controller();
     render(<BriefPhase controller={props} />);
@@ -211,7 +242,7 @@ describe('BriefPhase', () => {
     render(<BriefPhase controller={props} />);
 
     expect(screen.queryByText('conversation.creativeStudio.phase.brief.invalidName')).not.toBeInTheDocument();
-    expect(screen.queryByText('conversation.creativeStudio.errors.invalidPayload')).not.toBeInTheDocument();
+    expect(screen.getByText('conversation.creativeStudio.errors.invalidPayload')).toBeInTheDocument();
     expect(screen.getByText('conversation.creativeStudio.create.invalidDuration')).toBeInTheDocument();
 
     const startWriting = screen.getByRole('button', {
