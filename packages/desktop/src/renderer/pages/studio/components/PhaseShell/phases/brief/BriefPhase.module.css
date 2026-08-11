@@ -1,5 +1,5 @@
 .phase {
-  composes: body from '../../../StudioTypography.module.css';
+  composes: body from '../../../../StudioTypography.module.css';
   box-sizing: border-box;
   display: flex;
   width: 100%;
@@ -24,15 +24,15 @@
 }
 
 .introCopy {
-  composes: body from '../../../StudioTypography.module.css';
+  composes: body from '../../../../StudioTypography.module.css';
 }
 
 .secondaryCopy {
-  composes: body from '../../../StudioTypography.module.css';
+  composes: body from '../../../../StudioTypography.module.css';
 }
 
 .heading {
-  composes: cardTitle from '../../../StudioTypography.module.css';
+  composes: cardTitle from '../../../../StudioTypography.module.css';
   margin: 0;
   color: var(--text-primary);
   scroll-margin-block: 24px;
@@ -90,7 +90,7 @@
 }
 
 .fieldLabel {
-  composes: cardTitle from '../../../StudioTypography.module.css';
+  composes: cardTitle from '../../../../StudioTypography.module.css';
 }
 
 .fieldError {
@@ -99,7 +99,7 @@
 }
 
 .lockHelp {
-  composes: body from '../../../StudioTypography.module.css';
+  composes: body from '../../../../StudioTypography.module.css';
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -132,7 +132,7 @@
 }
 
 .saveStatus {
-  composes: meta from '../../../StudioTypography.module.css';
+  composes: meta from '../../../../StudioTypography.module.css';
 }
 
 .phase[data-layout='compact'] .content {
