@@ -98,9 +98,26 @@ The Director has authority to generate images without a per-image approval. This
 
 🚨 **This must NOT be implemented by attaching the image-generation MCP to the Studio conversation.** That server reaches the provider directly, bypassing the job manager, the review modal and the per-project cap, and a snapshot test asserts its id — with five other auto-attach ids — is absent from the curated Studio conversation. That test is the spend fence and it stays.
 
-The correct implementation is a **Studio MCP tool that submits an image job through the existing job manager**, so metering, the per-project cap, idempotency and the audit trail all continue to apply. The Director gains the _decision_, not a private channel to the provider.
+The correct implementation is a **Studio MCP tool that submits an image job through the existing job manager**, so route validation, idempotency, the audit trail and concurrency pacing all continue to apply. The Director gains the _decision_, not a private channel to the provider.
 
-That also answers the sub-question: **the per-project cap still applies**, because the job manager still enforces it. When the cap is reached the tool must fail with a reason the Director can relay in prose, not fail silently.
+> ### ⚠️ Correction, 2026-08-12 — an earlier draft of this section was wrong
+>
+> It claimed "the per-project cap still applies". **There is no per-project spend cap, and there never was.** Verified by spike:
+>
+> - `MAX_IN_FLIGHT_PAID_JOBS_PER_PROJECT = 2` (`jobManager.ts:50`, used at `:393`) is a **`FifoSemaphore`** — a _concurrency_ limit. Jobs beyond it **queue**; they are never refused.
+> - `submitScenes` gates on batch ≤24 scenes, prompt ≤4KB and a revision match. No total ceiling.
+> - `GenerationReviewModal` **discloses** cost and enforces nothing.
+> - `RemoteMediaBudget` is a media _download_ budget; `quota` / `rate_limited` are _provider_ error codes. Neither is a spend control of ours.
+>
+> So before D1, image spend was bounded by exactly two things: **the human pressing Accept** in the review modal, and **the spend fence** keeping the agent away from the provider. D1 removes the first.
+
+### ✅ D1a — No spend cap is added (decided 2026-08-12)
+
+Cost is explicitly not a concern at this stage. **No ceiling is introduced**, and the consequence is recorded here so it is a known position rather than something discovered later:
+
+**After D1, nothing bounds the total number of images the Director can generate.** The remaining controls are concurrency pacing (2 in flight per project, which slows but never stops) and the fact that every generated image is visible in the transcript. There is no refusal path, so the tool needs no "capped" failure copy.
+
+If cost later matters, the enforcement point already exists — `submitScenes` is the single funnel every paid job passes through, and a ceiling belongs there rather than in the tool or the UI.
 
 ### ✅ D2 — Produce stays a phase route; the modal is not built
 
