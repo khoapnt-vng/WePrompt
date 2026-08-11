@@ -15,7 +15,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { rm } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
@@ -37,10 +37,15 @@ import type {
   StudioProject,
   StudioProjectSummary,
   StudioMediaChoiceRef,
+  StudioProposalPayload,
   StudioRendererJob,
   StudioRendererProject,
   StudioRouteCatalog,
 } from '@/common/types/project/creativeStudioTypes';
+import {
+  StudioProposalWriteError,
+  writeProposalRecord,
+} from '@process/resources/builtinMcp/studioProposalWriter';
 import { createCreativeStudioStore, type CreativeStudioStore } from '@process/services/creative-studio/store';
 
 const makeInput = (overrides: Partial<CreateStudioProjectInput> = {}): CreateStudioProjectInput => ({
@@ -51,6 +56,23 @@ const makeInput = (overrides: Partial<CreateStudioProjectInput> = {}): CreateStu
   resolution: '1080p',
   ...overrides,
 });
+
+const subprocessProposalPayload: StudioProposalPayload = {
+  kind: 'replace_storyboard',
+  sceneOrder: ['scene_1'],
+  scenes: {
+    scene_1: {
+      title: 'Sunrise over the terraces',
+      purpose: 'Open on the origin of the coffee',
+      visualPrompt: 'Golden hour over mountain coffee terraces, mist in the valleys',
+      narration: 'It starts at 1,600 meters.',
+      onScreenText: '',
+      mediaKind: 'image',
+      durationSeconds: 5,
+      referenceAssetId: null,
+    },
+  },
+};
 
 const cloneProject = (project: StudioProject): StudioProject => structuredClone(project);
 
@@ -1925,5 +1947,84 @@ describe('CreativeStudioStore connections', () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('Studio subprocess proposal writer', () => {
+  let proposalRoot: string;
+  let pendingDir: string;
+  let slotsDir: string;
+
+  beforeEach(async () => {
+    proposalRoot = await nodeFs.mkdtemp(path.join(tmpdir(), 'studio-proposals-'));
+    pendingDir = path.join(proposalRoot, 'pending');
+    slotsDir = path.join(proposalRoot, 'slots');
+    await mkdir(pendingDir, { recursive: true });
+    await mkdir(slotsDir, { recursive: true });
+  });
+
+  it('writes a pending record and a slot reservation', async () => {
+    const record = await writeProposalRecord({
+      pendingDir,
+      projectId: 'project_1',
+      baseRevision: 3,
+      payload: subprocessProposalPayload,
+    });
+
+    expect(record.status).toBe('pending');
+    expect(record.baseRevision).toBe(3);
+    const written = JSON.parse(await readFile(path.join(pendingDir, `${record.id}.json`), 'utf8'));
+    expect(written).toEqual(record);
+    const slots = await readdir(slotsDir);
+    expect(slots).toHaveLength(1);
+    const slot = JSON.parse(await readFile(path.join(slotsDir, slots[0]), 'utf8'));
+    expect(slot).toMatchObject({ schemaVersion: 1, proposalId: record.id });
+  });
+
+  it('fails typed when every slot is taken, without writing a record', async () => {
+    await Promise.all(
+      Array.from({ length: 50 }, (_, index) =>
+        writeFile(
+          path.join(slotsDir, `${index}.slot`),
+          JSON.stringify({ schemaVersion: 1, proposalId: 'x', reservedAt: 'now' })
+        )
+      )
+    );
+
+    await expect(
+      writeProposalRecord({ pendingDir, projectId: 'project_1', baseRevision: 1, payload: subprocessProposalPayload })
+    ).rejects.toMatchObject({ code: 'capacity' } satisfies Partial<StudioProposalWriteError>);
+    expect(await readdir(pendingDir)).toHaveLength(0);
+  });
+
+  it('releases its slot when the record write fails', async () => {
+    const collidingId = 'fixed_id_for_collision';
+    await mkdir(path.join(pendingDir, `${collidingId}.json`));
+
+    await expect(
+      writeProposalRecord({
+        pendingDir,
+        projectId: 'project_1',
+        baseRevision: 1,
+        payload: subprocessProposalPayload,
+        proposalId: collidingId,
+      })
+    ).rejects.toMatchObject({ code: 'storage' });
+    expect(await readdir(slotsDir)).toHaveLength(0);
+  });
+
+  it('rejects a record over the byte cap without touching disk', async () => {
+    const huge = {
+      ...subprocessProposalPayload,
+      scenes: {
+        scene_1: { ...subprocessProposalPayload.scenes.scene_1, narration: 'x'.repeat(300 * 1024) },
+      },
+    };
+
+    await expect(
+      writeProposalRecord({ pendingDir, projectId: 'project_1', baseRevision: 1, payload: huge })
+    ).rejects.toMatchObject({ code: 'too_large' });
+    expect(await readdir(pendingDir)).toHaveLength(0);
+    expect(await readdir(slotsDir)).toHaveLength(0);
   });
 });
