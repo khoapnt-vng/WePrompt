@@ -226,10 +226,10 @@ describe('PresentationRunFiles', () => {
       [
         path.basename(retried.candidate.temporaryRelativePath),
         path.basename(retried.grounding.temporaryRelativePath),
-      ].sort()
+      ].toSorted()
     );
     await expect(readdir(path.join(retryFiles.roots.runRoot, RUN_ID))).resolves.toEqual(
-      [path.basename(retried.preparationFile.temporaryRelativePath), 'retained'].sort()
+      [path.basename(retried.preparationFile.temporaryRelativePath), 'retained'].toSorted()
     );
   });
 
@@ -286,7 +286,7 @@ describe('PresentationRunFiles', () => {
         byteLength: prepared.byteLength,
       },
       async (reader) => ({
-        keys: Object.keys(reader).sort(),
+        keys: Object.keys(reader).toSorted(),
         hasSourcePath: 'sourcePath' in reader,
         text: (await reader.readBytes()).toString('utf8'),
       })

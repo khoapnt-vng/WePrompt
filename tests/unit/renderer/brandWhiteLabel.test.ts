@@ -143,7 +143,7 @@ describe('WePrompt white-label branding', () => {
     expect(referenceConflict).toBeDefined();
     const referencePaths = collectStringLeaves(referenceConflict ?? {})
       .map((leaf) => leaf.path)
-      .sort();
+      .toSorted();
 
     for (const language of i18nConfig.supportedLanguages) {
       const settings = readJson<JsonValue>(
@@ -157,7 +157,9 @@ describe('WePrompt white-label branding', () => {
 
       const conflict = getNestedValue(settings, 'channelConflict');
       const leaves = collectStringLeaves(conflict ?? {});
-      expect(leaves.map((leaf) => leaf.path).sort(), `${language}/settings/channelConflict`).toEqual(referencePaths);
+      expect(leaves.map((leaf) => leaf.path).toSorted(), `${language}/settings/channelConflict`).toEqual(
+        referencePaths
+      );
       for (const leaf of leaves) {
         expect(leaf.value.trim(), `${language}/settings/channelConflict.${leaf.path}`).not.toBe('');
       }

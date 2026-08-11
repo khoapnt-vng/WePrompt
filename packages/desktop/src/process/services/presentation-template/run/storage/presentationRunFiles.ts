@@ -375,8 +375,8 @@ function assertSourcePathAuthorization(authorization: PresentationSourcePathAuth
 }
 
 function hasExactObjectKeys(value: object, keys: readonly string[]): boolean {
-  const expected = [...keys].sort();
-  const actual = Object.keys(value).sort();
+  const expected = [...keys].toSorted();
+  const actual = Object.keys(value).toSorted();
   return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
 }
 

@@ -85,7 +85,7 @@ export class SortedKeyedLock {
   constructor(private readonly onAcquire?: (sortedKeys: readonly string[]) => void) {}
 
   async runExclusive<T>(keys: readonly string[], operation: () => Promise<T>): Promise<T> {
-    const sortedKeys = [...new Set(keys)].sort();
+    const sortedKeys = [...new Set(keys)].toSorted();
     this.onAcquire?.(sortedKeys);
     const acquired: { key: string; mutex: KeyMutex; release: () => void }[] = [];
     try {
@@ -96,7 +96,7 @@ export class SortedKeyedLock {
       }
       return await operation();
     } finally {
-      for (const lock of acquired.reverse()) {
+      for (const lock of acquired.toReversed()) {
         lock.release();
         if (lock.mutex.idle && this.mutexes.get(lock.key) === lock.mutex) this.mutexes.delete(lock.key);
       }
@@ -339,8 +339,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const hasExactKeys = (value: Record<string, unknown>, keys: readonly string[]): boolean => {
-  const expected = [...keys].sort();
-  const actual = Object.keys(value).sort();
+  const expected = [...keys].toSorted();
+  const actual = Object.keys(value).toSorted();
   return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
 };
 
@@ -422,13 +422,13 @@ const isIsoTimestamp = (value: unknown): value is string => {
   return Number.isFinite(parsed) && new Date(parsed).toISOString() === value;
 };
 
-const GRANT_STATES: readonly StoredPresentationGrantManifest['state'][] = [
+const GRANT_STATES: ReadonlySet<StoredPresentationGrantManifest['state']> = new Set([
   'active',
   'claimed',
   'consumed',
   'revoked',
   'expired',
-];
+]);
 
 function isStructurallyValidGrant(value: unknown, expectedGrantId: string): value is StoredPresentationGrantManifest {
   if (
@@ -454,7 +454,7 @@ function isStructurallyValidGrant(value: unknown, expectedGrantId: string): valu
     !isIsoTimestamp(value.createdAt) ||
     !isIsoTimestamp(value.updatedAt) ||
     !isIsoTimestamp(value.expiresAt) ||
-    !GRANT_STATES.includes(value.state as StoredPresentationGrantManifest['state']) ||
+    !GRANT_STATES.has(value.state as StoredPresentationGrantManifest['state']) ||
     !isNonnegativeInteger(value.byteLength) ||
     (value.claimedRunId !== null && (typeof value.claimedRunId !== 'string' || !UUID_RE.test(value.claimedRunId)))
   ) {
@@ -961,7 +961,7 @@ export class PresentationRunStore {
         revision: currentOwner.revision + 1,
         createdAt: currentOwner.createdAt === '' ? now : currentOwner.createdAt,
         updatedAt: now,
-        grantIds: [...currentOwner.grantIds, ...grants.map(({ grantId }) => grantId)].sort(),
+        grantIds: [...currentOwner.grantIds, ...grants.map(({ grantId }) => grantId)].toSorted(),
         unboundBytes: currentOwner.unboundBytes + batchBytes,
       };
       assertPresentationSourceOwnerManifest(nextOwner);
@@ -1335,7 +1335,7 @@ export class PresentationRunStore {
                 revision: 1,
                 createdAt: now,
                 updatedAt: now,
-                grantIds: grants.map(({ grantId }) => grantId).sort(),
+                grantIds: grants.map(({ grantId }) => grantId).toSorted(),
                 unboundBytes: currentDraftOwner.unboundBytes,
                 draftClientRequestId: null,
                 draftLifecycle: null,
@@ -1344,7 +1344,7 @@ export class PresentationRunStore {
                 ...existingDestination,
                 revision: existingDestination.revision + 1,
                 updatedAt: now,
-                grantIds: [...existingDestination.grantIds, ...grants.map(({ grantId }) => grantId)].sort(),
+                grantIds: [...existingDestination.grantIds, ...grants.map(({ grantId }) => grantId)].toSorted(),
                 unboundBytes: existingDestination.unboundBytes + currentDraftOwner.unboundBytes,
               };
         const migratedGrants = grants.map<StoredPresentationSourceGrantManifest>((grant) => ({
@@ -2856,7 +2856,7 @@ export class PresentationRunStore {
     const scannedGrantTombstones = new Map<string, StoredPresentationSourceGrantTombstone>();
     const scannedDrafts = new Map<string, StoredPresentationSourceDraftManifest>();
     const scannedDraftTombstones = new Map<string, StoredPresentationSourceDraftTombstone>();
-    for (const grantId of (await this.files.listTombstoneIds('grant')).sort()) {
+    for (const grantId of (await this.files.listTombstoneIds('grant')).toSorted()) {
       try {
         const tombstone = await this.journal.readCanonical<StoredPresentationSourceGrantTombstone>(
           'grant-tombstone',
@@ -2875,7 +2875,7 @@ export class PresentationRunStore {
         await this.files.quarantineEntity('grant-tombstone', grantId);
       }
     }
-    for (const draftId of (await this.files.listTombstoneIds('draft')).sort()) {
+    for (const draftId of (await this.files.listTombstoneIds('draft')).toSorted()) {
       try {
         const tombstone = await this.journal.readCanonical<StoredPresentationSourceDraftTombstone>(
           'draft-tombstone',
@@ -2894,7 +2894,7 @@ export class PresentationRunStore {
         await this.files.quarantineEntity('draft-tombstone', draftId);
       }
     }
-    for (const ownerId of (await this.files.listEntityIds('owner')).sort()) {
+    for (const ownerId of (await this.files.listEntityIds('owner')).toSorted()) {
       try {
         const owner = await this.journal.readCanonical<StoredPresentationSourceOwnerManifest>('owner', ownerId);
         if (owner === null) throw new PresentationCanonicalCorruptionError('Source owner manifest is missing');
@@ -2912,7 +2912,7 @@ export class PresentationRunStore {
         await this.files.quarantineEntity('owner', ownerId);
       }
     }
-    for (const grantId of (await this.files.listEntityIds('grant')).sort()) {
+    for (const grantId of (await this.files.listEntityIds('grant')).toSorted()) {
       if (scannedGrantTombstones.has(grantId)) continue;
       try {
         const value = await this.journal.readCanonical<Record<string, unknown>>('grant', grantId);
@@ -2947,7 +2947,7 @@ export class PresentationRunStore {
         await this.files.quarantineEntity('grant', grantId);
       }
     }
-    for (const draftId of (await this.files.listEntityIds('draft')).sort()) {
+    for (const draftId of (await this.files.listEntityIds('draft')).toSorted()) {
       if (scannedDraftTombstones.has(draftId)) continue;
       try {
         const draft = await this.journal.readCanonical<StoredPresentationSourceDraftManifest>('draft', draftId);
@@ -2964,7 +2964,7 @@ export class PresentationRunStore {
         await this.files.quarantineEntity('draft', draftId);
       }
     }
-    for (const runId of (await this.files.listTombstoneIds('run')).sort()) {
+    for (const runId of (await this.files.listTombstoneIds('run')).toSorted()) {
       let tombstone: StoredPresentationRunTombstone | null;
       try {
         tombstone = await this.journal.readCanonical<StoredPresentationRunTombstone>('run-tombstone', runId);
@@ -2980,7 +2980,7 @@ export class PresentationRunStore {
       await this.cleanupTombstonedRun(tombstone);
       scannedTombstones.set(runId, frozenSnapshot(tombstone));
     }
-    for (const runId of (await this.files.listEntityIds('run')).sort()) {
+    for (const runId of (await this.files.listEntityIds('run')).toSorted()) {
       let run: StoredPresentationRunManifest | null;
       try {
         run = await this.journal.readCanonical<StoredPresentationRunManifest>('run', runId);
@@ -3505,7 +3505,7 @@ export class PresentationRunStore {
   private sortedRuns(predicate: (run: StoredPresentationRunManifest) => boolean): StoredPresentationRunManifest[] {
     return Array.from(this.runs.values())
       .filter(predicate)
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || right.runId.localeCompare(left.runId))
+      .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt) || right.runId.localeCompare(left.runId))
       .map((run) => this.snapshotRun(run));
   }
 
@@ -3759,7 +3759,9 @@ export class PresentationRunStore {
     this.appStartBucket = null;
     const starts = Array.from(this.runs.values())
       .concat(Array.from(this.tombstones.values(), ({ discardedRun }) => discardedRun))
-      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.runId.localeCompare(right.runId));
+      .toSorted(
+        (left, right) => left.createdAt.localeCompare(right.createdAt) || left.runId.localeCompare(right.runId)
+      );
     for (const run of starts) this.recordStartEvent(run.conversationId, Date.parse(run.createdAt));
   }
 

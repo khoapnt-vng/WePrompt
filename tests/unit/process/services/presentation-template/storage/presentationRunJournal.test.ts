@@ -89,7 +89,7 @@ describe('PresentationRunJournal', () => {
       }),
     ]);
 
-    expect(results.map((result) => result.status).sort()).toEqual(['fulfilled', 'rejected']);
+    expect(results.map((result) => result.status).toSorted()).toEqual(['fulfilled', 'rejected']);
     expect((await journal.readCanonical<Record<string, unknown>>('run', RUN_ID))?.revision).toBe(1);
   });
 

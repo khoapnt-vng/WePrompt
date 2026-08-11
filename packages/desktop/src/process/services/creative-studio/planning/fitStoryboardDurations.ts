@@ -114,7 +114,7 @@ export function fitStoryboardDurations(
     durationSeconds: Math.floor(item.durationSeconds),
   }));
   let leftoverSeconds = targetSeconds - floored.reduce((total, item) => total + item.durationSeconds, 0);
-  const remainderOrder = [...floored].sort(
+  const remainderOrder = [...floored].toSorted(
     (left, right) => right.fractionalRemainder - left.fractionalRemainder || left.index - right.index
   );
   while (leftoverSeconds > 0) {
