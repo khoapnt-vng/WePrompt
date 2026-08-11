@@ -11,6 +11,8 @@ import type { GroupedHistoryResult } from '@/renderer/pages/conversation/Grouped
 import { buildGroupedHistory } from '@/renderer/pages/conversation/GroupedHistory/utils/groupingHelpers';
 
 export type ConversationHistoryContextValue = ReturnType<typeof useConversationListSync> & {
+  /** Includes conversations intentionally hidden from the general sidebar. */
+  allConversations: ReturnType<typeof useConversationListSync>['conversations'];
   groupedHistory: GroupedHistoryResult;
 };
 
@@ -35,6 +37,7 @@ export const ConversationHistoryProvider: React.FC<React.PropsWithChildren> = ({
   const value = useMemo<ConversationHistoryContextValue>(() => {
     return {
       ...conversationListSync,
+      allConversations: conversationListSync.conversations,
       conversations: visibleConversations,
       groupedHistory,
     };

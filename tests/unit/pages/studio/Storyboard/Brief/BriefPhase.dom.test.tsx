@@ -9,7 +9,7 @@ import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { StudioAsset, StudioRendererProject } from '@/common/types/project/creativeStudioTypes';
-import { BriefPhase } from '@renderer/pages/studio/components/PhaseShell/phases/BriefPhase';
+import { BriefPhase } from '@renderer/pages/studio/components/PhaseShell/phases/brief';
 import type { BriefPhaseController } from '@renderer/pages/studio/components/PhaseShell/types';
 import type { UseStoryboardEditorResult } from '@renderer/pages/studio/hooks/useStoryboardEditor';
 

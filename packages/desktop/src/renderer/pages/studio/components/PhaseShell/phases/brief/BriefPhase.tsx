@@ -9,8 +9,8 @@ import { Button, Input, InputNumber, Select } from '@arco-design/web-react';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import type { BriefPhaseController } from '../types';
-import type { StudioLayoutMode } from '../useStudioLayoutMode';
+import type { BriefPhaseController } from '../../types';
+import type { StudioLayoutMode } from '../../useStudioLayoutMode';
 import styles from './BriefPhase.module.css';
 
 const MAX_PROJECT_NAME_CHARS = 256;
