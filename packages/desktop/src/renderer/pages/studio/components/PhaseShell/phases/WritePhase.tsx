@@ -119,20 +119,9 @@ export const WritePhase: React.FC<WritePhaseProps> = ({ controller, layoutMode =
 
   return (
     <section data-layout={layoutMode} className={styles.phase} aria-labelledby='studio-write-phase-heading'>
-      <div className={styles.intro}>
-        <div>
-          <h2 id='studio-write-phase-heading' data-studio-phase-heading tabIndex={-1} className={styles.heading}>
-            {t('conversation.creativeStudio.phase.write.title')}
-          </h2>
-          <p className={`${styles.secondaryCopy} mb-0 mt-4px`}>
-            {t('conversation.creativeStudio.phase.shared.noMediaGeneration')}
-          </p>
-        </div>
-        <p className={styles.briefLine}>
-          <strong>{t('conversation.creativeStudio.project.brief')}</strong>
-          <span>{project.brief}</span>
-        </p>
-      </div>
+      <h2 id='studio-write-phase-heading' data-studio-phase-heading tabIndex={-1} className='sr-only'>
+        {t('conversation.creativeStudio.phase.write.title')}
+      </h2>
       <div className={styles.workspace} data-layout={layoutMode}>
         <div className={styles.mainColumn}>
           <ScriptTable
