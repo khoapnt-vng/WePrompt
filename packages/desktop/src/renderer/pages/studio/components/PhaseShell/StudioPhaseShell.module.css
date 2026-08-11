@@ -36,9 +36,13 @@
 }
 
 .projectTitle {
-  composes: pageHeading from '../../StudioTypography.module.css';
   overflow: hidden;
   margin: 0;
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 16px;
+  font-weight: var(--fw-medium);
+  letter-spacing: normal;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
