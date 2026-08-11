@@ -174,11 +174,11 @@ describe('GenerationControls', () => {
         catalog: catalog(),
         scene: { id: 'scene-1', mediaKind: 'image' },
         outputRole: 'reference',
-        referencePrompt: 'Edited product sheet prompt',
+        referencePrompt: 'Edited first-frame prompt',
       })
     ).toMatchObject({
       outputRole: 'reference',
-      referencePrompt: 'Edited product sheet prompt',
+      referencePrompt: 'Edited first-frame prompt',
       route: { kind: 'image' },
     });
   });

@@ -60,6 +60,7 @@ import type {
   StudioUpdateModelSelectionRequest,
 } from '@/common/types/project/creativeStudioTypes';
 import { isCanonicalStudioGeneratedTake } from '@/common/types/project/creativeStudioCanonicalTake';
+import { requestedMediaKind } from '@/common/types/project/creativeStudioOutputRole';
 import {
   CreativeStudioStoreError,
   reconcilePersistedStudioCuts,
@@ -1829,8 +1830,7 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
           (candidate) => candidate.kind === choice.kind && candidate.choiceId === choice.choiceId
         );
         if (scene === undefined) throw new CreativeStudioServiceError('invalid_route');
-        // A reference plate is always generated on an image route, whatever the scene's media kind.
-        const requiredKind = input.outputRole === 'reference' ? 'image' : scene.mediaKind;
+        const requiredKind = requestedMediaKind(scene.mediaKind, input.outputRole ?? 'take');
         if (requiredKind !== choice.kind || !available || route === undefined) {
           throw new CreativeStudioServiceError('invalid_route');
         }

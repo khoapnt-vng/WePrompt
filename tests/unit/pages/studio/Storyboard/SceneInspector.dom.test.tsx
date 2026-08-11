@@ -355,7 +355,7 @@ describe('SceneInspector', () => {
       byteSize: 256,
       sha256: 'b'.repeat(64),
       createdAt: '2026-08-11T00:00:00.000Z',
-      sourceVisualPrompt: 'Product reference sheet',
+      sourceVisualPrompt: 'First-frame reference plate',
     };
     render(
       <SceneInspector

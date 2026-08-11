@@ -274,7 +274,7 @@ describe('useStudioJobs', () => {
           catalogVersion: 'catalog-1',
           expectedRevision: 2,
           outputRole: 'reference',
-          referencePrompt: 'Edited product sheet prompt',
+          referencePrompt: 'Edited first-frame prompt',
         })
       ).toBe(true);
     });
@@ -287,7 +287,7 @@ describe('useStudioJobs', () => {
       routes: [{ ...route, kind: 'image', choiceId: 'choice_image' }],
       catalogVersion: 'catalog-1',
       outputRole: 'reference',
-      referencePrompt: 'Edited product sheet prompt',
+      referencePrompt: 'Edited first-frame prompt',
     });
   });
 

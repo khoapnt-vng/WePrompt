@@ -19,6 +19,7 @@ import type {
   StudioSceneGenerationChoice,
   StudioSelectVariationRequest,
 } from '@/common/types/project/creativeStudioTypes';
+import { requestedMediaKind } from '@/common/types/project/creativeStudioOutputRole';
 
 import {
   GenerationReviewModal,
@@ -56,11 +57,6 @@ type GenerationReviewState = {
   outputRole?: GenerationSingleReviewRequest['outputRole'];
   referencePrompt?: GenerationSingleReviewRequest['referencePrompt'];
 };
-
-const requestedMediaKind = (
-  sceneMediaKind: StudioScene['mediaKind'],
-  outputRole: GenerationReviewScene['outputRole']
-): StudioScene['mediaKind'] => (outputRole === 'reference' ? 'image' : sceneMediaKind);
 
 const routeIdentity = (
   route: Pick<StudioRouteCatalogEntry | GenerationReviewRouteSnapshot, 'choiceId' | 'kind'>

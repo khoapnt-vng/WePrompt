@@ -24,7 +24,7 @@ import {
   type StudioRetryJobRequest,
   type StudioSubmitScenesRequest,
 } from '@/common/types/project/creativeStudioTypes';
-import { jobOutputRole } from '@/common/types/project/creativeStudioOutputRole';
+import { jobOutputRole, requestedMediaKind } from '@/common/types/project/creativeStudioOutputRole';
 import {
   ProviderDeadlineError,
   runWithProviderDeadline,
@@ -278,13 +278,6 @@ const providerIsAvailable = (provider: IProvider, model: string): boolean =>
 
 const providerCredentialsAreUsable = (provider: IProvider): boolean =>
   provider.enabled !== false && provider.api_key.trim().length > 0;
-
-/**
- * A reference plate is always produced on the image route, whatever the scene's own media kind;
- * a take follows the scene. Every route, routing-selection and provider-request decision keys off this.
- */
-const requestedMediaKind = (sceneMediaKind: StudioMediaKind, role: StudioOutputRole): StudioMediaKind =>
-  role === 'reference' ? 'image' : sceneMediaKind;
 
 const routeMatches = (
   candidate: {

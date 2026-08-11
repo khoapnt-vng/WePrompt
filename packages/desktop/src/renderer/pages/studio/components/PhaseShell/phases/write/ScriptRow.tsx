@@ -7,10 +7,11 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Button, Input, Modal, Select } from '@arco-design/web-react';
-import { Delete, Down, Drag, Magic, Picture, Up } from '@icon-park/react';
+import { Camera, Delete, Down, Drag, Magic, Picture, Up } from '@icon-park/react';
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { STUDIO_REFERENCE_PROMPT_MAX_LENGTH } from '@/common/types/project/creativeStudioTypes';
 import type {
   StudioAsset,
   StudioAspectRatio,
@@ -21,7 +22,7 @@ import type {
 import type { SelectedSceneSaveState } from '../../../../hooks/useStoryboardEditor';
 import type { StudioSceneDurationBounds } from '../../../../studioRouteConstraints';
 import type { StudioSceneStatus } from '../../../../studioReadiness';
-import { buildFirstFramePrompt } from '../../../Generation/referencePrompt';
+import { buildFirstFramePrompt, hasFirstFramePromptSubject } from '../../../Generation/referencePrompt';
 import { createManagedStudioAssetUrl } from '../../../Preview/StagePreview';
 
 import styles from './write.module.css';
@@ -412,9 +413,9 @@ export const ScriptRow: React.FC<ScriptRowProps> = ({
               <Button
                 size='small'
                 disabled={importingReference || mutationPending}
-                icon={<Magic aria-hidden='true' />}
+                icon={<Camera aria-hidden='true' />}
                 onClick={() => {
-                  setReferencePrompt(buildFirstFramePrompt(scene.visualPrompt, aspectRatio));
+                  setReferencePrompt(buildFirstFramePrompt(draft.visualPrompt, aspectRatio));
                   setReferenceDialogVisible(true);
                 }}
               >
@@ -480,13 +481,15 @@ export const ScriptRow: React.FC<ScriptRowProps> = ({
         footer={
           <>
             <Button disabled={mutationPending} onClick={() => setReferenceDialogVisible(false)}>
-              {t('conversation.creativeStudio.review.cancel')}
+              {t('conversation.creativeStudio.create.cancel')}
             </Button>
             <Button
               type='primary'
-              disabled={!canGenerateReference || mutationPending || referencePrompt.trim().length === 0}
+              disabled={
+                !canGenerateReference || mutationPending || !hasFirstFramePromptSubject(referencePrompt, aspectRatio)
+              }
               onClick={() => {
-                if (!canGenerateReference) return;
+                if (!canGenerateReference || !hasFirstFramePromptSubject(referencePrompt, aspectRatio)) return;
                 setReferenceDialogVisible(false);
                 void onGenerateReference(referencePrompt);
               }}
@@ -505,6 +508,7 @@ export const ScriptRow: React.FC<ScriptRowProps> = ({
           value={referencePrompt}
           aria-label={t('conversation.creativeStudio.reference.promptLabel')}
           rows={10}
+          maxLength={STUDIO_REFERENCE_PROMPT_MAX_LENGTH}
           onChange={setReferencePrompt}
         />
       </Modal>
