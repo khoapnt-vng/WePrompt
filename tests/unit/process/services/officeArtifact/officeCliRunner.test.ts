@@ -17,6 +17,7 @@ import { PRESENTATION_RUN_LIMITS } from '@/common/config/constants';
 import { parseOfficeCliEnvelope } from '@/process/services/office-artifact/officeCliJson';
 import {
   createOfficeCliRunner,
+  resolveOfficeCliBinary,
   type OfficeCliExecFile,
   type OfficeCliProcessTreeSpawn,
   type OfficeCliSpawn,
@@ -1183,5 +1184,92 @@ ${command}
     await assertion;
     expect(child.kill).toHaveBeenCalledWith('SIGTERM');
     vi.useRealTimers();
+  });
+});
+
+describe('resolveOfficeCliBinary', () => {
+  const bundled = (resources: string, platform: NodeJS.Platform, arch: string) =>
+    path.join(
+      resources,
+      'bundled-aioncore',
+      `${platform}-${arch}`,
+      'managed-resources',
+      'office',
+      platform === 'win32' ? 'officecli.exe' : 'officecli'
+    );
+
+  it('returns an explicit binaryPath first', () => {
+    expect(resolveOfficeCliBinary({ binaryPath: '/opt/officecli', exists: () => true })).toBe('/opt/officecli');
+  });
+
+  it('returns an absolute OFFICECLI_PATH over discovered locations', () => {
+    expect(resolveOfficeCliBinary({ environment: { OFFICECLI_PATH: '/abs/officecli' }, exists: () => true })).toBe(
+      '/abs/officecli'
+    );
+  });
+
+  it('finds the officecli bundled with the app (WP #24097)', () => {
+    const resources = '/app/Resources';
+    const expected = bundled(resources, 'darwin', 'arm64');
+    const resolved = resolveOfficeCliBinary({
+      resourcesPath: resources,
+      platform: 'darwin',
+      arch: 'arm64',
+      environment: {},
+      exists: (p) => p === expected,
+      homeDirectory: '/home/u',
+    });
+    expect(resolved).toBe(expected);
+  });
+
+  it('finds the bundled officecli.exe on Windows', () => {
+    const resources = 'C:\\app\\resources';
+    const expected = bundled(resources, 'win32', 'x64');
+    const resolved = resolveOfficeCliBinary({
+      resourcesPath: resources,
+      platform: 'win32',
+      arch: 'x64',
+      environment: {},
+      exists: (p) => p === expected,
+    });
+    expect(resolved).toBe(expected);
+  });
+
+  it('falls back to the Windows installer location when nothing is bundled', () => {
+    const installed = path.join('C:\\Users\\u\\AppData\\Local', 'OfficeCli', 'officecli.exe');
+    const resolved = resolveOfficeCliBinary({
+      resourcesPath: 'C:\\app\\resources',
+      platform: 'win32',
+      arch: 'x64',
+      environment: { LOCALAPPDATA: 'C:\\Users\\u\\AppData\\Local' },
+      exists: (p) => p === installed,
+    });
+    expect(resolved).toBe(installed);
+  });
+
+  it('finds ~/.local/bin/officecli on unix when not bundled', () => {
+    const local = path.join('/home/u', '.local', 'bin', 'officecli');
+    const resolved = resolveOfficeCliBinary({
+      resourcesPath: '/app/Resources',
+      platform: 'linux',
+      arch: 'x64',
+      environment: {},
+      homeDirectory: '/home/u',
+      exists: (p) => p === local,
+    });
+    expect(resolved).toBe(local);
+  });
+
+  it('falls back to bare officecli when nothing is found', () => {
+    expect(
+      resolveOfficeCliBinary({
+        resourcesPath: '/app/Resources',
+        platform: 'linux',
+        arch: 'x64',
+        environment: {},
+        homeDirectory: '/home/u',
+        exists: () => false,
+      })
+    ).toBe('officecli');
   });
 });
