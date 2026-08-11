@@ -1086,7 +1086,7 @@
         "durationGuess": "약 {{seconds}}초",
         "attachBrief": "브리프 문서 첨부",
         "attachBriefUnavailable": "브리프 문서 첨부는 아직 사용할 수 없습니다.",
-        "submit": "브리프 확인 →",
+        "submit": "시작",
         "empty": "한 문장이면 충분합니다. 무엇을 만들지 알려 주세요."
       },
       "scriptOnly": "스크립트만",

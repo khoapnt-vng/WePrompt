@@ -1102,7 +1102,7 @@
         "durationGuess": "Cerca de {{seconds}}s",
         "attachBrief": "Anexar documento de briefing",
         "attachBriefUnavailable": "Ainda não é possível anexar documentos de briefing.",
-        "submit": "Ler meu briefing →",
+        "submit": "Começar",
         "empty": "Uma frase basta — diga o que vamos criar."
       },
       "scriptOnly": "SÓ ROTEIRO",

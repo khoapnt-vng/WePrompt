@@ -1086,7 +1086,7 @@
         "durationGuess": "約{{seconds}}秒",
         "attachBrief": "ブリーフ文書を添付",
         "attachBriefUnavailable": "ブリーフ文書の添付はまだ利用できません。",
-        "submit": "ブリーフを確認 →",
+        "submit": "開始",
         "empty": "一文で十分です。何を作るのか教えてください。"
       },
       "scriptOnly": "脚本のみ",

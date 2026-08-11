@@ -29,7 +29,6 @@ const bridge = vi.hoisted(() => ({
 }));
 const navigate = vi.hoisted(() => vi.fn());
 const activeLanguage = vi.hoisted(() => ({ value: 'en-US' }));
-const activePlatform = vi.hoisted(() => ({ isMacOS: true }));
 
 vi.mock('@/common', () => ({ ipcBridge: { creativeStudio: bridge } }));
 // Creative Studio ships behind a default-off release gate, so the sidebar entry this
@@ -40,7 +39,6 @@ vi.mock('@/common/config/constants', async (importOriginal) => ({
 }));
 vi.mock('@renderer/utils/platform', () => ({
   isElectronDesktop: () => true,
-  isMacOS: () => activePlatform.isMacOS,
 }));
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
@@ -52,7 +50,7 @@ vi.mock('react-i18next', () => ({
     t: (key: string, params?: Record<string, string | number>) => {
       const copy: Record<string, string> = {
         'conversation.creativeStudio.library.composer.label': 'What are we making?',
-        'conversation.creativeStudio.library.composer.submit': 'Read my brief →',
+        'conversation.creativeStudio.library.composer.submit': 'Start',
         'conversation.creativeStudio.library.composer.empty': 'One sentence is enough — say what we are making.',
         'conversation.creativeStudio.library.composer.attachBrief': 'Attach a brief doc',
         'conversation.creativeStudio.library.composer.attachBriefUnavailable':
@@ -146,7 +144,6 @@ describe('StudioLibrary', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     activeLanguage.value = 'en-US';
-    activePlatform.isMacOS = true;
     window.localStorage.clear();
     bridge.listProjects.invoke.mockResolvedValue(ok([]));
     bridge.createProject.invoke.mockResolvedValue(ok(project()));
@@ -209,7 +206,7 @@ describe('StudioLibrary', () => {
     fireEvent.change(screen.getByLabelText('What are we making?'), {
       target: { value: 'A brief for a launch video.' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Read my brief →' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
     await waitFor(() =>
       expect(bridge.createProject.invoke).toHaveBeenCalledWith({
@@ -236,16 +233,11 @@ describe('StudioLibrary', () => {
     expect(navigate).toHaveBeenCalledWith('/studio/shortcut-project/brief');
   });
 
-  it('shows the platform-correct shortcut hint for the supported submit chord', () => {
-    const view = render(<StudioLibrary />);
-
-    expect(screen.getByText('⌘↵')).toBeInTheDocument();
-
-    view.unmount();
-    activePlatform.isMacOS = false;
+  it('keeps the submit chord out of the visible composer controls', () => {
     render(<StudioLibrary />);
 
-    expect(screen.getByText('Ctrl+↵')).toBeInTheDocument();
+    expect(screen.queryByText('⌘↵')).not.toBeInTheDocument();
+    expect(screen.queryByText('Ctrl+↵')).not.toBeInTheDocument();
   });
 
   it('keeps brief-document attachment unavailable when the Library has no import path', () => {
@@ -257,7 +249,7 @@ describe('StudioLibrary', () => {
   it('shows the one-sentence inline validation without creating', async () => {
     render(<StudioLibrary />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Read my brief →' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('One sentence is enough — say what we are making.');
     expect(bridge.createProject.invoke).not.toHaveBeenCalled();
@@ -368,7 +360,7 @@ describe('StudioLibrary', () => {
     fireEvent.change(screen.getByLabelText('What are we making?'), {
       target: { value: 'Failed project sentence.' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Read my brief →' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('conversation.creativeStudio.errors.storage');
     expect(navigate).not.toHaveBeenCalled();
@@ -463,7 +455,7 @@ describe('StudioLibrary', () => {
     fireEvent.change(screen.getByLabelText('What are we making?'), {
       target: { value: 'Failed project sentence.' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Read my brief →' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('conversation.creativeStudio.errors.storage');
 
     await act(async () => onUpdate?.({ projectId: 'project-1' }));
@@ -485,7 +477,7 @@ describe('StudioLibrary', () => {
       deleteButtons[0].click();
       deleteButtons[1].click();
     });
-    expect(screen.getByRole('button', { name: 'Read my brief →' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
     expect(deleteButtons[0]).toBeDisabled();
     expect(deleteButtons[1]).toBeDisabled();
 

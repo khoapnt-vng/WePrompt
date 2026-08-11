@@ -926,7 +926,7 @@
         "durationGuess": "About {{seconds}}s",
         "attachBrief": "Attach a brief doc",
         "attachBriefUnavailable": "Brief document attachments are not available yet.",
-        "submit": "Read my brief →",
+        "submit": "Start",
         "empty": "One sentence is enough — say what we are making."
       },
       "scriptOnly": "SCRIPT ONLY",

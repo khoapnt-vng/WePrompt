@@ -6,8 +6,6 @@
 
 import type { CreateStudioProjectInput, StudioAspectRatio } from '@/common/types/project/creativeStudioTypes';
 import { Button, Input, Select, Tooltip } from '@arco-design/web-react';
-import { ArrowRight } from '@icon-park/react';
-import { isMacOS } from '@renderer/utils/platform';
 import React, { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -29,7 +27,6 @@ export const Composer: React.FC<ComposerProps> = ({ creating, disabled, errorMes
   const [aspectRatio, setAspectRatio] = useState<StudioAspectRatio>('16:9');
   const [targetDurationSeconds, setTargetDurationSeconds] = useState(18);
   const [empty, setEmpty] = useState(false);
-  const shortcutLabel = isMacOS() ? '⌘↵' : 'Ctrl+↵';
 
   const submit = useCallback(async (): Promise<void> => {
     const brief = sentence.trim();
@@ -115,12 +112,10 @@ export const Composer: React.FC<ComposerProps> = ({ creating, disabled, errorMes
             </span>
           </Tooltip>
         </div>
-        <kbd className={styles.composerShortcut}>{shortcutLabel}</kbd>
         <Button
           type='primary'
           size='small'
           className={styles.composerSubmit}
-          icon={<ArrowRight />}
           loading={creating}
           disabled={disabled}
           onClick={() => void submit()}

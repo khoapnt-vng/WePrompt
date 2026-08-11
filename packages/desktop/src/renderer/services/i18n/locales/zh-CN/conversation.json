@@ -1086,7 +1086,7 @@
         "durationGuess": "约 {{seconds}} 秒",
         "attachBrief": "附加简报文档",
         "attachBriefUnavailable": "简报文档附件功能尚不可用。",
-        "submit": "阅读我的简报 →",
+        "submit": "开始",
         "empty": "一句话就够了——说说我们要制作什么。"
       },
       "scriptOnly": "仅脚本",

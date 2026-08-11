@@ -1091,7 +1091,7 @@
         "durationGuess": "حدود {{seconds}} ثانیه",
         "attachBrief": "پیوست کردن سند بریف",
         "attachBriefUnavailable": "پیوست سند بریف هنوز در دسترس نیست.",
-        "submit": "خواندن بریف من →",
+        "submit": "شروع",
         "empty": "یک جمله کافی است — بگویید چه چیزی می‌سازیم."
       },
       "scriptOnly": "فقط فیلمنامه",

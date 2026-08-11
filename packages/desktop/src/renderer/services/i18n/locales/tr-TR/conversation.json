@@ -1093,7 +1093,7 @@
         "durationGuess": "Yaklaşık {{seconds}} sn",
         "attachBrief": "Bir özet belgesi ekle",
         "attachBriefUnavailable": "Özet belgesi ekleri henüz kullanılamıyor.",
-        "submit": "Özetimi oku →",
+        "submit": "Başla",
         "empty": "Bir cümle yeter — ne hazırladığımızı söyleyin."
       },
       "scriptOnly": "YALNIZCA SENARYO",

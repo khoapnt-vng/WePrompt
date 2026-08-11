@@ -1092,7 +1092,7 @@
         "durationGuess": "Etwa {{seconds}} s",
         "attachBrief": "Briefing-Dokument anhängen",
         "attachBriefUnavailable": "Briefing-Dokumente können derzeit noch nicht angehängt werden.",
-        "submit": "Briefing lesen →",
+        "submit": "Starten",
         "empty": "Ein Satz genügt – sag, was wir erstellen."
       },
       "scriptOnly": "NUR SKRIPT",

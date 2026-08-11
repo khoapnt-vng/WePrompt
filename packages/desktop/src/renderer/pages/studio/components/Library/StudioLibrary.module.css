@@ -116,15 +116,6 @@
   font-size: 12.5px;
 }
 
-.composerShortcut {
-  composes: meta from '../../StudioTypography.module.css';
-  margin-left: auto;
-  padding: 2px 6px;
-  border: 1px solid var(--studio-library-control-border);
-  border-radius: 5px;
-  color: var(--studio-plate-text);
-}
-
 .composerSubmit {
   composes: primaryAction from '../../StudioTypography.module.css';
 }
