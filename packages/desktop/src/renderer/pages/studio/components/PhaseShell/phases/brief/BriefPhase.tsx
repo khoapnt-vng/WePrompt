@@ -18,7 +18,6 @@ import { BriefProposalCard } from './BriefProposalCard';
 import styles from './BriefPhase.module.css';
 import { useBriefConversation } from './useBriefConversation';
 
-const MAX_PROJECT_NAME_CHARS = 256;
 const MAX_PROJECT_BRIEF_CHARS = 16 * 1024;
 const ACTIVE_JOB_STATUSES = new Set(['queued_local', 'submitting', 'queued_remote', 'running', 'needs_attention']);
 const ASPECT_RATIOS: StudioAspectRatio[] = ['16:9', '9:16', '1:1', '4:3', '3:4'];
@@ -43,21 +42,19 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
   const projectConflict = editor.conflict?.operation === 'update_project' ? editor.conflict : null;
   const projectIssue = projectConflict ?? (editor.error?.operation === 'update_project' ? editor.error : null);
   const draft = editor.projectDraft ?? {
-    name: project.name,
     brief: project.brief,
     aspectRatio: project.aspectRatio,
     targetDurationSeconds: project.targetDurationSeconds,
   };
   const briefConversation = useBriefConversation(project);
   const [composerText, setComposerText] = useState(draft.brief);
-  const invalidName = draft.name.trim().length === 0 || draft.name.length > MAX_PROJECT_NAME_CHARS;
   const invalidBrief = draft.brief.length > MAX_PROJECT_BRIEF_CHARS;
   const invalidComposer = composerText.length > MAX_PROJECT_BRIEF_CHARS;
   const invalidDuration =
     !Number.isInteger(draft.targetDurationSeconds) ||
     draft.targetDurationSeconds < 5 ||
     draft.targetDurationSeconds > 60;
-  const hasValidationError = invalidName || invalidBrief || invalidDuration;
+  const hasValidationError = invalidBrief || invalidDuration;
   const aspectLocked =
     Object.values(project.assets).some((asset) => asset.managedAsset.collection === 'assets') ||
     Object.values(project.jobs).some((job) => ACTIVE_JOB_STATUSES.has(job.status));
@@ -105,25 +102,6 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
 
       <div className={styles.content}>
         <div className={styles.form}>
-          <div className={styles.field}>
-            <label htmlFor='studio-brief-name' className={styles.fieldLabel}>
-              {t('conversation.creativeStudio.phase.brief.nameLabel')}
-            </label>
-            <Input
-              id='studio-brief-name'
-              value={draft.name}
-              error={invalidName}
-              maxLength={MAX_PROJECT_NAME_CHARS}
-              onChange={(name) => editor.updateProjectDraft({ name })}
-              onBlur={flushIfValid}
-            />
-            {invalidName && (
-              <span role='alert' className={styles.fieldError}>
-                {t('conversation.creativeStudio.phase.brief.invalidName')}
-              </span>
-            )}
-          </div>
-
           <div className={styles.field}>
             <label htmlFor='studio-brief-duration' className={styles.fieldLabel}>
               {t('conversation.creativeStudio.phase.brief.durationLabel')}
