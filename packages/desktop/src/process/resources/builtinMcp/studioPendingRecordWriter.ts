@@ -7,6 +7,8 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 
+// Shared subprocess-side disk contract: an O_EXCL slot caps pending records,
+// an exclusive write prevents replacement, and main re-validates every record.
 const MAX_RECORD_BYTES = 256 * 1024;
 const MAX_PENDING_PER_PROJECT = 50;
 
@@ -25,6 +27,7 @@ type WritePendingRecordInput<RecordType> = {
   pendingDir: string;
   recordId: string;
   record: RecordType;
+  // Proposal slots must retain proposalId for the main-process validateProposalSlot contract.
   slotRecordKey: 'proposalId' | 'requestId';
   capacityMessage: string;
   tooLargeMessage: string;

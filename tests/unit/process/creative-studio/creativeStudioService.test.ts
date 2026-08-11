@@ -50,6 +50,7 @@ import {
   registerStudioTools,
 } from '@process/resources/builtinMcp/studioServer';
 import { BUILTIN_STUDIO_NAME } from '@process/resources/builtinMcp/constants';
+import * as referenceRequestWriter from '@process/resources/builtinMcp/studioReferenceRequestWriter';
 
 const makeInput = (overrides: Partial<CreateStudioProjectInput> = {}): CreateStudioProjectInput => ({
   name: 'Launch film',
@@ -4262,29 +4263,34 @@ describe('Studio MCP server', () => {
     expect(await readFile(projectFile)).toEqual(before);
   });
 
-  it('parses env only when all four storage keys are present', () => {
-    expect(parseStudioServerEnv({})).toBeNull();
+  it.each([
+    { omitted: STUDIO_ENV.projectId, expected: null },
+    { omitted: STUDIO_ENV.projectDir, expected: null },
+    { omitted: STUDIO_ENV.pendingDir, expected: null },
+    {
+      omitted: STUDIO_ENV.referencePendingDir,
+      expected: path.join('/tmp/p', 'reference-requests', 'pending'),
+    },
+  ])('degrades safely when $omitted is absent from a frozen descriptor', ({ omitted, expected }) => {
     const routeCatalog: StudioRouteCatalog = {
       storyboard: { status: 'setup_required', selected: null, options: [] },
       image: { status: 'setup_required', selected: null, selectedRoute: null, options: [] },
       video: { status: 'setup_required', selected: null, selectedRoute: null, options: [] },
       catalogVersion: 'catalog-v1',
     };
-    const env = {
-      [STUDIO_ENV.projectId]: 'project_1',
-      [STUDIO_ENV.projectDir]: '/tmp/p',
-      [STUDIO_ENV.pendingDir]: '/tmp/p/proposals/pending',
-      [STUDIO_ENV.referencePendingDir]: '/tmp/p/reference-requests/pending',
-      [STUDIO_ENV.routeCatalog]: JSON.stringify(routeCatalog),
-    };
+    const env = Object.fromEntries(
+      Object.entries({
+        [STUDIO_ENV.projectId]: 'project_1',
+        [STUDIO_ENV.projectDir]: '/tmp/p',
+        [STUDIO_ENV.pendingDir]: '/tmp/p/proposals/pending',
+        [STUDIO_ENV.referencePendingDir]: '/tmp/p/reference-requests/pending',
+        [STUDIO_ENV.routeCatalog]: JSON.stringify(routeCatalog),
+      }).filter(([key]) => key !== omitted)
+    );
 
-    expect(parseStudioServerEnv(env)).toEqual({
-      projectId: 'project_1',
-      projectDir: '/tmp/p',
-      pendingDir: '/tmp/p/proposals/pending',
-      referencePendingDir: '/tmp/p/reference-requests/pending',
-      routeCatalog,
-    });
+    const parsed = parseStudioServerEnv(env);
+    if (expected === null) expect(parsed).toBeNull();
+    else expect(parsed).toMatchObject({ referencePendingDir: expected });
   });
 
   it('queues a reference request without spending', async () => {
@@ -4317,12 +4323,90 @@ describe('Studio MCP server', () => {
       referencePendingDir: paths.referencePendingDir,
     })({ sceneIds: ['scene_1', 'scene_2'] });
 
-    expect(result.status).toBe('queued_for_approval');
+    expect(result.content[0].text).toContain('2 of 2');
     expect(await store.listPendingReferenceRequests(created.id)).toHaveLength(2);
-    expect(JSON.parse(await readFile(path.join(paths.projectDir, 'project.json'), 'utf8'))).toMatchObject({ jobs: {} });
+    const project = JSON.parse(await readFile(path.join(paths.projectDir, 'project.json'), 'utf8')) as StudioProject;
+    expect(project.jobs).toEqual({});
+    expect(project.assets).toEqual({});
   });
 
-  it('refuses reference requests for scenes that do not exist', async () => {
+  it('reports the successful and failed scenes when a reference-request batch is partially written', async () => {
+    const rootDir = await mkdtemp(path.join(tmpdir(), 'studio-server-'));
+    const store = createCreativeStudioStore({ rootDir, createId: () => 'project_1' });
+    const created = await store.createProject(makeInput());
+    await store.updateProject(created.id, (project) => ({
+      ...project,
+      sceneOrder: ['scene_1', 'scene_2', 'scene_3'],
+      scenes: Object.fromEntries(
+        ['scene_1', 'scene_2', 'scene_3'].map((sceneId) => [
+          sceneId,
+          {
+            id: sceneId,
+            ...makeScene(sceneId),
+            selectedAssetId: null,
+            assetIds: [],
+            jobIds: [],
+            reviewState: 'draft' as const,
+          },
+        ])
+      ),
+    }));
+    const paths = await store.resolveProposalPaths(created.id);
+    const writeReferenceRequestRecord = referenceRequestWriter.writeReferenceRequestRecord;
+    vi.spyOn(referenceRequestWriter, 'writeReferenceRequestRecord').mockImplementation(async (input) => {
+      if (input.sceneId === 'scene_2') throw new Error('disk full');
+      return writeReferenceRequestRecord(input);
+    });
+
+    const result = await createRequestReferenceImagesHandler({
+      projectId: created.id,
+      projectDir: paths.projectDir,
+      pendingDir: paths.pendingDir,
+      referencePendingDir: paths.referencePendingDir,
+    })({ sceneIds: ['scene_1', 'scene_2', 'scene_3'] });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Queued 2 of 3');
+    expect(result.content[0].text).toContain('scene_2 failed: disk full');
+    expect((await store.listPendingReferenceRequests(created.id)).map((request) => request.sceneId).toSorted()).toEqual(
+      ['scene_1', 'scene_3']
+    );
+  });
+
+  it('reports a scene as already queued instead of writing it twice across calls', async () => {
+    const rootDir = await mkdtemp(path.join(tmpdir(), 'studio-server-'));
+    const store = createCreativeStudioStore({ rootDir, createId: () => 'project_1' });
+    const created = await store.createProject(makeInput());
+    await store.updateProject(created.id, (project) => ({
+      ...project,
+      sceneOrder: ['scene_1'],
+      scenes: {
+        scene_1: {
+          id: 'scene_1',
+          ...makeScene('scene_1'),
+          selectedAssetId: null,
+          assetIds: [],
+          jobIds: [],
+          reviewState: 'draft' as const,
+        },
+      },
+    }));
+    const paths = await store.resolveProposalPaths(created.id);
+    const handler = createRequestReferenceImagesHandler({
+      projectId: created.id,
+      projectDir: paths.projectDir,
+      pendingDir: paths.pendingDir,
+      referencePendingDir: paths.referencePendingDir,
+    });
+
+    await handler({ sceneIds: ['scene_1'] });
+    const repeated = await handler({ sceneIds: ['scene_1'] });
+
+    expect(repeated.content[0].text).toContain('Already queued: scene_1');
+    await expect(store.listPendingReferenceRequests(created.id)).resolves.toHaveLength(1);
+  });
+
+  it('names every unknown scene in one response', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'studio-server-'));
     await writeFile(path.join(dir, 'project.json'), JSON.stringify(studioServerProjectFixture));
 
@@ -4331,25 +4415,32 @@ describe('Studio MCP server', () => {
       projectDir: dir,
       pendingDir: path.join(dir, 'proposals', 'pending'),
       referencePendingDir: path.join(dir, 'reference-requests', 'pending'),
-    })({ sceneIds: ['nope'] });
+    })({ sceneIds: ['nope', 'also_missing'] });
 
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toMatch(/unknown scene/i);
+    expect(result.content[0].text).toContain('Unknown scenes: nope, also_missing');
   });
 
-  it.each([[], ['scene_1', 'scene_1'], Array.from({ length: 25 }, (_, index) => `scene_${index}`)])(
-    'refuses an invalid reference request scene selection',
-    async (sceneIds) => {
-      const result = await createRequestReferenceImagesHandler({
-        projectId: 'project_1',
-        projectDir: '',
-        pendingDir: '',
-        referencePendingDir: '',
-      })({ sceneIds });
+  it.each([
+    { sceneIds: null as unknown as string[], message: 'sceneIds must be an array.' },
+    { sceneIds: [], message: 'At least one scene id is required.' },
+    {
+      sceneIds: Array.from({ length: 25 }, (_, index) => `scene_${index}`),
+      message: 'At most 24 scene ids may be requested at once.',
+    },
+    { sceneIds: ['unsafe/id'], message: 'Invalid scene ids: unsafe/id' },
+    { sceneIds: ['scene_1', 'scene_1'], message: 'Duplicate scene ids: scene_1' },
+  ])('explains an invalid reference request selection: $message', async ({ sceneIds, message }) => {
+    const result = await createRequestReferenceImagesHandler({
+      projectId: 'project_1',
+      projectDir: '',
+      pendingDir: '',
+      referencePendingDir: '',
+    })({ sceneIds });
 
-      expect(result.isError).toBe(true);
-    }
-  );
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toBe(message);
+  });
 
   it('read_storyboard returns revision, settings and scenes without operational state', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'studio-server-'));

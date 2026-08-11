@@ -204,6 +204,7 @@ const PROPOSAL_SCENE_KEYS = new Set([
 ]);
 const PROPOSAL_DECISION_KEYS = new Set(['schemaVersion', 'proposalId', 'status', 'decidedAt']);
 const PROPOSAL_SLOT_KEYS = new Set(['schemaVersion', 'proposalId', 'reservedAt']);
+const REFERENCE_REQUEST_SLOT_KEYS = new Set(['schemaVersion', 'requestId', 'reservedAt']);
 const PROPOSAL_DECISION_STATUSES = new Set(['accepted', 'rejected', 'expired']);
 const REFERENCE_REQUEST_RECORD_KEYS = new Set(['schemaVersion', 'id', 'projectId', 'sceneId', 'status', 'createdAt']);
 
@@ -288,6 +289,12 @@ type StudioProposalDecision = {
 type StudioProposalSlot = {
   schemaVersion: 1;
   proposalId: string;
+  reservedAt: string;
+};
+
+type StudioReferenceRequestSlot = {
+  schemaVersion: 1;
+  requestId: string;
   reservedAt: string;
 };
 
@@ -424,6 +431,13 @@ const validateProposalSlot = (value: unknown): value is StudioProposalSlot =>
   hasExactKeys(value, PROPOSAL_SLOT_KEYS) &&
   value.schemaVersion === 1 &&
   isSafeProposalId(value.proposalId) &&
+  isCanonicalIsoTimestamp(value.reservedAt);
+
+const validateReferenceRequestSlot = (value: unknown): value is StudioReferenceRequestSlot =>
+  isRecord(value) &&
+  hasExactKeys(value, REFERENCE_REQUEST_SLOT_KEYS) &&
+  value.schemaVersion === 1 &&
+  isSafeProposalId(value.requestId) &&
   isCanonicalIsoTimestamp(value.reservedAt);
 
 const validateReferenceRequestRecord = (
@@ -1423,10 +1437,13 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     }
   };
 
-  const readBoundedPendingRecordJson = async (file: string): Promise<unknown> => {
+  const readBoundedPendingRecordJson = async (
+    file: string,
+    region: 'proposal' | 'reference request' = 'proposal'
+  ): Promise<unknown> => {
     const stats = await fs.lstat(file);
     if (stats.isSymbolicLink() || !stats.isFile() || stats.size > STUDIO_PROPOSAL_MAX_RECORD_BYTES) {
-      throw new CreativeStudioStoreError('storage_error', 'Creative Studio proposal record is unsafe');
+      throw new CreativeStudioStoreError('storage_error', `Creative Studio ${region} record is unsafe`);
     }
     return JSON.parse(await fs.readFile(file, 'utf8')) as unknown;
   };
@@ -1465,7 +1482,10 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       try {
         // The bounded queue contains at most 50 records and logs each malformed entry independently.
         // eslint-disable-next-line no-await-in-loop
-        const value = await readBoundedPendingRecordJson(path.join(directories.pending, entry.name));
+        const value = await readBoundedPendingRecordJson(
+          path.join(directories.pending, entry.name),
+          'reference request'
+        );
         if (validateReferenceRequestRecord(project, requestId, value)) requests.push(value);
         else {
           logError(
@@ -1544,39 +1564,66 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     await fs.rm(file, { force: true });
   };
 
-  const cleanupProposalSlots = async (directories: { slots: string }, proposals: StudioProposal[]): Promise<void> => {
-    const liveProposalIds = new Set(
-      proposals.filter((proposal) => proposal.status === 'pending').map((proposal) => proposal.id)
-    );
+  const cleanupPendingRecordSlots = async <Slot extends { reservedAt: string }>(
+    directories: { slots: string },
+    liveRecordIds: Set<string>,
+    validateSlot: (value: unknown) => value is Slot,
+    recordIdOf: (slot: Slot) => string,
+    region: 'Proposal' | 'Reference request'
+  ): Promise<void> => {
     const entries = await pendingRecordFileEntries(directories.slots);
-    const retainedProposalIds = new Set<string>();
+    const retainedRecordIds = new Set<string>();
     const cutoff = Date.parse(now()) - STUDIO_PROPOSAL_STALE_SLOT_MS;
     for (const entry of entries) {
       if (!entry.isFile() || !/^\d+\.slot$/.test(entry.name)) continue;
       const file = path.join(directories.slots, entry.name);
       try {
         // eslint-disable-next-line no-await-in-loop
-        const value = await readBoundedPendingRecordJson(file);
-        const retain =
-          validateProposalSlot(value) &&
-          liveProposalIds.has(value.proposalId) &&
-          !retainedProposalIds.has(value.proposalId);
+        const value = await readBoundedPendingRecordJson(
+          file,
+          region === 'Proposal' ? 'proposal' : 'reference request'
+        );
+        const slot = validateSlot(value) ? value : undefined;
+        const recordId = slot === undefined ? undefined : recordIdOf(slot);
+        const retain = recordId !== undefined && liveRecordIds.has(recordId) && !retainedRecordIds.has(recordId);
         if (retain) {
-          retainedProposalIds.add(value.proposalId);
+          retainedRecordIds.add(recordId);
           continue;
         }
         const activeReservation =
-          validateProposalSlot(value) &&
-          !liveProposalIds.has(value.proposalId) &&
-          Date.parse(value.reservedAt) > cutoff;
+          recordId !== undefined &&
+          !liveRecordIds.has(recordId) &&
+          slot !== undefined &&
+          Date.parse(slot.reservedAt) > cutoff;
         if (activeReservation) continue;
         // eslint-disable-next-line no-await-in-loop
         await releaseProposalSlotFile(file);
       } catch (error) {
-        logError('[CreativeStudio] Proposal slot cleanup failed', error);
+        logError(`[CreativeStudio] ${region} slot cleanup failed`, error);
       }
     }
   };
+
+  const cleanupProposalSlots = async (directories: { slots: string }, proposals: StudioProposal[]): Promise<void> =>
+    cleanupPendingRecordSlots(
+      directories,
+      new Set(proposals.filter((proposal) => proposal.status === 'pending').map((proposal) => proposal.id)),
+      validateProposalSlot,
+      (slot) => slot.proposalId,
+      'Proposal'
+    );
+
+  const cleanupReferenceRequestSlots = async (
+    directories: { slots: string },
+    requests: StudioReferenceRequest[]
+  ): Promise<void> =>
+    cleanupPendingRecordSlots(
+      directories,
+      new Set(requests.map((request) => request.id)),
+      validateReferenceRequestSlot,
+      (slot) => slot.requestId,
+      'Reference request'
+    );
 
   const releaseProposalSlot = async (directories: { slots: string }, proposalId: string): Promise<void> => {
     const entries = await pendingRecordFileEntries(directories.slots);
@@ -1649,6 +1696,30 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     if (lastReapedAt !== undefined && currentTime - lastReapedAt < STUDIO_PROPOSAL_STALE_SLOT_MS) return;
     await reapPendingProposals(root, directories);
     proposalReapedAt.set(projectId, currentTime);
+  };
+
+  const reapPendingReferenceRequests = async (
+    project: StudioProject,
+    directories: { pending: string; slots: string }
+  ): Promise<void> => {
+    const requests = await readReferenceRequestRecords(project, directories);
+    const cutoff = Date.parse(now()) - STUDIO_PROPOSAL_PENDING_TTL_MS;
+    const retained: StudioReferenceRequest[] = [];
+    for (const request of requests) {
+      if (Date.parse(request.createdAt) > cutoff) {
+        retained.push(request);
+        continue;
+      }
+      try {
+        // A bounded project ledger has at most 50 live pending records.
+        // eslint-disable-next-line no-await-in-loop
+        await fs.rm(path.join(directories.pending, `${request.id}.json`));
+      } catch (error) {
+        retained.push(request);
+        logError('[CreativeStudio] Reference request expiry failed', error);
+      }
+    }
+    await cleanupReferenceRequestSlots(directories, retained);
   };
 
   const listProjectProposals = async (
@@ -1977,10 +2048,16 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       await Promise.all(
         projects.map((project) =>
           enqueue(project.id, async () => {
-            const directories = await proposalDirectories(root, project.id, false);
+            const [directories, referenceDirectories] = await Promise.all([
+              proposalDirectories(root, project.id, false),
+              referenceRequestDirectories(root, project.id, false),
+            ]);
             if (directories !== null) {
               await reapPendingProposals(root, directories);
               proposalReapedAt.set(project.id, Date.parse(now()));
+            }
+            if (referenceDirectories !== null) {
+              await reapPendingReferenceRequests(project, referenceDirectories);
             }
           })
         )

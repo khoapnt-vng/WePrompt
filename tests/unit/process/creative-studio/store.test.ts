@@ -459,6 +459,26 @@ describe('creative studio project store', () => {
       ).toMatchObject({ proposalId: 'proposal_abandoned', status: 'expired' });
     });
 
+    it('reaps abandoned reference requests and releases their queue slots', async () => {
+      const project = await store.createProject(makeInput());
+      await store.updateProject(project.id, (current) => addScene(current, 'scene_1'));
+      const paths = await store.resolveProposalPaths(project.id);
+      clock = Date.now();
+      const record = await writeReferenceRequestRecord({
+        pendingDir: paths.referencePendingDir,
+        projectId: project.id,
+        sceneId: 'scene_1',
+        requestId: 'request_abandoned',
+      });
+      clock += 8 * 24 * 60 * 60 * 1_000;
+
+      await store.reapAbandonedProposals();
+
+      await expect(store.listPendingReferenceRequests(project.id)).resolves.toEqual([]);
+      expect(existsSync(path.join(paths.referencePendingDir, `${record.id}.json`))).toBe(false);
+      expect(readdirSync(path.join(rootDir, project.id, 'reference-requests', 'slots'))).toEqual([]);
+    });
+
     describe('subprocess proposal conformance', () => {
       const prepareProposalDirectories = async (projectId: string): Promise<string> => {
         await store.listProposals(projectId);
@@ -585,6 +605,29 @@ describe('creative studio project store', () => {
       } finally {
         await stopWatching();
       }
+    });
+
+    it('keeps proposal and reference-request inboxes independent', async () => {
+      const project = await store.createProject(makeInput());
+      const updated = await store.updateProject(project.id, (current) => addScene(current, 'scene_1'));
+      const paths = await store.resolveProposalPaths(project.id);
+      await writeReferenceRequestRecord({
+        pendingDir: paths.referencePendingDir,
+        projectId: project.id,
+        sceneId: 'scene_1',
+      });
+
+      await expect(store.listProposals(project.id)).resolves.toEqual([]);
+
+      await store.recordProposal({
+        projectId: project.id,
+        proposalId: 'proposal_1',
+        baseRevision: updated.revision,
+        payload: subprocessProposalPayload,
+      });
+      await rm(path.join(paths.referencePendingDir, (await readdir(paths.referencePendingDir))[0]));
+
+      await expect(store.listPendingReferenceRequests(project.id)).resolves.toEqual([]);
     });
   });
 

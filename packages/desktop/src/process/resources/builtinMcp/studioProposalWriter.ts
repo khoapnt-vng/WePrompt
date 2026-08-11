@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// Subprocess-side writer for the Studio proposal inbox. Implements the disk
-// contract the main-process store enforces on read: an O_EXCL slot file caps
-// pending records per project, and an exclusive record write prevents an id
-// from ever being overwritten. Main re-validates every record on read.
-
 import { randomUUID } from 'node:crypto';
 import type { StudioProposal, StudioProposalPayload } from '@/common/types/project/creativeStudioTypes';
 import {

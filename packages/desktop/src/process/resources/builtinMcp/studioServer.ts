@@ -21,7 +21,10 @@ import type {
 } from '@/common/types/project/creativeStudioTypes';
 import { BUILTIN_STUDIO_NAME } from '@process/resources/builtinMcp/constants';
 import { StudioProposalWriteError, writeProposalRecord } from '@process/resources/builtinMcp/studioProposalWriter';
-import { writeReferenceRequestRecord } from '@process/resources/builtinMcp/studioReferenceRequestWriter';
+import {
+  listPendingReferenceRequestSceneIds,
+  writeReferenceRequestRecord,
+} from '@process/resources/builtinMcp/studioReferenceRequestWriter';
 import { StudioPendingRecordWriteError } from '@process/resources/builtinMcp/studioPendingRecordWriter';
 
 export type StudioServerEnv = {
@@ -35,7 +38,6 @@ export type StudioServerEnv = {
 export type StudioToolResult = {
   content: Array<{ type: 'text'; text: string }>;
   isError?: boolean;
-  status?: 'queued_for_approval';
 };
 
 export type ProposeStoryboardInput = {
@@ -63,9 +65,11 @@ export function parseStudioServerEnv(env: Record<string, string | undefined>): S
   const projectId = env[STUDIO_ENV.projectId];
   const projectDir = env[STUDIO_ENV.projectDir];
   const pendingDir = env[STUDIO_ENV.pendingDir];
-  const referencePendingDir = env[STUDIO_ENV.referencePendingDir];
+  const referencePendingDir =
+    env[STUDIO_ENV.referencePendingDir] ??
+    (projectDir ? path.join(projectDir, 'reference-requests', 'pending') : undefined);
   const serializedRouteCatalog = env[STUDIO_ENV.routeCatalog];
-  if (!projectId || !projectDir || !pendingDir || !referencePendingDir) return null;
+  if (!projectId || !projectDir || !pendingDir) return null;
   let routeCatalog: StudioRouteCatalog | null = null;
   if (serializedRouteCatalog) {
     try {
@@ -192,21 +196,24 @@ export function createRequestReferenceImagesHandler(
 ): (input: { sceneIds: string[] }) => Promise<StudioToolResult> {
   return async ({ sceneIds }) => {
     if (!config) return errorResult('Creative Studio project is unavailable.');
-    if (
-      !Array.isArray(sceneIds) ||
-      sceneIds.length < 1 ||
-      sceneIds.length > 24 ||
-      sceneIds.some((sceneId) => !SAFE_ID.test(sceneId)) ||
-      new Set(sceneIds).size !== sceneIds.length
-    ) {
-      return errorResult('Reference requests require between 1 and 24 unique scene ids.');
+    if (!Array.isArray(sceneIds)) return errorResult('sceneIds must be an array.');
+    if (sceneIds.length < 1) return errorResult('At least one scene id is required.');
+    if (sceneIds.length > 24) return errorResult('At most 24 scene ids may be requested at once.');
+    const invalidSceneIds = sceneIds.filter((sceneId) => !SAFE_ID.test(sceneId));
+    if (invalidSceneIds.length > 0) return errorResult(`Invalid scene ids: ${invalidSceneIds.join(', ')}`);
+    const duplicateSceneIds = sceneIds.filter((sceneId, index) => sceneIds.indexOf(sceneId) !== index);
+    if (duplicateSceneIds.length > 0) {
+      return errorResult(`Duplicate scene ids: ${[...new Set(duplicateSceneIds)].join(', ')}`);
     }
     try {
       const project = await readProject(config);
-      const unknownSceneId = sceneIds.find((sceneId) => project.scenes[sceneId] === undefined);
-      if (unknownSceneId) return errorResult(`Unknown scene: ${unknownSceneId}`);
-      await Promise.all(
-        sceneIds.map((sceneId) =>
+      const unknownSceneIds = sceneIds.filter((sceneId) => project.scenes[sceneId] === undefined);
+      if (unknownSceneIds.length > 0) return errorResult(`Unknown scenes: ${unknownSceneIds.join(', ')}`);
+      const pendingSceneIds = await listPendingReferenceRequestSceneIds(config.referencePendingDir, config.projectId);
+      const alreadyQueued = sceneIds.filter((sceneId) => pendingSceneIds.has(sceneId));
+      const scenesToQueue = sceneIds.filter((sceneId) => !pendingSceneIds.has(sceneId));
+      const results = await Promise.allSettled(
+        scenesToQueue.map((sceneId) =>
           writeReferenceRequestRecord({
             pendingDir: config.referencePendingDir,
             projectId: config.projectId,
@@ -214,15 +221,22 @@ export function createRequestReferenceImagesHandler(
           })
         )
       );
-      return {
-        status: 'queued_for_approval',
-        content: [
-          {
-            type: 'text',
-            text: `${sceneIds.length} reference image request(s) queued for user approval; nothing was generated.`,
-          },
-        ],
-      };
+      const queued = results.filter((result) => result.status === 'fulfilled').length;
+      const failed = results.flatMap((result, index) =>
+        result.status === 'rejected'
+          ? [
+              `${scenesToQueue[index]} failed: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
+            ]
+          : []
+      );
+      const details = [
+        `Queued ${queued} of ${sceneIds.length} reference image request(s) for user approval`,
+        ...(alreadyQueued.length > 0 ? [`Already queued: ${alreadyQueued.join(', ')}`] : []),
+        ...failed,
+        'Nothing was generated',
+      ];
+      const result = { content: [{ type: 'text' as const, text: `${details.join('. ')}.` }] };
+      return failed.length > 0 ? { ...result, isError: true } : result;
     } catch (error) {
       if (error instanceof StudioPendingRecordWriteError) return errorResult(error.message);
       return errorResult(
