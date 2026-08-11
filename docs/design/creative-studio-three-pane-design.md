@@ -1,6 +1,6 @@
 # Creative Studio — the three-pane model
 
-**Drafted:** 2026-08-11 · **Status:** design of record, pending four decisions in §6
+**Drafted:** 2026-08-11 · **Status:** design of record — §6 decisions all settled 2026-08-12; §7 still open
 **Source of truth:** the Claude clickthrough `Creative Studio - Write (Clickthrough).dc.html` (62 pages). Where this document and the clickthrough disagree, the clickthrough wins and this document is wrong.
 **Reconciled against:** `integration/studio-director` @ `9baa9ceb9` ([PR #19](https://github.com/khoapnt-vng/WePrompt/pull/19))
 
@@ -80,35 +80,47 @@ way it was.
 
 It names the field, both values, **the actor, and the time**, states the consequence in plain language, and offers a **recompute** rather than only refusing. Today we fail closed and offer a prefilled re-propose turn; this is the same safety with far better explanation.
 
-## 5. Produce becomes a modal, not a route
+## 5. The Produce mock — rejected by D2, kept here for its copy
 
-Produce is a **batch-confirm modal over a dimmed Write screen**, titled "Produce N shots":
+The clickthrough draws Produce as a **batch-confirm modal over a dimmed Write screen**. **D2 rejects this** — Produce stays a phase route. The modal is recorded because its _copy_ is worth taking:
 
 > "Each shot's plate is its clip's first frame. Look at it now — this is the point of no return for the spend, not for the plate."
 
 One row per shot: plate thumbnail (132×74), `Seedance 1.0 · 4s · 16:9`, and **`~5 cr`**. Footer totals and, critically, **names the exclusions**: "3 shots · 12s · ~15 cr total. Shots 03 and 04 are not here — neither has a plate." Button: "Render 3 shots".
 
-Consequences: the phase rail becomes **part navigation, part action** (step 3 opens a modal), and shots without plates are silently excluded from spend but _loudly_ named in the copy.
+The transferable part is that it **names what it is leaving out** rather than silently producing fewer shots than expected. That belongs on the Produce route's confirm step. The modal itself, and the part-navigation/part-action rail it implied, are not built.
 
-## 6. Four decisions required before implementation
+## 6. Decisions — all four settled 2026-08-12
 
-### D1 — Asking for an image spends immediately
+### ✅ D1 — The Director decides when to make an image
 
-The composer invites "ask for an image", images charge, and the transcript shows the Director having already made two. That **removes the batch-approval gate we shipped in J2** (`97d6b47aa`), where assistant-queued reference requests waited for an explicit Accept in a review modal.
+The Director has authority to generate images without a per-image approval. This supersedes J2's batch-approval gate (`97d6b47aa`, `bf7a985d4`, `a1cc6491e`), where queued reference requests waited for an explicit Accept.
 
-Defensible: images are cheap relative to video, and video stays gated behind the Produce modal. But it is a deliberate loosening of an existing control, and it should be chosen, not inherited. **Sub-question:** does the per-project cap still apply, and what happens when it is reached mid-conversation?
+🚨 **This must NOT be implemented by attaching the image-generation MCP to the Studio conversation.** That server reaches the provider directly, bypassing the job manager, the review modal and the per-project cap, and a snapshot test asserts its id — with five other auto-attach ids — is absent from the curated Studio conversation. That test is the spend fence and it stays.
 
-### D2 — Produce as a modal replaces Produce as a phase route
+The correct implementation is a **Studio MCP tool that submits an image job through the existing job manager**, so metering, the per-project cap, idempotency and the audit trail all continue to apply. The Director gains the _decision_, not a private channel to the provider.
 
-Today `produce` is a route with its own screen (`studioPhaseRoute.ts`, `ProducePhase.tsx`) and its own engine bar. As a modal, that screen's other content — engine selection, the per-shot generation controls — needs a home or needs dropping. **Which?**
+That also answers the sub-question: **the per-project cap still applies**, because the job manager still enforces it. When the cap is reached the tool must fail with a reason the Director can relay in prose, not fail silently.
 
-### D3 — Credits become the cost unit
+### ✅ D2 — Produce stays a phase route; the modal is not built
 
-The modal prices in `~5 cr`. We have no credit ledger; we show honest-cost lines. This is a subsystem (balance, decrement, failure accounting, what happens on a partial batch) and it was already an open decision from the earlier redesign critique. **Is the ledger in scope, or do we show currency/opaque cost until it exists?**
+The clickthrough's Produce modal is **rejected**. `produce` remains a route with its own screen, engine bar and per-shot controls.
 
-### D4 — Per-field attribution
+Consequences, all simplifying: the phase rail stays **pure navigation** rather than part-action; the engine-bar hover shipped today (`63f4566c8`) is **not** superseded and keeps its home; and the §8 re-homing list shrinks accordingly.
 
-"Shot 02 duration · 4s → 5s · **you, just now**" requires knowing which field changed, from what, by whom, and when. We have store revisions, not per-field authorship. **Do we add attribution, or degrade the copy to what a revision diff can honestly say?**
+Worth borrowing from the mock even though the modal is not: its confirm step **names its exclusions** — "Shots 03 and 04 are not here — neither has a plate" — rather than silently producing fewer shots than the user expects. That copy belongs on the Produce route's own confirm. Optional, not blocking.
+
+### ✅ D3 — No credit ledger
+
+Out of scope. Cost is not priced in credits (`~5 cr`); the existing honest-cost lines stand. Any mock text showing credits is illustrative only and must not be transcribed into the build.
+
+### ✅ D4 — Degrade the copy; do not add per-field attribution
+
+No per-field authorship tracking. The stale card says only what a revision diff can honestly support.
+
+So "Shot 02 duration · 4s → 5s · you, just now" is **not** implementable as drawn. What survives is the field, the two values, and the fact that the script moved — without asserting **who** or **when** unless the store already knows it.
+
+⚠️ **Do not fabricate the actor.** In a single-user desktop app "you" is _probably_ true, but a proposal can also be superseded by an accepted proposal, which is not the user typing. Say what is known; drop what is not. The rest of the stale card — the `OUT OF DATE` badge, the plain-language consequence, and **"Ask again with my changes"** — is unaffected and is still the main win over today's fail-closed accept.
 
 ## 7. Unanswered by the clickthrough
 
@@ -139,4 +151,10 @@ The A15 phase-switch-mid-stream smoke passed on 2026-08-11 against the harder tw
 
 ## 10. Next step
 
-Answer D1–D4 and the two §7 questions, then write the implementation plan. Do not start tasks before D1 and D2 — they decide whether the spend model and the Produce surface change, and both touch code that multiple phases share.
+D1–D4 are settled (§6). Two questions in §7 remain — **collapse** and **narrow widths** — and both are shell-layout questions, so they block the pane work rather than the Director or proposal work.
+
+Sequencing that follows from the decisions:
+
+1. **Not blocked, can start:** the Director pane's contents — proposal card rationale, the stale card with its recompute action, outcome chips with Reopen, the pending strip, the composer scope chip.
+2. **Blocked on §7:** the three-pane shell itself, since collapse and narrow-width behaviour change its structure.
+3. **Needs a spike first:** D1's image tool. The Director gaining image authority while the spend fence holds is the one piece where a wrong implementation is expensive, and it is worth proving the job-manager route before building UI on top of it.
