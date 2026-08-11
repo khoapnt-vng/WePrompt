@@ -1,6 +1,6 @@
 # Creative Studio — the three-pane model
 
-**Drafted:** 2026-08-11 · **Status:** design of record — §6 decisions all settled 2026-08-12; §7 still open
+**Drafted:** 2026-08-11 · **Status:** design of record — §6 settled 2026-08-12; §7 collapse and scope settled; Brief's work-panel content and narrow widths still open
 **Source of truth:** the Claude clickthrough `Creative Studio - Write (Clickthrough).dc.html` (62 pages). Where this document and the clickthrough disagree, the clickthrough wins and this document is wrong.
 **Reconciled against:** `integration/studio-director` @ `9baa9ceb9` ([PR #19](https://github.com/khoapnt-vng/WePrompt/pull/19))
 
@@ -8,7 +8,7 @@
 
 ## 1. The model
 
-Studio becomes three fixed panes: **side menu · Director conversation · work panel**.
+Studio becomes three **collapsible** panes: **side menu · Director conversation · work panel**.
 
 The conversation is **always on**, on the left, at shell level — not a per-phase component. The work panel is **an app with its own flow and controls** which the Director can also drive through MCP. The phase rail lives _inside_ the work panel, under a breadcrumb, rather than in the application header.
 
@@ -122,11 +122,31 @@ So "Shot 02 duration · 4s → 5s · you, just now" is **not** implementable as 
 
 ⚠️ **Do not fabricate the actor.** In a single-user desktop app "you" is _probably_ true, but a proposal can also be superseded by an accepted proposal, which is not the user typing. Say what is known; drop what is not. The rest of the stale card — the `OUT OF DATE` badge, the plain-language consequence, and **"Ask again with my changes"** — is unaffected and is still the main win over today's fail-closed accept.
 
-## 7. Unanswered by the clickthrough
+## 7. Shell behaviour and scope
 
-- **Collapse.** The brief called the three areas collapsible; the clickthrough shows fixed panes with no collapse control. Wanted or dropped?
-- **Narrow widths.** Container min-width is 1340px. Today `useStudioLayoutMode.ts` defines `inline > 1120`, `drawer 820–1120`, `compact ≤ 820`. The design says nothing about either smaller mode.
-- **Review.** Not in this clickthrough. It has its own outstanding commission, which explicitly says the cut strip is not to be built until drawn.
+### ✅ Collapse — settled 2026-08-12: the shell is collapsible and expandable
+
+Panes collapse and expand. This **overrides the clickthrough**, which draws fixed panes with no control — the mock shows one width, not the whole behaviour.
+
+Since collapse is user-driven, the choice has to persist; a pane that reopens itself on every navigation is worse than no control. Existing precedent to follow rather than reinvent: the app sidebar already has a "Collapse sidebar" control.
+
+### ✅ Scope — settled 2026-08-12: the work area is one app, and only Brief and Write change now
+
+**The work area is a single application hosting all four phases**, not four screens sharing a frame. It owns its own flow, navigation and controls, and the Director drives it through MCP.
+
+**Produce and Review keep their current content this round.** They live inside the new shell and gain nothing else; they are fixed later. This is a deliberate deferral, not an oversight — Review in particular has an outstanding commission that says its cut strip is not to be built until drawn.
+
+### ⚠️ Still open — Brief's work-panel content
+
+Moving the conversation to the shell leaves Brief without its main content, and the clickthrough never draws it: the mock shows `Brief ✓` as a completed step with Write active, so Brief's own work-area is undrawn.
+
+Today Brief holds three things — the constraints (duration, aspect), the conversation, and the proposal cards. Under this design the conversation **and** the proposal cards move to the Director pane (§3, §4). What remains for Brief's work panel is a compact constraints row, which is close to an empty screen.
+
+Needs a decision. Plausible answers: Brief's work panel shows the script as it currently stands, including its empty state; or Brief shows the brief text itself as an editable document; or Brief stops being a work-area phase at all and becomes purely a conversation state, with the rail starting at Write.
+
+### Still open — narrow widths
+
+Container min-width in the mock is 1340px, while `useStudioLayoutMode.ts` defines `inline > 1120`, `drawer 820–1120`, `compact ≤ 820`. Collapse may subsume this — a narrow window could simply collapse the Director pane — but that should be stated rather than assumed, and `compact` still needs a defined behaviour.
 
 ## 8. What this supersedes from work shipped 2026-08-11
 
@@ -137,7 +157,6 @@ Not wasted, but re-homed — worth stating so the cost is visible:
 | Phase rail centred in the app header (`2a95fcf87`)            | Rail moves **inside the work panel**, under a breadcrumb                                 |
 | Project title + inline rename in the app header (`eca1c1242`) | Becomes the work-panel **breadcrumb**                                                    |
 | Save state in the app header                                  | Becomes the **`SAVED` chip** in the work-panel header                                    |
-| Engine bar collapsed to a hover chip (`63f4566c8`)            | Produce is a modal; the engine bar's home is D2                                          |
 | Script table `112px / 1.3fr / 1.7fr / 0.8fr`                  | Fixed `56 / 200 / 320 / 120`                                                             |
 | OUTPUT cell states                                            | Product-language states: "Ready to produce" / "Needs an image before it can be produced" |
 
