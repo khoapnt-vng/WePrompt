@@ -1101,6 +1101,9 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
       assertSafeId(input.projectId, 'project id');
       if (!deps.getStudioServerScriptPath) throw new Error('Creative Studio MCP script path is unavailable');
       const paths = await deps.store.resolveProposalPaths(input.projectId);
+      const project = await deps.store.getProject(input.projectId);
+      if (project === null) throw new CreativeStudioStoreError('not_found', 'Studio project not found');
+      const routeCatalog = (await buildCatalog(project)).catalog;
       return {
         id: `studio-brief-${input.projectId}`,
         name: BUILTIN_STUDIO_NAME,
@@ -1112,6 +1115,7 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
             [STUDIO_ENV.projectId]: input.projectId,
             [STUDIO_ENV.projectDir]: paths.projectDir,
             [STUDIO_ENV.pendingDir]: paths.pendingDir,
+            [STUDIO_ENV.routeCatalog]: JSON.stringify(routeCatalog),
           },
         },
       };

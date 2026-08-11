@@ -12,4 +12,5 @@ export const STUDIO_ENV = {
   projectId: 'AIONUI_STUDIO_PROJECT_ID',
   projectDir: 'AIONUI_STUDIO_PROJECT_DIR',
   pendingDir: 'AIONUI_STUDIO_PENDING_DIR',
+  routeCatalog: 'AIONUI_STUDIO_ROUTE_CATALOG',
 } as const;

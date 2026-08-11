@@ -14,7 +14,11 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
-import type { StudioEditableScene, StudioProject } from '@/common/types/project/creativeStudioTypes';
+import type {
+  StudioEditableScene,
+  StudioProject,
+  StudioRouteCatalog,
+} from '@/common/types/project/creativeStudioTypes';
 import { BUILTIN_STUDIO_NAME } from '@process/resources/builtinMcp/constants';
 import { StudioProposalWriteError, writeProposalRecord } from '@process/resources/builtinMcp/studioProposalWriter';
 
@@ -22,6 +26,7 @@ export type StudioServerEnv = {
   projectId: string;
   projectDir: string;
   pendingDir: string;
+  routeCatalog?: StudioRouteCatalog | null;
 };
 
 export type StudioToolResult = {
@@ -54,8 +59,17 @@ export function parseStudioServerEnv(env: Record<string, string | undefined>): S
   const projectId = env[STUDIO_ENV.projectId];
   const projectDir = env[STUDIO_ENV.projectDir];
   const pendingDir = env[STUDIO_ENV.pendingDir];
+  const serializedRouteCatalog = env[STUDIO_ENV.routeCatalog];
   if (!projectId || !projectDir || !pendingDir) return null;
-  return { projectId, projectDir, pendingDir };
+  let routeCatalog: StudioRouteCatalog | null = null;
+  if (serializedRouteCatalog) {
+    try {
+      routeCatalog = JSON.parse(serializedRouteCatalog) as StudioRouteCatalog;
+    } catch {
+      routeCatalog = null;
+    }
+  }
+  return { projectId, projectDir, pendingDir, routeCatalog };
 }
 
 const errorResult = (message: string): StudioToolResult => ({
@@ -113,6 +127,15 @@ export function createReadStoryboardHandler(
   };
 }
 
+export function createListRoutesHandler(
+  config: StudioServerEnv | null
+): (_input: Record<string, never>) => Promise<StudioToolResult> {
+  return async () => {
+    if (!config?.routeCatalog) return errorResult('Creative Studio route catalog is unavailable.');
+    return { content: [{ type: 'text', text: JSON.stringify(config.routeCatalog, null, 2) }] };
+  };
+}
+
 export function createProposeStoryboardHandler(
   config: StudioServerEnv | null
 ): (input: ProposeStoryboardInput) => Promise<StudioToolResult> {
@@ -163,6 +186,12 @@ async function main() {
   const config = parseStudioServerEnv(process.env);
   const server = new McpServer({ name: BUILTIN_STUDIO_NAME, version: '1.0.0' });
 
+  server.tool(
+    'studio_list_routes',
+    "Read the generation routes available to this project, with their constraints. Call this before proposing scene durations: a scene shorter than the video route's minDurationSeconds cannot be produced. Never assume a limit; read it.",
+    {},
+    createListRoutesHandler(config)
+  );
   server.tool(
     'read_storyboard',
     "Read the Studio project's current script: revision, settings, and every scene's editable fields plus whether it has a reference image and a selected take. Always call this before proposing.",

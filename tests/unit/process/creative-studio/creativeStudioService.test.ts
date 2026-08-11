@@ -19,6 +19,7 @@ import type {
   StudioJob,
   StudioProject,
   StudioRendererProject,
+  StudioRouteCatalog,
   StudioRouteCatalogEntry,
   StudioScene,
   StudioTextModelOption,
@@ -41,6 +42,7 @@ import {
   type StudioStoryboardPlanner,
 } from '@process/services/creative-studio/planning/storyboardPlanner';
 import {
+  createListRoutesHandler,
   createProposeStoryboardHandler,
   createReadStoryboardHandler,
   parseStudioServerEnv,
@@ -338,9 +340,18 @@ describe('CreativeStudioService', () => {
       store,
       onProjectUpdated,
       storyboardPlanner: makePlanner(),
+      providerResolver: {
+        listConnectionCandidates: async () => [],
+        listGenerationRoutes: async () => ({
+          routes: [routeOption('image', { model: 'image-model' }), routeOption('video', { model: 'video-model' })],
+          generationCatalogVersion: 'generation-v1',
+        }),
+        isGenerationRouteAvailable: async () => true,
+      },
       getStudioServerScriptPath: () => scriptPath,
-    });
+    } as unknown as Parameters<typeof createCreativeStudioService>[0]);
     const paths = await store.resolveProposalPaths(project.id);
+    const routeCatalog = await descriptorService.listRoutes({ projectId: project.id });
 
     await expect(descriptorService.getBriefSessionServer({ projectId: project.id })).resolves.toEqual({
       id: `studio-brief-${project.id}`,
@@ -353,6 +364,7 @@ describe('CreativeStudioService', () => {
           [STUDIO_ENV.projectId]: project.id,
           [STUDIO_ENV.projectDir]: paths.projectDir,
           [STUDIO_ENV.pendingDir]: paths.pendingDir,
+          [STUDIO_ENV.routeCatalog]: JSON.stringify(routeCatalog),
         },
       },
     });
@@ -4068,18 +4080,65 @@ describe('CreativeStudioService', () => {
 });
 
 describe('Studio MCP server', () => {
+  it('exposes the route catalog with constraints and never mutates the project', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'studio-server-'));
+    const projectFile = path.join(dir, 'project.json');
+    await writeFile(projectFile, JSON.stringify(studioServerProjectFixture));
+    const catalog: StudioRouteCatalog = {
+      storyboard: { status: 'ready', selected: null, options: [] },
+      image: {
+        status: 'ready',
+        selected: null,
+        selectedRoute: null,
+        options: [routeOption('image', { model: 'image-model' })],
+      },
+      video: {
+        status: 'ready',
+        selected: null,
+        selectedRoute: null,
+        options: [routeOption('video', { model: 'video-model' })],
+      },
+      catalogVersion: 'catalog-v1',
+    };
+    const before = await readFile(projectFile);
+
+    const result = await createListRoutesHandler({
+      projectId: 'project_1',
+      projectDir: dir,
+      pendingDir: '',
+      routeCatalog: catalog,
+    })({});
+    const parsed = JSON.parse(result.content[0].text) as StudioRouteCatalog;
+
+    expect(parsed.image.options[0]).toMatchObject({ model: expect.any(String), health: expect.any(String) });
+    expect(parsed.video.options[0]?.constraints).toMatchObject({
+      minDurationSeconds: expect.any(Number),
+      maxDurationSeconds: expect.any(Number),
+      supportsFirstFrame: expect.any(Boolean),
+    });
+    expect(await readFile(projectFile)).toEqual(before);
+  });
+
   it('parses env only when all three keys are present', () => {
     expect(parseStudioServerEnv({})).toBeNull();
+    const routeCatalog: StudioRouteCatalog = {
+      storyboard: { status: 'setup_required', selected: null, options: [] },
+      image: { status: 'setup_required', selected: null, selectedRoute: null, options: [] },
+      video: { status: 'setup_required', selected: null, selectedRoute: null, options: [] },
+      catalogVersion: 'catalog-v1',
+    };
     const env = {
       [STUDIO_ENV.projectId]: 'project_1',
       [STUDIO_ENV.projectDir]: '/tmp/p',
       [STUDIO_ENV.pendingDir]: '/tmp/p/proposals/pending',
+      [STUDIO_ENV.routeCatalog]: JSON.stringify(routeCatalog),
     };
 
     expect(parseStudioServerEnv(env)).toEqual({
       projectId: 'project_1',
       projectDir: '/tmp/p',
       pendingDir: '/tmp/p/proposals/pending',
+      routeCatalog,
     });
   });
 
