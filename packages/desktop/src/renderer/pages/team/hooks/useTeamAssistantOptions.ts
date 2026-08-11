@@ -1,9 +1,11 @@
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { resolveLocaleKey } from '@/common/utils';
 import { useConversationAssistants } from '@renderer/pages/conversation/hooks/useConversationAssistants';
 import {
   assistantToOption,
   filterTeamSupportedAssistants,
+  teamAssistantMatchesQuery,
   type TeamAssistantOption,
 } from '../components/assistantSelectUtils';
 
@@ -13,6 +15,7 @@ export function useTeamAssistantOptions(locale = 'en-US'): {
   error: unknown;
   filterByQuery: (query: string) => TeamAssistantOption[];
 } {
+  const { t } = useTranslation();
   const result = useConversationAssistants() as {
     presetAssistants?: Parameters<typeof assistantToOption>[0][];
     loading?: boolean;
@@ -28,12 +31,8 @@ export function useTeamAssistantOptions(locale = 'en-US'): {
     [result.presetAssistants, localeKey]
   );
   const filterByQuery = useMemo(
-    () => (query: string) => {
-      const q = query.trim().toLowerCase();
-      if (!q) return assistants;
-      return assistants.filter((assistant) => assistant.name.toLowerCase().includes(q));
-    },
-    [assistants]
+    () => (query: string) => assistants.filter((assistant) => teamAssistantMatchesQuery(assistant, query, t)),
+    [assistants, t]
   );
 
   return {

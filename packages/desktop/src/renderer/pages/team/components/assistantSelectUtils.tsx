@@ -9,6 +9,7 @@ import {
   type ForgeAssistantBrandKey,
 } from '@renderer/utils/model/assistantDisplay';
 import { assistantRuntimeKey, type Assistant } from '@/common/types/agent/assistantTypes';
+import type { TeamAssistant } from '@/common/types/team/teamTypes';
 
 /** Team leader selector entry derived from the unified assistant catalog. */
 export type TeamAssistantOption = {
@@ -60,6 +61,45 @@ export function resolveTeamAssistantLabel(
   t: TFunction
 ): string {
   return assistant.brandKey ? t(assistant.brandKey) : assistant.name;
+}
+
+/**
+ * The name to show for an existing team member.
+ *
+ * Unlike an option, a member carries `assistant_name` — persisted at create
+ * time and **overwritten by `team.renameAgent`**. So the brand label may only
+ * stand in while that field is still the untouched catalog name; a name the
+ * user typed themselves always wins. Falls back to the persisted name whenever
+ * the member cannot be matched to a catalog entry (deleted assistant, a slot
+ * that predates assistant identity, or an empty catalog).
+ */
+export function resolveTeamMemberLabel(
+  member: Pick<TeamAssistant, 'assistant_id' | 'assistant_name'>,
+  options: TeamAssistantOption[],
+  t: TFunction
+): string {
+  const persisted = member.assistant_name ?? '';
+  const option = member.assistant_id ? options.find((o) => o.id === member.assistant_id) : undefined;
+  if (!option?.brandKey) return persisted;
+  if (persisted && persisted !== option.name) return persisted;
+  return resolveTeamAssistantLabel(option, t);
+}
+
+/**
+ * Whether an assistant matches a search query.
+ *
+ * Matches the label the row actually displays *and* the catalog name, so the
+ * rebranded built-ins are findable by the name on screen without breaking
+ * anyone who searches by the name they already know.
+ */
+export function teamAssistantMatchesQuery(
+  assistant: Pick<TeamAssistantOption, 'name' | 'brandKey'>,
+  query: string,
+  t: TFunction
+): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return resolveTeamAssistantLabel(assistant, t).toLowerCase().includes(q) || assistant.name.toLowerCase().includes(q);
 }
 
 export function assistantFromId(

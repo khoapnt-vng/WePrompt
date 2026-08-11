@@ -20,6 +20,8 @@ import { resolveCronJobId } from '@/renderer/pages/cron/cronUtils';
 import TeamTabs from './components/TeamTabs';
 import TeamChatView from './components/TeamChatView';
 import TeamAgentIdentity from './components/TeamAgentIdentity';
+import { resolveTeamMemberLabel } from './components/assistantSelectUtils';
+import { useTeamAssistantOptions } from './hooks/useTeamAssistantOptions';
 import TeamViewToggle from './components/TeamViewToggle';
 import TeamWarmupOverlay from './components/TeamWarmupOverlay';
 import { useTeamViewMode } from './hooks/useTeamViewMode';
@@ -129,9 +131,12 @@ const AssistantChatSlot: React.FC<{
   onTeamRunAck,
   onRunStateStale,
 }) => {
+  const { t, i18n } = useTranslation();
   const layout = useLayoutContext();
   const teamPermission = useTeamPermission();
   const isMobile = layout?.isMobile ?? false;
+  // 列抬头的名字要和胶囊 / warmup 失败卡一致（改过名的用用户的名字，否则品牌名）。
+  const { assistants: catalog } = useTeamAssistantOptions(i18n?.language ?? 'en-US');
   const { data: conversation } = useSWR(
     assistant.conversation_id ? ['team-conversation', assistant.conversation_id] : null,
     () => getConversationOrNull(assistant.conversation_id)
@@ -147,7 +152,7 @@ const AssistantChatSlot: React.FC<{
     <div className='flex flex-col h-full' style={{ background: `color-mix(in srgb, ${color} 4%, var(--bg-base))` }}>
       <div className='flex items-center justify-between gap-8px px-12px h-40px shrink-0 border-b border-solid border-[color:var(--border-base)] relative z-10 bg-1'>
         <TeamAgentIdentity
-          assistant_name={assistant.assistant_name}
+          assistant_name={resolveTeamMemberLabel(assistant, catalog, t)}
           assistant_backend={assistant.assistant_backend}
           icon={assistant.icon}
           conversation_id={assistant.conversation_id}

@@ -3,7 +3,12 @@ import { Button, Empty, Tooltip } from '@arco-design/web-react';
 import { Plus } from '@icon-park/react';
 import { useTranslation } from 'react-i18next';
 import { AionSearchInput, AionInlineSearchInput } from '@renderer/components/base';
-import { AssistantOptionLabel, assistantKey, type TeamAssistantOption } from '../assistantSelectUtils';
+import {
+  AssistantOptionLabel,
+  assistantKey,
+  teamAssistantMatchesQuery,
+  type TeamAssistantOption,
+} from '../assistantSelectUtils';
 
 type Props = {
   assistants: TeamAssistantOption[];
@@ -38,11 +43,10 @@ const TeamAssistantPicker: React.FC<Props> = ({
   const isInlineSearch = searchVariant === 'inline';
   const [query, setQuery] = useState('');
   const searchPlaceholder = t('team.create.searchPlaceholder', { defaultValue: 'Search' });
-  const filteredAssistants = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return assistants;
-    return assistants.filter((assistant) => assistant.name.toLowerCase().includes(q));
-  }, [assistants, query]);
+  const filteredAssistants = useMemo(
+    () => assistants.filter((assistant) => teamAssistantMatchesQuery(assistant, query, t)),
+    [assistants, query, t]
+  );
 
   return (
     <div className={`flex min-h-0 flex-col ${isModalDensity ? 'gap-12px' : ''} ${className ?? ''}`}>
