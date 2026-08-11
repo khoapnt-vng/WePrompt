@@ -1374,14 +1374,6 @@ const INVALID_PAYLOADS = [
   ],
   [
     'creative-studio.submit-scenes',
-    'reference output role in batch mode',
-    // Batch stays take-only in v1: the Director requests one reference plate at a time. A later commit in
-    // this slice deliberately removes this constraint so batch can request plates for several scenes at
-    // once — this row is expected to flip then. It is correct behaviour today.
-    { ...VALID_PAYLOADS['creative-studio.submit-scenes'], mode: 'batch', outputRole: 'reference' },
-  ],
-  [
-    'creative-studio.submit-scenes',
     'reference prompt without a reference output role',
     { ...VALID_PAYLOADS['creative-studio.submit-scenes'], referencePrompt: 'A close-up of the product label' },
   ],
@@ -1568,6 +1560,21 @@ describe('native bridge payload schemas', () => {
       ...VALID_PAYLOADS['creative-studio.submit-scenes'],
       outputRole: 'reference',
       referencePrompt: 'A close-up of the product label',
+    };
+
+    expect(parseNativeBridgePayload('creative-studio.submit-scenes', payload)).toEqual(payload);
+  });
+
+  it('accepts a batch reference submission across multiple scenes', () => {
+    const payload = {
+      ...VALID_PAYLOADS['creative-studio.submit-scenes'],
+      mode: 'batch',
+      sceneIds: ['scene_1', 'scene_2'],
+      outputRole: 'reference',
+      routes: [
+        { sceneId: 'scene_1', choiceId: 'binding_1', kind: 'video' },
+        { sceneId: 'scene_2', choiceId: 'binding_2', kind: 'video' },
+      ],
     };
 
     expect(parseNativeBridgePayload('creative-studio.submit-scenes', payload)).toEqual(payload);

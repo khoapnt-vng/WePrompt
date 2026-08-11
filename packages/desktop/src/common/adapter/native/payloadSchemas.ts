@@ -375,9 +375,6 @@ const studioSubmitScenesSchema = z
     ) {
       context.addIssue({ code: 'custom', message: 'routes must exactly match sceneIds', path: ['routes'] });
     }
-    if (input.outputRole === 'reference' && input.mode !== 'single') {
-      context.addIssue({ code: 'custom', message: 'reference output requires single mode', path: ['outputRole'] });
-    }
     if (input.referencePrompt !== undefined && input.outputRole !== 'reference') {
       context.addIssue({
         code: 'custom',
