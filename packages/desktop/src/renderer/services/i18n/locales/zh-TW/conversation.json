@@ -1084,27 +1084,8 @@
         "aspectRatioLabel": "畫面比例",
         "durationLabel": "預計長度",
         "durationGuess": "約 {{seconds}} 秒",
-        "attachBrief": "附加簡報文件",
-        "attachBriefUnavailable": "簡報文件附件功能尚未開放。",
-        "submit": "閱讀我的簡報 →",
+        "submit": "開始",
         "empty": "一句話就夠了——說說我們要製作什麼。"
-      },
-      "shape": {
-        "title": "從結構開始",
-        "label": "{{name}} · {{count}} 個鏡頭 · {{seconds}} 秒",
-        "sceneTitle": "鏡頭 {{number}}",
-        "productStory": {
-          "name": "產品故事",
-          "starter": "為從未聽說過我們的人講一個產品故事——四個節拍，最後以品牌字標收尾。"
-        },
-        "featureTeaser": {
-          "name": "功能預告",
-          "starter": "為已經在使用產品的客戶製作一支新功能短預告。"
-        },
-        "recapReel": {
-          "name": "季度回顧",
-          "starter": "為全公司製作一支季度回顧短片，溫暖，並帶一點自豪感。"
-        }
       },
       "scriptOnly": "僅腳本",
       "posterBadge": "版本 {{take}} · 鏡頭 {{scene}}",

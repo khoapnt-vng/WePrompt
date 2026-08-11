@@ -17,7 +17,6 @@ import { useNavigate } from 'react-router-dom';
 
 import { Composer } from './Composer';
 import { ProjectCard } from './ProjectCard';
-import { ShapeTemplates, type StudioShape } from './ShapeTemplates';
 import styles from './StudioLibrary.module.css';
 import { rememberStudioPhase, resolveStudioEntryPhase, studioPhasePath } from '../../studioPhaseRoute';
 
@@ -96,59 +95,6 @@ export const StudioLibrary: React.FC = () => {
     [navigate]
   );
 
-  const createFromShape = useCallback(
-    async (shape: StudioShape): Promise<void> => {
-      setCreating(true);
-      setCreateErrorMessageKey(null);
-      try {
-        const name = t(shape.nameKey);
-        const created = await ipcBridge.creativeStudio.createProject.invoke({
-          name,
-          brief: t(shape.starterKey),
-          aspectRatio: '16:9',
-          targetDurationSeconds: shape.totalSeconds,
-          resolution: '720p',
-        });
-        if (created.ok === false) {
-          setCreateErrorMessageKey(created.error.messageKey);
-          return;
-        }
-        let current = created.data;
-        const baseDuration = Math.floor(shape.totalSeconds / shape.shotCount);
-        const remainder = shape.totalSeconds % shape.shotCount;
-        for (let index = 0; index < shape.shotCount; index += 1) {
-          const updated = await ipcBridge.creativeStudio.updateScene.invoke({
-            projectId: current.id,
-            sceneId: `scene_${index + 1}`,
-            expectedRevision: current.revision,
-            scene: {
-              title: t('conversation.creativeStudio.library.shape.sceneTitle', { number: index + 1 }),
-              purpose: '',
-              visualPrompt: '',
-              narration: '',
-              onScreenText: '',
-              mediaKind: 'video',
-              durationSeconds: baseDuration + (index < remainder ? 1 : 0),
-              referenceAssetId: null,
-            },
-          });
-          if (updated.ok === false) {
-            setCreateErrorMessageKey(updated.error.messageKey);
-            return;
-          }
-          current = updated.data;
-        }
-        rememberStudioPhase(current.id, 'write');
-        navigate(studioPhasePath(current.id, 'write'));
-      } catch {
-        setCreateErrorMessageKey('conversation.creativeStudio.errors.storage');
-      } finally {
-        setCreating(false);
-      }
-    },
-    [navigate, t]
-  );
-
   const prepareDelete = useCallback(async (candidate: StudioProjectSummary): Promise<void> => {
     const request = ++deletePreparationRef.current;
     setDeletePreparing(true);
@@ -215,7 +161,6 @@ export const StudioLibrary: React.FC = () => {
         errorMessageKey={createErrorMessageKey}
         onSubmit={createProject}
       />
-      <ShapeTemplates disabled={mutationBusy || deleteCandidate !== null} onCreate={createFromShape} />
       {listErrorMessageKey && (
         <div role='alert' className={styles.alert}>
           {t(listErrorMessageKey)}

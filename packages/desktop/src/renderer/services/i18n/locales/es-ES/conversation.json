@@ -1095,27 +1095,8 @@
         "aspectRatioLabel": "Relación de aspecto",
         "durationLabel": "Duración estimada",
         "durationGuess": "Unos {{seconds}} s",
-        "attachBrief": "Adjuntar documento de briefing",
-        "attachBriefUnavailable": "Todavía no se pueden adjuntar documentos de briefing.",
-        "submit": "Leer mi briefing →",
+        "submit": "Empezar",
         "empty": "Una frase es suficiente: dinos qué vamos a crear."
-      },
-      "shape": {
-        "title": "Empezar con una estructura",
-        "label": "{{name}} · {{count}} planos · {{seconds}} s",
-        "sceneTitle": "Plano {{number}}",
-        "productStory": {
-          "name": "Historia de producto",
-          "starter": "Una historia de producto para quienes nunca han oído hablar de nosotros: cuatro momentos que terminan en la marca denominativa."
-        },
-        "featureTeaser": {
-          "name": "Avance de función",
-          "starter": "Un avance breve de una función nueva, dirigido a clientes que ya utilizan el producto."
-        },
-        "recapReel": {
-          "name": "Reel de recapitulación",
-          "starter": "Un reel de recapitulación del trimestre para toda la empresa, cálido y con un toque de orgullo."
-        }
       },
       "scriptOnly": "SOLO GUION",
       "posterBadge": "Toma {{take}} · Plano {{scene}}",

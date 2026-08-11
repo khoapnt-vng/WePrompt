@@ -1091,27 +1091,8 @@
         "aspectRatioLabel": "En-boy oranı",
         "durationLabel": "Tahmini uzunluk",
         "durationGuess": "Yaklaşık {{seconds}} sn",
-        "attachBrief": "Bir özet belgesi ekle",
-        "attachBriefUnavailable": "Özet belgesi ekleri henüz kullanılamıyor.",
-        "submit": "Özetimi oku →",
+        "submit": "Başla",
         "empty": "Bir cümle yeter — ne hazırladığımızı söyleyin."
-      },
-      "shape": {
-        "title": "Bir yapıyla başla",
-        "label": "{{name}} · {{count}} çekim · {{seconds}} sn",
-        "sceneTitle": "Çekim {{number}}",
-        "productStory": {
-          "name": "Ürün hikâyesi",
-          "starter": "Bizi hiç duymamış kişiler için, dört bölümlü ve marka yazısıyla biten bir ürün hikâyesi."
-        },
-        "featureTeaser": {
-          "name": "Özellik tanıtımı",
-          "starter": "Ürünü zaten kullanan müşterilere yönelik yeni bir özellik için kısa bir tanıtım."
-        },
-        "recapReel": {
-          "name": "Çeyrek özeti",
-          "starter": "Tüm şirket için sıcak ve biraz gururlu bir çeyrek özeti videosu."
-        }
       },
       "scriptOnly": "YALNIZCA SENARYO",
       "posterBadge": "Deneme {{take}} · Çekim {{scene}}",

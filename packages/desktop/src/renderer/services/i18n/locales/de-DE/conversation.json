@@ -1090,27 +1090,8 @@
         "aspectRatioLabel": "Seitenverhältnis",
         "durationLabel": "Geschätzte Länge",
         "durationGuess": "Etwa {{seconds}} s",
-        "attachBrief": "Briefing-Dokument anhängen",
-        "attachBriefUnavailable": "Briefing-Dokumente können derzeit noch nicht angehängt werden.",
-        "submit": "Briefing lesen →",
+        "submit": "Starten",
         "empty": "Ein Satz genügt – sag, was wir erstellen."
-      },
-      "shape": {
-        "title": "Mit einer Struktur starten",
-        "label": "{{name}} · {{count}} Shots · {{seconds}} s",
-        "sceneTitle": "Shot {{number}}",
-        "productStory": {
-          "name": "Produktstory",
-          "starter": "Eine Produktstory für Menschen, die noch nie von uns gehört haben – vier Stationen mit Abschluss auf der Wortmarke."
-        },
-        "featureTeaser": {
-          "name": "Feature-Teaser",
-          "starter": "Ein kurzer Teaser für eine neue Funktion, ausgerichtet auf Kunden, die das Produkt bereits nutzen."
-        },
-        "recapReel": {
-          "name": "Quartalsrückblick",
-          "starter": "Ein Quartalsrückblick für das ganze Unternehmen, warm und ein wenig stolz."
-        }
       },
       "scriptOnly": "NUR SKRIPT",
       "posterBadge": "Take {{take}} · Shot {{scene}}",
