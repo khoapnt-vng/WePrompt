@@ -1244,6 +1244,9 @@
       "invalidRoute": "このルートは無効になりました。生成前に確認してください。"
     },
     "reference": {
+      "generate": "参照画像を生成",
+      "dialogTitle": "参照画像を生成",
+      "promptLabel": "参照プロンプト",
       "reviewTag": "参照画像"
     },
     "review": {

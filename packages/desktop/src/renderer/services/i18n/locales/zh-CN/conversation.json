@@ -1244,6 +1244,9 @@
       "invalidRoute": "此路线已失效。请在生成前重新检查。"
     },
     "reference": {
+      "generate": "生成参考图",
+      "dialogTitle": "生成参考图像",
+      "promptLabel": "参考图提示词",
       "reviewTag": "参考图"
     },
     "review": {

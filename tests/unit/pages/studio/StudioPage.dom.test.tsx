@@ -1132,6 +1132,147 @@ describe('StudioPage and useStudioProject', () => {
     ).toHaveAttribute('src', 'weprompt-studio://asset/project-1/asset-reference');
   });
 
+  it('prefills a generated reference prompt without changing the scene draft when edited', async () => {
+    const opening = scene({ visualPrompt: '  A brushed-steel travel mug  ' });
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
+    );
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
+    renderRoute();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.reference.generate' }));
+    const dialog = await screen.findByRole('dialog', {
+      name: 'conversation.creativeStudio.reference.dialogTitle',
+    });
+    const referencePrompt = within(dialog).getByLabelText('conversation.creativeStudio.reference.promptLabel');
+    expect(referencePrompt)
+      .toHaveValue(`Product reference sheet. Pure white catalog background with thin labeled dividers.
+[SECTION 1]: Three-view turnaround — straight-on, 3/4 angle, side profile.
+[SECTION 2]: In-context scale reference.
+[SECTION 3]: Macro close-ups of material and texture.
+[SECTION 4]: A flat color swatch.
+Identical geometry, placement, and material finish in every section.
+Subject: A brushed-steel travel mug`);
+
+    fireEvent.change(referencePrompt, { target: { value: 'Edited reference-only prompt' } });
+
+    expect(referencePrompt).toHaveValue('Edited reference-only prompt');
+    expect(screen.getByLabelText('conversation.creativeStudio.inspector.visualPromptLabel')).toHaveValue(
+      '  A brushed-steel travel mug  '
+    );
+    expect(bridge.updateScene.invoke).not.toHaveBeenCalled();
+  });
+
+  it('routes a video-scene reference through the existing paid review with its cost disclosure intact', async () => {
+    const opening = scene({ mediaKind: 'video', durationSeconds: 12 });
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
+    );
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
+    renderRoute();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.reference.generate' }));
+    const promptDialog = await screen.findByRole('dialog', {
+      name: 'conversation.creativeStudio.reference.dialogTitle',
+    });
+    fireEvent.click(
+      within(promptDialog).getByRole('button', { name: 'conversation.creativeStudio.reference.generate' })
+    );
+
+    const reviewDialog = await screen.findByRole('dialog', {
+      name: 'conversation.creativeStudio.review.title',
+    });
+    expect(within(reviewDialog).getByText('conversation.creativeStudio.reference.reviewTag')).toBeVisible();
+    expect(within(reviewDialog).getByText('conversation.creativeStudio.review.chargeNotice')).toBeVisible();
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+  });
+
+  it('submits an edited reference prompt with the reference role on the image route', async () => {
+    const opening = scene({ mediaKind: 'video' });
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
+    );
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
+    renderRoute();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.reference.generate' }));
+    const promptDialog = await screen.findByRole('dialog', {
+      name: 'conversation.creativeStudio.reference.dialogTitle',
+    });
+    fireEvent.change(within(promptDialog).getByLabelText('conversation.creativeStudio.reference.promptLabel'), {
+      target: { value: 'Edited reference-only prompt' },
+    });
+    fireEvent.click(
+      within(promptDialog).getByRole('button', { name: 'conversation.creativeStudio.reference.generate' })
+    );
+    const reviewDialog = await screen.findByRole('dialog', {
+      name: 'conversation.creativeStudio.review.title',
+    });
+    fireEvent.click(within(reviewDialog).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
+
+    await waitFor(() =>
+      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: 'project-1',
+        mode: 'single',
+        sceneIds: ['scene-1'],
+        expectedRevision: 2,
+        routes: [{ sceneId: 'scene-1', choiceId: 'choice_image', kind: 'image' }],
+        catalogVersion: 'catalog-1',
+        outputRole: 'reference',
+        referencePrompt: 'Edited reference-only prompt',
+      })
+    );
+  });
+
+  it('does not offer generated references when the image catalog role is not ready', async () => {
+    const videoRoute = imageRoute({
+      choiceId: 'choice_video',
+      providerId: 'provider-video',
+      providerName: 'Video provider',
+      model: 'video-model',
+      kind: 'video',
+    });
+    const opening = scene({ mediaKind: 'video' });
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(
+        project('project-1', {
+          sceneOrder: [opening.id],
+          scenes: { [opening.id]: opening },
+          routing: {
+            storyboard: null,
+            image: project().routing.image,
+            video: {
+              choiceId: videoRoute.choiceId,
+              providerId: videoRoute.providerId,
+              model: videoRoute.model,
+            },
+          },
+        })
+      )
+    );
+    bridge.listRoutes.invoke.mockResolvedValue(
+      ok({
+        ...routes(),
+        video: {
+          status: 'ready',
+          selected: {
+            choiceId: videoRoute.choiceId,
+            providerId: videoRoute.providerId,
+            model: videoRoute.model,
+          },
+          selectedRoute: videoRoute,
+          options: [videoRoute],
+        },
+      })
+    );
+    renderRoute();
+
+    await screen.findByRole('region', { name: 'Opening' });
+    expect(
+      screen.queryByRole('button', { name: 'conversation.creativeStudio.reference.generate' })
+    ).not.toBeInTheDocument();
+  });
+
   it('opens the canonical selected variation from its shot card without selecting another asset', async () => {
     const first = asset('asset-1');
     const second = asset('asset-2');
@@ -2049,6 +2190,97 @@ describe('StudioPage and useStudioProject', () => {
           ],
         })
       )
+    );
+  });
+
+  it('preserves a reference prompt and image route when refreshing a stale paid review', async () => {
+    let onUpdate: ((event: { projectId: string }) => void) | undefined;
+    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
+      onUpdate = listener;
+      return () => {};
+    });
+    const opening = scene({ mediaKind: 'video', durationSeconds: 12 });
+    const revisedOpening = scene({
+      title: 'Revised opening',
+      visualPrompt: '   ',
+      mediaKind: 'video',
+      durationSeconds: 12,
+    });
+    const initial = project('project-1', {
+      sceneOrder: [opening.id],
+      scenes: { [opening.id]: opening },
+    });
+    const revisedRoute = imageRoute({
+      choiceId: 'choice_image_new',
+      providerId: 'provider-image-new',
+      providerName: 'New image provider',
+      model: 'image-model-new',
+    });
+    const revised = project('project-1', {
+      revision: 3,
+      sceneOrder: [revisedOpening.id],
+      scenes: { [revisedOpening.id]: revisedOpening },
+      routing: {
+        storyboard: null,
+        image: {
+          choiceId: revisedRoute.choiceId,
+          providerId: revisedRoute.providerId,
+          model: revisedRoute.model,
+        },
+        video: null,
+      },
+    });
+    bridge.getProject.invoke
+      .mockResolvedValueOnce(ok(initial))
+      .mockResolvedValueOnce(ok(initial))
+      .mockResolvedValue(ok(revised));
+    bridge.listRoutes.invoke.mockResolvedValueOnce(ok(routesWithImage())).mockResolvedValue(
+      ok({
+        ...routesWithImage(revisedRoute),
+        catalogVersion: 'catalog-2',
+      })
+    );
+    renderRoute('/studio/project-1/write');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.reference.generate' }));
+    const promptDialog = await screen.findByRole('dialog', {
+      name: 'conversation.creativeStudio.reference.dialogTitle',
+    });
+    fireEvent.change(within(promptDialog).getByLabelText('conversation.creativeStudio.reference.promptLabel'), {
+      target: { value: 'Preserved edited reference prompt' },
+    });
+    fireEvent.click(
+      within(promptDialog).getByRole('button', { name: 'conversation.creativeStudio.reference.generate' })
+    );
+    await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+
+    await act(async () => onUpdate?.({ projectId: 'project-1' }));
+    await waitFor(() => expect(bridge.getProject.invoke).toHaveBeenCalledTimes(3));
+    const routeRequestsBeforeConfirmation = bridge.listRoutes.invoke.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
+
+    await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(routeRequestsBeforeConfirmation + 1));
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+    const refreshedReview = screen.getByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+    expect(within(refreshedReview).getByText('conversation.creativeStudio.reference.reviewTag')).toBeVisible();
+    expect(within(refreshedReview).getByText('New image provider')).toBeVisible();
+    const confirm = within(refreshedReview).getByRole('button', {
+      name: 'conversation.creativeStudio.review.confirm',
+    });
+    expect(confirm).toBeEnabled();
+    fireEvent.click(confirm);
+
+    await waitFor(() =>
+      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: 'project-1',
+        mode: 'single',
+        sceneIds: ['scene-1'],
+        expectedRevision: 3,
+        routes: [{ sceneId: 'scene-1', choiceId: 'choice_image_new', kind: 'image' }],
+        catalogVersion: 'catalog-2',
+        outputRole: 'reference',
+        referencePrompt: 'Preserved edited reference prompt',
+      })
     );
   });
 

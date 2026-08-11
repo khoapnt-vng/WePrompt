@@ -1244,6 +1244,9 @@
       "invalidRoute": "이 경로는 더 이상 유효하지 않습니다. 생성하기 전에 검토하세요."
     },
     "reference": {
+      "generate": "참조 이미지 생성",
+      "dialogTitle": "참조 이미지 생성",
+      "promptLabel": "참조 프롬프트",
       "reviewTag": "참조 이미지"
     },
     "review": {

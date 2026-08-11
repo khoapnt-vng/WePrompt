@@ -7,6 +7,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { buildSingleSceneReviewRequest } from '../../Generation/GenerationControls';
 import { resolveSceneDurationBounds } from '../../../studioRouteConstraints';
 import { AssistantDock } from '../AssistantDock';
 import type { WritePhaseController } from '../types';
@@ -32,6 +33,7 @@ export const WritePhase: React.FC<WritePhaseProps> = ({ controller, layoutMode =
     advisory,
     mutationPending,
     openDraftReview,
+    openSingleGenerationReview,
     importReference,
     clearWriteFocusIntent,
   } = controller;
@@ -173,6 +175,7 @@ export const WritePhase: React.FC<WritePhaseProps> = ({ controller, layoutMode =
                   selected={editor.selectedSceneId === scene.id}
                   mutationPending={mutationPending}
                   importingReference={importingSceneId === scene.id}
+                  canGenerateReference={models.catalog?.image.status === 'ready'}
                   removeDisabled={scene.assetIds.length > 0 || scene.jobIds.length > 0}
                   moveUpDisabled={index === 0}
                   moveDownDisabled={index === editor.orderedScenes.length - 1}
@@ -193,6 +196,16 @@ export const WritePhase: React.FC<WritePhaseProps> = ({ controller, layoutMode =
                     if (importingSceneId !== null) return;
                     setImportingSceneId(scene.id);
                     void importReference(scene.id).finally(() => setImportingSceneId(null));
+                  }}
+                  onGenerateReference={(referencePrompt) => {
+                    const request = buildSingleSceneReviewRequest({
+                      project,
+                      catalog: models.catalog,
+                      scene: { id: scene.id, mediaKind: 'image' },
+                      outputRole: 'reference',
+                      referencePrompt,
+                    });
+                    if (request !== null) openSingleGenerationReview(request);
                   }}
                   onSuggestVisual={() => {
                     editor.selectScene(scene.id);

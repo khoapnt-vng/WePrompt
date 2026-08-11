@@ -1254,6 +1254,9 @@
       "invalidRoute": "Bu rota artık geçerli değil. Oluşturmadan önce gözden geçirin."
     },
     "reference": {
+      "generate": "Referans oluştur",
+      "dialogTitle": "Referans görseli oluştur",
+      "promptLabel": "Referans istemi",
       "reviewTag": "Referans"
     },
     "review": {

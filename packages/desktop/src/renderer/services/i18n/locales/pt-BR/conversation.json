@@ -1266,6 +1266,9 @@
       "invalidRoute": "Esta rota não é mais válida. Revise-a antes de gerar."
     },
     "reference": {
+      "generate": "Gerar referência",
+      "dialogTitle": "Gerar uma imagem de referência",
+      "promptLabel": "Prompt de referência",
       "reviewTag": "Referência"
     },
     "review": {

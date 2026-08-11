@@ -53,7 +53,14 @@ type GenerationReviewState = {
   availableRoutes: StudioRouteCatalogEntry[];
   projectId: string;
   projectRevision: number;
+  outputRole?: GenerationSingleReviewRequest['outputRole'];
+  referencePrompt?: GenerationSingleReviewRequest['referencePrompt'];
 };
+
+const requestedMediaKind = (
+  sceneMediaKind: StudioScene['mediaKind'],
+  outputRole: GenerationReviewScene['outputRole']
+): StudioScene['mediaKind'] => (outputRole === 'reference' ? 'image' : sceneMediaKind);
 
 const routeIdentity = (
   route: Pick<StudioRouteCatalogEntry | GenerationReviewRouteSnapshot, 'choiceId' | 'kind'>
@@ -67,12 +74,13 @@ const toReviewScene = (
   routeStatus?: 'valid' | 'invalid' | 'missing',
   outputRole: GenerationReviewScene['outputRole'] = 'take'
 ): GenerationReviewScene => {
+  const mediaKind = requestedMediaKind(scene.mediaKind, outputRole);
   const catalogRoute =
     route === null ? undefined : availableRoutes.find((candidate) => routeIdentity(candidate) === routeIdentity(route));
   return {
     id: scene.id,
     title: scene.title,
-    mediaKind: scene.mediaKind,
+    mediaKind,
     outputRole,
     durationSeconds: scene.durationSeconds,
     route:
@@ -83,12 +91,12 @@ const toReviewScene = (
               routeStatus === 'invalid' ||
               catalogRoute === undefined ||
               !routeSupportsScene(catalogRoute, {
-                kind: scene.mediaKind,
+                kind: mediaKind,
                 sceneId: scene.id,
                 routeSceneId: route.sceneId,
                 aspectRatio: project.aspectRatio,
                 resolution: project.resolution,
-                durationSeconds: scene.durationSeconds,
+                durationSeconds: outputRole === 'reference' ? undefined : scene.durationSeconds,
                 hasReference: scene.referenceAssetId !== null,
               })
                 ? 'invalid'
@@ -107,9 +115,11 @@ const catalogEntries = (catalog: StudioRouteCatalog): StudioRouteCatalogEntry[] 
 
 const projectRouteSnapshot = (
   project: StudioRendererProject,
-  scene: Pick<StudioScene, 'id' | 'mediaKind'>
+  scene: Pick<StudioScene, 'id' | 'mediaKind'>,
+  outputRole: GenerationReviewScene['outputRole'] = 'take'
 ): GenerationReviewRouteSnapshot | null => {
-  const selected = project.routing[scene.mediaKind];
+  const mediaKind = requestedMediaKind(scene.mediaKind, outputRole);
+  const selected = project.routing[mediaKind];
   return selected === null
     ? null
     : {
@@ -117,7 +127,7 @@ const projectRouteSnapshot = (
         choiceId: selected.choiceId,
         providerId: selected.providerId,
         model: selected.model,
-        kind: scene.mediaKind,
+        kind: mediaKind,
       };
 };
 
@@ -303,7 +313,11 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
     (request: GenerationSingleReviewRequest): void => {
       if (project === null || generationBlocked || request.catalogVersion === null) return;
       const scene = project.scenes[request.sceneId];
-      if (scene === undefined || !canOpenSingleSceneReview(readiness?.sceneStatuses[scene.id], scene.visualPrompt)) {
+      if (
+        scene === undefined ||
+        (request.outputRole !== 'reference' &&
+          !canOpenSingleSceneReview(readiness?.sceneStatuses[scene.id], scene.visualPrompt))
+      ) {
         return;
       }
       studioJobs.clearIssue();
@@ -324,6 +338,8 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
         availableRoutes: request.availableRoutes,
         projectId: project.id,
         projectRevision: project.revision,
+        ...(request.outputRole === undefined ? {} : { outputRole: request.outputRole }),
+        ...(request.referencePrompt === undefined ? {} : { referencePrompt: request.referencePrompt }),
       });
     },
     [generationBlocked, project, readiness, studioJobs]
@@ -388,9 +404,19 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
               ? generationReview.scenes.flatMap(({ id: sceneId }) => {
                   const scene = project.scenes[sceneId];
                   return scene === undefined ||
-                    !canOpenSingleSceneReview(readiness?.sceneStatuses[scene.id], scene.visualPrompt)
+                    (generationReview.outputRole !== 'reference' &&
+                      !canOpenSingleSceneReview(readiness?.sceneStatuses[scene.id], scene.visualPrompt))
                     ? []
-                    : [toReviewScene(project, scene, projectRouteSnapshot(project, scene), availableRoutes)];
+                    : [
+                        toReviewScene(
+                          project,
+                          scene,
+                          projectRouteSnapshot(project, scene, generationReview.outputRole),
+                          availableRoutes,
+                          undefined,
+                          generationReview.outputRole ?? 'take'
+                        ),
+                      ];
                 })
               : readyScenes.map((scene) =>
                   toReviewScene(project, scene, projectRouteSnapshot(project, scene), availableRoutes)
@@ -402,6 +428,10 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
             availableRoutes,
             projectId: project.id,
             projectRevision: project.revision,
+            ...(generationReview.outputRole === undefined ? {} : { outputRole: generationReview.outputRole }),
+            ...(generationReview.referencePrompt === undefined
+              ? {}
+              : { referencePrompt: generationReview.referencePrompt }),
           });
         } catch {
           setGenerationReviewIssueMessageKey('conversation.creativeStudio.errors.provider');
@@ -418,6 +448,10 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
         routes,
         catalogVersion: generationReview.catalogVersion,
         expectedRevision: generationReview.projectRevision,
+        ...(generationReview.outputRole === undefined ? {} : { outputRole: generationReview.outputRole }),
+        ...(generationReview.referencePrompt === undefined
+          ? {}
+          : { referencePrompt: generationReview.referencePrompt }),
       });
       if (submitted) setGenerationReview(null);
     },
@@ -440,13 +474,15 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
         projectRevision: project.revision,
         scenes: staleIntent.sceneIds.flatMap((sceneId) => {
           const scene = project.scenes[sceneId];
-          const route = scene === undefined ? null : projectRouteSnapshot(project, scene);
+          const outputRole = current.outputRole ?? 'take';
+          const route = scene === undefined ? null : projectRouteSnapshot(project, scene, outputRole);
           const eligible =
             scene !== undefined &&
-            canOpenSingleSceneReview(readiness?.sceneStatuses[scene.id], scene.visualPrompt) &&
+            (outputRole === 'reference' ||
+              canOpenSingleSceneReview(readiness?.sceneStatuses[scene.id], scene.visualPrompt)) &&
             (current.mode === 'single' || scene.selectedAssetId === null);
           if (eligible) {
-            return [toReviewScene(project, scene, route, availableRoutes)];
+            return [toReviewScene(project, scene, route, availableRoutes, undefined, outputRole)];
           }
           const previous = currentById.get(sceneId);
           return previous === undefined

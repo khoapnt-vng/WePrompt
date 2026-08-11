@@ -1087,6 +1087,9 @@
       "invalidRoute": "This route is no longer valid. Review it before generating."
     },
     "reference": {
+      "generate": "Generate reference",
+      "dialogTitle": "Generate a reference image",
+      "promptLabel": "Reference prompt",
       "reviewTag": "Reference"
     },
     "review": {

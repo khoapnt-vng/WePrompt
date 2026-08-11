@@ -1252,6 +1252,9 @@
       "invalidRoute": "این مسیر دیگر معتبر نیست. پیش از تولید آن را بازبینی کنید."
     },
     "reference": {
+      "generate": "ایجاد مرجع",
+      "dialogTitle": "ایجاد تصویر مرجع",
+      "promptLabel": "پرامپت مرجع",
       "reviewTag": "تصویر مرجع"
     },
     "review": {

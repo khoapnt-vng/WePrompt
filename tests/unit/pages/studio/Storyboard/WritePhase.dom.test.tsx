@@ -243,6 +243,7 @@ const controller = (overrides: Partial<WritePhaseController> = {}): WritePhaseCo
   mutationPending: false,
   requestTransition: vi.fn(),
   openDraftReview: vi.fn(),
+  openSingleGenerationReview: vi.fn(),
   importReference: vi.fn(async () => {}),
   clearWriteFocusIntent: vi.fn(),
   ...overrides,
@@ -658,6 +659,40 @@ describe('WritePhase', () => {
       'src',
       'weprompt-studio://asset/project-1/reference-2'
     );
+  });
+
+  it('closes the reference prompt dialog when the image catalog role loses readiness', async () => {
+    const props = controller();
+    const view = render(<WritePhase controller={props} />);
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'conversation.creativeStudio.reference.generate' })[0]!);
+    expect(
+      screen.getByRole('dialog', { name: 'conversation.creativeStudio.reference.dialogTitle' })
+    ).toBeInTheDocument();
+
+    view.rerender(
+      <WritePhase
+        controller={controller({
+          models: models({
+            catalog: {
+              ...catalog,
+              image: { status: 'setup_required', selected: null, selectedRoute: null, options: [] },
+            },
+          }),
+          openSingleGenerationReview: props.openSingleGenerationReview,
+        })}
+      />
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('dialog', { name: 'conversation.creativeStudio.reference.dialogTitle' })
+      ).not.toBeInTheDocument()
+    );
+    expect(
+      screen.queryByRole('button', { name: 'conversation.creativeStudio.reference.generate' })
+    ).not.toBeInTheDocument();
+    expect(props.openSingleGenerationReview).not.toHaveBeenCalled();
   });
 
   it('keeps Fit to goal at summary level and contains no media-generation or spend action', () => {

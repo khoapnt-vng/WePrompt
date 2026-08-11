@@ -1253,6 +1253,9 @@
       "invalidRoute": "Diese Route ist nicht mehr gültig. Prüfe sie vor der Generierung."
     },
     "reference": {
+      "generate": "Referenz erstellen",
+      "dialogTitle": "Referenzbild erstellen",
+      "promptLabel": "Referenz-Prompt",
       "reviewTag": "Referenz"
     },
     "review": {
