@@ -955,6 +955,7 @@
         "renderingWith": "در حال رندر با —",
         "engineSummary": "{{model}} · {{kind}} · تا {{seconds}} ثانیه",
         "changeEngines": "تغییر موتورها",
+        "engineKinds": "موتورها: {{kinds}}",
         "takeRatio": "برداشت {{current}} / {{total}}",
         "noVisualYet": "هنوز تصویری نیست",
         "writeVisual": "نوشتن تصویر",

@@ -33,6 +33,8 @@ vi.mock('react-i18next', () => ({
             .map(([name, value]) => `${name}=${String(value)}`)
             .join(',')}`
         : key,
+    // EngineBar joins the ready media kinds with Intl.ListFormat, so the locale must exist.
+    i18n: { language: 'en' },
   }),
 }));
 
@@ -357,13 +359,27 @@ describe('ProducePhase', () => {
     });
     render(<ProducePhase controller={controller} />);
 
-    expect(screen.getByText(/image-model/)).toBeVisible();
-    expect(screen.getByText(/seconds=47/)).toBeVisible();
+    // The engine chip hides the summary behind a hover, so the paid model and its duration
+    // contract have to remain reachable through the trigger's description.
+    expect(screen.getByRole('button', { name: /engineKinds/ })).toHaveAccessibleDescription(
+      'conversation.creativeStudio.phase.produce.engineSummary:model=image-model,kind=conversation.creativeStudio.scene.image,seconds=47'
+    );
     expect(screen.queryByText(/video-model/)).not.toBeInTheDocument();
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.phase.produce.changeEngines' }));
     expect(controller.openModelSettings).toHaveBeenCalledExactlyOnceWith('/settings/model');
+  });
+
+  it('keeps exactly one focus target for the shell to move focus to on a phase transition', () => {
+    // StudioPhaseShell focuses [data-studio-phase-heading] after every transition; if the engine
+    // strip ever drops or duplicates its heading, keyboard focus lands nowhere or on the wrong node.
+    const { container } = render(<ProducePhase controller={createController()} />);
+
+    const focusTargets = container.querySelectorAll('[data-studio-phase-heading]');
+    expect(focusTargets).toHaveLength(1);
+    expect(focusTargets[0]).toHaveAttribute('id', 'studio-produce-phase-heading');
+    expect(focusTargets[0]).toHaveAttribute('tabindex', '-1');
   });
 
   it('shows only canonical generated takes and opens the selected take preview from its card', () => {

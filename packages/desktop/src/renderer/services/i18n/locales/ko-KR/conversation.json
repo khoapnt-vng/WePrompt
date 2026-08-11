@@ -954,6 +954,7 @@
         "renderingWith": "렌더링 엔진 —",
         "engineSummary": "{{model}} · {{kind}} · 최대 {{seconds}}초",
         "changeEngines": "엔진 변경",
+        "engineKinds": "엔진: {{kinds}}",
         "takeRatio": "테이크 {{current}} / {{total}}",
         "noVisualYet": "아직 비주얼 없음",
         "writeVisual": "비주얼 작성",

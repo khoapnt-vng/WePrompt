@@ -957,6 +957,7 @@
         "renderingWith": "Рендеринг с помощью —",
         "engineSummary": "{{model}} · {{kind}} · до {{seconds}} с",
         "changeEngines": "Сменить движки",
+        "engineKinds": "Движки: {{kinds}}",
         "takeRatio": "Дубль {{current}} / {{total}}",
         "noVisualYet": "ВИЗУАЛА ПОКА НЕТ",
         "writeVisual": "Описать визуал",

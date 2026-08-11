@@ -954,6 +954,7 @@
         "renderingWith": "正在使用以下引擎算繪 —",
         "engineSummary": "{{model}} · {{kind}} · 最長 {{seconds}} 秒",
         "changeEngines": "更換引擎",
+        "engineKinds": "引擎：{{kinds}}",
         "takeRatio": "鏡次 {{current}} / {{total}}",
         "noVisualYet": "尚無畫面",
         "writeVisual": "撰寫畫面描述",

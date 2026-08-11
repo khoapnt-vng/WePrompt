@@ -957,6 +957,7 @@
         "renderingWith": "İşleme motoru —",
         "engineSummary": "{{model}} · {{kind}} · en fazla {{seconds}} sn",
         "changeEngines": "Motorları değiştir",
+        "engineKinds": "Motorlar: {{kinds}}",
         "takeRatio": "Çekim {{current}} / {{total}}",
         "noVisualYet": "HENÜZ GÖRSEL YOK",
         "writeVisual": "Görseli yaz",

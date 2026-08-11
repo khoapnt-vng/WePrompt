@@ -19,6 +19,8 @@ vi.mock('react-i18next', () => ({
             .map(([name, value]) => `${name}=${String(value)}`)
             .join(',')}`
         : key,
+    // EngineBar joins the ready media kinds with Intl.ListFormat, so the locale must exist.
+    i18n: { language: 'en' },
   }),
 }));
 
@@ -55,6 +57,26 @@ const catalog = (overrides: Partial<StudioRouteCatalog> = {}): StudioRouteCatalo
   ...overrides,
 });
 
+/** The engine strip keeps model names and duration contracts out of the visible chip, so pin the exact text. */
+const SELECTED_IMAGE_SUMMARY =
+  'conversation.creativeStudio.phase.produce.engineSummary:model=selected-image-model,kind=conversation.creativeStudio.scene.image,seconds=47';
+
+/** Ready image role whose selected route is only one of two catalog options. */
+const readySelectedImageCatalog = (): StudioRouteCatalog => {
+  const selected = mediaRoute('image', {
+    model: 'selected-image-model',
+    constraints: { ...mediaRoute('image').constraints, maxDurationSeconds: 47 },
+  });
+  return catalog({
+    image: {
+      status: 'ready',
+      selected: { choiceId: selected.choiceId, providerId: selected.providerId, model: selected.model },
+      selectedRoute: selected,
+      options: [selected, mediaRoute('image', { choiceId: 'unused', model: 'unused-option' })],
+    },
+  });
+};
+
 const props = (overrides: Partial<StudioModelBarProps> = {}): StudioModelBarProps => ({
   catalog: catalog(),
   disabled: false,
@@ -73,28 +95,20 @@ describe('StudioModelBar', () => {
   });
 
   it('shows only real ready selected routes and their contract duration', () => {
-    const selected = mediaRoute('image', {
-      model: 'selected-image-model',
-      constraints: { ...mediaRoute('image').constraints, maxDurationSeconds: 47 },
-    });
-    render(
-      <StudioModelBar
-        {...props({
-          catalog: catalog({
-            image: {
-              status: 'ready',
-              selected: { choiceId: selected.choiceId, providerId: selected.providerId, model: selected.model },
-              selectedRoute: selected,
-              options: [selected, mediaRoute('image', { choiceId: 'unused', model: 'unused-option' })],
-            },
-          }),
-        })}
-      />
-    );
+    render(<StudioModelBar {...props({ catalog: readySelectedImageCatalog() })} />);
 
-    expect(screen.getByText(/model=selected-image-model/)).toBeVisible();
-    expect(screen.getByText(/seconds=47/)).toBeVisible();
+    // The chip keeps the detail behind a hover, so the spend-relevant model name and the
+    // maxDurationSeconds contract must stay reachable through the trigger's description.
+    expect(screen.getByRole('button', { name: /engineKinds/ })).toHaveAccessibleDescription(SELECTED_IMAGE_SUMMARY);
     expect(screen.queryByText(/unused-option/)).not.toBeInTheDocument();
+  });
+
+  it('reveals the selected route detail on keyboard focus, not only on hover', async () => {
+    render(<StudioModelBar {...props({ catalog: readySelectedImageCatalog() })} />);
+
+    fireEvent.focus(screen.getByRole('button', { name: /engineKinds/ }));
+
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(SELECTED_IMAGE_SUMMARY);
   });
 
   it('opens the existing Model Settings surface from Change engines', () => {

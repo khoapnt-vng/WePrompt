@@ -954,6 +954,7 @@
         "renderingWith": "レンダリングに使用 —",
         "engineSummary": "{{model}} · {{kind}} · 最大{{seconds}}秒",
         "changeEngines": "エンジンを変更",
+        "engineKinds": "エンジン: {{kinds}}",
         "takeRatio": "テイク {{current}} / {{total}}",
         "noVisualYet": "ビジュアルはまだありません",
         "writeVisual": "ビジュアルを書く",

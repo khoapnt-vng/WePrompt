@@ -956,6 +956,7 @@
         "renderingWith": "Rendering mit —",
         "engineSummary": "{{model}} · {{kind}} · bis zu {{seconds}} s",
         "changeEngines": "Engines ändern",
+        "engineKinds": "Engines: {{kinds}}",
         "takeRatio": "Take {{current}} / {{total}}",
         "noVisualYet": "NOCH KEIN VISUAL",
         "writeVisual": "Visual beschreiben",

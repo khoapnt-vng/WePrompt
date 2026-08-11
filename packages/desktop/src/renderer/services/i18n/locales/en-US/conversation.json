@@ -790,6 +790,7 @@
         "renderingWith": "Rendering with —",
         "engineSummary": "{{model}} · {{kind}} · up to {{seconds}}s",
         "changeEngines": "Change engines",
+        "engineKinds": "Engines: {{kinds}}",
         "takeRatio": "Take {{current}} / {{total}}",
         "noVisualYet": "NO VISUAL YET",
         "writeVisual": "Write the visual",
