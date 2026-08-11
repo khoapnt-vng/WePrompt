@@ -121,7 +121,10 @@ export const updateModelSettings = (
  * displaying a reasoning tag is unaffected. It only stops this module being
  * treated as authority for whether reasoning controls may be enabled.
  */
-export const DISCOVERY_ONLY_CAPABILITIES: ReadonlySet<ModelType> = new Set<ModelType>(['reasoning']);
+const DISCOVERY_ONLY_CAPABILITY: ModelType = 'reasoning';
+
+/** Whether capability support must come from the capability discovery seam. */
+export const isDiscoveryOnlyCapability = (type: ModelType): boolean => type === DISCOVERY_ONLY_CAPABILITY;
 
 /**
  * Check whether a specific model within a provider has a given capability.
@@ -132,7 +135,7 @@ export const hasSpecificModelCapability = (
   modelName: string,
   type: ModelType
 ): boolean | undefined => {
-  if (DISCOVERY_ONLY_CAPABILITIES.has(type)) return undefined;
+  if (isDiscoveryOnlyCapability(type)) return undefined;
 
   const baseModelName = getBaseModelName(modelName);
   const exclusions = CAPABILITY_EXCLUSIONS[type];

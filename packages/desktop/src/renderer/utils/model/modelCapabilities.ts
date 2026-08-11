@@ -9,7 +9,7 @@ import {
   CAPABILITY_PATTERNS,
   CAPABILITY_EXCLUSIONS,
   getBaseModelName,
-  DISCOVERY_ONLY_CAPABILITIES,
+  isDiscoveryOnlyCapability,
 } from '@/common/utils/modelCapabilities';
 
 export { hasSpecificModelCapability } from '@/common/utils/modelCapabilities';
@@ -75,7 +75,7 @@ const getProviderCapabilityRule = (provider: string, type: ModelType): boolean |
  */
 export const hasModelCapability = (model: IProvider, type: ModelType): boolean | undefined => {
   // Some capabilities cannot be answered by heuristics at all — see
-  // DISCOVERY_ONLY_CAPABILITIES in common/utils/modelCapabilities. The guard
+  // isDiscoveryOnlyCapability in common/utils/modelCapabilities. The guard
   // sits ahead of the user-tag, provider-rule and regex rungs below, because
   // all three are too weak to grant reasoning controls.
   //
@@ -85,7 +85,7 @@ export const hasModelCapability = (model: IProvider, type: ModelType): boolean |
   // clear() (clearModelCapabilitiesCache) has no callers — so one false grant
   // would persist for the entire process lifetime. Guard before the cache is
   // consulted or written, so no forbidden verdict is ever stored.
-  if (DISCOVERY_ONLY_CAPABILITIES.has(type)) return undefined;
+  if (isDiscoveryOnlyCapability(type)) return undefined;
 
   // 生成缓存键（包含 capabilities 版本以避免缓存过期）
   const capabilitiesHash = model.capabilities ? JSON.stringify(model.capabilities) : '';
