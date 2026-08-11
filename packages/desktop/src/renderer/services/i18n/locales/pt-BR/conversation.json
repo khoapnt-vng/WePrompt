@@ -907,6 +907,8 @@
       },
       "shared": {
         "backToLibrary": "Voltar à biblioteca de projetos",
+        "renameProject": "Renomear projeto",
+        "invalidProjectName": "Informe um nome de projeto.",
         "noMediaGeneration": "Esta etapa não gera imagens nem vídeos."
       },
       "brief": {

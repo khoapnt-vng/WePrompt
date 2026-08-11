@@ -899,6 +899,8 @@
       },
       "shared": {
         "backToLibrary": "プロジェクト一覧に戻る",
+        "renameProject": "プロジェクト名を変更",
+        "invalidProjectName": "プロジェクト名を入力してください。",
         "noMediaGeneration": "この手順では画像や動画は生成されません。"
       },
       "brief": {

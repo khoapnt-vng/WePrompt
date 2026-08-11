@@ -899,6 +899,8 @@
       },
       "shared": {
         "backToLibrary": "返回專案庫",
+        "renameProject": "重新命名專案",
+        "invalidProjectName": "請輸入專案名稱。",
         "noMediaGeneration": "此步驟不會產生圖片或影片。"
       },
       "brief": {

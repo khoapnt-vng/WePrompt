@@ -36,8 +36,11 @@
 }
 
 .projectTitle {
+  display: flex;
   overflow: hidden;
   margin: 0;
+  min-width: 0;
+  flex: 1;
   color: var(--text-primary);
   font-family: var(--font-body);
   font-size: 16px;
@@ -45,6 +48,50 @@
   letter-spacing: normal;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.projectTitleButton {
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 4px;
+  border-bottom: 1px solid transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+}
+
+.projectTitleButton:global(.arco-btn-text):hover,
+.projectTitleButton:global(.arco-btn-text):focus-visible {
+  border-bottom-color: var(--color-border-3);
+  background: var(--color-fill-2);
+  color: var(--text-primary);
+}
+
+.projectTitleText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projectTitleEditor {
+  display: flex;
+  width: min(360px, 100%);
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.projectTitleInput {
+  min-width: 0;
+}
+
+.projectTitleError {
+  color: var(--color-danger-6);
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: var(--fw-regular);
+  line-height: 1.3;
+  white-space: normal;
 }
 
 .aspectChip {

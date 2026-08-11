@@ -900,6 +900,8 @@
       },
       "shared": {
         "backToLibrary": "بازگشت به کتابخانه پروژه‌ها",
+        "renameProject": "تغییر نام پروژه",
+        "invalidProjectName": "نام پروژه را وارد کنید.",
         "noMediaGeneration": "در این مرحله تصویر یا ویدیو تولید نمی‌شود."
       },
       "brief": {

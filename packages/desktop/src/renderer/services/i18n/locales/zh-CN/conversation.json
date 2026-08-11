@@ -899,6 +899,8 @@
       },
       "shared": {
         "backToLibrary": "返回项目库",
+        "renameProject": "重命名项目",
+        "invalidProjectName": "请输入项目名称。",
         "noMediaGeneration": "此步骤不会生成图像或视频。"
       },
       "brief": {

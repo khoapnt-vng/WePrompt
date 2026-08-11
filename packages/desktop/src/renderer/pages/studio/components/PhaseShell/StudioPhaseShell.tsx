@@ -100,6 +100,10 @@ export const StudioPhaseShell: React.FC<StudioPhaseShellProps> = ({
         project={controller.project}
         saveState={shellSaveState}
         onBack={onBack}
+        onRenameProject={async (name) => {
+          controller.editor.updateProjectDraft({ name });
+          return controller.editor.flushProjectDraft();
+        }}
         actions={headerAction}
       />
       <StudioPhaseNav

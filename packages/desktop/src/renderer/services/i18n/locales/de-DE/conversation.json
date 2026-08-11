@@ -901,6 +901,8 @@
       },
       "shared": {
         "backToLibrary": "Zurück zur Projektbibliothek",
+        "renameProject": "Projekt umbenennen",
+        "invalidProjectName": "Gib einen Projektnamen ein.",
         "noMediaGeneration": "In diesem Schritt werden keine Bilder oder Videos erzeugt."
       },
       "brief": {

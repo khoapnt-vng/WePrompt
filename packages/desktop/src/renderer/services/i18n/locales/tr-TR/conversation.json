@@ -902,6 +902,8 @@
       },
       "shared": {
         "backToLibrary": "Proje kitaplığına dön",
+        "renameProject": "Projeyi yeniden adlandır",
+        "invalidProjectName": "Bir proje adı girin.",
         "noMediaGeneration": "Bu adımda görüntü veya video oluşturulmaz."
       },
       "brief": {

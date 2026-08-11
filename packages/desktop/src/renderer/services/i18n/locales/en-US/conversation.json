@@ -735,6 +735,8 @@
       },
       "shared": {
         "backToLibrary": "Back to project library",
+        "renameProject": "Rename project",
+        "invalidProjectName": "Enter a project name.",
         "noMediaGeneration": "This step does not generate images or video."
       },
       "brief": {

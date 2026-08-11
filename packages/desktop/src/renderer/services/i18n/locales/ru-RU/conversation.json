@@ -902,6 +902,8 @@
       },
       "shared": {
         "backToLibrary": "Вернуться к библиотеке проектов",
+        "renameProject": "Переименовать проект",
+        "invalidProjectName": "Введите название проекта.",
         "noMediaGeneration": "На этом этапе изображения и видео не создаются."
       },
       "brief": {
