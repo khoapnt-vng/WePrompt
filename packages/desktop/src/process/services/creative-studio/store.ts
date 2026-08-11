@@ -22,6 +22,7 @@ import type {
   StudioProjectSummary,
   StudioProposal,
   StudioProposalPayload,
+  StudioReferenceRequest,
   StudioRecordProposalInput,
   StudioProviderRef,
   StudioScene,
@@ -204,6 +205,7 @@ const PROPOSAL_SCENE_KEYS = new Set([
 const PROPOSAL_DECISION_KEYS = new Set(['schemaVersion', 'proposalId', 'status', 'decidedAt']);
 const PROPOSAL_SLOT_KEYS = new Set(['schemaVersion', 'proposalId', 'reservedAt']);
 const PROPOSAL_DECISION_STATUSES = new Set(['accepted', 'rejected', 'expired']);
+const REFERENCE_REQUEST_RECORD_KEYS = new Set(['schemaVersion', 'id', 'projectId', 'sceneId', 'status', 'createdAt']);
 
 export const STUDIO_PROPOSAL_MAX_RECORD_BYTES = 256 * 1024;
 export const STUDIO_PROPOSAL_MAX_PENDING_PER_PROJECT = 50;
@@ -240,6 +242,7 @@ export type CreativeStudioStore = {
   removeConnection(connectionId: string): Promise<boolean>;
   recordProposal(input: StudioRecordProposalInput): Promise<StudioProposal>;
   listProposals(projectId: string): Promise<StudioProposal[]>;
+  listPendingReferenceRequests(projectId: string): Promise<StudioReferenceRequest[]>;
   acceptProposal(
     projectId: string,
     proposalId: string,
@@ -248,7 +251,9 @@ export type CreativeStudioStore = {
   rejectProposal(projectId: string, proposalId: string): Promise<StudioProposal>;
   reapAbandonedProposals(): Promise<void>;
   watchProposals(listener: (projectId: string, proposalId: string) => void): Promise<() => Promise<void>>;
-  resolveProposalPaths(projectId: string): Promise<{ projectDir: string; pendingDir: string }>;
+  resolveProposalPaths(
+    projectId: string
+  ): Promise<{ projectDir: string; pendingDir: string; referencePendingDir: string }>;
   /** Main-process-only canonical project path; never return this through IPC. */
   getVerifiedProjectDirectory(projectId: string): Promise<string | null>;
 };
@@ -420,6 +425,22 @@ const validateProposalSlot = (value: unknown): value is StudioProposalSlot =>
   value.schemaVersion === 1 &&
   isSafeProposalId(value.proposalId) &&
   isCanonicalIsoTimestamp(value.reservedAt);
+
+const validateReferenceRequestRecord = (
+  project: StudioProject,
+  requestId: string,
+  value: unknown
+): value is StudioReferenceRequest =>
+  isRecord(value) &&
+  hasExactKeys(value, REFERENCE_REQUEST_RECORD_KEYS) &&
+  value.schemaVersion === 1 &&
+  value.id === requestId &&
+  isSafeProposalId(value.id) &&
+  value.projectId === project.id &&
+  isSafeId(value.sceneId) &&
+  project.scenes[value.sceneId] !== undefined &&
+  value.status === 'pending' &&
+  isCanonicalIsoTimestamp(value.createdAt);
 
 const validateProviderRef = (value: unknown): value is StudioProviderRef =>
   isRecord(value) &&
@@ -1219,34 +1240,34 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
   ): Promise<string | null> => {
     const directory = resolveRootChild(parent, name);
     if (!isInsideRoot(root, directory)) {
-      throw new CreativeStudioStoreError('storage_error', 'Creative Studio proposal directory escaped its root');
+      throw new CreativeStudioStoreError('storage_error', 'Creative Studio queue directory escaped its root');
     }
     try {
       const stats = await fs.lstat(directory);
       if (!stats.isDirectory() || stats.isSymbolicLink()) {
-        throw new CreativeStudioStoreError('storage_error', 'Creative Studio proposal directory is unsafe');
+        throw new CreativeStudioStoreError('storage_error', 'Creative Studio queue directory is unsafe');
       }
     } catch (error) {
       if (error instanceof CreativeStudioStoreError) throw error;
       if (!isRecord(error) || error.code !== 'ENOENT') {
-        throw storageError(error, 'Creative Studio proposal directory is unavailable');
+        throw storageError(error, 'Creative Studio queue directory is unavailable');
       }
       if (!createIfMissing) return null;
       try {
         await fs.mkdir(directory);
       } catch (mkdirError) {
-        throw storageError(mkdirError, 'Creative Studio proposal directory could not be created');
+        throw storageError(mkdirError, 'Creative Studio queue directory could not be created');
       }
     }
     try {
       const canonicalDirectory = await fs.realpath(directory);
       if (canonicalDirectory !== directory || !isInsideRoot(root, canonicalDirectory)) {
-        throw new CreativeStudioStoreError('storage_error', 'Creative Studio proposal directory is unsafe');
+        throw new CreativeStudioStoreError('storage_error', 'Creative Studio queue directory is unsafe');
       }
       return canonicalDirectory;
     } catch (error) {
       if (error instanceof CreativeStudioStoreError) throw error;
-      throw storageError(error, 'Creative Studio proposal directory is unavailable');
+      throw storageError(error, 'Creative Studio queue directory is unavailable');
     }
   };
 
@@ -1267,6 +1288,24 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       throw new CreativeStudioStoreError('storage_error', 'Creative Studio proposal slots are unavailable');
     }
     return { root: proposalRoot, pending, decisions, slots };
+  };
+
+  const referenceRequestDirectories = async (
+    root: string,
+    projectId: string,
+    createIfMissing: boolean
+  ): Promise<{ root: string; pending: string; slots: string } | null> => {
+    const project = await projectDirectory(root, projectId, false);
+    if (project === null) throw new CreativeStudioStoreError('not_found', 'Studio project not found');
+    const requestRoot = await safeNestedDirectory(root, project, 'reference-requests', createIfMissing);
+    if (requestRoot === null) return null;
+    const pending = await safeNestedDirectory(root, requestRoot, 'pending', createIfMissing);
+    if (pending === null) return null;
+    const slots = await safeNestedDirectory(root, requestRoot, 'slots', true);
+    if (slots === null) {
+      throw new CreativeStudioStoreError('storage_error', 'Creative Studio reference request slots are unavailable');
+    }
+    return { root: requestRoot, pending, slots };
   };
 
   const readConnections = async (root: string): Promise<StudioConnectionBinding[]> => {
@@ -1376,7 +1415,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     }
   };
 
-  const proposalFileEntries = async (directory: string): Promise<import('node:fs').Dirent[]> => {
+  const pendingRecordFileEntries = async (directory: string): Promise<import('node:fs').Dirent[]> => {
     try {
       return await fs.readdir(directory, { withFileTypes: true });
     } catch (error) {
@@ -1384,7 +1423,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     }
   };
 
-  const readBoundedProposalJson = async (file: string): Promise<unknown> => {
+  const readBoundedPendingRecordJson = async (file: string): Promise<unknown> => {
     const stats = await fs.lstat(file);
     if (stats.isSymbolicLink() || !stats.isFile() || stats.size > STUDIO_PROPOSAL_MAX_RECORD_BYTES) {
       throw new CreativeStudioStoreError('storage_error', 'Creative Studio proposal record is unsafe');
@@ -1396,14 +1435,14 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     projectId: string,
     directories: { pending: string }
   ): Promise<StudioProposal[]> => {
-    const entries = await proposalFileEntries(directories.pending);
+    const entries = await pendingRecordFileEntries(directories.pending);
     const proposals: StudioProposal[] = [];
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
       const proposalId = entry.name.slice(0, -'.json'.length);
       if (!isSafeProposalId(proposalId)) continue;
       try {
-        const value = await readBoundedProposalJson(path.join(directories.pending, entry.name));
+        const value = await readBoundedPendingRecordJson(path.join(directories.pending, entry.name));
         if (validateProposalRecord(projectId, proposalId, value)) proposals.push(value);
         else logError('[CreativeStudio] Ignoring malformed proposal record', new Error('InvalidProposalRecord'));
       } catch (error) {
@@ -1413,17 +1452,45 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     return proposals;
   };
 
+  const readReferenceRequestRecords = async (
+    project: StudioProject,
+    directories: { pending: string }
+  ): Promise<StudioReferenceRequest[]> => {
+    const entries = await pendingRecordFileEntries(directories.pending);
+    const requests: StudioReferenceRequest[] = [];
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+      const requestId = entry.name.slice(0, -'.json'.length);
+      if (!isSafeProposalId(requestId)) continue;
+      try {
+        // The bounded queue contains at most 50 records and logs each malformed entry independently.
+        // eslint-disable-next-line no-await-in-loop
+        const value = await readBoundedPendingRecordJson(path.join(directories.pending, entry.name));
+        if (validateReferenceRequestRecord(project, requestId, value)) requests.push(value);
+        else {
+          logError(
+            '[CreativeStudio] Ignoring malformed reference request record',
+            new Error('InvalidReferenceRequestRecord')
+          );
+        }
+      } catch (error) {
+        logError('[CreativeStudio] Ignoring unreadable reference request record', error);
+      }
+    }
+    return requests;
+  };
+
   const readProposalDecisions = async (directories: {
     decisions: string;
   }): Promise<Map<string, StudioProposalDecision>> => {
-    const entries = await proposalFileEntries(directories.decisions);
+    const entries = await pendingRecordFileEntries(directories.decisions);
     const decisions = new Map<string, StudioProposalDecision>();
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
       const proposalId = entry.name.slice(0, -'.json'.length);
       if (!isSafeProposalId(proposalId)) continue;
       try {
-        const value = await readBoundedProposalJson(path.join(directories.decisions, entry.name));
+        const value = await readBoundedPendingRecordJson(path.join(directories.decisions, entry.name));
         if (validateProposalDecision(proposalId, value)) decisions.set(proposalId, value);
         else logError('[CreativeStudio] Ignoring malformed proposal decision', new Error('InvalidProposalDecision'));
       } catch (error) {
@@ -1481,7 +1548,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     const liveProposalIds = new Set(
       proposals.filter((proposal) => proposal.status === 'pending').map((proposal) => proposal.id)
     );
-    const entries = await proposalFileEntries(directories.slots);
+    const entries = await pendingRecordFileEntries(directories.slots);
     const retainedProposalIds = new Set<string>();
     const cutoff = Date.parse(now()) - STUDIO_PROPOSAL_STALE_SLOT_MS;
     for (const entry of entries) {
@@ -1489,7 +1556,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       const file = path.join(directories.slots, entry.name);
       try {
         // eslint-disable-next-line no-await-in-loop
-        const value = await readBoundedProposalJson(file);
+        const value = await readBoundedPendingRecordJson(file);
         const retain =
           validateProposalSlot(value) &&
           liveProposalIds.has(value.proposalId) &&
@@ -1512,13 +1579,13 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
   };
 
   const releaseProposalSlot = async (directories: { slots: string }, proposalId: string): Promise<void> => {
-    const entries = await proposalFileEntries(directories.slots);
+    const entries = await pendingRecordFileEntries(directories.slots);
     for (const entry of entries) {
       if (!entry.isFile() || !/^\d+\.slot$/.test(entry.name)) continue;
       const file = path.join(directories.slots, entry.name);
       try {
         // eslint-disable-next-line no-await-in-loop
-        const value = await readBoundedProposalJson(file);
+        const value = await readBoundedPendingRecordJson(file);
         if (!validateProposalSlot(value) || value.proposalId !== proposalId) continue;
         // eslint-disable-next-line no-await-in-loop
         await releaseProposalSlotFile(file);
@@ -1730,6 +1797,18 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       return directories === null ? [] : listProjectProposals(root, projectId, directories);
     });
 
+  const listReferenceRequestsThroughQueue = (projectId: string): Promise<StudioReferenceRequest[]> =>
+    enqueue(projectId, async (): Promise<StudioReferenceRequest[]> => {
+      const root = await canonicalRoot();
+      const project = await readProject(root, projectId);
+      if (project === null) throw new CreativeStudioStoreError('not_found', 'Studio project not found');
+      const directories = await referenceRequestDirectories(root, projectId, false);
+      if (directories === null) return [];
+      return (await readReferenceRequestRecords(project, directories)).toSorted(
+        (left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)
+      );
+    });
+
   return {
     async listProjects(): Promise<StudioProjectSummary[]> {
       if (sharedListingSweep?.remainingConsumer === 'projects') {
@@ -1787,7 +1866,9 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       return projectDirectory(await canonicalRoot(), projectId, false);
     },
 
-    async resolveProposalPaths(projectId: string): Promise<{ projectDir: string; pendingDir: string }> {
+    async resolveProposalPaths(
+      projectId: string
+    ): Promise<{ projectDir: string; pendingDir: string; referencePendingDir: string }> {
       if (!isSafeId(projectId)) {
         throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio project id');
       }
@@ -1796,10 +1877,15 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
         const project = await projectDirectory(root, projectId, false);
         if (project === null) throw new CreativeStudioStoreError('not_found', 'Studio project not found');
         const directories = await proposalDirectories(root, projectId, true);
-        if (directories === null) {
+        const referenceDirectories = await referenceRequestDirectories(root, projectId, true);
+        if (directories === null || referenceDirectories === null) {
           throw new CreativeStudioStoreError('storage_error', 'Creative Studio proposal storage is unavailable');
         }
-        return { projectDir: project, pendingDir: directories.pending };
+        return {
+          projectDir: project,
+          pendingDir: directories.pending,
+          referencePendingDir: referenceDirectories.pending,
+        };
       });
     },
 
@@ -1854,6 +1940,13 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       return listProposalsThroughQueue(projectId);
     },
 
+    async listPendingReferenceRequests(projectId: string): Promise<StudioReferenceRequest[]> {
+      if (!isSafeId(projectId)) {
+        throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio project id');
+      }
+      return listReferenceRequestsThroughQueue(projectId);
+    },
+
     async rejectProposal(projectId: string, proposalId: string): Promise<StudioProposal> {
       if (!isSafeId(projectId) || !isSafeProposalId(proposalId)) {
         throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio proposal identity');
@@ -1897,30 +1990,32 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     async watchProposals(listener: (projectId: string, proposalId: string) => void): Promise<() => Promise<void>> {
       const root = await canonicalRoot();
       let closed = false;
-      const observedStatuses = new Map<string, StudioProposal['status']>();
+      const observedStatuses = new Map<string, StudioProposal['status'] | StudioReferenceRequest['status']>();
       const validateAndNotify = async (relativeFile: string): Promise<void> => {
         const segments = path.normalize(relativeFile).split(path.sep);
+        const isProposalChange =
+          segments[1] === 'proposals' && (segments[2] === 'pending' || segments[2] === 'decisions');
+        const isReferenceRequestChange = segments[1] === 'reference-requests' && segments[2] === 'pending';
         if (
           segments.length !== 4 ||
           !isSafeId(segments[0]) ||
-          segments[1] !== 'proposals' ||
-          (segments[2] !== 'pending' && segments[2] !== 'decisions') ||
+          (!isProposalChange && !isReferenceRequestChange) ||
           !segments[3].endsWith('.json')
         ) {
           return;
         }
         const projectId = segments[0];
-        const proposalId = segments[3].slice(0, -'.json'.length);
-        if (!isSafeProposalId(proposalId)) return;
+        const recordId = segments[3].slice(0, -'.json'.length);
+        if (!isSafeProposalId(recordId)) return;
         try {
-          const proposal = (await listProposalsThroughQueue(projectId)).find(
-            (candidate) => candidate.id === proposalId
-          );
-          if (closed || proposal === undefined) return;
-          const key = `${projectId}:${proposalId}`;
-          if (observedStatuses.get(key) === proposal.status) return;
-          observedStatuses.set(key, proposal.status);
-          listener(projectId, proposalId);
+          const record = isProposalChange
+            ? (await listProposalsThroughQueue(projectId)).find((candidate) => candidate.id === recordId)
+            : (await listReferenceRequestsThroughQueue(projectId)).find((candidate) => candidate.id === recordId);
+          if (closed || record === undefined) return;
+          const key = `${projectId}:${recordId}`;
+          if (observedStatuses.get(key) === record.status) return;
+          observedStatuses.set(key, record.status);
+          listener(projectId, recordId);
         } catch (error) {
           if (!closed) logError('[CreativeStudio] Proposal watcher ignored an invalid record', error);
         }

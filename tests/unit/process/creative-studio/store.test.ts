@@ -45,6 +45,7 @@ import type {
 import { jobOutputRole } from '@/common/types/project/creativeStudioOutputRole';
 import type { StudioProposalWriteError } from '@process/resources/builtinMcp/studioProposalWriter';
 import { writeProposalRecord } from '@process/resources/builtinMcp/studioProposalWriter';
+import { writeReferenceRequestRecord } from '@process/resources/builtinMcp/studioReferenceRequestWriter';
 import { createCreativeStudioStore, type CreativeStudioStore } from '@process/services/creative-studio/store';
 
 const makeInput = (overrides: Partial<CreateStudioProjectInput> = {}): CreateStudioProjectInput => ({
@@ -281,9 +282,11 @@ describe('creative studio project store', () => {
       expect(paths).toEqual({
         projectDir: path.join(canonicalRoot, project.id),
         pendingDir: path.join(canonicalRoot, project.id, 'proposals', 'pending'),
+        referencePendingDir: path.join(canonicalRoot, project.id, 'reference-requests', 'pending'),
       });
       expect(existsSync(path.join(rootDir, project.id, 'proposals', 'decisions'))).toBe(true);
       expect(existsSync(path.join(rootDir, project.id, 'proposals', 'slots'))).toBe(true);
+      expect(existsSync(path.join(rootDir, project.id, 'reference-requests', 'slots'))).toBe(true);
     });
 
     it('rejects proposal-path resolution for an unknown project', async () => {
@@ -546,6 +549,42 @@ describe('creative studio project store', () => {
 
         await expect(store.listProposals(project.id)).resolves.toMatchObject([{ id: record.id }]);
       });
+    });
+
+    it('lists and watches validated reference requests from the sibling queue', async () => {
+      const project = await store.createProject(makeInput());
+      await store.updateProject(project.id, (current) => addScene(current, 'scene_1'));
+      const paths = await store.resolveProposalPaths(project.id);
+      const record = await writeReferenceRequestRecord({
+        pendingDir: paths.referencePendingDir,
+        projectId: project.id,
+        sceneId: 'scene_1',
+      });
+      await writeFile(
+        path.join(paths.referencePendingDir, 'request_unknown_scene.json'),
+        JSON.stringify({ ...record, id: 'request_unknown_scene', sceneId: 'scene_missing' })
+      );
+
+      await expect(store.listPendingReferenceRequests(project.id)).resolves.toMatchObject([
+        { id: record.id, projectId: project.id, sceneId: 'scene_1', status: 'pending' },
+      ]);
+
+      const listener = vi.fn();
+      let notifyFileChange: ((relativeFile: string) => void) | undefined;
+      const watchingStore = createCreativeStudioStore({
+        rootDir,
+        watchProposalTree: ({ onChange }) => {
+          notifyFileChange = onChange;
+          return { close: vi.fn() };
+        },
+      });
+      const stopWatching = await watchingStore.watchProposals(listener);
+      try {
+        notifyFileChange?.(`${project.id}/reference-requests/pending/${record.id}.json`);
+        await vi.waitFor(() => expect(listener).toHaveBeenCalledWith(project.id, record.id));
+      } finally {
+        await stopWatching();
+      }
     });
   });
 

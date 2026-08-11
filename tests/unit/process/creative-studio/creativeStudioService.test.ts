@@ -45,7 +45,9 @@ import {
   createListRoutesHandler,
   createProposeStoryboardHandler,
   createReadStoryboardHandler,
+  createRequestReferenceImagesHandler,
   parseStudioServerEnv,
+  registerStudioTools,
 } from '@process/resources/builtinMcp/studioServer';
 import { BUILTIN_STUDIO_NAME } from '@process/resources/builtinMcp/constants';
 
@@ -431,6 +433,7 @@ describe('CreativeStudioService', () => {
           [STUDIO_ENV.projectId]: project.id,
           [STUDIO_ENV.projectDir]: paths.projectDir,
           [STUDIO_ENV.pendingDir]: paths.pendingDir,
+          [STUDIO_ENV.referencePendingDir]: paths.referencePendingDir,
           [STUDIO_ENV.routeCatalog]: JSON.stringify(routeCatalog),
         },
       },
@@ -4207,6 +4210,18 @@ describe('CreativeStudioService', () => {
 });
 
 describe('Studio MCP server', () => {
+  it('registers the reference request tool with the approval-before-spend instruction', () => {
+    const tool = vi.fn();
+
+    registerStudioTools({ tool: tool as never }, null);
+
+    const registration = tool.mock.calls.find(([name]) => name === 'studio_request_reference_images');
+    expect(tool).toHaveBeenCalledTimes(4);
+    expect(registration?.[1]).toBe(
+      'Request a supporting reference image for one or more scenes. This does NOT generate anything — it queues a request the user approves before any money is spent. One image per scene; do not request a scene that already has one unless the user asked you to replace it.'
+    );
+  });
+
   it('exposes the route catalog with constraints and never mutates the project', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'studio-server-'));
     const projectFile = path.join(dir, 'project.json');
@@ -4233,6 +4248,7 @@ describe('Studio MCP server', () => {
       projectId: 'project_1',
       projectDir: dir,
       pendingDir: '',
+      referencePendingDir: '',
       routeCatalog: catalog,
     })({});
     const parsed = JSON.parse(result.content[0].text) as StudioRouteCatalog;
@@ -4246,7 +4262,7 @@ describe('Studio MCP server', () => {
     expect(await readFile(projectFile)).toEqual(before);
   });
 
-  it('parses env only when all three keys are present', () => {
+  it('parses env only when all four storage keys are present', () => {
     expect(parseStudioServerEnv({})).toBeNull();
     const routeCatalog: StudioRouteCatalog = {
       storyboard: { status: 'setup_required', selected: null, options: [] },
@@ -4258,6 +4274,7 @@ describe('Studio MCP server', () => {
       [STUDIO_ENV.projectId]: 'project_1',
       [STUDIO_ENV.projectDir]: '/tmp/p',
       [STUDIO_ENV.pendingDir]: '/tmp/p/proposals/pending',
+      [STUDIO_ENV.referencePendingDir]: '/tmp/p/reference-requests/pending',
       [STUDIO_ENV.routeCatalog]: JSON.stringify(routeCatalog),
     };
 
@@ -4265,14 +4282,84 @@ describe('Studio MCP server', () => {
       projectId: 'project_1',
       projectDir: '/tmp/p',
       pendingDir: '/tmp/p/proposals/pending',
+      referencePendingDir: '/tmp/p/reference-requests/pending',
       routeCatalog,
     });
   });
 
+  it('queues a reference request without spending', async () => {
+    const rootDir = await mkdtemp(path.join(tmpdir(), 'studio-server-'));
+    const store = createCreativeStudioStore({ rootDir, createId: () => 'project_1' });
+    const created = await store.createProject(makeInput());
+    await store.updateProject(created.id, (project) => ({
+      ...project,
+      sceneOrder: ['scene_1', 'scene_2'],
+      scenes: Object.fromEntries(
+        ['scene_1', 'scene_2'].map((sceneId) => [
+          sceneId,
+          {
+            id: sceneId,
+            ...makeScene(sceneId),
+            selectedAssetId: null,
+            assetIds: [],
+            jobIds: [],
+            reviewState: 'draft' as const,
+          },
+        ])
+      ),
+    }));
+    const paths = await store.resolveProposalPaths(created.id);
+
+    const result = await createRequestReferenceImagesHandler({
+      projectId: created.id,
+      projectDir: paths.projectDir,
+      pendingDir: paths.pendingDir,
+      referencePendingDir: paths.referencePendingDir,
+    })({ sceneIds: ['scene_1', 'scene_2'] });
+
+    expect(result.status).toBe('queued_for_approval');
+    expect(await store.listPendingReferenceRequests(created.id)).toHaveLength(2);
+    expect(JSON.parse(await readFile(path.join(paths.projectDir, 'project.json'), 'utf8'))).toMatchObject({ jobs: {} });
+  });
+
+  it('refuses reference requests for scenes that do not exist', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'studio-server-'));
+    await writeFile(path.join(dir, 'project.json'), JSON.stringify(studioServerProjectFixture));
+
+    const result = await createRequestReferenceImagesHandler({
+      projectId: 'project_1',
+      projectDir: dir,
+      pendingDir: path.join(dir, 'proposals', 'pending'),
+      referencePendingDir: path.join(dir, 'reference-requests', 'pending'),
+    })({ sceneIds: ['nope'] });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/unknown scene/i);
+  });
+
+  it.each([[], ['scene_1', 'scene_1'], Array.from({ length: 25 }, (_, index) => `scene_${index}`)])(
+    'refuses an invalid reference request scene selection',
+    async (sceneIds) => {
+      const result = await createRequestReferenceImagesHandler({
+        projectId: 'project_1',
+        projectDir: '',
+        pendingDir: '',
+        referencePendingDir: '',
+      })({ sceneIds });
+
+      expect(result.isError).toBe(true);
+    }
+  );
+
   it('read_storyboard returns revision, settings and scenes without operational state', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'studio-server-'));
     await writeFile(path.join(dir, 'project.json'), JSON.stringify(studioServerProjectFixture));
-    const handler = createReadStoryboardHandler({ projectId: 'project_1', projectDir: dir, pendingDir: '' });
+    const handler = createReadStoryboardHandler({
+      projectId: 'project_1',
+      projectDir: dir,
+      pendingDir: '',
+      referencePendingDir: '',
+    });
 
     const result = await handler({});
     const text = result.content[0].text;
@@ -4287,7 +4374,12 @@ describe('Studio MCP server', () => {
     const pendingDir = path.join(dir, 'proposals', 'pending');
     await mkdir(pendingDir, { recursive: true });
     await mkdir(path.join(dir, 'proposals', 'slots'), { recursive: true });
-    const handler = createProposeStoryboardHandler({ projectId: 'project_1', projectDir: dir, pendingDir });
+    const handler = createProposeStoryboardHandler({
+      projectId: 'project_1',
+      projectDir: dir,
+      pendingDir,
+      referencePendingDir: '',
+    });
 
     const result = await handler({
       base_revision: 7,
@@ -4316,7 +4408,12 @@ describe('Studio MCP server', () => {
     await writeFile(path.join(dir, 'project.json'), JSON.stringify(studioServerProjectFixture));
     const pendingDir = path.join(dir, 'proposals', 'pending');
     await mkdir(pendingDir, { recursive: true });
-    const handler = createProposeStoryboardHandler({ projectId: 'project_1', projectDir: dir, pendingDir });
+    const handler = createProposeStoryboardHandler({
+      projectId: 'project_1',
+      projectDir: dir,
+      pendingDir,
+      referencePendingDir: '',
+    });
 
     const result = await handler({
       base_revision: 3,
@@ -4344,10 +4441,13 @@ describe('Studio MCP server', () => {
     const projectFile = path.join(dir, 'project.json');
     await writeFile(projectFile, JSON.stringify(studioServerProjectFixture));
     const pendingDir = path.join(dir, 'proposals', 'pending');
+    const referencePendingDir = path.join(dir, 'reference-requests', 'pending');
     await mkdir(pendingDir, { recursive: true });
     await mkdir(path.join(dir, 'proposals', 'slots'), { recursive: true });
+    await mkdir(referencePendingDir, { recursive: true });
+    await mkdir(path.join(dir, 'reference-requests', 'slots'), { recursive: true });
     const before = await readFile(projectFile, 'utf8');
-    const env = { projectId: 'project_1', projectDir: dir, pendingDir };
+    const env = { projectId: 'project_1', projectDir: dir, pendingDir, referencePendingDir };
 
     await createReadStoryboardHandler(env)({});
     await createProposeStoryboardHandler(env)({
@@ -4366,6 +4466,7 @@ describe('Studio MCP server', () => {
         },
       },
     });
+    await createRequestReferenceImagesHandler(env)({ sceneIds: ['scene_1'] });
 
     expect(await readFile(projectFile, 'utf8')).toBe(before);
   });

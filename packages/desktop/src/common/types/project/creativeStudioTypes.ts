@@ -305,6 +305,16 @@ export type StudioProposalAcceptance = {
   project: StudioRendererProject;
 };
 
+/** A durable request for one scene reference image; generation begins only after renderer approval. */
+export type StudioReferenceRequest = {
+  schemaVersion: 1;
+  id: string;
+  projectId: string;
+  sceneId: string;
+  status: 'pending';
+  createdAt: string;
+};
+
 export type StudioProjectSummary = {
   id: string;
   name: string;

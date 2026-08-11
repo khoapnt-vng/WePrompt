@@ -19,6 +19,7 @@ import type {
   StudioProposalAcceptance,
   StudioProposalPayload,
   StudioProposalRequest,
+  StudioReferenceRequest,
   StudioProjectRequest,
   StudioPersistCapturedPosterRequest,
   StudioPlaceCutScenesRequest,
@@ -153,6 +154,7 @@ export type CreativeStudioService = {
   getLatestRender(input: StudioProjectRequest): Promise<StudioLatestRender | null>;
   getBriefSessionServer(input: StudioProjectRequest): Promise<ISessionMcpServer>;
   listProposals(input: StudioProjectRequest): Promise<StudioProposal[]>;
+  listPendingReferenceRequests(input: StudioProjectRequest): Promise<StudioReferenceRequest[]>;
   acceptProposal(input: StudioProposalRequest): Promise<StudioProposalAcceptance>;
   rejectProposal(input: StudioProposalRequest): Promise<StudioProposal>;
   proposeStoryboard(input: ProposeStudioStoryboardInput): Promise<StudioRendererProject>;
@@ -1117,6 +1119,7 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
             [STUDIO_ENV.projectId]: input.projectId,
             [STUDIO_ENV.projectDir]: paths.projectDir,
             [STUDIO_ENV.pendingDir]: paths.pendingDir,
+            [STUDIO_ENV.referencePendingDir]: paths.referencePendingDir,
             [STUDIO_ENV.routeCatalog]: JSON.stringify(routeCatalog),
           },
         },
@@ -1126,6 +1129,11 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
     async listProposals(input: StudioProjectRequest): Promise<StudioProposal[]> {
       assertSafeId(input.projectId, 'project id');
       return (await deps.store.listProposals(input.projectId)).map(toRendererProposal);
+    },
+
+    async listPendingReferenceRequests(input: StudioProjectRequest): Promise<StudioReferenceRequest[]> {
+      assertSafeId(input.projectId, 'project id');
+      return deps.store.listPendingReferenceRequests(input.projectId);
     },
 
     async acceptProposal(input: StudioProposalRequest): Promise<StudioProposalAcceptance> {

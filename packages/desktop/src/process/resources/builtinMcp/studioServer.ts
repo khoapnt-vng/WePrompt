@@ -5,7 +5,7 @@
  */
 
 // Built-in MCP server for one Creative Studio project. This subprocess can
-// read a bounded script view and write durable proposal records. It never
+// read a bounded script view and write durable approval-queue records. It never
 // writes project.json; the main-process store remains the sole project writer.
 
 import { readFile } from 'node:fs/promises';
@@ -21,17 +21,21 @@ import type {
 } from '@/common/types/project/creativeStudioTypes';
 import { BUILTIN_STUDIO_NAME } from '@process/resources/builtinMcp/constants';
 import { StudioProposalWriteError, writeProposalRecord } from '@process/resources/builtinMcp/studioProposalWriter';
+import { writeReferenceRequestRecord } from '@process/resources/builtinMcp/studioReferenceRequestWriter';
+import { StudioPendingRecordWriteError } from '@process/resources/builtinMcp/studioPendingRecordWriter';
 
 export type StudioServerEnv = {
   projectId: string;
   projectDir: string;
   pendingDir: string;
+  referencePendingDir: string;
   routeCatalog?: StudioRouteCatalog | null;
 };
 
 export type StudioToolResult = {
   content: Array<{ type: 'text'; text: string }>;
   isError?: boolean;
+  status?: 'queued_for_approval';
 };
 
 export type ProposeStoryboardInput = {
@@ -59,8 +63,9 @@ export function parseStudioServerEnv(env: Record<string, string | undefined>): S
   const projectId = env[STUDIO_ENV.projectId];
   const projectDir = env[STUDIO_ENV.projectDir];
   const pendingDir = env[STUDIO_ENV.pendingDir];
+  const referencePendingDir = env[STUDIO_ENV.referencePendingDir];
   const serializedRouteCatalog = env[STUDIO_ENV.routeCatalog];
-  if (!projectId || !projectDir || !pendingDir) return null;
+  if (!projectId || !projectDir || !pendingDir || !referencePendingDir) return null;
   let routeCatalog: StudioRouteCatalog | null = null;
   if (serializedRouteCatalog) {
     try {
@@ -69,7 +74,7 @@ export function parseStudioServerEnv(env: Record<string, string | undefined>): S
       routeCatalog = null;
     }
   }
-  return { projectId, projectDir, pendingDir, routeCatalog };
+  return { projectId, projectDir, pendingDir, referencePendingDir, routeCatalog };
 }
 
 const errorResult = (message: string): StudioToolResult => ({
@@ -182,10 +187,52 @@ export function createProposeStoryboardHandler(
   };
 }
 
-async function main() {
-  const config = parseStudioServerEnv(process.env);
-  const server = new McpServer({ name: BUILTIN_STUDIO_NAME, version: '1.0.0' });
+export function createRequestReferenceImagesHandler(
+  config: StudioServerEnv | null
+): (input: { sceneIds: string[] }) => Promise<StudioToolResult> {
+  return async ({ sceneIds }) => {
+    if (!config) return errorResult('Creative Studio project is unavailable.');
+    if (
+      !Array.isArray(sceneIds) ||
+      sceneIds.length < 1 ||
+      sceneIds.length > 24 ||
+      sceneIds.some((sceneId) => !SAFE_ID.test(sceneId)) ||
+      new Set(sceneIds).size !== sceneIds.length
+    ) {
+      return errorResult('Reference requests require between 1 and 24 unique scene ids.');
+    }
+    try {
+      const project = await readProject(config);
+      const unknownSceneId = sceneIds.find((sceneId) => project.scenes[sceneId] === undefined);
+      if (unknownSceneId) return errorResult(`Unknown scene: ${unknownSceneId}`);
+      await Promise.all(
+        sceneIds.map((sceneId) =>
+          writeReferenceRequestRecord({
+            pendingDir: config.referencePendingDir,
+            projectId: config.projectId,
+            sceneId,
+          })
+        )
+      );
+      return {
+        status: 'queued_for_approval',
+        content: [
+          {
+            type: 'text',
+            text: `${sceneIds.length} reference image request(s) queued for user approval; nothing was generated.`,
+          },
+        ],
+      };
+    } catch (error) {
+      if (error instanceof StudioPendingRecordWriteError) return errorResult(error.message);
+      return errorResult(
+        `Reference requests could not be recorded: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  };
+}
 
+export function registerStudioTools(server: Pick<McpServer, 'tool'>, config: StudioServerEnv | null): void {
   server.tool(
     'studio_list_routes',
     "Read the generation routes available to this project, with their constraints. Call this before proposing scene durations: a scene shorter than the video route's minDurationSeconds cannot be produced. Never assume a limit; read it.",
@@ -197,6 +244,12 @@ async function main() {
     "Read the Studio project's current script: revision, settings, and every scene's editable fields plus whether it has a reference image and a selected take. Always call this before proposing.",
     {},
     createReadStoryboardHandler(config)
+  );
+  server.tool(
+    'studio_request_reference_images',
+    'Request a supporting reference image for one or more scenes. This does NOT generate anything — it queues a request the user approves before any money is spent. One image per scene; do not request a scene that already has one unless the user asked you to replace it.',
+    { sceneIds: z.array(z.string().regex(SAFE_ID)).min(1).max(24) },
+    createRequestReferenceImagesHandler(config)
   );
   server.tool(
     'propose_storyboard',
@@ -212,6 +265,12 @@ async function main() {
     },
     createProposeStoryboardHandler(config)
   );
+}
+
+async function main() {
+  const config = parseStudioServerEnv(process.env);
+  const server = new McpServer({ name: BUILTIN_STUDIO_NAME, version: '1.0.0' });
+  registerStudioTools(server, config);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
