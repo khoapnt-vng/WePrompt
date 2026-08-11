@@ -929,23 +929,6 @@
         "submit": "Read my brief →",
         "empty": "One sentence is enough — say what we are making."
       },
-      "shape": {
-        "title": "Start from a shape",
-        "label": "{{name}} · {{count}} shots · {{seconds}}s",
-        "sceneTitle": "Shot {{number}}",
-        "productStory": {
-          "name": "Product story",
-          "starter": "A product story for people who have never heard of us — four beats, ending on the wordmark."
-        },
-        "featureTeaser": {
-          "name": "Feature teaser",
-          "starter": "A short teaser for one new feature, aimed at customers already using the product."
-        },
-        "recapReel": {
-          "name": "Recap reel",
-          "starter": "A recap reel of the quarter for the whole company, warm and a little proud."
-        }
-      },
       "scriptOnly": "SCRIPT ONLY",
       "posterBadge": "Take {{take}} · Shot {{scene}}",
       "status": {

@@ -22,7 +22,6 @@ import SiderStudioEntry from '@renderer/components/layout/Sider/SiderNav/SiderSt
 const bridge = vi.hoisted(() => ({
   listProjects: { invoke: vi.fn() },
   createProject: { invoke: vi.fn() },
-  updateScene: { invoke: vi.fn() },
   getProject: { invoke: vi.fn() },
   deleteProject: { invoke: vi.fn() },
   listRoutes: { invoke: vi.fn() },
@@ -59,22 +58,9 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.library.composer.attachBriefUnavailable':
           'Brief document attachments are not available yet.',
         'conversation.creativeStudio.library.sectionLabel': 'OR PICK UP WHERE YOU LEFT OFF',
-        'conversation.creativeStudio.library.shape.productStory.name': 'Product story',
-        'conversation.creativeStudio.library.shape.productStory.starter':
-          'A product story for people who have never heard of us — four beats, ending on the wordmark.',
-        'conversation.creativeStudio.library.shape.featureTeaser.name': 'Feature teaser',
-        'conversation.creativeStudio.library.shape.featureTeaser.starter':
-          'A short teaser for one new feature, aimed at customers already using the product.',
-        'conversation.creativeStudio.library.shape.recapReel.name': 'Recap reel',
-        'conversation.creativeStudio.library.shape.recapReel.starter':
-          'A recap reel of the quarter for the whole company, warm and a little proud.',
         'conversation.creativeStudio.library.scriptOnly': 'SCRIPT ONLY',
       };
       if (key === 'conversation.creativeStudio.library.deleteConfirmBody') return `${key}:${params?.name}`;
-      if (key === 'conversation.creativeStudio.library.shape.label') {
-        return `${params?.name} · ${params?.count} shots · ${params?.seconds}s`;
-      }
-      if (key === 'conversation.creativeStudio.library.shape.sceneTitle') return `Shot ${params?.number}`;
       if (key === 'conversation.creativeStudio.library.shotCount') return `${params?.count} shots`;
       if (key === 'conversation.creativeStudio.library.projectCount') return `${params?.count} projects`;
       if (key === 'conversation.creativeStudio.library.posterBadge') {
@@ -164,7 +150,6 @@ describe('StudioLibrary', () => {
     window.localStorage.clear();
     bridge.listProjects.invoke.mockResolvedValue(ok([]));
     bridge.createProject.invoke.mockResolvedValue(ok(project()));
-    bridge.updateScene.invoke.mockResolvedValue(ok(project()));
     bridge.getProject.invoke.mockResolvedValue(ok(project()));
     bridge.deleteProject.invoke.mockResolvedValue(ok(true));
     bridge.listRoutes.invoke.mockResolvedValue(ok(routes()));
@@ -276,62 +261,6 @@ describe('StudioLibrary', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('One sentence is enough — say what we are making.');
     expect(bridge.createProject.invoke).not.toHaveBeenCalled();
-  });
-
-  it('names a shape-created project after the shape alone and seeds its starter sentence', async () => {
-    bridge.createProject.invoke.mockResolvedValue(ok(project({ id: 'shape-project', revision: 1 })));
-    bridge.updateScene.invoke.mockImplementation(async (input: { expectedRevision: number }) =>
-      ok(project({ id: 'shape-project', revision: input.expectedRevision + 1 }))
-    );
-    render(<StudioLibrary />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Product story · 4 shots · 15s' }));
-
-    await waitFor(() => expect(bridge.updateScene.invoke).toHaveBeenCalledTimes(4));
-    expect(bridge.createProject.invoke).toHaveBeenCalledWith({
-      name: 'Product story',
-      brief: 'A product story for people who have never heard of us — four beats, ending on the wordmark.',
-      aspectRatio: '16:9',
-      targetDurationSeconds: 15,
-      resolution: '720p',
-    });
-    expect(bridge.updateScene.invoke.mock.calls.map(([input]) => input)).toEqual([
-      {
-        projectId: 'shape-project',
-        sceneId: 'scene_1',
-        expectedRevision: 1,
-        scene: {
-          title: 'Shot 1',
-          purpose: '',
-          visualPrompt: '',
-          narration: '',
-          onScreenText: '',
-          mediaKind: 'video',
-          durationSeconds: 4,
-          referenceAssetId: null,
-        },
-      },
-      expect.objectContaining({
-        projectId: 'shape-project',
-        sceneId: 'scene_2',
-        expectedRevision: 2,
-        scene: expect.objectContaining({ title: 'Shot 2', durationSeconds: 4 }),
-      }),
-      expect.objectContaining({
-        projectId: 'shape-project',
-        sceneId: 'scene_3',
-        expectedRevision: 3,
-        scene: expect.objectContaining({ title: 'Shot 3', durationSeconds: 4 }),
-      }),
-      expect.objectContaining({
-        projectId: 'shape-project',
-        sceneId: 'scene_4',
-        expectedRevision: 4,
-        scene: expect.objectContaining({ title: 'Shot 4', durationSeconds: 3 }),
-      }),
-    ]);
-    expect(navigate).toHaveBeenCalledWith('/studio/shape-project/write');
-    expect(readLastStudioPhase('shape-project')).toBe('write');
   });
 
   it('shows a canonical poster URL for a rendered project and SCRIPT ONLY otherwise', async () => {

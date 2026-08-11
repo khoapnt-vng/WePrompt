@@ -1089,23 +1089,6 @@
         "submit": "브리프 확인 →",
         "empty": "한 문장이면 충분합니다. 무엇을 만들지 알려 주세요."
       },
-      "shape": {
-        "title": "구성으로 시작",
-        "label": "{{name}} · {{count}}개 숏 · {{seconds}}초",
-        "sceneTitle": "숏 {{number}}",
-        "productStory": {
-          "name": "제품 스토리",
-          "starter": "우리를 처음 접하는 사람들을 위한 제품 스토리 — 네 개의 비트로 구성하고 워드마크로 마무리합니다."
-        },
-        "featureTeaser": {
-          "name": "기능 티저",
-          "starter": "이미 제품을 사용 중인 고객을 대상으로 한 새 기능의 짧은 티저입니다."
-        },
-        "recapReel": {
-          "name": "분기 회고 릴",
-          "starter": "전사를 위한 분기 회고 릴로, 따뜻하면서도 조금은 자랑스러운 분위기입니다."
-        }
-      },
       "scriptOnly": "스크립트만",
       "posterBadge": "테이크 {{take}} · 숏 {{scene}}",
       "status": {

@@ -1089,23 +1089,6 @@
         "submit": "阅读我的简报 →",
         "empty": "一句话就够了——说说我们要制作什么。"
       },
-      "shape": {
-        "title": "从结构开始",
-        "label": "{{name}} · {{count}} 个镜头 · {{seconds}} 秒",
-        "sceneTitle": "镜头 {{number}}",
-        "productStory": {
-          "name": "产品故事",
-          "starter": "为从未听说过我们的人讲一个产品故事——四个节拍，最后以品牌字标收尾。"
-        },
-        "featureTeaser": {
-          "name": "功能预告",
-          "starter": "为已经在使用产品的客户制作一支新功能短预告。"
-        },
-        "recapReel": {
-          "name": "季度回顾",
-          "starter": "为全公司制作一支季度回顾短片，温暖，并带一点自豪感。"
-        }
-      },
       "scriptOnly": "仅脚本",
       "posterBadge": "版本 {{take}} · 镜头 {{scene}}",
       "status": {

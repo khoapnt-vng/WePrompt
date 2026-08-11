@@ -1105,23 +1105,6 @@
         "submit": "Ler meu briefing →",
         "empty": "Uma frase basta — diga o que vamos criar."
       },
-      "shape": {
-        "title": "Começar por uma estrutura",
-        "label": "{{name}} · {{count}} planos · {{seconds}}s",
-        "sceneTitle": "Plano {{number}}",
-        "productStory": {
-          "name": "História do produto",
-          "starter": "Uma história do produto para quem nunca ouviu falar de nós — quatro momentos, terminando na marca nominativa."
-        },
-        "featureTeaser": {
-          "name": "Teaser de recurso",
-          "starter": "Um teaser curto de um novo recurso, voltado para clientes que já usam o produto."
-        },
-        "recapReel": {
-          "name": "Reel de retrospectiva",
-          "starter": "Um reel de retrospectiva do trimestre para toda a empresa, acolhedor e um pouco orgulhoso."
-        }
-      },
       "scriptOnly": "SÓ ROTEIRO",
       "posterBadge": "Take {{take}} · Plano {{scene}}",
       "status": {

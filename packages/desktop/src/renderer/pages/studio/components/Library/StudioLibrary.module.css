@@ -129,26 +129,6 @@
   composes: primaryAction from '../../StudioTypography.module.css';
 }
 
-.shapes {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.sectionTitle {
-  composes: meta from '../../StudioTypography.module.css';
-  margin: 0;
-  color: var(--studio-plate-text);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.shapeChips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 .alert {
   grid-column: 1 / -1;
   margin: 0;
@@ -338,25 +318,6 @@
 .emptyTitle {
   margin: 0;
   color: var(--text-primary);
-}
-
-.shapeChip {
-  composes: body from '../../StudioTypography.module.css';
-}
-
-.shapeChip:global(.arco-btn-secondary):not(:global(.arco-btn-disabled)),
-.shapeChip:global(.arco-btn-secondary):not(:global(.arco-btn-disabled)):not(:global(.arco-btn-loading)):hover,
-.shapeChip:global(.arco-btn-secondary):not(:global(.arco-btn-disabled)):focus,
-.shapeChip:global(.arco-btn-secondary):not(:global(.arco-btn-disabled)):focus-visible,
-.shapeChip:global(.arco-btn-secondary):not(:global(.arco-btn-disabled)):not(:global(.arco-btn-loading)):active,
-.shapeChip:global(.arco-btn-secondary.arco-btn-disabled) {
-  height: auto;
-  padding: 6px 11px;
-  border: 1px solid var(--studio-library-shape-border);
-  border-radius: 8px;
-  background: var(--studio-library-shape-surface);
-  color: var(--studio-library-chip-text);
-  font-size: 12.5px;
 }
 
 .modalSurface {
