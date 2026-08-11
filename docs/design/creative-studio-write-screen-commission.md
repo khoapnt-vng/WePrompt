@@ -4,6 +4,8 @@
 **Why now:** Write is about to change from a text form into the place where the script and its images are made together. We would rather you drew that before we build it.
 **Related:** [designer brief](creative-studio-designer-brief.md) · [Review commission](creative-studio-review-screen-commission.md) · [script-level v1 design](creative-studio-script-level-v1-design.md) · [brief conversation design](creative-studio-brief-conversation-design.md)
 
+**Amendment, 2026-08-11 (after your first two frames):** we dropped the plate **approval** state. See the callout after §1 of "what changed" and the note under §1 of "what the screen has to hold" — both marked below. Nothing else in this commission changed.
+
 ## The ask
 
 Draw **Brief and Write** as one working surface: a conversation with a single Creative Director agent, worked scene by scene, that produces the script **and one supporting image per scene**.
@@ -20,7 +22,7 @@ Creative Studio is being re-conceived around one agent and four unchanged phases
 
 Two consequences worth holding onto while you draw:
 
-1. **A scene cannot be produced without an approved image.** There is one path through Produce, not two, and the image is the thing that keeps five separately-generated clips looking like one film.
+1. **A scene cannot be produced without an image.** There is one path through Produce, not two, and the image is the thing that keeps five separately-generated clips looking like one film. **Amended:** the image needs to *exist*, not to be separately approved by the user — see the note under §1 below. It still blocks Produce; it just isn't a state you design an approve action for.
 2. **Scene state is now the legibility surface.** A scene moves through *written → plated → produced → selected*. This replaces an earlier idea (a crew of four named agents, each reporting separately) that we built, ran, and retired.
 
 ## What we learned by building it first
@@ -35,6 +37,8 @@ We ran a four-agent crew end-to-end twice against real briefs, so this commissio
 ## What the screen has to hold
 
 1. **The plate cell, in the VISUAL column.** `Add reference` already lives there, so it has a home. It needs states — *none · queued · generating · ready · failed* — and entry points to generate, import, replace and view large. This is the moment Write stops being text-only.
+
+   **Amended — no separate "approved" state.** Your first pass added `✓ APPROVED` on the plate and a `NOT LOOKED AT` / "Waiting on your eyes" state that blocked Produce until the user had opened the image. Drop both. The reasoning was ours, not yours, and it doesn't hold up: the failure we were guarding against was an *agent* rubber-stamping images it never opened, and a human clicking "approved" on their own review doesn't add anything — they're already the one deciding to move on. What we actually need to protect is spend, since a bad plate becomes the first frame of a video that costs real money to generate. That belongs in Produce's pre-generation review, which has to show the plates themselves at a size worth judging — see the note under "what we are NOT asking for." Ready = the plate exists. Nothing more granular than that in Write.
 
 2. **The conversation panel.** Today's *Writing assistant* rail is a description, a charge disclaimer and one dead button reading *"Storyboard drafting is currently unavailable."* It becomes the Director's conversation: message list, composer, streaming. It is the **same conversation as Brief** — the user should feel they are continuing a discussion, not starting one.
 
@@ -53,7 +57,7 @@ And three smaller things that fall out:
 - **Arco components; no raw interactive HTML.** Semantic tokens only — if a state needs a colour we do not have, name it and we will add a token.
 - **Twelve locales**, both themes, keyboard parity.
 - **Generating a plate spends money.** Any generate affordance leads to the existing batch approval, never straight to the provider.
-- **A blocked scene needs a reason, not a disabled control.** "Needs an image before it can be produced" is the message.
+- **A blocked scene needs a reason, not a disabled control.** "Needs an image before it can be produced" is the message — that's the only blocking condition; there is no separate "not yet approved" state.
 - **The Brief/Write conversation is single-mount today** — prefill has one consumer and the message list uses global DOM ids, so Brief and Write cannot both render it at once. If your design needs it live in both, say so and we will fix the mount rather than have you design around it.
 - **No undo exists and none is planned.** Recovery lives in copy and in the accept step.
 - **No pricing is displayed anywhere**, and none is planned until an estimate we trust exists.
@@ -61,7 +65,7 @@ And three smaller things that fall out:
 ## What we are NOT asking for
 
 - **Review.** Your redraw stands and this does not disturb it.
-- **Produce**, beyond two things: each scene showing its plate as the visible source of its clip, and partial state being first-class.
+- **Produce**, beyond three things: each scene showing its plate as the visible source of its clip; partial state being first-class; and the pre-generation batch review showing every plate about to be spent on, at a size worth judging. That review is where the "did anyone actually look at this" concern from the amendment above gets addressed — once, at the moment money is spent, not per-plate in Write.
 - The audio lane — still sprint 4. Generated clips arrive with their own audio and we intend to mute it on ingest.
 - Anything about the retired crew, or about Teams.
 
