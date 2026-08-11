@@ -7,7 +7,7 @@
 import type { StudioProjectSummary } from '@/common/types/project/creativeStudioTypes';
 import { Button, Card, Tag } from '@arco-design/web-react';
 import { Delete } from '@icon-park/react';
-import React from 'react';
+import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { createManagedStudioAssetUrl } from '../Preview';
@@ -53,6 +53,8 @@ export type ProjectCardProps = {
 export const ProjectCard: React.FC<ProjectCardProps> = ({ project, locale, disabled, onOpen, onDelete }) => {
   const { t } = useTranslation();
   const posterSource = project.poster === null ? null : createManagedStudioAssetUrl(project.id, project.poster.assetId);
+  const [failedPosterSource, setFailedPosterSource] = useState<string | null>(null);
+  const showScriptPoster = posterSource === null || failedPosterSource === posterSource;
   const complete = project.sceneCount > 0 && project.selectedAssetCount >= project.sceneCount;
   const partial = !complete && project.selectedAssetCount > 0;
   const statusKey = complete
@@ -67,14 +69,19 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project, locale, disab
       className={styles.projectCard}
       cover={
         <div className={styles.poster}>
-          {posterSource === null ? (
+          {showScriptPoster ? (
             <div className={styles.scriptPoster} data-gradient={getScriptPosterGradientIndex(project.id)}>
               <Tag className={styles.posterLabel}>{t('conversation.creativeStudio.library.scriptOnly')}</Tag>
             </div>
           ) : (
-            <img className={styles.posterImage} src={posterSource} alt={project.name} />
+            <img
+              className={styles.posterImage}
+              src={posterSource}
+              alt={project.name}
+              onError={() => setFailedPosterSource(posterSource)}
+            />
           )}
-          {project.poster !== null && posterSource !== null && (
+          {project.poster !== null && !showScriptPoster && (
             <Tag className={styles.posterBadge}>
               {t('conversation.creativeStudio.library.posterBadge', {
                 scene: String(project.poster.sceneNumber).padStart(2, '0'),

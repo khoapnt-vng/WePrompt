@@ -274,6 +274,27 @@ describe('StudioLibrary', () => {
     expect(screen.getByText('SCRIPT ONLY')).toBeInTheDocument();
   });
 
+  it('falls back to the script-only poster when a managed poster fails to load', async () => {
+    bridge.listProjects.invoke.mockResolvedValue(
+      ok([
+        summary({
+          name: 'Unreadable poster',
+          sceneCount: 2,
+          selectedAssetCount: 1,
+          poster: { assetId: 'missing-poster', sceneNumber: 1, takeNumber: 2 },
+        }),
+      ])
+    );
+
+    render(<StudioLibrary />);
+
+    fireEvent.error(await screen.findByRole('img', { name: 'Unreadable poster' }));
+
+    expect(screen.queryByRole('img', { name: 'Unreadable poster' })).not.toBeInTheDocument();
+    expect(screen.getByText('SCRIPT ONLY')).toBeInTheDocument();
+    expect(screen.queryByText('TAKE 2 · SHOT 01')).not.toBeInTheDocument();
+  });
+
   it('assigns stable gradients to script-only posters from their project ids', async () => {
     bridge.listProjects.invoke.mockResolvedValue(
       ok([summary({ id: 'project-alpha', name: 'Alpha script' }), summary({ id: 'project-beta', name: 'Beta script' })])
