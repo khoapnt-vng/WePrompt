@@ -1089,8 +1089,6 @@
         "aspectRatioLabel": "نسبت تصویر",
         "durationLabel": "زمان تقریبی",
         "durationGuess": "حدود {{seconds}} ثانیه",
-        "attachBrief": "پیوست کردن سند بریف",
-        "attachBriefUnavailable": "پیوست سند بریف هنوز در دسترس نیست.",
         "submit": "شروع",
         "empty": "یک جمله کافی است — بگویید چه چیزی می‌سازیم."
       },

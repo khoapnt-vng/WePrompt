@@ -97,25 +97,6 @@
   line-height: normal;
 }
 
-.disabledTooltipTarget {
-  display: inline-flex;
-}
-
-.composerPill {
-  composes: body from '../../StudioTypography.module.css';
-}
-
-.composerPill:global(.arco-btn-secondary),
-.composerPill:global(.arco-btn-secondary.arco-btn-disabled) {
-  height: auto;
-  padding: 6px 11px;
-  border: 1px solid var(--studio-library-control-border);
-  border-radius: 8px;
-  background: var(--studio-library-control-surface);
-  color: var(--studio-library-attach-text);
-  font-size: 12.5px;
-}
-
 .composerSubmit {
   composes: primaryAction from '../../StudioTypography.module.css';
 }

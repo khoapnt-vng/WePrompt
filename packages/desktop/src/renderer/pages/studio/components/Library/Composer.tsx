@@ -5,7 +5,7 @@
  */
 
 import type { CreateStudioProjectInput, StudioAspectRatio } from '@/common/types/project/creativeStudioTypes';
-import { Button, Input, Select, Tooltip } from '@arco-design/web-react';
+import { Button, Input, Select } from '@arco-design/web-react';
 import React, { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -103,14 +103,6 @@ export const Composer: React.FC<ComposerProps> = ({ creating, disabled, errorMes
               </Select.Option>
             ))}
           </Select>
-          <Tooltip content={t('conversation.creativeStudio.library.composer.attachBriefUnavailable')}>
-            <span className={styles.disabledTooltipTarget}>
-              <Button className={styles.composerPill} size='small' disabled>
-                <span aria-hidden='true'>⧉</span>
-                {t('conversation.creativeStudio.library.composer.attachBrief')}
-              </Button>
-            </span>
-          </Tooltip>
         </div>
         <Button
           type='primary'

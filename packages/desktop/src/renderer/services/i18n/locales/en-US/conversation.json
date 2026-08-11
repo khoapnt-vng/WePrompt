@@ -924,8 +924,6 @@
         "aspectRatioLabel": "Aspect ratio",
         "durationLabel": "Estimated length",
         "durationGuess": "About {{seconds}}s",
-        "attachBrief": "Attach a brief doc",
-        "attachBriefUnavailable": "Brief document attachments are not available yet.",
         "submit": "Start",
         "empty": "One sentence is enough — say what we are making."
       },

@@ -44,7 +44,6 @@
   --studio-library-chip-text: #54503f;
   --studio-library-control-surface: var(--bg-2);
   --studio-library-control-border: #e1d9c8;
-  --studio-library-attach-text: #5e5747;
   --studio-script-label-surface: var(--text-primary);
   --studio-script-label-text: var(--text-white);
   --bg-4: #d8cbb6;
@@ -147,7 +146,6 @@
   --studio-library-chip-text: var(--text-secondary);
   --studio-library-control-surface: var(--color-fill-2);
   --studio-library-control-border: var(--color-border-2);
-  --studio-library-attach-text: var(--text-secondary);
   --studio-script-label-surface: var(--text-primary);
   --studio-script-label-text: var(--bg-base);
   --bg-4: #2a3344;

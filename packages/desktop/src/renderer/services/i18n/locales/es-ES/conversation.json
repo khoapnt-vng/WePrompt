@@ -1095,8 +1095,6 @@
         "aspectRatioLabel": "Relación de aspecto",
         "durationLabel": "Duración estimada",
         "durationGuess": "Unos {{seconds}} s",
-        "attachBrief": "Adjuntar documento de briefing",
-        "attachBriefUnavailable": "Todavía no se pueden adjuntar documentos de briefing.",
         "submit": "Empezar",
         "empty": "Una frase es suficiente: dinos qué vamos a crear."
       },

@@ -52,9 +52,6 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.library.composer.label': 'What are we making?',
         'conversation.creativeStudio.library.composer.submit': 'Start',
         'conversation.creativeStudio.library.composer.empty': 'One sentence is enough — say what we are making.',
-        'conversation.creativeStudio.library.composer.attachBrief': 'Attach a brief doc',
-        'conversation.creativeStudio.library.composer.attachBriefUnavailable':
-          'Brief document attachments are not available yet.',
         'conversation.creativeStudio.library.sectionLabel': 'OR PICK UP WHERE YOU LEFT OFF',
         'conversation.creativeStudio.library.scriptOnly': 'SCRIPT ONLY',
       };
@@ -240,10 +237,10 @@ describe('StudioLibrary', () => {
     expect(screen.queryByText('Ctrl+↵')).not.toBeInTheDocument();
   });
 
-  it('keeps brief-document attachment unavailable when the Library has no import path', () => {
+  it('does not advertise brief-document attachment without an import path', () => {
     render(<StudioLibrary />);
 
-    expect(screen.getByRole('button', { name: 'Attach a brief doc' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Attach a brief doc' })).not.toBeInTheDocument();
   });
 
   it('shows the one-sentence inline validation without creating', async () => {

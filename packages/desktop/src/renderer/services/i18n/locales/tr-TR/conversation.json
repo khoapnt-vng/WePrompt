@@ -1091,8 +1091,6 @@
         "aspectRatioLabel": "En-boy oranı",
         "durationLabel": "Tahmini uzunluk",
         "durationGuess": "Yaklaşık {{seconds}} sn",
-        "attachBrief": "Bir özet belgesi ekle",
-        "attachBriefUnavailable": "Özet belgesi ekleri henüz kullanılamıyor.",
         "submit": "Başla",
         "empty": "Bir cümle yeter — ne hazırladığımızı söyleyin."
       },
