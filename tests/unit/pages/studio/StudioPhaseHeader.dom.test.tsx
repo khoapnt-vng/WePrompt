@@ -32,7 +32,7 @@ const project: StudioRendererProject = {
 };
 
 describe('StudioPhaseHeader', () => {
-  it('keeps the project breadcrumb, aspect, save state, and active phase action in one header', () => {
+  it('keeps the project breadcrumb, save state, and active phase action in one header', () => {
     render(
       <StudioPhaseHeader project={project} saveState='saved' onBack={vi.fn()} actions={<span>phase action</span>} />
     );
@@ -44,11 +44,17 @@ describe('StudioPhaseHeader', () => {
       screen.getByRole('button', { name: 'conversation.creativeStudio.phase.shared.backToLibrary' })
     ).toBeVisible();
     expect(screen.getByRole('heading', { level: 1, name: 'Launch film' })).toBeVisible();
-    expect(screen.getByText('16:9')).toBeVisible();
     expect(screen.getByRole('status')).toHaveTextContent('conversation.creativeStudio.phase.nav.saved');
     expect(screen.getByText('phase action')).toBeVisible();
     expect(screen.queryByText('A short launch video')).not.toBeInTheDocument();
     expect(screen.queryByText('conversation.creativeStudio.project.readiness')).not.toBeInTheDocument();
+  });
+
+  it('leaves the aspect ratio to the Brief panel rather than restating it as a header chip', () => {
+    render(<StudioPhaseHeader project={project} saveState='saved' onBack={vi.fn()} />);
+
+    expect(screen.queryByText('16:9')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/conversation\.creativeStudio\.project\.aspectRatio/)).not.toBeInTheDocument();
   });
 
   it('omits the action container when the active phase has no page-level action', () => {
