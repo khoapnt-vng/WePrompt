@@ -899,7 +899,9 @@
       },
       "shared": {
         "backToLibrary": "返回專案庫",
-        "noMediaGeneration": "此步驟不會產生圖片或影片。"
+        "noMediaGeneration": "此步驟不會產生圖片或影片。",
+        "renameProject": "重新命名專案",
+        "invalidProjectName": "請輸入專案名稱。"
       },
       "brief": {
         "title": "簡報",
@@ -918,7 +920,7 @@
       },
       "write": {
         "title": "編寫",
-        "continueToProduce": "繼續製作",
+        "continueToProduce": "繼續",
         "askAssistant": "詢問助理",
         "assistantTitle": "編寫助理",
         "assistantDescription": "根據創作簡報產生分鏡腳本草稿。",
@@ -961,7 +963,7 @@
         "render": "算繪",
         "renderAnother": "再次算繪",
         "openPreview": "開啟「{{title}}」預覽",
-        "reviewCut": "檢視剪輯",
+        "reviewCut": "繼續",
         "modelsTitle": "模型",
         "activityTitle": "產生活動",
         "activityEmpty": "目前沒有執行中的產生工作。",

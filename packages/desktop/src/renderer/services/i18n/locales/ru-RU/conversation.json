@@ -902,7 +902,9 @@
       },
       "shared": {
         "backToLibrary": "Вернуться к библиотеке проектов",
-        "noMediaGeneration": "На этом этапе изображения и видео не создаются."
+        "noMediaGeneration": "На этом этапе изображения и видео не создаются.",
+        "renameProject": "Переименовать проект",
+        "invalidProjectName": "Введите название проекта."
       },
       "brief": {
         "title": "Бриф",
@@ -921,7 +923,7 @@
       },
       "write": {
         "title": "Сценарий",
-        "continueToProduce": "Перейти к созданию",
+        "continueToProduce": "Продолжить",
         "askAssistant": "Спросить помощника",
         "assistantTitle": "Помощник по сценарию",
         "assistantDescription": "Создайте черновик раскадровки на основе брифа.",
@@ -964,7 +966,7 @@
         "render": "Рендерить",
         "renderAnother": "Рендерить ещё",
         "openPreview": "Открыть предпросмотр {{title}}",
-        "reviewCut": "Проверить монтаж",
+        "reviewCut": "Продолжить",
         "modelsTitle": "Модели",
         "activityTitle": "Ход генерации",
         "activityEmpty": "Сейчас нет выполняющихся заданий генерации.",

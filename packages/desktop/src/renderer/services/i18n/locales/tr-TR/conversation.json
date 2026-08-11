@@ -902,7 +902,9 @@
       },
       "shared": {
         "backToLibrary": "Proje kitaplığına dön",
-        "noMediaGeneration": "Bu adımda görüntü veya video oluşturulmaz."
+        "noMediaGeneration": "Bu adımda görüntü veya video oluşturulmaz.",
+        "renameProject": "Projeyi yeniden adlandır",
+        "invalidProjectName": "Bir proje adı girin."
       },
       "brief": {
         "title": "Özet",
@@ -921,7 +923,7 @@
       },
       "write": {
         "title": "Yaz",
-        "continueToProduce": "Üretime devam et",
+        "continueToProduce": "Devam et",
         "askAssistant": "Asistana sor",
         "assistantTitle": "Yazım asistanı",
         "assistantDescription": "Kısa açıklamanızdan bir storyboard taslağı oluşturun.",
@@ -964,7 +966,7 @@
         "render": "İşle",
         "renderAnother": "Yeniden işle",
         "openPreview": "{{title}} önizlemesini aç",
-        "reviewCut": "Kurguyu incele",
+        "reviewCut": "Devam et",
         "modelsTitle": "Modeller",
         "activityTitle": "Oluşturma etkinliği",
         "activityEmpty": "Çalışan bir oluşturma işi yok.",

@@ -907,7 +907,9 @@
       },
       "shared": {
         "backToLibrary": "Voltar à biblioteca de projetos",
-        "noMediaGeneration": "Esta etapa não gera imagens nem vídeos."
+        "noMediaGeneration": "Esta etapa não gera imagens nem vídeos.",
+        "renameProject": "Renomear projeto",
+        "invalidProjectName": "Informe um nome de projeto."
       },
       "brief": {
         "title": "Briefing",
@@ -926,7 +928,7 @@
       },
       "write": {
         "title": "Escrever",
-        "continueToProduce": "Continuar para Produzir",
+        "continueToProduce": "Continuar",
         "askAssistant": "Perguntar ao assistente",
         "assistantTitle": "Assistente de escrita",
         "assistantDescription": "Crie um rascunho de storyboard a partir do seu briefing.",
@@ -969,7 +971,7 @@
         "render": "Renderizar",
         "renderAnother": "Renderizar novamente",
         "openPreview": "Abrir prévia de {{title}}",
-        "reviewCut": "Revisar corte",
+        "reviewCut": "Continuar",
         "modelsTitle": "Modelos",
         "activityTitle": "Atividade de geração",
         "activityEmpty": "Nenhum trabalho de geração está em execução.",

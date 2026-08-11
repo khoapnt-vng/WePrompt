@@ -902,7 +902,9 @@
       },
       "shared": {
         "backToLibrary": "Повернутися до бібліотеки проєктів",
-        "noMediaGeneration": "На цьому етапі зображення та відео не створюються."
+        "noMediaGeneration": "На цьому етапі зображення та відео не створюються.",
+        "renameProject": "Перейменувати проєкт",
+        "invalidProjectName": "Введіть назву проєкту."
       },
       "brief": {
         "title": "Бриф",
@@ -921,7 +923,7 @@
       },
       "write": {
         "title": "Сценарій",
-        "continueToProduce": "Перейти до створення",
+        "continueToProduce": "Продовжити",
         "askAssistant": "Запитати помічника",
         "assistantTitle": "Помічник зі сценарію",
         "assistantDescription": "Створіть чернетку розкадрування на основі брифу.",
@@ -964,7 +966,7 @@
         "render": "Рендерити",
         "renderAnother": "Рендерити ще",
         "openPreview": "Відкрити попередній перегляд {{title}}",
-        "reviewCut": "Перевірити монтаж",
+        "reviewCut": "Продовжити",
         "modelsTitle": "Моделі",
         "activityTitle": "Хід генерації",
         "activityEmpty": "Зараз немає активних завдань генерації.",

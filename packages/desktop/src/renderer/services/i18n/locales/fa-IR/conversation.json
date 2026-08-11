@@ -900,7 +900,9 @@
       },
       "shared": {
         "backToLibrary": "بازگشت به کتابخانه پروژه‌ها",
-        "noMediaGeneration": "در این مرحله تصویر یا ویدیو تولید نمی‌شود."
+        "noMediaGeneration": "در این مرحله تصویر یا ویدیو تولید نمی‌شود.",
+        "renameProject": "تغییر نام پروژه",
+        "invalidProjectName": "نام پروژه را وارد کنید."
       },
       "brief": {
         "title": "خلاصه",
@@ -919,7 +921,7 @@
       },
       "write": {
         "title": "نگارش",
-        "continueToProduce": "ادامه به تولید",
+        "continueToProduce": "ادامه",
         "askAssistant": "پرسش از دستیار",
         "assistantTitle": "دستیار نگارش",
         "assistantDescription": "از شرح مختصر خود یک پیش‌نویس استوری‌بورد بسازید.",
@@ -962,7 +964,7 @@
         "render": "رندر",
         "renderAnother": "رندر دوباره",
         "openPreview": "باز کردن پیش‌نمایش {{title}}",
-        "reviewCut": "بازبینی تدوین",
+        "reviewCut": "ادامه",
         "modelsTitle": "مدل‌ها",
         "activityTitle": "فعالیت تولید",
         "activityEmpty": "هیچ کار تولیدی در حال اجرا نیست.",

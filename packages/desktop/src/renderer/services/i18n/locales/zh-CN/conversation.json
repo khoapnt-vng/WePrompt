@@ -899,7 +899,9 @@
       },
       "shared": {
         "backToLibrary": "返回项目库",
-        "noMediaGeneration": "此步骤不会生成图像或视频。"
+        "noMediaGeneration": "此步骤不会生成图像或视频。",
+        "renameProject": "重命名项目",
+        "invalidProjectName": "请输入项目名称。"
       },
       "brief": {
         "title": "简报",
@@ -918,7 +920,7 @@
       },
       "write": {
         "title": "编写",
-        "continueToProduce": "继续制作",
+        "continueToProduce": "继续",
         "askAssistant": "询问助手",
         "assistantTitle": "编写助手",
         "assistantDescription": "根据创作简报生成故事板草稿。",
@@ -961,7 +963,7 @@
         "render": "渲染",
         "renderAnother": "再次渲染",
         "openPreview": "打开“{{title}}”预览",
-        "reviewCut": "审阅剪辑",
+        "reviewCut": "继续",
         "modelsTitle": "模型",
         "activityTitle": "生成活动",
         "activityEmpty": "当前没有正在运行的生成任务。",

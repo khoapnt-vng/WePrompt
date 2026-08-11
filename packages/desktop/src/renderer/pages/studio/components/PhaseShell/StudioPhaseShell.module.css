@@ -13,7 +13,7 @@
   min-width: 0;
   align-items: center;
   justify-content: space-between;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 16px;
 }
 
@@ -35,22 +35,78 @@
   composes: body bodyTextAction from '../../StudioTypography.module.css';
 }
 
-.breadcrumbSeparator {
-  padding: 0 4px;
-  color: var(--color-text-4);
-}
-
 .projectTitle {
-  composes: pageHeading from '../../StudioTypography.module.css';
+  display: flex;
   overflow: hidden;
   margin: 0;
+  min-width: 0;
+  flex: 1;
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 16px;
+  font-weight: var(--fw-medium);
+  letter-spacing: normal;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.projectTitleButton {
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 4px;
+  border-bottom: 1px solid transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+}
+
+.projectTitleButton:global(.arco-btn-text):hover,
+.projectTitleButton:global(.arco-btn-text):focus-visible {
+  border-bottom-color: var(--color-border-3);
+  background: var(--color-fill-2);
+  color: var(--text-primary);
+}
+
+.projectTitleText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projectTitleEditor {
+  display: flex;
+  width: min(360px, 100%);
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.projectTitleInput {
+  min-width: 0;
+}
+
+.projectTitleError {
+  color: var(--color-danger-6);
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: var(--fw-regular);
+  line-height: 1.3;
+  white-space: normal;
 }
 
 .aspectChip {
   composes: meta from '../../StudioTypography.module.css';
   flex: none;
+}
+
+.headerNavigation {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 320px;
+}
+
+.headerNavigation .phaseNavigation {
+  width: 100%;
 }
 
 .headerMeta {
@@ -226,6 +282,7 @@
 
 .shell[data-layout='compact'] .header {
   align-items: flex-start;
+  flex-wrap: wrap;
 }
 
 .shell[data-layout='compact'] .headerCopy,
@@ -233,6 +290,16 @@
   width: 100%;
   flex-wrap: wrap;
   justify-content: flex-start;
+}
+
+.shell[data-layout='compact'] .headerMeta {
+  order: 2;
+}
+
+.shell[data-layout='compact'] .headerNavigation {
+  width: 100%;
+  flex-basis: 100%;
+  order: 3;
 }
 
 .shell[data-layout='compact'] .phaseNavigation {
