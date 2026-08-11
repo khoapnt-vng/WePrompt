@@ -1099,10 +1099,11 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     ]);
     const scene = project?.scenes[input.sceneId];
     const job = project?.jobs[input.jobId];
+    // Must match commitProviderJobAsset: StudioJob.outputRole is immutable after creation.
     const role = job ? jobOutputRole(job) : null;
     const mediaKindMatchesRole =
       role === 'reference' ? input.mediaKind === 'image' : scene?.mediaKind === input.mediaKind;
-    if (scene && job && !mediaKindMatchesRole) {
+    if (scene && !mediaKindMatchesRole) {
       throw new CreativeStudioMediaError('invalid_media');
     }
     const active =
@@ -1120,12 +1121,8 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     ) {
       throw new CreativeStudioMediaError(project && job ? 'job_inactive' : 'not_found');
     }
-    const perAssetMaxBytes =
-      role === 'reference'
-        ? limits.imageOutputMaxBytes
-        : input.mediaKind === 'video'
-          ? limits.videoOutputMaxBytes
-          : limits.imageOutputMaxBytes;
+    // A reference is already required to be an image above, so the kind check alone is sufficient.
+    const perAssetMaxBytes = input.mediaKind === 'video' ? limits.videoOutputMaxBytes : limits.imageOutputMaxBytes;
     return {
       projectDir,
       project,
@@ -1425,11 +1422,13 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       if (!job || !scene || job.sceneId !== input.sceneId || !active) {
         throw new CreativeStudioMediaError('job_inactive');
       }
+      // Must match prepareProviderJobWrite: StudioJob.outputRole is immutable after creation.
       const role = jobOutputRole(job);
       if (role === 'take' && scene.mediaKind !== input.mediaKind) {
         throw new CreativeStudioMediaError('job_inactive');
       }
       if (role === 'reference' && input.mediaKind !== 'image') {
+        // Deliberately invalid_media: immutable outputRole and stable input.mediaKind cannot race like scene.mediaKind.
         throw new CreativeStudioMediaError('invalid_media');
       }
       const usedBytes = Object.values(current.assets).reduce((total, candidate) => total + candidate.byteSize, 0);
@@ -1443,9 +1442,8 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       scene.assetIds.push(asset.id);
       if (role === 'reference') {
         scene.referenceAssetId = asset.id;
-        // Deliberately NOT touched: selectedAssetId, reviewState.
-        // A plate must never make a scene look produced. It is distinguished from a
-        // take by collection 'references', which every take predicate filters on.
+        // Load-bearing guarantee: selectedAssetId and reviewState stay untouched, so a plate cannot mark a scene produced.
+        // Filtering collection 'references' from take predicates is defense in depth.
       } else {
         scene.selectedAssetId = asset.id;
         scene.reviewState = 'complete';

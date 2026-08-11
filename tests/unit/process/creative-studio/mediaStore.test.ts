@@ -140,6 +140,11 @@ const addActiveReferenceJob = async (store: CreativeStudioStore, visualPrompt = 
   await store.updateProject('project_1', (project) => {
     const next = structuredClone(project);
     next.scenes.scene_1.visualPrompt = visualPrompt;
+    next.jobs.job_1.provider = {
+      providerId: 'provider_1',
+      adapterId: 'weprompt-image-v1',
+      model: 'image-model',
+    };
     next.jobs.job_1.outputRole = 'reference';
     return next;
   });
@@ -522,7 +527,7 @@ describe('createStudioMediaStore', () => {
     // true is that the plate is not the take and the scene is not produced.
     expect(project?.scenes.scene_1.assetIds).toContain(committed.id);
     expect(project?.scenes.scene_1.selectedAssetId).toBeNull();
-    expect(project?.scenes.scene_1.reviewState).not.toBe('complete');
+    expect(project?.scenes.scene_1.reviewState).toBe('generating');
     expect(project?.assets[committed.id].sceneId).toBe('scene_1');
     expect(project?.assets[committed.id].managedAsset.collection).toBe('references');
     await expect(
@@ -637,6 +642,11 @@ describe('createStudioMediaStore', () => {
   it('still commits a take exactly as before', async () => {
     const { store } = await makeStore();
     await addActiveVideoJob(store);
+    await store.updateProject('project_1', (project) => {
+      const next = structuredClone(project);
+      next.scenes.scene_1.visualPrompt = '  Aerial, drifting.  ';
+      return next;
+    });
     const media = createStudioMediaStore({ store, createId: () => 'asset_video_take' });
 
     const committed = await media.persistProviderOutputForJob({
@@ -652,6 +662,7 @@ describe('createStudioMediaStore', () => {
     expect(project?.scenes.scene_1.selectedAssetId).toBe(committed.id);
     expect(project?.scenes.scene_1.assetIds).toContain(committed.id);
     expect(project?.scenes.scene_1.reviewState).toBe('complete');
+    expect(project?.assets[committed.id].sourceVisualPrompt).toBe('Aerial, drifting.');
   });
 
   it('rejects a reference whose output is not an image', async () => {
