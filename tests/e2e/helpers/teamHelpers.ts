@@ -1,6 +1,40 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { invokeBridge } from './bridge';
+import { httpGet, httpPost } from './httpBridge';
 import { TEAM_SUPPORTED_BACKENDS } from './teamConfig';
+
+type ProviderRecord = { id: string; enabled?: boolean; models?: string[] };
+
+/**
+ * Guarantee the profile has a model provider a team lead can resolve a model
+ * from.
+ *
+ * E2E launches against a fresh `mkdtemp` profile (see `fixtures.ts`), and
+ * `getDataPath()` keeps the backend DB inside it, so **every run starts with
+ * zero providers**. The first assistant in the picker is an `aionrs` agent, and
+ * an aionrs slot needs a real model id — team creation now fails fast rather
+ * than persisting a slot whose runtime could never start. Without this the
+ * create flow is unreachable and the specs below would all fail on
+ * `waitForURL`.
+ *
+ * Idempotent, and platform `new-api` keeps it aionrs-compatible so
+ * `getAionrsTestModels` reuses it instead of adding a second provider. Two
+ * models, because that helper hands out a modelA/modelB pair.
+ */
+export async function ensureTeamModelProvider(page: Page): Promise<void> {
+  const providers = await httpGet<ProviderRecord[]>(page, '/api/providers').catch(() => [] as ProviderRecord[]);
+  const usable = (providers ?? []).some((p) => p.enabled !== false && (p.models?.length ?? 0) > 0);
+  if (usable) return;
+
+  await httpPost(page, '/api/providers', {
+    platform: 'new-api',
+    name: 'E2E Team Model Provider',
+    base_url: 'https://api.example.com/v1',
+    api_key: 'sk-e2e-team',
+    models: ['e2e-team-model-a', 'e2e-team-model-b'],
+    enabled: true,
+  }).catch(() => undefined);
+}
 
 type TeamAgent = { role: string; name: string };
 type TeamRecord = { id: string; name: string; agents: TeamAgent[] };
@@ -26,6 +60,8 @@ export async function createTeam(page: Page, name: string, leaderType?: string):
   if (TEAM_SUPPORTED_BACKENDS.size === 0) {
     throw new Error('No supported team backends available — skip this test');
   }
+
+  await ensureTeamModelProvider(page);
 
   await page.evaluate(() => {
     window.location.hash = '#/team';
