@@ -381,6 +381,28 @@ describe('TeamCreateModal', () => {
     expect(createTeamInvokeMock).not.toHaveBeenCalled();
     expect(String(messageErrorMock.mock.calls[0][0])).toContain('Remote Runner');
   });
+
+  /**
+   * `bare-aionrs` renders as "Forge Chat" in the picker but its catalog name is
+   * "Aion CLI" / "Aion 命令行". Naming the catalog name in an error points the
+   * user at a row label that does not exist on screen.
+   */
+  it('names the failing member by the label the picker showed, not its catalog name', async () => {
+    resolveDefaultTeamAgentModelMock.mockRejectedValue(new Error('model unavailable'));
+    render(<TeamCreateModal visible onClose={vi.fn()} onCreated={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText('Team name'), {
+      target: { value: 'Brand Name Team' },
+    });
+    fireEvent.click(screen.getByTestId('team-create-agent-option-bare-aionrs'));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Create' }));
+
+    await waitFor(() => expect(messageErrorMock).toHaveBeenCalled());
+
+    const message = String(messageErrorMock.mock.calls[0][0]);
+    expect(message).toContain('Forge Chat');
+    expect(message).not.toContain('Aion');
+  });
 });
 
 describe('TeamCreateModal · mobile (narrow screen)', () => {

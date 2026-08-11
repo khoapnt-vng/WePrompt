@@ -12,7 +12,7 @@ import AionModal from '@renderer/components/base/AionModal';
 import { WorkspaceFolderSelect } from '@renderer/components/workspace';
 import { getConversationCreateErrorMessage } from '@renderer/pages/conversation/utils/conversationCreateError';
 import { useTeamAssistantOptions } from '../hooks/useTeamAssistantOptions';
-import type { TeamAssistantOption } from './assistantSelectUtils';
+import { resolveTeamAssistantLabel, type TeamAssistantOption } from './assistantSelectUtils';
 import { resolveDefaultTeamAgentModel } from './teamCreateModelResolver';
 import TeamAssistantPicker from './memberPicker/TeamAssistantPicker';
 import TeamAssistantPickerDropdown from './memberPicker/TeamAssistantPickerDropdown';
@@ -105,7 +105,10 @@ const TeamCreateModal: React.FC<Props> = ({ visible, onClose, onCreated }) => {
             });
             return [member.selectionId, model] as const;
           } catch (error) {
-            throw new Error(`${member.assistant.name}: ${getConversationCreateErrorMessage(error, t)}`, {
+            // Label, not `assistant.name`: the catalog name differs from the
+            // picker row for the Forge-rebranded built-ins.
+            const label = resolveTeamAssistantLabel(member.assistant, t);
+            throw new Error(`${label}: ${getConversationCreateErrorMessage(error, t)}`, {
               cause: error,
             });
           }

@@ -1,5 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { Robot } from '@icon-park/react';
 import { resolveAssistantAvatar } from '@renderer/utils/model/assistantAvatar';
 import {
@@ -45,6 +46,22 @@ export function assistantKey(assistant: TeamAssistantOption): string {
   return assistant.id;
 }
 
+/**
+ * The name to show the user for a team assistant option.
+ *
+ * `option.name` is the raw catalog name, kept as-is so persisted team records
+ * stay stable — for the Forge-rebranded built-ins that is NOT what the picker
+ * row says. Every user-facing string built from an option (labels, error
+ * messages, confirmations) must go through here, otherwise it names an
+ * assistant by a name that appears nowhere on screen.
+ */
+export function resolveTeamAssistantLabel(
+  assistant: Pick<TeamAssistantOption, 'name' | 'brandKey'>,
+  t: TFunction
+): string {
+  return assistant.brandKey ? t(assistant.brandKey) : assistant.name;
+}
+
 export function assistantFromId(
   assistantId: string,
   allAssistants: TeamAssistantOption[]
@@ -70,7 +87,7 @@ export const AssistantOptionLabel: React.FC<AssistantOptionLabelProps> = ({
 }) => {
   const { t } = useTranslation();
   const avatar = resolveAssistantAvatar(assistant.icon);
-  const label = assistant.brandKey ? t(assistant.brandKey) : assistant.name;
+  const label = resolveTeamAssistantLabel(assistant, t);
   const isLarge = size === 'large';
   const iconSize = isLarge ? 18 : 16;
   const avatarToneClass = muted ? 'bg-fill-1 text-t-tertiary opacity-75' : 'bg-fill-2 text-t-primary';
