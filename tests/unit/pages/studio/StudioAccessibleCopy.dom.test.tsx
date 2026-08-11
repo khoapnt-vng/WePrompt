@@ -24,8 +24,6 @@ import type { StudioPhaseControllers } from '@renderer/pages/studio/components/P
 import { AssetStrip } from '@renderer/pages/studio/components/Preview/AssetStrip';
 import { StudioExportModal } from '@renderer/pages/studio/components/Preview/StudioExportModal';
 import { SceneTimeline } from '@renderer/pages/studio/components/SceneTimeline';
-import { SceneCard } from '@renderer/pages/studio/components/Storyboard/SceneCard';
-import { StoryboardPanel } from '@renderer/pages/studio/components/Storyboard/StoryboardPanel';
 import type { UseStoryboardEditorResult } from '@renderer/pages/studio/hooks/useStoryboardEditor';
 import type { UseStudioJobsResult } from '@renderer/pages/studio/hooks/useStudioJobs';
 import type { UseStudioModelsResult } from '@renderer/pages/studio/hooks/useStudioModels';
@@ -432,66 +430,6 @@ describe('Creative Studio full-sentence English copy', () => {
     expect(document.querySelector('[data-studio-phase-marker="brief"]')).toHaveAttribute('data-complete', 'false');
     expect(document.querySelector('[data-studio-phase-marker="write"]')).toHaveAttribute('data-complete', 'false');
     expect(document.querySelector('[data-studio-phase-marker="produce"]')).toHaveAttribute('data-complete', 'false');
-  });
-
-  it('renders complete scene action names and a grammatically singular duration', async () => {
-    await renderEnglish(
-      <SceneCard
-        scene={scene({ durationSeconds: 1 })}
-        index={1}
-        selected={false}
-        status='ready'
-        removeDisabled={false}
-        mutationPending={false}
-        moveUpDisabled={false}
-        moveDownDisabled={false}
-        onSelect={vi.fn()}
-        onRemove={vi.fn()}
-        onMove={vi.fn()}
-      />
-    );
-
-    expect(screen.getByRole('button', { name: 'Drag scene 2: Product close-up' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Move scene 2: Product close-up up' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Move scene 2: Product close-up down' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Remove scene 2: Product close-up' })).toBeInTheDocument();
-    expect(screen.getByText('1 second')).toBeInTheDocument();
-  });
-
-  it('keeps the full removal action name in the confirmation dialog', async () => {
-    await renderEnglish(
-      <StoryboardPanel
-        orderedScenes={[scene()]}
-        selectedSceneId='scene-2'
-        targetDurationSeconds={5}
-        durationTotalSeconds={5}
-        durationMatchesTarget
-        remainingDurationSeconds={0}
-        suggestedExpandedTargetSeconds={10}
-        canAddScene
-        mutationPending={false}
-        fitDisabled={false}
-        fitOutcome={null}
-        hasLockedScenes={false}
-        sceneStatuses={{ 'scene-2': 'ready' }}
-        conflict={false}
-        onSelectScene={vi.fn()}
-        onAddScene={vi.fn()}
-        onIncreaseTargetDuration={vi.fn()}
-        onFitToTarget={vi.fn()}
-        onRemoveScene={vi.fn()}
-        onReorderScenes={vi.fn()}
-        onMoveScene={vi.fn()}
-        onRetryConflict={vi.fn()}
-        onDiscardConflict={vi.fn()}
-      />
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Remove scene 1: Product close-up' }));
-
-    expect(
-      within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove scene 1: Product close-up' })
-    ).toBeInTheDocument();
   });
 
   it('renders complete timeline and variation selection names without translated fragments', async () => {

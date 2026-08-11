@@ -10,4 +10,4 @@ export { StudioModelBar } from './Models';
 export * from './PhaseShell';
 export { AssetStrip, StagePreview, StudioExportModal } from './Preview';
 export { SceneTimeline } from './SceneTimeline';
-export { SceneCard, StoryboardDraftModal, StoryboardPanel } from './Storyboard';
+export { StoryboardDraftModal } from './Storyboard';
