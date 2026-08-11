@@ -31,9 +31,16 @@ vi.mock('@/renderer/utils/model/agentLogo', () => ({
   },
 }));
 
+const BRAND_STRINGS: Record<string, string> = {
+  'agent.brand.forgeChat': 'WePrompt Chat',
+  'agent.brand.forgeCode': 'WePrompt Code',
+  'agent.brand.forgeAssistant': 'WePrompt Assistant',
+};
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     i18n: { language: currentLanguage },
+    t: (key: string) => BRAND_STRINGS[key] ?? key,
   }),
 }));
 
@@ -540,6 +547,76 @@ describe('usePresetAssistantInfo', () => {
         })
       )
     ).toBe('assistant-modern');
+  });
+
+  /**
+   * The conversation snapshot stores `backend` (the assistant runtime key)
+   * instead of the full agent record, which is why this path used to skip the
+   * Forge brand override that the catalog path already applied — the two
+   * builders disagreed, and the snapshot one leaked the catalog name into
+   * every surface that reads `info.name`.
+   */
+  describe('Forge brand names on assistant snapshots', () => {
+    const snapshotInfo = (assistant: Record<string, unknown>) => {
+      useSWRMock.mockImplementation((key: unknown) => {
+        if (key === 'assistants') return { data: [], isLoading: false };
+        if (key === 'extensions.acpAdapters') return { data: [], isLoading: false };
+        return { data: undefined, isLoading: false };
+      });
+      const conversation = {
+        ...makeConversation({ assistant_id: assistant.id, backend: assistant.backend }),
+        assistant,
+      } as TChatConversation;
+      return renderHook(() => usePresetAssistantInfo(conversation)).result.current.info;
+    };
+
+    it('renders the butler snapshot under its brand name', () => {
+      expect(
+        snapshotInfo({
+          id: 'aionui-assistant',
+          source: 'builtin',
+          name: 'AionUi Butler',
+          avatar: '/api/assistants/aionui-assistant/avatar',
+          backend: 'aionrs',
+        })?.name
+      ).toBe('WePrompt Assistant');
+    });
+
+    it('maps a snapshot whose backend arrives as an acp_backend', () => {
+      expect(
+        snapshotInfo({
+          id: 'bare-opencode',
+          source: 'generated',
+          name: 'OpenCode',
+          avatar: '',
+          backend: 'opencode',
+        })?.name
+      ).toBe('WePrompt Code');
+    });
+
+    it('maps a snapshot whose backend arrives as an agent type', () => {
+      expect(
+        snapshotInfo({ id: 'bare-aionrs', source: 'generated', name: 'Aion CLI', avatar: '', backend: 'aionrs' })?.name
+      ).toBe('WePrompt Chat');
+    });
+
+    it('leaves every other assistant snapshot name untouched', () => {
+      expect(
+        snapshotInfo({
+          id: 'assistant-social',
+          source: 'generated',
+          name: 'Social Job Publisher',
+          avatar: '',
+          backend: 'gemini',
+        })?.name
+      ).toBe('Social Job Publisher');
+    });
+
+    it('keeps a builtin aionrs assistant on its own name, since only the bare agent is rebranded', () => {
+      expect(
+        snapshotInfo({ id: 'ppt-creator', source: 'builtin', name: 'PPT Creator', avatar: '', backend: 'aionrs' })?.name
+      ).toBe('PPT Creator');
+    });
   });
 });
 

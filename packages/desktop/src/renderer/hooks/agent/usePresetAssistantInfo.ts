@@ -231,12 +231,35 @@ function buildPresetInfoFromAssistant(assistant: Assistant, locale: string, t: T
   };
 }
 
-function buildPresetInfoFromConversationAssistant(
+/**
+ * Adapt a conversation's assistant snapshot to the shape the shared brand
+ * rules read, so those rules live in exactly one place.
+ *
+ * The snapshot stores `backend` — the `assistantRuntimeKey`, i.e.
+ * `acp_backend || type` — instead of the full agent record. Feeding it to both
+ * fields is safe because the two agent-shaped rules key on disjoint values:
+ * 'opencode' only ever arrives as an `acp_backend`, 'aionrs' only ever as an
+ * agent `type`, so neither rule can fire on the wrong one.
+ */
+function snapshotBrandSource(
   assistant: NonNullable<TChatConversation['assistant']>
+): Pick<Assistant, 'id' | 'source' | 'agent'> {
+  return {
+    id: assistant.id,
+    source: assistant.source as Assistant['source'],
+    agent: { type: assistant.backend, source: 'builtin', acp_backend: assistant.backend },
+  };
+}
+
+function buildPresetInfoFromConversationAssistant(
+  assistant: NonNullable<TChatConversation['assistant']>,
+  t: TFunction
 ): PresetAssistantInfo {
   const normalized = normalizeAvatar(assistant.avatar);
+  const brandKey = getForgeAssistantBrandKey(snapshotBrandSource(assistant));
   return {
-    name: assistant.name,
+    // Snapshots carry no `name_i18n`, so only the brand override applies here.
+    name: brandKey ? t(brandKey) : assistant.name,
     logo: normalized.logo,
     isEmoji: normalized.isEmoji,
     isFallback: normalized.isFallback,
@@ -326,7 +349,7 @@ export function usePresetAssistantInfo(conversation: TChatConversation | undefin
       }
 
       return {
-        info: buildPresetInfoFromConversationAssistant(conversation.assistant),
+        info: buildPresetInfoFromConversationAssistant(conversation.assistant, t),
         isLoading: false,
       };
     }
