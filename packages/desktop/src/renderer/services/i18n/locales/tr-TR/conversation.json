@@ -669,7 +669,8 @@
   },
   "thinking": {
     "complete": "Düşünme tamamlandı",
-    "label": "Düşünüyor..."
+    "label": "Düşünüyor...",
+    "waitingApproval": "Onayınız bekleniyor"
   },
   "skills": {
     "loaded": "Yüklenen Beceriler",

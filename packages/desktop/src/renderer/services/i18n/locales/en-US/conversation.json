@@ -667,7 +667,8 @@
   },
   "thinking": {
     "complete": "Thought complete",
-    "label": "Thinking..."
+    "label": "Thinking...",
+    "waitingApproval": "Waiting for your approval"
   },
   "skills": {
     "loaded": "Loaded Skills",

@@ -24,6 +24,9 @@ type ThoughtDisplayProps = {
   startedAtMs?: number | null;
   // Explicit flag declaring elapsed time is driven by an external timestamp (team chain).
   externalElapsedSource?: boolean;
+  // The run is blocked on a permission confirmation the user has not answered yet.
+  // The model is not working, so the thinking label, spinner and elapsed timer would all lie.
+  awaitingApproval?: boolean;
 };
 
 const ThoughtDisplay: React.FC<ThoughtDisplayProps> = ({
@@ -34,6 +37,7 @@ const ThoughtDisplay: React.FC<ThoughtDisplayProps> = ({
   onStop: _onStop,
   startedAtMs,
   externalElapsedSource,
+  awaitingApproval = false,
 }) => {
   const { t } = useTranslation();
 
@@ -52,7 +56,9 @@ const ThoughtDisplay: React.FC<ThoughtDisplayProps> = ({
 
   const [elapsedTime, setElapsedTime] = useState(0);
   const startTimeRef = useRef<number>(Date.now());
-  const hasActivity = running || Boolean(thought?.subject);
+  // Keep the indicator mounted while blocked even if the backend has already stopped
+  // reporting the turn as processing — the user still needs to be told they are the blocker.
+  const hasActivity = running || awaitingApproval || Boolean(thought?.subject);
 
   // External mode with a valid absolute start timestamp → derive elapsed from it (state A).
   const hasValidStartedAt =
@@ -63,7 +69,8 @@ const ThoughtDisplay: React.FC<ThoughtDisplayProps> = ({
   // External mode but timestamp invalid → suppress the elapsed number (state B).
   const suppressElapsed = externalElapsedSource === true && !hasValidStartedAt;
   // Show the elapsed number only while running and not suppressed; the spinner stays gated on `running`.
-  const showElapsed = running && !suppressElapsed;
+  // While blocked on approval the clock is measuring the user, not the model, so it is hidden.
+  const showElapsed = running && !suppressElapsed && !awaitingApproval;
 
   // Timer for elapsed time
   useEffect(() => {
@@ -108,7 +115,8 @@ const ThoughtDisplay: React.FC<ThoughtDisplayProps> = ({
 
   const className = [
     'thought-display',
-    running ? 'thought-display--running' : '',
+    running && !awaitingApproval ? 'thought-display--running' : '',
+    awaitingApproval ? 'thought-display--awaiting-approval' : '',
     style === 'compact' ? 'thought-display--compact' : '',
   ]
     .filter(Boolean)
@@ -118,21 +126,31 @@ const ThoughtDisplay: React.FC<ThoughtDisplayProps> = ({
     return null;
   }
 
-  const isFallbackActivity = !thought?.subject && !statusText;
-  const rawActivityLabel = thought?.subject || statusText || t('conversation.thinking.label');
+  // An approval block outranks any label the model left behind: the last thought subject
+  // describes work that has already stopped, so showing it keeps the run looking active.
+  const isFallbackActivity = !awaitingApproval && !thought?.subject && !statusText;
+  const rawActivityLabel = awaitingApproval
+    ? t('conversation.thinking.waitingApproval')
+    : thought?.subject || statusText || t('conversation.thinking.label');
   const activityLabel = isFallbackActivity ? rawActivityLabel.replace(/(?:\.\.\.|…)\s*$/, '') : rawActivityLabel;
-  const showDescription = Boolean(thought?.description && thought.description !== thought.subject);
+  const showDescription = !awaitingApproval && Boolean(thought?.description && thought.description !== thought.subject);
   // Bare thinking state hides the initial 0s to avoid flicker; a status text or
   // external timestamp means the caller wants the timer visible immediately.
   const showElapsedTime = showElapsed && (elapsedTime > 0 || Boolean(statusText) || externalElapsedSource === true);
   const activityKey = `${activityLabel}:${thought?.description ?? ''}`;
 
   return (
-    <div data-testid='thought-display' className={className} role='status' aria-live='polite'>
+    <div
+      data-testid='thought-display'
+      data-awaiting-approval={awaitingApproval ? 'true' : undefined}
+      className={className}
+      role='status'
+      aria-live='polite'
+    >
       <div className='thought-display__content' key={activityKey}>
-        {running && <Spin size={14} />}
+        {running && !awaitingApproval && <Spin size={14} />}
         <span className='thought-display__label'>{activityLabel}</span>
-        {running && isFallbackActivity && (
+        {running && !awaitingApproval && isFallbackActivity && (
           <span data-testid='thought-display-dots' className='thought-display__dots' aria-hidden='true'>
             <span />
             <span />

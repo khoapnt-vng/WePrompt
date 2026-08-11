@@ -667,7 +667,8 @@
   },
   "thinking": {
     "complete": "思考完成",
-    "label": "思考中..."
+    "label": "思考中...",
+    "waitingApproval": "等待你的批准"
   },
   "skills": {
     "loaded": "已加载技能",

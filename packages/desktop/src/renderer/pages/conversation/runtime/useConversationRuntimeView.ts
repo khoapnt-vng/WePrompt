@@ -32,6 +32,7 @@ type UseConversationRuntimeViewReturn = {
   state: ConversationRuntimeView['state'];
   isProcessing: boolean;
   canSendMessage: boolean;
+  pendingConfirmations: number;
   activeTurnId: string | null;
   markSendStarted: () => void;
   markSendAccepted: (turn_id: string, runtime: TConversationRuntimeSummary, msg_id?: string) => void;
@@ -132,6 +133,7 @@ export const useConversationRuntimeView = (conversation_id: string): UseConversa
     state: view.state,
     isProcessing: view.isProcessing,
     canSendMessage: view.canSendMessage,
+    pendingConfirmations: view.pendingConfirmations,
     activeTurnId: view.activeTurnId,
     markSendStarted,
     markSendAccepted,

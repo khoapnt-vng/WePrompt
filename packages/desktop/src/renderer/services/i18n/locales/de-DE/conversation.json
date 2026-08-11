@@ -668,7 +668,8 @@
   },
   "thinking": {
     "complete": "Denken abgeschlossen",
-    "label": "Wird gedacht..."
+    "label": "Wird gedacht...",
+    "waitingApproval": "Wartet auf deine Freigabe"
   },
   "skills": {
     "loaded": "Geladene Skills",

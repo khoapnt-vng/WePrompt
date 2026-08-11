@@ -673,7 +673,8 @@
   },
   "thinking": {
     "complete": "Pensamento completo",
-    "label": "Pensando..."
+    "label": "Pensando...",
+    "waitingApproval": "Aguardando sua aprovação"
   },
   "skills": {
     "loaded": "Habilidades Carregadas",

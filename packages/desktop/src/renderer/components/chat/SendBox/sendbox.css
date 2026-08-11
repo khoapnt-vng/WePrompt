@@ -103,6 +103,16 @@
     0 8px 20px color-mix(in srgb, var(--aou-6-brand) 18%, transparent);
 }
 
+/* Blocked on the user, not on the model: a warning tone rather than the brand "working" glow. */
+.thought-display--awaiting-approval {
+  border-color: color-mix(in srgb, var(--color-warning-6) 58%, var(--color-border-2));
+  background: color-mix(in srgb, var(--color-warning-light-1) 56%, var(--color-bg-1));
+}
+
+.thought-display--awaiting-approval .thought-display__label {
+  color: var(--color-text-1);
+}
+
 .thought-display--compact {
   margin-bottom: 6px;
 }
