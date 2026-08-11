@@ -28,7 +28,7 @@
   --bg-3: #e5dcc9; /* warm hairline border / 边框分隔 */
   --bg-chat-surface: #fffdf9;
   --bg-artifact-surface: #fffdf9;
-  --studio-page-background: #e9e3d6;
+  --studio-page-background: #ffffff;
   --studio-slate-surface: #f0eadd;
   --studio-slate-border: #d4a98d;
   --studio-slate-text: #b4380f;
@@ -44,7 +44,7 @@
   --studio-library-chip-text: #54503f;
   --studio-library-shape-surface: #fbf8f1;
   --studio-library-shape-border: #e7decb;
-  --studio-library-control-surface: #f4eee2;
+  --studio-library-control-surface: var(--bg-2);
   --studio-library-control-border: #e1d9c8;
   --studio-library-attach-text: #5e5747;
   --bg-4: #d8cbb6;
