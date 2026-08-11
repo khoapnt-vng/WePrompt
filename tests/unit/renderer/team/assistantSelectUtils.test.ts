@@ -10,6 +10,8 @@ import {
   assistantToOption,
   filterTeamSupportedAssistants,
   resolveTeamAssistantLabel,
+  resolveTeamMemberLabel,
+  teamAssistantMatchesQuery,
 } from '@/renderer/pages/team/components/assistantSelectUtils';
 import type { Assistant } from '@/common/types/agent/assistantTypes';
 
@@ -87,6 +89,81 @@ describe('assistantSelectUtils', () => {
 
     it('falls back to the catalog name when no brand key is present at all', () => {
       expect(resolveTeamAssistantLabel({ id: 'custom-1', name: 'Scriptwriter' }, t)).toBe('Scriptwriter');
+    });
+  });
+
+  /**
+   * A team member's `assistant_name` is persisted at create time and is also
+   * what `team.renameAgent` overwrites. So the brand label may only replace it
+   * while it is still the untouched catalog name — a name the user typed
+   * themselves always wins.
+   */
+  describe('resolveTeamMemberLabel', () => {
+    const t = ((key: string) =>
+      ({ 'agent.brand.forgeAssistant': 'WePrompt Assistant' })[key] ?? key) as unknown as TFunction;
+    const options = [
+      { id: 'aionui-assistant', name: 'AionUi Butler', brandKey: 'agent.brand.forgeAssistant' as const },
+      { id: 'custom-1', name: 'Scriptwriter', brandKey: null },
+    ];
+
+    it('replaces the untouched catalog name with the brand label', () => {
+      expect(
+        resolveTeamMemberLabel({ assistant_id: 'aionui-assistant', assistant_name: 'AionUi Butler' }, options, t)
+      ).toBe('WePrompt Assistant');
+    });
+
+    it('keeps a name the user typed via rename, never overriding it with the brand', () => {
+      expect(
+        resolveTeamMemberLabel({ assistant_id: 'aionui-assistant', assistant_name: 'Research Lead' }, options, t)
+      ).toBe('Research Lead');
+    });
+
+    it('uses the brand label when the slot carries no name at all', () => {
+      expect(resolveTeamMemberLabel({ assistant_id: 'aionui-assistant', assistant_name: '' }, options, t)).toBe(
+        'WePrompt Assistant'
+      );
+    });
+
+    it('keeps the persisted name for assistants that are not rebranded', () => {
+      expect(resolveTeamMemberLabel({ assistant_id: 'custom-1', assistant_name: 'Scriptwriter' }, options, t)).toBe(
+        'Scriptwriter'
+      );
+    });
+
+    it('keeps the persisted name when the assistant is gone from the catalog', () => {
+      expect(resolveTeamMemberLabel({ assistant_id: 'deleted-9', assistant_name: 'AionUi Butler' }, options, t)).toBe(
+        'AionUi Butler'
+      );
+    });
+
+    it('keeps the persisted name when the slot predates assistant identity', () => {
+      expect(resolveTeamMemberLabel({ assistant_name: 'AionUi Butler' }, options, t)).toBe('AionUi Butler');
+    });
+  });
+
+  /**
+   * Search must match what the row displays. Filtering on the catalog name
+   * alone means typing the visible brand name finds nothing.
+   */
+  describe('teamAssistantMatchesQuery', () => {
+    const t = ((key: string) =>
+      ({ 'agent.brand.forgeAssistant': 'WePrompt Assistant' })[key] ?? key) as unknown as TFunction;
+    const butler = { id: 'aionui-assistant', name: 'AionUi Butler', brandKey: 'agent.brand.forgeAssistant' as const };
+
+    it('matches the brand label the row actually shows', () => {
+      expect(teamAssistantMatchesQuery(butler, 'weprompt', t)).toBe(true);
+    });
+
+    it('still matches the catalog name, so existing habits keep working', () => {
+      expect(teamAssistantMatchesQuery(butler, 'aionui', t)).toBe(true);
+    });
+
+    it('does not match unrelated text', () => {
+      expect(teamAssistantMatchesQuery(butler, 'scriptwriter', t)).toBe(false);
+    });
+
+    it('treats an empty query as matching everything', () => {
+      expect(teamAssistantMatchesQuery(butler, '   ', t)).toBe(true);
     });
   });
 });

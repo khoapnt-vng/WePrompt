@@ -8,14 +8,23 @@ import type { TeammateStatus } from '@/common/types/team/teamTypes';
 import { restrictToHorizontalAxis } from '@/renderer/utils/ui/dndModifiers';
 import AgentStatusBadge from './AgentStatusBadge';
 import TeamAgentIdentity from './TeamAgentIdentity';
+import { resolveTeamMemberLabel } from './assistantSelectUtils';
 import { useTeamTabs } from '../hooks/TeamTabsContext';
+import { useTeamAssistantOptions } from '../hooks/useTeamAssistantOptions';
 import TeamAddMemberPopover from './memberPicker/TeamAddMemberPopover';
 
 const TAB_OVERFLOW_THRESHOLD = 10;
 
 type TeamTabViewProps = {
   slot_id: string;
+  /**
+   * The raw persisted slot name. Stays the edit buffer and the rename
+   * comparison baseline — never swap it for a display label, or renaming a
+   * rebranded built-in would persist the brand name as a custom one.
+   */
   assistant_name: string;
+  /** What the pill shows: {@link resolveTeamMemberLabel} applied by the parent. */
+  displayName: string;
   assistant_backend: string;
   icon?: string;
   conversation_id?: string;
@@ -38,6 +47,7 @@ type TeamTabViewProps = {
 const TeamTabView: React.FC<TeamTabViewProps> = ({
   slot_id,
   assistant_name,
+  displayName,
   assistant_backend,
   icon,
   conversation_id,
@@ -168,7 +178,7 @@ const TeamTabView: React.FC<TeamTabViewProps> = ({
             </span>
           )}
           <TeamAgentIdentity
-            assistant_name={assistant_name}
+            assistant_name={displayName}
             assistant_backend={assistant_backend}
             icon={icon}
             conversation_id={conversation_id}
@@ -236,7 +246,9 @@ type TeamTabsProps = {
  * Supports scroll overflow with fade indicators.
  */
 const TeamTabs: React.FC<TeamTabsProps> = ({ onTabClick, pendingCounts, warmingUp = false, failedSlotIds }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  // 胶囊上显示的名字要和 warmup 失败卡一致：改过名的用用户自己的名字，没改过的用品牌名。
+  const { assistants: catalog } = useTeamAssistantOptions(i18n?.language ?? 'en-US');
   const {
     assistants,
     activeSlotId,
@@ -332,6 +344,7 @@ const TeamTabs: React.FC<TeamTabsProps> = ({ onTabClick, pendingCounts, warmingU
                     key={assistant.slot_id}
                     slot_id={assistant.slot_id}
                     assistant_name={assistant.assistant_name}
+                    displayName={resolveTeamMemberLabel(assistant, catalog, t)}
                     assistant_backend={assistant.assistant_backend}
                     icon={assistant.icon}
                     conversation_id={assistant.conversation_id}

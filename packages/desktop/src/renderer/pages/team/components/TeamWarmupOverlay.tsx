@@ -9,6 +9,8 @@ import { Refresh } from '@icon-park/react';
 import { useTranslation } from 'react-i18next';
 import type { TeamAssistant } from '@/common/types/team/teamTypes';
 import type { TeamWarmupMemberState, TeamWarmupPhase } from '../hooks/useTeamWarmup';
+import { useTeamAssistantOptions } from '../hooks/useTeamAssistantOptions';
+import { resolveTeamMemberLabel } from './assistantSelectUtils';
 import TeamAgentIdentity from './TeamAgentIdentity';
 
 type Props = {
@@ -52,7 +54,11 @@ export function simplifyWarmupError(raw: string | undefined): string | undefined
 }
 
 const TeamWarmupOverlay: React.FC<Props> = ({ phase, assistants, runtimeStatus, colorOf, onRetry }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  // 失败卡里的名字必须和抬头 tab 上显示的一致：改过名的成员用用户自己起的名字，
+  // 没改过的用品牌名（目录名 "AionUi Butler" 在界面上根本不存在）。
+  const { assistants: catalog } = useTeamAssistantOptions(i18n?.language ?? 'en-US');
+  const labelOf = (assistant: TeamAssistant) => resolveTeamMemberLabel(assistant, catalog, t);
   if (phase === 'ready') return null;
 
   const isFailure = phase === 'error';
@@ -145,11 +151,11 @@ const TeamWarmupOverlay: React.FC<Props> = ({ phase, assistants, runtimeStatus, 
                   ? singleIsLeader
                     ? t('team.warmup.leaderFailedTitle', {
                         defaultValue: 'Lead {{name}} failed to start',
-                        name: single.assistant.assistant_name,
+                        name: labelOf(single.assistant),
                       })
                     : t('team.warmup.memberFailedTitle', {
                         defaultValue: 'Member {{name}} failed to start',
-                        name: single.assistant.assistant_name,
+                        name: labelOf(single.assistant),
                       })
                   : t('team.warmup.genericFailedTitle', { defaultValue: 'The team could not start' })}
             </div>
@@ -166,7 +172,7 @@ const TeamWarmupOverlay: React.FC<Props> = ({ phase, assistants, runtimeStatus, 
                     className='flex items-start gap-6px text-11px leading-relaxed text-left'
                   >
                     <span className='shrink-0 font-600' style={{ color: 'var(--danger)' }}>
-                      {m.assistant.assistant_name}
+                      {labelOf(m.assistant)}
                       {m.assistant.role === 'leader' ? t('team.warmup.leaderSuffix', { defaultValue: ' (Lead)' }) : ''}
                     </span>
                     <span className='min-w-0 break-words' style={{ color: 'var(--danger)' }}>

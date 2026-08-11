@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (_key: string, options?: { defaultValue?: string; count?: number; name?: string }) => {
+      if (_key === 'agent.brand.forgeAssistant') return 'WePrompt Assistant';
       let s = options?.defaultValue ?? _key;
       if (options?.count !== undefined) s = s.replace('{{count}}', String(options.count));
       if (options?.name !== undefined) s = s.replace('{{name}}', options.name);
@@ -22,6 +23,18 @@ vi.mock('react-i18next', () => ({
 vi.mock('@/renderer/pages/team/components/TeamAgentIdentity', () => ({
   __esModule: true,
   default: () => <div data-testid='mock-identity' />,
+}));
+
+// The overlay resolves member labels against the assistant catalog; only the
+// rebranded built-in matters here, everything else falls through to the
+// persisted name.
+vi.mock('@/renderer/pages/team/hooks/useTeamAssistantOptions', () => ({
+  useTeamAssistantOptions: () => ({
+    assistants: [{ id: 'aionui-assistant', name: 'AionUi Butler', brandKey: 'agent.brand.forgeAssistant' }],
+    loading: false,
+    error: undefined,
+    filterByQuery: () => [],
+  }),
 }));
 
 import TeamWarmupOverlay from '@/renderer/pages/team/components/TeamWarmupOverlay';
@@ -118,5 +131,42 @@ describe('TeamWarmupOverlay failure states', () => {
       <TeamWarmupOverlay phase='ready' assistants={[]} runtimeStatus={runtime([])} colorOf={colorOf} />
     );
     expect(container).toBeEmptyDOMElement();
+  });
+
+  /**
+   * The failure card is the surface a user reads when a slot dies, so naming
+   * the catalog name here points them at a tab label that does not exist.
+   */
+  describe('rebranded built-ins', () => {
+    const butler = (slot_id: string, role: 'leader' | 'teammate'): TeamAssistant =>
+      ({ ...assistant(slot_id, role, 'AionUi Butler'), assistant_id: 'aionui-assistant' }) as TeamAssistant;
+
+    it('names the failing lead by the brand label the tab shows', () => {
+      render(
+        <TeamWarmupOverlay
+          phase='error'
+          assistants={[butler('l', 'leader')]}
+          runtimeStatus={runtime([['l', 'failed', 'boom']])}
+          colorOf={colorOf}
+          onRetry={() => {}}
+        />
+      );
+      expect(screen.getByText('Lead WePrompt Assistant failed to start')).toBeInTheDocument();
+      expect(screen.queryByText(/AionUi Butler/)).not.toBeInTheDocument();
+    });
+
+    it('keeps a renamed member name instead of the brand label', () => {
+      const renamed = { ...butler('m', 'teammate'), assistant_name: 'Research Lead' } as TeamAssistant;
+      render(
+        <TeamWarmupOverlay
+          phase='error'
+          assistants={[renamed]}
+          runtimeStatus={runtime([['m', 'failed', 'boom']])}
+          colorOf={colorOf}
+          onRetry={() => {}}
+        />
+      );
+      expect(screen.getByText('Member Research Lead failed to start')).toBeInTheDocument();
+    });
   });
 });
