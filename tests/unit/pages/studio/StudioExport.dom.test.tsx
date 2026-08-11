@@ -62,6 +62,14 @@ vi.mock('react-i18next', () => ({
     i18n: { language: 'en-US' },
   }),
 }));
+vi.mock('@renderer/pages/studio/components/PhaseShell/phases/brief/useBriefConversation', () => ({
+  useBriefConversation: () => ({
+    state: { kind: 'absent' },
+    errorMessageKey: null,
+    sendFirstMessage: vi.fn(async () => {}),
+    recreate: vi.fn(),
+  }),
+}));
 
 const ok = <T,>(data: T): StudioCommandResult<T> => ({ ok: true, data });
 

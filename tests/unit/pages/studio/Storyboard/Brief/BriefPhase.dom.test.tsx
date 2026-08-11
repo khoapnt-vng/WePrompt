@@ -6,14 +6,37 @@
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { StudioAsset, StudioRendererProject } from '@/common/types/project/creativeStudioTypes';
-import { BriefPhase } from '@renderer/pages/studio/components/PhaseShell/phases/BriefPhase';
+import { BriefPhase } from '@renderer/pages/studio/components/PhaseShell/phases/brief';
 import type { BriefPhaseController } from '@renderer/pages/studio/components/PhaseShell/types';
 import type { UseStoryboardEditorResult } from '@renderer/pages/studio/hooks/useStoryboardEditor';
 
+const briefConversationHarness = vi.hoisted(() => ({
+  result: {
+    state: { kind: 'absent' } as { kind: string; conversation?: unknown; conversationId?: string },
+    errorMessageKey: null as string | null,
+    sendFirstMessage: vi.fn(async () => {}),
+    recreate: vi.fn(),
+  },
+}));
+
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+vi.mock('@renderer/pages/studio/components/PhaseShell/phases/brief/useBriefConversation', () => ({
+  useBriefConversation: () => briefConversationHarness.result,
+}));
+vi.mock('@renderer/pages/conversation/platforms/aionrs/AionrsChat', () => ({
+  default: () => <div data-testid='aionrs-chat' />,
+}));
+vi.mock('@renderer/pages/conversation/platforms/aionrs/useAionrsModelSelection', () => ({
+  useAionrsModelSelection: () => ({
+    providers: [],
+    getAvailableModels: vi.fn(),
+    handleSelectModel: vi.fn(),
+    getDisplayModelName: vi.fn(),
+  }),
+}));
 
 const project = (overrides: Partial<StudioRendererProject> = {}): StudioRendererProject => ({
   schemaVersion: 1,
@@ -100,6 +123,7 @@ const editor = (overrides: Partial<UseStoryboardEditorResult> = {}): UseStoryboa
 
 const controller = (overrides: Partial<BriefPhaseController> = {}): BriefPhaseController => ({
   project: project(),
+  proposals: [],
   readiness: {
     sceneStatuses: {},
     totalSceneCount: 0,
@@ -111,16 +135,25 @@ const controller = (overrides: Partial<BriefPhaseController> = {}): BriefPhaseCo
   advisory: null,
   mutationPending: false,
   requestTransition: vi.fn(),
+  acceptProposal: vi.fn(),
+  rejectProposal: vi.fn(),
   ...overrides,
 });
 
 describe('BriefPhase', () => {
-  it('renders only the editable project brief contract and reports controlled changes', () => {
+  beforeEach(() => {
+    briefConversationHarness.result.state = { kind: 'absent' };
+    briefConversationHarness.result.errorMessageKey = null;
+    briefConversationHarness.result.sendFirstMessage.mockClear();
+    briefConversationHarness.result.recreate.mockClear();
+  });
+
+  it('renders the intent composer with the editable form controls before the conversation exists', () => {
     const props = controller();
     render(<BriefPhase controller={props} />);
 
     expect(screen.getByLabelText('conversation.creativeStudio.phase.brief.nameLabel')).toHaveValue('Launch film');
-    expect(screen.getByLabelText('conversation.creativeStudio.phase.brief.intentLabel')).toHaveValue(
+    expect(screen.getByPlaceholderText('conversation.creativeStudio.brief.composerPlaceholder')).toHaveValue(
       'A short launch story'
     );
     expect(
@@ -133,20 +166,48 @@ describe('BriefPhase', () => {
     fireEvent.change(screen.getByLabelText('conversation.creativeStudio.phase.brief.nameLabel'), {
       target: { value: 'Launch film v2' },
     });
-    fireEvent.change(screen.getByLabelText('conversation.creativeStudio.phase.brief.intentLabel'), {
-      target: { value: 'A sharper launch story' },
-    });
     fireEvent.change(
       screen.getByRole('spinbutton', { name: 'conversation.creativeStudio.phase.brief.durationLabel' }),
       { target: { value: '20' } }
     );
 
     expect(props.editor.updateProjectDraft).toHaveBeenCalledWith({ name: 'Launch film v2' });
-    expect(props.editor.updateProjectDraft).toHaveBeenCalledWith({ brief: 'A sharper launch story' });
     expect(props.editor.updateProjectDraft).toHaveBeenCalledWith({ targetDurationSeconds: 20 });
+    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.brief.composerSend' })).toBeInTheDocument();
     expect(screen.queryByText('conversation.creativeStudio.project.resolution')).not.toBeInTheDocument();
     expect(screen.queryByText('conversation.creativeStudio.phase.produce.modelsTitle')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /render|generate/i })).not.toBeInTheDocument();
+  });
+
+  it('mounts the ready conversation surface', () => {
+    briefConversationHarness.result.state = {
+      kind: 'ready',
+      conversation: {
+        id: 'conversation_brief',
+        name: 'Brief',
+        type: 'aionrs',
+        model: { id: 'provider_1', use_model: 'model_1' },
+        created_at: 1,
+        modified_at: 1,
+        extra: { backend: 'aionrs', workspace: '' },
+      },
+    };
+
+    render(<BriefPhase controller={controller()} />);
+
+    expect(
+      screen.getByRole('region', { name: 'conversation.creativeStudio.brief.conversationTitle' })
+    ).toBeInTheDocument();
+  });
+
+  it('shows the dangling notice and Start fresh action', () => {
+    briefConversationHarness.result.state = { kind: 'dangling', conversationId: 'conversation_deleted' };
+
+    render(<BriefPhase controller={controller()} />);
+
+    expect(screen.getByText('conversation.creativeStudio.brief.danglingNotice')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.brief.danglingStartFresh' }));
+    expect(briefConversationHarness.result.recreate).toHaveBeenCalledOnce();
   });
 
   it('blocks invalid fields next to their inputs without attempting persistence or navigation', () => {

@@ -1201,6 +1201,9 @@ export const creativeStudio = {
   getProject: bridge.buildProvider<StudioCommandResult<StudioRendererProject | null>, StudioProjectRequest>(
     'creative-studio.get-project'
   ),
+  getBriefSessionServer: bridge.buildProvider<StudioCommandResult<ISessionMcpServer>, StudioProjectRequest>(
+    'creative-studio.get-brief-session-server'
+  ),
   listProposals: bridge.buildProvider<StudioCommandResult<StudioProposal[]>, StudioProjectRequest>(
     'creative-studio.list-proposals'
   ),

@@ -1404,6 +1404,24 @@
       "refresh": "تازه‌سازی مدل‌ها",
       "loading": "در حال بارگیری مدل‌ها...",
       "updateFailed": "انتخاب مدل پروژه به‌روزرسانی نشد."
+    },
+    "brief": {
+      "composerPlaceholder": "ویدیوی موردنظر خود را توصیف کنید…",
+      "composerSend": "ارسال",
+      "conversationTitle": "گفت‌وگوی بریف",
+      "danglingNotice": "گفت‌وگوی بریف این پروژه دیگر در دسترس نیست.",
+      "danglingStartFresh": "شروع گفت‌وگوی جدید",
+      "proposalTitle": "فیلمنامه پیشنهادی",
+      "proposalMeta": "بر اساس بازبینی {{revision}} · {{createdAt}}",
+      "proposalSummary": "{{added}} افزوده · {{removed}} حذف · {{changed}} تغییرکرده",
+      "proposalAccept": "پذیرش فیلمنامه",
+      "proposalReject": "رد کردن",
+      "proposalAccepted": "فیلمنامه اعمال شد",
+      "proposalRejected": "رد شد",
+      "proposalExpired": "منقضی شد",
+      "proposalStale": "در زمان انتظار این پیشنهاد، فیلمنامه تغییر کرده است. درخواست بازنویسی کنید.",
+      "proposalRepropose": "درخواست بازنویسی",
+      "proposalFlushRefused": "ویرایش‌های ذخیره‌نشده شما ذخیره نشد، بنابراین پیشنهاد اعمال نشد. ویرایش‌ها را اصلاح کنید و دوباره تلاش کنید."
     }
   },
   "artifact": {

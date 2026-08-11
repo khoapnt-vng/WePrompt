@@ -1388,6 +1388,24 @@
       "refresh": "모델 새로고침",
       "loading": "모델 불러오는 중...",
       "updateFailed": "프로젝트 모델 선택을 업데이트할 수 없습니다."
+    },
+    "brief": {
+      "composerPlaceholder": "원하는 동영상을 설명하세요…",
+      "composerSend": "보내기",
+      "conversationTitle": "브리프 대화",
+      "danglingNotice": "이 프로젝트의 브리프 대화를 더 이상 사용할 수 없습니다.",
+      "danglingStartFresh": "새 대화 시작",
+      "proposalTitle": "제안된 스크립트",
+      "proposalMeta": "리비전 {{revision}} 기준 · {{createdAt}}",
+      "proposalSummary": "추가 {{added}} · 삭제 {{removed}} · 변경 {{changed}}",
+      "proposalAccept": "스크립트 수락",
+      "proposalReject": "거부",
+      "proposalAccepted": "스크립트 적용됨",
+      "proposalRejected": "거부됨",
+      "proposalExpired": "만료됨",
+      "proposalStale": "이 제안이 대기하는 동안 스크립트가 변경되었습니다. 다시 작성해 달라고 요청하세요.",
+      "proposalRepropose": "다시 작성 요청",
+      "proposalFlushRefused": "저장하지 않은 편집 내용을 저장할 수 없어 제안을 적용하지 않았습니다. 편집 내용을 수정한 후 다시 시도하세요."
     }
   },
   "artifact": {

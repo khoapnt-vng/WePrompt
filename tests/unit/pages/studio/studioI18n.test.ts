@@ -14,6 +14,7 @@ type JsonObject = Record<string, unknown>;
 const localeRoot = new URL('../../../../packages/desktop/src/renderer/services/i18n/locales/', import.meta.url);
 
 const plannedGroups = [
+  'brief',
   'close',
   'create',
   'draft',
@@ -35,6 +36,25 @@ const plannedGroups = [
   'storyboard',
   'timeline',
   'transition',
+] as const;
+
+const briefKeys = [
+  'brief.composerPlaceholder',
+  'brief.composerSend',
+  'brief.conversationTitle',
+  'brief.danglingNotice',
+  'brief.danglingStartFresh',
+  'brief.proposalTitle',
+  'brief.proposalMeta',
+  'brief.proposalSummary',
+  'brief.proposalAccept',
+  'brief.proposalReject',
+  'brief.proposalAccepted',
+  'brief.proposalRejected',
+  'brief.proposalExpired',
+  'brief.proposalStale',
+  'brief.proposalRepropose',
+  'brief.proposalFlushRefused',
 ] as const;
 
 const phaseKeys = [
@@ -375,6 +395,9 @@ describe('Creative Studio localization contract', () => {
     expect(Object.keys(creativeStudio).toSorted()).toEqual([...plannedGroups].toSorted());
 
     const leaves = flattenStringLeaves(creativeStudio);
+    for (const key of briefKeys) {
+      expect(leaves[key], `Missing conversation.creativeStudio.${key}`).toBeTruthy();
+    }
     for (const key of taskSevenKeys) {
       expect(leaves[key], `Missing conversation.creativeStudio.${key}`).toBeTruthy();
     }

@@ -1406,6 +1406,24 @@
       "refresh": "Modelleri yenile",
       "loading": "Modeller yükleniyor...",
       "updateFailed": "Proje model seçimi güncellenemedi."
+    },
+    "brief": {
+      "composerPlaceholder": "İstediğiniz videoyu açıklayın…",
+      "composerSend": "Gönder",
+      "conversationTitle": "Brifing konuşması",
+      "danglingNotice": "Bu projenin brifing konuşmasına artık erişilemiyor.",
+      "danglingStartFresh": "Yeni konuşma başlat",
+      "proposalTitle": "Önerilen senaryo",
+      "proposalMeta": "Revizyon {{revision}} temel alındı · {{createdAt}}",
+      "proposalSummary": "{{added}} eklendi · {{removed}} kaldırıldı · {{changed}} değiştirildi",
+      "proposalAccept": "Senaryoyu kabul et",
+      "proposalReject": "Reddet",
+      "proposalAccepted": "Senaryo uygulandı",
+      "proposalRejected": "Reddedildi",
+      "proposalExpired": "Süresi doldu",
+      "proposalStale": "Bu öneri beklerken senaryo değişti. Yeniden taslak hazırlanmasını isteyin.",
+      "proposalRepropose": "Yeniden taslak iste",
+      "proposalFlushRefused": "Kaydedilmemiş düzenlemeleriniz kaydedilemediği için öneri uygulanmadı. Düzenlemeleri düzeltip tekrar deneyin."
     }
   },
   "artifact": {

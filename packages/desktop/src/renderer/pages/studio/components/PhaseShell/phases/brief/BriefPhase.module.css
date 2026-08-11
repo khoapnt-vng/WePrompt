@@ -43,10 +43,38 @@
   outline-offset: 4px;
 }
 
-.form {
+.content {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+}
+
+.form,
+.conversationColumn,
+.composer,
+.dangling {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.conversationSurface {
+  display: flex;
+  min-height: 360px;
+  overflow: hidden;
+  border: 1px solid var(--color-border-2);
+  border-radius: 10px;
+}
+
+.proposals {
+  display: grid;
+  gap: 12px;
+}
+
+.dangling p {
+  margin: 0;
+  color: var(--color-text-2);
 }
 
 .field {
@@ -63,10 +91,6 @@
 
 .fieldLabel {
   composes: cardTitle from '../../../StudioTypography.module.css';
-}
-
-.fullWidth {
-  grid-column: 1 / -1;
 }
 
 .fieldError {
@@ -111,12 +135,8 @@
   composes: meta from '../../../StudioTypography.module.css';
 }
 
-.phase[data-layout='compact'] .form {
+.phase[data-layout='compact'] .content {
   grid-template-columns: minmax(0, 1fr);
-}
-
-.phase[data-layout='compact'] .fullWidth {
-  grid-column: auto;
 }
 
 .phase[data-layout='compact'] .footer {

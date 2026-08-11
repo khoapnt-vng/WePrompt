@@ -1405,6 +1405,24 @@
       "refresh": "Modelle aktualisieren",
       "loading": "Modelle werden geladen...",
       "updateFailed": "Die Modellauswahl des Projekts konnte nicht aktualisiert werden."
+    },
+    "brief": {
+      "composerPlaceholder": "Beschreiben Sie das gewünschte Video…",
+      "composerSend": "Senden",
+      "conversationTitle": "Briefing-Unterhaltung",
+      "danglingNotice": "Die Briefing-Unterhaltung dieses Projekts ist nicht mehr verfügbar.",
+      "danglingStartFresh": "Neue Unterhaltung beginnen",
+      "proposalTitle": "Vorgeschlagenes Skript",
+      "proposalMeta": "Basierend auf Revision {{revision}} · {{createdAt}}",
+      "proposalSummary": "{{added}} hinzugefügt · {{removed}} entfernt · {{changed}} geändert",
+      "proposalAccept": "Skript annehmen",
+      "proposalReject": "Ablehnen",
+      "proposalAccepted": "Skript angewendet",
+      "proposalRejected": "Abgelehnt",
+      "proposalExpired": "Abgelaufen",
+      "proposalStale": "Das Skript wurde geändert, während dieser Vorschlag wartete. Fordern Sie eine neue Fassung an.",
+      "proposalRepropose": "Neue Fassung anfordern",
+      "proposalFlushRefused": "Ihre ungespeicherten Änderungen konnten nicht gespeichert werden, daher wurde der Vorschlag nicht angewendet. Korrigieren Sie die Änderungen und versuchen Sie es erneut."
     }
   },
   "artifact": {

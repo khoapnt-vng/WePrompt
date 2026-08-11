@@ -64,3 +64,6 @@ export const BUILTIN_KNOWLEDGE_ID = 'builtin-project-knowledge';
 // BUILTIN_KNOWLEDGE_NAME lives in `@/common/knowledge/constants`: the renderer
 // matches conversations against it and may not import from `process/`.
 export const BUILTIN_KNOWLEDGE_SCRIPT = 'builtin-mcp-knowledge';
+
+export const BUILTIN_STUDIO_NAME = 'aionui-creative-studio';
+export const BUILTIN_STUDIO_SCRIPT = 'builtin-mcp-studio';

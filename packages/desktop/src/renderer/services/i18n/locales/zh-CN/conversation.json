@@ -1388,6 +1388,24 @@
       "refresh": "刷新模型",
       "loading": "正在加载模型...",
       "updateFailed": "无法更新项目模型选择。"
+    },
+    "brief": {
+      "composerPlaceholder": "描述你想制作的视频…",
+      "composerSend": "发送",
+      "conversationTitle": "简报对话",
+      "danglingNotice": "此项目的简报对话已不可用。",
+      "danglingStartFresh": "开始新对话",
+      "proposalTitle": "提议的脚本",
+      "proposalMeta": "基于修订版 {{revision}} · {{createdAt}}",
+      "proposalSummary": "新增 {{added}} · 删除 {{removed}} · 修改 {{changed}}",
+      "proposalAccept": "接受脚本",
+      "proposalReject": "拒绝",
+      "proposalAccepted": "脚本已应用",
+      "proposalRejected": "已拒绝",
+      "proposalExpired": "已过期",
+      "proposalStale": "此提案等待期间脚本已发生变化。请请求重新起草。",
+      "proposalRepropose": "请求重新起草",
+      "proposalFlushRefused": "无法保存你尚未保存的编辑，因此未应用此提案。请修正这些编辑后重试。"
     }
   },
   "artifact": {

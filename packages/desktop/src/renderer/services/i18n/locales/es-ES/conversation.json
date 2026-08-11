@@ -1421,6 +1421,24 @@
       "refresh": "Actualizar modelos",
       "loading": "Cargando modelos...",
       "updateFailed": "No se pudo actualizar la selección de modelo del proyecto."
+    },
+    "brief": {
+      "composerPlaceholder": "Describe el vídeo que quieres…",
+      "composerSend": "Enviar",
+      "conversationTitle": "Conversación del briefing",
+      "danglingNotice": "La conversación del briefing de este proyecto ya no está disponible.",
+      "danglingStartFresh": "Iniciar una conversación nueva",
+      "proposalTitle": "Guion propuesto",
+      "proposalMeta": "Basado en la revisión {{revision}} · {{createdAt}}",
+      "proposalSummary": "Adiciones: {{added}} · eliminaciones: {{removed}} · cambios: {{changed}}",
+      "proposalAccept": "Aceptar guion",
+      "proposalReject": "Rechazar",
+      "proposalAccepted": "Guion aplicado",
+      "proposalRejected": "Rechazado",
+      "proposalExpired": "Caducado",
+      "proposalStale": "El guion cambió mientras esta propuesta esperaba. Solicita una nueva versión.",
+      "proposalRepropose": "Solicitar nueva versión",
+      "proposalFlushRefused": "No se pudieron guardar tus cambios sin guardar, así que la propuesta no se aplicó. Corrige los cambios e inténtalo de nuevo."
     }
   },
   "artifact": {

@@ -1388,6 +1388,24 @@
       "refresh": "モデルを更新",
       "loading": "モデルを読み込み中...",
       "updateFailed": "プロジェクトのモデル選択を更新できませんでした。"
+    },
+    "brief": {
+      "composerPlaceholder": "作りたい動画を説明してください…",
+      "composerSend": "送信",
+      "conversationTitle": "ブリーフの会話",
+      "danglingNotice": "このプロジェクトのブリーフの会話は利用できなくなりました。",
+      "danglingStartFresh": "新しい会話を始める",
+      "proposalTitle": "提案された台本",
+      "proposalMeta": "リビジョン {{revision}} に基づく · {{createdAt}}",
+      "proposalSummary": "追加 {{added}} · 削除 {{removed}} · 変更 {{changed}}",
+      "proposalAccept": "台本を承認",
+      "proposalReject": "却下",
+      "proposalAccepted": "台本を適用しました",
+      "proposalRejected": "却下しました",
+      "proposalExpired": "期限切れ",
+      "proposalStale": "この提案を待っている間に台本が変更されました。再作成を依頼してください。",
+      "proposalRepropose": "再作成を依頼",
+      "proposalFlushRefused": "未保存の編集を保存できなかったため、提案は適用されませんでした。編集を修正してからもう一度お試しください。"
     }
   },
   "artifact": {

@@ -30,7 +30,8 @@ import {
 } from './adapters/e2eFakeAdapter';
 import { createStudioJobManager, type StudioJobManager } from './jobManager';
 import { installCreativeStudioProtocol, type CreativeStudioProtocolInstallation } from './mediaProtocol';
-import { getCreativeStudioRootDir } from '@process/utils/initStorage';
+import { getBuiltinMcpScriptPath, getCreativeStudioRootDir } from '@process/utils/initStorage';
+import { BUILTIN_STUDIO_SCRIPT } from '@process/resources/builtinMcp/constants';
 import {
   createStudioStoryboardPlanner,
   type StudioStoryboardPlanner,
@@ -167,6 +168,7 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
     listProviders,
     jobManager,
     storyboardPlanner,
+    getStudioServerScriptPath: () => getBuiltinMcpScriptPath(BUILTIN_STUDIO_SCRIPT),
     onProjectUpdated: deps.onProjectUpdated,
   });
   const renderRunner = createStudioRenderRunner({

@@ -6,7 +6,7 @@
  * @vitest-environment node
  */
 
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -19,11 +19,13 @@ import type {
   StudioJob,
   StudioProject,
   StudioRendererProject,
+  StudioRouteCatalog,
   StudioRouteCatalogEntry,
   StudioScene,
   StudioTextModelOption,
   StudioUpdateModelSelectionRequest,
 } from '@/common/types/project/creativeStudioTypes';
+import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
 import type { IProvider } from '@/common/config/storage';
 import type { GenerationProviderAdapter } from '@process/services/creative-studio/adapters';
 import { STUDIO_E2E_BOUNDARY_SENTINELS } from '@process/services/creative-studio/adapters/e2eFakeAdapter';
@@ -39,6 +41,13 @@ import {
   StudioStoryboardPlannerError,
   type StudioStoryboardPlanner,
 } from '@process/services/creative-studio/planning/storyboardPlanner';
+import {
+  createListRoutesHandler,
+  createProposeStoryboardHandler,
+  createReadStoryboardHandler,
+  parseStudioServerEnv,
+} from '@process/resources/builtinMcp/studioServer';
+import { BUILTIN_STUDIO_NAME } from '@process/resources/builtinMcp/constants';
 
 const makeInput = (overrides: Partial<CreateStudioProjectInput> = {}): CreateStudioProjectInput => ({
   name: 'Launch film',
@@ -157,6 +166,36 @@ const storyboardProposal = {
       durationSeconds: 4,
     },
   ],
+};
+
+const studioServerProjectFixture = {
+  schemaVersion: 1,
+  id: 'project_1',
+  revision: 7,
+  name: 'Coffee teaser',
+  brief: 'A 10-second teaser for a mountain coffee brand',
+  aspectRatio: '16:9',
+  targetDurationSeconds: 10,
+  sceneOrder: ['scene_1'],
+  scenes: {
+    scene_1: {
+      id: 'scene_1',
+      title: 'Sunrise',
+      purpose: '',
+      visualPrompt: '',
+      narration: '',
+      onScreenText: '',
+      mediaKind: 'image',
+      durationSeconds: 5,
+      referenceAssetId: null,
+      selectedAssetId: null,
+      assetIds: [],
+      jobIds: [],
+      reviewState: 'draft',
+    },
+  },
+  assets: {},
+  jobs: {},
 };
 
 const storyboardOptions: StudioTextModelOption[] = [
@@ -359,6 +398,43 @@ describe('CreativeStudioService', () => {
 
     expect(asset?.sourceVisualPrompt).toBeUndefined();
     expect(asset).not.toHaveProperty('sourceVisualPrompt');
+  });
+
+  it('builds a project-scoped Brief session-server descriptor', async () => {
+    const project = await service.createProject(makeInput());
+    const scriptPath = '/tmp/builtin-mcp-studio.js';
+    const descriptorService = createCreativeStudioService({
+      store,
+      onProjectUpdated,
+      storyboardPlanner: makePlanner(),
+      providerResolver: {
+        listConnectionCandidates: async () => [],
+        listGenerationRoutes: async () => ({
+          routes: [routeOption('image', { model: 'image-model' }), routeOption('video', { model: 'video-model' })],
+          generationCatalogVersion: 'generation-v1',
+        }),
+        isGenerationRouteAvailable: async () => true,
+      },
+      getStudioServerScriptPath: () => scriptPath,
+    } as unknown as Parameters<typeof createCreativeStudioService>[0]);
+    const paths = await store.resolveProposalPaths(project.id);
+    const routeCatalog = await descriptorService.listRoutes({ projectId: project.id });
+
+    await expect(descriptorService.getBriefSessionServer({ projectId: project.id })).resolves.toEqual({
+      id: `studio-brief-${project.id}`,
+      name: BUILTIN_STUDIO_NAME,
+      transport: {
+        type: 'stdio',
+        command: 'node',
+        args: [scriptPath],
+        env: {
+          [STUDIO_ENV.projectId]: project.id,
+          [STUDIO_ENV.projectDir]: paths.projectDir,
+          [STUDIO_ENV.pendingDir]: paths.pendingDir,
+          [STUDIO_ENV.routeCatalog]: JSON.stringify(routeCatalog),
+        },
+      },
+    });
   });
 
   it('reports the newest verified cut file and its render time without exposing a storage path', async () => {
@@ -4127,5 +4203,170 @@ describe('CreativeStudioService', () => {
       ).rejects.toMatchObject({ code: 'planning_unavailable' });
       expect(harness.draft).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('Studio MCP server', () => {
+  it('exposes the route catalog with constraints and never mutates the project', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'studio-server-'));
+    const projectFile = path.join(dir, 'project.json');
+    await writeFile(projectFile, JSON.stringify(studioServerProjectFixture));
+    const catalog: StudioRouteCatalog = {
+      storyboard: { status: 'ready', selected: null, options: [] },
+      image: {
+        status: 'ready',
+        selected: null,
+        selectedRoute: null,
+        options: [routeOption('image', { model: 'image-model' })],
+      },
+      video: {
+        status: 'ready',
+        selected: null,
+        selectedRoute: null,
+        options: [routeOption('video', { model: 'video-model' })],
+      },
+      catalogVersion: 'catalog-v1',
+    };
+    const before = await readFile(projectFile);
+
+    const result = await createListRoutesHandler({
+      projectId: 'project_1',
+      projectDir: dir,
+      pendingDir: '',
+      routeCatalog: catalog,
+    })({});
+    const parsed = JSON.parse(result.content[0].text) as StudioRouteCatalog;
+
+    expect(parsed.image.options[0]).toMatchObject({ model: expect.any(String), health: expect.any(String) });
+    expect(parsed.video.options[0]?.constraints).toMatchObject({
+      minDurationSeconds: expect.any(Number),
+      maxDurationSeconds: expect.any(Number),
+      supportsFirstFrame: expect.any(Boolean),
+    });
+    expect(await readFile(projectFile)).toEqual(before);
+  });
+
+  it('parses env only when all three keys are present', () => {
+    expect(parseStudioServerEnv({})).toBeNull();
+    const routeCatalog: StudioRouteCatalog = {
+      storyboard: { status: 'setup_required', selected: null, options: [] },
+      image: { status: 'setup_required', selected: null, selectedRoute: null, options: [] },
+      video: { status: 'setup_required', selected: null, selectedRoute: null, options: [] },
+      catalogVersion: 'catalog-v1',
+    };
+    const env = {
+      [STUDIO_ENV.projectId]: 'project_1',
+      [STUDIO_ENV.projectDir]: '/tmp/p',
+      [STUDIO_ENV.pendingDir]: '/tmp/p/proposals/pending',
+      [STUDIO_ENV.routeCatalog]: JSON.stringify(routeCatalog),
+    };
+
+    expect(parseStudioServerEnv(env)).toEqual({
+      projectId: 'project_1',
+      projectDir: '/tmp/p',
+      pendingDir: '/tmp/p/proposals/pending',
+      routeCatalog,
+    });
+  });
+
+  it('read_storyboard returns revision, settings and scenes without operational state', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'studio-server-'));
+    await writeFile(path.join(dir, 'project.json'), JSON.stringify(studioServerProjectFixture));
+    const handler = createReadStoryboardHandler({ projectId: 'project_1', projectDir: dir, pendingDir: '' });
+
+    const result = await handler({});
+    const text = result.content[0].text;
+    expect(text).toContain('"revision": 7');
+    expect(text).toContain('Sunrise');
+    expect(text).not.toContain('jobIds');
+  });
+
+  it('propose_storyboard writes a record and reports recorded but never accepted', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'studio-server-'));
+    await writeFile(path.join(dir, 'project.json'), JSON.stringify(studioServerProjectFixture));
+    const pendingDir = path.join(dir, 'proposals', 'pending');
+    await mkdir(pendingDir, { recursive: true });
+    await mkdir(path.join(dir, 'proposals', 'slots'), { recursive: true });
+    const handler = createProposeStoryboardHandler({ projectId: 'project_1', projectDir: dir, pendingDir });
+
+    const result = await handler({
+      base_revision: 7,
+      scene_order: ['scene_1'],
+      scenes: {
+        scene_1: {
+          title: 'Sunrise over the terraces',
+          purpose: 'Origin',
+          visualPrompt: 'Golden hour terraces',
+          narration: 'It starts at 1,600 meters.',
+          onScreenText: '',
+          mediaKind: 'image',
+          durationSeconds: 5,
+          referenceAssetId: null,
+        },
+      },
+    });
+
+    const text = result.content[0].text;
+    expect(text).toContain('recorded');
+    expect(text).not.toMatch(/accepted|applied/i);
+  });
+
+  it('propose_storyboard fails typed when base_revision differs from the project file', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'studio-server-'));
+    await writeFile(path.join(dir, 'project.json'), JSON.stringify(studioServerProjectFixture));
+    const pendingDir = path.join(dir, 'proposals', 'pending');
+    await mkdir(pendingDir, { recursive: true });
+    const handler = createProposeStoryboardHandler({ projectId: 'project_1', projectDir: dir, pendingDir });
+
+    const result = await handler({
+      base_revision: 3,
+      scene_order: ['scene_1'],
+      scenes: {
+        scene_1: {
+          title: 'Sunrise',
+          purpose: '',
+          visualPrompt: '',
+          narration: '',
+          onScreenText: '',
+          mediaKind: 'image',
+          durationSeconds: 5,
+          referenceAssetId: null,
+        },
+      },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('read_storyboard');
+  });
+
+  it('leaves project.json byte-unchanged across every tool call', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'studio-server-'));
+    const projectFile = path.join(dir, 'project.json');
+    await writeFile(projectFile, JSON.stringify(studioServerProjectFixture));
+    const pendingDir = path.join(dir, 'proposals', 'pending');
+    await mkdir(pendingDir, { recursive: true });
+    await mkdir(path.join(dir, 'proposals', 'slots'), { recursive: true });
+    const before = await readFile(projectFile, 'utf8');
+    const env = { projectId: 'project_1', projectDir: dir, pendingDir };
+
+    await createReadStoryboardHandler(env)({});
+    await createProposeStoryboardHandler(env)({
+      base_revision: 7,
+      scene_order: ['scene_1'],
+      scenes: {
+        scene_1: {
+          title: 'x',
+          purpose: '',
+          visualPrompt: '',
+          narration: '',
+          onScreenText: '',
+          mediaKind: 'image',
+          durationSeconds: 5,
+          referenceAssetId: null,
+        },
+      },
+    });
+
+    expect(await readFile(projectFile, 'utf8')).toBe(before);
   });
 });

@@ -63,6 +63,13 @@ const bridge = vi.hoisted(() => ({
   turnCompleted: { on: vi.fn() },
 }));
 
+const briefConversationHarness = vi.hoisted(() => ({
+  state: { kind: 'absent' } as const,
+  errorMessageKey: null,
+  sendFirstMessage: vi.fn(async () => {}),
+  recreate: vi.fn(),
+}));
+
 vi.mock('@/common', () => ({
   ipcBridge: {
     creativeStudio: bridge,
@@ -70,6 +77,9 @@ vi.mock('@/common', () => ({
   },
 }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+vi.mock('@renderer/pages/studio/components/PhaseShell/phases/brief/useBriefConversation', () => ({
+  useBriefConversation: () => briefConversationHarness,
+}));
 
 const ok = <T,>(data: T): StudioCommandResult<T> => ({ ok: true, data });
 const failure = <T,>(): StudioCommandResult<T> => ({

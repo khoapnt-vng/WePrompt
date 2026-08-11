@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   listProjectsProvider: vi.fn(),
   createProjectProvider: vi.fn(),
   getProjectProvider: vi.fn(),
+  getBriefSessionServerProvider: vi.fn(),
   listProposalsProvider: vi.fn(),
   acceptProposalProvider: vi.fn(),
   rejectProposalProvider: vi.fn(),
@@ -54,6 +55,7 @@ vi.mock('@/common', () => ({
       listProjects: { provider: mocks.listProjectsProvider },
       createProject: { provider: mocks.createProjectProvider },
       getProject: { provider: mocks.getProjectProvider },
+      getBriefSessionServer: { provider: mocks.getBriefSessionServerProvider },
       listProposals: { provider: mocks.listProposalsProvider },
       acceptProposal: { provider: mocks.acceptProposalProvider },
       rejectProposal: { provider: mocks.rejectProposalProvider },
@@ -131,6 +133,11 @@ describe('initCreativeStudioBridge', () => {
         listProjects: vi.fn(async () => []),
         createProject: vi.fn(async () => project),
         getProject: vi.fn(async () => project),
+        getBriefSessionServer: vi.fn(async () => ({
+          id: 'studio-brief-project_1',
+          name: 'aionui-creative-studio',
+          transport: { type: 'stdio' as const, command: 'node', args: ['/tmp/builtin-mcp-studio.js'] },
+        })),
         listProposals: vi.fn(async () => []),
         acceptProposal: vi.fn(),
         rejectProposal: vi.fn(),
@@ -179,6 +186,7 @@ describe('initCreativeStudioBridge', () => {
     expect(mocks.listProjectsProvider).toHaveBeenCalledOnce();
     expect(mocks.createProjectProvider).toHaveBeenCalledOnce();
     expect(mocks.getProjectProvider).toHaveBeenCalledOnce();
+    expect(mocks.getBriefSessionServerProvider).toHaveBeenCalledOnce();
     expect(mocks.listProposalsProvider).toHaveBeenCalledOnce();
     expect(mocks.acceptProposalProvider).toHaveBeenCalledOnce();
     expect(mocks.rejectProposalProvider).toHaveBeenCalledOnce();
@@ -799,6 +807,7 @@ describe('initCreativeStudioBridge', () => {
         { name: 'Launch film', brief: '', aspectRatio: '16:9', targetDurationSeconds: 12, resolution: '1080p' },
       ],
       [mocks.getProjectProvider, { projectId: 'project_1' }],
+      [mocks.getBriefSessionServerProvider, { projectId: 'project_1' }],
       [mocks.proposeStoryboardProvider, { projectId: 'project_1', expectedRevision: 1, replaceExisting: false }],
       [
         mocks.updateModelSelectionProvider,
@@ -853,6 +862,7 @@ describe('initCreativeStudioBridge', () => {
     expect(service.listProjects).toHaveBeenCalledOnce();
     expect(service.createProject).toHaveBeenCalledOnce();
     expect(service.getProject).toHaveBeenCalledOnce();
+    expect(service.getBriefSessionServer).toHaveBeenCalledOnce();
     expect(service.proposeStoryboard).toHaveBeenCalledOnce();
     expect(service.updateModelSelection).toHaveBeenCalledOnce();
     expect(service.updateProject).toHaveBeenCalledOnce();

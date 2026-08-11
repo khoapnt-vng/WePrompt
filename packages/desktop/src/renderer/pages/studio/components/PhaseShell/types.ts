@@ -6,6 +6,10 @@
 
 import type {
   StudioAsset,
+  StudioCommandResult,
+  StudioProposal,
+  StudioProposalAcceptance,
+  StudioProposalRequest,
   StudioRendererProject,
   StudioSelectVariationRequest,
 } from '@/common/types/project/creativeStudioTypes';
@@ -23,6 +27,7 @@ export type StudioPhaseAdvisory = {
 
 export type StudioPhaseControllers = {
   project: StudioRendererProject;
+  proposals: StudioProposal[];
   readiness: StudioReadinessSummary;
   editor: UseStoryboardEditorResult;
   models: UseStudioModelsResult;
@@ -34,6 +39,8 @@ export type StudioPhaseControllers = {
   advisory: StudioPhaseAdvisory | null;
   mutationPending: boolean;
   requestTransition: (transition: StudioPhaseTransition) => void;
+  acceptProposal: (request: StudioProposalRequest) => Promise<StudioCommandResult<StudioProposalAcceptance>>;
+  rejectProposal: (request: StudioProposalRequest) => Promise<StudioCommandResult<StudioProposal>>;
   openDraftReview: () => void;
   openSingleGenerationReview: (request: GenerationSingleReviewRequest) => void;
   openBatchGenerationReview: (request: GenerationBatchReviewRequest) => void;
@@ -48,7 +55,15 @@ export type StudioPhaseControllers = {
 
 export type BriefPhaseController = Pick<
   StudioPhaseControllers,
-  'project' | 'readiness' | 'editor' | 'advisory' | 'mutationPending' | 'requestTransition'
+  | 'project'
+  | 'proposals'
+  | 'readiness'
+  | 'editor'
+  | 'advisory'
+  | 'mutationPending'
+  | 'requestTransition'
+  | 'acceptProposal'
+  | 'rejectProposal'
 >;
 
 export type WritePhaseController = Pick<
