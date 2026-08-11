@@ -23,6 +23,7 @@ import type {
 import { requestedMediaKind } from '@/common/types/project/creativeStudioOutputRole';
 
 import {
+  collectSubmittableRoutes,
   GenerationReviewModal,
   routeSupportsScene,
   type GenerationBatchReviewRequest,
@@ -299,6 +300,16 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
   const generationReviewRefreshingRef = useRef(false);
   const suppressedReferenceRequestIdsRef = useRef(new Set<string>());
   const notifiedExcludedReferenceRequestsRef = useRef<string | null>(null);
+  /**
+   * Reference requests this session has already auto-submitted, or tried to.
+   *
+   * The effect below re-runs whenever `studioJobs` changes, which includes every job poll, so
+   * without this guard a queued request could be submitted repeatedly — and this is a paid path
+   * with no spend ceiling behind it. Ids are added *before* the submit resolves and are never
+   * removed, including on failure: a failed submit spends nothing, but retrying on every poll
+   * could.
+   */
+  const autoSubmittedReferenceRequestIdsRef = useRef(new Set<string>());
   const variationPendingRef = useRef(false);
   const referenceImportSceneIdRef = useRef<string | null>(null);
   const pendingTransitionRef = useRef<StudioPhaseTransition | null>(null);
@@ -416,18 +427,48 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
     setReferenceNotice((current) => (current?.kind === 'excluded' ? null : current));
     studioJobs.clearIssue();
     setGenerationReviewIssueMessageKey(null);
-    setGenerationReview({
-      mode: 'batch',
-      scenes: review.scenes,
-      excludedScenes: review.excludedScenes,
-      catalogVersion: studioModels.catalog.catalogVersion,
-      availableRoutes,
-      projectId: project.id,
-      projectRevision: project.revision,
-      outputRole: 'reference',
-      referenceRequestIds: review.referenceRequestIds,
-      referenceRequests: requests.map(({ id, sceneId }) => ({ id, sceneId })),
-    });
+    // The Director decides when to make an image, so a request it queued no longer waits for a
+    // confirmation step. Routes are still resolved by the modal's own rule via
+    // collectSubmittableRoutes, which returns null unless *every* scene has a valid matching
+    // route — so a partial or unroutable batch falls back to the modal rather than spending on a
+    // subset the modal itself would have refused.
+    const submission = collectSubmittableRoutes(review.scenes);
+    if (submission === null) {
+      setGenerationReview({
+        mode: 'batch',
+        scenes: review.scenes,
+        excludedScenes: review.excludedScenes,
+        catalogVersion: studioModels.catalog.catalogVersion,
+        availableRoutes,
+        projectId: project.id,
+        projectRevision: project.revision,
+        outputRole: 'reference',
+        referenceRequestIds: review.referenceRequestIds,
+        referenceRequests: requests.map(({ id, sceneId }) => ({ id, sceneId })),
+      });
+      return;
+    }
+
+    const requestIds = review.referenceRequestIds;
+    if (requestIds.some((requestId) => autoSubmittedReferenceRequestIdsRef.current.has(requestId))) return;
+    requestIds.forEach((requestId) => autoSubmittedReferenceRequestIdsRef.current.add(requestId));
+
+    const catalogVersion = studioModels.catalog.catalogVersion;
+    const projectRevision = project.revision;
+    void (async () => {
+      const submitted = await studioJobs.submitScenes({
+        mode: 'batch',
+        sceneIds: submission.sceneIds,
+        routes: submission.routes,
+        catalogVersion,
+        expectedRevision: projectRevision,
+        outputRole: 'reference',
+      });
+      if (!submitted) return;
+      const dismissed = requestIds.length === 0 || (await studioJobs.dismissReferenceRequests(requestIds));
+      requestIds.forEach((requestId) => suppressedReferenceRequestIdsRef.current.add(requestId));
+      if (!dismissed) setReferenceNotice({ kind: 'dismiss_failed' });
+    })();
   }, [generationBlocked, generationReview, project, readiness, studioJobs, studioModels.catalog]);
 
   const handleDraftStoryboard = useCallback(

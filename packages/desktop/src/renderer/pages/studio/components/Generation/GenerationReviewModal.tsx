@@ -47,6 +47,29 @@ export type GenerationReviewConfirmation = {
   routes: StudioSceneGenerationChoice[];
 };
 
+/**
+ * The submission the modal's confirm button would produce, or `null` when it would be disabled.
+ *
+ * Exported so the Director's auto-submitted image requests go through the *same* validity rule as
+ * a human pressing Confirm. Both paths spend money, so a second implementation that drifted from
+ * this one would submit routes the modal refuses. Returns `null` unless every scene resolves to a
+ * valid, matching route — a partial batch is never submitted silently.
+ */
+export const collectSubmittableRoutes = (
+  scenes: readonly GenerationReviewScene[]
+): GenerationReviewConfirmation | null => {
+  if (scenes.length === 0) return null;
+  const validRoutes = scenes
+    .filter((scene) => scene.route.status === 'valid' && routeMatchesScene(scene))
+    .map((scene) => scene.route.snapshot)
+    .filter((route): route is GenerationReviewRouteSnapshot => route !== null);
+  if (validRoutes.length !== scenes.length) return null;
+  return {
+    sceneIds: scenes.map((scene) => scene.id),
+    routes: validRoutes.map(({ sceneId, choiceId, kind }) => ({ sceneId, choiceId, kind })),
+  };
+};
+
 export type GenerationReviewExcludedScene = {
   id: string;
   title: string;
