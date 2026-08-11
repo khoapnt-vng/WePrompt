@@ -134,7 +134,7 @@ describe('BriefProposalCard', () => {
     expect(screen.getByText('Finale')).toBeInTheDocument();
   });
 
-  it('accept invokes acceptProposal and announces success', async () => {
+  it('accept invokes acceptProposal and removes the resolved card', async () => {
     render(
       <BriefProposalCard
         project={project()}
@@ -151,7 +151,7 @@ describe('BriefProposalCard', () => {
     await waitFor(() =>
       expect(acceptProposal).toHaveBeenCalledWith({ projectId: 'project-1', proposalId: 'proposal-1' })
     );
-    expect(screen.getByRole('status')).toHaveTextContent('conversation.creativeStudio.brief.proposalAccepted');
+    expect(screen.queryByText('conversation.creativeStudio.brief.proposalTitle')).not.toBeInTheDocument();
   });
 
   it('stale accept fails closed and offers re-propose', async () => {
@@ -181,7 +181,7 @@ describe('BriefProposalCard', () => {
     expect(repropose).toHaveBeenCalledOnce();
   });
 
-  it('reject invokes rejectProposal and reflects the rejected state', async () => {
+  it('reject invokes rejectProposal and removes the resolved card', async () => {
     render(
       <BriefProposalCard
         project={project()}
@@ -198,7 +198,7 @@ describe('BriefProposalCard', () => {
     await waitFor(() =>
       expect(rejectProposal).toHaveBeenCalledWith({ projectId: 'project-1', proposalId: 'proposal-1' })
     );
-    expect(screen.getByRole('status')).toHaveTextContent('conversation.creativeStudio.brief.proposalRejected');
+    expect(screen.queryByText('conversation.creativeStudio.brief.proposalTitle')).not.toBeInTheDocument();
   });
 
   it('flushes unsaved drafts first and refuses acceptance when the flush fails', async () => {

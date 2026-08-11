@@ -8,7 +8,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { StudioAsset, StudioRendererProject } from '@/common/types/project/creativeStudioTypes';
+import type { StudioAsset, StudioProposal, StudioRendererProject } from '@/common/types/project/creativeStudioTypes';
 import { BriefPhase } from '@renderer/pages/studio/components/PhaseShell/phases/brief';
 import type { BriefPhaseController } from '@renderer/pages/studio/components/PhaseShell/types';
 import type { UseStoryboardEditorResult } from '@renderer/pages/studio/hooks/useStoryboardEditor';
@@ -140,6 +140,17 @@ const controller = (overrides: Partial<BriefPhaseController> = {}): BriefPhaseCo
   ...overrides,
 });
 
+const proposal = (id: string, status: StudioProposal['status']): StudioProposal => ({
+  schemaVersion: 1,
+  id,
+  projectId: 'project-1',
+  status,
+  baseRevision: 2,
+  payload: { kind: 'replace_storyboard', sceneOrder: [], scenes: {} },
+  createdAt: '2026-08-11T01:00:00.000Z',
+  decidedAt: status === 'pending' ? null : '2026-08-11T02:00:00.000Z',
+});
+
 describe('BriefPhase', () => {
   beforeEach(() => {
     briefConversationHarness.result.state = { kind: 'absent' };
@@ -194,6 +205,23 @@ describe('BriefPhase', () => {
     expect(
       screen.getByRole('region', { name: 'conversation.creativeStudio.brief.conversationTitle' })
     ).toBeInTheDocument();
+  });
+
+  it('renders a full proposal card only for pending proposals', () => {
+    render(
+      <BriefPhase
+        controller={controller({
+          proposals: [
+            proposal('pending', 'pending'),
+            proposal('accepted', 'accepted'),
+            proposal('rejected', 'rejected'),
+            proposal('expired', 'expired'),
+          ],
+        })}
+      />
+    );
+
+    expect(screen.getAllByText('conversation.creativeStudio.brief.proposalTitle')).toHaveLength(1);
   });
 
   it('shows the dangling notice and Start fresh action', () => {

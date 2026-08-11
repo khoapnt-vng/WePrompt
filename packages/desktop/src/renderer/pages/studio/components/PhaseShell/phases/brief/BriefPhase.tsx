@@ -64,6 +64,7 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
     saving: 'conversation.creativeStudio.phase.brief.saving',
     failed: 'conversation.creativeStudio.inspector.saveFailed',
   } as const;
+  const pendingProposals = controller.proposals.filter((proposal) => proposal.status === 'pending');
 
   const flushIfValid = (): void => {
     if (!hasValidationError) void editor.flushProjectDraft();
@@ -206,9 +207,9 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
         </div>
       </div>
 
-      {controller.proposals.length > 0 && (
+      {pendingProposals.length > 0 && (
         <div className={styles.proposals}>
-          {controller.proposals.map((proposal) => (
+          {pendingProposals.map((proposal) => (
             <BriefProposalCard
               key={proposal.id}
               project={project}
