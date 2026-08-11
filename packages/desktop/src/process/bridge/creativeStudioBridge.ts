@@ -296,6 +296,9 @@ export function initCreativeStudioBridge(dependencies: CreativeStudioBridgeDepen
   ipcBridge.creativeStudio.getProject.provider((input) =>
     runCommand(() => dependencies.getService().getProject(input.projectId))
   );
+  ipcBridge.creativeStudio.getBriefSessionServer.provider((input) =>
+    runCommand(() => dependencies.getService().getBriefSessionServer(input))
+  );
   ipcBridge.creativeStudio.listProposals.provider((input) =>
     runCommand(() => dependencies.getService().listProposals(input))
   );

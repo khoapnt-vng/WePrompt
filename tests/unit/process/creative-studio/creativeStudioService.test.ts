@@ -45,6 +45,7 @@ import {
   createReadStoryboardHandler,
   parseStudioServerEnv,
 } from '@process/resources/builtinMcp/studioServer';
+import { BUILTIN_STUDIO_NAME } from '@process/resources/builtinMcp/constants';
 
 const makeInput = (overrides: Partial<CreateStudioProjectInput> = {}): CreateStudioProjectInput => ({
   name: 'Launch film',
@@ -327,6 +328,33 @@ describe('CreativeStudioService', () => {
     expect(bound.briefConversationId).toBe('conversation_brief');
     await expect(service.getProject(project.id)).resolves.toMatchObject({
       briefConversationId: 'conversation_brief',
+    });
+  });
+
+  it('builds a project-scoped Brief session-server descriptor', async () => {
+    const project = await service.createProject(makeInput());
+    const scriptPath = '/tmp/builtin-mcp-studio.js';
+    const descriptorService = createCreativeStudioService({
+      store,
+      onProjectUpdated,
+      storyboardPlanner: makePlanner(),
+      getStudioServerScriptPath: () => scriptPath,
+    });
+    const paths = await store.resolveProposalPaths(project.id);
+
+    await expect(descriptorService.getBriefSessionServer({ projectId: project.id })).resolves.toEqual({
+      id: `studio-brief-${project.id}`,
+      name: BUILTIN_STUDIO_NAME,
+      transport: {
+        type: 'stdio',
+        command: 'node',
+        args: [scriptPath],
+        env: {
+          [STUDIO_ENV.projectId]: project.id,
+          [STUDIO_ENV.projectDir]: paths.projectDir,
+          [STUDIO_ENV.pendingDir]: paths.pendingDir,
+        },
+      },
     });
   });
 

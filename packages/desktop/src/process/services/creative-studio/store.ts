@@ -243,6 +243,7 @@ export type CreativeStudioStore = {
   rejectProposal(projectId: string, proposalId: string): Promise<StudioProposal>;
   reapAbandonedProposals(): Promise<void>;
   watchProposals(listener: (projectId: string, proposalId: string) => void): Promise<() => Promise<void>>;
+  resolveProposalPaths(projectId: string): Promise<{ projectDir: string; pendingDir: string }>;
   /** Main-process-only canonical project path; never return this through IPC. */
   getVerifiedProjectDirectory(projectId: string): Promise<string | null>;
 };
@@ -1776,6 +1777,25 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     async getVerifiedProjectDirectory(projectId: string): Promise<string | null> {
       if (!isSafeId(projectId)) return null;
       return projectDirectory(await canonicalRoot(), projectId, false);
+    },
+
+    async resolveProposalPaths(projectId: string): Promise<{ projectDir: string; pendingDir: string }> {
+      if (!isSafeId(projectId)) {
+        throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio project id');
+      }
+      return enqueue(projectId, async () => {
+        const root = await canonicalRoot();
+        const project = await projectDirectory(root, projectId, false);
+        if (project === null) throw new CreativeStudioStoreError('not_found', 'Studio project not found');
+        const directories = await proposalDirectories(root, projectId, true);
+        if (directories === null) {
+          throw new CreativeStudioStoreError(
+            'storage_error',
+            'Creative Studio proposal storage is unavailable'
+          );
+        }
+        return { projectDir: project, pendingDir: directories.pending };
+      });
     },
 
     async recordProposal(input: StudioRecordProposalInput): Promise<StudioProposal> {

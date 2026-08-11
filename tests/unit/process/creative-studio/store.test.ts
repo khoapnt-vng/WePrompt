@@ -15,7 +15,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
@@ -273,6 +273,24 @@ describe('creative studio project store', () => {
   });
 
   describe('proposal ledger', () => {
+    it('resolves verified project and pending paths while creating every proposal directory', async () => {
+      const project = await store.createProject(makeInput());
+
+      const paths = await store.resolveProposalPaths(project.id);
+      const canonicalRoot = await realpath(rootDir);
+
+      expect(paths).toEqual({
+        projectDir: path.join(canonicalRoot, project.id),
+        pendingDir: path.join(canonicalRoot, project.id, 'proposals', 'pending'),
+      });
+      expect(existsSync(path.join(rootDir, project.id, 'proposals', 'decisions'))).toBe(true);
+      expect(existsSync(path.join(rootDir, project.id, 'proposals', 'slots'))).toBe(true);
+    });
+
+    it('rejects proposal-path resolution for an unknown project', async () => {
+      await expect(store.resolveProposalPaths('project_missing')).rejects.toMatchObject({ code: 'not_found' });
+    });
+
     it('records one immutable project-scoped proposal and reloads it after restart', async () => {
       const project = await store.createProject(makeInput());
       const recorded = await store.recordProposal({

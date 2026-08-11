@@ -6,6 +6,8 @@
 
 /** Shared, renderer-safe Creative Studio domain and desktop contract types. */
 
+import type { ISessionMcpServer } from '@/common/config/storage';
+
 export type StudioMediaKind = 'image' | 'video';
 
 export type StudioAspectRatio = '16:9' | '9:16' | '1:1' | '4:3' | '3:4';
@@ -688,6 +690,7 @@ export type StudioDesktopApi = {
   listProjects(): Promise<StudioCommandResult<StudioProjectSummary[]>>;
   createProject(input: CreateStudioProjectInput): Promise<StudioCommandResult<StudioRendererProject>>;
   getProject(input: StudioProjectRequest): Promise<StudioCommandResult<StudioRendererProject | null>>;
+  getBriefSessionServer(input: StudioProjectRequest): Promise<StudioCommandResult<ISessionMcpServer>>;
   proposeStoryboard(input: ProposeStudioStoryboardInput): Promise<StudioCommandResult<StudioRendererProject>>;
   updateModelSelection(input: StudioUpdateModelSelectionRequest): Promise<StudioCommandResult<StudioRendererProject>>;
   updateProject(input: StudioUpdateProjectRequest): Promise<StudioCommandResult<StudioRendererProject>>;

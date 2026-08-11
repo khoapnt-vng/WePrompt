@@ -59,7 +59,10 @@ import type {
   StudioTextModelRef,
   StudioUpdateModelSelectionRequest,
 } from '@/common/types/project/creativeStudioTypes';
+import type { ISessionMcpServer } from '@/common/config/storage';
+import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
 import { isCanonicalStudioGeneratedTake } from '@/common/types/project/creativeStudioCanonicalTake';
+import { BUILTIN_STUDIO_NAME } from '@process/resources/builtinMcp/constants';
 import {
   CreativeStudioStoreError,
   reconcilePersistedStudioCuts,
@@ -147,6 +150,7 @@ export type CreativeStudioService = {
   createProject(input: CreateStudioProjectInput): Promise<StudioRendererProject>;
   getProject(projectId: string): Promise<StudioRendererProject | null>;
   getLatestRender(input: StudioProjectRequest): Promise<StudioLatestRender | null>;
+  getBriefSessionServer(input: StudioProjectRequest): Promise<ISessionMcpServer>;
   listProposals(input: StudioProjectRequest): Promise<StudioProposal[]>;
   acceptProposal(input: StudioProposalRequest): Promise<StudioProposalAcceptance>;
   rejectProposal(input: StudioProposalRequest): Promise<StudioProposal>;
@@ -191,6 +195,7 @@ export type CreativeStudioServiceDeps = {
   storyboardPlanner: StudioStoryboardPlanner;
   createSceneId?: () => string;
   createConnectionId?: () => string;
+  getStudioServerScriptPath?: () => string;
   providerResolver?: StudioProviderResolver;
   validateConnection?: (input: StudioInternalConnectionRequest) => Promise<StudioConnectionBinding>;
   listProviders?: () => Promise<IProvider[]>;
@@ -1090,6 +1095,26 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
       assertSafeId(projectId, 'project id');
       const project = await deps.store.getProject(projectId);
       return project === null ? null : toRendererProject(project);
+    },
+
+    async getBriefSessionServer(input: StudioProjectRequest): Promise<ISessionMcpServer> {
+      assertSafeId(input.projectId, 'project id');
+      if (!deps.getStudioServerScriptPath) throw new Error('Creative Studio MCP script path is unavailable');
+      const paths = await deps.store.resolveProposalPaths(input.projectId);
+      return {
+        id: `studio-brief-${input.projectId}`,
+        name: BUILTIN_STUDIO_NAME,
+        transport: {
+          type: 'stdio',
+          command: 'node',
+          args: [deps.getStudioServerScriptPath()],
+          env: {
+            [STUDIO_ENV.projectId]: input.projectId,
+            [STUDIO_ENV.projectDir]: paths.projectDir,
+            [STUDIO_ENV.pendingDir]: paths.pendingDir,
+          },
+        },
+      };
     },
 
     async listProposals(input: StudioProjectRequest): Promise<StudioProposal[]> {

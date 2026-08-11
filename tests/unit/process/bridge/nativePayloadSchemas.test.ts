@@ -223,6 +223,7 @@ const VALID_PAYLOADS = {
     resolution: '1080p',
   },
   'creative-studio.get-project': { projectId: 'project_1' },
+  'creative-studio.get-brief-session-server': { projectId: 'project_1' },
   'creative-studio.list-proposals': { projectId: 'project_1' },
   'creative-studio.accept-proposal': { projectId: 'project_1', proposalId: 'proposal_1' },
   'creative-studio.reject-proposal': { projectId: 'project_1', proposalId: 'proposal_1' },
