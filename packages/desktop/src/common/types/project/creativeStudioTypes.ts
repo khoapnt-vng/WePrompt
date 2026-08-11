@@ -79,6 +79,12 @@ export type StudioAsset = {
   height?: number;
   durationSeconds?: number;
   createdAt: string;
+  /**
+   * The scene's visual prompt at the moment this asset was generated, trimmed.
+   * Absent means unknown provenance — an asset written before this field existed,
+   * or one that did not come from a prompt (an import). Absent is NOT stale.
+   */
+  sourceVisualPrompt?: string;
 };
 
 export type StudioJobErrorCode =

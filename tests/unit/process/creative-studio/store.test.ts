@@ -997,6 +997,80 @@ describe('creative studio project store', () => {
         })
       ).rejects.toMatchObject({ code: 'invalid_payload' });
     });
+
+    it('accepts an asset carrying the visual prompt it was generated from', async () => {
+      const project = await store.createProject(makeInput());
+
+      const persisted = await store.updateProject(project.id, (current) => {
+        const next = addScene(current, 'scene_1');
+        next.assets.reference_1 = {
+          id: 'reference_1',
+          projectId: next.id,
+          sceneId: 'scene_1',
+          mediaKind: 'image',
+          mimeType: 'image/png',
+          managedAsset: { collection: 'references', fileName: 'reference_1.png' },
+          byteSize: 1,
+          sha256: '4'.repeat(64),
+          createdAt: next.createdAt,
+          sourceVisualPrompt: 'Aerial, drifting. Smoke columns.',
+        };
+        next.scenes.scene_1.assetIds = ['reference_1'];
+        return next;
+      });
+
+      expect(persisted.assets.reference_1.sourceVisualPrompt).toBe('Aerial, drifting. Smoke columns.');
+      expect(await store.getProject(project.id)).toEqual(persisted);
+    });
+
+    it('accepts an asset with no provenance — every pre-existing asset lacks it', async () => {
+      const project = await store.createProject(makeInput());
+
+      const persisted = await store.updateProject(project.id, (current) => {
+        const next = addScene(current, 'scene_1');
+        next.assets.reference_1 = {
+          id: 'reference_1',
+          projectId: next.id,
+          sceneId: 'scene_1',
+          mediaKind: 'image',
+          mimeType: 'image/png',
+          managedAsset: { collection: 'references', fileName: 'reference_1.png' },
+          byteSize: 1,
+          sha256: '5'.repeat(64),
+          createdAt: next.createdAt,
+        };
+        next.scenes.scene_1.assetIds = ['reference_1'];
+        expect('sourceVisualPrompt' in next.assets.reference_1).toBe(false);
+        return next;
+      });
+
+      expect('sourceVisualPrompt' in persisted.assets.reference_1).toBe(false);
+      expect(await store.getProject(project.id)).toEqual(persisted);
+    });
+
+    it('rejects an asset whose provenance is not a string', async () => {
+      const project = await store.createProject(makeInput());
+
+      await expect(
+        store.updateProject(project.id, (current) => {
+          const next = addScene(current, 'scene_1');
+          next.assets.reference_1 = {
+            id: 'reference_1',
+            projectId: next.id,
+            sceneId: 'scene_1',
+            mediaKind: 'image',
+            mimeType: 'image/png',
+            managedAsset: { collection: 'references', fileName: 'reference_1.png' },
+            byteSize: 1,
+            sha256: '6'.repeat(64),
+            createdAt: next.createdAt,
+            sourceVisualPrompt: 42 as never,
+          };
+          next.scenes.scene_1.assetIds = ['reference_1'];
+          return next;
+        })
+      ).rejects.toMatchObject({ code: 'invalid_payload' });
+    });
   });
 
   it('returns summaries newest-first instead of relying on filesystem iteration order', async () => {

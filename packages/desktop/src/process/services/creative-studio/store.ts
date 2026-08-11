@@ -103,6 +103,7 @@ const ASSET_KEYS = new Set([
   'height',
   'durationSeconds',
   'createdAt',
+  'sourceVisualPrompt',
 ]);
 const MANAGED_ASSET_KEYS = new Set(['collection', 'fileName']);
 const CUT_KEYS = new Set(['id', 'name', 'orderMode', 'clipOrder', 'clips']);
@@ -581,7 +582,8 @@ const validateAsset = (
     (value.height === undefined || isIntegerInRange(value.height, 1, Number.MAX_SAFE_INTEGER)) &&
     (value.durationSeconds === undefined ||
       (isFiniteInRange(value.durationSeconds, 0, Number.MAX_SAFE_INTEGER) && value.durationSeconds > 0)) &&
-    isNonEmptyString(value.createdAt)
+    isNonEmptyString(value.createdAt) &&
+    (value.sourceVisualPrompt === undefined || isString(value.sourceVisualPrompt))
   );
 };
 
