@@ -220,7 +220,8 @@
     "codes": {
       "TEAM_ASSISTANT_ID_REQUIRED": "建立團隊前請先選擇助手。",
       "TEAM_ASSISTANT_NOT_FOUND": "助手 {{assistantId}} 已不可用。請重新整理助手列表後再選擇。",
-      "TEAM_ASSISTANT_FIELD_UNSUPPORTED": "請使用 assistant_id，不要再傳 {{field}}。"
+      "TEAM_ASSISTANT_FIELD_UNSUPPORTED": "請使用 assistant_id，不要再傳 {{field}}。",
+      "TEAM_MEMBER_MODEL_UNRESOLVED": "此團隊成員沒有可用的模型。請在設定中新增或啟用模型供應商，然後再試一次。"
     }
   },
   "agentError": {

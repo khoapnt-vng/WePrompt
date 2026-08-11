@@ -221,7 +221,8 @@
     "codes": {
       "TEAM_ASSISTANT_ID_REQUIRED": "Please select an assistant before creating the team.",
       "TEAM_ASSISTANT_NOT_FOUND": "Assistant {{assistantId}} is no longer available. Refresh the assistant list and choose another one.",
-      "TEAM_ASSISTANT_FIELD_UNSUPPORTED": "Use assistant_id instead of {{field}}."
+      "TEAM_ASSISTANT_FIELD_UNSUPPORTED": "Use assistant_id instead of {{field}}.",
+      "TEAM_MEMBER_MODEL_UNRESOLVED": "No model is available for this team member. Add or enable a model provider in Settings, then try again."
     }
   },
   "agentError": {

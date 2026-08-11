@@ -220,7 +220,8 @@
     "codes": {
       "TEAM_ASSISTANT_ID_REQUIRED": "Перед созданием команды выберите ассистента.",
       "TEAM_ASSISTANT_NOT_FOUND": "Ассистент {{assistantId}} больше недоступен. Обновите список ассистентов и выберите другого.",
-      "TEAM_ASSISTANT_FIELD_UNSUPPORTED": "Используйте assistant_id вместо {{field}}."
+      "TEAM_ASSISTANT_FIELD_UNSUPPORTED": "Используйте assistant_id вместо {{field}}.",
+      "TEAM_MEMBER_MODEL_UNRESOLVED": "Для этого участника команды нет доступной модели. Добавьте или включите поставщика моделей в настройках и повторите попытку."
     }
   },
   "agentError": {
