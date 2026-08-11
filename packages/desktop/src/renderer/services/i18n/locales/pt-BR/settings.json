@@ -709,6 +709,7 @@
   "mcpJsonBareServerError": "Envolva a configuração do servidor MCP em um objeto \"mcpServers\" no nível superior ou adicione um \"name\" em um item do array.",
   "mcpJsonUrlRequiredError": "Servidores MCP HTTP e SSE exigem um \"url\" não vazio.",
   "mcpJsonStdioCommandRequiredError": "Servidores MCP stdio exigem um \"command\" não vazio.",
+  "mcpJsonReservedNameError": "Esse nome é reservado pelo WePrompt e não pode ser usado em um servidor MCP. Renomeie o servidor e tente novamente.",
   "mcpTestConnection": "Verificar Disponibilidade do MCP",
   "mcpTestConnectionSuccess": "Teste de conexão bem-sucedido",
   "mcpConnected": "Conectado",

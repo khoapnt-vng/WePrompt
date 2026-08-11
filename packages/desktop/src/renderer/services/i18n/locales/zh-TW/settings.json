@@ -709,6 +709,7 @@
   "mcpJsonBareServerError": "請將 MCP 服務配置放在頂層 \"mcpServers\" 物件中，或在陣列項目中加入 \"name\"。",
   "mcpJsonUrlRequiredError": "HTTP 和 SSE MCP 服務必須提供非空 \"url\"。",
   "mcpJsonStdioCommandRequiredError": "Stdio MCP 服務必須提供非空 \"command\"。",
+  "mcpJsonReservedNameError": "該名稱由 WePrompt 保留，不能用於 MCP 伺服器。請重新命名後再試。",
   "mcpTestConnection": "檢測MCP可用狀態",
   "mcpTestConnectionSuccess": "連線測試成功",
   "mcpConnected": "可用",

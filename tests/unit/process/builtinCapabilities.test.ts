@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { IMcpServerTransportStdio } from '@/common/config/storage';
-import { BUILTIN_IDP_NAME, BUILTIN_VISION_NAME } from '@/common/config/storage';
+import { BUILTIN_IDP_NAME, BUILTIN_IMAGE_GEN_NAME, BUILTIN_VISION_NAME } from '@/common/config/storage';
 import {
   BUILTIN_CAPABILITIES,
   BUILTIN_MEMORY_ID,
@@ -18,6 +18,10 @@ import {
   isIdpBuiltinServer,
   isVisionBuiltinServer,
   mergeCommodityMcpServerIds,
+  isReservedMcpServerName,
+  COMMODITY_BUILTIN_SERVER_NAMES,
+  BUILTIN_STUDIO_NAME,
+  TEAM_MCP_SERVER_NAME,
 } from '@/common/config/builtinCapabilities';
 
 const stdio = (over: Partial<IMcpServerTransportStdio> = {}): IMcpServerTransportStdio => ({
@@ -152,5 +156,61 @@ describe('mergeCommodityMcpServerIds', () => {
 
     const disabled = [srv('vision-1', BUILTIN_VISION_NAME, false, true)];
     expect(mergeCommodityMcpServerIds([], disabled)).toEqual([]);
+  });
+});
+
+describe('isReservedMcpServerName', () => {
+  it('reserves the auto-approved team server name', () => {
+    // AionCore auto-approves this name with AllowAlways, so a user server claiming it
+    // would run arbitrary commands without ever prompting.
+    expect(isReservedMcpServerName(TEAM_MCP_SERVER_NAME)).toBe(true);
+  });
+
+  it('reserves the Creative Studio server name', () => {
+    expect(isReservedMcpServerName(BUILTIN_STUDIO_NAME)).toBe(true);
+  });
+
+  it.each([BUILTIN_IMAGE_GEN_NAME, BUILTIN_IDP_NAME, BUILTIN_VISION_NAME, BUILTIN_CHROME_DEVTOOLS_NAME])(
+    'reserves the built-in server name %s',
+    (name) => {
+      expect(isReservedMcpServerName(name)).toBe(true);
+    }
+  );
+
+  it('ignores surrounding whitespace so a padded name cannot slip through', () => {
+    expect(isReservedMcpServerName(`  ${TEAM_MCP_SERVER_NAME}  `)).toBe(true);
+  });
+
+  it('matches case-insensitively so a re-cased impersonation is still refused', () => {
+    expect(isReservedMcpServerName('AionUI-Team')).toBe(true);
+  });
+
+  it('allows an ordinary user server name', () => {
+    expect(isReservedMcpServerName('my-postgres')).toBe(false);
+  });
+
+  it('allows a name that merely contains a reserved name as a substring', () => {
+    // Substring matching here would lock users out of legitimate names.
+    expect(isReservedMcpServerName('aionui-team-extras')).toBe(false);
+  });
+
+  it('allows an empty name, leaving that to the existing format validation', () => {
+    expect(isReservedMcpServerName('   ')).toBe(false);
+  });
+});
+
+describe('builtin MCP name parity', () => {
+  it('keeps the renderer-safe Studio name identical to the process-side constant', async () => {
+    // constants.ts is deliberately dependency-free so built-in MCP servers can boot as
+    // standalone stdio processes, so the renderer cannot import it and the name is mirrored.
+    // This is the net that fails if the two copies ever drift.
+    const processConstants = await import('@process/resources/builtinMcp/constants');
+    expect(BUILTIN_STUDIO_NAME).toBe(processConstants.BUILTIN_STUDIO_NAME);
+  });
+
+  it('reserves every commodity built-in server name', () => {
+    for (const name of COMMODITY_BUILTIN_SERVER_NAMES) {
+      expect(isReservedMcpServerName(name)).toBe(true);
+    }
   });
 });

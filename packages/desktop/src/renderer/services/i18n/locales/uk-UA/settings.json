@@ -706,6 +706,7 @@
   "mcpJsonBareServerError": "Оберніть конфігурацію MCP-сервера в об'єкт верхнього рівня \"mcpServers\" або додайте \"name\" в елемент масиву.",
   "mcpJsonUrlRequiredError": "Для MCP-серверів HTTP і SSE потрібен непорожній \"url\".",
   "mcpJsonStdioCommandRequiredError": "Для MCP-серверів Stdio потрібен непорожній \"command\".",
+  "mcpJsonReservedNameError": "Це ім'я зарезервовано WePrompt і не може використовуватися для MCP-сервера. Перейменуйте сервер і спробуйте ще раз.",
   "mcpTestConnection": "Перевірити доступність MCP",
   "mcpTestConnectionSuccess": "Тест підключення успішний",
   "mcpConnected": "Доступно",
