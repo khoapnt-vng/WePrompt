@@ -1123,7 +1123,6 @@
       "notFound": "このクリエイティブスタジオのプロジェクトは見つかりませんでした。",
       "title": "プロジェクト概要",
       "brief": "概要",
-      "aspectRatio": "アスペクト比",
       "targetDuration": "目標の長さ",
       "resolution": "解像度",
       "sceneCount": "シーン数",
