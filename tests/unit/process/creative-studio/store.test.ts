@@ -42,10 +42,8 @@ import type {
   StudioRendererProject,
   StudioRouteCatalog,
 } from '@/common/types/project/creativeStudioTypes';
-import {
-  StudioProposalWriteError,
-  writeProposalRecord,
-} from '@process/resources/builtinMcp/studioProposalWriter';
+import type { StudioProposalWriteError } from '@process/resources/builtinMcp/studioProposalWriter';
+import { writeProposalRecord } from '@process/resources/builtinMcp/studioProposalWriter';
 import { createCreativeStudioStore, type CreativeStudioStore } from '@process/services/creative-studio/store';
 
 const makeInput = (overrides: Partial<CreateStudioProjectInput> = {}): CreateStudioProjectInput => ({
@@ -529,9 +527,9 @@ describe('creative studio project store', () => {
           payload: subprocessProposalPayload,
         });
 
-        await expect(
-          store.acceptProposal(project.id, staleRecord.id, (current) => current)
-        ).rejects.toMatchObject({ code: 'stale_project' });
+        await expect(store.acceptProposal(project.id, staleRecord.id, (current) => current)).rejects.toMatchObject({
+          code: 'stale_project',
+        });
       });
 
       it('ignores a malformed record without failing the listing', async () => {

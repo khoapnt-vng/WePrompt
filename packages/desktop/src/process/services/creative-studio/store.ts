@@ -1789,10 +1789,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
         if (project === null) throw new CreativeStudioStoreError('not_found', 'Studio project not found');
         const directories = await proposalDirectories(root, projectId, true);
         if (directories === null) {
-          throw new CreativeStudioStoreError(
-            'storage_error',
-            'Creative Studio proposal storage is unavailable'
-          );
+          throw new CreativeStudioStoreError('storage_error', 'Creative Studio proposal storage is unavailable');
         }
         return { projectDir: project, pendingDir: directories.pending };
       });

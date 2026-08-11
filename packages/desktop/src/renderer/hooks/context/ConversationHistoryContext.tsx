@@ -24,8 +24,7 @@ export const ConversationHistoryProvider: React.FC<React.PropsWithChildren> = ({
   const visibleConversations = useMemo(
     () =>
       conversationListSync.conversations.filter(
-        (conversation) =>
-          !(conversation.extra as { studio_project_id?: string } | undefined)?.studio_project_id
+        (conversation) => !(conversation.extra as { studio_project_id?: string } | undefined)?.studio_project_id
       ),
     [conversationListSync.conversations]
   );

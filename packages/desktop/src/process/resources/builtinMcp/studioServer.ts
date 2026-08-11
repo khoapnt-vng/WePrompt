@@ -16,10 +16,7 @@ import { z } from 'zod';
 import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
 import type { StudioEditableScene, StudioProject } from '@/common/types/project/creativeStudioTypes';
 import { BUILTIN_STUDIO_NAME } from '@process/resources/builtinMcp/constants';
-import {
-  StudioProposalWriteError,
-  writeProposalRecord,
-} from '@process/resources/builtinMcp/studioProposalWriter';
+import { StudioProposalWriteError, writeProposalRecord } from '@process/resources/builtinMcp/studioProposalWriter';
 
 export type StudioServerEnv = {
   projectId: string;
@@ -155,7 +152,9 @@ export function createProposeStoryboardHandler(
       };
     } catch (error) {
       if (error instanceof StudioProposalWriteError) return errorResult(error.message);
-      return errorResult(`Creative Studio proposal could not be recorded: ${error instanceof Error ? error.message : String(error)}`);
+      return errorResult(
+        `Creative Studio proposal could not be recorded: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   };
 }

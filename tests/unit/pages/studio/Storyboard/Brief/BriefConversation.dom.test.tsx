@@ -70,10 +70,7 @@ const descriptor: ISessionMcpServer = {
   transport: { type: 'stdio', command: 'node', args: ['/tmp/builtin-mcp-studio.js'] },
 };
 
-const conversation = (
-  extra: TChatConversation['extra'],
-  id = 'conversation_brief'
-): TChatConversation =>
+const conversation = (extra: TChatConversation['extra'], id = 'conversation_brief'): TChatConversation =>
   ({
     id,
     name: 'Coffee teaser',
@@ -174,12 +171,13 @@ describe('useBriefConversation', () => {
     );
     const rendered = renderHook(() => useBriefConversation(project()));
 
-    await expect(
-      act(() => rendered.result.current.sendFirstMessage('Draft it'))
-    ).rejects.toThrow('Curated MCP snapshot drifted after creation');
+    await expect(act(() => rendered.result.current.sendFirstMessage('Draft it'))).rejects.toThrow(
+      'Curated MCP snapshot drifted after creation'
+    );
 
     const persistedSelection = harness.createInvoke.mock.calls[0][0].extra.selected_session_mcp_servers;
-    for (const id of AUTO_ATTACH_IDS) expect(persistedSelection.map((server: ISessionMcpServer) => server.id)).not.toContain(id);
+    for (const id of AUTO_ATTACH_IDS)
+      expect(persistedSelection.map((server: ISessionMcpServer) => server.id)).not.toContain(id);
     expect(persistedSelection).toHaveLength(1);
     expect(persistedSelection[0].transport.args).toEqual(['/tmp/builtin-mcp-studio.js']);
     expect(isBuiltinImageGenTransport(persistedSelection[0].transport)).toBe(false);
@@ -198,9 +196,7 @@ describe('useBriefConversation', () => {
   });
 
   it('exposes a dangling binding and recreates it on the next send after Start fresh', async () => {
-    const rendered = renderHook(() =>
-      useBriefConversation(project({ briefConversationId: 'conversation_deleted' }))
-    );
+    const rendered = renderHook(() => useBriefConversation(project({ briefConversationId: 'conversation_deleted' })));
 
     expect(rendered.result.current.state).toEqual({
       kind: 'dangling',
