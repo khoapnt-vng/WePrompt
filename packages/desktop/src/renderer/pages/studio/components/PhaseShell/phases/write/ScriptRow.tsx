@@ -63,13 +63,6 @@ export type ScriptRowProps = {
   onMove: (direction: SceneMoveDirection) => ActionResult;
 };
 
-const SAVE_STATUS_KEYS = {
-  saved: 'conversation.creativeStudio.inspector.saved',
-  dirty: 'conversation.creativeStudio.inspector.unsavedChanges',
-  saving: 'conversation.creativeStudio.inspector.saving',
-  failed: 'conversation.creativeStudio.inspector.saveFailed',
-} as const satisfies Record<SelectedSceneSaveState, string>;
-
 /** Controlled, sortable script row. Draft ownership stays in useStoryboardEditor. */
 export const ScriptRow: React.FC<ScriptRowProps> = ({
   projectId,
@@ -80,7 +73,6 @@ export const ScriptRow: React.FC<ScriptRowProps> = ({
   sceneCount,
   status,
   referenceAsset,
-  saveState,
   errorMessageKey = null,
   conflict,
   selected,
@@ -446,15 +438,6 @@ export const ScriptRow: React.FC<ScriptRowProps> = ({
           <span role='status' data-readiness={status} className={styles.readiness}>
             <span aria-hidden='true' className={styles.readinessDot} />
             {draft.title.trim().length === 0 ? t('conversation.creativeStudio.phase.write.needsTitle') : t(statusKey)}
-          </span>
-          <span
-            role='status'
-            aria-live='polite'
-            aria-atomic='true'
-            data-state={saveState}
-            className={styles.saveStatus}
-          >
-            {t(SAVE_STATUS_KEYS[saveState])}
           </span>
           {errorMessageKey !== null && (
             <div role='alert' className={styles.errorMessage}>

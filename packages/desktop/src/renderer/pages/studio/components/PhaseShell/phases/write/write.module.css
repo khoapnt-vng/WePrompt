@@ -401,7 +401,7 @@
 }
 
 .readiness {
-  composes: meta from '../../../../StudioTypography.module.css';
+  composes: body from '../../../../StudioTypography.module.css';
   display: flex;
   align-items: center;
   gap: 6px;
@@ -431,10 +431,6 @@
 
 .readiness[data-readiness='needs_attention'] .readinessDot {
   background: var(--color-danger-6);
-}
-
-.saveStatus {
-  composes: meta from '../../../../StudioTypography.module.css';
 }
 
 .fieldError,

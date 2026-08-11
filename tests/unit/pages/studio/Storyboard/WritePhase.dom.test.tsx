@@ -321,6 +321,13 @@ describe('WritePhase', () => {
     }
   });
 
+  it('keeps row readiness without repeating the scene save status', () => {
+    render(<WritePhase controller={controller()} />);
+
+    expect(screen.getAllByText('conversation.creativeStudio.scene.status.ready')).toHaveLength(2);
+    expect(screen.queryByText('conversation.creativeStudio.inspector.saved')).not.toBeInTheDocument();
+  });
+
   it('shows compact zone headings while every scene field keeps its accessible name', () => {
     render(<WritePhase controller={controller()} layoutMode='compact' />);
 
