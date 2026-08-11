@@ -415,13 +415,11 @@ describe('Creative Studio generation lifecycle integration', () => {
     if (!referenceAssetId) throw new Error('Reference job succeeded without a committed asset');
     const referenceAsset = plated.assets[referenceAssetId];
     expect({
-      referenceAssetId,
       outputAssetIds: plated.jobs.job_reference_lifecycle.outputAssetIds,
       sceneId: referenceAsset?.sceneId,
       collection: referenceAsset?.managedAsset.collection,
       assetIds: platedScene.assetIds,
     }).toEqual({
-      referenceAssetId,
       outputAssetIds: [referenceAssetId],
       sceneId: scene.id,
       collection: 'references',

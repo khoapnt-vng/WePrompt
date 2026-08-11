@@ -1121,7 +1121,8 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     ) {
       throw new CreativeStudioMediaError(project && job ? 'job_inactive' : 'not_found');
     }
-    // A reference is already required to be an image above, so the kind check alone is sufficient.
+    // A reference is already required to be an image above, so the kind check alone is sufficient;
+    // the references collection also keeps plates out of canonical-take predicates as defence in depth.
     const perAssetMaxBytes = input.mediaKind === 'video' ? limits.videoOutputMaxBytes : limits.imageOutputMaxBytes;
     return {
       projectDir,
@@ -1445,6 +1446,8 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         // A plate settles the scene out of 'generating' but must never mark it produced.
         // A scene that already has a take stays complete - regenerating its plate does
         // not un-produce it. One with no take returns to its resting state.
+        // The ready -> draft demotion is known and accepted while only the busy gate reads reviewState;
+        // revisit this before making the distinction user-visible rather than duplicating readiness rules here.
         scene.reviewState = scene.selectedAssetId === null ? 'draft' : 'complete';
       } else {
         scene.selectedAssetId = asset.id;
