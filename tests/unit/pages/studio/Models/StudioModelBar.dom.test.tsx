@@ -111,6 +111,16 @@ describe('StudioModelBar', () => {
     expect(await screen.findByRole('tooltip')).toHaveTextContent(SELECTED_IMAGE_SUMMARY);
   });
 
+  it('reveals the selected route detail on a bare tap, without focus or hover', async () => {
+    render(<StudioModelBar {...props({ catalog: readySelectedImageCatalog() })} />);
+
+    // A touch tap must not depend on Chromium also focusing the tapped button, so `click`
+    // is listed on the trigger in its own right. Clicking alone has to be enough.
+    fireEvent.click(screen.getByRole('button', { name: /engineKinds/ }));
+
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(SELECTED_IMAGE_SUMMARY);
+  });
+
   it('opens the existing Model Settings surface from Change engines', () => {
     const onOpenSettings = vi.fn();
     const selected = mediaRoute('video');

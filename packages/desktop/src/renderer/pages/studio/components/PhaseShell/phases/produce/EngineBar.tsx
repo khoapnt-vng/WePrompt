@@ -37,9 +37,14 @@ export const getReadySelectedRoutes = (catalog: StudioRouteCatalog | null): Read
  * Model names and per-route duration limits live in the hover, but the media kinds stay
  * visible: this names the paid engines that a generation will bill against, and an engine's
  * `maxDurationSeconds` silently reshapes the script, so the strip must never collapse to
- * nothing. The detail is reachable without hovering — the trigger is a real Button, so the
- * tooltip also opens on keyboard focus, and `aria-describedby` carries the same text to
- * assistive tech whether or not the tooltip ever opens.
+ * nothing. The detail is reachable without hovering by three independent paths, because
+ * hover-only would put spend-relevant facts out of reach: the trigger is a real Button, so
+ * the tooltip opens on keyboard focus; `click` is listed explicitly so a touch tap opens it
+ * rather than relying on Chromium focusing a tapped button; and `aria-describedby` carries
+ * the same text to assistive tech whether or not the tooltip ever opens.
+ *
+ * Listing both `hover` and `click` means a click while the pointer is already hovering
+ * toggles the tooltip shut. That is the accepted cost of a guaranteed tap-to-open.
  */
 export const EngineBar: React.FC<EngineBarProps> = ({
   routes,
@@ -70,7 +75,7 @@ export const EngineBar: React.FC<EngineBarProps> = ({
         {t('conversation.creativeStudio.phase.produce.renderingWith')}
       </h2>
       <Tooltip
-        trigger={['hover', 'focus']}
+        trigger={['hover', 'focus', 'click']}
         content={
           <ul className={styles.engineTooltipList}>
             {routes.map((entry) => (
