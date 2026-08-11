@@ -5,13 +5,16 @@
  */
 
 import type { StudioAspectRatio } from '@/common/types/project/creativeStudioTypes';
+import { ipcBridge } from '@/common';
 import { Button, Input, InputNumber, Select } from '@arco-design/web-react';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { BriefPhaseController } from '../../types';
 import type { StudioLayoutMode } from '../../useStudioLayoutMode';
+import { getConversationPinnedContext } from '@/renderer/pages/conversation/contextHandoff/pinnedContext';
 import { StudioConversationSurface } from '../StudioConversationSurface';
+import { BriefProposalCard } from './BriefProposalCard';
 import styles from './BriefPhase.module.css';
 import { useBriefConversation } from './useBriefConversation';
 
@@ -77,6 +80,17 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
     } finally {
       setStartingWrite(false);
     }
+  };
+
+  const repropose = async (): Promise<void> => {
+    if (briefConversation.state.kind !== 'ready') return;
+    await ipcBridge.conversation.sendMessage.invoke({
+      input:
+        'The script changed since your last proposal (it is now at a newer revision). Call read_storyboard and redraft your proposal against the current script.',
+      conversation_id: briefConversation.state.conversation.id,
+      files: [],
+      pinned_context: getConversationPinnedContext(briefConversation.state.conversation),
+    });
   };
 
   return (
@@ -211,6 +225,22 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
           )}
         </div>
       </div>
+
+      {controller.proposals.length > 0 && (
+        <div className={styles.proposals}>
+          {controller.proposals.map((proposal) => (
+            <BriefProposalCard
+              key={proposal.id}
+              project={project}
+              proposal={proposal}
+              editor={editor}
+              acceptProposal={controller.acceptProposal}
+              rejectProposal={controller.rejectProposal}
+              onRepropose={repropose}
+            />
+          ))}
+        </div>
+      )}
 
       {projectIssue !== null && (
         <div role='alert' className={styles.saveError}>

@@ -123,6 +123,7 @@ const editor = (overrides: Partial<UseStoryboardEditorResult> = {}): UseStoryboa
 
 const controller = (overrides: Partial<BriefPhaseController> = {}): BriefPhaseController => ({
   project: project(),
+  proposals: [],
   readiness: {
     sceneStatuses: {},
     totalSceneCount: 0,
@@ -134,6 +135,8 @@ const controller = (overrides: Partial<BriefPhaseController> = {}): BriefPhaseCo
   advisory: null,
   mutationPending: false,
   requestTransition: vi.fn(),
+  acceptProposal: vi.fn(),
+  rejectProposal: vi.fn(),
   ...overrides,
 });
 

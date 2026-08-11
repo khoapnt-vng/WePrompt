@@ -143,6 +143,7 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
   const { id } = useParams<{ id: string }>();
   const {
     project: loadedProject,
+    proposals,
     loading,
     notFound,
     errorMessageKey,
@@ -768,6 +769,7 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
             : null;
   const controller: StudioPhaseControllers = {
     project,
+    proposals,
     readiness,
     editor,
     models: studioModels,
@@ -780,6 +782,8 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
     mutationPending:
       canonicalMutationPending || referenceImportSceneId !== null || generationReviewRefreshing || exportPending,
     requestTransition,
+    acceptProposal: (request) => ipcBridge.creativeStudio.acceptProposal.invoke(request),
+    rejectProposal: (request) => ipcBridge.creativeStudio.rejectProposal.invoke(request),
     openDraftReview: () => setDraftModalVisible(true),
     openSingleGenerationReview: openSingleReview,
     openBatchGenerationReview: openBatchReview,

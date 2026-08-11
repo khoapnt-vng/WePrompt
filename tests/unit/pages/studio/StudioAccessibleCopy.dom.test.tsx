@@ -206,6 +206,9 @@ const phaseController = (): StudioPhaseControllers => {
   };
 
   return {
+    proposals: [],
+    acceptProposal: vi.fn(),
+    rejectProposal: vi.fn(),
     project: currentProject,
     readiness: {
       sceneStatuses: {},
