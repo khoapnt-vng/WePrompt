@@ -5,6 +5,7 @@
  */
 
 import { isBackendHttpError } from '@/common/adapter/httpBridge';
+import { TeamMemberModelUnresolvedError } from '@/common/adapter/teamMapper';
 import { parseError } from '@/common/utils';
 import type { TFunction } from 'i18next';
 
@@ -162,6 +163,13 @@ export const normalizeConversationRuntimeWorkspaceErrorCode = (
 };
 
 export const getConversationCreateErrorMessage = (error: unknown, t: TFunction): string => {
+  // Raised locally, before any request goes out, so it carries no backend code.
+  if (error instanceof TeamMemberModelUnresolvedError) {
+    return t('conversation.createError.codes.TEAM_MEMBER_MODEL_UNRESOLVED', {
+      defaultValue: parseError(error),
+    });
+  }
+
   const normalizedCode = normalizeConversationCreateErrorCode(error);
   const payload = getWorkspacePathErrorPayload(error);
   const workspacePath = getWorkspacePathFromErrorDetails(error);
