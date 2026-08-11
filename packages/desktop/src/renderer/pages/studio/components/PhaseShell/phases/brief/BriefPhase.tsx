@@ -101,9 +101,9 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
       </div>
 
       <div className={styles.content}>
-        <div className={styles.form}>
-          <div className={styles.field}>
-            <label htmlFor='studio-brief-duration' className={styles.fieldLabel}>
+        <div className={styles.constraintsRow}>
+          <div className={styles.constraint}>
+            <label htmlFor='studio-brief-duration' className={styles.constraintLabel}>
               {t('conversation.creativeStudio.phase.brief.durationLabel')}
             </label>
             <InputNumber
@@ -117,6 +117,7 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
               precision={0}
               step={1}
               mode='button'
+              className={styles.durationControl}
               error={invalidDuration}
               onChange={(targetDurationSeconds) => editor.updateProjectDraft({ targetDurationSeconds })}
               onBlur={flushIfValid}
@@ -128,13 +129,14 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
             )}
           </div>
 
-          <div className={styles.field}>
-            <label htmlFor='studio-brief-aspect' className={styles.fieldLabel}>
+          <div className={styles.constraint}>
+            <label htmlFor='studio-brief-aspect' className={styles.constraintLabel}>
               {t('conversation.creativeStudio.phase.brief.aspectRatioLabel')}
             </label>
             <Select
               id='studio-brief-aspect'
               aria-label={t('conversation.creativeStudio.phase.brief.aspectRatioLabel')}
+              className={styles.aspectControl}
               value={draft.aspectRatio}
               disabled={aspectLocked}
               onChange={(aspectRatio) => editor.updateProjectDraft({ aspectRatio: aspectRatio as StudioAspectRatio })}
