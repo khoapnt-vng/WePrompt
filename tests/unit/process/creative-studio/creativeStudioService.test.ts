@@ -4124,4 +4124,35 @@ describe('Studio MCP server', () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('read_storyboard');
   });
+
+  it('leaves project.json byte-unchanged across every tool call', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'studio-server-'));
+    const projectFile = path.join(dir, 'project.json');
+    await writeFile(projectFile, JSON.stringify(studioServerProjectFixture));
+    const pendingDir = path.join(dir, 'proposals', 'pending');
+    await mkdir(pendingDir, { recursive: true });
+    await mkdir(path.join(dir, 'proposals', 'slots'), { recursive: true });
+    const before = await readFile(projectFile, 'utf8');
+    const env = { projectId: 'project_1', projectDir: dir, pendingDir };
+
+    await createReadStoryboardHandler(env)({});
+    await createProposeStoryboardHandler(env)({
+      base_revision: 7,
+      scene_order: ['scene_1'],
+      scenes: {
+        scene_1: {
+          title: 'x',
+          purpose: '',
+          visualPrompt: '',
+          narration: '',
+          onScreenText: '',
+          mediaKind: 'image',
+          durationSeconds: 5,
+          referenceAssetId: null,
+        },
+      },
+    });
+
+    expect(await readFile(projectFile, 'utf8')).toBe(before);
+  });
 });
