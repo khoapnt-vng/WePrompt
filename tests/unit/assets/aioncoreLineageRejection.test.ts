@@ -1,0 +1,359 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+
+const {
+  verifyBundledAioncoreResources,
+} = require('../../../packages/shared-scripts/src/verify-bundled-aioncore-resources');
+const { prepareAioncore } = require('../../../packages/shared-scripts/src/prepare-aioncore');
+
+type LineageEntry = { version: number; description: string; checksum: string };
+type Lineage = {
+  schemaVersion: number;
+  minimumSupportedVersion: number;
+  latestVersion: number;
+  entryCount: number;
+  fingerprint: string;
+  entries: LineageEntry[];
+};
+
+// Hand-written from the independently reviewed migration contract. This fixture deliberately
+// does not import the verifier's accepted lineage or call its manifest generator.
+const INDEPENDENT_ACCEPTED_LINEAGE: Lineage = {
+  schemaVersion: 1,
+  minimumSupportedVersion: 19,
+  latestVersion: 27,
+  entryCount: 27,
+  fingerprint: '7ab8e15a44ab55603a32038ae20c38eff5c18ca4d5c2cc23c00f3fa868727999',
+  entries: [
+    {
+      version: 1,
+      description: 'initial schema',
+      checksum: 'e18a4394627489c083778138a695aaf94df3a8754f34ca0aab079b4ec92779dd70a81fcf67472c53e18fc8bec2512c54',
+    },
+    {
+      version: 2,
+      description: 'legacy data normalize',
+      checksum: '5bae9aa1d0df2369cb60cf28c93d1fdd846c0602b3bf3770246646f6b4e1f3e5070e704b0bc28eef2ab88e3bb89d4e49',
+    },
+    {
+      version: 3,
+      description: 'agent acp capabilities',
+      checksum: 'f4f3ab29883b1d562ebd4787b8aabbbf8edb0a2e6c6c159f8c04820f85d7802f2a09a34138219d07e26f8ebada70a0b3',
+    },
+    {
+      version: 4,
+      description: 'update bun agent package versions',
+      checksum: 'a7e67fa55d935659784c09bcfa4e4a0949faf0155d0afccc2f210e34a764541fc52efa129aa52858dba0576ab9e7b87c',
+    },
+    {
+      version: 5,
+      description: 'fix real timestamps',
+      checksum: '9ce9aaeef323de7433042abdb7674c85b5da3942af8e6f937b851d9c2de00012d0cc35df786b835f5d86a9f4b4bf4d32',
+    },
+    {
+      version: 6,
+      description: 'provider is full url',
+      checksum: '8339f6fbad074662f4b3ab27f25840f0696f571de2f31363e9a0a42e76f85b95cd7f116c6f5f424ab647ad9637d7136f',
+    },
+    {
+      version: 7,
+      description: 'mcp soft delete',
+      checksum: '3f1e336426c4145a7bf20b86df9b587b9173d89ee7dea3ef5965d185a330543b356c644b6bd72d5e42d64208a18ecce7',
+    },
+    {
+      version: 8,
+      description: 'builtin acp agents use npx',
+      checksum: 'de5d7ea865e6279b6ce630b833ddf13c978435972fb6f293122244dbd3407dc93c5aaa1409ad7e7eb7089a78198c2981',
+    },
+    {
+      version: 9,
+      description: 'builtin managed acp tools',
+      checksum: '6709aeef6393edbd72bc54ebf9b5aaadb4280a14648c7643d30cedf8c1c688463837c2f803a58f708223eff47d7f398c',
+    },
+    {
+      version: 10,
+      description: 'hermes yolo id null',
+      checksum: '6fdb5b728a2d5e7b3ba21d0f1fcd44fb2bcc059bae40b1abd60442f2a28b7c00459046923d219fcff1a074d37859eebe',
+    },
+    {
+      version: 11,
+      description: 'add openclaw acp agent',
+      checksum: 'f8e34cd00024c77f9bbeced30c5f844a167451b91c5ee98a8a2eb2ee75e7c804c9115583cca4c20eb0a1b8aec316fd86',
+    },
+    {
+      version: 12,
+      description: 'assistant data unification',
+      checksum: '1ec9c53d482d8d8753701a82830b4e795851ba0568bc091f1a9b7441891066f47e925e3ac846eb3bc26c77cb99b997d4',
+    },
+    {
+      version: 13,
+      description: 'agent connection snapshot',
+      checksum: 'b88f5d1add78a91900df0b4c3e633650f89240fb090b1acc2aae878d3d8d3777ec06f25999a6a581a45f6e2d1e056ec5',
+    },
+    {
+      version: 14,
+      description: 'skill management',
+      checksum: '396712f29452fe6b5859348fda349402dccb48d0b8ffb74f9537c918ef528b6ec8f593c94ab817473b6cf22be07362a6',
+    },
+    {
+      version: 15,
+      description: 'aionrs mode catalog',
+      checksum: 'ce9084a77b36b6755eb8066ee8019ad4123b55fe8017fd6d8f7be980f2a98ea817346438171bde9b295fdb8926ffd310',
+    },
+    {
+      version: 16,
+      description: 'clear internal aion cli command override',
+      checksum: 'a8ad85c50eedc9427684a036d5a44f5c2be99ad5c5507d7113e93661622c823f46c218067762779c4b955cba7f6886cb',
+    },
+    {
+      version: 17,
+      description: 'drop conversation assistant identity snapshot',
+      checksum: '15bb3eccd1c5ea02b16515092676f6851f7da6c94c854fb50ebede660ba97c772de999a6fa91a37c5b58151d2ae55d57',
+    },
+    {
+      version: 18,
+      description: 'reset builtin assistant enabled',
+      checksum: 'af43d57568264673b35c0ce69197f6662f217bc5d406d537863cbe7a2a02d5048eea06c9274ce26c243febdf7b464778',
+    },
+    {
+      version: 19,
+      description: 'assistant thought level defaults',
+      checksum: '3f17b312e814660088d0a70a6d6b9ea229ed2a8aaa292c0ab6f28069222c3ed49587318d28784cc29113a9fb19b76e21',
+    },
+    {
+      version: 20,
+      description: 'update codex acp package scope',
+      checksum: '8d3537fa5e4e968af9813999ae38e08db77137675441bbc65c8a170009dc842c90c3e89eea9fbff512885007a4afc760',
+    },
+    {
+      version: 21,
+      description: 'codex agent full access yolo id',
+      checksum: '33a534c7012c91c4bdf6fb78592331e15659275dbc6251781e742e9e1db11d284dbf2ddc541edaeaa9e691ee11413a79',
+    },
+    {
+      version: 22,
+      description: 'cron execution dedup',
+      checksum: '16003f8e442a8603aea690ba6c1714fe098332de583657220aa25cbc94c9a242b3573c19986ff1aa5cc4a88d6c1f6bbb',
+    },
+    {
+      version: 23,
+      description: 'add pi builtin acp agent',
+      checksum: '57b1b4baac8aab405245774f4e5cd8ad710c309e12f032d1cdaa94ddd8b4ed658070513073cd2df289a36245464487d4',
+    },
+    {
+      version: 24,
+      description: 'drop unused assistant definition fields',
+      checksum: '6fa1fe44bc718bc7c3fc62a234ddec146f2b3efec2e4f3c826d7355581716740bb33790cac679546acfd271c844f847f',
+    },
+    {
+      version: 25,
+      description: 'sync and add acp registry agents',
+      checksum: '5400e17ead7f6cdd16999faf90c421bb9707fee6bb3407bfe4de778086c7557eb2e430c557bae7fd1129d5e683c01827',
+    },
+    {
+      version: 26,
+      description: 'clear bridge agent command override',
+      checksum: '6f6e06578c6dbf91643319ef6986538636ce1057bf868aef33a9fd11c09e7d400331c18f7d18744c3910a31e3266b37a',
+    },
+    {
+      version: 27,
+      description: 'provider model settings',
+      checksum: 'f76d48e0e7245c06cd98dcf9ba8a355d613d5f5ffeda9d10526f3379aab1d29a154f6029f2332bc18496241fd4e60b23',
+    },
+  ],
+};
+
+const COMPUTED_REPLACEMENT_CHECKSUM = createHash('sha384')
+  .update('-- T1.3a deliberately incompatible migration checksum\n', 'utf8')
+  .digest('hex');
+const COMPUTED_EXTRA_ENTRY_CHECKSUM = createHash('sha384')
+  .update('-- T1.3a deliberately extra migration 28\n', 'utf8')
+  .digest('hex');
+
+function cloneAcceptedLineage(): Lineage {
+  return structuredClone(INDEPENDENT_ACCEPTED_LINEAGE);
+}
+
+function writeJson(filePath: string, value: unknown) {
+  mkdirSync(dirname(filePath), { recursive: true });
+  writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function writeBundleLineage(runtimeRoot: string, lineage: Lineage) {
+  writeJson(join(runtimeRoot, 'migration-lineage.json'), lineage);
+  writeJson(join(runtimeRoot, 'manifest.json'), {
+    platform: 'darwin',
+    arch: 'arm64',
+    migrationLineage: { ...lineage, file: 'migration-lineage.json' },
+  });
+}
+
+const LINEAGE_MUTATIONS: Array<[string, (lineage: Lineage) => void]> = [
+  ['a changed checksum', (lineage) => (lineage.entries[19].checksum = COMPUTED_REPLACEMENT_CHECKSUM)],
+  ['a missing entry', (lineage) => lineage.entries.splice(19, 1)],
+  [
+    'an extra entry',
+    (lineage) =>
+      lineage.entries.push({
+        version: 28,
+        description: 'deliberately extra migration',
+        checksum: COMPUTED_EXTRA_ENTRY_CHECKSUM,
+      }),
+  ],
+  [
+    'a reordered list',
+    (lineage) => ([lineage.entries[19], lineage.entries[20]] = [lineage.entries[20], lineage.entries[19]]),
+  ],
+  ['a changed latest version', (lineage) => (lineage.latestVersion = 28)],
+  ['a changed minimum supported version', (lineage) => (lineage.minimumSupportedVersion = 20)],
+];
+
+describe('AionCore packaging lineage rejection', () => {
+  let temporaryRoot: string;
+  let resourcesDir: string;
+  let runtimeRoot: string;
+  let sentinelPath: string;
+  const sentinelBytes = Buffer.from([0x00, 0x13, 0x40, 0xff, 0x0a, 0x7f]);
+
+  beforeEach(() => {
+    temporaryRoot = mkdtempSync(join(tmpdir(), 'aionui-real-lineage-rejection-'));
+    resourcesDir = join(temporaryRoot, 'resources');
+    runtimeRoot = join(resourcesDir, 'bundled-aioncore', 'darwin-arm64');
+    sentinelPath = join(runtimeRoot, 'preserve-me.bin');
+    mkdirSync(join(runtimeRoot, 'managed-resources'), { recursive: true });
+    writeFileSync(join(runtimeRoot, 'aioncore'), 'test binary');
+    writeFileSync(sentinelPath, sentinelBytes);
+    writeBundleLineage(runtimeRoot, cloneAcceptedLineage());
+  });
+
+  afterEach(() => {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+  });
+
+  it('accepts the independently hand-written lineage at both comparison boundaries', () => {
+    const result = verifyBundledAioncoreResources({
+      resourcesDir,
+      electronPlatformName: 'darwin',
+      targetArch: 'arm64',
+    });
+
+    expect(result.failures.filter(({ component }: { component: string }) => component === 'migration-lineage')).toEqual(
+      []
+    );
+  });
+
+  it.each(LINEAGE_MUTATIONS)('rejects %s in both the bundle document and manifest', (_name, mutate) => {
+    const incompatibleLineage = cloneAcceptedLineage();
+    mutate(incompatibleLineage);
+    writeBundleLineage(runtimeRoot, incompatibleLineage);
+
+    const result = verifyBundledAioncoreResources({
+      resourcesDir,
+      electronPlatformName: 'darwin',
+      targetArch: 'arm64',
+    });
+
+    expect(result.failures).toContainEqual({
+      component: 'migration-lineage',
+      reason: 'manifest_mismatch',
+      path: 'bundled-aioncore/darwin-arm64/manifest.json',
+    });
+    expect(result.failures).toContainEqual({
+      component: 'migration-lineage',
+      reason: 'lineage_mismatch',
+      path: 'bundled-aioncore/darwin-arm64/migration-lineage.json',
+    });
+  });
+
+  it('preserves unrelated bundle bytes after a real checksum rejection', () => {
+    const incompatibleLineage = cloneAcceptedLineage();
+    incompatibleLineage.entries[19].checksum = COMPUTED_REPLACEMENT_CHECKSUM;
+    writeBundleLineage(runtimeRoot, incompatibleLineage);
+
+    const result = verifyBundledAioncoreResources({
+      resourcesDir,
+      electronPlatformName: 'darwin',
+      targetArch: 'arm64',
+    });
+
+    expect(result.failures).toContainEqual(
+      expect.objectContaining({ component: 'migration-lineage', reason: 'lineage_mismatch' })
+    );
+    expect(readFileSync(sentinelPath)).toEqual(sentinelBytes);
+  });
+
+  it('fails closed when the bundle has no migration-lineage.json evidence', () => {
+    rmSync(join(runtimeRoot, 'migration-lineage.json'));
+
+    const result = verifyBundledAioncoreResources({
+      resourcesDir,
+      electronPlatformName: 'darwin',
+      targetArch: 'arm64',
+    });
+
+    expect(result.failures).toContainEqual({
+      component: 'migration-lineage',
+      reason: 'missing_file',
+      path: 'bundled-aioncore/darwin-arm64/migration-lineage.json',
+    });
+  });
+});
+
+describe('prepare-aioncore accepted-lineage boundary', () => {
+  let temporaryRoot: string;
+  let localBundle: string;
+  let projectRoot: string;
+  let sentinelPath: string;
+  let previousLocalBundle: string | undefined;
+  const sentinelBytes = Buffer.from('source bundle must survive rejection\n', 'utf8');
+
+  beforeEach(() => {
+    temporaryRoot = mkdtempSync(join(tmpdir(), 'aionui-prepare-lineage-rejection-'));
+    localBundle = join(temporaryRoot, 'local-bundle');
+    projectRoot = join(temporaryRoot, 'project');
+    sentinelPath = join(localBundle, 'preserve-me.bin');
+    mkdirSync(join(localBundle, 'managed-resources'), { recursive: true });
+    writeFileSync(join(localBundle, 'aioncore'), 'test binary');
+    writeFileSync(sentinelPath, sentinelBytes);
+    previousLocalBundle = process.env.AIONUI_BACKEND_LOCAL_BUNDLE_DIR;
+    process.env.AIONUI_BACKEND_LOCAL_BUNDLE_DIR = localBundle;
+  });
+
+  afterEach(() => {
+    if (previousLocalBundle === undefined) delete process.env.AIONUI_BACKEND_LOCAL_BUNDLE_DIR;
+    else process.env.AIONUI_BACKEND_LOCAL_BUNDLE_DIR = previousLocalBundle;
+    rmSync(temporaryRoot, { recursive: true, force: true });
+  });
+
+  it('rejects a real local-bundle checksum mismatch as a typed integrity failure and preserves its bytes', () => {
+    const incompatibleLineage = cloneAcceptedLineage();
+    incompatibleLineage.entries[19].checksum = COMPUTED_REPLACEMENT_CHECKSUM;
+    writeJson(join(localBundle, 'migration-lineage.json'), incompatibleLineage);
+
+    let failure: (Error & { isAioncoreIntegrityError?: boolean }) | undefined;
+    try {
+      prepareAioncore({ projectRoot, platform: 'darwin', arch: 'arm64', version: 'v0.1.62' });
+    } catch (error) {
+      if (error instanceof Error) failure = error;
+    }
+
+    expect(failure).toMatchObject({ isAioncoreIntegrityError: true });
+    expect(failure?.message).toMatch(/migration lineage does not match the accepted WePrompt lineage/);
+    expect(readFileSync(sentinelPath)).toEqual(sentinelBytes);
+  });
+
+  it('fails closed when a real local bundle has no migration-lineage.json evidence', () => {
+    let failure: (Error & { isAioncoreIntegrityError?: boolean }) | undefined;
+    try {
+      prepareAioncore({ projectRoot, platform: 'darwin', arch: 'arm64', version: 'v0.1.62' });
+    } catch (error) {
+      if (error instanceof Error) failure = error;
+    }
+
+    expect(failure).toMatchObject({ isAioncoreIntegrityError: true });
+    expect(failure?.message).toMatch(/missing a valid migration-lineage\.json document/);
+  });
+});
