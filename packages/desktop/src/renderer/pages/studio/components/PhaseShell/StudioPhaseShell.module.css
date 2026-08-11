@@ -8,19 +8,22 @@
   gap: 18px;
 }
 
+/* Three explicit columns so the phase rail sits optically centred in the row
+   regardless of how wide the title or the actions are. The columns are assigned
+   by name because the rail is absent in the compact layout, and auto-placement
+   would otherwise slide the meta column into the centre. */
 .header {
-  display: flex;
+  display: grid;
   min-width: 0;
   align-items: center;
-  justify-content: space-between;
-  flex-wrap: nowrap;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   gap: 16px;
 }
 
 .headerCopy {
   display: flex;
   min-width: 0;
-  flex: 1;
+  grid-column: 1;
   align-items: center;
   gap: 8px;
 }
@@ -94,25 +97,17 @@
   white-space: normal;
 }
 
-.aspectChip {
-  composes: meta from '../../StudioTypography.module.css';
-  flex: none;
-}
-
 .headerNavigation {
   display: flex;
   min-width: 0;
-  flex: 1 1 320px;
-}
-
-.headerNavigation .phaseNavigation {
-  width: 100%;
+  grid-column: 2;
+  justify-content: center;
 }
 
 .headerMeta {
   display: flex;
   min-width: 0;
-  flex: none;
+  grid-column: 3;
   align-items: center;
   justify-content: flex-end;
   gap: 12px;

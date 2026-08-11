@@ -5,7 +5,7 @@
  */
 
 import type { StudioRendererProject } from '@/common/types/project/creativeStudioTypes';
-import { Button, Input, Tag, Tooltip } from '@arco-design/web-react';
+import { Button, Input, Tooltip } from '@arco-design/web-react';
 import { Left } from '@icon-park/react';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
@@ -140,13 +140,6 @@ export const StudioPhaseHeader: React.FC<StudioPhaseHeaderProps> = ({
             </Tooltip>
           )}
         </h1>
-        <Tag
-          size='small'
-          aria-label={`${t('conversation.creativeStudio.project.aspectRatio')}: ${project.aspectRatio}`}
-          className={styles.aspectChip}
-        >
-          {project.aspectRatio}
-        </Tag>
       </div>
       {navigation !== undefined && <div className={styles.headerNavigation}>{navigation}</div>}
       <div className={styles.headerMeta}>
