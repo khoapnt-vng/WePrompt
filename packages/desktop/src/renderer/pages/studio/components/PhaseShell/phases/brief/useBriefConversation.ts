@@ -13,10 +13,12 @@ import { getConversationPinnedContext } from '@/renderer/pages/conversation/cont
 import { useGuidModelSelection } from '@/renderer/pages/guid/hooks/useGuidModelSelection';
 import { createStudioBriefConversation } from '../studioBriefConversation';
 
+export type StudioBriefConversation = Extract<TChatConversation, { type: 'aionrs' }>;
+
 export type BriefConversationState =
   | { kind: 'absent' }
   | { kind: 'creating' }
-  | { kind: 'ready'; conversation: TChatConversation }
+  | { kind: 'ready'; conversation: StudioBriefConversation }
   | { kind: 'dangling'; conversationId: string };
 
 export type UseBriefConversationResult = {
@@ -33,7 +35,7 @@ const resolveBoundState = (
 ): BriefConversationState => {
   if (conversationId === null || conversationId === ignoredConversationId) return { kind: 'absent' };
   const conversation = conversations.find((candidate) => candidate.id === conversationId);
-  return conversation ? { kind: 'ready', conversation } : { kind: 'dangling', conversationId };
+  return conversation?.type === 'aionrs' ? { kind: 'ready', conversation } : { kind: 'dangling', conversationId };
 };
 
 export const useBriefConversation = (project: StudioRendererProject): UseBriefConversationResult => {
@@ -76,9 +78,9 @@ export const useBriefConversation = (project: StudioRendererProject): UseBriefCo
         original_json: JSON.stringify(descriptor),
       };
 
-      let conversation: TChatConversation;
+      let conversation: StudioBriefConversation;
       try {
-        conversation = await createStudioBriefConversation({
+        conversation = (await createStudioBriefConversation({
           type: 'aionrs',
           name: project.name,
           model: current_model,
@@ -86,7 +88,7 @@ export const useBriefConversation = (project: StudioRendererProject): UseBriefCo
           mcpServerAllowlist: [descriptor.id],
           availableMcpServers: [availableServer],
           extra: { workspace: '', custom_workspace: false },
-        });
+        })) as StudioBriefConversation;
       } catch (error) {
         setState({ kind: 'absent' });
         throw error;

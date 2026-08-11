@@ -11,7 +11,9 @@ import { useTranslation } from 'react-i18next';
 
 import type { BriefPhaseController } from '../../types';
 import type { StudioLayoutMode } from '../../useStudioLayoutMode';
+import { StudioConversationSurface } from '../StudioConversationSurface';
 import styles from './BriefPhase.module.css';
+import { useBriefConversation } from './useBriefConversation';
 
 const MAX_PROJECT_NAME_CHARS = 256;
 const MAX_PROJECT_BRIEF_CHARS = 16 * 1024;
@@ -43,8 +45,11 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
     aspectRatio: project.aspectRatio,
     targetDurationSeconds: project.targetDurationSeconds,
   };
+  const briefConversation = useBriefConversation(project);
+  const [composerText, setComposerText] = useState(draft.brief);
   const invalidName = draft.name.trim().length === 0 || draft.name.length > MAX_PROJECT_NAME_CHARS;
   const invalidBrief = draft.brief.length > MAX_PROJECT_BRIEF_CHARS;
+  const invalidComposer = composerText.length > MAX_PROJECT_BRIEF_CHARS;
   const invalidDuration =
     !Number.isInteger(draft.targetDurationSeconds) ||
     draft.targetDurationSeconds < 5 ||
@@ -84,94 +89,124 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
         <p className={styles.secondaryCopy}>{t('conversation.creativeStudio.phase.shared.noMediaGeneration')}</p>
       </div>
 
-      <div className={styles.form}>
-        <div className={styles.field}>
-          <label htmlFor='studio-brief-name' className={styles.fieldLabel}>
-            {t('conversation.creativeStudio.phase.brief.nameLabel')}
-          </label>
-          <Input
-            id='studio-brief-name'
-            value={draft.name}
-            error={invalidName}
-            maxLength={MAX_PROJECT_NAME_CHARS}
-            onChange={(name) => editor.updateProjectDraft({ name })}
-            onBlur={flushIfValid}
-          />
-          {invalidName && (
-            <span role='alert' className={styles.fieldError}>
-              {t('conversation.creativeStudio.phase.brief.invalidName')}
-            </span>
-          )}
+      <div className={styles.content}>
+        <div className={styles.form}>
+          <div className={styles.field}>
+            <label htmlFor='studio-brief-name' className={styles.fieldLabel}>
+              {t('conversation.creativeStudio.phase.brief.nameLabel')}
+            </label>
+            <Input
+              id='studio-brief-name'
+              value={draft.name}
+              error={invalidName}
+              maxLength={MAX_PROJECT_NAME_CHARS}
+              onChange={(name) => editor.updateProjectDraft({ name })}
+              onBlur={flushIfValid}
+            />
+            {invalidName && (
+              <span role='alert' className={styles.fieldError}>
+                {t('conversation.creativeStudio.phase.brief.invalidName')}
+              </span>
+            )}
+          </div>
+
+          <div className={styles.field}>
+            <label htmlFor='studio-brief-duration' className={styles.fieldLabel}>
+              {t('conversation.creativeStudio.phase.brief.durationLabel')}
+            </label>
+            <InputNumber
+              id='studio-brief-duration'
+              aria-label={t('conversation.creativeStudio.phase.brief.durationLabel')}
+              aria-valuemin={5}
+              aria-valuemax={60}
+              value={draft.targetDurationSeconds}
+              min={5}
+              max={60}
+              precision={0}
+              step={1}
+              mode='button'
+              error={invalidDuration}
+              onChange={(targetDurationSeconds) => editor.updateProjectDraft({ targetDurationSeconds })}
+              onBlur={flushIfValid}
+            />
+            {invalidDuration && (
+              <span role='alert' className={styles.fieldError}>
+                {t('conversation.creativeStudio.create.invalidDuration')}
+              </span>
+            )}
+          </div>
+
+          <div className={styles.field}>
+            <label htmlFor='studio-brief-aspect' className={styles.fieldLabel}>
+              {t('conversation.creativeStudio.phase.brief.aspectRatioLabel')}
+            </label>
+            <Select
+              id='studio-brief-aspect'
+              aria-label={t('conversation.creativeStudio.phase.brief.aspectRatioLabel')}
+              value={draft.aspectRatio}
+              disabled={aspectLocked}
+              onChange={(aspectRatio) => editor.updateProjectDraft({ aspectRatio: aspectRatio as StudioAspectRatio })}
+              onBlur={flushIfValid}
+            >
+              {ASPECT_RATIOS.map((aspectRatio) => (
+                <Select.Option key={aspectRatio} value={aspectRatio}>
+                  {t(ASPECT_RATIO_LABEL_KEYS[aspectRatio])}
+                </Select.Option>
+              ))}
+            </Select>
+            {aspectLocked && (
+              <div className={styles.lockHelp}>
+                <strong>{t('conversation.creativeStudio.phase.brief.aspectLocked')}</strong>
+                <span>{t('conversation.creativeStudio.phase.brief.aspectLockedHelp')}</span>
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className={`${styles.field} ${styles.fullWidth}`}>
-          <label htmlFor='studio-brief-intent' className={styles.fieldLabel}>
-            {t('conversation.creativeStudio.phase.brief.intentLabel')}
-          </label>
-          <Input.TextArea
-            id='studio-brief-intent'
-            value={draft.brief}
-            error={invalidBrief}
-            maxLength={MAX_PROJECT_BRIEF_CHARS}
-            rows={6}
-            onChange={(brief) => editor.updateProjectDraft({ brief })}
-            onBlur={flushIfValid}
-          />
-          {invalidBrief && (
-            <span role='alert' className={styles.fieldError}>
-              {t('conversation.creativeStudio.errors.invalidPayload')}
-            </span>
-          )}
-        </div>
-
-        <div className={styles.field}>
-          <label htmlFor='studio-brief-duration' className={styles.fieldLabel}>
-            {t('conversation.creativeStudio.phase.brief.durationLabel')}
-          </label>
-          <InputNumber
-            id='studio-brief-duration'
-            aria-label={t('conversation.creativeStudio.phase.brief.durationLabel')}
-            aria-valuemin={5}
-            aria-valuemax={60}
-            value={draft.targetDurationSeconds}
-            min={5}
-            max={60}
-            precision={0}
-            step={1}
-            mode='button'
-            error={invalidDuration}
-            onChange={(targetDurationSeconds) => editor.updateProjectDraft({ targetDurationSeconds })}
-            onBlur={flushIfValid}
-          />
-          {invalidDuration && (
-            <span role='alert' className={styles.fieldError}>
-              {t('conversation.creativeStudio.create.invalidDuration')}
-            </span>
-          )}
-        </div>
-
-        <div className={styles.field}>
-          <label htmlFor='studio-brief-aspect' className={styles.fieldLabel}>
-            {t('conversation.creativeStudio.phase.brief.aspectRatioLabel')}
-          </label>
-          <Select
-            id='studio-brief-aspect'
-            aria-label={t('conversation.creativeStudio.phase.brief.aspectRatioLabel')}
-            value={draft.aspectRatio}
-            disabled={aspectLocked}
-            onChange={(aspectRatio) => editor.updateProjectDraft({ aspectRatio: aspectRatio as StudioAspectRatio })}
-            onBlur={flushIfValid}
-          >
-            {ASPECT_RATIOS.map((aspectRatio) => (
-              <Select.Option key={aspectRatio} value={aspectRatio}>
-                {t(ASPECT_RATIO_LABEL_KEYS[aspectRatio])}
-              </Select.Option>
-            ))}
-          </Select>
-          {aspectLocked && (
-            <div className={styles.lockHelp}>
-              <strong>{t('conversation.creativeStudio.phase.brief.aspectLocked')}</strong>
-              <span>{t('conversation.creativeStudio.phase.brief.aspectLockedHelp')}</span>
+        <div className={styles.conversationColumn}>
+          {briefConversation.state.kind === 'ready' ? (
+            <div
+              role='region'
+              aria-label={t('conversation.creativeStudio.brief.conversationTitle')}
+              className={styles.conversationSurface}
+            >
+              <StudioConversationSurface conversation={briefConversation.state.conversation} />
+            </div>
+          ) : briefConversation.state.kind === 'dangling' ? (
+            <div className={styles.dangling}>
+              <p>{t('conversation.creativeStudio.brief.danglingNotice')}</p>
+              <Button type='primary' onClick={briefConversation.recreate}>
+                {t('conversation.creativeStudio.brief.danglingStartFresh')}
+              </Button>
+            </div>
+          ) : (
+            <div className={styles.composer}>
+              <Input.TextArea
+                value={composerText}
+                error={invalidComposer}
+                maxLength={MAX_PROJECT_BRIEF_CHARS}
+                rows={6}
+                placeholder={t('conversation.creativeStudio.brief.composerPlaceholder')}
+                onChange={setComposerText}
+              />
+              {invalidComposer && (
+                <span role='alert' className={styles.fieldError}>
+                  {t('conversation.creativeStudio.errors.invalidPayload')}
+                </span>
+              )}
+              {briefConversation.errorMessageKey && (
+                <span role='alert' className={styles.fieldError}>
+                  {t(briefConversation.errorMessageKey)}
+                </span>
+              )}
+              <Button
+                type='primary'
+                loading={briefConversation.state.kind === 'creating'}
+                disabled={composerText.trim().length === 0 || invalidComposer}
+                onClick={() => void briefConversation.sendFirstMessage(composerText)}
+              >
+                {t('conversation.creativeStudio.brief.composerSend')}
+              </Button>
             </div>
           )}
         </div>
