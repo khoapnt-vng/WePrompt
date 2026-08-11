@@ -924,6 +924,78 @@ describe('creative studio project store', () => {
         code: 'invalid_payload',
       });
     });
+
+    it('validates an asset in the references collection with no scene attachment', async () => {
+      const project = await store.createProject(makeInput());
+
+      const persisted = await store.updateProject(project.id, (current) => {
+        const next = addScene(current, 'scene_1');
+        next.assets.reference_1 = {
+          id: 'reference_1',
+          projectId: next.id,
+          sceneId: null,
+          mediaKind: 'image',
+          mimeType: 'image/png',
+          managedAsset: { collection: 'references', fileName: 'reference_1.png' },
+          byteSize: 1,
+          sha256: '2'.repeat(64),
+          createdAt: next.createdAt,
+        };
+        return next;
+      });
+
+      expect(await store.getProject(project.id)).toEqual(persisted);
+    });
+
+    it('validates a job carrying the reference output role', async () => {
+      const project = await store.createProject(makeInput());
+
+      const persisted = await store.updateProject(project.id, (current) => {
+        const next = addScene(current, 'scene_1');
+        next.jobs.job_1 = makeJob(next, 'job_1', 'scene_1', { outputRole: 'reference' });
+        next.scenes.scene_1.jobIds = ['job_1'];
+        return next;
+      });
+
+      expect(persisted.jobs.job_1.outputRole).toBe('reference');
+      expect(await store.getProject(project.id)).toEqual(persisted);
+    });
+
+    it('rejects a job carrying an unknown output role', async () => {
+      const project = await store.createProject(makeInput());
+
+      await expect(
+        store.updateProject(project.id, (current) => {
+          const next = addScene(current, 'scene_1');
+          next.jobs.job_1 = makeJob(next, 'job_1', 'scene_1', { outputRole: 'poster' as never });
+          next.scenes.scene_1.jobIds = ['job_1'];
+          return next;
+        })
+      ).rejects.toMatchObject({ code: 'invalid_payload' });
+    });
+
+    it('rejects an asset with an unknown collection', async () => {
+      const project = await store.createProject(makeInput());
+
+      await expect(
+        store.updateProject(project.id, (current) => {
+          const next = addScene(current, 'scene_1');
+          next.assets.asset_1 = {
+            id: 'asset_1',
+            projectId: next.id,
+            sceneId: 'scene_1',
+            mediaKind: 'image',
+            mimeType: 'image/png',
+            managedAsset: { collection: 'gallery' as never, fileName: 'asset_1.png' },
+            byteSize: 1,
+            sha256: '3'.repeat(64),
+            createdAt: next.createdAt,
+          };
+          next.scenes.scene_1.assetIds = ['asset_1'];
+          return next;
+        })
+      ).rejects.toMatchObject({ code: 'invalid_payload' });
+    });
   });
 
   it('returns summaries newest-first instead of relying on filesystem iteration order', async () => {

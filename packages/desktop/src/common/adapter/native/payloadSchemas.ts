@@ -353,6 +353,8 @@ const studioSubmitScenesSchema = z
       .refine((ids) => new Set(ids).size === ids.length),
     catalogVersion: z.string().regex(/^[a-f0-9]{16}$/),
     routes: z.array(studioSceneRouteSnapshotSchema).min(1).max(24),
+    outputRole: z.enum(['take', 'reference']).optional(),
+    referencePrompt: z.string().min(1).max(4096).optional(),
   })
   .strict()
   .superRefine((input, context) => {
@@ -367,6 +369,16 @@ const studioSubmitScenesSchema = z
       routeSceneIds.some((sceneId) => !selectedSceneIds.has(sceneId))
     ) {
       context.addIssue({ code: 'custom', message: 'routes must exactly match sceneIds', path: ['routes'] });
+    }
+    if (input.outputRole === 'reference' && input.mode !== 'single') {
+      context.addIssue({ code: 'custom', message: 'reference output requires single mode', path: ['outputRole'] });
+    }
+    if (input.referencePrompt !== undefined && input.outputRole !== 'reference') {
+      context.addIssue({
+        code: 'custom',
+        message: 'referencePrompt requires outputRole reference',
+        path: ['referencePrompt'],
+      });
     }
   });
 const studioFitStoryboardSchema = z

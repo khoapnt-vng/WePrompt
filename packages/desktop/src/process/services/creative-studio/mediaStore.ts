@@ -1031,7 +1031,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     projectDir: string;
     project: StudioProject;
     capacity: WriteCapacity;
-    collection: 'assets' | 'thumbnails';
+    collection: 'assets' | 'thumbnails' | 'references';
   };
 
   const validateProviderOutputMetadata = (

@@ -53,7 +53,7 @@ export type StudioMediaChoiceRef = {
 
 /** An app-managed asset identity, deliberately not a filesystem path or URL. */
 export type StudioManagedAssetRef = {
-  collection: 'assets' | 'imports' | 'thumbnails';
+  collection: 'assets' | 'imports' | 'thumbnails' | 'references';
   fileName: string;
 };
 
@@ -96,6 +96,9 @@ export type StudioJobRetryReason = 'provider_failure' | 'submission_unknown';
 
 export type StudioCancellationPolicy = 'none' | 'queued_only' | 'queued_and_running';
 
+/** What a job's output becomes once it lands: the scene's finished take, or its supporting reference plate. */
+export type StudioOutputRole = 'take' | 'reference';
+
 export type StudioJob = {
   id: string;
   projectId: string;
@@ -107,6 +110,8 @@ export type StudioJob = {
   /** Set once when providerJobId becomes durable. Optional only for old schema-v1 jobs. */
   remoteStartedAt?: string | null;
   cancellationPolicy: StudioCancellationPolicy;
+  /** Absent means 'take', the pre-existing default. Never backfilled onto old records; read via jobOutputRole(job). */
+  outputRole?: StudioOutputRole;
   outputAssetIds: string[];
   error: StudioJobError | null;
   progress?: number;
@@ -611,6 +616,10 @@ export type StudioSubmitScenesRequest = StudioProjectRequest & {
   expectedRevision: number;
   routes: StudioSceneGenerationChoice[];
   catalogVersion: string;
+  /** Absent means 'take'. 'reference' is single-mode only in v1; batch submissions stay take-only. */
+  outputRole?: StudioOutputRole;
+  /** Only meaningful alongside outputRole: 'reference'. */
+  referencePrompt?: string;
 };
 
 export type StudioFitStoryboardRequest = StudioProjectRequest & {

@@ -16,6 +16,7 @@ import type {
   StudioCutClip,
   StudioCutFilter,
   StudioJob,
+  StudioOutputRole,
   StudioProject,
   StudioProjectSummary,
   StudioProposal,
@@ -47,6 +48,7 @@ const JOB_STATUSES = new Set([
 const NONTERMINAL_JOB_STATUSES = new Set(['queued_local', 'submitting', 'queued_remote', 'running', 'needs_attention']);
 const JOB_RETRY_REASONS = new Set(['provider_failure', 'submission_unknown']);
 const CANCELLATION_POLICIES = new Set<StudioCancellationPolicy>(['none', 'queued_only', 'queued_and_running']);
+const JOB_OUTPUT_ROLES = new Set<StudioOutputRole>(['take', 'reference']);
 const ADAPTER_IDS = new Set([
   'weprompt-image-v1',
   'byteplus-seedance-v1',
@@ -116,6 +118,7 @@ const JOB_KEYS = new Set([
   'providerJobId',
   'remoteStartedAt',
   'cancellationPolicy',
+  'outputRole',
   'outputAssetIds',
   'error',
   'progress',
@@ -126,7 +129,7 @@ const JOB_KEYS = new Set([
   'createdAt',
   'updatedAt',
 ]);
-const ASSET_COLLECTIONS = new Set(['assets', 'imports', 'thumbnails']);
+const ASSET_COLLECTIONS = new Set(['assets', 'imports', 'thumbnails', 'references']);
 const CONNECTION_BINDING_KEYS = new Set([
   'schemaVersion',
   'id',
@@ -827,6 +830,8 @@ const validateJob = (jobId: string, projectId: string, sceneIds: Set<string>, va
         : isCanonicalIsoTimestamp(value.remoteStartedAt))) &&
     isString(value.cancellationPolicy) &&
     CANCELLATION_POLICIES.has(value.cancellationPolicy as StudioCancellationPolicy) &&
+    (!Object.hasOwn(value, 'outputRole') ||
+      (isString(value.outputRole) && JOB_OUTPUT_ROLES.has(value.outputRole as StudioOutputRole))) &&
     asArrayOfSafeIds(value.outputAssetIds) &&
     new Set(value.outputAssetIds).size === value.outputAssetIds.length &&
     errorIsValid &&
