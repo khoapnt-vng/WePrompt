@@ -5,7 +5,7 @@
  */
 
 import type { StudioRendererProject } from '@/common/types/project/creativeStudioTypes';
-import { Button, Tag } from '@arco-design/web-react';
+import { Button, Tag, Tooltip } from '@arco-design/web-react';
 import { Left } from '@icon-park/react';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
@@ -34,12 +34,16 @@ export const StudioPhaseHeader: React.FC<StudioPhaseHeaderProps> = ({ project, s
     <header className={styles.header}>
       <div className={styles.headerCopy}>
         <nav aria-label={t('conversation.creativeStudio.phase.shared.backToLibrary')} className={styles.breadcrumb}>
-          <Button type='text' size='small' icon={<Left />} className={styles.breadcrumbButton} onClick={onBack}>
-            {t('conversation.creativeStudio.phase.shared.backToLibrary')}
-          </Button>
-          <span aria-hidden='true' className={styles.breadcrumbSeparator}>
-            /
-          </span>
+          <Tooltip content={t('conversation.creativeStudio.phase.shared.backToLibrary')}>
+            <Button
+              type='text'
+              size='small'
+              aria-label={t('conversation.creativeStudio.phase.shared.backToLibrary')}
+              icon={<Left aria-hidden='true' />}
+              className={styles.breadcrumbButton}
+              onClick={onBack}
+            />
+          </Tooltip>
         </nav>
         <h1 className={styles.projectTitle}>{project.name}</h1>
         <Tag

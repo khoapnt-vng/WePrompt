@@ -35,11 +35,6 @@
   composes: body bodyTextAction from '../../StudioTypography.module.css';
 }
 
-.breadcrumbSeparator {
-  padding: 0 4px;
-  color: var(--color-text-4);
-}
-
 .projectTitle {
   composes: pageHeading from '../../StudioTypography.module.css';
   overflow: hidden;
