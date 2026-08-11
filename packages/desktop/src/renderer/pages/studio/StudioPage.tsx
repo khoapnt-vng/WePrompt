@@ -64,7 +64,8 @@ const toReviewScene = (
   scene: StudioScene,
   route: GenerationReviewRouteSnapshot | null,
   availableRoutes: readonly StudioRouteCatalogEntry[],
-  routeStatus?: 'valid' | 'invalid' | 'missing'
+  routeStatus?: 'valid' | 'invalid' | 'missing',
+  outputRole: GenerationReviewScene['outputRole'] = 'take'
 ): GenerationReviewScene => {
   const catalogRoute =
     route === null ? undefined : availableRoutes.find((candidate) => routeIdentity(candidate) === routeIdentity(route));
@@ -72,6 +73,7 @@ const toReviewScene = (
     id: scene.id,
     title: scene.title,
     mediaKind: scene.mediaKind,
+    outputRole,
     durationSeconds: scene.durationSeconds,
     route:
       route === null
@@ -308,7 +310,16 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
       setGenerationReviewIssueMessageKey(null);
       setGenerationReview({
         mode: 'single',
-        scenes: [toReviewScene(project, scene, request.route, request.availableRoutes, request.routeStatus)],
+        scenes: [
+          toReviewScene(
+            project,
+            scene,
+            request.route,
+            request.availableRoutes,
+            request.routeStatus,
+            request.outputRole ?? 'take'
+          ),
+        ],
         catalogVersion: request.catalogVersion,
         availableRoutes: request.availableRoutes,
         projectId: project.id,

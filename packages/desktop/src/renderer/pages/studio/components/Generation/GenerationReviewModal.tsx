@@ -7,6 +7,7 @@
 import type {
   StudioAspectRatio,
   StudioMediaKind,
+  StudioOutputRole,
   StudioResolution,
   StudioSceneGenerationChoice,
 } from '@/common/types/project/creativeStudioTypes';
@@ -36,6 +37,7 @@ export type GenerationReviewScene = {
   id: string;
   title: string;
   mediaKind: StudioMediaKind;
+  outputRole: StudioOutputRole;
   durationSeconds: number;
   route: GenerationReviewRoute;
 };
@@ -204,6 +206,7 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
                       : 'conversation.creativeStudio.scene.video'
                   )}
                 </Tag>
+                {scene.outputRole === 'reference' && <Tag>{t('conversation.creativeStudio.reference.reviewTag')}</Tag>}
                 <Tag>
                   {t('conversation.creativeStudio.scene.durationSeconds', {
                     count: scene.durationSeconds,

@@ -1243,6 +1243,9 @@
       "missingRoute": "请选择兼容的生成路线。",
       "invalidRoute": "此路线已失效。请在生成前重新检查。"
     },
+    "reference": {
+      "reviewTag": "参考图"
+    },
     "review": {
       "generateReadyScenes": "生成 {{count}} 个已就绪场景",
       "generateReadyScenes_other": "生成 {{count}} 个已就绪场景",

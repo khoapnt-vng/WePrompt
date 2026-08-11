@@ -128,7 +128,7 @@ export const ScriptRow: React.FC<ScriptRowProps> = ({
     referenceAsset.projectId === projectId &&
     referenceAsset.sceneId === scene.id &&
     referenceAsset.mediaKind === 'image' &&
-    referenceAsset.managedAsset.collection === 'imports' &&
+    (referenceAsset.managedAsset.collection === 'imports' || referenceAsset.managedAsset.collection === 'references') &&
     scene.assetIds.includes(referenceAsset.id)
       ? createManagedStudioAssetUrl(projectId, referenceAsset.id)
       : null;

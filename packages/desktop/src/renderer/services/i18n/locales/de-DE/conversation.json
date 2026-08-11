@@ -1252,6 +1252,9 @@
       "missingRoute": "Wähle eine kompatible Generierungsroute.",
       "invalidRoute": "Diese Route ist nicht mehr gültig. Prüfe sie vor der Generierung."
     },
+    "reference": {
+      "reviewTag": "Referenz"
+    },
     "review": {
       "generateReadyScenes": "{{count}} bereite Szenen generieren",
       "generateReadyScenes_one": "{{count}} bereite Szene generieren",

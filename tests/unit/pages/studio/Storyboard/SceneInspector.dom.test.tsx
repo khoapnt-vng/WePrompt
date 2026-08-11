@@ -344,6 +344,43 @@ describe('SceneInspector', () => {
     ).toHaveAttribute('src', 'weprompt-studio://asset/project-1/reference-1');
   });
 
+  it('shows a generated reference plate from the references collection', () => {
+    const referenceAsset: StudioAsset = {
+      id: 'reference-generated-1',
+      projectId: 'project-1',
+      sceneId: selectedScene.id,
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'references', fileName: 'reference-generated-1.png' },
+      byteSize: 256,
+      sha256: 'b'.repeat(64),
+      createdAt: '2026-08-11T00:00:00.000Z',
+      sourceVisualPrompt: 'Product reference sheet',
+    };
+    render(
+      <SceneInspector
+        {...createProps({
+          selectedScene: {
+            ...selectedScene,
+            referenceAssetId: referenceAsset.id,
+            assetIds: [referenceAsset.id],
+          },
+          sceneDraft: {
+            ...sceneDraft,
+            referenceAssetId: referenceAsset.id,
+          },
+          referenceAsset,
+        })}
+      />
+    );
+
+    expect(
+      screen.getByRole('img', {
+        name: 'conversation.creativeStudio.preview.importReference',
+      })
+    ).toHaveAttribute('src', 'weprompt-studio://asset/project-1/reference-generated-1');
+  });
+
   it('announces and disables reference import while the native chooser is active', () => {
     render(<SceneInspector {...createProps({ importingReference: true })} />);
 

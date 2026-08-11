@@ -158,6 +158,22 @@ describe('GenerationControls', () => {
     ).toBeNull();
   });
 
+  it('carries the reference role and prompt into the image-route review request', () => {
+    expect(
+      buildSingleSceneReviewRequest({
+        project: project(),
+        catalog: catalog(),
+        scene: { id: 'scene-1', mediaKind: 'image' },
+        outputRole: 'reference',
+        referencePrompt: 'Edited product sheet prompt',
+      })
+    ).toMatchObject({
+      outputRole: 'reference',
+      referencePrompt: 'Edited product sheet prompt',
+      route: { kind: 'image' },
+    });
+  });
+
   it('derives review from persisted project routing without exposing Studio configuration controls', () => {
     const props = createProps();
     render(<GenerationControls {...props} />);

@@ -1251,6 +1251,9 @@
       "missingRoute": "یک مسیر تولید سازگار انتخاب کنید.",
       "invalidRoute": "این مسیر دیگر معتبر نیست. پیش از تولید آن را بازبینی کنید."
     },
+    "reference": {
+      "reviewTag": "تصویر مرجع"
+    },
     "review": {
       "generateReadyScenes": "تولید {{count}} صحنه آماده",
       "generateReadyScenes_one": "تولید {{count}} صحنه آماده",

@@ -1243,6 +1243,9 @@
       "missingRoute": "互換性のある生成ルートを選択してください。",
       "invalidRoute": "このルートは無効になりました。生成前に確認してください。"
     },
+    "reference": {
+      "reviewTag": "参照画像"
+    },
     "review": {
       "generateReadyScenes": "準備済みの{{count}}シーンを生成",
       "generateReadyScenes_other": "準備済みの{{count}}シーンを生成",

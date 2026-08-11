@@ -1265,6 +1265,9 @@
       "missingRoute": "Escolha uma rota de geração compatível.",
       "invalidRoute": "Esta rota não é mais válida. Revise-a antes de gerar."
     },
+    "reference": {
+      "reviewTag": "Referência"
+    },
     "review": {
       "generateReadyScenes": "Gerar {{count}} cenas prontas",
       "generateReadyScenes_one": "Gerar {{count}} cena pronta",

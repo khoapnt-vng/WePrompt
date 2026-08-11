@@ -54,6 +54,7 @@ const mixedScenes = (): GenerationReviewScene[] => [
     id: 'scene-image',
     title: 'Opening image',
     mediaKind: 'image',
+    outputRole: 'take',
     durationSeconds: 5,
     route: validReviewRoute(imageRoute, 'Provider One', true),
   },
@@ -61,6 +62,7 @@ const mixedScenes = (): GenerationReviewScene[] => [
     id: 'scene-video',
     title: 'Product motion',
     mediaKind: 'video',
+    outputRole: 'take',
     durationSeconds: 7,
     route: validReviewRoute(videoRoute, 'Provider Two', false),
   },
@@ -146,6 +148,20 @@ describe('GenerationReviewModal', () => {
     expect(screen.queryByText(/credits|estimated cost/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /audio/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: /audio/i })).not.toBeInTheDocument();
+  });
+
+  it('names a reference generation while keeping the charge disclosure visible', () => {
+    render(
+      <GenerationReviewModal
+        {...createProps({
+          mode: 'single',
+          scenes: [{ ...mixedScenes()[0]!, outputRole: 'reference' }],
+        })}
+      />
+    );
+
+    expect(screen.getByText('conversation.creativeStudio.reference.reviewTag')).toBeInTheDocument();
+    expect(screen.getByText('conversation.creativeStudio.review.chargeNotice')).toBeInTheDocument();
   });
 
   it('keeps a mismatched batch advisory and submits after explicit confirmation', () => {

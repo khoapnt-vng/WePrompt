@@ -637,6 +637,29 @@ describe('WritePhase', () => {
     await waitFor(() => expect(props.importReference).toHaveBeenCalledWith('scene-2'));
   });
 
+  it('shows a generated plate from the references collection in its scene row', () => {
+    const generatedReference: StudioAsset = {
+      ...reference,
+      managedAsset: { collection: 'references', fileName: 'reference-2.png' },
+      sourceVisualPrompt: 'Product reference sheet',
+    };
+    render(
+      <WritePhase
+        controller={controller({
+          project: {
+            ...project,
+            assets: { [generatedReference.id]: generatedReference },
+          },
+        })}
+      />
+    );
+
+    expect(screen.getByRole('img', { name: 'conversation.creativeStudio.preview.importReference' })).toHaveAttribute(
+      'src',
+      'weprompt-studio://asset/project-1/reference-2'
+    );
+  });
+
   it('keeps Fit to goal at summary level and contains no media-generation or spend action', () => {
     const phaseEditor = editor('scene-1', { hasUnsavedSceneDrafts: false });
     const props = controller({ editor: phaseEditor });
