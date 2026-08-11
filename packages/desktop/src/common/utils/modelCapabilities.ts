@@ -96,6 +96,34 @@ export const updateModelSettings = (
 };
 
 /**
+ * Capabilities that CANNOT be answered by this module at all, by any heuristic.
+ *
+ * Every other capability here is resolved from evidence of decreasing strength:
+ * an explicit user tag, then a per-provider rule, then a regex over the model
+ * name (note `_platformModel` is unused below — name matching ignores the
+ * provider entirely). For vision or function-calling that ladder is fine; a
+ * wrong guess degrades a list filter.
+ *
+ * Reasoning is different. EPIC-003 rules that even an explicit
+ * provider-declared reasoning badge is insufficient evidence to enable
+ * reasoning controls — positive evidence must come from the capability
+ * discovery seam. Every rung of the ladder above is therefore too weak: a user
+ * checkbox is the user telling themselves, and a name regex is weaker still, so
+ * a model merely named `*-thinking` would grant the feature with no backend
+ * consulted. Guarding only the regex would leave the other two rungs open.
+ *
+ * These capabilities resolve to `undefined` ("unknown") — never `true`, and
+ * never `false`. `undefined` preserves the tri-state vocabulary: callers must
+ * seek positive evidence from the discovery seam, and nobody is told the
+ * capability is definitively absent.
+ *
+ * This does NOT remove `reasoning` from {@link ModelType}: storing and
+ * displaying a reasoning tag is unaffected. It only stops this module being
+ * treated as authority for whether reasoning controls may be enabled.
+ */
+export const DISCOVERY_ONLY_CAPABILITIES: ReadonlySet<ModelType> = new Set<ModelType>(['reasoning']);
+
+/**
  * Check whether a specific model within a provider has a given capability.
  * Returns true (supported), false (excluded), or undefined (unknown).
  */
@@ -104,6 +132,8 @@ export const hasSpecificModelCapability = (
   modelName: string,
   type: ModelType
 ): boolean | undefined => {
+  if (DISCOVERY_ONLY_CAPABILITIES.has(type)) return undefined;
+
   const baseModelName = getBaseModelName(modelName);
   const exclusions = CAPABILITY_EXCLUSIONS[type];
   const pattern = CAPABILITY_PATTERNS[type];
