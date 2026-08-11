@@ -49,7 +49,6 @@
   gap: 16px;
 }
 
-.form,
 .conversationColumn,
 .composer,
 .dangling {
@@ -57,6 +56,33 @@
   min-width: 0;
   flex-direction: column;
   gap: 12px;
+}
+
+.constraintsRow {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px 16px;
+}
+
+.constraint {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.constraintLabel {
+  composes: meta from '../../../../StudioTypography.module.css';
+}
+
+.durationControl {
+  width: 112px;
+}
+
+.aspectControl {
+  width: 152px;
 }
 
 .conversationSurface {
@@ -132,11 +158,15 @@
 }
 
 .saveStatus {
-  composes: meta from '../../../../StudioTypography.module.css';
+  composes: body from '../../../../StudioTypography.module.css';
 }
 
 .phase[data-layout='compact'] .content {
   grid-template-columns: minmax(0, 1fr);
+}
+
+.phase[data-layout='compact'] .constraintsRow {
+  row-gap: 8px;
 }
 
 .phase[data-layout='compact'] .footer {

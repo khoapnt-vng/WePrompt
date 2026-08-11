@@ -146,7 +146,7 @@
 .scriptRow {
   display: grid;
   min-width: 900px;
-  grid-template-columns: minmax(106px, 0.55fr) minmax(245px, 1.35fr) minmax(260px, 1.45fr) minmax(160px, 0.8fr);
+  grid-template-columns: 112px minmax(245px, 1.3fr) minmax(260px, 1.7fr) minmax(160px, 0.8fr);
 }
 
 .tableHeader {
@@ -274,6 +274,10 @@
   color: var(--color-text-3);
 }
 
+.visualPromptControl {
+  min-height: 120px;
+}
+
 .durationChip {
   composes: meta from '../../../../StudioTypography.module.css';
   width: fit-content;
@@ -397,7 +401,7 @@
 }
 
 .readiness {
-  composes: meta from '../../../../StudioTypography.module.css';
+  composes: body from '../../../../StudioTypography.module.css';
   display: flex;
   align-items: center;
   gap: 6px;
@@ -427,10 +431,6 @@
 
 .readiness[data-readiness='needs_attention'] .readinessDot {
   background: var(--color-danger-6);
-}
-
-.saveStatus {
-  composes: meta from '../../../../StudioTypography.module.css';
 }
 
 .fieldError,

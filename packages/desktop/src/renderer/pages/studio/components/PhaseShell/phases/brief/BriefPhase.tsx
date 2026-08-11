@@ -18,7 +18,6 @@ import { BriefProposalCard } from './BriefProposalCard';
 import styles from './BriefPhase.module.css';
 import { useBriefConversation } from './useBriefConversation';
 
-const MAX_PROJECT_NAME_CHARS = 256;
 const MAX_PROJECT_BRIEF_CHARS = 16 * 1024;
 const ACTIVE_JOB_STATUSES = new Set(['queued_local', 'submitting', 'queued_remote', 'running', 'needs_attention']);
 const ASPECT_RATIOS: StudioAspectRatio[] = ['16:9', '9:16', '1:1', '4:3', '3:4'];
@@ -43,21 +42,19 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
   const projectConflict = editor.conflict?.operation === 'update_project' ? editor.conflict : null;
   const projectIssue = projectConflict ?? (editor.error?.operation === 'update_project' ? editor.error : null);
   const draft = editor.projectDraft ?? {
-    name: project.name,
     brief: project.brief,
     aspectRatio: project.aspectRatio,
     targetDurationSeconds: project.targetDurationSeconds,
   };
   const briefConversation = useBriefConversation(project);
   const [composerText, setComposerText] = useState(draft.brief);
-  const invalidName = draft.name.trim().length === 0 || draft.name.length > MAX_PROJECT_NAME_CHARS;
   const invalidBrief = draft.brief.length > MAX_PROJECT_BRIEF_CHARS;
   const invalidComposer = composerText.length > MAX_PROJECT_BRIEF_CHARS;
   const invalidDuration =
     !Number.isInteger(draft.targetDurationSeconds) ||
     draft.targetDurationSeconds < 5 ||
     draft.targetDurationSeconds > 60;
-  const hasValidationError = invalidName || invalidBrief || invalidDuration;
+  const hasValidationError = invalidBrief || invalidDuration;
   const aspectLocked =
     Object.values(project.assets).some((asset) => asset.managedAsset.collection === 'assets') ||
     Object.values(project.jobs).some((job) => ACTIVE_JOB_STATUSES.has(job.status));
@@ -67,6 +64,7 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
     saving: 'conversation.creativeStudio.phase.brief.saving',
     failed: 'conversation.creativeStudio.inspector.saveFailed',
   } as const;
+  const pendingProposals = controller.proposals.filter((proposal) => proposal.status === 'pending');
 
   const flushIfValid = (): void => {
     if (!hasValidationError) void editor.flushProjectDraft();
@@ -104,28 +102,9 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
       </div>
 
       <div className={styles.content}>
-        <div className={styles.form}>
-          <div className={styles.field}>
-            <label htmlFor='studio-brief-name' className={styles.fieldLabel}>
-              {t('conversation.creativeStudio.phase.brief.nameLabel')}
-            </label>
-            <Input
-              id='studio-brief-name'
-              value={draft.name}
-              error={invalidName}
-              maxLength={MAX_PROJECT_NAME_CHARS}
-              onChange={(name) => editor.updateProjectDraft({ name })}
-              onBlur={flushIfValid}
-            />
-            {invalidName && (
-              <span role='alert' className={styles.fieldError}>
-                {t('conversation.creativeStudio.phase.brief.invalidName')}
-              </span>
-            )}
-          </div>
-
-          <div className={styles.field}>
-            <label htmlFor='studio-brief-duration' className={styles.fieldLabel}>
+        <div className={styles.constraintsRow}>
+          <div className={styles.constraint}>
+            <label htmlFor='studio-brief-duration' className={styles.constraintLabel}>
               {t('conversation.creativeStudio.phase.brief.durationLabel')}
             </label>
             <InputNumber
@@ -139,6 +118,7 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
               precision={0}
               step={1}
               mode='button'
+              className={styles.durationControl}
               error={invalidDuration}
               onChange={(targetDurationSeconds) => editor.updateProjectDraft({ targetDurationSeconds })}
               onBlur={flushIfValid}
@@ -150,13 +130,14 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
             )}
           </div>
 
-          <div className={styles.field}>
-            <label htmlFor='studio-brief-aspect' className={styles.fieldLabel}>
+          <div className={styles.constraint}>
+            <label htmlFor='studio-brief-aspect' className={styles.constraintLabel}>
               {t('conversation.creativeStudio.phase.brief.aspectRatioLabel')}
             </label>
             <Select
               id='studio-brief-aspect'
               aria-label={t('conversation.creativeStudio.phase.brief.aspectRatioLabel')}
+              className={styles.aspectControl}
               value={draft.aspectRatio}
               disabled={aspectLocked}
               onChange={(aspectRatio) => editor.updateProjectDraft({ aspectRatio: aspectRatio as StudioAspectRatio })}
@@ -226,9 +207,9 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
         </div>
       </div>
 
-      {controller.proposals.length > 0 && (
+      {pendingProposals.length > 0 && (
         <div className={styles.proposals}>
-          {controller.proposals.map((proposal) => (
+          {pendingProposals.map((proposal) => (
             <BriefProposalCard
               key={proposal.id}
               project={project}

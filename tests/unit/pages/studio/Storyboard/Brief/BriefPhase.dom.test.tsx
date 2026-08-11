@@ -8,7 +8,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { StudioAsset, StudioRendererProject } from '@/common/types/project/creativeStudioTypes';
+import type { StudioAsset, StudioProposal, StudioRendererProject } from '@/common/types/project/creativeStudioTypes';
 import { BriefPhase } from '@renderer/pages/studio/components/PhaseShell/phases/brief';
 import type { BriefPhaseController } from '@renderer/pages/studio/components/PhaseShell/types';
 import type { UseStoryboardEditorResult } from '@renderer/pages/studio/hooks/useStoryboardEditor';
@@ -140,6 +140,17 @@ const controller = (overrides: Partial<BriefPhaseController> = {}): BriefPhaseCo
   ...overrides,
 });
 
+const proposal = (id: string, status: StudioProposal['status']): StudioProposal => ({
+  schemaVersion: 1,
+  id,
+  projectId: 'project-1',
+  status,
+  baseRevision: 2,
+  payload: { kind: 'replace_storyboard', sceneOrder: [], scenes: {} },
+  createdAt: '2026-08-11T01:00:00.000Z',
+  decidedAt: status === 'pending' ? null : '2026-08-11T02:00:00.000Z',
+});
+
 describe('BriefPhase', () => {
   beforeEach(() => {
     briefConversationHarness.result.state = { kind: 'absent' };
@@ -148,11 +159,11 @@ describe('BriefPhase', () => {
     briefConversationHarness.result.recreate.mockClear();
   });
 
-  it('renders the intent composer with the editable form controls before the conversation exists', () => {
+  it('renders the intent composer and project constraints without a duplicate project-name control', () => {
     const props = controller();
     render(<BriefPhase controller={props} />);
 
-    expect(screen.getByLabelText('conversation.creativeStudio.phase.brief.nameLabel')).toHaveValue('Launch film');
+    expect(screen.queryByLabelText('conversation.creativeStudio.phase.brief.nameLabel')).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText('conversation.creativeStudio.brief.composerPlaceholder')).toHaveValue(
       'A short launch story'
     );
@@ -163,15 +174,11 @@ describe('BriefPhase', () => {
       screen.getByRole('combobox', { name: 'conversation.creativeStudio.phase.brief.aspectRatioLabel' })
     ).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText('conversation.creativeStudio.phase.brief.nameLabel'), {
-      target: { value: 'Launch film v2' },
-    });
     fireEvent.change(
       screen.getByRole('spinbutton', { name: 'conversation.creativeStudio.phase.brief.durationLabel' }),
       { target: { value: '20' } }
     );
 
-    expect(props.editor.updateProjectDraft).toHaveBeenCalledWith({ name: 'Launch film v2' });
     expect(props.editor.updateProjectDraft).toHaveBeenCalledWith({ targetDurationSeconds: 20 });
     expect(screen.getByRole('button', { name: 'conversation.creativeStudio.brief.composerSend' })).toBeInTheDocument();
     expect(screen.queryByText('conversation.creativeStudio.project.resolution')).not.toBeInTheDocument();
@@ -200,6 +207,23 @@ describe('BriefPhase', () => {
     ).toBeInTheDocument();
   });
 
+  it('renders a full proposal card only for pending proposals', () => {
+    render(
+      <BriefPhase
+        controller={controller({
+          proposals: [
+            proposal('pending', 'pending'),
+            proposal('accepted', 'accepted'),
+            proposal('rejected', 'rejected'),
+            proposal('expired', 'expired'),
+          ],
+        })}
+      />
+    );
+
+    expect(screen.getAllByText('conversation.creativeStudio.brief.proposalTitle')).toHaveLength(1);
+  });
+
   it('shows the dangling notice and Start fresh action', () => {
     briefConversationHarness.result.state = { kind: 'dangling', conversationId: 'conversation_deleted' };
 
@@ -210,7 +234,7 @@ describe('BriefPhase', () => {
     expect(briefConversationHarness.result.recreate).toHaveBeenCalledOnce();
   });
 
-  it('blocks invalid fields next to their inputs without attempting persistence or navigation', () => {
+  it('blocks invalid brief constraints without treating the header-owned name as a brief-panel error', () => {
     const draft = {
       name: '   ',
       brief: 'x'.repeat(16 * 1024 + 1),
@@ -221,7 +245,7 @@ describe('BriefPhase', () => {
     const props = controller({ editor: phaseEditor });
     render(<BriefPhase controller={props} />);
 
-    expect(screen.getByText('conversation.creativeStudio.phase.brief.invalidName')).toBeInTheDocument();
+    expect(screen.queryByText('conversation.creativeStudio.phase.brief.invalidName')).not.toBeInTheDocument();
     expect(screen.getByText('conversation.creativeStudio.errors.invalidPayload')).toBeInTheDocument();
     expect(screen.getByText('conversation.creativeStudio.create.invalidDuration')).toBeInTheDocument();
 
@@ -338,7 +362,9 @@ describe('BriefPhase', () => {
       screen.getByRole('combobox', { name: 'conversation.creativeStudio.phase.brief.aspectRatioLabel' })
     ).toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByText('conversation.creativeStudio.phase.brief.aspectLockedHelp')).toBeInTheDocument();
-    expect(screen.getByLabelText('conversation.creativeStudio.phase.brief.nameLabel')).toBeEnabled();
+    expect(
+      screen.getByRole('spinbutton', { name: 'conversation.creativeStudio.phase.brief.durationLabel' })
+    ).toBeEnabled();
   });
 
   it.each([

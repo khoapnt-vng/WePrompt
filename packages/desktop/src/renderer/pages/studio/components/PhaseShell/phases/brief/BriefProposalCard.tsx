@@ -124,6 +124,8 @@ export const BriefProposalCard: React.FC<BriefProposalCardProps> = ({
     }
   };
 
+  if (status !== 'pending') return null;
+
   return (
     <Card title={t('conversation.creativeStudio.brief.proposalTitle')}>
       <p>
@@ -138,27 +140,15 @@ export const BriefProposalCard: React.FC<BriefProposalCardProps> = ({
           <li key={sceneId}>{proposal.payload.scenes[sceneId]?.title ?? sceneId}</li>
         ))}
       </ul>
-      {status === 'pending' ? (
-        <div className='flex gap-8px'>
-          <Button type='primary' loading={pending} onClick={() => void accept()}>
-            {t('conversation.creativeStudio.brief.proposalAccept')}
-          </Button>
-          <Button disabled={pending} onClick={() => void reject()}>
-            {t('conversation.creativeStudio.brief.proposalReject')}
-          </Button>
-        </div>
-      ) : (
-        <div role='status' aria-live='polite'>
-          {t(
-            status === 'accepted'
-              ? 'conversation.creativeStudio.brief.proposalAccepted'
-              : status === 'rejected'
-                ? 'conversation.creativeStudio.brief.proposalRejected'
-                : 'conversation.creativeStudio.brief.proposalExpired'
-          )}
-        </div>
-      )}
-      {messageKey !== null && status === 'pending' && (
+      <div className='flex gap-8px'>
+        <Button type='primary' loading={pending} onClick={() => void accept()}>
+          {t('conversation.creativeStudio.brief.proposalAccept')}
+        </Button>
+        <Button disabled={pending} onClick={() => void reject()}>
+          {t('conversation.creativeStudio.brief.proposalReject')}
+        </Button>
+      </div>
+      {messageKey !== null && (
         <div role='status' aria-live='polite'>
           {t(messageKey)}
         </div>
