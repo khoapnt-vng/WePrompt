@@ -358,6 +358,7 @@ describe('CreativeStudioService', () => {
     const asset = Object.values(rendererProject?.assets ?? {}).find((candidate) => candidate.sceneId === 's1');
 
     expect(asset?.sourceVisualPrompt).toBeUndefined();
+    expect(asset).not.toHaveProperty('sourceVisualPrompt');
   });
 
   it('reports the newest verified cut file and its render time without exposing a storage path', async () => {

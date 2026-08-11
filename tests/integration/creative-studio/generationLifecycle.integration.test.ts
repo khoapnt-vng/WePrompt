@@ -171,6 +171,77 @@ const createHarness = async (): Promise<Harness> => {
   return harness;
 };
 
+const submitReferenceAndStopWithRemoteIdentity = async (
+  harness: Harness
+): Promise<{
+  configured: StudioProject;
+  providerResolver: ReturnType<typeof createStudioProviderResolver>;
+}> => {
+  const listProviders = async () => [harness.fake.provider];
+  const providerResolver = createStudioProviderResolver({
+    listProviders,
+    listConnections: () => harness.store.listConnections(),
+  });
+  const catalog = await providerResolver.listGenerationRoutes();
+  const catalogImageRoute = catalog.routes.find((candidate) => candidate.kind === 'image');
+  if (!catalogImageRoute) throw new Error('E2E fake image route was not resolved');
+  const imageRoute: StudioResolvedSceneRouteSnapshot = {
+    sceneId: scene.id,
+    providerId: catalogImageRoute.providerId,
+    adapterId: catalogImageRoute.adapterId,
+    model: catalogImageRoute.model,
+    kind: catalogImageRoute.kind,
+  };
+  const configured = await harness.store.updateProject(harness.project.id, (current) => ({
+    ...current,
+    routing: {
+      ...current.routing,
+      image: {
+        providerId: imageRoute.providerId,
+        adapterId: imageRoute.adapterId,
+        model: imageRoute.model,
+      },
+    },
+  }));
+
+  await harness.manager.submitScenes({
+    projectId: configured.id,
+    expectedRevision: configured.revision,
+    sceneIds: [scene.id],
+    routes: [imageRoute],
+    catalogVersion: catalog.generationCatalogVersion,
+    outputRole: 'reference',
+    referencePrompt: 'A restart-safe reference plate',
+  });
+  await waitFor(async () => {
+    const job = (await harness.store.getProject(configured.id))?.jobs.job_lifecycle;
+    return job?.status === 'queued_remote' && job.providerJobId ? job : null;
+  });
+  await harness.clock.take(2_000);
+  const disposal = harness.manager.dispose();
+  harness.clock.releaseAll();
+  await disposal;
+
+  return { configured, providerResolver };
+};
+
+const createRestartedManager = (
+  harness: Harness,
+  providerResolver: ReturnType<typeof createStudioProviderResolver>
+): StudioJobManager => {
+  const manager = createStudioJobManager({
+    store: harness.store,
+    mediaStore: harness.mediaStore,
+    providerResolver,
+    adapters: harness.fake.adapters,
+    listProviders: async () => [harness.fake.provider],
+    sleep: async () => undefined,
+    jitterMs: (baseMs) => baseMs,
+  });
+  activeManagers.push(manager);
+  return manager;
+};
+
 const forbiddenDtoKeys = new Set([
   'path',
   'filepath',
@@ -214,6 +285,54 @@ afterEach(async () => {
 });
 
 describe('Creative Studio generation lifecycle integration', () => {
+  it('resumes a reference job on a video scene through its durable image route', async () => {
+    const harness = await createHarness();
+    const { configured, providerResolver } = await submitReferenceAndStopWithRemoteIdentity(harness);
+    const manager = createRestartedManager(harness, providerResolver);
+
+    await manager.resumePendingJobs();
+
+    const recovered = await waitFor(async () => {
+      const current = await harness.store.getProject(configured.id);
+      const status = current?.jobs.job_lifecycle.status;
+      return current && (status === 'succeeded' || status === 'needs_attention') ? current : null;
+    });
+    expect(recovered.jobs.job_lifecycle).toMatchObject({
+      status: 'succeeded',
+      outputRole: 'reference',
+      error: null,
+    });
+    expect(recovered.jobs.job_lifecycle.error?.code).not.toBe('provider_unavailable');
+  });
+
+  it('retries a reference download on a video scene through its durable image route', async () => {
+    const harness = await createHarness();
+    const { configured, providerResolver } = await submitReferenceAndStopWithRemoteIdentity(harness);
+    const failed = await harness.store.updateProject(configured.id, (current) => {
+      const next = structuredClone(current);
+      next.jobs.job_lifecycle.status = 'failed';
+      next.jobs.job_lifecycle.error = {
+        code: 'download_failed',
+        messageKey: 'conversation.creativeStudio.jobs.errors.downloadFailed',
+      };
+      next.scenes[scene.id].reviewState = 'blocked';
+      return next;
+    });
+    const manager = createRestartedManager(harness, providerResolver);
+
+    const retried = await manager.retryDownload({
+      projectId: failed.id,
+      jobId: 'job_lifecycle',
+      expectedRevision: failed.revision,
+    });
+
+    expect(retried).toMatchObject({
+      status: 'failed',
+      outputRole: 'reference',
+      error: { code: 'download_failed' },
+    });
+  });
+
   it('commits a scene-owned reference before using it as the first frame of a later take', async () => {
     const harness = await createHarness();
     const providerResolver = createStudioProviderResolver({

@@ -114,6 +114,8 @@ type ExecutionContext = {
   projectId: string;
   sceneId: string;
   mediaKind: StudioMediaKind;
+  /** Always explicit in memory; only 'reference' is written to the durable record. */
+  outputRole: StudioOutputRole;
   jobId: string;
   adapter: GenerationProviderAdapter;
   provider: TProviderWithModel;
@@ -122,8 +124,6 @@ type ExecutionContext = {
 type PreparedSubmission = ExecutionContext & {
   request: ResolvedStudioGenerationRequest;
   cancellationPolicy: StudioCancellationPolicy;
-  /** Always explicit in memory; only 'reference' is written to the durable record. */
-  outputRole: StudioOutputRole;
 };
 
 /**
@@ -630,10 +630,12 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     const scene = project.scenes[job.sceneId];
     if (!scene) return null;
     try {
+      const outputRole = jobOutputRole(job);
+      const mediaKind = requestedMediaKind(scene.mediaKind, outputRole);
       const route = {
         sceneId: scene.id,
         ...job.provider,
-        kind: scene.mediaKind,
+        kind: mediaKind,
       } satisfies StudioResolvedSceneRouteSnapshot;
       if (!(await deps.providerResolver.isGenerationRouteAvailable(route))) return null;
       const provider = (await deps.listProviders()).find((candidate) => candidate.id === job.provider.providerId);
@@ -642,7 +644,8 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       return {
         projectId: project.id,
         sceneId: scene.id,
-        mediaKind: scene.mediaKind,
+        mediaKind,
+        outputRole,
         jobId: job.id,
         adapter,
         provider: providerWithModel(provider, job.provider.model),
@@ -659,13 +662,15 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     const scene = project.scenes[job.sceneId];
     if (!scene) return null;
     try {
+      const outputRole = jobOutputRole(job);
       const provider = (await deps.listProviders()).find((candidate) => candidate.id === job.provider.providerId);
       const adapter = deps.adapters.get(job.provider.adapterId);
       if (!provider || !adapter || !providerCredentialsAreUsable(provider)) return null;
       return {
         projectId: project.id,
         sceneId: scene.id,
-        mediaKind: scene.mediaKind,
+        mediaKind: requestedMediaKind(scene.mediaKind, outputRole),
+        outputRole,
         jobId: job.id,
         adapter,
         provider: providerWithModel(provider, job.provider.model),
