@@ -146,7 +146,7 @@
 .scriptRow {
   display: grid;
   min-width: 900px;
-  grid-template-columns: minmax(106px, 0.55fr) minmax(245px, 1.35fr) minmax(260px, 1.45fr) minmax(160px, 0.8fr);
+  grid-template-columns: 112px minmax(245px, 1.3fr) minmax(260px, 1.7fr) minmax(160px, 0.8fr);
 }
 
 .tableHeader {
@@ -272,6 +272,10 @@
 
 .editorControl::placeholder {
   color: var(--color-text-3);
+}
+
+.visualPromptControl {
+  min-height: 120px;
 }
 
 .durationChip {

@@ -367,7 +367,7 @@ export const ScriptRow: React.FC<ScriptRowProps> = ({
             </label>
             <Input.TextArea
               id={fieldId('prompt')}
-              className={styles.editorControl}
+              className={`${styles.editorControl} ${styles.visualPromptControl}`}
               value={draft.visualPrompt}
               placeholder={t('conversation.creativeStudio.phase.write.visualPlaceholder')}
               rows={3}
