@@ -159,14 +159,11 @@ describe('BriefPhase', () => {
     briefConversationHarness.result.recreate.mockClear();
   });
 
-  it('renders the intent composer and project constraints without a duplicate project-name control', () => {
+  it('renders the project constraints without a duplicate project-name control', () => {
     const props = controller();
     render(<BriefPhase controller={props} />);
 
     expect(screen.queryByLabelText('conversation.creativeStudio.phase.brief.nameLabel')).not.toBeInTheDocument();
-    expect(screen.getByPlaceholderText('conversation.creativeStudio.brief.composerPlaceholder')).toHaveValue(
-      'A short launch story'
-    );
     expect(
       screen.getByRole('spinbutton', { name: 'conversation.creativeStudio.phase.brief.durationLabel' })
     ).toHaveValue('15');
@@ -180,31 +177,9 @@ describe('BriefPhase', () => {
     );
 
     expect(props.editor.updateProjectDraft).toHaveBeenCalledWith({ targetDurationSeconds: 20 });
-    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.brief.composerSend' })).toBeInTheDocument();
     expect(screen.queryByText('conversation.creativeStudio.project.resolution')).not.toBeInTheDocument();
     expect(screen.queryByText('conversation.creativeStudio.phase.produce.modelsTitle')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /render|generate/i })).not.toBeInTheDocument();
-  });
-
-  it('mounts the ready conversation surface', () => {
-    briefConversationHarness.result.state = {
-      kind: 'ready',
-      conversation: {
-        id: 'conversation_brief',
-        name: 'Brief',
-        type: 'aionrs',
-        model: { id: 'provider_1', use_model: 'model_1' },
-        created_at: 1,
-        modified_at: 1,
-        extra: { backend: 'aionrs', workspace: '' },
-      },
-    };
-
-    render(<BriefPhase controller={controller()} />);
-
-    expect(
-      screen.getByRole('region', { name: 'conversation.creativeStudio.brief.conversationTitle' })
-    ).toBeInTheDocument();
   });
 
   it('renders a full proposal card only for pending proposals', () => {
@@ -224,16 +199,6 @@ describe('BriefPhase', () => {
     expect(screen.getAllByText('conversation.creativeStudio.brief.proposalTitle')).toHaveLength(1);
   });
 
-  it('shows the dangling notice and Start fresh action', () => {
-    briefConversationHarness.result.state = { kind: 'dangling', conversationId: 'conversation_deleted' };
-
-    render(<BriefPhase controller={controller()} />);
-
-    expect(screen.getByText('conversation.creativeStudio.brief.danglingNotice')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.brief.danglingStartFresh' }));
-    expect(briefConversationHarness.result.recreate).toHaveBeenCalledOnce();
-  });
-
   it('blocks invalid brief constraints without treating the header-owned name as a brief-panel error', () => {
     const draft = {
       name: '   ',
@@ -246,7 +211,7 @@ describe('BriefPhase', () => {
     render(<BriefPhase controller={props} />);
 
     expect(screen.queryByText('conversation.creativeStudio.phase.brief.invalidName')).not.toBeInTheDocument();
-    expect(screen.getByText('conversation.creativeStudio.errors.invalidPayload')).toBeInTheDocument();
+    expect(screen.queryByText('conversation.creativeStudio.errors.invalidPayload')).not.toBeInTheDocument();
     expect(screen.getByText('conversation.creativeStudio.create.invalidDuration')).toBeInTheDocument();
 
     const startWriting = screen.getByRole('button', {

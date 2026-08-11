@@ -13,10 +13,9 @@ import { useTranslation } from 'react-i18next';
 import type { BriefPhaseController } from '../../types';
 import type { StudioLayoutMode } from '../../useStudioLayoutMode';
 import { getConversationPinnedContext } from '@/renderer/pages/conversation/contextHandoff/pinnedContext';
-import { StudioConversationSurface } from '../StudioConversationSurface';
+import { useBriefConversationContext } from '../../../Shell/BriefConversationContext';
 import { BriefProposalCard } from './BriefProposalCard';
 import styles from './BriefPhase.module.css';
-import { useBriefConversation } from './useBriefConversation';
 
 const MAX_PROJECT_BRIEF_CHARS = 16 * 1024;
 const ACTIVE_JOB_STATUSES = new Set(['queued_local', 'submitting', 'queued_remote', 'running', 'needs_attention']);
@@ -46,7 +45,6 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
     aspectRatio: project.aspectRatio,
     targetDurationSeconds: project.targetDurationSeconds,
   };
-  const briefConversation = useBriefConversation(project);
   const [composerText, setComposerText] = useState(draft.brief);
   const invalidBrief = draft.brief.length > MAX_PROJECT_BRIEF_CHARS;
   const invalidComposer = composerText.length > MAX_PROJECT_BRIEF_CHARS;
@@ -79,6 +77,8 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
       setStartingWrite(false);
     }
   };
+
+  const briefConversation = useBriefConversationContext();
 
   const repropose = async (): Promise<void> => {
     if (briefConversation.state.kind !== 'ready') return;
@@ -156,54 +156,6 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
               </div>
             )}
           </div>
-        </div>
-
-        <div className={styles.conversationColumn}>
-          {briefConversation.state.kind === 'ready' ? (
-            <div
-              role='region'
-              aria-label={t('conversation.creativeStudio.brief.conversationTitle')}
-              className={styles.conversationSurface}
-            >
-              <StudioConversationSurface conversation={briefConversation.state.conversation} />
-            </div>
-          ) : briefConversation.state.kind === 'dangling' ? (
-            <div className={styles.dangling}>
-              <p>{t('conversation.creativeStudio.brief.danglingNotice')}</p>
-              <Button type='primary' onClick={briefConversation.recreate}>
-                {t('conversation.creativeStudio.brief.danglingStartFresh')}
-              </Button>
-            </div>
-          ) : (
-            <div className={styles.composer}>
-              <Input.TextArea
-                value={composerText}
-                error={invalidComposer}
-                maxLength={MAX_PROJECT_BRIEF_CHARS}
-                rows={6}
-                placeholder={t('conversation.creativeStudio.brief.composerPlaceholder')}
-                onChange={setComposerText}
-              />
-              {invalidComposer && (
-                <span role='alert' className={styles.fieldError}>
-                  {t('conversation.creativeStudio.errors.invalidPayload')}
-                </span>
-              )}
-              {briefConversation.errorMessageKey && (
-                <span role='alert' className={styles.fieldError}>
-                  {t(briefConversation.errorMessageKey)}
-                </span>
-              )}
-              <Button
-                type='primary'
-                loading={briefConversation.state.kind === 'creating'}
-                disabled={composerText.trim().length === 0 || invalidComposer}
-                onClick={() => void briefConversation.sendFirstMessage(composerText)}
-              >
-                {t('conversation.creativeStudio.brief.composerSend')}
-              </Button>
-            </div>
-          )}
         </div>
       </div>
 

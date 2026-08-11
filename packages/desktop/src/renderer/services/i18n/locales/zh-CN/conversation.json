@@ -1409,7 +1409,9 @@
     },
     "shell": {
       "showDirector": "显示创意总监",
-      "hideDirector": "隐藏创意总监"
+      "hideDirector": "隐藏创意总监",
+      "directorName": "创意总监",
+      "sameConversation": "与简报同一个对话"
     }
   },
   "artifact": {

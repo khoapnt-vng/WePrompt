@@ -1409,7 +1409,9 @@
     },
     "shell": {
       "showDirector": "顯示創意總監",
-      "hideDirector": "隱藏創意總監"
+      "hideDirector": "隱藏創意總監",
+      "directorName": "創意總監",
+      "sameConversation": "與簡報同一個對話"
     }
   },
   "artifact": {

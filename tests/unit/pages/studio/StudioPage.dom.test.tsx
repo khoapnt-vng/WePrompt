@@ -665,7 +665,13 @@ describe('StudioPage and useStudioProject', () => {
           screen.getByRole('button', { name: 'conversation.creativeStudio.phase.write.askAssistant' })
         ).toHaveFocus()
       );
-      expect(document.querySelectorAll('.arco-drawer')).toHaveLength(0);
+      // Scoped to the assistant's drawer: the Director pane also renders in an Arco Drawer below
+      // inline width, and that one stays mounted on purpose so a streaming reply survives being
+      // hidden. Counting every .arco-drawer would assert the opposite of what the shell guarantees.
+      const assistantDrawers = [...document.querySelectorAll('.arco-drawer')].filter(
+        (drawer) => drawer.querySelector('[data-studio-director]') === null
+      );
+      expect(assistantDrawers).toHaveLength(0);
     });
 
     it('renders only the active phase and keeps project owners mounted across clean phase changes', async () => {

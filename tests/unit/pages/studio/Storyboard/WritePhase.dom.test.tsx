@@ -822,7 +822,15 @@ describe('WritePhase', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('mounts the project conversation in Write and renders its existing history', async () => {
+  /**
+   * Write must NOT mount its own conversation.
+   *
+   * It used to, which meant one thread had two mounts and each phase called
+   * `useBriefConversation` separately. The shell now owns the single mount, so a phase change
+   * cannot tear down a streaming reply — and this asserts Write does not quietly reintroduce a
+   * second one. Presence of the mount is covered by StudioShell.dom.test.tsx.
+   */
+  it('leaves the conversation to the shell instead of mounting a second copy', async () => {
     writeConversationHarness.result.state = {
       kind: 'ready',
       conversation: {
@@ -839,11 +847,9 @@ describe('WritePhase', () => {
 
     render(<WritePhase controller={controller()} layoutMode='inline' />);
 
-    expect(await screen.findByText('Five shots, 20 seconds.')).toBeInTheDocument();
-    expect(writeConversationHarness.mountedConversationIds).toEqual(['conversation_brief']);
-    expect(screen.queryByText(/start a new conversation/i)).not.toBeInTheDocument();
+    expect(writeConversationHarness.mountedConversationIds).toEqual([]);
+    expect(screen.queryByText('Five shots, 20 seconds.')).not.toBeInTheDocument();
   });
-
   it('selects and focuses the requested visual prompt, then clears the route intent', async () => {
     const firstEditor = editor('scene-1');
     const props = controller({

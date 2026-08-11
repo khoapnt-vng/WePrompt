@@ -1426,7 +1426,9 @@
     },
     "shell": {
       "showDirector": "Creative Director einblenden",
-      "hideDirector": "Creative Director ausblenden"
+      "hideDirector": "Creative Director ausblenden",
+      "directorName": "Creative Director",
+      "sameConversation": "DIESELBE UNTERHALTUNG WIE IHR BRIEFING"
     }
   },
   "artifact": {

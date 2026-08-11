@@ -1409,7 +1409,9 @@
     },
     "shell": {
       "showDirector": "크리에이티브 디렉터 표시",
-      "hideDirector": "크리에이티브 디렉터 숨기기"
+      "hideDirector": "크리에이티브 디렉터 숨기기",
+      "directorName": "크리에이티브 디렉터",
+      "sameConversation": "브리프와 같은 대화"
     }
   },
   "artifact": {

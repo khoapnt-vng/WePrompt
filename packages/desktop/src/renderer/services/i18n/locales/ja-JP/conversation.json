@@ -1409,7 +1409,9 @@
     },
     "shell": {
       "showDirector": "クリエイティブディレクターを表示",
-      "hideDirector": "クリエイティブディレクターを非表示"
+      "hideDirector": "クリエイティブディレクターを非表示",
+      "directorName": "クリエイティブディレクター",
+      "sameConversation": "ブリーフと同じ会話"
     }
   },
   "artifact": {

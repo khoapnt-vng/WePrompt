@@ -12,12 +12,11 @@ import { buildSingleSceneReviewRequest } from '../../Generation/GenerationContro
 import { requestedMediaKind } from '@/common/types/project/creativeStudioOutputRole';
 import { resolveSceneDurationBounds } from '../../../studioRouteConstraints';
 import { AssistantDock } from '../AssistantDock';
-import { StudioConversationSurface } from './StudioConversationSurface';
-import { useBriefConversation } from './brief/useBriefConversation';
 import type { WritePhaseController } from '../types';
 import type { StudioLayoutMode } from '../useStudioLayoutMode';
 import { ScriptRow, ScriptTable } from './write';
 import styles from './write/write.module.css';
+import { useBriefConversationContext } from '../../Shell/BriefConversationContext';
 
 export type WritePhaseProps = {
   controller: WritePhaseController;
@@ -40,7 +39,7 @@ export const WritePhase: React.FC<WritePhaseProps> = ({ controller, layoutMode =
   } = controller;
   const [importingSceneId, setImportingSceneId] = useState<string | null>(null);
   const [assistantOpen, setAssistantOpen] = useState(false);
-  const briefConversation = useBriefConversation(project);
+  const briefConversation = useBriefConversationContext();
   const saveConflict = editor.conflict?.operation === 'save_scene' ? editor.conflict : null;
   const nonSaveConflict =
     editor.conflict !== null &&
@@ -212,9 +211,6 @@ export const WritePhase: React.FC<WritePhaseProps> = ({ controller, layoutMode =
               aria-label={t('conversation.creativeStudio.brief.conversationTitle')}
               className={styles.conversationRail}
             >
-              <div className={styles.conversationSurface}>
-                <StudioConversationSurface conversation={briefConversation.state.conversation} />
-              </div>
               <Button
                 long
                 disabled={mutationPending || editor.drafting || models.pendingRole !== null}

@@ -1425,7 +1425,9 @@
     },
     "shell": {
       "showDirector": "نمایش کارگردان خلاق",
-      "hideDirector": "پنهان کردن کارگردان خلاق"
+      "hideDirector": "پنهان کردن کارگردان خلاق",
+      "directorName": "کارگردان خلاق",
+      "sameConversation": "همان گفتگوی بریف شما"
     }
   },
   "artifact": {

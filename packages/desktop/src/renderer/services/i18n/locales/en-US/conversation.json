@@ -1260,7 +1260,9 @@
     },
     "shell": {
       "showDirector": "Show the Creative Director",
-      "hideDirector": "Hide the Creative Director"
+      "hideDirector": "Hide the Creative Director",
+      "directorName": "Creative Director",
+      "sameConversation": "SAME CONVERSATION AS YOUR BRIEF"
     }
   },
   "contextHandoff": {

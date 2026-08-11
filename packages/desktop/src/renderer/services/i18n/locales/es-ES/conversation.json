@@ -1442,7 +1442,9 @@
     },
     "shell": {
       "showDirector": "Mostrar el Creative Director",
-      "hideDirector": "Ocultar el Creative Director"
+      "hideDirector": "Ocultar el Creative Director",
+      "directorName": "Creative Director",
+      "sameConversation": "LA MISMA CONVERSACIÓN QUE TU BRIEFING"
     }
   },
   "artifact": {

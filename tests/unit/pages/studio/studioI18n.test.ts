@@ -33,6 +33,7 @@ const plannedGroups = [
   'review',
   'routing',
   'scene',
+  'shell',
   'storyboard',
   'timeline',
   'transition',

@@ -37,6 +37,11 @@ import {
   StudioPhaseShell,
   type StudioPhaseControllers,
 } from './components';
+import { BriefConversationProvider } from './components/Shell/BriefConversationContext';
+import { DirectorPane } from './components/Shell/DirectorPane';
+import { StudioShell } from './components/Shell/StudioShell';
+import { useStudioPanes, type StudioPaneState } from './components/Shell/useStudioPanes';
+import { useStudioLayoutMode } from './components/PhaseShell/useStudioLayoutMode';
 import { useStoryboardEditor, useStudioJobs, useStudioModels, useStudioProject } from './hooks';
 import styles from './StudioPage.module.css';
 import {
@@ -298,6 +303,9 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
   const [transitionIssueMessageKey, setTransitionIssueMessageKey] = useState<string | null>(null);
   const [postModalTransition, setPostModalTransition] = useState<StudioPhaseTransition | null>(null);
   const generationReviewRefreshingRef = useRef(false);
+  const { containerRef: shellContainerRef, layoutMode: shellLayoutMode } = useStudioLayoutMode(routeProjectId ?? '');
+  const panes = useStudioPanes(shellLayoutMode);
+  const [directorOverlayOpen, setDirectorOverlayOpen] = useState(false);
   const suppressedReferenceRequestIdsRef = useRef(new Set<string>());
   const notifiedExcludedReferenceRequestsRef = useRef<string | null>(null);
   /**
@@ -1094,14 +1102,29 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
     ) : undefined;
 
   return (
-    <section aria-label={t('conversation.creativeStudio.project.title')} className={styles.projectShell}>
-      <StudioPhaseShell
-        activePhase={activePhase}
-        controller={controller}
-        navigationDisabled={transitionBlocked || pendingTransition !== null}
-        notice={referenceAdvisory}
-        onBack={() => navigate('/studio')}
-      />
+    <section
+      ref={shellContainerRef}
+      aria-label={t('conversation.creativeStudio.project.title')}
+      className={styles.projectShell}
+    >
+      <BriefConversationProvider project={project}>
+        <StudioShell
+          director={<DirectorPane />}
+          directorState={panes.directorEffective}
+          layoutMode={shellLayoutMode}
+          onDirectorStateChange={panes.setDirectorPreference}
+          directorOverlayOpen={directorOverlayOpen}
+          onDirectorOverlayOpenChange={setDirectorOverlayOpen}
+        >
+          <StudioPhaseShell
+            activePhase={activePhase}
+            controller={controller}
+            navigationDisabled={transitionBlocked || pendingTransition !== null}
+            notice={referenceAdvisory}
+            onBack={() => navigate('/studio')}
+          />
+        </StudioShell>
+      </BriefConversationProvider>
       <StoryboardDraftModal
         visible={draftModalVisible}
         project={project}
