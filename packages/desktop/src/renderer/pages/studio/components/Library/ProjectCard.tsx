@@ -62,7 +62,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project, locale, disab
     : partial
       ? 'conversation.creativeStudio.library.status.partiallyRendered'
       : 'conversation.creativeStudio.library.status.scriptOnly';
-  const statusClass = complete ? 'bg-success-6' : partial ? 'bg-danger-6' : 'bg-fill-4';
+  const statusClass = complete ? 'bg-success-6' : partial ? 'bg-warning-6' : 'bg-fill-4';
 
   return (
     <Card

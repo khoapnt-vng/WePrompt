@@ -275,7 +275,7 @@
 }
 
 .statusLine[data-status='partial'] {
-  color: var(--danger);
+  color: var(--warning);
 }
 
 .projectMeta {

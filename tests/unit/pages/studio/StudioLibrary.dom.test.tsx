@@ -323,6 +323,15 @@ describe('StudioLibrary', () => {
     expect(await screen.findByText('TAKE 1 · SHOT 02')).toBeInTheDocument();
   });
 
+  it('uses a progress tone for a partially rendered project', async () => {
+    bridge.listProjects.invoke.mockResolvedValue(ok([summary({ sceneCount: 5, selectedAssetCount: 2 })]));
+
+    render(<StudioLibrary />);
+
+    const status = await screen.findByText('conversation.creativeStudio.library.status.partiallyRendered');
+    expect(status.closest('[data-status]')?.querySelector('span')).toHaveClass('bg-warning-6');
+  });
+
   it('formats project recency with Intl.RelativeTimeFormat in the active non-English locale', async () => {
     activeLanguage.value = 'de-DE';
     const updatedAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1_000).toISOString();
