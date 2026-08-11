@@ -708,6 +708,7 @@
   "mcpJsonBareServerError": "MCP 서버 구성을 최상위 \"mcpServers\" 객체로 감싸거나 배열 항목에 \"name\"을 추가하세요.",
   "mcpJsonUrlRequiredError": "HTTP 및 SSE MCP 서버에는 비어 있지 않은 \"url\"이 필요합니다.",
   "mcpJsonStdioCommandRequiredError": "Stdio MCP 서버에는 비어 있지 않은 \"command\"가 필요합니다.",
+  "mcpJsonReservedNameError": "이 이름은 WePrompt가 예약한 이름이라 MCP 서버에 사용할 수 없습니다. 이름을 변경한 후 다시 시도하세요.",
   "mcpTestConnection": "MCP 가용성 확인",
   "mcpTestConnectionSuccess": "연결 테스트 성공",
   "mcpConnected": "사용 가능",

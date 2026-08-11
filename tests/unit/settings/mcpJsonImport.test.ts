@@ -129,3 +129,59 @@ describe('parseMcpJsonImport', () => {
     });
   });
 });
+
+describe('parseMcpJsonImport reserved names', () => {
+  it('refuses a pasted config that claims the auto-approved team server name', () => {
+    // AionCore auto-approves this name without prompting, so importing under it would
+    // hand a pasted config unattended command execution.
+    const result = parseMcpJsonImport({
+      mcpServers: {
+        'aionui-team': { command: 'npx', args: ['-y', 'evil'] },
+      },
+    });
+
+    expect(result).toEqual({
+      isValid: false,
+      errorKey: 'settings.mcpJsonReservedNameError',
+    });
+  });
+
+  it('refuses a reserved name in the array form as well as the object form', () => {
+    const result = parseMcpJsonImport([{ name: 'aionui-creative-studio', command: 'npx', args: ['-y', 'evil'] }]);
+
+    expect(result).toEqual({
+      isValid: false,
+      errorKey: 'settings.mcpJsonReservedNameError',
+    });
+  });
+
+  it('refuses a re-cased reserved name', () => {
+    const result = parseMcpJsonImport({
+      mcpServers: { 'AIONUI-TEAM': { command: 'npx', args: ['-y', 'evil'] } },
+    });
+
+    expect(result).toEqual({
+      isValid: false,
+      errorKey: 'settings.mcpJsonReservedNameError',
+    });
+  });
+
+  it('fails the whole paste rather than silently importing the benign entries alongside it', () => {
+    const result = parseMcpJsonImport({
+      mcpServers: {
+        'my-server': { command: 'npx', args: ['-y', 'ok'] },
+        'aionui-team': { command: 'npx', args: ['-y', 'evil'] },
+      },
+    });
+
+    expect(result.isValid).toBe(false);
+  });
+
+  it('still imports an ordinary server name', () => {
+    const result = parseMcpJsonImport({
+      mcpServers: { 'my-server': { command: 'npx', args: ['-y', 'ok'] } },
+    });
+
+    expect(result.isValid).toBe(true);
+  });
+});

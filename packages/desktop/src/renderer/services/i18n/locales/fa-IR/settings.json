@@ -709,6 +709,7 @@
   "mcpJsonBareServerError": "پیکربندی سرور MCP را در یک شیء سطح بالای «mcpServers» قرار دهید یا در آیتم آرایه یک «name» اضافه کنید.",
   "mcpJsonUrlRequiredError": "سرورهای HTTP و SSE MCP به یک «url» غیرخالی نیاز دارند.",
   "mcpJsonStdioCommandRequiredError": "سرورهای Stdio MCP به یک «command» غیرخالی نیاز دارند.",
+  "mcpJsonReservedNameError": "این نام توسط WePrompt رزرو شده و نمی‌توان از آن برای سرور MCP استفاده کرد. نام سرور را تغییر دهید و دوباره تلاش کنید.",
   "mcpTestConnection": "بررسی دسترسی MCP",
   "mcpTestConnectionSuccess": "آزمایش اتصال موفق بود",
   "mcpConnected": "در دسترس",

@@ -1,10 +1,12 @@
+import { isReservedMcpServerName } from '@/common/config/builtinCapabilities';
 import type { IMcpServerTransport } from '@/common/config/storage';
 
 export type McpJsonImportErrorKey =
   | 'settings.mcpJsonFormatError'
   | 'settings.mcpJsonBareServerError'
   | 'settings.mcpJsonUrlRequiredError'
-  | 'settings.mcpJsonStdioCommandRequiredError';
+  | 'settings.mcpJsonStdioCommandRequiredError'
+  | 'settings.mcpJsonReservedNameError';
 
 export type ParsedMcpJsonServer = {
   name: string;
@@ -123,6 +125,13 @@ const parseServer = (
   name: string,
   config: Record<string, unknown>
 ): { isValid: true; server: ParsedMcpJsonServer } | { isValid: false; errorKey: McpJsonImportErrorKey } => {
+  // Both the array and object forms route through here, so this is the one place a pasted
+  // config turns into a server name. A reserved name fails the whole paste rather than being
+  // skipped: the user supplied a specific config and should be told it will not be honoured.
+  if (isReservedMcpServerName(name)) {
+    return { isValid: false, errorKey: 'settings.mcpJsonReservedNameError' };
+  }
+
   const transportResult = parseTransport(config);
   if (transportResult.isValid === false) return transportResult;
 

@@ -204,6 +204,54 @@ export const isCommodityBuiltinServer = (server: Pick<IMcpServer, 'name' | 'buil
   server.builtin === true && COMMODITY_BUILTIN_SERVER_NAMES.includes(server.name);
 
 /**
+ * Renderer-safe mirror of `BUILTIN_STUDIO_NAME`. The canonical constant lives in
+ * `process/resources/builtinMcp/constants.ts`, which is deliberately dependency-free so the
+ * built-in MCP servers can boot as standalone stdio processes — the renderer may not import it.
+ * `builtinMcpNameParity` in the unit tests fails if the two ever drift.
+ */
+export const BUILTIN_STUDIO_NAME = 'aionui-creative-studio';
+
+/**
+ * Mirror of AionCore's `TEAM_MCP_SERVER_NAME` (`crates/aionui-api-types/src/team_mcp.rs`).
+ * Injected per session by the agent factory, so it never passes through the MCP registry —
+ * which is exactly why nothing here would otherwise stop a user from claiming the name.
+ */
+export const TEAM_MCP_SERVER_NAME = 'aionui-team';
+
+/**
+ * Names a user-registered MCP server may not claim.
+ *
+ * AionCore's `AUTO_APPROVE_MCP_SERVERS` matches on the *bare server name* and, on a hit,
+ * selects `AllowAlways` without prompting. Nothing upstream reserves those names, so a server
+ * imported under one would run arbitrary commands with no confirmation. Every name we ship as
+ * a built-in is reserved too, so a user server cannot impersonate one in the catalog.
+ *
+ * This is defense-in-depth, not a security boundary: MCP writes are HTTP passthroughs straight
+ * to AionCore, so anything calling `/api/mcp/servers` directly bypasses it. The authoritative
+ * fix belongs in AionCore.
+ */
+export const RESERVED_MCP_SERVER_NAMES: readonly string[] = [
+  TEAM_MCP_SERVER_NAME,
+  BUILTIN_STUDIO_NAME,
+  BUILTIN_IMAGE_GEN_NAME,
+  BUILTIN_IDP_NAME,
+  BUILTIN_VISION_NAME,
+  ...COMMODITY_BUILTIN_SERVER_NAMES,
+];
+
+/**
+ * True when `name` collides with a reserved server name.
+ *
+ * Compared case-insensitively on the trimmed name, matching how the MCP catalog already
+ * normalises names for dedupe. That is stricter than AionCore's exact match on purpose:
+ * a differently-cased near-miss is not exploitable but is still an impersonation attempt.
+ */
+export const isReservedMcpServerName = (name: string): boolean => {
+  const normalized = name.trim().toLowerCase();
+  return RESERVED_MCP_SERVER_NAMES.some((reserved) => reserved.toLowerCase() === normalized);
+};
+
+/**
  * True when `server` is the built-in image-generation server. Image gen is not a
  * "commodity" default (it needs an image model configured), but once enabled it
  * should attach to new conversations automatically like the commodity servers so

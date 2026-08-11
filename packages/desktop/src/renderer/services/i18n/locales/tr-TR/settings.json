@@ -708,6 +708,7 @@
   "mcpJsonBareServerError": "MCP sunucu yapılandırmasını üst düzey bir \"mcpServers\" nesnesine sarın veya dizi öğesine \"name\" ekleyin.",
   "mcpJsonUrlRequiredError": "HTTP ve SSE MCP sunucuları boş olmayan bir \"url\" gerektirir.",
   "mcpJsonStdioCommandRequiredError": "Stdio MCP sunucuları boş olmayan bir \"command\" gerektirir.",
+  "mcpJsonReservedNameError": "Bu ad WePrompt tarafından ayrılmıştır ve bir MCP sunucusu için kullanılamaz. Sunucuyu yeniden adlandırıp tekrar deneyin.",
   "mcpTestConnection": "MCP Erişilebilirliğini Kontrol Et",
   "mcpTestConnectionSuccess": "Bağlantı testi başarılı",
   "mcpConnected": "Kullanılabilir",
