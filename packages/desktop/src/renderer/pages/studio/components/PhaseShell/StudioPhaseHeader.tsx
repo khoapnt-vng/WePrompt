@@ -6,7 +6,6 @@
 
 import type { StudioRendererProject } from '@/common/types/project/creativeStudioTypes';
 import { Button, Input, Tooltip } from '@arco-design/web-react';
-import { Left } from '@icon-park/react';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -20,7 +19,6 @@ export type StudioPhaseHeaderProps = {
   saveState: SelectedSceneSaveState;
   onBack: () => void;
   onRenameProject?: (name: string) => Promise<boolean>;
-  navigation?: React.ReactNode;
   actions?: React.ReactNode;
 };
 
@@ -36,7 +34,6 @@ export const StudioPhaseHeader: React.FC<StudioPhaseHeaderProps> = ({
   saveState,
   onBack,
   onRenameProject,
-  navigation,
   actions,
 }) => {
   const { t } = useTranslation();
@@ -84,11 +81,15 @@ export const StudioPhaseHeader: React.FC<StudioPhaseHeaderProps> = ({
               type='text'
               size='small'
               aria-label={t('conversation.creativeStudio.phase.shared.backToLibrary')}
-              icon={<Left aria-hidden='true' />}
               className={styles.breadcrumbButton}
               onClick={onBack}
-            />
+            >
+              {t('conversation.creativeStudio.library.title')}
+            </Button>
           </Tooltip>
+          <span aria-hidden='true' className={styles.breadcrumbSeparator}>
+            /
+          </span>
         </nav>
         <h1 aria-label={project.name} className={styles.projectTitle}>
           {editingName ? (
@@ -141,7 +142,6 @@ export const StudioPhaseHeader: React.FC<StudioPhaseHeaderProps> = ({
           )}
         </h1>
       </div>
-      {navigation !== undefined && <div className={styles.headerNavigation}>{navigation}</div>}
       <div className={styles.headerMeta}>
         <span role='status' aria-live='polite' aria-atomic='true' data-state={saveState} className={styles.saveState}>
           {t(SAVE_STATE_KEYS[saveState])}

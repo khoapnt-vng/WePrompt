@@ -8,22 +8,21 @@
   gap: 18px;
 }
 
-/* Three explicit columns so the phase rail sits optically centred in the row
-   regardless of how wide the title or the actions are. The columns are assigned
-   by name because the rail is absent in the compact layout, and auto-placement
-   would otherwise slide the meta column into the centre. */
+/* One 56px row: the breadcrumb on the left, save state and the phase action on the right.
+   The rail is a sibling row below rather than a slot in here. */
 .header {
-  display: grid;
+  display: flex;
   min-width: 0;
+  height: 56px;
   align-items: center;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  gap: 16px;
+  justify-content: space-between;
+  gap: 14px;
 }
 
 .headerCopy {
   display: flex;
   min-width: 0;
-  grid-column: 1;
+  flex: 1;
   align-items: center;
   gap: 8px;
 }
@@ -97,29 +96,37 @@
   white-space: normal;
 }
 
-.headerNavigation {
-  display: flex;
-  min-width: 0;
-  grid-column: 2;
-  justify-content: center;
-}
-
 .headerMeta {
   display: flex;
   min-width: 0;
-  grid-column: 3;
+  flex: none;
   align-items: center;
   justify-content: flex-end;
   gap: 12px;
 }
 
+/* A chip rather than loose text: it reads as a state the project is in, not as running commentary. */
 .saveState {
-  composes: meta from '../../StudioTypography.module.css';
+  composes: eyebrow from '../../StudioTypography.module.css';
+  border: 1px solid var(--color-success-light-3);
+  border-radius: var(--border-radius-small);
+  padding: 4px 7px;
+  background: var(--color-success-light-1);
+  color: var(--color-success-6);
   white-space: nowrap;
 }
 
 .saveState[data-state='failed'] {
+  border-color: var(--color-danger-light-3);
+  background: var(--color-danger-light-1);
   color: var(--color-danger-6);
+}
+
+.saveState[data-state='dirty'],
+.saveState[data-state='saving'] {
+  border-color: var(--color-border-2);
+  background: var(--color-fill-2);
+  color: var(--text-secondary);
 }
 
 .headerActions {
@@ -289,12 +296,6 @@
 
 .shell[data-layout='compact'] .headerMeta {
   order: 2;
-}
-
-.shell[data-layout='compact'] .headerNavigation {
-  width: 100%;
-  flex-basis: 100%;
-  order: 3;
 }
 
 .shell[data-layout='compact'] .phaseNavigation {

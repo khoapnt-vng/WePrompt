@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -48,6 +48,30 @@ describe('StudioPhaseHeader', () => {
     expect(screen.getByText('phase action')).toBeVisible();
     expect(screen.queryByText('A short launch video')).not.toBeInTheDocument();
     expect(screen.queryByText('conversation.creativeStudio.project.readiness')).not.toBeInTheDocument();
+  });
+
+  /**
+   * The header is a breadcrumb, not a back button with a title next to it. "Creative Studio" is
+   * the crumb that returns to the library, and the project name follows it after a separator —
+   * so where you are is legible without reading an icon.
+   */
+  it('reads as a Creative Studio breadcrumb ending in the project name', () => {
+    const onBack = vi.fn();
+    render(<StudioPhaseHeader project={project} saveState='saved' onBack={onBack} />);
+
+    const crumb = screen.getByRole('button', { name: 'conversation.creativeStudio.phase.shared.backToLibrary' });
+    expect(crumb).toHaveTextContent('conversation.creativeStudio.library.title');
+    fireEvent.click(crumb);
+    expect(onBack).toHaveBeenCalledOnce();
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Launch film' })).toBeVisible();
+  });
+
+  /** The rail is a sibling row now; the header must not host it. */
+  it('does not host the phase rail', () => {
+    render(<StudioPhaseHeader project={project} saveState='saved' onBack={vi.fn()} />);
+
+    expect(screen.queryByRole('list')).not.toBeInTheDocument();
   });
 
   it('leaves the aspect ratio to the Brief panel rather than restating it as a header chip', () => {
