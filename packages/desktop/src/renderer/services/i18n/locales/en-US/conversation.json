@@ -1093,6 +1093,7 @@
       "reviewTag": "Reference",
       "excludedSummary": "Some requested scenes are not included in this approval because they are not ready:",
       "excludedNoneReady": "None of the requested scenes are ready for reference generation:",
+      "discardExcludedRequests": "Discard these requests",
       "excludedUnavailable": "Scene is no longer available",
       "dismissFailed": "The request queue could not be updated. The review was closed; try again later."
     },

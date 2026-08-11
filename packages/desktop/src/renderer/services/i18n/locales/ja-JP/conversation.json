@@ -1250,6 +1250,7 @@
       "reviewTag": "参照画像",
       "excludedSummary": "準備が整っていないため、リクエストされた一部のシーンは今回の承認に含まれません：",
       "excludedNoneReady": "リクエストされたシーンは、いずれも参照画像を生成できる状態ではありません：",
+      "discardExcludedRequests": "これらのリクエストを破棄",
       "excludedUnavailable": "シーンは利用できなくなりました",
       "dismissFailed": "リクエストキューを更新できませんでした。レビューは閉じられました。後でもう一度お試しください。"
     },

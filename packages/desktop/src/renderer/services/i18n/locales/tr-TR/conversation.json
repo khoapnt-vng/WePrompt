@@ -1260,6 +1260,7 @@
       "reviewTag": "Referans",
       "excludedSummary": "İstenen bazı sahneler hazır olmadığı için bu onaya dahil edilmedi:",
       "excludedNoneReady": "İstenen sahnelerin hiçbiri referans oluşturmaya hazır değil:",
+      "discardExcludedRequests": "Bu istekleri sil",
       "excludedUnavailable": "Sahne artık kullanılamıyor",
       "dismissFailed": "İstek kuyruğu güncellenemedi. İnceleme kapatıldı; daha sonra tekrar deneyin."
     },

@@ -1259,6 +1259,7 @@
       "reviewTag": "Referenz",
       "excludedSummary": "Einige angeforderte Szenen sind nicht in dieser Freigabe enthalten, weil sie noch nicht bereit sind:",
       "excludedNoneReady": "Keine der angeforderten Szenen ist für die Referenzgenerierung bereit:",
+      "discardExcludedRequests": "Diese Anfragen verwerfen",
       "excludedUnavailable": "Die Szene ist nicht mehr verfügbar",
       "dismissFailed": "Die Anforderungswarteschlange konnte nicht aktualisiert werden. Die Prüfung wurde geschlossen; versuchen Sie es später erneut."
     },

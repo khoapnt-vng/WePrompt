@@ -64,7 +64,9 @@ type GenerationReviewState = {
   referenceRequests?: Array<Pick<StudioReferenceRequest, 'id' | 'sceneId'>>;
 };
 
-type ReferenceNotice = { kind: 'excluded'; scenes: GenerationReviewExcludedScene[] } | { kind: 'dismiss_failed' };
+type ReferenceNotice =
+  | { kind: 'excluded'; scenes: GenerationReviewExcludedScene[]; requestIds: string[] }
+  | { kind: 'dismiss_failed' };
 
 const routeIdentity = (
   route: Pick<StudioRouteCatalogEntry | GenerationReviewRouteSnapshot, 'choiceId' | 'kind'>
@@ -160,6 +162,7 @@ const buildQueuedReferenceReview = (
 ): {
   scenes: GenerationReviewScene[];
   excludedScenes: GenerationReviewExcludedScene[];
+  excludedReferenceRequestIds: string[];
   referenceRequestIds: string[];
 } => {
   const readySceneIds = new Set(readiness.readySceneIds);
@@ -179,10 +182,13 @@ const buildQueuedReferenceReview = (
     ];
   });
   const includedSceneIds = new Set(scenes.map(({ id }) => id));
+  const excludedRequests = requests.filter(({ sceneId }) => !includedSceneIds.has(sceneId));
+  const excludedSceneIds = new Set<string>();
   return {
     scenes,
-    excludedScenes: requests.flatMap(({ sceneId }) => {
-      if (includedSceneIds.has(sceneId)) return [];
+    excludedScenes: excludedRequests.flatMap(({ sceneId }) => {
+      if (excludedSceneIds.has(sceneId)) return [];
+      excludedSceneIds.add(sceneId);
       const scene = project.scenes[sceneId];
       return [
         {
@@ -192,6 +198,7 @@ const buildQueuedReferenceReview = (
         },
       ];
     }),
+    excludedReferenceRequestIds: excludedRequests.map(({ id }) => id),
     referenceRequestIds: requests.flatMap(({ id, sceneId }) => (includedSceneIds.has(sceneId) ? [id] : [])),
   };
 };
@@ -398,7 +405,11 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
         .join('\u0000');
       if (notifiedExcludedReferenceRequestsRef.current === signature) return;
       notifiedExcludedReferenceRequestsRef.current = signature;
-      setReferenceNotice({ kind: 'excluded', scenes: review.excludedScenes });
+      setReferenceNotice({
+        kind: 'excluded',
+        scenes: review.excludedScenes,
+        requestIds: review.excludedReferenceRequestIds,
+      });
       return;
     }
     notifiedExcludedReferenceRequestsRef.current = null;
@@ -488,6 +499,7 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
 
   const confirmGeneration = useCallback(
     async ({ sceneIds, routes }: { sceneIds: string[]; routes: StudioSceneGenerationChoice[] }): Promise<void> => {
+      // Defence in depth behind the modal's disabled confirm button on this paid path.
       if (
         generationBlocked ||
         generationReview?.catalogVersion === null ||
@@ -601,7 +613,9 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
         setGenerationReview(null);
         return;
       }
-      const dismissed = await studioJobs.dismissReferenceRequests(generationReview.referenceRequestIds);
+      const dismissed =
+        generationReview.referenceRequestIds.length === 0 ||
+        (await studioJobs.dismissReferenceRequests(generationReview.referenceRequestIds));
       const suppressedIds = dismissed
         ? generationReview.referenceRequestIds
         : (generationReview.referenceRequests?.map(({ id: requestId }) => requestId) ??
@@ -612,6 +626,15 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
     },
     [generationBlocked, generationReview, project, readiness, readyScenes, studioJobs, studioModels]
   );
+
+  const dismissExcludedReferenceRequests = useCallback(async (): Promise<void> => {
+    if (referenceNotice?.kind !== 'excluded') return;
+    const requestIds = referenceNotice.requestIds;
+    const dismissed = requestIds.length === 0 || (await studioJobs.dismissReferenceRequests(requestIds));
+    if (!dismissed) return;
+    requestIds.forEach((requestId) => suppressedReferenceRequestIdsRef.current.add(requestId));
+    setReferenceNotice(null);
+  }, [referenceNotice, studioJobs]);
 
   useEffect(() => {
     const staleIntent = studioJobs.staleIntent;
@@ -996,6 +1019,36 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
     clearWriteFocusIntent,
     openDuplicateChargeConfirmation: setDuplicateChargeJobId,
   };
+  const referenceAdvisory =
+    referenceNotice?.kind === 'excluded' ? (
+      <Alert
+        type='warning'
+        content={
+          <div data-testid='reference-exclusion-notice'>
+            <p className='m-0'>{t('conversation.creativeStudio.reference.excludedNoneReady')}</p>
+            <ul className='mb-0 mt-6px pl-18px'>
+              {referenceNotice.scenes.map((scene) => (
+                <li key={scene.id}>
+                  <span>{scene.title}</span>
+                  <span> — {t(scene.reasonMessageKey)}</span>
+                </li>
+              ))}
+            </ul>
+            <Button
+              className='mt-8px'
+              type='text'
+              status='danger'
+              loading={studioJobs.mutationPending}
+              onClick={() => void dismissExcludedReferenceRequests()}
+            >
+              {t('conversation.creativeStudio.reference.discardExcludedRequests')}
+            </Button>
+          </div>
+        }
+      />
+    ) : referenceNotice?.kind === 'dismiss_failed' ? (
+      <Alert type='error' content={t('conversation.creativeStudio.reference.dismissFailed')} />
+    ) : undefined;
 
   return (
     <section aria-label={t('conversation.creativeStudio.project.title')} className={styles.projectShell}>
@@ -1003,29 +1056,9 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
         activePhase={activePhase}
         controller={controller}
         navigationDisabled={transitionBlocked || pendingTransition !== null}
+        notice={referenceAdvisory}
         onBack={() => navigate('/studio')}
       />
-      {referenceNotice?.kind === 'excluded' && (
-        <Alert
-          type='warning'
-          content={
-            <div data-testid='reference-exclusion-notice'>
-              <p className='m-0'>{t('conversation.creativeStudio.reference.excludedNoneReady')}</p>
-              <ul className='mb-0 mt-6px pl-18px'>
-                {referenceNotice.scenes.map((scene) => (
-                  <li key={scene.id}>
-                    <span>{scene.title}</span>
-                    <span> — {t(scene.reasonMessageKey)}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          }
-        />
-      )}
-      {referenceNotice?.kind === 'dismiss_failed' && (
-        <Alert type='error' content={t('conversation.creativeStudio.reference.dismissFailed')} />
-      )}
       <StoryboardDraftModal
         visible={draftModalVisible}
         project={project}
@@ -1071,7 +1104,10 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
         onCancel={async () => {
           if (!studioJobs.mutationPending && !generationReviewRefreshing) {
             const requestIds = generationReview?.referenceRequestIds;
-            const dismissed = requestIds === undefined || (await studioJobs.dismissReferenceRequests(requestIds));
+            const dismissed =
+              requestIds === undefined ||
+              requestIds.length === 0 ||
+              (await studioJobs.dismissReferenceRequests(requestIds));
             const suppressedIds = dismissed
               ? requestIds
               : (generationReview?.referenceRequests?.map(({ id: requestId }) => requestId) ?? requestIds);

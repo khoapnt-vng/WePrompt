@@ -1272,6 +1272,7 @@
       "reviewTag": "Referência",
       "excludedSummary": "Algumas cenas solicitadas não estão incluídas nesta aprovação porque ainda não estão prontas:",
       "excludedNoneReady": "Nenhuma das cenas solicitadas está pronta para gerar uma referência:",
+      "discardExcludedRequests": "Descartar estas solicitações",
       "excludedUnavailable": "A cena não está mais disponível",
       "dismissFailed": "Não foi possível atualizar a fila de solicitações. A revisão foi fechada; tente novamente mais tarde."
     },

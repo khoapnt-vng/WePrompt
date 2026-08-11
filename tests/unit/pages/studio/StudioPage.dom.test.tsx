@@ -1282,7 +1282,7 @@ describe('StudioPage and useStudioProject', () => {
     );
   });
 
-  it('submits only guard-ready queued scenes when another requested scene already owns a take', async () => {
+  it('submits only guard-ready queued scenes and lets the user discard the excluded request', async () => {
     const plated = scene({
       id: 'scene-1',
       assetIds: ['asset-1'],
@@ -1333,6 +1333,22 @@ describe('StudioPage and useStudioProject', () => {
         requestIds: [requests[1]!.id],
       })
     );
+
+    const notice = await screen.findByTestId('reference-exclusion-notice');
+    expect(within(notice).getByText(plated.title)).toBeVisible();
+    fireEvent.click(
+      within(notice).getByRole('button', {
+        name: 'conversation.creativeStudio.reference.discardExcludedRequests',
+      })
+    );
+
+    await waitFor(() =>
+      expect(bridge.dismissReferenceRequests.invoke).toHaveBeenNthCalledWith(2, {
+        projectId: 'project-1',
+        requestIds: [requests[0]!.id],
+      })
+    );
+    await waitFor(() => expect(screen.queryByTestId('reference-exclusion-notice')).not.toBeInTheDocument());
   });
 
   it('names every queued reference scene when none are ready for approval', async () => {
@@ -1367,7 +1383,7 @@ describe('StudioPage and useStudioProject', () => {
       )
     );
     bridge.listPendingReferenceRequests.invoke.mockResolvedValue(
-      ok([referenceRequest(plated.id, 1), referenceRequest(needsAttention.id, 2)])
+      ok([referenceRequest(plated.id, 1), referenceRequest(plated.id, 2), referenceRequest(needsAttention.id, 3)])
     );
     bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
 
@@ -1375,10 +1391,13 @@ describe('StudioPage and useStudioProject', () => {
 
     const notice = await screen.findByTestId('reference-exclusion-notice');
     expect(within(notice).getByText('conversation.creativeStudio.reference.excludedNoneReady')).toBeVisible();
-    expect(within(notice).getByText(plated.title)).toBeVisible();
+    expect(within(notice).getAllByText(plated.title)).toHaveLength(1);
     expect(within(notice).getByText(/conversation\.creativeStudio\.scene\.status\.needs_selection/)).toBeVisible();
     expect(within(notice).getByText(needsAttention.title)).toBeVisible();
     expect(within(notice).getByText(/conversation\.creativeStudio\.scene\.status\.needs_attention/)).toBeVisible();
+    const phaseHeading = document.querySelector('[data-studio-phase-heading]');
+    expect(phaseHeading).not.toBeNull();
+    expect(notice.compareDocumentPosition(phaseHeading) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
     expect(screen.queryByRole('dialog', { name: 'conversation.creativeStudio.review.title' })).not.toBeInTheDocument();
     expect(bridge.dismissReferenceRequests.invoke).not.toHaveBeenCalled();
     expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
@@ -1452,7 +1471,7 @@ describe('StudioPage and useStudioProject', () => {
     expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
   });
 
-  it('rechecks unsaved scene drafts when a queued reference approval is confirmed', async () => {
+  it('disables queued reference approval when the project becomes dirty mid-review', async () => {
     const opening = scene({ mediaKind: 'video' });
     bridge.getProject.invoke.mockResolvedValue(
       ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
@@ -2549,6 +2568,53 @@ describe('StudioPage and useStudioProject', () => {
         outputRole: 'reference',
       })
     );
+  });
+
+  it('closes a refreshed queued review without reporting failure when no request remains eligible', async () => {
+    let onUpdate: ((event: { projectId: string }) => void) | undefined;
+    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
+      onUpdate = listener;
+      return () => {};
+    });
+    const opening = scene({ mediaKind: 'video' });
+    const initial = project('project-1', {
+      sceneOrder: [opening.id],
+      scenes: { [opening.id]: opening },
+    });
+    const noLongerEligible = scene({
+      title: 'No longer eligible',
+      mediaKind: 'video',
+      assetIds: ['asset-1'],
+      reviewState: 'needs_selection',
+    });
+    const revised = project('project-1', {
+      revision: 3,
+      sceneOrder: [noLongerEligible.id],
+      scenes: { [noLongerEligible.id]: noLongerEligible },
+      assets: { 'asset-1': { ...asset('asset-1'), mediaKind: 'video' } },
+    });
+    bridge.getProject.invoke
+      .mockResolvedValueOnce(ok(initial))
+      .mockResolvedValueOnce(ok(initial))
+      .mockResolvedValue(ok(revised));
+    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([referenceRequest(opening.id, 1)]));
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
+    renderRoute('/studio/project-1/produce');
+
+    await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+    await act(async () => onUpdate?.({ projectId: 'project-1' }));
+    await waitFor(() => expect(bridge.getProject.invoke).toHaveBeenCalledTimes(3));
+    await screen.findByText(noLongerEligible.title);
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('dialog')).toHaveTextContent('conversation.creativeStudio.reference.excludedSummary')
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.review.cancel' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(bridge.dismissReferenceRequests.invoke).not.toHaveBeenCalled();
+    expect(screen.queryByText('conversation.creativeStudio.reference.dismissFailed')).not.toBeInTheDocument();
   });
 
   it('preserves a reference prompt and image route when refreshing a stale paid review', async () => {

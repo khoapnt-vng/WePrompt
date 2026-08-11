@@ -22,6 +22,7 @@ export type StudioPhaseShellProps = {
   activePhase: StudioPhase;
   controller: StudioPhaseControllers;
   navigationDisabled: boolean;
+  notice?: React.ReactNode;
   onBack: () => void;
 };
 
@@ -29,6 +30,7 @@ export const StudioPhaseShell: React.FC<StudioPhaseShellProps> = ({
   activePhase,
   controller,
   navigationDisabled,
+  notice,
   onBack,
 }) => {
   const { t } = useTranslation();
@@ -114,6 +116,7 @@ export const StudioPhaseShell: React.FC<StudioPhaseShellProps> = ({
           {t(controller.advisory.messageKey)}
         </div>
       )}
+      {notice}
       <div className={styles.phaseFrame}>
         {activePhase === 'brief' && <BriefPhase controller={controller} layoutMode={layoutMode} />}
         {activePhase === 'write' && <WritePhase controller={controller} layoutMode={layoutMode} />}
