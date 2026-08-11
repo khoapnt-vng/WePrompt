@@ -5,9 +5,11 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import type { TFunction } from 'i18next';
 import {
   assistantToOption,
   filterTeamSupportedAssistants,
+  resolveTeamAssistantLabel,
 } from '@/renderer/pages/team/components/assistantSelectUtils';
 import type { Assistant } from '@/common/types/agent/assistantTypes';
 
@@ -55,6 +57,37 @@ describe('assistantSelectUtils', () => {
     const option = assistantToOption(assistant);
 
     expect(option.team_selectable).toBe(true);
+  });
+
+  /**
+   * The picker row renders the Forge brand name while `option.name` keeps the
+   * real catalog name so persisted team records stay stable. Any user-facing
+   * string built from an option must therefore go through this helper, or it
+   * names an assistant by a name that appears nowhere in the UI.
+   */
+  describe('resolveTeamAssistantLabel', () => {
+    const t = ((key: string) =>
+      ({ 'agent.brand.forgeChat': 'Forge Chat', 'agent.brand.forgeAssistant': 'Forge Assistant' })[key] ??
+      key) as unknown as TFunction;
+
+    it('renders the Forge brand name for a rebranded built-in', () => {
+      expect(
+        resolveTeamAssistantLabel(
+          { id: 'aionui-assistant', name: 'AionUi Butler', brandKey: 'agent.brand.forgeAssistant' },
+          t
+        )
+      ).toBe('Forge Assistant');
+    });
+
+    it('falls back to the catalog name when the assistant is not rebranded', () => {
+      expect(resolveTeamAssistantLabel({ id: 'blocked-reviewer', name: 'Reviewer', brandKey: null }, t)).toBe(
+        'Reviewer'
+      );
+    });
+
+    it('falls back to the catalog name when no brand key is present at all', () => {
+      expect(resolveTeamAssistantLabel({ id: 'custom-1', name: 'Scriptwriter' }, t)).toBe('Scriptwriter');
+    });
   });
 });
 
