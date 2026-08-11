@@ -1,37 +1,23 @@
-.panel,
-.inspector {
+.panel {
+  display: flex;
   min-width: 0;
+  min-height: 0;
   border: 1px solid var(--color-border-2);
   border-radius: 12px;
+  flex-direction: column;
   background: var(--color-bg-2);
 }
 
-.panel {
-  display: flex;
-  min-height: 0;
-  flex-direction: column;
-}
-
 .panelHeader,
-.panelFooter,
-.inspectorHeader {
+.panelFooter {
   padding: 16px;
 }
 
-.panelHeader,
-.inspectorHeader {
+.panelHeader {
   border-bottom: 1px solid var(--color-border-2);
 }
 
-.inspectorHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.panelHeader h2,
-.inspectorHeader h2 {
+.panelHeader h2 {
   margin: 0;
   color: var(--color-text-1);
   font-size: 16px;
@@ -218,22 +204,6 @@
   background: var(--color-fill-2);
 }
 
-.saveStatus {
-  flex: none;
-  color: var(--color-text-2);
-  font-size: 12px;
-  line-height: 1.5;
-  text-align: end;
-}
-
-.saveStatus[data-state='saved'] {
-  color: rgb(var(--success-6));
-}
-
-.saveStatus[data-state='failed'] {
-  color: rgb(var(--danger-6));
-}
-
 .limit {
   margin: 0;
   color: var(--color-warning-6);
@@ -241,50 +211,11 @@
   line-height: 1.5;
 }
 
-.inspector {
-  display: flex;
-  min-height: 0;
-  flex-direction: column;
-}
-
-.inspectorBody {
-  min-height: 0;
-  padding: 12px 16px 16px;
-  overflow-x: hidden;
-  overflow-y: auto;
-}
-
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.field label {
-  color: var(--color-text-2);
-  font-size: 12px;
-  font-weight: 500;
-}
-
 .conflictActions {
   display: flex;
   margin-top: 10px;
   flex-wrap: wrap;
   gap: 8px;
-}
-
-.emptyInspector {
-  margin: 0;
-  padding: 24px 4px;
-  color: var(--color-text-3);
-  line-height: 1.6;
-  text-align: center;
 }
 
 @media (prefers-reduced-motion: reduce) {

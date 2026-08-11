@@ -5,6 +5,5 @@
  */
 
 export { SceneCard, type SceneCardProps } from './SceneCard';
-export { SceneInspector, type SceneInspectorProps } from './SceneInspector';
 export { StoryboardDraftModal, type StoryboardDraftModalProps } from './StoryboardDraftModal';
 export { StoryboardPanel, type StoryboardPanelProps } from './StoryboardPanel';
