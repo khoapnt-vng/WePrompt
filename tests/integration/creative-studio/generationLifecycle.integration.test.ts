@@ -7,6 +7,7 @@
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { isCanonicalStudioGeneratedTake } from '@/common/types/project/creativeStudioCanonicalTake';
 import type { StudioProject, StudioScene } from '@/common/types/project/creativeStudioTypes';
 import {
   createStudioE2EFakeBundle,
@@ -16,6 +17,7 @@ import {
   STUDIO_E2E_RAW_OUTPUT_BODY_SENTINEL,
   STUDIO_E2E_RAW_OUTPUT_PATH_SENTINEL,
 } from '@process/services/creative-studio/adapters/e2eFakeAdapter';
+import type { ResolvedStudioGenerationRequest } from '@process/services/creative-studio/adapters/types';
 import {
   createStudioJobManager,
   type StudioJobManager,
@@ -212,6 +214,129 @@ afterEach(async () => {
 });
 
 describe('Creative Studio generation lifecycle integration', () => {
+  it('commits a scene-owned reference before using it as the first frame of a later take', async () => {
+    const harness = await createHarness();
+    const providerResolver = createStudioProviderResolver({
+      listProviders: async () => [harness.fake.provider],
+      listConnections: () => harness.store.listConnections(),
+    });
+    const catalog = await providerResolver.listGenerationRoutes();
+    const imageRoute = catalog.routes.find((candidate) => candidate.kind === 'image');
+    const videoRoute = catalog.routes.find((candidate) => candidate.kind === 'video');
+    if (!imageRoute || !videoRoute) throw new Error('Reference lifecycle routes were not resolved');
+    expect(videoRoute.constraints.supportsFirstFrame).toBe(true);
+
+    const configured = await harness.store.updateProject(harness.project.id, (current) => ({
+      ...current,
+      routing: {
+        ...current.routing,
+        image: {
+          providerId: imageRoute.providerId,
+          adapterId: imageRoute.adapterId,
+          model: imageRoute.model,
+        },
+        video: {
+          providerId: videoRoute.providerId,
+          adapterId: videoRoute.adapterId,
+          model: videoRoute.model,
+        },
+      },
+    }));
+    const adapters = new Map(harness.fake.adapters);
+    const fakeVideoAdapter = adapters.get(videoRoute.adapterId);
+    if (!fakeVideoAdapter) throw new Error('E2E fake video adapter was not resolved');
+    const videoRequests: ResolvedStudioGenerationRequest[] = [];
+    adapters.set(videoRoute.adapterId, {
+      ...fakeVideoAdapter,
+      submit: async (request, provider, signal) => {
+        videoRequests.push(request);
+        return fakeVideoAdapter.submit(request, provider, signal);
+      },
+    });
+    const jobIds = ['job_reference_lifecycle', 'job_take_lifecycle'];
+    const idempotencyKeys = ['idempotency_reference_lifecycle', 'idempotency_take_lifecycle'];
+    const manager = createStudioJobManager({
+      store: harness.store,
+      mediaStore: harness.mediaStore,
+      providerResolver,
+      adapters,
+      listProviders: async () => [harness.fake.provider],
+      createJobId: () => jobIds.shift() ?? 'job_unexpected_lifecycle',
+      createIdempotencyKey: () => idempotencyKeys.shift() ?? 'idempotency_unexpected_lifecycle',
+      sleep: harness.clock.sleep,
+      jitterMs: (baseMs) => baseMs,
+    });
+    activeManagers.push(manager);
+    harness.clock.releaseAll();
+
+    await manager.submitScenes({
+      projectId: configured.id,
+      expectedRevision: configured.revision,
+      sceneIds: [scene.id],
+      routes: [
+        {
+          sceneId: scene.id,
+          providerId: imageRoute.providerId,
+          adapterId: imageRoute.adapterId,
+          model: imageRoute.model,
+          kind: 'image',
+        },
+      ],
+      catalogVersion: catalog.generationCatalogVersion,
+      outputRole: 'reference',
+      referencePrompt: '  A precise sunrise reference plate  ',
+    });
+
+    const plated = await waitFor(async () => {
+      const current = await harness.store.getProject(configured.id);
+      return current?.jobs.job_reference_lifecycle.status === 'succeeded' ? current : null;
+    });
+    const platedScene = plated.scenes[scene.id];
+    const referenceAssetId = platedScene.referenceAssetId;
+    if (!referenceAssetId) throw new Error('Reference job succeeded without a committed asset');
+    const referenceAsset = plated.assets[referenceAssetId];
+    expect({
+      referenceAssetId,
+      outputAssetIds: plated.jobs.job_reference_lifecycle.outputAssetIds,
+      sceneId: referenceAsset?.sceneId,
+      collection: referenceAsset?.managedAsset.collection,
+      assetIds: platedScene.assetIds,
+    }).toEqual({
+      referenceAssetId,
+      outputAssetIds: [referenceAssetId],
+      sceneId: scene.id,
+      collection: 'references',
+      assetIds: [referenceAssetId],
+    });
+    expect(platedScene.selectedAssetId).toBeNull();
+    expect(platedScene.reviewState).toBe('draft');
+    expect(
+      Object.values(plated.assets).some((asset) => isCanonicalStudioGeneratedTake(asset, plated.id, platedScene))
+    ).toBe(false);
+
+    await manager.submitScenes({
+      projectId: plated.id,
+      expectedRevision: plated.revision,
+      sceneIds: [scene.id],
+      routes: [
+        {
+          sceneId: scene.id,
+          providerId: videoRoute.providerId,
+          adapterId: videoRoute.adapterId,
+          model: videoRoute.model,
+          kind: 'video',
+        },
+      ],
+      catalogVersion: catalog.generationCatalogVersion,
+    });
+
+    const takeRequest = await waitFor(async () => videoRequests[0] ?? null);
+    expect(takeRequest.firstFrame).toMatchObject({
+      assetId: referenceAssetId,
+      mimeType: 'image/png',
+    });
+  });
+
   it('uses one selected model per kind across a batch and only applies changes to later submissions', async () => {
     const harness = await createHarness();
     const providerResolver = createStudioProviderResolver({

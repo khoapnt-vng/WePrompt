@@ -1442,8 +1442,10 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       scene.assetIds.push(asset.id);
       if (role === 'reference') {
         scene.referenceAssetId = asset.id;
-        // Load-bearing guarantee: selectedAssetId and reviewState stay untouched, so a plate cannot mark a scene produced.
-        // Filtering collection 'references' from take predicates is defense in depth.
+        // A plate settles the scene out of 'generating' but must never mark it produced.
+        // A scene that already has a take stays complete - regenerating its plate does
+        // not un-produce it. One with no take returns to its resting state.
+        scene.reviewState = scene.selectedAssetId === null ? 'draft' : 'complete';
       } else {
         scene.selectedAssetId = asset.id;
         scene.reviewState = 'complete';

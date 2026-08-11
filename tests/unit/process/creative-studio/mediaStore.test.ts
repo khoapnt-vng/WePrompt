@@ -527,12 +527,51 @@ describe('createStudioMediaStore', () => {
     // true is that the plate is not the take and the scene is not produced.
     expect(project?.scenes.scene_1.assetIds).toContain(committed.id);
     expect(project?.scenes.scene_1.selectedAssetId).toBeNull();
-    expect(project?.scenes.scene_1.reviewState).toBe('generating');
+    // Regression: a reference commit must clear the submit-time generating state without marking the scene produced.
+    expect(project?.scenes.scene_1.reviewState).toBe('draft');
     expect(project?.assets[committed.id].sceneId).toBe('scene_1');
     expect(project?.assets[committed.id].managedAsset.collection).toBe('references');
     await expect(
       fs.access(path.join(rootDir, 'project_1', 'references', 'asset_reference_1.png'))
     ).resolves.toBeUndefined();
+  });
+
+  it('restores a produced scene to complete after committing a new reference', async () => {
+    const { store } = await makeStore();
+    await addActiveReferenceJob(store);
+    await store.updateProject('project_1', (project) => {
+      const next = structuredClone(project);
+      next.assets.asset_existing_take = {
+        id: 'asset_existing_take',
+        projectId: project.id,
+        sceneId: 'scene_1',
+        mediaKind: 'video',
+        mimeType: 'video/mp4',
+        managedAsset: { collection: 'assets', fileName: 'asset_existing_take.mp4' },
+        byteSize: 1,
+        sha256: '0'.repeat(64),
+        durationSeconds: 5,
+        createdAt: project.createdAt,
+      };
+      next.scenes.scene_1.assetIds.push('asset_existing_take');
+      next.scenes.scene_1.selectedAssetId = 'asset_existing_take';
+      return next;
+    });
+    const media = createStudioMediaStore({ store, createId: () => 'asset_replacement_reference' });
+
+    const committed = await media.persistProviderOutputForJob({
+      projectId: 'project_1',
+      sceneId: 'scene_1',
+      jobId: 'job_1',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      body: Readable.from([png]),
+    });
+
+    const project = await store.getProject('project_1');
+    expect(project?.scenes.scene_1.referenceAssetId).toBe(committed.id);
+    expect(project?.scenes.scene_1.selectedAssetId).toBe('asset_existing_take');
+    expect(project?.scenes.scene_1.reviewState).toBe('complete');
   });
 
   it('leaves a persisted cut untouched when committing a reference', async () => {
