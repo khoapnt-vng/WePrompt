@@ -504,11 +504,7 @@ describe('StudioPage and useStudioProject', () => {
 
     it.each([
       ['brief', 'conversation.creativeStudio.phase.brief.title', 'conversation.creativeStudio.phase.brief.description'],
-      [
-        'write',
-        'conversation.creativeStudio.phase.write.title',
-        'conversation.creativeStudio.phase.shared.noMediaGeneration',
-      ],
+      ['write', 'conversation.creativeStudio.phase.write.title', null],
       ['produce', 'conversation.creativeStudio.phase.produce.connectEngine', null],
       [
         'review',
@@ -897,9 +893,9 @@ describe('StudioPage and useStudioProject', () => {
     it('renders one Brief save-failure alert instead of duplicating it in the shell', async () => {
       bridge.updateProject.invoke.mockResolvedValueOnce(failure());
       const { router } = renderRoute('/studio/project-1/brief');
-      const nameInput = await screen.findByLabelText('conversation.creativeStudio.phase.brief.nameLabel');
+      const durationInput = await screen.findByLabelText('conversation.creativeStudio.phase.brief.durationLabel');
 
-      fireEvent.change(nameInput, { target: { value: 'Unsaved launch film' } });
+      fireEvent.change(durationInput, { target: { value: '24' } });
       fireEvent.click(
         screen.getByRole('button', {
           name: 'conversation.creativeStudio.phase.brief.startWriting',

@@ -265,8 +265,8 @@ describe('Creative Studio full-sentence English copy', () => {
   });
 
   it.each([
-    ['write', 'Continue to Produce'],
-    ['produce', 'Review cut'],
+    ['write', 'Continue'],
+    ['produce', 'Continue'],
     ['review', 'Prepare handoff'],
   ] as const)('renders one %s phase action in the header', async (activePhase, actionName) => {
     await renderEnglish(
