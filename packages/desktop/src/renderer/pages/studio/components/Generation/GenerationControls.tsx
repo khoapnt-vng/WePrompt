@@ -13,6 +13,7 @@ import type {
   StudioRouteCatalog,
   StudioRouteCatalogEntry,
   StudioSceneGenerationChoice,
+  StudioSubmitScenesRequest,
 } from '@/common/types/project/creativeStudioTypes';
 import { Alert, Button, Spin } from '@arco-design/web-react';
 import { Refresh } from '@icon-park/react';
@@ -33,6 +34,8 @@ export type GenerationSingleReviewRequest = {
   routeStatus: 'valid' | 'invalid' | 'missing';
   catalogVersion: string | null;
   availableRoutes: StudioRouteCatalogEntry[];
+  outputRole?: StudioSubmitScenesRequest['outputRole'];
+  referencePrompt?: StudioSubmitScenesRequest['referencePrompt'];
 };
 
 export type GenerationReviewRouteSnapshot = StudioSceneGenerationChoice &
@@ -78,6 +81,8 @@ export type BuildSingleSceneReviewRequestInput = {
   resolution?: StudioResolution;
   durationSeconds?: number;
   hasReference?: boolean;
+  outputRole?: StudioSubmitScenesRequest['outputRole'];
+  referencePrompt?: StudioSubmitScenesRequest['referencePrompt'];
 };
 
 export type BuildBatchGenerationReviewRequestInput = {
@@ -143,6 +148,8 @@ export const buildSingleSceneReviewRequest = ({
   resolution = project.resolution,
   durationSeconds,
   hasReference,
+  outputRole,
+  referencePrompt,
 }: BuildSingleSceneReviewRequestInput): GenerationSingleReviewRequest | null => {
   if (catalog === null || catalog.catalogVersion.trim().length === 0 || catalog[scene.mediaKind].status !== 'ready') {
     return null;
@@ -174,6 +181,8 @@ export const buildSingleSceneReviewRequest = ({
     routeStatus: 'valid',
     catalogVersion: catalog.catalogVersion,
     availableRoutes: catalogRoutes(catalog),
+    ...(outputRole === undefined ? {} : { outputRole }),
+    ...(referencePrompt === undefined ? {} : { referencePrompt }),
   };
 };
 

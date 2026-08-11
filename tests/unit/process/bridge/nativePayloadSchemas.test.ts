@@ -1372,6 +1372,16 @@ const INVALID_PAYLOADS = [
       ],
     },
   ],
+  [
+    'creative-studio.submit-scenes',
+    'reference prompt without a reference output role',
+    { ...VALID_PAYLOADS['creative-studio.submit-scenes'], referencePrompt: 'A close-up of the product label' },
+  ],
+  [
+    'creative-studio.submit-scenes',
+    'unknown output role',
+    { ...VALID_PAYLOADS['creative-studio.submit-scenes'], outputRole: 'poster' },
+  ],
   ['creative-studio.cancel-job', 'missing expected revision', { projectId: 'project_1', jobId: 'job_1' }],
   [
     'creative-studio.retry-job',
@@ -1543,6 +1553,31 @@ describe('native bridge payload schemas', () => {
         conversationId: '../conversation',
       }).success
     ).toBe(false);
+  });
+
+  it('accepts a single-mode reference output submission with a reference prompt', () => {
+    const payload = {
+      ...VALID_PAYLOADS['creative-studio.submit-scenes'],
+      outputRole: 'reference',
+      referencePrompt: 'A close-up of the product label',
+    };
+
+    expect(parseNativeBridgePayload('creative-studio.submit-scenes', payload)).toEqual(payload);
+  });
+
+  it('accepts a batch reference submission across multiple scenes', () => {
+    const payload = {
+      ...VALID_PAYLOADS['creative-studio.submit-scenes'],
+      mode: 'batch',
+      sceneIds: ['scene_1', 'scene_2'],
+      outputRole: 'reference',
+      routes: [
+        ...VALID_PAYLOADS['creative-studio.submit-scenes'].routes,
+        { sceneId: 'scene_2', choiceId: 'binding_2', kind: 'video' },
+      ],
+    };
+
+    expect(parseNativeBridgePayload('creative-studio.submit-scenes', payload)).toEqual(payload);
   });
 
   it('accepts an empty Studio scene title for display-only seeded placeholders', () => {

@@ -85,6 +85,31 @@ const addTake = (
   if (selected) scene.selectedAssetId = assetId;
 };
 
+const addReferencePlate = (project: StudioProject, sourceVisualPrompt?: string): void => {
+  project.sceneOrder = ['s1'];
+  project.scenes.s1 = {
+    id: 's1',
+    ...makeScene('s1'),
+    referenceAssetId: 'reference_1',
+    selectedAssetId: null,
+    assetIds: ['reference_1'],
+    jobIds: [],
+    reviewState: 'ready',
+  };
+  project.assets.reference_1 = {
+    id: 'reference_1',
+    projectId: project.id,
+    sceneId: 's1',
+    mediaKind: 'image',
+    mimeType: 'image/png',
+    managedAsset: { collection: 'references', fileName: 'reference_1.png' },
+    byteSize: 1,
+    sha256: 'a'.repeat(64),
+    createdAt: project.createdAt,
+    ...(sourceVisualPrompt === undefined ? {} : { sourceVisualPrompt }),
+  };
+};
+
 const editableCut = (cut: StudioCut): StudioEditableCut => ({
   orderMode: cut.orderMode,
   clipOrder: [...cut.clipOrder],
@@ -292,6 +317,48 @@ describe('CreativeStudioService', () => {
     await expect(service.getProject(project.id)).resolves.toMatchObject({
       briefConversationId: 'conversation_brief',
     });
+  });
+
+  it('projects a reference asset with its managed collection', async () => {
+    const project = await service.createProject(makeInput());
+    await store.updateProject(project.id, (current) => {
+      const next = structuredClone(current);
+      addReferencePlate(next);
+      return next;
+    });
+
+    const rendererProject = await service.getProject(project.id);
+
+    expect(rendererProject?.assets.reference_1.managedAsset.collection).toBe('references');
+  });
+
+  it('projects the visual prompt an asset was generated from', async () => {
+    const project = await service.createProject(makeInput());
+    await store.updateProject(project.id, (current) => {
+      const next = structuredClone(current);
+      addReferencePlate(next, 'Aerial, drifting. Smoke columns.');
+      return next;
+    });
+
+    const rendererProject = await service.getProject(project.id);
+    const asset = Object.values(rendererProject?.assets ?? {}).find((candidate) => candidate.sceneId === 's1');
+
+    expect(asset?.sourceVisualPrompt).toBe('Aerial, drifting. Smoke columns.');
+  });
+
+  it('leaves provenance undefined for an asset that never recorded one', async () => {
+    const project = await service.createProject(makeInput());
+    await store.updateProject(project.id, (current) => {
+      const next = structuredClone(current);
+      addReferencePlate(next);
+      return next;
+    });
+
+    const rendererProject = await service.getProject(project.id);
+    const asset = Object.values(rendererProject?.assets ?? {}).find((candidate) => candidate.sceneId === 's1');
+
+    expect(asset?.sourceVisualPrompt).toBeUndefined();
+    expect(asset).not.toHaveProperty('sourceVisualPrompt');
   });
 
   it('reports the newest verified cut file and its render time without exposing a storage path', async () => {
@@ -3928,6 +3995,66 @@ describe('CreativeStudioService', () => {
         })
       );
       expect(harness.submitScenes.mock.calls[0]?.[0]).not.toHaveProperty('mode');
+    });
+
+    it('forwards the reference output role and prompt to the job manager', async () => {
+      const harness = await createVideoSubmissionHarness();
+      const catalog = await harness.service.listRoutes({ projectId: harness.project.id });
+      const imageChoice = catalog.image.options[0]!;
+
+      await harness.service.submitScenes({
+        projectId: harness.project.id,
+        expectedRevision: harness.project.revision,
+        mode: 'single',
+        sceneIds: ['scene_1'],
+        routes: [{ sceneId: 'scene_1', choiceId: imageChoice.choiceId, kind: 'image' }],
+        catalogVersion: catalog.catalogVersion,
+        outputRole: 'reference',
+        referencePrompt: 'A calm establishing plate',
+      });
+
+      expect(harness.submitScenes).toHaveBeenCalledOnce();
+      expect(harness.submitScenes.mock.calls[0]?.[0]).toMatchObject({
+        outputRole: 'reference',
+        referencePrompt: 'A calm establishing plate',
+        routes: [
+          {
+            sceneId: 'scene_1',
+            providerId: 'provider_1',
+            adapterId: 'weprompt-image-v1',
+            model: 'image-model',
+            kind: 'image',
+          },
+        ],
+      });
+    });
+
+    it('omits both reference fields from an ordinary take submission', async () => {
+      const harness = await createVideoSubmissionHarness();
+
+      await harness.submit('single');
+
+      expect(harness.submitScenes).toHaveBeenCalledOnce();
+      expect(harness.submitScenes.mock.calls[0]?.[0]).not.toHaveProperty('outputRole');
+      expect(harness.submitScenes.mock.calls[0]?.[0]).not.toHaveProperty('referencePrompt');
+    });
+
+    it('rejects a take whose route kind differs from the scene before reaching the job manager', async () => {
+      const harness = await createVideoSubmissionHarness();
+      const catalog = await harness.service.listRoutes({ projectId: harness.project.id });
+      const imageChoice = catalog.image.options[0]!;
+
+      await expect(
+        harness.service.submitScenes({
+          projectId: harness.project.id,
+          expectedRevision: harness.project.revision,
+          mode: 'single',
+          sceneIds: ['scene_1'],
+          routes: [{ sceneId: 'scene_1', choiceId: imageChoice.choiceId, kind: 'image' }],
+          catalogVersion: catalog.catalogVersion,
+        })
+      ).rejects.toMatchObject({ code: 'invalid_route' });
+      expect(harness.submitScenes).not.toHaveBeenCalled();
     });
 
     it('rejects a single-mode request that includes multiple scenes before resolving provider routes', async () => {

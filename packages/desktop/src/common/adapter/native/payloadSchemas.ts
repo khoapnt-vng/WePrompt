@@ -10,6 +10,7 @@ import {
   OFFICE_ARTIFACT_MAX_SELECTION_MESSAGE_BYTES,
 } from '../../types/office/artifactEditor';
 import { PRESENTATION_RUN_LIMITS } from '../../types/office/presentationRunPolicy';
+import { STUDIO_REFERENCE_PROMPT_MAX_LENGTH } from '../../types/project/creativeStudioTypes';
 import type { NativeBridgeProviderKey, RendererBridgeQueryKey } from './constants';
 
 const MAX_PATH_LENGTH = 4096;
@@ -353,6 +354,8 @@ const studioSubmitScenesSchema = z
       .refine((ids) => new Set(ids).size === ids.length),
     catalogVersion: z.string().regex(/^[a-f0-9]{16}$/),
     routes: z.array(studioSceneRouteSnapshotSchema).min(1).max(24),
+    outputRole: z.enum(['take', 'reference']).optional(),
+    referencePrompt: z.string().trim().min(1).max(STUDIO_REFERENCE_PROMPT_MAX_LENGTH).optional(),
   })
   .strict()
   .superRefine((input, context) => {
@@ -367,6 +370,13 @@ const studioSubmitScenesSchema = z
       routeSceneIds.some((sceneId) => !selectedSceneIds.has(sceneId))
     ) {
       context.addIssue({ code: 'custom', message: 'routes must exactly match sceneIds', path: ['routes'] });
+    }
+    if (input.referencePrompt !== undefined && input.outputRole !== 'reference') {
+      context.addIssue({
+        code: 'custom',
+        message: 'referencePrompt requires outputRole reference',
+        path: ['referencePrompt'],
+      });
     }
   });
 const studioFitStoryboardSchema = z

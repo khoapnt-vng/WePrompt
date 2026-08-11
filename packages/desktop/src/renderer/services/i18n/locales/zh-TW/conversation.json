@@ -1243,6 +1243,12 @@
       "missingRoute": "請選擇相容的產生路線。",
       "invalidRoute": "此路線已失效。請在產生前重新檢視。"
     },
+    "reference": {
+      "generate": "產生參考圖",
+      "dialogTitle": "產生參考圖像",
+      "promptLabel": "參考圖提示詞",
+      "reviewTag": "參考圖"
+    },
     "review": {
       "generateReadyScenes": "產生 {{count}} 個已就緒場景",
       "generateReadyScenes_other": "產生 {{count}} 個已就緒場景",

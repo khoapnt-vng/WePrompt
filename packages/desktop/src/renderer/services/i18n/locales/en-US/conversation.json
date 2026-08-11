@@ -1086,6 +1086,12 @@
       "missingRoute": "Choose a compatible generation route.",
       "invalidRoute": "This route is no longer valid. Review it before generating."
     },
+    "reference": {
+      "generate": "Generate reference",
+      "dialogTitle": "Generate a reference image",
+      "promptLabel": "Reference prompt",
+      "reviewTag": "Reference"
+    },
     "review": {
       "generateReadyScenes": "Generate {{count}} ready scenes",
       "generateReadyScenes_one": "Generate {{count}} ready scene",

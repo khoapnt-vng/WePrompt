@@ -18,6 +18,7 @@ import {
   GenerationControls,
   type GenerationControlsProps,
 } from '@renderer/pages/studio/components/Generation/GenerationControls';
+import { buildFirstFramePrompt } from '@renderer/pages/studio/components/Generation/referencePrompt';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -125,6 +126,14 @@ const createProps = (overrides: Partial<GenerationControlsProps> = {}): Generati
   ...overrides,
 });
 
+describe('buildFirstFramePrompt', () => {
+  it('builds a single cinematic first frame with the project aspect ratio and trimmed visual prompt', () => {
+    expect(buildFirstFramePrompt('  A brushed-steel travel mug  ', '4:3')).toBe(
+      'A single cinematic frame, 4:3, no text, no labels, no collage, no split panels. A brushed-steel travel mug'
+    );
+  });
+});
+
 describe('GenerationControls', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -156,6 +165,22 @@ describe('GenerationControls', () => {
         hasReference: false,
       })
     ).toBeNull();
+  });
+
+  it('carries the reference role and prompt into the image-route review request', () => {
+    expect(
+      buildSingleSceneReviewRequest({
+        project: project(),
+        catalog: catalog(),
+        scene: { id: 'scene-1', mediaKind: 'image' },
+        outputRole: 'reference',
+        referencePrompt: 'Edited first-frame prompt',
+      })
+    ).toMatchObject({
+      outputRole: 'reference',
+      referencePrompt: 'Edited first-frame prompt',
+      route: { kind: 'image' },
+    });
   });
 
   it('derives review from persisted project routing without exposing Studio configuration controls', () => {

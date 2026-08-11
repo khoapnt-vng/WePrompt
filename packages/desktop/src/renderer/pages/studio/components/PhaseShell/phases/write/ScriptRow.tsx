@@ -7,12 +7,14 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Button, Input, Modal, Select } from '@arco-design/web-react';
-import { Delete, Down, Drag, Magic, Picture, Up } from '@icon-park/react';
-import React, { useState } from 'react';
+import { Camera, Delete, Down, Drag, Magic, Picture, Up } from '@icon-park/react';
+import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { STUDIO_REFERENCE_PROMPT_MAX_LENGTH } from '@/common/types/project/creativeStudioTypes';
 import type {
   StudioAsset,
+  StudioAspectRatio,
   StudioEditableScene,
   StudioMediaKind,
   StudioScene,
@@ -20,6 +22,7 @@ import type {
 import type { SelectedSceneSaveState } from '../../../../hooks/useStoryboardEditor';
 import type { StudioSceneDurationBounds } from '../../../../studioRouteConstraints';
 import type { StudioSceneStatus } from '../../../../studioReadiness';
+import { buildFirstFramePrompt, hasFirstFramePromptSubject } from '../../../Generation/referencePrompt';
 import { createManagedStudioAssetUrl } from '../../../Preview/StagePreview';
 
 import styles from './write.module.css';
@@ -30,6 +33,7 @@ const MAX_SCENE_TITLE_CHARS = 256;
 
 export type ScriptRowProps = {
   projectId: string;
+  aspectRatio: StudioAspectRatio;
   scene: StudioScene;
   draft: StudioEditableScene;
   index: number;
@@ -42,6 +46,7 @@ export type ScriptRowProps = {
   selected: boolean;
   mutationPending: boolean;
   importingReference: boolean;
+  canGenerateReference: boolean;
   removeDisabled: boolean;
   moveUpDisabled: boolean;
   moveDownDisabled: boolean;
@@ -52,6 +57,7 @@ export type ScriptRowProps = {
   onRetryConflict: () => ActionResult;
   onDiscardConflict: () => ActionResult;
   onImportReference: () => ActionResult;
+  onGenerateReference: (referencePrompt: string) => ActionResult;
   onSuggestVisual: () => void;
   onRemove: () => ActionResult;
   onMove: (direction: SceneMoveDirection) => ActionResult;
@@ -67,6 +73,7 @@ const SAVE_STATUS_KEYS = {
 /** Controlled, sortable script row. Draft ownership stays in useStoryboardEditor. */
 export const ScriptRow: React.FC<ScriptRowProps> = ({
   projectId,
+  aspectRatio,
   scene,
   draft,
   index,
@@ -79,6 +86,7 @@ export const ScriptRow: React.FC<ScriptRowProps> = ({
   selected,
   mutationPending,
   importingReference,
+  canGenerateReference,
   removeDisabled,
   moveUpDisabled,
   moveDownDisabled,
@@ -89,6 +97,7 @@ export const ScriptRow: React.FC<ScriptRowProps> = ({
   onRetryConflict,
   onDiscardConflict,
   onImportReference,
+  onGenerateReference,
   onSuggestVisual,
   onRemove,
   onMove,
@@ -96,6 +105,8 @@ export const ScriptRow: React.FC<ScriptRowProps> = ({
   const { t } = useTranslation();
   const [detailsExpanded, setDetailsExpanded] = useState(false);
   const [removeConfirmVisible, setRemoveConfirmVisible] = useState(false);
+  const [referenceDialogVisible, setReferenceDialogVisible] = useState(false);
+  const [referencePrompt, setReferencePrompt] = useState('');
   const [titleTouched, setTitleTouched] = useState(false);
   const fieldId = (field: string): string => `studio-scene-${field}-${scene.id}`;
   const durationBounds = durationBoundsByMediaKind[draft.mediaKind];
@@ -108,6 +119,10 @@ export const ScriptRow: React.FC<ScriptRowProps> = ({
     id: scene.id,
     disabled: mutationPending,
   });
+
+  useEffect(() => {
+    if (!canGenerateReference) setReferenceDialogVisible(false);
+  }, [canGenerateReference]);
 
   const durationInvalid =
     !Number.isInteger(draft.durationSeconds) ||
@@ -128,7 +143,7 @@ export const ScriptRow: React.FC<ScriptRowProps> = ({
     referenceAsset.projectId === projectId &&
     referenceAsset.sceneId === scene.id &&
     referenceAsset.mediaKind === 'image' &&
-    referenceAsset.managedAsset.collection === 'imports' &&
+    (referenceAsset.managedAsset.collection === 'imports' || referenceAsset.managedAsset.collection === 'references') &&
     scene.assetIds.includes(referenceAsset.id)
       ? createManagedStudioAssetUrl(projectId, referenceAsset.id)
       : null;
@@ -394,6 +409,19 @@ export const ScriptRow: React.FC<ScriptRowProps> = ({
                   : 'conversation.creativeStudio.phase.write.addReference'
               )}
             </Button>
+            {canGenerateReference && (
+              <Button
+                size='small'
+                disabled={importingReference || mutationPending}
+                icon={<Camera aria-hidden='true' />}
+                onClick={() => {
+                  setReferencePrompt(buildFirstFramePrompt(draft.visualPrompt, aspectRatio));
+                  setReferenceDialogVisible(true);
+                }}
+              >
+                {t('conversation.creativeStudio.reference.generate')}
+              </Button>
+            )}
           </div>
         </div>
 
@@ -445,6 +473,45 @@ export const ScriptRow: React.FC<ScriptRowProps> = ({
           )}
         </div>
       </section>
+
+      <Modal
+        title={t('conversation.creativeStudio.reference.dialogTitle')}
+        wrapClassName={styles.modalSurface}
+        visible={canGenerateReference && referenceDialogVisible}
+        footer={
+          <>
+            <Button disabled={mutationPending} onClick={() => setReferenceDialogVisible(false)}>
+              {t('conversation.creativeStudio.create.cancel')}
+            </Button>
+            <Button
+              type='primary'
+              disabled={
+                !canGenerateReference || mutationPending || !hasFirstFramePromptSubject(referencePrompt, aspectRatio)
+              }
+              onClick={() => {
+                if (!canGenerateReference || !hasFirstFramePromptSubject(referencePrompt, aspectRatio)) return;
+                setReferenceDialogVisible(false);
+                void onGenerateReference(referencePrompt);
+              }}
+            >
+              {t('conversation.creativeStudio.reference.generate')}
+            </Button>
+          </>
+        }
+        onCancel={() => !mutationPending && setReferenceDialogVisible(false)}
+      >
+        <label htmlFor={fieldId('reference-prompt')} className={styles.srOnly}>
+          {t('conversation.creativeStudio.reference.promptLabel')}
+        </label>
+        <Input.TextArea
+          id={fieldId('reference-prompt')}
+          value={referencePrompt}
+          aria-label={t('conversation.creativeStudio.reference.promptLabel')}
+          rows={10}
+          maxLength={STUDIO_REFERENCE_PROMPT_MAX_LENGTH}
+          onChange={setReferencePrompt}
+        />
+      </Modal>
 
       <Modal
         title={t('conversation.creativeStudio.storyboard.removeConfirmTitle')}

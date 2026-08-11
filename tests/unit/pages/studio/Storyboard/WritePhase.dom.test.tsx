@@ -243,6 +243,7 @@ const controller = (overrides: Partial<WritePhaseController> = {}): WritePhaseCo
   mutationPending: false,
   requestTransition: vi.fn(),
   openDraftReview: vi.fn(),
+  openSingleGenerationReview: vi.fn(),
   importReference: vi.fn(async () => {}),
   clearWriteFocusIntent: vi.fn(),
   ...overrides,
@@ -635,6 +636,124 @@ describe('WritePhase', () => {
     expect(referenceActions).toHaveLength(2);
     fireEvent.click(referenceActions[1]!);
     await waitFor(() => expect(props.importReference).toHaveBeenCalledWith('scene-2'));
+  });
+
+  it('shows a generated plate from the references collection in its scene row', () => {
+    const generatedReference: StudioAsset = {
+      ...reference,
+      managedAsset: { collection: 'references', fileName: 'reference-2.png' },
+      sourceVisualPrompt: 'First-frame reference plate',
+    };
+    render(
+      <WritePhase
+        controller={controller({
+          project: {
+            ...project,
+            assets: { [generatedReference.id]: generatedReference },
+          },
+        })}
+      />
+    );
+
+    expect(screen.getByRole('img', { name: 'conversation.creativeStudio.preview.importReference' })).toHaveAttribute(
+      'src',
+      'weprompt-studio://asset/project-1/reference-2'
+    );
+  });
+
+  it('does not offer reference generation while any scene draft is dirty', () => {
+    render(<WritePhase controller={controller()} />);
+
+    expect(
+      screen.queryByRole('button', { name: 'conversation.creativeStudio.reference.generate' })
+    ).not.toBeInTheDocument();
+  });
+
+  it('prefills the reference prompt from the live scene draft', async () => {
+    const phaseEditor = editor('scene-1', {
+      hasUnsavedSceneDrafts: false,
+      sceneDrafts: {
+        'scene-1': { ...editable(scenes[0]!), visualPrompt: 'A live draft first-frame subject' },
+        'scene-2': editable(scenes[1]!),
+      },
+    });
+    render(<WritePhase controller={controller({ editor: phaseEditor })} />);
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'conversation.creativeStudio.reference.generate' })[0]!);
+    const dialog = await screen.findByRole('dialog', {
+      name: 'conversation.creativeStudio.reference.dialogTitle',
+    });
+
+    expect(within(dialog).getByLabelText('conversation.creativeStudio.reference.promptLabel')).toHaveValue(
+      'A single cinematic frame, 16:9, no text, no labels, no collage, no split panels. A live draft first-frame subject'
+    );
+  });
+
+  it('blocks a boilerplate-only reference prompt but accepts an explicit subject', async () => {
+    const emptyOpening = scene('scene-1', { visualPrompt: '' });
+    const emptyProject = {
+      ...project,
+      scenes: { ...project.scenes, [emptyOpening.id]: emptyOpening },
+    };
+    const phaseEditor = editor('scene-1', {
+      project: emptyProject,
+      hasUnsavedSceneDrafts: false,
+      orderedScenes: [emptyOpening, scenes[1]!],
+      sceneDrafts: {
+        'scene-1': editable(emptyOpening),
+        'scene-2': editable(scenes[1]!),
+      },
+    });
+    render(<WritePhase controller={controller({ project: emptyProject, editor: phaseEditor })} />);
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'conversation.creativeStudio.reference.generate' })[0]!);
+    const dialog = await screen.findByRole('dialog', {
+      name: 'conversation.creativeStudio.reference.dialogTitle',
+    });
+    const prompt = within(dialog).getByLabelText('conversation.creativeStudio.reference.promptLabel');
+    const confirm = within(dialog).getByRole('button', {
+      name: 'conversation.creativeStudio.reference.generate',
+    });
+
+    expect(prompt).toHaveAttribute('maxlength', '4096');
+    expect(confirm).toBeDisabled();
+
+    fireEvent.change(prompt, { target: { value: 'A single cinematic frame of a cobalt travel mug' } });
+    expect(confirm).toBeEnabled();
+  });
+
+  it('closes the reference prompt dialog when the image catalog role loses readiness', async () => {
+    const props = controller({ editor: editor('scene-1', { hasUnsavedSceneDrafts: false }) });
+    const view = render(<WritePhase controller={props} />);
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'conversation.creativeStudio.reference.generate' })[0]!);
+    expect(
+      screen.getByRole('dialog', { name: 'conversation.creativeStudio.reference.dialogTitle' })
+    ).toBeInTheDocument();
+
+    view.rerender(
+      <WritePhase
+        controller={controller({
+          models: models({
+            catalog: {
+              ...catalog,
+              image: { status: 'setup_required', selected: null, selectedRoute: null, options: [] },
+            },
+          }),
+          openSingleGenerationReview: props.openSingleGenerationReview,
+        })}
+      />
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('dialog', { name: 'conversation.creativeStudio.reference.dialogTitle' })
+      ).not.toBeInTheDocument()
+    );
+    expect(
+      screen.queryByRole('button', { name: 'conversation.creativeStudio.reference.generate' })
+    ).not.toBeInTheDocument();
+    expect(props.openSingleGenerationReview).not.toHaveBeenCalled();
   });
 
   it('keeps Fit to goal at summary level and contains no media-generation or spend action', () => {

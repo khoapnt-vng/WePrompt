@@ -41,6 +41,7 @@ import type {
   StudioRendererProject,
   StudioRouteCatalog,
 } from '@/common/types/project/creativeStudioTypes';
+import { jobOutputRole } from '@/common/types/project/creativeStudioOutputRole';
 import { createCreativeStudioStore, type CreativeStudioStore } from '@process/services/creative-studio/store';
 
 const makeInput = (overrides: Partial<CreateStudioProjectInput> = {}): CreateStudioProjectInput => ({
@@ -924,6 +925,152 @@ describe('creative studio project store', () => {
         code: 'invalid_payload',
       });
     });
+
+    it('validates an asset in the references collection with no scene attachment', async () => {
+      const project = await store.createProject(makeInput());
+
+      const persisted = await store.updateProject(project.id, (current) => {
+        const next = addScene(current, 'scene_1');
+        next.assets.reference_1 = {
+          id: 'reference_1',
+          projectId: next.id,
+          sceneId: null,
+          mediaKind: 'image',
+          mimeType: 'image/png',
+          managedAsset: { collection: 'references', fileName: 'reference_1.png' },
+          byteSize: 1,
+          sha256: '2'.repeat(64),
+          createdAt: next.createdAt,
+        };
+        return next;
+      });
+
+      expect(await store.getProject(project.id)).toEqual(persisted);
+    });
+
+    it('validates a job carrying the reference output role', async () => {
+      const project = await store.createProject(makeInput());
+
+      const persisted = await store.updateProject(project.id, (current) => {
+        const next = addScene(current, 'scene_1');
+        next.jobs.job_1 = makeJob(next, 'job_1', 'scene_1', { outputRole: 'reference' });
+        next.scenes.scene_1.jobIds = ['job_1'];
+        return next;
+      });
+
+      expect(persisted.jobs.job_1.outputRole).toBe('reference');
+      expect(await store.getProject(project.id)).toEqual(persisted);
+    });
+
+    it('rejects a job carrying an unknown output role', async () => {
+      const project = await store.createProject(makeInput());
+
+      await expect(
+        store.updateProject(project.id, (current) => {
+          const next = addScene(current, 'scene_1');
+          next.jobs.job_1 = makeJob(next, 'job_1', 'scene_1', { outputRole: 'poster' as never });
+          next.scenes.scene_1.jobIds = ['job_1'];
+          return next;
+        })
+      ).rejects.toMatchObject({ code: 'invalid_payload' });
+    });
+
+    it('rejects an asset with an unknown collection', async () => {
+      const project = await store.createProject(makeInput());
+
+      await expect(
+        store.updateProject(project.id, (current) => {
+          const next = addScene(current, 'scene_1');
+          next.assets.asset_1 = {
+            id: 'asset_1',
+            projectId: next.id,
+            sceneId: 'scene_1',
+            mediaKind: 'image',
+            mimeType: 'image/png',
+            managedAsset: { collection: 'gallery' as never, fileName: 'asset_1.png' },
+            byteSize: 1,
+            sha256: '3'.repeat(64),
+            createdAt: next.createdAt,
+          };
+          next.scenes.scene_1.assetIds = ['asset_1'];
+          return next;
+        })
+      ).rejects.toMatchObject({ code: 'invalid_payload' });
+    });
+
+    it('accepts an asset carrying the visual prompt it was generated from', async () => {
+      const project = await store.createProject(makeInput());
+
+      const persisted = await store.updateProject(project.id, (current) => {
+        const next = addScene(current, 'scene_1');
+        next.assets.reference_1 = {
+          id: 'reference_1',
+          projectId: next.id,
+          sceneId: 'scene_1',
+          mediaKind: 'image',
+          mimeType: 'image/png',
+          managedAsset: { collection: 'references', fileName: 'reference_1.png' },
+          byteSize: 1,
+          sha256: '4'.repeat(64),
+          createdAt: next.createdAt,
+          sourceVisualPrompt: 'Aerial, drifting. Smoke columns.',
+        };
+        next.scenes.scene_1.assetIds = ['reference_1'];
+        return next;
+      });
+
+      expect(persisted.assets.reference_1.sourceVisualPrompt).toBe('Aerial, drifting. Smoke columns.');
+      expect(await store.getProject(project.id)).toEqual(persisted);
+    });
+
+    it('accepts an asset with no provenance — every pre-existing asset lacks it', async () => {
+      const project = await store.createProject(makeInput());
+
+      const persisted = await store.updateProject(project.id, (current) => {
+        const next = addScene(current, 'scene_1');
+        next.assets.reference_1 = {
+          id: 'reference_1',
+          projectId: next.id,
+          sceneId: 'scene_1',
+          mediaKind: 'image',
+          mimeType: 'image/png',
+          managedAsset: { collection: 'references', fileName: 'reference_1.png' },
+          byteSize: 1,
+          sha256: '5'.repeat(64),
+          createdAt: next.createdAt,
+        };
+        next.scenes.scene_1.assetIds = ['reference_1'];
+        expect('sourceVisualPrompt' in next.assets.reference_1).toBe(false);
+        return next;
+      });
+
+      expect('sourceVisualPrompt' in persisted.assets.reference_1).toBe(false);
+      expect(await store.getProject(project.id)).toEqual(persisted);
+    });
+
+    it('rejects an asset whose provenance is not a string', async () => {
+      const project = await store.createProject(makeInput());
+
+      await expect(
+        store.updateProject(project.id, (current) => {
+          const next = addScene(current, 'scene_1');
+          next.assets.reference_1 = {
+            id: 'reference_1',
+            projectId: next.id,
+            sceneId: 'scene_1',
+            mediaKind: 'image',
+            mimeType: 'image/png',
+            managedAsset: { collection: 'references', fileName: 'reference_1.png' },
+            byteSize: 1,
+            sha256: '6'.repeat(64),
+            createdAt: next.createdAt,
+            sourceVisualPrompt: 42 as never,
+          };
+          next.scenes.scene_1.assetIds = ['reference_1'];
+          return next;
+        })
+      ).rejects.toMatchObject({ code: 'invalid_payload' });
+    });
   });
 
   it('returns summaries newest-first instead of relying on filesystem iteration order', async () => {
@@ -1566,6 +1713,40 @@ describe('creative studio project store', () => {
         await rm(outsideDir, { recursive: true, force: true });
       }
     });
+  });
+});
+
+describe('jobOutputRole', () => {
+  const makeBareJob = (overrides: Partial<StudioJob> = {}): StudioJob => ({
+    id: 'job_1',
+    projectId: 'project_1',
+    sceneId: 'scene_1',
+    status: 'succeeded',
+    provider: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'model_1' },
+    idempotencyKey: 'key_1',
+    providerJobId: null,
+    cancellationPolicy: 'none',
+    outputAssetIds: [],
+    error: null,
+    retryOfJobId: null,
+    retryReason: null,
+    duplicateChargeAcknowledged: false,
+    duplicateChargeAcknowledgedAt: null,
+    createdAt: '2026-08-06T00:00:00.000Z',
+    updatedAt: '2026-08-06T00:00:00.000Z',
+    ...overrides,
+  });
+
+  it('defaults an old schema-v1 job that lacks the field to take', () => {
+    expect(jobOutputRole(makeBareJob())).toBe('take');
+  });
+
+  it('reads an explicit take role', () => {
+    expect(jobOutputRole(makeBareJob({ outputRole: 'take' }))).toBe('take');
+  });
+
+  it('reads an explicit reference role', () => {
+    expect(jobOutputRole(makeBareJob({ outputRole: 'reference' }))).toBe('reference');
   });
 });
 

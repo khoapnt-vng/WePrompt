@@ -28,6 +28,7 @@ const plannedGroups = [
   'phase',
   'preview',
   'project',
+  'reference',
   'review',
   'routing',
   'scene',

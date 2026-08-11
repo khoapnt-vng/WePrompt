@@ -60,6 +60,7 @@ import type {
   StudioUpdateModelSelectionRequest,
 } from '@/common/types/project/creativeStudioTypes';
 import { isCanonicalStudioGeneratedTake } from '@/common/types/project/creativeStudioCanonicalTake';
+import { requestedMediaKind } from '@/common/types/project/creativeStudioOutputRole';
 import {
   CreativeStudioStoreError,
   reconcilePersistedStudioCuts,
@@ -697,6 +698,7 @@ const toRendererAsset = (asset: StudioAsset): StudioAsset => ({
   ...(asset.width === undefined ? {} : { width: asset.width }),
   ...(asset.height === undefined ? {} : { height: asset.height }),
   ...(asset.durationSeconds === undefined ? {} : { durationSeconds: asset.durationSeconds }),
+  ...(asset.sourceVisualPrompt === undefined ? {} : { sourceVisualPrompt: asset.sourceVisualPrompt }),
   createdAt: asset.createdAt,
 });
 
@@ -1827,7 +1829,9 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
         const route = built.generation.routes.find(
           (candidate) => candidate.kind === choice.kind && candidate.choiceId === choice.choiceId
         );
-        if (scene?.mediaKind !== choice.kind || !available || route === undefined) {
+        if (scene === undefined) throw new CreativeStudioServiceError('invalid_route');
+        const requiredKind = requestedMediaKind(scene.mediaKind, input.outputRole ?? 'take');
+        if (requiredKind !== choice.kind || !available || route === undefined) {
           throw new CreativeStudioServiceError('invalid_route');
         }
         return {
@@ -1845,6 +1849,10 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
           expectedRevision: input.expectedRevision,
           routes: resolvedRoutes,
           catalogVersion: built.generation.generationCatalogVersion,
+          // Forwarded explicitly: submitScenes is assembled field by field and both fields are
+          // optional on an Omit-derived type, so dropping them would never fail the typecheck.
+          ...(input.outputRole === undefined ? {} : { outputRole: input.outputRole }),
+          ...(input.referencePrompt === undefined ? {} : { referencePrompt: input.referencePrompt }),
         })
       ).map(toRendererJob);
     },

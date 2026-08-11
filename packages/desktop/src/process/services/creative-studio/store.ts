@@ -16,6 +16,8 @@ import type {
   StudioCutClip,
   StudioCutFilter,
   StudioJob,
+  StudioManagedAssetRef,
+  StudioOutputRole,
   StudioProject,
   StudioProjectSummary,
   StudioProposal,
@@ -26,6 +28,7 @@ import type {
   StudioTextModelRef,
 } from '@/common/types/project/creativeStudioTypes';
 import { isCanonicalStudioGeneratedTake } from '@/common/types/project/creativeStudioCanonicalTake';
+import { STUDIO_MANAGED_ASSET_COLLECTIONS } from '@/common/types/project/creativeStudioManagedAssetCollections';
 import { isValidProviderJobId } from '@process/services/creative-studio/adapters/types';
 import { toStudioProjectSummary } from '@/common/types/project/creativeStudioProjectSummary';
 
@@ -47,6 +50,7 @@ const JOB_STATUSES = new Set([
 const NONTERMINAL_JOB_STATUSES = new Set(['queued_local', 'submitting', 'queued_remote', 'running', 'needs_attention']);
 const JOB_RETRY_REASONS = new Set(['provider_failure', 'submission_unknown']);
 const CANCELLATION_POLICIES = new Set<StudioCancellationPolicy>(['none', 'queued_only', 'queued_and_running']);
+const JOB_OUTPUT_ROLES = new Set<StudioOutputRole>(['take', 'reference']);
 const ADAPTER_IDS = new Set([
   'weprompt-image-v1',
   'byteplus-seedance-v1',
@@ -99,6 +103,7 @@ const ASSET_KEYS = new Set([
   'height',
   'durationSeconds',
   'createdAt',
+  'sourceVisualPrompt',
 ]);
 const MANAGED_ASSET_KEYS = new Set(['collection', 'fileName']);
 const CUT_KEYS = new Set(['id', 'name', 'orderMode', 'clipOrder', 'clips']);
@@ -116,6 +121,7 @@ const JOB_KEYS = new Set([
   'providerJobId',
   'remoteStartedAt',
   'cancellationPolicy',
+  'outputRole',
   'outputAssetIds',
   'error',
   'progress',
@@ -126,7 +132,6 @@ const JOB_KEYS = new Set([
   'createdAt',
   'updatedAt',
 ]);
-const ASSET_COLLECTIONS = new Set(['assets', 'imports', 'thumbnails']);
 const CONNECTION_BINDING_KEYS = new Set([
   'schemaVersion',
   'id',
@@ -568,7 +573,7 @@ const validateAsset = (
     MEDIA_KINDS.has(value.mediaKind) &&
     isNonEmptyString(value.mimeType) &&
     isString(value.managedAsset.collection) &&
-    ASSET_COLLECTIONS.has(value.managedAsset.collection) &&
+    STUDIO_MANAGED_ASSET_COLLECTIONS.has(value.managedAsset.collection as StudioManagedAssetRef['collection']) &&
     isSafeAssetFileName(value.managedAsset.fileName) &&
     isIntegerInRange(value.byteSize, 0, Number.MAX_SAFE_INTEGER) &&
     isString(value.sha256) &&
@@ -577,7 +582,8 @@ const validateAsset = (
     (value.height === undefined || isIntegerInRange(value.height, 1, Number.MAX_SAFE_INTEGER)) &&
     (value.durationSeconds === undefined ||
       (isFiniteInRange(value.durationSeconds, 0, Number.MAX_SAFE_INTEGER) && value.durationSeconds > 0)) &&
-    isNonEmptyString(value.createdAt)
+    isNonEmptyString(value.createdAt) &&
+    (value.sourceVisualPrompt === undefined || isString(value.sourceVisualPrompt))
   );
 };
 
@@ -827,6 +833,8 @@ const validateJob = (jobId: string, projectId: string, sceneIds: Set<string>, va
         : isCanonicalIsoTimestamp(value.remoteStartedAt))) &&
     isString(value.cancellationPolicy) &&
     CANCELLATION_POLICIES.has(value.cancellationPolicy as StudioCancellationPolicy) &&
+    (value.outputRole === undefined ||
+      (isString(value.outputRole) && JOB_OUTPUT_ROLES.has(value.outputRole as StudioOutputRole))) &&
     asArrayOfSafeIds(value.outputAssetIds) &&
     new Set(value.outputAssetIds).size === value.outputAssetIds.length &&
     errorIsValid &&

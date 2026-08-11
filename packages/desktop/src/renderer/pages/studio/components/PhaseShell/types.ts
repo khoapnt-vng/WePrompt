@@ -63,6 +63,7 @@ export type WritePhaseController = Pick<
   | 'mutationPending'
   | 'requestTransition'
   | 'openDraftReview'
+  | 'openSingleGenerationReview'
   | 'importReference'
   | 'clearWriteFocusIntent'
 >;

@@ -69,7 +69,7 @@ export type StudioJobIssue = {
 
 export type StudioSubmitIntent = Pick<
   StudioSubmitScenesRequest,
-  'mode' | 'sceneIds' | 'routes' | 'catalogVersion' | 'expectedRevision'
+  'mode' | 'sceneIds' | 'routes' | 'catalogVersion' | 'expectedRevision' | 'outputRole' | 'referencePrompt'
 >;
 
 export type StudioStaleIntent =
@@ -171,6 +171,8 @@ const cloneSubmitIntent = (
   routes: input.routes.map((route) => ({ ...route })),
   catalogVersion: input.catalogVersion,
   expectedRevision: input.expectedRevision,
+  ...(input.outputRole === undefined ? {} : { outputRole: input.outputRole }),
+  ...(input.referencePrompt === undefined ? {} : { referencePrompt: input.referencePrompt }),
 });
 
 const toIssue = (
@@ -373,6 +375,8 @@ export const useStudioJobs = ({
             expectedRevision: intent.expectedRevision,
             routes: intent.routes.map((route) => ({ ...route })),
             catalogVersion: intent.catalogVersion,
+            ...(intent.outputRole === undefined ? {} : { outputRole: intent.outputRole }),
+            ...(intent.referencePrompt === undefined ? {} : { referencePrompt: intent.referencePrompt }),
           });
         case 'cancel_job':
           return ipcBridge.creativeStudio.cancelJob.invoke({

@@ -1267,6 +1267,12 @@
       "missingRoute": "Виберіть сумісний маршрут генерації.",
       "invalidRoute": "Цей маршрут більше не дійсний. Перевірте його перед генерацією."
     },
+    "reference": {
+      "generate": "Створити референс",
+      "dialogTitle": "Створити референсне зображення",
+      "promptLabel": "Промпт референсу",
+      "reviewTag": "Референс"
+    },
     "review": {
       "generateReadyScenes": "Згенерувати готові сцени: {{count}}",
       "generateReadyScenes_one": "Згенерувати {{count}} готову сцену",

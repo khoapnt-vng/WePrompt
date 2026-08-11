@@ -9,7 +9,9 @@ import { constants as fsConstants, createReadStream, createWriteStream, promises
 import path from 'node:path';
 import { PassThrough, Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { jobOutputRole } from '@/common/types/project/creativeStudioOutputRole';
 import type { StudioAsset, StudioProject } from '@/common/types/project/creativeStudioTypes';
+import { STUDIO_MANAGED_ASSET_COLLECTIONS } from '@/common/types/project/creativeStudioManagedAssetCollections';
 import { CreativeStudioStoreError, reconcilePersistedStudioCuts, type CreativeStudioStore } from './store';
 import { downloadRemoteMedia, type RemoteMediaDownloadDeps } from '../remote-media/remoteMediaDownloader';
 
@@ -894,7 +896,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       if (!projectDir || !project) return null;
       const asset = project.assets[assetId] ?? (await readProjectOutputAsset(projectDir, projectId, assetId));
       if (!asset || asset.projectId !== projectId) return null;
-      if (!['assets', 'imports', 'thumbnails'].includes(asset.managedAsset.collection)) return null;
+      if (!STUDIO_MANAGED_ASSET_COLLECTIONS.has(asset.managedAsset.collection)) return null;
       if (!/^[A-Za-z0-9_-]+\.(?:jpg|png|webp|mp4|webm)$/.test(asset.managedAsset.fileName)) return null;
       const collectionDir = path.join(projectDir, asset.managedAsset.collection);
       if (path.dirname(collectionDir) !== projectDir) return null;
@@ -1031,7 +1033,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     projectDir: string;
     project: StudioProject;
     capacity: WriteCapacity;
-    collection: 'assets' | 'thumbnails';
+    collection: 'assets' | 'thumbnails' | 'references';
   };
 
   const validateProviderOutputMetadata = (
@@ -1095,8 +1097,13 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       deps.store.getVerifiedProjectDirectory(input.projectId),
       deps.store.getProject(input.projectId),
     ]);
+    const scene = project?.scenes[input.sceneId];
     const job = project?.jobs[input.jobId];
-    if (project?.scenes[input.sceneId] && project.scenes[input.sceneId].mediaKind !== input.mediaKind) {
+    // Must match commitProviderJobAsset: StudioJob.outputRole is immutable after creation.
+    const role = job ? jobOutputRole(job) : null;
+    const mediaKindMatchesRole =
+      role === 'reference' ? input.mediaKind === 'image' : scene?.mediaKind === input.mediaKind;
+    if (scene && !mediaKindMatchesRole) {
       throw new CreativeStudioMediaError('invalid_media');
     }
     const active =
@@ -1106,20 +1113,22 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     if (
       !projectDir ||
       !project ||
-      !project.scenes[input.sceneId] ||
-      project.scenes[input.sceneId].mediaKind !== input.mediaKind ||
+      !scene ||
+      !mediaKindMatchesRole ||
       !job ||
       job.sceneId !== input.sceneId ||
       !active
     ) {
       throw new CreativeStudioMediaError(project && job ? 'job_inactive' : 'not_found');
     }
+    // A reference is already required to be an image above, so the kind check alone is sufficient;
+    // the references collection also keeps plates out of canonical-take predicates as defence in depth.
     const perAssetMaxBytes = input.mediaKind === 'video' ? limits.videoOutputMaxBytes : limits.imageOutputMaxBytes;
     return {
       projectDir,
       project,
       capacity: await planWriteCapacity(project, projectDir, perAssetMaxBytes, input.declaredByteSize),
-      collection: 'assets',
+      collection: role === 'reference' ? 'references' : 'assets',
     };
   };
 
@@ -1411,22 +1420,48 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         job?.status === 'submitting' ||
         job?.status === 'running' ||
         (job?.status === 'failed' && job.error?.code === 'download_failed');
-      if (!job || !scene || scene.mediaKind !== input.mediaKind || job.sceneId !== input.sceneId || !active) {
+      if (!job || !scene || job.sceneId !== input.sceneId || !active) {
         throw new CreativeStudioMediaError('job_inactive');
+      }
+      // Must match prepareProviderJobWrite: StudioJob.outputRole is immutable after creation.
+      const role = jobOutputRole(job);
+      if (role === 'take' && scene.mediaKind !== input.mediaKind) {
+        throw new CreativeStudioMediaError('job_inactive');
+      }
+      if (role === 'reference' && input.mediaKind !== 'image') {
+        // Deliberately invalid_media: immutable outputRole and stable input.mediaKind cannot race like scene.mediaKind.
+        throw new CreativeStudioMediaError('invalid_media');
       }
       const usedBytes = Object.values(current.assets).reduce((total, candidate) => total + candidate.byteSize, 0);
       if (usedBytes + asset.byteSize > limits.projectMaxBytes) {
         throw new CreativeStudioMediaError('invalid_media');
       }
+      asset.sourceVisualPrompt = scene.visualPrompt.trim();
       current.assets[asset.id] = asset;
+      // Every scene-owned asset must be reverse-linked in assetIds (store.ts:993) —
+      // exactly as imported references and posters already are — regardless of role.
       scene.assetIds.push(asset.id);
-      scene.selectedAssetId = asset.id;
-      scene.reviewState = 'complete';
+      if (role === 'reference') {
+        scene.referenceAssetId = asset.id;
+        // A plate settles the scene out of 'generating' but must never mark it produced.
+        // A scene that already has a take stays complete - regenerating its plate does
+        // not un-produce it. One with no take returns to its resting state.
+        // The ready -> draft demotion is known and accepted while only the busy gate reads reviewState;
+        // revisit this before making the distinction user-visible rather than duplicating readiness rules here.
+        scene.reviewState = scene.selectedAssetId === null ? 'draft' : 'complete';
+      } else {
+        scene.selectedAssetId = asset.id;
+        scene.reviewState = 'complete';
+      }
       job.status = 'succeeded';
       job.outputAssetIds = [asset.id];
       job.error = null;
       delete job.progress;
       job.updatedAt = now();
+      // reconcileCut derives clips solely from selectedTake (store.ts:769/:780), which a
+      // reference commit never changes, so this is a no-op for the reference path today —
+      // but keeping one path means reconciliation starting to read assetIds can't silently
+      // let a plate become a clip without this call already being in place.
       return reconcilePersistedStudioCuts(current);
     });
   };

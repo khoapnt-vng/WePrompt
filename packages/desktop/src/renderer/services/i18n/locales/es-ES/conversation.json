@@ -1260,6 +1260,12 @@
       "missingRoute": "Elige una ruta de generación compatible.",
       "invalidRoute": "Esta ruta ya no es válida. Revísala antes de generar."
     },
+    "reference": {
+      "generate": "Generar referencia",
+      "dialogTitle": "Generar una imagen de referencia",
+      "promptLabel": "Prompt de referencia",
+      "reviewTag": "Referencia"
+    },
     "review": {
       "generateReadyScenes": "Generar {{count}} escenas listas",
       "generateReadyScenes_one": "Generar {{count}} escena lista",

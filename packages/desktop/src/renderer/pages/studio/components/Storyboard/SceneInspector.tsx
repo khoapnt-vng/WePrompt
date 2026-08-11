@@ -124,7 +124,7 @@ export const SceneInspector: React.FC<SceneInspectorProps> = ({
     referenceAsset.projectId === projectId &&
     referenceAsset.sceneId === selectedScene.id &&
     referenceAsset.mediaKind === 'image' &&
-    referenceAsset.managedAsset.collection === 'imports' &&
+    (referenceAsset.managedAsset.collection === 'imports' || referenceAsset.managedAsset.collection === 'references') &&
     selectedScene.assetIds.includes(referenceAsset.id)
       ? createManagedStudioAssetUrl(projectId, referenceAsset.id)
       : null;

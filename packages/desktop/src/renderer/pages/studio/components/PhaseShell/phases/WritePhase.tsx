@@ -7,6 +7,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { buildSingleSceneReviewRequest } from '../../Generation/GenerationControls';
+import { requestedMediaKind } from '@/common/types/project/creativeStudioOutputRole';
 import { resolveSceneDurationBounds } from '../../../studioRouteConstraints';
 import { AssistantDock } from '../AssistantDock';
 import type { WritePhaseController } from '../types';
@@ -32,6 +34,7 @@ export const WritePhase: React.FC<WritePhaseProps> = ({ controller, layoutMode =
     advisory,
     mutationPending,
     openDraftReview,
+    openSingleGenerationReview,
     importReference,
     clearWriteFocusIntent,
   } = controller;
@@ -72,6 +75,13 @@ export const WritePhase: React.FC<WritePhaseProps> = ({ controller, layoutMode =
     !models.catalog.catalogVersion ||
     mutationPending ||
     models.pendingRole !== null;
+  const generationBlocked =
+    editor.hasUnsavedProjectDraft ||
+    editor.hasUnsavedSceneDrafts ||
+    editor.conflict !== null ||
+    editor.drafting ||
+    mutationPending;
+  const canGenerateReference = models.catalog?.image.status === 'ready' && !generationBlocked;
 
   useEffect(() => {
     setAssistantOpen(false);
@@ -161,6 +171,7 @@ export const WritePhase: React.FC<WritePhaseProps> = ({ controller, layoutMode =
                 <ScriptRow
                   key={scene.id}
                   projectId={project.id}
+                  aspectRatio={project.aspectRatio}
                   scene={project.scenes[scene.id] ?? scene}
                   draft={draft}
                   index={index}
@@ -173,6 +184,7 @@ export const WritePhase: React.FC<WritePhaseProps> = ({ controller, layoutMode =
                   selected={editor.selectedSceneId === scene.id}
                   mutationPending={mutationPending}
                   importingReference={importingSceneId === scene.id}
+                  canGenerateReference={canGenerateReference}
                   removeDisabled={scene.assetIds.length > 0 || scene.jobIds.length > 0}
                   moveUpDisabled={index === 0}
                   moveDownDisabled={index === editor.orderedScenes.length - 1}
@@ -193,6 +205,17 @@ export const WritePhase: React.FC<WritePhaseProps> = ({ controller, layoutMode =
                     if (importingSceneId !== null) return;
                     setImportingSceneId(scene.id);
                     void importReference(scene.id).finally(() => setImportingSceneId(null));
+                  }}
+                  onGenerateReference={(referencePrompt) => {
+                    if (generationBlocked) return;
+                    const request = buildSingleSceneReviewRequest({
+                      project,
+                      catalog: models.catalog,
+                      scene: { id: scene.id, mediaKind: requestedMediaKind(scene.mediaKind, 'reference') },
+                      outputRole: 'reference',
+                      referencePrompt,
+                    });
+                    if (request !== null) openSingleGenerationReview(request);
                   }}
                   onSuggestVisual={() => {
                     editor.selectScene(scene.id);

@@ -12,6 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { isCanonicalStudioGeneratedTake } from '@/common/types/project/creativeStudioCanonicalTake';
 import { STUDIO_E2E_BOUNDARY_SENTINELS } from '@process/services/creative-studio/adapters/e2eFakeAdapter';
 import {
   createCreativeStudioStore,
@@ -130,6 +131,21 @@ const addActiveVideoJob = async (store: CreativeStudioStore): Promise<void> => {
       adapterId: 'weprompt-media-gateway-v1',
       model: 'video-model',
     };
+    return next;
+  });
+};
+
+const addActiveReferenceJob = async (store: CreativeStudioStore, visualPrompt = ''): Promise<void> => {
+  await addActiveVideoJob(store);
+  await store.updateProject('project_1', (project) => {
+    const next = structuredClone(project);
+    next.scenes.scene_1.visualPrompt = visualPrompt;
+    next.jobs.job_1.provider = {
+      providerId: 'provider_1',
+      adapterId: 'weprompt-image-v1',
+      model: 'image-model',
+    };
+    next.jobs.job_1.outputRole = 'reference';
     return next;
   });
 };
@@ -488,6 +504,221 @@ describe('createStudioMediaStore', () => {
       reviewState: 'complete',
     });
     expect(project?.routing.image).toBeNull();
+  });
+
+  it('commits a reference to the scene without selecting it as the take', async () => {
+    const { rootDir, store } = await makeStore();
+    await addActiveReferenceJob(store);
+    const media = createStudioMediaStore({ store, createId: () => 'asset_reference_1' });
+
+    const committed = await media.persistProviderOutputForJob({
+      projectId: 'project_1',
+      sceneId: 'scene_1',
+      jobId: 'job_1',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      body: Readable.from([png]),
+    });
+
+    const project = await store.getProject('project_1');
+    expect(project?.scenes.scene_1.referenceAssetId).toBe(committed.id);
+    // assetIds is "assets owned by this scene", not "takes" — imports and posters
+    // live there too, and store.ts:993 requires the reverse link. What must stay
+    // true is that the plate is not the take and the scene is not produced.
+    expect(project?.scenes.scene_1.assetIds).toContain(committed.id);
+    expect(project?.scenes.scene_1.selectedAssetId).toBeNull();
+    // Regression: a reference commit must clear the submit-time generating state without marking the scene produced.
+    expect(project?.scenes.scene_1.reviewState).toBe('draft');
+    expect(project?.assets[committed.id].sceneId).toBe('scene_1');
+    expect(project?.assets[committed.id].managedAsset.collection).toBe('references');
+    await expect(
+      fs.access(path.join(rootDir, 'project_1', 'references', 'asset_reference_1.png'))
+    ).resolves.toBeUndefined();
+  });
+
+  it('restores a produced scene to complete after committing a new reference', async () => {
+    const { store } = await makeStore();
+    await addActiveReferenceJob(store);
+    await store.updateProject('project_1', (project) => {
+      const next = structuredClone(project);
+      next.assets.asset_existing_take = {
+        id: 'asset_existing_take',
+        projectId: project.id,
+        sceneId: 'scene_1',
+        mediaKind: 'video',
+        mimeType: 'video/mp4',
+        managedAsset: { collection: 'assets', fileName: 'asset_existing_take.mp4' },
+        byteSize: 1,
+        sha256: '0'.repeat(64),
+        durationSeconds: 5,
+        createdAt: project.createdAt,
+      };
+      next.scenes.scene_1.assetIds.push('asset_existing_take');
+      next.scenes.scene_1.selectedAssetId = 'asset_existing_take';
+      return next;
+    });
+    const media = createStudioMediaStore({ store, createId: () => 'asset_replacement_reference' });
+
+    const committed = await media.persistProviderOutputForJob({
+      projectId: 'project_1',
+      sceneId: 'scene_1',
+      jobId: 'job_1',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      body: Readable.from([png]),
+    });
+
+    const project = await store.getProject('project_1');
+    expect(project?.scenes.scene_1.referenceAssetId).toBe(committed.id);
+    expect(project?.scenes.scene_1.selectedAssetId).toBe('asset_existing_take');
+    expect(project?.scenes.scene_1.reviewState).toBe('complete');
+  });
+
+  it('leaves a persisted cut untouched when committing a reference', async () => {
+    const { store } = await makeStore();
+    await addActiveReferenceJob(store);
+    await store.updateProject('project_1', (project) => {
+      const next = structuredClone(project);
+      next.assets.asset_video_old = {
+        id: 'asset_video_old',
+        projectId: project.id,
+        sceneId: 'scene_1',
+        mediaKind: 'video',
+        mimeType: 'video/mp4',
+        managedAsset: { collection: 'assets', fileName: 'asset_video_old.mp4' },
+        byteSize: 1,
+        sha256: '0'.repeat(64),
+        durationSeconds: 5.085,
+        createdAt: project.createdAt,
+      };
+      next.scenes.scene_1.assetIds.push('asset_video_old');
+      next.scenes.scene_1.selectedAssetId = 'asset_video_old';
+      next.cuts = {
+        cut_1: {
+          id: 'cut_1',
+          name: project.name,
+          orderMode: 'storyboard',
+          clipOrder: ['clip_scene_1'],
+          clips: {
+            clip_scene_1: {
+              id: 'clip_scene_1',
+              sceneId: 'scene_1',
+              assetId: 'asset_video_old',
+              sourceInSeconds: 0.5,
+              sourceOutSeconds: 4.5,
+              crop: { x: 0.1, y: 0.1, width: 0.8, height: 0.8 },
+              filters: [{ id: 'contrast', amount: 0.25 }],
+            },
+          },
+        },
+      };
+      next.activeCutId = 'cut_1';
+      return next;
+    });
+    const media = createStudioMediaStore({ store, createId: () => 'asset_reference_cut' });
+
+    await media.persistProviderOutputForJob({
+      projectId: 'project_1',
+      sceneId: 'scene_1',
+      jobId: 'job_1',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      body: Readable.from([png]),
+    });
+
+    // A plate must never become a clip in the rendered cut: reconciliation runs
+    // unconditionally now, but it derives clips solely from selectedTake, which a
+    // reference commit never changes, so the pre-existing take clip must survive as-is.
+    expect((await store.getProject('project_1'))?.cuts?.cut_1?.clips.clip_scene_1).toMatchObject({
+      assetId: 'asset_video_old',
+      sourceInSeconds: 0.5,
+      sourceOutSeconds: 4.5,
+      crop: { x: 0.1, y: 0.1, width: 0.8, height: 0.8 },
+      filters: [{ id: 'contrast', amount: 0.25 }],
+    });
+  });
+
+  it('does not create a canonical generated take when committing a reference', async () => {
+    const { store } = await makeStore();
+    await addActiveReferenceJob(store);
+    const media = createStudioMediaStore({ store, createId: () => 'asset_reference_not_take' });
+
+    await media.persistProviderOutputForJob({
+      projectId: 'project_1',
+      sceneId: 'scene_1',
+      jobId: 'job_1',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      body: Readable.from([png]),
+    });
+
+    const project = await store.getProject('project_1');
+    const scene = project?.scenes.scene_1;
+    expect(
+      project && scene
+        ? Object.values(project.assets).some((asset) => isCanonicalStudioGeneratedTake(asset, project.id, scene))
+        : true
+    ).toBe(false);
+  });
+
+  it('records the visual prompt the image was generated from, trimmed', async () => {
+    const { store } = await makeStore();
+    await addActiveReferenceJob(store, '  Aerial, drifting.  ');
+    const media = createStudioMediaStore({ store, createId: () => 'asset_reference_prompt' });
+
+    const committed = await media.persistProviderOutputForJob({
+      projectId: 'project_1',
+      sceneId: 'scene_1',
+      jobId: 'job_1',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      body: Readable.from([png]),
+    });
+
+    expect((await store.getProject('project_1'))?.assets[committed.id].sourceVisualPrompt).toBe('Aerial, drifting.');
+  });
+
+  it('still commits a take exactly as before', async () => {
+    const { store } = await makeStore();
+    await addActiveVideoJob(store);
+    await store.updateProject('project_1', (project) => {
+      const next = structuredClone(project);
+      next.scenes.scene_1.visualPrompt = '  Aerial, drifting.  ';
+      return next;
+    });
+    const media = createStudioMediaStore({ store, createId: () => 'asset_video_take' });
+
+    const committed = await media.persistProviderOutputForJob({
+      projectId: 'project_1',
+      sceneId: 'scene_1',
+      jobId: 'job_1',
+      mediaKind: 'video',
+      declaredMimeType: 'video/mp4',
+      body: Readable.from([mp4]),
+    });
+
+    const project = await store.getProject('project_1');
+    expect(project?.scenes.scene_1.selectedAssetId).toBe(committed.id);
+    expect(project?.scenes.scene_1.assetIds).toContain(committed.id);
+    expect(project?.scenes.scene_1.reviewState).toBe('complete');
+    expect(project?.assets[committed.id].sourceVisualPrompt).toBe('Aerial, drifting.');
+  });
+
+  it('rejects a reference whose output is not an image', async () => {
+    const { store } = await makeStore();
+    await addActiveReferenceJob(store);
+    const media = createStudioMediaStore({ store, createId: () => 'asset_reference_video' });
+
+    await expect(
+      media.persistProviderOutputForJob({
+        projectId: 'project_1',
+        sceneId: 'scene_1',
+        jobId: 'job_1',
+        mediaKind: 'video',
+        declaredMimeType: 'video/mp4',
+        body: Readable.from([mp4]),
+      })
+    ).rejects.toMatchObject<Partial<CreativeStudioMediaError>>({ code: 'invalid_media' });
   });
 
   it('persists a fractional provider-reported video duration', async () => {

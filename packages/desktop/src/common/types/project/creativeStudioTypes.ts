@@ -53,7 +53,15 @@ export type StudioMediaChoiceRef = {
 
 /** An app-managed asset identity, deliberately not a filesystem path or URL. */
 export type StudioManagedAssetRef = {
-  collection: 'assets' | 'imports' | 'thumbnails';
+  collection:
+    /** A generated take: the finished shot committed to a scene. */
+    | 'assets'
+    /** User-imported reference material. `StudioScene.referenceAssetId` points here today. */
+    | 'imports'
+    /** Captured or provider-generated poster frames for video takes. */
+    | 'thumbnails'
+    /** A generated reference plate (not user-imported); distinct from the `imports` sense of "reference". */
+    | 'references';
   fileName: string;
 };
 
@@ -71,6 +79,12 @@ export type StudioAsset = {
   height?: number;
   durationSeconds?: number;
   createdAt: string;
+  /**
+   * The scene's visual prompt at the moment this asset was generated, trimmed.
+   * Absent means unknown provenance — an asset written before this field existed,
+   * or one that did not come from a prompt (an import). Absent is NOT stale.
+   */
+  sourceVisualPrompt?: string;
 };
 
 export type StudioJobErrorCode =
@@ -96,6 +110,11 @@ export type StudioJobRetryReason = 'provider_failure' | 'submission_unknown';
 
 export type StudioCancellationPolicy = 'none' | 'queued_only' | 'queued_and_running';
 
+/** What a job's output becomes once it lands: the scene's finished take, or its supporting reference plate. */
+export type StudioOutputRole = 'take' | 'reference';
+
+export const STUDIO_REFERENCE_PROMPT_MAX_LENGTH = 4 * 1024;
+
 export type StudioJob = {
   id: string;
   projectId: string;
@@ -107,6 +126,8 @@ export type StudioJob = {
   /** Set once when providerJobId becomes durable. Optional only for old schema-v1 jobs. */
   remoteStartedAt?: string | null;
   cancellationPolicy: StudioCancellationPolicy;
+  /** Absent means 'take', the pre-existing default. Never backfilled onto old records; read via jobOutputRole(job). */
+  outputRole?: StudioOutputRole;
   outputAssetIds: string[];
   error: StudioJobError | null;
   progress?: number;
@@ -118,10 +139,15 @@ export type StudioJob = {
   updatedAt: string;
 };
 
-/** Renderer-facing job metadata. Provider task, adapter, and charge identities stay in main. */
+/**
+ * Renderer-facing job metadata. Provider task, adapter, and charge identities stay in main.
+ * `outputRole` is omitted too: the renderer does not consume it yet, and both projections onto this
+ * type (toRendererJob, sanitizeJob) are exhaustive whitelists that would otherwise silently drop it.
+ * Whoever starts wiring it must add it to both projections in the same change.
+ */
 export type StudioRendererJob = Omit<
   StudioJob,
-  'provider' | 'idempotencyKey' | 'providerJobId' | 'remoteStartedAt' | 'cancellationPolicy'
+  'provider' | 'idempotencyKey' | 'providerJobId' | 'remoteStartedAt' | 'cancellationPolicy' | 'outputRole'
 > & {
   provider: StudioMediaChoiceRef;
   /** Main-derived cancellation capability; renderer code never infers it from status or provider metadata. */
@@ -611,6 +637,10 @@ export type StudioSubmitScenesRequest = StudioProjectRequest & {
   expectedRevision: number;
   routes: StudioSceneGenerationChoice[];
   catalogVersion: string;
+  /** Absent means 'take'. Batch submissions may request 'reference' across multiple scenes, same as single mode. */
+  outputRole?: StudioOutputRole;
+  /** Only meaningful alongside outputRole: 'reference'. */
+  referencePrompt?: string;
 };
 
 export type StudioFitStoryboardRequest = StudioProjectRequest & {

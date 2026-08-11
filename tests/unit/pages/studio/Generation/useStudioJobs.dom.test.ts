@@ -261,6 +261,57 @@ describe('useStudioJobs', () => {
     expect(result.current.project?.revision).toBe(4);
   });
 
+  it('carries a reviewed reference role and prompt through the renderer IPC boundary', async () => {
+    const refetch = vi.fn(async () => project(3));
+    const { result } = renderHook(() => useStudioJobs({ project: project(), refetch }));
+
+    await act(async () => {
+      expect(
+        await result.current.submitScenes({
+          mode: 'single',
+          sceneIds: ['scene-1'],
+          routes: [{ ...route, kind: 'image', choiceId: 'choice_image' }],
+          catalogVersion: 'catalog-1',
+          expectedRevision: 2,
+          outputRole: 'reference',
+          referencePrompt: 'Edited first-frame prompt',
+        })
+      ).toBe(true);
+    });
+
+    expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project-1',
+      mode: 'single',
+      sceneIds: ['scene-1'],
+      expectedRevision: 2,
+      routes: [{ ...route, kind: 'image', choiceId: 'choice_image' }],
+      catalogVersion: 'catalog-1',
+      outputRole: 'reference',
+      referencePrompt: 'Edited first-frame prompt',
+    });
+  });
+
+  it('omits reference-only fields from an ordinary take submission', async () => {
+    const refetch = vi.fn(async () => project(3));
+    const { result } = renderHook(() => useStudioJobs({ project: project(), refetch }));
+
+    await act(async () => {
+      expect(
+        await result.current.submitScenes({
+          mode: 'single',
+          sceneIds: ['scene-1'],
+          routes: [route],
+          catalogVersion: 'catalog-1',
+          expectedRevision: 2,
+        })
+      ).toBe(true);
+    });
+
+    const payload = bridge.submitScenes.invoke.mock.calls[0]?.[0];
+    expect(payload).not.toHaveProperty('outputRole');
+    expect(payload).not.toHaveProperty('referencePrompt');
+  });
+
   it('serializes concurrently requested mutations before reading each canonical revision', async () => {
     const firstResult = deferred<StudioCommandResult<StudioRendererJob>>();
     const firstQueued = job('job-first');
