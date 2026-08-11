@@ -16,6 +16,7 @@ import { StudioPhaseHeader } from './StudioPhaseHeader';
 import { StudioPhaseNav } from './StudioPhaseNav';
 import type { StudioPhaseControllers } from './types';
 import { useStudioLayoutMode } from './useStudioLayoutMode';
+import { useStudioLayoutContext } from '../Shell/StudioLayoutContext';
 import styles from './StudioPhaseShell.module.css';
 
 export type StudioPhaseShellProps = {
@@ -35,7 +36,9 @@ export const StudioPhaseShell: React.FC<StudioPhaseShellProps> = ({
 }) => {
   const { t } = useTranslation();
   const previousPhaseRef = useRef(activePhase);
-  const { containerRef, layoutMode } = useStudioLayoutMode(controller.project.id);
+  // The shell owns the single measurement; fall back to measuring only if rendered without it.
+  const measured = useStudioLayoutMode(controller.project.id);
+  const layoutMode = useStudioLayoutContext(measured.layoutMode);
 
   useEffect(() => {
     if (previousPhaseRef.current === activePhase) return;
@@ -95,7 +98,7 @@ export const StudioPhaseShell: React.FC<StudioPhaseShellProps> = ({
   })();
 
   return (
-    <div ref={containerRef} data-studio-layout-root data-layout={layoutMode} className={styles.shell}>
+    <div data-layout={layoutMode} className={styles.shell}>
       <StudioPhaseHeader
         project={controller.project}
         saveState={shellSaveState}

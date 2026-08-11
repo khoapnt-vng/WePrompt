@@ -9,19 +9,15 @@ import { Left, Right } from '@icon-park/react';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 
-import type { StudioLayoutMode } from '../PhaseShell/useStudioLayoutMode';
+import { useStudioLayoutMode } from '../PhaseShell/useStudioLayoutMode';
+import { StudioLayoutContext } from './StudioLayoutContext';
 import styles from './StudioShell.module.css';
-import type { StudioPaneState } from './useStudioPanes';
+import { useStudioPanes } from './useStudioPanes';
 
 export type StudioShellProps = {
   /** The Director conversation. Rendered once here, never per phase. */
   director: React.ReactNode;
-  directorState: StudioPaneState;
-  layoutMode: StudioLayoutMode;
-  onDirectorStateChange: (value: StudioPaneState) => void;
-  /** Transient overlay open/close below `inline`; never a preference change. */
-  directorOverlayOpen: boolean;
-  onDirectorOverlayOpenChange: (open: boolean) => void;
+  projectId: string;
   children: React.ReactNode;
 };
 
@@ -39,16 +35,17 @@ export type StudioShellProps = {
  * Opening and closing that overlay is a UI action and deliberately does not touch the persisted
  * preference.
  */
-export const StudioShell: React.FC<StudioShellProps> = ({
-  director,
-  directorState,
-  layoutMode,
-  onDirectorStateChange,
-  directorOverlayOpen,
-  onDirectorOverlayOpenChange,
-  children,
-}) => {
+export const StudioShell: React.FC<StudioShellProps> = ({ director, projectId, children }) => {
   const { t } = useTranslation();
+  // Measured here rather than by the page: the page early-returns loading and error states, so a
+  // ref attached out there is still null when the layout effect first runs, and the mode sticks at
+  // its `compact` default forever. The shell's own root always exists whenever the shell renders.
+  const { containerRef, layoutMode } = useStudioLayoutMode(projectId);
+  const { directorEffective, setDirectorPreference } = useStudioPanes(layoutMode);
+  const [directorOverlayOpen, setDirectorOverlayOpen] = React.useState(false);
+  const directorState = directorEffective;
+  const onDirectorStateChange = setDirectorPreference;
+  const onDirectorOverlayOpenChange = setDirectorOverlayOpen;
   const overlays = layoutMode !== 'inline';
   const collapsed = directorState === 'collapsed';
   const label = collapsed
@@ -73,39 +70,47 @@ export const StudioShell: React.FC<StudioShellProps> = ({
   );
 
   return (
-    <div className={styles.shell} data-studio-shell data-layout={layoutMode}>
-      {overlays ? (
-        // `mountOnEnter={false}` and `unmountOnExit={false}` are load-bearing, not defaults.
-        // Arco's Drawer otherwise defers mounting until first open and tears the subtree down on
-        // close — which would drop a reply streaming into a shut overlay. Note AssistantDock does
-        // pass `unmountOnExit`, so it is not a precedent for keeping children alive.
-        <Drawer
-          visible={directorOverlayOpen}
-          placement='left'
-          width={352}
-          footer={null}
-          title={null}
-          maskClosable
-          mountOnEnter={false}
-          unmountOnExit={false}
-          onCancel={() => onDirectorOverlayOpenChange(false)}
-        >
-          {director}
-        </Drawer>
-      ) : (
-        <aside
-          data-studio-director-pane
-          data-collapsed={collapsed ? 'true' : 'false'}
-          aria-hidden={collapsed ? 'true' : undefined}
-          className={`${styles.directorPane} ${collapsed ? styles.directorPaneCollapsed : ''}`}
-        >
-          {director}
-        </aside>
-      )}
-      <div className={styles.workPanel} data-studio-work-panel>
-        {toggle}
-        {children}
+    <StudioLayoutContext.Provider value={layoutMode}>
+      <div
+        ref={containerRef}
+        data-studio-layout-root
+        data-studio-shell
+        data-layout={layoutMode}
+        className={styles.shell}
+      >
+        {overlays ? (
+          // `mountOnEnter={false}` and `unmountOnExit={false}` are load-bearing, not defaults.
+          // Arco's Drawer otherwise defers mounting until first open and tears the subtree down on
+          // close — which would drop a reply streaming into a shut overlay. Note AssistantDock does
+          // pass `unmountOnExit`, so it is not a precedent for keeping children alive.
+          <Drawer
+            visible={directorOverlayOpen}
+            placement='left'
+            width={352}
+            footer={null}
+            title={null}
+            maskClosable
+            mountOnEnter={false}
+            unmountOnExit={false}
+            onCancel={() => onDirectorOverlayOpenChange(false)}
+          >
+            {director}
+          </Drawer>
+        ) : (
+          <aside
+            data-studio-director-pane
+            data-collapsed={collapsed ? 'true' : 'false'}
+            aria-hidden={collapsed ? 'true' : undefined}
+            className={`${styles.directorPane} ${collapsed ? styles.directorPaneCollapsed : ''}`}
+          >
+            {director}
+          </aside>
+        )}
+        <div className={styles.workPanel} data-studio-work-panel>
+          {toggle}
+          {children}
+        </div>
       </div>
-    </div>
+    </StudioLayoutContext.Provider>
   );
 };

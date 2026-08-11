@@ -6,38 +6,34 @@
 
 import { fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { StudioShell } from '@renderer/pages/studio/components/Shell/StudioShell';
 import type { StudioLayoutMode } from '@renderer/pages/studio/components/PhaseShell/useStudioLayoutMode';
-import type { StudioPaneState } from '@renderer/pages/studio/components/Shell/useStudioPanes';
 
-const renderShell = (
-  overrides: Partial<{
-    directorState: StudioPaneState;
-    layoutMode: StudioLayoutMode;
-    directorOverlayOpen: boolean;
-    onDirectorStateChange: (value: StudioPaneState) => void;
-    onDirectorOverlayOpenChange: (open: boolean) => void;
-  }> = {}
-) => {
-  const props = {
-    directorState: 'expanded' as StudioPaneState,
-    layoutMode: 'inline' as StudioLayoutMode,
-    directorOverlayOpen: false,
-    onDirectorStateChange: vi.fn(),
-    onDirectorOverlayOpenChange: vi.fn(),
-    ...overrides,
-  };
+// jsdom measures every element at 0 width, so the shell would always select `compact` and the
+// inline pane could never be exercised. The mode is driven directly instead.
+const layout: { mode: StudioLayoutMode } = { mode: 'inline' };
+vi.mock('@renderer/pages/studio/components/PhaseShell/useStudioLayoutMode', () => ({
+  useStudioLayoutMode: () => ({ containerRef: { current: null }, layoutMode: layout.mode }),
+}));
+
+const { StudioShell } = await import('@renderer/pages/studio/components/Shell/StudioShell');
+
+const renderShell = (mode: StudioLayoutMode = 'inline') => {
+  layout.mode = mode;
   render(
-    <StudioShell {...props} director={<div data-testid='director-child'>conversation</div>}>
+    <StudioShell projectId='project-1' director={<div data-testid='director-child'>conversation</div>}>
       <div data-testid='work-panel-child'>work</div>
     </StudioShell>
   );
-  return props;
 };
 
 describe('StudioShell', () => {
+  // The pane preference persists by design, so it must be cleared or one test decides the next.
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
   it('renders the Director pane beside the work panel', () => {
     renderShell();
 
@@ -54,19 +50,20 @@ describe('StudioShell', () => {
    * while the pane is shut would be lost, and the user would have no idea it had happened.
    */
   it('keeps the conversation mounted while collapsed', () => {
-    renderShell({ directorState: 'collapsed' });
+    renderShell('inline');
+
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.shell.hideDirector' }));
 
     expect(screen.getByTestId('director-child')).toBeInTheDocument();
     expect(document.querySelector('[data-studio-director-pane]')).toHaveAttribute('data-collapsed', 'true');
   });
 
-  it('toggles the preference at inline width', () => {
-    const props = renderShell({ directorState: 'expanded', layoutMode: 'inline' });
+  it('persists the collapse chosen at inline width', () => {
+    renderShell('inline');
 
     fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.shell.hideDirector' }));
 
-    expect(props.onDirectorStateChange).toHaveBeenCalledExactlyOnceWith('collapsed');
-    expect(props.onDirectorOverlayOpenChange).not.toHaveBeenCalled();
+    expect(localStorage.getItem('studio.directorPane.collapsed')).toBe('1');
   });
 
   /**
@@ -74,17 +71,20 @@ describe('StudioShell', () => {
    * That is a transient UI action and must not write a preference — otherwise resizing the window
    * would quietly rewrite what the user chose at a comfortable width.
    */
+  /**
+   * Below inline width the control opens an overlay. It must not write a preference — otherwise
+   * resizing the window would quietly rewrite what the user chose at a comfortable width.
+   */
   it('opens an overlay instead of writing a preference below inline width', () => {
-    const props = renderShell({ layoutMode: 'drawer', directorOverlayOpen: false });
+    renderShell('drawer');
 
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.shell.hideDirector' }));
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.shell.showDirector' }));
 
-    expect(props.onDirectorOverlayOpenChange).toHaveBeenCalledExactlyOnceWith(true);
-    expect(props.onDirectorStateChange).not.toHaveBeenCalled();
+    expect(localStorage.getItem('studio.directorPane.collapsed')).toBeNull();
   });
 
   it('still mounts the conversation when the overlay is closed', () => {
-    renderShell({ layoutMode: 'compact', directorOverlayOpen: false });
+    renderShell('compact');
 
     expect(screen.getByTestId('director-child')).toBeInTheDocument();
   });
