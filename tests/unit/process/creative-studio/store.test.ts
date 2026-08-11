@@ -438,6 +438,98 @@ describe('creative studio project store', () => {
         )
       ).toMatchObject({ proposalId: 'proposal_abandoned', status: 'expired' });
     });
+
+    describe('subprocess proposal conformance', () => {
+      const prepareProposalDirectories = async (projectId: string): Promise<string> => {
+        await store.listProposals(projectId);
+        const proposalsDir = path.join(rootDir, projectId, 'proposals');
+        const pendingDir = path.join(proposalsDir, 'pending');
+        await mkdir(pendingDir, { recursive: true });
+        await mkdir(path.join(proposalsDir, 'decisions'), { recursive: true });
+        await mkdir(path.join(proposalsDir, 'slots'), { recursive: true });
+        return pendingDir;
+      };
+
+      it('lists and watches a record written by the subprocess writer', async () => {
+        const project = await store.createProject(makeInput());
+        const pendingDir = await prepareProposalDirectories(project.id);
+        const record = await writeProposalRecord({
+          pendingDir,
+          projectId: project.id,
+          baseRevision: project.revision,
+          payload: subprocessProposalPayload,
+        });
+
+        expect((await store.listProposals(project.id)).map((proposal) => proposal.id)).toContain(record.id);
+
+        const listener = vi.fn();
+        let notifyFileChange: ((relativeFile: string) => void) | undefined;
+        const watchingStore = createCreativeStudioStore({
+          rootDir,
+          now: () => new Date((clock += 1_000)).toISOString(),
+          watchProposalTree: ({ onChange }) => {
+            notifyFileChange = onChange;
+            return { close: vi.fn() };
+          },
+        });
+        const stopWatching = await watchingStore.watchProposals(listener);
+        try {
+          const secondRecord = await writeProposalRecord({
+            pendingDir,
+            projectId: project.id,
+            baseRevision: project.revision,
+            payload: subprocessProposalPayload,
+          });
+          notifyFileChange?.(`${project.id}/proposals/pending/${secondRecord.id}.json`);
+          await vi.waitFor(() => expect(listener).toHaveBeenCalledWith(project.id, secondRecord.id));
+        } finally {
+          await stopWatching();
+        }
+      });
+
+      it('accepts a subprocess-written record under CAS and rejects a stale one', async () => {
+        const project = await store.createProject(makeInput());
+        const pendingDir = await prepareProposalDirectories(project.id);
+        const record = await writeProposalRecord({
+          pendingDir,
+          projectId: project.id,
+          baseRevision: project.revision,
+          payload: subprocessProposalPayload,
+        });
+
+        const accepted = await store.acceptProposal(project.id, record.id, (current, payload) => ({
+          ...current,
+          brief: payload.scenes.scene_1.narration,
+        }));
+        expect(accepted.applied).toBe(true);
+
+        const bumped = await store.updateProject(project.id, (current) => ({ ...current, name: 'Changed elsewhere' }));
+        const staleRecord = await writeProposalRecord({
+          pendingDir,
+          projectId: project.id,
+          baseRevision: bumped.revision - 1,
+          payload: subprocessProposalPayload,
+        });
+
+        await expect(
+          store.acceptProposal(project.id, staleRecord.id, (current) => current)
+        ).rejects.toMatchObject({ code: 'stale_project' });
+      });
+
+      it('ignores a malformed record without failing the listing', async () => {
+        const project = await store.createProject(makeInput());
+        const pendingDir = await prepareProposalDirectories(project.id);
+        const record = await writeProposalRecord({
+          pendingDir,
+          projectId: project.id,
+          baseRevision: project.revision,
+          payload: subprocessProposalPayload,
+        });
+        await writeFile(path.join(pendingDir, 'zzz.json'), '{not-json');
+
+        await expect(store.listProposals(project.id)).resolves.toMatchObject([{ id: record.id }]);
+      });
+    });
   });
 
   it('creates three empty project model selections', async () => {
