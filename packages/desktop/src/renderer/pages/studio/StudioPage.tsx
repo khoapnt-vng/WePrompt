@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Button, Modal, Spin } from '@arco-design/web-react';
+import { Alert, Button, Modal, Spin } from '@arco-design/web-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
@@ -12,6 +12,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ipcBridge } from '@/common';
 import type {
   StudioRendererProject,
+  StudioReferenceRequest,
   StudioLatestRender,
   StudioRouteCatalog,
   StudioRouteCatalogEntry,
@@ -25,6 +26,7 @@ import {
   GenerationReviewModal,
   routeSupportsScene,
   type GenerationBatchReviewRequest,
+  type GenerationReviewExcludedScene,
   type GenerationReviewScene,
   type GenerationReviewRouteSnapshot,
   type GenerationSingleReviewRequest,
@@ -46,10 +48,12 @@ import {
   type StudioWriteFocusIntent,
 } from './studioPhaseRoute';
 import { canOpenSingleSceneReview, deriveStudioReadiness } from './studioReadiness';
+import type { StudioReadinessSummary, StudioSceneStatus } from './studioReadiness';
 
 type GenerationReviewState = {
   mode: 'single' | 'batch';
   scenes: GenerationReviewScene[];
+  excludedScenes?: GenerationReviewExcludedScene[];
   catalogVersion: string | null;
   availableRoutes: StudioRouteCatalogEntry[];
   projectId: string;
@@ -57,7 +61,10 @@ type GenerationReviewState = {
   outputRole?: GenerationSingleReviewRequest['outputRole'];
   referencePrompt?: GenerationSingleReviewRequest['referencePrompt'];
   referenceRequestIds?: string[];
+  referenceRequests?: Array<Pick<StudioReferenceRequest, 'id' | 'sceneId'>>;
 };
+
+type ReferenceNotice = { kind: 'excluded'; scenes: GenerationReviewExcludedScene[] } | { kind: 'dismiss_failed' };
 
 const routeIdentity = (
   route: Pick<StudioRouteCatalogEntry | GenerationReviewRouteSnapshot, 'choiceId' | 'kind'>
@@ -128,6 +135,67 @@ const projectRouteSnapshot = (
       };
 };
 
+const referenceExclusionReason = (
+  status: StudioSceneStatus | undefined
+): GenerationReviewExcludedScene['reasonMessageKey'] => {
+  switch (status) {
+    case 'needs_title':
+    case 'needs_prompt':
+    case 'generating':
+    case 'needs_selection':
+    case 'generated':
+    case 'needs_attention':
+      return `conversation.creativeStudio.scene.status.${status}`;
+    case 'ready':
+    case undefined:
+      return 'conversation.creativeStudio.reference.excludedUnavailable';
+  }
+};
+
+const buildQueuedReferenceReview = (
+  project: StudioRendererProject,
+  readiness: StudioReadinessSummary,
+  requests: ReadonlyArray<Pick<StudioReferenceRequest, 'id' | 'sceneId'>>,
+  availableRoutes: readonly StudioRouteCatalogEntry[]
+): {
+  scenes: GenerationReviewScene[];
+  excludedScenes: GenerationReviewExcludedScene[];
+  referenceRequestIds: string[];
+} => {
+  const readySceneIds = new Set(readiness.readySceneIds);
+  const requestedSceneIds = new Set(requests.map(({ sceneId }) => sceneId));
+  const scenes = project.sceneOrder.flatMap((sceneId) => {
+    const scene = project.scenes[sceneId];
+    if (scene === undefined || !requestedSceneIds.has(sceneId) || !readySceneIds.has(sceneId)) return [];
+    return [
+      toReviewScene(
+        project,
+        scene,
+        projectRouteSnapshot(project, scene, 'reference'),
+        availableRoutes,
+        undefined,
+        'reference'
+      ),
+    ];
+  });
+  const includedSceneIds = new Set(scenes.map(({ id }) => id));
+  return {
+    scenes,
+    excludedScenes: requests.flatMap(({ sceneId }) => {
+      if (includedSceneIds.has(sceneId)) return [];
+      const scene = project.scenes[sceneId];
+      return [
+        {
+          id: sceneId,
+          title: scene?.title ?? sceneId,
+          reasonMessageKey: referenceExclusionReason(readiness.sceneStatuses[sceneId]),
+        },
+      ];
+    }),
+    referenceRequestIds: requests.flatMap(({ id, sceneId }) => (includedSceneIds.has(sceneId) ? [id] : [])),
+  };
+};
+
 const newestProject = (...candidates: Array<StudioRendererProject | null>): StudioRendererProject | null =>
   candidates.reduce<StudioRendererProject | null>(
     (newest, candidate) =>
@@ -149,7 +217,7 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
-  const { id } = useParams<{ id: string }>();
+  const { id: routeProjectId } = useParams<{ id: string }>();
   const {
     project: loadedProject,
     proposals,
@@ -157,7 +225,7 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
     notFound,
     errorMessageKey,
     refetch,
-  } = useStudioProject(id, {
+  } = useStudioProject(routeProjectId, {
     subscribeToUpdates: false,
   });
   const editor = useStoryboardEditor({ project: loadedProject, refetch });
@@ -200,6 +268,7 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
   const [generationReview, setGenerationReview] = useState<GenerationReviewState | null>(null);
   const [generationReviewIssueMessageKey, setGenerationReviewIssueMessageKey] = useState<string | null>(null);
   const [generationReviewRefreshing, setGenerationReviewRefreshing] = useState(false);
+  const [referenceNotice, setReferenceNotice] = useState<ReferenceNotice | null>(null);
   const [duplicateChargeJobId, setDuplicateChargeJobId] = useState<string | null>(null);
   const [variationPending, setVariationPending] = useState(false);
   const [variationIssueMessageKey, setVariationIssueMessageKey] = useState<string | null>(null);
@@ -221,6 +290,8 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
   const [transitionIssueMessageKey, setTransitionIssueMessageKey] = useState<string | null>(null);
   const [postModalTransition, setPostModalTransition] = useState<StudioPhaseTransition | null>(null);
   const generationReviewRefreshingRef = useRef(false);
+  const suppressedReferenceRequestIdsRef = useRef(new Set<string>());
+  const notifiedExcludedReferenceRequestsRef = useRef<string | null>(null);
   const variationPendingRef = useRef(false);
   const referenceImportSceneIdRef = useRef<string | null>(null);
   const pendingTransitionRef = useRef<StudioPhaseTransition | null>(null);
@@ -301,6 +372,12 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
   const transitionBlocked = generationReview !== null || duplicateChargeJobId !== null || exportVisible;
 
   useEffect(() => {
+    suppressedReferenceRequestIdsRef.current.clear();
+    notifiedExcludedReferenceRequestsRef.current = null;
+    setReferenceNotice(null);
+  }, [project?.id]);
+
+  useEffect(() => {
     if (
       generationReview !== null ||
       generationBlocked ||
@@ -311,35 +388,34 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
     ) {
       return;
     }
-    const catalog = studioModels.catalog;
-    const readySceneIds = new Set(readiness.readySceneIds);
-    const requestedSceneIds = new Set(studioJobs.referenceRequests.map(({ sceneId }) => sceneId));
-    const scenes = project.sceneOrder.flatMap((sceneId) => {
-      const scene = project.scenes[sceneId];
-      if (scene === undefined || !requestedSceneIds.has(sceneId) || !readySceneIds.has(sceneId)) return [];
-      return [
-        toReviewScene(
-          project,
-          scene,
-          projectRouteSnapshot(project, scene, 'reference'),
-          catalogEntries(catalog),
-          undefined,
-          'reference'
-        ),
-      ];
-    });
-    if (scenes.length === 0) return;
+    const requests = studioJobs.referenceRequests.filter(({ id }) => !suppressedReferenceRequestIdsRef.current.has(id));
+    if (requests.length === 0) return;
+    const availableRoutes = catalogEntries(studioModels.catalog);
+    const review = buildQueuedReferenceReview(project, readiness, requests, availableRoutes);
+    if (review.scenes.length === 0) {
+      const signature = review.excludedScenes
+        .map(({ id, reasonMessageKey }) => `${id}:${reasonMessageKey}`)
+        .join('\u0000');
+      if (notifiedExcludedReferenceRequestsRef.current === signature) return;
+      notifiedExcludedReferenceRequestsRef.current = signature;
+      setReferenceNotice({ kind: 'excluded', scenes: review.excludedScenes });
+      return;
+    }
+    notifiedExcludedReferenceRequestsRef.current = null;
+    setReferenceNotice((current) => (current?.kind === 'excluded' ? null : current));
     studioJobs.clearIssue();
     setGenerationReviewIssueMessageKey(null);
     setGenerationReview({
       mode: 'batch',
-      scenes,
-      catalogVersion: catalog.catalogVersion,
-      availableRoutes: catalogEntries(catalog),
+      scenes: review.scenes,
+      excludedScenes: review.excludedScenes,
+      catalogVersion: studioModels.catalog.catalogVersion,
+      availableRoutes,
       projectId: project.id,
       projectRevision: project.revision,
       outputRole: 'reference',
-      referenceRequestIds: studioJobs.referenceRequests.map(({ id: requestId }) => requestId),
+      referenceRequestIds: review.referenceRequestIds,
+      referenceRequests: requests.map(({ id, sceneId }) => ({ id, sceneId })),
     });
   }, [generationBlocked, generationReview, project, readiness, studioJobs, studioModels.catalog]);
 
@@ -441,6 +517,10 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
             return;
           }
           const availableRoutes = catalogEntries(catalog);
+          const refreshedReferenceReview =
+            generationReview.mode === 'batch' && generationReview.referenceRequests !== undefined
+              ? buildQueuedReferenceReview(project, readiness, generationReview.referenceRequests, availableRoutes)
+              : null;
           const refreshedScenes =
             generationReview.mode === 'single'
               ? generationReview.scenes.flatMap(({ id: sceneId }) => {
@@ -460,12 +540,25 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
                         ),
                       ];
                 })
-              : readyScenes.map((scene) =>
-                  toReviewScene(project, scene, projectRouteSnapshot(project, scene), availableRoutes)
-                );
+              : (refreshedReferenceReview?.scenes ??
+                readyScenes.map((scene) =>
+                  toReviewScene(
+                    project,
+                    scene,
+                    projectRouteSnapshot(project, scene, generationReview.outputRole),
+                    availableRoutes,
+                    undefined,
+                    generationReview.outputRole ?? 'take'
+                  )
+                ));
           setGenerationReview({
             mode: generationReview.mode,
             scenes: refreshedScenes,
+            ...(refreshedReferenceReview === null
+              ? generationReview.excludedScenes === undefined
+                ? {}
+                : { excludedScenes: generationReview.excludedScenes }
+              : { excludedScenes: refreshedReferenceReview.excludedScenes }),
             catalogVersion: catalog.catalogVersion,
             availableRoutes,
             projectId: project.id,
@@ -474,9 +567,14 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
             ...(generationReview.referencePrompt === undefined
               ? {}
               : { referencePrompt: generationReview.referencePrompt }),
-            ...(generationReview.referenceRequestIds === undefined
+            ...(refreshedReferenceReview === null
+              ? generationReview.referenceRequestIds === undefined
+                ? {}
+                : { referenceRequestIds: generationReview.referenceRequestIds }
+              : { referenceRequestIds: refreshedReferenceReview.referenceRequestIds }),
+            ...(generationReview.referenceRequests === undefined
               ? {}
-              : { referenceRequestIds: generationReview.referenceRequestIds }),
+              : { referenceRequests: generationReview.referenceRequests }),
           });
         } catch {
           setGenerationReviewIssueMessageKey('conversation.creativeStudio.errors.provider');
@@ -499,12 +597,18 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
           : { referencePrompt: generationReview.referencePrompt }),
       });
       if (!submitted) return;
-      if (
-        generationReview.referenceRequestIds === undefined ||
-        (await studioJobs.dismissReferenceRequests(generationReview.referenceRequestIds))
-      ) {
+      if (generationReview.referenceRequestIds === undefined) {
         setGenerationReview(null);
+        return;
       }
+      const dismissed = await studioJobs.dismissReferenceRequests(generationReview.referenceRequestIds);
+      const suppressedIds = dismissed
+        ? generationReview.referenceRequestIds
+        : (generationReview.referenceRequests?.map(({ id: requestId }) => requestId) ??
+          generationReview.referenceRequestIds);
+      suppressedIds.forEach((requestId) => suppressedReferenceRequestIdsRef.current.add(requestId));
+      setGenerationReview(null);
+      if (!dismissed) setReferenceNotice({ kind: 'dismiss_failed' });
     },
     [generationBlocked, generationReview, project, readiness, readyScenes, studioJobs, studioModels]
   );
@@ -901,6 +1005,27 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
         navigationDisabled={transitionBlocked || pendingTransition !== null}
         onBack={() => navigate('/studio')}
       />
+      {referenceNotice?.kind === 'excluded' && (
+        <Alert
+          type='warning'
+          content={
+            <div data-testid='reference-exclusion-notice'>
+              <p className='m-0'>{t('conversation.creativeStudio.reference.excludedNoneReady')}</p>
+              <ul className='mb-0 mt-6px pl-18px'>
+                {referenceNotice.scenes.map((scene) => (
+                  <li key={scene.id}>
+                    <span>{scene.title}</span>
+                    <span> — {t(scene.reasonMessageKey)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          }
+        />
+      )}
+      {referenceNotice?.kind === 'dismiss_failed' && (
+        <Alert type='error' content={t('conversation.creativeStudio.reference.dismissFailed')} />
+      )}
       <StoryboardDraftModal
         visible={draftModalVisible}
         project={project}
@@ -922,6 +1047,7 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
         visible={generationReview !== null}
         mode={generationReview?.mode ?? 'single'}
         scenes={generationReview?.scenes ?? []}
+        excludedScenes={generationReview?.excludedScenes}
         aspectRatio={project.aspectRatio}
         resolution={project.resolution}
         targetDurationSeconds={project.targetDurationSeconds}
@@ -945,11 +1071,16 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
         onCancel={async () => {
           if (!studioJobs.mutationPending && !generationReviewRefreshing) {
             const requestIds = generationReview?.referenceRequestIds;
-            if (requestIds !== undefined && !(await studioJobs.dismissReferenceRequests(requestIds))) return;
-            studioJobs.clearIssue();
+            const dismissed = requestIds === undefined || (await studioJobs.dismissReferenceRequests(requestIds));
+            const suppressedIds = dismissed
+              ? requestIds
+              : (generationReview?.referenceRequests?.map(({ id: requestId }) => requestId) ?? requestIds);
+            suppressedIds?.forEach((requestId) => suppressedReferenceRequestIdsRef.current.add(requestId));
+            if (dismissed) studioJobs.clearIssue();
             studioJobs.clearStaleIntent();
             setGenerationReviewIssueMessageKey(null);
             setGenerationReview(null);
+            if (!dismissed) setReferenceNotice({ kind: 'dismiss_failed' });
           }
         }}
         onConfirm={confirmGeneration}

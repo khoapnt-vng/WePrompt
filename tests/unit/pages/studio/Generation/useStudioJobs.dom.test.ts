@@ -12,6 +12,7 @@ import type {
   StudioCommandResult,
   StudioRendererJob,
   StudioRendererProject,
+  StudioReferenceRequest,
   StudioScene,
   StudioSceneGenerationChoice,
 } from '@/common/types/project/creativeStudioTypes';
@@ -121,6 +122,7 @@ const deferred = <T>() => {
 };
 
 let projectUpdatedListener: ((event: { projectId: string }) => void) | null;
+let proposalUpdatedListener: ((event: { projectId: string }) => void) | null;
 let unsubscribe: ReturnType<typeof vi.fn>;
 
 const emitProjectUpdated = (projectId: string): void => {
@@ -128,16 +130,25 @@ const emitProjectUpdated = (projectId: string): void => {
   act(() => projectUpdatedListener?.({ projectId }));
 };
 
+const emitProposalUpdated = (projectId: string): void => {
+  if (proposalUpdatedListener === null) throw new Error('Studio proposal listener was not registered');
+  act(() => proposalUpdatedListener?.({ projectId }));
+};
+
 describe('useStudioJobs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     projectUpdatedListener = null;
+    proposalUpdatedListener = null;
     unsubscribe = vi.fn();
     bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
       projectUpdatedListener = listener;
       return unsubscribe;
     });
-    bridge.proposalUpdated.on.mockReturnValue(vi.fn());
+    bridge.proposalUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
+      proposalUpdatedListener = listener;
+      return vi.fn();
+    });
     bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([]));
     bridge.dismissReferenceRequests.invoke.mockResolvedValue(ok(true));
     bridge.submitScenes.invoke.mockResolvedValue(ok([]));
@@ -295,6 +306,33 @@ describe('useStudioJobs', () => {
       outputRole: 'reference',
       referencePrompt: 'Edited first-frame prompt',
     });
+  });
+
+  it('does not resurrect dismissed reference requests from an in-flight load', async () => {
+    const request: StudioReferenceRequest = {
+      schemaVersion: 1,
+      id: 'reference-request-1',
+      projectId: 'project-1',
+      sceneId: 'scene-1',
+      status: 'pending',
+      createdAt: '2026-08-11T00:00:00.000Z',
+    };
+    const staleLoad = deferred<StudioCommandResult<StudioReferenceRequest[]>>();
+    bridge.listPendingReferenceRequests.invoke
+      .mockResolvedValueOnce(ok([request]))
+      .mockReturnValueOnce(staleLoad.promise);
+    const { result } = renderHook(() => useStudioJobs({ project: project(), refetch: vi.fn(async () => project()) }));
+    await waitFor(() => expect(result.current.referenceRequests).toEqual([request]));
+
+    emitProposalUpdated('project-1');
+    await waitFor(() => expect(bridge.listPendingReferenceRequests.invoke).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      expect(await result.current.dismissReferenceRequests([request.id])).toBe(true);
+    });
+    expect(result.current.referenceRequests).toEqual([]);
+
+    await act(async () => staleLoad.resolve(ok([request])));
+    expect(result.current.referenceRequests).toEqual([]);
   });
 
   it('omits reference-only fields from an ordinary take submission', async () => {

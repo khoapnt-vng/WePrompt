@@ -1264,7 +1264,11 @@
       "generate": "Generar referencia",
       "dialogTitle": "Generar una imagen de referencia",
       "promptLabel": "Prompt de referencia",
-      "reviewTag": "Referencia"
+      "reviewTag": "Referencia",
+      "excludedSummary": "Algunas escenas solicitadas no se incluyen en esta aprobación porque aún no están listas:",
+      "excludedNoneReady": "Ninguna de las escenas solicitadas está lista para generar una referencia:",
+      "excludedUnavailable": "La escena ya no está disponible",
+      "dismissFailed": "No se pudo actualizar la cola de solicitudes. La revisión se cerró; inténtalo de nuevo más tarde."
     },
     "review": {
       "generateReadyScenes": "Generar {{count}} escenas listas",

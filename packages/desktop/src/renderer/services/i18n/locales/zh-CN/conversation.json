@@ -1247,7 +1247,11 @@
       "generate": "生成参考图",
       "dialogTitle": "生成参考图像",
       "promptLabel": "参考图提示词",
-      "reviewTag": "参考图"
+      "reviewTag": "参考图",
+      "excludedSummary": "部分请求的场景尚未就绪，因此不包含在本次批准中：",
+      "excludedNoneReady": "请求的场景均未准备好生成参考图：",
+      "excludedUnavailable": "场景已不可用",
+      "dismissFailed": "无法更新请求队列。审核窗口已关闭，请稍后重试。"
     },
     "review": {
       "generateReadyScenes": "生成 {{count}} 个已就绪场景",

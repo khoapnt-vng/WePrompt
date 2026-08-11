@@ -1269,7 +1269,11 @@
       "generate": "Gerar referência",
       "dialogTitle": "Gerar uma imagem de referência",
       "promptLabel": "Prompt de referência",
-      "reviewTag": "Referência"
+      "reviewTag": "Referência",
+      "excludedSummary": "Algumas cenas solicitadas não estão incluídas nesta aprovação porque ainda não estão prontas:",
+      "excludedNoneReady": "Nenhuma das cenas solicitadas está pronta para gerar uma referência:",
+      "excludedUnavailable": "A cena não está mais disponível",
+      "dismissFailed": "Não foi possível atualizar a fila de solicitações. A revisão foi fechada; tente novamente mais tarde."
     },
     "review": {
       "generateReadyScenes": "Gerar {{count}} cenas prontas",

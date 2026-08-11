@@ -47,10 +47,24 @@ export type GenerationReviewConfirmation = {
   routes: StudioSceneGenerationChoice[];
 };
 
+export type GenerationReviewExcludedScene = {
+  id: string;
+  title: string;
+  reasonMessageKey:
+    | 'conversation.creativeStudio.scene.status.needs_title'
+    | 'conversation.creativeStudio.scene.status.needs_prompt'
+    | 'conversation.creativeStudio.scene.status.generating'
+    | 'conversation.creativeStudio.scene.status.needs_selection'
+    | 'conversation.creativeStudio.scene.status.generated'
+    | 'conversation.creativeStudio.scene.status.needs_attention'
+    | 'conversation.creativeStudio.reference.excludedUnavailable';
+};
+
 export type GenerationReviewModalProps = {
   visible: boolean;
   mode: 'single' | 'batch';
   scenes: GenerationReviewScene[];
+  excludedScenes?: GenerationReviewExcludedScene[];
   aspectRatio: StudioAspectRatio;
   resolution: StudioResolution;
   targetDurationSeconds: number;
@@ -80,6 +94,7 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
   visible,
   mode,
   scenes,
+  excludedScenes = [],
   aspectRatio,
   resolution,
   targetDurationSeconds,
@@ -240,6 +255,25 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
             </article>
           ))}
         </div>
+
+        {excludedScenes.length > 0 && (
+          <Alert
+            type='warning'
+            content={
+              <div>
+                <p className='m-0'>{t('conversation.creativeStudio.reference.excludedSummary')}</p>
+                <ul className='mb-0 mt-6px pl-18px'>
+                  {excludedScenes.map((scene) => (
+                    <li key={scene.id}>
+                      <span>{scene.title}</span>
+                      <span> — {t(scene.reasonMessageKey)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            }
+          />
+        )}
 
         {review.durationMismatch && (
           <Alert type='warning' content={t('conversation.creativeStudio.review.durationMismatch')} />

@@ -1247,7 +1247,11 @@
       "generate": "產生參考圖",
       "dialogTitle": "產生參考圖像",
       "promptLabel": "參考圖提示詞",
-      "reviewTag": "參考圖"
+      "reviewTag": "參考圖",
+      "excludedSummary": "部分要求的場景尚未就緒，因此不包含在本次核准中：",
+      "excludedNoneReady": "要求的場景均未準備好產生參考圖：",
+      "excludedUnavailable": "場景已無法使用",
+      "dismissFailed": "無法更新要求佇列。審核視窗已關閉，請稍後再試。"
     },
     "review": {
       "generateReadyScenes": "產生 {{count}} 個已就緒場景",

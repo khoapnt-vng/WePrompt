@@ -1247,7 +1247,11 @@
       "generate": "参照画像を生成",
       "dialogTitle": "参照画像を生成",
       "promptLabel": "参照プロンプト",
-      "reviewTag": "参照画像"
+      "reviewTag": "参照画像",
+      "excludedSummary": "準備が整っていないため、リクエストされた一部のシーンは今回の承認に含まれません：",
+      "excludedNoneReady": "リクエストされたシーンは、いずれも参照画像を生成できる状態ではありません：",
+      "excludedUnavailable": "シーンは利用できなくなりました",
+      "dismissFailed": "リクエストキューを更新できませんでした。レビューは閉じられました。後でもう一度お試しください。"
     },
     "review": {
       "generateReadyScenes": "準備済みの{{count}}シーンを生成",

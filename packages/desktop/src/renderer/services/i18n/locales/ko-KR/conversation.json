@@ -1247,7 +1247,11 @@
       "generate": "참조 이미지 생성",
       "dialogTitle": "참조 이미지 생성",
       "promptLabel": "참조 프롬프트",
-      "reviewTag": "참조 이미지"
+      "reviewTag": "참조 이미지",
+      "excludedSummary": "요청된 일부 장면은 준비되지 않아 이번 승인에 포함되지 않습니다:",
+      "excludedNoneReady": "요청된 장면 중 참조 이미지를 생성할 준비가 된 장면이 없습니다:",
+      "excludedUnavailable": "장면을 더 이상 사용할 수 없습니다",
+      "dismissFailed": "요청 대기열을 업데이트하지 못했습니다. 검토 창은 닫혔습니다. 나중에 다시 시도하세요."
     },
     "review": {
       "generateReadyScenes": "준비된 장면 {{count}}개 생성",

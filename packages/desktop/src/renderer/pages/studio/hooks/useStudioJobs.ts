@@ -627,6 +627,7 @@ export const useStudioJobs = ({
 
   const dismissReferenceRequests = useCallback(
     async (requestIds: string[]): Promise<boolean> => {
+      referenceRequestEpochRef.current += 1;
       const current = projectRef.current;
       if (current === null || requestIds.length === 0 || !mountedRef.current) return false;
       const session = projectSessionRef.current;
