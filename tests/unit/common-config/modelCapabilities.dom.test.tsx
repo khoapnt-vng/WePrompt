@@ -267,6 +267,7 @@ vi.mock('@arco-design/web-react', async (importOriginal) => {
 
 import {
   CAPABILITY_PATTERNS,
+  getBaseModelName,
   hasSpecificModelCapability,
   supportsOpenAiApiMode,
   updateModelSettings,
@@ -672,17 +673,25 @@ describe('name-based capability inference (BUG-045 fail-open guard)', () => {
   // insufficient evidence to enable reasoning controls; a regex on the model NAME
   // is strictly weaker. Name inference must therefore never assert reasoning
   // support — it must answer "unknown" and let the discovery seam decide.
-  const reasoningLookalikes = [
-    'o1-preview',
-    'o1-mini',
-    'deepseek-reasoner',
-    'qwen-thinking',
-    'some-vendor-reasoning-v2',
-    'THINK-1',
-  ];
+  const reasoningLookalikes = ['o1-preview', 'o1-mini', 'qwen-thinking', 'some-vendor-reasoning-v2', 'THINK-1'];
 
   it.each(reasoningLookalikes)('never infers reasoning support from the model name: %s', (modelName) => {
+    // Assert the pre-condition explicitly. `undefined` is BOTH the guard's return
+    // and this module's pre-existing no-match default, so toBeUndefined() alone
+    // cannot tell them apart — a fixture that fails to match the pattern would
+    // pass vacuously and prove nothing. That is not hypothetical: an earlier
+    // revision of this list included 'deepseek-reasoner', which does not match
+    // (`reasoner` is not `reasoning`), and the case passed identically without
+    // the guard in place.
+    expect(CAPABILITY_PATTERNS.reasoning.test(getBaseModelName(modelName))).toBe(true);
     expect(hasSpecificModelCapability(provider, modelName, 'reasoning')).toBeUndefined();
+  });
+
+  // The regex is not a superset of real reasoning models either, which is the
+  // other half of why name inference is the wrong instrument — it is wrong in
+  // both directions. These are genuine reasoning models the pattern misses.
+  it.each(['deepseek-reasoner', 'deepseek-r1'])('does not match real reasoning model %s at all', (modelName) => {
+    expect(CAPABILITY_PATTERNS.reasoning.test(getBaseModelName(modelName))).toBe(false);
   });
 
   it('still infers other capabilities from the name, so the guard is scoped to reasoning', () => {
