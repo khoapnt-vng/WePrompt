@@ -104,16 +104,18 @@ export const StudioPhaseShell: React.FC<StudioPhaseShellProps> = ({
           controller.editor.updateProjectDraft({ name });
           return controller.editor.flushProjectDraft();
         }}
+        navigation={
+          <StudioPhaseNav
+            activePhase={activePhase}
+            project={controller.project}
+            readiness={controller.readiness}
+            disabled={navigationDisabled}
+            onSelect={(phase) => {
+              if (phase !== activePhase) controller.requestTransition({ phase });
+            }}
+          />
+        }
         actions={headerAction}
-      />
-      <StudioPhaseNav
-        activePhase={activePhase}
-        project={controller.project}
-        readiness={controller.readiness}
-        disabled={navigationDisabled}
-        onSelect={(phase) => {
-          if (phase !== activePhase) controller.requestTransition({ phase });
-        }}
       />
       {controller.advisory?.anchor === 'shell' && (
         <div role='alert' className={styles.shellAdvisory}>

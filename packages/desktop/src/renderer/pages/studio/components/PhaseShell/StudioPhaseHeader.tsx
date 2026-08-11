@@ -20,6 +20,7 @@ export type StudioPhaseHeaderProps = {
   saveState: SelectedSceneSaveState;
   onBack: () => void;
   onRenameProject?: (name: string) => Promise<boolean>;
+  navigation?: React.ReactNode;
   actions?: React.ReactNode;
 };
 
@@ -35,6 +36,7 @@ export const StudioPhaseHeader: React.FC<StudioPhaseHeaderProps> = ({
   saveState,
   onBack,
   onRenameProject,
+  navigation,
   actions,
 }) => {
   const { t } = useTranslation();
@@ -146,6 +148,7 @@ export const StudioPhaseHeader: React.FC<StudioPhaseHeaderProps> = ({
           {project.aspectRatio}
         </Tag>
       </div>
+      {navigation !== undefined && <div className={styles.headerNavigation}>{navigation}</div>}
       <div className={styles.headerMeta}>
         <span role='status' aria-live='polite' aria-atomic='true' data-state={saveState} className={styles.saveState}>
           {t(SAVE_STATE_KEYS[saveState])}

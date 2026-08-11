@@ -13,7 +13,7 @@
   min-width: 0;
   align-items: center;
   justify-content: space-between;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 16px;
 }
 
@@ -97,6 +97,16 @@
 .aspectChip {
   composes: meta from '../../StudioTypography.module.css';
   flex: none;
+}
+
+.headerNavigation {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 320px;
+}
+
+.headerNavigation .phaseNavigation {
+  width: 100%;
 }
 
 .headerMeta {
@@ -272,6 +282,7 @@
 
 .shell[data-layout='compact'] .header {
   align-items: flex-start;
+  flex-wrap: wrap;
 }
 
 .shell[data-layout='compact'] .headerCopy,
@@ -279,6 +290,16 @@
   width: 100%;
   flex-wrap: wrap;
   justify-content: flex-start;
+}
+
+.shell[data-layout='compact'] .headerMeta {
+  order: 2;
+}
+
+.shell[data-layout='compact'] .headerNavigation {
+  width: 100%;
+  flex-basis: 100%;
+  order: 3;
 }
 
 .shell[data-layout='compact'] .phaseNavigation {
