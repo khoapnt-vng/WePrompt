@@ -1551,6 +1551,12 @@ export const useStoryboardEditor = ({
       if (pendingConflict?.intent.operation === 'draft_storyboard') {
         internalConflictRef.current = null;
         if (mountedRef.current) setConflict(null);
+        resumePausedIntents();
+      }
+
+      if (dirtySceneIdsRef.current.size > 0) {
+        const flushed = await flushAllSceneDrafts();
+        if (flushed.failed.length > 0 || flushed.dirtied.length > 0) return false;
       }
 
       const drafted = await runDraftIntent({
@@ -1572,7 +1578,7 @@ export const useStoryboardEditor = ({
       if (!drafted && internalConflictRef.current === null) resumePausedIntents();
       return drafted;
     },
-    [clearAllDrafts, discardPausedIntents, resumePausedIntents, runDraftIntent]
+    [clearAllDrafts, discardPausedIntents, flushAllSceneDrafts, resumePausedIntents, runDraftIntent]
   );
 
   return {

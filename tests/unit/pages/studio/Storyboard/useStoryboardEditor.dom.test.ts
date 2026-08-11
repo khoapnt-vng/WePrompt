@@ -2276,34 +2276,39 @@ describe('useStoryboardEditor', () => {
     expect(result.current.conflict).toBeNull();
   });
 
-  it('invalidates an old-scene save queued behind a successful storyboard replacement', async () => {
-    const proposal = deferred<StudioCommandResult<StudioRendererProject>>();
-    const drafted = project(3, [scene('draft-1', { title: 'Drafted scene' })]);
-    bridge.proposeStoryboard.invoke.mockReturnValueOnce(proposal.promise);
+  it('flushes a typed scene draft before a storyboard replacement can supersede it', async () => {
+    const saved = project(3, [scene('scene-1', { title: 'Preserved local edit' }), scene('scene-2')]);
+    const drafted = project(4, [scene('draft-1', { title: 'Drafted scene' })]);
+    bridge.updateScene.invoke.mockResolvedValueOnce(ok(saved));
+    bridge.proposeStoryboard.invoke.mockResolvedValueOnce(ok(drafted));
     const { result } = renderHook(() =>
       useStoryboardEditor({ project: project(), refetch: vi.fn(async () => project()) })
     );
 
-    let drafting!: Promise<boolean>;
-    act(() => {
-      drafting = result.current.proposeStoryboard(true);
-    });
-    await waitFor(() => expect(bridge.proposeStoryboard.invoke).toHaveBeenCalledTimes(1));
-
-    act(() => result.current.updateSceneDraft({ title: 'Old local edit' }));
-    let queuedSave!: Promise<boolean>;
-    act(() => {
-      queuedSave = result.current.flushSceneDraft();
-    });
-    expect(bridge.updateScene.invoke).not.toHaveBeenCalled();
+    act(() => result.current.updateSceneDraft({ title: 'Preserved local edit' }));
 
     await act(async () => {
-      proposal.resolve(ok(drafted));
-      expect(await drafting).toBe(true);
-      expect(await queuedSave).toBe(true);
+      expect(await result.current.proposeStoryboard(true)).toBe(true);
     });
 
-    expect(bridge.updateScene.invoke).not.toHaveBeenCalled();
+    // Slice A Task 11 / parent spec section 7: replacement is authorized only
+    // after typed scene content has crossed the durable main-process boundary.
+    expect(bridge.updateScene.invoke).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: 'project-1',
+        sceneId: 'scene-1',
+        expectedRevision: 2,
+        scene: expect.objectContaining({ title: 'Preserved local edit' }),
+      })
+    );
+    expect(bridge.updateScene.invoke.mock.invocationCallOrder[0]).toBeLessThan(
+      bridge.proposeStoryboard.invoke.mock.invocationCallOrder[0]
+    );
+    expect(bridge.proposeStoryboard.invoke).toHaveBeenCalledWith({
+      projectId: 'project-1',
+      expectedRevision: 3,
+      replaceExisting: true,
+    });
     expect(result.current.orderedScenes.map(({ id }) => id)).toEqual(['draft-1']);
     expect(result.current.conflict).toBeNull();
   });
