@@ -243,6 +243,7 @@ Do the same. Mount `AionrsChat` from the moment the project opens and **delete t
 composer entirely**. Not a lookalike — the same component. Lookalikes drift.
 
 Two consequences, accepted:
+
 - A conversation record exists per Studio project from open, including projects never used.
 - The MCP set freezes at conversation-create time, so it freezes earlier. For Studio this is
   better: the tool set is fixed before the user types.
@@ -345,7 +346,7 @@ so far and the ones still open:
   tool set attached to the conversation. (D5 and D7 are this principle applied; D10 removes the
   last duplicate assistant surface.)
 - **The workspace is a document app.** The document is the CAS-guarded project store; main is
-  its sole writer; the four phases are *views of the document*, not steps of a wizard.
+  its sole writer; the four phases are _views of the document_, not steps of a wizard.
 - **The bridge is a transaction protocol, not shared UI.** Tools PROPOSE; the human ACCEPTS;
   main writes. Proposal cards are the Director's output and ride beside the conversation.
 
@@ -381,19 +382,20 @@ grown up) rather than sitting beside it.
   to the frame conceptually, but folding it into the bar is layout, not architecture, and the
   rail is load-bearing for a11y (`aria-current='step'`, completion markers).
 
-**The activity indicator is the substantive new thing.** The survey's verdict: *nothing
-resembling project-level progress exists.* `useStudioJobs` is mounted at page level
+**The activity indicator is the substantive new thing.** The survey's verdict: _nothing
+resembling project-level progress exists._ `useStudioJobs` is mounted at page level
 (`StudioPage.tsx:276`) but rendered only inside Produce's feed; cut-render progress is only a
 button label inside Review. The toolbar gets the aggregate — "N generating", "Rendering 42%" —
 with the per-job detail staying where it is (rule 3: the feed is Produce's view detail).
 
-**Prerequisite plumbing, non-optional:** `useStudioRender` is subscribed *inside*
+**Prerequisite plumbing, non-optional:** `useStudioRender` is subscribed _inside_
 `ReviewPhase.tsx:30`, so today an in-flight render becomes unobservable the moment the user
 leaves Review. Under the app framing that is a document-level process trapped in a view — the
 subscription hoists to `StudioPage` alongside `useStudioJobs`, and Review consumes it from
 there. This is the survey's most consequential finding.
 
 **What D9 explicitly does not do:**
+
 - Does not touch the engine bar (D2 stands; its spend-relevant facts — `maxDurationSeconds`
   reshaping the script — must stay ambient in Produce, and `EngineBar.tsx:74` /
   `ConnectEngineCard.tsx:34` carry Produce's `data-studio-phase-heading` focus target, which
@@ -404,6 +406,7 @@ there. This is the survey's most consequential finding.
   frame owns save state, and two live `role=status` readouts of the same fact is a defect.
 
 **Two survey flags recorded while they are cheap:**
+
 - `GenerationControls.tsx` is dead code (not mounted anywhere) with the same live-looking shape
   as the SceneCard/StoryboardPanel trap. Candidate for deletion in any nearby slice.
 - `useStudioModels.ts:232` `autoSelectSoleRoute` writes `project.routing` with no user gesture —
