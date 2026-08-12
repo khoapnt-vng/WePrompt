@@ -19,15 +19,26 @@ const AssistantAvatar: React.FC<AssistantAvatarProps> = ({ assistant, size = 32 
   const iconSize = Math.floor(size * 0.5);
   const emojiSize = Math.floor(size * 0.6);
 
+  // A resolved src can still fail to load (e.g. a bundled extension asset
+  // missing from this build, or a bare filename that never resolves). Fall
+  // back to the emoji/icon instead of the browser's broken-image glyph. Reset
+  // on src change so a different assistant re-attempts the load.
+  const [imageFailed, setImageFailed] = React.useState(false);
+  React.useEffect(() => {
+    setImageFailed(false);
+  }, [avatarImage]);
+  const showImage = Boolean(avatarImage) && !imageFailed;
+
   return (
     <Avatar.Group size={size}>
       <Avatar className='border-none' shape='square' style={{ backgroundColor: 'var(--color-fill-2)', border: 'none' }}>
-        {avatarImage ? (
+        {showImage ? (
           <img
             src={avatarImage}
             alt=''
             className='h-full w-full rounded-inherit object-cover'
             style={{ display: 'block' }}
+            onError={() => setImageFailed(true)}
           />
         ) : hasEmojiAvatar ? (
           <span style={{ fontSize: emojiSize }}>{resolvedAvatar}</span>

@@ -119,7 +119,12 @@ export class OfficeArtifactService {
       preview = await this.workingFiles.createPreview(artifact.filePath);
       try {
         await this.runner.validate(preview.filePath);
-      } catch {
+      } catch (error) {
+        // A missing officecli must surface its real "not installed" code so the
+        // viewer can prompt to install it — not be masked as "corrupted or
+        // invalid", which wrongly blames the file (WP #24097). Only a validate
+        // that actually ran and rejected the file maps to INVALID_OFFICE_ARTIFACT.
+        if (error instanceof OfficeArtifactError && error.code === 'OFFICECLI_NOT_FOUND') throw error;
         throw new OfficeArtifactError('INVALID_OFFICE_ARTIFACT');
       }
       if (

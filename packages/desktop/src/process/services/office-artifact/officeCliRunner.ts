@@ -126,6 +126,10 @@ export type OfficeCliRunnerDependencies = {
   exists?: (path: string) => boolean;
   homeDirectory?: string;
   platform?: NodeJS.Platform;
+  /** App resources dir (electron `process.resourcesPath`); used to find the bundled officecli. */
+  resourcesPath?: string;
+  /** Process arch, for the `<platform>-<arch>` bundled-aioncore runtime key. */
+  arch?: string;
   processTreeSpawn?: OfficeCliProcessTreeSpawn;
 };
 
@@ -465,20 +469,48 @@ async function assertRenderOutputWithinLimit(outputPath: string): Promise<void> 
   }
 }
 
-function resolveOfficeCliBinary(dependencies: OfficeCliRunnerDependencies): string {
+export function resolveOfficeCliBinary(dependencies: OfficeCliRunnerDependencies): string {
   if (dependencies.binaryPath) return dependencies.binaryPath;
 
-  const environmentBinary = (dependencies.environment ?? process.env).OFFICECLI_PATH;
+  const environment = dependencies.environment ?? process.env;
+  const exists = dependencies.exists ?? existsSync;
+  const platform = dependencies.platform ?? process.platform;
+  const binaryName = platform === 'win32' ? 'officecli.exe' : 'officecli';
+
+  const environmentBinary = environment.OFFICECLI_PATH;
   if (environmentBinary && isAbsolute(environmentBinary)) return environmentBinary;
 
-  const platform = dependencies.platform ?? process.platform;
-  const localBinary = join(
-    dependencies.homeDirectory ?? homedir(),
-    '.local',
-    'bin',
-    platform === 'win32' ? 'officecli.exe' : 'officecli'
-  );
-  if ((dependencies.exists ?? existsSync)(localBinary)) return localBinary;
+  // Bundled with the app: <resources>/bundled-aioncore/<platform>-<arch>/managed-resources/office/officecli[.exe].
+  // The preview/extractor runs in the desktop main process (not aioncore) and
+  // must find the same shipped officecli, or Office previews fail as
+  // "corrupted or invalid" on machines where officecli is not on PATH (WP #24097).
+  const resourcesPath =
+    dependencies.resourcesPath ?? (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+  if (resourcesPath) {
+    const arch = dependencies.arch ?? process.arch;
+    const bundled = join(
+      resourcesPath,
+      'bundled-aioncore',
+      `${platform}-${arch}`,
+      'managed-resources',
+      'office',
+      binaryName
+    );
+    if (exists(bundled)) return bundled;
+  }
+
+  const localBinary = join(dependencies.homeDirectory ?? homedir(), '.local', 'bin', binaryName);
+  if (exists(localBinary)) return localBinary;
+
+  // Windows installer location (aioncore's runtime auto-install target), which
+  // lives outside PATH and the unix ~/.local/bin checked above.
+  if (platform === 'win32') {
+    const localAppData = environment.LOCALAPPDATA;
+    if (localAppData) {
+      const installed = join(localAppData, 'OfficeCli', 'officecli.exe');
+      if (exists(installed)) return installed;
+    }
+  }
 
   return 'officecli';
 }

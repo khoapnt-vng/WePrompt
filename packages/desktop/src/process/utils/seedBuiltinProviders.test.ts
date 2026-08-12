@@ -178,10 +178,9 @@ describe('buildBuiltinHttpMcpServers', () => {
     }
   });
 
-  it('seeds the TSE Datahub and Outlook Advanced endpoints', () => {
-    const urls = BUILTIN_HTTP_MCP_SERVERS.map((seed) => seed.url);
-    expect(urls).toContain('https://aigw.vng.vn/mcp-connect/default-tse-datahub-mcp-3fa296edm25h4');
-    expect(urls).toContain('https://send-email-mcp.thankfulhill-292d9583.southeastasia.azurecontainerapps.io/mcp');
+  it('ships no default HTTP MCP servers (removed per WP #24096)', () => {
+    expect(BUILTIN_HTTP_MCP_SERVERS).toEqual([]);
+    expect(buildBuiltinHttpMcpServers()).toEqual([]);
   });
 });
 
