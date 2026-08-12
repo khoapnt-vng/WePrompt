@@ -1166,10 +1166,10 @@
       "number": "장면 {{number}}",
       "status": {
         "needs_title": "제목 필요",
-        "needs_prompt": "프롬프트 필요",
-        "ready": "생성 준비 완료",
+        "needs_prompt": "설명 필요",
+        "ready": "제작 준비 완료",
         "generating": "생성 중",
-        "needs_selection": "변형 선택",
+        "needs_selection": "테이크 선택",
         "generated": "생성됨",
         "needs_attention": "확인 필요"
       },

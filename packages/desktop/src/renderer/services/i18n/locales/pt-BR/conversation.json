@@ -1186,10 +1186,10 @@
       "number": "Cena {{number}}",
       "status": {
         "needs_title": "Precisa de título",
-        "needs_prompt": "Precisa de prompt",
-        "ready": "Pronta para gerar",
+        "needs_prompt": "Precisa de descrição",
+        "ready": "Pronta para produzir",
         "generating": "Gerando",
-        "needs_selection": "Selecione uma variação",
+        "needs_selection": "Escolha uma tomada",
         "generated": "Gerada",
         "needs_attention": "Requer atenção"
       },

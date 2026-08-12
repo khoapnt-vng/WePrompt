@@ -1166,10 +1166,10 @@
       "number": "場景 {{number}}",
       "status": {
         "needs_title": "需要標題",
-        "needs_prompt": "需要提示詞",
-        "ready": "可開始產生",
+        "needs_prompt": "需要描述",
+        "ready": "可開始製作",
         "generating": "正在產生",
-        "needs_selection": "請選擇一個變體",
+        "needs_selection": "請選擇一個鏡次",
         "generated": "已產生",
         "needs_attention": "需要處理"
       },

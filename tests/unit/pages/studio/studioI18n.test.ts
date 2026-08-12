@@ -725,4 +725,61 @@ describe('Creative Studio localization contract', () => {
       expect(leaves['inspector.unsavedChanges']).not.toBe(leaves['inspector.saved']);
     }
   });
+
+  /**
+   * Seven readiness states, not two.
+   *
+   * An earlier pass at this copy collapsed the row to a binary derived from whether a reference
+   * image existed. That is not what readiness means: `studioReadiness.ts` never consults
+   * `referenceAssetId`, and a reference image is optional. A scene with no plate is still ready to
+   * produce, while one missing a title is not — so a scene could read "Ready to produce" and then
+   * be silently excluded from Produce, or read "needs an image" when nothing was missing.
+   *
+   * Distinctness is the part that matters: collapsing two states onto one string is how the
+   * information gets lost, and it cannot be seen by a key-presence check alone.
+   */
+  it('words every scene readiness state distinctly in every configured locale', () => {
+    const readinessStates = [
+      'needs_title',
+      'needs_prompt',
+      'generating',
+      'needs_selection',
+      'generated',
+      'needs_attention',
+      'ready',
+    ] as const;
+    const issues: string[] = [];
+
+    for (const locale of i18nConfig.supportedLanguages) {
+      const leaves = flattenStringLeaves(loadConversationLocale(locale).creativeStudio);
+      const wordingToState = new Map<string, string>();
+
+      for (const state of readinessStates) {
+        const wording = leaves[`scene.status.${state}`]?.trim();
+        if (!wording) {
+          issues.push(`${locale} is missing conversation.creativeStudio.scene.status.${state}`);
+          continue;
+        }
+        const clash = wordingToState.get(wording);
+        if (clash !== undefined) {
+          issues.push(`${locale} words scene.status.${state} the same as scene.status.${clash}: "${wording}"`);
+        }
+        wordingToState.set(wording, state);
+      }
+    }
+
+    expect(issues).toEqual([]);
+  });
+
+  /**
+   * Studio produces shots. "Ready to generate" describes the engine; the row describes the film.
+   * `phase.write.needsTitle` is the same statement shown from an unsaved draft before readiness has
+   * recomputed, so the two must never drift apart and say different things about one scene.
+   */
+  it('describes a ready scene in production language rather than engine language', () => {
+    const leaves = flattenStringLeaves(loadConversationLocale('en-US').creativeStudio);
+
+    expect(leaves['scene.status.ready']).toBe('Ready to produce');
+    expect(leaves['phase.write.needsTitle']).toBe(leaves['scene.status.needs_title']);
+  });
 });

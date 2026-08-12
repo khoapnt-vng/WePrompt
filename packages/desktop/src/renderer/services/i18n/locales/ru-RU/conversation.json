@@ -1187,10 +1187,10 @@
       "number": "Сцена {{number}}",
       "status": {
         "needs_title": "Нужно название",
-        "needs_prompt": "Нужен промпт",
-        "ready": "Готово к генерации",
+        "needs_prompt": "Нужно описание",
+        "ready": "Готово к производству",
         "generating": "Генерация",
-        "needs_selection": "Выберите вариант",
+        "needs_selection": "Выберите дубль",
         "generated": "Сгенерировано",
         "needs_attention": "Требуется внимание"
       },

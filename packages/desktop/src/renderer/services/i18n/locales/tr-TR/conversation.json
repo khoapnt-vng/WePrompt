@@ -1175,10 +1175,10 @@
       "number": "Sahne {{number}}",
       "status": {
         "needs_title": "Başlık gerekli",
-        "needs_prompt": "İstem gerekiyor",
-        "ready": "Oluşturmaya hazır",
+        "needs_prompt": "Açıklama gerekiyor",
+        "ready": "Üretime hazır",
         "generating": "Oluşturuluyor",
-        "needs_selection": "Bir varyasyon seçin",
+        "needs_selection": "Bir çekim seçin",
         "generated": "Oluşturuldu",
         "needs_attention": "Dikkat gerekiyor"
       },

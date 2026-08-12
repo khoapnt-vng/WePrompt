@@ -1174,10 +1174,10 @@
       "number": "Szene {{number}}",
       "status": {
         "needs_title": "Titel fehlt",
-        "needs_prompt": "Prompt erforderlich",
-        "ready": "Bereit zur Generierung",
+        "needs_prompt": "Beschreibung fehlt",
+        "ready": "Bereit für die Produktion",
         "generating": "Wird generiert",
-        "needs_selection": "Variation auswählen",
+        "needs_selection": "Take auswählen",
         "generated": "Generiert",
         "needs_attention": "Aufmerksamkeit erforderlich"
       },

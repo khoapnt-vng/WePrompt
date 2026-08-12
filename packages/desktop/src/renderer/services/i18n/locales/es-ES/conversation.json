@@ -1181,10 +1181,10 @@
       "number": "Escena {{number}}",
       "status": {
         "needs_title": "Falta el título",
-        "needs_prompt": "Falta el prompt",
-        "ready": "Lista para generar",
+        "needs_prompt": "Falta la descripción",
+        "ready": "Lista para producir",
         "generating": "Generando",
-        "needs_selection": "Selecciona una variación",
+        "needs_selection": "Elige una toma",
         "generated": "Generada",
         "needs_attention": "Requiere atención"
       },

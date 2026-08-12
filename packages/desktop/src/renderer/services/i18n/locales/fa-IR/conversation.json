@@ -1173,10 +1173,10 @@
       "number": "صحنه {{number}}",
       "status": {
         "needs_title": "عنوان لازم است",
-        "needs_prompt": "به دستور نیاز دارد",
+        "needs_prompt": "به توضیح نیاز دارد",
         "ready": "آماده تولید",
         "generating": "در حال تولید",
-        "needs_selection": "یک نسخه را انتخاب کنید",
+        "needs_selection": "یک برداشت را انتخاب کنید",
         "generated": "تولید شد",
         "needs_attention": "نیازمند توجه"
       },

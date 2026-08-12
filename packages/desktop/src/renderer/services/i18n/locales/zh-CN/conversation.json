@@ -1166,10 +1166,10 @@
       "number": "场景 {{number}}",
       "status": {
         "needs_title": "需要标题",
-        "needs_prompt": "需要提示词",
-        "ready": "可生成",
+        "needs_prompt": "需要描述",
+        "ready": "可制作",
         "generating": "正在生成",
-        "needs_selection": "请选择一个变体",
+        "needs_selection": "请选择一个镜次",
         "generated": "已生成",
         "needs_attention": "需要处理"
       },

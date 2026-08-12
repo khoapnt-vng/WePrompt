@@ -1166,10 +1166,10 @@
       "number": "シーン {{number}}",
       "status": {
         "needs_title": "タイトルが必要",
-        "needs_prompt": "プロンプトが必要",
-        "ready": "生成準備完了",
+        "needs_prompt": "説明が必要",
+        "ready": "制作の準備完了",
         "generating": "生成中",
-        "needs_selection": "バリエーションを選択",
+        "needs_selection": "テイクを選択",
         "generated": "生成済み",
         "needs_attention": "要対応"
       },

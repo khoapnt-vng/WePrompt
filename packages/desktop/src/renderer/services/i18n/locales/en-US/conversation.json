@@ -782,7 +782,7 @@
           "middle": "Middle shot",
           "closing": "Closing shot"
         },
-        "needsTitle": "Needs title"
+        "needsTitle": "Needs a title"
       },
       "produce": {
         "connectEngine": "Connect an engine — about a minute, once for the whole workspace",
@@ -1007,11 +1007,11 @@
       "accessibleName": "Scene {{number}}: {{title}}",
       "number": "Scene {{number}}",
       "status": {
-        "needs_title": "Needs title",
-        "needs_prompt": "Needs prompt",
-        "ready": "Ready to generate",
+        "needs_title": "Needs a title",
+        "needs_prompt": "Needs a description",
+        "ready": "Ready to produce",
         "generating": "Generating",
-        "needs_selection": "Select a variation",
+        "needs_selection": "Pick a take",
         "generated": "Generated",
         "needs_attention": "Needs attention"
       },
