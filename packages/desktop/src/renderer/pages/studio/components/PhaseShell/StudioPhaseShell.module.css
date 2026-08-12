@@ -255,43 +255,6 @@
   min-width: 0;
 }
 
-.assistantDock {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.assistantDrawer {
-  composes: surface from '../../StudioTypography.module.css';
-}
-
-.assistantTitle {
-  composes: cardTitle from '../../StudioTypography.module.css';
-}
-
-.assistantBody {
-  composes: body from '../../StudioTypography.module.css';
-}
-
-.assistantMeta {
-  composes: meta from '../../StudioTypography.module.css';
-}
-
-.assistantValue {
-  composes: cardTitle from '../../StudioTypography.module.css';
-  color: var(--text-primary);
-}
-
-.draftButton:global(.arco-btn-primary.arco-btn-disabled),
-.draftButton :global(.arco-btn-primary.arco-btn-disabled) {
-  color: var(--color-text-1);
-}
-
-.draftButton {
-  composes: primaryAction from '../../StudioTypography.module.css';
-}
-
 .shell[data-layout='compact'] .header {
   align-items: flex-start;
   flex-wrap: wrap;
@@ -313,10 +276,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .phaseNavigation,
-  .assistantDrawer,
-  .assistantDrawer :global(.arco-drawer),
-  .assistantDrawer :global(.arco-drawer-mask) {
+  .phaseNavigation {
     scroll-behavior: auto;
     animation: none !important;
     transition: none !important;

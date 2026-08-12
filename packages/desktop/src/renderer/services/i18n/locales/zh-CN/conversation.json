@@ -923,11 +923,6 @@
       "write": {
         "title": "编写",
         "continueToProduce": "继续",
-        "askAssistant": "询问助手",
-        "assistantTitle": "编写助手",
-        "assistantDescription": "根据创作简报生成故事板草稿。",
-        "textChargeDisclosure": "起草故事板会使用您配置的文本模型。提供商可能会对模型使用收费。",
-        "draftStoryboard": "起草故事板",
         "addShot": "添加镜头",
         "noScenes": "添加镜头或起草故事板即可开始。",
         "scriptTableTitle": "脚本",

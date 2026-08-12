@@ -11,6 +11,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
 import { useStudioLayoutMode } from '../PhaseShell/useStudioLayoutMode';
+import { StudioDirectorRevealProvider } from './StudioDirectorRevealContext';
 import { StudioLayoutContext } from './StudioLayoutContext';
 import styles from './StudioShell.module.css';
 import { useStudioPanes } from './useStudioPanes';
@@ -125,6 +126,21 @@ export const StudioShell: React.FC<StudioShellProps> = ({ director, projectId, c
     if (active === null || active === document.body || directorHost.contains(active)) toggleRef.current?.focus();
   }, [directorHost, directorShown]);
 
+  /**
+   * Put the Director on screen, whichever way it is currently presented.
+   *
+   * The two presentations are revealed by two different pieces of state, and conflating them is a
+   * real hazard rather than a tidiness point. Below inline width the pane is an overlay: opening it
+   * belongs to that presentation, so this must NOT write the stored preference — doing so would
+   * overwrite a collapse the user chose at full width with a decision they never made. At inline
+   * width the opposite holds: the user asked to see the pane, so that *is* their preference and it
+   * persists, exactly as the toggle's own expand does.
+   */
+  const revealDirector = React.useCallback((): void => {
+    if (overlays) setDirectorOverlayOpen(true);
+    else setDirectorPreference('expanded');
+  }, [overlays, setDirectorPreference]);
+
   const toggle = (
     <Tooltip content={label}>
       <Button
@@ -183,7 +199,7 @@ export const StudioShell: React.FC<StudioShellProps> = ({ director, projectId, c
         )}
         <div className={styles.workPanel} data-studio-work-panel>
           {toggle}
-          {children}
+          <StudioDirectorRevealProvider reveal={revealDirector}>{children}</StudioDirectorRevealProvider>
         </div>
       </div>
     </StudioLayoutContext.Provider>

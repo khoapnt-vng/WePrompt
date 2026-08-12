@@ -923,11 +923,6 @@
       "write": {
         "title": "構成",
         "continueToProduce": "続行",
-        "askAssistant": "アシスタントに相談",
-        "assistantTitle": "構成アシスタント",
-        "assistantDescription": "ブリーフをもとにストーリーボードの下書きを作成します。",
-        "textChargeDisclosure": "ストーリーボードの下書きには設定済みのテキストモデルを使用します。プロバイダーから利用料が請求される場合があります。",
-        "draftStoryboard": "ストーリーボードを下書き",
         "addShot": "ショットを追加",
         "noScenes": "ショットを追加するか、ストーリーボードを下書きして開始します。",
         "scriptTableTitle": "台本",

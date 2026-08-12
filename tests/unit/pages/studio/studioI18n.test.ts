@@ -83,11 +83,6 @@ const phaseKeys = [
   'phase.brief.aspectLockedHelp',
   'phase.write.title',
   'phase.write.continueToProduce',
-  'phase.write.askAssistant',
-  'phase.write.assistantTitle',
-  'phase.write.assistantDescription',
-  'phase.write.textChargeDisclosure',
-  'phase.write.draftStoryboard',
   'phase.write.addShot',
   'phase.write.noScenes',
   'phase.write.scriptTableTitle',
@@ -258,8 +253,6 @@ const streamFullSentenceKeys = [
   'phase.brief.description',
   'phase.brief.invalidName',
   'phase.brief.aspectLockedHelp',
-  'phase.write.assistantDescription',
-  'phase.write.textChargeDisclosure',
   'phase.write.noScenes',
   'phase.write.scriptTableHelp',
   'phase.write.visualPlaceholder',
@@ -314,32 +307,30 @@ function isPluralVariantKey(key: string): boolean {
   return pluralLogicalKeys.some((base) => key.startsWith(`${base}_`));
 }
 
-const truthfulAssistantDescriptions: Record<string, string> = {
-  'zh-CN': '根据创作简报生成故事板草稿。',
-  'en-US': 'Draft a storyboard from your brief.',
-  'ja-JP': 'ブリーフをもとにストーリーボードの下書きを作成します。',
-  'zh-TW': '根據創作簡報產生分鏡腳本草稿。',
-  'ko-KR': '브리프를 바탕으로 스토리보드 초안을 만듭니다.',
-  'tr-TR': 'Kısa açıklamanızdan bir storyboard taslağı oluşturun.',
-  'ru-RU': 'Создайте черновик раскадровки на основе брифа.',
-  'uk-UA': 'Створіть чернетку розкадрування на основі брифу.',
-  'pt-BR': 'Crie um rascunho de storyboard a partir do seu briefing.',
-  'de-DE': 'Erstelle aus deinem Briefing einen Storyboard-Entwurf.',
-  'es-ES': 'Crea un borrador de storyboard a partir de tu brief.',
-  'fa-IR': 'از شرح مختصر خود یک پیش‌نویس استوری‌بورد بسازید.',
-};
+/**
+ * Copy that belonged to Write's own writing assistant, which D10 removed.
+ *
+ * Deleting a surface leaves its strings behind in twelve files, where nothing complains about them:
+ * `check-i18n.js` only compares locales against each other, so an orphan present everywhere looks
+ * perfectly healthy. This is what notices.
+ */
+const removedWriteAssistantKeys = [
+  'phase.write.askAssistant',
+  'phase.write.assistantTitle',
+  'phase.write.assistantDescription',
+  'phase.write.textChargeDisclosure',
+  'phase.write.draftStoryboard',
+] as const;
 
 describe('Creative Studio localization contract', () => {
-  it('describes the Write assistant truthfully in every configured locale', () => {
-    expect(Object.keys(truthfulAssistantDescriptions).toSorted()).toEqual(
-      [...i18nConfig.supportedLanguages].toSorted()
-    );
-
+  it('carries no copy for the Write assistant it removed, in any configured locale', () => {
     for (const locale of i18nConfig.supportedLanguages) {
-      const creativeStudio = loadConversationLocale(locale).creativeStudio;
-      const description = flattenStringLeaves(creativeStudio)['phase.write.assistantDescription'];
-
-      expect(description, `${locale}/phase.write.assistantDescription`).toBe(truthfulAssistantDescriptions[locale]);
+      const leaves = flattenStringLeaves(loadConversationLocale(locale).creativeStudio);
+      // Guards the guard: a wrong path or an empty read would make every absence assertion pass.
+      expect(leaves['phase.write.suggestVisual'], `${locale}/phase.write.suggestVisual`).toBeTruthy();
+      for (const key of removedWriteAssistantKeys) {
+        expect(leaves[key], `${locale}/${key} outlived the surface that used it`).toBeUndefined();
+      }
     }
   });
 

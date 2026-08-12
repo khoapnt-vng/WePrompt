@@ -926,11 +926,6 @@
       "write": {
         "title": "Escribir",
         "continueToProduce": "Continuar",
-        "askAssistant": "Preguntar al asistente",
-        "assistantTitle": "Asistente de escritura",
-        "assistantDescription": "Crea un borrador de storyboard a partir de tu brief.",
-        "textChargeDisclosure": "El borrador del guion gráfico usa el modelo de texto configurado. El proveedor puede cobrar por el uso del modelo.",
-        "draftStoryboard": "Crear borrador del guion gráfico",
         "addShot": "Añadir plano",
         "noScenes": "Añade un plano o crea un borrador del guion gráfico para empezar.",
         "scriptTableTitle": "Guion",

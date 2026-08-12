@@ -926,11 +926,6 @@
       "write": {
         "title": "Yaz",
         "continueToProduce": "Devam et",
-        "askAssistant": "Asistana sor",
-        "assistantTitle": "Yazım asistanı",
-        "assistantDescription": "Kısa açıklamanızdan bir storyboard taslağı oluşturun.",
-        "textChargeDisclosure": "Hikâye panosu taslağı yapılandırdığınız metin modelini kullanır. Sağlayıcınız model kullanımı için ücret alabilir.",
-        "draftStoryboard": "Hikâye panosu taslağı oluştur",
         "addShot": "Çekim ekle",
         "noScenes": "Başlamak için bir çekim ekleyin veya hikâye panosu taslağı oluşturun.",
         "scriptTableTitle": "Senaryo",

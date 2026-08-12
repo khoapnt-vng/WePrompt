@@ -923,11 +923,6 @@
       "write": {
         "title": "編寫",
         "continueToProduce": "繼續",
-        "askAssistant": "詢問助理",
-        "assistantTitle": "編寫助理",
-        "assistantDescription": "根據創作簡報產生分鏡腳本草稿。",
-        "textChargeDisclosure": "起草分鏡會使用您設定的文字模型。供應商可能會收取模型使用費。",
-        "draftStoryboard": "起草分鏡",
         "addShot": "新增鏡頭",
         "noScenes": "新增鏡頭或起草分鏡即可開始。",
         "scriptTableTitle": "腳本",

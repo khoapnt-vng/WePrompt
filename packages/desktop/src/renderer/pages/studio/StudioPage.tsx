@@ -548,6 +548,19 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
     })();
   }, [generationBlocked, generationReview, project, readiness, studioJobs, studioModels.catalog]);
 
+  /**
+   * ⚠️ Currently unreachable, deliberately.
+   *
+   * D10 deleted Write's writing assistant, which held the only "Draft storyboard" button, and with
+   * it the only path to `openDraftReview` → `StoryboardDraftModal` → this. The capability itself is
+   * not lost: the Director drafts a storyboard through the Studio MCP server's `propose_storyboard`
+   * and the user accepts it from the proposal cards in the pane. That is a *different* mechanism —
+   * the Director authors the scenes with its own conversation model and queues them for review,
+   * where this calls the model-routed `storyboardPlanner` and writes scenes straight in.
+   *
+   * The modal, `editor.proposeStoryboard` and the planner path are kept rather than deleted, so
+   * treat everything they reach as dormant, not live: nothing renders it today.
+   */
   const handleDraftStoryboard = useCallback(
     async (replaceExisting: boolean): Promise<void> => {
       if (await editor.proposeStoryboard(replaceExisting)) setDraftModalVisible(false);
