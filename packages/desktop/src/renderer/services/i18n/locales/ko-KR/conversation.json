@@ -1409,9 +1409,7 @@
     "shell": {
       "showDirector": "크리에이티브 디렉터 표시",
       "hideDirector": "크리에이티브 디렉터 숨기기",
-      "directorStarting": "크리에이티브 디렉터를 준비하는 중…",
-      "directorName": "크리에이티브 디렉터",
-      "sameConversation": "브리프와 같은 대화"
+      "directorStarting": "크리에이티브 디렉터를 준비하는 중…"
     }
   },
   "artifact": {

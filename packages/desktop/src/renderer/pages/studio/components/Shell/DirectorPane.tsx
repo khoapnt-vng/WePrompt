@@ -44,18 +44,6 @@ export const DirectorPane: React.FC<DirectorPaneProps> = ({ proposals }) => {
 
   return (
     <div className={styles.pane} data-studio-director>
-      {/* A div, not a header: inside the overlay Drawer a <header> becomes a second banner
-          landmark and collides with the phase header. This identifies a pane, not the page. */}
-      <div className={styles.header}>
-        <span aria-hidden='true' className={styles.avatar}>
-          CD
-        </span>
-        <span className={styles.identity}>
-          <span className={styles.name}>{t('conversation.creativeStudio.shell.directorName')}</span>
-          <span className={styles.sameThread}>{t('conversation.creativeStudio.shell.sameConversation')}</span>
-        </span>
-      </div>
-
       {state.kind === 'ready' ? (
         <div
           role='region'

@@ -1425,9 +1425,7 @@
     "shell": {
       "showDirector": "نمایش کارگردان خلاق",
       "hideDirector": "پنهان کردن کارگردان خلاق",
-      "directorStarting": "در حال آماده‌سازی کارگردان خلاق…",
-      "directorName": "کارگردان خلاق",
-      "sameConversation": "همان گفتگوی بریف شما"
+      "directorStarting": "در حال آماده‌سازی کارگردان خلاق…"
     }
   },
   "artifact": {

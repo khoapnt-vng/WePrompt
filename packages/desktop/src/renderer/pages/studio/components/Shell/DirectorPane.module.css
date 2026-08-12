@@ -6,49 +6,6 @@
   flex-direction: column;
 }
 
-.header {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 9px;
-  border-bottom: 1px solid var(--color-border-2);
-  padding: 13px 16px;
-}
-
-.avatar {
-  display: inline-flex;
-  width: 22px;
-  height: 22px;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  border-radius: 7px;
-  background: var(--text-primary);
-  color: var(--text-white);
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-}
-
-.identity {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.name {
-  color: var(--text-primary);
-  font-family: var(--font-display);
-  font-size: 13.5px;
-  font-weight: var(--fw-bold);
-}
-
-/* The one thing a user cannot otherwise tell: Write is still talking to the brief's thread. */
-.sameThread {
-  composes: eyebrow from '../../StudioTypography.module.css';
-  color: var(--text-secondary);
-}
-
 .surface {
   display: flex;
   min-width: 0;

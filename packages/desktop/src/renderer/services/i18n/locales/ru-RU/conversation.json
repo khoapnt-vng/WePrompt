@@ -1457,9 +1457,7 @@
     "shell": {
       "showDirector": "Показать креативного директора",
       "hideDirector": "Скрыть креативного директора",
-      "directorStarting": "Запуск креативного директора…",
-      "directorName": "Креативный директор",
-      "sameConversation": "ТОТ ЖЕ ДИАЛОГ, ЧТО И БРИФ"
+      "directorStarting": "Запуск креативного директора…"
     }
   },
   "artifact": {

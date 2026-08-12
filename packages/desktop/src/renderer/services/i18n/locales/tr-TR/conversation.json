@@ -1427,9 +1427,7 @@
     "shell": {
       "showDirector": "Kreatif Direktörü göster",
       "hideDirector": "Kreatif Direktörü gizle",
-      "directorStarting": "Kreatif Direktör başlatılıyor…",
-      "directorName": "Kreatif Direktör",
-      "sameConversation": "ÖZETİNİZLE AYNI KONUŞMA"
+      "directorStarting": "Kreatif Direktör başlatılıyor…"
     }
   },
   "artifact": {

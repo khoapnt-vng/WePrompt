@@ -1409,9 +1409,7 @@
     "shell": {
       "showDirector": "クリエイティブディレクターを表示",
       "hideDirector": "クリエイティブディレクターを非表示",
-      "directorStarting": "クリエイティブディレクターを準備しています…",
-      "directorName": "クリエイティブディレクター",
-      "sameConversation": "ブリーフと同じ会話"
+      "directorStarting": "クリエイティブディレクターを準備しています…"
     }
   },
   "artifact": {

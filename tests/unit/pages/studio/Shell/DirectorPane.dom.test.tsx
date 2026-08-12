@@ -43,14 +43,34 @@ beforeEach(() => {
 
 describe('DirectorPane', () => {
   /**
-   * The pane says the thread is continuous. A user who reaches Write has no other way to know the
-   * Director still remembers the brief, so this is load-bearing copy rather than decoration.
+   * D7: the pane used to open with a `CD` monogram, the Director's name, and the subtitle
+   * SAME CONVERSATION AS YOUR BRIEF. That subtitle was load-bearing while the conversation lived
+   * inside Brief — a user who reached Write had no other way to know the thread persisted. An
+   * always-on pane demonstrates that by never going away, so the copy now explains something the
+   * UI no longer hides, and it charges two lines of height for it in the one pane whose scarce
+   * axis is height. The conversation starts at the top of the pane.
    */
-  it('names the Director and states that the thread is the same one', () => {
-    render(<DirectorPane />);
+  it('opens straight onto the conversation, with no header block above it', () => {
+    harness.result.state = {
+      kind: 'ready',
+      conversation: {
+        id: 'conversation_brief',
+        name: 'Brief',
+        type: 'aionrs',
+        model: { id: 'provider_1', use_model: 'model_1' },
+        created_at: 1,
+        modified_at: 1,
+        extra: { backend: 'aionrs', workspace: '' },
+      },
+    } as UseBriefConversationResult['state'];
 
-    expect(screen.getByText('conversation.creativeStudio.shell.directorName')).toBeVisible();
-    expect(screen.getByText('conversation.creativeStudio.shell.sameConversation')).toBeVisible();
+    const { container } = render(<DirectorPane />);
+
+    expect(screen.queryByText('conversation.creativeStudio.shell.directorName')).toBeNull();
+    expect(screen.queryByText('conversation.creativeStudio.shell.sameConversation')).toBeNull();
+    expect(screen.queryByText('CD')).toBeNull();
+    const pane = container.querySelector('[data-studio-director]');
+    expect(pane?.firstElementChild).toBe(container.querySelector(`.${styles.surface}`));
   });
 
   it('mounts the ready conversation surface', () => {
