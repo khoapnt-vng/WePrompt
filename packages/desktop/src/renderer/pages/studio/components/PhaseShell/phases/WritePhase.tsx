@@ -6,7 +6,6 @@
 
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button } from '@arco-design/web-react';
 
 import { buildSingleSceneReviewRequest } from '../../Generation/GenerationControls';
 import { requestedMediaKind } from '@/common/types/project/creativeStudioOutputRole';
@@ -64,6 +63,27 @@ export const WritePhase: React.FC<WritePhaseProps> = ({ controller, layoutMode =
   useEffect(() => {
     setAssistantOpen(false);
   }, [project.id]);
+
+  /**
+   * Where a "suggest a visual" click should land now that the conversation left the phase.
+   *
+   * It used to focus the composer of the conversation Write mounted itself. The shell owns that
+   * conversation and renders it in the Director pane, which Write cannot open: below 1120px it is
+   * an overlay, and at any width the user can collapse it. So aim at the Director's composer and
+   * let the DOM answer whether the click actually landed — a collapsed pane is `visibility: hidden`
+   * and a shut overlay is `display: none`, and neither takes focus. When it does not land, Write
+   * falls back to the assistant it does own and can always open, rather than doing nothing at all.
+   *
+   * Only when the thread already exists: the pane's other composer sends the *first* message, which
+   * becomes the project brief, and a note about one shot has no business being that.
+   */
+  const focusDirectorComposer = (): boolean => {
+    if (briefConversation.state.kind !== 'ready') return false;
+    const composer = document.querySelector<HTMLElement>('[data-studio-director] textarea');
+    if (composer === null) return false;
+    composer.focus();
+    return document.activeElement === composer;
+  };
 
   useEffect(() => {
     if (writeFocusIntent === null) return;
@@ -186,10 +206,7 @@ export const WritePhase: React.FC<WritePhaseProps> = ({ controller, layoutMode =
                   }}
                   onSuggestVisual={() => {
                     editor.selectScene(scene.id);
-                    if (briefConversation.state.kind === 'ready') {
-                      document.querySelector<HTMLElement>('[data-write-conversation] textarea')?.focus();
-                      return;
-                    }
+                    if (focusDirectorComposer()) return;
                     if (layoutMode === 'inline') {
                       document.querySelector<HTMLElement>("[data-assistant-presentation='inline']")?.focus();
                     } else {
@@ -204,37 +221,28 @@ export const WritePhase: React.FC<WritePhaseProps> = ({ controller, layoutMode =
           </ScriptTable>
         </div>
 
+        {/*
+          One assistant, whatever the Director is doing. The rail that used to replace it once the
+          conversation existed was a leftover of Write hosting that conversation: with the surface
+          gone it was an empty bordered box carrying a "Brief conversation" landmark name that
+          matched the Director pane's, so screen-reader users landed in a region holding nothing
+          but a button. Write keeps the assistant it owns and can always open.
+        */}
         <div className={styles.assistantSlot} data-write-assistant-column data-layout={layoutMode}>
-          {briefConversation.state.kind === 'ready' ? (
-            <aside
-              data-write-conversation
-              aria-label={t('conversation.creativeStudio.brief.conversationTitle')}
-              className={styles.conversationRail}
-            >
-              <Button
-                long
-                disabled={mutationPending || editor.drafting || models.pendingRole !== null}
-                onClick={openDraftReview}
-              >
-                {t('conversation.creativeStudio.phase.write.draftStoryboard')}
-              </Button>
-            </aside>
-          ) : (
-            <AssistantDock
-              kind='write'
-              layoutMode={layoutMode}
-              drawerVisible={assistantOpen}
-              storyboard={models.catalog?.storyboard ?? null}
-              catalogLoading={models.loading}
-              drafting={editor.drafting}
-              disabled={mutationPending || models.pendingRole !== null}
-              onOpenChange={setAssistantOpen}
-              onDraftStoryboard={() => {
-                setAssistantOpen(false);
-                openDraftReview();
-              }}
-            />
-          )}
+          <AssistantDock
+            kind='write'
+            layoutMode={layoutMode}
+            drawerVisible={assistantOpen}
+            storyboard={models.catalog?.storyboard ?? null}
+            catalogLoading={models.loading}
+            drafting={editor.drafting}
+            disabled={mutationPending || models.pendingRole !== null}
+            onOpenChange={setAssistantOpen}
+            onDraftStoryboard={() => {
+              setAssistantOpen(false);
+              openDraftReview();
+            }}
+          />
         </div>
       </div>
     </section>
