@@ -13,6 +13,25 @@ import type {
 
 type EchoInput = { value: string };
 
+// The broker arms a REAL setTimeout for a task's deadline (broker.ts:424) and races it
+// against the provider request, so it is wall-clock time and the injected `now` does not
+// govern it. Most tests here hold a request pending across two or more `vi.waitFor`
+// polls — 50ms each by default — while asserting on the operation still in flight. At
+// the previous value of 100ms that left a margin of about two polls, so under load the
+// broker gave up mid-choreography and the operation resolved as provider_timeout
+// instead of the expected success. That is what made this file intermittent (BUG-046).
+//
+// 30s sits above vitest's own `testTimeout` of 10s, so this deadline can no longer be
+// reached inside a passing test: anything that genuinely hangs now fails on the test
+// timeout, loudly and at a stable place, rather than silently changing an operation's
+// result. Raising a `vi.waitFor` budget instead would have made this WORSE — more
+// elapsed wall-clock before a test resolves its deferred is exactly what blows the
+// deadline.
+//
+// Tests that assert deadline behaviour override it; see 'normalizes broker deadline
+// expiration as provider_timeout', which passes `timeoutMs: 5`.
+const TASK_TIMEOUT_MS = 30_000;
+
 const provider: IProvider = {
   id: 'provider-a',
   platform: 'openai',
@@ -48,7 +67,7 @@ const echoTask = (
   responseMode: 'text',
   temperature: 0.2,
   maxOutputTokens: 100,
-  timeoutMs: 100,
+  timeoutMs: TASK_TIMEOUT_MS,
   maxTransientRetries: 0,
   ...overrides,
 });
@@ -197,7 +216,7 @@ describe('app operations broker provider execution', () => {
     expect(buildMessages).toHaveBeenCalledTimes(1);
     expect(dependencies.createClient).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'provider-a', use_model: 'model-a' }),
-      { timeout: 100, rotatingOptions: { maxRetries: 1, retryDelay: 0 } }
+      { timeout: TASK_TIMEOUT_MS, rotatingOptions: { maxRetries: 1, retryDelay: 0 } }
     );
     expect(request).toHaveBeenCalledTimes(3);
     expect(request.mock.calls.map(([params]) => params.model)).toEqual(['model-a', 'model-a', 'model-a']);
@@ -310,7 +329,7 @@ describe('app operations broker provider execution', () => {
     expect(result).toMatchObject({ ok: true, output: { answer: 'yes' } });
     expect(request).toHaveBeenCalledWith(expect.objectContaining({ response_format: { type: 'json_object' } }), {
       signal: expect.any(AbortSignal),
-      timeout: 100,
+      timeout: TASK_TIMEOUT_MS,
     });
   });
 
