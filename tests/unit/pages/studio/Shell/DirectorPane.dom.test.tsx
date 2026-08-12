@@ -9,6 +9,9 @@ import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { UseBriefConversationResult } from '@renderer/pages/studio/components/PhaseShell/phases/brief/useBriefConversation';
+// The pane's own stylesheet, so the strip is located by the class the component actually sets
+// rather than by a name copied into the test — the two cannot drift apart.
+import styles from '@renderer/pages/studio/components/Shell/DirectorPane.module.css';
 
 const harness: { result: UseBriefConversationResult } = {
   result: {
@@ -121,16 +124,29 @@ describe('DirectorPane', () => {
       },
     } as UseBriefConversationResult['state'];
 
-    render(<DirectorPane proposals={<div data-testid='proposal-card'>A proposal</div>} />);
+    const { container } = render(<DirectorPane proposals={<div data-testid='proposal-card'>A proposal</div>} />);
 
     const pane = screen.getByTestId('proposal-card').closest('[data-studio-director]');
     expect(pane).not.toBeNull();
     expect(screen.getByTestId('conversation-surface')).toBeVisible();
+    // The strip is a real element with its own border and scroll box, not just a passthrough.
+    const strip = container.querySelector(`.${styles.proposals}`);
+    expect(strip).not.toBeNull();
+    expect(strip).toContainElement(screen.getByTestId('proposal-card'));
   });
 
-  it('renders nothing extra when there are no proposals', () => {
-    render(<DirectorPane />);
+  /**
+   * Nothing pending must leave no trace. The strip carries a top border and 14px of padding, so
+   * rendering it around an empty slot draws a bordered band under the conversation that reads as a
+   * card that failed to load — which is why the pane omits the element rather than its contents.
+   */
+  it('omits the proposals strip entirely when the slot is empty', () => {
+    const { container } = render(<DirectorPane />);
 
-    expect(screen.queryByTestId('proposal-card')).toBeNull();
+    expect(container.querySelector(`.${styles.proposals}`)).toBeNull();
+    const pane = container.querySelector('[data-studio-director]');
+    expect(pane).not.toBeNull();
+    // The composer is the last thing in the pane: no empty container trails it.
+    expect(pane?.lastElementChild).toBe(container.querySelector(`.${styles.composer}`));
   });
 });
