@@ -16,10 +16,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const STUDIO_STYLES_ROOT = path.resolve(__dirname, '../../../../packages/desktop/src/renderer/pages/studio');
-const WRITE_STYLESHEET = path.join(
-  STUDIO_STYLES_ROOT,
-  'components/PhaseShell/phases/write/write.module.css'
-);
+const WRITE_STYLESHEET = path.join(STUDIO_STYLES_ROOT, 'components/PhaseShell/phases/write/write.module.css');
 const COMPOSES_FROM = /composes:[^;]*from\s+["']([^"']+)["']/g;
 
 const moduleStylesheets = (directory: string): string[] =>
