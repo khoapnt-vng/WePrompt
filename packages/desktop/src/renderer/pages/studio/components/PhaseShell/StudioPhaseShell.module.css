@@ -31,10 +31,20 @@
   display: flex;
   flex: none;
   align-items: center;
+  gap: 4px;
 }
 
 .breadcrumbButton {
   composes: body bodyTextAction from '../../StudioTypography.module.css';
+}
+
+/* The slash is punctuation, not a label: muted and set apart so the eye lands on the two names. */
+.breadcrumbSeparator {
+  color: var(--color-text-3);
+  font-family: var(--font-body);
+  font-size: 14.5px;
+  font-weight: var(--fw-regular);
+  line-height: 1;
 }
 
 .projectTitle {

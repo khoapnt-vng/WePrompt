@@ -5,6 +5,8 @@
  */
 
 import { fireEvent, render, screen } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -118,5 +120,41 @@ describe('StudioPhaseHeader', () => {
     render(<StudioPhaseHeader project={project} saveState={saveState} onBack={vi.fn()} />);
 
     expect(screen.getByRole('status')).toHaveTextContent(messageKey);
+  });
+
+  it('renders the breadcrumb separator between the crumb and the project name', () => {
+    const { container } = render(<StudioPhaseHeader project={project} saveState='saved' onBack={vi.fn()} />);
+
+    const separator = container.querySelector('nav > span[aria-hidden="true"]');
+    expect(separator).not.toBeNull();
+    expect(separator?.textContent?.trim()).toBe('/');
+  });
+});
+
+/**
+ * jsdom never loads the stylesheet: Vitest hands every `styles.x` lookup a fabricated class name,
+ * including for classes that do not exist. A rendered-DOM assertion on `className` is therefore
+ * vacuous by construction, and a `styles.` reference with no rule behind it ships as
+ * `className={undefined}` — unstyled markup that no suite can see. This walks the real files.
+ */
+describe('StudioPhaseHeader stylesheet references', () => {
+  const PHASE_SHELL_DIR = path.resolve(
+    __dirname,
+    '../../../../packages/desktop/src/renderer/pages/studio/components/PhaseShell'
+  );
+  const source = readFileSync(path.join(PHASE_SHELL_DIR, 'StudioPhaseHeader.tsx'), 'utf8');
+  const stylesheet = readFileSync(path.join(PHASE_SHELL_DIR, 'StudioPhaseShell.module.css'), 'utf8');
+
+  const referenced = [...source.matchAll(/\bstyles\.([A-Za-z_][\w$]*)/g)].map((match) => match[1]!);
+  const defined = new Set([...stylesheet.matchAll(/\.([A-Za-z_][\w-]*)/g)].map((match) => match[1]!));
+
+  it('finds the class references to check', () => {
+    // Guards the guard: a bad path or a broken pattern would make the assertion below vacuous.
+    expect(new Set(referenced).size).toBeGreaterThan(5);
+    expect(defined.size).toBeGreaterThan(5);
+  });
+
+  it('backs every styles.* lookup with a rule in StudioPhaseShell.module.css', () => {
+    expect([...new Set(referenced)].filter((className) => !defined.has(className))).toEqual([]);
   });
 });
