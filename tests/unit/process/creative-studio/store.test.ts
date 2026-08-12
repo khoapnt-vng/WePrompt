@@ -43,6 +43,7 @@ import type {
   StudioRouteCatalog,
 } from '@/common/types/project/creativeStudioTypes';
 import { jobOutputRole } from '@/common/types/project/creativeStudioOutputRole';
+import { STUDIO_EDITABLE_SCENE_LIMITS, editableSceneSchema } from '@process/resources/builtinMcp/studioServer';
 import type { StudioProposalWriteError } from '@process/resources/builtinMcp/studioProposalWriter';
 import { writeProposalRecord } from '@process/resources/builtinMcp/studioProposalWriter';
 import { writeReferenceRequestRecord } from '@process/resources/builtinMcp/studioReferenceRequestWriter';
@@ -365,6 +366,47 @@ describe('creative studio project store', () => {
       ).rejects.toMatchObject({ code: 'invalid_payload' });
       await expect(store.listProposals(project.id)).resolves.toEqual([]);
       expect(existsSync(path.join(rootDir, project.id, 'proposals', 'pending', 'proposal_too_large.json'))).toBe(false);
+    });
+
+    /**
+     * The `propose_storyboard` tool writes straight into the pending directory; the store only sees
+     * the payload when it reads it back. So a scene the tool's schema admits and the store's reader
+     * refuses is written to disk, reported to the Director as "recorded for user review", and then
+     * dropped on read with nothing but a log line — no proposal for the user, no error for the
+     * model. Since D10 that tool is the only route to a drafted storyboard, so a proposal lost this
+     * way is the whole capability lost.
+     *
+     * This asserts the two agree at the boundary, which is the only place they can disagree.
+     */
+    it('keeps a proposal holding every field at the length propose_storyboard advertises', async () => {
+      const project = await store.createProject(makeInput());
+      const { pendingDir } = await store.resolveProposalPaths(project.id);
+      const atAdvertisedMaximum = {
+        title: 'T'.repeat(STUDIO_EDITABLE_SCENE_LIMITS.title),
+        purpose: 'P'.repeat(STUDIO_EDITABLE_SCENE_LIMITS.purpose),
+        visualPrompt: 'V'.repeat(STUDIO_EDITABLE_SCENE_LIMITS.visualPrompt),
+        narration: 'N'.repeat(STUDIO_EDITABLE_SCENE_LIMITS.narration),
+        onScreenText: 'O'.repeat(STUDIO_EDITABLE_SCENE_LIMITS.onScreenText),
+        mediaKind: 'image' as const,
+        durationSeconds: 5,
+        referenceAssetId: null,
+      };
+      // Guards the guard: the limits above really are what the tool accepts, so this payload is one
+      // the Director can actually send rather than a shape invented by the test.
+      expect(editableSceneSchema.safeParse(atAdvertisedMaximum).success).toBe(true);
+
+      const record = await writeProposalRecord({
+        pendingDir,
+        projectId: project.id,
+        baseRevision: project.revision,
+        payload: {
+          kind: 'replace_storyboard',
+          sceneOrder: ['scene_proposed'],
+          scenes: { scene_proposed: atAdvertisedMaximum },
+        },
+      });
+
+      expect((await store.listProposals(project.id)).map((proposal) => proposal.id)).toContain(record.id);
     });
 
     it('rejects an overlong opaque proposal id before constructing a filesystem path', async () => {
