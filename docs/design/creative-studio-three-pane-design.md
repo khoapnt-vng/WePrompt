@@ -217,3 +217,65 @@ Sequencing that follows from the decisions:
 1. **Not blocked, can start:** the Director pane's contents — proposal card rationale, the stale card with its recompute action, outcome chips with Reopen, the pending strip, the composer scope chip.
 2. **Blocked on §7:** the three-pane shell itself, since collapse and narrow-width behaviour change its structure.
 3. **Needs a spike first:** D1's image tool. The Director gaining image authority while the spend fence holds is the one piece where a wrong implementation is expensive, and it is worth proving the job-manager route before building UI on top of it.
+
+## 9. Audit round 1 — the Director pane must BE the chat (2026-08-12)
+
+Walked the built shell against two Claude Design reference screens (entry screen; project
+screen). The headline finding supersedes parts of §3.
+
+### The finding
+
+`StudioConversationSurface` already renders `AionrsChat` — the same component the main chat
+uses. Once a Director conversation exists, the thread and composer are already identical to
+the rest of the app. **The discrepancy is entirely the first-message state.**
+
+`useBriefConversation` creates the conversation lazily inside `sendFirstMessage`, so before
+you have sent anything there is no conversation to hand `AionrsChat`. `DirectorPane` fills
+that gap with a hand-rolled `Input.TextArea` + Send button: no attach, no model picker, no
+permission selector, no `/` commands, no `@` file references, no `↑/↓` history.
+
+### D5 — Create the Director conversation eagerly on project open
+
+Settled by the reference: Claude Design's project screen shows a completed exchange on a
+brand-new project, so the conversation is created up front rather than on first send.
+
+Do the same. Mount `AionrsChat` from the moment the project opens and **delete the stub
+composer entirely**. Not a lookalike — the same component. Lookalikes drift.
+
+Two consequences, accepted:
+- A conversation record exists per Studio project from open, including projects never used.
+- The MCP set freezes at conversation-create time, so it freezes earlier. For Studio this is
+  better: the tool set is fixed before the user types.
+
+### D6 — The scope chip lives on the composer, and is NOT dropped
+
+An earlier note suggested dropping §3's scope chip and letting `@` carry shot references.
+The reference contradicts this: Claude Design puts a scope chip (`Design System ⌄`) as a
+header row on the composer itself, above the input. So `SHOT 03 ▾` belongs there, as a
+composer header row — not inline, and not dropped.
+
+### D7 — Drop the Director pane's header block
+
+The reference's left pane has no avatar, no assistant name, no subtitle: just the project
+name above the thread.
+
+§3.1 justified `SAME CONVERSATION AS YOUR BRIEF` as load-bearing — a user reaching Write had
+no other way to know the thread persisted. That reasoning is now obsolete: it was written
+when the conversation lived inside Brief. An always-on pane demonstrates continuity by never
+going away, so the subtitle explains something the UI no longer hides.
+
+Removing it also reclaims the vertical space the `CD` monogram and two lines of text occupy
+at the top of a pane whose scarce axis is height.
+
+### D8 — The work panel names its own state
+
+The reference's work area reads `No file open ⌄` — the panel says what it is showing and
+offers a way to change it, independent of the conversation. Our work panel is phase-driven
+and has no equivalent. Worth considering whether the breadcrumb should carry that role.
+
+### Not in this round
+
+Stale proposal card, outcome chips with Reopen, and the pending strip are still unbuilt and
+were excluded from the walkthrough. The proposal **rationale** field remains blocked on a
+cross-process slice: `StudioProposal` has no such field and `validateProposalRecord`
+exact-matches its keys.
