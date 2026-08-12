@@ -5,10 +5,4 @@
  */
 
 export { BriefPhase, type BriefPhaseProps } from './BriefPhase';
-export {
-  BriefProposalCard,
-  type BriefProposalAction,
-  type BriefProposalCardProps,
-  type BriefProposalRejectAction,
-} from './BriefProposalCard';
 export { useBriefConversation, type BriefConversationState } from './useBriefConversation';

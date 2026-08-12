@@ -5,16 +5,12 @@
  */
 
 import type { StudioAspectRatio } from '@/common/types/project/creativeStudioTypes';
-import { ipcBridge } from '@/common';
 import { Button, Input, InputNumber, Select } from '@arco-design/web-react';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { BriefPhaseController } from '../../types';
 import type { StudioLayoutMode } from '../../useStudioLayoutMode';
-import { getConversationPinnedContext } from '@/renderer/pages/conversation/contextHandoff/pinnedContext';
-import { useBriefConversationContext } from '../../../Shell/BriefConversationContext';
-import { BriefProposalCard } from './BriefProposalCard';
 import styles from './BriefPhase.module.css';
 
 const MAX_PROJECT_BRIEF_CHARS = 16 * 1024;
@@ -60,8 +56,6 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
     saving: 'conversation.creativeStudio.phase.brief.saving',
     failed: 'conversation.creativeStudio.inspector.saveFailed',
   } as const;
-  const pendingProposals = controller.proposals.filter((proposal) => proposal.status === 'pending');
-
   const flushIfValid = (): void => {
     if (!hasValidationError) void editor.flushProjectDraft();
   };
@@ -74,19 +68,6 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
     } finally {
       setStartingWrite(false);
     }
-  };
-
-  const briefConversation = useBriefConversationContext();
-
-  const repropose = async (): Promise<void> => {
-    if (briefConversation.state.kind !== 'ready') return;
-    await ipcBridge.conversation.sendMessage.invoke({
-      input:
-        'The script changed since your last proposal (it is now at a newer revision). Call read_storyboard and redraft your proposal against the current script.',
-      conversation_id: briefConversation.state.conversation.id,
-      files: [],
-      pinned_context: getConversationPinnedContext(briefConversation.state.conversation),
-    });
   };
 
   return (
@@ -177,22 +158,6 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
           </div>
         </div>
       </div>
-
-      {pendingProposals.length > 0 && (
-        <div className={styles.proposals}>
-          {pendingProposals.map((proposal) => (
-            <BriefProposalCard
-              key={proposal.id}
-              project={project}
-              proposal={proposal}
-              editor={editor}
-              acceptProposal={controller.acceptProposal}
-              rejectProposal={controller.rejectProposal}
-              onRepropose={repropose}
-            />
-          ))}
-        </div>
-      )}
 
       {projectIssue !== null && (
         <div role='alert' className={styles.saveError}>

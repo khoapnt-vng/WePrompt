@@ -101,4 +101,36 @@ describe('DirectorPane', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('conversation.creativeStudio.errors.storage');
   });
+
+  /**
+   * A proposal is the Director's output, so it belongs beside the Director rather than in whichever
+   * phase happens to be open. Brief used to own this card; the work panel is now free to change
+   * phase underneath a pending proposal without the proposal disappearing.
+   */
+  it('renders proposals inside the pane, below the conversation', () => {
+    harness.result.state = {
+      kind: 'ready',
+      conversation: {
+        id: 'conversation_brief',
+        name: 'Brief',
+        type: 'aionrs',
+        model: { id: 'provider_1', use_model: 'model_1' },
+        created_at: 1,
+        modified_at: 1,
+        extra: { backend: 'aionrs', workspace: '' },
+      },
+    } as UseBriefConversationResult['state'];
+
+    render(<DirectorPane proposals={<div data-testid='proposal-card'>A proposal</div>} />);
+
+    const pane = screen.getByTestId('proposal-card').closest('[data-studio-director]');
+    expect(pane).not.toBeNull();
+    expect(screen.getByTestId('conversation-surface')).toBeVisible();
+  });
+
+  it('renders nothing extra when there are no proposals', () => {
+    render(<DirectorPane />);
+
+    expect(screen.queryByTestId('proposal-card')).toBeNull();
+  });
 });

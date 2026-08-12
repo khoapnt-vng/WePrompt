@@ -71,3 +71,17 @@
   font-size: 12px;
   line-height: 1.4;
 }
+
+/* Pinned under the thread rather than scrolling with it: a proposal is an action the user still
+   owes an answer to, and it must stay reachable while they scroll back to read what prompted it. */
+.proposals {
+  display: flex;
+  min-width: 0;
+  max-height: 45%;
+  flex: none;
+  flex-direction: column;
+  overflow-y: auto;
+  gap: 10px;
+  border-top: 1px solid var(--color-border-2);
+  padding: 14px 16px;
+}

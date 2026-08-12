@@ -15,7 +15,7 @@ import type {
   StudioProposalAcceptance,
   StudioRendererProject,
 } from '@/common/types/project/creativeStudioTypes';
-import { BriefProposalCard } from '@renderer/pages/studio/components/PhaseShell/phases/brief/BriefProposalCard';
+import { DirectorProposalCard } from '@renderer/pages/studio/components/Shell/DirectorProposalCard';
 import type { UseStoryboardEditorResult } from '@renderer/pages/studio/hooks/useStoryboardEditor';
 
 const FIELD_SEPARATOR_KEY = 'conversation.creativeStudio.brief.proposalFieldSeparator';
@@ -114,14 +114,14 @@ const editor = (overrides: Partial<UseStoryboardEditorResult> = {}): UseStoryboa
     ...overrides,
   }) as UseStoryboardEditorResult;
 
-describe('BriefProposalCard', () => {
+describe('DirectorProposalCard', () => {
   const acceptProposal = vi.fn(async () => success(acceptResult()));
   const rejectProposal = vi.fn(async () => success({ ...proposal(), status: 'rejected' as const }));
   const repropose = vi.fn(async () => {});
 
   const renderCard = (overrides: { project?: StudioRendererProject; proposal?: StudioProposal } = {}): void => {
     render(
-      <BriefProposalCard
+      <DirectorProposalCard
         project={overrides.project ?? project()}
         proposal={overrides.proposal ?? proposal()}
         editor={editor()}
@@ -261,7 +261,7 @@ describe('BriefProposalCard', () => {
     );
     const currentProject = project();
     render(
-      <BriefProposalCard
+      <DirectorProposalCard
         project={currentProject}
         proposal={proposal()}
         editor={editor()}
@@ -293,7 +293,7 @@ describe('BriefProposalCard', () => {
   it('flushes unsaved drafts first and refuses acceptance when the flush fails', async () => {
     const flushAllSceneDrafts = vi.fn(async () => ({ failed: ['scene-1'], dirtied: [] }));
     render(
-      <BriefProposalCard
+      <DirectorProposalCard
         project={project()}
         proposal={proposal()}
         editor={editor({ hasUnsavedSceneDrafts: true, flushAllSceneDrafts })}

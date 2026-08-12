@@ -213,7 +213,12 @@ describe('BriefPhase', () => {
     expect(screen.queryByRole('button', { name: /render|generate/i })).not.toBeInTheDocument();
   });
 
-  it('renders a full proposal card only for pending proposals', () => {
+  /**
+   * Proposals moved to the Director pane, which outlives the phase. Brief rendering them too would
+   * double the card whenever Brief is the open phase, and — worse — a user who switched to Write
+   * would lose a card they still owed an answer to.
+   */
+  it('does not render proposal cards, pending or otherwise', () => {
     render(
       <BriefPhase
         controller={controller({
@@ -227,7 +232,10 @@ describe('BriefPhase', () => {
       />
     );
 
-    expect(screen.getAllByText('conversation.creativeStudio.brief.proposalTitle')).toHaveLength(1);
+    expect(screen.queryByText('conversation.creativeStudio.brief.proposalTitle')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'conversation.creativeStudio.brief.proposalAccept' })
+    ).not.toBeInTheDocument();
   });
 
   it('blocks invalid brief constraints without treating the header-owned name as a brief-panel error', () => {

@@ -39,6 +39,7 @@ import {
 } from './components';
 import { BriefConversationProvider } from './components/Shell/BriefConversationContext';
 import { DirectorPane } from './components/Shell/DirectorPane';
+import { DirectorProposals, pendingDirectorProposals } from './components/Shell/DirectorProposals';
 import { StudioShell } from './components/Shell/StudioShell';
 import { useStoryboardEditor, useStudioJobs, useStudioModels, useStudioProject } from './hooks';
 import styles from './StudioPage.module.css';
@@ -1065,6 +1066,18 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
     clearWriteFocusIntent,
     openDuplicateChargeConfirmation: setDuplicateChargeJobId,
   };
+  // Undefined rather than an always-rendered component, so the pane can drop its separator and
+  // padding entirely when nothing is pending instead of showing an empty bordered strip.
+  const directorProposals =
+    pendingDirectorProposals(proposals).length > 0 ? (
+      <DirectorProposals
+        project={project}
+        proposals={proposals}
+        editor={editor}
+        acceptProposal={controller.acceptProposal}
+        rejectProposal={controller.rejectProposal}
+      />
+    ) : undefined;
   const referenceAdvisory =
     referenceNotice?.kind === 'excluded' ? (
       <Alert
@@ -1099,7 +1112,7 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
   return (
     <section aria-label={t('conversation.creativeStudio.project.title')} className={styles.projectShell}>
       <BriefConversationProvider project={project}>
-        <StudioShell director={<DirectorPane />} projectId={project.id}>
+        <StudioShell director={<DirectorPane proposals={directorProposals} />} projectId={project.id}>
           <StudioPhaseShell
             activePhase={activePhase}
             controller={controller}

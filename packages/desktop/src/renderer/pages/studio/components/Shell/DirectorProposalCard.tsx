@@ -34,19 +34,19 @@ const SCENE_FIELD_LABEL_KEYS = {
   referenceAssetId: 'conversation.creativeStudio.brief.proposalField.referenceAssetId',
 } as const satisfies Record<StudioEditableSceneField, string>;
 
-export type BriefProposalAction = (
+export type DirectorProposalAction = (
   request: StudioProposalRequest
 ) => Promise<StudioCommandResult<StudioProposalAcceptance>>;
-export type BriefProposalRejectAction = (
+export type DirectorProposalRejectAction = (
   request: StudioProposalRequest
 ) => Promise<StudioCommandResult<StudioProposal>>;
 
-export type BriefProposalCardProps = {
+export type DirectorProposalCardProps = {
   project: StudioRendererProject;
   proposal: StudioProposal;
   editor: Pick<UseStoryboardEditorResult, 'hasUnsavedSceneDrafts' | 'flushAllSceneDrafts'>;
-  acceptProposal: BriefProposalAction;
-  rejectProposal: BriefProposalRejectAction;
+  acceptProposal: DirectorProposalAction;
+  rejectProposal: DirectorProposalRejectAction;
   onRepropose: () => Promise<void>;
 };
 
@@ -62,7 +62,7 @@ const resolveProposalDiff = (project: StudioRendererProject, proposal: StudioPro
   return computeStudioProposalDiff(project, proposal.payload);
 };
 
-export const BriefProposalCard: React.FC<BriefProposalCardProps> = ({
+export const DirectorProposalCard: React.FC<DirectorProposalCardProps> = ({
   project,
   proposal,
   editor,

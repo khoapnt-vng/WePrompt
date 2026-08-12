@@ -25,7 +25,16 @@ const MAX_PROJECT_BRIEF_CHARS = 16 * 1024;
  * out from under the project (the offer to start fresh). Splitting these across phases is what
  * previously required two hook instances to agree.
  */
-export const DirectorPane: React.FC = () => {
+export type DirectorPaneProps = {
+  /**
+   * Proposal cards, composed by the page because it owns the project and the accept/reject calls.
+   * A slot rather than data: it keeps this pane free of the storyboard editor, which is the only
+   * reason the card was stuck in Brief in the first place.
+   */
+  proposals?: React.ReactNode;
+};
+
+export const DirectorPane: React.FC<DirectorPaneProps> = ({ proposals }) => {
   const { t } = useTranslation();
   const conversation = useBriefConversationContext();
   const [composerText, setComposerText] = useState('');
@@ -90,6 +99,8 @@ export const DirectorPane: React.FC = () => {
           </Button>
         </div>
       )}
+
+      {proposals !== undefined && <div className={styles.proposals}>{proposals}</div>}
     </div>
   );
 };
