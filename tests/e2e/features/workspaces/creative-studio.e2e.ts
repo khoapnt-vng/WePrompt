@@ -277,7 +277,10 @@ async function expectConnectEngineDoor(page: Page, projectId: string): Promise<v
   await expect(connectionCard.getByRole('button', { name: 'Open Model Settings' })).toBeVisible();
   await expect(connectionCard.getByRole('button', { name: 'Ask a teammate' })).toBeVisible();
 
-  const phaseShell = page.locator('[data-studio-layout-root]');
+  // The work panel, not the layout root: the root now also holds the Director pane, whose
+  // conversation surface has controls of its own that this "nothing was generated" check must
+  // not count.
+  const phaseShell = page.locator('[data-studio-work-panel]');
   await expect(phaseShell.getByRole('combobox')).toHaveCount(0);
   await expect(phaseShell.getByRole('button', { name: /^(Render|Generate)/i })).toHaveCount(0);
   await expect(phaseShell.getByRole('region', { name: 'Storyboard' })).toHaveCount(0);
@@ -386,7 +389,11 @@ test.describe('Creative Studio workspace', () => {
       await expect(page.getByLabel('Aspect ratio: 16:9')).toBeVisible();
       await expectStudioPhase(page, projectId, 'brief');
       await expect(page.getByRole('region', { name: 'Brief' }).getByLabel('Creative intent')).toHaveValue(projectBrief);
-      await expect(page.locator('[data-studio-layout-root] > header [role="status"]')).toHaveText('Saved');
+      // `data-studio-layout-root` is StudioShell's root now, and the phase shell hangs two levels
+      // below it: work panel > phase shell > header. The chain stays direct-child on purpose — the
+      // phases render headers and save-state regions of their own (a scene row, the script table),
+      // and only the project's save state belongs to this assertion.
+      await expect(page.locator('[data-studio-work-panel] > div > header [role="status"]')).toHaveText('Saved');
       // A project adopts a route only when exactly one compatible engine exists, so the
       // fake catalog's single video model is adopted while its two image models are not.
       const snapshot = await readCanonicalStudioSnapshot(page, projectId);
@@ -477,9 +484,11 @@ test.describe('Creative Studio workspace', () => {
       await visual.blur();
 
       await expect(shotRow.locator('[role="status"][data-state="saved"]')).toHaveText('Scene saved');
-      await expect(page.locator('[data-studio-layout-root] > header [role="status"]')).toHaveText('Saved');
+      await expect(page.locator('[data-studio-work-panel] > div > header [role="status"]')).toHaveText('Saved');
       // The pacing bar is gone; the off-target warning now lives in the shell advisory slot.
-      await expect(page.locator('[data-studio-layout-root] > [role="alert"]')).toHaveText(
+      // Scoped to the work panel: the Director pane renders alerts of its own and sits ahead of
+      // the phase shell in document order.
+      await expect(page.locator('[data-studio-work-panel] > div > [role="alert"]')).toHaveText(
         'Storyboard timing does not match the project target.'
       );
       const continueToProduce = page.getByRole('button', { name: 'Continue to Produce' });
@@ -565,7 +574,7 @@ test.describe('Creative Studio workspace', () => {
         })
       );
       // A seeded 3x5s shape hits the 15s target exactly, so no shell advisory is raised.
-      await expect(page.locator('[data-studio-layout-root] > [role="alert"]')).toHaveCount(0);
+      await expect(page.locator('[data-studio-work-panel] > div > [role="alert"]')).toHaveCount(0);
       await expect(page.getByText('Untitled scene', { exact: true })).toHaveCount(0);
       expect(await readCanonicalStudioSnapshot(page, shapeProjectId)).toMatchObject({
         routes: fakeCatalogRoutes,
