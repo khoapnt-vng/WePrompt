@@ -1363,8 +1363,11 @@ const StudioPage: React.FC = () => {
   const { id, phase } = useParams<{ id: string; phase?: string }>();
   const routePhase = parseStudioPhase(phase);
 
+  // The library is a document — it scrolls the page and sits inside its margins. A project is a
+  // frame: it fills the viewport so the Director's composer stays on screen, and hands scrolling
+  // to the work panel. One element serves both, so the frame is a modifier rather than the default.
   return (
-    <main className={styles.page}>
+    <main className={id ? `${styles.page} ${styles.pageProject}` : styles.page}>
       {id ? <StudioProjectShell key={id} routePhase={routePhase} /> : <StudioLibrary />}
     </main>
   );

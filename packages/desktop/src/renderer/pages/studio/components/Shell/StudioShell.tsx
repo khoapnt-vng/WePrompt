@@ -200,7 +200,11 @@ export const StudioShell: React.FC<StudioShellProps> = ({ director, projectId, c
         )}
         <div className={styles.workPanel} data-studio-work-panel>
           {toggle}
-          <StudioDirectorRevealProvider reveal={revealDirector}>{children}</StudioDirectorRevealProvider>
+          {/* The toggle stays outside the scroll box on purpose: it is the control that brings the
+              Director back, so it must not scroll out of reach along with the work. */}
+          <div className={styles.workScroll} data-studio-work-scroll>
+            <StudioDirectorRevealProvider reveal={revealDirector}>{children}</StudioDirectorRevealProvider>
+          </div>
         </div>
       </div>
     </StudioLayoutContext.Provider>

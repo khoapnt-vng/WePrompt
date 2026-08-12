@@ -268,4 +268,34 @@ describe('StudioShell', () => {
 
     expect(screen.getByRole('button', { name: HIDE_DIRECTOR })).toHaveClass(shellStyles.paneToggle);
   });
+
+  /**
+   * The work panel scrolls, the frame does not.
+   *
+   * When the frame scrolled, a phase taller than the window took the Director column with it and
+   * the composer went below the fold — unreachable without scrolling the work away. So the phase
+   * lives in a scroll box and the toggle stays outside it: the toggle is the control that brings
+   * the Director back, and a control that scrolls out of reach cannot do that job.
+   *
+   * jsdom performs no layout, so this pins the structure only. `overflow-y` itself is checked
+   * against the real stylesheet in studioFrameLayout.test.ts.
+   */
+  it('puts the phase inside the work panel scroll box and leaves the toggle outside it', () => {
+    renderShell('inline');
+
+    const scroll = document.querySelector('[data-studio-work-scroll]');
+    expect(scroll).toHaveClass(shellStyles.workScroll);
+    expect(scroll).toContainElement(screen.getByTestId('work-panel-child'));
+    expect(scroll).toContainElement(screen.getByTestId('phase-heading'));
+    expect(scroll).not.toContainElement(screen.getByRole('button', { name: HIDE_DIRECTOR }));
+  });
+
+  /** The Director is the shell's own column, never inside the work panel's scroll box. */
+  it('keeps the Director out of the work panel scroll box', () => {
+    renderShell('inline');
+
+    expect(document.querySelector('[data-studio-work-scroll]')).not.toContainElement(
+      screen.getByTestId('director-child')
+    );
+  });
 });

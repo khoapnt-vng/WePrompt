@@ -56,21 +56,44 @@
 
 /* `position: relative` is what makes `.paneToggle` land on this panel rather than on whatever
    positioned ancestor Studio happens to sit inside; the left gutter is the space it floats in, so
-   the toggle never covers the breadcrumb the phase header starts with. */
+   the toggle never covers the breadcrumb the phase header starts with.
+   `overflow: hidden` keeps the panel itself still so the toggle stays pinned while the work
+   scrolls — an absolutely positioned child of a scroll container scrolls away with the content. */
 .workPanel {
+  /* The page used to supply this inset. It moved here when the frame went flush against the app
+     side menu, and the toggle's offset is derived from it below so the two cannot drift apart. */
+  --studio-work-inset-block: clamp(16px, 3vw, 28px);
+  --studio-work-inset-inline: clamp(16px, 3.5vw, 36px);
+
   position: relative;
   display: flex;
   min-width: 0;
   min-height: 0;
   flex: 1;
   flex-direction: column;
+  overflow: hidden;
   padding-left: 44px;
 }
 
+/* The work panel's scroll box, so a phase taller than the window scrolls here rather than taking
+   the whole frame with it — which is what kept the Director's composer off screen on Review. */
+.workScroll {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: var(--studio-work-inset-block) var(--studio-work-inset-inline) var(--studio-work-inset-block) 0;
+}
+
+/* Absolute offsets are measured from the panel's padding box, so the panel's own block inset does
+   not move this: add it back explicitly to keep the toggle level with the header row it sits
+   beside. */
 .paneToggle {
   position: absolute;
   z-index: 2;
-  top: 14px;
+  top: calc(var(--studio-work-inset-block) + 14px);
   left: 8px;
 }
 
