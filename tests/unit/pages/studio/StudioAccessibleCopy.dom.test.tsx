@@ -15,7 +15,6 @@ import { describe, expect, it, vi } from 'vitest';
 import i18nConfig from '@/common/config/i18n-config.json';
 import type { StudioAsset, StudioRendererProject, StudioScene } from '@/common/types/project/creativeStudioTypes';
 import { GenerationReviewModal } from '@renderer/pages/studio/components/Generation/GenerationReviewModal';
-import { AssistantDock } from '@renderer/pages/studio/components/PhaseShell/AssistantDock';
 import { StudioPhaseHeader } from '@renderer/pages/studio/components/PhaseShell/StudioPhaseHeader';
 import { StudioPhaseNav } from '@renderer/pages/studio/components/PhaseShell/StudioPhaseNav';
 import { StudioPhaseShell } from '@renderer/pages/studio/components/PhaseShell/StudioPhaseShell';
@@ -319,7 +318,7 @@ describe('Creative Studio full-sentence English copy', () => {
     expect(issues).toEqual([]);
   }, 30_000);
 
-  it('renders the phase workflow and assistant dock with localized accessible names', async () => {
+  it('renders the phase workflow with localized accessible names', async () => {
     await renderEnglish(
       <>
         <StudioPhaseNav
@@ -335,12 +334,6 @@ describe('Creative Studio full-sentence English copy', () => {
           disabled={false}
           onSelect={vi.fn()}
         />
-        <AssistantDock>
-          <span>Assistant controls</span>
-        </AssistantDock>
-        <AssistantDock kind='produce'>
-          <span>Generation controls</span>
-        </AssistantDock>
       </>
     );
 
@@ -349,8 +342,6 @@ describe('Creative Studio full-sentence English copy', () => {
     for (const phaseName of ['Brief', 'Write', 'Produce', 'Review']) {
       expect(within(navigation).getByRole('button', { name: phaseName })).toBeVisible();
     }
-    expect(screen.getByRole('complementary', { name: 'Writing assistant' })).toBeInTheDocument();
-    expect(screen.getByRole('complementary', { name: 'Generation activity' })).toBeInTheDocument();
   });
 
   it('derives phase completion from durable project content', () => {

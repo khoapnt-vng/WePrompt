@@ -22,6 +22,7 @@ import type {
 import type { TChatConversation } from '@/common/config/storage';
 import { BriefConversationProvider } from '@renderer/pages/studio/components/Shell/BriefConversationContext';
 import { WritePhase } from '@renderer/pages/studio/components/PhaseShell/phases/WritePhase';
+import type { StudioLayoutMode } from '@renderer/pages/studio/components/PhaseShell/useStudioLayoutMode';
 import type { WritePhaseController } from '@renderer/pages/studio/components/PhaseShell/types';
 import type { UseStoryboardEditorResult } from '@renderer/pages/studio/hooks/useStoryboardEditor';
 import type { UseStudioModelsResult } from '@renderer/pages/studio/hooks/useStudioModels';
@@ -61,6 +62,15 @@ vi.mock('react-i18next', () => ({
     t: (key: string) => (key === 'common.unit.second_short' ? 's' : key),
   }),
 }));
+
+// jsdom measures every element at 0 width, so the real shell would always pick `compact` and the
+// docked Director pane could never be exercised. The mode is driven directly instead.
+const shellLayout = vi.hoisted(() => ({ mode: 'inline' as 'inline' | 'drawer' | 'compact' }));
+vi.mock('@renderer/pages/studio/components/PhaseShell/useStudioLayoutMode', () => ({
+  useStudioLayoutMode: () => ({ containerRef: { current: null }, layoutMode: shellLayout.mode }),
+}));
+
+const { StudioShell } = await import('@renderer/pages/studio/components/Shell/StudioShell');
 
 const observedTargets: Element[] = [];
 
@@ -294,17 +304,10 @@ const directorConversation: TChatConversation = {
   extra: { backend: 'aionrs', workspace: '', studio_project_id: project.id },
 };
 
-/**
- * Stands in for the Director pane, which the shell renders outside the phase.
- *
- * `reachable={false}` is how a pane that is on the page but not on screen behaves: collapsed it is
- * `visibility: hidden` and inside a shut overlay it is `display: none`, and neither can take focus.
- * jsdom happily focuses both, so a disabled control is the only honest way to say "focus will not
- * land here" in this environment.
- */
-const DirectorPaneStub: React.FC<{ reachable?: boolean }> = ({ reachable = true }) => (
+/** Stands in for the Director pane, which the shell renders outside the phase. */
+const DirectorPaneStub: React.FC = () => (
   <div data-studio-director>
-    <Input.TextArea disabled={!reachable} />
+    <Input.TextArea />
   </div>
 );
 
@@ -321,6 +324,46 @@ const renderInShell = (ui: React.ReactElement, director?: React.ReactNode) =>
       {ui}
     </BriefConversationProvider>
   );
+
+const DIRECTOR_COLLAPSED_KEY = 'studio.directorPane.collapsed';
+
+/**
+ * Renders Write inside the **real** shell, which is the only thing that can reveal the Director.
+ *
+ * A stub shell would let "reveal" mean whatever the test wanted it to mean. jsdom focuses hidden
+ * elements happily, so `toHaveFocus()` alone cannot tell a revealed pane from a shut one — the
+ * pane's own collapse attribute and Arco's drawer class are what carry that, and they only exist
+ * if the real shell is mounted.
+ */
+const renderInStudioShell = (
+  ui: React.ReactElement,
+  { mode = 'inline', collapsed = false }: { mode?: StudioLayoutMode; collapsed?: boolean } = {}
+) => {
+  shellLayout.mode = mode;
+  localStorage.setItem(DIRECTOR_COLLAPSED_KEY, collapsed ? '1' : '0');
+  return render(
+    <BriefConversationProvider project={project}>
+      <StudioShell projectId={project.id} director={<DirectorPaneStub />}>
+        {ui}
+      </StudioShell>
+    </BriefConversationProvider>
+  );
+};
+
+const directorPane = (): HTMLElement => {
+  const pane = document.querySelector<HTMLElement>('[data-studio-director-pane]');
+  if (pane === null) throw new Error('the shell rendered no Director pane');
+  return pane;
+};
+
+/** Arco marks a shut Drawer with `-wrapper-hide` (`display: none`) rather than unmounting it. */
+const directorOverlayVisible = (): boolean => {
+  const wrapper = document.querySelector('.arco-drawer-wrapper');
+  return wrapper !== null && !wrapper.classList.contains('arco-drawer-wrapper-hide');
+};
+
+const directorComposer = (): HTMLElement | null =>
+  document.querySelector<HTMLElement>('[data-studio-director] textarea');
 
 const emptyVisualSetup = (): { props: WritePhaseController; phaseEditor: UseStoryboardEditorResult } => {
   const emptyReveal = scene('scene-2', {
@@ -345,6 +388,9 @@ const emptyVisualSetup = (): { props: WritePhaseController; phaseEditor: UseStor
 describe('WritePhase', () => {
   beforeEach(() => {
     observedTargets.length = 0;
+    // The pane preference persists by design, so it must be cleared or one test decides the next.
+    localStorage.clear();
+    shellLayout.mode = 'inline';
     vi.stubGlobal('ResizeObserver', ResizeObserverMock);
     writeConversationHarness.result.state = { kind: 'absent' };
     writeConversationHarness.messages = [];
@@ -443,9 +489,16 @@ describe('WritePhase', () => {
   });
 
   /**
-   * "Suggest a visual" used to focus the composer of the conversation Write mounted itself. The
-   * shell owns that conversation now, so the selector Write kept aiming at matched nothing and the
-   * click did nothing at all. These pin the click to a surface that actually takes it.
+   * "Suggest a visual" has no surface of its own to fall back to any more.
+   *
+   * It used to focus the composer of the conversation Write mounted itself, then — once the shell
+   * took that conversation — Write's own writing assistant whenever the Director was out of reach.
+   * That assistant is gone (D10), so the Director has to be *made* reachable: the pane expands, or
+   * the overlay opens, and only then does the composer take the caret.
+   *
+   * Every case below asserts the reveal, not just the focus. jsdom focuses hidden elements without
+   * complaint, so `toHaveFocus()` on its own passes just as happily against a pane that never
+   * opened — which is precisely how the original silent no-op survived its guard.
    */
   describe('suggest a visual', () => {
     const clickSuggest = (): void => {
@@ -455,62 +508,84 @@ describe('WritePhase', () => {
       );
     };
 
-    it('hands the request to the Director composer when the pane is on screen', () => {
+    it('hands the request to the Director composer when the pane is already on screen', () => {
       writeConversationHarness.result.state = { kind: 'ready', conversation: directorConversation };
       const { props, phaseEditor } = emptyVisualSetup();
-      const { container } = renderInShell(<WritePhase controller={props} />, <DirectorPaneStub />);
+      renderInStudioShell(<WritePhase controller={props} />);
+      expect(directorPane()).toHaveAttribute('data-collapsed', 'false');
 
       clickSuggest();
 
       expect(phaseEditor.selectScene).toHaveBeenCalledWith('scene-2');
-      expect(container.querySelector('[data-studio-director] textarea')).toHaveFocus();
-      expect(
-        screen.getByRole('complementary', { name: 'conversation.creativeStudio.phase.write.assistantTitle' })
-      ).not.toHaveFocus();
+      expect(directorPane()).toHaveAttribute('data-collapsed', 'false');
+      expect(directorComposer()).toHaveFocus();
     });
 
-    it("falls back to Write's own assistant when the Director pane cannot take focus", () => {
+    /**
+     * The reveal is transient, at inline width just as much as in the overlay.
+     *
+     * Clicking a button in the work panel is a request to see the Director *now*; it is not the
+     * user revisiting the collapse they chose from the shell's own toggle. Persisting `expanded`
+     * here would destroy that choice silently and for good — the pane would come back open on
+     * every later load and nothing would tell them why.
+     */
+    it('expands a collapsed Director pane without touching the stored preference', () => {
       writeConversationHarness.result.state = { kind: 'ready', conversation: directorConversation };
       const { props } = emptyVisualSetup();
-      const { container } = renderInShell(
-        <WritePhase controller={props} layoutMode='inline' />,
-        <DirectorPaneStub reachable={false} />
-      );
+      renderInStudioShell(<WritePhase controller={props} />, { collapsed: true });
+      // Guards the guard: a pane that started open would make the reveal assertion vacuous.
+      expect(directorPane()).toHaveAttribute('data-collapsed', 'true');
+      expect(directorComposer()).not.toHaveFocus();
 
       clickSuggest();
 
-      expect(container.querySelector('[data-studio-director] textarea')).not.toHaveFocus();
-      expect(
-        screen.getByRole('complementary', { name: 'conversation.creativeStudio.phase.write.assistantTitle' })
-      ).toHaveFocus();
+      expect(directorPane()).toHaveAttribute('data-collapsed', 'false');
+      expect(directorComposer()).toHaveFocus();
+      expect(localStorage.getItem(DIRECTOR_COLLAPSED_KEY)).toBe('1');
     });
 
-    it('opens the assistant drawer when the Director pane cannot take focus below inline width', async () => {
+    it('opens the Director overlay below inline width and lands in its composer', () => {
       writeConversationHarness.result.state = { kind: 'ready', conversation: directorConversation };
       const { props } = emptyVisualSetup();
-      renderInShell(<WritePhase controller={props} layoutMode='drawer' />, <DirectorPaneStub reachable={false} />);
-      expect(
-        screen.queryByRole('button', { name: 'conversation.creativeStudio.phase.write.draftStoryboard' })
-      ).not.toBeInTheDocument();
+      renderInStudioShell(<WritePhase controller={props} layoutMode='drawer' />, { mode: 'drawer' });
+      expect(directorOverlayVisible()).toBe(false);
+      expect(directorComposer()).not.toHaveFocus();
 
       clickSuggest();
 
-      expect(
-        await screen.findByRole('button', { name: 'conversation.creativeStudio.phase.write.draftStoryboard' })
-      ).toBeInTheDocument();
+      expect(directorOverlayVisible()).toBe(true);
+      expect(directorComposer()).toHaveFocus();
     });
 
-    it('points at the assistant while the Director conversation does not exist yet', () => {
+    /**
+     * Opening the overlay is a UI action bound to the narrow presentation, not a change of intent.
+     * Writing `expanded` here would silently overwrite a collapse the user chose at full width, and
+     * writing `collapsed` would leave the pane shut when they widened the window again.
+     */
+    it('leaves the stored pane preference untouched when it reveals the overlay', () => {
+      writeConversationHarness.result.state = { kind: 'ready', conversation: directorConversation };
       const { props } = emptyVisualSetup();
-      const { container } = renderInShell(<WritePhase controller={props} layoutMode='inline' />, <DirectorPaneStub />);
+      renderInStudioShell(<WritePhase controller={props} layoutMode='drawer' />, {
+        mode: 'drawer',
+        collapsed: true,
+      });
 
       clickSuggest();
 
-      // The Director's first-message composer writes the project brief, not a note about one shot.
-      expect(container.querySelector('[data-studio-director] textarea')).not.toHaveFocus();
-      expect(
-        screen.getByRole('complementary', { name: 'conversation.creativeStudio.phase.write.assistantTitle' })
-      ).toHaveFocus();
+      expect(directorOverlayVisible()).toBe(true);
+      expect(localStorage.getItem(DIRECTOR_COLLAPSED_KEY)).toBe('1');
+    });
+
+    it('reveals the Director but keeps out of the composer that writes the brief', () => {
+      const { props } = emptyVisualSetup();
+      renderInStudioShell(<WritePhase controller={props} />, { collapsed: true });
+
+      clickSuggest();
+
+      // The Director is on screen, so the user can see there is no thread yet and start one — but
+      // that composer's first message becomes the project brief, not a note about one shot.
+      expect(directorPane()).toHaveAttribute('data-collapsed', 'false');
+      expect(directorComposer()).not.toHaveFocus();
     });
   });
 
@@ -922,25 +997,35 @@ describe('WritePhase', () => {
     expect(screen.queryByText(/credit|session spend|estimated cost/i)).not.toBeInTheDocument();
   });
 
-  it('docks the assistant in the inline right column and keeps the drawer trigger for narrower layouts', () => {
+  /**
+   * D10: the Director is the only writing assistant in Studio.
+   *
+   * Write used to dock a second one — inline at full width, behind an "Ask assistant" opener below
+   * it — offering a subset of what the pane beside it already does. Removed means removed at every
+   * width, opener included; an assistant that only appears in one layout is the same surface hiding.
+   */
+  it('hosts no writing assistant of its own at any width', () => {
     const view = render(<WritePhase controller={controller()} layoutMode='inline' />);
 
-    const assistant = screen.getByRole('complementary', {
-      name: 'conversation.creativeStudio.phase.write.assistantTitle',
-    });
-    expect(assistant).toHaveAttribute('data-assistant-presentation', 'inline');
-    expect(assistant.closest('[data-write-assistant-column]')).toHaveAttribute('data-layout', 'inline');
-    expect(
-      screen.queryByRole('button', { name: 'conversation.creativeStudio.phase.write.askAssistant' })
-    ).not.toBeInTheDocument();
+    for (const mode of ['inline', 'drawer', 'compact'] as const) {
+      view.rerender(<WritePhase controller={controller()} layoutMode={mode} />);
+      const scriptTable = screen.getByRole('region', {
+        name: 'conversation.creativeStudio.phase.write.scriptTableTitle',
+      });
+      // Guards the guard: the phase really did render at this width.
+      expect(scriptTable, mode).toBeVisible();
 
-    view.rerender(<WritePhase controller={controller()} layoutMode='drawer' />);
-    expect(
-      screen.getByRole('button', { name: 'conversation.creativeStudio.phase.write.askAssistant' })
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole('complementary', { name: 'conversation.creativeStudio.phase.write.assistantTitle' })
-    ).not.toBeInTheDocument();
+      // The script is the whole of Write's work area. A sibling here is the shape every version of
+      // the assistant took — the inline card, and the opener button that stood in for it below
+      // 1120px. Asserting only on the rendered drawer would miss the opener entirely, because Arco
+      // does not mount a Drawer until it is first opened.
+      const workspace = scriptTable.parentElement;
+      expect(workspace, mode).not.toBeNull();
+      expect([...workspace!.children], mode).toEqual([scriptTable]);
+      expect(screen.queryByRole('complementary'), mode).not.toBeInTheDocument();
+      expect(document.querySelector('.arco-drawer'), mode).toBeNull();
+      expect(document.querySelector('[data-assistant-presentation]'), mode).toBeNull();
+    }
   });
 
   /**
@@ -967,25 +1052,21 @@ describe('WritePhase', () => {
     expect(screen.queryByText('Five shots, 20 seconds.')).not.toBeInTheDocument();
   });
 
-  it('keeps its own assistant, and no second conversation region, once the Director thread exists', () => {
+  it('adds no second conversation region once the Director thread exists', () => {
     writeConversationHarness.result.state = { kind: 'ready', conversation: directorConversation };
 
     renderInShell(<WritePhase controller={controller()} layoutMode='inline' />);
 
-    expect(
-      screen.getByRole('complementary', { name: 'conversation.creativeStudio.phase.write.assistantTitle' })
-    ).toBeInTheDocument();
+    // Guards the guard: the provider is live and feeding Write a ready conversation.
+    expect(writeConversationHarness.providedProjectIds).toEqual([project.id]);
     // The Director pane already carries this name. A second region under it sends a screen-reader
     // user landmark-hopping into a rail that holds no conversation at all.
     expect(
       screen.queryByRole('complementary', { name: 'conversation.creativeStudio.brief.conversationTitle' })
     ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'conversation.creativeStudio.phase.write.draftStoryboard' })
-    ).toBeInTheDocument();
   });
 
-  it('leaves no stylesheet behind for the conversation rail it no longer renders', () => {
+  it('leaves no stylesheet behind for the surfaces it no longer renders', () => {
     const stylesheet = readFileSync(
       resolve(
         process.cwd(),
@@ -994,9 +1075,11 @@ describe('WritePhase', () => {
       'utf8'
     );
 
-    // Guards the guard: a wrong path would make the assertion below pass on an empty string.
-    expect(stylesheet).toMatch(/^\.assistantSlot\b/m);
+    // Guards the guard: a wrong path would make the assertions below pass on an empty string.
+    expect(stylesheet).toMatch(/^\.workspace\b/m);
     expect(stylesheet).not.toMatch(/^\.conversation(Rail|Surface)\b/m);
+    expect(stylesheet).not.toMatch(/^\.assistantSlot\b/m);
+    expect(stylesheet).not.toMatch(/assistantSlot/);
   });
   it('selects and focuses the requested visual prompt, then clears the route intent', async () => {
     const firstEditor = editor('scene-1');

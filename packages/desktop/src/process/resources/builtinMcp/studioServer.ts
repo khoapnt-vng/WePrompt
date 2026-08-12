@@ -48,13 +48,32 @@ export type ProposeStoryboardInput = {
 
 const SAFE_ID = /^[A-Za-z0-9_-]+$/;
 
-const editableSceneSchema = z
+/**
+ * How long each editable field may be in a proposal this server records.
+ *
+ * These are not the tool's own preference. The proposal is written straight to the pending
+ * directory and validated only when the store reads it back, so a field this schema admits and
+ * `validateProposalScene` (store.ts) refuses is written to disk, reported to the Director as
+ * "recorded for user review", and then dropped on read with nothing but a log line — no proposal
+ * reaches the user and no error reaches the model. Every limit here must therefore be no looser
+ * than the store's. `purpose` was 2048 against a store limit of 256 and lost proposals exactly
+ * that way; since D10 this is the only route to a drafted storyboard, so it lost the only one.
+ */
+export const STUDIO_EDITABLE_SCENE_LIMITS = {
+  title: 256,
+  purpose: 256,
+  visualPrompt: 4096,
+  narration: 4096,
+  onScreenText: 1024,
+} as const;
+
+export const editableSceneSchema = z
   .object({
-    title: z.string().max(256),
-    purpose: z.string().max(2048),
-    visualPrompt: z.string().max(4096),
-    narration: z.string().max(4096),
-    onScreenText: z.string().max(1024),
+    title: z.string().max(STUDIO_EDITABLE_SCENE_LIMITS.title),
+    purpose: z.string().max(STUDIO_EDITABLE_SCENE_LIMITS.purpose),
+    visualPrompt: z.string().max(STUDIO_EDITABLE_SCENE_LIMITS.visualPrompt),
+    narration: z.string().max(STUDIO_EDITABLE_SCENE_LIMITS.narration),
+    onScreenText: z.string().max(STUDIO_EDITABLE_SCENE_LIMITS.onScreenText),
     mediaKind: z.enum(['image', 'video']),
     durationSeconds: z.number().int().min(1).max(60),
     referenceAssetId: z.string().regex(SAFE_ID).nullable(),

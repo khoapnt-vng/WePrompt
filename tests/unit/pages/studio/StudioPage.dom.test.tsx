@@ -665,7 +665,14 @@ describe('StudioPage and useStudioProject', () => {
       expect(observations[0]!.disconnect).toHaveBeenCalledOnce();
     });
 
-    it('keeps assistant focus recoverable while measured width crosses both Drawer thresholds', async () => {
+    /**
+     * D10 removed Write's own writing assistant, so the Director's overlay is the only Drawer the
+     * page may put up. This used to cover the assistant's own focus recovery across the same two
+     * thresholds; what is worth guarding now is that no second assistant surface comes back at any
+     * of the three measured widths, since the whole point of removing it was that the Director is
+     * always beside the work panel already.
+     */
+    it('puts up no assistant surface of its own at any measured width', async () => {
       const opening = scene();
       bridge.getProject.invoke.mockResolvedValue(
         ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
@@ -677,35 +684,26 @@ describe('StudioPage and useStudioProject', () => {
         level: 2,
         name: 'conversation.creativeStudio.phase.write.title',
       });
-      act(() => resize(820));
-      const opener = screen.getByRole('button', {
-        name: 'conversation.creativeStudio.phase.write.askAssistant',
-      });
-      fireEvent.click(opener);
-      const draftAction = await screen.findByRole('button', {
-        name: 'conversation.creativeStudio.phase.write.draftStoryboard',
-      });
-      draftAction.focus();
 
-      act(() => resize(1121));
-      const inlineAssistant = await screen.findByRole('complementary', {
-        name: 'conversation.creativeStudio.phase.write.assistantTitle',
-      });
-      await waitFor(() => expect(inlineAssistant).toHaveFocus());
-
-      act(() => resize(1120));
-      await waitFor(() =>
+      for (const width of [820, 1121, 1120]) {
+        act(() => resize(width));
+        // Guards the guard: the phase really is mounted at this width.
         expect(
-          screen.getByRole('button', { name: 'conversation.creativeStudio.phase.write.askAssistant' })
-        ).toHaveFocus()
-      );
-      // Scoped to the assistant's drawer: the Director pane also renders in an Arco Drawer below
-      // inline width, and that one stays mounted on purpose so a streaming reply survives being
-      // hidden. Counting every .arco-drawer would assert the opposite of what the shell guarantees.
-      const assistantDrawers = [...document.querySelectorAll('.arco-drawer')].filter(
-        (drawer) => drawer.querySelector('[data-studio-director]') === null
-      );
-      expect(assistantDrawers).toHaveLength(0);
+          screen.getByRole('region', { name: 'conversation.creativeStudio.phase.write.scriptTableTitle' }),
+          `${width}px`
+        ).toBeInTheDocument();
+        // Scoped to non-Director drawers: the Director pane renders in an Arco Drawer below inline
+        // width, and that one stays mounted on purpose so a streaming reply survives being hidden.
+        // Counting every .arco-drawer would assert the opposite of what the shell guarantees.
+        const assistantDrawers = [...document.querySelectorAll('.arco-drawer')].filter(
+          (drawer) => drawer.querySelector('[data-studio-director]') === null
+        );
+        expect(assistantDrawers, `${width}px`).toHaveLength(0);
+        expect(
+          screen.queryByRole('complementary', { name: 'conversation.creativeStudio.phase.write.assistantTitle' }),
+          `${width}px`
+        ).not.toBeInTheDocument();
+      }
     });
 
     it('renders only the active phase and keeps project owners mounted across clean phase changes', async () => {

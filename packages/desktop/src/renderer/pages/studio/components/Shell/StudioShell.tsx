@@ -11,6 +11,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
 import { useStudioLayoutMode } from '../PhaseShell/useStudioLayoutMode';
+import { StudioDirectorRevealProvider } from './StudioDirectorRevealContext';
 import { StudioLayoutContext } from './StudioLayoutContext';
 import styles from './StudioShell.module.css';
 import { useStudioPanes } from './useStudioPanes';
@@ -44,7 +45,7 @@ export const StudioShell: React.FC<StudioShellProps> = ({ director, projectId, c
   // ref attached out there is still null when the layout effect first runs, and the mode sticks at
   // its `compact` default forever. The shell's own root always exists whenever the shell renders.
   const { containerRef, layoutMode } = useStudioLayoutMode(projectId);
-  const { directorEffective, setDirectorPreference } = useStudioPanes(layoutMode);
+  const { directorEffective, setDirectorPreference, revealDirectorTransiently } = useStudioPanes(layoutMode);
   const [directorOverlayOpen, setDirectorOverlayOpen] = React.useState(false);
   const overlays = layoutMode !== 'inline';
   const collapsed = directorEffective === 'collapsed';
@@ -125,6 +126,22 @@ export const StudioShell: React.FC<StudioShellProps> = ({ director, projectId, c
     if (active === null || active === document.body || directorHost.contains(active)) toggleRef.current?.focus();
   }, [directorHost, directorShown]);
 
+  /**
+   * Put the Director on screen, whichever way it is currently presented.
+   *
+   * The two presentations are revealed by two different pieces of state, and conflating them is a
+   * real hazard rather than a tidiness point. Neither of them writes the stored preference: this is
+   * reached from a control in the work panel — "Suggest a visual" — which asks to see the Director
+   * now, and is not the user revisiting the collapse they chose from the toggle. Recording it would
+   * overwrite that collapse with a decision they never made, and silently: the pane would simply be
+   * open on every later load. Transience is `useStudioPanes`' job for the inline pane and
+   * `directorOverlayOpen`'s for the overlay; the toggle stays the only thing that persists.
+   */
+  const revealDirector = React.useCallback((): void => {
+    if (overlays) setDirectorOverlayOpen(true);
+    else revealDirectorTransiently();
+  }, [overlays, revealDirectorTransiently]);
+
   const toggle = (
     <Tooltip content={label}>
       <Button
@@ -183,7 +200,7 @@ export const StudioShell: React.FC<StudioShellProps> = ({ director, projectId, c
         )}
         <div className={styles.workPanel} data-studio-work-panel>
           {toggle}
-          {children}
+          <StudioDirectorRevealProvider reveal={revealDirector}>{children}</StudioDirectorRevealProvider>
         </div>
       </div>
     </StudioLayoutContext.Provider>

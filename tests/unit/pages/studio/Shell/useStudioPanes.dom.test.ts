@@ -79,6 +79,65 @@ describe('useStudioPanes', () => {
     expect(result.current.directorEffective).toBe('collapsed');
   });
 
+  /**
+   * A reveal asked for by a work-panel control is the same kind of thing as a width override: it
+   * changes what is on screen right now, not what the user chose. Writing `expanded` here would
+   * destroy a collapse they made deliberately at full width — the very failure the split above
+   * exists to prevent, arriving through the other door.
+   */
+  describe('transient reveal', () => {
+    it('opens a collapsed pane without writing the stored preference', () => {
+      localStorage.setItem(STUDIO_DIRECTOR_COLLAPSED_STORAGE_KEY, '1');
+      const { result } = renderHook(() => useStudioPanes('inline'));
+      expect(result.current.directorEffective).toBe('collapsed');
+
+      act(() => result.current.revealDirectorTransiently());
+
+      expect(result.current.directorEffective).toBe('expanded');
+      expect(result.current.directorPreference).toBe('collapsed');
+      expect(localStorage.getItem(STUDIO_DIRECTOR_COLLAPSED_STORAGE_KEY)).toBe('1');
+    });
+
+    it('leaves the collapse in force on the next load', () => {
+      localStorage.setItem(STUDIO_DIRECTOR_COLLAPSED_STORAGE_KEY, '1');
+      const first = renderHook(() => useStudioPanes('inline'));
+      act(() => first.result.current.revealDirectorTransiently());
+
+      const second = renderHook(() => useStudioPanes('inline'));
+      expect(second.result.current.directorPreference).toBe('collapsed');
+      expect(second.result.current.directorEffective).toBe('collapsed');
+    });
+
+    /**
+     * Width still wins. Below `inline` the pane cannot sit beside the work panel at all, so an
+     * override that opened it there would not reveal anything — it would break the layout. The
+     * shell reveals the overlay instead in that mode.
+     */
+    it('cannot force the pane open below inline width', () => {
+      const { result, rerender } = renderHook(({ mode }) => useStudioPanes(mode), {
+        initialProps: { mode: 'inline' as const },
+      });
+      act(() => result.current.revealDirectorTransiently());
+      expect(result.current.directorEffective).toBe('expanded');
+
+      rerender({ mode: 'drawer' as const });
+
+      expect(result.current.directorEffective).toBe('collapsed');
+    });
+
+    /** The shell's own toggle stays authoritative: an explicit collapse closes a revealed pane. */
+    it('yields to an explicit collapse from the toggle', () => {
+      localStorage.setItem(STUDIO_DIRECTOR_COLLAPSED_STORAGE_KEY, '1');
+      const { result } = renderHook(() => useStudioPanes('inline'));
+      act(() => result.current.revealDirectorTransiently());
+
+      act(() => result.current.setDirectorPreference('collapsed'));
+
+      expect(result.current.directorEffective).toBe('collapsed');
+      expect(localStorage.getItem(STUDIO_DIRECTOR_COLLAPSED_STORAGE_KEY)).toBe('1');
+    });
+  });
+
   it('survives storage that throws', () => {
     const original = Storage.prototype.setItem;
     Storage.prototype.setItem = () => {

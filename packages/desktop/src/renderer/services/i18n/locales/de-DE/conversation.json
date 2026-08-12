@@ -925,11 +925,6 @@
       "write": {
         "title": "Schreiben",
         "continueToProduce": "Weiter",
-        "askAssistant": "Assistenten fragen",
-        "assistantTitle": "Schreibassistent",
-        "assistantDescription": "Erstelle aus deinem Briefing einen Storyboard-Entwurf.",
-        "textChargeDisclosure": "Der Storyboard-Entwurf verwendet dein konfiguriertes Textmodell. Der Anbieter kann die Modellnutzung berechnen.",
-        "draftStoryboard": "Storyboard entwerfen",
         "addShot": "Einstellung hinzufügen",
         "noScenes": "Füge eine Einstellung hinzu oder entwirf ein Storyboard, um zu beginnen.",
         "scriptTableTitle": "Drehbuch",

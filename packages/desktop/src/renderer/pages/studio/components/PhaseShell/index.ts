@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export { AssistantDock, type AssistantDockProps } from './AssistantDock';
 export { StudioPhaseHeader, type StudioPhaseHeaderProps } from './StudioPhaseHeader';
 export { StudioPhaseNav, type StudioPhaseNavProps } from './StudioPhaseNav';
 export { StudioPhaseShell, type StudioPhaseShellProps } from './StudioPhaseShell';

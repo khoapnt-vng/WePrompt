@@ -52,39 +52,15 @@
   white-space: nowrap;
 }
 
+/*
+  One column at every width. It used to reserve a 352px rail for Write's own writing assistant;
+  that assistant is gone (D10) and the Director pane beside the work panel is the only one.
+*/
 .workspace {
-  display: grid;
-  min-width: 0;
-  align-items: start;
-  grid-template-columns: minmax(0, 1fr) 352px;
-  gap: 16px;
-}
-
-.mainColumn {
   display: flex;
   min-width: 0;
   flex-direction: column;
   gap: 16px;
-}
-
-.assistantSlot {
-  position: sticky;
-  top: 16px;
-  width: 352px;
-  min-width: 0;
-}
-
-.workspace[data-layout='drawer'],
-.workspace[data-layout='compact'] {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.workspace[data-layout='drawer'] .assistantSlot,
-.workspace[data-layout='compact'] .assistantSlot {
-  position: static;
-  display: flex;
-  width: auto;
-  justify-content: flex-end;
 }
 
 .scriptTable {
