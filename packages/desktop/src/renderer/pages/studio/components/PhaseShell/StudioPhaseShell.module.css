@@ -8,12 +8,14 @@
   gap: 18px;
 }
 
-/* One 56px row: the breadcrumb on the left, save state and the phase action on the right.
-   The rail is a sibling row below rather than a slot in here. */
+/* One 56px row: document identity on the left, document state and the phase action on the
+   right. The rail is a sibling row below rather than a slot in here. `min-height` rather than
+   `height` so the rename editor's validation message can push the row taller instead of being
+   clipped by it. */
 .header {
   display: flex;
   min-width: 0;
-  height: 56px;
+  min-height: 56px;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
@@ -45,6 +47,29 @@
   font-size: 14.5px;
   font-weight: var(--fw-regular);
   line-height: 1;
+}
+
+/* Title and subtitle stack as one identity block, so the subtitle sits under the name rather
+   than under the crumb that precedes it. */
+.headerIdentity {
+  display: flex;
+  overflow: hidden;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* What the document contains, in the reference's "62 pages" position: quieter than the title,
+   and never the thing the eye lands on first. */
+.projectSubtitle {
+  composes: meta from '../../StudioTypography.module.css';
+  overflow: hidden;
+  margin: 0;
+  padding-inline-start: 4px;
+  color: var(--color-text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .projectTitle {
@@ -137,6 +162,32 @@
   border-color: var(--color-border-2);
   background: var(--color-fill-2);
   color: var(--text-secondary);
+}
+
+/* The document's in-flight work. Empty by design when nothing is running, so it must collapse
+   to nothing rather than reserve a gap in the row. */
+.activity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.activity:empty {
+  display: none;
+}
+
+.activityItem {
+  composes: meta from '../../StudioTypography.module.css';
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.activitySeparator {
+  color: var(--color-text-3);
+  font-family: var(--font-body);
+  font-size: 12px;
+  line-height: 1;
 }
 
 .headerActions {

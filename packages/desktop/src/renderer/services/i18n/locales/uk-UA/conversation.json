@@ -906,7 +906,20 @@
         "backToLibrary": "Повернутися до бібліотеки проєктів",
         "noMediaGeneration": "На цьому етапі зображення та відео не створюються.",
         "renameProject": "Перейменувати проєкт",
-        "invalidProjectName": "Введіть назву проєкту."
+        "invalidProjectName": "Введіть назву проєкту.",
+        "documentSummary": "{{count}} кадрів · {{seconds}} с",
+        "documentSummary_one": "{{count}} кадр · {{seconds}} с",
+        "documentSummary_few": "{{count}} кадри · {{seconds}} с",
+        "documentSummary_many": "{{count}} кадрів · {{seconds}} с",
+        "documentSummary_other": "{{count}} кадру · {{seconds}} с",
+        "documentSummaryEmpty": "Кадрів ще немає",
+        "activityLabel": "Активність проєкту",
+        "activityGenerating": "{{count}} завдань генеруються",
+        "activityGenerating_one": "{{count}} завдання генерується",
+        "activityGenerating_few": "{{count}} завдання генеруються",
+        "activityGenerating_many": "{{count}} завдань генеруються",
+        "activityGenerating_other": "{{count}} завдання генеруються",
+        "activityRendering": "Збирання… {{percent}}%"
       },
       "brief": {
         "title": "Бриф",
@@ -916,9 +929,6 @@
         "durationLabel": "Цільова тривалість",
         "aspectRatioLabel": "Співвідношення сторін",
         "startWriting": "Почати сценарій",
-        "saved": "Усі зміни брифа збережено.",
-        "saving": "Зміни брифа зберігаються...",
-        "unsaved": "Зміни брифа ще не збережено.",
         "invalidName": "Введіть назву проєкту, перш ніж продовжити.",
         "aspectLocked": "Співвідношення сторін заблоковано",
         "aspectLockedHelp": "Після додавання створених матеріалів співвідношення сторін змінити не можна."

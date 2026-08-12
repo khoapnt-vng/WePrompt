@@ -36,6 +36,7 @@ import { StudioShell } from '@renderer/pages/studio/components/Shell/StudioShell
 import type { UseStoryboardEditorResult } from '@renderer/pages/studio/hooks/useStoryboardEditor';
 import type { UseStudioJobsResult } from '@renderer/pages/studio/hooks/useStudioJobs';
 import type { UseStudioModelsResult } from '@renderer/pages/studio/hooks/useStudioModels';
+import type { UseStudioRenderResult } from '@renderer/pages/studio/hooks/useStudioRender';
 import conversation from '@renderer/services/i18n/locales/en-US/conversation.json';
 
 // jsdom measures every element at 0 width, so the shell would pick `compact` and park the Director
@@ -62,7 +63,9 @@ const studioSpecSelectors = (): string[] => {
   return [...new Set(found)];
 };
 
-const SAVE_STATE_ROLE = 'status';
+// The header carries two live regions now — the save chip and the document activity indicator —
+// so the spec addresses the chip by its own hook rather than by `[role="status"]`.
+const SAVE_STATE_HOOK = 'data-studio-save-state';
 const ADVISORY_ROLE = 'alert';
 
 // The copy the spec asserts on, in the spec's own words.
@@ -162,6 +165,20 @@ const jobs: UseStudioJobsResult = {
   retryDownload: vi.fn(async () => true),
 };
 
+const renderState: UseStudioRenderResult = {
+  status: 'idle',
+  progress: 0,
+  clipIndex: null,
+  clipTotal: null,
+  assetId: null,
+  missingSceneIds: null,
+  errorCode: null,
+  errorMessageKey: null,
+  busy: false,
+  render: vi.fn(async () => undefined),
+  cancel: vi.fn(async () => undefined),
+};
+
 const controller = (advisory: StudioPhaseAdvisory | null): StudioPhaseControllers => ({
   project,
   proposals: [],
@@ -175,6 +192,7 @@ const controller = (advisory: StudioPhaseAdvisory | null): StudioPhaseController
   editor,
   models,
   jobs,
+  render: renderState,
   selectedAsset: null,
   posterAsset: null,
   selectedReferenceAsset: null,
@@ -204,7 +222,7 @@ const controller = (advisory: StudioPhaseAdvisory | null): StudioPhaseController
 const DirectorDecoy: React.FC = () => (
   <div data-testid='director-decoy'>
     <header>
-      <span role={SAVE_STATE_ROLE}>director status</span>
+      <span role='status'>director status</span>
     </header>
     <span role={ADVISORY_ROLE}>director alert</span>
   </div>
@@ -246,6 +264,12 @@ const specSelectorFor = (role: string): string => {
   return selector;
 };
 
+const specSelectorWith = (attribute: string): string => {
+  const selector = studioSpecSelectors().find((candidate) => candidate.includes(`[${attribute}]`));
+  if (selector === undefined) throw new Error(`the e2e spec no longer addresses a [${attribute}] element`);
+  return selector;
+};
+
 describe('creative-studio e2e selectors', () => {
   it('reads the layout selectors the spec actually uses', () => {
     // Guards the extraction itself: if the regex stops finding the spec's locators, every
@@ -264,10 +288,24 @@ describe('creative-studio e2e selectors', () => {
   it('lands the save-state selector on the project save state and not on the Director pane', async () => {
     const { getByTestId } = await renderStudio(shellAdvisory);
 
-    const saveState = document.querySelector(specSelectorFor(SAVE_STATE_ROLE));
+    const saveState = document.querySelector(specSelectorWith(SAVE_STATE_HOOK));
 
     expect(saveState).toHaveTextContent(SAVED_TEXT);
     expect(getByTestId('director-decoy')).not.toContainElement(saveState as HTMLElement);
+  });
+
+  /**
+   * The header gained a second live region. `header [role="status"]` — what the spec used to
+   * say — now matches the activity indicator too, so the spec would assert 'Saved' against two
+   * elements. This pins the reason the selector was narrowed.
+   */
+  it('keeps the activity indicator out of the save-state selector', async () => {
+    await renderStudio(shellAdvisory);
+
+    const header = document.querySelector('[data-studio-work-panel] > div > header');
+    expect(header?.querySelectorAll('[role="status"]').length).toBeGreaterThan(1);
+    expect(header?.querySelectorAll(`[${SAVE_STATE_HOOK}]`)).toHaveLength(1);
+    expect(document.querySelectorAll('[data-studio-document-activity]')).toHaveLength(1);
   });
 
   it('lands the advisory selector on the shell advisory and not on the Director pane', async () => {

@@ -401,8 +401,12 @@ test.describe('Creative Studio workspace', () => {
       // `data-studio-layout-root` is StudioShell's root now, and the phase shell hangs two levels
       // below it: work panel > phase shell > header. The chain stays direct-child on purpose — the
       // phases render headers and save-state regions of their own (a scene row, the script table),
-      // and only the project's save state belongs to this assertion.
-      await expect(page.locator('[data-studio-work-panel] > div > header [role="status"]')).toHaveText('Saved');
+      // and only the project's save state belongs to this assertion. The header itself now holds a
+      // second live region (the document activity indicator), so the chip is addressed by its own
+      // hook rather than by `[role="status"]`.
+      await expect(page.locator('[data-studio-work-panel] > div > header [data-studio-save-state]')).toHaveText(
+        'Saved'
+      );
       // A project adopts a route only when exactly one compatible engine exists, so the
       // fake catalog's single video model is adopted while its two image models are not.
       const snapshot = await readCanonicalStudioSnapshot(page, projectId);
@@ -493,7 +497,9 @@ test.describe('Creative Studio workspace', () => {
       await visual.blur();
 
       await expect(shotRow.locator('[role="status"][data-state="saved"]')).toHaveText('Scene saved');
-      await expect(page.locator('[data-studio-work-panel] > div > header [role="status"]')).toHaveText('Saved');
+      await expect(page.locator('[data-studio-work-panel] > div > header [data-studio-save-state]')).toHaveText(
+        'Saved'
+      );
       // The pacing bar is gone; the off-target warning now lives in the shell advisory slot.
       // Scoped to the work panel: the Director pane renders alerts of its own and sits ahead of
       // the phase shell in document order.

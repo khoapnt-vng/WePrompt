@@ -904,7 +904,16 @@
         "backToLibrary": "بازگشت به کتابخانه پروژه‌ها",
         "noMediaGeneration": "در این مرحله تصویر یا ویدیو تولید نمی‌شود.",
         "renameProject": "تغییر نام پروژه",
-        "invalidProjectName": "نام پروژه را وارد کنید."
+        "invalidProjectName": "نام پروژه را وارد کنید.",
+        "documentSummary": "{{count}} نما · {{seconds}} ثانیه",
+        "documentSummary_one": "{{count}} نما · {{seconds}} ثانیه",
+        "documentSummary_other": "{{count}} نما · {{seconds}} ثانیه",
+        "documentSummaryEmpty": "هنوز نمایی وجود ندارد",
+        "activityLabel": "فعالیت پروژه",
+        "activityGenerating": "{{count}} در حال تولید",
+        "activityGenerating_one": "{{count}} در حال تولید",
+        "activityGenerating_other": "{{count}} در حال تولید",
+        "activityRendering": "در حال رندر {{percent}}٪"
       },
       "brief": {
         "title": "خلاصه",
@@ -914,9 +923,6 @@
         "durationLabel": "زمان هدف",
         "aspectRatioLabel": "نسبت تصویر",
         "startWriting": "شروع نگارش",
-        "saved": "همه تغییرات خلاصه ذخیره شده‌اند.",
-        "saving": "در حال ذخیره تغییرات خلاصه...",
-        "unsaved": "تغییرات خلاصه هنوز ذخیره نشده‌اند.",
         "invalidName": "پیش از ادامه، نام پروژه را وارد کنید.",
         "aspectLocked": "نسبت تصویر قفل است",
         "aspectLockedHelp": "پس از افزودن رسانه تولیدشده، نسبت تصویر قابل تغییر نیست."

@@ -911,7 +911,18 @@
         "backToLibrary": "Voltar à biblioteca de projetos",
         "noMediaGeneration": "Esta etapa não gera imagens nem vídeos.",
         "renameProject": "Renomear projeto",
-        "invalidProjectName": "Informe um nome de projeto."
+        "invalidProjectName": "Informe um nome de projeto.",
+        "documentSummary": "{{count}} planos · {{seconds}}s",
+        "documentSummary_one": "{{count}} plano · {{seconds}}s",
+        "documentSummary_many": "{{count}} planos · {{seconds}}s",
+        "documentSummary_other": "{{count}} planos · {{seconds}}s",
+        "documentSummaryEmpty": "Nenhum plano ainda",
+        "activityLabel": "Atividade do projeto",
+        "activityGenerating": "{{count}} em geração",
+        "activityGenerating_one": "{{count}} em geração",
+        "activityGenerating_many": "{{count}} em geração",
+        "activityGenerating_other": "{{count}} em geração",
+        "activityRendering": "Renderizando {{percent}}%"
       },
       "brief": {
         "title": "Briefing",
@@ -921,9 +932,6 @@
         "durationLabel": "Duração desejada",
         "aspectRatioLabel": "Proporção",
         "startWriting": "Começar a escrever",
-        "saved": "Todas as alterações do briefing foram salvas.",
-        "saving": "Salvando alterações do briefing...",
-        "unsaved": "As alterações do briefing ainda não foram salvas.",
         "invalidName": "Informe um nome de projeto antes de continuar.",
         "aspectLocked": "A proporção está bloqueada",
         "aspectLockedHelp": "A proporção não pode ser alterada depois que uma mídia gerada for adicionada."
