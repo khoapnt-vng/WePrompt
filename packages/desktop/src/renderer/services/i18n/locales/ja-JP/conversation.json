@@ -1233,6 +1233,7 @@
       "excludedNoneReady": "リクエストされたシーンは、いずれも参照画像を生成できる状態ではありません：",
       "discardExcludedRequests": "これらのリクエストを破棄",
       "excludedUnavailable": "シーンは利用できなくなりました",
+      "excludedPromptUnusable": "シーンのビジュアルプロンプトでは参照画像を記述できません",
       "dismissFailed": "リクエストキューを更新できませんでした。レビューは閉じられました。後でもう一度お試しください。"
     },
     "review": {

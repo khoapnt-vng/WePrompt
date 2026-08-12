@@ -1250,6 +1250,7 @@
       "excludedNoneReady": "Ninguna de las escenas solicitadas está lista para generar una referencia:",
       "discardExcludedRequests": "Descartar estas solicitudes",
       "excludedUnavailable": "La escena ya no está disponible",
+      "excludedPromptUnusable": "El prompt visual de la escena no puede describir una imagen de referencia",
       "dismissFailed": "No se pudo actualizar la cola de solicitudes. La revisión se cerró; inténtalo de nuevo más tarde."
     },
     "review": {

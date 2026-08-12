@@ -669,6 +669,13 @@ export type StudioSceneGenerationChoice = {
 
 export type StudioGenerationSubmitMode = 'single' | 'batch';
 
+/** The picture one scene's reference plate should paint. A plate is that scene's first frame, so
+ *  the prompt is per scene: a batch-wide prompt would paint every scene the same. */
+export type StudioSceneReferencePrompt = {
+  sceneId: string;
+  prompt: string;
+};
+
 export type StudioSubmitScenesRequest = StudioProjectRequest & {
   mode: StudioGenerationSubmitMode;
   sceneIds: string[];
@@ -677,8 +684,8 @@ export type StudioSubmitScenesRequest = StudioProjectRequest & {
   catalogVersion: string;
   /** Absent means 'take'. Batch submissions may request 'reference' across multiple scenes, same as single mode. */
   outputRole?: StudioOutputRole;
-  /** Only meaningful alongside outputRole: 'reference'. */
-  referencePrompt?: string;
+  /** Required by, and only valid with, outputRole: 'reference' — exactly one entry per submitted scene. */
+  referencePrompts?: StudioSceneReferencePrompt[];
 };
 
 export type StudioFitStoryboardRequest = StudioProjectRequest & {

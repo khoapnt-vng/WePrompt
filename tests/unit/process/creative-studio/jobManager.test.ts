@@ -1748,7 +1748,7 @@ describe('StudioJobManager reference output routing', () => {
       routes: [imageRoute],
       catalogVersion: 'catalog_1',
       outputRole: 'reference',
-      referencePrompt: '  A calm establishing plate  ',
+      referencePrompts: [{ sceneId: 'scene_1', prompt: '  A calm establishing plate  ' }],
     });
 
     expect(job).toMatchObject({ id: 'job_1', outputRole: 'reference', provider: selectionFor(imageRoute) });
@@ -1764,6 +1764,42 @@ describe('StudioJobManager reference output routing', () => {
         error: { code: 'no_output' },
       })
     );
+  });
+
+  it('paints each scene in a reference batch with that scene own prompt', async () => {
+    // A reference plate is one scene's first frame. A batch that carried a single prompt could
+    // only ever describe one of its scenes, so the prompt each provider call receives has to be
+    // the one submitted for that scene - not the first, and not a shared one.
+    const submit = vi.fn(async () => ({ kind: 'complete', outputs: [] }));
+    const scenes = [
+      scene({ id: 'scene_1', mediaKind: 'video', durationSeconds: 8, visualPrompt: 'video_prompt' }),
+      scene({ id: 'scene_2', mediaKind: 'video', durationSeconds: 8, visualPrompt: 'video_prompt' }),
+    ];
+    const harness = await createReferenceHarness(submit, {
+      scenes,
+      routes: [imageRoute, videoRoute],
+      jobIds: ['job_1', 'job_2'],
+      idempotencyKeys: ['key_1', 'key_2'],
+    });
+
+    await harness.manager.submitScenes({
+      projectId: harness.project.id,
+      expectedRevision: harness.project.revision,
+      sceneIds: ['scene_1', 'scene_2'],
+      routes: [imageRoute, { ...imageRoute, sceneId: 'scene_2' }],
+      catalogVersion: 'catalog_1',
+      outputRole: 'reference',
+      referencePrompts: [
+        { sceneId: 'scene_1', prompt: 'A calm establishing plate' },
+        { sceneId: 'scene_2', prompt: 'A rain-slicked alley at dusk' },
+      ],
+    });
+
+    await waitFor(() => expect(submit).toHaveBeenCalledTimes(2));
+    expect(submit.mock.calls.map((call) => (call[0] as { prompt: string }).prompt)).toEqual([
+      'A calm establishing plate',
+      'A rain-slicked alley at dusk',
+    ]);
   });
 
   it('a take job still requires the route kind to match the scene', async () => {
@@ -1813,7 +1849,7 @@ describe('StudioJobManager reference output routing', () => {
         routes: [imageRoute],
         catalogVersion: 'catalog_1',
         outputRole: 'reference',
-        referencePrompt: 'A calm establishing plate',
+        referencePrompts: [{ sceneId: 'scene_1', prompt: 'A calm establishing plate' }],
       })
     ).resolves.toMatchObject([{ id: 'job_1', outputRole: 'reference' }]);
 
@@ -1829,9 +1865,10 @@ describe('StudioJobManager reference output routing', () => {
   });
 
   it.each([
-    { label: 'absent', referencePrompt: undefined },
-    { label: 'blank', referencePrompt: '   ' },
-  ])('a reference job with a $label referencePrompt is rejected', async ({ referencePrompt }) => {
+    { label: 'absent', referencePrompts: undefined },
+    { label: 'blank', referencePrompts: [{ sceneId: 'scene_1', prompt: '   ' }] },
+    { label: 'other-scene', referencePrompts: [{ sceneId: 'scene_2', prompt: 'A calm establishing plate' }] },
+  ])('a reference job with a $label referencePrompt is rejected', async ({ referencePrompts }) => {
     const submit = vi.fn();
     const listGenerationRoutes = vi.fn(async () => catalog([imageRoute, videoRoute]));
     const harness = await createReferenceHarness(submit, { catalog: listGenerationRoutes });
@@ -1844,7 +1881,7 @@ describe('StudioJobManager reference output routing', () => {
         routes: [imageRoute],
         catalogVersion: 'stale_catalog',
         outputRole: 'reference',
-        ...(referencePrompt === undefined ? {} : { referencePrompt }),
+        ...(referencePrompts === undefined ? {} : { referencePrompts }),
       })
     ).rejects.toMatchObject({ code: 'invalid_request' });
 
@@ -1866,7 +1903,7 @@ describe('StudioJobManager reference output routing', () => {
         routes: [imageRoute],
         catalogVersion: 'catalog_1',
         outputRole: 'reference',
-        referencePrompt,
+        referencePrompts: [{ sceneId: 'scene_1', prompt: referencePrompt }],
       })
     ).resolves.toMatchObject([{ id: 'job_1', outputRole: 'reference' }]);
 
@@ -1902,7 +1939,7 @@ describe('StudioJobManager reference output routing', () => {
         routes: [imageRoute],
         catalogVersion: 'catalog_1',
         outputRole: 'reference',
-        referencePrompt: 'A calm establishing plate',
+        referencePrompts: [{ sceneId: 'scene_1', prompt: 'A calm establishing plate' }],
       })
     ).rejects.toMatchObject({ code: 'busy' });
 
@@ -1917,7 +1954,7 @@ describe('StudioJobManager reference output routing', () => {
         routes: [imageRoute],
         catalogVersion: 'catalog_1',
         outputRole: 'reference',
-        referencePrompt: 'A calm establishing plate',
+        referencePrompts: [{ sceneId: 'scene_1', prompt: 'A calm establishing plate' }],
       })
     ).rejects.toMatchObject({ code: 'duplicate_charge_acknowledgement_required' });
 
@@ -2024,7 +2061,10 @@ describe('StudioJobManager scheduling', () => {
       routes,
       catalogVersion: 'catalog_1',
       outputRole: 'reference',
-      referencePrompt: 'A shared reference plate',
+      referencePrompts: scenes.map((candidate) => ({
+        sceneId: candidate.id,
+        prompt: `A reference plate for ${candidate.id}`,
+      })),
     });
 
     await waitFor(() => expect(gates).toHaveLength(2));

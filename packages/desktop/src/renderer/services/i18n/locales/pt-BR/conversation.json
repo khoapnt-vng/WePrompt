@@ -1255,6 +1255,7 @@
       "excludedNoneReady": "Nenhuma das cenas solicitadas está pronta para gerar uma referência:",
       "discardExcludedRequests": "Descartar estas solicitações",
       "excludedUnavailable": "A cena não está mais disponível",
+      "excludedPromptUnusable": "O prompt visual da cena não pode descrever uma imagem de referência",
       "dismissFailed": "Não foi possível atualizar a fila de solicitações. A revisão foi fechada; tente novamente mais tarde."
     },
     "review": {

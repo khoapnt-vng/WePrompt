@@ -1076,6 +1076,7 @@
       "excludedNoneReady": "None of the requested scenes are ready for reference generation:",
       "discardExcludedRequests": "Discard these requests",
       "excludedUnavailable": "Scene is no longer available",
+      "excludedPromptUnusable": "Scene's visual prompt cannot describe a reference image",
       "dismissFailed": "The request queue could not be updated. The review was closed; try again later."
     },
     "review": {

@@ -291,7 +291,7 @@ describe('useStudioJobs', () => {
           catalogVersion: 'catalog-1',
           expectedRevision: 2,
           outputRole: 'reference',
-          referencePrompt: 'Edited first-frame prompt',
+          referencePrompts: [{ sceneId: 'scene-1', prompt: 'Edited first-frame prompt' }],
         })
       ).toBe(true);
     });
@@ -304,7 +304,7 @@ describe('useStudioJobs', () => {
       routes: [{ ...route, kind: 'image', choiceId: 'choice_image' }],
       catalogVersion: 'catalog-1',
       outputRole: 'reference',
-      referencePrompt: 'Edited first-frame prompt',
+      referencePrompts: [{ sceneId: 'scene-1', prompt: 'Edited first-frame prompt' }],
     });
   });
 
@@ -353,7 +353,7 @@ describe('useStudioJobs', () => {
 
     const payload = bridge.submitScenes.invoke.mock.calls[0]?.[0];
     expect(payload).not.toHaveProperty('outputRole');
-    expect(payload).not.toHaveProperty('referencePrompt');
+    expect(payload).not.toHaveProperty('referencePrompts');
   });
 
   it('serializes concurrently requested mutations before reading each canonical revision', async () => {

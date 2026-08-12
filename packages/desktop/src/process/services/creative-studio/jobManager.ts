@@ -1203,8 +1203,25 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     if (disposed) throw new StudioJobManagerError('invalid_request');
     const project = await requireExpectedProject(input.projectId, input.expectedRevision);
     if (disposed) throw new StudioJobManagerError('invalid_request');
-    const referencePrompt =
-      typeof input.referencePrompt === 'string' ? input.referencePrompt.trim() : input.referencePrompt;
+    const outputRole = input.outputRole ?? 'take';
+    // A reference plate paints one scene's first frame, so each scene brings its own prompt. A
+    // batch-wide prompt could only ever describe one of them correctly.
+    const referencePromptByScene = new Map<string, string>();
+    if (input.referencePrompts !== undefined) {
+      if (!Array.isArray(input.referencePrompts)) invalidRequest();
+      for (const entry of input.referencePrompts) {
+        if (
+          typeof entry?.sceneId !== 'string' ||
+          typeof entry.prompt !== 'string' ||
+          referencePromptByScene.has(entry.sceneId)
+        ) {
+          invalidRequest();
+        }
+        const prompt = entry.prompt.trim();
+        if (prompt.length === 0 || prompt.length > STUDIO_REFERENCE_PROMPT_MAX_LENGTH) invalidRequest();
+        referencePromptByScene.set(entry.sceneId, prompt);
+      }
+    }
     if (
       !Array.isArray(input.sceneIds) ||
       input.sceneIds.length < 1 ||
@@ -1217,18 +1234,13 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       input.catalogVersion.length < 1 ||
       input.catalogVersion.length > 256 ||
       (input.outputRole !== undefined && input.outputRole !== 'take' && input.outputRole !== 'reference') ||
-      (input.outputRole === 'reference' && (typeof referencePrompt !== 'string' || referencePrompt.length === 0)) ||
-      (referencePrompt !== undefined &&
-        (typeof referencePrompt !== 'string' ||
-          referencePrompt.length > STUDIO_REFERENCE_PROMPT_MAX_LENGTH ||
-          input.outputRole !== 'reference'))
+      (outputRole === 'reference' &&
+        (referencePromptByScene.size !== input.sceneIds.length ||
+          input.sceneIds.some((sceneId) => !referencePromptByScene.has(sceneId)))) ||
+      (outputRole !== 'reference' && referencePromptByScene.size > 0)
     ) {
       invalidRequest();
     }
-    const requestedOutput: RequestedOutput = {
-      role: input.outputRole ?? 'take',
-      ...(referencePrompt === undefined ? {} : { referencePrompt }),
-    };
     const routeByScene = new Map<string, StudioResolvedSceneRouteSnapshot>();
     for (const route of input.routes) {
       if (
@@ -1248,6 +1260,11 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       if (!route) invalidRequest();
       const scene = project.scenes[sceneId];
       if (!scene) throw new StudioJobManagerError('invalid_route');
+      const scenePrompt = referencePromptByScene.get(sceneId);
+      const requestedOutput: RequestedOutput = {
+        role: outputRole,
+        ...(scenePrompt === undefined ? {} : { referencePrompt: scenePrompt }),
+      };
       const selected = project.routing[requestedMediaKind(scene.mediaKind, requestedOutput.role)];
       if (
         selected === null ||

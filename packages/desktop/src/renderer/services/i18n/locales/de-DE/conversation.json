@@ -1242,6 +1242,7 @@
       "excludedNoneReady": "Keine der angeforderten Szenen ist für die Referenzgenerierung bereit:",
       "discardExcludedRequests": "Diese Anfragen verwerfen",
       "excludedUnavailable": "Die Szene ist nicht mehr verfügbar",
+      "excludedPromptUnusable": "Der visuelle Prompt der Szene kann kein Referenzbild beschreiben",
       "dismissFailed": "Die Anforderungswarteschlange konnte nicht aktualisiert werden. Die Prüfung wurde geschlossen; versuchen Sie es später erneut."
     },
     "review": {

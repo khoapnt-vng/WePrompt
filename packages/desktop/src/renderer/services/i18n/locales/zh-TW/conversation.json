@@ -1233,6 +1233,7 @@
       "excludedNoneReady": "要求的場景均未準備好產生參考圖：",
       "discardExcludedRequests": "捨棄這些要求",
       "excludedUnavailable": "場景已無法使用",
+      "excludedPromptUnusable": "該場景的畫面提示詞無法描述參考圖",
       "dismissFailed": "無法更新要求佇列。審核視窗已關閉，請稍後再試。"
     },
     "review": {

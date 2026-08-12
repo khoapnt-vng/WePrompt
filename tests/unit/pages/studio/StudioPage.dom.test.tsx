@@ -22,6 +22,7 @@ import type {
   StudioScene,
 } from '@/common/types/project/creativeStudioTypes';
 import StudioPage from '@renderer/pages/studio/StudioPage';
+import { buildFirstFramePrompt } from '@renderer/pages/studio/components/Generation/referencePrompt';
 import { useStudioProject } from '@renderer/pages/studio/hooks';
 import {
   defaultStudioPhase,
@@ -1285,6 +1286,76 @@ describe('StudioPage and useStudioProject', () => {
     expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
   });
 
+  it('surfaces a queued request whose scene cannot describe a reference image instead of spending on it', async () => {
+    // `ready` only asks for a non-empty visual prompt, and a visual prompt may be twice as long as
+    // a reference prompt. Main refuses such a submission, so submitting would dismiss the request
+    // and then lose it with nothing on screen.
+    const unusable = scene({ id: 'scene-1', visualPrompt: 'A '.repeat(3 * 1024) });
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(project('project-1', { sceneOrder: [unusable.id], scenes: { [unusable.id]: unusable } }))
+    );
+    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([referenceRequest(unusable.id, 1)]));
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
+
+    renderRoute();
+
+    const notice = await screen.findByTestId('reference-exclusion-notice');
+    expect(within(notice).getByText(unusable.title)).toBeVisible();
+    expect(within(notice).getByText(/conversation\.creativeStudio\.reference\.excludedPromptUnusable/)).toBeVisible();
+    // Nothing was paid for, and the request is still on disk for the discard action to consume.
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+    expect(bridge.dismissReferenceRequests.invoke).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      within(notice).getByRole('button', { name: 'conversation.creativeStudio.reference.discardExcludedRequests' })
+    );
+    await waitFor(() =>
+      expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: 'project-1',
+        requestIds: ['reference_request_1'],
+      })
+    );
+  });
+
+  it('describes each auto-submitted reference scene with its own visual prompt', async () => {
+    // A reference plate is the scene's *first frame*, so one prompt shared across the batch would
+    // paint every scene with the same picture. The batch carries one prompt per scene or it is
+    // not a batch of references at all.
+    const first = scene({ id: 'scene-1', mediaKind: 'video', visualPrompt: 'A bright studio' });
+    const second = scene({
+      id: 'scene-2',
+      title: 'Closing',
+      mediaKind: 'video',
+      visualPrompt: 'A rain-slicked alley at dusk',
+    });
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(
+        project('project-1', {
+          sceneOrder: [first.id, second.id],
+          scenes: { [first.id]: first, [second.id]: second },
+        })
+      )
+    );
+    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(
+      ok([referenceRequest(first.id, 1), referenceRequest(second.id, 2)])
+    );
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
+
+    renderRoute();
+
+    await waitFor(() =>
+      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          outputRole: 'reference',
+          referencePrompts: [
+            { sceneId: first.id, prompt: buildFirstFramePrompt('A bright studio', '16:9') },
+            { sceneId: second.id, prompt: buildFirstFramePrompt('A rain-slicked alley at dusk', '16:9') },
+          ],
+        })
+      )
+    );
+  });
+
   it('auto-submits queued assistant requests as one batch with no confirmation step', async () => {
     const first = scene({ id: 'scene-1', mediaKind: 'video' });
     const second = scene({ id: 'scene-2', title: 'Closing', mediaKind: 'video' });
@@ -1315,6 +1386,10 @@ describe('StudioPage and useStudioProject', () => {
         ],
         catalogVersion: 'catalog-1',
         outputRole: 'reference',
+        referencePrompts: [
+          { sceneId: first.id, prompt: buildFirstFramePrompt(first.visualPrompt, '16:9') },
+          { sceneId: second.id, prompt: buildFirstFramePrompt(second.visualPrompt, '16:9') },
+        ],
       })
     );
     expect(screen.queryByRole('dialog', { name: 'conversation.creativeStudio.review.title' })).not.toBeInTheDocument();
@@ -1349,6 +1424,10 @@ describe('StudioPage and useStudioProject', () => {
         ],
         catalogVersion: 'catalog-1',
         outputRole: 'reference',
+        referencePrompts: [
+          { sceneId: first.id, prompt: buildFirstFramePrompt(first.visualPrompt, '16:9') },
+          { sceneId: second.id, prompt: buildFirstFramePrompt(second.visualPrompt, '16:9') },
+        ],
       })
     );
     await waitFor(() =>
@@ -1497,6 +1576,7 @@ describe('StudioPage and useStudioProject', () => {
         routes: [{ sceneId: ready.id, choiceId: 'choice_image', kind: 'image' }],
         catalogVersion: 'catalog-1',
         outputRole: 'reference',
+        referencePrompts: [{ sceneId: ready.id, prompt: buildFirstFramePrompt(ready.visualPrompt, '16:9') }],
       })
     );
     await waitFor(() =>
@@ -1698,7 +1778,7 @@ describe('StudioPage and useStudioProject', () => {
         routes: [{ sceneId: 'scene-1', choiceId: 'choice_image', kind: 'image' }],
         catalogVersion: 'catalog-1',
         outputRole: 'reference',
-        referencePrompt: 'Edited reference-only prompt',
+        referencePrompts: [{ sceneId: 'scene-1', prompt: 'Edited reference-only prompt' }],
       })
     );
   });
@@ -2631,7 +2711,7 @@ describe('StudioPage and useStudioProject', () => {
         routes: [{ sceneId: 'scene-1', choiceId: 'choice_image_new', kind: 'image' }],
         catalogVersion: 'catalog-2',
         outputRole: 'reference',
-        referencePrompt: 'Preserved edited reference prompt',
+        referencePrompts: [{ sceneId: 'scene-1', prompt: 'Preserved edited reference prompt' }],
       })
     );
   });

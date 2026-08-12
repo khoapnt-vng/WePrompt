@@ -1946,7 +1946,9 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
           // Forwarded explicitly: submitScenes is assembled field by field and both fields are
           // optional on an Omit-derived type, so dropping them would never fail the typecheck.
           ...(input.outputRole === undefined ? {} : { outputRole: input.outputRole }),
-          ...(input.referencePrompt === undefined ? {} : { referencePrompt: input.referencePrompt }),
+          ...(input.referencePrompts === undefined
+            ? {}
+            : { referencePrompts: input.referencePrompts.map((entry) => ({ ...entry })) }),
         })
       ).map(toRendererJob);
     },

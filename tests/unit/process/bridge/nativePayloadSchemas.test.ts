@@ -1381,7 +1381,24 @@ const INVALID_PAYLOADS = [
   [
     'creative-studio.submit-scenes',
     'reference prompt without a reference output role',
-    { ...VALID_PAYLOADS['creative-studio.submit-scenes'], referencePrompt: 'A close-up of the product label' },
+    {
+      ...VALID_PAYLOADS['creative-studio.submit-scenes'],
+      referencePrompts: [{ sceneId: 'scene_1', prompt: 'A close-up of the product label' }],
+    },
+  ],
+  [
+    'creative-studio.submit-scenes',
+    'reference output role with no prompt to paint',
+    { ...VALID_PAYLOADS['creative-studio.submit-scenes'], outputRole: 'reference' },
+  ],
+  [
+    'creative-studio.submit-scenes',
+    'reference prompt naming a scene outside the submission',
+    {
+      ...VALID_PAYLOADS['creative-studio.submit-scenes'],
+      outputRole: 'reference',
+      referencePrompts: [{ sceneId: 'scene_2', prompt: 'A close-up of the product label' }],
+    },
   ],
   [
     'creative-studio.submit-scenes',
@@ -1565,7 +1582,7 @@ describe('native bridge payload schemas', () => {
     const payload = {
       ...VALID_PAYLOADS['creative-studio.submit-scenes'],
       outputRole: 'reference',
-      referencePrompt: 'A close-up of the product label',
+      referencePrompts: [{ sceneId: 'scene_1', prompt: 'A close-up of the product label' }],
     };
 
     expect(parseNativeBridgePayload('creative-studio.submit-scenes', payload)).toEqual(payload);
@@ -1580,6 +1597,10 @@ describe('native bridge payload schemas', () => {
       routes: [
         ...VALID_PAYLOADS['creative-studio.submit-scenes'].routes,
         { sceneId: 'scene_2', choiceId: 'binding_2', kind: 'video' },
+      ],
+      referencePrompts: [
+        { sceneId: 'scene_1', prompt: 'A close-up of the product label' },
+        { sceneId: 'scene_2', prompt: 'A wide shot of the empty workshop' },
       ],
     };
 

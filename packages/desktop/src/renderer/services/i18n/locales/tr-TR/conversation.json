@@ -1243,6 +1243,7 @@
       "excludedNoneReady": "İstenen sahnelerin hiçbiri referans oluşturmaya hazır değil:",
       "discardExcludedRequests": "Bu istekleri sil",
       "excludedUnavailable": "Sahne artık kullanılamıyor",
+      "excludedPromptUnusable": "Sahnenin görsel istemi bir referans görseli tanımlayamıyor",
       "dismissFailed": "İstek kuyruğu güncellenemedi. İnceleme kapatıldı; daha sonra tekrar deneyin."
     },
     "review": {

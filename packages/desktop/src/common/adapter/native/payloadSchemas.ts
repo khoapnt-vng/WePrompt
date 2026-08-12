@@ -355,7 +355,18 @@ const studioSubmitScenesSchema = z
     catalogVersion: z.string().regex(/^[a-f0-9]{16}$/),
     routes: z.array(studioSceneRouteSnapshotSchema).min(1).max(24),
     outputRole: z.enum(['take', 'reference']).optional(),
-    referencePrompt: z.string().trim().min(1).max(STUDIO_REFERENCE_PROMPT_MAX_LENGTH).optional(),
+    referencePrompts: z
+      .array(
+        z
+          .object({
+            sceneId: safeIdSchema,
+            prompt: z.string().trim().min(1).max(STUDIO_REFERENCE_PROMPT_MAX_LENGTH),
+          })
+          .strict()
+      )
+      .min(1)
+      .max(24)
+      .optional(),
   })
   .strict()
   .superRefine((input, context) => {
@@ -371,11 +382,26 @@ const studioSubmitScenesSchema = z
     ) {
       context.addIssue({ code: 'custom', message: 'routes must exactly match sceneIds', path: ['routes'] });
     }
-    if (input.referencePrompt !== undefined && input.outputRole !== 'reference') {
+    if (input.outputRole === 'reference') {
+      // A reference plate without a prompt has nothing to paint, and a prompt that names no
+      // submitted scene describes nothing. Both are refused here rather than at the provider.
+      const promptSceneIds = (input.referencePrompts ?? []).map(({ sceneId }) => sceneId);
+      if (
+        promptSceneIds.length !== input.sceneIds.length ||
+        new Set(promptSceneIds).size !== promptSceneIds.length ||
+        promptSceneIds.some((sceneId) => !selectedSceneIds.has(sceneId))
+      ) {
+        context.addIssue({
+          code: 'custom',
+          message: 'reference submissions need exactly one referencePrompt per scene',
+          path: ['referencePrompts'],
+        });
+      }
+    } else if (input.referencePrompts !== undefined) {
       context.addIssue({
         code: 'custom',
-        message: 'referencePrompt requires outputRole reference',
-        path: ['referencePrompt'],
+        message: 'referencePrompts requires outputRole reference',
+        path: ['referencePrompts'],
       });
     }
   });

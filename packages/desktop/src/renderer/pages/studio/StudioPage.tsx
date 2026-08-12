@@ -10,19 +10,21 @@ import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 
 import { ipcBridge } from '@/common';
-import type {
-  StudioRendererProject,
-  StudioReferenceRequest,
-  StudioLatestRender,
-  StudioRouteCatalog,
-  StudioRouteCatalogEntry,
-  StudioScene,
-  StudioSceneGenerationChoice,
-  StudioSelectVariationRequest,
+import {
+  STUDIO_REFERENCE_PROMPT_MAX_LENGTH,
+  type StudioRendererProject,
+  type StudioReferenceRequest,
+  type StudioLatestRender,
+  type StudioRouteCatalog,
+  type StudioRouteCatalogEntry,
+  type StudioScene,
+  type StudioSceneGenerationChoice,
+  type StudioSelectVariationRequest,
 } from '@/common/types/project/creativeStudioTypes';
 import { requestedMediaKind } from '@/common/types/project/creativeStudioOutputRole';
 
 import {
+  collectReferencePrompts,
   collectSubmittableRoutes,
   GenerationReviewModal,
   routeSupportsScene,
@@ -37,6 +39,7 @@ import {
   StudioPhaseShell,
   type StudioPhaseControllers,
 } from './components';
+import { buildFirstFramePrompt, hasFirstFramePromptSubject } from './components/Generation/referencePrompt';
 import { BriefConversationProvider } from './components/Shell/BriefConversationContext';
 import { DirectorPane } from './components/Shell/DirectorPane';
 import { DirectorProposals, pendingDirectorProposals } from './components/Shell/DirectorProposals';
@@ -64,7 +67,6 @@ type GenerationReviewState = {
   projectId: string;
   projectRevision: number;
   outputRole?: GenerationSingleReviewRequest['outputRole'];
-  referencePrompt?: GenerationSingleReviewRequest['referencePrompt'];
   referenceRequestIds?: string[];
   referenceRequests?: Array<Pick<StudioReferenceRequest, 'id' | 'sceneId'>>;
 };
@@ -83,7 +85,8 @@ const toReviewScene = (
   route: GenerationReviewRouteSnapshot | null,
   availableRoutes: readonly StudioRouteCatalogEntry[],
   routeStatus?: 'valid' | 'invalid' | 'missing',
-  outputRole: GenerationReviewScene['outputRole'] = 'take'
+  outputRole: GenerationReviewScene['outputRole'] = 'take',
+  referencePrompt?: string
 ): GenerationReviewScene => {
   const mediaKind = requestedMediaKind(scene.mediaKind, outputRole);
   const catalogRoute =
@@ -94,6 +97,7 @@ const toReviewScene = (
     mediaKind,
     outputRole,
     durationSeconds: scene.durationSeconds,
+    ...(outputRole === 'reference' && referencePrompt !== undefined ? { referencePrompt } : {}),
     route:
       route === null
         ? { status: 'missing', snapshot: null, providerName: null }
@@ -159,6 +163,22 @@ const referenceExclusionReason = (
   }
 };
 
+/**
+ * The first-frame prompt a Director-queued request should paint for this scene, or `null` when the
+ * scene's own visual prompt cannot produce a usable one.
+ *
+ * A scene can be `ready` - which only asks for a non-empty visual prompt - and still fail here:
+ * `visualPrompt` is allowed to be twice as long as a reference prompt may be. Main refuses such a
+ * submission outright, so the caller excludes the scene where the user can see it rather than
+ * sending a request that is destroyed on arrival.
+ */
+const queuedReferencePrompt = (project: StudioRendererProject, scene: StudioScene): string | null => {
+  const prompt = buildFirstFramePrompt(scene.visualPrompt, project.aspectRatio);
+  return hasFirstFramePromptSubject(prompt, project.aspectRatio) && prompt.length <= STUDIO_REFERENCE_PROMPT_MAX_LENGTH
+    ? prompt
+    : null;
+};
+
 const buildQueuedReferenceReview = (
   project: StudioRendererProject,
   readiness: StudioReadinessSummary,
@@ -172,9 +192,15 @@ const buildQueuedReferenceReview = (
 } => {
   const readySceneIds = new Set(readiness.readySceneIds);
   const requestedSceneIds = new Set(requests.map(({ sceneId }) => sceneId));
+  const promptUnusableSceneIds = new Set<string>();
   const scenes = project.sceneOrder.flatMap((sceneId) => {
     const scene = project.scenes[sceneId];
     if (scene === undefined || !requestedSceneIds.has(sceneId) || !readySceneIds.has(sceneId)) return [];
+    const referencePrompt = queuedReferencePrompt(project, scene);
+    if (referencePrompt === null) {
+      promptUnusableSceneIds.add(sceneId);
+      return [];
+    }
     return [
       toReviewScene(
         project,
@@ -182,7 +208,8 @@ const buildQueuedReferenceReview = (
         projectRouteSnapshot(project, scene, 'reference'),
         availableRoutes,
         undefined,
-        'reference'
+        'reference',
+        referencePrompt
       ),
     ];
   });
@@ -199,7 +226,12 @@ const buildQueuedReferenceReview = (
         {
           id: sceneId,
           title: scene?.title ?? sceneId,
-          reasonMessageKey: referenceExclusionReason(readiness.sceneStatuses[sceneId]),
+          // A scene the readiness summary calls ready, but whose visual prompt cannot describe a
+          // first frame, is excluded for that reason - not for its status, which says nothing
+          // about it and would read as "no longer available".
+          reasonMessageKey: promptUnusableSceneIds.has(sceneId)
+            ? 'conversation.creativeStudio.reference.excludedPromptUnusable'
+            : referenceExclusionReason(readiness.sceneStatuses[sceneId]),
         },
       ];
     }),
@@ -471,6 +503,14 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
       openQueuedReferenceReview();
       return;
     }
+    // buildQueuedReferenceReview excludes any scene it could not describe, so this should hold for
+    // every scene it did include. It is checked anyway because the alternative is dismissing the
+    // requests and then having main refuse the batch - which destroys them.
+    const referencePrompts = collectReferencePrompts(review.scenes, submission.sceneIds);
+    if (referencePrompts === null) {
+      openQueuedReferenceReview();
+      return;
+    }
 
     // Marked before the first await: the effect re-runs whenever `studioJobs` changes, which
     // includes every job poll, and this is a paid path with no spend ceiling behind it.
@@ -497,6 +537,7 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
         catalogVersion,
         expectedRevision: projectRevision,
         outputRole: 'reference',
+        referencePrompts,
       });
       if (submitted) return;
       // A refused submit spends nothing and nothing retries it, so with no surface here the
@@ -536,7 +577,8 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
             request.route,
             request.availableRoutes,
             request.routeStatus,
-            request.outputRole ?? 'take'
+            request.outputRole ?? 'take',
+            request.referencePrompt
           ),
         ],
         catalogVersion: request.catalogVersion,
@@ -544,7 +586,6 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
         projectId: project.id,
         projectRevision: project.revision,
         ...(request.outputRole === undefined ? {} : { outputRole: request.outputRole }),
-        ...(request.referencePrompt === undefined ? {} : { referencePrompt: request.referencePrompt }),
       });
     },
     [generationBlocked, project, readiness, studioJobs]
@@ -612,8 +653,8 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
               : null;
           const refreshedScenes =
             generationReview.mode === 'single'
-              ? generationReview.scenes.flatMap(({ id: sceneId }) => {
-                  const scene = project.scenes[sceneId];
+              ? generationReview.scenes.flatMap((reviewScene) => {
+                  const scene = project.scenes[reviewScene.id];
                   return scene === undefined ||
                     (generationReview.outputRole !== 'reference' &&
                       !canOpenSingleSceneReview(readiness?.sceneStatuses[scene.id], scene.visualPrompt))
@@ -625,7 +666,8 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
                           projectRouteSnapshot(project, scene, generationReview.outputRole),
                           availableRoutes,
                           undefined,
-                          generationReview.outputRole ?? 'take'
+                          generationReview.outputRole ?? 'take',
+                          reviewScene.referencePrompt
                         ),
                       ];
                 })
@@ -653,9 +695,6 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
             projectId: project.id,
             projectRevision: project.revision,
             ...(generationReview.outputRole === undefined ? {} : { outputRole: generationReview.outputRole }),
-            ...(generationReview.referencePrompt === undefined
-              ? {}
-              : { referencePrompt: generationReview.referencePrompt }),
             ...(refreshedReferenceReview === null
               ? generationReview.referenceRequestIds === undefined
                 ? {}
@@ -674,6 +713,16 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
         return;
       }
 
+      // Defence in depth: main refuses a reference submission whose scenes are not all described,
+      // and a refused submit here would leave the queued requests dismissed and unpaid-for with
+      // nothing on screen. Surfacing the issue keeps the review open so Cancel or a retry works.
+      const referencePrompts =
+        generationReview.outputRole === 'reference' ? collectReferencePrompts(generationReview.scenes, sceneIds) : null;
+      if (generationReview.outputRole === 'reference' && referencePrompts === null) {
+        setGenerationReviewIssueMessageKey('conversation.creativeStudio.errors.invalidPayload');
+        return;
+      }
+
       const submitted = await studioJobs.submitScenes({
         mode: generationReview.mode,
         sceneIds,
@@ -681,9 +730,7 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
         catalogVersion: generationReview.catalogVersion,
         expectedRevision: generationReview.projectRevision,
         ...(generationReview.outputRole === undefined ? {} : { outputRole: generationReview.outputRole }),
-        ...(generationReview.referencePrompt === undefined
-          ? {}
-          : { referencePrompt: generationReview.referencePrompt }),
+        ...(referencePrompts === null ? {} : { referencePrompts }),
       });
       if (!submitted) return;
       if (generationReview.referenceRequestIds === undefined) {
@@ -737,7 +784,17 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
               canOpenSingleSceneReview(readiness?.sceneStatuses[scene.id], scene.visualPrompt)) &&
             (current.mode === 'single' || scene.selectedAssetId === null);
           if (eligible) {
-            return [toReviewScene(project, scene, route, availableRoutes, undefined, outputRole)];
+            return [
+              toReviewScene(
+                project,
+                scene,
+                route,
+                availableRoutes,
+                undefined,
+                outputRole,
+                currentById.get(sceneId)?.referencePrompt
+              ),
+            ];
           }
           const previous = currentById.get(sceneId);
           return previous === undefined

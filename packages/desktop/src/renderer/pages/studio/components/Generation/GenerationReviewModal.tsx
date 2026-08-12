@@ -10,6 +10,7 @@ import type {
   StudioOutputRole,
   StudioResolution,
   StudioSceneGenerationChoice,
+  StudioSceneReferencePrompt,
 } from '@/common/types/project/creativeStudioTypes';
 import type { GenerationReviewRouteSnapshot } from './GenerationControls';
 import { Alert, Button, Modal, Tag } from '@arco-design/web-react';
@@ -40,6 +41,8 @@ export type GenerationReviewScene = {
   outputRole: StudioOutputRole;
   durationSeconds: number;
   route: GenerationReviewRoute;
+  /** The picture this scene's reference plate should paint. Present only for outputRole 'reference'. */
+  referencePrompt?: string;
 };
 
 export type GenerationReviewConfirmation = {
@@ -70,6 +73,27 @@ export const collectSubmittableRoutes = (
   };
 };
 
+/**
+ * The per-scene reference prompts a submission must carry, or `null` when any submitted scene has
+ * none.
+ *
+ * Main refuses a reference submission whose scenes are not all described, so a caller that cannot
+ * build this list must not spend: returning `null` sends it back to the review surface instead.
+ */
+export const collectReferencePrompts = (
+  scenes: readonly GenerationReviewScene[],
+  sceneIds: readonly string[]
+): StudioSceneReferencePrompt[] | null => {
+  const sceneById = new Map(scenes.map((scene) => [scene.id, scene]));
+  const prompts: StudioSceneReferencePrompt[] = [];
+  for (const sceneId of sceneIds) {
+    const prompt = sceneById.get(sceneId)?.referencePrompt;
+    if (prompt === undefined || prompt.trim().length === 0) return null;
+    prompts.push({ sceneId, prompt });
+  }
+  return prompts;
+};
+
 export type GenerationReviewExcludedScene = {
   id: string;
   title: string;
@@ -80,7 +104,8 @@ export type GenerationReviewExcludedScene = {
     | 'conversation.creativeStudio.scene.status.needs_selection'
     | 'conversation.creativeStudio.scene.status.generated'
     | 'conversation.creativeStudio.scene.status.needs_attention'
-    | 'conversation.creativeStudio.reference.excludedUnavailable';
+    | 'conversation.creativeStudio.reference.excludedUnavailable'
+    | 'conversation.creativeStudio.reference.excludedPromptUnusable';
 };
 
 export type GenerationReviewModalProps = {

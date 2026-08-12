@@ -211,7 +211,7 @@ const submitReferenceAndStopWithRemoteIdentity = async (
     routes: [imageRoute],
     catalogVersion: catalog.generationCatalogVersion,
     outputRole: 'reference',
-    referencePrompt: 'A restart-safe reference plate',
+    referencePrompts: [{ sceneId: scene.id, prompt: 'A restart-safe reference plate' }],
   });
   await waitFor(async () => {
     const job = (await harness.store.getProject(configured.id))?.jobs.job_lifecycle;
@@ -403,7 +403,7 @@ describe('Creative Studio generation lifecycle integration', () => {
       ],
       catalogVersion: catalog.generationCatalogVersion,
       outputRole: 'reference',
-      referencePrompt: '  A precise sunrise reference plate  ',
+      referencePrompts: [{ sceneId: scene.id, prompt: '  A precise sunrise reference plate  ' }],
     });
 
     const plated = await waitFor(async () => {

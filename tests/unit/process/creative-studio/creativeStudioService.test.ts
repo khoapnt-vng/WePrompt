@@ -4182,13 +4182,13 @@ describe('CreativeStudioService', () => {
         routes: [{ sceneId: 'scene_1', choiceId: imageChoice.choiceId, kind: 'image' }],
         catalogVersion: catalog.catalogVersion,
         outputRole: 'reference',
-        referencePrompt: 'A calm establishing plate',
+        referencePrompts: [{ sceneId: 'scene_1', prompt: 'A calm establishing plate' }],
       });
 
       expect(harness.submitScenes).toHaveBeenCalledOnce();
       expect(harness.submitScenes.mock.calls[0]?.[0]).toMatchObject({
         outputRole: 'reference',
-        referencePrompt: 'A calm establishing plate',
+        referencePrompts: [{ sceneId: 'scene_1', prompt: 'A calm establishing plate' }],
         routes: [
           {
             sceneId: 'scene_1',
@@ -4208,7 +4208,7 @@ describe('CreativeStudioService', () => {
 
       expect(harness.submitScenes).toHaveBeenCalledOnce();
       expect(harness.submitScenes.mock.calls[0]?.[0]).not.toHaveProperty('outputRole');
-      expect(harness.submitScenes.mock.calls[0]?.[0]).not.toHaveProperty('referencePrompt');
+      expect(harness.submitScenes.mock.calls[0]?.[0]).not.toHaveProperty('referencePrompts');
     });
 
     it('rejects a take whose route kind differs from the scene before reaching the job manager', async () => {

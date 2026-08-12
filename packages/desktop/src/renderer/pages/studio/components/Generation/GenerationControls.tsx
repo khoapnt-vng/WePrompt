@@ -35,7 +35,8 @@ export type GenerationSingleReviewRequest = {
   catalogVersion: string | null;
   availableRoutes: StudioRouteCatalogEntry[];
   outputRole?: StudioSubmitScenesRequest['outputRole'];
-  referencePrompt?: StudioSubmitScenesRequest['referencePrompt'];
+  /** The one reviewed scene's reference prompt - a single review is a batch of one. */
+  referencePrompt?: string;
 };
 
 export type GenerationReviewRouteSnapshot = StudioSceneGenerationChoice &
@@ -82,7 +83,8 @@ export type BuildSingleSceneReviewRequestInput = {
   durationSeconds?: number;
   hasReference?: boolean;
   outputRole?: StudioSubmitScenesRequest['outputRole'];
-  referencePrompt?: StudioSubmitScenesRequest['referencePrompt'];
+  /** The one reviewed scene's reference prompt - a single review is a batch of one. */
+  referencePrompt?: string;
 };
 
 export type BuildBatchGenerationReviewRequestInput = {

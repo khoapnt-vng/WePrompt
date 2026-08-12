@@ -1233,6 +1233,7 @@
       "excludedNoneReady": "请求的场景均未准备好生成参考图：",
       "discardExcludedRequests": "丢弃这些请求",
       "excludedUnavailable": "场景已不可用",
+      "excludedPromptUnusable": "该场景的画面提示词无法描述参考图",
       "dismissFailed": "无法更新请求队列。审核窗口已关闭，请稍后重试。"
     },
     "review": {
