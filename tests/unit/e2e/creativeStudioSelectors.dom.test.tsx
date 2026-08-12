@@ -301,7 +301,7 @@ describe('creative-studio e2e selectors', () => {
   it('keeps the activity indicator out of the save-state selector', async () => {
     await renderStudio(shellAdvisory);
 
-    const header = document.querySelector('[data-studio-work-panel] > div > header');
+    const header = document.querySelector('[data-studio-phase-shell] > header');
     expect(header?.querySelectorAll('[role="status"]').length).toBeGreaterThan(1);
     expect(header?.querySelectorAll(`[${SAVE_STATE_HOOK}]`)).toHaveLength(1);
     expect(document.querySelectorAll('[data-studio-document-activity]')).toHaveLength(1);

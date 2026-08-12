@@ -98,8 +98,11 @@ export const StudioPhaseShell: React.FC<StudioPhaseShellProps> = ({
     }
   })();
 
+  // Named so the e2e spec can address the phase shell's own header and advisory directly. It used
+  // to reach them by counting anonymous divs down from the work panel, which broke the moment the
+  // panel gained a scroll box — a hook cannot be broken by inserting a wrapper above it.
   return (
-    <div data-layout={layoutMode} className={styles.shell}>
+    <div data-studio-phase-shell data-layout={layoutMode} className={styles.shell}>
       <StudioPhaseHeader
         project={controller.project}
         saveState={shellSaveState}
