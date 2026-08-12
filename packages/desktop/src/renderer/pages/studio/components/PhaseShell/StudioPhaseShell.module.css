@@ -132,12 +132,16 @@
 }
 
 .headerMeta {
+  /* Named because the idle activity indicator has to cancel exactly one of these gaps; see
+     `.activity[data-idle='true']`. */
+  --studio-header-meta-gap: 12px;
+
   display: flex;
   min-width: 0;
   flex: none;
   align-items: center;
   justify-content: flex-end;
-  gap: 12px;
+  gap: var(--studio-header-meta-gap);
 }
 
 /* A chip rather than loose text: it reads as a state the project is in, not as running commentary. */
@@ -165,7 +169,11 @@
 }
 
 /* The document's in-flight work. Empty by design when nothing is running, so it must collapse
-   to nothing rather than reserve a gap in the row. */
+   to nothing rather than reserve a gap in the row — but it holds a live region that is mounted
+   for the document's whole life, and `display: none` / `visibility: hidden` would delete that
+   region from the accessibility tree and let it re-enter carrying its first message, which is
+   exactly the announcement the mounting exists to avoid. Idle, it is already a zero-width box;
+   all that is left to remove is the one row gap it takes in `.headerMeta`. */
 .activity {
   display: flex;
   min-width: 0;
@@ -173,14 +181,22 @@
   gap: 6px;
 }
 
-.activity:empty {
-  display: none;
+/* `:not(:first-child)` because there is no preceding gap to cancel when the save chip is not
+   there to precede it; a negative margin then would pull the row past its own start edge. */
+.activity[data-idle='true']:not(:first-child) {
+  margin-inline-start: calc(-1 * var(--studio-header-meta-gap));
 }
 
 .activityItem {
   composes: meta from '../../StudioTypography.module.css';
   color: var(--text-secondary);
   white-space: nowrap;
+}
+
+/* The live region itself: styled as an item so its text matches, and deliberately given no rule
+   that could remove it from the accessibility tree. */
+.activityLive {
+  composes: activityItem;
 }
 
 .activitySeparator {

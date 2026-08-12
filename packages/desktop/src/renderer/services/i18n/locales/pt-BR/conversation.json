@@ -922,7 +922,8 @@
         "activityGenerating_one": "{{count}} em geração",
         "activityGenerating_many": "{{count}} em geração",
         "activityGenerating_other": "{{count}} em geração",
-        "activityRendering": "Renderizando {{percent}}%"
+        "activityRendering": "Renderizando {{percent}}%",
+        "activityRenderingLabel": "Progresso da renderização do vídeo"
       },
       "brief": {
         "title": "Briefing",

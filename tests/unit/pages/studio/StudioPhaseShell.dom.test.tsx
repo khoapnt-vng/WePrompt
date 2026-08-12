@@ -262,10 +262,19 @@ describe('StudioPhaseShell document activity', () => {
     expect(activity()).toHaveTextContent(/activityGenerating:count=2(?![\d.])/);
   });
 
+  /**
+   * The percentage is a `progressbar` value beside the live region, not text inside it: ffmpeg
+   * progress arrives many times a second, and a polite atomic region would speak every step.
+   */
   it('reports a cut render running elsewhere in the document while Brief is on screen', () => {
     renderPhase('brief', { render: { ...idleRender, status: 'running', progress: 0.42 } });
 
-    expect(activity()).toHaveTextContent(/activityRendering:percent=42(?![\d.])/);
+    const progressbar = screen.getByRole('progressbar', {
+      name: 'conversation.creativeStudio.phase.shared.activityRenderingLabel',
+    });
+    expect(progressbar).toHaveTextContent(/activityRendering:percent=42(?![\d.])/);
+    expect(progressbar).toHaveAttribute('aria-valuenow', '42');
+    expect(activity()).not.toContainElement(progressbar);
   });
 
   it('keeps the region mounted and silent when the document has no work in flight', () => {

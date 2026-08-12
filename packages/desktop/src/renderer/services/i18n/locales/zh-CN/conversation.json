@@ -910,7 +910,8 @@
         "activityLabel": "项目活动",
         "activityGenerating": "{{count}} 个生成中",
         "activityGenerating_other": "{{count}} 个生成中",
-        "activityRendering": "渲染中 {{percent}}%"
+        "activityRendering": "渲染中 {{percent}}%",
+        "activityRenderingLabel": "视频渲染进度"
       },
       "brief": {
         "title": "简报",

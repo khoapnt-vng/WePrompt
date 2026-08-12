@@ -748,7 +748,8 @@
         "activityGenerating": "{{count}} generating",
         "activityGenerating_one": "{{count}} generating",
         "activityGenerating_other": "{{count}} generating",
-        "activityRendering": "Rendering {{percent}}%"
+        "activityRendering": "Rendering {{percent}}%",
+        "activityRenderingLabel": "Video render progress"
       },
       "brief": {
         "title": "Brief",

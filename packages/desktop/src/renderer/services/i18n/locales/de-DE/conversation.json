@@ -914,7 +914,8 @@
         "activityGenerating": "{{count}} werden erzeugt",
         "activityGenerating_one": "{{count}} wird erzeugt",
         "activityGenerating_other": "{{count}} werden erzeugt",
-        "activityRendering": "Rendern {{percent}}%"
+        "activityRendering": "Rendern {{percent}}%",
+        "activityRenderingLabel": "Fortschritt des Video-Renderings"
       },
       "brief": {
         "title": "Briefing",

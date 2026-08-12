@@ -910,7 +910,8 @@
         "activityLabel": "プロジェクトの状況",
         "activityGenerating": "{{count}} 件生成中",
         "activityGenerating_other": "{{count}} 件生成中",
-        "activityRendering": "レンダリング中 {{percent}}%"
+        "activityRendering": "レンダリング中 {{percent}}%",
+        "activityRenderingLabel": "動画レンダリングの進捗"
       },
       "brief": {
         "title": "概要",

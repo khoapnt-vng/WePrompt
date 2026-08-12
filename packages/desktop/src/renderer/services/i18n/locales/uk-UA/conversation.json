@@ -919,7 +919,8 @@
         "activityGenerating_few": "{{count}} завдання генеруються",
         "activityGenerating_many": "{{count}} завдань генеруються",
         "activityGenerating_other": "{{count}} завдання генеруються",
-        "activityRendering": "Збирання… {{percent}}%"
+        "activityRendering": "Збирання… {{percent}}%",
+        "activityRenderingLabel": "Перебіг збирання відео"
       },
       "brief": {
         "title": "Бриф",

@@ -919,7 +919,8 @@
         "activityGenerating_few": "{{count}} задания генерируются",
         "activityGenerating_many": "{{count}} заданий генерируются",
         "activityGenerating_other": "{{count}} задания генерируются",
-        "activityRendering": "Сборка… {{percent}}%"
+        "activityRendering": "Сборка… {{percent}}%",
+        "activityRenderingLabel": "Ход сборки видео"
       },
       "brief": {
         "title": "Бриф",

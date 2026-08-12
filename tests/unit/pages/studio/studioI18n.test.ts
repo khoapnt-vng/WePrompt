@@ -71,6 +71,7 @@ const phaseKeys = [
   'phase.shared.activityLabel',
   'phase.shared.activityGenerating',
   'phase.shared.activityRendering',
+  'phase.shared.activityRenderingLabel',
   'phase.brief.title',
   'phase.brief.description',
   'phase.brief.nameLabel',

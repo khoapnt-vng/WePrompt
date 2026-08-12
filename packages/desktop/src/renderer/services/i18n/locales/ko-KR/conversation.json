@@ -910,7 +910,8 @@
         "activityLabel": "프로젝트 활동",
         "activityGenerating": "{{count}}개 생성 중",
         "activityGenerating_other": "{{count}}개 생성 중",
-        "activityRendering": "렌더링 중 {{percent}}%"
+        "activityRendering": "렌더링 중 {{percent}}%",
+        "activityRenderingLabel": "동영상 렌더링 진행률"
       },
       "brief": {
         "title": "기획",

@@ -910,7 +910,8 @@
         "activityLabel": "專案活動",
         "activityGenerating": "{{count}} 個產生中",
         "activityGenerating_other": "{{count}} 個產生中",
-        "activityRendering": "算繪中 {{percent}}%"
+        "activityRendering": "算繪中 {{percent}}%",
+        "activityRenderingLabel": "影片算繪進度"
       },
       "brief": {
         "title": "簡報",

@@ -913,7 +913,8 @@
         "activityGenerating": "{{count}} در حال تولید",
         "activityGenerating_one": "{{count}} در حال تولید",
         "activityGenerating_other": "{{count}} در حال تولید",
-        "activityRendering": "در حال رندر {{percent}}٪"
+        "activityRendering": "در حال رندر {{percent}}٪",
+        "activityRenderingLabel": "پیشرفت رندر ویدیو"
       },
       "brief": {
         "title": "خلاصه",
