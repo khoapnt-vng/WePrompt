@@ -76,14 +76,11 @@ export const StudioPhaseHeader: React.FC<StudioPhaseHeaderProps> = ({
     <header className={styles.header}>
       <div className={styles.headerCopy}>
         <nav aria-label={t('conversation.creativeStudio.phase.shared.backToLibrary')} className={styles.breadcrumb}>
+          {/* No aria-label on the crumb: it carries visible text now, and an aria-label would
+              replace that name with words the user cannot see (WCAG 2.5.3, Label in Name).
+              Where it leads is carried by the landmark name and the tooltip instead. */}
           <Tooltip content={t('conversation.creativeStudio.phase.shared.backToLibrary')}>
-            <Button
-              type='text'
-              size='small'
-              aria-label={t('conversation.creativeStudio.phase.shared.backToLibrary')}
-              className={styles.breadcrumbButton}
-              onClick={onBack}
-            >
+            <Button type='text' size='small' className={styles.breadcrumbButton} onClick={onBack}>
               {t('conversation.creativeStudio.library.title')}
             </Button>
           </Tooltip>

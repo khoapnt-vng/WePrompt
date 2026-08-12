@@ -41,9 +41,7 @@ describe('StudioPhaseHeader', () => {
     expect(
       screen.getByRole('navigation', { name: 'conversation.creativeStudio.phase.shared.backToLibrary' })
     ).toBeVisible();
-    expect(
-      screen.getByRole('button', { name: 'conversation.creativeStudio.phase.shared.backToLibrary' })
-    ).toBeVisible();
+    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.library.title' })).toBeVisible();
     expect(screen.getByRole('heading', { level: 1, name: 'Launch film' })).toBeVisible();
     expect(screen.getByRole('status')).toHaveTextContent('conversation.creativeStudio.phase.nav.saved');
     expect(screen.getByText('phase action')).toBeVisible();
@@ -60,7 +58,11 @@ describe('StudioPhaseHeader', () => {
     const onBack = vi.fn();
     render(<StudioPhaseHeader project={project} saveState='saved' onBack={onBack} />);
 
-    const crumb = screen.getByRole('button', { name: 'conversation.creativeStudio.phase.shared.backToLibrary' });
+    // Looked up by the crumb's own words: WCAG 2.5.3 (Label in Name) requires the accessible
+    // name to contain the visible label, so a speech-input user can say what they can read.
+    // An aria-label describing the destination instead of the crumb replaces the name and
+    // leaves "click Creative Studio" matching nothing.
+    const crumb = screen.getByRole('button', { name: 'conversation.creativeStudio.library.title' });
     expect(crumb).toHaveTextContent('conversation.creativeStudio.library.title');
     fireEvent.click(crumb);
     expect(onBack).toHaveBeenCalledOnce();
