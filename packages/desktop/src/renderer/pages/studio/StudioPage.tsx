@@ -305,13 +305,17 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
   const suppressedReferenceRequestIdsRef = useRef(new Set<string>());
   const notifiedExcludedReferenceRequestsRef = useRef<string | null>(null);
   /**
-   * Reference requests this session has already auto-submitted, or tried to.
+   * Reference requests this mount has already taken down the paid path, or tried to.
    *
    * The effect below re-runs whenever `studioJobs` changes, which includes every job poll, so
    * without this guard a queued request could be submitted repeatedly — and this is a paid path
-   * with no spend ceiling behind it. Ids are added *before* the submit resolves and are never
-   * removed, including on failure: a failed submit spends nothing, but retrying on every poll
-   * could.
+   * with no spend ceiling behind it. Ids are added *before* the first await and are never removed,
+   * including on failure: one attempt spends nothing, but retrying on every poll could.
+   *
+   * It filters the pending requests rather than vetoing the batch they appear in. A request whose
+   * dismissal failed is still queued and so reappears in every later batch; vetoing on that would
+   * take the requests queued after it down with it for the rest of the mount. Recovery is the
+   * review the effect opens on failure, not a silent retry.
    */
   const autoSubmittedReferenceRequestIdsRef = useRef(new Set<string>());
   const variationPendingRef = useRef(false);
@@ -410,7 +414,14 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
     ) {
       return;
     }
-    const requests = studioJobs.referenceRequests.filter(({ id }) => !suppressedReferenceRequestIdsRef.current.has(id));
+    // Requests this mount has already acted on are dropped here rather than checked as a whole
+    // batch further down. The batch is rebuilt from every pending request on each run, so an id
+    // that has been through the paid path must not be able to take the requests queued alongside
+    // it with it — filtering leaves the untouched ones free to be submitted on their own.
+    const requests = studioJobs.referenceRequests.filter(
+      ({ id }) =>
+        !suppressedReferenceRequestIdsRef.current.has(id) && !autoSubmittedReferenceRequestIdsRef.current.has(id)
+    );
     if (requests.length === 0) return;
     const availableRoutes = catalogEntries(studioModels.catalog);
     const review = buildQueuedReferenceReview(project, readiness, requests, availableRoutes);
@@ -431,6 +442,25 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
     setReferenceNotice((current) => (current?.kind === 'excluded' ? null : current));
     studioJobs.clearIssue();
     setGenerationReviewIssueMessageKey(null);
+
+    const catalogVersion = studioModels.catalog.catalogVersion;
+    const projectId = project.id;
+    const projectRevision = project.revision;
+    const requestIds = review.referenceRequestIds;
+    const openQueuedReferenceReview = (): void =>
+      setGenerationReview({
+        mode: 'batch',
+        scenes: review.scenes,
+        excludedScenes: review.excludedScenes,
+        catalogVersion,
+        availableRoutes,
+        projectId,
+        projectRevision,
+        outputRole: 'reference',
+        referenceRequestIds: requestIds,
+        referenceRequests: requests.map(({ id, sceneId }) => ({ id, sceneId })),
+      });
+
     // The Director decides when to make an image, so a request it queued no longer waits for a
     // confirmation step. Routes are still resolved by the modal's own rule via
     // collectSubmittableRoutes, which returns null unless *every* scene has a valid matching
@@ -438,28 +468,28 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
     // subset the modal itself would have refused.
     const submission = collectSubmittableRoutes(review.scenes);
     if (submission === null) {
-      setGenerationReview({
-        mode: 'batch',
-        scenes: review.scenes,
-        excludedScenes: review.excludedScenes,
-        catalogVersion: studioModels.catalog.catalogVersion,
-        availableRoutes,
-        projectId: project.id,
-        projectRevision: project.revision,
-        outputRole: 'reference',
-        referenceRequestIds: review.referenceRequestIds,
-        referenceRequests: requests.map(({ id, sceneId }) => ({ id, sceneId })),
-      });
+      openQueuedReferenceReview();
       return;
     }
 
-    const requestIds = review.referenceRequestIds;
-    if (requestIds.some((requestId) => autoSubmittedReferenceRequestIdsRef.current.has(requestId))) return;
+    // Marked before the first await: the effect re-runs whenever `studioJobs` changes, which
+    // includes every job poll, and this is a paid path with no spend ceiling behind it.
     requestIds.forEach((requestId) => autoSubmittedReferenceRequestIdsRef.current.add(requestId));
 
-    const catalogVersion = studioModels.catalog.catalogVersion;
-    const projectRevision = project.revision;
     void (async () => {
+      // Consume the queued request *before* paying for it. Both de-dup sets are refs inside a
+      // shell React remounts per project, so the pending request on disk is the only record that
+      // survives leaving the project or quitting the app: dismissing after the submit leaves a
+      // window where the plate is charged and the request is still queued, and the next mount
+      // charges for it again with no human in the loop. Dismissing first can only lose an unpaid
+      // request, which the user can simply ask the Director for again.
+      const consumed = requestIds.length === 0 || (await studioJobs.dismissReferenceRequests(requestIds));
+      if (!consumed) {
+        // Nothing has been spent, and the request is still queued for a later mount to pick up.
+        setReferenceNotice({ kind: 'dismiss_failed' });
+        return;
+      }
+      requestIds.forEach((requestId) => suppressedReferenceRequestIdsRef.current.add(requestId));
       const submitted = await studioJobs.submitScenes({
         mode: 'batch',
         sceneIds: submission.sceneIds,
@@ -468,10 +498,12 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
         expectedRevision: projectRevision,
         outputRole: 'reference',
       });
-      if (!submitted) return;
-      const dismissed = requestIds.length === 0 || (await studioJobs.dismissReferenceRequests(requestIds));
-      requestIds.forEach((requestId) => suppressedReferenceRequestIdsRef.current.add(requestId));
-      if (!dismissed) setReferenceNotice({ kind: 'dismiss_failed' });
+      if (submitted) return;
+      // A refused submit spends nothing and nothing retries it, so with no surface here the
+      // request is simply gone: no error, no modal, nothing to act on. The review this path
+      // replaced is that surface — it shows the failure, its Confirm retries under a human click,
+      // and its Cancel discards the request.
+      openQueuedReferenceReview();
     })();
   }, [generationBlocked, generationReview, project, readiness, studioJobs, studioModels.catalog]);
 

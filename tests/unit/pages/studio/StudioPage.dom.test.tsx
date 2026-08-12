@@ -93,6 +93,11 @@ const stale = <T,>(): StudioCommandResult<T> => ({
   ok: false,
   error: { code: 'stale_project', messageKey: 'conversation.creativeStudio.errors.staleProject' },
 });
+/** What main answers a submit it refuses outright — `invalid_request` reaches the renderer as this. */
+const invalidPayload = <T,>(): StudioCommandResult<T> => ({
+  ok: false,
+  error: { code: 'invalid_payload', messageKey: 'conversation.creativeStudio.errors.invalidPayload' },
+});
 
 const project = (id = 'project-1', overrides: Partial<StudioRendererProject> = {}): StudioRendererProject => ({
   schemaVersion: 1,
@@ -263,6 +268,34 @@ const deferred = <T,>() => {
     resolve = resolvePromise;
   });
   return { promise, resolve };
+};
+
+/**
+ * The queued reference requests as main keeps them: on disk, read back by
+ * `listPendingReferenceRequests` and removed by `dismissReferenceRequests`.
+ *
+ * A fixed `mockResolvedValue` cannot express that, and the difference is exactly what decides
+ * whether a remount pays for the same plate a second time — the renderer's de-dup sets are refs
+ * inside a shell React remounts per project, so this queue is the only record that outlives it.
+ */
+const installReferenceRequestQueue = (
+  initial: readonly StudioReferenceRequest[]
+): {
+  queue: (request: StudioReferenceRequest) => void;
+  pendingIds: () => string[];
+} => {
+  let pending: StudioReferenceRequest[] = [...initial];
+  bridge.listPendingReferenceRequests.invoke.mockImplementation(async () => ok([...pending]));
+  bridge.dismissReferenceRequests.invoke.mockImplementation(async ({ requestIds }: { requestIds: string[] }) => {
+    pending = pending.filter((request) => !requestIds.includes(request.id));
+    return ok(true);
+  });
+  return {
+    queue: (request) => {
+      pending = [...pending, request];
+    },
+    pendingIds: () => pending.map(({ id }) => id),
+  };
 };
 
 const renderRoute = (path: string | { pathname: string; state?: unknown } = '/studio/project-1/write') => {
@@ -1324,6 +1357,113 @@ describe('StudioPage and useStudioProject', () => {
         requestIds: requests.map(({ id }) => id),
       })
     );
+    // Consumed before it is paid for, never after: the queued request on disk is the only record
+    // that survives leaving the project, so a submit that lands first leaves a window where the
+    // plate is charged and the request is still queued for the next mount to charge again.
+    expect(bridge.dismissReferenceRequests.invoke.mock.invocationCallOrder[0]).toBeLessThan(
+      bridge.submitScenes.invoke.mock.invocationCallOrder[0]!
+    );
+  });
+
+  it('consumes a queued reference request before spending, so re-entering cannot pay twice', async () => {
+    const opening = scene({ mediaKind: 'video' });
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
+    );
+    const queue = installReferenceRequestQueue([referenceRequest(opening.id, 1)]);
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
+    // The paid call never resolves: the user goes back to the library, or quits, while it is in
+    // flight. Everything the renderer knows about this request dies with the mount, so the request
+    // must already be gone from the queue by the time the money is committed.
+    const inFlightSubmit = deferred<StudioCommandResult<StudioRendererJob[]>>();
+    bridge.submitScenes.invoke.mockReturnValueOnce(inFlightSubmit.promise);
+
+    const { view } = renderRoute();
+
+    await waitFor(() => expect(bridge.submitScenes.invoke).toHaveBeenCalledOnce());
+    expect(queue.pendingIds()).toEqual([]);
+
+    view.unmount();
+    renderRoute();
+
+    await waitFor(() => expect(bridge.listPendingReferenceRequests.invoke.mock.calls.length).toBeGreaterThan(1));
+    await act(async () => {});
+    expect(bridge.submitScenes.invoke).toHaveBeenCalledOnce();
+  });
+
+  it('shows a rejected auto-submit in a review the user can discard', async () => {
+    const opening = scene({ mediaKind: 'video' });
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
+    );
+    installReferenceRequestQueue([referenceRequest(opening.id, 1)]);
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
+    bridge.submitScenes.invoke.mockResolvedValue(invalidPayload());
+
+    renderRoute();
+
+    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+    expect(within(review).getByText('conversation.creativeStudio.errors.invalidPayload')).toBeVisible();
+    expect(within(review).getByLabelText(opening.title)).toBeVisible();
+
+    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.cancel' }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'conversation.creativeStudio.review.title' })).not.toBeInTheDocument()
+    );
+    expect(bridge.submitScenes.invoke).toHaveBeenCalledOnce();
+  });
+
+  /**
+   * One request the renderer could not act on must not close the feature for the rest of the mount.
+   *
+   * The batch is rebuilt from every pending request on each run, so a request that has been through
+   * the paid path but is still queued (its dismissal failed) reappears inside every later batch. A
+   * re-entry guard that asks "does this batch contain anything already attempted?" therefore skips
+   * brand-new requests for unrelated scenes, silently and for good.
+   */
+  it('lets the next queued reference request through after one that could not be consumed', async () => {
+    const first = scene({ id: 'scene-1', mediaKind: 'video' });
+    const second = scene({ id: 'scene-2', title: 'Closing', mediaKind: 'video' });
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(
+        project('project-1', {
+          sceneOrder: [first.id, second.id],
+          scenes: { [first.id]: first, [second.id]: second },
+        })
+      )
+    );
+    let onProposalUpdate: ((event: { projectId: string }) => void) | undefined;
+    bridge.proposalUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
+      onProposalUpdate = listener;
+      return () => {};
+    });
+    const stuck = referenceRequest(first.id, 1);
+    const queue = installReferenceRequestQueue([stuck]);
+    const consume = bridge.dismissReferenceRequests.invoke.getMockImplementation()!;
+    bridge.dismissReferenceRequests.invoke.mockImplementation(async (input: { requestIds: string[] }) =>
+      input.requestIds.includes(stuck.id) ? failure() : consume(input)
+    );
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
+
+    renderRoute();
+
+    await waitFor(() => expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledOnce());
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+    expect(queue.pendingIds()).toEqual([stuck.id]);
+
+    queue.queue(referenceRequest(second.id, 2));
+    await act(async () => onProposalUpdate?.({ projectId: 'project-1' }));
+
+    await waitFor(() => expect(bridge.submitScenes.invoke).toHaveBeenCalledOnce());
+    expect(bridge.submitScenes.invoke).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        mode: 'batch',
+        sceneIds: [second.id],
+        routes: [{ sceneId: second.id, choiceId: 'choice_image', kind: 'image' }],
+        outputRole: 'reference',
+      })
+    );
   });
 
   it('auto-submits only guard-ready queued scenes and lets the user discard the excluded request', async () => {
@@ -1435,7 +1575,19 @@ describe('StudioPage and useStudioProject', () => {
     expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
   });
 
-  it('reports a failed dismissal after auto-submitting a queued reference request', async () => {
+  /**
+   * A queued request that cannot be consumed must not be paid for.
+   *
+   * Dismissal is what stops the next mount finding the same request still pending and charging for
+   * the plate again, so a failed dismissal is a failed spend fence, not a cosmetic problem. Nothing
+   * is lost by waiting: the request stays queued for the next mount to pick up.
+   */
+  it('does not spend when a queued reference request cannot be consumed first', async () => {
+    let onUpdate: ((event: { projectId: string }) => void) | undefined;
+    bridge.proposalUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
+      onUpdate = listener;
+      return () => {};
+    });
     const opening = scene({ mediaKind: 'video' });
     bridge.getProject.invoke.mockResolvedValue(
       ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
@@ -1446,27 +1598,35 @@ describe('StudioPage and useStudioProject', () => {
 
     renderRoute();
 
-    await waitFor(() => expect(bridge.submitScenes.invoke).toHaveBeenCalledOnce());
+    await waitFor(() => expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledOnce());
     expect(await screen.findByText('conversation.creativeStudio.reference.dismissFailed')).toBeVisible();
+    await act(async () => {});
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+
+    // The request is still queued and every re-read offers it again. Retrying it for the rest of
+    // the mount is what `autoSubmittedReferenceRequestIdsRef` exists to stop: nothing here has
+    // been suppressed, because suppression means "already dealt with", which this is not.
+    await act(async () => onUpdate?.({ projectId: 'project-1' }));
+    await act(async () => {});
+    expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledOnce();
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
   });
 
   /**
    * A queued request must be submitted once, not once per job poll.
    *
    * The auto-submit effect re-runs whenever `studioJobs` changes, which includes every poll, and
-   * this is a paid path with no spend ceiling behind it. Dismissal fails here, so the request is
-   * never consumed and each re-read offers it again — it must still submit exactly once.
+   * this is a paid path with no spend ceiling behind it. Main keeps offering the request here —
+   * a stale read, a dismissal that has not landed on disk yet — and each re-read must be ignored.
    *
-   * ⚠️ Coverage limit, established by mutation rather than assumed: deleting the in-flight guard
-   * does NOT fail this test, because the success path also adds the id to
-   * `suppressedReferenceRequestIdsRef` and suppression alone prevents the resubmit. The guard's
-   * real job is the *failed*-submit path, which returns before suppression — and that case is not
-   * covered here, because this harness would not let a failed submit through the mutation queue in
-   * `useStudioJobs`. Do not read this test as proof the guard works.
+   * Deleting either half of the re-entry filter (the suppressed set or the auto-submitted set) is
+   * enough to make this red, which is what the earlier version of this test could not claim.
    */
   it('auto-submits a queued reference request once across repeated pending re-reads', async () => {
     let onUpdate: ((event: { projectId: string }) => void) | undefined;
-    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
+    // `proposalUpdated`, not `projectUpdated`: only this one re-reads the pending queue, which is
+    // what puts the already-submitted request back in front of the effect.
+    bridge.proposalUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
       onUpdate = listener;
       return () => {};
     });
@@ -1475,7 +1635,6 @@ describe('StudioPage and useStudioProject', () => {
       ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
     );
     bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([referenceRequest(opening.id, 1)]));
-    bridge.dismissReferenceRequests.invoke.mockResolvedValue(failure());
     bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
 
     renderRoute();
