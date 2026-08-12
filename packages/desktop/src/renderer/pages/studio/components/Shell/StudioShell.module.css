@@ -65,6 +65,21 @@
   --studio-work-inset-block: clamp(16px, 3vw, 28px);
   --studio-work-inset-inline: clamp(16px, 3.5vw, 36px);
 
+  /* How far the collapse toggle sits from the panel's edge, and the box it occupies there. The
+     size is Arco's rendered footprint for a text Button at size='small', measured, not assumed. */
+  --studio-toggle-inset: 8px;
+  --studio-toggle-size: 28px;
+  /*
+   * Clear space after the toggle, and the reason this gutter is a calculation rather than a round
+   * number that looked about right.
+   *
+   * The toggle used to end 8px before the breadcrumb, and two things 8px apart read as one control
+   * group — which is how a panel toggle came to look like the back button for the trail beside it.
+   * Proximity is the grouping signal, so the separation is a measurement: below roughly 24px they
+   * group, above it they read as two. Anything that narrows this re-creates the confusion.
+   */
+  --studio-toggle-clear: 32px;
+
   position: relative;
   display: flex;
   min-width: 0;
@@ -72,7 +87,7 @@
   flex: 1;
   flex-direction: column;
   overflow: hidden;
-  padding-left: 44px;
+  padding-left: calc(var(--studio-toggle-inset) + var(--studio-toggle-size) + var(--studio-toggle-clear));
 }
 
 /* The work panel's scroll box, so a phase taller than the window scrolls here rather than taking
@@ -94,7 +109,7 @@
   position: absolute;
   z-index: 2;
   top: calc(var(--studio-work-inset-block) + 14px);
-  left: 8px;
+  left: var(--studio-toggle-inset);
 }
 
 @media (prefers-reduced-motion: no-preference) {

@@ -129,4 +129,29 @@ describe('studio project frame layout', () => {
     expect(valueOf(paneToggle, 'top')).toContain('--studio-work-inset-block');
     expect(valueOf(workScroll, 'padding')).toContain('--studio-work-inset-block');
   });
+
+  /**
+   * The gutter is what stops the collapse toggle reading as the back button for the breadcrumb it
+   * precedes. Two controls 8px apart group into one; the separation only works as a measurement, so
+   * this pins the number rather than the appearance. jsdom cannot see any of it: the toggle is
+   * absolutely positioned and jsdom measures every box at zero.
+   */
+  it('leaves the toggle enough clear space not to group with the breadcrumb', () => {
+    const clear = valueOf(workPanel, '--studio-toggle-clear');
+
+    expect(clear).toBeDefined();
+    // Below roughly 24px, proximity makes the two read as one control group.
+    expect(Number.parseInt(clear!, 10)).toBeGreaterThanOrEqual(24);
+  });
+
+  /** The gutter is the sum of its parts, so widening the toggle cannot silently eat the clear space. */
+  it('builds the work panel gutter from the toggle box and that clear space', () => {
+    const padding = valueOf(workPanel, 'padding-left');
+
+    expect(padding).toContain('--studio-toggle-inset');
+    expect(padding).toContain('--studio-toggle-size');
+    expect(padding).toContain('--studio-toggle-clear');
+    // And the toggle sits at the same inset the gutter accounts for, not at its own literal.
+    expect(valueOf(paneToggle, 'left')).toBe('var(--studio-toggle-inset)');
+  });
 });

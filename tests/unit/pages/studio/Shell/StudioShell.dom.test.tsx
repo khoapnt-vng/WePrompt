@@ -298,4 +298,40 @@ describe('StudioShell', () => {
       screen.getByTestId('director-child')
     );
   });
+
+  /**
+   * The toggle sits a few pixels before a `<nav>` named "Back to library". A chevron there is read
+   * as that nav's back control — from its shape by sighted users, from tab order by everyone else —
+   * whatever its own label says. So the glyph must be the app's panel glyph, the one its titlebar
+   * sider toggle already uses, and never a directional arrow.
+   */
+  it('marks the toggle with the app panel glyph rather than a directional arrow', () => {
+    renderShell('inline');
+
+    const toggle = screen.getByRole('button', { name: HIDE_DIRECTOR });
+
+    expect(toggle.querySelector('[data-icon="sidebar-panel"]')).not.toBeNull();
+    // icon-park renders its name as a class on the icon span; a chevron here is the defect.
+    expect(toggle.querySelector('.i-icon-left, .i-icon-right, [class*="icon-left"], [class*="icon-right"]')).toBeNull();
+  });
+
+  /**
+   * Which way the pane will move is not something a glyph conveys reliably, and duplicating the
+   * state into the icon means two things to keep in sync. `aria-expanded` and the label carry it —
+   * one place, and translated. This pins that the glyph itself is state-independent.
+   */
+  it('keeps the same glyph in both states and carries the state in aria-expanded and the label', () => {
+    renderShell('inline');
+
+    const shown = screen.getByRole('button', { name: HIDE_DIRECTOR });
+    expect(shown).toHaveAttribute('aria-expanded', 'true');
+    const glyphWhenShown = shown.querySelector('[data-icon="sidebar-panel"]')?.outerHTML;
+
+    fireEvent.click(shown);
+
+    const hidden = screen.getByRole('button', { name: SHOW_DIRECTOR });
+    expect(hidden).toHaveAttribute('aria-expanded', 'false');
+    expect(hidden.querySelector('[data-icon="sidebar-panel"]')?.outerHTML).toBe(glyphWhenShown);
+    expect(glyphWhenShown).toBeDefined();
+  });
 });

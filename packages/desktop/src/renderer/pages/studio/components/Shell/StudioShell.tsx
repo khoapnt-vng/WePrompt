@@ -5,10 +5,11 @@
  */
 
 import { Button, Drawer, Tooltip } from '@arco-design/web-react';
-import { Left, Right } from '@icon-park/react';
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
+
+import { SidebarIcon } from '@renderer/components/base';
 
 import { useStudioLayoutMode } from '../PhaseShell/useStudioLayoutMode';
 import { StudioDirectorRevealProvider } from './StudioDirectorRevealContext';
@@ -142,6 +143,18 @@ export const StudioShell: React.FC<StudioShellProps> = ({ director, projectId, c
     else revealDirectorTransiently();
   }, [overlays, revealDirectorTransiently]);
 
+  /*
+   * A panel glyph, not a chevron, and the same glyph in both states.
+   *
+   * This button sits a few pixels before a `<nav>` whose accessible name is "Back to library",
+   * holding the crumb that leads there. A left-pointing chevron in that position is read as that
+   * nav's back control — by sighted users from its shape, and by anyone tabbing through from its
+   * order — whatever its own label says. The app already owns a glyph that means "show or hide a
+   * panel" (the titlebar's sider toggle) and this is it, so the two panel toggles now match.
+   *
+   * It does not flip with state: which way the pane will move is not something a glyph conveys
+   * reliably, and `aria-expanded` plus the translated label already carry it in one place.
+   */
   const toggle = (
     <Tooltip content={label}>
       <Button
@@ -151,7 +164,7 @@ export const StudioShell: React.FC<StudioShellProps> = ({ director, projectId, c
         aria-label={label}
         aria-expanded={directorShown}
         className={styles.paneToggle}
-        icon={directorShown ? <Left aria-hidden='true' /> : <Right aria-hidden='true' />}
+        icon={<SidebarIcon size={16} strokeWidth={3} />}
         onClick={() =>
           overlays
             ? setDirectorOverlayOpen(!directorOverlayOpen)

@@ -27,30 +27,12 @@ import { NavigationHistoryProvider } from '@renderer/hooks/context/NavigationHis
 import { useDeepLink } from '@renderer/hooks/system/useDeepLink';
 import { useNotificationClick } from '@renderer/hooks/system/notification/useNotificationClick';
 import { useBrowserNotification } from '@renderer/hooks/system/notification/useBrowserNotification';
+import { SidebarIcon } from '@renderer/components/base';
 import { useDirectorySelection } from '@renderer/hooks/file/useDirectorySelection';
 import { cleanupSiderTooltips } from '@renderer/utils/ui/siderTooltip';
 import { useConversationShortcuts } from '@renderer/hooks/ui/useConversationShortcuts';
 import { isElectronDesktop } from '@renderer/utils/platform';
 import '@renderer/styles/layout.css';
-
-const SidebarIcon: React.FC<{ size?: number; strokeWidth?: number }> = ({ size = 18, strokeWidth = 4 }) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox='0 0 48 48'
-    fill='none'
-    stroke='currentColor'
-    strokeWidth={strokeWidth}
-    strokeLinecap='round'
-    strokeLinejoin='round'
-    aria-hidden='true'
-    focusable='false'
-    style={{ display: 'inline-block', verticalAlign: 'middle' }}
-  >
-    <rect x='6' y='10' width='36' height='28' rx='5' />
-    <line x1='18' y1='10' x2='18' y2='38' />
-  </svg>
-);
 
 const useDebug = () => {
   const [count, setCount] = useState(0);
@@ -371,7 +353,11 @@ const Layout: React.FC<{
                     title={t('common.chrome.collapseSidebar')}
                     aria-label={t('common.chrome.collapseSidebar')}
                   >
-                    <SidebarIcon size={18} strokeWidth={2.5} />
+                    <SidebarIcon
+                      size={18}
+                      strokeWidth={2.5}
+                      style={{ display: 'inline-block', verticalAlign: 'middle' }}
+                    />
                   </button>
                 )}
                 {/* 侧栏折叠改由标题栏统一控制 / Sidebar folding handled by Titlebar toggle */}
