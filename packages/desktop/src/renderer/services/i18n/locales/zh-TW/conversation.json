@@ -1377,8 +1377,6 @@
       "updateFailed": "無法更新專案模型選擇。"
     },
     "brief": {
-      "composerPlaceholder": "描述你想製作的影片…",
-      "composerSend": "傳送",
       "conversationTitle": "簡報對話",
       "danglingNotice": "此專案的簡報對話已無法使用。",
       "danglingStartFresh": "開始新對話",
@@ -1411,6 +1409,7 @@
     "shell": {
       "showDirector": "顯示創意總監",
       "hideDirector": "隱藏創意總監",
+      "directorStarting": "正在啟動創意總監…",
       "directorName": "創意總監",
       "sameConversation": "與簡報同一個對話"
     }

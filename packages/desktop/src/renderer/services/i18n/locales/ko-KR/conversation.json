@@ -1377,8 +1377,6 @@
       "updateFailed": "프로젝트 모델 선택을 업데이트할 수 없습니다."
     },
     "brief": {
-      "composerPlaceholder": "원하는 동영상을 설명하세요…",
-      "composerSend": "보내기",
       "conversationTitle": "브리프 대화",
       "danglingNotice": "이 프로젝트의 브리프 대화를 더 이상 사용할 수 없습니다.",
       "danglingStartFresh": "새 대화 시작",
@@ -1411,6 +1409,7 @@
     "shell": {
       "showDirector": "크리에이티브 디렉터 표시",
       "hideDirector": "크리에이티브 디렉터 숨기기",
+      "directorStarting": "크리에이티브 디렉터를 준비하는 중…",
       "directorName": "크리에이티브 디렉터",
       "sameConversation": "브리프와 같은 대화"
     }

@@ -6,13 +6,25 @@
 
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ISessionMcpServer, TChatConversation, TProviderWithModel } from '@/common/config/storage';
+import type { IProvider, ISessionMcpServer, TChatConversation, TProviderWithModel } from '@/common/config/storage';
 import type { StudioRendererProject } from '@/common/types/project/creativeStudioTypes';
 import { isBuiltinImageGenTransport } from '@process/resources/builtinMcp/constants';
+
+const provider: IProvider = {
+  id: 'provider_1',
+  name: 'Provider',
+  platform: 'openai',
+  baseUrl: 'https://example.invalid',
+  apiKey: 'key',
+  models: ['model_1'],
+} as IProvider;
 
 const harness = vi.hoisted(() => ({
   conversations: [] as TChatConversation[],
   order: [] as string[],
+  currentModel: undefined as TProviderWithModel | undefined,
+  modelList: [] as unknown[],
+  providersResolved: true,
   descriptorInvoke: vi.fn(),
   createInvoke: vi.fn(),
   bindInvoke: vi.fn(),
@@ -37,12 +49,19 @@ vi.mock('@/renderer/hooks/context/ConversationHistoryContext', () => ({
 }));
 
 vi.mock('@/renderer/pages/guid/hooks/useGuidModelSelection', () => ({
-  useGuidModelSelection: () => ({
-    current_model: { id: 'provider_1', name: 'Provider', use_model: 'model_1' } as TProviderWithModel,
-  }),
+  useGuidModelSelection: () => ({ current_model: harness.currentModel, modelList: harness.modelList }),
 }));
 
-import { useBriefConversation } from '@/renderer/pages/studio/components/PhaseShell/phases/brief/useBriefConversation';
+// The eager start has to tell "no model yet" from "no model ever", and the provider query is the
+// only thing that knows which it is. Nothing else in this hook reads it.
+vi.mock('@/renderer/hooks/agent/useModelProviderList', () => ({
+  useProvidersQuery: () => (harness.providersResolved ? { data: harness.modelList } : {}),
+}));
+
+import {
+  forgetDirectorConversationStart,
+  useBriefConversation,
+} from '@/renderer/pages/studio/components/PhaseShell/phases/brief/useBriefConversation';
 
 const project = (overrides: Partial<StudioRendererProject> = {}): StudioRendererProject => ({
   schemaVersion: 1,
@@ -101,10 +120,19 @@ const AUTO_ATTACH_IDS = [
   'builtin-tavily',
 ] as const;
 
+const storageFailure = {
+  ok: false,
+  error: { code: 'storage_error', messageKey: 'conversation.creativeStudio.errors.storage' },
+} as const;
+
 describe('useBriefConversation', () => {
   beforeEach(() => {
+    forgetDirectorConversationStart();
     harness.conversations = [];
     harness.order = [];
+    harness.currentModel = { id: 'provider_1', name: 'Provider', use_model: 'model_1' } as TProviderWithModel;
+    harness.modelList = [provider];
+    harness.providersResolved = true;
     harness.descriptorInvoke.mockReset().mockImplementation(async () => {
       harness.order.push('descriptor');
       return { ok: true, data: descriptor };
@@ -123,12 +151,18 @@ describe('useBriefConversation', () => {
     });
   });
 
-  it('creates the curated conversation on first send, binds it, and sends the first message', async () => {
+  /**
+   * D5: the conversation exists from the moment the project opens, so the pane can mount the real
+   * chat instead of a stand-in composer. Nothing is sent — the user's first message is the first
+   * message, and it goes through the same composer as every other conversation in the app.
+   */
+  it('creates and binds the curated conversation when the project opens, sending nothing', async () => {
     const rendered = renderHook(() => useBriefConversation(project()));
 
-    await act(() => rendered.result.current.sendFirstMessage('Make me a coffee teaser'));
+    await waitFor(() => expect(rendered.result.current.state.kind).toBe('ready'));
 
-    expect(harness.order).toEqual(['descriptor', 'create', 'bind', 'send']);
+    expect(harness.order).toEqual(['descriptor', 'create', 'bind']);
+    expect(harness.sendInvoke).not.toHaveBeenCalled();
     const createRequest = harness.createInvoke.mock.calls[0][0];
     expect(createRequest.extra).toMatchObject({
       studio_project_id: 'project_1',
@@ -139,13 +173,111 @@ describe('useBriefConversation', () => {
       expectedRevision: 2,
       conversationId: 'conversation_brief',
     });
-    expect(harness.sendInvoke).toHaveBeenCalledWith({
-      input: 'Make me a coffee teaser',
-      conversation_id: 'conversation_brief',
-      files: [],
-      pinned_context: [],
-    });
     expect(rendered.result.current.state).toMatchObject({ kind: 'ready', conversation: { id: 'conversation_brief' } });
+  });
+
+  /**
+   * The guard has to outlive the component. A ref or a render-scoped flag is reset by the remount
+   * this test performs, and the project record has not been rebound yet at that point, so a second
+   * mount would happily create a second conversation for the same project.
+   */
+  it('creates one conversation per project across a remount that races the first attempt', async () => {
+    const first = renderHook(() => useBriefConversation(project()));
+    first.unmount();
+    const second = renderHook(() => useBriefConversation(project()));
+
+    await waitFor(() => expect(second.result.current.state.kind).toBe('ready'));
+
+    expect(harness.createInvoke).toHaveBeenCalledOnce();
+    expect(harness.bindInvoke).toHaveBeenCalledOnce();
+  });
+
+  it('creates one conversation per project for two simultaneous mounts', async () => {
+    const first = renderHook(() => useBriefConversation(project()));
+    const second = renderHook(() => useBriefConversation(project()));
+
+    await waitFor(() => expect(first.result.current.state.kind).toBe('ready'));
+    await waitFor(() => expect(second.result.current.state.kind).toBe('ready'));
+
+    expect(harness.createInvoke).toHaveBeenCalledOnce();
+  });
+
+  it('binds against the revision the project is on when creation finishes, not when it started', async () => {
+    let releaseCreate = (): void => {};
+    harness.createInvoke.mockImplementationOnce(async () => {
+      harness.order.push('create');
+      await new Promise<void>((resolve) => {
+        releaseCreate = resolve;
+      });
+      return exactSnapshotConversation();
+    });
+    const rendered = renderHook((props: StudioRendererProject) => useBriefConversation(props), {
+      initialProps: project(),
+    });
+
+    await waitFor(() => expect(harness.createInvoke).toHaveBeenCalledOnce());
+    rendered.rerender(project({ revision: 7 }));
+    await act(async () => {
+      releaseCreate();
+    });
+
+    await waitFor(() => expect(rendered.result.current.state.kind).toBe('ready'));
+    expect(harness.bindInvoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 7,
+      conversationId: 'conversation_brief',
+    });
+  });
+
+  it('reports a failed start through errorMessageKey and starts over on recreate', async () => {
+    harness.descriptorInvoke.mockImplementationOnce(async () => {
+      harness.order.push('descriptor');
+      return storageFailure;
+    });
+    const rendered = renderHook(() => useBriefConversation(project()));
+
+    await waitFor(() =>
+      expect(rendered.result.current.errorMessageKey).toBe('conversation.creativeStudio.errors.storage')
+    );
+    expect(rendered.result.current.state).toEqual({ kind: 'absent' });
+    expect(harness.createInvoke).not.toHaveBeenCalled();
+
+    act(() => rendered.result.current.recreate());
+
+    await waitFor(() => expect(rendered.result.current.state.kind).toBe('ready'));
+    expect(rendered.result.current.errorMessageKey).toBeNull();
+  });
+
+  it('does not retry a failed start by itself when the project changes underneath it', async () => {
+    harness.descriptorInvoke.mockImplementation(async () => {
+      harness.order.push('descriptor');
+      return storageFailure;
+    });
+    const rendered = renderHook((props: StudioRendererProject) => useBriefConversation(props), {
+      initialProps: project(),
+    });
+
+    await waitFor(() =>
+      expect(rendered.result.current.errorMessageKey).toBe('conversation.creativeStudio.errors.storage')
+    );
+    rendered.rerender(project({ revision: 3 }));
+    rendered.rerender(project({ revision: 4, name: 'Renamed' }));
+
+    await waitFor(() => expect(rendered.result.current.errorMessageKey).not.toBeNull());
+    expect(harness.descriptorInvoke).toHaveBeenCalledOnce();
+  });
+
+  it('surfaces a refused binding as a dangling conversation with its reason', async () => {
+    harness.bindInvoke.mockImplementationOnce(async () => {
+      harness.order.push('bind');
+      return storageFailure;
+    });
+    const rendered = renderHook(() => useBriefConversation(project()));
+
+    await waitFor(() => expect(rendered.result.current.state.kind).toBe('dangling'));
+
+    expect(rendered.result.current.state).toEqual({ kind: 'dangling', conversationId: 'conversation_brief' });
+    expect(rendered.result.current.errorMessageKey).toBe('conversation.creativeStudio.errors.storage');
   });
 
   it('rejects snapshot drift and fences every auto-attach server and image client transport', async () => {
@@ -154,8 +286,9 @@ describe('useBriefConversation', () => {
       name: id,
       transport: { type: 'stdio' as const, command: 'node', args: [`/tmp/${id}.js`] },
     }));
-    harness.createInvoke.mockImplementationOnce(async () =>
-      conversation({
+    harness.createInvoke.mockImplementationOnce(async () => {
+      harness.order.push('create');
+      return conversation({
         backend: 'aionrs',
         workspace: '',
         studio_project_id: 'project_1',
@@ -167,13 +300,11 @@ describe('useBriefConversation', () => {
           status: 'loaded',
         })),
         session_mcp_servers: [descriptor, ...injectedServers],
-      })
-    );
+      });
+    });
     const rendered = renderHook(() => useBriefConversation(project()));
 
-    await expect(act(() => rendered.result.current.sendFirstMessage('Draft it'))).rejects.toThrow(
-      'Curated MCP snapshot drifted after creation'
-    );
+    await waitFor(() => expect(rendered.result.current.errorMessageKey).not.toBeNull());
 
     const persistedSelection = harness.createInvoke.mock.calls[0][0].extra.selected_session_mcp_servers;
     for (const id of AUTO_ATTACH_IDS)
@@ -185,32 +316,54 @@ describe('useBriefConversation', () => {
     expect(persistedSelection[0].transport.args).not.toContain('/tmp/builtin-mcp-vision.js');
     expect(harness.bindInvoke).not.toHaveBeenCalled();
     expect(harness.sendInvoke).not.toHaveBeenCalled();
-  });
-
-  it('creates nothing when Brief opens without a send', () => {
-    const rendered = renderHook(() => useBriefConversation(project()));
-
     expect(rendered.result.current.state).toEqual({ kind: 'absent' });
-    expect(harness.descriptorInvoke).not.toHaveBeenCalled();
-    expect(harness.createInvoke).not.toHaveBeenCalled();
   });
 
-  it('exposes a dangling binding and recreates it on the next send after Start fresh', async () => {
+  it('exposes a dangling binding and creates a replacement after Start fresh', async () => {
     const rendered = renderHook(() => useBriefConversation(project({ briefConversationId: 'conversation_deleted' })));
 
     expect(rendered.result.current.state).toEqual({
       kind: 'dangling',
       conversationId: 'conversation_deleted',
     });
-    act(() => rendered.result.current.recreate());
-    expect(rendered.result.current.state).toEqual({ kind: 'absent' });
+    expect(harness.createInvoke).not.toHaveBeenCalled();
 
-    await act(() => rendered.result.current.sendFirstMessage('Start again'));
+    act(() => rendered.result.current.recreate());
+
     await waitFor(() => expect(rendered.result.current.state.kind).toBe('ready'));
     expect(harness.bindInvoke).toHaveBeenCalledWith({
       projectId: 'project_1',
       expectedRevision: 2,
       conversationId: 'conversation_brief',
     });
+    expect(harness.sendInvoke).not.toHaveBeenCalled();
+  });
+
+  it('waits for the model list to resolve before creating anything', async () => {
+    harness.providersResolved = false;
+    harness.currentModel = undefined;
+    harness.modelList = [];
+    const rendered = renderHook(() => useBriefConversation(project()));
+
+    expect(rendered.result.current.state).toEqual({ kind: 'absent' });
+    expect(rendered.result.current.errorMessageKey).toBeNull();
+    expect(harness.descriptorInvoke).not.toHaveBeenCalled();
+
+    harness.providersResolved = true;
+    harness.currentModel = { id: 'provider_1', name: 'Provider', use_model: 'model_1' } as TProviderWithModel;
+    harness.modelList = [provider];
+    rendered.rerender();
+
+    await waitFor(() => expect(rendered.result.current.state.kind).toBe('ready'));
+  });
+
+  it('says a model is needed rather than spinning forever when none is configured', async () => {
+    harness.currentModel = undefined;
+    harness.modelList = [];
+    const rendered = renderHook(() => useBriefConversation(project()));
+
+    await waitFor(() => expect(rendered.result.current.errorMessageKey).toBe('conversation.noModelConfigured'));
+    expect(harness.descriptorInvoke).not.toHaveBeenCalled();
+    expect(harness.createInvoke).not.toHaveBeenCalled();
   });
 });

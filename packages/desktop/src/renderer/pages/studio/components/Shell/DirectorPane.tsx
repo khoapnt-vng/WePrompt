@@ -4,26 +4,26 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Button, Input } from '@arco-design/web-react';
-import React, { useState } from 'react';
+import { Button, Spin } from '@arco-design/web-react';
+import React from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { StudioConversationSurface } from '../PhaseShell/phases/StudioConversationSurface';
 import { useBriefConversationContext } from './BriefConversationContext';
 import styles from './DirectorPane.module.css';
 
-const MAX_PROJECT_BRIEF_CHARS = 16 * 1024;
-
 /**
  * The Creative Director conversation, mounted once for the whole of Studio.
  *
- * This is the same thread throughout — the header says so, because a user who reaches Write has no
- * other way to know the Director still remembers the brief they wrote.
+ * The pane has no composer of its own. It used to hand-roll one for the state before a conversation
+ * existed, and that stand-in was the entire reason the Director looked unlike the rest of the app:
+ * no attachments, no model picker, no permission selector, no `/` commands, no `@` references, no
+ * history. The conversation is created when the project opens, so the surface — and with it the
+ * real composer, the same component every other conversation uses — is what the user gets.
  *
- * Every state the conversation can be in lives here rather than in a phase: not yet created (the
- * first-message composer), created (the surface), and dangling because the conversation was deleted
- * out from under the project (the offer to start fresh). Splitting these across phases is what
- * previously required two hook instances to agree.
+ * What is left here are the states the conversation itself can be in: starting, started, refused,
+ * and dangling because the conversation was deleted out from under the project. Splitting these
+ * across phases is what previously required two hook instances to agree.
  */
 export type DirectorPaneProps = {
   /**
@@ -37,8 +37,10 @@ export type DirectorPaneProps = {
 export const DirectorPane: React.FC<DirectorPaneProps> = ({ proposals }) => {
   const { t } = useTranslation();
   const conversation = useBriefConversationContext();
-  const [composerText, setComposerText] = useState('');
-  const invalidComposer = composerText.length > MAX_PROJECT_BRIEF_CHARS;
+  const { state, errorMessageKey } = conversation;
+  const dangling = state.kind === 'dangling';
+  /** Nothing to say yet and nothing wrong: the conversation is still being created. */
+  const starting = !dangling && errorMessageKey === null;
 
   return (
     <div className={styles.pane} data-studio-director>
@@ -54,49 +56,38 @@ export const DirectorPane: React.FC<DirectorPaneProps> = ({ proposals }) => {
         </span>
       </div>
 
-      {conversation.state.kind === 'ready' ? (
+      {state.kind === 'ready' ? (
         <div
           role='region'
           aria-label={t('conversation.creativeStudio.brief.conversationTitle')}
           className={styles.surface}
         >
-          <StudioConversationSurface conversation={conversation.state.conversation} />
-        </div>
-      ) : conversation.state.kind === 'dangling' ? (
-        <div className={styles.dangling}>
-          <p>{t('conversation.creativeStudio.brief.danglingNotice')}</p>
-          <Button type='primary' onClick={conversation.recreate}>
-            {t('conversation.creativeStudio.brief.danglingStartFresh')}
-          </Button>
+          <StudioConversationSurface conversation={state.conversation} />
         </div>
       ) : (
-        <div className={styles.composer}>
-          <Input.TextArea
-            value={composerText}
-            error={invalidComposer}
-            maxLength={MAX_PROJECT_BRIEF_CHARS}
-            rows={6}
-            placeholder={t('conversation.creativeStudio.brief.composerPlaceholder')}
-            onChange={setComposerText}
-          />
-          {invalidComposer && (
+        <div className={styles.notice}>
+          {dangling && <p>{t('conversation.creativeStudio.brief.danglingNotice')}</p>}
+          {errorMessageKey !== null && (
             <span role='alert' className={styles.fieldError}>
-              {t('conversation.creativeStudio.errors.invalidPayload')}
+              {t(errorMessageKey)}
             </span>
           )}
-          {conversation.errorMessageKey !== null && (
-            <span role='alert' className={styles.fieldError}>
-              {t(conversation.errorMessageKey)}
+          {starting ? (
+            <span className={styles.starting}>
+              <Spin size={14} />
+              {t('conversation.creativeStudio.shell.directorStarting')}
             </span>
+          ) : (
+            // Both roads lead back to a working Director: one starts a replacement for a
+            // conversation that is gone, the other retries a start that did not finish.
+            <Button type='primary' onClick={conversation.recreate}>
+              {t(
+                dangling
+                  ? 'conversation.creativeStudio.brief.danglingStartFresh'
+                  : 'conversation.creativeStudio.library.retry'
+              )}
+            </Button>
           )}
-          <Button
-            type='primary'
-            loading={conversation.state.kind === 'creating'}
-            disabled={composerText.trim().length === 0 || invalidComposer}
-            onClick={() => void conversation.sendFirstMessage(composerText)}
-          >
-            {t('conversation.creativeStudio.brief.composerSend')}
-          </Button>
         </div>
       )}
 

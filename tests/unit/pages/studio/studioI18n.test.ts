@@ -40,8 +40,6 @@ const plannedGroups = [
 ] as const;
 
 const briefKeys = [
-  'brief.composerPlaceholder',
-  'brief.composerSend',
   'brief.conversationTitle',
   'brief.danglingNotice',
   'brief.danglingStartFresh',
@@ -272,6 +270,7 @@ const streamFullSentenceKeys = [
   'phase.review.handoffDescription',
   'phase.review.partialHandoff',
   'transition.savingBlocked',
+  'shell.directorStarting',
   ...pluralLogicalKeys,
 ] as const;
 

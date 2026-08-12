@@ -70,7 +70,6 @@ const bridge = vi.hoisted(() => ({
 const briefConversationHarness = vi.hoisted(() => ({
   state: { kind: 'absent' } as const,
   errorMessageKey: null as string | null,
-  sendFirstMessage: vi.fn(async () => {}),
   recreate: vi.fn(),
 }));
 

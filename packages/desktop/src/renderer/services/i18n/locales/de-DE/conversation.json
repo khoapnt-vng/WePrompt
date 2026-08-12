@@ -1394,8 +1394,6 @@
       "updateFailed": "Die Modellauswahl des Projekts konnte nicht aktualisiert werden."
     },
     "brief": {
-      "composerPlaceholder": "Beschreiben Sie das gewünschte Video…",
-      "composerSend": "Senden",
       "conversationTitle": "Briefing-Unterhaltung",
       "danglingNotice": "Die Briefing-Unterhaltung dieses Projekts ist nicht mehr verfügbar.",
       "danglingStartFresh": "Neue Unterhaltung beginnen",
@@ -1428,6 +1426,7 @@
     "shell": {
       "showDirector": "Creative Director einblenden",
       "hideDirector": "Creative Director ausblenden",
+      "directorStarting": "Creative Director wird gestartet…",
       "directorName": "Creative Director",
       "sameConversation": "DIESELBE UNTERHALTUNG WIE IHR BRIEFING"
     }

@@ -1415,8 +1415,6 @@
       "updateFailed": "Não foi possível atualizar a seleção de modelo do projeto."
     },
     "brief": {
-      "composerPlaceholder": "Descreva o vídeo que você quer…",
-      "composerSend": "Enviar",
       "conversationTitle": "Conversa do briefing",
       "danglingNotice": "A conversa de briefing deste projeto não está mais disponível.",
       "danglingStartFresh": "Iniciar uma nova conversa",
@@ -1449,6 +1447,7 @@
     "shell": {
       "showDirector": "Mostrar o Creative Director",
       "hideDirector": "Ocultar o Creative Director",
+      "directorStarting": "Iniciando o Creative Director…",
       "directorName": "Creative Director",
       "sameConversation": "A MESMA CONVERSA DO SEU BRIEFING"
     }

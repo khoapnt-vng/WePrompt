@@ -66,7 +66,6 @@ vi.mock('@renderer/pages/studio/components/PhaseShell/phases/brief/useBriefConve
   useBriefConversation: () => ({
     state: { kind: 'absent' },
     errorMessageKey: null,
-    sendFirstMessage: vi.fn(async () => {}),
     recreate: vi.fn(),
   }),
 }));

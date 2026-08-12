@@ -32,7 +32,6 @@ const harness: { result: UseBriefConversationResult } = {
   result: {
     state: { kind: 'absent' },
     errorMessageKey: null,
-    sendFirstMessage: vi.fn(async () => {}),
     recreate: vi.fn(),
   },
 };
@@ -155,7 +154,6 @@ beforeEach(() => {
   harness.result = {
     state: { kind: 'ready', conversation: conversation() },
     errorMessageKey: null,
-    sendFirstMessage: vi.fn(async () => {}),
     recreate: vi.fn(),
   };
 });

@@ -1425,8 +1425,6 @@
       "updateFailed": "Не вдалося оновити вибір моделі проєкту."
     },
     "brief": {
-      "composerPlaceholder": "Опишіть потрібне відео…",
-      "composerSend": "Надіслати",
       "conversationTitle": "Обговорення брифу",
       "danglingNotice": "Обговорення брифу для цього проєкту більше недоступне.",
       "danglingStartFresh": "Почати нове обговорення",
@@ -1459,6 +1457,7 @@
     "shell": {
       "showDirector": "Показати креативного директора",
       "hideDirector": "Сховати креативного директора",
+      "directorStarting": "Запускаємо креативного директора…",
       "directorName": "Креативний директор",
       "sameConversation": "ТОЙ САМИЙ ДІАЛОГ, ЩО Й БРИФ"
     }

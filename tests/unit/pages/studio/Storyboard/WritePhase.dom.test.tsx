@@ -30,7 +30,6 @@ const writeConversationHarness = vi.hoisted(() => ({
   result: {
     state: { kind: 'absent' } as { kind: string; conversation?: TChatConversation },
     errorMessageKey: null,
-    sendFirstMessage: vi.fn(async () => {}),
     recreate: vi.fn(),
   },
   messages: [] as string[],

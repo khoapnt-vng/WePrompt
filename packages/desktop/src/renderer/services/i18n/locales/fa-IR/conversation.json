@@ -1393,8 +1393,6 @@
       "updateFailed": "انتخاب مدل پروژه به‌روزرسانی نشد."
     },
     "brief": {
-      "composerPlaceholder": "ویدیوی موردنظر خود را توصیف کنید…",
-      "composerSend": "ارسال",
       "conversationTitle": "گفت‌وگوی بریف",
       "danglingNotice": "گفت‌وگوی بریف این پروژه دیگر در دسترس نیست.",
       "danglingStartFresh": "شروع گفت‌وگوی جدید",
@@ -1427,6 +1425,7 @@
     "shell": {
       "showDirector": "نمایش کارگردان خلاق",
       "hideDirector": "پنهان کردن کارگردان خلاق",
+      "directorStarting": "در حال آماده‌سازی کارگردان خلاق…",
       "directorName": "کارگردان خلاق",
       "sameConversation": "همان گفتگوی بریف شما"
     }

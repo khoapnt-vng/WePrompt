@@ -1377,8 +1377,6 @@
       "updateFailed": "プロジェクトのモデル選択を更新できませんでした。"
     },
     "brief": {
-      "composerPlaceholder": "作りたい動画を説明してください…",
-      "composerSend": "送信",
       "conversationTitle": "ブリーフの会話",
       "danglingNotice": "このプロジェクトのブリーフの会話は利用できなくなりました。",
       "danglingStartFresh": "新しい会話を始める",
@@ -1411,6 +1409,7 @@
     "shell": {
       "showDirector": "クリエイティブディレクターを表示",
       "hideDirector": "クリエイティブディレクターを非表示",
+      "directorStarting": "クリエイティブディレクターを準備しています…",
       "directorName": "クリエイティブディレクター",
       "sameConversation": "ブリーフと同じ会話"
     }

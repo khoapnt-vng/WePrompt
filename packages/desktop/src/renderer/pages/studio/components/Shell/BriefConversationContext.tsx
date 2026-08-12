@@ -34,18 +34,17 @@ export const BriefConversationProvider: React.FC<{ project: StudioRendererProjec
  * Falls back to "no conversation yet" outside a provider rather than throwing.
  *
  * That is not a fudge for tests: `absent` is a real state the UI already renders — a project whose
- * Director conversation has not been created yet shows the first-message composer, and no provider
- * is indistinguishable from that. Throwing would make every isolated phase render a hard error for
- * a situation the components handle correctly.
+ * Director conversation is still being created has nothing to hand the chat surface, and no
+ * provider is indistinguishable from that. Throwing would make every isolated phase render a hard
+ * error for a situation the components handle correctly.
  *
- * It does mean a forgotten provider degrades quietly, so it warns in development. `sendFirstMessage`
- * and `recreate` are inert here by design: with nothing to send to, silently doing nothing is safer
- * than reaching for a conversation that does not exist.
+ * It does mean a forgotten provider degrades quietly, so it warns in development. `recreate` is
+ * inert here by design: with no conversation to replace, silently doing nothing is safer than
+ * reaching for one that does not exist.
  */
 const ABSENT: UseBriefConversationResult = {
   state: { kind: 'absent' },
   errorMessageKey: null,
-  sendFirstMessage: async () => {},
   recreate: () => {},
 };
 

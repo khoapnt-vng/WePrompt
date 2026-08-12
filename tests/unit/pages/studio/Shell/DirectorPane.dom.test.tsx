@@ -17,7 +17,6 @@ const harness: { result: UseBriefConversationResult } = {
   result: {
     state: { kind: 'absent' },
     errorMessageKey: null,
-    sendFirstMessage: vi.fn(async () => {}),
     recreate: vi.fn(),
   },
 };
@@ -38,7 +37,6 @@ beforeEach(() => {
   harness.result = {
     state: { kind: 'absent' },
     errorMessageKey: null,
-    sendFirstMessage: vi.fn(async () => {}),
     recreate: vi.fn(),
   };
 });
@@ -84,25 +82,50 @@ describe('DirectorPane', () => {
     expect(harness.result.recreate).toHaveBeenCalledOnce();
   });
 
-  it('offers the first-message composer before a conversation exists', () => {
-    render(<DirectorPane />);
+  /**
+   * D5: the pane owns no composer of its own. It used to hand-roll one for the state before a
+   * conversation existed, and that stand-in had no attachments, no model picker, no permission
+   * selector, no `/` commands, no `@` references and no history — every one of them a difference
+   * from the composer the same user gets in every other conversation in the app. The conversation
+   * is now created when the project opens, so the only composer that can appear here is the real
+   * one, inside the surface.
+   */
+  it.each([
+    ['absent', { kind: 'absent' }],
+    ['creating', { kind: 'creating' }],
+  ] as const)('renders no composer of its own while the conversation is %s', (_label, state) => {
+    harness.result.state = state as UseBriefConversationResult['state'];
 
-    const composer = screen.getByPlaceholderText('conversation.creativeStudio.brief.composerPlaceholder');
-    const send = screen.getByRole('button', { name: 'conversation.creativeStudio.brief.composerSend' });
-    expect(send).toBeDisabled();
+    const { container } = render(<DirectorPane />);
 
-    fireEvent.change(composer, { target: { value: 'A teaser for the launch' } });
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.brief.composerSend' }));
-
-    expect(harness.result.sendFirstMessage).toHaveBeenCalledExactlyOnceWith('A teaser for the launch');
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(container.querySelector('textarea')).toBeNull();
+    expect(screen.queryAllByRole('button')).toEqual([]);
+    expect(screen.getByText('conversation.creativeStudio.shell.directorStarting')).toBeVisible();
   });
 
-  it('surfaces a conversation error beside the composer', () => {
+  it('surfaces a failed start and offers to try again', () => {
     harness.result.errorMessageKey = 'conversation.creativeStudio.errors.storage';
 
     render(<DirectorPane />);
 
     expect(screen.getByRole('alert')).toHaveTextContent('conversation.creativeStudio.errors.storage');
+    expect(screen.queryByText('conversation.creativeStudio.shell.directorStarting')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.library.retry' }));
+    expect(harness.result.recreate).toHaveBeenCalledOnce();
+  });
+
+  it('explains why a binding was refused alongside the offer to start fresh', () => {
+    harness.result.state = { kind: 'dangling', conversationId: 'conversation_orphan' };
+    harness.result.errorMessageKey = 'conversation.creativeStudio.errors.staleProject';
+
+    render(<DirectorPane />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('conversation.creativeStudio.errors.staleProject');
+    expect(screen.getByText('conversation.creativeStudio.brief.danglingNotice')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.brief.danglingStartFresh' })
+    ).toBeInTheDocument();
   });
 
   /**
@@ -146,7 +169,7 @@ describe('DirectorPane', () => {
     expect(container.querySelector(`.${styles.proposals}`)).toBeNull();
     const pane = container.querySelector('[data-studio-director]');
     expect(pane).not.toBeNull();
-    // The composer is the last thing in the pane: no empty container trails it.
-    expect(pane?.lastElementChild).toBe(container.querySelector(`.${styles.composer}`));
+    // The conversation's own column is the last thing in the pane: no empty container trails it.
+    expect(pane?.lastElementChild).toBe(container.querySelector(`.${styles.notice}`));
   });
 });

@@ -1377,8 +1377,6 @@
       "updateFailed": "无法更新项目模型选择。"
     },
     "brief": {
-      "composerPlaceholder": "描述你想制作的视频…",
-      "composerSend": "发送",
       "conversationTitle": "简报对话",
       "danglingNotice": "此项目的简报对话已不可用。",
       "danglingStartFresh": "开始新对话",
@@ -1411,6 +1409,7 @@
     "shell": {
       "showDirector": "显示创意总监",
       "hideDirector": "隐藏创意总监",
+      "directorStarting": "正在启动创意总监…",
       "directorName": "创意总监",
       "sameConversation": "与简报同一个对话"
     }

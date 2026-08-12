@@ -1228,8 +1228,6 @@
       "updateFailed": "The project model selection could not be updated."
     },
     "brief": {
-      "composerPlaceholder": "Describe the video you want…",
-      "composerSend": "Send",
       "conversationTitle": "Brief conversation",
       "danglingNotice": "This project's brief conversation is no longer available.",
       "danglingStartFresh": "Start a new conversation",
@@ -1262,6 +1260,7 @@
     "shell": {
       "showDirector": "Show the Creative Director",
       "hideDirector": "Hide the Creative Director",
+      "directorStarting": "Starting the Creative Director…",
       "directorName": "Creative Director",
       "sameConversation": "SAME CONVERSATION AS YOUR BRIEF"
     }

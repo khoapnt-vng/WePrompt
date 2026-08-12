@@ -19,7 +19,6 @@ const briefConversationHarness = vi.hoisted(() => ({
   result: {
     state: { kind: 'absent' } as { kind: string; conversation?: unknown; conversationId?: string },
     errorMessageKey: null as string | null,
-    sendFirstMessage: vi.fn(async () => {}),
     recreate: vi.fn(),
   },
 }));
@@ -157,7 +156,6 @@ describe('BriefPhase', () => {
   beforeEach(() => {
     briefConversationHarness.result.state = { kind: 'absent' };
     briefConversationHarness.result.errorMessageKey = null;
-    briefConversationHarness.result.sendFirstMessage.mockClear();
     briefConversationHarness.result.recreate.mockClear();
   });
 
