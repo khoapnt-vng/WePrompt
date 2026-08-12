@@ -85,14 +85,6 @@
   width: 152px;
 }
 
-.conversationSurface {
-  display: flex;
-  min-height: 360px;
-  overflow: hidden;
-  border: 1px solid var(--color-border-2);
-  border-radius: 10px;
-}
-
 .proposals {
   display: grid;
   gap: 12px;

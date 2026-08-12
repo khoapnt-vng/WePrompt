@@ -5,6 +5,8 @@
  */
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -380,5 +382,19 @@ describe('BriefPhase', () => {
     render(<BriefPhase controller={controller({ editor: editor({ projectSaveState }) })} />);
 
     expect(screen.getByRole('status')).toHaveTextContent(message);
+  });
+
+  it('leaves no stylesheet behind for the conversation rail it no longer renders', () => {
+    const stylesheet = readFileSync(
+      resolve(
+        process.cwd(),
+        'packages/desktop/src/renderer/pages/studio/components/PhaseShell/phases/brief/BriefPhase.module.css'
+      ),
+      'utf8'
+    );
+
+    // Guards the guard: a wrong path would make the assertion below pass on an empty string.
+    expect(stylesheet).toMatch(/^\.constraintsRow\b/m);
+    expect(stylesheet).not.toMatch(/^\.conversationSurface\b/m);
   });
 });
