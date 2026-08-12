@@ -232,6 +232,15 @@ async function openStudioLibrary(page: Page): Promise<void> {
   await expect(studioLibrary).toBeVisible({ timeout: 15_000 });
 }
 
+/**
+ * Leaves the open project the way the phase header offers. The crumb is named by the words it
+ * shows ("Creative Studio"); where it leads is carried by the breadcrumb landmark around it, so
+ * the button cannot be addressed by the destination.
+ */
+async function leaveStudioProject(page: Page): Promise<void> {
+  await page.getByRole('navigation', { name: 'Back to project library' }).getByRole('button').click();
+}
+
 async function assertStudioInvariants(page: Page): Promise<void> {
   const visibleAlertCount = await page.locator('[role="alert"]:visible').count();
   expect(visibleAlertCount, 'Creative Studio must never show competing alerts').toBeLessThanOrEqual(1);
@@ -548,7 +557,7 @@ test.describe('Creative Studio workspace', () => {
     });
 
     await test.step('show the project card and create a seeded shape directly into Write', async () => {
-      await page.getByRole('button', { name: 'Back to project library' }).click();
+      await leaveStudioProject(page);
       const studioLibrary = page.getByRole('region', { name: 'Creative Studio' });
       await expect(studioLibrary).toBeVisible();
       await expect(studioLibrary.getByRole('button', { name: projectBrief })).toBeVisible();
@@ -587,7 +596,7 @@ test.describe('Creative Studio workspace', () => {
       });
       await assertStudioInvariants(page);
 
-      await page.getByRole('button', { name: 'Back to project library' }).click();
+      await leaveStudioProject(page);
       await expect(studioLibrary.getByText('3 shots written, none rendered', { exact: true })).toBeVisible();
       await expect(studioLibrary.getByText(/^3 shots · 15s ·/)).toBeVisible();
       await assertStudioInvariants(page);

@@ -23,7 +23,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { render } from '@testing-library/react';
+import { render, within } from '@testing-library/react';
 import i18next, { type i18n } from 'i18next';
 import React from 'react';
 import { I18nextProvider } from 'react-i18next';
@@ -68,6 +68,8 @@ const ADVISORY_ROLE = 'alert';
 // The copy the spec asserts on, in the spec's own words.
 const SAVED_TEXT = 'Saved';
 const ADVISORY_TEXT = 'Storyboard timing does not match the project target.';
+const BACK_TO_LIBRARY_NAME = 'Back to project library';
+const CRUMB_NAME = 'Creative Studio';
 
 const project: StudioRendererProject = {
   schemaVersion: 1,
@@ -288,5 +290,19 @@ describe('creative-studio e2e selectors', () => {
 
     expect(document.querySelectorAll(specSelectorFor(ADVISORY_ROLE))).toHaveLength(0);
     expect(document.querySelectorAll(`[role="${ADVISORY_ROLE}"]`).length).toBeGreaterThan(0);
+  });
+
+  /**
+   * The spec leaves a project through the breadcrumb. The crumb is named by its visible text now,
+   * so the destination lives on the landmark — addressing the button by "Back to project library"
+   * matches nothing, and the e2e would sit in a click timeout with no route out of the project.
+   */
+  it('reaches the back affordance through the breadcrumb landmark', async () => {
+    const { getByRole, queryAllByRole } = await renderStudio(null);
+
+    const crumb = within(getByRole('navigation', { name: BACK_TO_LIBRARY_NAME })).getByRole('button');
+
+    expect(crumb).toHaveAccessibleName(CRUMB_NAME);
+    expect(queryAllByRole('button', { name: BACK_TO_LIBRARY_NAME })).toEqual([]);
   });
 });
