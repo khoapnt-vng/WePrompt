@@ -522,7 +522,15 @@ describe('WritePhase', () => {
       expect(directorComposer()).toHaveFocus();
     });
 
-    it('expands a collapsed Director pane and then lands in its composer', () => {
+    /**
+     * The reveal is transient, at inline width just as much as in the overlay.
+     *
+     * Clicking a button in the work panel is a request to see the Director *now*; it is not the
+     * user revisiting the collapse they chose from the shell's own toggle. Persisting `expanded`
+     * here would destroy that choice silently and for good — the pane would come back open on
+     * every later load and nothing would tell them why.
+     */
+    it('expands a collapsed Director pane without touching the stored preference', () => {
       writeConversationHarness.result.state = { kind: 'ready', conversation: directorConversation };
       const { props } = emptyVisualSetup();
       renderInStudioShell(<WritePhase controller={props} />, { collapsed: true });
@@ -534,8 +542,7 @@ describe('WritePhase', () => {
 
       expect(directorPane()).toHaveAttribute('data-collapsed', 'false');
       expect(directorComposer()).toHaveFocus();
-      // Revealing is a choice to see the pane, so it is the user's preference from now on.
-      expect(localStorage.getItem(DIRECTOR_COLLAPSED_KEY)).toBe('0');
+      expect(localStorage.getItem(DIRECTOR_COLLAPSED_KEY)).toBe('1');
     });
 
     it('opens the Director overlay below inline width and lands in its composer', () => {
