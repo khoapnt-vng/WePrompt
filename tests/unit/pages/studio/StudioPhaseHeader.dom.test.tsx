@@ -9,6 +9,7 @@ import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { StudioRendererProject } from '@/common/types/project/creativeStudioTypes';
+import type { StudioPhaseHeaderProps } from '@renderer/pages/studio/components/PhaseShell/StudioPhaseHeader';
 import { StudioPhaseHeader } from '@renderer/pages/studio/components/PhaseShell/StudioPhaseHeader';
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
@@ -67,11 +68,31 @@ describe('StudioPhaseHeader', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Launch film' })).toBeVisible();
   });
 
-  /** The rail is a sibling row now; the header must not host it. */
-  it('does not host the phase rail', () => {
-    render(<StudioPhaseHeader project={project} saveState='saved' onBack={vi.fn()} />);
+  /**
+   * The rail is a sibling row that StudioPhaseShell owns; the header must not host it. Handing
+   * the header a rail-shaped slot is what makes the assertion falsifiable: if the `navigation`
+   * prop is ever restored to this component, the list below renders and this test goes red.
+   */
+  it('does not host the phase rail even when handed one', () => {
+    const HeaderWithLegacyNavigationSlot = StudioPhaseHeader as React.FC<
+      StudioPhaseHeaderProps & { navigation?: React.ReactNode }
+    >;
+
+    render(
+      <HeaderWithLegacyNavigationSlot
+        project={project}
+        saveState='saved'
+        onBack={vi.fn()}
+        navigation={
+          <ol>
+            <li>phase rail</li>
+          </ol>
+        }
+      />
+    );
 
     expect(screen.queryByRole('list')).not.toBeInTheDocument();
+    expect(screen.queryByText('phase rail')).not.toBeInTheDocument();
   });
 
   it('leaves the aspect ratio to the Brief panel rather than restating it as a header chip', () => {
