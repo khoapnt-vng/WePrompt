@@ -317,8 +317,16 @@ describe('StudioDocumentActivity stylesheet references', () => {
   // and prose about a declaration is not a declaration.
   const rules = stylesheet.replace(/\/\*[\s\S]*?\*\//g, '');
 
-  // The live region's own class and every class on an ancestor the component itself styles.
-  const LIVE_REGION_CLASSES = ['activity', 'activityLive'] as const;
+  // The live region's own class, the wrapper the component styles around it, and `.activityItem`,
+  // which `.activityLive` composes: `composes` puts the composed class on the same element at build
+  // time, so a rule written on `.activityItem` reaches the region just as surely as one written on
+  // `.activityLive` — and reaches it under a name that does not mention the region at all.
+  //
+  // The chain does continue — `.activityItem` composes `meta` from StudioTypography.module.css —
+  // and this guard stops at this file. That is deliberate: `meta` is shared typography used
+  // throughout Studio, so hiding it would blank visible text everywhere and be caught on sight,
+  // whereas the failure guarded here is silent by construction.
+  const LIVE_REGION_CLASSES = ['activity', 'activityLive', 'activityItem'] as const;
 
   const rulesTargeting = (className: string): string[] =>
     [...rules.matchAll(RULE)]
