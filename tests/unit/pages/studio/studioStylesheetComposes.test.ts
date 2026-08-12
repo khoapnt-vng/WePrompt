@@ -16,6 +16,10 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const STUDIO_STYLES_ROOT = path.resolve(__dirname, '../../../../packages/desktop/src/renderer/pages/studio');
+const WRITE_STYLESHEET = path.join(
+  STUDIO_STYLES_ROOT,
+  'components/PhaseShell/phases/write/write.module.css'
+);
 const COMPOSES_FROM = /composes:[^;]*from\s+["']([^"']+)["']/g;
 
 const moduleStylesheets = (directory: string): string[] =>
@@ -41,5 +45,32 @@ describe('studio CSS module composes targets', () => {
 
   it('resolves every composes target on disk', () => {
     expect([...new Set(stylesheets.flatMap(unresolvedComposeTargets))]).toEqual([]);
+  });
+});
+
+describe('Studio write table stylesheet', () => {
+  const stylesheet = readFileSync(WRITE_STYLESHEET, 'utf8');
+
+  const declarationsFor = (selector: string): Record<string, string> => {
+    const declarations: Record<string, string> = {};
+    for (const rule of stylesheet.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const selectors = rule[1]!.split(',').map((candidate) => candidate.trim());
+      if (!selectors.includes(selector)) continue;
+      for (const declaration of rule[2]!.matchAll(/([\w-]+)\s*:\s*([^;]+);/g)) {
+        declarations[declaration[1]!] = declaration[2]!.trim();
+      }
+    }
+    return declarations;
+  };
+
+  it('keeps the header and scene cells aligned to the fixed 696px table width', () => {
+    const expected = {
+      'grid-template-columns': '56px 200px 320px 120px',
+      'min-width': '696px',
+    };
+
+    expect(declarationsFor('.tableHeader')).toMatchObject(expected);
+    expect(declarationsFor('.scriptRow')).toMatchObject(expected);
+    expect(declarationsFor('.scriptRowItem')).toMatchObject({ 'min-width': '696px' });
   });
 });
