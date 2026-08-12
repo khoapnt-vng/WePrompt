@@ -526,3 +526,71 @@ describe('getInstallationIntegrityModalActions', () => {
     expect(onRecoverCorruptedDatabase).not.toHaveBeenCalled();
   });
 });
+
+// BUG-017. SQLite code 14 (SQLITE_CANTOPEN) means the database file could not be
+// opened — a permission, path or mount problem. It is not corruption, and the
+// reproduction in docs/design/bug017-runtime-data-access-loss.md shows an intact
+// database answering integrity_check "ok" while every fresh open fails with 14.
+//
+// The consequence for this classifier: an access-loss failure must never be
+// labelled `backend_recoverable_database_corruption`, because that reason is the
+// sole key to the backup-and-rebuild path. There is no rung for code 14 today, so
+// these payloads fall through to the generic bucket — which is the safe answer.
+// The assertion is the invariant rather than the bucket, so adding a proper rung
+// later keeps these green as long as it does not route to corruption.
+describe('classifyBackendStartupFailure — BUG-017 local data access loss', () => {
+  // Constructed from the reproduced SQLite error text, not observed from a live
+  // AionCore build: no reachable build emits a runtime access-loss boundary, so
+  // the exact wire shape is unconfirmed and deliberately varied here.
+  const accessLossPayloads: { label: string; details: Record<string, unknown> }[] = [
+    {
+      label: 'data init reporting code 14',
+      details: {
+        stage: 'data_init',
+        backendBoundaryCode: 'BOOTSTRAP_DATA_INIT_FAILED',
+        backendBoundaryStage: 'database.open',
+        stderrTail: 'sqlite error code 14: unable to open database file',
+      },
+    },
+    {
+      label: 'service init reporting SQLITE_CANTOPEN',
+      details: {
+        stage: 'services.init',
+        backendBoundaryCode: 'BOOTSTRAP_SERVICE_INIT_FAILED',
+        backendBoundaryStage: 'services.init',
+        stderrTail: 'SQLITE_CANTOPEN: unable to open database file',
+      },
+    },
+    {
+      label: 'unstructured transport failure carrying the sqlite message',
+      details: {
+        stage: 'health_timeout',
+        stderrTail: 'Database query failed: unable to open database file (code 14)',
+      },
+    },
+  ];
+
+  it.each(accessLossPayloads)('does not treat $label as recoverable corruption', ({ details }) => {
+    const error = new Error('aioncore failed to serve requests') as Error & {
+      details?: Record<string, unknown>;
+    };
+    error.details = details;
+
+    expect(classifyBackendStartupFailure(error).reason).not.toBe('backend_recoverable_database_corruption');
+  });
+
+  it('still classifies the genuine recoverable-corruption boundary', () => {
+    // Guards the negative cases above against passing vacuously: if the
+    // corruption rung were removed entirely, they would all still be green.
+    const error = new Error('aioncore exited during data init') as Error & {
+      details?: Record<string, unknown>;
+    };
+    error.details = {
+      stage: 'data_init',
+      backendBoundaryCode: 'BOOTSTRAP_DATA_INIT_FAILED',
+      backendBoundaryStage: 'database.recoverable_corruption',
+    };
+
+    expect(classifyBackendStartupFailure(error).reason).toBe('backend_recoverable_database_corruption');
+  });
+});
