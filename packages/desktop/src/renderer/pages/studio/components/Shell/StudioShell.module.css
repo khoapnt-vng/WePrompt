@@ -35,7 +35,9 @@
   visibility: hidden;
 }
 
-.workPanel {
+/* The Director's single DOM home, moved between the pane and the overlay rather than re-created.
+   It carries the pane's layout so the conversation fills whichever container currently holds it. */
+.directorHost {
   display: flex;
   min-width: 0;
   min-height: 0;
@@ -43,10 +45,32 @@
   flex-direction: column;
 }
 
+/* The overlay's own slot: Arco's drawer body is a plain block, so the pane needs a flex column to
+   fill it the way it fills the inline pane. */
+.overlayBody {
+  display: flex;
+  min-width: 0;
+  min-height: 100%;
+  flex-direction: column;
+}
+
+/* `position: relative` is what makes `.paneToggle` land on this panel rather than on whatever
+   positioned ancestor Studio happens to sit inside; the left gutter is the space it floats in, so
+   the toggle never covers the breadcrumb the phase header starts with. */
+.workPanel {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  padding-left: 44px;
+}
+
 .paneToggle {
   position: absolute;
   z-index: 2;
-  top: 12px;
+  top: 14px;
   left: 8px;
 }
 
