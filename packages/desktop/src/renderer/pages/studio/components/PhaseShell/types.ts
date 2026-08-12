@@ -16,6 +16,7 @@ import type {
 import type { UseStoryboardEditorResult } from '../../hooks/useStoryboardEditor';
 import type { UseStudioJobsResult } from '../../hooks/useStudioJobs';
 import type { UseStudioModelsResult } from '../../hooks/useStudioModels';
+import type { UseStudioRenderResult } from '../../hooks/useStudioRender';
 import type { StudioPhaseTransition, StudioWriteFocusIntent } from '../../studioPhaseRoute';
 import type { StudioReadinessSummary } from '../../studioReadiness';
 import type { GenerationBatchReviewRequest, GenerationSingleReviewRequest } from '../Generation/GenerationControls';
@@ -32,6 +33,8 @@ export type StudioPhaseControllers = {
   editor: UseStoryboardEditorResult;
   models: UseStudioModelsResult;
   jobs: UseStudioJobsResult;
+  /** The cut render, held at project scope so it stays observable from any phase. */
+  render: UseStudioRenderResult;
   selectedAsset: StudioAsset | null;
   posterAsset: StudioAsset | null;
   selectedReferenceAsset: StudioAsset | null;
@@ -107,6 +110,7 @@ export type ReviewPhaseController = Pick<
   | 'project'
   | 'readiness'
   | 'editor'
+  | 'render'
   | 'selectedAsset'
   | 'posterAsset'
   | 'advisory'

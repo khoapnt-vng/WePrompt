@@ -115,8 +115,14 @@ const stateFromEvent = (event: StudioRenderProgressEvent): StudioRenderViewState
   }
 };
 
-/** Keeps one project's local render action synchronized with the terminal event stream. */
-export const useStudioRender = (projectId: string): UseStudioRenderResult => {
+/**
+ * Keeps one project's local render action synchronized with the terminal event stream.
+ *
+ * A cut render is a property of the document, not of the view that started it, so this hook is
+ * mounted at project scope and its result is handed down. `projectId` is optional because the
+ * project scope exists before a project id is known, and a hook cannot be called conditionally.
+ */
+export const useStudioRender = (projectId: string | undefined): UseStudioRenderResult => {
   const [state, setState] = useState<StudioRenderViewState>(idleState);
   const projectIdRef = useRef(projectId);
   const requestGenerationRef = useRef(0);
@@ -128,28 +134,31 @@ export const useStudioRender = (projectId: string): UseStudioRenderResult => {
     requestGenerationRef.current = generation;
     renderInFlightRef.current = false;
     setState(idleState());
-    const unsubscribe = ipcBridge.creativeStudio.renderProgress.on((event) => {
-      if (event.projectId !== projectId || requestGenerationRef.current !== generation) return;
-      const next = stateFromEvent(event);
-      setState(
-        event.status === 'running' && !renderInFlightRef.current
-          ? {
-              ...next,
-              errorCode: 'busy',
-              errorMessageKey: RENDER_ERROR_MESSAGE_KEYS.busy,
-              busy: true,
-            }
-          : next
-      );
-    });
+    const unsubscribe =
+      projectId === undefined
+        ? null
+        : ipcBridge.creativeStudio.renderProgress.on((event) => {
+            if (event.projectId !== projectId || requestGenerationRef.current !== generation) return;
+            const next = stateFromEvent(event);
+            setState(
+              event.status === 'running' && !renderInFlightRef.current
+                ? {
+                    ...next,
+                    errorCode: 'busy',
+                    errorMessageKey: RENDER_ERROR_MESSAGE_KEYS.busy,
+                    busy: true,
+                  }
+                : next
+            );
+          });
     return () => {
       if (requestGenerationRef.current === generation) requestGenerationRef.current += 1;
-      unsubscribe();
+      unsubscribe?.();
     };
   }, [projectId]);
 
   const render = useCallback(async (): Promise<void> => {
-    if (renderInFlightRef.current) return;
+    if (projectId === undefined || renderInFlightRef.current) return;
     renderInFlightRef.current = true;
     const requestedProjectId = projectId;
     const generation = requestGenerationRef.current;
@@ -210,7 +219,7 @@ export const useStudioRender = (projectId: string): UseStudioRenderResult => {
   }, [projectId]);
 
   const cancel = useCallback(async (): Promise<void> => {
-    if (!renderInFlightRef.current) return;
+    if (projectId === undefined || !renderInFlightRef.current) return;
     try {
       const result = await ipcBridge.creativeStudio.cancelRender.invoke({ projectId });
       if (result.ok === false && projectIdRef.current === projectId) {

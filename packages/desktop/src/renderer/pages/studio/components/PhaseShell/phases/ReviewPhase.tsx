@@ -11,7 +11,7 @@ import { Button } from '@arco-design/web-react';
 import { isCanonicalStudioGeneratedTake } from '@/common/types/project/creativeStudioCanonicalTake';
 import { openExternalUrl } from '@renderer/utils/platform';
 import { ReviewCut, createManagedStudioAssetUrl, studioShotNumbers } from '../../Preview';
-import { useCutEditor, useStudioRender } from '../../../hooks';
+import { useCutEditor } from '../../../hooks';
 import type { ReviewPhaseController } from '../types';
 import type { StudioLayoutMode } from '../useStudioLayoutMode';
 import styles from './ReviewPhase.module.css';
@@ -23,11 +23,10 @@ export type ReviewPhaseProps = {
 
 export const ReviewPhase: React.FC<ReviewPhaseProps> = ({ controller, layoutMode = 'inline' }) => {
   const { t } = useTranslation();
-  const { readiness, editor, posterAsset, mutationPending, selectVariation } = controller;
+  const { readiness, editor, posterAsset, mutationPending, render, selectVariation } = controller;
   const cutEditor = useCutEditor(controller.project, controller.refreshProject);
   const { project } = cutEditor;
   const missingSlateCount = Math.max(0, readiness.totalSceneCount - readiness.selectedAssetCount);
-  const render = useStudioRender(project.id);
   const canonicalMissingSceneIds = project.sceneOrder.filter((sceneId) => {
     const scene = project.scenes[sceneId];
     const asset = scene?.selectedAssetId === null ? undefined : project.assets[scene?.selectedAssetId ?? ''];
