@@ -321,13 +321,31 @@
   justify-content: center;
 }
 
+/*
+ * The crop region, drawn over the frame and operated by the keyboard.
+ *
+ * `pointer-events: none` is load-bearing. This box is sized from the clip's crop, which starts as
+ * the whole frame, and it sits at z-index 3 directly over the <video> — native play and fullscreen
+ * buttons included. It renders whenever a clip is selected, which is the first thing anyone does in
+ * Review, so taking pointer events made the preview unplayable: the click landed here and this
+ * element has no pointer handler to do anything with it.
+ *
+ * Nothing is lost by declining them. The control is keyboard-only — `onKeyDown` nudges the crop and
+ * there is no drag, resize or click behaviour anywhere on it — and Tab focus is unaffected by
+ * `pointer-events`, so `:focus-visible` below still applies. The trade is that a mouse user can no
+ * longer click the frame to focus the crop group; they Tab to it, and clicking the frame now does
+ * what clicking a video frame should do.
+ *
+ * There is deliberately no `cursor` here: it used to say `move`, promising a drag that was never
+ * implemented, and an element that is not hit-tested cannot show a cursor regardless.
+ */
 .cropOverlay {
   position: absolute;
   z-index: 3;
   box-sizing: border-box;
   border: 2px solid var(--control-handle);
   box-shadow: 0 0 0 999px color-mix(in srgb, var(--bg-10) 38%, transparent);
-  cursor: move;
+  pointer-events: none;
 }
 
 .cropOverlay:focus-visible {

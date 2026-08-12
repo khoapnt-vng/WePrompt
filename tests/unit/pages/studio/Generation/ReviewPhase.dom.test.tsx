@@ -950,6 +950,24 @@ describe('Review phase cut', () => {
     expect(cutStyles).toMatch(/\.slateItem\s*\{[^}]*background-image:\s*var\(--cut-slate-hatch\)/);
     expect(cutStyles).toMatch(/\.trimHandle[^}]*\}[\s\S]*?background:\s*var\(--control-handle\)/);
     expect(cutStyles).toMatch(/\.cropOverlay\s*\{[^}]*border:\s*2px solid var\(--control-handle\)/);
+    /*
+     * The crop overlay must not take pointer events.
+     *
+     * It is sized from the clip's crop, which defaults to the whole frame, and sits at z-index 3
+     * directly over the <video> — including its native play and fullscreen buttons. It renders
+     * whenever a clip is selected, which is the first thing anyone does in Review, so selecting a
+     * clip made the preview unplayable: `document.elementFromPoint` at the video's centre returned
+     * the overlay, not the video. The control is keyboard-only — the element carries `onKeyDown` and
+     * no pointer handler of any kind — so it loses nothing by declining pointer events, and the
+     * nudge test above proves the keyboard path still works.
+     *
+     * jsdom performs no hit testing and mocks CSS modules, so this is only observable in the
+     * stylesheet.
+     */
+    expect(cutStyles).toMatch(/\.cropOverlay\s*\{[^}]*pointer-events:\s*none/);
+    // And no cursor promising a drag: there is no pointer handler to drag with, and a
+    // `pointer-events: none` element is never hit-tested, so its cursor could never show anyway.
+    expect(cutStyles).not.toMatch(/\.cropOverlay\s*\{[^}]*cursor:/);
     expect(cutStyles).toMatch(/\.zeroTick\s*\{[^}]*background:\s*var\(--control-zero-tick\)/);
     expect(cutStyles).toMatch(/\.colourControl[^}]*\.arco-slider-button[^}]*border-color:\s*var\(--control-handle\)/);
     expect(`${cutStyles}\n${footerStyles}`).not.toMatch(/#[\da-f]{3,8}|rgba?\(/i);
