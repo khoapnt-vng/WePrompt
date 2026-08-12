@@ -243,6 +243,7 @@ Do the same. Mount `AionrsChat` from the moment the project opens and **delete t
 composer entirely**. Not a lookalike — the same component. Lookalikes drift.
 
 Two consequences, accepted:
+
 - A conversation record exists per Studio project from open, including projects never used.
 - The MCP set freezes at conversation-create time, so it freezes earlier. For Studio this is
   better: the tool set is fixed before the user types.
