@@ -144,6 +144,27 @@ describe('studio project frame layout', () => {
     expect(Number.parseInt(clear!, 10)).toBeGreaterThanOrEqual(24);
   });
 
+  /**
+   * The glyph is drawn with `stroke: currentColor`, and Arco paints a text Button in the brand
+   * colour, so without an override the toggle renders brand-orange beside a grey breadcrumb and
+   * reads as the loudest control in the row. Arco's own rule is two classes (three with `:hover`)
+   * and outranks a bare module class, so the override only lands if it matches that specificity —
+   * which is why this checks the selector shape and not just that a colour was set somewhere.
+   * jsdom mocks CSS modules and applies no cascade, so no DOM test can see any of it.
+   */
+  it('paints the toggle as chrome, at a specificity that beats Arco text-button colour', () => {
+    const css = readFileSync(SHELL_STYLESHEET, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    const colourRules = [...css.matchAll(RULE)]
+      .filter((rule) => /\.paneToggle(?![\w-])/.test(rule[1]!) && /(?:^|;)\s*color\s*:/.test(rule[2]!))
+      .map((rule) => rule[1]!.trim());
+
+    expect(colourRules).not.toEqual([]);
+    // Every selector that sets the colour must be scoped against Arco's own text-button class,
+    // and the hover state must be covered too or Arco wins it back on hover alone.
+    expect(colourRules.every((selector) => selector.includes('arco-btn-text'))).toBe(true);
+    expect(colourRules.some((selector) => selector.includes(':hover'))).toBe(true);
+  });
+
   /** The gutter is the sum of its parts, so widening the toggle cannot silently eat the clear space. */
   it('builds the work panel gutter from the toggle box and that clear space', () => {
     const padding = valueOf(workPanel, 'padding-left');

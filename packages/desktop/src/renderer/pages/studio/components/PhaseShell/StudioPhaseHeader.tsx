@@ -24,28 +24,6 @@ export type StudioPhaseHeaderProps = {
   actions?: React.ReactNode;
 };
 
-type StudioDocumentSummary = { shotCount: number; durationSeconds: number };
-
-/**
- * What the document contains, as the frame states it beneath the title.
- *
- * `sceneOrder` is the document's own ordering and may repeat an id or name one the scene map
- * no longer holds, so it is walked rather than counted. The total is rounded to a tenth: scene
- * durations are floats, and a subtitle is not the place for their full precision.
- */
-const documentSummary = (project: StudioRendererProject): StudioDocumentSummary => {
-  const seen = new Set<string>();
-  let durationSeconds = 0;
-  for (const sceneId of project.sceneOrder) {
-    if (seen.has(sceneId)) continue;
-    const scene = project.scenes[sceneId];
-    if (scene === undefined) continue;
-    seen.add(sceneId);
-    if (Number.isFinite(scene.durationSeconds)) durationSeconds += scene.durationSeconds;
-  }
-  return { shotCount: seen.size, durationSeconds: Math.round(durationSeconds * 10) / 10 };
-};
-
 const SAVE_STATE_KEYS: Record<SelectedSceneSaveState, string> = {
   saved: 'conversation.creativeStudio.phase.nav.saved',
   dirty: 'conversation.creativeStudio.phase.nav.saving',
@@ -62,7 +40,6 @@ export const StudioPhaseHeader: React.FC<StudioPhaseHeaderProps> = ({
   actions,
 }) => {
   const { t } = useTranslation();
-  const summary = documentSummary(project);
   const [editingName, setEditingName] = React.useState(false);
   const [nameDraft, setNameDraft] = React.useState(project.name);
   const [renamePending, setRenamePending] = React.useState(false);
@@ -165,14 +142,6 @@ export const StudioPhaseHeader: React.FC<StudioPhaseHeaderProps> = ({
               </Tooltip>
             )}
           </h1>
-          <p className={styles.projectSubtitle}>
-            {summary.shotCount === 0
-              ? t('conversation.creativeStudio.phase.shared.documentSummaryEmpty')
-              : t('conversation.creativeStudio.phase.shared.documentSummary', {
-                  count: summary.shotCount,
-                  seconds: summary.durationSeconds,
-                })}
-          </p>
         </div>
       </div>
       <div className={styles.headerMeta}>

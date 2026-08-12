@@ -112,6 +112,24 @@
   left: var(--studio-toggle-inset);
 }
 
+/*
+ * Chrome, not a primary action.
+ *
+ * Arco paints a text Button in the brand colour, and the panel glyph is drawn with
+ * `stroke: currentColor`, so it inherited that and rendered brand-orange next to a grey breadcrumb —
+ * reading as the loudest control in the row. The icon-park chevron it replaced never showed this
+ * because those icons carry their own fill and ignore `currentColor`.
+ *
+ * The doubled `:global` selectors are specificity, not decoration: Arco's own
+ * `.arco-btn-text:not(.arco-btn-disabled)` is two classes and outranks a bare module class, and its
+ * `:hover` variant is three, so both have to be matched or the colour silently does nothing. The
+ * hover background Arco supplies is left alone; only the colour is pinned.
+ */
+.paneToggle:global(.arco-btn-text):not(:global(.arco-btn-disabled)),
+.paneToggle:global(.arco-btn-text):not(:global(.arco-btn-disabled)):hover {
+  color: var(--text-secondary);
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .directorPane {
     transition: width 160ms ease;

@@ -49,27 +49,14 @@
   line-height: 1;
 }
 
-/* Title and subtitle stack as one identity block, so the subtitle sits under the name rather
-   than under the crumb that precedes it. */
+/* The title's own box, kept even though it now holds nothing else: `flex: 1` with `min-width: 0`
+   and `overflow: hidden` is what lets a long project name truncate instead of pushing the row's
+   state and actions off the end. The column stacking it used to need for a subtitle is gone. */
 .headerIdentity {
   display: flex;
   overflow: hidden;
   min-width: 0;
   flex: 1;
-  flex-direction: column;
-  gap: 1px;
-}
-
-/* What the document contains, in the reference's "62 pages" position: quieter than the title,
-   and never the thing the eye lands on first. */
-.projectSubtitle {
-  composes: meta from '../../StudioTypography.module.css';
-  overflow: hidden;
-  margin: 0;
-  padding-inline-start: 4px;
-  color: var(--color-text-3);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .projectTitle {

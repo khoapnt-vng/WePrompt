@@ -66,8 +66,6 @@ const phaseKeys = [
   'phase.nav.saving',
   'phase.shared.backToLibrary',
   'phase.shared.noMediaGeneration',
-  'phase.shared.documentSummary',
-  'phase.shared.documentSummaryEmpty',
   'phase.shared.activityLabel',
   'phase.shared.activityGenerating',
   'phase.shared.activityRendering',
@@ -126,7 +124,6 @@ const phasePluralLogicalKeys = [
   'phase.produce.jobsRunning',
   'phase.review.renderedShots',
   'phase.review.missingSlates',
-  'phase.shared.documentSummary',
   'phase.shared.activityGenerating',
 ] as const;
 
