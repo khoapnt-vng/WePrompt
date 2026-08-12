@@ -906,7 +906,20 @@
         "backToLibrary": "Вернуться к библиотеке проектов",
         "noMediaGeneration": "На этом этапе изображения и видео не создаются.",
         "renameProject": "Переименовать проект",
-        "invalidProjectName": "Введите название проекта."
+        "invalidProjectName": "Введите название проекта.",
+        "documentSummary": "{{count}} кадров · {{seconds}} с",
+        "documentSummary_one": "{{count}} кадр · {{seconds}} с",
+        "documentSummary_few": "{{count}} кадра · {{seconds}} с",
+        "documentSummary_many": "{{count}} кадров · {{seconds}} с",
+        "documentSummary_other": "{{count}} кадра · {{seconds}} с",
+        "documentSummaryEmpty": "Пока нет кадров",
+        "activityLabel": "Активность проекта",
+        "activityGenerating": "{{count}} заданий генерируются",
+        "activityGenerating_one": "{{count}} задание генерируется",
+        "activityGenerating_few": "{{count}} задания генерируются",
+        "activityGenerating_many": "{{count}} заданий генерируются",
+        "activityGenerating_other": "{{count}} задания генерируются",
+        "activityRendering": "Сборка… {{percent}}%"
       },
       "brief": {
         "title": "Бриф",
@@ -916,9 +929,6 @@
         "durationLabel": "Целевая длительность",
         "aspectRatioLabel": "Соотношение сторон",
         "startWriting": "Начать сценарий",
-        "saved": "Все изменения брифа сохранены.",
-        "saving": "Изменения брифа сохраняются...",
-        "unsaved": "Изменения брифа ещё не сохранены.",
         "invalidName": "Введите название проекта, прежде чем продолжить.",
         "aspectLocked": "Соотношение сторон заблокировано",
         "aspectLockedHelp": "После добавления созданных материалов соотношение сторон изменить нельзя."

@@ -903,7 +903,14 @@
         "backToLibrary": "返回项目库",
         "noMediaGeneration": "此步骤不会生成图像或视频。",
         "renameProject": "重命名项目",
-        "invalidProjectName": "请输入项目名称。"
+        "invalidProjectName": "请输入项目名称。",
+        "documentSummary": "{{count}} 个镜头 · {{seconds}} 秒",
+        "documentSummary_other": "{{count}} 个镜头 · {{seconds}} 秒",
+        "documentSummaryEmpty": "尚无镜头",
+        "activityLabel": "项目活动",
+        "activityGenerating": "{{count}} 个生成中",
+        "activityGenerating_other": "{{count}} 个生成中",
+        "activityRendering": "渲染中 {{percent}}%"
       },
       "brief": {
         "title": "简报",
@@ -913,9 +920,6 @@
         "durationLabel": "目标时长",
         "aspectRatioLabel": "宽高比",
         "startWriting": "开始编写",
-        "saved": "简报的所有更改均已保存。",
-        "saving": "正在保存简报更改...",
-        "unsaved": "简报更改尚未保存。",
         "invalidName": "请先输入项目名称再继续。",
         "aspectLocked": "宽高比已锁定",
         "aspectLockedHelp": "添加生成的媒体后，无法更改宽高比。"

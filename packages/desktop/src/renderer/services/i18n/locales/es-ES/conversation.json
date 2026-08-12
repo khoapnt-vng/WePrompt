@@ -906,7 +906,18 @@
         "backToLibrary": "Volver a la biblioteca de proyectos",
         "noMediaGeneration": "Este paso no genera imágenes ni vídeos.",
         "renameProject": "Cambiar nombre del proyecto",
-        "invalidProjectName": "Introduce un nombre de proyecto."
+        "invalidProjectName": "Introduce un nombre de proyecto.",
+        "documentSummary": "{{count}} planos · {{seconds}} s",
+        "documentSummary_one": "{{count}} plano · {{seconds}} s",
+        "documentSummary_many": "{{count}} planos · {{seconds}} s",
+        "documentSummary_other": "{{count}} planos · {{seconds}} s",
+        "documentSummaryEmpty": "Aún no hay planos",
+        "activityLabel": "Actividad del proyecto",
+        "activityGenerating": "{{count}} en generación",
+        "activityGenerating_one": "{{count}} en generación",
+        "activityGenerating_many": "{{count}} en generación",
+        "activityGenerating_other": "{{count}} en generación",
+        "activityRendering": "Renderizando {{percent}}%"
       },
       "brief": {
         "title": "Briefing",
@@ -916,9 +927,6 @@
         "durationLabel": "Duración objetivo",
         "aspectRatioLabel": "Relación de aspecto",
         "startWriting": "Empezar a escribir",
-        "saved": "Todos los cambios del briefing están guardados.",
-        "saving": "Guardando cambios del briefing...",
-        "unsaved": "Los cambios del briefing aún no se han guardado.",
         "invalidName": "Introduce un nombre de proyecto antes de continuar.",
         "aspectLocked": "La relación de aspecto está bloqueada",
         "aspectLockedHelp": "La relación de aspecto no se puede cambiar después de añadir contenido generado."

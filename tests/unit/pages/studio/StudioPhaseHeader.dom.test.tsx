@@ -10,11 +10,36 @@ import path from 'node:path';
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { StudioRendererProject } from '@/common/types/project/creativeStudioTypes';
+import type { StudioRendererProject, StudioScene } from '@/common/types/project/creativeStudioTypes';
 import type { StudioPhaseHeaderProps } from '@renderer/pages/studio/components/PhaseShell/StudioPhaseHeader';
 import { StudioPhaseHeader } from '@renderer/pages/studio/components/PhaseShell/StudioPhaseHeader';
 
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string, values?: Record<string, unknown>) =>
+      values
+        ? `${key}:${Object.entries(values)
+            .map(([name, value]) => `${name}=${String(value)}`)
+            .join(',')}`
+        : key,
+  }),
+}));
+
+const scene = (id: string, durationSeconds: number): StudioScene => ({
+  id,
+  title: id,
+  purpose: '',
+  visualPrompt: '',
+  narration: '',
+  onScreenText: '',
+  mediaKind: 'video',
+  durationSeconds,
+  referenceAssetId: null,
+  selectedAssetId: null,
+  assetIds: [],
+  jobIds: [],
+  reviewState: 'draft',
+});
 
 const project: StudioRendererProject = {
   schemaVersion: 1,
@@ -128,6 +153,129 @@ describe('StudioPhaseHeader', () => {
     const separator = container.querySelector('nav > span[aria-hidden="true"]');
     expect(separator).not.toBeNull();
     expect(separator?.textContent?.trim()).toBe('/');
+  });
+});
+
+/**
+ * The reference app puts "62 pages" under the document title. Studio's honest equivalent is
+ * what the document actually contains — how many shots, and how long they run — which is a
+ * property of the project and therefore identical on every phase.
+ */
+describe('StudioPhaseHeader document subtitle', () => {
+  const withScenes = (): StudioRendererProject => ({
+    ...project,
+    sceneOrder: ['scene-1', 'scene-2', 'scene-3'],
+    scenes: {
+      'scene-1': scene('scene-1', 5),
+      'scene-2': scene('scene-2', 4),
+      'scene-3': scene('scene-3', 7),
+    },
+  });
+
+  it('states the shot count and total duration beneath the title', () => {
+    render(<StudioPhaseHeader project={withScenes()} saveState='saved' onBack={vi.fn()} />);
+
+    expect(
+      screen.getByText('conversation.creativeStudio.phase.shared.documentSummary:count=3,seconds=16')
+    ).toBeVisible();
+  });
+
+  it('says the document is empty rather than counting zero shots', () => {
+    render(<StudioPhaseHeader project={project} saveState='saved' onBack={vi.fn()} />);
+
+    expect(screen.getByText('conversation.creativeStudio.phase.shared.documentSummaryEmpty')).toBeVisible();
+    expect(screen.queryByText(/documentSummary:/)).not.toBeInTheDocument();
+  });
+
+  /**
+   * `sceneOrder` is the document's own ordering and can name an id twice or name one the
+   * scene map no longer holds. Counting it raw would report shots that do not exist.
+   */
+  it('counts each ordered scene once and skips ids the scene map does not hold', () => {
+    const ragged: StudioRendererProject = {
+      ...project,
+      sceneOrder: ['scene-1', 'scene-1', 'scene-missing', 'scene-2'],
+      scenes: { 'scene-1': scene('scene-1', 5), 'scene-2': scene('scene-2', 4) },
+    };
+
+    render(<StudioPhaseHeader project={ragged} saveState='saved' onBack={vi.fn()} />);
+
+    expect(
+      screen.getByText('conversation.creativeStudio.phase.shared.documentSummary:count=2,seconds=9')
+    ).toBeVisible();
+  });
+
+  it('keeps a fractional total legible instead of printing its full precision', () => {
+    const fractional: StudioRendererProject = {
+      ...project,
+      sceneOrder: ['scene-1', 'scene-2'],
+      scenes: { 'scene-1': scene('scene-1', 2.25), 'scene-2': scene('scene-2', 3.1) },
+    };
+
+    render(<StudioPhaseHeader project={fractional} saveState='saved' onBack={vi.fn()} />);
+
+    expect(
+      screen.getByText('conversation.creativeStudio.phase.shared.documentSummary:count=2,seconds=5.4')
+    ).toBeVisible();
+  });
+
+  it('survives a scene whose duration is not a usable number', () => {
+    const broken: StudioRendererProject = {
+      ...project,
+      sceneOrder: ['scene-1', 'scene-2'],
+      scenes: {
+        'scene-1': scene('scene-1', 5),
+        'scene-2': { ...scene('scene-2', 0), durationSeconds: Number.NaN },
+      },
+    };
+
+    render(<StudioPhaseHeader project={broken} saveState='saved' onBack={vi.fn()} />);
+
+    expect(
+      screen.getByText('conversation.creativeStudio.phase.shared.documentSummary:count=2,seconds=5')
+    ).toBeVisible();
+  });
+
+  it('keeps the subtitle visible while the title is being renamed', () => {
+    render(
+      <StudioPhaseHeader
+        project={withScenes()}
+        saveState='saved'
+        onBack={vi.fn()}
+        onRenameProject={vi.fn(async () => true)}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.phase.shared.renameProject' }));
+
+    expect(screen.getByRole('textbox')).toBeVisible();
+    expect(
+      screen.getByText('conversation.creativeStudio.phase.shared.documentSummary:count=3,seconds=16')
+    ).toBeVisible();
+  });
+});
+
+describe('StudioPhaseHeader activity slot', () => {
+  it('carries a project-level activity indicator beside the save state', () => {
+    const { container } = render(
+      <StudioPhaseHeader
+        project={project}
+        saveState='saved'
+        onBack={vi.fn()}
+        activity={<span data-test-activity>2 generating</span>}
+      />
+    );
+
+    const indicator = container.querySelector('[data-test-activity]');
+    expect(indicator).not.toBeNull();
+    // The frame's right-hand cluster, not a bar of its own: same parent as the save chip.
+    expect(indicator?.parentElement).toBe(screen.getByRole('status').parentElement);
+  });
+
+  it('adds no second status region when the frame supplies no activity', () => {
+    render(<StudioPhaseHeader project={project} saveState='saved' onBack={vi.fn()} />);
+
+    expect(screen.getAllByRole('status')).toHaveLength(1);
   });
 });
 

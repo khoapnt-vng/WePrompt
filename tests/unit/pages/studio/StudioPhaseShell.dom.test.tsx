@@ -8,12 +8,14 @@ import { render, screen } from '@testing-library/react';
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { StudioRendererProject } from '@/common/types/project/creativeStudioTypes';
+import type { StudioRendererJob, StudioRendererProject } from '@/common/types/project/creativeStudioTypes';
+import type { StudioPhase } from '@renderer/pages/studio/studioPhaseRoute';
 import { StudioPhaseShell } from '@renderer/pages/studio/components/PhaseShell/StudioPhaseShell';
 import type { StudioPhaseAdvisory, StudioPhaseControllers } from '@renderer/pages/studio/components/PhaseShell/types';
 import type { UseStoryboardEditorResult } from '@renderer/pages/studio/hooks/useStoryboardEditor';
 import type { UseStudioJobsResult } from '@renderer/pages/studio/hooks/useStudioJobs';
 import type { UseStudioModelsResult } from '@renderer/pages/studio/hooks/useStudioModels';
+import type { UseStudioRenderResult } from '@renderer/pages/studio/hooks/useStudioRender';
 
 vi.mock('@renderer/pages/studio/components/PhaseShell/phases/brief/useBriefConversation', () => ({
   useBriefConversation: () => ({
@@ -24,8 +26,48 @@ vi.mock('@renderer/pages/studio/components/PhaseShell/phases/brief/useBriefConve
 }));
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    t: (key: string, values?: Record<string, unknown>) =>
+      values
+        ? `${key}:${Object.entries(values)
+            .map(([name, value]) => `${name}=${String(value)}`)
+            .join(',')}`
+        : key,
+  }),
 }));
+
+const job = (overrides: Partial<StudioRendererJob> = {}): StudioRendererJob => ({
+  id: 'job-1',
+  projectId: 'project-1',
+  sceneId: 'scene-1',
+  status: 'running',
+  provider: { choiceId: 'choice-image', providerId: 'provider-image', model: 'image-model' },
+  outputAssetIds: [],
+  error: null,
+  canCancel: false,
+  canRetryDownload: false,
+  retryOfJobId: null,
+  retryReason: null,
+  duplicateChargeAcknowledged: false,
+  duplicateChargeAcknowledgedAt: null,
+  createdAt: '2026-08-12T00:00:00.000Z',
+  updatedAt: '2026-08-12T00:00:00.000Z',
+  ...overrides,
+});
+
+const idleRender: UseStudioRenderResult = {
+  status: 'idle',
+  progress: 0,
+  clipIndex: null,
+  clipTotal: null,
+  assetId: null,
+  missingSceneIds: null,
+  errorCode: null,
+  errorMessageKey: null,
+  busy: false,
+  render: vi.fn(async () => undefined),
+  cancel: vi.fn(async () => undefined),
+};
 
 const project: StudioRendererProject = {
   schemaVersion: 1,
@@ -118,7 +160,10 @@ const jobs: UseStudioJobsResult = {
   retryDownload: vi.fn(async () => true),
 };
 
-const controller = (advisory: StudioPhaseAdvisory | null): StudioPhaseControllers => ({
+const controller = (
+  advisory: StudioPhaseAdvisory | null,
+  overrides: Partial<StudioPhaseControllers> = {}
+): StudioPhaseControllers => ({
   project,
   proposals: [],
   readiness: {
@@ -131,6 +176,7 @@ const controller = (advisory: StudioPhaseAdvisory | null): StudioPhaseController
   editor,
   models,
   jobs,
+  render: idleRender,
   selectedAsset: null,
   posterAsset: null,
   selectedReferenceAsset: null,
@@ -149,6 +195,7 @@ const controller = (advisory: StudioPhaseAdvisory | null): StudioPhaseController
   selectVariation: vi.fn(async () => undefined),
   clearWriteFocusIntent: vi.fn(),
   openDuplicateChargeConfirmation: vi.fn(),
+  ...overrides,
 });
 
 const renderShell = (advisory: StudioPhaseAdvisory | null) =>
@@ -185,5 +232,45 @@ describe('StudioPhaseShell advisory', () => {
 
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.queryByText('conversation.creativeStudio.review.durationMismatch')).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * The frame owns in-flight document work. Produce's feed and Review's render button are view
+ * detail; the aggregate has to be legible from a phase that renders neither, which is what
+ * these cases assert by mounting Brief.
+ */
+describe('StudioPhaseShell document activity', () => {
+  const renderPhase = (activePhase: StudioPhase, overrides: Partial<StudioPhaseControllers>) =>
+    render(
+      <StudioPhaseShell
+        activePhase={activePhase}
+        controller={controller(null, overrides)}
+        navigationDisabled={false}
+        onBack={vi.fn()}
+      />
+    );
+
+  const activity = (): HTMLElement =>
+    screen.getByRole('status', { name: 'conversation.creativeStudio.phase.shared.activityLabel' });
+
+  it('reports generation running elsewhere in the document while Brief is on screen', () => {
+    renderPhase('brief', {
+      jobs: { ...jobs, jobs: [job({ id: 'job-1' }), job({ id: 'job-2', status: 'queued_remote' })] },
+    });
+
+    expect(activity()).toHaveTextContent(/activityGenerating:count=2(?![\d.])/);
+  });
+
+  it('reports a cut render running elsewhere in the document while Brief is on screen', () => {
+    renderPhase('brief', { render: { ...idleRender, status: 'running', progress: 0.42 } });
+
+    expect(activity()).toHaveTextContent(/activityRendering:percent=42(?![\d.])/);
+  });
+
+  it('keeps the region mounted and silent when the document has no work in flight', () => {
+    renderPhase('brief', {});
+
+    expect(activity()).toBeEmptyDOMElement();
   });
 });

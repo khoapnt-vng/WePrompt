@@ -26,6 +26,7 @@ import { SceneTimeline } from '@renderer/pages/studio/components/SceneTimeline';
 import type { UseStoryboardEditorResult } from '@renderer/pages/studio/hooks/useStoryboardEditor';
 import type { UseStudioJobsResult } from '@renderer/pages/studio/hooks/useStudioJobs';
 import type { UseStudioModelsResult } from '@renderer/pages/studio/hooks/useStudioModels';
+import type { UseStudioRenderResult } from '@renderer/pages/studio/hooks/useStudioRender';
 import { STUDIO_PHASES } from '@renderer/pages/studio/studioPhaseRoute';
 import conversation from '@renderer/services/i18n/locales/en-US/conversation.json';
 
@@ -209,6 +210,20 @@ const phaseController = (): StudioPhaseControllers => {
     retryJob: vi.fn(async () => true),
     retryDownload: vi.fn(async () => true),
   };
+  // Copy under an idle cut render - the state Review showed before the render was hoisted.
+  const cutRender: UseStudioRenderResult = {
+    status: 'idle',
+    progress: 0,
+    clipIndex: null,
+    clipTotal: null,
+    assetId: null,
+    missingSceneIds: null,
+    errorCode: null,
+    errorMessageKey: null,
+    busy: false,
+    render: vi.fn(async () => undefined),
+    cancel: vi.fn(async () => undefined),
+  };
 
   return {
     proposals: [],
@@ -225,6 +240,7 @@ const phaseController = (): StudioPhaseControllers => {
     editor,
     models,
     jobs,
+    render: cutRender,
     selectedAsset: null,
     posterAsset: null,
     selectedReferenceAsset: null,

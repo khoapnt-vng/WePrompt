@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next';
 import type { SelectedSceneSaveState } from '../../hooks/useStoryboardEditor';
 import type { StudioPhase } from '../../studioPhaseRoute';
 import { BriefPhase, ProducePhase, ReviewPhase, WritePhase } from './phases';
+import { StudioDocumentActivity } from './StudioDocumentActivity';
 import { StudioPhaseHeader } from './StudioPhaseHeader';
 import { StudioPhaseNav } from './StudioPhaseNav';
 import type { StudioPhaseControllers } from './types';
@@ -107,6 +108,7 @@ export const StudioPhaseShell: React.FC<StudioPhaseShellProps> = ({
           controller.editor.updateProjectDraft({ name });
           return controller.editor.flushProjectDraft();
         }}
+        activity={<StudioDocumentActivity jobs={controller.jobs.jobs} render={controller.render} />}
         actions={headerAction}
       />
       <StudioPhaseNav

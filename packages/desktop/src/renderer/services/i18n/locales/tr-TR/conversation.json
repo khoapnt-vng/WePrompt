@@ -906,7 +906,16 @@
         "backToLibrary": "Proje kitaplığına dön",
         "noMediaGeneration": "Bu adımda görüntü veya video oluşturulmaz.",
         "renameProject": "Projeyi yeniden adlandır",
-        "invalidProjectName": "Bir proje adı girin."
+        "invalidProjectName": "Bir proje adı girin.",
+        "documentSummary": "{{count}} çekim · {{seconds}} sn",
+        "documentSummary_one": "{{count}} çekim · {{seconds}} sn",
+        "documentSummary_other": "{{count}} çekim · {{seconds}} sn",
+        "documentSummaryEmpty": "Henüz çekim yok",
+        "activityLabel": "Proje etkinliği",
+        "activityGenerating": "{{count}} oluşturuluyor",
+        "activityGenerating_one": "{{count}} oluşturuluyor",
+        "activityGenerating_other": "{{count}} oluşturuluyor",
+        "activityRendering": "İşleniyor {{percent}}%"
       },
       "brief": {
         "title": "Özet",
@@ -916,9 +925,6 @@
         "durationLabel": "Hedef süre",
         "aspectRatioLabel": "En boy oranı",
         "startWriting": "Yazmaya başla",
-        "saved": "Özetteki tüm değişiklikler kaydedildi.",
-        "saving": "Özet değişiklikleri kaydediliyor...",
-        "unsaved": "Özet değişiklikleri henüz kaydedilmedi.",
         "invalidName": "Devam etmeden önce bir proje adı girin.",
         "aspectLocked": "En boy oranı kilitli",
         "aspectLockedHelp": "Oluşturulan medya eklendikten sonra en boy oranı değiştirilemez."

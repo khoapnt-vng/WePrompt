@@ -905,7 +905,16 @@
         "backToLibrary": "Zurück zur Projektbibliothek",
         "noMediaGeneration": "In diesem Schritt werden keine Bilder oder Videos erzeugt.",
         "renameProject": "Projekt umbenennen",
-        "invalidProjectName": "Gib einen Projektnamen ein."
+        "invalidProjectName": "Gib einen Projektnamen ein.",
+        "documentSummary": "{{count}} Shots · {{seconds}} s",
+        "documentSummary_one": "{{count}} Shot · {{seconds}} s",
+        "documentSummary_other": "{{count}} Shots · {{seconds}} s",
+        "documentSummaryEmpty": "Noch keine Shots",
+        "activityLabel": "Projektaktivität",
+        "activityGenerating": "{{count}} werden erzeugt",
+        "activityGenerating_one": "{{count}} wird erzeugt",
+        "activityGenerating_other": "{{count}} werden erzeugt",
+        "activityRendering": "Rendern {{percent}}%"
       },
       "brief": {
         "title": "Briefing",
@@ -915,9 +924,6 @@
         "durationLabel": "Zieldauer",
         "aspectRatioLabel": "Seitenverhältnis",
         "startWriting": "Mit dem Schreiben beginnen",
-        "saved": "Alle Änderungen am Briefing sind gespeichert.",
-        "saving": "Änderungen am Briefing werden gespeichert...",
-        "unsaved": "Die Änderungen am Briefing sind noch nicht gespeichert.",
         "invalidName": "Gib vor dem Fortfahren einen Projektnamen ein.",
         "aspectLocked": "Seitenverhältnis ist gesperrt",
         "aspectLockedHelp": "Nach dem Hinzufügen erzeugter Medien kann das Seitenverhältnis nicht mehr geändert werden."

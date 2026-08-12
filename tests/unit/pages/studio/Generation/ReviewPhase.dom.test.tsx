@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -13,6 +13,7 @@ import type { StudioAsset, StudioRendererProject, StudioScene } from '@/common/t
 import { ReviewPhase } from '@renderer/pages/studio/components/PhaseShell/phases/ReviewPhase';
 import type { ReviewPhaseController } from '@renderer/pages/studio/components/PhaseShell/types';
 import type { UseStoryboardEditorResult } from '@renderer/pages/studio/hooks/useStoryboardEditor';
+import { useStudioRender } from '@renderer/pages/studio/hooks/useStudioRender';
 
 type RenderProgressEvent =
   | { projectId: string; status: 'running'; progress: number; clipIndex?: number; clipTotal?: number }
@@ -244,7 +245,23 @@ const editor = (currentProject: StudioRendererProject, selectedSceneId: string):
   proposeStoryboard: vi.fn(async () => true),
 });
 
-const controller = (selectedSceneId = 'scene-selected'): ReviewPhaseController => {
+type ReviewPhaseTestController = Omit<ReviewPhaseController, 'render'>;
+
+/**
+ * Mounts the cut render where production does - above the phase - and hands it down.
+ *
+ * Review reads the render from its controller, so these tests exercise the real hook against the
+ * mocked bridge without the phase owning the subscription.
+ */
+const ReviewPhaseWithRender: React.FC<{
+  controller: ReviewPhaseTestController;
+  layoutMode?: React.ComponentProps<typeof ReviewPhase>['layoutMode'];
+}> = ({ controller: reviewController, layoutMode }) => {
+  const cutRender = useStudioRender(reviewController.project.id);
+  return <ReviewPhase controller={{ ...reviewController, render: cutRender }} layoutMode={layoutMode} />;
+};
+
+const controller = (selectedSceneId = 'scene-selected'): ReviewPhaseTestController => {
   const currentProject = project();
   return {
     project: currentProject,
@@ -271,7 +288,7 @@ const controller = (selectedSceneId = 'scene-selected'): ReviewPhaseController =
   };
 };
 
-const addSecondClip = (reviewController: ReviewPhaseController): void => {
+const addSecondClip = (reviewController: ReviewPhaseTestController): void => {
   const secondScene = reviewController.project.scenes['scene-slate']!;
   secondScene.selectedAssetId = 'asset-3';
   secondScene.assetIds = ['asset-3'];
@@ -329,7 +346,7 @@ beforeEach(() => {
 
 describe('Review phase cut', () => {
   it('keeps the inspector inline beside a proportional strip in inline mode', () => {
-    const { container } = render(<ReviewPhase controller={controller()} layoutMode='inline' />);
+    const { container } = render(<ReviewPhaseWithRender controller={controller()} layoutMode='inline' />);
 
     expect(container.querySelector('[data-review-cut-layout]')).toHaveAttribute('data-layout', 'inline');
     expect(container.querySelector('[data-review-workspace]')).toHaveAttribute('data-inspector-presentation', 'inline');
@@ -340,7 +357,7 @@ describe('Review phase cut', () => {
   });
 
   it('keeps the stage and strip full width while a selected clip opens a 322px inspector Drawer that Escape closes', async () => {
-    const { container } = render(<ReviewPhase controller={controller()} layoutMode='drawer' />);
+    const { container } = render(<ReviewPhaseWithRender controller={controller()} layoutMode='drawer' />);
 
     expect(container.querySelector('[data-review-cut-layout]')).toHaveAttribute('data-layout', 'drawer');
     expect(container.querySelector('[data-review-workspace]')).toHaveAttribute('data-inspector-presentation', 'drawer');
@@ -383,7 +400,7 @@ describe('Review phase cut', () => {
   });
 
   it('uses fixed 96px strip items, duration labels, and a scroll cue in compact mode', () => {
-    const { container } = render(<ReviewPhase controller={controller()} layoutMode='compact' />);
+    const { container } = render(<ReviewPhaseWithRender controller={controller()} layoutMode='compact' />);
 
     expect(container.querySelector('[data-review-cut-layout]')).toHaveAttribute('data-layout', 'compact');
     const track = container.querySelector('[data-cut-timeline-track]');
@@ -410,7 +427,7 @@ describe('Review phase cut', () => {
       mimeType: 'video/mp4',
       managedAsset: { collection: 'assets', fileName: 'asset-1.mp4' },
     };
-    render(<ReviewPhase controller={reviewController} layoutMode='compact' />);
+    render(<ReviewPhaseWithRender controller={reviewController} layoutMode='compact' />);
     const track = document.querySelector<HTMLElement>('[data-cut-timeline-track]')!;
     vi.spyOn(track, 'getBoundingClientRect').mockReturnValue({
       x: 0,
@@ -433,7 +450,7 @@ describe('Review phase cut', () => {
   it.each(['drawer', 'compact'] as const)('keeps modifier-arrow reorder available in %s mode', async (layoutMode) => {
     const reviewController = controller();
     addSecondClip(reviewController);
-    const { container } = render(<ReviewPhase controller={reviewController} layoutMode={layoutMode} />);
+    const { container } = render(<ReviewPhaseWithRender controller={reviewController} layoutMode={layoutMode} />);
 
     expect(container.querySelector('[data-cut-timeline-track]')).toHaveAttribute('data-layout', layoutMode);
 
@@ -454,7 +471,7 @@ describe('Review phase cut', () => {
   });
 
   it('shows played, untrimmed, and rendered durations with trim and grade marks', () => {
-    const { container } = render(<ReviewPhase controller={controller()} />);
+    const { container } = render(<ReviewPhaseWithRender controller={controller()} />);
 
     expect(screen.getByText('conversation.creativeStudio.phase.review.cut.duration.played:0')).toBeVisible();
     expect(screen.getByText('conversation.creativeStudio.phase.review.cut.duration.untrimmed:5')).toBeVisible();
@@ -468,7 +485,7 @@ describe('Review phase cut', () => {
     const reviewController = controller();
     addSecondClip(reviewController);
 
-    render(<ReviewPhase controller={reviewController} />);
+    render(<ReviewPhaseWithRender controller={reviewController} />);
     fireEvent.keyDown(
       screen.getByRole('button', {
         name: 'conversation.creativeStudio.phase.review.cut.clipAccessible:2,Missing close,5',
@@ -492,7 +509,7 @@ describe('Review phase cut', () => {
   it('uses the same guarded cut permutation for pointer drag reorder', async () => {
     const reviewController = controller();
     addSecondClip(reviewController);
-    render(<ReviewPhase controller={reviewController} />);
+    render(<ReviewPhaseWithRender controller={reviewController} />);
 
     act(() => {
       dnd.onDragEnd?.({ active: { id: 'clip-second' }, over: { id: 'clip-selected' } });
@@ -511,7 +528,7 @@ describe('Review phase cut', () => {
   });
 
   it('keeps the trim handle and typed in point on the same persisted value', async () => {
-    render(<ReviewPhase controller={controller()} />);
+    render(<ReviewPhaseWithRender controller={controller()} />);
     const inHandle = screen.getByRole('slider', {
       name: 'conversation.creativeStudio.phase.review.cut.trimInHandle',
     });
@@ -539,7 +556,7 @@ describe('Review phase cut', () => {
   });
 
   it('shows trim points as rounded seconds instead of raw floating point', () => {
-    render(<ReviewPhase controller={controller()} />);
+    render(<ReviewPhaseWithRender controller={controller()} />);
 
     const trimIn = screen.getByRole('spinbutton', {
       name: 'conversation.creativeStudio.phase.review.cut.trimInField',
@@ -557,7 +574,7 @@ describe('Review phase cut', () => {
   });
 
   it('persists a precisely typed trim point through the same cut edit', async () => {
-    render(<ReviewPhase controller={controller()} />);
+    render(<ReviewPhaseWithRender controller={controller()} />);
 
     fireEvent.change(
       screen.getByRole('spinbutton', {
@@ -583,7 +600,7 @@ describe('Review phase cut', () => {
     ['ArrowRight', false, 0.433],
     ['Home', false, null],
   ] as const)('moves the in handle with %s to the exact persisted value', async (key, shiftKey, expected) => {
-    render(<ReviewPhase controller={controller()} />);
+    render(<ReviewPhaseWithRender controller={controller()} />);
 
     fireEvent.keyDown(
       screen.getByRole('slider', { name: 'conversation.creativeStudio.phase.review.cut.trimInHandle' }),
@@ -604,7 +621,7 @@ describe('Review phase cut', () => {
   });
 
   it('moves the out handle to its clip bound with End', async () => {
-    render(<ReviewPhase controller={controller()} />);
+    render(<ReviewPhaseWithRender controller={controller()} />);
 
     fireEvent.keyDown(
       screen.getByRole('slider', { name: 'conversation.creativeStudio.phase.review.cut.trimOutHandle' }),
@@ -625,13 +642,13 @@ describe('Review phase cut', () => {
   });
 
   it('exposes a visible zero recovery tick for every bipolar colour slider', () => {
-    const { container } = render(<ReviewPhase controller={controller()} />);
+    const { container } = render(<ReviewPhaseWithRender controller={controller()} />);
 
     expect(container.querySelectorAll('[data-control-zero-tick]')).toHaveLength(4);
   });
 
   it('persists colour changes from the slider keyboard path', async () => {
-    render(<ReviewPhase controller={controller()} />);
+    render(<ReviewPhaseWithRender controller={controller()} />);
 
     fireEvent.keyDown(
       screen.getByRole('slider', {
@@ -656,7 +673,7 @@ describe('Review phase cut', () => {
   });
 
   it('nudges the focusable crop overlay and resets trim, crop, and colour together', async () => {
-    render(<ReviewPhase controller={controller()} />);
+    render(<ReviewPhaseWithRender controller={controller()} />);
 
     fireEvent.keyDown(screen.getByRole('group', { name: 'conversation.creativeStudio.phase.review.cut.cropOverlay' }), {
       key: 'ArrowRight',
@@ -702,7 +719,7 @@ describe('Review phase cut', () => {
       width: 960,
       height: 720,
     };
-    render(<ReviewPhase controller={reviewController} />);
+    render(<ReviewPhaseWithRender controller={reviewController} />);
     const scale = screen.getByRole('combobox', { name: 'conversation.creativeStudio.phase.review.cut.scale' });
 
     fireEvent.keyDown(scale, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13 });
@@ -733,7 +750,7 @@ describe('Review phase cut', () => {
     reviewController.project.assets['asset-outside'] = asset('asset-outside', outsideScene.id);
     reviewController.project.cuts!['cut-1']!.orderMode = 'manual';
 
-    const view = render(<ReviewPhase controller={reviewController} />);
+    const view = render(<ReviewPhaseWithRender controller={reviewController} />);
     expect(screen.getByText('conversation.creativeStudio.phase.review.cut.divergence')).toBeVisible();
     const add = screen.getByRole('button', {
       name: 'conversation.creativeStudio.phase.review.cut.addToEnd:Missing close',
@@ -756,7 +773,7 @@ describe('Review phase cut', () => {
     storyboardOutside.selectedAssetId = 'asset-outside';
     storyboardOutside.assetIds = ['asset-outside'];
     storyboardController.project.assets['asset-outside'] = asset('asset-outside', storyboardOutside.id);
-    render(<ReviewPhase controller={storyboardController} />);
+    render(<ReviewPhaseWithRender controller={storyboardController} />);
     expect(screen.queryByText('conversation.creativeStudio.phase.review.cut.outsideTitle')).not.toBeInTheDocument();
   });
 
@@ -770,7 +787,7 @@ describe('Review phase cut', () => {
       mimeType: 'video/mp4',
       managedAsset: { collection: 'assets', fileName: 'asset-1.mp4' },
     };
-    render(<ReviewPhase controller={reviewController} />);
+    render(<ReviewPhaseWithRender controller={reviewController} />);
     const track = document.querySelector<HTMLElement>('[data-cut-timeline-track]')!;
     vi.spyOn(track, 'getBoundingClientRect').mockReturnValue({
       x: 0,
@@ -818,7 +835,7 @@ describe('Review phase cut', () => {
     };
     const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
     const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
-    render(<ReviewPhase controller={reviewController} />);
+    render(<ReviewPhaseWithRender controller={reviewController} />);
     const timeline = screen.getByRole('region', { name: 'conversation.creativeStudio.timeline.title' });
     const track = document.querySelector<HTMLElement>('[data-cut-timeline-track]')!;
     vi.spyOn(track, 'getBoundingClientRect').mockReturnValue({
@@ -857,7 +874,7 @@ describe('Review phase cut', () => {
 
   it('shows the selected take and changes variations with the canonical project revision', () => {
     const reviewController = controller();
-    render(<ReviewPhase controller={reviewController} />);
+    render(<ReviewPhaseWithRender controller={reviewController} />);
 
     expect(screen.getByRole('img', { name: 'conversation.creativeStudio.preview.imageAlt' })).toHaveAttribute(
       'src',
@@ -877,7 +894,7 @@ describe('Review phase cut', () => {
   });
 
   it('shows a labeled scene slate with timing and handoff exclusion when no take is selected', () => {
-    render(<ReviewPhase controller={controller('scene-slate')} />);
+    render(<ReviewPhaseWithRender controller={controller('scene-slate')} />);
 
     const preview = screen.getByRole('region', { name: 'conversation.creativeStudio.preview.title' });
     expect(within(preview).getByText('Missing close')).toBeVisible();
@@ -886,7 +903,7 @@ describe('Review phase cut', () => {
   });
 
   it('keeps every takeless storyboard scene as a labeled slate outside the rendered clip order', () => {
-    const { container } = render(<ReviewPhase controller={controller()} />);
+    const { container } = render(<ReviewPhaseWithRender controller={controller()} />);
 
     expect(container.querySelectorAll('[data-cut-clip-id]')).toHaveLength(1);
     expect(container.querySelectorAll('[data-slate-scene-id]')).toHaveLength(3);
@@ -894,7 +911,7 @@ describe('Review phase cut', () => {
   });
 
   it('labels selected, slate, running, and failed cut states without relying on colour', () => {
-    render(<ReviewPhase controller={controller()} />);
+    render(<ReviewPhaseWithRender controller={controller()} />);
 
     expect(
       screen.getByRole('button', {
@@ -952,7 +969,7 @@ describe('Review phase cut', () => {
   });
 
   it('uses the same neutral fact chip for chosen, trimmed, and graded facts', () => {
-    const { container } = render(<ReviewPhase controller={controller()} />);
+    const { container } = render(<ReviewPhaseWithRender controller={controller()} />);
     const chosen = container.querySelector<HTMLElement>('[data-selected-take-chip]');
     const editMarks = container.querySelectorAll<HTMLElement>('[data-cut-fact-chip]');
 
@@ -965,7 +982,7 @@ describe('Review phase cut', () => {
   });
 
   it('preserves strip-title ellipsis and non-truncating durations, counts, colour labels, and footer action', async () => {
-    const { container } = render(<ReviewPhase controller={controller()} layoutMode='compact' />);
+    const { container } = render(<ReviewPhaseWithRender controller={controller()} layoutMode='compact' />);
     const cutStyles = readFileSync(
       'packages/desktop/src/renderer/pages/studio/components/Preview/CutEditor/cut-editor.module.css',
       'utf8'
@@ -1015,7 +1032,7 @@ describe('Review phase cut', () => {
       filters: [],
     };
     reviewController.project.cuts!['cut-1']!.clipOrder.push('clip-running');
-    const { container } = render(<ReviewPhase controller={reviewController} />);
+    const { container } = render(<ReviewPhaseWithRender controller={reviewController} />);
 
     const timelineItems = [...(container.querySelector('[data-cut-timeline-track] ol')?.children ?? [])].map(
       (item) => item.getAttribute('data-cut-clip-id') ?? item.getAttribute('data-slate-scene-id')
@@ -1029,14 +1046,14 @@ describe('Review phase cut', () => {
       ...reviewController.readiness,
       sceneStatuses: { ...reviewController.readiness.sceneStatuses, 'scene-selected': 'generating' },
     };
-    const { container } = render(<ReviewPhase controller={reviewController} />);
+    const { container } = render(<ReviewPhaseWithRender controller={reviewController} />);
 
     expect(container.querySelector("[data-cut-clip-id='clip-selected']")).not.toBeNull();
     expect(screen.getByText('conversation.creativeStudio.phase.review.renderedShots:1')).toBeVisible();
   });
 
   it('never exposes generation actions in Review', () => {
-    render(<ReviewPhase controller={controller('scene-slate')} />);
+    render(<ReviewPhaseWithRender controller={controller('scene-slate')} />);
 
     expect(
       screen.queryByRole('button', { name: 'conversation.creativeStudio.preview.generateThisScene' })
@@ -1045,7 +1062,7 @@ describe('Review phase cut', () => {
   });
 
   it('keeps the handoff summary with the render action at the foot of the cut', () => {
-    render(<ReviewPhase controller={controller()} />);
+    render(<ReviewPhaseWithRender controller={controller()} />);
 
     const renderFoot = screen.getByRole('contentinfo', {
       name: 'conversation.creativeStudio.phase.review.render.footer',
@@ -1060,7 +1077,7 @@ describe('Review phase cut', () => {
 
   it('shows the render action and a non-blocking missing-take count', () => {
     bridge.renderCut.invoke.mockReturnValueOnce(new Promise(() => {}));
-    render(<ReviewPhase controller={controller()} />);
+    render(<ReviewPhaseWithRender controller={controller()} />);
 
     const action = screen.getByRole('button', { name: 'conversation.creativeStudio.phase.review.render.action' });
     expect(action).toBeEnabled();
@@ -1076,7 +1093,7 @@ describe('Review phase cut', () => {
       error: { code: 'cancelled'; messageKey: string };
     }>();
     bridge.renderCut.invoke.mockReturnValueOnce(pending.promise);
-    render(<ReviewPhase controller={controller()} />);
+    render(<ReviewPhaseWithRender controller={controller()} />);
 
     const action = screen.getByRole('button', { name: 'conversation.creativeStudio.phase.review.render.action' });
     const slot = action.closest('[data-render-state-slot]');
@@ -1110,7 +1127,7 @@ describe('Review phase cut', () => {
   });
 
   it('degrades a legacy running event with no clip fields to percentage only', () => {
-    render(<ReviewPhase controller={controller()} />);
+    render(<ReviewPhaseWithRender controller={controller()} />);
 
     act(() => renderProgressListener?.({ projectId: 'project-1', status: 'running', progress: 0.42 }));
 
@@ -1121,7 +1138,7 @@ describe('Review phase cut', () => {
   });
 
   it('states the busy reason visibly and accessibly before the disabled action is hit', () => {
-    render(<ReviewPhase controller={controller()} />);
+    render(<ReviewPhaseWithRender controller={controller()} />);
 
     act(() =>
       renderProgressListener?.({
@@ -1144,7 +1161,7 @@ describe('Review phase cut', () => {
   });
 
   it('offers only FFmpeg installation for an unavailable renderer', () => {
-    render(<ReviewPhase controller={controller()} />);
+    render(<ReviewPhaseWithRender controller={controller()} />);
     act(() =>
       renderProgressListener?.({
         projectId: 'project-1',
@@ -1165,7 +1182,7 @@ describe('Review phase cut', () => {
   });
 
   it('names the failed clip and offers only a render retry', async () => {
-    render(<ReviewPhase controller={controller()} />);
+    render(<ReviewPhaseWithRender controller={controller()} />);
     act(() =>
       renderProgressListener?.({
         projectId: 'project-1',
@@ -1189,7 +1206,7 @@ describe('Review phase cut', () => {
 
   it('names missing shots and offers only the Produce recovery for no renderable scenes', () => {
     const reviewController = controller();
-    render(<ReviewPhase controller={reviewController} />);
+    render(<ReviewPhaseWithRender controller={reviewController} />);
     act(() =>
       renderProgressListener?.({
         projectId: 'project-1',
@@ -1218,7 +1235,7 @@ describe('Review phase cut', () => {
     ['cancelled', 'conversation.creativeStudio.phase.review.render.errors.cancelled'],
   ] as const)('shows the distinct %s render failure', async (code, messageKey) => {
     bridge.renderCut.invoke.mockResolvedValueOnce({ ok: false, error: { code, messageKey: 'generic-error' } });
-    render(<ReviewPhase controller={controller()} />);
+    render(<ReviewPhaseWithRender controller={controller()} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.phase.review.render.action' }));
 
@@ -1231,7 +1248,7 @@ describe('Review phase cut', () => {
       data: { assetId: string; missingSceneIds: string[] };
     }>();
     bridge.renderCut.invoke.mockReturnValueOnce(pending.promise);
-    render(<ReviewPhase controller={controller()} />);
+    render(<ReviewPhaseWithRender controller={controller()} />);
     fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.phase.review.render.action' }));
 
     act(() =>
@@ -1250,5 +1267,21 @@ describe('Review phase cut', () => {
     );
     pending.resolve({ ok: true, data: { assetId: 'render-1', missingSceneIds: ['scene-slate'] } });
     await waitFor(() => expect(bridge.renderCut.invoke).toHaveBeenCalledOnce());
+  });
+});
+
+describe('Cut render without a project', () => {
+  it('neither subscribes nor spends while the project scope has no id yet', async () => {
+    const { result } = renderHook(() => useStudioRender(undefined));
+
+    await act(async () => {
+      await result.current.render();
+      await result.current.cancel();
+    });
+
+    expect(bridge.renderProgress.on).not.toHaveBeenCalled();
+    expect(bridge.renderCut.invoke).not.toHaveBeenCalled();
+    expect(bridge.cancelRender.invoke).not.toHaveBeenCalled();
+    expect(result.current.status).toBe('idle');
   });
 });

@@ -44,7 +44,7 @@ import { BriefConversationProvider } from './components/Shell/BriefConversationC
 import { DirectorPane } from './components/Shell/DirectorPane';
 import { DirectorProposals, pendingDirectorProposals } from './components/Shell/DirectorProposals';
 import { StudioShell } from './components/Shell/StudioShell';
-import { useStoryboardEditor, useStudioJobs, useStudioModels, useStudioProject } from './hooks';
+import { useStoryboardEditor, useStudioJobs, useStudioModels, useStudioProject, useStudioRender } from './hooks';
 import styles from './StudioPage.module.css';
 import {
   parseStudioPhase,
@@ -279,6 +279,10 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
     reconcileOnSubscribe: true,
   });
   const project = newestProject(studioJobs.project, editor.project, loadedProject);
+  // Project scope, not phase scope: a cut render outlives the Review view that starts it, and
+  // must stay observable while the user works elsewhere in the document. Keyed on the route id
+  // rather than the loaded project so the stream is not re-subscribed once the project arrives.
+  const studioRender = useStudioRender(routeProjectId);
 
   useEffect(() => {
     if (project === null) return;
@@ -1157,6 +1161,7 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
     editor,
     models: studioModels,
     jobs: studioJobs,
+    render: studioRender,
     selectedAsset,
     posterAsset,
     selectedReferenceAsset,

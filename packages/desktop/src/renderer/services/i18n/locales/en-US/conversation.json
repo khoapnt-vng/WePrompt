@@ -739,7 +739,16 @@
         "backToLibrary": "Back to project library",
         "noMediaGeneration": "This step does not generate images or video.",
         "renameProject": "Rename project",
-        "invalidProjectName": "Enter a project name."
+        "invalidProjectName": "Enter a project name.",
+        "documentSummary": "{{count}} shots · {{seconds}}s",
+        "documentSummary_one": "{{count}} shot · {{seconds}}s",
+        "documentSummary_other": "{{count}} shots · {{seconds}}s",
+        "documentSummaryEmpty": "No shots yet",
+        "activityLabel": "Project activity",
+        "activityGenerating": "{{count}} generating",
+        "activityGenerating_one": "{{count}} generating",
+        "activityGenerating_other": "{{count}} generating",
+        "activityRendering": "Rendering {{percent}}%"
       },
       "brief": {
         "title": "Brief",
@@ -749,9 +758,6 @@
         "durationLabel": "Target duration",
         "aspectRatioLabel": "Aspect ratio",
         "startWriting": "Start writing",
-        "saved": "All brief changes are saved.",
-        "saving": "Saving brief changes...",
-        "unsaved": "Brief changes have not been saved.",
         "invalidName": "Enter a project name before continuing.",
         "aspectLocked": "Aspect ratio is locked",
         "aspectLockedHelp": "The aspect ratio cannot change after generated media has been added."

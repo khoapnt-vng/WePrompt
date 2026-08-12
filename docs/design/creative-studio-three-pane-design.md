@@ -326,3 +326,89 @@ Director pane, and the toolbar. That is not obviously wrong — they may govern 
 
 Nothing in D9 may depend on this. The toolbar shell and the progress bar are additive and do
 not touch model routing, so they proceed; the menu's contents wait.
+
+## 11. The architecture, stated plainly (2026-08-12)
+
+Two sentences from the product owner, recorded verbatim because they generate every decision
+so far and the ones still open:
+
+> The Director is an assistant, with Studio MCP capability. Users chat with the Director; the
+> Director can do the work in the Studio workspace.
+>
+> The Studio workspace is an app — a canvas where a video-creation workflow is designed.
+
+### What this means structurally
+
+**Two components, one boundary.**
+
+- **The conversation pane is the app's ordinary assistant surface.** `AionrsChat`, unmodified.
+  Nothing Studio-specific may live in its UI — the Studio-ness enters entirely through the MCP
+  tool set attached to the conversation. (D5 and D7 are this principle applied; D10 removes the
+  last duplicate assistant surface.)
+- **The workspace is a document app.** The document is the CAS-guarded project store; main is
+  its sole writer; the four phases are _views of the document_, not steps of a wizard.
+- **The bridge is a transaction protocol, not shared UI.** Tools PROPOSE; the human ACCEPTS;
+  main writes. Proposal cards are the Director's output and ride beside the conversation.
+
+### The sorting rule
+
+For any piece of chrome, ask what it governs:
+
+1. **The assistant** → conversation pane. (Its model picker already lives in its composer.)
+2. **The document as a whole** — identity, save state, in-flight paid work, advisories,
+   handoff → the app frame, i.e. the D9 toolbar.
+3. **One view's behaviour** — engine facts, per-shot controls, cut resync → that view.
+4. **Nothing (duplicates the assistant)** → delete. (D10, Brief's old column, the stub composer.)
+
+This rule, applied to the 2026-08-12 chrome survey, produces D9 below. It also dissolves the
+model-change ambiguity that forced D11: "change the model" was three different sentences —
+the assistant's model (pane, exists), the document's engines (view, engine bar per D2), and a
+settings handoff (a toolbar menu may carry one without owning either). D11 stays parked; it
+is only smaller now.
+
+### ✅ D9 — The work-area toolbar
+
+**Decided.** One toolbar across the top of the work panel: document identity on the left,
+document state and actions on the right. It replaces `StudioPhaseHeader` (which is the toolbar,
+grown up) rather than sitting beside it.
+
+- **Left:** the existing breadcrumb and inline-rename project title (both already in
+  `StudioPhaseHeader.tsx:78-140`), plus a document subtitle in the reference's "62 pages"
+  position — Studio's honest equivalent is shot count and duration ("5 shots · 15s").
+- **Right:** the SAVED chip (`:143`); a **project-level activity indicator** (see below); the
+  phase primary action (the existing `actions` slot, `StudioPhaseShell.tsx:60-96`); an overflow
+  menu whose contents are **deferred per D11**.
+- **The phase rail stays a second row** for now. It is the app's view switcher, so it belongs
+  to the frame conceptually, but folding it into the bar is layout, not architecture, and the
+  rail is load-bearing for a11y (`aria-current='step'`, completion markers).
+
+**The activity indicator is the substantive new thing.** The survey's verdict: _nothing
+resembling project-level progress exists._ `useStudioJobs` is mounted at page level
+(`StudioPage.tsx:276`) but rendered only inside Produce's feed; cut-render progress is only a
+button label inside Review. The toolbar gets the aggregate — "N generating", "Rendering 42%" —
+with the per-job detail staying where it is (rule 3: the feed is Produce's view detail).
+
+**Prerequisite plumbing, non-optional:** `useStudioRender` is subscribed _inside_
+`ReviewPhase.tsx:30`, so today an in-flight render becomes unobservable the moment the user
+leaves Review. Under the app framing that is a document-level process trapped in a view — the
+subscription hoists to `StudioPage` alongside `useStudioJobs`, and Review consumes it from
+there. This is the survey's most consequential finding.
+
+**What D9 explicitly does not do:**
+
+- Does not touch the engine bar (D2 stands; its spend-relevant facts — `maxDurationSeconds`
+  reshaping the script — must stay ambient in Produce, and `EngineBar.tsx:74` /
+  `ConnectEngineCard.tsx:34` carry Produce's `data-studio-phase-heading` focus target, which
+  must not be orphaned).
+- Does not decide the overflow menu's contents (D11).
+- Does not move Produce's job feed or Review's render controls.
+- Deletes Brief's duplicate save-state readout (`BriefPhase.tsx:177-186`) — rule 2 says the
+  frame owns save state, and two live `role=status` readouts of the same fact is a defect.
+
+**Two survey flags recorded while they are cheap:**
+
+- `GenerationControls.tsx` is dead code (not mounted anywhere) with the same live-looking shape
+  as the SceneCard/StoryboardPanel trap. Candidate for deletion in any nearby slice.
+- `useStudioModels.ts:232` `autoSelectSoleRoute` writes `project.routing` with no user gesture —
+  a deliberate convenience, but it is the one writer that bypasses the propose/accept protocol,
+  and anyone reasoning from "the human approves document writes" must know it exists.

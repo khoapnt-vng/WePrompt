@@ -66,6 +66,11 @@ const phaseKeys = [
   'phase.nav.saving',
   'phase.shared.backToLibrary',
   'phase.shared.noMediaGeneration',
+  'phase.shared.documentSummary',
+  'phase.shared.documentSummaryEmpty',
+  'phase.shared.activityLabel',
+  'phase.shared.activityGenerating',
+  'phase.shared.activityRendering',
   'phase.brief.title',
   'phase.brief.description',
   'phase.brief.nameLabel',
@@ -73,9 +78,6 @@ const phaseKeys = [
   'phase.brief.durationLabel',
   'phase.brief.aspectRatioLabel',
   'phase.brief.startWriting',
-  'phase.brief.saved',
-  'phase.brief.saving',
-  'phase.brief.unsaved',
   'phase.brief.invalidName',
   'phase.brief.aspectLocked',
   'phase.brief.aspectLockedHelp',
@@ -123,6 +125,8 @@ const phasePluralLogicalKeys = [
   'phase.produce.jobsRunning',
   'phase.review.renderedShots',
   'phase.review.missingSlates',
+  'phase.shared.documentSummary',
+  'phase.shared.activityGenerating',
 ] as const;
 
 const closeKeys = [
@@ -462,6 +466,23 @@ describe('Creative Studio localization contract', () => {
 
     expect(creativeStudio.connection).toBeUndefined();
     expect(JSON.stringify(creativeStudio)).not.toContain('App Operations');
+  });
+
+  /**
+   * The frame's header is the single save-state readout. Brief's copy went with its duplicate
+   * readout; leaving the keys behind would let the duplicate be restored without a translation
+   * round, which is how it comes back.
+   */
+  it('retains no copy for the Brief save-state readout the frame replaced', () => {
+    for (const locale of i18nConfig.supportedLanguages) {
+      const leaves = flattenStringLeaves(loadConversationLocale(locale).creativeStudio);
+
+      for (const key of ['phase.brief.saved', 'phase.brief.saving', 'phase.brief.unsaved'] as const) {
+        expect(leaves[key], `${locale}/${key} must be removed`).toBeUndefined();
+      }
+      // Guards the guard: a wrong lookup shape would make the assertions above vacuous.
+      expect(leaves['phase.brief.startWriting'], `${locale}/phase.brief.startWriting`).toBeTruthy();
+    }
   });
 
   it('explains that imported media also protects a scene from deletion', () => {

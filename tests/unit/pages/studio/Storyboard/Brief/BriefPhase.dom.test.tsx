@@ -371,15 +371,38 @@ describe('BriefPhase', () => {
     ).toBeEnabled();
   });
 
-  it.each([
-    ['saved', 'conversation.creativeStudio.phase.brief.saved'],
-    ['dirty', 'conversation.creativeStudio.phase.brief.unsaved'],
-    ['saving', 'conversation.creativeStudio.phase.brief.saving'],
-    ['failed', 'conversation.creativeStudio.inspector.saveFailed'],
-  ] as const)('announces the %s project draft state', (projectSaveState, message) => {
-    render(<BriefPhase controller={controller({ editor: editor({ projectSaveState }) })} />);
+  /**
+   * Save state is a fact about the whole document, and the frame's header already announces
+   * it in a live region. A second live readout of the same fact makes a screen reader say it
+   * twice on every keystroke, so Brief no longer carries one.
+   */
+  it.each([['saved'], ['dirty'], ['saving'], ['failed']] as const)(
+    'leaves the %s project draft state to the frame rather than announcing it again',
+    (projectSaveState) => {
+      render(<BriefPhase controller={controller({ editor: editor({ projectSaveState }) })} />);
 
-    expect(screen.getByRole('status')).toHaveTextContent(message);
+      expect(screen.queryAllByRole('status')).toEqual([]);
+    }
+  );
+
+  it('keeps the actions the frame does not own', () => {
+    render(
+      <BriefPhase
+        controller={controller({
+          editor: editor({
+            conflict: {
+              operation: 'update_project',
+              code: 'stale_project',
+              messageKey: 'conversation.creativeStudio.errors.staleProject',
+            },
+          }),
+        })}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.phase.brief.startWriting' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.storyboard.retry' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.storyboard.discard' })).toBeVisible();
   });
 
   it('leaves no stylesheet behind for the conversation rail it no longer renders', () => {

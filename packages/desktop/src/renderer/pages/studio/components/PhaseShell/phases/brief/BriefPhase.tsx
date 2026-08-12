@@ -50,12 +50,6 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
   const aspectLocked =
     Object.values(project.assets).some((asset) => asset.managedAsset.collection === 'assets') ||
     Object.values(project.jobs).some((job) => ACTIVE_JOB_STATUSES.has(job.status));
-  const saveStatusKey = {
-    saved: 'conversation.creativeStudio.phase.brief.saved',
-    dirty: 'conversation.creativeStudio.phase.brief.unsaved',
-    saving: 'conversation.creativeStudio.phase.brief.saving',
-    failed: 'conversation.creativeStudio.inspector.saveFailed',
-  } as const;
   const flushIfValid = (): void => {
     if (!hasValidationError) void editor.flushProjectDraft();
   };
@@ -174,16 +168,9 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
           </Button>
         </div>
       )}
+      {/* Save state is the frame's, not this phase's: StudioPhaseHeader carries the one live
+          readout for the whole document. */}
       <footer className={styles.footer}>
-        <span
-          role='status'
-          aria-live='polite'
-          aria-atomic='true'
-          data-state={editor.projectSaveState}
-          className={styles.saveStatus}
-        >
-          {t(saveStatusKey[editor.projectSaveState])}
-        </span>
         <Button
           type='primary'
           loading={startingWrite || editor.projectSaveState === 'saving'}

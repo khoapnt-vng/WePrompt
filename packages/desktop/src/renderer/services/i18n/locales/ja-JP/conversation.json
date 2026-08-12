@@ -903,7 +903,14 @@
         "backToLibrary": "プロジェクト一覧に戻る",
         "noMediaGeneration": "この手順では画像や動画は生成されません。",
         "renameProject": "プロジェクト名を変更",
-        "invalidProjectName": "プロジェクト名を入力してください。"
+        "invalidProjectName": "プロジェクト名を入力してください。",
+        "documentSummary": "{{count}}ショット · {{seconds}}秒",
+        "documentSummary_other": "{{count}}ショット · {{seconds}}秒",
+        "documentSummaryEmpty": "ショットはまだありません",
+        "activityLabel": "プロジェクトの状況",
+        "activityGenerating": "{{count}} 件生成中",
+        "activityGenerating_other": "{{count}} 件生成中",
+        "activityRendering": "レンダリング中 {{percent}}%"
       },
       "brief": {
         "title": "概要",
@@ -913,9 +920,6 @@
         "durationLabel": "目標尺",
         "aspectRatioLabel": "アスペクト比",
         "startWriting": "構成を始める",
-        "saved": "概要の変更はすべて保存されています。",
-        "saving": "概要の変更を保存しています...",
-        "unsaved": "概要の変更はまだ保存されていません。",
         "invalidName": "続行する前にプロジェクト名を入力してください。",
         "aspectLocked": "アスペクト比は固定されています",
         "aspectLockedHelp": "生成済みメディアを追加した後はアスペクト比を変更できません。"

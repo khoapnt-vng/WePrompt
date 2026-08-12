@@ -17,6 +17,7 @@ import type {
   StudioReferenceRequest,
   StudioRendererJob,
   StudioRendererProject,
+  StudioRenderProgressEvent,
   StudioRouteCatalog,
   StudioRouteCatalogEntry,
   StudioScene,
@@ -1053,6 +1054,72 @@ describe('StudioPage and useStudioProject', () => {
 
       await waitFor(() => expect(router.state.location.pathname).toBe('/studio/project-1/brief'));
       expect(router.state.location.pathname).not.toBe('/guid');
+    });
+  });
+
+  describe('Cut render progress at project scope', () => {
+    let emitRenderProgress: ((event: StudioRenderProgressEvent) => void) | undefined;
+
+    beforeEach(() => {
+      emitRenderProgress = undefined;
+      bridge.renderProgress.on.mockImplementation((listener: (event: StudioRenderProgressEvent) => void) => {
+        emitRenderProgress = listener;
+        return () => {
+          if (emitRenderProgress === listener) emitRenderProgress = undefined;
+        };
+      });
+    });
+
+    it('keeps an in-flight cut render observable while the user works in another phase', async () => {
+      // The render never settles, so the only thing that can move its progress is the event
+      // stream - which a view-scoped subscription would have torn down on leaving Review.
+      bridge.renderCut.invoke.mockReturnValue(new Promise(() => {}));
+      const { router } = renderRoute('/studio/project-1/review');
+
+      fireEvent.click(
+        await screen.findByRole('button', { name: 'conversation.creativeStudio.phase.review.render.action' })
+      );
+      expect(
+        screen.getByRole('button', { name: 'conversation.creativeStudio.phase.review.render.progress' })
+      ).toBeDisabled();
+
+      await selectStudioPhase(router, 'produce');
+      act(() =>
+        emitRenderProgress?.({
+          projectId: 'project-1',
+          status: 'running',
+          progress: 0.42,
+          clipIndex: 2,
+          clipTotal: 3,
+        })
+      );
+      await selectStudioPhase(router, 'review');
+
+      const action = await screen.findByRole('button', {
+        name: 'conversation.creativeStudio.phase.review.render.progressWithClip',
+      });
+      expect(action).toBeDisabled();
+      expect(action.closest('[data-render-state-slot]')).toHaveAttribute('data-render-state', 'running');
+    });
+
+    it('subscribes to render progress once for the project rather than once per Review visit', async () => {
+      const { router } = renderRoute('/studio/project-1/review');
+      await screen.findByRole('heading', { level: 2, name: 'conversation.creativeStudio.phase.review.title' });
+
+      await selectStudioPhase(router, 'produce');
+      await selectStudioPhase(router, 'review');
+
+      expect(bridge.renderProgress.on).toHaveBeenCalledOnce();
+    });
+
+    it('releases the render progress subscription when the project shell unmounts', async () => {
+      const { view } = renderRoute('/studio/project-1/review');
+      await screen.findByRole('heading', { level: 2, name: 'conversation.creativeStudio.phase.review.title' });
+      expect(emitRenderProgress).toBeDefined();
+
+      view.unmount();
+
+      expect(emitRenderProgress).toBeUndefined();
     });
   });
 

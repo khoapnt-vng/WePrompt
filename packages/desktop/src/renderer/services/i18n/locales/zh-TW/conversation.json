@@ -903,7 +903,14 @@
         "backToLibrary": "返回專案庫",
         "noMediaGeneration": "此步驟不會產生圖片或影片。",
         "renameProject": "重新命名專案",
-        "invalidProjectName": "請輸入專案名稱。"
+        "invalidProjectName": "請輸入專案名稱。",
+        "documentSummary": "{{count}} 個鏡頭 · {{seconds}} 秒",
+        "documentSummary_other": "{{count}} 個鏡頭 · {{seconds}} 秒",
+        "documentSummaryEmpty": "尚無鏡頭",
+        "activityLabel": "專案活動",
+        "activityGenerating": "{{count}} 個產生中",
+        "activityGenerating_other": "{{count}} 個產生中",
+        "activityRendering": "算繪中 {{percent}}%"
       },
       "brief": {
         "title": "簡報",
@@ -913,9 +920,6 @@
         "durationLabel": "目標時長",
         "aspectRatioLabel": "長寬比",
         "startWriting": "開始編寫",
-        "saved": "簡報的所有變更均已儲存。",
-        "saving": "正在儲存簡報變更...",
-        "unsaved": "簡報變更尚未儲存。",
         "invalidName": "請先輸入專案名稱再繼續。",
         "aspectLocked": "長寬比已鎖定",
         "aspectLockedHelp": "加入產生的媒體後，無法變更長寬比。"
