@@ -279,3 +279,49 @@ Stale proposal card, outcome chips with Reopen, and the pending strip are still 
 were excluded from the walkthrough. The proposal **rationale** field remains blocked on a
 cross-process slice: `StudioProposal` has no such field and `validateProposalRecord`
 exact-matches its keys.
+
+## 10. Audit round 1, continued — D10 and D11 (2026-08-12)
+
+### ✅ D10 — Remove Write's writing assistant
+
+The Director is always on. A second assistant inside Write is a redundant surface offering a
+subset of what the pane beside it already does, and it currently renders as a near-empty
+drawer whose only content is a disabled action and a "currently unavailable" notice.
+
+Delete it: the drawer, its trigger, its styles and its copy.
+
+**⚠️ Two consequences that must be handled in the same change, not after it.**
+
+**1. It is the fallback target of "Suggest visual".** `WritePhase` (fixed in `5bbb371d2`)
+focuses the Director's composer and, when focus does not land — pane collapsed, or overlay
+shut below 1120px — falls back to Write's own assistant. Deleting the assistant without
+redirecting that fallback reintroduces the exact silent no-op `5bbb371d2` fixed.
+
+The new fallback must be to **reveal the Director** — expand the pane, or open the overlay —
+and then focus its composer. That is what "always on" implies, and it removes the need for a
+fallback surface at all. The guard test must assert the reveal, not merely that no error
+occurred.
+
+**2. The drawer owns "Draft storyboard".** This is wired to `editor.proposeStoryboard`, a real
+capability, not just copy. Removing the drawer strands it unless it lands somewhere.
+
+Preferred resolution: **nowhere.** The Director already holds the Studio MCP tools and can
+draft a storyboard conversationally, which is the whole premise of the single-Director model.
+Before deleting, confirm the Director can actually reach that capability — if it cannot, this
+decision blocks on giving it one, because losing drafting entirely is not acceptable.
+
+Note also the observed "Storyboard drafting is currently unavailable" state: drafting is gated
+on configured text-model routing. Whatever replaces the entry point must degrade as legibly.
+
+### 🔶 D11 — Model change in the work-area toolbar: DEFERRED
+
+Explicitly parked by the product owner, recorded so it is a known open question rather than an
+oversight.
+
+A work-area toolbar menu carrying "change model" would make **three** places a model can be
+chosen: Produce's engine bar (which D2 ruled keeps its home), `AionrsChat`'s own picker in the
+Director pane, and the toolbar. That is not obviously wrong — they may govern different things
+— but it is not settled, and D2 would have to be revisited to settle it.
+
+Nothing in D9 may depend on this. The toolbar shell and the progress bar are additive and do
+not touch model routing, so they proceed; the menu's contents wait.
