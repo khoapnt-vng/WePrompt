@@ -68,7 +68,7 @@ const bridge = vi.hoisted(() => ({
 
 const briefConversationHarness = vi.hoisted(() => ({
   state: { kind: 'absent' } as const,
-  errorMessageKey: null,
+  errorMessageKey: null as string | null,
   sendFirstMessage: vi.fn(async () => {}),
   recreate: vi.fn(),
 }));
@@ -421,6 +421,7 @@ describe('StudioPage and useStudioProject', () => {
     bridge.turnCompleted.on.mockReturnValue(() => {});
     bridge.hasUnsavedWork.provider.mockReturnValue(() => {});
     bridge.flushUnsavedWork.provider.mockReturnValue(() => {});
+    briefConversationHarness.errorMessageKey = null;
   });
 
   afterEach(() => {
@@ -888,6 +889,49 @@ describe('StudioPage and useStudioProject', () => {
         'Recoverable local title'
       );
       await waitFor(() => expect(document.activeElement).toHaveAttribute('role', 'alert'));
+    });
+
+    it('recovers focus onto the work panel, never onto an alert in the Director pane', async () => {
+      const opening = scene();
+      // Paced to the target so the shell advisory stays silent and the only alert in the work
+      // panel is the one that explains the refused transition.
+      bridge.getProject.invoke.mockResolvedValue(
+        ok(
+          project('project-1', {
+            targetDurationSeconds: opening.durationSeconds,
+            sceneOrder: [opening.id],
+            scenes: { [opening.id]: opening },
+          })
+        )
+      );
+      bridge.updateScene.invoke.mockResolvedValueOnce(stale());
+      briefConversationHarness.errorMessageKey = 'conversation.creativeStudio.errors.storage';
+      const { resize } = installResizeObserverMock();
+      const { router } = renderRoute('/studio/project-1/write');
+      const titleInput = await screen.findByLabelText('conversation.creativeStudio.inspector.titleLabel');
+      act(() => resize(1121));
+
+      const directorPane = document.querySelector('[data-studio-director]');
+      const workPanel = document.querySelector('[data-studio-work-panel]');
+      if (directorPane === null || workPanel === null) throw new Error('Studio must render both panes inline');
+      // The defect is positional: the Director pane is rendered before the work panel, so the
+      // first `[role="alert"]` in the document is whatever the Director happens to be saying.
+      const directorAlert = within(directorPane as HTMLElement).getByRole('alert');
+      expect(directorPane.compareDocumentPosition(workPanel) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+
+      fireEvent.change(titleInput, { target: { value: 'Recoverable local title' } });
+      fireEvent.click(
+        within(screen.getByRole('navigation', { name: 'conversation.creativeStudio.phase.nav.label' })).getByRole(
+          'button',
+          { name: 'conversation.creativeStudio.phase.nav.produce' }
+        )
+      );
+
+      await waitFor(() => expect(document.activeElement).toHaveAttribute('role', 'alert'));
+      expect(document.activeElement).not.toBe(directorAlert);
+      expect(workPanel.contains(document.activeElement)).toBe(true);
+      expect(document.activeElement).toHaveTextContent('conversation.creativeStudio.errors.staleProject');
+      expect(router.state.location.pathname).toBe('/studio/project-1/write');
     });
 
     it('renders one Brief save-failure alert instead of duplicating it in the shell', async () => {

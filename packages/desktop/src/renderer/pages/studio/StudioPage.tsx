@@ -889,9 +889,19 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
       .catch(() => setExportIssueMessageKey('conversation.creativeStudio.export.latestRenderUnavailable'));
   }, [exportBlocked, project, readiness?.selectedAssetCount]);
 
+  /**
+   * Lands focus on the advisory that explains a refused phase transition.
+   *
+   * Scoped to the work panel, not the document: the Director pane renders before it and has
+   * `role="alert"` spans of its own — an over-length composer, a conversation that could not be
+   * created — plus whatever the mounted conversation surface raises. A document-wide lookup takes
+   * the first alert in order, which is one of those, and drops the user on an unrelated message
+   * instead of the reason their transition was blocked. Worse when the pane is collapsed: those
+   * spans are `visibility: hidden`, where `focus()` does nothing at all and the recovery is lost.
+   */
   const focusRecoveryAlert = useCallback((): void => {
     requestAnimationFrame(() => {
-      const alert = document.querySelector<HTMLElement>('[role="alert"]');
+      const alert = document.querySelector<HTMLElement>('[data-studio-work-panel] [role="alert"]');
       if (alert === null) return;
       alert.tabIndex = -1;
       alert.focus();
