@@ -204,6 +204,23 @@ describe('the Studio brief rules pin', () => {
     expect(payload.updates.extra.context_handoff.pinned_context.map((pin) => pin.id)).toEqual(['pin_user']);
   });
 
+  it('re-syncs the pin when undo restores the previous rule list', async () => {
+    const { rerender } = renderHook(({ rules }: { rules: unknown[] }) => useBriefConversation(project(3, rules)), {
+      initialProps: { rules: [] },
+    });
+
+    await waitFor(() => expect(harness.update).toHaveBeenCalledTimes(1));
+    harness.update.mockClear();
+    rerender({ rules: [rule] });
+
+    await waitFor(() => expect(harness.update).toHaveBeenCalledTimes(1));
+    const payload = harness.update.mock.calls[0][0] as UpdatePayload;
+    const studioPin = payload.updates.extra.context_handoff.pinned_context.find(
+      (pin) => pin.id === 'studio_brief_rules'
+    );
+    expect(studioPin?.content).toContain('No competitor logos.');
+  });
+
   it('does not rewrite the pin when nothing about the rules changed', async () => {
     const { rerender } = renderHook(
       ({ revision }: { revision: number }) => useBriefConversation(project(revision, [rule])),

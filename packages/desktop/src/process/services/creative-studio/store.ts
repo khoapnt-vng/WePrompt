@@ -207,6 +207,7 @@ const PROPOSAL_SCENE_KEYS = new Set([
 ]);
 const BRIEF_RULE_KEYS = new Set(['id', 'scope', 'text', 'predicate', 'createdAt']);
 const BRIEF_RULE_PREDICATE_KEYS = new Set(['kind', 'terms']);
+const RULE_LIST_UNDO_KEYS = new Set(['capturedRevision', 'previousRules']);
 const PROPOSAL_DECISION_KEYS = new Set(['schemaVersion', 'proposalId', 'status', 'decidedAt']);
 const PROPOSAL_SLOT_KEYS = new Set(['schemaVersion', 'proposalId', 'reservedAt']);
 const REFERENCE_REQUEST_SLOT_KEYS = new Set(['schemaVersion', 'requestId', 'reservedAt']);
@@ -423,6 +424,13 @@ const validateBriefRules = (value: unknown): value is StudioBriefRule[] =>
   value.length <= STUDIO_RULE_LIMITS.maxRules &&
   value.every(validateBriefRule) &&
   new Set(value.map((rule) => (rule as StudioBriefRule).id)).size === value.length;
+
+const validateRuleListUndo = (value: unknown): boolean =>
+  value === null ||
+  (isRecord(value) &&
+    hasExactKeys(value, RULE_LIST_UNDO_KEYS) &&
+    isIntegerInRange(value.capturedRevision, 1, Number.MAX_SAFE_INTEGER) &&
+    validateBriefRules(value.previousRules));
 
 const validateStoryboardProposalPayload = (value: Record<string, unknown>): boolean => {
   if (!isRecord(value.scenes) || !hasExactKeys(value, PROPOSAL_STORYBOARD_PAYLOAD_KEYS)) return false;
@@ -984,8 +992,15 @@ const migrateSchemaV1Project = (value: unknown): unknown => {
   // that could otherwise pass validation, which is what makes it safe to validate `rules` as
   // required in the same change.
   const rulesMissing = !Object.hasOwn(value, 'rules');
-  return changed || routing !== value.routing || rulesMissing
-    ? { ...value, jobs, routing, ...(rulesMissing ? { rules: [] } : {}) }
+  const ruleListUndoMissing = !Object.hasOwn(value, 'ruleListUndo');
+  return changed || routing !== value.routing || rulesMissing || ruleListUndoMissing
+    ? {
+        ...value,
+        jobs,
+        routing,
+        ...(rulesMissing ? { rules: [] } : {}),
+        ...(ruleListUndoMissing ? { ruleListUndo: null } : {}),
+      }
     : value;
 };
 
@@ -1033,6 +1048,7 @@ const validateProject = (value: unknown): value is StudioProject => {
     !isNonEmptyString(value.name) ||
     !isString(value.brief) ||
     !validateBriefRules(value.rules) ||
+    !validateRuleListUndo(value.ruleListUndo) ||
     (value.forgeProjectId !== undefined && !isSafeId(value.forgeProjectId)) ||
     (value.briefConversationId !== undefined &&
       value.briefConversationId !== null &&
@@ -1159,6 +1175,7 @@ const createProjectFromInput = (input: CreateStudioProjectInput, id: string, tim
   name: input.name.trim(),
   brief: input.brief,
   rules: [],
+  ruleListUndo: null,
   ...(input.forgeProjectId === undefined ? {} : { forgeProjectId: input.forgeProjectId }),
   briefConversationId: null,
   aspectRatio: input.aspectRatio,

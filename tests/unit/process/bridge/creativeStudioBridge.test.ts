@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   updateModelSelectionProvider: vi.fn(),
   updateProjectProvider: vi.fn(),
   setBriefRulesProvider: vi.fn(),
+  undoBriefRulesProvider: vi.fn(),
   bindBriefConversationProvider: vi.fn(),
   updateCutProvider: vi.fn(),
   placeCutScenesProvider: vi.fn(),
@@ -68,6 +69,7 @@ vi.mock('@/common', () => ({
       updateModelSelection: { provider: mocks.updateModelSelectionProvider },
       updateProject: { provider: mocks.updateProjectProvider },
       setBriefRules: { provider: mocks.setBriefRulesProvider },
+      undoBriefRules: { provider: mocks.undoBriefRulesProvider },
       bindBriefConversation: { provider: mocks.bindBriefConversationProvider },
       updateCut: { provider: mocks.updateCutProvider },
       placeCutScenes: { provider: mocks.placeCutScenesProvider },
@@ -124,6 +126,7 @@ const project: StudioProject = {
   jobs: {},
   routing: { storyboard: null, image: null, video: null },
   rules: [],
+  ruleListUndo: null,
   createdAt: '2026-07-30T00:00:00.000Z',
   updatedAt: '2026-07-30T00:00:00.000Z',
 };
@@ -154,6 +157,7 @@ describe('initCreativeStudioBridge', () => {
         updateModelSelection: vi.fn(async () => project),
         updateProject: vi.fn(async () => project),
         setBriefRules: vi.fn(async () => project),
+        undoBriefRules: vi.fn(async () => project),
         bindBriefConversation: vi.fn(async () => project),
         updateCut: vi.fn(async () => project),
         placeCutScenes: vi.fn(async () => project),
@@ -206,6 +210,7 @@ describe('initCreativeStudioBridge', () => {
     expect(mocks.updateModelSelectionProvider).toHaveBeenCalledOnce();
     expect(mocks.updateProjectProvider).toHaveBeenCalledOnce();
     expect(mocks.setBriefRulesProvider).toHaveBeenCalledOnce();
+    expect(mocks.undoBriefRulesProvider).toHaveBeenCalledOnce();
     expect(mocks.bindBriefConversationProvider).toHaveBeenCalledOnce();
     expect(mocks.updateCutProvider).toHaveBeenCalledOnce();
     expect(mocks.placeCutScenesProvider).toHaveBeenCalledOnce();
@@ -841,6 +846,7 @@ describe('initCreativeStudioBridge', () => {
       ],
       [mocks.updateProjectProvider, { projectId: 'project_1', expectedRevision: 1, name: 'Changed' }],
       [mocks.setBriefRulesProvider, { projectId: 'project_1', expectedRevision: 1, rules: [] }],
+      [mocks.undoBriefRulesProvider, { projectId: 'project_1' }],
       [
         mocks.bindBriefConversationProvider,
         { projectId: 'project_1', expectedRevision: 1, conversationId: 'conversation_brief' },
@@ -889,6 +895,7 @@ describe('initCreativeStudioBridge', () => {
     expect(service.updateModelSelection).toHaveBeenCalledOnce();
     expect(service.updateProject).toHaveBeenCalledOnce();
     expect(service.setBriefRules).toHaveBeenCalledOnce();
+    expect(service.undoBriefRules).toHaveBeenCalledOnce();
     expect(service.bindBriefConversation).toHaveBeenCalledOnce();
     expect(service.updateCut).toHaveBeenCalledOnce();
     expect(service.deleteProject).toHaveBeenCalledOnce();

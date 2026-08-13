@@ -12,9 +12,57 @@ import { StudioRulesDrawer } from '@/renderer/pages/studio/components/Rules';
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 
-const project = (rules: unknown[] = []) => ({ id: 'project_1', revision: 4, rules }) as never;
+const project = (rules: unknown[] = [], ruleListUndo: unknown = null) =>
+  ({ id: 'project_1', revision: 4, rules, ruleListUndo }) as never;
+const noOpUndoRules = async (): Promise<boolean> => true;
 
 describe('StudioRulesDrawer', () => {
+  it('hides undo when no rule-list write is available', () => {
+    render(
+      <StudioRulesDrawer
+        visible
+        project={project()}
+        organisationRules={[]}
+        onClose={vi.fn()}
+        onSetRules={vi.fn()}
+        onUndoRules={noOpUndoRules}
+      />
+    );
+
+    expect(screen.queryByRole('button', { name: 'conversation.creativeStudio.rules.undo' })).not.toBeInTheDocument();
+  });
+
+  it('names the removed rule that undo will restore and invokes one undo', async () => {
+    const onUndoRules = vi.fn(async () => true);
+    render(
+      <StudioRulesDrawer
+        visible
+        project={project([], {
+          capturedRevision: 3,
+          previousRules: [
+            {
+              id: 'rule_1',
+              scope: 'project',
+              text: 'Keep the kits generic.',
+              predicate: null,
+              createdAt: '2026-08-13T00:00:00.000Z',
+            },
+          ],
+        })}
+        organisationRules={[]}
+        onClose={vi.fn()}
+        onSetRules={vi.fn()}
+        onUndoRules={onUndoRules}
+      />
+    );
+
+    expect(screen.getByText('conversation.creativeStudio.rules.undoRemoved')).toBeInTheDocument();
+    expect(screen.getByText('Keep the kits generic.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.rules.undo' }));
+
+    await waitFor(() => expect(onUndoRules).toHaveBeenCalledTimes(1));
+  });
+
   it('lists the locked organisation layer as unremovable and the project rules as removable', () => {
     render(
       <StudioRulesDrawer
@@ -39,6 +87,7 @@ describe('StudioRulesDrawer', () => {
         ]}
         onClose={vi.fn()}
         onSetRules={vi.fn()}
+        onUndoRules={noOpUndoRules}
       />
     );
 
@@ -66,6 +115,7 @@ describe('StudioRulesDrawer', () => {
         organisationRules={[]}
         onClose={vi.fn()}
         onSetRules={onSetRules}
+        onUndoRules={noOpUndoRules}
       />
     );
 
@@ -90,7 +140,14 @@ describe('StudioRulesDrawer', () => {
 
   it('explains what each badge means, so the two enforcement states are not a guess', () => {
     render(
-      <StudioRulesDrawer visible project={project()} organisationRules={[]} onClose={vi.fn()} onSetRules={vi.fn()} />
+      <StudioRulesDrawer
+        visible
+        project={project()}
+        organisationRules={[]}
+        onClose={vi.fn()}
+        onSetRules={vi.fn()}
+        onUndoRules={noOpUndoRules}
+      />
     );
 
     expect(screen.getByText('conversation.creativeStudio.rules.enforcedHelp')).toBeInTheDocument();
@@ -100,7 +157,14 @@ describe('StudioRulesDrawer', () => {
   it('refuses an empty rule and never calls the command', () => {
     const onSetRules = vi.fn(async () => true);
     render(
-      <StudioRulesDrawer visible project={project()} organisationRules={[]} onClose={vi.fn()} onSetRules={onSetRules} />
+      <StudioRulesDrawer
+        visible
+        project={project()}
+        organisationRules={[]}
+        onClose={vi.fn()}
+        onSetRules={onSetRules}
+        onUndoRules={noOpUndoRules}
+      />
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.rules.add' }));
@@ -112,7 +176,14 @@ describe('StudioRulesDrawer', () => {
   it('identifies rule text beyond the shared limit and never calls the command', () => {
     const onSetRules = vi.fn(async () => true);
     render(
-      <StudioRulesDrawer visible project={project()} organisationRules={[]} onClose={vi.fn()} onSetRules={onSetRules} />
+      <StudioRulesDrawer
+        visible
+        project={project()}
+        organisationRules={[]}
+        onClose={vi.fn()}
+        onSetRules={onSetRules}
+        onUndoRules={noOpUndoRules}
+      />
     );
 
     fireEvent.change(screen.getByLabelText('conversation.creativeStudio.rules.textLabel'), {
@@ -127,7 +198,14 @@ describe('StudioRulesDrawer', () => {
   it('identifies more than eight forbidden terms and never calls the command', () => {
     const onSetRules = vi.fn(async () => true);
     render(
-      <StudioRulesDrawer visible project={project()} organisationRules={[]} onClose={vi.fn()} onSetRules={onSetRules} />
+      <StudioRulesDrawer
+        visible
+        project={project()}
+        organisationRules={[]}
+        onClose={vi.fn()}
+        onSetRules={onSetRules}
+        onUndoRules={noOpUndoRules}
+      />
     );
 
     fireEvent.change(screen.getByLabelText('conversation.creativeStudio.rules.textLabel'), {
@@ -145,7 +223,14 @@ describe('StudioRulesDrawer', () => {
   it('identifies a forbidden term beyond the shared limit and never calls the command', () => {
     const onSetRules = vi.fn(async () => true);
     render(
-      <StudioRulesDrawer visible project={project()} organisationRules={[]} onClose={vi.fn()} onSetRules={onSetRules} />
+      <StudioRulesDrawer
+        visible
+        project={project()}
+        organisationRules={[]}
+        onClose={vi.fn()}
+        onSetRules={onSetRules}
+        onUndoRules={noOpUndoRules}
+      />
     );
 
     fireEvent.change(screen.getByLabelText('conversation.creativeStudio.rules.textLabel'), {
@@ -163,7 +248,14 @@ describe('StudioRulesDrawer', () => {
   it('identifies a forbidden term with no matchable token and never calls the command', () => {
     const onSetRules = vi.fn(async () => true);
     render(
-      <StudioRulesDrawer visible project={project()} organisationRules={[]} onClose={vi.fn()} onSetRules={onSetRules} />
+      <StudioRulesDrawer
+        visible
+        project={project()}
+        organisationRules={[]}
+        onClose={vi.fn()}
+        onSetRules={onSetRules}
+        onUndoRules={noOpUndoRules}
+      />
     );
 
     fireEvent.change(screen.getByLabelText('conversation.creativeStudio.rules.textLabel'), {
@@ -181,7 +273,14 @@ describe('StudioRulesDrawer', () => {
   it('identifies matcher-equivalent forbidden terms and never calls the command', () => {
     const onSetRules = vi.fn(async () => true);
     render(
-      <StudioRulesDrawer visible project={project()} organisationRules={[]} onClose={vi.fn()} onSetRules={onSetRules} />
+      <StudioRulesDrawer
+        visible
+        project={project()}
+        organisationRules={[]}
+        onClose={vi.fn()}
+        onSetRules={onSetRules}
+        onUndoRules={noOpUndoRules}
+      />
     );
 
     fireEvent.change(screen.getByLabelText('conversation.creativeStudio.rules.textLabel'), {
@@ -222,6 +321,7 @@ describe('StudioRulesDrawer', () => {
             setRules(drafts.map((draft) => ({ ...draft, scope: 'project', createdAt: '2026-08-13T00:00:00.000Z' })));
             return onSetRules(drafts);
           }}
+          onUndoRules={noOpUndoRules}
         />
       );
     };
@@ -255,6 +355,7 @@ describe('StudioRulesDrawer', () => {
         organisationRules={[]}
         onClose={vi.fn()}
         onSetRules={onSetRules}
+        onUndoRules={noOpUndoRules}
       />
     );
 

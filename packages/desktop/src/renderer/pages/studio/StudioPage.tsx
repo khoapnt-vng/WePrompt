@@ -1224,6 +1224,23 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
     [project, refetch]
   );
 
+  const undoBriefRules = useCallback(async (): Promise<boolean> => {
+    if (project === null) return false;
+    setRulesPending(true);
+    setRulesErrorMessageKey(null);
+    try {
+      const result = await ipcBridge.creativeStudio.undoBriefRules.invoke({ projectId: project.id });
+      if (result.ok === false) {
+        setRulesErrorMessageKey(result.error.messageKey);
+        return false;
+      }
+      await refetch();
+      return true;
+    } finally {
+      setRulesPending(false);
+    }
+  }, [project, refetch]);
+
   useEffect(() => {
     if (postModalTransition === null || exportVisible) return;
     const transition = postModalTransition;
@@ -1444,6 +1461,7 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
           errorMessageKey={rulesErrorMessageKey}
           onClose={() => setRulesOpen(false)}
           onSetRules={setBriefRules}
+          onUndoRules={undoBriefRules}
         />
       )}
       <StudioExportModal

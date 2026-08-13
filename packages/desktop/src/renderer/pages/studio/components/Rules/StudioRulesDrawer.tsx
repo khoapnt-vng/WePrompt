@@ -21,13 +21,14 @@ import styles from './StudioRulesDrawer.module.css';
 
 export type StudioRulesDrawerProps = {
   visible: boolean;
-  project: Pick<StudioRendererProject, 'id' | 'revision' | 'rules'>;
+  project: Pick<StudioRendererProject, 'id' | 'revision' | 'rules' | 'ruleListUndo'>;
   /** Injected so tests can exercise the locked layer while it ships empty. */
   organisationRules?: readonly StudioBriefRule[];
   pending?: boolean;
   errorMessageKey?: string | null;
   onClose: () => void;
   onSetRules: (rules: StudioBriefRuleDraft[]) => Promise<boolean>;
+  onUndoRules: () => Promise<boolean>;
 };
 
 const toDraft = (rule: StudioBriefRule): StudioBriefRuleDraft => ({
@@ -69,6 +70,7 @@ export const StudioRulesDrawer: React.FC<StudioRulesDrawerProps> = ({
   errorMessageKey = null,
   onClose,
   onSetRules,
+  onUndoRules,
 }) => {
   const { t } = useTranslation();
   const [text, setText] = useState('');
@@ -76,6 +78,20 @@ export const StudioRulesDrawer: React.FC<StudioRulesDrawerProps> = ({
   const [validation, setValidation] = useState<RuleValidation | null>(null);
   const parsedTerms = parseTerms(terms);
   const atLimit = organisationRules.length + project.rules.length >= STUDIO_RULE_LIMITS.maxRules;
+  const undoChange = (() => {
+    if (project.ruleListUndo === null) return null;
+    const previousIds = new Set(project.ruleListUndo.previousRules.map((rule) => rule.id));
+    const currentIds = new Set(project.rules.map((rule) => rule.id));
+    const added = project.rules.filter((rule) => !previousIds.has(rule.id));
+    const removed = project.ruleListUndo.previousRules.filter((rule) => !currentIds.has(rule.id));
+    if (added.length === 1 && removed.length === 0) {
+      return { messageKey: 'conversation.creativeStudio.rules.undoAdded', rule: added[0].text };
+    }
+    if (removed.length === 1 && added.length === 0) {
+      return { messageKey: 'conversation.creativeStudio.rules.undoRemoved', rule: removed[0].text };
+    }
+    return { messageKey: 'conversation.creativeStudio.rules.undoChanged', rule: null };
+  })();
 
   const add = async (): Promise<void> => {
     const trimmed = text.trim();
@@ -152,6 +168,18 @@ export const StudioRulesDrawer: React.FC<StudioRulesDrawerProps> = ({
       <div className={styles.body}>
         <p className={styles.description}>{t('conversation.creativeStudio.rules.description')}</p>
         <p className={styles.description}>{t('conversation.creativeStudio.rules.precedence')}</p>
+
+        {undoChange !== null && (
+          <div className={styles.undo}>
+            <div className={styles.undoCopy}>
+              <span>{t(undoChange.messageKey)}</span>
+              {undoChange.rule !== null && <strong>{undoChange.rule}</strong>}
+            </div>
+            <Button disabled={pending} onClick={() => void onUndoRules()}>
+              {t('conversation.creativeStudio.rules.undo')}
+            </Button>
+          </div>
+        )}
 
         {organisationRules.length === 0 && project.rules.length === 0 ? (
           <p className={styles.description}>{t('conversation.creativeStudio.rules.empty')}</p>

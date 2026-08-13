@@ -273,20 +273,23 @@ describe('creative studio project store', () => {
     expect(await store.getProject(project.id)).toEqual(project);
   });
 
-  it('reads a project written before rules existed and defaults them to an empty list', async () => {
+  it('reads a project written before rule history existed and defaults the missing fields', async () => {
     const project = await store.createProject(makeInput());
     const file = path.join(rootDir, project.id, 'project.json');
     const raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
     delete raw.rules;
+    delete raw.ruleListUndo;
     writeFileSync(file, JSON.stringify(raw));
 
     const reread = await store.getProject(project.id);
 
     expect(reread?.rules).toEqual([]);
+    expect(reread?.ruleListUndo).toBeNull();
     expect(await store.listQuarantinedProjectIds()).toEqual([]);
 
     await store.updateProject(project.id, (current) => ({ ...current, name: 'Migrated project' }));
     expect((JSON.parse(readFileSync(file, 'utf8')) as StudioProject).rules).toEqual([]);
+    expect((JSON.parse(readFileSync(file, 'utf8')) as StudioProject).ruleListUndo).toBeNull();
   });
 
   it('persists a valid enforced rule and reads it back unchanged', async () => {
