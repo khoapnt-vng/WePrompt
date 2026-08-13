@@ -12,6 +12,10 @@ import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { STUDIO_REFERENCE_PROMPT_MAX_LENGTH } from '@/common/types/project/creativeStudioTypes';
+import {
+  buildFirstFramePrompt,
+  hasFirstFramePromptSubject,
+} from '@/common/types/project/creativeStudioReferencePrompt';
 import type {
   StudioAsset,
   StudioAspectRatio,
@@ -22,7 +26,6 @@ import type {
 import type { SelectedSceneSaveState } from '../../../../hooks/useStoryboardEditor';
 import type { StudioSceneDurationBounds } from '../../../../studioRouteConstraints';
 import type { StudioSceneStatus } from '../../../../studioReadiness';
-import { buildFirstFramePrompt, hasFirstFramePromptSubject } from '../../../Generation/referencePrompt';
 import { createManagedStudioAssetUrl } from '../../../Preview/StagePreview';
 
 import styles from './write.module.css';

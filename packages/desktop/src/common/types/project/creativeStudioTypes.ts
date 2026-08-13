@@ -526,6 +526,7 @@ export type StudioCommandErrorCode =
   | 'stale_project'
   | 'planning_unavailable'
   | 'invalid_route'
+  | 'rule_breach'
   | 'cancellation_refused'
   | 'duplicate_charge_acknowledgement_required'
   | 'unsupported'

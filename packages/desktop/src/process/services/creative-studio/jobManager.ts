@@ -8,6 +8,8 @@ import { randomUUID } from 'node:crypto';
 import { promises as dns } from 'node:dns';
 import { createReadStream, promises as fs } from 'node:fs';
 import type { IProvider, TProviderWithModel } from '@/common/config/storage';
+import { stripFirstFramePromptPrefix } from '@/common/types/project/creativeStudioReferencePrompt';
+import { evaluateStudioRules, resolveEffectiveStudioRules } from '@/common/types/project/creativeStudioRules';
 import {
   STUDIO_REFERENCE_PROMPT_MAX_LENGTH,
   type StudioCancellationPolicy,
@@ -93,6 +95,7 @@ export type StudioResolvedSubmitScenesRequest = Omit<StudioSubmitScenesRequest, 
 export type StudioJobManagerErrorCode =
   | 'invalid_request'
   | 'invalid_route'
+  | 'rule_breach'
   | 'provider_error'
   | 'busy'
   | 'unsupported'
@@ -584,6 +587,27 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       idempotencyKey,
     } as const;
     if (!baseRequest.prompt) invalidRequest();
+    /**
+     * The money gate for pinned rules.
+     *
+     * Here and nowhere else: this is the only point where the resolved prompt exists for BOTH paid
+     * entry points (submitScenes and retryJob) and for both output roles — a reference plate's
+     * prompt lives only in the request, never on the durable record, so a check that read
+     * scene.visualPrompt from the store would not see it. The reference request sent to the provider
+     * includes an app-authored first-frame prefix; rules evaluate only the authored subject, while
+     * baseRequest.prompt remains unchanged. Likewise, imageGenCore.ts prepends `Generate image: `
+     * only after the gate, so app-authored text is never rule-checked. The gate is also strictly
+     * before persistPreparedJobs and trackRun, so a breach costs nothing.
+     *
+     * The renderer runs the same evaluator to say the consequence before Confirm is pressable. This
+     * one exists because the Director's queued reference requests are auto-submitted with no modal.
+     */
+    const authored =
+      output.role === 'reference'
+        ? stripFirstFramePromptPrefix(baseRequest.prompt, project.aspectRatio)
+        : baseRequest.prompt;
+    const breaches = evaluateStudioRules(resolveEffectiveStudioRules(project.rules), authored).breaches;
+    if (breaches.length > 0) throw new StudioJobManagerError('rule_breach');
     const validation = adapter.validateRequest(baseRequest, resolvedProvider);
     if (!validation.ok) throw new StudioJobManagerError('invalid_route');
     let firstFrame: ResolvedStudioGenerationRequest['firstFrame'];

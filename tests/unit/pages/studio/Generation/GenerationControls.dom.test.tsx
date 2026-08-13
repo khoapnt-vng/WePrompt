@@ -13,12 +13,12 @@ import type {
   StudioRouteCatalog,
   StudioRouteCatalogEntry,
 } from '@/common/types/project/creativeStudioTypes';
+import { buildFirstFramePrompt } from '@/common/types/project/creativeStudioReferencePrompt';
 import {
   buildSingleSceneReviewRequest,
   GenerationControls,
   type GenerationControlsProps,
 } from '@renderer/pages/studio/components/Generation/GenerationControls';
-import { buildFirstFramePrompt } from '@renderer/pages/studio/components/Generation/referencePrompt';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({

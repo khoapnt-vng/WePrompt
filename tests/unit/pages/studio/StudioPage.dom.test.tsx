@@ -23,7 +23,7 @@ import type {
   StudioScene,
 } from '@/common/types/project/creativeStudioTypes';
 import StudioPage from '@renderer/pages/studio/StudioPage';
-import { buildFirstFramePrompt } from '@renderer/pages/studio/components/Generation/referencePrompt';
+import { buildFirstFramePrompt } from '@/common/types/project/creativeStudioReferencePrompt';
 import { useStudioProject } from '@renderer/pages/studio/hooks';
 import {
   defaultStudioPhase,

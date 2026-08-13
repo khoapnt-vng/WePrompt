@@ -6,11 +6,18 @@
 
 import type { StudioAspectRatio } from '@/common/types/project/creativeStudioTypes';
 
-const firstFramePromptPrefix = (aspectRatio: StudioAspectRatio): string =>
+export const firstFramePromptPrefix = (aspectRatio: StudioAspectRatio): string =>
   `A single cinematic frame, ${aspectRatio}, no text, no labels, no collage, no split panels.`;
 
 export const buildFirstFramePrompt = (visualPrompt: string, aspectRatio: StudioAspectRatio): string =>
   `${firstFramePromptPrefix(aspectRatio)} ${visualPrompt.trim()}`;
+
+export const stripFirstFramePromptPrefix = (prompt: string, aspectRatio: StudioAspectRatio): string => {
+  const trimmedPrompt = prompt.trim();
+  const prefix = firstFramePromptPrefix(aspectRatio);
+  if (trimmedPrompt === prefix) return '';
+  return trimmedPrompt.startsWith(`${prefix} `) ? trimmedPrompt.slice(prefix.length + 1).trim() : trimmedPrompt;
+};
 
 export const hasFirstFramePromptSubject = (prompt: string, aspectRatio: StudioAspectRatio): boolean => {
   const trimmedPrompt = prompt.trim();
