@@ -90,8 +90,35 @@ rule is that director edits are undoable _from the first phase onward_. Phase 1'
 zero times in 4,259 lines, and `StudioSetBriefRulesRequest` (`creativeStudioTypes.ts:613-616`)
 carries the whole rule list, so `setBriefRules` replaces rather than patches and deleting a rule is
 unrecoverable. Single-step undo of the last rule-list write, applied as a new forward write under a
-fresh guard because the revision bumps on every persist. ~1–1.5 hand-days, and it builds the
-operation-log primitive phase 2 needs anyway.
+fresh guard because the revision bumps on every persist. ~1–1.5 hand-days.
+
+**Correction to that item, from grounding it since:** it does _not_ build "the operation-log
+primitive phase 2 needs anyway," as this document first claimed. The store makes a coarse pre-image
+almost free to keep — `updateProjectInsideQueue` already materializes the prior body, and handing it
+back to the mutator lands as a new forward revision — but a coarse revert **fails open** once it
+reaches beyond one field: job transitions move the revision counter unguarded (`mutateJob` takes
+`expectedRevision` as optional), and a restored body predating a submission is internally
+self-consistent, so `validateProject` accepts it and silently drops the `providerJobId` of work
+already paid for. Nor can it reach the rendered cut, which is a sidecar, or the write-once proposal
+decision ledger.
+
+The rules estimate survives because rules are one array on the project record and touch no job
+state. What does not survive is the generalisation: the safe coarse form costs **2–3 hand-days** and
+earns a scoped _"revert this proposal"_, not Undo. Phase 2's per-edit undo still needs
+`apply_script_changes` and its inverses; there is no cheap substitute, only a cheap narrower thing.
+
+**A second gap, found in the same grounding, in the surface phase 1 just extended.**
+`read_storyboard` projects a scene's reference as a boolean — `hasReference` — while
+`propose_storyboard`'s schema requires `referenceAssetId` as a concrete id or `null`, and
+`referenceAssetId` is one of `EDITABLE_SCENE_FIELDS`. A Director told only that a reference exists
+therefore has no id to send, must send `null`, and **drops the reference on every re-proposal**. Not
+silent — the diff records the field as changed — but unavoidable from the Director's side.
+
+The fix is to project the id, three lines in `studioServer.ts`, and it belongs in phase 1's
+territory rather than phase 2's. It is deliberately **not** being handed to the phase-1 session
+mid-flight: that session was told to finish Tasks 7–13 and expand nothing, and contradicting that
+within the hour costs more than the defect. Do it immediately after Task 13, in parallel with the
+skeleton's S1, which touches no MCP surface.
 
 ---
 

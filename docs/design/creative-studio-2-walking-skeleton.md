@@ -27,18 +27,24 @@ today's flat model, is a fraction of it — and it is the half you asked to see.
 
 ## 2. Why the navigation change is cheap — seven facts, each checked
 
+> Citations below name **symbols**, not line numbers. Phase 1 is merging into this branch while
+> this document is being read: three citations in the first draft went stale within the hour
+> (`types.ts` by 2 lines, `studioI18n.test.ts` by 1, `store.ts` by 15) because Tasks 6 and 8 landed
+> after it was committed. Symbols survive that; line numbers do not.
+
 **The controller seam is already view-agnostic.** `StudioPhaseControllers`
-(`PhaseShell/types.ts:29`) is one flat bag — project, readiness, editor, models, jobs, render,
-export, proposals — and every phase controller is a `Pick<>` of it (`:72`, `:88`, `:107`). The
-render is documented as *"held at project scope so it stays observable from any phase"* (`:36`).
-New views are new `Pick<>`s. **No controller rework.**
+(`PhaseShell/types.ts`) is one flat bag — project, readiness, editor, models, jobs, render, export,
+proposals — and every phase controller is a `Pick<>` of it (`WritePhaseController`,
+`ProducePhaseController`, `ReviewPhaseController`). The render is documented as *"held at project
+scope so it stays observable from any phase."* New views are new `Pick<>`s. **No controller
+rework.**
 
 **Table already exists.** `phases/write/ScriptTable.tsx` is a four-column table — shot, script,
-visual, output (`:88-91`) — with dnd-kit drag-to-reorder, conflict retry/discard, and the scene
+visual, output — with dnd-kit drag-to-reorder, conflict retry/discard, and the scene
 limit notice. `ScriptRow.tsx` is 21 KB of per-row editing already built.
 
 **Board already exists.** `phases/produce/ShotGrid.tsx` + `ShotCard.tsx` render an ordered grid
-of cards with takes, per-scene status, cancel and single-shot review. `ShotGridProps` (`:39`) is
+of cards with takes, per-scene status, cancel and single-shot review. `ShotGridProps` is
 already a pure prop interface — `ProducePhase.tsx` is a 145-line composition over it, not an
 owner.
 
@@ -46,17 +52,17 @@ owner.
 render progress, missing-slate counting and the export entry.
 
 **The Table's two missing columns are already computed.** Length is `scene.durationSeconds`;
-state is `readiness.sceneStatuses`. `StudioReadinessSummary` (`studioReadiness.ts:23`) already
+state is `readiness.sceneStatuses`. `StudioReadinessSummary` (`studioReadiness.ts`) already
 returns `totalSceneCount`, `readySceneIds`, `selectedAssetCount` and `durationDeltaSeconds` —
 which is the state readout (`9 sections · 2:58 · 2 ready`) with no new logic.
 
 **Every command the flow needs already exists.** `createProject`, `proposeStoryboard`,
 `acceptProposal`, `updateScene`, `reorderScenes`, `submitScenes`, `selectAsset`,
 `placeCutScenes`, `updateCut`, `renderCut`, `chooseAndExportAssets`, `getLatestRender`
-(`ipcBridge.ts:1197+`). **Zero new IPC commands. Zero main-process work. Zero migrations.**
+(the `creativeStudio` provider block in `ipcBridge.ts`). **Zero new IPC commands. Zero main-process work. Zero migrations.**
 
 **The Engine Strip is not on this path.** `resolveSoleRouteAdoptions`
-(`studioRouteDefaults.ts:31`) adopts a route automatically when a role has exactly one
+(`studioRouteDefaults.ts`) adopts a route automatically when a role has exactly one
 compatible option. The live blocker fires only when **two** bindings of one media kind exist.
 One image model + one video model bound → both roles adopt themselves. 8–12 days deferred, at
 the cost of one stated precondition.
@@ -71,14 +77,14 @@ the cost of one stated precondition.
 | **Keep `propose_storyboard` whole-script replace** | `apply_script_changes`, inverse ops, revision-aware undo — the item the handoff calls "the one contract change that gates everything else" | The Director stays proposal-based, which costs the skeleton nothing: the navigation is exercised identically either way. See §5. |
 | **No proposal-record versioning** | a versioning pass | Nothing: the model does not move, so there is nothing to version. This item was always downstream of the model change. |
 | **No shelf, one card size** | a parking surface and two more card renderers | Deleting a section destroys it. Acceptable in a happy path; not acceptable in a release. |
-| **Do not raise the duration or scene caps** | nine edit sites for `targetDurationSeconds` (validated `5..60` at `store.ts:1027`) and ~twelve for `MAX_SCENES = 24` | The skeleton runs at ≤60s and ≤24 scenes. A 3-minute piece is out of scope until phase 2 proper. |
+| **Do not raise the duration or scene caps** | nine edit sites for `targetDurationSeconds` (validated `5..60` in `validateProject`, `store.ts`) and ~twelve for `MAX_SCENES = 24` | The skeleton runs at ≤60s and ≤24 scenes. A 3-minute piece is out of scope until phase 2 proper. |
 | **Defer the Engine Strip** | 8–12 hand-days | A precondition, not a defect-free state: exactly one image model and one video model bound in Model Settings. Bind two video engines and generation blocks with no in-app cure — the live bug, unchanged. |
 
 ---
 
 ## 4. The skeleton — the flow, end to end
 
-**Navigation.** The four-step rail (`STUDIO_PHASES` at `studioPhaseRoute.ts:1`) becomes a
+**Navigation.** The four-step rail (`STUDIO_PHASES` in `studioPhaseRoute.ts`) becomes a
 three-view switch: **Table · Board · Cut**. Brief becomes a drawer, not a step — it is an object,
 not a stage. Completion markers go; the state readout takes their place. One money control in the
 top bar.
@@ -107,15 +113,36 @@ causality is wrong twice.
 
 Wrong on mechanism: the handoff's *per-edit* undo means undo across a batch of granular
 operations, which is exactly what `apply_script_changes` and its inverses are for. Today's writes
-are coarse — whole-record and whole-script replaces — so the pre-image of any write is the whole
-project body, which the renderer already holds in memory. Coarse commands make coarse undo cheap.
-It is the granular design that makes undo expensive, so deferring `apply_script_changes` implies
-**coarse** undo, not **no** undo.
+are coarse, and main already materializes the whole prior body inside every write —
+`updateProjectInsideQueue` reads `current`, passes a clone to an arbitrary mutator, refuses only an
+identity change, and force-overwrites `revision` and `updatedAt` — then discards it. Handing that
+mutator a previously-observed body therefore lands as a new forward revision. **Storing a coarse
+pre-image is a few dozen lines.** Deferring `apply_script_changes` defers *per-edit* undo; it does
+not imply no undo.
+
+One correction to an earlier draft of this paragraph, which claimed the renderer already holds a
+usable pre-image. **It does not.** `StudioRendererProject` is
+`Omit<StudioProject, 'jobs' | 'routing'>` re-widened with *renderer-shaped* jobs and routing
+(`creativeStudioTypes.ts`), and `validateJob` rejects that shape on both its exact-key check and
+`isSafeId(idempotencyKey)`. Any pre-image has to be captured in main.
+
+And storage was never the expensive part. **A coarse revert fails open.** Job transitions go
+through `mutateJob` with `expectedRevision` optional, so the revision counter moves unguarded; a
+restored body that predates a submission is internally self-consistent, so `validateProject`
+accepts it and silently drops the `providerJobId` of work already paid for. It also cannot reach
+the rendered cut, which is a sidecar, or the write-once proposal decision ledger. Done fail-closed
+— gated on the recorded post-write revision rather than a plain CAS, restoring only
+`scenes`/`sceneOrder`/`rules`/`brief`/settings, and routed through cut reconciliation — it is
+**2–3 hand-days**, and what it earns is a scoped *"revert this proposal"*, not Undo.
 
 Wrong on scope, which matters more: **demonstrating the navigation does not require the Director
-to edit directly at all.** Table, Board, Cut, the spend gate and the render are exercised
-identically whichever way the Director writes. Chaining the two inflated this document's own
-stated limitation.
+to edit directly at all.** The run in §4 contains exactly one Director write — step 2's spine
+acceptance. Making it direct would *remove* the review card rather than add a surface. Worse, it
+would confound the very thing under evaluation: `DirectorPane` mounts at page scope, so a
+direct-editing Director writes concurrently with the 450 ms scene autosave
+(`SCENE_SAVE_DEBOUNCE_MS`), injecting write collision into the navigation being assessed, on a run
+declared happy-case. It would also cost §2's "zero new IPC commands, zero main-process work" —
+the claim that justifies sequencing the navigation first.
 
 So direct edits and undo are out of the skeleton deliberately, and open question 4 — *"will users
 trust a director that edits directly"* — is not on trial here. Do not read a good skeleton
@@ -153,7 +180,7 @@ nothing because it is a test hook, not user-facing copy.
 Skipping the other locales looks like the obvious saving and is not one — though not for the
 reason I would have guessed. `scripts/check-i18n.js` only **warns** on missing keys and empty
 values (`logWarning`, and only `hasErrors` exits non-zero), so the script would let English-only
-through. The hard gate is a test: `studioI18n.test.ts:495` asserts every configured locale is in
+through. The hard gate is a test: `studioI18n.test.ts`'s *"keeps every configured locale exactly in parity"* asserts every configured locale is in
 **exact parity**, non-empty, placeholder-compatible, carries **zero** copied new full-sentence
 keys, and leaves at most `max(4, 5% of keys)` English strings anywhere. `just push` runs the
 suite, so that is a red gate.
