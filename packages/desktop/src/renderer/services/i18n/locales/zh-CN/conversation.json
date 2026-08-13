@@ -904,7 +904,7 @@
       "termUnusable": "禁用词“{{term}}”必须包含字母或数字。",
       "duplicateTerm": "“{{term}}”与另一个禁用词相同。请移除重复项。",
       "termsLabel": "禁用词（可选）",
-      "termsPlaceholder": "例如：耐克，阿迪达斯",
+      "termsPlaceholder": "例如：耐克, 阿迪达斯",
       "termsHelp": "用逗号分隔，最多可输入 8 个词。没有禁用词的规则仅作上下文。",
       "invalidTerms": "最多输入 8 个词，每个词不超过 64 个字符。",
       "limitReached": "已达到 24 条有效规则的上限。",

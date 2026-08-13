@@ -38,7 +38,7 @@ const toDraft = (rule: StudioBriefRule): StudioBriefRuleDraft => ({
 
 const parseTerms = (value: string): string[] => {
   return value
-    .split(',')
+    .split(/[,，、،؛\n]/)
     .map((term) => term.trim())
     .filter((term) => term.length > 0);
 };

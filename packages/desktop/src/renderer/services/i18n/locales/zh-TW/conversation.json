@@ -904,7 +904,7 @@
       "termUnusable": "禁用詞「{{term}}」必須包含字母或數字。",
       "duplicateTerm": "「{{term}}」與另一個禁用詞相同。請移除重複項目。",
       "termsLabel": "禁用詞（選填）",
-      "termsPlaceholder": "例如：Nike、Adidas",
+      "termsPlaceholder": "例如：Nike, Adidas",
       "termsHelp": "請以逗號分隔，最多輸入 8 個詞。沒有禁用詞的規則僅供參考。",
       "invalidTerms": "最多輸入 8 個詞，每個詞不得超過 64 個字元。",
       "limitReached": "已達 24 條有效規則的上限。",

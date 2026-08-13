@@ -9,6 +9,10 @@ import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { StudioRulesDrawer } from '@/renderer/pages/studio/components/Rules';
+import faIRConversation from '@/renderer/services/i18n/locales/fa-IR/conversation.json';
+import jaJPConversation from '@/renderer/services/i18n/locales/ja-JP/conversation.json';
+import zhCNConversation from '@/renderer/services/i18n/locales/zh-CN/conversation.json';
+import zhTWConversation from '@/renderer/services/i18n/locales/zh-TW/conversation.json';
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 
@@ -86,6 +90,29 @@ describe('StudioRulesDrawer', () => {
         predicate: { kind: 'forbidden_terms', terms: ['acme', 'globex'] },
       },
     ]);
+  });
+
+  it.each([
+    ['zh-CN', zhCNConversation.creativeStudio.rules.termsPlaceholder],
+    ['zh-TW', zhTWConversation.creativeStudio.rules.termsPlaceholder],
+    ['ja-JP', jaJPConversation.creativeStudio.rules.termsPlaceholder],
+    ['fa-IR', faIRConversation.creativeStudio.rules.termsPlaceholder],
+  ])('parses the %s forbidden-term placeholder into two terms', async (_language, placeholder) => {
+    const onSetRules = vi.fn(async () => true);
+    render(
+      <StudioRulesDrawer visible project={project()} organisationRules={[]} onClose={vi.fn()} onSetRules={onSetRules} />
+    );
+
+    fireEvent.change(screen.getByLabelText('conversation.creativeStudio.rules.textLabel'), {
+      target: { value: 'Avoid competitor brands.' },
+    });
+    fireEvent.change(screen.getByLabelText('conversation.creativeStudio.rules.termsLabel'), {
+      target: { value: placeholder },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.rules.add' }));
+
+    await waitFor(() => expect(onSetRules).toHaveBeenCalledTimes(1));
+    expect(onSetRules.mock.calls[0][0][0].predicate?.terms).toHaveLength(2);
   });
 
   it('explains what each badge means, so the two enforcement states are not a guess', () => {
