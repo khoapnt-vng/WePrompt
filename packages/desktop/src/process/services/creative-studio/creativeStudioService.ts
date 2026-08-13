@@ -854,6 +854,15 @@ const applyProposalPayload = (
 ): StudioProject => {
   if (payload.kind === 'pin_rule') {
     const text = payload.rule.text.trim();
+    const proposedTerms = payload.rule.predicate?.terms.map((term) => term.trim()) ?? [];
+    if (proposedTerms.some((term) => !hasRuleToken(term))) throw invalid('Invalid Studio rule predicate');
+    const seenTermKeys = new Set<string>();
+    const terms = proposedTerms.filter((term) => {
+      const matchKey = ruleTermMatchKey(term);
+      if (seenTermKeys.has(matchKey)) return false;
+      seenTermKeys.add(matchKey);
+      return true;
+    });
     // Idempotent: accepting a duplicate is a no-op rather than an error, because the user pressing
     // Accept twice, or pinning a rule they already had, is not a failure they can act on.
     const duplicate = resolveEffectiveStudioRules(project.rules).some(
@@ -869,10 +878,7 @@ const applyProposalPayload = (
           id: minted.ruleId,
           scope: 'project' as const,
           text,
-          predicate:
-            payload.rule.predicate === null
-              ? null
-              : { kind: 'forbidden_terms' as const, terms: payload.rule.predicate.terms.map((term) => term.trim()) },
+          predicate: payload.rule.predicate === null ? null : { kind: 'forbidden_terms' as const, terms },
           createdAt: minted.timestamp,
         },
       ],

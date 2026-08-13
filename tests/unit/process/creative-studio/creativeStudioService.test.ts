@@ -800,6 +800,50 @@ describe('CreativeStudioService', () => {
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain('read_storyboard');
     });
+
+    it('refuses an accepted proposal term that token matching can never enforce', async () => {
+      const project = await service.createProject(makeInput());
+      await store.recordProposal({
+        projectId: project.id,
+        proposalId: 'proposal_unenforceable',
+        baseRevision: project.revision,
+        payload: {
+          kind: 'pin_rule',
+          rule: {
+            text: 'No symbol-only mark.',
+            predicate: { kind: 'forbidden_terms', terms: ['+++'] },
+          },
+        },
+      });
+
+      await expect(
+        service.acceptProposal({ projectId: project.id, proposalId: 'proposal_unenforceable' })
+      ).rejects.toMatchObject({ code: 'invalid_payload' });
+      await expect(service.getProject(project.id)).resolves.toMatchObject({ rules: [] });
+    });
+
+    it('deduplicates accepted proposal terms by their matcher key', async () => {
+      const project = await service.createProject(makeInput());
+      await store.recordProposal({
+        projectId: project.id,
+        proposalId: 'proposal_duplicate_terms',
+        baseRevision: project.revision,
+        payload: {
+          kind: 'pin_rule',
+          rule: {
+            text: 'No competitor marks.',
+            predicate: { kind: 'forbidden_terms', terms: ['Nike', 'nike', 'Nike!', 'Adidas'] },
+          },
+        },
+      });
+
+      const accepted = await service.acceptProposal({
+        projectId: project.id,
+        proposalId: 'proposal_duplicate_terms',
+      });
+
+      expect(accepted.project.rules[0].predicate?.terms).toEqual(['Nike', 'Adidas']);
+    });
   });
 
   describe('proposal diff', () => {
