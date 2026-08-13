@@ -10,6 +10,7 @@ import {
   OFFICE_ARTIFACT_MAX_SELECTION_MESSAGE_BYTES,
 } from '../../types/office/artifactEditor';
 import { PRESENTATION_RUN_LIMITS } from '../../types/office/presentationRunPolicy';
+import { STUDIO_RULE_LIMITS } from '../../types/project/creativeStudioRules';
 import { STUDIO_REFERENCE_PROMPT_MAX_LENGTH } from '../../types/project/creativeStudioTypes';
 import type { NativeBridgeProviderKey, RendererBridgeQueryKey } from './constants';
 
@@ -434,7 +435,7 @@ const studioSceneSchema = z
 const studioBriefRulePredicateSchema = z
   .object({
     kind: z.literal('forbidden_terms'),
-    terms: z.array(z.string().trim().min(1).max(64)).min(1).max(8),
+    terms: z.array(z.string().trim().min(1).max(STUDIO_RULE_LIMITS.term)).min(1).max(STUDIO_RULE_LIMITS.maxTerms),
   })
   .strict();
 const studioSetBriefRulesSchema = z
@@ -446,12 +447,12 @@ const studioSetBriefRulesSchema = z
         z
           .object({
             id: safeIdSchema,
-            text: z.string().trim().min(1).max(240),
+            text: z.string().trim().min(1).max(STUDIO_RULE_LIMITS.text),
             predicate: studioBriefRulePredicateSchema.nullable(),
           })
           .strict()
       )
-      .max(24),
+      .max(STUDIO_RULE_LIMITS.maxRules),
   })
   .strict();
 const studioUpdateProjectSchema = z

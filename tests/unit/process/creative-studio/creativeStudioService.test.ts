@@ -347,40 +347,46 @@ describe('CreativeStudioService', () => {
   });
 
   it('replaces the rule list, stamps project scope, and preserves createdAt for a rule that stays', async () => {
-    const ruled = createCreativeStudioService({
-      store,
-      onProjectUpdated,
-      storyboardPlanner: makePlanner(),
-      createRuleId: () => 'rule_minted',
-    });
-    const project = await ruled.createProject(makeInput());
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime('2026-08-13T00:00:00.000Z');
+      const project = await service.createProject(makeInput());
 
-    const first = await ruled.setBriefRules({
-      projectId: project.id,
-      expectedRevision: project.revision,
-      rules: [{ id: 'rule_1', text: '  Keep the kits generic.  ', predicate: null }],
-    });
-    const createdAt = first.rules[0].createdAt;
+      const first = await service.setBriefRules({
+        projectId: project.id,
+        expectedRevision: project.revision,
+        rules: [{ id: 'rule_1', text: '  Keep the kits generic.  ', predicate: null }],
+      });
 
-    const second = await ruled.setBriefRules({
-      projectId: project.id,
-      expectedRevision: first.revision,
-      rules: [
-        { id: 'rule_1', text: 'Keep the kits generic.', predicate: null },
-        { id: 'rule_2', text: 'No competitor logos.', predicate: { kind: 'forbidden_terms', terms: ['acme'] } },
-      ],
-    });
+      vi.setSystemTime('2026-08-13T00:01:00.000Z');
+      const second = await service.setBriefRules({
+        projectId: project.id,
+        expectedRevision: first.revision,
+        rules: [
+          { id: 'rule_1', text: 'Keep the kits generic.', predicate: null },
+          { id: 'rule_2', text: 'No competitor logos.', predicate: { kind: 'forbidden_terms', terms: ['acme'] } },
+        ],
+      });
 
-    expect(second.rules).toEqual([
-      { id: 'rule_1', scope: 'project', text: 'Keep the kits generic.', predicate: null, createdAt },
-      {
-        id: 'rule_2',
-        scope: 'project',
-        text: 'No competitor logos.',
-        predicate: { kind: 'forbidden_terms', terms: ['acme'] },
-        createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
-      },
-    ]);
+      expect(second.rules).toEqual([
+        {
+          id: 'rule_1',
+          scope: 'project',
+          text: 'Keep the kits generic.',
+          predicate: null,
+          createdAt: '2026-08-13T00:00:00.000Z',
+        },
+        {
+          id: 'rule_2',
+          scope: 'project',
+          text: 'No competitor logos.',
+          predicate: { kind: 'forbidden_terms', terms: ['acme'] },
+          createdAt: '2026-08-13T00:01:00.000Z',
+        },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('refuses a stale revision rather than clobbering a concurrent edit', async () => {
@@ -425,6 +431,78 @@ describe('CreativeStudioService', () => {
     });
 
     expect(updated.rules[0].predicate?.terms).toEqual(['Nike', 'Adidas']);
+  });
+
+  it('deduplicates forbidden terms that tokenise to the same match key', async () => {
+    const project = await service.createProject(makeInput());
+
+    const updated = await service.setBriefRules({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      rules: [
+        {
+          id: 'rule_1',
+          text: 'No competitor marks.',
+          predicate: {
+            kind: 'forbidden_terms',
+            terms: ['Nike', 'Nike!', 'Nike.', '(Nike)', 'Nike-', 'Nike,', 'Nike;', 'Nike?'],
+          },
+        },
+      ],
+    });
+
+    expect(updated.rules[0].predicate?.terms).toEqual(['Nike']);
+  });
+
+  it('deduplicates forbidden terms within each rule rather than across the whole rule list', async () => {
+    const project = await service.createProject(makeInput());
+
+    const updated = await service.setBriefRules({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      rules: [
+        {
+          id: 'rule_1',
+          text: 'No sportswear brands.',
+          predicate: { kind: 'forbidden_terms', terms: ['Nike', 'Adidas'] },
+        },
+        {
+          id: 'rule_2',
+          text: 'No Nike marks.',
+          predicate: { kind: 'forbidden_terms', terms: ['Nike'] },
+        },
+      ],
+    });
+
+    expect(updated.rules.map((rule) => rule.predicate?.terms)).toEqual([['Nike', 'Adidas'], ['Nike']]);
+  });
+
+  it('rejects duplicate draft rule ids before replacing the project rule list', async () => {
+    const project = await service.createProject(makeInput());
+
+    await expect(
+      service.setBriefRules({
+        projectId: project.id,
+        expectedRevision: project.revision,
+        rules: [
+          { id: 'rule_1', text: 'Keep the kits generic.', predicate: null },
+          { id: 'rule_1', text: 'No competitor marks.', predicate: null },
+        ],
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+  });
+
+  it('notifies the renderer after replacing the project rule list', async () => {
+    const project = await service.createProject(makeInput());
+    onProjectUpdated.mockClear();
+
+    await service.setBriefRules({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      rules: [{ id: 'rule_1', text: 'Keep the kits generic.', predicate: null }],
+    });
+
+    expect(onProjectUpdated).toHaveBeenCalledExactlyOnceWith(project.id);
   });
 
   it('persists the Brief conversation binding and returns it through the renderer projection', async () => {

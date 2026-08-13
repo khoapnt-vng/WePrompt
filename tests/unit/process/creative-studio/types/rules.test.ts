@@ -13,6 +13,7 @@ import {
   ORGANISATION_STUDIO_RULES,
   renderStudioRulesBlock,
   resolveEffectiveStudioRules,
+  ruleTermMatchKey,
   STUDIO_BRIEF_RULES_PIN_ID,
   STUDIO_BRIEF_RULES_PIN_MAX_CHARS,
   STUDIO_RULE_LIMITS,
@@ -99,6 +100,14 @@ describe('hasRuleToken', () => {
     expect(hasRuleToken('Nhãn hiệu 2026')).toBe(true);
     expect(hasRuleToken('+++')).toBe(false);
     expect(hasRuleToken('🎬')).toBe(false);
+  });
+});
+
+describe('ruleTermMatchKey', () => {
+  it('uses the same token sequence for punctuation and whitespace variants', () => {
+    expect(ruleTermMatchKey('Nike!')).toBe('nike');
+    expect(ruleTermMatchKey('(Nike)')).toBe('nike');
+    expect(ruleTermMatchKey('New  Balance')).toBe('new balance');
   });
 });
 

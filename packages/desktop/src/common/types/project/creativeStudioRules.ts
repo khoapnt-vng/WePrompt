@@ -87,8 +87,11 @@ const RULE_TOKEN = /[\p{L}\p{N}]+/gu;
 const tokenise = (value: string): string[] =>
   Array.from(foldForRuleMatch(value).matchAll(RULE_TOKEN), (match) => match[0]);
 
+/** Returns the token sequence used to decide whether two forbidden terms match the same text. */
+export const ruleTermMatchKey = (term: string): string => tokenise(term).join(' ');
+
 /** Returns whether a rule term contains at least one token that matching can enforce. */
-export const hasRuleToken = (term: string): boolean => tokenise(term).length > 0;
+export const hasRuleToken = (term: string): boolean => ruleTermMatchKey(term).length > 0;
 
 const containsRun = (haystack: readonly string[], needle: readonly string[]): boolean => {
   if (needle.length === 0 || needle.length > haystack.length) return false;

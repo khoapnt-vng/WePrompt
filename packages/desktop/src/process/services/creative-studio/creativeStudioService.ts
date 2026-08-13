@@ -63,7 +63,7 @@ import type {
   StudioTextModelRef,
   StudioUpdateModelSelectionRequest,
 } from '@/common/types/project/creativeStudioTypes';
-import { foldForRuleMatch, hasRuleToken, STUDIO_RULE_LIMITS } from '@/common/types/project/creativeStudioRules';
+import { hasRuleToken, ruleTermMatchKey, STUDIO_RULE_LIMITS } from '@/common/types/project/creativeStudioRules';
 import type { ISessionMcpServer } from '@/common/config/storage';
 import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
 import { isCanonicalStudioGeneratedTake } from '@/common/types/project/creativeStudioCanonicalTake';
@@ -1348,10 +1348,9 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
     async setBriefRules(input: StudioSetBriefRulesRequest): Promise<StudioRendererProject> {
       assertSafeId(input.projectId, 'project id');
       assertExpectedRevision(input.expectedRevision);
+      // Task 8's drawer pre-checks with hasRuleToken and STUDIO_RULE_LIMITS; these generic main-side
+      // rejections are backstops for non-UI callers, not field-specific UI errors.
       if (!Array.isArray(input.rules) || input.rules.length > STUDIO_RULE_LIMITS.maxRules) {
-        throw invalid('Invalid Studio rule list');
-      }
-      if (new Set(input.rules.map((rule) => rule.id)).size !== input.rules.length) {
         throw invalid('Invalid Studio rule list');
       }
       for (const rule of input.rules) {
@@ -1370,6 +1369,9 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
           assertText(term, STUDIO_RULE_LIMITS.term, 'rule term', true);
           if (!hasRuleToken(term)) throw invalid('Invalid Studio rule predicate');
         }
+      }
+      if (new Set(input.rules.map((rule) => rule.id)).size !== input.rules.length) {
+        throw invalid('Invalid Studio rule list');
       }
       const timestamp = new Date().toISOString();
       return notify(
@@ -1393,9 +1395,9 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
                           terms: draft.predicate.terms
                             .map((term) => term.trim())
                             .filter((term) => {
-                              const folded = foldForRuleMatch(term);
-                              if (seenTerms.has(folded)) return false;
-                              seenTerms.add(folded);
+                              const matchKey = ruleTermMatchKey(term);
+                              if (seenTerms.has(matchKey)) return false;
+                              seenTerms.add(matchKey);
                               return true;
                             }),
                         },
