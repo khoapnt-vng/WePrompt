@@ -9,7 +9,9 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
+  hasRuleToken,
   ORGANISATION_STUDIO_RULES,
+  ruleTermMatchKey,
   STUDIO_RULE_LIMITS,
   type StudioBriefRule,
   type StudioBriefRuleDraft,
@@ -35,11 +37,16 @@ const toDraft = (rule: StudioBriefRule): StudioBriefRuleDraft => ({
 });
 
 const parseTerms = (value: string): string[] => {
-  const terms = value
+  return value
     .split(',')
     .map((term) => term.trim())
     .filter((term) => term.length > 0);
-  return [...new Set(terms)];
+};
+
+type RuleValidation = {
+  field: 'text' | 'terms';
+  messageKey: string;
+  term?: string;
 };
 
 /**
@@ -66,24 +73,59 @@ export const StudioRulesDrawer: React.FC<StudioRulesDrawerProps> = ({
   const { t } = useTranslation();
   const [text, setText] = useState('');
   const [terms, setTerms] = useState('');
-  const [invalid, setInvalid] = useState<'text' | 'terms' | null>(null);
+  const [validation, setValidation] = useState<RuleValidation | null>(null);
   const parsedTerms = parseTerms(terms);
   const atLimit = organisationRules.length + project.rules.length >= STUDIO_RULE_LIMITS.maxRules;
 
   const add = async (): Promise<void> => {
     const trimmed = text.trim();
-    if (trimmed.length === 0 || trimmed.length > STUDIO_RULE_LIMITS.text) {
-      setInvalid('text');
+    if (trimmed.length === 0) {
+      setValidation({ field: 'text', messageKey: 'conversation.creativeStudio.rules.invalidText' });
       return;
     }
-    if (
-      parsedTerms.length > STUDIO_RULE_LIMITS.maxTerms ||
-      parsedTerms.some((term) => term.length > STUDIO_RULE_LIMITS.term)
-    ) {
-      setInvalid('terms');
+    if (trimmed.length > STUDIO_RULE_LIMITS.text) {
+      setValidation({ field: 'text', messageKey: 'conversation.creativeStudio.rules.textTooLong' });
       return;
     }
-    setInvalid(null);
+    if (atLimit) return;
+    if (parsedTerms.length > STUDIO_RULE_LIMITS.maxTerms) {
+      setValidation({ field: 'terms', messageKey: 'conversation.creativeStudio.rules.tooManyTerms' });
+      return;
+    }
+    const termTooLong = parsedTerms.find((term) => term.length > STUDIO_RULE_LIMITS.term);
+    if (termTooLong !== undefined) {
+      setValidation({
+        field: 'terms',
+        messageKey: 'conversation.creativeStudio.rules.termTooLong',
+        term: termTooLong,
+      });
+      return;
+    }
+    const unusableTerm = parsedTerms.find((term) => !hasRuleToken(term));
+    if (unusableTerm !== undefined) {
+      setValidation({
+        field: 'terms',
+        messageKey: 'conversation.creativeStudio.rules.termUnusable',
+        term: unusableTerm,
+      });
+      return;
+    }
+    const seenTerms = new Set<string>();
+    const duplicateTerm = parsedTerms.find((term) => {
+      const key = ruleTermMatchKey(term);
+      if (seenTerms.has(key)) return true;
+      seenTerms.add(key);
+      return false;
+    });
+    if (duplicateTerm !== undefined) {
+      setValidation({
+        field: 'terms',
+        messageKey: 'conversation.creativeStudio.rules.duplicateTerm',
+        term: duplicateTerm,
+      });
+      return;
+    }
+    setValidation(null);
     const draft: StudioBriefRuleDraft = {
       id: window.crypto.randomUUID().replaceAll('-', '_'),
       text: trimmed,
@@ -181,15 +223,16 @@ export const StudioRulesDrawer: React.FC<StudioRulesDrawerProps> = ({
           <Input
             id='studio-rule-text'
             value={text}
-            error={invalid === 'text'}
-            maxLength={STUDIO_RULE_LIMITS.text}
+            error={validation?.field === 'text'}
             placeholder={t('conversation.creativeStudio.rules.textPlaceholder')}
             aria-label={t('conversation.creativeStudio.rules.textLabel')}
             onChange={setText}
           />
-          {invalid === 'text' && (
+          {validation?.field === 'text' && (
             <span role='alert' className={styles.error}>
-              {t('conversation.creativeStudio.rules.invalidText')}
+              {validation.term === undefined
+                ? t(validation.messageKey)
+                : t(validation.messageKey, { term: validation.term })}
             </span>
           )}
 
@@ -199,15 +242,17 @@ export const StudioRulesDrawer: React.FC<StudioRulesDrawerProps> = ({
           <Input
             id='studio-rule-terms'
             value={terms}
-            error={invalid === 'terms'}
+            error={validation?.field === 'terms'}
             placeholder={t('conversation.creativeStudio.rules.termsPlaceholder')}
             aria-label={t('conversation.creativeStudio.rules.termsLabel')}
             onChange={setTerms}
           />
           <p className={styles.help}>{t('conversation.creativeStudio.rules.termsHelp')}</p>
-          {invalid === 'terms' && (
+          {validation?.field === 'terms' && (
             <span role='alert' className={styles.error}>
-              {t('conversation.creativeStudio.rules.invalidTerms')}
+              {validation.term === undefined
+                ? t(validation.messageKey)
+                : t(validation.messageKey, { term: validation.term })}
             </span>
           )}
 

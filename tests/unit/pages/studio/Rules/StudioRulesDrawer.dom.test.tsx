@@ -109,6 +109,93 @@ describe('StudioRulesDrawer', () => {
     expect(onSetRules).not.toHaveBeenCalled();
   });
 
+  it('identifies rule text beyond the shared limit and never calls the command', () => {
+    const onSetRules = vi.fn(async () => true);
+    render(
+      <StudioRulesDrawer visible project={project()} organisationRules={[]} onClose={vi.fn()} onSetRules={onSetRules} />
+    );
+
+    fireEvent.change(screen.getByLabelText('conversation.creativeStudio.rules.textLabel'), {
+      target: { value: 'x'.repeat(241) },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.rules.add' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('conversation.creativeStudio.rules.textTooLong');
+    expect(onSetRules).not.toHaveBeenCalled();
+  });
+
+  it('identifies more than eight forbidden terms and never calls the command', () => {
+    const onSetRules = vi.fn(async () => true);
+    render(
+      <StudioRulesDrawer visible project={project()} organisationRules={[]} onClose={vi.fn()} onSetRules={onSetRules} />
+    );
+
+    fireEvent.change(screen.getByLabelText('conversation.creativeStudio.rules.textLabel'), {
+      target: { value: 'Avoid competitor brands.' },
+    });
+    fireEvent.change(screen.getByLabelText('conversation.creativeStudio.rules.termsLabel'), {
+      target: { value: 'one,two,three,four,five,six,seven,eight,nine' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.rules.add' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('conversation.creativeStudio.rules.tooManyTerms');
+    expect(onSetRules).not.toHaveBeenCalled();
+  });
+
+  it('identifies a forbidden term beyond the shared limit and never calls the command', () => {
+    const onSetRules = vi.fn(async () => true);
+    render(
+      <StudioRulesDrawer visible project={project()} organisationRules={[]} onClose={vi.fn()} onSetRules={onSetRules} />
+    );
+
+    fireEvent.change(screen.getByLabelText('conversation.creativeStudio.rules.textLabel'), {
+      target: { value: 'Avoid competitor brands.' },
+    });
+    fireEvent.change(screen.getByLabelText('conversation.creativeStudio.rules.termsLabel'), {
+      target: { value: 'x'.repeat(65) },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.rules.add' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('conversation.creativeStudio.rules.termTooLong');
+    expect(onSetRules).not.toHaveBeenCalled();
+  });
+
+  it('identifies a forbidden term with no matchable token and never calls the command', () => {
+    const onSetRules = vi.fn(async () => true);
+    render(
+      <StudioRulesDrawer visible project={project()} organisationRules={[]} onClose={vi.fn()} onSetRules={onSetRules} />
+    );
+
+    fireEvent.change(screen.getByLabelText('conversation.creativeStudio.rules.textLabel'), {
+      target: { value: 'Avoid competitor brands.' },
+    });
+    fireEvent.change(screen.getByLabelText('conversation.creativeStudio.rules.termsLabel'), {
+      target: { value: '+++' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.rules.add' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('conversation.creativeStudio.rules.termUnusable');
+    expect(onSetRules).not.toHaveBeenCalled();
+  });
+
+  it('identifies matcher-equivalent forbidden terms and never calls the command', () => {
+    const onSetRules = vi.fn(async () => true);
+    render(
+      <StudioRulesDrawer visible project={project()} organisationRules={[]} onClose={vi.fn()} onSetRules={onSetRules} />
+    );
+
+    fireEvent.change(screen.getByLabelText('conversation.creativeStudio.rules.textLabel'), {
+      target: { value: 'Avoid competitor brands.' },
+    });
+    fireEvent.change(screen.getByLabelText('conversation.creativeStudio.rules.termsLabel'), {
+      target: { value: 'Nike, Nike!' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.rules.add' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('conversation.creativeStudio.rules.duplicateTerm');
+    expect(onSetRules).not.toHaveBeenCalled();
+  });
+
   it('reads the adopted project on the next write, so add-then-remove never resends the pre-add list', async () => {
     const onSetRules = vi.fn(async () => true);
     // Stands in for StudioPage: the command succeeds, the page awaits refetch, and the drawer
@@ -173,5 +260,6 @@ describe('StudioRulesDrawer', () => {
 
     expect(screen.getByRole('button', { name: 'conversation.creativeStudio.rules.add' })).toBeDisabled();
     expect(screen.getByText('conversation.creativeStudio.rules.limitReached')).toBeInTheDocument();
+    expect(onSetRules).not.toHaveBeenCalled();
   });
 });
