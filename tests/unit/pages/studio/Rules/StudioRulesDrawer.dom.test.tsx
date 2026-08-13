@@ -165,6 +165,33 @@ describe('StudioRulesDrawer', () => {
     expect(onSetRules.mock.calls[0][0][0].predicate?.terms).toHaveLength(2);
   });
 
+  it.each(['耐克，阿迪达斯', 'ナイキ、アディダス', 'نایکی، آدیداس', 'نایکی؛ آدیداس'])(
+    'splits forbidden terms separated by %s',
+    async (terms) => {
+      const onSetRules = vi.fn(async () => true);
+      render(
+        <StudioRulesDrawer
+          visible
+          project={project()}
+          organisationRules={[]}
+          onClose={vi.fn()}
+          onSetRules={onSetRules}
+        />
+      );
+
+      fireEvent.change(screen.getByLabelText('conversation.creativeStudio.rules.textLabel'), {
+        target: { value: 'Avoid competitor brands.' },
+      });
+      fireEvent.change(screen.getByLabelText('conversation.creativeStudio.rules.termsLabel'), {
+        target: { value: terms },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.rules.add' }));
+
+      await waitFor(() => expect(onSetRules).toHaveBeenCalledTimes(1));
+      expect(onSetRules.mock.calls[0][0][0].predicate?.terms).toHaveLength(2);
+    }
+  );
+
   it('explains what each badge means, so the two enforcement states are not a guess', () => {
     render(
       <StudioRulesDrawer
