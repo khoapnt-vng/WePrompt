@@ -106,12 +106,12 @@ const containsRun = (haystack: readonly string[], needle: readonly string[]): bo
  * rule the user has to act on.
  */
 export const evaluateStudioRules = (rules: readonly StudioBriefRule[], prompt: string): StudioRuleVerdict => {
-  // Before touching `prompt`, because the zero-rule case is every project until the user pins one
-  // and the renderer calls this once per reviewed shot. It is also a guard: no test fixture in this
-  // repo is typechecked, so a `GenerationReviewScene` built without `promptText` reaches here as
-  // `undefined`, and tokenising it would turn a memo into a TypeError for a project with no rules.
+  // The zero-rule case is the cheap fast path for every project until the user pins one. The
+  // `?? ''` below guards untypechecked renderer fixtures built without `promptText`, even when rules
+  // exist. Main is the real gate and always passes a real string, so coercing a fixture bug to an
+  // empty prompt cannot let a paid render through; it only stops the renderer's memo from crashing.
   if (rules.length === 0) return { breaches: [] };
-  const promptTokens = tokenise(prompt);
+  const promptTokens = tokenise(prompt ?? '');
   const breaches: StudioRuleBreach[] = [];
   for (const rule of rules) {
     if (rule.predicate === null) continue;
@@ -161,8 +161,11 @@ const RULES_BLOCK_FOOTER = 'Call read_storyboard for the full brief.';
 
 const ruleLine = (rule: StudioBriefRule, position: number): string => {
   const enforcement = rule.predicate === null ? 'context only' : 'enforced';
-  const terms = rule.predicate === null ? '' : ` (forbidden words: ${rule.predicate.terms.join(', ')})`;
-  return `${position}. [${rule.scope}, ${enforcement}] ${rule.text}${terms}`;
+  const terms =
+    rule.predicate === null
+      ? ''
+      : ` (forbidden words: ${rule.predicate.terms.map((term) => term.replace(/\s+/g, ' ').trim()).join(', ')})`;
+  return `${position}. [${rule.scope}, ${enforcement}] ${rule.text.replace(/\s+/g, ' ').trim()}${terms}`;
 };
 
 /**
