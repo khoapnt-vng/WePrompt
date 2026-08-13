@@ -313,7 +313,7 @@ describe('creative studio project store', () => {
         id: 'rule_1',
         scope: 'project',
         text: 'x',
-        predicate: { kind: 'nope', terms: [] },
+        predicate: { kind: 'nope', terms: ['nike'] },
         createdAt: '2026-08-13T00:00:00.000Z',
       },
     ];
@@ -1099,6 +1099,35 @@ describe('creative studio project store', () => {
       },
     ],
     [
+      'an extra brief rule predicate field',
+      (project: StudioProject) => {
+        project.rules = [
+          {
+            id: 'rule_1',
+            scope: 'project',
+            text: 'Avoid this term',
+            predicate: { kind: 'forbidden_terms', terms: ['nike'] },
+            createdAt: '2026-08-13T00:00:00.000Z',
+          },
+        ];
+        Object.assign(project.rules[0].predicate!, { caseSensitive: true });
+      },
+    ],
+    [
+      'an empty brief rule term list',
+      (project: StudioProject) => {
+        project.rules = [
+          {
+            id: 'rule_1',
+            scope: 'project',
+            text: 'Avoid these terms',
+            predicate: { kind: 'forbidden_terms', terms: [] },
+            createdAt: '2026-08-13T00:00:00.000Z',
+          },
+        ];
+      },
+    ],
+    [
       'an extra brief rule field',
       (project: StudioProject) => {
         project.rules = [
@@ -1127,7 +1156,7 @@ describe('creative studio project store', () => {
         ];
       },
     ],
-  ] as const)('rejects cut data with %s without changing durable state', async (_case, mutate) => {
+  ] as const)('rejects %s without changing durable state', async (_case, mutate) => {
     const project = await store.createProject(makeInput());
 
     await expect(
