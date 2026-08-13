@@ -327,6 +327,9 @@ export function initCreativeStudioBridge(dependencies: CreativeStudioBridgeDepen
   ipcBridge.creativeStudio.setBriefRules.provider((input) =>
     runCommand(() => dependencies.getService().setBriefRules(input))
   );
+  ipcBridge.creativeStudio.undoBriefRules.provider((input) =>
+    runCommand(() => dependencies.getService().undoBriefRules(input))
+  );
   ipcBridge.creativeStudio.bindBriefConversation.provider((input) =>
     runCommand(() => dependencies.getService().bindBriefConversation(input))
   );

@@ -251,6 +251,7 @@ const VALID_PAYLOADS = {
       },
     ],
   },
+  'creative-studio.undo-brief-rules': { projectId: 'project_1' },
   'creative-studio.bind-brief-conversation': {
     projectId: 'project_1',
     expectedRevision: 1,

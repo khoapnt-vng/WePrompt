@@ -386,9 +386,40 @@ describe('CreativeStudioService', () => {
           createdAt: '2026-08-13T00:01:00.000Z',
         },
       ]);
+      expect(second.ruleListUndo).toEqual({
+        capturedRevision: first.revision,
+        previousRules: first.rules,
+      });
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('undoes the latest rule-list write after unrelated project changes by reading a fresh revision', async () => {
+    const project = await service.createProject(makeInput());
+    const ruled = await service.setBriefRules({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      rules: [{ id: 'rule_1', text: 'Keep the kits generic.', predicate: null }],
+    });
+    const renamed = await service.updateProject({
+      projectId: project.id,
+      expectedRevision: ruled.revision,
+      name: 'Renamed after the rule write',
+    });
+
+    const undone = await service.undoBriefRules({ projectId: project.id });
+
+    expect(undone.revision).toBe(renamed.revision + 1);
+    expect(undone.name).toBe('Renamed after the rule write');
+    expect(undone.rules).toEqual([]);
+    expect(undone.ruleListUndo).toBeNull();
+  });
+
+  it('refuses undo when no rule-list write is available', async () => {
+    const project = await service.createProject(makeInput());
+
+    await expect(service.undoBriefRules({ projectId: project.id })).rejects.toMatchObject({ code: 'invalid_payload' });
   });
 
   it('refuses a stale revision rather than clobbering a concurrent edit', async () => {
@@ -783,6 +814,10 @@ describe('CreativeStudioService', () => {
           createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
         },
       ]);
+      expect(accepted.project.ruleListUndo).toEqual({
+        capturedRevision: project.revision,
+        previousRules: [],
+      });
     });
 
     it('refuses a proposed rule term that the accept path cannot enforce', async () => {

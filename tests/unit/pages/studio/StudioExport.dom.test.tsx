@@ -110,6 +110,7 @@ const project = (withSelectedAssets = true): StudioRendererProject => {
     name: 'Launch film',
     brief: 'A short launch video',
     rules: [],
+    ruleListUndo: null,
     aspectRatio: '16:9',
     targetDurationSeconds: 10,
     resolution: '720p',

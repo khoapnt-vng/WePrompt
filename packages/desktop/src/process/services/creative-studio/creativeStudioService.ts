@@ -69,6 +69,7 @@ import {
   resolveEffectiveStudioRules,
   ruleTermMatchKey,
   STUDIO_RULE_LIMITS,
+  type StudioBriefRule,
 } from '@/common/types/project/creativeStudioRules';
 import type { ISessionMcpServer } from '@/common/config/storage';
 import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
@@ -172,6 +173,7 @@ export type CreativeStudioService = {
   proposeStoryboard(input: ProposeStudioStoryboardInput): Promise<StudioRendererProject>;
   updateProject(input: StudioUpdateProjectRequest): Promise<StudioRendererProject>;
   setBriefRules(input: StudioSetBriefRulesRequest): Promise<StudioRendererProject>;
+  undoBriefRules(input: StudioProjectRequest): Promise<StudioRendererProject>;
   bindBriefConversation(input: StudioBindBriefConversationRequest): Promise<StudioRendererProject>;
   updateCut(input: StudioUpdateCutRequest): Promise<StudioRendererProject>;
   placeCutScenes(input: StudioPlaceCutScenesRequest): Promise<StudioRendererProject>;
@@ -759,6 +761,19 @@ const toRendererProject = (project: StudioProject): StudioRendererProject => {
       predicate: rule.predicate === null ? null : { ...rule.predicate, terms: [...rule.predicate.terms] },
       createdAt: rule.createdAt,
     })),
+    ruleListUndo:
+      project.ruleListUndo === null
+        ? null
+        : {
+            capturedRevision: project.ruleListUndo.capturedRevision,
+            previousRules: project.ruleListUndo.previousRules.map((rule) => ({
+              id: rule.id,
+              scope: rule.scope,
+              text: rule.text,
+              predicate: rule.predicate === null ? null : { ...rule.predicate, terms: [...rule.predicate.terms] },
+              createdAt: rule.createdAt,
+            })),
+          },
     ...(project.forgeProjectId === undefined ? {} : { forgeProjectId: project.forgeProjectId }),
     briefConversationId: project.briefConversationId ?? null,
     aspectRatio: project.aspectRatio,
@@ -847,6 +862,32 @@ const toRendererProposal = (proposal: StudioProposal, diff?: StudioProposalDiff)
       }),
 });
 
+const cloneBriefRules = (rules: readonly StudioBriefRule[]): StudioBriefRule[] =>
+  rules.map((rule) => ({
+    id: rule.id,
+    scope: rule.scope,
+    text: rule.text,
+    predicate: rule.predicate === null ? null : { kind: rule.predicate.kind, terms: [...rule.predicate.terms] },
+    createdAt: rule.createdAt,
+  }));
+
+/** The only service path that replaces `project.rules`; every forward writer captures here. */
+const applyRuleListWrite = (
+  project: StudioProject,
+  rules: readonly StudioBriefRule[],
+  mode: 'capture' | 'consume' = 'capture'
+): StudioProject => ({
+  ...project,
+  rules: cloneBriefRules(rules),
+  ruleListUndo:
+    mode === 'consume'
+      ? null
+      : {
+          capturedRevision: project.revision,
+          previousRules: cloneBriefRules(project.rules),
+        },
+});
+
 const applyProposalPayload = (
   project: StudioProject,
   payload: StudioProposalPayload,
@@ -870,19 +911,16 @@ const applyProposalPayload = (
     );
     if (duplicate) return project;
     if (project.rules.length >= STUDIO_RULE_LIMITS.maxRules) throw invalid('Studio rule limit reached');
-    return {
-      ...project,
-      rules: [
-        ...project.rules,
-        {
-          id: minted.ruleId,
-          scope: 'project' as const,
-          text,
-          predicate: payload.rule.predicate === null ? null : { kind: 'forbidden_terms' as const, terms },
-          createdAt: minted.timestamp,
-        },
-      ],
-    };
+    return applyRuleListWrite(project, [
+      ...project.rules,
+      {
+        id: minted.ruleId,
+        scope: 'project' as const,
+        text,
+        predicate: payload.rule.predicate === null ? null : { kind: 'forbidden_terms' as const, terms },
+        createdAt: minted.timestamp,
+      },
+    ]);
   }
   const proposedIds = new Set(payload.sceneOrder);
   for (const scene of Object.values(project.scenes)) {
@@ -1450,9 +1488,9 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
           input.projectId,
           (project) => {
             const existing = new Map(project.rules.map((rule) => [rule.id, rule]));
-            return {
-              ...project,
-              rules: input.rules.map((draft) => {
+            return applyRuleListWrite(
+              project,
+              input.rules.map((draft) => {
                 const seenTerms = new Set<string>();
                 return {
                   id: draft.id,
@@ -1474,10 +1512,28 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
                         },
                   createdAt: existing.get(draft.id)?.createdAt ?? timestamp,
                 };
-              }),
-            };
+              })
+            );
           },
           input.expectedRevision
+        )
+      );
+    },
+
+    async undoBriefRules(input: StudioProjectRequest): Promise<StudioRendererProject> {
+      assertSafeId(input.projectId, 'project id');
+      const current = await deps.store.getProject(input.projectId);
+      if (current === null) throw new CreativeStudioStoreError('not_found', 'Studio project not found');
+      if (current.ruleListUndo === null) throw invalid('No Studio rule-list write to undo');
+      const expectedRevision = current.revision;
+      return notify(
+        await deps.store.updateProject(
+          input.projectId,
+          (project) => {
+            if (project.ruleListUndo === null) throw invalid('No Studio rule-list write to undo');
+            return applyRuleListWrite(project, project.ruleListUndo.previousRules, 'consume');
+          },
+          expectedRevision
         )
       );
     },

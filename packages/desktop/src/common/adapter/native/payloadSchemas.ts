@@ -758,6 +758,7 @@ export const nativeBridgePayloadSchemas = {
   'creative-studio.update-model-selection': studioUpdateModelSelectionSchema,
   'creative-studio.update-project': studioUpdateProjectSchema,
   'creative-studio.set-brief-rules': studioSetBriefRulesSchema,
+  'creative-studio.undo-brief-rules': studioProjectRequestSchema,
   'creative-studio.bind-brief-conversation': z
     .object({
       projectId: safeIdSchema,

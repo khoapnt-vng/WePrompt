@@ -244,6 +244,12 @@ export type StudioRoutingPreferences = {
   video: StudioProviderRef | null;
 };
 
+/** The single durable inverse available for the project's most recent rule-list write. */
+export type StudioRuleListUndo = {
+  capturedRevision: number;
+  previousRules: StudioBriefRule[];
+};
+
 export type StudioProject = {
   schemaVersion: 1;
   revision: number;
@@ -258,6 +264,7 @@ export type StudioProject = {
    * the documented `outputRole` trap (see the warning at :154-159).
    */
   rules: StudioBriefRule[];
+  ruleListUndo: StudioRuleListUndo | null;
   forgeProjectId?: string;
   briefConversationId?: string | null;
   aspectRatio: StudioAspectRatio;

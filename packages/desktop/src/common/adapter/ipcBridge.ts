@@ -1236,6 +1236,9 @@ export const creativeStudio = {
   setBriefRules: bridge.buildProvider<StudioCommandResult<StudioRendererProject>, StudioSetBriefRulesRequest>(
     'creative-studio.set-brief-rules'
   ),
+  undoBriefRules: bridge.buildProvider<StudioCommandResult<StudioRendererProject>, StudioProjectRequest>(
+    'creative-studio.undo-brief-rules'
+  ),
   bindBriefConversation: bridge.buildProvider<
     StudioCommandResult<StudioRendererProject>,
     StudioBindBriefConversationRequest

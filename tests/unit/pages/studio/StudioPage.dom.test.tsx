@@ -45,6 +45,7 @@ const bridge = vi.hoisted(() => ({
   listRoutes: { invoke: vi.fn() },
   updateModelSelection: { invoke: vi.fn() },
   updateProject: { invoke: vi.fn() },
+  undoBriefRules: { invoke: vi.fn() },
   updateScene: { invoke: vi.fn() },
   reorderScenes: { invoke: vi.fn() },
   proposeStoryboard: { invoke: vi.fn() },
@@ -107,6 +108,7 @@ const project = (id = 'project-1', overrides: Partial<StudioRendererProject> = {
   name: id === 'project-1' ? 'Launch film' : 'Second film',
   brief: 'A short launch video',
   rules: [],
+  ruleListUndo: null,
   aspectRatio: '16:9',
   targetDurationSeconds: 15,
   resolution: '720p',
@@ -426,6 +428,7 @@ describe('StudioPage and useStudioProject', () => {
     bridge.listRoutes.invoke.mockResolvedValue(ok(routes()));
     bridge.updateModelSelection.invoke.mockResolvedValue(ok(project()));
     bridge.updateProject.invoke.mockImplementation(async () => ok(project()));
+    bridge.undoBriefRules.invoke.mockImplementation(async () => ok(project()));
     bridge.updateScene.invoke.mockImplementation(async () => ok(project()));
     bridge.reorderScenes.invoke.mockImplementation(async () => ok(project()));
     bridge.proposeStoryboard.invoke.mockImplementation(async () => ok(project()));
@@ -1056,6 +1059,36 @@ describe('StudioPage and useStudioProject', () => {
       await waitFor(() => expect(router.state.location.pathname).toBe('/studio/project-1/brief'));
       expect(router.state.location.pathname).not.toBe('/guid');
     });
+  });
+
+  it('adopts the project returned after undo so the rules drawer and pin input receive the restored list', async () => {
+    const addedRule = {
+      id: 'rule_1',
+      scope: 'project' as const,
+      text: 'Keep the kits generic.',
+      predicate: null,
+      createdAt: '2026-08-13T00:00:00.000Z',
+    };
+    const ruled = project('project-1', {
+      rules: [addedRule],
+      ruleListUndo: { capturedRevision: 1, previousRules: [] },
+    });
+    const restored = project('project-1', { revision: 3, rules: [], ruleListUndo: null });
+    bridge.getProject.invoke.mockResolvedValue(ok(ruled));
+    bridge.undoBriefRules.invoke.mockImplementation(async () => {
+      bridge.getProject.invoke.mockResolvedValue(ok(restored));
+      return ok(restored);
+    });
+    renderRoute('/studio/project-1/brief');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.rules.open' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.rules.undo' }));
+
+    await waitFor(() =>
+      expect(bridge.undoBriefRules.invoke).toHaveBeenCalledExactlyOnceWith({ projectId: 'project-1' })
+    );
+    await waitFor(() => expect(bridge.getProject.invoke.mock.calls.length).toBeGreaterThanOrEqual(2));
+    expect(screen.queryByRole('button', { name: 'conversation.creativeStudio.rules.undo' })).not.toBeInTheDocument();
   });
 
   describe('Cut render progress at project scope', () => {

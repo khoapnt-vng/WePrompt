@@ -915,7 +915,11 @@
       "autoSubmitBlocked": "佇列中的參考圖請求違反了專案規則。請先檢查受影響的鏡頭再生成。",
       "proposalTitle": "建議的規則",
       "proposalBody": "創意總監建議將此規則釘選至專案簡報。",
-      "proposalTerms": "強制執行的禁用詞：{{terms}}"
+      "proposalTerms": "強制執行的禁用詞：{{terms}}",
+      "undo": "復原",
+      "undoAdded": "復原後將移除這條新增規則：",
+      "undoRemoved": "復原後將還原這條已刪除的規則：",
+      "undoChanged": "復原後將還原上一版規則清單。"
     },
     "nav": {
       "title": "創意工作室"
