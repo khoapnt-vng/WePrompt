@@ -881,9 +881,9 @@
   "creativeStudio": {
     "rules": {
       "open": "Reglas",
-      "title": "Reglas del proyecto",
-      "description": "Las reglas orientan a la dirección creativa y se comprueban antes de cualquier renderizado de pago.",
-      "precedence": "Las reglas de la organización se aplican primero y están bloqueadas. Las reglas del proyecto pueden añadir requisitos, pero no anularlas. Las reglas de la organización se distribuyen de forma centralizada y no se pueden gestionar aquí.",
+      "title": "Reglas",
+      "description": "Las reglas orientan a la dirección creativa. Las reglas con términos prohibidos se comprueban en cada prompt visual antes de un renderizado de pago.",
+      "precedence": "Las reglas de la organización están integradas en la aplicación, bloqueadas y se aplican primero. Esta versión no tiene un canal de administración ni de servidor para distribuirlas. Las reglas del proyecto pueden añadir requisitos, pero no anular las reglas de la organización.",
       "empty": "Aún no hay reglas del proyecto.",
       "scope": {
         "organisation": "Organización",
@@ -911,7 +911,6 @@
       "termsLabel": "Términos prohibidos (opcional)",
       "termsPlaceholder": "Ejemplo: Nike, Adidas",
       "termsHelp": "Separa hasta 8 términos con comas. Las reglas sin términos solo aportan contexto.",
-      "invalidTerms": "Usa hasta 8 términos, de 64 caracteres como máximo cada uno.",
       "limitReached": "Se ha alcanzado el máximo de 24 reglas efectivas.",
       "add": "Añadir regla",
       "breachScene": "Bloqueado por la regla «{{rule}}» (coincidencia: «{{term}}»).",
@@ -919,7 +918,7 @@
       "breachAskDirector": "Pedir al director que lo revise",
       "autoSubmitBlocked": "Una solicitud de imagen de referencia en cola infringió una regla del proyecto. Revisa la toma afectada antes de generar.",
       "proposalTitle": "Regla propuesta",
-      "proposalBody": "El Director Creativo propone fijar esta regla en el briefing del proyecto.",
+      "proposalBody": "La dirección creativa sugiere añadir esta regla al proyecto. Nada cambia hasta que la aceptes.",
       "proposalTerms": "Términos prohibidos aplicados: {{terms}}"
     },
     "nav": {
@@ -1441,7 +1440,7 @@
       "busy": "Este proyecto tiene tareas de generación activas.",
       "provider": "El proveedor no ha podido completar la solicitud.",
       "storage": "Creative Studio no ha podido actualizar sus datos locales.",
-      "ruleBreach": "La generación se bloqueó porque el prompt infringe una regla del proyecto."
+      "ruleBreach": "Una regla bloqueó la generación antes de cualquier cobro. Abre Reglas para ver qué debes cambiar."
     },
     "models": {
       "storyboard": "Modelo de guion gráfico",

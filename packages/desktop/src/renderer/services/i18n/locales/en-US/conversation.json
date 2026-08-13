@@ -715,9 +715,9 @@
   "creativeStudio": {
     "rules": {
       "open": "Rules",
-      "title": "Project rules",
-      "description": "Rules guide the Creative Director and are checked before any paid render.",
-      "precedence": "Organisation rules are applied first and locked. Project rules can add requirements but cannot override them. Organisation rules are distributed centrally and cannot be managed here.",
+      "title": "Rules",
+      "description": "Rules guide the Creative Director. Rules with forbidden terms are checked against each visual prompt before a paid render.",
+      "precedence": "Organisation rules are built into the app, locked, and applied first. This version has no admin or server channel for distributing them. Project rules can add requirements but cannot override organisation rules.",
       "empty": "No project rules yet.",
       "scope": {
         "organisation": "Organisation",
@@ -745,7 +745,6 @@
       "termsLabel": "Forbidden terms (optional)",
       "termsPlaceholder": "For example: Nike, Adidas",
       "termsHelp": "Separate up to 8 terms with commas. Rules without terms are context only.",
-      "invalidTerms": "Use up to 8 terms, each no more than 64 characters.",
       "limitReached": "The maximum of 24 effective rules has been reached.",
       "add": "Add rule",
       "breachScene": "Blocked by rule “{{rule}}” (matched “{{term}}”).",
@@ -753,7 +752,7 @@
       "breachAskDirector": "Ask the Director to revise",
       "autoSubmitBlocked": "A queued reference image request breached a project rule. Review the affected shot before generating.",
       "proposalTitle": "Proposed rule",
-      "proposalBody": "The Creative Director proposes pinning this rule to the project brief.",
+      "proposalBody": "The Creative Director suggests adding this rule to the project. Nothing changes until you accept.",
       "proposalTerms": "Enforced forbidden terms: {{terms}}"
     },
     "nav": {
@@ -1258,7 +1257,7 @@
       "busy": "This project has active generation work.",
       "provider": "The provider could not complete the request.",
       "storage": "Creative Studio could not update its local data.",
-      "ruleBreach": "Generation was blocked because the prompt breaches a project rule."
+      "ruleBreach": "A rule blocked generation before any charge. Open Rules to see what needs changing."
     },
     "models": {
       "storyboard": "Storyboard model",
