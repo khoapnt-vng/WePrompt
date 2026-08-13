@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -23,9 +23,14 @@ import type {
 import type { UseStoryboardEditorResult } from '@renderer/pages/studio/hooks/useStoryboardEditor';
 
 const sendMessage = vi.fn(async () => ({}));
+const conversationCache = vi.fn(async () => null);
 
 vi.mock('@/common', () => ({
   ipcBridge: { conversation: { sendMessage: { invoke: sendMessage } } },
+}));
+
+vi.mock('@/renderer/pages/conversation/utils/conversationCache', () => ({
+  getConversationOrNull: conversationCache,
 }));
 
 const harness: { result: UseBriefConversationResult } = {
@@ -54,7 +59,7 @@ vi.mock('@renderer/pages/studio/components/Shell/DirectorProposalCard', () => ({
   ),
 }));
 
-const { DirectorProposals, pendingDirectorProposals } =
+const { describeRuleBreachInstruction, DirectorProposals, pendingDirectorProposals, sendDirectorInstruction } =
   await import('@renderer/pages/studio/components/Shell/DirectorProposals');
 
 const editableScene = (): StudioEditableScene => ({
@@ -188,6 +193,55 @@ describe('pendingDirectorProposals', () => {
 });
 
 describe('DirectorProposals', () => {
+  it('quotes the rule and the shot when handing a breach to the Director', async () => {
+    await sendDirectorInstruction({
+      conversation: conversation(),
+      instruction: describeRuleBreachInstruction([
+        { sceneTitle: 'Opening', ruleText: 'No competitor logos.', matchedTerm: 'acme' },
+      ]),
+    });
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const [payload] = sendMessage.mock.calls[0] as [{ input: string; conversation_id: string }];
+    expect(payload.conversation_id).toBe('conversation_brief');
+    expect(payload.input).toContain('No competitor logos.');
+    expect(payload.input).toContain('Opening');
+    expect(payload.input).toContain('acme');
+    expect(payload.input).toContain('Rewrite');
+    // Does not ask the Director to remove the rule — the whole point of the instruction.
+    expect(payload.input).toContain('Do not ask to remove the rule');
+  });
+
+  it('re-reads the conversation before attaching pins to the breach request', async () => {
+    const stale = conversation();
+    const fresh = {
+      ...stale,
+      extra: {
+        ...stale.extra,
+        context_handoff: {
+          pinned_context: [
+            {
+              id: 'studio_brief_rules',
+              title: 'Project rules',
+              content: 'PROJECT RULES',
+              source: 'manual' as const,
+              created_at: 1,
+              updated_at: 1,
+            },
+          ],
+        },
+      },
+    };
+    conversationCache.mockResolvedValueOnce(fresh as never);
+
+    // The stale handle carries `pin-1`; the server copy carries the Studio pin. The request must
+    // use the latest desktop-side pin set even though the current backend ignores this field.
+    await sendDirectorInstruction({ conversation: stale, instruction: 'x' });
+
+    const [payload] = sendMessage.mock.calls[0] as [{ pinned_context: TContextHandoffItem[] }];
+    expect(payload.pinned_context.map((pin) => pin.id)).toEqual(['studio_brief_rules']);
+  });
+
   it('renders one card per pending proposal, in the order they arrived', () => {
     renderProposals([proposal('pending-1', 'pending'), proposal('pending-2', 'pending')]);
 
@@ -229,12 +283,12 @@ describe('DirectorProposals', () => {
    * Re-proposing has to reach the Director's own thread — a bare retry against a fresh conversation
    * redrafts from memory instead of from the script that moved underneath it.
    */
-  it('asks the Director to redraft against the current script, in the Director conversation', () => {
+  it('asks the Director to redraft against the current script, in the Director conversation', async () => {
     renderProposals([proposal('pending-1', 'pending')]);
 
     fireEvent.click(screen.getByRole('button', { name: 'repropose pending-1' }));
 
-    expect(sendMessage).toHaveBeenCalledOnce();
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
     const payload = sendMessage.mock.calls[0]?.[0] as {
       input: string;
       conversation_id: string;
@@ -245,7 +299,7 @@ describe('DirectorProposals', () => {
     // Naming the tool is the load-bearing half: without it the Director redrafts from memory.
     expect(payload.input).toContain('read_storyboard');
     expect(payload.files).toEqual([]);
-    // The brief's pinned context is what the Director was briefed with; a redraft without it drifts.
+    // The desktop preserves the current pin payload for backends that support it.
     expect(payload.pinned_context).toEqual([pinnedItem]);
   });
 
