@@ -22,6 +22,10 @@ import {
   type StudioSelectVariationRequest,
 } from '@/common/types/project/creativeStudioTypes';
 import { requestedMediaKind } from '@/common/types/project/creativeStudioOutputRole';
+import {
+  buildFirstFramePrompt,
+  hasFirstFramePromptSubject,
+} from '@/common/types/project/creativeStudioReferencePrompt';
 
 import {
   collectReferencePrompts,
@@ -39,7 +43,6 @@ import {
   StudioPhaseShell,
   type StudioPhaseControllers,
 } from './components';
-import { buildFirstFramePrompt, hasFirstFramePromptSubject } from './components/Generation/referencePrompt';
 import { BriefConversationProvider } from './components/Shell/BriefConversationContext';
 import { DirectorPane } from './components/Shell/DirectorPane';
 import { DirectorProposals, pendingDirectorProposals } from './components/Shell/DirectorProposals';
