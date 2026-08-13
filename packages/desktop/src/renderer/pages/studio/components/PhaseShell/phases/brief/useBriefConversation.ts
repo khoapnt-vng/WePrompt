@@ -7,9 +7,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ipcBridge } from '@/common';
 import type { IMcpServer, TChatConversation, TProviderWithModel } from '@/common/config/storage';
+import {
+  buildStudioBriefRulesPin,
+  resolveEffectiveStudioRules,
+  STUDIO_BRIEF_RULES_PIN_ID,
+} from '@/common/types/project/creativeStudioRules';
 import type { StudioRendererProject } from '@/common/types/project/creativeStudioTypes';
 import { useProvidersQuery } from '@/renderer/hooks/agent/useModelProviderList';
 import { useConversationHistoryContext } from '@/renderer/hooks/context/ConversationHistoryContext';
+import { buildContextHandoffExtraPatch } from '@/renderer/pages/conversation/contextHandoff/contextConversationUpdate';
+import { getConversationPinnedContext } from '@/renderer/pages/conversation/contextHandoff/pinnedContext';
 import { useGuidModelSelection } from '@/renderer/pages/guid/hooks/useGuidModelSelection';
 import { createStudioBriefConversation } from '../studioBriefConversation';
 
@@ -134,6 +141,77 @@ export const useBriefConversation = (project: StudioRendererProject): UseBriefCo
   const [state, setState] = useState<BriefConversationState>(boundState);
   const [errorMessageKey, setErrorMessageKey] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  /**
+   * Keeps one Studio-owned entry in the Director conversation's `pinned_context`.
+   *
+   * `pinned_context` is the only field on the send wire that is recomputed from a fresh server read
+   * on every message (AionrsSendBox re-GETs the conversation, then forwards the pins), so a write
+   * here rides every subsequent turn once the backend reads this field. Today AionCore silently
+   * drops it. `preset_context`/`preset_rules` cannot provide a per-turn substitute: they are captured
+   * once at conversation create and the send body has no slot for them.
+   *
+   * Five details are load-bearing:
+   * - `merge_extra` merges at the `extra` level, NOT inside `context_handoff`. So the patch must be
+   *   built with `buildContextHandoffExtraPatch`, which spreads the conversation's current
+   *   `context_handoff` first (contextConversationUpdate.ts:35-40). Writing a bare
+   *   `{ context_handoff: { pinned_context } }` replaces the whole sub-object and drops `snapshot`,
+   *   `revision`, `context_file_path`/`_name`, `last_budget_status`, `last_exported_at`,
+   *   `last_compacted_turn_id` and `turns_since_compaction` on every rules change. Every existing
+   *   writer goes through this helper for exactly that reason (ContextHandoffPanel.tsx:169,
+   *   useContextCompaction.ts:336-340).
+   * - Non-Studio pins are preserved and the Studio pin is replaced in place by its fixed id, so a
+   *   user pin can never be clobbered and the Studio pin can never be duplicated.
+   * - The pin ITEM is still built literally rather than through addPinnedContext/updatePinnedContext,
+   *   whose `cleanText` collapses ALL whitespace including newlines and would flatten the rule list
+   *   (pinnedContext.ts:25). `buildContextHandoffExtraPatch` does not run `cleanText`, so it is safe
+   *   for the patch while the item stays hand-built.
+   * - The dedupe signature carries the conversation ID, not only the pin text. `recreate()` mints a
+   *   NEW conversation with unchanged rules (`:197-205`, installed at `:182`); a content-only signature
+   *   would match, return early, and leave that conversation with no Studio pin for the rest of the
+   *   renderer's life.
+   * - Zero rules and no stale Studio pin means NO write at all, not an empty one — see the guard below.
+   *
+   * Re-asserted on every rules change, whenever the conversation becomes ready, and whenever the
+   * conversation's identity changes — which covers the realistic ways the pin could be lost: this
+   * store is not CAS-guarded and Studio does not own it.
+   *
+   * `state.conversation` is `StudioBriefConversation = Extract<TChatConversation, { type: 'aionrs' }>`,
+   * which is exactly the parameter type `buildContextHandoffExtraPatch` takes, so no cast is needed on
+   * the way in — only on the way out, where `updates.extra` is typed against the whole union.
+   */
+  const lastSyncedPinRef = useRef<string | null>(null);
+  const conversationId = state.kind === 'ready' ? state.conversation.id : null;
+  const effectiveRules = useMemo(() => resolveEffectiveStudioRules(project.rules), [project.rules]);
+
+  useEffect(() => {
+    if (conversationId === null || state.kind !== 'ready') return;
+    const pin = buildStudioBriefRulesPin({ rules: effectiveRules, now: Date.now() });
+    const signature = `${conversationId} ${pin === null ? '' : pin.content}`;
+    if (lastSyncedPinRef.current === signature) return;
+    lastSyncedPinRef.current = signature;
+    const current = getConversationPinnedContext(state.conversation);
+    const existing = current.filter((item) => item.id !== STUDIO_BRIEF_RULES_PIN_ID);
+    // Nothing to write: no rules to push, and no stale Studio pin to clear. Without this the effect
+    // issues a `conversation.update` on every open of every project that has no rules — which is every
+    // project until the user pins one — for a patch identical to what is already stored. It also keeps
+    // `conversation.update` off the wire entirely for those projects, which is what lets
+    // `BriefConversation.dom.test.tsx` keep its existing `@/common` mock shape.
+    if (pin === null && existing.length === current.length) return;
+    const patch = buildContextHandoffExtraPatch(state.conversation, {
+      pinned_context: pin === null ? existing : [...existing, pin],
+    });
+    void ipcBridge.conversation.update
+      .invoke({
+        id: conversationId,
+        merge_extra: true,
+        updates: { extra: patch as TChatConversation['extra'] },
+      })
+      // A failed pin write loses only this best-effort channel: the main-process money gate remains
+      // authoritative, and read_storyboard still carries the rules. Retrying on the next change.
+      .catch(() => {
+        lastSyncedPinRef.current = null;
+      });
+  }, [conversationId, effectiveRules, state]);
   const projectRef = useRef(project);
   projectRef.current = project;
 

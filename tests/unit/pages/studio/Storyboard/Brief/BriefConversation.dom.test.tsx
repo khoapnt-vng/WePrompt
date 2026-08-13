@@ -69,6 +69,7 @@ const project = (overrides: Partial<StudioRendererProject> = {}): StudioRenderer
   id: 'project_1',
   name: 'Coffee teaser',
   brief: 'A mountain coffee story',
+  rules: [],
   briefConversationId: null,
   aspectRatio: '16:9',
   targetDurationSeconds: 10,
