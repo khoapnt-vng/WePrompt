@@ -28,7 +28,7 @@ import type {
   StudioScene,
   StudioTextModelRef,
 } from '@/common/types/project/creativeStudioTypes';
-import { STUDIO_RULE_LIMITS, type StudioBriefRule } from '@/common/types/project/creativeStudioRules';
+import { hasRuleToken, STUDIO_RULE_LIMITS, type StudioBriefRule } from '@/common/types/project/creativeStudioRules';
 import { isCanonicalStudioGeneratedTake } from '@/common/types/project/creativeStudioCanonicalTake';
 import { STUDIO_MANAGED_ASSET_COLLECTIONS } from '@/common/types/project/creativeStudioManagedAssetCollections';
 import { isValidProviderJobId } from '@process/services/creative-studio/adapters/types';
@@ -404,6 +404,11 @@ const validateBriefRulePredicate = (value: unknown): boolean =>
     value.terms.every((term) => isNonEmptyString(term) && term.length <= STUDIO_RULE_LIMITS.term) &&
     new Set(value.terms).size === value.terms.length);
 
+const validateStoredBriefRulePredicate = (value: unknown): boolean =>
+  validateBriefRulePredicate(value) &&
+  (value === null ||
+    (isRecord(value) && Array.isArray(value.terms) && value.terms.every((term) => hasRuleToken(String(term)))));
+
 /**
  * A rule on the project record is always project-scoped. The organisation layer is code-resident
  * (ORGANISATION_STUDIO_RULES) and is refused here on purpose: a locked rule cached on disk could be
@@ -416,7 +421,7 @@ const validateBriefRule = (value: unknown): value is StudioBriefRule =>
   value.scope === 'project' &&
   isNonEmptyString(value.text) &&
   value.text.length <= STUDIO_RULE_LIMITS.text &&
-  validateBriefRulePredicate(value.predicate) &&
+  validateStoredBriefRulePredicate(value.predicate) &&
   isCanonicalIsoTimestamp(value.createdAt);
 
 const validateBriefRules = (value: unknown): value is StudioBriefRule[] =>

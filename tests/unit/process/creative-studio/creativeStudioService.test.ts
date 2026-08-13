@@ -6,10 +6,11 @@
  * @vitest-environment node
  */
 
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import type {
   CreateStudioProjectInput,
   StudioAsset,
@@ -22,9 +23,11 @@ import type {
   StudioRouteCatalog,
   StudioRouteCatalogEntry,
   StudioScene,
+  StudioSetBriefRulesRequest,
   StudioTextModelOption,
   StudioUpdateModelSelectionRequest,
 } from '@/common/types/project/creativeStudioTypes';
+import type { StudioBriefRule, StudioBriefRuleDraft } from '@/common/types/project/creativeStudioRules';
 import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
 import type { IProvider } from '@/common/config/storage';
 import type { GenerationProviderAdapter } from '@process/services/creative-studio/adapters';
@@ -61,6 +64,219 @@ const makeInput = (overrides: Partial<CreateStudioProjectInput> = {}): CreateStu
   resolution: '1080p',
   ...overrides,
 });
+
+type RuleContractVerdict = 'accept' | 'reject';
+
+type RuleContractCase = {
+  name: string;
+  storedRules: StudioBriefRule[];
+  serviceRules: StudioBriefRuleDraft[];
+  mcpInput: Record<string, unknown>;
+  mcpProjectRules?: StudioBriefRule[];
+  expected: {
+    store: RuleContractVerdict;
+    service: RuleContractVerdict;
+    mcpSchema: RuleContractVerdict;
+    mcpHandler: RuleContractVerdict | 'not_run';
+  };
+  expectedStoreError?: string;
+  expectedServiceError?: string;
+  expectedMcpSchemaIssue?: string;
+  expectedMcpHandlerError?: string;
+  expectedTerms?: {
+    store: string[];
+    service: string[];
+    mcp: string[];
+  };
+  expectedRuleCount?: {
+    store: number;
+    service: number;
+    mcpAfterProposal: number;
+  };
+  expectedText?: string;
+  expectedServiceScope?: StudioBriefRule['scope'];
+  expectedMcpPredicate?: StudioBriefRule['predicate'];
+};
+
+const contractStoredRule = (overrides: Partial<StudioBriefRule> = {}): StudioBriefRule => ({
+  id: 'rule_1',
+  scope: 'project',
+  text: 'Keep the kits generic.',
+  predicate: null,
+  createdAt: '2026-08-13T00:00:00.000Z',
+  ...overrides,
+});
+
+const contractDraftRule = (overrides: Partial<StudioBriefRuleDraft> = {}): StudioBriefRuleDraft => ({
+  id: 'rule_1',
+  text: 'Keep the kits generic.',
+  predicate: null,
+  ...overrides,
+});
+
+const contractMcpInput = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+  base_revision: 1,
+  text: 'Keep the kits generic.',
+  forbidden_terms: [],
+  ...overrides,
+});
+
+const maximumRuleList = (): StudioBriefRule[] =>
+  Array.from({ length: 24 }, (_, index) =>
+    contractStoredRule({ id: `rule_${index + 1}`, text: `Project rule ${index + 1}` })
+  );
+
+const maximumTerms = (): string[] =>
+  Array.from({ length: 8 }, (_, index) => `term${index}_${String.fromCodePoint(97 + index).repeat(58)}`);
+
+const inclusiveMaximumRuleList = (): StudioBriefRule[] => [
+  contractStoredRule({
+    id: 'rule_maximum',
+    text: 'x'.repeat(240),
+    predicate: { kind: 'forbidden_terms', terms: maximumTerms() },
+  }),
+  ...Array.from({ length: 23 }, (_, index) =>
+    contractStoredRule({ id: `rule_filler_${index + 1}`, text: `Project rule ${index + 1}` })
+  ),
+];
+
+const ruleContractCases: RuleContractCase[] = [
+  {
+    name: 'inclusive maxima',
+    storedRules: inclusiveMaximumRuleList(),
+    serviceRules: inclusiveMaximumRuleList().map(({ id, text, predicate }) => ({ id, text, predicate })),
+    mcpInput: contractMcpInput({ text: 'x'.repeat(240), forbidden_terms: maximumTerms() }),
+    mcpProjectRules: maximumRuleList().slice(0, 23),
+    expected: { store: 'accept', service: 'accept', mcpSchema: 'accept', mcpHandler: 'accept' },
+    expectedTerms: { store: maximumTerms(), service: maximumTerms(), mcp: maximumTerms() },
+    expectedRuleCount: { store: 24, service: 24, mcpAfterProposal: 24 },
+    expectedText: 'x'.repeat(240),
+  },
+  {
+    name: '241-character text',
+    storedRules: [contractStoredRule({ text: 'x'.repeat(241) })],
+    serviceRules: [contractDraftRule({ text: 'x'.repeat(241) })],
+    mcpInput: contractMcpInput({ text: 'x'.repeat(241) }),
+    expected: { store: 'reject', service: 'reject', mcpSchema: 'reject', mcpHandler: 'not_run' },
+    expectedStoreError: 'Invalid Studio project payload',
+    expectedServiceError: 'Invalid Studio rule text',
+    expectedMcpSchemaIssue: 'too_big',
+  },
+  {
+    name: 'ninth term',
+    storedRules: [
+      contractStoredRule({
+        predicate: { kind: 'forbidden_terms', terms: Array.from({ length: 9 }, (_, index) => `term_${index}`) },
+      }),
+    ],
+    serviceRules: [
+      contractDraftRule({
+        predicate: { kind: 'forbidden_terms', terms: Array.from({ length: 9 }, (_, index) => `term_${index}`) },
+      }),
+    ],
+    mcpInput: contractMcpInput({ forbidden_terms: Array.from({ length: 9 }, (_, index) => `term_${index}`) }),
+    expected: { store: 'reject', service: 'reject', mcpSchema: 'reject', mcpHandler: 'not_run' },
+    expectedStoreError: 'Invalid Studio project payload',
+    expectedServiceError: 'Invalid Studio rule predicate',
+    expectedMcpSchemaIssue: 'too_big',
+  },
+  {
+    name: '65-character term',
+    storedRules: [contractStoredRule({ predicate: { kind: 'forbidden_terms', terms: ['x'.repeat(65)] } })],
+    serviceRules: [contractDraftRule({ predicate: { kind: 'forbidden_terms', terms: ['x'.repeat(65)] } })],
+    mcpInput: contractMcpInput({ forbidden_terms: ['x'.repeat(65)] }),
+    expected: { store: 'reject', service: 'reject', mcpSchema: 'reject', mcpHandler: 'not_run' },
+    expectedStoreError: 'Invalid Studio project payload',
+    expectedServiceError: 'Invalid Studio rule term',
+    expectedMcpSchemaIssue: 'too_big',
+  },
+  {
+    name: '25th rule',
+    storedRules: [...maximumRuleList(), contractStoredRule({ id: 'rule_25', text: 'Project rule 25' })],
+    serviceRules: Array.from({ length: 25 }, (_, index) =>
+      contractDraftRule({ id: `rule_${index + 1}`, text: `Project rule ${index + 1}` })
+    ),
+    mcpInput: contractMcpInput(),
+    mcpProjectRules: maximumRuleList(),
+    expected: { store: 'reject', service: 'reject', mcpSchema: 'accept', mcpHandler: 'reject' },
+    expectedStoreError: 'Invalid Studio project payload',
+    expectedServiceError: 'Invalid Studio rule list',
+    expectedMcpHandlerError: 'maximum of 24 rules',
+    // The registered schema cannot know project state; the handler owns the existing-rule count check.
+  },
+  {
+    name: 'duplicate rule ids',
+    storedRules: [contractStoredRule(), contractStoredRule({ text: 'Keep logos abstract.' })],
+    serviceRules: [contractDraftRule(), contractDraftRule({ text: 'Keep logos abstract.' })],
+    mcpInput: contractMcpInput(),
+    expected: { store: 'reject', service: 'reject', mcpSchema: 'accept', mcpHandler: 'accept' },
+    expectedStoreError: 'Invalid Studio project payload',
+    expectedServiceError: 'Invalid Studio rule list',
+    // MCP proposes one rule at a time and mints proposal ids itself, so a caller cannot supply duplicate rule ids.
+  },
+  {
+    name: 'Nike and Nike! duplicate-equivalent terms',
+    storedRules: [contractStoredRule({ predicate: { kind: 'forbidden_terms', terms: ['Nike', 'Nike!'] } })],
+    serviceRules: [contractDraftRule({ predicate: { kind: 'forbidden_terms', terms: ['Nike', 'Nike!'] } })],
+    mcpInput: contractMcpInput({ forbidden_terms: ['Nike', 'Nike!'] }),
+    expected: { store: 'accept', service: 'accept', mcpSchema: 'accept', mcpHandler: 'accept' },
+    expectedTerms: { store: ['Nike', 'Nike!'], service: ['Nike'], mcp: ['Nike', 'Nike!'] },
+    // Store and MCP preserve distinct user spellings; the accepting service is the canonicalisation boundary.
+  },
+  ...['+++', '®', '😀'].map(
+    (term): RuleContractCase => ({
+      name: `tokenless term ${term}`,
+      storedRules: [contractStoredRule({ predicate: { kind: 'forbidden_terms', terms: [term] } })],
+      serviceRules: [contractDraftRule({ predicate: { kind: 'forbidden_terms', terms: [term] } })],
+      mcpInput: contractMcpInput({ forbidden_terms: [term] }),
+      expected: { store: 'reject', service: 'reject', mcpSchema: 'accept', mcpHandler: 'reject' },
+      expectedStoreError: 'Invalid Studio project payload',
+      expectedServiceError: 'Invalid Studio rule predicate',
+      expectedMcpHandlerError: `unenforceable term: "${term}"`,
+      // Token enforceability is semantic, so the registered shape admits it and the handler returns the real refusal.
+    })
+  ),
+  {
+    name: 'empty term list',
+    storedRules: [contractStoredRule({ predicate: { kind: 'forbidden_terms', terms: [] } })],
+    serviceRules: [contractDraftRule({ predicate: { kind: 'forbidden_terms', terms: [] } })],
+    mcpInput: contractMcpInput({ forbidden_terms: [] }),
+    expected: { store: 'reject', service: 'reject', mcpSchema: 'accept', mcpHandler: 'accept' },
+    expectedStoreError: 'Invalid Studio project payload',
+    expectedServiceError: 'Invalid Studio rule predicate',
+    expectedMcpPredicate: null,
+    // Empty forbidden_terms is the MCP representation of a context-only rule, not an empty predicate.
+  },
+  {
+    name: 'predicate null',
+    storedRules: [contractStoredRule({ predicate: null })],
+    serviceRules: [contractDraftRule({ predicate: null })],
+    mcpInput: contractMcpInput({ forbidden_terms: [] }),
+    expected: { store: 'accept', service: 'accept', mcpSchema: 'accept', mcpHandler: 'accept' },
+    expectedMcpPredicate: null,
+  },
+  {
+    name: 'organisation scope',
+    storedRules: [contractStoredRule({ scope: 'organisation' })],
+    serviceRules: [{ ...contractDraftRule(), scope: 'organisation' } as StudioBriefRuleDraft],
+    mcpInput: contractMcpInput({ scope: 'organisation' }),
+    expected: { store: 'reject', service: 'accept', mcpSchema: 'accept', mcpHandler: 'accept' },
+    expectedStoreError: 'Invalid Studio project payload',
+    expectedServiceScope: 'project',
+    // Organisation rules are code-resident; service and MCP deliberately discard caller scope and mint project scope.
+  },
+];
+
+type RuleContractOutcome = { verdict: 'accept'; error?: never } | { verdict: 'reject'; error: unknown };
+
+const settleRuleContract = async (operation: () => Promise<unknown>): Promise<RuleContractOutcome> => {
+  try {
+    await operation();
+    return { verdict: 'accept' };
+  } catch (error) {
+    return { verdict: 'reject', error };
+  }
+};
 
 const makeScene = (id: string, durationSeconds = 4): StudioEditableScene => ({
   title: `Scene ${id}`,
@@ -553,6 +769,152 @@ describe('CreativeStudioService', () => {
       })
     ).rejects.toMatchObject({ code: 'invalid_payload' });
   });
+
+  it.each(ruleContractCases)(
+    'keeps the $name verdict explicit across store, service, and MCP',
+    async (contractCase) => {
+      const project = await service.createProject(makeInput());
+      const projectFile = path.join(rootDir, project.id, 'project.json');
+      const projectBeforeStore = (await store.getProject(project.id))!;
+      const manifestBeforeStore = await readFile(projectFile);
+      let storedProject: StudioProject | undefined;
+      const storeOutcome = await settleRuleContract(async () => {
+        storedProject = await store.updateProject(
+          project.id,
+          (current) => ({ ...current, rules: contractCase.storedRules }),
+          project.revision
+        );
+      });
+
+      expect(storeOutcome.verdict).toBe(contractCase.expected.store);
+      if (contractCase.expected.store === 'reject') {
+        expect(storeOutcome.error).toMatchObject({
+          code: 'invalid_payload',
+          message: contractCase.expectedStoreError,
+        });
+        expect(await store.getProject(project.id)).toEqual(projectBeforeStore);
+        expect(await readFile(projectFile)).toEqual(manifestBeforeStore);
+      } else {
+        expect(storeOutcome.error).toBeUndefined();
+      }
+      if (contractCase.expectedTerms !== undefined) {
+        expect(storedProject?.rules[0]?.predicate?.terms).toEqual(contractCase.expectedTerms.store);
+      }
+      if (contractCase.expectedRuleCount !== undefined) {
+        expect(storedProject?.rules).toHaveLength(contractCase.expectedRuleCount.store);
+      }
+      if (contractCase.expectedText !== undefined) {
+        expect(storedProject?.rules[0]?.text).toBe(contractCase.expectedText);
+      }
+
+      let current = (await store.getProject(project.id))!;
+      current = await store.updateProject(current.id, (value) => ({ ...value, rules: [] }), current.revision);
+
+      const projectBeforeService = structuredClone(current);
+      const manifestBeforeService = await readFile(projectFile);
+      let serviceProject: StudioRendererProject | undefined;
+      const serviceOutcome = await settleRuleContract(async () => {
+        const request: StudioSetBriefRulesRequest = {
+          projectId: current.id,
+          expectedRevision: current.revision,
+          rules: contractCase.serviceRules,
+        };
+        serviceProject = await service.setBriefRules(request);
+      });
+
+      expect(serviceOutcome.verdict).toBe(contractCase.expected.service);
+      if (contractCase.expected.service === 'reject') {
+        expect(serviceOutcome.error).toMatchObject({
+          code: 'invalid_payload',
+          message: contractCase.expectedServiceError,
+        });
+        expect(await store.getProject(current.id)).toEqual(projectBeforeService);
+        expect(await readFile(projectFile)).toEqual(manifestBeforeService);
+      } else {
+        expect(serviceOutcome.error).toBeUndefined();
+      }
+      if (contractCase.expectedTerms !== undefined) {
+        expect(serviceProject?.rules[0]?.predicate?.terms).toEqual(contractCase.expectedTerms.service);
+      }
+      if (contractCase.expectedRuleCount !== undefined) {
+        expect(serviceProject?.rules).toHaveLength(contractCase.expectedRuleCount.service);
+      }
+      if (contractCase.expectedText !== undefined) {
+        expect(serviceProject?.rules[0]?.text).toBe(contractCase.expectedText);
+      }
+      if (contractCase.expectedServiceScope !== undefined) {
+        expect(serviceProject?.rules[0]?.scope).toBe(contractCase.expectedServiceScope);
+      }
+
+      current = (await store.getProject(project.id))!;
+      current = await store.updateProject(
+        current.id,
+        (value) => ({ ...value, rules: contractCase.mcpProjectRules ?? [] }),
+        current.revision
+      );
+      const { projectDir, pendingDir, referencePendingDir } = await store.resolveProposalPaths(current.id);
+      const config = { projectId: current.id, projectDir, pendingDir, referencePendingDir };
+      const tool = vi.fn();
+      registerStudioTools({ tool: tool as never }, config);
+      const registration = tool.mock.calls.find(([name]) => name === 'propose_brief_rule');
+      expect(registration).toBeDefined();
+
+      // This matches the SDK's registration path: a raw tool shape becomes one Zod object before
+      // the parsed value reaches createProposeBriefRuleHandler.
+      const registeredSchema = z.object(registration?.[2] as Parameters<typeof z.object>[0]);
+      const schemaResult = registeredSchema.safeParse({
+        ...contractCase.mcpInput,
+        base_revision: current.revision,
+      });
+      const mcpSchemaVerdict: RuleContractVerdict = schemaResult.success ? 'accept' : 'reject';
+      expect(mcpSchemaVerdict).toBe(contractCase.expected.mcpSchema);
+      if (!schemaResult.success) {
+        expect(schemaResult.error.issues[0]?.code).toBe(contractCase.expectedMcpSchemaIssue);
+      }
+
+      let mcpHandlerVerdict: RuleContractVerdict | 'not_run' = 'not_run';
+      let mcpResult: Awaited<ReturnType<ReturnType<typeof createProposeBriefRuleHandler>>> | undefined;
+      if (schemaResult.success) {
+        const registeredHandler = registration?.[3] as ReturnType<typeof createProposeBriefRuleHandler> | undefined;
+        expect(registeredHandler).toBeTypeOf('function');
+        mcpResult = await registeredHandler!(
+          schemaResult.data as Parameters<ReturnType<typeof createProposeBriefRuleHandler>>[0]
+        );
+        mcpHandlerVerdict = mcpResult.isError === true ? 'reject' : 'accept';
+      }
+      expect(mcpHandlerVerdict).toBe(contractCase.expected.mcpHandler);
+      if (mcpHandlerVerdict === 'reject') {
+        expect(mcpResult?.content[0]?.text).toContain(contractCase.expectedMcpHandlerError);
+      }
+
+      const proposals = await service.listProposals({ projectId: current.id });
+      if (mcpHandlerVerdict === 'accept') {
+        expect(proposals).toHaveLength(1);
+        expect(proposals[0]?.payload.kind).toBe('pin_rule');
+        if (proposals[0]?.payload.kind === 'pin_rule') {
+          if (contractCase.expectedTerms !== undefined) {
+            expect(proposals[0].payload.rule.predicate?.terms).toEqual(contractCase.expectedTerms.mcp);
+          }
+          if (contractCase.expectedMcpPredicate !== undefined) {
+            expect(proposals[0].payload.rule.predicate).toEqual(contractCase.expectedMcpPredicate);
+          }
+          if (contractCase.expectedText !== undefined) {
+            expect(proposals[0].payload.rule.text).toBe(contractCase.expectedText);
+          }
+          if (contractCase.expectedServiceScope !== undefined) {
+            expect(proposals[0].payload.rule).not.toHaveProperty('scope');
+          }
+        }
+        if (contractCase.expectedRuleCount !== undefined) {
+          expect(current.rules.length + proposals.length).toBe(contractCase.expectedRuleCount.mcpAfterProposal);
+        }
+      } else {
+        expect(proposals).toEqual([]);
+        expect(await readdir(pendingDir)).toEqual([]);
+        expect(await readdir(path.join(path.dirname(pendingDir), 'slots'))).toEqual([]);
+      }
+    }
+  );
 
   it('notifies the renderer after replacing the project rule list', async () => {
     const project = await service.createProject(makeInput());
