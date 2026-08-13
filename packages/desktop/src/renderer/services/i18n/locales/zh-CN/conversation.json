@@ -933,11 +933,11 @@
     },
     "phase": {
       "nav": {
-        "label": "创作流程",
+        "viewsLabel": "项目视图",
+        "table": "表格",
+        "board": "看板",
+        "cut": "剪辑",
         "brief": "简报",
-        "write": "编写",
-        "produce": "制作",
-        "review": "审阅",
         "saved": "已保存",
         "saving": "正在保存更改..."
       },

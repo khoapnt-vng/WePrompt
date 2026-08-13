@@ -506,7 +506,7 @@ describe('ProducePhase', () => {
     expect(controller.jobs.submitScenes).not.toHaveBeenCalled();
   });
 
-  it('routes a blank-prompt shot to its Write visual field instead of offering generation', () => {
+  it('routes a blank-prompt shot to its Table visual field instead of offering generation', () => {
     const controller = createController();
     render(<ProducePhase controller={controller} />);
     const closing = screen.getByRole('listitem', {
@@ -522,7 +522,7 @@ describe('ProducePhase', () => {
 
     expect(controller.editor.selectScene).toHaveBeenCalledExactlyOnceWith('scene-2');
     expect(controller.requestTransition).toHaveBeenCalledExactlyOnceWith({
-      phase: 'write',
+      view: 'table',
       state: { writeFocus: { sceneId: 'scene-2', field: 'visualPrompt' } },
     });
   });

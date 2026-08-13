@@ -97,7 +97,7 @@ export const ProducePhase: React.FC<ProducePhaseProps> = ({ controller, layoutMo
           onWriteVisual={(sceneId) => {
             editor.selectScene(sceneId);
             requestTransition({
-              phase: 'write',
+              view: 'table',
               state: { writeFocus: { sceneId, field: 'visualPrompt' } },
             });
           }}

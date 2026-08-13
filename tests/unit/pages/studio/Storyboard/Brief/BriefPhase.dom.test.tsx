@@ -279,7 +279,7 @@ describe('BriefPhase', () => {
       })
     );
     await waitFor(() => expect(phaseEditor.flushProjectDraft).toHaveBeenCalledOnce());
-    expect(props.requestTransition).toHaveBeenCalledWith({ phase: 'write' });
+    expect(props.requestTransition).toHaveBeenCalledWith({ view: 'table' });
 
     const failedEditor = editor({
       projectDraft: { name: 'Launch film v3', brief: 'Updated', aspectRatio: '16:9', targetDurationSeconds: 15 },
@@ -333,7 +333,7 @@ describe('BriefPhase', () => {
     );
     fireEvent.click(startWriting);
     await waitFor(() => expect(resolvedEditor.flushProjectDraft).toHaveBeenCalledOnce());
-    expect(props.requestTransition).toHaveBeenCalledExactlyOnceWith({ phase: 'write' });
+    expect(props.requestTransition).toHaveBeenCalledExactlyOnceWith({ view: 'table' });
   });
 
   it('discards a stale project conflict without navigating', () => {

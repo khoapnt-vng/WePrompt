@@ -16,7 +16,7 @@ import type {
   StudioRouteCatalog,
 } from '@/common/types/project/creativeStudioTypes';
 import { StudioLibrary } from '@renderer/pages/studio/components';
-import { readLastStudioPhase } from '@renderer/pages/studio/studioPhaseRoute';
+import { readLastStudioView } from '@renderer/pages/studio/studioPhaseRoute';
 import SiderStudioEntry from '@renderer/components/layout/Sider/SiderNav/SiderStudioEntry';
 
 const bridge = vi.hoisted(() => ({
@@ -215,7 +215,7 @@ describe('StudioLibrary', () => {
       })
     );
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/studio/canonical-project/brief'));
-    expect(readLastStudioPhase('canonical-project')).toBe('brief');
+    expect(readLastStudioView('canonical-project')).toBe('brief');
   });
 
   it('submits the composer with Command-Enter', async () => {
@@ -342,32 +342,35 @@ describe('StudioLibrary', () => {
     expect(await screen.findByText((content) => content.includes(relative))).toBeInTheDocument();
   });
 
-  it('opens a zero-scene project card at Brief', async () => {
-    bridge.listProjects.invoke.mockResolvedValue(ok([summary({ sceneCount: 0 })]));
+  // The scene count used to pick the landing step. Views are not steps, so both counts land on
+  // the same default — asserting each of them is what would catch the old branch coming back.
+  it.each([0, 2])('opens a card with %i scenes at the default view when nothing was saved', async (sceneCount) => {
+    bridge.listProjects.invoke.mockResolvedValue(ok([summary({ sceneCount })]));
     render(<StudioLibrary />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Launch film' }));
 
-    expect(navigate).toHaveBeenCalledWith('/studio/project-1/brief');
+    expect(navigate).toHaveBeenCalledWith('/studio/project-1/table');
   });
 
-  it('opens an existing project card at Write when no phase was saved', async () => {
+  it('opens a project card at its saved view', async () => {
+    window.localStorage.setItem('aionui:creative-studio:last-view:project-1', 'board');
     bridge.listProjects.invoke.mockResolvedValue(ok([summary({ sceneCount: 2 })]));
     render(<StudioLibrary />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Launch film' }));
 
-    expect(navigate).toHaveBeenCalledWith('/studio/project-1/write');
+    expect(navigate).toHaveBeenCalledWith('/studio/project-1/board');
   });
 
-  it('opens a project card at its saved phase', async () => {
-    window.localStorage.setItem('aionui:creative-studio:last-phase:project-1', 'produce');
+  it('discards a saved value from the retired phase vocabulary instead of routing to a dead view', async () => {
+    window.localStorage.setItem('aionui:creative-studio:last-view:project-1', 'produce');
     bridge.listProjects.invoke.mockResolvedValue(ok([summary({ sceneCount: 2 })]));
     render(<StudioLibrary />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Launch film' }));
 
-    expect(navigate).toHaveBeenCalledWith('/studio/project-1/produce');
+    expect(navigate).toHaveBeenCalledWith('/studio/project-1/table');
   });
 
   it('gives both composer guesses explicit accessible names and defaults', () => {

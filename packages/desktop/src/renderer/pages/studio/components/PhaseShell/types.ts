@@ -17,7 +17,7 @@ import type { UseStoryboardEditorResult } from '../../hooks/useStoryboardEditor'
 import type { UseStudioJobsResult } from '../../hooks/useStudioJobs';
 import type { UseStudioModelsResult } from '../../hooks/useStudioModels';
 import type { UseStudioRenderResult } from '../../hooks/useStudioRender';
-import type { StudioPhaseTransition, StudioWriteFocusIntent } from '../../studioPhaseRoute';
+import type { StudioViewTransition, StudioWriteFocusIntent } from '../../studioPhaseRoute';
 import type { StudioReadinessSummary } from '../../studioReadiness';
 import type { GenerationBatchReviewRequest, GenerationSingleReviewRequest } from '../Generation/GenerationControls';
 
@@ -33,7 +33,7 @@ export type StudioPhaseControllers = {
   editor: UseStoryboardEditorResult;
   models: UseStudioModelsResult;
   jobs: UseStudioJobsResult;
-  /** The cut render, held at project scope so it stays observable from any phase. */
+  /** The cut render, held at project scope so it stays observable from any view. */
   render: UseStudioRenderResult;
   selectedAsset: StudioAsset | null;
   posterAsset: StudioAsset | null;
@@ -41,8 +41,8 @@ export type StudioPhaseControllers = {
   writeFocusIntent: StudioWriteFocusIntent | null;
   advisory: StudioPhaseAdvisory | null;
   mutationPending: boolean;
-  requestTransition: (transition: StudioPhaseTransition) => void;
-  /** Opens the document's rule list. The frame owns it, so every phase can reach it. */
+  requestTransition: (transition: StudioViewTransition) => void;
+  /** Opens the document's rule list. The frame owns it, so every view can reach it. */
   openRules: () => void;
   acceptProposal: (request: StudioProposalRequest) => Promise<StudioCommandResult<StudioProposalAcceptance>>;
   rejectProposal: (request: StudioProposalRequest) => Promise<StudioCommandResult<StudioProposal>>;

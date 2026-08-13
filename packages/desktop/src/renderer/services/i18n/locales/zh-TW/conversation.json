@@ -933,11 +933,11 @@
     },
     "phase": {
       "nav": {
-        "label": "創作流程",
+        "viewsLabel": "專案檢視",
+        "table": "表格",
+        "board": "看板",
+        "cut": "剪輯",
         "brief": "簡報",
-        "write": "編寫",
-        "produce": "製作",
-        "review": "檢視",
         "saved": "已儲存",
         "saving": "正在儲存變更..."
       },

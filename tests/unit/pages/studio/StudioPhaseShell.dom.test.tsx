@@ -9,7 +9,7 @@ import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { StudioRendererJob, StudioRendererProject } from '@/common/types/project/creativeStudioTypes';
-import type { StudioPhase } from '@renderer/pages/studio/studioPhaseRoute';
+import type { StudioView } from '@renderer/pages/studio/studioPhaseRoute';
 import { StudioPhaseShell } from '@renderer/pages/studio/components/PhaseShell/StudioPhaseShell';
 import type { StudioPhaseAdvisory, StudioPhaseControllers } from '@renderer/pages/studio/components/PhaseShell/types';
 import type { UseStoryboardEditorResult } from '@renderer/pages/studio/hooks/useStoryboardEditor';
@@ -202,7 +202,7 @@ const controller = (
 const renderShell = (advisory: StudioPhaseAdvisory | null) =>
   render(
     <StudioPhaseShell
-      activePhase='write'
+      activeView='table'
       controller={controller(advisory)}
       navigationDisabled={false}
       onBack={vi.fn()}
@@ -210,7 +210,7 @@ const renderShell = (advisory: StudioPhaseAdvisory | null) =>
   );
 
 describe('StudioPhaseShell advisory', () => {
-  it('announces a shell-anchored Write timing advisory in the shell alert region', () => {
+  it('announces a shell-anchored Table timing advisory in the shell alert region', () => {
     renderShell({
       messageKey: 'conversation.creativeStudio.review.durationMismatch',
       anchor: 'shell',
@@ -237,15 +237,15 @@ describe('StudioPhaseShell advisory', () => {
 });
 
 /**
- * The frame owns in-flight document work. Produce's feed and Review's render button are view
- * detail; the aggregate has to be legible from a phase that renders neither, which is what
- * these cases assert by mounting Brief.
+ * The frame owns in-flight document work. The Board's feed and the Cut's render button are view
+ * detail; the aggregate has to be legible from a view that renders neither, which is what these
+ * cases assert by mounting Brief.
  */
 describe('StudioPhaseShell document activity', () => {
-  const renderPhase = (activePhase: StudioPhase, overrides: Partial<StudioPhaseControllers>) =>
+  const renderView = (activeView: StudioView, overrides: Partial<StudioPhaseControllers>) =>
     render(
       <StudioPhaseShell
-        activePhase={activePhase}
+        activeView={activeView}
         controller={controller(null, overrides)}
         navigationDisabled={false}
         onBack={vi.fn()}
@@ -256,10 +256,13 @@ describe('StudioPhaseShell document activity', () => {
     screen.getByRole('status', { name: 'conversation.creativeStudio.phase.shared.activityLabel' });
 
   it('reports generation running elsewhere in the document while Brief is on screen', () => {
-    renderPhase('brief', {
+    renderView('brief', {
       jobs: { ...jobs, jobs: [job({ id: 'job-1' }), job({ id: 'job-2', status: 'queued_remote' })] },
     });
 
+    // Guards the guard: the readout is header-owned, so it survives a view id the shell cannot
+    // mount. Without this the whole suite would keep passing against an empty frame.
+    expect(screen.getByRole('heading', { level: 2, name: 'conversation.creativeStudio.phase.brief.title' }));
     expect(activity()).toHaveTextContent(/activityGenerating:count=2(?![\d.])/);
   });
 
@@ -268,7 +271,7 @@ describe('StudioPhaseShell document activity', () => {
    * progress arrives many times a second, and a polite atomic region would speak every step.
    */
   it('reports a cut render running elsewhere in the document while Brief is on screen', () => {
-    renderPhase('brief', { render: { ...idleRender, status: 'running', progress: 0.42 } });
+    renderView('brief', { render: { ...idleRender, status: 'running', progress: 0.42 } });
 
     const progressbar = screen.getByRole('progressbar', {
       name: 'conversation.creativeStudio.phase.shared.activityRenderingLabel',
@@ -279,7 +282,7 @@ describe('StudioPhaseShell document activity', () => {
   });
 
   it('keeps the region mounted and silent when the document has no work in flight', () => {
-    renderPhase('brief', {});
+    renderView('brief', {});
 
     expect(activity()).toBeEmptyDOMElement();
   });

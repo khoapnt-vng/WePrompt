@@ -933,11 +933,11 @@
     },
     "phase": {
       "nav": {
-        "label": "제작 워크플로",
+        "viewsLabel": "프로젝트 보기",
+        "table": "테이블",
+        "board": "보드",
+        "cut": "컷",
         "brief": "기획",
-        "write": "작성",
-        "produce": "제작",
-        "review": "검토",
         "saved": "저장됨",
         "saving": "변경 사항 저장 중..."
       },

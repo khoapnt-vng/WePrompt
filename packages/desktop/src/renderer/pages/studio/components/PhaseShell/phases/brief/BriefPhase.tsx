@@ -58,7 +58,7 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
     if (hasValidationError || projectConflict !== null || mutationPending || startingWrite) return;
     setStartingWrite(true);
     try {
-      if (await editor.flushProjectDraft()) requestTransition({ phase: 'write' });
+      if (await editor.flushProjectDraft()) requestTransition({ view: 'table' });
     } finally {
       setStartingWrite(false);
     }

@@ -941,11 +941,11 @@
     },
     "phase": {
       "nav": {
-        "label": "Fluxo criativo",
+        "viewsLabel": "Visualizações do projeto",
+        "table": "Tabela",
+        "board": "Quadro",
+        "cut": "Corte",
         "brief": "Briefing",
-        "write": "Escrever",
-        "produce": "Produzir",
-        "review": "Revisar",
         "saved": "Salvo",
         "saving": "Salvando alterações..."
       },

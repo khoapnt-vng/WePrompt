@@ -913,7 +913,7 @@ const createCloseEvent = (): CloseEvent => ({ preventDefault: vi.fn() });
 const createCloseHandshakeDependencies = (
   overrides: Partial<CreativeStudioCloseHandshakeDependencies> = {}
 ): CreativeStudioCloseHandshakeDependencies => ({
-  getCurrentUrl: () => 'file:///Applications/WePrompt/index.html#/studio/project_1/write',
+  getCurrentUrl: () => 'file:///Applications/WePrompt/index.html#/studio/project_1/table',
   queryUnsavedWork: vi.fn(async () => ({ dirtySceneCount: 0 })),
   flushUnsavedWork: vi.fn(async () => ({ saved: true })),
   showMessageBox: vi.fn(async () => ({ response: 2 })),
@@ -926,11 +926,39 @@ const createCloseHandshakeDependencies = (
 });
 
 describe('createCreativeStudioCloseHandshake', () => {
+  /**
+   * The unsaved-draft preflight is gated by a route pattern that names every view segment. A view
+   * the pattern does not know about closes the window silently, losing the drafts the handshake
+   * exists to save, and no other assertion in this suite notices — the default fixture URL is one
+   * single segment, so it can be the only recognised one and everything still passes.
+   */
+  it.each([
+    'file:///Applications/WePrompt/index.html#/studio/project_1',
+    'file:///Applications/WePrompt/index.html#/studio/project_1/table',
+    'file:///Applications/WePrompt/index.html#/studio/project_1/board',
+    'file:///Applications/WePrompt/index.html#/studio/project_1/cut',
+    'file:///Applications/WePrompt/index.html#/studio/project_1/brief',
+  ])('runs the unsaved-work preflight for the Studio view route %s', async (currentUrl) => {
+    const dependencies = createCloseHandshakeDependencies({ getCurrentUrl: () => currentUrl });
+    const handshake = createCreativeStudioCloseHandshake(dependencies);
+    const event = createCloseEvent();
+
+    expect(handshake.handleWindowClose(event)).toBe(true);
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(dependencies.queryUnsavedWork).toHaveBeenCalledExactlyOnceWith({ timeoutMs: 3_000 }));
+  });
+
   it.each([
     'file:///Applications/WePrompt/index.html#/guid',
     'file:///Applications/WePrompt/index.html#/studio',
     'http://localhost:5173/#/studio-tools',
     'not a renderer URL',
+    // The retired phase segments. They are no longer routes, so a URL carrying one is not a Studio
+    // document and must not be treated as one — this half is what stops the pattern from being
+    // widened into a match-anything that would make the positive cases above meaningless.
+    'file:///Applications/WePrompt/index.html#/studio/project_1/write',
+    'file:///Applications/WePrompt/index.html#/studio/project_1/produce',
+    'file:///Applications/WePrompt/index.html#/studio/project_1/review',
   ])('leaves a non-Studio renderer route to the normal close lifecycle: %s', (currentUrl) => {
     const dependencies = createCloseHandshakeDependencies({ getCurrentUrl: () => currentUrl });
     const handshake = createCreativeStudioCloseHandshake(dependencies);

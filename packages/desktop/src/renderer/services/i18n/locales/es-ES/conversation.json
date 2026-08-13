@@ -936,11 +936,11 @@
     },
     "phase": {
       "nav": {
-        "label": "Flujo creativo",
+        "viewsLabel": "Vistas del proyecto",
+        "table": "Tabla",
+        "board": "Tablero",
+        "cut": "Montaje",
         "brief": "Briefing",
-        "write": "Escribir",
-        "produce": "Producir",
-        "review": "Revisar",
         "saved": "Guardado",
         "saving": "Guardando cambios..."
       },

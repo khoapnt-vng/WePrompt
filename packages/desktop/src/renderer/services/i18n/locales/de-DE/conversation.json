@@ -935,11 +935,11 @@
     },
     "phase": {
       "nav": {
-        "label": "Kreativer Ablauf",
+        "viewsLabel": "Projektansichten",
+        "table": "Tabelle",
+        "board": "Board",
+        "cut": "Schnitt",
         "brief": "Briefing",
-        "write": "Schreiben",
-        "produce": "Produzieren",
-        "review": "Prüfen",
         "saved": "Gespeichert",
         "saving": "Änderungen werden gespeichert..."
       },

@@ -50,7 +50,7 @@ describe('Creative Studio route visibility', () => {
     mocks.isElectronDesktop.mockReturnValue(true);
   });
 
-  it.each(['#/studio', '#/studio/project_1/produce'])(
+  it.each(['#/studio', '#/studio/project_1/board'])(
     'redirects disabled Studio request %s before the native Studio page loads',
     async (hash) => {
       mocks.creativeStudioEnabled.current = false;
@@ -64,10 +64,10 @@ describe('Creative Studio route visibility', () => {
 
   it.each([
     '#/studio',
+    '#/studio/project_1/table',
+    '#/studio/project_1/board',
+    '#/studio/project_1/cut',
     '#/studio/project_1/brief',
-    '#/studio/project_1/write',
-    '#/studio/project_1/produce',
-    '#/studio/project_1/review',
   ])('redirects WebUI Studio request %s before the native Studio page loads', async (hash) => {
     mocks.isElectronDesktop.mockReturnValue(false);
     const nativePageLoadsBefore = mocks.nativePageLoads;
@@ -79,10 +79,10 @@ describe('Creative Studio route visibility', () => {
 
   it.each([
     '#/studio',
+    '#/studio/project_1/table',
+    '#/studio/project_1/board',
+    '#/studio/project_1/cut',
     '#/studio/project_1/brief',
-    '#/studio/project_1/write',
-    '#/studio/project_1/produce',
-    '#/studio/project_1/review',
   ])('renders the native Studio page for desktop route %s', async (hash) => {
     renderAt(hash);
 

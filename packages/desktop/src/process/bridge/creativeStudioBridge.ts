@@ -136,7 +136,16 @@ export type CreativeStudioCloseHandshake = {
 };
 
 const CLOSE_QUERY_TIMEOUT_MS = 3_000;
-const STUDIO_ROUTE_PATTERN = /^\/studio\/[^/?#]+(?:\/(?:brief|write|produce|review))?\/?$/;
+/**
+ * The renderer's view segments, duplicated because main cannot import from the renderer.
+ *
+ * It gates the unsaved-scene-draft preflight: a Studio document parked on a segment this pattern
+ * does not list closes with no prompt and loses the drafts. Keep it in step with `STUDIO_VIEWS`
+ * in `renderer/pages/studio/studioPhaseRoute.ts` — the retired `write|produce|review` segments are
+ * deliberately absent, since the renderer redirects an unknown segment to a real view on its first
+ * render, so no document stays on one long enough to hold work.
+ */
+const STUDIO_ROUTE_PATTERN = /^\/studio\/[^/?#]+(?:\/(?:table|board|cut|brief))?\/?$/;
 
 const isCreativeStudioRendererUrl = (rawUrl: string): boolean => {
   try {

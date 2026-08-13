@@ -10,18 +10,18 @@ import React, { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { SelectedSceneSaveState } from '../../hooks/useStoryboardEditor';
-import type { StudioPhase } from '../../studioPhaseRoute';
+import type { StudioView } from '../../studioPhaseRoute';
 import { BriefPhase, ProducePhase, ReviewPhase, WritePhase } from './phases';
 import { StudioDocumentActivity } from './StudioDocumentActivity';
 import { StudioPhaseHeader } from './StudioPhaseHeader';
-import { StudioPhaseNav } from './StudioPhaseNav';
+import { StudioViewSwitch } from './StudioViewSwitch';
 import type { StudioPhaseControllers } from './types';
 import { useStudioLayoutMode } from './useStudioLayoutMode';
 import { useStudioLayoutContext } from '../Shell/StudioLayoutContext';
 import styles from './StudioPhaseShell.module.css';
 
 export type StudioPhaseShellProps = {
-  activePhase: StudioPhase;
+  activeView: StudioView;
   controller: StudioPhaseControllers;
   navigationDisabled: boolean;
   notice?: React.ReactNode;
@@ -29,27 +29,27 @@ export type StudioPhaseShellProps = {
 };
 
 export const StudioPhaseShell: React.FC<StudioPhaseShellProps> = ({
-  activePhase,
+  activeView,
   controller,
   navigationDisabled,
   notice,
   onBack,
 }) => {
   const { t } = useTranslation();
-  const previousPhaseRef = useRef(activePhase);
+  const previousViewRef = useRef(activeView);
   // The shell owns the single measurement; fall back to measuring only if rendered without it.
   const measured = useStudioLayoutMode(controller.project.id);
   const layoutMode = useStudioLayoutContext(measured.layoutMode);
 
   useEffect(() => {
-    if (previousPhaseRef.current === activePhase) return;
-    previousPhaseRef.current = activePhase;
-    if (activePhase === 'write' && controller.writeFocusIntent !== null) return;
+    if (previousViewRef.current === activeView) return;
+    previousViewRef.current = activeView;
+    if (activeView === 'table' && controller.writeFocusIntent !== null) return;
     const frame = requestAnimationFrame(() => {
       document.querySelector<HTMLElement>('[data-studio-phase-heading]')?.focus();
     });
     return () => cancelAnimationFrame(frame);
-  }, [activePhase, controller.writeFocusIntent]);
+  }, [activeView, controller.writeFocusIntent]);
 
   const shellSaveState: SelectedSceneSaveState = (() => {
     const states = new Set([controller.editor.projectSaveState, ...Object.values(controller.editor.sceneSaveStates)]);
@@ -59,32 +59,32 @@ export const StudioPhaseShell: React.FC<StudioPhaseShellProps> = ({
     return 'saved';
   })();
   const headerAction = (() => {
-    switch (activePhase) {
+    switch (activeView) {
       case 'brief':
         return undefined;
-      case 'write':
+      case 'table':
         return (
           <Button
             type='primary'
             disabled={navigationDisabled || controller.mutationPending}
-            onClick={() => controller.requestTransition({ phase: 'produce' })}
+            onClick={() => controller.requestTransition({ view: 'board' })}
           >
             {t('conversation.creativeStudio.phase.write.continueToProduce')}
             <Right aria-hidden='true' />
           </Button>
         );
-      case 'produce':
+      case 'board':
         return (
           <Button
             type='primary'
             disabled={navigationDisabled || controller.mutationPending}
-            onClick={() => controller.requestTransition({ phase: 'review' })}
+            onClick={() => controller.requestTransition({ view: 'cut' })}
           >
             {t('conversation.creativeStudio.phase.produce.reviewCut')}
             <Right aria-hidden='true' />
           </Button>
         );
-      case 'review':
+      case 'cut':
         return (
           <Button
             type='primary'
@@ -121,13 +121,11 @@ export const StudioPhaseShell: React.FC<StudioPhaseShellProps> = ({
           </>
         }
       />
-      <StudioPhaseNav
-        activePhase={activePhase}
-        project={controller.project}
-        readiness={controller.readiness}
+      <StudioViewSwitch
+        activeView={activeView}
         disabled={navigationDisabled}
-        onSelect={(phase) => {
-          if (phase !== activePhase) controller.requestTransition({ phase });
+        onSelect={(view) => {
+          if (view !== activeView) controller.requestTransition({ view });
         }}
       />
       {controller.advisory?.anchor === 'shell' && (
@@ -137,10 +135,10 @@ export const StudioPhaseShell: React.FC<StudioPhaseShellProps> = ({
       )}
       {notice}
       <div className={styles.phaseFrame}>
-        {activePhase === 'brief' && <BriefPhase controller={controller} layoutMode={layoutMode} />}
-        {activePhase === 'write' && <WritePhase controller={controller} layoutMode={layoutMode} />}
-        {activePhase === 'produce' && <ProducePhase controller={controller} layoutMode={layoutMode} />}
-        {activePhase === 'review' && <ReviewPhase controller={controller} layoutMode={layoutMode} />}
+        {activeView === 'brief' && <BriefPhase controller={controller} layoutMode={layoutMode} />}
+        {activeView === 'table' && <WritePhase controller={controller} layoutMode={layoutMode} />}
+        {activeView === 'board' && <ProducePhase controller={controller} layoutMode={layoutMode} />}
+        {activeView === 'cut' && <ReviewPhase controller={controller} layoutMode={layoutMode} />}
       </div>
     </div>
   );

@@ -16,9 +16,8 @@ import i18nConfig from '@/common/config/i18n-config.json';
 import type { StudioAsset, StudioRendererProject, StudioScene } from '@/common/types/project/creativeStudioTypes';
 import { GenerationReviewModal } from '@renderer/pages/studio/components/Generation/GenerationReviewModal';
 import { StudioPhaseHeader } from '@renderer/pages/studio/components/PhaseShell/StudioPhaseHeader';
-import { StudioPhaseNav } from '@renderer/pages/studio/components/PhaseShell/StudioPhaseNav';
 import { StudioPhaseShell } from '@renderer/pages/studio/components/PhaseShell/StudioPhaseShell';
-import { deriveStudioPhaseCompletion } from '@renderer/pages/studio/components/PhaseShell/studioPhaseCompletion';
+import { StudioViewSwitch } from '@renderer/pages/studio/components/PhaseShell/StudioViewSwitch';
 import type { StudioPhaseControllers } from '@renderer/pages/studio/components/PhaseShell/types';
 import { AssetStrip } from '@renderer/pages/studio/components/Preview/AssetStrip';
 import { StudioExportModal } from '@renderer/pages/studio/components/Preview/StudioExportModal';
@@ -27,7 +26,7 @@ import type { UseStoryboardEditorResult } from '@renderer/pages/studio/hooks/use
 import type { UseStudioJobsResult } from '@renderer/pages/studio/hooks/useStudioJobs';
 import type { UseStudioModelsResult } from '@renderer/pages/studio/hooks/useStudioModels';
 import type { UseStudioRenderResult } from '@renderer/pages/studio/hooks/useStudioRender';
-import { STUDIO_PHASES } from '@renderer/pages/studio/studioPhaseRoute';
+import { STUDIO_VIEWS } from '@renderer/pages/studio/studioPhaseRoute';
 import conversation from '@renderer/services/i18n/locales/en-US/conversation.json';
 
 vi.mock('@dnd-kit/core', async () => {
@@ -264,12 +263,7 @@ const phaseController = (): StudioPhaseControllers => {
 describe('Creative Studio full-sentence English copy', () => {
   it('keeps Brief start-writing in its validated footer and document rules in the frame', async () => {
     await renderEnglish(
-      <StudioPhaseShell
-        activePhase='brief'
-        controller={phaseController()}
-        navigationDisabled={false}
-        onBack={vi.fn()}
-      />
+      <StudioPhaseShell activeView='brief' controller={phaseController()} navigationDisabled={false} onBack={vi.fn()} />
     );
 
     const headerActions = document.querySelector<HTMLElement>('[data-studio-phase-actions]');
@@ -280,13 +274,13 @@ describe('Creative Studio full-sentence English copy', () => {
   });
 
   it.each([
-    ['write', 'Continue'],
-    ['produce', 'Continue'],
-    ['review', 'Prepare handoff'],
-  ] as const)('renders the Rules action and the %s phase action in the header', async (activePhase, actionName) => {
+    ['table', 'Continue'],
+    ['board', 'Continue'],
+    ['cut', 'Prepare handoff'],
+  ] as const)('renders the Rules action and the %s view action in the header', async (activeView, actionName) => {
     await renderEnglish(
       <StudioPhaseShell
-        activePhase={activePhase}
+        activeView={activeView}
         controller={phaseController()}
         navigationDisabled={false}
         onBack={vi.fn()}
@@ -300,7 +294,7 @@ describe('Creative Studio full-sentence English copy', () => {
     expect(within(headerActions!).getByRole('button', { name: actionName })).toBeInTheDocument();
   });
 
-  it('renders every phase in every configured locale without raw visible or accessible copy', async () => {
+  it('renders every view in every configured locale without raw visible or accessible copy', async () => {
     const rawKey = /conversation\.creativeStudio\./i;
     const issues: string[] = [];
     const localeInstances = await Promise.all(
@@ -308,11 +302,11 @@ describe('Creative Studio full-sentence English copy', () => {
     );
 
     for (const [locale, instance] of localeInstances) {
-      for (const activePhase of STUDIO_PHASES) {
+      for (const activeView of STUDIO_VIEWS) {
         const { container, unmount } = render(
           <I18nextProvider i18n={instance}>
             <StudioPhaseShell
-              activePhase={activePhase}
+              activeView={activeView}
               controller={phaseController()}
               navigationDisabled={false}
               onBack={vi.fn()}
@@ -320,14 +314,20 @@ describe('Creative Studio full-sentence English copy', () => {
           </I18nextProvider>
         );
 
+        // Guards the guard: a view id the shell cannot mount renders an empty frame, and an empty
+        // frame satisfies every absence check below without exercising a single string.
+        if (container.querySelector('[data-studio-phase-heading]') === null) {
+          issues.push(`${locale}.${activeView} mounted no view body`);
+        }
+
         if (rawKey.test(container.textContent ?? '')) {
-          issues.push(`${locale}.${activePhase} exposes a raw key as visible text`);
+          issues.push(`${locale}.${activeView} exposes a raw key as visible text`);
         }
 
         for (const role of Object.keys(getRoles(container))) {
           const rawNames = within(container).queryAllByRole(role, { name: rawKey });
           if (rawNames.length > 0) {
-            issues.push(`${locale}.${activePhase} exposes ${rawNames.length} raw accessible name(s) for ${role}`);
+            issues.push(`${locale}.${activeView} exposes ${rawNames.length} raw accessible name(s) for ${role}`);
           }
         }
 
@@ -338,108 +338,18 @@ describe('Creative Studio full-sentence English copy', () => {
     expect(issues).toEqual([]);
   }, 30_000);
 
-  it('renders the phase workflow with localized accessible names', async () => {
-    await renderEnglish(
-      <>
-        <StudioPhaseNav
-          activePhase='brief'
-          project={project()}
-          readiness={{
-            sceneStatuses: {},
-            totalSceneCount: 0,
-            readySceneIds: [],
-            selectedAssetCount: 0,
-            durationDeltaSeconds: -5,
-          }}
-          disabled={false}
-          onSelect={vi.fn()}
-        />
-      </>
-    );
+  it('renders the view switch with localized accessible names and no step semantics', async () => {
+    await renderEnglish(<StudioViewSwitch activeView='table' disabled={false} onSelect={vi.fn()} />);
 
-    const navigation = screen.getByRole('navigation', { name: 'Creative workflow' });
+    const navigation = screen.getByRole('navigation', { name: 'Project views' });
     expect(within(navigation).getAllByRole('button')).toHaveLength(4);
-    for (const phaseName of ['Brief', 'Write', 'Produce', 'Review']) {
-      expect(within(navigation).getByRole('button', { name: phaseName })).toBeVisible();
+    for (const viewName of ['Table', 'Board', 'Cut', 'Brief']) {
+      expect(within(navigation).getByRole('button', { name: viewName })).toBeVisible();
     }
-  });
 
-  it('derives phase completion from durable project content', () => {
-    const completeScene = scene({ id: 'scene-1', visualPrompt: 'A finished visual prompt' });
-    const currentProject = project({
-      brief: 'A useful intent',
-      sceneOrder: [completeScene.id],
-      scenes: { [completeScene.id]: completeScene },
-    });
-
-    expect(
-      deriveStudioPhaseCompletion(currentProject, {
-        sceneStatuses: { [completeScene.id]: 'generated' },
-        totalSceneCount: 1,
-        readySceneIds: [],
-        selectedAssetCount: 1,
-        durationDeltaSeconds: 0,
-      })
-    ).toEqual({ brief: true, write: true, produce: true, review: false });
-  });
-
-  it('derives rail checkmarks from phase content while keeping Review numbered', async () => {
-    const completeScene = scene({ id: 'scene-1', visualPrompt: 'A finished visual prompt' });
-    const completeProject = project({
-      brief: 'A useful intent',
-      sceneOrder: [completeScene.id],
-      scenes: { [completeScene.id]: completeScene },
-    });
-    await renderEnglish(
-      <StudioPhaseNav
-        activePhase='review'
-        project={completeProject}
-        readiness={{
-          sceneStatuses: { [completeScene.id]: 'generated' },
-          totalSceneCount: 1,
-          readySceneIds: [],
-          selectedAssetCount: 1,
-          durationDeltaSeconds: 0,
-        }}
-        disabled={false}
-        onSelect={vi.fn()}
-      />
-    );
-
-    expect(document.querySelector('[data-studio-phase-marker="brief"]')).toHaveAttribute('data-complete', 'true');
-    expect(document.querySelector('[data-studio-phase-marker="write"]')).toHaveAttribute('data-complete', 'true');
-    expect(document.querySelector('[data-studio-phase-marker="produce"]')).toHaveAttribute('data-complete', 'true');
-    expect(document.querySelector('[data-studio-phase-marker="review"]')).toHaveAttribute('data-complete', 'false');
-    expect(document.querySelector('[data-studio-phase-marker="review"]')).toHaveTextContent('4');
-    expect(screen.getByRole('button', { current: 'step' })).toHaveTextContent('Review');
-  });
-
-  it('keeps Write incomplete when any ordered shot has a blank visual prompt', async () => {
-    const completeScene = scene({ id: 'scene-1', visualPrompt: 'A finished visual prompt' });
-    const blankScene = scene({ id: 'scene-2', visualPrompt: '   ' });
-    await renderEnglish(
-      <StudioPhaseNav
-        activePhase='write'
-        project={project({
-          brief: '   ',
-          sceneOrder: [completeScene.id, blankScene.id],
-          scenes: { [completeScene.id]: completeScene, [blankScene.id]: blankScene },
-        })}
-        readiness={{
-          sceneStatuses: { [completeScene.id]: 'ready', [blankScene.id]: 'needs_prompt' },
-          totalSceneCount: 2,
-          readySceneIds: [completeScene.id],
-          selectedAssetCount: 0,
-          durationDeltaSeconds: 5,
-        }}
-        disabled={false}
-        onSelect={vi.fn()}
-      />
-    );
-
-    expect(document.querySelector('[data-studio-phase-marker="brief"]')).toHaveAttribute('data-complete', 'false');
-    expect(document.querySelector('[data-studio-phase-marker="write"]')).toHaveAttribute('data-complete', 'false');
-    expect(document.querySelector('[data-studio-phase-marker="produce"]')).toHaveAttribute('data-complete', 'false');
+    // A switch, not a stepper: the active view is a page, not a step in a sequence.
+    expect(within(navigation).getByRole('button', { current: 'page' })).toHaveTextContent('Table');
+    expect(within(navigation).queryByRole('button', { current: 'step' })).not.toBeInTheDocument();
   });
 
   it('renders complete timeline and variation selection names without translated fragments', async () => {
@@ -508,14 +418,9 @@ describe('Creative Studio full-sentence English copy', () => {
     ).toHaveAccessibleDescription('In cut');
   });
 
-  it('describes the Review handoff as a manifest plus selected media without exported slates', async () => {
+  it('describes the Cut handoff as a manifest plus selected media without exported slates', async () => {
     await renderEnglish(
-      <StudioPhaseShell
-        activePhase='review'
-        controller={phaseController()}
-        navigationDisabled={false}
-        onBack={vi.fn()}
-      />
+      <StudioPhaseShell activeView='cut' controller={phaseController()} navigationDisabled={false} onBack={vi.fn()} />
     );
 
     expect(

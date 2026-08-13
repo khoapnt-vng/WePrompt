@@ -82,11 +82,14 @@ describe('StudioPhaseHeader', () => {
   });
 
   /**
-   * The rail is a sibling row that StudioPhaseShell owns; the header must not host it. Handing
-   * the header a rail-shaped slot is what makes the assertion falsifiable: if the `navigation`
-   * prop is ever restored to this component, the list below renders and this test goes red.
+   * The view switch is a sibling row that StudioPhaseShell owns; the header must not host it.
+   * Handing the header a switch-shaped slot is what makes the assertion falsifiable: if the
+   * `navigation` prop is ever restored to this component, the list below renders and this test
+   * goes red. Placement is load-bearing beyond taste — the e2e spec addresses the save chip as
+   * `[data-studio-phase-shell] > header [data-studio-save-state]`, so anything that grows the
+   * header's contents is one refactor away from breaking those selectors.
    */
-  it('does not host the phase rail even when handed one', () => {
+  it('does not host the view switch even when handed one', () => {
     const HeaderWithLegacyNavigationSlot = StudioPhaseHeader as React.FC<
       StudioPhaseHeaderProps & { navigation?: React.ReactNode }
     >;
@@ -97,15 +100,15 @@ describe('StudioPhaseHeader', () => {
         saveState='saved'
         onBack={vi.fn()}
         navigation={
-          <ol>
-            <li>phase rail</li>
-          </ol>
+          <ul>
+            <li>view switch</li>
+          </ul>
         }
       />
     );
 
     expect(screen.queryByRole('list')).not.toBeInTheDocument();
-    expect(screen.queryByText('phase rail')).not.toBeInTheDocument();
+    expect(screen.queryByText('view switch')).not.toBeInTheDocument();
   });
 
   it('leaves the aspect ratio to the Brief panel rather than restating it as a header chip', () => {
@@ -115,7 +118,7 @@ describe('StudioPhaseHeader', () => {
     expect(screen.queryByLabelText(/conversation\.creativeStudio\.project\.aspectRatio/)).not.toBeInTheDocument();
   });
 
-  it('omits the action container when the active phase has no page-level action', () => {
+  it('omits the action container when the active view has no page-level action', () => {
     const { container } = render(<StudioPhaseHeader project={project} saveState='saving' onBack={vi.fn()} />);
 
     expect(container.querySelector('[data-studio-phase-actions]')).toBeNull();

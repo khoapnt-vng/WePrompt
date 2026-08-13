@@ -106,13 +106,13 @@ const rulesKeys = [
 ] as const;
 
 const phaseKeys = [
-  'phase.nav.label',
+  'phase.nav.viewsLabel',
+  'phase.nav.table',
+  'phase.nav.board',
+  'phase.nav.cut',
   'phase.nav.brief',
-  'phase.nav.write',
-  'phase.nav.produce',
-  'phase.nav.review',
-  'phase.nav.saved',
-  'phase.nav.saving',
+  'phase.nav.saved', // StudioPhaseHeader save chip, not the view switch
+  'phase.nav.saving', // StudioPhaseHeader save chip, not the view switch
   'phase.shared.backToLibrary',
   'phase.shared.noMediaGeneration',
   'phase.shared.activityLabel',
@@ -396,7 +396,28 @@ const removedWriteAssistantKeys = [
   'phase.write.draftStoryboard',
 ] as const;
 
+/**
+ * Copy for the four-step Brief/Write/Produce/Review rail that the view switch replaced.
+ *
+ * `phase.nav.brief` is deliberately not here — Brief survived the rail as a view and kept its
+ * label. `phase.nav.saved` and `phase.nav.saving` are not rail copy at all; they are the header's
+ * save chip, and a prefix-wide sweep of `phase.nav.*` would take them with it.
+ */
+const removedPhaseRailKeys = ['phase.nav.label', 'phase.nav.write', 'phase.nav.produce', 'phase.nav.review'] as const;
+
 describe('Creative Studio localization contract', () => {
+  it('carries no copy for the four-step phase rail the view switch replaced, in any configured locale', () => {
+    for (const locale of i18nConfig.supportedLanguages) {
+      const leaves = flattenStringLeaves(loadConversationLocale(locale).creativeStudio);
+      // Guards the guard: a wrong path or an empty read would make every absence assertion pass.
+      expect(leaves['phase.nav.table'], `${locale}/phase.nav.table`).toBeTruthy();
+      expect(leaves['phase.nav.saved'], `${locale}/phase.nav.saved`).toBeTruthy();
+      for (const key of removedPhaseRailKeys) {
+        expect(leaves[key], `${locale}/${key} outlived the rail that used it`).toBeUndefined();
+      }
+    }
+  });
+
   it('carries no copy for the Write assistant it removed, in any configured locale', () => {
     for (const locale of i18nConfig.supportedLanguages) {
       const leaves = flattenStringLeaves(loadConversationLocale(locale).creativeStudio);

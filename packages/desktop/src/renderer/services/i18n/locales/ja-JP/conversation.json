@@ -933,11 +933,11 @@
     },
     "phase": {
       "nav": {
-        "label": "制作ワークフロー",
+        "viewsLabel": "プロジェクトビュー",
+        "table": "テーブル",
+        "board": "ボード",
+        "cut": "カット",
         "brief": "概要",
-        "write": "構成",
-        "produce": "生成",
-        "review": "確認",
         "saved": "保存済み",
         "saving": "変更を保存しています..."
       },

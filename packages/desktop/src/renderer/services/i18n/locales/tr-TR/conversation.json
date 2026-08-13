@@ -936,11 +936,11 @@
     },
     "phase": {
       "nav": {
-        "label": "Yaratıcı iş akışı",
+        "viewsLabel": "Proje görünümleri",
+        "table": "Tablo",
+        "board": "Pano",
+        "cut": "Kurgu",
         "brief": "Özet",
-        "write": "Yaz",
-        "produce": "Üret",
-        "review": "İncele",
         "saved": "Kaydedildi",
         "saving": "Değişiklikler kaydediliyor..."
       },

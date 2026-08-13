@@ -5,8 +5,8 @@
  */
 
 export { StudioPhaseHeader, type StudioPhaseHeaderProps } from './StudioPhaseHeader';
-export { StudioPhaseNav, type StudioPhaseNavProps } from './StudioPhaseNav';
 export { StudioPhaseShell, type StudioPhaseShellProps } from './StudioPhaseShell';
+export { StudioViewSwitch, type StudioViewSwitchProps } from './StudioViewSwitch';
 export type {
   BriefPhaseController,
   ProducePhaseController,

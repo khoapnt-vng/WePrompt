@@ -769,11 +769,11 @@
     },
     "phase": {
       "nav": {
-        "label": "Creative workflow",
+        "viewsLabel": "Project views",
+        "table": "Table",
+        "board": "Board",
+        "cut": "Cut",
         "brief": "Brief",
-        "write": "Write",
-        "produce": "Produce",
-        "review": "Review",
         "saved": "Saved",
         "saving": "Saving changes..."
       },

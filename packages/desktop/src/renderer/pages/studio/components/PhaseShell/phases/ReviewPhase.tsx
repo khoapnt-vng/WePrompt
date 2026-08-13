@@ -78,7 +78,7 @@ export const ReviewPhase: React.FC<ReviewPhaseProps> = ({ controller, layoutMode
                   shots: shots.join(', '),
                 }),
           action: t('conversation.creativeStudio.phase.review.render.openProduce'),
-          run: () => controller.requestTransition({ phase: 'produce' }),
+          run: () => controller.requestTransition({ view: 'board' }),
         };
       }
       default:
