@@ -912,7 +912,10 @@
       "breachScene": "被规则“{{rule}}”阻止（匹配到“{{term}}”）。",
       "breachBlockedConfirm": "一个或多个镜头违反项目规则，因此无法确认整个批次。",
       "breachAskDirector": "请创意总监修改",
-      "autoSubmitBlocked": "排队中的参考图请求违反了项目规则。请先检查受影响的镜头再生成。"
+      "autoSubmitBlocked": "排队中的参考图请求违反了项目规则。请先检查受影响的镜头再生成。",
+      "proposalTitle": "建议的规则",
+      "proposalBody": "创意总监建议将此规则固定到项目简报中。",
+      "proposalTerms": "强制执行的禁用词：{{terms}}"
     },
     "nav": {
       "title": "创意工作室"

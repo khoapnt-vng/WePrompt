@@ -913,7 +913,10 @@
       "breachScene": "Bloqueado por la regla «{{rule}}» (coincidencia: «{{term}}»).",
       "breachBlockedConfirm": "Este lote no se puede confirmar porque una o más tomas infringen una regla del proyecto.",
       "breachAskDirector": "Pedir al director que lo revise",
-      "autoSubmitBlocked": "Una solicitud de imagen de referencia en cola infringió una regla del proyecto. Revisa la toma afectada antes de generar."
+      "autoSubmitBlocked": "Una solicitud de imagen de referencia en cola infringió una regla del proyecto. Revisa la toma afectada antes de generar.",
+      "proposalTitle": "Regla propuesta",
+      "proposalBody": "El Director Creativo propone fijar esta regla en el briefing del proyecto.",
+      "proposalTerms": "Términos prohibidos aplicados: {{terms}}"
     },
     "nav": {
       "title": "Creative Studio"

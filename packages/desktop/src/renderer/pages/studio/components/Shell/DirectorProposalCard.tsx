@@ -56,6 +56,8 @@ export type DirectorProposalCardProps = {
  * main froze anything, seen only after the script had already moved past the revision it was drafted from.
  */
 const resolveProposalDiff = (project: StudioRendererProject, proposal: StudioProposal): StudioProposalDiff | null => {
+  // A rule pin has no positional shape, so there is nothing to diff and nothing to be unknowable about.
+  if (proposal.payload.kind !== 'replace_storyboard') return null;
   const frozen = normaliseStudioProposalDiff(proposal.diff);
   if (frozen !== undefined) return frozen;
   if (project.revision !== proposal.baseRevision) return null;
@@ -86,7 +88,7 @@ export const DirectorProposalCard: React.FC<DirectorProposalCardProps> = ({
     setMessageKey(null);
     setStale(false);
     try {
-      if (editor.hasUnsavedSceneDrafts) {
+      if (proposal.payload.kind !== 'pin_rule' && editor.hasUnsavedSceneDrafts) {
         const flushed = await editor.flushAllSceneDrafts();
         if (flushed.failed.length > 0 || flushed.dirtied.length > 0) {
           setMessageKey('conversation.creativeStudio.brief.proposalFlushRefused');
@@ -129,6 +131,41 @@ export const DirectorProposalCard: React.FC<DirectorProposalCardProps> = ({
 
   if (status !== 'pending') return null;
 
+  if (proposal.payload.kind === 'pin_rule') {
+    const { rule } = proposal.payload;
+    return (
+      <Card title={t('conversation.creativeStudio.rules.proposalTitle')}>
+        <p>{t('conversation.creativeStudio.rules.proposalBody')}</p>
+        <p>{rule.text}</p>
+        {rule.predicate !== null && (
+          <p>
+            {t('conversation.creativeStudio.rules.proposalTerms', {
+              terms: rule.predicate.terms.join(fieldSeparator),
+            })}
+          </p>
+        )}
+        <div className='flex gap-8px'>
+          <Button type='primary' loading={pending} onClick={() => void accept()}>
+            {t('conversation.creativeStudio.brief.proposalAccept')}
+          </Button>
+          <Button disabled={pending} onClick={() => void reject()}>
+            {t('conversation.creativeStudio.brief.proposalReject')}
+          </Button>
+        </div>
+        {messageKey !== null && (
+          <div role='status' aria-live='polite'>
+            {t(messageKey)}
+          </div>
+        )}
+        {stale && (
+          <Button onClick={() => void onRepropose()}>{t('conversation.creativeStudio.brief.proposalRepropose')}</Button>
+        )}
+      </Card>
+    );
+  }
+
+  const storyboardPayload = proposal.payload;
+
   return (
     <Card title={t('conversation.creativeStudio.brief.proposalTitle')}>
       <p>
@@ -165,8 +202,8 @@ export const DirectorProposalCard: React.FC<DirectorProposalCardProps> = ({
         </>
       )}
       <ul>
-        {proposal.payload.sceneOrder.map((sceneId) => (
-          <li key={sceneId}>{proposal.payload.scenes[sceneId]?.title ?? sceneId}</li>
+        {storyboardPayload.sceneOrder.map((sceneId) => (
+          <li key={sceneId}>{storyboardPayload.scenes[sceneId]?.title ?? sceneId}</li>
         ))}
       </ul>
       <div className='flex gap-8px'>

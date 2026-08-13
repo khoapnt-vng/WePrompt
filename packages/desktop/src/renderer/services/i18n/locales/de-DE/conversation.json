@@ -913,7 +913,10 @@
       "breachScene": "Durch die Regel „{{rule}}“ blockiert (Treffer: „{{term}}“).",
       "breachBlockedConfirm": "Dieser Stapel kann nicht bestätigt werden, da mindestens eine Einstellung gegen eine Projektregel verstößt.",
       "breachAskDirector": "Regisseur um Überarbeitung bitten",
-      "autoSubmitBlocked": "Eine ausstehende Referenzbild-Anfrage verstößt gegen eine Projektregel. Prüfen Sie die betroffene Einstellung vor der Generierung."
+      "autoSubmitBlocked": "Eine ausstehende Referenzbild-Anfrage verstößt gegen eine Projektregel. Prüfen Sie die betroffene Einstellung vor der Generierung.",
+      "proposalTitle": "Vorgeschlagene Regel",
+      "proposalBody": "Die Kreativdirektion schlägt vor, diese Regel im Projektbriefing festzuhalten.",
+      "proposalTerms": "Verbindliche verbotene Begriffe: {{terms}}"
     },
     "nav": {
       "title": "Creative Studio"
