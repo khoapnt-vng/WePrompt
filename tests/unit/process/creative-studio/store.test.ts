@@ -284,6 +284,24 @@ describe('creative studio project store', () => {
 
     expect(reread?.rules).toEqual([]);
     expect(await store.listQuarantinedProjectIds()).toEqual([]);
+
+    await store.updateProject(project.id, (current) => ({ ...current, name: 'Migrated project' }));
+    expect((JSON.parse(readFileSync(file, 'utf8')) as StudioProject).rules).toEqual([]);
+  });
+
+  it('persists a valid enforced rule and reads it back unchanged', async () => {
+    const project = await store.createProject(makeInput());
+    const rule: StudioProject['rules'][number] = {
+      id: 'rule_1',
+      scope: 'project',
+      text: 'Do not show competitor branding',
+      predicate: { kind: 'forbidden_terms', terms: ['nike'] },
+      createdAt: '2026-08-13T00:00:00.000Z',
+    };
+
+    await store.updateProject(project.id, (current) => ({ ...current, rules: [rule] }), project.revision);
+
+    expect((await store.getProject(project.id))?.rules).toEqual([rule]);
   });
 
   it('refuses a rules array that breaks the shape, rather than persisting it unread', async () => {
@@ -989,6 +1007,124 @@ describe('creative studio project store', () => {
       (project: StudioProject) => {
         project.cuts!.cut_1.clips.clip_1.sourceInSeconds = 5.086;
         project.cuts!.cut_1.clips.clip_1.sourceOutSeconds = null;
+      },
+    ],
+    [
+      'a 241-character brief rule',
+      (project: StudioProject) => {
+        project.rules = [
+          {
+            id: 'rule_1',
+            scope: 'project',
+            text: 'x'.repeat(241),
+            predicate: null,
+            createdAt: '2026-08-13T00:00:00.000Z',
+          },
+        ];
+      },
+    ],
+    [
+      'a ninth brief rule term',
+      (project: StudioProject) => {
+        project.rules = [
+          {
+            id: 'rule_1',
+            scope: 'project',
+            text: 'Avoid these terms',
+            predicate: { kind: 'forbidden_terms', terms: Array.from({ length: 9 }, (_, index) => `term_${index}`) },
+            createdAt: '2026-08-13T00:00:00.000Z',
+          },
+        ];
+      },
+    ],
+    [
+      'a 65-character brief rule term',
+      (project: StudioProject) => {
+        project.rules = [
+          {
+            id: 'rule_1',
+            scope: 'project',
+            text: 'Avoid this term',
+            predicate: { kind: 'forbidden_terms', terms: ['x'.repeat(65)] },
+            createdAt: '2026-08-13T00:00:00.000Z',
+          },
+        ];
+      },
+    ],
+    [
+      'a 25th brief rule',
+      (project: StudioProject) => {
+        project.rules = Array.from({ length: 25 }, (_, index) => ({
+          id: `rule_${index}`,
+          scope: 'project',
+          text: `Rule ${index}`,
+          predicate: null,
+          createdAt: '2026-08-13T00:00:00.000Z',
+        }));
+      },
+    ],
+    [
+      'duplicate brief rule ids',
+      (project: StudioProject) => {
+        project.rules = [
+          {
+            id: 'rule_1',
+            scope: 'project',
+            text: 'First rule',
+            predicate: null,
+            createdAt: '2026-08-13T00:00:00.000Z',
+          },
+          {
+            id: 'rule_1',
+            scope: 'project',
+            text: 'Second rule',
+            predicate: null,
+            createdAt: '2026-08-13T00:00:00.000Z',
+          },
+        ];
+      },
+    ],
+    [
+      'duplicate terms in a brief rule',
+      (project: StudioProject) => {
+        project.rules = [
+          {
+            id: 'rule_1',
+            scope: 'project',
+            text: 'Avoid this term',
+            predicate: { kind: 'forbidden_terms', terms: ['nike', 'nike'] },
+            createdAt: '2026-08-13T00:00:00.000Z',
+          },
+        ];
+      },
+    ],
+    [
+      'an extra brief rule field',
+      (project: StudioProject) => {
+        project.rules = [
+          {
+            id: 'rule_1',
+            scope: 'project',
+            text: 'Avoid this term',
+            predicate: null,
+            createdAt: '2026-08-13T00:00:00.000Z',
+          },
+        ];
+        Object.assign(project.rules[0], { priority: 'high' });
+      },
+    ],
+    [
+      'a non-canonical brief rule timestamp',
+      (project: StudioProject) => {
+        project.rules = [
+          {
+            id: 'rule_1',
+            scope: 'project',
+            text: 'Avoid this term',
+            predicate: null,
+            createdAt: '2026-08-13T00:00:00Z',
+          },
+        ];
       },
     ],
   ] as const)('rejects cut data with %s without changing durable state', async (_case, mutate) => {

@@ -255,7 +255,7 @@ export type StudioProject = {
    * `Omit<StudioProject, 'jobs' | 'routing'> & …` and `toRendererProject` declares that return
    * type, so a required field makes omitting it from the projection a tsc error. Optional and it
    * would be persisted, validated, visible to the MCP tools and silently invisible to the renderer —
-   * the documented `outputRole` trap (see the warning at :144-149).
+   * the documented `outputRole` trap (see the warning at :154-159).
    */
   rules: StudioBriefRule[];
   forgeProjectId?: string;
