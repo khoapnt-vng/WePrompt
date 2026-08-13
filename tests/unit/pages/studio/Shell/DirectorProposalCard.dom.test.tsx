@@ -60,6 +60,7 @@ const project = (overrides: Partial<StudioRendererProject> = {}): StudioRenderer
   id: 'project-1',
   name: 'Launch film',
   brief: 'Launch it',
+  rules: [],
   aspectRatio: '16:9',
   targetDurationSeconds: 10,
   resolution: '1080p',
@@ -136,6 +137,63 @@ describe('DirectorProposalCard', () => {
     acceptProposal.mockClear();
     rejectProposal.mockClear();
     repropose.mockClear();
+  });
+
+  it('shows a rule pin as the rule itself, with its enforced words, and no shot diff', () => {
+    renderCard({
+      proposal: proposal({
+        payload: {
+          kind: 'pin_rule',
+          rule: { text: 'Keep the kits generic.', predicate: { kind: 'forbidden_terms', terms: ['acme', 'globex'] } },
+        },
+      }),
+    });
+
+    expect(screen.getByText('conversation.creativeStudio.rules.proposalTitle')).toBeInTheDocument();
+    expect(screen.getByText('conversation.creativeStudio.rules.proposalBody')).toBeInTheDocument();
+    expect(screen.getByText('Keep the kits generic.')).toBeInTheDocument();
+    // `fieldSeparator` is the one key the mock resolves for real, so the joined terms read as ', '.
+    expect(screen.getByText('conversation.creativeStudio.rules.proposalTerms(terms=acme, globex)')).toBeInTheDocument();
+    // Nothing from the storyboard branch: no diff summary, no per-scene change list, no scene titles.
+    expect(screen.queryByText(/proposalSummary/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/proposalSceneChange/)).not.toBeInTheDocument();
+  });
+
+  it('does not compute a shot diff for a rule pin, even at a stale revision', () => {
+    renderCard({
+      project: project({ revision: 9 }),
+      proposal: proposal({
+        baseRevision: 3,
+        payload: { kind: 'pin_rule', rule: { text: 'Keep the kits generic.', predicate: null } },
+      }),
+    });
+
+    // The storyboard branch would render proposalDiffUnavailable here, because revision 9 ≠ base 3.
+    expect(screen.queryByText('conversation.creativeStudio.brief.proposalDiffUnavailable')).not.toBeInTheDocument();
+    expect(screen.getByText('conversation.creativeStudio.rules.proposalTitle')).toBeInTheDocument();
+  });
+
+  it('accepts a rule pin without flushing unrelated scene drafts', async () => {
+    const flushAllSceneDrafts = vi.fn(async () => ({ failed: ['scene-1'], dirtied: [] }));
+    render(
+      <DirectorProposalCard
+        project={project()}
+        proposal={proposal({
+          payload: { kind: 'pin_rule', rule: { text: 'Keep the kits generic.', predicate: null } },
+        })}
+        editor={editor({ hasUnsavedSceneDrafts: true, flushAllSceneDrafts })}
+        acceptProposal={acceptProposal}
+        rejectProposal={rejectProposal}
+        onRepropose={repropose}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.brief.proposalAccept' }));
+
+    await waitFor(() =>
+      expect(acceptProposal).toHaveBeenCalledWith({ projectId: 'project-1', proposalId: 'proposal-1' })
+    );
+    expect(flushAllSceneDrafts).not.toHaveBeenCalled();
   });
 
   it('names the one field a same-length redraft rewrites instead of reporting a wholesale replacement', () => {

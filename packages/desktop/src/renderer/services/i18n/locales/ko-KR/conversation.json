@@ -912,7 +912,10 @@
       "breachScene": "규칙 ‘{{rule}}’에 의해 차단됨(‘{{term}}’ 일치).",
       "breachBlockedConfirm": "하나 이상의 샷이 프로젝트 규칙을 위반하여 이 배치를 확인할 수 없습니다.",
       "breachAskDirector": "디렉터에게 수정 요청",
-      "autoSubmitBlocked": "대기 중인 참조 이미지 요청이 프로젝트 규칙을 위반했습니다. 생성하기 전에 해당 샷을 검토하세요."
+      "autoSubmitBlocked": "대기 중인 참조 이미지 요청이 프로젝트 규칙을 위반했습니다. 생성하기 전에 해당 샷을 검토하세요.",
+      "proposalTitle": "제안된 규칙",
+      "proposalBody": "크리에이티브 디렉터가 이 규칙을 프로젝트 브리프에 고정할 것을 제안합니다.",
+      "proposalTerms": "적용되는 금지 용어: {{terms}}"
     },
     "nav": {
       "title": "크리에이티브 스튜디오"

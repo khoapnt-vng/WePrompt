@@ -747,7 +747,10 @@
       "breachScene": "Blocked by rule “{{rule}}” (matched “{{term}}”).",
       "breachBlockedConfirm": "This batch cannot be confirmed because one or more shots breach a project rule.",
       "breachAskDirector": "Ask the Director to revise",
-      "autoSubmitBlocked": "A queued reference image request breached a project rule. Review the affected shot before generating."
+      "autoSubmitBlocked": "A queued reference image request breached a project rule. Review the affected shot before generating.",
+      "proposalTitle": "Proposed rule",
+      "proposalBody": "The Creative Director proposes pinning this rule to the project brief.",
+      "proposalTerms": "Enforced forbidden terms: {{terms}}"
     },
     "nav": {
       "title": "Creative Studio"

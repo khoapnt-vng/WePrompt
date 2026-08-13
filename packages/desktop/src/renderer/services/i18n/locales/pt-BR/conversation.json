@@ -918,7 +918,10 @@
       "breachScene": "Bloqueado pela regra “{{rule}}” (termo correspondente: “{{term}}”).",
       "breachBlockedConfirm": "Este lote não pode ser confirmado porque uma ou mais cenas violam uma regra do projeto.",
       "breachAskDirector": "Pedir ao diretor para revisar",
-      "autoSubmitBlocked": "Uma solicitação de imagem de referência na fila violou uma regra do projeto. Revise a cena afetada antes de gerar."
+      "autoSubmitBlocked": "Uma solicitação de imagem de referência na fila violou uma regra do projeto. Revise a cena afetada antes de gerar.",
+      "proposalTitle": "Regra proposta",
+      "proposalBody": "O Diretor Criativo propõe fixar esta regra no briefing do projeto.",
+      "proposalTerms": "Termos proibidos aplicados: {{terms}}"
     },
     "nav": {
       "title": "Creative Studio"

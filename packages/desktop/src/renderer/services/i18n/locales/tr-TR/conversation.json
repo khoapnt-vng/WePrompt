@@ -914,7 +914,10 @@
       "breachScene": "“{{rule}}” kuralı tarafından engellendi (“{{term}}” eşleşti).",
       "breachBlockedConfirm": "Bir veya daha fazla çekim proje kuralını ihlal ettiği için bu toplu işlem onaylanamaz.",
       "breachAskDirector": "Yönetmenden düzeltmesini iste",
-      "autoSubmitBlocked": "Sıradaki bir referans görseli isteği proje kuralını ihlal etti. Oluşturmadan önce etkilenen çekimi inceleyin."
+      "autoSubmitBlocked": "Sıradaki bir referans görseli isteği proje kuralını ihlal etti. Oluşturmadan önce etkilenen çekimi inceleyin.",
+      "proposalTitle": "Önerilen kural",
+      "proposalBody": "Kreatif Direktör bu kuralın proje brifine sabitlenmesini öneriyor.",
+      "proposalTerms": "Uygulanan yasaklı terimler: {{terms}}"
     },
     "nav": {
       "title": "Creative Studio"
