@@ -159,6 +159,27 @@ describe('GenerationReviewModal', () => {
     expect(screen.getByText('conversation.creativeStudio.rules.breachBlockedConfirm')).toBeInTheDocument();
   });
 
+  it('names the breached rule on a batch shot even when that media kind has no route', () => {
+    const routelessVideo = {
+      ...mixedScenes()[1]!,
+      route: { status: 'missing' as const, snapshot: null, providerName: null },
+    };
+    render(
+      <GenerationReviewModal
+        {...createProps({
+          scenes: [routelessVideo],
+          ruleBreachesBySceneId: { 'scene-video': [breach] },
+        })}
+      />
+    );
+
+    expect(screen.getByText('conversation.creativeStudio.review.missingRoute')).toBeInTheDocument();
+    expect(
+      screen.getByText('conversation.creativeStudio.rules.breachScene:rule=No competitor logos.,term=acme')
+    ).toBeInTheDocument();
+    expect(screen.getByText('conversation.creativeStudio.rules.breachBlockedConfirm')).toBeInTheDocument();
+  });
+
   it('leaves Confirm alone when no rule is breached', () => {
     render(<GenerationReviewModal {...createProps({ mode: 'single', scenes: [mixedScenes()[0]!] })} />);
 

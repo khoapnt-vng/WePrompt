@@ -327,19 +327,19 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
                       content={t('conversation.creativeStudio.review.invalidRoute')}
                     />
                   )}
-                  {(ruleBreachesBySceneId[scene.id] ?? []).map((breach) => (
-                    <Alert
-                      key={breach.ruleId}
-                      className='mt-10px'
-                      type='error'
-                      content={t('conversation.creativeStudio.rules.breachScene', {
-                        rule: breach.ruleText,
-                        term: breach.matchedTerm,
-                      })}
-                    />
-                  ))}
                 </>
               )}
+              {(ruleBreachesBySceneId[scene.id] ?? []).map((breach) => (
+                <Alert
+                  key={breach.ruleId}
+                  className='mt-10px'
+                  type='error'
+                  content={t('conversation.creativeStudio.rules.breachScene', {
+                    rule: breach.ruleText,
+                    term: breach.matchedTerm,
+                  })}
+                />
+              ))}
             </article>
           ))}
         </div>
