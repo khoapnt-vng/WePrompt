@@ -116,6 +116,7 @@ import type {
   StudioProposalAcceptance,
   StudioProposalRequest,
   StudioReferenceRequest,
+  StudioSetBriefRulesRequest,
   StudioPersistCapturedPosterRequest,
   StudioPlaceCutScenesRequest,
   StudioRendererProject,
@@ -1231,6 +1232,9 @@ export const creativeStudio = {
   >('creative-studio.update-model-selection'),
   updateProject: bridge.buildProvider<StudioCommandResult<StudioRendererProject>, StudioUpdateProjectRequest>(
     'creative-studio.update-project'
+  ),
+  setBriefRules: bridge.buildProvider<StudioCommandResult<StudioRendererProject>, StudioSetBriefRulesRequest>(
+    'creative-studio.set-brief-rules'
   ),
   bindBriefConversation: bridge.buildProvider<
     StudioCommandResult<StudioRendererProject>,

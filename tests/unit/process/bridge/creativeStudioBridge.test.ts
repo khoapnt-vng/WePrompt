@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   proposeStoryboardProvider: vi.fn(),
   updateModelSelectionProvider: vi.fn(),
   updateProjectProvider: vi.fn(),
+  setBriefRulesProvider: vi.fn(),
   bindBriefConversationProvider: vi.fn(),
   updateCutProvider: vi.fn(),
   placeCutScenesProvider: vi.fn(),
@@ -66,6 +67,7 @@ vi.mock('@/common', () => ({
       proposeStoryboard: { provider: mocks.proposeStoryboardProvider },
       updateModelSelection: { provider: mocks.updateModelSelectionProvider },
       updateProject: { provider: mocks.updateProjectProvider },
+      setBriefRules: { provider: mocks.setBriefRulesProvider },
       bindBriefConversation: { provider: mocks.bindBriefConversationProvider },
       updateCut: { provider: mocks.updateCutProvider },
       placeCutScenes: { provider: mocks.placeCutScenesProvider },
@@ -121,6 +123,7 @@ const project: StudioProject = {
   assets: {},
   jobs: {},
   routing: { storyboard: null, image: null, video: null },
+  rules: [],
   createdAt: '2026-07-30T00:00:00.000Z',
   updatedAt: '2026-07-30T00:00:00.000Z',
 };
@@ -150,6 +153,7 @@ describe('initCreativeStudioBridge', () => {
         proposeStoryboard: vi.fn(async () => project),
         updateModelSelection: vi.fn(async () => project),
         updateProject: vi.fn(async () => project),
+        setBriefRules: vi.fn(async () => project),
         bindBriefConversation: vi.fn(async () => project),
         updateCut: vi.fn(async () => project),
         placeCutScenes: vi.fn(async () => project),
@@ -201,6 +205,7 @@ describe('initCreativeStudioBridge', () => {
     expect(mocks.proposeStoryboardProvider).toHaveBeenCalledOnce();
     expect(mocks.updateModelSelectionProvider).toHaveBeenCalledOnce();
     expect(mocks.updateProjectProvider).toHaveBeenCalledOnce();
+    expect(mocks.setBriefRulesProvider).toHaveBeenCalledOnce();
     expect(mocks.bindBriefConversationProvider).toHaveBeenCalledOnce();
     expect(mocks.updateCutProvider).toHaveBeenCalledOnce();
     expect(mocks.placeCutScenesProvider).toHaveBeenCalledOnce();
@@ -241,6 +246,7 @@ describe('initCreativeStudioBridge', () => {
     const getProject = mocks.getProjectProvider.mock.calls[0]?.[0] as ProviderHandler;
     const getLatestRender = mocks.getLatestRenderProvider.mock.calls[0]?.[0] as ProviderHandler;
     const updateProject = mocks.updateProjectProvider.mock.calls[0]?.[0] as ProviderHandler;
+    const setBriefRules = mocks.setBriefRulesProvider.mock.calls[0]?.[0] as ProviderHandler;
     const renderCut = mocks.renderCutProvider.mock.calls[0]?.[0] as ProviderHandler;
     const disabled = {
       ok: false,
@@ -255,12 +261,14 @@ describe('initCreativeStudioBridge', () => {
     await expect(updateProject({ projectId: 'project_1', expectedRevision: 1, name: 'Changed' })).resolves.toEqual(
       disabled
     );
+    await expect(setBriefRules({ projectId: 'project_1', expectedRevision: 1, rules: [] })).resolves.toEqual(disabled);
     await expect(renderCut({ projectId: 'project_1' })).resolves.toEqual(disabled);
     expect(getService).not.toHaveBeenCalled();
     expect(getRenderRunner).not.toHaveBeenCalled();
     expect(service.getProject).not.toHaveBeenCalled();
     expect(service.getLatestRender).not.toHaveBeenCalled();
     expect(service.updateProject).not.toHaveBeenCalled();
+    expect(service.setBriefRules).not.toHaveBeenCalled();
     expect(runner.renderCut).not.toHaveBeenCalled();
   });
 
@@ -271,11 +279,16 @@ describe('initCreativeStudioBridge', () => {
     const getProject = mocks.getProjectProvider.mock.calls[0]?.[0] as ProviderHandler;
     const getLatestRender = mocks.getLatestRenderProvider.mock.calls[0]?.[0] as ProviderHandler;
     const updateProject = mocks.updateProjectProvider.mock.calls[0]?.[0] as ProviderHandler;
+    const setBriefRules = mocks.setBriefRulesProvider.mock.calls[0]?.[0] as ProviderHandler;
     const renderCut = mocks.renderCutProvider.mock.calls[0]?.[0] as ProviderHandler;
 
     await expect(getProject({ projectId: 'project_1' })).resolves.toEqual({ ok: true, data: project });
     await expect(getLatestRender({ projectId: 'project_1' })).resolves.toEqual({ ok: true, data: null });
     await expect(updateProject({ projectId: 'project_1', expectedRevision: 1, name: 'Changed' })).resolves.toEqual({
+      ok: true,
+      data: project,
+    });
+    await expect(setBriefRules({ projectId: 'project_1', expectedRevision: 1, rules: [] })).resolves.toEqual({
       ok: true,
       data: project,
     });
@@ -827,6 +840,7 @@ describe('initCreativeStudioBridge', () => {
         },
       ],
       [mocks.updateProjectProvider, { projectId: 'project_1', expectedRevision: 1, name: 'Changed' }],
+      [mocks.setBriefRulesProvider, { projectId: 'project_1', expectedRevision: 1, rules: [] }],
       [
         mocks.bindBriefConversationProvider,
         { projectId: 'project_1', expectedRevision: 1, conversationId: 'conversation_brief' },
@@ -874,6 +888,7 @@ describe('initCreativeStudioBridge', () => {
     expect(service.proposeStoryboard).toHaveBeenCalledOnce();
     expect(service.updateModelSelection).toHaveBeenCalledOnce();
     expect(service.updateProject).toHaveBeenCalledOnce();
+    expect(service.setBriefRules).toHaveBeenCalledOnce();
     expect(service.bindBriefConversation).toHaveBeenCalledOnce();
     expect(service.updateCut).toHaveBeenCalledOnce();
     expect(service.deleteProject).toHaveBeenCalledOnce();

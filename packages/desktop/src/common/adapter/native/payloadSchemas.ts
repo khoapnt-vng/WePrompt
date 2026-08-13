@@ -431,6 +431,29 @@ const studioSceneSchema = z
     referenceAssetId: safeIdSchema.nullable(),
   })
   .strict();
+const studioBriefRulePredicateSchema = z
+  .object({
+    kind: z.literal('forbidden_terms'),
+    terms: z.array(z.string().trim().min(1).max(64)).min(1).max(8),
+  })
+  .strict();
+const studioSetBriefRulesSchema = z
+  .object({
+    projectId: safeIdSchema,
+    expectedRevision: studioExpectedRevisionSchema,
+    rules: z
+      .array(
+        z
+          .object({
+            id: safeIdSchema,
+            text: z.string().trim().min(1).max(240),
+            predicate: studioBriefRulePredicateSchema.nullable(),
+          })
+          .strict()
+      )
+      .max(24),
+  })
+  .strict();
 const studioUpdateProjectSchema = z
   .object({
     projectId: safeIdSchema,
@@ -733,6 +756,7 @@ export const nativeBridgePayloadSchemas = {
     .strict(),
   'creative-studio.update-model-selection': studioUpdateModelSelectionSchema,
   'creative-studio.update-project': studioUpdateProjectSchema,
+  'creative-studio.set-brief-rules': studioSetBriefRulesSchema,
   'creative-studio.bind-brief-conversation': z
     .object({
       projectId: safeIdSchema,

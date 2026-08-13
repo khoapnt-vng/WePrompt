@@ -346,6 +346,51 @@ describe('CreativeStudioService', () => {
     ).rejects.toMatchObject({ code: 'not_found' } satisfies Partial<CreativeStudioStoreError>);
   });
 
+  it('replaces the rule list, stamps project scope, and preserves createdAt for a rule that stays', async () => {
+    const ruled = createCreativeStudioService({
+      store,
+      onProjectUpdated,
+      storyboardPlanner: makePlanner(),
+      createRuleId: () => 'rule_minted',
+    });
+    const project = await ruled.createProject(makeInput());
+
+    const first = await ruled.setBriefRules({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      rules: [{ id: 'rule_1', text: '  Keep the kits generic.  ', predicate: null }],
+    });
+    const createdAt = first.rules[0].createdAt;
+
+    const second = await ruled.setBriefRules({
+      projectId: project.id,
+      expectedRevision: first.revision,
+      rules: [
+        { id: 'rule_1', text: 'Keep the kits generic.', predicate: null },
+        { id: 'rule_2', text: 'No competitor logos.', predicate: { kind: 'forbidden_terms', terms: ['acme'] } },
+      ],
+    });
+
+    expect(second.rules).toEqual([
+      { id: 'rule_1', scope: 'project', text: 'Keep the kits generic.', predicate: null, createdAt },
+      {
+        id: 'rule_2',
+        scope: 'project',
+        text: 'No competitor logos.',
+        predicate: { kind: 'forbidden_terms', terms: ['acme'] },
+        createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+      },
+    ]);
+  });
+
+  it('refuses a stale revision rather than clobbering a concurrent edit', async () => {
+    const project = await service.createProject(makeInput());
+
+    await expect(
+      service.setBriefRules({ projectId: project.id, expectedRevision: project.revision + 5, rules: [] })
+    ).rejects.toMatchObject({ code: 'stale_project' });
+  });
+
   it('persists the Brief conversation binding and returns it through the renderer projection', async () => {
     const project = await service.createProject(makeInput());
 

@@ -7,7 +7,7 @@
 /** Shared, renderer-safe Creative Studio domain and desktop contract types. */
 
 import type { ISessionMcpServer } from '@/common/config/storage';
-import type { StudioBriefRule } from './creativeStudioRules';
+import type { StudioBriefRule, StudioBriefRuleDraft } from './creativeStudioRules';
 
 export type {
   StudioBriefRule,
@@ -606,6 +606,12 @@ export type StudioUpdateProjectRequest = StudioProjectRequest & {
 export type StudioBindBriefConversationRequest = StudioProjectRequest & {
   expectedRevision: number;
   conversationId: string | null;
+};
+
+/** Replaces the project's whole rule list. Main mints scope and createdAt; ids come from the caller. */
+export type StudioSetBriefRulesRequest = StudioProjectRequest & {
+  expectedRevision: number;
+  rules: StudioBriefRuleDraft[];
 };
 
 export type StudioUpdateCutRequest = StudioProjectRequest & {

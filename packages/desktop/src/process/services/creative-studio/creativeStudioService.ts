@@ -22,6 +22,7 @@ import type {
   StudioProposalPayload,
   StudioProposalRequest,
   StudioReferenceRequest,
+  StudioSetBriefRulesRequest,
   StudioProjectRequest,
   StudioPersistCapturedPosterRequest,
   StudioPlaceCutScenesRequest,
@@ -62,6 +63,7 @@ import type {
   StudioTextModelRef,
   StudioUpdateModelSelectionRequest,
 } from '@/common/types/project/creativeStudioTypes';
+import { STUDIO_RULE_LIMITS } from '@/common/types/project/creativeStudioRules';
 import type { ISessionMcpServer } from '@/common/config/storage';
 import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
 import { isCanonicalStudioGeneratedTake } from '@/common/types/project/creativeStudioCanonicalTake';
@@ -163,6 +165,7 @@ export type CreativeStudioService = {
   rejectProposal(input: StudioProposalRequest): Promise<StudioProposal>;
   proposeStoryboard(input: ProposeStudioStoryboardInput): Promise<StudioRendererProject>;
   updateProject(input: StudioUpdateProjectRequest): Promise<StudioRendererProject>;
+  setBriefRules(input: StudioSetBriefRulesRequest): Promise<StudioRendererProject>;
   bindBriefConversation(input: StudioBindBriefConversationRequest): Promise<StudioRendererProject>;
   updateCut(input: StudioUpdateCutRequest): Promise<StudioRendererProject>;
   placeCutScenes(input: StudioPlaceCutScenesRequest): Promise<StudioRendererProject>;
@@ -201,6 +204,7 @@ export type CreativeStudioServiceDeps = {
   onProjectUpdated: (projectId: string) => void;
   storyboardPlanner: StudioStoryboardPlanner;
   createSceneId?: () => string;
+  createRuleId?: () => string;
   createConnectionId?: () => string;
   getStudioServerScriptPath?: () => string;
   providerResolver?: StudioProviderResolver;
@@ -960,6 +964,7 @@ type BuiltStudioCatalog = {
 /** Owns bounded Creative Studio project edits and renderer-safe mutation notifications. */
 export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): CreativeStudioService => {
   const createSceneId = deps.createSceneId ?? randomUUID;
+  const createRuleId = deps.createRuleId ?? randomUUID;
   const createConnectionId = deps.createConnectionId ?? randomUUID;
   /**
    * Proposal diffs frozen at first observation, keyed `${projectId}:${proposalId}`. The subprocess that
@@ -1336,6 +1341,54 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
             return project;
           },
           expectedRevision
+        )
+      );
+    },
+
+    async setBriefRules(input: StudioSetBriefRulesRequest): Promise<StudioRendererProject> {
+      assertSafeId(input.projectId, 'project id');
+      assertExpectedRevision(input.expectedRevision);
+      if (!Array.isArray(input.rules) || input.rules.length > STUDIO_RULE_LIMITS.maxRules) {
+        throw invalid('Invalid Studio rule list');
+      }
+      if (new Set(input.rules.map((rule) => rule.id)).size !== input.rules.length) {
+        throw invalid('Invalid Studio rule list');
+      }
+      for (const rule of input.rules) {
+        assertSafeId(rule.id, 'rule id');
+        assertText(rule.text, STUDIO_RULE_LIMITS.text, 'rule text', true);
+        if (rule.predicate === null) continue;
+        if (
+          rule.predicate.kind !== 'forbidden_terms' ||
+          !Array.isArray(rule.predicate.terms) ||
+          rule.predicate.terms.length === 0 ||
+          rule.predicate.terms.length > STUDIO_RULE_LIMITS.maxTerms
+        ) {
+          throw invalid('Invalid Studio rule predicate');
+        }
+        for (const term of rule.predicate.terms) assertText(term, STUDIO_RULE_LIMITS.term, 'rule term', true);
+      }
+      const timestamp = new Date().toISOString();
+      return notify(
+        await deps.store.updateProject(
+          input.projectId,
+          (project) => {
+            const existing = new Map(project.rules.map((rule) => [rule.id, rule]));
+            return {
+              ...project,
+              rules: input.rules.map((draft) => ({
+                id: draft.id,
+                scope: 'project' as const,
+                text: draft.text.trim(),
+                predicate:
+                  draft.predicate === null
+                    ? null
+                    : { kind: 'forbidden_terms' as const, terms: draft.predicate.terms.map((term) => term.trim()) },
+                createdAt: existing.get(draft.id)?.createdAt ?? timestamp,
+              })),
+            };
+          },
+          input.expectedRevision
         )
       );
     },

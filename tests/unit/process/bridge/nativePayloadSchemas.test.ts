@@ -240,6 +240,17 @@ const VALID_PAYLOADS = {
     selection: { choiceId: 'binding_1' },
   },
   'creative-studio.update-project': { projectId: 'project_1', expectedRevision: 1, name: 'Changed launch film' },
+  'creative-studio.set-brief-rules': {
+    projectId: 'project_1',
+    expectedRevision: 1,
+    rules: [
+      {
+        id: 'rule_1',
+        text: 'Keep the kits generic.',
+        predicate: { kind: 'forbidden_terms', terms: ['acme'] },
+      },
+    ],
+  },
   'creative-studio.bind-brief-conversation': {
     projectId: 'project_1',
     expectedRevision: 1,
@@ -1064,6 +1075,25 @@ const INVALID_PAYLOADS = [
     'creative-studio.update-project',
     'missing expected revision',
     { projectId: 'project_1', name: 'Changed launch film' },
+  ],
+  ['creative-studio.set-brief-rules', 'missing expected revision', { projectId: 'project_1', rules: [] }],
+  [
+    'creative-studio.set-brief-rules',
+    'unknown predicate kind',
+    {
+      projectId: 'project_1',
+      expectedRevision: 1,
+      rules: [{ id: 'rule_1', text: 'x', predicate: { kind: 'regex', terms: ['x'] } }],
+    },
+  ],
+  [
+    'creative-studio.set-brief-rules',
+    'too many rules',
+    {
+      projectId: 'project_1',
+      expectedRevision: 1,
+      rules: Array.from({ length: 25 }, (_, index) => ({ id: `rule_${index}`, text: 'x', predicate: null })),
+    },
   ],
   [
     'creative-studio.update-model-selection',
