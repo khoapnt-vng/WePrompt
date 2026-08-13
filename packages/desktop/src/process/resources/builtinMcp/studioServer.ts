@@ -13,7 +13,7 @@ import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { resolveEffectiveStudioRules } from '@/common/types/project/creativeStudioRules';
+import { resolveEffectiveStudioRules, STUDIO_RULE_LIMITS } from '@/common/types/project/creativeStudioRules';
 import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
 import type {
   StudioEditableScene,
@@ -45,6 +45,12 @@ export type ProposeStoryboardInput = {
   base_revision: number;
   scene_order: string[];
   scenes: Record<string, StudioEditableScene>;
+};
+
+export type ProposeBriefRuleInput = {
+  base_revision: number;
+  text: string;
+  forbidden_terms: string[];
 };
 
 const SAFE_ID = /^[A-Za-z0-9_-]+$/;
@@ -231,6 +237,68 @@ export function createProposeStoryboardHandler(
   };
 }
 
+/**
+ * Records a rule for the user to pin. The tool never writes the project: main is the sole writer of
+ * the CAS-guarded store, and the user decides.
+ *
+ * Every limit here is the store's limit, not this tool's preference. The record goes straight to the
+ * pending directory and is validated only when the store reads it back, so a field this schema
+ * admits and `validateBriefRulePredicate` refuses is written to disk, reported to the Director as
+ * "recorded for user review", and then dropped on read with nothing but a log line — see the
+ * warning above STUDIO_EDITABLE_SCENE_LIMITS, which `purpose` learned the hard way.
+ */
+export function createProposeBriefRuleHandler(
+  config: StudioServerEnv | null
+): (input: ProposeBriefRuleInput) => Promise<StudioToolResult> {
+  return async ({ base_revision, text, forbidden_terms }) => {
+    if (!config) return errorResult('Creative Studio project is unavailable.');
+    const trimmed = text.trim();
+    if (trimmed.length === 0) return errorResult('A rule needs text.');
+    if (trimmed.length > STUDIO_RULE_LIMITS.text) {
+      return errorResult(`A rule must be at most ${STUDIO_RULE_LIMITS.text} characters.`);
+    }
+    const terms = forbidden_terms.map((term) => term.trim()).filter((term) => term.length > 0);
+    if (new Set(terms).size !== terms.length) return errorResult('forbidden_terms must not repeat a word.');
+    try {
+      const project = await readProject(config);
+      if (project.revision !== base_revision) {
+        return errorResult(
+          `The project is at revision ${project.revision}; you proposed against ${base_revision}. ` +
+            'Call read_storyboard and redraft.'
+        );
+      }
+      // `project.rules` is always an array here because Step 4.2 normalised it inside readProject.
+      // Without that, a manifest written before rules existed throws on `.length` and this tool
+      // reports the project as unavailable — do not reorder Task 4 after Task 6.
+      if (project.rules.length >= STUDIO_RULE_LIMITS.maxRules) {
+        return errorResult(`This project already holds the maximum of ${STUDIO_RULE_LIMITS.maxRules} rules.`);
+      }
+      const record = await writeProposalRecord({
+        pendingDir: config.pendingDir,
+        projectId: config.projectId,
+        baseRevision: base_revision,
+        payload: {
+          kind: 'pin_rule',
+          rule: { text: trimmed, predicate: terms.length === 0 ? null : { kind: 'forbidden_terms', terms } },
+        },
+      });
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Rule ${record.id} recorded for user review; nothing is pinned until the user accepts it.`,
+          },
+        ],
+      };
+    } catch (error) {
+      if (error instanceof StudioProposalWriteError) return errorResult(error.message);
+      return errorResult(
+        `Creative Studio rule could not be recorded: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  };
+}
+
 export function createRequestReferenceImagesHandler(
   config: StudioServerEnv | null
 ): (input: { sceneIds: string[] }) => Promise<StudioToolResult> {
@@ -318,6 +386,27 @@ export function registerStudioTools(server: Pick<McpServer, 'tool'>, config: Stu
       scenes: z.record(z.string().regex(SAFE_ID), editableSceneSchema),
     },
     createProposeStoryboardHandler(config)
+  );
+  server.tool(
+    'propose_brief_rule',
+    'Record one project rule for the user to pin. Use it when the user states a standing constraint ("keep the kits generic", "never show a competitor logo") — offer to pin it, then call this. Requires base_revision from your latest read_storyboard. A rule with forbidden_terms is ENFORCED: main refuses any visual prompt containing one of those words before anything is generated, so only list words that must never appear. Leave forbidden_terms empty for a rule that is guidance you should follow but nothing can check. Offer ONE rule per turn: two rules recorded against the same base_revision cannot both be accepted, because accepting the first moves the project past the revision the second was drafted against. If the user states several constraints at once, record the most important one and offer the rest after they answer. This pins nothing on its own; the user decides.',
+    {
+      base_revision: z
+        .number()
+        .int()
+        .positive()
+        .describe('The revision you saw in read_storyboard. Re-read if your last read is stale.'),
+      text: z
+        .string()
+        .min(1)
+        .max(STUDIO_RULE_LIMITS.text)
+        .describe('One sentence, in the user’s own words where possible.'),
+      forbidden_terms: z
+        .array(z.string().min(1).max(STUDIO_RULE_LIMITS.term))
+        .max(STUDIO_RULE_LIMITS.maxTerms)
+        .describe('Words that must never appear in a visual prompt. Empty for an unenforced rule.'),
+    },
+    createProposeBriefRuleHandler(config)
   );
 }
 

@@ -7,7 +7,7 @@
 /** Shared, renderer-safe Creative Studio domain and desktop contract types. */
 
 import type { ISessionMcpServer } from '@/common/config/storage';
-import type { StudioBriefRule, StudioBriefRuleDraft } from './creativeStudioRules';
+import type { StudioBriefRule, StudioBriefRuleDraft, StudioBriefRulePredicate } from './creativeStudioRules';
 
 export type {
   StudioBriefRule,
@@ -289,11 +289,30 @@ export type StudioRendererProject = Omit<StudioProject, 'jobs' | 'routing'> & {
 export type StudioProposalStatus = 'pending' | 'accepted' | 'rejected' | 'expired';
 
 /** A complete replacement for the editable storyboard region named by a proposal. */
-export type StudioProposalPayload = {
+export type StudioReplaceStoryboardProposalPayload = {
   kind: 'replace_storyboard';
   sceneOrder: string[];
   scenes: Record<string, StudioEditableScene>;
 };
+
+/**
+ * One rule the Director wants pinned to the project.
+ *
+ * A rule pin rides the proposal protocol rather than a new pending-record family: the writer, the
+ * slot reservation, the CAS on accept, the decision ledger, the three IPC channels and the card in
+ * the Director pane all already exist and are all kind-agnostic. What is NOT kind-agnostic is
+ * `validateProposalPayload` — see store.ts — which is why the discriminant must be validated
+ * per-kind before any record of this shape reaches disk.
+ */
+export type StudioPinRuleProposalPayload = {
+  kind: 'pin_rule';
+  rule: {
+    text: string;
+    predicate: StudioBriefRulePredicate | null;
+  };
+};
+
+export type StudioProposalPayload = StudioReplaceStoryboardProposalPayload | StudioPinRuleProposalPayload;
 
 export type StudioEditableSceneField = keyof StudioEditableScene;
 
