@@ -152,6 +152,17 @@ zero-scene project opens on Table with the Brief drawer open.
 
 ## C5 — One money control in the top bar
 
+**Inherited from C3's review, and C5 owns it:** Board is the one view whose focused heading does not
+name the view. `StudioPhaseShell` focuses `[data-studio-phase-heading]` on every view change, and
+Board's only one is `EngineBar`'s `phase.produce.renderingWith` — "Rendering with —" — or
+`ConnectEngineCard`'s "connect an engine" when none is bound. So a screen-reader user activates
+"Board" and hears the engine, not the view. It was left alone in C3 deliberately: `renderingWith`
+answers a different question than a view name does, so forcing equality would be the wrong contract,
+and the heading is `aria-labelledby` for the engine section — changing its text changes that
+section's accessible name too. C5 moves the engine strip out of the view, which is the moment Board
+can be given a heading of its own without breaking an aria relationship. **Do not close it before
+then, and do not let it ship unclosed.**
+
 **The cut render is not money.** `renderService` spawns a local `ffmpeg` binary with no provider. The
 single spend is `studioJobs.submitScenes`.
 
