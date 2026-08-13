@@ -742,6 +742,10 @@ const toRendererProject = (project: StudioProject): StudioRendererProject => {
     id: project.id,
     name: project.name,
     brief: project.brief,
+    rules: project.rules.map((rule) => ({
+      ...rule,
+      predicate: rule.predicate === null ? null : { ...rule.predicate, terms: [...rule.predicate.terms] },
+    })),
     ...(project.forgeProjectId === undefined ? {} : { forgeProjectId: project.forgeProjectId }),
     briefConversationId: project.briefConversationId ?? null,
     aspectRatio: project.aspectRatio,

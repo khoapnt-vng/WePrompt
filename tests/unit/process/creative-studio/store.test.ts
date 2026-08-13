@@ -273,6 +273,49 @@ describe('creative studio project store', () => {
     expect(await store.getProject(project.id)).toEqual(project);
   });
 
+  it('reads a project written before rules existed and defaults them to an empty list', async () => {
+    const project = await store.createProject(makeInput());
+    const file = path.join(rootDir, project.id, 'project.json');
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    delete raw.rules;
+    writeFileSync(file, JSON.stringify(raw));
+
+    const reread = await store.getProject(project.id);
+
+    expect(reread?.rules).toEqual([]);
+    expect(await store.listQuarantinedProjectIds()).toEqual([]);
+  });
+
+  it('refuses a rules array that breaks the shape, rather than persisting it unread', async () => {
+    const project = await store.createProject(makeInput());
+    const file = path.join(rootDir, project.id, 'project.json');
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    raw.rules = [
+      {
+        id: 'rule_1',
+        scope: 'project',
+        text: 'x',
+        predicate: { kind: 'nope', terms: [] },
+        createdAt: '2026-08-13T00:00:00.000Z',
+      },
+    ];
+    writeFileSync(file, JSON.stringify(raw));
+
+    await expect(store.getProject(project.id)).rejects.toMatchObject({ code: 'storage_error' });
+  });
+
+  it('refuses an organisation-scoped rule on the project record, because that layer is code-resident', async () => {
+    const project = await store.createProject(makeInput());
+    const file = path.join(rootDir, project.id, 'project.json');
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    raw.rules = [
+      { id: 'rule_1', scope: 'organisation', text: 'x', predicate: null, createdAt: '2026-08-13T00:00:00.000Z' },
+    ];
+    writeFileSync(file, JSON.stringify(raw));
+
+    await expect(store.getProject(project.id)).rejects.toMatchObject({ code: 'storage_error' });
+  });
+
   describe('proposal ledger', () => {
     it('resolves verified project and pending paths while creating every proposal directory', async () => {
       const project = await store.createProject(makeInput());

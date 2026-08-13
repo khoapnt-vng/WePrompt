@@ -7,6 +7,16 @@
 /** Shared, renderer-safe Creative Studio domain and desktop contract types. */
 
 import type { ISessionMcpServer } from '@/common/config/storage';
+import type { StudioBriefRule } from './creativeStudioRules';
+
+export type {
+  StudioBriefRule,
+  StudioBriefRuleDraft,
+  StudioBriefRulePredicate,
+  StudioBriefRuleScope,
+  StudioRuleBreach,
+  StudioRuleVerdict,
+} from './creativeStudioRules';
 
 export type StudioMediaKind = 'image' | 'video';
 
@@ -240,6 +250,14 @@ export type StudioProject = {
   id: string;
   name: string;
   brief: string;
+  /**
+   * The executable part of the brief. REQUIRED, not optional: `StudioRendererProject` is
+   * `Omit<StudioProject, 'jobs' | 'routing'> & …` and `toRendererProject` declares that return
+   * type, so a required field makes omitting it from the projection a tsc error. Optional and it
+   * would be persisted, validated, visible to the MCP tools and silently invisible to the renderer —
+   * the documented `outputRole` trap (see the warning at :144-149).
+   */
+  rules: StudioBriefRule[];
   forgeProjectId?: string;
   briefConversationId?: string | null;
   aspectRatio: StudioAspectRatio;

@@ -28,6 +28,7 @@ import type {
   StudioScene,
   StudioTextModelRef,
 } from '@/common/types/project/creativeStudioTypes';
+import { STUDIO_RULE_LIMITS, type StudioBriefRule } from '@/common/types/project/creativeStudioRules';
 import { isCanonicalStudioGeneratedTake } from '@/common/types/project/creativeStudioCanonicalTake';
 import { STUDIO_MANAGED_ASSET_COLLECTIONS } from '@/common/types/project/creativeStudioManagedAssetCollections';
 import { isValidProviderJobId } from '@process/services/creative-studio/adapters/types';
@@ -202,6 +203,8 @@ const PROPOSAL_SCENE_KEYS = new Set([
   'durationSeconds',
   'referenceAssetId',
 ]);
+const BRIEF_RULE_KEYS = new Set(['id', 'scope', 'text', 'predicate', 'createdAt']);
+const BRIEF_RULE_PREDICATE_KEYS = new Set(['kind', 'terms']);
 const PROPOSAL_DECISION_KEYS = new Set(['schemaVersion', 'proposalId', 'status', 'decidedAt']);
 const PROPOSAL_SLOT_KEYS = new Set(['schemaVersion', 'proposalId', 'reservedAt']);
 const REFERENCE_REQUEST_SLOT_KEYS = new Set(['schemaVersion', 'requestId', 'reservedAt']);
@@ -386,6 +389,38 @@ const validateProposalScene = (value: unknown): boolean =>
   MEDIA_KINDS.has(value.mediaKind) &&
   isIntegerInRange(value.durationSeconds, 1, 60) &&
   (value.referenceAssetId === null || isSafeId(value.referenceAssetId));
+
+const validateBriefRulePredicate = (value: unknown): boolean =>
+  value === null ||
+  (isRecord(value) &&
+    hasExactKeys(value, BRIEF_RULE_PREDICATE_KEYS) &&
+    value.kind === 'forbidden_terms' &&
+    Array.isArray(value.terms) &&
+    value.terms.length > 0 &&
+    value.terms.length <= STUDIO_RULE_LIMITS.maxTerms &&
+    value.terms.every((term) => isNonEmptyString(term) && term.length <= STUDIO_RULE_LIMITS.term) &&
+    new Set(value.terms).size === value.terms.length);
+
+/**
+ * A rule on the project record is always project-scoped. The organisation layer is code-resident
+ * (ORGANISATION_STUDIO_RULES) and is refused here on purpose: a locked rule cached on disk could be
+ * edited out of the file by hand, which is exactly what "locked" must not mean.
+ */
+const validateBriefRule = (value: unknown): value is StudioBriefRule =>
+  isRecord(value) &&
+  hasExactKeys(value, BRIEF_RULE_KEYS) &&
+  isSafeId(value.id) &&
+  value.scope === 'project' &&
+  isNonEmptyString(value.text) &&
+  value.text.length <= STUDIO_RULE_LIMITS.text &&
+  validateBriefRulePredicate(value.predicate) &&
+  isCanonicalIsoTimestamp(value.createdAt);
+
+const validateBriefRules = (value: unknown): value is StudioBriefRule[] =>
+  Array.isArray(value) &&
+  value.length <= STUDIO_RULE_LIMITS.maxRules &&
+  value.every(validateBriefRule) &&
+  new Set(value.map((rule) => (rule as StudioBriefRule).id)).size === value.length;
 
 const validateProposalPayload = (value: unknown): value is StudioProposalPayload => {
   if (!isRecord(value) || !isRecord(value.scenes) || !hasExactKeys(value, PROPOSAL_PAYLOAD_KEYS)) return false;
@@ -929,7 +964,14 @@ const migrateSchemaV1Project = (value: unknown): unknown => {
     isRecord(value.routing) && !Object.hasOwn(value.routing, 'storyboard')
       ? { ...value.routing, storyboard: null }
       : value.routing;
-  return changed || routing !== value.routing ? { ...value, jobs, routing } : value;
+  // Defaulted here, before validateProject runs at readProject, so a manifest written before rules
+  // existed reads back rather than being quarantined. The migrator is unconditional for any record
+  // that could otherwise pass validation, which is what makes it safe to validate `rules` as
+  // required in the same change.
+  const rulesMissing = !Object.hasOwn(value, 'rules');
+  return changed || routing !== value.routing || rulesMissing
+    ? { ...value, jobs, routing, ...(rulesMissing ? { rules: [] } : {}) }
+    : value;
 };
 
 const retryGraphHasCycle = (jobs: Record<string, StudioJob>): boolean => {
@@ -975,6 +1017,7 @@ const validateProject = (value: unknown): value is StudioProject => {
     !isIntegerInRange(value.revision, 1, Number.MAX_SAFE_INTEGER) ||
     !isNonEmptyString(value.name) ||
     !isString(value.brief) ||
+    !validateBriefRules(value.rules) ||
     (value.forgeProjectId !== undefined && !isSafeId(value.forgeProjectId)) ||
     (value.briefConversationId !== undefined &&
       value.briefConversationId !== null &&
@@ -1100,6 +1143,7 @@ const createProjectFromInput = (input: CreateStudioProjectInput, id: string, tim
   id,
   name: input.name.trim(),
   brief: input.brief,
+  rules: [],
   ...(input.forgeProjectId === undefined ? {} : { forgeProjectId: input.forgeProjectId }),
   briefConversationId: null,
   aspectRatio: input.aspectRatio,
