@@ -608,6 +608,61 @@
     max-width: 70ch;
   }
 
+  /* ── J: the pinch-width comparison ─────────────────────── */
+  .derivation {
+    margin-top: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--rule);
+    background: var(--panel-2);
+    overflow-x: auto;
+    color: var(--ink-2);
+    font-family: var(--mono);
+    font-size: 12.5px;
+    font-variant-numeric: tabular-nums;
+  }
+  .derivation b {
+    color: var(--ink);
+  }
+  .pinchrow {
+    display: grid;
+    min-width: 692px;
+    gap: 22px;
+    grid-template-columns: 325px 325px;
+  }
+  .pinchlabel {
+    margin-bottom: 7px;
+    color: var(--ink-3);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+  }
+  .slot.pinch {
+    box-sizing: border-box;
+    width: 325px;
+  }
+  .linecount {
+    margin-top: 7px;
+    color: var(--ink-3);
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+  .linecount[data-cost] {
+    color: var(--brand);
+  }
+  .tbadge {
+    padding: 1px 5px;
+    border: 1px solid currentColor;
+    color: var(--warn);
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    text-decoration: none;
+  }
+  .tbadge[data-err] {
+    color: var(--err);
+  }
+
   a {
     color: var(--brand);
   }
@@ -1161,18 +1216,207 @@
     </p>
   </section>
 
+  <!-- ─────────────────────────── J ─────────────────────────── -->
+  <section>
+    <div class="shead">
+      <span class="letter">J</span>
+      <h2>German, at the narrowest width</h2>
+      <span class="flag">the blocking case</span>
+    </div>
+
+    <p class="note">
+      The pinch is not the smallest window — it is the width just <em>above</em> the inline threshold, because below it
+      the Director becomes an overlay and the work panel gets wider. At a shell of 1121px: content <b>665px</b>, each
+      slot <b>325px</b>, text <b>≈305px</b>.
+    </p>
+    <div class="derivation">
+      1121 shell − 352 pane − 68 gutter − 36 inset = <b>665</b> content · (665 − 14 gap) ÷ 2 = <b>325</b> per slot · −
+      20 padding = <b>305</b> of text
+    </div>
+
+    <p class="note">
+      German keeps <b>“Engine”</b> as a loanword — a real saving the wireframe depends on. What costs is the compounds:
+      <span class="inline-code">Arbeitsbereich</span>, <span class="inline-code">Zugangsdaten</span>,
+      <span class="inline-code">Modelleinstellungen</span>, <span class="inline-code">Seitenverhältnis</span>. Unit
+      spacing changes too: “4–12s” becomes “4–12 s”.
+    </p>
+
+    <div class="frame">
+      <div class="pinchrow">
+        <div>
+          <div class="pinchlabel">en-US · 325px</div>
+          <div class="slot pinch" data-unset>
+            <div class="slotrole">Video</div>
+            <div class="trigger" data-armed>
+              <span class="tbadge">!</span>No video engine is set. <span class="caret">▾</span>
+            </div>
+            <div class="notset">Not set · 3 available</div>
+          </div>
+          <div class="linecount">1 line · slot 103px</div>
+        </div>
+        <div>
+          <div class="pinchlabel">de-DE · 325px</div>
+          <div class="slot pinch" data-unset>
+            <div class="slotrole">Video</div>
+            <div class="trigger" data-armed>
+              <span class="tbadge">!</span>Keine Video-Engine festgelegt. <span class="caret">▾</span>
+            </div>
+            <div class="notset">Nicht festgelegt · 3 verfügbar</div>
+          </div>
+          <div class="linecount">1 line · slot 103px · no cost</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="frame">
+      <div class="pinchrow">
+        <div>
+          <div class="pinchlabel">en-US · capability summary</div>
+          <div class="slot pinch">
+            <div class="slotrole">Video</div>
+            <div class="trigger">seedance-1-0-pro <span class="caret">▾</span></div>
+            <div class="caps">720p · 4–12s · Silent · Starts from a frame</div>
+          </div>
+          <div class="linecount">2 lines · slot 120px</div>
+        </div>
+        <div>
+          <div class="pinchlabel">de-DE · capability summary</div>
+          <div class="slot pinch">
+            <div class="slotrole">Video</div>
+            <div class="trigger">seedance-1-0-pro <span class="caret">▾</span></div>
+            <div class="caps">720p · 4–12 s · Ohne Ton · Startet aus einem Standbild</div>
+          </div>
+          <div class="linecount">2 lines · slot 120px · no cost</div>
+        </div>
+      </div>
+    </div>
+
+    <p class="note">
+      <strong>Measured, German is far cheaper here than the character counts suggest.</strong> The trigger and the
+      capability summary cost <b>nothing at all</b> — both wrap to the same number of lines as English and produce
+      byte-identical slot heights. Only one string grows: the unconfigured-provider sentence, 107 characters in English
+      against 154 in German, a +44% expansion that buys <b>one extra line</b>.
+    </p>
+
+    <div class="frame">
+      <div class="pinchrow">
+        <div>
+          <div class="pinchlabel">en-US · state E, provider unconfigured</div>
+          <div class="slot pinch" data-unset>
+            <div class="slotrole">Video</div>
+            <div class="trigger" data-dead>
+              <span class="tbadge" data-err>x</span>seedance-1-0-pro <span class="caret">▾</span>
+            </div>
+            <div class="slotmsg" style="color: var(--err)">
+              BytePlus has no usable credential in this workspace. Add one in Model settings, or ask whoever manages
+              them.
+            </div>
+            <div class="btnrow" style="padding: 8px 10px 0"><span class="btn">Manage engines ↗</span></div>
+          </div>
+          <div class="linecount">3 lines · slot 191px</div>
+        </div>
+        <div>
+          <div class="pinchlabel">de-DE · state E, provider unconfigured</div>
+          <div class="slot pinch" data-unset>
+            <div class="slotrole">Video</div>
+            <div class="trigger" data-dead>
+              <span class="tbadge" data-err>x</span>seedance-1-0-pro <span class="caret">▾</span>
+            </div>
+            <div class="slotmsg" style="color: var(--err)">
+              Für BytePlus gibt es in diesem Arbeitsbereich keine nutzbaren Zugangsdaten. Füge welche in den
+              Modelleinstellungen hinzu oder frage die zuständige Person.
+            </div>
+            <div class="btnrow" style="padding: 8px 10px 0"><span class="btn">Engines verwalten ↗</span></div>
+          </div>
+          <div class="linecount" data-cost>4 lines · slot 210px · +19px</div>
+        </div>
+      </div>
+    </div>
+
+    <p class="note">
+      One compound is worth naming on its own:
+      <span class="inline-code">Modelleinstellungen</span> is 19 characters with no break opportunity a browser will
+      take. At this column width it can be the only word on its line. If that reads badly the fix is copy, not layout —
+      “in den Einstellungen” shortens it by seven characters and loses nothing, since the link already says where it
+      goes.
+    </p>
+
+    <div class="tablewrap">
+      <table>
+        <caption>
+          Vertical cost at a 325px slot — measured in the rendered page, not estimated
+        </caption>
+        <thead>
+          <tr>
+            <th>State</th>
+            <th>en-US</th>
+            <th>de-DE</th>
+            <th>Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>B · ambiguous — trigger + meta</td>
+            <td>1 + 1 lines · 103px</td>
+            <td>1 + 1 lines · 103px</td>
+            <td>none</td>
+          </tr>
+          <tr>
+            <td>A · capability summary</td>
+            <td>2 lines · 120px</td>
+            <td>2 lines · 120px</td>
+            <td>none</td>
+          </tr>
+          <tr>
+            <td>E · provider unconfigured</td>
+            <td>3 lines · 191px</td>
+            <td>4 lines · 210px</td>
+            <td class="none">+19px</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="note">
+      The lesson is not the one the concern predicted.
+      <strong>A 305px column is wider than German needs for short strings</strong> — a four-part capability summary
+      wraps to two lines in both languages, and “Keine Video-Engine festgelegt.” fits on one. Length only becomes height
+      when a string is a <em>sentence</em>, and the strip has exactly one of those per slot. The states not measured
+      here — the coherence line and the compact fallback, both of which span the full 665px rather than a column — have
+      far more room again, so they are lower risk than these, not higher.
+    </p>
+
+    <p class="note">
+      <strong>The recommendation: let the slots size to their content and never truncate.</strong>
+      Worst case the strip is <b>19px</b> taller in German than in English — one line, in one state, which is already an
+      error and already the most important thing on screen. Equal-height slots would be worse — it would pay the tallest
+      state's cost in every state. Setting a fixed height and clipping is not an option: these are the facts that decide
+      whether a render can happen and what it will cost.
+    </p>
+
+    <div class="tone" data-t="info" style="max-width: 74ch; margin-top: 18px">
+      <span class="badge">i</span>
+      <span>
+        The German here follows the product's existing register — informal address, “Engine” retained, “Arbeitsbereich”
+        for workspace, “Einstellung” for shot — but it is drawn for layout, not signed off as copy. A native reviewer
+        should see it before it becomes locale files.
+      </span>
+    </div>
+  </section>
+
   <!-- ─────────────────────────── open ─────────────────────────── -->
   <div class="open">
     <h2>Still open</h2>
-    <p>Four questions the drawing cannot settle. The first is blocking.</p>
+    <p>Three questions the drawing cannot settle. The blocking one is now drawn, in J.</p>
     <div class="qlist">
-      <div class="q">
-        <h3>German at the narrowest width</h3>
+      <div class="q" data-resolved>
+        <h3>German at the narrowest width — <span>drawn, in J</span></h3>
         <p>
-          Each slot carries a model name, a four-part capability summary and sometimes a full sentence, and German runs
-          about 30% longer. These are blocking, spend-relevant facts, so truncation is not permissible — the strip must
-          wrap to a second and sometimes third line, in a panel whose scarce axis is height. Someone has to draw the
-          wrapped state before this is built.
+          Answered, and smaller than feared: measured at a 325px slot, German costs nothing in the trigger or the
+          capability summary and one line (+19px) in the unconfigured-provider sentence. Let slots size to their content
+          and never truncate. What remains is a copy decision, not a layout one: whether “Modelleinstellungen” shortens
+          to “Einstellungen”. And the German is drawn for layout, not signed off — a native reviewer should see it
+          first.
         </p>
       </div>
       <div class="q">
