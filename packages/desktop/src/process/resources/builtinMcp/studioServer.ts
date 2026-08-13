@@ -13,7 +13,11 @@ import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { resolveEffectiveStudioRules, STUDIO_RULE_LIMITS } from '@/common/types/project/creativeStudioRules';
+import {
+  hasRuleToken,
+  resolveEffectiveStudioRules,
+  STUDIO_RULE_LIMITS,
+} from '@/common/types/project/creativeStudioRules';
 import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
 import type {
   StudioEditableScene,
@@ -259,6 +263,10 @@ export function createProposeBriefRuleHandler(
     }
     const terms = forbidden_terms.map((term) => term.trim()).filter((term) => term.length > 0);
     if (new Set(terms).size !== terms.length) return errorResult('forbidden_terms must not repeat a word.');
+    const unenforceableTerm = terms.find((term) => !hasRuleToken(term));
+    if (unenforceableTerm !== undefined) {
+      return errorResult(`forbidden_terms contains an unenforceable term: "${unenforceableTerm}".`);
+    }
     try {
       const project = await readProject(config);
       if (project.revision !== base_revision) {

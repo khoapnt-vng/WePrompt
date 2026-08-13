@@ -785,6 +785,26 @@ describe('CreativeStudioService', () => {
       ]);
     });
 
+    it('refuses a proposed rule term that the accept path cannot enforce', async () => {
+      const project = await service.createProject(makeInput());
+      const { projectDir, pendingDir, referencePendingDir } = await store.resolveProposalPaths(project.id);
+      const handler = createProposeBriefRuleHandler({
+        projectId: project.id,
+        projectDir,
+        pendingDir,
+        referencePendingDir,
+      });
+
+      const result = await handler({
+        base_revision: project.revision,
+        text: 'Never show a registered-trademark mark.',
+        forbidden_terms: ['acme', '®'],
+      });
+
+      expect(result).toMatchObject({ isError: true, content: [{ text: expect.stringContaining('®') }] });
+      await expect(service.listProposals({ projectId: project.id })).resolves.toEqual([]);
+    });
+
     it('refuses a rule drafted against a stale revision instead of pinning the wrong thing', async () => {
       const project = await service.createProject(makeInput());
       const projectDir = path.join(rootDir, project.id);
