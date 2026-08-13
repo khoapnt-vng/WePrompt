@@ -68,7 +68,7 @@ the cost of one stated precondition.
 | Cut | Buys | Costs |
 | --- | --- | --- |
 | **Keep the flat scene model** — one scene renders as a section holding one clip | the entire model change, the biggest single item in the programme | Table and Board get re-touched when sections land. The handoff already defines this exact shape as the migration target ("existing scenes migrate to sections holding one clip each"), so it is the degenerate case of the target model, not a throwaway. |
-| **Keep `propose_storyboard` whole-script replace** | `apply_script_changes`, inverse ops, revision-aware undo — the item the handoff calls "the one contract change that gates everything else" | The Director stays proposal-based. See §5 — this is the real limit of the skeleton. |
+| **Keep `propose_storyboard` whole-script replace** | `apply_script_changes`, inverse ops, revision-aware undo — the item the handoff calls "the one contract change that gates everything else" | The Director stays proposal-based, which costs the skeleton nothing: the navigation is exercised identically either way. See §5. |
 | **No proposal-record versioning** | a versioning pass | Nothing: the model does not move, so there is nothing to version. This item was always downstream of the model change. |
 | **No shelf, one card size** | a parking surface and two more card renderers | Deleting a section destroys it. Acceptable in a happy path; not acceptable in a release. |
 | **Do not raise the duration or scene caps** | nine edit sites for `targetDurationSeconds` (validated `5..60` at `store.ts:1027`) and ~twelve for `MAX_SCENES = 24` | The skeleton runs at ≤60s and ≤24 scenes. A 3-minute piece is out of scope until phase 2 proper. |
@@ -99,17 +99,27 @@ Nothing in that list needs a model change, a new command, or a new engine surfac
 
 ---
 
-## 5. What the skeleton cannot tell you
+## 5. What the skeleton is not asked to answer
 
-**Whether the collaboration model works.** The handoff's sharpest principle is *free is direct,
-with undo* — the Director edits the script itself and every edit is reversible. The skeleton has
-no undo, so the Director must stay proposal-based. The flow will look right and the collaboration
-will be the old one.
+**The Director stays proposal-based by scope, not by constraint.** An earlier draft of this
+document said the skeleton has no undo and *therefore* the Director must stay proposal-based. That
+causality is wrong twice.
 
-So the skeleton answers "is this the right navigation" and does **not** answer open question 4,
-*"will users trust a director that edits directly."* Do not read a good skeleton demo as evidence
-on that question. It is the reason `apply_script_changes` plus revision-aware undo remains the
-first commit of phase 2 proper, not an optional extra.
+Wrong on mechanism: the handoff's *per-edit* undo means undo across a batch of granular
+operations, which is exactly what `apply_script_changes` and its inverses are for. Today's writes
+are coarse — whole-record and whole-script replaces — so the pre-image of any write is the whole
+project body, which the renderer already holds in memory. Coarse commands make coarse undo cheap.
+It is the granular design that makes undo expensive, so deferring `apply_script_changes` implies
+**coarse** undo, not **no** undo.
+
+Wrong on scope, which matters more: **demonstrating the navigation does not require the Director
+to edit directly at all.** Table, Board, Cut, the spend gate and the render are exercised
+identically whichever way the Director writes. Chaining the two inflated this document's own
+stated limitation.
+
+So direct edits and undo are out of the skeleton deliberately, and open question 4 — *"will users
+trust a director that edits directly"* — is not on trial here. Do not read a good skeleton
+walkthrough as evidence either way on it.
 
 **One thing the skeleton will expose that the old shell hid**: with Produce gone as a step, the
 money control sits next to the authoring views permanently. Whether that reads as convenient or
