@@ -41,6 +41,7 @@ import {
   routeSupportsScene,
   type GenerationBatchReviewRequest,
   type GenerationReviewExcludedScene,
+  type GenerationReviewModalProps,
   type GenerationReviewScene,
   type GenerationReviewRouteSnapshot,
   type GenerationSingleReviewRequest,
@@ -51,9 +52,15 @@ import {
   StudioRulesDrawer,
   type StudioPhaseControllers,
 } from './components';
-import { BriefConversationProvider } from './components/Shell/BriefConversationContext';
+import { BriefConversationProvider, useBriefConversationContext } from './components/Shell/BriefConversationContext';
 import { DirectorPane } from './components/Shell/DirectorPane';
-import { DirectorProposals, pendingDirectorProposals } from './components/Shell/DirectorProposals';
+import {
+  describeRuleBreachInstruction,
+  DirectorProposals,
+  pendingDirectorProposals,
+  sendDirectorInstruction,
+  type StudioRuleBreachReport,
+} from './components/Shell/DirectorProposals';
 import { StudioShell } from './components/Shell/StudioShell';
 import { useStoryboardEditor, useStudioJobs, useStudioModels, useStudioProject, useStudioRender } from './hooks';
 import styles from './StudioPage.module.css';
@@ -272,6 +279,33 @@ const parseWriteFocusIntent = (state: unknown): StudioWriteFocusIntent | null =>
     : null;
 };
 
+/**
+ * The generation review, plus the one thing it needs from the Director conversation.
+ *
+ * `BriefConversationProvider` owns the single `useBriefConversation` instance, and the page renders
+ * that provider, so the page cannot read the context it supplies. This component sits inside the
+ * provider and reads it, which is why the modal moved inside too. Everything else the send needs
+ * arrives as `reports`.
+ *
+ * `onAskDirector` is left undefined when there is nothing to report, so the modal hides the
+ * affordance rather than offering a button that does nothing.
+ */
+const StudioGenerationReview: React.FC<
+  GenerationReviewModalProps & { reports: readonly StudioRuleBreachReport[]; onAsked: () => void }
+> = ({ reports, onAsked, ...modalProps }) => {
+  const briefConversation = useBriefConversationContext();
+  const askDirector = useCallback((): void => {
+    if (briefConversation.state.kind !== 'ready' || reports.length === 0) return;
+    void sendDirectorInstruction({
+      conversation: briefConversation.state.conversation,
+      instruction: describeRuleBreachInstruction(reports),
+    });
+    onAsked();
+  }, [briefConversation.state, onAsked, reports]);
+
+  return <GenerationReviewModal {...modalProps} onAskDirector={reports.length === 0 ? undefined : askDirector} />;
+};
+
 const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ routePhase }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -342,6 +376,16 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
     }
     return breaches;
   }, [effectiveRules, generationReview]);
+  const breachReports = useMemo<StudioRuleBreachReport[]>(() => {
+    if (generationReview === null) return [];
+    return generationReview.scenes.flatMap((scene) =>
+      (ruleBreachesBySceneId[scene.id] ?? []).map((breach) => ({
+        sceneTitle: scene.title,
+        ruleText: breach.ruleText,
+        matchedTerm: breach.matchedTerm,
+      }))
+    );
+  }, [generationReview, ruleBreachesBySceneId]);
   const [generationReviewIssueMessageKey, setGenerationReviewIssueMessageKey] = useState<string | null>(null);
   const [generationReviewRefreshing, setGenerationReviewRefreshing] = useState(false);
   const [referenceNotice, setReferenceNotice] = useState<ReferenceNotice | null>(null);
@@ -1326,6 +1370,54 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
             onBack={() => navigate('/studio')}
           />
         </StudioShell>
+        <StudioGenerationReview
+          reports={breachReports}
+          onAsked={() => setGenerationReview(null)}
+          visible={generationReview !== null}
+          mode={generationReview?.mode ?? 'single'}
+          scenes={generationReview?.scenes ?? []}
+          ruleBreachesBySceneId={ruleBreachesBySceneId}
+          excludedScenes={generationReview?.excludedScenes}
+          aspectRatio={project.aspectRatio}
+          resolution={project.resolution}
+          targetDurationSeconds={project.targetDurationSeconds}
+          selectedDurationSeconds={
+            generationReview?.scenes.reduce((total, scene) => total + scene.durationSeconds, 0) ?? 0
+          }
+          projectDurationSeconds={project.sceneOrder.reduce((total, sceneId) => {
+            const scene = project.scenes[sceneId];
+            return scene?.id === sceneId ? total + scene.durationSeconds : total;
+          }, 0)}
+          submitting={studioJobs.mutationPending || generationReviewRefreshing}
+          submissionBlocked={
+            generationBlocked ||
+            (studioJobs.issue?.operation === 'submit_scenes' && studioJobs.issue.code === 'invalid_route')
+          }
+          errorMessageKey={
+            studioJobs.issue?.operation === 'submit_scenes'
+              ? studioJobs.issue.messageKey
+              : generationReviewIssueMessageKey
+          }
+          onCancel={async () => {
+            if (!studioJobs.mutationPending && !generationReviewRefreshing) {
+              const requestIds = generationReview?.referenceRequestIds;
+              const dismissed =
+                requestIds === undefined ||
+                requestIds.length === 0 ||
+                (await studioJobs.dismissReferenceRequests(requestIds));
+              const suppressedIds = dismissed
+                ? requestIds
+                : (generationReview?.referenceRequests?.map(({ id: requestId }) => requestId) ?? requestIds);
+              suppressedIds?.forEach((requestId) => suppressedReferenceRequestIdsRef.current.add(requestId));
+              if (dismissed) studioJobs.clearIssue();
+              studioJobs.clearStaleIntent();
+              setGenerationReviewIssueMessageKey(null);
+              setGenerationReview(null);
+              if (!dismissed) setReferenceNotice({ kind: 'dismiss_failed' });
+            }
+          }}
+          onConfirm={confirmGeneration}
+        />
       </BriefConversationProvider>
       <StoryboardDraftModal
         visible={draftModalVisible}
@@ -1343,52 +1435,6 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
         onOpenSettings={() => setTimeout(() => navigate('/settings/model'), 0)}
         onRefreshCatalog={studioModels.refresh}
         onSelectStoryboardModel={(selection) => studioModels.updateSelection({ role: 'storyboard', selection })}
-      />
-      <GenerationReviewModal
-        visible={generationReview !== null}
-        mode={generationReview?.mode ?? 'single'}
-        scenes={generationReview?.scenes ?? []}
-        ruleBreachesBySceneId={ruleBreachesBySceneId}
-        excludedScenes={generationReview?.excludedScenes}
-        aspectRatio={project.aspectRatio}
-        resolution={project.resolution}
-        targetDurationSeconds={project.targetDurationSeconds}
-        selectedDurationSeconds={
-          generationReview?.scenes.reduce((total, scene) => total + scene.durationSeconds, 0) ?? 0
-        }
-        projectDurationSeconds={project.sceneOrder.reduce((total, sceneId) => {
-          const scene = project.scenes[sceneId];
-          return scene?.id === sceneId ? total + scene.durationSeconds : total;
-        }, 0)}
-        submitting={studioJobs.mutationPending || generationReviewRefreshing}
-        submissionBlocked={
-          generationBlocked ||
-          (studioJobs.issue?.operation === 'submit_scenes' && studioJobs.issue.code === 'invalid_route')
-        }
-        errorMessageKey={
-          studioJobs.issue?.operation === 'submit_scenes'
-            ? studioJobs.issue.messageKey
-            : generationReviewIssueMessageKey
-        }
-        onCancel={async () => {
-          if (!studioJobs.mutationPending && !generationReviewRefreshing) {
-            const requestIds = generationReview?.referenceRequestIds;
-            const dismissed =
-              requestIds === undefined ||
-              requestIds.length === 0 ||
-              (await studioJobs.dismissReferenceRequests(requestIds));
-            const suppressedIds = dismissed
-              ? requestIds
-              : (generationReview?.referenceRequests?.map(({ id: requestId }) => requestId) ?? requestIds);
-            suppressedIds?.forEach((requestId) => suppressedReferenceRequestIdsRef.current.add(requestId));
-            if (dismissed) studioJobs.clearIssue();
-            studioJobs.clearStaleIntent();
-            setGenerationReviewIssueMessageKey(null);
-            setGenerationReview(null);
-            if (!dismissed) setReferenceNotice({ kind: 'dismiss_failed' });
-          }
-        }}
-        onConfirm={confirmGeneration}
       />
       {project !== null && (
         <StudioRulesDrawer
