@@ -909,7 +909,11 @@
       "termsHelp": "Trennen Sie bis zu 8 Begriffe durch Kommas. Regeln ohne Begriffe dienen nur als Kontext.",
       "invalidTerms": "Verwenden Sie höchstens 8 Begriffe mit jeweils maximal 64 Zeichen.",
       "limitReached": "Die Höchstzahl von 24 wirksamen Regeln ist erreicht.",
-      "add": "Regel hinzufügen"
+      "add": "Regel hinzufügen",
+      "breachScene": "Durch die Regel „{{rule}}“ blockiert (Treffer: „{{term}}“).",
+      "breachBlockedConfirm": "Dieser Stapel kann nicht bestätigt werden, da mindestens eine Einstellung gegen eine Projektregel verstößt.",
+      "breachAskDirector": "Regisseur um Überarbeitung bitten",
+      "autoSubmitBlocked": "Eine ausstehende Referenzbild-Anfrage verstößt gegen eine Projektregel. Prüfen Sie die betroffene Einstellung vor der Generierung."
     },
     "nav": {
       "title": "Creative Studio"
@@ -1412,7 +1416,8 @@
       "duplicateChargeAcknowledgementRequired": "Bestätige die mögliche doppelte Anbietergebühr, bevor du es erneut versuchst.",
       "busy": "Dieses Projekt enthält aktive Generierungsaufträge.",
       "provider": "Der Anbieter konnte die Anfrage nicht abschließen.",
-      "storage": "Creative Studio konnte seine lokalen Daten nicht aktualisieren."
+      "storage": "Creative Studio konnte seine lokalen Daten nicht aktualisieren.",
+      "ruleBreach": "Die Generierung wurde blockiert, weil der Prompt gegen eine Projektregel verstößt."
     },
     "models": {
       "storyboard": "Storyboard-Modell",

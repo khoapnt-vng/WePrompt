@@ -743,7 +743,11 @@
       "termsHelp": "Separate up to 8 terms with commas. Rules without terms are context only.",
       "invalidTerms": "Use up to 8 terms, each no more than 64 characters.",
       "limitReached": "The maximum of 24 effective rules has been reached.",
-      "add": "Add rule"
+      "add": "Add rule",
+      "breachScene": "Blocked by rule “{{rule}}” (matched “{{term}}”).",
+      "breachBlockedConfirm": "This batch cannot be confirmed because one or more shots breach a project rule.",
+      "breachAskDirector": "Ask the Director to revise",
+      "autoSubmitBlocked": "A queued reference image request breached a project rule. Review the affected shot before generating."
     },
     "nav": {
       "title": "Creative Studio"
@@ -1246,7 +1250,8 @@
       "duplicateChargeAcknowledgementRequired": "Acknowledge the possible duplicate provider charge before retrying.",
       "busy": "This project has active generation work.",
       "provider": "The provider could not complete the request.",
-      "storage": "Creative Studio could not update its local data."
+      "storage": "Creative Studio could not update its local data.",
+      "ruleBreach": "Generation was blocked because the prompt breaches a project rule."
     },
     "models": {
       "storyboard": "Storyboard model",

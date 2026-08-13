@@ -1351,6 +1351,86 @@ describe('StudioPage and useStudioProject', () => {
     expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
   });
 
+  it('shows an authored reference-prompt breach and blocks Confirm before the paid request', async () => {
+    const opening = scene({ mediaKind: 'video', durationSeconds: 12, visualPrompt: 'An ACME billboard at dusk' });
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(
+        project('project-1', {
+          rules: [
+            {
+              id: 'rule_1',
+              scope: 'project',
+              text: 'No competitor logos.',
+              predicate: { kind: 'forbidden_terms', terms: ['acme'] },
+              createdAt: '2026-08-13T00:00:00.000Z',
+            },
+          ],
+          sceneOrder: [opening.id],
+          scenes: { [opening.id]: opening },
+        })
+      )
+    );
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
+    renderRoute();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.reference.generate' }));
+    const promptDialog = await screen.findByRole('dialog', {
+      name: 'conversation.creativeStudio.reference.dialogTitle',
+    });
+    fireEvent.click(
+      within(promptDialog).getByRole('button', { name: 'conversation.creativeStudio.reference.generate' })
+    );
+
+    const reviewDialog = await screen.findByRole('dialog', {
+      name: 'conversation.creativeStudio.review.title',
+    });
+    expect(within(reviewDialog).getByText('conversation.creativeStudio.rules.breachScene')).toBeInTheDocument();
+    expect(
+      within(reviewDialog).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' })
+    ).toBeDisabled();
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+  });
+
+  it('does not breach a reference rule on a term that exists only in the app-authored prefix', async () => {
+    const opening = scene({ mediaKind: 'video', durationSeconds: 12, visualPrompt: 'A paper airplane at sunrise' });
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(
+        project('project-1', {
+          rules: [
+            {
+              id: 'rule_1',
+              scope: 'project',
+              text: 'Do not include typography.',
+              predicate: { kind: 'forbidden_terms', terms: ['text'] },
+              createdAt: '2026-08-13T00:00:00.000Z',
+            },
+          ],
+          sceneOrder: [opening.id],
+          scenes: { [opening.id]: opening },
+        })
+      )
+    );
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
+    renderRoute();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.reference.generate' }));
+    const promptDialog = await screen.findByRole('dialog', {
+      name: 'conversation.creativeStudio.reference.dialogTitle',
+    });
+    fireEvent.click(
+      within(promptDialog).getByRole('button', { name: 'conversation.creativeStudio.reference.generate' })
+    );
+
+    const reviewDialog = await screen.findByRole('dialog', {
+      name: 'conversation.creativeStudio.review.title',
+    });
+    expect(within(reviewDialog).queryByText('conversation.creativeStudio.rules.breachScene')).not.toBeInTheDocument();
+    expect(
+      within(reviewDialog).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' })
+    ).toBeEnabled();
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+  });
+
   it('surfaces a queued request whose scene cannot describe a reference image instead of spending on it', async () => {
     // `ready` only asks for a non-empty visual prompt, and a visual prompt may be twice as long as
     // a reference prompt. Main refuses such a submission, so submitting would dismiss the request

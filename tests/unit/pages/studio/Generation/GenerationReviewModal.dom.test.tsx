@@ -56,6 +56,7 @@ const mixedScenes = (): GenerationReviewScene[] => [
     mediaKind: 'image',
     outputRole: 'take',
     durationSeconds: 5,
+    promptText: 'A paper airplane crossing a sunrise',
     route: validReviewRoute(imageRoute, 'Provider One', true),
   },
   {
@@ -64,9 +65,19 @@ const mixedScenes = (): GenerationReviewScene[] => [
     mediaKind: 'video',
     outputRole: 'take',
     durationSeconds: 7,
+    promptText: 'A product turning slowly',
     route: validReviewRoute(videoRoute, 'Provider Two', false),
   },
 ];
+
+const breach = { ruleId: 'rule_1', ruleText: 'No competitor logos.', scope: 'project' as const, matchedTerm: 'acme' };
+
+const breachingScene = (): GenerationReviewScene => ({
+  ...mixedScenes()[0]!,
+  id: 'scene-image',
+  title: 'Opening image',
+  promptText: 'An ACME billboard at dusk',
+});
 
 const createProps = (overrides: Partial<GenerationReviewModalProps> = {}): GenerationReviewModalProps => ({
   visible: true,
@@ -85,6 +96,76 @@ const createProps = (overrides: Partial<GenerationReviewModalProps> = {}): Gener
 });
 
 describe('GenerationReviewModal', () => {
+  it('names the breached rule on the shot and blocks Confirm before anything is charged', () => {
+    render(
+      <GenerationReviewModal
+        {...createProps({
+          mode: 'single',
+          scenes: [breachingScene()],
+          ruleBreachesBySceneId: { 'scene-image': [breach] },
+        })}
+      />
+    );
+
+    expect(
+      screen.getByText('conversation.creativeStudio.rules.breachScene:rule=No competitor logos.,term=acme')
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.review.confirm' })).toBeDisabled();
+    expect(screen.getByText('conversation.creativeStudio.rules.breachBlockedConfirm')).toBeInTheDocument();
+  });
+
+  it('offers to hand the breach to the Director rather than leaving a dead end', () => {
+    const onAskDirector = vi.fn();
+    render(
+      <GenerationReviewModal
+        {...createProps({
+          mode: 'single',
+          scenes: [breachingScene()],
+          ruleBreachesBySceneId: { 'scene-image': [breach] },
+          onAskDirector,
+        })}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.rules.breachAskDirector' }));
+
+    expect(onAskDirector).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides the ask-the-Director affordance when the page cannot supply it', () => {
+    render(
+      <GenerationReviewModal
+        {...createProps({
+          mode: 'single',
+          scenes: [breachingScene()],
+          ruleBreachesBySceneId: { 'scene-image': [breach] },
+        })}
+      />
+    );
+
+    // Task 10 ships before Task 11 wires the sender, so `onAskDirector` is absent in between. A button
+    // that does nothing is worse than no button.
+    expect(
+      screen.queryByRole('button', { name: 'conversation.creativeStudio.rules.breachAskDirector' })
+    ).not.toBeInTheDocument();
+  });
+
+  it('blocks Confirm for the whole batch when one shot breaches, and says so', () => {
+    render(<GenerationReviewModal {...createProps({ ruleBreachesBySceneId: { 'scene-image': [breach] } })} />);
+
+    // main aborts the entire submitScenes call on the first breach (jobManager.ts:1297), so a
+    // per-shot reading of this copy would be wrong.
+    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.review.confirm' })).toBeDisabled();
+    expect(screen.getByText('conversation.creativeStudio.rules.breachBlockedConfirm')).toBeInTheDocument();
+  });
+
+  it('leaves Confirm alone when no rule is breached', () => {
+    render(<GenerationReviewModal {...createProps({ mode: 'single', scenes: [mixedScenes()[0]!] })} />);
+
+    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.review.confirm' })).toBeEnabled();
+    expect(screen.queryByText(/rules\.breachScene/)).not.toBeInTheDocument();
+  });
+
   it('discloses every exact mixed-media route and requested output setting', () => {
     render(<GenerationReviewModal {...createProps()} />);
 

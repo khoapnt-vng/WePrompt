@@ -26,7 +26,13 @@ import { requestedMediaKind } from '@/common/types/project/creativeStudioOutputR
 import {
   buildFirstFramePrompt,
   hasFirstFramePromptSubject,
+  stripFirstFramePromptPrefix,
 } from '@/common/types/project/creativeStudioReferencePrompt';
+import {
+  evaluateStudioRules,
+  resolveEffectiveStudioRules,
+  type StudioRuleBreach,
+} from '@/common/types/project/creativeStudioRules';
 
 import {
   collectReferencePrompts,
@@ -102,6 +108,10 @@ const toReviewScene = (
     mediaKind,
     outputRole,
     durationSeconds: scene.durationSeconds,
+    promptText:
+      outputRole === 'reference'
+        ? stripFirstFramePromptPrefix((referencePrompt ?? '').trim(), project.aspectRatio)
+        : scene.visualPrompt.trim(),
     ...(outputRole === 'reference' && referencePrompt !== undefined ? { referencePrompt } : {}),
     route:
       route === null
@@ -322,6 +332,16 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
   const [rulesPending, setRulesPending] = useState(false);
   const [rulesErrorMessageKey, setRulesErrorMessageKey] = useState<string | null>(null);
   const [generationReview, setGenerationReview] = useState<GenerationReviewState | null>(null);
+  const effectiveRules = useMemo(() => (project === null ? [] : resolveEffectiveStudioRules(project.rules)), [project]);
+  const ruleBreachesBySceneId = useMemo(() => {
+    if (generationReview === null) return {};
+    const breaches: Record<string, StudioRuleBreach[]> = {};
+    for (const scene of generationReview.scenes) {
+      const verdict = evaluateStudioRules(effectiveRules, scene.promptText);
+      if (verdict.breaches.length > 0) breaches[scene.id] = verdict.breaches;
+    }
+    return breaches;
+  }, [effectiveRules, generationReview]);
   const [generationReviewIssueMessageKey, setGenerationReviewIssueMessageKey] = useState<string | null>(null);
   const [generationReviewRefreshing, setGenerationReviewRefreshing] = useState(false);
   const [referenceNotice, setReferenceNotice] = useState<ReferenceNotice | null>(null);
@@ -512,6 +532,24 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
     // subset the modal itself would have refused.
     const submission = collectSubmittableRoutes(review.scenes);
     if (submission === null) {
+      openQueuedReferenceReview();
+      return;
+    }
+    // The Director's queued reference requests are the one paid path with no human confirm, so the
+    // rule check happens here too. Main refuses this batch anyway; going through the modal instead
+    // means the user sees WHICH rule blocked WHICH shot rather than a bare refusal, and the queued
+    // requests survive to be answered.
+    const breached = review.scenes.some(
+      (scene) => evaluateStudioRules(resolveEffectiveStudioRules(project.rules), scene.promptText).breaches.length > 0
+    );
+    if (breached) {
+      // Say WHY the batch stopped. Redirecting the user into a review they did not ask for, with no
+      // statement that a rule caused it, is exactly the "say the consequence before it runs" failure
+      // this phase exists to fix. The modal's own error slot is the surface: both
+      // `studioJobs.clearIssue()` and `setGenerationReviewIssueMessageKey(null)` ran earlier in this
+      // effect, and the modal falls back to `generationReviewIssueMessageKey` whenever
+      // `studioJobs.issue` is not a `submit_scenes` issue, so this key is what renders.
+      setGenerationReviewIssueMessageKey('conversation.creativeStudio.rules.autoSubmitBlocked');
       openQueuedReferenceReview();
       return;
     }
@@ -1310,6 +1348,7 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
         visible={generationReview !== null}
         mode={generationReview?.mode ?? 'single'}
         scenes={generationReview?.scenes ?? []}
+        ruleBreachesBySceneId={ruleBreachesBySceneId}
         excludedScenes={generationReview?.excludedScenes}
         aspectRatio={project.aspectRatio}
         resolution={project.resolution}

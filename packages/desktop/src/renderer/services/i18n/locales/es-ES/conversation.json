@@ -909,7 +909,11 @@
       "termsHelp": "Separa hasta 8 términos con comas. Las reglas sin términos solo aportan contexto.",
       "invalidTerms": "Usa hasta 8 términos, de 64 caracteres como máximo cada uno.",
       "limitReached": "Se ha alcanzado el máximo de 24 reglas efectivas.",
-      "add": "Añadir regla"
+      "add": "Añadir regla",
+      "breachScene": "Bloqueado por la regla «{{rule}}» (coincidencia: «{{term}}»).",
+      "breachBlockedConfirm": "Este lote no se puede confirmar porque una o más tomas infringen una regla del proyecto.",
+      "breachAskDirector": "Pedir al director que lo revise",
+      "autoSubmitBlocked": "Una solicitud de imagen de referencia en cola infringió una regla del proyecto. Revisa la toma afectada antes de generar."
     },
     "nav": {
       "title": "Creative Studio"
@@ -1429,7 +1433,8 @@
       "duplicateChargeAcknowledgementRequired": "Acepta el posible cargo duplicado del proveedor antes de reintentarlo.",
       "busy": "Este proyecto tiene tareas de generación activas.",
       "provider": "El proveedor no ha podido completar la solicitud.",
-      "storage": "Creative Studio no ha podido actualizar sus datos locales."
+      "storage": "Creative Studio no ha podido actualizar sus datos locales.",
+      "ruleBreach": "La generación se bloqueó porque el prompt infringe una regla del proyecto."
     },
     "models": {
       "storyboard": "Modelo de guion gráfico",

@@ -910,7 +910,11 @@
       "termsHelp": "Virgülle ayırarak en fazla 8 terim girin. Terim içermeyen kurallar yalnızca bağlam sağlar.",
       "invalidTerms": "Her biri en fazla 64 karakter olan en çok 8 terim kullanın.",
       "limitReached": "24 etkin kural sınırına ulaşıldı.",
-      "add": "Kural ekle"
+      "add": "Kural ekle",
+      "breachScene": "“{{rule}}” kuralı tarafından engellendi (“{{term}}” eşleşti).",
+      "breachBlockedConfirm": "Bir veya daha fazla çekim proje kuralını ihlal ettiği için bu toplu işlem onaylanamaz.",
+      "breachAskDirector": "Yönetmenden düzeltmesini iste",
+      "autoSubmitBlocked": "Sıradaki bir referans görseli isteği proje kuralını ihlal etti. Oluşturmadan önce etkilenen çekimi inceleyin."
     },
     "nav": {
       "title": "Creative Studio"
@@ -1413,7 +1417,8 @@
       "duplicateChargeAcknowledgementRequired": "Tekrar denemeden önce olası mükerrer sağlayıcı ücretini kabul edin.",
       "busy": "Bu projede etkin oluşturma işleri var.",
       "provider": "Sağlayıcı isteği tamamlayamadı.",
-      "storage": "Creative Studio yerel verilerini güncelleyemedi."
+      "storage": "Creative Studio yerel verilerini güncelleyemedi.",
+      "ruleBreach": "İstem bir proje kuralını ihlal ettiği için oluşturma engellendi."
     },
     "models": {
       "storyboard": "Hikâye panosu modeli",

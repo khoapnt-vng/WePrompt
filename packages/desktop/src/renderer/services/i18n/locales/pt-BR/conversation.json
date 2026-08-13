@@ -914,7 +914,11 @@
       "termsHelp": "Separe até 8 termos com vírgulas. Regras sem termos servem apenas como contexto.",
       "invalidTerms": "Use até 8 termos, com no máximo 64 caracteres cada.",
       "limitReached": "O limite de 24 regras efetivas foi atingido.",
-      "add": "Adicionar regra"
+      "add": "Adicionar regra",
+      "breachScene": "Bloqueado pela regra “{{rule}}” (termo correspondente: “{{term}}”).",
+      "breachBlockedConfirm": "Este lote não pode ser confirmado porque uma ou mais cenas violam uma regra do projeto.",
+      "breachAskDirector": "Pedir ao diretor para revisar",
+      "autoSubmitBlocked": "Uma solicitação de imagem de referência na fila violou uma regra do projeto. Revise a cena afetada antes de gerar."
     },
     "nav": {
       "title": "Creative Studio"
@@ -1434,7 +1438,8 @@
       "duplicateChargeAcknowledgementRequired": "Reconheça a possível cobrança duplicada do provedor antes de tentar novamente.",
       "busy": "Este projeto tem trabalhos de geração ativos.",
       "provider": "O provedor não conseguiu concluir a solicitação.",
-      "storage": "O Creative Studio não conseguiu atualizar seus dados locais."
+      "storage": "O Creative Studio não conseguiu atualizar seus dados locais.",
+      "ruleBreach": "A geração foi bloqueada porque o prompt viola uma regra do projeto."
     },
     "models": {
       "storyboard": "Modelo de storyboard",

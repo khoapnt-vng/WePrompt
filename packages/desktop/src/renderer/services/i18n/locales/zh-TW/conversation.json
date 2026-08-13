@@ -908,7 +908,11 @@
       "termsHelp": "請以逗號分隔，最多輸入 8 個詞。沒有禁用詞的規則僅供參考。",
       "invalidTerms": "最多輸入 8 個詞，每個詞不得超過 64 個字元。",
       "limitReached": "已達 24 條有效規則的上限。",
-      "add": "新增規則"
+      "add": "新增規則",
+      "breachScene": "遭規則「{{rule}}」阻止（符合「{{term}}」）。",
+      "breachBlockedConfirm": "一個或多個鏡頭違反專案規則，因此無法確認整個批次。",
+      "breachAskDirector": "請創意總監修改",
+      "autoSubmitBlocked": "佇列中的參考圖請求違反了專案規則。請先檢查受影響的鏡頭再生成。"
     },
     "nav": {
       "title": "創意工作室"
@@ -1394,7 +1398,8 @@
       "duplicateChargeAcknowledgementRequired": "重試前請確認可能產生重複供應商費用。",
       "busy": "此專案有進行中的產生工作。",
       "provider": "服務供應商無法完成要求。",
-      "storage": "創意工作室無法更新本機資料。"
+      "storage": "創意工作室無法更新本機資料。",
+      "ruleBreach": "提示詞違反專案規則，因此已阻止生成。"
     },
     "models": {
       "storyboard": "分鏡模型",

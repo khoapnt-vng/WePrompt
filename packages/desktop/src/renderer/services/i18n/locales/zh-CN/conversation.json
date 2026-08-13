@@ -908,7 +908,11 @@
       "termsHelp": "用逗号分隔，最多可输入 8 个词。没有禁用词的规则仅作上下文。",
       "invalidTerms": "最多输入 8 个词，每个词不超过 64 个字符。",
       "limitReached": "已达到 24 条有效规则的上限。",
-      "add": "添加规则"
+      "add": "添加规则",
+      "breachScene": "被规则“{{rule}}”阻止（匹配到“{{term}}”）。",
+      "breachBlockedConfirm": "一个或多个镜头违反项目规则，因此无法确认整个批次。",
+      "breachAskDirector": "请创意总监修改",
+      "autoSubmitBlocked": "排队中的参考图请求违反了项目规则。请先检查受影响的镜头再生成。"
     },
     "nav": {
       "title": "创意工作室"
@@ -1394,7 +1398,8 @@
       "duplicateChargeAcknowledgementRequired": "重试前请确认可能产生重复服务商费用。",
       "busy": "此项目有正在进行的生成任务。",
       "provider": "服务商无法完成请求。",
-      "storage": "创意工作室无法更新本地数据。"
+      "storage": "创意工作室无法更新本地数据。",
+      "ruleBreach": "提示词违反了项目规则，因此生成已被阻止。"
     },
     "models": {
       "storyboard": "分镜模型",
