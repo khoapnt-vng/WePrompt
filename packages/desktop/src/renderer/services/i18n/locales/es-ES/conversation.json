@@ -1032,7 +1032,7 @@
         "missingSlates_one": "{{count}} claqueta ausente",
         "missingSlates_many": "{{count}} claquetas ausentes",
         "missingSlates_other": "{{count}} claquetas ausentes",
-        "openProduce": "Abrir Producir",
+        "openProduce": "Abrir Tablero",
         "handoffDescription": "La entrega contiene únicamente el manifiesto del guion gráfico y el contenido seleccionado. Las claquetas de revisión no se exportan.",
         "partialHandoff": "Esta entrega es parcial porque algunos planos no tienen contenido seleccionado.",
         "cut": {
@@ -1095,7 +1095,7 @@
           "busyReason": "Este proyecto ya se está renderizando. Espera a que termine o cancélalo desde la ventana que lo inició.",
           "installFfmpeg": "Instalar FFmpeg",
           "tryAgain": "Reintentar renderizado",
-          "openProduce": "Ir a Producir",
+          "openProduce": "Ir al Tablero",
           "missingScenes": "{{count}} escenas no tienen toma y no aparecerán en el vídeo.",
           "missingScenes_one": "{{count}} escena no tiene toma y no aparecerá en el vídeo.",
           "missingScenes_other": "{{count}} escenas no tienen toma y no aparecerán en el vídeo.",

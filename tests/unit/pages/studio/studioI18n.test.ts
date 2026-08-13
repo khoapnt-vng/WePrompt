@@ -452,6 +452,33 @@ describe('Creative Studio localization contract', () => {
     expect(issues).toEqual([]);
   });
 
+  /**
+   * The same contract for cross-view calls to action, where the view name sits inside a sentence
+   * rather than standing alone, so containment is the honest assertion and equality is not.
+   *
+   * Both keys below outlived the phase rail still saying "Produce" — a primary button reading
+   * "Open Produce" that navigates to a tab labelled "Board", in twelve languages. Retiring a view
+   * name from the switch does not retire it from the sentences that point at that view.
+   *
+   * **Reference locale only, deliberately.** Russian and Ukrainian decline the noun: the switch
+   * says «Доска» / «Дошка» while the sentences need «доску» / «дошки», so a containment assertion
+   * is structurally wrong for inflected languages and would force translators into ungrammatical
+   * copy to satisfy it. Drift is introduced in the reference locale — translators work from it —
+   * and the other eleven are already held by the parity and copied-English guards above.
+   */
+  it.each([
+    ['phase.review.openProduce', 'phase.nav.board'],
+    ['phase.review.render.openProduce', 'phase.nav.board'],
+  ])('names the destination view in %s using the reference switch label %s', (ctaKey, navKey) => {
+    const leaves = flattenStringLeaves(loadConversationLocale(i18nConfig.referenceLanguage).creativeStudio);
+    const cta = leaves[ctaKey];
+    const label = leaves[navKey];
+
+    expect(cta?.trim(), `${ctaKey} is missing`).toBeTruthy();
+    expect(label?.trim(), `${navKey} is missing`).toBeTruthy();
+    expect(cta, `${ctaKey} says "${cta}" but the switch calls that view "${label}"`).toContain(label);
+  });
+
   it('carries no copy for the Write assistant it removed, in any configured locale', () => {
     for (const locale of i18nConfig.supportedLanguages) {
       const leaves = flattenStringLeaves(loadConversationLocale(locale).creativeStudio);

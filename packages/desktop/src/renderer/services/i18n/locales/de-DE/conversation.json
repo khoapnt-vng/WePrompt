@@ -1027,7 +1027,7 @@
         "missingSlates": "{{count}} fehlende Platzhalter",
         "missingSlates_one": "{{count}} fehlender Platzhalter",
         "missingSlates_other": "{{count}} fehlende Platzhalter",
-        "openProduce": "Produzieren öffnen",
+        "openProduce": "Board öffnen",
         "handoffDescription": "Die Übergabe enthält nur das Storyboard-Manifest und ausgewählte Medien. Platzhalter aus der Prüfung werden nicht exportiert.",
         "partialHandoff": "Diese Übergabe ist unvollständig, weil einigen Einstellungen ein ausgewähltes Medium fehlt.",
         "cut": {
@@ -1090,7 +1090,7 @@
           "busyReason": "Dieses Projekt wird bereits gerendert. Warte auf den Abschluss oder brich den Vorgang im startenden Fenster ab.",
           "installFfmpeg": "FFmpeg installieren",
           "tryAgain": "Rendern erneut versuchen",
-          "openProduce": "Zu Produzieren",
+          "openProduce": "Zum Board",
           "missingScenes": "{{count}} Szenen haben keinen Take und erscheinen nicht im Video.",
           "missingScenes_one": "{{count}} Szene hat keinen Take und erscheint nicht im Video.",
           "missingScenes_other": "{{count}} Szenen haben keinen Take und erscheinen nicht im Video.",

@@ -1021,7 +1021,7 @@
         "renderedShots_other": "{{count}} 个已渲染镜头",
         "missingSlates": "缺少 {{count}} 个场记卡",
         "missingSlates_other": "缺少 {{count}} 个场记卡",
-        "openProduce": "打开制作",
+        "openProduce": "打开看板",
         "handoffDescription": "交付内容仅包含故事板清单和已选媒体。审阅场记卡不会导出。",
         "partialHandoff": "部分场景没有已选媒体，因此此次交付不完整。",
         "cut": {
@@ -1084,7 +1084,7 @@
           "busyReason": "此项目已有渲染任务在运行。请等待完成，或在启动渲染的窗口中取消。",
           "installFfmpeg": "安装 FFmpeg",
           "tryAgain": "重试渲染",
-          "openProduce": "前往生成",
+          "openProduce": "前往看板",
           "missingScenes": "{{count}} 个场景没有镜头，不会出现在视频中。",
           "missingScenes_one": "{{count}} 个场景没有镜头，不会出现在视频中。",
           "missingScenes_other": "{{count}} 个场景没有镜头，不会出现在视频中。",

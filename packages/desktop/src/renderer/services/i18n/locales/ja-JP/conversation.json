@@ -1021,7 +1021,7 @@
         "renderedShots_other": "レンダリング済みショット {{count}} 件",
         "missingSlates": "不足しているスレート {{count}} 件",
         "missingSlates_other": "不足しているスレート {{count}} 件",
-        "openProduce": "生成を開く",
+        "openProduce": "ボードを開く",
         "handoffDescription": "引き渡しに含まれるのは、ストーリーボードのマニフェストと選択したメディアのみです。確認用スレートは書き出されません。",
         "partialHandoff": "選択したメディアがないシーンがあるため、この引き渡しは一部のみです。",
         "cut": {
@@ -1084,7 +1084,7 @@
           "busyReason": "このプロジェクトはすでにレンダリング中です。完了を待つか、開始したウィンドウからキャンセルしてください。",
           "installFfmpeg": "FFmpeg をインストール",
           "tryAgain": "レンダリングを再試行",
-          "openProduce": "生成へ移動",
+          "openProduce": "ボードへ移動",
           "missingScenes": "テイクのないシーンが{{count}}件あり、動画には含まれません。",
           "missingScenes_one": "テイクのないシーンが{{count}}件あり、動画には含まれません。",
           "missingScenes_other": "テイクのないシーンが{{count}}件あり、動画には含まれません。",

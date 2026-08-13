@@ -31,6 +31,7 @@ import {
   readLastStudioView,
   rememberStudioView,
   resolveStudioEntryView,
+  STUDIO_VIEWS,
   type StudioView,
   studioViewPath,
 } from '@renderer/pages/studio/studioPhaseRoute';
@@ -469,7 +470,7 @@ describe('StudioPage and useStudioProject', () => {
   });
 
   describe('Studio view routes', () => {
-    it.each(['table', 'board', 'cut', 'brief'])('accepts %s as a canonical Studio view', (view) => {
+    it.each([...STUDIO_VIEWS])('accepts %s as a canonical Studio view', (view) => {
       expect(parseStudioView(view)).toBe(view);
     });
 
@@ -519,7 +520,7 @@ describe('StudioPage and useStudioProject', () => {
       expect(resolveStudioEntryView('project-1')).toBe('table');
     });
 
-    it.each(['table', 'board', 'cut', 'brief'])('renders the Studio page at the %s view route', async (view) => {
+    it.each([...STUDIO_VIEWS])('renders the Studio page at the %s view route', async (view) => {
       renderRoute(`/studio/project-1/${view}`);
 
       expect(await screen.findByRole('heading', { level: 1, name: 'Launch film' })).toBeInTheDocument();
@@ -613,8 +614,8 @@ describe('StudioPage and useStudioProject', () => {
       });
       const actions = within(viewSwitch).getAllByRole('button');
 
-      expect(actions).toHaveLength(4);
-      for (const view of ['table', 'board', 'cut', 'brief']) {
+      expect(actions).toHaveLength(STUDIO_VIEWS.length);
+      for (const view of STUDIO_VIEWS) {
         expect(
           within(viewSwitch).getByRole('button', {
             name: `conversation.creativeStudio.phase.nav.${view}`,

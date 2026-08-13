@@ -1037,7 +1037,7 @@
         "missingSlates_one": "{{count}} cartela ausente",
         "missingSlates_many": "{{count}} cartelas ausentes",
         "missingSlates_other": "{{count}} cartelas ausentes",
-        "openProduce": "Abrir Produzir",
+        "openProduce": "Abrir Quadro",
         "handoffDescription": "A entrega contém somente o manifesto do storyboard e as mídias selecionadas. As cartelas de revisão não são exportadas.",
         "partialHandoff": "Esta entrega é parcial porque algumas cenas não têm mídia selecionada.",
         "cut": {
@@ -1100,7 +1100,7 @@
           "busyReason": "Este projeto já está sendo renderizado. Aguarde a conclusão ou cancele na janela que iniciou a renderização.",
           "installFfmpeg": "Instalar FFmpeg",
           "tryAgain": "Tentar renderizar novamente",
-          "openProduce": "Ir para Produzir",
+          "openProduce": "Ir para o Quadro",
           "missingScenes": "{{count}} cenas não têm tomada e não aparecerão no vídeo.",
           "missingScenes_one": "{{count}} cena não tem tomada e não aparecerá no vídeo.",
           "missingScenes_other": "{{count}} cenas não têm tomada e não aparecerão no vídeo.",

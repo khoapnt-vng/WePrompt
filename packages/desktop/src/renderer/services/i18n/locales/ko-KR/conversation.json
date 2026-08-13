@@ -1021,7 +1021,7 @@
         "renderedShots_other": "렌더링된 숏 {{count}}개",
         "missingSlates": "누락된 슬레이트 {{count}}개",
         "missingSlates_other": "누락된 슬레이트 {{count}}개",
-        "openProduce": "제작 열기",
+        "openProduce": "보드 열기",
         "handoffDescription": "전달에는 스토리보드 매니페스트와 선택된 미디어만 포함됩니다. 검토용 슬레이트는 내보내지지 않습니다.",
         "partialHandoff": "일부 장면에 선택된 미디어가 없어 이번 전달은 일부만 포함합니다.",
         "cut": {
@@ -1084,7 +1084,7 @@
           "busyReason": "이 프로젝트는 이미 렌더링 중입니다. 완료될 때까지 기다리거나 렌더링을 시작한 창에서 취소하세요.",
           "installFfmpeg": "FFmpeg 설치",
           "tryAgain": "렌더링 다시 시도",
-          "openProduce": "생성으로 이동",
+          "openProduce": "보드로 이동",
           "missingScenes": "테이크가 없는 장면 {{count}}개는 동영상에 포함되지 않습니다.",
           "missingScenes_one": "테이크가 없는 장면 {{count}}개는 동영상에 포함되지 않습니다.",
           "missingScenes_other": "테이크가 없는 장면 {{count}}개는 동영상에 포함되지 않습니다.",

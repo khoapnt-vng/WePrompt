@@ -861,7 +861,7 @@
         "missingSlates": "{{count}} missing slates",
         "missingSlates_one": "{{count}} missing slate",
         "missingSlates_other": "{{count}} missing slates",
-        "openProduce": "Open Produce",
+        "openProduce": "Open Board",
         "handoffDescription": "The handoff contains the storyboard manifest and selected media only. Review slates are not exported.",
         "partialHandoff": "This handoff is partial because some scenes have no selected media.",
         "cut": {
@@ -924,7 +924,7 @@
           "busyReason": "A render is already running for this project. Wait for it to finish or cancel it from the window that started it.",
           "installFfmpeg": "Install FFmpeg",
           "tryAgain": "Try render again",
-          "openProduce": "Go to Produce",
+          "openProduce": "Go to Board",
           "missingScenes": "{{count}} scenes have no take and will not be in the video.",
           "missingScenes_one": "{{count}} scene has no take and will not be in the video.",
           "missingScenes_other": "{{count}} scenes have no take and will not be in the video.",
