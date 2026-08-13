@@ -966,7 +966,6 @@
       },
       "write": {
         "title": "テーブル",
-        "continueToProduce": "続行",
         "addShot": "ショットを追加",
         "noScenes": "ショットを追加するか、ストーリーボードを下書きして開始します。",
         "scriptTableTitle": "台本",
@@ -1001,7 +1000,6 @@
         "render": "レンダリング",
         "renderAnother": "もう一度レンダリング",
         "openPreview": "{{title}} のプレビューを開く",
-        "reviewCut": "続行",
         "modelsTitle": "モデル",
         "activityTitle": "生成状況",
         "activityEmpty": "実行中の生成ジョブはありません。",

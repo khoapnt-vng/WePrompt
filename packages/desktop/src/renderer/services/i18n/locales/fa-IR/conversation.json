@@ -968,7 +968,6 @@
       },
       "write": {
         "title": "جدول",
-        "continueToProduce": "ادامه",
         "addShot": "افزودن نما",
         "noScenes": "برای شروع یک نما اضافه کنید یا پیش‌نویس استوری‌بورد بسازید.",
         "scriptTableTitle": "فیلم‌نامه",
@@ -1003,7 +1002,6 @@
         "render": "رندر",
         "renderAnother": "رندر دوباره",
         "openPreview": "باز کردن پیش‌نمایش {{title}}",
-        "reviewCut": "ادامه",
         "modelsTitle": "مدل‌ها",
         "activityTitle": "فعالیت تولید",
         "activityEmpty": "هیچ کار تولیدی در حال اجرا نیست.",

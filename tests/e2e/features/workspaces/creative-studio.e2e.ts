@@ -34,20 +34,26 @@ const viewLabels: Record<StudioView, string> = {
 };
 
 /**
- * The page-level action each view offers, verbatim from en-US.
+ * The page-level action each view offers, verbatim from en-US — `null` where the view offers none.
  *
- * The previous table claimed "Continue to Produce" and "Review cut"; both keys have rendered the
- * single word "Continue" since before this spec's last edit, so those two entries never matched a
- * real button. The staleness was latent rather than red because e2e needs a display and `--list`
- * only proves the file compiles.
+ * Table and Board offer none. Both carried the phase rail's step-forward button, which outlived the
+ * rail in the top bar; a view switch has no next step, and the two buttons rendered the same word
+ * "Continue" while going to different places — an ambiguity this helper could not see through
+ * either, since both entries used to read `'Continue'`. Brief's "Start writing" sits in its
+ * validated footer and Cut's "Prepare handoff" opens export; neither is progression, so both stay.
  */
-const viewCtas: Record<StudioView, string> = {
-  table: 'Continue',
-  board: 'Continue',
+const viewCtas: Record<StudioView, string | null> = {
+  table: null,
+  board: null,
   cut: 'Prepare handoff',
   brief: 'Start writing',
 };
 
+/**
+ * "Continue" stays in this pattern precisely because nothing renders it any more: it is what makes
+ * the zero-action assertion on Table and Board falsifiable. Restoring either progression CTA turns
+ * the expected count of 0 into 1 and fails `expectStudioView` on both views.
+ */
 const viewCtaPattern = /^(Start writing|Continue|Prepare handoff)$/;
 const timingGateCopy = [
   'Match the storyboard duration to the target before generating all ready shots.',
@@ -271,8 +277,9 @@ async function expectStudioView(page: Page, projectId: string, view: StudioView)
     'aria-current',
     'page'
   );
-  await expect(page.getByRole('button', { name: viewCtaPattern })).toHaveCount(1);
-  await expect(page.getByRole('button', { name: viewCtas[view], exact: true })).toBeVisible();
+  const cta = viewCtas[view];
+  await expect(page.getByRole('button', { name: viewCtaPattern })).toHaveCount(cta === null ? 0 : 1);
+  if (cta !== null) await expect(page.getByRole('button', { name: cta, exact: true })).toBeVisible();
   await assertStudioInvariants(page);
 }
 
@@ -515,8 +522,11 @@ test.describe('Creative Studio workspace', () => {
       await expect(page.locator('[data-studio-phase-shell] > [role="alert"]')).toHaveText(
         'Storyboard timing does not match the project target.'
       );
-      const continueToBoard = page.getByRole('button', { name: 'Continue', exact: true });
-      await expect(continueToBoard).toBeEnabled();
+      // An off-target advisory must not lock the way out of Table. The switch is the only way out
+      // now that Table's "Continue" is gone, so the advisory is asserted against the switch itself.
+      await expect(
+        page.getByRole('navigation', { name: 'Project views' }).getByRole('button', { name: 'Board', exact: true })
+      ).toBeEnabled();
 
       await expect
         .poll(async () => {
@@ -539,8 +549,7 @@ test.describe('Creative Studio workspace', () => {
           scenes: [{ title: shotTitle, narration, visualPrompt, durationSeconds: 5 }],
           jobs: [],
         });
-      await continueToBoard.click();
-      await expectStudioView(page, projectId, 'board');
+      await selectStudioView(page, projectId, 'board');
       await expectIdleProduceSurface(page, projectId);
     });
 

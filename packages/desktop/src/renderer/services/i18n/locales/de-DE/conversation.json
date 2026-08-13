@@ -969,7 +969,6 @@
       },
       "write": {
         "title": "Tabelle",
-        "continueToProduce": "Weiter",
         "addShot": "Einstellung hinzufügen",
         "noScenes": "Füge eine Einstellung hinzu oder entwirf ein Storyboard, um zu beginnen.",
         "scriptTableTitle": "Drehbuch",
@@ -1004,7 +1003,6 @@
         "render": "Rendern",
         "renderAnother": "Erneut rendern",
         "openPreview": "Vorschau für {{title}} öffnen",
-        "reviewCut": "Weiter",
         "modelsTitle": "Modelle",
         "activityTitle": "Erzeugungsaktivität",
         "activityEmpty": "Es werden keine Erzeugungsaufträge ausgeführt.",

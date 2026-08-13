@@ -966,7 +966,6 @@
       },
       "write": {
         "title": "表格",
-        "continueToProduce": "繼續",
         "addShot": "新增鏡頭",
         "noScenes": "新增鏡頭或起草分鏡即可開始。",
         "scriptTableTitle": "腳本",
@@ -1001,7 +1000,6 @@
         "render": "算繪",
         "renderAnother": "再次算繪",
         "openPreview": "開啟「{{title}}」預覽",
-        "reviewCut": "繼續",
         "modelsTitle": "模型",
         "activityTitle": "產生活動",
         "activityEmpty": "目前沒有執行中的產生工作。",

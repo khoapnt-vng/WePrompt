@@ -976,7 +976,6 @@
       },
       "write": {
         "title": "Tabela",
-        "continueToProduce": "Continuar",
         "addShot": "Adicionar tomada",
         "noScenes": "Adicione uma tomada ou crie um rascunho do storyboard para começar.",
         "scriptTableTitle": "Roteiro",
@@ -1011,7 +1010,6 @@
         "render": "Renderizar",
         "renderAnother": "Renderizar novamente",
         "openPreview": "Abrir prévia de {{title}}",
-        "reviewCut": "Continuar",
         "modelsTitle": "Modelos",
         "activityTitle": "Atividade de geração",
         "activityEmpty": "Nenhum trabalho de geração está em execução.",

@@ -649,14 +649,4 @@ describe('ProducePhase', () => {
     expect(within(activity).getByText('Opening shot')).toBeVisible();
     expect(within(activity).getByText('Closing shot')).toBeVisible();
   });
-
-  it('does not duplicate the shell-owned Review cut action inside Produce', () => {
-    const controller = createController();
-    render(<ProducePhase controller={controller} />);
-
-    expect(
-      screen.queryByRole('button', { name: 'conversation.creativeStudio.phase.produce.reviewCut' })
-    ).not.toBeInTheDocument();
-    expect(controller.requestTransition).not.toHaveBeenCalled();
-  });
 });

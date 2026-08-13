@@ -130,7 +130,6 @@ const phaseKeys = [
   'phase.brief.aspectLocked',
   'phase.brief.aspectLockedHelp',
   'phase.write.title',
-  'phase.write.continueToProduce',
   'phase.write.addShot',
   'phase.write.noScenes',
   'phase.write.scriptTableTitle',
@@ -148,7 +147,6 @@ const phaseKeys = [
   'phase.write.placeholder.middle',
   'phase.write.placeholder.closing',
   'phase.write.needsTitle',
-  'phase.produce.reviewCut',
   'phase.produce.modelsTitle',
   'phase.produce.activityTitle',
   'phase.produce.activityEmpty',
@@ -397,21 +395,40 @@ const removedWriteAssistantKeys = [
 ] as const;
 
 /**
- * Copy for the four-step Brief/Write/Produce/Review rail that the view switch replaced.
+ * Copy for the four-step Brief/Write/Produce/Review rail that the view switch replaced — both its
+ * labels and its two progression calls to action.
  *
  * `phase.nav.brief` is deliberately not here — Brief survived the rail as a view and kept its
  * label. `phase.nav.saved` and `phase.nav.saving` are not rail copy at all; they are the header's
  * save chip, and a prefix-wide sweep of `phase.nav.*` would take them with it.
+ *
+ * `phase.write.continueToProduce` and `phase.produce.reviewCut` were the rail's step-forward
+ * buttons, which outlived the rail in the top bar. A switch has no next step — every destination is
+ * already visible — and both rendered the same word "Continue" while going to different places.
+ * `phase.review.handoff` is deliberately not here: it opens export, so it is an action on the
+ * document rather than progression through it.
  */
-const removedPhaseRailKeys = ['phase.nav.label', 'phase.nav.write', 'phase.nav.produce', 'phase.nav.review'] as const;
+const removedPhaseRailKeys = [
+  'phase.nav.label',
+  'phase.nav.write',
+  'phase.nav.produce',
+  'phase.nav.review',
+  'phase.write.continueToProduce',
+  'phase.produce.reviewCut',
+] as const;
 
 describe('Creative Studio localization contract', () => {
   it('carries no copy for the four-step phase rail the view switch replaced, in any configured locale', () => {
     for (const locale of i18nConfig.supportedLanguages) {
       const leaves = flattenStringLeaves(loadConversationLocale(locale).creativeStudio);
       // Guards the guard: a wrong path or an empty read would make every absence assertion pass.
+      // One live neighbour per prefix the removed set spans, so a mistyped prefix cannot pass either.
       expect(leaves['phase.nav.table'], `${locale}/phase.nav.table`).toBeTruthy();
       expect(leaves['phase.nav.saved'], `${locale}/phase.nav.saved`).toBeTruthy();
+      expect(leaves['phase.write.title'], `${locale}/phase.write.title`).toBeTruthy();
+      expect(leaves['phase.produce.modelsTitle'], `${locale}/phase.produce.modelsTitle`).toBeTruthy();
+      // The Cut view's export action is not progression and stays.
+      expect(leaves['phase.review.handoff'], `${locale}/phase.review.handoff`).toBeTruthy();
       for (const key of removedPhaseRailKeys) {
         expect(leaves[key], `${locale}/${key} outlived the rail that used it`).toBeUndefined();
       }

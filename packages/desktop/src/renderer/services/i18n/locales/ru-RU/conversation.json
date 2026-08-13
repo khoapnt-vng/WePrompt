@@ -972,7 +972,6 @@
       },
       "write": {
         "title": "Таблица",
-        "continueToProduce": "Продолжить",
         "addShot": "Добавить кадр",
         "noScenes": "Чтобы начать, добавьте кадр или создайте черновик раскадровки.",
         "scriptTableTitle": "Сценарий",
@@ -1007,7 +1006,6 @@
         "render": "Рендерить",
         "renderAnother": "Рендерить ещё",
         "openPreview": "Открыть предпросмотр {{title}}",
-        "reviewCut": "Продолжить",
         "modelsTitle": "Модели",
         "activityTitle": "Ход генерации",
         "activityEmpty": "Сейчас нет выполняющихся заданий генерации.",

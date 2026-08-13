@@ -273,11 +273,16 @@ describe('Creative Studio full-sentence English copy', () => {
     expect(screen.getAllByRole('button', { name: 'Start writing' })).toHaveLength(1);
   });
 
-  it.each([
-    ['table', 'Continue'],
-    ['board', 'Continue'],
-    ['cut', 'Prepare handoff'],
-  ] as const)('renders the Rules action and the %s view action in the header', async (activeView, actionName) => {
+  /**
+   * Table and Board offer no header action at all. Both used to carry a "Continue" that walked the
+   * four-step rail forward; with a view switch every destination is already visible and one click
+   * away, so there is no next step for a call to action to name — and two buttons reading the same
+   * word while going to different places was ambiguous besides.
+   *
+   * Asserting the exact button count *and* the absence of the retired word keeps this falsifiable
+   * in both directions: restoring either CTA makes the header hold two buttons and match "Continue".
+   */
+  it.each(['table', 'board'] as const)('offers no progression action in the %s view header', async (activeView) => {
     await renderEnglish(
       <StudioPhaseShell
         activeView={activeView}
@@ -289,9 +294,21 @@ describe('Creative Studio full-sentence English copy', () => {
 
     const headerActions = document.querySelector<HTMLElement>('[data-studio-phase-actions]');
     expect(headerActions).not.toBeNull();
+    expect(within(headerActions!).getAllByRole('button')).toHaveLength(1);
+    expect(within(headerActions!).getByRole('button', { name: 'Rules' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
+  });
+
+  it('renders the Rules action and the Cut handoff action in the header', async () => {
+    await renderEnglish(
+      <StudioPhaseShell activeView='cut' controller={phaseController()} navigationDisabled={false} onBack={vi.fn()} />
+    );
+
+    const headerActions = document.querySelector<HTMLElement>('[data-studio-phase-actions]');
+    expect(headerActions).not.toBeNull();
     expect(within(headerActions!).getAllByRole('button')).toHaveLength(2);
     expect(within(headerActions!).getByRole('button', { name: 'Rules' })).toBeInTheDocument();
-    expect(within(headerActions!).getByRole('button', { name: actionName })).toBeInTheDocument();
+    expect(within(headerActions!).getByRole('button', { name: 'Prepare handoff' })).toBeInTheDocument();
   });
 
   it('renders every view in every configured locale without raw visible or accessible copy', async () => {

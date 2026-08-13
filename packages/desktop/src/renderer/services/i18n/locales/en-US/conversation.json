@@ -803,7 +803,6 @@
       },
       "write": {
         "title": "Table",
-        "continueToProduce": "Continue",
         "addShot": "Add shot",
         "noScenes": "Add a shot or draft a storyboard to begin.",
         "scriptTableTitle": "Script",
@@ -838,7 +837,6 @@
         "render": "Render",
         "renderAnother": "Render another",
         "openPreview": "Open {{title}} preview",
-        "reviewCut": "Continue",
         "modelsTitle": "Models",
         "activityTitle": "Generation activity",
         "activityEmpty": "No generation jobs are running.",

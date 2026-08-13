@@ -1183,7 +1183,7 @@ describe('StudioPage and useStudioProject', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Launch film' })).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'conversation.creativeStudio.phase.write.continueToProduce' })
+      screen.getByRole('navigation', { name: 'conversation.creativeStudio.phase.nav.viewsLabel' })
     ).toBeInTheDocument();
   });
 
@@ -1207,9 +1207,6 @@ describe('StudioPage and useStudioProject', () => {
     expect(within(openingRow).getByLabelText('conversation.creativeStudio.inspector.titleLabel')).toHaveValue(
       'Opening'
     );
-    expect(
-      screen.getByRole('button', { name: 'conversation.creativeStudio.phase.write.continueToProduce' })
-    ).toBeInTheDocument();
     expect(screen.queryByText('conversation.creativeStudio.preview.noAssetTitle')).toBeNull();
 
     await selectStudioView(router, 'board');
@@ -1243,8 +1240,12 @@ describe('StudioPage and useStudioProject', () => {
     expect(
       await screen.findByRole('button', { name: 'conversation.creativeStudio.phase.write.addShot' })
     ).toBeEnabled();
+    // A storyboard route awaiting setup must not lock the way out of Table either.
     expect(
-      screen.getByRole('button', { name: 'conversation.creativeStudio.phase.write.continueToProduce' })
+      within(screen.getByRole('navigation', { name: 'conversation.creativeStudio.phase.nav.viewsLabel' })).getByRole(
+        'button',
+        { name: 'conversation.creativeStudio.phase.nav.board' }
+      )
     ).toBeEnabled();
   });
 
@@ -2284,10 +2285,12 @@ describe('StudioPage and useStudioProject', () => {
 
     const { batchAction, activityPanel } = await findBatchAction();
     expect(batchAction).toBeEnabled();
+    // An off-target storyboard advises; it must not lock the way to the Cut view either.
     expect(
-      within(screen.getByRole('banner')).getByRole('button', {
-        name: 'conversation.creativeStudio.phase.produce.reviewCut',
-      })
+      within(screen.getByRole('navigation', { name: 'conversation.creativeStudio.phase.nav.viewsLabel' })).getByRole(
+        'button',
+        { name: 'conversation.creativeStudio.phase.nav.cut' }
+      )
     ).toBeEnabled();
     expect(within(activityPanel).getByText('conversation.creativeStudio.review.durationMismatch')).toBeVisible();
 

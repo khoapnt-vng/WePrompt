@@ -966,7 +966,6 @@
       },
       "write": {
         "title": "테이블",
-        "continueToProduce": "계속",
         "addShot": "숏 추가",
         "noScenes": "숏을 추가하거나 스토리보드 초안을 만들어 시작하세요.",
         "scriptTableTitle": "대본",
@@ -1001,7 +1000,6 @@
         "render": "렌더링",
         "renderAnother": "다시 렌더링",
         "openPreview": "{{title}} 미리보기 열기",
-        "reviewCut": "계속",
         "modelsTitle": "모델",
         "activityTitle": "생성 활동",
         "activityEmpty": "실행 중인 생성 작업이 없습니다.",

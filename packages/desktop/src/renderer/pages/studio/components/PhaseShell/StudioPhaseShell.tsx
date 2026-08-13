@@ -5,7 +5,7 @@
  */
 
 import { Button } from '@arco-design/web-react';
-import { Download, Right } from '@icon-park/react';
+import { Download } from '@icon-park/react';
 import React, { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -58,32 +58,21 @@ export const StudioPhaseShell: React.FC<StudioPhaseShellProps> = ({
     if (controller.editor.hasUnsavedProjectDraft || controller.editor.hasUnsavedSceneDrafts) return 'dirty';
     return 'saved';
   })();
+  /**
+   * The header carries an action only where one acts on the document.
+   *
+   * Brief, Table and Board offer none. Table and Board used to hold the phase rail's step-forward
+   * buttons, which outlived the rail here; a switch has no next step, since every view is already
+   * visible and one click away, and both buttons read "Continue" while going to different places.
+   * Cut's handoff stays because it opens export — an action on the document, not progression
+   * through it.
+   */
   const headerAction = (() => {
     switch (activeView) {
       case 'brief':
-        return undefined;
       case 'table':
-        return (
-          <Button
-            type='primary'
-            disabled={navigationDisabled || controller.mutationPending}
-            onClick={() => controller.requestTransition({ view: 'board' })}
-          >
-            {t('conversation.creativeStudio.phase.write.continueToProduce')}
-            <Right aria-hidden='true' />
-          </Button>
-        );
       case 'board':
-        return (
-          <Button
-            type='primary'
-            disabled={navigationDisabled || controller.mutationPending}
-            onClick={() => controller.requestTransition({ view: 'cut' })}
-          >
-            {t('conversation.creativeStudio.phase.produce.reviewCut')}
-            <Right aria-hidden='true' />
-          </Button>
-        );
+        return undefined;
       case 'cut':
         return (
           <Button

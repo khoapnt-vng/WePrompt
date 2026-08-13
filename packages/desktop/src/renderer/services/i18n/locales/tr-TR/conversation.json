@@ -970,7 +970,6 @@
       },
       "write": {
         "title": "Tablo",
-        "continueToProduce": "Devam et",
         "addShot": "Çekim ekle",
         "noScenes": "Başlamak için bir çekim ekleyin veya hikâye panosu taslağı oluşturun.",
         "scriptTableTitle": "Senaryo",
@@ -1005,7 +1004,6 @@
         "render": "İşle",
         "renderAnother": "Yeniden işle",
         "openPreview": "{{title}} önizlemesini aç",
-        "reviewCut": "Devam et",
         "modelsTitle": "Modeller",
         "activityTitle": "Oluşturma etkinliği",
         "activityEmpty": "Çalışan bir oluşturma işi yok.",

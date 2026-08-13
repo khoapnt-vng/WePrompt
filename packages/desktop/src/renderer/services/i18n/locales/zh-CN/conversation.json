@@ -966,7 +966,6 @@
       },
       "write": {
         "title": "表格",
-        "continueToProduce": "继续",
         "addShot": "添加镜头",
         "noScenes": "添加镜头或起草故事板即可开始。",
         "scriptTableTitle": "脚本",
@@ -1001,7 +1000,6 @@
         "render": "渲染",
         "renderAnother": "再次渲染",
         "openPreview": "打开“{{title}}”预览",
-        "reviewCut": "继续",
         "modelsTitle": "模型",
         "activityTitle": "生成活动",
         "activityEmpty": "当前没有正在运行的生成任务。",

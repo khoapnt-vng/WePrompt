@@ -972,7 +972,6 @@
       },
       "write": {
         "title": "Таблиця",
-        "continueToProduce": "Продовжити",
         "addShot": "Додати кадр",
         "noScenes": "Щоб почати, додайте кадр або створіть чернетку розкадрування.",
         "scriptTableTitle": "Сценарій",
@@ -1007,7 +1006,6 @@
         "render": "Рендерити",
         "renderAnother": "Рендерити ще",
         "openPreview": "Відкрити попередній перегляд {{title}}",
-        "reviewCut": "Продовжити",
         "modelsTitle": "Моделі",
         "activityTitle": "Хід генерації",
         "activityEmpty": "Зараз немає активних завдань генерації.",
