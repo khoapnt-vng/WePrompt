@@ -864,6 +864,31 @@ describe('CreativeStudioService', () => {
 
       expect(accepted.project.rules[0].predicate?.terms).toEqual(['Nike', 'Adidas']);
     });
+
+    it('leaves the rules unchanged when accepting a duplicate rule proposal', async () => {
+      const project = await service.createProject(makeInput());
+      const seeded = await service.setBriefRules({
+        projectId: project.id,
+        expectedRevision: project.revision,
+        rules: [{ id: 'rule_existing', text: 'Keep the kits generic.', predicate: null }],
+      });
+      await store.recordProposal({
+        projectId: project.id,
+        proposalId: 'proposal_duplicate_rule',
+        baseRevision: seeded.revision,
+        payload: {
+          kind: 'pin_rule',
+          rule: { text: 'KEEP THE KITS GENERIC.', predicate: null },
+        },
+      });
+
+      const accepted = await service.acceptProposal({
+        projectId: project.id,
+        proposalId: 'proposal_duplicate_rule',
+      });
+
+      expect(accepted.project.rules).toEqual(seeded.rules);
+    });
   });
 
   describe('proposal diff', () => {
