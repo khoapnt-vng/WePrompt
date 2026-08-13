@@ -69,7 +69,7 @@ The only per-turn field on the send wire is `pinned_context`, re-read fresh from
 > - **What happens when the set exceeds 20 pins, or one pin exceeds 2,000 characters.** This is the asymmetry that matters most, and it is not obvious: the 20-pin/2,000-character limits are enforced by `appOperationsContextCompactSchema` (`payloadSchemas.ts:99-110`, `pinned_context` at `:106`), i.e. on the **compaction** channel — not by `conversation.update`, which is how Task 5 writes the pin. So an over-long or over-numerous pin set is **accepted at write time and rejected the first time Studio ever compacts**. That is a latent failure, not a loud one, and it argues for staying well under both limits under either option. Pull-only leaves 19 slots of headroom; Option B would have left ~10 and no slack for a brief that grows.
 > - **Per-turn token cost.** The pin set rides every send. Option B would push up to 16 KB on every Director turn, forever, for content one `read_storyboard` call fetches on demand. Nothing in this repo meters or caps that, and nothing warns the user. This is reason 1 above, stated as a code fact.
 > - **Freshness.** The pin is written by a renderer effect after a project revision lands; `read_storyboard` re-reads `project.json` on every tool call (`studioServer.ts:108-109`). The pull channel is strictly fresher, so Option B would still have needed the pull channel for the case where the brief changed mid-turn — it adds a channel rather than replacing one.
-> - **The unknown from Step 5.0.** What aioncore does with `pinned_context` is unproven (see below). If the answer is "ignored, or used only at compaction", Option B buys nothing and costs a chunker, while pull-only's one wasted pin costs nothing. Pull-only is the cheaper bet against an unknown.
+> - **Settled since: `pinned_context` is inert.** aioncore's `SendMessageData` has no such field on either live branch and the payload does not deny unknown fields, so the desktop's pin is silently dropped (Step 5.0). Option B's chunker would have bought nothing; pull-only's one wasted pin costs one effect. This confirms the decision rather than reopening it — and it means **no channel injects per turn today**, so §3's claim fails for the rules as well as the prose.
 >
 > **What Option B would have changed, concretely** — kept so a later phase that revisits this inherits the analysis instead of re-deriving it:
 >
@@ -1358,15 +1358,33 @@ Expected: no output — the phrase is unique to the sentence you just replaced, 
 - Create: `tests/unit/pages/studio/Storyboard/Brief/useBriefConversationPin.dom.test.ts` — a new sibling, not an addition to the existing spec. `BriefConversation.dom.test.tsx` already occupies that directory and covers the create/bind lifecycle with its own harness; the pin is a separate effect with a different mock surface.
 - Modify: `tests/unit/pages/studio/Storyboard/Brief/BriefConversation.dom.test.tsx` — its `project()` fixture (`:66-84`) gains `rules: []`. It drives the **real** hook, so Task 5's effect breaks all 11 of its tests without this. See Step 5.2.
 
-### Step 5.0 — Verify the mechanism out of band (blocking on the _claim_, not the code)
+### Step 5.0 — ANSWERED: the pin is inert. Read this before writing Task 5.
 
-- [ ] Confirm against the VNG aioncore fork (`code.vng.vn/dto/aioncore`, branch `fix/mcp-oauth-discovery`) what `POST /api/conversations/{id}/messages`'s `pinned_context` does: whether it enters every turn's prompt, where, and with what authority. This repo proves only that the field is sent per turn.
-- [ ] Record the answer in the MR description. The code below ships either way:
-  - **Injected per turn** → Phase 1 delivers the design's core claim for rules. Say so.
-  - **Ignored, or only used at compaction** → the pin is inert; `read_storyboard` (Task 4) plus the breach feedback loop (Task 11) are the delivered channels, and "loaded into every turn" is downgraded honestly in the MR. Do **not** remove the pin: it costs one effect and becomes correct the moment the backend honours it.
+**The out-of-band question is settled, against source.** The backend is `github.com/khoapnt-vng/aioncore`
+(public; the decision record's `code.vng.vn/dto/aioncore` is the GitLab mirror). Checked on **both**
+`security/pilot-hardening-d01-d06` (workspace version 0.1.54, ahead of this repo's pinned 0.1.51 and
+the bundled 0.1.53) and `fix/mcp-oauth-discovery`:
+
+- `pinned_context` does not appear anywhere in the repository — 688 Rust files, zero matches. The only
+  `pinned` identifiers are conversation list-pinning (`pinned`, `pinned_at`) and unrelated prose about
+  pinned toolchains.
+- `SendMessageData` (`crates/aionui-ai-agent/src/types.rs:12`), the carrier for a user message to an
+  agent, has exactly five fields: `content`, `msg_id`, `turn_id`, `files`, `inject_skills`. Identical
+  on both branches.
+- `#[serde(deny_unknown_fields)]` appears only on team MCP tool inputs and team API types, never on
+  the message payload — so the desktop's `pinned_context` is **silently dropped**, not rejected. That
+  is why nothing has ever errored.
+
+**Therefore the pin reaches nothing.** Write Task 5 anyway — it is one effect, it is correct, and it
+begins working the day the backend adds the field — but do not let the MR, the design record or a
+stakeholder conversation claim that rules are injected per turn. They are not.
+
+- [ ] Put this in the MR verbatim: **Phase 1 does not deliver "the brief is loaded into every director
+      turn."** Nothing is. The Director sees the brief and rules only when it calls `read_storyboard`.
 - [ ] Do not block the rest of the plan on this. Nothing else depends on the answer.
 - [ ] **Do not write "the brief cannot fit in a pin" into the MR.** It can: 20 pins × 2,000 characters against a 16 KB brief (A4). The MR states the split as a decision with its two reasons — A4's RECORDED DECISION, pull-only — not as a limit of the wire. Equally, **do not write that the brief is loaded into every turn.** After the pull-only decision that is true of the rules and false of the prose; A4's "consequence, stated plainly" paragraph is the wording to reuse.
-- [ ] This answer does not reopen the decision, but it does grade it: if `pinned_context` turns out inert, the declined Option B's chunker would have bought nothing, which is one more reason pull-only was the cheaper bet.
+- [ ] The answer grades the decision rather than reopening it: because the pin is inert, the declined Option B's chunker would have bought **nothing at all**, at the cost of a chunker and two more tests. Pull-only was the right bet against the unknown, and is now the right bet against the known.
+- [ ] **What Phase 1 still delivers, and it is the enforceable half.** The gate in `resolveProvider` (Task 9) checks every visual prompt against the rules in main, before spend, where the Director cannot reach it. That works whether or not the model ever sees a rule. The pin and the tool description are about getting the Director to comply _proactively_ instead of being refused; enforcement does not depend on either. Say it that way round in the MR.
 
 ### Step 5.1 — Write the failing test
 
