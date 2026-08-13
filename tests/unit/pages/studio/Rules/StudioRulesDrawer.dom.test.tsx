@@ -266,6 +266,73 @@ describe('StudioRulesDrawer', () => {
     expect(onSetRules.mock.calls[1][0]).toEqual([]);
   });
 
+  it('retains the drafted rule and shows the write error when the command rejects it', async () => {
+    const onSetRules = vi.fn(async () => false);
+    render(
+      <StudioRulesDrawer
+        visible
+        project={project()}
+        organisationRules={[]}
+        errorMessageKey='conversation.creativeStudio.errors.staleProject'
+        onClose={vi.fn()}
+        onSetRules={onSetRules}
+      />
+    );
+    const textInput = screen.getByLabelText('conversation.creativeStudio.rules.textLabel');
+    const termsInput = screen.getByLabelText('conversation.creativeStudio.rules.termsLabel');
+
+    fireEvent.change(textInput, { target: { value: 'No competitor logos.' } });
+    fireEvent.change(termsInput, { target: { value: 'acme, globex' } });
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.rules.add' }));
+
+    await waitFor(() => expect(onSetRules).toHaveBeenCalledTimes(1));
+    expect(textInput).toHaveValue('No competitor logos.');
+    expect(termsInput).toHaveValue('acme, globex');
+    expect(screen.getByRole('alert')).toHaveTextContent('conversation.creativeStudio.errors.staleProject');
+  });
+
+  it('clears the drafted rule after the command accepts it', async () => {
+    const onSetRules = vi.fn(async () => true);
+    render(
+      <StudioRulesDrawer visible project={project()} organisationRules={[]} onClose={vi.fn()} onSetRules={onSetRules} />
+    );
+    const textInput = screen.getByLabelText('conversation.creativeStudio.rules.textLabel');
+    const termsInput = screen.getByLabelText('conversation.creativeStudio.rules.termsLabel');
+
+    fireEvent.change(textInput, { target: { value: 'No competitor logos.' } });
+    fireEvent.change(termsInput, { target: { value: 'acme, globex' } });
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.rules.add' }));
+
+    await waitFor(() => expect(textInput).toHaveValue(''));
+    expect(termsInput).toHaveValue('');
+  });
+
+  it('disables rule writes and shows Add as loading while a write is pending', () => {
+    render(
+      <StudioRulesDrawer
+        visible
+        pending
+        project={project([
+          {
+            id: 'rule_1',
+            scope: 'project',
+            text: 'Keep the kits generic.',
+            predicate: null,
+            createdAt: '2026-08-13T00:00:00.000Z',
+          },
+        ])}
+        organisationRules={[]}
+        onClose={vi.fn()}
+        onSetRules={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.rules.removeAccessible' })).toBeDisabled();
+    const add = screen.getByRole('button', { name: 'conversation.creativeStudio.rules.add' });
+    expect(add).toBeDisabled();
+    expect(add).toHaveClass('arco-btn-loading');
+  });
+
   it('refuses to add past the cap, so the store never rejects a write the UI allowed', () => {
     const onSetRules = vi.fn(async () => true);
     const rules = Array.from({ length: 24 }, (_, index) => ({
