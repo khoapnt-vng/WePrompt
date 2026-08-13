@@ -1350,8 +1350,15 @@
       "noSelectedAssets": "書き出せる選択済みのシーン素材がありません。",
       "folderLabel": "書き出しフォルダー"
     },
+    "rules": {
+      "breachScene": "ルール「{{rule}}」によりブロックされました（「{{term}}」に一致）。",
+      "breachBlockedConfirm": "1つ以上のショットがプロジェクトルールに違反しているため、このバッチは確定できません。",
+      "breachAskDirector": "ディレクターに修正を依頼",
+      "autoSubmitBlocked": "キュー内の参照画像リクエストがプロジェクトルールに違反しました。生成前に該当ショットを確認してください。"
+    },
     "errors": {
       "featureDisabled": "Creative Studio はこのビルドでは無効です。",
+      "ruleBreach": "プロンプトがプロジェクトルールに違反しているため、生成はブロックされました。",
       "invalidPayload": "リクエストに無効または不完全な情報が含まれています。",
       "projectNotFound": "このクリエイティブスタジオのプロジェクトは存在しません。",
       "storyboardExists": "このプロジェクトには既にストーリーボードがあります。再作成する前に置き換えを確認してください。",

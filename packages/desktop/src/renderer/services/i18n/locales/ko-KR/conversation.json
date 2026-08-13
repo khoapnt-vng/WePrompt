@@ -1350,8 +1350,15 @@
       "noSelectedAssets": "내보낼 수 있는 선택된 장면 에셋이 없습니다.",
       "folderLabel": "내보내기 폴더"
     },
+    "rules": {
+      "breachScene": "규칙 ‘{{rule}}’에 의해 차단됨(‘{{term}}’ 일치).",
+      "breachBlockedConfirm": "하나 이상의 샷이 프로젝트 규칙을 위반하여 이 배치를 확인할 수 없습니다.",
+      "breachAskDirector": "디렉터에게 수정 요청",
+      "autoSubmitBlocked": "대기 중인 참조 이미지 요청이 프로젝트 규칙을 위반했습니다. 생성하기 전에 해당 샷을 검토하세요."
+    },
     "errors": {
       "featureDisabled": "이 빌드에서는 Creative Studio가 비활성화되어 있습니다.",
+      "ruleBreach": "프롬프트가 프로젝트 규칙을 위반하여 생성이 차단되었습니다.",
       "invalidPayload": "요청에 유효하지 않거나 불완전한 정보가 포함되어 있습니다.",
       "projectNotFound": "이 크리에이티브 스튜디오 프로젝트는 더 이상 존재하지 않습니다.",
       "storyboardExists": "이 프로젝트에는 이미 스토리보드가 있습니다. 다시 초안을 만들기 전에 교체를 확인하세요.",

@@ -1385,8 +1385,15 @@
       "noSelectedAssets": "No hay recursos de escenas seleccionados listos para exportar.",
       "folderLabel": "Carpeta de exportación"
     },
+    "rules": {
+      "breachScene": "Bloqueado por la regla «{{rule}}» (coincidencia: «{{term}}»).",
+      "breachBlockedConfirm": "Este lote no se puede confirmar porque una o más tomas infringen una regla del proyecto.",
+      "breachAskDirector": "Pedir al director que lo revise",
+      "autoSubmitBlocked": "Una solicitud de imagen de referencia en cola infringió una regla del proyecto. Revisa la toma afectada antes de generar."
+    },
     "errors": {
       "featureDisabled": "Creative Studio está deshabilitado en esta compilación.",
+      "ruleBreach": "La generación se bloqueó porque el prompt infringe una regla del proyecto.",
       "invalidPayload": "La solicitud contiene información no válida o incompleta.",
       "projectNotFound": "El proyecto de Creative Studio ya no existe.",
       "storyboardExists": "Este proyecto ya tiene un guion gráfico. Confirma que deseas sustituirlo antes de crear otro borrador.",

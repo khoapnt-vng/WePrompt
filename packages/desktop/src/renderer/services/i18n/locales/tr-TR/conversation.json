@@ -1369,8 +1369,15 @@
       "noSelectedAssets": "Dışa aktarmaya hazır seçili sahne varlığı yok.",
       "folderLabel": "Dışa aktarma klasörü"
     },
+    "rules": {
+      "breachScene": "“{{rule}}” kuralı tarafından engellendi (“{{term}}” eşleşti).",
+      "breachBlockedConfirm": "Bir veya daha fazla çekim proje kuralını ihlal ettiği için bu toplu işlem onaylanamaz.",
+      "breachAskDirector": "Yönetmenden düzeltmesini iste",
+      "autoSubmitBlocked": "Sıradaki bir referans görseli isteği proje kuralını ihlal etti. Oluşturmadan önce etkilenen çekimi inceleyin."
+    },
     "errors": {
       "featureDisabled": "Creative Studio bu derlemede devre dışıdır.",
+      "ruleBreach": "İstem bir proje kuralını ihlal ettiği için oluşturma engellendi.",
       "invalidPayload": "İstek geçersiz veya eksik bilgiler içeriyor.",
       "projectNotFound": "Creative Studio projesi artık mevcut değil.",
       "storyboardExists": "Bu projede zaten bir storyboard var. Yeniden taslak oluşturmadan önce değiştirmeyi onaylayın.",

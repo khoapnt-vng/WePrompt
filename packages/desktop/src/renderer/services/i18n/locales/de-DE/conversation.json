@@ -1368,8 +1368,15 @@
       "noSelectedAssets": "Keine ausgewählten Szenen-Assets sind für den Export bereit.",
       "folderLabel": "Exportordner"
     },
+    "rules": {
+      "breachScene": "Durch die Regel „{{rule}}“ blockiert (Treffer: „{{term}}“).",
+      "breachBlockedConfirm": "Dieser Stapel kann nicht bestätigt werden, da mindestens eine Einstellung gegen eine Projektregel verstößt.",
+      "breachAskDirector": "Regisseur um Überarbeitung bitten",
+      "autoSubmitBlocked": "Eine ausstehende Referenzbild-Anfrage verstößt gegen eine Projektregel. Prüfen Sie die betroffene Einstellung vor der Generierung."
+    },
     "errors": {
       "featureDisabled": "Creative Studio ist in diesem Build deaktiviert.",
+      "ruleBreach": "Die Generierung wurde blockiert, weil der Prompt gegen eine Projektregel verstößt.",
       "invalidPayload": "Die Anfrage enthält ungültige oder unvollständige Informationen.",
       "projectNotFound": "Das Creative-Studio-Projekt existiert nicht mehr.",
       "storyboardExists": "Dieses Projekt hat bereits ein Storyboard. Bestätige das Ersetzen, bevor du es erneut entwirfst.",

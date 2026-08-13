@@ -1202,8 +1202,15 @@
       "noSelectedAssets": "No selected scene assets are ready to export.",
       "folderLabel": "Export folder"
     },
+    "rules": {
+      "breachScene": "Blocked by rule “{{rule}}” (matched “{{term}}”).",
+      "breachBlockedConfirm": "This batch cannot be confirmed because one or more shots breach a project rule.",
+      "breachAskDirector": "Ask the Director to revise",
+      "autoSubmitBlocked": "A queued reference image request breached a project rule. Review the affected shot before generating."
+    },
     "errors": {
       "featureDisabled": "Creative Studio is disabled in this build.",
+      "ruleBreach": "Generation was blocked because the prompt breaches a project rule.",
       "invalidPayload": "The request contains invalid or incomplete information.",
       "projectNotFound": "The Creative Studio project no longer exists.",
       "storyboardExists": "This project already has a storyboard. Confirm replacement before drafting again.",

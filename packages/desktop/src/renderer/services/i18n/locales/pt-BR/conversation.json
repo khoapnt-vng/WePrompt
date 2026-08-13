@@ -1390,8 +1390,15 @@
       "noSelectedAssets": "Nenhum recurso de cena selecionado está pronto para exportação.",
       "folderLabel": "Pasta de exportação"
     },
+    "rules": {
+      "breachScene": "Bloqueado pela regra “{{rule}}” (termo correspondente: “{{term}}”).",
+      "breachBlockedConfirm": "Este lote não pode ser confirmado porque uma ou mais cenas violam uma regra do projeto.",
+      "breachAskDirector": "Pedir ao diretor para revisar",
+      "autoSubmitBlocked": "Uma solicitação de imagem de referência na fila violou uma regra do projeto. Revise a cena afetada antes de gerar."
+    },
     "errors": {
       "featureDisabled": "O Creative Studio está desativado nesta compilação.",
+      "ruleBreach": "A geração foi bloqueada porque o prompt viola uma regra do projeto.",
       "invalidPayload": "A solicitação contém informações inválidas ou incompletas.",
       "projectNotFound": "O projeto do Creative Studio não existe mais.",
       "storyboardExists": "Este projeto já tem um storyboard. Confirme a substituição antes de criar outro rascunho.",

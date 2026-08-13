@@ -12,6 +12,7 @@ import type {
   StudioSceneGenerationChoice,
   StudioSceneReferencePrompt,
 } from '@/common/types/project/creativeStudioTypes';
+import type { StudioRuleBreach } from '@/common/types/project/creativeStudioRules';
 import type { GenerationReviewRouteSnapshot } from './GenerationControls';
 import { Alert, Button, Modal, Tag } from '@arco-design/web-react';
 import React, { useMemo } from 'react';
@@ -40,6 +41,14 @@ export type GenerationReviewScene = {
   mediaKind: StudioMediaKind;
   outputRole: StudioOutputRole;
   durationSeconds: number;
+  /**
+   * The authored string main evaluates before sending the prompt: the reference plate subject for
+   * outputRole 'reference', the scene's visual prompt otherwise. It mirrors jobManager's
+   * `output.role === 'reference' ? stripFirstFramePromptPrefix(baseRequest.prompt, aspectRatio) :
+   * baseRequest.prompt`, because a rule verdict computed against a different string than main checks
+   * is worse than no verdict.
+   */
+  promptText: string;
   route: GenerationReviewRoute;
   /** The picture this scene's reference plate should paint. Present only for outputRole 'reference'. */
   referencePrompt?: string;
@@ -122,6 +131,10 @@ export type GenerationReviewModalProps = {
   /** Blocks another paid submit until the parent supplies a newly reviewed intent. */
   submissionBlocked?: boolean;
   errorMessageKey?: string | null;
+  /** Breaches computed by the page with the same shared evaluator main uses. */
+  ruleBreachesBySceneId?: Record<string, StudioRuleBreach[]>;
+  /** Hands the breach to the Director. Absent hides the affordance. */
+  onAskDirector?: () => void;
   onCancel: () => void;
   onConfirm: (confirmation: GenerationReviewConfirmation) => ActionResult;
 };
@@ -130,6 +143,14 @@ const routeMatchesScene = (scene: GenerationReviewScene): boolean =>
   scene.route.snapshot !== null &&
   scene.route.snapshot.sceneId === scene.id &&
   scene.route.snapshot.kind === scene.mediaKind;
+
+/**
+ * Hoisted, not inlined as `= {}`. A fresh object literal in the destructuring default is a new
+ * identity on every render, and this value goes into the review `useMemo`'s dependency array — an
+ * inline default would defeat that memo for every project with no rules, which is all of them until
+ * the user pins one.
+ */
+const NO_RULE_BREACHES: Record<string, StudioRuleBreach[]> = {};
 
 /**
  * Final paid-generation authorization surface.
@@ -151,6 +172,8 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
   submitting,
   submissionBlocked = false,
   errorMessageKey = null,
+  ruleBreachesBySceneId = NO_RULE_BREACHES,
+  onAskDirector,
   onCancel,
   onConfirm,
 }) => {
@@ -177,6 +200,7 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
       : knownAudioPolicies.length > 0
         ? 'conversation.creativeStudio.review.audioOff'
         : null;
+    const ruleBreached = scenes.some((scene) => (ruleBreachesBySceneId[scene.id] ?? []).length > 0);
 
     return {
       videoSeconds,
@@ -185,9 +209,11 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
       durationMismatch,
       validRoutes,
       audioMessageKey,
-      canConfirm: scenes.length > 0 && !missingRoute && !invalidRoute && validRoutes.length === scenes.length,
+      ruleBreached,
+      canConfirm:
+        scenes.length > 0 && !missingRoute && !invalidRoute && !ruleBreached && validRoutes.length === scenes.length,
     };
-  }, [mode, projectDurationSeconds, scenes, targetDurationSeconds]);
+  }, [mode, projectDurationSeconds, ruleBreachesBySceneId, scenes, targetDurationSeconds]);
 
   const handleConfirm = (): void => {
     if (!review.canConfirm || submissionBlocked || submitting) return;
@@ -197,8 +223,11 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
     });
   };
 
-  const disabledReason =
-    review.missingRoute || review.invalidRoute ? 'conversation.creativeStudio.review.disabledMissingRoutes' : null;
+  const disabledReason = review.ruleBreached
+    ? 'conversation.creativeStudio.rules.breachBlockedConfirm'
+    : review.missingRoute || review.invalidRoute
+      ? 'conversation.creativeStudio.review.disabledMissingRoutes'
+      : null;
 
   const footer = (
     <div className='flex flex-wrap justify-end gap-8px'>
@@ -298,6 +327,17 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
                       content={t('conversation.creativeStudio.review.invalidRoute')}
                     />
                   )}
+                  {(ruleBreachesBySceneId[scene.id] ?? []).map((breach) => (
+                    <Alert
+                      key={breach.ruleId}
+                      className='mt-10px'
+                      type='error'
+                      content={t('conversation.creativeStudio.rules.breachScene', {
+                        rule: breach.ruleText,
+                        term: breach.matchedTerm,
+                      })}
+                    />
+                  ))}
                 </>
               )}
             </article>
@@ -337,6 +377,11 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
           <p role='status' className='m-0 rounded-8px bg-fill-1 p-10px text-12px text-t-secondary'>
             {t(disabledReason)}
           </p>
+        )}
+        {review.ruleBreached && onAskDirector !== undefined && (
+          <div>
+            <Button onClick={onAskDirector}>{t('conversation.creativeStudio.rules.breachAskDirector')}</Button>
+          </div>
         )}
         {errorMessageKey && (
           <div role='alert' className='rounded-8px border border-danger-3 bg-danger-light-1 p-10px text-danger'>

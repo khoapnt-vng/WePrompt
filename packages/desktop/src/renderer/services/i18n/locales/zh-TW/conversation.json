@@ -1350,8 +1350,15 @@
       "noSelectedAssets": "沒有可供匯出的已選場景素材。",
       "folderLabel": "匯出資料夾"
     },
+    "rules": {
+      "breachScene": "遭規則「{{rule}}」阻止（符合「{{term}}」）。",
+      "breachBlockedConfirm": "一個或多個鏡頭違反專案規則，因此無法確認整個批次。",
+      "breachAskDirector": "請創意總監修改",
+      "autoSubmitBlocked": "佇列中的參考圖請求違反了專案規則。請先檢查受影響的鏡頭再生成。"
+    },
     "errors": {
       "featureDisabled": "此版本中已停用 Creative Studio。",
+      "ruleBreach": "提示詞違反專案規則，因此已阻止生成。",
       "invalidPayload": "要求包含無效或不完整的資訊。",
       "projectNotFound": "此創意工作室專案已不存在。",
       "storyboardExists": "此專案已有分鏡。再次建立草稿前請確認取代。",
