@@ -773,7 +773,6 @@
         "table": "Table",
         "board": "Board",
         "cut": "Cut",
-        "brief": "Brief",
         "saved": "Saved",
         "saving": "Saving changes..."
       },
@@ -796,7 +795,6 @@
         "intentLabel": "Creative intent",
         "durationLabel": "Target duration",
         "aspectRatioLabel": "Aspect ratio",
-        "startWriting": "Start writing",
         "invalidName": "Enter a project name before continuing.",
         "aspectLocked": "Aspect ratio is locked",
         "aspectLockedHelp": "The aspect ratio cannot change after generated media has been added."

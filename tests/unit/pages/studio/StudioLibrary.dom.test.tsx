@@ -214,8 +214,10 @@ describe('StudioLibrary', () => {
         resolution: '720p',
       })
     );
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/studio/canonical-project/brief'));
-    expect(readLastStudioView('canonical-project')).toBe('brief');
+    await waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith('/studio/canonical-project/table', { state: { openBrief: true } })
+    );
+    expect(readLastStudioView('canonical-project')).toBe('table');
   });
 
   it('submits the composer with Command-Enter', async () => {
@@ -227,7 +229,7 @@ describe('StudioLibrary', () => {
     fireEvent.keyDown(composer, { key: 'Enter', metaKey: true });
 
     await waitFor(() => expect(bridge.createProject.invoke).toHaveBeenCalledTimes(1));
-    expect(navigate).toHaveBeenCalledWith('/studio/shortcut-project/brief');
+    expect(navigate).toHaveBeenCalledWith('/studio/shortcut-project/table', { state: { openBrief: true } });
   });
 
   it('keeps the submit chord out of the visible composer controls', () => {

@@ -939,7 +939,6 @@
         "table": "Tabelle",
         "board": "Board",
         "cut": "Schnitt",
-        "brief": "Briefing",
         "saved": "Gespeichert",
         "saving": "Änderungen werden gespeichert..."
       },
@@ -962,7 +961,6 @@
         "intentLabel": "Kreative Absicht",
         "durationLabel": "Zieldauer",
         "aspectRatioLabel": "Seitenverhältnis",
-        "startWriting": "Mit dem Schreiben beginnen",
         "invalidName": "Gib vor dem Fortfahren einen Projektnamen ein.",
         "aspectLocked": "Seitenverhältnis ist gesperrt",
         "aspectLockedHelp": "Nach dem Hinzufügen erzeugter Medien kann das Seitenverhältnis nicht mehr geändert werden."

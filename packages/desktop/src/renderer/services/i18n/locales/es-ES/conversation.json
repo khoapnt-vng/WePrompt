@@ -940,7 +940,6 @@
         "table": "Tabla",
         "board": "Tablero",
         "cut": "Montaje",
-        "brief": "Briefing",
         "saved": "Guardado",
         "saving": "Guardando cambios..."
       },
@@ -964,7 +963,6 @@
         "intentLabel": "Intención creativa",
         "durationLabel": "Duración objetivo",
         "aspectRatioLabel": "Relación de aspecto",
-        "startWriting": "Empezar a escribir",
         "invalidName": "Introduce un nombre de proyecto antes de continuar.",
         "aspectLocked": "La relación de aspecto está bloqueada",
         "aspectLockedHelp": "La relación de aspecto no se puede cambiar después de añadir contenido generado."

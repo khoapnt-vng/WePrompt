@@ -476,9 +476,12 @@ describe('StudioPage and useStudioProject', () => {
 
     // The retired phase vocabulary is rejected, not remapped: it is what real localStorage values
     // and real bookmarks still carry, and the graceful path for them is the entry redirect below.
-    it.each([undefined, '', 'bogus', 'TABLE', 'write', 'produce', 'review'])('rejects %s as a Studio view', (view) => {
-      expect(parseStudioView(view)).toBeNull();
-    });
+    it.each([undefined, '', 'bogus', 'TABLE', 'brief', 'write', 'produce', 'review'])(
+      'rejects %s as a Studio view',
+      (view) => {
+        expect(parseStudioView(view)).toBeNull();
+      }
+    );
 
     it('encodes project ids in canonical view paths', () => {
       expect(studioViewPath('project / 1', 'cut')).toBe('/studio/project%20%2F%201/cut');
@@ -501,7 +504,7 @@ describe('StudioPage and useStudioProject', () => {
         },
       } as Storage;
 
-      expect(() => rememberStudioView('project-1', 'brief', inaccessibleStorage)).not.toThrow();
+      expect(() => rememberStudioView('project-1', 'table', inaccessibleStorage)).not.toThrow();
     });
 
     it('opens a project on Table', () => {
@@ -518,6 +521,45 @@ describe('StudioPage and useStudioProject', () => {
       window.localStorage.setItem('aionui:creative-studio:last-view:project-1', 'produce');
 
       expect(resolveStudioEntryView('project-1')).toBe('table');
+    });
+
+    it('falls back to Table when the saved view is the retired Brief route', () => {
+      window.localStorage.setItem('aionui:creative-studio:last-view:project-1', 'brief');
+
+      expect(resolveStudioEntryView('project-1')).toBe('table');
+    });
+
+    it('opens the Brief drawer over Table only when creation supplies the renderer intent', async () => {
+      const { router } = renderRoute({ pathname: '/studio/project-1/table', state: { openBrief: true } });
+
+      const dialog = await screen.findByRole('dialog', {
+        name: 'conversation.creativeStudio.phase.brief.title',
+      });
+      expect(router.state.location.pathname).toBe('/studio/project-1/table');
+      expect(
+        within(screen.getByRole('navigation', { name: 'conversation.creativeStudio.phase.nav.viewsLabel' })).getByRole(
+          'button',
+          { current: 'page' }
+        )
+      ).toHaveTextContent('conversation.creativeStudio.phase.nav.table');
+    });
+
+    it('flushes a just-typed brief before closing the drawer', async () => {
+      renderRoute({ pathname: '/studio/project-1/table', state: { openBrief: true } });
+      const dialog = await screen.findByRole('dialog', {
+        name: 'conversation.creativeStudio.phase.brief.title',
+      });
+      const brief = within(dialog).getByLabelText('conversation.creativeStudio.project.brief');
+
+      fireEvent.change(brief, { target: { value: 'A last-second drawer edit' } });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'common.close' }));
+
+      await waitFor(() =>
+        expect(bridge.updateProject.invoke).toHaveBeenCalledWith(
+          expect.objectContaining({ brief: 'A last-second drawer edit' })
+        )
+      );
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     });
 
     it.each([...STUDIO_VIEWS])('renders the Studio page at the %s view route', async (view) => {
@@ -541,7 +583,6 @@ describe('StudioPage and useStudioProject', () => {
     });
 
     it.each([
-      ['brief', 'conversation.creativeStudio.phase.brief.title', 'conversation.creativeStudio.phase.brief.description'],
       ['table', 'conversation.creativeStudio.phase.write.title', null],
       ['board', 'conversation.creativeStudio.phase.produce.connectEngine', null],
       [
@@ -607,7 +648,7 @@ describe('StudioPage and useStudioProject', () => {
     });
 
     it('renders one localized view switch with the routed view current', async () => {
-      renderRoute('/studio/project-1/brief');
+      renderRoute('/studio/project-1/table');
 
       const viewSwitch = await screen.findByRole('navigation', {
         name: 'conversation.creativeStudio.phase.nav.viewsLabel',
@@ -623,7 +664,7 @@ describe('StudioPage and useStudioProject', () => {
         ).toBeVisible();
       }
       expect(within(viewSwitch).getByRole('button', { current: 'page' })).toHaveTextContent(
-        'conversation.creativeStudio.phase.nav.brief'
+        'conversation.creativeStudio.phase.nav.table'
       );
       // A switch has no sequence to be part of, so no segment claims a position in one.
       expect(within(viewSwitch).queryByRole('button', { current: 'step' })).not.toBeInTheDocument();
@@ -631,7 +672,7 @@ describe('StudioPage and useStudioProject', () => {
 
     it('shares one measured Studio layout across every view without observing the viewport', async () => {
       const { observations, resize } = installResizeObserverMock();
-      const { router, view } = renderRoute('/studio/project-1/brief');
+      const { router, view } = renderRoute('/studio/project-1/table');
 
       await screen.findByRole('navigation', {
         name: 'conversation.creativeStudio.phase.nav.viewsLabel',
@@ -646,7 +687,6 @@ describe('StudioPage and useStudioProject', () => {
       expect(layoutRoot).toHaveAttribute('data-layout', 'inline');
 
       const headingKeys: Record<StudioView, string> = {
-        brief: 'conversation.creativeStudio.phase.brief.title',
         table: 'conversation.creativeStudio.phase.write.title',
         board: 'conversation.creativeStudio.phase.produce.connectEngine',
         cut: 'conversation.creativeStudio.phase.review.title',
@@ -663,7 +703,6 @@ describe('StudioPage and useStudioProject', () => {
         expect(heading.closest('[data-layout]')).toHaveAttribute('data-layout', 'inline');
         expect(observations).toHaveLength(1);
       };
-      await expectSharedViewLayout('brief');
       await expectSharedViewLayout('table');
       await expectSharedViewLayout('board');
       await expectSharedViewLayout('cut');
@@ -720,36 +759,33 @@ describe('StudioPage and useStudioProject', () => {
       }
     });
 
-    it('renders only the active phase and keeps project owners mounted across clean phase changes', async () => {
+    it('renders only the active view and keeps project owners mounted across clean view changes', async () => {
       const opening = scene();
       bridge.getProject.invoke.mockResolvedValue(
         ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
       );
-      const { router } = renderRoute('/studio/project-1/brief');
+      const { router } = renderRoute('/studio/project-1/table');
 
-      const briefHeading = await screen.findByRole('heading', {
+      const tableHeading = await screen.findByRole('heading', {
         level: 2,
-        name: 'conversation.creativeStudio.phase.brief.title',
+        name: 'conversation.creativeStudio.phase.write.title',
       });
       expect(
-        screen.queryByRole('region', { name: 'conversation.creativeStudio.phase.write.scriptTableTitle' })
+        screen.queryByRole('heading', { level: 2, name: 'conversation.creativeStudio.phase.review.title' })
       ).toBeNull();
       const loadCount = bridge.getProject.invoke.mock.calls.length;
 
-      await selectStudioView(router, 'table');
+      await selectStudioView(router, 'cut');
 
-      await waitFor(() => expect(router.state.location.pathname).toBe('/studio/project-1/table'));
-      const writeHeading = (
+      await waitFor(() => expect(router.state.location.pathname).toBe('/studio/project-1/cut'));
+      const cutHeading = (
         await screen.findAllByRole('heading', {
           level: 2,
-          name: 'conversation.creativeStudio.phase.write.title',
+          name: 'conversation.creativeStudio.phase.review.title',
         })
       )[0]!;
-      await waitFor(() => expect(document.activeElement).toBe(writeHeading));
-      expect(briefHeading).not.toBeInTheDocument();
-      expect(
-        screen.getByRole('region', { name: 'conversation.creativeStudio.phase.write.scriptTableTitle' })
-      ).toBeVisible();
+      await waitFor(() => expect(document.activeElement).toBe(cutHeading));
+      expect(tableHeading).not.toBeInTheDocument();
       expect(bridge.getProject.invoke).toHaveBeenCalledTimes(loadCount);
     });
 
@@ -979,22 +1015,53 @@ describe('StudioPage and useStudioProject', () => {
       expect(router.state.location.pathname).toBe('/studio/project-1/table');
     });
 
-    it('renders one Brief save-failure alert instead of duplicating it in the shell', async () => {
+    it('moves a Brief save failure from the drawer to one shell alert when the drawer closes', async () => {
       bridge.updateProject.invoke.mockResolvedValueOnce(failure());
-      const { router } = renderRoute('/studio/project-1/brief');
-      const durationInput = await screen.findByLabelText('conversation.creativeStudio.phase.brief.durationLabel');
+      const { router } = renderRoute('/studio/project-1/table');
+      fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.phase.brief.title' }));
+      const dialog = await screen.findByRole('dialog', {
+        name: 'conversation.creativeStudio.phase.brief.title',
+      });
+      const durationInput = within(dialog).getByLabelText('conversation.creativeStudio.phase.brief.durationLabel');
 
       fireEvent.change(durationInput, { target: { value: '24' } });
-      fireEvent.click(
-        screen.getByRole('button', {
-          name: 'conversation.creativeStudio.phase.brief.startWriting',
-        })
-      );
+      fireEvent.click(within(dialog).getByRole('button', { name: 'common.close' }));
 
       await waitFor(() => expect(bridge.updateProject.invoke).toHaveBeenCalledOnce());
-      await waitFor(() => expect(screen.getAllByRole('alert')).toHaveLength(1));
-      expect(screen.getByRole('alert')).toHaveTextContent('conversation.creativeStudio.errors.storage');
-      expect(router.state.location.pathname).toBe('/studio/project-1/brief');
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      await waitFor(() =>
+        expect(document.querySelector('[data-studio-phase-shell] > [role="alert"]')).toHaveTextContent(
+          'conversation.creativeStudio.errors.storage'
+        )
+      );
+      expect(router.state.location.pathname).toBe('/studio/project-1/table');
+    });
+
+    it('renders a project-update conflict in the drawer while open and in the shell after close', async () => {
+      bridge.updateProject.invoke.mockResolvedValueOnce(stale());
+      renderRoute('/studio/project-1/table');
+      fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.phase.brief.title' }));
+      const dialog = await screen.findByRole('dialog', {
+        name: 'conversation.creativeStudio.phase.brief.title',
+      });
+      const durationInput = within(dialog).getByLabelText('conversation.creativeStudio.phase.brief.durationLabel');
+
+      fireEvent.change(durationInput, { target: { value: '24' } });
+      fireEvent.blur(durationInput);
+
+      await waitFor(() =>
+        expect(within(dialog).getByRole('alert')).toHaveTextContent('conversation.creativeStudio.errors.staleProject')
+      );
+      expect(document.querySelector('[data-studio-phase-shell] > [role="alert"]')).not.toHaveTextContent(
+        'conversation.creativeStudio.errors.staleProject'
+      );
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'common.close' }));
+
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      expect(document.querySelector('[data-studio-phase-shell] > [role="alert"]')).toHaveTextContent(
+        'conversation.creativeStudio.errors.staleProject'
+      );
     });
 
     it('focuses and clears only a valid typed Write focus intent', async () => {
@@ -1064,7 +1131,7 @@ describe('StudioPage and useStudioProject', () => {
 
     // A bookmark or a stale in-flight URL from before the switch lands here. It must resolve to a
     // real view, not fall through the Studio route to the chat workspace.
-    it.each(['bogus', 'write', 'produce', 'review'])(
+    it.each(['bogus', 'brief', 'write', 'produce', 'review'])(
       'replaces the invalid segment %s without falling through to Guid',
       async (segment) => {
         const { router } = renderRoute(`/studio/project-1/${segment}`);
@@ -1093,7 +1160,7 @@ describe('StudioPage and useStudioProject', () => {
       bridge.getProject.invoke.mockResolvedValue(ok(restored));
       return ok(restored);
     });
-    renderRoute('/studio/project-1/brief');
+    renderRoute('/studio/project-1/table');
 
     fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.rules.open' }));
     fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.rules.undo' }));

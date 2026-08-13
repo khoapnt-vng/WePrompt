@@ -928,8 +928,8 @@ const createCloseHandshakeDependencies = (
 const studioViewUrl = (segment: string): string =>
   `file:///Applications/WePrompt/index.html#/studio/project_1${segment ? `/${segment}` : ''}`;
 
-/** Segments the rail used and the view switch dropped. `brief` is absent: it survived as a view. */
-const retiredPhaseSegments = ['write', 'produce', 'review'] as const;
+/** Segments the rail or view switch used and later retired. */
+const retiredPhaseSegments = ['brief', 'write', 'produce', 'review'] as const;
 
 describe('createCreativeStudioCloseHandshake', () => {
   /**
@@ -943,7 +943,7 @@ describe('createCreativeStudioCloseHandshake', () => {
    */
   it('interpolates view segments into the route pattern without needing regex escaping', () => {
     // Guards the guard: an empty shared list would make every derived case below vacuous.
-    expect(STUDIO_VIEWS.length).toBeGreaterThanOrEqual(4);
+    expect(STUDIO_VIEWS).toEqual(['table', 'board', 'cut']);
     for (const view of STUDIO_VIEWS) {
       expect(view, `${view} must stay a plain lowercase segment`).toMatch(/^[a-z]+$/);
     }

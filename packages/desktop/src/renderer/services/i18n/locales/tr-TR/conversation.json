@@ -940,7 +940,6 @@
         "table": "Tablo",
         "board": "Pano",
         "cut": "Kurgu",
-        "brief": "Özet",
         "saved": "Kaydedildi",
         "saving": "Değişiklikler kaydediliyor..."
       },
@@ -963,7 +962,6 @@
         "intentLabel": "Yaratıcı amaç",
         "durationLabel": "Hedef süre",
         "aspectRatioLabel": "En boy oranı",
-        "startWriting": "Yazmaya başla",
         "invalidName": "Devam etmeden önce bir proje adı girin.",
         "aspectLocked": "En boy oranı kilitli",
         "aspectLockedHelp": "Oluşturulan medya eklendikten sonra en boy oranı değiştirilemez."

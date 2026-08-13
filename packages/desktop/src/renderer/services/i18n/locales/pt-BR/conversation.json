@@ -945,7 +945,6 @@
         "table": "Tabela",
         "board": "Quadro",
         "cut": "Corte",
-        "brief": "Briefing",
         "saved": "Salvo",
         "saving": "Salvando alterações..."
       },
@@ -969,7 +968,6 @@
         "intentLabel": "Intenção criativa",
         "durationLabel": "Duração desejada",
         "aspectRatioLabel": "Proporção",
-        "startWriting": "Começar a escrever",
         "invalidName": "Informe um nome de projeto antes de continuar.",
         "aspectLocked": "A proporção está bloqueada",
         "aspectLockedHelp": "A proporção não pode ser alterada depois que uma mídia gerada for adicionada."

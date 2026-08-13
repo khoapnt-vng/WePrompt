@@ -30,7 +30,6 @@ const viewLabels: Record<StudioView, string> = {
   table: 'Table',
   board: 'Board',
   cut: 'Cut',
-  brief: 'Brief',
 };
 
 /**
@@ -39,14 +38,13 @@ const viewLabels: Record<StudioView, string> = {
  * Table and Board offer none. Both carried the phase rail's step-forward button, which outlived the
  * rail in the top bar; a view switch has no next step, and the two buttons rendered the same word
  * "Continue" while going to different places — an ambiguity this helper could not see through
- * either, since both entries used to read `'Continue'`. Brief's "Start writing" sits in its
- * validated footer and Cut's "Prepare handoff" opens export; neither is progression, so both stay.
+ * either, since both entries used to read `'Continue'`. Cut's "Prepare handoff" opens export,
+ * so it stays as a document action.
  */
 const viewCtas: Record<StudioView, string | null> = {
   table: null,
   board: null,
   cut: 'Prepare handoff',
-  brief: 'Start writing',
 };
 
 /**
@@ -54,7 +52,7 @@ const viewCtas: Record<StudioView, string | null> = {
  * the zero-action assertion on Table and Board falsifiable. Restoring either progression CTA turns
  * the expected count of 0 into 1 and fails `expectStudioView` on both views.
  */
-const viewCtaPattern = /^(Start writing|Continue|Prepare handoff)$/;
+const viewCtaPattern = /^(Continue|Prepare handoff)$/;
 const timingGateCopy = [
   'Match the storyboard duration to the target before generating all ready shots.',
   'Scene timing must match the project target before batch generation.',
@@ -399,7 +397,7 @@ test.describe('Creative Studio workspace', () => {
       });
     });
 
-    await test.step('create a one-sentence project in the library and land on Brief', async () => {
+    await test.step('create a one-sentence project on Table with the Brief drawer open', async () => {
       await openStudioLibrary(page);
       const studioLibrary = page.getByRole('region', { name: 'Creative Studio' });
       await expect(studioLibrary.getByRole('heading', { level: 1, name: 'Creative Studio' })).toBeVisible();
@@ -412,12 +410,13 @@ test.describe('Creative Studio workspace', () => {
       await composer.fill(projectBrief);
       await studioLibrary.getByRole('button', { name: 'Read my brief →' }).click();
 
-      await expect(page).toHaveURL(/#\/studio\/[^/]+\/brief$/);
-      projectId = projectIdFromViewUrl(page, 'brief');
+      await expect(page).toHaveURL(/#\/studio\/[^/]+\/table$/);
+      projectId = projectIdFromViewUrl(page, 'table');
       await expect(page.getByRole('heading', { level: 1, name: projectBrief })).toBeVisible();
       await expect(page.getByLabel('Aspect ratio: 16:9')).toBeVisible();
-      await expectStudioView(page, projectId, 'brief');
-      await expect(page.getByRole('region', { name: 'Brief' }).getByLabel('Creative intent')).toHaveValue(projectBrief);
+      await expectStudioView(page, projectId, 'table');
+      const briefDrawer = page.getByRole('dialog', { name: 'Brief' });
+      await expect(briefDrawer.getByRole('textbox', { name: 'Brief' })).toHaveValue(projectBrief);
       // `data-studio-layout-root` is StudioShell's root now, and the phase shell hangs two levels
       // below it: work panel > phase shell > header. The chain stays direct-child on purpose — the
       // phases render headers and save-state regions of their own (a scene row, the script table),
@@ -467,7 +466,8 @@ test.describe('Creative Studio workspace', () => {
     });
 
     await test.step('add and save a complete shot in the Table view without configuring an engine', async () => {
-      await page.getByRole('button', { name: 'Start writing' }).click();
+      await page.getByRole('dialog', { name: 'Brief' }).getByRole('button', { name: 'Close' }).click();
+      await expect(page.getByRole('dialog', { name: 'Brief' })).toHaveCount(0);
       await expectStudioView(page, projectId, 'table');
       const tableView = page.getByRole('region', { name: 'Table' });
       await expect(tableView.getByText('This step does not generate images or video.', { exact: true })).toBeVisible();
@@ -562,8 +562,10 @@ test.describe('Creative Studio workspace', () => {
       await expectIdleProduceSurface(page, projectId);
       await selectStudioView(page, projectId, 'table');
       await expect(page.getByRole('heading', { level: 2, name: 'Table' })).toBeVisible();
-      await selectStudioView(page, projectId, 'brief');
-      await expect(page.getByRole('heading', { level: 2, name: 'Brief' })).toBeVisible();
+      await page.getByRole('button', { name: 'Brief', exact: true }).click();
+      await expect(page.getByRole('dialog', { name: 'Brief' })).toBeVisible();
+      await page.getByRole('dialog', { name: 'Brief' }).getByRole('button', { name: 'Close' }).click();
+      await expect(page.getByRole('dialog', { name: 'Brief' })).toHaveCount(0);
 
       await navigateTo(page, studioViewHash(projectId, 'table'));
       await expectStudioView(page, projectId, 'table');
@@ -653,10 +655,11 @@ test.describe('Creative Studio packaged workspace', () => {
     await studioLibrary.getByLabel('What are we making?').fill(projectBrief);
     await studioLibrary.getByRole('button', { name: 'Read my brief →' }).click();
 
-    await expect(page).toHaveURL(/#\/studio\/[^/]+\/brief$/);
-    const projectId = projectIdFromViewUrl(page, 'brief');
+    await expect(page).toHaveURL(/#\/studio\/[^/]+\/table$/);
+    const projectId = projectIdFromViewUrl(page, 'table');
     await expect(page.getByRole('heading', { level: 1, name: projectBrief })).toBeVisible();
-    await expectStudioView(page, projectId, 'brief');
+    await expectStudioView(page, projectId, 'table');
+    await expect(page.getByRole('dialog', { name: 'Brief' })).toBeVisible();
     await expect(page.getByText('WePrompt Studio E2E')).toHaveCount(0);
     const routeCatalog = await readStudioRouteCatalog(page, projectId);
     expect(routeCatalog.image.selected).toBeNull();

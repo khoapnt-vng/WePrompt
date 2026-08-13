@@ -110,7 +110,6 @@ const phaseKeys = [
   'phase.nav.table',
   'phase.nav.board',
   'phase.nav.cut',
-  'phase.nav.brief',
   'phase.nav.saved', // StudioPhaseHeader save chip, not the view switch
   'phase.nav.saving', // StudioPhaseHeader save chip, not the view switch
   'phase.shared.backToLibrary',
@@ -125,7 +124,6 @@ const phaseKeys = [
   'phase.brief.intentLabel',
   'phase.brief.durationLabel',
   'phase.brief.aspectRatioLabel',
-  'phase.brief.startWriting',
   'phase.brief.invalidName',
   'phase.brief.aspectLocked',
   'phase.brief.aspectLockedHelp',
@@ -398,8 +396,7 @@ const removedWriteAssistantKeys = [
  * Copy for the four-step Brief/Write/Produce/Review rail that the view switch replaced — both its
  * labels and its two progression calls to action.
  *
- * `phase.nav.brief` is deliberately not here — Brief survived the rail as a view and kept its
- * label. `phase.nav.saved` and `phase.nav.saving` are not rail copy at all; they are the header's
+ * `phase.nav.saved` and `phase.nav.saving` are not rail copy at all; they are the header's
  * save chip, and a prefix-wide sweep of `phase.nav.*` would take them with it.
  *
  * `phase.write.continueToProduce` and `phase.produce.reviewCut` were the rail's step-forward
@@ -416,6 +413,9 @@ const removedPhaseRailKeys = [
   'phase.write.continueToProduce',
   'phase.produce.reviewCut',
 ] as const;
+
+/** Copy retired when Brief moved from the view switch into a project-level drawer. */
+const removedBriefViewKeys = ['phase.nav.brief', 'phase.brief.startWriting'] as const;
 
 describe('Creative Studio localization contract', () => {
   it('carries no copy for the four-step phase rail the view switch replaced, in any configured locale', () => {
@@ -435,6 +435,17 @@ describe('Creative Studio localization contract', () => {
     }
   });
 
+  it('carries no switch label or progression action for Brief now that it is a drawer', () => {
+    for (const locale of i18nConfig.supportedLanguages) {
+      const leaves = flattenStringLeaves(loadConversationLocale(locale).creativeStudio);
+      expect(leaves['phase.brief.title'], `${locale}/phase.brief.title`).toBeTruthy();
+      expect(leaves['phase.brief.durationLabel'], `${locale}/phase.brief.durationLabel`).toBeTruthy();
+      for (const key of removedBriefViewKeys) {
+        expect(leaves[key], `${locale}/${key} outlived the Brief view`).toBeUndefined();
+      }
+    }
+  });
+
   /**
    * A view's heading is the first thing a screen reader speaks after the switch moves focus, because
    * `StudioPhaseShell` focuses `[data-studio-phase-heading]` on every view change. Activating "Cut"
@@ -449,7 +460,6 @@ describe('Creative Studio localization contract', () => {
   it.each([
     ['phase.write.title', 'phase.nav.table'],
     ['phase.review.title', 'phase.nav.cut'],
-    ['phase.brief.title', 'phase.nav.brief'],
   ])('words %s exactly as the switch label %s in every configured locale', (headingKey, navKey) => {
     const issues: string[] = [];
 
@@ -654,7 +664,7 @@ describe('Creative Studio localization contract', () => {
         expect(leaves[key], `${locale}/${key} must be removed`).toBeUndefined();
       }
       // Guards the guard: a wrong lookup shape would make the assertions above vacuous.
-      expect(leaves['phase.brief.startWriting'], `${locale}/phase.brief.startWriting`).toBeTruthy();
+      expect(leaves['phase.brief.title'], `${locale}/phase.brief.title`).toBeTruthy();
     }
   });
 

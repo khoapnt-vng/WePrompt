@@ -84,8 +84,8 @@ export const StudioLibrary: React.FC = () => {
           setCreateErrorMessageKey(result.error.messageKey);
           return;
         }
-        rememberStudioView(result.data.id, 'brief');
-        navigate(studioViewPath(result.data.id, 'brief'));
+        rememberStudioView(result.data.id, 'table');
+        navigate(studioViewPath(result.data.id, 'table'), { state: { openBrief: true } });
       } catch {
         setCreateErrorMessageKey('conversation.creativeStudio.errors.storage');
       } finally {

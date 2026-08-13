@@ -15,7 +15,6 @@ const VIEW_LABEL_KEYS: Record<StudioView, string> = {
   table: 'conversation.creativeStudio.phase.nav.table',
   board: 'conversation.creativeStudio.phase.nav.board',
   cut: 'conversation.creativeStudio.phase.nav.cut',
-  brief: 'conversation.creativeStudio.phase.nav.brief',
 };
 
 export type StudioViewSwitchProps = {

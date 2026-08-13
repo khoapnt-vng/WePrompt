@@ -247,6 +247,7 @@ const phaseController = (): StudioPhaseControllers => {
     advisory: null,
     mutationPending: false,
     requestTransition: vi.fn(),
+    openBrief: vi.fn(),
     openRules: vi.fn(),
     openDraftReview: vi.fn(),
     openSingleGenerationReview: vi.fn(),
@@ -261,16 +262,17 @@ const phaseController = (): StudioPhaseControllers => {
 };
 
 describe('Creative Studio full-sentence English copy', () => {
-  it('keeps Brief start-writing in its validated footer and document rules in the frame', async () => {
+  it('keeps the Brief and Rules project objects together in the frame', async () => {
     await renderEnglish(
-      <StudioPhaseShell activeView='brief' controller={phaseController()} navigationDisabled={false} onBack={vi.fn()} />
+      <StudioPhaseShell activeView='table' controller={phaseController()} navigationDisabled={false} onBack={vi.fn()} />
     );
 
     const headerActions = document.querySelector<HTMLElement>('[data-studio-phase-actions]');
     expect(headerActions).not.toBeNull();
-    expect(within(headerActions!).getAllByRole('button')).toHaveLength(1);
+    expect(within(headerActions!).getAllByRole('button')).toHaveLength(2);
+    expect(within(headerActions!).getByRole('button', { name: 'Brief' })).toBeInTheDocument();
     expect(within(headerActions!).getByRole('button', { name: 'Rules' })).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Start writing' })).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: 'Start writing' })).not.toBeInTheDocument();
   });
 
   /**
@@ -280,7 +282,7 @@ describe('Creative Studio full-sentence English copy', () => {
    * word while going to different places was ambiguous besides.
    *
    * Asserting the exact button count *and* the absence of the retired word keeps this falsifiable
-   * in both directions: restoring either CTA makes the header hold two buttons and match "Continue".
+   * in both directions: restoring either CTA makes the header hold three buttons and match "Continue".
    */
   it.each(['table', 'board'] as const)('offers no progression action in the %s view header', async (activeView) => {
     await renderEnglish(
@@ -294,7 +296,8 @@ describe('Creative Studio full-sentence English copy', () => {
 
     const headerActions = document.querySelector<HTMLElement>('[data-studio-phase-actions]');
     expect(headerActions).not.toBeNull();
-    expect(within(headerActions!).getAllByRole('button')).toHaveLength(1);
+    expect(within(headerActions!).getAllByRole('button')).toHaveLength(2);
+    expect(within(headerActions!).getByRole('button', { name: 'Brief' })).toBeInTheDocument();
     expect(within(headerActions!).getByRole('button', { name: 'Rules' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
   });
@@ -306,7 +309,8 @@ describe('Creative Studio full-sentence English copy', () => {
 
     const headerActions = document.querySelector<HTMLElement>('[data-studio-phase-actions]');
     expect(headerActions).not.toBeNull();
-    expect(within(headerActions!).getAllByRole('button')).toHaveLength(2);
+    expect(within(headerActions!).getAllByRole('button')).toHaveLength(3);
+    expect(within(headerActions!).getByRole('button', { name: 'Brief' })).toBeInTheDocument();
     expect(within(headerActions!).getByRole('button', { name: 'Rules' })).toBeInTheDocument();
     expect(within(headerActions!).getByRole('button', { name: 'Prepare handoff' })).toBeInTheDocument();
   });
@@ -333,8 +337,9 @@ describe('Creative Studio full-sentence English copy', () => {
 
         // Guards the guard: a view id the shell cannot mount renders an empty frame, and an empty
         // frame satisfies every absence check below without exercising a single string.
-        if (container.querySelector('[data-studio-phase-heading]') === null) {
-          issues.push(`${locale}.${activeView} mounted no view body`);
+        const focusTargets = container.querySelectorAll('[data-studio-phase-heading]');
+        if (focusTargets.length !== 1) {
+          issues.push(`${locale}.${activeView} mounted ${focusTargets.length} focused headings`);
         }
 
         if (rawKey.test(container.textContent ?? '')) {
@@ -359,8 +364,8 @@ describe('Creative Studio full-sentence English copy', () => {
     await renderEnglish(<StudioViewSwitch activeView='table' disabled={false} onSelect={vi.fn()} />);
 
     const navigation = screen.getByRole('navigation', { name: 'Project views' });
-    expect(within(navigation).getAllByRole('button')).toHaveLength(4);
-    for (const viewName of ['Table', 'Board', 'Cut', 'Brief']) {
+    expect(within(navigation).getAllByRole('button')).toHaveLength(3);
+    for (const viewName of ['Table', 'Board', 'Cut']) {
       expect(within(navigation).getByRole('button', { name: viewName })).toBeVisible();
     }
 

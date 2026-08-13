@@ -11,7 +11,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { SelectedSceneSaveState } from '../../hooks/useStoryboardEditor';
 import type { StudioView } from '../../studioPhaseRoute';
-import { BriefPhase, ProducePhase, ReviewPhase, WritePhase } from './phases';
+import { ProducePhase, ReviewPhase, WritePhase } from './phases';
 import { StudioDocumentActivity } from './StudioDocumentActivity';
 import { StudioPhaseHeader } from './StudioPhaseHeader';
 import { StudioViewSwitch } from './StudioViewSwitch';
@@ -61,7 +61,7 @@ export const StudioPhaseShell: React.FC<StudioPhaseShellProps> = ({
   /**
    * The header carries an action only where one acts on the document.
    *
-   * Brief, Table and Board offer none. Table and Board used to hold the phase rail's step-forward
+   * Table and Board offer none. They used to hold the phase rail's step-forward
    * buttons, which outlived the rail here; a switch has no next step, since every view is already
    * visible and one click away, and both buttons read "Continue" while going to different places.
    * Cut's handoff stays because it opens export — an action on the document, not progression
@@ -69,7 +69,6 @@ export const StudioPhaseShell: React.FC<StudioPhaseShellProps> = ({
    */
   const headerAction = (() => {
     switch (activeView) {
-      case 'brief':
       case 'table':
       case 'board':
         return undefined;
@@ -103,6 +102,9 @@ export const StudioPhaseShell: React.FC<StudioPhaseShellProps> = ({
         activity={<StudioDocumentActivity jobs={controller.jobs.jobs} render={controller.render} />}
         actions={
           <>
+            <Button size='small' disabled={navigationDisabled} onClick={controller.openBrief}>
+              {t('conversation.creativeStudio.phase.brief.title')}
+            </Button>
             <Button size='small' disabled={navigationDisabled} onClick={controller.openRules}>
               {t('conversation.creativeStudio.rules.open')}
             </Button>
@@ -124,7 +126,6 @@ export const StudioPhaseShell: React.FC<StudioPhaseShellProps> = ({
       )}
       {notice}
       <div className={styles.phaseFrame}>
-        {activeView === 'brief' && <BriefPhase controller={controller} layoutMode={layoutMode} />}
         {activeView === 'table' && <WritePhase controller={controller} layoutMode={layoutMode} />}
         {activeView === 'board' && <ProducePhase controller={controller} layoutMode={layoutMode} />}
         {activeView === 'cut' && <ReviewPhase controller={controller} layoutMode={layoutMode} />}

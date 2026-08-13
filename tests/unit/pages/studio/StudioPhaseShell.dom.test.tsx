@@ -185,6 +185,7 @@ const controller = (
   advisory,
   mutationPending: false,
   requestTransition: vi.fn(),
+  openBrief: vi.fn(),
   openRules: vi.fn(),
   acceptProposal: vi.fn(),
   rejectProposal: vi.fn(),
@@ -239,8 +240,7 @@ describe('StudioPhaseShell advisory', () => {
 
 /**
  * The frame owns in-flight document work. The Board's feed and the Cut's render button are view
- * detail; the aggregate has to be legible from a view that renders neither, which is what these
- * cases assert by mounting Brief.
+ * detail; the aggregate has to be legible from a view that renders neither.
  */
 describe('StudioPhaseShell document activity', () => {
   const renderView = (activeView: StudioView, overrides: Partial<StudioPhaseControllers>) =>
@@ -256,14 +256,14 @@ describe('StudioPhaseShell document activity', () => {
   const activity = (): HTMLElement =>
     screen.getByRole('status', { name: 'conversation.creativeStudio.phase.shared.activityLabel' });
 
-  it('reports generation running elsewhere in the document while Brief is on screen', () => {
-    renderView('brief', {
+  it('reports generation running elsewhere in the document while Table is on screen', () => {
+    renderView('table', {
       jobs: { ...jobs, jobs: [job({ id: 'job-1' }), job({ id: 'job-2', status: 'queued_remote' })] },
     });
 
     // Guards the guard: the readout is header-owned, so it survives a view id the shell cannot
     // mount. Without this the whole suite would keep passing against an empty frame.
-    expect(screen.getByRole('heading', { level: 2, name: 'conversation.creativeStudio.phase.brief.title' }));
+    expect(screen.getByRole('heading', { level: 2, name: 'conversation.creativeStudio.phase.write.title' }));
     expect(activity()).toHaveTextContent(/activityGenerating:count=2(?![\d.])/);
   });
 
@@ -271,8 +271,8 @@ describe('StudioPhaseShell document activity', () => {
    * The percentage is a `progressbar` value beside the live region, not text inside it: ffmpeg
    * progress arrives many times a second, and a polite atomic region would speak every step.
    */
-  it('reports a cut render running elsewhere in the document while Brief is on screen', () => {
-    renderView('brief', { render: { ...idleRender, status: 'running', progress: 0.42 } });
+  it('reports a cut render running elsewhere in the document while Table is on screen', () => {
+    renderView('table', { render: { ...idleRender, status: 'running', progress: 0.42 } });
 
     const progressbar = screen.getByRole('progressbar', {
       name: 'conversation.creativeStudio.phase.shared.activityRenderingLabel',
@@ -283,7 +283,7 @@ describe('StudioPhaseShell document activity', () => {
   });
 
   it('keeps the region mounted and silent when the document has no work in flight', () => {
-    renderView('brief', {});
+    renderView('table', {});
 
     expect(activity()).toBeEmptyDOMElement();
   });
@@ -328,7 +328,7 @@ describe('StudioViewSwitch active marker while blocked', () => {
   it('marks exactly one view active and leaves the others unmarked while blocked', () => {
     renderSwitch(true);
 
-    for (const label of ['table', 'board', 'brief']) {
+    for (const label of ['table', 'board']) {
       const inactive = viewButton(label);
       expect(inactive).not.toHaveClass(styles.viewButtonActive!);
       expect(inactive).not.toHaveAttribute('aria-current');

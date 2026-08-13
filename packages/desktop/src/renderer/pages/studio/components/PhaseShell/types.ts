@@ -42,6 +42,8 @@ export type StudioPhaseControllers = {
   advisory: StudioPhaseAdvisory | null;
   mutationPending: boolean;
   requestTransition: (transition: StudioViewTransition) => void;
+  /** Opens the project draft settings from the frame. */
+  openBrief: () => void;
   /** Opens the document's rule list. The frame owns it, so every view can reach it. */
   openRules: () => void;
   acceptProposal: (request: StudioProposalRequest) => Promise<StudioCommandResult<StudioProposalAcceptance>>;
@@ -57,19 +59,6 @@ export type StudioPhaseControllers = {
   clearWriteFocusIntent: () => void;
   openDuplicateChargeConfirmation: (jobId: string) => void;
 };
-
-export type BriefPhaseController = Pick<
-  StudioPhaseControllers,
-  | 'project'
-  | 'proposals'
-  | 'readiness'
-  | 'editor'
-  | 'advisory'
-  | 'mutationPending'
-  | 'requestTransition'
-  | 'acceptProposal'
-  | 'rejectProposal'
->;
 
 export type WritePhaseController = Pick<
   StudioPhaseControllers,

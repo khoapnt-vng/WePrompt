@@ -937,7 +937,6 @@
         "table": "テーブル",
         "board": "ボード",
         "cut": "カット",
-        "brief": "概要",
         "saved": "保存済み",
         "saving": "変更を保存しています..."
       },
@@ -959,7 +958,6 @@
         "intentLabel": "制作意図",
         "durationLabel": "目標尺",
         "aspectRatioLabel": "アスペクト比",
-        "startWriting": "構成を始める",
         "invalidName": "続行する前にプロジェクト名を入力してください。",
         "aspectLocked": "アスペクト比は固定されています",
         "aspectLockedHelp": "生成済みメディアを追加した後はアスペクト比を変更できません。"

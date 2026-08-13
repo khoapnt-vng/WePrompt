@@ -46,6 +46,7 @@ import {
   type GenerationReviewRouteSnapshot,
   type GenerationSingleReviewRequest,
   StoryboardDraftModal,
+  StudioBriefDrawer,
   StudioExportModal,
   StudioLibrary,
   StudioPhaseShell,
@@ -279,6 +280,11 @@ const parseWriteFocusIntent = (state: unknown): StudioWriteFocusIntent | null =>
     : null;
 };
 
+const parseBriefOpenIntent = (state: unknown): boolean =>
+  typeof state === 'object' && state !== null && Object.hasOwn(state, 'openBrief')
+    ? (state as { openBrief?: unknown }).openBrief === true
+    : false;
+
 /**
  * The generation review, plus the one thing it needs from the Director conversation.
  *
@@ -362,6 +368,7 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
       !editor.hasUnsavedSceneDrafts,
   });
   const [draftModalVisible, setDraftModalVisible] = useState(false);
+  const [briefOpen, setBriefOpen] = useState(() => parseBriefOpenIntent(location.state));
   const [rulesOpen, setRulesOpen] = useState(false);
   const [rulesPending, setRulesPending] = useState(false);
   const [rulesErrorMessageKey, setRulesErrorMessageKey] = useState<string | null>(null);
@@ -434,6 +441,11 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
   canonicalProjectRef.current = project;
   editorRef.current = editor;
   const writeFocusIntent = useMemo(() => parseWriteFocusIntent(location.state), [location.state]);
+
+  useEffect(() => {
+    if (!parseBriefOpenIntent(location.state)) return;
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.pathname, location.state, navigate]);
   const draftConflict = editor.conflict?.operation === 'draft_storyboard' ? editor.conflict : null;
   const draftErrorMessageKey =
     editor.error?.operation === 'draft_storyboard'
@@ -1289,7 +1301,7 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
     errorMessageKey ??
     variationIssueMessageKey ??
     referenceImportIssue?.messageKey ??
-    (activeView === 'brief' ? null : projectUpdateIssue);
+    (briefOpen ? null : projectUpdateIssue);
   const advisory: StudioPhaseControllers['advisory'] =
     shellIssueMessageKey !== null
       ? { messageKey: shellIssueMessageKey, anchor: 'shell' }
@@ -1318,6 +1330,7 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
     mutationPending:
       canonicalMutationPending || referenceImportSceneId !== null || generationReviewRefreshing || exportPending,
     requestTransition,
+    openBrief: () => setBriefOpen(true),
     openRules: () => setRulesOpen(true),
     acceptProposal: (request) => ipcBridge.creativeStudio.acceptProposal.invoke(request),
     rejectProposal: (request) => ipcBridge.creativeStudio.rejectProposal.invoke(request),
@@ -1453,6 +1466,7 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
         onRefreshCatalog={studioModels.refresh}
         onSelectStoryboardModel={(selection) => studioModels.updateSelection({ role: 'storyboard', selection })}
       />
+      <StudioBriefDrawer visible={briefOpen} controller={controller} onClose={() => setBriefOpen(false)} />
       {project !== null && (
         <StudioRulesDrawer
           visible={rulesOpen}

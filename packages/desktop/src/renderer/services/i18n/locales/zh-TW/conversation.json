@@ -937,7 +937,6 @@
         "table": "表格",
         "board": "看板",
         "cut": "剪輯",
-        "brief": "簡報",
         "saved": "已儲存",
         "saving": "正在儲存變更..."
       },
@@ -959,7 +958,6 @@
         "intentLabel": "創作意圖",
         "durationLabel": "目標時長",
         "aspectRatioLabel": "長寬比",
-        "startWriting": "開始編寫",
         "invalidName": "請先輸入專案名稱再繼續。",
         "aspectLocked": "長寬比已鎖定",
         "aspectLockedHelp": "加入產生的媒體後，無法變更長寬比。"
