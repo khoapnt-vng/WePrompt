@@ -116,8 +116,15 @@ incomplete…".
 
 **The five vacuous passes.** After this change these assert nothing and must be deleted or
 re-pointed, not left green: `StudioPhaseHeader.dom.test.tsx` "header does not host a rail"
-(unfalsifiable once no rail exists anywhere) and `ProducePhase.dom.test.tsx`'s absence assertion for
-`phase.produce.reviewCut`, among others. A test that cannot fail is worse than one that does.
+(unfalsifiable once no rail exists anywhere), among others. A test that cannot fail is worse than
+one that does.
+
+**Discharged, and worth recording because I had it wrong.** This list also named
+`ProducePhase.dom.test.tsx`'s absence assertion for `phase.produce.reviewCut`. C3's implementer
+declined to delete it and was right: the shell still rendered that CTA on the Board view, so the
+duplication it guarded was still reachable. It became vacuous only when the progression CTAs
+themselves were deleted, and it was removed in that commit. Timing, not correctness — but a test
+deleted one commit early is a gap nobody would have noticed.
 
 Verify: `bun run test` (expect 641/8,589 ± the deletions, each one accounted for), `bunx tsc
 --noEmit`, `node scripts/check-i18n.js`, `bunx playwright test --list`.
