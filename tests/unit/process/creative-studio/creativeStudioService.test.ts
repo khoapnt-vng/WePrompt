@@ -661,6 +661,35 @@ describe('CreativeStudioService', () => {
     expect(undone.ruleListUndo).toBeNull();
   });
 
+  it('refuses undo when the project changes between its fresh read and compare-and-set write', async () => {
+    const project = await service.createProject(makeInput());
+    const ruled = await service.setBriefRules({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      rules: [{ id: 'rule_1', text: 'Keep the kits generic.', predicate: null }],
+    });
+    let injectConcurrentEdit = true;
+    const racingStore: CreativeStudioStore = {
+      ...store,
+      updateProject: async (projectId, update, expectedRevision) => {
+        if (injectConcurrentEdit && projectId === project.id) {
+          injectConcurrentEdit = false;
+          await store.updateProject(projectId, (current) => ({ ...current, name: 'Concurrent edit' }), ruled.revision);
+        }
+        return store.updateProject(projectId, update, expectedRevision);
+      },
+    };
+    const racingService = createCreativeStudioService({
+      store: racingStore,
+      onProjectUpdated,
+      storyboardPlanner: makePlanner(),
+    });
+
+    await expect(racingService.undoBriefRules({ projectId: project.id })).rejects.toMatchObject({
+      code: 'stale_project',
+    } satisfies Partial<CreativeStudioStoreError>);
+  });
+
   it('refuses undo when no rule-list write is available', async () => {
     const project = await service.createProject(makeInput());
 
