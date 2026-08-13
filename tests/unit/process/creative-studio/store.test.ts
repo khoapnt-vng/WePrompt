@@ -335,6 +335,31 @@ describe('creative studio project store', () => {
   });
 
   describe('proposal ledger', () => {
+    it('accepts a pin_rule proposal record and refuses one with an unknown key', async () => {
+      const project = await store.createProject(makeInput());
+      const { pendingDir } = await store.resolveProposalPaths(project.id);
+
+      const good = {
+        schemaVersion: 1,
+        id: 'proposal_rule',
+        projectId: project.id,
+        status: 'pending',
+        baseRevision: project.revision,
+        payload: { kind: 'pin_rule', rule: { text: 'Keep the kits generic.', predicate: null } },
+        createdAt: '2026-08-13T00:00:00.000Z',
+        decidedAt: null,
+      };
+      writeFileSync(path.join(pendingDir, 'proposal_rule.json'), JSON.stringify(good));
+      writeFileSync(
+        path.join(pendingDir, 'proposal_bad.json'),
+        JSON.stringify({ ...good, id: 'proposal_bad', payload: { ...good.payload, sceneOrder: [] } })
+      );
+
+      const proposals = await store.listProposals(project.id);
+
+      expect(proposals.map((proposal) => proposal.id)).toEqual(['proposal_rule']);
+    });
+
     it('resolves verified project and pending paths while creating every proposal directory', async () => {
       const project = await store.createProject(makeInput());
 

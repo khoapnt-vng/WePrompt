@@ -63,7 +63,13 @@ import type {
   StudioTextModelRef,
   StudioUpdateModelSelectionRequest,
 } from '@/common/types/project/creativeStudioTypes';
-import { hasRuleToken, ruleTermMatchKey, STUDIO_RULE_LIMITS } from '@/common/types/project/creativeStudioRules';
+import {
+  foldForRuleMatch,
+  hasRuleToken,
+  resolveEffectiveStudioRules,
+  ruleTermMatchKey,
+  STUDIO_RULE_LIMITS,
+} from '@/common/types/project/creativeStudioRules';
 import type { ISessionMcpServer } from '@/common/config/storage';
 import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
 import { isCanonicalStudioGeneratedTake } from '@/common/types/project/creativeStudioCanonicalTake';
@@ -778,31 +784,56 @@ const toRendererProject = (project: StudioProject): StudioRendererProject => {
   };
 };
 
+/**
+ * The whitelist every proposal crosses on its way to the renderer.
+ *
+ * It is exhaustive by construction — it rebuilds the payload field by field and aliases nothing — so
+ * a payload kind that is NOT branched here reaches the card with its own fields stripped and the
+ * storyboard fields invented. `toRendererProposal` is the only path (listProposals :1172,
+ * acceptProposal :1201, rejectProposal :1210), so this function is the whole contract.
+ *
+ * Keep the no-alias discipline the storyboard branch already uses: `terms` is copied, not shared. A
+ * renderer holding a reference into a store-owned array is the `outputRole` trap's twin.
+ */
+const toRendererProposalPayload = (payload: StudioProposalPayload): StudioProposalPayload =>
+  payload.kind === 'pin_rule'
+    ? {
+        kind: 'pin_rule',
+        rule: {
+          text: payload.rule.text,
+          predicate:
+            payload.rule.predicate === null
+              ? null
+              : { kind: payload.rule.predicate.kind, terms: [...payload.rule.predicate.terms] },
+        },
+      }
+    : {
+        kind: 'replace_storyboard',
+        sceneOrder: [...payload.sceneOrder],
+        scenes: Object.fromEntries(
+          Object.entries(payload.scenes).map(([sceneId, scene]) => [
+            sceneId,
+            {
+              title: scene.title,
+              purpose: scene.purpose,
+              visualPrompt: scene.visualPrompt,
+              narration: scene.narration,
+              onScreenText: scene.onScreenText,
+              mediaKind: scene.mediaKind,
+              durationSeconds: scene.durationSeconds,
+              referenceAssetId: scene.referenceAssetId,
+            },
+          ])
+        ),
+      };
+
 const toRendererProposal = (proposal: StudioProposal, diff?: StudioProposalDiff): StudioProposal => ({
   schemaVersion: proposal.schemaVersion,
   id: proposal.id,
   projectId: proposal.projectId,
   status: proposal.status,
   baseRevision: proposal.baseRevision,
-  payload: {
-    kind: proposal.payload.kind,
-    sceneOrder: [...proposal.payload.sceneOrder],
-    scenes: Object.fromEntries(
-      Object.entries(proposal.payload.scenes).map(([sceneId, scene]) => [
-        sceneId,
-        {
-          title: scene.title,
-          purpose: scene.purpose,
-          visualPrompt: scene.visualPrompt,
-          narration: scene.narration,
-          onScreenText: scene.onScreenText,
-          mediaKind: scene.mediaKind,
-          durationSeconds: scene.durationSeconds,
-          referenceAssetId: scene.referenceAssetId,
-        },
-      ])
-    ),
-  },
+  payload: toRendererProposalPayload(proposal.payload),
   createdAt: proposal.createdAt,
   decidedAt: proposal.decidedAt,
   ...(diff === undefined
@@ -816,7 +847,37 @@ const toRendererProposal = (proposal: StudioProposal, diff?: StudioProposalDiff)
       }),
 });
 
-const applyProposalPayload = (project: StudioProject, payload: StudioProposalPayload): StudioProject => {
+const applyProposalPayload = (
+  project: StudioProject,
+  payload: StudioProposalPayload,
+  minted: { ruleId: string; timestamp: string }
+): StudioProject => {
+  if (payload.kind === 'pin_rule') {
+    const text = payload.rule.text.trim();
+    // Idempotent: accepting a duplicate is a no-op rather than an error, because the user pressing
+    // Accept twice, or pinning a rule they already had, is not a failure they can act on.
+    const duplicate = resolveEffectiveStudioRules(project.rules).some(
+      (rule) => foldForRuleMatch(rule.text.trim()) === foldForRuleMatch(text)
+    );
+    if (duplicate) return project;
+    if (project.rules.length >= STUDIO_RULE_LIMITS.maxRules) throw invalid('Studio rule limit reached');
+    return {
+      ...project,
+      rules: [
+        ...project.rules,
+        {
+          id: minted.ruleId,
+          scope: 'project' as const,
+          text,
+          predicate:
+            payload.rule.predicate === null
+              ? null
+              : { kind: 'forbidden_terms' as const, terms: payload.rule.predicate.terms.map((term) => term.trim()) },
+          createdAt: minted.timestamp,
+        },
+      ],
+    };
+  }
   const proposedIds = new Set(payload.sceneOrder);
   for (const scene of Object.values(project.scenes)) {
     if (!proposedIds.has(scene.id) && (scene.assetIds.length > 0 || scene.jobIds.length > 0)) {
@@ -983,6 +1044,8 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
     const key = proposalDiffKey(proposal);
     const frozen = proposalDiffs.get(key);
     if (frozen !== undefined) return frozen;
+    // Only a storyboard replace has an order to diff. A rule pin has no positional shape at all.
+    if (proposal.payload.kind !== 'replace_storyboard') return undefined;
     if (project === null || project.revision !== proposal.baseRevision) return undefined;
     const computed = computeStudioProposalDiff(project, proposal.payload);
     proposalDiffs.set(key, computed);
@@ -1206,7 +1269,9 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
     async acceptProposal(input: StudioProposalRequest): Promise<StudioProposalAcceptance> {
       assertSafeId(input.projectId, 'project id');
       assertSafeId(input.proposalId, 'proposal id');
-      const accepted = await deps.store.acceptProposal(input.projectId, input.proposalId, applyProposalPayload);
+      const accepted = await deps.store.acceptProposal(input.projectId, input.proposalId, (project, payload) =>
+        applyProposalPayload(project, payload, { ruleId: createRuleId(), timestamp: new Date().toISOString() })
+      );
       if (accepted.applied) deps.onProjectUpdated(accepted.project.id);
       return {
         // Only the frozen diff: the applied project now equals the proposal, so recomputing here reads as no change.

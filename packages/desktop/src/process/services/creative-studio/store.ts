@@ -192,7 +192,9 @@ const PROPOSAL_RECORD_KEYS = new Set([
   'createdAt',
   'decidedAt',
 ]);
-const PROPOSAL_PAYLOAD_KEYS = new Set(['kind', 'sceneOrder', 'scenes']);
+const PROPOSAL_STORYBOARD_PAYLOAD_KEYS = new Set(['kind', 'sceneOrder', 'scenes']);
+const PROPOSAL_PIN_RULE_PAYLOAD_KEYS = new Set(['kind', 'rule']);
+const PROPOSAL_RULE_KEYS = new Set(['text', 'predicate']);
 const PROPOSAL_SCENE_KEYS = new Set([
   'title',
   'purpose',
@@ -422,21 +424,34 @@ const validateBriefRules = (value: unknown): value is StudioBriefRule[] =>
   value.every(validateBriefRule) &&
   new Set(value.map((rule) => (rule as StudioBriefRule).id)).size === value.length;
 
-const validateProposalPayload = (value: unknown): value is StudioProposalPayload => {
-  if (!isRecord(value) || !isRecord(value.scenes) || !hasExactKeys(value, PROPOSAL_PAYLOAD_KEYS)) return false;
+const validateStoryboardProposalPayload = (value: Record<string, unknown>): boolean => {
+  if (!isRecord(value.scenes) || !hasExactKeys(value, PROPOSAL_STORYBOARD_PAYLOAD_KEYS)) return false;
   const scenes = value.scenes;
   const sceneOrder = value.sceneOrder;
   if (!asArrayOfSafeIds(sceneOrder)) return false;
   const sceneIds = Object.keys(scenes);
   return (
-    value.kind === 'replace_storyboard' &&
     sceneOrder.length > 0 &&
     sceneOrder.length <= 24 &&
     new Set(sceneOrder).size === sceneOrder.length &&
     sceneIds.length === sceneOrder.length &&
-    sceneIds.every((sceneId) => sceneOrder.includes(sceneId) && validateProposalScene(scenes[sceneId])) &&
-    !containsForbiddenRendererField(value)
+    sceneIds.every((sceneId) => sceneOrder.includes(sceneId) && validateProposalScene(scenes[sceneId]))
   );
+};
+
+const validatePinRuleProposalPayload = (value: Record<string, unknown>): boolean =>
+  hasExactKeys(value, PROPOSAL_PIN_RULE_PAYLOAD_KEYS) &&
+  isRecord(value.rule) &&
+  hasExactKeys(value.rule, PROPOSAL_RULE_KEYS) &&
+  isNonEmptyString(value.rule.text) &&
+  value.rule.text.length <= STUDIO_RULE_LIMITS.text &&
+  validateBriefRulePredicate(value.rule.predicate);
+
+const validateProposalPayload = (value: unknown): value is StudioProposalPayload => {
+  if (!isRecord(value) || containsForbiddenRendererField(value)) return false;
+  if (value.kind === 'replace_storyboard') return validateStoryboardProposalPayload(value);
+  if (value.kind === 'pin_rule') return validatePinRuleProposalPayload(value);
+  return false;
 };
 
 const validateProposalRecord = (projectId: string, proposalId: string, value: unknown): value is StudioProposal =>

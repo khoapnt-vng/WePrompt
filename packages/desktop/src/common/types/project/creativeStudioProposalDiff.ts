@@ -8,8 +8,8 @@ import type {
   StudioEditableScene,
   StudioEditableSceneField,
   StudioProposalDiff,
-  StudioProposalPayload,
   StudioProposalSceneChange,
+  StudioReplaceStoryboardProposalPayload,
 } from './creativeStudioTypes';
 
 /**
@@ -45,7 +45,7 @@ const changedFields = (current: StudioEditableScene, proposed: StudioEditableSce
  */
 export const computeStudioProposalDiff = (
   current: StudioProposalDiffSource,
-  payload: StudioProposalPayload
+  payload: StudioReplaceStoryboardProposalPayload
 ): StudioProposalDiff => {
   const currentScenes = current.sceneOrder
     .map((sceneId) => current.scenes[sceneId])

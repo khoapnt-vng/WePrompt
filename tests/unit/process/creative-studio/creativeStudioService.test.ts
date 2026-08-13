@@ -43,6 +43,7 @@ import {
 } from '@process/services/creative-studio/planning/storyboardPlanner';
 import {
   createListRoutesHandler,
+  createProposeBriefRuleHandler,
   createProposeStoryboardHandler,
   createReadStoryboardHandler,
   createRequestReferenceImagesHandler,
@@ -738,6 +739,66 @@ describe('CreativeStudioService', () => {
       await expect(service.listProposals({ projectId: project.id })).resolves.toEqual([
         { ...rejected, diff: { added: 1, removed: 0, changed: [] } },
       ]);
+    });
+
+    it('records a rule the user reviews, and generates nothing', async () => {
+      const ruled = createCreativeStudioService({
+        store,
+        onProjectUpdated,
+        storyboardPlanner: makePlanner(),
+        createRuleId: () => 'rule_minted',
+      });
+      const project = await ruled.createProject(makeInput());
+      const { projectDir, pendingDir, referencePendingDir } = await store.resolveProposalPaths(project.id);
+      const handler = createProposeBriefRuleHandler({
+        projectId: project.id,
+        projectDir,
+        pendingDir,
+        referencePendingDir,
+      });
+
+      const result = await handler({
+        base_revision: project.revision,
+        text: 'Keep the kits generic.',
+        forbidden_terms: ['acme'],
+      });
+
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0].text).toContain('recorded for user review');
+      const [proposal] = await ruled.listProposals({ projectId: project.id });
+      // This assertion reads through `toRendererProposal` → `toRendererProposalPayload`, so it is also
+      // the guard on Step 6.4.1's projection branch: without it, `rule` is stripped here.
+      expect(proposal.payload).toEqual({
+        kind: 'pin_rule',
+        rule: { text: 'Keep the kits generic.', predicate: { kind: 'forbidden_terms', terms: ['acme'] } },
+      });
+
+      const accepted = await ruled.acceptProposal({ projectId: project.id, proposalId: proposal.id });
+      expect(accepted.project.rules).toEqual([
+        {
+          id: 'rule_minted',
+          scope: 'project',
+          text: 'Keep the kits generic.',
+          predicate: { kind: 'forbidden_terms', terms: ['acme'] },
+          createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+        },
+      ]);
+    });
+
+    it('refuses a rule drafted against a stale revision instead of pinning the wrong thing', async () => {
+      const project = await service.createProject(makeInput());
+      const projectDir = path.join(rootDir, project.id);
+      const handler = createProposeBriefRuleHandler({
+        projectId: project.id,
+        projectDir,
+        pendingDir: path.join(projectDir, 'proposals', 'pending'),
+        referencePendingDir: path.join(projectDir, 'reference-requests', 'pending'),
+      });
+
+      const result = await handler({ base_revision: project.revision + 1, text: 'x', forbidden_terms: [] });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('read_storyboard');
     });
   });
 
@@ -4469,7 +4530,7 @@ describe('Studio MCP server', () => {
     registerStudioTools({ tool: tool as never }, null);
 
     const registration = tool.mock.calls.find(([name]) => name === 'studio_request_reference_images');
-    expect(tool).toHaveBeenCalledTimes(4);
+    expect(tool).toHaveBeenCalledTimes(5);
     expect(registration?.[1]).toBe(
       'Request a supporting reference image for one or more scenes. This does NOT generate anything — it queues a request the user approves before any money is spent. One image per scene; do not request a scene that already has one unless the user asked you to replace it.'
     );
