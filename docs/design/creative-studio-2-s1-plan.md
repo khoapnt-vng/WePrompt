@@ -52,16 +52,19 @@ Verify: `bun run test tests/unit/pages/studio/studioReadiness.test.ts` then `bun
 
 ---
 
-## C2 — Fix the pre-existing e2e staleness (prep, no S1 content)
+## C2 — Withdrawn. The pre-existing e2e staleness folds into C3
 
-**This is already broken on the phase-1 tip.** `phaseCtas` declares write→"Continue to Produce" and
-produce→"Review cut", but en-US renders **"Continue"** for both, so `phaseCtaPattern` matches nothing
-and `expectStudioPhase` cannot pass today.
+**Verified as real**, on the phase-1 tip, before S1 touched anything: `phaseCtas` declares
+write→"Continue to Produce" and produce→"Review cut", `phaseCtaPattern` encodes the same strings, and
+`expectStudioPhase` asserts both — one button matching the pattern, and a visible button with that
+exact name. en-US renders **"Continue"** for both keys. So `expectStudioPhase(…, 'write')` and
+`(…, 'produce')` cannot pass today. Latent rather than red, because e2e needs a display and `--list`
+proves compilation only.
 
-Fix it _before_ touching the harness, in its own commit, so the S1 rewrite is not blamed for it and
-so the harness is honest when S1 starts editing it.
-
-Verify: `bunx playwright test --list tests/e2e/features/workspaces/creative-studio.e2e.ts`.
+Originally planned as its own prep commit so the S1 diff would not be blamed for it. **Withdrawn:**
+C3 replaces those constants wholesale, so a standalone cleanup commit would be scope expansion under
+AGENTS.md for a "before" state that C3 deletes. Recorded here instead, so the correction is not
+mistaken for an S1 regression when someone runs the spec on a display.
 
 ---
 
