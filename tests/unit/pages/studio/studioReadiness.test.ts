@@ -239,6 +239,27 @@ describe('deriveStudioReadiness', () => {
     });
   });
 
+  it('reports the total shot duration, not only its delta against the target', () => {
+    const first = scene('first', { durationSeconds: 5 });
+    const second = scene('second', { durationSeconds: 10 });
+
+    expect(deriveStudioReadiness(project([first, second], { targetDurationSeconds: 12 }))).toMatchObject({
+      durationTotalSeconds: 15,
+      durationDeltaSeconds: 3,
+    });
+  });
+
+  it('counts a duplicated shot once in the total, as the canonical order does', () => {
+    const first = scene('first', { durationSeconds: 5 });
+    const second = scene('second', { durationSeconds: 10 });
+    const duplicated = project([first, second], { sceneOrder: ['first', 'second', 'first'] });
+
+    expect(deriveStudioReadiness(duplicated)).toMatchObject({
+      totalSceneCount: 2,
+      durationTotalSeconds: 15,
+    });
+  });
+
   it.each(['generated', 'needs_selection'] as const)(
     'keeps a %s scene out of single-scene review when its canonical visual prompt is blank',
     (status) => {

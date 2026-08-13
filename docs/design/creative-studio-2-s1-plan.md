@@ -58,7 +58,7 @@ Verify: `bun run test tests/unit/pages/studio/studioReadiness.test.ts` then `bun
 produce→"Review cut", but en-US renders **"Continue"** for both, so `phaseCtaPattern` matches nothing
 and `expectStudioPhase` cannot pass today.
 
-Fix it *before* touching the harness, in its own commit, so the S1 rewrite is not blamed for it and
+Fix it _before_ touching the harness, in its own commit, so the S1 rewrite is not blamed for it and
 so the harness is honest when S1 starts editing it.
 
 Verify: `bunx playwright test --list tests/e2e/features/workspaces/creative-studio.e2e.ts`.
@@ -91,7 +91,7 @@ because the rail and the shell are interlocked.
   `createCreativeStudioCloseHandshake`. **Miss it and quitting from `/studio/:id/table` discards
   unsaved scene drafts with no prompt** — and the suite stays green, because
   `creativeStudioBridge.test.ts` defaults `getCurrentUrl` to `#/studio/project_1/write`, which still
-  matches the old regex. Update the regex **and** the fixture, and add a case asserting a *new* view
+  matches the old regex. Update the regex **and** the fixture, and add a case asserting a _new_ view
   URL is recognised.
 
 **i18n**
@@ -139,7 +139,7 @@ Two things that lose their home and will be dropped silently if not named here:
 
 - The `data-studio-phase-heading` focus target `StudioPhaseShell` focuses after every view change.
 - The `activePhase === 'brief'` special case that suppresses the project-update conflict from the
-  shell advisory *because BriefPhase renders it itself*. Demote Brief without moving this and the
+  shell advisory _because BriefPhase renders it itself_. Demote Brief without moving this and the
   conflict either renders twice or not at all.
 
 Open, and decided here: **"Start writing" goes.** With a switch there is no next step. The
@@ -154,7 +154,7 @@ single spend is `studioJobs.submitScenes`.
 
 That one spend has **five** entry points: the batch button, per-shot Render on `ShotCard`,
 `onGenerateReference` in Write/Table, `StagePreview`, and the Director's auto-submitted reference
-requests — **the last with no human confirm at all**. S1 consolidates the *visible* controls into the
+requests — **the last with no human confirm at all**. S1 consolidates the _visible_ controls into the
 top bar. It does **not** touch the unconfirmed path: that is a pre-existing spend-fence hole, it is
 recorded here, and it is not S1's to fix quietly.
 
@@ -177,7 +177,7 @@ Traps:
 
 Count is `totalSceneCount`. Duration is `durationTotalSeconds` from C1.
 
-**The third term is the trap.** `readySceneIds.length` means *ready to generate* — it counts **down
+**The third term is the trap.** `readySceneIds.length` means _ready to generate_ — it counts **down
 to zero** as shots are generated. The "done" number is `selectedAssetCount`. Using the obvious field
 gives a readout that runs backwards.
 
