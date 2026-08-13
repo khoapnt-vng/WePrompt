@@ -878,6 +878,33 @@
     }
   },
   "creativeStudio": {
+    "rules": {
+      "open": "規則",
+      "title": "專案規則",
+      "description": "規則用於引導創意總監，並會在任何付費算圖前進行檢查。",
+      "precedence": "組織規則會優先套用且已鎖定。專案規則可以增加要求，但不能覆寫組織規則。組織規則由中央統一發布，無法在此管理。",
+      "empty": "尚未新增專案規則。",
+      "scope": {
+        "organisation": "組織",
+        "project": "專案",
+        "organisationLocked": "已鎖定"
+      },
+      "contextOnlyBadge": "僅供參考",
+      "enforcedBadge": "強制執行",
+      "removeAccessible": "移除規則：{{rule}}",
+      "remove": "移除",
+      "enforcedHelp": "當視覺提示詞出現禁用詞時，會阻止付費算圖。",
+      "contextOnlyHelp": "用於引導創意總監，但不會自動阻止算圖。",
+      "textLabel": "規則",
+      "textPlaceholder": "例如：所有運動服品牌皆使用通用名稱。",
+      "invalidText": "請輸入 1 到 240 個字元的規則。",
+      "termsLabel": "禁用詞（選填）",
+      "termsPlaceholder": "例如：Nike、Adidas",
+      "termsHelp": "請以逗號分隔，最多輸入 8 個詞。沒有禁用詞的規則僅供參考。",
+      "invalidTerms": "最多輸入 8 個詞，每個詞不得超過 64 個字元。",
+      "limitReached": "已達 24 條有效規則的上限。",
+      "add": "新增規則"
+    },
     "nav": {
       "title": "創意工作室"
     },

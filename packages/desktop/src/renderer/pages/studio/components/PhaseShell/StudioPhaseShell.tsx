@@ -112,7 +112,14 @@ export const StudioPhaseShell: React.FC<StudioPhaseShellProps> = ({
           return controller.editor.flushProjectDraft();
         }}
         activity={<StudioDocumentActivity jobs={controller.jobs.jobs} render={controller.render} />}
-        actions={headerAction}
+        actions={
+          <>
+            <Button size='small' disabled={navigationDisabled} onClick={controller.openRules}>
+              {t('conversation.creativeStudio.rules.open')}
+            </Button>
+            {headerAction}
+          </>
+        }
       />
       <StudioPhaseNav
         activePhase={activePhase}

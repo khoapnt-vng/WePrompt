@@ -248,6 +248,7 @@ const phaseController = (): StudioPhaseControllers => {
     advisory: null,
     mutationPending: false,
     requestTransition: vi.fn(),
+    openRules: vi.fn(),
     openDraftReview: vi.fn(),
     openSingleGenerationReview: vi.fn(),
     openBatchGenerationReview: vi.fn(),
@@ -261,7 +262,7 @@ const phaseController = (): StudioPhaseControllers => {
 };
 
 describe('Creative Studio full-sentence English copy', () => {
-  it('keeps Brief start-writing only in its validated footer', async () => {
+  it('keeps Brief start-writing in its validated footer and document rules in the frame', async () => {
     await renderEnglish(
       <StudioPhaseShell
         activePhase='brief'
@@ -272,7 +273,9 @@ describe('Creative Studio full-sentence English copy', () => {
     );
 
     const headerActions = document.querySelector<HTMLElement>('[data-studio-phase-actions]');
-    expect(headerActions).toBeNull();
+    expect(headerActions).not.toBeNull();
+    expect(within(headerActions!).getAllByRole('button')).toHaveLength(1);
+    expect(within(headerActions!).getByRole('button', { name: 'Rules' })).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Start writing' })).toHaveLength(1);
   });
 
@@ -280,7 +283,7 @@ describe('Creative Studio full-sentence English copy', () => {
     ['write', 'Continue'],
     ['produce', 'Continue'],
     ['review', 'Prepare handoff'],
-  ] as const)('renders one %s phase action in the header', async (activePhase, actionName) => {
+  ] as const)('renders the Rules action and the %s phase action in the header', async (activePhase, actionName) => {
     await renderEnglish(
       <StudioPhaseShell
         activePhase={activePhase}
@@ -292,7 +295,8 @@ describe('Creative Studio full-sentence English copy', () => {
 
     const headerActions = document.querySelector<HTMLElement>('[data-studio-phase-actions]');
     expect(headerActions).not.toBeNull();
-    expect(within(headerActions!).getAllByRole('button')).toHaveLength(1);
+    expect(within(headerActions!).getAllByRole('button')).toHaveLength(2);
+    expect(within(headerActions!).getByRole('button', { name: 'Rules' })).toBeInTheDocument();
     expect(within(headerActions!).getByRole('button', { name: actionName })).toBeInTheDocument();
   });
 

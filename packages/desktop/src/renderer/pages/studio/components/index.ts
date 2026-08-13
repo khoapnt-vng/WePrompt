@@ -9,5 +9,6 @@ export { StudioLibrary } from './Library';
 export { StudioModelBar } from './Models';
 export * from './PhaseShell';
 export { AssetStrip, StagePreview, StudioExportModal } from './Preview';
+export * from './Rules';
 export { SceneTimeline } from './SceneTimeline';
 export { StoryboardDraftModal } from './Storyboard';

@@ -878,6 +878,33 @@
     }
   },
   "creativeStudio": {
+    "rules": {
+      "open": "规则",
+      "title": "项目规则",
+      "description": "规则用于指导创意总监，并会在任何付费渲染前进行检查。",
+      "precedence": "组织规则优先应用且已锁定。项目规则可以增加要求，但不能覆盖组织规则。组织规则由中央统一分发，无法在此处管理。",
+      "empty": "尚未添加项目规则。",
+      "scope": {
+        "organisation": "组织",
+        "project": "项目",
+        "organisationLocked": "已锁定"
+      },
+      "contextOnlyBadge": "仅作上下文",
+      "enforcedBadge": "强制执行",
+      "removeAccessible": "移除规则：{{rule}}",
+      "remove": "移除",
+      "enforcedHelp": "当视觉提示词中出现禁用词时，会阻止付费渲染。",
+      "contextOnlyHelp": "用于指导创意总监，但不会自动阻止渲染。",
+      "textLabel": "规则",
+      "textPlaceholder": "例如：所有运动服品牌均使用通用名称。",
+      "invalidText": "请输入 1 到 240 个字符的规则。",
+      "termsLabel": "禁用词（可选）",
+      "termsPlaceholder": "例如：耐克，阿迪达斯",
+      "termsHelp": "用逗号分隔，最多可输入 8 个词。没有禁用词的规则仅作上下文。",
+      "invalidTerms": "最多输入 8 个词，每个词不超过 64 个字符。",
+      "limitReached": "已达到 24 条有效规则的上限。",
+      "add": "添加规则"
+    },
     "nav": {
       "title": "创意工作室"
     },

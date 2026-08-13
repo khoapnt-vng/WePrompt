@@ -136,6 +136,7 @@ const controller = (overrides: Partial<BriefPhaseController> = {}): BriefPhaseCo
   advisory: null,
   mutationPending: false,
   requestTransition: vi.fn(),
+  openRules: vi.fn(),
   acceptProposal: vi.fn(),
   rejectProposal: vi.fn(),
   ...overrides,
