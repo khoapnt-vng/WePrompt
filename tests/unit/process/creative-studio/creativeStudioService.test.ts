@@ -348,6 +348,35 @@ describe('CreativeStudioService', () => {
     ).rejects.toMatchObject({ code: 'not_found' } satisfies Partial<CreativeStudioStoreError>);
   });
 
+  it('opens a project written before rules existed, and the first rule write rewrites the record', async () => {
+    const project = await service.createProject(makeInput());
+    const file = path.join(rootDir, project.id, 'project.json');
+    const raw = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
+    delete raw.rules;
+    delete raw.ruleListUndo;
+    await writeFile(file, JSON.stringify(raw), 'utf8');
+
+    const reopened = await service.getProject(project.id);
+    expect(reopened?.rules).toEqual([]);
+    expect(reopened?.ruleListUndo).toBeNull();
+    expect(await store.listQuarantinedProjectIds()).toEqual([]);
+
+    const written = await service.setBriefRules({
+      projectId: project.id,
+      expectedRevision: reopened!.revision,
+      rules: [{ id: 'rule_1', text: 'Keep the kits generic.', predicate: null }],
+    });
+    const persisted = JSON.parse(await readFile(file, 'utf8')) as {
+      rules: unknown[];
+      revision: number;
+      ruleListUndo: unknown;
+    };
+
+    expect(persisted.rules).toHaveLength(1);
+    expect(persisted.revision).toBe(written.revision);
+    expect(persisted.ruleListUndo).toEqual({ capturedRevision: reopened!.revision, previousRules: [] });
+  });
+
   it('replaces the rule list, stamps project scope, and preserves createdAt for a rule that stays', async () => {
     vi.useFakeTimers();
     try {
