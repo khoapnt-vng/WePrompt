@@ -177,6 +177,7 @@ const studioServerProjectFixture = {
   revision: 7,
   name: 'Coffee teaser',
   brief: 'A 10-second teaser for a mountain coffee brand',
+  rules: [],
   aspectRatio: '16:9',
   targetDurationSeconds: 10,
   sceneOrder: ['scene_1'],
@@ -4708,6 +4709,60 @@ describe('Studio MCP server', () => {
     expect(text).toContain('"revision": 7');
     expect(text).toContain('Sunrise');
     expect(text).not.toContain('jobIds');
+  });
+
+  it('shows the Director the project rules, fresh from disk on every call', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'studio-server-'));
+    await writeFile(
+      path.join(dir, 'project.json'),
+      JSON.stringify({
+        ...studioServerProjectFixture,
+        rules: [
+          {
+            id: 'rule_1',
+            scope: 'project',
+            text: 'No competitor logos.',
+            predicate: { kind: 'forbidden_terms', terms: ['acme'] },
+            createdAt: '2026-08-13T00:00:00.000Z',
+          },
+        ],
+      })
+    );
+    const handler = createReadStoryboardHandler({
+      projectId: 'project_1',
+      projectDir: dir,
+      pendingDir: '',
+      referencePendingDir: '',
+    });
+
+    const view = JSON.parse((await handler({})).content[0].text) as { rules: unknown };
+
+    expect(view.rules).toEqual([
+      { scope: 'project', text: 'No competitor logos.', enforced: true, forbiddenTerms: ['acme'] },
+    ]);
+  });
+
+  it('reads a manifest written before rules existed as an empty list, not an unavailable project', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'studio-server-'));
+    const raw = { ...studioServerProjectFixture } as Record<string, unknown>;
+    delete raw.rules;
+    await writeFile(path.join(dir, 'project.json'), JSON.stringify(raw));
+    const handler = createReadStoryboardHandler({
+      projectId: 'project_1',
+      projectDir: dir,
+      pendingDir: '',
+      referencePendingDir: '',
+    });
+
+    const result = await handler({});
+
+    // The subprocess does not run migrateSchemaV1Project, and nothing rewrites project.json on open.
+    // Without the normalisation in readProject this returns isError: true and the Director loses
+    // read_storyboard for every project that predates this change.
+    expect(result.isError).toBeUndefined();
+    const view = JSON.parse(result.content[0].text) as { rules: unknown; sceneOrder: string[] };
+    expect(view.rules).toEqual([]);
+    expect(view.sceneOrder).toEqual(['scene_1']);
   });
 
   it('propose_storyboard writes a record and reports recorded but never accepted', async () => {

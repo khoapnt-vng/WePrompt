@@ -13,6 +13,7 @@ import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { resolveEffectiveStudioRules } from '@/common/types/project/creativeStudioRules';
 import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
 import type {
   StudioEditableScene,
@@ -105,8 +106,18 @@ const errorResult = (message: string): StudioToolResult => ({
   isError: true,
 });
 
-const readProject = async (config: StudioServerEnv): Promise<StudioProject> =>
-  JSON.parse(await readFile(path.join(config.projectDir, 'project.json'), 'utf8')) as StudioProject;
+/**
+ * The subprocess reads project.json raw: no migrateSchemaV1Project, no validateProject. Main's
+ * `rules: []` default (store.ts:1768) is in-memory only and nothing rewrites the manifest on open,
+ * so every project written before rules existed still has no `rules` key on disk. Defaulting it here
+ * — once, at the single read point every handler shares — is what stops `read_storyboard` and
+ * `propose_brief_rule` throwing on `undefined` and reporting the project as unavailable. Doing it at
+ * the call sites instead means every future handler has to remember.
+ */
+const readProject = async (config: StudioServerEnv): Promise<StudioProject> => {
+  const raw = JSON.parse(await readFile(path.join(config.projectDir, 'project.json'), 'utf8')) as StudioProject;
+  return Array.isArray(raw.rules) ? raw : { ...raw, rules: [] };
+};
 
 export function createReadStoryboardHandler(
   config: StudioServerEnv | null
@@ -137,10 +148,19 @@ export function createReadStoryboardHandler(
           ];
         })
       );
+      // Rule ids are not exposed: the Director never addresses a rule by id, and an id in the
+      // context is one more thing it can hallucinate back at us. Text is the handle.
+      const rules = resolveEffectiveStudioRules(project.rules).map((rule) => ({
+        scope: rule.scope,
+        text: rule.text,
+        enforced: rule.predicate !== null,
+        ...(rule.predicate === null ? {} : { forbiddenTerms: rule.predicate.terms }),
+      }));
       const view = {
         revision: project.revision,
         name: project.name,
         brief: project.brief,
+        rules,
         aspectRatio: project.aspectRatio,
         targetDurationSeconds: project.targetDurationSeconds,
         sceneOrder: project.sceneOrder,
@@ -274,7 +294,7 @@ export function registerStudioTools(server: Pick<McpServer, 'tool'>, config: Stu
   );
   server.tool(
     'read_storyboard',
-    "Read the Studio project's current script: revision, settings, and every scene's editable fields plus whether it has a reference image and a selected take. Always call this before proposing.",
+    "Read this project's brief, its governing rules and its current script: revision, settings, the brief prose, the pinned rules, and every scene's editable fields plus whether it has a reference image and a selected take. Read this BEFORE you draft a script, critique one, propose any change, or answer any question about what this project may or may not show — do not answer from memory. The brief prose is not carried in your context; it lives here, and this call is the freshest and authoritative copy of both the brief and the rules. A rule marked enforced is checked against every visual prompt before anything is generated: a prompt that breaks one is refused and nothing is charged, so satisfy the rules while you write the prompt rather than after it is refused.",
     {},
     createReadStoryboardHandler(config)
   );
