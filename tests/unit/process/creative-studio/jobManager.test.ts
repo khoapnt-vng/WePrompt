@@ -13,6 +13,7 @@ import https from 'node:https';
 import { Readable } from 'node:stream';
 import type { IProvider, TProviderWithModel } from '@/common/config/storage';
 import type {
+  StudioBriefRule,
   StudioCancellationPolicy,
   StudioJob,
   StudioJobStatus,
@@ -5714,5 +5715,156 @@ describe('StudioJobManager provider failures', () => {
         outputAssetIds: [],
       })
     );
+  });
+});
+
+describe('StudioJobManager pinned rule gate', () => {
+  // Same shape as the file's other local adapter helpers (:1365-1377, :1670-1682): the id must be
+  // 'weprompt-image-v1' because that is what `route` resolves to.
+  const adapterWithSubmit = (submit: ReturnType<typeof vi.fn>): GenerationProviderAdapter => ({
+    id: 'weprompt-image-v1',
+    validateConnection: async () => ({ ok: true }),
+    validateRequest: (request) => ({
+      ok: true,
+      normalized: {
+        aspectRatio: request.aspectRatio,
+        resolution: request.resolution,
+        durationSeconds: request.durationSeconds,
+      },
+    }),
+    submit,
+  });
+
+  const enforcedRule: StudioBriefRule = {
+    id: 'rule_1',
+    scope: 'project',
+    text: 'No competitor logos.',
+    predicate: { kind: 'forbidden_terms', terms: ['acme'] },
+    createdAt: '2026-08-13T00:00:00.000Z',
+  };
+
+  /** Pins rules the only way anything pins them: through the store, which bumps the revision. */
+  const withRules = (harness: Harness, rules: StudioBriefRule[]): Promise<StudioProject> =>
+    harness.store.updateProject(harness.project.id, (current) => ({ ...current, rules }));
+
+  it('refuses a submission whose visual prompt breaks an enforced rule, before anything is spent', async () => {
+    const submit = vi.fn();
+    const harness = await createHarness(adapterWithSubmit(submit), {
+      scenes: [scene({ visualPrompt: 'An ACME billboard at dusk' })],
+    });
+    const guarded = await withRules(harness, [enforcedRule]);
+
+    await expect(
+      harness.manager.submitScenes({
+        projectId: guarded.id,
+        expectedRevision: guarded.revision,
+        sceneIds: ['scene_1'],
+        routes: [route],
+        catalogVersion: 'catalog_1',
+      })
+    ).rejects.toMatchObject({ code: 'rule_breach' });
+
+    expect(submit).not.toHaveBeenCalled();
+    // The gate sits before persistPreparedJobs (:1300) and trackRun (:1302), so the refusal leaves
+    // no job record and no scene linkage behind either.
+    const after = (await harness.store.getProject(guarded.id))!;
+    expect(Object.keys(after.jobs)).toEqual([]);
+    expect(after.scenes.scene_1.jobIds).toEqual([]);
+  });
+
+  it('refuses a reference plate whose own prompt breaks a rule, which the durable record never holds', async () => {
+    const submit = vi.fn();
+    const harness = await createHarness(adapterWithSubmit(submit), {
+      scenes: [scene({ visualPrompt: 'A clean studio plate' })],
+    });
+    const guarded = await withRules(harness, [enforcedRule]);
+
+    await expect(
+      harness.manager.submitScenes({
+        projectId: guarded.id,
+        expectedRevision: guarded.revision,
+        sceneIds: ['scene_1'],
+        routes: [route],
+        catalogVersion: 'catalog_1',
+        outputRole: 'reference',
+        referencePrompts: [{ sceneId: 'scene_1', prompt: 'An ACME logo, centred' }],
+      })
+    ).rejects.toMatchObject({ code: 'rule_breach' });
+
+    expect(submit).not.toHaveBeenCalled();
+    // This is the test that justifies the gate's placement: scene.visualPrompt is clean, the breach
+    // exists only in baseRequest.prompt, and a store-side check would wave this through.
+    expect((await harness.store.getProject(guarded.id))!.scenes.scene_1.visualPrompt).toBe('A clean studio plate');
+  });
+
+  it('refuses a retry that would resend a breaching prompt', async () => {
+    const submit = vi.fn();
+    const harness = await createHarness(adapterWithSubmit(submit), {
+      scenes: [scene({ visualPrompt: 'An ACME billboard at dusk' })],
+      jobIds: ['job_2'],
+      idempotencyKeys: ['key_2'],
+    });
+    // Seeded exactly as the file's other retry tests do (:4001-4028): a failed job written straight
+    // onto the record, plus the rule pinned in the same write. That is the real sequence — the user
+    // reads the failure, pins the rule, and only then presses Retry.
+    const failed = await harness.store.updateProject(harness.project.id, (project) => {
+      const next = structuredClone(project);
+      next.jobs.job_1 = {
+        id: 'job_1',
+        projectId: project.id,
+        sceneId: 'scene_1',
+        status: 'failed',
+        provider: selectionFor(route),
+        idempotencyKey: 'key_1',
+        providerJobId: null,
+        cancellationPolicy: 'none',
+        outputAssetIds: [],
+        error: { code: 'no_output', messageKey: 'conversation.creativeStudio.jobs.errors.noOutput' },
+        retryOfJobId: null,
+        retryReason: null,
+        duplicateChargeAcknowledged: false,
+        duplicateChargeAcknowledgedAt: null,
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt,
+      };
+      next.scenes.scene_1.jobIds.push('job_1');
+      next.scenes.scene_1.reviewState = 'blocked';
+      next.rules = [enforcedRule];
+      return next;
+    });
+
+    await expect(
+      harness.manager.retryJob({ projectId: failed.id, jobId: 'job_1', expectedRevision: failed.revision })
+    ).rejects.toMatchObject({ code: 'rule_breach' });
+
+    expect(submit).not.toHaveBeenCalled();
+    expect((await harness.store.getProject(failed.id))!.jobs.job_2).toBeUndefined();
+  });
+
+  it('lets a prompt through when the rule carries no predicate', async () => {
+    const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
+    const harness = await createHarness(adapterWithSubmit(submit), {
+      scenes: [scene({ visualPrompt: 'A generic kit on a plain background' })],
+    });
+    const guarded = await withRules(harness, [
+      {
+        id: 'rule_1',
+        scope: 'project',
+        text: 'Keep the kits generic.',
+        predicate: null,
+        createdAt: '2026-08-13T00:00:00.000Z',
+      },
+    ]);
+
+    const [job] = await harness.manager.submitScenes({
+      projectId: guarded.id,
+      expectedRevision: guarded.revision,
+      sceneIds: ['scene_1'],
+      routes: [route],
+      catalogVersion: 'catalog_1',
+    });
+
+    expect(job).toMatchObject({ id: 'job_1', sceneId: 'scene_1' });
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
   });
 });

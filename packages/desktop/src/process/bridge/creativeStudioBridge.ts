@@ -31,6 +31,7 @@ const errorMessageKeys: Record<StudioCommandErrorCode, string> = {
   stale_project: 'conversation.creativeStudio.errors.staleProject',
   planning_unavailable: 'conversation.creativeStudio.errors.planningUnavailable',
   invalid_route: 'conversation.creativeStudio.errors.invalidRoute',
+  rule_breach: 'conversation.creativeStudio.errors.ruleBreach',
   cancellation_refused: 'conversation.creativeStudio.errors.cancellationRefused',
   duplicate_charge_acknowledgement_required:
     'conversation.creativeStudio.errors.duplicateChargeAcknowledgementRequired',
