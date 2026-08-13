@@ -9,6 +9,7 @@ import type { StudioBriefRule } from '@/common/types/project/creativeStudioRules
 import {
   buildStudioBriefRulesPin,
   evaluateStudioRules,
+  hasRuleToken,
   ORGANISATION_STUDIO_RULES,
   renderStudioRulesBlock,
   resolveEffectiveStudioRules,
@@ -90,6 +91,14 @@ describe('evaluateStudioRules', () => {
     expect(evaluateStudioRules([forbidden], 'ACME and GLOBEX together').breaches).toEqual([
       { ruleId: 'rule_1', ruleText: 'Never show a competitor logo.', scope: 'project', matchedTerm: 'acme' },
     ]);
+  });
+});
+
+describe('hasRuleToken', () => {
+  it('distinguishes matchable Unicode word content from punctuation and emoji', () => {
+    expect(hasRuleToken('Nhãn hiệu 2026')).toBe(true);
+    expect(hasRuleToken('+++')).toBe(false);
+    expect(hasRuleToken('🎬')).toBe(false);
   });
 });
 

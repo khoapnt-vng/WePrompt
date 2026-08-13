@@ -63,7 +63,7 @@ import type {
   StudioTextModelRef,
   StudioUpdateModelSelectionRequest,
 } from '@/common/types/project/creativeStudioTypes';
-import { STUDIO_RULE_LIMITS } from '@/common/types/project/creativeStudioRules';
+import { foldForRuleMatch, hasRuleToken, STUDIO_RULE_LIMITS } from '@/common/types/project/creativeStudioRules';
 import type { ISessionMcpServer } from '@/common/config/storage';
 import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
 import { isCanonicalStudioGeneratedTake } from '@/common/types/project/creativeStudioCanonicalTake';
@@ -1366,7 +1366,10 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
         ) {
           throw invalid('Invalid Studio rule predicate');
         }
-        for (const term of rule.predicate.terms) assertText(term, STUDIO_RULE_LIMITS.term, 'rule term', true);
+        for (const term of rule.predicate.terms) {
+          assertText(term, STUDIO_RULE_LIMITS.term, 'rule term', true);
+          if (!hasRuleToken(term)) throw invalid('Invalid Studio rule predicate');
+        }
       }
       const timestamp = new Date().toISOString();
       return notify(
@@ -1376,16 +1379,29 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
             const existing = new Map(project.rules.map((rule) => [rule.id, rule]));
             return {
               ...project,
-              rules: input.rules.map((draft) => ({
-                id: draft.id,
-                scope: 'project' as const,
-                text: draft.text.trim(),
-                predicate:
-                  draft.predicate === null
-                    ? null
-                    : { kind: 'forbidden_terms' as const, terms: draft.predicate.terms.map((term) => term.trim()) },
-                createdAt: existing.get(draft.id)?.createdAt ?? timestamp,
-              })),
+              rules: input.rules.map((draft) => {
+                const seenTerms = new Set<string>();
+                return {
+                  id: draft.id,
+                  scope: 'project' as const,
+                  text: draft.text.trim(),
+                  predicate:
+                    draft.predicate === null
+                      ? null
+                      : {
+                          kind: 'forbidden_terms' as const,
+                          terms: draft.predicate.terms
+                            .map((term) => term.trim())
+                            .filter((term) => {
+                              const folded = foldForRuleMatch(term);
+                              if (seenTerms.has(folded)) return false;
+                              seenTerms.add(folded);
+                              return true;
+                            }),
+                        },
+                  createdAt: existing.get(draft.id)?.createdAt ?? timestamp,
+                };
+              }),
             };
           },
           input.expectedRevision

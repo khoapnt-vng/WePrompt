@@ -87,6 +87,9 @@ const RULE_TOKEN = /[\p{L}\p{N}]+/gu;
 const tokenise = (value: string): string[] =>
   Array.from(foldForRuleMatch(value).matchAll(RULE_TOKEN), (match) => match[0]);
 
+/** Returns whether a rule term contains at least one token that matching can enforce. */
+export const hasRuleToken = (term: string): boolean => tokenise(term).length > 0;
+
 const containsRun = (haystack: readonly string[], needle: readonly string[]): boolean => {
   if (needle.length === 0 || needle.length > haystack.length) return false;
   for (let start = 0; start <= haystack.length - needle.length; start += 1) {

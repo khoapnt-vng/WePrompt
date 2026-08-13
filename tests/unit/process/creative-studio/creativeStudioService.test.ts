@@ -391,6 +391,42 @@ describe('CreativeStudioService', () => {
     ).rejects.toMatchObject({ code: 'stale_project' });
   });
 
+  it('rejects an enforced rule term that token matching can never detect', async () => {
+    const project = await service.createProject(makeInput());
+
+    await expect(
+      service.setBriefRules({
+        projectId: project.id,
+        expectedRevision: project.revision,
+        rules: [
+          {
+            id: 'rule_1',
+            text: 'No symbol-only mark.',
+            predicate: { kind: 'forbidden_terms', terms: ['+++'] },
+          },
+        ],
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+  });
+
+  it('deduplicates forbidden terms under case folding while preserving the first spelling', async () => {
+    const project = await service.createProject(makeInput());
+
+    const updated = await service.setBriefRules({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      rules: [
+        {
+          id: 'rule_1',
+          text: 'No competitor marks.',
+          predicate: { kind: 'forbidden_terms', terms: [' Nike ', 'nike', 'NIKE', 'Adidas'] },
+        },
+      ],
+    });
+
+    expect(updated.rules[0].predicate?.terms).toEqual(['Nike', 'Adidas']);
+  });
+
   it('persists the Brief conversation binding and returns it through the renderer projection', async () => {
     const project = await service.createProject(makeInput());
 
