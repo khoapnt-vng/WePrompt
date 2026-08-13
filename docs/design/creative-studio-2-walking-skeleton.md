@@ -59,7 +59,16 @@ which is the state readout (`9 sections · 2:58 · 2 ready`) with no new logic.
 **Every command the flow needs already exists.** `createProject`, `proposeStoryboard`,
 `acceptProposal`, `updateScene`, `reorderScenes`, `submitScenes`, `selectAsset`,
 `placeCutScenes`, `updateCut`, `renderCut`, `chooseAndExportAssets`, `getLatestRender`
-(the `creativeStudio` provider block in `ipcBridge.ts`). **Zero new IPC commands. Zero main-process work. Zero migrations.**
+(the `creativeStudio` provider block in `ipcBridge.ts`). **Zero new IPC commands. Zero migrations.**
+
+**Correction — it is _not_ zero main-process work, and the exception is a data-loss path.**
+`STUDIO_ROUTE_PATTERN` in `creativeStudioBridge.ts` hardcodes `brief|write|produce|review` and gates
+`isCreativeStudioRendererUrl`, which gates `createCreativeStudioCloseHandshake` — the unsaved-scene-drafts
+preflight on window close and app quit. Rename the route segments without it and closing WePrompt from
+`/studio/:id/table` **discards unsaved drafts with no prompt**. Worse, nothing catches it: the bridge test
+defaults `getCurrentUrl` to `#/studio/project_1/write`, which still matches the old regex, so the suite
+stays green while production loses work. One regex, in main, and it must land in the same commit as the
+route change.
 
 **The Engine Strip is not on this path.** `resolveSoleRouteAdoptions`
 (`studioRouteDefaults.ts`) adopts a route automatically when a role has exactly one
@@ -141,8 +150,8 @@ acceptance. Making it direct would _remove_ the review card rather than add a su
 would confound the very thing under evaluation: `DirectorPane` mounts at page scope, so a
 direct-editing Director writes concurrently with the 450 ms scene autosave
 (`SCENE_SAVE_DEBOUNCE_MS`), injecting write collision into the navigation being assessed, on a run
-declared happy-case. It would also cost §2's "zero new IPC commands, zero main-process work" —
-the claim that justifies sequencing the navigation first.
+declared happy-case. It would also cost §2's "zero new IPC commands" — the claim that justifies
+sequencing the navigation first.
 
 So direct edits and undo are out of the skeleton deliberately, and open question 4 — _"will users
 trust a director that edits directly"_ — is not on trial here. Do not read a good skeleton
