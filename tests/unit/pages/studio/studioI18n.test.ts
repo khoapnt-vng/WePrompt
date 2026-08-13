@@ -57,6 +57,54 @@ const briefKeys = [
   'brief.proposalFlushRefused',
 ] as const;
 
+/**
+ * Every entry is rendered by code in Tasks 7-14, and each is named next to its render site so the
+ * list cannot quietly outlive a surface. `check-i18n.js` has no unused-key detection, and this
+ * presence loop pins whatever it lists into all twelve locales, so every entry must have a shipped
+ * surface.
+ */
+const rulesKeys = [
+  'rules.open', // StudioPhaseShell, Rules button
+  'rules.title', // StudioRulesDrawer, Drawer title
+  'rules.description', // StudioRulesDrawer
+  'rules.precedence', // StudioRulesDrawer
+  'rules.empty', // StudioRulesDrawer, both layers empty
+  'rules.scope.organisation', // StudioRulesDrawer, scope Tag
+  'rules.scope.project', // StudioRulesDrawer, scope Tag
+  'rules.scope.organisationLocked', // StudioRulesDrawer, locked Tag
+  'rules.contextOnlyBadge', // StudioRulesDrawer, enforcement Tag + legend
+  'rules.enforcedBadge', // StudioRulesDrawer, enforcement Tag + legend
+  'rules.removeAccessible', // StudioRulesDrawer, per-rule aria-label
+  'rules.remove', // StudioRulesDrawer, per-rule button text
+  'rules.undo', // StudioRulesDrawer, undo button
+  'rules.undoAdded', // StudioRulesDrawer, added-rule undo notice
+  'rules.undoRemoved', // StudioRulesDrawer, removed-rule undo notice
+  'rules.undoChanged', // StudioRulesDrawer, changed-list undo notice
+  'rules.enforcedHelp', // StudioRulesDrawer, badge legend
+  'rules.contextOnlyHelp', // StudioRulesDrawer, badge legend
+  'rules.textLabel', // StudioRulesDrawer, label + aria-label
+  'rules.textPlaceholder', // StudioRulesDrawer
+  'rules.invalidText', // StudioRulesDrawer, empty-text alert
+  'rules.textTooLong', // StudioRulesDrawer, overlong-text alert
+  'rules.tooManyTerms', // StudioRulesDrawer, term-count alert
+  'rules.termTooLong', // StudioRulesDrawer, overlong-term alert
+  'rules.termUnusable', // StudioRulesDrawer, unusable-term alert
+  'rules.duplicateTerm', // StudioRulesDrawer, duplicate-term alert
+  'rules.termsLabel', // StudioRulesDrawer, label + aria-label
+  'rules.termsPlaceholder', // StudioRulesDrawer
+  'rules.termsHelp', // StudioRulesDrawer
+  'rules.limitReached', // StudioRulesDrawer, at the cap
+  'rules.add', // StudioRulesDrawer, submit
+  'rules.breachScene', // GenerationReviewModal, per-scene Alert
+  'rules.breachBlockedConfirm', // GenerationReviewModal, disabledReason
+  'rules.breachAskDirector', // GenerationReviewModal, escape hatch
+  'rules.autoSubmitBlocked', // StudioPage, queued-reference guard
+  'rules.proposalTitle', // DirectorProposalCard, pin_rule Card title
+  'rules.proposalBody', // DirectorProposalCard, pin_rule
+  'rules.proposalTerms', // DirectorProposalCard, pin_rule predicate
+  'errors.ruleBreach', // creativeStudioBridge + useStudioJobs rule_breach mapping
+] as const;
+
 const phaseKeys = [
   'phase.nav.label',
   'phase.nav.brief',
@@ -267,6 +315,30 @@ const streamFullSentenceKeys = [
   'phase.review.partialHandoff',
   'transition.savingBlocked',
   'shell.directorStarting',
+  'rules.description',
+  'rules.precedence',
+  'rules.empty',
+  'rules.removeAccessible',
+  'rules.undoAdded',
+  'rules.undoRemoved',
+  'rules.undoChanged',
+  'rules.enforcedHelp',
+  'rules.contextOnlyHelp',
+  'rules.textPlaceholder',
+  'rules.invalidText',
+  'rules.textTooLong',
+  'rules.tooManyTerms',
+  'rules.termTooLong',
+  'rules.termUnusable',
+  'rules.duplicateTerm',
+  'rules.termsPlaceholder',
+  'rules.termsHelp',
+  'rules.limitReached',
+  'rules.breachScene',
+  'rules.breachBlockedConfirm',
+  'rules.autoSubmitBlocked',
+  'rules.proposalBody',
+  'errors.ruleBreach',
   ...pluralLogicalKeys,
 ] as const;
 
@@ -385,6 +457,9 @@ describe('Creative Studio localization contract', () => {
 
     const leaves = flattenStringLeaves(creativeStudio);
     for (const key of briefKeys) {
+      expect(leaves[key], `Missing conversation.creativeStudio.${key}`).toBeTruthy();
+    }
+    for (const key of rulesKeys) {
       expect(leaves[key], `Missing conversation.creativeStudio.${key}`).toBeTruthy();
     }
     for (const key of taskSevenKeys) {

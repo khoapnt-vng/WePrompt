@@ -882,9 +882,9 @@
   "creativeStudio": {
     "rules": {
       "open": "Kurallar",
-      "title": "Proje kuralları",
-      "description": "Kurallar yaratıcı yönetmeni yönlendirir ve ücretli her oluşturma işleminden önce denetlenir.",
-      "precedence": "Kurum kuralları önce uygulanır ve kilitlidir. Proje kuralları yeni gereksinimler ekleyebilir ancak kurum kurallarını geçersiz kılamaz. Kurum kuralları merkezi olarak dağıtılır ve buradan yönetilemez.",
+      "title": "Kurallar",
+      "description": "Kurallar yaratıcı yönetmeni yönlendirir. Yasaklı terim içeren kurallar, ücretli bir oluşturma işleminden önce her görsel istemde denetlenir.",
+      "precedence": "Kurum kuralları uygulamaya gömülüdür, kilitlidir ve önce uygulanır. Bu sürümde bunları dağıtacak bir yönetici veya sunucu kanalı yoktur. Proje kuralları yeni gereksinimler ekleyebilir ancak kurum kurallarını geçersiz kılamaz.",
       "empty": "Henüz proje kuralı yok.",
       "scope": {
         "organisation": "Kurum",
@@ -912,7 +912,6 @@
       "termsLabel": "Yasaklı terimler (isteğe bağlı)",
       "termsPlaceholder": "Örnek: Nike, Adidas",
       "termsHelp": "Virgülle ayırarak en fazla 8 terim girin. Terim içermeyen kurallar yalnızca bağlam sağlar.",
-      "invalidTerms": "Her biri en fazla 64 karakter olan en çok 8 terim kullanın.",
       "limitReached": "24 etkin kural sınırına ulaşıldı.",
       "add": "Kural ekle",
       "breachScene": "“{{rule}}” kuralı tarafından engellendi (“{{term}}” eşleşti).",
@@ -920,7 +919,7 @@
       "breachAskDirector": "Yönetmenden düzeltmesini iste",
       "autoSubmitBlocked": "Sıradaki bir referans görseli isteği proje kuralını ihlal etti. Oluşturmadan önce etkilenen çekimi inceleyin.",
       "proposalTitle": "Önerilen kural",
-      "proposalBody": "Kreatif Direktör bu kuralın proje brifine sabitlenmesini öneriyor.",
+      "proposalBody": "Yaratıcı Yönetmen bu kuralın projeye eklenmesini öneriyor. Siz kabul edene kadar hiçbir şey değişmez.",
       "proposalTerms": "Uygulanan yasaklı terimler: {{terms}}"
     },
     "nav": {
@@ -1425,7 +1424,7 @@
       "busy": "Bu projede etkin oluşturma işleri var.",
       "provider": "Sağlayıcı isteği tamamlayamadı.",
       "storage": "Creative Studio yerel verilerini güncelleyemedi.",
-      "ruleBreach": "İstem bir proje kuralını ihlal ettiği için oluşturma engellendi."
+      "ruleBreach": "Bir kural, herhangi bir ücret oluşmadan üretimi engelledi. Nelerin değiştirilmesi gerektiğini görmek için Kurallar'ı açın."
     },
     "models": {
       "storyboard": "Hikâye panosu modeli",

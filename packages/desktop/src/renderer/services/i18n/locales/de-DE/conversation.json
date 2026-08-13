@@ -881,9 +881,9 @@
   "creativeStudio": {
     "rules": {
       "open": "Regeln",
-      "title": "Projektregeln",
-      "description": "Regeln leiten die Kreativdirektion und werden vor jedem kostenpflichtigen Rendering geprüft.",
-      "precedence": "Organisationsregeln werden zuerst angewendet und sind gesperrt. Projektregeln können Anforderungen ergänzen, sie aber nicht überschreiben. Organisationsregeln werden zentral verteilt und können hier nicht verwaltet werden.",
+      "title": "Regeln",
+      "description": "Regeln leiten die Kreativdirektion. Regeln mit verbotenen Begriffen werden vor einem kostenpflichtigen Rendering mit jedem visuellen Prompt abgeglichen.",
+      "precedence": "Organisationsregeln sind in die App integriert, gesperrt und werden zuerst angewendet. In dieser Version gibt es keinen Admin- oder Serverkanal für ihre Verteilung. Projektregeln können Anforderungen ergänzen, Organisationsregeln aber nicht überschreiben.",
       "empty": "Noch keine Projektregeln vorhanden.",
       "scope": {
         "organisation": "Organisation",
@@ -911,7 +911,6 @@
       "termsLabel": "Verbotene Begriffe (optional)",
       "termsPlaceholder": "Beispiel: Nike, Adidas",
       "termsHelp": "Trennen Sie bis zu 8 Begriffe durch Kommas. Regeln ohne Begriffe dienen nur als Kontext.",
-      "invalidTerms": "Verwenden Sie höchstens 8 Begriffe mit jeweils maximal 64 Zeichen.",
       "limitReached": "Die Höchstzahl von 24 wirksamen Regeln ist erreicht.",
       "add": "Regel hinzufügen",
       "breachScene": "Durch die Regel „{{rule}}“ blockiert (Treffer: „{{term}}“).",
@@ -919,7 +918,7 @@
       "breachAskDirector": "Regisseur um Überarbeitung bitten",
       "autoSubmitBlocked": "Eine ausstehende Referenzbild-Anfrage verstößt gegen eine Projektregel. Prüfen Sie die betroffene Einstellung vor der Generierung.",
       "proposalTitle": "Vorgeschlagene Regel",
-      "proposalBody": "Die Kreativdirektion schlägt vor, diese Regel im Projektbriefing festzuhalten.",
+      "proposalBody": "Die Kreativdirektion schlägt vor, diese Regel zum Projekt hinzuzufügen. Bis zur Annahme ändert sich nichts.",
       "proposalTerms": "Verbindliche verbotene Begriffe: {{terms}}"
     },
     "nav": {
@@ -1424,7 +1423,7 @@
       "busy": "Dieses Projekt enthält aktive Generierungsaufträge.",
       "provider": "Der Anbieter konnte die Anfrage nicht abschließen.",
       "storage": "Creative Studio konnte seine lokalen Daten nicht aktualisieren.",
-      "ruleBreach": "Die Generierung wurde blockiert, weil der Prompt gegen eine Projektregel verstößt."
+      "ruleBreach": "Eine Regel hat die Generierung vor einer Abbuchung blockiert. Öffnen Sie Regeln, um zu sehen, was geändert werden muss."
     },
     "models": {
       "storyboard": "Storyboard-Modell",

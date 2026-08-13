@@ -886,9 +886,9 @@
   "creativeStudio": {
     "rules": {
       "open": "Regras",
-      "title": "Regras do projeto",
-      "description": "As regras orientam a direção criativa e são verificadas antes de qualquer renderização paga.",
-      "precedence": "As regras da organização são aplicadas primeiro e ficam bloqueadas. As regras do projeto podem acrescentar requisitos, mas não substituí-las. As regras da organização são distribuídas de forma centralizada e não podem ser gerenciadas aqui.",
+      "title": "Regras",
+      "description": "As regras orientam a direção criativa. Regras com termos proibidos são verificadas em cada prompt visual antes de uma renderização paga.",
+      "precedence": "As regras da organização são incorporadas ao aplicativo, ficam bloqueadas e são aplicadas primeiro. Esta versão não tem um canal administrativo nem de servidor para distribuí-las. As regras do projeto podem acrescentar requisitos, mas não podem substituir as regras da organização.",
       "empty": "Ainda não há regras do projeto.",
       "scope": {
         "organisation": "Organização",
@@ -916,7 +916,6 @@
       "termsLabel": "Termos proibidos (opcional)",
       "termsPlaceholder": "Exemplo: Nike, Adidas",
       "termsHelp": "Separe até 8 termos com vírgulas. Regras sem termos servem apenas como contexto.",
-      "invalidTerms": "Use até 8 termos, com no máximo 64 caracteres cada.",
       "limitReached": "O limite de 24 regras efetivas foi atingido.",
       "add": "Adicionar regra",
       "breachScene": "Bloqueado pela regra “{{rule}}” (termo correspondente: “{{term}}”).",
@@ -924,7 +923,7 @@
       "breachAskDirector": "Pedir ao diretor para revisar",
       "autoSubmitBlocked": "Uma solicitação de imagem de referência na fila violou uma regra do projeto. Revise a cena afetada antes de gerar.",
       "proposalTitle": "Regra proposta",
-      "proposalBody": "O Diretor Criativo propõe fixar esta regra no briefing do projeto.",
+      "proposalBody": "A direção criativa sugere adicionar esta regra ao projeto. Nada muda até você aceitar.",
       "proposalTerms": "Termos proibidos aplicados: {{terms}}"
     },
     "nav": {
@@ -1446,7 +1445,7 @@
       "busy": "Este projeto tem trabalhos de geração ativos.",
       "provider": "O provedor não conseguiu concluir a solicitação.",
       "storage": "O Creative Studio não conseguiu atualizar seus dados locais.",
-      "ruleBreach": "A geração foi bloqueada porque o prompt viola uma regra do projeto."
+      "ruleBreach": "Uma regra bloqueou a geração antes de qualquer cobrança. Abra Regras para ver o que precisa ser alterado."
     },
     "models": {
       "storyboard": "Modelo de storyboard",
