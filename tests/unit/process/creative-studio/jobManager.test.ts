@@ -12,6 +12,7 @@ import path from 'node:path';
 import https from 'node:https';
 import { Readable } from 'node:stream';
 import type { IProvider, TProviderWithModel } from '@/common/config/storage';
+import { buildFirstFramePrompt } from '@/common/types/project/creativeStudioReferencePrompt';
 import type {
   StudioBriefRule,
   StudioCancellationPolicy,
@@ -5743,6 +5744,14 @@ describe('StudioJobManager pinned rule gate', () => {
     createdAt: '2026-08-13T00:00:00.000Z',
   };
 
+  const nonmatchingRule: StudioBriefRule = {
+    id: 'rule_2',
+    scope: 'project',
+    text: 'No horses.',
+    predicate: { kind: 'forbidden_terms', terms: ['horse'] },
+    createdAt: '2026-08-13T00:00:00.000Z',
+  };
+
   /** Pins rules the only way anything pins them: through the store, which bumps the revision. */
   const withRules = (harness: Harness, rules: StudioBriefRule[]): Promise<StudioProject> =>
     harness.store.updateProject(harness.project.id, (current) => ({ ...current, rules }));
@@ -5752,7 +5761,7 @@ describe('StudioJobManager pinned rule gate', () => {
     const harness = await createHarness(adapterWithSubmit(submit), {
       scenes: [scene({ visualPrompt: 'An ACME billboard at dusk' })],
     });
-    const guarded = await withRules(harness, [enforcedRule]);
+    const guarded = await withRules(harness, [enforcedRule, nonmatchingRule]);
 
     await expect(
       harness.manager.submitScenes({
@@ -5839,6 +5848,77 @@ describe('StudioJobManager pinned rule gate', () => {
 
     expect(submit).not.toHaveBeenCalled();
     expect((await harness.store.getProject(failed.id))!.jobs.job_2).toBeUndefined();
+  });
+
+  it('lets a visual prompt through when an enforced rule does not match', async () => {
+    const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
+    const harness = await createHarness(adapterWithSubmit(submit), {
+      scenes: [scene({ visualPrompt: 'A generic kit on a plain background' })],
+    });
+    const guarded = await withRules(harness, [enforcedRule]);
+
+    const [job] = await harness.manager.submitScenes({
+      projectId: guarded.id,
+      expectedRevision: guarded.revision,
+      sceneIds: ['scene_1'],
+      routes: [route],
+      catalogVersion: 'catalog_1',
+    });
+
+    expect(job).toMatchObject({ id: 'job_1', sceneId: 'scene_1' });
+    expect((await harness.store.getProject(guarded.id))!.jobs.job_1).toBeDefined();
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+  });
+
+  it('lets a reference plate through when only the app-authored prefix matches an enforced rule', async () => {
+    const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
+    const subject = 'A red bicycle leaning on a wall at dawn';
+    const harness = await createHarness(adapterWithSubmit(submit), {
+      scenes: [scene({ visualPrompt: subject })],
+    });
+    const guarded = await withRules(harness, [
+      {
+        id: 'rule_1',
+        scope: 'project',
+        text: 'No on-screen text.',
+        predicate: { kind: 'forbidden_terms', terms: ['text'] },
+        createdAt: '2026-08-13T00:00:00.000Z',
+      },
+    ]);
+
+    const [job] = await harness.manager.submitScenes({
+      projectId: guarded.id,
+      expectedRevision: guarded.revision,
+      sceneIds: ['scene_1'],
+      routes: [route],
+      catalogVersion: 'catalog_1',
+      outputRole: 'reference',
+      referencePrompts: [{ sceneId: 'scene_1', prompt: buildFirstFramePrompt(subject, guarded.aspectRatio) }],
+    });
+
+    expect(job).toMatchObject({ id: 'job_1', sceneId: 'scene_1', outputRole: 'reference' });
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+  });
+
+  it('refuses a visual prompt when only the second pinned rule matches', async () => {
+    const submit = vi.fn();
+    const harness = await createHarness(adapterWithSubmit(submit), {
+      scenes: [scene({ visualPrompt: 'An ACME billboard at dusk' })],
+    });
+    const guarded = await withRules(harness, [nonmatchingRule, enforcedRule]);
+
+    await expect(
+      harness.manager.submitScenes({
+        projectId: guarded.id,
+        expectedRevision: guarded.revision,
+        sceneIds: ['scene_1'],
+        routes: [route],
+        catalogVersion: 'catalog_1',
+      })
+    ).rejects.toMatchObject({ code: 'rule_breach' });
+
+    expect(submit).not.toHaveBeenCalled();
+    expect(Object.keys((await harness.store.getProject(guarded.id))!.jobs)).toEqual([]);
   });
 
   it('lets a prompt through when the rule carries no predicate', async () => {
