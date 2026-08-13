@@ -80,6 +80,14 @@ const contextHandoff = {
       created_at: 1,
       updated_at: 1,
     },
+    {
+      id: 'studio_brief_rules',
+      title: 'Project rules',
+      content: 'STALE',
+      source: 'manual' as const,
+      created_at: 1,
+      updated_at: 1,
+    },
   ],
   revision: 4,
   context_file_path: '/tmp/context.md',
@@ -175,11 +183,25 @@ describe('the Studio brief rules pin', () => {
     expect(payload.merge_extra).toBe(true);
     const patched = payload.updates.extra.context_handoff;
     expect(patched.pinned_context.map((pin) => pin.id)).toEqual(['pin_user', 'studio_brief_rules']);
-    expect(patched.pinned_context[1].content).toContain('No competitor logos.');
+    const studioPins = patched.pinned_context.filter((pin) => pin.id === 'studio_brief_rules');
+    expect(studioPins).toHaveLength(1);
+    expect(studioPins[0].content).toContain('No competitor logos.');
     // Everything the patch must NOT drop.
     expect(patched.revision).toBe(4);
     expect(patched.context_file_path).toBe('/tmp/context.md');
     expect(patched.turns_since_compaction).toBe(2);
+  });
+
+  it('clears a stale Studio pin when the project has no rules', async () => {
+    const { rerender } = renderHook(({ rules }: { rules: unknown[] }) => useBriefConversation(project(3, rules)), {
+      initialProps: { rules: [rule] },
+    });
+
+    await waitFor(() => expect(harness.update).toHaveBeenCalledTimes(1));
+    rerender({ rules: [] });
+    await waitFor(() => expect(harness.update).toHaveBeenCalledTimes(2));
+    const payload = harness.update.mock.calls[1][0] as UpdatePayload;
+    expect(payload.updates.extra.context_handoff.pinned_context.map((pin) => pin.id)).toEqual(['pin_user']);
   });
 
   it('does not rewrite the pin when nothing about the rules changed', async () => {
