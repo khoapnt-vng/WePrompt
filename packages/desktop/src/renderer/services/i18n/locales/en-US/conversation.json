@@ -802,7 +802,7 @@
         "aspectLockedHelp": "The aspect ratio cannot change after generated media has been added."
       },
       "write": {
-        "title": "Write",
+        "title": "Table",
         "continueToProduce": "Continue",
         "addShot": "Add shot",
         "noScenes": "Add a shot or draft a storyboard to begin.",
@@ -847,7 +847,7 @@
         "jobsRunning_other": "{{count}} generation jobs running"
       },
       "review": {
-        "title": "Review",
+        "title": "Cut",
         "description": "Check selected media, fill missing slates, and prepare the handoff.",
         "handoff": "Prepare handoff",
         "noAssets": "No selected media is ready for handoff.",

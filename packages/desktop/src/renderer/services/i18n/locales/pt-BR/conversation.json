@@ -975,7 +975,7 @@
         "aspectLockedHelp": "A proporção não pode ser alterada depois que uma mídia gerada for adicionada."
       },
       "write": {
-        "title": "Escrever",
+        "title": "Tabela",
         "continueToProduce": "Continuar",
         "addShot": "Adicionar tomada",
         "noScenes": "Adicione uma tomada ou crie um rascunho do storyboard para começar.",
@@ -1021,7 +1021,7 @@
         "jobsRunning_other": "{{count}} trabalhos de geração em execução"
       },
       "review": {
-        "title": "Revisar",
+        "title": "Corte",
         "description": "Confira a mídia selecionada, preencha as cartelas ausentes e prepare a entrega.",
         "handoff": "Preparar entrega",
         "noAssets": "Nenhuma mídia selecionada está pronta para entrega.",

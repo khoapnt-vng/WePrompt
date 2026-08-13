@@ -970,7 +970,7 @@
         "aspectLockedHelp": "La relación de aspecto no se puede cambiar después de añadir contenido generado."
       },
       "write": {
-        "title": "Escribir",
+        "title": "Tabla",
         "continueToProduce": "Continuar",
         "addShot": "Añadir plano",
         "noScenes": "Añade un plano o crea un borrador del guion gráfico para empezar.",
@@ -1016,7 +1016,7 @@
         "jobsRunning_other": "{{count}} trabajos de generación en curso"
       },
       "review": {
-        "title": "Revisar",
+        "title": "Montaje",
         "description": "Comprueba el contenido seleccionado, completa las claquetas que faltan y prepara la entrega.",
         "handoff": "Preparar entrega",
         "noAssets": "No hay contenido seleccionado listo para entregar.",

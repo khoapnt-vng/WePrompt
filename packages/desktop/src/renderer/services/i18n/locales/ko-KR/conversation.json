@@ -965,7 +965,7 @@
         "aspectLockedHelp": "생성된 미디어를 추가한 후에는 화면 비율을 변경할 수 없습니다."
       },
       "write": {
-        "title": "작성",
+        "title": "테이블",
         "continueToProduce": "계속",
         "addShot": "숏 추가",
         "noScenes": "숏을 추가하거나 스토리보드 초안을 만들어 시작하세요.",
@@ -1009,7 +1009,7 @@
         "jobsRunning_other": "생성 작업 {{count}}개 실행 중"
       },
       "review": {
-        "title": "검토",
+        "title": "컷",
         "description": "선택한 미디어를 확인하고 빠진 슬레이트를 채운 뒤 전달을 준비하세요.",
         "handoff": "전달 준비",
         "noAssets": "전달할 수 있는 선택된 미디어가 없습니다.",

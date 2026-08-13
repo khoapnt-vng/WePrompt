@@ -965,7 +965,7 @@
         "aspectLockedHelp": "加入產生的媒體後，無法變更長寬比。"
       },
       "write": {
-        "title": "編寫",
+        "title": "表格",
         "continueToProduce": "繼續",
         "addShot": "新增鏡頭",
         "noScenes": "新增鏡頭或起草分鏡即可開始。",
@@ -1009,7 +1009,7 @@
         "jobsRunning_other": "有 {{count}} 個產生工作正在執行"
       },
       "review": {
-        "title": "檢視",
+        "title": "剪輯",
         "description": "檢查已選媒體、補齊缺少的場記卡，並準備交付。",
         "handoff": "準備交付",
         "noAssets": "沒有可供交付的已選媒體。",

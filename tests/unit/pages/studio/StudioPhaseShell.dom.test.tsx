@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { StudioRendererJob, StudioRendererProject } from '@/common/types/project/creativeStudioTypes';
 import type { StudioView } from '@renderer/pages/studio/studioPhaseRoute';
 import { StudioPhaseShell } from '@renderer/pages/studio/components/PhaseShell/StudioPhaseShell';
+import styles from '@renderer/pages/studio/components/PhaseShell/StudioPhaseShell.module.css';
 import type { StudioPhaseAdvisory, StudioPhaseControllers } from '@renderer/pages/studio/components/PhaseShell/types';
 import type { UseStoryboardEditorResult } from '@renderer/pages/studio/hooks/useStoryboardEditor';
 import type { UseStudioJobsResult } from '@renderer/pages/studio/hooks/useStudioJobs';
@@ -285,5 +286,52 @@ describe('StudioPhaseShell document activity', () => {
     renderView('brief', {});
 
     expect(activity()).toBeEmptyDOMElement();
+  });
+});
+
+/**
+ * The switch is disabled while a generation review, a duplicate-charge prompt or the export modal
+ * is open — precisely when a reader is most likely to have lost track of which view is behind the
+ * dialog. So the active marker has to survive `disabled`, and the marker is CSS: it needs the
+ * active class to still be on the element the stylesheet targets.
+ *
+ * jsdom does no layout and no cascade, so this asserts the structural precondition only; the
+ * companion assertion on the compiled declarations lives in `studioStylesheetComposes.test.ts`.
+ */
+describe('StudioViewSwitch active marker while blocked', () => {
+  const renderSwitch = (navigationDisabled: boolean) =>
+    render(
+      <StudioPhaseShell
+        activeView='cut'
+        controller={controller(null)}
+        navigationDisabled={navigationDisabled}
+        onBack={vi.fn()}
+      />
+    );
+
+  const viewButton = (label: string): HTMLElement =>
+    screen.getByRole('button', { name: `conversation.creativeStudio.phase.nav.${label}` });
+
+  it.each([false, true])('keeps the active class on the button element itself (disabled: %s)', (disabled) => {
+    renderSwitch(disabled);
+    const active = viewButton('cut');
+
+    // Arco puts the author className on the <button> rather than a wrapper, disabled or not. If a
+    // future version wraps it, the module's `.viewButtonActive` rules would target the wrapper and
+    // the marker would vanish — which is what this pins.
+    expect(active.tagName).toBe('BUTTON');
+    expect(active).toHaveClass(styles.viewButton!, styles.viewButtonActive!);
+    expect(active).toHaveAttribute('aria-current', 'page');
+    expect((active as HTMLButtonElement).disabled).toBe(disabled);
+  });
+
+  it('marks exactly one view active and leaves the others unmarked while blocked', () => {
+    renderSwitch(true);
+
+    for (const label of ['table', 'board', 'brief']) {
+      const inactive = viewButton(label);
+      expect(inactive).not.toHaveClass(styles.viewButtonActive!);
+      expect(inactive).not.toHaveAttribute('aria-current');
+    }
   });
 });

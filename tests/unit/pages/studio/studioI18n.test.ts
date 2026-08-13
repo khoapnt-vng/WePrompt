@@ -418,6 +418,40 @@ describe('Creative Studio localization contract', () => {
     }
   });
 
+  /**
+   * A view's heading is the first thing a screen reader speaks after the switch moves focus, because
+   * `StudioPhaseShell` focuses `[data-studio-phase-heading]` on every view change. Activating "Cut"
+   * and landing on a heading that says "Review" is not a wording preference; it is the switch and the
+   * document disagreeing about where you are. Asserting equality rather than exact strings keeps the
+   * two surfaces consistent by construction, so improving a view's name only takes one edit.
+   *
+   * `phase.produce.renderingWith` is deliberately not here. It is the Board view's only heading, but
+   * it names the engine a render will use ("Rendering with —"), not the view; it answers a different
+   * question than the switch label does, so equality would be the wrong contract for it.
+   */
+  it.each([
+    ['phase.write.title', 'phase.nav.table'],
+    ['phase.review.title', 'phase.nav.cut'],
+    ['phase.brief.title', 'phase.nav.brief'],
+  ])('words %s exactly as the switch label %s in every configured locale', (headingKey, navKey) => {
+    const issues: string[] = [];
+
+    for (const locale of i18nConfig.supportedLanguages) {
+      const leaves = flattenStringLeaves(loadConversationLocale(locale).creativeStudio);
+      const heading = leaves[headingKey];
+      const label = leaves[navKey];
+      if (!heading?.trim() || !label?.trim()) {
+        issues.push(`${locale} is missing ${headingKey} or ${navKey}`);
+        continue;
+      }
+      if (heading !== label) {
+        issues.push(`${locale}.${headingKey} says "${heading}" but the switch says "${label}"`);
+      }
+    }
+
+    expect(issues).toEqual([]);
+  });
+
   it('carries no copy for the Write assistant it removed, in any configured locale', () => {
     for (const locale of i18nConfig.supportedLanguages) {
       const leaves = flattenStringLeaves(loadConversationLocale(locale).creativeStudio);

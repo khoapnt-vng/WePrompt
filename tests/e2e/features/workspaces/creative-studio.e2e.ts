@@ -8,6 +8,7 @@
  */
 import { expect, test } from '../../fixtures';
 import { navigateTo, ROUTES } from '../../helpers';
+import { STUDIO_VIEWS, type StudioView } from '@/common/types/project/creativeStudioTypes';
 import type { Page } from '@playwright/test';
 import path from 'node:path';
 
@@ -19,8 +20,11 @@ const mainProcessOnlySentinels = [
   '/private/STUDIO_RAW_OUTPUT_PATH_SENTINEL/provider-output.bin',
 ];
 
-const studioViews = ['table', 'board', 'cut', 'brief'] as const;
-type StudioView = (typeof studioViews)[number];
+/**
+ * The vocabulary comes from the shipped shared constant, not a copy: a view added there must show
+ * up in this spec's coverage rather than leaving it silently green on three of four views.
+ */
+const studioViews = STUDIO_VIEWS;
 
 const viewLabels: Record<StudioView, string> = {
   table: 'Table',
@@ -458,11 +462,11 @@ test.describe('Creative Studio workspace', () => {
     await test.step('add and save a complete shot in the Table view without configuring an engine', async () => {
       await page.getByRole('button', { name: 'Start writing' }).click();
       await expectStudioView(page, projectId, 'table');
-      const writePhase = page.getByRole('region', { name: 'Write' });
-      await expect(writePhase.getByText('This step does not generate images or video.', { exact: true })).toBeVisible();
-      await expect(writePhase.getByRole('button', { name: /render|generate/i })).toHaveCount(0);
+      const tableView = page.getByRole('region', { name: 'Table' });
+      await expect(tableView.getByText('This step does not generate images or video.', { exact: true })).toBeVisible();
+      await expect(tableView.getByRole('button', { name: /render|generate/i })).toHaveCount(0);
 
-      const scriptTable = writePhase.getByRole('region', { name: 'Script' });
+      const scriptTable = tableView.getByRole('region', { name: 'Script' });
       await expect(scriptTable.locator('div[aria-hidden="true"] > span')).toHaveText([
         'Shot',
         'Script',
@@ -542,13 +546,13 @@ test.describe('Creative Studio workspace', () => {
 
     await test.step('navigate every view in both directions and recover a deep-linked reload', async () => {
       await selectStudioView(page, projectId, 'cut');
-      await expect(page.getByRole('heading', { level: 2, name: 'Review' })).toBeVisible();
+      await expect(page.getByRole('heading', { level: 2, name: 'Cut' })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Prepare handoff' })).toBeDisabled();
 
       await selectStudioView(page, projectId, 'board');
       await expectIdleProduceSurface(page, projectId);
       await selectStudioView(page, projectId, 'table');
-      await expect(page.getByRole('heading', { level: 2, name: 'Write' })).toBeVisible();
+      await expect(page.getByRole('heading', { level: 2, name: 'Table' })).toBeVisible();
       await selectStudioView(page, projectId, 'brief');
       await expect(page.getByRole('heading', { level: 2, name: 'Brief' })).toBeVisible();
 
@@ -567,7 +571,7 @@ test.describe('Creative Studio workspace', () => {
       await assertStudioInvariants(page);
     });
 
-    await test.step('show the project card and create a seeded shape directly into Write', async () => {
+    await test.step('show the project card and create a seeded shape directly into the Table view', async () => {
       await leaveStudioProject(page);
       const studioLibrary = page.getByRole('region', { name: 'Creative Studio' });
       await expect(studioLibrary).toBeVisible();

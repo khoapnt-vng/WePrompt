@@ -1,6 +1,11 @@
-export const STUDIO_VIEWS = ['table', 'board', 'cut', 'brief'] as const;
+import { STUDIO_VIEWS, type StudioView } from '@/common/types/project/creativeStudioTypes';
 
-export type StudioView = (typeof STUDIO_VIEWS)[number];
+/**
+ * Re-exported, not redeclared: the view vocabulary is shared with the main process, which gates its
+ * unsaved-draft close preflight on the same segments. Renderer call sites keep importing it from
+ * here so the route module stays the single place the renderer reasons about view addresses.
+ */
+export { STUDIO_VIEWS, type StudioView };
 
 export type StudioWriteFocusIntent = {
   sceneId: string;

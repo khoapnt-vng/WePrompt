@@ -7,7 +7,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { StudioProject } from '@/common/types/project/creativeStudioTypes';
+import { STUDIO_VIEWS, type StudioProject } from '@/common/types/project/creativeStudioTypes';
 import { CreativeStudioStoreError } from '@process/services/creative-studio/store';
 import { CreativeStudioMediaError } from '@process/services/creative-studio/mediaStore';
 
@@ -925,28 +925,46 @@ const createCloseHandshakeDependencies = (
   ...overrides,
 });
 
+const studioViewUrl = (segment: string): string =>
+  `file:///Applications/WePrompt/index.html#/studio/project_1${segment ? `/${segment}` : ''}`;
+
+/** Segments the rail used and the view switch dropped. `brief` is absent: it survived as a view. */
+const retiredPhaseSegments = ['write', 'produce', 'review'] as const;
+
 describe('createCreativeStudioCloseHandshake', () => {
   /**
    * The unsaved-draft preflight is gated by a route pattern that names every view segment. A view
    * the pattern does not know about closes the window silently, losing the drafts the handshake
    * exists to save, and no other assertion in this suite notices — the default fixture URL is one
    * single segment, so it can be the only recognised one and everything still passes.
+   *
+   * Enumerated from the shared `STUDIO_VIEWS` rather than a literal list, so a fifth view is
+   * covered the day it is added and the bridge cannot pass by hardcoding a subset of the segments.
    */
-  it.each([
-    'file:///Applications/WePrompt/index.html#/studio/project_1',
-    'file:///Applications/WePrompt/index.html#/studio/project_1/table',
-    'file:///Applications/WePrompt/index.html#/studio/project_1/board',
-    'file:///Applications/WePrompt/index.html#/studio/project_1/cut',
-    'file:///Applications/WePrompt/index.html#/studio/project_1/brief',
-  ])('runs the unsaved-work preflight for the Studio view route %s', async (currentUrl) => {
-    const dependencies = createCloseHandshakeDependencies({ getCurrentUrl: () => currentUrl });
-    const handshake = createCreativeStudioCloseHandshake(dependencies);
-    const event = createCloseEvent();
-
-    expect(handshake.handleWindowClose(event)).toBe(true);
-    expect(event.preventDefault).toHaveBeenCalledOnce();
-    await vi.waitFor(() => expect(dependencies.queryUnsavedWork).toHaveBeenCalledExactlyOnceWith({ timeoutMs: 3_000 }));
+  it('interpolates view segments into the route pattern without needing regex escaping', () => {
+    // Guards the guard: an empty shared list would make every derived case below vacuous.
+    expect(STUDIO_VIEWS.length).toBeGreaterThanOrEqual(4);
+    for (const view of STUDIO_VIEWS) {
+      expect(view, `${view} must stay a plain lowercase segment`).toMatch(/^[a-z]+$/);
+    }
+    // The negative cases below only mean something while these names are genuinely not views.
+    expect(STUDIO_VIEWS.filter((view) => retiredPhaseSegments.includes(view as never))).toEqual([]);
   });
+
+  it.each([studioViewUrl(''), ...STUDIO_VIEWS.map(studioViewUrl)])(
+    'runs the unsaved-work preflight for the Studio view route %s',
+    async (currentUrl) => {
+      const dependencies = createCloseHandshakeDependencies({ getCurrentUrl: () => currentUrl });
+      const handshake = createCreativeStudioCloseHandshake(dependencies);
+      const event = createCloseEvent();
+
+      expect(handshake.handleWindowClose(event)).toBe(true);
+      expect(event.preventDefault).toHaveBeenCalledOnce();
+      await vi.waitFor(() =>
+        expect(dependencies.queryUnsavedWork).toHaveBeenCalledExactlyOnceWith({ timeoutMs: 3_000 })
+      );
+    }
+  );
 
   it.each([
     'file:///Applications/WePrompt/index.html#/guid',
@@ -955,10 +973,9 @@ describe('createCreativeStudioCloseHandshake', () => {
     'not a renderer URL',
     // The retired phase segments. They are no longer routes, so a URL carrying one is not a Studio
     // document and must not be treated as one — this half is what stops the pattern from being
-    // widened into a match-anything that would make the positive cases above meaningless.
-    'file:///Applications/WePrompt/index.html#/studio/project_1/write',
-    'file:///Applications/WePrompt/index.html#/studio/project_1/produce',
-    'file:///Applications/WePrompt/index.html#/studio/project_1/review',
+    // widened into a match-anything that would make the positive cases above meaningless. Asserted
+    // against the shared list too: a retired name must never come back as a view.
+    ...retiredPhaseSegments.map(studioViewUrl),
   ])('leaves a non-Studio renderer route to the normal close lifecycle: %s', (currentUrl) => {
     const dependencies = createCloseHandshakeDependencies({ getCurrentUrl: () => currentUrl });
     const handshake = createCreativeStudioCloseHandshake(dependencies);

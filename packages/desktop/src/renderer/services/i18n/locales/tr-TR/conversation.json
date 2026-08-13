@@ -969,7 +969,7 @@
         "aspectLockedHelp": "Oluşturulan medya eklendikten sonra en boy oranı değiştirilemez."
       },
       "write": {
-        "title": "Yaz",
+        "title": "Tablo",
         "continueToProduce": "Devam et",
         "addShot": "Çekim ekle",
         "noScenes": "Başlamak için bir çekim ekleyin veya hikâye panosu taslağı oluşturun.",
@@ -1014,7 +1014,7 @@
         "jobsRunning_other": "{{count}} oluşturma işi çalışıyor"
       },
       "review": {
-        "title": "İncele",
+        "title": "Kurgu",
         "description": "Seçilen medyayı kontrol edin, eksik slaytları tamamlayın ve devri hazırlayın.",
         "handoff": "Devri hazırla",
         "noAssets": "Devir için hazır seçilmiş medya yok.",

@@ -965,7 +965,7 @@
         "aspectLockedHelp": "生成済みメディアを追加した後はアスペクト比を変更できません。"
       },
       "write": {
-        "title": "構成",
+        "title": "テーブル",
         "continueToProduce": "続行",
         "addShot": "ショットを追加",
         "noScenes": "ショットを追加するか、ストーリーボードを下書きして開始します。",
@@ -1009,7 +1009,7 @@
         "jobsRunning_other": "{{count}} 件の生成ジョブが実行中"
       },
       "review": {
-        "title": "確認",
+        "title": "カット",
         "description": "選択したメディアを確認し、不足するスレートを補って引き渡しを準備します。",
         "handoff": "引き渡しを準備",
         "noAssets": "引き渡せる選択済みメディアがありません。",

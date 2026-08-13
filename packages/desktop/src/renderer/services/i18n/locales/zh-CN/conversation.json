@@ -965,7 +965,7 @@
         "aspectLockedHelp": "添加生成的媒体后，无法更改宽高比。"
       },
       "write": {
-        "title": "编写",
+        "title": "表格",
         "continueToProduce": "继续",
         "addShot": "添加镜头",
         "noScenes": "添加镜头或起草故事板即可开始。",
@@ -1009,7 +1009,7 @@
         "jobsRunning_other": "有 {{count}} 个生成任务正在运行"
       },
       "review": {
-        "title": "审阅",
+        "title": "剪辑",
         "description": "检查已选媒体、补充缺失的场记卡，并准备交付。",
         "handoff": "准备交付",
         "noAssets": "没有可供交付的已选媒体。",

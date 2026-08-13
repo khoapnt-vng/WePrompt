@@ -8,10 +8,10 @@
   gap: 18px;
 }
 
-/* One 56px row: document identity on the left, document state and the phase action on the
-   right. The rail is a sibling row below rather than a slot in here. `min-height` rather than
-   `height` so the rename editor's validation message can push the row taller instead of being
-   clipped by it. */
+/* One 56px row: document identity on the left, document state and the view's action on the
+   right. The view switch is a sibling row below rather than a slot in here. `min-height` rather
+   than `height` so the rename editor's validation message can push the row taller instead of
+   being clipped by it. */
 .header {
   display: flex;
   min-width: 0;
@@ -267,6 +267,25 @@
   color: var(--color-text-1);
 }
 
+/*
+ * Disabled is not a reason to stop saying which view you are on.
+ *
+ * The switch is disabled while a generation review, a duplicate-charge prompt or the export modal
+ * is open, which is exactly when a reader most needs the answer. Arco's
+ * `.arco-btn-text.arco-btn-disabled` sets one flat colour for every button in the row and carries
+ * the same two-class weight as the rules above, so which side wins is decided by stylesheet order
+ * — a coin toss that would flatten the active and inactive labels to one colour. These three-class
+ * selectors settle it on specificity instead. The active marker's `box-shadow` needs no such
+ * defence: Arco declares none for a disabled text button.
+ */
+.viewButton:global(.arco-btn-text):global(.arco-btn-disabled) {
+  color: var(--color-text-3);
+}
+
+.viewButtonActive:global(.arco-btn-text):global(.arco-btn-disabled) {
+  color: var(--color-text-1);
+}
+
 .viewLabel {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -305,12 +324,4 @@
 
 .shell[data-layout='compact'] .viewSwitch {
   justify-content: flex-start;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .viewSwitch {
-    scroll-behavior: auto;
-    animation: none !important;
-    transition: none !important;
-  }
 }

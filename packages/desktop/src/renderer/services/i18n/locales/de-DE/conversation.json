@@ -968,7 +968,7 @@
         "aspectLockedHelp": "Nach dem Hinzufügen erzeugter Medien kann das Seitenverhältnis nicht mehr geändert werden."
       },
       "write": {
-        "title": "Schreiben",
+        "title": "Tabelle",
         "continueToProduce": "Weiter",
         "addShot": "Einstellung hinzufügen",
         "noScenes": "Füge eine Einstellung hinzu oder entwirf ein Storyboard, um zu beginnen.",
@@ -1013,7 +1013,7 @@
         "jobsRunning_other": "{{count}} Erzeugungsaufträge laufen"
       },
       "review": {
-        "title": "Prüfen",
+        "title": "Schnitt",
         "description": "Prüfe ausgewählte Medien, ergänze fehlende Platzhalter und bereite die Übergabe vor.",
         "handoff": "Übergabe vorbereiten",
         "noAssets": "Keine ausgewählten Medien sind für die Übergabe bereit.",
