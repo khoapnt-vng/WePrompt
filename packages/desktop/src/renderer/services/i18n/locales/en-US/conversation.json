@@ -713,6 +713,38 @@
   },
   "notFound": "Conversation not found or has been deleted",
   "creativeStudio": {
+    "rules": {
+      "open": "Rules",
+      "title": "Project rules",
+      "description": "Rules guide the Creative Director and are checked before any paid render.",
+      "precedence": "Organisation rules are applied first and locked. Project rules can add requirements but cannot override them. Organisation rules are distributed centrally and cannot be managed here.",
+      "empty": "No project rules yet.",
+      "scope": {
+        "organisation": "Organisation",
+        "project": "Project",
+        "organisationLocked": "Locked"
+      },
+      "contextOnlyBadge": "Context only",
+      "enforcedBadge": "Enforced",
+      "removeAccessible": "Remove rule: {{rule}}",
+      "remove": "Remove",
+      "enforcedHelp": "Blocks a paid render when its forbidden terms appear in the visual prompt.",
+      "contextOnlyHelp": "Guides the Creative Director but does not automatically block a render.",
+      "textLabel": "Rule",
+      "textPlaceholder": "For example: Keep all sportswear branding generic.",
+      "invalidText": "Enter a rule between 1 and 240 characters.",
+      "textTooLong": "Keep the rule to 240 characters or fewer.",
+      "tooManyTerms": "Enter no more than 8 forbidden terms.",
+      "termTooLong": "The forbidden term “{{term}}” exceeds 64 characters.",
+      "termUnusable": "The forbidden term “{{term}}” must contain a letter or number.",
+      "duplicateTerm": "“{{term}}” matches another forbidden term. Remove the duplicate.",
+      "termsLabel": "Forbidden terms (optional)",
+      "termsPlaceholder": "For example: Nike, Adidas",
+      "termsHelp": "Separate up to 8 terms with commas. Rules without terms are context only.",
+      "invalidTerms": "Use up to 8 terms, each no more than 64 characters.",
+      "limitReached": "The maximum of 24 effective rules has been reached.",
+      "add": "Add rule"
+    },
     "nav": {
       "title": "Creative Studio"
     },

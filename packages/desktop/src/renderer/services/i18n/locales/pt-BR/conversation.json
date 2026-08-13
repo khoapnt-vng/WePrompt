@@ -884,6 +884,38 @@
     }
   },
   "creativeStudio": {
+    "rules": {
+      "open": "Regras",
+      "title": "Regras do projeto",
+      "description": "As regras orientam a direção criativa e são verificadas antes de qualquer renderização paga.",
+      "precedence": "As regras da organização são aplicadas primeiro e ficam bloqueadas. As regras do projeto podem acrescentar requisitos, mas não substituí-las. As regras da organização são distribuídas de forma centralizada e não podem ser gerenciadas aqui.",
+      "empty": "Ainda não há regras do projeto.",
+      "scope": {
+        "organisation": "Organização",
+        "project": "Projeto",
+        "organisationLocked": "Bloqueada"
+      },
+      "contextOnlyBadge": "Somente contexto",
+      "enforcedBadge": "Obrigatória",
+      "removeAccessible": "Remover regra: {{rule}}",
+      "remove": "Remover",
+      "enforcedHelp": "Bloqueia uma renderização paga quando o prompt visual contém termos proibidos.",
+      "contextOnlyHelp": "Orienta a direção criativa, mas não bloqueia automaticamente uma renderização.",
+      "textLabel": "Regra",
+      "textPlaceholder": "Exemplo: Use nomes genéricos para todas as marcas esportivas.",
+      "invalidText": "Digite uma regra com 1 a 240 caracteres.",
+      "textTooLong": "A regra deve ter no máximo 240 caracteres.",
+      "tooManyTerms": "Digite no máximo 8 termos proibidos.",
+      "termTooLong": "O termo proibido “{{term}}” ultrapassa 64 caracteres.",
+      "termUnusable": "O termo proibido “{{term}}” deve conter uma letra ou um número.",
+      "duplicateTerm": "“{{term}}” corresponde a outro termo proibido. Remova o duplicado.",
+      "termsLabel": "Termos proibidos (opcional)",
+      "termsPlaceholder": "Exemplo: Nike, Adidas",
+      "termsHelp": "Separe até 8 termos com vírgulas. Regras sem termos servem apenas como contexto.",
+      "invalidTerms": "Use até 8 termos, com no máximo 64 caracteres cada.",
+      "limitReached": "O limite de 24 regras efetivas foi atingido.",
+      "add": "Adicionar regra"
+    },
     "nav": {
       "title": "Creative Studio"
     },

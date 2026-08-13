@@ -880,6 +880,38 @@
     }
   },
   "creativeStudio": {
+    "rules": {
+      "open": "Kurallar",
+      "title": "Proje kuralları",
+      "description": "Kurallar yaratıcı yönetmeni yönlendirir ve ücretli her oluşturma işleminden önce denetlenir.",
+      "precedence": "Kurum kuralları önce uygulanır ve kilitlidir. Proje kuralları yeni gereksinimler ekleyebilir ancak kurum kurallarını geçersiz kılamaz. Kurum kuralları merkezi olarak dağıtılır ve buradan yönetilemez.",
+      "empty": "Henüz proje kuralı yok.",
+      "scope": {
+        "organisation": "Kurum",
+        "project": "Proje",
+        "organisationLocked": "Kilitli"
+      },
+      "contextOnlyBadge": "Yalnızca bağlam",
+      "enforcedBadge": "Zorunlu",
+      "removeAccessible": "Kuralı kaldır: {{rule}}",
+      "remove": "Kaldır",
+      "enforcedHelp": "Görsel istemde yasaklı terimler bulunduğunda ücretli oluşturmayı engeller.",
+      "contextOnlyHelp": "Yaratıcı yönetmeni yönlendirir ancak oluşturmayı otomatik olarak engellemez.",
+      "textLabel": "Kural",
+      "textPlaceholder": "Örnek: Tüm spor giyim markalarını genel adlarla gösterin.",
+      "invalidText": "1 ile 240 karakter arasında bir kural girin.",
+      "textTooLong": "Kural en fazla 240 karakter olmalıdır.",
+      "tooManyTerms": "En fazla 8 yasaklı terim girin.",
+      "termTooLong": "“{{term}}” yasaklı terimi 64 karakteri aşıyor.",
+      "termUnusable": "“{{term}}” yasaklı terimi bir harf veya sayı içermelidir.",
+      "duplicateTerm": "“{{term}}” başka bir yasaklı terimle eşleşiyor. Yinelenen terimi kaldırın.",
+      "termsLabel": "Yasaklı terimler (isteğe bağlı)",
+      "termsPlaceholder": "Örnek: Nike, Adidas",
+      "termsHelp": "Virgülle ayırarak en fazla 8 terim girin. Terim içermeyen kurallar yalnızca bağlam sağlar.",
+      "invalidTerms": "Her biri en fazla 64 karakter olan en çok 8 terim kullanın.",
+      "limitReached": "24 etkin kural sınırına ulaşıldı.",
+      "add": "Kural ekle"
+    },
     "nav": {
       "title": "Creative Studio"
     },

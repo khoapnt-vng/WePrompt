@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 
 import { ipcBridge } from '@/common';
+import type { StudioBriefRuleDraft } from '@/common/types/project/creativeStudioRules';
 import {
   STUDIO_REFERENCE_PROMPT_MAX_LENGTH,
   type StudioRendererProject,
@@ -41,6 +42,7 @@ import {
   StudioExportModal,
   StudioLibrary,
   StudioPhaseShell,
+  StudioRulesDrawer,
   type StudioPhaseControllers,
 } from './components';
 import { BriefConversationProvider } from './components/Shell/BriefConversationContext';
@@ -316,6 +318,9 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
       !editor.hasUnsavedSceneDrafts,
   });
   const [draftModalVisible, setDraftModalVisible] = useState(false);
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const [rulesPending, setRulesPending] = useState(false);
+  const [rulesErrorMessageKey, setRulesErrorMessageKey] = useState<string | null>(null);
   const [generationReview, setGenerationReview] = useState<GenerationReviewState | null>(null);
   const [generationReviewIssueMessageKey, setGenerationReviewIssueMessageKey] = useState<string | null>(null);
   const [generationReviewRefreshing, setGenerationReviewRefreshing] = useState(false);
@@ -1096,6 +1101,47 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
     setExportIssueMessageKey(null);
   }, [exportPending]);
 
+  const setBriefRules = useCallback(
+    async (rules: StudioBriefRuleDraft[]): Promise<boolean> => {
+      if (project === null) return false;
+      setRulesPending(true);
+      setRulesErrorMessageKey(null);
+      try {
+        const result = await ipcBridge.creativeStudio.setBriefRules.invoke({
+          projectId: project.id,
+          expectedRevision: project.revision,
+          rules,
+        });
+        if (result.ok === false) {
+          setRulesErrorMessageKey(result.error.messageKey);
+          return false;
+        }
+        // Adopt the bumped revision before returning, so the drawer's NEXT write CASes against the
+        // revision this one produced. `refetch` is the handle the page already destructures at :271
+        // and already passes to useStoryboardEditor, useStudioJobs and useStudioModels for exactly
+        // this purpose; it reloads `loadedProject`, which flows back through
+        // `newestProject(studioJobs.project, editor.project, loadedProject)` at :281.
+        //
+        // There is no `applyProject` to call: `adoptProject` is private to useStoryboardEditor
+        // (:494) and is not on `UseStoryboardEditorResult`, `creativeStudio.updateProject.invoke` is
+        // only ever called from inside that hook (:1249, :1386) and never from this page, and
+        // `useStudioProject` exposes only `refetch` (useStudioProject.ts:180-188). Do not widen the
+        // editor hook's API to satisfy a call that was never needed.
+        //
+        // `setBriefRules` also goes through main's `notify` (creativeStudioService.ts:979-982), which
+        // fires `onProjectUpdated` → `creativeStudio.projectUpdated.emit` → `useStudioJobs`'s
+        // subscription (useStudioJobs.ts:392) → the same `refetch`. That path would adopt eventually;
+        // awaiting here makes it deterministic instead, which is what add-then-remove in one drawer
+        // session needs.
+        await refetch();
+        return true;
+      } finally {
+        setRulesPending(false);
+      }
+    },
+    [project, refetch]
+  );
+
   useEffect(() => {
     if (postModalTransition === null || exportVisible) return;
     const transition = postModalTransition;
@@ -1173,6 +1219,7 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
     mutationPending:
       canonicalMutationPending || referenceImportSceneId !== null || generationReviewRefreshing || exportPending,
     requestTransition,
+    openRules: () => setRulesOpen(true),
     acceptProposal: (request) => ipcBridge.creativeStudio.acceptProposal.invoke(request),
     rejectProposal: (request) => ipcBridge.creativeStudio.rejectProposal.invoke(request),
     openDraftReview: () => setDraftModalVisible(true),
@@ -1304,6 +1351,16 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
         }}
         onConfirm={confirmGeneration}
       />
+      {project !== null && (
+        <StudioRulesDrawer
+          visible={rulesOpen}
+          project={project}
+          pending={rulesPending}
+          errorMessageKey={rulesErrorMessageKey}
+          onClose={() => setRulesOpen(false)}
+          onSetRules={setBriefRules}
+        />
+      )}
       <StudioExportModal
         visible={exportVisible}
         project={project}

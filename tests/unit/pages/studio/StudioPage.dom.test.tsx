@@ -106,6 +106,7 @@ const project = (id = 'project-1', overrides: Partial<StudioRendererProject> = {
   id,
   name: id === 'project-1' ? 'Launch film' : 'Second film',
   brief: 'A short launch video',
+  rules: [],
   aspectRatio: '16:9',
   targetDurationSeconds: 15,
   resolution: '720p',

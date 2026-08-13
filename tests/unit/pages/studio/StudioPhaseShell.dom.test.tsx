@@ -184,6 +184,7 @@ const controller = (
   advisory,
   mutationPending: false,
   requestTransition: vi.fn(),
+  openRules: vi.fn(),
   acceptProposal: vi.fn(),
   rejectProposal: vi.fn(),
   openDraftReview: vi.fn(),

@@ -42,6 +42,8 @@ export type StudioPhaseControllers = {
   advisory: StudioPhaseAdvisory | null;
   mutationPending: boolean;
   requestTransition: (transition: StudioPhaseTransition) => void;
+  /** Opens the document's rule list. The frame owns it, so every phase can reach it. */
+  openRules: () => void;
   acceptProposal: (request: StudioProposalRequest) => Promise<StudioCommandResult<StudioProposalAcceptance>>;
   rejectProposal: (request: StudioProposalRequest) => Promise<StudioCommandResult<StudioProposal>>;
   openDraftReview: () => void;

@@ -32,6 +32,7 @@ const plannedGroups = [
   'reference',
   'review',
   'routing',
+  'rules',
   'scene',
   'shell',
   'storyboard',
