@@ -108,11 +108,12 @@ const errorResult = (message: string): StudioToolResult => ({
 
 /**
  * The subprocess reads project.json raw: no migrateSchemaV1Project, no validateProject. Main's
- * `rules: []` default (store.ts:1768) is in-memory only and nothing rewrites the manifest on open,
- * so every project written before rules existed still has no `rules` key on disk. Defaulting it here
- * — once, at the single read point every handler shares — is what stops `read_storyboard` and
- * `propose_brief_rule` throwing on `undefined` and reporting the project as unavailable. Doing it at
- * the call sites instead means every future handler has to remember.
+ * `rules: []` default (`migrateSchemaV1Project`, store.ts:971-973, applied from `readProject` at
+ * :1812) is in-memory only and nothing rewrites the manifest on open, so every project written
+ * before rules existed still has no `rules` key on disk. Defaulting it here — once, at the single
+ * read point every handler shares — is what stops `read_storyboard` and `propose_brief_rule`
+ * throwing on `undefined` and reporting the project as unavailable. Doing it at the call sites
+ * instead means every future handler has to remember.
  */
 const readProject = async (config: StudioServerEnv): Promise<StudioProject> => {
   const raw = JSON.parse(await readFile(path.join(config.projectDir, 'project.json'), 'utf8')) as StudioProject;

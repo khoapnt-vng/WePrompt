@@ -4742,6 +4742,35 @@ describe('Studio MCP server', () => {
     ]);
   });
 
+  it('shows a context-only project rule as unenforced without forbidden terms', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'studio-server-'));
+    await writeFile(
+      path.join(dir, 'project.json'),
+      JSON.stringify({
+        ...studioServerProjectFixture,
+        rules: [
+          {
+            id: 'rule_1',
+            scope: 'project',
+            text: 'Keep the tone optimistic.',
+            predicate: null,
+            createdAt: '2026-08-13T00:00:00.000Z',
+          },
+        ],
+      })
+    );
+    const handler = createReadStoryboardHandler({
+      projectId: 'project_1',
+      projectDir: dir,
+      pendingDir: '',
+      referencePendingDir: '',
+    });
+
+    const view = JSON.parse((await handler({})).content[0].text) as { rules: unknown };
+
+    expect(view.rules).toEqual([{ scope: 'project', text: 'Keep the tone optimistic.', enforced: false }]);
+  });
+
   it('reads a manifest written before rules existed as an empty list, not an unavailable project', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'studio-server-'));
     const raw = { ...studioServerProjectFixture } as Record<string, unknown>;
