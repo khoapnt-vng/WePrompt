@@ -1007,7 +1007,8 @@
         "activityEmpty": "Çalışan bir oluşturma işi yok.",
         "jobsRunning": "{{count}} oluşturma işi çalışıyor",
         "jobsRunning_one": "{{count}} oluşturma işi çalışıyor",
-        "jobsRunning_other": "{{count}} oluşturma işi çalışıyor"
+        "jobsRunning_other": "{{count}} oluşturma işi çalışıyor",
+        "title": "Pano"
       },
       "review": {
         "title": "Kurgu",

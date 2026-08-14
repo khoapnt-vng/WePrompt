@@ -380,6 +380,9 @@ describe('ProducePhase', () => {
     expect(focusTargets).toHaveLength(1);
     expect(focusTargets[0]).toHaveAttribute('id', 'studio-produce-phase-heading');
     expect(focusTargets[0]).toHaveAttribute('tabindex', '-1');
+    // It must name the VIEW. It used to be the engine strip's heading, so activating "Board" moved
+    // focus to a heading announcing "Rendering with —" instead of where the user had just gone.
+    expect(focusTargets[0]).toHaveTextContent('conversation.creativeStudio.phase.produce.title');
   });
 
   it('shows only canonical generated takes and opens the selected take preview from its card', () => {

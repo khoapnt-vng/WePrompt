@@ -1006,7 +1006,8 @@
         "activityEmpty": "Es werden keine Erzeugungsaufträge ausgeführt.",
         "jobsRunning": "{{count}} Erzeugungsaufträge laufen",
         "jobsRunning_one": "{{count}} Erzeugungsauftrag läuft",
-        "jobsRunning_other": "{{count}} Erzeugungsaufträge laufen"
+        "jobsRunning_other": "{{count}} Erzeugungsaufträge laufen",
+        "title": "Board"
       },
       "review": {
         "title": "Schnitt",

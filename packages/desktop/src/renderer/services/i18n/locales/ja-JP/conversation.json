@@ -1002,7 +1002,8 @@
         "activityTitle": "生成状況",
         "activityEmpty": "実行中の生成ジョブはありません。",
         "jobsRunning": "{{count}} 件の生成ジョブが実行中",
-        "jobsRunning_other": "{{count}} 件の生成ジョブが実行中"
+        "jobsRunning_other": "{{count}} 件の生成ジョブが実行中",
+        "title": "ボード"
       },
       "review": {
         "title": "カット",

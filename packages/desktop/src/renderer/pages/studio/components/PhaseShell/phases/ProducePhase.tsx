@@ -68,6 +68,11 @@ export const ProducePhase: React.FC<ProducePhaseProps> = ({ controller, layoutMo
   if (readyRoutes.length === 0) {
     return (
       <section data-layout={layoutMode} className={styles.phase} aria-labelledby='studio-produce-phase-heading'>
+        {/* The Board view's focus target. StudioPhaseShell focuses [data-studio-phase-heading] after
+            every view change, so it must name the view — the engine strip names the engine. */}
+        <h2 id='studio-produce-phase-heading' data-studio-phase-heading tabIndex={-1} className='sr-only'>
+          {t('conversation.creativeStudio.phase.produce.title')}
+        </h2>
         <ConnectEngineCard disabled={mutationPending} onOpenSettings={openModelSettings} />
       </section>
     );
@@ -75,6 +80,11 @@ export const ProducePhase: React.FC<ProducePhaseProps> = ({ controller, layoutMo
 
   return (
     <section data-layout={layoutMode} className={styles.phase} aria-labelledby='studio-produce-phase-heading'>
+      {/* The Board view's focus target. StudioPhaseShell focuses [data-studio-phase-heading] after
+          every view change, so it must name the view — the engine strip names the engine. */}
+      <h2 id='studio-produce-phase-heading' data-studio-phase-heading tabIndex={-1} className='sr-only'>
+        {t('conversation.creativeStudio.phase.produce.title')}
+      </h2>
       <StudioModelBar
         catalog={models.catalog}
         disabled={mutationPending || editor.drafting || jobs.mutationPending}

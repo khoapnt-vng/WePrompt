@@ -1002,7 +1002,8 @@
         "activityTitle": "生成活动",
         "activityEmpty": "当前没有正在运行的生成任务。",
         "jobsRunning": "有 {{count}} 个生成任务正在运行",
-        "jobsRunning_other": "有 {{count}} 个生成任务正在运行"
+        "jobsRunning_other": "有 {{count}} 个生成任务正在运行",
+        "title": "看板"
       },
       "review": {
         "title": "剪辑",

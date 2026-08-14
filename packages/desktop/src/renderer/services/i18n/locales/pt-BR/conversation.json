@@ -1014,7 +1014,8 @@
         "jobsRunning": "{{count}} trabalhos de geração em execução",
         "jobsRunning_one": "{{count}} trabalho de geração em execução",
         "jobsRunning_many": "{{count}} trabalhos de geração em execução",
-        "jobsRunning_other": "{{count}} trabalhos de geração em execução"
+        "jobsRunning_other": "{{count}} trabalhos de geração em execução",
+        "title": "Quadro"
       },
       "review": {
         "title": "Corte",

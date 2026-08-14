@@ -1011,7 +1011,8 @@
         "jobsRunning_one": "Виконується {{count}} завдання генерації",
         "jobsRunning_few": "Виконуються {{count}} завдання генерації",
         "jobsRunning_many": "Виконуються {{count}} завдань генерації",
-        "jobsRunning_other": "Виконується {{count}} завдання генерації"
+        "jobsRunning_other": "Виконується {{count}} завдання генерації",
+        "title": "Дошка"
       },
       "review": {
         "title": "Монтаж",

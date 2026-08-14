@@ -840,7 +840,8 @@
         "activityEmpty": "No generation jobs are running.",
         "jobsRunning": "{{count}} generation jobs running",
         "jobsRunning_one": "{{count}} generation job running",
-        "jobsRunning_other": "{{count}} generation jobs running"
+        "jobsRunning_other": "{{count}} generation jobs running",
+        "title": "Board"
       },
       "review": {
         "title": "Cut",

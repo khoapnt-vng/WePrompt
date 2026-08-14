@@ -145,6 +145,7 @@ const phaseKeys = [
   'phase.write.placeholder.middle',
   'phase.write.placeholder.closing',
   'phase.write.needsTitle',
+  'phase.produce.title',
   'phase.produce.modelsTitle',
   'phase.produce.activityTitle',
   'phase.produce.activityEmpty',
@@ -453,12 +454,15 @@ describe('Creative Studio localization contract', () => {
    * document disagreeing about where you are. Asserting equality rather than exact strings keeps the
    * two surfaces consistent by construction, so improving a view's name only takes one edit.
    *
-   * `phase.produce.renderingWith` is deliberately not here. It is the Board view's only heading, but
-   * it names the engine a render will use ("Rendering with —"), not the view; it answers a different
-   * question than the switch label does, so equality would be the wrong contract for it.
+   * `phase.produce.renderingWith` is deliberately not here. It names the engine a render will use
+   * ("Rendering with —"), not the view; it answers a different question than the switch label does,
+   * so equality would be the wrong contract for it. It used to be the Board view's *only* heading,
+   * which meant activating "Board" announced the engine — `phase.produce.title` now carries the
+   * view name and `renderingWith` labels the engine strip alone.
    */
   it.each([
     ['phase.write.title', 'phase.nav.table'],
+    ['phase.produce.title', 'phase.nav.board'],
     ['phase.review.title', 'phase.nav.cut'],
   ])('words %s exactly as the switch label %s in every configured locale', (headingKey, navKey) => {
     const issues: string[] = [];

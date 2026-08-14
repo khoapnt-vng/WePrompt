@@ -49,7 +49,7 @@ export const getReadySelectedRoutes = (catalog: StudioRouteCatalog | null): Read
 export const EngineBar: React.FC<EngineBarProps> = ({
   routes,
   disabled = false,
-  headingId = 'studio-produce-phase-heading',
+  headingId = 'studio-produce-engine-heading',
   onOpenSettings,
 }) => {
   const { t, i18n } = useTranslation();
@@ -69,9 +69,9 @@ export const EngineBar: React.FC<EngineBarProps> = ({
 
   return (
     <section className={styles.engineBar} aria-labelledby={headingId}>
-      {/* Visually hidden, never removed: StudioPhaseShell focuses [data-studio-phase-heading]
-          on every phase transition, and this is the Produce phase's only one. */}
-      <h2 id={headingId} data-studio-phase-heading tabIndex={-1} className='sr-only'>
+      {/* Names the engine strip only. The Board view's focus target lives on ProducePhase, so
+          that activating "Board" announces the view rather than the engine it will spend on. */}
+      <h2 id={headingId} className='sr-only'>
         {t('conversation.creativeStudio.phase.produce.renderingWith')}
       </h2>
       <Tooltip

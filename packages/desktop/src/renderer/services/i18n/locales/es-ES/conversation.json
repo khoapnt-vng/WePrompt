@@ -1009,7 +1009,8 @@
         "jobsRunning": "{{count}} trabajos de generación en curso",
         "jobsRunning_one": "{{count}} trabajo de generación en curso",
         "jobsRunning_many": "{{count}} trabajos de generación en curso",
-        "jobsRunning_other": "{{count}} trabajos de generación en curso"
+        "jobsRunning_other": "{{count}} trabajos de generación en curso",
+        "title": "Tablero"
       },
       "review": {
         "title": "Montaje",

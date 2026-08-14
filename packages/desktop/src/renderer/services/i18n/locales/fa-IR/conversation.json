@@ -1005,7 +1005,8 @@
         "activityEmpty": "هیچ کار تولیدی در حال اجرا نیست.",
         "jobsRunning": "{{count}} کار تولیدی در حال اجراست",
         "jobsRunning_one": "{{count}} کار تولیدی در حال اجراست",
-        "jobsRunning_other": "{{count}} کار تولیدی در حال اجراست"
+        "jobsRunning_other": "{{count}} کار تولیدی در حال اجراست",
+        "title": "تخته"
       },
       "review": {
         "title": "تدوین",

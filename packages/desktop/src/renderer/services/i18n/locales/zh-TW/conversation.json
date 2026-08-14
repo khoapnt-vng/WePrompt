@@ -1002,7 +1002,8 @@
         "activityTitle": "產生活動",
         "activityEmpty": "目前沒有執行中的產生工作。",
         "jobsRunning": "有 {{count}} 個產生工作正在執行",
-        "jobsRunning_other": "有 {{count}} 個產生工作正在執行"
+        "jobsRunning_other": "有 {{count}} 個產生工作正在執行",
+        "title": "看板"
       },
       "review": {
         "title": "剪輯",

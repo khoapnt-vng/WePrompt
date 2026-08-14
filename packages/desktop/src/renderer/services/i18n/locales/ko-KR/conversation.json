@@ -1002,7 +1002,8 @@
         "activityTitle": "생성 활동",
         "activityEmpty": "실행 중인 생성 작업이 없습니다.",
         "jobsRunning": "생성 작업 {{count}}개 실행 중",
-        "jobsRunning_other": "생성 작업 {{count}}개 실행 중"
+        "jobsRunning_other": "생성 작업 {{count}}개 실행 중",
+        "title": "보드"
       },
       "review": {
         "title": "컷",

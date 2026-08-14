@@ -20,7 +20,7 @@ export type ConnectEngineCardProps = {
 /** The sole Produce surface until the workspace has an explicitly selected media route. */
 export const ConnectEngineCard: React.FC<ConnectEngineCardProps> = ({
   disabled = false,
-  headingId = 'studio-produce-phase-heading',
+  headingId = 'studio-produce-connect-heading',
   onOpenSettings,
 }) => {
   const { t } = useTranslation();
@@ -31,7 +31,7 @@ export const ConnectEngineCard: React.FC<ConnectEngineCardProps> = ({
 
   return (
     <section className={styles.connectCard} aria-labelledby={headingId}>
-      <h2 id={headingId} data-studio-phase-heading tabIndex={-1} className={styles.connectHeading}>
+      <h2 id={headingId} className={styles.connectHeading}>
         {t('conversation.creativeStudio.phase.produce.connectEngine')}
       </h2>
       <div className={styles.connectActions}>
