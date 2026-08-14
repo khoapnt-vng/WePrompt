@@ -41,6 +41,7 @@ import {
   describeSceneRenderBlockMessage,
   GenerationReviewModal,
   routeSupportsScene,
+  submitExactGenerationReview,
   type GenerationBatchReviewRequest,
   type GenerationReviewExcludedScene,
   type GenerationReviewModalProps,
@@ -97,9 +98,33 @@ type ReferenceNotice =
   | { kind: 'excluded'; scenes: GenerationReviewExcludedScene[]; requestIds: string[] }
   | { kind: 'dismiss_failed' };
 
+type DeferredReferenceReview = {
+  requests: Array<Pick<StudioReferenceRequest, 'id' | 'sceneId'>>;
+  sceneIds: string[];
+};
+
 const routeIdentity = (
   route: Pick<StudioRouteCatalogEntry | GenerationReviewRouteSnapshot, 'choiceId' | 'kind'>
 ): string => `${route.choiceId}\u0000${route.kind}`;
+
+const catalogMatchesProjectImageRoute = (project: StudioRendererProject, catalog: StudioRouteCatalog): boolean => {
+  const selected = resolveShotEngine(project, { mediaKind: 'image' });
+  const catalogSelection = catalog.image.selected;
+  const route = catalog.image.selectedRoute;
+  return (
+    selected !== null &&
+    catalog.image.status === 'ready' &&
+    catalogSelection !== null &&
+    route !== null &&
+    route.kind === 'image' &&
+    catalogSelection.choiceId === selected.choiceId &&
+    catalogSelection.providerId === selected.providerId &&
+    catalogSelection.model === selected.model &&
+    route.choiceId === selected.choiceId &&
+    route.providerId === selected.providerId &&
+    route.model === selected.model
+  );
+};
 
 const toReviewScene = (
   project: StudioRendererProject,
@@ -432,6 +457,7 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
   const [postModalTransition, setPostModalTransition] = useState<StudioViewTransition | null>(null);
   const generationReviewRefreshingRef = useRef(false);
   const suppressedReferenceRequestIdsRef = useRef(new Set<string>());
+  const deferredReferenceReviewsRef = useRef<DeferredReferenceReview[]>([]);
   const notifiedExcludedReferenceRequestsRef = useRef<string | null>(null);
   /**
    * Reference requests this mount has already taken down the paid path, or tried to.
@@ -523,6 +549,7 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
 
   useEffect(() => {
     suppressedReferenceRequestIdsRef.current.clear();
+    deferredReferenceReviewsRef.current = [];
     notifiedExcludedReferenceRequestsRef.current = null;
     setReferenceNotice(null);
   }, [project?.id]);
@@ -538,16 +565,55 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
     ) {
       return;
     }
+    const availableRoutes = catalogEntries(studioModels.catalog);
+    const pendingRequestById = new Map(studioJobs.referenceRequests.map((request) => [request.id, request]));
+    const retainedDeferredReviews: DeferredReferenceReview[] = [];
+    for (const deferred of deferredReferenceReviewsRef.current) {
+      const exactPendingRequests = deferred.requests.map((request) => {
+        const pending = pendingRequestById.get(request.id);
+        return pending?.sceneId === request.sceneId ? pending : null;
+      });
+      if (
+        !catalogMatchesProjectImageRoute(project, studioModels.catalog) ||
+        exactPendingRequests.some((request) => request === null)
+      ) {
+        retainedDeferredReviews.push(deferred);
+        continue;
+      }
+      const review = buildQueuedReferenceReview(project, readiness, deferred.requests, availableRoutes);
+      const submission = collectSubmittableRoutes(review.scenes);
+      const prompts = submission === null ? null : collectReferencePrompts(review.scenes, submission.sceneIds);
+      const exactRequestIds =
+        review.referenceRequestIds.length === deferred.requests.length &&
+        review.referenceRequestIds.every((requestId, index) => requestId === deferred.requests[index]?.id);
+      const exactSceneIds =
+        review.scenes.length === deferred.sceneIds.length &&
+        review.scenes.every((scene, index) => scene.id === deferred.sceneIds[index]);
+      if (
+        !exactRequestIds ||
+        !exactSceneIds ||
+        review.excludedScenes.length > 0 ||
+        review.excludedReferenceRequestIds.length > 0 ||
+        submission === null ||
+        prompts === null
+      ) {
+        retainedDeferredReviews.push(deferred);
+      }
+    }
+    deferredReferenceReviewsRef.current = retainedDeferredReviews;
+    const deferredRequestIds = new Set(retainedDeferredReviews.flatMap(({ requests }) => requests.map(({ id }) => id)));
+
     // Requests this mount has already acted on are dropped here rather than checked as a whole
     // batch further down. The batch is rebuilt from every pending request on each run, so an id
     // that has been through the paid path must not be able to take the requests queued alongside
     // it with it — filtering leaves the untouched ones free to be submitted on their own.
     const requests = studioJobs.referenceRequests.filter(
       ({ id }) =>
-        !suppressedReferenceRequestIdsRef.current.has(id) && !autoSubmittedReferenceRequestIdsRef.current.has(id)
+        !suppressedReferenceRequestIdsRef.current.has(id) &&
+        !autoSubmittedReferenceRequestIdsRef.current.has(id) &&
+        !deferredRequestIds.has(id)
     );
     if (requests.length === 0) return;
-    const availableRoutes = catalogEntries(studioModels.catalog);
     const review = buildQueuedReferenceReview(project, readiness, requests, availableRoutes);
     if (review.scenes.length === 0) {
       const signature = review.excludedScenes
@@ -844,46 +910,38 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
         return;
       }
 
-      const reviewedConfirmation = collectSubmittableRoutes(generationReview.scenes);
-      const confirmationMatchesReview =
-        reviewedConfirmation !== null &&
-        reviewedConfirmation.sceneIds.length === sceneIds.length &&
-        reviewedConfirmation.sceneIds.every((sceneId, index) => sceneId === sceneIds[index]) &&
-        reviewedConfirmation.routes.length === routes.length &&
-        reviewedConfirmation.routes.every((route, index) => {
-          const candidate = routes[index];
-          return (
-            candidate !== undefined &&
-            candidate.sceneId === route.sceneId &&
-            candidate.choiceId === route.choiceId &&
-            candidate.kind === route.kind
-          );
-        });
-      if (!confirmationMatchesReview) {
+      const submitResult = await submitExactGenerationReview(
+        generationReview.scenes,
+        { sceneIds, routes },
+        async (exactConfirmation) => {
+          // Defence in depth: main refuses a reference submission whose scenes are not all described,
+          // and a refused submit here would leave the queued requests dismissed and unpaid-for with
+          // nothing on screen. Surfacing the issue keeps the review open so Cancel or a retry works.
+          const referencePrompts =
+            generationReview.outputRole === 'reference'
+              ? collectReferencePrompts(generationReview.scenes, exactConfirmation.sceneIds)
+              : null;
+          if (generationReview.outputRole === 'reference' && referencePrompts === null) {
+            setGenerationReviewIssueMessageKey('conversation.creativeStudio.errors.invalidPayload');
+            return false;
+          }
+
+          return studioJobs.submitScenes({
+            mode: generationReview.mode,
+            sceneIds: exactConfirmation.sceneIds,
+            routes: exactConfirmation.routes,
+            catalogVersion: generationReview.catalogVersion,
+            expectedRevision: generationReview.projectRevision,
+            ...(generationReview.outputRole === undefined ? {} : { outputRole: generationReview.outputRole }),
+            ...(referencePrompts === null ? {} : { referencePrompts }),
+          });
+        }
+      );
+      if (submitResult === 'rejected') {
         setGenerationReviewIssueMessageKey('conversation.creativeStudio.errors.invalidRoute');
         return;
       }
-
-      // Defence in depth: main refuses a reference submission whose scenes are not all described,
-      // and a refused submit here would leave the queued requests dismissed and unpaid-for with
-      // nothing on screen. Surfacing the issue keeps the review open so Cancel or a retry works.
-      const referencePrompts =
-        generationReview.outputRole === 'reference' ? collectReferencePrompts(generationReview.scenes, sceneIds) : null;
-      if (generationReview.outputRole === 'reference' && referencePrompts === null) {
-        setGenerationReviewIssueMessageKey('conversation.creativeStudio.errors.invalidPayload');
-        return;
-      }
-
-      const submitted = await studioJobs.submitScenes({
-        mode: generationReview.mode,
-        sceneIds,
-        routes,
-        catalogVersion: generationReview.catalogVersion,
-        expectedRevision: generationReview.projectRevision,
-        ...(generationReview.outputRole === undefined ? {} : { outputRole: generationReview.outputRole }),
-        ...(referencePrompts === null ? {} : { referencePrompts }),
-      });
-      if (!submitted) return;
+      if (submitResult === 'not_submitted') return;
       if (generationReview.referenceRequestIds === undefined) {
         setGenerationReview(null);
         return;
@@ -1489,9 +1547,21 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
             }
           }}
           onSetEngines={(role) => {
-            generationReview?.referenceRequests?.forEach(({ id: requestId }) =>
-              suppressedReferenceRequestIdsRef.current.add(requestId)
-            );
+            if (
+              generationReview?.referenceRequestIds !== undefined &&
+              generationReview.referenceRequests !== undefined
+            ) {
+              const requestById = new Map(generationReview.referenceRequests.map((request) => [request.id, request]));
+              const includedRequests = generationReview.referenceRequestIds.map((requestId) =>
+                requestById.get(requestId)
+              );
+              if (includedRequests.length > 0 && includedRequests.every((request) => request !== undefined)) {
+                deferredReferenceReviewsRef.current.push({
+                  requests: includedRequests,
+                  sceneIds: generationReview.scenes.map(({ id }) => id),
+                });
+              }
+            }
             studioJobs.clearIssue();
             studioJobs.clearStaleIntent();
             setGenerationReviewIssueMessageKey(null);

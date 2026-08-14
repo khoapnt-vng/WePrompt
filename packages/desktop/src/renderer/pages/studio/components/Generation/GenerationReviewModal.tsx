@@ -82,6 +82,33 @@ export const collectSubmittableRoutes = (
   };
 };
 
+export type ExactGenerationReviewSubmitResult = 'rejected' | 'not_submitted' | 'submitted';
+
+/** Keeps the reviewed IDs/routes as the final authority immediately in front of paid submission. */
+export const submitExactGenerationReview = async (
+  scenes: readonly GenerationReviewScene[],
+  confirmation: GenerationReviewConfirmation,
+  submitScenes: (confirmation: GenerationReviewConfirmation) => Promise<boolean>
+): Promise<ExactGenerationReviewSubmitResult> => {
+  const reviewed = collectSubmittableRoutes(scenes);
+  const matches =
+    reviewed !== null &&
+    reviewed.sceneIds.length === confirmation.sceneIds.length &&
+    reviewed.sceneIds.every((sceneId, index) => sceneId === confirmation.sceneIds[index]) &&
+    reviewed.routes.length === confirmation.routes.length &&
+    reviewed.routes.every((route, index) => {
+      const candidate = confirmation.routes[index];
+      return (
+        candidate !== undefined &&
+        candidate.sceneId === route.sceneId &&
+        candidate.choiceId === route.choiceId &&
+        candidate.kind === route.kind
+      );
+    });
+  if (!matches) return 'rejected';
+  return (await submitScenes(reviewed)) ? 'submitted' : 'not_submitted';
+};
+
 /**
  * The per-scene reference prompts a submission must carry, or `null` when any submitted scene has
  * none.

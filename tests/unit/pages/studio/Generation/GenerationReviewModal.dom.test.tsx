@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { GenerationReviewRouteSnapshot } from '@renderer/pages/studio/components/Generation/generationRequests';
 import {
   GenerationReviewModal,
+  submitExactGenerationReview,
   type GenerationReviewModalProps,
   type GenerationReviewScene,
 } from '@renderer/pages/studio/components/Generation/GenerationReviewModal';
@@ -96,6 +97,51 @@ const createProps = (overrides: Partial<GenerationReviewModalProps> = {}): Gener
 });
 
 describe('GenerationReviewModal', () => {
+  it.each([
+    {
+      condition: 'reordered IDs and routes',
+      confirmation: {
+        sceneIds: ['scene-video', 'scene-image'],
+        routes: [
+          { sceneId: 'scene-video', choiceId: 'choice_video', kind: 'video' as const },
+          { sceneId: 'scene-image', choiceId: 'choice_image', kind: 'image' as const },
+        ],
+      },
+    },
+    {
+      condition: 'an omitted ID and route',
+      confirmation: {
+        sceneIds: ['scene-image'],
+        routes: [{ sceneId: 'scene-image', choiceId: 'choice_image', kind: 'image' as const }],
+      },
+    },
+    {
+      condition: 'a substituted ID',
+      confirmation: {
+        sceneIds: ['scene-image', 'scene-other'],
+        routes: [
+          { sceneId: 'scene-image', choiceId: 'choice_image', kind: 'image' as const },
+          { sceneId: 'scene-other', choiceId: 'choice_video', kind: 'video' as const },
+        ],
+      },
+    },
+    {
+      condition: 'a substituted route',
+      confirmation: {
+        sceneIds: ['scene-image', 'scene-video'],
+        routes: [
+          { sceneId: 'scene-image', choiceId: 'choice_image', kind: 'image' as const },
+          { sceneId: 'scene-video', choiceId: 'choice_other', kind: 'video' as const },
+        ],
+      },
+    },
+  ])('rejects $condition before the paid submit callback', async ({ confirmation }) => {
+    const submitScenes = vi.fn(async () => true);
+
+    await expect(submitExactGenerationReview(mixedScenes(), confirmation, submitScenes)).resolves.toBe('rejected');
+    expect(submitScenes).not.toHaveBeenCalled();
+  });
+
   it('names the breached rule on the shot and blocks Confirm before anything is charged', () => {
     render(
       <GenerationReviewModal

@@ -2676,6 +2676,162 @@ describe('StudioPage and useStudioProject', () => {
     expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
   });
 
+  it('resumes one deferred Director request after a same-project engine selection without duplicate spend', async () => {
+    let onProposalUpdate: ((event: { projectId: string }) => void) | undefined;
+    bridge.proposalUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
+      onProposalUpdate = listener;
+      return () => {};
+    });
+    const opening = scene({ id: 'scene-1', title: 'Deferred opening', durationSeconds: 5 });
+    const pendingRequest = referenceRequest(opening.id, 1);
+    const excluded = scene({
+      id: 'scene-excluded',
+      title: 'Already plated',
+      assetIds: ['asset-1'],
+      reviewState: 'needs_selection',
+    });
+    const excludedRequest = referenceRequest(excluded.id, 2);
+    const excludedAsset = { ...asset('asset-1'), sceneId: excluded.id };
+    const unrouted = project('project-1', {
+      sceneOrder: [opening.id, excluded.id],
+      scenes: { [opening.id]: opening, [excluded.id]: excluded },
+      assets: { [excludedAsset.id]: excludedAsset },
+      routing: { storyboard: null, image: null, video: null },
+    });
+    const routed = project('project-1', {
+      revision: 3,
+      sceneOrder: [opening.id, excluded.id],
+      scenes: { [opening.id]: opening, [excluded.id]: excluded },
+      assets: { [excludedAsset.id]: excludedAsset },
+    });
+    const selectableCatalog: StudioRouteCatalog = {
+      ...routes(),
+      image: {
+        status: 'selection_required',
+        selected: null,
+        selectedRoute: null,
+        selectionIssue: null,
+        options: [imageRoute()],
+      },
+    };
+    let canonicalProject = unrouted;
+    bridge.getProject.invoke.mockImplementation(async () => ok(canonicalProject));
+    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([pendingRequest, excludedRequest]));
+    bridge.updateModelSelection.invoke.mockImplementation(async () => {
+      canonicalProject = routed;
+      return ok(routed);
+    });
+    bridge.listRoutes.invoke.mockImplementation(async () =>
+      ok(canonicalProject === unrouted ? selectableCatalog : routesWithImage())
+    );
+    renderRoute('/studio/project-1/board');
+
+    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.setEngines' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+
+    const imageEngine = screen.getByRole('button', {
+      name: 'conversation.creativeStudio.models.engine.notSetImage',
+    });
+    fireEvent.click(imageEngine);
+    fireEvent.click(
+      within(await screen.findByRole('menu')).getByText('conversation.creativeStudio.models.engine.optionLabel')
+    );
+
+    await waitFor(() =>
+      expect(bridge.updateModelSelection.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: 'project-1',
+        expectedRevision: unrouted.revision,
+        role: 'image',
+        selection: { choiceId: 'choice_image' },
+      })
+    );
+    await waitFor(() =>
+      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: 'project-1',
+        mode: 'batch',
+        sceneIds: [opening.id],
+        expectedRevision: routed.revision,
+        routes: [{ sceneId: opening.id, choiceId: 'choice_image', kind: 'image' }],
+        catalogVersion: 'catalog-1',
+        outputRole: 'reference',
+        referencePrompts: [
+          { sceneId: opening.id, prompt: buildFirstFramePrompt(opening.visualPrompt, routed.aspectRatio) },
+        ],
+      })
+    );
+    expect(bridge.dismissReferenceRequests.invoke.mock.invocationCallOrder[0]).toBeLessThan(
+      bridge.submitScenes.invoke.mock.invocationCallOrder[0]!
+    );
+    expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project-1',
+      requestIds: [pendingRequest.id],
+    });
+
+    await act(async () => onProposalUpdate?.({ projectId: 'project-1' }));
+    await act(async () => onProposalUpdate?.({ projectId: 'project-1' }));
+    await act(async () => {});
+    expect(bridge.submitScenes.invoke).toHaveBeenCalledOnce();
+    expect(await screen.findByTestId('reference-exclusion-notice')).toHaveTextContent(excluded.title);
+  });
+
+  it('releases a deferred Director request when the canonical engine became valid before Close', async () => {
+    let onProjectUpdate: ((event: { projectId: string }) => void) | undefined;
+    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
+      onProjectUpdate = listener;
+      return () => {};
+    });
+    const opening = scene({ id: 'scene-1', title: 'Already recovered opening', durationSeconds: 5 });
+    const pendingRequest = referenceRequest(opening.id, 1);
+    const unrouted = project('project-1', {
+      sceneOrder: [opening.id],
+      scenes: { [opening.id]: opening },
+      routing: { storyboard: null, image: null, video: null },
+    });
+    const routed = project('project-1', {
+      revision: 3,
+      sceneOrder: [opening.id],
+      scenes: { [opening.id]: opening },
+    });
+    const selectableCatalog: StudioRouteCatalog = {
+      ...routes(),
+      image: {
+        status: 'selection_required',
+        selected: null,
+        selectedRoute: null,
+        selectionIssue: null,
+        options: [imageRoute()],
+      },
+    };
+    let canonicalProject = unrouted;
+    bridge.getProject.invoke.mockImplementation(async () => ok(canonicalProject));
+    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([pendingRequest]));
+    bridge.listRoutes.invoke.mockImplementation(async () =>
+      ok(canonicalProject === unrouted ? selectableCatalog : routesWithImage())
+    );
+    renderRoute('/studio/project-1/board');
+
+    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+    canonicalProject = routed;
+    await act(async () => onProjectUpdate?.({ projectId: 'project-1' }));
+    await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(2));
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+
+    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.setEngines' }));
+
+    await waitFor(() =>
+      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          sceneIds: [opening.id],
+          expectedRevision: routed.revision,
+          routes: [{ sceneId: opening.id, choiceId: 'choice_image', kind: 'image' }],
+          outputRole: 'reference',
+        })
+      )
+    );
+  });
+
   it('opens batch review after a canonical routing update recovers the catalog', async () => {
     let onUpdate: ((event: { projectId: string }) => void) | undefined;
     bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
