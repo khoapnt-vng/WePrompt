@@ -58,14 +58,6 @@ const timingGateCopy = [
   'Scene timing must match the project target before batch generation.',
 ];
 
-// A project adopts a generation route only when exactly one compatible engine exists.
-// The unpackaged fake catalog exposes two image models but a single video model, so a
-// freshly created project arrives with the video route adopted and the image route open.
-const fakeCatalogRoutes = {
-  image: null,
-  video: expect.objectContaining({ providerId: 'weprompt_studio_e2e', model: 'weprompt-e2e-video' }),
-};
-
 type CanonicalStudioSnapshot = {
   projectId: string;
   revision: number;
@@ -84,25 +76,38 @@ type CanonicalStudioSnapshot = {
 };
 
 type StudioRouteOptionSnapshot = {
+  choiceId: string;
   providerId: string;
   providerName: string;
   model: string;
+  integrationLabelKey: 'bytePlusSeedance' | 'imageApi' | 'openRouterVideo' | 'selfHostedVideoGateway';
 };
+
+type StudioRouteChoiceSnapshot = Pick<StudioRouteOptionSnapshot, 'choiceId' | 'providerId' | 'model'>;
 
 type StudioRouteCatalogSnapshot = {
   image: {
-    selected: { choiceId: string; providerId: string; model: string } | null;
+    selected: StudioRouteChoiceSnapshot | null;
+    selectedRoute: StudioRouteOptionSnapshot | null;
     options: StudioRouteOptionSnapshot[];
   };
   video: {
-    selected: { choiceId: string; providerId: string; model: string } | null;
+    selected: StudioRouteChoiceSnapshot | null;
+    selectedRoute: StudioRouteOptionSnapshot | null;
     options: StudioRouteOptionSnapshot[];
   };
 };
 
-const summarizeStudioRoute = ({ selected, options }: StudioRouteCatalogSnapshot['image']) => ({
+const summarizeStudioRoute = ({ selected, selectedRoute, options }: StudioRouteCatalogSnapshot['image']) => ({
   selected,
-  options: options.map(({ providerId, providerName, model }) => ({ providerId, providerName, model })),
+  selectedRoute,
+  options: options.map(({ choiceId, providerId, providerName, model, integrationLabelKey }) => ({
+    choiceId,
+    providerId,
+    providerName,
+    model,
+    integrationLabelKey,
+  })),
 });
 
 async function invokeStudioBridge<T>(
@@ -289,11 +294,22 @@ async function selectStudioView(page: Page, projectId: string, view: StudioView)
   await expectStudioView(page, projectId, view);
 }
 
+async function selectEngineOption(page: Page, role: 'image' | 'video', optionLabel: string): Promise<void> {
+  const slot = page.locator(`[data-engine-role="${role}"]`).first();
+  await slot.getByRole('button').click();
+  await page.getByRole('menu').getByText(optionLabel, { exact: true }).click();
+}
+
 /**
- * Produce's door when the workspace has NO compatible engine: the connect card is the
- * only content and no route can have been adopted.
+ * Produce's door when the workspace has NO compatible engine: the Engine Strip remains
+ * visible above the connection card, while the top-bar paid Generate control is absent.
+ * The door intentionally replaces the shot grid, so it cannot assert a per-shot Render control.
  */
 async function expectConnectEngineDoor(page: Page, projectId: string): Promise<void> {
+  const engineStrip = page.getByRole('region', { name: 'Engines' });
+  await expect(engineStrip).toBeVisible();
+  await expect(engineStrip.locator('[data-engine-role="image"]')).toBeVisible();
+  await expect(engineStrip.locator('[data-engine-role="video"]')).toBeVisible();
   const connectionHeading = page.getByRole('heading', {
     level: 2,
     name: 'Connect an engine — about a minute, once for the whole workspace',
@@ -309,7 +325,9 @@ async function expectConnectEngineDoor(page: Page, projectId: string): Promise<v
   // not count.
   const phaseShell = page.locator('[data-studio-work-panel]');
   await expect(phaseShell.getByRole('combobox')).toHaveCount(0);
-  await expect(phaseShell.getByRole('button', { name: /^(Render|Generate)/i })).toHaveCount(0);
+  await expect(
+    page.locator('[data-studio-phase-shell] > header').getByRole('button', { name: /^Generate/i })
+  ).toHaveCount(0);
   await expect(phaseShell.getByRole('region', { name: 'Storyboard' })).toHaveCount(0);
   await expect(phaseShell.getByText('Generation activity', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('dialog', { name: 'Review generation' })).toHaveCount(0);
@@ -323,12 +341,14 @@ async function expectConnectEngineDoor(page: Page, projectId: string): Promise<v
 }
 
 /**
- * Produce with the fake catalog's adopted video engine: the engine bar replaces the
- * connect door, but nothing has been generated and no generation dialog is open.
+ * Produce with the explicitly selected fake engines: the Engine Strip stays visible,
+ * no connection door replaces the board, and no generation dialog is open.
  */
 async function expectIdleProduceSurface(page: Page, projectId: string): Promise<void> {
-  await expect(page.getByRole('heading', { level: 2, name: /^Rendering with/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Change engines' })).toBeVisible();
+  const engineStrip = page.getByRole('region', { name: 'Engines' });
+  await expect(engineStrip).toBeVisible();
+  await expect(engineStrip.locator('[data-engine-role="image"]')).toContainText('weprompt-e2e-image');
+  await expect(engineStrip.locator('[data-engine-role="video"]')).toContainText('dreamina-seedance-2-0-260128');
   await expect(
     page.getByRole('heading', {
       level: 2,
@@ -339,7 +359,6 @@ async function expectIdleProduceSurface(page: Page, projectId: string): Promise<
 
   expect(await readCanonicalStudioSnapshot(page, projectId)).toMatchObject({
     projectId,
-    routes: fakeCatalogRoutes,
     jobs: [],
   });
   await assertStudioInvariants(page);
@@ -352,15 +371,14 @@ test.describe('Creative Studio workspace', () => {
     'Creative Studio E2E requires both fake-provider flags and an explicit unpackaged dev launch.'
   );
 
-  test('uses the current view shell while keeping the Table view available without an engine', async ({
-    electronApp,
-    page,
-  }) => {
+  test('uses the current view shell with explicit engine selection', async ({ electronApp, page }) => {
     const projectBrief = `A paper airplane carries a launch message across a calm blue studio ${Date.now()}.`;
     const shotTitle = 'Paper airplane launch';
     const narration = 'One small idea can carry a team forward.';
     const visualPrompt = 'A paper airplane crossing a calm blue studio backdrop.';
     let projectId = '';
+    let selectedImage: StudioRouteOptionSnapshot | null = null;
+    let selectedVideo: StudioRouteOptionSnapshot | null = null;
 
     await test.step('prove the fake-provider runtime gate is active', async () => {
       const gate = await electronApp.evaluate(({ app }) => ({
@@ -424,51 +442,77 @@ test.describe('Creative Studio workspace', () => {
       // second live region (the document activity indicator), so the chip is addressed by its own
       // hook rather than by `[role="status"]`.
       await expect(page.locator('[data-studio-phase-shell] > header [data-studio-save-state]')).toHaveText('Saved');
-      // A project adopts a route only when exactly one compatible engine exists, so the
-      // fake catalog's single video model is adopted while its two image models are not.
       const snapshot = await readCanonicalStudioSnapshot(page, projectId);
       expect(snapshot).toMatchObject({
         projectId,
-        routes: { image: null },
+        routes: { image: null, video: null },
         scenes: [],
         jobs: [],
       });
-      expect(snapshot.routes.video).toMatchObject({
-        providerId: 'weprompt_studio_e2e',
-        model: 'weprompt-e2e-video',
-      });
       const routeCatalog = await readStudioRouteCatalog(page, projectId);
       expect(routeCatalog.image.selected).toBeNull();
-      expect(routeCatalog.video.selected).toMatchObject({ model: 'weprompt-e2e-video' });
-      expect(routeCatalog.image.options).toEqual(
-        expect.arrayContaining([
-          {
-            providerId: 'weprompt_studio_e2e',
-            providerName: 'WePrompt Studio E2E',
-            model: 'weprompt-e2e-image',
-          },
-          {
-            providerId: 'weprompt_studio_e2e',
-            providerName: 'WePrompt Studio E2E',
-            model: 'weprompt-e2e-image-next',
-          },
-        ])
-      );
-      expect(routeCatalog.video.options).toEqual(
-        expect.arrayContaining([
-          {
-            providerId: 'weprompt_studio_e2e',
-            providerName: 'WePrompt Studio E2E',
-            model: 'weprompt-e2e-video',
-          },
-        ])
-      );
+      expect(routeCatalog.video.selected).toBeNull();
+      expect(routeCatalog.image.selectedRoute).toBeNull();
+      expect(routeCatalog.video.selectedRoute).toBeNull();
+      expect(routeCatalog.image.options).toHaveLength(1);
+      expect(routeCatalog.image.options[0]).toMatchObject({
+        providerId: 'weprompt_studio_e2e',
+        providerName: 'WePrompt Studio E2E',
+        model: 'weprompt-e2e-image',
+        integrationLabelKey: 'imageApi',
+      });
+      expect(routeCatalog.video.options).toHaveLength(2);
+      expect(
+        routeCatalog.video.options.map(({ model, integrationLabelKey }) => ({ model, integrationLabelKey }))
+      ).toEqual([
+        { model: 'dreamina-seedance-2-0-260128', integrationLabelKey: 'bytePlusSeedance' },
+        { model: 'dreamina-seedance-2-0-260128', integrationLabelKey: 'selfHostedVideoGateway' },
+      ]);
+      selectedImage = routeCatalog.image.options[0]!;
+      selectedVideo = routeCatalog.video.options.find((option) => option.integrationLabelKey === 'bytePlusSeedance')!;
     });
 
-    await test.step('add and save a complete shot in the Table view without configuring an engine', async () => {
+    await test.step('explicitly select both engine roles before any paid review', async () => {
+      if (selectedImage === null || selectedVideo === null) throw new Error('explicit fake catalog was unavailable');
+      const imageChoice = selectedImage;
+      const videoChoice = selectedVideo;
       await page.getByRole('dialog', { name: 'Brief' }).getByRole('button', { name: 'Close' }).click();
       await expect(page.getByRole('dialog', { name: 'Brief' })).toHaveCount(0);
       await expectStudioView(page, projectId, 'table');
+      await selectEngineOption(page, 'image', 'weprompt-e2e-image · WePrompt Studio E2E · Image API');
+      await selectEngineOption(page, 'video', 'dreamina-seedance-2-0-260128 · WePrompt Studio E2E · BytePlus Seedance');
+
+      await expect
+        .poll(async () => {
+          const snapshot = await readCanonicalStudioSnapshot(page, projectId);
+          const catalog = await readStudioRouteCatalog(page, projectId);
+          return {
+            routes: snapshot.routes,
+            selections: {
+              image: { choice: catalog.image.selected, route: catalog.image.selectedRoute },
+              video: { choice: catalog.video.selected, route: catalog.video.selectedRoute },
+            },
+          };
+        })
+        .toMatchObject({
+          routes: {
+            image: { choiceId: imageChoice.choiceId, model: imageChoice.model },
+            video: { choiceId: videoChoice.choiceId, model: videoChoice.model },
+          },
+          selections: {
+            image: {
+              choice: { choiceId: imageChoice.choiceId },
+              route: { choiceId: imageChoice.choiceId, integrationLabelKey: 'imageApi' },
+            },
+            video: {
+              choice: { choiceId: videoChoice.choiceId },
+              route: { choiceId: videoChoice.choiceId, integrationLabelKey: 'bytePlusSeedance' },
+            },
+          },
+        });
+    });
+
+    await test.step('add and save a complete shot in the Table view after configuring engines', async () => {
       const tableView = page.getByRole('region', { name: 'Table' });
       await expect(tableView.getByText('This step does not generate images or video.', { exact: true })).toBeVisible();
       await expect(tableView.getByRole('button', { name: /render|generate/i })).toHaveCount(0);
@@ -547,7 +591,10 @@ test.describe('Creative Studio workspace', () => {
           };
         })
         .toEqual({
-          routes: fakeCatalogRoutes,
+          routes: {
+            image: { model: 'weprompt-e2e-image' },
+            video: { model: 'dreamina-seedance-2-0-260128' },
+          },
           scenes: [{ title: shotTitle, narration, visualPrompt, durationSeconds: 5 }],
           jobs: [],
         });
@@ -558,6 +605,7 @@ test.describe('Creative Studio workspace', () => {
     await test.step('navigate every view in both directions and recover a deep-linked reload', async () => {
       await selectStudioView(page, projectId, 'cut');
       await expect(page.getByRole('heading', { level: 2, name: 'Cut' })).toBeVisible();
+      await expect(page.getByRole('region', { name: 'Engines' })).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Prepare handoff' })).toBeDisabled();
 
       await selectStudioView(page, projectId, 'board');
@@ -614,7 +662,7 @@ test.describe('Creative Studio workspace', () => {
       await expect(page.locator('[data-studio-phase-shell] > [role="alert"]')).toHaveCount(0);
       await expect(page.getByText('Untitled scene', { exact: true })).toHaveCount(0);
       expect(await readCanonicalStudioSnapshot(page, shapeProjectId)).toMatchObject({
-        routes: fakeCatalogRoutes,
+        routes: { image: null, video: null },
         scenes: [
           { title: 'Shot 1', visualPrompt: '', durationSeconds: 5 },
           { title: 'Shot 2', visualPrompt: '', durationSeconds: 5 },

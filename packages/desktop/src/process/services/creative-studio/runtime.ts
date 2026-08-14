@@ -132,7 +132,12 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
   const fakeBundle = shouldEnableStudioE2EFakeAdapter(deps.environment ?? process.env, {
     isPackaged: deps.isPackaged,
   })
-    ? factories.createE2EFakeBundle({ rootDir: deps.rootDir })
+    ? factories.createE2EFakeBundle({
+        rootDir: deps.rootDir,
+        // Direct bundle consumers retain the lifecycle default. The dual-gated unpackaged runtime
+        // is the E2E journey seam, so it always exposes the explicit-selection catalog.
+        catalogProfile: 'explicit-selection',
+      })
     : null;
   const store = factories.createStore({ rootDir: deps.rootDir });
   const mediaStore = factories.createMediaStore({ store });

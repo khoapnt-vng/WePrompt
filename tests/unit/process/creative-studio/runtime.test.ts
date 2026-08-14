@@ -39,10 +39,14 @@ import type {
 import { createStudioJobManager, type StudioJobManager } from '@process/services/creative-studio/jobManager';
 import { createStudioMediaStore, type StudioMediaStore } from '@process/services/creative-studio/mediaStore';
 import type { StudioProviderResolver } from '@process/services/creative-studio/providerResolver';
-import type { CreativeStudioService } from '@process/services/creative-studio/creativeStudioService';
+import {
+  createCreativeStudioService,
+  type CreativeStudioService,
+} from '@process/services/creative-studio/creativeStudioService';
 import type { CreativeStudioStore } from '@process/services/creative-studio/store';
 import { createCreativeStudioStore } from '@process/services/creative-studio/store';
 import type { StudioStoryboardPlanner } from '@process/services/creative-studio/planning/storyboardPlanner';
+import { createStudioProviderResolver } from '@process/services/creative-studio/providerResolver';
 
 const temporaryDirectories: string[] = [];
 
@@ -691,16 +695,16 @@ describe('Creative Studio E2E fake gate', () => {
   });
 
   it('constructs the fake bundle only when both flags are present', async () => {
-    const calls: string[] = [];
+    const calls: Array<{ rootDir: string; catalogProfile?: string }> = [];
     const rootDir = await mkdtemp(path.join(os.tmpdir(), 'weprompt-studio-runtime-'));
     temporaryDirectories.push(rootDir);
-    const fakeBundle = createStudioE2EFakeBundle({ rootDir });
+    const fakeBundle = createStudioE2EFakeBundle({ rootDir, catalogProfile: 'explicit-selection' });
     const { captures } = createHarness(
       { AIONUI_E2E_TEST: '1', AIONUI_E2E_STUDIO_FAKE: '1' },
       {
         rootDir,
         createE2EFakeBundle: (input) => {
-          calls.push(`fake:${input.rootDir}`);
+          calls.push(input);
           return fakeBundle;
         },
       }
@@ -710,7 +714,7 @@ describe('Creative Studio E2E fake gate', () => {
     const plannerProviders = await captures.plannerInput?.listProviders();
     const connections = await captures.resolverInput?.listConnections();
 
-    expect(calls).toEqual([`fake:${rootDir}`]);
+    expect(calls).toEqual([{ rootDir, catalogProfile: 'explicit-selection' }]);
     expect(providers?.map((item) => item.id)).toEqual(['provider_1', STUDIO_E2E_FAKE_PROVIDER_ID]);
     expect(plannerProviders?.map((item) => item.id)).toEqual(['provider_1', STUDIO_E2E_FAKE_PROVIDER_ID]);
     expect(connections).toEqual(fakeBundle.connections);
@@ -720,6 +724,87 @@ describe('Creative Studio E2E fake gate', () => {
 });
 
 describe('Creative Studio E2E fake adapter', () => {
+  it('provides an explicit-selection catalog with one image and two runnable video integrations', async () => {
+    const rootDir = await mkdtemp(path.join(os.tmpdir(), 'weprompt-studio-fake-explicit-selection-'));
+    temporaryDirectories.push(rootDir);
+    const bundle = createStudioE2EFakeBundle({ rootDir, catalogProfile: 'explicit-selection' });
+    const lifecycleBundle = createStudioE2EFakeBundle({ rootDir });
+    const imageConnections = bundle.connections.filter(
+      (connection) => connection.capabilities.mediaKinds[0] === 'image'
+    );
+    const videoConnections = bundle.connections.filter(
+      (connection) => connection.capabilities.mediaKinds[0] === 'video'
+    );
+
+    expect(imageConnections).toHaveLength(1);
+    expect(videoConnections).toHaveLength(2);
+    expect(new Set(videoConnections.map((connection) => connection.model))).toEqual(
+      new Set(['dreamina-seedance-2-0-260128'])
+    );
+    expect(new Set(videoConnections.map((connection) => connection.adapterId))).toEqual(
+      new Set(['byteplus-seedance-v1', 'weprompt-media-gateway-v1'])
+    );
+
+    const fakeProvider = {
+      ...bundle.provider,
+      use_model: 'dreamina-seedance-2-0-260128',
+    } satisfies TProviderWithModel;
+    await expect(
+      bundle.adapters
+        .get('byteplus-seedance-v1')
+        ?.validateConnection({ model: fakeProvider.use_model }, fakeProvider, new AbortController().signal)
+    ).resolves.toMatchObject({ ok: true });
+
+    const store = createCreativeStudioStore({ rootDir });
+    const providerResolver = createStudioProviderResolver({
+      listProviders: async () => [bundle.provider],
+      listConnections: () => Promise.resolve(bundle.connections),
+    });
+    const service = createCreativeStudioService({
+      store,
+      onProjectUpdated: vi.fn(),
+      providerResolver,
+      storyboardPlanner: {
+        listModels: async () => [],
+        draft: async () => {
+          throw new Error('not used by catalog projection');
+        },
+        dispose: async () => {},
+      },
+    });
+    const project = await service.createProject({
+      name: 'Explicit selection',
+      brief: 'Choose each engine before the paid review.',
+      aspectRatio: '16:9',
+      targetDurationSeconds: 5,
+      resolution: '720p',
+    });
+    const catalog = await service.listRoutes({ projectId: project.id });
+
+    expect(catalog.image.options).toHaveLength(1);
+    expect(
+      catalog.video.options.map(({ choiceId, model, integrationLabelKey }) => ({
+        choiceId,
+        model,
+        integrationLabelKey,
+      }))
+    ).toEqual([
+      {
+        choiceId: expect.stringMatching(/^choice_[A-Za-z0-9_-]+$/),
+        model: 'dreamina-seedance-2-0-260128',
+        integrationLabelKey: 'bytePlusSeedance',
+      },
+      {
+        choiceId: expect.stringMatching(/^choice_[A-Za-z0-9_-]+$/),
+        model: 'dreamina-seedance-2-0-260128',
+        integrationLabelKey: 'selfHostedVideoGateway',
+      },
+    ]);
+    expect(new Set(catalog.video.options.map(({ choiceId }) => choiceId)).size).toBe(2);
+    expect(lifecycleBundle.catalogProfile).toBe('lifecycle');
+    expect(lifecycleBundle.connections).toHaveLength(3);
+  });
+
   it('emits a decodable non-zero-dimension PNG for image generation', async () => {
     const rootDir = await mkdtemp(path.join(os.tmpdir(), 'weprompt-studio-fake-image-'));
     temporaryDirectories.push(rootDir);
