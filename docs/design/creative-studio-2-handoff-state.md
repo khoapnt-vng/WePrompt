@@ -49,10 +49,21 @@ and Rules on every view. Whether that reads as convenient or as dangerous is the
 cannot answer, and a live walkthrough has caught three defects that three rounds of code review read
 straight past.
 
-**One spend path has no human confirm.** `submitScenes` is the only spend, and it has five entry
+**One spend path has no per-spend confirm.** `submitScenes` is the only spend, and it has five entry
 points — the top-bar control, per-shot Render on `ShotCard`, `onGenerateReference` in Table,
-`StagePreview`, and **the Director's auto-submitted reference requests, which pay with no modal**.
-The last is pre-existing and was deliberately not touched while consolidating the visible controls.
+`StagePreview`, and the Director's **auto-submitted queued reference requests**, which submit
+without a confirmation modal. The code's own comment calls it "a paid path with no spend ceiling
+behind it".
+
+It is not unguarded, and the distinction matters before anyone "fixes" it: rules are enforced first
+— a breach opens the review with `rules.autoSubmitBlocked` so the user sees which rule blocked which
+shot — a scene that cannot be described also diverts to the review, and requests are de-duplicated
+and consumed _before_ paying, because the effect re-runs on every job poll and dismissing after the
+submit would let the next mount charge again with no human in the loop.
+
+So: every spend is rule-gated, and every spend a _user_ initiates is confirmed by name. This one
+proceeds on the authority of the user having accepted the proposal that queued it. Whether that is
+enough is a designer question, not an engineering one.
 
 **`read_storyboard` still projects a scene's reference as a boolean** (`hasReference`, still at
 `studioServer.ts:155`) while `propose_storyboard` requires the concrete `referenceAssetId`, which is
