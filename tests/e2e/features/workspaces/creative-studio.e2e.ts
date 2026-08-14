@@ -480,7 +480,18 @@ test.describe('Creative Studio workspace', () => {
       await expect(page.getByRole('dialog', { name: 'Brief' })).toHaveCount(0);
       await expectStudioView(page, projectId, 'table');
       await selectEngineOption(page, 'image', 'weprompt-e2e-image · WePrompt Studio E2E · Image API');
-      await selectEngineOption(page, 'video', 'dreamina-seedance-2-0-260128 · WePrompt Studio E2E · BytePlus Seedance');
+      const videoSlot = page.locator('[data-engine-role="video"]').first();
+      await videoSlot.getByRole('button').click();
+      const videoMenu = page.getByRole('menu');
+      const bytePlusOption = 'dreamina-seedance-2-0-260128 · WePrompt Studio E2E · BytePlus Seedance';
+      const bytePlusMenuItem = videoMenu.getByRole('menuitem').filter({ hasText: bytePlusOption });
+      const gatewayOption = 'dreamina-seedance-2-0-260128 · WePrompt Studio E2E · Self-hosted video gateway';
+      const gatewayMenuItem = videoMenu.getByRole('menuitem').filter({ hasText: gatewayOption });
+      await expect(bytePlusMenuItem).toHaveCount(1);
+      await expect(bytePlusMenuItem.getByText(bytePlusOption, { exact: true })).toBeVisible();
+      await expect(gatewayMenuItem).toHaveCount(1);
+      await expect(gatewayMenuItem.getByText(gatewayOption, { exact: true })).toBeVisible();
+      await bytePlusMenuItem.click();
 
       await expect
         .poll(async () => {

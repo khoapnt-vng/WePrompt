@@ -749,11 +749,39 @@ describe('Creative Studio E2E fake adapter', () => {
       ...bundle.provider,
       use_model: 'dreamina-seedance-2-0-260128',
     } satisfies TProviderWithModel;
-    await expect(
-      bundle.adapters
-        .get('byteplus-seedance-v1')
-        ?.validateConnection({ model: fakeProvider.use_model }, fakeProvider, new AbortController().signal)
-    ).resolves.toMatchObject({ ok: true });
+    for (const adapterId of ['byteplus-seedance-v1', 'weprompt-media-gateway-v1'] as const) {
+      const adapter = bundle.adapters.get(adapterId);
+      if (adapter === undefined) throw new Error(`expected ${adapterId} adapter`);
+      await expect(
+        adapter.validateConnection({ model: fakeProvider.use_model }, fakeProvider, new AbortController().signal)
+      ).resolves.toMatchObject({ ok: true });
+      const submitted = await adapter.submit(
+        {
+          prompt: `Run ${adapterId} through the explicit-selection lifecycle`,
+          mediaKind: 'video',
+          aspectRatio: '16:9',
+          resolution: '720p',
+          durationSeconds: 4,
+          idempotencyKey: `e2e_explicit_selection_${adapterId}`,
+        },
+        fakeProvider,
+        new AbortController().signal
+      );
+      if (submitted.kind !== 'remote') throw new Error(`expected ${adapterId} remote fake task`);
+      await expect(adapter.poll(submitted.providerJobId, fakeProvider, new AbortController().signal)).resolves.toEqual({
+        status: 'queued',
+      });
+      await expect(adapter.poll(submitted.providerJobId, fakeProvider, new AbortController().signal)).resolves.toEqual({
+        status: 'running',
+        progress: 50,
+      });
+      await expect(
+        adapter.poll(submitted.providerJobId, fakeProvider, new AbortController().signal)
+      ).resolves.toMatchObject({
+        status: 'succeeded',
+        outputs: [{ mediaKind: 'video', role: 'primary', mimeType: 'video/mp4' }],
+      });
+    }
 
     const store = createCreativeStudioStore({ rootDir });
     const providerResolver = createStudioProviderResolver({
