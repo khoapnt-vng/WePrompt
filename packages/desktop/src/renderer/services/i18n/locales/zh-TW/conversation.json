@@ -995,10 +995,6 @@
         "connectEngine": "連接一個引擎——大約一分鐘，整個工作區只需設定一次",
         "askTeammate": "請同事協助",
         "askTeammateCopy": "請在 WePrompt 的模型設定中為此工作區連接圖片引擎和影片引擎。",
-        "renderingWith": "正在使用以下引擎算繪 —",
-        "engineSummary": "{{model}} · {{kind}} · 最長 {{seconds}} 秒",
-        "changeEngines": "更換引擎",
-        "engineKinds": "引擎：{{kinds}}",
         "batchExcluded": "有 {{count}} 個鏡頭不在這裡——{{reason}}",
         "batchExcluded_other": "有 {{count}} 個鏡頭不在這裡——{{reason}}",
         "takeRatio": "鏡次 {{current}} / {{total}}",
@@ -1263,12 +1259,6 @@
       "manualFallback": "繼續手動編輯",
       "failed": "無法建立分鏡草稿。目前的場景未被變更。"
     },
-    "routing": {
-      "title": "產生路線",
-      "modelLabel": "模型",
-      "missingRoute": "請選擇相容的產生路線。",
-      "invalidRoute": "此路線已失效。請在產生前重新檢視。"
-    },
     "reference": {
       "generate": "產生參考圖",
       "dialogTitle": "產生參考圖像",
@@ -1300,8 +1290,8 @@
       "resolution": "解析度",
       "watermarkOff": "浮水印已停用",
       "audioOff": "靜音輸出；音訊產生已停用",
-      "missingRoute": "至少有一個場景沒有產生路線。",
-      "invalidRoute": "至少有一條所選路線無效。",
+      "missingRoute": "至少有一個場景沒有引擎。",
+      "invalidRoute": "至少有一個所選引擎無效。",
       "durationMismatch": "分鏡時間與專案目標不符。",
       "chargeNotice": "產生內容會使用你選擇的供應商帳戶，可能產生供應商費用。",
       "confirm": "確認並產生",
@@ -1309,7 +1299,7 @@
       "disabledMissingRoutes": "有 {{count}} 個鏡頭沒有引擎。關閉此視窗進行設定。",
       "setEngines": "關閉並設定引擎",
       "excludedFirstFrame": "本次算繪不包含 {{count}} 個鏡頭——此引擎無法從一幀開始。",
-      "audioOn": "此次算繪包含產生的音訊；靜音路線（如有）仍會保持靜音。"
+      "audioOn": "此次算繪包含產生的音訊；靜音引擎（如有）仍會保持靜音。"
     },
     "jobs": {
       "progress": "已完成 {{percent}}%",
@@ -1407,7 +1397,7 @@
       "storyboardExists": "此專案已有分鏡。再次建立草稿前請確認取代。",
       "staleProject": "專案已在其他位置變更。請重新整理後再試。",
       "planningUnavailable": "分鏡草稿無法使用，你仍可繼續手動編輯。",
-      "invalidRoute": "所選產生路線無效或無法使用。",
+      "invalidRoute": "所選產生引擎無效或無法使用。",
       "cancellationRefused": "服務供應商已無法取消這個執行中的工作。",
       "duplicateChargeAcknowledgementRequired": "重試前請確認可能產生重複供應商費用。",
       "busy": "此專案有進行中的產生工作。",

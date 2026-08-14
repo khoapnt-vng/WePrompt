@@ -995,10 +995,6 @@
         "connectEngine": "连接一个引擎——大约一分钟，整个工作区只需设置一次",
         "askTeammate": "请同事帮忙",
         "askTeammateCopy": "请在 WePrompt 的模型设置中为此工作区连接图像引擎和视频引擎。",
-        "renderingWith": "正在使用以下引擎渲染 —",
-        "engineSummary": "{{model}} · {{kind}} · 最长 {{seconds}} 秒",
-        "changeEngines": "更换引擎",
-        "engineKinds": "引擎：{{kinds}}",
         "batchExcluded": "有 {{count}} 个镜头不在此处——{{reason}}",
         "batchExcluded_other": "有 {{count}} 个镜头不在此处——{{reason}}",
         "takeRatio": "镜次 {{current}} / {{total}}",
@@ -1263,12 +1259,6 @@
       "manualFallback": "继续手动编辑",
       "failed": "无法起草故事板。当前场景未被更改。"
     },
-    "routing": {
-      "title": "生成路线",
-      "modelLabel": "模型",
-      "missingRoute": "请选择兼容的生成路线。",
-      "invalidRoute": "此路线已失效。请在生成前重新检查。"
-    },
     "reference": {
       "generate": "生成参考图",
       "dialogTitle": "生成参考图像",
@@ -1300,8 +1290,8 @@
       "resolution": "分辨率",
       "watermarkOff": "已禁用水印",
       "audioOff": "静音输出；已禁用音频生成",
-      "missingRoute": "至少有一个场景没有生成路线。",
-      "invalidRoute": "至少有一条所选路线无效。",
+      "missingRoute": "至少有一个场景没有引擎。",
+      "invalidRoute": "至少有一个所选引擎无效。",
       "durationMismatch": "故事板时长与项目目标不一致。",
       "chargeNotice": "生成会使用你选择的服务商账户，并可能产生服务商费用。",
       "confirm": "确认并生成",
@@ -1309,7 +1299,7 @@
       "disabledMissingRoutes": "有 {{count}} 个镜头没有引擎。关闭此窗口进行设置。",
       "setEngines": "关闭并设置引擎",
       "excludedFirstFrame": "本次渲染不包含 {{count}} 个镜头——此引擎无法从一帧开始。",
-      "audioOn": "此次渲染包含生成的音频；静音路线（如有）仍将保持静音。"
+      "audioOn": "此次渲染包含生成的音频；静音引擎（如有）仍将保持静音。"
     },
     "jobs": {
       "progress": "已完成 {{percent}}%",
@@ -1407,7 +1397,7 @@
       "storyboardExists": "此项目已有故事板。再次起草前请确认替换。",
       "staleProject": "项目已在其他位置发生更改。请刷新后重试。",
       "planningUnavailable": "故事板起草不可用，你仍可继续手动编辑。",
-      "invalidRoute": "所选生成路线无效或不可用。",
+      "invalidRoute": "所选生成引擎无效或不可用。",
       "cancellationRefused": "服务商已无法取消这个运行中的任务。",
       "duplicateChargeAcknowledgementRequired": "重试前请确认可能产生重复服务商费用。",
       "busy": "此项目有正在进行的生成任务。",

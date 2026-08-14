@@ -1004,10 +1004,6 @@
         "connectEngine": "Conecta un motor — aproximadamente un minuto, una sola vez para todo el espacio de trabajo",
         "askTeammate": "Pedir ayuda a un compañero",
         "askTeammateCopy": "¿Puedes conectar un motor de imagen y otro de vídeo para este espacio de trabajo en los ajustes de modelos de WePrompt?",
-        "renderingWith": "Renderizando con —",
-        "engineSummary": "{{model}} · {{kind}} · hasta {{seconds}} s",
-        "changeEngines": "Cambiar motores",
-        "engineKinds": "Motores: {{kinds}}",
         "batchExcluded": "{{count}} planos no están aquí — {{reason}}",
         "batchExcluded_one": "{{count}} plano no está aquí — {{reason}}",
         "batchExcluded_many": "{{count}} planos no están aquí — {{reason}}",
@@ -1288,12 +1284,6 @@
       "manualFallback": "Continuar con la edición manual",
       "failed": "No se ha podido crear un borrador del guion gráfico. Las escenas actuales no se han modificado."
     },
-    "routing": {
-      "title": "Ruta de generación",
-      "modelLabel": "Modelo",
-      "missingRoute": "Elige una ruta de generación compatible.",
-      "invalidRoute": "Esta ruta ya no es válida. Revísala antes de generar."
-    },
     "reference": {
       "generate": "Generar referencia",
       "dialogTitle": "Generar una imagen de referencia",
@@ -1331,8 +1321,8 @@
       "resolution": "Resolución",
       "watermarkOff": "Marca de agua desactivada",
       "audioOff": "Salida sin sonido; generación de audio desactivada",
-      "missingRoute": "Al menos una escena no tiene ruta de generación.",
-      "invalidRoute": "Al menos una ruta seleccionada no es válida.",
+      "missingRoute": "Al menos una escena no tiene motor.",
+      "invalidRoute": "Al menos un motor seleccionado no es válido.",
       "durationMismatch": "La duración del guion gráfico no coincide con el objetivo del proyecto.",
       "chargeNotice": "La generación usa la cuenta del proveedor seleccionado y puede generar cargos.",
       "confirm": "Confirmar y generar",
@@ -1340,7 +1330,7 @@
       "disabledMissingRoutes": "{{count}} planos no tienen motor. Cierra esta ventana para definir uno.",
       "setEngines": "Cerrar y definir motores",
       "excludedFirstFrame": "{{count}} planos no están en este renderizado: este motor no puede empezar desde un fotograma.",
-      "audioOn": "Este renderizado incluye audio generado; las rutas silenciosas, si las hay, permanecen sin sonido."
+      "audioOn": "Este renderizado incluye audio generado; los motores silenciosos, si los hay, permanecen sin sonido."
     },
     "jobs": {
       "progress": "{{percent}} % completado",
@@ -1448,7 +1438,7 @@
       "storyboardExists": "Este proyecto ya tiene un guion gráfico. Confirma que deseas sustituirlo antes de crear otro borrador.",
       "staleProject": "El proyecto se ha modificado en otro lugar. Actualízalo antes de reintentarlo.",
       "planningUnavailable": "La creación del borrador del guion gráfico no está disponible. Puedes continuar editando manualmente.",
-      "invalidRoute": "La ruta de generación seleccionada no es válida o no está disponible.",
+      "invalidRoute": "El motor de generación seleccionado no es válido o no está disponible.",
       "cancellationRefused": "El proveedor ya no puede cancelar esta tarea en curso.",
       "duplicateChargeAcknowledgementRequired": "Acepta el posible cargo duplicado del proveedor antes de reintentarlo.",
       "busy": "Este proyecto tiene tareas de generación activas.",

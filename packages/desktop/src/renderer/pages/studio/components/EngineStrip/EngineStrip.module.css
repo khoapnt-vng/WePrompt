@@ -1,0 +1,226 @@
+.strip {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--color-border-2);
+  border-radius: 10px;
+  background: var(--color-bg-2);
+  color: var(--color-text-1);
+}
+
+.header {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+}
+
+.header h2,
+.header p,
+.slotHeading h3,
+.slotHeading span,
+.staticState p,
+.slotSummary,
+.verdict,
+.directorNotice p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.header h2,
+.slotHeading h3 {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.header p,
+.slotHeading span,
+.slotSummary {
+  color: var(--color-text-3);
+  font-size: 12px;
+}
+
+.verdict {
+  color: rgb(var(--warning-6));
+  font-size: 12px;
+}
+
+.slots {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.slot {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--color-border-2);
+  border-radius: 8px;
+  background: var(--color-bg-1);
+}
+
+.slotHeading {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.engineTrigger {
+  display: inline-flex;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 2px 0;
+  color: var(--color-text-1);
+  font-weight: 600;
+  text-align: start;
+  white-space: normal;
+}
+
+.engineTrigger span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.staticState {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.menuSurface {
+  min-width: min(440px, calc(100vw - 32px));
+  max-width: min(560px, calc(100vw - 32px));
+}
+
+.optionRow {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  padding-block: 4px;
+  white-space: normal;
+}
+
+.optionRow strong,
+.optionRow span {
+  overflow-wrap: anywhere;
+}
+
+.optionRow span {
+  color: var(--color-text-3);
+  font-size: 12px;
+}
+
+.menuFooter {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--color-border-2);
+}
+
+.loadingRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px;
+}
+
+.error {
+  margin: 0;
+  color: rgb(var(--danger-6));
+  font-size: 12px;
+}
+
+.directorNotice {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  color: rgb(var(--warning-6));
+  font-size: 12px;
+}
+
+.strip[data-variant='compact'] {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: start;
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.strip[data-variant='compact'] .header {
+  padding-block: 8px;
+}
+
+.strip[data-variant='compact'] .header p {
+  display: none;
+}
+
+.strip[data-variant='compact'] .slots {
+  align-items: start;
+}
+
+.strip[data-variant='compact'] .slot {
+  gap: 2px;
+  padding: 6px 8px;
+  border: 0;
+  background: transparent;
+}
+
+.strip[data-variant='compact'] .slotHeading {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.strip[data-variant='compact'] .slot[data-state='ready'] .slotSummary {
+  display: none;
+}
+
+.strip[data-variant='compact'] .bounds,
+.strip[data-variant='compact'] .error,
+.strip[data-variant='compact'] .directorNotice {
+  grid-column: 2;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+@media (max-width: 720px) {
+  .slots {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .strip[data-variant='compact'] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .strip[data-variant='compact'] .header,
+  .strip[data-variant='compact'] .bounds,
+  .strip[data-variant='compact'] .error,
+  .strip[data-variant='compact'] .directorNotice {
+    grid-column: 1;
+  }
+}

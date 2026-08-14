@@ -9,10 +9,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
   StudioCommandResult,
-  StudioMediaRouteCatalog,
   StudioRendererProject,
   StudioRouteCatalog,
-  StudioRouteCatalogEntry,
 } from '@/common/types/project/creativeStudioTypes';
 import { useStudioModels } from '@renderer/pages/studio/hooks/useStudioModels';
 
@@ -52,38 +50,6 @@ const catalog = (version: string): StudioRouteCatalog => ({
   image: { status: 'selection_required', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
   video: { status: 'selection_required', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
   catalogVersion: version,
-});
-
-const route = (kind: 'image' | 'video', overrides: Partial<StudioRouteCatalogEntry> = {}): StudioRouteCatalogEntry => ({
-  choiceId: `choice_${kind}`,
-  providerId: `provider-${kind}`,
-  providerName: `${kind} provider`,
-  model: `${kind}-model`,
-  integrationLabelKey: kind === 'image' ? 'imageApi' : 'selfHostedVideoGateway',
-  health: 'available',
-  kind,
-  constraints: {
-    aspectRatios: ['16:9'],
-    resolutions: ['720p'],
-    minDurationSeconds: 1,
-    maxDurationSeconds: 60,
-    supportsFirstFrame: true,
-    silentOutput: true,
-  },
-  ...overrides,
-});
-
-const unchosen = (entry: StudioRouteCatalogEntry, ...rest: StudioRouteCatalogEntry[]): StudioMediaRouteCatalog => ({
-  status: 'selection_required',
-  selected: null,
-  selectedRoute: null,
-  selectionIssue: null,
-  options: [entry, ...rest],
-});
-
-const catalogWith = (version: string, media: Partial<StudioRouteCatalog>): StudioRouteCatalog => ({
-  ...catalog(version),
-  ...media,
 });
 
 const deferred = <T>() => {
@@ -448,73 +414,99 @@ describe('useStudioModels', () => {
     expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(2);
   });
 
-  it('adopts the only compatible engine as the project route with the canonical revision', async () => {
-    bridge.listRoutes.invoke.mockResolvedValue(ok(catalogWith('catalog-1', { image: unchosen(route('image')) })));
-    renderHook(() =>
-      useStudioModels({
-        project: project(),
-        refetch: vi.fn(async () => project('project-1', 5)),
-        beforeMutation: vi.fn(async () => true),
-        autoSelectSoleRoute: true,
+  it('loads and refreshes a sole-option catalog without writing either media selection', async () => {
+    bridge.listRoutes.invoke.mockResolvedValue(
+      ok({
+        ...catalog('catalog-1'),
+        image: {
+          status: 'selection_required',
+          selected: null,
+          selectedRoute: null,
+          selectionIssue: null,
+          options: [
+            {
+              choiceId: 'choice_image',
+              providerId: 'provider-image',
+              providerName: 'Image provider',
+              model: 'image-model',
+              integrationLabelKey: 'imageApi',
+              health: 'available',
+              kind: 'image',
+              constraints: {
+                aspectRatios: ['16:9'],
+                resolutions: ['720p'],
+                minDurationSeconds: 4,
+                maxDurationSeconds: 15,
+                supportsFirstFrame: true,
+                silentOutput: true,
+              },
+            },
+          ],
+        },
       })
     );
-
-    await waitFor(() => expect(bridge.updateModelSelection.invoke).toHaveBeenCalledOnce());
-    expect(bridge.updateModelSelection.invoke).toHaveBeenCalledWith({
-      projectId: 'project-1',
-      expectedRevision: 4,
-      role: 'image',
-      selection: { choiceId: 'choice_image' },
-    });
-  });
-
-  it('leaves the project route alone while automatic selection is withheld', async () => {
-    bridge.listRoutes.invoke.mockResolvedValue(ok(catalogWith('catalog-1', { image: unchosen(route('image')) })));
     const view = renderHook(() =>
       useStudioModels({
         project: project(),
         refetch: vi.fn(async () => project()),
         beforeMutation: vi.fn(async () => true),
-        autoSelectSoleRoute: false,
       })
     );
 
     await waitFor(() => expect(view.result.current.loading).toBe(false));
+    await act(() => view.result.current.refresh());
     expect(bridge.updateModelSelection.invoke).not.toHaveBeenCalled();
   });
 
-  it('adopts each media role once, in sequence', async () => {
+  it('does not replace a dangling explicit choice when one survivor remains', async () => {
     bridge.listRoutes.invoke.mockResolvedValue(
-      ok(catalogWith('catalog-1', { image: unchosen(route('image')), video: unchosen(route('video')) }))
-    );
-    renderHook(() =>
-      useStudioModels({
-        project: project(),
-        refetch: vi.fn(async () => project('project-1', 5)),
-        beforeMutation: vi.fn(async () => true),
-        autoSelectSoleRoute: true,
+      ok({
+        ...catalog('catalog-1'),
+        video: {
+          status: 'unavailable',
+          selected: { choiceId: 'retired-choice', providerId: 'retired-provider', model: 'retired-model' },
+          selectedRoute: null,
+          selectionIssue: { code: 'retired' },
+          options: [
+            {
+              choiceId: 'survivor-choice',
+              providerId: 'survivor-provider',
+              providerName: 'Survivor provider',
+              model: 'survivor-model',
+              integrationLabelKey: 'selfHostedVideoGateway',
+              health: 'available',
+              kind: 'video',
+              constraints: {
+                aspectRatios: ['16:9'],
+                resolutions: ['720p'],
+                minDurationSeconds: 4,
+                maxDurationSeconds: 15,
+                supportsFirstFrame: true,
+                silentOutput: true,
+              },
+            },
+          ],
+        },
       })
     );
-
-    await waitFor(() => expect(bridge.updateModelSelection.invoke).toHaveBeenCalledTimes(2));
-    expect(bridge.updateModelSelection.invoke.mock.calls.map(([request]) => request.role)).toEqual(['image', 'video']);
-  });
-
-  it('stops after one attempt when the canonical command refuses the adopted route', async () => {
-    bridge.listRoutes.invoke.mockResolvedValue(ok(catalogWith('catalog-1', { image: unchosen(route('image')) })));
-    bridge.updateModelSelection.invoke.mockResolvedValue(failed('storage_error'));
     const view = renderHook(() =>
       useStudioModels({
-        project: project(),
+        project: {
+          ...project(),
+          routing: {
+            storyboard: null,
+            image: null,
+            video: { choiceId: 'retired-choice', providerId: 'retired-provider', model: 'retired-model' },
+          },
+        },
         refetch: vi.fn(async () => project()),
         beforeMutation: vi.fn(async () => true),
-        autoSelectSoleRoute: true,
       })
     );
 
-    await waitFor(() => expect(view.result.current.selectionIssue).toBe('save_failed'));
+    await waitFor(() => expect(view.result.current.loading).toBe(false));
     await act(() => view.result.current.refresh());
-    expect(bridge.updateModelSelection.invoke).toHaveBeenCalledOnce();
+    expect(bridge.updateModelSelection.invoke).not.toHaveBeenCalled();
   });
 
   it('refreshes when project aspect ratio or resolution changes', async () => {

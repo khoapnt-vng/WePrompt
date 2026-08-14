@@ -33,7 +33,6 @@ vi.mock('react-i18next', () => ({
             .map(([name, value]) => `${name}=${String(value)}`)
             .join(',')}`
         : key,
-    // EngineBar joins the ready media kinds with Intl.ListFormat, so the locale must exist.
     i18n: { language: 'en' },
   }),
 }));
@@ -272,6 +271,7 @@ const createController = (
     catalog: currentCatalog,
     loading: false,
     errorMessageKey: null,
+    selectionIssue: null,
     pendingRole: null,
     refresh: vi.fn(async () => undefined),
     updateSelection: vi.fn(async () => true),
@@ -317,14 +317,16 @@ describe('ProducePhase', () => {
     vi.clearAllMocks();
   });
 
-  it('shows only the connection door when no ready selected route exists', () => {
+  it('keeps engine selection reachable above the connection door when no route is ready', () => {
     const controller = createController(project(), 'scene-1', disconnectedCatalog());
     const { container } = render(<ProducePhase controller={controller} />);
 
     expect(
       screen.getByRole('heading', { name: 'conversation.creativeStudio.phase.produce.connectEngine' })
     ).toBeVisible();
-    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'conversation.creativeStudio.models.engine.label' })).toBeVisible();
+    expect(screen.getByRole('group', { name: 'conversation.creativeStudio.models.engine.roleImage' })).toBeVisible();
+    expect(screen.getByRole('group', { name: 'conversation.creativeStudio.models.engine.roleVideo' })).toBeVisible();
     expect(
       screen.queryByRole('region', { name: 'conversation.creativeStudio.phase.produce.activityTitle' })
     ).not.toBeInTheDocument();
@@ -351,7 +353,7 @@ describe('ProducePhase', () => {
     expect(copiedText).toBe('conversation.creativeStudio.phase.produce.askTeammateCopy');
   });
 
-  it('shows facts only from ready selected routes and opens settings through Change engines', () => {
+  it('shows selected-engine facts, the missing role, and a Settings remedy', () => {
     const imageRoute = route('image');
     imageRoute.constraints.maxDurationSeconds = 47;
     const controller = createController(project(), 'scene-1', {
@@ -365,15 +367,13 @@ describe('ProducePhase', () => {
     });
     render(<ProducePhase controller={controller} />);
 
-    // The engine chip hides the summary behind a hover, so the paid model and its duration
-    // contract have to remain reachable through the trigger's description.
-    expect(screen.getByRole('button', { name: /engineKinds/ })).toHaveAccessibleDescription(
-      'conversation.creativeStudio.phase.produce.engineSummary:model=image-model,kind=conversation.creativeStudio.scene.image,seconds=47'
+    expect(screen.getByRole('button', { name: 'image-model' })).toHaveAccessibleDescription(
+      'conversation.creativeStudio.models.engine.summary:resolution=720p,duration=conversation.creativeStudio.models.engine.durationRange:min=1,max=47,audio=conversation.creativeStudio.models.engine.audioSilent,frame=conversation.creativeStudio.models.engine.frameYes'
     );
     expect(screen.queryByText(/video-model/)).not.toBeInTheDocument();
-    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(screen.getByText('conversation.creativeStudio.models.engine.noFitVideo')).toBeVisible();
 
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.phase.produce.changeEngines' }));
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.models.engine.manageShort' }));
     expect(controller.openModelSettings).toHaveBeenCalledExactlyOnceWith('/settings/model');
   });
 
@@ -624,7 +624,9 @@ describe('ProducePhase', () => {
     render(<ProducePhase controller={controller} />);
 
     // Guards the guard: without a mounted engine surface every absence below passes vacuously.
-    expect(screen.getByRole('heading', { name: /phase\.produce\.renderingWith/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'conversation.creativeStudio.models.engine.label' })
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: /conversation\.creativeStudio\.review\.generateReadyScenes/ })
     ).not.toBeInTheDocument();

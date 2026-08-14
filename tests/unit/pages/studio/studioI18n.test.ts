@@ -31,7 +31,6 @@ const plannedGroups = [
   'project',
   'reference',
   'review',
-  'routing',
   'rules',
   'scene',
   'shell',
@@ -524,6 +523,17 @@ const removedPhaseRailKeys = [
 /** Copy retired when Brief moved from the view switch into a project-level drawer. */
 const removedBriefViewKeys = ['phase.nav.brief', 'phase.brief.startWriting'] as const;
 
+const retiredEngineBarKeys = [
+  'phase.produce.renderingWith',
+  'phase.produce.engineSummary',
+  'phase.produce.changeEngines',
+  'phase.produce.engineKinds',
+  'routing.title',
+  'routing.modelLabel',
+  'routing.missingRoute',
+  'routing.invalidRoute',
+] as const;
+
 describe('Creative Studio localization contract', () => {
   it('carries no copy for the four-step phase rail the view switch replaced, in any configured locale', () => {
     for (const locale of i18nConfig.supportedLanguages) {
@@ -553,6 +563,24 @@ describe('Creative Studio localization contract', () => {
     }
   });
 
+  it('retires the read-only engine bar and its route vocabulary in every locale', () => {
+    for (const locale of i18nConfig.supportedLanguages) {
+      const leaves = flattenStringLeaves(loadConversationLocale(locale).creativeStudio);
+      for (const key of retiredEngineBarKeys) {
+        expect(leaves[key], `${locale}/${key} outlived the Engine Strip`).toBeUndefined();
+      }
+    }
+  });
+
+  it('uses engine rather than route in every English Creative Studio message', () => {
+    const leaves = flattenStringLeaves(loadConversationLocale('en-US').creativeStudio);
+    const offenders = Object.entries(leaves)
+      .filter(([, value]) => /\broutes?\b/i.test(value))
+      .map(([key]) => key);
+
+    expect(offenders).toEqual([]);
+  });
+
   /**
    * A view's heading is the first thing a screen reader speaks after the switch moves focus, because
    * `StudioPhaseShell` focuses `[data-studio-phase-heading]` on every view change. Activating "Cut"
@@ -560,11 +588,7 @@ describe('Creative Studio localization contract', () => {
    * document disagreeing about where you are. Asserting equality rather than exact strings keeps the
    * two surfaces consistent by construction, so improving a view's name only takes one edit.
    *
-   * `phase.produce.renderingWith` is deliberately not here. It names the engine a render will use
-   * ("Rendering with —"), not the view; it answers a different question than the switch label does,
-   * so equality would be the wrong contract for it. It used to be the Board view's *only* heading,
-   * which meant activating "Board" announced the engine — `phase.produce.title` now carries the
-   * view name and `renderingWith` labels the engine strip alone.
+   * The Engine Strip has its own section label and never owns this phase focus target.
    */
   it.each([
     ['phase.write.title', 'phase.nav.table'],

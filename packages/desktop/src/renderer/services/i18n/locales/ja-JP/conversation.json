@@ -995,10 +995,6 @@
         "connectEngine": "エンジンを接続 — 約1分、ワークスペース全体で一度だけ",
         "askTeammate": "チームメンバーに依頼",
         "askTeammateCopy": "このワークスペース用の画像エンジンと動画エンジンを WePrompt のモデル設定で接続してもらえますか？",
-        "renderingWith": "レンダリングに使用 —",
-        "engineSummary": "{{model}} · {{kind}} · 最大{{seconds}}秒",
-        "changeEngines": "エンジンを変更",
-        "engineKinds": "エンジン: {{kinds}}",
         "batchExcluded": "{{count}}件のショットがここに含まれていません — {{reason}}",
         "batchExcluded_other": "{{count}}件のショットがここに含まれていません — {{reason}}",
         "takeRatio": "テイク {{current}} / {{total}}",
@@ -1263,12 +1259,6 @@
       "manualFallback": "手動編集を続ける",
       "failed": "ストーリーボードを作成できませんでした。現在のシーンは変更されていません。"
     },
-    "routing": {
-      "title": "生成ルート",
-      "modelLabel": "モデル",
-      "missingRoute": "互換性のある生成ルートを選択してください。",
-      "invalidRoute": "このルートは無効になりました。生成前に確認してください。"
-    },
     "reference": {
       "generate": "参照画像を生成",
       "dialogTitle": "参照画像を生成",
@@ -1300,8 +1290,8 @@
       "resolution": "解像度",
       "watermarkOff": "ウォーターマーク無効",
       "audioOff": "無音出力：音声生成は無効",
-      "missingRoute": "生成ルートがないシーンが少なくとも 1 つあります。",
-      "invalidRoute": "選択したルートの少なくとも 1 つが無効です。",
+      "missingRoute": "エンジンがないシーンが少なくとも 1 つあります。",
+      "invalidRoute": "選択したエンジンの少なくとも 1 つが無効です。",
       "durationMismatch": "ストーリーボードの時間がプロジェクトの目標と一致していません。",
       "chargeNotice": "生成には選択したプロバイダーアカウントが使用され、料金が発生する場合があります。",
       "confirm": "確認して生成",
@@ -1309,7 +1299,7 @@
       "disabledMissingRoutes": "{{count}}件のショットにエンジンがありません。閉じて設定してください。",
       "setEngines": "閉じてエンジンを設定",
       "excludedFirstFrame": "{{count}}件のショットはこのレンダリングに含まれません。このエンジンはフレームから開始できません。",
-      "audioOn": "このレンダーには生成音声が含まれます。無音ルートがある場合、その出力は無音のままです。"
+      "audioOn": "このレンダーには生成音声が含まれます。無音エンジンがある場合、その出力は無音のままです。"
     },
     "jobs": {
       "progress": "{{percent}}% 完了",
@@ -1407,7 +1397,7 @@
       "storyboardExists": "このプロジェクトには既にストーリーボードがあります。再作成する前に置き換えを確認してください。",
       "staleProject": "プロジェクトが別の場所で変更されました。更新してから再試行してください。",
       "planningUnavailable": "ストーリーボードを作成できません。手動編集は続けられます。",
-      "invalidRoute": "選択した生成ルートは無効または利用できません。",
+      "invalidRoute": "選択した生成エンジンは無効または利用できません。",
       "cancellationRefused": "プロバイダーは実行中のこのジョブをキャンセルできません。",
       "duplicateChargeAcknowledgementRequired": "再試行前にプロバイダー料金が重複する可能性を了承してください。",
       "busy": "このプロジェクトには進行中の生成処理があります。",

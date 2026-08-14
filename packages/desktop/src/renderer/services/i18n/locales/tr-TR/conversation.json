@@ -1001,10 +1001,6 @@
         "connectEngine": "Bir motor bağlayın — yaklaşık bir dakika, tüm çalışma alanı için yalnızca bir kez",
         "askTeammate": "Bir ekip arkadaşına sor",
         "askTeammateCopy": "Bu çalışma alanı için WePrompt Model Ayarları'nda bir görüntü ve bir video motoru bağlayabilir misin?",
-        "renderingWith": "İşleme motoru —",
-        "engineSummary": "{{model}} · {{kind}} · en fazla {{seconds}} sn",
-        "changeEngines": "Motorları değiştir",
-        "engineKinds": "Motorlar: {{kinds}}",
         "batchExcluded": "{{count}} çekim burada değil — {{reason}}",
         "batchExcluded_one": "{{count}} çekim burada değil — {{reason}}",
         "batchExcluded_other": "{{count}} çekim burada değil — {{reason}}",
@@ -1277,12 +1273,6 @@
       "manualFallback": "Elle düzenlemeye devam et",
       "failed": "Storyboard taslağı oluşturulamadı. Mevcut sahneleriniz değiştirilmedi."
     },
-    "routing": {
-      "title": "Oluşturma rotası",
-      "modelLabel": "Model",
-      "missingRoute": "Uyumlu bir oluşturma rotası seçin.",
-      "invalidRoute": "Bu rota artık geçerli değil. Oluşturmadan önce gözden geçirin."
-    },
     "reference": {
       "generate": "Referans oluştur",
       "dialogTitle": "Referans görseli oluştur",
@@ -1317,8 +1307,8 @@
       "resolution": "Çözünürlük",
       "watermarkOff": "Filigran devre dışı",
       "audioOff": "Sessiz çıktı; ses oluşturma devre dışı",
-      "missingRoute": "En az bir sahnenin oluşturma rotası yok.",
-      "invalidRoute": "Seçilen rotalardan en az biri geçersiz.",
+      "missingRoute": "En az bir sahnenin motoru yok.",
+      "invalidRoute": "Seçilen motorlardan en az biri geçersiz.",
       "durationMismatch": "Storyboard zamanlaması proje hedefiyle eşleşmiyor.",
       "chargeNotice": "Oluşturma, seçtiğiniz sağlayıcı hesabını kullanır ve ücrete tabi olabilir.",
       "confirm": "Onayla ve oluştur",
@@ -1326,7 +1316,7 @@
       "disabledMissingRoutes": "{{count}} çekimin motoru yok. Bir motor ayarlamak için bunu kapatın.",
       "setEngines": "Kapat ve motorları ayarla",
       "excludedFirstFrame": "{{count}} çekim bu oluşturmada yok — bu motor bir kareden başlayamaz.",
-      "audioOn": "Bu işleme oluşturulmuş ses içerir; varsa sessiz rotalar sessiz kalır."
+      "audioOn": "Bu işleme oluşturulmuş ses içerir; varsa sessiz motorlar sessiz kalır."
     },
     "jobs": {
       "progress": "%{{percent}} tamamlandı",
@@ -1429,7 +1419,7 @@
       "storyboardExists": "Bu projede zaten bir storyboard var. Yeniden taslak oluşturmadan önce değiştirmeyi onaylayın.",
       "staleProject": "Proje başka bir yerde değiştirildi. Tekrar denemeden önce yenileyin.",
       "planningUnavailable": "Storyboard taslağı oluşturma kullanılamıyor. Elle düzenlemeye devam edebilirsiniz.",
-      "invalidRoute": "Seçilen oluşturma rotası geçersiz veya kullanılamıyor.",
+      "invalidRoute": "Seçilen oluşturma motoru geçersiz veya kullanılamıyor.",
       "cancellationRefused": "Sağlayıcı artık çalışan bu işi iptal edemiyor.",
       "duplicateChargeAcknowledgementRequired": "Tekrar denemeden önce olası mükerrer sağlayıcı ücretini kabul edin.",
       "busy": "Bu projede etkin oluşturma işleri var.",

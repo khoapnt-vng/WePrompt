@@ -5,8 +5,8 @@
  */
 
 export * from './Generation';
+export * from './EngineStrip';
 export { StudioLibrary } from './Library';
-export { StudioModelBar } from './Models';
 export * from './PhaseShell';
 export { AssetStrip, StagePreview, StudioExportModal } from './Preview';
 export * from './Rules';

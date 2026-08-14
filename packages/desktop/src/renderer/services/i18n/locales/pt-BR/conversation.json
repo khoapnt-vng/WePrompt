@@ -1009,10 +1009,6 @@
         "connectEngine": "Conecte um mecanismo — cerca de um minuto, uma vez para todo o espaço de trabalho",
         "askTeammate": "Pedir a um colega",
         "askTeammateCopy": "Você pode conectar mecanismos de imagem e vídeo para este espaço de trabalho nas Configurações de Modelo do WePrompt?",
-        "renderingWith": "Renderizando com —",
-        "engineSummary": "{{model}} · {{kind}} · até {{seconds}} s",
-        "changeEngines": "Alterar mecanismos",
-        "engineKinds": "Motores: {{kinds}}",
         "batchExcluded": "{{count}} tomadas não estão aqui — {{reason}}",
         "batchExcluded_one": "{{count}} tomada não está aqui — {{reason}}",
         "batchExcluded_many": "{{count}} tomadas não estão aqui — {{reason}}",
@@ -1293,12 +1289,6 @@
       "manualFallback": "Continuar com a edição manual",
       "failed": "Não foi possível criar um rascunho do storyboard. Suas cenas atuais não foram alteradas."
     },
-    "routing": {
-      "title": "Rota de geração",
-      "modelLabel": "Modelo",
-      "missingRoute": "Escolha uma rota de geração compatível.",
-      "invalidRoute": "Esta rota não é mais válida. Revise-a antes de gerar."
-    },
     "reference": {
       "generate": "Gerar referência",
       "dialogTitle": "Gerar uma imagem de referência",
@@ -1336,8 +1326,8 @@
       "resolution": "Resolução",
       "watermarkOff": "Marca-d'água desativada",
       "audioOff": "Saída sem som; geração de áudio desativada",
-      "missingRoute": "Pelo menos uma cena não tem rota de geração.",
-      "invalidRoute": "Pelo menos uma rota selecionada é inválida.",
+      "missingRoute": "Pelo menos uma cena não tem mecanismo.",
+      "invalidRoute": "Pelo menos um mecanismo selecionado é inválido.",
       "durationMismatch": "A duração do storyboard não corresponde ao objetivo do projeto.",
       "chargeNotice": "A geração usa a conta do provedor selecionado e pode gerar cobranças.",
       "confirm": "Confirmar e gerar",
@@ -1345,7 +1335,7 @@
       "disabledMissingRoutes": "{{count}} tomadas não têm mecanismo. Feche para definir um.",
       "setEngines": "Fechar e definir mecanismos",
       "excludedFirstFrame": "{{count}} tomadas não estão nesta renderização — este mecanismo não pode começar a partir de um quadro.",
-      "audioOn": "Esta renderização inclui áudio gerado; rotas silenciosas, se houver, permanecem sem som."
+      "audioOn": "Esta renderização inclui áudio gerado; mecanismos silenciosos, se houver, permanecem sem som."
     },
     "jobs": {
       "progress": "{{percent}}% concluído",
@@ -1453,7 +1443,7 @@
       "storyboardExists": "Este projeto já tem um storyboard. Confirme a substituição antes de criar outro rascunho.",
       "staleProject": "O projeto foi alterado em outro lugar. Atualize-o antes de tentar novamente.",
       "planningUnavailable": "A criação do rascunho do storyboard está indisponível. Você pode continuar editando manualmente.",
-      "invalidRoute": "A rota de geração selecionada é inválida ou está indisponível.",
+      "invalidRoute": "O mecanismo de geração selecionado é inválido ou está indisponível.",
       "cancellationRefused": "O provedor não pode mais cancelar este trabalho em execução.",
       "duplicateChargeAcknowledgementRequired": "Reconheça a possível cobrança duplicada do provedor antes de tentar novamente.",
       "busy": "Este projeto tem trabalhos de geração ativos.",

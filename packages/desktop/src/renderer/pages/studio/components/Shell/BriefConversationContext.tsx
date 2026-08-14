@@ -4,13 +4,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { createContext, useContext } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 
 import type { StudioRendererProject } from '@/common/types/project/creativeStudioTypes';
 
 import { useBriefConversation, type UseBriefConversationResult } from '../PhaseShell/phases/brief/useBriefConversation';
 
-const BriefConversationContext = createContext<UseBriefConversationResult | null>(null);
+export type BriefConversationContextResult = UseBriefConversationResult & {
+  routeSnapshotStale: boolean;
+  routeSnapshotStaleModel: string | null;
+  markRouteSnapshotStale(model?: string): void;
+};
+
+const BriefConversationContext = createContext<BriefConversationContextResult | null>(null);
 
 /**
  * Provides the Director conversation to the whole Studio subtree.
@@ -27,7 +33,28 @@ export const BriefConversationProvider: React.FC<{ project: StudioRendererProjec
   children,
 }) => {
   const conversation = useBriefConversation(project);
-  return <BriefConversationContext.Provider value={conversation}>{children}</BriefConversationContext.Provider>;
+  const [routeSnapshotStaleModel, setRouteSnapshotStaleModel] = useState<string | null>(null);
+  const [routeSnapshotStale, setRouteSnapshotStale] = useState(false);
+  const markRouteSnapshotStale = useCallback((model?: string): void => {
+    setRouteSnapshotStale(true);
+    if (model !== undefined) setRouteSnapshotStaleModel(model);
+  }, []);
+  const recreate = useCallback((): void => {
+    setRouteSnapshotStale(false);
+    setRouteSnapshotStaleModel(null);
+    conversation.recreate();
+  }, [conversation]);
+  const value = useMemo<BriefConversationContextResult>(
+    () => ({
+      ...conversation,
+      recreate,
+      routeSnapshotStale,
+      routeSnapshotStaleModel,
+      markRouteSnapshotStale,
+    }),
+    [conversation, markRouteSnapshotStale, recreate, routeSnapshotStale, routeSnapshotStaleModel]
+  );
+  return <BriefConversationContext.Provider value={value}>{children}</BriefConversationContext.Provider>;
 };
 
 /**
@@ -42,13 +69,16 @@ export const BriefConversationProvider: React.FC<{ project: StudioRendererProjec
  * inert here by design: with no conversation to replace, silently doing nothing is safer than
  * reaching for one that does not exist.
  */
-const ABSENT: UseBriefConversationResult = {
+const ABSENT: BriefConversationContextResult = {
   state: { kind: 'absent' },
   errorMessageKey: null,
   recreate: () => {},
+  routeSnapshotStale: false,
+  routeSnapshotStaleModel: null,
+  markRouteSnapshotStale: () => {},
 };
 
-export const useBriefConversationContext = (): UseBriefConversationResult => {
+export const useBriefConversationContext = (): BriefConversationContextResult => {
   const value = useContext(BriefConversationContext);
   if (value === null) {
     if (process.env.NODE_ENV === 'development') {

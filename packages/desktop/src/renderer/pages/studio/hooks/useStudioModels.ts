@@ -10,10 +10,7 @@ import type {
   StudioRendererProject,
   StudioRouteCatalog,
 } from '@/common/types/project/creativeStudioTypes';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-
-import type { StudioRouteAdoption } from '../studioRouteDefaults';
-import { resolveSoleRouteAdoptions } from '../studioRouteDefaults';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 const STORAGE_ERROR_MESSAGE_KEY = 'conversation.creativeStudio.errors.storage';
 
@@ -33,19 +30,10 @@ const projectCatalogKey = (project: StudioRendererProject | null): string => {
   ].join('\u0001');
 };
 
-const adoptionKey = (projectId: string, adoption: StudioRouteAdoption): string =>
-  [projectId, adoption.role, adoption.choiceId].join('\u0000');
-
 export type UseStudioModelsOptions = {
   project: StudioRendererProject | null;
   refetch: () => Promise<StudioRendererProject | null>;
   beforeMutation: () => Promise<boolean>;
-  /**
-   * Whether the page may persist an unambiguous route for the project right
-   * now. Callers withhold it while an edit is unsaved or in flight so an
-   * automatic selection never races a user's own revision.
-   */
-  autoSelectSoleRoute?: boolean;
 };
 
 export type UseStudioModelsResult = {
@@ -71,7 +59,6 @@ export const useStudioModels = ({
   project,
   refetch,
   beforeMutation,
-  autoSelectSoleRoute = false,
 }: UseStudioModelsOptions): UseStudioModelsResult => {
   const [catalog, setCatalog] = useState<StudioRouteCatalog | null>(null);
   const [loading, setLoading] = useState(project !== null);
@@ -87,7 +74,6 @@ export const useStudioModels = ({
   const pendingRoleRef = useRef<'storyboard' | 'image' | 'video' | null>(null);
   const lastRequestedCatalogKeyRef = useRef<string | null>(null);
   const refreshInFlightRef = useRef<{ key: string; promise: Promise<void> } | null>(null);
-  const attemptedAdoptionsRef = useRef(new Set<string>());
 
   useLayoutEffect(() => {
     catalogRef.current = catalog;
@@ -232,32 +218,6 @@ export const useStudioModels = ({
     },
     [refresh]
   );
-
-  const adoptions = useMemo(() => resolveSoleRouteAdoptions(catalog), [catalog]);
-  const projectId = project?.id ?? null;
-
-  /**
-   * Persists each unambiguous route through the same CAS command a person
-   * would use. Candidates are claimed before the first await and run in
-   * sequence, because the command admits one mutation at a time; claiming them
-   * up front also caps every candidate at one attempt per mount, so a refused
-   * adoption stops there instead of retrying against each catalog refresh.
-   */
-  useEffect(() => {
-    if (!autoSelectSoleRoute || projectId === null || pendingRole !== null) return;
-    const claimed = adoptions.filter((candidate) => {
-      const key = adoptionKey(projectId, candidate);
-      if (attemptedAdoptionsRef.current.has(key)) return false;
-      attemptedAdoptionsRef.current.add(key);
-      return true;
-    });
-    if (claimed.length === 0) return;
-    void (async () => {
-      for (const adoption of claimed) {
-        await updateSelection({ role: adoption.role, selection: { choiceId: adoption.choiceId } });
-      }
-    })();
-  }, [adoptions, autoSelectSoleRoute, pendingRole, projectId, updateSelection]);
 
   return {
     get catalog() {

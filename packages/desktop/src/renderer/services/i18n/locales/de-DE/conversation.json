@@ -1000,10 +1000,6 @@
         "connectEngine": "Engine verbinden — etwa eine Minute, einmal für den gesamten Arbeitsbereich",
         "askTeammate": "Teammitglied fragen",
         "askTeammateCopy": "Kannst du in den WePrompt-Modelleinstellungen eine Bild- und eine Video-Engine für diesen Arbeitsbereich verbinden?",
-        "renderingWith": "Rendering mit —",
-        "engineSummary": "{{model}} · {{kind}} · bis zu {{seconds}} s",
-        "changeEngines": "Engines ändern",
-        "engineKinds": "Engines: {{kinds}}",
         "batchExcluded": "{{count}} Einstellungen sind nicht enthalten — {{reason}}",
         "batchExcluded_one": "{{count}} Einstellung ist nicht enthalten — {{reason}}",
         "batchExcluded_other": "{{count}} Einstellungen sind nicht enthalten — {{reason}}",
@@ -1276,12 +1272,6 @@
       "manualFallback": "Mit manueller Bearbeitung fortfahren",
       "failed": "Es konnte kein Storyboard entworfen werden. Deine aktuellen Szenen wurden nicht geändert."
     },
-    "routing": {
-      "title": "Generierungsroute",
-      "modelLabel": "Modell",
-      "missingRoute": "Wähle eine kompatible Generierungsroute.",
-      "invalidRoute": "Diese Route ist nicht mehr gültig. Prüfe sie vor der Generierung."
-    },
     "reference": {
       "generate": "Referenz erstellen",
       "dialogTitle": "Referenzbild erstellen",
@@ -1316,8 +1306,8 @@
       "resolution": "Auflösung",
       "watermarkOff": "Wasserzeichen deaktiviert",
       "audioOff": "Stumme Ausgabe; Audiogenerierung deaktiviert",
-      "missingRoute": "Mindestens eine Szene hat keine Generierungsroute.",
-      "invalidRoute": "Mindestens eine ausgewählte Route ist ungültig.",
+      "missingRoute": "Mindestens eine Szene hat keine Engine.",
+      "invalidRoute": "Mindestens eine ausgewählte Engine ist ungültig.",
       "durationMismatch": "Das Storyboard-Timing entspricht nicht dem Projektziel.",
       "chargeNotice": "Die Generierung nutzt dein ausgewähltes Anbieterkonto und kann Kosten verursachen.",
       "confirm": "Bestätigen und generieren",
@@ -1325,7 +1315,7 @@
       "disabledMissingRoutes": "{{count}} Einstellungen haben keine Engine. Schließe dieses Fenster, um eine festzulegen.",
       "setEngines": "Schließen und Engines festlegen",
       "excludedFirstFrame": "{{count}} Einstellungen sind nicht in diesem Render enthalten, weil diese Engine nicht mit einem Bild beginnen kann.",
-      "audioOn": "Dieses Rendering enthält generiertes Audio; stumme Routen bleiben, sofern vorhanden, stumm."
+      "audioOn": "Dieses Rendering enthält generiertes Audio; stumme Engines bleiben, sofern vorhanden, stumm."
     },
     "jobs": {
       "progress": "{{percent}} % abgeschlossen",
@@ -1428,7 +1418,7 @@
       "storyboardExists": "Dieses Projekt hat bereits ein Storyboard. Bestätige das Ersetzen, bevor du es erneut entwirfst.",
       "staleProject": "Das Projekt wurde an anderer Stelle geändert. Aktualisiere es vor einem erneuten Versuch.",
       "planningUnavailable": "Der Storyboard-Entwurf ist nicht verfügbar. Du kannst die Bearbeitung manuell fortsetzen.",
-      "invalidRoute": "Die ausgewählte Generierungsroute ist ungültig oder nicht verfügbar.",
+      "invalidRoute": "Die ausgewählte Generierungs-Engine ist ungültig oder nicht verfügbar.",
       "cancellationRefused": "Der Anbieter kann diesen laufenden Auftrag nicht mehr abbrechen.",
       "duplicateChargeAcknowledgementRequired": "Bestätige die mögliche doppelte Anbietergebühr, bevor du es erneut versuchst.",
       "busy": "Dieses Projekt enthält aktive Generierungsaufträge.",

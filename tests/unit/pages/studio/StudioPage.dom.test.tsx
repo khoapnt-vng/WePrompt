@@ -1360,15 +1360,13 @@ describe('StudioPage and useStudioProject', () => {
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
   });
 
-  it('uses the engine bar when one selected media route is ready', async () => {
+  it('uses the live Engine Strip when one selected media engine is ready', async () => {
     bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
     renderRoute('/studio/project-1/board');
 
-    await screen.findByRole('heading', { name: 'conversation.creativeStudio.phase.produce.renderingWith' });
-    expect(screen.getByText('conversation.creativeStudio.phase.produce.engineSummary')).toBeVisible();
-    expect(
-      screen.getByRole('button', { name: 'conversation.creativeStudio.phase.produce.changeEngines' })
-    ).toBeVisible();
+    await screen.findByRole('region', { name: 'conversation.creativeStudio.models.engine.label' });
+    expect(screen.getByRole('button', { name: 'image-model' })).toBeVisible();
+    expect(screen.getByText('conversation.creativeStudio.models.engine.noFitVideo')).toBeVisible();
     expect(screen.queryByRole('button', { name: 'conversation.creativeStudio.models.openSettings' })).toBeNull();
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
   });
@@ -2292,7 +2290,7 @@ describe('StudioPage and useStudioProject', () => {
     bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
     renderRoute('/studio/project-1/board');
 
-    await screen.findByRole('heading', { name: 'conversation.creativeStudio.phase.produce.renderingWith' });
+    await screen.findByRole('region', { name: 'conversation.creativeStudio.models.engine.label' });
     expect(
       screen.queryByRole('button', {
         name:
@@ -2444,7 +2442,7 @@ describe('StudioPage and useStudioProject', () => {
     await waitFor(() => expect(addReference).toBeEnabled());
   });
 
-  it('keeps model selection behind Model Settings instead of exposing Produce selectors', async () => {
+  it('selects a project engine directly from the live strip', async () => {
     const opening = scene({ durationSeconds: 10 });
     const initial = project('project-1', {
       targetDurationSeconds: 15,
@@ -2462,20 +2460,26 @@ describe('StudioPage and useStudioProject', () => {
     catalog.image.options.push(alternate);
     bridge.getProject.invoke.mockResolvedValue(ok(initial));
     bridge.listRoutes.invoke.mockResolvedValue(ok(catalog));
-    const { router } = renderRoute('/studio/project-1/board');
+    renderRoute('/studio/project-1/board');
 
-    const changeEngines = await screen.findByRole('button', {
-      name: 'conversation.creativeStudio.phase.produce.changeEngines',
-    });
-    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    const imageEngine = await screen.findByRole('button', { name: 'image-model' });
     expect(screen.queryByText(/alternate-image-model/)).not.toBeInTheDocument();
-    fireEvent.click(changeEngines);
+    fireEvent.click(imageEngine);
+    fireEvent.click(
+      within(await screen.findByRole('menu')).getAllByText('conversation.creativeStudio.models.engine.optionLabel')[1]
+    );
 
-    await waitFor(() => expect(router.state.location.pathname).toBe('/settings/model'));
-    expect(bridge.updateModelSelection.invoke).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(bridge.updateModelSelection.invoke).toHaveBeenCalledWith({
+        projectId: 'project-1',
+        expectedRevision: initial.revision,
+        role: 'image',
+        selection: { choiceId: 'choice_image_alternate' },
+      })
+    );
   });
 
-  it('adopts the only compatible engine so a connected workspace can render without a picker', async () => {
+  it('pre-arms the only compatible engine without writing until the user chooses it', async () => {
     const unrouted = project('project-1', { routing: { storyboard: null, image: null, video: null } });
     bridge.getProject.invoke.mockResolvedValueOnce(ok(unrouted)).mockResolvedValue(ok(project()));
     bridge.listRoutes.invoke
@@ -2494,6 +2498,16 @@ describe('StudioPage and useStudioProject', () => {
       .mockResolvedValue(ok(routesWithImage()));
     renderRoute('/studio/project-1/board');
 
+    const imageEngine = await screen.findByRole('button', {
+      name: 'conversation.creativeStudio.models.engine.notSetImage',
+    });
+    expect(imageEngine).toHaveTextContent('image-model');
+    expect(bridge.updateModelSelection.invoke).not.toHaveBeenCalled();
+
+    fireEvent.click(imageEngine);
+    fireEvent.click(
+      within(await screen.findByRole('menu')).getByText('conversation.creativeStudio.models.engine.optionLabel')
+    );
     await waitFor(() =>
       expect(bridge.updateModelSelection.invoke).toHaveBeenCalledWith({
         projectId: 'project-1',
@@ -2502,10 +2516,7 @@ describe('StudioPage and useStudioProject', () => {
         selection: { choiceId: 'choice_image' },
       })
     );
-    await screen.findByRole('heading', { name: 'conversation.creativeStudio.phase.produce.renderingWith' });
-    expect(
-      screen.queryByRole('heading', { name: 'conversation.creativeStudio.phase.produce.connectEngine' })
-    ).not.toBeInTheDocument();
+    await screen.findByRole('region', { name: 'conversation.creativeStudio.models.engine.label' });
   });
 
   it('asks for a connection instead of guessing when several engines could serve a role', async () => {
@@ -2671,7 +2682,7 @@ describe('StudioPage and useStudioProject', () => {
     bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
     renderRoute('/studio/project-1/board');
 
-    await screen.findByRole('heading', { name: 'conversation.creativeStudio.phase.produce.renderingWith' });
+    await screen.findByRole('region', { name: 'conversation.creativeStudio.models.engine.label' });
     expect(
       screen.queryByRole('button', { name: 'conversation.creativeStudio.phase.produce.render' })
     ).not.toBeInTheDocument();
@@ -2705,7 +2716,7 @@ describe('StudioPage and useStudioProject', () => {
     bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
     renderRoute('/studio/project-1/board');
 
-    await screen.findByRole('heading', { name: 'conversation.creativeStudio.phase.produce.renderingWith' });
+    await screen.findByRole('region', { name: 'conversation.creativeStudio.models.engine.label' });
     expect(
       screen.queryByRole('button', { name: 'conversation.creativeStudio.phase.produce.render' })
     ).not.toBeInTheDocument();
@@ -2757,7 +2768,7 @@ describe('StudioPage and useStudioProject', () => {
     bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
     renderRoute('/studio/project-1/board');
 
-    await screen.findByRole('heading', { name: 'conversation.creativeStudio.phase.produce.renderingWith' });
+    await screen.findByRole('region', { name: 'conversation.creativeStudio.models.engine.label' });
     expect(
       screen.queryByRole('button', { name: 'conversation.creativeStudio.phase.produce.render' })
     ).not.toBeInTheDocument();

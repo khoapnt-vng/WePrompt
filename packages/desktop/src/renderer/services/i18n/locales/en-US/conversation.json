@@ -834,10 +834,6 @@
         "connectEngine": "Connect an engine — about a minute, once for the whole workspace",
         "askTeammate": "Ask a teammate",
         "askTeammateCopy": "Could you connect an image and a video engine in WePrompt Model settings for this workspace?",
-        "renderingWith": "Rendering with —",
-        "engineSummary": "{{model}} · {{kind}} · up to {{seconds}}s",
-        "changeEngines": "Change engines",
-        "engineKinds": "Engines: {{kinds}}",
         "batchExcluded": "{{count}} shots are not here — {{reason}}",
         "batchExcluded_one": "{{count}} shot is not here — {{reason}}",
         "batchExcluded_other": "{{count}} shots are not here — {{reason}}",
@@ -1110,12 +1106,6 @@
       "manualFallback": "Continue with manual editing",
       "failed": "A storyboard could not be drafted. Your current scenes were not changed."
     },
-    "routing": {
-      "title": "Generation route",
-      "modelLabel": "Model",
-      "missingRoute": "Choose a compatible generation route.",
-      "invalidRoute": "This route is no longer valid. Review it before generating."
-    },
     "reference": {
       "generate": "Generate reference",
       "dialogTitle": "Generate a reference image",
@@ -1150,8 +1140,8 @@
       "resolution": "Resolution",
       "watermarkOff": "Watermark disabled",
       "audioOff": "Silent output; audio generation disabled",
-      "missingRoute": "At least one scene has no generation route.",
-      "invalidRoute": "At least one selected route is invalid.",
+      "missingRoute": "At least one scene has no engine.",
+      "invalidRoute": "At least one selected engine is invalid.",
       "durationMismatch": "Storyboard timing does not match the project target.",
       "chargeNotice": "Generation uses your selected provider account and may incur provider charges.",
       "confirm": "Confirm and generate",
@@ -1159,7 +1149,7 @@
       "disabledMissingRoutes": "{{count}} shots have no engine. Close this to set one.",
       "setEngines": "Close and set engines",
       "excludedFirstFrame": "{{count}} shots are not in this render — this engine cannot start from a frame.",
-      "audioOn": "This render includes generated audio; silent routes, if present, remain silent."
+      "audioOn": "This render includes generated audio; silent engines, if present, remain silent."
     },
     "jobs": {
       "progress": "{{percent}}% complete",
@@ -1262,7 +1252,7 @@
       "storyboardExists": "This project already has a storyboard. Confirm replacement before drafting again.",
       "staleProject": "The project changed elsewhere. Refresh it before retrying.",
       "planningUnavailable": "Storyboard drafting is unavailable. You can continue editing manually.",
-      "invalidRoute": "The selected generation route is invalid or unavailable.",
+      "invalidRoute": "The selected generation engine is invalid or unavailable.",
       "cancellationRefused": "The provider can no longer cancel this running job.",
       "duplicateChargeAcknowledgementRequired": "Acknowledge the possible duplicate provider charge before retrying.",
       "busy": "This project has active generation work.",
