@@ -137,7 +137,7 @@ const project = (overrides: Partial<StudioRendererProject> = {}): StudioRenderer
   ...overrides,
 });
 
-const phaseController = (): StudioPhaseControllers => {
+const phaseController = (overrides: Partial<StudioPhaseControllers> = {}): StudioPhaseControllers => {
   const currentProject = project();
   const editor: UseStoryboardEditorResult = {
     project: currentProject,
@@ -258,7 +258,60 @@ const phaseController = (): StudioPhaseControllers => {
     selectVariation: vi.fn(async () => undefined),
     clearWriteFocusIntent: vi.fn(),
     openDuplicateChargeConfirmation: vi.fn(),
+    ...overrides,
   };
+};
+
+/**
+ * A workspace with one adopted, ready image engine and one shot ready to generate — the only state
+ * in which the frame shows its paid control. The default fixture has no engine, so every header
+ * assertion below would otherwise be counting buttons in a workspace that cannot spend at all.
+ */
+const readyEngineController = (): StudioPhaseControllers => {
+  const imageRoute = {
+    choiceId: 'choice-image',
+    providerId: 'provider-image',
+    providerName: 'Image provider',
+    model: 'image-model',
+    health: 'available' as const,
+    kind: 'image' as const,
+    constraints: {
+      aspectRatios: ['16:9' as const],
+      resolutions: ['720p' as const],
+      minDurationSeconds: 1,
+      maxDurationSeconds: 60,
+      supportsFirstFrame: true,
+      silentOutput: true,
+    },
+  };
+
+  return phaseController({
+    models: {
+      catalog: {
+        storyboard: { status: 'ready', selected: null, options: [] },
+        image: {
+          status: 'ready',
+          selected: { choiceId: imageRoute.choiceId, providerId: imageRoute.providerId, model: imageRoute.model },
+          selectedRoute: imageRoute,
+          options: [imageRoute],
+        },
+        video: { status: 'setup_required', selected: null, selectedRoute: null, options: [] },
+        catalogVersion: 'catalog-v1',
+      },
+      loading: false,
+      errorMessageKey: null,
+      pendingRole: null,
+      refresh: vi.fn(async () => undefined),
+      updateSelection: vi.fn(async () => true),
+    },
+    readiness: {
+      sceneStatuses: { 'scene-1': 'ready' },
+      totalSceneCount: 1,
+      readySceneIds: ['scene-1'],
+      selectedAssetCount: 0,
+      durationDeltaSeconds: 0,
+    },
+  });
 };
 
 describe('Creative Studio full-sentence English copy', () => {
@@ -276,6 +329,27 @@ describe('Creative Studio full-sentence English copy', () => {
   });
 
   /**
+   * The frame's third action is the document's only spend, so what it says and when it appears are
+   * both copy decisions. Two buttons that cost nothing and one that charges a provider sit in the
+   * same row: the label has to name the charge and its size, which is why it counts the shots
+   * rather than reading "Generate".
+   */
+  it('names the paid generation control by the shots it will charge for', async () => {
+    await renderEnglish(
+      <StudioPhaseShell
+        activeView='table'
+        controller={readyEngineController()}
+        navigationDisabled={false}
+        onBack={vi.fn()}
+      />
+    );
+
+    const headerActions = document.querySelector<HTMLElement>('[data-studio-phase-actions]');
+    expect(within(headerActions!).getAllByRole('button')).toHaveLength(3);
+    expect(within(headerActions!).getByRole('button', { name: 'Generate 1 ready scene' })).toBeEnabled();
+  });
+
+  /**
    * Table and Board offer no header action at all. Both used to carry a "Continue" that walked the
    * four-step rail forward; with a view switch every destination is already visible and one click
    * away, so there is no next step for a call to action to name — and two buttons reading the same
@@ -283,6 +357,11 @@ describe('Creative Studio full-sentence English copy', () => {
    *
    * Asserting the exact button count *and* the absence of the retired word keeps this falsifiable
    * in both directions: restoring either CTA makes the header hold three buttons and match "Continue".
+   *
+   * The header does carry a third button now — the paid generation control — but only where there
+   * is an engine to spend against, and it is an action on the document rather than a step through
+   * it. This fixture has no engine, so the count is still two; the engine-bound count is pinned by
+   * "names the paid generation control by the shots it will charge for" above.
    */
   it.each(['table', 'board'] as const)('offers no progression action in the %s view header', async (activeView) => {
     await renderEnglish(
@@ -300,6 +379,7 @@ describe('Creative Studio full-sentence English copy', () => {
     expect(within(headerActions!).getByRole('button', { name: 'Brief' })).toBeInTheDocument();
     expect(within(headerActions!).getByRole('button', { name: 'Rules' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Generate/ })).toBeNull();
   });
 
   it('renders the Rules action and the Cut handoff action in the header', async () => {
@@ -313,6 +393,29 @@ describe('Creative Studio full-sentence English copy', () => {
     expect(within(headerActions!).getByRole('button', { name: 'Brief' })).toBeInTheDocument();
     expect(within(headerActions!).getByRole('button', { name: 'Rules' })).toBeInTheDocument();
     expect(within(headerActions!).getByRole('button', { name: 'Prepare handoff' })).toBeInTheDocument();
+  });
+
+  /**
+   * Cut is the one view whose own header action is also `type='primary'`. The paid control and the
+   * export handoff therefore sit side by side, and the pair has to stay distinguishable by name
+   * alone — "Prepare handoff" costs nothing, the other charges a provider per shot.
+   */
+  it('keeps the paid control distinguishable from the free handoff on the Cut view', async () => {
+    await renderEnglish(
+      <StudioPhaseShell
+        activeView='cut'
+        controller={readyEngineController()}
+        navigationDisabled={false}
+        onBack={vi.fn()}
+      />
+    );
+
+    const headerActions = document.querySelector<HTMLElement>('[data-studio-phase-actions]');
+    expect(
+      within(headerActions!)
+        .getAllByRole('button')
+        .map((button) => button.textContent)
+    ).toEqual(['Brief', 'Rules', 'Generate 1 ready scene', 'Prepare handoff']);
   });
 
   it('renders every view in every configured locale without raw visible or accessible copy', async () => {

@@ -4,11 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { StudioRendererJob, StudioRendererProject } from '@/common/types/project/creativeStudioTypes';
+import type {
+  StudioRendererJob,
+  StudioRendererProject,
+  StudioRouteCatalog,
+  StudioRouteCatalogEntry,
+  StudioScene,
+} from '@/common/types/project/creativeStudioTypes';
 import type { StudioView } from '@renderer/pages/studio/studioPhaseRoute';
 import { StudioPhaseShell } from '@renderer/pages/studio/components/PhaseShell/StudioPhaseShell';
 import styles from '@renderer/pages/studio/components/PhaseShell/StudioPhaseShell.module.css';
@@ -147,6 +153,83 @@ const models: UseStudioModelsResult = {
   updateSelection: vi.fn(async () => true),
 };
 
+const imageRoute: StudioRouteCatalogEntry = {
+  choiceId: 'choice-image',
+  providerId: 'provider-image',
+  providerName: 'Image provider',
+  model: 'image-model',
+  health: 'available',
+  kind: 'image',
+  constraints: {
+    aspectRatios: ['16:9'],
+    resolutions: ['1080p'],
+    minDurationSeconds: 1,
+    maxDurationSeconds: 60,
+    supportsFirstFrame: true,
+    silentOutput: true,
+  },
+};
+
+/** A workspace with one adopted, ready image engine — the state in which spending is possible. */
+const readyCatalog: StudioRouteCatalog = {
+  storyboard: {
+    status: 'ready',
+    selected: { providerId: 'planner', model: 'planner-model' },
+    options: [{ providerId: 'planner', providerName: 'Planner', model: 'planner-model', health: 'available' }],
+  },
+  image: {
+    status: 'ready',
+    selected: { choiceId: imageRoute.choiceId, providerId: imageRoute.providerId, model: imageRoute.model },
+    selectedRoute: imageRoute,
+    options: [imageRoute],
+  },
+  video: { status: 'setup_required', selected: null, selectedRoute: null, options: [] },
+  catalogVersion: 'catalog-v1',
+};
+
+const readyScene: StudioScene = {
+  id: 'scene-1',
+  title: 'Opening shot',
+  purpose: '',
+  visualPrompt: 'A wide sunrise over the city',
+  narration: '',
+  onScreenText: '',
+  mediaKind: 'image',
+  durationSeconds: 5,
+  referenceAssetId: null,
+  selectedAssetId: null,
+  assetIds: [],
+  jobIds: [],
+  reviewState: 'ready',
+};
+
+const spendableProject: StudioRendererProject = {
+  ...project,
+  sceneOrder: [readyScene.id],
+  scenes: { [readyScene.id]: readyScene },
+  routing: {
+    storyboard: { providerId: 'planner', model: 'planner-model' },
+    image: { choiceId: imageRoute.choiceId, providerId: imageRoute.providerId, model: imageRoute.model },
+    video: null,
+  },
+};
+
+/** Controller overrides that put the frame in the one state where the paid control can be used. */
+const spendable = (overrides: Partial<StudioPhaseControllers> = {}): Partial<StudioPhaseControllers> => ({
+  project: spendableProject,
+  models: { ...models, catalog: readyCatalog },
+  readiness: {
+    sceneStatuses: { [readyScene.id]: 'ready' },
+    totalSceneCount: 1,
+    readySceneIds: [readyScene.id],
+    selectedAssetCount: 0,
+    durationTotalSeconds: readyScene.durationSeconds,
+    durationDeltaSeconds: readyScene.durationSeconds - project.targetDurationSeconds,
+  },
+  editor: { ...editor, project: spendableProject },
+  ...overrides,
+});
+
 const jobs: UseStudioJobsResult = {
   project,
   jobs: [],
@@ -201,11 +284,11 @@ const controller = (
   ...overrides,
 });
 
-const renderShell = (advisory: StudioPhaseAdvisory | null) =>
+const renderShell = (advisory: StudioPhaseAdvisory | null, overrides: Partial<StudioPhaseControllers> = {}) =>
   render(
     <StudioPhaseShell
       activeView='table'
-      controller={controller(advisory)}
+      controller={controller(advisory, overrides)}
       navigationDisabled={false}
       onBack={vi.fn()}
     />
@@ -227,14 +310,115 @@ describe('StudioPhaseShell advisory', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
+  /**
+   * `anchor` is the whole point of the advisory type, and both anchors now render inside the same
+   * frame: the shell's `role='alert'` speaks about the document and interrupts, the batch anchor
+   * speaks about one button and waits its turn. Hoisting the batch advisory into the alert region
+   * would be invisible on screen and wrong in the ear, so this asserts the text is present, is
+   * announced politely, and is not what `role='alert'` resolves to.
+   */
   it('does not hoist a batch-anchored advisory into the shell alert region', () => {
-    renderShell({
-      messageKey: 'conversation.creativeStudio.review.durationMismatch',
-      anchor: 'batch',
-    });
+    renderShell({ messageKey: 'conversation.creativeStudio.review.durationMismatch', anchor: 'batch' }, spendable());
 
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    expect(screen.queryByText('conversation.creativeStudio.review.durationMismatch')).not.toBeInTheDocument();
+    const advisory = screen.getByText('conversation.creativeStudio.review.durationMismatch');
+    expect(advisory).toHaveAttribute('aria-live', 'polite');
+    expect(advisory.closest('[data-studio-batch-control]')).not.toBeNull();
+  });
+});
+
+/**
+ * The document's one spend, `studioJobs.submitScenes`, reached from the frame rather than from the
+ * Board view that used to hold it. Every assertion here is about money: that the entry point exists
+ * exactly once, that it opens review instead of charging, and that the states which make a
+ * submission unsafe hold it shut.
+ */
+describe('StudioPhaseShell batch generation control', () => {
+  const batchButton = (): HTMLElement =>
+    screen.getByRole('button', { name: 'conversation.creativeStudio.review.generateReadyScenes:count=1' });
+
+  it('opens review from the top bar instead of submitting, on a view that is not Board', () => {
+    const openBatchGenerationReview = vi.fn();
+    const submitScenes = vi.fn(async () => true);
+    renderShell(null, {
+      ...spendable(),
+      jobs: { ...jobs, submitScenes },
+      openBatchGenerationReview,
+    });
+
+    const control = batchButton();
+    expect(control.closest('[data-studio-phase-actions]')).not.toBeNull();
+    fireEvent.click(control);
+
+    // Table is on screen: the spend is reachable from a view that never hosted it.
+    expect(screen.getByRole('heading', { level: 2, name: 'conversation.creativeStudio.phase.write.title' }));
+    expect(openBatchGenerationReview).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        catalogVersion: 'catalog-v1',
+        routes: expect.objectContaining({
+          image: { route: expect.objectContaining({ choiceId: 'choice-image' }), routeStatus: 'valid' },
+        }),
+      })
+    );
+    expect(submitScenes).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The e2e no-engine door asserts zero buttons named /^(Render|Generate)/ inside the work panel,
+   * and the top bar is inside that panel. Hiding rather than disabling is also the honest reading:
+   * with no adopted engine there is nothing to spend against.
+   */
+  it('withholds the paid control entirely when the workspace has no ready engine', () => {
+    renderShell(null, { ...spendable(), models });
+
+    expect(
+      screen.queryByRole('button', { name: /conversation\.creativeStudio\.review\.generateReadyScenes/ })
+    ).not.toBeInTheDocument();
+    // Guards the guard: the free document actions prove the header rendered at all.
+    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.rules.open' })).toBeInTheDocument();
+  });
+
+  it.each([
+    ['an unsaved project draft', { editor: { ...editor, project: spendableProject, hasUnsavedProjectDraft: true } }],
+    ['an unsaved scene draft', { editor: { ...editor, project: spendableProject, hasUnsavedSceneDrafts: true } }],
+    [
+      'an unresolved update conflict',
+      {
+        editor: {
+          ...editor,
+          project: spendableProject,
+          conflict: {
+            operation: 'update_project' as const,
+            messageKey: 'conversation.creativeStudio.errors.staleProject',
+          },
+        },
+      },
+    ],
+    ['a storyboard draft in flight', { editor: { ...editor, project: spendableProject, drafting: true } }],
+    ['a pending mutation', { mutationPending: true }],
+    ['a catalog still loading', { models: { ...models, catalog: readyCatalog, loading: true } }],
+  ])('holds the paid control shut while the document has %s', (_state, overrides) => {
+    renderShell(null, { ...spendable(), ...overrides });
+
+    expect(batchButton()).toBeDisabled();
+  });
+
+  it('holds the paid control shut with no ready shot to generate', () => {
+    renderShell(null, {
+      ...spendable(),
+      readiness: {
+        sceneStatuses: { [readyScene.id]: 'needs_prompt' },
+        totalSceneCount: 1,
+        readySceneIds: [],
+        selectedAssetCount: 0,
+        durationTotalSeconds: readyScene.durationSeconds,
+        durationDeltaSeconds: readyScene.durationSeconds - project.targetDurationSeconds,
+      },
+    });
+
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.review.generateReadyScenes:count=0' })
+    ).toBeDisabled();
   });
 });
 

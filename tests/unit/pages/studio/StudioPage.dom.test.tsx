@@ -389,17 +389,30 @@ const installResizeObserverMock = (): {
   };
 };
 
-const findBatchAction = async (): Promise<{ batchAction: HTMLElement; activityPanel: HTMLElement }> => {
+/**
+ * The document's single paid entry point, and the box that holds it with its advisory.
+ *
+ * Two facts, deliberately expressed as `expect` rather than `throw`: a helper that throws reports a
+ * moved control as an opaque error at whichever test called it first, so the diff a reader needs —
+ * where the button actually is — never reaches the output. The uniqueness check matters most:
+ * `submitScenes` is the only spend in Studio, and a second visible entry point is the bug this
+ * whole placement exists to prevent.
+ */
+const findBatchAction = async (): Promise<{ batchAction: HTMLElement; batchControl: HTMLElement }> => {
   const batchAction = await screen.findByRole('button', {
     name: 'conversation.creativeStudio.review.generateReadyScenes',
   });
-  const allBatchActions = screen.getAllByRole('button', {
-    name: 'conversation.creativeStudio.review.generateReadyScenes',
-  });
-  if (allBatchActions.length !== 1) throw new Error('Studio must expose exactly one batch-generation action');
-  const activityPanel = batchAction.closest('aside');
-  if (activityPanel === null) throw new Error('Batch generation must remain pinned to the activity column');
-  return { batchAction, activityPanel };
+  expect(
+    screen.getAllByRole('button', { name: 'conversation.creativeStudio.review.generateReadyScenes' }),
+    'Studio must expose exactly one batch-generation action'
+  ).toHaveLength(1);
+  const batchControl = batchAction.closest<HTMLElement>('[data-studio-batch-control]');
+  expect(batchControl, 'Batch generation must stay in the frame, beside the document actions').not.toBeNull();
+  expect(
+    batchControl!.closest('[data-studio-phase-actions]'),
+    'Batch generation must stay in the top bar rather than inside a view'
+  ).not.toBeNull();
+  return { batchAction, batchControl: batchControl! };
 };
 
 const ProjectHookHarness: React.FC = () => {
@@ -2350,7 +2363,7 @@ describe('StudioPage and useStudioProject', () => {
     bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
     renderRoute('/studio/project-1/board');
 
-    const { batchAction, activityPanel } = await findBatchAction();
+    const { batchAction, batchControl } = await findBatchAction();
     expect(batchAction).toBeEnabled();
     // An off-target storyboard advises; it must not lock the way to the Cut view either.
     expect(
@@ -2359,7 +2372,7 @@ describe('StudioPage and useStudioProject', () => {
         { name: 'conversation.creativeStudio.phase.nav.cut' }
       )
     ).toBeEnabled();
-    expect(within(activityPanel).getByText('conversation.creativeStudio.review.durationMismatch')).toBeVisible();
+    expect(within(batchControl).getByText('conversation.creativeStudio.review.durationMismatch')).toBeVisible();
 
     fireEvent.click(batchAction);
     expect(await screen.findByRole('dialog')).toHaveTextContent('conversation.creativeStudio.review.title');
@@ -2382,9 +2395,9 @@ describe('StudioPage and useStudioProject', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('conversation.creativeStudio.review.durationMismatch');
 
     await selectStudioView(router, 'board');
-    const { batchAction, activityPanel } = await findBatchAction();
+    const { batchAction, batchControl } = await findBatchAction();
     expect(batchAction).toBeEnabled();
-    expect(within(activityPanel).getByText('conversation.creativeStudio.review.durationMismatch')).toBeVisible();
+    expect(within(batchControl).getByText('conversation.creativeStudio.review.durationMismatch')).toBeVisible();
   });
 
   it('keeps write actions disabled for the entire reference import mutation', async () => {

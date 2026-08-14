@@ -4,11 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Button } from '@arco-design/web-react';
 import React, { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { buildBatchGenerationReviewRequest, GenerationJobList } from '../../Generation';
+import { GenerationJobList } from '../../Generation';
 import { StudioModelBar } from '../../Models';
 import type { ProducePhaseController } from '../types';
 import type { StudioLayoutMode } from '../useStudioLayoutMode';
@@ -28,11 +27,9 @@ export const ProducePhase: React.FC<ProducePhaseProps> = ({ controller, layoutMo
     editor,
     models,
     jobs,
-    advisory,
     mutationPending,
     requestTransition,
     openSingleGenerationReview,
-    openBatchGenerationReview,
     openModelSettings,
     openDuplicateChargeConfirmation,
   } = controller;
@@ -59,11 +56,6 @@ export const ProducePhase: React.FC<ProducePhaseProps> = ({ controller, layoutMo
     jobs.issue?.jobId !== undefined && jobs.jobs.some((candidate) => candidate.id === jobs.issue?.jobId)
       ? { jobId: jobs.issue.jobId, code: jobs.issue.code, messageKey: jobs.issue.messageKey }
       : null;
-  const batchReviewRequest = useMemo(
-    () => buildBatchGenerationReviewRequest({ project, catalog: models.catalog }),
-    [models.catalog, project]
-  );
-  const batchDisabled = generationBlocked || models.loading || readiness.readySceneIds.length < 1;
 
   if (readyRoutes.length === 0) {
     return (
@@ -115,6 +107,9 @@ export const ProducePhase: React.FC<ProducePhaseProps> = ({ controller, layoutMo
           onCancelJob={jobs.cancelJob}
         />
 
+        {/* The activity feed only. The batch control that used to close this column is the
+            document's one spend, so it moved to the frame's top bar with its advisory — a paid
+            action reachable from one view was reachable only by knowing which view held it. */}
         <aside className={styles.activityColumn}>
           <div className={styles.activityList}>
             <GenerationJobList
@@ -128,25 +123,6 @@ export const ProducePhase: React.FC<ProducePhaseProps> = ({ controller, layoutMo
               onRetryDownload={jobs.retryDownload}
               onReviewUnknownSubmission={openDuplicateChargeConfirmation}
             />
-          </div>
-          <div className={styles.batchFooter}>
-            <Button
-              type='primary'
-              long
-              disabled={batchDisabled}
-              onClick={() => {
-                if (!batchDisabled) openBatchGenerationReview(batchReviewRequest);
-              }}
-            >
-              {t('conversation.creativeStudio.review.generateReadyScenes', {
-                count: readiness.readySceneIds.length,
-              })}
-            </Button>
-            {advisory?.anchor === 'batch' && (
-              <p aria-live='polite' className={styles.batchAdvisory}>
-                {t(advisory.messageKey)}
-              </p>
-            )}
           </div>
         </aside>
       </div>

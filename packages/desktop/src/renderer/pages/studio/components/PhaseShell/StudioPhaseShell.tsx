@@ -6,12 +6,14 @@
 
 import { Button } from '@arco-design/web-react';
 import { Download } from '@icon-park/react';
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { SelectedSceneSaveState } from '../../hooks/useStoryboardEditor';
 import type { StudioView } from '../../studioPhaseRoute';
+import { buildBatchGenerationReviewRequest } from '../Generation';
 import { ProducePhase, ReviewPhase, WritePhase } from './phases';
+import { getReadySelectedRoutes } from './phases/produce';
 import { StudioDocumentActivity } from './StudioDocumentActivity';
 import { StudioPhaseHeader } from './StudioPhaseHeader';
 import { StudioViewSwitch } from './StudioViewSwitch';
@@ -86,6 +88,72 @@ export const StudioPhaseShell: React.FC<StudioPhaseShellProps> = ({
     }
   })();
 
+  /**
+   * The document's one paid control.
+   *
+   * `studioJobs.submitScenes` is the only spend Studio has — rendering the cut shells out to a
+   * local ffmpeg with no provider — so it belongs to the frame rather than to one view, and the
+   * frame is where a reader can find it without first guessing which view holds it.
+   *
+   * It disappears rather than greys out when the workspace has no ready engine, which is the same
+   * predicate that puts Board behind `ConnectEngineCard`: there is nothing to spend against, and a
+   * disabled button named "Generate…" still tells a screen reader that generation is on this screen.
+   */
+  const batchReviewRequest = useMemo(
+    () => buildBatchGenerationReviewRequest({ project: controller.project, catalog: controller.models.catalog }),
+    [controller.models.catalog, controller.project]
+  );
+  const readyRouteCount = getReadySelectedRoutes(controller.models.catalog).length;
+  // Carried over from Produce term for term, and every term is load-bearing: a click here submits
+  // paid work against whatever the main process last persisted, so an unflushed draft, an
+  // unresolved conflict or an in-flight mutation must all hold it shut. `navigationDisabled` is the
+  // one addition — the control now sits beside Brief, Rules and the handoff, which it already
+  // blocks, and it is raised exactly while a review, duplicate-charge or export dialog is open.
+  const batchDisabled =
+    navigationDisabled ||
+    controller.editor.hasUnsavedProjectDraft ||
+    controller.editor.hasUnsavedSceneDrafts ||
+    controller.editor.conflict !== null ||
+    controller.editor.drafting ||
+    controller.mutationPending ||
+    controller.models.loading ||
+    controller.readiness.readySceneIds.length < 1;
+  const batchAction =
+    readyRouteCount === 0 ? undefined : (
+      <div data-studio-batch-control className={styles.batchControl}>
+        {/*
+         * Weight tracks availability, which is not a style preference here.
+         *
+         * The label counts the shots a click would charge for, so it spends most of a project's
+         * life reading "Generate 0 ready scenes" — everything generated, or nothing ready yet. A
+         * permanent primary block in the frame saying "0" is the loudest thing on every view while
+         * being the one thing that cannot be done. Rendered flat while it is shut, it sits with
+         * Brief and Rules and takes the emphasis back the moment there is something to spend on.
+         * `size='small'` for the same reason: this row is small buttons.
+         */}
+        <Button
+          size='small'
+          type={batchDisabled ? 'default' : 'primary'}
+          disabled={batchDisabled}
+          onClick={() => {
+            if (!batchDisabled) controller.openBatchGenerationReview(batchReviewRequest);
+          }}
+        >
+          {t('conversation.creativeStudio.review.generateReadyScenes', {
+            count: controller.readiness.readySceneIds.length,
+          })}
+        </Button>
+        {/* Follows its control into the frame, and stays out of the shell's `role='alert'` region:
+            the advisory is about this button, so it is announced politely beside it rather than
+            interrupting as a document-level alert. `anchor` is what keeps the two distinguishable. */}
+        {controller.advisory?.anchor === 'batch' && (
+          <p aria-live='polite' className={styles.batchAdvisory}>
+            {t(controller.advisory.messageKey)}
+          </p>
+        )}
+      </div>
+    );
+
   // Named so the e2e spec can address the phase shell's own header and advisory directly. It used
   // to reach them by counting anonymous divs down from the work panel, which broke the moment the
   // panel gained a scroll box — a hook cannot be broken by inserting a wrapper above it.
@@ -108,6 +176,7 @@ export const StudioPhaseShell: React.FC<StudioPhaseShellProps> = ({
             <Button size='small' disabled={navigationDisabled} onClick={controller.openRules}>
               {t('conversation.creativeStudio.rules.open')}
             </Button>
+            {batchAction}
             {headerAction}
           </>
         }

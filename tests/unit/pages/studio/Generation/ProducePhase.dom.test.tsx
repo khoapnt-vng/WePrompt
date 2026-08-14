@@ -598,34 +598,32 @@ describe('ProducePhase', () => {
     expect(controller.jobs.cancelJob).toHaveBeenCalledExactlyOnceWith('job-closing-current');
   });
 
-  it('renders the batch advisory only when the controller routes it to the batch anchor', () => {
-    const mismatchedProject = project({ targetDurationSeconds: 12 });
-    const mismatch = createController(mismatchedProject);
-    const exact = createController(project());
-    exact.openBatchGenerationReview = mismatch.openBatchGenerationReview;
-    const { rerender } = render(<ProducePhase controller={mismatch} />);
-
-    const mismatchedBatch = screen.getByRole('button', {
-      name: 'conversation.creativeStudio.review.generateReadyScenes:count=1',
-    });
-    expect(mismatchedBatch).toBeEnabled();
-    expect(screen.queryByText('conversation.creativeStudio.review.durationMismatch')).not.toBeInTheDocument();
-    fireEvent.click(mismatchedBatch);
-    expect(mismatch.openBatchGenerationReview).toHaveBeenCalledTimes(1);
-
-    exact.advisory = {
+  /**
+   * The paid control and its advisory live in the frame's top bar now; the assertions that they
+   * open review rather than submit moved with them to `StudioPhaseShell.dom.test.tsx`.
+   *
+   * What has to stay here is the absence. Board is the view the batch button came from and the one
+   * a reader would most naturally put it back on, and a second entry point to the only spend in
+   * Studio is not a cosmetic duplicate — it is two buttons that can each charge a provider, with
+   * only one of them holding the frame's disabled derivation. The advisory is checked too: routed
+   * to the batch anchor it must render exactly once, in the frame, not once per surface that
+   * happens to read `advisory`.
+   */
+  it('hosts no batch generation control or batch advisory now that the frame owns the spend', () => {
+    const controller = createController(project());
+    controller.advisory = {
       messageKey: 'conversation.creativeStudio.review.durationMismatch',
       anchor: 'batch',
     };
-    rerender(<ProducePhase controller={exact} />);
-    const batch = screen.getByRole('button', {
-      name: 'conversation.creativeStudio.review.generateReadyScenes:count=1',
-    });
-    expect(batch).toBeEnabled();
-    expect(screen.getAllByText('conversation.creativeStudio.review.durationMismatch')).toHaveLength(1);
-    fireEvent.click(batch);
-    expect(mismatch.openBatchGenerationReview).toHaveBeenCalledTimes(2);
-    expect(exact.jobs.submitScenes).not.toHaveBeenCalled();
+    render(<ProducePhase controller={controller} />);
+
+    // Guards the guard: without a mounted engine surface every absence below passes vacuously.
+    expect(screen.getByRole('heading', { name: /phase\.produce\.renderingWith/ })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /conversation\.creativeStudio\.review\.generateReadyScenes/ })
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('conversation.creativeStudio.review.durationMismatch')).not.toBeInTheDocument();
+    expect(controller.openBatchGenerationReview).not.toHaveBeenCalled();
   });
 
   it('lists project activity across scenes instead of filtering to the selected shot', () => {

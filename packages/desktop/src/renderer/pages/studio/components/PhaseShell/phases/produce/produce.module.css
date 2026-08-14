@@ -314,20 +314,6 @@
   padding: 0;
 }
 
-.batchFooter {
-  display: flex;
-  padding-top: 10px;
-  border-top: 1px solid var(--color-border-2);
-  flex-direction: column;
-  gap: 8px;
-}
-
-.batchAdvisory {
-  margin: 0;
-  color: var(--color-warning-6);
-  font-size: 12px;
-}
-
 .previewModal :global(.arco-modal-content) {
   min-width: 0;
 }

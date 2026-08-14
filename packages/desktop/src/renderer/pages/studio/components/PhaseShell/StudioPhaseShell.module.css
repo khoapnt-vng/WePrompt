@@ -203,6 +203,27 @@
   gap: 8px;
 }
 
+/* The paid control and the advisory that belongs to it, as one column so the sentence sits under
+   the button it is about rather than beside the free actions. `.headerActions` already wraps and
+   `.header` is `min-height`, so an advisory grows the row instead of being clipped by it. */
+.batchControl {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.batchAdvisory {
+  margin: 0;
+  max-width: 260px;
+  color: var(--color-warning-6);
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: end;
+  white-space: normal;
+}
+
 .viewSwitch {
   display: flex;
   min-width: 0;
