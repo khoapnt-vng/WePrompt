@@ -66,6 +66,29 @@ propagates to the end of the section with nothing to correct it.
 That is a real design decision, not a detail, and it lands in **Phase 3b**, which is specified as
 head-to-tail chaining within a section.
 
+### 2a. It constrains what a Section can promise — relevant to the Section redesign
+
+The model defines a Section as carrying _"visual prompt — the look every clip in it inherits"_, and
+separately says clips within a section are **a chain, not a set**.
+
+On Seedance 2.0 those two cannot both be delivered by references. If clips 2…n are chained
+(`first_frame` from the previous clip's last frame), they **cannot also carry `reference_image`
+entries** — so a section's inherited look reaches them only through the chain and the prompt text,
+never through the cast or look images.
+
+Concretely, a section can offer any two of these three, not all three:
+
+- clips that continue from one another (chaining)
+- every clip conditioned on the same cast/look images (references)
+- a single paid generation per clip
+
+The likely resolution is that clip 1 is _referenced_ and clips 2…n are _chained_, which makes the
+section's inherited look real at its head and inherited-by-continuation thereafter. That is a
+defensible design — but it means **drift within a section is uncorrectable after clip 1**, and the
+UI should probably say so rather than imply every clip is anchored to the cast.
+
+Worth settling in the Section redesign rather than discovering in 3b.
+
 ### 3. The experiment's scope is now narrower than the question
 
 `creative-studio-2-still-to-clip-experiment.md` tests still → `first_frame`, which is exactly what we
