@@ -131,3 +131,72 @@ that: a run you can start, watch, interrupt, and reject.
 Items 1 and 2 are unblocked today and do not depend on the model or binding questions. Item 5 is the
 one worth thinking about longest, because it determines whether the product is an autonomous director
 or a very fast assistant with a person as its eyes.
+
+---
+
+## How this relates to the phase roadmap
+
+The two are **axes, not a sequence**. The phases define what the product can do; the levels define
+who operates it. The Director can only ever do what the app can do, so phases feed levels rather than
+competing with them. Nothing here says stop at 3a and re-plan.
+
+**Level 1 is orthogonal.** It wraps commands that already exist and needs no phase, no model decision
+and no binding. Start it whenever.
+
+**3b becomes a fork, and it is the real question.** "Poll for done, take the last frame, make the
+next clip" is Phase 3b described as a Director capability. Two ways to build it:
+
+- **App-orchestrated** — main renders, extracts, feeds the next clip and tracks staleness; the
+  Director gets one tool, `render_section`. Manual users get chaining too.
+- **Director-orchestrated** — the Director gets primitives (read the last frame, set a scene's
+  reference, generate, poll) and sequences them itself. Less code, more AI-native, and the chain
+  becomes something the Director _decides_ rather than something the app _does_ — but a user working
+  by hand gets no chaining, and staleness still has to live somewhere.
+
+Under the direction in this document the second is the more honest answer. Decide it deliberately
+rather than defaulting to the first because the phase plan says so.
+
+**Phase 2's justification weakens.** Sections were justified as an _authoring_ structure — the level
+between a three-minute film and a six-second clip that a human needs in order to work. An autonomous
+Director does not need them: a flat list of thirty scenes is tractable for an agent, and grouping is
+a human comprehension aid. If the Director does the authoring, sections become a **review**
+convenience rather than infrastructure — a much weaker case for 60–80 days. Worth asking of the
+Section redesign: what do sections do for someone reviewing an agent's work, rather than for someone
+building it by hand?
+
+**Unchanged:** 3a is still needed — coherent output matters whoever drives. 1.5 shipped. Phase 4 may
+matter _more_, since "brief in, finished file out" is exactly its job.
+
+---
+
+## OpenRouter and BytePlus are not interchangeable
+
+Both reach Seedance. They are different adapters with different capabilities, and the difference
+decides what Level 2 costs.
+
+|                      | `openrouter-video-v1`                                    | `byteplus-seedance-v1`                                                  |
+| -------------------- | -------------------------------------------------------- | ----------------------------------------------------------------------- |
+| bound today          | **yes**                                                  | no                                                                      |
+| last frame returned  | **no** — the adapter has no `last_frame` handling at all | **yes** — reads `content.last_frame_url`, emits it as a `poster` output |
+| last frame persisted | n/a                                                      | durably, via `persistProviderPosterFromUrlForJob` into `thumbnails`     |
+| model identifier     | `bytedance/seedance-2.0`                                 | `dreamina-seedance-2-0-260128` (also two 1.x models)                    |
+| base URL             | OpenRouter's                                             | must equal `https://ark.ap-southeast.bytepluses.com/api/v3` exactly     |
+| duration bounds      | from route constraints                                   | per-model spec: 2–12s, 4–12s, and 4–15s                                 |
+| what it sends        | one image, `frame_type: 'first_frame'`                   | one image, `role: 'first_frame'`                                        |
+
+**The consequence that matters: Level 2's chaining input is free on BytePlus and absent on
+OpenRouter.** The hardest part of 3b — getting the last frame — is already implemented, already
+persisted, and already tested on one adapter and simply not present on the other. Binding through
+BytePlus is a configuration change, not engineering: the adapter is 404 lines with
+`validateConnection`, `submit` and `poll`, it is registered in the registry, it is a first-class
+integration in the service catalogue, and it is covered by existing tests.
+
+**And a symmetry worth noting: neither adapter sends multi-reference today.** Both push exactly one
+image in a first-frame role. Seedance 2.0's nine-reference mode is not reachable through either
+without adapter work, so the "maybe the still stage is unnecessary" question is open on _both_ paths,
+not just one.
+
+Two things to check before treating the BytePlus route as ready: the model must be one of the three
+names in `BYTEPLUS_SEEDANCE_MODELS` — note `dreamina-seedance-2-0-260128` bears no resemblance to
+OpenRouter's `bytedance/seedance-2.0` — and BytePlus is a separate vendor account, which is
+procurement rather than engineering.
