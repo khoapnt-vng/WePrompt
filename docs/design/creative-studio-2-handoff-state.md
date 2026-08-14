@@ -17,11 +17,11 @@ This file does not pin a tip SHA on purpose: the first version of it named one a
 twenty minutes. Run `git log --oneline -1` and `git status` — those are always true, and this file
 never will be.
 
-The last recorded full gate predates S1.5: **641 test files / 8,639 tests passed, 19 skipped**; tsc,
-lint, format and `check-i18n` were clean. Re-measure rather than trusting this historical number.
-S1.5's final review fix has run the focused Studio slice, not the full suite. Treat counts as the
-signal — durations on this machine inflate several-fold under concurrent sessions, and a slow run
-is not a failing one.
+The S1.5 delivery gate passed **641 test files, with 8,709 tests passed and 19 skipped**; tsc, lint,
+format and `check-i18n` were clean. The first full-suite attempt was not a product signal because the
+sandbox denied localhost listeners; the unrestricted rerun and the guarded push both passed. Treat
+counts as the signal — durations on this machine inflate several-fold under concurrent sessions,
+and a slow run is not a failing one.
 
 ### Shipped
 
@@ -35,15 +35,16 @@ record is `creative-studio-2-phase-1-gate.md`.
 given a heading that names the view; the single paid control moved to the top bar; the state readout
 added. See `creative-studio-2-s1-plan.md`.
 
-### In flight
-
-**S1.5 — the Engine Strip — is implemented locally through Task 9 and the final review fix.** New
+**S1.5 — the Engine Strip — is delivered through Task 9 and the final review fix.** New
 projects keep image and video choices explicit instead of adopting a sole route. The strip exposes
 those choices in Brief, Table and Board, and the paid review distinguishes integrations when two
 routes share a provider and model. The fake journey covers one image route and two same-model video
 routes with different integrations, but it has only passed Playwright compile/discovery via
-`--list`; no live journey was run. The focused Studio slice passed; the full suite was not run, the
-slice is not merged, and the final local commits remain unpushed pending the user.
+`--list`; no live journey was run. The focused Studio slice and full suite passed. S1.5 was committed
+directly on the long-lived `feat/creative-studio-2` integration branch, so delivery was a
+fast-forward of that branch rather than a separate slice merge commit.
+
+### In flight
 
 S2 — Table's dedicated Length and State columns — merged and pushed shortly after this file was
 first written. Its twelve locale files auto-merged with no conflict, because it was told to **only
