@@ -506,7 +506,7 @@ describe('ProducePhase', () => {
     expect(controller.jobs.submitScenes).not.toHaveBeenCalled();
   });
 
-  it('routes a blank-prompt shot to its Write visual field instead of offering generation', () => {
+  it('routes a blank-prompt shot to its Table visual field instead of offering generation', () => {
     const controller = createController();
     render(<ProducePhase controller={controller} />);
     const closing = screen.getByRole('listitem', {
@@ -522,7 +522,7 @@ describe('ProducePhase', () => {
 
     expect(controller.editor.selectScene).toHaveBeenCalledExactlyOnceWith('scene-2');
     expect(controller.requestTransition).toHaveBeenCalledExactlyOnceWith({
-      phase: 'write',
+      view: 'table',
       state: { writeFocus: { sceneId: 'scene-2', field: 'visualPrompt' } },
     });
   });
@@ -648,15 +648,5 @@ describe('ProducePhase', () => {
     });
     expect(within(activity).getByText('Opening shot')).toBeVisible();
     expect(within(activity).getByText('Closing shot')).toBeVisible();
-  });
-
-  it('does not duplicate the shell-owned Review cut action inside Produce', () => {
-    const controller = createController();
-    render(<ProducePhase controller={controller} />);
-
-    expect(
-      screen.queryByRole('button', { name: 'conversation.creativeStudio.phase.produce.reviewCut' })
-    ).not.toBeInTheDocument();
-    expect(controller.requestTransition).not.toHaveBeenCalled();
   });
 });

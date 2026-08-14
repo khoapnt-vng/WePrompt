@@ -941,17 +941,16 @@
     },
     "phase": {
       "nav": {
-        "label": "Fluxo criativo",
-        "brief": "Briefing",
-        "write": "Escrever",
-        "produce": "Produzir",
-        "review": "Revisar",
+        "viewsLabel": "Visualizações do projeto",
+        "table": "Tabela",
+        "board": "Quadro",
+        "cut": "Corte",
         "saved": "Salvo",
         "saving": "Salvando alterações..."
       },
       "shared": {
         "backToLibrary": "Voltar à biblioteca de projetos",
-        "noMediaGeneration": "Esta etapa não gera imagens nem vídeos.",
+        "noMediaGeneration": "Aqui não são geradas imagens nem vídeos.",
         "renameProject": "Renomear projeto",
         "invalidProjectName": "Informe um nome de projeto.",
         "activityLabel": "Atividade do projeto",
@@ -964,19 +963,17 @@
       },
       "brief": {
         "title": "Briefing",
-        "description": "Defina o objetivo, o formato e a duração do projeto antes de escrever.",
+        "description": "O objetivo, o formato e a duração do projeto. Novos planos herdam esses valores.",
         "nameLabel": "Nome do projeto",
         "intentLabel": "Intenção criativa",
         "durationLabel": "Duração desejada",
         "aspectRatioLabel": "Proporção",
-        "startWriting": "Começar a escrever",
         "invalidName": "Informe um nome de projeto antes de continuar.",
         "aspectLocked": "A proporção está bloqueada",
         "aspectLockedHelp": "A proporção não pode ser alterada depois que uma mídia gerada for adicionada."
       },
       "write": {
-        "title": "Escrever",
-        "continueToProduce": "Continuar",
+        "title": "Tabela",
         "addShot": "Adicionar tomada",
         "noScenes": "Adicione uma tomada ou crie um rascunho do storyboard para começar.",
         "scriptTableTitle": "Roteiro",
@@ -1011,7 +1008,6 @@
         "render": "Renderizar",
         "renderAnother": "Renderizar novamente",
         "openPreview": "Abrir prévia de {{title}}",
-        "reviewCut": "Continuar",
         "modelsTitle": "Modelos",
         "activityTitle": "Atividade de geração",
         "activityEmpty": "Nenhum trabalho de geração está em execução.",
@@ -1021,7 +1017,7 @@
         "jobsRunning_other": "{{count}} trabalhos de geração em execução"
       },
       "review": {
-        "title": "Revisar",
+        "title": "Corte",
         "description": "Confira a mídia selecionada, preencha as cartelas ausentes e prepare a entrega.",
         "handoff": "Preparar entrega",
         "noAssets": "Nenhuma mídia selecionada está pronta para entrega.",
@@ -1037,7 +1033,7 @@
         "missingSlates_one": "{{count}} cartela ausente",
         "missingSlates_many": "{{count}} cartelas ausentes",
         "missingSlates_other": "{{count}} cartelas ausentes",
-        "openProduce": "Abrir Produzir",
+        "openProduce": "Abrir Quadro",
         "handoffDescription": "A entrega contém somente o manifesto do storyboard e as mídias selecionadas. As cartelas de revisão não são exportadas.",
         "partialHandoff": "Esta entrega é parcial porque algumas cenas não têm mídia selecionada.",
         "cut": {
@@ -1100,7 +1096,7 @@
           "busyReason": "Este projeto já está sendo renderizado. Aguarde a conclusão ou cancele na janela que iniciou a renderização.",
           "installFfmpeg": "Instalar FFmpeg",
           "tryAgain": "Tentar renderizar novamente",
-          "openProduce": "Ir para Produzir",
+          "openProduce": "Ir para o Quadro",
           "missingScenes": "{{count}} cenas não têm tomada e não aparecerão no vídeo.",
           "missingScenes_one": "{{count}} cena não tem tomada e não aparecerá no vídeo.",
           "missingScenes_other": "{{count}} cenas não têm tomada e não aparecerão no vídeo.",

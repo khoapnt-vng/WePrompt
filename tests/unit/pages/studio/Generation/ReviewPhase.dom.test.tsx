@@ -1244,7 +1244,7 @@ describe('Review phase cut', () => {
     expect(actions).toHaveLength(1);
     expect(actions[0]).toHaveAccessibleName('conversation.creativeStudio.phase.review.render.openProduce');
     fireEvent.click(actions[0]!);
-    expect(reviewController.requestTransition).toHaveBeenCalledExactlyOnceWith({ phase: 'produce' });
+    expect(reviewController.requestTransition).toHaveBeenCalledExactlyOnceWith({ view: 'board' });
   });
 
   it.each([

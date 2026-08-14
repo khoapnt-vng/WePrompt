@@ -6,11 +6,12 @@
 
 import { ipcBridge } from '@/common';
 import { CREATIVE_STUDIO_ENABLED } from '@/common/config/constants';
-import type {
-  StudioCommandErrorCode,
-  StudioCommandResult,
-  StudioRenderErrorCode,
-  StudioUpdateModelSelectionRequest,
+import {
+  STUDIO_VIEWS,
+  type StudioCommandErrorCode,
+  type StudioCommandResult,
+  type StudioRenderErrorCode,
+  type StudioUpdateModelSelectionRequest,
 } from '@/common/types/project/creativeStudioTypes';
 import {
   CreativeStudioServiceError,
@@ -136,7 +137,23 @@ export type CreativeStudioCloseHandshake = {
 };
 
 const CLOSE_QUERY_TIMEOUT_MS = 3_000;
-const STUDIO_ROUTE_PATTERN = /^\/studio\/[^/?#]+(?:\/(?:brief|write|produce|review))?\/?$/;
+/**
+ * Built from the shared `STUDIO_VIEWS`, never from a hand-written alternation.
+ *
+ * This pattern gates the unsaved-scene-draft preflight: a Studio document parked on a segment it
+ * does not match closes with no prompt and loses the drafts. Deriving it means a new view is
+ * covered the moment it joins the shared list, which is the whole reason the vocabulary is shared
+ * rather than copied here.
+ *
+ * The retired `write|produce|review` segments are absent by construction and must stay absent —
+ * the renderer redirects an unknown segment to a real view on its first render, so no document
+ * stays on one long enough to hold work. (`brief` is not retired: it survived the rail as a view.)
+ *
+ * The values are plain lowercase words with no regex metacharacters, so they are interpolated as
+ * written rather than escaped; `creativeStudioBridge.test.ts` asserts that shape, so a view named
+ * with anything else fails there instead of silently widening this pattern.
+ */
+const STUDIO_ROUTE_PATTERN = new RegExp(`^/studio/[^/?#]+(?:/(?:${STUDIO_VIEWS.join('|')}))?/?$`);
 
 const isCreativeStudioRendererUrl = (rawUrl: string): boolean => {
   try {

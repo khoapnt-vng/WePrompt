@@ -769,17 +769,16 @@
     },
     "phase": {
       "nav": {
-        "label": "Creative workflow",
-        "brief": "Brief",
-        "write": "Write",
-        "produce": "Produce",
-        "review": "Review",
+        "viewsLabel": "Project views",
+        "table": "Table",
+        "board": "Board",
+        "cut": "Cut",
         "saved": "Saved",
         "saving": "Saving changes..."
       },
       "shared": {
         "backToLibrary": "Back to project library",
-        "noMediaGeneration": "This step does not generate images or video.",
+        "noMediaGeneration": "Nothing here generates images or video.",
         "renameProject": "Rename project",
         "invalidProjectName": "Enter a project name.",
         "activityLabel": "Project activity",
@@ -791,19 +790,17 @@
       },
       "brief": {
         "title": "Brief",
-        "description": "Define the project goal, format, and timing before writing.",
+        "description": "The project goal, format and timing. New shots inherit from it.",
         "nameLabel": "Project name",
         "intentLabel": "Creative intent",
         "durationLabel": "Target duration",
         "aspectRatioLabel": "Aspect ratio",
-        "startWriting": "Start writing",
         "invalidName": "Enter a project name before continuing.",
         "aspectLocked": "Aspect ratio is locked",
         "aspectLockedHelp": "The aspect ratio cannot change after generated media has been added."
       },
       "write": {
-        "title": "Write",
-        "continueToProduce": "Continue",
+        "title": "Table",
         "addShot": "Add shot",
         "noScenes": "Add a shot or draft a storyboard to begin.",
         "scriptTableTitle": "Script",
@@ -838,7 +835,6 @@
         "render": "Render",
         "renderAnother": "Render another",
         "openPreview": "Open {{title}} preview",
-        "reviewCut": "Continue",
         "modelsTitle": "Models",
         "activityTitle": "Generation activity",
         "activityEmpty": "No generation jobs are running.",
@@ -847,7 +843,7 @@
         "jobsRunning_other": "{{count}} generation jobs running"
       },
       "review": {
-        "title": "Review",
+        "title": "Cut",
         "description": "Check selected media, fill missing slates, and prepare the handoff.",
         "handoff": "Prepare handoff",
         "noAssets": "No selected media is ready for handoff.",
@@ -861,7 +857,7 @@
         "missingSlates": "{{count}} missing slates",
         "missingSlates_one": "{{count}} missing slate",
         "missingSlates_other": "{{count}} missing slates",
-        "openProduce": "Open Produce",
+        "openProduce": "Open Board",
         "handoffDescription": "The handoff contains the storyboard manifest and selected media only. Review slates are not exported.",
         "partialHandoff": "This handoff is partial because some scenes have no selected media.",
         "cut": {
@@ -924,7 +920,7 @@
           "busyReason": "A render is already running for this project. Wait for it to finish or cancel it from the window that started it.",
           "installFfmpeg": "Install FFmpeg",
           "tryAgain": "Try render again",
-          "openProduce": "Go to Produce",
+          "openProduce": "Go to Board",
           "missingScenes": "{{count}} scenes have no take and will not be in the video.",
           "missingScenes_one": "{{count}} scene has no take and will not be in the video.",
           "missingScenes_other": "{{count}} scenes have no take and will not be in the video.",

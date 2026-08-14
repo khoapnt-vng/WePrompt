@@ -933,17 +933,16 @@
     },
     "phase": {
       "nav": {
-        "label": "創作流程",
-        "brief": "簡報",
-        "write": "編寫",
-        "produce": "製作",
-        "review": "檢視",
+        "viewsLabel": "專案檢視",
+        "table": "表格",
+        "board": "看板",
+        "cut": "剪輯",
         "saved": "已儲存",
         "saving": "正在儲存變更..."
       },
       "shared": {
         "backToLibrary": "返回專案庫",
-        "noMediaGeneration": "此步驟不會產生圖片或影片。",
+        "noMediaGeneration": "這裡不會產生圖片或影片。",
         "renameProject": "重新命名專案",
         "invalidProjectName": "請輸入專案名稱。",
         "activityLabel": "專案活動",
@@ -954,19 +953,17 @@
       },
       "brief": {
         "title": "簡報",
-        "description": "在編寫前先確認專案目標、格式與時長。",
+        "description": "專案的目標、畫面比例與時長。新鏡頭會沿用這些設定。",
         "nameLabel": "專案名稱",
         "intentLabel": "創作意圖",
         "durationLabel": "目標時長",
         "aspectRatioLabel": "長寬比",
-        "startWriting": "開始編寫",
         "invalidName": "請先輸入專案名稱再繼續。",
         "aspectLocked": "長寬比已鎖定",
         "aspectLockedHelp": "加入產生的媒體後，無法變更長寬比。"
       },
       "write": {
-        "title": "編寫",
-        "continueToProduce": "繼續",
+        "title": "表格",
         "addShot": "新增鏡頭",
         "noScenes": "新增鏡頭或起草分鏡即可開始。",
         "scriptTableTitle": "腳本",
@@ -1001,7 +998,6 @@
         "render": "算繪",
         "renderAnother": "再次算繪",
         "openPreview": "開啟「{{title}}」預覽",
-        "reviewCut": "繼續",
         "modelsTitle": "模型",
         "activityTitle": "產生活動",
         "activityEmpty": "目前沒有執行中的產生工作。",
@@ -1009,7 +1005,7 @@
         "jobsRunning_other": "有 {{count}} 個產生工作正在執行"
       },
       "review": {
-        "title": "檢視",
+        "title": "剪輯",
         "description": "檢查已選媒體、補齊缺少的場記卡，並準備交付。",
         "handoff": "準備交付",
         "noAssets": "沒有可供交付的已選媒體。",
@@ -1021,7 +1017,7 @@
         "renderedShots_other": "{{count}} 個已算繪鏡頭",
         "missingSlates": "缺少 {{count}} 個場記卡",
         "missingSlates_other": "缺少 {{count}} 個場記卡",
-        "openProduce": "開啟製作",
+        "openProduce": "開啟看板",
         "handoffDescription": "交付內容僅包含分鏡資訊清單與已選媒體。檢視用場記卡不會匯出。",
         "partialHandoff": "部分場景沒有已選媒體，因此此次交付不完整。",
         "cut": {
@@ -1084,7 +1080,7 @@
           "busyReason": "此專案已有算繪工作在執行。請等待完成，或在啟動算繪的視窗中取消。",
           "installFfmpeg": "安裝 FFmpeg",
           "tryAgain": "重試算繪",
-          "openProduce": "前往生成",
+          "openProduce": "前往看板",
           "missingScenes": "{{count}} 個場景沒有鏡頭，不會出現在影片中。",
           "missingScenes_one": "{{count}} 個場景沒有鏡頭，不會出現在影片中。",
           "missingScenes_other": "{{count}} 個場景沒有鏡頭，不會出現在影片中。",

@@ -1,0 +1,97 @@
+.body {
+  composes: body from '../../../StudioTypography.module.css';
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.close {
+  align-self: flex-end;
+}
+
+.intro {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.intro p {
+  margin: 0;
+}
+
+.introCopy,
+.secondaryCopy {
+  composes: body from '../../../StudioTypography.module.css';
+}
+
+.content,
+.briefField,
+.constraint {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.content {
+  gap: 16px;
+}
+
+.briefField {
+  gap: 6px;
+}
+
+.constraintsRow {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px 16px;
+}
+
+.constraint {
+  gap: 4px;
+}
+
+.constraintLabel {
+  composes: meta from '../../../StudioTypography.module.css';
+}
+
+.durationControl {
+  width: 112px;
+}
+
+.aspectControl {
+  width: 152px;
+}
+
+.fieldError {
+  color: var(--color-danger-6);
+  font-size: 12px;
+}
+
+.lockHelp {
+  composes: body from '../../../StudioTypography.module.css';
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lockHelp strong {
+  color: var(--color-text-2);
+}
+
+.saveError {
+  border: 1px solid var(--color-danger-3);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--color-danger-6);
+  background: var(--color-danger-light-1);
+  font-size: 13px;
+}
+
+.conflictActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

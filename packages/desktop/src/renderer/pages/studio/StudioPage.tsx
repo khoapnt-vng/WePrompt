@@ -46,6 +46,7 @@ import {
   type GenerationReviewRouteSnapshot,
   type GenerationSingleReviewRequest,
   StoryboardDraftModal,
+  StudioBriefDrawer,
   StudioExportModal,
   StudioLibrary,
   StudioPhaseShell,
@@ -65,12 +66,12 @@ import { StudioShell } from './components/Shell/StudioShell';
 import { useStoryboardEditor, useStudioJobs, useStudioModels, useStudioProject, useStudioRender } from './hooks';
 import styles from './StudioPage.module.css';
 import {
-  parseStudioPhase,
-  rememberStudioPhase,
-  resolveStudioEntryPhase,
-  studioPhasePath,
-  type StudioPhase,
-  type StudioPhaseTransition,
+  parseStudioView,
+  rememberStudioView,
+  resolveStudioEntryView,
+  studioViewPath,
+  type StudioView,
+  type StudioViewTransition,
   type StudioWriteFocusIntent,
 } from './studioPhaseRoute';
 import { canOpenSingleSceneReview, deriveStudioReadiness } from './studioReadiness';
@@ -279,6 +280,11 @@ const parseWriteFocusIntent = (state: unknown): StudioWriteFocusIntent | null =>
     : null;
 };
 
+const parseBriefOpenIntent = (state: unknown): boolean =>
+  typeof state === 'object' && state !== null && Object.hasOwn(state, 'openBrief')
+    ? (state as { openBrief?: unknown }).openBrief === true
+    : false;
+
 /**
  * The generation review, plus the one thing it needs from the Director conversation.
  *
@@ -306,7 +312,7 @@ const StudioGenerationReview: React.FC<
   return <GenerationReviewModal {...modalProps} onAskDirector={reports.length === 0 ? undefined : askDirector} />;
 };
 
-const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ routePhase }) => {
+const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeView }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
@@ -328,21 +334,21 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
     reconcileOnSubscribe: true,
   });
   const project = newestProject(studioJobs.project, editor.project, loadedProject);
-  // Project scope, not phase scope: a cut render outlives the Review view that starts it, and
+  // Project scope, not view scope: a cut render outlives the Cut view that starts it, and
   // must stay observable while the user works elsewhere in the document. Keyed on the route id
   // rather than the loaded project so the stream is not re-subscribed once the project arrives.
   const studioRender = useStudioRender(routeProjectId);
 
   useEffect(() => {
     if (project === null) return;
-    if (routePhase !== null) {
-      rememberStudioPhase(project.id, routePhase);
+    if (routeView !== null) {
+      rememberStudioView(project.id, routeView);
       return;
     }
-    navigate(studioPhasePath(project.id, resolveStudioEntryPhase(project.id, project.sceneOrder.length)), {
+    navigate(studioViewPath(project.id, resolveStudioEntryView(project.id)), {
       replace: true,
     });
-  }, [navigate, project, routePhase]);
+  }, [navigate, project, routeView]);
   const studioModels = useStudioModels({
     project,
     refetch,
@@ -362,6 +368,7 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
       !editor.hasUnsavedSceneDrafts,
   });
   const [draftModalVisible, setDraftModalVisible] = useState(false);
+  const [briefOpen, setBriefOpen] = useState(() => parseBriefOpenIntent(location.state));
   const [rulesOpen, setRulesOpen] = useState(false);
   const [rulesPending, setRulesPending] = useState(false);
   const [rulesErrorMessageKey, setRulesErrorMessageKey] = useState<string | null>(null);
@@ -405,10 +412,10 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
   const [exportIssueMessageKey, setExportIssueMessageKey] = useState<string | null>(null);
   const [exportLatestRender, setExportLatestRender] = useState<StudioLatestRender | null>(null);
   const [exportLatestRenderReady, setExportLatestRenderReady] = useState(false);
-  const [pendingTransition, setPendingTransition] = useState<StudioPhaseTransition | null>(null);
+  const [pendingTransition, setPendingTransition] = useState<StudioViewTransition | null>(null);
   const [transitionReady, setTransitionReady] = useState(false);
   const [transitionIssueMessageKey, setTransitionIssueMessageKey] = useState<string | null>(null);
-  const [postModalTransition, setPostModalTransition] = useState<StudioPhaseTransition | null>(null);
+  const [postModalTransition, setPostModalTransition] = useState<StudioViewTransition | null>(null);
   const generationReviewRefreshingRef = useRef(false);
   const suppressedReferenceRequestIdsRef = useRef(new Set<string>());
   const notifiedExcludedReferenceRequestsRef = useRef<string | null>(null);
@@ -428,12 +435,17 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
   const autoSubmittedReferenceRequestIdsRef = useRef(new Set<string>());
   const variationPendingRef = useRef(false);
   const referenceImportSceneIdRef = useRef<string | null>(null);
-  const pendingTransitionRef = useRef<StudioPhaseTransition | null>(null);
+  const pendingTransitionRef = useRef<StudioViewTransition | null>(null);
   const editorRef = useRef(editor);
   const canonicalProjectRef = useRef<StudioRendererProject | null>(project);
   canonicalProjectRef.current = project;
   editorRef.current = editor;
   const writeFocusIntent = useMemo(() => parseWriteFocusIntent(location.state), [location.state]);
+
+  useEffect(() => {
+    if (!parseBriefOpenIntent(location.state)) return;
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.pathname, location.state, navigate]);
   const draftConflict = editor.conflict?.operation === 'draft_storyboard' ? editor.conflict : null;
   const draftErrorMessageKey =
     editor.error?.operation === 'draft_storyboard'
@@ -1086,7 +1098,7 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
   }, [exportBlocked, project, readiness?.selectedAssetCount]);
 
   /**
-   * Lands focus on the advisory that explains a refused phase transition.
+   * Lands focus on the advisory that explains a refused view transition.
    *
    * Scoped to the work panel, not the document: the Director pane renders before it and has
    * `role="alert"` spans of its own — an over-length composer, a conversation that could not be
@@ -1105,12 +1117,12 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
   }, []);
 
   const requestTransition = useCallback(
-    (transition: StudioPhaseTransition): void => {
+    (transition: StudioViewTransition): void => {
       if (
         project === null ||
         transitionBlocked ||
         pendingTransitionRef.current !== null ||
-        (transition.phase === routePhase && transition.state === undefined)
+        (transition.view === routeView && transition.state === undefined)
       ) {
         return;
       }
@@ -1149,14 +1161,14 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
         focusRecoveryAlert();
       })();
     },
-    [focusRecoveryAlert, project, routePhase, transitionBlocked]
+    [focusRecoveryAlert, project, routeView, transitionBlocked]
   );
 
   useEffect(() => {
     if (project === null || pendingTransition === null || !transitionReady) return;
     const transition = pendingTransition;
-    rememberStudioPhase(project.id, transition.phase);
-    navigate(studioPhasePath(project.id, transition.phase), {
+    rememberStudioView(project.id, transition.view);
+    navigate(studioViewPath(project.id, transition.view), {
       state: transition.state ?? null,
     });
     pendingTransitionRef.current = null;
@@ -1175,7 +1187,7 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
 
   const closeExportAndOpenProduce = useCallback((): void => {
     if (exportPending) return;
-    setPostModalTransition({ phase: 'produce' });
+    setPostModalTransition({ view: 'board' });
     setExportVisible(false);
     setExportIncludeReferences(false);
     setExportedFolderName(null);
@@ -1277,7 +1289,7 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
 
   if (readiness === null) return null;
 
-  const activePhase = routePhase ?? resolveStudioEntryPhase(project.id, project.sceneOrder.length);
+  const activeView = routeView ?? resolveStudioEntryView(project.id);
   const projectUpdateIssue =
     editor.conflict?.operation === 'update_project'
       ? editor.conflict.messageKey
@@ -1289,17 +1301,17 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
     errorMessageKey ??
     variationIssueMessageKey ??
     referenceImportIssue?.messageKey ??
-    (activePhase === 'brief' ? null : projectUpdateIssue);
+    (briefOpen ? null : projectUpdateIssue);
   const advisory: StudioPhaseControllers['advisory'] =
     shellIssueMessageKey !== null
       ? { messageKey: shellIssueMessageKey, anchor: 'shell' }
-      : // Review-time concern with no Write-phase render site since the pacing bar was
+      : // Cut-time concern with no Table render site since the pacing bar was
         // removed, so it rides the shell advisory slot instead of vanishing silently.
-        activePhase === 'write' && readiness.durationDeltaSeconds !== 0
+        activeView === 'table' && readiness.durationDeltaSeconds !== 0
         ? { messageKey: 'conversation.creativeStudio.review.durationMismatch', anchor: 'shell' }
-        : activePhase === 'produce' && readiness.readySceneIds.length === 0
+        : activeView === 'board' && readiness.readySceneIds.length === 0
           ? { messageKey: 'conversation.creativeStudio.review.noReadyScenes', anchor: 'batch' }
-          : activePhase === 'produce' && readiness.durationDeltaSeconds !== 0
+          : activeView === 'board' && readiness.durationDeltaSeconds !== 0
             ? { messageKey: 'conversation.creativeStudio.review.durationMismatch', anchor: 'batch' }
             : null;
   const controller: StudioPhaseControllers = {
@@ -1318,6 +1330,7 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
     mutationPending:
       canonicalMutationPending || referenceImportSceneId !== null || generationReviewRefreshing || exportPending,
     requestTransition,
+    openBrief: () => setBriefOpen(true),
     openRules: () => setRulesOpen(true),
     acceptProposal: (request) => ipcBridge.creativeStudio.acceptProposal.invoke(request),
     rejectProposal: (request) => ipcBridge.creativeStudio.rejectProposal.invoke(request),
@@ -1380,7 +1393,7 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
       <BriefConversationProvider project={project}>
         <StudioShell director={<DirectorPane proposals={directorProposals} />} projectId={project.id}>
           <StudioPhaseShell
-            activePhase={activePhase}
+            activeView={activeView}
             controller={controller}
             navigationDisabled={transitionBlocked || pendingTransition !== null}
             notice={referenceAdvisory}
@@ -1453,6 +1466,7 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
         onRefreshCatalog={studioModels.refresh}
         onSelectStoryboardModel={(selection) => studioModels.updateSelection({ role: 'storyboard', selection })}
       />
+      <StudioBriefDrawer visible={briefOpen} controller={controller} onClose={() => setBriefOpen(false)} />
       {project !== null && (
         <StudioRulesDrawer
           visible={rulesOpen}
@@ -1523,15 +1537,15 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
 };
 
 const StudioPage: React.FC = () => {
-  const { id, phase } = useParams<{ id: string; phase?: string }>();
-  const routePhase = parseStudioPhase(phase);
+  const { id, view } = useParams<{ id: string; view?: string }>();
+  const routeView = parseStudioView(view);
 
   // The library is a document — it scrolls the page and sits inside its margins. A project is a
   // frame: it fills the viewport so the Director's composer stays on screen, and hands scrolling
   // to the work panel. One element serves both, so the frame is a modifier rather than the default.
   return (
     <main className={id ? `${styles.page} ${styles.pageProject}` : styles.page}>
-      {id ? <StudioProjectShell key={id} routePhase={routePhase} /> : <StudioLibrary />}
+      {id ? <StudioProjectShell key={id} routeView={routeView} /> : <StudioLibrary />}
     </main>
   );
 };

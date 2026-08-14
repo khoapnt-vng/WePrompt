@@ -935,17 +935,16 @@
     },
     "phase": {
       "nav": {
-        "label": "Kreativer Ablauf",
-        "brief": "Briefing",
-        "write": "Schreiben",
-        "produce": "Produzieren",
-        "review": "Prüfen",
+        "viewsLabel": "Projektansichten",
+        "table": "Tabelle",
+        "board": "Board",
+        "cut": "Schnitt",
         "saved": "Gespeichert",
         "saving": "Änderungen werden gespeichert..."
       },
       "shared": {
         "backToLibrary": "Zurück zur Projektbibliothek",
-        "noMediaGeneration": "In diesem Schritt werden keine Bilder oder Videos erzeugt.",
+        "noMediaGeneration": "Hier werden keine Bilder oder Videos erzeugt.",
         "renameProject": "Projekt umbenennen",
         "invalidProjectName": "Gib einen Projektnamen ein.",
         "activityLabel": "Projektaktivität",
@@ -957,19 +956,17 @@
       },
       "brief": {
         "title": "Briefing",
-        "description": "Lege vor dem Schreiben Projektziel, Format und Dauer fest.",
+        "description": "Projektziel, Format und Dauer. Neue Shots übernehmen diese Angaben.",
         "nameLabel": "Projektname",
         "intentLabel": "Kreative Absicht",
         "durationLabel": "Zieldauer",
         "aspectRatioLabel": "Seitenverhältnis",
-        "startWriting": "Mit dem Schreiben beginnen",
         "invalidName": "Gib vor dem Fortfahren einen Projektnamen ein.",
         "aspectLocked": "Seitenverhältnis ist gesperrt",
         "aspectLockedHelp": "Nach dem Hinzufügen erzeugter Medien kann das Seitenverhältnis nicht mehr geändert werden."
       },
       "write": {
-        "title": "Schreiben",
-        "continueToProduce": "Weiter",
+        "title": "Tabelle",
         "addShot": "Einstellung hinzufügen",
         "noScenes": "Füge eine Einstellung hinzu oder entwirf ein Storyboard, um zu beginnen.",
         "scriptTableTitle": "Drehbuch",
@@ -1004,7 +1001,6 @@
         "render": "Rendern",
         "renderAnother": "Erneut rendern",
         "openPreview": "Vorschau für {{title}} öffnen",
-        "reviewCut": "Weiter",
         "modelsTitle": "Modelle",
         "activityTitle": "Erzeugungsaktivität",
         "activityEmpty": "Es werden keine Erzeugungsaufträge ausgeführt.",
@@ -1013,7 +1009,7 @@
         "jobsRunning_other": "{{count}} Erzeugungsaufträge laufen"
       },
       "review": {
-        "title": "Prüfen",
+        "title": "Schnitt",
         "description": "Prüfe ausgewählte Medien, ergänze fehlende Platzhalter und bereite die Übergabe vor.",
         "handoff": "Übergabe vorbereiten",
         "noAssets": "Keine ausgewählten Medien sind für die Übergabe bereit.",
@@ -1027,7 +1023,7 @@
         "missingSlates": "{{count}} fehlende Platzhalter",
         "missingSlates_one": "{{count}} fehlender Platzhalter",
         "missingSlates_other": "{{count}} fehlende Platzhalter",
-        "openProduce": "Produzieren öffnen",
+        "openProduce": "Board öffnen",
         "handoffDescription": "Die Übergabe enthält nur das Storyboard-Manifest und ausgewählte Medien. Platzhalter aus der Prüfung werden nicht exportiert.",
         "partialHandoff": "Diese Übergabe ist unvollständig, weil einigen Einstellungen ein ausgewähltes Medium fehlt.",
         "cut": {
@@ -1090,7 +1086,7 @@
           "busyReason": "Dieses Projekt wird bereits gerendert. Warte auf den Abschluss oder brich den Vorgang im startenden Fenster ab.",
           "installFfmpeg": "FFmpeg installieren",
           "tryAgain": "Rendern erneut versuchen",
-          "openProduce": "Zu Produzieren",
+          "openProduce": "Zum Board",
           "missingScenes": "{{count}} Szenen haben keinen Take und erscheinen nicht im Video.",
           "missingScenes_one": "{{count}} Szene hat keinen Take und erscheint nicht im Video.",
           "missingScenes_other": "{{count}} Szenen haben keinen Take und erscheinen nicht im Video.",

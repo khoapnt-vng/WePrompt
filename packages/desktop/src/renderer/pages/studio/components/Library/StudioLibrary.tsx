@@ -18,7 +18,7 @@ import { useNavigate } from 'react-router-dom';
 import { Composer } from './Composer';
 import { ProjectCard } from './ProjectCard';
 import styles from './StudioLibrary.module.css';
-import { rememberStudioPhase, resolveStudioEntryPhase, studioPhasePath } from '../../studioPhaseRoute';
+import { rememberStudioView, resolveStudioEntryView, studioViewPath } from '../../studioPhaseRoute';
 
 const ACTIVE_JOB_STATUSES = new Set(['queued_local', 'submitting', 'queued_remote', 'running', 'needs_attention']);
 
@@ -84,8 +84,8 @@ export const StudioLibrary: React.FC = () => {
           setCreateErrorMessageKey(result.error.messageKey);
           return;
         }
-        rememberStudioPhase(result.data.id, 'brief');
-        navigate(studioPhasePath(result.data.id, 'brief'));
+        rememberStudioView(result.data.id, 'table');
+        navigate(studioViewPath(result.data.id, 'table'), { state: { openBrief: true } });
       } catch {
         setCreateErrorMessageKey('conversation.creativeStudio.errors.storage');
       } finally {
@@ -194,9 +194,7 @@ export const StudioLibrary: React.FC = () => {
                 project={project}
                 locale={i18n.resolvedLanguage ?? i18n.language}
                 disabled={mutationBusy || deleteCandidate !== null}
-                onOpen={() =>
-                  navigate(studioPhasePath(project.id, resolveStudioEntryPhase(project.id, project.sceneCount)))
-                }
+                onOpen={() => navigate(studioViewPath(project.id, resolveStudioEntryView(project.id)))}
                 onDelete={() => void prepareDelete(project)}
               />
             ))}

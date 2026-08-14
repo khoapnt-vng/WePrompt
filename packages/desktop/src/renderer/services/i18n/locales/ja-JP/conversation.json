@@ -933,17 +933,16 @@
     },
     "phase": {
       "nav": {
-        "label": "制作ワークフロー",
-        "brief": "概要",
-        "write": "構成",
-        "produce": "生成",
-        "review": "確認",
+        "viewsLabel": "プロジェクトビュー",
+        "table": "テーブル",
+        "board": "ボード",
+        "cut": "カット",
         "saved": "保存済み",
         "saving": "変更を保存しています..."
       },
       "shared": {
         "backToLibrary": "プロジェクト一覧に戻る",
-        "noMediaGeneration": "この手順では画像や動画は生成されません。",
+        "noMediaGeneration": "ここでは画像や動画は生成されません。",
         "renameProject": "プロジェクト名を変更",
         "invalidProjectName": "プロジェクト名を入力してください。",
         "activityLabel": "プロジェクトの状況",
@@ -954,19 +953,17 @@
       },
       "brief": {
         "title": "概要",
-        "description": "構成を始める前に、プロジェクトの目的、形式、尺を決めます。",
+        "description": "プロジェクトの目的、形式、尺。新しいショットはこれを引き継ぎます。",
         "nameLabel": "プロジェクト名",
         "intentLabel": "制作意図",
         "durationLabel": "目標尺",
         "aspectRatioLabel": "アスペクト比",
-        "startWriting": "構成を始める",
         "invalidName": "続行する前にプロジェクト名を入力してください。",
         "aspectLocked": "アスペクト比は固定されています",
         "aspectLockedHelp": "生成済みメディアを追加した後はアスペクト比を変更できません。"
       },
       "write": {
-        "title": "構成",
-        "continueToProduce": "続行",
+        "title": "テーブル",
         "addShot": "ショットを追加",
         "noScenes": "ショットを追加するか、ストーリーボードを下書きして開始します。",
         "scriptTableTitle": "台本",
@@ -1001,7 +998,6 @@
         "render": "レンダリング",
         "renderAnother": "もう一度レンダリング",
         "openPreview": "{{title}} のプレビューを開く",
-        "reviewCut": "続行",
         "modelsTitle": "モデル",
         "activityTitle": "生成状況",
         "activityEmpty": "実行中の生成ジョブはありません。",
@@ -1009,7 +1005,7 @@
         "jobsRunning_other": "{{count}} 件の生成ジョブが実行中"
       },
       "review": {
-        "title": "確認",
+        "title": "カット",
         "description": "選択したメディアを確認し、不足するスレートを補って引き渡しを準備します。",
         "handoff": "引き渡しを準備",
         "noAssets": "引き渡せる選択済みメディアがありません。",
@@ -1021,7 +1017,7 @@
         "renderedShots_other": "レンダリング済みショット {{count}} 件",
         "missingSlates": "不足しているスレート {{count}} 件",
         "missingSlates_other": "不足しているスレート {{count}} 件",
-        "openProduce": "生成を開く",
+        "openProduce": "ボードを開く",
         "handoffDescription": "引き渡しに含まれるのは、ストーリーボードのマニフェストと選択したメディアのみです。確認用スレートは書き出されません。",
         "partialHandoff": "選択したメディアがないシーンがあるため、この引き渡しは一部のみです。",
         "cut": {
@@ -1084,7 +1080,7 @@
           "busyReason": "このプロジェクトはすでにレンダリング中です。完了を待つか、開始したウィンドウからキャンセルしてください。",
           "installFfmpeg": "FFmpeg をインストール",
           "tryAgain": "レンダリングを再試行",
-          "openProduce": "生成へ移動",
+          "openProduce": "ボードへ移動",
           "missingScenes": "テイクのないシーンが{{count}}件あり、動画には含まれません。",
           "missingScenes_one": "テイクのないシーンが{{count}}件あり、動画には含まれません。",
           "missingScenes_other": "テイクのないシーンが{{count}}件あり、動画には含まれません。",

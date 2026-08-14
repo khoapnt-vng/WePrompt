@@ -933,17 +933,16 @@
     },
     "phase": {
       "nav": {
-        "label": "제작 워크플로",
-        "brief": "기획",
-        "write": "작성",
-        "produce": "제작",
-        "review": "검토",
+        "viewsLabel": "프로젝트 보기",
+        "table": "테이블",
+        "board": "보드",
+        "cut": "컷",
         "saved": "저장됨",
         "saving": "변경 사항 저장 중..."
       },
       "shared": {
         "backToLibrary": "프로젝트 라이브러리로 돌아가기",
-        "noMediaGeneration": "이 단계에서는 이미지나 동영상을 생성하지 않습니다.",
+        "noMediaGeneration": "여기서는 이미지나 영상이 생성되지 않습니다.",
         "renameProject": "프로젝트 이름 바꾸기",
         "invalidProjectName": "프로젝트 이름을 입력하세요.",
         "activityLabel": "프로젝트 활동",
@@ -954,19 +953,17 @@
       },
       "brief": {
         "title": "기획",
-        "description": "작성을 시작하기 전에 프로젝트 목표, 형식, 길이를 정하세요.",
+        "description": "프로젝트의 목표, 형식, 길이. 새 샷이 이를 물려받습니다.",
         "nameLabel": "프로젝트 이름",
         "intentLabel": "제작 의도",
         "durationLabel": "목표 길이",
         "aspectRatioLabel": "화면 비율",
-        "startWriting": "작성 시작",
         "invalidName": "계속하기 전에 프로젝트 이름을 입력하세요.",
         "aspectLocked": "화면 비율이 잠겼습니다",
         "aspectLockedHelp": "생성된 미디어를 추가한 후에는 화면 비율을 변경할 수 없습니다."
       },
       "write": {
-        "title": "작성",
-        "continueToProduce": "계속",
+        "title": "테이블",
         "addShot": "숏 추가",
         "noScenes": "숏을 추가하거나 스토리보드 초안을 만들어 시작하세요.",
         "scriptTableTitle": "대본",
@@ -1001,7 +998,6 @@
         "render": "렌더링",
         "renderAnother": "다시 렌더링",
         "openPreview": "{{title}} 미리보기 열기",
-        "reviewCut": "계속",
         "modelsTitle": "모델",
         "activityTitle": "생성 활동",
         "activityEmpty": "실행 중인 생성 작업이 없습니다.",
@@ -1009,7 +1005,7 @@
         "jobsRunning_other": "생성 작업 {{count}}개 실행 중"
       },
       "review": {
-        "title": "검토",
+        "title": "컷",
         "description": "선택한 미디어를 확인하고 빠진 슬레이트를 채운 뒤 전달을 준비하세요.",
         "handoff": "전달 준비",
         "noAssets": "전달할 수 있는 선택된 미디어가 없습니다.",
@@ -1021,7 +1017,7 @@
         "renderedShots_other": "렌더링된 숏 {{count}}개",
         "missingSlates": "누락된 슬레이트 {{count}}개",
         "missingSlates_other": "누락된 슬레이트 {{count}}개",
-        "openProduce": "제작 열기",
+        "openProduce": "보드 열기",
         "handoffDescription": "전달에는 스토리보드 매니페스트와 선택된 미디어만 포함됩니다. 검토용 슬레이트는 내보내지지 않습니다.",
         "partialHandoff": "일부 장면에 선택된 미디어가 없어 이번 전달은 일부만 포함합니다.",
         "cut": {
@@ -1084,7 +1080,7 @@
           "busyReason": "이 프로젝트는 이미 렌더링 중입니다. 완료될 때까지 기다리거나 렌더링을 시작한 창에서 취소하세요.",
           "installFfmpeg": "FFmpeg 설치",
           "tryAgain": "렌더링 다시 시도",
-          "openProduce": "생성으로 이동",
+          "openProduce": "보드로 이동",
           "missingScenes": "테이크가 없는 장면 {{count}}개는 동영상에 포함되지 않습니다.",
           "missingScenes_one": "테이크가 없는 장면 {{count}}개는 동영상에 포함되지 않습니다.",
           "missingScenes_other": "테이크가 없는 장면 {{count}}개는 동영상에 포함되지 않습니다.",

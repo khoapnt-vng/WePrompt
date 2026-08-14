@@ -933,17 +933,16 @@
     },
     "phase": {
       "nav": {
-        "label": "创作流程",
-        "brief": "简报",
-        "write": "编写",
-        "produce": "制作",
-        "review": "审阅",
+        "viewsLabel": "项目视图",
+        "table": "表格",
+        "board": "看板",
+        "cut": "剪辑",
         "saved": "已保存",
         "saving": "正在保存更改..."
       },
       "shared": {
         "backToLibrary": "返回项目库",
-        "noMediaGeneration": "此步骤不会生成图像或视频。",
+        "noMediaGeneration": "这里不会生成图片或视频。",
         "renameProject": "重命名项目",
         "invalidProjectName": "请输入项目名称。",
         "activityLabel": "项目活动",
@@ -954,19 +953,17 @@
       },
       "brief": {
         "title": "简报",
-        "description": "在编写之前明确项目目标、格式和时长。",
+        "description": "项目的目标、画幅与时长。新镜头会沿用这些设置。",
         "nameLabel": "项目名称",
         "intentLabel": "创作意图",
         "durationLabel": "目标时长",
         "aspectRatioLabel": "宽高比",
-        "startWriting": "开始编写",
         "invalidName": "请先输入项目名称再继续。",
         "aspectLocked": "宽高比已锁定",
         "aspectLockedHelp": "添加生成的媒体后，无法更改宽高比。"
       },
       "write": {
-        "title": "编写",
-        "continueToProduce": "继续",
+        "title": "表格",
         "addShot": "添加镜头",
         "noScenes": "添加镜头或起草故事板即可开始。",
         "scriptTableTitle": "脚本",
@@ -1001,7 +998,6 @@
         "render": "渲染",
         "renderAnother": "再次渲染",
         "openPreview": "打开“{{title}}”预览",
-        "reviewCut": "继续",
         "modelsTitle": "模型",
         "activityTitle": "生成活动",
         "activityEmpty": "当前没有正在运行的生成任务。",
@@ -1009,7 +1005,7 @@
         "jobsRunning_other": "有 {{count}} 个生成任务正在运行"
       },
       "review": {
-        "title": "审阅",
+        "title": "剪辑",
         "description": "检查已选媒体、补充缺失的场记卡，并准备交付。",
         "handoff": "准备交付",
         "noAssets": "没有可供交付的已选媒体。",
@@ -1021,7 +1017,7 @@
         "renderedShots_other": "{{count}} 个已渲染镜头",
         "missingSlates": "缺少 {{count}} 个场记卡",
         "missingSlates_other": "缺少 {{count}} 个场记卡",
-        "openProduce": "打开制作",
+        "openProduce": "打开看板",
         "handoffDescription": "交付内容仅包含故事板清单和已选媒体。审阅场记卡不会导出。",
         "partialHandoff": "部分场景没有已选媒体，因此此次交付不完整。",
         "cut": {
@@ -1084,7 +1080,7 @@
           "busyReason": "此项目已有渲染任务在运行。请等待完成，或在启动渲染的窗口中取消。",
           "installFfmpeg": "安装 FFmpeg",
           "tryAgain": "重试渲染",
-          "openProduce": "前往生成",
+          "openProduce": "前往看板",
           "missingScenes": "{{count}} 个场景没有镜头，不会出现在视频中。",
           "missingScenes_one": "{{count}} 个场景没有镜头，不会出现在视频中。",
           "missingScenes_other": "{{count}} 个场景没有镜头，不会出现在视频中。",

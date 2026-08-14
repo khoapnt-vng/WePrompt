@@ -18,6 +18,18 @@ export type {
   StudioRuleVerdict,
 } from './creativeStudioRules';
 
+/**
+ * The document's views, in switch order.
+ *
+ * Shared rather than renderer-private because the main process needs the same vocabulary: it
+ * matches the renderer's Studio URL against these segments to decide whether to run the
+ * unsaved-scene-draft preflight before closing the window. A second copy of this list would not
+ * just be a style problem — a view missing from main's copy closes with no prompt and loses the drafts.
+ */
+export const STUDIO_VIEWS = ['table', 'board', 'cut'] as const;
+
+export type StudioView = (typeof STUDIO_VIEWS)[number];
+
 export type StudioMediaKind = 'image' | 'video';
 
 export type StudioAspectRatio = '16:9' | '9:16' | '1:1' | '4:3' | '3:4';

@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+export * from './BriefDrawer';
 export { StudioPhaseHeader, type StudioPhaseHeaderProps } from './StudioPhaseHeader';
-export { StudioPhaseNav, type StudioPhaseNavProps } from './StudioPhaseNav';
 export { StudioPhaseShell, type StudioPhaseShellProps } from './StudioPhaseShell';
+export { StudioViewSwitch, type StudioViewSwitchProps } from './StudioViewSwitch';
 export type {
-  BriefPhaseController,
   ProducePhaseController,
   ReviewPhaseController,
   StudioPhaseControllers,

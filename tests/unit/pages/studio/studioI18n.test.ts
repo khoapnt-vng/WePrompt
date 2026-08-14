@@ -106,13 +106,12 @@ const rulesKeys = [
 ] as const;
 
 const phaseKeys = [
-  'phase.nav.label',
-  'phase.nav.brief',
-  'phase.nav.write',
-  'phase.nav.produce',
-  'phase.nav.review',
-  'phase.nav.saved',
-  'phase.nav.saving',
+  'phase.nav.viewsLabel',
+  'phase.nav.table',
+  'phase.nav.board',
+  'phase.nav.cut',
+  'phase.nav.saved', // StudioPhaseHeader save chip, not the view switch
+  'phase.nav.saving', // StudioPhaseHeader save chip, not the view switch
   'phase.shared.backToLibrary',
   'phase.shared.noMediaGeneration',
   'phase.shared.activityLabel',
@@ -125,12 +124,10 @@ const phaseKeys = [
   'phase.brief.intentLabel',
   'phase.brief.durationLabel',
   'phase.brief.aspectRatioLabel',
-  'phase.brief.startWriting',
   'phase.brief.invalidName',
   'phase.brief.aspectLocked',
   'phase.brief.aspectLockedHelp',
   'phase.write.title',
-  'phase.write.continueToProduce',
   'phase.write.addShot',
   'phase.write.noScenes',
   'phase.write.scriptTableTitle',
@@ -148,7 +145,6 @@ const phaseKeys = [
   'phase.write.placeholder.middle',
   'phase.write.placeholder.closing',
   'phase.write.needsTitle',
-  'phase.produce.reviewCut',
   'phase.produce.modelsTitle',
   'phase.produce.activityTitle',
   'phase.produce.activityEmpty',
@@ -396,7 +392,120 @@ const removedWriteAssistantKeys = [
   'phase.write.draftStoryboard',
 ] as const;
 
+/**
+ * Copy for the four-step Brief/Write/Produce/Review rail that the view switch replaced — both its
+ * labels and its two progression calls to action.
+ *
+ * `phase.nav.saved` and `phase.nav.saving` are not rail copy at all; they are the header's
+ * save chip, and a prefix-wide sweep of `phase.nav.*` would take them with it.
+ *
+ * `phase.write.continueToProduce` and `phase.produce.reviewCut` were the rail's step-forward
+ * buttons, which outlived the rail in the top bar. A switch has no next step — every destination is
+ * already visible — and both rendered the same word "Continue" while going to different places.
+ * `phase.review.handoff` is deliberately not here: it opens export, so it is an action on the
+ * document rather than progression through it.
+ */
+const removedPhaseRailKeys = [
+  'phase.nav.label',
+  'phase.nav.write',
+  'phase.nav.produce',
+  'phase.nav.review',
+  'phase.write.continueToProduce',
+  'phase.produce.reviewCut',
+] as const;
+
+/** Copy retired when Brief moved from the view switch into a project-level drawer. */
+const removedBriefViewKeys = ['phase.nav.brief', 'phase.brief.startWriting'] as const;
+
 describe('Creative Studio localization contract', () => {
+  it('carries no copy for the four-step phase rail the view switch replaced, in any configured locale', () => {
+    for (const locale of i18nConfig.supportedLanguages) {
+      const leaves = flattenStringLeaves(loadConversationLocale(locale).creativeStudio);
+      // Guards the guard: a wrong path or an empty read would make every absence assertion pass.
+      // One live neighbour per prefix the removed set spans, so a mistyped prefix cannot pass either.
+      expect(leaves['phase.nav.table'], `${locale}/phase.nav.table`).toBeTruthy();
+      expect(leaves['phase.nav.saved'], `${locale}/phase.nav.saved`).toBeTruthy();
+      expect(leaves['phase.write.title'], `${locale}/phase.write.title`).toBeTruthy();
+      expect(leaves['phase.produce.modelsTitle'], `${locale}/phase.produce.modelsTitle`).toBeTruthy();
+      // The Cut view's export action is not progression and stays.
+      expect(leaves['phase.review.handoff'], `${locale}/phase.review.handoff`).toBeTruthy();
+      for (const key of removedPhaseRailKeys) {
+        expect(leaves[key], `${locale}/${key} outlived the rail that used it`).toBeUndefined();
+      }
+    }
+  });
+
+  it('carries no switch label or progression action for Brief now that it is a drawer', () => {
+    for (const locale of i18nConfig.supportedLanguages) {
+      const leaves = flattenStringLeaves(loadConversationLocale(locale).creativeStudio);
+      expect(leaves['phase.brief.title'], `${locale}/phase.brief.title`).toBeTruthy();
+      expect(leaves['phase.brief.durationLabel'], `${locale}/phase.brief.durationLabel`).toBeTruthy();
+      for (const key of removedBriefViewKeys) {
+        expect(leaves[key], `${locale}/${key} outlived the Brief view`).toBeUndefined();
+      }
+    }
+  });
+
+  /**
+   * A view's heading is the first thing a screen reader speaks after the switch moves focus, because
+   * `StudioPhaseShell` focuses `[data-studio-phase-heading]` on every view change. Activating "Cut"
+   * and landing on a heading that says "Review" is not a wording preference; it is the switch and the
+   * document disagreeing about where you are. Asserting equality rather than exact strings keeps the
+   * two surfaces consistent by construction, so improving a view's name only takes one edit.
+   *
+   * `phase.produce.renderingWith` is deliberately not here. It is the Board view's only heading, but
+   * it names the engine a render will use ("Rendering with —"), not the view; it answers a different
+   * question than the switch label does, so equality would be the wrong contract for it.
+   */
+  it.each([
+    ['phase.write.title', 'phase.nav.table'],
+    ['phase.review.title', 'phase.nav.cut'],
+  ])('words %s exactly as the switch label %s in every configured locale', (headingKey, navKey) => {
+    const issues: string[] = [];
+
+    for (const locale of i18nConfig.supportedLanguages) {
+      const leaves = flattenStringLeaves(loadConversationLocale(locale).creativeStudio);
+      const heading = leaves[headingKey];
+      const label = leaves[navKey];
+      if (!heading?.trim() || !label?.trim()) {
+        issues.push(`${locale} is missing ${headingKey} or ${navKey}`);
+        continue;
+      }
+      if (heading !== label) {
+        issues.push(`${locale}.${headingKey} says "${heading}" but the switch says "${label}"`);
+      }
+    }
+
+    expect(issues).toEqual([]);
+  });
+
+  /**
+   * The same contract for cross-view calls to action, where the view name sits inside a sentence
+   * rather than standing alone, so containment is the honest assertion and equality is not.
+   *
+   * Both keys below outlived the phase rail still saying "Produce" — a primary button reading
+   * "Open Produce" that navigates to a tab labelled "Board", in twelve languages. Retiring a view
+   * name from the switch does not retire it from the sentences that point at that view.
+   *
+   * **Reference locale only, deliberately.** Russian and Ukrainian decline the noun: the switch
+   * says «Доска» / «Дошка» while the sentences need «доску» / «дошки», so a containment assertion
+   * is structurally wrong for inflected languages and would force translators into ungrammatical
+   * copy to satisfy it. Drift is introduced in the reference locale — translators work from it —
+   * and the other eleven are already held by the parity and copied-English guards above.
+   */
+  it.each([
+    ['phase.review.openProduce', 'phase.nav.board'],
+    ['phase.review.render.openProduce', 'phase.nav.board'],
+  ])('names the destination view in %s using the reference switch label %s', (ctaKey, navKey) => {
+    const leaves = flattenStringLeaves(loadConversationLocale(i18nConfig.referenceLanguage).creativeStudio);
+    const cta = leaves[ctaKey];
+    const label = leaves[navKey];
+
+    expect(cta?.trim(), `${ctaKey} is missing`).toBeTruthy();
+    expect(label?.trim(), `${navKey} is missing`).toBeTruthy();
+    expect(cta, `${ctaKey} says "${cta}" but the switch calls that view "${label}"`).toContain(label);
+  });
+
   it('carries no copy for the Write assistant it removed, in any configured locale', () => {
     for (const locale of i18nConfig.supportedLanguages) {
       const leaves = flattenStringLeaves(loadConversationLocale(locale).creativeStudio);
@@ -555,7 +664,7 @@ describe('Creative Studio localization contract', () => {
         expect(leaves[key], `${locale}/${key} must be removed`).toBeUndefined();
       }
       // Guards the guard: a wrong lookup shape would make the assertions above vacuous.
-      expect(leaves['phase.brief.startWriting'], `${locale}/phase.brief.startWriting`).toBeTruthy();
+      expect(leaves['phase.brief.title'], `${locale}/phase.brief.title`).toBeTruthy();
     }
   });
 

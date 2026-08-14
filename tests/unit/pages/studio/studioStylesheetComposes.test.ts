@@ -17,6 +17,7 @@ import { describe, expect, it } from 'vitest';
 
 const STUDIO_STYLES_ROOT = path.resolve(__dirname, '../../../../packages/desktop/src/renderer/pages/studio');
 const WRITE_STYLESHEET = path.join(STUDIO_STYLES_ROOT, 'components/PhaseShell/phases/write/write.module.css');
+const PHASE_SHELL_STYLESHEET = path.join(STUDIO_STYLES_ROOT, 'components/PhaseShell/StudioPhaseShell.module.css');
 const COMPOSES_FROM = /composes:[^;]*from\s+["']([^"']+)["']/g;
 
 const moduleStylesheets = (directory: string): string[] =>
@@ -69,5 +70,84 @@ describe('Studio write table stylesheet', () => {
     expect(declarationsFor('.tableHeader')).toMatchObject(expected);
     expect(declarationsFor('.scriptRow')).toMatchObject(expected);
     expect(declarationsFor('.scriptRowItem')).toMatchObject({ 'min-width': '696px' });
+  });
+});
+
+/**
+ * The view switch is disabled whenever a generation review, a duplicate-charge prompt or the export
+ * modal is open — the moments a reader is most likely to have lost track of which view is behind the
+ * dialog. Arco paints every disabled text button one flat colour with a two-class selector that ties
+ * with the module's own two-class rules, so without a more specific override the winner is decided by
+ * stylesheet injection order and the active label can flatten into its neighbours.
+ *
+ * jsdom applies no cascade, so no rendering test can see this. This reads the shipped declarations.
+ */
+describe('Studio view switch disabled active marker', () => {
+  type Rule = { selectors: string[]; declarations: Record<string, string> };
+
+  // Comments must go first: a selector capture of `[^{}]+` otherwise swallows the comment above the
+  // rule, and these very rules are documented with comments that name the Arco selectors involved.
+  const parseRules = (css: string): Rule[] =>
+    [...css.replaceAll(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((rule) => ({
+      selectors: rule[1]!.split(',').map((candidate) => candidate.trim()),
+      declarations: Object.fromEntries(
+        [...rule[2]!.matchAll(/([\w-]+)\s*:\s*([^;]+);/g)].map((declaration) => [
+          declaration[1]!,
+          declaration[2]!.trim(),
+        ])
+      ),
+    }));
+
+  /** Class-compound count, the only specificity component any of these selectors varies. */
+  const classWeight = (selector: string): number => (selector.match(/\.[\w-]+/g) ?? []).length;
+
+  const shellRules = parseRules(readFileSync(PHASE_SHELL_STYLESHEET, 'utf8'));
+
+  const disabledColour = (moduleClass: string): { colour: string; weight: number } => {
+    const matches = shellRules.flatMap((rule) =>
+      rule.selectors
+        .filter(
+          (selector) =>
+            new RegExp(`\\.${moduleClass}(?![\\w-])`).test(selector) && selector.includes('.arco-btn-disabled')
+        )
+        .filter(() => rule.declarations.color !== undefined)
+        .map((selector) => ({ colour: rule.declarations.color!, weight: classWeight(selector) }))
+    );
+    expect(matches, `${moduleClass} declares no colour for the disabled state`).toHaveLength(1);
+    return matches[0]!;
+  };
+
+  /** Arco's competing rule, read rather than assumed, so a version bump re-opens the question. */
+  const arcoDisabledTextWeight = (() => {
+    const arcoCss = readFileSync(
+      path.resolve(__dirname, '../../../../node_modules/@arco-design/web-react/dist/css/arco.css'),
+      'utf8'
+    );
+    const weights = parseRules(arcoCss)
+      .flatMap((rule) => rule.selectors)
+      .filter((selector) => selector === '.arco-btn-text.arco-btn-disabled')
+      .map(classWeight);
+    expect(weights.length, 'Arco no longer ships .arco-btn-text.arco-btn-disabled').toBeGreaterThan(0);
+    return Math.max(...weights);
+  })();
+
+  it('outranks the Arco disabled-text colour on specificity rather than on stylesheet order', () => {
+    const active = disabledColour('viewButtonActive');
+    const inactive = disabledColour('viewButton');
+
+    expect(active.weight).toBeGreaterThan(arcoDisabledTextWeight);
+    expect(inactive.weight).toBeGreaterThan(arcoDisabledTextWeight);
+    expect(active.colour).not.toBe(inactive.colour);
+  });
+
+  it('declares the active underline unconditionally, so disabling cannot switch it off', () => {
+    const markers = shellRules.filter(
+      (rule) =>
+        rule.selectors.includes('.viewButtonActive') && rule.declarations['box-shadow']?.includes('inset') === true
+    );
+
+    expect(markers, 'the active view marker is not declared on the bare .viewButtonActive class').toHaveLength(1);
+    // A `:not(...)`-qualified or `:enabled` variant would silently drop the marker while blocked.
+    expect(readFileSync(PHASE_SHELL_STYLESHEET, 'utf8')).not.toMatch(/\.viewButtonActive[^,{]*:(?:not\(|enabled)/);
   });
 });

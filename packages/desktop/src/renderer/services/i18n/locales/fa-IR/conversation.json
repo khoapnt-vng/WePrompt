@@ -934,17 +934,16 @@
     },
     "phase": {
       "nav": {
-        "label": "روند خلاقانه",
-        "brief": "خلاصه",
-        "write": "نگارش",
-        "produce": "تولید",
-        "review": "بازبینی",
+        "viewsLabel": "نماهای پروژه",
+        "table": "جدول",
+        "board": "تخته",
+        "cut": "تدوین",
         "saved": "ذخیره شد",
         "saving": "در حال ذخیره تغییرات..."
       },
       "shared": {
         "backToLibrary": "بازگشت به کتابخانه پروژه‌ها",
-        "noMediaGeneration": "در این مرحله تصویر یا ویدیو تولید نمی‌شود.",
+        "noMediaGeneration": "اینجا تصویر یا ویدیویی تولید نمی‌شود.",
         "renameProject": "تغییر نام پروژه",
         "invalidProjectName": "نام پروژه را وارد کنید.",
         "activityLabel": "فعالیت پروژه",
@@ -956,19 +955,17 @@
       },
       "brief": {
         "title": "خلاصه",
-        "description": "پیش از نگارش، هدف، قالب و زمان پروژه را مشخص کنید.",
+        "description": "هدف، قالب و مدت پروژه. نماهای جدید از آن ارث می‌برند.",
         "nameLabel": "نام پروژه",
         "intentLabel": "هدف خلاقانه",
         "durationLabel": "زمان هدف",
         "aspectRatioLabel": "نسبت تصویر",
-        "startWriting": "شروع نگارش",
         "invalidName": "پیش از ادامه، نام پروژه را وارد کنید.",
         "aspectLocked": "نسبت تصویر قفل است",
         "aspectLockedHelp": "پس از افزودن رسانه تولیدشده، نسبت تصویر قابل تغییر نیست."
       },
       "write": {
-        "title": "نگارش",
-        "continueToProduce": "ادامه",
+        "title": "جدول",
         "addShot": "افزودن نما",
         "noScenes": "برای شروع یک نما اضافه کنید یا پیش‌نویس استوری‌بورد بسازید.",
         "scriptTableTitle": "فیلم‌نامه",
@@ -1003,7 +1000,6 @@
         "render": "رندر",
         "renderAnother": "رندر دوباره",
         "openPreview": "باز کردن پیش‌نمایش {{title}}",
-        "reviewCut": "ادامه",
         "modelsTitle": "مدل‌ها",
         "activityTitle": "فعالیت تولید",
         "activityEmpty": "هیچ کار تولیدی در حال اجرا نیست.",
@@ -1012,7 +1008,7 @@
         "jobsRunning_other": "{{count}} کار تولیدی در حال اجراست"
       },
       "review": {
-        "title": "بازبینی",
+        "title": "تدوین",
         "description": "رسانه منتخب را بررسی کنید، اسلیت‌های جاافتاده را تکمیل و تحویل را آماده کنید.",
         "handoff": "آماده‌سازی تحویل",
         "noAssets": "هیچ رسانه منتخبی برای تحویل آماده نیست.",
@@ -1026,7 +1022,7 @@
         "missingSlates": "{{count}} اسلیت جاافتاده",
         "missingSlates_one": "{{count}} اسلیت جاافتاده",
         "missingSlates_other": "{{count}} اسلیت جاافتاده",
-        "openProduce": "باز کردن تولید",
+        "openProduce": "باز کردن تخته",
         "handoffDescription": "تحویل فقط شامل فهرست استوری‌بورد و رسانه‌های منتخب است. اسلیت‌های بازبینی خروجی گرفته نمی‌شوند.",
         "partialHandoff": "این تحویل ناقص است، چون بعضی صحنه‌ها رسانه منتخب ندارند.",
         "cut": {
@@ -1089,7 +1085,7 @@
           "busyReason": "این پروژه هم‌اکنون در حال رندر است. منتظر پایان بمانید یا آن را از پنجره آغازکننده لغو کنید.",
           "installFfmpeg": "نصب FFmpeg",
           "tryAgain": "تلاش دوباره برای رندر",
-          "openProduce": "رفتن به تولید",
+          "openProduce": "رفتن به تخته",
           "missingScenes": "{{count}} صحنه برداشت ندارد و در ویدیو نخواهد بود.",
           "missingScenes_one": "{{count}} صحنه برداشت ندارد و در ویدیو نخواهد بود.",
           "missingScenes_other": "{{count}} صحنه برداشت ندارد و در ویدیو نخواهد بود.",

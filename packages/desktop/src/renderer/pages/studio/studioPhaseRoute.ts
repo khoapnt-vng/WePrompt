@@ -1,18 +1,28 @@
-export const STUDIO_PHASES = ['brief', 'write', 'produce', 'review'] as const;
+import { STUDIO_VIEWS, type StudioView } from '@/common/types/project/creativeStudioTypes';
 
-export type StudioPhase = (typeof STUDIO_PHASES)[number];
+/**
+ * Re-exported, not redeclared: the view vocabulary is shared with the main process, which gates its
+ * unsaved-draft close preflight on the same segments. Renderer call sites keep importing it from
+ * here so the route module stays the single place the renderer reasons about view addresses.
+ */
+export { STUDIO_VIEWS, type StudioView };
 
 export type StudioWriteFocusIntent = {
   sceneId: string;
   field: 'visualPrompt';
 };
 
-export type StudioPhaseTransition = {
-  phase: StudioPhase;
+export type StudioViewTransition = {
+  view: StudioView;
   state?: { writeFocus?: StudioWriteFocusIntent };
 };
 
-const phaseStorageKey = (projectId: string): string => `aionui:creative-studio:last-phase:${projectId}`;
+/**
+ * Deliberately not the old `last-phase:` key. The stored vocabulary changed wholesale, and
+ * `parseStudioView` rejecting an unknown value already self-heals into one replace-navigation, so
+ * a migration map would buy a nicer first landing at the cost of code that outlives its reason.
+ */
+const viewStorageKey = (projectId: string): string => `aionui:creative-studio:last-view:${projectId}`;
 
 const resolveStorage = (storage?: Storage): Storage | null => {
   if (storage !== undefined) return storage;
@@ -23,34 +33,35 @@ const resolveStorage = (storage?: Storage): Storage | null => {
   }
 };
 
-export function parseStudioPhase(value: string | undefined): StudioPhase | null {
-  return STUDIO_PHASES.find((phase) => phase === value) ?? null;
+export function parseStudioView(value: string | undefined): StudioView | null {
+  return STUDIO_VIEWS.find((view) => view === value) ?? null;
 }
 
-export function studioPhasePath(projectId: string, phase: StudioPhase): string {
-  return `/studio/${encodeURIComponent(projectId)}/${phase}`;
+export function studioViewPath(projectId: string, view: StudioView): string {
+  return `/studio/${encodeURIComponent(projectId)}/${view}`;
 }
 
-export function defaultStudioPhase(sceneCount: number): StudioPhase {
-  return sceneCount === 0 ? 'brief' : 'write';
+/** The script is the document; every other view is a lens on it, so Table is where a project opens. */
+export function defaultStudioView(): StudioView {
+  return 'table';
 }
 
-export function readLastStudioPhase(projectId: string, storage?: Storage): StudioPhase | null {
+export function readLastStudioView(projectId: string, storage?: Storage): StudioView | null {
   try {
-    return parseStudioPhase(resolveStorage(storage)?.getItem(phaseStorageKey(projectId)) ?? undefined);
+    return parseStudioView(resolveStorage(storage)?.getItem(viewStorageKey(projectId)) ?? undefined);
   } catch {
     return null;
   }
 }
 
-export function rememberStudioPhase(projectId: string, phase: StudioPhase, storage?: Storage): void {
+export function rememberStudioView(projectId: string, view: StudioView, storage?: Storage): void {
   try {
-    resolveStorage(storage)?.setItem(phaseStorageKey(projectId), phase);
+    resolveStorage(storage)?.setItem(viewStorageKey(projectId), view);
   } catch {
-    // Phase persistence is a best-effort renderer-local enhancement.
+    // View persistence is a best-effort renderer-local enhancement.
   }
 }
 
-export function resolveStudioEntryPhase(projectId: string, sceneCount: number, storage?: Storage): StudioPhase {
-  return readLastStudioPhase(projectId, storage) ?? defaultStudioPhase(sceneCount);
+export function resolveStudioEntryView(projectId: string, storage?: Storage): StudioView {
+  return readLastStudioView(projectId, storage) ?? defaultStudioView();
 }

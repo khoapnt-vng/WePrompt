@@ -199,6 +199,7 @@ const controller = (advisory: StudioPhaseAdvisory | null): StudioPhaseController
   advisory,
   mutationPending: false,
   requestTransition: vi.fn(),
+  openBrief: vi.fn(),
   openRules: vi.fn(),
   acceptProposal: vi.fn(),
   rejectProposal: vi.fn(),
@@ -244,7 +245,7 @@ const renderStudio = async (advisory: StudioPhaseAdvisory | null) =>
     <I18nextProvider i18n={await englishI18n()}>
       <StudioShell projectId={project.id} director={<DirectorDecoy />}>
         <StudioPhaseShell
-          activePhase='write'
+          activeView='table'
           controller={controller(advisory)}
           navigationDisabled={false}
           onBack={vi.fn()}

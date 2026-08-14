@@ -9,8 +9,9 @@ import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { StudioRendererJob, StudioRendererProject } from '@/common/types/project/creativeStudioTypes';
-import type { StudioPhase } from '@renderer/pages/studio/studioPhaseRoute';
+import type { StudioView } from '@renderer/pages/studio/studioPhaseRoute';
 import { StudioPhaseShell } from '@renderer/pages/studio/components/PhaseShell/StudioPhaseShell';
+import styles from '@renderer/pages/studio/components/PhaseShell/StudioPhaseShell.module.css';
 import type { StudioPhaseAdvisory, StudioPhaseControllers } from '@renderer/pages/studio/components/PhaseShell/types';
 import type { UseStoryboardEditorResult } from '@renderer/pages/studio/hooks/useStoryboardEditor';
 import type { UseStudioJobsResult } from '@renderer/pages/studio/hooks/useStudioJobs';
@@ -184,6 +185,7 @@ const controller = (
   advisory,
   mutationPending: false,
   requestTransition: vi.fn(),
+  openBrief: vi.fn(),
   openRules: vi.fn(),
   acceptProposal: vi.fn(),
   rejectProposal: vi.fn(),
@@ -202,7 +204,7 @@ const controller = (
 const renderShell = (advisory: StudioPhaseAdvisory | null) =>
   render(
     <StudioPhaseShell
-      activePhase='write'
+      activeView='table'
       controller={controller(advisory)}
       navigationDisabled={false}
       onBack={vi.fn()}
@@ -210,7 +212,7 @@ const renderShell = (advisory: StudioPhaseAdvisory | null) =>
   );
 
 describe('StudioPhaseShell advisory', () => {
-  it('announces a shell-anchored Write timing advisory in the shell alert region', () => {
+  it('announces a shell-anchored Table timing advisory in the shell alert region', () => {
     renderShell({
       messageKey: 'conversation.creativeStudio.review.durationMismatch',
       anchor: 'shell',
@@ -237,15 +239,14 @@ describe('StudioPhaseShell advisory', () => {
 });
 
 /**
- * The frame owns in-flight document work. Produce's feed and Review's render button are view
- * detail; the aggregate has to be legible from a phase that renders neither, which is what
- * these cases assert by mounting Brief.
+ * The frame owns in-flight document work. The Board's feed and the Cut's render button are view
+ * detail; the aggregate has to be legible from a view that renders neither.
  */
 describe('StudioPhaseShell document activity', () => {
-  const renderPhase = (activePhase: StudioPhase, overrides: Partial<StudioPhaseControllers>) =>
+  const renderView = (activeView: StudioView, overrides: Partial<StudioPhaseControllers>) =>
     render(
       <StudioPhaseShell
-        activePhase={activePhase}
+        activeView={activeView}
         controller={controller(null, overrides)}
         navigationDisabled={false}
         onBack={vi.fn()}
@@ -255,11 +256,14 @@ describe('StudioPhaseShell document activity', () => {
   const activity = (): HTMLElement =>
     screen.getByRole('status', { name: 'conversation.creativeStudio.phase.shared.activityLabel' });
 
-  it('reports generation running elsewhere in the document while Brief is on screen', () => {
-    renderPhase('brief', {
+  it('reports generation running elsewhere in the document while Table is on screen', () => {
+    renderView('table', {
       jobs: { ...jobs, jobs: [job({ id: 'job-1' }), job({ id: 'job-2', status: 'queued_remote' })] },
     });
 
+    // Guards the guard: the readout is header-owned, so it survives a view id the shell cannot
+    // mount. Without this the whole suite would keep passing against an empty frame.
+    expect(screen.getByRole('heading', { level: 2, name: 'conversation.creativeStudio.phase.write.title' }));
     expect(activity()).toHaveTextContent(/activityGenerating:count=2(?![\d.])/);
   });
 
@@ -267,8 +271,8 @@ describe('StudioPhaseShell document activity', () => {
    * The percentage is a `progressbar` value beside the live region, not text inside it: ffmpeg
    * progress arrives many times a second, and a polite atomic region would speak every step.
    */
-  it('reports a cut render running elsewhere in the document while Brief is on screen', () => {
-    renderPhase('brief', { render: { ...idleRender, status: 'running', progress: 0.42 } });
+  it('reports a cut render running elsewhere in the document while Table is on screen', () => {
+    renderView('table', { render: { ...idleRender, status: 'running', progress: 0.42 } });
 
     const progressbar = screen.getByRole('progressbar', {
       name: 'conversation.creativeStudio.phase.shared.activityRenderingLabel',
@@ -279,8 +283,55 @@ describe('StudioPhaseShell document activity', () => {
   });
 
   it('keeps the region mounted and silent when the document has no work in flight', () => {
-    renderPhase('brief', {});
+    renderView('table', {});
 
     expect(activity()).toBeEmptyDOMElement();
+  });
+});
+
+/**
+ * The switch is disabled while a generation review, a duplicate-charge prompt or the export modal
+ * is open — precisely when a reader is most likely to have lost track of which view is behind the
+ * dialog. So the active marker has to survive `disabled`, and the marker is CSS: it needs the
+ * active class to still be on the element the stylesheet targets.
+ *
+ * jsdom does no layout and no cascade, so this asserts the structural precondition only; the
+ * companion assertion on the compiled declarations lives in `studioStylesheetComposes.test.ts`.
+ */
+describe('StudioViewSwitch active marker while blocked', () => {
+  const renderSwitch = (navigationDisabled: boolean) =>
+    render(
+      <StudioPhaseShell
+        activeView='cut'
+        controller={controller(null)}
+        navigationDisabled={navigationDisabled}
+        onBack={vi.fn()}
+      />
+    );
+
+  const viewButton = (label: string): HTMLElement =>
+    screen.getByRole('button', { name: `conversation.creativeStudio.phase.nav.${label}` });
+
+  it.each([false, true])('keeps the active class on the button element itself (disabled: %s)', (disabled) => {
+    renderSwitch(disabled);
+    const active = viewButton('cut');
+
+    // Arco puts the author className on the <button> rather than a wrapper, disabled or not. If a
+    // future version wraps it, the module's `.viewButtonActive` rules would target the wrapper and
+    // the marker would vanish — which is what this pins.
+    expect(active.tagName).toBe('BUTTON');
+    expect(active).toHaveClass(styles.viewButton!, styles.viewButtonActive!);
+    expect(active).toHaveAttribute('aria-current', 'page');
+    expect((active as HTMLButtonElement).disabled).toBe(disabled);
+  });
+
+  it('marks exactly one view active and leaves the others unmarked while blocked', () => {
+    renderSwitch(true);
+
+    for (const label of ['table', 'board']) {
+      const inactive = viewButton(label);
+      expect(inactive).not.toHaveClass(styles.viewButtonActive!);
+      expect(inactive).not.toHaveAttribute('aria-current');
+    }
   });
 });

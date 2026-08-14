@@ -936,17 +936,16 @@
     },
     "phase": {
       "nav": {
-        "label": "Yaratıcı iş akışı",
-        "brief": "Özet",
-        "write": "Yaz",
-        "produce": "Üret",
-        "review": "İncele",
+        "viewsLabel": "Proje görünümleri",
+        "table": "Tablo",
+        "board": "Pano",
+        "cut": "Kurgu",
         "saved": "Kaydedildi",
         "saving": "Değişiklikler kaydediliyor..."
       },
       "shared": {
         "backToLibrary": "Proje kitaplığına dön",
-        "noMediaGeneration": "Bu adımda görüntü veya video oluşturulmaz.",
+        "noMediaGeneration": "Burada görsel veya video üretilmez.",
         "renameProject": "Projeyi yeniden adlandır",
         "invalidProjectName": "Bir proje adı girin.",
         "activityLabel": "Proje etkinliği",
@@ -958,19 +957,17 @@
       },
       "brief": {
         "title": "Özet",
-        "description": "Yazmaya başlamadan önce proje hedefini, biçimini ve süresini belirleyin.",
+        "description": "Projenin amacı, biçimi ve süresi. Yeni çekimler bunları devralır.",
         "nameLabel": "Proje adı",
         "intentLabel": "Yaratıcı amaç",
         "durationLabel": "Hedef süre",
         "aspectRatioLabel": "En boy oranı",
-        "startWriting": "Yazmaya başla",
         "invalidName": "Devam etmeden önce bir proje adı girin.",
         "aspectLocked": "En boy oranı kilitli",
         "aspectLockedHelp": "Oluşturulan medya eklendikten sonra en boy oranı değiştirilemez."
       },
       "write": {
-        "title": "Yaz",
-        "continueToProduce": "Devam et",
+        "title": "Tablo",
         "addShot": "Çekim ekle",
         "noScenes": "Başlamak için bir çekim ekleyin veya hikâye panosu taslağı oluşturun.",
         "scriptTableTitle": "Senaryo",
@@ -1005,7 +1002,6 @@
         "render": "İşle",
         "renderAnother": "Yeniden işle",
         "openPreview": "{{title}} önizlemesini aç",
-        "reviewCut": "Devam et",
         "modelsTitle": "Modeller",
         "activityTitle": "Oluşturma etkinliği",
         "activityEmpty": "Çalışan bir oluşturma işi yok.",
@@ -1014,7 +1010,7 @@
         "jobsRunning_other": "{{count}} oluşturma işi çalışıyor"
       },
       "review": {
-        "title": "İncele",
+        "title": "Kurgu",
         "description": "Seçilen medyayı kontrol edin, eksik slaytları tamamlayın ve devri hazırlayın.",
         "handoff": "Devri hazırla",
         "noAssets": "Devir için hazır seçilmiş medya yok.",
@@ -1028,7 +1024,7 @@
         "missingSlates": "Eksik {{count}} slayt",
         "missingSlates_one": "Eksik {{count}} slayt",
         "missingSlates_other": "Eksik {{count}} slayt",
-        "openProduce": "Üretimi aç",
+        "openProduce": "Panoyu aç",
         "handoffDescription": "Devir yalnızca hikâye panosu bildirim dosyasını ve seçilen medyayı içerir. İnceleme slaytları dışa aktarılmaz.",
         "partialHandoff": "Bazı sahnelerde seçilmiş medya olmadığından bu devir kısmidir.",
         "cut": {
@@ -1091,7 +1087,7 @@
           "busyReason": "Bu proje zaten işleniyor. Tamamlanmasını bekleyin veya işlemi başlatan pencereden iptal edin.",
           "installFfmpeg": "FFmpeg'i yükle",
           "tryAgain": "İşlemeyi tekrar dene",
-          "openProduce": "Üret'e git",
+          "openProduce": "Pano'ya git",
           "missingScenes": "{{count}} sahnede çekim yok ve videoya dahil edilmeyecek.",
           "missingScenes_one": "{{count}} sahnede çekim yok ve videoya dahil edilmeyecek.",
           "missingScenes_other": "{{count}} sahnede çekim yok ve videoya dahil edilmeyecek.",

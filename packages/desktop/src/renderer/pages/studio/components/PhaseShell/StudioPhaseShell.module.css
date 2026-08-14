@@ -8,10 +8,10 @@
   gap: 18px;
 }
 
-/* One 56px row: document identity on the left, document state and the phase action on the
-   right. The rail is a sibling row below rather than a slot in here. `min-height` rather than
-   `height` so the rename editor's validation message can push the row taller instead of being
-   clipped by it. */
+/* One 56px row: document identity on the left, document state and the view's action on the
+   right. The view switch is a sibling row below rather than a slot in here. `min-height` rather
+   than `height` so the rename editor's validation message can push the row taller instead of
+   being clipped by it. */
 .header {
   display: flex;
   min-width: 0;
@@ -203,7 +203,7 @@
   gap: 8px;
 }
 
-.phaseNavigation {
+.viewSwitch {
   display: flex;
   min-width: 0;
   max-width: 100%;
@@ -213,7 +213,7 @@
   overscroll-behavior-inline: contain;
 }
 
-.phaseList {
+.viewList {
   display: flex;
   width: max-content;
   min-width: 0;
@@ -225,71 +225,68 @@
   list-style: none;
 }
 
-.phaseItem {
+.viewItem {
   min-width: 0;
   flex: none;
 }
 
-.phaseButton {
+.viewButton {
   composes: cardTitle from '../../StudioTypography.module.css';
   display: inline-flex;
   min-width: 0;
-  padding-inline: 10px;
+  padding-inline: 12px;
   align-items: center;
-  gap: 7px;
   color: var(--color-text-3);
   white-space: nowrap;
 }
 
-.phaseButtonActive {
+/*
+ * The active marker is a box-shadow rather than a background: Arco's own
+ * `.arco-btn-text:not(.arco-btn-disabled)` rule outranks a bare module class, so a background
+ * declared here would be overridden without a word. Nothing in Arco sets box-shadow on a text
+ * button, so this one lands.
+ */
+.viewButtonActive {
+  box-shadow: inset 0 -2px 0 var(--color-primary-6);
   color: var(--color-text-1);
 }
 
-.phaseButton:global(.arco-btn-text),
-.phaseButton:global(.arco-btn-text):hover,
-.phaseButton:global(.arco-btn-text):focus,
-.phaseButton:global(.arco-btn-text):focus-visible,
-.phaseButton:global(.arco-btn-text):active {
+.viewButton:global(.arco-btn-text),
+.viewButton:global(.arco-btn-text):hover,
+.viewButton:global(.arco-btn-text):focus,
+.viewButton:global(.arco-btn-text):focus-visible,
+.viewButton:global(.arco-btn-text):active {
   color: var(--color-text-3);
 }
 
-.phaseButtonActive:global(.arco-btn-text),
-.phaseButtonActive:global(.arco-btn-text):hover,
-.phaseButtonActive:global(.arco-btn-text):focus,
-.phaseButtonActive:global(.arco-btn-text):focus-visible,
-.phaseButtonActive:global(.arco-btn-text):active {
+.viewButtonActive:global(.arco-btn-text),
+.viewButtonActive:global(.arco-btn-text):hover,
+.viewButtonActive:global(.arco-btn-text):focus,
+.viewButtonActive:global(.arco-btn-text):focus-visible,
+.viewButtonActive:global(.arco-btn-text):active {
   color: var(--color-text-1);
 }
 
-.phaseMarker {
-  display: inline-flex;
-  box-sizing: border-box;
-  width: 22px;
-  height: 22px;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--color-border-3);
-  border-radius: 50%;
-  background: var(--color-bg-2);
+/*
+ * Disabled is not a reason to stop saying which view you are on.
+ *
+ * The switch is disabled while a generation review, a duplicate-charge prompt or the export modal
+ * is open, which is exactly when a reader most needs the answer. Arco's
+ * `.arco-btn-text.arco-btn-disabled` sets one flat colour for every button in the row and carries
+ * the same two-class weight as the rules above, so which side wins is decided by stylesheet order
+ * — a coin toss that would flatten the active and inactive labels to one colour. These three-class
+ * selectors settle it on specificity instead. The active marker's `box-shadow` needs no such
+ * defence: Arco declares none for a disabled text button.
+ */
+.viewButton:global(.arco-btn-text):global(.arco-btn-disabled) {
   color: var(--color-text-3);
-  font-size: 12px;
-  line-height: 1;
 }
 
-.phaseButtonActive .phaseMarker {
-  border-color: var(--color-primary-6);
-  background: var(--color-primary-light-1);
-  color: var(--color-primary-6);
+.viewButtonActive:global(.arco-btn-text):global(.arco-btn-disabled) {
+  color: var(--color-text-1);
 }
 
-.phaseMarkerComplete {
-  border-color: var(--color-success-6);
-  background: var(--color-success-light-1);
-  color: var(--color-success-6);
-}
-
-.phaseLabel {
+.viewLabel {
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -325,14 +322,6 @@
   order: 2;
 }
 
-.shell[data-layout='compact'] .phaseNavigation {
+.shell[data-layout='compact'] .viewSwitch {
   justify-content: flex-start;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .phaseNavigation {
-    scroll-behavior: auto;
-    animation: none !important;
-    transition: none !important;
-  }
 }
