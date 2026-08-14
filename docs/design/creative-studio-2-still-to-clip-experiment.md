@@ -38,6 +38,31 @@ coherence.
 - **Shot duration ≥ 4 seconds.** The engine floor is 4s and authoring still accepts 1–3s, which fails
   at render — after the money.
 
+## Blocked on S1.5 — found by attempting it, 2026-08-14
+
+The experiment cannot run today, and the reason is the thing S1.5 exists to fix.
+
+Reference generation is gated on `canGenerateReference = models.catalog?.image.status === 'ready'`
+(`WritePhase.tsx`). The workspace has exactly one image binding and one video binding — preconditions
+met — but a **project** adopts a route only when the catalog loads with no selection and finds exactly
+one option. A project created now shows `Rendering with —` on Board and offers only _Add reference_,
+never _Generate reference_.
+
+So: bindings exist workspace-wide, the project has no engine, and there is no in-app cure. That is
+precisely the live blocker the Engine Strip was specified to remove, and it now also gates the
+experiment that gates Phase 3a. Worth noting in the sequencing argument: 1.5 is not merely _before_
+3a, it is **required to test 3a's premise at all**.
+
+**A project is already prepared and waiting**, so this is two clicks once the strip ships:
+
+- project `dbf35861_0614_4cb3_9465_0baee3304e79`, one shot, output **Video**, length **5s** (above the
+  4s engine floor)
+- visual prompt carrying the two checkable attributes: _a red-and-white horizontally striped scarf_
+  and _a polished brass telescope_, on a rain-wet cobblestone street at night
+- nothing generated; **zero spend so far**
+
+Pick up at step 3 below.
+
 ## Protocol
 
 1. **New project**, one shot. Landscape 16:9 is fine.
