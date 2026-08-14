@@ -107,7 +107,9 @@ export const WritePhase: React.FC<WritePhaseProps> = ({ controller, layoutMode =
       return;
     }
     const focusRequestedField = (): boolean => {
-      const field = document.getElementById(`studio-scene-prompt-${writeFocusIntent.sceneId}`);
+      const field = document.getElementById(
+        `studio-scene-${writeFocusIntent.field === 'duration' ? 'duration' : 'prompt'}-${writeFocusIntent.sceneId}`
+      );
       if (!(field instanceof HTMLElement)) return false;
       field.focus();
       if (document.activeElement !== field) return false;

@@ -11,7 +11,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { SelectedSceneSaveState } from '../../hooks/useStoryboardEditor';
 import type { StudioView } from '../../studioPhaseRoute';
-import { buildBatchGenerationReviewRequest } from '../Generation/generationRequests';
+import { buildBatchGenerationReviewRequest, describeSceneRenderBlockMessage } from '../Generation/generationRequests';
 import { ProducePhase, ReviewPhase, WritePhase } from './phases';
 import { getReadySelectedRoutes } from './phases/produce';
 import { StudioDocumentActivity } from './StudioDocumentActivity';
@@ -115,8 +115,13 @@ export const StudioPhaseShell: React.FC<StudioPhaseShellProps> = ({
    * disabled button named "Generate…" still tells a screen reader that generation is on this screen.
    */
   const batchReviewRequest = useMemo(
-    () => buildBatchGenerationReviewRequest({ project: controller.project, catalog: controller.models.catalog }),
-    [controller.models.catalog, controller.project]
+    () =>
+      buildBatchGenerationReviewRequest({
+        project: controller.project,
+        catalog: controller.models.catalog,
+        candidateSceneIds: controller.readiness.readySceneIds,
+      }),
+    [controller.models.catalog, controller.project, controller.readiness.readySceneIds]
   );
   const readyRouteCount = getReadySelectedRoutes(controller.models.catalog).length;
   // Carried over from Produce term for term, and every term is load-bearing: a click here submits
@@ -132,7 +137,8 @@ export const StudioPhaseShell: React.FC<StudioPhaseShellProps> = ({
     controller.editor.drafting ||
     controller.mutationPending ||
     controller.models.loading ||
-    controller.readiness.readySceneIds.length < 1;
+    controller.readiness.readySceneIds.length < 1 ||
+    batchReviewRequest.sceneIds.length < 1;
   const batchAction =
     readyRouteCount === 0 ? undefined : (
       <div data-studio-batch-control className={styles.batchControl}>
@@ -155,9 +161,20 @@ export const StudioPhaseShell: React.FC<StudioPhaseShellProps> = ({
           }}
         >
           {t('conversation.creativeStudio.review.generateReadyScenes', {
-            count: controller.readiness.readySceneIds.length,
+            count: batchReviewRequest.sceneIds.length,
           })}
         </Button>
+        {batchReviewRequest.exclusions.map((exclusion) => {
+          const message = describeSceneRenderBlockMessage(exclusion.block);
+          return (
+            <p key={JSON.stringify(exclusion.block)} aria-live='polite' className={styles.batchAdvisory}>
+              {t('conversation.creativeStudio.phase.produce.batchExcluded', {
+                count: exclusion.sceneIds.length,
+                reason: t(message.key, message.values),
+              })}
+            </p>
+          );
+        })}
         {/* Follows its control into the frame, and stays out of the shell's `role='alert'` region:
             the advisory is about this button, so it is announced politely beside it rather than
             interrupting as a document-level alert. `anchor` is what keeps the two distinguishable. */}

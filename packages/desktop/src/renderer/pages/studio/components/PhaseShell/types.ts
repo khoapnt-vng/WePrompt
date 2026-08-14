@@ -53,6 +53,8 @@ export type StudioPhaseControllers = {
   openDraftReview: () => void;
   openSingleGenerationReview: (request: GenerationSingleReviewRequest) => void;
   openBatchGenerationReview: (request: GenerationBatchReviewRequest) => void;
+  /** Focuses the active phase's existing engine control without changing the selected route. */
+  focusEngineRole: (role: 'image' | 'video') => void;
   openExport: () => void;
   refreshProject?: () => Promise<StudioRendererProject | null>;
   openModelSettings: () => void;
@@ -95,6 +97,7 @@ export type ProducePhaseController = Pick<
   | 'requestTransition'
   | 'openSingleGenerationReview'
   | 'openBatchGenerationReview'
+  | 'focusEngineRole'
   | 'openModelSettings'
   | 'selectVariation'
   | 'openDuplicateChargeConfirmation'

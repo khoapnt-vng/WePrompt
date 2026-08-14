@@ -401,20 +401,23 @@ const installResizeObserverMock = (): {
  * whole placement exists to prevent.
  */
 const findBatchAction = async (): Promise<{ batchAction: HTMLElement; batchControl: HTMLElement }> => {
-  const batchAction = await screen.findByRole('button', {
-    name: 'conversation.creativeStudio.review.generateReadyScenes',
-  });
+  await waitFor(() =>
+    expect(
+      document.querySelector('[data-studio-batch-control]'),
+      'Studio must expose one batch-generation action'
+    ).not.toBeNull()
+  );
+  const batchControls = document.querySelectorAll<HTMLElement>('[data-studio-batch-control]');
+  expect(batchControls, 'Studio must expose exactly one batch-generation action').toHaveLength(1);
+  const batchControl = batchControls[0]!;
+  const batchButtons = within(batchControl).getAllByRole('button');
+  expect(batchButtons, 'The batch control must expose exactly one paid action').toHaveLength(1);
+  const batchAction = batchButtons[0]!;
   expect(
-    screen.getAllByRole('button', { name: 'conversation.creativeStudio.review.generateReadyScenes' }),
-    'Studio must expose exactly one batch-generation action'
-  ).toHaveLength(1);
-  const batchControl = batchAction.closest<HTMLElement>('[data-studio-batch-control]');
-  expect(batchControl, 'Batch generation must stay in the frame, beside the document actions').not.toBeNull();
-  expect(
-    batchControl!.closest('[data-studio-phase-actions]'),
+    batchControl.closest('[data-studio-phase-actions]'),
     'Batch generation must stay in the top bar rather than inside a view'
   ).not.toBeNull();
-  return { batchAction, batchControl: batchControl! };
+  return { batchAction, batchControl };
 };
 
 const ProjectHookHarness: React.FC = () => {
@@ -2292,13 +2295,10 @@ describe('StudioPage and useStudioProject', () => {
 
     await screen.findByRole('region', { name: 'conversation.creativeStudio.models.engine.label' });
     expect(
-      screen.queryByRole('button', {
-        name:
-          selectedAssetId === null
-            ? 'conversation.creativeStudio.phase.produce.render'
-            : 'conversation.creativeStudio.phase.produce.renderAnother',
+      screen.getByRole('button', {
+        name: 'conversation.creativeStudio.phase.produce.renderAnother',
       })
-    ).not.toBeInTheDocument();
+    ).toBeDisabled();
     if (selectedAssetId === null) {
       expect(
         screen.getByRole('button', { name: 'conversation.creativeStudio.phase.produce.writeVisual' })
@@ -2604,6 +2604,78 @@ describe('StudioPage and useStudioProject', () => {
     );
   });
 
+  it('keeps the batch modal and submit on the same frozen eligible scene enumeration', async () => {
+    const opening = scene({ id: 'scene-eligible', title: 'Eligible opening', durationSeconds: 5 });
+    const reference = scene({
+      id: 'scene-reference',
+      title: 'Reference blocked',
+      durationSeconds: 5,
+      referenceAssetId: 'reference-1',
+    });
+    const video = scene({ id: 'scene-video', title: 'Video without engine', mediaKind: 'video', durationSeconds: 5 });
+    const noFirstFrame = imageRoute({
+      constraints: { ...imageRoute().constraints, supportsFirstFrame: false },
+    });
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(
+        project('project-1', {
+          targetDurationSeconds: 15,
+          sceneOrder: [opening.id, reference.id, video.id],
+          scenes: { [opening.id]: opening, [reference.id]: reference, [video.id]: video },
+        })
+      )
+    );
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage(noFirstFrame)));
+    renderRoute('/studio/project-1/board');
+
+    const { batchAction, batchControl } = await findBatchAction();
+    await waitFor(() => expect(batchAction).toBeEnabled());
+    expect(within(batchControl).getAllByText('conversation.creativeStudio.phase.produce.batchExcluded')).toHaveLength(
+      2
+    );
+    fireEvent.click(batchAction);
+
+    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+    const reviewedShots = within(review).getAllByRole('article');
+    expect(reviewedShots).toHaveLength(1);
+    expect(reviewedShots[0]).toHaveAccessibleName('Eligible opening');
+    expect(within(review).getByText('Image provider')).toBeVisible();
+    expect(within(review).getByText('conversation.creativeStudio.review.excludedFirstFrame')).toBeVisible();
+
+    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
+    await waitFor(() =>
+      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: 'project-1',
+        mode: 'batch',
+        sceneIds: ['scene-eligible'],
+        expectedRevision: 2,
+        routes: [{ sceneId: 'scene-eligible', choiceId: 'choice_image', kind: 'image' }],
+        catalogVersion: 'catalog-1',
+      })
+    );
+  });
+
+  it('closes a route-blocked review and focuses its existing engine role without selecting or spending', async () => {
+    const opening = scene({ id: 'scene-1', title: 'Queued opening', durationSeconds: 5 });
+    installReferenceRequestQueue([referenceRequest(opening.id, 1)]);
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
+    );
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routes()));
+    renderRoute('/studio/project-1/board');
+
+    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+    expect(within(review).getByText('conversation.creativeStudio.review.invalidRoute')).toBeVisible();
+    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.setEngines' }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'conversation.creativeStudio.review.title' })).not.toBeInTheDocument()
+    );
+    await waitFor(() => expect(document.activeElement?.closest('[data-engine-role="image"]')).not.toBeNull());
+    expect(bridge.updateModelSelection.invoke).not.toHaveBeenCalled();
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+  });
+
   it('opens batch review after a canonical routing update recovers the catalog', async () => {
     let onUpdate: ((event: { projectId: string }) => void) | undefined;
     bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
@@ -2671,9 +2743,8 @@ describe('StudioPage and useStudioProject', () => {
     expect(
       await screen.findByRole('region', { name: 'conversation.creativeStudio.models.engine.label' })
     ).toHaveTextContent('conversation.creativeStudio.models.engine.catalogUnloaded');
-    expect(
-      screen.queryByRole('button', { name: 'conversation.creativeStudio.phase.produce.render' })
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.phase.produce.render' })).toBeDisabled();
+    expect(screen.getByText('conversation.creativeStudio.models.blocked.catalogUnloaded')).toBeVisible();
 
     await act(async () => refresh.resolve(ok(routesWithImage())));
     expect(
@@ -2696,11 +2767,37 @@ describe('StudioPage and useStudioProject', () => {
     renderRoute('/studio/project-1/board');
 
     await screen.findByRole('region', { name: 'conversation.creativeStudio.models.engine.label' });
-    expect(
-      screen.queryByRole('button', { name: 'conversation.creativeStudio.phase.produce.render' })
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.phase.produce.render' })).toBeDisabled();
+    expect(screen.getByText('conversation.creativeStudio.models.blocked.duration')).toBeVisible();
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+  });
+
+  it('moves the free duration remedy to the exact Table duration control without routing or spending', async () => {
+    const opening = scene({ durationSeconds: 16 });
+    const boundedRoute = imageRoute({
+      constraints: { ...imageRoute().constraints, minDurationSeconds: 4, maxDurationSeconds: 15 },
+    });
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(
+        project('project-1', {
+          targetDurationSeconds: 16,
+          sceneOrder: [opening.id],
+          scenes: { [opening.id]: opening },
+        })
+      )
+    );
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage(boundedRoute)));
+    const { router } = renderRoute('/studio/project-1/board');
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'conversation.creativeStudio.models.blocked.actionShorten' })
+    );
+
+    await waitFor(() => expect(router.state.location.pathname).toBe('/studio/project-1/table'));
+    await waitFor(() => expect(document.activeElement).toHaveAttribute('id', 'studio-scene-duration-scene-1'));
+    expect(bridge.updateModelSelection.invoke).not.toHaveBeenCalled();
     expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
   });
 
@@ -2730,14 +2827,9 @@ describe('StudioPage and useStudioProject', () => {
     renderRoute('/studio/project-1/board');
 
     await screen.findByRole('region', { name: 'conversation.creativeStudio.models.engine.label' });
-    expect(
-      screen.queryByRole('button', { name: 'conversation.creativeStudio.phase.produce.render' })
-    ).not.toBeInTheDocument();
-    const batchButtons = screen.getAllByRole('button', {
-      name: 'conversation.creativeStudio.review.generateReadyScenes',
-    });
-    expect(batchButtons).toHaveLength(1);
-    batchButtons.forEach((button) => expect(button).toBeDisabled());
+    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.phase.produce.render' })).toBeDisabled();
+    const { batchAction } = await findBatchAction();
+    expect(batchAction).toBeDisabled();
     expect(
       screen.getByRole('button', {
         name: 'conversation.creativeStudio.jobs.retry',
@@ -2782,14 +2874,9 @@ describe('StudioPage and useStudioProject', () => {
     renderRoute('/studio/project-1/board');
 
     await screen.findByRole('region', { name: 'conversation.creativeStudio.models.engine.label' });
-    expect(
-      screen.queryByRole('button', { name: 'conversation.creativeStudio.phase.produce.render' })
-    ).not.toBeInTheDocument();
-    screen
-      .getAllByRole('button', {
-        name: 'conversation.creativeStudio.review.generateReadyScenes',
-      })
-      .forEach((button) => expect(button).toBeDisabled());
+    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.phase.produce.render' })).toBeDisabled();
+    const { batchAction } = await findBatchAction();
+    expect(batchAction).toBeDisabled();
     expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
   });
 
@@ -2936,6 +3023,59 @@ describe('StudioPage and useStudioProject', () => {
               kind: 'image',
             },
           ],
+        })
+      )
+    );
+  });
+
+  it('does not widen a frozen batch when stale-project refresh finds another ready scene', async () => {
+    let onUpdate: ((event: { projectId: string }) => void) | undefined;
+    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
+      onUpdate = listener;
+      return () => {};
+    });
+    const opening = scene({ id: 'scene-1', title: 'Originally reviewed', durationSeconds: 5 });
+    const later = scene({ id: 'scene-2', title: 'Ready after review', durationSeconds: 5 });
+    const initial = project('project-1', {
+      targetDurationSeconds: 5,
+      sceneOrder: [opening.id],
+      scenes: { [opening.id]: opening },
+    });
+    const revised = project('project-1', {
+      revision: 3,
+      targetDurationSeconds: 10,
+      sceneOrder: [opening.id, later.id],
+      scenes: { [opening.id]: opening, [later.id]: later },
+    });
+    bridge.getProject.invoke
+      .mockResolvedValueOnce(ok(initial))
+      .mockResolvedValueOnce(ok(initial))
+      .mockResolvedValue(ok(revised));
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
+    renderRoute('/studio/project-1/board');
+
+    fireEvent.click((await findBatchAction()).batchAction);
+    expect(await screen.findByRole('dialog')).toHaveTextContent('Originally reviewed');
+    await act(async () => onUpdate?.({ projectId: 'project-1' }));
+    await waitFor(() => expect(bridge.getProject.invoke).toHaveBeenCalledTimes(3));
+
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
+    await waitFor(() =>
+      expect(screen.getByRole('dialog')).toHaveTextContent('conversation.creativeStudio.errors.staleProject')
+    );
+    const refreshedReview = screen.getByRole('dialog');
+    expect(within(refreshedReview).getAllByRole('article')).toHaveLength(1);
+    expect(within(refreshedReview).getByRole('article')).toHaveAccessibleName('Originally reviewed');
+    expect(within(refreshedReview).queryByText('Ready after review')).not.toBeInTheDocument();
+
+    fireEvent.click(
+      within(refreshedReview).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' })
+    );
+    await waitFor(() =>
+      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          sceneIds: ['scene-1'],
+          routes: [{ sceneId: 'scene-1', choiceId: 'choice_image', kind: 'image' }],
         })
       )
     );

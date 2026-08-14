@@ -31,6 +31,7 @@ export const ProducePhase: React.FC<ProducePhaseProps> = ({ controller, layoutMo
     generationReviewOpen,
     requestTransition,
     openSingleGenerationReview,
+    focusEngineRole,
     openModelSettings,
     openDuplicateChargeConfirmation,
   } = controller;
@@ -96,6 +97,17 @@ export const ProducePhase: React.FC<ProducePhaseProps> = ({ controller, layoutMo
                 requestTransition({
                   view: 'table',
                   state: { writeFocus: { sceneId, field: 'visualPrompt' } },
+                });
+              }}
+              onFocusEngineRole={focusEngineRole}
+              onRemoveReference={(sceneId) => {
+                editor.updateSceneDraftById(sceneId, { referenceAssetId: null });
+                void editor.flushSceneDraftById(sceneId);
+              }}
+              onShorten={(sceneId) => {
+                requestTransition({
+                  view: 'table',
+                  state: { writeFocus: { sceneId, field: 'duration' } },
                 });
               }}
               onOpenSingleReview={openSingleGenerationReview}

@@ -385,6 +385,60 @@ describe('GenerationReviewModal', () => {
     expect(screen.getByRole('button', { name: 'conversation.creativeStudio.review.confirm' })).toBeDisabled();
   });
 
+  it('offers the route role to Close and set engines only while a route blocks review', () => {
+    const onSetEngines = vi.fn();
+    render(
+      <GenerationReviewModal
+        {...createProps({
+          scenes: [
+            {
+              ...mixedScenes()[0]!,
+              route: { status: 'missing', snapshot: null, providerName: null },
+            },
+          ],
+          onSetEngines,
+        })}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.review.setEngines' }));
+
+    expect(onSetEngines).toHaveBeenCalledExactlyOnceWith('image');
+  });
+
+  it('does not show the engine escape when every reviewed route is valid', () => {
+    render(<GenerationReviewModal {...createProps({ onSetEngines: vi.fn() })} />);
+
+    expect(
+      screen.queryByRole('button', { name: 'conversation.creativeStudio.review.setEngines' })
+    ).not.toBeInTheDocument();
+  });
+
+  it('groups first-frame exclusions with their frozen count in an already-open review', () => {
+    render(
+      <GenerationReviewModal
+        {...createProps({
+          excludedScenes: [
+            {
+              id: 'scene-excluded-1',
+              title: 'Reference opening',
+              reasonMessageKey: 'conversation.creativeStudio.review.excludedFirstFrame',
+            },
+            {
+              id: 'scene-excluded-2',
+              title: 'Reference closing',
+              reasonMessageKey: 'conversation.creativeStudio.review.excludedFirstFrame',
+            },
+          ],
+        })}
+      />
+    );
+
+    expect(screen.getByText('conversation.creativeStudio.review.excludedFirstFrame:count=2')).toBeInTheDocument();
+    expect(screen.getByText('Reference opening')).toBeInTheDocument();
+    expect(screen.getByText('Reference closing')).toBeInTheDocument();
+  });
+
   it('keeps confirmation blocked after a submission error until the parent supplies a refreshed review', () => {
     const onConfirm = vi.fn();
     render(

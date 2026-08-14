@@ -225,6 +225,8 @@ const editor = (currentProject: StudioRendererProject, selectedSceneId = 'scene-
     selectedSceneId,
     selectedScene,
     sceneDraft: selectedScene,
+    sceneDrafts: Object.fromEntries(orderedScenes.map((candidate) => [candidate.id, candidate])),
+    sceneSaveStates: Object.fromEntries(orderedScenes.map((candidate) => [candidate.id, 'saved' as const])),
     projectDraft: null,
     projectSaveState: 'saved',
     hasUnsavedProjectDraft: false,
@@ -234,6 +236,7 @@ const editor = (currentProject: StudioRendererProject, selectedSceneId = 'scene-
     saveIssues: [],
     selectScene: vi.fn(),
     updateSceneDraft: vi.fn(),
+    updateSceneDraftById: vi.fn(),
     updateProjectDraft: vi.fn(),
     flushProjectDraft: vi.fn(async () => true),
     discardProjectDraft: vi.fn(),
@@ -314,6 +317,7 @@ const createController = (
     openSingleGenerationReview: vi.fn(),
     openBatchGenerationReview: vi.fn(),
     openModelSettings: vi.fn((_path?: '/settings/model') => undefined),
+    focusEngineRole: vi.fn(),
     selectVariation: vi.fn(async () => undefined),
     openDuplicateChargeConfirmation: vi.fn(),
   };
@@ -549,7 +553,7 @@ describe('ProducePhase', () => {
     expect(controller.jobs.submitScenes).not.toHaveBeenCalled();
   });
 
-  it('routes a blank-prompt shot to its Table visual field instead of offering generation', () => {
+  it('keeps disabled Render visible while routing a blank-prompt shot to its Table visual field', () => {
     const controller = createController();
     render(<ProducePhase controller={controller} />);
     const closing = screen.getByRole('listitem', {
@@ -557,8 +561,8 @@ describe('ProducePhase', () => {
     });
 
     expect(
-      within(closing).queryByRole('button', { name: 'conversation.creativeStudio.phase.produce.render' })
-    ).not.toBeInTheDocument();
+      within(closing).getByRole('button', { name: 'conversation.creativeStudio.phase.produce.render' })
+    ).toBeDisabled();
     fireEvent.click(
       within(closing).getByRole('button', { name: 'conversation.creativeStudio.phase.produce.writeVisual' })
     );
@@ -573,13 +577,129 @@ describe('ProducePhase', () => {
   it('opens explicit single-shot review from a ready selected shot without submitting', () => {
     const controller = createController();
     render(<ProducePhase controller={controller} />);
+    const opening = screen.getByRole('listitem', {
+      name: 'conversation.creativeStudio.scene.accessibleName:number=1,title=Opening shot',
+    });
 
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.phase.produce.render' }));
+    fireEvent.click(within(opening).getByRole('button', { name: 'conversation.creativeStudio.phase.produce.render' }));
 
     expect(controller.openSingleGenerationReview).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ sceneId: 'scene-1', routeStatus: 'valid' })
     );
     expect(controller.jobs.submitScenes).not.toHaveBeenCalled();
+  });
+
+  it('explains a first-frame block and offers only free reference and engine remedies', () => {
+    const unsupported = route('image');
+    unsupported.constraints.supportsFirstFrame = false;
+    const currentProject = project({
+      scenes: {
+        'scene-1': scene({ referenceAssetId: 'reference-1' }),
+        'scene-2': scene({ id: 'scene-2', title: 'Closing shot', mediaKind: 'video', visualPrompt: '' }),
+      },
+    });
+    const currentCatalog = catalog();
+    currentCatalog.image.selectedRoute = unsupported;
+    currentCatalog.image.options = [unsupported];
+    const controller = createController(currentProject, 'scene-1', currentCatalog);
+    render(<ProducePhase controller={controller} />);
+    const opening = screen.getByRole('listitem', {
+      name: 'conversation.creativeStudio.scene.accessibleName:number=1,title=Opening shot',
+    });
+
+    const renderButton = within(opening).getByRole('button', {
+      name: 'conversation.creativeStudio.phase.produce.render',
+    });
+    expect(renderButton).toBeDisabled();
+    expect(renderButton).toHaveAccessibleDescription(
+      'conversation.creativeStudio.models.blocked.aria:reason=conversation.creativeStudio.models.blocked.firstFrame'
+    );
+    expect(within(opening).getByText('conversation.creativeStudio.models.blocked.firstFrame')).toBeVisible();
+
+    fireEvent.click(
+      within(opening).getByRole('button', {
+        name: 'conversation.creativeStudio.models.blocked.actionRemoveReference',
+      })
+    );
+    expect(controller.editor.updateSceneDraftById).toHaveBeenCalledExactlyOnceWith('scene-1', {
+      referenceAssetId: null,
+    });
+    expect(controller.editor.flushSceneDraftById).toHaveBeenCalledExactlyOnceWith('scene-1');
+
+    fireEvent.click(
+      within(opening).getByRole('button', { name: 'conversation.creativeStudio.models.blocked.actionSetEngines' })
+    );
+    expect(controller.focusEngineRole).toHaveBeenCalledExactlyOnceWith('image');
+    expect(controller.openSingleGenerationReview).not.toHaveBeenCalled();
+    expect(controller.jobs.submitScenes).not.toHaveBeenCalled();
+  });
+
+  it('offers the exact Table duration field for a free duration remedy', () => {
+    const shortOnly = route('image');
+    shortOnly.constraints.maxDurationSeconds = 4;
+    const currentCatalog = catalog();
+    currentCatalog.image.selectedRoute = shortOnly;
+    currentCatalog.image.options = [shortOnly];
+    const controller = createController(project(), 'scene-1', currentCatalog);
+    render(<ProducePhase controller={controller} />);
+    const opening = screen.getByRole('listitem', {
+      name: 'conversation.creativeStudio.scene.accessibleName:number=1,title=Opening shot',
+    });
+
+    const renderButton = within(opening).getByRole('button', {
+      name: 'conversation.creativeStudio.phase.produce.render',
+    });
+    expect(renderButton).toBeDisabled();
+    expect(renderButton).toHaveAccessibleDescription(
+      'conversation.creativeStudio.models.blocked.aria:reason=conversation.creativeStudio.models.blocked.duration:seconds=5'
+    );
+    expect(
+      within(opening).queryByRole('button', {
+        name: 'conversation.creativeStudio.models.blocked.actionSetEngines',
+      })
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(
+      within(opening).getByRole('button', { name: 'conversation.creativeStudio.models.blocked.actionShorten' })
+    );
+    expect(controller.requestTransition).toHaveBeenCalledExactlyOnceWith({
+      view: 'table',
+      state: { writeFocus: { sceneId: 'scene-1', field: 'duration' } },
+    });
+  });
+
+  it.each([
+    {
+      condition: 'catalog is unloaded',
+      currentCatalog: null,
+      reason: 'conversation.creativeStudio.models.blocked.catalogUnloaded',
+    },
+    {
+      condition: 'engine health is unavailable',
+      currentCatalog: (() => {
+        const unavailable = route('image');
+        unavailable.health = 'unavailable';
+        const source = catalog();
+        source.image.selectedRoute = unavailable;
+        source.image.options = [unavailable];
+        return source;
+      })(),
+      reason: 'conversation.creativeStudio.models.blocked.notAnswering',
+    },
+  ])('keeps $condition visible without inventing a Settings remedy', ({ currentCatalog, reason }) => {
+    const controller = createController(project(), 'scene-1', currentCatalog);
+    render(<ProducePhase controller={controller} />);
+    const opening = screen.getByRole('listitem', {
+      name: 'conversation.creativeStudio.scene.accessibleName:number=1,title=Opening shot',
+    });
+
+    expect(within(opening).getByText(reason)).toBeVisible();
+    expect(
+      within(opening).queryByRole('button', {
+        name: 'conversation.creativeStudio.models.blocked.actionSetEngines',
+      })
+    ).not.toBeInTheDocument();
+    expect(controller.openModelSettings).not.toHaveBeenCalled();
   });
 
   it('shows determinate progress and Cancel only for the exact displayed cancellable job', () => {

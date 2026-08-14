@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next';
 
 import {
   buildSingleSceneReviewRequest,
+  describeSceneRenderBlock,
   type GenerationSingleReviewRequest,
 } from '../../../Generation/generationRequests';
 import {
@@ -49,6 +50,9 @@ export type ShotGridProps = {
   jobsMutationPending: boolean;
   onSelectScene: (sceneId: string) => void;
   onWriteVisual: (sceneId: string) => void;
+  onFocusEngineRole: (role: 'image' | 'video') => void;
+  onRemoveReference: (sceneId: string) => void;
+  onShorten: (sceneId: string) => void;
   onOpenSingleReview: (request: GenerationSingleReviewRequest) => void;
   onCancelJob: (jobId: string) => void | Promise<unknown>;
 };
@@ -147,6 +151,9 @@ export const ShotGrid: React.FC<ShotGridProps> = ({
   jobsMutationPending,
   onSelectScene,
   onWriteVisual,
+  onFocusEngineRole,
+  onRemoveReference,
+  onShorten,
   onOpenSingleReview,
   onCancelJob,
 }) => {
@@ -168,8 +175,11 @@ export const ShotGrid: React.FC<ShotGridProps> = ({
           const posterSource = poster === null ? null : createManagedStudioAssetUrl(project.id, poster.id);
           const selectedIndex = selected === null ? -1 : takes.findIndex((candidate) => candidate.id === selected.id);
           const status = sceneStatuses[scene.id] ?? 'needs_prompt';
+          const renderBlock = describeSceneRenderBlock(project, catalog, scene);
+          const nonRouteDisabled =
+            generationDisabled || catalogLoading || !canOpenSingleSceneReview(status, scene.visualPrompt);
           const reviewRequest =
-            generationDisabled || catalogLoading || !canOpenSingleSceneReview(status, scene.visualPrompt)
+            nonRouteDisabled || renderBlock !== null
               ? null
               : buildSingleSceneReviewRequest({
                   project,
@@ -195,13 +205,17 @@ export const ShotGrid: React.FC<ShotGridProps> = ({
               displayedJob={displayedSceneJob(project.id, scene, jobs)}
               mutationPending={mutationPending}
               cancelPending={jobsMutationPending}
-              reviewAvailable={reviewRequest !== null}
+              renderBlock={renderBlock}
+              renderDisabled={nonRouteDisabled}
               onSelect={() => onSelectScene(scene.id)}
               onOpenPreview={() => {
                 onSelectScene(scene.id);
                 setPreviewSceneId(scene.id);
               }}
               onWriteVisual={() => onWriteVisual(scene.id)}
+              onFocusEngineRole={() => onFocusEngineRole(scene.mediaKind)}
+              onRemoveReference={() => onRemoveReference(scene.id)}
+              onShorten={() => onShorten(scene.id)}
               onOpenReview={() => {
                 if (reviewRequest !== null) onOpenSingleReview(reviewRequest);
               }}

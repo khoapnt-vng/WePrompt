@@ -1217,6 +1217,18 @@ describe('WritePhase', () => {
     expect(props.clearWriteFocusIntent).toHaveBeenCalledOnce();
   });
 
+  it('focuses the requested duration control without falling back to the visual prompt', async () => {
+    const props = controller({
+      editor: editor('scene-2'),
+      writeFocusIntent: { sceneId: 'scene-2', field: 'duration' },
+    });
+    render(<WritePhase controller={props} />);
+
+    await waitFor(() => expect(document.getElementById('studio-scene-duration-scene-2')).toHaveFocus());
+    expect(screen.getByDisplayValue('A detailed reveal')).not.toHaveFocus();
+    expect(props.clearWriteFocusIntent).toHaveBeenCalledOnce();
+  });
+
   it('clears a missing-scene focus intent without moving focus', () => {
     const phaseEditor = editor();
     const props = controller({

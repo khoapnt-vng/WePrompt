@@ -9,7 +9,7 @@ export { STUDIO_VIEWS, type StudioView };
 
 export type StudioWriteFocusIntent = {
   sceneId: string;
-  field: 'visualPrompt';
+  field: 'visualPrompt' | 'duration';
 };
 
 export type StudioViewTransition = {

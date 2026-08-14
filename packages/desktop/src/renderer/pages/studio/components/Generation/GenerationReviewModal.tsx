@@ -106,6 +106,7 @@ export const collectReferencePrompts = (
 export type GenerationReviewExcludedScene = {
   id: string;
   title: string;
+  reasonValues?: Record<string, string | number>;
   reasonMessageKey:
     | 'conversation.creativeStudio.scene.status.needs_title'
     | 'conversation.creativeStudio.scene.status.needs_prompt'
@@ -114,7 +115,18 @@ export type GenerationReviewExcludedScene = {
     | 'conversation.creativeStudio.scene.status.generated'
     | 'conversation.creativeStudio.scene.status.needs_attention'
     | 'conversation.creativeStudio.reference.excludedUnavailable'
-    | 'conversation.creativeStudio.reference.excludedPromptUnusable';
+    | 'conversation.creativeStudio.reference.excludedPromptUnusable'
+    | 'conversation.creativeStudio.review.excludedFirstFrame'
+    | 'conversation.creativeStudio.models.blocked.catalogUnloaded'
+    | 'conversation.creativeStudio.models.blocked.noEngine'
+    | 'conversation.creativeStudio.models.blocked.needsSetup'
+    | 'conversation.creativeStudio.models.blocked.notAnswering'
+    | 'conversation.creativeStudio.models.blocked.retired'
+    | 'conversation.creativeStudio.models.engine.frameMismatch'
+    | 'conversation.creativeStudio.models.blocked.frame'
+    | 'conversation.creativeStudio.models.blocked.resolution'
+    | 'conversation.creativeStudio.models.blocked.duration'
+    | 'conversation.creativeStudio.models.blocked.firstFrame';
 };
 
 export type GenerationReviewModalProps = {
@@ -135,6 +147,8 @@ export type GenerationReviewModalProps = {
   ruleBreachesBySceneId?: Record<string, StudioRuleBreach[]>;
   /** Hands the breach to the Director. Absent hides the affordance. */
   onAskDirector?: () => void;
+  /** Closes route-blocked review and focuses the matching project engine slot. */
+  onSetEngines?: (role: StudioMediaKind) => void;
   onCancel: () => void;
   onConfirm: (confirmation: GenerationReviewConfirmation) => ActionResult;
 };
@@ -174,6 +188,7 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
   errorMessageKey = null,
   ruleBreachesBySceneId = NO_RULE_BREACHES,
   onAskDirector,
+  onSetEngines,
   onCancel,
   onConfirm,
 }) => {
@@ -228,12 +243,24 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
     : review.missingRoute || review.invalidRoute
       ? 'conversation.creativeStudio.review.disabledMissingRoutes'
       : null;
+  const routeBlockRole = scenes.find((scene) => scene.route.status !== 'valid' || !routeMatchesScene(scene))?.mediaKind;
+  const firstFrameExclusions = excludedScenes.filter(
+    (scene) => scene.reasonMessageKey === 'conversation.creativeStudio.review.excludedFirstFrame'
+  );
+  const otherExclusions = excludedScenes.filter(
+    (scene) => scene.reasonMessageKey !== 'conversation.creativeStudio.review.excludedFirstFrame'
+  );
 
   const footer = (
     <div className='flex flex-wrap justify-end gap-8px'>
       <Button disabled={submitting} onClick={onCancel}>
         {t('conversation.creativeStudio.review.cancel')}
       </Button>
+      {routeBlockRole !== undefined && onSetEngines !== undefined && (
+        <Button disabled={submitting} onClick={() => onSetEngines(routeBlockRole)}>
+          {t('conversation.creativeStudio.review.setEngines')}
+        </Button>
+      )}
       <Button
         type='primary'
         loading={submitting}
@@ -344,18 +371,38 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
           ))}
         </div>
 
-        {excludedScenes.length > 0 && (
+        {otherExclusions.length > 0 && (
           <Alert
             type='warning'
             content={
               <div>
                 <p className='m-0'>{t('conversation.creativeStudio.reference.excludedSummary')}</p>
                 <ul className='mb-0 mt-6px pl-18px'>
-                  {excludedScenes.map((scene) => (
+                  {otherExclusions.map((scene) => (
                     <li key={scene.id}>
                       <span>{scene.title}</span>
-                      <span> — {t(scene.reasonMessageKey)}</span>
+                      <span> — {t(scene.reasonMessageKey, scene.reasonValues)}</span>
                     </li>
+                  ))}
+                </ul>
+              </div>
+            }
+          />
+        )}
+
+        {firstFrameExclusions.length > 0 && (
+          <Alert
+            type='warning'
+            content={
+              <div>
+                <p className='m-0'>
+                  {t('conversation.creativeStudio.review.excludedFirstFrame', {
+                    count: firstFrameExclusions.length,
+                  })}
+                </p>
+                <ul className='mb-0 mt-6px pl-18px'>
+                  {firstFrameExclusions.map((scene) => (
+                    <li key={scene.id}>{scene.title}</li>
                   ))}
                 </ul>
               </div>

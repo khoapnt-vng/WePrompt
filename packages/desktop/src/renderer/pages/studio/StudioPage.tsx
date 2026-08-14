@@ -16,6 +16,7 @@ import {
   type StudioRendererProject,
   type StudioReferenceRequest,
   type StudioLatestRender,
+  type StudioMediaKind,
   type StudioRouteCatalog,
   type StudioRouteCatalogEntry,
   type StudioScene,
@@ -37,6 +38,7 @@ import {
 import {
   collectReferencePrompts,
   collectSubmittableRoutes,
+  describeSceneRenderBlockMessage,
   GenerationReviewModal,
   routeSupportsScene,
   type GenerationBatchReviewRequest,
@@ -187,6 +189,23 @@ const referenceExclusionReason = (
   }
 };
 
+const batchReviewExcludedScenes = (
+  project: StudioRendererProject,
+  request: GenerationBatchReviewRequest
+): GenerationReviewExcludedScene[] =>
+  request.exclusions.flatMap((exclusion) => {
+    const message = describeSceneRenderBlockMessage(exclusion.block);
+    return exclusion.sceneIds.map((sceneId) => ({
+      id: sceneId,
+      title: project.scenes[sceneId]?.title ?? sceneId,
+      reasonMessageKey:
+        exclusion.block.code === 'first_frame'
+          ? ('conversation.creativeStudio.review.excludedFirstFrame' as const)
+          : message.key,
+      ...(message.values === undefined ? {} : { reasonValues: message.values }),
+    }));
+  });
+
 /**
  * The first-frame prompt a Director-queued request should paint for this scene, or `null` when the
  * scene's own visual prompt cannot produce a usable one.
@@ -276,7 +295,9 @@ const parseWriteFocusIntent = (state: unknown): StudioWriteFocusIntent | null =>
   const writeFocus = (state as { writeFocus?: unknown }).writeFocus;
   if (typeof writeFocus !== 'object' || writeFocus === null) return null;
   const candidate = writeFocus as { sceneId?: unknown; field?: unknown };
-  return typeof candidate.sceneId === 'string' && candidate.sceneId.length > 0 && candidate.field === 'visualPrompt'
+  return typeof candidate.sceneId === 'string' &&
+    candidate.sceneId.length > 0 &&
+    (candidate.field === 'visualPrompt' || candidate.field === 'duration')
     ? { sceneId: candidate.sceneId, field: candidate.field }
     : null;
 };
@@ -447,16 +468,6 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
         ? draftConflict.messageKey
         : studioModels.errorMessageKey;
   const readiness = useMemo(() => (project === null ? null : deriveStudioReadiness(project)), [project]);
-  const readyScenes = useMemo(
-    () =>
-      readiness === null || project === null
-        ? []
-        : readiness.readySceneIds.flatMap((sceneId) => {
-            const scene = project.scenes[sceneId];
-            return scene === undefined ? [] : [scene];
-          }),
-    [project, readiness]
-  );
   const selectedScene =
     project !== null && editor.selectedSceneId !== null ? (project.scenes[editor.selectedSceneId] ?? null) : null;
   const selectedAsset =
@@ -705,26 +716,30 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
 
   const openBatchReview = useCallback(
     (request: GenerationBatchReviewRequest): void => {
-      if (project === null || generationBlocked || request.catalogVersion === null || readyScenes.length === 0) {
+      if (project === null || generationBlocked || request.catalogVersion === null || request.sceneIds.length === 0) {
         return;
       }
-      const scenes = readyScenes.map((scene) => {
+      const scenes = request.sceneIds.flatMap((sceneId) => {
+        const scene = project.scenes[sceneId];
+        if (scene?.id !== sceneId) return [];
         const resolved = request.routes[scene.mediaKind];
         const route = resolved === null ? null : { sceneId: scene.id, ...resolved.route };
-        return toReviewScene(project, scene, route, request.availableRoutes, resolved?.routeStatus);
+        return [toReviewScene(project, scene, route, request.availableRoutes, resolved?.routeStatus)];
       });
+      if (scenes.length !== request.sceneIds.length) return;
       studioJobs.clearIssue();
       setGenerationReviewIssueMessageKey(null);
       setGenerationReview({
         mode: 'batch',
         scenes,
+        excludedScenes: batchReviewExcludedScenes(project, request),
         catalogVersion: request.catalogVersion,
         availableRoutes: request.availableRoutes,
         projectId: project.id,
         projectRevision: project.revision,
       });
     },
-    [generationBlocked, project, readyScenes, studioJobs]
+    [generationBlocked, project, studioJobs]
   );
 
   const confirmGeneration = useCallback(
@@ -784,16 +799,20 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
                       ];
                 })
               : (refreshedReferenceReview?.scenes ??
-                readyScenes.map((scene) =>
-                  toReviewScene(
-                    project,
-                    scene,
-                    projectRouteSnapshot(project, scene, generationReview.outputRole),
-                    availableRoutes,
-                    undefined,
-                    generationReview.outputRole ?? 'take'
-                  )
-                ));
+                generationReview.scenes.flatMap((reviewScene) => {
+                  const scene = project.scenes[reviewScene.id];
+                  if (scene?.id !== reviewScene.id || !readiness.readySceneIds.includes(reviewScene.id)) return [];
+                  return [
+                    toReviewScene(
+                      project,
+                      scene,
+                      projectRouteSnapshot(project, scene, generationReview.outputRole),
+                      availableRoutes,
+                      undefined,
+                      generationReview.outputRole ?? 'take'
+                    ),
+                  ];
+                }));
           setGenerationReview({
             mode: generationReview.mode,
             scenes: refreshedScenes,
@@ -822,6 +841,26 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
           generationReviewRefreshingRef.current = false;
           setGenerationReviewRefreshing(false);
         }
+        return;
+      }
+
+      const reviewedConfirmation = collectSubmittableRoutes(generationReview.scenes);
+      const confirmationMatchesReview =
+        reviewedConfirmation !== null &&
+        reviewedConfirmation.sceneIds.length === sceneIds.length &&
+        reviewedConfirmation.sceneIds.every((sceneId, index) => sceneId === sceneIds[index]) &&
+        reviewedConfirmation.routes.length === routes.length &&
+        reviewedConfirmation.routes.every((route, index) => {
+          const candidate = routes[index];
+          return (
+            candidate !== undefined &&
+            candidate.sceneId === route.sceneId &&
+            candidate.choiceId === route.choiceId &&
+            candidate.kind === route.kind
+          );
+        });
+      if (!confirmationMatchesReview) {
+        setGenerationReviewIssueMessageKey('conversation.creativeStudio.errors.invalidRoute');
         return;
       }
 
@@ -860,7 +899,7 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
       setGenerationReview(null);
       if (!dismissed) setReferenceNotice({ kind: 'dismiss_failed' });
     },
-    [generationBlocked, generationReview, project, readiness, readyScenes, studioJobs, studioModels]
+    [generationBlocked, generationReview, project, readiness, studioJobs, studioModels]
   );
 
   const dismissExcludedReferenceRequests = useCallback(async (): Promise<void> => {
@@ -1178,6 +1217,14 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
     setTimeout(() => navigate('/settings/model'), 0);
   }, [navigate]);
 
+  const focusEngineRole = useCallback((role: StudioMediaKind): void => {
+    requestAnimationFrame(() => {
+      const activePhase = document.querySelector<HTMLElement>('[data-studio-phase-shell]');
+      const roleSlot = activePhase?.querySelector<HTMLElement>(`[data-engine-role="${role}"]`);
+      roleSlot?.querySelector<HTMLElement>('button:not([disabled])')?.focus();
+    });
+  }, []);
+
   const closeExportAndOpenProduce = useCallback((): void => {
     if (exportPending) return;
     setPostModalTransition({ view: 'board' });
@@ -1331,6 +1378,7 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
     openDraftReview: () => setDraftModalVisible(true),
     openSingleGenerationReview: openSingleReview,
     openBatchGenerationReview: openBatchReview,
+    focusEngineRole,
     openExport,
     refreshProject: refetch,
     openModelSettings,
@@ -1439,6 +1487,16 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
               setGenerationReview(null);
               if (!dismissed) setReferenceNotice({ kind: 'dismiss_failed' });
             }
+          }}
+          onSetEngines={(role) => {
+            generationReview?.referenceRequests?.forEach(({ id: requestId }) =>
+              suppressedReferenceRequestIdsRef.current.add(requestId)
+            );
+            studioJobs.clearIssue();
+            studioJobs.clearStaleIntent();
+            setGenerationReviewIssueMessageKey(null);
+            setGenerationReview(null);
+            focusEngineRole(role);
           }}
           onConfirm={confirmGeneration}
         />

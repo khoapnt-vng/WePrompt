@@ -540,6 +540,97 @@ describe('StudioPhaseShell batch generation control', () => {
       screen.getByRole('button', { name: 'conversation.creativeStudio.review.generateReadyScenes:count=0' })
     ).toBeDisabled();
   });
+
+  it('labels and opens only the exact eligible target while grouping frozen route exclusions', () => {
+    const blockedScene: StudioScene = {
+      ...readyScene,
+      id: 'scene-blocked',
+      title: 'Reference shot',
+      referenceAssetId: 'reference-1',
+    };
+    const noFirstFrameRoute: StudioRouteCatalogEntry = {
+      ...imageRoute,
+      constraints: { ...imageRoute.constraints, supportsFirstFrame: false },
+    };
+    const currentProject: StudioRendererProject = {
+      ...spendableProject,
+      sceneOrder: [readyScene.id, blockedScene.id],
+      scenes: { [readyScene.id]: readyScene, [blockedScene.id]: blockedScene },
+    };
+    const currentCatalog: StudioRouteCatalog = {
+      ...readyCatalog,
+      image: { ...readyCatalog.image, selectedRoute: noFirstFrameRoute, options: [noFirstFrameRoute] },
+    };
+    const openBatchGenerationReview = vi.fn();
+    renderShell(null, {
+      ...spendable(),
+      project: currentProject,
+      editor: { ...editor, project: currentProject },
+      models: { ...models, catalog: currentCatalog },
+      readiness: {
+        sceneStatuses: { [readyScene.id]: 'ready', [blockedScene.id]: 'ready' },
+        totalSceneCount: 2,
+        readySceneIds: [readyScene.id, blockedScene.id],
+        selectedAssetCount: 0,
+        durationTotalSeconds: 10,
+        durationDeltaSeconds: -5,
+      },
+      openBatchGenerationReview,
+    });
+
+    const button = screen.getByRole('button', {
+      name: 'conversation.creativeStudio.review.generateReadyScenes:count=1',
+    });
+    expect(button).toBeEnabled();
+    expect(
+      screen.getByText(
+        'conversation.creativeStudio.phase.produce.batchExcluded:count=1,reason=conversation.creativeStudio.models.blocked.firstFrame'
+      )
+    ).toBeVisible();
+
+    fireEvent.click(button);
+    expect(openBatchGenerationReview).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        sceneIds: ['scene-1'],
+        exclusions: [
+          {
+            block: { code: 'first_frame', role: 'image' },
+            sceneIds: ['scene-blocked'],
+          },
+        ],
+      })
+    );
+  });
+
+  it('adds the exact-target-empty guard without relying on the global ready count', () => {
+    const blockedScene: StudioScene = { ...readyScene, referenceAssetId: 'reference-1' };
+    const noFirstFrameRoute: StudioRouteCatalogEntry = {
+      ...imageRoute,
+      constraints: { ...imageRoute.constraints, supportsFirstFrame: false },
+    };
+    const currentProject: StudioRendererProject = {
+      ...spendableProject,
+      scenes: { [blockedScene.id]: blockedScene },
+    };
+    const currentCatalog: StudioRouteCatalog = {
+      ...readyCatalog,
+      image: { ...readyCatalog.image, selectedRoute: noFirstFrameRoute, options: [noFirstFrameRoute] },
+    };
+    renderShell(null, {
+      ...spendable(),
+      project: currentProject,
+      editor: { ...editor, project: currentProject },
+      models: { ...models, catalog: currentCatalog },
+      readiness: {
+        ...spendable().readiness!,
+        readySceneIds: [blockedScene.id],
+      },
+    });
+
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.review.generateReadyScenes:count=0' })
+    ).toBeDisabled();
+  });
 });
 
 /**

@@ -285,8 +285,33 @@ const readyEngineController = (): StudioPhaseControllers => {
       silentOutput: true,
     },
   };
+  const readyScene = scene({ id: 'scene-1', mediaKind: 'image' });
+  const currentProject = project({
+    sceneOrder: [readyScene.id],
+    scenes: { [readyScene.id]: readyScene },
+    routing: {
+      storyboard: null,
+      image: {
+        choiceId: imageRoute.choiceId,
+        providerId: imageRoute.providerId,
+        model: imageRoute.model,
+      },
+      video: null,
+    },
+  });
+  const controller = phaseController();
 
-  return phaseController({
+  return {
+    ...controller,
+    project: currentProject,
+    editor: {
+      ...controller.editor,
+      project: currentProject,
+      orderedScenes: [readyScene],
+      selectedSceneId: readyScene.id,
+      selectedScene: readyScene,
+    },
+    jobs: { ...controller.jobs, project: currentProject },
     models: {
       catalog: {
         storyboard: { status: 'ready', selected: null, options: [] },
@@ -313,7 +338,7 @@ const readyEngineController = (): StudioPhaseControllers => {
       selectedAssetCount: 0,
       durationDeltaSeconds: 0,
     },
-  });
+  };
 };
 
 describe('Creative Studio full-sentence English copy', () => {
