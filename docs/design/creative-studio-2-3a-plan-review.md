@@ -28,8 +28,29 @@ should choose it knowingly rather than inherit it from a constraints list. The n
 all concern reference-management detail; none is _"build the still stage even where the video engine
 accepts references directly."_
 
+### The argument the plan should be making
+
+Provider neutrality is the weaker half of the case. The stronger one is **composition with 3b**, and
+the plan does not state it:
+
+- The still stage puts a clip in **`first_frame` mode**. Phase 3b's chain — clip 2 starting from clip
+  1's last frame — **is** `first_frame` mode. Same mechanism, so they compose end to end:
+  still → clip 1 → chain → clip 2 → clip 3.
+- Direct references put a clip in **multi-reference mode**, which is mutually exclusive with
+  `first_frame`. The moment you want chaining you have to leave that mode anyway.
+
+So the trade is not "neutral but expensive versus specific but cheap". It is that **the cheap path
+does not extend into the next phase and the expensive one does**. Building direct references first
+would mean building a mechanism 3b then has to switch out of.
+
+The honest cost of the recommended answer, stated plainly so nobody rediscovers it: **two paid calls
+per shot where one might do** — roughly 60 rather than 30 provider calls for a nine-section project
+at 3–4 clips each — and a still that is an image model's interpretation of the cast rather than the
+cast photographs themselves.
+
 **Ask for that decision explicitly.** If the answer is yes, everything downstream in this plan
-stands unchanged.
+stands unchanged — and the reason is recorded, so it is not re-litigated in three weeks by someone
+who notices the doubled call count.
 
 ## 2. Type — make `StudioRouteConstraints.maxConditioningImages` optional, not required
 
