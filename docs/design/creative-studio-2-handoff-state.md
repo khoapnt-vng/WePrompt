@@ -95,6 +95,32 @@ nine call sites.
 
 ---
 
+## Known load-sensitive tests on this branch
+
+Two tests have failed in a full suite and passed in isolation at the same commit. Neither is caused
+by S1 or S2 — both were reached by branches that cannot touch their code — but both will cost the
+next person twenty minutes if they are not written down.
+
+| test                                                                                                                                                   | failure                                                         | isolated                                           |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- | -------------------------------------------------- |
+| `tests/unit/process/services/presentation-template/grants/PresentationSourceGrantStore.test.ts` — "enforces 16 grants per owner and 64 grants per app" | `Test timed out in 10000ms`, observed at **10,463 ms**          | passes; the whole 33-test file runs in ~12 s       |
+| `tests/integration/creative-studio/renderService.integration.test.ts`                                                                                  | real `ffmpeg` subprocess returns nonzero under `requireSuccess` | passes in ~14.8 s; took ~28 s in the failing suite |
+
+The grants one is the more interesting: it sits within roughly **half a second** of its own 10-second
+timeout on an idle machine, so any concurrent load tips it over. That is a test-design problem, not a
+product one — but until its budget is raised it will keep reporting as a random red.
+
+**Pass-isolated plus fail-under-load proves the failure is load-sensitive. It does not prove load is
+the cause** — this repo has already had one case (BUG-039) where load merely exposed a genuine timing
+assertion. Treat a red here as unclassified until someone looks, not as automatically benign.
+
+**Capture the exit code; do not read a piped tail.** Both `bun run test | tail` and `codex exec | tail`
+report the pipeline's status, not the command's, so a run can print a plausible summary while having
+failed. Run `bun run test > log 2>&1; echo "EXIT=$?"` and judge by that. The red tip above was found
+exactly this way, after several `| tail` runs had looked fine.
+
+---
+
 ## The gates that are not engineering
 
 From `creative-studio-2-programme-plan.md`. Each has a lead time no execution speed touches, and they
