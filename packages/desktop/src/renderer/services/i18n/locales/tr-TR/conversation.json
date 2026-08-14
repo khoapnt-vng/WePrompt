@@ -945,7 +945,7 @@
       },
       "shared": {
         "backToLibrary": "Proje kitaplığına dön",
-        "noMediaGeneration": "Bu adımda görüntü veya video oluşturulmaz.",
+        "noMediaGeneration": "Burada görsel veya video üretilmez.",
         "renameProject": "Projeyi yeniden adlandır",
         "invalidProjectName": "Bir proje adı girin.",
         "activityLabel": "Proje etkinliği",
@@ -957,7 +957,7 @@
       },
       "brief": {
         "title": "Özet",
-        "description": "Yazmaya başlamadan önce proje hedefini, biçimini ve süresini belirleyin.",
+        "description": "Projenin amacı, biçimi ve süresi. Yeni çekimler bunları devralır.",
         "nameLabel": "Proje adı",
         "intentLabel": "Yaratıcı amaç",
         "durationLabel": "Hedef süre",

@@ -942,7 +942,7 @@
       },
       "shared": {
         "backToLibrary": "프로젝트 라이브러리로 돌아가기",
-        "noMediaGeneration": "이 단계에서는 이미지나 동영상을 생성하지 않습니다.",
+        "noMediaGeneration": "여기서는 이미지나 영상이 생성되지 않습니다.",
         "renameProject": "프로젝트 이름 바꾸기",
         "invalidProjectName": "프로젝트 이름을 입력하세요.",
         "activityLabel": "프로젝트 활동",
@@ -953,7 +953,7 @@
       },
       "brief": {
         "title": "기획",
-        "description": "작성을 시작하기 전에 프로젝트 목표, 형식, 길이를 정하세요.",
+        "description": "프로젝트의 목표, 형식, 길이. 새 샷이 이를 물려받습니다.",
         "nameLabel": "프로젝트 이름",
         "intentLabel": "제작 의도",
         "durationLabel": "목표 길이",

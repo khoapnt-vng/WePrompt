@@ -778,7 +778,7 @@
       },
       "shared": {
         "backToLibrary": "Back to project library",
-        "noMediaGeneration": "This step does not generate images or video.",
+        "noMediaGeneration": "Nothing here generates images or video.",
         "renameProject": "Rename project",
         "invalidProjectName": "Enter a project name.",
         "activityLabel": "Project activity",
@@ -790,7 +790,7 @@
       },
       "brief": {
         "title": "Brief",
-        "description": "Define the project goal, format, and timing before writing.",
+        "description": "The project goal, format and timing. New shots inherit from it.",
         "nameLabel": "Project name",
         "intentLabel": "Creative intent",
         "durationLabel": "Target duration",

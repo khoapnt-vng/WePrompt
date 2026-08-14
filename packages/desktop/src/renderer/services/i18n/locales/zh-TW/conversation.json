@@ -942,7 +942,7 @@
       },
       "shared": {
         "backToLibrary": "返回專案庫",
-        "noMediaGeneration": "此步驟不會產生圖片或影片。",
+        "noMediaGeneration": "這裡不會產生圖片或影片。",
         "renameProject": "重新命名專案",
         "invalidProjectName": "請輸入專案名稱。",
         "activityLabel": "專案活動",
@@ -953,7 +953,7 @@
       },
       "brief": {
         "title": "簡報",
-        "description": "在編寫前先確認專案目標、格式與時長。",
+        "description": "專案的目標、畫面比例與時長。新鏡頭會沿用這些設定。",
         "nameLabel": "專案名稱",
         "intentLabel": "創作意圖",
         "durationLabel": "目標時長",

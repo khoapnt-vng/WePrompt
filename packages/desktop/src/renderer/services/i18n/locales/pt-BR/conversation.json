@@ -950,7 +950,7 @@
       },
       "shared": {
         "backToLibrary": "Voltar à biblioteca de projetos",
-        "noMediaGeneration": "Esta etapa não gera imagens nem vídeos.",
+        "noMediaGeneration": "Aqui não são geradas imagens nem vídeos.",
         "renameProject": "Renomear projeto",
         "invalidProjectName": "Informe um nome de projeto.",
         "activityLabel": "Atividade do projeto",
@@ -963,7 +963,7 @@
       },
       "brief": {
         "title": "Briefing",
-        "description": "Defina o objetivo, o formato e a duração do projeto antes de escrever.",
+        "description": "O objetivo, o formato e a duração do projeto. Novos planos herdam esses valores.",
         "nameLabel": "Nome do projeto",
         "intentLabel": "Intenção criativa",
         "durationLabel": "Duração desejada",

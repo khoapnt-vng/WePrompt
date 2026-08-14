@@ -944,7 +944,7 @@
       },
       "shared": {
         "backToLibrary": "Zurück zur Projektbibliothek",
-        "noMediaGeneration": "In diesem Schritt werden keine Bilder oder Videos erzeugt.",
+        "noMediaGeneration": "Hier werden keine Bilder oder Videos erzeugt.",
         "renameProject": "Projekt umbenennen",
         "invalidProjectName": "Gib einen Projektnamen ein.",
         "activityLabel": "Projektaktivität",
@@ -956,7 +956,7 @@
       },
       "brief": {
         "title": "Briefing",
-        "description": "Lege vor dem Schreiben Projektziel, Format und Dauer fest.",
+        "description": "Projektziel, Format und Dauer. Neue Shots übernehmen diese Angaben.",
         "nameLabel": "Projektname",
         "intentLabel": "Kreative Absicht",
         "durationLabel": "Zieldauer",

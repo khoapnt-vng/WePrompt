@@ -942,7 +942,7 @@
       },
       "shared": {
         "backToLibrary": "返回项目库",
-        "noMediaGeneration": "此步骤不会生成图像或视频。",
+        "noMediaGeneration": "这里不会生成图片或视频。",
         "renameProject": "重命名项目",
         "invalidProjectName": "请输入项目名称。",
         "activityLabel": "项目活动",
@@ -953,7 +953,7 @@
       },
       "brief": {
         "title": "简报",
-        "description": "在编写之前明确项目目标、格式和时长。",
+        "description": "项目的目标、画幅与时长。新镜头会沿用这些设置。",
         "nameLabel": "项目名称",
         "intentLabel": "创作意图",
         "durationLabel": "目标时长",

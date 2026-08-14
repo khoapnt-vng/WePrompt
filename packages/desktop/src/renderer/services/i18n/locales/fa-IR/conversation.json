@@ -943,7 +943,7 @@
       },
       "shared": {
         "backToLibrary": "بازگشت به کتابخانه پروژه‌ها",
-        "noMediaGeneration": "در این مرحله تصویر یا ویدیو تولید نمی‌شود.",
+        "noMediaGeneration": "اینجا تصویر یا ویدیویی تولید نمی‌شود.",
         "renameProject": "تغییر نام پروژه",
         "invalidProjectName": "نام پروژه را وارد کنید.",
         "activityLabel": "فعالیت پروژه",
@@ -955,7 +955,7 @@
       },
       "brief": {
         "title": "خلاصه",
-        "description": "پیش از نگارش، هدف، قالب و زمان پروژه را مشخص کنید.",
+        "description": "هدف، قالب و مدت پروژه. نماهای جدید از آن ارث می‌برند.",
         "nameLabel": "نام پروژه",
         "intentLabel": "هدف خلاقانه",
         "durationLabel": "زمان هدف",

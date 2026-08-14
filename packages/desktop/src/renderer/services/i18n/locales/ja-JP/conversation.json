@@ -942,7 +942,7 @@
       },
       "shared": {
         "backToLibrary": "プロジェクト一覧に戻る",
-        "noMediaGeneration": "この手順では画像や動画は生成されません。",
+        "noMediaGeneration": "ここでは画像や動画は生成されません。",
         "renameProject": "プロジェクト名を変更",
         "invalidProjectName": "プロジェクト名を入力してください。",
         "activityLabel": "プロジェクトの状況",
@@ -953,7 +953,7 @@
       },
       "brief": {
         "title": "概要",
-        "description": "構成を始める前に、プロジェクトの目的、形式、尺を決めます。",
+        "description": "プロジェクトの目的、形式、尺。新しいショットはこれを引き継ぎます。",
         "nameLabel": "プロジェクト名",
         "intentLabel": "制作意図",
         "durationLabel": "目標尺",
