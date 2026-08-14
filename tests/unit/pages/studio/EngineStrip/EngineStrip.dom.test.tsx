@@ -261,6 +261,52 @@ describe('EngineStrip', () => {
     expect(screen.queryByText(/coherence/i)).not.toBeInTheDocument();
   });
 
+  it('keeps a selected Image summary truthful while menu rows retain clip capabilities', async () => {
+    const selected = route('image', {
+      constraints: {
+        ...route('image').constraints,
+        resolutions: ['720p', '1080p'],
+        minDurationSeconds: 1,
+        maxDurationSeconds: 60,
+      },
+    });
+    render(
+      <EngineStrip
+        {...props({
+          models: modelResult({
+            catalog: catalog({
+              image: media({
+                status: 'ready',
+                selected: { choiceId: selected.choiceId, providerId: selected.providerId, model: selected.model },
+                selectedRoute: selected,
+                options: [selected],
+              }),
+            }),
+          }),
+        })}
+      />
+    );
+
+    const imageTrigger = screen.getByRole('button', { name: 'image-model' });
+    expect(
+      screen.getByText(
+        'conversation.creativeStudio.models.engine.summaryImage:resolution=720p, 1080p,frame=conversation.creativeStudio.models.engine.frameYes',
+        { selector: 'p' }
+      )
+    ).toBeVisible();
+    expect(imageTrigger).toHaveAccessibleDescription(
+      'conversation.creativeStudio.models.engine.summaryImage:resolution=720p, 1080p,frame=conversation.creativeStudio.models.engine.frameYes'
+    );
+
+    fireEvent.click(imageTrigger);
+    const menu = await screen.findByRole('menu');
+    expect(
+      within(menu).getByText(
+        'conversation.creativeStudio.models.engine.summary:resolution=720p, 1080p,duration=conversation.creativeStudio.models.engine.durationRange:min=1,max=60,audio=conversation.creativeStudio.models.engine.audioSilent,frame=conversation.creativeStudio.models.engine.frameYes'
+      )
+    ).toBeVisible();
+  });
+
   it('selects exactly the chosen row and does not auto-write a pre-armed sole option', async () => {
     const updateSelection = vi.fn(async () => true);
     render(<EngineStrip {...props({ models: modelResult({ updateSelection }) })} />);

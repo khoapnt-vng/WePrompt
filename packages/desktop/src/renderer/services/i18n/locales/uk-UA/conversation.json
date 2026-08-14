@@ -1482,6 +1482,7 @@
         "roleVideoHint": "Створює кліпи, починаючи з цих зображень.",
         "optionLabel": "{{model}} · {{provider}} · {{integration}}",
         "summary": "{{resolution}} · {{duration}} · {{audio}} · {{frame}}",
+        "summaryImage": "{{resolution}} · {{frame}}",
         "durationRange": "{{min}}–{{max}} с",
         "frameYes": "Починає з кадру",
         "frameNo": "Не може почати з кадру",

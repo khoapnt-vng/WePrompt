@@ -1422,6 +1422,7 @@
         "roleVideoHint": "從這些靜態畫面開始製作片段。",
         "optionLabel": "{{model}} · {{provider}} · {{integration}}",
         "summary": "{{resolution}} · {{duration}} · {{audio}} · {{frame}}",
+        "summaryImage": "{{resolution}} · {{frame}}",
         "durationRange": "{{min}}–{{max}} 秒",
         "frameYes": "從一幀開始",
         "frameNo": "無法從一幀開始",

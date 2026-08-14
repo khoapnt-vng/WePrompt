@@ -1443,6 +1443,7 @@
         "roleVideoHint": "Erstellt die Clips ausgehend von diesen Standbildern.",
         "optionLabel": "{{model}} · {{provider}} · {{integration}}",
         "summary": "{{resolution}} · {{duration}} · {{audio}} · {{frame}}",
+        "summaryImage": "{{resolution}} · {{frame}}",
         "durationRange": "{{min}}–{{max}} s",
         "frameYes": "Beginnt mit einem Bild",
         "frameNo": "Kann nicht mit einem Bild beginnen",

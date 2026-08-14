@@ -1444,6 +1444,7 @@
         "roleVideoHint": "Bu sabit görüntülerden başlayarak klipleri oluşturur.",
         "optionLabel": "{{model}} · {{provider}} · {{integration}}",
         "summary": "{{resolution}} · {{duration}} · {{audio}} · {{frame}}",
+        "summaryImage": "{{resolution}} · {{frame}}",
         "durationRange": "{{min}}–{{max}} sn",
         "frameYes": "Bir kareden başlar",
         "frameNo": "Bir kareden başlayamaz",

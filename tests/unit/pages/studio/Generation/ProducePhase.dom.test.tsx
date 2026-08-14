@@ -402,7 +402,7 @@ describe('ProducePhase', () => {
     render(<ProducePhase controller={controller} />);
 
     expect(screen.getByRole('button', { name: 'image-model' })).toHaveAccessibleDescription(
-      'conversation.creativeStudio.models.engine.summary:resolution=720p,duration=conversation.creativeStudio.models.engine.durationRange:min=1,max=47,audio=conversation.creativeStudio.models.engine.audioSilent,frame=conversation.creativeStudio.models.engine.frameYes'
+      'conversation.creativeStudio.models.engine.summaryImage:resolution=720p,frame=conversation.creativeStudio.models.engine.frameYes'
     );
     expect(screen.queryByText(/video-model/)).not.toBeInTheDocument();
     expect(screen.getByText('conversation.creativeStudio.models.engine.noFitVideo')).toBeVisible();

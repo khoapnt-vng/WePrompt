@@ -58,6 +58,14 @@ export const EngineSlot: React.FC<EngineSlotProps> = ({
     });
   };
 
+  const selectedRouteSummary = (route: StudioRouteCatalogEntry): string =>
+    slot.role === 'image'
+      ? t(engineKey('summaryImage'), {
+          resolution: route.constraints.resolutions.join(', '),
+          frame: t(engineKey(route.constraints.supportsFirstFrame ? 'frameYes' : 'frameNo')),
+        })
+      : routeSummary(route);
+
   const copy = useMemo(() => {
     switch (slot.state) {
       case 'unloaded':
@@ -73,7 +81,7 @@ export const EngineSlot: React.FC<EngineSlotProps> = ({
           detail: t(engineKey('noFitHint'), { ratio: project.aspectRatio, resolution: project.resolution }),
         };
       case 'ready':
-        return { primary: slot.selectedRoute.model, detail: routeSummary(slot.selectedRoute) };
+        return { primary: slot.selectedRoute.model, detail: selectedRouteSummary(slot.selectedRoute) };
       case 'retired':
         return {
           primary: slot.selectedModel,

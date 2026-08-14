@@ -1422,6 +1422,7 @@
         "roleVideoHint": "その静止画から始まるクリップを作成します。",
         "optionLabel": "{{model}} · {{provider}} · {{integration}}",
         "summary": "{{resolution}} · {{duration}} · {{audio}} · {{frame}}",
+        "summaryImage": "{{resolution}} · {{frame}}",
         "durationRange": "{{min}}～{{max}}秒",
         "frameYes": "フレームから開始",
         "frameNo": "フレームから開始不可",

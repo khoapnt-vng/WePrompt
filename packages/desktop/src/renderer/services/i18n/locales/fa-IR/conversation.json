@@ -1442,6 +1442,7 @@
         "roleVideoHint": "کلیپ‌ها را با شروع از آن تصاویر ثابت می‌سازد.",
         "optionLabel": "{{model}} · {{provider}} · {{integration}}",
         "summary": "{{resolution}} · {{duration}} · {{audio}} · {{frame}}",
+        "summaryImage": "{{resolution}} · {{frame}}",
         "durationRange": "{{min}} تا {{max}} ثانیه",
         "frameYes": "از یک فریم شروع می‌کند",
         "frameNo": "نمی‌تواند از یک فریم شروع کند",

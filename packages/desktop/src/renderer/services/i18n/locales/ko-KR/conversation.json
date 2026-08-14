@@ -1422,6 +1422,7 @@
         "roleVideoHint": "그 스틸 이미지에서 시작하는 클립을 만듭니다.",
         "optionLabel": "{{model}} · {{provider}} · {{integration}}",
         "summary": "{{resolution}} · {{duration}} · {{audio}} · {{frame}}",
+        "summaryImage": "{{resolution}} · {{frame}}",
         "durationRange": "{{min}}–{{max}}초",
         "frameYes": "프레임에서 시작",
         "frameNo": "프레임에서 시작할 수 없음",

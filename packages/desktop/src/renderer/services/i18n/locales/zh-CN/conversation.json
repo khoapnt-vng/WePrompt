@@ -1422,6 +1422,7 @@
         "roleVideoHint": "从这些静态画面开始生成片段。",
         "optionLabel": "{{model}} · {{provider}} · {{integration}}",
         "summary": "{{resolution}} · {{duration}} · {{audio}} · {{frame}}",
+        "summaryImage": "{{resolution}} · {{frame}}",
         "durationRange": "{{min}}–{{max}} 秒",
         "frameYes": "从一帧开始",
         "frameNo": "无法从一帧开始",

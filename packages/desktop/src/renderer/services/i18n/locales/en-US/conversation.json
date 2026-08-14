@@ -1277,6 +1277,7 @@
         "roleVideoHint": "Makes the clips, starting from those stills.",
         "optionLabel": "{{model}} · {{provider}} · {{integration}}",
         "summary": "{{resolution}} · {{duration}} · {{audio}} · {{frame}}",
+        "summaryImage": "{{resolution}} · {{frame}}",
         "durationRange": "{{min}}–{{max}}s",
         "frameYes": "Starts from a frame",
         "frameNo": "Cannot start from a frame",

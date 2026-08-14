@@ -1463,6 +1463,7 @@
         "roleVideoHint": "Crea los clips a partir de esas imágenes fijas.",
         "optionLabel": "{{model}} · {{provider}} · {{integration}}",
         "summary": "{{resolution}} · {{duration}} · {{audio}} · {{frame}}",
+        "summaryImage": "{{resolution}} · {{frame}}",
         "durationRange": "{{min}}–{{max}} s",
         "frameYes": "Empieza desde un fotograma",
         "frameNo": "No puede empezar desde un fotograma",

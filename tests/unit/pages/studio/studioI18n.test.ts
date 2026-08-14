@@ -259,6 +259,7 @@ const engineStripKeys = [
   'models.engine.roleVideoHint',
   'models.engine.optionLabel',
   'models.engine.summary',
+  'models.engine.summaryImage',
   'models.engine.durationRange',
   'models.engine.frameYes',
   'models.engine.frameNo',

@@ -1468,6 +1468,7 @@
         "roleVideoHint": "Cria os clipes a partir dessas imagens estáticas.",
         "optionLabel": "{{model}} · {{provider}} · {{integration}}",
         "summary": "{{resolution}} · {{duration}} · {{audio}} · {{frame}}",
+        "summaryImage": "{{resolution}} · {{frame}}",
         "durationRange": "{{min}}–{{max}} s",
         "frameYes": "Começa com um quadro",
         "frameNo": "Não começa com um quadro",
