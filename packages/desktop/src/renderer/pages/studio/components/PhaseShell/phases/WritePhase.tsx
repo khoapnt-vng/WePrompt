@@ -7,6 +7,7 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { EngineStrip } from '../../EngineStrip';
 import { buildSingleSceneReviewRequest } from '../../Generation/generationRequests';
 import { requestedMediaKind } from '@/common/types/project/creativeStudioOutputRole';
 import { resolveSceneDurationBounds } from '../../../studioRouteConstraints';
@@ -31,6 +32,8 @@ export const WritePhase: React.FC<WritePhaseProps> = ({ controller, layoutMode =
     models,
     writeFocusIntent,
     mutationPending,
+    generationReviewOpen,
+    openModelSettings,
     openSingleGenerationReview,
     importReference,
     clearWriteFocusIntent,
@@ -125,6 +128,13 @@ export const WritePhase: React.FC<WritePhaseProps> = ({ controller, layoutMode =
         {t('conversation.creativeStudio.phase.write.title')}
       </h2>
       <div className={styles.workspace} data-layout={layoutMode}>
+        <EngineStrip
+          project={project}
+          models={models}
+          variant='compact'
+          locked={generationReviewOpen}
+          openModelSettings={openModelSettings}
+        />
         <ScriptTable
           orderedScenes={editor.orderedScenes}
           canAddScene={editor.canAddScene}

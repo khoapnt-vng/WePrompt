@@ -139,6 +139,23 @@ describe('EngineStrip', () => {
     );
   });
 
+  it('keeps labels and descriptions unique when a work view and Brief mount coexist', () => {
+    const { container } = render(
+      <>
+        <EngineStrip {...props()} />
+        <EngineStrip {...props({ variant: 'compact' })} />
+      </>
+    );
+    const ids = [...container.querySelectorAll<HTMLElement>('[id]')].map(({ id }) => id);
+
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const group of screen.getAllByRole('group')) {
+      const labelId = group.getAttribute('aria-labelledby');
+      expect(labelId).not.toBeNull();
+      expect(container.querySelectorAll(`[id="${labelId}"]`)).toHaveLength(1);
+    }
+  });
+
   it('keeps the healthy compact variant to one line and only shows fallback bounds', () => {
     const selected = route('video');
     const selectedCatalog = catalog({

@@ -41,6 +41,8 @@ export type StudioPhaseControllers = {
   writeFocusIntent: StudioWriteFocusIntent | null;
   advisory: StudioPhaseAdvisory | null;
   mutationPending: boolean;
+  /** A paid generation review freezes project revision until it is confirmed or closed. */
+  generationReviewOpen: boolean;
   requestTransition: (transition: StudioViewTransition) => void;
   /** Opens the project draft settings from the frame. */
   openBrief: () => void;
@@ -70,7 +72,9 @@ export type WritePhaseController = Pick<
   | 'writeFocusIntent'
   | 'advisory'
   | 'mutationPending'
+  | 'generationReviewOpen'
   | 'requestTransition'
+  | 'openModelSettings'
   | 'openSingleGenerationReview'
   | 'importReference'
   | 'clearWriteFocusIntent'
@@ -87,6 +91,7 @@ export type ProducePhaseController = Pick<
   | 'posterAsset'
   | 'advisory'
   | 'mutationPending'
+  | 'generationReviewOpen'
   | 'requestTransition'
   | 'openSingleGenerationReview'
   | 'openBatchGenerationReview'

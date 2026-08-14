@@ -174,6 +174,12 @@ const disconnectedCatalog = (): StudioRouteCatalog => {
   };
 };
 
+const emptyOptionsCatalog = (): StudioRouteCatalog => ({
+  ...disconnectedCatalog(),
+  image: { ...disconnectedCatalog().image, options: [] },
+  video: { ...disconnectedCatalog().video, options: [] },
+});
+
 const project = (overrides: Partial<StudioRendererProject> = {}): StudioRendererProject => {
   const opening = scene();
   const closing = scene({
@@ -303,6 +309,7 @@ const createController = (
     posterAsset: null,
     advisory: null,
     mutationPending: false,
+    generationReviewOpen: false,
     requestTransition: vi.fn(),
     openSingleGenerationReview: vi.fn(),
     openBatchGenerationReview: vi.fn(),
@@ -317,24 +324,51 @@ describe('ProducePhase', () => {
     vi.clearAllMocks();
   });
 
-  it('keeps engine selection reachable above the connection door when no route is ready', () => {
+  it('keeps the full strip and Board workspace visible when options exist but no route is selected', () => {
     const controller = createController(project(), 'scene-1', disconnectedCatalog());
     const { container } = render(<ProducePhase controller={controller} />);
 
     expect(
-      screen.getByRole('heading', { name: 'conversation.creativeStudio.phase.produce.connectEngine' })
-    ).toBeVisible();
+      screen.queryByRole('heading', { name: 'conversation.creativeStudio.phase.produce.connectEngine' })
+    ).not.toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'conversation.creativeStudio.models.engine.label' })).toBeVisible();
+    expect(screen.getByRole('region', { name: 'conversation.creativeStudio.models.engine.label' })).toHaveAttribute(
+      'data-variant',
+      'full'
+    );
     expect(screen.getByRole('group', { name: 'conversation.creativeStudio.models.engine.roleImage' })).toBeVisible();
     expect(screen.getByRole('group', { name: 'conversation.creativeStudio.models.engine.roleVideo' })).toBeVisible();
     expect(
-      screen.queryByRole('region', { name: 'conversation.creativeStudio.phase.produce.activityTitle' })
-    ).not.toBeInTheDocument();
+      screen.getByRole('region', { name: 'conversation.creativeStudio.phase.produce.activityTitle' })
+    ).toBeVisible();
+    expect(screen.getByRole('region', { name: 'conversation.creativeStudio.storyboard.title' })).toBeVisible();
     expect(container.querySelectorAll('[role="alert"]')).toHaveLength(0);
   });
 
+  it('replaces only the Board grid region with the connection door when both roles have no options', () => {
+    const controller = createController(project(), 'scene-1', emptyOptionsCatalog());
+    const { container } = render(<ProducePhase controller={controller} />);
+    const gridRegion = container.querySelector('[data-studio-board-grid-region]');
+
+    expect(gridRegion).not.toBeNull();
+    expect(
+      within(gridRegion as HTMLElement).getByRole('heading', {
+        name: 'conversation.creativeStudio.phase.produce.connectEngine',
+      })
+    ).toBeVisible();
+    expect(
+      within(gridRegion as HTMLElement).queryByRole('region', {
+        name: 'conversation.creativeStudio.storyboard.title',
+      })
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'conversation.creativeStudio.models.engine.label' })).toBeVisible();
+    expect(
+      screen.getByRole('region', { name: 'conversation.creativeStudio.phase.produce.activityTitle' })
+    ).toBeVisible();
+  });
+
   it('routes the connection door actions to Model Settings and the shared clipboard utility', () => {
-    const controller = createController(project(), 'scene-1', disconnectedCatalog());
+    const controller = createController(project(), 'scene-1', emptyOptionsCatalog());
     let copiedText = '';
     Object.defineProperty(window, 'isSecureContext', { configurable: true, value: false });
     Object.defineProperty(document, 'execCommand', {

@@ -1322,6 +1322,7 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
     advisory,
     mutationPending:
       canonicalMutationPending || referenceImportSceneId !== null || generationReviewRefreshing || exportPending,
+    generationReviewOpen: generationReview !== null,
     requestTransition,
     openBrief: () => setBriefOpen(true),
     openRules: () => setRulesOpen(true),

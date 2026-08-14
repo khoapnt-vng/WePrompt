@@ -148,6 +148,7 @@ const models: UseStudioModelsResult = {
   catalog: null,
   loading: false,
   errorMessageKey: null,
+  selectionIssue: null,
   pendingRole: null,
   refresh: vi.fn(async () => undefined),
   updateSelection: vi.fn(async () => true),
@@ -270,6 +271,7 @@ const controller = (
   writeFocusIntent: null,
   advisory,
   mutationPending: false,
+  generationReviewOpen: false,
   requestTransition: vi.fn(),
   openBrief: vi.fn(),
   openRules: vi.fn(),
@@ -296,6 +298,28 @@ const renderShell = (advisory: StudioPhaseAdvisory | null, overrides: Partial<St
       onBack={vi.fn()}
     />
   );
+
+describe('StudioPhaseShell view mounts', () => {
+  it.each([
+    ['table', true],
+    ['board', true],
+    ['cut', false],
+  ] as const)('keeps one phase heading and the intended Engine Strip mount in %s', (activeView, hasStrip) => {
+    const { container } = render(
+      <StudioPhaseShell
+        activeView={activeView}
+        controller={controller(null)}
+        navigationDisabled={false}
+        onBack={vi.fn()}
+      />
+    );
+
+    expect(container.querySelectorAll('[data-studio-phase-heading]')).toHaveLength(1);
+    const strip = screen.queryByRole('region', { name: 'conversation.creativeStudio.models.engine.label' });
+    if (hasStrip) expect(strip).toBeVisible();
+    else expect(strip).not.toBeInTheDocument();
+  });
+});
 
 describe('StudioPhaseShell advisory', () => {
   it('announces a shell-anchored Table timing advisory in the shell alert region', () => {

@@ -7,7 +7,7 @@
 import React, { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { EngineStrip, getReadySelectedRoutes } from '../../EngineStrip';
+import { EngineStrip } from '../../EngineStrip';
 import { GenerationJobList } from '../../Generation';
 import type { ProducePhaseController } from '../types';
 import type { StudioLayoutMode } from '../useStudioLayoutMode';
@@ -28,6 +28,7 @@ export const ProducePhase: React.FC<ProducePhaseProps> = ({ controller, layoutMo
     models,
     jobs,
     mutationPending,
+    generationReviewOpen,
     requestTransition,
     openSingleGenerationReview,
     openModelSettings,
@@ -45,7 +46,6 @@ export const ProducePhase: React.FC<ProducePhaseProps> = ({ controller, layoutMo
     () => Object.fromEntries(orderedScenes.map((candidate) => [candidate.id, candidate.title])),
     [orderedScenes]
   );
-  const readyRoutes = getReadySelectedRoutes(models.catalog);
   const generationBlocked =
     editor.hasUnsavedProjectDraft ||
     editor.hasUnsavedSceneDrafts ||
@@ -56,6 +56,8 @@ export const ProducePhase: React.FC<ProducePhaseProps> = ({ controller, layoutMo
     jobs.issue?.jobId !== undefined && jobs.jobs.some((candidate) => candidate.id === jobs.issue?.jobId)
       ? { jobId: jobs.issue.jobId, code: jobs.issue.code, messageKey: jobs.issue.messageKey }
       : null;
+  const showConnectDoor =
+    models.catalog !== null && models.catalog.image.options.length === 0 && models.catalog.video.options.length === 0;
 
   return (
     <section data-layout={layoutMode} className={styles.phase} aria-labelledby='studio-produce-phase-heading'>
@@ -68,56 +70,59 @@ export const ProducePhase: React.FC<ProducePhaseProps> = ({ controller, layoutMo
         project={project}
         models={models}
         variant='full'
+        locked={generationReviewOpen}
         openModelSettings={openModelSettings}
       />
 
-      {readyRoutes.length === 0 ? (
-        <ConnectEngineCard disabled={mutationPending} onOpenSettings={openModelSettings} />
-      ) : (
-        <div className={styles.content}>
-          <ShotGrid
-            project={project}
-            scenes={orderedScenes}
-            sceneStatuses={readiness.sceneStatuses}
-            selectedSceneId={editor.selectedSceneId}
-            catalog={models.catalog}
-            catalogLoading={models.loading}
-            generationDisabled={generationBlocked}
-            mutationPending={mutationPending}
-            jobs={jobs.jobs}
-            jobsMutationPending={jobs.mutationPending}
-            onSelectScene={editor.selectScene}
-            onWriteVisual={(sceneId) => {
-              editor.selectScene(sceneId);
-              requestTransition({
-                view: 'table',
-                state: { writeFocus: { sceneId, field: 'visualPrompt' } },
-              });
-            }}
-            onOpenSingleReview={openSingleGenerationReview}
-            onCancelJob={jobs.cancelJob}
-          />
+      <div className={styles.content}>
+        <div className={styles.gridRegion} data-studio-board-grid-region>
+          {showConnectDoor ? (
+            <ConnectEngineCard disabled={mutationPending} onOpenSettings={openModelSettings} />
+          ) : (
+            <ShotGrid
+              project={project}
+              scenes={orderedScenes}
+              sceneStatuses={readiness.sceneStatuses}
+              selectedSceneId={editor.selectedSceneId}
+              catalog={models.catalog}
+              catalogLoading={models.loading}
+              generationDisabled={generationBlocked}
+              mutationPending={mutationPending}
+              jobs={jobs.jobs}
+              jobsMutationPending={jobs.mutationPending}
+              onSelectScene={editor.selectScene}
+              onWriteVisual={(sceneId) => {
+                editor.selectScene(sceneId);
+                requestTransition({
+                  view: 'table',
+                  state: { writeFocus: { sceneId, field: 'visualPrompt' } },
+                });
+              }}
+              onOpenSingleReview={openSingleGenerationReview}
+              onCancelJob={jobs.cancelJob}
+            />
+          )}
+        </div>
 
-          {/* The activity feed only. The batch control that used to close this column is the
+        {/* The activity feed only. The batch control that used to close this column is the
             document's one spend, so it moved to the frame's top bar with its advisory — a paid
             action reachable from one view was reachable only by knowing which view held it. */}
-          <aside className={styles.activityColumn}>
-            <div className={styles.activityList}>
-              <GenerationJobList
-                jobs={jobs.jobs}
-                sceneTitles={sceneTitles}
-                disabled={generationBlocked}
-                pendingJobIds={jobs.mutationPending ? jobs.jobs.map((candidate) => candidate.id) : []}
-                actionIssue={generationActionIssue}
-                onCancelJob={jobs.cancelJob}
-                onRetryJob={jobs.retryJob}
-                onRetryDownload={jobs.retryDownload}
-                onReviewUnknownSubmission={openDuplicateChargeConfirmation}
-              />
-            </div>
-          </aside>
-        </div>
-      )}
+        <aside className={styles.activityColumn}>
+          <div className={styles.activityList}>
+            <GenerationJobList
+              jobs={jobs.jobs}
+              sceneTitles={sceneTitles}
+              disabled={generationBlocked}
+              pendingJobIds={jobs.mutationPending ? jobs.jobs.map((candidate) => candidate.id) : []}
+              actionIssue={generationActionIssue}
+              onCancelJob={jobs.cancelJob}
+              onRetryJob={jobs.retryJob}
+              onRetryDownload={jobs.retryDownload}
+              onReviewUnknownSubmission={openDuplicateChargeConfirmation}
+            />
+          </div>
+        </aside>
+      </div>
     </section>
   );
 };

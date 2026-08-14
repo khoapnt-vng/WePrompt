@@ -10,6 +10,7 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { StudioAspectRatio } from '@/common/types/project/creativeStudioTypes';
+import { EngineStrip } from '../../EngineStrip';
 import type { StudioPhaseControllers } from '../types';
 import styles from './StudioBriefDrawer.module.css';
 
@@ -25,7 +26,10 @@ const ASPECT_RATIO_LABEL_KEYS = {
   '3:4': 'conversation.creativeStudio.create.aspectRatio3x4',
 } as const satisfies Record<StudioAspectRatio, string>;
 
-export type StudioBriefDrawerController = Pick<StudioPhaseControllers, 'project' | 'editor' | 'mutationPending'>;
+export type StudioBriefDrawerController = Pick<
+  StudioPhaseControllers,
+  'project' | 'editor' | 'models' | 'mutationPending' | 'generationReviewOpen' | 'openModelSettings'
+>;
 
 export type StudioBriefDrawerProps = {
   visible: boolean;
@@ -36,7 +40,7 @@ export type StudioBriefDrawerProps = {
 /** Project-draft settings that stay available from every Studio view. */
 export const StudioBriefDrawer: React.FC<StudioBriefDrawerProps> = ({ visible, controller, onClose }) => {
   const { t } = useTranslation();
-  const { project, editor, mutationPending } = controller;
+  const { project, editor, models, mutationPending, generationReviewOpen, openModelSettings } = controller;
   const [closing, setClosing] = useState(false);
   const projectConflict = editor.conflict?.operation === 'update_project' ? editor.conflict : null;
   const projectIssue = projectConflict ?? (editor.error?.operation === 'update_project' ? editor.error : null);
@@ -117,7 +121,7 @@ export const StudioBriefDrawer: React.FC<StudioBriefDrawerProps> = ({ visible, c
             )}
           </div>
 
-          <div className={styles.constraintsRow}>
+          <div className={styles.constraintsRow} data-studio-brief-constraints>
             <div className={styles.constraint}>
               <label htmlFor='studio-brief-duration' className={styles.constraintLabel}>
                 {t('conversation.creativeStudio.phase.brief.durationLabel')}
@@ -171,6 +175,15 @@ export const StudioBriefDrawer: React.FC<StudioBriefDrawerProps> = ({ visible, c
                 </div>
               )}
             </div>
+          </div>
+          <div className={styles.engineStrip}>
+            <EngineStrip
+              project={project}
+              models={models}
+              variant='compact'
+              locked={generationReviewOpen}
+              openModelSettings={openModelSettings}
+            />
           </div>
         </div>
 

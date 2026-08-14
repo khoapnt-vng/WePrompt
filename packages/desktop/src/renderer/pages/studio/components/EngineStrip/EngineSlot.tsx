@@ -5,7 +5,7 @@
  */
 
 import { Button, Dropdown, Menu, Spin, Tooltip } from '@arco-design/web-react';
-import React, { useMemo, useState } from 'react';
+import React, { useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { UseStudioModelsResult } from '../../hooks/useStudioModels';
@@ -34,12 +34,13 @@ export const EngineSlot: React.FC<EngineSlotProps> = ({
   onCommitted,
 }) => {
   const { t } = useTranslation();
+  const instanceId = useId();
   const [visible, setVisible] = useState(false);
   const [opening, setOpening] = useState(false);
   const roleLabel = t(engineKey(slot.role === 'image' ? 'roleImage' : 'roleVideo'));
   const roleHint = t(engineKey(slot.role === 'image' ? 'roleImageHint' : 'roleVideoHint'));
-  const roleId = `studio-engine-${slot.role}-label`;
-  const detailId = `studio-engine-${slot.role}-detail`;
+  const roleId = `studio-engine-${slot.role}-${instanceId}-label`;
+  const detailId = `studio-engine-${slot.role}-${instanceId}-detail`;
   const pending = models.pendingRole !== null;
   const isPendingRole = models.pendingRole === slot.role;
   const disabled = locked || pending;

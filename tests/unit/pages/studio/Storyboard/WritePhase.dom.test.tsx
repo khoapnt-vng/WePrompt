@@ -269,6 +269,7 @@ const models = (overrides: Partial<UseStudioModelsResult> = {}): UseStudioModels
   catalog,
   loading: false,
   errorMessageKey: null,
+  selectionIssue: null,
   pendingRole: null,
   refresh: vi.fn(async () => {}),
   updateSelection: vi.fn(async () => true),
@@ -290,7 +291,9 @@ const controller = (overrides: Partial<WritePhaseController> = {}): WritePhaseCo
   writeFocusIntent: null,
   advisory: null,
   mutationPending: false,
+  generationReviewOpen: false,
   requestTransition: vi.fn(),
+  openModelSettings: vi.fn(),
   openDraftReview: vi.fn(),
   openSingleGenerationReview: vi.fn(),
   importReference: vi.fn(async () => {}),
@@ -404,6 +407,30 @@ describe('WritePhase', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it('mounts the compact Engine Strip above the script table with one phase heading', () => {
+    const { container } = render(<WritePhase controller={controller()} />);
+    const strip = screen.getByRole('region', { name: 'conversation.creativeStudio.models.engine.label' });
+    const table = screen.getByRole('region', {
+      name: 'conversation.creativeStudio.phase.write.scriptTableTitle',
+    });
+
+    expect(strip).toHaveAttribute('data-variant', 'compact');
+    expect(strip.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(container.querySelectorAll('[data-studio-phase-heading]')).toHaveLength(1);
+  });
+
+  it('locks both Table engine slots only while generation review is open', () => {
+    render(<WritePhase controller={controller({ generationReviewOpen: true })} />);
+
+    for (const button of [
+      screen.getByRole('button', { name: 'image-model' }),
+      screen.getByRole('button', { name: 'video-model' }),
+    ]) {
+      expect(button).toBeDisabled();
+      expect(button).toHaveAccessibleDescription('conversation.creativeStudio.models.engine.lockedDuringReview');
+    }
   });
 
   it('keeps the six named headers aligned with every six-zone script row', () => {
@@ -1101,13 +1128,15 @@ describe('WritePhase', () => {
       // Guards the guard: the phase really did render at this width.
       expect(scriptTable, mode).toBeVisible();
 
-      // The script is the whole of Write's work area. A sibling here is the shape every version of
-      // the assistant took — the inline card, and the opener button that stood in for it below
-      // 1120px. Asserting only on the rendered drawer would miss the opener entirely, because Arco
-      // does not mount a Drawer until it is first opened.
+      // The only sibling admitted beside the script is the project Engine Strip. An assistant here
+      // would restore the old inline card or narrow-width opener; checking the exact pair catches
+      // both without mistaking the new engine control for a writing surface.
       const workspace = scriptTable.parentElement;
       expect(workspace, mode).not.toBeNull();
-      expect([...workspace!.children], mode).toEqual([scriptTable]);
+      const engineStrip = screen.getByRole('region', {
+        name: 'conversation.creativeStudio.models.engine.label',
+      });
+      expect([...workspace!.children], mode).toEqual([engineStrip, scriptTable]);
       expect(screen.queryByRole('complementary'), mode).not.toBeInTheDocument();
       expect(document.querySelector('.arco-drawer'), mode).toBeNull();
       expect(document.querySelector('[data-assistant-presentation]'), mode).toBeNull();

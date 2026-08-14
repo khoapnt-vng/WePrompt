@@ -2519,7 +2519,7 @@ describe('StudioPage and useStudioProject', () => {
     await screen.findByRole('region', { name: 'conversation.creativeStudio.models.engine.label' });
   });
 
-  it('asks for a connection instead of guessing when several engines could serve a role', async () => {
+  it('exposes ambiguous engine choices in place without guessing or showing the connection door', async () => {
     const unrouted = project('project-1', { routing: { storyboard: null, image: null, video: null } });
     bridge.getProject.invoke.mockResolvedValue(ok(unrouted));
     bridge.listRoutes.invoke.mockResolvedValue(
@@ -2536,7 +2536,12 @@ describe('StudioPage and useStudioProject', () => {
     );
     renderRoute('/studio/project-1/board');
 
-    await screen.findByRole('heading', { name: 'conversation.creativeStudio.phase.produce.connectEngine' });
+    expect(
+      await screen.findByRole('button', { name: 'conversation.creativeStudio.models.engine.notSetImage' })
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('heading', { name: 'conversation.creativeStudio.phase.produce.connectEngine' })
+    ).not.toBeInTheDocument();
     await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalledWith({ projectId: 'project-1' }));
     expect(bridge.updateModelSelection.invoke).not.toHaveBeenCalled();
   });
@@ -2562,6 +2567,10 @@ describe('StudioPage and useStudioProject', () => {
 
     expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
     expect(await screen.findByRole('dialog')).toHaveTextContent('conversation.creativeStudio.review.sceneCount');
+    expect(screen.getByRole('button', { name: 'image-model' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'image-model' })).toHaveAccessibleDescription(
+      'conversation.creativeStudio.models.engine.lockedDuringReview'
+    );
     within(screen.getByRole('navigation', { name: 'conversation.creativeStudio.phase.nav.viewsLabel' }))
       .getAllByRole('button')
       .forEach((button) => expect(button).toBeDisabled());
@@ -2631,7 +2640,9 @@ describe('StudioPage and useStudioProject', () => {
     bridge.listRoutes.invoke.mockResolvedValueOnce(failure()).mockResolvedValue(ok(routesWithImage(revisedRoute)));
     renderRoute('/studio/project-1/board');
 
-    await screen.findByRole('heading', { name: 'conversation.creativeStudio.phase.produce.connectEngine' });
+    expect(
+      await screen.findByRole('region', { name: 'conversation.creativeStudio.models.engine.label' })
+    ).toHaveTextContent('conversation.creativeStudio.models.engine.catalogUnloaded');
     canonicalProject = revised;
     await act(async () => onUpdate?.({ projectId: 'project-1' }));
     await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(2));
@@ -2657,7 +2668,9 @@ describe('StudioPage and useStudioProject', () => {
     bridge.listRoutes.invoke.mockReturnValueOnce(refresh.promise);
     renderRoute('/studio/project-1/board');
 
-    await screen.findByRole('heading', { name: 'conversation.creativeStudio.phase.produce.connectEngine' });
+    expect(
+      await screen.findByRole('region', { name: 'conversation.creativeStudio.models.engine.label' })
+    ).toHaveTextContent('conversation.creativeStudio.models.engine.catalogUnloaded');
     expect(
       screen.queryByRole('button', { name: 'conversation.creativeStudio.phase.produce.render' })
     ).not.toBeInTheDocument();

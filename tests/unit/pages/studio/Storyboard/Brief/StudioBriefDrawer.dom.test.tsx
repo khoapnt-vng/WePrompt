@@ -14,6 +14,7 @@ import {
   type StudioBriefDrawerController,
 } from '@renderer/pages/studio/components/PhaseShell/BriefDrawer';
 import type { UseStoryboardEditorResult } from '@renderer/pages/studio/hooks/useStoryboardEditor';
+import type { UseStudioModelsResult } from '@renderer/pages/studio/hooks/useStudioModels';
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 
@@ -105,7 +106,18 @@ const editor = (overrides: Partial<UseStoryboardEditorResult> = {}): UseStoryboa
 const controller = (overrides: Partial<StudioBriefDrawerController> = {}): StudioBriefDrawerController => ({
   project: project(),
   editor: editor(),
+  models: {
+    catalog: null,
+    loading: false,
+    errorMessageKey: null,
+    selectionIssue: null,
+    pendingRole: null,
+    refresh: vi.fn(async () => undefined),
+    updateSelection: vi.fn(async () => true),
+  } satisfies UseStudioModelsResult,
   mutationPending: false,
+  generationReviewOpen: false,
+  openModelSettings: vi.fn(),
   ...overrides,
 });
 
@@ -131,6 +143,27 @@ describe('StudioBriefDrawer', () => {
       within(dialog).getByRole('combobox', { name: 'conversation.creativeStudio.phase.brief.aspectRatioLabel' })
     ).toBeVisible();
     expect(dialog.querySelector('[data-studio-phase-heading]')).toBeNull();
+  });
+
+  it('mounts the compact Engine Strip below project constraints and above save recovery', () => {
+    const phaseEditor = editor({
+      conflict: {
+        operation: 'update_project',
+        code: 'stale_project',
+        messageKey: 'conversation.creativeStudio.errors.staleProject',
+      },
+    });
+    const { dialog } = renderDrawer(controller({ editor: phaseEditor }));
+    const constraints = dialog.querySelector('[data-studio-brief-constraints]');
+    const strip = within(dialog).getByRole('region', {
+      name: 'conversation.creativeStudio.models.engine.label',
+    });
+    const error = within(dialog).getByRole('alert');
+
+    expect(constraints).not.toBeNull();
+    expect(strip).toHaveAttribute('data-variant', 'compact');
+    expect(constraints!.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(strip.compareDocumentPosition(error) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
   });
 
   it('edits the brief text and flushes it on blur', () => {

@@ -17,7 +17,7 @@ export type ConnectEngineCardProps = {
   onOpenSettings: (path: '/settings/model') => void;
 };
 
-/** The sole Produce surface until the workspace has an explicitly selected media route. */
+/** Board-grid empty state for a workspace with no compatible image or video engine options. */
 export const ConnectEngineCard: React.FC<ConnectEngineCardProps> = ({
   disabled = false,
   headingId = 'studio-produce-connect-heading',

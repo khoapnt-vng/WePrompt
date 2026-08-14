@@ -49,6 +49,11 @@
   gap: 10px 16px;
 }
 
+.engineStrip {
+  width: 100%;
+  min-width: 0;
+}
+
 .constraint {
   gap: 4px;
 }
