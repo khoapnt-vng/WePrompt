@@ -6,6 +6,7 @@
 
 import type {
   StudioAspectRatio,
+  StudioConnectionIntegrationLabelKey,
   StudioMediaKind,
   StudioOutputRole,
   StudioResolution,
@@ -27,6 +28,7 @@ export type GenerationReviewRoute =
       status: 'valid' | 'invalid';
       snapshot: GenerationReviewRouteSnapshot;
       providerName: string | null;
+      integrationLabelKey: StudioConnectionIntegrationLabelKey | null;
       silentOutput: boolean | null;
     }
   | {
@@ -185,6 +187,11 @@ const routeMatchesScene = (scene: GenerationReviewScene): boolean =>
   scene.route.snapshot.sceneId === scene.id &&
   scene.route.snapshot.kind === scene.mediaKind;
 
+const integrationTranslationKey = (
+  integrationLabelKey: StudioConnectionIntegrationLabelKey
+): `settings.mediaModels.integration.${StudioConnectionIntegrationLabelKey}` =>
+  `settings.mediaModels.integration.${integrationLabelKey}`;
+
 /**
  * Hoisted, not inlined as `= {}`. A fresh object literal in the destructuring default is a new
  * identity on every render, and this value goes into the review `useMemo`'s dependency array — an
@@ -229,6 +236,12 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
     const invalidRoute = scenes.some(
       (scene) => scene.route.status === 'invalid' || (scene.route.snapshot !== null && !routeMatchesScene(scene))
     );
+    const blockedRouteCount = scenes.filter(
+      (scene) =>
+        scene.route.status === 'missing' ||
+        scene.route.status === 'invalid' ||
+        (scene.route.snapshot !== null && !routeMatchesScene(scene))
+    ).length;
     const durationMismatch = mode === 'batch' && projectDurationSeconds !== targetDurationSeconds;
     const validRoutes = scenes
       .filter((scene) => scene.route.status === 'valid' && routeMatchesScene(scene))
@@ -252,6 +265,7 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
       validRoutes,
       audioMessageKey,
       ruleBreached,
+      blockedRouteCount,
       canConfirm:
         scenes.length > 0 && !missingRoute && !invalidRoute && !ruleBreached && validRoutes.length === scenes.length,
     };
@@ -266,9 +280,9 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
   };
 
   const disabledReason = review.ruleBreached
-    ? 'conversation.creativeStudio.rules.breachBlockedConfirm'
+    ? t('conversation.creativeStudio.rules.breachBlockedConfirm')
     : review.missingRoute || review.invalidRoute
-      ? 'conversation.creativeStudio.review.disabledMissingRoutes'
+      ? t('conversation.creativeStudio.review.disabledMissingRoutes', { count: review.blockedRouteCount })
       : null;
   const routeBlockRole = scenes.find((scene) => scene.route.status !== 'valid' || !routeMatchesScene(scene))?.mediaKind;
   const firstFrameExclusions = excludedScenes.filter(
@@ -373,6 +387,14 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
                     </dd>
                     <dt className='text-12px text-t-tertiary'>{t('conversation.creativeStudio.review.modelLabel')}</dt>
                     <dd className='m-0 break-all text-12px text-t-primary'>{scene.route.snapshot.model}</dd>
+                    {scene.route.status !== 'missing' && typeof scene.route.integrationLabelKey === 'string' && (
+                      <>
+                        <dt className='text-12px text-t-tertiary'>{t('settings.mediaModels.integrationLabel')}</dt>
+                        <dd className='m-0 break-all text-12px text-t-primary'>
+                          {t(integrationTranslationKey(scene.route.integrationLabelKey))}
+                        </dd>
+                      </>
+                    )}
                   </dl>
                   {(scene.route.status === 'invalid' || !routeMatchesScene(scene)) && (
                     <Alert
@@ -449,7 +471,7 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
 
         {disabledReason && (
           <p role='status' className='m-0 rounded-8px bg-fill-1 p-10px text-12px text-t-secondary'>
-            {t(disabledReason)}
+            {disabledReason}
           </p>
         )}
         {review.ruleBreached && onAskDirector !== undefined && (

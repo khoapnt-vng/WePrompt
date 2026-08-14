@@ -156,6 +156,19 @@ describe('EngineStrip', () => {
     }
   });
 
+  it('keeps each engine role programmatically focusable with its localized state description', () => {
+    render(<EngineStrip {...props()} />);
+
+    const imageSlot = screen.getByRole('group', {
+      name: 'conversation.creativeStudio.models.engine.roleImage',
+    });
+    expect(imageSlot).toHaveAttribute('tabindex', '-1');
+    expect(imageSlot).toHaveAccessibleDescription('conversation.creativeStudio.models.engine.notSetCount:count=1');
+
+    imageSlot.focus();
+    expect(document.activeElement).toBe(imageSlot);
+  });
+
   it('keeps the healthy compact variant to one line and only shows fallback bounds', () => {
     const selected = route('video');
     const selectedCatalog = catalog({
@@ -365,6 +378,24 @@ describe('EngineStrip', () => {
 
     pendingView.rerender(<EngineStrip {...props({ locked: true })} />);
     for (const button of screen.getAllByRole('button', { name: /models\.engine\.notSet/ })) {
+      expect(button).toBeDisabled();
+      expect(button).toHaveAccessibleDescription('conversation.creativeStudio.models.engine.lockedDuringReview');
+    }
+  });
+
+  it('describes locked static Manage engines actions with the existing lock explanation', () => {
+    render(
+      <EngineStrip
+        {...props({
+          locked: true,
+          models: modelResult({ catalog: catalog({ image: media(), video: media() }) }),
+        })}
+      />
+    );
+
+    for (const button of screen.getAllByRole('button', {
+      name: 'conversation.creativeStudio.models.engine.manageShort',
+    })) {
       expect(button).toBeDisabled();
       expect(button).toHaveAccessibleDescription('conversation.creativeStudio.models.engine.lockedDuringReview');
     }

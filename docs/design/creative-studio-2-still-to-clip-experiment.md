@@ -29,39 +29,33 @@ coherence.
 
 ## Preconditions
 
-- **Exactly one image engine and one video engine bound** in Settings → Model → Creative Studio media
-  models. With two of either kind the project gets no route and there is no in-app cure until the
-  Engine Strip ships.
+- **Explicitly select the image and video engines in the project's Engine Strip.** Multiple routes
+  may be bound; record the intended integration as well as provider and model, then verify both
+  current project choices immediately before spending.
 - **The video engine must report first-frame support.** If it does not, the whole mechanism is
   unavailable on that engine and the experiment is answering a different question. Check before
   spending.
 - **Shot duration ≥ 4 seconds.** The engine floor is 4s and authoring still accepts 1–3s, which fails
   at render — after the money.
 
-## Blocked on S1.5 — found by attempting it, 2026-08-14
+## S1.5 is no longer the technical blocker; the experiment has not run
 
-The experiment cannot run today, and the reason is the thing S1.5 exists to fix.
+The current branch has explicit project-level image and video selection, so S1.5 no longer prevents
+this experiment. That is implementation evidence, not provider evidence: the human sign-off still
+requires all three paid generations below, and this document makes no claim that they ran.
 
-Reference generation is gated on `canGenerateReference = models.catalog?.image.status === 'ready'`
-(`WritePhase.tsx`). The workspace has exactly one image binding and one video binding — preconditions
-met — but a **project** adopts a route only when the catalog loads with no selection and finds exactly
-one option. A project created now shows `Rendering with —` on Board and offers only _Add reference_,
-never _Generate reference_.
-
-So: bindings exist workspace-wide, the project has no engine, and there is no in-app cure. That is
-precisely the live blocker the Engine Strip was specified to remove, and it now also gates the
-experiment that gates Phase 3a. Worth noting in the sequencing argument: 1.5 is not merely _before_
-3a, it is **required to test 3a's premise at all**.
-
-**A project is already prepared and waiting**, so this is two clicks once the strip ships:
+**A project was prepared during the earlier attempt**, with zero spend recorded at that point:
 
 - project `dbf35861_0614_4cb3_9465_0baee3304e79`, one shot, output **Video**, length **5s** (above the
   4s engine floor)
 - visual prompt carrying the two checkable attributes: _a red-and-white horizontally striped scarf_
   and _a polished brass telescope_, on a rain-wet cobblestone street at night
-- nothing generated; **zero spend so far**
+- nothing generated; **zero spend was recorded during preparation**
 
-Pick up at step 3 below.
+Before spending, verify that the prepared project still exists, that its prompt, output mode and
+duration remain as described, and that its current image and video choices name the intended routes
+and integrations. If any of that has drifted, repair or replace the project before step 3; do not
+infer current state from this note.
 
 ## Protocol
 
@@ -70,7 +64,9 @@ Pick up at step 3 below.
    city" but "a woman in a **red-and-white striped scarf** holding a **brass telescope**, on a rain-wet
    street at night". Vague prompts make drift unfalsifiable: you cannot tell a coherence failure from
    a prompt that never specified anything.
-3. **Generate the still** — the reference-image control on the shot's visual cell.
+3. **Verify the current project routes, then generate the still** — confirm the Engine Strip's image
+   and video choices, including integrations, before using the reference-image control on the shot's
+   visual cell.
 4. **Render the shot as video**, with that still as its first frame.
 5. **Second clip from the same still**, different action, same attributes. This is the product claim
    and it is a different question from step 4.

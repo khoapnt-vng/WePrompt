@@ -169,6 +169,7 @@ const toReviewScene = (
                 : 'valid',
             snapshot: route,
             providerName: catalogRoute?.providerName ?? null,
+            integrationLabelKey: catalogRoute?.integrationLabelKey ?? null,
             silentOutput: catalogRoute?.constraints.silentOutput ?? null,
           },
   };
@@ -408,6 +409,7 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
   });
   const [draftModalVisible, setDraftModalVisible] = useState(false);
   const [briefOpen, setBriefOpen] = useState(() => parseBriefOpenIntent(location.state));
+  const [pendingEngineFocusRole, setPendingEngineFocusRole] = useState<StudioMediaKind | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [rulesPending, setRulesPending] = useState(false);
   const [rulesErrorMessageKey, setRulesErrorMessageKey] = useState<string | null>(null);
@@ -1044,6 +1046,7 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
                           status: 'invalid' as const,
                           snapshot: previous.route.snapshot,
                           providerName: previous.route.providerName,
+                          integrationLabelKey: previous.route.integrationLabelKey,
                           silentOutput: previous.route.silentOutput,
                         },
                 },
@@ -1301,13 +1304,33 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
     setTimeout(() => navigate('/settings/model'), 0);
   }, [navigate]);
 
-  const focusEngineRole = useCallback((role: StudioMediaKind): void => {
-    requestAnimationFrame(() => {
+  const focusEngineRole = useCallback((role: StudioMediaKind): void => setPendingEngineFocusRole(role), []);
+
+  useEffect(() => {
+    if (pendingEngineFocusRole === null || generationReview !== null) return;
+    let frame = 0;
+    const focusPendingRole = (): void => {
+      const selector = `[data-engine-role="${pendingEngineFocusRole}"]`;
+      const briefScope = document.querySelector<HTMLElement>('[data-studio-engine-scope="brief"]');
       const activePhase = document.querySelector<HTMLElement>('[data-studio-phase-shell]');
-      const roleSlot = activePhase?.querySelector<HTMLElement>(`[data-engine-role="${role}"]`);
-      roleSlot?.querySelector<HTMLElement>('button:not([disabled])')?.focus();
-    });
-  }, []);
+      const roleSlot =
+        briefScope?.querySelector<HTMLElement>(selector) ?? activePhase?.querySelector<HTMLElement>(selector);
+      if (roleSlot === null || roleSlot === undefined) {
+        setBriefOpen(true);
+        frame = requestAnimationFrame(focusPendingRole);
+        return;
+      }
+      const target = roleSlot.querySelector<HTMLElement>('button:not([disabled])') ?? roleSlot;
+      target.focus({ preventScroll: true });
+      if (document.activeElement === target) {
+        setPendingEngineFocusRole(null);
+        return;
+      }
+      frame = requestAnimationFrame(focusPendingRole);
+    };
+    frame = requestAnimationFrame(focusPendingRole);
+    return () => cancelAnimationFrame(frame);
+  }, [generationReview, pendingEngineFocusRole]);
 
   const closeExportAndOpenProduce = useCallback((): void => {
     if (exportPending) return;

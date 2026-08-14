@@ -2612,6 +2612,70 @@ describe('StudioPage and useStudioProject', () => {
     );
   });
 
+  it('shows the canonical integration for duplicate provider and model routes before paid confirmation', async () => {
+    const selectedVideo = imageRoute({
+      choiceId: 'choice_video_byteplus',
+      providerId: 'provider-video',
+      providerName: 'Shared video provider',
+      model: 'duplicate-video-model',
+      integrationLabelKey: 'bytePlusSeedance',
+      kind: 'video',
+    });
+    const otherVideo = imageRoute({
+      ...selectedVideo,
+      choiceId: 'choice_video_gateway',
+      integrationLabelKey: 'selfHostedVideoGateway',
+    });
+    const opening = scene({ mediaKind: 'video', durationSeconds: 5 });
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(
+        project('project-1', {
+          targetDurationSeconds: 5,
+          sceneOrder: [opening.id],
+          scenes: { [opening.id]: opening },
+          routing: {
+            storyboard: null,
+            image: null,
+            video: {
+              choiceId: selectedVideo.choiceId,
+              providerId: selectedVideo.providerId,
+              model: selectedVideo.model,
+            },
+          },
+        })
+      )
+    );
+    bridge.listRoutes.invoke.mockResolvedValue(
+      ok({
+        ...routes(),
+        video: {
+          status: 'ready',
+          selected: {
+            choiceId: selectedVideo.choiceId,
+            providerId: selectedVideo.providerId,
+            model: selectedVideo.model,
+          },
+          selectedRoute: selectedVideo,
+          selectionIssue: null,
+          options: [otherVideo, selectedVideo],
+        },
+      })
+    );
+    renderRoute('/studio/project-1/board');
+
+    const { batchAction } = await findBatchAction();
+    await waitFor(() => expect(batchAction).toBeEnabled());
+    fireEvent.click(batchAction);
+
+    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+    expect(within(review).getByText('settings.mediaModels.integrationLabel')).toBeVisible();
+    expect(within(review).getByText('settings.mediaModels.integration.bytePlusSeedance')).toBeVisible();
+    expect(
+      within(review).queryByText('settings.mediaModels.integration.selfHostedVideoGateway')
+    ).not.toBeInTheDocument();
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+  });
+
   it('keeps the batch modal and submit on the same frozen eligible scene enumeration', async () => {
     const opening = scene({ id: 'scene-eligible', title: 'Eligible opening', durationSeconds: 5 });
     const reference = scene({
@@ -2680,6 +2744,89 @@ describe('StudioPage and useStudioProject', () => {
       expect(screen.queryByRole('dialog', { name: 'conversation.creativeStudio.review.title' })).not.toBeInTheDocument()
     );
     await waitFor(() => expect(document.activeElement?.closest('[data-engine-role="image"]')).not.toBeNull());
+    expect(bridge.updateModelSelection.invoke).not.toHaveBeenCalled();
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+  });
+
+  it('opens Brief from Cut and focuses the blocked role without selecting or spending', async () => {
+    const opening = scene({ id: 'scene-1', title: 'Cut recovery', durationSeconds: 5 });
+    installReferenceRequestQueue([referenceRequest(opening.id, 1)]);
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
+    );
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routes()));
+    renderRoute('/studio/project-1/cut');
+
+    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.setEngines' }));
+
+    const brief = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.phase.brief.title' });
+    const briefImageSlot = within(brief).getByRole('group', {
+      name: 'conversation.creativeStudio.models.engine.roleImage',
+    });
+    const briefScope = briefImageSlot.closest('[data-studio-engine-scope="brief"]');
+    expect(briefScope).not.toBeNull();
+    await waitFor(() => expect(document.activeElement?.closest('[data-studio-engine-scope="brief"]')).toBe(briefScope));
+    expect(document.activeElement?.closest('[data-engine-role="image"]')).not.toBeNull();
+    expect(bridge.updateModelSelection.invoke).not.toHaveBeenCalled();
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+  });
+
+  it('focuses the already-open Brief engine instead of the obscured phase engine', async () => {
+    const opening = scene({ id: 'scene-1', title: 'Brief recovery', durationSeconds: 5 });
+    installReferenceRequestQueue([referenceRequest(opening.id, 1)]);
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
+    );
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routes()));
+    renderRoute({ pathname: '/studio/project-1/table', state: { openBrief: true } });
+
+    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.setEngines' }));
+
+    const brief = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.phase.brief.title' });
+    const briefImageSlot = within(brief).getByRole('group', {
+      name: 'conversation.creativeStudio.models.engine.roleImage',
+    });
+    await waitFor(() => expect(document.activeElement?.closest('[data-engine-role="image"]')).toBe(briefImageSlot));
+    expect(document.activeElement?.closest('[data-studio-engine-scope="brief"]')).not.toBeNull();
+    expect(bridge.updateModelSelection.invoke).not.toHaveBeenCalled();
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+  });
+
+  it('focuses an actionless unhealthy engine slot after closing its blocked review', async () => {
+    const opening = scene({ id: 'scene-1', title: 'Health recovery', durationSeconds: 5 });
+    const unavailableImage = imageRoute({ health: 'unavailable' });
+    installReferenceRequestQueue([referenceRequest(opening.id, 1)]);
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
+    );
+    bridge.listRoutes.invoke.mockResolvedValue(
+      ok({
+        ...routes(),
+        image: {
+          status: 'unavailable',
+          selected: {
+            choiceId: unavailableImage.choiceId,
+            providerId: unavailableImage.providerId,
+            model: unavailableImage.model,
+          },
+          selectedRoute: null,
+          selectionIssue: { code: 'health' },
+          options: [unavailableImage],
+        },
+      })
+    );
+    renderRoute('/studio/project-1/board');
+
+    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.setEngines' }));
+
+    const healthSlot = await screen.findByRole('group', {
+      name: 'conversation.creativeStudio.models.engine.roleImage',
+    });
+    await waitFor(() => expect(document.activeElement).toBe(healthSlot));
+    expect(within(healthSlot).queryByRole('button')).not.toBeInTheDocument();
     expect(bridge.updateModelSelection.invoke).not.toHaveBeenCalled();
     expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
   });

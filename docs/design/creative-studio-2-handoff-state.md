@@ -17,9 +17,11 @@ This file does not pin a tip SHA on purpose: the first version of it named one a
 twenty minutes. Run `git log --oneline -1` and `git status` — those are always true, and this file
 never will be.
 
-Gate as of writing: **641 test files / 8,639 tests passed, 19 skipped**; tsc, lint, format and
-`check-i18n` clean. Re-measure rather than trusting this number. Treat counts as the signal — durations on this machine inflate several-fold under
-concurrent sessions, and a slow run is not a failing one.
+The last recorded full gate predates S1.5: **641 test files / 8,639 tests passed, 19 skipped**; tsc,
+lint, format and `check-i18n` were clean. Re-measure rather than trusting this historical number.
+S1.5's final review fix has run the focused Studio slice, not the full suite. Treat counts as the
+signal — durations on this machine inflate several-fold under concurrent sessions, and a slow run
+is not a failing one.
 
 ### Shipped
 
@@ -35,10 +37,18 @@ added. See `creative-studio-2-s1-plan.md`.
 
 ### In flight
 
-_Nothing._ S2 — Table's dedicated Length and State columns — merged and pushed shortly after this
-file was first written. Its twelve locale files auto-merged with no conflict, because it was told to
-**only add keys** under `phase.write.*` and never to reorder or rename. Keep that discipline: it is
-the difference between a clean merge and resolving twelve JSON files by hand.
+**S1.5 — the Engine Strip — is implemented locally through Task 9 and the final review fix.** New
+projects keep image and video choices explicit instead of adopting a sole route. The strip exposes
+those choices in Brief, Table and Board, and the paid review distinguishes integrations when two
+routes share a provider and model. The fake journey covers one image route and two same-model video
+routes with different integrations, but it has only passed Playwright compile/discovery via
+`--list`; no live journey was run. The focused Studio slice passed; the full suite was not run, the
+slice is not merged, and the final local commits remain unpushed pending the user.
+
+S2 — Table's dedicated Length and State columns — merged and pushed shortly after this file was
+first written. Its twelve locale files auto-merged with no conflict, because it was told to **only
+add keys** under `phase.write.*` and never to reorder or rename. Keep that discipline: it is the
+difference between a clean merge and resolving twelve JSON files by hand.
 
 ---
 
@@ -75,19 +85,20 @@ Director's side. Roughly three lines to fix.
 unnamed, unfocusable `<span>` — verified live, and still true. `StudioBriefDrawer` does this
 correctly; copy from Brief, not Rules.
 
-**The Studio e2e spec cannot reach its assertions.** Several accessible names it clicks match no
-string in the app, and the spec is conditionally skipped, so it has never gated anything.
-`playwright test --list` is a compile check only. This is why a stale CTA table survived unnoticed.
+**The rewritten Studio e2e journey still has no live acceptance evidence.** It now explicitly
+selects the image route and one of two same-provider/model video routes by integration, but the only
+current result is `playwright test --list`, which proves compile/discovery rather than a running
+journey. Do not treat it as a product gate until the fake journey runs end to end.
 
 **Two design artefacts are still missing from the repo** — _Table and Board (hi-fi)_ and _Board and
 Cut — Wireframes_. The hi-fi matters most: phase 2 builds Table and Board properly, and the hi-fi is
 the specification. Drop them in `docs/design/`; the engine-strip wireframes are already committed as
 precedent.
 
-**The Engine Strip is unbuilt.** Binding two models of one media kind leaves the project with no
-route and no in-app cure. Today's precondition is exactly one image route and one video route bound,
-which `resolveSoleRouteAdoptions` then adopts automatically. Specified in
-`creative-studio-2-engine-strip.md` with ten drawn states; ~8–12 hand-days.
+**The Engine Strip is implemented locally but not delivered.** Projects now require explicit image
+and video choices, including when only one route exists, and the strip supplies the in-app cure for
+missing or unhealthy choices. Its final local commits remain unpushed pending the user; the slice
+has not been merged and still needs live acceptance.
 
 **Caps unchanged, deliberately.** `targetDurationSeconds` is validated `5..60` and `MAX_SCENES` is 24. A three-minute piece — the design's own target — **fails validation today**. Raising them is
 phase 2's first commit, and the bound must be extracted to shared constants rather than edited at

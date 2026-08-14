@@ -48,7 +48,13 @@ const validReviewRoute = (
   snapshot: GenerationReviewRouteSnapshot,
   providerName: string,
   silentOutput: boolean
-): GenerationReviewScene['route'] => ({ status: 'valid', snapshot, providerName, silentOutput });
+): GenerationReviewScene['route'] => ({
+  status: 'valid',
+  snapshot,
+  providerName,
+  integrationLabelKey: snapshot.kind === 'image' ? 'imageApi' : 'selfHostedVideoGateway',
+  silentOutput,
+});
 
 const mixedScenes = (): GenerationReviewScene[] => [
   {
@@ -427,7 +433,8 @@ describe('GenerationReviewModal', () => {
     expect(screen.queryByText('provider_stale')).not.toBeInTheDocument();
     expect(screen.queryByText('weprompt-media-gateway-v1')).not.toBeInTheDocument();
     expect(screen.getByText('open-sora-stale')).toBeInTheDocument();
-    expect(screen.getByText('conversation.creativeStudio.review.disabledMissingRoutes')).toBeInTheDocument();
+    expect(screen.getByText('conversation.creativeStudio.review.disabledMissingRoutes:count=2')).toBeInTheDocument();
+    expect(screen.queryByText(/\{\{count\}\}/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'conversation.creativeStudio.review.confirm' })).toBeDisabled();
   });
 

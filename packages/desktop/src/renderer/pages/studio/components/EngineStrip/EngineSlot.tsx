@@ -221,6 +221,8 @@ export const EngineSlot: React.FC<EngineSlotProps> = ({
       className={styles.slot}
       role='group'
       aria-labelledby={roleId}
+      aria-describedby={detailId}
+      tabIndex={-1}
       data-engine-role={slot.role}
       data-state={slot.state}
     >
@@ -242,7 +244,12 @@ export const EngineSlot: React.FC<EngineSlotProps> = ({
         <div className={styles.staticState}>
           <p>{copy.primary}</p>
           <p>{copy.detail}</p>
-          <Button type='text' onClick={() => openModelSettings('/settings/model')} disabled={disabled}>
+          <Button
+            type='text'
+            aria-describedby={detailId}
+            onClick={() => openModelSettings('/settings/model')}
+            disabled={disabled}
+          >
             {t(engineKey('manageShort'))}
           </Button>
         </div>

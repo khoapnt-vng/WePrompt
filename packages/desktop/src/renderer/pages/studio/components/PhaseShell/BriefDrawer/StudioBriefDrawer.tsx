@@ -176,7 +176,7 @@ export const StudioBriefDrawer: React.FC<StudioBriefDrawerProps> = ({ visible, c
               )}
             </div>
           </div>
-          <div className={styles.engineStrip}>
+          <div className={styles.engineStrip} data-studio-engine-scope={visible ? 'brief' : undefined}>
             <EngineStrip
               project={project}
               models={models}
