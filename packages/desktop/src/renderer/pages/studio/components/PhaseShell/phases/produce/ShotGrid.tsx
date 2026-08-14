@@ -18,7 +18,7 @@ import { useTranslation } from 'react-i18next';
 import {
   buildSingleSceneReviewRequest,
   type GenerationSingleReviewRequest,
-} from '../../../Generation/GenerationControls';
+} from '../../../Generation/generationRequests';
 import {
   createManagedStudioAssetUrl,
   isCanonicalStudioPosterAsset,

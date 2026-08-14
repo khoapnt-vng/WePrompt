@@ -11,7 +11,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { SelectedSceneSaveState } from '../../hooks/useStoryboardEditor';
 import type { StudioView } from '../../studioPhaseRoute';
-import { buildBatchGenerationReviewRequest } from '../Generation';
+import { buildBatchGenerationReviewRequest } from '../Generation/generationRequests';
 import { ProducePhase, ReviewPhase, WritePhase } from './phases';
 import { getReadySelectedRoutes } from './phases/produce';
 import { StudioDocumentActivity } from './StudioDocumentActivity';

@@ -65,6 +65,7 @@ import {
 import { StudioShell } from './components/Shell/StudioShell';
 import { useStoryboardEditor, useStudioJobs, useStudioModels, useStudioProject, useStudioRender } from './hooks';
 import styles from './StudioPage.module.css';
+import { resolveShotEngine } from './studioRouteConstraints';
 import {
   parseStudioView,
   rememberStudioView,
@@ -157,7 +158,7 @@ const projectRouteSnapshot = (
   outputRole: GenerationReviewScene['outputRole'] = 'take'
 ): GenerationReviewRouteSnapshot | null => {
   const mediaKind = requestedMediaKind(scene.mediaKind, outputRole);
-  const selected = project.routing[mediaKind];
+  const selected = resolveShotEngine(project, { mediaKind });
   return selected === null
     ? null
     : {

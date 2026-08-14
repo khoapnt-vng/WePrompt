@@ -8,7 +8,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { GenerationReviewRouteSnapshot } from '@renderer/pages/studio/components/Generation/GenerationControls';
+import type { GenerationReviewRouteSnapshot } from '@renderer/pages/studio/components/Generation/generationRequests';
 import {
   GenerationReviewModal,
   type GenerationReviewModalProps,

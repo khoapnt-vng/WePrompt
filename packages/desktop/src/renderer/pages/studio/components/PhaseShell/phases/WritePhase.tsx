@@ -7,7 +7,7 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { buildSingleSceneReviewRequest } from '../../Generation/GenerationControls';
+import { buildSingleSceneReviewRequest } from '../../Generation/generationRequests';
 import { requestedMediaKind } from '@/common/types/project/creativeStudioOutputRole';
 import { resolveSceneDurationBounds } from '../../../studioRouteConstraints';
 import type { WritePhaseController } from '../types';

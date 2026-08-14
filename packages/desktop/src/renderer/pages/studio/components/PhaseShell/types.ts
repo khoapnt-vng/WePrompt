@@ -19,7 +19,7 @@ import type { UseStudioModelsResult } from '../../hooks/useStudioModels';
 import type { UseStudioRenderResult } from '../../hooks/useStudioRender';
 import type { StudioViewTransition, StudioWriteFocusIntent } from '../../studioPhaseRoute';
 import type { StudioReadinessSummary } from '../../studioReadiness';
-import type { GenerationBatchReviewRequest, GenerationSingleReviewRequest } from '../Generation/GenerationControls';
+import type { GenerationBatchReviewRequest, GenerationSingleReviewRequest } from '../Generation/generationRequests';
 
 export type StudioPhaseAdvisory = {
   messageKey: string;

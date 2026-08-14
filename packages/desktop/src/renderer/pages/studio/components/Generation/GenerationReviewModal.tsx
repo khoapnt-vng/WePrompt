@@ -13,7 +13,7 @@ import type {
   StudioSceneReferencePrompt,
 } from '@/common/types/project/creativeStudioTypes';
 import type { StudioRuleBreach } from '@/common/types/project/creativeStudioRules';
-import type { GenerationReviewRouteSnapshot } from './GenerationControls';
+import type { GenerationReviewRouteSnapshot } from './generationRequests';
 import { Alert, Button, Modal, Tag } from '@arco-design/web-react';
 import React, { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
