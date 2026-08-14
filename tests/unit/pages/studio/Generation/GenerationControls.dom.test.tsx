@@ -36,6 +36,7 @@ const imageRoute = (overrides: Partial<StudioRouteCatalogEntry> = {}): StudioRou
   providerId: 'provider_image',
   providerName: 'Image Provider',
   model: 'image-model-v1',
+  integrationLabelKey: 'imageApi',
   health: 'available',
   kind: 'image',
   constraints: {
@@ -72,9 +73,10 @@ const catalog = (overrides: Partial<StudioRouteCatalog> = {}): StudioRouteCatalo
         model: suggested.model,
       },
       selectedRoute: suggested,
+      selectionIssue: null,
       options: [suggested],
     },
-    video: { status: 'setup_required', selected: null, selectedRoute: null, options: [] },
+    video: { status: 'setup_required', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
     catalogVersion: 'catalog-v1',
     ...overrides,
   };

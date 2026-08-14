@@ -32,6 +32,7 @@ const mediaRoute = (
   providerId: `${kind}-provider`,
   providerName: `${kind} Provider`,
   model: `${kind}-model`,
+  integrationLabelKey: kind === 'image' ? 'imageApi' : 'selfHostedVideoGateway',
   health: 'available',
   kind,
   constraints: {
@@ -51,8 +52,20 @@ const catalog = (overrides: Partial<StudioRouteCatalog> = {}): StudioRouteCatalo
     selected: null,
     options: [],
   },
-  image: { status: 'selection_required', selected: null, selectedRoute: null, options: [mediaRoute('image')] },
-  video: { status: 'selection_required', selected: null, selectedRoute: null, options: [mediaRoute('video')] },
+  image: {
+    status: 'selection_required',
+    selected: null,
+    selectedRoute: null,
+    selectionIssue: null,
+    options: [mediaRoute('image')],
+  },
+  video: {
+    status: 'selection_required',
+    selected: null,
+    selectedRoute: null,
+    selectionIssue: null,
+    options: [mediaRoute('video')],
+  },
   catalogVersion: 'catalog-1',
   ...overrides,
 });
@@ -72,6 +85,7 @@ const readySelectedImageCatalog = (): StudioRouteCatalog => {
       status: 'ready',
       selected: { choiceId: selected.choiceId, providerId: selected.providerId, model: selected.model },
       selectedRoute: selected,
+      selectionIssue: null,
       options: [selected, mediaRoute('image', { choiceId: 'unused', model: 'unused-option' })],
     },
   });
@@ -132,6 +146,7 @@ describe('StudioModelBar', () => {
               status: 'ready',
               selected: { choiceId: selected.choiceId, providerId: selected.providerId, model: selected.model },
               selectedRoute: selected,
+              selectionIssue: null,
               options: [selected],
             },
           }),

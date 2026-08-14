@@ -103,6 +103,7 @@ const catalog = (
       silentOutput: true,
     },
   })),
+  diagnostics: [],
   generationCatalogVersion: 'catalog_1',
 });
 

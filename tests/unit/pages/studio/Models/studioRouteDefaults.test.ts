@@ -18,6 +18,7 @@ const route = (kind: 'image' | 'video', overrides: Partial<StudioRouteCatalogEnt
   providerId: `provider-${kind}`,
   providerName: `${kind} provider`,
   model: `${kind}-model`,
+  integrationLabelKey: kind === 'image' ? 'imageApi' : 'selfHostedVideoGateway',
   health: 'available',
   kind,
   constraints: {
@@ -35,6 +36,7 @@ const unbound: StudioMediaRouteCatalog = {
   status: 'setup_required',
   selected: null,
   selectedRoute: null,
+  selectionIssue: null,
   options: [],
 };
 
@@ -50,6 +52,7 @@ const unchosen = (entry: StudioRouteCatalogEntry, ...rest: StudioRouteCatalogEnt
   status: 'selection_required',
   selected: null,
   selectedRoute: null,
+  selectionIssue: null,
   options: [entry, ...rest],
 });
 
@@ -70,6 +73,7 @@ describe('resolveSoleRouteAdoptions', () => {
             status: 'unavailable',
             selected: { choiceId: 'choice_video_retired', providerId: 'provider-retired', model: 'retired-model' },
             selectedRoute: null,
+            selectionIssue: { code: 'retired' },
             options: [replacement],
           },
         })
@@ -93,6 +97,7 @@ describe('resolveSoleRouteAdoptions', () => {
             status: 'ready',
             selected: { choiceId: entry.choiceId, providerId: entry.providerId, model: entry.model },
             selectedRoute: entry,
+            selectionIssue: null,
             options: [entry],
           },
         })

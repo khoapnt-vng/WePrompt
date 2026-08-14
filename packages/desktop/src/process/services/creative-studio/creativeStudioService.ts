@@ -57,6 +57,7 @@ import type {
   StudioFitStoryboardRequest,
   StudioModelAvailability,
   StudioMediaChoiceRef,
+  StudioMediaRouteCatalog,
   StudioProviderRef,
   StudioRouteCatalogEntry,
   StudioTextModelOption,
@@ -1002,28 +1003,33 @@ const sanitizedStoryboardOptions = (options: StudioTextModelOption[]): StudioTex
   );
 };
 
-const toRendererRoute = (route: StudioGenerationRoute): StudioRouteCatalogEntry => ({
-  choiceId: route.choiceId,
-  providerId: route.providerId,
-  providerName: route.providerName,
-  model: route.model,
-  health: route.health,
-  kind: route.kind,
-  constraints: {
-    aspectRatios: [...route.constraints.aspectRatios],
-    resolutions: [...route.constraints.resolutions],
-    minDurationSeconds: route.constraints.minDurationSeconds,
-    maxDurationSeconds: route.constraints.maxDurationSeconds,
-    supportsFirstFrame: route.constraints.supportsFirstFrame,
-    silentOutput: route.constraints.silentOutput,
-  },
-});
-
 const integrationForId = (integrationId: string) =>
   MEDIA_INTEGRATIONS.find((integration) => integration.integrationId === integrationId);
 
 const integrationForAdapter = (adapterId: StudioConnectionBinding['adapterId']) =>
   MEDIA_INTEGRATIONS.find((integration) => integration.adapterId === adapterId);
+
+const toRendererRoute = (route: StudioGenerationRoute): StudioRouteCatalogEntry => {
+  const integration = integrationForAdapter(route.adapterId);
+  if (!integration) throw new CreativeStudioStoreError('storage_error', 'Unknown Studio connection integration');
+  return {
+    choiceId: route.choiceId,
+    providerId: route.providerId,
+    providerName: route.providerName,
+    model: route.model,
+    integrationLabelKey: integration.labelKey,
+    health: route.health,
+    kind: route.kind,
+    constraints: {
+      aspectRatios: [...route.constraints.aspectRatios],
+      resolutions: [...route.constraints.resolutions],
+      minDurationSeconds: route.constraints.minDurationSeconds,
+      maxDurationSeconds: route.constraints.maxDurationSeconds,
+      supportsFirstFrame: route.constraints.supportsFirstFrame,
+      silentOutput: route.constraints.silentOutput,
+    },
+  };
+};
 
 const toConnectionRecord = (binding: StudioConnectionBinding): StudioConnectionRecord => {
   const integration = integrationForAdapter(binding.adapterId);
@@ -1134,6 +1140,36 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
     };
     const selectedImageRoute = selectedMediaRoute('image', selected.image);
     const selectedVideoRoute = selectedMediaRoute('video', selected.video);
+    const selectionIssue = (
+      kind: 'image' | 'video',
+      selection: StudioProviderRef | null,
+      selectedRoute: StudioRouteCatalogEntry | null
+    ): StudioMediaRouteCatalog['selectionIssue'] => {
+      if (selection === null || selectedRoute !== null) return null;
+      const matchingRoute = generation.routes.find(
+        (candidate) => candidate.kind === kind && mediaRouteMatches(candidate, selection)
+      );
+      if (
+        matchingRoute !== undefined &&
+        project !== null &&
+        (!matchingRoute.constraints.aspectRatios.includes(project.aspectRatio) ||
+          !matchingRoute.constraints.resolutions.includes(project.resolution))
+      ) {
+        return { code: 'frame', aspectRatio: project.aspectRatio, resolution: project.resolution };
+      }
+      const diagnostic = generation.diagnostics.find(
+        (candidate) =>
+          candidate.status !== 'available' &&
+          candidate.providerId === selection.providerId &&
+          candidate.adapterId === selection.adapterId &&
+          candidate.model === selection.model
+      );
+      if (diagnostic?.status === 'needs_setup') {
+        return { code: 'needs_setup', providerName: diagnostic.providerName };
+      }
+      if (diagnostic?.status === 'health') return { code: 'health' };
+      return { code: 'retired' };
+    };
     const storyboardSelectionAvailable =
       selected.storyboard !== null &&
       storyboardOptions.some((option) => textModelMatches(option, selected.storyboard!));
@@ -1148,12 +1184,14 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
       status: modelStatus(selected.image, imageOptions.length, imageSelectionAvailable),
       selected: selected.image === null ? null : toRendererMediaChoice(selected.image, 'image'),
       selectedRoute: selectedImageRoute,
+      selectionIssue: selectionIssue('image', selected.image, selectedImageRoute),
       options: imageOptions,
     };
     const video = {
       status: modelStatus(selected.video, videoOptions.length, videoSelectionAvailable),
       selected: selected.video === null ? null : toRendererMediaChoice(selected.video, 'video'),
       selectedRoute: selectedVideoRoute,
+      selectionIssue: selectionIssue('video', selected.video, selectedVideoRoute),
       options: videoOptions,
     };
     const catalogVersion = createHash('sha256')

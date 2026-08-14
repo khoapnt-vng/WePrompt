@@ -432,12 +432,12 @@ const routeOption = (
   kind: 'image' | 'video',
   overrides: Partial<
     StudioRouteCatalogEntry & {
-      adapterId: 'weprompt-image-v1' | 'weprompt-media-gateway-v1' | 'openrouter-video-v1';
+      adapterId: 'weprompt-image-v1' | 'byteplus-seedance-v1' | 'weprompt-media-gateway-v1' | 'openrouter-video-v1';
       cancellationPolicy: 'none' | 'queued_only' | 'queued_and_running';
     }
   > = {}
 ): StudioRouteCatalogEntry & {
-  adapterId: 'weprompt-image-v1' | 'weprompt-media-gateway-v1' | 'openrouter-video-v1';
+  adapterId: 'weprompt-image-v1' | 'byteplus-seedance-v1' | 'weprompt-media-gateway-v1' | 'openrouter-video-v1';
   cancellationPolicy: 'none' | 'queued_only' | 'queued_and_running';
 } => {
   const route = {
@@ -445,6 +445,14 @@ const routeOption = (
     providerName: 'Provider One',
     adapterId: kind === 'image' ? ('weprompt-image-v1' as const) : ('weprompt-media-gateway-v1' as const),
     model: `${kind}-model`,
+    integrationLabelKey:
+      kind === 'image'
+        ? ('imageApi' as const)
+        : overrides.adapterId === 'byteplus-seedance-v1'
+          ? ('bytePlusSeedance' as const)
+          : overrides.adapterId === 'openrouter-video-v1'
+            ? ('openRouterVideo' as const)
+            : ('selfHostedVideoGateway' as const),
     health: 'available' as const,
     kind,
     cancellationPolicy: 'none' as const,
@@ -3788,6 +3796,21 @@ describe('CreativeStudioService', () => {
       options: {
         models?: StudioTextModelOption[];
         routes?: StudioRouteCatalogEntry[];
+        diagnostics?: Array<
+          | {
+              status: 'retired' | 'health';
+              providerId: string;
+              adapterId: 'weprompt-media-gateway-v1';
+              model: string;
+            }
+          | {
+              status: 'needs_setup';
+              providerId: string;
+              providerName: string;
+              adapterId: 'weprompt-media-gateway-v1';
+              model: string;
+            }
+        >;
         projectInput?: Partial<CreateStudioProjectInput>;
       } = {}
     ) => {
@@ -3801,6 +3824,7 @@ describe('CreativeStudioService', () => {
       };
       const listGenerationRoutes = vi.fn(async () => ({
         routes: options.routes ?? [routeOption('image'), routeOption('video')],
+        diagnostics: options.diagnostics ?? [],
         generationCatalogVersion: 'generation-v1',
       }));
       const submitScenes = vi.fn(async () => []);
@@ -4426,7 +4450,11 @@ describe('CreativeStudioService', () => {
         storyboardPlanner: makePlanner(),
         providerResolver: {
           listConnectionCandidates: async () => [],
-          listGenerationRoutes: async () => ({ routes: [], generationCatalogVersion: 'generation-v2' }),
+          listGenerationRoutes: async () => ({
+            routes: [],
+            diagnostics: [],
+            generationCatalogVersion: 'generation-v2',
+          }),
           isGenerationRouteAvailable: async () => false,
         },
       } as unknown as Parameters<typeof createCreativeStudioService>[0]);
@@ -4443,6 +4471,7 @@ describe('CreativeStudioService', () => {
       expect(catalog.video).toMatchObject({
         status: 'unavailable',
         selected: rendererProject?.routing.video,
+        selectionIssue: { code: 'retired' },
         options: [],
       });
       expect(internalProject?.routing.video).toEqual({
@@ -4452,6 +4481,120 @@ describe('CreativeStudioService', () => {
       });
       expectRendererBoundaryToHideAdapters(rendererProject);
       expectRendererBoundaryToHideAdapters(catalog);
+    });
+
+    it('projects distinct integration labels for distinct adapters sharing a provider and model', async () => {
+      const routes = [
+        routeOption('video', { adapterId: 'byteplus-seedance-v1', model: 'shared-video-model' }),
+        routeOption('video', { adapterId: 'weprompt-media-gateway-v1', model: 'shared-video-model' }),
+      ];
+      const harness = await createCatalogHarness({ routes });
+
+      const catalog = await harness.service.listRoutes({ projectId: harness.project.id });
+
+      expect(
+        catalog.video.options.map(({ choiceId, integrationLabelKey }) => ({ choiceId, integrationLabelKey }))
+      ).toEqual([
+        { choiceId: routes[0]!.choiceId, integrationLabelKey: 'bytePlusSeedance' },
+        { choiceId: routes[1]!.choiceId, integrationLabelKey: 'selfHostedVideoGateway' },
+      ]);
+      expectRendererBoundaryToHideAdapters(catalog);
+    });
+
+    it.each([
+      {
+        name: 'removed binding',
+        routes: [],
+        diagnostics: [],
+        expectedIssue: { code: 'retired' },
+      },
+      {
+        name: 'missing credentials',
+        routes: [],
+        diagnostics: [
+          {
+            status: 'needs_setup' as const,
+            providerId: 'provider_1',
+            providerName: 'Provider One',
+            adapterId: KNOWN_ADAPTER_SENTINEL,
+            model: 'video-model',
+          },
+        ],
+        expectedIssue: { code: 'needs_setup', providerName: 'Provider One' },
+      },
+      {
+        name: 'unavailable provider health',
+        routes: [],
+        diagnostics: [
+          {
+            status: 'health' as const,
+            providerId: 'provider_1',
+            adapterId: KNOWN_ADAPTER_SENTINEL,
+            model: 'video-model',
+          },
+        ],
+        expectedIssue: { code: 'health' },
+      },
+      {
+        name: 'unsupported project frame',
+        routes: [
+          routeOption('video', {
+            constraints: { ...routeOption('video').constraints, aspectRatios: ['1:1'] },
+          }),
+        ],
+        diagnostics: [],
+        expectedIssue: { code: 'frame', aspectRatio: '16:9', resolution: '1080p' },
+      },
+    ])('explains an unavailable persisted media selection with a $name issue', async (testCase) => {
+      const harness = await createCatalogHarness({
+        routes: testCase.routes,
+        diagnostics: testCase.diagnostics,
+      });
+      await harness.store.updateProject(harness.project.id, (current) => ({
+        ...current,
+        routing: {
+          ...current.routing,
+          video: {
+            providerId: 'provider_1',
+            adapterId: KNOWN_ADAPTER_SENTINEL,
+            model: 'video-model',
+          },
+        },
+      }));
+
+      const catalog = await harness.service.listRoutes({ projectId: harness.project.id });
+
+      expect(catalog.video).toMatchObject({
+        status: 'unavailable',
+        selectedRoute: null,
+        selectionIssue: testCase.expectedIssue,
+      });
+    });
+
+    it('keeps a selected no-first-frame route ready because the capability is shot-specific', async () => {
+      const route = routeOption('video', {
+        constraints: { ...routeOption('video').constraints, supportsFirstFrame: false },
+      });
+      const harness = await createCatalogHarness({ routes: [route] });
+      await harness.store.updateProject(harness.project.id, (current) => ({
+        ...current,
+        routing: {
+          ...current.routing,
+          video: {
+            providerId: route.providerId,
+            adapterId: route.adapterId,
+            model: route.model,
+          },
+        },
+      }));
+
+      const catalog = await harness.service.listRoutes({ projectId: harness.project.id });
+
+      expect(catalog.video).toMatchObject({
+        status: 'ready',
+        selectedRoute: { choiceId: route.choiceId },
+        selectionIssue: null,
+      });
     });
 
     it.each([3, 13])(
@@ -5090,12 +5233,14 @@ describe('Studio MCP server', () => {
         status: 'ready',
         selected: null,
         selectedRoute: null,
+        selectionIssue: null,
         options: [routeOption('image', { model: 'image-model' })],
       },
       video: {
         status: 'ready',
         selected: null,
         selectedRoute: null,
+        selectionIssue: null,
         options: [routeOption('video', { model: 'video-model' })],
       },
       catalogVersion: 'catalog-v1',
@@ -5131,8 +5276,8 @@ describe('Studio MCP server', () => {
   ])('degrades safely when $omitted is absent from a frozen descriptor', ({ omitted, expected }) => {
     const routeCatalog: StudioRouteCatalog = {
       storyboard: { status: 'setup_required', selected: null, options: [] },
-      image: { status: 'setup_required', selected: null, selectedRoute: null, options: [] },
-      video: { status: 'setup_required', selected: null, selectedRoute: null, options: [] },
+      image: { status: 'setup_required', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+      video: { status: 'setup_required', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
       catalogVersion: 'catalog-v1',
     };
     const env = Object.fromEntries(

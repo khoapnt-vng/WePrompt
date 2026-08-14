@@ -96,6 +96,7 @@ const route = (kind: 'image' | 'video'): StudioRouteCatalogEntry => ({
   providerId: `provider-${kind}`,
   providerName: `${kind} provider`,
   model: `${kind}-model`,
+  integrationLabelKey: kind === 'image' ? 'imageApi' : 'selfHostedVideoGateway',
   health: 'available',
   kind,
   constraints: {
@@ -132,10 +133,11 @@ const catalog = (videoSetupRequired = false): StudioRouteCatalog => {
         model: imageRoute.model,
       },
       selectedRoute: imageRoute,
+      selectionIssue: null,
       options: [imageRoute],
     },
     video: videoSetupRequired
-      ? { status: 'setup_required', selected: null, selectedRoute: null, options: [] }
+      ? { status: 'setup_required', selected: null, selectedRoute: null, selectionIssue: null, options: [] }
       : {
           status: 'ready',
           selected: {
@@ -144,6 +146,7 @@ const catalog = (videoSetupRequired = false): StudioRouteCatalog => {
             model: videoRoute.model,
           },
           selectedRoute: videoRoute,
+          selectionIssue: null,
           options: [videoRoute],
         },
     catalogVersion: 'catalog-v1',
@@ -159,12 +162,14 @@ const disconnectedCatalog = (): StudioRouteCatalog => {
       status: 'selection_required',
       selected: null,
       selectedRoute: null,
+      selectionIssue: null,
       options: [imageRoute],
     },
     video: {
       status: 'selection_required',
       selected: null,
       selectedRoute: null,
+      selectionIssue: null,
       options: [videoRoute],
     },
   };
@@ -354,6 +359,7 @@ describe('ProducePhase', () => {
       image: {
         ...catalog(true).image,
         selectedRoute: imageRoute,
+        selectionIssue: null,
         options: [imageRoute],
       },
     });

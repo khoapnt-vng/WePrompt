@@ -97,6 +97,7 @@ const copyCatalogEntry = (route: StudioRouteCatalogEntry): StudioRouteCatalogEnt
   providerId: route.providerId,
   providerName: route.providerName,
   model: route.model,
+  integrationLabelKey: route.integrationLabelKey,
   health: route.health,
   kind: route.kind,
   constraints: {

@@ -28,14 +28,27 @@ export type StudioProviderResolverDeps = {
 
 export type StudioGenerationRouteCatalog = {
   routes: StudioGenerationRoute[];
+  diagnostics: StudioGenerationRouteDiagnostic[];
   generationCatalogVersion: string;
 };
 
 /** Main-only route. The renderer receives the opaque choiceId projection. */
-export type StudioGenerationRoute = StudioRouteCatalogEntry & {
+export type StudioGenerationRoute = Omit<StudioRouteCatalogEntry, 'integrationLabelKey'> & {
   adapterId: StudioProviderAdapterId;
   cancellationPolicy: StudioCancellationPolicy;
 };
+
+export type StudioGenerationRouteDiagnostic =
+  | { status: 'available'; route: StudioGenerationRoute }
+  | { status: 'retired'; providerId: string; adapterId: StudioProviderAdapterId; model: string }
+  | {
+      status: 'needs_setup';
+      providerId: string;
+      providerName: string;
+      adapterId: StudioProviderAdapterId;
+      model: string;
+    }
+  | { status: 'health'; providerId: string; adapterId: StudioProviderAdapterId; model: string };
 
 export type StudioProviderResolver = {
   listConnectionCandidates(): Promise<StudioConnectionCandidate[]>;
@@ -168,30 +181,54 @@ const bindingCancellationPolicy = (capabilities: StudioConnectionCapabilities): 
 const routeIdentity = (route: StudioGenerationRoute): string =>
   `${route.adapterId}\u0000${route.providerId}\u0000${route.model}\u0000${route.kind}`;
 
+const diagnosticIdentity = (diagnostic: Exclude<StudioGenerationRouteDiagnostic, { status: 'available' }>): string =>
+  `${diagnostic.adapterId}\u0000${diagnostic.providerId}\u0000${diagnostic.model}`;
+
 const resolveBindingRoute = (
   binding: StudioConnectionBinding,
   providers: IProvider[]
-): StudioGenerationRoute | null => {
+): StudioGenerationRouteDiagnostic => {
   const provider = providers.find((candidate) => candidate.id === binding.providerId);
   const kind = bindingMediaKind(binding);
-  if (
-    !provider ||
-    !isSafeProviderId(provider.id) ||
-    !isSafeModel(binding.model) ||
-    !available(provider, binding.model) ||
-    !kind
-  ) {
-    return null;
+  const retired = (): StudioGenerationRouteDiagnostic => ({
+    status: 'retired',
+    providerId: binding.providerId,
+    adapterId: binding.adapterId,
+    model: binding.model,
+  });
+  if (!provider || !isSafeProviderId(provider.id) || !isSafeModel(binding.model) || !kind) {
+    return retired();
   }
-  if (binding.adapterId === IMAGE_ADAPTER && !isImageGenSupported(provider, binding.model)) return null;
+  if (!providerIsConfigured(provider)) {
+    return {
+      status: 'needs_setup',
+      providerId: provider.id,
+      providerName: sanitizedProviderName(provider),
+      adapterId: binding.adapterId,
+      model: binding.model,
+    };
+  }
+  if (
+    provider.enabled === false ||
+    provider.model_enabled?.[binding.model] === false ||
+    provider.model_health?.[binding.model]?.status === 'unhealthy'
+  ) {
+    return {
+      status: 'health',
+      providerId: provider.id,
+      adapterId: binding.adapterId,
+      model: binding.model,
+    };
+  }
+  if (binding.adapterId === IMAGE_ADAPTER && !isImageGenSupported(provider, binding.model)) return retired();
   if (binding.adapterId === 'weprompt-media-gateway-v1' && !binding.capabilities.audioModes?.includes('none')) {
-    return null;
+    return retired();
   }
   if (binding.adapterId === 'byteplus-seedance-v1' && !isSupportedBytePlusSeedanceProvider(provider, binding.model)) {
-    return null;
+    return retired();
   }
   if (binding.adapterId === 'openrouter-video-v1' && !isSupportedOpenRouterVideoProvider(provider, binding.model)) {
-    return null;
+    return retired();
   }
   const constraints =
     binding.adapterId === IMAGE_ADAPTER
@@ -201,25 +238,28 @@ const resolveBindingRoute = (
         : binding.adapterId === 'openrouter-video-v1'
           ? openRouterConstraints(binding.model)
           : bindingConstraints(binding.capabilities);
-  if (!constraints) return null;
+  if (!constraints) return retired();
   // Only the host-locked OpenRouter adapter may surface audio-capable output;
   // every other adapter retains the existing silent-only security invariant.
-  if (!constraints.silentOutput && binding.adapterId !== 'openrouter-video-v1') return null;
+  if (!constraints.silentOutput && binding.adapterId !== 'openrouter-video-v1') return retired();
   return {
-    choiceId: createStudioMediaChoiceId({
+    status: 'available',
+    route: {
+      choiceId: createStudioMediaChoiceId({
+        providerId: provider.id,
+        adapterId: binding.adapterId,
+        model: binding.model,
+        kind,
+      }),
       providerId: provider.id,
-      adapterId: binding.adapterId,
+      providerName: sanitizedProviderName(provider),
       model: binding.model,
+      health: modelHealth(provider, binding.model),
+      adapterId: binding.adapterId,
+      cancellationPolicy: bindingCancellationPolicy(binding.capabilities),
       kind,
-    }),
-    providerId: provider.id,
-    providerName: sanitizedProviderName(provider),
-    model: binding.model,
-    health: modelHealth(provider, binding.model),
-    adapterId: binding.adapterId,
-    cancellationPolicy: bindingCancellationPolicy(binding.capabilities),
-    kind,
-    constraints,
+      constraints,
+    },
   };
 };
 
@@ -247,9 +287,11 @@ export const createStudioProviderResolver = (deps: StudioProviderResolverDeps): 
   const listGenerationRoutes = async (): Promise<StudioGenerationRouteCatalog> => {
     const [providers, connections] = await Promise.all([deps.listProviders(), deps.listConnections()]);
     const uniqueRoutes = new Map<string, StudioGenerationRoute>();
+    const rejected = new Map<string, Exclude<StudioGenerationRouteDiagnostic, { status: 'available' }>>();
     for (const binding of connections) {
-      const route = resolveBindingRoute(binding, providers);
-      if (route) {
+      const diagnostic = resolveBindingRoute(binding, providers);
+      if (diagnostic.status === 'available') {
+        const route = diagnostic.route;
         const identity = routeIdentity(route);
         const existing = uniqueRoutes.get(identity);
         if (
@@ -257,6 +299,12 @@ export const createStudioProviderResolver = (deps: StudioProviderResolverDeps): 
           CANCELLATION_POLICY_RANK[route.cancellationPolicy] < CANCELLATION_POLICY_RANK[existing.cancellationPolicy]
         ) {
           uniqueRoutes.set(identity, route);
+        }
+        rejected.delete(`${route.adapterId}\u0000${route.providerId}\u0000${route.model}`);
+      } else {
+        const identity = diagnosticIdentity(diagnostic);
+        if (!uniqueRoutes.has(`${identity}\u0000${bindingMediaKind(binding) ?? ''}`) && !rejected.has(identity)) {
+          rejected.set(identity, diagnostic);
         }
       }
     }
@@ -278,6 +326,9 @@ export const createStudioProviderResolver = (deps: StudioProviderResolverDeps): 
     );
     return {
       routes,
+      diagnostics: [...rejected.values()].toSorted((left, right) =>
+        diagnosticIdentity(left).localeCompare(diagnosticIdentity(right))
+      ),
       generationCatalogVersion: createHash('sha256').update(JSON.stringify(stable)).digest('hex').slice(0, 16),
     };
   };

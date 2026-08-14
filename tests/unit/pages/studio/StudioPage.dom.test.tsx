@@ -195,8 +195,8 @@ const routes = (): StudioRouteCatalog => ({
       },
     ],
   },
-  image: { status: 'setup_required', selected: null, selectedRoute: null, options: [] },
-  video: { status: 'setup_required', selected: null, selectedRoute: null, options: [] },
+  image: { status: 'setup_required', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+  video: { status: 'setup_required', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
   catalogVersion: 'catalog-1',
 });
 
@@ -240,6 +240,7 @@ const imageRoute = (overrides: Partial<StudioRouteCatalogEntry> = {}): StudioRou
   providerId: 'provider-image',
   providerName: 'Image provider',
   model: 'image-model',
+  integrationLabelKey: 'imageApi',
   health: 'available',
   kind: 'image',
   constraints: {
@@ -263,6 +264,7 @@ const routesWithImage = (route = imageRoute()): StudioRouteCatalog => ({
       model: route.model,
     },
     selectedRoute: route,
+    selectionIssue: null,
     options: [route],
   },
 });
@@ -1333,8 +1335,20 @@ describe('StudioPage and useStudioProject', () => {
     bridge.listRoutes.invoke.mockResolvedValue(
       ok({
         storyboard: { status: 'setup_required' as const, selected: null, options: [] },
-        image: { status: 'setup_required' as const, selected: null, selectedRoute: null, options: [] },
-        video: { status: 'setup_required' as const, selected: null, selectedRoute: null, options: [] },
+        image: {
+          status: 'setup_required' as const,
+          selected: null,
+          selectedRoute: null,
+          selectionIssue: null,
+          options: [],
+        },
+        video: {
+          status: 'setup_required' as const,
+          selected: null,
+          selectedRoute: null,
+          selectionIssue: null,
+          options: [],
+        },
         catalogVersion: 'catalog-full-setup',
       })
     );
@@ -2093,6 +2107,7 @@ describe('StudioPage and useStudioProject', () => {
             model: videoRoute.model,
           },
           selectedRoute: videoRoute,
+          selectionIssue: null,
           options: [videoRoute],
         },
       })
@@ -2471,6 +2486,7 @@ describe('StudioPage and useStudioProject', () => {
             status: 'selection_required' as const,
             selected: null,
             selectedRoute: null,
+            selectionIssue: null,
             options: [imageRoute()],
           },
         })
@@ -2502,6 +2518,7 @@ describe('StudioPage and useStudioProject', () => {
           status: 'selection_required' as const,
           selected: null,
           selectedRoute: null,
+          selectionIssue: null,
           options: [imageRoute(), imageRoute({ choiceId: 'choice_image_alternate', model: 'alternate-image-model' })],
         },
       })

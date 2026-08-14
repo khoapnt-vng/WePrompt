@@ -19,6 +19,7 @@ const route = (overrides: Partial<StudioRouteCatalogEntry> = {}): StudioRouteCat
   providerId: 'provider_image',
   providerName: 'Image Provider',
   model: 'image-model-v1',
+  integrationLabelKey: 'imageApi',
   health: 'available',
   kind: 'image',
   constraints: {

@@ -158,6 +158,7 @@ const imageRoute: StudioRouteCatalogEntry = {
   providerId: 'provider-image',
   providerName: 'Image provider',
   model: 'image-model',
+  integrationLabelKey: 'imageApi',
   health: 'available',
   kind: 'image',
   constraints: {
@@ -181,9 +182,10 @@ const readyCatalog: StudioRouteCatalog = {
     status: 'ready',
     selected: { choiceId: imageRoute.choiceId, providerId: imageRoute.providerId, model: imageRoute.model },
     selectedRoute: imageRoute,
+    selectionIssue: null,
     options: [imageRoute],
   },
-  video: { status: 'setup_required', selected: null, selectedRoute: null, options: [] },
+  video: { status: 'setup_required', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
   catalogVersion: 'catalog-v1',
 };
 

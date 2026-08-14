@@ -49,8 +49,8 @@ const project = (id = 'project-1', revision = 4): StudioRendererProject => ({
 
 const catalog = (version: string): StudioRouteCatalog => ({
   storyboard: { status: 'selection_required', selected: null, options: [] },
-  image: { status: 'selection_required', selected: null, selectedRoute: null, options: [] },
-  video: { status: 'selection_required', selected: null, selectedRoute: null, options: [] },
+  image: { status: 'selection_required', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+  video: { status: 'selection_required', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
   catalogVersion: version,
 });
 
@@ -59,6 +59,7 @@ const route = (kind: 'image' | 'video', overrides: Partial<StudioRouteCatalogEnt
   providerId: `provider-${kind}`,
   providerName: `${kind} provider`,
   model: `${kind}-model`,
+  integrationLabelKey: kind === 'image' ? 'imageApi' : 'selfHostedVideoGateway',
   health: 'available',
   kind,
   constraints: {
@@ -76,6 +77,7 @@ const unchosen = (entry: StudioRouteCatalogEntry, ...rest: StudioRouteCatalogEnt
   status: 'selection_required',
   selected: null,
   selectedRoute: null,
+  selectionIssue: null,
   options: [entry, ...rest],
 });
 

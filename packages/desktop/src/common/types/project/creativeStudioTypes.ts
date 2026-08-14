@@ -459,11 +459,18 @@ export type StudioConnectionCandidate = {
   models: StudioConnectionCandidateModel[];
 };
 
+export type StudioConnectionIntegrationLabelKey =
+  | 'imageApi'
+  | 'bytePlusSeedance'
+  | 'selfHostedVideoGateway'
+  | 'openRouterVideo';
+
 export type StudioRouteCatalogEntry = {
   choiceId: string;
   providerId: string;
   providerName: string;
   model: string;
+  integrationLabelKey: StudioConnectionIntegrationLabelKey;
   health: 'available' | 'unknown' | 'unavailable';
   kind: StudioMediaKind;
   constraints: StudioRouteConstraints;
@@ -502,12 +509,6 @@ export type StudioConnectionBinding = {
   validatedAt: string;
 };
 
-export type StudioConnectionIntegrationLabelKey =
-  | 'imageApi'
-  | 'bytePlusSeedance'
-  | 'selfHostedVideoGateway'
-  | 'openRouterVideo';
-
 export type StudioConnectionIntegration = {
   integrationId: string;
   kind: StudioMediaKind;
@@ -538,10 +539,17 @@ export type StudioConnectionValidationResult = Omit<StudioConnectionRecord, 'bin
 
 export type StudioModelAvailability = 'ready' | 'selection_required' | 'setup_required' | 'unavailable';
 
+export type StudioMediaSelectionIssue =
+  | { code: 'retired' }
+  | { code: 'needs_setup'; providerName: string }
+  | { code: 'health' }
+  | { code: 'frame'; aspectRatio: StudioAspectRatio; resolution: StudioResolution };
+
 export type StudioMediaRouteCatalog = {
   status: StudioModelAvailability;
   selected: StudioMediaChoiceRef | null;
   selectedRoute: StudioRouteCatalogEntry | null;
+  selectionIssue: StudioMediaSelectionIssue | null;
   options: StudioRouteCatalogEntry[];
 };
 

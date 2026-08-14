@@ -169,6 +169,7 @@ const catalog: StudioRouteCatalog = {
       providerId: 'image-provider',
       providerName: 'Image Provider',
       model: 'image-model',
+      integrationLabelKey: 'imageApi',
       health: 'available',
       kind: 'image',
       constraints: {
@@ -180,6 +181,7 @@ const catalog: StudioRouteCatalog = {
         silentOutput: true,
       },
     },
+    selectionIssue: null,
     options: [],
   },
   video: {
@@ -190,6 +192,7 @@ const catalog: StudioRouteCatalog = {
       providerId: 'video-provider',
       providerName: 'Video Provider',
       model: 'video-model',
+      integrationLabelKey: 'selfHostedVideoGateway',
       health: 'available',
       kind: 'video',
       constraints: {
@@ -201,6 +204,7 @@ const catalog: StudioRouteCatalog = {
         silentOutput: true,
       },
     },
+    selectionIssue: null,
     options: [],
   },
   catalogVersion: '0123456789abcdef',
@@ -1047,7 +1051,13 @@ describe('WritePhase', () => {
           models: models({
             catalog: {
               ...catalog,
-              image: { status: 'setup_required', selected: null, selectedRoute: null, options: [] },
+              image: {
+                status: 'setup_required',
+                selected: null,
+                selectedRoute: null,
+                selectionIssue: null,
+                options: [],
+              },
             },
           }),
           openSingleGenerationReview: props.openSingleGenerationReview,

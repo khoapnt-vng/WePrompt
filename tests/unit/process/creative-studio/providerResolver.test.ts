@@ -222,6 +222,54 @@ describe('createStudioProviderResolver', () => {
     expect((await resolver(unavailableProviders, connections).listGenerationRoutes()).routes).toEqual([]);
   });
 
+  it('keeps renderer-safe diagnostics for unavailable validated bindings', async () => {
+    const unavailableProviders = [
+      provider({ id: 'disabled', enabled: false }),
+      provider({ id: 'credentialless', api_key: '', name: 'Needs Setup' }),
+      provider({
+        id: 'unhealthy',
+        model_health: { 'video-model': { status: 'unhealthy', last_check: 1 } },
+      }),
+    ];
+    const connections = [
+      binding({ id: 'binding_removed', providerId: 'removed' }),
+      ...unavailableProviders.map((candidate) => binding({ id: `binding_${candidate.id}`, providerId: candidate.id })),
+    ];
+
+    const catalog = await resolver(unavailableProviders, connections).listGenerationRoutes();
+
+    expect(catalog.diagnostics).toEqual(
+      expect.arrayContaining([
+        {
+          status: 'retired',
+          providerId: 'removed',
+          adapterId: 'weprompt-media-gateway-v1',
+          model: 'video-model',
+        },
+        {
+          status: 'needs_setup',
+          providerId: 'credentialless',
+          providerName: 'Needs Setup',
+          adapterId: 'weprompt-media-gateway-v1',
+          model: 'video-model',
+        },
+        {
+          status: 'health',
+          providerId: 'disabled',
+          adapterId: 'weprompt-media-gateway-v1',
+          model: 'video-model',
+        },
+        {
+          status: 'health',
+          providerId: 'unhealthy',
+          adapterId: 'weprompt-media-gateway-v1',
+          model: 'video-model',
+        },
+      ])
+    );
+    expect(JSON.stringify(catalog.diagnostics)).not.toMatch(/api_key|base_url|never-return-this/i);
+  });
+
   it('requires silent output and complete constraints for media gateway routes', async () => {
     const missingSilent = binding({
       id: 'binding_audio',
