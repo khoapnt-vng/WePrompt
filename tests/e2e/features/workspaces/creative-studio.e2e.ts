@@ -474,11 +474,13 @@ test.describe('Creative Studio workspace', () => {
       await expect(tableView.getByRole('button', { name: /render|generate/i })).toHaveCount(0);
 
       const scriptTable = tableView.getByRole('region', { name: 'Script' });
-      await expect(scriptTable.locator('div[aria-hidden="true"] > span')).toHaveText([
+      await expect(scriptTable.locator('[data-script-column]')).toHaveText([
         'Shot',
         'Script',
         'Visual',
         'Output',
+        'Length',
+        'State',
       ]);
       await scriptTable.getByRole('button', { name: 'Add shot' }).click();
 
@@ -490,7 +492,7 @@ test.describe('Creative Studio workspace', () => {
       await expect(emptyRow.getByRole('button', { name: 'More details' })).toHaveAttribute('aria-expanded', 'false');
       await expect(emptyRow.getByRole('button', { name: 'Suggest a visual' })).toBeVisible();
       await expect(emptyRow.getByRole('button', { name: 'Add reference' })).toBeVisible();
-      await expect(emptyRow.getByRole('status').filter({ hasText: 'Needs title' })).toBeVisible();
+      await expect(emptyRow.getByRole('status').filter({ hasText: 'Needs a title' })).toBeVisible();
       await expect(page.getByText('Untitled scene', { exact: true })).toHaveCount(0);
 
       await expect

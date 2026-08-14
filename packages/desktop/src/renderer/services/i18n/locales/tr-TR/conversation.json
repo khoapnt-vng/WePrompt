@@ -976,6 +976,8 @@
         "scriptColumn": "Senaryo",
         "visualColumn": "Görsel",
         "outputColumn": "Çıktı",
+        "lengthColumn": "Süre",
+        "stateColumn": "Durum",
         "visualPlaceholder": "Ekranda ne gördüğümüzü açıklayın…",
         "suggestVisual": "Görsel öner",
         "addReference": "Referans ekle",

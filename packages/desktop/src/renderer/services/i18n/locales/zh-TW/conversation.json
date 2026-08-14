@@ -972,6 +972,8 @@
         "scriptColumn": "腳本",
         "visualColumn": "畫面",
         "outputColumn": "輸出",
+        "lengthColumn": "時間",
+        "stateColumn": "狀態",
         "visualPlaceholder": "描述畫面內容…",
         "suggestVisual": "建議畫面",
         "addReference": "新增參考圖",

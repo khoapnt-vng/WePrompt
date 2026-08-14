@@ -31,7 +31,7 @@ export type ScriptTableProps = {
   onDiscardConflict: () => ActionResult;
 };
 
-/** Four-zone script table. Scene editing remains owned by the by-ID editor controller. */
+/** Six-zone script table. Scene editing remains owned by the by-ID editor controller. */
 export const ScriptTable: React.FC<ScriptTableProps> = ({
   orderedScenes,
   children,
@@ -84,11 +84,13 @@ export const ScriptTable: React.FC<ScriptTableProps> = ({
       </header>
 
       <div className={styles.tableScroll}>
-        <div className={styles.tableHeader}>
-          <span>{t('conversation.creativeStudio.phase.write.shotColumn')}</span>
-          <span>{t('conversation.creativeStudio.phase.write.scriptColumn')}</span>
-          <span>{t('conversation.creativeStudio.phase.write.visualColumn')}</span>
-          <span>{t('conversation.creativeStudio.phase.write.outputColumn')}</span>
+        <div className={styles.tableHeader} aria-hidden='true'>
+          <span data-script-column='timing'>{t('conversation.creativeStudio.phase.write.shotColumn')}</span>
+          <span data-script-column='script'>{t('conversation.creativeStudio.phase.write.scriptColumn')}</span>
+          <span data-script-column='visual'>{t('conversation.creativeStudio.phase.write.visualColumn')}</span>
+          <span data-script-column='output'>{t('conversation.creativeStudio.phase.write.outputColumn')}</span>
+          <span data-script-column='length'>{t('conversation.creativeStudio.phase.write.lengthColumn')}</span>
+          <span data-script-column='state'>{t('conversation.creativeStudio.phase.write.stateColumn')}</span>
         </div>
 
         {orderedScenes.length === 0 ? (

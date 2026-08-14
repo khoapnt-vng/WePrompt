@@ -99,8 +99,8 @@
 .tableHeader,
 .scriptRow {
   display: grid;
-  min-width: 696px;
-  grid-template-columns: 56px 200px 320px 120px;
+  min-width: 808px;
+  grid-template-columns: 56px minmax(176px, 1.4fr) minmax(220px, 2fr) 120px 96px 140px;
 }
 
 .tableHeader {
@@ -125,7 +125,7 @@
 }
 
 .scriptRowItem {
-  min-width: 696px;
+  min-width: 808px;
 }
 
 .scriptRowItem[data-dragging='true'] {
@@ -161,6 +161,10 @@
 }
 
 .timingZone {
+  align-items: flex-start;
+}
+
+.lengthZone {
   align-items: flex-start;
 }
 
@@ -357,7 +361,7 @@
 .readiness {
   composes: body from '../../../../StudioTypography.module.css';
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
 }
 
@@ -365,6 +369,7 @@
   width: 8px;
   height: 8px;
   flex: none;
+  margin-block-start: 0.4em;
   border-radius: 50%;
   background: var(--color-fill-4);
 }
@@ -378,6 +383,7 @@
   background: var(--color-primary-6);
 }
 
+.readiness[data-readiness='needs_title'] .readinessDot,
 .readiness[data-readiness='needs_prompt'] .readinessDot,
 .readiness[data-readiness='needs_selection'] .readinessDot {
   background: var(--color-warning-6);

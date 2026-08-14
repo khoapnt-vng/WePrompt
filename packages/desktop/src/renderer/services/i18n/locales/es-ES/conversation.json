@@ -977,6 +977,8 @@
         "scriptColumn": "Guion",
         "visualColumn": "Imagen",
         "outputColumn": "Salida",
+        "lengthColumn": "Duración",
+        "stateColumn": "Estado",
         "visualPlaceholder": "Describe lo que vemos…",
         "suggestVisual": "Sugerir una imagen",
         "addReference": "Añadir referencia",

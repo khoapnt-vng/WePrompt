@@ -972,6 +972,8 @@
         "scriptColumn": "脚本",
         "visualColumn": "画面",
         "outputColumn": "输出",
+        "lengthColumn": "时长",
+        "stateColumn": "状态",
         "visualPlaceholder": "描述画面内容…",
         "suggestVisual": "建议画面",
         "addReference": "添加参考图",

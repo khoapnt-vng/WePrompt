@@ -972,6 +972,8 @@
         "scriptColumn": "대본",
         "visualColumn": "화면",
         "outputColumn": "출력",
+        "lengthColumn": "길이",
+        "stateColumn": "상태",
         "visualPlaceholder": "화면에 보이는 내용을 설명하세요…",
         "suggestVisual": "화면 제안",
         "addReference": "참조 이미지 추가",

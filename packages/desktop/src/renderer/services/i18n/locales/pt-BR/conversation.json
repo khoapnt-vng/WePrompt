@@ -982,6 +982,8 @@
         "scriptColumn": "Roteiro",
         "visualColumn": "Visual",
         "outputColumn": "Saída",
+        "lengthColumn": "Duração",
+        "stateColumn": "Estado",
         "visualPlaceholder": "Descreva o que vemos…",
         "suggestVisual": "Sugerir um visual",
         "addReference": "Adicionar referência",

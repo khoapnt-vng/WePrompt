@@ -61,15 +61,28 @@ describe('Studio write table stylesheet', () => {
     return declarations;
   };
 
-  it('keeps the header and scene cells aligned to the fixed 696px table width', () => {
-    const expected = {
-      'grid-template-columns': '56px 200px 320px 120px',
-      'min-width': '696px',
-    };
+  it('keeps all six header and scene columns aligned to the sum of their track minima', () => {
+    const sharedRule = [...stylesheet.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((rule) => {
+      const selectors = rule[1]!.split(',').map((candidate) => candidate.trim());
+      return selectors.includes('.tableHeader') && selectors.includes('.scriptRow');
+    });
+    expect(sharedRule, 'the header and scene row do not share one grid rule').toBeDefined();
 
-    expect(declarationsFor('.tableHeader')).toMatchObject(expected);
-    expect(declarationsFor('.scriptRow')).toMatchObject(expected);
-    expect(declarationsFor('.scriptRowItem')).toMatchObject({ 'min-width': '696px' });
+    const declarations = Object.fromEntries(
+      [...sharedRule![2]!.matchAll(/([\w-]+)\s*:\s*([^;]+);/g)].map((declaration) => [
+        declaration[1]!,
+        declaration[2]!.trim(),
+      ])
+    );
+    const trackList = declarations['grid-template-columns'];
+    expect(trackList).toBe('56px minmax(176px, 1.4fr) minmax(220px, 2fr) 120px 96px 140px');
+
+    const trackMinima = [...trackList!.matchAll(/(?:minmax\()?(\d+)px/g)].map((match) => Number(match[1]));
+    expect(trackMinima).toHaveLength(6);
+    const minimumWidth = `${trackMinima.reduce((sum, width) => sum + width, 0)}px`;
+
+    expect(declarations['min-width']).toBe(minimumWidth);
+    expect(declarationsFor('.scriptRowItem')).toMatchObject({ 'min-width': minimumWidth });
   });
 });
 

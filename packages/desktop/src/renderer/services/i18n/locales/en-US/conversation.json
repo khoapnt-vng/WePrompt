@@ -809,6 +809,8 @@
         "scriptColumn": "Script",
         "visualColumn": "Visual",
         "outputColumn": "Output",
+        "lengthColumn": "Length",
+        "stateColumn": "State",
         "visualPlaceholder": "Describe what we see…",
         "suggestVisual": "Suggest a visual",
         "addReference": "Add reference",

@@ -975,6 +975,8 @@
         "scriptColumn": "Drehbuch",
         "visualColumn": "Bild",
         "outputColumn": "Ausgabe",
+        "lengthColumn": "Dauer",
+        "stateColumn": "Status",
         "visualPlaceholder": "Beschreibe, was wir sehen…",
         "suggestVisual": "Bild vorschlagen",
         "addReference": "Referenz hinzufügen",

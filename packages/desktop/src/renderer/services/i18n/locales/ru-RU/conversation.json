@@ -978,6 +978,8 @@
         "scriptColumn": "Сценарий",
         "visualColumn": "Изображение",
         "outputColumn": "Результат",
+        "lengthColumn": "Длительность",
+        "stateColumn": "Статус",
         "visualPlaceholder": "Опишите, что мы видим…",
         "suggestVisual": "Предложить изображение",
         "addReference": "Добавить референс",

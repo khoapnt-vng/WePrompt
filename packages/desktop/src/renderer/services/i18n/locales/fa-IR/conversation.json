@@ -974,6 +974,8 @@
         "scriptColumn": "فیلم‌نامه",
         "visualColumn": "تصویر",
         "outputColumn": "خروجی",
+        "lengthColumn": "مدت",
+        "stateColumn": "وضعیت",
         "visualPlaceholder": "آنچه می‌بینیم را توصیف کنید…",
         "suggestVisual": "پیشنهاد تصویر",
         "addReference": "افزودن مرجع",
