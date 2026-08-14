@@ -434,7 +434,7 @@
   "toolsDescription": "MCP-Server und integrierte Tools wie die Bildgenerierung konfigurieren. Die Bildgenerierung kann erst aktiviert werden, nachdem auf der Modellseite ein bildfähiges Modell konfiguriert wurde.",
   "modelDescription": "Anbieter und API-Schlüssel für Text-, Bild- und Videomodelle konfigurieren.",
   "mediaModels": {
-    "title": "Creative-Studio-Medienmodelle",
+    "title": "Creative-Studio-Engines",
     "description": "Vorhandene Anbieter mit Bild- und Video-Integrationen verbinden, ohne Zugangsdaten anzuzeigen.",
     "add": "Medienmodell hinzufügen",
     "empty": "Noch keine Medienmodelle konfiguriert.",

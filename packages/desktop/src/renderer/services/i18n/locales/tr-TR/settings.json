@@ -442,7 +442,7 @@
   "toolsDescription": "MCP sunucularını ve görüntü oluşturma gibi yerleşik araçları yapılandırın. Görüntü oluşturma yalnızca Model sayfasında görüntü destekli bir model yapılandırıldıktan sonra etkinleştirilebilir.",
   "modelDescription": "Metin, görüntü ve video modelleri için sağlayıcıları ve API anahtarlarını yapılandırın.",
   "mediaModels": {
-    "title": "Creative Studio medya modelleri",
+    "title": "Creative Studio motorları",
     "description": "Kimlik bilgilerini göstermeden mevcut sağlayıcıları görüntü ve video entegrasyonlarına bağlayın.",
     "add": "Medya modeli ekle",
     "empty": "Henüz medya modeli yapılandırılmadı.",

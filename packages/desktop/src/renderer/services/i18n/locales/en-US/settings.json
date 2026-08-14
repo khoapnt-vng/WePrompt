@@ -442,7 +442,7 @@
   "toolsDescription": "Configure MCP servers and built-in tools like image generation. Image generation must be enabled after configuring an image-capable model on the Model page.",
   "modelDescription": "Configure providers and API keys for text, image, and video models.",
   "mediaModels": {
-    "title": "Creative Studio media models",
+    "title": "Creative Studio engines",
     "description": "Bind existing providers to image and video integrations without exposing credentials.",
     "add": "Add media model",
     "empty": "No media models configured yet.",

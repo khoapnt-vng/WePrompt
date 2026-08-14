@@ -442,7 +442,7 @@
   "toolsDescription": "MCP サーバーと画像生成などの組み込みツールを設定します。画像生成は、モデルページで画像対応モデルを設定した後にのみ有効化できます。",
   "modelDescription": "テキスト、画像、動画モデルのプロバイダーと API キーを設定します。",
   "mediaModels": {
-    "title": "Creative Studio メディアモデル",
+    "title": "Creative Studio エンジン",
     "description": "認証情報を表示せず、既存のプロバイダーを画像・動画連携に割り当てます。",
     "add": "メディアモデルを追加",
     "empty": "メディアモデルはまだ設定されていません。",

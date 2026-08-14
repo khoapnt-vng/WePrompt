@@ -442,7 +442,7 @@
   "toolsDescription": "Configure servidores MCP e ferramentas integradas, como geração de imagens. A geração de imagens só pode ser ativada após configurar um modelo compatível com imagens na página de Modelos.",
   "modelDescription": "Configure provedores e chaves de API para modelos de texto, imagem e vídeo.",
   "mediaModels": {
-    "title": "Modelos de mídia do Creative Studio",
+    "title": "Mecanismos do Creative Studio",
     "description": "Vincule provedores existentes a integrações de imagem e vídeo sem exibir credenciais.",
     "add": "Adicionar modelo de mídia",
     "empty": "Nenhum modelo de mídia configurado ainda.",

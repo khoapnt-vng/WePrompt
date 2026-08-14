@@ -442,7 +442,7 @@
   "toolsDescription": "配置 MCP 服务器与内置工具（如图像生成）。图像生成需先在“模型”页配置支持图像的模型后才能启用。",
   "modelDescription": "配置文本、图片和视频模型的服务商与 API Key。",
   "mediaModels": {
-    "title": "Creative Studio 媒体模型",
+    "title": "Creative Studio 引擎",
     "description": "将现有服务商绑定到图片和视频集成，不会显示凭据。",
     "add": "添加媒体模型",
     "empty": "尚未配置媒体模型。",
