@@ -45,7 +45,12 @@ to shared constants rather than edited at nine call sites.
 (`bytedance/seedance-2.0`) runs **4–15 seconds**. The ceiling being 15 is minor. The **4-second floor
 is undocumented and load-bearing**: there is no such thing as a two-second beat _as a clip_. Any
 shorter beat is a trim of a longer generation or a held still. A shot added in the current app
-defaults to 3s, below the floor, and fails at render with no warning at authoring time.
+defaults to 5s, which is safe. The gap is the accepted **range**, not the default: `isValidDuration`
+takes `1..60` (`useStoryboardEditor.ts:261`) and the store agrees (`store.ts:393`, `:645`), so a
+user can type 1, 2 or 3 seconds and it validates, persists and survives a reload — failing only at
+render, after the spend. Raising the floor to 4 at those three sites needs a migration first:
+projects may already hold sub-4s scenes, and tightening the validator ahead of migrating them
+quarantines those projects.
 
 **The 24-record cap is exceeded by the new model, not approached.** `MAX_SCENES = 24`
 (`useStoryboardEditor.ts:20`, enforced `:1344`, `:1622`, plus service `:1826`, `:1893` and
