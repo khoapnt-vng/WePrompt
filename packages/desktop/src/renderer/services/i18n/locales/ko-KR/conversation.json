@@ -987,7 +987,9 @@
           "middle": "중간 숏",
           "closing": "클로징 숏"
         },
-        "needsTitle": "제목 필요"
+        "needsTitle": "제목 필요",
+        "lengthColumn": "길이",
+        "stateColumn": "상태"
       },
       "produce": {
         "connectEngine": "엔진 연결 — 약 1분, 전체 작업 공간에서 한 번만",

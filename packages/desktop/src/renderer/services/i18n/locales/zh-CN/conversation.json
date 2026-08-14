@@ -987,7 +987,9 @@
           "middle": "中段镜头",
           "closing": "收尾镜头"
         },
-        "needsTitle": "需要标题"
+        "needsTitle": "需要标题",
+        "lengthColumn": "时长",
+        "stateColumn": "状态"
       },
       "produce": {
         "connectEngine": "连接一个引擎——大约一分钟，整个工作区只需设置一次",

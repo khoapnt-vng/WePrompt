@@ -826,7 +826,9 @@
           "middle": "Middle shot",
           "closing": "Closing shot"
         },
-        "needsTitle": "Needs a title"
+        "needsTitle": "Needs a title",
+        "lengthColumn": "Length",
+        "stateColumn": "State"
       },
       "produce": {
         "connectEngine": "Connect an engine — about a minute, once for the whole workspace",

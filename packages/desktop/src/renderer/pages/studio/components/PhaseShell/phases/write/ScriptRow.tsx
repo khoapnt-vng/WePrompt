@@ -206,34 +206,6 @@ export const ScriptRow: React.FC<ScriptRowProps> = ({
             </Button>
             <span className={styles.shotNumber}>{String(index + 1).padStart(2, '0')}</span>
           </div>
-          <label htmlFor={fieldId('duration')} className={styles.srOnly}>
-            {t('conversation.creativeStudio.inspector.durationLabel')}
-          </label>
-          <Select
-            id={fieldId('duration')}
-            className={styles.durationChip}
-            aria-label={t('conversation.creativeStudio.inspector.durationLabel')}
-            aria-invalid={durationInvalid}
-            size='mini'
-            status={durationInvalid ? 'error' : undefined}
-            value={draft.durationSeconds}
-            renderFormat={() => formatDuration(draft.durationSeconds)}
-            onChange={(value) => {
-              if (typeof value === 'number') updateDuration(value);
-            }}
-            onBlur={flushIfTitleValid}
-          >
-            {durationOptions.map((seconds) => (
-              <Select.Option key={seconds} value={seconds}>
-                {formatDuration(seconds)}
-              </Select.Option>
-            ))}
-          </Select>
-          {durationInvalid && (
-            <span role='alert' className={styles.fieldError}>
-              {t('conversation.creativeStudio.inspector.invalidDuration')}
-            </span>
-          )}
           <div className={styles.rowActions}>
             <Button
               type='text'
@@ -438,10 +410,6 @@ export const ScriptRow: React.FC<ScriptRowProps> = ({
               <Select.Option value='video'>{t('conversation.creativeStudio.scene.video')}</Select.Option>
             </Select>
           </div>
-          <span role='status' data-readiness={status} className={styles.readiness}>
-            <span aria-hidden='true' className={styles.readinessDot} />
-            {draft.title.trim().length === 0 ? t('conversation.creativeStudio.phase.write.needsTitle') : t(statusKey)}
-          </span>
           {errorMessageKey !== null && (
             <div role='alert' className={styles.errorMessage}>
               {t(errorMessageKey)}
@@ -457,6 +425,46 @@ export const ScriptRow: React.FC<ScriptRowProps> = ({
               </Button>
             </div>
           )}
+        </div>
+
+        <div data-script-zone='length' className={`${styles.zone} ${styles.lengthZone}`}>
+          <h4 className={styles.compactZoneHeading}>{t('conversation.creativeStudio.phase.write.lengthColumn')}</h4>
+          <label htmlFor={fieldId('duration')} className={styles.srOnly}>
+            {t('conversation.creativeStudio.inspector.durationLabel')}
+          </label>
+          <Select
+            id={fieldId('duration')}
+            className={styles.durationChip}
+            aria-label={t('conversation.creativeStudio.inspector.durationLabel')}
+            aria-invalid={durationInvalid}
+            size='mini'
+            status={durationInvalid ? 'error' : undefined}
+            value={draft.durationSeconds}
+            renderFormat={() => formatDuration(draft.durationSeconds)}
+            onChange={(value) => {
+              if (typeof value === 'number') updateDuration(value);
+            }}
+            onBlur={flushIfTitleValid}
+          >
+            {durationOptions.map((seconds) => (
+              <Select.Option key={seconds} value={seconds}>
+                {formatDuration(seconds)}
+              </Select.Option>
+            ))}
+          </Select>
+          {durationInvalid && (
+            <span role='alert' className={styles.fieldError}>
+              {t('conversation.creativeStudio.inspector.invalidDuration')}
+            </span>
+          )}
+        </div>
+
+        <div data-script-zone='state' className={styles.zone}>
+          <h4 className={styles.compactZoneHeading}>{t('conversation.creativeStudio.phase.write.stateColumn')}</h4>
+          <span role='status' data-readiness={status} className={styles.readiness}>
+            <span aria-hidden='true' className={styles.readinessDot} />
+            {draft.title.trim().length === 0 ? t('conversation.creativeStudio.phase.write.needsTitle') : t(statusKey)}
+          </span>
         </div>
       </section>
 

@@ -402,19 +402,32 @@ describe('WritePhase', () => {
     vi.unstubAllGlobals();
   });
 
-  it('lays out every seeded shot as one four-zone script row', () => {
+  it('keeps the six named headers aligned with every six-zone script row', () => {
     render(<WritePhase controller={controller()} />);
 
     const table = screen.getByRole('region', {
       name: 'conversation.creativeStudio.phase.write.scriptTableTitle',
     });
+    const expectedZones = ['timing', 'script', 'visual', 'output', 'length', 'state'];
+    const headers = [...table.querySelectorAll('[data-script-column]')];
+    expect(headers.map((header) => header.getAttribute('data-script-column'))).toEqual(expectedZones);
+    expect(headers.map((header) => header.textContent)).toEqual([
+      'conversation.creativeStudio.phase.write.shotColumn',
+      'conversation.creativeStudio.phase.write.scriptColumn',
+      'conversation.creativeStudio.phase.write.visualColumn',
+      'conversation.creativeStudio.phase.write.outputColumn',
+      'conversation.creativeStudio.phase.write.lengthColumn',
+      'conversation.creativeStudio.phase.write.stateColumn',
+    ]);
+    expect(headers[0]?.parentElement).toHaveAttribute('aria-hidden', 'true');
+
     const opening = within(table).getByRole('region', { name: 'Opening' });
     const reveal = within(table).getByRole('region', { name: 'Reveal' });
 
     for (const row of [opening, reveal]) {
       expect(
         [...row.querySelectorAll('[data-script-zone]')].map((zone) => zone.getAttribute('data-script-zone'))
-      ).toEqual(['timing', 'script', 'visual', 'output']);
+      ).toEqual(expectedZones);
       expect(
         within(row).getByRole('combobox', { name: 'conversation.creativeStudio.inspector.durationLabel' })
       ).toBeInTheDocument();
@@ -440,6 +453,44 @@ describe('WritePhase', () => {
     expect(screen.queryByText('conversation.creativeStudio.inspector.saved')).not.toBeInTheDocument();
   });
 
+  it('puts readiness in the state column and keeps it out of output', () => {
+    render(<WritePhase controller={controller()} />);
+
+    const opening = screen.getByRole('region', { name: 'Opening' });
+    const state = opening.querySelector('[data-script-zone="state"]');
+    const output = opening.querySelector('[data-script-zone="output"]');
+    expect(state).not.toBeNull();
+    expect(output).not.toBeNull();
+    expect(within(state!).getByRole('status')).toHaveAttribute('data-readiness', 'ready');
+    expect(within(output!).queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['needs_title', 'conversation.creativeStudio.scene.status.needs_title'],
+    ['needs_prompt', 'conversation.creativeStudio.scene.status.needs_prompt'],
+    ['ready', 'conversation.creativeStudio.scene.status.ready'],
+    ['generating', 'conversation.creativeStudio.scene.status.generating'],
+    ['needs_selection', 'conversation.creativeStudio.scene.status.needs_selection'],
+    ['generated', 'conversation.creativeStudio.scene.status.generated'],
+    ['needs_attention', 'conversation.creativeStudio.scene.status.needs_attention'],
+  ] as const)('renders the %s readiness variant with its own label', (status, expectedLabel) => {
+    render(
+      <WritePhase
+        controller={controller({
+          readiness: {
+            ...controller().readiness,
+            sceneStatuses: { 'scene-1': status, 'scene-2': 'ready' },
+          },
+        })}
+      />
+    );
+
+    const opening = screen.getByRole('region', { name: 'Opening' });
+    const state = opening.querySelector('[data-script-zone="state"]');
+    expect(state).not.toBeNull();
+    expect(within(state!).getByRole('status')).toHaveTextContent(expectedLabel);
+  });
+
   it('shows compact zone headings while every scene field keeps its accessible name', () => {
     render(<WritePhase controller={controller()} layoutMode='compact' />);
 
@@ -453,6 +504,8 @@ describe('WritePhase', () => {
       'conversation.creativeStudio.phase.write.scriptColumn',
       'conversation.creativeStudio.phase.write.visualColumn',
       'conversation.creativeStudio.phase.write.outputColumn',
+      'conversation.creativeStudio.phase.write.lengthColumn',
+      'conversation.creativeStudio.phase.write.stateColumn',
     ]);
     expect(
       within(opening).getByRole('combobox', { name: 'conversation.creativeStudio.inspector.durationLabel' })
@@ -789,6 +842,28 @@ describe('WritePhase', () => {
     );
   });
 
+  it('keeps the duration control and its invalid-value alert together in the length column', () => {
+    const phaseEditor = editor('scene-1', {
+      sceneDrafts: {
+        'scene-1': editable(scene('scene-1', { durationSeconds: 9 })),
+        'scene-2': editable(scene('scene-2')),
+      },
+    });
+    render(<WritePhase controller={controller({ editor: phaseEditor })} />);
+
+    const opening = screen.getByRole('region', { name: 'Opening' });
+    const length = opening.querySelector('[data-script-zone="length"]');
+    expect(length).not.toBeNull();
+    expect(
+      within(length!).getByRole('combobox', {
+        name: 'conversation.creativeStudio.inspector.durationLabel',
+      })
+    ).toHaveAttribute('aria-invalid', 'true');
+    expect(within(length!).getByRole('alert')).toHaveTextContent(
+      'conversation.creativeStudio.inspector.invalidDuration'
+    );
+  });
+
   it('keeps the duration chip keyboard-operable', async () => {
     const user = userEvent.setup();
     const phaseEditor = editor();
@@ -798,9 +873,10 @@ describe('WritePhase', () => {
     const duration = within(opening).getByRole('combobox', {
       name: 'conversation.creativeStudio.inspector.durationLabel',
     });
-    await user.tab();
-    await user.tab();
-    await user.tab();
+    // A fixed Tab count pins the table's column order, not whether the duration control is keyboard-reachable.
+    for (let step = 0; step < 24 && document.activeElement !== duration; step += 1) {
+      await user.tab();
+    }
     expect(duration).toHaveFocus();
 
     fireEvent.keyDown(duration, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13 });

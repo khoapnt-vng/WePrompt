@@ -987,7 +987,9 @@
           "middle": "中段鏡頭",
           "closing": "收尾鏡頭"
         },
-        "needsTitle": "需要標題"
+        "needsTitle": "需要標題",
+        "lengthColumn": "時間",
+        "stateColumn": "狀態"
       },
       "produce": {
         "connectEngine": "連接一個引擎——大約一分鐘，整個工作區只需設定一次",

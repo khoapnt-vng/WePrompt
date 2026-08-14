@@ -991,7 +991,9 @@
           "middle": "نمای میانی",
           "closing": "نمای پایانی"
         },
-        "needsTitle": "عنوان لازم است"
+        "needsTitle": "عنوان لازم است",
+        "lengthColumn": "مدت",
+        "stateColumn": "وضعیت"
       },
       "produce": {
         "connectEngine": "یک موتور متصل کنید — حدود یک دقیقه، فقط یک‌بار برای کل فضای کاری",

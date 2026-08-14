@@ -139,6 +139,8 @@ const phaseKeys = [
   'phase.write.scriptColumn',
   'phase.write.visualColumn',
   'phase.write.outputColumn',
+  'phase.write.lengthColumn',
+  'phase.write.stateColumn',
   'phase.write.visualPlaceholder',
   'phase.write.suggestVisual',
   'phase.write.addReference',

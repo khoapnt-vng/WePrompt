@@ -992,7 +992,9 @@
           "middle": "Mittlere Einstellung",
           "closing": "Schlusseinstellung"
         },
-        "needsTitle": "Titel fehlt"
+        "needsTitle": "Titel fehlt",
+        "lengthColumn": "Dauer",
+        "stateColumn": "Status"
       },
       "produce": {
         "connectEngine": "Engine verbinden — etwa eine Minute, einmal für den gesamten Arbeitsbereich",

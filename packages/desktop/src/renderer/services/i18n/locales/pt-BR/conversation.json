@@ -1001,7 +1001,9 @@
           "middle": "Tomada intermediária",
           "closing": "Tomada de encerramento"
         },
-        "needsTitle": "Precisa de título"
+        "needsTitle": "Precisa de título",
+        "lengthColumn": "Duração",
+        "stateColumn": "Estado"
       },
       "produce": {
         "connectEngine": "Conecte um mecanismo — cerca de um minuto, uma vez para todo o espaço de trabalho",

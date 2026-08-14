@@ -987,7 +987,9 @@
           "middle": "中間ショット",
           "closing": "締めのショット"
         },
-        "needsTitle": "タイトルが必要"
+        "needsTitle": "タイトルが必要",
+        "lengthColumn": "長さ",
+        "stateColumn": "状態"
       },
       "produce": {
         "connectEngine": "エンジンを接続 — 約1分、ワークスペース全体で一度だけ",

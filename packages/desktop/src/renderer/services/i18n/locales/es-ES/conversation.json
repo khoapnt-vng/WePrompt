@@ -996,7 +996,9 @@
           "middle": "Plano intermedio",
           "closing": "Plano de cierre"
         },
-        "needsTitle": "Falta el título"
+        "needsTitle": "Falta el título",
+        "lengthColumn": "Duración",
+        "stateColumn": "Estado"
       },
       "produce": {
         "connectEngine": "Conecta un motor — aproximadamente un minuto, una sola vez para todo el espacio de trabajo",

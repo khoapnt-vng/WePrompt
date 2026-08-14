@@ -993,7 +993,9 @@
           "middle": "Ortadaki çekim",
           "closing": "Kapanış çekimi"
         },
-        "needsTitle": "Başlık gerekli"
+        "needsTitle": "Başlık gerekli",
+        "lengthColumn": "Süre",
+        "stateColumn": "Durum"
       },
       "produce": {
         "connectEngine": "Bir motor bağlayın — yaklaşık bir dakika, tüm çalışma alanı için yalnızca bir kez",
