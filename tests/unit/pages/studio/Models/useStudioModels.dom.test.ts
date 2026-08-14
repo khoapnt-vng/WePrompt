@@ -182,6 +182,7 @@ describe('useStudioModels', () => {
     expect(bridge.updateModelSelection.invoke).toHaveBeenCalledWith(
       expect.objectContaining({ projectId: 'project-1', role: 'storyboard' })
     );
+    expect(view.result.current.selectionIssue).toBeNull();
   });
 
   it('does not carry a selection mutation to a project entered while edit flushing', async () => {
@@ -242,6 +243,8 @@ describe('useStudioModels', () => {
 
     expect(updated).toBe(false);
     expect(bridge.updateModelSelection.invoke).not.toHaveBeenCalled();
+    expect(view.result.current.selectionIssue).toBe('save_blocked');
+    expect(view.result.current.errorMessageKey).toBeNull();
   });
 
   it('supports clearing a selection and refetches before refreshing the catalog', async () => {
@@ -274,6 +277,7 @@ describe('useStudioModels', () => {
       selection: null,
     });
     expect(events).toEqual(['mutation', 'refetch', 'catalog']);
+    expect(view.result.current.selectionIssue).toBeNull();
   });
 
   it('refetches a stale project without replaying the mutation', async () => {
@@ -295,10 +299,12 @@ describe('useStudioModels', () => {
     expect(updated).toBe(false);
     expect(bridge.updateModelSelection.invoke).toHaveBeenCalledOnce();
     expect(refetch).toHaveBeenCalledOnce();
-    expect(view.result.current.errorMessageKey).toBe('conversation.creativeStudio.errors.staleProject');
+    expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(2);
+    expect(view.result.current.selectionIssue).toBe('save_stale');
+    expect(view.result.current.errorMessageKey).toBeNull();
   });
 
-  it('uses safe model copy for list and mutation failures', async () => {
+  it('keeps catalog-loading copy separate from selection failures', async () => {
     bridge.listRoutes.invoke.mockResolvedValueOnce(failed('provider_error'));
     const view = renderHook(() =>
       useStudioModels({
@@ -314,7 +320,24 @@ describe('useStudioModels', () => {
     bridge.updateModelSelection.invoke.mockResolvedValueOnce(failed('storage_error'));
     await act(() => view.result.current.updateSelection({ role: 'storyboard', selection: null }));
 
-    expect(view.result.current.errorMessageKey).toBe('conversation.creativeStudio.models.updateFailed');
+    expect(view.result.current.errorMessageKey).toBe('conversation.creativeStudio.errors.provider_error');
+    expect(view.result.current.selectionIssue).toBe('save_failed');
+  });
+
+  it('reports a thrown selection command as a selection failure', async () => {
+    bridge.updateModelSelection.invoke.mockRejectedValueOnce(new Error('bridge unavailable'));
+    const view = renderHook(() =>
+      useStudioModels({
+        project: project(),
+        refetch: vi.fn(async () => project()),
+        beforeMutation: vi.fn(async () => true),
+      })
+    );
+
+    await act(() => view.result.current.updateSelection({ role: 'storyboard', selection: null }));
+
+    expect(view.result.current.selectionIssue).toBe('save_failed');
+    expect(view.result.current.errorMessageKey).toBeNull();
   });
 
   it('ignores a catalog response after unmount', async () => {
@@ -349,6 +372,25 @@ describe('useStudioModels', () => {
 
     expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(2);
     expect(bridge.listRoutes.invoke).toHaveBeenLastCalledWith({ projectId: 'project-1' });
+  });
+
+  it('refreshes on window focus and removes the listener on cleanup', async () => {
+    const view = renderHook(() =>
+      useStudioModels({
+        project: project(),
+        refetch: vi.fn(async () => project()),
+        beforeMutation: vi.fn(async () => true),
+      })
+    );
+    await waitFor(() => expect(view.result.current.loading).toBe(false));
+
+    window.dispatchEvent(new Event('focus'));
+    await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(2));
+
+    view.unmount();
+    window.dispatchEvent(new Event('focus'));
+    await act(async () => {});
+    expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(2);
   });
 
   it('makes a successful refresh catalog available to the awaiting caller', async () => {
@@ -470,9 +512,7 @@ describe('useStudioModels', () => {
       })
     );
 
-    await waitFor(() =>
-      expect(view.result.current.errorMessageKey).toBe('conversation.creativeStudio.models.updateFailed')
-    );
+    await waitFor(() => expect(view.result.current.selectionIssue).toBe('save_failed'));
     await act(() => view.result.current.refresh());
     expect(bridge.updateModelSelection.invoke).toHaveBeenCalledOnce();
   });

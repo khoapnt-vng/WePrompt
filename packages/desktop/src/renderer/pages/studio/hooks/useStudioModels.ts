@@ -16,7 +16,6 @@ import type { StudioRouteAdoption } from '../studioRouteDefaults';
 import { resolveSoleRouteAdoptions } from '../studioRouteDefaults';
 
 const STORAGE_ERROR_MESSAGE_KEY = 'conversation.creativeStudio.errors.storage';
-const UPDATE_FAILED_MESSAGE_KEY = 'conversation.creativeStudio.models.updateFailed';
 
 const mediaSelectionKey = (selection: StudioRendererProject['routing']['image']): string =>
   selection === null ? 'none' : selection.choiceId;
@@ -53,10 +52,13 @@ export type UseStudioModelsResult = {
   catalog: StudioRouteCatalog | null;
   loading: boolean;
   errorMessageKey: string | null;
+  selectionIssue: StudioModelSelectionIssue | null;
   pendingRole: 'storyboard' | 'image' | 'video' | null;
   refresh: () => Promise<void>;
   updateSelection: (input: StudioModelSelectionChange) => Promise<boolean>;
 };
+
+export type StudioModelSelectionIssue = 'save_failed' | 'save_blocked' | 'save_stale';
 
 /**
  * Owns the project-scoped Studio model catalog and CAS selection mutations.
@@ -74,6 +76,7 @@ export const useStudioModels = ({
   const [catalog, setCatalog] = useState<StudioRouteCatalog | null>(null);
   const [loading, setLoading] = useState(project !== null);
   const [errorMessageKey, setErrorMessageKey] = useState<string | null>(null);
+  const [selectionIssue, setSelectionIssue] = useState<StudioModelSelectionIssue | null>(null);
   const [pendingRole, setPendingRole] = useState<'storyboard' | 'image' | 'video' | null>(null);
   const mountedRef = useRef(true);
   const requestRef = useRef(0);
@@ -170,16 +173,27 @@ export const useStudioModels = ({
     []
   );
 
+  useEffect(() => {
+    const handleFocus = (): void => {
+      void refresh();
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [refresh]);
+
   const updateSelection = useCallback(
     async (input: StudioModelSelectionChange): Promise<boolean> => {
       const origin = projectRef.current;
       if (!mountedRef.current || origin === null || pendingRoleRef.current !== null) return false;
       pendingRoleRef.current = input.role;
       setPendingRole(input.role);
-      setErrorMessageKey(null);
+      setSelectionIssue(null);
 
       try {
-        if (!(await beforeMutationRef.current())) return false;
+        if (!(await beforeMutationRef.current())) {
+          if (mountedRef.current && projectRef.current?.id === origin.id) setSelectionIssue('save_blocked');
+          return false;
+        }
         if (!mountedRef.current || projectRef.current?.id !== origin.id) return false;
         const current = projectRef.current;
         const result = await ipcBridge.creativeStudio.updateModelSelection.invoke({
@@ -195,9 +209,9 @@ export const useStudioModels = ({
             if (!mountedRef.current || projectRef.current?.id !== origin.id) return false;
             if (canonical?.id === origin.id) projectRef.current = canonical;
             await refresh();
-            if (mountedRef.current && projectRef.current?.id === origin.id) setErrorMessageKey(result.error.messageKey);
+            if (mountedRef.current && projectRef.current?.id === origin.id) setSelectionIssue('save_stale');
           } else if (mountedRef.current) {
-            setErrorMessageKey(UPDATE_FAILED_MESSAGE_KEY);
+            setSelectionIssue('save_failed');
           }
           return false;
         }
@@ -206,9 +220,10 @@ export const useStudioModels = ({
         if (!mountedRef.current || projectRef.current?.id !== origin.id) return false;
         if (canonical?.id === origin.id) projectRef.current = canonical;
         await refresh();
+        if (mountedRef.current && projectRef.current?.id === origin.id) setSelectionIssue(null);
         return true;
       } catch {
-        if (mountedRef.current && projectRef.current?.id === origin.id) setErrorMessageKey(UPDATE_FAILED_MESSAGE_KEY);
+        if (mountedRef.current && projectRef.current?.id === origin.id) setSelectionIssue('save_failed');
         return false;
       } finally {
         pendingRoleRef.current = null;
@@ -250,6 +265,7 @@ export const useStudioModels = ({
     },
     loading,
     errorMessageKey,
+    selectionIssue,
     pendingRole,
     refresh,
     updateSelection,
