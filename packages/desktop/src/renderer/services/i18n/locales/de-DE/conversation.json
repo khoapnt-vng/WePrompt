@@ -952,7 +952,14 @@
         "activityGenerating_one": "{{count}} wird erzeugt",
         "activityGenerating_other": "{{count}} werden erzeugt",
         "activityRendering": "Rendern {{percent}}%",
-        "activityRenderingLabel": "Fortschritt des Video-Renderings"
+        "activityRenderingLabel": "Fortschritt des Video-Renderings",
+        "readoutShots": "{{count}} Shots",
+        "readoutShots_one": "{{count}} Shot",
+        "readoutShots_other": "{{count}} Shots",
+        "readoutDuration": "{{duration}} gesamt",
+        "readoutRendered": "{{count}} gerendert",
+        "readoutRendered_one": "{{count}} gerendert",
+        "readoutRendered_other": "{{count}} gerendert"
       },
       "brief": {
         "title": "Briefing",

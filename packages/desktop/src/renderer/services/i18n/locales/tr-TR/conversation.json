@@ -953,7 +953,14 @@
         "activityGenerating_one": "{{count}} oluşturuluyor",
         "activityGenerating_other": "{{count}} oluşturuluyor",
         "activityRendering": "İşleniyor {{percent}}%",
-        "activityRenderingLabel": "Video işleme ilerlemesi"
+        "activityRenderingLabel": "Video işleme ilerlemesi",
+        "readoutShots": "{{count}} çekim",
+        "readoutShots_one": "{{count}} çekim",
+        "readoutShots_other": "{{count}} çekim",
+        "readoutDuration": "toplam {{duration}}",
+        "readoutRendered": "{{count}} oluşturuldu",
+        "readoutRendered_one": "{{count}} oluşturuldu",
+        "readoutRendered_other": "{{count}} oluşturuldu"
       },
       "brief": {
         "title": "Özet",

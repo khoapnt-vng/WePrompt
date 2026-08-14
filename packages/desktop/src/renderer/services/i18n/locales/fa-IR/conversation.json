@@ -951,7 +951,14 @@
         "activityGenerating_one": "{{count}} در حال تولید",
         "activityGenerating_other": "{{count}} در حال تولید",
         "activityRendering": "در حال رندر {{percent}}٪",
-        "activityRenderingLabel": "پیشرفت رندر ویدیو"
+        "activityRenderingLabel": "پیشرفت رندر ویدیو",
+        "readoutShots": "{{count}} نما",
+        "readoutShots_one": "{{count}} نما",
+        "readoutShots_other": "{{count}} نما",
+        "readoutDuration": "{{duration}} در کل",
+        "readoutRendered": "{{count}} ساخته شده",
+        "readoutRendered_one": "{{count}} ساخته شده",
+        "readoutRendered_other": "{{count}} ساخته شده"
       },
       "brief": {
         "title": "خلاصه",

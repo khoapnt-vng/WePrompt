@@ -949,7 +949,12 @@
         "activityGenerating": "{{count}} 个生成中",
         "activityGenerating_other": "{{count}} 个生成中",
         "activityRendering": "渲染中 {{percent}}%",
-        "activityRenderingLabel": "视频渲染进度"
+        "activityRenderingLabel": "视频渲染进度",
+        "readoutShots": "{{count}} 个镜头",
+        "readoutShots_other": "{{count}} 个镜头",
+        "readoutDuration": "共 {{duration}}",
+        "readoutRendered": "已渲染 {{count}} 个",
+        "readoutRendered_other": "已渲染 {{count}} 个"
       },
       "brief": {
         "title": "简报",

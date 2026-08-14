@@ -118,6 +118,9 @@ const phaseKeys = [
   'phase.shared.activityGenerating',
   'phase.shared.activityRendering',
   'phase.shared.activityRenderingLabel',
+  'phase.shared.readoutShots', // StudioPhaseShell state readout, beside the view switch
+  'phase.shared.readoutDuration', // ditto — a formatted runtime, not a seconds count
+  'phase.shared.readoutRendered', // ditto — selectedAssetCount, the shots that are finished
   'phase.brief.title',
   'phase.brief.description',
   'phase.brief.nameLabel',
@@ -171,6 +174,8 @@ const phasePluralLogicalKeys = [
   'phase.review.renderedShots',
   'phase.review.missingSlates',
   'phase.shared.activityGenerating',
+  'phase.shared.readoutShots',
+  'phase.shared.readoutRendered',
 ] as const;
 
 const closeKeys = [

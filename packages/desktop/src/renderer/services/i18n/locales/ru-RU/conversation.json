@@ -955,7 +955,18 @@
         "activityGenerating_many": "{{count}} заданий генерируются",
         "activityGenerating_other": "{{count}} задания генерируются",
         "activityRendering": "Сборка… {{percent}}%",
-        "activityRenderingLabel": "Ход сборки видео"
+        "activityRenderingLabel": "Ход сборки видео",
+        "readoutShots": "{{count}} кадров",
+        "readoutShots_one": "{{count}} кадр",
+        "readoutShots_few": "{{count}} кадра",
+        "readoutShots_many": "{{count}} кадров",
+        "readoutShots_other": "{{count}} кадра",
+        "readoutDuration": "всего {{duration}}",
+        "readoutRendered": "создано {{count}} кадра",
+        "readoutRendered_one": "создан {{count}} кадр",
+        "readoutRendered_few": "создано {{count}} кадра",
+        "readoutRendered_many": "создано {{count}} кадров",
+        "readoutRendered_other": "создано {{count}} кадра"
       },
       "brief": {
         "title": "Бриф",

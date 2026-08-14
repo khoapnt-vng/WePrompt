@@ -949,7 +949,12 @@
         "activityGenerating": "{{count}} 件生成中",
         "activityGenerating_other": "{{count}} 件生成中",
         "activityRendering": "レンダリング中 {{percent}}%",
-        "activityRenderingLabel": "動画レンダリングの進捗"
+        "activityRenderingLabel": "動画レンダリングの進捗",
+        "readoutShots": "{{count}}ショット",
+        "readoutShots_other": "{{count}}ショット",
+        "readoutDuration": "合計 {{duration}}",
+        "readoutRendered": "{{count}}件生成済み",
+        "readoutRendered_other": "{{count}}件生成済み"
       },
       "brief": {
         "title": "概要",

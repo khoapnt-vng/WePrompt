@@ -224,6 +224,39 @@
   white-space: normal;
 }
 
+/* Three columns rather than a centred flex pair, so the switch keeps the middle one to itself:
+   centring the switch and the readout together would slide the tabs sideways every time a shot is
+   added or a duration is typed. The outer columns are `minmax(0, 1fr)` so the readout can shrink
+   instead of pushing the switch off centre. */
+.viewRow {
+  display: grid;
+  min-width: 0;
+  max-width: 100%;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.viewRow > .viewSwitch {
+  grid-column: 2;
+}
+
+/* `meta` already carries the colour and the mono face the frame's other readout uses; only the
+   layout is added here. `overflow: hidden` matters because the outer grid column may shrink below
+   the text's width — clipping the tail is recoverable, overlapping the switch is not. */
+.stateReadout {
+  composes: meta from '../../StudioTypography.module.css';
+  display: flex;
+  overflow: hidden;
+  margin: 0;
+  min-width: 0;
+  grid-column: 3;
+  align-items: center;
+  justify-self: end;
+  gap: 6px;
+  white-space: nowrap;
+}
+
 .viewSwitch {
   display: flex;
   min-width: 0;
@@ -345,4 +378,16 @@
 
 .shell[data-layout='compact'] .viewSwitch {
   justify-content: flex-start;
+}
+
+/* One column in the drawer: there is no room to hold a centre, so the switch and the readout stack
+   against the start edge rather than fighting over the width. */
+.shell[data-layout='compact'] .viewRow {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.shell[data-layout='compact'] .viewRow > .viewSwitch,
+.shell[data-layout='compact'] .stateReadout {
+  grid-column: 1;
+  justify-self: start;
 }

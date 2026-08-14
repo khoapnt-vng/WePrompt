@@ -255,6 +255,7 @@ const controller = (
     totalSceneCount: 0,
     readySceneIds: [],
     selectedAssetCount: 0,
+    durationTotalSeconds: 0,
     durationDeltaSeconds: -project.targetDurationSeconds,
   },
   editor,
@@ -324,6 +325,99 @@ describe('StudioPhaseShell advisory', () => {
     const advisory = screen.getByText('conversation.creativeStudio.review.durationMismatch');
     expect(advisory).toHaveAttribute('aria-live', 'polite');
     expect(advisory.closest('[data-studio-batch-control]')).not.toBeNull();
+  });
+});
+
+/**
+ * Where the document stands, in three numbers, beside the view switch. It replaces the phase rail's
+ * completion markers, which could only report which of four steps you had walked past.
+ */
+describe('StudioPhaseShell state readout', () => {
+  const readout = (): HTMLElement => {
+    const element = document.querySelector<HTMLElement>('[data-studio-state-readout]');
+    expect(element, 'the frame must carry a state readout').not.toBeNull();
+    return element!;
+  };
+
+  const summary = (overrides: Partial<StudioPhaseControllers['readiness']>) =>
+    renderShell(null, {
+      readiness: {
+        sceneStatuses: {},
+        totalSceneCount: 0,
+        readySceneIds: [],
+        selectedAssetCount: 0,
+        durationTotalSeconds: 0,
+        durationDeltaSeconds: 0,
+        ...overrides,
+      },
+    });
+
+  it('reports the shot count, the runtime and the finished shots', () => {
+    summary({ totalSceneCount: 9, durationTotalSeconds: 178, selectedAssetCount: 2 });
+
+    expect(readout()).toHaveTextContent(
+      'conversation.creativeStudio.phase.shared.readoutShots:count=9 · conversation.creativeStudio.phase.shared.readoutDuration:duration=2:58 · conversation.creativeStudio.phase.shared.readoutRendered:count=2'
+    );
+    // Whitespace, unnormalised: the middle dots are aria-hidden, so real text nodes are the only
+    // thing keeping the three numbers from being spoken as a single word.
+    expect(readout().textContent).toMatch(/readoutShots:count=9\s+·\s+/);
+    expect(readout().textContent).toMatch(/\s+·\s+conversation\.creativeStudio\.phase\.shared\.readoutRendered/);
+  });
+
+  /**
+   * The trap this readout exists to avoid.
+   *
+   * `readySceneIds` means ready *to generate*, so it drains as shots are made — a project with nine
+   * finished shots and nothing left to do has an empty one. Sourcing the third term from it would
+   * produce a progress reading that counts down to zero at the exact moment the film is finished.
+   * The counts here are chosen so the two fields move in opposite directions and cannot be confused.
+   */
+  it('counts the shots that are finished, not the shots still waiting to be generated', () => {
+    summary({ totalSceneCount: 9, readySceneIds: ['scene-8', 'scene-9'], selectedAssetCount: 7 });
+
+    const text = readout().textContent ?? '';
+    expect(text).toContain('readoutRendered:count=7');
+    expect(text).not.toContain('readoutRendered:count=2');
+  });
+
+  it.each([
+    [0, '0:00'],
+    [9, '0:09'],
+    [60, '1:00'],
+    [178, '2:58'],
+    [3661, '1:01:01'],
+  ])('writes %i seconds of storyboard as the runtime %s', (durationTotalSeconds, expected) => {
+    summary({ durationTotalSeconds });
+
+    expect(readout()).toHaveTextContent(`readoutDuration:duration=${expected}`);
+  });
+
+  /**
+   * The frame already holds one polite live region and one progressbar, each addressed by an
+   * accessible name. A readout that reused either name would silently turn those single-element
+   * queries into two-element ones, and the failure would surface as an unrelated test breaking.
+   */
+  it('leaves the document activity region and the render progressbar uniquely addressable', () => {
+    renderShell(null, {
+      jobs: { ...jobs, jobs: [job({ id: 'job-1' })] },
+      render: { ...idleRender, status: 'running', progress: 0.42 },
+      readiness: {
+        sceneStatuses: {},
+        totalSceneCount: 4,
+        readySceneIds: [],
+        selectedAssetCount: 1,
+        durationTotalSeconds: 20,
+        durationDeltaSeconds: 5,
+      },
+    });
+
+    expect(
+      screen.getAllByRole('status', { name: 'conversation.creativeStudio.phase.shared.activityLabel' })
+    ).toHaveLength(1);
+    expect(
+      screen.getAllByRole('progressbar', { name: 'conversation.creativeStudio.phase.shared.activityRenderingLabel' })
+    ).toHaveLength(1);
+    expect(readout()).not.toHaveAttribute('aria-live');
   });
 });
 

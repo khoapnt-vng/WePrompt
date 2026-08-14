@@ -949,7 +949,12 @@
         "activityGenerating": "{{count}}개 생성 중",
         "activityGenerating_other": "{{count}}개 생성 중",
         "activityRendering": "렌더링 중 {{percent}}%",
-        "activityRenderingLabel": "동영상 렌더링 진행률"
+        "activityRenderingLabel": "동영상 렌더링 진행률",
+        "readoutShots": "{{count}}개 숏",
+        "readoutShots_other": "{{count}}개 숏",
+        "readoutDuration": "총 {{duration}}",
+        "readoutRendered": "{{count}}개 렌더링됨",
+        "readoutRendered_other": "{{count}}개 렌더링됨"
       },
       "brief": {
         "title": "기획",

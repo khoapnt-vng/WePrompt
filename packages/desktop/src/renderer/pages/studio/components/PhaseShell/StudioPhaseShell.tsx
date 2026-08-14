@@ -22,6 +22,21 @@ import { useStudioLayoutMode } from './useStudioLayoutMode';
 import { useStudioLayoutContext } from '../Shell/StudioLayoutContext';
 import styles from './StudioPhaseShell.module.css';
 
+/**
+ * A runtime, written the way runtimes are written: `2:58`, and `1:04:12` past the hour.
+ *
+ * Not `178s`. The number this formats is what the finished cut will last, and a bare seconds count
+ * stops being readable as a duration somewhere around a minute — which is inside this app's range,
+ * not beyond it.
+ */
+const formatRuntime = (totalSeconds: number): string => {
+  const whole = Number.isFinite(totalSeconds) && totalSeconds > 0 ? Math.round(totalSeconds) : 0;
+  const seconds = String(whole % 60).padStart(2, '0');
+  const minutes = Math.floor(whole / 60) % 60;
+  const hours = Math.floor(whole / 3600);
+  return hours === 0 ? `${minutes}:${seconds}` : `${hours}:${String(minutes).padStart(2, '0')}:${seconds}`;
+};
+
 export type StudioPhaseShellProps = {
   activeView: StudioView;
   controller: StudioPhaseControllers;
@@ -181,13 +196,56 @@ export const StudioPhaseShell: React.FC<StudioPhaseShellProps> = ({
           </>
         }
       />
-      <StudioViewSwitch
-        activeView={activeView}
-        disabled={navigationDisabled}
-        onSelect={(view) => {
-          if (view !== activeView) controller.requestTransition({ view });
-        }}
-      />
+      <div className={styles.viewRow}>
+        <StudioViewSwitch
+          activeView={activeView}
+          disabled={navigationDisabled}
+          onSelect={(view) => {
+            if (view !== activeView) controller.requestTransition({ view });
+          }}
+        />
+        {/*
+         * Where the document stands, in the three numbers that answer it: how many shots, how long
+         * they run, how many are finished. It replaces the rail's completion markers, which could
+         * only say which of four steps you had walked past.
+         *
+         * The third number is `selectedAssetCount`, not `readySceneIds.length`. "Ready" means ready
+         * *to generate*, so it empties out as shots get made — a progress reading taken from it
+         * would count down to zero exactly as the film was finished.
+         *
+         * Not a live region, deliberately. Editing a shot's duration moves these numbers on every
+         * keystroke, and `StudioDocumentActivity` already reserves the frame's one polite region
+         * for job transitions, which are discrete and worth speaking.
+         *
+         * The `{' '}` are load-bearing. The middle dots are `aria-hidden`, so without a real text
+         * node between the terms the paragraph's accessible text is "9 shots2:58 total2 rendered" —
+         * three numbers spoken as one word. Whitespace-only text between flex items is not
+         * rendered, so the spaces cost nothing on screen; the visible spacing is the row's `gap`.
+         */}
+        <p data-studio-state-readout className={styles.stateReadout}>
+          <span>
+            {t('conversation.creativeStudio.phase.shared.readoutShots', {
+              count: controller.readiness.totalSceneCount,
+            })}
+          </span>{' '}
+          <span aria-hidden='true' className={styles.activitySeparator}>
+            ·
+          </span>{' '}
+          <span>
+            {t('conversation.creativeStudio.phase.shared.readoutDuration', {
+              duration: formatRuntime(controller.readiness.durationTotalSeconds),
+            })}
+          </span>{' '}
+          <span aria-hidden='true' className={styles.activitySeparator}>
+            ·
+          </span>{' '}
+          <span>
+            {t('conversation.creativeStudio.phase.shared.readoutRendered', {
+              count: controller.readiness.selectedAssetCount,
+            })}
+          </span>
+        </p>
+      </div>
       {controller.advisory?.anchor === 'shell' && (
         <div role='alert' className={styles.shellAdvisory}>
           {t(controller.advisory.messageKey)}

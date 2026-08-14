@@ -959,7 +959,16 @@
         "activityGenerating_many": "{{count}} em geração",
         "activityGenerating_other": "{{count}} em geração",
         "activityRendering": "Renderizando {{percent}}%",
-        "activityRenderingLabel": "Progresso da renderização do vídeo"
+        "activityRenderingLabel": "Progresso da renderização do vídeo",
+        "readoutShots": "{{count}} planos",
+        "readoutShots_one": "{{count}} plano",
+        "readoutShots_many": "{{count}} planos",
+        "readoutShots_other": "{{count}} planos",
+        "readoutDuration": "{{duration}} no total",
+        "readoutRendered": "{{count}} renderizados",
+        "readoutRendered_one": "{{count}} renderizado",
+        "readoutRendered_many": "{{count}} renderizados",
+        "readoutRendered_other": "{{count}} renderizados"
       },
       "brief": {
         "title": "Briefing",

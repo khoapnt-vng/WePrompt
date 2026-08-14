@@ -329,6 +329,36 @@ describe('Creative Studio full-sentence English copy', () => {
   });
 
   /**
+   * The readout's three terms in English, because the third one is a copy decision as much as a
+   * data one: it says "rendered", not "ready". `readySceneIds` counts shots waiting to be
+   * generated and drains to nothing as the film gets made, so a readout worded "ready" would
+   * invite exactly the wrong field — and would read as progress running backwards.
+   */
+  it('reads the storyboard state as shots, runtime and rendered takes', async () => {
+    await renderEnglish(
+      <StudioPhaseShell
+        activeView='table'
+        controller={phaseController({
+          readiness: {
+            sceneStatuses: {},
+            totalSceneCount: 9,
+            readySceneIds: ['scene-8', 'scene-9'],
+            selectedAssetCount: 7,
+            durationTotalSeconds: 178,
+            durationDeltaSeconds: 173,
+          },
+        })}
+        navigationDisabled={false}
+        onBack={vi.fn()}
+      />
+    );
+
+    const readout = document.querySelector<HTMLElement>('[data-studio-state-readout]');
+    expect(readout).toHaveTextContent('9 shots · 2:58 total · 7 rendered');
+    expect(readout).not.toHaveTextContent('2 rendered');
+  });
+
+  /**
    * The frame's third action is the document's only spend, so what it says and when it appears are
    * both copy decisions. Two buttons that cost nothing and one that charges a provider sit in the
    * same row: the label has to name the charge and its size, which is why it counts the shots

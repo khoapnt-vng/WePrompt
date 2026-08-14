@@ -949,7 +949,12 @@
         "activityGenerating": "{{count}} 個產生中",
         "activityGenerating_other": "{{count}} 個產生中",
         "activityRendering": "算繪中 {{percent}}%",
-        "activityRenderingLabel": "影片算繪進度"
+        "activityRenderingLabel": "影片算繪進度",
+        "readoutShots": "{{count}} 個鏡頭",
+        "readoutShots_other": "{{count}} 個鏡頭",
+        "readoutDuration": "共 {{duration}}",
+        "readoutRendered": "已渲染 {{count}} 個",
+        "readoutRendered_other": "已渲染 {{count}} 個"
       },
       "brief": {
         "title": "簡報",
