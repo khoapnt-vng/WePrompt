@@ -228,6 +228,19 @@ describe('StudioLibrary', () => {
     expect(navigate).toHaveBeenCalledWith('/studio/project-1/table');
   });
 
+  it('keeps a card usable without a setup badge when its readiness command fails', async () => {
+    bridge.listProjects.invoke.mockResolvedValue(ok([summary()]));
+    bridge.listRoutes.invoke.mockResolvedValue(failure<StudioRouteCatalog>('storage_error'));
+
+    render(<StudioLibrary />);
+
+    const openProject = await screen.findByRole('button', { name: 'Launch film' });
+    await act(async () => {});
+    expect(screen.queryByText('conversation.creativeStudio.library.readinessSetupRequired')).not.toBeInTheDocument();
+    fireEvent.click(openProject);
+    expect(navigate).toHaveBeenCalledWith('/studio/project-1/table');
+  });
+
   it('renders the canonical project summaries returned by the bridge', async () => {
     bridge.listProjects.invoke.mockResolvedValue(ok([summary()]));
 
