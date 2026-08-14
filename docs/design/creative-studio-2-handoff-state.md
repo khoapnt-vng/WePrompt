@@ -10,11 +10,15 @@ the architecture. Then `creative-studio-2-design-handoff.md` for the reasoning b
 
 ## Where the code is
 
-**`feat/creative-studio-2` on `ghk` (github.com/khoapnt-vng/WePrompt) @ `02a4c1654`.** Nothing
-unpushed. `origin` is the GitLab mirror and is **not** where Studio work goes.
+**`feat/creative-studio-2` on `ghk` (github.com/khoapnt-vng/WePrompt).** `origin` is the GitLab
+mirror and is **not** where Studio work goes.
 
-Gate at that commit: **641 test files / 8,630 tests passed, 19 skipped**; tsc, lint, format and
-`check-i18n` clean. Treat counts as the signal — durations on this machine inflate several-fold under
+This file does not pin a tip SHA on purpose: the first version of it named one and was stale inside
+twenty minutes. Run `git log --oneline -1` and `git status` — those are always true, and this file
+never will be.
+
+Gate as of writing: **641 test files / 8,639 tests passed, 19 skipped**; tsc, lint, format and
+`check-i18n` clean. Re-measure rather than trusting this number. Treat counts as the signal — durations on this machine inflate several-fold under
 concurrent sessions, and a slow run is not a failing one.
 
 ### Shipped
@@ -31,10 +35,10 @@ added. See `creative-studio-2-s1-plan.md`.
 
 ### In flight
 
-**S2 — Table's Length and State columns.** Committed at `058e7025d` on `feat/studio-s2-table-columns`
-(worktree `.worktrees/s2`), **unpushed and unmerged**, branched from `324325e04`. It rebases cleanly:
-it only adds keys under `phase.write.*` and does not rename the `phases/write/` directory. **Its full
-suite has not been run against the current tip** — do that at the merge, not just its own directory.
+_Nothing._ S2 — Table's dedicated Length and State columns — merged and pushed shortly after this
+file was first written. Its twelve locale files auto-merged with no conflict, because it was told to
+**only add keys** under `phase.write.*` and never to reorder or rename. Keep that discipline: it is
+the difference between a clean merge and resolving twelve JSON files by hand.
 
 ---
 
