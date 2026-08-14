@@ -95,11 +95,15 @@ Cut — Wireframes_. The hi-fi matters most: phase 2 builds Table and Board prop
 the specification. Drop them in `docs/design/`; the engine-strip wireframes are already committed as
 precedent.
 
-**The Engine Strip is implemented locally but not delivered.** Projects now require explicit image
-and video choices, including when only one route exists. The strip supplies the in-app selection
-surface for missing or replaceable choices and truthfully diagnoses unhealthy choices without
-offering an action that cannot cure provider health. Its final local commits remain unpushed pending
-the user; the slice has not been merged and still needs live acceptance.
+**The Engine Strip implementation is complete and approved for delivery.** Projects now require
+explicit image and video choices, including when only one route exists. The strip supplies the
+in-app selection surface for missing or replaceable choices and truthfully diagnoses unhealthy
+choices without offering an action that cannot cure provider health. Verify the branch and remote
+directly for current delivery state rather than treating this handoff as a tip-SHA ledger.
+
+One manual-acceptance finding is deliberately deferred to the planned redesign of this section: in
+compact Table, an open engine menu can let its footer actions overlap the following Script content.
+Do not patch that layout as an S1.5 follow-up or treat the deferral as a settled menu design.
 
 **Caps unchanged, deliberately.** `targetDurationSeconds` is validated `5..60` and `MAX_SCENES` is 24. A three-minute piece — the design's own target — **fails validation today**. Raising them is
 phase 2's first commit, and the bound must be extracted to shared constants rather than edited at
