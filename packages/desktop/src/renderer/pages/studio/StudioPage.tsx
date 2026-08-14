@@ -560,8 +560,7 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
       generationBlocked ||
       project === null ||
       readiness === null ||
-      studioModels.catalog === null ||
-      studioJobs.referenceRequests.length === 0
+      studioModels.catalog === null
     ) {
       return;
     }
@@ -569,35 +568,62 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
     const pendingRequestById = new Map(studioJobs.referenceRequests.map((request) => [request.id, request]));
     const retainedDeferredReviews: DeferredReferenceReview[] = [];
     for (const deferred of deferredReferenceReviewsRef.current) {
-      const exactPendingRequests = deferred.requests.map((request) => {
+      const exactPendingRequests: DeferredReferenceReview['requests'] = [];
+      const remappedRequests: DeferredReferenceReview['requests'] = [];
+      deferred.requests.forEach((request) => {
         const pending = pendingRequestById.get(request.id);
-        return pending?.sceneId === request.sceneId ? pending : null;
+        if (pending === undefined) return;
+        (pending.sceneId === request.sceneId ? exactPendingRequests : remappedRequests).push(request);
       });
-      if (
-        !catalogMatchesProjectImageRoute(project, studioModels.catalog) ||
-        exactPendingRequests.some((request) => request === null)
-      ) {
-        retainedDeferredReviews.push(deferred);
+      const retain = (requests: DeferredReferenceReview['requests']): void => {
+        if (requests.length === 0) return;
+        const requestedSceneIds = new Set(requests.map(({ sceneId }) => sceneId));
+        retainedDeferredReviews.push({
+          requests,
+          sceneIds: deferred.sceneIds.filter((sceneId) => requestedSceneIds.has(sceneId)),
+        });
+      };
+
+      // A reused id no longer carries the frozen scene authority. Keep only that id deferred;
+      // exact siblings can still proceed, while an id that disappeared from the queue is gone.
+      retain(remappedRequests);
+      if (exactPendingRequests.length === 0) continue;
+
+      const review = buildQueuedReferenceReview(project, readiness, exactPendingRequests, availableRoutes);
+      const includedRequestIds = new Set(review.referenceRequestIds);
+      const excludedRequestIds = new Set(review.excludedReferenceRequestIds);
+      const includedRequests = exactPendingRequests.filter(({ id }) => includedRequestIds.has(id));
+      const excludedRequests = exactPendingRequests.filter(({ id }) => excludedRequestIds.has(id));
+      const accountedExactly =
+        review.referenceRequestIds.length + review.excludedReferenceRequestIds.length === exactPendingRequests.length &&
+        review.referenceRequestIds.every((requestId, index) => requestId === includedRequests[index]?.id) &&
+        review.excludedReferenceRequestIds.every((requestId, index) => requestId === excludedRequests[index]?.id) &&
+        exactPendingRequests.every(({ id }) => includedRequestIds.has(id) !== excludedRequestIds.has(id));
+      if (!accountedExactly) {
+        retain(exactPendingRequests);
         continue;
       }
-      const review = buildQueuedReferenceReview(project, readiness, deferred.requests, availableRoutes);
+
+      // Excluded ids leave the defer and re-enter the existing unpaid exclusion/notice path.
+      // Included ids require the same frozen scene membership and full route/prompt authority as
+      // before. The canonical project owns submission order, so a reorder alone cannot deadlock
+      // the deferred request; retain only ids whose paid-path predicates are not satisfied.
+      const includedSceneIds = new Set(includedRequests.map(({ sceneId }) => sceneId));
+      const expectedSceneIds = new Set(deferred.sceneIds.filter((sceneId) => includedSceneIds.has(sceneId)));
+      const currentSceneIds = new Set(review.scenes.map(({ id }) => id));
       const submission = collectSubmittableRoutes(review.scenes);
       const prompts = submission === null ? null : collectReferencePrompts(review.scenes, submission.sceneIds);
-      const exactRequestIds =
-        review.referenceRequestIds.length === deferred.requests.length &&
-        review.referenceRequestIds.every((requestId, index) => requestId === deferred.requests[index]?.id);
-      const exactSceneIds =
-        review.scenes.length === deferred.sceneIds.length &&
-        review.scenes.every((scene, index) => scene.id === deferred.sceneIds[index]);
+      const sceneMembershipMatches =
+        currentSceneIds.size === review.scenes.length &&
+        currentSceneIds.size === expectedSceneIds.size &&
+        [...currentSceneIds].every((sceneId) => expectedSceneIds.has(sceneId));
       if (
-        !exactRequestIds ||
-        !exactSceneIds ||
-        review.excludedScenes.length > 0 ||
-        review.excludedReferenceRequestIds.length > 0 ||
+        !catalogMatchesProjectImageRoute(project, studioModels.catalog) ||
+        !sceneMembershipMatches ||
         submission === null ||
         prompts === null
       ) {
-        retainedDeferredReviews.push(deferred);
+        retain(includedRequests);
       }
     }
     deferredReferenceReviewsRef.current = retainedDeferredReviews;
