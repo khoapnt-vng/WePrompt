@@ -1328,8 +1328,14 @@
       "confirm": "Confirmar y generar",
       "cancel": "Cancelar",
       "disabledMissingRoutes": "{{count}} planos no tienen motor. Cierra esta ventana para definir uno.",
+      "disabledMissingRoutes_one": "{{count}} plano no tiene motor. Cierra esta ventana para definir uno.",
+      "disabledMissingRoutes_many": "{{count}} planos no tienen motor. Cierra esta ventana para definir uno.",
+      "disabledMissingRoutes_other": "{{count}} planos no tienen motor. Cierra esta ventana para definir uno.",
       "setEngines": "Cerrar y definir motores",
       "excludedFirstFrame": "{{count}} planos no están en este renderizado: este motor no puede empezar desde un fotograma.",
+      "excludedFirstFrame_one": "{{count}} plano no está en este renderizado: este motor no puede empezar desde un fotograma.",
+      "excludedFirstFrame_many": "{{count}} planos no están en este renderizado: este motor no puede empezar desde un fotograma.",
+      "excludedFirstFrame_other": "{{count}} planos no están en este renderizado: este motor no puede empezar desde un fotograma.",
       "audioOn": "Este renderizado incluye audio generado; los motores silenciosos, si los hay, permanecen sin sonido."
     },
     "jobs": {

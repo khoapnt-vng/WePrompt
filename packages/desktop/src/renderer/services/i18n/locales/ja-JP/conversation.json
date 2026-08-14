@@ -1297,8 +1297,10 @@
       "confirm": "確認して生成",
       "cancel": "キャンセル",
       "disabledMissingRoutes": "{{count}}件のショットにエンジンがありません。閉じて設定してください。",
+      "disabledMissingRoutes_other": "{{count}}件のショットにエンジンがありません。閉じて設定してください。",
       "setEngines": "閉じてエンジンを設定",
       "excludedFirstFrame": "{{count}}件のショットはこのレンダリングに含まれません。このエンジンはフレームから開始できません。",
+      "excludedFirstFrame_other": "{{count}}件のショットはこのレンダリングに含まれません。このエンジンはフレームから開始できません。",
       "audioOn": "このレンダーには生成音声が含まれます。無音エンジンがある場合、その出力は無音のままです。"
     },
     "jobs": {

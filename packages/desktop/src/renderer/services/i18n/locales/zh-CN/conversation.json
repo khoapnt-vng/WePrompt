@@ -1297,8 +1297,10 @@
       "confirm": "确认并生成",
       "cancel": "取消",
       "disabledMissingRoutes": "有 {{count}} 个镜头没有引擎。关闭此窗口进行设置。",
+      "disabledMissingRoutes_other": "有 {{count}} 个镜头没有引擎。关闭此窗口进行设置。",
       "setEngines": "关闭并设置引擎",
       "excludedFirstFrame": "本次渲染不包含 {{count}} 个镜头——此引擎无法从一帧开始。",
+      "excludedFirstFrame_other": "本次渲染不包含 {{count}} 个镜头——此引擎无法从一帧开始。",
       "audioOn": "此次渲染包含生成的音频；静音引擎（如有）仍将保持静音。"
     },
     "jobs": {

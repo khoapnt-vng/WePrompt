@@ -1333,8 +1333,14 @@
       "confirm": "Confirmar e gerar",
       "cancel": "Cancelar",
       "disabledMissingRoutes": "{{count}} tomadas não têm mecanismo. Feche para definir um.",
+      "disabledMissingRoutes_one": "{{count}} tomada não tem mecanismo. Feche para definir um.",
+      "disabledMissingRoutes_many": "{{count}} tomadas não têm mecanismo. Feche para definir um.",
+      "disabledMissingRoutes_other": "{{count}} tomadas não têm mecanismo. Feche para definir um.",
       "setEngines": "Fechar e definir mecanismos",
       "excludedFirstFrame": "{{count}} tomadas não estão nesta renderização — este mecanismo não pode começar a partir de um quadro.",
+      "excludedFirstFrame_one": "{{count}} tomada não está nesta renderização — este mecanismo não pode começar a partir de um quadro.",
+      "excludedFirstFrame_many": "{{count}} tomadas não estão nesta renderização — este mecanismo não pode começar a partir de um quadro.",
+      "excludedFirstFrame_other": "{{count}} tomadas não estão nesta renderização — este mecanismo não pode começar a partir de um quadro.",
       "audioOn": "Esta renderização inclui áudio gerado; mecanismos silenciosos, se houver, permanecem sem som."
     },
     "jobs": {

@@ -1147,8 +1147,12 @@
       "confirm": "Confirm and generate",
       "cancel": "Cancel",
       "disabledMissingRoutes": "{{count}} shots have no engine. Close this to set one.",
+      "disabledMissingRoutes_one": "{{count}} shot has no engine. Close this to set one.",
+      "disabledMissingRoutes_other": "{{count}} shots have no engine. Close this to set one.",
       "setEngines": "Close and set engines",
       "excludedFirstFrame": "{{count}} shots are not in this render — this engine cannot start from a frame.",
+      "excludedFirstFrame_one": "{{count}} shot is not in this render — this engine cannot start from a frame.",
+      "excludedFirstFrame_other": "{{count}} shots are not in this render — this engine cannot start from a frame.",
       "audioOn": "This render includes generated audio; silent engines, if present, remain silent."
     },
     "jobs": {

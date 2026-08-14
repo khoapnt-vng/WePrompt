@@ -364,6 +364,8 @@ const pluralLogicalKeys = [
   'timeline.selectSceneAccessible',
   'review.selectedDurationFull',
   'review.targetDurationFull',
+  'review.disabledMissingRoutes',
+  'review.excludedFirstFrame',
   'models.engine.notSetCount',
   'phase.produce.batchExcluded',
   ...phasePluralLogicalKeys,

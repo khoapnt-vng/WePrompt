@@ -1297,8 +1297,10 @@
       "confirm": "확인 후 생성",
       "cancel": "취소",
       "disabledMissingRoutes": "{{count}}개 샷에 엔진이 없습니다. 닫고 설정하세요.",
+      "disabledMissingRoutes_other": "{{count}}개 샷에 엔진이 없습니다. 닫고 설정하세요.",
       "setEngines": "닫고 엔진 설정",
       "excludedFirstFrame": "{{count}}개 샷은 이번 렌더에 포함되지 않습니다. 이 엔진은 프레임에서 시작할 수 없습니다.",
+      "excludedFirstFrame_other": "{{count}}개 샷은 이번 렌더에 포함되지 않습니다. 이 엔진은 프레임에서 시작할 수 없습니다.",
       "audioOn": "이 렌더링에는 생성된 오디오가 포함됩니다. 무음 엔진이 있는 경우 해당 출력은 계속 무음입니다."
     },
     "jobs": {

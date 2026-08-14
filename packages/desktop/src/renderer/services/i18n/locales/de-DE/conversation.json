@@ -1313,8 +1313,12 @@
       "confirm": "Bestätigen und generieren",
       "cancel": "Abbrechen",
       "disabledMissingRoutes": "{{count}} Einstellungen haben keine Engine. Schließe dieses Fenster, um eine festzulegen.",
+      "disabledMissingRoutes_one": "{{count}} Einstellung hat keine Engine. Schließe dieses Fenster, um eine festzulegen.",
+      "disabledMissingRoutes_other": "{{count}} Einstellungen haben keine Engine. Schließe dieses Fenster, um eine festzulegen.",
       "setEngines": "Schließen und Engines festlegen",
       "excludedFirstFrame": "{{count}} Einstellungen sind nicht in diesem Render enthalten, weil diese Engine nicht mit einem Bild beginnen kann.",
+      "excludedFirstFrame_one": "{{count}} Einstellung ist nicht in diesem Render enthalten, weil diese Engine nicht mit einem Bild beginnen kann.",
+      "excludedFirstFrame_other": "{{count}} Einstellungen sind nicht in diesem Render enthalten, weil diese Engine nicht mit einem Bild beginnen kann.",
       "audioOn": "Dieses Rendering enthält generiertes Audio; stumme Engines bleiben, sofern vorhanden, stumm."
     },
     "jobs": {

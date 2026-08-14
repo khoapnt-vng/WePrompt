@@ -96,9 +96,10 @@ the specification. Drop them in `docs/design/`; the engine-strip wireframes are 
 precedent.
 
 **The Engine Strip is implemented locally but not delivered.** Projects now require explicit image
-and video choices, including when only one route exists, and the strip supplies the in-app cure for
-missing or unhealthy choices. Its final local commits remain unpushed pending the user; the slice
-has not been merged and still needs live acceptance.
+and video choices, including when only one route exists. The strip supplies the in-app selection
+surface for missing or replaceable choices and truthfully diagnoses unhealthy choices without
+offering an action that cannot cure provider health. Its final local commits remain unpushed pending
+the user; the slice has not been merged and still needs live acceptance.
 
 **Caps unchanged, deliberately.** `targetDurationSeconds` is validated `5..60` and `MAX_SCENES` is 24. A three-minute piece — the design's own target — **fails validation today**. Raising them is
 phase 2's first commit, and the bound must be extracted to shared constants rather than edited at

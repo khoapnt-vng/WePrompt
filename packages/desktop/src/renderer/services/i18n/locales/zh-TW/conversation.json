@@ -1297,8 +1297,10 @@
       "confirm": "確認並產生",
       "cancel": "取消",
       "disabledMissingRoutes": "有 {{count}} 個鏡頭沒有引擎。關閉此視窗進行設定。",
+      "disabledMissingRoutes_other": "有 {{count}} 個鏡頭沒有引擎。關閉此視窗進行設定。",
       "setEngines": "關閉並設定引擎",
       "excludedFirstFrame": "本次算繪不包含 {{count}} 個鏡頭——此引擎無法從一幀開始。",
+      "excludedFirstFrame_other": "本次算繪不包含 {{count}} 個鏡頭——此引擎無法從一幀開始。",
       "audioOn": "此次算繪包含產生的音訊；靜音引擎（如有）仍會保持靜音。"
     },
     "jobs": {

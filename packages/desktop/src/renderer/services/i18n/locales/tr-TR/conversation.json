@@ -1314,8 +1314,12 @@
       "confirm": "Onayla ve oluştur",
       "cancel": "İptal",
       "disabledMissingRoutes": "{{count}} çekimin motoru yok. Bir motor ayarlamak için bunu kapatın.",
+      "disabledMissingRoutes_one": "{{count}} çekimin motoru yok. Bir motor ayarlamak için bunu kapatın.",
+      "disabledMissingRoutes_other": "{{count}} çekimin motoru yok. Bir motor ayarlamak için bunu kapatın.",
       "setEngines": "Kapat ve motorları ayarla",
       "excludedFirstFrame": "{{count}} çekim bu oluşturmada yok — bu motor bir kareden başlayamaz.",
+      "excludedFirstFrame_one": "{{count}} çekim bu oluşturmada yok — bu motor bir kareden başlayamaz.",
+      "excludedFirstFrame_other": "{{count}} çekim bu oluşturmada yok — bu motor bir kareden başlayamaz.",
       "audioOn": "Bu işleme oluşturulmuş ses içerir; varsa sessiz motorlar sessiz kalır."
     },
     "jobs": {
