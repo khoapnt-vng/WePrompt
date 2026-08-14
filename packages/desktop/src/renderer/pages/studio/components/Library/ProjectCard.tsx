@@ -44,13 +44,23 @@ export const formatStudioRelativeTime = (timestamp: string, locale: string, now 
 
 export type ProjectCardProps = {
   project: StudioProjectSummary;
+  engineReadiness?: ProjectEngineReadiness;
   locale: string;
   disabled: boolean;
   onOpen: () => void;
   onDelete: () => void;
 };
 
-export const ProjectCard: React.FC<ProjectCardProps> = ({ project, locale, disabled, onOpen, onDelete }) => {
+export type ProjectEngineReadiness = 'ready' | 'setup_required' | 'unknown';
+
+export const ProjectCard: React.FC<ProjectCardProps> = ({
+  project,
+  engineReadiness,
+  locale,
+  disabled,
+  onOpen,
+  onDelete,
+}) => {
   const { t } = useTranslation();
   const posterSource = project.poster === null ? null : createManagedStudioAssetUrl(project.id, project.poster.assetId);
   const [failedPosterSource, setFailedPosterSource] = useState<string | null>(null);
@@ -115,6 +125,11 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project, locale, disab
           seconds: project.targetDurationSeconds,
         })}
       </p>
+      {engineReadiness === 'setup_required' && (
+        <Tag color='orange' className={styles.engineReadinessTag}>
+          {t('conversation.creativeStudio.library.readinessSetupRequired')}
+        </Tag>
+      )}
       <p className={styles.projectMeta}>
         {t('conversation.creativeStudio.library.meta', {
           shots: t('conversation.creativeStudio.library.shotCount', { count: project.sceneCount }),

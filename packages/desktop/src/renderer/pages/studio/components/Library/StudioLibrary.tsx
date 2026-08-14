@@ -16,11 +16,12 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 
 import { Composer } from './Composer';
-import { ProjectCard } from './ProjectCard';
+import { ProjectCard, type ProjectEngineReadiness } from './ProjectCard';
 import styles from './StudioLibrary.module.css';
 import { rememberStudioView, resolveStudioEntryView, studioViewPath } from '../../studioPhaseRoute';
 
 const ACTIVE_JOB_STATUSES = new Set(['queued_local', 'submitting', 'queued_remote', 'running', 'needs_attention']);
+const READINESS_WORKER_COUNT = 4;
 
 const hasActiveWork = (jobs: Record<string, { status: string }>): boolean =>
   Object.values(jobs).some((job) => ACTIVE_JOB_STATUSES.has(job.status));
@@ -29,6 +30,7 @@ export const StudioLibrary: React.FC = () => {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const [projects, setProjects] = useState<StudioProjectSummary[]>([]);
+  const [engineReadiness, setEngineReadiness] = useState<Record<string, ProjectEngineReadiness>>({});
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [listErrorMessageKey, setListErrorMessageKey] = useState<string | null>(null);
   const [createErrorMessageKey, setCreateErrorMessageKey] = useState<string | null>(null);
@@ -41,8 +43,37 @@ export const StudioLibrary: React.FC = () => {
   const deletePreparationRef = useRef(0);
   const mutationBusy = creating || deletePreparing || deleting;
 
+  const probeEngineReadiness = useCallback(async (request: number, projectIds: string[]): Promise<void> => {
+    let nextProjectIndex = 0;
+    const worker = async (): Promise<void> => {
+      while (listRequestRef.current === request) {
+        const projectId = projectIds[nextProjectIndex++];
+        if (!projectId) return;
+
+        let readiness: ProjectEngineReadiness = 'unknown';
+        try {
+          const result = await ipcBridge.creativeStudio.listRoutes.invoke({ projectId });
+          if (result.ok) {
+            readiness =
+              result.data.image.status === 'ready' && result.data.video.status === 'ready' ? 'ready' : 'setup_required';
+          }
+        } catch {
+          // A readiness badge is advisory; unavailable probes leave the card usable.
+        }
+
+        if (listRequestRef.current !== request) return;
+        setEngineReadiness((current) =>
+          listRequestRef.current === request ? { ...current, [projectId]: readiness } : current
+        );
+      }
+    };
+
+    await Promise.all(Array.from({ length: Math.min(READINESS_WORKER_COUNT, projectIds.length) }, worker));
+  }, []);
+
   const refreshProjects = useCallback(async (): Promise<void> => {
     const request = ++listRequestRef.current;
+    setEngineReadiness({});
     setProjectsLoading(true);
     try {
       const result = await ipcBridge.creativeStudio.listProjects.invoke();
@@ -53,6 +84,10 @@ export const StudioLibrary: React.FC = () => {
       }
       setProjects(result.data);
       setListErrorMessageKey(null);
+      void probeEngineReadiness(
+        request,
+        result.data.map((project) => project.id)
+      );
     } catch {
       if (listRequestRef.current === request) {
         setListErrorMessageKey('conversation.creativeStudio.errors.storage');
@@ -60,7 +95,7 @@ export const StudioLibrary: React.FC = () => {
     } finally {
       if (listRequestRef.current === request) setProjectsLoading(false);
     }
-  }, []);
+  }, [probeEngineReadiness]);
 
   useEffect(() => {
     void refreshProjects();
@@ -192,6 +227,7 @@ export const StudioLibrary: React.FC = () => {
               <ProjectCard
                 key={project.id}
                 project={project}
+                engineReadiness={engineReadiness[project.id]}
                 locale={i18n.resolvedLanguage ?? i18n.language}
                 disabled={mutationBusy || deleteCandidate !== null}
                 onOpen={() => navigate(studioViewPath(project.id, resolveStudioEntryView(project.id)))}

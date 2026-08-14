@@ -278,6 +278,10 @@
   color: var(--warning);
 }
 
+.engineReadinessTag {
+  margin-top: 10px;
+}
+
 .projectMeta {
   composes: meta from '../../StudioTypography.module.css';
   margin: 7px 0 0;

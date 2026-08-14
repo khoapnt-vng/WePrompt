@@ -116,24 +116,27 @@ const project = (overrides: Partial<StudioRendererProject> = {}): StudioRenderer
   ...overrides,
 });
 
-const routes = (health: 'ready' | 'setup_required' | 'unavailable' = 'ready'): StudioRouteCatalog => ({
+const routes = ({
+  image = 'ready',
+  video = 'ready',
+}: {
+  image?: StudioRouteCatalog['image']['status'];
+  video?: StudioRouteCatalog['video']['status'];
+} = {}): StudioRouteCatalog => ({
   storyboard: {
-    status: health === 'ready' ? 'ready' : 'setup_required',
-    selected: health === 'ready' ? { providerId: 'provider-1', model: 'operations-model' } : null,
-    options:
-      health === 'ready'
-        ? [
-            {
-              providerId: 'provider-1',
-              providerName: 'Provider',
-              model: 'operations-model',
-              health: 'available',
-            },
-          ]
-        : [],
+    status: 'ready',
+    selected: { providerId: 'provider-1', model: 'operations-model' },
+    options: [
+      {
+        providerId: 'provider-1',
+        providerName: 'Provider',
+        model: 'operations-model',
+        health: 'available',
+      },
+    ],
   },
-  image: { status: 'setup_required', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
-  video: { status: 'setup_required', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+  image: { status: image, selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+  video: { status: video, selected: null, selectedRoute: null, selectionIssue: null, options: [] },
   catalogVersion: 'catalog-1',
 });
 
@@ -176,15 +179,53 @@ describe('StudioLibrary', () => {
     expect(screen.getByText('6 projects')).toBeInTheDocument();
   });
 
-  it('keeps global Storyboard readiness hidden when the optional probe throws', async () => {
+  it.each([{ image: 'setup_required' }, { video: 'selection_required' }])(
+    'shows the setup badge when a media role is not ready: %j',
+    async (status) => {
+      bridge.listProjects.invoke.mockResolvedValue(ok([summary()]));
+      bridge.listRoutes.invoke.mockResolvedValue(ok(routes(status)));
+
+      render(<StudioLibrary />);
+
+      expect(await screen.findByText('conversation.creativeStudio.library.readinessSetupRequired')).toBeInTheDocument();
+    }
+  );
+
+  it('does not show the setup badge when both media roles are ready', async () => {
+    bridge.listProjects.invoke.mockResolvedValue(ok([summary()]));
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routes()));
+
+    render(<StudioLibrary />);
+
+    await screen.findByText('Launch film');
+    await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalledWith({ projectId: 'project-1' }));
+    expect(screen.queryByText('conversation.creativeStudio.library.readinessSetupRequired')).not.toBeInTheDocument();
+  });
+
+  it('keeps a card usable without a setup badge while its readiness probe is pending', async () => {
+    const pending = deferred<StudioCommandResult<StudioRouteCatalog>>();
+    bridge.listProjects.invoke.mockResolvedValue(ok([summary()]));
+    bridge.listRoutes.invoke.mockReturnValue(pending.promise);
+
+    render(<StudioLibrary />);
+
+    const openProject = await screen.findByRole('button', { name: 'Launch film' });
+    expect(screen.queryByText('conversation.creativeStudio.library.readinessSetupRequired')).not.toBeInTheDocument();
+    fireEvent.click(openProject);
+    expect(navigate).toHaveBeenCalledWith('/studio/project-1/table');
+  });
+
+  it('keeps a card usable without a setup badge when its readiness probe fails', async () => {
+    bridge.listProjects.invoke.mockResolvedValue(ok([summary()]));
     bridge.listRoutes.invoke.mockRejectedValue(new Error('bridge unavailable'));
 
     render(<StudioLibrary />);
 
-    await screen.findByText('conversation.creativeStudio.empty.title');
+    const openProject = await screen.findByRole('button', { name: 'Launch film' });
     await act(async () => {});
-    expect(screen.queryByText('conversation.creativeStudio.library.readinessLabel')).not.toBeInTheDocument();
     expect(screen.queryByText('conversation.creativeStudio.library.readinessSetupRequired')).not.toBeInTheDocument();
+    fireEvent.click(openProject);
+    expect(navigate).toHaveBeenCalledWith('/studio/project-1/table');
   });
 
   it('renders the canonical project summaries returned by the bridge', async () => {
@@ -474,6 +515,65 @@ describe('StudioLibrary', () => {
     older.resolve(ok([summary({ name: 'Older project' })]));
     await waitFor(() => expect(screen.getByText('Newest project')).toBeInTheDocument());
     expect(screen.queryByText('Older project')).not.toBeInTheDocument();
+  });
+
+  it('does not let an older readiness probe overwrite the newer listing', async () => {
+    let onUpdate: ((event: { projectId: string }) => void) | undefined;
+    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
+      onUpdate = listener;
+      return () => {};
+    });
+    const olderRoutes = deferred<StudioCommandResult<StudioRouteCatalog>>();
+    bridge.listProjects.invoke
+      .mockResolvedValueOnce(ok([summary({ name: 'Older project' })]))
+      .mockResolvedValueOnce(ok([summary({ name: 'Newest project' })]));
+    bridge.listRoutes.invoke.mockReturnValueOnce(olderRoutes.promise).mockResolvedValueOnce(ok(routes()));
+
+    render(<StudioLibrary />);
+
+    await screen.findByText('Older project');
+    act(() => onUpdate?.({ projectId: 'project-1' }));
+    await screen.findByText('Newest project');
+    await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(2));
+
+    olderRoutes.resolve(ok(routes({ image: 'setup_required' })));
+    await act(async () => {});
+
+    expect(screen.queryByText('conversation.creativeStudio.library.readinessSetupRequired')).not.toBeInTheDocument();
+  });
+
+  it('limits readiness probes to four in-flight route requests', async () => {
+    const routeRequests = new Map<string, ReturnType<typeof deferred<StudioCommandResult<StudioRouteCatalog>>>>();
+    let inFlight = 0;
+    let maxInFlight = 0;
+    bridge.listProjects.invoke.mockResolvedValue(
+      ok(Array.from({ length: 7 }, (_, index) => summary({ id: `project-${index + 1}`, name: `Project ${index + 1}` })))
+    );
+    bridge.listRoutes.invoke.mockImplementation(({ projectId }: { projectId: string }) => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      const request = deferred<StudioCommandResult<StudioRouteCatalog>>();
+      routeRequests.set(projectId, request);
+      return request.promise.finally(() => {
+        inFlight -= 1;
+      });
+    });
+
+    render(<StudioLibrary />);
+
+    await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(4));
+    expect(maxInFlight).toBe(4);
+
+    for (const projectId of ['project-1', 'project-2', 'project-3', 'project-4']) {
+      routeRequests.get(projectId)?.resolve(ok(routes()));
+    }
+    await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(7));
+
+    for (const request of routeRequests.values()) {
+      request.resolve(ok(routes()));
+    }
+    await act(async () => {});
+    expect(maxInFlight).toBe(4);
   });
 
   it('keeps a composer command error when a background project refresh succeeds', async () => {
