@@ -3,8 +3,8 @@
   "repository": "khoapnt-vng/aioncore",
   "version": "0.1.55",
   "baseCommit": "9bd693b3b43cdb1003061de0e4f62259ab6f42ae",
-  "candidateCommit": "232456db3d2ade5933952f1463a5af977e135a15",
-  "candidateStatus": "conditional_local_candidate_with_retained_red_attempt_awaiting_independent_review_windows_and_publish_authorization",
+  "candidateCommit": "e2931e953cbdfed146497e25ebf7bc3981b95193",
+  "candidateStatus": "conditional_local_candidate_with_green_exact_head_gates_awaiting_independent_review_windows_and_publish_authorization",
   "runner": {
     "os": "macOS 15.7.3 (24G419)",
     "architecture": "arm64",
@@ -47,8 +47,9 @@
     },
     {
       "commit": "232456db3d2ade5933952f1463a5af977e135a15",
-      "outcome": "conditional_local_candidate",
+      "outcome": "green_superseded_by_permission_review_fix",
       "sourceDelta": "Adds pinned OfficeCLI v1.0.143 to each approved immutable bundle before manifest/checksum generation and rejects missing or wrong-target OfficeCLI in both assembler and independent verifier.",
+      "reviewDisposition": "Superseded after pre-review found the release workflow granted contents:write to every job instead of only the publisher.",
       "fullSuiteAttempts": [
         {
           "attempt": 1,
@@ -70,28 +71,49 @@
           "disposition": "Additional diagnostic evidence only; does not erase attempt 1."
         }
       ]
+    },
+    {
+      "commit": "e2931e953cbdfed146497e25ebf7bc3981b95193",
+      "outcome": "conditional_local_candidate",
+      "sourceDelta": "Scopes the release workflow to contents:read globally and grants contents:write only to the GitHub release publisher; adds a workflow-contract regression test.",
+      "fullSuiteAttempts": [
+        {
+          "attempt": 1,
+          "command": "cargo nextest run --workspace",
+          "startedAt": "2026-08-15T17:03:57Z",
+          "endedAt": "2026-08-15T17:09:14Z",
+          "exitCode": 0,
+          "summary": "6677 tests run: 6677 passed, 18 skipped in 297.713s",
+          "rawLogSha256": "0781cf5b1884c130936f0ce2f0412f020687126937fcc1221d1ebf30809e4e53",
+          "disposition": "Single complete exact-head suite invocation; green. Historical red and invalid attempts remain retained on their original candidates."
+        }
+      ]
     }
   ],
   "exactHeadGates": [
     {
       "name": "fmt",
       "command": "cargo fmt --all -- --check",
-      "exitCode": 0
+      "exitCode": 0,
+      "rawLogSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     {
       "name": "clippy",
       "command": "cargo clippy --workspace -- -D warnings",
-      "exitCode": 0
+      "exitCode": 0,
+      "rawLogSha256": "c0e5e9c52c40d9c9029f34fe74e3856eb6f85ba8de0c41f3d1654f79cc5d3997"
     },
     {
       "name": "migration-immutability-test",
       "command": "bash scripts/migration/check-immutability.test.sh",
-      "exitCode": 0
+      "exitCode": 0,
+      "rawLogSha256": "88995e4a7110c328ae2d41e3b6bedbbb5d3d40e0776e19ad0022243f3e73bcef"
     },
     {
       "name": "migration-immutability",
       "command": "bash scripts/migration/check-immutability.sh",
-      "exitCode": 0
+      "exitCode": 0,
+      "rawLogSha256": "4939edaa531ceef2db63c7dfa862590c64bd275dc7cb3bc2449d397488b92d87"
     },
     {
       "name": "lineage",
@@ -100,13 +122,16 @@
         "python3 scripts/migration/generate-lineage.py --migrations crates/aionui-db/migrations --check migration-lineage.json"
       ],
       "exitCode": 0,
-      "summary": "8 tests passed and the checked lineage is exact"
+      "summary": "8 tests passed and the checked lineage is exact",
+      "testLogSha256": "082946010637fe91e2c59a125ba2e208cd1a4c57fa37a2a9a85a08efeed4e9ec",
+      "checkLogSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     {
       "name": "release-contract",
       "command": "python3 -m unittest discover -s scripts/release",
       "exitCode": 0,
-      "summary": "30 tests passed"
+      "summary": "31 tests passed",
+      "rawLogSha256": "eff4bd2ce7dbb2d1f24440fb1115e2d79a5f4d12c8333de821341f4e19fd2158"
     },
     {
       "name": "release-build-macos-arm64",
@@ -114,7 +139,8 @@
       "exitCode": 0,
       "binaryFormat": "Mach-O 64-bit executable arm64",
       "binaryVersion": "aioncore 0.1.55",
-      "binarySha256": "8b7a26e6b06b17f5059b8db9ea31df88e07caa5a5263efdeb566cc3c40a1649b"
+      "binarySha256": "8b7a26e6b06b17f5059b8db9ea31df88e07caa5a5263efdeb566cc3c40a1649b",
+      "rawLogSha256": "0f66cf9f65c0374195d473acd6d3931362f6bad2042d47c6f4dc6373c161c638"
     },
     {
       "name": "complete-bundle-smoke-macos-arm64",
@@ -125,8 +151,8 @@
         "python3 scripts/release/verify_bundle.py"
       ],
       "exitCode": 0,
-      "builtAt": "2026-08-15T16:04:21Z",
-      "sourceCommit": "232456db3d2ade5933952f1463a5af977e135a15",
+      "builtAt": "2026-08-15T17:10:31Z",
+      "sourceCommit": "e2931e953cbdfed146497e25ebf7bc3981b95193",
       "target": "aarch64-apple-darwin",
       "fileCount": 11791,
       "officeCli": {
@@ -135,12 +161,16 @@
         "sha256": "2f158d46f9b6c5eb0dfe4eb02038114001e17acc47b67347417c56dcf9659096",
         "size": 33740304
       },
-      "manifestSha256": "7d89a3daf462bdcb7dc46bbda4c250db316188846d5f2964fbc9de7827b37e7a",
-      "checksumsSha256": "8bab366f7b7d4f4f921b4d5e484c8e971208cc861b8478bf75747b2b4896afc0"
+      "manifestSha256": "80f2a04fe1b4e643c3c042c1385ae73d59812516cc0008f21311fca2f87fbc29",
+      "checksumsSha256": "124295ed5966a3272d782d2b5080fb78b04c5ef68570b7238496e9b4782d5604",
+      "archiveSha256": "a78bbf7305bc90cb024c6088b3ee4a07cc67b4ba515779b4912329114d915938",
+      "archiveSize": 291003492,
+      "freshExtractionVerified": true,
+      "evidenceNote": "The first archive command ran before the silent assembler process completed and produced a retained zero-byte rejected archive. A second assembler invocation was rejected because the first had atomically created the output. The separately named attempt-2 archive and fresh extraction both verified."
     }
   ],
   "review": {
-    "reviewedRange": "9bd693b3b43cdb1003061de0e4f62259ab6f42ae..232456db3d2ade5933952f1463a5af977e135a15",
+    "reviewedRange": "9bd693b3b43cdb1003061de0e4f62259ab6f42ae..e2931e953cbdfed146497e25ebf7bc3981b95193",
     "reviewer": "Codex implementation agent, fresh read-only pass",
     "independentReviewerSatisfied": false,
     "resolvedFindings": [
@@ -159,10 +189,16 @@
         "severity": "P1",
         "fixCommit": "232456db3d2ade5933952f1463a5af977e135a15",
         "proof": "TDD covered approved target mapping, digest mismatch cleanup, create-only installation, HTTPS-only redirects, assembler/verifier rejection, workflow ordering, live official ARM64 digest, and a verified 11,791-file bundle smoke."
+      },
+      {
+        "id": "RELEASE-WRITE-PERMISSION-SCOPE",
+        "severity": "P1",
+        "fixCommit": "e2931e953cbdfed146497e25ebf7bc3981b95193",
+        "proof": "A failing workflow-contract test first showed global contents:write. The exact candidate grants contents:read globally and contents:write only to the GitHub release publisher; all 31 release tests and exact-head gates pass."
       }
     ],
     "openBlockingFindings": [
-      "The first exact-head Nextest attempt is red with incomplete failure capture; only the second diagnostic attempt is green.",
+      "The invalid first Nextest attempt on superseded candidate 232456db3d2ade5933952f1463a5af977e135a15 remains retained and requires independent reviewer disposition.",
       "A reviewer independent of the implementation agent has not accepted the final range.",
       "The Windows x64 build and bundle have not run on a native Windows runner."
     ],

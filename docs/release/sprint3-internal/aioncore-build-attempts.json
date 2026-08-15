@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "scope": "local macOS ARM64 AionCore v0.1.55 bundle diagnostics",
-  "recordedAt": "2026-08-15T14:39:44Z",
+  "recordedAt": "2026-08-15T17:10:31Z",
   "runner": {
     "os": "macOS 15.7.3 Darwin 24.6.0",
     "architecture": "arm64",
@@ -85,6 +85,69 @@
         "symlinksInFinalBundle": 0
       },
       "evidenceLimit": "Local diagnostic only. Final release evidence still requires native two-target workflow artifacts, archived-bundle extraction and reverification, checksummed logs, and independent review."
+    },
+    {
+      "attemptId": "mac-managed-004",
+      "kind": "managed-resource-export-with-officecli",
+      "sourceCommit": "e2931e953cbdfed146497e25ebf7bc3981b95193",
+      "outcome": "green_local_diagnostic",
+      "exitCode": 0,
+      "result": "Exported and validated the managed Node and ACP resources, then added OfficeCLI v1.0.143 from the pinned HTTPS asset with exact SHA-256 2f158d46f9b6c5eb0dfe4eb02038114001e17acc47b67347417c56dcf9659096.",
+      "logs": {
+        "managedResourcesSha256": "4d67937ae3e94cd5836cd96e4cb8ab9aae96632a6e1e96d88805879f5df985bb",
+        "officeCliSha256": "0a50ef4a7e233d6c5c641c2950c48fcf62b14c1a604a7190b67376c558bdb73e"
+      }
+    },
+    {
+      "attemptId": "mac-bundle-004",
+      "kind": "bundle-assembly-and-verification",
+      "sourceCommit": "e2931e953cbdfed146497e25ebf7bc3981b95193",
+      "outcome": "green_local_diagnostic",
+      "exitCode": 0,
+      "builtAt": "2026-08-15T17:10:31Z",
+      "target": "aarch64-apple-darwin",
+      "payloadFileCount": 11791,
+      "binarySha256": "8b7a26e6b06b17f5059b8db9ea31df88e07caa5a5263efdeb566cc3c40a1649b",
+      "bundleManifestSha256": "80f2a04fe1b4e643c3c042c1385ae73d59812516cc0008f21311fca2f87fbc29",
+      "sha256SumsSha256": "124295ed5966a3272d782d2b5080fb78b04c5ef68570b7238496e9b4782d5604",
+      "managedResourcesManifestSha256": "a3503fdabd95cc5fa2f84d47097048f5c1297888c0b0f330f8413214c9bafd73",
+      "migrationLineageFingerprint": "3d872b4b1346afde6e277dd727e87af3ca140c91d7da16590ab272af7b3561e3",
+      "assemblyLogSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "verificationLogSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "attemptId": "mac-archive-001",
+      "kind": "archive-and-fresh-extraction",
+      "sourceCommit": "e2931e953cbdfed146497e25ebf7bc3981b95193",
+      "outcome": "red",
+      "exitCode": 1,
+      "failure": "tar started before the silently running assembler had atomically published work/bundle and created a zero-byte rejected archive",
+      "classification": "orchestration_timing_error",
+      "rootCause": "The long-running assembler returned an execution-session identifier that was not retained by the first orchestration call. The premature archive check raced the still-active assembler; the assembler later completed successfully.",
+      "disposition": "The zero-byte archive remains retained with SHA-256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855. No release identity uses it. The complete bundle was independently verified before a separately named archive attempt."
+    },
+    {
+      "attemptId": "mac-bundle-005",
+      "kind": "bundle-assembly-retry",
+      "sourceCommit": "e2931e953cbdfed146497e25ebf7bc3981b95193",
+      "outcome": "rejected_expected",
+      "exitCode": 1,
+      "failure": "Atomic replacement refused because work/bundle already existed and was non-empty",
+      "classification": "create_only_contract_enforced",
+      "disposition": "The first assembler had completed. The retry did not replace the immutable output; its raw log SHA-256 is 0d2fdc1d87e3c6d6b65c48dd937df30985dd28679fe17824485d304ae3e616f5."
+    },
+    {
+      "attemptId": "mac-archive-002",
+      "kind": "archive-and-fresh-extraction",
+      "sourceCommit": "e2931e953cbdfed146497e25ebf7bc3981b95193",
+      "outcome": "green_local_diagnostic",
+      "exitCode": 0,
+      "archiveName": "aioncore-v0.1.55-aarch64-apple-darwin-attempt2.tar.gz",
+      "archiveSize": 291003492,
+      "archiveSha256": "a78bbf7305bc90cb024c6088b3ee4a07cc67b4ba515779b4912329114d915938",
+      "freshExtractionVerified": true,
+      "verificationLogSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "evidenceLimit": "Local macOS diagnostic only. The archive name is deliberately non-release and cannot substitute for authorized native workflow assets."
     }
   ]
 }
