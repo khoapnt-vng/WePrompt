@@ -39,7 +39,7 @@ const AIONCORE_PUBLISHING_REMOTE = 'https://github.com/khoapnt-vng/aioncore.git'
 
 // Exact Sprint 3 internal-test bundle source. This commit is intentionally
 // consumed from authenticated Actions artifacts rather than a public release.
-const ACCEPTED_AIONCORE_SOURCE_COMMIT = '8d79ebbd79bd4bb08f0ff0e49ea0a22564cb3e61';
+const ACCEPTED_AIONCORE_SOURCE_COMMIT = '8ddae6e0c6773ed4871e0719f7a89924d9a5e6bb';
 
 // Default Forge mirror that publishes cosign-signed, self-built AionCore
 // artifacts (see aioncore-trust.js). Overridable via env for other mirrors.

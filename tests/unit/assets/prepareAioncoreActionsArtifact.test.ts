@@ -15,7 +15,7 @@ const { acceptedMigrationLineage } = require('../../../packages/shared-scripts/s
 
 const posixFakeToolchainIt = process.platform === 'win32' ? it.skip : it;
 const publishedAioncoreRefs =
-  '8d79ebbd79bd4bb08f0ff0e49ea0a22564cb3e61\trefs/heads/codex/internal-sprint3-aioncore-package\n';
+  '8ddae6e0c6773ed4871e0719f7a89924d9a5e6bb\trefs/heads/codex/internal-sprint3-aioncore-package\n';
 const resolvePublishedAioncoreRefs = () => publishedAioncoreRefs;
 
 function writeFile(filePath: string, contents = 'x') {
@@ -137,7 +137,7 @@ afterEach(() => {
 
 describe('prepare-aioncore GitHub Actions artifact resolver', () => {
   it('pins the Sprint 3 internal AionCore package commit and migration lineage', () => {
-    expect(ACCEPTED_AIONCORE_SOURCE_COMMIT).toBe('8d79ebbd79bd4bb08f0ff0e49ea0a22564cb3e61');
+    expect(ACCEPTED_AIONCORE_SOURCE_COMMIT).toBe('8ddae6e0c6773ed4871e0719f7a89924d9a5e6bb');
     expect(acceptedMigrationLineage).toMatchObject({
       latestVersion: 28,
       entryCount: 28,
