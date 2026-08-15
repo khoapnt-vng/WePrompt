@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "candidateCommit": "1a00f5fa6f446c57475426d260b0ee1ad0d19410",
-  "generatedAt": "2026-08-15T17:23:45Z",
+  "candidateCommit": "0de7d524fb98c282efba06ea805378c2fd42e8ca",
+  "generatedAt": "2026-08-15T17:30:04Z",
   "runner": {
     "os": "darwin",
     "architecture": "arm64",
@@ -19,8 +19,8 @@
       "result": "green",
       "exitCode": 0,
       "log": {
-        "path": "artifacts/sprint3-internal/source-gates/1a00f5fa6f446c57475426d260b0ee1ad0d19410/install.log",
-        "sha256": "216d176bc4e7034db4c0f792f2d0a2972918b342e8cf459de9a53c22cef56876"
+        "path": "artifacts/sprint3-internal/source-gates/0de7d524fb98c282efba06ea805378c2fd42e8ca/install.log",
+        "sha256": "d87b5aa606d9b3aa8d3fe3ac61be49ada0324a6a1966716263a6c26883592619"
       }
     },
     {
@@ -29,7 +29,7 @@
       "result": "green",
       "exitCode": 0,
       "log": {
-        "path": "artifacts/sprint3-internal/source-gates/1a00f5fa6f446c57475426d260b0ee1ad0d19410/tsc.log",
+        "path": "artifacts/sprint3-internal/source-gates/0de7d524fb98c282efba06ea805378c2fd42e8ca/tsc.log",
         "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
       }
     },
@@ -41,34 +41,19 @@
       "warningCount": 1225,
       "errorCount": 0,
       "log": {
-        "path": "artifacts/sprint3-internal/source-gates/1a00f5fa6f446c57475426d260b0ee1ad0d19410/lint.log",
-        "sha256": "fe2fcebdd881295e86c7065ee854796faee6328cfe96c2756bcfc53ca3a5392e"
+        "path": "artifacts/sprint3-internal/source-gates/0de7d524fb98c282efba06ea805378c2fd42e8ca/lint.log",
+        "sha256": "f946a81ef05be845837695b59453b84a8d2f6ec5fd55a6972aae9d40f8cb0044"
       }
     },
     {
       "name": "format",
       "command": ["bun", "run", "format:check"],
-      "result": "green_after_classified_local_evidence_fix",
-      "attempts": [
-        {
-          "attempt": 1,
-          "exitCode": 1,
-          "classification": "local_evidence_tree_format_scope",
-          "disposition": "oxfmt scans ignored files and found formatting differences only inside the untracked 11,791-file extracted AionCore diagnostic bundle. No tracked source failed. The complete bundle was moved intact to controlled external release-evidence storage before the next attempt; its accepted archive hash remains a78bbf7305bc90cb024c6088b3ee4a07cc67b4ba515779b4912329114d915938.",
-          "log": {
-            "path": "artifacts/sprint3-internal/source-gates/1a00f5fa6f446c57475426d260b0ee1ad0d19410/format.log",
-            "sha256": "2dce189b0ccf8b2b86d7a7c78bb1db7ed10d0282199850b749b32c41947047f8"
-          }
-        },
-        {
-          "attempt": 2,
-          "exitCode": 0,
-          "log": {
-            "path": "artifacts/sprint3-internal/source-gates/1a00f5fa6f446c57475426d260b0ee1ad0d19410/format-attempt2.log",
-            "sha256": "d09fcd5cf996d8bb30573125c3b3a4051cdb589d36289aadc407a12445cc0de8"
-          }
-        }
-      ]
+      "result": "green",
+      "exitCode": 0,
+      "log": {
+        "path": "artifacts/sprint3-internal/source-gates/0de7d524fb98c282efba06ea805378c2fd42e8ca/format.log",
+        "sha256": "c49416e44fa093b129c39edc44cc75d315b89fe3125ccabef9fe3576afa30d33"
+      }
     },
     {
       "name": "i18n",
@@ -77,7 +62,7 @@
       "exitCode": 0,
       "disposition": "Existing missing Creative Studio plural-form translations remain warnings; Creative Studio is fail-closed and excluded from this internal release.",
       "log": {
-        "path": "artifacts/sprint3-internal/source-gates/1a00f5fa6f446c57475426d260b0ee1ad0d19410/i18n.log",
+        "path": "artifacts/sprint3-internal/source-gates/0de7d524fb98c282efba06ea805378c2fd42e8ca/i18n.log",
         "sha256": "abb5ac77a99cbb24eac66aa6c605faaec2edc6a6c28c7f166d237095a21e1f3d"
       }
     },
@@ -101,8 +86,8 @@
         "testsSkipped": 11
       },
       "log": {
-        "path": "artifacts/sprint3-internal/source-gates/1a00f5fa6f446c57475426d260b0ee1ad0d19410/focused-release.log",
-        "sha256": "8f428694a8d303f894e79f3f4256efcb87596498d5b1ce4928015df324d7b48e"
+        "path": "artifacts/sprint3-internal/source-gates/0de7d524fb98c282efba06ea805378c2fd42e8ca/focused-release.log",
+        "sha256": "e1aeb4aceb511a10190d7c200f4f04889a56455adf448e12b55ae77cf92843ed"
       }
     },
     {
@@ -124,8 +109,8 @@
         "testsPassed": 82
       },
       "log": {
-        "path": "artifacts/sprint3-internal/source-gates/1a00f5fa6f446c57475426d260b0ee1ad0d19410/package-inventory.log",
-        "sha256": "126730286d6265ffb104d7aaf049a0e24492c296eb7a9f3a1bdab0a24e9db288"
+        "path": "artifacts/sprint3-internal/source-gates/0de7d524fb98c282efba06ea805378c2fd42e8ca/package-inventory.log",
+        "sha256": "463c6562da664b891c1151d7e7ad235327e431f9d5bfe5a016c1ae363d9baa1e"
       }
     },
     {
@@ -134,8 +119,8 @@
       "result": "blocked_pending_independent_review",
       "ledger": {
         "path": "docs/release/sprint3-internal/full-suite-ledger.json",
-        "sha256": "37e33ecc31301bb9b66a01615a2373c50eb66c24b5652751a028e1f313988115",
-        "totalRunCount": 5,
+        "sha256": "ee7560f8d6100b49b5947c8d723a4f831e00abc3849100a2e243b6a792c493af",
+        "totalRunCount": 6,
         "resolutionAttempt": {
           "commit": "6d4cca05628965bd041e9ec3a4693a7d11c1d2f5",
           "result": "green",
@@ -146,13 +131,13 @@
           "rawLogSha256": "080f087b4e9d8710f49605a9a316ed159a86ffa26c0c54b3d897397e677560e8"
         },
         "candidateAttempt": {
-          "commit": "1a00f5fa6f446c57475426d260b0ee1ad0d19410",
+          "commit": "0de7d524fb98c282efba06ea805378c2fd42e8ca",
           "result": "green",
           "testFilesPassed": 632,
           "testFilesSkipped": 1,
           "testsPassed": 8253,
           "testsSkipped": 19,
-          "rawLogSha256": "7b12d98890b6d35c7855dc9b8b598031d67b9f1586afb8782d85e92f47fdaca8"
+          "rawLogSha256": "27b58d05c3b7e3bac3a3f075f0f7b49c919f6cd2de4df38bdb51ca97513ef810"
         }
       }
     }
