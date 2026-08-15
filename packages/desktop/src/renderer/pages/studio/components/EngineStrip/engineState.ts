@@ -35,6 +35,7 @@ type EngineSlotBase = {
   selectedRoute: StudioRouteCatalogEntry | null;
   prearmedRoute: StudioRouteCatalogEntry | null;
   supportsFirstFrame: boolean | null;
+  maxConditioningImages: number | null;
   providerName: string | null;
   aspectRatio: StudioRendererProject['aspectRatio'] | null;
   resolution: StudioRendererProject['resolution'] | null;
@@ -45,7 +46,13 @@ export type EngineSlotView = EngineSlotBase &
     | { state: 'unloaded'; action: 'none' }
     | { state: 'not_set'; action: 'menu' }
     | { state: 'no_fit'; action: 'settings' }
-    | { state: 'ready'; action: 'menu'; selectedRoute: StudioRouteCatalogEntry; supportsFirstFrame: boolean }
+    | {
+        state: 'ready';
+        action: 'menu';
+        selectedRoute: StudioRouteCatalogEntry;
+        supportsFirstFrame: boolean;
+        maxConditioningImages: number;
+      }
     | { state: 'retired'; action: 'menu'; selectedModel: string }
     | { state: 'needs_setup'; action: 'settings'; selectedModel: string; providerName: string }
     | { state: 'health'; action: 'none'; selectedModel: string }
@@ -78,6 +85,7 @@ const baseSlot = (role: EngineRole, options: StudioRouteCatalogEntry[]): EngineS
   selectedRoute: null,
   prearmedRoute: null,
   supportsFirstFrame: null,
+  maxConditioningImages: null,
   providerName: null,
   aspectRatio: null,
   resolution: null,
@@ -103,6 +111,7 @@ const deriveSlot = (
       selectedModel: media.selectedRoute.model,
       selectedRoute: media.selectedRoute,
       supportsFirstFrame: media.selectedRoute.constraints.supportsFirstFrame,
+      maxConditioningImages: media.selectedRoute.constraints.maxConditioningImages,
     };
   }
 

@@ -190,6 +190,7 @@ const binding = (overrides: Partial<StudioConnectionRecord> = {}): StudioConnect
     minDurationSeconds: 2,
     maxDurationSeconds: 12,
     supportsFirstFrame: true,
+    maxConditioningImages: 0,
   },
   validatedAt: '2026-07-30T00:00:00.000Z',
   ...overrides,
@@ -486,6 +487,39 @@ describe('StudioMediaModelsSection', () => {
     await waitFor(() => expect(bridge.validateConnection.invoke).toHaveBeenCalledExactlyOnceWith(request));
     await waitFor(() => expect(bridge.saveConnection.invoke).toHaveBeenCalledExactlyOnceWith(request));
     await waitFor(() => expect(screen.getAllByRole('listitem', { name: 'open-sora' })).toHaveLength(1));
+  });
+
+  it('sanitizes admitted capacity through load and revalidation without rendering new capacity copy', async () => {
+    const capacityReads = vi.fn();
+    const capabilities = {
+      ...binding().capabilities,
+      get maxConditioningImages(): number {
+        capacityReads();
+        return 6;
+      },
+    };
+    bridge.listConnections.invoke.mockResolvedValue(
+      ok(inventory([{ ...binding(), capabilities } as StudioConnectionRecord]))
+    );
+    bridge.validateConnection.invoke.mockResolvedValue(
+      ok(validation({ capabilities: capabilities as StudioConnectionValidationResult['capabilities'] }))
+    );
+    bridge.saveConnection.invoke.mockResolvedValue(
+      ok(
+        binding({
+          bindingId: 'binding_revalidated',
+          capabilities: capabilities as StudioConnectionRecord['capabilities'],
+        })
+      )
+    );
+    render(<StudioMediaModelsSection providerRefreshToken={0} onAddProvider={vi.fn()} />);
+    const row = await screen.findByRole('listitem', { name: 'open-sora' });
+
+    fireEvent.click(within(row).getByRole('button', { name: 'settings.mediaModels.revalidate' }));
+
+    await waitFor(() => expect(bridge.saveConnection.invoke).toHaveBeenCalledOnce());
+    expect(capacityReads).toHaveBeenCalled();
+    expect(screen.queryByText('6')).toBeNull();
   });
 
   it('same-tuple edit replaces the visible row instead of duplicating it', async () => {

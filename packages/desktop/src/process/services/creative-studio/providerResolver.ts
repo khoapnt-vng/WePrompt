@@ -109,12 +109,13 @@ const modelHealth = (provider: IProvider, model: string): StudioGenerationRoute[
   return provider.model_health?.[model]?.status === 'healthy' ? 'available' : 'unknown';
 };
 
-const imageConstraints = (model: string): StudioRouteConstraints => ({
+const imageConstraints = (model: string, capabilities: StudioConnectionCapabilities): StudioRouteConstraints => ({
   aspectRatios: [...ALL_RATIOS],
   resolutions: [...ALL_RESOLUTIONS],
   minDurationSeconds: 1,
   maxDurationSeconds: 60,
   supportsFirstFrame: !isImagesApiModel(model),
+  maxConditioningImages: isImagesApiModel(model) ? 0 : (capabilities.maxConditioningImages ?? 0),
   silentOutput: true,
 });
 
@@ -127,6 +128,7 @@ const seedanceConstraints = (model: string): StudioRouteConstraints | null => {
         minDurationSeconds: spec.minDuration,
         maxDurationSeconds: spec.maxDuration,
         supportsFirstFrame: true,
+        maxConditioningImages: 0,
         silentOutput: true,
       }
     : null;
@@ -141,6 +143,7 @@ const openRouterConstraints = (model: string): StudioRouteConstraints | null => 
         minDurationSeconds: spec.minDuration,
         maxDurationSeconds: spec.maxDuration,
         supportsFirstFrame: spec.supportsFirstFrame,
+        maxConditioningImages: 0,
         silentOutput: !spec.supportsAudio,
       }
     : null;
@@ -161,6 +164,7 @@ const bindingConstraints = (capabilities: StudioConnectionCapabilities): StudioR
     minDurationSeconds: capabilities.minDurationSeconds,
     maxDurationSeconds: capabilities.maxDurationSeconds,
     supportsFirstFrame: capabilities.supportsFirstFrame ?? false,
+    maxConditioningImages: 0,
     silentOutput: capabilities.audioModes?.includes('none') ?? false,
   };
 };
@@ -232,7 +236,7 @@ const resolveBindingRoute = (
   }
   const constraints =
     binding.adapterId === IMAGE_ADAPTER
-      ? imageConstraints(binding.model)
+      ? imageConstraints(binding.model, binding.capabilities)
       : binding.adapterId === 'byteplus-seedance-v1'
         ? seedanceConstraints(binding.model)
         : binding.adapterId === 'openrouter-video-v1'

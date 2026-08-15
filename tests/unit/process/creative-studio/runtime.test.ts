@@ -738,6 +738,8 @@ describe('Creative Studio E2E fake adapter', () => {
 
     expect(imageConnections).toHaveLength(1);
     expect(videoConnections).toHaveLength(2);
+    expect(imageConnections[0]?.capabilities).toHaveProperty('maxConditioningImages', 6);
+    expect(videoConnections.map((connection) => connection.capabilities.maxConditioningImages)).toEqual([0, 0]);
     expect(new Set(videoConnections.map((connection) => connection.model))).toEqual(
       new Set(['dreamina-seedance-2-0-260128'])
     );
@@ -754,7 +756,7 @@ describe('Creative Studio E2E fake adapter', () => {
       if (adapter === undefined) throw new Error(`expected ${adapterId} adapter`);
       await expect(
         adapter.validateConnection({ model: fakeProvider.use_model }, fakeProvider, new AbortController().signal)
-      ).resolves.toMatchObject({ ok: true });
+      ).resolves.toMatchObject({ ok: true, capabilities: { maxConditioningImages: 0 } });
       const submitted = await adapter.submit(
         {
           prompt: `Run ${adapterId} through the explicit-selection lifecycle`,

@@ -124,6 +124,7 @@ const copyCatalogEntry = (route: StudioRouteCatalogEntry): StudioRouteCatalogEnt
     minDurationSeconds: route.constraints.minDurationSeconds,
     maxDurationSeconds: route.constraints.maxDurationSeconds,
     supportsFirstFrame: route.constraints.supportsFirstFrame,
+    maxConditioningImages: route.constraints.maxConditioningImages,
     silentOutput: route.constraints.silentOutput,
   },
 });

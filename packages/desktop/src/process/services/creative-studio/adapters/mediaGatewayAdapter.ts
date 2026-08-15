@@ -169,6 +169,7 @@ const sanitizedCapabilities = (value: unknown, model: string): Record<string, un
     minDurationSeconds: minimum as number,
     maxDurationSeconds: maximum as number,
     supportsFirstFrame: selectedVideo.supports_first_frame === true,
+    maxConditioningImages: 0,
     cancellationPolicy:
       cancellationPolicy === 'none' ||
       cancellationPolicy === 'queued_only' ||

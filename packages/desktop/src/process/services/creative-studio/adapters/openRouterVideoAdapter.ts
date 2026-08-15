@@ -385,6 +385,7 @@ export const createOpenRouterVideoAdapter = (deps: OpenRouterVideoAdapterDeps = 
             minDurationSeconds: spec.minDuration,
             maxDurationSeconds: spec.maxDuration,
             supportsFirstFrame: spec.supportsFirstFrame,
+            maxConditioningImages: 0,
             cancellationPolicy: 'none',
           },
         };

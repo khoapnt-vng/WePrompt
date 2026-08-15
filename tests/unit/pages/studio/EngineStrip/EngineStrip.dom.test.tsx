@@ -68,6 +68,7 @@ const route = (kind: 'image' | 'video', overrides: Partial<StudioRouteCatalogEnt
     minDurationSeconds: 4,
     maxDurationSeconds: 12,
     supportsFirstFrame: true,
+    maxConditioningImages: 0,
     silentOutput: true,
   },
   ...overrides,

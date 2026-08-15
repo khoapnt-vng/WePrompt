@@ -27,6 +27,7 @@ const gatewayCapabilities = (overrides: Partial<StudioConnectionCapabilities> = 
   minDurationSeconds: 2,
   maxDurationSeconds: 30,
   supportsFirstFrame: false,
+  maxConditioningImages: 0,
   cancellationPolicy: 'none',
   ...overrides,
 });
@@ -160,6 +161,53 @@ describe('createStudioProviderResolver', () => {
     ).listGenerationRoutes();
 
     expect(changed.generationCatalogVersion).not.toBe(first.generationCatalogVersion);
+  });
+
+  it('projects legacy image capacity as zero and changes the generation version when admitted capacity changes', async () => {
+    const image = binding({
+      id: 'binding_image',
+      adapterId: 'weprompt-image-v1',
+      model: 'gemini-2.5-flash-image',
+      capabilities: { mediaKinds: ['image'], supportsFirstFrame: true },
+    });
+    const providers = [provider({ models: ['gemini-2.5-flash-image'] })];
+
+    const legacy = await resolver(providers, [image]).listGenerationRoutes();
+    const admitted = await resolver(providers, [
+      { ...image, capabilities: { ...image.capabilities, maxConditioningImages: 6 } },
+    ]).listGenerationRoutes();
+
+    expect(legacy.routes[0]?.constraints).toHaveProperty('maxConditioningImages', 0);
+    expect(admitted.routes[0]?.constraints).toHaveProperty('maxConditioningImages', 6);
+    expect(admitted.generationCatalogVersion).not.toBe(legacy.generationCatalogVersion);
+  });
+
+  it('keeps video capacity zero even when a persisted binding claims six', async () => {
+    const claimed = binding({ capabilities: gatewayCapabilities({ maxConditioningImages: 6 }) });
+
+    const catalog = await resolver([provider()], [claimed]).listGenerationRoutes();
+
+    expect(catalog.routes[0]?.constraints).toHaveProperty('maxConditioningImages', 0);
+  });
+
+  it('keeps an Images API route at zero even when a persisted binding claims six', async () => {
+    const vng = provider({
+      platform: 'openai',
+      base_url: 'https://maas-llm-aiplatform-hcm.api.vngcloud.vn/v1',
+      models: ['openai/gpt-image-1'],
+    });
+    const claimed = binding({
+      adapterId: 'weprompt-image-v1',
+      model: 'openai/gpt-image-1',
+      capabilities: { mediaKinds: ['image'], supportsFirstFrame: false, maxConditioningImages: 6 },
+    });
+
+    const catalog = await resolver([vng], [claimed]).listGenerationRoutes();
+
+    expect(catalog.routes[0]?.constraints).toMatchObject({
+      supportsFirstFrame: false,
+      maxConditioningImages: 0,
+    });
   });
 
   it('changes the main-only generation version when cancellation policy changes', async () => {
@@ -306,7 +354,11 @@ describe('createStudioProviderResolver', () => {
     expect(catalog.routes).toEqual([
       expect.objectContaining({
         adapterId: 'openrouter-video-v1',
-        constraints: expect.objectContaining({ silentOutput: false, supportsFirstFrame: false }),
+        constraints: expect.objectContaining({
+          silentOutput: false,
+          supportsFirstFrame: false,
+          maxConditioningImages: 0,
+        }),
       }),
     ]);
   });
@@ -326,7 +378,10 @@ describe('createStudioProviderResolver', () => {
     const catalog = await resolver([openRouter], [legacyBinding]).listGenerationRoutes();
 
     expect(catalog.routes).toMatchObject([
-      { adapterId: 'openrouter-video-v1', constraints: { supportsFirstFrame: false } },
+      {
+        adapterId: 'openrouter-video-v1',
+        constraints: { supportsFirstFrame: false, maxConditioningImages: 0 },
+      },
     ]);
   });
 
@@ -345,7 +400,10 @@ describe('createStudioProviderResolver', () => {
     const catalog = await resolver([openRouter], [evidencedBinding]).listGenerationRoutes();
 
     expect(catalog.routes).toMatchObject([
-      { adapterId: 'openrouter-video-v1', constraints: { supportsFirstFrame: true } },
+      {
+        adapterId: 'openrouter-video-v1',
+        constraints: { supportsFirstFrame: true, maxConditioningImages: 0 },
+      },
     ]);
   });
 
@@ -366,7 +424,9 @@ describe('createStudioProviderResolver', () => {
       models: [],
     });
 
-    expect((await resolver([supported], [seedanceBinding]).listGenerationRoutes()).routes).toHaveLength(1);
+    expect((await resolver([supported], [seedanceBinding]).listGenerationRoutes()).routes).toMatchObject([
+      { constraints: { maxConditioningImages: 0 } },
+    ]);
     expect((await resolver([spoofed], [seedanceBinding]).listGenerationRoutes()).routes).toEqual([]);
   });
 

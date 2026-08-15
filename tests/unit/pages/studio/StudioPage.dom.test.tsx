@@ -249,6 +249,7 @@ const imageRoute = (overrides: Partial<StudioRouteCatalogEntry> = {}): StudioRou
     minDurationSeconds: 1,
     maxDurationSeconds: 60,
     supportsFirstFrame: true,
+    maxConditioningImages: 0,
     silentOutput: true,
   },
   ...overrides,

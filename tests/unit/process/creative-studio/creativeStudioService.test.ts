@@ -462,6 +462,7 @@ const routeOption = (
       minDurationSeconds: 1,
       maxDurationSeconds: 12,
       supportsFirstFrame: true,
+      maxConditioningImages: 0,
       silentOutput: true,
     },
     ...overrides,
@@ -480,6 +481,7 @@ const routeOption = (
 };
 
 const KNOWN_ADAPTER_SENTINEL = 'weprompt-media-gateway-v1';
+const IMAGE_INTEGRATION_ID = 'integration_g7Q2mB4p';
 const GATEWAY_INTEGRATION_ID = 'integration_x5T8cW1h';
 
 type RendererBoundaryLeak = {
@@ -2576,6 +2578,47 @@ describe('CreativeStudioService', () => {
     expect((await connectionService.getProject(project.id))?.routing.video).toBeNull();
   });
 
+  it('preserves an admitted image capacity through validation, save, listing, and revalidation', async () => {
+    const validateInternalConnection = vi.fn(async (input) => ({
+      schemaVersion: 1 as const,
+      id: 'validation_only',
+      providerId: input.providerId,
+      adapterId: input.adapterId,
+      model: input.model,
+      capabilities: {
+        mediaKinds: ['image' as const],
+        supportsFirstFrame: false,
+        maxConditioningImages: 6,
+        cancellationPolicy: 'none' as const,
+      },
+      validatedAt: '2026-07-30T00:00:00.000Z',
+    }));
+    const connectionService = createCreativeStudioService({
+      store: createCreativeStudioStore({ rootDir }),
+      onProjectUpdated,
+      createConnectionId: () => 'binding_image',
+      validateConnection: validateInternalConnection,
+    });
+    const request = {
+      providerId: 'provider_1',
+      integrationId: IMAGE_INTEGRATION_ID,
+      model: 'image-model',
+    };
+
+    await expect(connectionService.validateConnection(request)).resolves.toMatchObject({
+      capabilities: { supportsFirstFrame: true, maxConditioningImages: 6 },
+    });
+    await expect(connectionService.saveConnection(request)).resolves.toMatchObject({
+      capabilities: { supportsFirstFrame: true, maxConditioningImages: 6 },
+    });
+    await expect(connectionService.listConnections()).resolves.toMatchObject({
+      connections: [{ capabilities: { supportsFirstFrame: true, maxConditioningImages: 6 } }],
+    });
+    await expect(connectionService.saveConnection(request)).resolves.toMatchObject({
+      capabilities: { supportsFirstFrame: true, maxConditioningImages: 6 },
+    });
+  });
+
   it('lists and removes a saved binding after the service is recreated over the same store', async () => {
     const originalStore = createCreativeStudioStore({ rootDir });
     await originalStore.saveConnection({
@@ -2697,6 +2740,7 @@ describe('CreativeStudioService', () => {
         minDurationSeconds: 2,
         maxDurationSeconds: 20,
         supportsFirstFrame: true,
+        maxConditioningImages: 0,
         cancellationPolicy: 'queued_and_running',
         rawProviderField: STUDIO_E2E_BOUNDARY_SENTINELS,
       },
@@ -2748,6 +2792,7 @@ describe('CreativeStudioService', () => {
         minDurationSeconds: 2,
         maxDurationSeconds: 20,
         supportsFirstFrame: true,
+        maxConditioningImages: 0,
       },
     });
     expect(saved.capabilities).not.toHaveProperty('cancellation');
@@ -4154,6 +4199,28 @@ describe('CreativeStudioService', () => {
       };
     };
 
+    it('changes the renderer catalog version when image conditioning capacity changes', async () => {
+      const zero = routeOption('image', {
+        constraints: { ...routeOption('image').constraints, maxConditioningImages: 0 },
+      });
+      const six = routeOption('image', {
+        constraints: { ...routeOption('image').constraints, maxConditioningImages: 6 },
+      });
+      const harness = await createCatalogHarness({ routes: [zero] });
+
+      const first = await harness.service.listRoutes({ projectId: harness.project.id });
+      harness.listGenerationRoutes.mockResolvedValue({
+        routes: [six],
+        diagnostics: [],
+        generationCatalogVersion: 'generation-v2',
+      });
+      const changed = await harness.service.listRoutes({ projectId: harness.project.id });
+
+      expect(first.image.options[0]?.constraints).toHaveProperty('maxConditioningImages', 0);
+      expect(changed.image.options[0]?.constraints).toHaveProperty('maxConditioningImages', 6);
+      expect(changed.catalogVersion).not.toBe(first.catalogVersion);
+    });
+
     const makeCanonicalJob = (project: StudioProject, status: StudioJob['status'], id = 'job_1'): StudioJob => ({
       id,
       projectId: project.id,
@@ -5552,6 +5619,7 @@ describe('Studio MCP server', () => {
       minDurationSeconds: expect.any(Number),
       maxDurationSeconds: expect.any(Number),
       supportsFirstFrame: expect.any(Boolean),
+      maxConditioningImages: 0,
     });
     expect(await readFile(projectFile)).toEqual(before);
   });

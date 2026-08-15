@@ -13,7 +13,11 @@ import {
   type ImageGenParams,
   type ImageGenResult,
 } from '@/common/chat/imageGenCore';
-import { isImageGenSupported, isImagesApiModel } from '@/common/utils/imageModelAllowlist';
+import {
+  getImageModelMaxConditioningImages,
+  isImageGenSupported,
+  isImagesApiModel,
+} from '@/common/utils/imageModelAllowlist';
 import {
   createNodeRemoteMediaRequest,
   downloadRemoteMedia,
@@ -110,7 +114,12 @@ export const createImageGenerationAdapter = (deps: ImageGenerationAdapterDeps): 
       _signal: AbortSignal
     ): Promise<StudioConnectionValidation> {
       if (!provider.api_key.trim()) return { ok: false, error: { code: 'auth' } };
-      return isImageGenSupported(provider, input.model) ? { ok: true } : { ok: false, error: { code: 'unsupported' } };
+      return isImageGenSupported(provider, input.model)
+        ? {
+            ok: true,
+            capabilities: { maxConditioningImages: getImageModelMaxConditioningImages(provider, input.model) },
+          }
+        : { ok: false, error: { code: 'unsupported' } };
     },
 
     validateRequest: validRequest,

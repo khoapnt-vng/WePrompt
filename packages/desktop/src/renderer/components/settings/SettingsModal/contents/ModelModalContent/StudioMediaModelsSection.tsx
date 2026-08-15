@@ -47,6 +47,12 @@ const sanitizeCapabilities = (
   ...(capabilities.minDurationSeconds === undefined ? {} : { minDurationSeconds: capabilities.minDurationSeconds }),
   ...(capabilities.maxDurationSeconds === undefined ? {} : { maxDurationSeconds: capabilities.maxDurationSeconds }),
   ...(capabilities.supportsFirstFrame === undefined ? {} : { supportsFirstFrame: capabilities.supportsFirstFrame }),
+  ...(Number.isInteger(capabilities.maxConditioningImages) &&
+  capabilities.maxConditioningImages !== undefined &&
+  capabilities.maxConditioningImages >= 0 &&
+  capabilities.maxConditioningImages <= 6
+    ? { maxConditioningImages: capabilities.maxConditioningImages }
+    : {}),
 });
 
 const sanitizeCandidate = (candidate: StudioConnectionCandidate): SafeCandidate => ({

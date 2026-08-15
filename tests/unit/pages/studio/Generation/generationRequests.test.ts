@@ -34,6 +34,7 @@ const route = (kind: 'image' | 'video', overrides: Partial<StudioRouteCatalogEnt
     minDurationSeconds: 1,
     maxDurationSeconds: 60,
     supportsFirstFrame: true,
+    maxConditioningImages: 0,
     silentOutput: true,
   },
   ...overrides,
@@ -151,6 +152,7 @@ describe('generation review requests', () => {
 
   it('snapshots each persisted role against its own catalog and copies renderer-safe route metadata', () => {
     const source = catalog();
+    source.image.options[0]!.constraints.maxConditioningImages = 6;
     const request = buildBatchGenerationReviewRequest({ project: project(), catalog: source, candidateSceneIds: [] });
 
     expect(request.routes).toEqual({
@@ -179,6 +181,8 @@ describe('generation review requests', () => {
     ]);
     expect(request.availableRoutes[0]).not.toBe(source.image.options[0]);
     expect(request.availableRoutes[0]!.constraints).not.toBe(source.image.options[0]!.constraints);
+    expect(request.availableRoutes[0]!.constraints).toHaveProperty('maxConditioningImages', 6);
+    expect(request.availableRoutes[1]!.constraints).toHaveProperty('maxConditioningImages', 0);
   });
 
   it.each([

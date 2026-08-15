@@ -343,6 +343,7 @@ describe('OpenRouter video generation adapter', () => {
         minDurationSeconds: spec.minDuration,
         maxDurationSeconds: spec.maxDuration,
         supportsFirstFrame: true,
+        maxConditioningImages: 0,
         cancellationPolicy: 'none',
       },
     });

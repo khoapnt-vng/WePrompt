@@ -492,6 +492,7 @@ export type StudioConnectionCapabilities = {
   minDurationSeconds?: number;
   maxDurationSeconds?: number;
   supportsFirstFrame?: boolean;
+  maxConditioningImages?: number;
   cancellationPolicy?: StudioCancellationPolicy;
   /** Legacy schema-v1 ingress only. Canonical reads and new writes omit it. */
   cancellation?: boolean;
@@ -503,6 +504,7 @@ export type StudioRouteConstraints = {
   minDurationSeconds: number;
   maxDurationSeconds: number;
   supportsFirstFrame: boolean;
+  maxConditioningImages: number;
   silentOutput: boolean;
 };
 

@@ -289,6 +289,7 @@ export const createBytePlusSeedanceAdapter = (deps: BytePlusSeedanceAdapterDeps 
             minDurationSeconds: spec.minDuration,
             maxDurationSeconds: spec.maxDuration,
             supportsFirstFrame: true,
+            maxConditioningImages: 0,
             cancellationPolicy: 'queued_only',
           },
         };

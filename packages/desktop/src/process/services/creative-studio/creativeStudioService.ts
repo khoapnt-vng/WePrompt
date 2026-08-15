@@ -417,7 +417,13 @@ const sanitizedCapabilities = (
   capabilities: Record<string, unknown> | undefined
 ): StudioConnectionBinding['capabilities'] => {
   if (adapterId === 'weprompt-image-v1') {
-    return { mediaKinds: ['image'], supportsFirstFrame: !isImagesApiModel(model), cancellationPolicy: 'none' };
+    const maximum = capabilities?.maxConditioningImages;
+    return {
+      mediaKinds: ['image'],
+      supportsFirstFrame: !isImagesApiModel(model),
+      maxConditioningImages: !isImagesApiModel(model) && isIntegerInRange(maximum, 0, 6) ? maximum : 0,
+      cancellationPolicy: 'none',
+    };
   }
   if (adapterId === 'byteplus-seedance-v1') {
     const constraints =
@@ -445,6 +451,7 @@ const sanitizedCapabilities = (
       mediaKinds: ['video'],
       audioModes: ['none'],
       supportsFirstFrame: true,
+      maxConditioningImages: 0,
       cancellationPolicy: 'queued_only',
       ...constraints,
     };
@@ -471,6 +478,7 @@ const sanitizedCapabilities = (
     ...(isIntegerInRange(minimum, 1, 60) ? { minDurationSeconds: minimum } : {}),
     ...(isIntegerInRange(maximum, 1, 60) ? { maxDurationSeconds: maximum } : {}),
     supportsFirstFrame: capabilities?.supportsFirstFrame === true,
+    maxConditioningImages: 0,
     cancellationPolicy:
       capabilities?.cancellationPolicy === 'queued_only' || capabilities?.cancellationPolicy === 'queued_and_running'
         ? capabilities.cancellationPolicy
@@ -1041,6 +1049,7 @@ const toRendererRoute = (route: StudioGenerationRoute): StudioRouteCatalogEntry 
       minDurationSeconds: route.constraints.minDurationSeconds,
       maxDurationSeconds: route.constraints.maxDurationSeconds,
       supportsFirstFrame: route.constraints.supportsFirstFrame,
+      maxConditioningImages: route.constraints.maxConditioningImages,
       silentOutput: route.constraints.silentOutput,
     },
   };

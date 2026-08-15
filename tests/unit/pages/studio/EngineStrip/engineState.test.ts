@@ -52,6 +52,7 @@ const route = (kind: 'image' | 'video', overrides: Partial<StudioRouteCatalogEnt
     minDurationSeconds: 4,
     maxDurationSeconds: 12,
     supportsFirstFrame: true,
+    maxConditioningImages: kind === 'image' ? 6 : 0,
     silentOutput: true,
   },
   ...overrides,
@@ -120,7 +121,13 @@ describe('Engine Strip state', () => {
       project({ routing: { storyboard: null, image: null, video: selected } })
     );
 
-    expect(video).toMatchObject({ state: 'ready', action: 'menu', selectedRoute: selected });
+    expect(video).toMatchObject({
+      state: 'ready',
+      action: 'menu',
+      selectedRoute: selected,
+      supportsFirstFrame: true,
+      maxConditioningImages: 0,
+    });
   });
 
   it('keeps a retired persisted model name and offers its surviving replacements', () => {
@@ -212,6 +219,25 @@ describe('Engine Strip state', () => {
     );
 
     expect(video).toMatchObject({ state: 'ready', supportsFirstFrame: false });
+  });
+
+  it('exposes conditioning capacity independently from first-frame support', () => {
+    const selected = route('image', {
+      constraints: { ...route('image').constraints, supportsFirstFrame: false, maxConditioningImages: 6 },
+    });
+    const [image] = getProjectEngineSlots(
+      catalog({
+        image: media({
+          status: 'ready',
+          selected: { choiceId: selected.choiceId, providerId: selected.providerId, model: selected.model },
+          selectedRoute: selected,
+          options: [selected],
+        }),
+      }),
+      project({ routing: { storyboard: null, image: selected, video: null } })
+    );
+
+    expect(image).toMatchObject({ state: 'ready', supportsFirstFrame: false, maxConditioningImages: 6 });
   });
 
   it('intersects fallback video bounds and never substitutes storage bounds when no option exists', () => {

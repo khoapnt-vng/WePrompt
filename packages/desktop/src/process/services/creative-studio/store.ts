@@ -163,6 +163,7 @@ const CONNECTION_CAPABILITY_KEYS = new Set([
   'minDurationSeconds',
   'maxDurationSeconds',
   'supportsFirstFrame',
+  'maxConditioningImages',
   'cancellationPolicy',
 ]);
 const FORBIDDEN_CONNECTION_KEY_FRAGMENTS = [
@@ -600,6 +601,7 @@ const validateConnectionBinding = (value: unknown): value is StudioConnectionBin
     optionalAspectRatios &&
     optionalResolutions &&
     (capabilities.supportsFirstFrame === undefined || typeof capabilities.supportsFirstFrame === 'boolean') &&
+    (capabilities.maxConditioningImages === undefined || isIntegerInRange(capabilities.maxConditioningImages, 0, 6)) &&
     isString(capabilities.cancellationPolicy) &&
     CANCELLATION_POLICIES.has(capabilities.cancellationPolicy as StudioCancellationPolicy) &&
     (capabilities.minDurationSeconds === undefined || isIntegerInRange(capabilities.minDurationSeconds, 1, 60)) &&

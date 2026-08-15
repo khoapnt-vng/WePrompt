@@ -2867,6 +2867,61 @@ describe('creative studio renderer DTO contract', () => {
 });
 
 describe('CreativeStudioStore connections', () => {
+  it('preserves an absent legacy conditioning capacity without writing a default', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'creative-studio-connections-capacity-legacy-'));
+    const connectionStore = createCreativeStudioStore({ rootDir: root });
+    try {
+      writeFileSync(
+        path.join(root, 'connections.json'),
+        JSON.stringify({ schemaVersion: 1, connections: [validConnectionBinding()] })
+      );
+
+      const [loaded] = await connectionStore.listConnections();
+
+      expect(loaded?.capabilities).not.toHaveProperty('maxConditioningImages');
+      expect(readFileSync(path.join(root, 'connections.json'), 'utf8')).not.toContain('maxConditioningImages');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([0, 6])('persists admitted conditioning capacity %i exactly', async (maxConditioningImages) => {
+    const root = mkdtempSync(path.join(tmpdir(), 'creative-studio-connections-capacity-valid-'));
+    const connectionStore = createCreativeStudioStore({ rootDir: root });
+    try {
+      const saved = await connectionStore.saveConnection({
+        ...validConnectionBinding(),
+        capabilities: { ...validConnectionBinding().capabilities, maxConditioningImages },
+      });
+
+      expect(saved.capabilities).toHaveProperty('maxConditioningImages', maxConditioningImages);
+      await expect(connectionStore.listConnections()).resolves.toEqual([saved]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([-1, 1.5, 7])('rejects conditioning capacity %s at connection read and write boundaries', async (value) => {
+    const root = mkdtempSync(path.join(tmpdir(), 'creative-studio-connections-capacity-invalid-'));
+    const connectionStore = createCreativeStudioStore({ rootDir: root });
+    const malformed = {
+      ...validConnectionBinding(),
+      capabilities: { ...validConnectionBinding().capabilities, maxConditioningImages: value },
+    };
+    try {
+      await expect(connectionStore.saveConnection(malformed as never)).rejects.toMatchObject({
+        code: 'invalid_payload',
+      });
+      writeFileSync(
+        path.join(root, 'connections.json'),
+        JSON.stringify({ schemaVersion: 1, connections: [malformed] })
+      );
+      await expect(connectionStore.listConnections()).rejects.toMatchObject({ code: 'storage_error' });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('persists only a secret-free validated binding in the separately atomic connection file', async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'creative-studio-connections-'));
     const connectionStore = createCreativeStudioStore({ rootDir: root });
@@ -2899,6 +2954,7 @@ describe('CreativeStudioStore connections', () => {
           minDurationSeconds: 4,
           maxDurationSeconds: 15,
           supportsFirstFrame: true,
+          maxConditioningImages: 0,
           cancellationPolicy: 'none',
         },
       });

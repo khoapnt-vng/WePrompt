@@ -103,6 +103,19 @@ describe('Creative Studio provider adapters', () => {
     );
   });
 
+  it('keeps ordinary image validation at zero even when production configuration spoofs the fake tuple', async () => {
+    const adapter = createImageGenerationAdapter({ workspaceDir: '/private/studio' });
+    const spoofed = imageProvider({
+      id: 'weprompt_studio_e2e',
+      name: 'WePrompt Studio E2E',
+      use_model: 'weprompt-e2e-image',
+    });
+
+    await expect(
+      adapter.validateConnection({ model: spoofed.use_model }, spoofed, new AbortController().signal)
+    ).resolves.toEqual({ ok: true, capabilities: { maxConditioningImages: 0 } });
+  });
+
   it('rejects an image-engine path whose extension cannot provide a declared managed MIME type', async () => {
     const adapter = createImageGenerationAdapter({
       executeImageGeneration: async () => ({
@@ -445,7 +458,7 @@ describe('Creative Studio provider adapters', () => {
       adapter.validateConnection({ model: 'seedance-1-5-pro-251215' }, provider(), new AbortController().signal)
     ).resolves.toMatchObject({
       ok: true,
-      capabilities: { cancellationPolicy: 'queued_only' },
+      capabilities: { cancellationPolicy: 'queued_only', maxConditioningImages: 0 },
     });
   });
 
@@ -724,6 +737,7 @@ describe('Creative Studio provider adapters', () => {
         minDurationSeconds: 2,
         maxDurationSeconds: 30,
         supportsFirstFrame: true,
+        maxConditioningImages: 0,
         cancellationPolicy: 'queued_and_running',
       },
     });

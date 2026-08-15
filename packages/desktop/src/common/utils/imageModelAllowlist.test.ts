@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { isImageGenSupported, isImagesApiModel } from './imageModelAllowlist';
+import { getImageModelMaxConditioningImages, isImageGenSupported, isImagesApiModel } from './imageModelAllowlist';
 
 const VNG_BASE_URL = 'https://maas-llm-aiplatform-hcm.api.vngcloud.vn/v1';
 
@@ -44,5 +44,16 @@ describe('isImageGenSupported', () => {
     expect(
       isImageGenSupported({ base_url: 'https://openrouter.ai/api/v1' }, 'google/gemini-2.5-flash-image-preview')
     ).toBe(true);
+  });
+});
+
+describe('getImageModelMaxConditioningImages', () => {
+  it.each([
+    [{ base_url: VNG_BASE_URL, platform: 'openai' }, 'openai/gpt-image-1'],
+    [{ platform: 'gemini' }, 'gemini-2.5-flash-image-preview'],
+    [{ base_url: 'https://openrouter.ai/api/v1' }, 'google/gemini-2.5-flash-image-preview'],
+    [{ platform: 'gemini', name: 'WePrompt Studio E2E' }, 'weprompt-e2e-image'],
+  ])('keeps production tuple %j / %s fail-closed at zero', (provider, model) => {
+    expect(getImageModelMaxConditioningImages(provider, model)).toBe(0);
   });
 });

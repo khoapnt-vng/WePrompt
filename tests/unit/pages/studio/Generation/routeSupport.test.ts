@@ -30,6 +30,7 @@ const route = (overrides: Partial<StudioRouteCatalogEntry> = {}): StudioRouteCat
     minDurationSeconds: 1,
     maxDurationSeconds: 60,
     supportsFirstFrame: true,
+    maxConditioningImages: 0,
     silentOutput: false,
   },
   ...overrides,
@@ -48,6 +49,19 @@ const matchingContext = {
 describe('routeSupportsScene', () => {
   it('supports an audio-capable route when every renderer compatibility constraint matches', () => {
     expect(routeSupportsScene(route(), matchingContext)).toBe(true);
+  });
+
+  it('treats first-frame support and image conditioning capacity as independent constraints', () => {
+    const firstFrameOnly = route({
+      constraints: { ...route().constraints, supportsFirstFrame: true, maxConditioningImages: 0 },
+    });
+    const conditioningOnly = route({
+      constraints: { ...route().constraints, supportsFirstFrame: false, maxConditioningImages: 6 },
+    });
+
+    expect(routeSupportsScene(firstFrameOnly, matchingContext)).toBe(true);
+    expect(routeSupportsScene(conditioningOnly, { ...matchingContext, hasReference: false })).toBe(true);
+    expect(routeSupportsScene(conditioningOnly, matchingContext)).toBe(false);
   });
 
   it.each([

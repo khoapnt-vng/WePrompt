@@ -31,6 +31,7 @@ const route = (
     minDurationSeconds,
     maxDurationSeconds,
     supportsFirstFrame: true,
+    maxConditioningImages: 0,
     silentOutput: true,
   },
 });

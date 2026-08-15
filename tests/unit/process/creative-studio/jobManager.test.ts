@@ -101,6 +101,7 @@ const catalog = (
       minDurationSeconds: 1,
       maxDurationSeconds: 60,
       supportsFirstFrame: true,
+      maxConditioningImages: 0,
       silentOutput: true,
     },
   })),

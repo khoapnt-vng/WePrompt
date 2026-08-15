@@ -344,6 +344,8 @@ describe('Creative Studio generation lifecycle integration', () => {
     const videoRoute = catalog.routes.find((candidate) => candidate.kind === 'video');
     if (!imageRoute || !videoRoute) throw new Error('Reference lifecycle routes were not resolved');
     expect(videoRoute.constraints.supportsFirstFrame).toBe(true);
+    expect(videoRoute.constraints.maxConditioningImages).toBe(0);
+    expect(imageRoute.constraints.maxConditioningImages).toBe(6);
 
     const configured = await harness.store.updateProject(harness.project.id, (current) => ({
       ...current,

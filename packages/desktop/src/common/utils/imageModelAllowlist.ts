@@ -65,3 +65,6 @@ export const isImageGenSupported = (provider: ProviderShape, modelName: string):
   if (!IMAGE_NAME_PATTERN.test(modelName) && !isImagesApiModel(modelName)) return false;
   return RULES.some((rule) => rule.match(provider));
 };
+
+/** Exact production admission point; stays fail-closed until a tuple passes the paid Task 8.5 evidence gate. */
+export const getImageModelMaxConditioningImages = (_provider: ProviderShape, _modelName: string): number => 0;
