@@ -11,6 +11,7 @@ import type {
   StudioCut,
   StudioCutClip,
   StudioDismissReferenceRequestsRequest,
+  StudioDetachBriefReferenceRequest,
   StudioEditableCut,
   StudioEditableCutClip,
   StudioEditableScene,
@@ -34,6 +35,7 @@ import type {
   StudioReorderScenesRequest,
   StudioDeleteProjectRequest,
   StudioAsset,
+  StudioBriefReferenceRole,
   StudioConnectionBinding,
   StudioConnectionCandidate,
   StudioConnectionInventory,
@@ -191,9 +193,11 @@ export type CreativeStudioService = {
   importReferenceFromPath(input: {
     projectId: string;
     sceneId?: string;
+    briefReferenceRole?: StudioBriefReferenceRole;
     expectedRevision: number;
     sourcePath: string;
-  }): Promise<StudioAsset>;
+  }): Promise<{ asset: StudioAsset; project: StudioRendererProject }>;
+  detachBriefReference(input: StudioDetachBriefReferenceRequest): Promise<StudioRendererProject>;
   exportAssetsToDirectory(input: {
     projectId: string;
     destinationDirectory: string;
@@ -225,9 +229,12 @@ export type CreativeStudioServiceDeps = {
     importReferenceFromPath(input: {
       projectId: string;
       sceneId?: string;
+      briefReferenceRole?: StudioBriefReferenceRole;
       expectedRevision: number;
       sourcePath: string;
-    }): Promise<StudioAsset>;
+      returnProject: true;
+    }): Promise<{ asset: StudioAsset; project: StudioProject }>;
+    detachBriefReference(input: StudioDetachBriefReferenceRequest): Promise<StudioProject>;
     exportAssetsToDirectory(input: {
       projectId: string;
       destinationDirectory: string;
@@ -2228,16 +2235,34 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
       return toRendererJob(await deps.jobManager.retryDownload(input));
     },
 
-    async importReferenceFromPath(input): Promise<StudioAsset> {
+    async importReferenceFromPath(input): Promise<{ asset: StudioAsset; project: StudioRendererProject }> {
       assertSafeId(input.projectId, 'project id');
       assertExpectedRevision(input.expectedRevision);
       if (input.sceneId !== undefined) assertSafeId(input.sceneId, 'scene id');
+      if (
+        (input.briefReferenceRole !== undefined &&
+          input.briefReferenceRole !== 'cast' &&
+          input.briefReferenceRole !== 'look') ||
+        (input.sceneId !== undefined && input.briefReferenceRole !== undefined)
+      ) {
+        throw invalid('Invalid Studio Brief reference classification');
+      }
       if (typeof input.sourcePath !== 'string' || input.sourcePath.length === 0)
         throw invalid('Invalid Studio source path');
       if (!deps.mediaStore) throw new CreativeStudioStoreError('storage_error', 'Studio media storage is unavailable');
-      const asset = await deps.mediaStore.importReferenceFromPath(input);
+      const imported = await deps.mediaStore.importReferenceFromPath({ ...input, returnProject: true });
       deps.onProjectUpdated(input.projectId);
-      return asset;
+      return { asset: toRendererAsset(imported.asset), project: toRendererProject(imported.project) };
+    },
+
+    async detachBriefReference(input: StudioDetachBriefReferenceRequest): Promise<StudioRendererProject> {
+      assertSafeId(input.projectId, 'project id');
+      assertSafeId(input.assetId, 'asset id');
+      assertExpectedRevision(input.expectedRevision);
+      if (!deps.mediaStore) throw new CreativeStudioStoreError('storage_error', 'Studio media storage is unavailable');
+      const project = await deps.mediaStore.detachBriefReference(input);
+      deps.onProjectUpdated(input.projectId);
+      return toRendererProject(project);
     },
 
     async exportAssetsToDirectory(input) {

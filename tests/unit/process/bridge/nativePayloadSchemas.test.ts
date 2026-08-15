@@ -314,7 +314,12 @@ const VALID_PAYLOADS = {
   },
   'creative-studio.choose-and-import-reference': {
     projectId: 'project_1',
-    sceneId: 'scene_1',
+    briefReferenceRole: 'cast',
+    expectedRevision: 1,
+  },
+  'creative-studio.detach-brief-reference': {
+    projectId: 'project_1',
+    assetId: 'asset_1',
     expectedRevision: 1,
   },
   'creative-studio.choose-and-export-assets': { projectId: 'project_1', includeReferences: true },
@@ -991,6 +996,16 @@ const INVALID_PAYLOADS = [
   ['creative-studio.choose-and-import-reference', 'missing expected revision', { projectId: 'project_1' }],
   [
     'creative-studio.choose-and-import-reference',
+    'invalid Brief reference role',
+    { projectId: 'project_1', briefReferenceRole: 'subject', expectedRevision: 1 },
+  ],
+  [
+    'creative-studio.choose-and-import-reference',
+    'Brief role combined with a scene',
+    { projectId: 'project_1', sceneId: 'scene_1', briefReferenceRole: 'look', expectedRevision: 1 },
+  ],
+  [
+    'creative-studio.choose-and-import-reference',
     'attempted source path',
     { projectId: 'project_1', expectedRevision: 1, sourcePath: '/tmp/reference.png' },
   ],
@@ -998,6 +1013,21 @@ const INVALID_PAYLOADS = [
     'creative-studio.choose-and-import-reference',
     'scene traversal',
     { projectId: 'project_1', sceneId: '../scene_1', expectedRevision: 1 },
+  ],
+  [
+    'creative-studio.detach-brief-reference',
+    'missing expected revision',
+    { projectId: 'project_1', assetId: 'asset_1' },
+  ],
+  [
+    'creative-studio.detach-brief-reference',
+    'asset traversal',
+    { projectId: 'project_1', assetId: '../asset_1', expectedRevision: 1 },
+  ],
+  [
+    'creative-studio.detach-brief-reference',
+    'project traversal',
+    { projectId: '../project_1', assetId: 'asset_1', expectedRevision: 1 },
   ],
   [
     'creative-studio.choose-and-export-assets',
@@ -1857,6 +1887,16 @@ describe('native bridge payload schemas', () => {
 
   it.each(NATIVE_BRIDGE_PROVIDER_KEYS)('accepts the current payload shape for %s', (providerKey) => {
     expect(() => parseNativeBridgePayload(providerKey, VALID_PAYLOADS[providerKey])).not.toThrow();
+  });
+
+  it.each(['cast', 'look'] as const)('accepts %s as a classified Brief-reference import role', (role) => {
+    expect(
+      parseNativeBridgePayload('creative-studio.choose-and-import-reference' as NativeBridgeProviderKey, {
+        projectId: 'project_1',
+        briefReferenceRole: role,
+        expectedRevision: 1,
+      })
+    ).toEqual({ projectId: 'project_1', briefReferenceRole: role, expectedRevision: 1 });
   });
 
   it.each(VOID_PROVIDER_KEYS)('rejects a supplied payload for void provider %s', (providerKey) => {

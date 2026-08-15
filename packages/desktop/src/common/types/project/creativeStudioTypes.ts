@@ -810,6 +810,12 @@ export type StudioFitStoryboardOutcome =
 
 export type StudioChooseAndImportReferenceRequest = StudioProjectRequest & {
   sceneId?: string;
+  briefReferenceRole?: StudioBriefReferenceRole;
+  expectedRevision: number;
+};
+
+export type StudioDetachBriefReferenceRequest = StudioProjectRequest & {
+  assetId: string;
   expectedRevision: number;
 };
 
@@ -829,7 +835,9 @@ export type StudioSaveConnectionRequest = StudioValidateConnectionRequest;
 
 export type StudioRemoveConnectionRequest = { bindingId: string };
 
-export type StudioImportOutcome = { status: 'imported'; asset: StudioAsset } | { status: 'cancelled' };
+export type StudioImportOutcome =
+  | { status: 'imported'; asset: StudioAsset; project: StudioRendererProject }
+  | { status: 'cancelled' };
 
 export type StudioExportItem = { assetId: string; fileName: string };
 
@@ -857,6 +865,7 @@ export type StudioDesktopApi = {
   chooseAndImportReference(
     input: StudioChooseAndImportReferenceRequest
   ): Promise<StudioCommandResult<StudioImportOutcome>>;
+  detachBriefReference(input: StudioDetachBriefReferenceRequest): Promise<StudioCommandResult<StudioRendererProject>>;
   selectVariation(input: StudioSelectVariationRequest): Promise<StudioCommandResult<StudioRendererProject>>;
   submitScenes(input: StudioSubmitScenesRequest): Promise<StudioCommandResult<StudioRendererJob[]>>;
   fitStoryboard(input: StudioFitStoryboardRequest): Promise<StudioCommandResult<StudioFitStoryboardOutcome>>;

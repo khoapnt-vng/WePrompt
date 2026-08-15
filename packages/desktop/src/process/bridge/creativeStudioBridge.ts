@@ -374,11 +374,14 @@ export function initCreativeStudioBridge(dependencies: CreativeStudioBridgeDepen
       const parentWindow = (dependencies.getParentWindow ?? defaultDependencies.getParentWindow!)();
       const picked = await (dependencies.showOpenDialog ?? defaultDependencies.showOpenDialog!)(parentWindow);
       if (picked.canceled || !picked.filePaths[0]) return { status: 'cancelled' as const };
-      return {
-        status: 'imported' as const,
-        asset: await dependencies.getService().importReferenceFromPath({ ...input, sourcePath: picked.filePaths[0] }),
-      };
+      const imported = await dependencies
+        .getService()
+        .importReferenceFromPath({ ...input, sourcePath: picked.filePaths[0] });
+      return { status: 'imported' as const, ...imported };
     })
+  );
+  ipcBridge.creativeStudio.detachBriefReference.provider((input) =>
+    runCommand(() => dependencies.getService().detachBriefReference(input))
   );
   ipcBridge.creativeStudio.chooseAndExportAssets.provider((input) =>
     runCommand(async () => {

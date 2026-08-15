@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => ({
   selectAssetProvider: vi.fn(),
   persistCapturedPosterProvider: vi.fn(),
   chooseAndImportReferenceProvider: vi.fn(),
+  detachBriefReferenceProvider: vi.fn(),
   chooseAndExportAssetsProvider: vi.fn(),
   getLatestRenderProvider: vi.fn(),
   renderCutProvider: vi.fn(),
@@ -80,6 +81,7 @@ vi.mock('@/common', () => ({
       selectAsset: { provider: mocks.selectAssetProvider },
       persistCapturedPoster: { provider: mocks.persistCapturedPosterProvider },
       chooseAndImportReference: { provider: mocks.chooseAndImportReferenceProvider },
+      detachBriefReference: { provider: mocks.detachBriefReferenceProvider },
       chooseAndExportAssets: { provider: mocks.chooseAndExportAssetsProvider },
       getLatestRender: { provider: mocks.getLatestRenderProvider },
       renderCut: { provider: mocks.renderCutProvider },
@@ -173,6 +175,7 @@ describe('initCreativeStudioBridge', () => {
         selectAsset: vi.fn(async () => project),
         persistCapturedPoster: vi.fn(),
         importReferenceFromPath: vi.fn(),
+        detachBriefReference: vi.fn(async () => project),
         exportAssetsToDirectory: vi.fn(),
         getLatestRender: vi.fn(async () => null),
         submitScenes: vi.fn(async () => []),
@@ -221,6 +224,7 @@ describe('initCreativeStudioBridge', () => {
     expect(mocks.selectAssetProvider).toHaveBeenCalledOnce();
     expect(mocks.persistCapturedPosterProvider).toHaveBeenCalledOnce();
     expect(mocks.chooseAndImportReferenceProvider).toHaveBeenCalledOnce();
+    expect(mocks.detachBriefReferenceProvider).toHaveBeenCalledOnce();
     expect(mocks.chooseAndExportAssetsProvider).toHaveBeenCalledOnce();
     expect(mocks.getLatestRenderProvider).toHaveBeenCalledOnce();
     expect(mocks.renderCutProvider).toHaveBeenCalledOnce();
@@ -614,10 +618,9 @@ describe('initCreativeStudioBridge', () => {
     const importHandler = mocks.chooseAndImportReferenceProvider.mock.calls[0]?.[0] as ProviderHandler;
     const exportHandler = mocks.chooseAndExportAssetsProvider.mock.calls[0]?.[0] as ProviderHandler;
 
-    await expect(importHandler({ projectId: 'project_1', expectedRevision: 1, sceneId: 'scene_1' })).resolves.toEqual({
-      ok: true,
-      data: { status: 'cancelled' },
-    });
+    await expect(
+      importHandler({ projectId: 'project_1', expectedRevision: 1, briefReferenceRole: 'cast' })
+    ).resolves.toEqual({ ok: true, data: { status: 'cancelled' } });
     await expect(exportHandler({ projectId: 'project_1', includeReferences: true })).resolves.toEqual({
       ok: true,
       data: { status: 'cancelled' },
@@ -642,7 +645,7 @@ describe('initCreativeStudioBridge', () => {
     };
     const service = {
       ...dependencies.getService(),
-      importReferenceFromPath: vi.fn(async () => asset),
+      importReferenceFromPath: vi.fn(async () => ({ asset, project })),
       exportAssetsToDirectory: vi.fn(async () => ({
         folderName: 'Film-20260730-120000',
         exported: [{ assetId: 'asset_1', fileName: 'scene-01.png' }],
@@ -658,12 +661,17 @@ describe('initCreativeStudioBridge', () => {
     const importHandler = mocks.chooseAndImportReferenceProvider.mock.calls[0]?.[0] as ProviderHandler;
     const exportHandler = mocks.chooseAndExportAssetsProvider.mock.calls[0]?.[0] as ProviderHandler;
 
-    const imported = await importHandler({ projectId: 'project_1', expectedRevision: 1 });
+    const imported = await importHandler({
+      projectId: 'project_1',
+      expectedRevision: 1,
+      briefReferenceRole: 'look',
+    });
     const exported = await exportHandler({ projectId: 'project_1', includeReferences: false });
 
     expect(service.importReferenceFromPath).toHaveBeenCalledWith({
       projectId: 'project_1',
       expectedRevision: 1,
+      briefReferenceRole: 'look',
       sourcePath: importPath,
     });
     expect(service.exportAssetsToDirectory).toHaveBeenCalledWith({
@@ -671,7 +679,7 @@ describe('initCreativeStudioBridge', () => {
       includeReferences: false,
       destinationDirectory: exportPath,
     });
-    expect(imported).toEqual({ ok: true, data: { status: 'imported', asset } });
+    expect(imported).toEqual({ ok: true, data: { status: 'imported', asset, project } });
     expect(exported).toEqual({
       ok: true,
       data: {
@@ -682,6 +690,16 @@ describe('initCreativeStudioBridge', () => {
       },
     });
     expect(JSON.stringify({ imported, exported })).not.toContain('/private/user');
+  });
+
+  it('forwards detach exactly once and returns the canonical project from the successful mutation', async () => {
+    const service = dependencies.getService();
+    initCreativeStudioBridge({ getService: () => service });
+    const handler = mocks.detachBriefReferenceProvider.mock.calls[0]?.[0] as ProviderHandler;
+    const input = { projectId: 'project_1', assetId: 'asset_1', expectedRevision: 1 };
+
+    await expect(handler(input)).resolves.toEqual({ ok: true, data: project });
+    expect(service.detachBriefReference).toHaveBeenCalledExactlyOnceWith(input);
   });
 
   it.each([

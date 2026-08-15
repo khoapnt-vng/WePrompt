@@ -1147,6 +1147,129 @@ describe('CreativeStudioService', () => {
     expect(getLatestProjectOutput).toHaveBeenCalledExactlyOnceWith('project_1');
   });
 
+  it('forwards one classified import and returns its asset with the canonical successful project revision', async () => {
+    const created = await service.createProject(makeInput());
+    onProjectUpdated.mockClear();
+    const canonical = await store.getProject(created.id);
+    if (canonical === null) throw new Error('project fixture missing');
+    const asset: StudioAsset = {
+      id: 'asset_cast',
+      projectId: created.id,
+      sceneId: null,
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'imports', fileName: 'asset_cast.png' },
+      byteSize: 33,
+      sha256: 'a'.repeat(64),
+      briefReferenceRole: 'cast',
+      briefReferenceLabel: 'Lead Hero',
+      createdAt: '2026-08-15T01:02:03.000Z',
+    };
+    const importedProject = structuredClone(canonical);
+    importedProject.revision += 1;
+    importedProject.assets[asset.id] = asset;
+    const importReferenceFromPath = vi.fn(async () => ({ asset, project: importedProject }));
+    const importService = createCreativeStudioService({
+      store,
+      onProjectUpdated,
+      storyboardPlanner: makePlanner(),
+      mediaStore: {
+        importReferenceFromPath,
+        detachBriefReference: vi.fn(),
+        exportAssetsToDirectory: vi.fn(),
+        getLatestProjectOutput: vi.fn(async () => null),
+      },
+    });
+
+    await expect(
+      importService.importReferenceFromPath({
+        projectId: created.id,
+        expectedRevision: created.revision,
+        briefReferenceRole: 'cast',
+        sourcePath: '/private/Lead Hero.png',
+      })
+    ).resolves.toMatchObject({
+      asset,
+      project: { id: created.id, revision: importedProject.revision, assets: { asset_cast: asset } },
+    });
+    expect(importReferenceFromPath).toHaveBeenCalledExactlyOnceWith({
+      projectId: created.id,
+      expectedRevision: created.revision,
+      briefReferenceRole: 'cast',
+      sourcePath: '/private/Lead Hero.png',
+      returnProject: true,
+    });
+    expect(onProjectUpdated).toHaveBeenCalledExactlyOnceWith(created.id);
+  });
+
+  it('forwards detach once and returns the canonical successful renderer project revision', async () => {
+    const created = await service.createProject(makeInput());
+    onProjectUpdated.mockClear();
+    const canonical = await store.getProject(created.id);
+    if (canonical === null) throw new Error('project fixture missing');
+    const detachedProject = { ...canonical, revision: canonical.revision + 1 };
+    const detachBriefReference = vi.fn(async () => detachedProject);
+    const detachService = createCreativeStudioService({
+      store,
+      onProjectUpdated,
+      storyboardPlanner: makePlanner(),
+      mediaStore: {
+        importReferenceFromPath: vi.fn(),
+        detachBriefReference,
+        exportAssetsToDirectory: vi.fn(),
+        getLatestProjectOutput: vi.fn(async () => null),
+      },
+    });
+    const input = { projectId: created.id, assetId: 'asset_cast', expectedRevision: created.revision };
+
+    await expect(detachService.detachBriefReference(input)).resolves.toMatchObject({
+      id: created.id,
+      revision: detachedProject.revision,
+    });
+    expect(detachBriefReference).toHaveBeenCalledExactlyOnceWith(input);
+    expect(onProjectUpdated).toHaveBeenCalledExactlyOnceWith(created.id);
+  });
+
+  it.each([
+    [
+      'role combined with scene',
+      {
+        projectId: 'project_1',
+        expectedRevision: 1,
+        sourcePath: '/private/reference.png',
+        sceneId: 'scene_1',
+        briefReferenceRole: 'look',
+      },
+    ],
+    [
+      'invalid role',
+      {
+        projectId: 'project_1',
+        expectedRevision: 1,
+        sourcePath: '/private/reference.png',
+        briefReferenceRole: 'subject',
+      },
+    ],
+  ] as const)('rejects a classified import with %s before media mutation', async (_label, input) => {
+    const importReferenceFromPath = vi.fn();
+    const guardedService = createCreativeStudioService({
+      store,
+      onProjectUpdated,
+      storyboardPlanner: makePlanner(),
+      mediaStore: {
+        importReferenceFromPath,
+        detachBriefReference: vi.fn(),
+        exportAssetsToDirectory: vi.fn(),
+        getLatestProjectOutput: vi.fn(async () => null),
+      },
+    });
+
+    await expect(guardedService.importReferenceFromPath(input as never)).rejects.toMatchObject({
+      code: 'invalid_payload',
+    });
+    expect(importReferenceFromPath).not.toHaveBeenCalled();
+  });
+
   it('rejects a stale Brief binding revision without replacing the persisted conversation id', async () => {
     const project = await service.createProject(makeInput());
     await service.bindBriefConversation({

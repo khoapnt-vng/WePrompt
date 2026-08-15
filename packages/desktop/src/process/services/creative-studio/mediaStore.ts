@@ -10,8 +10,18 @@ import path from 'node:path';
 import { PassThrough, Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { jobOutputRole } from '@/common/types/project/creativeStudioOutputRole';
-import type { StudioAsset, StudioProject } from '@/common/types/project/creativeStudioTypes';
-import { STUDIO_MANAGED_ASSET_COLLECTIONS } from '@/common/types/project/creativeStudioManagedAssetCollections';
+import type {
+  StudioAsset,
+  StudioBriefReferenceRole,
+  StudioDetachBriefReferenceRequest,
+  StudioProject,
+} from '@/common/types/project/creativeStudioTypes';
+import {
+  allocateStudioBriefReferenceLabel,
+  resolveActiveStudioBriefReferences,
+  STUDIO_MANAGED_ASSET_COLLECTIONS,
+  STUDIO_MAX_ACTIVE_BRIEF_REFERENCES,
+} from '@/common/types/project/creativeStudioManagedAssetCollections';
 import { CreativeStudioStoreError, reconcilePersistedStudioCuts, type CreativeStudioStore } from './store';
 import { downloadRemoteMedia, type RemoteMediaDownloadDeps } from '../remote-media/remoteMediaDownloader';
 
@@ -83,8 +93,12 @@ export type InternalImportReferenceInput = {
   projectId: string;
   sourcePath: string;
   sceneId?: string;
+  briefReferenceRole?: StudioBriefReferenceRole;
   expectedRevision: number;
+  returnProject?: boolean;
 };
+
+export type StudioMediaImportResult = { asset: StudioAsset; project: StudioProject };
 
 export type InternalExportStudioAssetsInput = {
   projectId: string;
@@ -164,7 +178,11 @@ export type InternalStudioExportResult = {
 };
 
 export type StudioMediaStore = {
+  importReferenceFromPath(
+    input: InternalImportReferenceInput & { returnProject: true }
+  ): Promise<StudioMediaImportResult>;
   importReferenceFromPath(input: InternalImportReferenceInput): Promise<StudioAsset>;
+  detachBriefReference(input: StudioDetachBriefReferenceRequest): Promise<StudioProject>;
   persistProviderOutput(input: PersistProviderOutputInput): Promise<StudioAsset>;
   persistProviderOutputFromUrl(input: PersistProviderOutputUrlInput): Promise<StudioAsset>;
   persistProviderOutputForJob(input: PersistProviderJobOutputInput): Promise<StudioAsset>;
@@ -661,8 +679,21 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     };
   };
 
-  const importReferenceFromPath = async (input: InternalImportReferenceInput): Promise<StudioAsset> => {
-    if (!SAFE_ID.test(input.projectId) || (!SAFE_ID.test(input.sceneId ?? '') && input.sceneId !== undefined)) {
+  async function importReferenceFromPath(
+    input: InternalImportReferenceInput & { returnProject: true }
+  ): Promise<StudioMediaImportResult>;
+  async function importReferenceFromPath(input: InternalImportReferenceInput): Promise<StudioAsset>;
+  async function importReferenceFromPath(
+    input: InternalImportReferenceInput
+  ): Promise<StudioAsset | StudioMediaImportResult> {
+    if (
+      !SAFE_ID.test(input.projectId) ||
+      (!SAFE_ID.test(input.sceneId ?? '') && input.sceneId !== undefined) ||
+      (input.briefReferenceRole !== undefined &&
+        input.briefReferenceRole !== 'cast' &&
+        input.briefReferenceRole !== 'look') ||
+      (input.sceneId !== undefined && input.briefReferenceRole !== undefined)
+    ) {
       throw new CreativeStudioMediaError('invalid_media');
     }
     if (
@@ -687,6 +718,12 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       if (project.revision !== input.expectedRevision) throw new CreativeStudioMediaError('stale_project');
       if (input.sceneId !== undefined && !Object.hasOwn(project.scenes, input.sceneId)) {
         throw new CreativeStudioMediaError('not_found');
+      }
+      if (input.briefReferenceRole !== undefined) {
+        const activeReferences = resolveActiveStudioBriefReferences(project.assets);
+        if (activeReferences === null || activeReferences.length >= STUDIO_MAX_ACTIVE_BRIEF_REFERENCES) {
+          throw new CreativeStudioMediaError('invalid_media');
+        }
       }
       const capacity = await planWriteCapacity(project, projectDir, limits.referenceMaxBytes, sourceStats.size);
       const partsDir = await ensureManagedDirectory(projectDir, 'parts');
@@ -724,7 +761,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       finalIdentity = await finalizeManagedPart(partPath, partsDir, finalPath, importsDir);
       partPath = null;
 
-      const asset: StudioAsset = {
+      const baseAsset: StudioAsset = {
         id: assetId,
         projectId: input.projectId,
         sceneId: input.sceneId ?? null,
@@ -735,26 +772,84 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         sha256: hash.digest('hex'),
         createdAt: now(),
       };
-      await deps.store.updateProject(
+      let importedAsset: StudioAsset | null = null;
+      const updatedProject = await deps.store.updateProject(
         input.projectId,
         (current) => {
           const next = structuredClone(current);
+          const activeReferences = resolveActiveStudioBriefReferences(current.assets);
+          if (
+            input.briefReferenceRole !== undefined &&
+            (activeReferences === null || activeReferences.length >= STUDIO_MAX_ACTIVE_BRIEF_REFERENCES)
+          ) {
+            throw new CreativeStudioMediaError('invalid_media');
+          }
+          const asset: StudioAsset =
+            input.briefReferenceRole === undefined
+              ? baseAsset
+              : {
+                  ...baseAsset,
+                  briefReferenceRole: input.briefReferenceRole,
+                  briefReferenceLabel: allocateStudioBriefReferenceLabel(
+                    path.basename(input.sourcePath),
+                    activeReferences!.map((reference) => reference.briefReferenceLabel!)
+                  ),
+                };
           next.assets[asset.id] = asset;
           if (asset.sceneId !== null) {
             const scene = next.scenes[asset.sceneId];
             scene.assetIds.push(asset.id);
             scene.referenceAssetId = asset.id;
           }
+          importedAsset = asset;
           return next;
         },
         input.expectedRevision
       );
-      return asset;
+      if (importedAsset === null) throw new CreativeStudioMediaError('storage_error');
+      return input.returnProject ? { asset: importedAsset, project: updatedProject } : importedAsset;
     } catch (error) {
       if (partPath !== null) await fs.rm(partPath, { force: true }).catch((): undefined => undefined);
       if (finalPath !== null && finalIdentity !== null) {
         await unlinkIfIdentityMatches(finalPath, finalIdentity);
       }
+      return mapStoreError(error);
+    }
+  }
+
+  const detachBriefReference = async (input: StudioDetachBriefReferenceRequest): Promise<StudioProject> => {
+    if (
+      !SAFE_ID.test(input.projectId) ||
+      !SAFE_ID.test(input.assetId) ||
+      !Number.isSafeInteger(input.expectedRevision) ||
+      input.expectedRevision < 1
+    ) {
+      throw new CreativeStudioMediaError('invalid_media');
+    }
+    try {
+      return await deps.store.updateProject(
+        input.projectId,
+        (current) => {
+          const asset = current.assets[input.assetId];
+          if (asset === undefined) throw new CreativeStudioMediaError('not_found');
+          if (
+            asset.projectId !== current.id ||
+            asset.sceneId !== null ||
+            asset.mediaKind !== 'image' ||
+            asset.managedAsset.collection !== 'imports' ||
+            (asset.briefReferenceRole !== 'cast' && asset.briefReferenceRole !== 'look') ||
+            asset.briefReferenceLabel === undefined
+          ) {
+            throw new CreativeStudioMediaError('invalid_media');
+          }
+          const next = structuredClone(current);
+          delete next.assets[input.assetId].briefReferenceRole;
+          delete next.assets[input.assetId].briefReferenceLabel;
+          return next;
+        },
+        input.expectedRevision
+      );
+    } catch (error) {
       return mapStoreError(error);
     }
   };
@@ -1719,6 +1814,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
 
   return {
     importReferenceFromPath,
+    detachBriefReference,
     persistProviderOutput,
     persistProviderOutputFromUrl,
     persistProviderOutputForJob,

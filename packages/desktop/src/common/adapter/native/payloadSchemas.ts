@@ -815,6 +815,15 @@ export const nativeBridgePayloadSchemas = {
     .object({
       projectId: safeIdSchema,
       sceneId: safeIdSchema.optional(),
+      briefReferenceRole: z.enum(['cast', 'look']).optional(),
+      expectedRevision: studioExpectedRevisionSchema,
+    })
+    .strict()
+    .refine((input) => input.sceneId === undefined || input.briefReferenceRole === undefined),
+  'creative-studio.detach-brief-reference': z
+    .object({
+      projectId: safeIdSchema,
+      assetId: safeIdSchema,
       expectedRevision: studioExpectedRevisionSchema,
     })
     .strict(),

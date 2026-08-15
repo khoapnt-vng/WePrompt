@@ -108,6 +108,7 @@ import type {
   StudioCommandResult,
   StudioChooseAndExportAssetsRequest,
   StudioChooseAndImportReferenceRequest,
+  StudioDetachBriefReferenceRequest,
   StudioDismissReferenceRequestsRequest,
   StudioDeleteProjectRequest,
   StudioProjectRequest,
@@ -1268,6 +1269,10 @@ export const creativeStudio = {
     StudioCommandResult<StudioImportOutcome>,
     StudioChooseAndImportReferenceRequest
   >('creative-studio.choose-and-import-reference'),
+  detachBriefReference: bridge.buildProvider<
+    StudioCommandResult<StudioRendererProject>,
+    StudioDetachBriefReferenceRequest
+  >('creative-studio.detach-brief-reference'),
   chooseAndExportAssets: bridge.buildProvider<
     StudioCommandResult<StudioExportOutcome>,
     StudioChooseAndExportAssetsRequest
