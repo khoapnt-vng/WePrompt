@@ -33,11 +33,27 @@ function validateReviewerDisposition(disposition, attemptNumber) {
     throw new Error(`attempt ${attemptNumber} known failure requires reviewer disposition`);
   }
   requireString(disposition.reviewer, `attempt ${attemptNumber} reviewer disposition requires reviewer`);
-  if (!['accepted_known_flake', 'product_failure', 'infrastructure_failure'].includes(disposition.decision)) {
+  if (
+    !['accepted_known_flake', 'accepted_test_fix', 'product_failure', 'infrastructure_failure'].includes(
+      disposition.decision
+    )
+  ) {
     throw new Error(`attempt ${attemptNumber} reviewer disposition has invalid decision`);
   }
   requireString(disposition.rationale, `attempt ${attemptNumber} reviewer disposition requires rationale`);
   requireString(disposition.at, `attempt ${attemptNumber} reviewer disposition requires timestamp`);
+}
+
+function validateTestFailureTriage(triage, attemptNumber) {
+  if (!triage || typeof triage !== 'object') {
+    throw new Error(`attempt ${attemptNumber} test failure requires triage evidence`);
+  }
+  requireString(triage.investigator, `attempt ${attemptNumber} test failure requires investigator`);
+  requireString(triage.rationale, `attempt ${attemptNumber} test failure requires rationale`);
+  requireString(triage.evidence, `attempt ${attemptNumber} test failure requires evidence`);
+  if (!COMMIT.test(triage.resolutionCommit ?? '')) {
+    throw new Error(`attempt ${attemptNumber} test failure requires exact resolutionCommit`);
+  }
 }
 
 function validateAttempt(attempt, index) {
@@ -87,14 +103,24 @@ function validateAttempt(attempt, index) {
     if (!SHA256.test(failure.outputDigest ?? '')) {
       throw new Error(`attempt ${expectedAttempt} failure requires output digest`);
     }
-    if (failure.classification === 'unknown' || !failure.signatureId) {
+    if (failure.classification === 'unknown') {
       throw new Error(`attempt ${expectedAttempt} contains unknown failure`);
     }
-    if (failure.classification !== 'known_pending_triage') {
-      throw new Error(`attempt ${expectedAttempt} failure has invalid classification`);
+    if (failure.classification === 'known_pending_triage') {
+      if (!failure.signatureId) throw new Error(`attempt ${expectedAttempt} known failure requires signatureId`);
+      validateDiagnostic(failure.diagnostic, expectedAttempt);
+      validateReviewerDisposition(failure.reviewerDisposition, expectedAttempt);
+      continue;
     }
-    validateDiagnostic(failure.diagnostic, expectedAttempt);
-    validateReviewerDisposition(failure.reviewerDisposition, expectedAttempt);
+    if (failure.classification === 'test_failure_pending_review') {
+      if (failure.signatureId !== null) {
+        throw new Error(`attempt ${expectedAttempt} new test failure must not claim a known signature`);
+      }
+      validateTestFailureTriage(failure.triage, expectedAttempt);
+      validateReviewerDisposition(failure.reviewerDisposition, expectedAttempt);
+      continue;
+    }
+    throw new Error(`attempt ${expectedAttempt} failure has invalid classification`);
   }
 }
 
@@ -115,6 +141,23 @@ function validateLedger(ledger) {
     if (seen.has(key))
       throw new Error(`duplicate full-suite invocation for ${attempt.commit} on ${attempt.runner.name}`);
     seen.add(key);
+  });
+  ledger.attempts.forEach((attempt, index) => {
+    for (const failure of attempt.failures) {
+      if (failure.classification !== 'test_failure_pending_review') continue;
+      const resolution = ledger.attempts.find(
+        (candidate, candidateIndex) =>
+          candidateIndex > index &&
+          candidate.commit === failure.triage.resolutionCommit &&
+          candidate.result === 'green' &&
+          candidate.exitCode === 0
+      );
+      if (!resolution) {
+        throw new Error(
+          `attempt ${attempt.attempt} test failure lacks a later green attempt for ${failure.triage.resolutionCommit}`
+        );
+      }
+    }
   });
   return ledger;
 }

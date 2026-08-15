@@ -84,6 +84,46 @@ describe('Vitest full-suite evidence ledger', () => {
     expect(() => validateLedger(ledger([red, green]))).toThrow(/attempt 1.*unknown/i);
   });
 
+  it('retains a new test-harness failure until its fix is green and independently accepted', () => {
+    const resolutionCommit = 'e'.repeat(40);
+    const triagedFailure = {
+      project: 'dom',
+      file: 'tests/unit/pages/studio/StudioPage.dom.test.tsx',
+      testName: 'keeps batch generation available and explains an unreachable advisory fit',
+      signatureId: null,
+      classification: 'test_failure_pending_review',
+      outputDigest: 'd'.repeat(64),
+      triage: {
+        investigator: 'release-engineer',
+        rationale: 'The helper clicked the correctly disabled button before the route catalog finished loading.',
+        evidence: 'The preserved DOM showed the Fit button while the invocation count remained zero.',
+        resolutionCommit,
+      },
+    };
+    const red = attempt({ exitCode: 1, result: 'red', failures: [triagedFailure] });
+    const greenResolution = attempt({
+      attempt: 2,
+      commit: resolutionCommit,
+      startedAt: '2026-08-15T10:03:00Z',
+      endedAt: '2026-08-15T10:05:00Z',
+    });
+
+    expect(() => validateLedger(ledger([red, greenResolution]))).toThrow(/reviewer disposition/i);
+
+    const reviewed = {
+      ...triagedFailure,
+      reviewerDisposition: {
+        reviewer: 'independent-reviewer',
+        decision: 'accepted_test_fix',
+        rationale: 'The synchronization fix matches the retained failure and the resolution commit is green.',
+        at: '2026-08-15T11:00:00Z',
+      },
+    };
+    expect(() =>
+      validateLedger(ledger([attempt({ exitCode: 1, result: 'red', failures: [reviewed] }), greenResolution]))
+    ).not.toThrow();
+  });
+
   it('requires a focused diagnostic and reviewer disposition for an exact known signature', () => {
     const red = attempt({ exitCode: 1, result: 'red', failures: [knownFailure()] });
     expect(() => validateLedger(ledger([red]))).toThrow(/diagnostic/i);

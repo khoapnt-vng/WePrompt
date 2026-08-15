@@ -273,7 +273,11 @@ const selectStudioPhase = async (router: StudioTestRouter, phase: StudioPhase): 
 };
 
 const fitStoryboardToGoal = async (): Promise<void> => {
-  fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.phase.write.fitToGoal' }));
+  const fitButton = await screen.findByRole('button', {
+    name: 'conversation.creativeStudio.phase.write.fitToGoal',
+  });
+  await waitFor(() => expect(fitButton).toBeEnabled());
+  fireEvent.click(fitButton);
   await waitFor(() => expect(bridge.fitStoryboard.invoke).toHaveBeenCalledTimes(1));
   await act(async () => {});
 };
