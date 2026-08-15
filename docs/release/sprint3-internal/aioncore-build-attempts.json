@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "scope": "local macOS ARM64 AionCore v0.1.55 bundle diagnostics",
+  "recordedAt": "2026-08-15T14:39:44Z",
+  "runner": {
+    "os": "macOS 15.7.3 Darwin 24.6.0",
+    "architecture": "arm64",
+    "rustc": "1.95.0 (59807616e 2026-04-14)",
+    "cargo": "1.95.0 (f2d3ce0bd 2026-03-21)",
+    "python": "3.14.3",
+    "node": "24.15.0"
+  },
+  "attempts": [
+    {
+      "attemptId": "mac-managed-001",
+      "kind": "managed-resource-export",
+      "sourceCommit": "4f356a6e91d01ac6eb7aa064510f4ed1bcc036e1",
+      "outcome": "red",
+      "exitCode": 1,
+      "failure": "acp.prepare returned ENOENT after Node export",
+      "classification": "product_defect_fixed",
+      "rootCause": "The relative default data directory produced a relative managed npm path; changing the child working directory made the executable resolve below the staging directory.",
+      "disposition": "Fixed by 4f5dea094632e6399c30c28aa6a63016d0b2d842. Partial output retained as managed-input."
+    },
+    {
+      "attemptId": "mac-managed-002",
+      "kind": "managed-resource-export",
+      "sourceCommit": "4f5dea094632e6399c30c28aa6a63016d0b2d842",
+      "outcome": "red",
+      "exitCode": 1,
+      "failure": "Codex ACP smoke test duplicated the relative staging project path",
+      "classification": "product_defect_fixed",
+      "rootCause": "The smoke process used the relative staging project as its working directory and also passed the same relative prefix in the entrypoint path.",
+      "disposition": "Fixed by ccde99f375aacfc324f82624b5970dd70eb7e211. Partial output retained as managed-input-attempt-2."
+    },
+    {
+      "attemptId": "mac-managed-003",
+      "kind": "managed-resource-export",
+      "sourceCommit": "ccde99f375aacfc324f82624b5970dd70eb7e211",
+      "outcome": "green",
+      "exitCode": 0,
+      "result": "Exported and validated Node 24.11.0, Codex ACP 1.1.2, Claude ACP 0.58.1, and managed-resources/manifest.json."
+    },
+    {
+      "attemptId": "mac-bundle-001",
+      "kind": "bundle-assembly",
+      "sourceCommit": "ccde99f375aacfc324f82624b5970dd70eb7e211",
+      "outcome": "red",
+      "exitCode": 1,
+      "failure": "Managed npm and node_modules links were rejected by the no-symlink output policy",
+      "classification": "bundle_contract_defect_fixed",
+      "rootCause": "The exported Node and npm trees legitimately contain internal relative links, while the final verifier correctly forbids links in shipped output.",
+      "disposition": "Fixed by 69d59e4c5f21ed3274d69b492088c704c60581f0. Assembly now materializes only links resolving to regular files inside the input root and rejects escaping, broken, or directory links."
+    },
+    {
+      "attemptId": "mac-bundle-002",
+      "kind": "bundle-assembly-and-verification",
+      "sourceCommit": "69d59e4c5f21ed3274d69b492088c704c60581f0",
+      "outcome": "rejected",
+      "exitCode": 0,
+      "failure": "Manifest builtAt was later than the runner audit time",
+      "classification": "evidence_metadata_error",
+      "disposition": "Payload and verifier were green, but the artifact is inadmissible and retained as aioncore-0.1.55-aarch64-apple-darwin-attempt-2."
+    },
+    {
+      "attemptId": "mac-bundle-003",
+      "kind": "bundle-assembly-verification-and-smoke",
+      "sourceCommit": "69d59e4c5f21ed3274d69b492088c704c60581f0",
+      "outcome": "green_local_diagnostic",
+      "exitCode": 0,
+      "builtAt": "2026-08-15T14:39:44Z",
+      "target": "aarch64-apple-darwin",
+      "payloadFileCount": 11790,
+      "bundleManifestSha256": "e2d0ef153f23561f67fc029ee668f1c06860c4c35fb88276b984935afa2dba83",
+      "sha256SumsSha256": "76975539e1dfd5b4f8d8f205e2adca40bdf1999d8e9db453db6c36ef98285240",
+      "binarySha256": "3598239be05a55abed497873d0ef36e7c44da187e74006d935dfb4ac791cdcb1",
+      "managedResourcesManifestSha256": "a3503fdabd95cc5fa2f84d47097048f5c1297888c0b0f330f8413214c9bafd73",
+      "migrationLineageFingerprint": "3d872b4b1346afde6e277dd727e87af3ca140c91d7da16590ab272af7b3561e3",
+      "smoke": {
+        "bundledNodeNpmNpxResolved": true,
+        "codexAcpSyntaxCheck": "pass",
+        "claudeAcpImport": "pass",
+        "codexCliVersion": "0.144.6",
+        "claudeCodeVersion": "2.1.205",
+        "symlinksInFinalBundle": 0
+      },
+      "evidenceLimit": "Local diagnostic only. Final release evidence still requires native two-target workflow artifacts, archived-bundle extraction and reverification, checksummed logs, and independent review."
+    }
+  ]
+}
