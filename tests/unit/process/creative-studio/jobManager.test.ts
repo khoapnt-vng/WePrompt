@@ -1939,8 +1939,8 @@ describe('StudioJobManager reference output routing', () => {
     });
 
     expect(job?.referenceInputSnapshot).toEqual({
-      visualPrompt: 'A calm establishing plate',
-      referenceAssetIds: [imported.id],
+      sourceVisualPrompt: 'A calm establishing plate',
+      conditioningReferenceAssetIds: [imported.id],
       aspectRatio: '16:9',
       resolution: '720p',
     });
@@ -2533,8 +2533,8 @@ describe('StudioJobManager reference output routing', () => {
     await waitFor(() => expect(firstAdapter.poll).toHaveBeenCalled());
     const beforeRestart = (await harness.store.getProject(admitted.id))!;
     expect(beforeRestart.jobs.job_1.referenceInputSnapshot).toEqual({
-      visualPrompt: 'Reviewed one-off plate',
-      referenceAssetIds: [originalCast.id],
+      sourceVisualPrompt: 'Reviewed one-off plate',
+      conditioningReferenceAssetIds: [originalCast.id],
       aspectRatio: '16:9',
       resolution: '720p',
     });

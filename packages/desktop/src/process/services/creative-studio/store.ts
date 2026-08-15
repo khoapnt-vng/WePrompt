@@ -85,7 +85,12 @@ const PROVIDER_REF_KEYS = new Set(['providerId', 'adapterId', 'model']);
 const ROUTING_KEYS = new Set(['storyboard', 'image', 'video']);
 const TEXT_MODEL_REF_KEYS = new Set(['providerId', 'model']);
 const JOB_ERROR_KEYS = new Set(['code', 'messageKey']);
-const REFERENCE_INPUT_SNAPSHOT_KEYS = new Set(['visualPrompt', 'referenceAssetIds', 'aspectRatio', 'resolution']);
+const REFERENCE_INPUT_SNAPSHOT_KEYS = new Set([
+  'sourceVisualPrompt',
+  'conditioningReferenceAssetIds',
+  'aspectRatio',
+  'resolution',
+]);
 const SCENE_KEYS = new Set([
   'id',
   'title',
@@ -975,13 +980,13 @@ const validateJob = (jobId: string, projectId: string, sceneIds: Set<string>, va
     (value.outputRole === 'reference' &&
       isRecord(value.referenceInputSnapshot) &&
       hasExactKeys(value.referenceInputSnapshot, REFERENCE_INPUT_SNAPSHOT_KEYS) &&
-      isNonEmptyString(value.referenceInputSnapshot.visualPrompt) &&
-      value.referenceInputSnapshot.visualPrompt === value.referenceInputSnapshot.visualPrompt.trim() &&
-      value.referenceInputSnapshot.visualPrompt.length <= STUDIO_REFERENCE_PROMPT_MAX_LENGTH &&
-      asArrayOfSafeIds(value.referenceInputSnapshot.referenceAssetIds) &&
-      value.referenceInputSnapshot.referenceAssetIds.length <= STUDIO_MAX_ACTIVE_BRIEF_REFERENCES &&
-      new Set(value.referenceInputSnapshot.referenceAssetIds).size ===
-        value.referenceInputSnapshot.referenceAssetIds.length &&
+      isNonEmptyString(value.referenceInputSnapshot.sourceVisualPrompt) &&
+      value.referenceInputSnapshot.sourceVisualPrompt === value.referenceInputSnapshot.sourceVisualPrompt.trim() &&
+      value.referenceInputSnapshot.sourceVisualPrompt.length <= STUDIO_REFERENCE_PROMPT_MAX_LENGTH &&
+      asArrayOfSafeIds(value.referenceInputSnapshot.conditioningReferenceAssetIds) &&
+      value.referenceInputSnapshot.conditioningReferenceAssetIds.length <= STUDIO_MAX_ACTIVE_BRIEF_REFERENCES &&
+      new Set(value.referenceInputSnapshot.conditioningReferenceAssetIds).size ===
+        value.referenceInputSnapshot.conditioningReferenceAssetIds.length &&
       isString(value.referenceInputSnapshot.aspectRatio) &&
       ASPECT_RATIOS.has(value.referenceInputSnapshot.aspectRatio) &&
       isString(value.referenceInputSnapshot.resolution) &&
@@ -1188,7 +1193,7 @@ const validateProject = (value: unknown): value is StudioProject => {
   const jobSnapshotReferencesAreValid = Object.values(typedJobs).every(
     (job) =>
       job.referenceInputSnapshot === undefined ||
-      job.referenceInputSnapshot.referenceAssetIds.every((sourceAssetId) => {
+      job.referenceInputSnapshot.conditioningReferenceAssetIds.every((sourceAssetId) => {
         const sourceAsset = typedAssets[sourceAssetId];
         return (
           sourceAsset?.id === sourceAssetId &&

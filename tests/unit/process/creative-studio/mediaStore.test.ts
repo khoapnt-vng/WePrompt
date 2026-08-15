@@ -149,8 +149,8 @@ const addActiveReferenceJob = async (store: CreativeStudioStore, visualPrompt = 
     next.jobs.job_1.outputRole = 'reference';
     if (visualPrompt.trim()) {
       next.jobs.job_1.referenceInputSnapshot = {
-        visualPrompt: visualPrompt.trim(),
-        referenceAssetIds: [],
+        sourceVisualPrompt: visualPrompt.trim(),
+        conditioningReferenceAssetIds: [],
         aspectRatio: next.aspectRatio,
         resolution: next.resolution,
       };
@@ -1134,8 +1134,8 @@ describe('createStudioMediaStore', () => {
       (project) => {
         const next = structuredClone(project);
         next.jobs.job_1.referenceInputSnapshot = {
-          visualPrompt: 'Original reviewed plate',
-          referenceAssetIds: ['brief_1', 'brief_2'],
+          sourceVisualPrompt: 'Original reviewed plate',
+          conditioningReferenceAssetIds: ['brief_1', 'brief_2'],
           aspectRatio: '16:9',
           resolution: '720p',
         };

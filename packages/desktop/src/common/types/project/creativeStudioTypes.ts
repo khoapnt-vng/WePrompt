@@ -150,8 +150,8 @@ export const STUDIO_REFERENCE_PROMPT_MAX_LENGTH = 4 * 1024;
 
 /** Main-only frame-defining authority frozen before a reference plate is submitted. */
 export type StudioReferenceInputSnapshot = {
-  visualPrompt: string;
-  referenceAssetIds: string[];
+  sourceVisualPrompt: string;
+  conditioningReferenceAssetIds: string[];
   aspectRatio: StudioAspectRatio;
   resolution: StudioResolution;
 };

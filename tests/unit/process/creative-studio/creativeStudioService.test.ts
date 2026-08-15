@@ -3524,8 +3524,8 @@ describe('CreativeStudioService', () => {
           cancellationPolicy: 'none',
           outputRole: 'reference',
           referenceInputSnapshot: {
-            visualPrompt: 'Reviewed one-off plate',
-            referenceAssetIds: [],
+            sourceVisualPrompt: 'Reviewed one-off plate',
+            conditioningReferenceAssetIds: [],
             aspectRatio: '16:9',
             resolution: '720p',
           },

@@ -679,8 +679,8 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       ...(output.role === 'reference'
         ? {
             referenceInputSnapshot: {
-              visualPrompt: authored,
-              referenceAssetIds: referenceInputs.map((asset) => asset.id),
+              sourceVisualPrompt: authored,
+              conditioningReferenceAssetIds: referenceInputs.map((asset) => asset.id),
               aspectRatio: project.aspectRatio,
               resolution: project.resolution,
             },

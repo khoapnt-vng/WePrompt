@@ -1587,8 +1587,8 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         throw new CreativeStudioMediaError('invalid_media');
       }
       if (role === 'reference' && job.referenceInputSnapshot !== undefined) {
-        asset.sourceVisualPrompt = job.referenceInputSnapshot.visualPrompt;
-        asset.sourceReferenceAssetIds = [...job.referenceInputSnapshot.referenceAssetIds];
+        asset.sourceVisualPrompt = job.referenceInputSnapshot.sourceVisualPrompt;
+        asset.sourceReferenceAssetIds = [...job.referenceInputSnapshot.conditioningReferenceAssetIds];
         asset.sourceAspectRatio = job.referenceInputSnapshot.aspectRatio;
         asset.sourceResolution = job.referenceInputSnapshot.resolution;
       } else {

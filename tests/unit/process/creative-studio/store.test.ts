@@ -2065,8 +2065,8 @@ describe('creative studio project store', () => {
         next.jobs.job_1 = makeJob(next, 'job_1', 'scene_1', {
           outputRole: 'reference',
           referenceInputSnapshot: {
-            visualPrompt: 'Reviewed one-off plate',
-            referenceAssetIds: [],
+            sourceVisualPrompt: 'Reviewed one-off plate',
+            conditioningReferenceAssetIds: [],
             aspectRatio: '16:9',
             resolution: '720p',
           },
@@ -2077,8 +2077,8 @@ describe('creative studio project store', () => {
 
       expect(persisted.jobs.job_1.outputRole).toBe('reference');
       expect(persisted.jobs.job_1.referenceInputSnapshot).toEqual({
-        visualPrompt: 'Reviewed one-off plate',
-        referenceAssetIds: [],
+        sourceVisualPrompt: 'Reviewed one-off plate',
+        conditioningReferenceAssetIds: [],
         aspectRatio: '16:9',
         resolution: '720p',
       });
@@ -2102,8 +2102,8 @@ describe('creative studio project store', () => {
       {
         label: 'a take output role',
         snapshot: {
-          visualPrompt: 'Reviewed plate',
-          referenceAssetIds: [],
+          sourceVisualPrompt: 'Reviewed plate',
+          conditioningReferenceAssetIds: [],
           aspectRatio: '16:9',
           resolution: '720p',
         },
@@ -2112,8 +2112,8 @@ describe('creative studio project store', () => {
       {
         label: 'an unsafe reference id',
         snapshot: {
-          visualPrompt: 'Reviewed plate',
-          referenceAssetIds: ['../escape'],
+          sourceVisualPrompt: 'Reviewed plate',
+          conditioningReferenceAssetIds: ['../escape'],
           aspectRatio: '16:9',
           resolution: '720p',
         },
@@ -2122,8 +2122,8 @@ describe('creative studio project store', () => {
       {
         label: 'an unknown aspect ratio',
         snapshot: {
-          visualPrompt: 'Reviewed plate',
-          referenceAssetIds: [],
+          sourceVisualPrompt: 'Reviewed plate',
+          conditioningReferenceAssetIds: [],
           aspectRatio: '2:1',
           resolution: '720p',
         },
