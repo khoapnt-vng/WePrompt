@@ -884,6 +884,31 @@
     }
   },
   "creativeStudio": {
+    "briefReferences": {
+      "title": "Referências do projeto",
+      "inheritanceDescription": "Cada nova imagem de referência usa todas as imagens ativas de Elenco e Visual deste projeto.",
+      "castHeading": "Elenco",
+      "lookHeading": "Visual",
+      "castEmpty": "Ainda não há referências de elenco.",
+      "lookEmpty": "Ainda não há referências de visual.",
+      "addCast": "Adicionar referência de elenco",
+      "addLook": "Adicionar referência de visual",
+      "activeCount": "{{count}} referências ativas",
+      "activeCount_one": "{{count}} referência ativa",
+      "activeCount_many": "{{count}} referências ativas",
+      "activeCount_other": "{{count}} referências ativas",
+      "limitReached": "Este projeto já tem 6 referências ativas. Remova uma antes de adicionar outra.",
+      "removeFromBrief": "Remover do Brief",
+      "removeAccessible": "Remover {{label}} do Brief",
+      "previewAccessible": "Referência de {{role}}: {{label}}",
+      "engineCapacityNone": "Este mecanismo de imagem ainda não foi validado para imagens de referência. Abra as Configurações de modelo e valide-o novamente.",
+      "engineCapacityMaximum": "Até {{count}} imagens de referência",
+      "engineCapacityMaximum_one": "Até {{count}} imagem de referência",
+      "engineCapacityMaximum_many": "Até {{count}} imagens de referência",
+      "engineCapacityMaximum_other": "Até {{count}} imagens de referência",
+      "capacityMismatch": "Você tem {{count}} referências ativas, mas este mecanismo de imagem aceita {{maximum}}. A geração de novas imagens de referência fica bloqueada até você remover referências ou trocar ou revalidar o mecanismo.",
+      "importError": "Não foi possível adicionar a referência. Tente novamente."
+    },
     "rules": {
       "open": "Regras",
       "title": "Regras",

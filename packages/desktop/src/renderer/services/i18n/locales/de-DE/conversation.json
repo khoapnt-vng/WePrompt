@@ -879,6 +879,29 @@
     }
   },
   "creativeStudio": {
+    "briefReferences": {
+      "title": "Projektreferenzen",
+      "inheritanceDescription": "Jedes neue Referenzstill verwendet alle aktiven Besetzungs- und Look-Bilder dieses Projekts.",
+      "castHeading": "Besetzung",
+      "lookHeading": "Look",
+      "castEmpty": "Noch keine Besetzungsreferenzen.",
+      "lookEmpty": "Noch keine Look-Referenzen.",
+      "addCast": "Besetzungsreferenz hinzufügen",
+      "addLook": "Look-Referenz hinzufügen",
+      "activeCount": "{{count}} aktive Referenzen",
+      "activeCount_one": "{{count}} aktive Referenz",
+      "activeCount_other": "{{count}} aktive Referenzen",
+      "limitReached": "Dieses Projekt hat bereits 6 aktive Referenzen. Entferne eine, bevor du eine weitere hinzufügst.",
+      "removeFromBrief": "Aus dem Brief entfernen",
+      "removeAccessible": "{{label}} aus dem Brief entfernen",
+      "previewAccessible": "{{role}}-Referenz: {{label}}",
+      "engineCapacityNone": "Diese Bild-Engine wurde noch nicht für Referenzbilder validiert. Öffne die Modelleinstellungen und validiere sie erneut.",
+      "engineCapacityMaximum": "Bis zu {{count}} Referenzbilder",
+      "engineCapacityMaximum_one": "Bis zu {{count}} Referenzbild",
+      "engineCapacityMaximum_other": "Bis zu {{count}} Referenzbilder",
+      "capacityMismatch": "Du hast {{count}} aktive Referenzen, diese Bild-Engine unterstützt jedoch {{maximum}}. Neue Referenzstills bleiben blockiert, bis du Referenzen entfernst oder die Engine wechselst bzw. erneut validierst.",
+      "importError": "Die Referenz konnte nicht hinzugefügt werden. Versuche es erneut."
+    },
     "rules": {
       "open": "Regeln",
       "title": "Regeln",

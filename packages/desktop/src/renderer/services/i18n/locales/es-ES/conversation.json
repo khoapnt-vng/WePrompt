@@ -879,6 +879,31 @@
     }
   },
   "creativeStudio": {
+    "briefReferences": {
+      "title": "Referencias del proyecto",
+      "inheritanceDescription": "Cada nueva imagen de referencia usa todas las imágenes activas de Reparto y Aspecto de este proyecto.",
+      "castHeading": "Reparto",
+      "lookHeading": "Aspecto",
+      "castEmpty": "Aún no hay referencias de reparto.",
+      "lookEmpty": "Aún no hay referencias de aspecto.",
+      "addCast": "Añadir referencia de reparto",
+      "addLook": "Añadir referencia de aspecto",
+      "activeCount": "{{count}} referencias activas",
+      "activeCount_one": "{{count}} referencia activa",
+      "activeCount_many": "{{count}} referencias activas",
+      "activeCount_other": "{{count}} referencias activas",
+      "limitReached": "Este proyecto ya tiene 6 referencias activas. Elimina una antes de añadir otra.",
+      "removeFromBrief": "Quitar del Brief",
+      "removeAccessible": "Quitar {{label}} del Brief",
+      "previewAccessible": "Referencia de {{role}}: {{label}}",
+      "engineCapacityNone": "Este motor de imagen aún no se ha validado para imágenes de referencia. Abre Configuración de modelos y vuelve a validarlo.",
+      "engineCapacityMaximum": "Hasta {{count}} imágenes de referencia",
+      "engineCapacityMaximum_one": "Hasta {{count}} imagen de referencia",
+      "engineCapacityMaximum_many": "Hasta {{count}} imágenes de referencia",
+      "engineCapacityMaximum_other": "Hasta {{count}} imágenes de referencia",
+      "capacityMismatch": "Tienes {{count}} referencias activas, pero este motor de imagen admite {{maximum}}. La generación de nuevas imágenes de referencia queda bloqueada hasta que quites referencias o cambies o vuelvas a validar el motor.",
+      "importError": "No se pudo añadir la referencia. Inténtalo de nuevo."
+    },
     "rules": {
       "open": "Reglas",
       "title": "Reglas",

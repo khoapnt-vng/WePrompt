@@ -878,6 +878,33 @@
     }
   },
   "creativeStudio": {
+    "briefReferences": {
+      "title": "Референсы проекта",
+      "inheritanceDescription": "Каждый новый референсный кадр использует все активные изображения актёров и стиля этого проекта.",
+      "castHeading": "Актёры",
+      "lookHeading": "Стиль",
+      "castEmpty": "Референсов актёров пока нет.",
+      "lookEmpty": "Референсов стиля пока нет.",
+      "addCast": "Добавить референс актёра",
+      "addLook": "Добавить референс стиля",
+      "activeCount": "Активных референсов: {{count}}",
+      "activeCount_one": "{{count}} активный референс",
+      "activeCount_few": "{{count}} активных референса",
+      "activeCount_many": "{{count}} активных референсов",
+      "activeCount_other": "{{count}} активного референса",
+      "limitReached": "В проекте уже 6 активных референсов. Удалите один перед добавлением нового.",
+      "removeFromBrief": "Убрать из брифа",
+      "removeAccessible": "Убрать {{label}} из брифа",
+      "previewAccessible": "Референс «{{role}}»: {{label}}",
+      "engineCapacityNone": "Этот движок изображений ещё не проверен для референсов. Откройте настройки моделей и выполните повторную проверку.",
+      "engineCapacityMaximum": "Поддерживается до {{count}} референсов",
+      "engineCapacityMaximum_one": "Можно использовать не более {{count}} референса",
+      "engineCapacityMaximum_few": "Допустимо не более {{count}} референсов",
+      "engineCapacityMaximum_many": "Максимум — {{count}} референсов",
+      "engineCapacityMaximum_other": "Поддерживается до {{count}} референса",
+      "capacityMismatch": "Активных референсов: {{count}}, но этот движок изображений поддерживает {{maximum}}. Новые референсные кадры заблокированы, пока вы не уберёте референсы либо не смените или повторно не проверите движок.",
+      "importError": "Не удалось добавить референс. Повторите попытку."
+    },
     "rules": {
       "open": "Правила",
       "title": "Правила",

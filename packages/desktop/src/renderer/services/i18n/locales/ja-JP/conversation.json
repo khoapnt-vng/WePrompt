@@ -878,6 +878,27 @@
     }
   },
   "creativeStudio": {
+    "briefReferences": {
+      "title": "プロジェクト参照画像",
+      "inheritanceDescription": "新しい参照スチルには、このプロジェクトで有効なキャスト画像とルック画像がすべて使用されます。",
+      "castHeading": "キャスト",
+      "lookHeading": "ルック",
+      "castEmpty": "キャスト参照はまだありません。",
+      "lookEmpty": "ルック参照はまだありません。",
+      "addCast": "キャスト参照を追加",
+      "addLook": "ルック参照を追加",
+      "activeCount": "有効な参照 {{count}} 件",
+      "activeCount_other": "有効な参照 {{count}} 件",
+      "limitReached": "このプロジェクトにはすでに 6 件の有効な参照があります。追加する前に 1 件削除してください。",
+      "removeFromBrief": "ブリーフから外す",
+      "removeAccessible": "{{label}} をブリーフから外す",
+      "previewAccessible": "{{role}}参照：{{label}}",
+      "engineCapacityNone": "この画像エンジンは参照画像について未検証です。モデル設定を開いて再検証してください。",
+      "engineCapacityMaximum": "参照画像は最大 {{count}} 件",
+      "engineCapacityMaximum_other": "参照画像は最大 {{count}} 件",
+      "capacityMismatch": "有効な参照は {{count}} 件ありますが、この画像エンジンが対応するのは {{maximum}} 件です。参照を外すか、エンジンを変更または再検証するまで、新しい参照スチルは生成できません。",
+      "importError": "参照を追加できませんでした。もう一度お試しください。"
+    },
     "rules": {
       "open": "ルール",
       "title": "ルール",

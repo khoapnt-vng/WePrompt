@@ -878,6 +878,27 @@
     }
   },
   "creativeStudio": {
+    "briefReferences": {
+      "title": "프로젝트 참조 이미지",
+      "inheritanceDescription": "새 참조 스틸에는 이 프로젝트에서 활성화된 모든 출연진 및 룩 이미지가 사용됩니다.",
+      "castHeading": "출연진",
+      "lookHeading": "룩",
+      "castEmpty": "아직 출연진 참조가 없습니다.",
+      "lookEmpty": "아직 룩 참조가 없습니다.",
+      "addCast": "출연진 참조 추가",
+      "addLook": "룩 참조 추가",
+      "activeCount": "활성 참조 {{count}}개",
+      "activeCount_other": "활성 참조 {{count}}개",
+      "limitReached": "이 프로젝트에는 이미 활성 참조가 6개 있습니다. 새로 추가하기 전에 하나를 제거하세요.",
+      "removeFromBrief": "브리프에서 제거",
+      "removeAccessible": "브리프에서 {{label}} 제거",
+      "previewAccessible": "{{role}} 참조: {{label}}",
+      "engineCapacityNone": "이 이미지 엔진은 참조 이미지에 대해 아직 검증되지 않았습니다. 모델 설정을 열어 다시 검증하세요.",
+      "engineCapacityMaximum": "참조 이미지 최대 {{count}}개",
+      "engineCapacityMaximum_other": "참조 이미지 최대 {{count}}개",
+      "capacityMismatch": "활성 참조가 {{count}}개이지만 이 이미지 엔진은 {{maximum}}개를 지원합니다. 참조를 제거하거나 엔진을 변경 또는 재검증할 때까지 새 참조 스틸 생성이 차단됩니다.",
+      "importError": "참조를 추가하지 못했습니다. 다시 시도하세요."
+    },
     "rules": {
       "open": "규칙",
       "title": "규칙",

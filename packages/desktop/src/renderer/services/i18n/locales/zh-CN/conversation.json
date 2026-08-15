@@ -878,6 +878,27 @@
     }
   },
   "creativeStudio": {
+    "briefReferences": {
+      "title": "项目参考图",
+      "inheritanceDescription": "每张新的参考静帧都会使用此项目中所有启用的角色和视觉风格图片。",
+      "castHeading": "角色",
+      "lookHeading": "视觉风格",
+      "castEmpty": "尚无角色参考图。",
+      "lookEmpty": "尚无视觉风格参考图。",
+      "addCast": "添加角色参考图",
+      "addLook": "添加视觉风格参考图",
+      "activeCount": "{{count}} 张启用的参考图",
+      "activeCount_other": "{{count}} 张启用的参考图",
+      "limitReached": "此项目已有 6 张启用的参考图。请先移除一张再添加。",
+      "removeFromBrief": "从简报中移除",
+      "removeAccessible": "从简报中移除 {{label}}",
+      "previewAccessible": "{{role}}参考图：{{label}}",
+      "engineCapacityNone": "此图像引擎尚未通过参考图验证。请打开“模型设置”并重新验证。",
+      "engineCapacityMaximum": "最多 {{count}} 张参考图",
+      "engineCapacityMaximum_other": "最多 {{count}} 张参考图",
+      "capacityMismatch": "你有 {{count}} 张启用的参考图，但此图像引擎仅支持 {{maximum}} 张。在移除参考图或更换、重新验证引擎之前，无法生成新的参考静帧。",
+      "importError": "无法添加参考图，请重试。"
+    },
     "rules": {
       "open": "规则",
       "title": "规则",

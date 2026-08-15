@@ -13,6 +13,7 @@ import { ipcBridge } from '@/common';
 import type { StudioBriefRuleDraft } from '@/common/types/project/creativeStudioRules';
 import {
   STUDIO_REFERENCE_PROMPT_MAX_LENGTH,
+  type StudioBriefReferenceRole,
   type StudioRendererProject,
   type StudioReferenceRequest,
   type StudioLatestRender,
@@ -27,6 +28,7 @@ import { requestedMediaKind } from '@/common/types/project/creativeStudioOutputR
 import {
   getStudioReferencePlateFreshness,
   resolveActiveStudioBriefReferences,
+  STUDIO_MAX_ACTIVE_BRIEF_REFERENCES,
   type StudioReferencePlateFreshness,
 } from '@/common/types/project/creativeStudioManagedAssetCollections';
 import {
@@ -521,6 +523,8 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
     sceneId: string;
     messageKey: string;
   } | null>(null);
+  const [briefReferenceMutationPending, setBriefReferenceMutationPending] = useState(false);
+  const [briefReferenceIssueMessageKey, setBriefReferenceIssueMessageKey] = useState<string | null>(null);
   const [exportVisible, setExportVisible] = useState(false);
   const [exportPending, setExportPending] = useState(false);
   const [exportIncludeReferences, setExportIncludeReferences] = useState(false);
@@ -553,6 +557,7 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
   const autoSubmittedReferenceRequestIdsRef = useRef(new Set<string>());
   const variationPendingRef = useRef(false);
   const referenceImportSceneIdRef = useRef<string | null>(null);
+  const briefReferenceMutationPendingRef = useRef(false);
   const pendingTransitionRef = useRef<StudioViewTransition | null>(null);
   const editorRef = useRef(editor);
   const canonicalProjectRef = useRef<StudioRendererProject | null>(project);
@@ -1477,6 +1482,95 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
     ]
   );
 
+  const handleAddBriefReference = useCallback(
+    async (role: StudioBriefReferenceRole): Promise<string | null> => {
+      const canonical = canonicalProjectRef.current;
+      const active = canonical === null ? null : resolveActiveStudioBriefReferences(canonical.assets);
+      if (
+        canonical === null ||
+        active === null ||
+        active.length >= STUDIO_MAX_ACTIVE_BRIEF_REFERENCES ||
+        briefReferenceMutationPendingRef.current
+      ) {
+        return null;
+      }
+
+      briefReferenceMutationPendingRef.current = true;
+      setBriefReferenceMutationPending(true);
+      try {
+        const result = await ipcBridge.creativeStudio.chooseAndImportReference.invoke({
+          projectId: canonical.id,
+          briefReferenceRole: role,
+          expectedRevision: canonical.revision,
+        });
+        if (result.ok === false) {
+          if (result.error.code === 'stale_project') {
+            const refreshed = await refetch();
+            if (refreshed !== null) canonicalProjectRef.current = refreshed;
+          }
+          setBriefReferenceIssueMessageKey(result.error.messageKey);
+          return null;
+        }
+        if (result.data.status === 'cancelled') return null;
+        setBriefReferenceIssueMessageKey(null);
+        const refreshed = await refetch();
+        if (refreshed !== null) canonicalProjectRef.current = refreshed;
+        return result.data.asset.id;
+      } catch {
+        setBriefReferenceIssueMessageKey('conversation.creativeStudio.briefReferences.importError');
+        return null;
+      } finally {
+        briefReferenceMutationPendingRef.current = false;
+        setBriefReferenceMutationPending(false);
+      }
+    },
+    [refetch]
+  );
+
+  const handleRemoveBriefReference = useCallback(
+    async (assetId: string): Promise<boolean> => {
+      const canonical = canonicalProjectRef.current;
+      const active = canonical === null ? null : resolveActiveStudioBriefReferences(canonical.assets);
+      if (
+        canonical === null ||
+        active === null ||
+        !active.some((asset) => asset.id === assetId) ||
+        briefReferenceMutationPendingRef.current
+      ) {
+        return false;
+      }
+
+      briefReferenceMutationPendingRef.current = true;
+      setBriefReferenceMutationPending(true);
+      setBriefReferenceIssueMessageKey(null);
+      try {
+        const result = await ipcBridge.creativeStudio.detachBriefReference.invoke({
+          projectId: canonical.id,
+          assetId,
+          expectedRevision: canonical.revision,
+        });
+        if (result.ok === false) {
+          if (result.error.code === 'stale_project') {
+            const refreshed = await refetch();
+            if (refreshed !== null) canonicalProjectRef.current = refreshed;
+          }
+          setBriefReferenceIssueMessageKey(result.error.messageKey);
+          return false;
+        }
+        const refreshed = await refetch();
+        if (refreshed !== null) canonicalProjectRef.current = refreshed;
+        return true;
+      } catch {
+        setBriefReferenceIssueMessageKey('conversation.creativeStudio.errors.storage');
+        return false;
+      } finally {
+        briefReferenceMutationPendingRef.current = false;
+        setBriefReferenceMutationPending(false);
+      }
+    },
+    [refetch]
+  );
+
   const handleExportAssets = useCallback(async (): Promise<void> => {
     if (exportBlocked || exportPending || project === null || readiness?.selectedAssetCount === 0) return;
     setExportIssueMessageKey(null);
@@ -1952,7 +2046,17 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
         onRefreshCatalog={studioModels.refresh}
         onSelectStoryboardModel={(selection) => studioModels.updateSelection({ role: 'storyboard', selection })}
       />
-      <StudioBriefDrawer visible={briefOpen} controller={controller} onClose={() => setBriefOpen(false)} />
+      <StudioBriefDrawer
+        visible={briefOpen}
+        controller={{
+          ...controller,
+          briefReferenceMutationPending,
+          briefReferenceIssueMessageKey,
+          addBriefReference: handleAddBriefReference,
+          removeBriefReference: handleRemoveBriefReference,
+        }}
+        onClose={() => setBriefOpen(false)}
+      />
       {project !== null && (
         <StudioRulesDrawer
           visible={rulesOpen}

@@ -9,10 +9,11 @@ import { CloseSmall } from '@icon-park/react';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import type { StudioAspectRatio } from '@/common/types/project/creativeStudioTypes';
+import type { StudioAspectRatio, StudioBriefReferenceRole } from '@/common/types/project/creativeStudioTypes';
 import { EngineStrip } from '../../EngineStrip';
 import type { StudioPhaseControllers } from '../types';
 import styles from './StudioBriefDrawer.module.css';
+import { StudioBriefReferences } from './StudioBriefReferences';
 
 const MAX_PROJECT_BRIEF_CHARS = 16 * 1024;
 const ACTIVE_JOB_STATUSES = new Set(['queued_local', 'submitting', 'queued_remote', 'running', 'needs_attention']);
@@ -28,8 +29,14 @@ const ASPECT_RATIO_LABEL_KEYS = {
 
 export type StudioBriefDrawerController = Pick<
   StudioPhaseControllers,
-  'project' | 'editor' | 'models' | 'mutationPending' | 'generationReviewOpen' | 'openModelSettings'
->;
+  'project' | 'editor' | 'models' | 'mutationPending' | 'generationReviewOpen'
+> & {
+  briefReferenceMutationPending: boolean;
+  briefReferenceIssueMessageKey: string | null;
+  addBriefReference: (role: StudioBriefReferenceRole) => Promise<string | null>;
+  removeBriefReference: (assetId: string) => Promise<boolean>;
+  openModelSettings: (path: '/settings/model') => void;
+};
 
 export type StudioBriefDrawerProps = {
   visible: boolean;
@@ -40,7 +47,18 @@ export type StudioBriefDrawerProps = {
 /** Project-draft settings that stay available from every Studio view. */
 export const StudioBriefDrawer: React.FC<StudioBriefDrawerProps> = ({ visible, controller, onClose }) => {
   const { t } = useTranslation();
-  const { project, editor, models, mutationPending, generationReviewOpen, openModelSettings } = controller;
+  const {
+    project,
+    editor,
+    models,
+    mutationPending,
+    generationReviewOpen,
+    briefReferenceMutationPending,
+    briefReferenceIssueMessageKey,
+    addBriefReference,
+    removeBriefReference,
+    openModelSettings,
+  } = controller;
   const [closing, setClosing] = useState(false);
   const projectConflict = editor.conflict?.operation === 'update_project' ? editor.conflict : null;
   const projectIssue = projectConflict ?? (editor.error?.operation === 'update_project' ? editor.error : null);
@@ -176,6 +194,15 @@ export const StudioBriefDrawer: React.FC<StudioBriefDrawerProps> = ({ visible, c
               )}
             </div>
           </div>
+          <StudioBriefReferences
+            project={project}
+            models={models}
+            pending={briefReferenceMutationPending}
+            issueMessageKey={briefReferenceIssueMessageKey}
+            onAdd={addBriefReference}
+            onRemove={removeBriefReference}
+            openModelSettings={() => openModelSettings('/settings/model')}
+          />
           <div className={styles.engineStrip} data-studio-engine-scope={visible ? 'brief' : undefined}>
             <EngineStrip
               project={project}

@@ -878,6 +878,33 @@
     }
   },
   "creativeStudio": {
+    "briefReferences": {
+      "title": "Референси проєкту",
+      "inheritanceDescription": "Кожен новий референсний кадр використовує всі активні зображення акторів і стилю цього проєкту.",
+      "castHeading": "Актори",
+      "lookHeading": "Стиль",
+      "castEmpty": "Референсів акторів ще немає.",
+      "lookEmpty": "Референсів стилю ще немає.",
+      "addCast": "Додати референс актора",
+      "addLook": "Додати референс стилю",
+      "activeCount": "Активних референсів: {{count}}",
+      "activeCount_one": "{{count}} активний референс",
+      "activeCount_few": "{{count}} активні референси",
+      "activeCount_many": "{{count}} активних референсів",
+      "activeCount_other": "{{count}} активного референсу",
+      "limitReached": "У проєкті вже 6 активних референсів. Приберіть один перед додаванням нового.",
+      "removeFromBrief": "Прибрати з брифу",
+      "removeAccessible": "Прибрати {{label}} з брифу",
+      "previewAccessible": "Референс «{{role}}»: {{label}}",
+      "engineCapacityNone": "Цей рушій зображень ще не перевірено для референсів. Відкрийте налаштування моделей і виконайте повторну перевірку.",
+      "engineCapacityMaximum": "Підтримується до {{count}} референсів",
+      "engineCapacityMaximum_one": "Можна використати не більше {{count}} референсу",
+      "engineCapacityMaximum_few": "Допустимо не більше {{count}} референсів",
+      "engineCapacityMaximum_many": "Максимум — {{count}} референсів",
+      "engineCapacityMaximum_other": "Підтримується до {{count}} референсу",
+      "capacityMismatch": "Активних референсів: {{count}}, але цей рушій зображень підтримує {{maximum}}. Нові референсні кадри заблоковано, доки ви не приберете референси або не зміните чи повторно не перевірите рушій.",
+      "importError": "Не вдалося додати референс. Спробуйте ще раз."
+    },
     "rules": {
       "open": "Правила",
       "title": "Правила",

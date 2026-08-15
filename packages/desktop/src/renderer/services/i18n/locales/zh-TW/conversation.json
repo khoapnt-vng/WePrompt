@@ -878,6 +878,27 @@
     }
   },
   "creativeStudio": {
+    "briefReferences": {
+      "title": "專案參考圖",
+      "inheritanceDescription": "每張新的參考靜幀都會使用此專案中所有啟用的角色與視覺風格圖片。",
+      "castHeading": "角色",
+      "lookHeading": "視覺風格",
+      "castEmpty": "尚無角色參考圖。",
+      "lookEmpty": "尚無視覺風格參考圖。",
+      "addCast": "新增角色參考圖",
+      "addLook": "新增視覺風格參考圖",
+      "activeCount": "{{count}} 張啟用的參考圖",
+      "activeCount_other": "{{count}} 張啟用的參考圖",
+      "limitReached": "此專案已有 6 張啟用的參考圖。請先移除一張再新增。",
+      "removeFromBrief": "從簡報中移除",
+      "removeAccessible": "從簡報中移除 {{label}}",
+      "previewAccessible": "{{role}}參考圖：{{label}}",
+      "engineCapacityNone": "此圖片引擎尚未通過參考圖驗證。請開啟「模型設定」並重新驗證。",
+      "engineCapacityMaximum": "最多 {{count}} 張參考圖",
+      "engineCapacityMaximum_other": "最多 {{count}} 張參考圖",
+      "capacityMismatch": "你有 {{count}} 張啟用的參考圖，但此圖片引擎僅支援 {{maximum}} 張。在移除參考圖或更換、重新驗證引擎之前，無法產生新的參考靜幀。",
+      "importError": "無法新增參考圖，請再試一次。"
+    },
     "rules": {
       "open": "規則",
       "title": "規則",

@@ -51,6 +51,7 @@ const bridge = vi.hoisted(() => ({
   reorderScenes: { invoke: vi.fn() },
   proposeStoryboard: { invoke: vi.fn() },
   chooseAndImportReference: { invoke: vi.fn() },
+  detachBriefReference: { invoke: vi.fn() },
   renderCut: { invoke: vi.fn() },
   cancelRender: { invoke: vi.fn() },
   fitStoryboard: { invoke: vi.fn() },
@@ -519,6 +520,7 @@ describe('StudioPage and useStudioProject', () => {
     bridge.reorderScenes.invoke.mockImplementation(async () => ok(project()));
     bridge.proposeStoryboard.invoke.mockImplementation(async () => ok(project()));
     bridge.chooseAndImportReference.invoke.mockResolvedValue(ok({ status: 'cancelled' }));
+    bridge.detachBriefReference.invoke.mockResolvedValue(failure());
     bridge.renderCut.invoke.mockResolvedValue(ok({ assetId: 'render-1', missingSceneIds: [] }));
     bridge.cancelRender.invoke.mockResolvedValue(ok({ cancelled: true }));
     bridge.fitStoryboard.invoke.mockResolvedValue(
@@ -1439,6 +1441,204 @@ describe('StudioPage and useStudioProject', () => {
     expect(screen.getByText('conversation.creativeStudio.models.engine.noFitVideo')).toBeVisible();
     expect(screen.queryByRole('button', { name: 'conversation.creativeStudio.models.openSettings' })).toBeNull();
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+  });
+
+  it('passes the chosen Brief role and current revision while cancellation causes no refetch or error', async () => {
+    bridge.getProject.invoke.mockResolvedValue(ok(project()));
+    renderRoute({ pathname: '/studio/project-1/table', state: { openBrief: true } });
+    const dialog = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.phase.brief.title' });
+    await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalled());
+    const readsBeforeImport = bridge.getProject.invoke.mock.calls.length;
+
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: 'conversation.creativeStudio.briefReferences.addCast' })
+    );
+
+    await waitFor(() =>
+      expect(bridge.chooseAndImportReference.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: 'project-1',
+        briefReferenceRole: 'cast',
+        expectedRevision: 2,
+      })
+    );
+    await act(async () => {});
+    expect(bridge.getProject.invoke).toHaveBeenCalledTimes(readsBeforeImport);
+    expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument();
+    expect(
+      within(dialog).getByRole('button', { name: 'conversation.creativeStudio.briefReferences.addCast' })
+    ).toHaveFocus();
+  });
+
+  it('adopts canonical refetches across sequential import and detach revisions without using the IPC project', async () => {
+    const imported = briefReferenceAsset('brief-cast', { briefReferenceLabel: 'Canonical cast' });
+    const initial = project();
+    const afterImport = project('project-1', { revision: 3, assets: { [imported.id]: imported } });
+    const afterDetach = project('project-1', { revision: 4, assets: {} });
+    const untrustedReturn = project('project-1', {
+      revision: 999,
+      assets: {
+        poison: briefReferenceAsset('poison', { briefReferenceLabel: 'IPC-only project must stay invisible' }),
+      },
+    });
+    let canonical = initial;
+    bridge.getProject.invoke.mockImplementation(async () => ok(canonical));
+    bridge.chooseAndImportReference.invoke.mockImplementation(async () => {
+      canonical = afterImport;
+      return ok({ status: 'imported' as const, asset: imported, project: untrustedReturn });
+    });
+    bridge.detachBriefReference.invoke.mockImplementation(async () => {
+      canonical = afterDetach;
+      return ok(untrustedReturn);
+    });
+    renderRoute({ pathname: '/studio/project-1/table', state: { openBrief: true } });
+    const dialog = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.phase.brief.title' });
+
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: 'conversation.creativeStudio.briefReferences.addCast' })
+    );
+    await waitFor(() => expect(within(dialog).getByText('Canonical cast')).toBeVisible());
+    expect(within(dialog).queryByText('IPC-only project must stay invisible')).not.toBeInTheDocument();
+    expect(bridge.chooseAndImportReference.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project-1',
+      briefReferenceRole: 'cast',
+      expectedRevision: 2,
+    });
+
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: 'conversation.creativeStudio.briefReferences.removeAccessible' })
+    );
+    await waitFor(() => expect(within(dialog).queryByText('Canonical cast')).not.toBeInTheDocument());
+    expect(bridge.detachBriefReference.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project-1',
+      assetId: 'brief-cast',
+      expectedRevision: 3,
+    });
+    expect(bridge.chooseAndImportReference.invoke).toHaveBeenCalledOnce();
+    expect(bridge.detachBriefReference.invoke).toHaveBeenCalledOnce();
+  });
+
+  it('single-flights Brief reference mutations without disabling generation, engines, views, or drawer close', async () => {
+    const opening = scene();
+    const existing = briefReferenceAsset('brief-look', {
+      briefReferenceRole: 'look',
+      briefReferenceLabel: 'Existing look',
+    });
+    const activeProject = project('project-1', {
+      sceneOrder: [opening.id],
+      scenes: { [opening.id]: opening },
+      assets: { [existing.id]: existing },
+    });
+    const pendingImport = deferred<
+      StudioCommandResult<{
+        status: 'cancelled' | 'imported';
+        asset?: StudioAsset;
+        project?: StudioRendererProject;
+      }>
+    >();
+    bridge.getProject.invoke.mockResolvedValue(ok(activeProject));
+    bridge.listRoutes.invoke.mockResolvedValue(
+      ok(routesWithImage(imageRoute({ constraints: { ...imageRoute().constraints, maxConditioningImages: 6 } })))
+    );
+    bridge.chooseAndImportReference.invoke.mockReturnValue(pendingImport.promise);
+    renderRoute({ pathname: '/studio/project-1/table', state: { openBrief: true } });
+    const dialog = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.phase.brief.title' });
+    const { batchAction } = await findBatchAction();
+
+    const addCast = within(dialog).getByRole('button', {
+      name: 'conversation.creativeStudio.briefReferences.addCast',
+    });
+    const addLook = within(dialog).getByRole('button', {
+      name: 'conversation.creativeStudio.briefReferences.addLook',
+    });
+    const remove = within(dialog).getByRole('button', {
+      name: 'conversation.creativeStudio.briefReferences.removeAccessible',
+    });
+    act(() => {
+      addCast.click();
+      remove.click();
+      addLook.click();
+    });
+    await waitFor(() => expect(bridge.chooseAndImportReference.invoke).toHaveBeenCalledOnce());
+
+    expect(
+      within(dialog).getByRole('button', { name: 'conversation.creativeStudio.briefReferences.addCast' })
+    ).toBeDisabled();
+    expect(
+      within(dialog).getByRole('button', { name: 'conversation.creativeStudio.briefReferences.addLook' })
+    ).toBeDisabled();
+    expect(
+      within(dialog).getByRole('button', { name: 'conversation.creativeStudio.briefReferences.removeAccessible' })
+    ).toBeDisabled();
+    expect(bridge.chooseAndImportReference.invoke).toHaveBeenCalledOnce();
+    expect(bridge.detachBriefReference.invoke).not.toHaveBeenCalled();
+    expect(batchAction).toBeEnabled();
+    expect(
+      within(screen.getByRole('navigation', { name: 'conversation.creativeStudio.phase.nav.viewsLabel' })).getByRole(
+        'button',
+        { name: 'conversation.creativeStudio.phase.nav.board' }
+      )
+    ).toBeEnabled();
+    expect(within(dialog).getByRole('button', { name: 'image-model' })).toBeEnabled();
+    expect(within(dialog).getByRole('button', { name: 'common.close' })).toBeEnabled();
+
+    await act(async () => pendingImport.resolve(ok({ status: 'cancelled' })));
+  });
+
+  it('refetches a stale detach once, keeps the canonical card, and surfaces the canonical error', async () => {
+    const cast = briefReferenceAsset();
+    const initial = project('project-1', { assets: { [cast.id]: cast } });
+    const refreshed = project('project-1', { revision: 3, assets: { [cast.id]: cast } });
+    let canonical = initial;
+    bridge.getProject.invoke.mockImplementation(async () => ok(canonical));
+    bridge.detachBriefReference.invoke.mockImplementation(async () => {
+      canonical = refreshed;
+      return stale();
+    });
+    renderRoute({ pathname: '/studio/project-1/table', state: { openBrief: true } });
+    const dialog = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.phase.brief.title' });
+    const readsBeforeDetach = bridge.getProject.invoke.mock.calls.length;
+
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: 'conversation.creativeStudio.briefReferences.removeAccessible' })
+    );
+
+    await waitFor(() =>
+      expect(within(dialog).getByRole('alert')).toHaveTextContent('conversation.creativeStudio.errors.staleProject')
+    );
+    expect(bridge.detachBriefReference.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project-1',
+      assetId: cast.id,
+      expectedRevision: 2,
+    });
+    expect(bridge.getProject.invoke).toHaveBeenCalledTimes(readsBeforeDetach + 1);
+    expect(within(dialog).getByText('Scarf and telescope')).toBeVisible();
+    expect(bridge.detachBriefReference.invoke).toHaveBeenCalledOnce();
+  });
+
+  it('shows the dedicated import error and returns focus without retrying a rejected picker command', async () => {
+    bridge.chooseAndImportReference.invoke.mockRejectedValueOnce(new Error('picker failed'));
+    renderRoute({ pathname: '/studio/project-1/table', state: { openBrief: true } });
+    const dialog = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.phase.brief.title' });
+    const add = within(dialog).getByRole('button', { name: 'conversation.creativeStudio.briefReferences.addLook' });
+
+    fireEvent.click(add);
+
+    await waitFor(() =>
+      expect(within(dialog).getByRole('alert')).toHaveTextContent(
+        'conversation.creativeStudio.briefReferences.importError'
+      )
+    );
+    expect(add).toHaveFocus();
+    expect(bridge.chooseAndImportReference.invoke).toHaveBeenCalledOnce();
+
+    bridge.chooseAndImportReference.invoke.mockResolvedValueOnce(ok({ status: 'cancelled' }));
+    const readsBeforeCancel = bridge.getProject.invoke.mock.calls.length;
+    fireEvent.click(add);
+    await waitFor(() => expect(bridge.chooseAndImportReference.invoke).toHaveBeenCalledTimes(2));
+    expect(within(dialog).getByRole('alert')).toHaveTextContent(
+      'conversation.creativeStudio.briefReferences.importError'
+    );
+    expect(bridge.getProject.invoke).toHaveBeenCalledTimes(readsBeforeCancel);
   });
 
   it('imports a first frame through the native managed-asset command and refetches canonical state', async () => {

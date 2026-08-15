@@ -15,6 +15,7 @@ const localeRoot = new URL('../../../../packages/desktop/src/renderer/services/i
 
 const plannedGroups = [
   'brief',
+  'briefReferences',
   'close',
   'conditioning',
   'create',
@@ -38,6 +39,26 @@ const plannedGroups = [
   'storyboard',
   'timeline',
   'transition',
+] as const;
+
+const briefReferenceKeys = [
+  'briefReferences.title',
+  'briefReferences.inheritanceDescription',
+  'briefReferences.castHeading',
+  'briefReferences.lookHeading',
+  'briefReferences.castEmpty',
+  'briefReferences.lookEmpty',
+  'briefReferences.addCast',
+  'briefReferences.addLook',
+  'briefReferences.activeCount',
+  'briefReferences.limitReached',
+  'briefReferences.removeFromBrief',
+  'briefReferences.removeAccessible',
+  'briefReferences.previewAccessible',
+  'briefReferences.engineCapacityNone',
+  'briefReferences.engineCapacityMaximum',
+  'briefReferences.capacityMismatch',
+  'briefReferences.importError',
 ] as const;
 
 const conditioningKeys = [
@@ -369,6 +390,8 @@ const renderStateAndExportKeys = [
 ] as const;
 
 const pluralLogicalKeys = [
+  'briefReferences.activeCount',
+  'briefReferences.engineCapacityMaximum',
   'export.confirmSelectedCount',
   'export.gapWarning',
   'phase.review.render.errors.noRenderableShots',
@@ -390,6 +413,14 @@ const pluralLogicalKeys = [
 ] as const;
 
 const streamFullSentenceKeys = [
+  'briefReferences.inheritanceDescription',
+  'briefReferences.castEmpty',
+  'briefReferences.lookEmpty',
+  'briefReferences.limitReached',
+  'briefReferences.removeAccessible',
+  'briefReferences.engineCapacityNone',
+  'briefReferences.capacityMismatch',
+  'briefReferences.importError',
   'storyboard.dragSceneAccessible',
   'storyboard.moveSceneUpAccessible',
   'storyboard.moveSceneDownAccessible',
@@ -721,6 +752,9 @@ describe('Creative Studio localization contract', () => {
 
     const leaves = flattenStringLeaves(creativeStudio);
     for (const key of briefKeys) {
+      expect(leaves[key], `Missing conversation.creativeStudio.${key}`).toBeTruthy();
+    }
+    for (const key of briefReferenceKeys) {
       expect(leaves[key], `Missing conversation.creativeStudio.${key}`).toBeTruthy();
     }
     for (const key of rulesKeys) {

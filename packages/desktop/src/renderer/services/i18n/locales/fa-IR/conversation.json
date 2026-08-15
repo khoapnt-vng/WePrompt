@@ -878,6 +878,29 @@
     }
   },
   "creativeStudio": {
+    "briefReferences": {
+      "title": "مراجع پروژه",
+      "inheritanceDescription": "هر تصویر مرجع جدید از همه تصاویر فعال بازیگران و ظاهر این پروژه استفاده می‌کند.",
+      "castHeading": "بازیگران",
+      "lookHeading": "ظاهر",
+      "castEmpty": "هنوز مرجعی برای بازیگران وجود ندارد.",
+      "lookEmpty": "هنوز مرجعی برای ظاهر وجود ندارد.",
+      "addCast": "افزودن مرجع بازیگر",
+      "addLook": "افزودن مرجع ظاهر",
+      "activeCount": "{{count}} مرجع فعال",
+      "activeCount_one": "{{count}} مرجع فعال",
+      "activeCount_other": "{{count}} مرجع فعال",
+      "limitReached": "این پروژه از قبل ۶ مرجع فعال دارد. پیش از افزودن مرجع جدید، یکی را حذف کنید.",
+      "removeFromBrief": "حذف از بریف",
+      "removeAccessible": "حذف {{label}} از بریف",
+      "previewAccessible": "مرجع {{role}}: {{label}}",
+      "engineCapacityNone": "این موتور تصویر هنوز برای تصاویر مرجع اعتبارسنجی نشده است. تنظیمات مدل را باز کنید و دوباره آن را اعتبارسنجی کنید.",
+      "engineCapacityMaximum": "حداکثر {{count}} تصویر مرجع",
+      "engineCapacityMaximum_one": "حداکثر {{count}} تصویر مرجع",
+      "engineCapacityMaximum_other": "حداکثر {{count}} تصویر مرجع",
+      "capacityMismatch": "شما {{count}} مرجع فعال دارید، اما این موتور تصویر از {{maximum}} مرجع پشتیبانی می‌کند. تا زمانی که مراجع را حذف نکنید یا موتور را تغییر ندهید یا دوباره اعتبارسنجی نکنید، تولید تصاویر مرجع جدید مسدود می‌ماند.",
+      "importError": "مرجع افزوده نشد. دوباره تلاش کنید."
+    },
     "rules": {
       "open": "قوانین",
       "title": "قوانین",

@@ -316,10 +316,55 @@ describe('EngineStrip', () => {
     const menu = await screen.findByRole('menu');
     expect(
       within(menu).getByText(
-        'conversation.creativeStudio.models.engine.summary:resolution=720p, 1080p,duration=conversation.creativeStudio.models.engine.durationRange:min=1,max=60,audio=conversation.creativeStudio.models.engine.audioSilent,frame=conversation.creativeStudio.models.engine.frameYes'
+        'conversation.creativeStudio.models.engine.summary:resolution=720p, 1080p,duration=conversation.creativeStudio.models.engine.durationRange:min=1,max=60,audio=conversation.creativeStudio.models.engine.audioSilent,frame=conversation.creativeStudio.models.engine.frameYes conversation.creativeStudio.briefReferences.engineCapacityNone'
       )
     ).toBeVisible();
   });
+
+  it.each([
+    { maximum: 0, capacity: 'conversation.creativeStudio.briefReferences.engineCapacityNone' },
+    {
+      maximum: 3,
+      capacity: 'conversation.creativeStudio.briefReferences.engineCapacityMaximum:count=3',
+    },
+  ])(
+    'adds image-menu capacity for maximum $maximum without changing the compact trigger contract',
+    async ({ maximum, capacity }) => {
+      const selected = route('image', {
+        constraints: { ...route('image').constraints, maxConditioningImages: maximum },
+      });
+      render(
+        <EngineStrip
+          {...props({
+            variant: 'compact',
+            models: modelResult({
+              catalog: catalog({
+                image: media({
+                  status: 'ready',
+                  selected: { choiceId: selected.choiceId, providerId: selected.providerId, model: selected.model },
+                  selectedRoute: selected,
+                  options: [selected],
+                }),
+              }),
+            }),
+          })}
+        />
+      );
+
+      const trigger = screen.getByRole('button', { name: 'image-model' });
+      expect(trigger).toHaveTextContent('image-model');
+      expect(trigger).not.toHaveTextContent(/briefReferences\.engineCapacity/);
+      expect(trigger).toHaveAccessibleDescription(
+        'conversation.creativeStudio.models.engine.summaryImage:resolution=1080p,frame=conversation.creativeStudio.models.engine.frameYes'
+      );
+
+      fireEvent.click(trigger);
+      const menu = await screen.findByRole('menu');
+      expect(
+        within(menu).getByText((content, element) => element?.tagName === 'SPAN' && content.endsWith(capacity))
+      ).toBeVisible();
+    }
+  );
 
   it('selects exactly the chosen row and does not auto-write a pre-armed sole option', async () => {
     const updateSelection = vi.fn(async () => true);

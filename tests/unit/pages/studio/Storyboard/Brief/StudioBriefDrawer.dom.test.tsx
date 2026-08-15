@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -16,7 +16,16 @@ import {
 import type { UseStoryboardEditorResult } from '@renderer/pages/studio/hooks/useStoryboardEditor';
 import type { UseStudioModelsResult } from '@renderer/pages/studio/hooks/useStudioModels';
 
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string, values?: Record<string, unknown>) =>
+      values
+        ? `${key}:${Object.entries(values)
+            .map(([name, value]) => `${name}=${String(value)}`)
+            .join(',')}`
+        : key,
+  }),
+}));
 
 const project = (overrides: Partial<StudioRendererProject> = {}): StudioRendererProject => ({
   schemaVersion: 1,
@@ -49,6 +58,20 @@ const generatedAsset = (collection: StudioAsset['managedAsset']['collection']): 
   byteSize: 1,
   sha256: '1'.repeat(64),
   createdAt: '2026-08-04T00:00:00.000Z',
+});
+
+const briefReference = (
+  id: string,
+  role: 'cast' | 'look',
+  label: string,
+  createdAt = '2026-08-04T00:00:00.000Z'
+): StudioAsset => ({
+  ...generatedAsset('imports'),
+  id,
+  managedAsset: { collection: 'imports', fileName: `${id}.png` },
+  createdAt,
+  briefReferenceRole: role,
+  briefReferenceLabel: label,
 });
 
 const editor = (overrides: Partial<UseStoryboardEditorResult> = {}): UseStoryboardEditorResult =>
@@ -117,6 +140,10 @@ const controller = (overrides: Partial<StudioBriefDrawerController> = {}): Studi
   } satisfies UseStudioModelsResult,
   mutationPending: false,
   generationReviewOpen: false,
+  briefReferenceMutationPending: false,
+  briefReferenceIssueMessageKey: null,
+  addBriefReference: vi.fn(async () => null),
+  removeBriefReference: vi.fn(async () => false),
   openModelSettings: vi.fn(),
   ...overrides,
 });
@@ -265,4 +292,315 @@ describe('StudioBriefDrawer', () => {
       within(dialog).queryByRole('button', { name: 'conversation.creativeStudio.phase.brief.startWriting' })
     ).not.toBeInTheDocument();
   });
+
+  it('mounts inherited Cast then Look references between constraints and engines with managed previews', () => {
+    const longGermanLabel =
+      'Ausfuehrliche Charakterreferenz mit vollstaendig sichtbarer Bezeichnung fuer schmale Ansichten';
+    const castLater = briefReference('cast-z', 'cast', 'Second cast', '2026-08-04T00:00:02.000Z');
+    const castEarlier = briefReference('cast-a', 'cast', longGermanLabel, '2026-08-04T00:00:01.000Z');
+    const look = briefReference('look-a', 'look', 'Copper night palette', '2026-08-04T00:00:00.000Z');
+    const refsProject = project({
+      assets: { [look.id]: look, [castLater.id]: castLater, [castEarlier.id]: castEarlier },
+    });
+    const { dialog } = renderDrawer(controller({ project: refsProject }));
+    const constraints = dialog.querySelector('[data-studio-brief-constraints]');
+    const references = within(dialog).getByRole('region', {
+      name: 'conversation.creativeStudio.briefReferences.title',
+    });
+    const strip = within(dialog).getByRole('region', { name: 'conversation.creativeStudio.models.engine.label' });
+
+    expect(constraints!.compareDocumentPosition(references) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(references.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(
+      within(references).getByRole('heading', {
+        level: 2,
+        name: 'conversation.creativeStudio.briefReferences.title',
+      })
+    ).toBeVisible();
+    expect(
+      within(references).getByRole('heading', {
+        level: 3,
+        name: 'conversation.creativeStudio.briefReferences.castHeading',
+      })
+    ).toBeVisible();
+    expect(
+      within(references).getByRole('heading', {
+        level: 3,
+        name: 'conversation.creativeStudio.briefReferences.lookHeading',
+      })
+    ).toBeVisible();
+    expect(
+      within(references).getByText('conversation.creativeStudio.briefReferences.inheritanceDescription')
+    ).toBeVisible();
+    const groups = within(references).getAllByRole('group');
+    expect(groups.map((group) => group.getAttribute('aria-label'))).toEqual([
+      'conversation.creativeStudio.briefReferences.castHeading',
+      'conversation.creativeStudio.briefReferences.lookHeading',
+    ]);
+    expect(
+      within(groups[0]!)
+        .getAllByRole('img')
+        .map((image) => image.getAttribute('alt'))
+    ).toEqual([
+      `conversation.creativeStudio.briefReferences.previewAccessible:role=conversation.creativeStudio.briefReferences.castHeading,label=${longGermanLabel}`,
+      'conversation.creativeStudio.briefReferences.previewAccessible:role=conversation.creativeStudio.briefReferences.castHeading,label=Second cast',
+    ]);
+    expect(within(groups[1]!).getByRole('img')).toHaveAttribute('src', 'weprompt-studio://asset/project-1/look-a');
+    expect(within(references).getByText(longGermanLabel)).not.toHaveAttribute('title');
+    expect(
+      within(references).getByRole('button', {
+        name: `conversation.creativeStudio.briefReferences.removeAccessible:label=${longGermanLabel}`,
+      })
+    ).toHaveTextContent('conversation.creativeStudio.briefReferences.removeFromBrief');
+  });
+
+  it('shows empty roles, the six-reference ceiling, and selected-engine recovery without hiding Remove', () => {
+    const empty = renderDrawer();
+    expect(within(empty.dialog).getByText('conversation.creativeStudio.briefReferences.castEmpty')).toBeVisible();
+    expect(within(empty.dialog).getByText('conversation.creativeStudio.briefReferences.lookEmpty')).toBeVisible();
+    expect(
+      within(empty.dialog).getByRole('button', { name: 'conversation.creativeStudio.briefReferences.addCast' })
+    ).toBeEnabled();
+    empty.view.unmount();
+
+    const references = Object.fromEntries(
+      Array.from({ length: 6 }, (_, index) => {
+        const value = briefReference(`cast-${index}`, 'cast', `Cast ${index}`);
+        return [value.id, value];
+      })
+    );
+    const selectedImage = {
+      choiceId: 'choice-image',
+      providerId: 'provider-image',
+      providerName: 'Image provider',
+      model: 'image-model',
+      integrationLabelKey: 'imageApi' as const,
+      health: 'available' as const,
+      kind: 'image' as const,
+      constraints: {
+        aspectRatios: ['16:9' as const],
+        resolutions: ['1080p' as const],
+        minDurationSeconds: 1,
+        maxDurationSeconds: 60,
+        supportsFirstFrame: true,
+        maxConditioningImages: 0,
+        silentOutput: true,
+      },
+    };
+    const openModelSettings = vi.fn();
+    const fullController = controller({
+      project: project({ assets: references }),
+      models: {
+        ...controller().models,
+        catalog: {
+          storyboard: { status: 'selection_required', selected: null, options: [] },
+          image: {
+            status: 'ready',
+            selected: {
+              choiceId: selectedImage.choiceId,
+              providerId: selectedImage.providerId,
+              model: selectedImage.model,
+            },
+            selectedRoute: selectedImage,
+            selectionIssue: null,
+            options: [selectedImage],
+          },
+          video: {
+            status: 'selection_required',
+            selected: null,
+            selectedRoute: null,
+            selectionIssue: null,
+            options: [],
+          },
+          catalogVersion: 'catalog-1',
+        },
+      },
+      openModelSettings,
+    });
+    const { dialog } = renderDrawer(fullController);
+    const addButtons = [
+      within(dialog).getByRole('button', { name: 'conversation.creativeStudio.briefReferences.addCast' }),
+      within(dialog).getByRole('button', { name: 'conversation.creativeStudio.briefReferences.addLook' }),
+    ];
+
+    expect(addButtons.every((button) => button.hasAttribute('disabled'))).toBe(true);
+    expect(addButtons[0]).toHaveAccessibleDescription('conversation.creativeStudio.briefReferences.limitReached');
+    expect(addButtons[1]).toHaveAccessibleDescription('conversation.creativeStudio.briefReferences.limitReached');
+    expect(within(dialog).getByText('conversation.creativeStudio.briefReferences.limitReached')).toBeVisible();
+    expect(within(dialog).getAllByRole('button', { name: /briefReferences\.removeAccessible/ })[0]).toBeEnabled();
+    expect(within(dialog).getByText('conversation.creativeStudio.briefReferences.engineCapacityNone')).toBeVisible();
+    expect(
+      within(dialog).queryByText('conversation.creativeStudio.briefReferences.capacityMismatch:count=6,maximum=0')
+    ).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'conversation.creativeStudio.models.engine.manage' }));
+    expect(openModelSettings).toHaveBeenCalledWith('/settings/model');
+  });
+
+  it('states exact selected-engine mismatch counts without changing the route', () => {
+    const first = briefReference('cast-a', 'cast', 'Cast A');
+    const second = briefReference('look-a', 'look', 'Look A');
+    const selectedImage = {
+      choiceId: 'choice-image',
+      providerId: 'provider-image',
+      providerName: 'Image provider',
+      model: 'image-model',
+      integrationLabelKey: 'imageApi' as const,
+      health: 'available' as const,
+      kind: 'image' as const,
+      constraints: {
+        aspectRatios: ['16:9' as const],
+        resolutions: ['1080p' as const],
+        minDurationSeconds: 1,
+        maxDurationSeconds: 60,
+        supportsFirstFrame: true,
+        maxConditioningImages: 1,
+        silentOutput: true,
+      },
+    };
+    const props = controller({
+      project: project({ assets: { [first.id]: first, [second.id]: second } }),
+      models: {
+        ...controller().models,
+        catalog: {
+          storyboard: { status: 'selection_required', selected: null, options: [] },
+          image: {
+            status: 'ready',
+            selected: {
+              choiceId: selectedImage.choiceId,
+              providerId: selectedImage.providerId,
+              model: selectedImage.model,
+            },
+            selectedRoute: selectedImage,
+            selectionIssue: null,
+            options: [selectedImage],
+          },
+          video: {
+            status: 'selection_required',
+            selected: null,
+            selectedRoute: null,
+            selectionIssue: null,
+            options: [],
+          },
+          catalogVersion: 'catalog-1',
+        },
+      },
+    });
+    const { dialog } = renderDrawer(props);
+
+    expect(
+      within(dialog).getByText('conversation.creativeStudio.briefReferences.capacityMismatch:count=2,maximum=1')
+    ).toBeVisible();
+    expect(props.models.updateSelection).not.toHaveBeenCalled();
+  });
+
+  it('disables only reference mutation controls while their synchronous guard is pending', () => {
+    const cast = briefReference('cast-a', 'cast', 'Cast A');
+    const props = controller({
+      project: project({ assets: { [cast.id]: cast } }),
+      briefReferenceMutationPending: true,
+    });
+    const { dialog } = renderDrawer(props);
+
+    expect(
+      within(dialog).getByRole('button', { name: 'conversation.creativeStudio.briefReferences.addCast' })
+    ).toBeDisabled();
+    expect(
+      within(dialog).getByRole('button', { name: 'conversation.creativeStudio.briefReferences.addLook' })
+    ).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: /briefReferences\.removeAccessible/ })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: 'common.close' })).toBeEnabled();
+  });
+
+  it('restores Add focus on cancel and focuses an imported card only after canonical rerender', async () => {
+    const imported = briefReference('cast-new', 'cast', 'New cast');
+    const importResult = deferred<string | null>();
+    const addBriefReference = vi.fn(() => importResult.promise);
+    const initialController = controller({ addBriefReference });
+    const onClose = vi.fn();
+    const { dialog, view } = renderDrawer(initialController, onClose);
+    const add = within(dialog).getByRole('button', { name: 'conversation.creativeStudio.briefReferences.addCast' });
+
+    fireEvent.click(add);
+    view.rerender(
+      <StudioBriefDrawer
+        visible
+        controller={controller({
+          project: project({ assets: { [imported.id]: imported } }),
+          addBriefReference,
+        })}
+        onClose={onClose}
+      />
+    );
+    await act(async () => importResult.resolve(imported.id));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', {
+          name: 'conversation.creativeStudio.briefReferences.removeAccessible:label=New cast',
+        })
+      ).toHaveFocus()
+    );
+
+    const cancelled = vi.fn(async () => null);
+    view.rerender(
+      <StudioBriefDrawer visible controller={controller({ addBriefReference: cancelled })} onClose={onClose} />
+    );
+    const addLook = screen.getByRole('button', { name: 'conversation.creativeStudio.briefReferences.addLook' });
+    fireEvent.click(addLook);
+    await waitFor(() => expect(addLook).toHaveFocus());
+  });
+
+  it.each([
+    { name: 'next', removeId: 'cast-a', remaining: ['cast-b', 'cast-c'], focused: 'Cast B' },
+    { name: 'previous', removeId: 'cast-c', remaining: ['cast-a', 'cast-b'], focused: 'Cast B' },
+    { name: 'role Add', removeId: 'cast-a', remaining: [], focused: null },
+  ])('moves detach focus to the $name target after canonical rerender', async ({ removeId, remaining, focused }) => {
+    const assets = {
+      'cast-a': briefReference('cast-a', 'cast', 'Cast A', '2026-08-04T00:00:01.000Z'),
+      'cast-b': briefReference('cast-b', 'cast', 'Cast B', '2026-08-04T00:00:02.000Z'),
+      'cast-c': briefReference('cast-c', 'cast', 'Cast C', '2026-08-04T00:00:03.000Z'),
+    };
+    const initialAssets = focused === null ? { 'cast-a': assets['cast-a'] } : assets;
+    const detachResult = deferred<boolean>();
+    const removeBriefReference = vi.fn(() => detachResult.promise);
+    const onClose = vi.fn();
+    const view = render(
+      <StudioBriefDrawer
+        visible
+        controller={controller({ project: project({ assets: initialAssets }), removeBriefReference })}
+        onClose={onClose}
+      />
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: `conversation.creativeStudio.briefReferences.removeAccessible:label=${initialAssets[removeId as keyof typeof initialAssets]!.briefReferenceLabel}`,
+      })
+    );
+    const remainingAssets = Object.fromEntries(remaining.map((id) => [id, assets[id as keyof typeof assets]]));
+    view.rerender(
+      <StudioBriefDrawer
+        visible
+        controller={controller({ project: project({ revision: 3, assets: remainingAssets }), removeBriefReference })}
+        onClose={onClose}
+      />
+    );
+    await act(async () => detachResult.resolve(true));
+
+    const expected =
+      focused === null
+        ? screen.getByRole('button', { name: 'conversation.creativeStudio.briefReferences.addCast' })
+        : screen.getByRole('button', {
+            name: `conversation.creativeStudio.briefReferences.removeAccessible:label=${focused}`,
+          });
+    await waitFor(() => expect(expected).toHaveFocus());
+  });
 });
+
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+};

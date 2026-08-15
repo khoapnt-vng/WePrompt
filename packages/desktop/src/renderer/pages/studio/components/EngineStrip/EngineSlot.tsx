@@ -58,6 +58,18 @@ export const EngineSlot: React.FC<EngineSlotProps> = ({
     });
   };
 
+  const routeMenuSummary = (route: StudioRouteCatalogEntry): string => {
+    const summary = routeSummary(route);
+    if (route.kind !== 'image') return summary;
+    const capacity =
+      route.constraints.maxConditioningImages === 0
+        ? t('conversation.creativeStudio.briefReferences.engineCapacityNone')
+        : t('conversation.creativeStudio.briefReferences.engineCapacityMaximum', {
+            count: route.constraints.maxConditioningImages,
+          });
+    return `${summary} ${capacity}`;
+  };
+
   const selectedRouteSummary = (route: StudioRouteCatalogEntry): string =>
     slot.role === 'image'
       ? t(engineKey('summaryImage'), {
@@ -193,14 +205,19 @@ export const EngineSlot: React.FC<EngineSlotProps> = ({
                 <EngineMenuItem
                   key={route.choiceId}
                   route={route}
-                  summary={routeSummary(route)}
+                  summary={routeMenuSummary(route)}
                   onSelect={selectRoute}
                 />
               ))}
             </Menu.ItemGroup>
           ) : (
             slot.options.map((route) => (
-              <EngineMenuItem key={route.choiceId} route={route} summary={routeSummary(route)} onSelect={selectRoute} />
+              <EngineMenuItem
+                key={route.choiceId}
+                route={route}
+                summary={routeMenuSummary(route)}
+                onSelect={selectRoute}
+              />
             ))
           )}
         </Menu>

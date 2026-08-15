@@ -880,6 +880,29 @@
     }
   },
   "creativeStudio": {
+    "briefReferences": {
+      "title": "Proje referansları",
+      "inheritanceDescription": "Her yeni referans karesi, bu projedeki tüm etkin Oyuncu ve Görünüm görsellerini kullanır.",
+      "castHeading": "Oyuncu",
+      "lookHeading": "Görünüm",
+      "castEmpty": "Henüz oyuncu referansı yok.",
+      "lookEmpty": "Henüz görünüm referansı yok.",
+      "addCast": "Oyuncu referansı ekle",
+      "addLook": "Görünüm referansı ekle",
+      "activeCount": "{{count}} etkin referans",
+      "activeCount_one": "{{count}} etkin referans",
+      "activeCount_other": "{{count}} etkin referans",
+      "limitReached": "Bu projede zaten 6 etkin referans var. Yeni bir tane eklemeden önce birini kaldırın.",
+      "removeFromBrief": "Brief'ten kaldır",
+      "removeAccessible": "{{label}} referansını Brief'ten kaldır",
+      "previewAccessible": "{{role}} referansı: {{label}}",
+      "engineCapacityNone": "Bu görüntü motoru referans görselleri için doğrulanmadı. Model Ayarları'nı açıp yeniden doğrulayın.",
+      "engineCapacityMaximum": "En fazla {{count}} referans görseli",
+      "engineCapacityMaximum_one": "En fazla {{count}} referans görseli",
+      "engineCapacityMaximum_other": "En fazla {{count}} referans görseli",
+      "capacityMismatch": "{{count}} etkin referansınız var, ancak bu görüntü motoru {{maximum}} referansı destekliyor. Referansları kaldırana veya motoru değiştirip yeniden doğrulayana kadar yeni referans kareleri engellenir.",
+      "importError": "Referans eklenemedi. Yeniden deneyin."
+    },
     "rules": {
       "open": "Kurallar",
       "title": "Kurallar",
