@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/khoapnt-vng/WePrompt/blob/sprint3/docs/release/sprint3-internal/aioncore-v0.1.55.schema.json",
+  "title": "AionCore v0.1.55 Internal Release Record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "repository", "version", "tagCommit", "migrationLineageFingerprint", "assets"],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "repository": {
+      "const": "khoapnt-vng/aioncore"
+    },
+    "version": {
+      "const": "v0.1.55"
+    },
+    "tagCommit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "migrationLineageFingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "assets": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "$ref": "#/$defs/asset"
+      },
+      "allOf": [
+        {
+          "contains": {
+            "properties": {
+              "target": {
+                "const": "aarch64-apple-darwin"
+              }
+            },
+            "required": ["target"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "target": {
+                "const": "x86_64-pc-windows-msvc"
+              }
+            },
+            "required": ["target"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "name", "sha256", "binarySha256", "bundleManifestSha256"],
+      "properties": {
+        "target": {
+          "enum": ["aarch64-apple-darwin", "x86_64-pc-windows-msvc"]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "binarySha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "bundleManifestSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  }
+}
