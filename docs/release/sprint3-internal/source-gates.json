@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "candidateCommit": "6d4cca05628965bd041e9ec3a4693a7d11c1d2f5",
-  "generatedAt": "2026-08-15T16:34:23Z",
+  "candidateCommit": "a14792b08b4098c2b4abc15f1e1f6391e72155f1",
+  "generatedAt": "2026-08-15T16:44:11Z",
   "runner": {
     "os": "darwin",
     "architecture": "arm64",
@@ -106,13 +106,36 @@
       }
     },
     {
+      "name": "package-inventory-tests",
+      "command": [
+        "bunx",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "tests/unit/release/internalPackageInventory.test.ts",
+        "tests/unit/releasePackagingConfig.test.ts",
+        "tests/unit/assets/afterPackAioncoreIsolation.test.ts"
+      ],
+      "result": "green",
+      "exitCode": 0,
+      "summary": {
+        "testFilesPassed": 3,
+        "testsPassed": 82
+      },
+      "log": {
+        "path": "artifacts/sprint3-internal/source-gates/package-inventory.log",
+        "sha256": "655ba86f01498a3e072fc744f4dd020d1c4e4953c3121c363c81a40d050d22bf"
+      }
+    },
+    {
       "name": "full-suite",
       "command": ["bun", "run", "test"],
       "result": "blocked_pending_independent_review",
       "ledger": {
         "path": "docs/release/sprint3-internal/full-suite-ledger.json",
-        "sha256": "2ea58db08f60f11b908dc4756c8f9174342656f90383f96a95c093e7fda1b88c",
-        "totalRunCount": 2,
+        "sha256": "7549d40889e1d60e36fe0cc0a1868f4c8bbaa2c84a3370e5ada0ad2a621c40be",
+        "totalRunCount": 3,
         "resolutionAttempt": {
           "commit": "6d4cca05628965bd041e9ec3a4693a7d11c1d2f5",
           "result": "green",
@@ -121,6 +144,15 @@
           "testsPassed": 8228,
           "testsSkipped": 19,
           "rawLogSha256": "080f087b4e9d8710f49605a9a316ed159a86ffa26c0c54b3d897397e677560e8"
+        },
+        "candidateAttempt": {
+          "commit": "a14792b08b4098c2b4abc15f1e1f6391e72155f1",
+          "result": "green",
+          "testFilesPassed": 631,
+          "testFilesSkipped": 1,
+          "testsPassed": 8241,
+          "testsSkipped": 19,
+          "rawLogSha256": "746222bd7c9542842e6d2a75a1067ff4df31981b8b0bf3304a39ca8399c49942"
         }
       }
     }
