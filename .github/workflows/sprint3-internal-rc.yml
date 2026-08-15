@@ -27,7 +27,7 @@ jobs:
       - name: Validate exact commit input
         shell: pwsh
         run: |
-          if ('${{ inputs.weprompt_commit }}' -cnotmatch '^[0-9a-f]{40}$') {
+          if ($env:WEPROMPT_RELEASE_COMMIT -cnotmatch '^[0-9a-f]{40}$') {
             throw 'weprompt_commit must be one exact lowercase 40-character Git SHA'
           }
 
@@ -40,7 +40,7 @@ jobs:
       - name: Verify exact checkout
         shell: pwsh
         run: |
-          if ((git rev-parse HEAD) -cne '${{ inputs.weprompt_commit }}') {
+          if ((git rev-parse HEAD) -cne $env:WEPROMPT_RELEASE_COMMIT) {
             throw 'checked-out commit does not match weprompt_commit'
           }
 
@@ -123,7 +123,7 @@ jobs:
           --aioncore-record docs/release/sprint3-internal/aioncore-v0.1.55.json
           --platform windows-x64
           --resources-dir out/win-unpacked/resources
-          --weprompt-commit "${{ inputs.weprompt_commit }}"
+          --weprompt-commit "$env:WEPROMPT_RELEASE_COMMIT"
           --output "$env:RUNNER_TEMP/package-report.json"
 
       - name: Upload unsigned Windows x64 candidate
@@ -152,7 +152,7 @@ jobs:
           persist-credentials: false
 
       - name: Verify exact checkout
-        run: test "$(git rev-parse HEAD)" = "${{ inputs.weprompt_commit }}"
+        run: test "$(git rev-parse HEAD)" = "$WEPROMPT_RELEASE_COMMIT"
 
       - name: Set up Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -216,7 +216,7 @@ jobs:
           --aioncore-record docs/release/sprint3-internal/aioncore-v0.1.55.json
           --platform macos-arm64
           --resources-dir out/mac-arm64/WePrompt.app/Contents/Resources
-          --weprompt-commit "${{ inputs.weprompt_commit }}"
+          --weprompt-commit "$WEPROMPT_RELEASE_COMMIT"
           --output "$RUNNER_TEMP/package-report.json"
 
       - name: Upload unsigned macOS ARM64 candidate

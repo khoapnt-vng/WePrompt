@@ -658,7 +658,11 @@ describe('release packaging configuration', () => {
     expect(workflow).toContain('runs-on: windows-2022');
     expect(workflow).toContain('runs-on: macos-15');
     expect(workflow).toMatch(/macos-arm64:\s*\n\s+needs: windows-x64/);
-    expect(workflow).toContain('test "$(git rev-parse HEAD)" = "${{ inputs.weprompt_commit }}"');
+    expect(workflow).toContain("if ($env:WEPROMPT_RELEASE_COMMIT -cnotmatch '^[0-9a-f]{40}$')");
+    expect(workflow).toContain('if ((git rev-parse HEAD) -cne $env:WEPROMPT_RELEASE_COMMIT)');
+    expect(workflow).toContain('test "$(git rev-parse HEAD)" = "$WEPROMPT_RELEASE_COMMIT"');
+    expect(workflow).not.toContain("'${{ inputs.weprompt_commit }}'");
+    expect(workflow).not.toContain('"${{ inputs.weprompt_commit }}"');
     expect(workflow).toContain("WEPROMPT_INTERNAL_RELEASE: '1'");
     expect(workflow).toContain('WEPROMPT_RELEASE_COMMIT: ${{ inputs.weprompt_commit }}');
     expect(workflow).toContain('bun-version: 1.3.14');
