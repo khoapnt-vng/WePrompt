@@ -23,9 +23,14 @@ import type {
 import { isValidProviderJobId, ProviderDeadlineError, runWithProviderDeadline } from './types';
 
 export const OPENROUTER_VIDEO_BASE_URL = 'https://openrouter.ai/api/v1';
+/**
+ * OpenRouter models may support frame images, but this desktop adapter owns only managed local
+ * assets. The documented video path requires a directly downloadable public HTTPS URL, and no
+ * vetted publisher exists yet, so advertising first-frame support would permit a paid 400.
+ */
+export const OPENROUTER_MANAGED_FIRST_FRAME_SUPPORTED = false;
 const OPENROUTER_HOST = 'openrouter.ai';
 const VALIDATION_TIMEOUT_MS = 10_000;
-const FIRST_FRAME_MAX_BYTES = 30 * 1024 * 1024;
 
 export type OpenRouterVideoModelSpec = {
   minDuration: number;
@@ -33,7 +38,6 @@ export type OpenRouterVideoModelSpec = {
   resolutions: readonly ('720p' | '1080p')[];
   ratios: readonly ('16:9' | '9:16' | '1:1' | '4:3' | '3:4')[];
   supportsAudio: boolean;
-  supportsFirstFrame: boolean;
 };
 
 export const OPENROUTER_VIDEO_MODELS: Readonly<Record<string, OpenRouterVideoModelSpec>> = Object.freeze({
@@ -43,7 +47,6 @@ export const OPENROUTER_VIDEO_MODELS: Readonly<Record<string, OpenRouterVideoMod
     resolutions: ['720p', '1080p'],
     ratios: ['16:9', '9:16'],
     supportsAudio: true,
-    supportsFirstFrame: true,
   },
   'google/veo-3.1-fast': {
     minDuration: 4,
@@ -51,7 +54,6 @@ export const OPENROUTER_VIDEO_MODELS: Readonly<Record<string, OpenRouterVideoMod
     resolutions: ['720p', '1080p'],
     ratios: ['16:9', '9:16'],
     supportsAudio: true,
-    supportsFirstFrame: true,
   },
   'kwaivgi/kling-v3.0-std': {
     minDuration: 3,
@@ -59,7 +61,6 @@ export const OPENROUTER_VIDEO_MODELS: Readonly<Record<string, OpenRouterVideoMod
     resolutions: ['720p'],
     ratios: ['16:9', '9:16', '1:1'],
     supportsAudio: true,
-    supportsFirstFrame: true,
   },
   'kwaivgi/kling-v3.0-pro': {
     minDuration: 3,
@@ -67,7 +68,6 @@ export const OPENROUTER_VIDEO_MODELS: Readonly<Record<string, OpenRouterVideoMod
     resolutions: ['720p'],
     ratios: ['16:9', '9:16', '1:1'],
     supportsAudio: true,
-    supportsFirstFrame: true,
   },
   'bytedance/seedance-2.0': {
     minDuration: 4,
@@ -75,7 +75,6 @@ export const OPENROUTER_VIDEO_MODELS: Readonly<Record<string, OpenRouterVideoMod
     resolutions: ['720p', '1080p'],
     ratios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
     supportsAudio: true,
-    supportsFirstFrame: true,
   },
   'bytedance/seedance-2.0-fast': {
     minDuration: 4,
@@ -83,7 +82,6 @@ export const OPENROUTER_VIDEO_MODELS: Readonly<Record<string, OpenRouterVideoMod
     resolutions: ['720p'],
     ratios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
     supportsAudio: true,
-    supportsFirstFrame: true,
   },
 });
 
@@ -146,6 +144,9 @@ const requestValidation = (request: StudioGenerationRequest, provider: TProvider
   }
   if (!spec.resolutions.includes(request.resolution)) issues.push({ code: 'invalid_resolution' });
   if (!spec.ratios.includes(request.aspectRatio)) issues.push({ code: 'invalid_resolution' });
+  if ('firstFrame' in request && request.firstFrame !== undefined && !OPENROUTER_MANAGED_FIRST_FRAME_SUPPORTED) {
+    issues.push({ code: 'invalid_reference' });
+  }
   return issues.length > 0
     ? { ok: false, issues }
     : {
@@ -282,7 +283,7 @@ export const createOpenRouterVideoAdapter = (deps: OpenRouterVideoAdapterDeps = 
             resolutions: [...spec.resolutions],
             minDurationSeconds: spec.minDuration,
             maxDurationSeconds: spec.maxDuration,
-            supportsFirstFrame: spec.supportsFirstFrame,
+            supportsFirstFrame: OPENROUTER_MANAGED_FIRST_FRAME_SUPPORTED,
             cancellationPolicy: 'none',
           },
         };
@@ -322,15 +323,6 @@ export const createOpenRouterVideoAdapter = (deps: OpenRouterVideoAdapterDeps = 
         resolution: request.resolution,
       };
       if (spec.supportsAudio) payload.generate_audio = true;
-      if (request.firstFrame && spec.supportsFirstFrame) {
-        payload.frame_images = [
-          {
-            type: 'image_url',
-            image_url: { url: await request.firstFrame.asDataUrl(FIRST_FRAME_MAX_BYTES) },
-            frame_type: 'first_frame',
-          },
-        ];
-      }
       const body = await requestJson(fetcher, videosUrl(provider), provider, {
         method: 'POST',
         body: JSON.stringify(payload),

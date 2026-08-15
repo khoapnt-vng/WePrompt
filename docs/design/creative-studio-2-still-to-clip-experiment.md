@@ -109,3 +109,24 @@ strategy changes, and it is better to learn it from three generations than from 
 
 The last-frame chain — clip 2 starting from clip 1's final frame — is Phase 3b and needs sections.
 This experiment tests **still → clip**, once and twice, not clip → clip.
+
+## 2026-08-15 partial run — OpenRouter first-frame path failed closed
+
+This is a partial run, not an experiment verdict. The approved still succeeded through OpenRouter with
+`google/gemini-3-pro-image` / Image API; job `4d7905e1-898f-4e7c-9c00-e75cb8decec2` retained a JPEG
+whose SHA-256 is `b78620a730d3539e53c8eda01a7ad2ee32571c7226adec3c6489f0b4f08ac670`. The approved Clip 1
+request used OpenRouter / `bytedance/seedance-2.0` / `openrouter-video-v1`, reached canonical model
+`bytedance/seedance-2.0-20260414` at Seed as generation
+`gen-vid-1786754801-BRVVfG8p3G8jtHKPf5Z1`, and failed with HTTP 400 after 3.9 seconds and one
+attempt. It produced no output. The OpenRouter dashboard routing detail also failed to load, so no
+provider error body or cost was visible. This does **not** establish that the attempt was uncharged.
+
+Q1 and Q2 remain unanswered: there is no completed clip, no frame 0 to compare to the still, and no
+coherence judgement. Do not retry the unchanged request or spend again on this path.
+
+The current adapter supplied the managed first frame as an inline data URL. The official video path
+requires a stable, publicly downloadable HTTPS URL. Treat OpenRouter managed-first-frame support as
+failed closed until a vetted publisher supplies that URL; the inline-data-URL mismatch is the leading
+integration explanation, not a confirmed provider error because the routing detail is unavailable.
+The gate now requires either a direct BytePlus run or an explicitly approved public-URL publisher
+before retrying the OpenRouter route.

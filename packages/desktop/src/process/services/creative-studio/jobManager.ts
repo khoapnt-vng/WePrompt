@@ -626,6 +626,13 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
         throw new StudioJobManagerError('invalid_route');
       }
     }
+    const resolvedRequest = {
+      ...baseRequest,
+      ...validation.normalized,
+      ...(firstFrame ? { firstFrame } : {}),
+    };
+    const resolvedValidation = adapter.validateRequest(resolvedRequest, resolvedProvider);
+    if (!resolvedValidation.ok) throw new StudioJobManagerError('invalid_route');
     return {
       projectId: project.id,
       sceneId,
@@ -636,9 +643,8 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       provider: resolvedProvider,
       cancellationPolicy: catalogRoute.cancellationPolicy,
       request: {
-        ...baseRequest,
-        ...validation.normalized,
-        ...(firstFrame ? { firstFrame } : {}),
+        ...resolvedRequest,
+        ...resolvedValidation.normalized,
       },
     };
   };

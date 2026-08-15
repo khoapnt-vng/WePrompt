@@ -36,6 +36,7 @@ import {
   type StudioJobManagerDeps,
   type StudioResolvedSceneRouteSnapshot,
 } from '@process/services/creative-studio/jobManager';
+import { createOpenRouterVideoAdapter } from '@process/services/creative-studio/adapters/openRouterVideoAdapter';
 import { createStudioMediaStore, type StudioMediaStore } from '@process/services/creative-studio/mediaStore';
 import { createCreativeStudioStore, type CreativeStudioStore } from '@process/services/creative-studio/store';
 import type { RemoteMediaBudget } from '@process/services/remote-media';
@@ -1631,6 +1632,51 @@ describe('StudioJobManager route and reference isolation', () => {
     expect(imported.id).toBe(withReference.scenes.scene_1.referenceAssetId);
     expect(submit).not.toHaveBeenCalled();
     expect((await harness.store.getProject(harness.project.id))?.jobs).toEqual({});
+  });
+
+  it('rejects a legacy OpenRouter first-frame route before job persistence or provider fetch', async () => {
+    const fetch = vi.fn();
+    const openRouterAdapter = createOpenRouterVideoAdapter({ fetch });
+    const openRouterProvider: IProvider = {
+      ...provider,
+      base_url: 'https://openrouter.ai/api/v1',
+      api_key: 'sk-or-test',
+      models: ['bytedance/seedance-2.0-fast'],
+    };
+    const openRouterRoute: StudioResolvedSceneRouteSnapshot = {
+      sceneId: 'scene_1',
+      providerId: openRouterProvider.id,
+      adapterId: 'openrouter-video-v1',
+      model: 'bytedance/seedance-2.0-fast',
+      kind: 'video',
+    };
+    const harness = await createHarness(openRouterAdapter, {
+      provider: openRouterProvider,
+      routes: [openRouterRoute],
+      scenes: [scene({ mediaKind: 'video', durationSeconds: 5 })],
+    });
+    const sourcePath = path.join(harness.rootDir, 'reference.png');
+    await writeFile(sourcePath, png);
+    await harness.mediaStore.importReferenceFromPath({
+      projectId: harness.project.id,
+      sceneId: 'scene_1',
+      sourcePath,
+      expectedRevision: harness.project.revision,
+    });
+    const withReference = (await harness.store.getProject(harness.project.id))!;
+
+    await expect(
+      harness.manager.submitScenes({
+        projectId: withReference.id,
+        expectedRevision: withReference.revision,
+        sceneIds: ['scene_1'],
+        routes: [openRouterRoute],
+        catalogVersion: 'catalog_1',
+      })
+    ).rejects.toMatchObject({ code: 'invalid_route' });
+
+    expect((await harness.store.getProject(harness.project.id))?.jobs).toEqual({});
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('serializes deletion behind durable submission and refuses the active project atomically', async () => {

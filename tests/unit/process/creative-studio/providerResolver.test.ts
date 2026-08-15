@@ -306,8 +306,27 @@ describe('createStudioProviderResolver', () => {
     expect(catalog.routes).toEqual([
       expect.objectContaining({
         adapterId: 'openrouter-video-v1',
-        constraints: expect.objectContaining({ silentOutput: false }),
+        constraints: expect.objectContaining({ silentOutput: false, supportsFirstFrame: false }),
       }),
+    ]);
+  });
+
+  it('does not restore first-frame support from a legacy OpenRouter binding', async () => {
+    const openRouter = provider({
+      base_url: 'https://openrouter.ai/api/v1',
+      api_key: 'sk-or-test',
+      models: ['bytedance/seedance-2.0-fast'],
+    });
+    const legacyBinding = binding({
+      adapterId: 'openrouter-video-v1',
+      model: 'bytedance/seedance-2.0-fast',
+      capabilities: gatewayCapabilities({ audioModes: ['audio'], supportsFirstFrame: true }),
+    });
+
+    const catalog = await resolver([openRouter], [legacyBinding]).listGenerationRoutes();
+
+    expect(catalog.routes).toMatchObject([
+      { adapterId: 'openrouter-video-v1', constraints: { supportsFirstFrame: false } },
     ]);
   });
 

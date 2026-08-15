@@ -103,23 +103,17 @@ describe('OpenRouter video generation adapter', () => {
     expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body))).not.toHaveProperty('generate_audio');
   });
 
-  it('adds one first-frame image and enforces the 30 MB conversion cap', async () => {
+  it('rejects a managed first frame before data-url conversion or provider submission', async () => {
     const fetch = vi.fn(async () => response(202, { id: 'job_abc', status: 'pending' }));
     const asDataUrl = vi.fn(async () => 'data:image/png;base64,QUJD');
     const adapter = createOpenRouterVideoAdapter({ fetch });
 
-    await adapter.submit({ ...request, firstFrame: firstFrame(asDataUrl) }, provider(), new AbortController().signal);
+    await expect(
+      adapter.submit({ ...request, firstFrame: firstFrame(asDataUrl) }, provider(), new AbortController().signal)
+    ).rejects.toMatchObject({ code: 'unsupported' });
 
-    expect(asDataUrl).toHaveBeenCalledWith(30 * 1024 * 1024);
-    expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body))).toMatchObject({
-      frame_images: [
-        {
-          type: 'image_url',
-          image_url: { url: 'data:image/png;base64,QUJD' },
-          frame_type: 'first_frame',
-        },
-      ],
-    });
+    expect(asDataUrl).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -197,7 +191,7 @@ describe('OpenRouter video generation adapter', () => {
         resolutions: [...spec.resolutions],
         minDurationSeconds: spec.minDuration,
         maxDurationSeconds: spec.maxDuration,
-        supportsFirstFrame: true,
+        supportsFirstFrame: false,
         cancellationPolicy: 'none',
       },
     });
