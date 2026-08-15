@@ -223,6 +223,8 @@ export type StudioMediaStoreDeps = {
   limits?: Partial<StudioMediaLimits>;
   /** Test seam for deterministic replacement exactly before cleanup takes ownership of a path. */
   beforeCleanupOwnership?: (filePath: string) => Promise<void>;
+  /** Test seam for a replacement after no-replace restoration of a mismatched quarantine. */
+  afterCleanupRestore?: (filePath: string, quarantinePath: string) => Promise<void>;
 };
 
 const truncateUtf8 = (value: string, maxBytes: number): string => {
@@ -527,12 +529,13 @@ const finalizeManagedPart = async (
 
 /**
  * Atomically takes ownership of the current directory entry before inspecting it. A mismatched
- * entry is restored without replacement when possible, or retained in quarantine on any conflict.
+ * entry may be restored without replacement, but is always retained in quarantine for recovery.
  */
 const unlinkIfIdentityMatches = async (
   filePath: string,
   expected: FileIdentity,
-  beforeOwnership?: (filePath: string) => Promise<void>
+  beforeOwnership?: (filePath: string) => Promise<void>,
+  afterRestore?: (filePath: string, quarantinePath: string) => Promise<void>
 ): Promise<void> => {
   let quarantineDirectory: string | null = null;
   let quarantinePath: string | null = null;
@@ -558,8 +561,10 @@ const unlinkIfIdentityMatches = async (
       try {
         // link() never replaces a new owner at the original path. If that path is occupied or
         // restoration otherwise fails, the unverified entry remains in its private quarantine.
+        // The quarantine is retained even after restoration so no later pathname race can remove
+        // the final link to an inode that this cleanup operation does not own.
         await fs.link(quarantinePath, filePath);
-        await fs.unlink(quarantinePath);
+        await afterRestore?.(filePath, quarantinePath);
       } catch {
         // Preserve the unverified entry in quarantine rather than broadening cleanup.
       }
@@ -858,10 +863,10 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       return input.returnProject ? { asset: importedAsset, project: updatedProject } : importedAsset;
     } catch (error) {
       if (partPath !== null && partIdentity !== null) {
-        await unlinkIfIdentityMatches(partPath, partIdentity, deps.beforeCleanupOwnership);
+        await unlinkIfIdentityMatches(partPath, partIdentity, deps.beforeCleanupOwnership, deps.afterCleanupRestore);
       }
       if (finalPath !== null && finalIdentity !== null) {
-        await unlinkIfIdentityMatches(finalPath, finalIdentity, deps.beforeCleanupOwnership);
+        await unlinkIfIdentityMatches(finalPath, finalIdentity, deps.beforeCleanupOwnership, deps.afterCleanupRestore);
       }
       return mapStoreError(error);
     }

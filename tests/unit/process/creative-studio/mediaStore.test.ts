@@ -745,6 +745,45 @@ describe('createStudioMediaStore', () => {
     await expect(fs.readFile(partPath, 'utf8')).resolves.toBe('replacement part');
   });
 
+  it('retains a mismatched quarantine across a replacement after no-replace restoration', async () => {
+    const { rootDir, store } = await makeStore();
+    const canonicalRootDir = await fs.realpath(rootDir);
+    const sourcePath = path.join(rootDir, 'invalid-reference.txt');
+    const replacementPath = path.join(rootDir, 'unverified-replacement-part');
+    const laterOwnerPath = path.join(rootDir, 'later-owner-part');
+    const partPath = path.join(canonicalRootDir, 'project_1', 'parts', 'asset_restore_race.part');
+    await fs.writeFile(sourcePath, 'not media');
+    await fs.writeFile(replacementPath, 'unverified replacement bytes');
+    await fs.writeFile(laterOwnerPath, 'later owner bytes');
+    let quarantinePath: string | null = null;
+    let restorationWindowReached = false;
+    const media = createStudioMediaStore({
+      store,
+      createId: () => 'asset_restore_race',
+      beforeCleanupOwnership: async (target) => {
+        if (target !== partPath) return;
+        await fs.rm(partPath, { force: true });
+        await fs.rename(replacementPath, partPath);
+      },
+      afterCleanupRestore: async (target, quarantined) => {
+        if (target !== partPath) return;
+        quarantinePath = quarantined;
+        await fs.unlink(partPath);
+        await fs.rename(laterOwnerPath, partPath);
+        restorationWindowReached = true;
+      },
+    });
+
+    await expect(
+      media.importReferenceFromPath({ projectId: 'project_1', sourcePath, expectedRevision: 1 })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+
+    expect(restorationWindowReached).toBe(true);
+    expect(quarantinePath).not.toBeNull();
+    await expect(fs.readFile(partPath, 'utf8')).resolves.toBe('later owner bytes');
+    await expect(fs.readFile(quarantinePath!, 'utf8')).resolves.toBe('unverified replacement bytes');
+  });
+
   it('never deletes a final-path replacement installed after the old identity-check window', async () => {
     const { rootDir, store } = await makeStore();
     const canonicalRootDir = await fs.realpath(rootDir);
