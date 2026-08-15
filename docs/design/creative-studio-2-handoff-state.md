@@ -157,9 +157,21 @@ are the actual critical path now.
 
 ---
 
-## One thing worth proving before committing to phase 3
+## Provider gate completed before Phase 3a Task 1
 
-**The still→clip path has never run against a real provider pair.** The only end-to-end evidence is
-against `e2eFakeAdapter`. Whether a real image route produces a still that a real video engine
-visibly continues from is unproven — and it is the assumption the whole coherence phase rests on. One
-manual pair proves or kills it in about an hour.
+**The still→clip admission gate passed for one real OpenRouter route.** The completed control used
+integration/provider `d1ff983b`, adapter `openrouter-video-v1`, `bytedance/seedance-2.0`, 5 seconds,
+16:9, 720p and an inline managed JPEG first frame for scene `pitch_action`, **On the Pitch**. Both the
+original and fresh controlled 1280x720 H.264 clips (24 fps, 121 decoded frames, AAC, approximately
+5.04 seconds) visibly preserved the shared reference composition and first-frame identity. Q1 SSIM
+was `0.898096` from reference to original frame 0, `0.898209` from reference to controlled frame 0,
+and `0.985962` between the clips' frame 0s. The human Q2 owner verdict was:
+**“different but feel like the same for sure”**
+
+This is a same-film coherence pass for the OpenRouter route.
+
+Phase 3a Task 1 is admitted. The result remains route-specific: both clips reused the same action
+prompt, silhouetted subjects show role/world continuity rather than exact face/cast identity, and
+sampled frames/endpoint metrics do not prove flawless motion or physics. It disproves an HTTPS
+publisher requirement for this OpenRouter inline-first-frame route, but does not transfer to BytePlus
+or prove multi-image conditioning.

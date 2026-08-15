@@ -170,11 +170,20 @@ duplicates what sections give you for free.
 So _"if only two phases happen: one and three"_ survives, correctly re-priced: **phases 1 + 1.5 + 3a**
 gets an enforced brief and consistent-looking output, without the restructure. 3b follows phase 2.
 
-One caution that no estimate covers: **the still→clip path has never run against a real provider
-pair.** The only end-to-end evidence is `generationLifecycle.integration.test.ts:451` against
-`e2eFakeAdapter`. Whether a real image route produces a still a real video engine visibly continues
-from is unproven, and it is the assumption the whole phase rests on. Prove it with one manual pair
-before committing the phase.
+The still→clip admission gate is now complete for one real OpenRouter route. The **On the Pitch**
+control used integration/provider `d1ff983b`, `openrouter-video-v1`,
+`bytedance/seedance-2.0`, 5 seconds, 16:9, 720p and an inline managed JPEG first frame. Both the
+original and fresh controlled clips preserved the shared reference composition and first-frame
+identity: reference-to-original frame 0 SSIM `0.898096`, reference-to-controlled frame 0 SSIM
+`0.898209`, and original-to-controlled frame 0 SSIM `0.985962`. The human Q2 owner verdict,
+**“different but feel like the same for sure”**, passes same-film coherence for this route and admits
+Phase 3a Task 1.
+
+That admission is not a general provider claim. Both clips reused the same action prompt;
+silhouetted subjects show role/world continuity, not exact face/cast identity; and sampled frames and
+endpoint metrics do not prove flawless motion or physics. The control disproves an HTTPS-publisher
+requirement for this OpenRouter inline-first-frame route, but does not transfer to BytePlus or prove
+multi-image conditioning.
 
 Also: feeding cast and look references into the plate **inverts a documented decision** —
 `jobManager.ts:590` guards `output.role !== 'reference'` and `:556-557` states that a reference plate

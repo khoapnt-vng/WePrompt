@@ -6,8 +6,10 @@ One hour, three paid generations, no code. It decides whether Phase 3a is worth 
 clip's first frame, yields a clip that visibly continues from that still — and two clips built from
 the same still look like they belong in the same film.
 
-Every piece of evidence for this today comes from `e2eFakeAdapter`. A fake adapter proves the
-plumbing carries a field. It cannot prove two real models agree about a face.
+`e2eFakeAdapter` proves that the plumbing carries a field. It cannot prove two real models agree
+about a face. The 2026-08-15 controlled OpenRouter result below is the completed real-provider
+still-to-clip admission gate for that route; it is not evidence that the result transfers to
+BytePlus or that multi-image conditioning is available.
 
 ---
 
@@ -38,11 +40,13 @@ coherence.
 - **Shot duration ≥ 4 seconds.** The engine floor is 4s and authoring still accepts 1–3s, which fails
   at render — after the money.
 
-## S1.5 is no longer the technical blocker; the experiment has not run
+## S1.5 is no longer the technical blocker; the route-specific control has run
 
 The current branch has explicit project-level image and video selection, so S1.5 no longer prevents
-this experiment. That is implementation evidence, not provider evidence: the human sign-off still
-requires all three paid generations below, and this document makes no claim that they ran.
+this experiment. The successful controlled OpenRouter run recorded below supplies the required
+route-specific provider evidence and same-film coherence sign-off, admitting Phase 3a Task 1. It
+does not prove multi-image capacity, exact face/cast identity, flawless motion or physics, or any
+result on BytePlus.
 
 **A project was prepared during the earlier attempt**, with zero spend recorded at that point:
 
@@ -93,12 +97,13 @@ Save all of it — this is the evidence, and a screenshot of a verdict is not ev
 | **Q1 passes, Q2 fails within one clip**                                 | the engine accepts the frame and then drifts away from it | 3a as designed does not deliver coherence. **This is the phase-killing result and the most valuable one.**         |
 | **Q1 passes, within-clip holds, the two clips do not match each other** | continuation works, shared conditioning does not          | 3a is narrower than promised: it buys continuity inside a clip, not a consistent film. Re-scope before committing. |
 
-## Why this is worth an hour before any planning
+## Why this was worth an hour before planning
 
 Phase 3a is 12–17 hand-days, and the programme plan puts it **before** the expensive model
-restructure precisely so coherence is proven early. That ordering only pays if the premise is
-actually tested. Planning 3a first would mean writing a detailed plan for a mechanism nobody has
-watched work.
+restructure precisely so coherence is proven early. The controlled OpenRouter result below admitted
+Task 1 for that route before implementation started. Its limitations remain explicit: it is not a
+multi-image capacity proof, it did not use an explicitly different-action prompt, and it does not
+transfer to BytePlus.
 
 The handoff is explicit that this is the strongest lever available — _"two clips with identical refs
 and sloppy prompts match better than two with careful prompts and different refs"_ — and that
@@ -110,22 +115,23 @@ strategy changes, and it is better to learn it from three generations than from 
 The last-frame chain — clip 2 starting from clip 1's final frame — is Phase 3b and needs sections.
 This experiment tests **still → clip**, once and twice, not clip → clip.
 
-## 2026-08-15 partial run — OpenRouter returned HTTP 400; cause unconfirmed
+## 2026-08-15 failed case — Scarf and telescope, OpenRouter HTTP 400; cause unconfirmed
 
-This is a partial run, not an experiment verdict. The approved still succeeded through OpenRouter with
+This is a request-specific failed case, not an experiment verdict. The approved still succeeded through OpenRouter with
 `google/gemini-3-pro-image` / Image API; job `4d7905e1-898f-4e7c-9c00-e75cb8decec2` retained a JPEG
 whose SHA-256 is `b78620a730d3539e53c8eda01a7ad2ee32571c7226adec3c6489f0b4f08ac670`. The approved Clip 1
 request used OpenRouter / `bytedance/seedance-2.0` / `openrouter-video-v1`, reached canonical model
 `bytedance/seedance-2.0-20260414` at Seed, and failed with HTTP 400 after 3.9 seconds and one attempt.
 The dashboard displayed upstream request `gen-vid-1786754801-BRVVfG8p3G8jtHKPf5Z1`, but the app
 could not have retained that ID because it persists a provider job ID only after a successful submit
-response; a later `/api/v1/generation` lookup also returned 404. Treat the value as dashboard
-telemetry, not as a durable Studio job identity. It produced no output. The adapter discarded the
-non-2xx body, and the dashboard routing detail failed to load, so no provider classification or cost
-was visible. This does **not** establish that the attempt was uncharged.
+response; a later `/api/v1/generation/content` lookup returned 404. Treat the value as dashboard
+telemetry, not as a durable Studio job identity. Neither the original attempt nor its acknowledged
+retry created a durable provider job or output. The adapter discarded the non-2xx body, and the
+provider response body was not retrievable, so no provider classification or cost was visible.
+Neither failure establishes that the request was uncharged.
 
-Q1 and Q2 remain unanswered: there is no completed clip, no frame 0 to compare to the still, and no
-coherence judgement.
+This failed case leaves Q1 and Q2 unanswered for the Scarf-and-telescope request: there is no
+completed clip, no frame 0 to compare to the still, and no coherence judgement.
 
 The adapter supplied the managed first frame as an inline data URL. The earlier conclusion that
 OpenRouter therefore required a public HTTPS publisher was wrong. Local durable evidence records four
@@ -137,8 +143,44 @@ data URL for `frame_images`. The 2026-08-15 failure could instead be input-speci
 validation/routing change. Without the discarded response classification, the evidence cannot choose
 between them.
 
-For the approved controlled re-run, use a **fresh, single-scene** named review for **On the Pitch**
-with its original verified reference, standard `bytedance/seedance-2.0`, 5s, 16:9 and 720p. Do not use
-the failed job's generic Retry action and do not widen the request into the four-scene historical
-batch. The adapter records only allowlisted non-2xx classification tags; it never records a raw
-provider body, message, prompt, API key, URL or data URL.
+The approved control was a **fresh, single-scene** named review for **On the Pitch** with its original
+verified reference, standard `bytedance/seedance-2.0`, 5s, 16:9 and 720p. It did not use the failed
+job's generic Retry action or widen the request into the four-scene historical batch. The adapter
+records only allowlisted non-2xx classification tags; it never records a raw provider body, message,
+prompt, API key, URL or data URL.
+
+## 2026-08-15 controlled result — On the Pitch, OpenRouter admission gate passed
+
+The approved fresh, single-scene control completed through OpenRouter integration/provider
+`d1ff983b`, adapter `openrouter-video-v1`, model `bytedance/seedance-2.0`, at 5 seconds, 16:9 and
+720p. It supplied the first frame as an inline managed JPEG. The project manifest was
+`/Users/lap16603/Library/Application Support/Forge-Dev/config/creative-studio/3e477e8b_5ff2_44bc_8afa_4e25486b6b0d/project.json`;
+the scene was `pitch_action`, **On the Pitch**.
+
+The shared reference was asset `eeb9a494_8093_42ca_97ff_53629b77c4d9`, a 1376x768 JPEG of 716,790
+bytes, SHA-256 `d8edc0009296fed8f1f75e63c9d87785c077f16e7c3562b4adfe3e8e59d37f24`.
+
+- The original clip was job `4e251e85-33ec-4810-8b79-9ad540b7a1d8`, provider job
+  `fISdRphdD2aqao9VYg4E`, video asset `5cd67fbf_7ce0_4f64_91e8_b23168ed34f6`, SHA-256
+  `c535312f53abdb850ead117a655e1e37c404ec0b120d9a4881b87e07726ae80f`.
+- The fresh controlled clip was job `d4549fab-91a7-40d0-b7d0-0ce9f370db18`, provider job
+  `4RpWfJuDgLmdsiK7v8ww`, video asset `a7c77fa9_c994_4a0f_b57e_9e616cb3a4fb`, SHA-256
+  `d8ef7b4940169b1c79134771ef7b0439397c7894d5e9c2e747789a5fe56fc72e`.
+
+Both MP4s are 1280x720 H.264 at 24 fps, with 121 decoded frames, AAC audio and approximately 5.04
+seconds duration. Q1 passed objectively: reference-to-original frame 0 SSIM was `0.898096`,
+reference-to-controlled frame 0 SSIM was `0.898209`, and original-to-controlled frame 0 SSIM was
+`0.985962`. Both visibly preserve the reference composition and first-frame identity.
+
+Q2 passed for same-film coherence on this OpenRouter route. The human owner verdict was:
+**“different but feel like the same for sure”**
+
+Phase 3a Task 1 is therefore admitted.
+
+This result remains deliberately narrow. Both clips reused the same action prompt rather than an
+explicitly different-action prompt. Silhouetted subjects establish role/world continuity, not exact
+face or cast identity. Sampled frames and endpoint metrics do not by themselves prove flawless motion
+or physics. The successful inline first-frame control disproves the claim that this OpenRouter route
+requires an HTTPS publisher; it does not transfer that conclusion to BytePlus. It also does not prove
+multi-image conditioning, which remains scheduled for Task 8.5 before Task 9 / production nonzero
+capability.

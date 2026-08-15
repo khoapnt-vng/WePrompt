@@ -414,9 +414,16 @@ in-app cure. If phases 1 and 3 are the two that ship, route selection ships with
 ### Phase 3a: provider-neutral still stage — owner decisions (15 Aug 2026)
 
 The owner approves the following Phase 3a reference-management contract. This approves the product
-decisions, not provider spend or provider capability claims: the separate still-to-clip and
-multi-image evidence gate remains required before implementation, and each paid still and clip keeps
-its existing explicit confirmation.
+decisions, not provider spend or broad provider capability claims. The separate still-to-clip
+admission gate is complete for the route-specific **On the Pitch** OpenRouter control: its Q1 frame-0
+comparison passed and the Q2 owner verdict was **“different but feel like the same for sure”**. It
+therefore admits Phase 3a Task 1, while each paid still and clip keeps its existing explicit
+confirmation.
+
+Multi-input image capacity is a separate proof and remains unproven. The product cannot exercise it
+until Tasks 4–8 add the exact reviewed path, so Task 8.5 remains scheduled to prove that capacity
+before Task 9 / production nonzero capability. It does not block Task 1, and the completed
+still-to-clip control does not prove multi-image conditioning or establish support on another route.
 
 1. All active Brief references apply to every new reference plate; 3a has no per-scene subset picker.
 2. Cast and look are organisational roles, not provider parameters. Main orders cast before look, then
