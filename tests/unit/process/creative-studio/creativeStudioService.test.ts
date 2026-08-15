@@ -3340,6 +3340,7 @@ describe('CreativeStudioService', () => {
     expect(projectResult?.jobs.job_1).not.toHaveProperty('remoteStartedAt');
     expect(projectResult?.jobs.job_1).not.toHaveProperty('idempotencyKey');
     expect(projectResult?.jobs.job_1).not.toHaveProperty('cancellationPolicy');
+    expect(projectResult?.jobs.job_1).not.toHaveProperty('outputRole');
     expect(projectResult?.jobs.job_1.canCancel).toBe(true);
     expect(projectResult?.jobs.job_1.canRetryDownload).toBe(false);
     expect(projectResult?.scenes.scene_1).not.toHaveProperty('providerJobId');
