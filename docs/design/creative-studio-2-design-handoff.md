@@ -410,3 +410,39 @@ in-app cure. If phases 1 and 3 are the two that ship, route selection ships with
    when a project needs an image route _and_ a video route, and what the no-route state says. To
    design next.
 2. **Wireframe 9c (stale badge, chain break) is approved to build as-is.**
+
+### Phase 3a: provider-neutral still stage — owner decisions (15 Aug 2026)
+
+The owner approves the following Phase 3a reference-management contract. This approves the product
+decisions, not provider spend or provider capability claims: the separate still-to-clip and
+multi-image evidence gate remains required before implementation, and each paid still and clip keeps
+its existing explicit confirmation.
+
+1. All active Brief references apply to every new reference plate; 3a has no per-scene subset picker.
+2. Cast and look are organisational roles, not provider parameters. Main orders cast before look, then
+   `createdAt`, then `id`, and the paid plate review names the ordered inputs.
+3. Six is the application ceiling for active Brief references. A route may truthfully admit fewer
+   (including zero); a seventh import is refused without mutation until one is detached.
+4. Import gives each reference a stable, sanitized basename label, suffixing duplicates under the
+   project revision guard. Rename and reorder are deferred.
+5. “Remove from Brief” is non-destructive: it clears the Brief classification while retaining the
+   project-level managed import. This slice adds neither delete-file nor reclassification browsing.
+6. A generated reference plate durably records its admitted visual prompt, ordered Brief-reference
+   IDs, aspect ratio, and resolution. Complete provenance becomes out of date when any of those
+   frame-defining inputs changes; legacy or incomplete provenance remains usable with freshness
+   reported as unknown. This is not Phase 3b predecessor or continuation staleness.
+7. Spend stays two-stage: the user separately confirms the named still with its named cast/look inputs,
+   then the named clip with its selected first frame. One confirmation never hides two provider calls.
+8. Changing Brief references does not delete a plate or invalidate completed takes. It may mark a
+   selected generated plate out of date for a future clip render, for which the user may retain it.
+9. A queued Director reference request auto-submits only with no active Brief references. If it would
+   use cast or look inputs, it opens the same exact paid review as a user-initiated plate; this is a
+   Phase 3a / Level 0 rule, not a budget, grant, or run-envelope model.
+10. Phase 3a uses a still stage even where a video route may later offer direct references: cast/look
+    inputs condition only the image plate, and the video route receives only that selected plate as
+    its first frame. This preserves a provider-neutral path compatible with the planned Phase 3b
+    chain and does not assert support, incompatibility, or cost for any unverified provider route.
+
+Phase 3a stays on the current flat scene model. It does not add sections, the Phase 3b last-frame
+chain, filesystem watching or a new cast/refs folder workflow, a direct-video reference mode, or
+Director write, selection, polling, budget, or run-grant authority.
