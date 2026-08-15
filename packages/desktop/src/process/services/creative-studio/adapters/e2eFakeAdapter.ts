@@ -18,10 +18,11 @@ import type {
   ProviderJobSnapshot,
   ProviderOutput,
   ProviderSubmitResult,
-  StudioGenerationRequest,
+  ResolvedStudioGenerationRequest,
   StudioRouteValidation,
 } from './types';
 import { BYTEPLUS_SEEDANCE_BASE_URL } from './bytePlusSeedanceAdapter';
+import { validateImageConditioningRequest } from './imageAdapter';
 
 export const STUDIO_E2E_FAKE_PROVIDER_ID = 'weprompt_studio_e2e';
 export const STUDIO_E2E_CREDENTIAL_SENTINEL = 'STUDIO_SECRET_CREDENTIAL_SENTINEL';
@@ -113,7 +114,7 @@ const acceptsModel = (
 ): boolean => expectedModels(catalogProfile, mediaKind).includes(model);
 
 const validateRequest = (
-  request: StudioGenerationRequest,
+  request: ResolvedStudioGenerationRequest,
   provider: { id: string; use_model: string },
   catalogProfile: StudioE2EFakeCatalogProfile,
   mediaKind: StudioMediaKind
@@ -128,6 +129,9 @@ const validateRequest = (
   }
   if (!Number.isInteger(request.durationSeconds) || request.durationSeconds < 1 || request.durationSeconds > 60) {
     issues.push({ code: 'invalid_duration' });
+  }
+  if (mediaKind === 'image' && !validateImageConditioningRequest(request, 6, false).ok) {
+    issues.push({ code: 'provider_unavailable' });
   }
   return issues.length > 0
     ? { ok: false, issues }

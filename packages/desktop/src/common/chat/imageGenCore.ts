@@ -206,6 +206,14 @@ interface ImageContent {
 }
 
 export async function processImageUri(imageUri: string, workspaceDir: string): Promise<ImageContent | null> {
+  if (imageUri.startsWith('data:')) {
+    decodeImageDataUrl(imageUri, HOSTED_IMAGE_MAX_BYTES);
+    return {
+      type: 'image_url',
+      image_url: { url: imageUri, detail: 'auto' },
+    };
+  }
+
   if (isHttpUrl(imageUri)) {
     return {
       type: 'image_url',
@@ -380,28 +388,15 @@ export async function executeImageGeneration(
 
     // Process image URIs
     if (hasImages) {
-      const imageResults = await Promise.allSettled(imageUris.map((uri) => processImageUri(uri, workspaceDir)));
-
-      const successful: ImageContent[] = [];
-      const errors: string[] = [];
-
-      imageResults.forEach((result, index) => {
-        if (result.status === 'fulfilled' && result.value) {
-          successful.push(result.value);
-        } else {
-          const error = result.status === 'rejected' ? result.reason : 'Unknown error';
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          errors.push(`Image ${index + 1} (${imageUris[index]}): ${errorMessage}`);
-        }
-      });
-
-      successful.forEach((imageContent) => contentParts.push(imageContent));
-
-      if (successful.length === 0) {
+      try {
+        const processed = await Promise.all(imageUris.map((uri) => processImageUri(uri, workspaceDir)));
+        if (processed.some((imageContent) => imageContent === null)) throw new Error('Invalid image input');
+        contentParts.push(...(processed as ImageContent[]));
+      } catch {
         return {
           success: false,
-          text: `Error: Failed to process any images. Errors:\n${errors.join('\n')}`,
-          error: errors.join('\n'),
+          text: 'Failed to process image inputs.',
+          error: 'invalid_image_input',
         };
       }
     }

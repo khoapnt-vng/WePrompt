@@ -26,6 +26,7 @@ import {
 import type {
   GenerationProviderAdapter,
   ProviderSubmitResult,
+  ResolvedProviderInput,
   ResolvedStudioGenerationRequest,
   StudioConnectionCandidate,
   StudioConnectionValidation,
@@ -54,7 +55,62 @@ export type ImageGenerationAdapterDeps = {
   ) => Promise<ImageGenResult>;
   workspaceDir: string;
   hostedImageDownloader?: HostedImageDownloader;
+  getMaxConditioningImages?: typeof getImageModelMaxConditioningImages;
   proxy?: string;
+};
+
+const MAX_CONDITIONING_IMAGES = 6;
+const CONDITIONING_IMAGE_BUDGET_BYTES = 30 * 1024 * 1024;
+
+type ImageConditioningValidation =
+  | { ok: true; conditioningImages: readonly ResolvedProviderInput[] | undefined }
+  | { ok: false };
+type ResolvedImageRequestValidation = {
+  routeValidation: StudioRouteValidation;
+  conditioningValidation: ImageConditioningValidation | null;
+};
+
+/** Cheap, main-only safety validation shared with the trusted packaged-refused fake image adapter. */
+export const validateImageConditioningRequest = (
+  request: ResolvedStudioGenerationRequest,
+  currentSafetyLimit: number,
+  imagesApiRoute: boolean
+): ImageConditioningValidation => {
+  const hasConditioningImages = request.conditioningImages !== undefined;
+  const hasConditioningImageLimit = request.conditioningImageLimit !== undefined;
+  if (request.firstFrame !== undefined || hasConditioningImages !== hasConditioningImageLimit) return { ok: false };
+  if (!hasConditioningImages) return { ok: true, conditioningImages: undefined };
+  if (imagesApiRoute || !Array.isArray(request.conditioningImages)) return { ok: false };
+
+  const frozenLimit = request.conditioningImageLimit;
+  if (
+    !Number.isSafeInteger(frozenLimit) ||
+    frozenLimit! < 0 ||
+    frozenLimit! > MAX_CONDITIONING_IMAGES ||
+    !Number.isSafeInteger(currentSafetyLimit) ||
+    currentSafetyLimit < 0 ||
+    currentSafetyLimit > MAX_CONDITIONING_IMAGES ||
+    frozenLimit! > currentSafetyLimit ||
+    request.conditioningImages.length > MAX_CONDITIONING_IMAGES ||
+    request.conditioningImages.length > frozenLimit!
+  ) {
+    return { ok: false };
+  }
+
+  let remainingBytes = CONDITIONING_IMAGE_BUDGET_BYTES;
+  for (const input of request.conditioningImages) {
+    if (
+      typeof input !== 'object' ||
+      input === null ||
+      !Number.isSafeInteger(input.byteSize) ||
+      input.byteSize <= 0 ||
+      input.byteSize > remainingBytes
+    ) {
+      return { ok: false };
+    }
+    remainingBytes -= input.byteSize;
+  }
+  return { ok: true, conditioningImages: request.conditioningImages };
 };
 
 export type StudioHostedImageDownloaderDeps = Pick<RemoteMediaDownloadDeps, 'lookup' | 'request'>;
@@ -104,6 +160,25 @@ const generatedImageMimeType = (imagePath: string): 'image/jpeg' | 'image/png' |
 export const createImageGenerationAdapter = (deps: ImageGenerationAdapterDeps): GenerationProviderAdapter => {
   const generate = deps.executeImageGeneration ?? executeImageGeneration;
   const hostedImageDownloader = deps.hostedImageDownloader ?? createStudioHostedImageDownloader();
+  const getMaxConditioningImages = deps.getMaxConditioningImages ?? getImageModelMaxConditioningImages;
+  const validateResolvedRequest = (
+    request: ResolvedStudioGenerationRequest,
+    provider: TProviderWithModel
+  ): ResolvedImageRequestValidation => {
+    const routeValidation = validRequest(request, provider);
+    if (!routeValidation.ok) return { routeValidation, conditioningValidation: null };
+    const conditioningValidation = validateImageConditioningRequest(
+      request,
+      getMaxConditioningImages(provider, provider.use_model),
+      isImagesApiModel(provider.use_model)
+    );
+    return {
+      routeValidation: conditioningValidation.ok
+        ? routeValidation
+        : { ok: false, issues: [{ code: 'provider_unavailable' }] },
+      conditioningValidation,
+    };
+  };
 
   return {
     id: 'weprompt-image-v1',
@@ -122,19 +197,26 @@ export const createImageGenerationAdapter = (deps: ImageGenerationAdapterDeps): 
         : { ok: false, error: { code: 'unsupported' } };
     },
 
-    validateRequest: validRequest,
+    validateRequest: (request, provider) => validateResolvedRequest(request, provider).routeValidation,
 
     async submit(
       request: ResolvedStudioGenerationRequest,
       provider: TProviderWithModel,
       signal: AbortSignal
     ): Promise<ProviderSubmitResult> {
-      const validation = validRequest(request, provider);
-      if (!validation.ok) throw new ImageGenerationAdapterError('unsupported');
-      if (request.firstFrame && isImagesApiModel(provider.use_model)) {
-        throw new ImageGenerationAdapterError('unsupported');
+      const { routeValidation, conditioningValidation } = validateResolvedRequest(request, provider);
+      if (!routeValidation.ok || !conditioningValidation?.ok) throw new ImageGenerationAdapterError('unsupported');
+      let imageUris: string[] | undefined;
+      if (conditioningValidation.conditioningImages !== undefined) {
+        imageUris = [];
+        try {
+          for (const input of conditioningValidation.conditioningImages) {
+            imageUris.push(await input.asDataUrl(CONDITIONING_IMAGE_BUDGET_BYTES));
+          }
+        } catch {
+          throw new ImageGenerationAdapterError('unsupported');
+        }
       }
-      const imageUris = request.firstFrame ? [await request.firstFrame.asDataUrl(30 * 1024 * 1024)] : undefined;
       const result = await generate(
         { prompt: request.prompt, image_uris: imageUris },
         provider,

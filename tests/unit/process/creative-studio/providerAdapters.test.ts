@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { promises as fs } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { TProviderWithModel } from '@/common/config/storage';
 import {
   createBytePlusSeedanceAdapter,
@@ -15,6 +18,13 @@ import {
   type ProviderHttpResponse,
   type ResolvedProviderInput,
 } from '@process/services/creative-studio/adapters';
+import {
+  createStudioE2EFakeBundle,
+  createStudioE2EFakeRemoteState,
+} from '@process/services/creative-studio/adapters/e2eFakeAdapter';
+
+const REFERENCE_BUDGET_BYTES = 30 * 1024 * 1024;
+const temporaryDirectories: string[] = [];
 
 const provider = (overrides: Partial<TProviderWithModel> = {}): TProviderWithModel => ({
   id: 'provider_1',
@@ -61,6 +71,39 @@ const firstFrame = (): ResolvedProviderInput => ({
   asDataUrl: async () => 'data:image/png;base64,QUJD',
 });
 
+const conditioningInput = (index: number, byteSize = 3): ResolvedProviderInput => ({
+  assetId: `asset_${index}`,
+  mimeType: 'image/png',
+  byteSize,
+  openStream: async () => {
+    throw new Error('not used by adapters');
+  },
+  asDataUrl: vi.fn(async () => `data:image/png;base64,REF_${index}`),
+});
+
+const successfulImageEngine = () =>
+  vi.fn(async () => ({
+    success: true,
+    text: 'saved',
+    imagePath: '/private/studio/image.png',
+  }));
+
+const createConditioningAdapter = (executeImageGeneration = successfulImageEngine(), currentSafetyLimit = 6) => ({
+  adapter: createImageGenerationAdapter({
+    executeImageGeneration,
+    workspaceDir: '/private/studio',
+    getMaxConditioningImages: () => currentSafetyLimit,
+  }),
+  executeImageGeneration,
+});
+
+afterEach(async () => {
+  vi.restoreAllMocks();
+  await Promise.all(
+    temporaryDirectories.splice(0).map((directory) => fs.rm(directory, { force: true, recursive: true }))
+  );
+});
+
 describe('Creative Studio provider adapters', () => {
   it('registers the OpenRouter video adapter in the production registry', () => {
     const registry = createGenerationProviderAdapterRegistry({ image: { workspaceDir: '/private/studio' } });
@@ -68,16 +111,12 @@ describe('Creative Studio provider adapters', () => {
     expect(registry.get('openrouter-video-v1')?.id).toBe('openrouter-video-v1');
   });
 
-  it('turns a successful image engine result into a process-only complete output', async () => {
-    const executeImageGeneration = vi.fn(async () => ({
-      success: true,
-      text: 'saved',
-      imagePath: '/private/studio/image.png',
-    }));
-    const adapter = createImageGenerationAdapter({ executeImageGeneration, workspaceDir: '/private/studio' });
+  it.each([0, 1, 6])('passes %i ordered conditioning images to the image engine', async (count) => {
+    const { adapter, executeImageGeneration } = createConditioningAdapter();
+    const conditioningImages = Array.from({ length: count }, (_, index) => conditioningInput(index + 1));
 
     const result = await adapter.submit(
-      { ...request, mediaKind: 'image', firstFrame: firstFrame() },
+      { ...request, mediaKind: 'image', conditioningImages, conditioningImageLimit: 6 },
       imageProvider(),
       new AbortController().signal
     );
@@ -94,17 +133,171 @@ describe('Creative Studio provider adapters', () => {
       ],
     });
     expect(executeImageGeneration).toHaveBeenCalledWith(
-      { prompt: request.prompt, image_uris: ['data:image/png;base64,QUJD'] },
+      {
+        prompt: request.prompt,
+        image_uris: conditioningImages.map((_, index) => `data:image/png;base64,REF_${index + 1}`),
+      },
       expect.any(Object),
       '/private/studio',
       undefined,
       expect.any(AbortSignal),
       { hostedImageDownloader: expect.any(Function) }
     );
+    expect(conditioningImages.map((input) => vi.mocked(input.asDataUrl).mock.calls)).toEqual(
+      conditioningImages.map(() => [[REFERENCE_BUDGET_BYTES]])
+    );
+  });
+
+  it('accepts an aggregate conditioning size of exactly 30 MiB', async () => {
+    const { adapter, executeImageGeneration } = createConditioningAdapter();
+    const conditioningImages = [conditioningInput(1, REFERENCE_BUDGET_BYTES - 1), conditioningInput(2, 1)];
+
+    await expect(
+      adapter.submit(
+        { ...request, mediaKind: 'image', conditioningImages, conditioningImageLimit: 6 },
+        imageProvider(),
+        new AbortController().signal
+      )
+    ).resolves.toMatchObject({ kind: 'complete' });
+    expect(executeImageGeneration).toHaveBeenCalledOnce();
+  });
+
+  it('sanitizes a managed-input resolution failure before calling the image engine', async () => {
+    const { adapter, executeImageGeneration } = createConditioningAdapter();
+    const input = conditioningInput(1);
+    vi.mocked(input.asDataUrl).mockRejectedValue(new Error('secret path and data URL'));
+
+    const submitted = adapter.submit(
+      { ...request, mediaKind: 'image', conditioningImages: [input], conditioningImageLimit: 6 },
+      imageProvider(),
+      new AbortController().signal
+    );
+
+    await expect(submitted).rejects.toMatchObject({ code: 'unsupported', message: 'unsupported' });
+    await expect(submitted).rejects.not.toThrow('secret path and data URL');
+    expect(executeImageGeneration).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: 'seven inputs',
+      conditioningImages: Array.from({ length: 7 }, (_, index) => conditioningInput(index + 1)),
+      conditioningImageLimit: 6,
+      currentSafetyLimit: 6,
+    },
+    {
+      label: 'count above the frozen limit',
+      conditioningImages: [conditioningInput(1), conditioningInput(2)],
+      conditioningImageLimit: 1,
+      currentSafetyLimit: 6,
+    },
+    {
+      label: 'frozen limit above six',
+      conditioningImages: [conditioningInput(1)],
+      conditioningImageLimit: 7,
+      currentSafetyLimit: 6,
+    },
+    {
+      label: 'current safety below the frozen limit',
+      conditioningImages: [conditioningInput(1)],
+      conditioningImageLimit: 6,
+      currentSafetyLimit: 5,
+    },
+    {
+      label: 'aggregate bytes above 30 MiB',
+      conditioningImages: [conditioningInput(1, REFERENCE_BUDGET_BYTES), conditioningInput(2, 1)],
+      conditioningImageLimit: 6,
+      currentSafetyLimit: 6,
+    },
+  ])('rejects $label before resolving or calling the image engine', async (testCase) => {
+    const { adapter, executeImageGeneration } = createConditioningAdapter(undefined, testCase.currentSafetyLimit);
+
+    await expect(
+      adapter.submit(
+        {
+          ...request,
+          mediaKind: 'image',
+          conditioningImages: testCase.conditioningImages,
+          conditioningImageLimit: testCase.conditioningImageLimit,
+        },
+        imageProvider(),
+        new AbortController().signal
+      )
+    ).rejects.toMatchObject({ code: 'unsupported' });
+    expect(testCase.conditioningImages.every((input) => vi.mocked(input.asDataUrl).mock.calls.length === 0)).toBe(true);
+    expect(executeImageGeneration).not.toHaveBeenCalled();
+  });
+
+  it('rejects a stale frozen conditioning limit through validation before submission', () => {
+    const { adapter, executeImageGeneration } = createConditioningAdapter(undefined, 5);
+    const conditioningImages = [conditioningInput(1)];
+
+    expect(
+      adapter.validateRequest(
+        { ...request, mediaKind: 'image', conditioningImages, conditioningImageLimit: 6 },
+        imageProvider()
+      )
+    ).toEqual({ ok: false, issues: [{ code: 'provider_unavailable' }] });
+    expect(conditioningImages.every((input) => vi.mocked(input.asDataUrl).mock.calls.length === 0)).toBe(true);
+    expect(executeImageGeneration).not.toHaveBeenCalled();
+  });
+
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects invalid conditioning byte size %s before resolving or calling the image engine',
+    async (byteSize) => {
+      const { adapter, executeImageGeneration } = createConditioningAdapter();
+      const input = conditioningInput(1, byteSize);
+
+      await expect(
+        adapter.submit(
+          { ...request, mediaKind: 'image', conditioningImages: [input], conditioningImageLimit: 6 },
+          imageProvider(),
+          new AbortController().signal
+        )
+      ).rejects.toMatchObject({ code: 'unsupported' });
+      expect(input.asDataUrl).not.toHaveBeenCalled();
+      expect(executeImageGeneration).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    { label: 'images without a frozen limit', conditioningImages: [conditioningInput(1)] },
+    { label: 'a frozen limit without images', conditioningImageLimit: 6 },
+    {
+      label: 'conditioning mixed with a first frame',
+      conditioningImages: [conditioningInput(1)],
+      conditioningImageLimit: 6,
+      firstFrame: firstFrame(),
+    },
+    { label: 'an image first frame outside the conditioning pair', firstFrame: firstFrame() },
+  ])('rejects $label before resolving or calling the image engine', async (invalidInput) => {
+    const { adapter, executeImageGeneration } = createConditioningAdapter();
+
+    await expect(
+      adapter.submit({ ...request, mediaKind: 'image', ...invalidInput }, imageProvider(), new AbortController().signal)
+    ).rejects.toMatchObject({ code: 'unsupported' });
+    for (const input of invalidInput.conditioningImages ?? []) expect(input.asDataUrl).not.toHaveBeenCalled();
+    expect(executeImageGeneration).not.toHaveBeenCalled();
+  });
+
+  it('rejects conditioning on an Images-API route before resolving or calling the image engine', async () => {
+    const { adapter, executeImageGeneration } = createConditioningAdapter();
+    const input = conditioningInput(1);
+
+    await expect(
+      adapter.submit(
+        { ...request, mediaKind: 'image', conditioningImages: [input], conditioningImageLimit: 6 },
+        imageProvider({ platform: 'openai', base_url: 'https://api.vngcloud.vn/v1', use_model: 'gpt-image-1' }),
+        new AbortController().signal
+      )
+    ).rejects.toMatchObject({ code: 'unsupported' });
+    expect(input.asDataUrl).not.toHaveBeenCalled();
+    expect(executeImageGeneration).not.toHaveBeenCalled();
   });
 
   it('keeps ordinary image validation at zero even when production configuration spoofs the fake tuple', async () => {
-    const adapter = createImageGenerationAdapter({ workspaceDir: '/private/studio' });
+    const executeImageGeneration = successfulImageEngine();
+    const adapter = createImageGenerationAdapter({ executeImageGeneration, workspaceDir: '/private/studio' });
     const spoofed = imageProvider({
       id: 'weprompt_studio_e2e',
       name: 'WePrompt Studio E2E',
@@ -114,6 +307,65 @@ describe('Creative Studio provider adapters', () => {
     await expect(
       adapter.validateConnection({ model: spoofed.use_model }, spoofed, new AbortController().signal)
     ).resolves.toEqual({ ok: true, capabilities: { maxConditioningImages: 0 } });
+    const input = conditioningInput(1);
+    await expect(
+      adapter.submit(
+        { ...request, mediaKind: 'image', conditioningImages: [input], conditioningImageLimit: 6 },
+        spoofed,
+        new AbortController().signal
+      )
+    ).rejects.toMatchObject({ code: 'unsupported' });
+    expect(input.asDataUrl).not.toHaveBeenCalled();
+    expect(executeImageGeneration).not.toHaveBeenCalled();
+  });
+
+  it('rejects an over-limit resolved request through trusted fake validation', async () => {
+    const rootDir = await fs.mkdtemp(path.join(tmpdir(), 'weprompt-fake-adapter-'));
+    temporaryDirectories.push(rootDir);
+    const remoteState = createStudioE2EFakeRemoteState();
+    const bundle = createStudioE2EFakeBundle({ rootDir, remoteState });
+    const adapter = bundle.adapters.get('weprompt-image-v1');
+    const fakeProvider = { ...bundle.provider, use_model: 'weprompt-e2e-image' } as TProviderWithModel;
+    if (!adapter) throw new Error('expected fake image adapter');
+
+    const overLimit = Array.from({ length: 7 }, (_, index) => conditioningInput(index + 1));
+    expect(
+      adapter.validateRequest(
+        { ...request, mediaKind: 'image', conditioningImages: overLimit, conditioningImageLimit: 6 },
+        fakeProvider
+      )
+    ).toEqual({ ok: false, issues: [{ code: 'provider_unavailable' }] });
+    expect(remoteState.taskCounter).toBe(0);
+  });
+
+  it('enforces the trusted fake image limit before creating a provider task', async () => {
+    const rootDir = await fs.mkdtemp(path.join(tmpdir(), 'weprompt-fake-adapter-'));
+    temporaryDirectories.push(rootDir);
+    const remoteState = createStudioE2EFakeRemoteState();
+    const bundle = createStudioE2EFakeBundle({ rootDir, remoteState });
+    const adapter = bundle.adapters.get('weprompt-image-v1');
+    const fakeProvider = { ...bundle.provider, use_model: 'weprompt-e2e-image' } as TProviderWithModel;
+    if (!adapter) throw new Error('expected fake image adapter');
+
+    const six = Array.from({ length: 6 }, (_, index) => conditioningInput(index + 1));
+    await expect(
+      adapter.submit(
+        { ...request, mediaKind: 'image', conditioningImages: six, conditioningImageLimit: 6 },
+        fakeProvider,
+        new AbortController().signal
+      )
+    ).resolves.toMatchObject({ kind: 'remote' });
+    expect(remoteState.taskCounter).toBe(1);
+
+    const seven = Array.from({ length: 7 }, (_, index) => conditioningInput(index + 1));
+    await expect(
+      adapter.submit(
+        { ...request, mediaKind: 'image', conditioningImages: seven, conditioningImageLimit: 6 },
+        fakeProvider,
+        new AbortController().signal
+      )
+    ).rejects.toMatchObject({ code: 'unsupported' });
+    expect(remoteState.taskCounter).toBe(1);
   });
 
   it('rejects an image-engine path whose extension cannot provide a declared managed MIME type', async () => {

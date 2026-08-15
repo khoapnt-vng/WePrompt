@@ -9,12 +9,28 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type OpenAI from 'openai';
-import { extractImagesApiDataUrl, saveGeneratedImage } from './imageGenCore';
+import { ClientFactory, type RotatingClient } from '@/common/api/ClientFactory';
+import type { TProviderWithModel } from '@/common/config/storage';
+import { executeImageGeneration, extractImagesApiDataUrl, processImageUri, saveGeneratedImage } from './imageGenCore';
 
 const asResponse = (data: unknown) => data as OpenAI.Images.ImagesResponse;
 
 const temporaryDirectories: string[] = [];
 const PNG_SIGNATURE = Buffer.from('89504e470d0a1a0a', 'hex');
+const MANAGED_IMAGE_DATA_URLS = [
+  'data:image/jpeg;base64,/9j/',
+  `data:image/png;base64,${PNG_SIGNATURE.toString('base64')}`,
+  `data:image/webp;base64,${Buffer.from('524946460000000057454250', 'hex').toString('base64')}`,
+];
+
+const provider: TProviderWithModel = {
+  id: 'provider_1',
+  name: 'Provider One',
+  platform: 'gemini',
+  base_url: 'https://generativelanguage.googleapis.com',
+  api_key: 'secret-key',
+  use_model: 'gemini-2.5-flash-image',
+};
 
 const createTemporaryDirectory = async (): Promise<string> => {
   const directory = await fs.mkdtemp(path.join(tmpdir(), 'weprompt-image-core-'));
@@ -39,9 +55,88 @@ const oversizedHostedDownloader = async ({
 };
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(
     temporaryDirectories.splice(0).map((directory) => fs.rm(directory, { force: true, recursive: true }))
   );
+});
+
+describe('managed image inputs', () => {
+  it('preserves strict JPEG, PNG and WebP data URLs in order without filesystem reads', async () => {
+    const root = await createTemporaryDirectory();
+    const access = vi.spyOn(fs, 'access');
+    const createChatCompletion = vi.fn(async (_input: unknown) => ({
+      choices: [
+        {
+          message: {
+            content: 'generated',
+            images: [{ type: 'image_url', image_url: { url: MANAGED_IMAGE_DATA_URLS[1] } }],
+          },
+        },
+      ],
+    }));
+    vi.spyOn(ClientFactory, 'createRotatingClient').mockResolvedValue({
+      createChatCompletion,
+    } as unknown as RotatingClient);
+
+    const result = await executeImageGeneration(
+      { prompt: 'A safe prompt', image_uris: MANAGED_IMAGE_DATA_URLS },
+      provider,
+      root
+    );
+
+    expect(result.success).toBe(true);
+    expect(access).not.toHaveBeenCalled();
+    expect(createChatCompletion.mock.calls[0]?.[0]).toMatchObject({
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Analyze/Edit image: A safe prompt' },
+            ...MANAGED_IMAGE_DATA_URLS.map((url) => ({ type: 'image_url', image_url: { url, detail: 'auto' } })),
+          ],
+        },
+      ],
+    });
+  });
+
+  it.each([
+    'data:image/png;base64,',
+    'data:image/png;base64,not*base64',
+    `data:image/svg+xml;base64,${Buffer.from('<svg/>').toString('base64')}`,
+    `data:image/jpeg;base64,${PNG_SIGNATURE.toString('base64')}`,
+  ])('rejects malformed or unsupported managed data URL input', async (imageUri) => {
+    await expect(processImageUri(imageUri, '/private/studio')).rejects.toThrow('Invalid image data URL');
+  });
+
+  it('rejects the whole ordered input set when one image is invalid', async () => {
+    const root = await createTemporaryDirectory();
+    const createChatCompletion = vi.fn(async (_input: unknown) => ({
+      choices: [
+        {
+          message: {
+            content: 'generated',
+            images: [{ type: 'image_url', image_url: { url: MANAGED_IMAGE_DATA_URLS[1] } }],
+          },
+        },
+      ],
+    }));
+    const createRotatingClient = vi.spyOn(ClientFactory, 'createRotatingClient').mockResolvedValue({
+      createChatCompletion,
+    } as unknown as RotatingClient);
+    const secretInput = 'data:image/png;base64,not*base64';
+
+    const result = await executeImageGeneration(
+      { prompt: 'A safe prompt', image_uris: ['https://cdn.example/valid.png', secretInput] },
+      provider,
+      root
+    );
+
+    expect(result).toMatchObject({ success: false, error: 'invalid_image_input' });
+    expect(createRotatingClient).not.toHaveBeenCalled();
+    expect(createChatCompletion).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain(secretInput);
+  });
 });
 
 describe('extractImagesApiDataUrl', () => {

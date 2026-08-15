@@ -36,6 +36,8 @@ export type StudioGenerationRequest = {
 
 export type ResolvedStudioGenerationRequest = StudioGenerationRequest & {
   firstFrame?: ResolvedProviderInput;
+  conditioningImages?: readonly ResolvedProviderInput[];
+  conditioningImageLimit?: number;
 };
 
 export type { NormalizedStudioGenerationParameters, StudioRouteIssue, StudioRouteValidation };
@@ -90,7 +92,7 @@ export type GenerationProviderAdapter = {
     provider: IProvider,
     signal: AbortSignal
   ): Promise<StudioConnectionValidation>;
-  validateRequest(request: StudioGenerationRequest, provider: TProviderWithModel): StudioRouteValidation;
+  validateRequest(request: ResolvedStudioGenerationRequest, provider: TProviderWithModel): StudioRouteValidation;
   submit(
     request: ResolvedStudioGenerationRequest,
     provider: TProviderWithModel,
