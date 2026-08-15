@@ -312,6 +312,72 @@ describe('createStudioMediaStore', () => {
     expect(imported.project.assets.asset_look.briefReferenceLabel).toBe('Reference 1 (2)');
   });
 
+  it('allocates a classified label against a competing reference in the CAS candidate', async () => {
+    const { rootDir, store } = await makeStore();
+    const sourcePath = path.join(rootDir, 'Hero.png');
+    await fs.writeFile(sourcePath, png);
+    const preflightProject = await store.getProject('project_1');
+    if (preflightProject === null) throw new Error('project fixture missing');
+    const casCandidate = structuredClone(preflightProject);
+    casCandidate.assets.competing_reference = {
+      id: 'competing_reference',
+      projectId: 'project_1',
+      sceneId: null,
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'imports', fileName: 'competing_reference.png' },
+      byteSize: 1,
+      sha256: 'c'.repeat(64),
+      briefReferenceRole: 'look',
+      briefReferenceLabel: 'Hero',
+      createdAt: '2026-08-15T00:00:01.000Z',
+    };
+    const updateProject = vi.fn(async (_projectId, update) => update(casCandidate));
+    const media = createStudioMediaStore({
+      store: { ...store, getProject: vi.fn(async () => preflightProject), updateProject },
+      createId: () => 'asset_cast',
+    });
+
+    const imported = await media.importReferenceFromPath({
+      projectId: 'project_1',
+      sourcePath,
+      expectedRevision: preflightProject.revision,
+      briefReferenceRole: 'cast',
+      returnProject: true,
+    });
+
+    expect(imported.asset.briefReferenceLabel).toBe('Hero (2)');
+    expect(imported.project.assets.asset_cast.briefReferenceLabel).toBe('Hero (2)');
+  });
+
+  it('preserves the legacy scene reference association in the manifest', async () => {
+    const { rootDir, store } = await makeStore();
+    await addImageScene(store);
+    const project = await store.getProject('project_1');
+    if (project === null) throw new Error('project fixture missing');
+    const sourcePath = path.join(rootDir, 'scene-reference.png');
+    await fs.writeFile(sourcePath, png);
+    const media = createStudioMediaStore({ store, createId: () => 'asset_scene_reference' });
+
+    const asset = await media.importReferenceFromPath({
+      projectId: 'project_1',
+      sceneId: 'scene_1',
+      sourcePath,
+      expectedRevision: project.revision,
+    });
+
+    expect(asset.sceneId).toBe('scene_1');
+    await expect(store.getProject('project_1')).resolves.toMatchObject({
+      assets: { asset_scene_reference: { sceneId: 'scene_1' } },
+      scenes: {
+        scene_1: {
+          assetIds: ['asset_scene_reference'],
+          referenceAssetId: 'asset_scene_reference',
+        },
+      },
+    });
+  });
+
   it('refuses a seventh active Brief reference before starting the manifest mutation', async () => {
     const { rootDir, store } = await makeStore();
     const sourcePath = path.join(rootDir, 'seventh.png');
@@ -645,6 +711,77 @@ describe('createStudioMediaStore', () => {
       media.importReferenceFromPath({ projectId: 'project_1', sourcePath, expectedRevision: 1 })
     ).rejects.toMatchObject({ code: 'stale_project' });
     await expect(fs.readFile(finalPath, 'utf8')).resolves.toBe('replacement import');
+    expect((await store.getProject('project_1'))?.assets).toEqual({});
+  });
+
+  it('never deletes a replacement part installed at the cleanup ownership boundary', async () => {
+    const { rootDir, store } = await makeStore();
+    const canonicalRootDir = await fs.realpath(rootDir);
+    const sourcePath = path.join(rootDir, 'invalid-reference.txt');
+    const replacementPath = path.join(rootDir, 'replacement-part');
+    const partPath = path.join(canonicalRootDir, 'project_1', 'parts', 'asset_part_race.part');
+    await fs.writeFile(sourcePath, 'not media');
+    await fs.writeFile(replacementPath, 'replacement part');
+    let swapped = false;
+    const cleanupTargets: string[] = [];
+    const media = createStudioMediaStore({
+      store,
+      createId: () => 'asset_part_race',
+      beforeCleanupOwnership: async (target) => {
+        cleanupTargets.push(target);
+        if (target !== partPath) return;
+        await fs.rm(partPath, { force: true });
+        await fs.rename(replacementPath, partPath);
+        swapped = true;
+      },
+    });
+
+    await expect(
+      media.importReferenceFromPath({ projectId: 'project_1', sourcePath, expectedRevision: 1 })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+
+    expect(cleanupTargets).toEqual([partPath]);
+    expect(swapped).toBe(true);
+    await expect(fs.readFile(partPath, 'utf8')).resolves.toBe('replacement part');
+  });
+
+  it('never deletes a final-path replacement installed after the old identity-check window', async () => {
+    const { rootDir, store } = await makeStore();
+    const canonicalRootDir = await fs.realpath(rootDir);
+    const sourcePath = path.join(rootDir, 'reference.png');
+    const replacementPath = path.join(rootDir, 'replacement-final');
+    const finalPath = path.join(canonicalRootDir, 'project_1', 'imports', 'asset_final_race.png');
+    await fs.writeFile(sourcePath, png);
+    await fs.writeFile(replacementPath, 'replacement final');
+    let cleanupReady = false;
+    const staleStore: CreativeStudioStore = {
+      ...store,
+      async updateProject() {
+        cleanupReady = true;
+        throw new CreativeStudioStoreError('stale_project', 'forced stale CAS');
+      },
+    };
+    let swapped = false;
+    const cleanupTargets: string[] = [];
+    const media = createStudioMediaStore({
+      store: staleStore,
+      createId: () => 'asset_final_race',
+      beforeCleanupOwnership: async (target) => {
+        cleanupTargets.push(target);
+        if (target !== finalPath || !cleanupReady) return;
+        await fs.rm(finalPath, { force: true });
+        await fs.rename(replacementPath, finalPath);
+        swapped = true;
+      },
+    });
+
+    await expect(
+      media.importReferenceFromPath({ projectId: 'project_1', sourcePath, expectedRevision: 1 })
+    ).rejects.toMatchObject({ code: 'stale_project' });
+
+    expect(cleanupTargets).toEqual([finalPath]);
+    expect(swapped).toBe(true);
+    await expect(fs.readFile(finalPath, 'utf8')).resolves.toBe('replacement final');
     expect((await store.getProject('project_1'))?.assets).toEqual({});
   });
 

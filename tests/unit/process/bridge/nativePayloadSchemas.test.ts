@@ -1899,6 +1899,14 @@ describe('native bridge payload schemas', () => {
     ).toEqual({ projectId: 'project_1', briefReferenceRole: role, expectedRevision: 1 });
   });
 
+  it('preserves a valid scene reference import through strict payload parsing', () => {
+    const payload = { projectId: 'project_1', sceneId: 'scene_1', expectedRevision: 7 };
+
+    expect(
+      parseNativeBridgePayload('creative-studio.choose-and-import-reference' as NativeBridgeProviderKey, payload)
+    ).toEqual(payload);
+  });
+
   it.each(VOID_PROVIDER_KEYS)('rejects a supplied payload for void provider %s', (providerKey) => {
     expect(() => parseNativeBridgePayload(providerKey, {})).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
   });

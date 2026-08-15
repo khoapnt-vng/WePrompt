@@ -692,6 +692,58 @@ describe('initCreativeStudioBridge', () => {
     expect(JSON.stringify({ imported, exported })).not.toContain('/private/user');
   });
 
+  it('forwards a legacy scene reference exactly and returns its canonical import outcome', async () => {
+    const importPath = '/private/user/scene-reference.png';
+    const asset = {
+      id: 'asset_scene_reference',
+      projectId: 'project_1',
+      sceneId: 'scene_1',
+      mediaKind: 'image' as const,
+      mimeType: 'image/png',
+      managedAsset: { collection: 'imports' as const, fileName: 'asset_scene_reference.png' },
+      byteSize: 33,
+      sha256: 'b'.repeat(64),
+      createdAt: '2026-07-30T00:00:00.000Z',
+    };
+    const importedProject = structuredClone(project);
+    importedProject.sceneOrder = ['scene_1'];
+    importedProject.scenes.scene_1 = {
+      id: 'scene_1',
+      title: 'Opening',
+      purpose: '',
+      visualPrompt: '',
+      narration: '',
+      onScreenText: '',
+      mediaKind: 'image',
+      durationSeconds: 5,
+      referenceAssetId: null,
+      selectedAssetId: null,
+      assetIds: [],
+      jobIds: [],
+      reviewState: 'draft',
+    };
+    importedProject.assets[asset.id] = asset;
+    importedProject.scenes.scene_1.assetIds.push(asset.id);
+    importedProject.scenes.scene_1.referenceAssetId = asset.id;
+    const service = {
+      ...dependencies.getService(),
+      importReferenceFromPath: vi.fn(async () => ({ asset, project: importedProject })),
+    };
+    initCreativeStudioBridge({
+      getService: () => service,
+      getParentWindow: () => undefined,
+      showOpenDialog: async () => ({ canceled: false, filePaths: [importPath] }),
+    });
+    const importHandler = mocks.chooseAndImportReferenceProvider.mock.calls[0]?.[0] as ProviderHandler;
+    const input = { projectId: 'project_1', sceneId: 'scene_1', expectedRevision: 4 };
+
+    await expect(importHandler(input)).resolves.toEqual({
+      ok: true,
+      data: { status: 'imported', asset, project: importedProject },
+    });
+    expect(service.importReferenceFromPath).toHaveBeenCalledExactlyOnceWith({ ...input, sourcePath: importPath });
+  });
+
   it('forwards detach exactly once and returns the canonical project from the successful mutation', async () => {
     const service = dependencies.getService();
     initCreativeStudioBridge({ getService: () => service });

@@ -1202,6 +1202,75 @@ describe('CreativeStudioService', () => {
     expect(onProjectUpdated).toHaveBeenCalledExactlyOnceWith(created.id);
   });
 
+  it('forwards one legacy scene import and returns the exact successful scene-linked outcome', async () => {
+    const created = await service.createProject(makeInput());
+    const sceneProject = await store.updateProject(
+      created.id,
+      (project) => ({
+        ...project,
+        sceneOrder: ['scene_1'],
+        scenes: {
+          scene_1: {
+            id: 'scene_1',
+            ...makeScene('scene_1'),
+            selectedAssetId: null,
+            assetIds: [],
+            jobIds: [],
+            reviewState: 'draft' as const,
+          },
+        },
+      }),
+      created.revision
+    );
+    onProjectUpdated.mockClear();
+    const asset: StudioAsset = {
+      id: 'asset_scene_reference',
+      projectId: created.id,
+      sceneId: 'scene_1',
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'imports', fileName: 'asset_scene_reference.png' },
+      byteSize: 33,
+      sha256: 'b'.repeat(64),
+      createdAt: '2026-08-15T01:02:03.000Z',
+    };
+    const importedProject = structuredClone(sceneProject);
+    importedProject.revision += 1;
+    importedProject.assets[asset.id] = asset;
+    importedProject.scenes.scene_1.assetIds.push(asset.id);
+    importedProject.scenes.scene_1.referenceAssetId = asset.id;
+    const importReferenceFromPath = vi.fn(async () => ({ asset, project: importedProject }));
+    const importService = createCreativeStudioService({
+      store,
+      onProjectUpdated,
+      storyboardPlanner: makePlanner(),
+      mediaStore: {
+        importReferenceFromPath,
+        detachBriefReference: vi.fn(),
+        exportAssetsToDirectory: vi.fn(),
+        getLatestProjectOutput: vi.fn(async () => null),
+      },
+    });
+    const input = {
+      projectId: created.id,
+      sceneId: 'scene_1',
+      expectedRevision: sceneProject.revision,
+      sourcePath: '/private/scene-reference.png',
+    };
+
+    await expect(importService.importReferenceFromPath(input)).resolves.toEqual({
+      asset,
+      project: expect.objectContaining({
+        assets: expect.objectContaining({ asset_scene_reference: asset }),
+        scenes: expect.objectContaining({
+          scene_1: expect.objectContaining({ referenceAssetId: asset.id, assetIds: [asset.id] }),
+        }),
+      }),
+    });
+    expect(importReferenceFromPath).toHaveBeenCalledExactlyOnceWith({ ...input, returnProject: true });
+    expect(onProjectUpdated).toHaveBeenCalledExactlyOnceWith(created.id);
+  });
+
   it('forwards detach once and returns the canonical successful renderer project revision', async () => {
     const created = await service.createProject(makeInput());
     onProjectUpdated.mockClear();

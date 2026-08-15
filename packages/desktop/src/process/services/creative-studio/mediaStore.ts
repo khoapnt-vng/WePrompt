@@ -221,6 +221,8 @@ export type StudioMediaStoreDeps = {
   getAvailableDiskBytes?: (directory: string) => Promise<number>;
   /** Test seam for byte-boundary coverage without allocating production-sized fixtures. */
   limits?: Partial<StudioMediaLimits>;
+  /** Test seam for deterministic replacement exactly before cleanup takes ownership of a path. */
+  beforeCleanupOwnership?: (filePath: string) => Promise<void>;
 };
 
 const truncateUtf8 = (value: string, maxBytes: number): string => {
@@ -523,16 +525,49 @@ const finalizeManagedPart = async (
   }
 };
 
-/** Removes only the inode created by this operation; a replacement is user-owned and preserved. */
-const unlinkIfIdentityMatches = async (filePath: string, expected: FileIdentity): Promise<void> => {
+/**
+ * Atomically takes ownership of the current directory entry before inspecting it. A mismatched
+ * entry is restored without replacement when possible, or retained in quarantine on any conflict.
+ */
+const unlinkIfIdentityMatches = async (
+  filePath: string,
+  expected: FileIdentity,
+  beforeOwnership?: (filePath: string) => Promise<void>
+): Promise<void> => {
+  let quarantineDirectory: string | null = null;
+  let quarantinePath: string | null = null;
   try {
-    const stats = await fs.lstat(filePath);
+    quarantineDirectory = await fs.mkdtemp(path.join(path.dirname(filePath), '.studio-cleanup-'));
+    quarantinePath = path.join(quarantineDirectory, path.basename(filePath));
+    await beforeOwnership?.(filePath);
+    await fs.rename(filePath, quarantinePath);
+  } catch {
+    if (quarantineDirectory !== null) {
+      await fs.rmdir(quarantineDirectory).catch((): undefined => undefined);
+    }
+    return;
+  }
+  if (quarantineDirectory === null || quarantinePath === null) return;
+
+  try {
+    const stats = await fs.lstat(quarantinePath);
     const current = fileIdentity(stats);
     if (stats.isFile() && !stats.isSymbolicLink() && current.dev === expected.dev && current.ino === expected.ino) {
-      await fs.unlink(filePath);
+      await fs.unlink(quarantinePath);
+    } else {
+      try {
+        // link() never replaces a new owner at the original path. If that path is occupied or
+        // restoration otherwise fails, the unverified entry remains in its private quarantine.
+        await fs.link(quarantinePath, filePath);
+        await fs.unlink(quarantinePath);
+      } catch {
+        // Preserve the unverified entry in quarantine rather than broadening cleanup.
+      }
     }
   } catch {
-    // Cleanup is best-effort and never broadens to an unverified replacement.
+    // Cleanup is best-effort; unverifiable quarantine contents are preserved.
+  } finally {
+    await fs.rmdir(quarantineDirectory).catch((): undefined => undefined);
   }
 };
 
@@ -707,6 +742,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     if (!SAFE_ID.test(assetId)) throw new CreativeStudioMediaError('storage_error');
 
     let partPath: string | null = null;
+    let partIdentity: FileIdentity | null = null;
     let finalPath: string | null = null;
     let finalIdentity: FileIdentity | null = null;
     try {
@@ -746,12 +782,23 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
           callback(null, chunk);
         },
       });
-      await pipeline(
-        await openVerifiedReadStream(input.sourcePath),
-        checker,
-        createWriteStream(partPath, { flags: 'wx' })
-      );
-      await regularFile(partPath);
+      const partHandle = await fs.open(partPath, 'wx');
+      try {
+        const openedPart = await partHandle.stat();
+        if (!openedPart.isFile()) throw new CreativeStudioMediaError('storage_error');
+        partIdentity = fileIdentity(openedPart);
+        await pipeline(
+          await openVerifiedReadStream(input.sourcePath),
+          checker,
+          createWriteStream(partPath, { fd: partHandle.fd, autoClose: false })
+        );
+      } finally {
+        await partHandle.close().catch((): undefined => undefined);
+      }
+      const completedPartIdentity = fileIdentity(await regularFile(partPath));
+      if (completedPartIdentity.dev !== partIdentity.dev || completedPartIdentity.ino !== partIdentity.ino) {
+        throw new CreativeStudioMediaError('storage_error');
+      }
       const signature = sniff(sample);
       if (signature === null || !signature.mimeType.startsWith('image/')) {
         throw new CreativeStudioMediaError('invalid_media');
@@ -760,6 +807,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       if (path.dirname(finalPath) !== importsDir) throw new CreativeStudioMediaError('storage_error');
       finalIdentity = await finalizeManagedPart(partPath, partsDir, finalPath, importsDir);
       partPath = null;
+      partIdentity = null;
 
       const baseAsset: StudioAsset = {
         id: assetId,
@@ -809,9 +857,11 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       if (importedAsset === null) throw new CreativeStudioMediaError('storage_error');
       return input.returnProject ? { asset: importedAsset, project: updatedProject } : importedAsset;
     } catch (error) {
-      if (partPath !== null) await fs.rm(partPath, { force: true }).catch((): undefined => undefined);
+      if (partPath !== null && partIdentity !== null) {
+        await unlinkIfIdentityMatches(partPath, partIdentity, deps.beforeCleanupOwnership);
+      }
       if (finalPath !== null && finalIdentity !== null) {
-        await unlinkIfIdentityMatches(finalPath, finalIdentity);
+        await unlinkIfIdentityMatches(finalPath, finalIdentity, deps.beforeCleanupOwnership);
       }
       return mapStoreError(error);
     }
