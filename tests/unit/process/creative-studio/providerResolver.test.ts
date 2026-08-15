@@ -311,7 +311,7 @@ describe('createStudioProviderResolver', () => {
     ]);
   });
 
-  it('does not restore first-frame support from a legacy OpenRouter binding', async () => {
+  it('does not let a legacy binding broaden an unevidenced OpenRouter route', async () => {
     const openRouter = provider({
       base_url: 'https://openrouter.ai/api/v1',
       api_key: 'sk-or-test',
@@ -327,6 +327,25 @@ describe('createStudioProviderResolver', () => {
 
     expect(catalog.routes).toMatchObject([
       { adapterId: 'openrouter-video-v1', constraints: { supportsFirstFrame: false } },
+    ]);
+  });
+
+  it('advertises first-frame support only for the evidenced Seedance 2.0 route', async () => {
+    const openRouter = provider({
+      base_url: 'https://openrouter.ai/api/v1',
+      api_key: 'sk-or-test',
+      models: ['bytedance/seedance-2.0'],
+    });
+    const evidencedBinding = binding({
+      adapterId: 'openrouter-video-v1',
+      model: 'bytedance/seedance-2.0',
+      capabilities: gatewayCapabilities({ audioModes: ['audio'], supportsFirstFrame: false }),
+    });
+
+    const catalog = await resolver([openRouter], [evidencedBinding]).listGenerationRoutes();
+
+    expect(catalog.routes).toMatchObject([
+      { adapterId: 'openrouter-video-v1', constraints: { supportsFirstFrame: true } },
     ]);
   });
 

@@ -110,23 +110,35 @@ strategy changes, and it is better to learn it from three generations than from 
 The last-frame chain — clip 2 starting from clip 1's final frame — is Phase 3b and needs sections.
 This experiment tests **still → clip**, once and twice, not clip → clip.
 
-## 2026-08-15 partial run — OpenRouter first-frame path failed closed
+## 2026-08-15 partial run — OpenRouter returned HTTP 400; cause unconfirmed
 
 This is a partial run, not an experiment verdict. The approved still succeeded through OpenRouter with
 `google/gemini-3-pro-image` / Image API; job `4d7905e1-898f-4e7c-9c00-e75cb8decec2` retained a JPEG
 whose SHA-256 is `b78620a730d3539e53c8eda01a7ad2ee32571c7226adec3c6489f0b4f08ac670`. The approved Clip 1
 request used OpenRouter / `bytedance/seedance-2.0` / `openrouter-video-v1`, reached canonical model
-`bytedance/seedance-2.0-20260414` at Seed as generation
-`gen-vid-1786754801-BRVVfG8p3G8jtHKPf5Z1`, and failed with HTTP 400 after 3.9 seconds and one
-attempt. It produced no output. The OpenRouter dashboard routing detail also failed to load, so no
-provider error body or cost was visible. This does **not** establish that the attempt was uncharged.
+`bytedance/seedance-2.0-20260414` at Seed, and failed with HTTP 400 after 3.9 seconds and one attempt.
+The dashboard displayed upstream request `gen-vid-1786754801-BRVVfG8p3G8jtHKPf5Z1`, but the app
+could not have retained that ID because it persists a provider job ID only after a successful submit
+response; a later `/api/v1/generation` lookup also returned 404. Treat the value as dashboard
+telemetry, not as a durable Studio job identity. It produced no output. The adapter discarded the
+non-2xx body, and the dashboard routing detail failed to load, so no provider classification or cost
+was visible. This does **not** establish that the attempt was uncharged.
 
 Q1 and Q2 remain unanswered: there is no completed clip, no frame 0 to compare to the still, and no
-coherence judgement. Do not retry the unchanged request or spend again on this path.
+coherence judgement.
 
-The current adapter supplied the managed first frame as an inline data URL. The official video path
-requires a stable, publicly downloadable HTTPS URL. Treat OpenRouter managed-first-frame support as
-failed closed until a vetted publisher supplies that URL; the inline-data-URL mismatch is the leading
-integration explanation, not a confirmed provider error because the routing detail is unavailable.
-The gate now requires either a direct BytePlus run or an explicitly approved public-URL publisher
-before retrying the OpenRouter route.
+The adapter supplied the managed first frame as an inline data URL. The earlier conclusion that
+OpenRouter therefore required a public HTTPS publisher was wrong. Local durable evidence records four
+successful 2026-08-12 OpenRouter jobs through the same adapter and standard
+`bytedance/seedance-2.0` route, each with a managed first frame. The closest control, **On the Pitch**,
+used the same 5s, 16:9, 720p settings and a verified 1376×768 JPEG; its provider job
+`fISdRphdD2aqao9VYg4E` completed successfully. The official OpenRouter video contract also permits a
+data URL for `frame_images`. The 2026-08-15 failure could instead be input-specific or an upstream
+validation/routing change. Without the discarded response classification, the evidence cannot choose
+between them.
+
+For the approved controlled re-run, use a **fresh, single-scene** named review for **On the Pitch**
+with its original verified reference, standard `bytedance/seedance-2.0`, 5s, 16:9 and 720p. Do not use
+the failed job's generic Retry action and do not widen the request into the four-scene historical
+batch. The adapter records only allowlisted non-2xx classification tags; it never records a raw
+provider body, message, prompt, API key, URL or data URL.

@@ -1634,20 +1634,23 @@ describe('StudioJobManager route and reference isolation', () => {
     expect((await harness.store.getProject(harness.project.id))?.jobs).toEqual({});
   });
 
-  it('rejects a legacy OpenRouter first-frame route before job persistence or provider fetch', async () => {
-    const fetch = vi.fn();
+  it('submits exactly one managed first frame through a fresh OpenRouter scene submission', async () => {
+    const fetch = vi.fn(async () => ({
+      status: 400,
+      json: async () => ({ error: { metadata: { error_type: 'controlled_test_failure' } } }),
+    }));
     const openRouterAdapter = createOpenRouterVideoAdapter({ fetch });
     const openRouterProvider: IProvider = {
       ...provider,
       base_url: 'https://openrouter.ai/api/v1',
       api_key: 'sk-or-test',
-      models: ['bytedance/seedance-2.0-fast'],
+      models: ['bytedance/seedance-2.0'],
     };
     const openRouterRoute: StudioResolvedSceneRouteSnapshot = {
       sceneId: 'scene_1',
       providerId: openRouterProvider.id,
       adapterId: 'openrouter-video-v1',
-      model: 'bytedance/seedance-2.0-fast',
+      model: 'bytedance/seedance-2.0',
       kind: 'video',
     };
     const harness = await createHarness(openRouterAdapter, {
@@ -1673,10 +1676,28 @@ describe('StudioJobManager route and reference isolation', () => {
         routes: [openRouterRoute],
         catalogVersion: 'catalog_1',
       })
-    ).rejects.toMatchObject({ code: 'invalid_route' });
+    ).resolves.toHaveLength(1);
 
-    expect((await harness.store.getProject(harness.project.id))?.jobs).toEqual({});
-    expect(fetch).not.toHaveBeenCalled();
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    const [url, init] = fetch.mock.calls[0]!;
+    expect(url).toBe('https://openrouter.ai/api/v1/videos');
+    expect(init).toMatchObject({ method: 'POST' });
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      model: 'bytedance/seedance-2.0',
+      frame_images: [
+        {
+          type: 'image_url',
+          image_url: { url: expect.stringMatching(/^data:image\/png;base64,/) },
+          frame_type: 'first_frame',
+        },
+      ],
+    });
+    await waitFor(async () =>
+      expect((await harness.store.getProject(harness.project.id))?.jobs.job_1).toMatchObject({
+        status: 'needs_attention',
+        error: { code: 'submission_unknown' },
+      })
+    );
   });
 
   it('serializes deletion behind durable submission and refuses the active project atomically', async () => {

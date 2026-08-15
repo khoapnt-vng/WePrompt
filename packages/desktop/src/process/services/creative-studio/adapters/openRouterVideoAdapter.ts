@@ -23,14 +23,9 @@ import type {
 import { isValidProviderJobId, ProviderDeadlineError, runWithProviderDeadline } from './types';
 
 export const OPENROUTER_VIDEO_BASE_URL = 'https://openrouter.ai/api/v1';
-/**
- * OpenRouter models may support frame images, but this desktop adapter owns only managed local
- * assets. The documented video path requires a directly downloadable public HTTPS URL, and no
- * vetted publisher exists yet, so advertising first-frame support would permit a paid 400.
- */
-export const OPENROUTER_MANAGED_FIRST_FRAME_SUPPORTED = false;
 const OPENROUTER_HOST = 'openrouter.ai';
 const VALIDATION_TIMEOUT_MS = 10_000;
+const FIRST_FRAME_MAX_BYTES = 30 * 1024 * 1024;
 
 export type OpenRouterVideoModelSpec = {
   minDuration: number;
@@ -38,6 +33,8 @@ export type OpenRouterVideoModelSpec = {
   resolutions: readonly ('720p' | '1080p')[];
   ratios: readonly ('16:9' | '9:16' | '1:1' | '4:3' | '3:4')[];
   supportsAudio: boolean;
+  /** Enabled only where a managed data-URL first frame has succeeded in a real Studio job. */
+  supportsFirstFrame: boolean;
 };
 
 export const OPENROUTER_VIDEO_MODELS: Readonly<Record<string, OpenRouterVideoModelSpec>> = Object.freeze({
@@ -47,6 +44,7 @@ export const OPENROUTER_VIDEO_MODELS: Readonly<Record<string, OpenRouterVideoMod
     resolutions: ['720p', '1080p'],
     ratios: ['16:9', '9:16'],
     supportsAudio: true,
+    supportsFirstFrame: false,
   },
   'google/veo-3.1-fast': {
     minDuration: 4,
@@ -54,6 +52,7 @@ export const OPENROUTER_VIDEO_MODELS: Readonly<Record<string, OpenRouterVideoMod
     resolutions: ['720p', '1080p'],
     ratios: ['16:9', '9:16'],
     supportsAudio: true,
+    supportsFirstFrame: false,
   },
   'kwaivgi/kling-v3.0-std': {
     minDuration: 3,
@@ -61,6 +60,7 @@ export const OPENROUTER_VIDEO_MODELS: Readonly<Record<string, OpenRouterVideoMod
     resolutions: ['720p'],
     ratios: ['16:9', '9:16', '1:1'],
     supportsAudio: true,
+    supportsFirstFrame: false,
   },
   'kwaivgi/kling-v3.0-pro': {
     minDuration: 3,
@@ -68,6 +68,7 @@ export const OPENROUTER_VIDEO_MODELS: Readonly<Record<string, OpenRouterVideoMod
     resolutions: ['720p'],
     ratios: ['16:9', '9:16', '1:1'],
     supportsAudio: true,
+    supportsFirstFrame: false,
   },
   'bytedance/seedance-2.0': {
     minDuration: 4,
@@ -75,6 +76,7 @@ export const OPENROUTER_VIDEO_MODELS: Readonly<Record<string, OpenRouterVideoMod
     resolutions: ['720p', '1080p'],
     ratios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
     supportsAudio: true,
+    supportsFirstFrame: true,
   },
   'bytedance/seedance-2.0-fast': {
     minDuration: 4,
@@ -82,6 +84,7 @@ export const OPENROUTER_VIDEO_MODELS: Readonly<Record<string, OpenRouterVideoMod
     resolutions: ['720p'],
     ratios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
     supportsAudio: true,
+    supportsFirstFrame: false,
   },
 });
 
@@ -95,7 +98,25 @@ export class OpenRouterVideoAdapterError extends Error {
   }
 }
 
-export type OpenRouterVideoAdapterDeps = { fetch?: ProviderFetch; validationTimeoutMs?: number };
+export type OpenRouterHttpOperation = 'validate' | 'submit' | 'poll';
+
+export type OpenRouterHttpErrorEvidence = {
+  operation: OpenRouterHttpOperation;
+  model: string;
+  httpStatus: number;
+  stableCode: SanitizedProviderError['code'];
+  jsonReadable: boolean;
+  errorCode: string | null;
+  errorType: string | null;
+  providerCode: string | null;
+  messagePresent: boolean;
+};
+
+export type OpenRouterVideoAdapterDeps = {
+  fetch?: ProviderFetch;
+  validationTimeoutMs?: number;
+  emitHttpErrorEvidence?: (evidence: OpenRouterHttpErrorEvidence) => void | PromiseLike<void>;
+};
 
 const normalizedBaseUrl = (value: string): string | null => {
   try {
@@ -144,7 +165,7 @@ const requestValidation = (request: StudioGenerationRequest, provider: TProvider
   }
   if (!spec.resolutions.includes(request.resolution)) issues.push({ code: 'invalid_resolution' });
   if (!spec.ratios.includes(request.aspectRatio)) issues.push({ code: 'invalid_resolution' });
-  if ('firstFrame' in request && request.firstFrame !== undefined && !OPENROUTER_MANAGED_FIRST_FRAME_SUPPORTED) {
+  if ('firstFrame' in request && request.firstFrame !== undefined && !spec.supportsFirstFrame) {
     issues.push({ code: 'invalid_reference' });
   }
   return issues.length > 0
@@ -208,11 +229,79 @@ const defaultFetch: ProviderFetch = async (url, init) => {
   return { status: response.status, json: async () => response.json() };
 };
 
+const SAFE_HTTP_ERROR_TAGS = new Set([
+  'bad_request',
+  'content_policy',
+  'content_policy_violation',
+  'image_download_failed',
+  'image_too_large',
+  'image_too_small',
+  'invalid_image',
+  'invalid_image_url',
+  'invalid_request',
+  'invalid_request_error',
+  'moderation',
+  'payload_too_large',
+  'unprocessable_entity',
+  'unsupported_image_format',
+  'unsupported_value',
+]);
+
+const safeEvidenceTag = (value: unknown): string | null => {
+  const normalized = typeof value === 'number' && Number.isInteger(value) ? String(value) : value;
+  if (typeof normalized !== 'string') return null;
+  if (/^[1-5][0-9]{2}$/.test(normalized)) return normalized;
+  return SAFE_HTTP_ERROR_TAGS.has(normalized) ? normalized : null;
+};
+
+const httpErrorEvidence = async (
+  response: ProviderHttpResponse,
+  operation: OpenRouterHttpOperation,
+  model: string,
+  stableCode: SanitizedProviderError['code']
+): Promise<OpenRouterHttpErrorEvidence> => {
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return {
+      operation,
+      model,
+      httpStatus: response.status,
+      stableCode,
+      jsonReadable: false,
+      errorCode: null,
+      errorType: null,
+      providerCode: null,
+      messagePresent: false,
+    };
+  }
+  const error = record(record(body)?.error);
+  const metadata = record(error?.metadata);
+  return {
+    operation,
+    model,
+    httpStatus: response.status,
+    stableCode,
+    jsonReadable: true,
+    errorCode: safeEvidenceTag(error?.code),
+    errorType: safeEvidenceTag(metadata?.error_type),
+    providerCode: safeEvidenceTag(metadata?.provider_code),
+    messagePresent: typeof error?.message === 'string' && error.message.length > 0,
+  };
+};
+
+const defaultEmitHttpErrorEvidence = (evidence: OpenRouterHttpErrorEvidence): void => {
+  console.warn('[CreativeStudio:OpenRouterVideo:http-error]', evidence);
+};
+
 const requestJson = async (
   fetcher: ProviderFetch,
   url: string,
   provider: TProviderWithModel,
   init: Omit<Parameters<ProviderFetch>[1], 'headers'>,
+  operation: OpenRouterHttpOperation,
+  emitHttpErrorEvidence: (evidence: OpenRouterHttpErrorEvidence) => void | PromiseLike<void>,
   requireJson = true
 ): Promise<unknown> => {
   if (!isSupportedOpenRouterVideoProvider(provider, provider.use_model) || !provider.api_key.trim()) {
@@ -233,8 +322,17 @@ const requestJson = async (
     }
     throw new OpenRouterVideoAdapterError('provider_unavailable');
   }
-  if (response.status < 200 || response.status >= 300)
-    throw new OpenRouterVideoAdapterError(mapStatusError(response.status).code);
+  if (response.status < 200 || response.status >= 300) {
+    const stableCode = mapStatusError(response.status).code;
+    // Provider-controlled error bodies are detached from failure handling so a stalled body or
+    // diagnostic sink can never delay or change the already-known HTTP result.
+    setTimeout(() => {
+      void httpErrorEvidence(response, operation, provider.use_model, stableCode)
+        .then(emitHttpErrorEvidence)
+        .catch((): undefined => undefined);
+    }, 0);
+    throw new OpenRouterVideoAdapterError(stableCode);
+  }
   if (!requireJson || response.status === 204) return undefined;
   return safeJson(response);
 };
@@ -243,6 +341,7 @@ const requestJson = async (
 export const createOpenRouterVideoAdapter = (deps: OpenRouterVideoAdapterDeps = {}): GenerationProviderAdapter => {
   const fetcher = deps.fetch ?? defaultFetch;
   const validationTimeoutMs = deps.validationTimeoutMs ?? VALIDATION_TIMEOUT_MS;
+  const emitHttpErrorEvidence = deps.emitHttpErrorEvidence ?? defaultEmitHttpErrorEvidence;
   const videosUrl = (provider: Pick<IProvider, 'base_url'>, id?: string): string => {
     const baseUrl = normalizedBaseUrl(provider.base_url);
     if (!baseUrl) throw new OpenRouterVideoAdapterError('unsupported');
@@ -271,7 +370,9 @@ export const createOpenRouterVideoAdapter = (deps: OpenRouterVideoAdapterDeps = 
             fetcher,
             `${normalizedBaseUrl(provider.base_url)}/videos/models`,
             { ...provider, use_model: input.model },
-            { method: 'GET', signal: deadlineSignal }
+            { method: 'GET', signal: deadlineSignal },
+            'validate',
+            emitHttpErrorEvidence
           )
         );
         return {
@@ -283,7 +384,7 @@ export const createOpenRouterVideoAdapter = (deps: OpenRouterVideoAdapterDeps = 
             resolutions: [...spec.resolutions],
             minDurationSeconds: spec.minDuration,
             maxDurationSeconds: spec.maxDuration,
-            supportsFirstFrame: OPENROUTER_MANAGED_FIRST_FRAME_SUPPORTED,
+            supportsFirstFrame: spec.supportsFirstFrame,
             cancellationPolicy: 'none',
           },
         };
@@ -323,11 +424,27 @@ export const createOpenRouterVideoAdapter = (deps: OpenRouterVideoAdapterDeps = 
         resolution: request.resolution,
       };
       if (spec.supportsAudio) payload.generate_audio = true;
-      const body = await requestJson(fetcher, videosUrl(provider), provider, {
-        method: 'POST',
-        body: JSON.stringify(payload),
-        signal,
-      });
+      if (request.firstFrame && spec.supportsFirstFrame) {
+        payload.frame_images = [
+          {
+            type: 'image_url',
+            image_url: { url: await request.firstFrame.asDataUrl(FIRST_FRAME_MAX_BYTES) },
+            frame_type: 'first_frame',
+          },
+        ];
+      }
+      const body = await requestJson(
+        fetcher,
+        videosUrl(provider),
+        provider,
+        {
+          method: 'POST',
+          body: JSON.stringify(payload),
+          signal,
+        },
+        'submit',
+        emitHttpErrorEvidence
+      );
       const status = jobStatus(body);
       const outputs = outputUrls(body);
       if (status === 'completed' || status === 'succeeded' || status === 'success') {
@@ -341,10 +458,17 @@ export const createOpenRouterVideoAdapter = (deps: OpenRouterVideoAdapterDeps = 
     },
 
     async poll(providerJobId: string, provider: TProviderWithModel, signal: AbortSignal): Promise<ProviderJobSnapshot> {
-      const body = await requestJson(fetcher, videosUrl(provider, providerJobId), provider, {
-        method: 'GET',
-        signal,
-      });
+      const body = await requestJson(
+        fetcher,
+        videosUrl(provider, providerJobId),
+        provider,
+        {
+          method: 'GET',
+          signal,
+        },
+        'poll',
+        emitHttpErrorEvidence
+      );
       switch (jobStatus(body)) {
         case 'pending':
         case 'queued':

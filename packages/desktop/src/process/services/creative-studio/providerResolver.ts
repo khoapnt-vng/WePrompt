@@ -19,11 +19,7 @@ import type {
 } from '@/common/types/project/creativeStudioTypes';
 import { isImageGenSupported, isImagesApiModel } from '@/common/utils/imageModelAllowlist';
 import { getBytePlusSeedanceModelSpec, isSupportedBytePlusSeedanceProvider } from './adapters/bytePlusSeedanceAdapter';
-import {
-  getOpenRouterVideoModelSpec,
-  isSupportedOpenRouterVideoProvider,
-  OPENROUTER_MANAGED_FIRST_FRAME_SUPPORTED,
-} from './adapters/openRouterVideoAdapter';
+import { getOpenRouterVideoModelSpec, isSupportedOpenRouterVideoProvider } from './adapters/openRouterVideoAdapter';
 
 export type StudioProviderResolverDeps = {
   listProviders: () => Promise<IProvider[]>;
@@ -144,7 +140,7 @@ const openRouterConstraints = (model: string): StudioRouteConstraints | null => 
         resolutions: [...spec.resolutions],
         minDurationSeconds: spec.minDuration,
         maxDurationSeconds: spec.maxDuration,
-        supportsFirstFrame: OPENROUTER_MANAGED_FIRST_FRAME_SUPPORTED,
+        supportsFirstFrame: spec.supportsFirstFrame,
         silentOutput: !spec.supportsAudio,
       }
     : null;
