@@ -10,6 +10,7 @@ vi.mock('@sentry/vite-plugin', () => ({
 }));
 
 const POLICY_ENV_KEYS = [
+  'AIONUI_ENABLE_CREATIVE_STUDIO',
   'WEPROMPT_INTERNAL_RELEASE',
   'WEPROMPT_UPDATE_BASE_URL',
   'SENTRY_DSN',
@@ -72,6 +73,25 @@ describe('electron-vite internal release policy', () => {
 
     await expect(resolveProductionConfig()).rejects.toThrow(/SENTRY_AUTH_TOKEN/);
     expect(sentryVitePluginMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects Creative Studio before constructing an internal production bundle', async () => {
+    process.env.WEPROMPT_INTERNAL_RELEASE = '1';
+    process.env.AIONUI_ENABLE_CREATIVE_STUDIO = '1';
+
+    await expect(resolveProductionConfig()).rejects.toThrow(/AIONUI_ENABLE_CREATIVE_STUDIO/);
+    expect(sentryVitePluginMock).not.toHaveBeenCalled();
+  });
+
+  it('compiles the internal Studio flag as disabled when no forbidden value is present', async () => {
+    process.env.WEPROMPT_INTERNAL_RELEASE = '1';
+
+    const config = await resolveProductionConfig();
+    const mainDefine = config.main?.define as Record<string, string>;
+    const rendererDefine = config.renderer?.define as Record<string, string>;
+
+    expect(mainDefine['process.env.AIONUI_ENABLE_CREATIVE_STUDIO']).toBe(JSON.stringify(''));
+    expect(rendererDefine['process.env.AIONUI_ENABLE_CREATIVE_STUDIO']).toBe(JSON.stringify(''));
   });
 
   it('emits the presentation template inventory digest with the main bundle', async () => {

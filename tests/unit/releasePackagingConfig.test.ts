@@ -592,6 +592,7 @@ describe('release packaging configuration', () => {
     expect(windowsBuildBlock).toBeTruthy();
     expect(macBuildBlock).toBeTruthy();
     for (const name of [
+      'AIONUI_ENABLE_CREATIVE_STUDIO',
       'WEPROMPT_UPDATE_BASE_URL',
       'SENTRY_DSN',
       'SENTRY_AUTH_TOKEN',
@@ -617,6 +618,10 @@ describe('release packaging configuration', () => {
     ]) {
       expect(workflow).toMatch(new RegExp(`Validate internal release environment[\\s\\S]*?${name}`));
     }
+
+    expect(workflow).toContain('Creative Studio: disabled');
+    expect(workflow).toContain('Auto-update: disabled');
+    expect(workflow).toContain('Sentry: disabled');
 
     for (const name of ['appleId', 'appleIdPassword', 'teamId', 'identity', 'CSC_NAME']) {
       expect(windowsBuildBlock).not.toContain(`${name}:`);

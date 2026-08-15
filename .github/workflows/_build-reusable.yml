@@ -264,12 +264,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for name in WEPROMPT_UPDATE_BASE_URL SENTRY_DSN SENTRY_AUTH_TOKEN SENTRY_UPLOAD_SOURCE_MAPS SENTRY_ORG SENTRY_PROJECT SENTRY_RELEASE BUILD_CERTIFICATE_BASE64 P12_PASSWORD KEYCHAIN_PASSWORD CSC_LINK CSC_KEY_PASSWORD WIN_CSC_LINK WIN_CSC_KEY_PASSWORD CSC_NAME CSC_IDENTITY_AUTO_DISCOVERY APPLE_ID APPLE_ID_PASSWORD TEAM_ID IDENTITY appleId appleIdPassword teamId identity; do
+          for name in AIONUI_ENABLE_CREATIVE_STUDIO WEPROMPT_UPDATE_BASE_URL SENTRY_DSN SENTRY_AUTH_TOKEN SENTRY_UPLOAD_SOURCE_MAPS SENTRY_ORG SENTRY_PROJECT SENTRY_RELEASE BUILD_CERTIFICATE_BASE64 P12_PASSWORD KEYCHAIN_PASSWORD CSC_LINK CSC_KEY_PASSWORD WIN_CSC_LINK WIN_CSC_KEY_PASSWORD CSC_NAME CSC_IDENTITY_AUTO_DISCOVERY APPLE_ID APPLE_ID_PASSWORD TEAM_ID IDENTITY appleId appleIdPassword teamId identity; do
             if [ -n "${!name:-}" ]; then
               echo "::error title=Internal release configuration rejected::$name must be unset"
               exit 1
             fi
           done
+          echo "Creative Studio: disabled"
+          echo "Auto-update: disabled"
+          echo "Sentry: disabled"
 
       # macOS code signing certificate installation
       - name: Setup macOS code signing (macOS only)

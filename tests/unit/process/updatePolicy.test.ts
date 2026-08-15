@@ -72,6 +72,42 @@ describe('desktop release update policy', () => {
     }
   });
 
+  it('rejects Creative Studio enablement for an internal release', () => {
+    expect(() =>
+      resolveDesktopReleaseBuildPolicy(
+        {
+          WEPROMPT_INTERNAL_RELEASE: '1',
+          AIONUI_ENABLE_CREATIVE_STUDIO: '1',
+        },
+        { isDevelopment: false }
+      )
+    ).toThrow(/AIONUI_ENABLE_CREATIVE_STUDIO/);
+  });
+
+  it('resolves every internal release exclusion disabled when forbidden values are absent', () => {
+    expect(
+      resolveDesktopReleaseBuildPolicy(
+        {
+          WEPROMPT_INTERNAL_RELEASE: '1',
+        },
+        { isDevelopment: false }
+      )
+    ).toMatchObject({
+      internalRelease: true,
+      creativeStudioEnabled: false,
+      updateBaseUrl: null,
+      enableSentrySourceMaps: false,
+    });
+  });
+
+  it('keeps runtime updates disabled for an internal release even when passed a feed', () => {
+    expect(
+      isUpdateFeatureEnabled('https://updates.weprompt.test/releases', {
+        WEPROMPT_INTERNAL_RELEASE: '1',
+      })
+    ).toBe(false);
+  });
+
   it('does not enable source-map upload from an ambient auth token alone', () => {
     const policy = resolveDesktopReleaseBuildPolicy({ SENTRY_AUTH_TOKEN: 'ambient-token' }, { isDevelopment: false });
 

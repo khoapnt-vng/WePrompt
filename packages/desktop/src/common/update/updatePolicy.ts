@@ -10,18 +10,27 @@ const SENTRY_BUILD_VARIABLES = [
 type SentryBuildVariable = (typeof SENTRY_BUILD_VARIABLES)[number];
 
 export type DesktopReleaseBuildEnvironment = Partial<
-  Record<SentryBuildVariable | 'WEPROMPT_INTERNAL_RELEASE' | 'WEPROMPT_UPDATE_BASE_URL', string | undefined>
+  Record<
+    SentryBuildVariable | 'AIONUI_ENABLE_CREATIVE_STUDIO' | 'WEPROMPT_INTERNAL_RELEASE' | 'WEPROMPT_UPDATE_BASE_URL',
+    string | undefined
+  >
 >;
 
 export type DesktopUpdateRuntimeEnvironment = Partial<
   Record<
-    'AIONUI_DISABLE_AUTO_UPDATE' | 'AIONUI_E2E_TEST' | 'CI' | 'GITHUB_ACTIONS' | 'WEPROMPT_UPDATE_BASE_URL',
+    | 'AIONUI_DISABLE_AUTO_UPDATE'
+    | 'AIONUI_E2E_TEST'
+    | 'CI'
+    | 'GITHUB_ACTIONS'
+    | 'WEPROMPT_INTERNAL_RELEASE'
+    | 'WEPROMPT_UPDATE_BASE_URL',
     string | undefined
   >
 >;
 
 export type DesktopReleaseBuildPolicy = {
   internalRelease: boolean;
+  creativeStudioEnabled: boolean;
   updateBaseUrl: string | null;
   enableSentrySourceMaps: boolean;
   sentry: {
@@ -129,7 +138,12 @@ export function resolveDesktopReleaseBuildPolicy(
   options: { isDevelopment: boolean }
 ): DesktopReleaseBuildPolicy {
   const internalRelease = trimmed(environment.WEPROMPT_INTERNAL_RELEASE) === '1';
+  const rawCreativeStudioFlag = trimmed(environment.AIONUI_ENABLE_CREATIVE_STUDIO);
   const rawUpdateBaseUrl = trimmed(environment.WEPROMPT_UPDATE_BASE_URL);
+
+  if (internalRelease && rawCreativeStudioFlag) {
+    throw new Error('AIONUI_ENABLE_CREATIVE_STUDIO must be unset when WEPROMPT_INTERNAL_RELEASE=1');
+  }
 
   if (internalRelease && rawUpdateBaseUrl) {
     throw new Error('WEPROMPT_UPDATE_BASE_URL must be unset when WEPROMPT_INTERNAL_RELEASE=1');
@@ -160,6 +174,7 @@ export function resolveDesktopReleaseBuildPolicy(
 
   return {
     internalRelease,
+    creativeStudioEnabled: !internalRelease && rawCreativeStudioFlag === '1',
     updateBaseUrl,
     enableSentrySourceMaps,
     sentry: {
@@ -185,6 +200,7 @@ export function isUpdateFeatureEnabled(
   const isCiRuntime = environment.CI === 'true' || environment.CI === '1' || environment.GITHUB_ACTIONS === 'true';
   return (
     getConfiguredUpdateBaseUrl(value) !== null &&
+    environment.WEPROMPT_INTERNAL_RELEASE !== '1' &&
     environment.AIONUI_DISABLE_AUTO_UPDATE !== '1' &&
     environment.AIONUI_E2E_TEST !== '1' &&
     !isCiRuntime

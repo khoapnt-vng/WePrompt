@@ -98,7 +98,7 @@ export default defineConfig(({ mode }) => {
   const isDevelopment = mode === 'development';
   const releaseBuildPolicy = resolveDesktopReleaseBuildPolicy(process.env, { isDevelopment });
   const { enableSentrySourceMaps } = releaseBuildPolicy;
-  const creativeStudioFeatureEnv = JSON.stringify(process.env.AIONUI_ENABLE_CREATIVE_STUDIO ?? '');
+  const creativeStudioFeatureEnv = JSON.stringify(releaseBuildPolicy.creativeStudioEnabled ? '1' : '');
 
   const sentryPluginOptions = enableSentrySourceMaps
     ? {
