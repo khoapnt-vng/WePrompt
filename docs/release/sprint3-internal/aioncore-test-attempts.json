@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "scope": "pre-commit AionCore release diagnostics",
+  "attempts": [
+    {
+      "attemptId": "bfe83bb4-5f95-4b2a-894a-efa25710bf57",
+      "capturedAt": "2026-08-15T14:06:21Z",
+      "command": "cargo nextest run -p aionui-mcp -p aionui-ai-agent --status-level fail --final-status-level fail",
+      "sourceState": {
+        "baseCommit": "6d9669e081ede101d7933079bcde2762d38998b5",
+        "workingTreeDiffSha256": "8fc2927c68145b503f336ed592bca01eced7ab57f91561d8107809022b1ba46f"
+      },
+      "runner": {
+        "os": "macOS Darwin 24.6.0",
+        "architecture": "arm64",
+        "rustc": "1.95.0 (59807616e 2026-04-14)"
+      },
+      "outcome": "red",
+      "exitCode": 100,
+      "runSummary": "1035 of 1103 tests ran before fail-fast: 1034 passed, 1 failed, 12 skipped, 68 not run",
+      "failures": [
+        {
+          "test": "aionui-mcp connection_test::tests::stdio_timeout_cleans_up_process_group",
+          "signature": "stdio timeout should terminate the spawned process group",
+          "classification": "test_false_negative_fixed_pending_review",
+          "evidence": [
+            "The same test passed in standalone MCP attempt 47399e20-5cb0-414e-832d-a5bf5f10cf73.",
+            "The failure occurred only in the combined MCP plus AI-agent run after 1034 passing tests.",
+            "The assertion polls process-group exit for a fixed one-second window.",
+            "Focused diagnostic 3de81948-e0d8-46d1-8769-8362f0ad09ba passed in 0.233 seconds.",
+            "Production sends SIGKILL to the process group and awaits the direct child; kill(-pgid, 0) still reports a killed descendant zombie until the OS reaper removes it.",
+            "Corrected runnable-descendant diagnostic ee5842dd-a0f6-43d7-99c1-96842feb91fc passed in 0.269 seconds.",
+            "Mutation diagnostic 014f2a10-a6d9-43ca-bf36-3e30c60f2711 failed when cleanup killed only the direct child, proving the corrected assertion still detects a process-tree leak."
+          ],
+          "rootCause": "The test conflates process-group existence with a runnable process. Killed descendant zombies remain visible to signal-zero checks for OS-dependent time, so the fixed one-second assertion can fail despite successful cleanup.",
+          "disposition": "blocks_release_gate_until_a_reviewer_accepts_the_corrected_runnable-descendant assertion and a new exact-commit suite attempt completes"
+        }
+      ],
+      "rawLog": {
+        "available": false,
+        "reason": "interactive pre-commit diagnostic; not admissible as final release gate evidence"
+      }
+    },
+    {
+      "attemptId": "7932554f-b6a9-43d8-9c31-c7cd4cc7558b",
+      "startedAt": "2026-08-15T14:11:55Z",
+      "endedAt": "2026-08-15T14:12:41Z",
+      "command": "cargo nextest run -p aionui-mcp -p aionui-ai-agent --status-level fail --final-status-level fail",
+      "sourceState": {
+        "commit": "a48a1cb6373d6eebed8fc6765aab65931e6556b1",
+        "workingTreeClean": true
+      },
+      "runner": {
+        "os": "macOS Darwin 24.6.0",
+        "architecture": "arm64",
+        "rustc": "1.95.0 (59807616e 2026-04-14)"
+      },
+      "outcome": "green",
+      "exitCode": 0,
+      "runSummary": "1103 tests passed, 12 skipped",
+      "failures": [],
+      "rawLog": {
+        "available": false,
+        "reason": "interactive source diagnostic; final release gate requires the planned checksummed CI log"
+      }
+    }
+  ]
+}
