@@ -14,8 +14,12 @@ import type {
   StudioConnectionInventory,
   StudioConnectionRecord,
   StudioConnectionValidationResult,
+  StudioRendererConnectionCapabilities,
 } from '@/common/types/project/creativeStudioTypes';
-import { StudioMediaModelsSection } from '@renderer/components/settings/SettingsModal/contents/ModelModalContent/StudioMediaModelsSection';
+import {
+  sanitizeStudioMediaModelCapabilities,
+  StudioMediaModelsSection,
+} from '@renderer/components/settings/SettingsModal/contents/ModelModalContent/StudioMediaModelsSection';
 
 const bridge = vi.hoisted(() => ({
   listConnectionCandidates: { invoke: vi.fn() },
@@ -235,6 +239,29 @@ const fillVideoTuple = async (model = 'open-sora-manual'): Promise<HTMLElement> 
   });
   return dialog;
 };
+
+describe('sanitizeStudioMediaModelCapabilities', () => {
+  const capabilities = (maxConditioningImages?: number): StudioRendererConnectionCapabilities => ({
+    mediaKinds: ['image'],
+    ...(maxConditioningImages === undefined ? {} : { maxConditioningImages }),
+  });
+
+  it('preserves only absent or integer conditioning capacity values from zero through six', () => {
+    const absent = sanitizeStudioMediaModelCapabilities(capabilities());
+    const zero = sanitizeStudioMediaModelCapabilities(capabilities(0));
+    const six = sanitizeStudioMediaModelCapabilities(capabilities(6));
+    const negative = sanitizeStudioMediaModelCapabilities(capabilities(-1));
+    const fractional = sanitizeStudioMediaModelCapabilities(capabilities(1.5));
+    const excessive = sanitizeStudioMediaModelCapabilities(capabilities(7));
+
+    expect(absent).not.toHaveProperty('maxConditioningImages');
+    expect(zero).toHaveProperty('maxConditioningImages', 0);
+    expect(six).toHaveProperty('maxConditioningImages', 6);
+    expect(negative).not.toHaveProperty('maxConditioningImages');
+    expect(fractional).not.toHaveProperty('maxConditioningImages');
+    expect(excessive).not.toHaveProperty('maxConditioningImages');
+  });
+});
 
 describe('StudioMediaModelsSection', () => {
   beforeEach(() => {
@@ -519,7 +546,12 @@ describe('StudioMediaModelsSection', () => {
 
     await waitFor(() => expect(bridge.saveConnection.invoke).toHaveBeenCalledOnce());
     expect(capacityReads).toHaveBeenCalled();
-    expect(screen.queryByText('6')).toBeNull();
+    const capacityCopy =
+      /(?:conditioning|reference|images?|maximum|max|up to).*\b6\b|\b6\b.*(?:conditioning|reference|images?|maximum|max|up to)/i;
+    expect(document.body).not.toHaveTextContent(capacityCopy);
+    for (const element of [document.body, ...document.body.querySelectorAll('*')]) {
+      expect(element).not.toHaveAccessibleName(capacityCopy);
+    }
   });
 
   it('same-tuple edit replaces the visible row instead of duplicating it', async () => {

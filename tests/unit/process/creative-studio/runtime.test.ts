@@ -747,6 +747,30 @@ describe('Creative Studio E2E fake adapter', () => {
       new Set(['byteplus-seedance-v1', 'weprompt-media-gateway-v1'])
     );
 
+    const imageConnection = imageConnections[0];
+    if (!imageConnection) throw new Error('expected the explicit fake image binding');
+    const imageAdapter = bundle.adapters.get(imageConnection.adapterId);
+    if (!imageAdapter) throw new Error('expected the explicitly injected fake image adapter');
+    const imageProvider = { ...bundle.provider, use_model: imageConnection.model } satisfies TProviderWithModel;
+    const imageValidation = await imageAdapter.validateConnection(
+      { model: imageConnection.model },
+      imageProvider,
+      new AbortController().signal
+    );
+    expect(imageValidation).toMatchObject({ ok: true });
+    if (!imageValidation.ok) throw new Error('expected the exact fake image binding to validate');
+    expect(imageValidation.capabilities).toHaveProperty('maxConditioningImages', 6);
+    await expect(
+      imageAdapter.validateConnection(
+        { model: imageConnection.model },
+        { ...imageProvider, id: 'wrong_fake_provider' },
+        new AbortController().signal
+      )
+    ).resolves.toEqual({ ok: false, error: { code: 'unsupported' } });
+    await expect(
+      imageAdapter.validateConnection({ model: 'wrong-fake-model' }, imageProvider, new AbortController().signal)
+    ).resolves.toEqual({ ok: false, error: { code: 'unsupported' } });
+
     const fakeProvider = {
       ...bundle.provider,
       use_model: 'dreamina-seedance-2-0-260128',

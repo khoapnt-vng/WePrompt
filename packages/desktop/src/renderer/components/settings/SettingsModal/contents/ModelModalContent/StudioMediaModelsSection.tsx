@@ -37,7 +37,7 @@ export type StudioMediaModelsSectionProps = {
   onAddProvider: () => void;
 };
 
-const sanitizeCapabilities = (
+export const sanitizeStudioMediaModelCapabilities = (
   capabilities: StudioRendererConnectionCapabilities
 ): StudioRendererConnectionCapabilities => ({
   mediaKinds: [...capabilities.mediaKinds],
@@ -73,7 +73,7 @@ const sanitizeBinding = (binding: StudioConnectionRecord): SafeBinding => ({
   integrationId: binding.integrationId,
   labelKey: binding.labelKey,
   model: binding.model,
-  capabilities: sanitizeCapabilities(binding.capabilities),
+  capabilities: sanitizeStudioMediaModelCapabilities(binding.capabilities),
   validatedAt: binding.validatedAt,
 });
 
@@ -82,7 +82,7 @@ const sanitizeValidation = (validation: StudioConnectionValidationResult): SafeV
   integrationId: validation.integrationId,
   labelKey: validation.labelKey,
   model: validation.model,
-  capabilities: sanitizeCapabilities(validation.capabilities),
+  capabilities: sanitizeStudioMediaModelCapabilities(validation.capabilities),
   validatedAt: validation.validatedAt,
 });
 
