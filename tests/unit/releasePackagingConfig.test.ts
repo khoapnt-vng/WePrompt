@@ -669,6 +669,13 @@ describe('release packaging configuration', () => {
     expect(workflow).toContain('node-version: 24.15.0');
     expect(workflow).toContain('bun install --frozen-lockfile');
     expect(workflow).toContain('tests/unit/release/internalReleaseExclusions.test.ts');
+    expect(workflow.match(/node scripts\/release\/validate-full-suite-ledger\.js/g)).toHaveLength(2);
+    expect(workflow).toContain(
+      "Copy-Item -LiteralPath 'docs/release/sprint3-internal/full-suite-ledger.json' -Destination $Ledger"
+    );
+    expect(workflow).toContain('name: sprint3-windows-x64-ledger-${{ inputs.weprompt_commit }}');
+    expect(workflow).toContain('uses: actions/download-artifact@');
+    expect(workflow).toContain('mv "$RUNNER_TEMP/windows-ledger/full-suite-ledger.json"');
     expect(workflow.match(/node scripts\/release\/run-vitest-gate\.js/g)).toHaveLength(2);
     expect(workflow).toContain('PresentationReadinessService.test.ts');
     expect(workflow).toContain('aioncore-v0.1.55.json');

@@ -78,6 +78,14 @@ jobs:
           tests/unit/release/vitestGateLedger.test.ts
           tests/unit/releasePackagingConfig.test.ts
 
+      - name: Validate and seed governed suite ledger
+        shell: pwsh
+        run: |
+          node scripts/release/validate-full-suite-ledger.js docs/release/sprint3-internal/full-suite-ledger.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $Ledger = Join-Path $env:RUNNER_TEMP 'full-suite-ledger.json'
+          Copy-Item -LiteralPath 'docs/release/sprint3-internal/full-suite-ledger.json' -Destination $Ledger
+
       - name: Exercise BUG-043 readiness guard natively
         shell: pwsh
         run: |
@@ -104,6 +112,14 @@ jobs:
             ${{ runner.temp }}/full-suite-ledger.json
             ${{ runner.temp }}/vitest/*.log
             docs/release/sprint3-internal/known-flakes.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Windows suite-ledger handoff
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
+        with:
+          name: sprint3-windows-x64-ledger-${{ inputs.weprompt_commit }}
+          path: ${{ runner.temp }}/full-suite-ledger.json
           if-no-files-found: error
           retention-days: 30
 
@@ -181,6 +197,18 @@ jobs:
           tests/unit/release/internalReleaseExclusions.test.ts
           tests/unit/release/vitestGateLedger.test.ts
           tests/unit/releasePackagingConfig.test.ts
+
+      - name: Download Windows suite-ledger handoff
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: sprint3-windows-x64-ledger-${{ inputs.weprompt_commit }}
+          path: ${{ runner.temp }}/windows-ledger
+
+      - name: Validate Windows ledger before macOS append
+        run: |
+          test -f "$RUNNER_TEMP/windows-ledger/full-suite-ledger.json"
+          node scripts/release/validate-full-suite-ledger.js "$RUNNER_TEMP/windows-ledger/full-suite-ledger.json"
+          mv "$RUNNER_TEMP/windows-ledger/full-suite-ledger.json" "$RUNNER_TEMP/full-suite-ledger.json"
 
       - name: Run and ledger the Vitest suite once
         run: >-
