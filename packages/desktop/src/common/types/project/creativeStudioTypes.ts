@@ -89,6 +89,8 @@ export type StudioManagedAssetRef = {
   fileName: string;
 };
 
+export type StudioBriefReferenceRole = 'cast' | 'look';
+
 export type StudioAsset = {
   id: string;
   projectId: string;
@@ -103,12 +105,19 @@ export type StudioAsset = {
   height?: number;
   durationSeconds?: number;
   createdAt: string;
+  /** Optional Brief classification. Role and label are persisted together or both absent. */
+  briefReferenceRole?: StudioBriefReferenceRole;
+  briefReferenceLabel?: string;
   /**
    * The scene's visual prompt at the moment this asset was generated, trimmed.
    * Absent means unknown provenance — an asset written before this field existed,
    * or one that did not come from a prompt (an import). Absent is NOT stale.
    */
   sourceVisualPrompt?: string;
+  /** Complete frame-input provenance for generated reference plates; the trio is all-or-neither. */
+  sourceReferenceAssetIds?: string[];
+  sourceAspectRatio?: StudioAspectRatio;
+  sourceResolution?: StudioResolution;
 };
 
 export type StudioJobErrorCode =

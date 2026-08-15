@@ -723,7 +723,14 @@ const toRendererAsset = (asset: StudioAsset): StudioAsset => ({
   ...(asset.width === undefined ? {} : { width: asset.width }),
   ...(asset.height === undefined ? {} : { height: asset.height }),
   ...(asset.durationSeconds === undefined ? {} : { durationSeconds: asset.durationSeconds }),
+  ...(asset.briefReferenceRole === undefined ? {} : { briefReferenceRole: asset.briefReferenceRole }),
+  ...(asset.briefReferenceLabel === undefined ? {} : { briefReferenceLabel: asset.briefReferenceLabel }),
   ...(asset.sourceVisualPrompt === undefined ? {} : { sourceVisualPrompt: asset.sourceVisualPrompt }),
+  ...(asset.sourceReferenceAssetIds === undefined
+    ? {}
+    : { sourceReferenceAssetIds: [...asset.sourceReferenceAssetIds] }),
+  ...(asset.sourceAspectRatio === undefined ? {} : { sourceAspectRatio: asset.sourceAspectRatio }),
+  ...(asset.sourceResolution === undefined ? {} : { sourceResolution: asset.sourceResolution }),
   createdAt: asset.createdAt,
 });
 

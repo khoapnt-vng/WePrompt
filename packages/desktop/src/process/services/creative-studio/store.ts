@@ -30,7 +30,12 @@ import type {
 } from '@/common/types/project/creativeStudioTypes';
 import { hasRuleToken, STUDIO_RULE_LIMITS, type StudioBriefRule } from '@/common/types/project/creativeStudioRules';
 import { isCanonicalStudioGeneratedTake } from '@/common/types/project/creativeStudioCanonicalTake';
-import { STUDIO_MANAGED_ASSET_COLLECTIONS } from '@/common/types/project/creativeStudioManagedAssetCollections';
+import {
+  isStudioBriefReferenceLabel,
+  resolveActiveStudioBriefReferences,
+  STUDIO_MANAGED_ASSET_COLLECTIONS,
+  STUDIO_MAX_ACTIVE_BRIEF_REFERENCES,
+} from '@/common/types/project/creativeStudioManagedAssetCollections';
 import { isValidProviderJobId } from '@process/services/creative-studio/adapters/types';
 import { toStudioProjectSummary } from '@/common/types/project/creativeStudioProjectSummary';
 
@@ -105,7 +110,12 @@ const ASSET_KEYS = new Set([
   'height',
   'durationSeconds',
   'createdAt',
+  'briefReferenceRole',
+  'briefReferenceLabel',
   'sourceVisualPrompt',
+  'sourceReferenceAssetIds',
+  'sourceAspectRatio',
+  'sourceResolution',
 ]);
 const MANAGED_ASSET_KEYS = new Set(['collection', 'fileName']);
 const CUT_KEYS = new Set(['id', 'name', 'orderMode', 'clipOrder', 'clips']);
@@ -661,6 +671,12 @@ const validateAsset = (
   value: unknown
 ): value is StudioAsset => {
   if (!isRecord(value) || !isRecord(value.managedAsset)) return false;
+  const hasBriefReferenceRole = value.briefReferenceRole !== undefined;
+  const hasBriefReferenceLabel = value.briefReferenceLabel !== undefined;
+  const hasSourceReferenceAssetIds = value.sourceReferenceAssetIds !== undefined;
+  const hasSourceAspectRatio = value.sourceAspectRatio !== undefined;
+  const hasSourceResolution = value.sourceResolution !== undefined;
+  const hasCompleteSourceProvenance = hasSourceReferenceAssetIds && hasSourceAspectRatio && hasSourceResolution;
   return (
     Object.keys(value).every((key) => ASSET_KEYS.has(key)) &&
     Object.keys(value.managedAsset).length === MANAGED_ASSET_KEYS.size &&
@@ -683,7 +699,28 @@ const validateAsset = (
     (value.durationSeconds === undefined ||
       (isFiniteInRange(value.durationSeconds, 0, Number.MAX_SAFE_INTEGER) && value.durationSeconds > 0)) &&
     isNonEmptyString(value.createdAt) &&
-    (value.sourceVisualPrompt === undefined || isString(value.sourceVisualPrompt))
+    hasBriefReferenceRole === hasBriefReferenceLabel &&
+    (!hasBriefReferenceRole ||
+      ((value.briefReferenceRole === 'cast' || value.briefReferenceRole === 'look') &&
+        isStudioBriefReferenceLabel(value.briefReferenceLabel) &&
+        value.sceneId === null &&
+        value.mediaKind === 'image' &&
+        value.managedAsset.collection === 'imports')) &&
+    (value.sourceVisualPrompt === undefined || isString(value.sourceVisualPrompt)) &&
+    hasSourceReferenceAssetIds === hasSourceAspectRatio &&
+    hasSourceAspectRatio === hasSourceResolution &&
+    (!hasCompleteSourceProvenance ||
+      (asArrayOfSafeIds(value.sourceReferenceAssetIds) &&
+        value.sourceReferenceAssetIds.length <= STUDIO_MAX_ACTIVE_BRIEF_REFERENCES &&
+        new Set(value.sourceReferenceAssetIds).size === value.sourceReferenceAssetIds.length &&
+        isString(value.sourceAspectRatio) &&
+        ASPECT_RATIOS.has(value.sourceAspectRatio) &&
+        isString(value.sourceResolution) &&
+        RESOLUTIONS.has(value.sourceResolution) &&
+        value.sourceVisualPrompt !== undefined &&
+        value.mediaKind === 'image' &&
+        value.sceneId !== null &&
+        value.managedAsset.collection === 'references'))
   );
 };
 
@@ -1096,6 +1133,22 @@ const validateProject = (value: unknown): value is StudioProject => {
   const typedScenes = scenes as Record<string, StudioScene>;
   const typedAssets = assets as Record<string, StudioAsset>;
   const typedJobs = jobs as Record<string, StudioJob>;
+  if (resolveActiveStudioBriefReferences(typedAssets) === null) return false;
+  const provenanceReferencesAreValid = Object.values(typedAssets).every(
+    (asset) =>
+      asset.sourceReferenceAssetIds === undefined ||
+      asset.sourceReferenceAssetIds.every((sourceAssetId) => {
+        const sourceAsset = typedAssets[sourceAssetId];
+        return (
+          sourceAsset?.id === sourceAssetId &&
+          sourceAsset.projectId === projectId &&
+          sourceAsset.sceneId === null &&
+          sourceAsset.mediaKind === 'image' &&
+          sourceAsset.managedAsset.collection === 'imports'
+        );
+      })
+  );
+  if (!provenanceReferencesAreValid) return false;
   if (cutsPresent) {
     if (!isRecord(value.cuts)) return false;
     const cuts = value.cuts;

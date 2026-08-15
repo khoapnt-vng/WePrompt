@@ -1008,6 +1008,48 @@ describe('CreativeStudioService', () => {
     expect(asset?.sourceVisualPrompt).toBe('Aerial, drifting. Smoke columns.');
   });
 
+  it('projects Brief classification and complete plate provenance without aliasing source IDs', async () => {
+    const project = await service.createProject(makeInput());
+    await store.updateProject(project.id, (current) => {
+      const next = structuredClone(current);
+      next.assets.cast_1 = {
+        id: 'cast_1',
+        projectId: next.id,
+        sceneId: null,
+        mediaKind: 'image',
+        mimeType: 'image/png',
+        managedAsset: { collection: 'imports', fileName: 'cast_1.png' },
+        byteSize: 1,
+        sha256: 'c'.repeat(64),
+        createdAt: next.createdAt,
+        briefReferenceRole: 'cast',
+        briefReferenceLabel: 'Lead Hero',
+      };
+      addReferencePlate(next, 'Aerial, drifting. Smoke columns.');
+      Object.assign(next.assets.reference_1, {
+        sourceReferenceAssetIds: ['cast_1'],
+        sourceAspectRatio: '16:9',
+        sourceResolution: '1080p',
+      });
+      return next;
+    });
+
+    const rendererProject = await service.getProject(project.id);
+    const rendererIds = rendererProject?.assets.reference_1.sourceReferenceAssetIds;
+
+    expect(rendererProject?.assets.cast_1).toMatchObject({
+      briefReferenceRole: 'cast',
+      briefReferenceLabel: 'Lead Hero',
+    });
+    expect(rendererProject?.assets.reference_1).toMatchObject({
+      sourceVisualPrompt: 'Aerial, drifting. Smoke columns.',
+      sourceReferenceAssetIds: ['cast_1'],
+      sourceAspectRatio: '16:9',
+      sourceResolution: '1080p',
+    });
+    expect(rendererIds).not.toBe((await store.getProject(project.id))?.assets.reference_1.sourceReferenceAssetIds);
+  });
+
   it('leaves provenance undefined for an asset that never recorded one', async () => {
     const project = await service.createProject(makeInput());
     await store.updateProject(project.id, (current) => {

@@ -42,6 +42,12 @@ import type {
   StudioRendererProject,
   StudioRouteCatalog,
 } from '@/common/types/project/creativeStudioTypes';
+import {
+  allocateStudioBriefReferenceLabel,
+  getStudioReferencePlateFreshness,
+  resolveActiveStudioBriefReferences,
+  STUDIO_BRIEF_REFERENCE_LABEL_MAX_LENGTH,
+} from '@/common/types/project/creativeStudioManagedAssetCollections';
 import { jobOutputRole } from '@/common/types/project/creativeStudioOutputRole';
 import { STUDIO_EDITABLE_SCENE_LIMITS, editableSceneSchema } from '@process/resources/builtinMcp/studioServer';
 import type { StudioProposalWriteError } from '@process/resources/builtinMcp/studioProposalWriter';
@@ -76,6 +82,19 @@ const subprocessProposalPayload: StudioProposalPayload = {
 };
 
 const cloneProject = (project: StudioProject): StudioProject => structuredClone(project);
+
+const makeProjectImport = (project: StudioProject, id: string, overrides: Partial<StudioAsset> = {}): StudioAsset => ({
+  id,
+  projectId: project.id,
+  sceneId: null,
+  mediaKind: 'image',
+  mimeType: 'image/png',
+  managedAsset: { collection: 'imports', fileName: `${id}.png` },
+  byteSize: 1,
+  sha256: 'a'.repeat(64),
+  createdAt: project.createdAt,
+  ...overrides,
+});
 
 const addScene = (project: StudioProject, id: string, durationSeconds = 1): StudioProject => {
   const next = cloneProject(project);
@@ -242,6 +261,164 @@ const proposalPayload = (title = 'Proposed opening') => ({
       referenceAssetId: null,
     },
   },
+});
+
+describe('Creative Studio Brief reference metadata', () => {
+  const project = {
+    id: 'project_1',
+    createdAt: '2026-08-15T00:00:00.000Z',
+  } as StudioProject;
+
+  const classifiedImport = (
+    id: string,
+    role: 'cast' | 'look',
+    createdAt: string,
+    overrides: Partial<StudioAsset> = {}
+  ): StudioAsset =>
+    makeProjectImport(project, id, {
+      createdAt,
+      briefReferenceRole: role,
+      briefReferenceLabel: id,
+      ...overrides,
+    });
+
+  it('ignores legacy project imports with no Brief classification', () => {
+    expect(resolveActiveStudioBriefReferences({ legacy: makeProjectImport(project, 'legacy') })).toEqual([]);
+  });
+
+  it.each([{ briefReferenceRole: 'cast' as const }, { briefReferenceLabel: 'Hero' }])(
+    'rejects an incomplete role and label pair: %o',
+    (metadata) => {
+      const asset = makeProjectImport(project, 'hero', metadata);
+
+      expect(resolveActiveStudioBriefReferences({ hero: asset })).toBeNull();
+    }
+  );
+
+  it.each([
+    { sceneId: 'scene_1' },
+    { mediaKind: 'video' as const, mimeType: 'video/mp4' },
+    { managedAsset: { collection: 'assets' as const, fileName: 'hero.png' } },
+  ])('rejects classified metadata on an asset that cannot be a Brief reference: %o', (overrides) => {
+    const asset = classifiedImport('hero', 'cast', project.createdAt, overrides);
+
+    expect(resolveActiveStudioBriefReferences({ hero: asset })).toBeNull();
+  });
+
+  it('orders cast before look and breaks ties by createdAt then id', () => {
+    const assets = {
+      look_old: classifiedImport('look_old', 'look', '2026-08-15T00:00:00.000Z'),
+      cast_new: classifiedImport('cast_new', 'cast', '2026-08-15T00:00:01.000Z'),
+      cast_b: classifiedImport('cast_b', 'cast', '2026-08-15T00:00:00.000Z'),
+      cast_a: classifiedImport('cast_a', 'cast', '2026-08-15T00:00:00.000Z'),
+    };
+
+    expect(resolveActiveStudioBriefReferences(assets)?.map((asset) => asset.id)).toEqual([
+      'cast_a',
+      'cast_b',
+      'cast_new',
+      'look_old',
+    ]);
+  });
+
+  it('accepts six active references and rejects a seventh', () => {
+    const six = Object.fromEntries(
+      Array.from({ length: 6 }, (_, index) => {
+        const id = `reference_${index + 1}`;
+        return [id, classifiedImport(id, index < 3 ? 'cast' : 'look', project.createdAt)];
+      })
+    );
+
+    expect(resolveActiveStudioBriefReferences(six)).toHaveLength(6);
+    expect(
+      resolveActiveStudioBriefReferences({
+        ...six,
+        reference_7: classifiedImport('reference_7', 'look', project.createdAt),
+      })
+    ).toBeNull();
+  });
+
+  it('derives a trimmed, control-free basename label', () => {
+    expect(allocateStudioBriefReferenceLabel('/tmp/  Hero\u0000\t Portrait .PNG', [])).toBe('Hero Portrait');
+  });
+
+  it('bounds labels while preserving a unique numeric suffix', () => {
+    const source = `${'x'.repeat(STUDIO_BRIEF_REFERENCE_LABEL_MAX_LENGTH + 20)}.png`;
+    const first = allocateStudioBriefReferenceLabel(source, []);
+    const second = allocateStudioBriefReferenceLabel(source, [first]);
+
+    expect(first).toHaveLength(STUDIO_BRIEF_REFERENCE_LABEL_MAX_LENGTH);
+    expect(second).toHaveLength(STUDIO_BRIEF_REFERENCE_LABEL_MAX_LENGTH);
+    expect(second.endsWith(' (2)')).toBe(true);
+    expect(second).not.toBe(first);
+  });
+
+  it('reports complete exact plate provenance as current', () => {
+    const plate = classifiedImport('plate_1', 'cast', project.createdAt, {
+      sceneId: 'scene_1',
+      managedAsset: { collection: 'references', fileName: 'plate_1.png' },
+      sourceVisualPrompt: 'Hero enters the arena',
+      sourceReferenceAssetIds: ['cast_1', 'look_1'],
+      sourceAspectRatio: '16:9',
+      sourceResolution: '1080p',
+      briefReferenceRole: undefined,
+      briefReferenceLabel: undefined,
+    });
+
+    expect(
+      getStudioReferencePlateFreshness(plate, {
+        visualPrompt: 'Hero enters the arena',
+        referenceAssetIds: ['cast_1', 'look_1'],
+        aspectRatio: '16:9',
+        resolution: '1080p',
+      })
+    ).toBe('current');
+  });
+
+  it.each([
+    { visualPrompt: 'Hero leaves the arena' },
+    { referenceAssetIds: ['look_1', 'cast_1'] },
+    { referenceAssetIds: ['cast_1'] },
+    { referenceAssetIds: ['cast_1', 'look_1', 'look_2'] },
+    { aspectRatio: '9:16' as const },
+    { resolution: '720p' as const },
+  ])('reports changed frame-defining inputs as out of date: %o', (override) => {
+    const plate = makeProjectImport(project, 'plate_1', {
+      sceneId: 'scene_1',
+      managedAsset: { collection: 'references', fileName: 'plate_1.png' },
+      sourceVisualPrompt: 'Hero enters the arena',
+      sourceReferenceAssetIds: ['cast_1', 'look_1'],
+      sourceAspectRatio: '16:9',
+      sourceResolution: '1080p',
+    });
+
+    expect(
+      getStudioReferencePlateFreshness(plate, {
+        visualPrompt: 'Hero enters the arena',
+        referenceAssetIds: ['cast_1', 'look_1'],
+        aspectRatio: '16:9',
+        resolution: '1080p',
+        ...override,
+      })
+    ).toBe('out_of_date');
+  });
+
+  it('reports missing legacy provenance as unknown rather than out of date', () => {
+    const legacyPlate = makeProjectImport(project, 'plate_1', {
+      sceneId: 'scene_1',
+      managedAsset: { collection: 'references', fileName: 'plate_1.png' },
+      sourceVisualPrompt: 'Hero enters the arena',
+    });
+
+    expect(
+      getStudioReferencePlateFreshness(legacyPlate, {
+        visualPrompt: 'Changed prompt',
+        referenceAssetIds: ['cast_1'],
+        aspectRatio: '9:16',
+        resolution: '720p',
+      })
+    ).toBe('unknown');
+  });
 });
 
 describe('creative studio project store', () => {
@@ -1460,6 +1637,267 @@ describe('creative studio project store', () => {
       });
 
       expect(await store.getProject(project.id)).toEqual(persisted);
+    });
+
+    it('persists paired Brief metadata and complete generated-plate provenance', async () => {
+      const project = await store.createProject(makeInput());
+
+      const persisted = await store.updateProject(project.id, (current) => {
+        const next = addScene(current, 'scene_1');
+        next.assets.cast_1 = makeProjectImport(next, 'cast_1', {
+          briefReferenceRole: 'cast',
+          briefReferenceLabel: 'Lead Hero',
+        });
+        next.assets.look_1 = makeProjectImport(next, 'look_1', {
+          briefReferenceRole: 'look',
+          briefReferenceLabel: 'Stadium Light',
+        });
+        next.assets.plate_1 = {
+          ...makeProjectImport(next, 'plate_1'),
+          sceneId: 'scene_1',
+          managedAsset: { collection: 'references', fileName: 'plate_1.png' },
+          sourceVisualPrompt: 'Hero enters the arena',
+          sourceReferenceAssetIds: ['cast_1', 'look_1'],
+          sourceAspectRatio: '16:9',
+          sourceResolution: '1080p',
+        };
+        next.scenes.scene_1.assetIds = ['plate_1'];
+        return next;
+      });
+
+      expect(persisted.assets.cast_1).toMatchObject({
+        briefReferenceRole: 'cast',
+        briefReferenceLabel: 'Lead Hero',
+      });
+      expect(persisted.assets.plate_1).toMatchObject({
+        sourceVisualPrompt: 'Hero enters the arena',
+        sourceReferenceAssetIds: ['cast_1', 'look_1'],
+        sourceAspectRatio: '16:9',
+        sourceResolution: '1080p',
+      });
+      await expect(store.getProject(project.id)).resolves.toEqual(persisted);
+    });
+
+    it.each([
+      {
+        label: 'role without label',
+        mutate: (asset: StudioAsset) => {
+          asset.briefReferenceRole = 'cast';
+        },
+      },
+      {
+        label: 'label without role',
+        mutate: (asset: StudioAsset) => {
+          asset.briefReferenceLabel = 'Hero';
+        },
+      },
+      {
+        label: 'label with a control character',
+        mutate: (asset: StudioAsset) => {
+          asset.briefReferenceRole = 'cast';
+          asset.briefReferenceLabel = 'Hero\u0000Portrait';
+        },
+      },
+      {
+        label: 'untrimmed label',
+        mutate: (asset: StudioAsset) => {
+          asset.briefReferenceRole = 'cast';
+          asset.briefReferenceLabel = ' Hero ';
+        },
+      },
+      {
+        label: 'overlong label',
+        mutate: (asset: StudioAsset) => {
+          asset.briefReferenceRole = 'cast';
+          asset.briefReferenceLabel = 'x'.repeat(STUDIO_BRIEF_REFERENCE_LABEL_MAX_LENGTH + 1);
+        },
+      },
+      {
+        label: 'classification on a scene-owned import',
+        mutate: (asset: StudioAsset) => {
+          asset.sceneId = 'scene_1';
+          asset.briefReferenceRole = 'cast';
+          asset.briefReferenceLabel = 'Hero';
+        },
+      },
+      {
+        label: 'classification on a non-image import',
+        mutate: (asset: StudioAsset) => {
+          asset.mediaKind = 'video';
+          asset.mimeType = 'video/mp4';
+          asset.briefReferenceRole = 'cast';
+          asset.briefReferenceLabel = 'Hero';
+        },
+      },
+      {
+        label: 'classification outside imports',
+        mutate: (asset: StudioAsset) => {
+          asset.managedAsset = { collection: 'assets', fileName: 'cast_1.png' };
+          asset.briefReferenceRole = 'cast';
+          asset.briefReferenceLabel = 'Hero';
+        },
+      },
+    ])('rejects invalid Brief reference metadata: $label', async ({ mutate }) => {
+      const project = await store.createProject(makeInput());
+
+      await expect(
+        store.updateProject(project.id, (current) => {
+          const next = addScene(current, 'scene_1');
+          const asset = makeProjectImport(next, 'cast_1');
+          mutate(asset);
+          next.assets.cast_1 = asset;
+          if (asset.sceneId === 'scene_1') next.scenes.scene_1.assetIds = ['cast_1'];
+          return next;
+        })
+      ).rejects.toMatchObject({ code: 'invalid_payload' });
+    });
+
+    it('rejects more than six active Brief references', async () => {
+      const project = await store.createProject(makeInput());
+
+      await expect(
+        store.updateProject(project.id, (current) => {
+          const next = cloneProject(current);
+          Array.from({ length: 7 }, (_, index) => `reference_${index + 1}`).forEach((id, index) => {
+            next.assets[id] = makeProjectImport(next, id, {
+              briefReferenceRole: index < 3 ? 'cast' : 'look',
+              briefReferenceLabel: `Reference ${index + 1}`,
+            });
+          });
+          return next;
+        })
+      ).rejects.toMatchObject({ code: 'invalid_payload' });
+    });
+
+    it.each([
+      {
+        label: 'duplicate source IDs',
+        sourceReferenceAssetIds: ['cast_1', 'cast_1'],
+      },
+      {
+        label: 'missing source ID',
+        sourceReferenceAssetIds: ['missing_reference'],
+      },
+      {
+        label: 'foreign source ID',
+        sourceReferenceAssetIds: ['foreign_reference'],
+      },
+    ])('rejects generated-plate provenance with $label', async ({ sourceReferenceAssetIds }) => {
+      const project = await store.createProject(makeInput());
+      const foreign = await store.createProject(makeInput({ name: 'Foreign' }));
+      await store.updateProject(foreign.id, (current) => ({
+        ...current,
+        assets: { foreign_reference: makeProjectImport(current, 'foreign_reference') },
+      }));
+
+      await expect(
+        store.updateProject(project.id, (current) => {
+          const next = addScene(current, 'scene_1');
+          next.assets.cast_1 = makeProjectImport(next, 'cast_1');
+          next.assets.plate_1 = {
+            ...makeProjectImport(next, 'plate_1'),
+            sceneId: 'scene_1',
+            managedAsset: { collection: 'references', fileName: 'plate_1.png' },
+            sourceVisualPrompt: 'Hero enters the arena',
+            sourceReferenceAssetIds,
+            sourceAspectRatio: '16:9',
+            sourceResolution: '1080p',
+          };
+          next.scenes.scene_1.assetIds = ['plate_1'];
+          return next;
+        })
+      ).rejects.toMatchObject({ code: 'invalid_payload' });
+    });
+
+    it.each([
+      {
+        sourceReferenceAssetIds: ['cast_1'],
+      },
+      {
+        sourceAspectRatio: '16:9' as const,
+      },
+      {
+        sourceResolution: '1080p' as const,
+      },
+      {
+        sourceReferenceAssetIds: ['cast_1'],
+        sourceAspectRatio: '16:9' as const,
+      },
+    ])('rejects partial generated-plate provenance: %o', async (provenance) => {
+      const project = await store.createProject(makeInput());
+
+      await expect(
+        store.updateProject(project.id, (current) => {
+          const next = addScene(current, 'scene_1');
+          next.assets.cast_1 = makeProjectImport(next, 'cast_1');
+          next.assets.plate_1 = {
+            ...makeProjectImport(next, 'plate_1'),
+            sceneId: 'scene_1',
+            managedAsset: { collection: 'references', fileName: 'plate_1.png' },
+            sourceVisualPrompt: 'Hero enters the arena',
+            ...provenance,
+          };
+          next.scenes.scene_1.assetIds = ['plate_1'];
+          return next;
+        })
+      ).rejects.toMatchObject({ code: 'invalid_payload' });
+    });
+
+    it.each([
+      {
+        label: 'wrong collection',
+        overrides: { managedAsset: { collection: 'assets' as const, fileName: 'plate_1.png' } },
+      },
+      {
+        label: 'missing visual prompt',
+        overrides: { sourceVisualPrompt: undefined },
+      },
+    ])('rejects complete provenance on a plate with the $label', async ({ overrides }) => {
+      const project = await store.createProject(makeInput());
+
+      await expect(
+        store.updateProject(project.id, (current) => {
+          const next = addScene(current, 'scene_1');
+          next.assets.cast_1 = makeProjectImport(next, 'cast_1');
+          next.assets.plate_1 = {
+            ...makeProjectImport(next, 'plate_1'),
+            sceneId: 'scene_1',
+            managedAsset: { collection: 'references', fileName: 'plate_1.png' },
+            sourceVisualPrompt: 'Hero enters the arena',
+            sourceReferenceAssetIds: ['cast_1'],
+            sourceAspectRatio: '16:9',
+            sourceResolution: '1080p',
+            ...overrides,
+          };
+          next.scenes.scene_1.assetIds = ['plate_1'];
+          return next;
+        })
+      ).rejects.toMatchObject({ code: 'invalid_payload' });
+    });
+
+    it('loads and rewrites a pre-3a schema-v1 project without adding asset metadata defaults', async () => {
+      const project = await store.createProject(makeInput());
+      const legacy = await store.updateProject(project.id, (current) => {
+        const next = addScene(current, 'scene_1');
+        next.assets.plate_1 = {
+          ...makeProjectImport(next, 'plate_1'),
+          sceneId: 'scene_1',
+          managedAsset: { collection: 'references', fileName: 'plate_1.png' },
+          sourceVisualPrompt: 'Legacy generated plate',
+        };
+        next.scenes.scene_1.assetIds = ['plate_1'];
+        return next;
+      });
+      const manifestFile = path.join(rootDir, project.id, 'project.json');
+      const before = JSON.parse(readFileSync(manifestFile, 'utf8')) as StudioProject;
+
+      await expect(store.getProject(project.id)).resolves.toEqual(legacy);
+      const rewritten = await store.updateProject(project.id, (current) => ({ ...current, name: 'Legacy renamed' }));
+      const after = JSON.parse(readFileSync(manifestFile, 'utf8')) as StudioProject;
+
+      expect(before.assets.plate_1).not.toHaveProperty('sourceReferenceAssetIds');
+      expect(rewritten.schemaVersion).toBe(1);
+      expect(after.assets.plate_1).toEqual(before.assets.plate_1);
     });
 
     it('validates a job carrying the reference output role', async () => {
