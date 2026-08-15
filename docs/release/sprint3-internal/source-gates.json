@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "candidateCommit": "a14792b08b4098c2b4abc15f1e1f6391e72155f1",
-  "generatedAt": "2026-08-15T16:44:11Z",
+  "candidateCommit": "d878442010629b8e29685d59ed1132564b27ca01",
+  "generatedAt": "2026-08-15T16:59:17Z",
   "runner": {
     "os": "darwin",
     "architecture": "arm64",
@@ -19,8 +19,8 @@
       "result": "green",
       "exitCode": 0,
       "log": {
-        "path": "artifacts/sprint3-internal/source-gates/install.log",
-        "sha256": "1092a8d0ea62de2732a3e17c4c4c181097e71fdf9306fcf506dfd9ea3055aee8"
+        "path": "artifacts/sprint3-internal/source-gates/d878442010629b8e29685d59ed1132564b27ca01/install.log",
+        "sha256": "8f759cea84b18b401705838e824e03861b1aafaee4a754401ea320c9ddb11738"
       }
     },
     {
@@ -29,7 +29,7 @@
       "result": "green",
       "exitCode": 0,
       "log": {
-        "path": "artifacts/sprint3-internal/source-gates/tsc.log",
+        "path": "artifacts/sprint3-internal/source-gates/d878442010629b8e29685d59ed1132564b27ca01/tsc.log",
         "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
       }
     },
@@ -41,34 +41,19 @@
       "warningCount": 1225,
       "errorCount": 0,
       "log": {
-        "path": "artifacts/sprint3-internal/source-gates/lint.log",
-        "sha256": "cc0d7c8f4b5a35e5ca0385b5fc823236590a9fb7ea49b2bcf33e6bb964103eb2"
+        "path": "artifacts/sprint3-internal/source-gates/d878442010629b8e29685d59ed1132564b27ca01/lint.log",
+        "sha256": "cb932fc1aaf48bf8ecca280a0bf25770e24f8b2f714a2ab6df1d853e175afffe"
       }
     },
     {
       "name": "format",
       "command": ["bun", "run", "format:check"],
-      "result": "green_after_evidence_fix",
-      "attempts": [
-        {
-          "attempt": 1,
-          "exitCode": 1,
-          "classification": "evidence_formatting",
-          "disposition": "The newly created full-suite ledger was not formatter-normalized; only that JSON evidence file was formatted before the next attempt.",
-          "log": {
-            "path": "artifacts/sprint3-internal/source-gates/format-attempt-1.log",
-            "sha256": "f3e735ff38595d8de7970929ed711d726481f1b73e6dfb39681e380559f2bdfc"
-          }
-        },
-        {
-          "attempt": 2,
-          "exitCode": 0,
-          "log": {
-            "path": "artifacts/sprint3-internal/source-gates/format-attempt-2.log",
-            "sha256": "ce0b85db0481b81fa82922c28d31ca0356ca3b0efd20a62dfc3ed755a8a2be21"
-          }
-        }
-      ]
+      "result": "green",
+      "exitCode": 0,
+      "log": {
+        "path": "artifacts/sprint3-internal/source-gates/d878442010629b8e29685d59ed1132564b27ca01/format.log",
+        "sha256": "710dd8bbd16031557714ddc3e01962f1d3845320e59c60d03fede97004c888cb"
+      }
     },
     {
       "name": "i18n",
@@ -77,7 +62,7 @@
       "exitCode": 0,
       "disposition": "Existing missing Creative Studio plural-form translations remain warnings; Creative Studio is fail-closed and excluded from this internal release.",
       "log": {
-        "path": "artifacts/sprint3-internal/source-gates/i18n.log",
+        "path": "artifacts/sprint3-internal/source-gates/d878442010629b8e29685d59ed1132564b27ca01/i18n.log",
         "sha256": "abb5ac77a99cbb24eac66aa6c605faaec2edc6a6c28c7f166d237095a21e1f3d"
       }
     },
@@ -96,13 +81,13 @@
       "result": "green",
       "exitCode": 0,
       "summary": {
-        "testFilesPassed": 17,
-        "testsPassed": 249,
+        "testFilesPassed": 19,
+        "testsPassed": 274,
         "testsSkipped": 11
       },
       "log": {
-        "path": "artifacts/sprint3-internal/source-gates/focused-release.log",
-        "sha256": "cce2a965bf452067d2ff4077c2cfbb2eb64aece8aba53277751079a9620ddb6a"
+        "path": "artifacts/sprint3-internal/source-gates/d878442010629b8e29685d59ed1132564b27ca01/focused-release.log",
+        "sha256": "1c4bae9642d51b5cc7ef5bbb2899d721797bcac3f08685f2307d3a30b0107986"
       }
     },
     {
@@ -124,8 +109,8 @@
         "testsPassed": 82
       },
       "log": {
-        "path": "artifacts/sprint3-internal/source-gates/package-inventory.log",
-        "sha256": "655ba86f01498a3e072fc744f4dd020d1c4e4953c3121c363c81a40d050d22bf"
+        "path": "artifacts/sprint3-internal/source-gates/d878442010629b8e29685d59ed1132564b27ca01/package-inventory.log",
+        "sha256": "11afa30f3ee16e3cd508ddde1f2ff8a9e7cb425881d436c5c1894343b0d8b732"
       }
     },
     {
@@ -134,8 +119,8 @@
       "result": "blocked_pending_independent_review",
       "ledger": {
         "path": "docs/release/sprint3-internal/full-suite-ledger.json",
-        "sha256": "7549d40889e1d60e36fe0cc0a1868f4c8bbaa2c84a3370e5ada0ad2a621c40be",
-        "totalRunCount": 3,
+        "sha256": "9253f9d774219b9582c94d1ebf0d7761c65802cf76862f8e7ad747e72d8b35ab",
+        "totalRunCount": 4,
         "resolutionAttempt": {
           "commit": "6d4cca05628965bd041e9ec3a4693a7d11c1d2f5",
           "result": "green",
@@ -146,13 +131,13 @@
           "rawLogSha256": "080f087b4e9d8710f49605a9a316ed159a86ffa26c0c54b3d897397e677560e8"
         },
         "candidateAttempt": {
-          "commit": "a14792b08b4098c2b4abc15f1e1f6391e72155f1",
+          "commit": "d878442010629b8e29685d59ed1132564b27ca01",
           "result": "green",
-          "testFilesPassed": 631,
+          "testFilesPassed": 632,
           "testFilesSkipped": 1,
-          "testsPassed": 8241,
+          "testsPassed": 8253,
           "testsSkipped": 19,
-          "rawLogSha256": "746222bd7c9542842e6d2a75a1067ff4df31981b8b0bf3304a39ca8399c49942"
+          "rawLogSha256": "8cc0a6f0cddb1b55fc5c9abe7017ae80bfd58b1e433bfd79b1e20f472194345d"
         }
       }
     }
