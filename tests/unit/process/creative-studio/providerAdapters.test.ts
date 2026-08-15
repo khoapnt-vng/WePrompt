@@ -153,12 +153,19 @@ const videoConditioningFields: ReadonlyArray<{
   { label: 'both conditioning fields', fields: { conditioningImages: [], conditioningImageLimit: 0 } },
 ];
 
+const videoConditioningVariants = videoConditioningFields.flatMap(({ label, fields }) => [
+  { label, fields, firstFrameLabel: 'without a first frame', includeFirstFrame: false },
+  { label, fields, firstFrameLabel: 'with a first frame', includeFirstFrame: true },
+]);
+
 const videoConditioningCases = videoAdapterFixtures.flatMap((adapterFixture) =>
-  videoConditioningFields.map((conditioningCase) => ({
+  videoConditioningVariants.map((conditioningCase) => ({
     adapterLabel: adapterFixture.label,
     create: adapterFixture.create,
     conditioningLabel: conditioningCase.label,
     fields: conditioningCase.fields,
+    firstFrameLabel: conditioningCase.firstFrameLabel,
+    includeFirstFrame: conditioningCase.includeFirstFrame,
   }))
 );
 
@@ -177,19 +184,18 @@ describe('Creative Studio provider adapters', () => {
   });
 
   it.each(videoConditioningCases)(
-    'rejects $conditioningLabel on $adapterLabel video before resolving the first frame or calling the provider',
-    async ({ create, fields }) => {
+    'rejects $conditioningLabel $firstFrameLabel on $adapterLabel video before input resolution or provider calls',
+    async ({ create, fields, includeFirstFrame }) => {
       const { adapter, provider: selectedProvider, providerCall } = create();
       const asDataUrl = vi.fn(async () => 'data:image/png;base64,QUJD');
+      const frame = { ...firstFrame(), asDataUrl };
       const resolvedRequest: ResolvedStudioGenerationRequest = {
         ...request,
-        firstFrame: { ...firstFrame(), asDataUrl },
+        ...(includeFirstFrame ? { firstFrame: frame } : {}),
         ...fields,
       };
 
-      expect(
-        adapter.validateRequest({ ...request, firstFrame: resolvedRequest.firstFrame }, selectedProvider)
-      ).toMatchObject({ ok: true });
+      expect(adapter.validateRequest({ ...request, firstFrame: frame }, selectedProvider)).toMatchObject({ ok: true });
       expect(adapter.validateRequest(resolvedRequest, selectedProvider)).toEqual({
         ok: false,
         issues: [{ code: 'provider_unavailable' }],
@@ -499,9 +505,9 @@ describe('Creative Studio provider adapters', () => {
     expect(remoteState.taskCounter).toBe(1);
   });
 
-  it.each(videoConditioningFields)(
-    'rejects $label on trusted fake video before resolving the first frame or creating a task',
-    async ({ fields }) => {
+  it.each(videoConditioningVariants)(
+    'rejects $label $firstFrameLabel on trusted fake video before input resolution or task creation',
+    async ({ fields, includeFirstFrame }) => {
       const rootDir = await fs.mkdtemp(path.join(tmpdir(), 'weprompt-fake-adapter-'));
       temporaryDirectories.push(rootDir);
       const remoteState = createStudioE2EFakeRemoteState();
@@ -509,16 +515,15 @@ describe('Creative Studio provider adapters', () => {
       const adapter = bundle.adapters.get('weprompt-media-gateway-v1');
       const fakeProvider = { ...bundle.provider, use_model: 'weprompt-e2e-video' } as TProviderWithModel;
       const asDataUrl = vi.fn(async () => 'data:image/png;base64,QUJD');
+      const frame = { ...firstFrame(), asDataUrl };
       const resolvedRequest: ResolvedStudioGenerationRequest = {
         ...request,
-        firstFrame: { ...firstFrame(), asDataUrl },
+        ...(includeFirstFrame ? { firstFrame: frame } : {}),
         ...fields,
       };
       if (!adapter) throw new Error('expected fake video adapter');
 
-      expect(
-        adapter.validateRequest({ ...request, firstFrame: resolvedRequest.firstFrame }, fakeProvider)
-      ).toMatchObject({ ok: true });
+      expect(adapter.validateRequest({ ...request, firstFrame: frame }, fakeProvider)).toMatchObject({ ok: true });
       expect(adapter.validateRequest(resolvedRequest, fakeProvider)).toEqual({
         ok: false,
         issues: [{ code: 'provider_unavailable' }],
