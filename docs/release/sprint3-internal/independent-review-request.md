@@ -5,9 +5,9 @@ Status: **review required; not authorized to publish or package**
 ## Immutable review targets
 
 - WePrompt executable candidate: `d878442010629b8e29685d59ed1132564b27ca01`
-- WePrompt evidence commit: `e9a2e4cf0818951024d2c27e809b4cec7d091850`
+- WePrompt evidence commit: `9c536919ef7569ac2710a338a9dc9f5f55eb2981`
 - WePrompt approved base: `634f49c21567d9bd987b04887eaa0c6126b86353`
-- AionCore candidate: `232456db3d2ade5933952f1463a5af977e135a15`
+- AionCore candidate: `e2931e953cbdfed146497e25ebf7bc3981b95193`
 - AionCore approved base: `9bd693b3b43cdb1003061de0e4f62259ab6f42ae`
 - Intended AionCore version: `v0.1.55` (not tagged or published)
 
@@ -19,7 +19,7 @@ Review the exact commits, not branch names. Neither release branch has been push
 2. Creative Studio, auto-update, and Sentry are fail-closed for `WEPROMPT_INTERNAL_RELEASE=1`.
 3. The manual RC workflow accepts one exact 40-character commit, runs Windows x64 first, and permits only Windows x64 plus macOS ARM64 unsigned candidates.
 4. Missing native Windows evidence is a no-go; macOS cannot waive it.
-5. AionCore bundles contain the exact backend binary, immutable migration lineage, complete managed resources, and pinned OfficeCLI for only the two approved targets.
+5. AionCore bundles contain the exact backend binary, immutable migration lineage, complete managed resources, and pinned OfficeCLI for only the two approved targets; only the GitHub release publisher has `contents: write`.
 6. The package verifier rejects backend/hash/target drift, missing OfficeCLI/templates, a second runtime, and enabled excluded features.
 7. The packaged-evidence validator enforces Windows-first acceptance, exact artifact identity, all 12 scenarios, all four Windows gates, sanitized hashed evidence, and the BUG-017 decision boundary.
 8. The installation, known-issue, acceptance, and decision records do not pre-authorize release or weaken host security/data-preservation controls.
@@ -43,15 +43,16 @@ Review the exact commits, not branch names. Neither release branch has been push
 
 Required decision: inspect the failure, helper change, and ledger. If accepted, add a reviewer disposition with decision `accepted_test_fix`, rationale, reviewer identity, and UTC timestamp to attempt 1. Silence is not approval.
 
-### AionCore full-suite attempt 1
+### AionCore retained and current full-suite attempts
 
-- Candidate: `232456db3d2ade5933952f1463a5af977e135a15`.
-- First Nextest invocation: red/invalid evidence because the PTY lost the failing test identity and output. It remains retained and is not reclassified as green.
-- Recorded diagnostic invocation: green, 6,677 passed and 18 skipped; raw log SHA-256 `6441fc63c148afc3516b7d8b61a4e3fd7573e66d792a6e43723635078a37eea3`.
-- Other exact-head gates: format, workspace clippy, migration immutability, lineage, 30 release-script tests, macOS ARM64 release build, and complete bundle smoke are green.
+- Superseded candidate `232456db3d2ade5933952f1463a5af977e135a15` retains a red/invalid first Nextest invocation because the PTY lost the failing test identity and output. It is not reclassified as green.
+- Its recorded diagnostic invocation was green: 6,677 passed and 18 skipped; raw log SHA-256 `6441fc63c148afc3516b7d8b61a4e3fd7573e66d792a6e43723635078a37eea3`.
+- Current candidate `e2931e953cbdfed146497e25ebf7bc3981b95193` has one complete exact-head invocation: 6,677 passed and 18 skipped; raw log SHA-256 `0781cf5b1884c130936f0ce2f0412f020687126937fcc1221d1ebf30809e4e53`.
+- Current exact-head gates: format, workspace clippy with warnings denied, migration immutability, lineage, 31 release-script tests, macOS ARM64 release build, complete bundle verification, archive creation, fresh extraction, and extracted-bundle reverification are green.
+- The local archive diagnostic retained a zero-byte premature archive and a create-only retry rejection before the separately named verified archive. Inspect `aioncore-build-attempts.json`; neither rejected artifact is eligible for release identity.
 - No native Windows build evidence exists yet.
 
-Required decision: inspect the retained invalid attempt and the durable diagnostic evidence. Decide whether the candidate is admissible for an authorization decision or requires a new source commit/gate run. Silence is not approval.
+Required decision: inspect the retained invalid attempt, current single-run evidence, archive-attempt ledger, OfficeCLI pin, and write-permission scoping. Decide whether the current candidate is admissible for an authorization decision or requires a new source commit/gate run. Silence is not approval.
 
 ## Explicitly unresolved release blockers
 
