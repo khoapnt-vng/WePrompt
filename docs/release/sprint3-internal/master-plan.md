@@ -28,11 +28,11 @@
 
 ## Release Outputs and Handoffs
 
-| Producer | Required immutable output | Consumer |
-|---|---|---|
-| AionCore plan | Accepted `v0.1.55` tag/commit, two release assets, archive hashes, extracted manifests, migration fingerprint | WePrompt RC plan |
-| WePrompt RC plan | Accepted RC commit, fix-audit decisions, deterministic source gates, complete full-suite ledger, two desktop artifact hashes | Packaged-acceptance plan |
-| Packaged-acceptance plan | Two-platform acceptance matrix, known-issue record, evidence index, exact decision record | Release owner |
+| Producer                 | Required immutable output                                                                                                    | Consumer                 |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| AionCore plan            | Accepted `v0.1.55` tag/commit, two release assets, archive hashes, extracted manifests, migration fingerprint                | WePrompt RC plan         |
+| WePrompt RC plan         | Accepted RC commit, fix-audit decisions, deterministic source gates, complete full-suite ledger, two desktop artifact hashes | Packaged-acceptance plan |
+| Packaged-acceptance plan | Two-platform acceptance matrix, known-issue record, evidence index, exact decision record                                    | Release owner            |
 
 The canonical handoff directory in the WePrompt RC is `docs/release/sprint3-internal/`. The following committed records have fixed roles:
 

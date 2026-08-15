@@ -37,10 +37,10 @@ The release is held until the release owner explicitly signs off after reviewing
 
 ## 3. Immutable Baselines and Branch Model
 
-| Component | Repository | Starting ref | Immutable commit | RC branch |
-|---|---|---|---|---|
-| WePrompt | `khoapnt-vng/WePrompt` | `ghk/sprint3` | `634f49c21567d9bd987b04887eaa0c6126b86353` | `release/internal-sprint3` |
-| AionCore | `khoapnt-vng/aioncore` | current `v0.1.54` line | `9bd693b3b43cdb1003061de0e4f62259ab6f42ae` | `release/internal-v0.1.55` |
+| Component | Repository             | Starting ref           | Immutable commit                           | RC branch                  |
+| --------- | ---------------------- | ---------------------- | ------------------------------------------ | -------------------------- |
+| WePrompt  | `khoapnt-vng/WePrompt` | `ghk/sprint3`          | `634f49c21567d9bd987b04887eaa0c6126b86353` | `release/internal-sprint3` |
+| AionCore  | `khoapnt-vng/aioncore` | current `v0.1.54` line | `9bd693b3b43cdb1003061de0e4f62259ab6f42ae` | `release/internal-v0.1.55` |
 
 Before work begins, refresh remote refs and record the exact branch heads, ancestry, tags, and working-tree state. Create isolated worktrees from the immutable commits. RC branches must reject force pushes and direct release changes; bounded task branches merge through reviewed pull requests with required checks.
 
@@ -161,12 +161,12 @@ A green Sprint 3 source workflow is useful baseline evidence but does not replac
 
 The full Vitest suite is not a simple green/red release gate while BUG-046 remains open. The Sprint 3 baseline's declared intermittent set is frozen as follows:
 
-| Register item | Known signature on the baseline | Release treatment |
-|---|---|---|
-| BUG-027 | `jobManager.test.ts`: `persists the remote identity before polling and uses the exact capped backoff schedule` and `stops repeated running snapshots at the thirty-minute lifecycle deadline` | Exact-signature triage is allowed; no timeout increase or broad quarantine |
-| BUG-030 | `EnvironmentTeardownError` after green DOM tests in `TeamSiderSection.dom.test.tsx` | Process exit remains a failure and requires disposition |
-| BUG-043 | `PresentationReadinessService`: `rejects same-byte replacement and hardlink drift of the inspection path` | Integrity-sensitive; never waivable by a later green run and subject to the Windows gate below |
-| BUG-046 | `StudioPage.dom.test.tsx` `fitStoryboardToGoal` wait and `PresentationSourceGrantStore.test.ts` full-suite-position sightings | Exact-signature triage is allowed; new tests or signatures are not presumed flaky |
+| Register item | Known signature on the baseline                                                                                                                                                               | Release treatment                                                                              |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| BUG-027       | `jobManager.test.ts`: `persists the remote identity before polling and uses the exact capped backoff schedule` and `stops repeated running snapshots at the thirty-minute lifecycle deadline` | Exact-signature triage is allowed; no timeout increase or broad quarantine                     |
+| BUG-030       | `EnvironmentTeardownError` after green DOM tests in `TeamSiderSection.dom.test.tsx`                                                                                                           | Process exit remains a failure and requires disposition                                        |
+| BUG-043       | `PresentationReadinessService`: `rejects same-byte replacement and hardlink drift of the inspection path`                                                                                     | Integrity-sensitive; never waivable by a later green run and subject to the Windows gate below |
+| BUG-046       | `StudioPage.dom.test.tsx` `fitStoryboardToGoal` wait and `PresentationSourceGrantStore.test.ts` full-suite-position sightings                                                                 | Exact-signature triage is allowed; new tests or signatures are not presumed flaky              |
 
 BUG-025 and BUG-046's `broker.test.ts` wall-clock case are fixed on the baseline and are not members of the release quarantine. A recurrence is a regression until investigated. The table can change only through a reviewed register update that names the exact test/signature, evidence, owner, and expiry condition.
 
@@ -180,10 +180,10 @@ For each exact RC commit and runner environment:
 
 ## 7. Build and Artifact Matrix
 
-| Platform | Architecture | Backend member | Desktop artifact | Signing state |
-|---|---|---|---|---|
-| macOS | ARM64 | `aioncore` | Internal installer/archive | Unsigned |
-| Windows | x64 | `aioncore.exe` | Internal installer/archive | Unsigned |
+| Platform | Architecture | Backend member | Desktop artifact           | Signing state |
+| -------- | ------------ | -------------- | -------------------------- | ------------- |
+| macOS    | ARM64        | `aioncore`     | Internal installer/archive | Unsigned      |
+| Windows  | x64          | `aioncore.exe` | Internal installer/archive | Unsigned      |
 
 Each desktop artifact must be traceable to the exact WePrompt RC commit and the exact AionCore bundle. Store the desktop artifact hash, embedded backend hash, build log, toolchain versions, and package inventory together. Unsigned-install bypass instructions must be explicit and must not weaken runtime security controls.
 
@@ -223,13 +223,13 @@ Collect application/backend logs, screenshots where useful, timestamps, artifact
 
 BUG-017 is a P1 known issue, not an omitted test and not a passed acceptance scenario.
 
-| Aspect | Release evidence and disposition |
-|---|---|
-| Proven | Access loss and `SQLITE_CANTOPEN` must not reach the corruption backup-and-rebuild path; the baseline contains revert-resistant unit coverage for this invariant |
-| Unbuilt/unverified | Runtime classification, safe retry/restart UX, bounded diagnostics, and the exact AionCore runtime error wire shape |
-| Operator workaround | Stop further activity, preserve and hash a database copy, collect bounded logs, restart/retry, and never delete, rebuild, or invoke corruption recovery without confirmed corruption and explicit consent |
-| Required owner action | Name the WePrompt and AionCore owners, retain the wire-shape question as the first dependency, and decide whether to complete it before release or accept the availability/recovery limitation |
-| Release disposition | The release cannot receive plain **Go** while this P1 remains open. It requires an explicit **Conditional go** accepting the unbuilt detection/recovery UX after reviewing the proven non-destructive safeguard; otherwise it is **No-go** |
+| Aspect                | Release evidence and disposition                                                                                                                                                                                                           |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Proven                | Access loss and `SQLITE_CANTOPEN` must not reach the corruption backup-and-rebuild path; the baseline contains revert-resistant unit coverage for this invariant                                                                           |
+| Unbuilt/unverified    | Runtime classification, safe retry/restart UX, bounded diagnostics, and the exact AionCore runtime error wire shape                                                                                                                        |
+| Operator workaround   | Stop further activity, preserve and hash a database copy, collect bounded logs, restart/retry, and never delete, rebuild, or invoke corruption recovery without confirmed corruption and explicit consent                                  |
+| Required owner action | Name the WePrompt and AionCore owners, retain the wire-shape question as the first dependency, and decide whether to complete it before release or accept the availability/recovery limitation                                             |
+| Release disposition   | The release cannot receive plain **Go** while this P1 remains open. It requires an explicit **Conditional go** accepting the unbuilt detection/recovery UX after reviewing the proven non-destructive safeguard; otherwise it is **No-go** |
 
 Do not manufacture a synthetic runtime payload and call it acceptance evidence. If AionCore exposes an observed runtime wire shape before the release decision, add classification and recovery acceptance against that exact contract; otherwise retain the limitation and workaround verbatim in the internal release notes.
 
@@ -277,19 +277,19 @@ Any source change invalidates artifacts built from the prior commit. A backend p
 
 ## 11. Principal Risks and Controls
 
-| Risk | Control |
-|---|---|
-| Sprint 3 and `main` have diverged | Narrow RC from immutable Sprint 3 commit; audited ports only |
-| Backend release branch or assets drift | Exact commits, immutable tag, manifests, checksums, no asset replacement |
-| Backend archive omits runtime contract files | Complete release unit plus extracted-content validation |
-| OAuth refresh sends stale credentials | Correct client persistence, fail-closed token contract, end-to-end expiry tests |
-| Unsigned packages confuse testers or trigger OS warnings | Internal-only scope, checksum verification, explicit per-OS install instructions |
-| Hidden flag exposes Creative Studio | Build assertion plus packaged absence and traffic checks |
-| Full-suite flakes hide regressions or encourage rerun-until-green | Frozen known-flake set, mandatory per-failure triage, recorded run ledger, no erasure by rerun |
-| Windows behavior is inferred from macOS | Native Windows gates, BUG-043 filesystem/runtime evidence, Windows-first packaged acceptance |
-| BUG-017 runtime data access is lost without recovery UX | Non-destructive invariant, explicit P1 conditional-go disposition, preservation-first operator workaround |
-| Source tests create false confidence | Two-target packaged acceptance is mandatory |
-| Dirty local checkout contaminates release work | Isolated worktrees, narrow staging, recorded commits, reproducible inventories |
+| Risk                                                              | Control                                                                                                   |
+| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Sprint 3 and `main` have diverged                                 | Narrow RC from immutable Sprint 3 commit; audited ports only                                              |
+| Backend release branch or assets drift                            | Exact commits, immutable tag, manifests, checksums, no asset replacement                                  |
+| Backend archive omits runtime contract files                      | Complete release unit plus extracted-content validation                                                   |
+| OAuth refresh sends stale credentials                             | Correct client persistence, fail-closed token contract, end-to-end expiry tests                           |
+| Unsigned packages confuse testers or trigger OS warnings          | Internal-only scope, checksum verification, explicit per-OS install instructions                          |
+| Hidden flag exposes Creative Studio                               | Build assertion plus packaged absence and traffic checks                                                  |
+| Full-suite flakes hide regressions or encourage rerun-until-green | Frozen known-flake set, mandatory per-failure triage, recorded run ledger, no erasure by rerun            |
+| Windows behavior is inferred from macOS                           | Native Windows gates, BUG-043 filesystem/runtime evidence, Windows-first packaged acceptance              |
+| BUG-017 runtime data access is lost without recovery UX           | Non-destructive invariant, explicit P1 conditional-go disposition, preservation-first operator workaround |
+| Source tests create false confidence                              | Two-target packaged acceptance is mandatory                                                               |
+| Dirty local checkout contaminates release work                    | Isolated worktrees, narrow staging, recorded commits, reproducible inventories                            |
 
 ## 12. Execution Order
 

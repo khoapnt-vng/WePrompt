@@ -291,6 +291,7 @@ bunx vitest run tests/unit/release tests/unit/assets tests/unit/process/updatePo
 ```bash
 node scripts/release/run-vitest-gate.js --register docs/release/sprint3-internal/known-flakes.json --ledger docs/release/sprint3-internal/full-suite-ledger.json --log-dir artifacts/sprint3-internal/vitest -- bun run test
 ```
+
 - [ ] For exact known signatures, run only that exact test as a recorded diagnostic with a stated question. Do not raise timeout or change assertions.
 - [ ] Validate the completed ledger; unknown, missing reviewer disposition, or hidden attempt blocks:
 
@@ -316,6 +317,7 @@ node scripts/release/validate-full-suite-ledger.js docs/release/sprint3-internal
 ```bash
 bunx vitest run tests/unit/release/internalPackageInventory.test.ts
 ```
+
 - [ ] After authorization, trigger the dedicated workflow with the exact 40-character RC SHA, never a branch.
 - [ ] Build exactly `macos-15/arm64/unsigned` and `windows-2022/x64/unsigned`.
 - [ ] On native runners verify contents before upload, install/extract fresh, verify installed contents, and compute desktop plus embedded-backend SHA-256.

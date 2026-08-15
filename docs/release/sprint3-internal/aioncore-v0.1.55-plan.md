@@ -84,7 +84,6 @@ git commit -m "chore(release): prepare AionCore v0.1.55"
 - Test: `crates/aionui-db/tests/oauth_token_repository.rs`
 
 - [ ] Write failing DB repository tests for all of these contracts:
-
   - a token upsert/read round trip preserves `client_id=Some("dynamic-client")`;
   - legacy rows created without the new column value read as `client_id=None`;
   - updating token material does not silently replace the associated client identity with the global default;
@@ -128,7 +127,6 @@ git commit -m "fix(oauth): persist issued client identity"
 
 - [ ] Add `wiremock.workspace = true` under `aionui-mcp` dev-dependencies.
 - [ ] Replace the existing test that expects an expired token to be returned. Write failing tests for:
-
   1. unexpired token returns the current access token;
   2. expired token plus matching persisted client ID and refresh token uses the refresh endpoint and returns/persists the new token;
   3. dynamic client ID, not `DEFAULT_CLIENT_ID`, is sent during refresh;
@@ -242,7 +240,6 @@ SHA256SUMS
 To avoid self-referential hashes, `bundle-manifest.json` enumerates and hashes every payload file (binary, lineage, and every regular managed-resource file) but excludes itself and `SHA256SUMS`. `SHA256SUMS` hashes all payload files plus `bundle-manifest.json` and excludes itself.
 
 - [ ] Write failing tests for the bundle assembler/verifier:
-
   - accepted Unix and Windows binary names;
   - exact top-level member set;
   - manifest fields `schemaVersion`, `repository`, `version`, `sourceCommit`, `target`, `builtAt`, `migrationLineage`, and sorted `files`;

@@ -39,7 +39,6 @@
 - [ ] Define IDs: `S01_INSTALL`, `S02_SPRINT2_MIGRATION`, `S03_LINEAGE_FAIL_CLOSED`, `S04_HTTP_WS_AUTH`, `S05_MCP_OAUTH_TOOL`, `S06_OAUTH_EXPIRY`, `S07_OFFICECLI`, `S08_PRESENTATION_TEMPLATES`, `S09_BUG017`, `S10_RESTART`, `S11_STUDIO_ABSENT`, `S12_UPDATE_ABSENT`.
 - [ ] Define Windows gates: `W01_NATIVE_SOURCE`, `W02_BUG043_FILESYSTEM`, `W03_BUG043_PACKAGED_FAIL_CLOSED`, `W04_INSTALLED_BUNDLE`.
 - [ ] Write failing validator tests requiring:
-
   - exact WePrompt/AionCore identities from artifact index;
   - exactly two platform records, Windows first;
   - every scenario once per platform;
@@ -232,7 +231,6 @@ node scripts/release/verify-internal-package.js --artifact-index docs/release/sp
 
 - [ ] Recompute both desktop hashes immediately before review and put them in `go-no-go.md`.
 - [ ] Apply rules:
-
   - `Go` only if every required issue is closed and BUG-017 exact runtime detection/recovery is built and accepted;
   - `Conditional go` only if BUG-017 non-destructive invariant is proven, residual risk is availability/recovery UX only, owners/workaround are named, and owner explicitly accepts;
   - `No-go` for data-integrity uncertainty, auth bypass, stale token, Studio/update exposure, mismatch, unknown suite failure, missing Windows evidence, failed scenario, or incomplete packet.
