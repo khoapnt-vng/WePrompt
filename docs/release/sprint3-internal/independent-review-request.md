@@ -4,8 +4,8 @@ Status: **review required; not authorized to publish or package**
 
 ## Immutable review targets
 
-- WePrompt executable candidate: `a14792b08b4098c2b4abc15f1e1f6391e72155f1`
-- WePrompt evidence commit: `2d73aa55cc941fae4db97cea355e6a7fe309b454`
+- WePrompt executable candidate: `d878442010629b8e29685d59ed1132564b27ca01`
+- WePrompt evidence commit: `e9a2e4cf0818951024d2c27e809b4cec7d091850`
 - WePrompt approved base: `634f49c21567d9bd987b04887eaa0c6126b86353`
 - AionCore candidate: `232456db3d2ade5933952f1463a5af977e135a15`
 - AionCore approved base: `9bd693b3b43cdb1003061de0e4f62259ab6f42ae`
@@ -21,7 +21,9 @@ Review the exact commits, not branch names. Neither release branch has been push
 4. Missing native Windows evidence is a no-go; macOS cannot waive it.
 5. AionCore bundles contain the exact backend binary, immutable migration lineage, complete managed resources, and pinned OfficeCLI for only the two approved targets.
 6. The package verifier rejects backend/hash/target drift, missing OfficeCLI/templates, a second runtime, and enabled excluded features.
-7. No AionCore tag, push, GitHub release, WePrompt workflow trigger, or desktop distribution has occurred.
+7. The packaged-evidence validator enforces Windows-first acceptance, exact artifact identity, all 12 scenarios, all four Windows gates, sanitized hashed evidence, and the BUG-017 decision boundary.
+8. The installation, known-issue, acceptance, and decision records do not pre-authorize release or weaken host security/data-preservation controls.
+9. No AionCore tag, push, GitHub release, WePrompt workflow trigger, or desktop distribution has occurred.
 
 ## Evidence requiring reviewer disposition
 
@@ -37,6 +39,7 @@ Review the exact commits, not branch names. Neither release branch has been push
 - Later complete suites are retained, not replacements:
   - `6d4cca05628965bd041e9ec3a4693a7d11c1d2f5`: green, 630 files passed, 8,228 tests passed; raw SHA-256 `080f087b4e9d8710f49605a9a316ed159a86ffa26c0c54b3d897397e677560e8`.
   - `a14792b08b4098c2b4abc15f1e1f6391e72155f1`: green, 631 files passed, 8,241 tests passed; raw SHA-256 `746222bd7c9542842e6d2a75a1067ff4df31981b8b0bf3304a39ca8399c49942`.
+  - `d878442010629b8e29685d59ed1132564b27ca01`: green, 632 files passed, 8,253 tests passed; raw SHA-256 `8cc0a6f0cddb1b55fc5c9abe7017ae80bfd58b1e433bfd79b1e20f472194345d`.
 
 Required decision: inspect the failure, helper change, and ledger. If accepted, add a reviewer disposition with decision `accepted_test_fix`, rationale, reviewer identity, and UTC timestamp to attempt 1. Silence is not approval.
 
