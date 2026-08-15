@@ -13,6 +13,11 @@ Creative Studio is excluded from this release and must remain disabled at build 
 - `aioncore-test-attempts.json`, `aioncore-build-attempts.json`, and `aioncore-source-gates.json` retain ordered local backend diagnostics, including red attempts and their dispositions.
 - `source-gates.json` and `full-suite-ledger.json` will bind WePrompt gate results to one exact RC commit and retain every full-suite attempt.
 - `artifact-index.json` will bind the two final unsigned desktop packages to one WePrompt RC and one accepted AionCore release.
+- `acceptance-matrix.md` defines the four mandatory Windows entry gates and the twelve ordered packaged scenarios for both targets.
+- `evidence-index.schema.json`, `create-evidence-index.js`, and `validate-evidence-index.js` define and enforce the sanitized packaged-evidence packet. A static valid fixture lives under `tests/fixtures/release/`.
+- `known-issues.md` records the explicit BUG-017 P1 disposition and preservation-first operator response.
+- `installation.md` documents hash-first installation and removal without weakening host security or deleting user data.
+- `go-no-go.md` is the unsigned owner-decision record. It contains no preselected decision.
 
 ## Invalidation rules
 

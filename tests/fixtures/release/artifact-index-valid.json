@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "state": "held_not_approved",
+  "artifacts": [
+    {
+      "platform": "windows-x64",
+      "target": "x86_64-pc-windows-msvc",
+      "name": "WePrompt-2.1.39-win-x64.exe",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "wepromptCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "aioncoreVersion": "v0.1.55",
+      "aioncoreCommit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "aioncoreBinarySha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "bundleManifestSha256": "6666666666666666666666666666666666666666666666666666666666666666",
+      "migrationLineageFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "internal": true,
+      "unsigned": true,
+      "creativeStudioEnabled": false,
+      "autoUpdateEnabled": false,
+      "sentryEnabled": false
+    },
+    {
+      "platform": "macos-arm64",
+      "target": "aarch64-apple-darwin",
+      "name": "WePrompt-2.1.39-mac-arm64.dmg",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "wepromptCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "aioncoreVersion": "v0.1.55",
+      "aioncoreCommit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "aioncoreBinarySha256": "5555555555555555555555555555555555555555555555555555555555555555",
+      "bundleManifestSha256": "7777777777777777777777777777777777777777777777777777777777777777",
+      "migrationLineageFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "internal": true,
+      "unsigned": true,
+      "creativeStudioEnabled": false,
+      "autoUpdateEnabled": false,
+      "sentryEnabled": false
+    }
+  ]
+}

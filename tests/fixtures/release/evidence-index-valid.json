@@ -1,0 +1,477 @@
+{
+  "schemaVersion": 1,
+  "releaseChannel": "internal",
+  "artifactIndex": {
+    "path": "tests/fixtures/release/artifact-index-valid.json",
+    "sha256": "358f0b9b29e8f3ec3d3646310c87b0899203532214fae071567da49b7ddc6378"
+  },
+  "decisionReadiness": "ready_for_owner_decision",
+  "bug017RuntimeRecoveryBuilt": false,
+  "platforms": [
+    {
+      "platform": "windows-x64",
+      "artifact": {
+        "name": "WePrompt-2.1.39-win-x64.exe",
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "wepromptCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "aioncoreVersion": "v0.1.55",
+        "aioncoreCommit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "aioncoreBinarySha256": "4444444444444444444444444444444444444444444444444444444444444444",
+        "bundleManifestSha256": "6666666666666666666666666666666666666666666666666666666666666666",
+        "migrationLineageFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "startedAt": "2026-08-16T00:00:00Z",
+      "endedAt": "2026-08-16T03:00:00Z",
+      "environment": {
+        "tester": "Windows tester",
+        "machine": "clean-win-vm-01",
+        "osBuild": "Windows 11 24H2 build 26100",
+        "filesystem": "NTFS",
+        "architecture": "x64",
+        "snapshotId": "win-clean-snapshot-01",
+        "locale": "en-US",
+        "timezone": "UTC"
+      },
+      "windowsGates": [
+        {
+          "id": "W01_NATIVE_SOURCE",
+          "status": "pass",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Observed required packaged behavior.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/windows-x64/w01_native_source.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ]
+        },
+        {
+          "id": "W02_BUG043_FILESYSTEM",
+          "status": "pass",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Observed required packaged behavior.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/windows-x64/w02_bug043_filesystem.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ]
+        },
+        {
+          "id": "W03_BUG043_PACKAGED_FAIL_CLOSED",
+          "status": "pass",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Observed required packaged behavior.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/windows-x64/w03_bug043_packaged_fail_closed.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ]
+        },
+        {
+          "id": "W04_INSTALLED_BUNDLE",
+          "status": "pass",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Observed required packaged behavior.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/windows-x64/w04_installed_bundle.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ]
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "S01_INSTALL",
+          "status": "pass",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Observed required packaged behavior.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/windows-x64/s01_install.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ]
+        },
+        {
+          "id": "S02_SPRINT2_MIGRATION",
+          "status": "pass",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Observed required packaged behavior.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/windows-x64/s02_sprint2_migration.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ]
+        },
+        {
+          "id": "S03_LINEAGE_FAIL_CLOSED",
+          "status": "pass",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Observed required packaged behavior.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/windows-x64/s03_lineage_fail_closed.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ]
+        },
+        {
+          "id": "S04_HTTP_WS_AUTH",
+          "status": "pass",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Observed required packaged behavior.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/windows-x64/s04_http_ws_auth.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ]
+        },
+        {
+          "id": "S05_MCP_OAUTH_TOOL",
+          "status": "pass",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Observed required packaged behavior.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/windows-x64/s05_mcp_oauth_tool.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ]
+        },
+        {
+          "id": "S06_OAUTH_EXPIRY",
+          "status": "pass",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Observed required packaged behavior.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/windows-x64/s06_oauth_expiry.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ]
+        },
+        {
+          "id": "S07_OFFICECLI",
+          "status": "pass",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Observed required packaged behavior.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/windows-x64/s07_officecli.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ]
+        },
+        {
+          "id": "S08_PRESENTATION_TEMPLATES",
+          "status": "pass",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Observed required packaged behavior.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/windows-x64/s08_presentation_templates.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ]
+        },
+        {
+          "id": "S09_BUG017",
+          "status": "blocked",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Blocked with fixture preserved.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/windows-x64/s09_bug017.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ],
+          "failure": {
+            "reason": "Runtime classification and recovery UX are unbuilt; safeguard evidence is retained.",
+            "owner": "WePrompt and AionCore release owners",
+            "preservedFixture": {
+              "location": "controlled://sprint3/windows-x64/bug017",
+              "sha256": "9999999999999999999999999999999999999999999999999999999999999999"
+            }
+          }
+        },
+        {
+          "id": "S10_RESTART",
+          "status": "pass",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Observed required packaged behavior.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/windows-x64/s10_restart.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ]
+        },
+        {
+          "id": "S11_STUDIO_ABSENT",
+          "status": "pass",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Observed required packaged behavior.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/windows-x64/s11_studio_absent.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ]
+        },
+        {
+          "id": "S12_UPDATE_ABSENT",
+          "status": "pass",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Observed required packaged behavior.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/windows-x64/s12_update_absent.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "platform": "macos-arm64",
+      "artifact": {
+        "name": "WePrompt-2.1.39-mac-arm64.dmg",
+        "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "wepromptCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "aioncoreVersion": "v0.1.55",
+        "aioncoreCommit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "aioncoreBinarySha256": "5555555555555555555555555555555555555555555555555555555555555555",
+        "bundleManifestSha256": "7777777777777777777777777777777777777777777777777777777777777777",
+        "migrationLineageFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "startedAt": "2026-08-16T00:00:00Z",
+      "endedAt": "2026-08-16T03:00:00Z",
+      "environment": {
+        "tester": "macOS tester",
+        "machine": "clean-mac-01",
+        "osBuild": "macOS 15.6.1",
+        "filesystem": "APFS",
+        "architecture": "arm64",
+        "snapshotId": "mac-clean-snapshot-01",
+        "locale": "en-US",
+        "timezone": "UTC"
+      },
+      "windowsGates": [],
+      "scenarios": [
+        {
+          "id": "S01_INSTALL",
+          "status": "pass",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Observed required packaged behavior.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/macos-arm64/s01_install.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ]
+        },
+        {
+          "id": "S02_SPRINT2_MIGRATION",
+          "status": "pass",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Observed required packaged behavior.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/macos-arm64/s02_sprint2_migration.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ]
+        },
+        {
+          "id": "S03_LINEAGE_FAIL_CLOSED",
+          "status": "pass",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Observed required packaged behavior.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/macos-arm64/s03_lineage_fail_closed.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ]
+        },
+        {
+          "id": "S04_HTTP_WS_AUTH",
+          "status": "pass",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Observed required packaged behavior.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/macos-arm64/s04_http_ws_auth.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ]
+        },
+        {
+          "id": "S05_MCP_OAUTH_TOOL",
+          "status": "pass",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Observed required packaged behavior.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/macos-arm64/s05_mcp_oauth_tool.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ]
+        },
+        {
+          "id": "S06_OAUTH_EXPIRY",
+          "status": "pass",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Observed required packaged behavior.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/macos-arm64/s06_oauth_expiry.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ]
+        },
+        {
+          "id": "S07_OFFICECLI",
+          "status": "pass",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Observed required packaged behavior.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/macos-arm64/s07_officecli.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ]
+        },
+        {
+          "id": "S08_PRESENTATION_TEMPLATES",
+          "status": "pass",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Observed required packaged behavior.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/macos-arm64/s08_presentation_templates.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ]
+        },
+        {
+          "id": "S09_BUG017",
+          "status": "blocked",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Blocked with fixture preserved.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/macos-arm64/s09_bug017.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ],
+          "failure": {
+            "reason": "Runtime classification and recovery UX are unbuilt; safeguard evidence is retained.",
+            "owner": "WePrompt and AionCore release owners",
+            "preservedFixture": {
+              "location": "controlled://sprint3/macos-arm64/bug017",
+              "sha256": "9999999999999999999999999999999999999999999999999999999999999999"
+            }
+          }
+        },
+        {
+          "id": "S10_RESTART",
+          "status": "pass",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Observed required packaged behavior.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/macos-arm64/s10_restart.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ]
+        },
+        {
+          "id": "S11_STUDIO_ABSENT",
+          "status": "pass",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Observed required packaged behavior.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/macos-arm64/s11_studio_absent.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ]
+        },
+        {
+          "id": "S12_UPDATE_ABSENT",
+          "status": "pass",
+          "startedAt": "2026-08-16T01:00:00Z",
+          "endedAt": "2026-08-16T01:05:00Z",
+          "notes": "Observed required packaged behavior.",
+          "evidence": [
+            {
+              "kind": "sanitized-log",
+              "path": "evidence/macos-arm64/s12_update_absent.log",
+              "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
