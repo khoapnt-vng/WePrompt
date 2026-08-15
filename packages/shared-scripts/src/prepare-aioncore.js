@@ -37,11 +37,9 @@ const GITHUB_OWNER = 'khoapnt-vng';
 const GITHUB_REPO = 'aioncore';
 const AIONCORE_PUBLISHING_REMOTE = 'https://github.com/khoapnt-vng/aioncore.git';
 
-// Target of the `v0.1.51` tag, which is the release this file's checksums pin.
-// Verified out-of-band on both hosts before use: code.vng.vn/dto/aioncore and
-// github.com/khoapnt-vng/aioncore resolve `v0.1.51^{}` to this same commit.
-// Replaces the fabricated `260dbbc05…` value (BUG-040), which existed on neither.
-const ACCEPTED_AIONCORE_SOURCE_COMMIT = 'd4d8e87714690cdb230ab7a6987de3ceacbea275';
+// Exact Sprint 3 internal-test bundle source. This commit is intentionally
+// consumed from authenticated Actions artifacts rather than a public release.
+const ACCEPTED_AIONCORE_SOURCE_COMMIT = '8d79ebbd79bd4bb08f0ff0e49ea0a22564cb3e61';
 
 // Default Forge mirror that publishes cosign-signed, self-built AionCore
 // artifacts (see aioncore-trust.js). Overridable via env for other mirrors.
@@ -386,6 +384,15 @@ function getActionsArtifactMissingMessage({ runId, platform, arch, expectedArtif
     `Available artifacts: ${available}.`,
     `Re-run AionCore Manual Build with platform [ ${getActionsManualPlatform(platform, arch)} ] or all.`,
   ].join(' ');
+}
+
+function findCompleteActionsBundleRoot(binaryPath) {
+  const root = path.dirname(binaryPath);
+  const lineagePath = path.join(root, 'migration-lineage.json');
+  const managedResourcesPath = path.join(root, 'managed-resources');
+  if (!fs.existsSync(lineagePath) || !fs.existsSync(managedResourcesPath)) return null;
+  if (!fs.statSync(lineagePath).isFile() || !fs.statSync(managedResourcesPath).isDirectory()) return null;
+  return root;
 }
 
 function prepareManagedResources(binaryPath, targetDir) {
@@ -762,6 +769,7 @@ function downloadAndExtractActionsArtifact(platform, arch, runId, resolveRefs) {
   return {
     binaryPath,
     lineagePath,
+    bundleDir: findCompleteActionsBundleRoot(binaryPath),
     tempDir,
     artifactName: expectedArtifactName,
     archivePath,
@@ -961,6 +969,7 @@ function prepareAioncore(options) {
 
   let sourcePath = null;
   let sourceLineagePath = null;
+  let sourceBundleDir = null;
   let sourceType = 'none';
   let sourceDetail = {};
   let tempDir = null;
@@ -970,6 +979,7 @@ function prepareAioncore(options) {
     const result = downloadAndExtractActionsArtifact(platform, arch, actionsRunId, resolveAioncoreRefs);
     sourcePath = result.binaryPath;
     sourceLineagePath = result.lineagePath;
+    sourceBundleDir = result.bundleDir;
     tempDir = result.tempDir;
     sourceType = 'actions-artifact';
     sourceDetail = {
@@ -1045,10 +1055,15 @@ function prepareAioncore(options) {
     if (!sourceLineagePath) {
       throw makeIntegrityError(`AionCore source ${sourceType} did not provide migration-lineage.json.`);
     }
-    copyFileSafe(sourcePath, targetBinaryPath);
-    copyFileSafe(sourceLineagePath, path.join(targetDir, 'migration-lineage.json'));
+    if (sourceBundleDir) {
+      copyDirectorySafe(sourceBundleDir, targetDir);
+    } else {
+      copyFileSafe(sourcePath, targetBinaryPath);
+      copyFileSafe(sourceLineagePath, path.join(targetDir, 'migration-lineage.json'));
+      prepareManagedResources(targetBinaryPath, targetDir);
+    }
     ensureExecutableMode(targetBinaryPath);
-    const bundledManagedResourcesDir = prepareManagedResources(targetBinaryPath, targetDir);
+    const bundledManagedResourcesDir = path.join(targetDir, 'managed-resources');
 
     // The release tag is the authoritative version — the aioncore
     // binary does not expose a --version flag (it has --app-version which
@@ -1083,6 +1098,7 @@ module.exports = {
   cosign,
   getActionsArtifactMissingMessage,
   getActionsArtifactName,
+  findCompleteActionsBundleRoot,
   getAioncoreSource,
   getForgeDownloadUrl,
   isIntegrityError,

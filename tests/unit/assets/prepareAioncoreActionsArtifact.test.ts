@@ -6,6 +6,7 @@ import { delimiter, dirname, join } from 'node:path';
 const {
   ACCEPTED_AIONCORE_SOURCE_COMMIT,
   assertAcceptedActionsRun,
+  findCompleteActionsBundleRoot,
   getActionsArtifactName,
   getActionsArtifactMissingMessage,
   prepareAioncore,
@@ -13,7 +14,8 @@ const {
 const { acceptedMigrationLineage } = require('../../../packages/shared-scripts/src/verify-bundled-aioncore-resources');
 
 const posixFakeToolchainIt = process.platform === 'win32' ? it.skip : it;
-const publishedAioncoreRefs = 'd4d8e87714690cdb230ab7a6987de3ceacbea275\trefs/tags/v0.1.51\n';
+const publishedAioncoreRefs =
+  '8d79ebbd79bd4bb08f0ff0e49ea0a22564cb3e61\trefs/heads/codex/internal-sprint3-aioncore-package\n';
 const resolvePublishedAioncoreRefs = () => publishedAioncoreRefs;
 
 function writeFile(filePath: string, contents = 'x') {
@@ -134,6 +136,30 @@ afterEach(() => {
 });
 
 describe('prepare-aioncore GitHub Actions artifact resolver', () => {
+  it('pins the Sprint 3 internal AionCore package commit and migration lineage', () => {
+    expect(ACCEPTED_AIONCORE_SOURCE_COMMIT).toBe('8d79ebbd79bd4bb08f0ff0e49ea0a22564cb3e61');
+    expect(acceptedMigrationLineage).toMatchObject({
+      latestVersion: 28,
+      entryCount: 28,
+      fingerprint: '3d872b4b1346afde6e277dd727e87af3ca140c91d7da16590ab272af7b3561e3',
+    });
+  });
+
+  it('recognizes complete Actions bundles and rejects binary-only artifacts', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'aionui-actions-complete-bundle-'));
+    const binary = join(tmp, 'aioncore');
+    writeFile(binary);
+    writeFile(join(tmp, 'migration-lineage.json'), '{}');
+
+    try {
+      expect(findCompleteActionsBundleRoot(binary)).toBeNull();
+      mkdirSync(join(tmp, 'managed-resources'));
+      expect(findCompleteActionsBundleRoot(binary)).toBe(tmp);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   // Scope note (BUG-040): injected ref output verifies gate behavior without
   // claiming that a fixture proves real-world provenance. Production obtains
   // this independent input from git ls-remote on the publishing host.
