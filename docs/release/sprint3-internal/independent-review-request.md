@@ -4,8 +4,8 @@ Status: **review required; not authorized to publish or package**
 
 ## Immutable review targets
 
-- WePrompt executable candidate: `1a00f5fa6f446c57475426d260b0ee1ad0d19410`
-- WePrompt evidence commit: `23a4070403de263ee4e67919969e1c42f575c6f3`
+- WePrompt executable candidate: `0de7d524fb98c282efba06ea805378c2fd42e8ca`
+- WePrompt evidence commit: `daef806e06096f9d5cb2fb3dce8b2fa411d9d266`
 - WePrompt approved base: `634f49c21567d9bd987b04887eaa0c6126b86353`
 - AionCore candidate: `e2931e953cbdfed146497e25ebf7bc3981b95193`
 - AionCore approved base: `9bd693b3b43cdb1003061de0e4f62259ab6f42ae`
@@ -18,7 +18,7 @@ Review the exact commits, not branch names. Neither release branch has been push
 1. WePrompt descends from the approved Sprint 3 base without wholesale `main` integration.
 2. Creative Studio, auto-update, and Sentry are fail-closed for `WEPROMPT_INTERNAL_RELEASE=1`.
 3. The manual RC workflow accepts one exact 40-character commit through a non-interpolated environment boundary, runs Windows x64 first, and permits only Windows x64 plus macOS ARM64 unsigned candidates.
-4. Missing native Windows evidence is a no-go; macOS cannot waive it.
+4. Missing native Windows evidence is a no-go; macOS cannot waive it. Native jobs validate the committed governed ledger, Windows appends first, and macOS consumes and appends to that same chronological ledger.
 5. AionCore bundles contain the exact backend binary, immutable migration lineage, complete managed resources, and pinned OfficeCLI for only the two approved targets; only the GitHub release publisher has `contents: write`.
 6. The package verifier rejects backend/hash/target drift, missing OfficeCLI/templates, a second runtime, and enabled excluded features.
 7. The packaged-evidence validator enforces Windows-first acceptance, exact artifact identity, all 12 scenarios, all four Windows gates, sanitized hashed evidence, and the BUG-017 decision boundary.
@@ -41,6 +41,7 @@ Review the exact commits, not branch names. Neither release branch has been push
   - `a14792b08b4098c2b4abc15f1e1f6391e72155f1`: green, 631 files passed, 8,241 tests passed; raw SHA-256 `746222bd7c9542842e6d2a75a1067ff4df31981b8b0bf3304a39ca8399c49942`.
   - `d878442010629b8e29685d59ed1132564b27ca01`: green, 632 files passed, 8,253 tests passed; raw SHA-256 `8cc0a6f0cddb1b55fc5c9abe7017ae80bfd58b1e433bfd79b1e20f472194345d`.
   - `1a00f5fa6f446c57475426d260b0ee1ad0d19410`: green, 632 files passed, 8,253 tests passed; raw SHA-256 `7b12d98890b6d35c7855dc9b8b598031d67b9f1586afb8782d85e92f47fdaca8`.
+  - `0de7d524fb98c282efba06ea805378c2fd42e8ca`: green, 632 files passed, 8,253 tests passed; raw SHA-256 `27b58d05c3b7e3bac3a3f075f0f7b49c919f6cd2de4df38bdb51ca97513ef810`.
 
 Required decision: inspect the failure, helper change, and ledger. If accepted, add a reviewer disposition with decision `accepted_test_fix`, rationale, reviewer identity, and UTC timestamp to attempt 1. Silence is not approval.
 
