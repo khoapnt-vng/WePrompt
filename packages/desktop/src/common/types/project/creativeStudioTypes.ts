@@ -148,6 +148,14 @@ export type StudioOutputRole = 'take' | 'reference';
 
 export const STUDIO_REFERENCE_PROMPT_MAX_LENGTH = 4 * 1024;
 
+/** Main-only frame-defining authority frozen before a reference plate is submitted. */
+export type StudioReferenceInputSnapshot = {
+  visualPrompt: string;
+  referenceAssetIds: string[];
+  aspectRatio: StudioAspectRatio;
+  resolution: StudioResolution;
+};
+
 export type StudioJob = {
   id: string;
   projectId: string;
@@ -161,6 +169,8 @@ export type StudioJob = {
   cancellationPolicy: StudioCancellationPolicy;
   /** Absent means 'take', the pre-existing default. Never backfilled onto old records; read via jobOutputRole(job). */
   outputRole?: StudioOutputRole;
+  /** Optional only for legacy reference jobs. Never project this main-only authority to the renderer. */
+  referenceInputSnapshot?: StudioReferenceInputSnapshot;
   outputAssetIds: string[];
   error: StudioJobError | null;
   progress?: number;
@@ -179,7 +189,7 @@ export type StudioJob = {
  */
 export type StudioRendererJob = Omit<
   StudioJob,
-  'provider' | 'idempotencyKey' | 'providerJobId' | 'remoteStartedAt' | 'cancellationPolicy'
+  'provider' | 'idempotencyKey' | 'providerJobId' | 'remoteStartedAt' | 'cancellationPolicy' | 'referenceInputSnapshot'
 > & {
   provider: StudioMediaChoiceRef;
   /** Main-derived cancellation capability; renderer code never infers it from status or provider metadata. */

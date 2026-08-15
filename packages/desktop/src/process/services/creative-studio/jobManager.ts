@@ -8,7 +8,10 @@ import { randomUUID } from 'node:crypto';
 import { promises as dns } from 'node:dns';
 import { createReadStream, promises as fs } from 'node:fs';
 import type { IProvider, TProviderWithModel } from '@/common/config/storage';
-import { stripFirstFramePromptPrefix } from '@/common/types/project/creativeStudioReferencePrompt';
+import {
+  buildConditionedFirstFramePrompt,
+  stripFirstFramePromptPrefix,
+} from '@/common/types/project/creativeStudioReferencePrompt';
 import { evaluateStudioRules, resolveEffectiveStudioRules } from '@/common/types/project/creativeStudioRules';
 import {
   STUDIO_REFERENCE_PROMPT_MAX_LENGTH,
@@ -22,6 +25,7 @@ import {
   type StudioProject,
   type StudioProviderAdapterId,
   type StudioProviderRef,
+  type StudioReferenceInputSnapshot,
   type StudioRetryDownloadRequest,
   type StudioRetryJobRequest,
   type StudioSubmitScenesRequest,
@@ -128,6 +132,7 @@ type ExecutionContext = {
 type PreparedSubmission = ExecutionContext & {
   request: ResolvedStudioGenerationRequest;
   cancellationPolicy: StudioCancellationPolicy;
+  referenceInputSnapshot?: StudioReferenceInputSnapshot;
 };
 
 /**
@@ -137,6 +142,7 @@ type PreparedSubmission = ExecutionContext & {
 type RequestedOutput = {
   readonly role: StudioOutputRole;
   readonly referencePrompt?: string;
+  readonly referenceInputs?: readonly StudioProject['assets'][string][];
 };
 
 const TAKE_OUTPUT: RequestedOutput = { role: 'take' };
@@ -607,9 +613,20 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       output.role === 'reference'
         ? stripFirstFramePromptPrefix(baseRequest.prompt, project.aspectRatio)
         : baseRequest.prompt;
+    if (output.role === 'reference' && !authored) invalidRequest();
     const breaches = evaluateStudioRules(resolveEffectiveStudioRules(project.rules), authored).breaches;
     if (breaches.length > 0) throw new StudioJobManagerError('rule_breach');
-    const validation = adapter.validateRequest(baseRequest, resolvedProvider);
+    const referenceInputs = output.referenceInputs ?? [];
+    const providerPrompt =
+      output.role === 'reference'
+        ? buildConditionedFirstFramePrompt(
+            authored,
+            project.aspectRatio,
+            referenceInputs.map((asset) => asset.briefReferenceRole!)
+          )
+        : baseRequest.prompt;
+    const promptedRequest = { ...baseRequest, prompt: providerPrompt };
+    const validation = adapter.validateRequest(promptedRequest, resolvedProvider);
     if (!validation.ok) throw new StudioJobManagerError('invalid_route');
     let firstFrame: ResolvedStudioGenerationRequest['firstFrame'];
     if (output.role !== 'reference' && scene.referenceAssetId !== null) {
@@ -627,10 +644,26 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
         throw new StudioJobManagerError('invalid_route');
       }
     }
-    const resolvedRequest = {
-      ...baseRequest,
+    let conditioningImages: ResolvedStudioGenerationRequest['conditioningImages'];
+    if (output.role === 'reference') {
+      try {
+        conditioningImages = await Promise.all(
+          referenceInputs.map((asset) => deps.mediaStore.resolveProviderInput(project.id, asset.id))
+        );
+      } catch {
+        invalidRequest();
+      }
+    }
+    const resolvedRequest: ResolvedStudioGenerationRequest = {
+      ...promptedRequest,
       ...validation.normalized,
       ...(firstFrame ? { firstFrame } : {}),
+      ...(output.role === 'reference'
+        ? {
+            conditioningImages: conditioningImages!,
+            conditioningImageLimit: catalogRoute.constraints.maxConditioningImages,
+          }
+        : {}),
     };
     const resolvedValidation = adapter.validateRequest(resolvedRequest, resolvedProvider);
     if (!resolvedValidation.ok) throw new StudioJobManagerError('invalid_route');
@@ -643,6 +676,16 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       adapter,
       provider: resolvedProvider,
       cancellationPolicy: catalogRoute.cancellationPolicy,
+      ...(output.role === 'reference'
+        ? {
+            referenceInputSnapshot: {
+              visualPrompt: authored,
+              referenceAssetIds: referenceInputs.map((asset) => asset.id),
+              aspectRatio: project.aspectRatio,
+              resolution: project.resolution,
+            },
+          }
+        : {}),
       request: {
         ...resolvedRequest,
         ...resolvedValidation.normalized,
@@ -1180,6 +1223,9 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
         cancellationPolicy: candidate.cancellationPolicy,
         // Absent means 'take'; the default is never written so old and new take records stay identical.
         ...(candidate.outputRole === 'reference' ? { outputRole: 'reference' as const } : {}),
+        ...(candidate.referenceInputSnapshot === undefined
+          ? {}
+          : { referenceInputSnapshot: structuredClone(candidate.referenceInputSnapshot) }),
         outputAssetIds: [],
         error: null,
         retryOfJobId: lineage?.retryOfJobId ?? null,
@@ -1235,12 +1281,20 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     const project = await requireExpectedProject(input.projectId, input.expectedRevision);
     if (disposed) throw new StudioJobManagerError('invalid_request');
     const outputRole = input.outputRole ?? 'take';
-    if (outputRole === 'reference') {
-      const activeBriefReferences = resolveActiveStudioBriefReferences(project.assets);
-      // Task 6 replaces this temporary guard with main-derived, adapter-validated conditioning.
-      // Until then, paying for a plate while silently omitting an active or malformed Brief input
-      // would contradict the exact review. Fail before route lookup or any durable/provider work.
-      if (activeBriefReferences === null || activeBriefReferences.length > 0) invalidRequest();
+    const activeBriefReferences = outputRole === 'reference' ? resolveActiveStudioBriefReferences(project.assets) : [];
+    if (
+      activeBriefReferences === null ||
+      activeBriefReferences.some(
+        (asset) =>
+          asset.projectId !== project.id ||
+          project.assets[asset.id] !== asset ||
+          asset.sceneId !== null ||
+          asset.mediaKind !== 'image' ||
+          asset.managedAsset.collection !== 'imports'
+      ) ||
+      new Set(activeBriefReferences.map((asset) => asset.id)).size !== activeBriefReferences.length
+    ) {
+      invalidRequest();
     }
     // A reference plate paints one scene's first frame, so each scene brings its own prompt. A
     // batch-wide prompt could only ever describe one of them correctly.
@@ -1302,6 +1356,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       const requestedOutput: RequestedOutput = {
         role: outputRole,
         ...(scenePrompt === undefined ? {} : { referencePrompt: scenePrompt }),
+        ...(outputRole === 'reference' ? { referenceInputs: activeBriefReferences } : {}),
       };
       const selected = project.routing[requestedMediaKind(scene.mediaKind, requestedOutput.role)];
       if (

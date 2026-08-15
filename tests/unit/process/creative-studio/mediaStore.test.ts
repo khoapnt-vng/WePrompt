@@ -147,6 +147,14 @@ const addActiveReferenceJob = async (store: CreativeStudioStore, visualPrompt = 
       model: 'image-model',
     };
     next.jobs.job_1.outputRole = 'reference';
+    if (visualPrompt.trim()) {
+      next.jobs.job_1.referenceInputSnapshot = {
+        visualPrompt: visualPrompt.trim(),
+        referenceAssetIds: [],
+        aspectRatio: next.aspectRatio,
+        resolution: next.resolution,
+      };
+    }
     return next;
   });
 };
@@ -1115,6 +1123,71 @@ describe('createStudioMediaStore', () => {
     });
 
     expect((await store.getProject('project_1'))?.assets[committed.id].sourceVisualPrompt).toBe('Aerial, drifting.');
+  });
+
+  it('copies complete reference provenance from the durable job snapshot instead of current project state', async () => {
+    const { store } = await makeStore();
+    await addActiveReferenceJob(store, 'Original reviewed plate');
+    const withSources = await addBriefReferences(store, 2);
+    await store.updateProject(
+      'project_1',
+      (project) => {
+        const next = structuredClone(project);
+        next.jobs.job_1.referenceInputSnapshot = {
+          visualPrompt: 'Original reviewed plate',
+          referenceAssetIds: ['brief_1', 'brief_2'],
+          aspectRatio: '16:9',
+          resolution: '720p',
+        };
+        next.scenes.scene_1.visualPrompt = 'Changed while provider was running';
+        next.aspectRatio = '1:1';
+        next.resolution = '1080p';
+        return next;
+      },
+      withSources.revision
+    );
+    const media = createStudioMediaStore({ store, createId: () => 'asset_reference_snapshot' });
+
+    const committed = await media.persistProviderOutputForJob({
+      projectId: 'project_1',
+      sceneId: 'scene_1',
+      jobId: 'job_1',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      body: Readable.from([png]),
+    });
+
+    expect((await store.getProject('project_1'))?.assets[committed.id]).toMatchObject({
+      sourceVisualPrompt: 'Original reviewed plate',
+      sourceReferenceAssetIds: ['brief_1', 'brief_2'],
+      sourceAspectRatio: '16:9',
+      sourceResolution: '720p',
+    });
+  });
+
+  it('retains scene-prompt fallback only for a legacy reference job without a snapshot', async () => {
+    const { store } = await makeStore();
+    await addActiveReferenceJob(store, '  Legacy scene prompt  ');
+    await store.updateProject('project_1', (project) => {
+      const next = structuredClone(project);
+      delete next.jobs.job_1.referenceInputSnapshot;
+      return next;
+    });
+    const media = createStudioMediaStore({ store, createId: () => 'asset_reference_legacy' });
+
+    const committed = await media.persistProviderOutputForJob({
+      projectId: 'project_1',
+      sceneId: 'scene_1',
+      jobId: 'job_1',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      body: Readable.from([png]),
+    });
+
+    expect((await store.getProject('project_1'))?.assets[committed.id]).toMatchObject({
+      sourceVisualPrompt: 'Legacy scene prompt',
+    });
+    expect((await store.getProject('project_1'))?.assets[committed.id]).not.toHaveProperty('sourceReferenceAssetIds');
   });
 
   it('still commits a take exactly as before', async () => {

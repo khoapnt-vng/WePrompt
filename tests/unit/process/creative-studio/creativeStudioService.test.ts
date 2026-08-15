@@ -3523,6 +3523,12 @@ describe('CreativeStudioService', () => {
           providerJobId: 'reference-provider-job',
           cancellationPolicy: 'none',
           outputRole: 'reference',
+          referenceInputSnapshot: {
+            visualPrompt: 'Reviewed one-off plate',
+            referenceAssetIds: [],
+            aspectRatio: '16:9',
+            resolution: '720p',
+          },
           outputAssetIds: [],
           error: null,
           retryOfJobId: null,
@@ -3538,6 +3544,7 @@ describe('CreativeStudioService', () => {
     const rendererProject = await service.getProject(created.id);
 
     expect(rendererProject?.jobs.job_reference).toMatchObject({ outputRole: 'reference' });
+    expect(rendererProject?.jobs.job_reference).not.toHaveProperty('referenceInputSnapshot');
   });
 
   it('recursively removes adapter identity and provider internals from project, job, and catalog DTOs', async () => {

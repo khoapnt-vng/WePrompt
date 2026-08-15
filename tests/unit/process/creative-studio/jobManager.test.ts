@@ -7,6 +7,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { promises as nodeFs } from 'node:fs';
 import { EventEmitter } from 'node:events';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import https from 'node:https';
@@ -30,6 +31,7 @@ import {
   type ProviderJobSnapshot,
   type ProviderOutput,
   type ProviderSubmitResult,
+  validateImageConditioningRequest,
 } from '@process/services/creative-studio/adapters';
 import {
   createStudioJobManager,
@@ -1797,17 +1799,23 @@ describe('StudioJobManager route and reference isolation', () => {
 });
 
 describe('StudioJobManager reference output routing', () => {
-  const imageAdapterWithSubmit = (submit: ReturnType<typeof vi.fn>): GenerationProviderAdapter => ({
+  const imageAdapterWithSubmit = (
+    submit: ReturnType<typeof vi.fn>,
+    currentSafetyLimit = 6
+  ): GenerationProviderAdapter => ({
     id: 'weprompt-image-v1',
     validateConnection: async () => ({ ok: true }),
-    validateRequest: (request) => ({
-      ok: true,
-      normalized: {
-        aspectRatio: request.aspectRatio,
-        resolution: request.resolution,
-        durationSeconds: request.durationSeconds,
-      },
-    }),
+    validateRequest: (request) =>
+      validateImageConditioningRequest(request, currentSafetyLimit, false).ok
+        ? {
+            ok: true,
+            normalized: {
+              aspectRatio: request.aspectRatio,
+              resolution: request.resolution,
+              durationSeconds: request.durationSeconds,
+            },
+          }
+        : { ok: false, issues: [{ code: 'provider_unavailable' }] },
     submit,
   });
 
@@ -1827,14 +1835,38 @@ describe('StudioJobManager reference output routing', () => {
 
   const createReferenceHarness = (
     submit: ReturnType<typeof vi.fn>,
-    overrides: Partial<HarnessOptions> = {}
+    overrides: Partial<HarnessOptions> = {},
+    currentSafetyLimit = 6
   ): Promise<Harness> =>
-    createHarness(imageAdapterWithSubmit(submit), {
+    createHarness(imageAdapterWithSubmit(submit, currentSafetyLimit), {
       scenes: [videoScene()],
       routes: [imageRoute, videoRoute],
       provider: referenceProvider,
       ...overrides,
     });
+
+  const conditioningCatalog = (maximum: number): StudioGenerationRouteCatalog => {
+    const built = catalog([imageRoute, videoRoute]);
+    built.routes.find((candidate) => candidate.kind === 'image')!.constraints.maxConditioningImages = maximum;
+    return built;
+  };
+
+  const importBriefReference = async (
+    harness: Harness,
+    role: 'cast' | 'look',
+    index: number,
+    bytes: Buffer = Buffer.concat([png, Buffer.from([index])])
+  ) => {
+    const sourcePath = path.join(harness.rootDir, `${role}-${index}.png`);
+    await writeFile(sourcePath, bytes);
+    const current = (await harness.store.getProject(harness.project.id))!;
+    return harness.mediaStore.importReferenceFromPath({
+      projectId: current.id,
+      briefReferenceRole: role,
+      sourcePath,
+      expectedRevision: current.revision,
+    });
+  };
 
   const seedUnknownSubmission = (harness: Harness, outputRole: 'take' | 'reference'): Promise<StudioProject> =>
     harness.store.updateProject(harness.project.id, (project) => {
@@ -1867,8 +1899,8 @@ describe('StudioJobManager reference output routing', () => {
       return next;
     });
 
-  it('rejects an active-Brief reference plate before route lookup, persistence, notification or adapter activity', async () => {
-    const submit = vi.fn();
+  it('derives one active Brief reference in main before persisting and submitting a plate', async () => {
+    const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
     const validateRequest = vi.fn((request) => ({
       ok: true as const,
       normalized: {
@@ -1877,7 +1909,7 @@ describe('StudioJobManager reference output routing', () => {
         durationSeconds: request.durationSeconds,
       },
     }));
-    const listGenerationRoutes = vi.fn(async () => catalog([imageRoute, videoRoute]));
+    const listGenerationRoutes = vi.fn(async () => conditioningCatalog(6));
     const onProjectUpdated = vi.fn();
     const harness = await createHarness(
       {
@@ -1892,34 +1924,185 @@ describe('StudioJobManager reference output routing', () => {
         onProjectUpdated,
       }
     );
-    const sourcePath = path.join(harness.rootDir, 'cast.png');
-    await writeFile(sourcePath, png);
-    await harness.mediaStore.importReferenceFromPath({
-      projectId: harness.project.id,
-      briefReferenceRole: 'cast',
-      sourcePath,
-      expectedRevision: harness.project.revision,
-    });
+    const imported = await importBriefReference(harness, 'cast', 1);
     const withCast = (await harness.store.getProject(harness.project.id))!;
     onProjectUpdated.mockClear();
-    const before = structuredClone(withCast);
+
+    const [job] = await harness.manager.submitScenes({
+      projectId: withCast.id,
+      expectedRevision: withCast.revision,
+      sceneIds: ['scene_1'],
+      routes: [imageRoute],
+      catalogVersion: 'catalog_1',
+      outputRole: 'reference',
+      referencePrompts: [{ sceneId: 'scene_1', prompt: 'A calm establishing plate' }],
+    });
+
+    expect(job?.referenceInputSnapshot).toEqual({
+      visualPrompt: 'A calm establishing plate',
+      referenceAssetIds: [imported.id],
+      aspectRatio: '16:9',
+      resolution: '720p',
+    });
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    expect(submit.mock.calls[0]?.[0]).toMatchObject({
+      conditioningImageLimit: 6,
+      conditioningImages: [{ assetId: imported.id }],
+    });
+    expect(listGenerationRoutes).toHaveBeenCalledOnce();
+    expect(validateRequest).toHaveBeenCalled();
+    expect(onProjectUpdated).toHaveBeenCalled();
+  });
+
+  it.each([
+    { label: 'the route maximum', count: 3, maximum: 3 },
+    { label: 'the application maximum', count: 6, maximum: 6 },
+  ])('admits active Brief references at $label', async ({ count, maximum }) => {
+    const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
+    const harness = await createReferenceHarness(submit, {
+      catalog: async () => conditioningCatalog(maximum),
+    });
+    for (let index = 1; index <= count; index += 1) {
+      await importBriefReference(harness, index % 2 === 0 ? 'look' : 'cast', index);
+    }
+    const current = (await harness.store.getProject(harness.project.id))!;
 
     await expect(
       harness.manager.submitScenes({
-        projectId: withCast.id,
-        expectedRevision: withCast.revision,
+        projectId: current.id,
+        expectedRevision: current.revision,
         sceneIds: ['scene_1'],
         routes: [imageRoute],
         catalogVersion: 'catalog_1',
         outputRole: 'reference',
         referencePrompts: [{ sceneId: 'scene_1', prompt: 'A calm establishing plate' }],
       })
-    ).rejects.toMatchObject({ code: 'invalid_request' });
+    ).resolves.toMatchObject([{ outputRole: 'reference' }]);
 
-    expect(await harness.store.getProject(withCast.id)).toEqual(before);
-    expect(listGenerationRoutes).not.toHaveBeenCalled();
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    expect(submit.mock.calls[0]?.[0].conditioningImages).toHaveLength(count);
+    expect(submit.mock.calls[0]?.[0].conditioningImageLimit).toBe(maximum);
+  });
+
+  it('preserves canonical cast/look order and the exact managed bytes without consuming the scene reference', async () => {
+    const observedInputs: Array<{ assetId: string; sha256: string }> = [];
+    const submit = vi.fn(async (request) => {
+      for (const input of request.conditioningImages ?? []) {
+        const chunks: Buffer[] = [];
+        for await (const chunk of await input.openStream()) chunks.push(Buffer.from(chunk));
+        observedInputs.push({
+          assetId: input.assetId,
+          sha256: createHash('sha256').update(Buffer.concat(chunks)).digest('hex'),
+        });
+      }
+      return { kind: 'complete' as const, outputs: [] };
+    });
+    const harness = await createReferenceHarness(submit, {
+      catalog: async () => conditioningCatalog(6),
+    });
+    const look = await importBriefReference(harness, 'look', 1);
+    const castLater = await importBriefReference(harness, 'cast', 2);
+    const castLatest = await importBriefReference(harness, 'cast', 3);
+    const scenePath = path.join(harness.rootDir, 'scene-reference.png');
+    await writeFile(scenePath, Buffer.concat([png, Buffer.from([99])]));
+    const beforeSceneReference = (await harness.store.getProject(harness.project.id))!;
+    const sceneReference = await harness.mediaStore.importReferenceFromPath({
+      projectId: beforeSceneReference.id,
+      sceneId: 'scene_1',
+      sourcePath: scenePath,
+      expectedRevision: beforeSceneReference.revision,
+    });
+    const current = (await harness.store.getProject(harness.project.id))!;
+
+    await harness.manager.submitScenes({
+      projectId: current.id,
+      expectedRevision: current.revision,
+      sceneIds: ['scene_1'],
+      routes: [imageRoute],
+      catalogVersion: 'catalog_1',
+      outputRole: 'reference',
+      referencePrompts: [{ sceneId: 'scene_1', prompt: 'A calm establishing plate' }],
+    });
+
+    await waitFor(() => expect(observedInputs).toHaveLength(3));
+    expect(observedInputs).toEqual(
+      [castLater, castLatest, look].map((asset) => ({ assetId: asset.id, sha256: asset.sha256 }))
+    );
+    expect(observedInputs.map(({ assetId }) => assetId).includes(sceneReference.id)).toBe(false);
+    expect(submit.mock.calls[0]?.[0]).not.toHaveProperty('firstFrame');
+  });
+
+  it.each([
+    { label: 'a zero-capacity route', maximum: 0, currentSafety: 6, count: 1 },
+    { label: 'route maximum plus one', maximum: 2, currentSafety: 6, count: 3 },
+    { label: 'a frozen route maximum above current safety', maximum: 6, currentSafety: 2, count: 1 },
+  ])(
+    'rejects $label before persistence, notification, or provider submit',
+    async ({ maximum, currentSafety, count }) => {
+      const submit = vi.fn();
+      const onProjectUpdated = vi.fn();
+      const harness = await createReferenceHarness(
+        submit,
+        {
+          catalog: async () => conditioningCatalog(maximum),
+          onProjectUpdated,
+        },
+        currentSafety
+      );
+      for (let index = 1; index <= count; index += 1) await importBriefReference(harness, 'cast', index);
+      const before = (await harness.store.getProject(harness.project.id))!;
+      onProjectUpdated.mockClear();
+
+      await expect(
+        harness.manager.submitScenes({
+          projectId: before.id,
+          expectedRevision: before.revision,
+          sceneIds: ['scene_1'],
+          routes: [imageRoute],
+          catalogVersion: 'catalog_1',
+          outputRole: 'reference',
+          referencePrompts: [{ sceneId: 'scene_1', prompt: 'A calm establishing plate' }],
+        })
+      ).rejects.toMatchObject({ code: 'invalid_route' });
+
+      expect(await harness.store.getProject(before.id)).toEqual(before);
+      expect(onProjectUpdated).not.toHaveBeenCalled();
+      expect(submit).not.toHaveBeenCalled();
+    }
+  );
+
+  it('rejects aggregate conditioning bytes above 30 MiB before persistence or provider submit', async () => {
+    const submit = vi.fn();
+    const onProjectUpdated = vi.fn();
+    const harness = await createReferenceHarness(submit, {
+      catalog: async () => conditioningCatalog(6),
+      onProjectUpdated,
+      decorateMediaStore: (mediaStore) => ({
+        ...mediaStore,
+        resolveProviderInput: async (projectId, assetId) => ({
+          ...(await mediaStore.resolveProviderInput(projectId, assetId)),
+          byteSize: 30 * 1024 * 1024 + 1,
+        }),
+      }),
+    });
+    await importBriefReference(harness, 'cast', 1);
+    const before = (await harness.store.getProject(harness.project.id))!;
+    onProjectUpdated.mockClear();
+
+    await expect(
+      harness.manager.submitScenes({
+        projectId: before.id,
+        expectedRevision: before.revision,
+        sceneIds: ['scene_1'],
+        routes: [imageRoute],
+        catalogVersion: 'catalog_1',
+        outputRole: 'reference',
+        referencePrompts: [{ sceneId: 'scene_1', prompt: 'A calm establishing plate' }],
+      })
+    ).rejects.toMatchObject({ code: 'invalid_route' });
+
+    expect(await harness.store.getProject(before.id)).toEqual(before);
     expect(onProjectUpdated).not.toHaveBeenCalled();
-    expect(validateRequest).not.toHaveBeenCalled();
     expect(submit).not.toHaveBeenCalled();
   });
 
@@ -1983,6 +2166,65 @@ describe('StudioJobManager reference output routing', () => {
     expect(submit).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      label: 'missing',
+      mutate: (project: StudioProject, importedId: string) => {
+        const imported = project.assets[importedId]!;
+        delete project.assets[importedId];
+        project.assets.missing_reference = { ...imported, id: 'missing_reference' };
+      },
+    },
+    {
+      label: 'foreign',
+      mutate: (project: StudioProject, importedId: string) => {
+        project.assets[importedId]!.projectId = 'foreign_project';
+      },
+    },
+    {
+      label: 'scene-owned',
+      mutate: (project: StudioProject, importedId: string) => {
+        project.assets[importedId]!.sceneId = 'scene_1';
+      },
+    },
+    {
+      label: 'non-image',
+      mutate: (project: StudioProject, importedId: string) => {
+        project.assets[importedId]!.mediaKind = 'video';
+        project.assets[importedId]!.mimeType = 'video/mp4';
+      },
+    },
+  ])('rejects a $label canonical conditioning input with zero observable mutation', async ({ mutate }) => {
+    const submit = vi.fn();
+    const onProjectUpdated = vi.fn();
+    const harness = await createReferenceHarness(submit, {
+      catalog: async () => conditioningCatalog(6),
+      onProjectUpdated,
+    });
+    const imported = await importBriefReference(harness, 'cast', 1);
+    const stored = (await harness.store.getProject(harness.project.id))!;
+    const forged = structuredClone(stored);
+    mutate(forged, imported.id);
+    vi.spyOn(harness.store, 'getProject').mockResolvedValueOnce(forged);
+    onProjectUpdated.mockClear();
+
+    await expect(
+      harness.manager.submitScenes({
+        projectId: forged.id,
+        expectedRevision: forged.revision,
+        sceneIds: ['scene_1'],
+        routes: [imageRoute],
+        catalogVersion: 'catalog_1',
+        outputRole: 'reference',
+        referencePrompts: [{ sceneId: 'scene_1', prompt: 'A calm establishing plate' }],
+      })
+    ).rejects.toMatchObject({ code: 'invalid_request' });
+
+    expect(await harness.store.getProject(stored.id)).toEqual(stored);
+    expect(onProjectUpdated).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+  });
+
   it('a reference job on a video scene resolves an image route', async () => {
     const submit = vi.fn(async () => ({ kind: 'complete', outputs: [] }));
     const harness = await createReferenceHarness(submit);
@@ -2001,8 +2243,10 @@ describe('StudioJobManager reference output routing', () => {
     await waitFor(() => expect(submit).toHaveBeenCalledOnce());
     expect(submit.mock.calls[0]?.[0]).toMatchObject({
       mediaKind: 'image',
-      prompt: 'A calm establishing plate',
+      prompt: buildFirstFramePrompt('A calm establishing plate', '16:9'),
       durationSeconds: 8,
+      conditioningImages: [],
+      conditioningImageLimit: 0,
     });
     await waitFor(async () =>
       expect((await harness.store.getProject(harness.project.id))?.jobs.job_1).toMatchObject({
@@ -2043,8 +2287,8 @@ describe('StudioJobManager reference output routing', () => {
 
     await waitFor(() => expect(submit).toHaveBeenCalledTimes(2));
     expect(submit.mock.calls.map((call) => (call[0] as { prompt: string }).prompt)).toEqual([
-      'A calm establishing plate',
-      'A rain-slicked alley at dusk',
+      buildFirstFramePrompt('A calm establishing plate', '16:9'),
+      buildFirstFramePrompt('A rain-slicked alley at dusk', '16:9'),
     ]);
   });
 
@@ -2154,7 +2398,7 @@ describe('StudioJobManager reference output routing', () => {
     ).resolves.toMatchObject([{ id: 'job_1', outputRole: 'reference' }]);
 
     await waitFor(() => expect(submit).toHaveBeenCalledOnce());
-    expect(submit.mock.calls[0]?.[0].prompt).toBe('a'.repeat(4090));
+    expect(submit.mock.calls[0]?.[0].prompt).toBe(buildFirstFramePrompt('a'.repeat(4090), '16:9'));
     await waitFor(async () =>
       expect((await harness.store.getProject(harness.project.id))?.jobs.job_1).toMatchObject({
         status: 'failed',
@@ -2255,6 +2499,201 @@ describe('StudioJobManager reference output routing', () => {
 
     expect(submit).not.toHaveBeenCalled();
     expect(Object.keys((await harness.store.getProject(harness.project.id))!.jobs)).toEqual(['job_reference']);
+  });
+
+  it('uses the durable reviewed snapshot when a reference job completes after restart and project drift', async () => {
+    const firstPoll = deferred<ProviderJobSnapshot>();
+    const submit = vi.fn(async () => ({ kind: 'remote' as const, providerJobId: 'remote_reference' }));
+    const firstAdapter: GenerationProviderAdapter = {
+      ...imageAdapterWithSubmit(submit),
+      poll: vi.fn(async (_providerJobId, _provider, signal) => {
+        rejectDeferredOnAbort(firstPoll, signal);
+        return firstPoll.promise;
+      }),
+    };
+    const harness = await createHarness(firstAdapter, {
+      scenes: [videoScene()],
+      routes: [imageRoute, videoRoute],
+      provider: referenceProvider,
+      catalog: async () => conditioningCatalog(6),
+      sleep: async () => undefined,
+    });
+    const originalCast = await importBriefReference(harness, 'cast', 1);
+    const admitted = (await harness.store.getProject(harness.project.id))!;
+
+    await harness.manager.submitScenes({
+      projectId: admitted.id,
+      expectedRevision: admitted.revision,
+      sceneIds: ['scene_1'],
+      routes: [imageRoute],
+      catalogVersion: 'catalog_1',
+      outputRole: 'reference',
+      referencePrompts: [{ sceneId: 'scene_1', prompt: '  Reviewed one-off plate  ' }],
+    });
+    await waitFor(() => expect(firstAdapter.poll).toHaveBeenCalled());
+    const beforeRestart = (await harness.store.getProject(admitted.id))!;
+    expect(beforeRestart.jobs.job_1.referenceInputSnapshot).toEqual({
+      visualPrompt: 'Reviewed one-off plate',
+      referenceAssetIds: [originalCast.id],
+      aspectRatio: '16:9',
+      resolution: '720p',
+    });
+
+    await harness.manager.dispose();
+    const newLook = await importBriefReference(harness, 'look', 2);
+    await harness.store.updateProject(admitted.id, (project) => {
+      const next = structuredClone(project);
+      delete next.assets[originalCast.id].briefReferenceRole;
+      delete next.assets[originalCast.id].briefReferenceLabel;
+      next.scenes.scene_1.visualPrompt = 'Changed scene prompt';
+      next.aspectRatio = '1:1';
+      next.resolution = '1080p';
+      return next;
+    });
+    const outputPath = path.join(harness.rootDir, 'recovered-reference.png');
+    await writeFile(outputPath, png);
+    const recoveredAdapter: GenerationProviderAdapter = {
+      ...imageAdapterWithSubmit(vi.fn()),
+      poll: vi.fn(async () => ({
+        status: 'succeeded' as const,
+        outputs: [
+          {
+            mediaKind: 'image' as const,
+            role: 'primary' as const,
+            source: { kind: 'file' as const, path: outputPath },
+            mimeType: 'image/png' as const,
+          },
+        ],
+      })),
+    };
+    const videoSubmit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
+    const recoveredVideoAdapter = controllableAdapter('weprompt-media-gateway-v1', { submit: videoSubmit });
+    harness.manager = createStudioJobManager({
+      store: harness.store,
+      mediaStore: harness.mediaStore,
+      providerResolver: {
+        listConnectionCandidates: async () => [],
+        listGenerationRoutes: async () => conditioningCatalog(6),
+        isGenerationRouteAvailable: async () => true,
+      },
+      adapters: new Map([
+        [recoveredAdapter.id, recoveredAdapter],
+        [recoveredVideoAdapter.id, recoveredVideoAdapter],
+      ]),
+      listProviders: async () => [referenceProvider],
+      sleep: async () => undefined,
+    });
+
+    await harness.manager.resumePendingJobs();
+    await waitFor(async () =>
+      expect((await harness.store.getProject(admitted.id))?.jobs.job_1.status).toBe('succeeded')
+    );
+    const completed = (await harness.store.getProject(admitted.id))!;
+    const plate = completed.assets[completed.jobs.job_1.outputAssetIds[0]!]!;
+    expect(plate).toMatchObject({
+      sourceVisualPrompt: 'Reviewed one-off plate',
+      sourceReferenceAssetIds: [originalCast.id],
+      sourceAspectRatio: '16:9',
+      sourceResolution: '720p',
+    });
+    expect(plate.sourceReferenceAssetIds).not.toContain(newLook.id);
+
+    const readyForClip = await harness.store.updateProject(completed.id, (project) => ({
+      ...project,
+      aspectRatio: '16:9',
+      resolution: '720p',
+    }));
+    await harness.manager.submitScenes({
+      projectId: readyForClip.id,
+      expectedRevision: readyForClip.revision,
+      sceneIds: ['scene_1'],
+      routes: [videoRoute],
+      catalogVersion: 'catalog_1',
+    });
+    await waitFor(() => expect(videoSubmit).toHaveBeenCalledOnce());
+    expect(videoSubmit.mock.calls[0]?.[0]).toMatchObject({ firstFrame: { assetId: plate.id } });
+    expect(videoSubmit.mock.calls[0]?.[0]).not.toHaveProperty('conditioningImages');
+    expect(videoSubmit.mock.calls[0]?.[0]).not.toHaveProperty('conditioningImageLimit');
+  });
+
+  it('retries a failed reference download against the durable snapshot without leaving a partial plate', async () => {
+    const validOutputPath = path.join(os.tmpdir(), `studio-reference-retry-${Date.now()}.png`);
+    await writeFile(validOutputPath, png);
+    let pollAttempt = 0;
+    const submit = vi.fn(async () => ({ kind: 'remote' as const, providerJobId: 'remote_download' }));
+    const adapter: GenerationProviderAdapter = {
+      ...imageAdapterWithSubmit(submit),
+      poll: vi.fn(async () => {
+        pollAttempt += 1;
+        return {
+          status: 'succeeded' as const,
+          outputs: [
+            {
+              mediaKind: 'image' as const,
+              role: 'primary' as const,
+              source: {
+                kind: 'file' as const,
+                path: pollAttempt === 1 ? '/definitely/missing/reference-retry.png' : validOutputPath,
+              },
+              mimeType: 'image/png' as const,
+            },
+          ],
+        };
+      }),
+    };
+    const harness = await createHarness(adapter, {
+      scenes: [videoScene()],
+      routes: [imageRoute, videoRoute],
+      provider: referenceProvider,
+      catalog: async () => conditioningCatalog(6),
+      sleep: async () => undefined,
+    });
+    const originalCast = await importBriefReference(harness, 'cast', 1);
+    const admitted = (await harness.store.getProject(harness.project.id))!;
+
+    await harness.manager.submitScenes({
+      projectId: admitted.id,
+      expectedRevision: admitted.revision,
+      sceneIds: ['scene_1'],
+      routes: [imageRoute],
+      catalogVersion: 'catalog_1',
+      outputRole: 'reference',
+      referencePrompts: [{ sceneId: 'scene_1', prompt: 'Reviewed retry plate' }],
+    });
+    await waitFor(async () =>
+      expect((await harness.store.getProject(admitted.id))?.jobs.job_1).toMatchObject({
+        status: 'failed',
+        error: { code: 'download_failed' },
+      })
+    );
+    const afterFailure = (await harness.store.getProject(admitted.id))!;
+    expect(afterFailure.jobs.job_1.outputAssetIds).toEqual([]);
+    expect(
+      Object.values(afterFailure.assets).filter((asset) => asset.managedAsset.collection === 'references')
+    ).toEqual([]);
+    const drifted = await harness.store.updateProject(admitted.id, (project) => {
+      const next = structuredClone(project);
+      next.scenes.scene_1.visualPrompt = 'Changed after failed download';
+      next.aspectRatio = '1:1';
+      next.resolution = '1080p';
+      return next;
+    });
+
+    await harness.manager.retryDownload({
+      projectId: drifted.id,
+      jobId: 'job_1',
+      expectedRevision: drifted.revision,
+    });
+
+    const completed = (await harness.store.getProject(admitted.id))!;
+    const plate = completed.assets[completed.jobs.job_1.outputAssetIds[0]!]!;
+    expect(plate).toMatchObject({
+      sourceVisualPrompt: 'Reviewed retry plate',
+      sourceReferenceAssetIds: [originalCast.id],
+      sourceAspectRatio: '16:9',
+      sourceResolution: '720p',
+    });
+    await rm(validOutputPath, { force: true });
   });
 });
 
@@ -6142,6 +6581,53 @@ describe('StudioJobManager pinned rule gate', () => {
 
     expect(job).toMatchObject({ id: 'job_1', sceneId: 'scene_1', outputRole: 'reference' });
     await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+  });
+
+  it('evaluates only the authored subject before adding conditioning-role instructions', async () => {
+    const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
+    const harness = await createHarness(adapterWithSubmit(submit), {
+      catalog: async () => {
+        const built = catalog();
+        built.routes[0]!.constraints.maxConditioningImages = 6;
+        return built;
+      },
+    });
+    const sourcePath = path.join(harness.rootDir, 'Hero headshot.png');
+    await writeFile(sourcePath, png);
+    await harness.mediaStore.importReferenceFromPath({
+      projectId: harness.project.id,
+      briefReferenceRole: 'cast',
+      sourcePath,
+      expectedRevision: harness.project.revision,
+    });
+    const current = (await harness.store.getProject(harness.project.id))!;
+    const guarded = await harness.store.updateProject(current.id, (project) => ({
+      ...project,
+      rules: [
+        {
+          id: 'rule_instruction',
+          scope: 'project',
+          text: 'No conditioning instructions in authored content.',
+          predicate: { kind: 'forbidden_terms', terms: ['conditioning image position'] },
+          createdAt: '2026-08-13T00:00:00.000Z',
+        },
+      ],
+    }));
+
+    await harness.manager.submitScenes({
+      projectId: guarded.id,
+      expectedRevision: guarded.revision,
+      sceneIds: ['scene_1'],
+      routes: [route],
+      catalogVersion: 'catalog_1',
+      outputRole: 'reference',
+      referencePrompts: [{ sceneId: 'scene_1', prompt: buildFirstFramePrompt('A quiet hero', '16:9') }],
+    });
+
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    expect(submit.mock.calls[0]?.[0].prompt).toContain('Conditioning image position 1 is a cast reference.');
+    expect(submit.mock.calls[0]?.[0].prompt).not.toContain('Hero headshot');
+    expect(submit.mock.calls[0]?.[0].prompt).not.toContain(harness.rootDir);
   });
 
   it('refuses a visual prompt when only the second pinned rule matches', async () => {

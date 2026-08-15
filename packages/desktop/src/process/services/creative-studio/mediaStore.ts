@@ -1586,7 +1586,16 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       if (usedBytes + asset.byteSize > limits.projectMaxBytes) {
         throw new CreativeStudioMediaError('invalid_media');
       }
-      asset.sourceVisualPrompt = scene.visualPrompt.trim();
+      if (role === 'reference' && job.referenceInputSnapshot !== undefined) {
+        asset.sourceVisualPrompt = job.referenceInputSnapshot.visualPrompt;
+        asset.sourceReferenceAssetIds = [...job.referenceInputSnapshot.referenceAssetIds];
+        asset.sourceAspectRatio = job.referenceInputSnapshot.aspectRatio;
+        asset.sourceResolution = job.referenceInputSnapshot.resolution;
+      } else {
+        // Legacy reference jobs predate the durable request snapshot. Preserve their historical
+        // prompt-only provenance without inventing complete frame authority from current state.
+        asset.sourceVisualPrompt = scene.visualPrompt.trim();
+      }
       current.assets[asset.id] = asset;
       // Every scene-owned asset must be reverse-linked in assetIds (store.ts:993) —
       // exactly as imported references and posters already are — regardless of role.

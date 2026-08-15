@@ -2062,13 +2062,87 @@ describe('creative studio project store', () => {
 
       const persisted = await store.updateProject(project.id, (current) => {
         const next = addScene(current, 'scene_1');
-        next.jobs.job_1 = makeJob(next, 'job_1', 'scene_1', { outputRole: 'reference' });
+        next.jobs.job_1 = makeJob(next, 'job_1', 'scene_1', {
+          outputRole: 'reference',
+          referenceInputSnapshot: {
+            visualPrompt: 'Reviewed one-off plate',
+            referenceAssetIds: [],
+            aspectRatio: '16:9',
+            resolution: '720p',
+          },
+        });
         next.scenes.scene_1.jobIds = ['job_1'];
         return next;
       });
 
       expect(persisted.jobs.job_1.outputRole).toBe('reference');
+      expect(persisted.jobs.job_1.referenceInputSnapshot).toEqual({
+        visualPrompt: 'Reviewed one-off plate',
+        referenceAssetIds: [],
+        aspectRatio: '16:9',
+        resolution: '720p',
+      });
       expect(await store.getProject(project.id)).toEqual(persisted);
+    });
+
+    it('keeps legacy reference jobs without a reference input snapshot valid and absent', async () => {
+      const project = await store.createProject(makeInput());
+
+      const persisted = await store.updateProject(project.id, (current) => {
+        const next = addScene(current, 'scene_1');
+        next.jobs.job_1 = makeJob(next, 'job_1', 'scene_1', { outputRole: 'reference' });
+        next.scenes.scene_1.jobIds = ['job_1'];
+        return next;
+      });
+
+      expect(persisted.jobs.job_1).not.toHaveProperty('referenceInputSnapshot');
+    });
+
+    it.each([
+      {
+        label: 'a take output role',
+        snapshot: {
+          visualPrompt: 'Reviewed plate',
+          referenceAssetIds: [],
+          aspectRatio: '16:9',
+          resolution: '720p',
+        },
+        outputRole: undefined,
+      },
+      {
+        label: 'an unsafe reference id',
+        snapshot: {
+          visualPrompt: 'Reviewed plate',
+          referenceAssetIds: ['../escape'],
+          aspectRatio: '16:9',
+          resolution: '720p',
+        },
+        outputRole: 'reference' as const,
+      },
+      {
+        label: 'an unknown aspect ratio',
+        snapshot: {
+          visualPrompt: 'Reviewed plate',
+          referenceAssetIds: [],
+          aspectRatio: '2:1',
+          resolution: '720p',
+        },
+        outputRole: 'reference' as const,
+      },
+    ])('rejects a reference input snapshot with $label', async ({ snapshot, outputRole }) => {
+      const project = await store.createProject(makeInput());
+
+      await expect(
+        store.updateProject(project.id, (current) => {
+          const next = addScene(current, 'scene_1');
+          next.jobs.job_1 = makeJob(next, 'job_1', 'scene_1', {
+            ...(outputRole === undefined ? {} : { outputRole }),
+            referenceInputSnapshot: snapshot as never,
+          });
+          next.scenes.scene_1.jobIds = ['job_1'];
+          return next;
+        })
+      ).rejects.toMatchObject({ code: 'invalid_payload' });
     });
 
     it('rejects a job carrying an unknown output role', async () => {

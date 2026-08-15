@@ -7,27 +7,28 @@
 import { promises as nodeFs } from 'node:fs';
 import { watch as watchFileSystem } from 'node:fs';
 import path from 'node:path';
-import type {
-  CreateStudioProjectInput,
-  StudioAsset,
-  StudioCancellationPolicy,
-  StudioConnectionBinding,
-  StudioCut,
-  StudioCutClip,
-  StudioCutFilter,
-  StudioJob,
-  StudioManagedAssetRef,
-  StudioOutputRole,
-  StudioProject,
-  StudioProjectSummary,
-  StudioProposal,
-  StudioProposalPayload,
-  StudioReferenceRequest,
-  StudioReferenceRequestAuthority,
-  StudioRecordProposalInput,
-  StudioProviderRef,
-  StudioScene,
-  StudioTextModelRef,
+import {
+  STUDIO_REFERENCE_PROMPT_MAX_LENGTH,
+  type CreateStudioProjectInput,
+  type StudioAsset,
+  type StudioCancellationPolicy,
+  type StudioConnectionBinding,
+  type StudioCut,
+  type StudioCutClip,
+  type StudioCutFilter,
+  type StudioJob,
+  type StudioManagedAssetRef,
+  type StudioOutputRole,
+  type StudioProject,
+  type StudioProjectSummary,
+  type StudioProposal,
+  type StudioProposalPayload,
+  type StudioReferenceRequest,
+  type StudioReferenceRequestAuthority,
+  type StudioRecordProposalInput,
+  type StudioProviderRef,
+  type StudioScene,
+  type StudioTextModelRef,
 } from '@/common/types/project/creativeStudioTypes';
 import { hasRuleToken, STUDIO_RULE_LIMITS, type StudioBriefRule } from '@/common/types/project/creativeStudioRules';
 import { isCanonicalStudioGeneratedTake } from '@/common/types/project/creativeStudioCanonicalTake';
@@ -84,6 +85,7 @@ const PROVIDER_REF_KEYS = new Set(['providerId', 'adapterId', 'model']);
 const ROUTING_KEYS = new Set(['storyboard', 'image', 'video']);
 const TEXT_MODEL_REF_KEYS = new Set(['providerId', 'model']);
 const JOB_ERROR_KEYS = new Set(['code', 'messageKey']);
+const REFERENCE_INPUT_SNAPSHOT_KEYS = new Set(['visualPrompt', 'referenceAssetIds', 'aspectRatio', 'resolution']);
 const SCENE_KEYS = new Set([
   'id',
   'title',
@@ -136,6 +138,7 @@ const JOB_KEYS = new Set([
   'remoteStartedAt',
   'cancellationPolicy',
   'outputRole',
+  'referenceInputSnapshot',
   'outputAssetIds',
   'error',
   'progress',
@@ -967,6 +970,22 @@ const validateJob = (jobId: string, projectId: string, sceneIds: Set<string>, va
       isString(value.error.code) &&
       JOB_ERROR_CODES.has(value.error.code) &&
       isNonEmptyString(value.error.messageKey));
+  const referenceInputSnapshotIsValid =
+    value.referenceInputSnapshot === undefined ||
+    (value.outputRole === 'reference' &&
+      isRecord(value.referenceInputSnapshot) &&
+      hasExactKeys(value.referenceInputSnapshot, REFERENCE_INPUT_SNAPSHOT_KEYS) &&
+      isNonEmptyString(value.referenceInputSnapshot.visualPrompt) &&
+      value.referenceInputSnapshot.visualPrompt === value.referenceInputSnapshot.visualPrompt.trim() &&
+      value.referenceInputSnapshot.visualPrompt.length <= STUDIO_REFERENCE_PROMPT_MAX_LENGTH &&
+      asArrayOfSafeIds(value.referenceInputSnapshot.referenceAssetIds) &&
+      value.referenceInputSnapshot.referenceAssetIds.length <= STUDIO_MAX_ACTIVE_BRIEF_REFERENCES &&
+      new Set(value.referenceInputSnapshot.referenceAssetIds).size ===
+        value.referenceInputSnapshot.referenceAssetIds.length &&
+      isString(value.referenceInputSnapshot.aspectRatio) &&
+      ASPECT_RATIOS.has(value.referenceInputSnapshot.aspectRatio) &&
+      isString(value.referenceInputSnapshot.resolution) &&
+      RESOLUTIONS.has(value.referenceInputSnapshot.resolution));
   return (
     Object.keys(value).every((key) => JOB_KEYS.has(key)) &&
     value.id === jobId &&
@@ -987,6 +1006,7 @@ const validateJob = (jobId: string, projectId: string, sceneIds: Set<string>, va
     CANCELLATION_POLICIES.has(value.cancellationPolicy as StudioCancellationPolicy) &&
     (value.outputRole === undefined ||
       (isString(value.outputRole) && JOB_OUTPUT_ROLES.has(value.outputRole as StudioOutputRole))) &&
+    referenceInputSnapshotIsValid &&
     asArrayOfSafeIds(value.outputAssetIds) &&
     new Set(value.outputAssetIds).size === value.outputAssetIds.length &&
     errorIsValid &&
@@ -1165,6 +1185,22 @@ const validateProject = (value: unknown): value is StudioProject => {
       })
   );
   if (!provenanceReferencesAreValid) return false;
+  const jobSnapshotReferencesAreValid = Object.values(typedJobs).every(
+    (job) =>
+      job.referenceInputSnapshot === undefined ||
+      job.referenceInputSnapshot.referenceAssetIds.every((sourceAssetId) => {
+        const sourceAsset = typedAssets[sourceAssetId];
+        return (
+          sourceAsset?.id === sourceAssetId &&
+          sourceAsset.projectId === projectId &&
+          sourceAsset.sceneId === null &&
+          sourceAsset.mediaKind === 'image' &&
+          isStudioReferenceImageMimeType(sourceAsset.mimeType) &&
+          sourceAsset.managedAsset.collection === 'imports'
+        );
+      })
+  );
+  if (!jobSnapshotReferencesAreValid) return false;
   if (cutsPresent) {
     if (!isRecord(value.cuts)) return false;
     const cuts = value.cuts;

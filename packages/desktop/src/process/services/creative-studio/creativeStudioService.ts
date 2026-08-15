@@ -690,6 +690,8 @@ const toRendererMediaChoice = (
   model: provider.model,
 });
 
+// Keep this projection field-by-field: referenceInputSnapshot is durable main authority and must
+// never follow outputRole into the renderer DTO.
 const toRendererJob = (job: StudioJob): StudioRendererJob => ({
   id: job.id,
   projectId: job.projectId,
