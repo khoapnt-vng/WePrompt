@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "registerSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "totalRunCount": 1,
+  "attempts": [
+    {
+      "attempt": 1,
+      "kind": "full-suite",
+      "command": ["bun", "run", "test"],
+      "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "runner": {
+        "os": "darwin",
+        "architecture": "arm64",
+        "name": "fixture-macos-arm64"
+      },
+      "tools": {
+        "bun": "1.3.14",
+        "node": "24.15.0"
+      },
+      "startedAt": "2026-08-15T10:00:00.000Z",
+      "endedAt": "2026-08-15T10:02:00.000Z",
+      "exitCode": 0,
+      "result": "green",
+      "signal": null,
+      "load": {
+        "oneMinute": 2.5,
+        "fiveMinute": 2.1,
+        "fifteenMinute": 2.0
+      },
+      "rawLog": {
+        "path": "artifacts/sprint3-internal/vitest/fixture.log",
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "cleanLog": {
+        "path": "artifacts/sprint3-internal/vitest/fixture.clean.log",
+        "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "failures": []
+    }
+  ]
+}

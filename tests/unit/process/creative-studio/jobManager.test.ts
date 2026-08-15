@@ -44,11 +44,6 @@ const mp4 = Buffer.from('000000186674797069736f6d00000000', 'hex');
 const SUBMISSION_DEADLINE_MS = 5 * 60_000;
 const REMOTE_POLL_ATTEMPT_TIMEOUT_MS = 60_000;
 const REMOTE_POLL_DEADLINE_MS = 30 * 60_000;
-// BUG-027: CI load can exhaust these two tests' fixed filesystem poll budget.
-// Tracking: search BUG-027 in https://github.com/khoapnt-vng/WePrompt/blob/sprint3/TASKS.md
-// (TASKS.md records bugs as list items, not headings, so a generated heading
-// anchor does not resolve.)
-const BUG_027_CI_RETRY = process.env.CI ? 2 : 0;
 
 const provider: IProvider = {
   id: 'provider_1',
@@ -559,82 +554,78 @@ describe('StudioJobManager durable submission', () => {
     );
   });
 
-  it(
-    'persists the remote identity before polling and uses the exact capped backoff schedule',
-    { retry: BUG_027_CI_RETRY },
-    async () => {
-      const observedRemoteIdentity: Array<Pick<StudioJob, 'providerJobId' | 'remoteStartedAt' | 'status'>> = [];
-      const delays: number[] = [];
-      let outputPath = '';
-      let harness!: Harness;
-      let pollCount = 0;
-      const adapter: GenerationProviderAdapter = {
-        id: 'weprompt-image-v1',
-        validateConnection: async () => ({ ok: true }),
-        validateRequest: (request) => ({
-          ok: true,
-          normalized: {
-            aspectRatio: request.aspectRatio,
-            resolution: request.resolution,
-            durationSeconds: request.durationSeconds,
-          },
-        }),
-        submit: async () => ({ kind: 'remote', providerJobId: 'remote_1' }),
-        poll: async () => {
-          const current = (await harness.store.getProject(harness.project.id))!.jobs.job_1;
-          observedRemoteIdentity.push({
-            providerJobId: current.providerJobId,
-            remoteStartedAt: current.remoteStartedAt,
-            status: current.status,
-          });
-          pollCount += 1;
-          if (pollCount < 5) return { status: 'queued' };
-          return {
-            status: 'succeeded',
-            outputs: [
-              {
-                mediaKind: 'image',
-                role: 'primary',
-                source: { kind: 'file', path: outputPath },
-                mimeType: 'image/png',
-              },
-            ],
-          };
+  it('persists the remote identity before polling and uses the exact capped backoff schedule', async () => {
+    const observedRemoteIdentity: Array<Pick<StudioJob, 'providerJobId' | 'remoteStartedAt' | 'status'>> = [];
+    const delays: number[] = [];
+    let outputPath = '';
+    let harness!: Harness;
+    let pollCount = 0;
+    const adapter: GenerationProviderAdapter = {
+      id: 'weprompt-image-v1',
+      validateConnection: async () => ({ ok: true }),
+      validateRequest: (request) => ({
+        ok: true,
+        normalized: {
+          aspectRatio: request.aspectRatio,
+          resolution: request.resolution,
+          durationSeconds: request.durationSeconds,
         },
-      };
-      harness = await createHarness(adapter, {
-        sleep: async (delayMs) => {
-          delays.push(delayMs);
-        },
-      });
-      outputPath = path.join(harness.rootDir, 'generated.png');
-      await writeFile(outputPath, png);
+      }),
+      submit: async () => ({ kind: 'remote', providerJobId: 'remote_1' }),
+      poll: async () => {
+        const current = (await harness.store.getProject(harness.project.id))!.jobs.job_1;
+        observedRemoteIdentity.push({
+          providerJobId: current.providerJobId,
+          remoteStartedAt: current.remoteStartedAt,
+          status: current.status,
+        });
+        pollCount += 1;
+        if (pollCount < 5) return { status: 'queued' };
+        return {
+          status: 'succeeded',
+          outputs: [
+            {
+              mediaKind: 'image',
+              role: 'primary',
+              source: { kind: 'file', path: outputPath },
+              mimeType: 'image/png',
+            },
+          ],
+        };
+      },
+    };
+    harness = await createHarness(adapter, {
+      sleep: async (delayMs) => {
+        delays.push(delayMs);
+      },
+    });
+    outputPath = path.join(harness.rootDir, 'generated.png');
+    await writeFile(outputPath, png);
 
-      const [submitted] = await harness.manager.submitScenes({
-        projectId: harness.project.id,
-        expectedRevision: harness.project.revision,
-        sceneIds: ['scene_1'],
-        routes: [route],
-        catalogVersion: 'catalog_1',
-      });
+    const [submitted] = await harness.manager.submitScenes({
+      projectId: harness.project.id,
+      expectedRevision: harness.project.revision,
+      sceneIds: ['scene_1'],
+      routes: [route],
+      catalogVersion: 'catalog_1',
+    });
 
-      expect(submitted?.remoteStartedAt).toBeNull();
+    expect(submitted?.remoteStartedAt).toBeNull();
 
-      await waitFor(async () =>
-        expect((await harness.store.getProject(harness.project.id))?.jobs.job_1.status).toBe('succeeded')
-      );
-      expect(observedRemoteIdentity).toHaveLength(5);
-      expect(observedRemoteIdentity).toEqual(
-        observedRemoteIdentity.map(() => ({
-          providerJobId: 'remote_1',
-          remoteStartedAt: observedRemoteIdentity[0]!.remoteStartedAt,
-          status: expect.stringMatching(/queued_remote|running/),
-        }))
-      );
-      expect(observedRemoteIdentity[0]!.remoteStartedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
-      expect(delays).toEqual([2_000, 4_000, 8_000, 15_000, 15_000]);
-    }
-  );
+    await waitFor(async () =>
+      expect((await harness.store.getProject(harness.project.id))?.jobs.job_1.status).toBe('succeeded')
+    );
+    expect(observedRemoteIdentity).toHaveLength(5);
+    expect(observedRemoteIdentity).toEqual(
+      observedRemoteIdentity.map(() => ({
+        providerJobId: 'remote_1',
+        remoteStartedAt: observedRemoteIdentity[0]!.remoteStartedAt,
+        status: expect.stringMatching(/queued_remote|running/),
+      }))
+    );
+    expect(observedRemoteIdentity[0]!.remoteStartedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(delays).toEqual([2_000, 4_000, 8_000, 15_000, 15_000]);
+  });
 
   it('requires attention when a remote identity cannot be persisted after provider acceptance', async () => {
     const submission = deferred<ProviderSubmitResult>();
@@ -1108,65 +1099,61 @@ describe('StudioJobManager remote polling deadlines', () => {
     });
   });
 
-  it(
-    'stops repeated running snapshots at the thirty-minute lifecycle deadline',
-    { retry: BUG_027_CI_RETRY },
-    async () => {
-      const startedAtMs = Date.parse('2026-08-04T00:00:00.000Z');
-      const deadlineReached = deferred<void>();
-      let epochMs = startedAtMs;
-      let pollCount = 0;
-      let harness!: Harness;
-      const poll = vi.fn(async (): Promise<ProviderJobSnapshot> => {
-        pollCount += 1;
-        return pollCount < 130 ? { status: 'running' } : { status: 'failed', error: { code: 'unknown' } };
-      });
-      const adapter: GenerationProviderAdapter = {
-        id: 'weprompt-image-v1',
-        validateConnection: async () => ({ ok: true }),
-        validateRequest: (request) => ({
-          ok: true,
-          normalized: {
-            aspectRatio: request.aspectRatio,
-            resolution: request.resolution,
-            durationSeconds: request.durationSeconds,
-          },
-        }),
-        submit: async () => ({ kind: 'remote', providerJobId: 'remote_running' }),
-        poll,
-      };
-      harness = await createHarness(adapter, {
-        sleep: async (delayMs) => void (epochMs += delayMs),
-        now: () => new Date(epochMs).toISOString(),
-        nowEpochMs: () => epochMs,
-        onProjectUpdated: (projectId) => {
-          if (poll.mock.calls.length < 122) return;
-          void harness.store.getProject(projectId).then((project) => {
-            const job = project?.jobs.job_1;
-            if (job?.status === 'needs_attention' && job.error?.code === 'poll_deadline') deadlineReached.resolve();
-          }, deadlineReached.reject);
+  it('stops repeated running snapshots at the thirty-minute lifecycle deadline', async () => {
+    const startedAtMs = Date.parse('2026-08-04T00:00:00.000Z');
+    const deadlineReached = deferred<void>();
+    let epochMs = startedAtMs;
+    let pollCount = 0;
+    let harness!: Harness;
+    const poll = vi.fn(async (): Promise<ProviderJobSnapshot> => {
+      pollCount += 1;
+      return pollCount < 130 ? { status: 'running' } : { status: 'failed', error: { code: 'unknown' } };
+    });
+    const adapter: GenerationProviderAdapter = {
+      id: 'weprompt-image-v1',
+      validateConnection: async () => ({ ok: true }),
+      validateRequest: (request) => ({
+        ok: true,
+        normalized: {
+          aspectRatio: request.aspectRatio,
+          resolution: request.resolution,
+          durationSeconds: request.durationSeconds,
         },
-      });
+      }),
+      submit: async () => ({ kind: 'remote', providerJobId: 'remote_running' }),
+      poll,
+    };
+    harness = await createHarness(adapter, {
+      sleep: async (delayMs) => void (epochMs += delayMs),
+      now: () => new Date(epochMs).toISOString(),
+      nowEpochMs: () => epochMs,
+      onProjectUpdated: (projectId) => {
+        if (poll.mock.calls.length < 122) return;
+        void harness.store.getProject(projectId).then((project) => {
+          const job = project?.jobs.job_1;
+          if (job?.status === 'needs_attention' && job.error?.code === 'poll_deadline') deadlineReached.resolve();
+        }, deadlineReached.reject);
+      },
+    });
 
-      await harness.manager.submitScenes({
-        projectId: harness.project.id,
-        expectedRevision: harness.project.revision,
-        sceneIds: ['scene_1'],
-        routes: [route],
-        catalogVersion: 'catalog_1',
-      });
+    await harness.manager.submitScenes({
+      projectId: harness.project.id,
+      expectedRevision: harness.project.revision,
+      sceneIds: ['scene_1'],
+      routes: [route],
+      catalogVersion: 'catalog_1',
+    });
 
-      await deadlineReached.promise;
-      await waitFor(async () =>
-        expect((await harness.store.getProject(harness.project.id))?.jobs.job_1).toMatchObject({
-          status: 'needs_attention',
-          remoteStartedAt: '2026-08-04T00:00:00.000Z',
-          error: { code: 'poll_deadline' },
-        })
-      );
-      expect(poll).toHaveBeenCalledTimes(122);
-    }
-  );
+    await deadlineReached.promise;
+    await waitFor(async () =>
+      expect((await harness.store.getProject(harness.project.id))?.jobs.job_1).toMatchObject({
+        status: 'needs_attention',
+        remoteStartedAt: '2026-08-04T00:00:00.000Z',
+        error: { code: 'poll_deadline' },
+      })
+    );
+    expect(poll).toHaveBeenCalledTimes(122);
+  });
 
   it('clamps pre-poll backoff to the remaining lifecycle and does not dispatch at the deadline', async () => {
     const startedAtMs = Date.parse('2026-08-04T00:00:00.000Z');

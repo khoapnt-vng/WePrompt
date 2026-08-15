@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "signatures": [
+    {
+      "id": "BUG-027-CAPPED-BACKOFF",
+      "issue": "BUG-027",
+      "matchable": true,
+      "project": "node",
+      "file": "tests/unit/process/creative-studio/jobManager.test.ts",
+      "testName": "persists the remote identity before polling and uses the exact capped backoff schedule",
+      "outputPatterns": ["AssertionError"],
+      "diagnosticCommand": [
+        "bunx",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "tests/unit/process/creative-studio/jobManager.test.ts",
+        "-t",
+        "persists the remote identity before polling and uses the exact capped backoff schedule"
+      ]
+    },
+    {
+      "id": "BUG-027-LIFECYCLE-DEADLINE",
+      "issue": "BUG-027",
+      "matchable": true,
+      "project": "node",
+      "file": "tests/unit/process/creative-studio/jobManager.test.ts",
+      "testName": "stops repeated running snapshots at the thirty-minute lifecycle deadline",
+      "outputPatterns": ["AssertionError"],
+      "diagnosticCommand": [
+        "bunx",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "tests/unit/process/creative-studio/jobManager.test.ts",
+        "-t",
+        "stops repeated running snapshots at the thirty-minute lifecycle deadline"
+      ]
+    },
+    {
+      "id": "BUG-030-TEAM-SIDER-TEARDOWN",
+      "issue": "BUG-030",
+      "matchable": true,
+      "project": "dom",
+      "file": "tests/unit/renderer/team/TeamSiderSection.dom.test.tsx",
+      "testName": null,
+      "outputPatterns": ["EnvironmentTeardownError"],
+      "requiresZeroFailedTests": true,
+      "diagnosticCommand": [
+        "bunx",
+        "vitest",
+        "run",
+        "--project",
+        "dom",
+        "tests/unit/renderer/team/TeamSiderSection.dom.test.tsx"
+      ]
+    },
+    {
+      "id": "BUG-043-READINESS-HARDLINK-DRIFT",
+      "issue": "BUG-043",
+      "matchable": true,
+      "project": "node",
+      "file": "tests/unit/process/services/officeArtifact/readiness/PresentationReadinessService.test.ts",
+      "testName": "rejects same-byte replacement and hardlink drift of the inspection path",
+      "outputPatterns": ["AssertionError"],
+      "diagnosticCommand": [
+        "bunx",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "tests/unit/process/services/officeArtifact/readiness/PresentationReadinessService.test.ts",
+        "-t",
+        "rejects same-byte replacement and hardlink drift of the inspection path"
+      ]
+    },
+    {
+      "id": "BUG-046-STUDIO-FIT-WAIT",
+      "issue": "BUG-046",
+      "matchable": true,
+      "project": "dom",
+      "file": "tests/unit/pages/studio/StudioPage.dom.test.tsx",
+      "testName": "fits 18 seconds to 15 with one atomic command, no scene updates, and keeps the batch gate open",
+      "outputPatterns": ["fitStoryboardToGoal"],
+      "diagnosticCommand": [
+        "bunx",
+        "vitest",
+        "run",
+        "--project",
+        "dom",
+        "tests/unit/pages/studio/StudioPage.dom.test.tsx",
+        "-t",
+        "fits 18 seconds to 15 with one atomic command, no scene updates, and keeps the batch gate open"
+      ]
+    },
+    {
+      "id": "BUG-046-GRANT-STORE-INCOMPLETE-SIGHTING",
+      "issue": "BUG-046",
+      "matchable": false,
+      "project": "node",
+      "file": "tests/unit/process/services/presentation-template/grants/PresentationSourceGrantStore.test.ts",
+      "testName": null,
+      "outputPatterns": [],
+      "reason": "The retained incident names the file but not the exact failing test or assertion. Any recurrence remains unknown until exact evidence is captured."
+    }
+  ]
+}

@@ -1,0 +1,213 @@
+name: Sprint 3 internal RC
+
+on:
+  workflow_dispatch:
+    inputs:
+      weprompt_commit:
+        description: Exact 40-character WePrompt commit to package
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  WEPROMPT_INTERNAL_RELEASE: '1'
+  AIONUI_BACKEND_VERSION: v0.1.55
+  BUN_INSTALL_REGISTRY: 'https://registry.npmjs.org/'
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+jobs:
+  windows-x64:
+    name: Windows x64 native gate and unsigned package
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - name: Validate exact commit input
+        shell: pwsh
+        run: |
+          if ('${{ inputs.weprompt_commit }}' -cnotmatch '^[0-9a-f]{40}$') {
+            throw 'weprompt_commit must be one exact lowercase 40-character Git SHA'
+          }
+
+      - name: Check out exact candidate
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.weprompt_commit }}
+          persist-credentials: false
+
+      - name: Verify exact checkout
+        shell: pwsh
+        run: |
+          if ((git rev-parse HEAD) -cne '${{ inputs.weprompt_commit }}') {
+            throw 'checked-out commit does not match weprompt_commit'
+          }
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.15.0
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install frozen dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run source quality gates
+        shell: pwsh
+        run: |
+          bunx tsc --noEmit
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bun run lint
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bun run format:check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bun run i18n:types
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/check-i18n.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run focused release policy tests
+        run: >-
+          bunx vitest run --project node
+          tests/unit/release/internalReleaseExclusions.test.ts
+          tests/unit/release/vitestGateLedger.test.ts
+          tests/unit/releasePackagingConfig.test.ts
+
+      - name: Exercise BUG-043 readiness guard natively
+        shell: pwsh
+        run: |
+          $Evidence = Join-Path $env:RUNNER_TEMP 'bug-043-windows.json'
+          bunx vitest run --project node tests/unit/process/services/officeArtifact/readiness/PresentationReadinessService.test.ts -t 'rejects same-byte replacement and hardlink drift of the inspection path' --reporter=json --outputFile=$Evidence
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node -e "const r=require(process.argv[1]); if(r.numPassedTests!==1||r.numFailedTests!==0||r.numPendingTests!==0) throw new Error('BUG-043 native Windows test did not execute exactly once and pass')" $Evidence
+
+      - name: Run and ledger the Vitest suite once
+        run: >-
+          node scripts/release/run-vitest-gate.js
+          --register docs/release/sprint3-internal/known-flakes.json
+          --ledger "$env:RUNNER_TEMP/full-suite-ledger.json"
+          --log-dir "$env:RUNNER_TEMP/vitest"
+          -- bun run test
+
+      - name: Upload Windows gate evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
+        with:
+          name: sprint3-windows-x64-gates-${{ inputs.weprompt_commit }}
+          path: |
+            ${{ runner.temp }}/bug-043-windows.json
+            ${{ runner.temp }}/full-suite-ledger.json
+            ${{ runner.temp }}/vitest/*.log
+            docs/release/sprint3-internal/known-flakes.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Require published AionCore handoff record
+        shell: pwsh
+        run: |
+          if (-not (Test-Path -LiteralPath 'docs/release/sprint3-internal/aioncore-v0.1.55.json' -PathType Leaf)) {
+            throw 'AionCore v0.1.55 is not authorized and independently verified for packaging'
+          }
+
+      - name: Build unsigned Windows x64 package
+        run: bun run build-win:x64
+
+      - name: Upload unsigned Windows x64 candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
+        with:
+          name: sprint3-internal-unsigned-windows-x64-${{ inputs.weprompt_commit }}
+          path: |
+            out/*.exe
+            out/*.blockmap
+            out/*.yml
+            resources/bundled-aioncore/win32-x64/**
+          if-no-files-found: error
+          retention-days: 30
+
+  macos-arm64:
+    needs: windows-x64
+    name: macOS ARM64 native gate and unsigned package
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.weprompt_commit }}
+          persist-credentials: false
+
+      - name: Verify exact checkout
+        run: test "$(git rev-parse HEAD)" = "${{ inputs.weprompt_commit }}"
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.15.0
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install frozen dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run source quality gates
+        run: |
+          bunx tsc --noEmit
+          bun run lint
+          bun run format:check
+          bun run i18n:types
+          node scripts/check-i18n.js
+
+      - name: Run focused release policy tests
+        run: >-
+          bunx vitest run --project node
+          tests/unit/release/internalReleaseExclusions.test.ts
+          tests/unit/release/vitestGateLedger.test.ts
+          tests/unit/releasePackagingConfig.test.ts
+
+      - name: Run and ledger the Vitest suite once
+        run: >-
+          node scripts/release/run-vitest-gate.js
+          --register docs/release/sprint3-internal/known-flakes.json
+          --ledger "$RUNNER_TEMP/full-suite-ledger.json"
+          --log-dir "$RUNNER_TEMP/vitest"
+          -- bun run test
+
+      - name: Upload macOS gate evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
+        with:
+          name: sprint3-macos-arm64-gates-${{ inputs.weprompt_commit }}
+          path: |
+            ${{ runner.temp }}/full-suite-ledger.json
+            ${{ runner.temp }}/vitest/*.log
+            docs/release/sprint3-internal/known-flakes.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Require published AionCore handoff record
+        run: >-
+          test -f docs/release/sprint3-internal/aioncore-v0.1.55.json ||
+          (echo 'AionCore v0.1.55 is not authorized and independently verified for packaging' >&2; exit 1)
+
+      - name: Build unsigned macOS ARM64 package
+        run: bun run build-mac:arm64
+
+      - name: Upload unsigned macOS ARM64 candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
+        with:
+          name: sprint3-internal-unsigned-macos-arm64-${{ inputs.weprompt_commit }}
+          path: |
+            out/*.dmg
+            out/*.zip
+            out/*.blockmap
+            out/*.yml
+            resources/bundled-aioncore/darwin-arm64/**
+          if-no-files-found: error
+          retention-days: 30

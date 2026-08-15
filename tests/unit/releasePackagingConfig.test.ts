@@ -637,6 +637,45 @@ describe('release packaging configuration', () => {
     expect(macBuildBlock).toContain('out/WePrompt-${VERSION}-mac-${{ matrix.arch }}.dmg');
   });
 
+  it('records one blocking Sprint 3 suite attempt without rerun-to-green or teardown conversion', () => {
+    const workflow = readProjectFile('.github/workflows/sprint3-pr-gate.yml');
+
+    expect(workflow).toContain('node scripts/release/run-vitest-gate.js');
+    expect(workflow).toContain('--register docs/release/sprint3-internal/known-flakes.json');
+    expect(workflow).toContain('--ledger "$RUNNER_TEMP/full-suite-ledger.json"');
+    expect(workflow).toContain('-- bun run test');
+    expect(workflow).toMatch(/- name: Upload Vitest gate evidence\s*\n\s+if: \$\{\{ always\(\) \}\}/);
+    expect(workflow).not.toContain('treated as the known BUG-030 teardown');
+    expect(workflow).not.toContain('Re-run the job');
+    expect(workflow).not.toMatch(/if bun run test/);
+  });
+
+  it('defines a Windows-first two-target internal RC workflow from one exact commit', () => {
+    const workflow = readProjectFile('.github/workflows/sprint3-internal-rc.yml');
+
+    expect(workflow).toMatch(/weprompt_commit:\s*\n[\s\S]*?required: true/);
+    expect(workflow).not.toMatch(/weprompt_commit:\s*\n[\s\S]*?default:/);
+    expect(workflow).toContain('runs-on: windows-2022');
+    expect(workflow).toContain('runs-on: macos-15');
+    expect(workflow).toMatch(/macos-arm64:\s*\n\s+needs: windows-x64/);
+    expect(workflow).toContain('test "$(git rev-parse HEAD)" = "${{ inputs.weprompt_commit }}"');
+    expect(workflow).toContain("WEPROMPT_INTERNAL_RELEASE: '1'");
+    expect(workflow).toContain('bun-version: 1.3.14');
+    expect(workflow).toContain('node-version: 24.15.0');
+    expect(workflow).toContain('bun install --frozen-lockfile');
+    expect(workflow).toContain('tests/unit/release/internalReleaseExclusions.test.ts');
+    expect(workflow.match(/node scripts\/release\/run-vitest-gate\.js/g)).toHaveLength(2);
+    expect(workflow).toContain('PresentationReadinessService.test.ts');
+    expect(workflow).toContain('aioncore-v0.1.55.json');
+    expect(workflow).toContain('build-win:x64');
+    expect(workflow).toContain('build-mac:arm64');
+    expect(workflow).not.toContain('AIONUI_ENABLE_CREATIVE_STUDIO: 1');
+
+    const actionRefs = [...workflow.matchAll(/uses:\s*([^\s#]+)/g)].map((match) => match[1]);
+    expect(actionRefs.length).toBeGreaterThan(0);
+    for (const actionRef of actionRefs) expect(actionRef).toMatch(/^[^@]+@[0-9a-f]{40}$/);
+  });
+
   it('uses current WePrompt names in platform smoke checks while retaining the Forge install-directory fallback', () => {
     const workflow = readProjectFile('.github/workflows/pr-checks.yml');
 

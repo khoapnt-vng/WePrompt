@@ -37,13 +37,9 @@ jobs:
     # gate passed a full hosted run (`31405462957`: every step green, zero
     # failing tests) once BUG-042's CI-environment isolation landed.
     #
-    # Known intermittent: BUG-043 — the readiness hardlink-drift guard fails
-    # open on hosted filesystems, observed fail/fail/pass across three hosted
-    # runs. It WILL red this gate occasionally. That is deliberate: it is a
-    # real fail-open defect on a shipped-adjacent path, and hiding it behind a
-    # retry would repeat the mistake BUG-030's narrow quarantine exists to
-    # avoid. Re-run the job; if the noise becomes unmanageable, quarantine
-    # that single test by exact signature — never the whole job.
+    # Known intermittent signatures remain blocking until the failed attempt,
+    # an unchanged focused diagnostic, and a reviewer disposition are all in
+    # the evidence ledger. A later green job never erases an earlier red run.
     steps:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -78,44 +74,22 @@ jobs:
           bun run i18n:types
           node scripts/check-i18n.js
 
-      # Runs the whole suite in one invocation. Baseline on the integrated
-      # sprint3 tip: 624 files (1 skipped), 8,126 passed, 19 skipped.
-      #
-      # BUG-030 quarantine: TeamSiderSection can raise EnvironmentTeardownError
-      # that fails the PROCESS after every test has already passed. That is
-      # detectable from this run's own summary, so it needs no separate
-      # invocation. Tracking:
-      # https://github.com/khoapnt-vng/WePrompt/blob/sprint3/TASKS.md
-      #
-      # Do NOT reintroduce `vitest run --exclude=<file>` to carve this file out.
-      # The CLI flag REPLACES the resolved exclude list rather than adding to
-      # it, so the glob escapes into node_modules and sibling worktrees —
-      # measured locally as 13,874 discovered test files instead of 625.
-      - name: Run Vitest suite
-        shell: bash
-        run: |
-          set -o pipefail
-          log="$RUNNER_TEMP/suite.log"
+      - name: Run and ledger the Vitest suite once
+        run: >-
+          node scripts/release/run-vitest-gate.js
+          --register docs/release/sprint3-internal/known-flakes.json
+          --ledger "$RUNNER_TEMP/full-suite-ledger.json"
+          --log-dir "$RUNNER_TEMP/vitest"
+          -- bun run test
 
-          if bun run test 2>&1 | tee "$log"; then
-            exit 0
-          fi
-
-          clean="$RUNNER_TEMP/suite-clean.log"
-          sed $'s/\033\\[[0-9;]*[mK]//g' "$log" > "$clean"
-
-          # Pass only when the process died on the known teardown error while
-          # NOTHING actually failed. Any failed file or test still blocks.
-          if grep -q 'EnvironmentTeardownError' "$clean" \
-            && ! grep -Eq 'Test Files[[:space:]]+[0-9]+ failed' "$clean" \
-            && ! grep -Eq 'Tests[[:space:]]+[0-9]+ failed' "$clean"; then
-            echo '::warning title=BUG-030 quarantine::Suite exited non-zero via EnvironmentTeardownError with zero failing tests; treated as the known BUG-030 teardown.'
-            {
-              echo '### BUG-030 quarantine'
-              echo 'The suite exited non-zero through the known EnvironmentTeardownError while every test passed. BUG-030 remains non-blocking.'
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
-          echo '::error title=Suite failed::Failure is not the known BUG-030 post-green teardown signature.'
-          exit 1
+      - name: Upload Vitest gate evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
+        with:
+          name: sprint3-vitest-gate-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/full-suite-ledger.json
+            ${{ runner.temp }}/vitest/*.log
+            docs/release/sprint3-internal/known-flakes.json
+          if-no-files-found: error
+          retention-days: 30
