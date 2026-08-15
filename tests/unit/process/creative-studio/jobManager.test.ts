@@ -24,11 +24,12 @@ import type {
   StudioScene,
 } from '@/common/types/project/creativeStudioTypes';
 import type { StudioGenerationRouteCatalog } from '@process/services/creative-studio/providerResolver';
-import type {
-  GenerationProviderAdapter,
-  ProviderJobSnapshot,
-  ProviderOutput,
-  ProviderSubmitResult,
+import {
+  createImageGenerationAdapter,
+  type GenerationProviderAdapter,
+  type ProviderJobSnapshot,
+  type ProviderOutput,
+  type ProviderSubmitResult,
 } from '@process/services/creative-studio/adapters';
 import {
   createStudioJobManager,
@@ -1633,6 +1634,64 @@ describe('StudioJobManager route and reference isolation', () => {
     expect(imported.id).toBe(withReference.scenes.scene_1.referenceAssetId);
     expect(submit).not.toHaveBeenCalled();
     expect((await harness.store.getProject(harness.project.id))?.jobs).toEqual({});
+  });
+
+  it('submits an image scene reference through the production image adapter as one image URI', async () => {
+    const executeImageGeneration = vi.fn(async () => ({ success: false, text: 'none', error: 'no_output' }));
+    const imageAdapter = createImageGenerationAdapter({
+      executeImageGeneration,
+      workspaceDir: '/private/studio',
+    });
+    const selectedProvider: IProvider = {
+      ...provider,
+      platform: 'gemini',
+      base_url: 'https://generativelanguage.googleapis.com',
+      models: ['gemini-2.5-flash-image'],
+    };
+    const selectedRoute: StudioResolvedSceneRouteSnapshot = {
+      ...route,
+      providerId: selectedProvider.id,
+      model: 'gemini-2.5-flash-image',
+    };
+    const harness = await createHarness(imageAdapter, {
+      provider: selectedProvider,
+      routes: [selectedRoute],
+    });
+    const sourcePath = path.join(harness.rootDir, 'reference.png');
+    await writeFile(sourcePath, png);
+    await harness.mediaStore.importReferenceFromPath({
+      projectId: harness.project.id,
+      sceneId: 'scene_1',
+      sourcePath,
+      expectedRevision: harness.project.revision,
+    });
+    const withReference = (await harness.store.getProject(harness.project.id))!;
+
+    await expect(
+      harness.manager.submitScenes({
+        projectId: withReference.id,
+        expectedRevision: withReference.revision,
+        sceneIds: ['scene_1'],
+        routes: [selectedRoute],
+        catalogVersion: 'catalog_1',
+      })
+    ).resolves.toHaveLength(1);
+
+    await waitFor(() => expect(executeImageGeneration).toHaveBeenCalledOnce());
+    expect(executeImageGeneration).toHaveBeenCalledWith(
+      expect.objectContaining({ image_uris: [expect.stringMatching(/^data:image\/png;base64,/)] }),
+      expect.objectContaining({ use_model: 'gemini-2.5-flash-image' }),
+      '/private/studio',
+      undefined,
+      expect.any(AbortSignal),
+      { hostedImageDownloader: expect.any(Function) }
+    );
+    await waitFor(async () =>
+      expect((await harness.store.getProject(harness.project.id))?.jobs.job_1).toMatchObject({
+        status: 'failed',
+        error: { code: 'no_output' },
+      })
+    );
   });
 
   it('submits exactly one managed first frame through a fresh OpenRouter scene submission', async () => {

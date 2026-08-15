@@ -16,11 +16,15 @@ import type {
   SanitizedProviderError,
   StudioConnectionCandidate,
   StudioConnectionValidation,
-  StudioGenerationRequest,
   StudioRouteIssue,
   StudioRouteValidation,
 } from './types';
-import { isValidProviderJobId, ProviderDeadlineError, runWithProviderDeadline } from './types';
+import {
+  hasImageConditioningFields,
+  isValidProviderJobId,
+  ProviderDeadlineError,
+  runWithProviderDeadline,
+} from './types';
 
 export const OPENROUTER_VIDEO_BASE_URL = 'https://openrouter.ai/api/v1';
 const OPENROUTER_HOST = 'openrouter.ai';
@@ -145,10 +149,14 @@ export const isSupportedOpenRouterVideoProvider = (provider: Pick<IProvider, 'ba
 export const getOpenRouterVideoModelSpec = (model: string): OpenRouterVideoModelSpec | null =>
   OPENROUTER_VIDEO_MODELS[model] ?? null;
 
-const requestValidation = (request: StudioGenerationRequest, provider: TProviderWithModel): StudioRouteValidation => {
+const requestValidation = (
+  request: ResolvedStudioGenerationRequest,
+  provider: TProviderWithModel
+): StudioRouteValidation => {
   const spec = getOpenRouterVideoModelSpec(provider.use_model);
   if (
     request.mediaKind !== 'video' ||
+    hasImageConditioningFields(request) ||
     !isSupportedOpenRouterVideoProvider(provider, provider.use_model) ||
     !spec ||
     !provider.api_key.trim()
@@ -404,7 +412,7 @@ export const createOpenRouterVideoAdapter = (deps: OpenRouterVideoAdapterDeps = 
       }
     },
 
-    validateRequest(request: StudioGenerationRequest, provider: TProviderWithModel): StudioRouteValidation {
+    validateRequest(request: ResolvedStudioGenerationRequest, provider: TProviderWithModel): StudioRouteValidation {
       return requestValidation(request, provider);
     },
 

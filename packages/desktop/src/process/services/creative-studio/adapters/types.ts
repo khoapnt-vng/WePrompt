@@ -40,6 +40,10 @@ export type ResolvedStudioGenerationRequest = StudioGenerationRequest & {
   conditioningImageLimit?: number;
 };
 
+/** Runtime shape guard: conditioning fields are reserved for image jobs, even if explicitly undefined. */
+export const hasImageConditioningFields = (request: ResolvedStudioGenerationRequest): boolean =>
+  'conditioningImages' in request || 'conditioningImageLimit' in request;
+
 export type { NormalizedStudioGenerationParameters, StudioRouteIssue, StudioRouteValidation };
 
 export type SanitizedProviderErrorCode =

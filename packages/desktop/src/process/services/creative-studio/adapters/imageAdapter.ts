@@ -63,7 +63,7 @@ const MAX_CONDITIONING_IMAGES = 6;
 const CONDITIONING_IMAGE_BUDGET_BYTES = 30 * 1024 * 1024;
 
 type ImageConditioningValidation =
-  | { ok: true; conditioningImages: readonly ResolvedProviderInput[] | undefined }
+  | { ok: true; imageInputs: readonly ResolvedProviderInput[] | undefined }
   | { ok: false };
 type ResolvedImageRequestValidation = {
   routeValidation: StudioRouteValidation;
@@ -78,8 +78,12 @@ export const validateImageConditioningRequest = (
 ): ImageConditioningValidation => {
   const hasConditioningImages = request.conditioningImages !== undefined;
   const hasConditioningImageLimit = request.conditioningImageLimit !== undefined;
-  if (request.firstFrame !== undefined || hasConditioningImages !== hasConditioningImageLimit) return { ok: false };
-  if (!hasConditioningImages) return { ok: true, conditioningImages: undefined };
+  if (hasConditioningImages !== hasConditioningImageLimit) return { ok: false };
+  if (!hasConditioningImages) {
+    if (request.firstFrame === undefined) return { ok: true, imageInputs: undefined };
+    return imagesApiRoute ? { ok: false } : { ok: true, imageInputs: [request.firstFrame] };
+  }
+  if (request.firstFrame !== undefined) return { ok: false };
   if (imagesApiRoute || !Array.isArray(request.conditioningImages)) return { ok: false };
 
   const frozenLimit = request.conditioningImageLimit;
@@ -110,7 +114,7 @@ export const validateImageConditioningRequest = (
     }
     remainingBytes -= input.byteSize;
   }
-  return { ok: true, conditioningImages: request.conditioningImages };
+  return { ok: true, imageInputs: request.conditioningImages };
 };
 
 export type StudioHostedImageDownloaderDeps = Pick<RemoteMediaDownloadDeps, 'lookup' | 'request'>;
@@ -207,10 +211,10 @@ export const createImageGenerationAdapter = (deps: ImageGenerationAdapterDeps): 
       const { routeValidation, conditioningValidation } = validateResolvedRequest(request, provider);
       if (!routeValidation.ok || !conditioningValidation?.ok) throw new ImageGenerationAdapterError('unsupported');
       let imageUris: string[] | undefined;
-      if (conditioningValidation.conditioningImages !== undefined) {
+      if (conditioningValidation.imageInputs !== undefined) {
         imageUris = [];
         try {
-          for (const input of conditioningValidation.conditioningImages) {
+          for (const input of conditioningValidation.imageInputs) {
             imageUris.push(await input.asDataUrl(CONDITIONING_IMAGE_BUDGET_BYTES));
           }
         } catch {

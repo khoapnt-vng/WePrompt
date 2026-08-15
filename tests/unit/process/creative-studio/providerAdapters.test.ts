@@ -14,9 +14,12 @@ import {
   createGenerationProviderAdapterRegistry,
   createImageGenerationAdapter,
   createMediaGatewayAdapter,
+  createOpenRouterVideoAdapter,
   isValidProviderJobId,
+  type GenerationProviderAdapter,
   type ProviderHttpResponse,
   type ResolvedProviderInput,
+  type ResolvedStudioGenerationRequest,
 } from '@process/services/creative-studio/adapters';
 import {
   createStudioE2EFakeBundle,
@@ -97,6 +100,68 @@ const createConditioningAdapter = (executeImageGeneration = successfulImageEngin
   executeImageGeneration,
 });
 
+type VideoAdapterFixture = {
+  adapter: GenerationProviderAdapter;
+  provider: TProviderWithModel;
+  providerCall: ReturnType<typeof vi.fn>;
+};
+
+const videoAdapterFixtures: ReadonlyArray<{
+  label: string;
+  create: () => VideoAdapterFixture;
+}> = [
+  {
+    label: 'BytePlus',
+    create: () => {
+      const fetch = vi.fn();
+      return { adapter: createBytePlusSeedanceAdapter({ fetch }), provider: provider(), providerCall: fetch };
+    },
+  },
+  {
+    label: 'OpenRouter',
+    create: () => {
+      const fetch = vi.fn();
+      return {
+        adapter: createOpenRouterVideoAdapter({ fetch }),
+        provider: provider({
+          base_url: 'https://openrouter.ai/api/v1',
+          use_model: 'bytedance/seedance-2.0',
+        }),
+        providerCall: fetch,
+      };
+    },
+  },
+  {
+    label: 'media gateway',
+    create: () => {
+      const fetch = vi.fn();
+      return {
+        adapter: createMediaGatewayAdapter({ fetch }),
+        provider: provider({ base_url: 'https://gateway.example', use_model: 'open-sora' }),
+        providerCall: fetch,
+      };
+    },
+  },
+];
+
+const videoConditioningFields: ReadonlyArray<{
+  label: string;
+  fields: Partial<ResolvedStudioGenerationRequest>;
+}> = [
+  { label: 'conditioningImages only', fields: { conditioningImages: [] } },
+  { label: 'conditioningImageLimit only', fields: { conditioningImageLimit: 0 } },
+  { label: 'both conditioning fields', fields: { conditioningImages: [], conditioningImageLimit: 0 } },
+];
+
+const videoConditioningCases = videoAdapterFixtures.flatMap((adapterFixture) =>
+  videoConditioningFields.map((conditioningCase) => ({
+    adapterLabel: adapterFixture.label,
+    create: adapterFixture.create,
+    conditioningLabel: conditioningCase.label,
+    fields: conditioningCase.fields,
+  }))
+);
+
 afterEach(async () => {
   vi.restoreAllMocks();
   await Promise.all(
@@ -110,6 +175,32 @@ describe('Creative Studio provider adapters', () => {
 
     expect(registry.get('openrouter-video-v1')?.id).toBe('openrouter-video-v1');
   });
+
+  it.each(videoConditioningCases)(
+    'rejects $conditioningLabel on $adapterLabel video before resolving the first frame or calling the provider',
+    async ({ create, fields }) => {
+      const { adapter, provider: selectedProvider, providerCall } = create();
+      const asDataUrl = vi.fn(async () => 'data:image/png;base64,QUJD');
+      const resolvedRequest: ResolvedStudioGenerationRequest = {
+        ...request,
+        firstFrame: { ...firstFrame(), asDataUrl },
+        ...fields,
+      };
+
+      expect(
+        adapter.validateRequest({ ...request, firstFrame: resolvedRequest.firstFrame }, selectedProvider)
+      ).toMatchObject({ ok: true });
+      expect(adapter.validateRequest(resolvedRequest, selectedProvider)).toEqual({
+        ok: false,
+        issues: [{ code: 'provider_unavailable' }],
+      });
+      await expect(
+        adapter.submit(resolvedRequest, selectedProvider, new AbortController().signal)
+      ).rejects.toMatchObject({ code: 'unsupported' });
+      expect(asDataUrl).not.toHaveBeenCalled();
+      expect(providerCall).not.toHaveBeenCalled();
+    }
+  );
 
   it.each([0, 1, 6])('passes %i ordered conditioning images to the image engine', async (count) => {
     const { adapter, executeImageGeneration } = createConditioningAdapter();
@@ -269,7 +360,6 @@ describe('Creative Studio provider adapters', () => {
       conditioningImageLimit: 6,
       firstFrame: firstFrame(),
     },
-    { label: 'an image first frame outside the conditioning pair', firstFrame: firstFrame() },
   ])('rejects $label before resolving or calling the image engine', async (invalidInput) => {
     const { adapter, executeImageGeneration } = createConditioningAdapter();
 
@@ -278,6 +368,47 @@ describe('Creative Studio provider adapters', () => {
     ).rejects.toMatchObject({ code: 'unsupported' });
     for (const input of invalidInput.conditioningImages ?? []) expect(input.asDataUrl).not.toHaveBeenCalled();
     expect(executeImageGeneration).not.toHaveBeenCalled();
+  });
+
+  it('accepts a legacy image first-frame-only request at the pre-persistence validation seam', () => {
+    const { adapter, executeImageGeneration } = createConditioningAdapter();
+    const input = conditioningInput(1);
+
+    expect(adapter.validateRequest({ ...request, mediaKind: 'image', firstFrame: input }, imageProvider())).toEqual({
+      ok: true,
+      normalized: {
+        aspectRatio: request.aspectRatio,
+        resolution: request.resolution,
+        durationSeconds: request.durationSeconds,
+      },
+    });
+    expect(input.asDataUrl).not.toHaveBeenCalled();
+    expect(executeImageGeneration).not.toHaveBeenCalled();
+  });
+
+  it('forwards a legacy image first frame as exactly one bounded image URI', async () => {
+    const { adapter, executeImageGeneration } = createConditioningAdapter();
+    const input = conditioningInput(1);
+
+    await expect(
+      adapter.submit(
+        { ...request, mediaKind: 'image', firstFrame: input },
+        imageProvider(),
+        new AbortController().signal
+      )
+    ).resolves.toMatchObject({ kind: 'complete' });
+    expect(executeImageGeneration).toHaveBeenCalledWith(
+      {
+        prompt: request.prompt,
+        image_uris: ['data:image/png;base64,REF_1'],
+      },
+      expect.any(Object),
+      '/private/studio',
+      undefined,
+      expect.any(AbortSignal),
+      { hostedImageDownloader: expect.any(Function) }
+    );
+    expect(input.asDataUrl).toHaveBeenCalledWith(REFERENCE_BUDGET_BYTES);
   });
 
   it('rejects conditioning on an Images-API route before resolving or calling the image engine', async () => {
@@ -367,6 +498,38 @@ describe('Creative Studio provider adapters', () => {
     ).rejects.toMatchObject({ code: 'unsupported' });
     expect(remoteState.taskCounter).toBe(1);
   });
+
+  it.each(videoConditioningFields)(
+    'rejects $label on trusted fake video before resolving the first frame or creating a task',
+    async ({ fields }) => {
+      const rootDir = await fs.mkdtemp(path.join(tmpdir(), 'weprompt-fake-adapter-'));
+      temporaryDirectories.push(rootDir);
+      const remoteState = createStudioE2EFakeRemoteState();
+      const bundle = createStudioE2EFakeBundle({ rootDir, remoteState });
+      const adapter = bundle.adapters.get('weprompt-media-gateway-v1');
+      const fakeProvider = { ...bundle.provider, use_model: 'weprompt-e2e-video' } as TProviderWithModel;
+      const asDataUrl = vi.fn(async () => 'data:image/png;base64,QUJD');
+      const resolvedRequest: ResolvedStudioGenerationRequest = {
+        ...request,
+        firstFrame: { ...firstFrame(), asDataUrl },
+        ...fields,
+      };
+      if (!adapter) throw new Error('expected fake video adapter');
+
+      expect(
+        adapter.validateRequest({ ...request, firstFrame: resolvedRequest.firstFrame }, fakeProvider)
+      ).toMatchObject({ ok: true });
+      expect(adapter.validateRequest(resolvedRequest, fakeProvider)).toEqual({
+        ok: false,
+        issues: [{ code: 'provider_unavailable' }],
+      });
+      await expect(adapter.submit(resolvedRequest, fakeProvider, new AbortController().signal)).rejects.toMatchObject({
+        code: 'unsupported',
+      });
+      expect(asDataUrl).not.toHaveBeenCalled();
+      expect(remoteState.taskCounter).toBe(0);
+    }
+  );
 
   it('rejects an image-engine path whose extension cannot provide a declared managed MIME type', async () => {
     const adapter = createImageGenerationAdapter({

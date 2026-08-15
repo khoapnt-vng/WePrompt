@@ -21,6 +21,7 @@ import type {
   ResolvedStudioGenerationRequest,
   StudioRouteValidation,
 } from './types';
+import { hasImageConditioningFields } from './types';
 import { BYTEPLUS_SEEDANCE_BASE_URL } from './bytePlusSeedanceAdapter';
 import { validateImageConditioningRequest } from './imageAdapter';
 
@@ -123,7 +124,8 @@ const validateRequest = (
   if (
     provider.id !== STUDIO_E2E_FAKE_PROVIDER_ID ||
     !acceptsModel(catalogProfile, mediaKind, provider.use_model) ||
-    request.mediaKind !== mediaKind
+    request.mediaKind !== mediaKind ||
+    (mediaKind === 'video' && hasImageConditioningFields(request))
   ) {
     issues.push({ code: 'provider_unavailable' });
   }
