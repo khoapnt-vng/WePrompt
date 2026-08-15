@@ -1867,6 +1867,122 @@ describe('StudioJobManager reference output routing', () => {
       return next;
     });
 
+  it('rejects an active-Brief reference plate before route lookup, persistence, notification or adapter activity', async () => {
+    const submit = vi.fn();
+    const validateRequest = vi.fn((request) => ({
+      ok: true as const,
+      normalized: {
+        aspectRatio: request.aspectRatio,
+        resolution: request.resolution,
+        durationSeconds: request.durationSeconds,
+      },
+    }));
+    const listGenerationRoutes = vi.fn(async () => catalog([imageRoute, videoRoute]));
+    const onProjectUpdated = vi.fn();
+    const harness = await createHarness(
+      {
+        ...imageAdapterWithSubmit(submit),
+        validateRequest,
+      },
+      {
+        scenes: [videoScene()],
+        routes: [imageRoute, videoRoute],
+        provider: referenceProvider,
+        catalog: listGenerationRoutes,
+        onProjectUpdated,
+      }
+    );
+    const sourcePath = path.join(harness.rootDir, 'cast.png');
+    await writeFile(sourcePath, png);
+    await harness.mediaStore.importReferenceFromPath({
+      projectId: harness.project.id,
+      briefReferenceRole: 'cast',
+      sourcePath,
+      expectedRevision: harness.project.revision,
+    });
+    const withCast = (await harness.store.getProject(harness.project.id))!;
+    onProjectUpdated.mockClear();
+    const before = structuredClone(withCast);
+
+    await expect(
+      harness.manager.submitScenes({
+        projectId: withCast.id,
+        expectedRevision: withCast.revision,
+        sceneIds: ['scene_1'],
+        routes: [imageRoute],
+        catalogVersion: 'catalog_1',
+        outputRole: 'reference',
+        referencePrompts: [{ sceneId: 'scene_1', prompt: 'A calm establishing plate' }],
+      })
+    ).rejects.toMatchObject({ code: 'invalid_request' });
+
+    expect(await harness.store.getProject(withCast.id)).toEqual(before);
+    expect(listGenerationRoutes).not.toHaveBeenCalled();
+    expect(onProjectUpdated).not.toHaveBeenCalled();
+    expect(validateRequest).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed active-Brief metadata before route lookup, persistence, notification or adapter activity', async () => {
+    const submit = vi.fn();
+    const validateRequest = vi.fn((request) => ({
+      ok: true as const,
+      normalized: {
+        aspectRatio: request.aspectRatio,
+        resolution: request.resolution,
+        durationSeconds: request.durationSeconds,
+      },
+    }));
+    const listGenerationRoutes = vi.fn(async () => catalog([imageRoute, videoRoute]));
+    const onProjectUpdated = vi.fn();
+    const harness = await createHarness(
+      {
+        ...imageAdapterWithSubmit(submit),
+        validateRequest,
+      },
+      {
+        scenes: [videoScene()],
+        routes: [imageRoute, videoRoute],
+        provider: referenceProvider,
+        catalog: listGenerationRoutes,
+        onProjectUpdated,
+      }
+    );
+    const sourcePath = path.join(harness.rootDir, 'malformed-cast.png');
+    await writeFile(sourcePath, png);
+    await harness.mediaStore.importReferenceFromPath({
+      projectId: harness.project.id,
+      briefReferenceRole: 'cast',
+      sourcePath,
+      expectedRevision: harness.project.revision,
+    });
+    const stored = (await harness.store.getProject(harness.project.id))!;
+    const malformed = structuredClone(stored);
+    const imported = Object.values(malformed.assets).find((asset) => asset.briefReferenceRole === 'cast')!;
+    delete imported.briefReferenceLabel;
+    const getProject = vi.spyOn(harness.store, 'getProject').mockResolvedValueOnce(malformed);
+    onProjectUpdated.mockClear();
+
+    await expect(
+      harness.manager.submitScenes({
+        projectId: malformed.id,
+        expectedRevision: malformed.revision,
+        sceneIds: ['scene_1'],
+        routes: [imageRoute],
+        catalogVersion: 'catalog_1',
+        outputRole: 'reference',
+        referencePrompts: [{ sceneId: 'scene_1', prompt: 'A calm establishing plate' }],
+      })
+    ).rejects.toMatchObject({ code: 'invalid_request' });
+
+    getProject.mockRestore();
+    expect(await harness.store.getProject(stored.id)).toEqual(stored);
+    expect(listGenerationRoutes).not.toHaveBeenCalled();
+    expect(onProjectUpdated).not.toHaveBeenCalled();
+    expect(validateRequest).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+  });
+
   it('a reference job on a video scene resolves an image route', async () => {
     const submit = vi.fn(async () => ({ kind: 'complete', outputs: [] }));
     const harness = await createReferenceHarness(submit);

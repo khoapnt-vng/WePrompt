@@ -574,6 +574,59 @@ describe('CreativeStudioService', () => {
     ).rejects.toMatchObject({ code: 'not_found' } satisfies Partial<CreativeStudioStoreError>);
   });
 
+  it('rejects a checked reference-request consume when the queued id maps to another scene', async () => {
+    const created = await service.createProject(makeInput());
+    const project = await store.updateProject(created.id, (current) => ({
+      ...current,
+      sceneOrder: ['scene_1'],
+      scenes: {
+        scene_1: {
+          id: 'scene_1',
+          ...makeScene('scene_1'),
+          selectedAssetId: null,
+          assetIds: [],
+          jobIds: [],
+          reviewState: 'draft',
+        },
+      },
+    }));
+    const paths = await store.resolveProposalPaths(project.id);
+    const request = await referenceRequestWriter.writeReferenceRequestRecord({
+      pendingDir: paths.referencePendingDir,
+      projectId: project.id,
+      sceneId: 'scene_1',
+      requestId: 'request_checked',
+    });
+
+    await expect(
+      service.dismissReferenceRequests({
+        projectId: project.id,
+        requestIds: [request.id],
+        expectedRevision: project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+    await expect(
+      service.dismissReferenceRequests({
+        projectId: project.id,
+        requestIds: [request.id],
+        expectedRequests: [{ id: request.id, sceneId: request.sceneId }],
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+
+    await expect(
+      service.dismissReferenceRequests({
+        projectId: project.id,
+        requestIds: [request.id],
+        expectedRevision: project.revision,
+        expectedRequests: [{ id: request.id, sceneId: 'scene_2' }],
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+
+    await expect(store.listPendingReferenceRequests(project.id)).resolves.toMatchObject([
+      { id: request.id, sceneId: request.sceneId },
+    ]);
+  });
+
   it('opens a project written before rules existed, and the first rule write rewrites the record', async () => {
     const project = await service.createProject(makeInput());
     const file = path.join(rootDir, project.id, 'project.json');

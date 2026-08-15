@@ -14,7 +14,8 @@ import type {
   StudioSceneReferencePrompt,
 } from '@/common/types/project/creativeStudioTypes';
 import type { StudioRuleBreach } from '@/common/types/project/creativeStudioRules';
-import type { GenerationReviewRouteSnapshot } from './generationRequests';
+import type { StudioReferencePlateFreshness } from '@/common/types/project/creativeStudioManagedAssetCollections';
+import type { GenerationReferenceConditioningSnapshot, GenerationReviewRouteSnapshot } from './generationRequests';
 import { Alert, Button, Modal, Tag } from '@arco-design/web-react';
 import React, { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -54,11 +55,22 @@ export type GenerationReviewScene = {
   route: GenerationReviewRoute;
   /** The picture this scene's reference plate should paint. Present only for outputRole 'reference'. */
   referencePrompt?: string;
+  /** Frozen disclosure/authorization data for reference-plate image inputs. */
+  conditioning?: GenerationReferenceConditioningSnapshot;
+  conditioningIssue?: 'malformed';
+  /** Review-only warning for a selected generated plate used by a take. */
+  referencePlateFreshness?: StudioReferencePlateFreshness;
 };
 
 export type GenerationReviewConfirmation = {
   sceneIds: string[];
   routes: StudioSceneGenerationChoice[];
+  conditioning?: Array<{
+    sceneId: string;
+    maximum: number;
+    integrationLabelKey: StudioConnectionIntegrationLabelKey;
+    inputs: GenerationReferenceConditioningSnapshot['inputs'];
+  }>;
 };
 
 /**
@@ -78,9 +90,22 @@ export const collectSubmittableRoutes = (
     .map((scene) => scene.route.snapshot)
     .filter((route): route is GenerationReviewRouteSnapshot => route !== null);
   if (validRoutes.length !== scenes.length) return null;
+  const conditioning = scenes.flatMap((scene) =>
+    scene.conditioning === undefined
+      ? []
+      : [
+          {
+            sceneId: scene.id,
+            maximum: scene.conditioning.maximum,
+            integrationLabelKey: scene.conditioning.integrationLabelKey,
+            inputs: scene.conditioning.inputs.map((input) => ({ ...input })),
+          },
+        ]
+  );
   return {
     sceneIds: scenes.map((scene) => scene.id),
     routes: validRoutes.map(({ sceneId, choiceId, kind }) => ({ sceneId, choiceId, kind })),
+    ...(conditioning.length === 0 ? {} : { conditioning }),
   };
 };
 
@@ -105,6 +130,26 @@ export const submitExactGenerationReview = async (
         candidate.sceneId === route.sceneId &&
         candidate.choiceId === route.choiceId &&
         candidate.kind === route.kind
+      );
+    }) &&
+    (reviewed.conditioning ?? []).length === (confirmation.conditioning ?? []).length &&
+    (reviewed.conditioning ?? []).every((snapshot, index) => {
+      const candidate = confirmation.conditioning?.[index];
+      return (
+        candidate !== undefined &&
+        candidate.sceneId === snapshot.sceneId &&
+        candidate.maximum === snapshot.maximum &&
+        candidate.integrationLabelKey === snapshot.integrationLabelKey &&
+        candidate.inputs.length === snapshot.inputs.length &&
+        candidate.inputs.every((input, inputIndex) => {
+          const reviewedInput = snapshot.inputs[inputIndex];
+          return (
+            reviewedInput !== undefined &&
+            input.assetId === reviewedInput.assetId &&
+            input.label === reviewedInput.label &&
+            input.role === reviewedInput.role
+          );
+        })
       );
     });
   if (!matches) return 'rejected';
@@ -155,7 +200,9 @@ export type GenerationReviewExcludedScene = {
     | 'conversation.creativeStudio.models.blocked.frame'
     | 'conversation.creativeStudio.models.blocked.resolution'
     | 'conversation.creativeStudio.models.blocked.duration'
-    | 'conversation.creativeStudio.models.blocked.firstFrame';
+    | 'conversation.creativeStudio.models.blocked.firstFrame'
+    | 'conversation.creativeStudio.conditioning.unsupported'
+    | 'conversation.creativeStudio.conditioning.overflow';
 };
 
 export type GenerationReviewModalProps = {
@@ -273,9 +320,22 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
 
   const handleConfirm = (): void => {
     if (!review.canConfirm || submissionBlocked || submitting) return;
+    const conditioning = scenes.flatMap((scene) =>
+      scene.conditioning === undefined
+        ? []
+        : [
+            {
+              sceneId: scene.id,
+              maximum: scene.conditioning.maximum,
+              integrationLabelKey: scene.conditioning.integrationLabelKey,
+              inputs: scene.conditioning.inputs.map((input) => ({ ...input })),
+            },
+          ]
+    );
     void onConfirm({
       sceneIds: scenes.map((scene) => scene.id),
       routes: review.validRoutes.map(({ sceneId, choiceId, kind }) => ({ sceneId, choiceId, kind })),
+      ...(conditioning.length === 0 ? {} : { conditioning }),
     });
   };
 
@@ -416,6 +476,55 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
                   })}
                 />
               ))}
+              {scene.conditioning !== undefined && (
+                <div className='mt-10px rounded-8px bg-fill-1 p-10px'>
+                  <div className='mb-6px text-12px font-600 text-t-primary'>
+                    {t('conversation.creativeStudio.conditioning.inputsTitle')}
+                  </div>
+                  <ul className='m-0 flex list-none flex-col gap-4px p-0'>
+                    {scene.conditioning.inputs.map((input) => (
+                      <li key={input.assetId} className='flex items-center gap-8px text-12px text-t-primary'>
+                        <Tag>{t(`conversation.creativeStudio.conditioning.role.${input.role}`)}</Tag>
+                        <span>{input.label}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className='mb-0 mt-6px text-12px text-t-secondary'>
+                    {t('conversation.creativeStudio.conditioning.maximum', {
+                      count: scene.conditioning.maximum,
+                    })}
+                  </p>
+                  {scene.conditioning.inputs.length > scene.conditioning.maximum && (
+                    <Alert
+                      className='mt-10px'
+                      type='error'
+                      content={t(
+                        scene.conditioning.maximum === 0
+                          ? 'conversation.creativeStudio.conditioning.unsupported'
+                          : 'conversation.creativeStudio.conditioning.overflow',
+                        {
+                          count: scene.conditioning.inputs.length,
+                          maximum: scene.conditioning.maximum,
+                        }
+                      )}
+                    />
+                  )}
+                </div>
+              )}
+              {scene.conditioningIssue === 'malformed' && (
+                <Alert
+                  className='mt-10px'
+                  type='error'
+                  content={t('conversation.creativeStudio.conditioning.malformed')}
+                />
+              )}
+              {scene.referencePlateFreshness === 'out_of_date' && (
+                <Alert
+                  className='mt-10px'
+                  type='warning'
+                  content={t('conversation.creativeStudio.conditioning.plateOutOfDate')}
+                />
+              )}
             </article>
           ))}
         </div>

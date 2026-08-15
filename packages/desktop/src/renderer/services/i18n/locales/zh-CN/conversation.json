@@ -1259,6 +1259,16 @@
       "manualFallback": "继续手动编辑",
       "failed": "无法起草故事板。当前场景未被更改。"
     },
+    "conditioning": {
+      "inputsTitle": "此静帧的输入",
+      "role": { "cast": "角色", "look": "风格" },
+      "maximum": "此引擎最多接受 {{count}} 个简报参考。",
+      "unsupported": "此图像引擎无法使用有效的简报参考。请选择其他图像引擎，或从简报中移除这些参考。",
+      "overflow": "此图像引擎最多接受 {{maximum}} 个简报参考，但当前有 {{count}} 个有效参考。",
+      "malformed": "简报参考已更改或无效。请在生成前刷新审核。",
+      "reviewChanged": "简报参考或图像引擎已更改。请在生成前审核刷新后的输入。",
+      "plateOutOfDate": "所选首帧使用了不同的简报参考、宽高比或分辨率。你仍可渲染此片段。"
+    },
     "reference": {
       "generate": "生成参考图",
       "dialogTitle": "生成参考图像",

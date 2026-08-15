@@ -27,6 +27,7 @@ import {
   type StudioSubmitScenesRequest,
 } from '@/common/types/project/creativeStudioTypes';
 import { jobOutputRole, requestedMediaKind } from '@/common/types/project/creativeStudioOutputRole';
+import { resolveActiveStudioBriefReferences } from '@/common/types/project/creativeStudioManagedAssetCollections';
 import {
   ProviderDeadlineError,
   runWithProviderDeadline,
@@ -1234,6 +1235,13 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     const project = await requireExpectedProject(input.projectId, input.expectedRevision);
     if (disposed) throw new StudioJobManagerError('invalid_request');
     const outputRole = input.outputRole ?? 'take';
+    if (outputRole === 'reference') {
+      const activeBriefReferences = resolveActiveStudioBriefReferences(project.assets);
+      // Task 6 replaces this temporary guard with main-derived, adapter-validated conditioning.
+      // Until then, paying for a plate while silently omitting an active or malformed Brief input
+      // would contradict the exact review. Fail before route lookup or any durable/provider work.
+      if (activeBriefReferences === null || activeBriefReferences.length > 0) invalidRequest();
+    }
     // A reference plate paints one scene's first frame, so each scene brings its own prompt. A
     // batch-wide prompt could only ever describe one of them correctly.
     const referencePromptByScene = new Map<string, string>();

@@ -1272,6 +1272,16 @@
       "manualFallback": "Mit manueller Bearbeitung fortfahren",
       "failed": "Es konnte kein Storyboard entworfen werden. Deine aktuellen Szenen wurden nicht geändert."
     },
+    "conditioning": {
+      "inputsTitle": "Eingaben für dieses Standbild",
+      "role": { "cast": "Besetzung", "look": "Look" },
+      "maximum": "Diese Engine akzeptiert bis zu {{count}} Briefing-Referenzen.",
+      "unsupported": "Diese Bild-Engine kann keine aktiven Briefing-Referenzen verwenden. Wähle eine andere Bild-Engine oder entferne sie aus dem Briefing.",
+      "overflow": "Diese Bild-Engine akzeptiert höchstens {{maximum}} Briefing-Referenzen, aber {{count}} sind aktiv.",
+      "malformed": "Die Briefing-Referenzen wurden geändert oder sind ungültig. Aktualisiere die Prüfung vor der Generierung.",
+      "reviewChanged": "Die Briefing-Referenzen oder die Bild-Engine wurden geändert. Prüfe die aktualisierten Eingaben vor der Generierung.",
+      "plateOutOfDate": "Dieses ausgewählte erste Bild wurde mit anderen Briefing-Referenzen, einem anderen Seitenverhältnis oder einer anderen Auflösung erstellt. Du kannst den Clip trotzdem rendern."
+    },
     "reference": {
       "generate": "Referenz erstellen",
       "dialogTitle": "Referenzbild erstellen",

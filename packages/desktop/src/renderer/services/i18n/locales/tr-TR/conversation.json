@@ -1273,6 +1273,16 @@
       "manualFallback": "Elle düzenlemeye devam et",
       "failed": "Storyboard taslağı oluşturulamadı. Mevcut sahneleriniz değiştirilmedi."
     },
+    "conditioning": {
+      "inputsTitle": "Bu sabit görüntünün girdileri",
+      "role": { "cast": "Oyuncular", "look": "Görünüm" },
+      "maximum": "Bu motor en fazla {{count}} brief referansı kabul eder.",
+      "unsupported": "Bu görüntü motoru etkin brief referanslarını kullanamaz. Başka bir görüntü motoru seçin veya bunları brief'ten kaldırın.",
+      "overflow": "Bu görüntü motoru en fazla {{maximum}} brief referansı kabul eder, ancak {{count}} referans etkin.",
+      "malformed": "Brief referansları değişti veya geçersiz. Üretmeden önce incelemeyi yenileyin.",
+      "reviewChanged": "Brief referansları veya görüntü motoru değişti. Üretmeden önce yenilenen girdileri inceleyin.",
+      "plateOutOfDate": "Seçilen ilk kare farklı brief referansları, en-boy oranı veya çözünürlükle oluşturuldu. Bu klibi yine de işleyebilirsiniz."
+    },
     "reference": {
       "generate": "Referans oluştur",
       "dialogTitle": "Referans görseli oluştur",

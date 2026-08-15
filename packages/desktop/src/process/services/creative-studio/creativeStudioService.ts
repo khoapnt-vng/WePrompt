@@ -1360,15 +1360,38 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
 
     async dismissReferenceRequests(input: StudioDismissReferenceRequestsRequest): Promise<boolean> {
       assertSafeId(input.projectId, 'project id');
+      const hasExpectedRevision = input.expectedRevision !== undefined;
+      const hasExpectedRequests = input.expectedRequests !== undefined;
       if (
         input.requestIds.length === 0 ||
         input.requestIds.length > 50 ||
-        new Set(input.requestIds).size !== input.requestIds.length
+        new Set(input.requestIds).size !== input.requestIds.length ||
+        hasExpectedRevision !== hasExpectedRequests ||
+        (input.expectedRequests !== undefined &&
+          (!Array.isArray(input.expectedRequests) ||
+            input.expectedRequests.length !== input.requestIds.length ||
+            input.expectedRequests.some(
+              (request, index) => request?.id !== input.requestIds[index] || typeof request.sceneId !== 'string'
+            )))
       ) {
         throw new CreativeStudioServiceError('invalid_payload');
       }
       input.requestIds.forEach((requestId) => assertSafeId(requestId, 'reference request id'));
-      await deps.store.dismissReferenceRequests(input.projectId, input.requestIds);
+      input.expectedRequests?.forEach((request) => {
+        assertSafeId(request.id, 'reference request id');
+        assertSafeId(request.sceneId, 'reference request scene id');
+      });
+      if (input.expectedRevision !== undefined) assertExpectedRevision(input.expectedRevision);
+      await deps.store.dismissReferenceRequests(
+        input.projectId,
+        input.requestIds,
+        input.expectedRevision === undefined || input.expectedRequests === undefined
+          ? undefined
+          : {
+              expectedRevision: input.expectedRevision,
+              expectedRequests: input.expectedRequests,
+            }
+      );
       return true;
     },
 

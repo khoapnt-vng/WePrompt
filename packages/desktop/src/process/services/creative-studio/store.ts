@@ -23,6 +23,7 @@ import type {
   StudioProposal,
   StudioProposalPayload,
   StudioReferenceRequest,
+  StudioReferenceRequestAuthority,
   StudioRecordProposalInput,
   StudioProviderRef,
   StudioScene,
@@ -245,6 +246,11 @@ export class CreativeStudioStoreError extends Error {
   }
 }
 
+export type StudioReferenceRequestDismissAuthority = {
+  expectedRevision: number;
+  expectedRequests: StudioReferenceRequestAuthority[];
+};
+
 export type CreativeStudioStore = {
   listProjects(): Promise<StudioProjectSummary[]>;
   listQuarantinedProjectIds(): Promise<string[]>;
@@ -262,7 +268,11 @@ export type CreativeStudioStore = {
   recordProposal(input: StudioRecordProposalInput): Promise<StudioProposal>;
   listProposals(projectId: string): Promise<StudioProposal[]>;
   listPendingReferenceRequests(projectId: string): Promise<StudioReferenceRequest[]>;
-  dismissReferenceRequests(projectId: string, requestIds: string[]): Promise<void>;
+  dismissReferenceRequests(
+    projectId: string,
+    requestIds: string[],
+    authority?: StudioReferenceRequestDismissAuthority
+  ): Promise<void>;
   acceptProposal(
     projectId: string,
     proposalId: string,
@@ -2179,13 +2189,25 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       return listReferenceRequestsThroughQueue(projectId);
     },
 
-    async dismissReferenceRequests(projectId: string, requestIds: string[]): Promise<void> {
+    async dismissReferenceRequests(
+      projectId: string,
+      requestIds: string[],
+      authority?: StudioReferenceRequestDismissAuthority
+    ): Promise<void> {
       if (
         !isSafeId(projectId) ||
         requestIds.length === 0 ||
         requestIds.length > STUDIO_PROPOSAL_MAX_PENDING_PER_PROJECT ||
         new Set(requestIds).size !== requestIds.length ||
-        requestIds.some((requestId) => !isSafeProposalId(requestId))
+        requestIds.some((requestId) => !isSafeProposalId(requestId)) ||
+        (authority !== undefined &&
+          (!isIntegerInRange(authority.expectedRevision, 1, Number.MAX_SAFE_INTEGER) ||
+            !Array.isArray(authority.expectedRequests) ||
+            authority.expectedRequests.length !== requestIds.length ||
+            authority.expectedRequests.some(
+              (request, index) =>
+                request.id !== requestIds[index] || !isSafeProposalId(request.id) || !isSafeId(request.sceneId)
+            )))
       ) {
         throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio reference request identities');
       }
@@ -2193,9 +2215,23 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
         const root = await canonicalRoot();
         const project = await readProject(root, projectId);
         if (project === null) throw new CreativeStudioStoreError('not_found', 'Studio project not found');
+        if (authority !== undefined && project.revision !== authority.expectedRevision) {
+          throw new CreativeStudioStoreError('stale_project', 'Studio project has changed');
+        }
         const directories = await referenceRequestDirectories(root, projectId, false);
-        if (directories === null) return;
+        if (directories === null) {
+          if (authority !== undefined) {
+            throw new CreativeStudioStoreError('invalid_payload', 'Studio reference request authority changed');
+          }
+          return;
+        }
         const requests = await readReferenceRequestRecords(project, directories);
+        if (authority !== undefined) {
+          const currentSceneById = new Map(requests.map((request) => [request.id, request.sceneId]));
+          if (authority.expectedRequests.some((expected) => currentSceneById.get(expected.id) !== expected.sceneId)) {
+            throw new CreativeStudioStoreError('invalid_payload', 'Studio reference request authority changed');
+          }
+        }
         const requestedIds = new Set(requestIds);
         const dismissibleIds = new Set(
           requests.filter((request) => requestedIds.has(request.id)).map((request) => request.id)

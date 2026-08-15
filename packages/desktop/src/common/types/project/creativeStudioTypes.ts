@@ -401,8 +401,13 @@ export type StudioReferenceRequest = {
   createdAt: string;
 };
 
+export type StudioReferenceRequestAuthority = Pick<StudioReferenceRequest, 'id' | 'sceneId'>;
+
 export type StudioDismissReferenceRequestsRequest = StudioProjectRequest & {
   requestIds: string[];
+  /** Both fields are present only for an atomic checked consume before a human-confirmed spend. */
+  expectedRevision?: number;
+  expectedRequests?: StudioReferenceRequestAuthority[];
 };
 
 export type StudioProjectSummary = {

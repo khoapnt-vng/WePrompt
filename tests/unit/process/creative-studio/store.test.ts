@@ -964,6 +964,81 @@ describe('creative studio project store', () => {
       expect(readdirSync(path.join(rootDir, project.id, 'reference-requests', 'slots'))).toHaveLength(1);
     });
 
+    it('atomically dismisses only exact reviewed request identities at the expected project revision', async () => {
+      const created = await store.createProject(makeInput());
+      const project = await store.updateProject(created.id, (current) =>
+        addScene(addScene(current, 'scene_1'), 'scene_2')
+      );
+      const paths = await store.resolveProposalPaths(project.id);
+      const dismissed = await writeReferenceRequestRecord({
+        pendingDir: paths.referencePendingDir,
+        projectId: project.id,
+        sceneId: 'scene_1',
+        requestId: 'request_exact',
+      });
+      const retained = await writeReferenceRequestRecord({
+        pendingDir: paths.referencePendingDir,
+        projectId: project.id,
+        sceneId: 'scene_2',
+        requestId: 'request_unrelated',
+      });
+
+      await store.dismissReferenceRequests(project.id, [dismissed.id], {
+        expectedRevision: project.revision,
+        expectedRequests: [{ id: dismissed.id, sceneId: dismissed.sceneId }],
+      });
+
+      await expect(store.listPendingReferenceRequests(project.id)).resolves.toMatchObject([{ id: retained.id }]);
+      expect(existsSync(path.join(paths.referencePendingDir, `${dismissed.id}.json`))).toBe(false);
+      expect(existsSync(path.join(paths.referencePendingDir, `${retained.id}.json`))).toBe(true);
+    });
+
+    it.each([
+      {
+        condition: 'the request id was remapped',
+        authority: (projectRevision: number) => ({
+          expectedRevision: projectRevision,
+          expectedRequests: [{ id: 'request_checked', sceneId: 'scene_2' }],
+        }),
+        code: 'invalid_payload',
+      },
+      {
+        condition: 'the project revision changed',
+        authority: (projectRevision: number) => ({
+          expectedRevision: projectRevision - 1,
+          expectedRequests: [{ id: 'request_checked', sceneId: 'scene_1' }],
+        }),
+        code: 'stale_project',
+      },
+    ])('deletes nothing when $condition before checked consumption', async ({ authority, code }) => {
+      const created = await store.createProject(makeInput());
+      const project = await store.updateProject(created.id, (current) =>
+        addScene(addScene(current, 'scene_1'), 'scene_2')
+      );
+      const paths = await store.resolveProposalPaths(project.id);
+      const checked = await writeReferenceRequestRecord({
+        pendingDir: paths.referencePendingDir,
+        projectId: project.id,
+        sceneId: 'scene_1',
+        requestId: 'request_checked',
+      });
+      const unrelated = await writeReferenceRequestRecord({
+        pendingDir: paths.referencePendingDir,
+        projectId: project.id,
+        sceneId: 'scene_2',
+        requestId: 'request_unrelated',
+      });
+
+      await expect(
+        store.dismissReferenceRequests(project.id, [checked.id], authority(project.revision))
+      ).rejects.toMatchObject({ code });
+
+      await expect(store.listPendingReferenceRequests(project.id)).resolves.toHaveLength(2);
+      expect(existsSync(path.join(paths.referencePendingDir, `${checked.id}.json`))).toBe(true);
+      expect(existsSync(path.join(paths.referencePendingDir, `${unrelated.id}.json`))).toBe(true);
+      expect(readdirSync(path.join(rootDir, project.id, 'reference-requests', 'slots'))).toHaveLength(2);
+    });
+
     it('keeps proposal and reference-request inboxes independent', async () => {
       const project = await store.createProject(makeInput());
       const updated = await store.updateProject(project.id, (current) => addScene(current, 'scene_1'));

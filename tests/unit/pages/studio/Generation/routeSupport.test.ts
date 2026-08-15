@@ -46,6 +46,13 @@ const matchingContext = {
   hasReference: true,
 } satisfies StudioRouteSupportContext;
 
+const referencePlateContext = {
+  kind: 'image',
+  aspectRatio: '16:9',
+  resolution: '720p',
+  conditioningReferenceCount: 1,
+} satisfies StudioRouteSupportContext;
+
 describe('routeSupportsScene', () => {
   it('supports an audio-capable route when every renderer compatibility constraint matches', () => {
     expect(routeSupportsScene(route(), matchingContext)).toBe(true);
@@ -62,6 +69,17 @@ describe('routeSupportsScene', () => {
     expect(routeSupportsScene(firstFrameOnly, matchingContext)).toBe(true);
     expect(routeSupportsScene(conditioningOnly, { ...matchingContext, hasReference: false })).toBe(true);
     expect(routeSupportsScene(conditioningOnly, matchingContext)).toBe(false);
+  });
+
+  it('admits a zero-reference plate while rejecting zero-capacity and overflow conditioning', () => {
+    const twoInputRoute = route({
+      constraints: { ...route().constraints, maxConditioningImages: 2 },
+    });
+
+    expect(routeSupportsScene(route(), { ...referencePlateContext, conditioningReferenceCount: 0 })).toBe(true);
+    expect(routeSupportsScene(route(), referencePlateContext)).toBe(false);
+    expect(routeSupportsScene(twoInputRoute, { ...referencePlateContext, conditioningReferenceCount: 2 })).toBe(true);
+    expect(routeSupportsScene(twoInputRoute, { ...referencePlateContext, conditioningReferenceCount: 3 })).toBe(false);
   });
 
   it.each([
@@ -125,6 +143,11 @@ describe('explainRouteSupport', () => {
       reason: 'first_frame',
       candidate: route({ constraints: { ...route().constraints, supportsFirstFrame: false } }),
       context: { hasReference: true },
+    },
+    {
+      reason: 'conditioning',
+      candidate: route(),
+      context: { conditioningReferenceCount: 1 },
     },
   ] as const)('returns the ordered $reason capability reason', ({ reason, candidate, context }) => {
     expect(explainRouteSupport(candidate, context)).toBe(reason);

@@ -16,6 +16,7 @@ import type {
   StudioSceneGenerationChoice,
   StudioSubmitScenesRequest,
 } from '@/common/types/project/creativeStudioTypes';
+import { resolveActiveStudioBriefReferences } from '@/common/types/project/creativeStudioManagedAssetCollections';
 import { resolveShotEngine } from '../../studioRouteConstraints';
 import { explainRouteSupport, routeSupportsScene } from './routeSupport';
 
@@ -40,7 +41,8 @@ export type StudioSceneRenderBlock =
   | { code: 'frame'; role: StudioMediaKind; ratio: StudioAspectRatio }
   | { code: 'resolution'; role: StudioMediaKind; resolution: StudioResolution }
   | { code: 'duration'; role: StudioMediaKind; seconds: number }
-  | { code: 'first_frame'; role: StudioMediaKind };
+  | { code: 'first_frame'; role: StudioMediaKind }
+  | { code: 'conditioning'; role: StudioMediaKind; count: number; maximum: number };
 
 export type StudioSceneRenderBlockMessageKey =
   | 'conversation.creativeStudio.models.blocked.catalogUnloaded'
@@ -52,7 +54,9 @@ export type StudioSceneRenderBlockMessageKey =
   | 'conversation.creativeStudio.models.blocked.frame'
   | 'conversation.creativeStudio.models.blocked.resolution'
   | 'conversation.creativeStudio.models.blocked.duration'
-  | 'conversation.creativeStudio.models.blocked.firstFrame';
+  | 'conversation.creativeStudio.models.blocked.firstFrame'
+  | 'conversation.creativeStudio.conditioning.unsupported'
+  | 'conversation.creativeStudio.conditioning.overflow';
 
 export type StudioSceneRenderBlockMessage = {
   key: StudioSceneRenderBlockMessageKey;
@@ -68,6 +72,20 @@ export type GenerationSingleReviewRequest = {
   outputRole?: StudioSubmitScenesRequest['outputRole'];
   /** The one reviewed scene's reference prompt - a single review is a batch of one. */
   referencePrompt?: string;
+  conditioning?: GenerationReferenceConditioningSnapshot;
+  conditioningIssue?: 'malformed';
+};
+
+export type GenerationReferenceConditioningInput = {
+  assetId: string;
+  label: string;
+  role: 'cast' | 'look';
+};
+
+export type GenerationReferenceConditioningSnapshot = {
+  inputs: GenerationReferenceConditioningInput[];
+  maximum: number;
+  integrationLabelKey: StudioRouteCatalogEntry['integrationLabelKey'];
 };
 
 export type GenerationReviewRouteSnapshot = StudioSceneGenerationChoice &
@@ -178,7 +196,8 @@ const canonicalSelectedRoute = (
 export const describeSceneRenderBlock = (
   project: StudioRendererProject,
   catalog: StudioRouteCatalog | null,
-  scene: Pick<StudioScene, 'mediaKind'> & Partial<Pick<StudioScene, 'durationSeconds' | 'referenceAssetId'>>
+  scene: Pick<StudioScene, 'mediaKind'> &
+    Partial<Pick<StudioScene, 'durationSeconds' | 'referenceAssetId'>> & { conditioningReferenceCount?: number }
 ): StudioSceneRenderBlock | null => {
   const role = scene.mediaKind;
   if (catalog === null || catalog.catalogVersion.trim().length === 0) return { code: 'catalog_unloaded', role };
@@ -213,6 +232,7 @@ export const describeSceneRenderBlock = (
     resolution: project.resolution,
     durationSeconds: scene.durationSeconds,
     hasReference: scene.referenceAssetId !== null && scene.referenceAssetId !== undefined,
+    conditioningReferenceCount: scene.conditioningReferenceCount,
   });
   switch (reason) {
     case 'health':
@@ -225,6 +245,13 @@ export const describeSceneRenderBlock = (
       return { code: 'duration', role, seconds: scene.durationSeconds ?? 0 };
     case 'first_frame':
       return { code: 'first_frame', role };
+    case 'conditioning':
+      return {
+        code: 'conditioning',
+        role,
+        count: scene.conditioningReferenceCount ?? 0,
+        maximum: route.constraints.maxConditioningImages,
+      };
     case null:
       return null;
   }
@@ -255,7 +282,31 @@ export const describeSceneRenderBlockMessage = (block: StudioSceneRenderBlock): 
       return { key: 'conversation.creativeStudio.models.blocked.duration', values: { seconds: block.seconds } };
     case 'first_frame':
       return { key: 'conversation.creativeStudio.models.blocked.firstFrame' };
+    case 'conditioning':
+      return block.maximum === 0
+        ? { key: 'conversation.creativeStudio.conditioning.unsupported' }
+        : {
+            key: 'conversation.creativeStudio.conditioning.overflow',
+            values: { count: block.count, maximum: block.maximum },
+          };
   }
+};
+
+export const buildReferenceConditioningSnapshot = (
+  project: StudioRendererProject,
+  route: StudioRouteCatalogEntry
+): GenerationReferenceConditioningSnapshot | null => {
+  const active = resolveActiveStudioBriefReferences(project.assets);
+  if (active === null) return null;
+  return {
+    inputs: active.map((asset) => ({
+      assetId: asset.id,
+      label: asset.briefReferenceLabel!,
+      role: asset.briefReferenceRole!,
+    })),
+    maximum: route.constraints.maxConditioningImages,
+    integrationLabelKey: route.integrationLabelKey,
+  };
 };
 
 /** Builds a paid single-scene review request only for a canonical, compatible persisted route. */
@@ -270,22 +321,35 @@ export const buildSingleSceneReviewRequest = ({
   outputRole,
   referencePrompt,
 }: BuildSingleSceneReviewRequestInput): GenerationSingleReviewRequest | null => {
+  if (catalog === null) return null;
+  const selected = resolveShotEngine(project, scene);
+  if (selected === null) return null;
+  const route = canonicalSelectedRoute(catalog, scene.mediaKind, selected);
+  if (route === null) return null;
+  const conditioning = outputRole === 'reference' ? buildReferenceConditioningSnapshot(project, route) : undefined;
   const renderTarget = {
     ...scene,
     ...(durationSeconds === undefined ? {} : { durationSeconds }),
     ...(hasReference === undefined
       ? {}
       : { referenceAssetId: hasReference ? (scene.referenceAssetId ?? '__review_reference__') : null }),
+    ...(conditioning === undefined
+      ? {}
+      : { conditioningReferenceCount: conditioning === null ? Number.POSITIVE_INFINITY : conditioning.inputs.length }),
   };
-  if (describeSceneRenderBlock(project, catalog, renderTarget) !== null || catalog === null) return null;
-  const selected = resolveShotEngine(project, scene);
-  if (selected === null) return null;
-  const route = canonicalSelectedRoute(catalog, scene.mediaKind, selected);
-  if (
-    route === null ||
-    !routeSupportsScene(route, { kind: scene.mediaKind, aspectRatio, resolution, durationSeconds, hasReference })
-  )
-    return null;
+  const block = describeSceneRenderBlock(project, catalog, renderTarget);
+  if (block !== null && block.code !== 'conditioning') return null;
+  const routeValid = routeSupportsScene(route, {
+    kind: scene.mediaKind,
+    aspectRatio,
+    resolution,
+    durationSeconds,
+    hasReference,
+    ...(conditioning === undefined
+      ? {}
+      : { conditioningReferenceCount: conditioning === null ? Number.POSITIVE_INFINITY : conditioning.inputs.length }),
+  });
+  if (!routeValid && block?.code !== 'conditioning') return null;
   return {
     sceneId: scene.id,
     route: {
@@ -295,11 +359,13 @@ export const buildSingleSceneReviewRequest = ({
       model: route.model,
       kind: route.kind,
     },
-    routeStatus: 'valid',
+    routeStatus: routeValid ? 'valid' : 'invalid',
     catalogVersion: catalog.catalogVersion,
     availableRoutes: catalogRoutes(catalog),
     ...(outputRole === undefined ? {} : { outputRole }),
     ...(referencePrompt === undefined ? {} : { referencePrompt }),
+    ...(conditioning === undefined || conditioning === null ? {} : { conditioning }),
+    ...(conditioning === null ? { conditioningIssue: 'malformed' as const } : {}),
   };
 };
 

@@ -19,9 +19,11 @@ export type StudioRouteSupportContext = {
   resolution?: StudioResolution;
   durationSeconds?: number;
   hasReference?: boolean;
+  /** Active Brief inputs for an image reference plate. Undefined for ordinary takes and batches. */
+  conditioningReferenceCount?: number;
 };
 
-export type StudioRouteSupportReason = 'health' | 'frame' | 'resolution' | 'duration' | 'first_frame';
+export type StudioRouteSupportReason = 'health' | 'frame' | 'resolution' | 'duration' | 'first_frame' | 'conditioning';
 
 export const explainRouteSupport = (
   route: StudioRouteCatalogEntry,
@@ -42,6 +44,12 @@ export const explainRouteSupport = (
     return 'duration';
   }
   if (context.hasReference === true && !route.constraints.supportsFirstFrame) return 'first_frame';
+  if (
+    context.conditioningReferenceCount !== undefined &&
+    context.conditioningReferenceCount > route.constraints.maxConditioningImages
+  ) {
+    return 'conditioning';
+  }
   return null;
 };
 
@@ -55,8 +63,23 @@ export const explainRouteSupport = (
  */
 export const routeSupportsScene = (
   route: StudioRouteCatalogEntry,
-  { kind, sceneId, routeSceneId, aspectRatio, resolution, durationSeconds, hasReference }: StudioRouteSupportContext
+  {
+    kind,
+    sceneId,
+    routeSceneId,
+    aspectRatio,
+    resolution,
+    durationSeconds,
+    hasReference,
+    conditioningReferenceCount,
+  }: StudioRouteSupportContext
 ): boolean =>
   (kind === undefined || route.kind === kind) &&
   (sceneId === undefined || routeSceneId === sceneId) &&
-  explainRouteSupport(route, { aspectRatio, resolution, durationSeconds, hasReference }) === null;
+  explainRouteSupport(route, {
+    aspectRatio,
+    resolution,
+    durationSeconds,
+    hasReference,
+    conditioningReferenceCount,
+  }) === null;

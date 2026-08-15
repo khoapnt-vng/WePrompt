@@ -1289,6 +1289,16 @@
       "manualFallback": "Continuar com a edição manual",
       "failed": "Não foi possível criar um rascunho do storyboard. Suas cenas atuais não foram alteradas."
     },
+    "conditioning": {
+      "inputsTitle": "Entradas para esta imagem estática",
+      "role": { "cast": "Elenco", "look": "Visual" },
+      "maximum": "Este mecanismo aceita até {{count}} referências do briefing.",
+      "unsupported": "Este mecanismo de imagem não pode usar referências ativas do briefing. Escolha outro mecanismo ou remova-as do briefing.",
+      "overflow": "Este mecanismo de imagem aceita no máximo {{maximum}} referências do briefing, mas há {{count}} ativas.",
+      "malformed": "As referências do briefing mudaram ou são inválidas. Atualize a revisão antes de gerar.",
+      "reviewChanged": "As referências do briefing ou o mecanismo de imagem mudaram. Revise as entradas atualizadas antes de gerar.",
+      "plateOutOfDate": "Este primeiro quadro foi criado com outras referências do briefing, outra proporção ou resolução. Você ainda pode renderizar este clipe."
+    },
     "reference": {
       "generate": "Gerar referência",
       "dialogTitle": "Gerar uma imagem de referência",

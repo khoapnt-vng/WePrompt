@@ -1284,6 +1284,16 @@
       "manualFallback": "Continuar con la edición manual",
       "failed": "No se ha podido crear un borrador del guion gráfico. Las escenas actuales no se han modificado."
     },
+    "conditioning": {
+      "inputsTitle": "Entradas para esta imagen fija",
+      "role": { "cast": "Reparto", "look": "Estilo" },
+      "maximum": "Este motor acepta hasta {{count}} referencias del briefing.",
+      "unsupported": "Este motor de imagen no puede usar referencias activas del briefing. Elige otro motor de imagen o elimínalas del briefing.",
+      "overflow": "Este motor de imagen acepta como máximo {{maximum}} referencias del briefing, pero hay {{count}} activas.",
+      "malformed": "Las referencias del briefing cambiaron o no son válidas. Actualiza la revisión antes de generar.",
+      "reviewChanged": "Las referencias del briefing o el motor de imagen cambiaron. Revisa las entradas actualizadas antes de generar.",
+      "plateOutOfDate": "Este primer fotograma se creó con otras referencias del briefing, otra relación de aspecto o resolución. Aún puedes renderizar este clip."
+    },
     "reference": {
       "generate": "Generar referencia",
       "dialogTitle": "Generar una imagen de referencia",

@@ -1106,6 +1106,16 @@
       "manualFallback": "Continue with manual editing",
       "failed": "A storyboard could not be drafted. Your current scenes were not changed."
     },
+    "conditioning": {
+      "inputsTitle": "Inputs for this still",
+      "role": { "cast": "Cast", "look": "Look" },
+      "maximum": "This engine accepts up to {{count}} Brief references.",
+      "unsupported": "This image engine cannot use active Brief references. Choose another image engine or remove them from the Brief.",
+      "overflow": "This image engine accepts at most {{maximum}} Brief references, but {{count}} are active.",
+      "malformed": "Brief references changed or are invalid. Refresh the review before generating.",
+      "reviewChanged": "The Brief references or image engine changed. Review the refreshed inputs before generating.",
+      "plateOutOfDate": "This selected first frame was made with different Brief references, aspect ratio, or resolution. You can still render this clip."
+    },
     "reference": {
       "generate": "Generate reference",
       "dialogTitle": "Generate a reference image",

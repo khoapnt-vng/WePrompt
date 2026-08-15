@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type {
+  StudioAsset,
   StudioRendererProject,
   StudioRouteCatalog,
   StudioRouteCatalogEntry,
@@ -105,6 +106,20 @@ const scene = (overrides: Partial<StudioScene> = {}): StudioScene => ({
   ...overrides,
 });
 
+const briefReference = (id: string, role: 'cast' | 'look', label: string, createdAt: string): StudioAsset => ({
+  id,
+  projectId: 'project-1',
+  sceneId: null,
+  mediaKind: 'image',
+  mimeType: 'image/png',
+  managedAsset: { collection: 'imports', fileName: `${id}.png` },
+  byteSize: 32,
+  sha256: id.padEnd(64, 'a').slice(0, 64),
+  createdAt,
+  briefReferenceRole: role,
+  briefReferenceLabel: label,
+});
+
 describe('generation review requests', () => {
   it('builds only a fully compatible canonical single-scene review request', () => {
     expect(
@@ -148,6 +163,71 @@ describe('generation review requests', () => {
       referencePrompt: 'Edited first-frame prompt',
       route: { kind: 'image' },
     });
+  });
+
+  it('freezes ordered cast/look labels and the exact image route capacity for a reference plate', () => {
+    const source = catalog();
+    source.image.options[0]!.constraints.maxConditioningImages = 3;
+    source.image.selectedRoute!.constraints.maxConditioningImages = 3;
+    const cast = briefReference('cast-2', 'cast', 'Scarf', '2026-08-02T00:00:00.000Z');
+    const earlierCast = briefReference('cast-1', 'cast', 'Telescope', '2026-08-01T00:00:00.000Z');
+    const look = briefReference('look-1', 'look', 'Moonlight', '2026-07-01T00:00:00.000Z');
+
+    expect(
+      buildSingleSceneReviewRequest({
+        project: project({ assets: { [look.id]: look, [cast.id]: cast, [earlierCast.id]: earlierCast } }),
+        catalog: source,
+        scene: { id: 'scene-1', mediaKind: 'image' },
+        outputRole: 'reference',
+        referencePrompt: 'Edited first-frame prompt',
+      })
+    ).toMatchObject({
+      routeStatus: 'valid',
+      conditioning: {
+        maximum: 3,
+        integrationLabelKey: 'imageApi',
+        inputs: [
+          { assetId: 'cast-1', label: 'Telescope', role: 'cast' },
+          { assetId: 'cast-2', label: 'Scarf', role: 'cast' },
+          { assetId: 'look-1', label: 'Moonlight', role: 'look' },
+        ],
+      },
+    });
+  });
+
+  it('keeps a blocked reference plate reviewable instead of turning its click into a no-op', () => {
+    const cast = briefReference('cast-1', 'cast', 'Scarf', '2026-08-01T00:00:00.000Z');
+
+    const request = buildSingleSceneReviewRequest({
+      project: project({ assets: { [cast.id]: cast } }),
+      catalog: catalog(),
+      scene: { id: 'scene-1', mediaKind: 'image' },
+      outputRole: 'reference',
+      referencePrompt: 'A portrait in moonlight',
+    });
+
+    expect(request).toMatchObject({
+      routeStatus: 'invalid',
+      conditioning: {
+        maximum: 0,
+        inputs: [{ assetId: 'cast-1', label: 'Scarf', role: 'cast' }],
+      },
+    });
+  });
+
+  it('keeps malformed active reference metadata inside an invalid, explicit paid review', () => {
+    const malformed = { ...briefReference('cast-1', 'cast', 'Scarf', '2026-08-01T00:00:00.000Z') };
+    delete malformed.briefReferenceLabel;
+
+    expect(
+      buildSingleSceneReviewRequest({
+        project: project({ assets: { [malformed.id]: malformed } }),
+        catalog: catalog(),
+        scene: { id: 'scene-1', mediaKind: 'image' },
+        outputRole: 'reference',
+        referencePrompt: 'A portrait in moonlight',
+      })
+    ).toMatchObject({ routeStatus: 'invalid', conditioningIssue: 'malformed' });
   });
 
   it('snapshots each persisted role against its own catalog and copies renderer-safe route metadata', () => {

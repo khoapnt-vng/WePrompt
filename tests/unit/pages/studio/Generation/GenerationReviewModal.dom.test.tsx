@@ -10,8 +10,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { GenerationReviewRouteSnapshot } from '@renderer/pages/studio/components/Generation/generationRequests';
 import {
+  collectSubmittableRoutes,
   GenerationReviewModal,
   submitExactGenerationReview,
+  type GenerationReviewConfirmation,
   type GenerationReviewModalProps,
   type GenerationReviewScene,
 } from '@renderer/pages/studio/components/Generation/GenerationReviewModal';
@@ -86,6 +88,19 @@ const breachingScene = (): GenerationReviewScene => ({
   promptText: 'An ACME billboard at dusk',
 });
 
+const conditionedReferenceScene = (): GenerationReviewScene => ({
+  ...mixedScenes()[0]!,
+  outputRole: 'reference',
+  conditioning: {
+    maximum: 3,
+    integrationLabelKey: 'imageApi',
+    inputs: [
+      { assetId: 'asset-cast', label: 'Scarf and telescope', role: 'cast' },
+      { assetId: 'asset-look', label: 'Blue hour', role: 'look' },
+    ],
+  },
+});
+
 const createProps = (overrides: Partial<GenerationReviewModalProps> = {}): GenerationReviewModalProps => ({
   visible: true,
   mode: 'batch',
@@ -148,6 +163,49 @@ describe('GenerationReviewModal', () => {
     expect(submitScenes).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['reordered inputs', (value: GenerationReviewConfirmation) => value.conditioning![0]!.inputs.reverse()],
+    ['an omitted input', (value: GenerationReviewConfirmation) => value.conditioning![0]!.inputs.pop()],
+    [
+      'a substituted input ID',
+      (value: GenerationReviewConfirmation) => {
+        value.conditioning![0]!.inputs[0]!.assetId = 'asset-other';
+      },
+    ],
+    [
+      'a changed label',
+      (value: GenerationReviewConfirmation) => {
+        value.conditioning![0]!.inputs[0]!.label = 'Different cast';
+      },
+    ],
+    [
+      'a changed role',
+      (value: GenerationReviewConfirmation) => {
+        value.conditioning![0]!.inputs[0]!.role = 'look';
+      },
+    ],
+    [
+      'a changed maximum',
+      (value: GenerationReviewConfirmation) => {
+        value.conditioning![0]!.maximum = 4;
+      },
+    ],
+    [
+      'a changed integration',
+      (value: GenerationReviewConfirmation) => {
+        value.conditioning![0]!.integrationLabelKey = 'openRouter';
+      },
+    ],
+  ])('rejects conditioning authority with %s before the paid submit callback', async (_condition, mutate) => {
+    const reviewedScenes = [conditionedReferenceScene()];
+    const confirmation = structuredClone(collectSubmittableRoutes(reviewedScenes)!);
+    mutate(confirmation);
+    const submitScenes = vi.fn(async () => true);
+
+    await expect(submitExactGenerationReview(reviewedScenes, confirmation, submitScenes)).resolves.toBe('rejected');
+    expect(submitScenes).not.toHaveBeenCalled();
+  });
+
   it('names the breached rule on the shot and blocks Confirm before anything is charged', () => {
     render(
       <GenerationReviewModal
@@ -164,6 +222,41 @@ describe('GenerationReviewModal', () => {
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'conversation.creativeStudio.review.confirm' })).toBeDisabled();
     expect(screen.getByText('conversation.creativeStudio.rules.breachBlockedConfirm')).toBeInTheDocument();
+  });
+
+  it('names ordered conditioning labels, roles, integration and maximum without exposing asset IDs', () => {
+    render(<GenerationReviewModal {...createProps({ mode: 'single', scenes: [conditionedReferenceScene()] })} />);
+
+    const dialog = screen.getByRole('dialog');
+    const text = dialog.textContent ?? '';
+    expect(text.indexOf('Scarf and telescope')).toBeLessThan(text.indexOf('Blue hour'));
+    expect(within(dialog).getByText('conversation.creativeStudio.conditioning.role.cast')).toBeVisible();
+    expect(within(dialog).getByText('conversation.creativeStudio.conditioning.role.look')).toBeVisible();
+    expect(within(dialog).getByText('conversation.creativeStudio.conditioning.maximum:count=3')).toBeVisible();
+    expect(within(dialog).getByText('settings.mediaModels.integration.imageApi')).toBeVisible();
+    expect(text).not.toContain('asset-cast');
+    expect(text).not.toContain('asset-look');
+  });
+
+  it('does not claim cast or look conditioning for an ordinary clip review', () => {
+    render(<GenerationReviewModal {...createProps({ mode: 'single', scenes: [mixedScenes()[1]!] })} />);
+
+    expect(screen.queryByText('conversation.creativeStudio.conditioning.inputsTitle')).not.toBeInTheDocument();
+    expect(screen.queryByText('conversation.creativeStudio.conditioning.role.cast')).not.toBeInTheDocument();
+  });
+
+  it('warns about an out-of-date selected plate without disabling deliberate clip confirmation', () => {
+    render(
+      <GenerationReviewModal
+        {...createProps({
+          mode: 'single',
+          scenes: [{ ...mixedScenes()[1]!, referencePlateFreshness: 'out_of_date' }],
+        })}
+      />
+    );
+
+    expect(screen.getByText('conversation.creativeStudio.conditioning.plateOutOfDate')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.review.confirm' })).toBeEnabled();
   });
 
   it('offers to hand the breach to the Director rather than leaving a dead end', () => {

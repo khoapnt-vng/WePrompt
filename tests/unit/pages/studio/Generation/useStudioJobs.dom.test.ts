@@ -327,7 +327,15 @@ describe('useStudioJobs', () => {
     emitProposalUpdated('project-1');
     await waitFor(() => expect(bridge.listPendingReferenceRequests.invoke).toHaveBeenCalledTimes(2));
     await act(async () => {
-      expect(await result.current.dismissReferenceRequests([request.id])).toBe(true);
+      expect(await result.current.consumeReferenceRequests([{ id: request.id, sceneId: request.sceneId }], 2)).toBe(
+        'consumed'
+      );
+    });
+    expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledWith({
+      projectId: 'project-1',
+      requestIds: [request.id],
+      expectedRevision: 2,
+      expectedRequests: [{ id: request.id, sceneId: request.sceneId }],
     });
     expect(result.current.referenceRequests).toEqual([]);
 

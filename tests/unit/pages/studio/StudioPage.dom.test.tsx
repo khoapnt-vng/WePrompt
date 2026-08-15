@@ -182,6 +182,21 @@ const asset = (id: string): StudioAsset => ({
   createdAt: '2026-07-30T00:00:00.000Z',
 });
 
+const briefReferenceAsset = (id = 'brief-cast', overrides: Partial<StudioAsset> = {}): StudioAsset => ({
+  id,
+  projectId: 'project-1',
+  sceneId: null,
+  mediaKind: 'image',
+  mimeType: 'image/png',
+  managedAsset: { collection: 'imports', fileName: `${id}.png` },
+  byteSize: 128,
+  sha256: id.padEnd(64, 'a').slice(0, 64),
+  createdAt: '2026-07-30T00:00:00.000Z',
+  briefReferenceRole: 'cast',
+  briefReferenceLabel: 'Scarf and telescope',
+  ...overrides,
+});
+
 const routes = (): StudioRouteCatalog => ({
   storyboard: {
     status: 'ready',
@@ -270,6 +285,32 @@ const routesWithImage = (route = imageRoute()): StudioRouteCatalog => ({
   },
 });
 
+const videoRoute = (overrides: Partial<StudioRouteCatalogEntry> = {}): StudioRouteCatalogEntry => ({
+  ...imageRoute(),
+  choiceId: 'choice_video',
+  providerId: 'provider-video',
+  providerName: 'Video provider',
+  model: 'video-model',
+  integrationLabelKey: 'selfHostedVideoGateway',
+  kind: 'video',
+  ...overrides,
+});
+
+const routesWithVideo = (route = videoRoute()): StudioRouteCatalog => ({
+  ...routesWithImage(),
+  video: {
+    status: 'ready',
+    selected: {
+      choiceId: route.choiceId,
+      providerId: route.providerId,
+      model: route.model,
+    },
+    selectedRoute: route,
+    selectionIssue: null,
+    options: [route],
+  },
+});
+
 const deferred = <T,>() => {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((resolvePromise) => {
@@ -296,10 +337,27 @@ const installReferenceRequestQueue = (
 } => {
   let pending: StudioReferenceRequest[] = [...initial];
   bridge.listPendingReferenceRequests.invoke.mockImplementation(async () => ok([...pending]));
-  bridge.dismissReferenceRequests.invoke.mockImplementation(async ({ requestIds }: { requestIds: string[] }) => {
-    pending = pending.filter((request) => !requestIds.includes(request.id));
-    return ok(true);
-  });
+  bridge.dismissReferenceRequests.invoke.mockImplementation(
+    async (input: {
+      requestIds: string[];
+      expectedRequests?: Array<Pick<StudioReferenceRequest, 'id' | 'sceneId'>>;
+    }) => {
+      const { requestIds, expectedRequests } = input;
+      if (expectedRequests !== undefined) {
+        const pendingSceneById = new Map(pending.map((request) => [request.id, request.sceneId]));
+        if (
+          expectedRequests.length !== requestIds.length ||
+          expectedRequests.some(
+            (request, index) => request.id !== requestIds[index] || pendingSceneById.get(request.id) !== request.sceneId
+          )
+        ) {
+          return invalidPayload();
+        }
+      }
+      pending = pending.filter((request) => !requestIds.includes(request.id));
+      return ok(true);
+    }
+  );
   return {
     queue: (request) => {
       pending = [...pending, request];
@@ -1692,6 +1750,459 @@ describe('StudioPage and useStudioProject', () => {
     expect(screen.queryByRole('dialog', { name: 'conversation.creativeStudio.review.title' })).not.toBeInTheDocument();
   });
 
+  it('keeps an active-reference Director request queued and opens the exact paid review', async () => {
+    const opening = scene({ mediaKind: 'video' });
+    const cast = briefReferenceAsset();
+    const admitted = imageRoute({
+      constraints: { ...imageRoute().constraints, maxConditioningImages: 1 },
+    });
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(
+        project('project-1', {
+          sceneOrder: [opening.id],
+          scenes: { [opening.id]: opening },
+          assets: { [cast.id]: cast },
+        })
+      )
+    );
+    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([referenceRequest(opening.id, 1)]));
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage(admitted)));
+
+    renderRoute();
+
+    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+    expect(within(review).getByText('Scarf and telescope')).toBeVisible();
+    expect(bridge.dismissReferenceRequests.invoke).not.toHaveBeenCalled();
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+  });
+
+  it('closes an active-reference Director review without consuming it and shows it again after remount', async () => {
+    const opening = scene({ mediaKind: 'video' });
+    const cast = briefReferenceAsset();
+    const request = referenceRequest(opening.id, 1);
+    const queue = installReferenceRequestQueue([request]);
+    const admitted = imageRoute({ constraints: { ...imageRoute().constraints, maxConditioningImages: 1 } });
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(
+        project('project-1', {
+          sceneOrder: [opening.id],
+          scenes: { [opening.id]: opening },
+          assets: { [cast.id]: cast },
+        })
+      )
+    );
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage(admitted)));
+
+    const firstMount = renderRoute();
+    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.cancel' }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'conversation.creativeStudio.review.title' })).not.toBeInTheDocument()
+    );
+    expect(bridge.dismissReferenceRequests.invoke).not.toHaveBeenCalled();
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+    expect(queue.pendingIds()).toEqual([request.id]);
+
+    firstMount.view.unmount();
+    renderRoute();
+    expect(await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' })).toBeVisible();
+    expect(queue.pendingIds()).toEqual([request.id]);
+  });
+
+  it('fails malformed active-reference metadata closed in the Director review', async () => {
+    const opening = scene({ mediaKind: 'video' });
+    const malformed = briefReferenceAsset();
+    delete malformed.briefReferenceLabel;
+    const admitted = imageRoute({
+      constraints: { ...imageRoute().constraints, maxConditioningImages: 1 },
+    });
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(
+        project('project-1', {
+          sceneOrder: [opening.id],
+          scenes: { [opening.id]: opening },
+          assets: { [malformed.id]: malformed },
+        })
+      )
+    );
+    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([referenceRequest(opening.id, 1)]));
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage(admitted)));
+
+    renderRoute();
+
+    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+    expect(within(review).getByText('conversation.creativeStudio.conditioning.malformed')).toBeVisible();
+    expect(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' })).toBeDisabled();
+    expect(bridge.dismissReferenceRequests.invoke).not.toHaveBeenCalled();
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+  });
+
+  it('consumes exactly the reviewed active-reference request before a human-confirmed spend', async () => {
+    const opening = scene({ mediaKind: 'video' });
+    const cast = briefReferenceAsset();
+    const request = referenceRequest(opening.id, 1);
+    const admitted = imageRoute({
+      constraints: { ...imageRoute().constraints, maxConditioningImages: 1 },
+    });
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(
+        project('project-1', {
+          sceneOrder: [opening.id],
+          scenes: { [opening.id]: opening },
+          assets: { [cast.id]: cast },
+        })
+      )
+    );
+    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([request]));
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage(admitted)));
+
+    renderRoute();
+    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
+
+    await waitFor(() =>
+      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ outputRole: 'reference', sceneIds: [opening.id] })
+      )
+    );
+    expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project-1',
+      requestIds: [request.id],
+      expectedRevision: 2,
+      expectedRequests: [{ id: request.id, sceneId: request.sceneId }],
+    });
+    expect(bridge.dismissReferenceRequests.invoke.mock.invocationCallOrder[0]).toBeLessThan(
+      bridge.submitScenes.invoke.mock.invocationCallOrder[0]!
+    );
+  });
+
+  it('spends zero when an active-reference request cannot be consumed on Confirm', async () => {
+    const opening = scene({ mediaKind: 'video' });
+    const cast = briefReferenceAsset();
+    const request = referenceRequest(opening.id, 1);
+    const admitted = imageRoute({
+      constraints: { ...imageRoute().constraints, maxConditioningImages: 1 },
+    });
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(
+        project('project-1', {
+          sceneOrder: [opening.id],
+          scenes: { [opening.id]: opening },
+          assets: { [cast.id]: cast },
+        })
+      )
+    );
+    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([request]));
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage(admitted)));
+    bridge.dismissReferenceRequests.invoke.mockResolvedValueOnce(failure()).mockResolvedValueOnce(ok(true));
+
+    renderRoute();
+    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
+
+    expect(await within(review).findByText('conversation.creativeStudio.reference.dismissFailed')).toBeVisible();
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+
+    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
+    await waitFor(() => expect(bridge.submitScenes.invoke).toHaveBeenCalledTimes(1));
+    expect(bridge.dismissReferenceRequests.invoke).toHaveBeenNthCalledWith(2, {
+      projectId: 'project-1',
+      requestIds: [request.id],
+      expectedRevision: 2,
+      expectedRequests: [{ id: request.id, sceneId: request.sceneId }],
+    });
+  });
+
+  it('refreshes the review and spends zero when checked consumption finds a revision race', async () => {
+    const opening = scene({ mediaKind: 'video' });
+    const cast = briefReferenceAsset();
+    const request = referenceRequest(opening.id, 1);
+    const admitted = imageRoute({ constraints: { ...imageRoute().constraints, maxConditioningImages: 1 } });
+    const initial = project('project-1', {
+      sceneOrder: [opening.id],
+      scenes: { [opening.id]: opening },
+      assets: { [cast.id]: cast },
+    });
+    const revised = project('project-1', {
+      revision: 3,
+      sceneOrder: [opening.id],
+      scenes: { [opening.id]: opening },
+      assets: {},
+    });
+    let canonical = initial;
+    bridge.getProject.invoke.mockImplementation(async () => ok(canonical));
+    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([request]));
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage(admitted)));
+    bridge.dismissReferenceRequests.invoke
+      .mockImplementationOnce(async () => {
+        canonical = revised;
+        return stale();
+      })
+      .mockResolvedValueOnce(ok(true));
+
+    renderRoute();
+    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
+
+    expect(await within(review).findByText('conversation.creativeStudio.conditioning.reviewChanged')).toBeVisible();
+    expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project-1',
+      requestIds: [request.id],
+      expectedRevision: 2,
+      expectedRequests: [{ id: request.id, sceneId: request.sceneId }],
+    });
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+    await waitFor(() => expect(bridge.listPendingReferenceRequests.invoke).toHaveBeenCalledTimes(2));
+
+    const refreshedReview = await screen.findByRole('dialog', {
+      name: 'conversation.creativeStudio.review.title',
+    });
+    expect(within(refreshedReview).queryByText('Scarf and telescope')).not.toBeInTheDocument();
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+    fireEvent.click(
+      within(refreshedReview).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' })
+    );
+    await waitFor(() => expect(bridge.submitScenes.invoke).toHaveBeenCalledTimes(1));
+    expect(bridge.dismissReferenceRequests.invoke).toHaveBeenNthCalledWith(2, {
+      projectId: 'project-1',
+      requestIds: [request.id],
+      expectedRevision: 3,
+      expectedRequests: [{ id: request.id, sceneId: request.sceneId }],
+    });
+    expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ expectedRevision: 3 })
+    );
+  });
+
+  it('keeps recovery modal actions locked and preserves the queued request when Cancel follows recovery', async () => {
+    const opening = scene({ mediaKind: 'video' });
+    const cast = briefReferenceAsset();
+    const request = referenceRequest(opening.id, 1);
+    const queue = installReferenceRequestQueue([request]);
+    const admitted = imageRoute({ constraints: { ...imageRoute().constraints, maxConditioningImages: 1 } });
+    const canonical = project('project-1', {
+      sceneOrder: [opening.id],
+      scenes: { [opening.id]: opening },
+      assets: { [cast.id]: cast },
+    });
+    const recovery = deferred<StudioCommandResult<StudioRendererProject>>();
+    bridge.getProject.invoke.mockResolvedValue(ok(canonical));
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage(admitted)));
+    bridge.dismissReferenceRequests.invoke.mockImplementationOnce(async () => {
+      bridge.getProject.invoke.mockReturnValue(recovery.promise);
+      return invalidPayload();
+    });
+
+    const firstMount = renderRoute();
+    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+    const confirm = within(review).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' });
+    const cancel = within(review).getByRole('button', { name: 'conversation.creativeStudio.review.cancel' });
+    fireEvent.click(confirm);
+
+    await waitFor(() => expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledTimes(1));
+    expect(confirm).toBeDisabled();
+    expect(cancel).toBeDisabled();
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+
+    recovery.resolve(ok(canonical));
+    expect(await within(review).findByText('conversation.creativeStudio.conditioning.reviewChanged')).toBeVisible();
+    await waitFor(() => expect(confirm).toBeEnabled());
+    expect(cancel).toBeEnabled();
+    fireEvent.click(cancel);
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'conversation.creativeStudio.review.title' })).not.toBeInTheDocument()
+    );
+    expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledTimes(1);
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+    expect(queue.pendingIds()).toContain(request.id);
+
+    firstMount.view.unmount();
+    bridge.getProject.invoke.mockResolvedValue(ok(canonical));
+    renderRoute();
+    expect(await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' })).toBeVisible();
+  });
+
+  it('refreshes and rejects a stale active-reference confirmation when route capacity changes', async () => {
+    const opening = scene({ mediaKind: 'video' });
+    const cast = briefReferenceAsset();
+    const admitted = imageRoute({
+      constraints: { ...imageRoute().constraints, maxConditioningImages: 1 },
+    });
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(
+        project('project-1', {
+          sceneOrder: [opening.id],
+          scenes: { [opening.id]: opening },
+          assets: { [cast.id]: cast },
+        })
+      )
+    );
+    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([referenceRequest(opening.id, 1)]));
+    bridge.listRoutes.invoke
+      .mockResolvedValueOnce(ok(routesWithImage(admitted)))
+      .mockResolvedValueOnce(ok(routesWithImage()));
+
+    renderRoute();
+    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
+
+    expect(await within(review).findByText('conversation.creativeStudio.conditioning.reviewChanged')).toBeVisible();
+    expect(bridge.dismissReferenceRequests.invoke).not.toHaveBeenCalled();
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+  });
+
+  it('reopens a stale user-initiated reference review with the current exact inputs immediately', async () => {
+    let onProjectUpdate: ((event: { projectId: string }) => void) | undefined;
+    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
+      onProjectUpdate = listener;
+      return () => {};
+    });
+    const opening = scene({ mediaKind: 'video' });
+    const cast = briefReferenceAsset();
+    const look = briefReferenceAsset('brief_look', {
+      briefReferenceLabel: 'Blue hour',
+      briefReferenceRole: 'look',
+    });
+    const initial = project('project-1', {
+      sceneOrder: [opening.id],
+      scenes: { [opening.id]: opening },
+      assets: { [cast.id]: cast },
+    });
+    const revised = project('project-1', {
+      revision: 3,
+      sceneOrder: [opening.id],
+      scenes: { [opening.id]: opening },
+      assets: { [cast.id]: cast, [look.id]: look },
+    });
+    let canonicalProject = initial;
+    const admitted = imageRoute({ constraints: { ...imageRoute().constraints, maxConditioningImages: 2 } });
+    bridge.getProject.invoke.mockImplementation(async () => ok(canonicalProject));
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage(admitted)));
+
+    renderRoute();
+    fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.reference.generate' }));
+    const prompt = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.reference.dialogTitle' });
+    fireEvent.click(within(prompt).getByRole('button', { name: 'conversation.creativeStudio.reference.generate' }));
+    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+    expect(within(review).getByText('Scarf and telescope')).toBeVisible();
+
+    canonicalProject = revised;
+    await act(async () => onProjectUpdate?.({ projectId: initial.id }));
+    await waitFor(() => expect(bridge.getProject.invoke).toHaveBeenCalledTimes(3));
+    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
+
+    expect(await within(review).findByText('conversation.creativeStudio.conditioning.reviewChanged')).toBeVisible();
+    expect(within(review).getByText('Blue hour')).toBeVisible();
+    expect(bridge.dismissReferenceRequests.invoke).not.toHaveBeenCalled();
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+  });
+
+  it('spends zero when the canonical project changes while the exact review refresh is in flight', async () => {
+    let onProjectUpdate: ((event: { projectId: string }) => void) | undefined;
+    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
+      onProjectUpdate = listener;
+      return () => {};
+    });
+    const opening = scene({ mediaKind: 'video' });
+    const cast = briefReferenceAsset();
+    const look = briefReferenceAsset('brief_look', {
+      briefReferenceLabel: 'Blue hour',
+      briefReferenceRole: 'look',
+    });
+    const admitted = imageRoute({ constraints: { ...imageRoute().constraints, maxConditioningImages: 2 } });
+    const initial = project('project-1', {
+      sceneOrder: [opening.id],
+      scenes: { [opening.id]: opening },
+      assets: { [cast.id]: cast },
+    });
+    const revised = project('project-1', {
+      revision: 3,
+      sceneOrder: [opening.id],
+      scenes: { [opening.id]: opening },
+      assets: { [cast.id]: cast, [look.id]: look },
+    });
+    let canonicalProject = initial;
+    bridge.getProject.invoke.mockImplementation(async () => ok(canonicalProject));
+    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([referenceRequest(opening.id, 1)]));
+    const refresh = deferred<StudioCommandResult<StudioRouteCatalog>>();
+    bridge.listRoutes.invoke.mockResolvedValueOnce(ok(routesWithImage(admitted))).mockReturnValueOnce(refresh.promise);
+
+    renderRoute();
+    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
+    await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(2));
+
+    canonicalProject = revised;
+    await act(async () => onProjectUpdate?.({ projectId: initial.id }));
+    refresh.resolve(ok(routesWithImage(admitted)));
+
+    expect(await within(review).findByText('conversation.creativeStudio.conditioning.reviewChanged')).toBeVisible();
+    expect(within(review).getByText('Blue hour')).toBeVisible();
+    expect(bridge.dismissReferenceRequests.invoke).not.toHaveBeenCalled();
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'disappears',
+      (queue: ReturnType<typeof installReferenceRequestQueue>, request: StudioReferenceRequest) =>
+        queue.remove(request.id),
+    ],
+    [
+      'is remapped',
+      (queue: ReturnType<typeof installReferenceRequestQueue>, request: StudioReferenceRequest) =>
+        queue.replace({ ...request, sceneId: 'scene-unrelated' }),
+    ],
+  ])('spends zero and consumes nothing when a reviewed Director request %s before Confirm', async (_label, mutate) => {
+    const opening = scene({ mediaKind: 'video' });
+    const unrelatedScene = scene({ id: 'scene-unrelated', title: 'Unrelated request', mediaKind: 'video' });
+    const cast = briefReferenceAsset();
+    const request = referenceRequest(opening.id, 1);
+    const unrelated = referenceRequest('scene-unrelated', 2);
+    const queue = installReferenceRequestQueue([request]);
+    const admitted = imageRoute({ constraints: { ...imageRoute().constraints, maxConditioningImages: 1 } });
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(
+        project('project-1', {
+          sceneOrder: [opening.id, unrelatedScene.id],
+          scenes: { [opening.id]: opening, [unrelatedScene.id]: unrelatedScene },
+          assets: { [cast.id]: cast },
+        })
+      )
+    );
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage(admitted)));
+
+    renderRoute();
+    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+    mutate(queue, request);
+    queue.queue(unrelated);
+    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
+
+    expect(await within(review).findByText('conversation.creativeStudio.conditioning.reviewChanged')).toBeVisible();
+    expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project-1',
+      requestIds: [request.id],
+      expectedRevision: 2,
+      expectedRequests: [{ id: request.id, sceneId: request.sceneId }],
+    });
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+    expect(queue.pendingIds()).toContain(unrelated.id);
+    await waitFor(() => expect(bridge.listPendingReferenceRequests.invoke).toHaveBeenCalledTimes(2));
+    const refreshedReview = await screen.findByRole('dialog', {
+      name: 'conversation.creativeStudio.review.title',
+    });
+    expect(within(refreshedReview).getByText('Unrelated request')).toBeVisible();
+    expect(queue.pendingIds()).toContain(unrelated.id);
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      within(refreshedReview).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' })
+    );
+    await waitFor(() => expect(bridge.submitScenes.invoke).toHaveBeenCalledTimes(1));
+  });
+
   it('consumes the reviewed requests after auto-submitting a queued reference batch', async () => {
     const first = scene({ id: 'scene-1', mediaKind: 'video' });
     const second = scene({ id: 'scene-2', title: 'Closing', mediaKind: 'video' });
@@ -1788,6 +2299,31 @@ describe('StudioPage and useStudioProject', () => {
       expect(screen.queryByRole('dialog', { name: 'conversation.creativeStudio.review.title' })).not.toBeInTheDocument()
     );
     expect(bridge.submitScenes.invoke).toHaveBeenCalledOnce();
+  });
+
+  it('retries a rejected zero-reference auto-submit without consuming its queue request twice', async () => {
+    const opening = scene({ mediaKind: 'video' });
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
+    );
+    const request = referenceRequest(opening.id, 1);
+    const queue = installReferenceRequestQueue([request]);
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
+    bridge.submitScenes.invoke.mockResolvedValueOnce(invalidPayload()).mockResolvedValue(ok([]));
+
+    renderRoute();
+
+    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+    expect(queue.pendingIds()).toEqual([]);
+    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
+
+    await waitFor(() => expect(bridge.submitScenes.invoke).toHaveBeenCalledTimes(2));
+    expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledOnce();
+    expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledWith({
+      projectId: 'project-1',
+      requestIds: [request.id],
+    });
+    expect(queue.pendingIds()).toEqual([]);
   });
 
   /**
@@ -2367,6 +2903,75 @@ describe('StudioPage and useStudioProject', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
     await waitFor(() => expect(bridge.submitScenes.invoke).toHaveBeenCalledTimes(1));
+  });
+
+  it.each([
+    {
+      condition: 'a stored source prompt differs while references and frame settings still match',
+      provenance: {
+        sourceVisualPrompt: 'The manually admitted plate prompt',
+        sourceReferenceAssetIds: ['brief-cast'],
+        sourceAspectRatio: '16:9' as const,
+        sourceResolution: '720p' as const,
+      },
+      warns: false,
+    },
+    {
+      condition: 'known reference IDs differ',
+      provenance: {
+        sourceVisualPrompt: 'The manually admitted plate prompt',
+        sourceReferenceAssetIds: [],
+        sourceAspectRatio: '16:9' as const,
+        sourceResolution: '720p' as const,
+      },
+      warns: true,
+    },
+    {
+      condition: 'legacy provenance is incomplete',
+      provenance: {},
+      warns: false,
+    },
+  ])('keeps a selected first frame usable when $condition', async ({ provenance, warns }) => {
+    const cast = briefReferenceAsset();
+    const plate: StudioAsset = {
+      ...asset('plate-1'),
+      managedAsset: { collection: 'references', fileName: 'plate-1.png' },
+      ...provenance,
+    };
+    const opening = scene({
+      mediaKind: 'video',
+      visualPrompt: 'The current scene visual prompt',
+      referenceAssetId: plate.id,
+    });
+    bridge.getProject.invoke.mockResolvedValue(
+      ok(
+        project('project-1', {
+          sceneOrder: [opening.id],
+          scenes: { [opening.id]: opening },
+          assets: { [cast.id]: cast, [plate.id]: plate },
+          routing: {
+            storyboard: null,
+            image: { choiceId: 'choice_image', providerId: 'provider-image', model: 'image-model' },
+            video: { choiceId: 'choice_video', providerId: 'provider-video', model: 'video-model' },
+          },
+        })
+      )
+    );
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithVideo()));
+
+    renderRoute('/studio/project-1/board');
+    fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.phase.produce.render' }));
+    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+
+    if (warns) {
+      expect(within(review).getByText('conversation.creativeStudio.conditioning.plateOutOfDate')).toBeVisible();
+    } else {
+      expect(
+        within(review).queryByText('conversation.creativeStudio.conditioning.plateOutOfDate')
+      ).not.toBeInTheDocument();
+    }
+    expect(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' })).toBeEnabled();
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
   });
 
   it('opens and submits the single batch entry point with an 18-second storyboard against a 15-second target', async () => {

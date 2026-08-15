@@ -1259,6 +1259,16 @@
       "manualFallback": "繼續手動編輯",
       "failed": "無法建立分鏡草稿。目前的場景未被變更。"
     },
+    "conditioning": {
+      "inputsTitle": "此靜幀的輸入",
+      "role": { "cast": "角色", "look": "風格" },
+      "maximum": "此引擎最多接受 {{count}} 個簡報參考。",
+      "unsupported": "此圖像引擎無法使用有效的簡報參考。請選擇其他圖像引擎，或從簡報中移除這些參考。",
+      "overflow": "此圖像引擎最多接受 {{maximum}} 個簡報參考，但目前有 {{count}} 個有效參考。",
+      "malformed": "簡報參考已變更或無效。請在生成前重新整理審核。",
+      "reviewChanged": "簡報參考或圖像引擎已變更。請在生成前審核重新整理後的輸入。",
+      "plateOutOfDate": "所選首幀使用了不同的簡報參考、長寬比或解析度。你仍可算繪此片段。"
+    },
     "reference": {
       "generate": "產生參考圖",
       "dialogTitle": "產生參考圖像",

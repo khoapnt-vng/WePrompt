@@ -16,6 +16,7 @@ const localeRoot = new URL('../../../../packages/desktop/src/renderer/services/i
 const plannedGroups = [
   'brief',
   'close',
+  'conditioning',
   'create',
   'draft',
   'empty',
@@ -37,6 +38,18 @@ const plannedGroups = [
   'storyboard',
   'timeline',
   'transition',
+] as const;
+
+const conditioningKeys = [
+  'conditioning.inputsTitle',
+  'conditioning.role.cast',
+  'conditioning.role.look',
+  'conditioning.maximum',
+  'conditioning.unsupported',
+  'conditioning.overflow',
+  'conditioning.malformed',
+  'conditioning.reviewChanged',
+  'conditioning.plateOutOfDate',
 ] as const;
 
 const briefKeys = [
@@ -319,6 +332,11 @@ const engineStripKeys = [
   'phase.produce.batchExcluded',
   'phase.produce.batchExcluded_one',
   'phase.produce.askTeammateCopy',
+  'conditioning.unsupported',
+  'conditioning.overflow',
+  'conditioning.malformed',
+  'conditioning.reviewChanged',
+  'conditioning.plateOutOfDate',
   'library.readinessSetupRequired',
 ] as const;
 
@@ -706,6 +724,9 @@ describe('Creative Studio localization contract', () => {
       expect(leaves[key], `Missing conversation.creativeStudio.${key}`).toBeTruthy();
     }
     for (const key of rulesKeys) {
+      expect(leaves[key], `Missing conversation.creativeStudio.${key}`).toBeTruthy();
+    }
+    for (const key of conditioningKeys) {
       expect(leaves[key], `Missing conversation.creativeStudio.${key}`).toBeTruthy();
     }
     for (const key of taskSevenKeys) {

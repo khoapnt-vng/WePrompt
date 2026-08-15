@@ -1639,6 +1639,30 @@ describe('native bridge payload schemas', () => {
     ).toBe(false);
   });
 
+  it('accepts only paired exact authority for checked reference-request consumption', () => {
+    const checked = {
+      projectId: 'project_1',
+      requestIds: ['reference_request_1'],
+      expectedRevision: 2,
+      expectedRequests: [{ id: 'reference_request_1', sceneId: 'scene_1' }],
+    };
+
+    expect(parseNativeBridgePayload('creative-studio.dismiss-reference-requests', checked)).toEqual(checked);
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.dismiss-reference-requests', {
+        projectId: checked.projectId,
+        requestIds: checked.requestIds,
+        expectedRevision: checked.expectedRevision,
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.dismiss-reference-requests', {
+        ...checked,
+        expectedRequests: [{ id: 'reference_request_other', sceneId: 'scene_1' }],
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
   it('accepts a single-mode reference output submission with a reference prompt', () => {
     const payload = {
       ...VALID_PAYLOADS['creative-studio.submit-scenes'],

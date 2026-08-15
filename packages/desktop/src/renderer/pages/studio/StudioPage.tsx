@@ -25,6 +25,11 @@ import {
 } from '@/common/types/project/creativeStudioTypes';
 import { requestedMediaKind } from '@/common/types/project/creativeStudioOutputRole';
 import {
+  getStudioReferencePlateFreshness,
+  resolveActiveStudioBriefReferences,
+  type StudioReferencePlateFreshness,
+} from '@/common/types/project/creativeStudioManagedAssetCollections';
+import {
   buildFirstFramePrompt,
   hasFirstFramePromptSubject,
   stripFirstFramePromptPrefix,
@@ -38,6 +43,7 @@ import {
 import {
   collectReferencePrompts,
   collectSubmittableRoutes,
+  buildReferenceConditioningSnapshot,
   describeSceneRenderBlockMessage,
   GenerationReviewModal,
   routeSupportsScene,
@@ -45,8 +51,10 @@ import {
   type GenerationBatchReviewRequest,
   type GenerationReviewExcludedScene,
   type GenerationReviewModalProps,
+  type GenerationReviewConfirmation,
   type GenerationReviewScene,
   type GenerationReviewRouteSnapshot,
+  type GenerationReferenceConditioningSnapshot,
   type GenerationSingleReviewRequest,
   StoryboardDraftModal,
   StudioBriefDrawer,
@@ -92,6 +100,8 @@ type GenerationReviewState = {
   outputRole?: GenerationSingleReviewRequest['outputRole'];
   referenceRequestIds?: string[];
   referenceRequests?: Array<Pick<StudioReferenceRequest, 'id' | 'sceneId'>>;
+  /** Active Brief inputs require human authorization; Cancel leaves these queued on disk. */
+  referenceRequestsRequireConfirmation?: true;
 };
 
 type ReferenceNotice =
@@ -133,7 +143,9 @@ const toReviewScene = (
   availableRoutes: readonly StudioRouteCatalogEntry[],
   routeStatus?: 'valid' | 'invalid' | 'missing',
   outputRole: GenerationReviewScene['outputRole'] = 'take',
-  referencePrompt?: string
+  referencePrompt?: string,
+  conditioning?: GenerationReferenceConditioningSnapshot | null,
+  conditioningIssue?: 'malformed'
 ): GenerationReviewScene => {
   const mediaKind = requestedMediaKind(scene.mediaKind, outputRole);
   const catalogRoute =
@@ -155,6 +167,7 @@ const toReviewScene = (
         : {
             status:
               routeStatus === 'invalid' ||
+              conditioning === null ||
               catalogRoute === undefined ||
               !routeSupportsScene(catalogRoute, {
                 kind: mediaKind,
@@ -164,6 +177,7 @@ const toReviewScene = (
                 resolution: project.resolution,
                 durationSeconds: outputRole === 'reference' ? undefined : scene.durationSeconds,
                 hasReference: scene.referenceAssetId !== null,
+                ...(conditioning === undefined ? {} : { conditioningReferenceCount: conditioning.inputs.length }),
               })
                 ? 'invalid'
                 : 'valid',
@@ -172,7 +186,28 @@ const toReviewScene = (
             integrationLabelKey: catalogRoute?.integrationLabelKey ?? null,
             silentOutput: catalogRoute?.constraints.silentOutput ?? null,
           },
+    ...(conditioning === undefined || conditioning === null ? {} : { conditioning }),
+    ...(conditioning === null || conditioningIssue === 'malformed' ? { conditioningIssue: 'malformed' as const } : {}),
+    ...(outputRole === 'take' ? { referencePlateFreshness: selectedReferencePlateFreshness(project, scene) } : {}),
   };
+};
+
+const selectedReferencePlateFreshness = (
+  project: StudioRendererProject,
+  scene: StudioScene
+): StudioReferencePlateFreshness => {
+  if (scene.referenceAssetId === null) return 'unknown';
+  const plate = project.assets[scene.referenceAssetId];
+  const active = resolveActiveStudioBriefReferences(project.assets);
+  if (plate === undefined || plate.managedAsset.collection !== 'references' || active === null) return 'unknown';
+  return getStudioReferencePlateFreshness(plate, {
+    // Task 6 will persist the admitted prompt baseline. Until then, compare the durable prompt to
+    // itself so a manual reference prompt is never invented as stale against scene.visualPrompt.
+    visualPrompt: plate.sourceVisualPrompt ?? '',
+    referenceAssetIds: active.map(({ id }) => id),
+    aspectRatio: project.aspectRatio,
+    resolution: project.resolution,
+  });
 };
 
 const catalogEntries = (catalog: StudioRouteCatalog): StudioRouteCatalogEntry[] => [
@@ -270,16 +305,15 @@ const buildQueuedReferenceReview = (
       promptUnusableSceneIds.add(sceneId);
       return [];
     }
+    const route = projectRouteSnapshot(project, scene, 'reference');
+    const catalogRoute =
+      route === null
+        ? undefined
+        : availableRoutes.find((candidate) => routeIdentity(candidate) === routeIdentity(route));
+    const conditioning =
+      catalogRoute === undefined ? undefined : buildReferenceConditioningSnapshot(project, catalogRoute);
     return [
-      toReviewScene(
-        project,
-        scene,
-        projectRouteSnapshot(project, scene, 'reference'),
-        availableRoutes,
-        undefined,
-        'reference',
-        referencePrompt
-      ),
+      toReviewScene(project, scene, route, availableRoutes, undefined, 'reference', referencePrompt, conditioning),
     ];
   });
   const includedSceneIds = new Set(scenes.map(({ id }) => id));
@@ -315,6 +349,48 @@ const newestProject = (...candidates: Array<StudioRendererProject | null>): Stud
       candidate !== null && (newest === null || candidate.revision > newest.revision) ? candidate : newest,
     null
   );
+
+const reviewSceneAuthorityMatches = (
+  reviewed: readonly GenerationReviewScene[],
+  current: readonly GenerationReviewScene[]
+): boolean =>
+  reviewed.length === current.length &&
+  reviewed.every((scene, index) => {
+    const candidate = current[index];
+    if (candidate === undefined || candidate.id !== scene.id || candidate.route.status !== scene.route.status) {
+      return false;
+    }
+    const routeMatches =
+      scene.route.snapshot === null
+        ? candidate.route.snapshot === null
+        : candidate.route.snapshot !== null &&
+          candidate.route.snapshot.sceneId === scene.route.snapshot.sceneId &&
+          candidate.route.snapshot.choiceId === scene.route.snapshot.choiceId &&
+          candidate.route.snapshot.providerId === scene.route.snapshot.providerId &&
+          candidate.route.snapshot.model === scene.route.snapshot.model &&
+          candidate.route.snapshot.kind === scene.route.snapshot.kind &&
+          candidate.route.status !== 'missing' &&
+          scene.route.status !== 'missing' &&
+          candidate.route.integrationLabelKey === scene.route.integrationLabelKey;
+    if (!routeMatches) return false;
+    const reviewedConditioning = scene.conditioning;
+    const currentConditioning = candidate.conditioning;
+    return reviewedConditioning === undefined
+      ? currentConditioning === undefined
+      : currentConditioning !== undefined &&
+          currentConditioning.maximum === reviewedConditioning.maximum &&
+          currentConditioning.integrationLabelKey === reviewedConditioning.integrationLabelKey &&
+          currentConditioning.inputs.length === reviewedConditioning.inputs.length &&
+          currentConditioning.inputs.every((input, inputIndex) => {
+            const reviewedInput = reviewedConditioning.inputs[inputIndex];
+            return (
+              reviewedInput !== undefined &&
+              input.assetId === reviewedInput.assetId &&
+              input.label === reviewedInput.label &&
+              input.role === reviewedInput.role
+            );
+          });
+  });
 
 const parseWriteFocusIntent = (state: unknown): StudioWriteFocusIntent | null => {
   if (typeof state !== 'object' || state === null || !Object.hasOwn(state, 'writeFocus')) return null;
@@ -665,7 +741,7 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
     const projectId = project.id;
     const projectRevision = project.revision;
     const requestIds = review.referenceRequestIds;
-    const openQueuedReferenceReview = (): void =>
+    const openQueuedReferenceReview = (requiresConfirmation = false, requestsAlreadyConsumed = false): void =>
       setGenerationReview({
         mode: 'batch',
         scenes: review.scenes,
@@ -675,9 +751,19 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
         projectId,
         projectRevision,
         outputRole: 'reference',
-        referenceRequestIds: requestIds,
+        referenceRequestIds: requestsAlreadyConsumed ? [] : requestIds,
         referenceRequests: requests.map(({ id, sceneId }) => ({ id, sceneId })),
+        ...(requiresConfirmation ? { referenceRequestsRequireConfirmation: true as const } : {}),
       });
+
+    const activeBriefReferences = resolveActiveStudioBriefReferences(project.assets);
+    if (activeBriefReferences === null || activeBriefReferences.length > 0) {
+      // The accepted Director proposal may authorize a zero-input plate, but adding cast/look
+      // changes what the paid call will run. Keep every included request queued until the exact
+      // labels, roles, route and capacity have been reviewed by a human.
+      openQueuedReferenceReview(true);
+      return;
+    }
 
     // The Director decides when to make an image, so a request it queued no longer waits for a
     // confirmation step. Routes are still resolved by the modal's own rule via
@@ -748,7 +834,7 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
       // request is simply gone: no error, no modal, nothing to act on. The review this path
       // replaced is that surface — it shows the failure, its Confirm retries under a human click,
       // and its Cancel discards the request.
-      openQueuedReferenceReview();
+      openQueuedReferenceReview(false, true);
     })();
   }, [generationBlocked, generationReview, project, readiness, studioJobs, studioModels.catalog]);
 
@@ -795,7 +881,9 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
             request.availableRoutes,
             request.routeStatus,
             request.outputRole ?? 'take',
-            request.referencePrompt
+            request.referencePrompt,
+            request.conditioning,
+            request.conditioningIssue
           ),
         ],
         catalogVersion: request.catalogVersion,
@@ -837,7 +925,8 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
   );
 
   const confirmGeneration = useCallback(
-    async ({ sceneIds, routes }: { sceneIds: string[]; routes: StudioSceneGenerationChoice[] }): Promise<void> => {
+    async (confirmation: GenerationReviewConfirmation): Promise<void> => {
+      const { sceneIds, routes } = confirmation;
       // Defence in depth behind the modal's disabled confirm button on this paid path.
       if (
         generationBlocked ||
@@ -867,40 +956,61 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
             setGenerationReviewIssueMessageKey('conversation.creativeStudio.errors.staleProject');
             return;
           }
+          const canonicalReadiness = deriveStudioReadiness(canonical);
           const availableRoutes = catalogEntries(catalog);
           const refreshedReferenceReview =
             generationReview.mode === 'batch' && generationReview.referenceRequests !== undefined
-              ? buildQueuedReferenceReview(project, readiness, generationReview.referenceRequests, availableRoutes)
+              ? buildQueuedReferenceReview(
+                  canonical,
+                  canonicalReadiness,
+                  generationReview.referenceRequests,
+                  availableRoutes
+                )
               : null;
           const refreshedScenes =
             generationReview.mode === 'single'
               ? generationReview.scenes.flatMap((reviewScene) => {
-                  const scene = project.scenes[reviewScene.id];
-                  return scene === undefined ||
+                  const scene = canonical.scenes[reviewScene.id];
+                  if (
+                    scene === undefined ||
                     (generationReview.outputRole !== 'reference' &&
-                      !canOpenSingleSceneReview(readiness?.sceneStatuses[scene.id], scene.visualPrompt))
-                    ? []
-                    : [
-                        toReviewScene(
-                          project,
-                          scene,
-                          projectRouteSnapshot(project, scene, generationReview.outputRole),
-                          availableRoutes,
-                          undefined,
-                          generationReview.outputRole ?? 'take',
-                          reviewScene.referencePrompt
-                        ),
-                      ];
+                      !canOpenSingleSceneReview(canonicalReadiness.sceneStatuses[scene.id], scene.visualPrompt))
+                  ) {
+                    return [];
+                  }
+                  const route = projectRouteSnapshot(canonical, scene, generationReview.outputRole);
+                  const catalogRoute =
+                    route === null
+                      ? undefined
+                      : availableRoutes.find((candidate) => routeIdentity(candidate) === routeIdentity(route));
+                  const conditioning =
+                    generationReview.outputRole !== 'reference' || catalogRoute === undefined
+                      ? undefined
+                      : buildReferenceConditioningSnapshot(canonical, catalogRoute);
+                  return [
+                    toReviewScene(
+                      canonical,
+                      scene,
+                      route,
+                      availableRoutes,
+                      undefined,
+                      generationReview.outputRole ?? 'take',
+                      reviewScene.referencePrompt,
+                      conditioning
+                    ),
+                  ];
                 })
               : (refreshedReferenceReview?.scenes ??
                 generationReview.scenes.flatMap((reviewScene) => {
-                  const scene = project.scenes[reviewScene.id];
-                  if (scene?.id !== reviewScene.id || !readiness.readySceneIds.includes(reviewScene.id)) return [];
+                  const scene = canonical.scenes[reviewScene.id];
+                  if (scene?.id !== reviewScene.id || !canonicalReadiness.readySceneIds.includes(reviewScene.id)) {
+                    return [];
+                  }
                   return [
                     toReviewScene(
-                      project,
+                      canonical,
                       scene,
-                      projectRouteSnapshot(project, scene, generationReview.outputRole),
+                      projectRouteSnapshot(canonical, scene, generationReview.outputRole),
                       availableRoutes,
                       undefined,
                       generationReview.outputRole ?? 'take'
@@ -917,8 +1027,8 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
               : { excludedScenes: refreshedReferenceReview.excludedScenes }),
             catalogVersion: catalog.catalogVersion,
             availableRoutes,
-            projectId: project.id,
-            projectRevision: project.revision,
+            projectId: canonical.id,
+            projectRevision: canonical.revision,
             ...(generationReview.outputRole === undefined ? {} : { outputRole: generationReview.outputRole }),
             ...(refreshedReferenceReview === null
               ? generationReview.referenceRequestIds === undefined
@@ -928,7 +1038,13 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
             ...(generationReview.referenceRequests === undefined
               ? {}
               : { referenceRequests: generationReview.referenceRequests }),
+            ...(generationReview.referenceRequestsRequireConfirmation === true
+              ? { referenceRequestsRequireConfirmation: true as const }
+              : {}),
           });
+          if (generationReview.outputRole === 'reference') {
+            setGenerationReviewIssueMessageKey('conversation.creativeStudio.conditioning.reviewChanged');
+          }
         } catch {
           setGenerationReviewIssueMessageKey('conversation.creativeStudio.errors.provider');
         } finally {
@@ -938,9 +1054,120 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
         return;
       }
 
+      if (generationReview.outputRole === 'reference') {
+        generationReviewRefreshingRef.current = true;
+        setGenerationReviewRefreshing(true);
+        studioJobs.clearIssue();
+        try {
+          await studioModels.refresh();
+          const catalog = studioModels.catalog;
+          if (catalog === null) {
+            setGenerationReviewIssueMessageKey('conversation.creativeStudio.models.loading');
+            return;
+          }
+          const canonical = canonicalProjectRef.current;
+          if (
+            canonical === null ||
+            canonical.id !== generationReview.projectId ||
+            canonical.revision !== generationReview.projectRevision
+          ) {
+            if (canonical?.id === generationReview.projectId) {
+              const canonicalReadiness = deriveStudioReadiness(canonical);
+              const availableRoutes = catalogEntries(catalog);
+              const refreshedReferenceReview =
+                generationReview.referenceRequests === undefined
+                  ? null
+                  : buildQueuedReferenceReview(
+                      canonical,
+                      canonicalReadiness,
+                      generationReview.referenceRequests,
+                      availableRoutes
+                    );
+              setGenerationReview({
+                ...generationReview,
+                scenes: refreshedReferenceReview?.scenes ?? [],
+                ...(refreshedReferenceReview === null
+                  ? {}
+                  : {
+                      excludedScenes: refreshedReferenceReview.excludedScenes,
+                      referenceRequestIds: refreshedReferenceReview.referenceRequestIds,
+                    }),
+                catalogVersion: catalog.catalogVersion,
+                availableRoutes,
+                projectRevision: canonical.revision,
+              });
+            }
+            setGenerationReviewIssueMessageKey('conversation.creativeStudio.conditioning.reviewChanged');
+            return;
+          }
+          const canonicalReadiness = deriveStudioReadiness(canonical);
+          const availableRoutes = catalogEntries(catalog);
+          const refreshedReferenceReview =
+            generationReview.referenceRequests === undefined
+              ? null
+              : buildQueuedReferenceReview(
+                  canonical,
+                  canonicalReadiness,
+                  generationReview.referenceRequests,
+                  availableRoutes
+                );
+          const refreshedScenes =
+            refreshedReferenceReview?.scenes ??
+            generationReview.scenes.flatMap((reviewScene) => {
+              const scene = canonical.scenes[reviewScene.id];
+              if (scene === undefined) return [];
+              const route = projectRouteSnapshot(canonical, scene, 'reference');
+              const catalogRoute =
+                route === null
+                  ? undefined
+                  : availableRoutes.find((candidate) => routeIdentity(candidate) === routeIdentity(route));
+              const conditioning =
+                catalogRoute === undefined ? undefined : buildReferenceConditioningSnapshot(canonical, catalogRoute);
+              return [
+                toReviewScene(
+                  canonical,
+                  scene,
+                  route,
+                  availableRoutes,
+                  undefined,
+                  'reference',
+                  reviewScene.referencePrompt,
+                  conditioning
+                ),
+              ];
+            });
+          if (
+            catalog.catalogVersion !== generationReview.catalogVersion ||
+            !reviewSceneAuthorityMatches(generationReview.scenes, refreshedScenes)
+          ) {
+            setGenerationReview({
+              ...generationReview,
+              scenes: refreshedScenes,
+              ...(refreshedReferenceReview === null
+                ? {}
+                : {
+                    excludedScenes: refreshedReferenceReview.excludedScenes,
+                    referenceRequestIds: refreshedReferenceReview.referenceRequestIds,
+                  }),
+              catalogVersion: catalog.catalogVersion,
+              availableRoutes,
+              projectRevision: canonical.revision,
+            });
+            setGenerationReviewIssueMessageKey('conversation.creativeStudio.conditioning.reviewChanged');
+            return;
+          }
+        } catch {
+          setGenerationReviewIssueMessageKey('conversation.creativeStudio.errors.provider');
+          return;
+        } finally {
+          generationReviewRefreshingRef.current = false;
+          setGenerationReviewRefreshing(false);
+        }
+      }
+
       const submitResult = await submitExactGenerationReview(
         generationReview.scenes,
-        { sceneIds, routes },
+        confirmation,
         async (exactConfirmation) => {
           // Defence in depth: main refuses a reference submission whose scenes are not all described,
           // and a refused submit here would leave the queued requests dismissed and unpaid-for with
@@ -952,6 +1179,99 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
           if (generationReview.outputRole === 'reference' && referencePrompts === null) {
             setGenerationReviewIssueMessageKey('conversation.creativeStudio.errors.invalidPayload');
             return false;
+          }
+
+          if (generationReview.referenceRequestIds !== undefined) {
+            const requestIds = generationReview.referenceRequestIds;
+            const canonical = canonicalProjectRef.current;
+            if (
+              canonical?.id !== generationReview.projectId ||
+              canonical.revision !== generationReview.projectRevision
+            ) {
+              setGenerationReviewIssueMessageKey('conversation.creativeStudio.conditioning.reviewChanged');
+              return false;
+            }
+            let consumed = requestIds.length === 0;
+            if (generationReview.referenceRequestsRequireConfirmation === true && requestIds.length > 0) {
+              const reviewedRequestById = new Map(
+                generationReview.referenceRequests?.map((request) => [request.id, request]) ?? []
+              );
+              const expectedRequests = requestIds.flatMap((requestId) => {
+                const request = reviewedRequestById.get(requestId);
+                return request === undefined ? [] : [{ ...request }];
+              });
+              if (expectedRequests.length !== requestIds.length) {
+                setGenerationReviewIssueMessageKey('conversation.creativeStudio.conditioning.reviewChanged');
+                return false;
+              }
+              const consumeResult = await studioJobs.consumeReferenceRequests(
+                expectedRequests,
+                generationReview.projectRevision
+              );
+              if (consumeResult === 'changed') {
+                generationReviewRefreshingRef.current = true;
+                setGenerationReviewRefreshing(true);
+                try {
+                  const authority = await studioJobs.refreshReferenceAuthority();
+                  await studioModels.refresh();
+                  const refreshedCatalog = studioModels.catalog;
+                  if (authority === null || refreshedCatalog === null) {
+                    setGenerationReviewIssueMessageKey('conversation.creativeStudio.reference.dismissFailed');
+                    return false;
+                  }
+                  const currentRequestById = new Map(authority.requests.map((request) => [request.id, request]));
+                  const survivingRequests = expectedRequests.flatMap((expected) => {
+                    const current = currentRequestById.get(expected.id);
+                    return current?.sceneId === expected.sceneId ? [{ id: current.id, sceneId: current.sceneId }] : [];
+                  });
+                  const recoveryRequests = survivingRequests.length > 0 ? survivingRequests : authority.requests;
+                  if (recoveryRequests.length === 0) {
+                    setGenerationReview(null);
+                    return false;
+                  }
+                  const availableRoutes = catalogEntries(refreshedCatalog);
+                  const refreshedReview = buildQueuedReferenceReview(
+                    authority.project,
+                    deriveStudioReadiness(authority.project),
+                    recoveryRequests,
+                    availableRoutes
+                  );
+                  const includedRequestIds = new Set(refreshedReview.referenceRequestIds);
+                  const includedRequests = recoveryRequests.filter(({ id }) => includedRequestIds.has(id));
+                  if (refreshedReview.scenes.length === 0 || includedRequests.length === 0) {
+                    setGenerationReview(null);
+                    return false;
+                  }
+                  setGenerationReview({
+                    mode: 'batch',
+                    scenes: refreshedReview.scenes,
+                    excludedScenes: refreshedReview.excludedScenes,
+                    catalogVersion: refreshedCatalog.catalogVersion,
+                    availableRoutes,
+                    projectId: authority.project.id,
+                    projectRevision: authority.project.revision,
+                    outputRole: 'reference',
+                    referenceRequestIds: refreshedReview.referenceRequestIds,
+                    referenceRequests: includedRequests,
+                    referenceRequestsRequireConfirmation: true,
+                  });
+                  setGenerationReviewIssueMessageKey('conversation.creativeStudio.conditioning.reviewChanged');
+                  return false;
+                } finally {
+                  generationReviewRefreshingRef.current = false;
+                  setGenerationReviewRefreshing(false);
+                }
+              }
+              consumed = consumeResult === 'consumed';
+            } else if (requestIds.length > 0) {
+              consumed = await studioJobs.dismissReferenceRequests(requestIds);
+            }
+            if (!consumed) {
+              setGenerationReviewIssueMessageKey('conversation.creativeStudio.reference.dismissFailed');
+              return false;
+            }
+            requestIds.forEach((requestId) => suppressedReferenceRequestIdsRef.current.add(requestId));
+            setGenerationReview((current) => (current === null ? null : { ...current, referenceRequestIds: [] }));
           }
 
           return studioJobs.submitScenes({
@@ -970,20 +1290,7 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
         return;
       }
       if (submitResult === 'not_submitted') return;
-      if (generationReview.referenceRequestIds === undefined) {
-        setGenerationReview(null);
-        return;
-      }
-      const dismissed =
-        generationReview.referenceRequestIds.length === 0 ||
-        (await studioJobs.dismissReferenceRequests(generationReview.referenceRequestIds));
-      const suppressedIds = dismissed
-        ? generationReview.referenceRequestIds
-        : (generationReview.referenceRequests?.map(({ id: requestId }) => requestId) ??
-          generationReview.referenceRequestIds);
-      suppressedIds.forEach((requestId) => suppressedReferenceRequestIdsRef.current.add(requestId));
       setGenerationReview(null);
-      if (!dismissed) setReferenceNotice({ kind: 'dismiss_failed' });
     },
     [generationBlocked, generationReview, project, readiness, studioJobs, studioModels]
   );
@@ -1578,8 +1885,16 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
               : generationReviewIssueMessageKey
           }
           onCancel={async () => {
-            if (!studioJobs.mutationPending && !generationReviewRefreshing) {
+            if (!studioJobs.mutationPending && !generationReviewRefreshing && !generationReviewRefreshingRef.current) {
               const requestIds = generationReview?.referenceRequestIds;
+              if (generationReview?.referenceRequestsRequireConfirmation === true) {
+                requestIds?.forEach((requestId) => suppressedReferenceRequestIdsRef.current.add(requestId));
+                studioJobs.clearIssue();
+                studioJobs.clearStaleIntent();
+                setGenerationReviewIssueMessageKey(null);
+                setGenerationReview(null);
+                return;
+              }
               const dismissed =
                 requestIds === undefined ||
                 requestIds.length === 0 ||

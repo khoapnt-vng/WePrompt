@@ -744,8 +744,29 @@ export const nativeBridgePayloadSchemas = {
         .min(1)
         .max(50)
         .refine((ids) => new Set(ids).size === ids.length),
+      expectedRevision: studioExpectedRevisionSchema.optional(),
+      expectedRequests: z
+        .array(z.object({ id: safeIdSchema, sceneId: safeIdSchema }).strict())
+        .min(1)
+        .max(50)
+        .optional(),
     })
-    .strict(),
+    .strict()
+    .superRefine((value, context) => {
+      const hasExpectedRevision = value.expectedRevision !== undefined;
+      const hasExpectedRequests = value.expectedRequests !== undefined;
+      if (hasExpectedRevision !== hasExpectedRequests) {
+        context.addIssue({ code: 'custom', message: 'Checked consume authority must be paired' });
+        return;
+      }
+      if (
+        value.expectedRequests !== undefined &&
+        (value.expectedRequests.length !== value.requestIds.length ||
+          value.expectedRequests.some((request, index) => request.id !== value.requestIds[index]))
+      ) {
+        context.addIssue({ code: 'custom', message: 'Checked consume authority must match request order' });
+      }
+    }),
   'creative-studio.accept-proposal': z.object({ projectId: safeIdSchema, proposalId: safeIdSchema }).strict(),
   'creative-studio.reject-proposal': z.object({ projectId: safeIdSchema, proposalId: safeIdSchema }).strict(),
   'creative-studio.propose-storyboard': z
