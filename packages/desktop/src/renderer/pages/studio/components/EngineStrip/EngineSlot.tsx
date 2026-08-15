@@ -63,7 +63,7 @@ export const EngineSlot: React.FC<EngineSlotProps> = ({
     if (route.kind !== 'image') return summary;
     const capacity =
       route.constraints.maxConditioningImages === 0
-        ? t('conversation.creativeStudio.briefReferences.engineCapacityNone')
+        ? t('conversation.creativeStudio.briefReferences.engineMenuCapacityNone')
         : t('conversation.creativeStudio.briefReferences.engineCapacityMaximum', {
             count: route.constraints.maxConditioningImages,
           });

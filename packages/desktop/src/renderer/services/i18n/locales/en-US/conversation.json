@@ -730,6 +730,7 @@
       "removeAccessible": "Remove {{label}} from Brief",
       "previewAccessible": "{{role}} reference: {{label}}",
       "engineCapacityNone": "This image engine has not been validated for reference images. Open Model Settings and revalidate it.",
+      "engineMenuCapacityNone": "No reference images",
       "engineCapacityMaximum": "Up to {{count}} reference images",
       "engineCapacityMaximum_one": "Up to {{count}} reference image",
       "engineCapacityMaximum_other": "Up to {{count}} reference images",

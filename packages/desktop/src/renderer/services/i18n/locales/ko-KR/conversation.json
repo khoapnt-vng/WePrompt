@@ -894,6 +894,7 @@
       "removeAccessible": "브리프에서 {{label}} 제거",
       "previewAccessible": "{{role}} 참조: {{label}}",
       "engineCapacityNone": "이 이미지 엔진은 참조 이미지에 대해 아직 검증되지 않았습니다. 모델 설정을 열어 다시 검증하세요.",
+      "engineMenuCapacityNone": "참조 이미지 없음",
       "engineCapacityMaximum": "참조 이미지 최대 {{count}}개",
       "engineCapacityMaximum_other": "참조 이미지 최대 {{count}}개",
       "capacityMismatch": "활성 참조가 {{count}}개이지만 이 이미지 엔진은 {{maximum}}개를 지원합니다. 참조를 제거하거나 엔진을 변경 또는 재검증할 때까지 새 참조 스틸 생성이 차단됩니다.",

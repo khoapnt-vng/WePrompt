@@ -894,6 +894,7 @@
       "removeAccessible": "從簡報中移除 {{label}}",
       "previewAccessible": "{{role}}參考圖：{{label}}",
       "engineCapacityNone": "此圖片引擎尚未通過參考圖驗證。請開啟「模型設定」並重新驗證。",
+      "engineMenuCapacityNone": "無參考圖片",
       "engineCapacityMaximum": "最多 {{count}} 張參考圖",
       "engineCapacityMaximum_other": "最多 {{count}} 張參考圖",
       "capacityMismatch": "你有 {{count}} 張啟用的參考圖，但此圖片引擎僅支援 {{maximum}} 張。在移除參考圖或更換、重新驗證引擎之前，無法產生新的參考靜幀。",

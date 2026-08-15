@@ -902,6 +902,7 @@
       "removeAccessible": "Remover {{label}} do Brief",
       "previewAccessible": "Referência de {{role}}: {{label}}",
       "engineCapacityNone": "Este mecanismo de imagem ainda não foi validado para imagens de referência. Abra as Configurações de modelo e valide-o novamente.",
+      "engineMenuCapacityNone": "Sem imagens de referência",
       "engineCapacityMaximum": "Até {{count}} imagens de referência",
       "engineCapacityMaximum_one": "Até {{count}} imagem de referência",
       "engineCapacityMaximum_many": "Até {{count}} imagens de referência",

@@ -895,6 +895,7 @@
       "removeAccessible": "حذف {{label}} از بریف",
       "previewAccessible": "مرجع {{role}}: {{label}}",
       "engineCapacityNone": "این موتور تصویر هنوز برای تصاویر مرجع اعتبارسنجی نشده است. تنظیمات مدل را باز کنید و دوباره آن را اعتبارسنجی کنید.",
+      "engineMenuCapacityNone": "بدون تصویر مرجع",
       "engineCapacityMaximum": "حداکثر {{count}} تصویر مرجع",
       "engineCapacityMaximum_one": "حداکثر {{count}} تصویر مرجع",
       "engineCapacityMaximum_other": "حداکثر {{count}} تصویر مرجع",

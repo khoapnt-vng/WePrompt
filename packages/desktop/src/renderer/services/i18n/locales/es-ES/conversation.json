@@ -897,6 +897,7 @@
       "removeAccessible": "Quitar {{label}} del Brief",
       "previewAccessible": "Referencia de {{role}}: {{label}}",
       "engineCapacityNone": "Este motor de imagen aún no se ha validado para imágenes de referencia. Abre Configuración de modelos y vuelve a validarlo.",
+      "engineMenuCapacityNone": "Sin imágenes de referencia",
       "engineCapacityMaximum": "Hasta {{count}} imágenes de referencia",
       "engineCapacityMaximum_one": "Hasta {{count}} imagen de referencia",
       "engineCapacityMaximum_many": "Hasta {{count}} imágenes de referencia",

@@ -894,6 +894,7 @@
       "removeAccessible": "{{label}} をブリーフから外す",
       "previewAccessible": "{{role}}参照：{{label}}",
       "engineCapacityNone": "この画像エンジンは参照画像について未検証です。モデル設定を開いて再検証してください。",
+      "engineMenuCapacityNone": "参照画像なし",
       "engineCapacityMaximum": "参照画像は最大 {{count}} 件",
       "engineCapacityMaximum_other": "参照画像は最大 {{count}} 件",
       "capacityMismatch": "有効な参照は {{count}} 件ありますが、この画像エンジンが対応するのは {{maximum}} 件です。参照を外すか、エンジンを変更または再検証するまで、新しい参照スチルは生成できません。",

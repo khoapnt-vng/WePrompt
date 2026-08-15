@@ -897,6 +897,7 @@
       "removeAccessible": "Прибрати {{label}} з брифу",
       "previewAccessible": "Референс «{{role}}»: {{label}}",
       "engineCapacityNone": "Цей рушій зображень ще не перевірено для референсів. Відкрийте налаштування моделей і виконайте повторну перевірку.",
+      "engineMenuCapacityNone": "Немає референсних зображень",
       "engineCapacityMaximum": "Підтримується до {{count}} референсів",
       "engineCapacityMaximum_one": "Можна використати не більше {{count}} референсу",
       "engineCapacityMaximum_few": "Допустимо не більше {{count}} референсів",

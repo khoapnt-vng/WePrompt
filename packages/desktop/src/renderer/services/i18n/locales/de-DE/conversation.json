@@ -896,6 +896,7 @@
       "removeAccessible": "{{label}} aus dem Brief entfernen",
       "previewAccessible": "{{role}}-Referenz: {{label}}",
       "engineCapacityNone": "Diese Bild-Engine wurde noch nicht für Referenzbilder validiert. Öffne die Modelleinstellungen und validiere sie erneut.",
+      "engineMenuCapacityNone": "Keine Referenzbilder",
       "engineCapacityMaximum": "Bis zu {{count}} Referenzbilder",
       "engineCapacityMaximum_one": "Bis zu {{count}} Referenzbild",
       "engineCapacityMaximum_other": "Bis zu {{count}} Referenzbilder",

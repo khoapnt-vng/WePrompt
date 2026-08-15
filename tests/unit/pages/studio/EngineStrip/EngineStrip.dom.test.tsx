@@ -316,13 +316,14 @@ describe('EngineStrip', () => {
     const menu = await screen.findByRole('menu');
     expect(
       within(menu).getByText(
-        'conversation.creativeStudio.models.engine.summary:resolution=720p, 1080p,duration=conversation.creativeStudio.models.engine.durationRange:min=1,max=60,audio=conversation.creativeStudio.models.engine.audioSilent,frame=conversation.creativeStudio.models.engine.frameYes conversation.creativeStudio.briefReferences.engineCapacityNone'
+        'conversation.creativeStudio.models.engine.summary:resolution=720p, 1080p,duration=conversation.creativeStudio.models.engine.durationRange:min=1,max=60,audio=conversation.creativeStudio.models.engine.audioSilent,frame=conversation.creativeStudio.models.engine.frameYes conversation.creativeStudio.briefReferences.engineMenuCapacityNone'
       )
     ).toBeVisible();
+    expect(within(menu).queryByText(/briefReferences\.engineCapacityNone/)).not.toBeInTheDocument();
   });
 
   it.each([
-    { maximum: 0, capacity: 'conversation.creativeStudio.briefReferences.engineCapacityNone' },
+    { maximum: 0, capacity: 'conversation.creativeStudio.briefReferences.engineMenuCapacityNone' },
     {
       maximum: 3,
       capacity: 'conversation.creativeStudio.briefReferences.engineCapacityMaximum:count=3',

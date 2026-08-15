@@ -897,6 +897,7 @@
       "removeAccessible": "{{label}} referansını Brief'ten kaldır",
       "previewAccessible": "{{role}} referansı: {{label}}",
       "engineCapacityNone": "Bu görüntü motoru referans görselleri için doğrulanmadı. Model Ayarları'nı açıp yeniden doğrulayın.",
+      "engineMenuCapacityNone": "Referans görseli yok",
       "engineCapacityMaximum": "En fazla {{count}} referans görseli",
       "engineCapacityMaximum_one": "En fazla {{count}} referans görseli",
       "engineCapacityMaximum_other": "En fazla {{count}} referans görseli",

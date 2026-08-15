@@ -56,6 +56,7 @@ const briefReferenceKeys = [
   'briefReferences.removeAccessible',
   'briefReferences.previewAccessible',
   'briefReferences.engineCapacityNone',
+  'briefReferences.engineMenuCapacityNone',
   'briefReferences.engineCapacityMaximum',
   'briefReferences.capacityMismatch',
   'briefReferences.importError',
@@ -722,6 +723,15 @@ describe('Creative Studio localization contract', () => {
     const body = flattenStringLeaves(creativeStudio)['jobs.retryConfirmationBody'];
 
     expect(body).toBe('Retrying resubmits this generation to the provider and may incur provider charges.');
+  });
+
+  it('keeps the Engine menu zero-capacity label short while Brief recovery stays cautious', () => {
+    const leaves = flattenStringLeaves(loadConversationLocale(i18nConfig.referenceLanguage).creativeStudio);
+
+    expect(leaves['briefReferences.engineMenuCapacityNone']).toBe('No reference images');
+    expect(leaves['briefReferences.engineCapacityNone']).toBe(
+      'This image engine has not been validated for reference images. Open Model Settings and revalidate it.'
+    );
   });
 
   // Asserts the ABSENCE of a fabricated cost fragment rather than exact wording,
