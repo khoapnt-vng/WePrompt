@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 1,
+  "candidateCommit": "6d4cca05628965bd041e9ec3a4693a7d11c1d2f5",
+  "generatedAt": "2026-08-15T16:34:23Z",
+  "runner": {
+    "os": "darwin",
+    "architecture": "arm64",
+    "name": "local-darwin-arm64"
+  },
+  "tools": {
+    "bun": "1.3.14",
+    "node": "24.15.0"
+  },
+  "artifactRoot": "artifacts/sprint3-internal",
+  "gates": [
+    {
+      "name": "frozen-install",
+      "command": ["bun", "install", "--frozen-lockfile"],
+      "result": "green",
+      "exitCode": 0,
+      "log": {
+        "path": "artifacts/sprint3-internal/source-gates/install.log",
+        "sha256": "1092a8d0ea62de2732a3e17c4c4c181097e71fdf9306fcf506dfd9ea3055aee8"
+      }
+    },
+    {
+      "name": "typecheck",
+      "command": ["bunx", "tsc", "--noEmit"],
+      "result": "green",
+      "exitCode": 0,
+      "log": {
+        "path": "artifacts/sprint3-internal/source-gates/tsc.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "lint",
+      "command": ["bun", "run", "lint"],
+      "result": "green_with_warnings",
+      "exitCode": 0,
+      "warningCount": 1225,
+      "errorCount": 0,
+      "log": {
+        "path": "artifacts/sprint3-internal/source-gates/lint.log",
+        "sha256": "cc0d7c8f4b5a35e5ca0385b5fc823236590a9fb7ea49b2bcf33e6bb964103eb2"
+      }
+    },
+    {
+      "name": "format",
+      "command": ["bun", "run", "format:check"],
+      "result": "green_after_evidence_fix",
+      "attempts": [
+        {
+          "attempt": 1,
+          "exitCode": 1,
+          "classification": "evidence_formatting",
+          "disposition": "The newly created full-suite ledger was not formatter-normalized; only that JSON evidence file was formatted before the next attempt.",
+          "log": {
+            "path": "artifacts/sprint3-internal/source-gates/format-attempt-1.log",
+            "sha256": "f3e735ff38595d8de7970929ed711d726481f1b73e6dfb39681e380559f2bdfc"
+          }
+        },
+        {
+          "attempt": 2,
+          "exitCode": 0,
+          "log": {
+            "path": "artifacts/sprint3-internal/source-gates/format-attempt-2.log",
+            "sha256": "ce0b85db0481b81fa82922c28d31ca0356ca3b0efd20a62dfc3ed755a8a2be21"
+          }
+        }
+      ]
+    },
+    {
+      "name": "i18n",
+      "command": ["bun", "run", "i18n:types", "&&", "node", "scripts/check-i18n.js"],
+      "result": "green_with_warnings",
+      "exitCode": 0,
+      "disposition": "Existing missing Creative Studio plural-form translations remain warnings; Creative Studio is fail-closed and excluded from this internal release.",
+      "log": {
+        "path": "artifacts/sprint3-internal/source-gates/i18n.log",
+        "sha256": "abb5ac77a99cbb24eac66aa6c605faaec2edc6a6c28c7f166d237095a21e1f3d"
+      }
+    },
+    {
+      "name": "focused-release-tests",
+      "command": [
+        "bunx",
+        "vitest",
+        "run",
+        "tests/unit/release",
+        "tests/unit/assets",
+        "tests/unit/process/updatePolicy.test.ts",
+        "tests/unit/process/buildPolicyConfig.test.ts",
+        "tests/unit/releasePackagingConfig.test.ts"
+      ],
+      "result": "green",
+      "exitCode": 0,
+      "summary": {
+        "testFilesPassed": 17,
+        "testsPassed": 249,
+        "testsSkipped": 11
+      },
+      "log": {
+        "path": "artifacts/sprint3-internal/source-gates/focused-release.log",
+        "sha256": "cce2a965bf452067d2ff4077c2cfbb2eb64aece8aba53277751079a9620ddb6a"
+      }
+    },
+    {
+      "name": "full-suite",
+      "command": ["bun", "run", "test"],
+      "result": "blocked_pending_independent_review",
+      "ledger": {
+        "path": "docs/release/sprint3-internal/full-suite-ledger.json",
+        "sha256": "2ea58db08f60f11b908dc4756c8f9174342656f90383f96a95c093e7fda1b88c",
+        "totalRunCount": 2,
+        "resolutionAttempt": {
+          "commit": "6d4cca05628965bd041e9ec3a4693a7d11c1d2f5",
+          "result": "green",
+          "testFilesPassed": 630,
+          "testFilesSkipped": 1,
+          "testsPassed": 8228,
+          "testsSkipped": 19,
+          "rawLogSha256": "080f087b4e9d8710f49605a9a316ed159a86ffa26c0c54b3d897397e677560e8"
+        }
+      }
+    }
+  ],
+  "outstandingBlockers": [
+    "Independent reviewer disposition is missing for full-suite attempt 1 and its test-harness resolution.",
+    "Native Windows x64 source and BUG-043 evidence do not exist; Windows is a release no-go until they do.",
+    "AionCore v0.1.55 has not been authorized for tag/push/publish, so the verified handoff record is absent.",
+    "BUG-017 remains P1 without an accepted implementation or known-issue disposition; Plain Go is not admissible."
+  ]
+}
