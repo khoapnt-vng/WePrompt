@@ -3,8 +3,8 @@
   "repository": "khoapnt-vng/aioncore",
   "version": "0.1.55",
   "baseCommit": "9bd693b3b43cdb1003061de0e4f62259ab6f42ae",
-  "candidateCommit": "6355481aa3bdc149cbd18d665603872ae34cbb29",
-  "candidateStatus": "green_local_candidate_awaiting_independent_review_and_publish_authorization",
+  "candidateCommit": "232456db3d2ade5933952f1463a5af977e135a15",
+  "candidateStatus": "conditional_local_candidate_with_retained_red_attempt_awaiting_independent_review_windows_and_publish_authorization",
   "runner": {
     "os": "macOS 15.7.3 (24G419)",
     "architecture": "arm64",
@@ -19,15 +19,11 @@
       "commit": "62f6ca7ec755bd5118028657ac1edcb6ac51448f",
       "outcome": "red_superseded",
       "fullSuite": {
-        "startedAt": "2026-08-15T14:47:04Z",
-        "endedAt": "2026-08-15T14:54:28Z",
-        "exitCode": 100,
         "summary": "3938 of 6676 tests ran: 3937 passed, 1 failed, 18 skipped",
         "failure": "aionui-db::sqlcipher_at_rest plaintext_db_is_backed_up_and_reencrypted_on_upgrade",
         "classification": "test_false_negative_fixed",
         "rootCause": "The backup glob counted the primary timestamped plaintext backup plus preserved -wal and -shm sidecars.",
-        "focusedDiagnostic": "The focused diagnostic counted three files, proving one primary backup plus two sidecars.",
-        "disposition": "The assertion was narrowed to filenames whose suffix after .plaintext-backup. is all decimal digits; the focused test then passed. The source change invalidated this candidate.",
+        "disposition": "The assertion was narrowed to primary timestamped backups. The source change invalidated this candidate.",
         "rawLogSha256": "4887cbd47eed2b4b9b9f19068958248fdba782ac8f4593012cf5083f3f33790d"
       }
     },
@@ -45,139 +41,132 @@
     },
     {
       "commit": "6355481aa3bdc149cbd18d665603872ae34cbb29",
-      "outcome": "green_local_candidate",
-      "fullSuite": "6677 passed, 18 skipped in 297.044s"
-    }
-  ],
-  "nonProductGateEvents": [
+      "outcome": "green_superseded_by_bundle_contract_fix",
+      "fullSuite": "6677 passed, 18 skipped in 297.044s",
+      "reviewDisposition": "Superseded when the WePrompt audit proved the supposedly complete managed-resource bundle omitted OfficeCLI."
+    },
     {
-      "candidateCommit": "801787496535b3b85bfb4c58a206f88a3dc49cfb",
-      "gate": "fmt wrapper attempt 1",
-      "startedAt": "2026-08-15T15:12:44Z",
-      "outcome": "wrapper_error",
-      "classification": "evidence_wrapper_error",
-      "error": "zsh: read-only variable: status",
-      "productCommandOutcome": "cargo fmt emitted no output before the wrapper failed",
-      "disposition": "The empty raw log was retained, the shell variable was renamed gate_exit, and the formatter was rerun successfully."
+      "commit": "232456db3d2ade5933952f1463a5af977e135a15",
+      "outcome": "conditional_local_candidate",
+      "sourceDelta": "Adds pinned OfficeCLI v1.0.143 to each approved immutable bundle before manifest/checksum generation and rejects missing or wrong-target OfficeCLI in both assembler and independent verifier.",
+      "fullSuiteAttempts": [
+        {
+          "attempt": 1,
+          "command": "cargo nextest run --workspace",
+          "endedAtApprox": "2026-08-15T15:57:00Z",
+          "exitCode": 100,
+          "summary": "Nextest reported test run failed, but the PTY lost the failing test identity and captured output.",
+          "classification": "invalid_incomplete_gate_evidence",
+          "disposition": "Retained as red. It is neither a pass nor a named known flake. A later green run does not erase it."
+        },
+        {
+          "attempt": 2,
+          "command": "cargo nextest run --workspace --no-fail-fast --failure-output immediate-final --status-level fail --final-status-level fail",
+          "runId": "ec9fba88-f7af-479f-9a6f-edb953d95391",
+          "endedAt": "2026-08-15T16:02:57Z",
+          "exitCode": 0,
+          "summary": "6677 tests run: 6677 passed, 18 skipped in 297.533s",
+          "rawLogSha256": "6441fc138de14c1bb522f3fd34ead9324716711884b45b964f2089dfb163ce73",
+          "disposition": "Additional diagnostic evidence only; does not erase attempt 1."
+        }
+      ]
     }
   ],
-  "finalGates": [
+  "exactHeadGates": [
     {
       "name": "fmt",
       "command": "cargo fmt --all -- --check",
-      "startedAt": "2026-08-15T15:24:55Z",
-      "endedAt": "2026-08-15T15:24:57Z",
-      "exitCode": 0,
-      "rawLogSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      "exitCode": 0
     },
     {
       "name": "clippy",
       "command": "cargo clippy --workspace -- -D warnings",
-      "startedAt": "2026-08-15T15:24:57Z",
-      "endedAt": "2026-08-15T15:24:58Z",
-      "exitCode": 0,
-      "rawLogSha256": "c26fc98f6f64995340caf779475a92ed32f9659b7703e0dba2bc9d55342c0be1"
-    },
-    {
-      "name": "workspace-nextest",
-      "command": "cargo nextest run --workspace",
-      "startedAt": "2026-08-15T15:25:03Z",
-      "endedAt": "2026-08-15T15:30:02Z",
-      "exitCode": 0,
-      "summary": "6677 tests run: 6677 passed, 18 skipped; one uninterrupted attempt; 297.044s",
-      "rawLogSha256": "419c2c87308d61cfdd22b7bb436f93ebf2532775ca5df9d2fad086d4f7a984e8"
+      "exitCode": 0
     },
     {
       "name": "migration-immutability-test",
       "command": "bash scripts/migration/check-immutability.test.sh",
-      "startedAt": "2026-08-15T15:30:11Z",
-      "endedAt": "2026-08-15T15:30:12Z",
-      "exitCode": 0,
-      "rawLogSha256": "88995e4a7110c328ae2d41e3b6bedbbb5d3d40e0776e19ad0022243f3e73bcef"
+      "exitCode": 0
     },
     {
       "name": "migration-immutability",
       "command": "bash scripts/migration/check-immutability.sh",
-      "startedAt": "2026-08-15T15:30:13Z",
-      "endedAt": "2026-08-15T15:30:13Z",
-      "exitCode": 0,
-      "rawLogSha256": "4939edaa531ceef2db63c7dfa862590c64bd275dc7cb3bc2449d397488b92d87"
+      "exitCode": 0
     },
     {
-      "name": "lineage-unit",
-      "command": "python3 -m unittest scripts.migration.test_generate_lineage -v",
-      "startedAt": "2026-08-15T15:30:13Z",
-      "endedAt": "2026-08-15T15:30:13Z",
+      "name": "lineage",
+      "commands": [
+        "python3 -m unittest scripts.migration.test_generate_lineage -v",
+        "python3 scripts/migration/generate-lineage.py --migrations crates/aionui-db/migrations --check migration-lineage.json"
+      ],
       "exitCode": 0,
-      "summary": "8 tests passed",
-      "rawLogSha256": "ea353f5d5e715ea56c0f86542f2c3f49db08db7280bf00bcdafd90fad6903512"
+      "summary": "8 tests passed and the checked lineage is exact"
     },
     {
-      "name": "lineage-check-1",
-      "command": "python3 scripts/migration/generate-lineage.py --migrations crates/aionui-db/migrations --check migration-lineage.json",
-      "startedAt": "2026-08-15T15:30:13Z",
-      "endedAt": "2026-08-15T15:30:13Z",
+      "name": "release-contract",
+      "command": "python3 -m unittest discover -s scripts/release",
       "exitCode": 0,
-      "rawLogSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-    },
-    {
-      "name": "lineage-check-2",
-      "command": "python3 scripts/migration/generate-lineage.py --migrations crates/aionui-db/migrations --check migration-lineage.json",
-      "startedAt": "2026-08-15T15:30:13Z",
-      "endedAt": "2026-08-15T15:30:13Z",
-      "exitCode": 0,
-      "rawLogSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-    },
-    {
-      "name": "release-unit",
-      "command": "python3 -m unittest discover -s scripts/release -p 'test_*.py' -v",
-      "startedAt": "2026-08-15T15:30:13Z",
-      "endedAt": "2026-08-15T15:30:13Z",
-      "exitCode": 0,
-      "summary": "23 tests passed",
-      "rawLogSha256": "1474626260a81def49702ba83a18e4670636e9d33060df6cd8fd5f2848f4f02b"
+      "summary": "30 tests passed"
     },
     {
       "name": "release-build-macos-arm64",
-      "command": "cargo build --release --target aarch64-apple-darwin -p aionui-app",
-      "startedAt": "2026-08-15T15:30:19Z",
-      "endedAt": "2026-08-15T15:30:20Z",
+      "command": "cargo build --locked --release --target aarch64-apple-darwin -p aionui-app",
       "exitCode": 0,
       "binaryFormat": "Mach-O 64-bit executable arm64",
       "binaryVersion": "aioncore 0.1.55",
-      "binarySha256": "8b7a26e6b06b17f5059b8db9ea31df88e07caa5a5263efdeb566cc3c40a1649b",
-      "rawLogSha256": "3bb9df4cc07fb3c0ed8b89c7f273014d03b3c4965bd735df857668c843c6cb39"
+      "binarySha256": "8b7a26e6b06b17f5059b8db9ea31df88e07caa5a5263efdeb566cc3c40a1649b"
+    },
+    {
+      "name": "complete-bundle-smoke-macos-arm64",
+      "commands": [
+        "aioncore prepare-managed-resources",
+        "python3 scripts/release/prepare_officecli.py",
+        "python3 scripts/release/assemble_bundle.py",
+        "python3 scripts/release/verify_bundle.py"
+      ],
+      "exitCode": 0,
+      "builtAt": "2026-08-15T16:04:21Z",
+      "sourceCommit": "232456db3d2ade5933952f1463a5af977e135a15",
+      "target": "aarch64-apple-darwin",
+      "fileCount": 11791,
+      "officeCli": {
+        "version": "v1.0.143",
+        "path": "managed-resources/office/officecli",
+        "sha256": "2f158d46f9b6c5eb0dfe4eb02038114001e17acc47b67347417c56dcf9659096",
+        "size": 33740304
+      },
+      "manifestSha256": "7d89a3daf462bdcb7dc46bbda4c250db316188846d5f2964fbc9de7827b37e7a",
+      "checksumsSha256": "8bab366f7b7d4f4f921b4d5e484c8e971208cc861b8478bf75747b2b4896afc0"
     }
   ],
   "review": {
-    "reviewedRange": "9bd693b3b43cdb1003061de0e4f62259ab6f42ae..6355481aa3bdc149cbd18d665603872ae34cbb29",
+    "reviewedRange": "9bd693b3b43cdb1003061de0e4f62259ab6f42ae..232456db3d2ade5933952f1463a5af977e135a15",
     "reviewer": "Codex implementation agent, fresh read-only pass",
     "independentReviewerSatisfied": false,
-    "dimensions": {
-      "security": "pass_after_fix",
-      "correctness": "pass_after_fix",
-      "performance": "pass_no_blocking_findings",
-      "maintainability": "pass_no_blocking_findings"
-    },
     "resolvedFindings": [
       {
         "id": "OAUTH-EXPIRY-OVERFLOW",
         "severity": "P1",
-        "finding": "Subtracting the expiry safety margin could overflow for an extreme persisted timestamp and fail open in an optimized build.",
-        "fixCommit": "801787496535b3b85bfb4c58a206f88a3dc49cfb",
-        "proof": "The new focused test first failed with an overflow panic, then passed after saturating subtraction; the final full suite also passed."
+        "fixCommit": "801787496535b3b85bfb4c58a206f88a3dc49cfb"
       },
       {
         "id": "RELEASE-ACTION-PINS",
         "severity": "P1",
-        "finding": "The write-capable release workflow referenced actions by mutable tags or a moving branch.",
-        "fixCommit": "6355481aa3bdc149cbd18d665603872ae34cbb29",
-        "proof": "A contract test first failed on all seven mutable references, then passed after each release action was pinned to a full 40-character commit SHA."
+        "fixCommit": "6355481aa3bdc149cbd18d665603872ae34cbb29"
+      },
+      {
+        "id": "OFFICECLI-BUNDLE-OMISSION",
+        "severity": "P1",
+        "fixCommit": "232456db3d2ade5933952f1463a5af977e135a15",
+        "proof": "TDD covered approved target mapping, digest mismatch cleanup, create-only installation, HTTPS-only redirects, assembler/verifier rejection, workflow ordering, live official ARM64 digest, and a verified 11,791-file bundle smoke."
       }
     ],
-    "openBlockingFindings": [],
-    "knownLimitation": "OAuth bearer headers are resolved when an agent session is built; an already-running long-lived session does not refresh its fixed header in place.",
-    "requiredNextReview": "A reviewer independent of the implementation agent must accept the OAuth transitions, migration 028, logging boundary, bundle verifier, path safety, workflow pins, and this residual session-refresh limitation before Task 8."
+    "openBlockingFindings": [
+      "The first exact-head Nextest attempt is red with incomplete failure capture; only the second diagnostic attempt is green.",
+      "A reviewer independent of the implementation agent has not accepted the final range.",
+      "The Windows x64 build and bundle have not run on a native Windows runner."
+    ],
+    "knownLimitation": "OAuth bearer headers are resolved when an agent session is built; an already-running long-lived session does not refresh its fixed header in place."
   },
-  "evidenceLimit": "Local macOS diagnostics only. Native Windows build and both published archive/manifests remain unverified. Raw logs are local ignored artifacts identified by SHA-256; released evidence requires checksummed workflow artifacts. No tag or release is authorized by this record."
+  "evidenceLimit": "Local macOS diagnostics only. Native Windows build and both published archives remain unverified. No tag, push, release, or publication is authorized by this record."
 }

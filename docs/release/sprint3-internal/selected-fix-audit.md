@@ -42,9 +42,9 @@ Focused baseline evidence on the RC:
 - Changed paths: `packages/shared-scripts/src/prepare-aioncore.js` and `tests/unit/assets/officecliAssetName.test.ts`.
 - Assumptions: WePrompt may independently download OfficeCLI `v1.0.143` while preparing each desktop build, and adding files after backend-contract validation still produces one trustworthy bundle.
 - Baseline evidence: the current AionCore release candidate exports Node and ACP managed resources but not OfficeCLI. Therefore the packaged-path behavior above would otherwise fall back to host installation or `PATH` on a clean machine.
-- Smallest complete patch: add the pinned OfficeCLI asset and digest to the immutable AionCore release bundle before its manifest, checksums, and signatures are generated. WePrompt must consume that already-verified bundle and must not download a second executable.
-- Focused evidence: the accepted AionCore bundle tests and both native bundle verifiers must enumerate `managed-resources/office/officecli[.exe]`; WePrompt packaged tests must prove the same path. This is a release-candidate requirement before backend publication.
-- Decision: `replaced` by the complete AionCore bundle contract. The current AionCore candidate is not publishable until this replacement is implemented and all exact-head gates are rerun.
+- Smallest complete patch: add the pinned OfficeCLI asset and digest to the immutable AionCore release bundle before its manifest and checksums are generated. WePrompt must consume that already-verified bundle and must not download a second executable.
+- Focused evidence: AionCore `232456db3d2ade5933952f1463a5af977e135a15` implements the replacement. Release-contract tests passed 30/30; the official ARM64 asset matched its pinned digest; and the independent verifier accepted an 11,791-file ARM64 smoke bundle containing `managed-resources/office/officecli`. Native Windows evidence remains required.
+- Decision: `replaced` by the complete AionCore bundle contract at `232456db3d2ade5933952f1463a5af977e135a15`.
 
 ### `c2c7de28678e67e11bb2cb5b9f883b0b2ad11e48` — presentation-template packaging path
 
@@ -111,4 +111,4 @@ Focused baseline evidence on the RC:
 
 ## Port boundary
 
-No WePrompt code port is approved from these named commits. Tasks 4 and 6 implement the separately specified release-policy and workflow contracts. The AionCore bundle must be superseded to carry pinned OfficeCLI before Task 3 can pin or publish it.
+No WePrompt code port is approved from these named commits. Tasks 4 and 6 implement the separately specified release-policy and workflow contracts. AionCore `232456db3d2ade5933952f1463a5af977e135a15` now carries pinned OfficeCLI, but publication remains blocked on independent review, native Windows evidence, the retained red suite attempt, and explicit authorization.
