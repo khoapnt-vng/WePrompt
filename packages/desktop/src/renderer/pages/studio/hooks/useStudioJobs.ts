@@ -134,6 +134,7 @@ const sanitizeJob = (candidate: StudioRendererJob): StudioRendererJob => {
       providerId: candidate.provider.providerId,
       model: candidate.provider.model,
     },
+    ...(candidate.outputRole === undefined ? {} : { outputRole: candidate.outputRole }),
     outputAssetIds: [...candidate.outputAssetIds],
     canRetryDownload: candidate.canRetryDownload === true,
     canCancel: candidate.canCancel === true,

@@ -165,13 +165,12 @@ export type StudioJob = {
 
 /**
  * Renderer-facing job metadata. Provider task, adapter, and charge identities stay in main.
- * `outputRole` is omitted too: the renderer does not consume it yet, and both projections onto this
- * type (toRendererJob, sanitizeJob) are exhaustive whitelists that would otherwise silently drop it.
- * Whoever starts wiring it must add it to both projections in the same change.
+ * `outputRole` is an optional renderer field: absent remains the legacy `take` default and must not
+ * be backfilled onto older jobs.
  */
 export type StudioRendererJob = Omit<
   StudioJob,
-  'provider' | 'idempotencyKey' | 'providerJobId' | 'remoteStartedAt' | 'cancellationPolicy' | 'outputRole'
+  'provider' | 'idempotencyKey' | 'providerJobId' | 'remoteStartedAt' | 'cancellationPolicy'
 > & {
   provider: StudioMediaChoiceRef;
   /** Main-derived cancellation capability; renderer code never infers it from status or provider metadata. */

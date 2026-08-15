@@ -3152,6 +3152,49 @@ describe('CreativeStudioService', () => {
     ).rejects.toMatchObject({ code: 'invalid_payload' });
   });
 
+  it('retains a reference output role when projecting a job for the renderer', async () => {
+    const created = await service.createProject(makeInput());
+    await store.updateProject(created.id, (current) => ({
+      ...current,
+      sceneOrder: ['scene_1'],
+      scenes: {
+        scene_1: {
+          id: 'scene_1',
+          ...makeScene('scene_1'),
+          selectedAssetId: null,
+          assetIds: [],
+          jobIds: ['job_reference'],
+          reviewState: 'generating',
+        },
+      },
+      jobs: {
+        job_reference: {
+          id: 'job_reference',
+          projectId: current.id,
+          sceneId: 'scene_1',
+          status: 'succeeded',
+          provider: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'image-model' },
+          idempotencyKey: 'reference-idempotency-key',
+          providerJobId: 'reference-provider-job',
+          cancellationPolicy: 'none',
+          outputRole: 'reference',
+          outputAssetIds: [],
+          error: null,
+          retryOfJobId: null,
+          retryReason: null,
+          duplicateChargeAcknowledged: false,
+          duplicateChargeAcknowledgedAt: null,
+          createdAt: current.createdAt,
+          updatedAt: current.updatedAt,
+        },
+      },
+    }));
+
+    const rendererProject = await service.getProject(created.id);
+
+    expect(rendererProject?.jobs.job_reference).toMatchObject({ outputRole: 'reference' });
+  });
+
   it('recursively removes adapter identity and provider internals from project, job, and catalog DTOs', async () => {
     const internalJob: StudioJob = {
       id: 'job_1',

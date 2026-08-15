@@ -668,6 +668,20 @@ describe('useStudioJobs', () => {
     });
   });
 
+  it('retains a reference output role when sanitizing a renderer job', async () => {
+    const { result } = renderHook(() =>
+      useStudioJobs({ project: project(2, { 'job-reference': job('job-reference', { outputRole: 'reference' }) }) })
+    );
+
+    await waitFor(() => expect(result.current.jobs[0]).toMatchObject({ id: 'job-reference', outputRole: 'reference' }));
+  });
+
+  it('does not invent an output role when sanitizing a legacy job', async () => {
+    const { result } = renderHook(() => useStudioJobs({ project: project(2, { 'job-legacy': job('job-legacy') }) }));
+
+    await waitFor(() => expect(result.current.jobs[0]).not.toHaveProperty('outputRole'));
+  });
+
   it('trusts main-derived canCancel instead of inferring authority from job status', async () => {
     const queued = job('job-queued', { status: 'queued_remote', canCancel: false });
     const running = job('job-running', { status: 'running', sceneId: 'scene-1', canCancel: true });

@@ -681,6 +681,7 @@ const toRendererJob = (job: StudioJob): StudioRendererJob => ({
   sceneId: job.sceneId,
   status: job.status,
   provider: toRendererMediaChoice(job.provider),
+  ...(job.outputRole === undefined ? {} : { outputRole: job.outputRole }),
   outputAssetIds: [...job.outputAssetIds],
   error: job.error === null ? null : { ...job.error },
   canCancel: canCancelJob(job),
