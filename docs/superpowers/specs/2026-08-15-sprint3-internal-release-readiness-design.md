@@ -2,13 +2,13 @@
 
 **Date:** 2026-08-15
 
-**Status:** Approved design; awaiting written-spec review
+**Status:** Revised after written-spec review; awaiting approval
 
 **Release type:** Internal, unsigned, manually distributed
 
 ## 1. Decision Summary
 
-Prepare Sprint 3 as a narrowly hardened internal release. Do not merge WePrompt `main` wholesale and do not remove Creative Studio code. Build from immutable reviewed baselines, repair and publish the AionCore backend contract first, then pin WePrompt to that exact backend release and produce three unsigned desktop artifacts.
+Prepare Sprint 3 as a narrowly hardened internal release. Do not merge WePrompt `main` wholesale and do not remove Creative Studio code. Build from immutable reviewed baselines, repair and publish the AionCore backend contract first, then pin WePrompt to that exact backend release and produce two unsigned desktop artifacts.
 
 The release is held until the release owner explicitly signs off after reviewing packaged-runtime evidence.
 
@@ -21,7 +21,6 @@ The release is held until the release owner explicitly signs off after reviewing
 - Selected release-critical fixes from later WePrompt work, ported only after source and behavior review.
 - Unsigned internal packages for:
   - macOS ARM64
-  - macOS x64
   - Windows x64
 - Manual distribution with artifact hashes and installation instructions.
 - Packaged acceptance covering migration safety, local authentication, chat streaming, MCP OAuth, OfficeCLI, presentation templates, restart behavior, Creative Studio exclusion, and disabled auto-update.
@@ -31,7 +30,7 @@ The release is held until the release owner explicitly signs off after reviewing
 - Public release, store submission, signing, notarization, or trusted-publisher setup.
 - Auto-update feeds or automatic rollout.
 - Creative Studio exposure, Studio provider calls, or integration of newer Studio branches.
-- Linux and Windows ARM64 packages.
+- macOS x64, Linux, and Windows ARM64 packages.
 - Wholesale integration of WePrompt `main`.
 - Feature expansion unrelated to release blockers.
 - Use of upstream `iOfficeAI/AionCore`; the backend must come from `khoapnt-vng/aioncore`.
@@ -51,9 +50,9 @@ No branch name is sufficient evidence. Every review, dependency pin, artifact ma
 
 ```mermaid
 flowchart LR
-    A["AionCore RC\nexact source commit"] --> B["Complete v0.1.55 backend bundle\n3 targets + manifest + hashes"]
+    A["AionCore RC\nexact source commit"] --> B["Complete v0.1.55 backend bundle\n2 targets + manifest + hashes"]
     B --> C["WePrompt RC\nexact backend pin"]
-    C --> D["Unsigned desktop packages\nmacOS ARM64, macOS x64, Windows x64"]
+    C --> D["Unsigned desktop packages\nmacOS ARM64, Windows x64"]
     D --> E["Packaged acceptance evidence"]
     E --> F{"Release owner sign-off"}
     F -->|Go| G["Manual internal distribution"]
@@ -97,7 +96,7 @@ The exact release candidate must pass:
 - Clippy with warnings treated as failures for the release workspace
 - Backend test suite, including new OAuth cases
 - Migration immutability and deterministic-lineage validation
-- Release build for all three targets
+- Release build for both targets
 - Bundle content and checksum validation after extraction
 - Tag-to-commit and manifest-to-commit verification
 
@@ -151,22 +150,53 @@ The exact WePrompt RC must pass:
 - Linting
 - Formatting checks
 - i18n validation
-- Full Vitest suite
+- Deterministic Vitest gates plus controlled full-suite evidence under the flake policy below
 - Release-configuration assertions for Studio and auto-update
 - Exact backend-pin and backend-bundle contract tests
 - Package-content verification for each target
 
 A green Sprint 3 source workflow is useful baseline evidence but does not replace these RC and packaged-runtime gates.
 
+### 6.6 Full-suite flake policy
+
+The full Vitest suite is not a simple green/red release gate while BUG-046 remains open. The Sprint 3 baseline's declared intermittent set is frozen as follows:
+
+| Register item | Known signature on the baseline | Release treatment |
+|---|---|---|
+| BUG-027 | `jobManager.test.ts`: `persists the remote identity before polling and uses the exact capped backoff schedule` and `stops repeated running snapshots at the thirty-minute lifecycle deadline` | Exact-signature triage is allowed; no timeout increase or broad quarantine |
+| BUG-030 | `EnvironmentTeardownError` after green DOM tests in `TeamSiderSection.dom.test.tsx` | Process exit remains a failure and requires disposition |
+| BUG-043 | `PresentationReadinessService`: `rejects same-byte replacement and hardlink drift of the inspection path` | Integrity-sensitive; never waivable by a later green run and subject to the Windows gate below |
+| BUG-046 | `StudioPage.dom.test.tsx` `fitStoryboardToGoal` wait and `PresentationSourceGrantStore.test.ts` full-suite-position sightings | Exact-signature triage is allowed; new tests or signatures are not presumed flaky |
+
+BUG-025 and BUG-046's `broker.test.ts` wall-clock case are fixed on the baseline and are not members of the release quarantine. A recurrence is a regression until investigated. The table can change only through a reviewed register update that names the exact test/signature, evidence, owner, and expiry condition.
+
+For each exact RC commit and runner environment:
+
+1. Run the full suite once and record the command, commit, runner, environment, start/end time, exit code, failed tests, logs, and machine-load evidence where available.
+2. Treat every nonzero result as a gate event. Before any rerun, classify each failure as a confirmed regression, an exact known-flake signature, infrastructure failure, or unknown.
+3. Confirmed regressions and unknown failures block the RC. An exact known-flake signature requires a focused diagnostic run, unchanged assertions, a linked register item, and reviewer disposition. Passing in isolation is diagnostic evidence, not proof that the full-suite failure is harmless.
+4. Reruns are permitted only as recorded diagnostics with a stated question; they never replace or erase earlier results. Re-running until green is prohibited, and raising timeouts is not a flake disposition.
+5. The source gate is satisfied only when deterministic tests pass, no failure remains unknown, every full-suite failure has a written disposition, and the evidence packet reports the total run count and the ordered outcome of every run.
+
 ## 7. Build and Artifact Matrix
 
 | Platform | Architecture | Backend member | Desktop artifact | Signing state |
 |---|---|---|---|---|
 | macOS | ARM64 | `aioncore` | Internal installer/archive | Unsigned |
-| macOS | x64 | `aioncore` | Internal installer/archive | Unsigned |
 | Windows | x64 | `aioncore.exe` | Internal installer/archive | Unsigned |
 
 Each desktop artifact must be traceable to the exact WePrompt RC commit and the exact AionCore bundle. Store the desktop artifact hash, embedded backend hash, build log, toolchain versions, and package inventory together. Unsigned-install bypass instructions must be explicit and must not weaken runtime security controls.
+
+### 7.1 Windows risk gate
+
+The targets do not have equal evidence. macOS has hosted source-suite history; Windows has no equivalent full-suite result, and BUG-043's readiness guard has never been exercised there. Windows therefore carries the higher release risk and must pass these entry gates before its packaged matrix can be accepted:
+
+- A native Windows x64 CI job on the exact RC commit covering frozen install, source gates, tests under the §6.6 flake policy, and release build.
+- The focused BUG-043 replacement and hardlink-drift suite on the shipped Windows filesystem/runtime, with the relevant path-stat and handle-stat evidence captured.
+- A packaged-Electron readiness probe proving that missing, unsupported, or ambiguous identity evidence blocks approval rather than failing open.
+- Windows package-content and bundled-AionCore verification after installation, not only archive inspection on macOS.
+
+Run Windows packaged acceptance first. A missing Windows host, an unexercised BUG-043 guard, or a failed Windows-only gate is a Windows no-go; macOS results cannot waive it. Because both targets are in the approved scope, that holds the overall release unless the release owner explicitly re-scopes the release to macOS ARM64 only.
 
 ## 8. Packaged Acceptance
 
@@ -182,12 +212,26 @@ Run acceptance on clean, representative machines or VMs for every target. Source
 6. Exercise token expiry, successful refresh, failed refresh, and reauthentication recovery; confirm no expired token is sent.
 7. Exercise packaged OfficeCLI discovery and preview.
 8. Verify packaged presentation-template inventory and access paths.
-9. Quit cleanly, relaunch, and verify persisted sessions and data remain valid.
-10. Verify Creative Studio is absent from navigation, inaccessible by direct route, and causes no Studio provider traffic or storage initialization.
-11. Verify auto-update is disabled and no upstream update prompt or feed access occurs.
-12. Collect application/backend logs, screenshots where useful, timestamps, artifact hashes, and tester result for every scenario.
+9. Apply the BUG-017 disposition below. Do not claim runtime access-loss detection or recovery passed while its AionCore wire shape is unverified.
+10. Quit cleanly, relaunch, and verify persisted sessions and data remain valid.
+11. Verify Creative Studio is absent from navigation, inaccessible by direct route, and causes no Studio provider traffic or storage initialization.
+12. Verify auto-update is disabled and no upstream update prompt or feed access occurs.
 
-Acceptance failures must preserve the affected database and logs for diagnosis. Test fixtures must use copies; never use the only copy of user data.
+Collect application/backend logs, screenshots where useful, timestamps, artifact hashes, and tester results for every scenario. Acceptance failures must preserve the affected database and logs for diagnosis. Test fixtures must use copies; never use the only copy of user data.
+
+### 8.1 BUG-017 known-issue disposition
+
+BUG-017 is a P1 known issue, not an omitted test and not a passed acceptance scenario.
+
+| Aspect | Release evidence and disposition |
+|---|---|
+| Proven | Access loss and `SQLITE_CANTOPEN` must not reach the corruption backup-and-rebuild path; the baseline contains revert-resistant unit coverage for this invariant |
+| Unbuilt/unverified | Runtime classification, safe retry/restart UX, bounded diagnostics, and the exact AionCore runtime error wire shape |
+| Operator workaround | Stop further activity, preserve and hash a database copy, collect bounded logs, restart/retry, and never delete, rebuild, or invoke corruption recovery without confirmed corruption and explicit consent |
+| Required owner action | Name the WePrompt and AionCore owners, retain the wire-shape question as the first dependency, and decide whether to complete it before release or accept the availability/recovery limitation |
+| Release disposition | The release cannot receive plain **Go** while this P1 remains open. It requires an explicit **Conditional go** accepting the unbuilt detection/recovery UX after reviewing the proven non-destructive safeguard; otherwise it is **No-go** |
+
+Do not manufacture a synthetic runtime payload and call it acceptance evidence. If AionCore exposes an observed runtime wire shape before the release decision, add classification and recovery acceptance against that exact contract; otherwise retain the limitation and workaround verbatim in the internal release notes.
 
 ## 9. Evidence and Decision Gate
 
@@ -197,6 +241,7 @@ The release evidence packet must contain:
 - Exact WePrompt and AionCore base/head commits
 - Pull request list and selected-fix audit
 - CI results for both exact RC heads
+- Full-suite run ledger with every attempt, ordered outcome, failure triage, focused diagnostics, and disposition
 - Backend and desktop bundle manifests and SHA-256 hashes
 - Toolchain and build-environment record
 - Per-platform packaged acceptance matrix
@@ -207,7 +252,7 @@ The release evidence packet must contain:
 The final decision record has three possible outcomes:
 
 - **Go:** release owner explicitly approves the exact artifact hashes.
-- **Conditional go:** permitted only for a documented non-security, non-data-integrity limitation with owner, workaround, and accepted risk.
+- **Conditional go:** permitted only for a documented non-security, non-data-integrity limitation with owner, workaround, and accepted risk. BUG-017 qualifies only while the non-destructive invariant remains proven and its residual risk is limited to availability and recovery UX; any data-integrity uncertainty is **No-go**.
 - **No-go:** artifacts remain held; no distribution occurs.
 
 Silence, elapsed time, partial platform success, or CI reruns do not constitute approval.
@@ -223,6 +268,9 @@ Stop the release and return to the relevant gate if any of the following occurs:
 - Creative Studio or auto-update is enabled in a production package.
 - Local authentication can be bypassed for HTTP or WebSocket traffic.
 - Any target fails a required package or acceptance scenario.
+- A full-suite failure is unknown, untriaged, or treated as erased by a later green run.
+- Windows lacks native CI evidence or the BUG-043 guard is unexercised, ambiguous, or fails open there.
+- BUG-017 access loss can invoke destructive recovery, or its open P1 disposition is omitted from the decision record.
 - A release artifact is replaced without a new version and evidence cycle.
 
 Any source change invalidates artifacts built from the prior commit. A backend pin, migration input, release configuration, packaging script, or build-toolchain change invalidates all affected package evidence. A platform-specific change invalidates at least that platform and any shared-gate evidence it touches.
@@ -237,7 +285,10 @@ Any source change invalidates artifacts built from the prior commit. A backend p
 | OAuth refresh sends stale credentials | Correct client persistence, fail-closed token contract, end-to-end expiry tests |
 | Unsigned packages confuse testers or trigger OS warnings | Internal-only scope, checksum verification, explicit per-OS install instructions |
 | Hidden flag exposes Creative Studio | Build assertion plus packaged absence and traffic checks |
-| Source tests create false confidence | Three-target packaged acceptance is mandatory |
+| Full-suite flakes hide regressions or encourage rerun-until-green | Frozen known-flake set, mandatory per-failure triage, recorded run ledger, no erasure by rerun |
+| Windows behavior is inferred from macOS | Native Windows gates, BUG-043 filesystem/runtime evidence, Windows-first packaged acceptance |
+| BUG-017 runtime data access is lost without recovery UX | Non-destructive invariant, explicit P1 conditional-go disposition, preservation-first operator workaround |
+| Source tests create false confidence | Two-target packaged acceptance is mandatory |
 | Dirty local checkout contaminates release work | Isolated worktrees, narrow staging, recorded commits, reproducible inventories |
 
 ## 12. Execution Order
@@ -247,8 +298,8 @@ Any source change invalidates artifacts built from the prior commit. A backend p
 3. Publish immutable backend RC artifacts and verify them after extraction.
 4. Pin WePrompt to the exact backend release and audit/port only approved release fixes.
 5. Pass WePrompt source and packaging gates with Studio and auto-update assertions.
-6. Build all three unsigned desktop artifacts from one accepted WePrompt RC commit.
-7. Run the full packaged acceptance matrix and assemble the evidence packet.
+6. Build both unsigned desktop artifacts from one accepted WePrompt RC commit.
+7. Run Windows risk gates first, then the full two-target packaged acceptance matrix and assemble the evidence packet.
 8. Present exact artifact hashes and evidence to the release owner for explicit go/no-go sign-off.
 9. On approval, distribute manually to the internal audience; otherwise hold all artifacts.
 
