@@ -1008,7 +1008,7 @@ describe('CreativeStudioService', () => {
     expect(asset?.sourceVisualPrompt).toBe('Aerial, drifting. Smoke columns.');
   });
 
-  it('projects Brief classification and complete plate provenance without aliasing source IDs', async () => {
+  it('projects Brief classification and clones complete plate provenance from the exact source object', async () => {
     const project = await service.createProject(makeInput());
     await store.updateProject(project.id, (current) => {
       const next = structuredClone(current);
@@ -1034,7 +1034,19 @@ describe('CreativeStudioService', () => {
       return next;
     });
 
-    const rendererProject = await service.getProject(project.id);
+    const sourceProject = await store.getProject(project.id);
+    expect(sourceProject).not.toBeNull();
+    const stableStore: CreativeStudioStore = {
+      ...store,
+      getProject: vi.fn(async () => sourceProject),
+    };
+    const projectionService = createCreativeStudioService({
+      store: stableStore,
+      onProjectUpdated,
+      storyboardPlanner: makePlanner(),
+    });
+
+    const rendererProject = await projectionService.getProject(project.id);
     const rendererIds = rendererProject?.assets.reference_1.sourceReferenceAssetIds;
 
     expect(rendererProject?.assets.cast_1).toMatchObject({
@@ -1047,7 +1059,8 @@ describe('CreativeStudioService', () => {
       sourceAspectRatio: '16:9',
       sourceResolution: '1080p',
     });
-    expect(rendererIds).not.toBe((await store.getProject(project.id))?.assets.reference_1.sourceReferenceAssetIds);
+    rendererIds?.push('renderer_only');
+    expect(sourceProject?.assets.reference_1.sourceReferenceAssetIds).toEqual(['cast_1']);
   });
 
   it('leaves provenance undefined for an asset that never recorded one', async () => {

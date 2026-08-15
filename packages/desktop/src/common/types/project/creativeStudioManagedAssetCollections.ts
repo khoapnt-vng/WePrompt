@@ -20,6 +20,10 @@ export const STUDIO_MANAGED_ASSET_COLLECTIONS: ReadonlySet<StudioManagedAssetRef
 
 export const STUDIO_MAX_ACTIVE_BRIEF_REFERENCES = 6;
 export const STUDIO_BRIEF_REFERENCE_LABEL_MAX_LENGTH = 160;
+const STUDIO_REFERENCE_IMAGE_MIME_TYPES: ReadonlySet<string> = new Set(['image/jpeg', 'image/png', 'image/webp']);
+
+export const isStudioReferenceImageMimeType = (value: unknown): value is string =>
+  typeof value === 'string' && STUDIO_REFERENCE_IMAGE_MIME_TYPES.has(value);
 
 const isUnsafeLabelCharacter = (character: string): boolean => {
   const codePoint = character.codePointAt(0)!;
@@ -41,6 +45,8 @@ const truncateLabel = (value: string, maximumLength: number): string => {
   }
   return result;
 };
+
+const compareCodeUnits = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
 
 /** Derives one stable display label from a portable source basename and allocates its first free suffix. */
 export const allocateStudioBriefReferenceLabel = (sourceName: string, existingLabels: readonly string[]): string => {
@@ -79,6 +85,7 @@ export const resolveActiveStudioBriefReferences = (
       !isStudioBriefReferenceLabel(asset.briefReferenceLabel) ||
       asset.sceneId !== null ||
       asset.mediaKind !== 'image' ||
+      !isStudioReferenceImageMimeType(asset.mimeType) ||
       asset.managedAsset.collection !== 'imports'
     ) {
       return null;
@@ -88,7 +95,7 @@ export const resolveActiveStudioBriefReferences = (
   if (active.length > STUDIO_MAX_ACTIVE_BRIEF_REFERENCES) return null;
   return active.toSorted((left, right) => {
     const byRole = Number(left.briefReferenceRole === 'look') - Number(right.briefReferenceRole === 'look');
-    return byRole || left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
+    return byRole || compareCodeUnits(left.createdAt, right.createdAt) || compareCodeUnits(left.id, right.id);
   });
 };
 

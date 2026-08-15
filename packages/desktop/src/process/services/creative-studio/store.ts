@@ -32,6 +32,7 @@ import { hasRuleToken, STUDIO_RULE_LIMITS, type StudioBriefRule } from '@/common
 import { isCanonicalStudioGeneratedTake } from '@/common/types/project/creativeStudioCanonicalTake';
 import {
   isStudioBriefReferenceLabel,
+  isStudioReferenceImageMimeType,
   resolveActiveStudioBriefReferences,
   STUDIO_MANAGED_ASSET_COLLECTIONS,
   STUDIO_MAX_ACTIVE_BRIEF_REFERENCES,
@@ -705,6 +706,7 @@ const validateAsset = (
         isStudioBriefReferenceLabel(value.briefReferenceLabel) &&
         value.sceneId === null &&
         value.mediaKind === 'image' &&
+        isStudioReferenceImageMimeType(value.mimeType) &&
         value.managedAsset.collection === 'imports')) &&
     (value.sourceVisualPrompt === undefined || isString(value.sourceVisualPrompt)) &&
     hasSourceReferenceAssetIds === hasSourceAspectRatio &&
@@ -719,6 +721,7 @@ const validateAsset = (
         RESOLUTIONS.has(value.sourceResolution) &&
         value.sourceVisualPrompt !== undefined &&
         value.mediaKind === 'image' &&
+        isStudioReferenceImageMimeType(value.mimeType) &&
         value.sceneId !== null &&
         value.managedAsset.collection === 'references'))
   );
@@ -1144,6 +1147,7 @@ const validateProject = (value: unknown): value is StudioProject => {
           sourceAsset.projectId === projectId &&
           sourceAsset.sceneId === null &&
           sourceAsset.mediaKind === 'image' &&
+          isStudioReferenceImageMimeType(sourceAsset.mimeType) &&
           sourceAsset.managedAsset.collection === 'imports'
         );
       })

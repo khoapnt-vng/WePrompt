@@ -298,6 +298,7 @@ describe('Creative Studio Brief reference metadata', () => {
   it.each([
     { sceneId: 'scene_1' },
     { mediaKind: 'video' as const, mimeType: 'video/mp4' },
+    { mimeType: 'video/mp4' },
     { managedAsset: { collection: 'assets' as const, fileName: 'hero.png' } },
   ])('rejects classified metadata on an asset that cannot be a Brief reference: %o', (overrides) => {
     const asset = classifiedImport('hero', 'cast', project.createdAt, overrides);
@@ -319,6 +320,30 @@ describe('Creative Studio Brief reference metadata', () => {
       'cast_new',
       'look_old',
     ]);
+  });
+
+  it('orders mixed-case and punctuation timestamps by deterministic code units', () => {
+    const assets = {
+      lower: classifiedImport('lower', 'cast', 'a_stamp'),
+      punctuation: classifiedImport('punctuation', 'cast', '_stamp'),
+      upper: classifiedImport('upper', 'cast', 'B_stamp'),
+    };
+
+    expect(resolveActiveStudioBriefReferences(assets)?.map((asset) => asset.id)).toEqual([
+      'upper',
+      'punctuation',
+      'lower',
+    ]);
+  });
+
+  it('breaks timestamp ties for mixed-case and punctuation IDs by deterministic code units', () => {
+    const assets = {
+      a_ref: classifiedImport('a_ref', 'cast', project.createdAt),
+      Z_ref: classifiedImport('Z_ref', 'cast', project.createdAt),
+      _ref: classifiedImport('_ref', 'cast', project.createdAt),
+    };
+
+    expect(resolveActiveStudioBriefReferences(assets)?.map((asset) => asset.id)).toEqual(['Z_ref', '_ref', 'a_ref']);
   });
 
   it('accepts six active references and rejects a seventh', () => {
@@ -1730,6 +1755,14 @@ describe('creative studio project store', () => {
         },
       },
       {
+        label: 'classification on image metadata with a video MIME',
+        mutate: (asset: StudioAsset) => {
+          asset.mimeType = 'video/mp4';
+          asset.briefReferenceRole = 'cast';
+          asset.briefReferenceLabel = 'Hero';
+        },
+      },
+      {
         label: 'classification outside imports',
         mutate: (asset: StudioAsset) => {
           asset.managedAsset = { collection: 'assets', fileName: 'cast_1.png' };
@@ -1809,6 +1842,51 @@ describe('creative studio project store', () => {
       ).rejects.toMatchObject({ code: 'invalid_payload' });
     });
 
+    it('accepts complete provenance pointing to a retained import that is no longer classified in Brief', async () => {
+      const project = await store.createProject(makeInput());
+
+      const persisted = await store.updateProject(project.id, (current) => {
+        const next = addScene(current, 'scene_1');
+        next.assets.retained_1 = makeProjectImport(next, 'retained_1');
+        next.assets.plate_1 = {
+          ...makeProjectImport(next, 'plate_1'),
+          sceneId: 'scene_1',
+          managedAsset: { collection: 'references', fileName: 'plate_1.png' },
+          sourceVisualPrompt: 'Hero enters the arena',
+          sourceReferenceAssetIds: ['retained_1'],
+          sourceAspectRatio: '16:9',
+          sourceResolution: '1080p',
+        };
+        next.scenes.scene_1.assetIds = ['plate_1'];
+        return next;
+      });
+
+      expect(persisted.assets.retained_1).not.toHaveProperty('briefReferenceRole');
+      expect(persisted.assets.plate_1.sourceReferenceAssetIds).toEqual(['retained_1']);
+    });
+
+    it('rejects complete provenance pointing to image metadata with a video MIME', async () => {
+      const project = await store.createProject(makeInput());
+
+      await expect(
+        store.updateProject(project.id, (current) => {
+          const next = addScene(current, 'scene_1');
+          next.assets.source_1 = makeProjectImport(next, 'source_1', { mimeType: 'video/mp4' });
+          next.assets.plate_1 = {
+            ...makeProjectImport(next, 'plate_1'),
+            sceneId: 'scene_1',
+            managedAsset: { collection: 'references', fileName: 'plate_1.png' },
+            sourceVisualPrompt: 'Hero enters the arena',
+            sourceReferenceAssetIds: ['source_1'],
+            sourceAspectRatio: '16:9',
+            sourceResolution: '1080p',
+          };
+          next.scenes.scene_1.assetIds = ['plate_1'];
+          return next;
+        })
+      ).rejects.toMatchObject({ code: 'invalid_payload' });
+    });
+
     it.each([
       {
         sourceReferenceAssetIds: ['cast_1'],
@@ -1851,6 +1929,10 @@ describe('creative studio project store', () => {
       {
         label: 'missing visual prompt',
         overrides: { sourceVisualPrompt: undefined },
+      },
+      {
+        label: 'image metadata with a video MIME',
+        overrides: { mimeType: 'video/mp4' },
       },
     ])('rejects complete provenance on a plate with the $label', async ({ overrides }) => {
       const project = await store.createProject(makeInput());
