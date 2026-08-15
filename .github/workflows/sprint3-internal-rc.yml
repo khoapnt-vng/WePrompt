@@ -13,6 +13,7 @@ permissions:
 
 env:
   WEPROMPT_INTERNAL_RELEASE: '1'
+  WEPROMPT_RELEASE_COMMIT: ${{ inputs.weprompt_commit }}
   AIONUI_BACKEND_VERSION: v0.1.55
   BUN_INSTALL_REGISTRY: 'https://registry.npmjs.org/'
   CSC_IDENTITY_AUTO_DISCOVERY: 'false'
@@ -116,6 +117,15 @@ jobs:
       - name: Build unsigned Windows x64 package
         run: bun run build-win:x64
 
+      - name: Verify packaged Windows x64 contents
+        run: >-
+          node scripts/release/verify-internal-package.js
+          --aioncore-record docs/release/sprint3-internal/aioncore-v0.1.55.json
+          --platform windows-x64
+          --resources-dir out/win-unpacked/resources
+          --weprompt-commit "${{ inputs.weprompt_commit }}"
+          --output "$env:RUNNER_TEMP/package-report.json"
+
       - name: Upload unsigned Windows x64 candidate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
         with:
@@ -125,6 +135,7 @@ jobs:
             out/*.blockmap
             out/*.yml
             resources/bundled-aioncore/win32-x64/**
+            ${{ runner.temp }}/package-report.json
           if-no-files-found: error
           retention-days: 30
 
@@ -199,6 +210,15 @@ jobs:
       - name: Build unsigned macOS ARM64 package
         run: bun run build-mac:arm64
 
+      - name: Verify packaged macOS ARM64 contents
+        run: >-
+          node scripts/release/verify-internal-package.js
+          --aioncore-record docs/release/sprint3-internal/aioncore-v0.1.55.json
+          --platform macos-arm64
+          --resources-dir out/mac-arm64/WePrompt.app/Contents/Resources
+          --weprompt-commit "${{ inputs.weprompt_commit }}"
+          --output "$RUNNER_TEMP/package-report.json"
+
       - name: Upload unsigned macOS ARM64 candidate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
         with:
@@ -209,5 +229,6 @@ jobs:
             out/*.blockmap
             out/*.yml
             resources/bundled-aioncore/darwin-arm64/**
+            ${{ runner.temp }}/package-report.json
           if-no-files-found: error
           retention-days: 30

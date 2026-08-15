@@ -660,6 +660,7 @@ describe('release packaging configuration', () => {
     expect(workflow).toMatch(/macos-arm64:\s*\n\s+needs: windows-x64/);
     expect(workflow).toContain('test "$(git rev-parse HEAD)" = "${{ inputs.weprompt_commit }}"');
     expect(workflow).toContain("WEPROMPT_INTERNAL_RELEASE: '1'");
+    expect(workflow).toContain('WEPROMPT_RELEASE_COMMIT: ${{ inputs.weprompt_commit }}');
     expect(workflow).toContain('bun-version: 1.3.14');
     expect(workflow).toContain('node-version: 24.15.0');
     expect(workflow).toContain('bun install --frozen-lockfile');
@@ -669,6 +670,9 @@ describe('release packaging configuration', () => {
     expect(workflow).toContain('aioncore-v0.1.55.json');
     expect(workflow).toContain('build-win:x64');
     expect(workflow).toContain('build-mac:arm64');
+    expect(workflow.match(/node scripts\/release\/verify-internal-package\.js/g)).toHaveLength(2);
+    expect(workflow).toContain('--resources-dir out/win-unpacked/resources');
+    expect(workflow).toContain('--resources-dir out/mac-arm64/WePrompt.app/Contents/Resources');
     expect(workflow).not.toContain('AIONUI_ENABLE_CREATIVE_STUDIO: 1');
 
     const actionRefs = [...workflow.matchAll(/uses:\s*([^\s#]+)/g)].map((match) => match[1]);

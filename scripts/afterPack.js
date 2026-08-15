@@ -79,6 +79,44 @@ function verifyPresentationTemplateResources(resourcesDir) {
   return checked;
 }
 
+function writeInternalReleaseMarker(resourcesDir, electronPlatformName, targetArch, environment = process.env) {
+  if (environment.WEPROMPT_INTERNAL_RELEASE !== '1') return null;
+  const platform =
+    electronPlatformName === 'win32' && targetArch === 'x64'
+      ? 'windows-x64'
+      : electronPlatformName === 'darwin' && targetArch === 'arm64'
+        ? 'macos-arm64'
+        : null;
+  if (platform === null) throw new Error('Internal release marker supports only an approved internal target');
+  const wepromptCommit = environment.WEPROMPT_RELEASE_COMMIT;
+  if (!/^[0-9a-f]{40}$/.test(wepromptCommit || '')) {
+    throw new Error('WEPROMPT_RELEASE_COMMIT must be the exact lowercase 40-character candidate SHA');
+  }
+  const markerPath = path.join(resourcesDir, 'internal-release.json');
+  const markerBytes = `${JSON.stringify(
+    {
+      schemaVersion: 1,
+      channel: 'internal',
+      wepromptCommit,
+      platform,
+      unsigned: true,
+      creativeStudioEnabled: false,
+      autoUpdateEnabled: false,
+      sentryEnabled: false,
+    },
+    null,
+    2
+  )}\n`;
+  if (fs.existsSync(markerPath)) {
+    if (fs.readFileSync(markerPath, 'utf8') !== markerBytes) {
+      throw new Error('Existing internal release marker does not match the exact candidate policy');
+    }
+    return markerPath;
+  }
+  fs.writeFileSync(markerPath, markerBytes, { flag: 'wx' });
+  return markerPath;
+}
+
 async function afterPack(context) {
   const { arch, electronPlatformName, appOutDir, packager } = context;
   const targetArch = normalizeArch(typeof arch === 'string' ? arch : Arch[arch] || process.arch);
@@ -116,6 +154,7 @@ async function afterPack(context) {
 
     verifyBundledResources(resourcesDir, electronPlatformName, targetArch);
     verifyPresentationTemplateResources(resourcesDir);
+    writeInternalReleaseMarker(resourcesDir, electronPlatformName, targetArch);
   } else {
     throw new Error(`resources directory not found: ${resourcesDir}`);
   }
@@ -272,3 +311,4 @@ module.exports = afterPack;
 module.exports.assertBundledRuntimeIsolation = assertBundledRuntimeIsolation;
 module.exports.resolveResourcesDir = resolveResourcesDir;
 module.exports.verifyPresentationTemplateResources = verifyPresentationTemplateResources;
+module.exports.writeInternalReleaseMarker = writeInternalReleaseMarker;
