@@ -266,6 +266,61 @@ describe('Studio Director subprocess command writer', () => {
     await expect(readFile(path.join(slotsDir, '0.slot'), 'utf8')).resolves.toBe(JSON.stringify(newerSlot));
   });
 
+  it('preserves a valid replacement installed after cleanup validates its original slot', async () => {
+    await writeFile(path.join(pendingDir, 'command_collision.json'), '{"existing":true}');
+    const canonicalSlotsDir = await nodeFs.realpath(slotsDir);
+    const slotFile = path.join(canonicalSlotsDir, '0.slot');
+    const slotGuard = `${slotFile}.unconfirmed`;
+    const newerSlot: StudioDirectorCommandSlotV1 = {
+      schemaVersion: 1,
+      commandId: 'command_newer_after_validation',
+      reservedAt: '2026-08-17T01:02:04.000Z',
+      deadlineAt: '2026-08-17T01:02:19.000Z',
+    };
+    let originalSlotReadComplete = false;
+    let slotGuardOpenCount = 0;
+    let replaced = false;
+    const replaceWithNewerSlot = async () => {
+      if (replaced) return;
+      replaced = true;
+      await rm(slotFile);
+      await writeFile(slotFile, JSON.stringify(newerSlot));
+    };
+    const open = async (...args: Parameters<typeof nodeFs.open>) => {
+      const file = String(args[0]);
+      const handle = await nodeFs.open(...args);
+      if (file === slotGuard) {
+        slotGuardOpenCount += 1;
+        if (originalSlotReadComplete && slotGuardOpenCount > 1) await replaceWithNewerSlot();
+      }
+      if (file !== slotFile || originalSlotReadComplete) return handle;
+      return bindMethods(handle, {
+        close: async () => {
+          await handle.close();
+          originalSlotReadComplete = true;
+        },
+      });
+    };
+    const lstat = async (file: Parameters<typeof nodeFs.lstat>[0], ...args: unknown[]) => {
+      if (!replaced && originalSlotReadComplete && slotGuardOpenCount === 1 && String(file) === canonicalSlotsDir) {
+        await replaceWithNewerSlot();
+      }
+      return Reflect.apply(nodeFs.lstat, nodeFs, [file, ...args]);
+    };
+    const fs = bindMethods(nodeFs, { lstat, open });
+    const writer = writerWithIds(['command_collision'], { fs });
+
+    await expect(writer.apply(setBriefInput())).resolves.toEqual({
+      status: 'storage_error',
+      commandId: 'command_collision',
+    });
+
+    expect(replaced).toBe(true);
+    expect(slotGuardOpenCount).toBe(2);
+    await expect(readFile(slotFile, 'utf8')).resolves.toBe(JSON.stringify(newerSlot));
+    expect(await readdir(slotsDir)).toEqual(['0.slot']);
+  });
+
   it.each([
     {
       name: 'unsafe command id',

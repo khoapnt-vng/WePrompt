@@ -5,7 +5,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { promises as nodeFs } from 'node:fs';
+import { constants as fsConstants, promises as nodeFs } from 'node:fs';
 import path from 'node:path';
 import {
   STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
@@ -29,7 +29,6 @@ import {
   type RecordIoFileSystem,
   publishImmutableRecord,
   readBoundedRegularFile,
-  removeRegularRecordIfPresent,
   resolveCompleteDirectorySet,
 } from '@process/services/creative-studio/service/recordIo';
 
@@ -87,6 +86,14 @@ type PreparedCommand = {
   slotBytes: string;
 };
 
+type ErrorRecord = { code?: unknown };
+
+type GuardedRecord = {
+  value: unknown;
+  dev: number;
+  ino: number;
+};
+
 const defaultSleep = (milliseconds: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -96,6 +103,9 @@ const storageError = (commandId: string): { status: 'storage_error'; commandId: 
 });
 
 const safeOutcomeId = (candidate: string): string => (isSafeStudioDirectorId(candidate) ? candidate : 'unavailable');
+
+const hasErrorCode = (error: unknown, code: string): boolean =>
+  typeof error === 'object' && error !== null && !Array.isArray(error) && (error as ErrorRecord).code === code;
 
 const parseJson = (bytes: string): unknown => {
   try {
@@ -144,6 +154,90 @@ const readJsonRecord = async (input: {
     maxBytes: STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
   });
   return bytes === null ? null : parseJson(bytes);
+};
+
+const syncDirectory = async (fs: RecordIoFileSystem, directory: string): Promise<void> => {
+  const handle = await fs.open(directory, 'r');
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+};
+
+const readGuardedJsonRecord = async (input: {
+  fs: RecordIoFileSystem;
+  file: string;
+}): Promise<GuardedRecord | null> => {
+  let handle: Awaited<ReturnType<RecordIoFileSystem['open']>> | undefined;
+  try {
+    let preliminaryStats: Awaited<ReturnType<RecordIoFileSystem['lstat']>>;
+    try {
+      preliminaryStats = await input.fs.lstat(input.file);
+    } catch (error) {
+      if (hasErrorCode(error, 'ENOENT')) return null;
+      throw error;
+    }
+    if (preliminaryStats.isSymbolicLink() || !preliminaryStats.isFile()) {
+      throw new RecordIoError('unsafe_file');
+    }
+    if (preliminaryStats.size > STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES) {
+      throw new RecordIoError('record_too_large');
+    }
+    const flags =
+      process.platform === 'win32'
+        ? fsConstants.O_RDONLY
+        : fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK;
+    try {
+      handle = await input.fs.open(input.file, flags);
+    } catch (error) {
+      if (hasErrorCode(error, 'ENOENT')) return null;
+      if (hasErrorCode(error, 'ELOOP') || hasErrorCode(error, 'EMLINK')) {
+        throw new RecordIoError('unsafe_file');
+      }
+      throw error;
+    }
+    const stats = await handle.stat();
+    if (!stats.isFile() || stats.dev !== preliminaryStats.dev || stats.ino !== preliminaryStats.ino) {
+      throw new RecordIoError('unsafe_file');
+    }
+    if (stats.size > STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES) {
+      throw new RecordIoError('record_too_large');
+    }
+    const bytes = Buffer.alloc(STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES + 1);
+    let offset = 0;
+    while (offset < bytes.length) {
+      // eslint-disable-next-line no-await-in-loop
+      const result = await handle.read(bytes, offset, bytes.length - offset, offset);
+      if (result.bytesRead === 0) break;
+      offset += result.bytesRead;
+    }
+    if (offset > STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES) throw new RecordIoError('record_too_large');
+    let pathStats: Awaited<ReturnType<RecordIoFileSystem['lstat']>>;
+    try {
+      pathStats = await input.fs.lstat(input.file);
+    } catch (error) {
+      if (hasErrorCode(error, 'ENOENT')) return null;
+      throw error;
+    }
+    if (
+      pathStats.isSymbolicLink() ||
+      !pathStats.isFile() ||
+      pathStats.dev !== stats.dev ||
+      pathStats.ino !== stats.ino
+    ) {
+      throw new RecordIoError('unsafe_file');
+    }
+    return {
+      value: parseJson(bytes.subarray(0, offset).toString('utf8')),
+      dev: stats.dev,
+      ino: stats.ino,
+    };
+  } catch (error) {
+    throw error instanceof RecordIoError ? error : new RecordIoError('storage_error');
+  } finally {
+    await handle?.close().catch((): undefined => undefined);
+  }
 };
 
 const readNamedReceipt = async (input: {
@@ -284,13 +378,92 @@ const cleanupOwnedSlot = async (input: {
     new Date(input.nowMs).toISOString(),
     STUDIO_DIRECTOR_COMMAND_WAIT_MS
   );
-  if (current?.commandId !== input.slot.commandId || current.deadlineAt !== input.slot.deadlineAt) return false;
-  await removeRegularRecordIfPresent({
-    fs: input.fs,
-    canonicalRoot: input.directories.canonicalRoot,
-    file: slotFile,
-  });
-  return true;
+  if (
+    current?.schemaVersion !== input.slot.schemaVersion ||
+    current.commandId !== input.slot.commandId ||
+    current.reservedAt !== input.slot.reservedAt ||
+    current.deadlineAt !== input.slot.deadlineAt
+  ) {
+    return false;
+  }
+
+  const slotGuard = `${slotFile}.unconfirmed`;
+  let guardHandle: Awaited<ReturnType<RecordIoFileSystem['open']>> | undefined;
+  let ownsGuard = false;
+  let preserveGuard = false;
+  const releaseGuard = async (): Promise<void> => {
+    await input.fs.rm(slotGuard);
+    ownsGuard = false;
+    await syncDirectory(input.fs, input.directories.slots);
+  };
+  try {
+    const slotsStats = await input.fs.lstat(input.directories.slots);
+    if (
+      !slotsStats.isDirectory() ||
+      slotsStats.isSymbolicLink() ||
+      (await input.fs.realpath(input.directories.slots)) !== input.directories.slots
+    ) {
+      throw new RecordIoError('unsafe_path');
+    }
+    guardHandle = await input.fs.open(slotGuard, 'wx');
+    ownsGuard = true;
+    await guardHandle.writeFile('1', { encoding: 'utf8' });
+    await guardHandle.sync();
+    await guardHandle.close();
+    guardHandle = undefined;
+    await syncDirectory(input.fs, input.directories.slots);
+
+    const guardedRecord = await readGuardedJsonRecord({ fs: input.fs, file: slotFile });
+    if (guardedRecord === null) {
+      await releaseGuard();
+      return true;
+    }
+    const guardedSlot = parseStudioDirectorCommandSlot(
+      guardedRecord.value,
+      new Date(input.nowMs).toISOString(),
+      STUDIO_DIRECTOR_COMMAND_WAIT_MS
+    );
+    if (
+      guardedSlot?.schemaVersion !== input.slot.schemaVersion ||
+      guardedSlot.commandId !== input.slot.commandId ||
+      guardedSlot.reservedAt !== input.slot.reservedAt ||
+      guardedSlot.deadlineAt !== input.slot.deadlineAt
+    ) {
+      await releaseGuard();
+      return false;
+    }
+
+    let finalStats: Awaited<ReturnType<RecordIoFileSystem['lstat']>>;
+    try {
+      finalStats = await input.fs.lstat(slotFile);
+    } catch (error) {
+      if (!hasErrorCode(error, 'ENOENT')) throw error;
+      await releaseGuard();
+      return true;
+    }
+    if (
+      finalStats.isSymbolicLink() ||
+      !finalStats.isFile() ||
+      finalStats.dev !== guardedRecord.dev ||
+      finalStats.ino !== guardedRecord.ino
+    ) {
+      await releaseGuard();
+      return false;
+    }
+    await input.fs.rm(slotFile);
+    preserveGuard = true;
+    await syncDirectory(input.fs, input.directories.slots);
+    preserveGuard = false;
+    await releaseGuard();
+    return true;
+  } catch (error) {
+    await guardHandle?.close().catch((): undefined => undefined);
+    if (ownsGuard && !preserveGuard) {
+      await input.fs.rm(slotGuard).catch((): undefined => undefined);
+      await syncDirectory(input.fs, input.directories.slots).catch((): undefined => undefined);
+    }
+    throw error instanceof RecordIoError ? error : new RecordIoError('storage_error');
+  }
 };
 
 export const createStudioDirectorCommandWriter = (
