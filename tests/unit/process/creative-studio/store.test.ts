@@ -117,6 +117,14 @@ const addScene = (project: StudioProject, id: string, durationSeconds = 1): Stud
   return next;
 };
 
+const withSceneCount = (project: StudioProject, count: number): StudioProject => {
+  let next = cloneProject(project);
+  for (let index = next.sceneOrder.length; index < count; index += 1) {
+    next = addScene(next, `scene_${index + 1}`);
+  }
+  return next;
+};
+
 const addVideoAsset = (project: StudioProject, durationSeconds: number): StudioProject => {
   const next = addScene(project, 'scene_1');
   next.scenes.scene_1.mediaKind = 'video';
@@ -473,6 +481,74 @@ describe('creative studio project store', () => {
     expect(project.revision).toBe(1);
     expect(project.schemaVersion).toBe(1);
     expect(await store.getProject(project.id)).toEqual(project);
+  });
+
+  it('reads and lists a legacy 25-scene schema-v1 project without rewriting or quarantining it', async () => {
+    const project = await store.createProject(makeInput());
+    const file = path.join(rootDir, project.id, 'project.json');
+    const legacy = withSceneCount(project, 25);
+    const manifestBytes = JSON.stringify(legacy);
+    writeFileSync(file, manifestBytes);
+
+    await expect(store.getProject(project.id)).resolves.toEqual(legacy);
+    await expect(store.listProjects()).resolves.toEqual([
+      expect.objectContaining({ id: project.id, sceneCount: 25, selectedAssetCount: 0 }),
+    ]);
+    await expect(store.listQuarantinedProjectIds()).resolves.toEqual([]);
+    expect(readFileSync(file, 'utf8')).toBe(manifestBytes);
+  });
+
+  it('rejects a direct 23-to-25 scene transition without changing manifest bytes or revision', async () => {
+    const project = await store.createProject(makeInput());
+    const admitted = await store.updateProject(project.id, (current) => withSceneCount(current, 23), project.revision);
+    const file = path.join(rootDir, project.id, 'project.json');
+    const before = readFileSync(file);
+
+    await expect(
+      store.updateProject(admitted.id, (current) => withSceneCount(current, 25), admitted.revision)
+    ).rejects.toMatchObject({ code: 'invalid_payload', message: 'Studio scene limit exceeded' });
+
+    expect(readFileSync(file)).toEqual(before);
+    await expect(store.getProject(project.id)).resolves.toMatchObject({
+      revision: admitted.revision,
+      sceneOrder: admitted.sceneOrder,
+    });
+  });
+
+  it('allows a legacy over-capacity project to stay or shrink but never grow', async () => {
+    const project = await store.createProject(makeInput());
+    const file = path.join(rootDir, project.id, 'project.json');
+    writeFileSync(file, JSON.stringify(withSceneCount(project, 25)));
+
+    const retained = await store.updateProject(project.id, (current) => ({ ...current, name: 'Legacy retained' }), 1);
+    expect(retained.sceneOrder).toHaveLength(25);
+
+    const beforeGrowth = readFileSync(file);
+    await expect(
+      store.updateProject(retained.id, (current) => withSceneCount(current, 26), retained.revision)
+    ).rejects.toMatchObject({ code: 'invalid_payload', message: 'Studio scene limit exceeded' });
+    expect(readFileSync(file)).toEqual(beforeGrowth);
+
+    const reduced = await store.updateProject(
+      retained.id,
+      (current) => {
+        const next = structuredClone(current);
+        const removed = next.sceneOrder.pop()!;
+        delete next.scenes[removed];
+        return next;
+      },
+      retained.revision
+    );
+    expect(reduced.sceneOrder).toHaveLength(24);
+  });
+
+  it('does not let an admitted 24-scene project cross the scene limit', async () => {
+    const project = await store.createProject(makeInput());
+    const admitted = await store.updateProject(project.id, (current) => withSceneCount(current, 24), project.revision);
+
+    await expect(
+      store.updateProject(admitted.id, (current) => withSceneCount(current, 25), admitted.revision)
+    ).rejects.toMatchObject({ code: 'invalid_payload', message: 'Studio scene limit exceeded' });
   });
 
   it('reads a project written before rule history existed and defaults the missing fields', async () => {

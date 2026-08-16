@@ -147,6 +147,18 @@ export type StudioCancellationPolicy = 'none' | 'queued_only' | 'queued_and_runn
 export type StudioOutputRole = 'take' | 'reference';
 
 export const STUDIO_REFERENCE_PROMPT_MAX_LENGTH = 4 * 1024;
+export const STUDIO_MAX_SCENES = 24;
+export const STUDIO_MAX_GENERATION_SCENES_PER_REQUEST = 24;
+export const STUDIO_MAX_REFERENCE_REQUEST_SCENES = 24;
+export const STUDIO_MAX_CUT_PLACEMENT_SCENES = 24;
+export const STUDIO_MAX_DIRTY_SCENES_REPORTED = 24;
+export const STUDIO_MAX_MCP_AVAILABLE_TAKE_IDS_PER_SCENE = 24;
+
+/** Preserves readable legacy projects while preventing any further scene-count growth above the current cap. */
+export function isStudioSceneCountTransitionAllowed(currentCount: number, nextCount: number): boolean {
+  if (currentCount <= STUDIO_MAX_SCENES) return nextCount <= STUDIO_MAX_SCENES;
+  return nextCount <= currentCount;
+}
 
 /** Main-only frame-defining authority frozen before a reference plate is submitted. */
 export type StudioReferenceInputSnapshot = {

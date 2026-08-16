@@ -11,7 +11,13 @@ import {
 } from '../../types/office/artifactEditor';
 import { PRESENTATION_RUN_LIMITS } from '../../types/office/presentationRunPolicy';
 import { STUDIO_RULE_LIMITS } from '../../types/project/creativeStudioRules';
-import { STUDIO_REFERENCE_PROMPT_MAX_LENGTH } from '../../types/project/creativeStudioTypes';
+import {
+  STUDIO_MAX_CUT_PLACEMENT_SCENES,
+  STUDIO_MAX_DIRTY_SCENES_REPORTED,
+  STUDIO_MAX_GENERATION_SCENES_PER_REQUEST,
+  STUDIO_MAX_SCENES,
+  STUDIO_REFERENCE_PROMPT_MAX_LENGTH,
+} from '../../types/project/creativeStudioTypes';
 import type { NativeBridgeProviderKey, RendererBridgeQueryKey } from './constants';
 
 const MAX_PATH_LENGTH = 4096;
@@ -351,10 +357,10 @@ const studioSubmitScenesSchema = z
     sceneIds: z
       .array(safeIdSchema)
       .min(1)
-      .max(24)
+      .max(STUDIO_MAX_GENERATION_SCENES_PER_REQUEST)
       .refine((ids) => new Set(ids).size === ids.length),
     catalogVersion: z.string().regex(/^[a-f0-9]{16}$/),
-    routes: z.array(studioSceneRouteSnapshotSchema).min(1).max(24),
+    routes: z.array(studioSceneRouteSnapshotSchema).min(1).max(STUDIO_MAX_GENERATION_SCENES_PER_REQUEST),
     outputRole: z.enum(['take', 'reference']).optional(),
     referencePrompts: z
       .array(
@@ -366,7 +372,7 @@ const studioSubmitScenesSchema = z
           .strict()
       )
       .min(1)
-      .max(24)
+      .max(STUDIO_MAX_GENERATION_SCENES_PER_REQUEST)
       .optional(),
   })
   .strict()
@@ -527,7 +533,9 @@ export const INVALID_RENDERER_BRIDGE_QUERY_PAYLOAD_MESSAGE =
 export const rendererBridgeQuerySchemas = {
   'creative-studio.has-unsaved-work': {
     request: voidPayloadSchema,
-    response: z.object({ dirtySceneCount: z.number().finite().int().min(0).max(24) }).strict(),
+    response: z
+      .object({ dirtySceneCount: z.number().finite().int().min(0).max(STUDIO_MAX_DIRTY_SCENES_REPORTED) })
+      .strict(),
   },
   'creative-studio.flush-unsaved-work': {
     request: voidPayloadSchema,
@@ -796,7 +804,7 @@ export const nativeBridgePayloadSchemas = {
       sceneIds: z
         .array(safeIdSchema)
         .min(1)
-        .max(24)
+        .max(STUDIO_MAX_CUT_PLACEMENT_SCENES)
         .refine((ids) => new Set(ids).size === ids.length),
       beforeClipId: safeIdSchema.nullable(),
     })
@@ -819,7 +827,7 @@ export const nativeBridgePayloadSchemas = {
       sceneOrder: z
         .array(safeIdSchema)
         .min(1)
-        .max(24)
+        .max(STUDIO_MAX_SCENES)
         .refine((ids) => new Set(ids).size === ids.length),
     })
     .strict(),

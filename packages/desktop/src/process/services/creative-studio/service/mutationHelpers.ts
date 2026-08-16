@@ -4,11 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {
-  StudioEditableScene,
-  StudioJob,
-  StudioProject,
-  StudioScene,
+import {
+  isStudioSceneCountTransitionAllowed,
+  type StudioEditableScene,
+  type StudioJob,
+  type StudioProject,
+  type StudioScene,
 } from '@/common/types/project/creativeStudioTypes';
 import { isCanonicalStudioGeneratedTake } from '@/common/types/project/creativeStudioCanonicalTake';
 import { requestedMediaKind } from '@/common/types/project/creativeStudioOutputRole';
@@ -46,6 +47,12 @@ export class CreativeStudioServiceError extends Error {
 }
 
 const invalid = (message: string): CreativeStudioStoreError => new CreativeStudioStoreError('invalid_payload', message);
+
+const assertSceneCountTransition = (currentCount: number, nextCount: number): void => {
+  if (!isStudioSceneCountTransitionAllowed(currentCount, nextCount)) {
+    throw invalid('Studio scene limit exceeded');
+  }
+};
 
 const isIntegerInRange = (value: unknown, minimum: number, maximum: number): value is number =>
   typeof value === 'number' &&
@@ -111,10 +118,8 @@ export function applyStudioSceneMutation(
     }
     delete next.scenes[input.sceneId];
     next.sceneOrder = next.sceneOrder.filter((sceneId) => sceneId !== input.sceneId);
+    assertSceneCountTransition(project.sceneOrder.length, next.sceneOrder.length);
     return reconcilePersistedStudioCuts(next);
-  }
-  if (!Object.hasOwn(next.scenes, input.sceneId) && next.sceneOrder.length >= 24) {
-    throw invalid('Studio project has too many scenes');
   }
   if (input.scene.referenceAssetId !== null) {
     const reference = next.assets[input.scene.referenceAssetId];
@@ -165,6 +170,7 @@ export function applyStudioSceneMutation(
     };
   }
   if (!next.sceneOrder.includes(input.sceneId)) next.sceneOrder.push(input.sceneId);
+  assertSceneCountTransition(project.sceneOrder.length, next.sceneOrder.length);
   return reconcilePersistedStudioCuts(next);
 }
 
@@ -177,6 +183,7 @@ export function applyStudioSceneOrder(project: StudioProject, sceneOrder: readon
   ) {
     throw invalid('Studio scene order must be an exact permutation');
   }
+  assertSceneCountTransition(project.sceneOrder.length, sceneOrder.length);
   return reconcilePersistedStudioCuts({ ...project, sceneOrder: [...sceneOrder] });
 }
 

@@ -66,6 +66,11 @@ import type {
   StudioUpdateModelSelectionRequest,
 } from '@/common/types/project/creativeStudioTypes';
 import {
+  isStudioSceneCountTransitionAllowed,
+  STUDIO_MAX_GENERATION_SCENES_PER_REQUEST,
+  STUDIO_MAX_SCENES,
+} from '@/common/types/project/creativeStudioTypes';
+import {
   foldForRuleMatch,
   hasRuleToken,
   resolveEffectiveStudioRules,
@@ -489,7 +494,7 @@ const assertSubmitScenesInput = (input: StudioSubmitScenesRequest): void => {
   if (
     !Array.isArray(input.sceneIds) ||
     input.sceneIds.length < 1 ||
-    input.sceneIds.length > 24 ||
+    input.sceneIds.length > STUDIO_MAX_GENERATION_SCENES_PER_REQUEST ||
     input.sceneIds.some((sceneId) => !isSafeId(sceneId)) ||
     new Set(input.sceneIds).size !== input.sceneIds.length ||
     !Array.isArray(input.routes) ||
@@ -902,6 +907,9 @@ const applyProposalPayload = (
         createdAt: minted.timestamp,
       },
     ]);
+  }
+  if (!isStudioSceneCountTransitionAllowed(project.sceneOrder.length, payload.sceneOrder.length)) {
+    throw invalid('Studio scene limit exceeded');
   }
   const proposedIds = new Set(payload.sceneOrder);
   for (const scene of Object.values(project.scenes)) {
@@ -1411,6 +1419,10 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
         );
       } catch (error) {
         throw plannerError(error);
+      }
+
+      if (!isStudioSceneCountTransitionAllowed(project.sceneOrder.length, result.scenes.length)) {
+        throw invalid('Studio scene limit exceeded');
       }
 
       const sceneIds = new Set<string>();
@@ -1988,7 +2000,7 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
       if (
         !Array.isArray(input.sceneOrder) ||
         input.sceneOrder.length < 1 ||
-        input.sceneOrder.length > 24 ||
+        input.sceneOrder.length > STUDIO_MAX_SCENES ||
         input.sceneOrder.some((sceneId) => !isSafeId(sceneId)) ||
         new Set(input.sceneOrder).size !== input.sceneOrder.length
       ) {

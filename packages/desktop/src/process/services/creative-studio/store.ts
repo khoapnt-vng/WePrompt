@@ -8,6 +8,8 @@ import { promises as nodeFs } from 'node:fs';
 import { watch as watchFileSystem } from 'node:fs';
 import path from 'node:path';
 import {
+  isStudioSceneCountTransitionAllowed,
+  STUDIO_MAX_SCENES,
   STUDIO_REFERENCE_PROMPT_MAX_LENGTH,
   type CreateStudioProjectInput,
   type StudioAsset,
@@ -475,7 +477,7 @@ const validateStoryboardProposalPayload = (value: Record<string, unknown>): bool
   const sceneIds = Object.keys(scenes);
   return (
     sceneOrder.length > 0 &&
-    sceneOrder.length <= 24 &&
+    sceneOrder.length <= STUDIO_MAX_SCENES &&
     new Set(sceneOrder).size === sceneOrder.length &&
     sceneIds.length === sceneOrder.length &&
     sceneIds.every((sceneId) => sceneOrder.includes(sceneId) && validateProposalScene(scenes[sceneId]))
@@ -2052,6 +2054,12 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     const updated = update(structuredClone(current));
     if (!isRecord(updated) || updated.id !== current.id || updated.createdAt !== current.createdAt) {
       throw new CreativeStudioStoreError('invalid_payload', 'Studio project identity cannot change');
+    }
+    if (
+      Array.isArray(updated.sceneOrder) &&
+      !isStudioSceneCountTransitionAllowed(current.sceneOrder.length, updated.sceneOrder.length)
+    ) {
+      throw new CreativeStudioStoreError('invalid_payload', 'Studio scene limit exceeded');
     }
     const next: StudioProject = {
       ...updated,

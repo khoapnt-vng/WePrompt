@@ -444,6 +444,45 @@ afterEach(async () => {
 });
 
 describe('StudioJobManager durable submission', () => {
+  it('persists real same-count job lifecycle updates on a legacy 25-scene project', async () => {
+    const submission = deferred<ProviderSubmitResult>();
+    const submit = vi.fn(async () => submission.promise);
+    const harness = await createHarness(
+      controllableAdapter('weprompt-image-v1', {
+        submit,
+      })
+    );
+    const legacy = structuredClone(harness.project);
+    for (let index = 1; index < 25; index += 1) {
+      const sceneId = `scene_${index + 1}`;
+      legacy.sceneOrder.push(sceneId);
+      legacy.scenes[sceneId] = scene({ id: sceneId, title: `Scene ${index + 1}` });
+    }
+    await writeFile(path.join(harness.rootDir, legacy.id, 'project.json'), JSON.stringify(legacy));
+
+    await expect(
+      harness.manager.submitScenes({
+        projectId: legacy.id,
+        expectedRevision: legacy.revision,
+        sceneIds: ['scene_1'],
+        routes: [route],
+        catalogVersion: 'catalog_1',
+      })
+    ).resolves.toMatchObject([{ id: 'job_1', status: 'queued_local' }]);
+    await waitFor(async () =>
+      expect((await harness.store.getProject(legacy.id))?.jobs.job_1.status).toBe('submitting')
+    );
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+
+    submission.reject(new Error('transport interrupted'));
+    await waitFor(async () => {
+      const persisted = await harness.store.getProject(legacy.id);
+      expect(persisted?.jobs.job_1).toMatchObject({ status: 'needs_attention' });
+      expect(persisted?.sceneOrder).toHaveLength(25);
+      expect(persisted?.sceneOrder.at(-1)).toBe('scene_25');
+    });
+  });
+
   it('persists the local job and idempotency key before adapter submission begins', async () => {
     const submission = deferred<ProviderSubmitResult>();
     let observedProject: StudioProject | null = null;

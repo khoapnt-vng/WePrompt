@@ -20,11 +20,17 @@ import {
 } from '@/common/types/project/creativeStudioRules';
 import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
 import { resolveActiveStudioBriefReferences } from '@/common/types/project/creativeStudioManagedAssetCollections';
-import type {
-  StudioEditableScene,
-  StudioProject,
-  StudioRouteCatalog,
+import {
+  STUDIO_MAX_MCP_AVAILABLE_TAKE_IDS_PER_SCENE,
+  STUDIO_MAX_REFERENCE_REQUEST_SCENES,
+  STUDIO_MAX_SCENES,
+  type StudioAsset,
+  type StudioEditableScene,
+  type StudioProject,
+  type StudioScene,
+  type StudioRouteCatalog,
 } from '@/common/types/project/creativeStudioTypes';
+import { isCanonicalStudioGeneratedTake } from '@/common/types/project/creativeStudioCanonicalTake';
 import { BUILTIN_STUDIO_NAME } from '@process/resources/builtinMcp/constants';
 import { StudioProposalWriteError, writeProposalRecord } from '@process/resources/builtinMcp/studioProposalWriter';
 import {
@@ -59,6 +65,35 @@ export type ProposeBriefRuleInput = {
 };
 
 const SAFE_ID = /^[A-Za-z0-9_-]+$/;
+
+const compareCodeUnits = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
+
+const projectSceneTakes = (
+  project: StudioProject,
+  scene: StudioScene
+): { selectedTakeId: string | null; availableTakeIds: string[] } => {
+  const canonicalById = new Map<string, StudioAsset>();
+  for (const assetId of scene.assetIds) {
+    const asset = project.assets[assetId];
+    if (asset !== undefined && asset.id === assetId && isCanonicalStudioGeneratedTake(asset, project.id, scene)) {
+      canonicalById.set(assetId, asset);
+    }
+  }
+  const selectedTakeId =
+    scene.selectedAssetId !== null && canonicalById.has(scene.selectedAssetId) ? scene.selectedAssetId : null;
+  const remaining = [...canonicalById.values()]
+    .filter((asset) => asset.id !== selectedTakeId)
+    .toSorted(
+      (left, right) => compareCodeUnits(right.createdAt, left.createdAt) || compareCodeUnits(left.id, right.id)
+    );
+  return {
+    selectedTakeId,
+    availableTakeIds: [
+      ...(selectedTakeId === null ? [] : [selectedTakeId]),
+      ...remaining.map((asset) => asset.id),
+    ].slice(0, STUDIO_MAX_MCP_AVAILABLE_TAKE_IDS_PER_SCENE),
+  };
+};
 
 /**
  * How long each editable field may be in a proposal this server records.
@@ -142,6 +177,7 @@ export function createReadStoryboardHandler(
         project.sceneOrder.flatMap((sceneId) => {
           const scene = project.scenes[sceneId];
           if (!scene) return [];
+          const takes = projectSceneTakes(project, scene);
           return [
             [
               sceneId,
@@ -155,7 +191,9 @@ export function createReadStoryboardHandler(
                 durationSeconds: scene.durationSeconds,
                 referenceAssetId: scene.referenceAssetId,
                 hasReference: scene.referenceAssetId !== null,
-                hasSelectedTake: scene.selectedAssetId !== null,
+                hasSelectedTake: takes.selectedTakeId !== null,
+                selectedTakeId: takes.selectedTakeId,
+                availableTakeIds: takes.availableTakeIds,
               },
             ],
           ];
@@ -182,6 +220,12 @@ export function createReadStoryboardHandler(
         rules,
         aspectRatio: project.aspectRatio,
         targetDurationSeconds: project.targetDurationSeconds,
+        sceneCapacity: {
+          current: project.sceneOrder.length,
+          maximum: STUDIO_MAX_SCENES,
+          remaining: Math.max(0, STUDIO_MAX_SCENES - project.sceneOrder.length),
+          overCapacity: project.sceneOrder.length > STUDIO_MAX_SCENES,
+        },
         sceneOrder: project.sceneOrder,
         scenes,
       };
@@ -210,6 +254,9 @@ export function createProposeStoryboardHandler(
     if (!config) return errorResult('Creative Studio project is unavailable.');
     const sceneIds = Object.keys(scenes);
     const orderSet = new Set(scene_order);
+    if (scene_order.length > STUDIO_MAX_SCENES) {
+      return errorResult(`At most ${STUDIO_MAX_SCENES} scenes may be proposed at once.`);
+    }
     if (
       orderSet.size !== scene_order.length ||
       sceneIds.length !== scene_order.length ||
@@ -322,7 +369,9 @@ export function createRequestReferenceImagesHandler(
     if (!config) return errorResult('Creative Studio project is unavailable.');
     if (!Array.isArray(sceneIds)) return errorResult('sceneIds must be an array.');
     if (sceneIds.length < 1) return errorResult('At least one scene id is required.');
-    if (sceneIds.length > 24) return errorResult('At most 24 scene ids may be requested at once.');
+    if (sceneIds.length > STUDIO_MAX_REFERENCE_REQUEST_SCENES) {
+      return errorResult(`At most ${STUDIO_MAX_REFERENCE_REQUEST_SCENES} scene ids may be requested at once.`);
+    }
     const invalidSceneIds = sceneIds.filter((sceneId) => !SAFE_ID.test(sceneId));
     if (invalidSceneIds.length > 0) return errorResult(`Invalid scene ids: ${invalidSceneIds.join(', ')}`);
     const duplicateSceneIds = sceneIds.filter((sceneId, index) => sceneIds.indexOf(sceneId) !== index);
@@ -386,7 +435,7 @@ export function registerStudioTools(server: Pick<McpServer, 'tool'>, config: Stu
   server.tool(
     'studio_request_reference_images',
     'Request a supporting reference image for one or more scenes. This does NOT generate anything — it queues a request the user approves before any money is spent. One image per scene; do not request a scene that already has one unless the user asked you to replace it.',
-    { sceneIds: z.array(z.string().regex(SAFE_ID)).min(1).max(24) },
+    { sceneIds: z.array(z.string().regex(SAFE_ID)).min(1).max(STUDIO_MAX_REFERENCE_REQUEST_SCENES) },
     createRequestReferenceImagesHandler(config)
   );
   server.tool(
@@ -398,7 +447,7 @@ export function registerStudioTools(server: Pick<McpServer, 'tool'>, config: Stu
         .int()
         .positive()
         .describe('The revision you saw in read_storyboard. Re-read if your last read is stale.'),
-      scene_order: z.array(z.string().regex(SAFE_ID)).min(1).max(24),
+      scene_order: z.array(z.string().regex(SAFE_ID)).min(1).max(STUDIO_MAX_SCENES),
       scenes: z.record(z.string().regex(SAFE_ID), editableSceneSchema),
     },
     createProposeStoryboardHandler(config)

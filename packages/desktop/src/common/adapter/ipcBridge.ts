@@ -149,6 +149,7 @@ import type {
   StudioUpdateProjectRequest,
   StudioUpdateSceneRequest,
 } from '../types/project/creativeStudioTypes';
+import { STUDIO_MAX_DIRTY_SCENES_REPORTED } from '../types/project/creativeStudioTypes';
 import type {
   CreateProviderRequest,
   FetchModelsAnonymousRequest,
@@ -1321,7 +1322,7 @@ export const creativeStudio = {
     'creative-studio.list-routes'
   ),
   hasUnsavedWork: bridge.buildRendererQuery<StudioUnsavedWorkStatus>('creative-studio.has-unsaved-work', {
-    dirtySceneCount: 24,
+    dirtySceneCount: STUDIO_MAX_DIRTY_SCENES_REPORTED,
   }),
   flushUnsavedWork: bridge.buildRendererQuery<StudioFlushUnsavedWorkResult>('creative-studio.flush-unsaved-work', {
     saved: false,

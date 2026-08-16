@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import ts from 'typescript';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   NATIVE_BRIDGE_PROVIDER_KEYS,
   RENDERER_BRIDGE_QUERY_KEYS,
@@ -1911,6 +1911,53 @@ describe('native bridge payload schemas', () => {
 
   it.each(NATIVE_BRIDGE_PROVIDER_KEYS)('accepts the current payload shape for %s', (providerKey) => {
     expect(() => parseNativeBridgePayload(providerKey, VALID_PAYLOADS[providerKey])).not.toThrow();
+  });
+
+  it('reads reorder, generation, cut, and dirty bounds from their shared independently named authorities', async () => {
+    vi.resetModules();
+    vi.doMock('@/common/types/project/creativeStudioTypes', async (importOriginal) => ({
+      ...(await importOriginal<Record<string, unknown>>()),
+      STUDIO_MAX_SCENES: 2,
+      STUDIO_MAX_GENERATION_SCENES_PER_REQUEST: 2,
+      STUDIO_MAX_CUT_PLACEMENT_SCENES: 2,
+      STUDIO_MAX_DIRTY_SCENES_REPORTED: 2,
+    }));
+    try {
+      const schemas = await import('@/common/adapter/native/payloadSchemas');
+      const sceneIds = ['scene_1', 'scene_2', 'scene_3'];
+      expect(() =>
+        schemas.parseNativeBridgePayload('creative-studio.reorder-scenes', {
+          projectId: 'project_1',
+          expectedRevision: 1,
+          sceneOrder: sceneIds,
+        })
+      ).toThrow(schemas.INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+      expect(() =>
+        schemas.parseNativeBridgePayload('creative-studio.submit-scenes', {
+          projectId: 'project_1',
+          expectedRevision: 1,
+          mode: 'batch',
+          sceneIds,
+          catalogVersion: '0123456789abcdef',
+          routes: sceneIds.map((sceneId) => ({ sceneId, choiceId: `route_${sceneId}`, kind: 'video' })),
+        })
+      ).toThrow(schemas.INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+      expect(() =>
+        schemas.parseNativeBridgePayload('creative-studio.place-cut-scenes', {
+          projectId: 'project_1',
+          expectedRevision: 1,
+          cutId: 'cut_1',
+          sceneIds,
+          beforeClipId: null,
+        })
+      ).toThrow(schemas.INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+      expect(() =>
+        schemas.parseRendererBridgeQueryResponse('creative-studio.has-unsaved-work', { dirtySceneCount: 3 })
+      ).toThrow(schemas.INVALID_RENDERER_BRIDGE_QUERY_PAYLOAD_MESSAGE);
+    } finally {
+      vi.doUnmock('@/common/types/project/creativeStudioTypes');
+      vi.resetModules();
+    }
   });
 
   it.each(['cast', 'look'] as const)('accepts %s as a classified Brief-reference import role', (role) => {

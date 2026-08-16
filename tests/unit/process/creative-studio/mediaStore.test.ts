@@ -159,6 +159,32 @@ const addActiveReferenceJob = async (store: CreativeStudioStore, visualPrompt = 
   });
 };
 
+const seedLegacySceneCount = async (rootDir: string, store: CreativeStudioStore, count: number): Promise<void> => {
+  const project = await store.getProject('project_1');
+  if (project === null) throw new Error('project fixture missing');
+  const legacy = structuredClone(project);
+  for (let index = legacy.sceneOrder.length; index < count; index += 1) {
+    const sceneId = `scene_${index + 1}`;
+    legacy.sceneOrder.push(sceneId);
+    legacy.scenes[sceneId] = {
+      id: sceneId,
+      title: `Scene ${index + 1}`,
+      purpose: '',
+      visualPrompt: '',
+      narration: '',
+      onScreenText: '',
+      mediaKind: 'image',
+      durationSeconds: 1,
+      referenceAssetId: null,
+      selectedAssetId: null,
+      assetIds: [],
+      jobIds: [],
+      reviewState: 'draft',
+    };
+  }
+  await fs.writeFile(path.join(rootDir, 'project_1', 'project.json'), JSON.stringify(legacy));
+};
+
 const addBriefReferences = async (
   store: CreativeStudioStore,
   count: number,
@@ -953,6 +979,28 @@ describe('createStudioMediaStore', () => {
     expect(project?.routing.image).toBeNull();
   });
 
+  it('commits a real generated output without rewriting or truncating a legacy 25-scene project', async () => {
+    const { rootDir, store } = await makeStore();
+    await addActiveImageJob(store);
+    await seedLegacySceneCount(rootDir, store, 25);
+    const media = createStudioMediaStore({ store, createId: () => 'asset_legacy_take' });
+
+    const asset = await media.persistProviderOutputForJob({
+      projectId: 'project_1',
+      sceneId: 'scene_1',
+      jobId: 'job_1',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      body: Readable.from([png]),
+    });
+
+    const project = await store.getProject('project_1');
+    expect(project?.sceneOrder).toHaveLength(25);
+    expect(project?.sceneOrder.at(-1)).toBe('scene_25');
+    expect(project?.scenes.scene_1.selectedAssetId).toBe(asset.id);
+    expect(project?.jobs.job_1).toMatchObject({ status: 'succeeded', outputAssetIds: [asset.id] });
+  });
+
   it('commits a reference to the scene without selecting it as the take', async () => {
     const { rootDir, store } = await makeStore();
     await addActiveReferenceJob(store);
@@ -981,6 +1029,28 @@ describe('createStudioMediaStore', () => {
     await expect(
       fs.access(path.join(rootDir, 'project_1', 'references', 'asset_reference_1.png'))
     ).resolves.toBeUndefined();
+  });
+
+  it('commits a real reference output without rewriting or truncating a legacy 25-scene project', async () => {
+    const { rootDir, store } = await makeStore();
+    await addActiveReferenceJob(store, 'A supporting plate');
+    await seedLegacySceneCount(rootDir, store, 25);
+    const media = createStudioMediaStore({ store, createId: () => 'asset_legacy_reference' });
+
+    const asset = await media.persistProviderOutputForJob({
+      projectId: 'project_1',
+      sceneId: 'scene_1',
+      jobId: 'job_1',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      body: Readable.from([png]),
+    });
+
+    const project = await store.getProject('project_1');
+    expect(project?.sceneOrder).toHaveLength(25);
+    expect(project?.sceneOrder.at(-1)).toBe('scene_25');
+    expect(project?.scenes.scene_1).toMatchObject({ referenceAssetId: asset.id, selectedAssetId: null });
+    expect(project?.assets[asset.id].managedAsset.collection).toBe('references');
   });
 
   it('restores a produced scene to complete after committing a new reference', async () => {

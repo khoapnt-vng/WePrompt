@@ -14,6 +14,7 @@ import {
 } from '@/common/types/project/creativeStudioReferencePrompt';
 import { evaluateStudioRules, resolveEffectiveStudioRules } from '@/common/types/project/creativeStudioRules';
 import {
+  STUDIO_MAX_GENERATION_SCENES_PER_REQUEST,
   STUDIO_REFERENCE_PROMPT_MAX_LENGTH,
   type StudioCancellationPolicy,
   type StudioJob,
@@ -1317,7 +1318,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     if (
       !Array.isArray(input.sceneIds) ||
       input.sceneIds.length < 1 ||
-      input.sceneIds.length > 24 ||
+      input.sceneIds.length > STUDIO_MAX_GENERATION_SCENES_PER_REQUEST ||
       input.sceneIds.some((sceneId) => typeof sceneId !== 'string' || !SAFE_ID.test(sceneId)) ||
       new Set(input.sceneIds).size !== input.sceneIds.length ||
       !Array.isArray(input.routes) ||

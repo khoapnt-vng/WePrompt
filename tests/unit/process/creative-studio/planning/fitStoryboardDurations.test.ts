@@ -7,7 +7,7 @@
  */
 
 import { fitStoryboardDurations } from '@process/services/creative-studio/planning';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 type Item = Parameters<typeof fitStoryboardDurations>[0][number];
 
@@ -195,6 +195,25 @@ describe('fitStoryboardDurations', () => {
     expect(() => fitStoryboardDurations(items, 25)).toThrowError(
       new RangeError('items must contain at most 24 scenes')
     );
+  });
+
+  it('reads the storyboard item boundary from the shared scene authority', async () => {
+    vi.resetModules();
+    vi.doMock('@/common/types/project/creativeStudioTypes', async (importOriginal) => ({
+      ...(await importOriginal<Record<string, unknown>>()),
+      STUDIO_MAX_SCENES: 2,
+    }));
+    try {
+      const { fitStoryboardDurations: fitWithAuthority } =
+        await import('@process/services/creative-studio/planning/fitStoryboardDurations');
+
+      expect(() =>
+        fitWithAuthority([item('scene-1', 1, 0, 60), item('scene-2', 1, 0, 60), item('scene-3', 1, 0, 60)], 3)
+      ).toThrowError(new RangeError('items must contain at most 2 scenes'));
+    } finally {
+      vi.doUnmock('@/common/types/project/creativeStudioTypes');
+      vi.resetModules();
+    }
   });
 
   it.each([

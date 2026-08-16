@@ -13,11 +13,11 @@ import type {
   StudioRendererProject,
   StudioScene,
 } from '@/common/types/project/creativeStudioTypes';
+import { STUDIO_MAX_SCENES } from '@/common/types/project/creativeStudioTypes';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { draftKey, persistDrafts, takePersistedDrafts, type PersistedDrafts } from './useDraftPersistence';
 
-const MAX_SCENES = 24;
 const DEFAULT_SCENE_DURATION_SECONDS = 5;
 const SCENE_SAVE_DEBOUNCE_MS = 450;
 const MAX_PROJECT_NAME_CHARS = 256;
@@ -1341,7 +1341,7 @@ export const useStoryboardEditor = ({
 
   const addScene = useCallback(async (): Promise<boolean> => {
     const current = projectRef.current;
-    if (current === null || current.sceneOrder.length >= MAX_SCENES) return false;
+    if (current === null || current.sceneOrder.length >= STUDIO_MAX_SCENES) return false;
     const sceneId = globalThis.crypto.randomUUID();
     const remainingSeconds =
       current.targetDurationSeconds -
@@ -1619,7 +1619,7 @@ export const useStoryboardEditor = ({
     removeScene,
     reorderScenes,
     moveScene,
-    canAddScene: project !== null && project.sceneOrder.length < MAX_SCENES,
+    canAddScene: project !== null && project.sceneOrder.length < STUDIO_MAX_SCENES,
     durationTotalSeconds,
     durationMatchesTarget: project !== null && durationTotalSeconds === project.targetDurationSeconds,
     remainingDurationSeconds,

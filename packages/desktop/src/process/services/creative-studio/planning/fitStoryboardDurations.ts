@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { STUDIO_MAX_SCENES } from '@/common/types/project/creativeStudioTypes';
+
 export type FitStoryboardDurationItem = {
   sceneId: string;
   currentDurationSeconds: number;
@@ -27,7 +29,6 @@ type WorkingAllocation = FitStoryboardDurationItem & {
   durationSeconds: number;
 };
 
-const MAX_STORYBOARD_ITEMS = 24;
 const MAX_DURATION_SECONDS = 60;
 
 const assertSafeNonnegativeInteger = (value: number, label: string): void => {
@@ -42,13 +43,13 @@ const assertDurationSeconds = (value: number, label: string): void => {
   }
 };
 
-/** Allocates a 0-60 second integer target across at most 24 independently bounded scenes. */
+/** Allocates a 0-60 second integer target across the admitted number of independently bounded scenes. */
 export function fitStoryboardDurations(
   items: readonly FitStoryboardDurationItem[],
   targetSeconds: number
 ): FitStoryboardDurationsResult {
-  if (items.length > MAX_STORYBOARD_ITEMS) {
-    throw new RangeError(`items must contain at most ${MAX_STORYBOARD_ITEMS} scenes`);
+  if (items.length > STUDIO_MAX_SCENES) {
+    throw new RangeError(`items must contain at most ${STUDIO_MAX_SCENES} scenes`);
   }
   assertDurationSeconds(targetSeconds, 'targetSeconds');
   let minimumSeconds = 0;

@@ -3233,6 +3233,88 @@ describe('CreativeStudioService', () => {
     });
   });
 
+  it('edits and reorders a 24-scene project but refuses one more scene with a store error', async () => {
+    const created = await service.createProject(makeInput());
+    const sceneOrder = Array.from({ length: 24 }, (_, index) => `scene_${index + 1}`);
+    const admitted = await store.updateProject(created.id, (current) => ({
+      ...current,
+      sceneOrder,
+      scenes: Object.fromEntries(
+        sceneOrder.map((sceneId) => [
+          sceneId,
+          {
+            id: sceneId,
+            ...makeScene(sceneId),
+            selectedAssetId: null,
+            assetIds: [],
+            jobIds: [],
+            reviewState: 'ready' as const,
+          },
+        ])
+      ),
+    }));
+
+    const edited = await service.updateScene({
+      projectId: admitted.id,
+      expectedRevision: admitted.revision,
+      sceneId: 'scene_1',
+      scene: { ...makeScene('scene_1'), title: 'Edited at capacity' },
+    });
+    expect(edited.scenes.scene_1.title).toBe('Edited at capacity');
+
+    const reversedOrder = [...sceneOrder].reverse();
+    const reordered = await service.reorderScenes({
+      projectId: edited.id,
+      expectedRevision: edited.revision,
+      sceneOrder: reversedOrder,
+    });
+    expect(reordered.sceneOrder).toEqual(reversedOrder);
+
+    await expect(
+      service.updateScene({
+        projectId: reordered.id,
+        expectedRevision: reordered.revision,
+        sceneId: 'scene_25',
+        scene: makeScene('scene_25'),
+      })
+    ).rejects.toMatchObject({
+      name: 'CreativeStudioStoreError',
+      code: 'invalid_payload',
+      message: 'Studio scene limit exceeded',
+    });
+  });
+
+  it('rejects a planner replacement above the shared scene limit without changing the project', async () => {
+    const draftedScenes = Array.from({ length: 25 }, (_, index) => ({
+      ...storyboardProposal.scenes[0],
+      title: `Draft ${index + 1}`,
+    }));
+    let sceneId = 0;
+    const cappedService = createCreativeStudioService({
+      store,
+      onProjectUpdated,
+      storyboardPlanner: makePlanner({
+        draft: async () => ({ projectSummary: 'Too many scenes', scenes: draftedScenes }),
+      }),
+      createSceneId: () => `planned_${++sceneId}`,
+    });
+    const created = await cappedService.createProject(makeInput());
+    const selected = await selectStoryboard(store, created);
+
+    await expect(
+      cappedService.proposeStoryboard({
+        projectId: selected.id,
+        expectedRevision: selected.revision,
+        replaceExisting: false,
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload', message: 'Studio scene limit exceeded' });
+    await expect(store.getProject(selected.id)).resolves.toMatchObject({
+      revision: selected.revision,
+      sceneOrder: [],
+      scenes: {},
+    });
+  });
+
   it('keeps a newly created scene draft when it has no usable visual prompt', async () => {
     const project = await service.createProject(makeInput());
 
@@ -5953,9 +6035,128 @@ describe('Studio MCP server', () => {
       'adapterId',
       'credential',
       'jobIds',
+      'providerJobId',
+      'idempotencyKey',
+      'managedAsset',
+      'fileName',
     ]) {
       expect(serialized).not.toContain(`"${forbidden}"`);
     }
+  });
+
+  it('read_storyboard reports legacy capacity without treating a 25-scene manifest as unavailable', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'studio-server-'));
+    const sceneIds = Array.from({ length: 25 }, (_, index) => `scene_${index + 1}`);
+    const projectFixture = {
+      ...structuredClone(studioServerProjectFixture),
+      sceneOrder: sceneIds,
+      scenes: Object.fromEntries(
+        sceneIds.map((sceneId) => [sceneId, { ...studioServerProjectFixture.scenes.scene_1, id: sceneId }])
+      ),
+    };
+    await writeFile(path.join(dir, 'project.json'), JSON.stringify(projectFixture));
+
+    const result = await createReadStoryboardHandler({
+      projectId: 'project_1',
+      projectDir: dir,
+      pendingDir: '',
+      referencePendingDir: '',
+    })({});
+    const view = JSON.parse(result.content[0].text) as { sceneCapacity: unknown; sceneOrder: string[] };
+
+    expect(result.isError).toBeUndefined();
+    expect(view.sceneOrder).toHaveLength(25);
+    expect(view.sceneCapacity).toEqual({ current: 25, maximum: 24, remaining: 0, overCapacity: true });
+  });
+
+  it('read_storyboard projects canonical takes selected-first, newest-next, id-ascending, and capped at 24', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'studio-server-'));
+    const projectFixture = structuredClone(studioServerProjectFixture);
+    const selected = {
+      id: 'take_selected',
+      projectId: 'project_1',
+      sceneId: 'scene_1',
+      mediaKind: 'image' as const,
+      mimeType: 'image/png',
+      managedAsset: { collection: 'assets' as const, fileName: 'selected.png' },
+      byteSize: 1,
+      sha256: 'a'.repeat(64),
+      createdAt: '2026-08-15T00:00:00.000Z',
+    };
+    const regular = Array.from({ length: 25 }, (_, index) => ({
+      ...selected,
+      id: `take_${String(index).padStart(2, '0')}`,
+      managedAsset: { collection: 'assets' as const, fileName: `take_${String(index).padStart(2, '0')}.png` },
+      createdAt: '2026-08-15T01:00:00.000Z',
+    }));
+    const newest = {
+      ...selected,
+      id: 'take_newest',
+      managedAsset: { collection: 'assets' as const, fileName: 'newest.png' },
+      createdAt: '2026-08-15T02:00:00.000Z',
+    };
+    const invalid = {
+      ...selected,
+      id: 'plate_not_a_take',
+      managedAsset: { collection: 'references' as const, fileName: 'plate.png' },
+    };
+    projectFixture.scenes.scene_1.selectedAssetId = selected.id;
+    projectFixture.scenes.scene_1.assetIds = [
+      invalid.id,
+      ...regular.map(({ id }) => id).reverse(),
+      newest.id,
+      selected.id,
+    ];
+    projectFixture.assets = Object.fromEntries(
+      [selected, newest, invalid, ...regular].map((asset) => [asset.id, asset])
+    );
+    projectFixture.sceneOrder.push('scene_invalid');
+    projectFixture.scenes.scene_invalid = {
+      ...projectFixture.scenes.scene_1,
+      id: 'scene_invalid',
+      selectedAssetId: invalid.id,
+      assetIds: [invalid.id],
+    };
+    await writeFile(path.join(dir, 'project.json'), JSON.stringify(projectFixture));
+
+    const result = await createReadStoryboardHandler({
+      projectId: 'project_1',
+      projectDir: dir,
+      pendingDir: '',
+      referencePendingDir: '',
+    })({});
+    const view = JSON.parse(result.content[0].text) as {
+      scenes: Record<string, { selectedTakeId: string | null; availableTakeIds: string[] }>;
+    };
+
+    expect(view.scenes.scene_1.availableTakeIds).toEqual([
+      'take_selected',
+      'take_newest',
+      'take_00',
+      'take_01',
+      'take_02',
+      'take_03',
+      'take_04',
+      'take_05',
+      'take_06',
+      'take_07',
+      'take_08',
+      'take_09',
+      'take_10',
+      'take_11',
+      'take_12',
+      'take_13',
+      'take_14',
+      'take_15',
+      'take_16',
+      'take_17',
+      'take_18',
+      'take_19',
+      'take_20',
+      'take_21',
+    ]);
+    expect(view.scenes.scene_1.selectedTakeId).toBe('take_selected');
+    expect(view.scenes.scene_invalid).toMatchObject({ selectedTakeId: null, availableTakeIds: [] });
   });
 
   it('shows the Director the project rules, fresh from disk on every call', async () => {
