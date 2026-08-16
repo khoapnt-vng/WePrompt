@@ -261,6 +261,15 @@ export type StudioReferenceRequestDismissAuthority = {
   expectedRequests: StudioReferenceRequestAuthority[];
 };
 
+export type StudioProjectCommitFacts = Readonly<{
+  projectId: string;
+  previousRevision: number;
+  committedRevision: number;
+  commitTag: string | null;
+}>;
+
+export type StudioProjectCommitObserver = (facts: StudioProjectCommitFacts) => void;
+
 export type CreativeStudioStore = {
   listProjects(): Promise<StudioProjectSummary[]>;
   listQuarantinedProjectIds(): Promise<string[]>;
@@ -269,7 +278,8 @@ export type CreativeStudioStore = {
   updateProject(
     projectId: string,
     update: (project: StudioProject) => StudioProject,
-    expectedRevision?: number
+    expectedRevision?: number,
+    commitTag?: string
   ): Promise<StudioProject>;
   deleteProject(projectId: string, expectedRevision: number): Promise<boolean>;
   listConnections(): Promise<StudioConnectionBinding[]>;
@@ -303,6 +313,7 @@ export type CreativeStudioStoreDeps = {
   now?: () => string;
   createId?: () => string;
   fs?: typeof nodeFs;
+  onProjectCommitted?: StudioProjectCommitObserver;
   logError?: (message: string, error: unknown) => void;
   watchProposalTree?: (input: {
     rootDir: string;
@@ -1313,6 +1324,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
   const now = deps.now ?? (() => new Date().toISOString());
   const createId = deps.createId ?? (() => crypto.randomUUID().replaceAll('-', '_'));
   const fs = deps.fs ?? nodeFs;
+  const onProjectCommitted = deps.onProjectCommitted;
   const logError = deps.logError ?? ((message: string, error: unknown): void => console.error(message, error));
   const watchProposalTree =
     deps.watchProposalTree ??
@@ -1334,6 +1346,36 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
   let sharedListingSweep:
     | { result: ProjectListingSweep; remainingConsumer: 'projects' | 'quarantinedProjectIds' }
     | undefined;
+
+  const safeLogError = (message: string, error: unknown): void => {
+    try {
+      logError(message, error);
+    } catch {
+      // Logging is diagnostic and cannot veto an already-authoritative project commit.
+    }
+  };
+
+  const observeProjectCommit = (facts: StudioProjectCommitFacts): void => {
+    if (onProjectCommitted === undefined) return;
+    let observerResult: unknown;
+    try {
+      observerResult = (onProjectCommitted as (observed: StudioProjectCommitFacts) => unknown)(facts);
+    } catch (error) {
+      safeLogError('[CreativeStudio] Project commit observer failed', error);
+      return;
+    }
+    if ((typeof observerResult !== 'object' || observerResult === null) && typeof observerResult !== 'function') {
+      return;
+    }
+    try {
+      if (typeof Reflect.get(observerResult, 'then') !== 'function') return;
+      void Promise.resolve(observerResult).catch((error: unknown): void => {
+        safeLogError('[CreativeStudio] Project commit observer rejected', error);
+      });
+    } catch (error) {
+      safeLogError('[CreativeStudio] Project commit observer rejected', error);
+    }
+  };
 
   const requireSafeId = (projectId: string): void => {
     if (!isSafeId(projectId)) throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio project id');
@@ -2027,6 +2069,17 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     return next;
   };
 
+  const repairSummaryAfterCommit = async (): Promise<void> => {
+    try {
+      await repairSummaryIndex();
+    } catch (error) {
+      safeLogError('[CreativeStudio] Project summary repair failed after commit', error);
+      void repairSummaryIndex().catch((retryError: unknown): void => {
+        safeLogError('[CreativeStudio] Project summary repair retry failed', retryError);
+      });
+    }
+  };
+
   const enqueue = <T>(projectId: string, work: () => Promise<T>): Promise<T> => {
     const previous = queues.get(projectId) ?? Promise.resolve();
     const next = previous.catch((): undefined => undefined).then(() => work());
@@ -2043,7 +2096,8 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     root: string,
     projectId: string,
     update: (project: StudioProject) => StudioProject,
-    expectedRevision?: number
+    expectedRevision: number | undefined,
+    commitTag: string | null
   ): Promise<StudioProject> => {
     await summariesFile(root);
     const current = await readProject(root, projectId);
@@ -2075,7 +2129,15 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       throw new CreativeStudioStoreError('storage_error', 'Creative Studio project storage is unavailable');
     }
     await writeJsonAtomic(root, file, next);
-    await repairSummaryIndex();
+    observeProjectCommit(
+      Object.freeze({
+        projectId,
+        previousRevision: current.revision,
+        committedRevision: next.revision,
+        commitTag,
+      })
+    );
+    await repairSummaryAfterCommit();
     return next;
   };
 
@@ -2430,7 +2492,8 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
           root,
           projectId,
           (candidate) => update(candidate, structuredClone(proposal.payload)),
-          proposal.baseRevision
+          proposal.baseRevision,
+          null
         );
         const decision = await appendProposalDecision(root, directories.decisions, proposalId, 'accepted');
         await releaseProposalSlot(directories, proposalId);
@@ -2441,7 +2504,8 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     async updateProject(
       projectId: string,
       update: (project: StudioProject) => StudioProject,
-      expectedRevision?: number
+      expectedRevision?: number,
+      commitTag?: string
     ): Promise<StudioProject> {
       if (!isSafeId(projectId)) throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio project id');
       if (expectedRevision !== undefined && !isIntegerInRange(expectedRevision, 1, Number.MAX_SAFE_INTEGER)) {
@@ -2450,7 +2514,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       sharedListingSweep = undefined;
       return enqueue(projectId, async () => {
         const root = await canonicalRoot();
-        return updateProjectInsideQueue(root, projectId, update, expectedRevision);
+        return updateProjectInsideQueue(root, projectId, update, expectedRevision, commitTag ?? null);
       });
     },
 

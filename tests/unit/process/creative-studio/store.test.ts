@@ -53,7 +53,11 @@ import { STUDIO_EDITABLE_SCENE_LIMITS, editableSceneSchema } from '@process/reso
 import type { StudioProposalWriteError } from '@process/resources/builtinMcp/studioProposalWriter';
 import { writeProposalRecord } from '@process/resources/builtinMcp/studioProposalWriter';
 import { writeReferenceRequestRecord } from '@process/resources/builtinMcp/studioReferenceRequestWriter';
-import { createCreativeStudioStore, type CreativeStudioStore } from '@process/services/creative-studio/store';
+import {
+  createCreativeStudioStore,
+  type CreativeStudioStore,
+  type StudioProjectCommitObserver,
+} from '@process/services/creative-studio/store';
 
 const makeInput = (overrides: Partial<CreateStudioProjectInput> = {}): CreateStudioProjectInput => ({
   name: 'Launch film',
@@ -270,6 +274,37 @@ const proposalPayload = (title = 'Proposed opening') => ({
     },
   },
 });
+
+const summaryRenameFailureFs = () => {
+  let armed = false;
+  let projectRenameAttempts = 0;
+  let summaryRenameAttempts = 0;
+  const fs = new Proxy(nodeFs, {
+    get(target, property, receiver) {
+      if (property !== 'rename') return Reflect.get(target, property, receiver);
+      return async (...args: Parameters<typeof nodeFs.rename>): ReturnType<typeof nodeFs.rename> => {
+        const destination = String(args[1]);
+        if (destination.endsWith(`${path.sep}project.json`)) projectRenameAttempts += 1;
+        if (destination.endsWith(`${path.sep}projects.json`)) {
+          summaryRenameAttempts += 1;
+          if (armed) {
+            armed = false;
+            throw new Error('summary rename failed');
+          }
+        }
+        return nodeFs.rename(...args);
+      };
+    },
+  }) as typeof nodeFs;
+  return {
+    fs,
+    arm: (): void => {
+      armed = true;
+    },
+    projectRenameAttempts: (): number => projectRenameAttempts,
+    summaryRenameAttempts: (): number => summaryRenameAttempts,
+  };
+};
 
 describe('Creative Studio Brief reference metadata', () => {
   const project = {
@@ -2456,6 +2491,265 @@ describe('creative studio project store', () => {
     writeFileSync(path.join(projectDir, 'project.json'), '{not json');
 
     await expect(store.getProject('project_broken')).rejects.toMatchObject({ code: 'storage_error' });
+  });
+
+  describe('durable project commit boundary', () => {
+    it('returns the committed revision and repairs the summary without rewriting the project', async () => {
+      const project = await store.createProject(makeInput());
+      const fault = summaryRenameFailureFs();
+      const logError = vi.fn();
+      store = createCreativeStudioStore({
+        rootDir,
+        now: () => new Date((clock += 1_000)).toISOString(),
+        fs: fault.fs,
+        logError,
+      });
+      fault.arm();
+
+      const committed = await store.updateProject(
+        project.id,
+        (current) => ({ ...current, name: 'Committed despite stale summary' }),
+        project.revision
+      );
+
+      expect(committed).toMatchObject({ name: 'Committed despite stale summary', revision: project.revision + 1 });
+      expect(await store.getProject(project.id)).toEqual(committed);
+      await vi.waitFor(() => {
+        const index = JSON.parse(readFileSync(path.join(rootDir, 'projects.json'), 'utf8')) as {
+          projects: StudioProjectSummary[];
+        };
+        expect(index.projects).toEqual([
+          expect.objectContaining({ id: project.id, name: 'Committed despite stale summary' }),
+        ]);
+      });
+      expect(fault.projectRenameAttempts()).toBe(1);
+      expect(fault.summaryRenameAttempts()).toBe(2);
+      expect(logError).toHaveBeenCalledExactlyOnceWith(
+        '[CreativeStudio] Project summary repair failed after commit',
+        expect.objectContaining({ message: 'summary rename failed' })
+      );
+    });
+
+    it('observes frozen explicit and ordinary commit facts after directory sync and before summary repair', async () => {
+      const project = await store.createProject(makeInput());
+      const events: string[] = [];
+      const facts: Parameters<StudioProjectCommitObserver>[0][] = [];
+      let failSummaryRename = true;
+      const trackingFs = new Proxy(nodeFs, {
+        get(target, property, receiver) {
+          if (property === 'rename') {
+            return async (...args: Parameters<typeof nodeFs.rename>): ReturnType<typeof nodeFs.rename> => {
+              const destination = String(args[1]);
+              if (destination.endsWith(`${path.sep}projects.json`)) {
+                events.push('summary-rename');
+                if (failSummaryRename) {
+                  failSummaryRename = false;
+                  throw new Error('summary rename failed');
+                }
+              }
+              return nodeFs.rename(...args);
+            };
+          }
+          if (property !== 'open') return Reflect.get(target, property, receiver);
+          return async (...args: Parameters<typeof nodeFs.open>) => {
+            const file = String(args[0]);
+            const handle = await nodeFs.open(...args);
+            return new Proxy(handle, {
+              get(handleTarget, handleProperty, handleReceiver) {
+                if (handleProperty === 'sync') {
+                  return async (): Promise<void> => {
+                    await handleTarget.sync();
+                    if (file.endsWith(`${path.sep}${project.id}`)) events.push('project-directory-sync');
+                  };
+                }
+                const value = Reflect.get(handleTarget, handleProperty, handleReceiver) as unknown;
+                return typeof value === 'function' ? value.bind(handleTarget) : value;
+              },
+            });
+          };
+        },
+      }) as typeof nodeFs;
+      store = createCreativeStudioStore({
+        rootDir,
+        now: () => new Date((clock += 1_000)).toISOString(),
+        fs: trackingFs,
+        onProjectCommitted: (observed) => {
+          events.push('observer');
+          facts.push(observed);
+        },
+      });
+
+      const tagged = await store.updateProject(
+        project.id,
+        (current) => ({ ...current, name: 'Tagged commit' }),
+        project.revision,
+        'opaque/director/value'
+      );
+      const ordinary = await store.updateProject(tagged.id, (current) => ({ ...current, name: 'Ordinary commit' }));
+
+      expect(events.slice(0, 3)).toEqual(['project-directory-sync', 'observer', 'summary-rename']);
+      expect(facts).toEqual([
+        {
+          projectId: project.id,
+          previousRevision: project.revision,
+          committedRevision: tagged.revision,
+          commitTag: 'opaque/director/value',
+        },
+        {
+          projectId: project.id,
+          previousRevision: tagged.revision,
+          committedRevision: ordinary.revision,
+          commitTag: null,
+        },
+      ]);
+      expect(facts.every(Object.isFrozen)).toBe(true);
+    });
+
+    it('does not observe stale or invalid mutations that fail before the project write', async () => {
+      const project = await store.createProject(makeInput());
+      const onProjectCommitted = vi.fn<StudioProjectCommitObserver>();
+      store = createCreativeStudioStore({ rootDir, onProjectCommitted });
+
+      await expect(
+        store.updateProject(project.id, (current) => ({ ...current, name: 'Stale' }), project.revision + 1)
+      ).rejects.toMatchObject({ code: 'stale_project' });
+      await expect(
+        store.updateProject(project.id, (current) => ({ ...current, targetDurationSeconds: 61 }), project.revision)
+      ).rejects.toMatchObject({ code: 'invalid_payload' });
+
+      expect(onProjectCommitted).not.toHaveBeenCalled();
+    });
+
+    it('does not observe a project whose atomic rename fails', async () => {
+      const project = await store.createProject(makeInput());
+      const onProjectCommitted = vi.fn<StudioProjectCommitObserver>();
+      const failingFs = new Proxy(nodeFs, {
+        get(target, property, receiver) {
+          if (property !== 'rename') return Reflect.get(target, property, receiver);
+          return async (...args: Parameters<typeof nodeFs.rename>): ReturnType<typeof nodeFs.rename> => {
+            if (String(args[1]).endsWith(`${path.sep}project.json`)) throw new Error('project rename failed');
+            return nodeFs.rename(...args);
+          };
+        },
+      }) as typeof nodeFs;
+      store = createCreativeStudioStore({ rootDir, fs: failingFs, onProjectCommitted });
+
+      await expect(
+        store.updateProject(project.id, (current) => ({ ...current, name: 'Not committed' }), project.revision)
+      ).rejects.toMatchObject({ code: 'storage_error' });
+
+      expect(onProjectCommitted).not.toHaveBeenCalled();
+      expect(await createCreativeStudioStore({ rootDir }).getProject(project.id)).toEqual(project);
+    });
+
+    it('does not observe a project whose directory sync fails', async () => {
+      const project = await store.createProject(makeInput());
+      const onProjectCommitted = vi.fn<StudioProjectCommitObserver>();
+      const failingFs = new Proxy(nodeFs, {
+        get(target, property, receiver) {
+          if (property !== 'open') return Reflect.get(target, property, receiver);
+          return async (...args: Parameters<typeof nodeFs.open>) => {
+            const file = String(args[0]);
+            const handle = await nodeFs.open(...args);
+            return new Proxy(handle, {
+              get(handleTarget, handleProperty, handleReceiver) {
+                if (handleProperty === 'sync' && file.endsWith(`${path.sep}${project.id}`)) {
+                  return async (): Promise<void> => {
+                    throw new Error('project directory sync failed');
+                  };
+                }
+                const value = Reflect.get(handleTarget, handleProperty, handleReceiver) as unknown;
+                return typeof value === 'function' ? value.bind(handleTarget) : value;
+              },
+            });
+          };
+        },
+      }) as typeof nodeFs;
+      store = createCreativeStudioStore({ rootDir, fs: failingFs, onProjectCommitted });
+
+      await expect(
+        store.updateProject(project.id, (current) => ({ ...current, name: 'Unconfirmed commit' }), project.revision)
+      ).rejects.toMatchObject({ code: 'storage_error' });
+
+      expect(onProjectCommitted).not.toHaveBeenCalled();
+    });
+
+    it('logs and swallows a synchronous commit observer failure', async () => {
+      const project = await store.createProject(makeInput());
+      const observerError = new Error('observer failed');
+      const logError = vi.fn();
+      store = createCreativeStudioStore({
+        rootDir,
+        onProjectCommitted: () => {
+          throw observerError;
+        },
+        logError,
+      });
+
+      await expect(
+        store.updateProject(project.id, (current) => ({ ...current, name: 'Observer cannot veto' }), project.revision)
+      ).resolves.toMatchObject({ name: 'Observer cannot veto', revision: project.revision + 1 });
+      expect(logError).toHaveBeenCalledWith('[CreativeStudio] Project commit observer failed', observerError);
+    });
+
+    it('sinks a rejected contract-violating thenable without awaiting it', async () => {
+      const project = await store.createProject(makeInput());
+      const observerError = new Error('async observer failed');
+      const logError = vi.fn();
+      let rejectObserver: (error: Error) => void = () => undefined;
+      const contractViolatingObserver = (() =>
+        new Promise<never>((_resolve, reject) => {
+          rejectObserver = reject;
+        })) as unknown as StudioProjectCommitObserver;
+      store = createCreativeStudioStore({ rootDir, onProjectCommitted: contractViolatingObserver, logError });
+      let settled = false;
+
+      const update = store
+        .updateProject(
+          project.id,
+          (current) => ({ ...current, name: 'Thenable cannot delay commit' }),
+          project.revision
+        )
+        .then((result) => {
+          settled = true;
+          return result;
+        });
+      await vi.waitFor(() => expect(settled).toBe(true));
+      rejectObserver(observerError);
+
+      await vi.waitFor(() =>
+        expect(logError).toHaveBeenCalledWith('[CreativeStudio] Project commit observer rejected', observerError)
+      );
+      await expect(update).resolves.toMatchObject({ revision: project.revision + 1 });
+    });
+
+    it('keeps the committed result and retry when error logging itself throws', async () => {
+      const project = await store.createProject(makeInput());
+      const fault = summaryRenameFailureFs();
+      const throwingLogger = vi.fn(() => {
+        throw new Error('logger failed');
+      });
+      store = createCreativeStudioStore({
+        rootDir,
+        fs: fault.fs,
+        onProjectCommitted: () => {
+          throw new Error('observer failed');
+        },
+        logError: throwingLogger,
+      });
+      fault.arm();
+
+      const committed = await store.updateProject(
+        project.id,
+        (current) => ({ ...current, name: 'Committed through logger failures' }),
+        project.revision
+      );
+
+      expect(committed.revision).toBe(project.revision + 1);
+      await vi.waitFor(() => expect(fault.summaryRenameAttempts()).toBe(2));
+      expect(fault.projectRenameAttempts()).toBe(1);
+      expect(throwingLogger).toHaveBeenCalledTimes(2);
+    });
   });
 
   it('syncs atomic temp files and their directories before reporting a write as complete', async () => {

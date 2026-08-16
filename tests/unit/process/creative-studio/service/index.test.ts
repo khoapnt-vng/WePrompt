@@ -6,6 +6,7 @@
  * @vitest-environment node
  */
 
+import { promises as nodeFs } from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -1451,6 +1452,77 @@ describe('CreativeStudioService', () => {
       });
       expect(second).toEqual(first);
       await expect(service.getProject(project.id)).resolves.toEqual(first.project);
+      expect(onProjectUpdated).toHaveBeenCalledExactlyOnceWith(project.id);
+    });
+
+    it('finalizes an accepted proposal when summary repair fails after the project commit', async () => {
+      const project = await service.createProject(makeInput());
+      await store.recordProposal({
+        projectId: project.id,
+        proposalId: 'proposal_summary_repair',
+        baseRevision: project.revision,
+        payload,
+      });
+      let failSummaryRename = true;
+      let projectRenameAttempts = 0;
+      let summaryRenameAttempts = 0;
+      const failingSummaryFs = new Proxy(nodeFs, {
+        get(target, property, receiver) {
+          if (property !== 'rename') return Reflect.get(target, property, receiver);
+          return async (...args: Parameters<typeof nodeFs.rename>): ReturnType<typeof nodeFs.rename> => {
+            const destination = String(args[1]);
+            if (destination.endsWith(`${path.sep}project.json`)) projectRenameAttempts += 1;
+            if (destination.endsWith(`${path.sep}projects.json`)) {
+              summaryRenameAttempts += 1;
+              if (failSummaryRename) {
+                failSummaryRename = false;
+                throw new Error('summary rename failed');
+              }
+            }
+            return nodeFs.rename(...args);
+          };
+        },
+      }) as typeof nodeFs;
+      const repairStore = createCreativeStudioStore({
+        rootDir,
+        now: () => '2026-07-30T00:00:00.000Z',
+        fs: failingSummaryFs,
+        logError: vi.fn(),
+      });
+      const repairService = createCreativeStudioService({
+        store: repairStore,
+        onProjectUpdated,
+        storyboardPlanner: makePlanner(),
+      });
+      onProjectUpdated.mockClear();
+
+      const accepted = await repairService.acceptProposal({
+        projectId: project.id,
+        proposalId: 'proposal_summary_repair',
+      });
+      const replay = await repairStore.acceptProposal(project.id, 'proposal_summary_repair', () => {
+        throw new Error('an accepted proposal must not mutate again');
+      });
+
+      expect(accepted.project.revision).toBe(project.revision + 1);
+      expect(replay).toMatchObject({ applied: false, project: { revision: accepted.project.revision } });
+      expect(
+        JSON.parse(
+          await readFile(
+            path.join(rootDir, project.id, 'proposals', 'decisions', 'proposal_summary_repair.json'),
+            'utf8'
+          )
+        )
+      ).toMatchObject({ proposalId: 'proposal_summary_repair', status: 'accepted' });
+      expect(await readdir(path.join(rootDir, project.id, 'proposals', 'slots'))).toEqual([]);
+      await vi.waitFor(async () => {
+        const index = JSON.parse(await readFile(path.join(rootDir, 'projects.json'), 'utf8')) as {
+          projects: Array<{ id: string; sceneCount: number }>;
+        };
+        expect(index.projects).toEqual([expect.objectContaining({ id: project.id, sceneCount: 1 })]);
+      });
+      expect(projectRenameAttempts).toBe(1);
+      expect(summaryRenameAttempts).toBe(2);
       expect(onProjectUpdated).toHaveBeenCalledExactlyOnceWith(project.id);
     });
 
