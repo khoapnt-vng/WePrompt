@@ -5863,9 +5863,64 @@ describe('Studio MCP server', () => {
     expect(result.content[0].text).toBe(message);
   });
 
-  it('read_storyboard returns revision, settings and scenes without operational state', async () => {
+  it('read_storyboard exposes ordered Brief references and concrete scene plates without operational state', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'studio-server-'));
-    await writeFile(path.join(dir, 'project.json'), JSON.stringify(studioServerProjectFixture));
+    const projectFixture = structuredClone(studioServerProjectFixture);
+    projectFixture.scenes.scene_1.referenceAssetId = 'plate_1';
+    projectFixture.assets = {
+      cast_1: {
+        id: 'cast_1',
+        projectId: 'project_1',
+        sceneId: null,
+        mediaKind: 'image',
+        mimeType: 'image/png',
+        managedAsset: { collection: 'imports', fileName: 'cast_1.png' },
+        byteSize: 101,
+        sha256: 'a'.repeat(64),
+        briefReferenceRole: 'cast',
+        briefReferenceLabel: 'Lead Hero',
+        createdAt: '2026-08-15T01:00:00.000Z',
+      },
+      look_1: {
+        id: 'look_1',
+        projectId: 'project_1',
+        sceneId: null,
+        mediaKind: 'image',
+        mimeType: 'image/png',
+        managedAsset: { collection: 'imports', fileName: 'look_1.png' },
+        byteSize: 102,
+        sha256: 'b'.repeat(64),
+        briefReferenceRole: 'look',
+        briefReferenceLabel: 'Golden Atrium',
+        createdAt: '2026-08-15T01:01:00.000Z',
+      },
+      plate_1: {
+        id: 'plate_1',
+        projectId: 'project_1',
+        sceneId: 'scene_1',
+        mediaKind: 'image',
+        mimeType: 'image/png',
+        managedAsset: { collection: 'references', fileName: 'plate_1.png' },
+        byteSize: 103,
+        sha256: 'c'.repeat(64),
+        sourceVisualPrompt: 'Private provenance prompt',
+        sourceReferenceAssetIds: ['cast_1', 'look_1'],
+        sourceAspectRatio: '16:9',
+        sourceResolution: '720p',
+        createdAt: '2026-08-15T01:02:00.000Z',
+      },
+    };
+    projectFixture.jobs = {
+      job_1: {
+        status: 'running',
+        progress: 50,
+        error: null,
+        provider: { providerId: 'private_provider', adapterId: 'private_adapter' },
+        credential: 'private_credential',
+        referenceInputSnapshot: { conditioningReferenceAssetIds: ['cast_1', 'look_1'] },
+      },
+    };
+    await writeFile(path.join(dir, 'project.json'), JSON.stringify(projectFixture));
     const handler = createReadStoryboardHandler({
       projectId: 'project_1',
       projectDir: dir,
@@ -5874,10 +5929,36 @@ describe('Studio MCP server', () => {
     });
 
     const result = await handler({});
-    const text = result.content[0].text;
-    expect(text).toContain('"revision": 7');
-    expect(text).toContain('Sunrise');
-    expect(text).not.toContain('jobIds');
+    const view = JSON.parse(result.content[0].text) as {
+      briefReferences: unknown;
+      scenes: Record<string, Record<string, unknown>>;
+    };
+    expect(view.briefReferences).toEqual([
+      { id: 'cast_1', label: 'Lead Hero', role: 'cast' },
+      { id: 'look_1', label: 'Golden Atrium', role: 'look' },
+    ]);
+    expect(view.scenes.scene_1).toMatchObject({ referenceAssetId: 'plate_1' });
+    const serialized = JSON.stringify(view);
+    for (const forbidden of [
+      'path',
+      'sha256',
+      'byteSize',
+      'sourceVisualPrompt',
+      'sourceReferenceAssetIds',
+      'sourceAspectRatio',
+      'sourceResolution',
+      'referenceInputSnapshot',
+      'status',
+      'progress',
+      'error',
+      'provider',
+      'providerId',
+      'adapterId',
+      'credential',
+      'jobIds',
+    ]) {
+      expect(serialized).not.toContain(`"${forbidden}"`);
+    }
   });
 
   it('shows the Director the project rules, fresh from disk on every call', async () => {

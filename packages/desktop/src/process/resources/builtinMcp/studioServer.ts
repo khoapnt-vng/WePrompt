@@ -19,6 +19,7 @@ import {
   STUDIO_RULE_LIMITS,
 } from '@/common/types/project/creativeStudioRules';
 import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
+import { resolveActiveStudioBriefReferences } from '@/common/types/project/creativeStudioManagedAssetCollections';
 import type {
   StudioEditableScene,
   StudioProject,
@@ -152,6 +153,7 @@ export function createReadStoryboardHandler(
                 onScreenText: scene.onScreenText,
                 mediaKind: scene.mediaKind,
                 durationSeconds: scene.durationSeconds,
+                referenceAssetId: scene.referenceAssetId,
                 hasReference: scene.referenceAssetId !== null,
                 hasSelectedTake: scene.selectedAssetId !== null,
               },
@@ -167,10 +169,16 @@ export function createReadStoryboardHandler(
         enforced: rule.predicate !== null,
         ...(rule.predicate === null ? {} : { forbiddenTerms: rule.predicate.terms }),
       }));
+      const briefReferences = (resolveActiveStudioBriefReferences(project.assets) ?? []).map((asset) => ({
+        id: asset.id,
+        label: asset.briefReferenceLabel!,
+        role: asset.briefReferenceRole!,
+      }));
       const view = {
         revision: project.revision,
         name: project.name,
         brief: project.brief,
+        briefReferences,
         rules,
         aspectRatio: project.aspectRatio,
         targetDurationSeconds: project.targetDurationSeconds,
@@ -371,7 +379,7 @@ export function registerStudioTools(server: Pick<McpServer, 'tool'>, config: Stu
   );
   server.tool(
     'read_storyboard',
-    "Read this project's brief, its governing rules and its current script: revision, settings, the brief prose, the pinned rules, and every scene's editable fields plus whether it has a reference image and a selected take. Read this BEFORE you draft a script, critique one, propose any change, or answer any question about what this project may or may not show — do not answer from memory. The brief prose is not carried in your context; it lives here, and this call is the freshest and authoritative copy of both the brief and the rules. A rule marked enforced is checked against every visual prompt before anything is generated: a prompt that breaks one is refused and nothing is charged, so satisfy the rules while you write the prompt rather than after it is refused.",
+    "Read this project's brief, sanitized Cast/Look references, governing rules and current script: revision, settings, brief prose, pinned rules, and every scene's editable fields plus its concrete referenceAssetId and whether it has a selected take. Read this BEFORE you draft a script, critique one, propose any change, or answer any question about what this project may or may not show — do not answer from memory. The brief prose is not carried in your context; it lives here, and this call is the freshest and authoritative copy of both the brief and the rules. A rule marked enforced is checked against every visual prompt before anything is generated: a prompt that breaks one is refused and nothing is charged, so satisfy the rules while you write the prompt rather than after it is refused.",
     {},
     createReadStoryboardHandler(config)
   );

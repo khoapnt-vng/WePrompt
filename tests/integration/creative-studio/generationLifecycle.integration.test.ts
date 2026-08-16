@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { isCanonicalStudioGeneratedTake } from '@/common/types/project/creativeStudioCanonicalTake';
@@ -25,6 +25,7 @@ import {
 } from '@process/services/creative-studio/jobManager';
 import { createStudioMediaStore } from '@process/services/creative-studio/mediaStore';
 import { createStudioProviderResolver } from '@process/services/creative-studio/providerResolver';
+import { createCreativeStudioService } from '@process/services/creative-studio/creativeStudioService';
 import { createCreativeStudioStore } from '@process/services/creative-studio/store';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -111,6 +112,11 @@ type Harness = {
   fake: ReturnType<typeof createStudioE2EFakeBundle>;
 };
 
+const REFERENCE_FIXTURE_BYTES = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWMwTpv5HwAENAIyeXoBdAAAAABJRU5ErkJggg==',
+  'base64'
+);
+
 const activeHarnesses: Harness[] = [];
 const activeManagers: StudioJobManager[] = [];
 
@@ -169,6 +175,29 @@ const createHarness = async (): Promise<Harness> => {
   const harness = { rootDir, project, route, manager, clock, store, mediaStore, fake };
   activeHarnesses.push(harness);
   return harness;
+};
+
+const importBriefReferences = async (
+  harness: Harness
+): Promise<{ project: StudioProject; castAssetId: string; lookAssetId: string }> => {
+  const castPath = path.join(harness.rootDir, 'Lead Hero.png');
+  const lookPath = path.join(harness.rootDir, 'Golden Atrium.png');
+  await Promise.all([writeFile(castPath, REFERENCE_FIXTURE_BYTES), writeFile(lookPath, REFERENCE_FIXTURE_BYTES)]);
+  const cast = await harness.mediaStore.importReferenceFromPath({
+    projectId: harness.project.id,
+    expectedRevision: harness.project.revision,
+    sourcePath: castPath,
+    briefReferenceRole: 'cast',
+    returnProject: true,
+  });
+  const look = await harness.mediaStore.importReferenceFromPath({
+    projectId: harness.project.id,
+    expectedRevision: cast.project.revision,
+    sourcePath: lookPath,
+    briefReferenceRole: 'look',
+    returnProject: true,
+  });
+  return { project: look.project, castAssetId: cast.asset.id, lookAssetId: look.asset.id };
 };
 
 const submitReferenceAndStopWithRemoteIdentity = async (
@@ -333,8 +362,9 @@ describe('Creative Studio generation lifecycle integration', () => {
     });
   });
 
-  it('commits a scene-owned reference before using it as the first frame of a later take', async () => {
+  it('persists Cast-before-Look still provenance and reloads only the selected plate into video', async () => {
     const harness = await createHarness();
+    const imported = await importBriefReferences(harness);
     const providerResolver = createStudioProviderResolver({
       listProviders: async () => [harness.fake.provider],
       listConnections: () => harness.store.listConnections(),
@@ -347,7 +377,7 @@ describe('Creative Studio generation lifecycle integration', () => {
     expect(videoRoute.constraints.maxConditioningImages).toBe(0);
     expect(imageRoute.constraints.maxConditioningImages).toBe(6);
 
-    const configured = await harness.store.updateProject(harness.project.id, (current) => ({
+    const configured = await harness.store.updateProject(imported.project.id, (current) => ({
       ...current,
       routing: {
         ...current.routing,
@@ -364,9 +394,18 @@ describe('Creative Studio generation lifecycle integration', () => {
       },
     }));
     const adapters = new Map(harness.fake.adapters);
+    const fakeImageAdapter = adapters.get(imageRoute.adapterId);
     const fakeVideoAdapter = adapters.get(videoRoute.adapterId);
-    if (!fakeVideoAdapter) throw new Error('E2E fake video adapter was not resolved');
+    if (!fakeImageAdapter || !fakeVideoAdapter) throw new Error('E2E fake lifecycle adapters were not resolved');
+    const imageRequests: ResolvedStudioGenerationRequest[] = [];
     const videoRequests: ResolvedStudioGenerationRequest[] = [];
+    adapters.set(imageRoute.adapterId, {
+      ...fakeImageAdapter,
+      submit: async (request, provider, signal) => {
+        imageRequests.push(request);
+        return fakeImageAdapter.submit(request, provider, signal);
+      },
+    });
     adapters.set(videoRoute.adapterId, {
       ...fakeVideoAdapter,
       submit: async (request, provider, signal) => {
@@ -416,16 +455,40 @@ describe('Creative Studio generation lifecycle integration', () => {
     const referenceAssetId = platedScene.referenceAssetId;
     if (!referenceAssetId) throw new Error('Reference job succeeded without a committed asset');
     const referenceAsset = plated.assets[referenceAssetId];
+    expect(imageRequests).toHaveLength(1);
+    expect(imageRequests[0]?.conditioningImages?.map(({ assetId }) => assetId)).toEqual([
+      imported.castAssetId,
+      imported.lookAssetId,
+    ]);
+    expect(imageRequests[0]?.firstFrame).toBeUndefined();
+    expect(plated.jobs.job_reference_lifecycle).toMatchObject({
+      status: 'succeeded',
+      outputRole: 'reference',
+      referenceInputSnapshot: {
+        sourceVisualPrompt: 'A precise sunrise reference plate',
+        conditioningReferenceAssetIds: [imported.castAssetId, imported.lookAssetId],
+        aspectRatio: '16:9',
+        resolution: '720p',
+      },
+    });
     expect({
       outputAssetIds: plated.jobs.job_reference_lifecycle.outputAssetIds,
       sceneId: referenceAsset?.sceneId,
       collection: referenceAsset?.managedAsset.collection,
       assetIds: platedScene.assetIds,
+      sourceVisualPrompt: referenceAsset?.sourceVisualPrompt,
+      sourceReferenceAssetIds: referenceAsset?.sourceReferenceAssetIds,
+      sourceAspectRatio: referenceAsset?.sourceAspectRatio,
+      sourceResolution: referenceAsset?.sourceResolution,
     }).toEqual({
       outputAssetIds: [referenceAssetId],
       sceneId: scene.id,
       collection: 'references',
       assetIds: [referenceAssetId],
+      sourceVisualPrompt: 'A precise sunrise reference plate',
+      sourceReferenceAssetIds: [imported.castAssetId, imported.lookAssetId],
+      sourceAspectRatio: '16:9',
+      sourceResolution: '720p',
     });
     expect(platedScene.selectedAssetId).toBeNull();
     expect(platedScene.reviewState).toBe('draft');
@@ -433,9 +496,50 @@ describe('Creative Studio generation lifecycle integration', () => {
       Object.values(plated.assets).some((asset) => isCanonicalStudioGeneratedTake(asset, plated.id, platedScene))
     ).toBe(false);
 
-    await manager.submitScenes({
-      projectId: plated.id,
-      expectedRevision: plated.revision,
+    await manager.dispose();
+    const reloadedStore = createCreativeStudioStore({ rootDir: harness.rootDir });
+    const reloadedMediaStore = createStudioMediaStore({ store: reloadedStore });
+    const reloadedProviderResolver = createStudioProviderResolver({
+      listProviders: async () => [harness.fake.provider],
+      listConnections: () => reloadedStore.listConnections(),
+    });
+    const reloaded = await reloadedStore.getProject(plated.id);
+    if (!reloaded) throw new Error('Persisted reference lifecycle project did not reload');
+    expect(reloaded.scenes[scene.id].referenceAssetId).toBe(referenceAssetId);
+    const rendererProject = await createCreativeStudioService({
+      store: reloadedStore,
+      onProjectUpdated: () => undefined,
+      storyboardPlanner: {
+        listModels: async () => [],
+        draft: async () => {
+          throw new Error('Storyboard planning is not part of this lifecycle');
+        },
+        dispose: async () => undefined,
+      },
+    }).getProject(reloaded.id);
+    expect(rendererProject?.jobs.job_reference_lifecycle).toMatchObject({
+      status: 'succeeded',
+      outputRole: 'reference',
+    });
+    expect(rendererProject?.jobs.job_reference_lifecycle).not.toHaveProperty('referenceInputSnapshot');
+
+    const reloadedCatalog = await reloadedProviderResolver.listGenerationRoutes();
+    const reloadedManager = createStudioJobManager({
+      store: reloadedStore,
+      mediaStore: reloadedMediaStore,
+      providerResolver: reloadedProviderResolver,
+      adapters,
+      listProviders: async () => [harness.fake.provider],
+      createJobId: () => jobIds.shift() ?? 'job_unexpected_lifecycle',
+      createIdempotencyKey: () => idempotencyKeys.shift() ?? 'idempotency_unexpected_lifecycle',
+      sleep: async () => undefined,
+      jitterMs: (baseMs) => baseMs,
+    });
+    activeManagers.push(reloadedManager);
+
+    await reloadedManager.submitScenes({
+      projectId: reloaded.id,
+      expectedRevision: reloaded.revision,
       sceneIds: [scene.id],
       routes: [
         {
@@ -446,7 +550,7 @@ describe('Creative Studio generation lifecycle integration', () => {
           kind: 'video',
         },
       ],
-      catalogVersion: catalog.generationCatalogVersion,
+      catalogVersion: reloadedCatalog.generationCatalogVersion,
     });
 
     const takeRequest = await waitFor(async () => videoRequests[0] ?? null);
@@ -454,6 +558,101 @@ describe('Creative Studio generation lifecycle integration', () => {
       assetId: referenceAssetId,
       mimeType: 'image/png',
     });
+    expect(takeRequest).not.toHaveProperty('conditioningImages');
+    expect(takeRequest).not.toHaveProperty('conditioningImageLimit');
+  });
+
+  it('rejects active Brief references at route capacity zero before persistence or provider spend', async () => {
+    const harness = await createHarness();
+    const imported = await importBriefReferences(harness);
+    const imageConnection = harness.fake.connections.find((connection) =>
+      connection.capabilities.mediaKinds.includes('image')
+    );
+    if (!imageConnection) throw new Error('E2E fake image connection was not resolved');
+    await harness.store.saveConnection({
+      ...imageConnection,
+      capabilities: { ...imageConnection.capabilities, maxConditioningImages: 0 },
+    });
+    const providerResolver = createStudioProviderResolver({
+      listProviders: async () => [harness.fake.provider],
+      listConnections: () => harness.store.listConnections(),
+    });
+    const catalog = await providerResolver.listGenerationRoutes();
+    const imageRoute = catalog.routes.find(
+      (candidate) => candidate.kind === 'image' && candidate.model === imageConnection.model
+    );
+    if (!imageRoute) throw new Error('Capacity-zero image route was not resolved');
+    expect(imageRoute.constraints.maxConditioningImages).toBe(0);
+    const configured = await harness.store.updateProject(imported.project.id, (current) => ({
+      ...current,
+      routing: {
+        ...current.routing,
+        image: {
+          providerId: imageRoute.providerId,
+          adapterId: imageRoute.adapterId,
+          model: imageRoute.model,
+        },
+      },
+    }));
+    const adapters = new Map(harness.fake.adapters);
+    const imageAdapter = adapters.get(imageRoute.adapterId);
+    const videoAdapter = [...adapters.values()].find((adapter) => adapter.id !== imageRoute.adapterId);
+    if (!imageAdapter || !videoAdapter) throw new Error('E2E fake spend-boundary adapters were not resolved');
+    const imageRequests: ResolvedStudioGenerationRequest[] = [];
+    const videoRequests: ResolvedStudioGenerationRequest[] = [];
+    adapters.set(imageRoute.adapterId, {
+      ...imageAdapter,
+      submit: async (request, provider, signal) => {
+        imageRequests.push(request);
+        return imageAdapter.submit(request, provider, signal);
+      },
+    });
+    adapters.set(videoAdapter.id, {
+      ...videoAdapter,
+      submit: async (request, provider, signal) => {
+        videoRequests.push(request);
+        return videoAdapter.submit(request, provider, signal);
+      },
+    });
+    const manager = createStudioJobManager({
+      store: harness.store,
+      mediaStore: harness.mediaStore,
+      providerResolver,
+      adapters,
+      listProviders: async () => [harness.fake.provider],
+      createJobId: () => 'job_capacity_zero',
+      createIdempotencyKey: () => 'idempotency_capacity_zero',
+      sleep: harness.clock.sleep,
+      jitterMs: (baseMs) => baseMs,
+    });
+    activeManagers.push(manager);
+    const before = await harness.store.getProject(configured.id);
+    const delaysBefore = [...harness.clock.observedDelays];
+
+    await expect(
+      manager.submitScenes({
+        projectId: configured.id,
+        expectedRevision: configured.revision,
+        sceneIds: [scene.id],
+        routes: [
+          {
+            sceneId: scene.id,
+            providerId: imageRoute.providerId,
+            adapterId: imageRoute.adapterId,
+            model: imageRoute.model,
+            kind: 'image',
+          },
+        ],
+        catalogVersion: catalog.generationCatalogVersion,
+        outputRole: 'reference',
+        referencePrompts: [{ sceneId: scene.id, prompt: 'A capacity-zero reference plate' }],
+      })
+    ).rejects.toMatchObject({ code: 'invalid_route' });
+
+    expect(await harness.store.getProject(configured.id)).toEqual(before);
+    expect(imageRequests).toEqual([]);
+    expect(videoRequests).toEqual([]);
+    expect(harness.clock.observedDelays).toEqual(delaysBefore);
   });
 
   it('uses one selected model per kind across a batch and only applies changes to later submissions', async () => {
