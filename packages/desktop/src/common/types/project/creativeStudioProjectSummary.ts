@@ -29,7 +29,7 @@ export const studioProjectSummarySchema = z
       .object({
         assetId: safeStudioIdSchema,
         sceneNumber: z.number().finite().int().positive().max(Number.MAX_SAFE_INTEGER),
-        takeNumber: z.number().finite().int().positive().max(256),
+        takeNumber: z.number().finite().int().positive().max(Number.MAX_SAFE_INTEGER),
       })
       .strict()
       .nullable(),

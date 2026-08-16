@@ -498,6 +498,42 @@ describe('creative studio project store', () => {
     expect(readFileSync(file, 'utf8')).toBe(manifestBytes);
   });
 
+  it('lists a legacy 25-scene project whose selected canonical take is number 257', async () => {
+    const project = await store.createProject(makeInput());
+    const file = path.join(rootDir, project.id, 'project.json');
+    const legacy = withSceneCount(project, 25);
+    const takes = Array.from({ length: 257 }, (_, index) => {
+      const assetId = `asset_${index + 1}`;
+      return {
+        id: assetId,
+        projectId: legacy.id,
+        sceneId: 'scene_1',
+        mediaKind: 'image' as const,
+        mimeType: 'image/png',
+        managedAsset: { collection: 'assets' as const, fileName: `${assetId}.png` },
+        byteSize: 1,
+        sha256: 'a'.repeat(64),
+        createdAt: legacy.createdAt,
+      };
+    });
+    legacy.assets = Object.fromEntries(takes.map((asset) => [asset.id, asset]));
+    legacy.scenes.scene_1.assetIds = takes.map((asset) => asset.id);
+    legacy.scenes.scene_1.selectedAssetId = 'asset_257';
+    const manifestBytes = JSON.stringify(legacy);
+    writeFileSync(file, manifestBytes);
+
+    await expect(store.getProject(project.id)).resolves.toEqual(legacy);
+    await expect(store.listProjects()).resolves.toEqual([
+      expect.objectContaining({
+        id: project.id,
+        sceneCount: 25,
+        selectedAssetCount: 1,
+        poster: expect.objectContaining({ assetId: 'asset_257', sceneNumber: 1, takeNumber: 257 }),
+      }),
+    ]);
+    expect(readFileSync(file, 'utf8')).toBe(manifestBytes);
+  });
+
   it('rejects a direct 23-to-25 scene transition without changing manifest bytes or revision', async () => {
     const project = await store.createProject(makeInput());
     const admitted = await store.updateProject(project.id, (current) => withSceneCount(current, 23), project.revision);
