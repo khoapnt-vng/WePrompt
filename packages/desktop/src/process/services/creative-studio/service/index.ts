@@ -118,6 +118,15 @@ import {
 } from './mutationHelpers';
 
 export { CreativeStudioServiceError } from './mutationHelpers';
+export {
+  createStudioDirectorCommandService,
+  StudioDirectorCommandApplyError,
+  type StudioDirectorCommandApplyErrorCode,
+  type StudioDirectorCommandApplyResult,
+  type StudioDirectorCommandService,
+  type StudioDirectorCommandServiceDeps,
+  type StudioDirectorCommitAttribution,
+} from './directorCommandService';
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const ASPECT_RATIOS = new Set(['16:9', '9:16', '1:1', '4:3', '3:4']);

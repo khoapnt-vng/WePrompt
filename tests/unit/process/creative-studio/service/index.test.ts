@@ -35,7 +35,11 @@ import type { GenerationProviderAdapter } from '@process/services/creative-studi
 import { STUDIO_E2E_BOUNDARY_SENTINELS } from '@process/services/creative-studio/adapters/e2eFakeAdapter';
 import type { CreativeStudioStore, CreativeStudioStoreError } from '@process/services/creative-studio/store';
 import { createCreativeStudioStore } from '@process/services/creative-studio/store';
-import { createCreativeStudioService, type CreativeStudioService } from '@process/services/creative-studio/service';
+import {
+  createCreativeStudioService,
+  createStudioDirectorCommandService,
+  type CreativeStudioService,
+} from '@process/services/creative-studio/service';
 import { createStudioMediaChoiceId } from '@process/services/creative-studio/providerResolver';
 import { canCancelJob } from '@process/services/creative-studio/jobManager';
 import {
@@ -720,6 +724,85 @@ describe('CreativeStudioService', () => {
     expect(undone.name).toBe('Renamed after the rule write');
     expect(undone.rules).toEqual([]);
     expect(undone.ruleListUndo).toBeNull();
+  });
+
+  it('keeps Director edits outside rule undo and leaves notification to the later receipt owner', async () => {
+    const created = await service.createProject(makeInput());
+    const ruled = await service.setBriefRules({
+      projectId: created.id,
+      expectedRevision: created.revision,
+      rules: [{ id: 'rule_1', text: 'Keep the kits generic.', predicate: null }],
+    });
+    const seeded = await store.updateProject(
+      ruled.id,
+      (current) => {
+        const next = structuredClone(current);
+        next.sceneOrder = ['scene_1', 'scene_2'];
+        next.scenes = {
+          scene_1: {
+            id: 'scene_1',
+            ...makeScene('scene_1'),
+            selectedAssetId: null,
+            assetIds: [],
+            jobIds: [],
+            reviewState: 'ready',
+          },
+          scene_2: {
+            id: 'scene_2',
+            ...makeScene('scene_2'),
+            selectedAssetId: null,
+            assetIds: [],
+            jobIds: [],
+            reviewState: 'ready',
+          },
+        };
+        addTake(next, 'scene_1', 'take_1', 4, false);
+        return next;
+      },
+      ruled.revision
+    );
+    const director = createStudioDirectorCommandService({
+      store,
+      now: () => Date.parse('2026-08-17T00:00:00.000Z'),
+    });
+    onProjectUpdated.mockClear();
+
+    const applied = await director.apply(
+      {
+        schemaVersion: 1,
+        commandId: 'command_rule_undo',
+        projectId: seeded.id,
+        expectedRevision: seeded.revision,
+        createdAt: '2026-08-17T00:00:00.000Z',
+        deadlineAt: '2026-08-17T00:00:15.000Z',
+        policy: 'auto_apply',
+        operations: [
+          { kind: 'set_brief', brief: 'Director brief survives rule undo' },
+          { kind: 'edit_scene', sceneId: 'scene_2', changes: { title: 'Director scene survives' } },
+          { kind: 'reorder_scenes', sceneOrder: ['scene_2', 'scene_1'] },
+          { kind: 'select_take', sceneId: 'scene_1', assetId: 'take_1' },
+        ],
+      },
+      Date.parse('2026-08-17T00:00:13.000Z'),
+      { commitTag: 'command_rule_undo' }
+    );
+
+    expect(applied.project.ruleListUndo).toEqual(seeded.ruleListUndo);
+    expect(onProjectUpdated).not.toHaveBeenCalled();
+
+    const undone = await service.undoBriefRules({ projectId: seeded.id });
+
+    expect(undone.rules).toEqual([]);
+    expect(undone.ruleListUndo).toBeNull();
+    expect(undone).toMatchObject({
+      brief: 'Director brief survives rule undo',
+      sceneOrder: ['scene_2', 'scene_1'],
+      scenes: {
+        scene_1: { selectedAssetId: 'take_1' },
+        scene_2: { title: 'Director scene survives' },
+      },
+    });
+    expect(onProjectUpdated).toHaveBeenCalledOnce();
   });
 
   it('refuses undo when the project changes between its fresh read and compare-and-set write', async () => {
