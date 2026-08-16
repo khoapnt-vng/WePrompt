@@ -1584,6 +1584,67 @@ describe('StudioPage and useStudioProject', () => {
     await act(async () => pendingImport.resolve(ok({ status: 'cancelled' })));
   });
 
+  it('keeps a Director request queued until an unresolved Brief import reaches canonical review', async () => {
+    const proposalListeners: Array<(event: { projectId: string }) => void> = [];
+    bridge.proposalUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
+      proposalListeners.push(listener);
+      return () => {};
+    });
+    const opening = scene({ mediaKind: 'video' });
+    const imported = briefReferenceAsset('brief-cast', { briefReferenceLabel: 'Imported cast' });
+    const initial = project('project-1', {
+      sceneOrder: [opening.id],
+      scenes: { [opening.id]: opening },
+    });
+    const afterImport = project('project-1', {
+      revision: 3,
+      sceneOrder: [opening.id],
+      scenes: { [opening.id]: opening },
+      assets: { [imported.id]: imported },
+    });
+    let canonical = initial;
+    bridge.getProject.invoke.mockImplementation(async () => ok(canonical));
+    const request = referenceRequest(opening.id, 1);
+    const queue = installReferenceRequestQueue([]);
+    bridge.listRoutes.invoke.mockResolvedValue(
+      ok(routesWithImage(imageRoute({ constraints: { ...imageRoute().constraints, maxConditioningImages: 1 } })))
+    );
+    const pendingImport = deferred<
+      StudioCommandResult<{
+        status: 'cancelled' | 'imported';
+        asset?: StudioAsset;
+        project?: StudioRendererProject;
+      }>
+    >();
+    bridge.chooseAndImportReference.invoke.mockReturnValue(pendingImport.promise);
+
+    renderRoute({ pathname: '/studio/project-1/table', state: { openBrief: true } });
+    const brief = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.phase.brief.title' });
+    fireEvent.click(within(brief).getByRole('button', { name: 'conversation.creativeStudio.briefReferences.addCast' }));
+    await waitFor(() => expect(bridge.chooseAndImportReference.invoke).toHaveBeenCalledOnce());
+
+    queue.queue(request);
+    await act(async () => {
+      proposalListeners.forEach((listener) => listener({ projectId: initial.id }));
+    });
+    await waitFor(() => expect(bridge.listPendingReferenceRequests.invoke).toHaveBeenCalledTimes(2));
+    await act(async () => {});
+
+    expect(screen.queryByRole('dialog', { name: 'conversation.creativeStudio.review.title' })).not.toBeInTheDocument();
+    expect(bridge.dismissReferenceRequests.invoke).not.toHaveBeenCalled();
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+    expect(queue.pendingIds()).toEqual([request.id]);
+
+    canonical = afterImport;
+    await act(async () => pendingImport.resolve(ok({ status: 'imported', asset: imported, project: afterImport })));
+
+    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+    expect(within(review).getByText('Imported cast')).toBeVisible();
+    expect(queue.pendingIds()).toEqual([request.id]);
+    expect(bridge.dismissReferenceRequests.invoke).not.toHaveBeenCalled();
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+  });
+
   it('refetches a stale detach once, keeps the canonical card, and surfaces the canonical error', async () => {
     const cast = briefReferenceAsset();
     const initial = project('project-1', { assets: { [cast.id]: cast } });

@@ -639,6 +639,8 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
 
   useEffect(() => {
     if (
+      briefReferenceMutationPendingRef.current ||
+      briefReferenceMutationPending ||
       generationReview !== null ||
       generationBlocked ||
       project === null ||
@@ -841,7 +843,15 @@ const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeV
       // and its Cancel discards the request.
       openQueuedReferenceReview(false, true);
     })();
-  }, [generationBlocked, generationReview, project, readiness, studioJobs, studioModels.catalog]);
+  }, [
+    briefReferenceMutationPending,
+    generationBlocked,
+    generationReview,
+    project,
+    readiness,
+    studioJobs,
+    studioModels.catalog,
+  ]);
 
   /**
    * ⚠️ Currently unreachable, deliberately.
