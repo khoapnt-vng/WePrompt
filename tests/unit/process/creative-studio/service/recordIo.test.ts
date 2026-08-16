@@ -8,6 +8,7 @@ import { constants as fsConstants, existsSync, mkdtempSync, promises as nodeFs, 
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as recordIo from '@process/services/creative-studio/service/recordIo';
 import {
   canonicalizeRecordRoot,
   publishImmutableRecord,
@@ -17,6 +18,18 @@ import {
   resolveConfinedRecordPath,
   resolveSafeRecordDirectory,
 } from '@process/services/creative-studio/service/recordIo';
+
+const publishLeaseRecord = async (input: {
+  fs: typeof nodeFs;
+  canonicalRoot: string;
+  file: string;
+  bytes: string;
+  temporaryId: string;
+}): Promise<void> => {
+  const publisher = Reflect.get(recordIo, 'publishExclusiveLeaseRecord');
+  if (typeof publisher !== 'function') throw new Error('publishExclusiveLeaseRecord is not implemented');
+  await Reflect.apply(publisher, undefined, [input]);
+};
 
 describe('error-neutral Creative Studio record IO', () => {
   let rootDir: string;
@@ -338,6 +351,167 @@ describe('error-neutral Creative Studio record IO', () => {
     expect(usedPathReadFile).toBe(false);
     expect(readLengths.length).toBeGreaterThan(0);
     expect(Math.max(...readLengths)).toBe(65);
+  });
+
+  it('publishes a complete lease by exclusive link without a recursive unconfirmed marker', async () => {
+    const records = path.join(canonicalRoot, 'records');
+    await nodeFs.mkdir(records);
+    const target = path.join(records, '0.slot.lease');
+    const bytes = '{"schemaVersion":1,"leaseId":"lease_1"}';
+    const events: string[] = [];
+    const observedFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property === 'link') {
+          return async (...args: Parameters<typeof nodeFs.link>) => {
+            events.push('link');
+            await nodeFs.link(...args);
+          };
+        }
+        if (property === 'rm') {
+          return async (...args: Parameters<typeof nodeFs.rm>) => {
+            events.push('temp-rm');
+            await nodeFs.rm(...args);
+          };
+        }
+        if (property !== 'open') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.open>) => {
+          const opened = String(args[0]);
+          const handle = await nodeFs.open(...args);
+          const kind = opened === records ? 'directory' : 'temp';
+          events.push(`${kind}-open`);
+          return new Proxy(handle, {
+            get(realHandle, handleProperty, handleReceiver) {
+              if (handleProperty === 'writeFile') {
+                return async (...writeArgs: Parameters<typeof handle.writeFile>) => {
+                  events.push('temp-write');
+                  return handle.writeFile(...writeArgs);
+                };
+              }
+              if (handleProperty === 'sync') {
+                return async () => {
+                  events.push(`${kind}-sync`);
+                  return handle.sync();
+                };
+              }
+              if (handleProperty === 'close') {
+                return async () => {
+                  events.push(`${kind}-close`);
+                  return handle.close();
+                };
+              }
+              return Reflect.get(realHandle, handleProperty, handleReceiver);
+            },
+          });
+        };
+      },
+    }) as typeof nodeFs;
+
+    await publishLeaseRecord({
+      fs: observedFs,
+      canonicalRoot,
+      file: target,
+      bytes,
+      temporaryId: 'lease_proof',
+    });
+
+    expect(await nodeFs.readFile(target, 'utf8')).toBe(bytes);
+    expect(events).toEqual([
+      'temp-open',
+      'temp-write',
+      'temp-sync',
+      'temp-close',
+      'link',
+      'directory-open',
+      'directory-sync',
+      'directory-close',
+      'temp-rm',
+    ]);
+    expect((await nodeFs.readdir(records)).some((name) => name.includes('.unconfirmed'))).toBe(false);
+  });
+
+  it('reports lease collision without replacing complete existing bytes', async () => {
+    const records = path.join(canonicalRoot, 'records');
+    await nodeFs.mkdir(records);
+    const target = path.join(records, '0.slot.lease');
+    await nodeFs.writeFile(target, 'existing-complete-lease');
+
+    await expect(
+      publishLeaseRecord({
+        fs: nodeFs,
+        canonicalRoot,
+        file: target,
+        bytes: 'replacement',
+        temporaryId: 'lease_collision',
+      })
+    ).rejects.toMatchObject({ code: 'already_exists', message: 'Record IO failed' });
+    expect(await nodeFs.readFile(target, 'utf8')).toBe('existing-complete-lease');
+    expect((await nodeFs.readdir(records)).some((name) => name.includes('.unconfirmed'))).toBe(false);
+  });
+
+  it('leaves only an ignored unique temp when pre-link failure cleanup also fails', async () => {
+    const records = path.join(canonicalRoot, 'records');
+    await nodeFs.mkdir(records);
+    const target = path.join(records, '0.slot.lease');
+    const failingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property === 'link') return async () => Promise.reject(new Error('pre-link crash'));
+        if (property === 'rm') return async () => Promise.reject(new Error('crash prevented temp cleanup'));
+        return Reflect.get(realFs, property, receiver);
+      },
+    }) as typeof nodeFs;
+
+    await expect(
+      publishLeaseRecord({
+        fs: failingFs,
+        canonicalRoot,
+        file: target,
+        bytes: 'complete-lease',
+        temporaryId: 'pre_link',
+      })
+    ).rejects.toMatchObject({ code: 'storage_error', message: 'Record IO failed' });
+    expect(existsSync(target)).toBe(false);
+    expect(await nodeFs.readdir(records)).toEqual(['0.slot.lease.pre_link.tmp']);
+  });
+
+  it('leaves complete visible lease bytes when post-link directory sync fails', async () => {
+    const records = path.join(canonicalRoot, 'records');
+    await nodeFs.mkdir(records);
+    const target = path.join(records, '0.slot.lease');
+    const bytes = '{"complete":true}';
+    let linked = false;
+    const failingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property === 'link') {
+          return async (...args: Parameters<typeof nodeFs.link>) => {
+            await nodeFs.link(...args);
+            linked = true;
+          };
+        }
+        if (property !== 'open') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.open>) => {
+          const handle = await nodeFs.open(...args);
+          if (String(args[0]) !== records || !linked) return handle;
+          return new Proxy(handle, {
+            get(realHandle, handleProperty, handleReceiver) {
+              if (handleProperty === 'sync') return async () => Promise.reject(new Error('directory sync crash'));
+              return Reflect.get(realHandle, handleProperty, handleReceiver);
+            },
+          });
+        };
+      },
+    }) as typeof nodeFs;
+
+    await expect(
+      publishLeaseRecord({
+        fs: failingFs,
+        canonicalRoot,
+        file: target,
+        bytes,
+        temporaryId: 'post_link',
+      })
+    ).rejects.toMatchObject({ code: 'storage_error', message: 'Record IO failed' });
+    expect(await nodeFs.readFile(target, 'utf8')).toBe(bytes);
+    expect((await nodeFs.readdir(records)).some((name) => name.includes('.unconfirmed'))).toBe(false);
   });
 
   it('publishes immutable bytes only after file sync and then syncs the parent directory', async () => {

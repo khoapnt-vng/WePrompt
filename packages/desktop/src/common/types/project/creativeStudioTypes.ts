@@ -162,6 +162,7 @@ export const STUDIO_DIRECTOR_COMMAND_MAINTENANCE_INTERVAL_MS = 60_000;
 export const STUDIO_DIRECTOR_COMMAND_SWEEP_INTERVAL_MS = 500;
 export const STUDIO_DIRECTOR_COMMAND_CLOCK_SKEW_MS = 2_000;
 export const STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS = 2_000;
+export const STUDIO_DIRECTOR_COMMAND_SLOT_LEASE_MS = STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS;
 export const STUDIO_DIRECTOR_COMMAND_WAIT_MS = 15_000;
 
 /** Preserves readable legacy projects while preventing any further scene-count growth above the current cap. */
@@ -298,6 +299,17 @@ export type StudioDirectorCommandSlotV1 = {
   commandId: string;
   reservedAt: string;
   deadlineAt: string;
+};
+
+export type StudioDirectorCommandSlotLeaseV1 = {
+  schemaVersion: 1;
+  leaseId: string;
+  owner: 'writer' | 'main';
+  commandId: string | null;
+  reservedAt: string | null;
+  deadlineAt: string | null;
+  acquiredAt: string;
+  expiresAt: string;
 };
 
 export type StudioDirectorCommandRejectionCode =

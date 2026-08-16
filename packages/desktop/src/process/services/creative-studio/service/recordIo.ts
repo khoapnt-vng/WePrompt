@@ -167,13 +167,18 @@ const assertNoUnconfirmedPublication = async (fs: RecordIoFileSystem, file: stri
   }
 };
 
-/** Reads a named immutable record through one no-follow, bounded file handle. */
-export async function readBoundedRegularFile(input: {
+export type BoundedRegularFileRead = {
+  bytes: string;
+  identity: { dev: number; ino: number };
+};
+
+/** Reads a named immutable record and returns the verified named inode identity. */
+export async function readBoundedRegularFileWithIdentity(input: {
   fs: RecordIoFileSystem;
   canonicalRoot: string;
   file: string;
   maxBytes: number;
-}): Promise<string | null> {
+}): Promise<BoundedRegularFileRead | null> {
   const file = resolveConfinedRecordPath(input.canonicalRoot, path.dirname(input.file), path.basename(input.file));
   let handle: Awaited<ReturnType<RecordIoFileSystem['open']>> | undefined;
   try {
@@ -228,12 +233,26 @@ export async function readBoundedRegularFile(input: {
       throw new RecordIoError('unsafe_file');
     }
     await assertNoUnconfirmedPublication(input.fs, file);
-    return bytes.subarray(0, offset).toString('utf8');
+    return {
+      bytes: bytes.subarray(0, offset).toString('utf8'),
+      identity: { dev: stats.dev, ino: stats.ino },
+    };
   } catch (error) {
     throw preserveOrNeutralize(error);
   } finally {
     await handle?.close().catch((): undefined => undefined);
   }
+}
+
+/** Reads a named immutable record through one no-follow, bounded file handle. */
+export async function readBoundedRegularFile(input: {
+  fs: RecordIoFileSystem;
+  canonicalRoot: string;
+  file: string;
+  maxBytes: number;
+}): Promise<string | null> {
+  const record = await readBoundedRegularFileWithIdentity(input);
+  return record?.bytes ?? null;
 }
 
 const assertSafeParent = async (input: {
@@ -272,6 +291,45 @@ const removeIfPresent = async (fs: RecordIoFileSystem, file: string): Promise<bo
     return false;
   }
 };
+
+/**
+ * Publishes the complete, bounded-lifetime slot lease without using the generic recursive
+ * `.unconfirmed` protocol. The uniquely named temp is non-authoritative; once the hard link is
+ * visible, its inode already contains the complete lease bytes.
+ */
+export async function publishExclusiveLeaseRecord(input: {
+  fs: RecordIoFileSystem;
+  canonicalRoot: string;
+  file: string;
+  bytes: string;
+  temporaryId?: string;
+}): Promise<void> {
+  const parent = await assertSafeParent(input);
+  const temporaryId = input.temporaryId ?? `${process.pid}_${++temporaryFileCounter}`;
+  if (!/^[A-Za-z0-9_-]+$/.test(temporaryId)) throw new RecordIoError('unsafe_path');
+  const temporaryFile = `${input.file}.${temporaryId}.tmp`;
+  let temporaryHandle: Awaited<ReturnType<RecordIoFileSystem['open']>> | undefined;
+  try {
+    temporaryHandle = await input.fs.open(temporaryFile, 'wx');
+    await temporaryHandle.writeFile(input.bytes, { encoding: 'utf8' });
+    await temporaryHandle.sync();
+    await temporaryHandle.close();
+    temporaryHandle = undefined;
+
+    try {
+      await input.fs.link(temporaryFile, input.file);
+    } catch (error) {
+      if (hasErrorCode(error, 'EEXIST')) throw new RecordIoError('already_exists');
+      throw error;
+    }
+    await syncDirectory(input.fs, parent);
+    await input.fs.rm(temporaryFile).catch((): undefined => undefined);
+  } catch (error) {
+    await temporaryHandle?.close().catch((): undefined => undefined);
+    await input.fs.rm(temporaryFile).catch((): undefined => undefined);
+    throw preserveOrNeutralize(error);
+  }
+}
 
 /** Exclusive temp-write/fsync plus a durable unconfirmed guard around link publication. */
 export async function publishImmutableRecord(input: {
@@ -376,6 +434,38 @@ export async function removeRegularRecordIfPresent(input: {
       throw error;
     }
     if (stats.isSymbolicLink() || !stats.isFile()) throw new RecordIoError('unsafe_file');
+    await input.fs.rm(input.file);
+    await syncDirectory(input.fs, parent);
+    return true;
+  } catch (error) {
+    throw preserveOrNeutralize(error);
+  }
+}
+
+/** Removes only the regular inode proved by the caller, then durably records the deletion. */
+export async function removeRegularRecordIfIdentity(input: {
+  fs: RecordIoFileSystem;
+  canonicalRoot: string;
+  file: string;
+  identity: { dev: number; ino: number };
+}): Promise<boolean> {
+  const parent = await assertSafeParent(input);
+  try {
+    let stats: Awaited<ReturnType<RecordIoFileSystem['lstat']>>;
+    try {
+      stats = await input.fs.lstat(input.file);
+    } catch (error) {
+      if (hasErrorCode(error, 'ENOENT')) return false;
+      throw error;
+    }
+    if (
+      stats.isSymbolicLink() ||
+      !stats.isFile() ||
+      stats.dev !== input.identity.dev ||
+      stats.ino !== input.identity.ino
+    ) {
+      throw new RecordIoError('unsafe_file');
+    }
     await input.fs.rm(input.file);
     await syncDirectory(input.fs, parent);
     return true;

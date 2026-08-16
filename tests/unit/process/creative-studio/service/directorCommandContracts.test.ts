@@ -5,7 +5,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import * as creativeStudioTypes from '@/common/types/project/creativeStudioTypes';
 import {
+  STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS,
   STUDIO_DIRECTOR_COMMAND_CLOCK_SKEW_MS,
   STUDIO_DIRECTOR_COMMAND_MAX_OPERATIONS,
   STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
@@ -14,6 +16,7 @@ import {
   type StudioDirectorCommandRecordV1,
   type StudioDirectorCommandSlotV1,
 } from '@/common/types/project/creativeStudioTypes';
+import * as directorCommandContracts from '@process/services/creative-studio/service/directorCommandContracts';
 import {
   parseStudioDirectorCommandReceipt,
   parseStudioDirectorCommandSlot,
@@ -22,6 +25,36 @@ import {
 
 const NOW = '2026-08-16T12:00:00.000Z';
 const WAIT_MS = 15_000;
+
+type SlotLeaseFixture = {
+  schemaVersion: 1;
+  leaseId: string;
+  owner: 'writer' | 'main';
+  commandId: string | null;
+  reservedAt: string | null;
+  deadlineAt: string | null;
+  acquiredAt: string;
+  expiresAt: string;
+};
+
+const validLease = (overrides: Partial<SlotLeaseFixture> = {}): SlotLeaseFixture => ({
+  schemaVersion: 1,
+  leaseId: 'lease_1',
+  owner: 'writer',
+  commandId: 'command_1',
+  reservedAt: NOW,
+  deadlineAt: '2026-08-16T12:00:15.000Z',
+  acquiredAt: NOW,
+  expiresAt: new Date(Date.parse(NOW) + STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS).toISOString(),
+  ...overrides,
+});
+
+const parseLease = (value: unknown, now = NOW): SlotLeaseFixture | null | undefined => {
+  const parser = Reflect.get(directorCommandContracts, 'parseStudioDirectorCommandSlotLease');
+  return typeof parser === 'function'
+    ? (Reflect.apply(parser, undefined, [value, now, WAIT_MS]) as SlotLeaseFixture | null)
+    : undefined;
+};
 
 const validCommand = (overrides: Partial<StudioDirectorCommandRecordV1> = {}): StudioDirectorCommandRecordV1 => ({
   schemaVersion: 1,
@@ -297,6 +330,59 @@ describe('Studio Director V1 command contracts', () => {
       status: 'invalid',
       expectedRevision: null,
     });
+  });
+});
+
+describe('Studio Director V1 slot lease contract', () => {
+  it('accepts exact writer and main leases and derives duration from ACK grace', () => {
+    const mainWithoutSlot = validLease({
+      leaseId: 'lease_main',
+      owner: 'main',
+      commandId: null,
+      reservedAt: null,
+      deadlineAt: null,
+    });
+
+    expect(parseLease(validLease())).toEqual(validLease());
+    expect(parseLease(mainWithoutSlot)).toEqual(mainWithoutSlot);
+    expect(Reflect.get(creativeStudioTypes, 'STUDIO_DIRECTOR_COMMAND_SLOT_LEASE_MS')).toBe(
+      STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS
+    );
+  });
+
+  it.each([
+    ['unknown key', { ...validLease(), extra: true }],
+    ['unknown owner', { ...validLease(), owner: 'processor' }],
+    ['unsafe lease id', { ...validLease(), leaseId: '../lease' }],
+    ['partial command identity', { ...validLease(), reservedAt: null }],
+    ['writer without slot identity', { ...validLease(), commandId: null, reservedAt: null, deadlineAt: null }],
+    ['noncanonical acquisition', { ...validLease(), acquiredAt: '2026-08-16T12:00:00Z' }],
+    [
+      'far-future acquisition',
+      {
+        ...validLease(),
+        acquiredAt: new Date(Date.parse(NOW) + STUDIO_DIRECTOR_COMMAND_CLOCK_SKEW_MS + 1).toISOString(),
+        expiresAt: new Date(
+          Date.parse(NOW) + STUDIO_DIRECTOR_COMMAND_CLOCK_SKEW_MS + 1 + STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS
+        ).toISOString(),
+      },
+    ],
+    [
+      'short duration',
+      {
+        ...validLease(),
+        expiresAt: new Date(Date.parse(NOW) + STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS - 1).toISOString(),
+      },
+    ],
+    [
+      'long duration',
+      {
+        ...validLease(),
+        expiresAt: new Date(Date.parse(NOW) + STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS + 1).toISOString(),
+      },
+    ],
+  ])('rejects %s', (_label, lease) => {
+    expect(parseLease(lease)).toBeNull();
   });
 });
 

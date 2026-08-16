@@ -6021,7 +6021,7 @@ describe('Studio MCP server', () => {
 
     expect(applyResult).toMatchObject({ status: 'storage_error', commandId: 'command_accepted' });
     expect(statusResult).toMatchObject({ status: 'storage_error', commandId: 'command_status' });
-    expect(createId).toHaveBeenCalledTimes(1);
+    expect(createId).toHaveBeenCalledTimes(2);
   });
 
   it('exposes the route catalog with constraints and never mutates the project', async () => {

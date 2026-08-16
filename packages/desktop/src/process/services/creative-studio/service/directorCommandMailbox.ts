@@ -11,11 +11,16 @@ import path from 'node:path';
 import {
   STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
   STUDIO_DIRECTOR_COMMAND_MAX_SWEEP_RECORDS,
+  STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION,
+  STUDIO_DIRECTOR_COMMAND_SLOT_LEASE_MS,
   STUDIO_DIRECTOR_COMMAND_WAIT_MS,
   type StudioDirectorCommandReceiptV1,
+  type StudioDirectorCommandSlotLeaseV1,
+  type StudioDirectorCommandSlotV1,
 } from '@/common/types/project/creativeStudioTypes';
 import {
   parseStudioDirectorCommandReceipt,
+  parseStudioDirectorCommandSlotLease,
   parseStudioDirectorCommandSlot,
   parseStudioDirectorPendingRecord,
   isSafeStudioDirectorId,
@@ -23,9 +28,12 @@ import {
 } from './directorCommandContracts';
 import {
   canonicalizeRecordRoot,
+  publishExclusiveLeaseRecord,
   publishImmutableRecord,
   readBoundedRegularFile,
+  readBoundedRegularFileWithIdentity,
   RecordIoError,
+  removeRegularRecordIfIdentity,
   removeRegularRecordIfPresent,
   resolveCompleteDirectorySet,
   resolveConfinedRecordPath,
@@ -91,8 +99,23 @@ type CursorSession = {
 
 type SlotRead =
   | { status: 'absent' }
-  | { status: 'valid'; slot: NonNullable<ReturnType<typeof parseStudioDirectorCommandSlot>> }
-  | { status: 'invalid'; commandId: string | null };
+  | {
+      status: 'valid';
+      slot: StudioDirectorCommandSlotV1;
+      bytes: string;
+      identity: { dev: number; ino: number };
+    }
+  | { status: 'invalid'; commandId: string | null; bytes: string; identity: { dev: number; ino: number } };
+
+type LeaseRead =
+  | { status: 'absent' }
+  | { status: 'invalid' }
+  | {
+      status: 'valid';
+      lease: StudioDirectorCommandSlotLeaseV1;
+      bytes: string;
+      identity: { dev: number; ino: number };
+    };
 
 type WatchCommandTree = (input: {
   rootDir: string;
@@ -104,6 +127,7 @@ export type StudioDirectorCommandMailboxDeps = {
   rootDir: string;
   store: Pick<CreativeStudioStore, 'getVerifiedProjectDirectory'>;
   now?: () => string;
+  createId?: () => string;
   waitMs?: number;
   fs?: RecordIoFileSystem;
   logError?: (message: string, error: unknown) => void;
@@ -141,6 +165,7 @@ export const createStudioDirectorCommandMailbox = (
 ): StudioDirectorCommandMailbox => {
   const fs = deps.fs ?? nodeFs;
   const now = deps.now ?? (() => new Date().toISOString());
+  const createId = deps.createId ?? randomUUID;
   const waitMs = deps.waitMs ?? STUDIO_DIRECTOR_COMMAND_WAIT_MS;
   const logError = deps.logError ?? (() => undefined);
   const canonicalRootPromise = canonicalizeRecordRoot({ fs, rootDir: deps.rootDir });
@@ -204,6 +229,22 @@ export const createStudioDirectorCommandMailbox = (
   const readBytes = async (canonicalRoot: string, file: string): Promise<string | null> => {
     try {
       return await readBoundedRegularFile({
+        fs,
+        canonicalRoot,
+        file,
+        maxBytes: STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
+      });
+    } catch {
+      throw storageError();
+    }
+  };
+
+  const readIdentifiedBytes = async (
+    canonicalRoot: string,
+    file: string
+  ): Promise<{ bytes: string; identity: { dev: number; ino: number } } | null> => {
+    try {
+      return await readBoundedRegularFileWithIdentity({
         fs,
         canonicalRoot,
         file,
@@ -472,15 +513,152 @@ export const createStudioDirectorCommandMailbox = (
     directories: CommandDirectories,
     currentTime: string
   ): Promise<SlotRead> => {
-    const bytes = await readBytes(canonicalRoot, path.join(directories.slots, '0.slot'));
-    if (bytes === null) return { status: 'absent' };
-    const value = parseJson(bytes);
+    const record = await readIdentifiedBytes(canonicalRoot, path.join(directories.slots, '0.slot'));
+    if (record === null) return { status: 'absent' };
+    const value = parseJson(record.bytes);
     const slot = parseStudioDirectorCommandSlot(value, currentTime, waitMs);
-    if (slot !== null) return { status: 'valid', slot };
+    if (slot !== null) return { status: 'valid', slot, bytes: record.bytes, identity: record.identity };
     return {
       status: 'invalid',
       commandId: isRecord(value) && isSafeStudioDirectorId(value.commandId) ? value.commandId : null,
+      bytes: record.bytes,
+      identity: record.identity,
     };
+  };
+
+  const readLease = async (
+    canonicalRoot: string,
+    directories: CommandDirectories,
+    currentTime: string
+  ): Promise<LeaseRead> => {
+    const record = await readIdentifiedBytes(canonicalRoot, path.join(directories.slots, '0.slot.lease'));
+    if (record === null) return { status: 'absent' };
+    const lease = parseStudioDirectorCommandSlotLease(parseJson(record.bytes), currentTime, waitMs);
+    return lease === null
+      ? { status: 'invalid' }
+      : { status: 'valid', lease, bytes: record.bytes, identity: record.identity };
+  };
+
+  const sameLease = (left: StudioDirectorCommandSlotLeaseV1, right: StudioDirectorCommandSlotLeaseV1): boolean =>
+    left.schemaVersion === right.schemaVersion &&
+    left.leaseId === right.leaseId &&
+    left.owner === right.owner &&
+    left.commandId === right.commandId &&
+    left.reservedAt === right.reservedAt &&
+    left.deadlineAt === right.deadlineAt &&
+    left.acquiredAt === right.acquiredAt &&
+    left.expiresAt === right.expiresAt;
+
+  const sameIdentity = (left: { dev: number; ino: number }, right: { dev: number; ino: number }): boolean =>
+    left.dev === right.dev && left.ino === right.ino;
+
+  const sameSlotRead = (left: SlotRead, right: SlotRead): boolean => {
+    if (left.status === 'absent' || right.status === 'absent') return left.status === right.status;
+    return (
+      left.status === right.status &&
+      left.bytes === right.bytes &&
+      sameIdentity(left.identity, right.identity) &&
+      (left.status !== 'invalid' || right.status !== 'invalid' || left.commandId === right.commandId)
+    );
+  };
+
+  const buildMainLease = (slot: SlotRead, currentTime: string): StudioDirectorCommandSlotLeaseV1 => {
+    const acquiredAtMs = canonicalTimestamp(currentTime);
+    const leaseId = createId();
+    if (acquiredAtMs === null || !isSafeStudioDirectorId(leaseId)) throw storageError();
+    const lease: StudioDirectorCommandSlotLeaseV1 = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION,
+      leaseId,
+      owner: 'main',
+      commandId: slot.status === 'valid' ? slot.slot.commandId : null,
+      reservedAt: slot.status === 'valid' ? slot.slot.reservedAt : null,
+      deadlineAt: slot.status === 'valid' ? slot.slot.deadlineAt : null,
+      acquiredAt: currentTime,
+      expiresAt: new Date(acquiredAtMs + STUDIO_DIRECTOR_COMMAND_SLOT_LEASE_MS).toISOString(),
+    };
+    if (parseStudioDirectorCommandSlotLease(lease, currentTime, waitMs) === null) throw storageError();
+    return lease;
+  };
+
+  const acquireMainLease = async (
+    canonicalRoot: string,
+    directories: CommandDirectories,
+    slot: SlotRead,
+    currentTime: string
+  ): Promise<Extract<LeaseRead, { status: 'valid' }> | null> => {
+    const lease = buildMainLease(slot, currentTime);
+    const leaseFile = path.join(directories.slots, '0.slot.lease');
+    try {
+      await publishExclusiveLeaseRecord({
+        fs,
+        canonicalRoot,
+        file: leaseFile,
+        bytes: JSON.stringify(lease),
+      });
+    } catch (error) {
+      if (error instanceof RecordIoError && error.code === 'already_exists') return null;
+      throw neutralizeIo(error);
+    }
+    const held = await readLease(canonicalRoot, directories, now());
+    if (held.status !== 'valid' || !sameLease(held.lease, lease)) throw storageError();
+    return held;
+  };
+
+  const leaseIsActive = (lease: StudioDirectorCommandSlotLeaseV1, currentTime: string): boolean => {
+    const currentMs = canonicalTimestamp(currentTime);
+    return currentMs !== null && currentMs < Date.parse(lease.expiresAt);
+  };
+
+  const removeIdentifiedRecord = async (
+    canonicalRoot: string,
+    file: string,
+    identity: { dev: number; ino: number }
+  ): Promise<boolean> => {
+    try {
+      return await removeRegularRecordIfIdentity({ fs, canonicalRoot, file, identity });
+    } catch {
+      throw storageError();
+    }
+  };
+
+  const releaseMainLease = async (
+    canonicalRoot: string,
+    directories: CommandDirectories,
+    held: Extract<LeaseRead, { status: 'valid' }>
+  ): Promise<boolean> => {
+    if (!leaseIsActive(held.lease, now())) return false;
+    const fresh = await readLease(canonicalRoot, directories, now());
+    if (
+      fresh.status !== 'valid' ||
+      !sameLease(fresh.lease, held.lease) ||
+      !sameIdentity(fresh.identity, held.identity) ||
+      !leaseIsActive(held.lease, now())
+    ) {
+      return false;
+    }
+    return removeIdentifiedRecord(canonicalRoot, path.join(directories.slots, '0.slot.lease'), fresh.identity);
+  };
+
+  const reclaimExpiredLease = async (
+    canonicalRoot: string,
+    directories: CommandDirectories,
+    currentTime: string
+  ): Promise<boolean> => {
+    const observed = await readLease(canonicalRoot, directories, currentTime);
+    if (observed.status === 'absent') return true;
+    if (observed.status === 'invalid') throw storageError();
+    if (leaseIsActive(observed.lease, currentTime)) return false;
+
+    const fresh = await readLease(canonicalRoot, directories, currentTime);
+    if (
+      fresh.status !== 'valid' ||
+      !sameLease(fresh.lease, observed.lease) ||
+      !sameIdentity(fresh.identity, observed.identity) ||
+      leaseIsActive(fresh.lease, currentTime)
+    ) {
+      return false;
+    }
+    return removeIdentifiedRecord(canonicalRoot, path.join(directories.slots, '0.slot.lease'), fresh.identity);
   };
 
   const removeRecord = async (canonicalRoot: string, file: string): Promise<void> => {
@@ -580,10 +758,34 @@ export const createStudioDirectorCommandMailbox = (
         }
         if (slot.status === 'valid' && slot.slot.commandId !== commandId) throw storageError();
         if (slot.status === 'invalid' && slot.commandId !== commandId) throw storageError();
-        await removeRecord(canonicalRoot, pendingFile);
-        if (slot.status !== 'absent') await removeRecord(canonicalRoot, slotFile);
-        if (await pathExists(pendingFile)) throw storageError();
-        if ((await readSlot(canonicalRoot, directories, now())).status !== 'absent') throw storageError();
+        let held: Extract<LeaseRead, { status: 'valid' }> | undefined;
+        try {
+          held = (await acquireMainLease(canonicalRoot, directories, slot, now())) ?? undefined;
+          if (held === undefined) throw storageError();
+          if (!leaseIsActive(held.lease, now())) throw storageError();
+          const freshSlot = await readSlot(canonicalRoot, directories, now());
+          if (!sameSlotRead(slot, freshSlot)) throw storageError();
+
+          await removeRecord(canonicalRoot, pendingFile);
+          if (!leaseIsActive(held.lease, now())) throw storageError();
+          if (
+            freshSlot.status !== 'absent' &&
+            !(await removeIdentifiedRecord(canonicalRoot, slotFile, freshSlot.identity))
+          ) {
+            throw storageError();
+          }
+          if (!leaseIsActive(held.lease, now())) throw storageError();
+          if (!(await releaseMainLease(canonicalRoot, directories, held))) throw storageError();
+          held = undefined;
+
+          if (await pathExists(pendingFile)) throw storageError();
+          if ((await readSlot(canonicalRoot, directories, now())).status !== 'absent') throw storageError();
+        } catch (error) {
+          if (held !== undefined) {
+            await releaseMainLease(canonicalRoot, directories, held).catch((): undefined => undefined);
+          }
+          throw neutralizeIo(error);
+        }
       });
     },
 
@@ -613,24 +815,72 @@ export const createStudioDirectorCommandMailbox = (
           runSlotCleanup(projectId, async () => {
             const directories = await directoriesFor(projectId, false);
             if (directories === null) return;
-            const slotRead = await readSlot(canonicalRoot, directories, currentTime);
-            if (slotRead.status === 'absent') return;
-            if (slotRead.status === 'invalid') {
-              if (slotRead.commandId === null) throw storageError();
-              if (await pathExists(path.join(directories.pending, `${slotRead.commandId}.json`))) return;
-              // A bounded invalid reservation cannot remain live authority once its pending record is absent.
-              await removeRecord(canonicalRoot, path.join(directories.slots, '0.slot'));
-              return;
+            if (!(await reclaimExpiredLease(canonicalRoot, directories, currentTime))) return;
+
+            const observedSlot = await readSlot(canonicalRoot, directories, currentTime);
+            if (observedSlot.status === 'absent') return;
+            let held: Extract<LeaseRead, { status: 'valid' }> | undefined;
+            try {
+              held = (await acquireMainLease(canonicalRoot, directories, observedSlot, now())) ?? undefined;
+              if (held === undefined) return;
+              if (!leaseIsActive(held.lease, now())) return;
+              const slotRead = await readSlot(canonicalRoot, directories, currentTime);
+              if (!sameSlotRead(observedSlot, slotRead)) {
+                await releaseMainLease(canonicalRoot, directories, held);
+                held = undefined;
+                return;
+              }
+              if (slotRead.status === 'absent') {
+                await releaseMainLease(canonicalRoot, directories, held);
+                held = undefined;
+                return;
+              }
+              if (slotRead.status === 'invalid') {
+                if (slotRead.commandId === null) throw storageError();
+                if (await pathExists(path.join(directories.pending, `${slotRead.commandId}.json`))) {
+                  await releaseMainLease(canonicalRoot, directories, held);
+                  held = undefined;
+                  return;
+                }
+              } else {
+                const { slot } = slotRead;
+                if (await pathExists(path.join(directories.pending, `${slot.commandId}.json`))) {
+                  await releaseMainLease(canonicalRoot, directories, held);
+                  held = undefined;
+                  return;
+                }
+                const deadlineMs = canonicalTimestamp(slot.deadlineAt);
+                if (deadlineMs === null) throw storageError();
+                if (
+                  deadlineMs >= nowMs &&
+                  (await exactReceiptFrom(canonicalRoot, directories, projectId, slot.commandId)) === null
+                ) {
+                  await releaseMainLease(canonicalRoot, directories, held);
+                  held = undefined;
+                  return;
+                }
+              }
+
+              if (!leaseIsActive(held.lease, now())) return;
+              if (
+                !(await removeIdentifiedRecord(
+                  canonicalRoot,
+                  path.join(directories.slots, '0.slot'),
+                  slotRead.identity
+                ))
+              ) {
+                throw storageError();
+              }
+              if (leaseIsActive(held.lease, now())) {
+                await releaseMainLease(canonicalRoot, directories, held);
+                held = undefined;
+              }
+            } catch (error) {
+              if (held !== undefined && leaseIsActive(held.lease, now())) {
+                await releaseMainLease(canonicalRoot, directories, held).catch((): undefined => undefined);
+              }
+              throw error;
             }
-            const { slot } = slotRead;
-            if (await pathExists(path.join(directories.pending, `${slot.commandId}.json`))) return;
-            const deadlineMs = canonicalTimestamp(slot.deadlineAt);
-            if (deadlineMs === null) return;
-            if (deadlineMs >= nowMs) {
-              // A live slot is releasable only with its exact durable terminal receipt.
-              if ((await exactReceiptFrom(canonicalRoot, directories, projectId, slot.commandId)) === null) return;
-            }
-            await removeRecord(canonicalRoot, path.join(directories.slots, '0.slot'));
           }),
       });
     },

@@ -5,15 +5,17 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { constants as fsConstants, promises as nodeFs } from 'node:fs';
+import { promises as nodeFs } from 'node:fs';
 import path from 'node:path';
 import {
   STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
   STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION,
+  STUDIO_DIRECTOR_COMMAND_SLOT_LEASE_MS,
   STUDIO_DIRECTOR_COMMAND_SWEEP_INTERVAL_MS,
   STUDIO_DIRECTOR_COMMAND_WAIT_MS,
   type StudioDirectorCommandReceiptV1,
   type StudioDirectorCommandRecordV1,
+  type StudioDirectorCommandSlotLeaseV1,
   type StudioDirectorCommandSlotV1,
   type StudioDirectorNewSceneV1,
   type StudioDirectorOperationV1,
@@ -21,14 +23,18 @@ import {
 import {
   isSafeStudioDirectorId,
   parseStudioDirectorCommandReceipt,
+  parseStudioDirectorCommandSlotLease,
   parseStudioDirectorCommandSlot,
   parseStudioDirectorPendingRecord,
 } from '@process/services/creative-studio/service/directorCommandContracts';
 import {
   RecordIoError,
   type RecordIoFileSystem,
+  publishExclusiveLeaseRecord,
   publishImmutableRecord,
   readBoundedRegularFile,
+  readBoundedRegularFileWithIdentity,
+  removeRegularRecordIfIdentity,
   resolveCompleteDirectorySet,
 } from '@process/services/creative-studio/service/recordIo';
 
@@ -82,16 +88,15 @@ type CommandDirectories = {
 type PreparedCommand = {
   command: StudioDirectorCommandRecordV1;
   slot: StudioDirectorCommandSlotV1;
+  lease: StudioDirectorCommandSlotLeaseV1;
   commandBytes: string;
   slotBytes: string;
+  leaseBytes: string;
 };
 
-type ErrorRecord = { code?: unknown };
-
-type GuardedRecord = {
+type IdentifiedJsonRecord = {
   value: unknown;
-  dev: number;
-  ino: number;
+  identity: { dev: number; ino: number };
 };
 
 const defaultSleep = (milliseconds: number): Promise<void> =>
@@ -103,9 +108,6 @@ const storageError = (commandId: string): { status: 'storage_error'; commandId: 
 });
 
 const safeOutcomeId = (candidate: string): string => (isSafeStudioDirectorId(candidate) ? candidate : 'unavailable');
-
-const hasErrorCode = (error: unknown, code: string): boolean =>
-  typeof error === 'object' && error !== null && !Array.isArray(error) && (error as ErrorRecord).code === code;
 
 const parseJson = (bytes: string): unknown => {
   try {
@@ -156,88 +158,16 @@ const readJsonRecord = async (input: {
   return bytes === null ? null : parseJson(bytes);
 };
 
-const syncDirectory = async (fs: RecordIoFileSystem, directory: string): Promise<void> => {
-  const handle = await fs.open(directory, 'r');
-  try {
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-};
-
-const readGuardedJsonRecord = async (input: {
+const readIdentifiedJsonRecord = async (input: {
   fs: RecordIoFileSystem;
+  canonicalRoot: string;
   file: string;
-}): Promise<GuardedRecord | null> => {
-  let handle: Awaited<ReturnType<RecordIoFileSystem['open']>> | undefined;
-  try {
-    let preliminaryStats: Awaited<ReturnType<RecordIoFileSystem['lstat']>>;
-    try {
-      preliminaryStats = await input.fs.lstat(input.file);
-    } catch (error) {
-      if (hasErrorCode(error, 'ENOENT')) return null;
-      throw error;
-    }
-    if (preliminaryStats.isSymbolicLink() || !preliminaryStats.isFile()) {
-      throw new RecordIoError('unsafe_file');
-    }
-    if (preliminaryStats.size > STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES) {
-      throw new RecordIoError('record_too_large');
-    }
-    const flags =
-      process.platform === 'win32'
-        ? fsConstants.O_RDONLY
-        : fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK;
-    try {
-      handle = await input.fs.open(input.file, flags);
-    } catch (error) {
-      if (hasErrorCode(error, 'ENOENT')) return null;
-      if (hasErrorCode(error, 'ELOOP') || hasErrorCode(error, 'EMLINK')) {
-        throw new RecordIoError('unsafe_file');
-      }
-      throw error;
-    }
-    const stats = await handle.stat();
-    if (!stats.isFile() || stats.dev !== preliminaryStats.dev || stats.ino !== preliminaryStats.ino) {
-      throw new RecordIoError('unsafe_file');
-    }
-    if (stats.size > STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES) {
-      throw new RecordIoError('record_too_large');
-    }
-    const bytes = Buffer.alloc(STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES + 1);
-    let offset = 0;
-    while (offset < bytes.length) {
-      // eslint-disable-next-line no-await-in-loop
-      const result = await handle.read(bytes, offset, bytes.length - offset, offset);
-      if (result.bytesRead === 0) break;
-      offset += result.bytesRead;
-    }
-    if (offset > STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES) throw new RecordIoError('record_too_large');
-    let pathStats: Awaited<ReturnType<RecordIoFileSystem['lstat']>>;
-    try {
-      pathStats = await input.fs.lstat(input.file);
-    } catch (error) {
-      if (hasErrorCode(error, 'ENOENT')) return null;
-      throw error;
-    }
-    if (
-      pathStats.isSymbolicLink() ||
-      !pathStats.isFile() ||
-      pathStats.dev !== stats.dev ||
-      pathStats.ino !== stats.ino
-    ) {
-      throw new RecordIoError('unsafe_file');
-    }
-    return {
-      value: parseJson(bytes.subarray(0, offset).toString('utf8')),
-      dev: stats.dev,
-      ino: stats.ino,
-    };
-  } catch (error) {
-    throw error instanceof RecordIoError ? error : new RecordIoError('storage_error');
-  } finally {
-    await handle?.close().catch((): undefined => undefined);
-  }
+}): Promise<IdentifiedJsonRecord | null> => {
+  const record = await readBoundedRegularFileWithIdentity({
+    ...input,
+    maxBytes: STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
+  });
+  return record === null ? null : { value: parseJson(record.bytes), identity: record.identity };
 };
 
 const readNamedReceipt = async (input: {
@@ -286,20 +216,6 @@ const pendingRecordIsValid = (input: {
   return parsed.status === 'valid';
 };
 
-const recoverBusyCommandId = async (input: {
-  fs: RecordIoFileSystem;
-  directories: CommandDirectories;
-}): Promise<string | null> => {
-  const value = await readJsonRecord({
-    fs: input.fs,
-    canonicalRoot: input.directories.canonicalRoot,
-    file: path.join(input.directories.slots, '0.slot'),
-  });
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
-  const commandId = (value as Record<string, unknown>).commandId;
-  return isSafeStudioDirectorId(commandId) ? commandId : null;
-};
-
 const prepareCommand = (input: {
   config: StudioDirectorCommandWriterConfig | null;
   toolInput: StudioApplyEditsInput;
@@ -322,6 +238,8 @@ const prepareCommand = (input: {
   if (!mintedIds.every(isSafeStudioDirectorId) || new Set(mintedIds).size !== mintedIds.length) {
     return { commandId: outcomeCommandId, prepared: null };
   }
+  const leaseId = input.createId();
+  if (!isSafeStudioDirectorId(leaseId)) return { commandId, prepared: null };
   const createdAtMs = input.now();
   if (!Number.isFinite(createdAtMs)) return { commandId, prepared: null };
   const createdAt = new Date(createdAtMs).toISOString();
@@ -343,6 +261,16 @@ const prepareCommand = (input: {
     reservedAt: createdAt,
     deadlineAt,
   };
+  const lease: StudioDirectorCommandSlotLeaseV1 = {
+    schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION,
+    leaseId,
+    owner: 'writer',
+    commandId,
+    reservedAt: createdAt,
+    deadlineAt,
+    acquiredAt: createdAt,
+    expiresAt: new Date(createdAtMs + STUDIO_DIRECTOR_COMMAND_SLOT_LEASE_MS).toISOString(),
+  };
   const validation = parseStudioDirectorPendingRecord({
     projectId,
     commandId,
@@ -351,119 +279,178 @@ const prepareCommand = (input: {
     now: createdAt,
     waitMs: STUDIO_DIRECTOR_COMMAND_WAIT_MS,
   });
-  if (validation.status !== 'valid') return { commandId, prepared: null };
-  const commandBytes = JSON.stringify(command);
-  const slotBytes = JSON.stringify(slot);
-  if (Buffer.byteLength(commandBytes, 'utf8') > STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES) {
+  if (
+    validation.status !== 'valid' ||
+    parseStudioDirectorCommandSlotLease(lease, createdAt, STUDIO_DIRECTOR_COMMAND_WAIT_MS) === null
+  ) {
     return { commandId, prepared: null };
   }
-  return { commandId, prepared: { command, slot, commandBytes, slotBytes } };
+  const commandBytes = JSON.stringify(command);
+  const slotBytes = JSON.stringify(slot);
+  const leaseBytes = JSON.stringify(lease);
+  if (
+    Buffer.byteLength(commandBytes, 'utf8') > STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES ||
+    Buffer.byteLength(leaseBytes, 'utf8') > STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES
+  ) {
+    return { commandId, prepared: null };
+  }
+  return { commandId, prepared: { command, slot, lease, commandBytes, slotBytes, leaseBytes } };
 };
+
+const sameSlot = (left: StudioDirectorCommandSlotV1, right: StudioDirectorCommandSlotV1): boolean =>
+  left.schemaVersion === right.schemaVersion &&
+  left.commandId === right.commandId &&
+  left.reservedAt === right.reservedAt &&
+  left.deadlineAt === right.deadlineAt;
+
+const sameLease = (left: StudioDirectorCommandSlotLeaseV1, right: StudioDirectorCommandSlotLeaseV1): boolean =>
+  left.schemaVersion === right.schemaVersion &&
+  left.leaseId === right.leaseId &&
+  left.owner === right.owner &&
+  left.commandId === right.commandId &&
+  left.reservedAt === right.reservedAt &&
+  left.deadlineAt === right.deadlineAt &&
+  left.acquiredAt === right.acquiredAt &&
+  left.expiresAt === right.expiresAt;
+
+type HeldLease = {
+  lease: StudioDirectorCommandSlotLeaseV1;
+  identity: { dev: number; ino: number };
+};
+
+const readSlot = async (input: {
+  fs: RecordIoFileSystem;
+  directories: CommandDirectories;
+  nowMs: number;
+}): Promise<{ slot: StudioDirectorCommandSlotV1; identity: { dev: number; ino: number } } | null> => {
+  const slotFile = path.join(input.directories.slots, '0.slot');
+  const record = await readIdentifiedJsonRecord({
+    fs: input.fs,
+    canonicalRoot: input.directories.canonicalRoot,
+    file: slotFile,
+  });
+  if (record === null) return null;
+  const slot = parseStudioDirectorCommandSlot(
+    record.value,
+    new Date(input.nowMs).toISOString(),
+    STUDIO_DIRECTOR_COMMAND_WAIT_MS
+  );
+  if (slot === null) throw new RecordIoError('storage_error');
+  return { slot, identity: record.identity };
+};
+
+const acquireLease = async (input: {
+  fs: RecordIoFileSystem;
+  directories: CommandDirectories;
+  lease: StudioDirectorCommandSlotLeaseV1;
+}): Promise<HeldLease> => {
+  const leaseFile = path.join(input.directories.slots, '0.slot.lease');
+  await publishExclusiveLeaseRecord({
+    fs: input.fs,
+    canonicalRoot: input.directories.canonicalRoot,
+    file: leaseFile,
+    bytes: JSON.stringify(input.lease),
+  });
+  const record = await readIdentifiedJsonRecord({
+    fs: input.fs,
+    canonicalRoot: input.directories.canonicalRoot,
+    file: leaseFile,
+  });
+  const parsed =
+    record === null
+      ? null
+      : parseStudioDirectorCommandSlotLease(record.value, input.lease.acquiredAt, STUDIO_DIRECTOR_COMMAND_WAIT_MS);
+  if (record === null || parsed === null || !sameLease(parsed, input.lease)) {
+    throw new RecordIoError('storage_error');
+  }
+  return { lease: parsed, identity: record.identity };
+};
+
+const releaseLease = async (input: {
+  fs: RecordIoFileSystem;
+  directories: CommandDirectories;
+  held: HeldLease;
+  now: () => number;
+}): Promise<boolean> => {
+  if (input.now() >= Date.parse(input.held.lease.expiresAt)) return false;
+  const leaseFile = path.join(input.directories.slots, '0.slot.lease');
+  const record = await readIdentifiedJsonRecord({
+    fs: input.fs,
+    canonicalRoot: input.directories.canonicalRoot,
+    file: leaseFile,
+  });
+  if (record === null) return false;
+  const current = parseStudioDirectorCommandSlotLease(
+    record.value,
+    new Date(input.now()).toISOString(),
+    STUDIO_DIRECTOR_COMMAND_WAIT_MS
+  );
+  if (
+    current === null ||
+    !sameLease(current, input.held.lease) ||
+    record.identity.dev !== input.held.identity.dev ||
+    record.identity.ino !== input.held.identity.ino ||
+    input.now() >= Date.parse(input.held.lease.expiresAt)
+  ) {
+    return false;
+  }
+  return removeRegularRecordIfIdentity({
+    fs: input.fs,
+    canonicalRoot: input.directories.canonicalRoot,
+    file: leaseFile,
+    identity: record.identity,
+  });
+};
+
+const buildWriterLease = (input: {
+  leaseId: string;
+  slot: StudioDirectorCommandSlotV1;
+  acquiredAtMs: number;
+}): StudioDirectorCommandSlotLeaseV1 => ({
+  schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION,
+  leaseId: input.leaseId,
+  owner: 'writer',
+  commandId: input.slot.commandId,
+  reservedAt: input.slot.reservedAt,
+  deadlineAt: input.slot.deadlineAt,
+  acquiredAt: new Date(input.acquiredAtMs).toISOString(),
+  expiresAt: new Date(input.acquiredAtMs + STUDIO_DIRECTOR_COMMAND_SLOT_LEASE_MS).toISOString(),
+});
 
 const cleanupOwnedSlot = async (input: {
   fs: RecordIoFileSystem;
   directories: CommandDirectories;
   slot: StudioDirectorCommandSlotV1;
-  nowMs: number;
+  now: () => number;
+  createId: () => string;
 }): Promise<boolean> => {
-  const slotFile = path.join(input.directories.slots, '0.slot');
-  const value = await readJsonRecord({
-    fs: input.fs,
-    canonicalRoot: input.directories.canonicalRoot,
-    file: slotFile,
-  });
-  if (value === null) return true;
-  const current = parseStudioDirectorCommandSlot(
-    value,
-    new Date(input.nowMs).toISOString(),
-    STUDIO_DIRECTOR_COMMAND_WAIT_MS
-  );
-  if (
-    current?.schemaVersion !== input.slot.schemaVersion ||
-    current.commandId !== input.slot.commandId ||
-    current.reservedAt !== input.slot.reservedAt ||
-    current.deadlineAt !== input.slot.deadlineAt
-  ) {
+  const initial = await readSlot({ fs: input.fs, directories: input.directories, nowMs: input.now() });
+  if (initial === null) return true;
+  if (!sameSlot(initial.slot, input.slot)) return false;
+
+  const leaseId = input.createId();
+  const acquiredAtMs = input.now();
+  if (!isSafeStudioDirectorId(leaseId) || !Number.isFinite(acquiredAtMs)) return false;
+  const lease = buildWriterLease({ leaseId, slot: input.slot, acquiredAtMs });
+  if (parseStudioDirectorCommandSlotLease(lease, lease.acquiredAt, STUDIO_DIRECTOR_COMMAND_WAIT_MS) === null) {
     return false;
   }
-
-  const slotGuard = `${slotFile}.unconfirmed`;
-  let guardHandle: Awaited<ReturnType<RecordIoFileSystem['open']>> | undefined;
-  let ownsGuard = false;
-  let preserveGuard = false;
-  const releaseGuard = async (): Promise<void> => {
-    await input.fs.rm(slotGuard);
-    ownsGuard = false;
-    await syncDirectory(input.fs, input.directories.slots);
-  };
-  try {
-    const slotsStats = await input.fs.lstat(input.directories.slots);
-    if (
-      !slotsStats.isDirectory() ||
-      slotsStats.isSymbolicLink() ||
-      (await input.fs.realpath(input.directories.slots)) !== input.directories.slots
-    ) {
-      throw new RecordIoError('unsafe_path');
-    }
-    guardHandle = await input.fs.open(slotGuard, 'wx');
-    ownsGuard = true;
-    await guardHandle.writeFile('1', { encoding: 'utf8' });
-    await guardHandle.sync();
-    await guardHandle.close();
-    guardHandle = undefined;
-    await syncDirectory(input.fs, input.directories.slots);
-
-    const guardedRecord = await readGuardedJsonRecord({ fs: input.fs, file: slotFile });
-    if (guardedRecord === null) {
-      await releaseGuard();
-      return true;
-    }
-    const guardedSlot = parseStudioDirectorCommandSlot(
-      guardedRecord.value,
-      new Date(input.nowMs).toISOString(),
-      STUDIO_DIRECTOR_COMMAND_WAIT_MS
-    );
-    if (
-      guardedSlot?.schemaVersion !== input.slot.schemaVersion ||
-      guardedSlot.commandId !== input.slot.commandId ||
-      guardedSlot.reservedAt !== input.slot.reservedAt ||
-      guardedSlot.deadlineAt !== input.slot.deadlineAt
-    ) {
-      await releaseGuard();
-      return false;
-    }
-
-    let finalStats: Awaited<ReturnType<RecordIoFileSystem['lstat']>>;
-    try {
-      finalStats = await input.fs.lstat(slotFile);
-    } catch (error) {
-      if (!hasErrorCode(error, 'ENOENT')) throw error;
-      await releaseGuard();
-      return true;
-    }
-    if (
-      finalStats.isSymbolicLink() ||
-      !finalStats.isFile() ||
-      finalStats.dev !== guardedRecord.dev ||
-      finalStats.ino !== guardedRecord.ino
-    ) {
-      await releaseGuard();
-      return false;
-    }
-    await input.fs.rm(slotFile);
-    preserveGuard = true;
-    await syncDirectory(input.fs, input.directories.slots);
-    preserveGuard = false;
-    await releaseGuard();
-    return true;
-  } catch (error) {
-    await guardHandle?.close().catch((): undefined => undefined);
-    if (ownsGuard && !preserveGuard) {
-      await input.fs.rm(slotGuard).catch((): undefined => undefined);
-      await syncDirectory(input.fs, input.directories.slots).catch((): undefined => undefined);
-    }
-    throw error instanceof RecordIoError ? error : new RecordIoError('storage_error');
+  const held = await acquireLease({ fs: input.fs, directories: input.directories, lease });
+  const fresh = await readSlot({ fs: input.fs, directories: input.directories, nowMs: input.now() });
+  if (fresh === null) return releaseLease({ ...input, held });
+  if (!sameSlot(fresh.slot, input.slot)) {
+    await releaseLease({ ...input, held });
+    return false;
   }
+  if (input.now() >= Date.parse(held.lease.expiresAt)) return false;
+  const removed = await removeRegularRecordIfIdentity({
+    fs: input.fs,
+    canonicalRoot: input.directories.canonicalRoot,
+    file: path.join(input.directories.slots, '0.slot'),
+    identity: fresh.identity,
+  });
+  if (!removed) return false;
+  return releaseLease({ ...input, held });
 };
 
 export const createStudioDirectorCommandWriter = (
@@ -517,24 +504,30 @@ export const createStudioDirectorCommandWriter = (
       return storageError(commandId);
     }
     const slotFile = path.join(directories.slots, '0.slot');
+    let held: HeldLease;
     try {
+      held = await acquireLease({ fs, directories, lease: prepared.lease });
+    } catch {
+      return storageError(commandId);
+    }
+
+    try {
+      if (now() >= Date.parse(held.lease.expiresAt)) return storageError(commandId);
+      const existing = await readSlot({ fs, directories, nowMs: now() });
+      if (existing !== null) {
+        const released = await releaseLease({ fs, directories, held, now });
+        return released ? { status: 'busy', commandId: existing.slot.commandId } : storageError(commandId);
+      }
       await publishImmutableRecord({
         fs,
         canonicalRoot: directories.canonicalRoot,
         file: slotFile,
         bytes: prepared.slotBytes,
       });
-    } catch (error) {
-      if (error instanceof RecordIoError && error.code === 'already_exists') {
-        try {
-          const existingCommandId = await recoverBusyCommandId({ fs, directories });
-          return existingCommandId === null
-            ? storageError(commandId)
-            : { status: 'busy', commandId: existingCommandId };
-        } catch {
-          return storageError(commandId);
-        }
-      }
+      if (now() >= Date.parse(held.lease.expiresAt)) return storageError(commandId);
+      if (!(await releaseLease({ fs, directories, held, now }))) return storageError(commandId);
+    } catch {
+      await releaseLease({ fs, directories, held, now }).catch((): undefined => undefined);
       return storageError(commandId);
     }
 
@@ -547,7 +540,7 @@ export const createStudioDirectorCommandWriter = (
       });
     } catch {
       try {
-        await cleanupOwnedSlot({ fs, directories, slot: prepared.slot, nowMs: now() });
+        await cleanupOwnedSlot({ fs, directories, slot: prepared.slot, now, createId });
       } catch {
         // The caller receives storage_error; a slot that cannot be re-proven is deliberately retained.
       }

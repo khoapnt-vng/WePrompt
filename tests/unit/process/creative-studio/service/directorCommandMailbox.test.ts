@@ -66,6 +66,26 @@ const makeSlot = (
   ...overrides,
 });
 
+const makeLease = (input: {
+  leaseId: string;
+  owner: 'writer' | 'main';
+  slot?: StudioDirectorCommandSlotV1 | null;
+  acquiredAt?: string;
+}) => {
+  const acquiredAt = input.acquiredAt ?? NOW;
+  const slot = input.slot === undefined ? makeSlot('command_1') : input.slot;
+  return {
+    schemaVersion: 1,
+    leaseId: input.leaseId,
+    owner: input.owner,
+    commandId: slot?.commandId ?? null,
+    reservedAt: slot?.reservedAt ?? null,
+    deadlineAt: slot?.deadlineAt ?? null,
+    acquiredAt,
+    expiresAt: new Date(Date.parse(acquiredAt) + STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS).toISOString(),
+  };
+};
+
 const makeReceipt = (
   projectId: string,
   commandId: string,
@@ -332,6 +352,290 @@ describe('Studio Director command mailbox', () => {
     expect(JSON.parse(await nodeFs.readFile(path.join(directories.slots, '0.slot'), 'utf8'))).toMatchObject({
       commandId: 'command_other',
     });
+  });
+
+  it('keeps receipt, pending, and slot untouched while another active lease exists', async () => {
+    await mailbox.ensure(projectId);
+    await writeBundle(rootDir, projectId, 'command_1');
+    await mailbox.writeReceipt(projectId, makeReceipt(projectId, 'command_1'));
+    const directories = commandDirectories(rootDir, projectId);
+    const lease = makeLease({ leaseId: 'lease_writer', owner: 'writer', slot: makeSlot('command_1') });
+    await nodeFs.writeFile(path.join(directories.slots, '0.slot.lease'), JSON.stringify(lease));
+
+    await expect(mailbox.finish(projectId, 'command_1')).rejects.toMatchObject({ code: 'storage_error' });
+
+    expect(JSON.parse(await nodeFs.readFile(path.join(directories.slots, '0.slot.lease'), 'utf8'))).toEqual(lease);
+    expect(existsSync(path.join(directories.pending, 'command_1.json'))).toBe(true);
+    expect(existsSync(path.join(directories.slots, '0.slot'))).toBe(true);
+  });
+
+  it('stops destructive finish work once its newly acquired lease expires', async () => {
+    await mailbox.ensure(projectId);
+    await writeBundle(rootDir, projectId, 'command_1');
+    await mailbox.writeReceipt(projectId, makeReceipt(projectId, 'command_1'));
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const leaseFile = path.join(directories.slots, '0.slot.lease');
+    let currentTime = NOW;
+    let leaseLinked = false;
+    const fs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property !== 'link') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.link>) => {
+          await nodeFs.link(...args);
+          if (String(args[1]) === leaseFile) {
+            leaseLinked = true;
+            currentTime = new Date(Date.parse(NOW) + STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS).toISOString();
+          }
+        };
+      },
+    }) as typeof nodeFs;
+    const expiringMailbox = createStudioDirectorCommandMailbox({
+      rootDir,
+      store,
+      fs,
+      now: () => currentTime,
+      waitMs: WAIT_MS,
+      createId: () => 'lease_expiring',
+    } as never);
+
+    await expect(expiringMailbox.finish(projectId, 'command_1')).rejects.toMatchObject({ code: 'storage_error' });
+
+    expect(leaseLinked).toBe(true);
+    expect(existsSync(path.join(directories.pending, 'command_1.json'))).toBe(true);
+    expect(existsSync(path.join(directories.slots, '0.slot'))).toBe(true);
+    expect(existsSync(leaseFile)).toBe(true);
+    await expiringMailbox.dispose();
+  });
+
+  it('revalidates the full slot under its main lease before finish deletes anything', async () => {
+    await mailbox.ensure(projectId);
+    await writeBundle(rootDir, projectId, 'command_1');
+    await mailbox.writeReceipt(projectId, makeReceipt(projectId, 'command_1'));
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const slotFile = path.join(directories.slots, '0.slot');
+    const leaseFile = `${slotFile}.lease`;
+    const replacementSlot = makeSlot('command_replacement');
+    let replaced = false;
+    const fs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property === 'link') {
+          return async (...args: Parameters<typeof nodeFs.link>) => {
+            await nodeFs.link(...args);
+            if (String(args[1]) === leaseFile && !replaced) {
+              replaced = true;
+              await nodeFs.rm(slotFile);
+              await nodeFs.writeFile(slotFile, JSON.stringify(replacementSlot));
+            }
+          };
+        }
+        if (property === 'rm') {
+          return async (...args: Parameters<typeof nodeFs.rm>) => {
+            if (String(args[0]).endsWith(`${path.sep}pending${path.sep}command_1.json`) && !replaced) {
+              replaced = true;
+              await nodeFs.rm(slotFile);
+              await nodeFs.writeFile(slotFile, JSON.stringify(replacementSlot));
+            }
+            await nodeFs.rm(...args);
+          };
+        }
+        return Reflect.get(realFs, property, receiver);
+      },
+    }) as typeof nodeFs;
+    const racingMailbox = createStudioDirectorCommandMailbox({
+      rootDir,
+      store,
+      fs,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+      createId: () => 'lease_finish',
+    } as never);
+
+    await expect(racingMailbox.finish(projectId, 'command_1')).rejects.toMatchObject({ code: 'storage_error' });
+
+    expect(replaced).toBe(true);
+    expect(existsSync(path.join(directories.pending, 'command_1.json'))).toBe(true);
+    expect(JSON.parse(await nodeFs.readFile(slotFile, 'utf8'))).toEqual(replacementSlot);
+    expect(existsSync(leaseFile)).toBe(false);
+    await racingMailbox.dispose();
+  });
+
+  it('reclaims an expired crash lease, then a fresh main lease completes receipt cleanup', async () => {
+    let currentTime = NOW;
+    await mailbox.dispose();
+    mailbox = createStudioDirectorCommandMailbox({
+      rootDir,
+      store,
+      now: () => currentTime,
+      waitMs: WAIT_MS,
+      createId: (() => {
+        const ids = ['lease_recovery', 'lease_finish'];
+        return () => ids.shift() ?? 'lease_fallback';
+      })(),
+    } as never);
+    await mailbox.ensure(projectId);
+    await writeBundle(rootDir, projectId, 'command_1');
+    await mailbox.writeReceipt(projectId, makeReceipt(projectId, 'command_1'));
+    const directories = commandDirectories(rootDir, projectId);
+    const crashedLease = makeLease({ leaseId: 'lease_crashed', owner: 'main', slot: makeSlot('command_1') });
+    const leaseFile = path.join(directories.slots, '0.slot.lease');
+    await nodeFs.writeFile(leaseFile, JSON.stringify(crashedLease));
+
+    await mailbox.releaseOrphanedSlotsPage(null, currentTime, 64);
+    expect(JSON.parse(await nodeFs.readFile(leaseFile, 'utf8'))).toEqual(crashedLease);
+    expect(existsSync(path.join(directories.slots, '0.slot'))).toBe(true);
+
+    currentTime = new Date(Date.parse(NOW) + STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS + 1).toISOString();
+    await mailbox.releaseOrphanedSlotsPage(null, currentTime, 64);
+    expect(existsSync(leaseFile)).toBe(false);
+    expect(existsSync(path.join(directories.slots, '0.slot'))).toBe(true);
+
+    await mailbox.finish(projectId, 'command_1');
+    expect(existsSync(path.join(directories.pending, 'command_1.json'))).toBe(false);
+    expect(existsSync(path.join(directories.slots, '0.slot'))).toBe(false);
+    expect(existsSync(leaseFile)).toBe(false);
+  });
+
+  it('recovers an expired lease left after slot removal and permits the next maintenance acquisition', async () => {
+    let currentTime = NOW;
+    await mailbox.dispose();
+    mailbox = createStudioDirectorCommandMailbox({
+      rootDir,
+      store,
+      now: () => currentTime,
+      waitMs: WAIT_MS,
+      createId: () => 'lease_after_crash',
+    } as never);
+    await mailbox.ensure(projectId);
+    const directories = commandDirectories(rootDir, projectId);
+    const leaseFile = path.join(directories.slots, '0.slot.lease');
+    const crashedLease = makeLease({ leaseId: 'lease_slot_removed', owner: 'main', slot: makeSlot('command_1') });
+    await nodeFs.writeFile(leaseFile, JSON.stringify(crashedLease));
+
+    await mailbox.releaseOrphanedSlotsPage(null, currentTime, 64);
+    expect(existsSync(leaseFile)).toBe(true);
+
+    currentTime = new Date(Date.parse(NOW) + STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS + 1).toISOString();
+    await mailbox.releaseOrphanedSlotsPage(null, currentTime, 64);
+    expect(existsSync(leaseFile)).toBe(false);
+    expect(await nodeFs.readdir(directories.slots)).toEqual([]);
+  });
+
+  it('fails closed for a malformed lease instead of releasing an orphan slot', async () => {
+    await mailbox.ensure(projectId);
+    const directories = commandDirectories(rootDir, projectId);
+    const slotFile = path.join(directories.slots, '0.slot');
+    const leaseFile = `${slotFile}.lease`;
+    await nodeFs.writeFile(
+      slotFile,
+      JSON.stringify(
+        makeSlot('command_expired', {
+          reservedAt: '2026-08-16T11:59:40.000Z',
+          deadlineAt: '2026-08-16T11:59:55.000Z',
+        })
+      )
+    );
+    await nodeFs.writeFile(leaseFile, '{"schemaVersion":1,"owner":"main"}');
+
+    await mailbox.releaseOrphanedSlotsPage(null, NOW, 64);
+
+    expect(existsSync(slotFile)).toBe(true);
+    expect(await nodeFs.readFile(leaseFile, 'utf8')).toBe('{"schemaVersion":1,"owner":"main"}');
+  });
+
+  it('retains a replacement lease and its slot when expiry recovery loses inode identity', async () => {
+    await mailbox.ensure(projectId);
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const slotFile = path.join(directories.slots, '0.slot');
+    const leaseFile = `${slotFile}.lease`;
+    const slot = makeSlot('command_expired', {
+      reservedAt: '2026-08-16T11:59:40.000Z',
+      deadlineAt: '2026-08-16T11:59:55.000Z',
+    });
+    const expiredLease = makeLease({
+      leaseId: 'lease_expired',
+      owner: 'main',
+      slot,
+      acquiredAt: '2026-08-16T11:59:57.999Z',
+    });
+    const replacementLease = makeLease({ leaseId: 'lease_replacement', owner: 'writer', slot });
+    await nodeFs.writeFile(slotFile, JSON.stringify(slot));
+    await nodeFs.writeFile(leaseFile, JSON.stringify(expiredLease));
+    let replaced = false;
+    const fs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property !== 'open') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.open>) => {
+          const handle = await nodeFs.open(...args);
+          if (String(args[0]) !== leaseFile || replaced) return handle;
+          return new Proxy(handle, {
+            get(realHandle, handleProperty, handleReceiver) {
+              if (handleProperty === 'close') {
+                return async () => {
+                  await handle.close();
+                  replaced = true;
+                  await nodeFs.rm(leaseFile);
+                  await nodeFs.writeFile(leaseFile, JSON.stringify(replacementLease));
+                };
+              }
+              return Reflect.get(realHandle, handleProperty, handleReceiver);
+            },
+          });
+        };
+      },
+    }) as typeof nodeFs;
+    const racingMailbox = createStudioDirectorCommandMailbox({ rootDir, store, fs, now: () => NOW, waitMs: WAIT_MS });
+
+    await racingMailbox.releaseOrphanedSlotsPage(null, NOW, 64);
+
+    expect(replaced).toBe(true);
+    expect(JSON.parse(await nodeFs.readFile(leaseFile, 'utf8'))).toEqual(replacementLease);
+    expect(JSON.parse(await nodeFs.readFile(slotFile, 'utf8'))).toEqual(slot);
+    await racingMailbox.dispose();
+  });
+
+  it('does not touch a slot when a writer wins the fresh-lease race after expired recovery', async () => {
+    await mailbox.ensure(projectId);
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const slotFile = path.join(directories.slots, '0.slot');
+    const leaseFile = `${slotFile}.lease`;
+    const slot = makeSlot('command_expired', {
+      reservedAt: '2026-08-16T11:59:40.000Z',
+      deadlineAt: '2026-08-16T11:59:55.000Z',
+    });
+    const expiredLease = makeLease({
+      leaseId: 'lease_expired',
+      owner: 'main',
+      slot,
+      acquiredAt: '2026-08-16T11:59:57.999Z',
+    });
+    const writerLease = makeLease({ leaseId: 'lease_writer_won', owner: 'writer', slot });
+    await nodeFs.writeFile(slotFile, JSON.stringify(slot));
+    await nodeFs.writeFile(leaseFile, JSON.stringify(expiredLease));
+    let writerWon = false;
+    const fs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property !== 'rm') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.rm>) => {
+          await nodeFs.rm(...args);
+          if (String(args[0]) === leaseFile && !writerWon) {
+            writerWon = true;
+            await nodeFs.writeFile(leaseFile, JSON.stringify(writerLease));
+          }
+        };
+      },
+    }) as typeof nodeFs;
+    const racingMailbox = createStudioDirectorCommandMailbox({ rootDir, store, fs, now: () => NOW, waitMs: WAIT_MS });
+
+    await racingMailbox.releaseOrphanedSlotsPage(null, NOW, 64);
+
+    expect(writerWon).toBe(true);
+    expect(JSON.parse(await nodeFs.readFile(leaseFile, 'utf8'))).toEqual(writerLease);
+    expect(JSON.parse(await nodeFs.readFile(slotFile, 'utf8'))).toEqual(slot);
+    await racingMailbox.dispose();
   });
 
   it('serializes finish with orphan maintenance so cleanup A cannot unlink newly reserved slot B', async () => {

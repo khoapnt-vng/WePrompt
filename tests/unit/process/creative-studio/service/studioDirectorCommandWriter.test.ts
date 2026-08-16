@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS,
   STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
   STUDIO_DIRECTOR_COMMAND_WAIT_MS,
   type StudioDirectorCommandReceiptV1,
@@ -82,11 +83,12 @@ describe('Studio Director subprocess command writer', () => {
   ): ReturnType<typeof createStudioDirectorCommandWriter> => {
     let currentMs = START_MS;
     const nextIds = [...ids];
+    let fallbackId = 0;
     return createStudioDirectorCommandWriter(
       { projectId: PROJECT_ID, projectDir },
       {
         now: () => currentMs,
-        createId: () => nextIds.shift() ?? 'unexpected_extra_id',
+        createId: () => nextIds.shift() ?? `lease_fallback_${++fallbackId}`,
         sleep: async (milliseconds) => {
           currentMs += milliseconds;
         },
@@ -100,7 +102,8 @@ describe('Studio Director subprocess command writer', () => {
       .fn<() => string>()
       .mockReturnValueOnce('command_1')
       .mockReturnValueOnce('scene_new_a')
-      .mockReturnValueOnce('scene_new_b');
+      .mockReturnValueOnce('scene_new_b')
+      .mockReturnValueOnce('lease_1');
     let currentMs = START_MS;
     const writer = createStudioDirectorCommandWriter(
       { projectId: PROJECT_ID, projectDir },
@@ -149,7 +152,7 @@ describe('Studio Director subprocess command writer', () => {
       reservedAt: command.createdAt,
       deadlineAt: command.deadlineAt,
     });
-    expect(createId).toHaveBeenCalledTimes(3);
+    expect(createId).toHaveBeenCalledTimes(4);
     expect(await readdir(slotsDir)).toEqual(['0.slot']);
   });
 
@@ -187,6 +190,7 @@ describe('Studio Director subprocess command writer', () => {
     });
 
     expect(linkedDestinations).toEqual([
+      path.join(canonicalSlotsDir, '0.slot.lease'),
       path.join(canonicalSlotsDir, '0.slot'),
       path.join(canonicalPendingDir, 'command_durable.json'),
     ]);
@@ -218,6 +222,65 @@ describe('Studio Director subprocess command writer', () => {
 
     expect(await readdir(slotsDir)).toEqual(['0.slot']);
     expect(await readdir(pendingDir)).toEqual(['command_first.json']);
+  });
+
+  it('never reclaims an expired lease from the subprocess writer', async () => {
+    const leaseFile = path.join(slotsDir, '0.slot.lease');
+    const expiredLease = {
+      schemaVersion: 1,
+      leaseId: 'lease_expired',
+      owner: 'writer',
+      commandId: 'command_crashed',
+      reservedAt: new Date(START_MS - 17_000).toISOString(),
+      deadlineAt: new Date(START_MS - 2_000).toISOString(),
+      acquiredAt: new Date(START_MS - STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS).toISOString(),
+      expiresAt: new Date(START_MS).toISOString(),
+    };
+    await writeFile(leaseFile, JSON.stringify(expiredLease));
+    const writer = writerWithIds(['command_after_crash', 'lease_after_crash']);
+
+    await expect(writer.apply(setBriefInput())).resolves.toEqual({
+      status: 'storage_error',
+      commandId: 'command_after_crash',
+    });
+
+    expect(await readFile(leaseFile, 'utf8')).toBe(JSON.stringify(expiredLease));
+    expect(await readdir(slotsDir)).toEqual(['0.slot.lease']);
+  });
+
+  it('leaves a complete lease for main recovery when reservation crashes after lease fsync', async () => {
+    const canonicalSlotsDir = await nodeFs.realpath(slotsDir);
+    const leaseFile = path.join(canonicalSlotsDir, '0.slot.lease');
+    const slotFile = path.join(canonicalSlotsDir, '0.slot');
+    const fs = bindMethods(nodeFs, {
+      link: async (source: Parameters<typeof nodeFs.link>[0], destination: Parameters<typeof nodeFs.link>[1]) => {
+        if (String(destination) === slotFile) throw new Error('simulated crash after lease durability');
+        await nodeFs.link(source, destination);
+      },
+      rm: async (file: Parameters<typeof nodeFs.rm>[0], ...args: unknown[]) => {
+        if (String(file) === leaseFile) throw new Error('process crashed before lease release');
+        await Reflect.apply(nodeFs.rm, nodeFs, [file, ...args]);
+      },
+    });
+    const writer = writerWithIds(['command_crash', 'lease_crash'], { fs });
+
+    await expect(writer.apply(setBriefInput())).resolves.toEqual({
+      status: 'storage_error',
+      commandId: 'command_crash',
+    });
+
+    expect(JSON.parse(await readFile(leaseFile, 'utf8'))).toEqual({
+      schemaVersion: 1,
+      leaseId: 'lease_crash',
+      owner: 'writer',
+      commandId: 'command_crash',
+      reservedAt: '2026-08-17T01:02:03.000Z',
+      deadlineAt: '2026-08-17T01:02:18.000Z',
+      acquiredAt: '2026-08-17T01:02:03.000Z',
+      expiresAt: new Date(START_MS + STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS).toISOString(),
+    });
+    expect(await readdir(slotsDir)).not.toContain('0.slot.lease.unconfirmed');
+    expect(await readdir(slotsDir)).not.toContain('0.slot');
   });
 
   it('cleans its own slot after an immutable pending collision without replacing the existing command', async () => {
@@ -270,7 +333,7 @@ describe('Studio Director subprocess command writer', () => {
     await writeFile(path.join(pendingDir, 'command_collision.json'), '{"existing":true}');
     const canonicalSlotsDir = await nodeFs.realpath(slotsDir);
     const slotFile = path.join(canonicalSlotsDir, '0.slot');
-    const slotGuard = `${slotFile}.unconfirmed`;
+    const leaseFile = `${slotFile}.lease`;
     const newerSlot: StudioDirectorCommandSlotV1 = {
       schemaVersion: 1,
       commandId: 'command_newer_after_validation',
@@ -278,7 +341,7 @@ describe('Studio Director subprocess command writer', () => {
       deadlineAt: '2026-08-17T01:02:19.000Z',
     };
     let originalSlotReadComplete = false;
-    let slotGuardOpenCount = 0;
+    let leaseLinkCount = 0;
     let replaced = false;
     const replaceWithNewerSlot = async () => {
       if (replaced) return;
@@ -289,10 +352,6 @@ describe('Studio Director subprocess command writer', () => {
     const open = async (...args: Parameters<typeof nodeFs.open>) => {
       const file = String(args[0]);
       const handle = await nodeFs.open(...args);
-      if (file === slotGuard) {
-        slotGuardOpenCount += 1;
-        if (originalSlotReadComplete && slotGuardOpenCount > 1) await replaceWithNewerSlot();
-      }
       if (file !== slotFile || originalSlotReadComplete) return handle;
       return bindMethods(handle, {
         close: async () => {
@@ -302,13 +361,19 @@ describe('Studio Director subprocess command writer', () => {
       });
     };
     const lstat = async (file: Parameters<typeof nodeFs.lstat>[0], ...args: unknown[]) => {
-      if (!replaced && originalSlotReadComplete && slotGuardOpenCount === 1 && String(file) === canonicalSlotsDir) {
+      if (!replaced && originalSlotReadComplete && leaseLinkCount === 0 && String(file) === canonicalSlotsDir) {
         await replaceWithNewerSlot();
       }
       return Reflect.apply(nodeFs.lstat, nodeFs, [file, ...args]);
     };
-    const fs = bindMethods(nodeFs, { lstat, open });
-    const writer = writerWithIds(['command_collision'], { fs });
+    const link = async (source: Parameters<typeof nodeFs.link>[0], destination: Parameters<typeof nodeFs.link>[1]) => {
+      await nodeFs.link(source, destination);
+      if (String(destination) !== leaseFile) return;
+      leaseLinkCount += 1;
+      if (originalSlotReadComplete && leaseLinkCount > 1) await replaceWithNewerSlot();
+    };
+    const fs = bindMethods(nodeFs, { lstat, link, open });
+    const writer = writerWithIds(['command_collision', 'lease_reserve', 'lease_cleanup'], { fs });
 
     await expect(writer.apply(setBriefInput())).resolves.toEqual({
       status: 'storage_error',
@@ -316,7 +381,7 @@ describe('Studio Director subprocess command writer', () => {
     });
 
     expect(replaced).toBe(true);
-    expect(slotGuardOpenCount).toBe(2);
+    expect(leaseLinkCount).toBe(2);
     await expect(readFile(slotFile, 'utf8')).resolves.toBe(JSON.stringify(newerSlot));
     expect(await readdir(slotsDir)).toEqual(['0.slot']);
   });

@@ -8,8 +8,10 @@ import {
   STUDIO_DIRECTOR_COMMAND_CLOCK_SKEW_MS,
   STUDIO_DIRECTOR_COMMAND_MAX_OPERATIONS,
   STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
+  STUDIO_DIRECTOR_COMMAND_SLOT_LEASE_MS,
   type StudioDirectorCommandReceiptV1,
   type StudioDirectorCommandRecordV1,
+  type StudioDirectorCommandSlotLeaseV1,
   type StudioDirectorCommandSlotV1,
   type StudioDirectorNewSceneV1,
   type StudioDirectorOperationV1,
@@ -38,6 +40,16 @@ const COMMAND_KEYS = new Set([
   'operations',
 ]);
 const SLOT_KEYS = new Set(['schemaVersion', 'commandId', 'reservedAt', 'deadlineAt']);
+const SLOT_LEASE_KEYS = new Set([
+  'schemaVersion',
+  'leaseId',
+  'owner',
+  'commandId',
+  'reservedAt',
+  'deadlineAt',
+  'acquiredAt',
+  'expiresAt',
+]);
 const SET_BRIEF_KEYS = new Set(['kind', 'brief']);
 const ADD_SCENE_KEYS = new Set(['kind', 'sceneId', 'scene', 'beforeSceneId']);
 const NEW_SCENE_KEYS = new Set([
@@ -290,6 +302,47 @@ export function parseStudioDirectorCommandSlot(
     deadlineAt - reservedAt <= waitMs
     ? (value as StudioDirectorCommandSlotV1)
     : null;
+}
+
+export function parseStudioDirectorCommandSlotLease(
+  value: unknown,
+  now: string,
+  waitMs: number
+): StudioDirectorCommandSlotLeaseV1 | null {
+  if (!isRecord(value) || !hasExactKeys(value, SLOT_LEASE_KEYS) || value.schemaVersion !== 1) return null;
+  if (!isSafeStudioDirectorId(value.leaseId) || (value.owner !== 'writer' && value.owner !== 'main')) return null;
+  const acquiredAt = timestampMs(value.acquiredAt);
+  const expiresAt = timestampMs(value.expiresAt);
+  const nowMs = timestampMs(now);
+  if (
+    acquiredAt === null ||
+    expiresAt === null ||
+    nowMs === null ||
+    acquiredAt > nowMs + STUDIO_DIRECTOR_COMMAND_CLOCK_SKEW_MS ||
+    expiresAt - acquiredAt !== STUDIO_DIRECTOR_COMMAND_SLOT_LEASE_MS
+  ) {
+    return null;
+  }
+  const identityIsNull = value.commandId === null && value.reservedAt === null && value.deadlineAt === null;
+  const identityIsComplete = value.commandId !== null && value.reservedAt !== null && value.deadlineAt !== null;
+  if (!identityIsNull && !identityIsComplete) return null;
+  if (value.owner === 'writer' && !identityIsComplete) return null;
+  if (
+    identityIsComplete &&
+    parseStudioDirectorCommandSlot(
+      {
+        schemaVersion: 1,
+        commandId: value.commandId,
+        reservedAt: value.reservedAt,
+        deadlineAt: value.deadlineAt,
+      },
+      now,
+      waitMs
+    ) === null
+  ) {
+    return null;
+  }
+  return value as StudioDirectorCommandSlotLeaseV1;
 }
 
 export function parseStudioDirectorCommandReceipt(input: {
