@@ -880,7 +880,8 @@ test.describe('Creative Studio workspace', () => {
       await selectStudioView(page, projectId, 'board');
       await expectIdleProduceSurface(page, projectId, 3);
       const secondShot = page.getByRole('listitem', { name: `Scene 2: ${secondTitle}` });
-      const jobsBeforeCancel = (await readCanonicalStudioSnapshot(page, projectId)).jobs.length;
+      const snapshotBeforeCancel = await readCanonicalStudioSnapshot(page, projectId);
+      const jobIdsBeforeCancel = snapshotBeforeCancel.jobs.map(({ id }) => id).sort();
       await secondShot.getByRole('button', { name: 'Render', exact: true }).click();
       const staleClipReview = page.getByRole('dialog', { name: 'Review generation' });
       await expect(
@@ -891,13 +892,18 @@ test.describe('Creative Studio workspace', () => {
       ).toBeVisible();
       await staleClipReview.getByRole('button', { name: 'Cancel', exact: true }).click();
       await expect(staleClipReview).toHaveCount(0);
-      await expect
-        .poll(async () => (await readCanonicalStudioSnapshot(page, projectId)).jobs.length)
-        .toBe(jobsBeforeCancel);
-      expect(
-        (await readCanonicalStudioSnapshot(page, projectId)).scenes.find(({ id }) => id === secondSceneId)
-          ?.referenceAssetId
-      ).toBe(secondPlateId);
+      const cancelQuietPeriodDeadline = Date.now() + 1_500;
+      do {
+        await page.waitForTimeout(100);
+        const quietPeriodSnapshot = await readCanonicalStudioSnapshot(page, projectId);
+        expect(quietPeriodSnapshot.jobs.map(({ id }) => id).sort()).toEqual(jobIdsBeforeCancel);
+      } while (Date.now() < cancelQuietPeriodDeadline);
+
+      const snapshotBeforeConfirm = await readCanonicalStudioSnapshot(page, projectId);
+      const secondSceneBeforeConfirm = snapshotBeforeConfirm.scenes.find(({ id }) => id === secondSceneId);
+      expect(secondSceneBeforeConfirm?.referenceAssetId).toBe(secondPlateId);
+      expect(secondSceneBeforeConfirm?.selectedAssetId).toBeNull();
+      const jobIdsBeforeConfirm = new Set(snapshotBeforeConfirm.jobs.map(({ id }) => id));
 
       await secondShot.getByRole('button', { name: 'Render', exact: true }).click();
       const confirmedClipReview = page.getByRole('dialog', { name: 'Review generation' });
@@ -909,6 +915,12 @@ test.describe('Creative Studio workspace', () => {
           async () => {
             const snapshot = await readCanonicalStudioSnapshot(page, projectId);
             const currentScene = snapshot.scenes.find(({ id }) => id === secondSceneId);
+            const newVideoJobs = snapshot.jobs
+              .filter(
+                ({ id, sceneId, outputRole }) =>
+                  !jobIdsBeforeConfirm.has(id) && sceneId === secondSceneId && outputRole === undefined
+              )
+              .map(({ id, status, outputAssetIds }) => ({ id, status, outputAssetIds }));
             return {
               jobs: snapshot.jobs.length,
               referenceJobs: snapshot.jobs.filter(
@@ -916,15 +928,28 @@ test.describe('Creative Studio workspace', () => {
               ).length,
               referenceAssetId: currentScene?.referenceAssetId ?? null,
               selectedAssetId: currentScene?.selectedAssetId ?? null,
+              newVideoJobs,
+              selectedAssetIsNewVideoOutput:
+                newVideoJobs.length === 1 &&
+                newVideoJobs[0]?.outputAssetIds.length === 1 &&
+                newVideoJobs[0].outputAssetIds[0] === currentScene?.selectedAssetId,
             };
           },
           { timeout: 30_000 }
         )
         .toEqual({
-          jobs: jobsBeforeCancel + 1,
+          jobs: snapshotBeforeConfirm.jobs.length + 1,
           referenceJobs: 1,
           referenceAssetId: secondPlateId,
           selectedAssetId: expect.any(String),
+          newVideoJobs: [
+            {
+              id: expect.any(String),
+              status: 'succeeded',
+              outputAssetIds: [expect.any(String)],
+            },
+          ],
+          selectedAssetIsNewVideoOutput: true,
         });
 
       const reloadedUrl = page.url();

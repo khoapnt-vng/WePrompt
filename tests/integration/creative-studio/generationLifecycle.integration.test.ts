@@ -506,6 +506,28 @@ describe('Creative Studio generation lifecycle integration', () => {
     const reloaded = await reloadedStore.getProject(plated.id);
     if (!reloaded) throw new Error('Persisted reference lifecycle project did not reload');
     expect(reloaded.scenes[scene.id].referenceAssetId).toBe(referenceAssetId);
+    expect(reloaded.jobs.job_reference_lifecycle.referenceInputSnapshot).toEqual({
+      sourceVisualPrompt: 'A precise sunrise reference plate',
+      conditioningReferenceAssetIds: [imported.castAssetId, imported.lookAssetId],
+      aspectRatio: '16:9',
+      resolution: '720p',
+    });
+    const reloadedReferenceAsset = reloaded.assets[referenceAssetId];
+    expect({
+      sceneId: reloadedReferenceAsset?.sceneId,
+      collection: reloadedReferenceAsset?.managedAsset.collection,
+      sourceVisualPrompt: reloadedReferenceAsset?.sourceVisualPrompt,
+      sourceReferenceAssetIds: reloadedReferenceAsset?.sourceReferenceAssetIds,
+      sourceAspectRatio: reloadedReferenceAsset?.sourceAspectRatio,
+      sourceResolution: reloadedReferenceAsset?.sourceResolution,
+    }).toEqual({
+      sceneId: scene.id,
+      collection: 'references',
+      sourceVisualPrompt: 'A precise sunrise reference plate',
+      sourceReferenceAssetIds: [imported.castAssetId, imported.lookAssetId],
+      sourceAspectRatio: '16:9',
+      sourceResolution: '720p',
+    });
     const rendererProject = await createCreativeStudioService({
       store: reloadedStore,
       onProjectUpdated: () => undefined,
