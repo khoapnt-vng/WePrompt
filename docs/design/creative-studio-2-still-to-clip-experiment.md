@@ -219,3 +219,36 @@ transfer. This admits this exact app route and count, not causal attribution of 
 `2f068cd4-439e-47c9-97ed-3d2c94a576f9` remains confounded preliminary evidence because its prompt also
 named Look attributes, not the admission proof. This makes no video claim and does not generalize to
 other providers, adapters, aliases, integrations, or image API routes.
+
+## 2026-08-16 Task 9 checkpoint — Clip 1 stopped at OpenRouter HTTP 400
+
+Task 9 continued from the accepted Task 8.5 still above. Before spending, a temporary third project
+reference was classified as active against the selected image route's admitted maximum of two. The
+Brief showed three active references, declared the maximum of two, and blocked new reference-still
+generation. No review was confirmed and the project job count remained five through the blocked
+state and the subsequent removal of that temporary classification. This completes the required
+below-active-count no-spend control without a provider request.
+
+The evidence scene `b4e0fa40-1b60-40d3-8f55-9ee4f2c5b92b`, **Scarf and telescope — evidence**, was
+then set to Video at five seconds while retaining reference asset
+`6d1bf139_7107_495e_96b5_c95b615ef5a0` (SHA-256
+`9167feca52d40b6f9a6afce1f337c67ca9e455e349598b52fd78be42e0e34fb3`) and the canonical Cast-then-Look
+Brief inputs. The named review showed OpenRouter provider `d1ff983b`, adapter
+`openrouter-video-v1`, model `bytedance/seedance-2.0`, integration **OpenRouter video**, 5 seconds,
+16:9, 720p, generated audio, and the provider-charge warning. The owner approved only this call with
+the exact instruction **“approve clip 1”** immediately before Confirm.
+
+The app submitted exactly once through `submitScenes`. Local job
+`648e3740-e381-447c-aee5-5326fa053566` was created at `2026-08-16T04:12:59.465Z` and became
+`needs_attention` / `submission_unknown` at `2026-08-16T04:13:04.728Z`. It has no provider job ID,
+remote-start timestamp, output asset, or selected take. The allowlisted diagnostic recorded an
+OpenRouter submit response with HTTP `400`, readable JSON, provider error code `400`, and a message,
+but no stable error type or provider code. The raw response was not retained, so the cause and charge
+status remain unknown.
+
+The checkpoint stopped there. No retry and no Clip 2 submission were made. With no clip artifact,
+Q1 and Q2 are unanswerable; this is a request/provider failure and an incomplete Task 9 acceptance,
+not a coherence verdict. The exact Task 8.5 still-route admission and the earlier **On the Pitch**
+OpenRouter still-to-clip result remain valid, but Phase 3a's final real-project acceptance and handoff
+remain blocked pending provider/charge reconciliation and fresh, separately named approval for any
+replacement Clip 1 call.
