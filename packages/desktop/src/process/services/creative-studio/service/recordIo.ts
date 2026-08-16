@@ -423,6 +423,7 @@ export async function removeRegularRecordIfPresent(input: {
   fs: RecordIoFileSystem;
   canonicalRoot: string;
   file: string;
+  isStillAuthorized?: () => boolean | Promise<boolean>;
 }): Promise<boolean> {
   const parent = await assertSafeParent(input);
   try {
@@ -434,6 +435,11 @@ export async function removeRegularRecordIfPresent(input: {
       throw error;
     }
     if (stats.isSymbolicLink() || !stats.isFile()) throw new RecordIoError('unsafe_file');
+    const authorization = input.isStillAuthorized?.();
+    if (authorization !== undefined) {
+      const authorized = typeof authorization === 'boolean' ? authorization : await authorization;
+      if (!authorized) throw new RecordIoError('storage_error');
+    }
     await input.fs.rm(input.file);
     await syncDirectory(input.fs, parent);
     return true;
@@ -448,6 +454,7 @@ export async function removeRegularRecordIfIdentity(input: {
   canonicalRoot: string;
   file: string;
   identity: { dev: number; ino: number };
+  isStillAuthorized: () => boolean | Promise<boolean>;
 }): Promise<boolean> {
   const parent = await assertSafeParent(input);
   try {
@@ -466,6 +473,9 @@ export async function removeRegularRecordIfIdentity(input: {
     ) {
       throw new RecordIoError('unsafe_file');
     }
+    const authorization = input.isStillAuthorized();
+    const authorized = typeof authorization === 'boolean' ? authorization : await authorization;
+    if (!authorized) throw new RecordIoError('storage_error');
     await input.fs.rm(input.file);
     await syncDirectory(input.fs, parent);
     return true;

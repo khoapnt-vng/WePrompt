@@ -408,6 +408,195 @@ describe('Studio Director command mailbox', () => {
     await expiringMailbox.dispose();
   });
 
+  it('retains pending residue when its lease expires after final slot validation', async () => {
+    await mailbox.ensure(projectId);
+    await writeBundle(rootDir, projectId, 'command_1');
+    await mailbox.writeReceipt(projectId, makeReceipt(projectId, 'command_1'));
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const slotFile = path.join(directories.slots, '0.slot');
+    const leaseFile = `${slotFile}.lease`;
+    let currentTime = NOW;
+    let leaseLinked = false;
+    let slotLstatCount = 0;
+    let expiredAfterValidation = false;
+    const fs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property === 'link') {
+          return async (...args: Parameters<typeof nodeFs.link>) => {
+            await nodeFs.link(...args);
+            if (String(args[1]) === leaseFile) leaseLinked = true;
+          };
+        }
+        if (property === 'lstat') {
+          return async (...args: Parameters<typeof nodeFs.lstat>) => {
+            const stats = await nodeFs.lstat(...args);
+            if (leaseLinked && String(args[0]) === slotFile) {
+              slotLstatCount += 1;
+              if (slotLstatCount === 2) {
+                expiredAfterValidation = true;
+                currentTime = new Date(Date.parse(NOW) + STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS).toISOString();
+              }
+            }
+            return stats;
+          };
+        }
+        return Reflect.get(realFs, property, receiver);
+      },
+    }) as typeof nodeFs;
+    const expiringMailbox = createStudioDirectorCommandMailbox({
+      rootDir,
+      store,
+      fs,
+      now: () => currentTime,
+      waitMs: WAIT_MS,
+      createId: () => 'lease_pending_boundary',
+    });
+
+    await expect(expiringMailbox.finish(projectId, 'command_1')).rejects.toMatchObject({ code: 'storage_error' });
+
+    expect(expiredAfterValidation).toBe(true);
+    expect(existsSync(path.join(directories.pending, 'command_1.json'))).toBe(true);
+    expect(existsSync(slotFile)).toBe(true);
+    expect(existsSync(leaseFile)).toBe(true);
+    await expiringMailbox.dispose();
+  });
+
+  it('retains a replacement lease and slot when finish expires after final slot identity lstat', async () => {
+    await mailbox.ensure(projectId);
+    await writeBundle(rootDir, projectId, 'command_1');
+    await mailbox.writeReceipt(projectId, makeReceipt(projectId, 'command_1'));
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const slotFile = path.join(directories.slots, '0.slot');
+    const leaseFile = `${slotFile}.lease`;
+    const replacementTime = new Date(Date.parse(NOW) + STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS).toISOString();
+    const replacementSlot = makeSlot('command_replacement_boundary', {
+      reservedAt: replacementTime,
+      deadlineAt: new Date(Date.parse(replacementTime) + WAIT_MS).toISOString(),
+    });
+    const replacementLease = makeLease({
+      leaseId: 'lease_replacement_boundary',
+      owner: 'writer',
+      slot: replacementSlot,
+      acquiredAt: replacementTime,
+    });
+    let currentTime = NOW;
+    let leaseLinked = false;
+    let slotLstatCount = 0;
+    let replaced = false;
+    const fs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property === 'link') {
+          return async (...args: Parameters<typeof nodeFs.link>) => {
+            await nodeFs.link(...args);
+            if (String(args[1]) === leaseFile) leaseLinked = true;
+          };
+        }
+        if (property === 'lstat') {
+          return async (...args: Parameters<typeof nodeFs.lstat>) => {
+            const stats = await nodeFs.lstat(...args);
+            if (leaseLinked && !replaced && String(args[0]) === slotFile) {
+              slotLstatCount += 1;
+              if (slotLstatCount === 3) {
+                replaced = true;
+                currentTime = replacementTime;
+                await nodeFs.rm(leaseFile);
+                await nodeFs.writeFile(leaseFile, JSON.stringify(replacementLease));
+                await nodeFs.rm(slotFile);
+                await nodeFs.writeFile(slotFile, JSON.stringify(replacementSlot));
+              }
+            }
+            return stats;
+          };
+        }
+        return Reflect.get(realFs, property, receiver);
+      },
+    }) as typeof nodeFs;
+    const racingMailbox = createStudioDirectorCommandMailbox({
+      rootDir,
+      store,
+      fs,
+      now: () => currentTime,
+      waitMs: WAIT_MS,
+      createId: () => 'lease_finish_boundary',
+    });
+
+    await expect(racingMailbox.finish(projectId, 'command_1')).rejects.toMatchObject({ code: 'storage_error' });
+
+    expect(replaced).toBe(true);
+    expect(JSON.parse(await nodeFs.readFile(leaseFile, 'utf8'))).toEqual(replacementLease);
+    expect(JSON.parse(await nodeFs.readFile(slotFile, 'utf8'))).toEqual(replacementSlot);
+    await racingMailbox.dispose();
+  });
+
+  it('retains a replacement lease and slot when finish expires after final lease identity lstat', async () => {
+    await mailbox.ensure(projectId);
+    await writeBundle(rootDir, projectId, 'command_1');
+    await mailbox.writeReceipt(projectId, makeReceipt(projectId, 'command_1'));
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const slotFile = path.join(directories.slots, '0.slot');
+    const leaseFile = `${slotFile}.lease`;
+    const replacementTime = new Date(Date.parse(NOW) + STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS).toISOString();
+    const replacementSlot = makeSlot('command_replacement_lease_boundary', {
+      reservedAt: replacementTime,
+      deadlineAt: new Date(Date.parse(replacementTime) + WAIT_MS).toISOString(),
+    });
+    const replacementLease = makeLease({
+      leaseId: 'lease_replacement_lease_boundary',
+      owner: 'writer',
+      slot: replacementSlot,
+      acquiredAt: replacementTime,
+    });
+    let currentTime = NOW;
+    let leaseLinked = false;
+    let leaseLstatCount = 0;
+    let replaced = false;
+    const fs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property === 'link') {
+          return async (...args: Parameters<typeof nodeFs.link>) => {
+            await nodeFs.link(...args);
+            if (String(args[1]) === leaseFile) leaseLinked = true;
+          };
+        }
+        if (property === 'lstat') {
+          return async (...args: Parameters<typeof nodeFs.lstat>) => {
+            const stats = await nodeFs.lstat(...args);
+            if (leaseLinked && !replaced && String(args[0]) === leaseFile) {
+              leaseLstatCount += 1;
+              if (leaseLstatCount === 5) {
+                replaced = true;
+                currentTime = replacementTime;
+                await nodeFs.rm(leaseFile);
+                await nodeFs.writeFile(leaseFile, JSON.stringify(replacementLease));
+                await nodeFs.writeFile(slotFile, JSON.stringify(replacementSlot));
+              }
+            }
+            return stats;
+          };
+        }
+        return Reflect.get(realFs, property, receiver);
+      },
+    }) as typeof nodeFs;
+    const racingMailbox = createStudioDirectorCommandMailbox({
+      rootDir,
+      store,
+      fs,
+      now: () => currentTime,
+      waitMs: WAIT_MS,
+      createId: () => 'lease_finish_release_boundary',
+    });
+
+    await expect(racingMailbox.finish(projectId, 'command_1')).rejects.toMatchObject({ code: 'storage_error' });
+
+    expect(replaced).toBe(true);
+    expect(JSON.parse(await nodeFs.readFile(leaseFile, 'utf8'))).toEqual(replacementLease);
+    expect(JSON.parse(await nodeFs.readFile(slotFile, 'utf8'))).toEqual(replacementSlot);
+    await racingMailbox.dispose();
+  });
+
   it('revalidates the full slot under its main lease before finish deletes anything', async () => {
     await mailbox.ensure(projectId);
     await writeBundle(rootDir, projectId, 'command_1');
@@ -593,6 +782,81 @@ describe('Studio Director command mailbox', () => {
     expect(replaced).toBe(true);
     expect(JSON.parse(await nodeFs.readFile(leaseFile, 'utf8'))).toEqual(replacementLease);
     expect(JSON.parse(await nodeFs.readFile(slotFile, 'utf8'))).toEqual(slot);
+    await racingMailbox.dispose();
+  });
+
+  it('retains a replacement lease and slot when orphan cleanup expires after final slot identity lstat', async () => {
+    await mailbox.ensure(projectId);
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const slotFile = path.join(directories.slots, '0.slot');
+    const leaseFile = `${slotFile}.lease`;
+    await nodeFs.writeFile(
+      slotFile,
+      JSON.stringify(
+        makeSlot('command_expired_boundary', {
+          reservedAt: '2026-08-16T11:59:40.000Z',
+          deadlineAt: '2026-08-16T11:59:55.000Z',
+        })
+      )
+    );
+    const replacementTime = new Date(Date.parse(NOW) + STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS).toISOString();
+    const replacementSlot = makeSlot('command_orphan_replacement', {
+      reservedAt: replacementTime,
+      deadlineAt: new Date(Date.parse(replacementTime) + WAIT_MS).toISOString(),
+    });
+    const replacementLease = makeLease({
+      leaseId: 'lease_orphan_replacement',
+      owner: 'writer',
+      slot: replacementSlot,
+      acquiredAt: replacementTime,
+    });
+    let currentTime = NOW;
+    let leaseLinked = false;
+    let slotLstatCount = 0;
+    let replaced = false;
+    const fs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property === 'link') {
+          return async (...args: Parameters<typeof nodeFs.link>) => {
+            await nodeFs.link(...args);
+            if (String(args[1]) === leaseFile) leaseLinked = true;
+          };
+        }
+        if (property === 'lstat') {
+          return async (...args: Parameters<typeof nodeFs.lstat>) => {
+            const stats = await nodeFs.lstat(...args);
+            if (leaseLinked && !replaced && String(args[0]) === slotFile) {
+              slotLstatCount += 1;
+              if (slotLstatCount === 3) {
+                replaced = true;
+                currentTime = replacementTime;
+                await nodeFs.rm(leaseFile);
+                await nodeFs.writeFile(leaseFile, JSON.stringify(replacementLease));
+                await nodeFs.rm(slotFile);
+                await nodeFs.writeFile(slotFile, JSON.stringify(replacementSlot));
+              }
+            }
+            return stats;
+          };
+        }
+        return Reflect.get(realFs, property, receiver);
+      },
+    }) as typeof nodeFs;
+    const racingMailbox = createStudioDirectorCommandMailbox({
+      rootDir,
+      store,
+      fs,
+      now: () => currentTime,
+      waitMs: WAIT_MS,
+      createId: () => 'lease_orphan_cleanup_boundary',
+    });
+
+    await racingMailbox.releaseOrphanedSlotsPage(null, NOW, 64);
+
+    expect(replaced).toBe(true);
+    expect(JSON.parse(await nodeFs.readFile(leaseFile, 'utf8'))).toEqual(replacementLease);
+    expect(JSON.parse(await nodeFs.readFile(slotFile, 'utf8'))).toEqual(replacementSlot);
     await racingMailbox.dispose();
   });
 

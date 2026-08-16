@@ -399,6 +399,7 @@ const releaseLease = async (input: {
     canonicalRoot: input.directories.canonicalRoot,
     file: leaseFile,
     identity: record.identity,
+    isStillAuthorized: () => input.now() < Date.parse(input.held.lease.expiresAt),
   });
 };
 
@@ -448,6 +449,7 @@ const cleanupOwnedSlot = async (input: {
     canonicalRoot: input.directories.canonicalRoot,
     file: path.join(input.directories.slots, '0.slot'),
     identity: fresh.identity,
+    isStillAuthorized: () => input.now() < Date.parse(held.lease.expiresAt),
   });
   if (!removed) return false;
   return releaseLease({ ...input, held });

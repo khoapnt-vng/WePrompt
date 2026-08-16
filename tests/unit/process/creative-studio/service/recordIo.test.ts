@@ -14,6 +14,7 @@ import {
   publishImmutableRecord,
   readBoundedRegularFile,
   RecordIoError,
+  removeRegularRecordIfIdentity,
   resolveCompleteDirectorySet,
   resolveConfinedRecordPath,
   resolveSafeRecordDirectory,
@@ -512,6 +513,52 @@ describe('error-neutral Creative Studio record IO', () => {
     ).rejects.toMatchObject({ code: 'storage_error', message: 'Record IO failed' });
     expect(await nodeFs.readFile(target, 'utf8')).toBe(bytes);
     expect((await nodeFs.readdir(records)).some((name) => name.includes('.unconfirmed'))).toBe(false);
+  });
+
+  it('evaluates the holder fence after final identity lstat and before unlink', async () => {
+    const records = path.join(canonicalRoot, 'records');
+    await nodeFs.mkdir(records);
+    const target = path.join(records, '0.slot');
+    await nodeFs.writeFile(target, 'owned-slot');
+    const identity = await nodeFs.lstat(target);
+    let finalIdentityChecked = false;
+    let fenceCalls = 0;
+    let removeCalls = 0;
+    const expiringFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property === 'lstat') {
+          return async (...args: Parameters<typeof nodeFs.lstat>) => {
+            const stats = await nodeFs.lstat(...args);
+            if (String(args[0]) === target) finalIdentityChecked = true;
+            return stats;
+          };
+        }
+        if (property === 'rm') {
+          return async (...args: Parameters<typeof nodeFs.rm>) => {
+            removeCalls += 1;
+            await nodeFs.rm(...args);
+          };
+        }
+        return Reflect.get(realFs, property, receiver);
+      },
+    }) as typeof nodeFs;
+
+    await expect(
+      removeRegularRecordIfIdentity({
+        fs: expiringFs,
+        canonicalRoot,
+        file: target,
+        identity: { dev: identity.dev, ino: identity.ino },
+        isStillAuthorized: () => {
+          fenceCalls += 1;
+          expect(finalIdentityChecked).toBe(true);
+          return false;
+        },
+      })
+    ).rejects.toMatchObject({ code: 'storage_error', message: 'Record IO failed' });
+    expect(fenceCalls).toBe(1);
+    expect(removeCalls).toBe(0);
+    expect(await nodeFs.readFile(target, 'utf8')).toBe('owned-slot');
   });
 
   it('publishes immutable bytes only after file sync and then syncs the parent directory', async () => {

@@ -6,7 +6,7 @@
  * @vitest-environment node
  */
 
-import { promises as nodeFs } from 'node:fs';
+import { existsSync, promises as nodeFs } from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -283,6 +283,57 @@ describe('Studio Director subprocess command writer', () => {
     expect(await readdir(slotsDir)).not.toContain('0.slot');
   });
 
+  it('retains its reservation lease and slot when expiry arrives after final lease identity lstat', async () => {
+    const canonicalSlotsDir = await nodeFs.realpath(slotsDir);
+    const leaseFile = path.join(canonicalSlotsDir, '0.slot.lease');
+    const slotFile = path.join(canonicalSlotsDir, '0.slot');
+    let currentMs = START_MS;
+    let leaseLinked = false;
+    let leaseLstatCount = 0;
+    let expiredAtBoundary = false;
+    const fs = bindMethods(nodeFs, {
+      link: async (source: Parameters<typeof nodeFs.link>[0], destination: Parameters<typeof nodeFs.link>[1]) => {
+        await nodeFs.link(source, destination);
+        if (String(destination) === leaseFile) leaseLinked = true;
+      },
+      lstat: async (file: Parameters<typeof nodeFs.lstat>[0], ...args: unknown[]) => {
+        const stats = await Reflect.apply(nodeFs.lstat, nodeFs, [file, ...args]);
+        if (leaseLinked && String(file) === leaseFile) {
+          leaseLstatCount += 1;
+          if (leaseLstatCount === 5) {
+            expiredAtBoundary = true;
+            currentMs = START_MS + STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS;
+          }
+        }
+        return stats;
+      },
+    });
+    const writer = createStudioDirectorCommandWriter(
+      { projectId: PROJECT_ID, projectDir },
+      {
+        fs,
+        now: () => currentMs,
+        createId: (() => {
+          const ids = ['command_boundary', 'lease_boundary'];
+          return () => ids.shift() ?? 'lease_fallback';
+        })(),
+        sleep: async (milliseconds) => {
+          currentMs += milliseconds;
+        },
+      }
+    );
+
+    await expect(writer.apply(setBriefInput())).resolves.toEqual({
+      status: 'storage_error',
+      commandId: 'command_boundary',
+    });
+
+    expect(expiredAtBoundary).toBe(true);
+    expect(existsSync(leaseFile)).toBe(true);
+    expect(existsSync(slotFile)).toBe(true);
+    expect(existsSync(path.join(pendingDir, 'command_boundary.json'))).toBe(false);
+  });
+
   it('cleans its own slot after an immutable pending collision without replacing the existing command', async () => {
     const existing = '{"existing":true}';
     await writeFile(path.join(pendingDir, 'command_collision.json'), existing);
@@ -384,6 +435,55 @@ describe('Studio Director subprocess command writer', () => {
     expect(leaseLinkCount).toBe(2);
     await expect(readFile(slotFile, 'utf8')).resolves.toBe(JSON.stringify(newerSlot));
     expect(await readdir(slotsDir)).toEqual(['0.slot']);
+  });
+
+  it('retains its owned slot when cleanup expires after final slot identity lstat', async () => {
+    await writeFile(path.join(pendingDir, 'command_boundary_cleanup.json'), '{"existing":true}');
+    const canonicalSlotsDir = await nodeFs.realpath(slotsDir);
+    const slotFile = path.join(canonicalSlotsDir, '0.slot');
+    const leaseFile = `${slotFile}.lease`;
+    let currentMs = START_MS;
+    let leaseLinkCount = 0;
+    let cleanupSlotLstatCount = 0;
+    let expiredAtBoundary = false;
+    const fs = bindMethods(nodeFs, {
+      link: async (source: Parameters<typeof nodeFs.link>[0], destination: Parameters<typeof nodeFs.link>[1]) => {
+        await nodeFs.link(source, destination);
+        if (String(destination) === leaseFile) leaseLinkCount += 1;
+      },
+      lstat: async (file: Parameters<typeof nodeFs.lstat>[0], ...args: unknown[]) => {
+        const stats = await Reflect.apply(nodeFs.lstat, nodeFs, [file, ...args]);
+        if (leaseLinkCount > 1 && String(file) === slotFile) {
+          cleanupSlotLstatCount += 1;
+          if (cleanupSlotLstatCount === 3) {
+            expiredAtBoundary = true;
+            currentMs = START_MS + STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS;
+          }
+        }
+        return stats;
+      },
+    });
+    const writer = createStudioDirectorCommandWriter(
+      { projectId: PROJECT_ID, projectDir },
+      {
+        fs,
+        now: () => currentMs,
+        createId: (() => {
+          const ids = ['command_boundary_cleanup', 'lease_reserve_boundary', 'lease_cleanup_boundary'];
+          return () => ids.shift() ?? 'lease_fallback';
+        })(),
+        sleep: async () => undefined,
+      }
+    );
+
+    await expect(writer.apply(setBriefInput())).resolves.toEqual({
+      status: 'storage_error',
+      commandId: 'command_boundary_cleanup',
+    });
+
+    expect(expiredAtBoundary).toBe(true);
+    expect(JSON.parse(await readFile(slotFile, 'utf8'))).toMatchObject({ commandId: 'command_boundary_cleanup' });
+    expect(existsSync(leaseFile)).toBe(true);
   });
 
   it.each([

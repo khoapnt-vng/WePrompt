@@ -612,10 +612,11 @@ export const createStudioDirectorCommandMailbox = (
   const removeIdentifiedRecord = async (
     canonicalRoot: string,
     file: string,
-    identity: { dev: number; ino: number }
+    identity: { dev: number; ino: number },
+    isStillAuthorized: () => boolean | Promise<boolean>
   ): Promise<boolean> => {
     try {
-      return await removeRegularRecordIfIdentity({ fs, canonicalRoot, file, identity });
+      return await removeRegularRecordIfIdentity({ fs, canonicalRoot, file, identity, isStillAuthorized });
     } catch {
       throw storageError();
     }
@@ -636,7 +637,9 @@ export const createStudioDirectorCommandMailbox = (
     ) {
       return false;
     }
-    return removeIdentifiedRecord(canonicalRoot, path.join(directories.slots, '0.slot.lease'), fresh.identity);
+    return removeIdentifiedRecord(canonicalRoot, path.join(directories.slots, '0.slot.lease'), fresh.identity, () =>
+      leaseIsActive(held.lease, now())
+    );
   };
 
   const reclaimExpiredLease = async (
@@ -658,12 +661,21 @@ export const createStudioDirectorCommandMailbox = (
     ) {
       return false;
     }
-    return removeIdentifiedRecord(canonicalRoot, path.join(directories.slots, '0.slot.lease'), fresh.identity);
+    return removeIdentifiedRecord(
+      canonicalRoot,
+      path.join(directories.slots, '0.slot.lease'),
+      fresh.identity,
+      () => !leaseIsActive(fresh.lease, currentTime)
+    );
   };
 
-  const removeRecord = async (canonicalRoot: string, file: string): Promise<void> => {
+  const removeRecord = async (
+    canonicalRoot: string,
+    file: string,
+    isStillAuthorized?: () => boolean | Promise<boolean>
+  ): Promise<void> => {
     try {
-      await removeRegularRecordIfPresent({ fs, canonicalRoot, file });
+      await removeRegularRecordIfPresent({ fs, canonicalRoot, file, isStillAuthorized });
     } catch {
       throw storageError();
     }
@@ -766,11 +778,13 @@ export const createStudioDirectorCommandMailbox = (
           const freshSlot = await readSlot(canonicalRoot, directories, now());
           if (!sameSlotRead(slot, freshSlot)) throw storageError();
 
-          await removeRecord(canonicalRoot, pendingFile);
+          await removeRecord(canonicalRoot, pendingFile, () => leaseIsActive(held.lease, now()));
           if (!leaseIsActive(held.lease, now())) throw storageError();
           if (
             freshSlot.status !== 'absent' &&
-            !(await removeIdentifiedRecord(canonicalRoot, slotFile, freshSlot.identity))
+            !(await removeIdentifiedRecord(canonicalRoot, slotFile, freshSlot.identity, () =>
+              leaseIsActive(held.lease, now())
+            ))
           ) {
             throw storageError();
           }
@@ -866,7 +880,8 @@ export const createStudioDirectorCommandMailbox = (
                 !(await removeIdentifiedRecord(
                   canonicalRoot,
                   path.join(directories.slots, '0.slot'),
-                  slotRead.identity
+                  slotRead.identity,
+                  () => leaseIsActive(held.lease, now())
                 ))
               ) {
                 throw storageError();
