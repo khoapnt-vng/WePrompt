@@ -17,6 +17,7 @@ import { buildFirstFramePrompt } from '@/common/types/project/creativeStudioRefe
 import type {
   StudioBriefRule,
   StudioCancellationPolicy,
+  StudioDirectorCommandRecordV1,
   StudioJob,
   StudioJobStatus,
   StudioProject,
@@ -41,6 +42,7 @@ import {
 } from '@process/services/creative-studio/jobManager';
 import { createOpenRouterVideoAdapter } from '@process/services/creative-studio/adapters/openRouterVideoAdapter';
 import { createStudioMediaStore, type StudioMediaStore } from '@process/services/creative-studio/mediaStore';
+import { createStudioDirectorCommandService } from '@process/services/creative-studio/service/directorCommandService';
 import { createCreativeStudioStore, type CreativeStudioStore } from '@process/services/creative-studio/store';
 import type { RemoteMediaBudget } from '@process/services/remote-media';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -444,6 +446,104 @@ afterEach(async () => {
 });
 
 describe('StudioJobManager durable submission', () => {
+  it('rejects a revision-N request after a real Director edit commits N+1 before any paid boundary or job write', async () => {
+    const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-job-manager-director-race-'));
+    const store = createCreativeStudioStore({ rootDir });
+    const created = await store.createProject({
+      name: 'Director race',
+      brief: 'Keep the paid review pinned',
+      aspectRatio: '16:9',
+      targetDurationSeconds: 5,
+      resolution: '720p',
+    });
+    const reviewed = await store.updateProject(created.id, (current) => ({
+      ...current,
+      sceneOrder: ['scene_1'],
+      scenes: { scene_1: scene({ visualPrompt: 'Prompt A' }) },
+      routing: { storyboard: null, image: selectionFor(route), video: null },
+    }));
+    const commandCreatedAtMs = Date.now();
+    const command: StudioDirectorCommandRecordV1 = {
+      schemaVersion: 1,
+      commandId: 'command_director_paid_race',
+      projectId: reviewed.id,
+      expectedRevision: reviewed.revision,
+      createdAt: new Date(commandCreatedAtMs).toISOString(),
+      deadlineAt: new Date(commandCreatedAtMs + 15_000).toISOString(),
+      policy: 'auto_apply',
+      operations: [{ kind: 'edit_scene', sceneId: 'scene_1', changes: { visualPrompt: 'Prompt B' } }],
+    };
+    const directorService = createStudioDirectorCommandService({ store, now: () => commandCreatedAtMs });
+    const directorResult = await directorService.apply(command, commandCreatedAtMs + 13_000, {
+      commitTag: command.commandId,
+    });
+
+    const listGenerationRoutes = vi.fn(async () => {
+      throw new Error('provider catalog must stay unreachable');
+    });
+    const isGenerationRouteAvailable = vi.fn(async () => {
+      throw new Error('provider resolver must stay unreachable');
+    });
+    const listProviders = vi.fn(async () => {
+      throw new Error('provider inventory must stay unreachable');
+    });
+    const submit = vi.fn(async () => {
+      throw new Error('adapter submit must stay unreachable');
+    });
+    const poll = vi.fn(async () => {
+      throw new Error('adapter poll must stay unreachable');
+    });
+    const adapter = controllableAdapter('weprompt-image-v1', { submit, poll });
+    const createJobId = vi.fn(() => {
+      throw new Error('job id must stay unreachable');
+    });
+    const createIdempotencyKey = vi.fn(() => {
+      throw new Error('idempotency key must stay unreachable');
+    });
+    const onProjectUpdated = vi.fn();
+    const mediaStore = createStudioMediaStore({ store });
+    const manager = createStudioJobManager({
+      store,
+      mediaStore,
+      providerResolver: {
+        listConnectionCandidates: async () => [],
+        listGenerationRoutes,
+        isGenerationRouteAvailable,
+      },
+      adapters: new Map([[adapter.id, adapter]]),
+      listProviders,
+      createJobId,
+      createIdempotencyKey,
+      onProjectUpdated,
+    });
+    harnesses.push({ rootDir, store, mediaStore, project: directorResult.project, manager });
+
+    await expect(
+      manager.submitScenes({
+        projectId: reviewed.id,
+        expectedRevision: reviewed.revision,
+        sceneIds: ['scene_1'],
+        routes: [route],
+        catalogVersion: 'catalog_1',
+      })
+    ).rejects.toMatchObject({ code: 'stale_project' });
+
+    const after = await store.getProject(reviewed.id);
+    expect(after).toMatchObject({
+      revision: reviewed.revision + 1,
+      scenes: { scene_1: { visualPrompt: 'Prompt B', jobIds: [] } },
+      jobs: {},
+    });
+    expect(onProjectUpdated).not.toHaveBeenCalled();
+    expect(listGenerationRoutes).not.toHaveBeenCalled();
+    expect(isGenerationRouteAvailable).not.toHaveBeenCalled();
+    expect(listProviders).not.toHaveBeenCalled();
+    expect(createJobId).not.toHaveBeenCalled();
+    expect(createIdempotencyKey).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+    expect(poll).not.toHaveBeenCalled();
+  });
+
   it('persists real same-count job lifecycle updates on a legacy 25-scene project', async () => {
     const submission = deferred<ProviderSubmitResult>();
     const submit = vi.fn(async () => submission.promise);

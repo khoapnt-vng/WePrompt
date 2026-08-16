@@ -485,12 +485,18 @@ describe('Creative Studio runtime identity and lifecycle', () => {
     });
     expect(captures.mailboxInput).toMatchObject({ rootDir: '/tmp/creative-studio-runtime-test', store: runtime.store });
     expect(captures.directorServiceInput).toEqual({ store: runtime.store });
+    expect(captures.directorServiceInput).not.toHaveProperty('jobManager');
+    expect(captures.directorServiceInput).not.toHaveProperty('providerResolver');
+    expect(captures.directorServiceInput).not.toHaveProperty('adapterRegistry');
     expect(captures.processorInput).toMatchObject({
       store: runtime.store,
       mailbox: runtime.directorCommandMailbox,
       service: runtime.directorCommandService,
       tracker: runtime.directorCommitTracker,
     });
+    expect(captures.processorInput).not.toHaveProperty('jobManager');
+    expect(captures.processorInput).not.toHaveProperty('providerResolver');
+    expect(captures.processorInput).not.toHaveProperty('adapterRegistry');
     const ensureResult = captures.serviceInput?.ensureDirectorCommandMailbox?.('project_opened');
     expect(ensureMailbox).toHaveBeenCalledWith('project_opened');
     await ensureResult;

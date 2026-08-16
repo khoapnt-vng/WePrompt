@@ -633,6 +633,112 @@ describe('useStoryboardEditor', () => {
     });
   });
 
+  it('rebases a dirty scene field onto a Director revision and saves the merged draft only on explicit flush', async () => {
+    const initial = project(2, [scene('scene-1', { title: 'Opening A', narration: 'Narration A' }), scene('scene-2')]);
+    const directorRevision = project(3, [
+      scene('scene-1', { title: 'Opening A', narration: 'Director narration B' }),
+      scene('scene-2'),
+    ]);
+    const userRevision = project(4, [
+      scene('scene-1', { title: 'Local opening', narration: 'Director narration B' }),
+      scene('scene-2'),
+    ]);
+    bridge.updateScene.invoke.mockResolvedValueOnce(ok(userRevision));
+    const { result, rerender } = renderHook(
+      ({ value }) => useStoryboardEditor({ project: value, refetch: vi.fn(async () => value) }),
+      { initialProps: { value: initial } }
+    );
+
+    act(() => result.current.updateSceneDraftById('scene-1', { title: 'Local opening' }));
+    rerender({ value: directorRevision });
+
+    expect(result.current.project?.revision).toBe(3);
+    expect(result.current.sceneDrafts['scene-1']).toMatchObject({
+      title: 'Local opening',
+      narration: 'Director narration B',
+    });
+    expect(bridge.updateScene.invoke).not.toHaveBeenCalled();
+
+    await act(async () => {
+      expect(await result.current.flushSceneDraftById('scene-1')).toBe(true);
+    });
+
+    expect(bridge.updateScene.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project-1',
+      sceneId: 'scene-1',
+      expectedRevision: 3,
+      scene: expect.objectContaining({
+        title: 'Local opening',
+        narration: 'Director narration B',
+      }),
+    });
+    expect(result.current.project?.revision).toBe(4);
+  });
+
+  it('keeps a same-field local scene conflict over a Director value until the user explicitly saves N+2', async () => {
+    const initial = project(2, [scene('scene-1', { visualPrompt: 'Prompt A' }), scene('scene-2')]);
+    const directorRevision = project(3, [scene('scene-1', { visualPrompt: 'Director prompt B' }), scene('scene-2')]);
+    const userRevision = project(4, [scene('scene-1', { visualPrompt: 'Local prompt C' }), scene('scene-2')]);
+    bridge.updateScene.invoke.mockResolvedValueOnce(ok(userRevision));
+    const { result, rerender } = renderHook(
+      ({ value }) => useStoryboardEditor({ project: value, refetch: vi.fn(async () => value) }),
+      { initialProps: { value: initial } }
+    );
+
+    act(() => result.current.updateSceneDraftById('scene-1', { visualPrompt: 'Local prompt C' }));
+    rerender({ value: directorRevision });
+
+    expect(result.current.project?.scenes['scene-1']?.visualPrompt).toBe('Director prompt B');
+    expect(result.current.sceneDrafts['scene-1']?.visualPrompt).toBe('Local prompt C');
+    expect(bridge.updateScene.invoke).not.toHaveBeenCalled();
+
+    await act(async () => {
+      expect(await result.current.flushSceneDraftById('scene-1')).toBe(true);
+    });
+
+    expect(bridge.updateScene.invoke).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        projectId: 'project-1',
+        sceneId: 'scene-1',
+        expectedRevision: 3,
+        scene: expect.objectContaining({ visualPrompt: 'Local prompt C' }),
+      })
+    );
+    expect(result.current.project?.revision).toBe(4);
+  });
+
+  it('preserves a dirty local brief across Director set_brief without an implicit write and saves it at N+2', async () => {
+    const initial = project(2, undefined, { brief: 'Brief A', name: 'Launch film A' });
+    const directorRevision = project(3, undefined, { brief: 'Director brief B', name: 'Director name B' });
+    const userRevision = project(4, undefined, { brief: 'Local brief C', name: 'Director name B' });
+    bridge.updateProject.invoke.mockResolvedValueOnce(ok(userRevision));
+    const { result, rerender } = renderHook(
+      ({ value }) => useStoryboardEditor({ project: value, refetch: vi.fn(async () => value) }),
+      { initialProps: { value: initial } }
+    );
+
+    act(() => result.current.updateProjectDraft({ brief: 'Local brief C' }));
+    rerender({ value: directorRevision });
+
+    expect(result.current.project?.brief).toBe('Director brief B');
+    expect(result.current.projectDraft).toMatchObject({ brief: 'Local brief C', name: 'Director name B' });
+    expect(bridge.updateProject.invoke).not.toHaveBeenCalled();
+
+    await act(async () => {
+      expect(await result.current.flushProjectDraft()).toBe(true);
+    });
+
+    expect(bridge.updateProject.invoke).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        projectId: 'project-1',
+        expectedRevision: 3,
+        brief: 'Local brief C',
+        name: 'Director name B',
+      })
+    );
+    expect(result.current.project?.revision).toBe(4);
+  });
+
   it('flushes a project draft before a dirty scene and advances the shared revision', async () => {
     const initial = project();
     const afterProject = project(3, undefined, { name: 'Launch film v2' });

@@ -765,6 +765,8 @@ describe('CreativeStudioService', () => {
       store,
       now: () => Date.parse('2026-08-17T00:00:00.000Z'),
     });
+    const submitScenes = vi.spyOn(service, 'submitScenes');
+    const retryJob = vi.spyOn(service, 'retryJob');
     onProjectUpdated.mockClear();
 
     const applied = await director.apply(
@@ -789,6 +791,8 @@ describe('CreativeStudioService', () => {
 
     expect(applied.project.ruleListUndo).toEqual(seeded.ruleListUndo);
     expect(onProjectUpdated).not.toHaveBeenCalled();
+    expect(submitScenes).not.toHaveBeenCalled();
+    expect(retryJob).not.toHaveBeenCalled();
 
     const undone = await service.undoBriefRules({ projectId: seeded.id });
 

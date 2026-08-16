@@ -77,6 +77,10 @@ const briefConversationHarness = vi.hoisted(() => ({
   recreate: vi.fn(),
 }));
 
+const studioRuleEvaluationHarness = vi.hoisted(() => ({
+  evaluateStudioRules: vi.fn(),
+}));
+
 vi.mock('@/common', () => ({
   ipcBridge: {
     creativeStudio: bridge,
@@ -87,7 +91,11 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => k
 vi.mock('@renderer/pages/studio/components/PhaseShell/phases/brief/useBriefConversation', () => ({
   useBriefConversation: () => briefConversationHarness,
 }));
-
+vi.mock('@/common/types/project/creativeStudioRules', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/common/types/project/creativeStudioRules')>();
+  studioRuleEvaluationHarness.evaluateStudioRules.mockImplementation(actual.evaluateStudioRules);
+  return { ...actual, evaluateStudioRules: studioRuleEvaluationHarness.evaluateStudioRules };
+});
 const ok = <T,>(data: T): StudioCommandResult<T> => ({ ok: true, data });
 const failure = <T,>(): StudioCommandResult<T> => ({
   ok: false,
@@ -3221,7 +3229,11 @@ describe('StudioPage and useStudioProject', () => {
     bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithVideo()));
 
     renderRoute('/studio/project-1/board');
-    fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.phase.produce.render' }));
+    const renderScene = await screen.findByRole('button', {
+      name: 'conversation.creativeStudio.phase.produce.render',
+    });
+    await waitFor(() => expect(renderScene).toBeEnabled());
+    fireEvent.click(renderScene);
     const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
 
     if (warns) {
@@ -4224,8 +4236,8 @@ describe('StudioPage and useStudioProject', () => {
     renderRoute('/studio/project-1/board');
 
     await screen.findByRole('region', { name: 'conversation.creativeStudio.models.engine.label' });
+    expect(await screen.findByText('conversation.creativeStudio.models.blocked.duration')).toBeVisible();
     expect(screen.getByRole('button', { name: 'conversation.creativeStudio.phase.produce.render' })).toBeDisabled();
-    expect(screen.getByText('conversation.creativeStudio.models.blocked.duration')).toBeVisible();
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
@@ -4480,6 +4492,88 @@ describe('StudioPage and useStudioProject', () => {
               kind: 'image',
             },
           ],
+        })
+      )
+    );
+  });
+
+  it('refreshes Prompt A to the Director-edited Prompt B before any paid confirmation can submit', async () => {
+    let onUpdate: ((event: { projectId: string }) => void) | undefined;
+    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
+      onUpdate = listener;
+      return () => {};
+    });
+    const promptA = scene({ durationSeconds: 5, visualPrompt: 'Prompt A before the Director edit' });
+    const promptB = scene({ durationSeconds: 5, visualPrompt: 'Prompt B from the Director edit' });
+    const initial = project('project-1', {
+      targetDurationSeconds: 5,
+      sceneOrder: [promptA.id],
+      scenes: { [promptA.id]: promptA },
+    });
+    const directorRevision = project('project-1', {
+      revision: 3,
+      targetDurationSeconds: 5,
+      sceneOrder: [promptB.id],
+      scenes: { [promptB.id]: promptB },
+    });
+    bridge.getProject.invoke
+      .mockResolvedValueOnce(ok(initial))
+      .mockResolvedValueOnce(ok(initial))
+      .mockResolvedValue(ok(directorRevision));
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
+    renderRoute('/studio/project-1/board');
+
+    const generateScene = await screen.findByRole('button', {
+      name: 'conversation.creativeStudio.phase.produce.render',
+    });
+    await waitFor(() => expect(generateScene).toBeEnabled());
+    fireEvent.click(generateScene);
+    const originalReview = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+    expect(originalReview).toBeVisible();
+    await waitFor(() =>
+      expect(
+        studioRuleEvaluationHarness.evaluateStudioRules.mock.calls.some(
+          ([, promptText]) => promptText === 'Prompt A before the Director edit'
+        )
+      ).toBe(true)
+    );
+
+    await act(async () => onUpdate?.({ projectId: 'project-1' }));
+    await waitFor(() => expect(bridge.getProject.invoke).toHaveBeenCalledTimes(3));
+    const firstConfirmation = within(originalReview).getByRole('button', {
+      name: 'conversation.creativeStudio.review.confirm',
+    });
+    await waitFor(() => expect(firstConfirmation).toBeEnabled());
+    studioRuleEvaluationHarness.evaluateStudioRules.mockClear();
+    const routeRequestsBeforeFirstConfirmation = bridge.listRoutes.invoke.mock.calls.length;
+    fireEvent.click(firstConfirmation);
+
+    await waitFor(() =>
+      expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(routeRequestsBeforeFirstConfirmation + 1)
+    );
+    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+    const refreshedReview = screen.getByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
+    expect(refreshedReview).toBeVisible();
+    await waitFor(() =>
+      expect(
+        studioRuleEvaluationHarness.evaluateStudioRules.mock.calls.some(
+          ([, promptText]) => promptText === 'Prompt B from the Director edit'
+        )
+      ).toBe(true)
+    );
+
+    const secondConfirmation = within(refreshedReview).getByRole('button', {
+      name: 'conversation.creativeStudio.review.confirm',
+    });
+    await waitFor(() => expect(secondConfirmation).toBeEnabled());
+    fireEvent.click(secondConfirmation);
+
+    await waitFor(() =>
+      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          projectId: 'project-1',
+          expectedRevision: 3,
+          sceneIds: ['scene-1'],
         })
       )
     );

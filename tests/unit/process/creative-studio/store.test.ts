@@ -55,6 +55,8 @@ import { writeProposalRecord } from '@process/resources/builtinMcp/studioProposa
 import { writeReferenceRequestRecord } from '@process/resources/builtinMcp/studioReferenceRequestWriter';
 import {
   createCreativeStudioStore,
+  STUDIO_PROPOSAL_MAX_PENDING_PER_PROJECT,
+  STUDIO_PROPOSAL_PENDING_TTL_MS,
   type CreativeStudioStore,
   type StudioProjectCommitObserver,
 } from '@process/services/creative-studio/store';
@@ -939,6 +941,7 @@ describe('creative studio project store', () => {
     });
 
     it('admits at most 50 concurrent pending proposals and writes nothing for the overflow', async () => {
+      expect(STUDIO_PROPOSAL_MAX_PENDING_PER_PROJECT).toBe(50);
       const project = await store.createProject(makeInput());
       const results = await Promise.allSettled(
         Array.from({ length: 51 }, (_, index) =>
@@ -997,6 +1000,7 @@ describe('creative studio project store', () => {
     });
 
     it('reaps abandoned pending proposals by appending an expiry decision before listing', async () => {
+      expect(STUDIO_PROPOSAL_PENDING_TTL_MS).toBe(7 * 24 * 60 * 60 * 1_000);
       const project = await store.createProject(makeInput());
       await store.recordProposal({
         projectId: project.id,
@@ -1017,6 +1021,7 @@ describe('creative studio project store', () => {
     });
 
     it('reaps abandoned reference requests and releases their queue slots', async () => {
+      expect(STUDIO_PROPOSAL_PENDING_TTL_MS).toBe(7 * 24 * 60 * 60 * 1_000);
       const project = await store.createProject(makeInput());
       await store.updateProject(project.id, (current) => addScene(current, 'scene_1'));
       const paths = await store.resolveProposalPaths(project.id);
@@ -1264,6 +1269,7 @@ describe('creative studio project store', () => {
     });
 
     it('keeps proposal and reference-request inboxes independent', async () => {
+      expect(STUDIO_PROPOSAL_MAX_PENDING_PER_PROJECT).toBe(50);
       const project = await store.createProject(makeInput());
       const updated = await store.updateProject(project.id, (current) => addScene(current, 'scene_1'));
       const paths = await store.resolveProposalPaths(project.id);
