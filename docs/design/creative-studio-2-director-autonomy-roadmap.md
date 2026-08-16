@@ -43,8 +43,9 @@ completion, take the last frame, render the next.
 
 **Three things are missing, and only one is UI work.**
 
-- **Job visibility.** `read_storyboard` reports whether a scene has a reference and a selected take.
-  It cannot see job status, progress, or failure reason. That is a projection change — small.
+- **Job visibility.** `read_storyboard` now reports concrete scene-reference ids, ordered Brief
+  references and whether a selected take exists. It still cannot see the selected take id, job
+  status, progress, or failure reason. That remaining projection change is small.
 - **A spend ceiling.** See below; this is the design decision, not the code.
 - **The last frame.** Captured today only by the BytePlus adapter, not by the OpenRouter route we
   currently bind. Level 2's chaining is gated on that binding, not on MCP work.
@@ -138,10 +139,13 @@ or a very fast assistant with a person as its eyes.
 
 The two are **axes, not a sequence**. The phases define what the product can do; the levels define
 who operates it. The Director can only ever do what the app can do, so phases feed levels rather than
-competing with them. Nothing here says stop at 3a and re-plan.
+competing with them. The programme target is: Phases 1, 1.5 and 3a remain Level 0; Phase 2 delivers
+Level 1; Phase 3b delivers Level 2; Phase 4 broadens Level 2; Level 3 remains the later north star.
 
-**Level 1 is orthogonal.** It wraps commands that already exist and needs no phase, no model decision
-and no binding. Start it whenever.
+**Level 1 is mechanically independent, but scheduled with Phase 2.** Its wrappers do not require the
+section model, a provider decision or a binding. Keeping the work in Phase 2 nevertheless gives the
+programme one explicit point at which the Director becomes the operator of free edits, instead of
+letting autonomy drift into capability slices such as 3a.
 
 **3b becomes a fork, and it is the real question.** "Poll for done, take the last frame, make the
 next clip" is Phase 3b described as a Director capability. Two ways to build it:

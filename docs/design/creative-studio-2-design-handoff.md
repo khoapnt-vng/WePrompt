@@ -420,10 +420,13 @@ comparison passed and the Q2 owner verdict was **“different but feel like the 
 therefore admits Phase 3a Task 1, while each paid still and clip keeps its existing explicit
 confirmation.
 
-Multi-input image capacity is a separate proof and remains unproven. The product cannot exercise it
-until Tasks 4–8 add the exact reviewed path, so Task 8.5 remains scheduled to prove that capacity
-before Task 9 / production nonzero capability. It does not block Task 1, and the completed
-still-to-clip control does not prove multi-image conditioning or establish support on another route.
+The separate multi-input image-capacity proof subsequently passed through the reviewed product path
+for exact provider `d1ff983b`, adapter `weprompt-image-v1`, model
+`google/gemini-3-pro-image`, at a maximum of two ordered inputs. Task 8.5 is complete for that exact
+tuple; every near miss remains fail-closed at zero. A later cartoon reference still independently
+succeeded with the same Cast-then-Look count. This narrow evidence does not transfer to another
+provider, adapter, model or integration, and does not establish direct-video multi-reference input.
+The final Task 9 different-action/two-clip acceptance remains deferred.
 
 1. All active Brief references apply to every new reference plate; 3a has no per-scene subset picker.
 2. Cast and look are organisational roles, not provider parameters. Main orders cast before look, then

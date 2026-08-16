@@ -252,3 +252,43 @@ not a coherence verdict. The exact Task 8.5 still-route admission and the earlie
 OpenRouter still-to-clip result remain valid, but Phase 3a's final real-project acceptance and handoff
 remain blocked pending provider/charge reconciliation and fresh, separately named approval for any
 replacement Clip 1 call.
+
+## 2026-08-16 Task 9 follow-up — one cartoon clip passed; the second fresh run failed
+
+The checkpoint above was accurate when recorded. Acceptance later continued with a clearly fictional
+2D-cartoon case in the same project. Reference job
+`77dd846d-d613-4022-9038-de6e9db472b2` succeeded through provider `d1ff983b`, adapter
+`weprompt-image-v1`, model `google/gemini-3-pro-image`, using the exact ordered inputs Cast
+`7b915411_54aa_4775_9d6a_537a1f6ac542` (`cartoon-cast-reference`) then Look
+`2e246874_9a70_4ad4_ab4e_5393dcb9d25c` (`cartoon-look-reference`). It produced the selected 16:9 / 720p
+reference asset `d0051492_3116_469d_9fef_427f3c7f8160`, whose SHA-256 is
+`4ea8104aef2940182b4534ab335ff82e7fb9704231fa6ec4c52d90ed97a2bd79`.
+
+Clip 1 was a fresh five-second submission through provider `d1ff983b`, adapter
+`openrouter-video-v1`, model `bytedance/seedance-2.0`, with generated audio and the selected still as
+its only video-conditioning input. Local job `615f7c44-d88d-4ef1-af6d-ae86b102712e`, provider job
+`YOtORU2sMGD4FnsmR0s7`, succeeded and produced MP4 asset
+`c3cdc166_bed8_4713_b171_737ae979d485`, whose SHA-256 is
+`9313d23ce6c887ae4d520343b21d738cbccfd372f93b0e79ef8664115e9f7e85`. The stored file is 1280x720
+H.264 at 24 fps with 121 frames, AAC audio, and a container duration of approximately 5.062 seconds.
+The provider visibly began from the selected still: after registration, still-to-frame-0 grayscale
+SSIM was `0.939682`, luminance correlation was `0.993524`, and 97.6% of feature matches were inliers.
+Visual inspection found the same illustrated woman, pose, scarf, telescope, lighting and street. The
+owner explicitly concluded **“Clip 1 passes; prepare Clip 2.”** This proves the bounded Cast/Look ->
+still -> one-clip visual happy path. It does **not** pass Q1's strict equality wording: the 1376x768
+still was reframed into a 1280x720 decoded frame, and the quoted metrics require registration.
+
+Clip 2 was another fresh submission, not a retry: local job
+`247b2be7-5134-4337-9594-eab6886d342a` has `retryOfJobId: null`, a new provider job
+`bJMLyg4PF9QhKa6Zp4Tg`, and the same scene, prompt, selected still, provider, adapter, model, duration,
+frame, resolution and audio setting. It was accepted remotely and later failed with local error code
+`unknown`; it produced no output asset. No retry was made, and the owner explicitly deferred the
+investigation. Because this was the same prompt rather than the protocol's different-action prompt,
+it was a repeated-run reliability check, not a complete substitute for protocol step 5.
+
+Task 9 Step 5 therefore remains incomplete. Strict Q1 equality is unproven for Clip 1, and there is
+no second clip, second frame-0/final-frame evidence, different-action comparison, or two-clip
+coherence judgement. This is not a negative coherence verdict and does not invalidate the admitted
+max-two image route, the earlier **On the Pitch** Task 1 gate, the no-spend capacity control, or the
+successful single-clip cartoon path. Phase 3a engineering is complete locally; its original final
+acceptance remains deferred.

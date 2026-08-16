@@ -112,18 +112,11 @@ state. What does not survive is the generalisation: the safe coarse form costs *
 earns a scoped _"revert this proposal"_, not Undo. Phase 2's per-edit undo still needs
 `apply_script_changes` and its inverses; there is no cheap substitute, only a cheap narrower thing.
 
-**A second gap, found in the same grounding, in the surface phase 1 just extended.**
-`read_storyboard` projects a scene's reference as a boolean — `hasReference` — while
-`propose_storyboard`'s schema requires `referenceAssetId` as a concrete id or `null`, and
-`referenceAssetId` is one of `EDITABLE_SCENE_FIELDS`. A Director told only that a reference exists
-therefore has no id to send, must send `null`, and **drops the reference on every re-proposal**. Not
-silent — the diff records the field as changed — but unavoidable from the Director's side.
-
-The fix is to project the id, three lines in `studioServer.ts`, and it belongs in phase 1's
-territory rather than phase 2's. It is deliberately **not** being handed to the phase-1 session
-mid-flight: that session was told to finish Tasks 7–13 and expand nothing, and contradicting that
-within the hour costs more than the defect. Do it immediately after Task 13, in parallel with the
-skeleton's S1, which touches no MCP surface.
+**The reference-preservation read gap found in that grounding is now closed.** Phase 3a Task 9 kept
+`hasReference` for compatibility and added the concrete per-scene `referenceAssetId` plus ordered,
+sanitized Brief-reference ids, labels and roles to `read_storyboard`. The Director can now preserve a
+reference on re-proposal without gaining write, run, polling, media-return, budget, checkpoint or
+continuation authority; the surface remains Level 0.
 
 ---
 
@@ -185,6 +178,13 @@ endpoint metrics do not prove flawless motion or physics. The control disproves 
 requirement for this OpenRouter inline-first-frame route, but does not transfer to BytePlus or prove
 multi-image conditioning.
 
+Phase 3a engineering subsequently completed locally. The exact admitted image route produced a
+cartoon still from two ordered Cast-then-Look inputs, and one five-second Seedance clip passed owner
+review with strong registered frame-0 continuity. Provider reframing means the protocol's strict Q1
+equality is unproven. A second fresh same-setup provider run failed with no output. The original
+different-action/two-clip acceptance is therefore deferred, not passed and not a negative coherence
+verdict.
+
 Also: feeding cast and look references into the plate **inverts a documented decision** —
 `jobManager.ts:590` guards `output.role !== 'reference'` and `:556-557` states that a reference plate
 never consumes the scene's own reference. Phase 3a changes that rule deliberately; do it explicitly.
@@ -195,9 +195,10 @@ never consumes the scene's own reference. Phase 3a changes that rule deliberatel
 
 Each of these has a lead time no execution speed touches. Start them now, in parallel with phase 1.
 
-**A real VNGG project, and a person who did not write it.** Phase 3's acceptance criterion is a human
-judgement on real material. Without a real project and a willing reviewer, phase 3 cannot be _finished_
-however fast it is built.
+**A representative production project, and a person who did not write it.** Phase 3's acceptance
+criterion is a human judgement on representative material. VNGG material may be used for acceptance
+or demo, but it is not required and does not define product behavior. Without a real project and a
+willing reviewer, phase 3 cannot be _finished_ however fast it is built.
 
 **Design review of Table and Board.** Phase 2's UI half is the biggest single cost in the programme.
 Review cycles on a new primary authoring view are calendar, not engineering.

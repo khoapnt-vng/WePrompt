@@ -51,6 +51,27 @@ first written. Its twelve locale files auto-merged with no conflict, because it 
 add keys** under `phase.write.*` and never to reorder or rename. Keep that discipline: it is the
 difference between a clean merge and resolving twelve JSON files by hand.
 
+**Phase 3a — engineering complete locally; final provider acceptance deferred.** The reviewed
+product path carried ordered Cast and Look inputs into a generated still and that still into one
+accepted five-second clip through adapter `openrouter-video-v1` and model
+`bytedance/seedance-2.0`. Registered frame-0 comparison showed strong visual continuity and the owner
+passed Clip 1, but provider reframing means the protocol's strict Q1 equality is unproven. A second
+fresh same-setup provider job failed with `unknown` and no output, so the required
+different-action/two-clip comparison was not completed. Phase 3a remains open against its original
+acceptance contract; this is a deferred provider/reliability item, not a coherence failure.
+
+Task 9 automation Steps 1–4 are complete in `05f57c35c` and `66259459c`: the integration lifecycle
+proves ordered Cast/Look conditioning, durable main-only provenance, selected-still persistence, and
+the single-first-frame video handoff after reload. A full-slice safety audit found one Important
+Brief-picker/Director race; `318c81d6c` fixed it, and 69 files / 2,801 tests passed twice with
+TypeScript, i18n, lint, format and diff checks green. The final closeout full suite passed 641 files /
+8,958 tests with 19 skipped. Playwright still has compile/discovery evidence only (`--list`, two
+tests); no live fake journey ran. Direct multi-reference video input remains deferred: the shipped
+provider-neutral path feeds video exactly one selected still as `firstFrame`.
+
+Phase 3a remains Level 0. Phase 2 targets Level 1, Phase 3b targets Level 2, Phase 4 broadens Level 2,
+and Level 3 remains the later north star.
+
 ---
 
 ## Open, in rough priority order
@@ -75,12 +96,6 @@ submit would let the next mount charge again with no human in the loop.
 So: every spend is rule-gated, and every spend a _user_ initiates is confirmed by name. This one
 proceeds on the authority of the user having accepted the proposal that queued it. Whether that is
 enough is a designer question, not an engineering one.
-
-**`read_storyboard` still projects a scene's reference as a boolean** (`hasReference`, still at
-`studioServer.ts:155`) while `propose_storyboard` requires the concrete `referenceAssetId`, which is
-an editable scene field. A Director told only _that_ a reference exists must send `null`, so **every
-re-proposal drops the reference**. Not silent — the diff records the field — but unavoidable from the
-Director's side. Roughly three lines to fix.
 
 **`StudioRulesDrawer` has no `role="dialog"`** and Arco's default close control renders as an
 unnamed, unfocusable `<span>` — verified live, and still true. `StudioBriefDrawer` does this
@@ -143,8 +158,10 @@ exactly this way, after several `| tail` runs had looked fine.
 From `creative-studio-2-programme-plan.md`. Each has a lead time no execution speed touches, and they
 are the actual critical path now.
 
-1. **A real VNGG project and an outside reviewer.** Phase 3's acceptance criterion is a human
-   judgement on real material. Without both, phase 3 cannot be _finished_ however fast it is built.
+1. **A representative production project and an outside reviewer.** Phase 3's acceptance criterion
+   is a human judgement on representative material. VNGG material is useful for acceptance or demo,
+   but it is not the product boundary. Without both, phase 3 cannot be _finished_ however fast it is
+   built.
 2. **Design review of Table and Board.** Phase 2's UI half is the largest single cost in the
    programme.
 3. **Is the project folder's readable content source or derived?** Unanswered. It decides the file
