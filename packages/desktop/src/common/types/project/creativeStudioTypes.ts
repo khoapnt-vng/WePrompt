@@ -153,6 +153,16 @@ export const STUDIO_MAX_REFERENCE_REQUEST_SCENES = 24;
 export const STUDIO_MAX_CUT_PLACEMENT_SCENES = 24;
 export const STUDIO_MAX_DIRTY_SCENES_REPORTED = 24;
 export const STUDIO_MAX_MCP_AVAILABLE_TAKE_IDS_PER_SCENE = 24;
+export const STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION = 1 as const;
+export const STUDIO_DIRECTOR_COMMAND_MAX_OPERATIONS = 32;
+export const STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES = 256 * 1024;
+export const STUDIO_DIRECTOR_COMMAND_RECEIPT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+export const STUDIO_DIRECTOR_COMMAND_MAX_SWEEP_RECORDS = 64;
+export const STUDIO_DIRECTOR_COMMAND_MAINTENANCE_INTERVAL_MS = 60_000;
+export const STUDIO_DIRECTOR_COMMAND_SWEEP_INTERVAL_MS = 500;
+export const STUDIO_DIRECTOR_COMMAND_CLOCK_SKEW_MS = 2_000;
+export const STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS = 2_000;
+export const STUDIO_DIRECTOR_COMMAND_WAIT_MS = 15_000;
 
 /** Preserves readable legacy projects while preventing any further scene-count growth above the current cap. */
 export function isStudioSceneCountTransitionAllowed(currentCount: number, nextCount: number): boolean {
@@ -240,6 +250,119 @@ export type StudioEditableScene = Pick<
   | 'durationSeconds'
   | 'referenceAssetId'
 >;
+
+export type StudioDirectorNewSceneV1 = {
+  title: string;
+  purpose: string;
+  visualPrompt: string;
+  narration: string;
+  onScreenText: string;
+  mediaKind: StudioMediaKind;
+  durationSeconds: number;
+};
+
+export type StudioDirectorOperationV1 =
+  | { kind: 'set_brief'; brief: string }
+  | {
+      kind: 'add_scene';
+      sceneId: string;
+      scene: StudioDirectorNewSceneV1;
+      beforeSceneId: string | null;
+    }
+  | {
+      kind: 'edit_scene';
+      sceneId: string;
+      changes: Partial<
+        Pick<
+          StudioEditableScene,
+          'title' | 'purpose' | 'visualPrompt' | 'narration' | 'onScreenText' | 'durationSeconds'
+        >
+      >;
+    }
+  | { kind: 'reorder_scenes'; sceneOrder: string[] }
+  | { kind: 'select_take'; sceneId: string; assetId: string };
+
+export type StudioDirectorCommandRecordV1 = {
+  schemaVersion: 1;
+  commandId: string;
+  projectId: string;
+  expectedRevision: number;
+  createdAt: string;
+  deadlineAt: string;
+  policy: 'auto_apply';
+  operations: StudioDirectorOperationV1[];
+};
+
+export type StudioDirectorCommandSlotV1 = {
+  schemaVersion: 1;
+  commandId: string;
+  reservedAt: string;
+  deadlineAt: string;
+};
+
+export type StudioDirectorCommandRejectionCode =
+  | 'malformed_record'
+  | 'unsupported_version'
+  | 'stale_revision'
+  | 'future_revision'
+  | 'project_not_found'
+  | 'validation_failed'
+  | 'scene_limit_exceeded'
+  | 'project_over_capacity';
+
+export type StudioDirectorCommandExpiryCode = 'deadline_elapsed' | 'expired_after_restart';
+
+export type StudioDirectorCommandIndeterminateCode = 'commit_attribution_unknown' | 'indeterminate_after_restart';
+
+export type StudioDirectorAppliedReceiptV1 = {
+  schemaVersion: 1;
+  commandId: string;
+  projectId: string;
+  expectedRevision: number;
+  decidedAt: string;
+  status: 'applied';
+  appliedRevision: number;
+  createdSceneIds: string[];
+};
+
+export type StudioDirectorRejectedReceiptV1 = {
+  schemaVersion: 1;
+  commandId: string;
+  projectId: string;
+  expectedRevision: number | null;
+  decidedAt: string;
+  status: 'rejected';
+  observedRevision: number | null;
+  reasonCode: StudioDirectorCommandRejectionCode;
+};
+
+export type StudioDirectorExpiredReceiptV1 = {
+  schemaVersion: 1;
+  commandId: string;
+  projectId: string;
+  expectedRevision: number;
+  decidedAt: string;
+  status: 'expired';
+  observedRevision: number | null;
+  reasonCode: StudioDirectorCommandExpiryCode;
+};
+
+export type StudioDirectorIndeterminateReceiptV1 = {
+  schemaVersion: 1;
+  commandId: string;
+  projectId: string;
+  expectedRevision: number;
+  decidedAt: string;
+  status: 'indeterminate';
+  observedRevision: number | null;
+  reasonCode: StudioDirectorCommandIndeterminateCode;
+};
+
+export type StudioDirectorCommandReceiptV1 =
+  | StudioDirectorAppliedReceiptV1
+  | StudioDirectorRejectedReceiptV1
+  | StudioDirectorExpiredReceiptV1
+  | StudioDirectorIndeterminateReceiptV1;
 
 export type StudioNormalisedRect = {
   x: number;

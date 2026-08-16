@@ -43,6 +43,14 @@ import {
 } from '@/common/types/project/creativeStudioManagedAssetCollections';
 import { isValidProviderJobId } from '@process/services/creative-studio/adapters/types';
 import { toStudioProjectSummary } from '@/common/types/project/creativeStudioProjectSummary';
+import {
+  canonicalizeRecordRoot,
+  publishImmutableRecord,
+  readBoundedRegularFile,
+  RecordIoError,
+  resolveConfinedRecordPath,
+  resolveSafeRecordDirectory,
+} from './service/recordIo';
 
 const SAFE_ID = /^[A-Za-z0-9_-]+$/;
 const ASPECT_RATIOS = new Set(['16:9', '9:16', '1:1', '4:3', '3:4']);
@@ -1389,24 +1397,18 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
 
   const canonicalRoot = async (): Promise<string> => {
     try {
-      await fs.mkdir(rootDir, { recursive: true });
-      const stats = await fs.lstat(rootDir);
-      if (!stats.isDirectory() || stats.isSymbolicLink()) {
-        throw new CreativeStudioStoreError('storage_error', 'Creative Studio root must be a directory');
-      }
-      return await fs.realpath(rootDir);
+      return await canonicalizeRecordRoot({ fs, rootDir });
     } catch (error) {
-      if (error instanceof CreativeStudioStoreError) throw error;
       throw storageError(error, 'Creative Studio root is unavailable');
     }
   };
 
   const resolveRootChild = (root: string, child: string): string => {
-    const resolved = path.resolve(root, child);
-    if (!isInsideRoot(root, resolved)) {
+    try {
+      return resolveConfinedRecordPath(root, root, child);
+    } catch {
       throw new CreativeStudioStoreError('storage_error', 'Creative Studio storage target escaped its root');
     }
-    return resolved;
   };
 
   const assertRegularFileOrMissing = async (file: string): Promise<void> => {
@@ -1488,35 +1490,15 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     name: string,
     createIfMissing: boolean
   ): Promise<string | null> => {
-    const directory = resolveRootChild(parent, name);
-    if (!isInsideRoot(root, directory)) {
-      throw new CreativeStudioStoreError('storage_error', 'Creative Studio queue directory escaped its root');
-    }
     try {
-      const stats = await fs.lstat(directory);
-      if (!stats.isDirectory() || stats.isSymbolicLink()) {
-        throw new CreativeStudioStoreError('storage_error', 'Creative Studio queue directory is unsafe');
-      }
+      return await resolveSafeRecordDirectory({
+        fs,
+        canonicalRoot: root,
+        parent,
+        name,
+        createIfMissing,
+      });
     } catch (error) {
-      if (error instanceof CreativeStudioStoreError) throw error;
-      if (!isRecord(error) || error.code !== 'ENOENT') {
-        throw storageError(error, 'Creative Studio queue directory is unavailable');
-      }
-      if (!createIfMissing) return null;
-      try {
-        await fs.mkdir(directory);
-      } catch (mkdirError) {
-        throw storageError(mkdirError, 'Creative Studio queue directory could not be created');
-      }
-    }
-    try {
-      const canonicalDirectory = await fs.realpath(directory);
-      if (canonicalDirectory !== directory || !isInsideRoot(root, canonicalDirectory)) {
-        throw new CreativeStudioStoreError('storage_error', 'Creative Studio queue directory is unsafe');
-      }
-      return canonicalDirectory;
-    } catch (error) {
-      if (error instanceof CreativeStudioStoreError) throw error;
       throw storageError(error, 'Creative Studio queue directory is unavailable');
     }
   };
@@ -1628,40 +1610,13 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
   };
 
   const writeJsonExclusiveAtomic = async (root: string, file: string, serialized: string): Promise<void> => {
-    const parent = path.dirname(file);
-    if (!isInsideRoot(root, parent)) {
-      throw new CreativeStudioStoreError('storage_error', 'Creative Studio proposal target escaped its root');
-    }
-    const parentStats = await fs.lstat(parent);
-    if (!parentStats.isDirectory() || parentStats.isSymbolicLink() || (await fs.realpath(parent)) !== parent) {
-      throw new CreativeStudioStoreError('storage_error', 'Creative Studio proposal parent is unsafe');
-    }
-    const temporaryFile = `${file}.${process.pid}.${++temporaryFileCounter}.tmp`;
-    let temporaryHandle: Awaited<ReturnType<typeof fs.open>> | undefined;
     try {
-      temporaryHandle = await fs.open(temporaryFile, 'wx');
-      await temporaryHandle.writeFile(serialized, { encoding: 'utf8' });
-      await temporaryHandle.sync();
-      await temporaryHandle.close();
-      temporaryHandle = undefined;
-      await fs.link(temporaryFile, file);
-      await fs.rm(temporaryFile);
-      const directoryHandle = await fs.open(parent, 'r');
-      try {
-        await directoryHandle.sync();
-      } finally {
-        await directoryHandle.close();
-      }
+      await publishImmutableRecord({ fs, canonicalRoot: root, file, bytes: serialized });
     } catch (error) {
-      await temporaryHandle?.close().catch((): undefined => undefined);
-      await fs.rm(temporaryFile, { force: true }).catch((): undefined => undefined);
-      if (isRecord(error) && error.code === 'EEXIST') {
+      if (error instanceof RecordIoError && error.code === 'already_exists') {
         throw new CreativeStudioStoreError('invalid_payload', 'Studio proposal already exists');
       }
-      throw new CreativeStudioStoreError(
-        'storage_error',
-        error instanceof Error ? error.message : 'Studio proposal write failed'
-      );
+      throw storageError(error, 'Studio proposal write failed');
     }
   };
 
@@ -1677,11 +1632,21 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     file: string,
     region: 'proposal' | 'reference request' = 'proposal'
   ): Promise<unknown> => {
-    const stats = await fs.lstat(file);
-    if (stats.isSymbolicLink() || !stats.isFile() || stats.size > STUDIO_PROPOSAL_MAX_RECORD_BYTES) {
-      throw new CreativeStudioStoreError('storage_error', `Creative Studio ${region} record is unsafe`);
+    try {
+      const bytes = await readBoundedRegularFile({
+        fs,
+        canonicalRoot: await canonicalRoot(),
+        file,
+        maxBytes: STUDIO_PROPOSAL_MAX_RECORD_BYTES,
+      });
+      if (bytes === null) {
+        throw new CreativeStudioStoreError('storage_error', `Creative Studio ${region} record is unavailable`);
+      }
+      return JSON.parse(bytes) as unknown;
+    } catch (error) {
+      if (error instanceof CreativeStudioStoreError) throw error;
+      throw storageError(error, `Creative Studio ${region} record is unsafe`);
     }
-    return JSON.parse(await fs.readFile(file, 'utf8')) as unknown;
   };
 
   const readProposalRecords = async (

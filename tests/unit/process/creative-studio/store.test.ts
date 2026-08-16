@@ -758,6 +758,83 @@ describe('creative studio project store', () => {
       ).toEqual(recorded);
     });
 
+    it('preserves immutable proposal byte-sync, link publication, and parent-directory sync through shared record IO', async () => {
+      const project = await store.createProject(makeInput());
+      const events: string[] = [];
+      const observedFs = new Proxy(nodeFs, {
+        get(realFs, property, receiver) {
+          if (property === 'link') {
+            return async (...args: Parameters<typeof nodeFs.link>): ReturnType<typeof nodeFs.link> => {
+              events.push('link');
+              return nodeFs.link(...args);
+            };
+          }
+          if (property !== 'open') return Reflect.get(realFs, property, receiver);
+          return async (...args: Parameters<typeof nodeFs.open>) => {
+            const handle = await nodeFs.open(...args);
+            const file = String(args[0]);
+            const isPendingDirectory = file.endsWith(`${path.sep}proposals${path.sep}pending`);
+            const isProposalTemporary = file.includes(
+              `${path.sep}proposals${path.sep}pending${path.sep}proposal_io.json.`
+            );
+            return new Proxy(handle, {
+              get(realHandle, handleProperty, handleReceiver) {
+                if (handleProperty === 'writeFile' && isProposalTemporary) {
+                  return async (...writeArgs: Parameters<typeof handle.writeFile>) => {
+                    events.push('write');
+                    return handle.writeFile(...writeArgs);
+                  };
+                }
+                if (handleProperty === 'sync' && (isProposalTemporary || isPendingDirectory)) {
+                  return async () => {
+                    events.push(isPendingDirectory ? 'directory-sync' : 'file-sync');
+                    return handle.sync();
+                  };
+                }
+                return Reflect.get(realHandle, handleProperty, handleReceiver);
+              },
+            });
+          };
+        },
+      }) as typeof nodeFs;
+      const observedStore = createCreativeStudioStore({
+        rootDir,
+        fs: observedFs,
+        now: () => '2026-08-16T12:00:00.000Z',
+      });
+
+      await observedStore.recordProposal({
+        projectId: project.id,
+        proposalId: 'proposal_io',
+        baseRevision: project.revision,
+        payload: proposalPayload(),
+      });
+
+      expect(events).toEqual(['write', 'file-sync', 'link', 'directory-sync']);
+    });
+
+    it('keeps unsafe proposal records unreadable after delegating bounded lstat reads', async () => {
+      const project = await store.createProject(makeInput());
+      const { pendingDir } = await store.resolveProposalPaths(project.id);
+      const outside = path.join(rootDir, 'outside-proposal.json');
+      writeFileSync(
+        outside,
+        JSON.stringify({
+          schemaVersion: 1,
+          id: 'proposal_symlink',
+          projectId: project.id,
+          status: 'pending',
+          baseRevision: project.revision,
+          payload: proposalPayload(),
+          createdAt: '2026-08-16T12:00:00.000Z',
+          decidedAt: null,
+        })
+      );
+      symlinkSync(outside, path.join(pendingDir, 'proposal_symlink.json'));
+
+      await expect(store.listProposals(project.id)).resolves.toEqual([]);
+    });
+
     it('marks a rejection with an immutable decision while retaining the original pending record', async () => {
       const project = await store.createProject(makeInput());
       await store.recordProposal({
