@@ -1437,7 +1437,7 @@ describe('StudioPage and useStudioProject', () => {
     renderRoute('/studio/project-1/board');
 
     await screen.findByRole('region', { name: 'conversation.creativeStudio.models.engine.label' });
-    expect(screen.getByRole('button', { name: 'image-model' })).toBeVisible();
+    expect(await screen.findByRole('button', { name: 'image-model' })).toBeVisible();
     expect(screen.getByText('conversation.creativeStudio.models.engine.noFitVideo')).toBeVisible();
     expect(screen.queryByRole('button', { name: 'conversation.creativeStudio.models.openSettings' })).toBeNull();
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
