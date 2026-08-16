@@ -25,7 +25,7 @@ import {
 } from '@process/services/creative-studio/jobManager';
 import { createStudioMediaStore } from '@process/services/creative-studio/mediaStore';
 import { createStudioProviderResolver } from '@process/services/creative-studio/providerResolver';
-import { createCreativeStudioService } from '@process/services/creative-studio/creativeStudioService';
+import { createCreativeStudioService } from '@process/services/creative-studio/service';
 import { createCreativeStudioStore } from '@process/services/creative-studio/store';
 import { afterEach, describe, expect, it } from 'vitest';
 

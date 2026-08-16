@@ -14,7 +14,6 @@ import type {
   StudioDetachBriefReferenceRequest,
   StudioEditableCut,
   StudioEditableCutClip,
-  StudioEditableScene,
   StudioProject,
   StudioProjectSummary,
   StudioProposal,
@@ -104,14 +103,22 @@ import {
 } from '@process/services/creative-studio/planning/storyboardPlanner';
 import { fitStoryboardDurations } from '@process/services/creative-studio/planning/fitStoryboardDurations';
 import { Readable } from 'node:stream';
+import {
+  applyStudioProjectFields,
+  applyStudioSceneMutation,
+  applyStudioSceneOrder,
+  applyStudioTakeSelection,
+  assertStudioEditableScene,
+  CreativeStudioServiceError,
+} from './mutationHelpers';
+
+export { CreativeStudioServiceError } from './mutationHelpers';
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const ASPECT_RATIOS = new Set(['16:9', '9:16', '1:1', '4:3', '3:4']);
 const RESOLUTIONS = new Set(['720p', '1080p']);
 const MEDIA_KINDS = new Set(['image', 'video']);
 const CONNECTION_VALIDATION_TIMEOUT_MS = 30_000;
-const UPDATABLE_PROJECT_FIELDS = ['name', 'brief', 'aspectRatio', 'targetDurationSeconds', 'resolution'] as const;
-type UpdatableProjectField = (typeof UPDATABLE_PROJECT_FIELDS)[number];
 const EDITABLE_CUT_KEYS = new Set(['orderMode', 'clipOrder', 'clips']);
 const EDITABLE_CUT_CLIP_KEYS = new Set(['sourceInSeconds', 'sourceOutSeconds', 'crop', 'filters']);
 const NORMALISED_RECT_KEYS = new Set(['x', 'y', 'width', 'height']);
@@ -259,23 +266,6 @@ type StudioInternalConnectionRequest = {
   model: string;
 };
 
-/** A safe, stable service error that can cross only through the bridge error mapper. */
-export class CreativeStudioServiceError extends Error {
-  readonly code:
-    | 'invalid_payload'
-    | 'storyboard_exists'
-    | 'planning_unavailable'
-    | 'busy'
-    | 'provider_error'
-    | 'invalid_route';
-
-  constructor(code: CreativeStudioServiceError['code']) {
-    super(code);
-    this.name = 'CreativeStudioServiceError';
-    this.code = code;
-  }
-}
-
 const isSafeId = (value: unknown): value is string => typeof value === 'string' && SAFE_ID.test(value);
 
 const isUnsafeTextCharacter = (character: string): boolean => {
@@ -375,30 +365,6 @@ const decodeCapturedPoster = (value: unknown): Buffer => {
     throw invalid('Invalid Studio captured poster');
   }
   return bytes;
-};
-
-const applyProjectUpdateField = <Field extends UpdatableProjectField>(
-  project: StudioProject,
-  input: StudioUpdateProjectRequest,
-  field: Field
-): void => {
-  switch (field) {
-    case 'name':
-      if (input.name !== undefined) project.name = input.name;
-      break;
-    case 'brief':
-      if (input.brief !== undefined) project.brief = input.brief;
-      break;
-    case 'aspectRatio':
-      if (input.aspectRatio !== undefined) project.aspectRatio = input.aspectRatio;
-      break;
-    case 'targetDurationSeconds':
-      if (input.targetDurationSeconds !== undefined) project.targetDurationSeconds = input.targetDurationSeconds;
-      break;
-    case 'resolution':
-      if (input.resolution !== undefined) project.resolution = input.resolution;
-      break;
-  }
 };
 
 const providerIsAvailable = (provider: IProvider, model: string, requireListedModel = true): boolean =>
@@ -581,17 +547,6 @@ const batchSceneIsReady = (project: StudioProject, sceneId: string): boolean => 
   if (hasGeneratedAsset) return false;
   const latestJob = jobs.at(-1);
   return latestJob?.status !== 'failed' && latestJob?.status !== 'needs_attention';
-};
-
-const assertScene = (scene: StudioEditableScene): void => {
-  assertText(scene.title, 256, 'scene title');
-  assertText(scene.purpose, 256, 'scene purpose');
-  assertText(scene.visualPrompt, 8 * 1024, 'scene visual prompt');
-  assertText(scene.narration, 4 * 1024, 'scene narration');
-  assertText(scene.onScreenText, 1024, 'scene on-screen text');
-  if (!MEDIA_KINDS.has(scene.mediaKind)) throw invalid('Invalid Studio scene media kind');
-  if (!isIntegerInRange(scene.durationSeconds, 1, 60)) throw invalid('Invalid Studio scene duration');
-  if (scene.referenceAssetId !== null) assertSafeId(scene.referenceAssetId, 'reference asset id');
 };
 
 type JsonRecord = Record<string, unknown>;
@@ -1513,7 +1468,7 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
       }
       if (input.resolution !== undefined && !RESOLUTIONS.has(input.resolution))
         throw invalid('Invalid Studio resolution');
-      const { projectId, expectedRevision } = input;
+      const { projectId, expectedRevision, ...patch } = input;
       if (input.aspectRatio !== undefined) {
         const project = await deps.store.getProject(projectId);
         if (project === null) throw new CreativeStudioStoreError('not_found', 'Studio project not found');
@@ -1532,10 +1487,7 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
       return notify(
         await deps.store.updateProject(
           projectId,
-          (project) => {
-            for (const field of UPDATABLE_PROJECT_FIELDS) applyProjectUpdateField(project, input, field);
-            return project;
-          },
+          (project) => applyStudioProjectFields(project, patch),
           expectedRevision
         )
       );
@@ -2020,79 +1972,11 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
       assertSafeId(input.projectId, 'project id');
       assertSafeId(input.sceneId, 'scene id');
       assertExpectedRevision(input.expectedRevision);
-      if (input.scene !== null) assertScene(input.scene);
+      if (input.scene !== null) assertStudioEditableScene(input.scene);
       return notify(
         await deps.store.updateProject(
           input.projectId,
-          (project) => {
-            const next = structuredClone(project);
-            if (input.scene === null) {
-              if (!Object.hasOwn(next.scenes, input.sceneId))
-                throw new CreativeStudioStoreError('not_found', 'Studio scene not found');
-              const scene = next.scenes[input.sceneId];
-              if (scene.assetIds.length > 0 || scene.jobIds.length > 0) {
-                throw invalid('Studio scene with assets or jobs cannot be removed');
-              }
-              delete next.scenes[input.sceneId];
-              next.sceneOrder = next.sceneOrder.filter((sceneId) => sceneId !== input.sceneId);
-              return reconcilePersistedStudioCuts(next);
-            }
-            if (!Object.hasOwn(next.scenes, input.sceneId) && next.sceneOrder.length >= 24) {
-              throw invalid('Studio project has too many scenes');
-            }
-            if (input.scene.referenceAssetId !== null) {
-              const reference = next.assets[input.scene.referenceAssetId];
-              if (
-                reference === undefined ||
-                reference.projectId !== next.id ||
-                reference.sceneId !== input.sceneId ||
-                reference.mediaKind !== 'image'
-              ) {
-                throw invalid('Studio reference asset does not belong to its scene');
-              }
-            }
-            const current = next.scenes[input.sceneId];
-            if (current === undefined) {
-              next.scenes[input.sceneId] = {
-                id: input.sceneId,
-                ...input.scene,
-                selectedAssetId: null,
-                assetIds: [],
-                jobIds: [],
-                reviewState:
-                  input.scene.title.trim().length > 0 && input.scene.visualPrompt.trim().length > 0 ? 'ready' : 'draft',
-              };
-            } else {
-              const mediaKindChanged = current.mediaKind !== input.scene.mediaKind;
-              if (
-                mediaKindChanged &&
-                current.jobIds.some((jobId) => {
-                  const job = next.jobs[jobId];
-                  return job !== undefined && NONTERMINAL_JOB_STATUSES.has(job.status);
-                })
-              ) {
-                throw new CreativeStudioServiceError('busy');
-              }
-              const selectedAsset = current.selectedAssetId === null ? undefined : next.assets[current.selectedAssetId];
-              const selectedAssetId =
-                mediaKindChanged && selectedAsset?.mediaKind !== input.scene.mediaKind ? null : current.selectedAssetId;
-              next.scenes[input.sceneId] = {
-                ...current,
-                ...input.scene,
-                id: current.id,
-                selectedAssetId,
-                assetIds: [...current.assetIds],
-                jobIds: [...current.jobIds],
-                reviewState: mediaKindChanged
-                  ? input.scene.title.trim().length > 0 && input.scene.visualPrompt.trim().length > 0
-                    ? 'ready'
-                    : 'draft'
-                  : current.reviewState,
-              };
-            }
-            if (!next.sceneOrder.includes(input.sceneId)) next.sceneOrder.push(input.sceneId);
-            return reconcilePersistedStudioCuts(next);
-          },
+          (project) => applyStudioSceneMutation(project, { sceneId: input.sceneId, scene: input.scene }),
           input.expectedRevision
         )
       );
@@ -2113,15 +1997,7 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
       return notify(
         await deps.store.updateProject(
           input.projectId,
-          (project) => {
-            if (
-              project.sceneOrder.length !== input.sceneOrder.length ||
-              input.sceneOrder.some((sceneId) => !Object.hasOwn(project.scenes, sceneId))
-            ) {
-              throw invalid('Studio scene order must be an exact permutation');
-            }
-            return reconcilePersistedStudioCuts({ ...project, sceneOrder: [...input.sceneOrder] });
-          },
+          (project) => applyStudioSceneOrder(project, input.sceneOrder),
           input.expectedRevision
         )
       );
@@ -2135,24 +2011,7 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
       return notify(
         await deps.store.updateProject(
           input.projectId,
-          (project) => {
-            const scene = project.scenes[input.sceneId];
-            const asset = project.assets[input.assetId];
-            if (
-              scene === undefined ||
-              asset === undefined ||
-              !isCanonicalStudioGeneratedTake(asset, project.id, scene)
-            ) {
-              throw invalid('Studio asset does not belong to its selected scene');
-            }
-            return reconcilePersistedStudioCuts({
-              ...project,
-              scenes: {
-                ...project.scenes,
-                [input.sceneId]: { ...scene, selectedAssetId: input.assetId },
-              },
-            });
-          },
+          (project) => applyStudioTakeSelection(project, { sceneId: input.sceneId, assetId: input.assetId }),
           input.expectedRevision
         )
       );

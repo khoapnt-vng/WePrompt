@@ -10,11 +10,7 @@ import { CREATIVE_STUDIO_ENABLED } from '@/common/config/constants';
 import type { IProvider } from '@/common/config/storage';
 import type { StudioRenderProgressEvent } from '@/common/types/project/creativeStudioTypes';
 import { app, protocol } from 'electron';
-import {
-  createCreativeStudioService,
-  type CreativeStudioService,
-  type CreativeStudioServiceDeps,
-} from './creativeStudioService';
+import { createCreativeStudioService, type CreativeStudioService, type CreativeStudioServiceDeps } from './service';
 import { createCreativeStudioStore, type CreativeStudioStore } from './store';
 import { createStudioMediaStore, getAvailableStudioDiskBytes, type StudioMediaStore } from './mediaStore';
 import {

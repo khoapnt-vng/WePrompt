@@ -13,10 +13,7 @@ import {
   type StudioRenderErrorCode,
   type StudioUpdateModelSelectionRequest,
 } from '@/common/types/project/creativeStudioTypes';
-import {
-  CreativeStudioServiceError,
-  type CreativeStudioService,
-} from '@process/services/creative-studio/creativeStudioService';
+import { CreativeStudioServiceError, type CreativeStudioService } from '@process/services/creative-studio/service';
 import { CreativeStudioStoreError } from '@process/services/creative-studio/store';
 import { CreativeStudioMediaError } from '@process/services/creative-studio/mediaStore';
 import { getCreativeStudioRuntime, getCreativeStudioService } from '@process/services/creative-studio/runtime';

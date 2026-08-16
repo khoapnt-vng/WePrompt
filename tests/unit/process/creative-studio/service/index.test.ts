@@ -34,10 +34,7 @@ import type { GenerationProviderAdapter } from '@process/services/creative-studi
 import { STUDIO_E2E_BOUNDARY_SENTINELS } from '@process/services/creative-studio/adapters/e2eFakeAdapter';
 import type { CreativeStudioStore, CreativeStudioStoreError } from '@process/services/creative-studio/store';
 import { createCreativeStudioStore } from '@process/services/creative-studio/store';
-import {
-  createCreativeStudioService,
-  type CreativeStudioService,
-} from '@process/services/creative-studio/creativeStudioService';
+import { createCreativeStudioService, type CreativeStudioService } from '@process/services/creative-studio/service';
 import { createStudioMediaChoiceId } from '@process/services/creative-studio/providerResolver';
 import { canCancelJob } from '@process/services/creative-studio/jobManager';
 import {

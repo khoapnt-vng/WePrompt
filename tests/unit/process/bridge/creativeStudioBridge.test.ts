@@ -109,7 +109,7 @@ import {
   type CreativeStudioBridgeDependencies,
   type CreativeStudioCloseHandshakeDependencies,
 } from '@process/bridge/creativeStudioBridge';
-import { CreativeStudioServiceError } from '@process/services/creative-studio/creativeStudioService';
+import { CreativeStudioServiceError } from '@process/services/creative-studio/service';
 import { StudioJobManagerError } from '@process/services/creative-studio/jobManager';
 import { StudioRenderRunnerError } from '@process/services/creative-studio/renderService';
 

@@ -23,7 +23,7 @@ import type {
   StudioScene,
 } from '@/common/types/project/creativeStudioTypes';
 import { createStudioMediaStore } from '@process/services/creative-studio/mediaStore';
-import { createCreativeStudioService } from '@process/services/creative-studio/creativeStudioService';
+import { createCreativeStudioService } from '@process/services/creative-studio/service';
 import type { StudioStoryboardPlanner } from '@process/services/creative-studio/planning/storyboardPlanner';
 import {
   createStudioRenderRunner,

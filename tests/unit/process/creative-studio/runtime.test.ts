@@ -39,10 +39,7 @@ import type {
 import { createStudioJobManager, type StudioJobManager } from '@process/services/creative-studio/jobManager';
 import { createStudioMediaStore, type StudioMediaStore } from '@process/services/creative-studio/mediaStore';
 import type { StudioProviderResolver } from '@process/services/creative-studio/providerResolver';
-import {
-  createCreativeStudioService,
-  type CreativeStudioService,
-} from '@process/services/creative-studio/creativeStudioService';
+import { createCreativeStudioService, type CreativeStudioService } from '@process/services/creative-studio/service';
 import type { CreativeStudioStore } from '@process/services/creative-studio/store';
 import { createCreativeStudioStore } from '@process/services/creative-studio/store';
 import type { StudioStoryboardPlanner } from '@process/services/creative-studio/planning/storyboardPlanner';
