@@ -2670,12 +2670,14 @@ describe('creative studio project store', () => {
           projectId: project.id,
           previousRevision: project.revision,
           committedRevision: tagged.revision,
+          committedAt: tagged.updatedAt,
           commitTag: 'opaque/director/value',
         },
         {
           projectId: project.id,
           previousRevision: tagged.revision,
           committedRevision: ordinary.revision,
+          committedAt: ordinary.updatedAt,
           commitTag: null,
         },
       ]);

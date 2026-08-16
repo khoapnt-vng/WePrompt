@@ -10,8 +10,25 @@ import { CREATIVE_STUDIO_ENABLED } from '@/common/config/constants';
 import type { IProvider } from '@/common/config/storage';
 import type { StudioRenderProgressEvent } from '@/common/types/project/creativeStudioTypes';
 import { app, protocol } from 'electron';
-import { createCreativeStudioService, type CreativeStudioService, type CreativeStudioServiceDeps } from './service';
-import { createCreativeStudioStore, type CreativeStudioStore } from './store';
+import {
+  createCreativeStudioService,
+  createStudioDirectorCommandProcessor,
+  createStudioDirectorCommandService,
+  createStudioDirectorCommitTracker,
+  type CreativeStudioService,
+  type CreativeStudioServiceDeps,
+  type StudioDirectorCommandProcessor,
+  type StudioDirectorCommandProcessorDeps,
+  type StudioDirectorCommandService,
+  type StudioDirectorCommandServiceDeps,
+  type StudioDirectorCommitTracker,
+} from './service';
+import { createCreativeStudioStore, type CreativeStudioStore, type StudioProjectCommitObserver } from './store';
+import {
+  createStudioDirectorCommandMailbox,
+  type StudioDirectorCommandMailbox,
+  type StudioDirectorCommandMailboxDeps,
+} from './service/directorCommandMailbox';
 import { createStudioMediaStore, getAvailableStudioDiskBytes, type StudioMediaStore } from './mediaStore';
 import {
   createStudioProviderResolver,
@@ -50,7 +67,7 @@ type RuntimeServiceDeps = CreativeStudioServiceDeps & {
 };
 
 export type CreativeStudioRuntimeFactories = {
-  createStore(input: { rootDir: string }): CreativeStudioStore;
+  createStore(input: { rootDir: string; onProjectCommitted: StudioProjectCommitObserver }): CreativeStudioStore;
   createMediaStore(input: { store: CreativeStudioStore }): StudioMediaStore;
   createAdapters(input: { rootDir: string }): GenerationProviderAdapterRegistry;
   createPlanner(input: Pick<StudioStoryboardPlannerDeps, 'listProviders'>): StudioStoryboardPlanner;
@@ -58,6 +75,10 @@ export type CreativeStudioRuntimeFactories = {
   createJobManager(input: Parameters<typeof createStudioJobManager>[0]): StudioJobManager;
   createService(input: RuntimeServiceDeps): CreativeStudioService;
   createE2EFakeBundle(input: StudioE2EFakeBundleDeps): StudioE2EFakeBundle;
+  createDirectorCommitTracker?(): StudioDirectorCommitTracker;
+  createDirectorCommandMailbox?(input: StudioDirectorCommandMailboxDeps): StudioDirectorCommandMailbox;
+  createDirectorCommandService?(input: StudioDirectorCommandServiceDeps): StudioDirectorCommandService;
+  createDirectorCommandProcessor?(input: StudioDirectorCommandProcessorDeps): StudioDirectorCommandProcessor;
 };
 
 export type CreativeStudioRuntimeDeps = {
@@ -82,13 +103,17 @@ export type CreativeStudioRuntime = {
   readonly jobManager: StudioJobManager;
   readonly renderRunner: StudioRenderRunner;
   readonly service: CreativeStudioService;
+  readonly directorCommitTracker: StudioDirectorCommitTracker;
+  readonly directorCommandMailbox: StudioDirectorCommandMailbox;
+  readonly directorCommandService: StudioDirectorCommandService;
+  readonly directorCommandProcessor: StudioDirectorCommandProcessor;
   start(): Promise<void>;
   onBackendReady(): Promise<void>;
   dispose(): Promise<void>;
 };
 
 const defaultFactories: CreativeStudioRuntimeFactories = {
-  createStore: ({ rootDir }) => createCreativeStudioStore({ rootDir }),
+  createStore: ({ rootDir, onProjectCommitted }) => createCreativeStudioStore({ rootDir, onProjectCommitted }),
   createMediaStore: ({ store }) =>
     createStudioMediaStore({
       store,
@@ -103,6 +128,10 @@ const defaultFactories: CreativeStudioRuntimeFactories = {
   createJobManager: createStudioJobManager,
   createService: createCreativeStudioService,
   createE2EFakeBundle: createStudioE2EFakeBundle,
+  createDirectorCommitTracker: createStudioDirectorCommitTracker,
+  createDirectorCommandMailbox: createStudioDirectorCommandMailbox,
+  createDirectorCommandService: createStudioDirectorCommandService,
+  createDirectorCommandProcessor: createStudioDirectorCommandProcessor,
 };
 
 /** E2E generation is never enabled by a broad test mode or Studio flag alone. */
@@ -125,6 +154,7 @@ const mergeProviders = (
 /** Builds an isolated main-process runtime graph; callers supply every external boundary. */
 export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): CreativeStudioRuntime => {
   const factories = deps.factories ?? defaultFactories;
+  const directorCommitTracker = (factories.createDirectorCommitTracker ?? createStudioDirectorCommitTracker)();
   const fakeBundle = shouldEnableStudioE2EFakeAdapter(deps.environment ?? process.env, {
     isPackaged: deps.isPackaged,
   })
@@ -135,7 +165,11 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
         catalogProfile: 'explicit-selection',
       })
     : null;
-  const store = factories.createStore({ rootDir: deps.rootDir });
+  const store = factories.createStore({ rootDir: deps.rootDir, onProjectCommitted: directorCommitTracker.observe });
+  const directorCommandMailbox = (factories.createDirectorCommandMailbox ?? createStudioDirectorCommandMailbox)({
+    rootDir: deps.rootDir,
+    store,
+  });
   const mediaStore = factories.createMediaStore({ store });
   const baseAdapters = factories.createAdapters({ rootDir: deps.rootDir });
   const adapterRegistry: GenerationProviderAdapterRegistry = fakeBundle
@@ -170,6 +204,17 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
     jobManager,
     storyboardPlanner,
     getStudioServerScriptPath: () => getBuiltinMcpScriptPath(BUILTIN_STUDIO_SCRIPT),
+    ensureDirectorCommandMailbox: directorCommandMailbox.ensure,
+    onProjectUpdated: deps.onProjectUpdated,
+  });
+  const directorCommandService = (factories.createDirectorCommandService ?? createStudioDirectorCommandService)({
+    store,
+  });
+  const directorCommandProcessor = (factories.createDirectorCommandProcessor ?? createStudioDirectorCommandProcessor)({
+    store,
+    mailbox: directorCommandMailbox,
+    service: directorCommandService,
+    tracker: directorCommitTracker,
     onProjectUpdated: deps.onProjectUpdated,
   });
   const renderRunner = createStudioRenderRunner({
@@ -184,26 +229,64 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
   let protocolInstalled = false;
   let protocolInstallation: CreativeStudioProtocolInstallation | null = null;
   let disposeProposalWatcher: (() => Promise<void>) | null = null;
+  let directorProcessorStopPromise: Promise<void> | null = null;
   let disposed = false;
   const disabledLifecycle = Promise.resolve();
+
+  const stopDirectorProcessor = (): Promise<void> => {
+    directorProcessorStopPromise ??= directorCommandProcessor.stop();
+    return directorProcessorStopPromise;
+  };
 
   const start = (): Promise<void> => {
     if (!deps.enabled) return disabledLifecycle;
     startPromise ??= (async () => {
-      if (disposed) return;
-      await mediaStore.cleanupOrphanParts();
-      if (disposed) return;
-      await store.reapAbandonedProposals();
-      if (disposed) return;
-      disposeProposalWatcher = await store.watchProposals(deps.onProposalUpdated);
-      if (disposed) {
-        await disposeProposalWatcher();
-        disposeProposalWatcher = null;
-        return;
+      let processorStartAttempted = false;
+      try {
+        if (disposed) return;
+        await mediaStore.cleanupOrphanParts();
+        if (disposed) return;
+        await store.reapAbandonedProposals();
+        if (disposed) return;
+        disposeProposalWatcher = await store.watchProposals(deps.onProposalUpdated);
+        if (disposed) {
+          await disposeProposalWatcher();
+          disposeProposalWatcher = null;
+          return;
+        }
+        processorStartAttempted = true;
+        await directorCommandProcessor.start();
+        if (disposed) {
+          await stopDirectorProcessor();
+          if (disposeProposalWatcher !== null) await disposeProposalWatcher();
+          disposeProposalWatcher = null;
+          return;
+        }
+        protocolInstallAttempted = true;
+        protocolInstallation = await deps.protocol.install(mediaStore);
+        protocolInstalled = true;
+      } catch (error) {
+        const rollbackErrors: unknown[] = [];
+        if (processorStartAttempted) {
+          try {
+            await stopDirectorProcessor();
+          } catch (rollbackError) {
+            rollbackErrors.push(rollbackError);
+          }
+        }
+        if (disposeProposalWatcher !== null) {
+          try {
+            await disposeProposalWatcher();
+          } catch (rollbackError) {
+            rollbackErrors.push(rollbackError);
+          }
+          disposeProposalWatcher = null;
+        }
+        if (rollbackErrors.length > 0) {
+          throw new AggregateError([error, ...rollbackErrors], 'Creative Studio runtime startup rollback failed');
+        }
+        throw error;
       }
-      protocolInstallAttempted = true;
-      protocolInstallation = await deps.protocol.install(mediaStore);
-      protocolInstalled = true;
     })();
     return startPromise;
   };
@@ -221,6 +304,11 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
     disposePromise ??= (async () => {
       disposed = true;
       const errors: unknown[] = [];
+      try {
+        await stopDirectorProcessor();
+      } catch (error) {
+        errors.push(error);
+      }
       if (disposeProposalWatcher !== null) {
         try {
           await disposeProposalWatcher();
@@ -282,6 +370,10 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
     jobManager,
     renderRunner,
     service,
+    directorCommitTracker,
+    directorCommandMailbox,
+    directorCommandService,
+    directorCommandProcessor,
     start,
     onBackendReady,
     dispose,

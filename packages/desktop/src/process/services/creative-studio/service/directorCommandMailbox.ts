@@ -552,12 +552,23 @@ export const createStudioDirectorCommandMailbox = (
       const directories = await directoriesFor(projectId, false);
       if (directories === null) return;
       const canonicalRoot = await canonicalRootPromise;
-      if ((await exactReceiptFrom(canonicalRoot, directories, projectId, commandId)) === null) return;
+      const pendingFile = path.join(directories.pending, `${commandId}.json`);
+      const slotFile = path.join(directories.slots, '0.slot');
+      const receipt = await exactReceiptFrom(canonicalRoot, directories, projectId, commandId);
       const slot = await readSlot(canonicalRoot, directories, now());
-      if (slot.status === 'invalid') throw storageError();
-      if (slot.status === 'valid' && slot.slot.commandId !== commandId) return;
-      await removeRecord(canonicalRoot, path.join(directories.pending, `${commandId}.json`));
-      if (slot.status === 'valid') await removeRecord(canonicalRoot, path.join(directories.slots, '0.slot'));
+      if (receipt === null) {
+        const attributableSlot =
+          (slot.status === 'valid' && slot.slot.commandId === commandId) ||
+          (slot.status === 'invalid' && slot.commandId === commandId);
+        if ((await pathExists(pendingFile)) || attributableSlot) throw storageError();
+        return;
+      }
+      if (slot.status === 'valid' && slot.slot.commandId !== commandId) throw storageError();
+      if (slot.status === 'invalid' && slot.commandId !== commandId) throw storageError();
+      await removeRecord(canonicalRoot, pendingFile);
+      if (slot.status !== 'absent') await removeRecord(canonicalRoot, slotFile);
+      if (await pathExists(pendingFile)) throw storageError();
+      if ((await readSlot(canonicalRoot, directories, now())).status !== 'absent') throw storageError();
     },
 
     async listPendingPage(cursor: string | null, limit: number): Promise<StudioDirectorCommandPage> {
@@ -566,7 +577,7 @@ export const createStudioDirectorCommandMailbox = (
         cursor,
         limit,
         directory: 'pending',
-        tolerateProjectErrors: false,
+        tolerateProjectErrors: true,
         createIfWhollyAbsent: false,
       });
     },

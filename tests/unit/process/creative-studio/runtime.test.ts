@@ -44,6 +44,12 @@ import type { CreativeStudioStore } from '@process/services/creative-studio/stor
 import { createCreativeStudioStore } from '@process/services/creative-studio/store';
 import type { StudioStoryboardPlanner } from '@process/services/creative-studio/planning/storyboardPlanner';
 import { createStudioProviderResolver } from '@process/services/creative-studio/providerResolver';
+import type { StudioDirectorCommandMailbox } from '@process/services/creative-studio/service/directorCommandMailbox';
+import type { StudioDirectorCommandService } from '@process/services/creative-studio/service/directorCommandService';
+import type {
+  StudioDirectorCommandProcessor,
+  StudioDirectorCommitTracker,
+} from '@process/services/creative-studio/service/directorCommandProcessor';
 
 const temporaryDirectories: string[] = [];
 
@@ -65,6 +71,7 @@ type RuntimeHarness = {
   runtime: ReturnType<typeof createCreativeStudioRuntime>;
   calls: string[];
   captures: {
+    storeInput?: Parameters<CreativeStudioRuntimeFactories['createStore']>[0];
     mediaStoreInput?: { store: CreativeStudioStore };
     resolverInput?: {
       listProviders: () => Promise<IProvider[]>;
@@ -87,11 +94,18 @@ type RuntimeHarness = {
       adapterRegistry: GenerationProviderAdapterRegistry;
       jobManager: StudioJobManager;
       storyboardPlanner: StudioStoryboardPlanner;
+      ensureDirectorCommandMailbox?: (projectId: string) => Promise<void>;
     };
+    mailboxInput?: Parameters<NonNullable<CreativeStudioRuntimeFactories['createDirectorCommandMailbox']>>[0];
+    directorServiceInput?: Parameters<NonNullable<CreativeStudioRuntimeFactories['createDirectorCommandService']>>[0];
+    processorInput?: Parameters<NonNullable<CreativeStudioRuntimeFactories['createDirectorCommandProcessor']>>[0];
   };
   resumePendingJobs: ReturnType<typeof vi.fn<() => Promise<void>>>;
   disposeJobs: ReturnType<typeof vi.fn<() => Promise<void>>>;
   disposePlanner: ReturnType<typeof vi.fn<() => Promise<void>>>;
+  startDirector: ReturnType<typeof vi.fn<() => Promise<void>>>;
+  stopDirector: ReturnType<typeof vi.fn<() => Promise<void>>>;
+  ensureMailbox: ReturnType<typeof vi.fn<(projectId: string) => Promise<void>>>;
   uninstallProtocol: ReturnType<
     typeof vi.fn<(installation: CreativeStudioProtocolInstallation | null) => Promise<void>>
   >;
@@ -103,6 +117,8 @@ const createHarness = (
     resumePendingJobs?: () => Promise<void>;
     disposeJobs?: () => Promise<void>;
     disposePlanner?: () => Promise<void>;
+    startDirector?: () => Promise<void>;
+    stopDirector?: () => Promise<void>;
     installProtocol?: (
       resolver: StudioMediaStore
     ) => Promise<CreativeStudioProtocolInstallation> | CreativeStudioProtocolInstallation;
@@ -142,6 +158,25 @@ const createHarness = (
     resumePendingJobs,
     dispose: disposeJobs,
   } as unknown as StudioJobManager;
+  const tracker = {
+    expect: vi.fn(),
+    observe: vi.fn(),
+    materialize: vi.fn(),
+    pendingReceipt: vi.fn(() => null),
+    clear: vi.fn(),
+  } as unknown as StudioDirectorCommitTracker;
+  const ensureMailbox = vi.fn<(projectId: string) => Promise<void>>(async () => undefined);
+  const mailbox = {
+    ensure: ensureMailbox,
+  } as unknown as StudioDirectorCommandMailbox;
+  const directorService = {} as StudioDirectorCommandService;
+  const startDirector = vi.fn(overrides.startDirector ?? (async () => calls.push('start-director')));
+  const stopDirector = vi.fn(overrides.stopDirector ?? (async () => calls.push('stop-director')));
+  const directorProcessor = {
+    start: startDirector,
+    trigger: vi.fn(),
+    stop: stopDirector,
+  } as StudioDirectorCommandProcessor;
   const service = {} as CreativeStudioService;
   const protocolInstallation: CreativeStudioProtocolInstallation = {
     dispose: vi.fn(async () => {}),
@@ -155,7 +190,10 @@ const createHarness = (
   );
 
   const factories: CreativeStudioRuntimeFactories = {
-    createStore: () => store,
+    createStore: (input) => {
+      captures.storeInput = input;
+      return store;
+    },
     createMediaStore: (input) => {
       captures.mediaStoreInput = input;
       return mediaStore;
@@ -176,6 +214,19 @@ const createHarness = (
     createService: (input) => {
       captures.serviceInput = input;
       return service;
+    },
+    createDirectorCommitTracker: () => tracker,
+    createDirectorCommandMailbox: (input) => {
+      captures.mailboxInput = input;
+      return mailbox;
+    },
+    createDirectorCommandService: (input) => {
+      captures.directorServiceInput = input;
+      return directorService;
+    },
+    createDirectorCommandProcessor: (input) => {
+      captures.processorInput = input;
+      return directorProcessor;
     },
     createE2EFakeBundle:
       overrides.createE2EFakeBundle ??
@@ -206,7 +257,18 @@ const createHarness = (
     },
   });
 
-  return { runtime, calls, captures, resumePendingJobs, disposeJobs, disposePlanner, uninstallProtocol };
+  return {
+    runtime,
+    calls,
+    captures,
+    resumePendingJobs,
+    disposeJobs,
+    disposePlanner,
+    startDirector,
+    stopDirector,
+    ensureMailbox,
+    uninstallProtocol,
+  };
 };
 
 const interruptedScene: StudioScene = {
@@ -402,8 +464,9 @@ describe('Creative Studio runtime identity and lifecycle', () => {
   });
 
   it('assembles one shared store, media store, resolver, adapter registry, manager, and service graph', async () => {
-    const { runtime, captures } = createHarness();
+    const { runtime, captures, ensureMailbox } = createHarness();
 
+    expect(captures.storeInput?.onProjectCommitted).toBe(runtime.directorCommitTracker.observe);
     expect(captures.mediaStoreInput?.store).toBe(runtime.store);
     expect(captures.managerInput).toMatchObject({
       store: runtime.store,
@@ -418,17 +481,94 @@ describe('Creative Studio runtime identity and lifecycle', () => {
       adapterRegistry: runtime.adapterRegistry,
       jobManager: runtime.jobManager,
       storyboardPlanner: runtime.storyboardPlanner,
+      ensureDirectorCommandMailbox: expect.any(Function),
     });
+    expect(captures.mailboxInput).toMatchObject({ rootDir: '/tmp/creative-studio-runtime-test', store: runtime.store });
+    expect(captures.directorServiceInput).toEqual({ store: runtime.store });
+    expect(captures.processorInput).toMatchObject({
+      store: runtime.store,
+      mailbox: runtime.directorCommandMailbox,
+      service: runtime.directorCommandService,
+      tracker: runtime.directorCommitTracker,
+    });
+    const ensureResult = captures.serviceInput?.ensureDirectorCommandMailbox?.('project_opened');
+    expect(ensureMailbox).toHaveBeenCalledWith('project_opened');
+    await ensureResult;
     await expect(captures.managerInput?.listProviders()).resolves.toEqual([provider()]);
     await expect(captures.plannerInput?.listProviders()).resolves.toEqual([provider()]);
   });
 
-  it('cleans stale parts before installing the protocol and starts only once', async () => {
+  it('awaits mailbox ensure before returning a newly opened project MCP descriptor', async () => {
+    const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-runtime-mailbox-ensure-'));
+    temporaryDirectories.push(rootDir);
+    const store = createCreativeStudioStore({ rootDir, createId: () => 'project_opened' });
+    const project = await store.createProject({
+      name: 'Opened project',
+      brief: '',
+      aspectRatio: '16:9',
+      targetDurationSeconds: 10,
+      resolution: '1080p',
+    });
+    let releaseEnsure!: () => void;
+    const ensureBlocked = new Promise<void>((resolve) => {
+      releaseEnsure = resolve;
+    });
+    const ensureDirectorCommandMailbox = vi.fn(async () => ensureBlocked);
+    const resolveProposalPaths = vi.spyOn(store, 'resolveProposalPaths');
+    const service = createCreativeStudioService({
+      store,
+      onProjectUpdated: vi.fn(),
+      storyboardPlanner: {
+        listModels: async () => [],
+        dispose: async () => undefined,
+      } as unknown as StudioStoryboardPlanner,
+      providerResolver: {
+        listGenerationRoutes: async () => ({ routes: [], diagnostics: [], generationCatalogVersion: 'empty' }),
+      } as unknown as StudioProviderResolver,
+      getStudioServerScriptPath: () => '/tmp/studio-server.cjs',
+      ensureDirectorCommandMailbox,
+    });
+
+    const descriptor = service.getBriefSessionServer({ projectId: project.id });
+    await vi.waitFor(() => expect(ensureDirectorCommandMailbox).toHaveBeenCalledWith(project.id));
+    expect(resolveProposalPaths).not.toHaveBeenCalled();
+    releaseEnsure();
+
+    await expect(descriptor).resolves.toMatchObject({ id: `studio-brief-${project.id}` });
+    expect(resolveProposalPaths).toHaveBeenCalledOnce();
+  });
+
+  it('cleans stale parts, starts the command processor before protocol availability, and starts only once', async () => {
     const { runtime, calls } = createHarness();
 
     await Promise.all([runtime.start(), runtime.start()]);
 
-    expect(calls).toEqual(['cleanup-parts', 'install-protocol']);
+    expect(calls).toEqual(['cleanup-parts', 'start-director', 'install-protocol']);
+  });
+
+  it('rolls back the command processor and proposal watcher when a later protocol start fails', async () => {
+    const disposeProposalWatcher = vi.fn(async () => undefined);
+    const store = {
+      listConnections: async () => [],
+      reapAbandonedProposals: async () => undefined,
+      watchProposals: async () => disposeProposalWatcher,
+    } as unknown as CreativeStudioStore;
+    const { runtime, startDirector, stopDirector } = createHarness(
+      {},
+      {
+        store,
+        installProtocol: async () => {
+          throw new Error('protocol start failed');
+        },
+      }
+    );
+
+    await expect(runtime.start()).rejects.toThrow('protocol start failed');
+
+    expect(startDirector).toHaveBeenCalledOnce();
+    expect(stopDirector).toHaveBeenCalledOnce();
+    expect(disposeProposalWatcher).toHaveBeenCalledOnce();
+    await runtime.dispose().catch((): undefined => undefined);
   });
 
   it('does no startup or pending-job recovery work while the release gate is disabled', async () => {
@@ -488,7 +628,7 @@ describe('Creative Studio runtime identity and lifecycle', () => {
     const lateReady = runtime.onBackendReady();
     await resumeStarted;
 
-    expect(calls).toEqual(['cleanup-parts', 'install-protocol', 'resume-jobs-start']);
+    expect(calls).toEqual(['cleanup-parts', 'start-director', 'install-protocol', 'resume-jobs-start']);
     expect(resumePendingJobs).toHaveBeenCalledTimes(1);
 
     releaseResume?.();

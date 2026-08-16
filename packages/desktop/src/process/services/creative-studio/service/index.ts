@@ -127,6 +127,13 @@ export {
   type StudioDirectorCommandServiceDeps,
   type StudioDirectorCommitAttribution,
 } from './directorCommandService';
+export {
+  createStudioDirectorCommandProcessor,
+  createStudioDirectorCommitTracker,
+  type StudioDirectorCommandProcessor,
+  type StudioDirectorCommandProcessorDeps,
+  type StudioDirectorCommitTracker,
+} from './directorCommandProcessor';
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const ASPECT_RATIOS = new Set(['16:9', '9:16', '1:1', '4:3', '3:4']);
@@ -241,6 +248,7 @@ export type CreativeStudioServiceDeps = {
   createRuleId?: () => string;
   createConnectionId?: () => string;
   getStudioServerScriptPath?: () => string;
+  ensureDirectorCommandMailbox?: (projectId: string) => Promise<void>;
   providerResolver?: StudioProviderResolver;
   validateConnection?: (input: StudioInternalConnectionRequest) => Promise<StudioConnectionBinding>;
   listProviders?: () => Promise<IProvider[]>;
@@ -1294,6 +1302,7 @@ export const createCreativeStudioService = (deps: CreativeStudioServiceDeps): Cr
     async getBriefSessionServer(input: StudioProjectRequest): Promise<ISessionMcpServer> {
       assertSafeId(input.projectId, 'project id');
       if (!deps.getStudioServerScriptPath) throw new Error('Creative Studio MCP script path is unavailable');
+      await deps.ensureDirectorCommandMailbox?.(input.projectId);
       const paths = await deps.store.resolveProposalPaths(input.projectId);
       const project = await deps.store.getProject(input.projectId);
       if (project === null) throw new CreativeStudioStoreError('not_found', 'Studio project not found');

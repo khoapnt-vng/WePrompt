@@ -273,6 +273,7 @@ export type StudioProjectCommitFacts = Readonly<{
   projectId: string;
   previousRevision: number;
   committedRevision: number;
+  committedAt: string;
   commitTag: string | null;
 }>;
 
@@ -2099,6 +2100,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
         projectId,
         previousRevision: current.revision,
         committedRevision: next.revision,
+        committedAt: next.updatedAt,
         commitTag,
       })
     );

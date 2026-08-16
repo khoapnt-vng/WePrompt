@@ -297,7 +297,7 @@ describe('Studio Director command mailbox', () => {
     const receipt = makeReceipt(projectId, 'command_1');
     const directories = commandDirectories(rootDir, projectId);
 
-    await mailbox.finish(projectId, 'command_1');
+    await expect(mailbox.finish(projectId, 'command_1')).rejects.toMatchObject({ code: 'storage_error' });
     expect(existsSync(path.join(directories.pending, 'command_1.json'))).toBe(true);
     expect(existsSync(path.join(directories.slots, '0.slot'))).toBe(true);
 
@@ -317,6 +317,53 @@ describe('Studio Director command mailbox', () => {
     expect(existsSync(path.join(directories.pending, 'command_1.json'))).toBe(false);
     expect(existsSync(path.join(directories.slots, '0.slot'))).toBe(false);
     expect(await mailbox.readReceipt(projectId, 'command_1')).toEqual(receipt);
+  });
+
+  it('fails cleanup closed when a valid slot belongs to another command', async () => {
+    await mailbox.ensure(projectId);
+    await writeBundle(rootDir, projectId, 'command_1');
+    const directories = commandDirectories(rootDir, projectId);
+    await mailbox.writeReceipt(projectId, makeReceipt(projectId, 'command_1'));
+    await nodeFs.writeFile(path.join(directories.slots, '0.slot'), JSON.stringify(makeSlot('command_other')));
+
+    await expect(mailbox.finish(projectId, 'command_1')).rejects.toMatchObject({ code: 'storage_error' });
+
+    expect(existsSync(path.join(directories.pending, 'command_1.json'))).toBe(true);
+    expect(JSON.parse(await nodeFs.readFile(path.join(directories.slots, '0.slot'), 'utf8'))).toMatchObject({
+      commandId: 'command_other',
+    });
+  });
+
+  it('removes attributable invalid slot residue only when its safe command identity matches', async () => {
+    await mailbox.ensure(projectId);
+    await writeBundle(rootDir, projectId, 'command_1');
+    const directories = commandDirectories(rootDir, projectId);
+    await mailbox.writeReceipt(projectId, makeReceipt(projectId, 'command_1'));
+    await nodeFs.writeFile(
+      path.join(directories.slots, '0.slot'),
+      JSON.stringify({ commandId: 'command_1', deadlineAt: 'not-a-timestamp' })
+    );
+
+    await expect(mailbox.finish(projectId, 'command_1')).resolves.toBeUndefined();
+
+    expect(existsSync(path.join(directories.pending, 'command_1.json'))).toBe(false);
+    expect(existsSync(path.join(directories.slots, '0.slot'))).toBe(false);
+  });
+
+  it.each([
+    ['no safe identity', { commandId: '../unsafe', deadlineAt: 'not-a-timestamp' }],
+    ['a different safe identity', { commandId: 'command_other', deadlineAt: 'not-a-timestamp' }],
+  ])('retains pending and invalid slot residue with %s', async (_label, invalidSlot) => {
+    await mailbox.ensure(projectId);
+    await writeBundle(rootDir, projectId, 'command_1');
+    const directories = commandDirectories(rootDir, projectId);
+    await mailbox.writeReceipt(projectId, makeReceipt(projectId, 'command_1'));
+    await nodeFs.writeFile(path.join(directories.slots, '0.slot'), JSON.stringify(invalidSlot));
+
+    await expect(mailbox.finish(projectId, 'command_1')).rejects.toMatchObject({ code: 'storage_error' });
+
+    expect(existsSync(path.join(directories.pending, 'command_1.json'))).toBe(true);
+    expect(existsSync(path.join(directories.slots, '0.slot'))).toBe(true);
   });
 
   it('never finishes from a final receipt whose post-link publication sync did not commit', async () => {
@@ -670,10 +717,60 @@ describe('Studio Director command mailbox', () => {
       now: () => NOW,
       waitMs: WAIT_MS,
     });
-    await expect(failingMailbox.listPendingPage(null, 64)).rejects.toMatchObject({ code: 'storage_error' });
+    await expect(failingMailbox.listPendingPage(null, 64)).resolves.toEqual(
+      expect.objectContaining({ items: expect.any(Array) })
+    );
+    const strictFailure = observeTraversalFileSystem({ failFirstReadIn: `${path.sep}commands${path.sep}pending` });
+    const strictMailbox = createStudioDirectorCommandMailbox({
+      rootDir,
+      store,
+      fs: strictFailure.fs,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+    await expect(strictMailbox.snapshotPendingPage(null, 64)).rejects.toMatchObject({ code: 'storage_error' });
     for (const opened of failing.opens) {
       expect(failing.closes.filter((id) => id === opened.id)).toHaveLength(1);
     }
+    for (const opened of strictFailure.opens) {
+      expect(strictFailure.closes.filter((id) => id === opened.id)).toHaveLength(1);
+    }
+    await strictMailbox.dispose();
+  });
+
+  it('advances a live cursor past a persistently failing early project and reaches later work', async () => {
+    const laterProjectId = (await store.createProject(makeInput('Later live project'))).id;
+    await mailbox.ensure(projectId);
+    await mailbox.ensure(laterProjectId);
+    await nodeFs.writeFile(path.join(commandDirectories(rootDir, laterProjectId).pending, 'command_later.json'), '{}');
+    const failingDirectory = path.join(await nodeFs.realpath(rootDir), projectId, 'commands', 'pending');
+    const persistentFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property !== 'opendir') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.opendir>) => {
+          if (String(args[0]) === failingDirectory) throw new Error('persistent early project failure');
+          return nodeFs.opendir(...args);
+        };
+      },
+    }) as typeof nodeFs;
+    const fairMailbox = createStudioDirectorCommandMailbox({
+      rootDir,
+      store,
+      fs: persistentFs,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+    const observed: string[] = [];
+    let cursor: string | null = null;
+    do {
+      // eslint-disable-next-line no-await-in-loop
+      const page = await fairMailbox.listPendingPage(cursor, 1);
+      observed.push(...page.items.map((item) => `${item.projectId}:${item.commandId}`));
+      cursor = page.nextCursor;
+    } while (cursor !== null);
+
+    expect(observed).toContain(`${laterProjectId}:command_later`);
+    await fairMailbox.dispose();
   });
 
   it('bounds pending directory enumeration on first and later composite-cursor pages', async () => {
