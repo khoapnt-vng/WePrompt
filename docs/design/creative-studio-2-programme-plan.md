@@ -9,6 +9,19 @@ Read §1 and §6 if you read nothing else.
 
 ---
 
+## Current Phase 2 status
+
+Phase 2A is the Level 1 happy path over the existing flat storyboard. Phase 2B broadens that
+happy path with Section -> Clip -> Take and Table/Board review. Phase 2C hardens Level 1 with
+versioned recovery/checkpointing and exactly-once attribution. 2A/2B are not full or hardened
+Level 1. Their direct edits are temporarily not generally undoable; StudioRuleListUndo remains
+rule-list-specific and unchanged. Paid authority remains Phase 3b.
+
+`set_brief` is the sharpest temporary recovery gap. CAS and receipts prevent stale/ambiguous writes
+but are not undo.
+
+---
+
 ## 1. The headline: engineering is not the critical path any more
 
 Phase 1's plan estimated its remaining Tasks 4–13 at **20–26 engineer-days**. Three of those ten
