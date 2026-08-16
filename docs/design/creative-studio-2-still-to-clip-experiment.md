@@ -184,3 +184,38 @@ or physics. The successful inline first-frame control disproves the claim that t
 requires an HTTPS publisher; it does not transfer that conclusion to BytePlus. It also does not prove
 multi-image conditioning, which remains scheduled for Task 8.5 before Task 9 / production nonzero
 capability.
+
+## 2026-08-16 Task 8.5 result — two-image conditioning admitted on one exact still route
+
+The admission proof is the successful, unretried `submitScenes` still job
+`10d2089c-b2e8-47e3-a701-cd5ac321dd8f`, scene `b4e0fa40-1b60-40d3-8f55-9ee4f2c5b92b`, project
+`dbf35861_0614_4cb3_9465_0baee3304e79`. Its exact route was provider `d1ff983b`, adapter
+`weprompt-image-v1`, `base_url=https://openrouter.ai/api/v1`, UI integration **Image API**, model
+`google/gemini-3-pro-image`, and a maximum conditioning count of **2**. The project frame was 16:9 /
+720p. This app uses the chat-completions image path; it does **not** establish support for OpenRouter's
+dedicated `/api/v1/images` route. Provider image size was not explicitly requested.
+
+The immutable ordered inputs were Cast `84fc7da2_f2a3_4394_99e5_33668a73a4c0` (`Screenshot 2026-08-16
+at 07.01.17`), then Look `da00becc_295a_4f33_87a9_d54046374aab` (`Screenshot 2026-08-16 at 07.01.52`).
+The unconfounded prompt was:
+
+> Preserve the exact identity, facial features, and hair of conditioning image 1. Show her wearing a
+> red-and-white striped scarf and dark coat, holding a brass telescope on a wet street at night. Use
+> conditioning image 2 solely to determine the visual treatment; do not borrow its depicted content.
+
+Output asset `6d1bf139_7107_495e_96b5_c95b615ef5a0` is a 1376x768 JPEG, 739,781 bytes, SHA-256
+`9167feca52d40b6f9a6afce1f337c67ca9e455e349598b52fd78be42e0e34fb3`.
+
+The independent, predeclared verdict was **PASS narrowly**. The Cast's elongated oval face, high arched
+brows, wide-set brown eyes, narrow straight nose, mouth/cheek structure, and smile were consistent;
+wet hair altered styling but not identity. The Look's amber-versus-deep-cyan/teal split lighting and
+warm face highlights were visible, as were its saturated low-key color, sculpted high-contrast
+rendering, shallow depth, luminous background separation, and polished portrait treatment—none named
+in the prompt. No Look people, headphones, or outfits were copied.
+
+The wet night street still encourages colored reflections, bokeh, and contrast, so attribution rests
+on the combined palette, facial toning, saturation, and depth; flowers and dual-subject staging did not
+transfer. This admits this exact app route and count, not causal attribution of every pixel. Job
+`2f068cd4-439e-47c9-97ed-3d2c94a576f9` remains confounded preliminary evidence because its prompt also
+named Look attributes, not the admission proof. This makes no video claim and does not generalize to
+other providers, adapters, aliases, integrations, or image API routes.

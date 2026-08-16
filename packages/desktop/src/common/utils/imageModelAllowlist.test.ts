@@ -48,7 +48,15 @@ describe('isImageGenSupported', () => {
 });
 
 describe('getImageModelMaxConditioningImages', () => {
+  it('admits the evidence-backed OpenRouter Gemini 3 Pro Image route exactly', () => {
+    expect(
+      getImageModelMaxConditioningImages({ base_url: 'https://openrouter.ai/api/v1' }, 'google/gemini-3-pro-image')
+    ).toBe(2);
+  });
+
   it.each([
+    [{ base_url: 'https://openrouter.ai/api/v1/' }, 'google/gemini-3-pro-image'],
+    [{ base_url: 'https://openrouter.ai/api/v1' }, 'google/gemini-3-pro-image-preview'],
     [{ base_url: VNG_BASE_URL, platform: 'openai' }, 'openai/gpt-image-1'],
     [{ platform: 'gemini' }, 'gemini-2.5-flash-image-preview'],
     [{ base_url: 'https://openrouter.ai/api/v1' }, 'google/gemini-2.5-flash-image-preview'],
