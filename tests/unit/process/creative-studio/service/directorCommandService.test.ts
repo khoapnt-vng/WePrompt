@@ -160,6 +160,16 @@ describe('Studio Director command service', () => {
       project.revision
     );
 
+  const writeLegacySceneCount = async (sceneCount: number): Promise<StudioProject> => {
+    const file = path.join(rootDir, project.id, 'project.json');
+    const legacy = JSON.parse(await readFile(file, 'utf8')) as StudioProject;
+    const sceneOrder = Array.from({ length: sceneCount }, (_, index) => `scene_${index + 1}`);
+    legacy.sceneOrder = sceneOrder;
+    legacy.scenes = Object.fromEntries(sceneOrder.map((sceneId) => [sceneId, makeScene(sceneId)]));
+    await writeFile(file, JSON.stringify(legacy), 'utf8');
+    return legacy;
+  };
+
   const apply = (current: StudioProject, operations: StudioDirectorOperationV1[], commandId = 'command_1') =>
     service.apply(makeCommand(current, operations, { commandId }), APPLY_CUTOFF_MS, {
       commitTag: commandId,
@@ -443,23 +453,66 @@ describe('Studio Director command service', () => {
     });
   });
 
+  it('rejects deadline before legacy over-capacity and add semantic failures in a revision-current callback', async () => {
+    const legacy = await writeLegacySceneCount(25);
+    const file = path.join(rootDir, project.id, 'project.json');
+    const before = await readFile(file, 'utf8');
+    const realStore = store;
+    const queuedStore: CreativeStudioStore = {
+      ...realStore,
+      updateProject: (projectId, update, expectedRevision, commitTag) =>
+        realStore.updateProject(
+          projectId,
+          (current) => {
+            nowMs = APPLY_CUTOFF_MS;
+            return update(current);
+          },
+          expectedRevision,
+          commitTag
+        ),
+    };
+    service = createStudioDirectorCommandService({ store: queuedStore, now: () => nowMs });
+
+    await expect(
+      apply(legacy, [
+        {
+          kind: 'add_scene',
+          sceneId: 'scene_1',
+          scene: makeNewScene(),
+          beforeSceneId: 'scene_missing',
+        },
+      ])
+    ).rejects.toMatchObject({ reasonCode: 'deadline_elapsed', message: 'deadline_elapsed' });
+
+    expect(await readFile(file, 'utf8')).toBe(before);
+  });
+
   it('preserves store stale precedence when a concurrent write wins before the callback', async () => {
-    const clock = vi.fn(() => nowMs);
+    const legacy = await writeLegacySceneCount(25);
+    const clock = vi.fn(() => APPLY_CUTOFF_MS);
     service = createStudioDirectorCommandService({ store, now: clock });
     const winningWrite = store.updateProject(
-      project.id,
+      legacy.id,
       (current) => ({ ...current, name: 'Concurrent winner' }),
-      project.revision
+      legacy.revision
     );
-    const directorWrite = apply(project, [{ kind: 'set_brief', brief: 'Must stay unapplied' }]);
+    const directorWrite = apply(legacy, [
+      {
+        kind: 'add_scene',
+        sceneId: 'scene_1',
+        scene: makeNewScene(),
+        beforeSceneId: 'scene_missing',
+      },
+    ]);
 
-    await expect(winningWrite).resolves.toMatchObject({ revision: project.revision + 1 });
+    await expect(winningWrite).resolves.toMatchObject({ revision: legacy.revision + 1 });
     await expect(directorWrite).rejects.toMatchObject({ code: 'stale_project' });
     expect(clock).not.toHaveBeenCalled();
-    await expect(store.getProject(project.id)).resolves.toMatchObject({
-      revision: project.revision + 1,
+    await expect(store.getProject(legacy.id)).resolves.toMatchObject({
+      revision: legacy.revision + 1,
       name: 'Concurrent winner',
-      brief: project.brief,
+      brief: legacy.brief,
+      sceneOrder: legacy.sceneOrder,
     });
   });
 
@@ -479,11 +532,12 @@ describe('Studio Director command service', () => {
 
   it('preserves the exact project-level storage error object unchanged', async () => {
     const storageError = new CreativeStudioStoreError('storage_error', 'opaque store failure');
+    const updateProject = vi.fn(async () => {
+      throw storageError;
+    });
     const failingStore: CreativeStudioStore = {
       ...store,
-      updateProject: async () => {
-        throw storageError;
-      },
+      updateProject,
     };
     service = createStudioDirectorCommandService({ store: failingStore, now: () => nowMs });
 
@@ -493,34 +547,42 @@ describe('Studio Director command service', () => {
 
     expect(error).toBe(storageError);
     expect(error).not.toBeInstanceOf(StudioDirectorCommandApplyError);
+    expect(updateProject).toHaveBeenCalledTimes(1);
   });
 
-  it('translates an operation-scope store-shaped error to validation_failed without its prose', async () => {
+  it.each([
+    {
+      name: 'a store-shaped error',
+      thrown: new CreativeStudioStoreError('not_found', 'operation helper detail must not escape'),
+    },
+    { name: 'a generic error', thrown: new Error('generic operation detail must not escape') },
+  ])('translates $name inside the callback to validation_failed without raw prose', async ({ thrown }) => {
     project = await seedScenes(['scene_1']);
     const changes = Object.defineProperty({}, 'title', {
       enumerable: true,
       get: () => {
-        throw new CreativeStudioStoreError('not_found', 'operation helper detail must not escape');
+        throw thrown;
       },
     }) as Extract<StudioDirectorOperationV1, { kind: 'edit_scene' }>['changes'];
     const before = await readFile(path.join(rootDir, project.id, 'project.json'), 'utf8');
 
-    await expect(apply(project, [{ kind: 'edit_scene', sceneId: 'scene_1', changes }])).rejects.toMatchObject({
+    const error = await apply(project, [{ kind: 'edit_scene', sceneId: 'scene_1', changes }]).catch(
+      (caught: unknown) => caught
+    );
+
+    expect(error).toBeInstanceOf(StudioDirectorCommandApplyError);
+    expect(error).toMatchObject({
       name: 'StudioDirectorCommandApplyError',
       reasonCode: 'validation_failed',
       message: 'validation_failed',
     });
-
+    expect((error as Error).message).not.toContain(thrown.message);
     expect(await readFile(path.join(rootDir, project.id, 'project.json'), 'utf8')).toBe(before);
   });
 
   it('rejects a revision-current legacy over-capacity project before operation one', async () => {
     const file = path.join(rootDir, project.id, 'project.json');
-    const legacy = JSON.parse(await readFile(file, 'utf8')) as StudioProject;
-    const sceneOrder = Array.from({ length: 25 }, (_, index) => `scene_${index + 1}`);
-    legacy.sceneOrder = sceneOrder;
-    legacy.scenes = Object.fromEntries(sceneOrder.map((sceneId) => [sceneId, makeScene(sceneId)]));
-    await writeFile(file, JSON.stringify(legacy), 'utf8');
+    const legacy = await writeLegacySceneCount(25);
     const before = await readFile(file, 'utf8');
 
     await expect(apply(legacy, [{ kind: 'set_brief', brief: 'Must not apply' }])).rejects.toMatchObject({
@@ -530,6 +592,25 @@ describe('Studio Director command service', () => {
 
     expect(await readFile(file, 'utf8')).toBe(before);
     expect(await store.listQuarantinedProjectIds()).toEqual([]);
+  });
+
+  it('rejects project_over_capacity before add overflow and semantic validation in a revision-current callback', async () => {
+    const file = path.join(rootDir, project.id, 'project.json');
+    const legacy = await writeLegacySceneCount(25);
+    const before = await readFile(file, 'utf8');
+
+    await expect(
+      apply(legacy, [
+        {
+          kind: 'add_scene',
+          sceneId: 'scene_1',
+          scene: makeNewScene(),
+          beforeSceneId: 'scene_missing',
+        },
+      ])
+    ).rejects.toMatchObject({ reasonCode: 'project_over_capacity', message: 'project_over_capacity' });
+
+    expect(await readFile(file, 'utf8')).toBe(before);
   });
 
   it('rejects a 23-scene two-add command atomically with a scene-limit reason', async () => {
@@ -544,6 +625,56 @@ describe('Studio Director command service', () => {
     ).rejects.toMatchObject({ reasonCode: 'scene_limit_exceeded', message: 'scene_limit_exceeded' });
 
     expect(await readFile(path.join(rootDir, project.id, 'project.json'), 'utf8')).toBe(before);
+  });
+
+  it.each([
+    {
+      name: 'an opening-scene id collision',
+      operation: {
+        kind: 'add_scene',
+        sceneId: 'scene_1',
+        scene: makeNewScene(),
+        beforeSceneId: null,
+      },
+    },
+    {
+      name: 'an unknown opening anchor',
+      operation: {
+        kind: 'add_scene',
+        sceneId: 'scene_25',
+        scene: makeNewScene(),
+        beforeSceneId: 'scene_missing',
+      },
+    },
+  ] satisfies Array<{
+    name: string;
+    operation: Extract<StudioDirectorOperationV1, { kind: 'add_scene' }>;
+  }>)('rejects a 24-scene add with $name as scene_limit_exceeded before semantic validation', async ({ operation }) => {
+    project = await seedScenes(Array.from({ length: 24 }, (_, index) => `scene_${index + 1}`));
+    const file = path.join(rootDir, project.id, 'project.json');
+    const before = await readFile(file, 'utf8');
+
+    await expect(apply(project, [operation])).rejects.toMatchObject({
+      reasonCode: 'scene_limit_exceeded',
+      message: 'scene_limit_exceeded',
+    });
+
+    expect(await readFile(file, 'utf8')).toBe(before);
+  });
+
+  it('counts duplicate add operations toward the 23-scene aggregate limit before semantic validation', async () => {
+    project = await seedScenes(Array.from({ length: 23 }, (_, index) => `scene_${index + 1}`));
+    const file = path.join(rootDir, project.id, 'project.json');
+    const before = await readFile(file, 'utf8');
+
+    await expect(
+      apply(project, [
+        { kind: 'add_scene', sceneId: 'scene_24', scene: makeNewScene({ title: 'First' }), beforeSceneId: null },
+        { kind: 'add_scene', sceneId: 'scene_24', scene: makeNewScene({ title: 'Second' }), beforeSceneId: null },
+      ])
+    ).rejects.toMatchObject({ reasonCode: 'scene_limit_exceeded', message: 'scene_limit_exceeded' });
+
+    expect(await readFile(file, 'utf8')).toBe(before);
   });
 
   it('allows edit, reorder, and select at 24 scenes but rejects an addition', async () => {

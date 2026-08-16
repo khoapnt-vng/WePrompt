@@ -108,6 +108,13 @@ const addScene = (
 };
 
 const validateOpeningCommand = (project: StudioProject, operations: readonly StudioDirectorOperationV1[]): string[] => {
+  const addOperationCount = operations.reduce(
+    (count, operation) => count + (operation.kind === 'add_scene' ? 1 : 0),
+    0
+  );
+  if (project.sceneOrder.length + addOperationCount > STUDIO_MAX_SCENES) {
+    throw applyError('scene_limit_exceeded');
+  }
   if (operations.length === 0) throw applyError('validation_failed');
   const openingSceneIds = new Set(Object.keys(project.scenes));
   const createdSceneIds: string[] = [];
@@ -132,9 +139,6 @@ const validateOpeningCommand = (project: StudioProject, operations: readonly Stu
   }
 
   if (addSceneIds.size > 0 && hasReorder) throw applyError('validation_failed');
-  if (project.sceneOrder.length + addSceneIds.size > STUDIO_MAX_SCENES) {
-    throw applyError('scene_limit_exceeded');
-  }
   return createdSceneIds;
 };
 
