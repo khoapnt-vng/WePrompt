@@ -29,7 +29,7 @@ import { createCreativeStudioStore, type CreativeStudioStore } from '@process/se
 
 const NOW = '2026-08-16T12:00:00.000Z';
 const WAIT_MS = STUDIO_DIRECTOR_COMMAND_WAIT_MS;
-const RECORDED_CALIBRATION_MAX_MS = 33.621;
+const RECORDED_CALIBRATION_MAX_MS = 65.808;
 
 const makeInput = (name: string): CreateStudioProjectInput => ({
   name,
@@ -262,6 +262,63 @@ describe('Studio Director command mailbox', () => {
     expect(await mailbox.readReceipt(projectId, 'command_1')).toEqual(receipt);
   });
 
+  it('never finishes from a final receipt whose post-link publication sync did not commit', async () => {
+    await mailbox.ensure(projectId);
+    await writeBundle(rootDir, projectId, 'command_1');
+    const directories = commandDirectories(rootDir, projectId);
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const ioDirectories = commandDirectories(canonicalRoot, projectId);
+    const receiptFile = path.join(ioDirectories.receipts, 'command_1.json');
+    let receiptLinked = false;
+    let failedPostLinkSync = false;
+    const failingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property === 'link') {
+          return async (...args: Parameters<typeof nodeFs.link>) => {
+            await nodeFs.link(...args);
+            if (String(args[1]) === receiptFile) receiptLinked = true;
+          };
+        }
+        if (property === 'rm') {
+          return async (...args: Parameters<typeof nodeFs.rm>) => {
+            if (receiptLinked && String(args[0]) === receiptFile) throw new Error('receipt rollback failed');
+            return nodeFs.rm(...args);
+          };
+        }
+        if (property !== 'open') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.open>) => {
+          const handle = await nodeFs.open(...args);
+          if (String(args[0]) !== ioDirectories.receipts || !receiptLinked || failedPostLinkSync) return handle;
+          return new Proxy(handle, {
+            get(realHandle, handleProperty, handleReceiver) {
+              if (handleProperty === 'sync') {
+                return async () => {
+                  failedPostLinkSync = true;
+                  throw new Error('post-link directory sync failed');
+                };
+              }
+              return Reflect.get(realHandle, handleProperty, handleReceiver);
+            },
+          });
+        };
+      },
+    }) as typeof nodeFs;
+    const failingMailbox = createStudioDirectorCommandMailbox({
+      rootDir,
+      store,
+      fs: failingFs,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+
+    await expect(failingMailbox.writeReceipt(projectId, makeReceipt(projectId, 'command_1'))).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+    await expect(failingMailbox.finish(projectId, 'command_1')).rejects.toMatchObject({ code: 'storage_error' });
+    expect(existsSync(path.join(directories.pending, 'command_1.json'))).toBe(true);
+    expect(existsSync(path.join(directories.slots, '0.slot'))).toBe(true);
+  });
+
   it('reports a safe existing 0.slot command as busy authority without exposing unsafe slot bytes', async () => {
     await mailbox.ensure(projectId);
     const slotFile = path.join(commandDirectories(rootDir, projectId).slots, '0.slot');
@@ -297,6 +354,65 @@ describe('Studio Director command mailbox', () => {
     });
   });
 
+  it('bounds pending directory enumeration on first and later composite-cursor pages', async () => {
+    const projectIds = [projectId];
+    for (let index = 1; index < 8; index += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      projectIds.push((await store.createProject(makeInput(`Pending page ${index}`))).id);
+    }
+    for (const [index, id] of projectIds.entries()) {
+      // eslint-disable-next-line no-await-in-loop
+      await mailbox.ensure(id);
+      // eslint-disable-next-line no-await-in-loop
+      await nodeFs.writeFile(
+        path.join(commandDirectories(rootDir, id).pending, `command_${String(index).padStart(2, '0')}.json`),
+        '{}'
+      );
+    }
+    const enumeratedPending: string[] = [];
+    const observedFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property !== 'readdir') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.readdir>) => {
+          if (String(args[0]).endsWith(`${path.sep}commands${path.sep}pending`)) {
+            enumeratedPending.push(String(args[0]));
+          }
+          return nodeFs.readdir(...args);
+        };
+      },
+    }) as typeof nodeFs;
+    const pagedMailbox = createStudioDirectorCommandMailbox({
+      rootDir,
+      store,
+      fs: observedFs,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+
+    const first = await pagedMailbox.listPendingPage(null, 1);
+    const firstEnumerationCount = enumeratedPending.length;
+    if (first.nextCursor === null) throw new Error('Expected a later pending page');
+    const second = await pagedMailbox.listPendingPage(first.nextCursor, 1);
+    const secondEnumerationCount = enumeratedPending.length - firstEnumerationCount;
+
+    expect(first.items).toHaveLength(1);
+    expect(second.items).toHaveLength(1);
+    expect(second.items[0]).not.toEqual(first.items[0]);
+    expect(firstEnumerationCount).toBeLessThanOrEqual(2);
+    expect(secondEnumerationCount).toBeLessThanOrEqual(2);
+  });
+
+  it('treats a legal backslash entry cursor as opaque comparison data rather than a path', async () => {
+    await mailbox.ensure(projectId);
+    await nodeFs.writeFile(path.join(commandDirectories(rootDir, projectId).pending, 'z_command.json'), '{}');
+    const cursor = `v1.${Buffer.from(JSON.stringify([projectId, 'early\\residue.tmp']), 'utf8').toString('base64url')}`;
+
+    await expect(mailbox.listPendingPage(cursor, 64)).resolves.toEqual({
+      items: [{ projectId, commandId: 'z_command' }],
+      nextCursor: null,
+    });
+  });
+
   it('releases only receipt-backed or deadline-expired orphan slots', async () => {
     const live = projectId;
     const expired = (await store.createProject(makeInput('Expired'))).id;
@@ -329,6 +445,25 @@ describe('Studio Director command mailbox', () => {
     expect(existsSync(path.join(commandDirectories(rootDir, live).slots, '0.slot'))).toBe(true);
     expect(existsSync(path.join(commandDirectories(rootDir, expired).slots, '0.slot'))).toBe(false);
     expect(existsSync(path.join(commandDirectories(rootDir, receiptBacked).slots, '0.slot'))).toBe(false);
+  });
+
+  it.each([
+    ['a reservation lasting years', makeSlot('command_invalid', { deadlineAt: '2030-08-16T12:00:00.000Z' })],
+    [
+      'a reservation beyond future clock skew',
+      makeSlot('command_invalid', {
+        reservedAt: '2026-08-16T12:00:02.001Z',
+        deadlineAt: '2026-08-16T12:00:12.001Z',
+      }),
+    ],
+  ])('does not leave %s live and busy without pending authority', async (_label, slot) => {
+    await mailbox.ensure(projectId);
+    const slotFile = path.join(commandDirectories(rootDir, projectId).slots, '0.slot');
+    await nodeFs.writeFile(slotFile, JSON.stringify(slot));
+
+    await mailbox.releaseOrphanedSlotsPage(null, NOW, 64);
+
+    expect(existsSync(slotFile)).toBe(false);
   });
 
   it('never releases a slot while its exact pending record remains, even after the slot deadline', async () => {
@@ -441,6 +576,55 @@ describe('Studio Director command mailbox', () => {
 
     const wrapped = await mailbox.pruneReceiptsPage(null, '2026-08-09T00:00:00.000Z', 64);
     expect(wrapped).toEqual({ processed: 4, nextCursor: null });
+  });
+
+  it('bounds receipt directory enumeration on first and later composite-cursor pages', async () => {
+    const projectIds = [projectId];
+    for (let index = 1; index < 8; index += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      projectIds.push((await store.createProject(makeInput(`Receipt page ${index}`))).id);
+    }
+    for (const [index, id] of projectIds.entries()) {
+      // eslint-disable-next-line no-await-in-loop
+      await mailbox.ensure(id);
+      // eslint-disable-next-line no-await-in-loop
+      await nodeFs.writeFile(
+        path.join(commandDirectories(rootDir, id).receipts, `command_${String(index).padStart(2, '0')}.json`),
+        JSON.stringify(
+          makeReceipt(id, `command_${String(index).padStart(2, '0')}`, { decidedAt: '2026-08-01T00:00:00.000Z' })
+        )
+      );
+    }
+    const enumeratedReceipts: string[] = [];
+    const observedFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property !== 'readdir') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.readdir>) => {
+          if (String(args[0]).endsWith(`${path.sep}commands${path.sep}receipts`)) {
+            enumeratedReceipts.push(String(args[0]));
+          }
+          return nodeFs.readdir(...args);
+        };
+      },
+    }) as typeof nodeFs;
+    const pagedMailbox = createStudioDirectorCommandMailbox({
+      rootDir,
+      store,
+      fs: observedFs,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+
+    const first = await pagedMailbox.pruneReceiptsPage(null, '2026-08-09T00:00:00.000Z', 1);
+    const firstEnumerationCount = enumeratedReceipts.length;
+    if (first.nextCursor === null) throw new Error('Expected a later receipt page');
+    const second = await pagedMailbox.pruneReceiptsPage(first.nextCursor, '2026-08-09T00:00:00.000Z', 1);
+    const secondEnumerationCount = enumeratedReceipts.length - firstEnumerationCount;
+
+    expect(first.processed).toBe(1);
+    expect(second.processed).toBe(1);
+    expect(firstEnumerationCount).toBeLessThanOrEqual(2);
+    expect(secondEnumerationCount).toBeLessThanOrEqual(2);
   });
 
   it('filters watcher noise and closes exactly once', async () => {

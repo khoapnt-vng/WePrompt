@@ -16,6 +16,7 @@ import {
 } from '@/common/types/project/creativeStudioTypes';
 import {
   parseStudioDirectorCommandReceipt,
+  parseStudioDirectorCommandSlot,
   parseStudioDirectorPendingRecord,
 } from '@process/services/creative-studio/service/directorCommandContracts';
 
@@ -160,6 +161,15 @@ describe('Studio Director V1 command contracts', () => {
     ).toBe('invalid');
   });
 
+  it('accepts a brief at 16 KiB and rejects the next character', () => {
+    expect(
+      parsePending(validCommand({ operations: [{ kind: 'set_brief', brief: 'x'.repeat(16 * 1024) }] })).status
+    ).toBe('valid');
+    expect(
+      parsePending(validCommand({ operations: [{ kind: 'set_brief', brief: 'x'.repeat(16 * 1024 + 1) }] })).status
+    ).toBe('invalid');
+  });
+
   it('rejects a structurally valid in-memory command whose serialized bytes exceed the wire cap', () => {
     const oversized = validCommand({
       operations: [{ kind: 'set_brief', brief: 'x'.repeat(STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES) }],
@@ -221,6 +231,23 @@ describe('Studio Director V1 command contracts', () => {
     ['unsupported version', { ...validSlot(), schemaVersion: 2 }],
   ])('rejects a slot with a %s', (_label, slot) => {
     expect(parsePending(validCommand(), slot)).toMatchObject({ status: 'invalid' });
+  });
+
+  it('bounds standalone slot reservation time against injected now and wait', () => {
+    expect(parseStudioDirectorCommandSlot(validSlot(), NOW, WAIT_MS)).toEqual(validSlot());
+    expect(
+      parseStudioDirectorCommandSlot(validSlot({ deadlineAt: '2030-08-16T12:00:00.000Z' }), NOW, WAIT_MS)
+    ).toBeNull();
+    expect(
+      parseStudioDirectorCommandSlot(
+        validSlot({
+          reservedAt: '2026-08-16T12:00:02.001Z',
+          deadlineAt: '2026-08-16T12:00:12.001Z',
+        }),
+        NOW,
+        WAIT_MS
+      )
+    ).toBeNull();
   });
 
   it('distinguishes an unsupported command version from other malformed values', () => {

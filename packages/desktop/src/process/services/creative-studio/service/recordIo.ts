@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { constants as fsConstants } from 'node:fs';
 import type { promises as nodeFs } from 'node:fs';
 import path from 'node:path';
 
@@ -156,7 +157,17 @@ export async function resolveCompleteDirectorySet<const ChildName extends string
   return result as { root: string } & Record<ChildName, string>;
 }
 
-/** Reads a named immutable record only after lstat type and size checks. */
+const assertNoUnconfirmedPublication = async (fs: RecordIoFileSystem, file: string): Promise<void> => {
+  try {
+    await fs.lstat(`${file}.unconfirmed`);
+    throw new RecordIoError('unsafe_file');
+  } catch (error) {
+    if (error instanceof RecordIoError) throw error;
+    if (!hasErrorCode(error, 'ENOENT')) throw error;
+  }
+};
+
+/** Reads a named immutable record through one no-follow, bounded file handle. */
 export async function readBoundedRegularFile(input: {
   fs: RecordIoFileSystem;
   canonicalRoot: string;
@@ -164,21 +175,46 @@ export async function readBoundedRegularFile(input: {
   maxBytes: number;
 }): Promise<string | null> {
   const file = resolveConfinedRecordPath(input.canonicalRoot, path.dirname(input.file), path.basename(input.file));
+  let handle: Awaited<ReturnType<RecordIoFileSystem['open']>> | undefined;
   try {
-    let stats: Awaited<ReturnType<RecordIoFileSystem['lstat']>>;
+    await assertNoUnconfirmedPublication(input.fs, file);
+    const flags = process.platform === 'win32' ? fsConstants.O_RDONLY : fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW;
     try {
-      stats = await input.fs.lstat(file);
+      handle = await input.fs.open(file, flags);
     } catch (error) {
       if (hasErrorCode(error, 'ENOENT')) return null;
+      if (hasErrorCode(error, 'ELOOP') || hasErrorCode(error, 'EMLINK')) {
+        throw new RecordIoError('unsafe_file');
+      }
       throw error;
     }
-    if (stats.isSymbolicLink() || !stats.isFile()) throw new RecordIoError('unsafe_file');
+    const stats = await handle.stat();
+    if (!stats.isFile()) throw new RecordIoError('unsafe_file');
     if (stats.size > input.maxBytes) throw new RecordIoError('record_too_large');
-    const bytes = await input.fs.readFile(file, 'utf8');
-    if (Buffer.byteLength(bytes, 'utf8') > input.maxBytes) throw new RecordIoError('record_too_large');
-    return bytes;
+    const bytes = Buffer.alloc(input.maxBytes + 1);
+    let offset = 0;
+    while (offset < bytes.length) {
+      // eslint-disable-next-line no-await-in-loop
+      const result = await handle.read(bytes, offset, bytes.length - offset, offset);
+      if (result.bytesRead === 0) break;
+      offset += result.bytesRead;
+    }
+    if (offset > input.maxBytes) throw new RecordIoError('record_too_large');
+    const pathStats = await input.fs.lstat(file);
+    if (
+      pathStats.isSymbolicLink() ||
+      !pathStats.isFile() ||
+      pathStats.dev !== stats.dev ||
+      pathStats.ino !== stats.ino
+    ) {
+      throw new RecordIoError('unsafe_file');
+    }
+    await assertNoUnconfirmedPublication(input.fs, file);
+    return bytes.subarray(0, offset).toString('utf8');
   } catch (error) {
     throw preserveOrNeutralize(error);
+  } finally {
+    await handle?.close().catch((): undefined => undefined);
   }
 }
 
@@ -209,7 +245,17 @@ const syncDirectory = async (fs: RecordIoFileSystem, directory: string): Promise
   }
 };
 
-/** Exclusive temp-write/fsync/link publication followed by parent-directory fsync. */
+const removeIfPresent = async (fs: RecordIoFileSystem, file: string): Promise<boolean> => {
+  try {
+    await fs.rm(file);
+    return true;
+  } catch (error) {
+    if (hasErrorCode(error, 'ENOENT')) return true;
+    return false;
+  }
+};
+
+/** Exclusive temp-write/fsync plus a durable unconfirmed guard around link publication. */
 export async function publishImmutableRecord(input: {
   fs: RecordIoFileSystem;
   canonicalRoot: string;
@@ -221,20 +267,77 @@ export async function publishImmutableRecord(input: {
   const temporaryId = input.temporaryId ?? `${process.pid}_${++temporaryFileCounter}`;
   if (!/^[A-Za-z0-9_-]+$/.test(temporaryId)) throw new RecordIoError('unsafe_path');
   const temporaryFile = `${input.file}.${temporaryId}.tmp`;
+  const unconfirmedFile = `${input.file}.unconfirmed`;
   let temporaryHandle: Awaited<ReturnType<RecordIoFileSystem['open']>> | undefined;
+  let unconfirmedHandle: Awaited<ReturnType<RecordIoFileSystem['open']>> | undefined;
+  let ownsUnconfirmed = false;
+  let linked = false;
+  let committed = false;
+  let preserveResidue = false;
   try {
+    try {
+      await input.fs.lstat(input.file);
+      throw new RecordIoError('already_exists');
+    } catch (error) {
+      if (error instanceof RecordIoError) throw error;
+      if (!hasErrorCode(error, 'ENOENT')) throw error;
+    }
+
     temporaryHandle = await input.fs.open(temporaryFile, 'wx');
     await temporaryHandle.writeFile(input.bytes, { encoding: 'utf8' });
     await temporaryHandle.sync();
     await temporaryHandle.close();
     temporaryHandle = undefined;
-    await input.fs.link(temporaryFile, input.file);
-    await input.fs.rm(temporaryFile);
+
+    unconfirmedHandle = await input.fs.open(unconfirmedFile, 'wx');
+    ownsUnconfirmed = true;
+    await unconfirmedHandle.writeFile('1', { encoding: 'utf8' });
+    await unconfirmedHandle.sync();
+    await unconfirmedHandle.close();
+    unconfirmedHandle = undefined;
     await syncDirectory(input.fs, parent);
+
+    try {
+      await input.fs.link(temporaryFile, input.file);
+      linked = true;
+    } catch (error) {
+      if (hasErrorCode(error, 'EEXIST')) throw new RecordIoError('already_exists');
+      throw error;
+    }
+    try {
+      await syncDirectory(input.fs, parent);
+      committed = true;
+    } catch (error) {
+      const removed = await removeIfPresent(input.fs, input.file);
+      linked = !removed;
+      let rollbackDurable = false;
+      if (removed) {
+        try {
+          await syncDirectory(input.fs, parent);
+          rollbackDurable = true;
+        } catch {
+          // The durable guard remains authoritative when rollback durability is unknown.
+        }
+      }
+      if (rollbackDurable) {
+        if (await removeIfPresent(input.fs, unconfirmedFile)) ownsUnconfirmed = false;
+        await removeIfPresent(input.fs, temporaryFile);
+      } else {
+        preserveResidue = true;
+      }
+      throw error;
+    }
+
+    await input.fs.rm(unconfirmedFile);
+    ownsUnconfirmed = false;
+    await input.fs.rm(temporaryFile).catch((): undefined => undefined);
   } catch (error) {
     await temporaryHandle?.close().catch((): undefined => undefined);
-    await input.fs.rm(temporaryFile, { force: true }).catch((): undefined => undefined);
-    if (hasErrorCode(error, 'EEXIST')) throw new RecordIoError('already_exists');
+    await unconfirmedHandle?.close().catch((): undefined => undefined);
+    if (!committed && !linked && !preserveResidue) {
+      if (ownsUnconfirmed && (await removeIfPresent(input.fs, unconfirmedFile))) ownsUnconfirmed = false;
+      await removeIfPresent(input.fs, temporaryFile);
+    }
     throw preserveOrNeutralize(error);
   }
 }

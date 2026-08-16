@@ -181,6 +181,110 @@ describe('error-neutral Creative Studio record IO', () => {
     ).rejects.toMatchObject({ code: kind === 'oversize' ? 'record_too_large' : 'unsafe_file' });
   });
 
+  it('rejects a regular path swapped to a symlink around the opened handle', async () => {
+    const records = path.join(canonicalRoot, 'records');
+    await nodeFs.mkdir(records);
+    const target = path.join(records, 'record.json');
+    const outside = path.join(canonicalRoot, 'outside.json');
+    await nodeFs.writeFile(target, '{"safe":true}');
+    await nodeFs.writeFile(outside, '{"credential":"outside"}');
+    let swapped = false;
+    const swappingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property === 'lstat') {
+          return async (...args: Parameters<typeof nodeFs.lstat>) => {
+            const stats = await nodeFs.lstat(...args);
+            if (String(args[0]) === target && !swapped) {
+              swapped = true;
+              await nodeFs.rm(target);
+              await nodeFs.symlink(outside, target);
+            }
+            return stats;
+          };
+        }
+        if (property === 'open') {
+          return async (...args: Parameters<typeof nodeFs.open>) => {
+            const handle = await nodeFs.open(...args);
+            if (String(args[0]) === target && !swapped) {
+              swapped = true;
+              await nodeFs.rm(target);
+              await nodeFs.symlink(outside, target);
+            }
+            return handle;
+          };
+        }
+        return Reflect.get(realFs, property, receiver);
+      },
+    }) as typeof nodeFs;
+
+    await expect(
+      readBoundedRegularFile({ fs: swappingFs, canonicalRoot, file: target, maxBytes: 64 })
+    ).rejects.toMatchObject({ code: 'unsafe_file', message: 'Record IO failed' });
+  });
+
+  it('reads at most max plus one bytes from the same handle after metadata-time growth', async () => {
+    const records = path.join(canonicalRoot, 'records');
+    await nodeFs.mkdir(records);
+    const target = path.join(records, 'record.json');
+    await nodeFs.writeFile(target, '{}');
+    let grew = false;
+    let usedPathReadFile = false;
+    const readLengths: number[] = [];
+    const growingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property === 'lstat') {
+          return async (...args: Parameters<typeof nodeFs.lstat>) => {
+            const stats = await nodeFs.lstat(...args);
+            if (String(args[0]) === target && !grew) {
+              grew = true;
+              await nodeFs.appendFile(target, 'x'.repeat(128));
+            }
+            return stats;
+          };
+        }
+        if (property === 'readFile') {
+          return async (...args: Parameters<typeof nodeFs.readFile>) => {
+            usedPathReadFile = true;
+            return nodeFs.readFile(...args);
+          };
+        }
+        if (property !== 'open') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.open>) => {
+          const handle = await nodeFs.open(...args);
+          if (String(args[0]) !== target) return handle;
+          return new Proxy(handle, {
+            get(realHandle, handleProperty, handleReceiver) {
+              if (handleProperty === 'stat') {
+                return async (...statArgs: Parameters<typeof handle.stat>) => {
+                  const stats = await handle.stat(...statArgs);
+                  if (!grew) {
+                    grew = true;
+                    await nodeFs.appendFile(target, 'x'.repeat(128));
+                  }
+                  return stats;
+                };
+              }
+              if (handleProperty === 'read') {
+                return async (...readArgs: Parameters<typeof handle.read>) => {
+                  readLengths.push(Number(readArgs[2]));
+                  return handle.read(...readArgs);
+                };
+              }
+              return Reflect.get(realHandle, handleProperty, handleReceiver);
+            },
+          });
+        };
+      },
+    }) as typeof nodeFs;
+
+    await expect(
+      readBoundedRegularFile({ fs: growingFs, canonicalRoot, file: target, maxBytes: 64 })
+    ).rejects.toMatchObject({ code: 'record_too_large' });
+    expect(usedPathReadFile).toBe(false);
+    expect(readLengths.length).toBeGreaterThan(0);
+    expect(Math.max(...readLengths)).toBe(65);
+  });
+
   it('publishes immutable bytes only after file sync and then syncs the parent directory', async () => {
     const records = path.join(canonicalRoot, 'records');
     await nodeFs.mkdir(records);
@@ -196,32 +300,35 @@ describe('error-neutral Creative Studio record IO', () => {
         }
         if (property === 'rm') {
           return async (...args: Parameters<typeof nodeFs.rm>): ReturnType<typeof nodeFs.rm> => {
-            if (String(args[0]).endsWith('.tmp')) events.push('temp-rm');
+            const removed = String(args[0]);
+            if (removed.endsWith('.unconfirmed')) events.push('guard-rm');
+            else if (removed.endsWith('.tmp')) events.push('temp-rm');
             return nodeFs.rm(...args);
           };
         }
         if (property !== 'open') return Reflect.get(realFs, property, receiver);
         return async (...args: Parameters<typeof nodeFs.open>) => {
           const handle = await nodeFs.open(...args);
-          const isDirectory = String(args[0]) === records;
-          events.push(isDirectory ? 'directory-open' : 'temp-open');
+          const opened = String(args[0]);
+          const kind = opened === records ? 'directory' : opened.endsWith('.unconfirmed') ? 'guard' : 'temp';
+          events.push(`${kind}-open`);
           return new Proxy(handle, {
             get(realHandle, handleProperty, handleReceiver) {
               if (handleProperty === 'writeFile') {
                 return async (...writeArgs: Parameters<typeof handle.writeFile>) => {
-                  events.push('temp-write');
+                  events.push(`${kind}-write`);
                   return handle.writeFile(...writeArgs);
                 };
               }
               if (handleProperty === 'sync') {
                 return async () => {
-                  events.push(isDirectory ? 'directory-sync' : 'temp-sync');
+                  events.push(`${kind}-sync`);
                   return handle.sync();
                 };
               }
               if (handleProperty === 'close') {
                 return async () => {
-                  events.push(isDirectory ? 'directory-close' : 'temp-close');
+                  events.push(`${kind}-close`);
                   return handle.close();
                 };
               }
@@ -246,12 +353,157 @@ describe('error-neutral Creative Studio record IO', () => {
       'temp-write',
       'temp-sync',
       'temp-close',
-      'link',
-      'temp-rm',
+      'guard-open',
+      'guard-write',
+      'guard-sync',
+      'guard-close',
       'directory-open',
       'directory-sync',
       'directory-close',
+      'link',
+      'directory-open',
+      'directory-sync',
+      'directory-close',
+      'guard-rm',
+      'temp-rm',
     ]);
+  });
+
+  it.each(['directory-open', 'directory-sync'])('rolls back a final link when post-link %s fails', async (kind) => {
+    const records = path.join(canonicalRoot, 'records');
+    await nodeFs.mkdir(records);
+    const target = path.join(records, 'receipt.json');
+    let linked = false;
+    const failingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property === 'link') {
+          return async (...args: Parameters<typeof nodeFs.link>) => {
+            await nodeFs.link(...args);
+            linked = true;
+          };
+        }
+        if (property !== 'open') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.open>) => {
+          if (String(args[0]) === records && linked && kind === 'directory-open') {
+            throw new Error('path=/private/receipt directory open failed');
+          }
+          const handle = await nodeFs.open(...args);
+          if (String(args[0]) !== records || !linked || kind !== 'directory-sync') return handle;
+          return new Proxy(handle, {
+            get(realHandle, handleProperty, handleReceiver) {
+              if (handleProperty === 'sync') {
+                return async () => {
+                  throw new Error('credential=secret directory sync failed');
+                };
+              }
+              return Reflect.get(realHandle, handleProperty, handleReceiver);
+            },
+          });
+        };
+      },
+    }) as typeof nodeFs;
+
+    await expect(
+      publishImmutableRecord({
+        fs: failingFs,
+        canonicalRoot,
+        file: target,
+        bytes: '{"status":"applied"}',
+        temporaryId: `post_link_${kind.replace('-', '_')}`,
+      })
+    ).rejects.toMatchObject({ code: 'storage_error', message: 'Record IO failed' });
+    expect(existsSync(target)).toBe(false);
+  });
+
+  it('treats temp cleanup after the post-link directory sync as non-authoritative', async () => {
+    const records = path.join(canonicalRoot, 'records');
+    await nodeFs.mkdir(records);
+    const target = path.join(records, 'receipt.json');
+    let linked = false;
+    const failingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property === 'link') {
+          return async (...args: Parameters<typeof nodeFs.link>) => {
+            await nodeFs.link(...args);
+            linked = true;
+          };
+        }
+        if (property === 'rm') {
+          return async (...args: Parameters<typeof nodeFs.rm>) => {
+            if (linked && String(args[0]).endsWith('.tmp')) throw new Error('temp cleanup failed');
+            return nodeFs.rm(...args);
+          };
+        }
+        return Reflect.get(realFs, property, receiver);
+      },
+    }) as typeof nodeFs;
+
+    await expect(
+      publishImmutableRecord({
+        fs: failingFs,
+        canonicalRoot,
+        file: target,
+        bytes: '{"status":"applied"}',
+        temporaryId: 'cleanup_failure',
+      })
+    ).resolves.toBeUndefined();
+    await expect(readBoundedRegularFile({ fs: nodeFs, canonicalRoot, file: target, maxBytes: 64 })).resolves.toBe(
+      '{"status":"applied"}'
+    );
+  });
+
+  it('leaves a rollback-resistant final link distinguishable as unconfirmed', async () => {
+    const records = path.join(canonicalRoot, 'records');
+    await nodeFs.mkdir(records);
+    const target = path.join(records, 'receipt.json');
+    let linked = false;
+    const failingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property === 'link') {
+          return async (...args: Parameters<typeof nodeFs.link>) => {
+            await nodeFs.link(...args);
+            linked = true;
+          };
+        }
+        if (property === 'rm') {
+          return async (...args: Parameters<typeof nodeFs.rm>) => {
+            if (linked && (String(args[0]) === target || String(args[0]).endsWith('.tmp'))) {
+              throw new Error('rollback and cleanup failed at /private/receipt');
+            }
+            return nodeFs.rm(...args);
+          };
+        }
+        if (property !== 'open') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.open>) => {
+          const handle = await nodeFs.open(...args);
+          if (String(args[0]) !== records || !linked) return handle;
+          return new Proxy(handle, {
+            get(realHandle, handleProperty, handleReceiver) {
+              if (handleProperty === 'sync') {
+                return async () => {
+                  throw new Error('post-link sync failed');
+                };
+              }
+              return Reflect.get(realHandle, handleProperty, handleReceiver);
+            },
+          });
+        };
+      },
+    }) as typeof nodeFs;
+
+    await expect(
+      publishImmutableRecord({
+        fs: failingFs,
+        canonicalRoot,
+        file: target,
+        bytes: '{"status":"applied"}',
+        temporaryId: 'rollback_failure',
+      })
+    ).rejects.toMatchObject({ code: 'storage_error', message: 'Record IO failed' });
+    expect(existsSync(target)).toBe(true);
+    await expect(
+      readBoundedRegularFile({ fs: nodeFs, canonicalRoot, file: target, maxBytes: 64 })
+    ).rejects.toMatchObject({ code: 'unsafe_file', message: 'Record IO failed' });
   });
 
   it('never replaces an immutable target and returns an error-neutral collision', async () => {

@@ -774,9 +774,9 @@ describe('creative studio project store', () => {
             const handle = await nodeFs.open(...args);
             const file = String(args[0]);
             const isPendingDirectory = file.endsWith(`${path.sep}proposals${path.sep}pending`);
-            const isProposalTemporary = file.includes(
-              `${path.sep}proposals${path.sep}pending${path.sep}proposal_io.json.`
-            );
+            const isProposalTemporary =
+              file.includes(`${path.sep}proposals${path.sep}pending${path.sep}proposal_io.json.`) &&
+              file.endsWith('.tmp');
             return new Proxy(handle, {
               get(realHandle, handleProperty, handleReceiver) {
                 if (handleProperty === 'writeFile' && isProposalTemporary) {
@@ -810,7 +810,7 @@ describe('creative studio project store', () => {
         payload: proposalPayload(),
       });
 
-      expect(events).toEqual(['write', 'file-sync', 'link', 'directory-sync']);
+      expect(events).toEqual(['write', 'file-sync', 'directory-sync', 'link', 'directory-sync']);
     });
 
     it('keeps unsafe proposal records unreadable after delegating bounded lstat reads', async () => {

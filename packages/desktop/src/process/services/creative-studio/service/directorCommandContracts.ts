@@ -155,7 +155,7 @@ const validateEditChanges = (value: unknown): boolean => {
 const validateOperation = (value: unknown): value is StudioDirectorOperationV1 => {
   if (!isRecord(value)) return false;
   if (value.kind === 'set_brief') {
-    return hasExactKeys(value, SET_BRIEF_KEYS) && typeof value.brief === 'string';
+    return hasExactKeys(value, SET_BRIEF_KEYS) && isText(value.brief, 16 * 1024);
   }
   if (value.kind === 'add_scene') {
     return (
@@ -215,18 +215,8 @@ const slotMatches = (input: {
   nowMs: number;
   waitMs: number;
 }): boolean => {
-  if (!isRecord(input.slot) || !hasExactKeys(input.slot, SLOT_KEYS) || input.slot.schemaVersion !== 1) return false;
-  const reservedAt = timestampMs(input.slot.reservedAt);
-  const deadlineAt = timestampMs(input.slot.deadlineAt);
-  return (
-    input.slot.commandId === input.record.commandId &&
-    input.slot.deadlineAt === input.record.deadlineAt &&
-    reservedAt !== null &&
-    deadlineAt !== null &&
-    reservedAt <= input.nowMs + STUDIO_DIRECTOR_COMMAND_CLOCK_SKEW_MS &&
-    deadlineAt > reservedAt &&
-    deadlineAt - reservedAt <= input.waitMs
-  );
+  const slot = parseStudioDirectorCommandSlot(input.slot, new Date(input.nowMs).toISOString(), input.waitMs);
+  return slot?.commandId === input.record.commandId && slot.deadlineAt === input.record.deadlineAt;
 };
 
 export function parseStudioDirectorPendingRecord(input: {
@@ -280,14 +270,24 @@ export function parseStudioDirectorPendingRecord(input: {
   return { status: 'valid', record };
 }
 
-export function parseStudioDirectorCommandSlot(value: unknown): StudioDirectorCommandSlotV1 | null {
+export function parseStudioDirectorCommandSlot(
+  value: unknown,
+  now: string,
+  waitMs: number
+): StudioDirectorCommandSlotV1 | null {
   if (!isRecord(value) || !hasExactKeys(value, SLOT_KEYS) || value.schemaVersion !== 1) return null;
   const reservedAt = timestampMs(value.reservedAt);
   const deadlineAt = timestampMs(value.deadlineAt);
+  const nowMs = timestampMs(now);
   return isSafeStudioDirectorId(value.commandId) &&
     reservedAt !== null &&
     deadlineAt !== null &&
-    deadlineAt > reservedAt
+    nowMs !== null &&
+    Number.isSafeInteger(waitMs) &&
+    waitMs > 0 &&
+    reservedAt <= nowMs + STUDIO_DIRECTOR_COMMAND_CLOCK_SKEW_MS &&
+    deadlineAt > reservedAt &&
+    deadlineAt - reservedAt <= waitMs
     ? (value as StudioDirectorCommandSlotV1)
     : null;
 }
