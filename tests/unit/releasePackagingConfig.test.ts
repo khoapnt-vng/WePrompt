@@ -570,6 +570,9 @@ describe('release packaging configuration', () => {
 
     expect(workflow).toMatch(/internal_release:\s*\n[\s\S]*?type:\s*boolean/);
     expect(workflow).toContain("WEPROMPT_INTERNAL_RELEASE: ${{ inputs.internal_release && '1' || '0' }}");
+    expect(workflow).toMatch(
+      /- name: Get commit hash[\s\S]*?FULL=\$\(git rev-parse HEAD\)[\s\S]*?echo "WEPROMPT_RELEASE_COMMIT=\$FULL" >> "\$GITHUB_ENV"/
+    );
     expect(manualWorkflow).toContain('internal_release: true');
     expect(workflow).toMatch(/- name: Resolve Sentry release name\s*\n\s+if: \$\{\{ !inputs\.internal_release \}\}/);
     expect(workflow).toMatch(

@@ -101,9 +101,11 @@ jobs:
         id: commit
         shell: bash
         run: |
+          FULL=$(git rev-parse HEAD)
           SHORT=$(git rev-parse --short HEAD)
+          echo "WEPROMPT_RELEASE_COMMIT=$FULL" >> "$GITHUB_ENV"
           echo "short=$SHORT" >> $GITHUB_OUTPUT
-          echo "Commit: $SHORT"
+          echo "Commit: $FULL ($SHORT)"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
