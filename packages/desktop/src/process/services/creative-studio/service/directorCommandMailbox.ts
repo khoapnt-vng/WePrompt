@@ -224,6 +224,7 @@ export const createStudioDirectorCommandMailbox = (
 
   const sessions = new Map<CursorMethod, CursorSession>();
   const cursorOperations = new Map<CursorMethod, Promise<void>>();
+  const slotCleanupOperations = new Map<string, Promise<void>>();
   let disposed = false;
 
   const runCursorMethod = <Result>(method: CursorMethod, operation: () => Promise<Result>): Promise<Result> => {
@@ -236,6 +237,19 @@ export const createStudioDirectorCommandMailbox = (
     cursorOperations.set(method, tail);
     return result.finally(() => {
       if (cursorOperations.get(method) === tail) cursorOperations.delete(method);
+    });
+  };
+
+  const runSlotCleanup = <Result>(projectId: string, operation: () => Promise<Result>): Promise<Result> => {
+    const previous = slotCleanupOperations.get(projectId) ?? Promise.resolve();
+    const result = previous.then(operation, operation);
+    const tail = result.then(
+      (): void => undefined,
+      (): void => undefined
+    );
+    slotCleanupOperations.set(projectId, tail);
+    return result.finally(() => {
+      if (slotCleanupOperations.get(projectId) === tail) slotCleanupOperations.delete(projectId);
     });
   };
 
@@ -549,26 +563,28 @@ export const createStudioDirectorCommandMailbox = (
 
     async finish(projectId: string, commandId: string): Promise<void> {
       requireIdentity(projectId, commandId);
-      const directories = await directoriesFor(projectId, false);
-      if (directories === null) return;
-      const canonicalRoot = await canonicalRootPromise;
-      const pendingFile = path.join(directories.pending, `${commandId}.json`);
-      const slotFile = path.join(directories.slots, '0.slot');
-      const receipt = await exactReceiptFrom(canonicalRoot, directories, projectId, commandId);
-      const slot = await readSlot(canonicalRoot, directories, now());
-      if (receipt === null) {
-        const attributableSlot =
-          (slot.status === 'valid' && slot.slot.commandId === commandId) ||
-          (slot.status === 'invalid' && slot.commandId === commandId);
-        if ((await pathExists(pendingFile)) || attributableSlot) throw storageError();
-        return;
-      }
-      if (slot.status === 'valid' && slot.slot.commandId !== commandId) throw storageError();
-      if (slot.status === 'invalid' && slot.commandId !== commandId) throw storageError();
-      await removeRecord(canonicalRoot, pendingFile);
-      if (slot.status !== 'absent') await removeRecord(canonicalRoot, slotFile);
-      if (await pathExists(pendingFile)) throw storageError();
-      if ((await readSlot(canonicalRoot, directories, now())).status !== 'absent') throw storageError();
+      return runSlotCleanup(projectId, async () => {
+        const directories = await directoriesFor(projectId, false);
+        if (directories === null) return;
+        const canonicalRoot = await canonicalRootPromise;
+        const pendingFile = path.join(directories.pending, `${commandId}.json`);
+        const slotFile = path.join(directories.slots, '0.slot');
+        const receipt = await exactReceiptFrom(canonicalRoot, directories, projectId, commandId);
+        const slot = await readSlot(canonicalRoot, directories, now());
+        if (receipt === null) {
+          const attributableSlot =
+            (slot.status === 'valid' && slot.slot.commandId === commandId) ||
+            (slot.status === 'invalid' && slot.commandId === commandId);
+          if ((await pathExists(pendingFile)) || attributableSlot) throw storageError();
+          return;
+        }
+        if (slot.status === 'valid' && slot.slot.commandId !== commandId) throw storageError();
+        if (slot.status === 'invalid' && slot.commandId !== commandId) throw storageError();
+        await removeRecord(canonicalRoot, pendingFile);
+        if (slot.status !== 'absent') await removeRecord(canonicalRoot, slotFile);
+        if (await pathExists(pendingFile)) throw storageError();
+        if ((await readSlot(canonicalRoot, directories, now())).status !== 'absent') throw storageError();
+      });
     },
 
     async listPendingPage(cursor: string | null, limit: number): Promise<StudioDirectorCommandPage> {
@@ -593,28 +609,29 @@ export const createStudioDirectorCommandMailbox = (
       return scanProjectPage({
         cursor,
         limit,
-        visit: async (projectId) => {
-          const directories = await directoriesFor(projectId, false);
-          if (directories === null) return;
-          const slotRead = await readSlot(canonicalRoot, directories, currentTime);
-          if (slotRead.status === 'absent') return;
-          if (slotRead.status === 'invalid') {
-            if (slotRead.commandId === null) throw storageError();
-            if (await pathExists(path.join(directories.pending, `${slotRead.commandId}.json`))) return;
-            // A bounded invalid reservation cannot remain live authority once its pending record is absent.
+        visit: (projectId) =>
+          runSlotCleanup(projectId, async () => {
+            const directories = await directoriesFor(projectId, false);
+            if (directories === null) return;
+            const slotRead = await readSlot(canonicalRoot, directories, currentTime);
+            if (slotRead.status === 'absent') return;
+            if (slotRead.status === 'invalid') {
+              if (slotRead.commandId === null) throw storageError();
+              if (await pathExists(path.join(directories.pending, `${slotRead.commandId}.json`))) return;
+              // A bounded invalid reservation cannot remain live authority once its pending record is absent.
+              await removeRecord(canonicalRoot, path.join(directories.slots, '0.slot'));
+              return;
+            }
+            const { slot } = slotRead;
+            if (await pathExists(path.join(directories.pending, `${slot.commandId}.json`))) return;
+            const deadlineMs = canonicalTimestamp(slot.deadlineAt);
+            if (deadlineMs === null) return;
+            if (deadlineMs >= nowMs) {
+              // A live slot is releasable only with its exact durable terminal receipt.
+              if ((await exactReceiptFrom(canonicalRoot, directories, projectId, slot.commandId)) === null) return;
+            }
             await removeRecord(canonicalRoot, path.join(directories.slots, '0.slot'));
-            return;
-          }
-          const { slot } = slotRead;
-          if (await pathExists(path.join(directories.pending, `${slot.commandId}.json`))) return;
-          const deadlineMs = canonicalTimestamp(slot.deadlineAt);
-          if (deadlineMs === null) return;
-          if (deadlineMs >= nowMs) {
-            // A live slot is releasable only with its exact durable terminal receipt.
-            if ((await exactReceiptFrom(canonicalRoot, directories, projectId, slot.commandId)) === null) return;
-          }
-          await removeRecord(canonicalRoot, path.join(directories.slots, '0.slot'));
-        },
+          }),
       });
     },
 
@@ -706,6 +723,14 @@ export const createStudioDirectorCommandMailbox = (
       if (disposed) return;
       disposed = true;
       await Promise.all(cursorOperations.values());
+      while (slotCleanupOperations.size > 0) {
+        const operations = [...slotCleanupOperations.values()];
+        // A finishing cleanup can expose its queued successor; repeat until stable.
+        // eslint-disable-next-line no-await-in-loop
+        await Promise.allSettled(operations);
+        // eslint-disable-next-line no-await-in-loop
+        await Promise.resolve();
+      }
       let failed = false;
       for (const session of sessions.values()) {
         try {

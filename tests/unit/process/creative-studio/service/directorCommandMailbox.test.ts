@@ -334,6 +334,77 @@ describe('Studio Director command mailbox', () => {
     });
   });
 
+  it('serializes finish with orphan maintenance so cleanup A cannot unlink newly reserved slot B', async () => {
+    // Kills either mutation that bypasses the shared per-project slot-cleanup queue.
+    await mailbox.ensure(projectId);
+    await writeBundle(rootDir, projectId, 'command_a');
+    await mailbox.writeReceipt(projectId, makeReceipt(projectId, 'command_a'));
+    const directories = commandDirectories(await nodeFs.realpath(rootDir), projectId);
+    const pendingA = path.join(directories.pending, 'command_a.json');
+    const pendingB = path.join(directories.pending, 'command_b.json');
+    const slotFile = path.join(directories.slots, '0.slot');
+    let releasePendingRemoval!: () => void;
+    const pendingRemovalReleased = new Promise<void>((resolve) => {
+      releasePendingRemoval = resolve;
+    });
+    let signalPendingRemoved!: () => void;
+    const pendingRemoved = new Promise<void>((resolve) => {
+      signalPendingRemoved = resolve;
+    });
+    let signalReplacementReserved!: () => void;
+    const replacementReserved = new Promise<void>((resolve) => {
+      signalReplacementReserved = resolve;
+    });
+    let blockedPendingRemoval = false;
+    let slotRemovalCount = 0;
+    const racingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property !== 'rm') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.rm>) => {
+          const target = String(args[0]);
+          if (target === pendingA && !blockedPendingRemoval) {
+            blockedPendingRemoval = true;
+            await nodeFs.rm(...args);
+            signalPendingRemoved();
+            await pendingRemovalReleased;
+            return;
+          }
+          await nodeFs.rm(...args);
+          if (target !== slotFile) return;
+          slotRemovalCount += 1;
+          if (slotRemovalCount !== 1) return;
+          await nodeFs.writeFile(slotFile, JSON.stringify(makeSlot('command_b')));
+          await nodeFs.writeFile(pendingB, JSON.stringify(makeCommand(projectId, 'command_b')));
+          signalReplacementReserved();
+        };
+      },
+    }) as typeof nodeFs;
+    const racingMailbox = createStudioDirectorCommandMailbox({
+      rootDir,
+      store,
+      fs: racingFs,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+
+    const finishingA = racingMailbox.finish(projectId, 'command_a');
+    await pendingRemoved;
+    const maintainingA = racingMailbox.releaseOrphanedSlotsPage(null, NOW, 64);
+    await Promise.race([replacementReserved, new Promise<void>((resolve) => setTimeout(resolve, 100))]);
+    releasePendingRemoval();
+    const [finishResult, maintenanceResult] = await Promise.allSettled([finishingA, maintainingA]);
+
+    expect(finishResult).toMatchObject({
+      status: 'rejected',
+      reason: expect.objectContaining({ code: 'storage_error' }),
+    });
+    expect(maintenanceResult).toMatchObject({ status: 'fulfilled' });
+    expect(JSON.parse(await nodeFs.readFile(slotFile, 'utf8'))).toEqual(makeSlot('command_b'));
+    expect(JSON.parse(await nodeFs.readFile(pendingB, 'utf8'))).toEqual(makeCommand(projectId, 'command_b'));
+    expect(slotRemovalCount).toBe(1);
+    await racingMailbox.dispose();
+  });
+
   it('removes attributable invalid slot residue only when its safe command identity matches', async () => {
     await mailbox.ensure(projectId);
     await writeBundle(rootDir, projectId, 'command_1');

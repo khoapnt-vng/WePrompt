@@ -473,6 +473,7 @@ export const createStudioDirectorCommandProcessor = (
       );
       slotCursor = page.nextCursor;
     } catch (error) {
+      slotCursor = null;
       safeLog('[CreativeStudio] Director command slot maintenance deferred', error);
     }
     try {
@@ -484,6 +485,7 @@ export const createStudioDirectorCommandProcessor = (
       );
       receiptCursor = page.nextCursor;
     } catch (error) {
+      receiptCursor = null;
       safeLog('[CreativeStudio] Director command receipt maintenance deferred', error);
     }
   };
@@ -497,7 +499,10 @@ export const createStudioDirectorCommandProcessor = (
   const schedulePendingSweep = (): Promise<void> => {
     if (pendingOperation !== null) return pendingOperation;
     const operation = runPendingSweep()
-      .catch((error: unknown) => safeLog('[CreativeStudio] Director command pending sweep deferred', error))
+      .catch((error: unknown) => {
+        pendingCursor = null;
+        safeLog('[CreativeStudio] Director command pending sweep deferred', error);
+      })
       .finally(() => {
         if (pendingOperation === operation) pendingOperation = null;
       });

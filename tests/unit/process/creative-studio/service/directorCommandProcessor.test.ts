@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { mkdtempSync, promises as nodeFs, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS,
@@ -12,6 +15,7 @@ import {
   type StudioDirectorCommandReceiptV1,
   type StudioDirectorCommandRecordV1,
   type StudioProject,
+  type CreateStudioProjectInput,
 } from '@/common/types/project/creativeStudioTypes';
 import {
   createStudioDirectorCommandProcessor,
@@ -28,10 +32,43 @@ import type {
   StudioDirectorCommandPage,
   StudioDirectorPendingRead,
 } from '@process/services/creative-studio/service/directorCommandMailbox';
-import { CreativeStudioStoreError } from '@process/services/creative-studio/store';
+import { createStudioDirectorCommandMailbox } from '@process/services/creative-studio/service/directorCommandMailbox';
+import { createStudioDirectorCommandService } from '@process/services/creative-studio/service/directorCommandService';
+import { createCreativeStudioStore, CreativeStudioStoreError } from '@process/services/creative-studio/store';
 
 const NOW_MS = Date.parse('2026-08-16T12:00:10.000Z');
 const COMMITTED_AT = '2026-08-16T12:00:10.125Z';
+
+const makeInput = (name: string): CreateStudioProjectInput => ({
+  name,
+  brief: 'A real Director command boundary',
+  aspectRatio: '16:9',
+  targetDurationSeconds: 12,
+  resolution: '1080p',
+});
+
+const realCommandDirectories = (rootDir: string, projectId: string) => {
+  const root = path.join(rootDir, projectId, 'commands');
+  return {
+    pending: path.join(root, 'pending'),
+    slots: path.join(root, 'slots'),
+    receipts: path.join(root, 'receipts'),
+  };
+};
+
+const publishRealCommand = async (rootDir: string, command: StudioDirectorCommandRecordV1): Promise<void> => {
+  const directories = realCommandDirectories(rootDir, command.projectId);
+  await nodeFs.writeFile(path.join(directories.pending, `${command.commandId}.json`), JSON.stringify(command));
+  await nodeFs.writeFile(
+    path.join(directories.slots, '0.slot'),
+    JSON.stringify({
+      schemaVersion: 1,
+      commandId: command.commandId,
+      reservedAt: command.createdAt,
+      deadlineAt: command.deadlineAt,
+    })
+  );
+};
 
 const keyOf = (projectId: string, commandId: string): string => `${projectId}/${commandId}`;
 
@@ -673,6 +710,439 @@ describe('Studio Director command processor repair and coordination', () => {
   });
 });
 
+describe('Studio Director command processor real storage boundaries', () => {
+  it('lets an untagged queued-ahead CAS win stale precedence before the cutoff callback', async () => {
+    // Kills mutations that run the cutoff callback before CAS or attribute an untagged user commit.
+    const rootDir = mkdtempSync(path.join(tmpdir(), 'studio-director-cas-'));
+    try {
+      const tracker = createStudioDirectorCommitTracker();
+      const observed: Parameters<StudioDirectorCommitTracker['observe']>[0][] = [];
+      const store = createCreativeStudioStore({
+        rootDir,
+        now: () => '2026-08-16T12:00:10.125Z',
+        createId: () => 'project_cas',
+        onProjectCommitted: (facts) => {
+          observed.push(facts);
+          tracker.observe(facts);
+        },
+      });
+      const project = await store.createProject(makeInput('CAS contention'));
+      const command = makeCommand(project.id, 'command_cas', { expectedRevision: project.revision });
+      const cutoff = Date.parse(command.deadlineAt) - STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS;
+      const callbackClock = vi.fn(() => cutoff);
+      const service = createStudioDirectorCommandService({ store, now: callbackClock });
+      tracker.expect(command);
+
+      const userWrite = store.updateProject(
+        project.id,
+        (current) => ({ ...current, name: 'Queued user winner' }),
+        project.revision
+      );
+      const directorWrite = service.apply(command, cutoff, { commitTag: command.commandId });
+
+      await expect(userWrite).resolves.toMatchObject({ revision: project.revision + 1 });
+      await expect(directorWrite).rejects.toMatchObject({ code: 'stale_project' });
+      expect(callbackClock).not.toHaveBeenCalled();
+      expect(observed).toEqual([
+        expect.objectContaining({
+          projectId: project.id,
+          previousRevision: project.revision,
+          committedRevision: project.revision + 1,
+          commitTag: null,
+        }),
+      ]);
+      expect(tracker.pendingReceipt(project.id, command.commandId)).toBeNull();
+      await expect(store.getProject(project.id)).resolves.toMatchObject({
+        revision: project.revision + 1,
+        name: 'Queued user winner',
+        brief: project.brief,
+      });
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it('repairs an indeterminate receipt after a failed tagged write without misattributing a later user write', async () => {
+    // Kills mutations that clear the repair marker on receipt failure or consume an untagged post-failure commit.
+    const rootDir = mkdtempSync(path.join(tmpdir(), 'studio-director-repair-'));
+    let processor: StudioDirectorCommandProcessor | null = null;
+    try {
+      let failNextProjectRename = false;
+      let projectFile = '';
+      const failingStoreFs = new Proxy(nodeFs, {
+        get(realFs, property, receiver) {
+          if (property !== 'rename') return Reflect.get(realFs, property, receiver);
+          return async (...args: Parameters<typeof nodeFs.rename>) => {
+            if (failNextProjectRename && String(args[1]) === projectFile) {
+              failNextProjectRename = false;
+              throw new Error('indeterminate project publication');
+            }
+            return nodeFs.rename(...args);
+          };
+        },
+      }) as typeof nodeFs;
+      const tracker = createStudioDirectorCommitTracker();
+      const observed: Parameters<StudioDirectorCommitTracker['observe']>[0][] = [];
+      const store = createCreativeStudioStore({
+        rootDir,
+        fs: failingStoreFs,
+        now: () => COMMITTED_AT,
+        createId: () => 'project_repair',
+        onProjectCommitted: (facts) => {
+          observed.push(facts);
+          tracker.observe(facts);
+        },
+      });
+      const project = await store.createProject(makeInput('Indeterminate repair'));
+      projectFile = path.join(await nodeFs.realpath(rootDir), project.id, 'project.json');
+      const realMailbox = createStudioDirectorCommandMailbox({
+        rootDir,
+        store,
+        now: () => new Date(NOW_MS).toISOString(),
+        watchCommandTree: () => ({ close: vi.fn() }),
+      });
+      await realMailbox.ensure(project.id);
+      let remainingReceiptFailures = 1;
+      const writeReceipt = vi.fn(async (projectId: string, receipt: StudioDirectorCommandReceiptV1) => {
+        if (remainingReceiptFailures > 0) {
+          remainingReceiptFailures -= 1;
+          throw new CreativeStudioStoreError('storage_error', 'indeterminate receipt publication');
+        }
+        await realMailbox.writeReceipt(projectId, receipt);
+      });
+      const processorMailbox: StudioDirectorCommandMailbox = { ...realMailbox, writeReceipt };
+      const realService = createStudioDirectorCommandService({ store, now: () => NOW_MS });
+      const apply = vi.fn(realService.apply.bind(realService));
+      processor = createStudioDirectorCommandProcessor({
+        store,
+        mailbox: processorMailbox,
+        service: { apply },
+        tracker,
+        onProjectUpdated: vi.fn(),
+        now: () => NOW_MS,
+        setInterval: () => ({ interval: true }),
+        clearInterval: vi.fn(),
+        logError: vi.fn(),
+      });
+      await processor.start();
+      const command = makeCommand(project.id, 'command_repair', { expectedRevision: project.revision });
+      await publishRealCommand(rootDir, command);
+      failNextProjectRename = true;
+
+      processor.trigger(project.id, command.commandId);
+      await vi.waitFor(() => expect(writeReceipt).toHaveBeenCalledTimes(1));
+      const frozenIndeterminate = tracker.pendingReceipt(project.id, command.commandId);
+      expect(frozenIndeterminate).toMatchObject({
+        status: 'indeterminate',
+        reasonCode: 'commit_attribution_unknown',
+        observedRevision: project.revision,
+      });
+      expect(observed).toEqual([]);
+
+      await store.updateProject(
+        project.id,
+        (current) => ({ ...current, name: 'Post-failure user update' }),
+        project.revision
+      );
+      expect(observed).toEqual([
+        expect.objectContaining({
+          previousRevision: project.revision,
+          committedRevision: project.revision + 1,
+          commitTag: null,
+        }),
+      ]);
+      expect(tracker.pendingReceipt(project.id, command.commandId)).toEqual(frozenIndeterminate);
+
+      processor.trigger(project.id, command.commandId);
+      await vi.waitFor(async () =>
+        expect(await realMailbox.readReceipt(project.id, command.commandId)).toEqual(frozenIndeterminate)
+      );
+      await vi.waitFor(async () => expect(await realMailbox.readPending(project.id, command.commandId)).toBeNull());
+      expect(apply).toHaveBeenCalledOnce();
+      await vi.waitFor(() => expect(tracker.pendingReceipt(project.id, command.commandId)).toBeNull());
+      await expect(
+        realMailbox.writeReceipt(project.id, {
+          ...frozenIndeterminate!,
+          decidedAt: '2026-08-16T12:00:11.000Z',
+        })
+      ).rejects.toMatchObject({ code: 'invalid_payload' });
+      await expect(
+        nodeFs.lstat(path.join(realCommandDirectories(rootDir, project.id).slots, '0.slot'))
+      ).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await processor?.stop();
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it('recovers from a watcher error on the real sweep without deadlocking the store queue', async () => {
+    // Kills mutations that stop periodic repair after watcher failure or reuse the store's project queue.
+    const rootDir = mkdtempSync(path.join(tmpdir(), 'studio-director-watcher-'));
+    let processor: StudioDirectorCommandProcessor | null = null;
+    try {
+      const tracker = createStudioDirectorCommitTracker();
+      const store = createCreativeStudioStore({
+        rootDir,
+        now: () => COMMITTED_AT,
+        createId: () => 'project_watcher',
+        onProjectCommitted: tracker.observe,
+      });
+      const project = await store.createProject(makeInput('Watcher recovery'));
+      let watcherError: ((error: Error) => void) | null = null;
+      const watcherClose = vi.fn();
+      const mailbox = createStudioDirectorCommandMailbox({
+        rootDir,
+        store,
+        now: () => new Date(NOW_MS).toISOString(),
+        watchCommandTree: (input) => {
+          watcherError = input.onError;
+          return { close: watcherClose };
+        },
+        logError: vi.fn(),
+      });
+      const service = createStudioDirectorCommandService({ store, now: () => NOW_MS });
+      const apply = vi.fn(service.apply.bind(service));
+      const intervals: ManualInterval[] = [];
+      const notify = vi.fn();
+      processor = createStudioDirectorCommandProcessor({
+        store,
+        mailbox,
+        service: { apply },
+        tracker,
+        onProjectUpdated: notify,
+        now: () => NOW_MS,
+        setInterval: (callback, delayMs) => {
+          const interval = { callback, delayMs, cleared: false };
+          intervals.push(interval);
+          return interval;
+        },
+        clearInterval: (interval) => {
+          (interval as ManualInterval).cleared = true;
+        },
+        logError: vi.fn(),
+      });
+      await processor.start();
+      watcherError?.(new Error('watch stream interrupted'));
+      const command = makeCommand(project.id, 'command_watcher', { expectedRevision: project.revision });
+      await publishRealCommand(rootDir, command);
+
+      intervals.find(({ delayMs }) => delayMs === STUDIO_DIRECTOR_COMMAND_SWEEP_INTERVAL_MS)!.callback();
+      let receipt: StudioDirectorCommandReceiptV1 | null = null;
+      await vi.waitFor(async () => {
+        receipt = await mailbox.readReceipt(project.id, command.commandId);
+        expect(receipt).not.toBeNull();
+      });
+
+      expect(receipt).toMatchObject({ status: 'applied', appliedRevision: project.revision + 1 });
+      expect(apply).toHaveBeenCalledOnce();
+      await vi.waitFor(() => expect(notify).toHaveBeenCalledOnce());
+      await expect(store.getProject(project.id)).resolves.toMatchObject({
+        revision: project.revision + 1,
+        brief: 'A bounded direct edit',
+      });
+      await expect(mailbox.readPending(project.id, command.commandId)).resolves.toBeNull();
+      await expect(
+        nodeFs.lstat(path.join(realCommandDirectories(rootDir, project.id).slots, '0.slot'))
+      ).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(
+        mailbox.writeReceipt(project.id, { ...receipt!, decidedAt: '2026-08-16T12:00:11.000Z' })
+      ).rejects.toMatchObject({ code: 'invalid_payload' });
+    } finally {
+      await processor?.stop();
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it('restarts all three invalidated real mailbox traversals and reaches later durable work', async () => {
+    // Kills any mutation that reuses a mailbox-invalidated pending, slot, or receipt cursor.
+    const rootDir = mkdtempSync(path.join(tmpdir(), 'studio-director-cursors-'));
+    let processor: StudioDirectorCommandProcessor | null = null;
+    try {
+      const tracker = createStudioDirectorCommitTracker();
+      let nextProjectId = 0;
+      const store = createCreativeStudioStore({
+        rootDir,
+        now: () => COMMITTED_AT,
+        createId: () => `project_cursor_${++nextProjectId}`,
+        onProjectCommitted: tracker.observe,
+      });
+      const liveProject = await store.createProject(makeInput('Live cursor recovery'));
+      const orphanProject = await store.createProject(makeInput('Slot cursor recovery'));
+      const receiptProject = await store.createProject(makeInput('Receipt cursor recovery'));
+      const realMailbox = createStudioDirectorCommandMailbox({
+        rootDir,
+        store,
+        now: () => new Date(NOW_MS).toISOString(),
+        watchCommandTree: () => ({ close: vi.fn() }),
+      });
+      await Promise.all([
+        realMailbox.ensure(liveProject.id),
+        realMailbox.ensure(orphanProject.id),
+        realMailbox.ensure(receiptProject.id),
+      ]);
+      const invalidateOnSecond = <Result>(
+        method: (cursor: string | null, limit: number) => Promise<Result>
+      ): ReturnType<typeof vi.fn<(cursor: string | null, limit: number) => Promise<Result>>> => {
+        let callCount = 0;
+        return vi.fn(async (cursor: string | null) => {
+          callCount += 1;
+          if (callCount === 2) {
+            await method(null, 1);
+            return method(cursor, 1);
+          }
+          return method(cursor, 1);
+        });
+      };
+      const listPendingPage = invalidateOnSecond(realMailbox.listPendingPage.bind(realMailbox));
+      const releaseOrphanedSlotsPage = invalidateOnSecond((cursor, limit) =>
+        realMailbox.releaseOrphanedSlotsPage(cursor, new Date(NOW_MS).toISOString(), limit)
+      );
+      const pruneReceiptsPage = invalidateOnSecond((cursor, limit) =>
+        realMailbox.pruneReceiptsPage(cursor, '2026-08-09T00:00:00.000Z', limit)
+      );
+      const processorMailbox: StudioDirectorCommandMailbox = {
+        ...realMailbox,
+        listPendingPage,
+        releaseOrphanedSlotsPage: (cursor, _currentTime, limit) => releaseOrphanedSlotsPage(cursor, limit),
+        pruneReceiptsPage: (cursor, _decidedBefore, limit) => pruneReceiptsPage(cursor, limit),
+      };
+      const service = createStudioDirectorCommandService({ store, now: () => NOW_MS });
+      const intervals: ManualInterval[] = [];
+      processor = createStudioDirectorCommandProcessor({
+        store,
+        mailbox: processorMailbox,
+        service,
+        tracker,
+        onProjectUpdated: vi.fn(),
+        now: () => NOW_MS,
+        setInterval: (callback, delayMs) => {
+          const interval = { callback, delayMs, cleared: false };
+          intervals.push(interval);
+          return interval;
+        },
+        clearInterval: (interval) => {
+          (interval as ManualInterval).cleared = true;
+        },
+        logError: vi.fn(),
+      });
+      await processor.start();
+      const pendingTick = intervals.find(
+        ({ delayMs }) => delayMs === STUDIO_DIRECTOR_COMMAND_SWEEP_INTERVAL_MS
+      )!.callback;
+      const maintenanceTick = intervals.find(
+        ({ delayMs }) => delayMs === STUDIO_DIRECTOR_COMMAND_MAINTENANCE_INTERVAL_MS
+      )!.callback;
+
+      pendingTick();
+      await vi.waitFor(() => expect(listPendingPage).toHaveBeenCalledTimes(2));
+      maintenanceTick();
+      await vi.waitFor(() => expect(releaseOrphanedSlotsPage).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(pruneReceiptsPage).toHaveBeenCalledTimes(1));
+      await Promise.allSettled([
+        releaseOrphanedSlotsPage.mock.results.at(-1)?.value,
+        pruneReceiptsPage.mock.results.at(-1)?.value,
+      ]);
+      maintenanceTick();
+      await vi.waitFor(() => expect(releaseOrphanedSlotsPage).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(pruneReceiptsPage).toHaveBeenCalledTimes(2));
+      await Promise.allSettled([
+        releaseOrphanedSlotsPage.mock.results.at(-1)?.value,
+        pruneReceiptsPage.mock.results.at(-1)?.value,
+      ]);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      const liveCommand = makeCommand(liveProject.id, 'command_cursor_live', {
+        expectedRevision: liveProject.revision,
+      });
+      await publishRealCommand(rootDir, liveCommand);
+      await nodeFs.writeFile(
+        path.join(realCommandDirectories(rootDir, orphanProject.id).slots, '0.slot'),
+        JSON.stringify({
+          schemaVersion: 1,
+          commandId: 'command_cursor_orphan',
+          reservedAt: '2026-08-01T00:00:00.000Z',
+          deadlineAt: '2026-08-01T00:00:15.000Z',
+        })
+      );
+      await realMailbox.writeReceipt(receiptProject.id, {
+        schemaVersion: 1,
+        commandId: 'command_cursor_old_receipt',
+        projectId: receiptProject.id,
+        expectedRevision: receiptProject.revision,
+        decidedAt: '2026-08-01T00:00:00.000Z',
+        status: 'rejected',
+        observedRevision: receiptProject.revision,
+        reasonCode: 'validation_failed',
+      });
+
+      pendingTick();
+      maintenanceTick();
+      await vi.waitFor(() => expect(listPendingPage).toHaveBeenCalledTimes(3));
+      await vi.waitFor(() => expect(releaseOrphanedSlotsPage).toHaveBeenCalledTimes(3));
+      await vi.waitFor(() => expect(pruneReceiptsPage).toHaveBeenCalledTimes(3));
+      expect(listPendingPage.mock.calls.slice(0, 3).map(([cursor]) => cursor)).toEqual([
+        null,
+        expect.any(String),
+        null,
+      ]);
+      expect(releaseOrphanedSlotsPage.mock.calls.slice(0, 3).map(([cursor]) => cursor)).toEqual([
+        null,
+        expect.any(String),
+        null,
+      ]);
+      expect(pruneReceiptsPage.mock.calls.slice(0, 3).map(([cursor]) => cursor)).toEqual([
+        null,
+        expect.any(String),
+        null,
+      ]);
+
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const pendingCalls = listPendingPage.mock.calls.length;
+        const slotCalls = releaseOrphanedSlotsPage.mock.calls.length;
+        const receiptCalls = pruneReceiptsPage.mock.calls.length;
+        // Retry the timer callback until the prior operation has released its single-flight guard.
+        // eslint-disable-next-line no-await-in-loop
+        await vi.waitFor(() => {
+          pendingTick();
+          expect(listPendingPage.mock.calls.length).toBeGreaterThan(pendingCalls);
+        });
+        // eslint-disable-next-line no-await-in-loop
+        await vi.waitFor(() => {
+          maintenanceTick();
+          expect(releaseOrphanedSlotsPage.mock.calls.length).toBeGreaterThan(slotCalls);
+          expect(pruneReceiptsPage.mock.calls.length).toBeGreaterThan(receiptCalls);
+        });
+        const slotPage = releaseOrphanedSlotsPage.mock.results.at(-1)?.value;
+        const receiptPage = pruneReceiptsPage.mock.results.at(-1)?.value;
+        // Exact reads remain strict, so wait for concurrent maintenance to leave a stable record boundary.
+        // eslint-disable-next-line no-await-in-loop
+        await Promise.allSettled([slotPage, receiptPage]);
+        // eslint-disable-next-line no-await-in-loop
+        const [liveReceipt, orphanExists, oldReceipt] = await Promise.all([
+          realMailbox.readReceipt(liveProject.id, liveCommand.commandId).catch(() => null),
+          nodeFs.lstat(path.join(realCommandDirectories(rootDir, orphanProject.id).slots, '0.slot')).then(
+            () => true,
+            () => false
+          ),
+          realMailbox.readReceipt(receiptProject.id, 'command_cursor_old_receipt').catch(() => null),
+        ]);
+        if (liveReceipt !== null && !orphanExists && oldReceipt === null) break;
+      }
+
+      await expect(realMailbox.readReceipt(liveProject.id, liveCommand.commandId)).resolves.toMatchObject({
+        status: 'applied',
+      });
+      await expect(
+        nodeFs.lstat(path.join(realCommandDirectories(rootDir, orphanProject.id).slots, '0.slot'))
+      ).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(realMailbox.readReceipt(receiptProject.id, 'command_cursor_old_receipt')).resolves.toBeNull();
+    } finally {
+      await processor?.stop();
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('Studio Director command processor lifecycle', () => {
   it('rejects an incomplete strict startup snapshot before watcher, timers, or dispatch', async () => {
     const harness = createHarness({
@@ -742,6 +1212,80 @@ describe('Studio Director command processor lifecycle', () => {
 
     expect(receipt).toMatchObject({ status: 'applied', appliedRevision: 2 });
     expect(harness.serviceApply).toHaveBeenCalledOnce();
+    await harness.processor.stop();
+  });
+
+  it('restarts a failed live pending page from null instead of retaining its closed opaque cursor', async () => {
+    // Kills the mutation that logs a page failure while retaining pendingCursor.
+    const ref = { projectId: 'project_1', commandId: 'command_1' };
+    const harness = createHarness();
+    const listPendingPage = vi.mocked(harness.mailbox.listPendingPage);
+    listPendingPage
+      .mockResolvedValueOnce(page([], 'pending-token'))
+      .mockRejectedValueOnce(new CreativeStudioStoreError('storage_error', 'page session closed'))
+      .mockImplementationOnce(async (cursor) => {
+        if (cursor !== null) throw new CreativeStudioStoreError('invalid_payload', 'closed cursor reused');
+        return page([ref]);
+      });
+    await harness.processor.start();
+    addLiveCommand(harness, makeCommand(ref.projectId, ref.commandId));
+    const pendingTick = harness.intervals.find(
+      ({ delayMs }) => delayMs === STUDIO_DIRECTOR_COMMAND_SWEEP_INTERVAL_MS
+    )!.callback;
+
+    pendingTick();
+    await vi.waitFor(() => expect(listPendingPage).toHaveBeenCalledTimes(2));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    pendingTick();
+    await vi.waitFor(() => expect(listPendingPage).toHaveBeenCalledTimes(3));
+
+    expect(listPendingPage.mock.calls.map(([cursor]) => cursor)).toEqual([null, 'pending-token', null]);
+    await expect(waitForReceipt(harness)).resolves.toMatchObject({ status: 'applied' });
+    await harness.processor.stop();
+  });
+
+  it('restarts failed slot and receipt pages from null instead of retaining closed opaque cursors', async () => {
+    // Kills the mutations that retain slotCursor or receiptCursor after their page rejects.
+    const harness = createHarness();
+    let slotRecoveryProgress = 0;
+    let receiptRecoveryProgress = 0;
+    harness.releaseOrphans
+      .mockResolvedValueOnce({ processed: 0, nextCursor: 'slot-token' })
+      .mockRejectedValueOnce(new CreativeStudioStoreError('storage_error', 'slot page session closed'))
+      .mockImplementationOnce(async (cursor) => {
+        if (cursor !== null) throw new CreativeStudioStoreError('invalid_payload', 'closed slot cursor reused');
+        slotRecoveryProgress += 1;
+        return { processed: 1, nextCursor: null };
+      });
+    harness.pruneReceipts
+      .mockResolvedValueOnce({ processed: 0, nextCursor: 'receipt-token' })
+      .mockRejectedValueOnce(new CreativeStudioStoreError('storage_error', 'receipt page session closed'))
+      .mockImplementationOnce(async (cursor) => {
+        if (cursor !== null) throw new CreativeStudioStoreError('invalid_payload', 'closed receipt cursor reused');
+        receiptRecoveryProgress += 1;
+        return { processed: 1, nextCursor: null };
+      });
+    await harness.processor.start();
+    const maintenanceTick = harness.intervals.find(
+      ({ delayMs }) => delayMs === STUDIO_DIRECTOR_COMMAND_MAINTENANCE_INTERVAL_MS
+    )!.callback;
+
+    for (let callCount = 1; callCount <= 3; callCount += 1) {
+      maintenanceTick();
+      // eslint-disable-next-line no-await-in-loop
+      await vi.waitFor(() => expect(harness.releaseOrphans).toHaveBeenCalledTimes(callCount));
+      // eslint-disable-next-line no-await-in-loop
+      await vi.waitFor(() => expect(harness.pruneReceipts).toHaveBeenCalledTimes(callCount));
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+
+    expect(harness.releaseOrphans.mock.calls.map(([cursor]) => cursor)).toEqual([null, 'slot-token', null]);
+    expect(harness.pruneReceipts.mock.calls.map(([cursor]) => cursor)).toEqual([null, 'receipt-token', null]);
+    expect({ slotRecoveryProgress, receiptRecoveryProgress }).toEqual({
+      slotRecoveryProgress: 1,
+      receiptRecoveryProgress: 1,
+    });
     await harness.processor.stop();
   });
 
