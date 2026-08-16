@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { existsSync, mkdtempSync, promises as nodeFs, rmSync } from 'node:fs';
+import { constants as fsConstants, existsSync, mkdtempSync, promises as nodeFs, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -181,6 +181,71 @@ describe('error-neutral Creative Studio record IO', () => {
     ).rejects.toMatchObject({ code: kind === 'oversize' ? 'record_too_large' : 'unsafe_file' });
   });
 
+  it('rejects an injected FIFO-like special file before open or read can block', async () => {
+    const records = path.join(canonicalRoot, 'records');
+    await nodeFs.mkdir(records);
+    const target = path.join(records, 'record.json');
+    await nodeFs.writeFile(target, '{"safe":true}');
+    const specialStats = await nodeFs.lstat(records);
+    let opened = false;
+    let read = false;
+    const specialFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property === 'lstat') {
+          return async (...args: Parameters<typeof nodeFs.lstat>) =>
+            String(args[0]) === target ? specialStats : nodeFs.lstat(...args);
+        }
+        if (property !== 'open') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.open>) => {
+          const handle = await nodeFs.open(...args);
+          if (String(args[0]) !== target) return handle;
+          opened = true;
+          return new Proxy(handle, {
+            get(realHandle, handleProperty, handleReceiver) {
+              if (handleProperty === 'read') {
+                return async (...readArgs: Parameters<typeof handle.read>) => {
+                  read = true;
+                  return handle.read(...readArgs);
+                };
+              }
+              return Reflect.get(realHandle, handleProperty, handleReceiver);
+            },
+          });
+        };
+      },
+    }) as typeof nodeFs;
+
+    await expect(
+      readBoundedRegularFile({ fs: specialFs, canonicalRoot, file: target, maxBytes: 64 })
+    ).rejects.toMatchObject({ code: 'unsafe_file', message: 'Record IO failed' });
+    expect(opened).toBe(false);
+    expect(read).toBe(false);
+  });
+
+  it.skipIf(process.platform === 'win32')('opens POSIX records with no-follow and nonblocking flags', async () => {
+    const records = path.join(canonicalRoot, 'records');
+    await nodeFs.mkdir(records);
+    const target = path.join(records, 'record.json');
+    await nodeFs.writeFile(target, '{"safe":true}');
+    let openedFlags: number | undefined;
+    const observedFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property !== 'open') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.open>) => {
+          if (String(args[0]) === target && typeof args[1] === 'number') openedFlags = args[1];
+          return nodeFs.open(...args);
+        };
+      },
+    }) as typeof nodeFs;
+
+    await expect(readBoundedRegularFile({ fs: observedFs, canonicalRoot, file: target, maxBytes: 64 })).resolves.toBe(
+      '{"safe":true}'
+    );
+    expect(openedFlags).toBeDefined();
+    expect(openedFlags! & fsConstants.O_NOFOLLOW).toBe(fsConstants.O_NOFOLLOW);
+    expect(openedFlags! & fsConstants.O_NONBLOCK).toBe(fsConstants.O_NONBLOCK);
+  });
+
   it('rejects a regular path swapped to a symlink around the opened handle', async () => {
     const records = path.join(canonicalRoot, 'records');
     await nodeFs.mkdir(records);
@@ -232,16 +297,6 @@ describe('error-neutral Creative Studio record IO', () => {
     const readLengths: number[] = [];
     const growingFs = new Proxy(nodeFs, {
       get(realFs, property, receiver) {
-        if (property === 'lstat') {
-          return async (...args: Parameters<typeof nodeFs.lstat>) => {
-            const stats = await nodeFs.lstat(...args);
-            if (String(args[0]) === target && !grew) {
-              grew = true;
-              await nodeFs.appendFile(target, 'x'.repeat(128));
-            }
-            return stats;
-          };
-        }
         if (property === 'readFile') {
           return async (...args: Parameters<typeof nodeFs.readFile>) => {
             usedPathReadFile = true;

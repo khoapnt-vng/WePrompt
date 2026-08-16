@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { promises as nodeFs } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { promises as nodeFs, type Dir, type Dirent } from 'node:fs';
 import { watch as watchFileSystem } from 'node:fs';
 import path from 'node:path';
 import {
@@ -61,6 +62,7 @@ export type StudioDirectorCommandMailbox = {
     limit: number
   ): Promise<StudioDirectorMaintenancePage>;
   watch(trigger: (projectId: string, commandId?: string) => void): Promise<() => void>;
+  dispose(): Promise<void>;
 };
 
 type CommandDirectories = {
@@ -72,10 +74,19 @@ type CommandDirectories = {
 
 type LedgerDirectory = 'pending' | 'receipts';
 
-type LedgerCursor = {
+type CursorMethod = 'snapshotPendingPage' | 'listPendingPage' | 'releaseOrphanedSlotsPage' | 'pruneReceiptsPage';
+
+type LedgerTraversal = {
+  directory: Dir;
   projectId: string;
-  /** null means the project was fully inspected. */
-  entryName: string | null;
+};
+
+type CursorSession = {
+  method: CursorMethod;
+  token: string;
+  root: Dir;
+  ledger: LedgerTraversal | null;
+  closed: boolean;
 };
 
 type SlotRead =
@@ -91,7 +102,7 @@ type WatchCommandTree = (input: {
 
 export type StudioDirectorCommandMailboxDeps = {
   rootDir: string;
-  store: Pick<CreativeStudioStore, 'getVerifiedProjectDirectory' | 'listProjects'>;
+  store: Pick<CreativeStudioStore, 'getVerifiedProjectDirectory'>;
   now?: () => string;
   waitMs?: number;
   fs?: RecordIoFileSystem;
@@ -122,38 +133,6 @@ const canonicalTimestamp = (value: string): number | null => {
   if (value.length !== 24) return null;
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) && new Date(parsed).toISOString() === value ? parsed : null;
-};
-
-const compareCodeUnits = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
-
-const encodeLedgerCursor = (cursor: LedgerCursor): string =>
-  `v1.${Buffer.from(JSON.stringify([cursor.projectId, cursor.entryName]), 'utf8').toString('base64url')}`;
-
-const decodeLedgerCursor = (cursor: string | null): LedgerCursor | null => {
-  if (cursor === null) return null;
-  if (cursor.length > 2_048 || !cursor.startsWith('v1.')) throw invalidPayload();
-  const encoded = cursor.slice(3);
-  if (!/^[A-Za-z0-9_-]+$/.test(encoded)) throw invalidPayload();
-  try {
-    const bytes = Buffer.from(encoded, 'base64url');
-    if (bytes.toString('base64url') !== encoded) throw invalidPayload();
-    const value = JSON.parse(bytes.toString('utf8')) as unknown;
-    if (!Array.isArray(value) || value.length !== 2 || !isSafeStudioDirectorId(value[0])) throw invalidPayload();
-    const entryName = value[1];
-    if (
-      entryName !== null &&
-      (typeof entryName !== 'string' ||
-        entryName.length === 0 ||
-        entryName.length > 1_024 ||
-        entryName.includes('\u0000'))
-    ) {
-      throw invalidPayload();
-    }
-    return { projectId: value[0], entryName };
-  } catch (error) {
-    if (error instanceof CreativeStudioStoreError) throw error;
-    throw invalidPayload();
-  }
 };
 
 /** Creates the main-process mailbox without publishing or consuming a command. */
@@ -243,98 +222,172 @@ export const createStudioDirectorCommandMailbox = (
     }
   };
 
-  const listProjectIds = async (): Promise<string[]> =>
-    (await deps.store.listProjects()).map((project) => project.id).toSorted();
+  const sessions = new Map<CursorMethod, CursorSession>();
+  const cursorOperations = new Map<CursorMethod, Promise<void>>();
+  let disposed = false;
 
-  const readDirectoryEntries = async (directory: string): Promise<import('node:fs').Dirent[]> => {
+  const runCursorMethod = <Result>(method: CursorMethod, operation: () => Promise<Result>): Promise<Result> => {
+    const previous = cursorOperations.get(method) ?? Promise.resolve();
+    const result = previous.then(operation, operation);
+    const tail = result.then(
+      (): void => undefined,
+      (): void => undefined
+    );
+    cursorOperations.set(method, tail);
+    return result.finally(() => {
+      if (cursorOperations.get(method) === tail) cursorOperations.delete(method);
+    });
+  };
+
+  const closeSession = async (session: CursorSession): Promise<void> => {
+    if (session.closed) return;
+    session.closed = true;
+    if (sessions.get(session.method) === session) sessions.delete(session.method);
+    const handles = session.ledger === null ? [session.root] : [session.ledger.directory, session.root];
+    session.ledger = null;
+    let failed = false;
+    for (const handle of handles) {
+      try {
+        // Every opened handle is attempted even when an earlier close fails.
+        // eslint-disable-next-line no-await-in-loop
+        await handle.close();
+      } catch {
+        failed = true;
+      }
+    }
+    if (failed) throw storageError();
+  };
+
+  const closeSessionAfterFailure = async (session: CursorSession): Promise<void> => {
     try {
-      return await fs.readdir(directory, { withFileTypes: true });
+      await closeSession(session);
+    } catch {
+      // Preserve the original error while still attempting every close.
+    }
+  };
+
+  const closeLedger = async (session: CursorSession): Promise<void> => {
+    const ledger = session.ledger;
+    if (ledger === null) return;
+    session.ledger = null;
+    try {
+      await ledger.directory.close();
     } catch {
       throw storageError();
     }
   };
 
+  const openSession = async (method: CursorMethod): Promise<CursorSession> => {
+    const token = `v2.${randomUUID()}`;
+    let root: Dir;
+    try {
+      root = await fs.opendir(await canonicalRootPromise, { bufferSize: 1 });
+    } catch {
+      throw storageError();
+    }
+    const session: CursorSession = {
+      method,
+      token,
+      root,
+      ledger: null,
+      closed: false,
+    };
+    sessions.set(method, session);
+    return session;
+  };
+
+  const sessionFor = async (method: CursorMethod, cursor: string | null): Promise<CursorSession> => {
+    if (disposed) throw invalidPayload();
+    const current = sessions.get(method);
+    if (cursor !== null) {
+      if (typeof cursor !== 'string' || cursor.length > 256 || current?.token !== cursor || current.closed) {
+        throw invalidPayload();
+      }
+      return current;
+    }
+    if (current !== undefined) await closeSession(current);
+    return openSession(method);
+  };
+
   const scanLedgerPage = async (input: {
+    method: 'snapshotPendingPage' | 'listPendingPage' | 'pruneReceiptsPage';
     cursor: string | null;
     limit: number;
     directory: LedgerDirectory;
     tolerateProjectErrors: boolean;
+    createIfWhollyAbsent: boolean;
   }): Promise<StudioDirectorCommandPage> => {
-    requireLimit(input.limit);
-    const cursor = decodeLedgerCursor(input.cursor);
-    const projectIds = await listProjectIds();
-    let startIndex = 0;
-    if (cursor !== null) {
-      startIndex = projectIds.findIndex((projectId) => projectId >= cursor.projectId);
-      if (startIndex < 0) return { items: [], nextCursor: null };
-      if (projectIds[startIndex] === cursor.projectId && cursor.entryName === null) startIndex += 1;
-    }
-
-    const collected: Array<{ ref: StudioDirectorCommandRef; cursor: LedgerCursor }> = [];
-    const workLimit = input.limit + 1;
-    let inspectedDirectories = 0;
-    let inspectedEntries = 0;
-    let lastProgress: LedgerCursor | null = cursor;
-
-    const boundedPage = (): StudioDirectorCommandPage => ({
-      items: collected.slice(0, input.limit).map((item) => item.ref),
-      nextCursor: lastProgress === null ? null : encodeLedgerCursor(lastProgress),
-    });
-
-    for (let projectIndex = startIndex; projectIndex < projectIds.length; projectIndex += 1) {
-      if (inspectedDirectories >= workLimit) return boundedPage();
-      const projectId = projectIds[projectIndex];
-      inspectedDirectories += 1;
-      let directories: CommandDirectories | null;
+    return runCursorMethod(input.method, async () => {
+      requireLimit(input.limit);
+      let session: CursorSession | undefined;
       try {
-        // eslint-disable-next-line no-await-in-loop
-        directories = await directoriesFor(projectId, false);
-      } catch (error) {
-        if (!input.tolerateProjectErrors) throw error;
-        safeLog('[CreativeStudio] Director command receipt maintenance skipped unsafe storage');
-        lastProgress = { projectId, entryName: null };
-        continue;
-      }
-      if (directories === null) {
-        lastProgress = { projectId, entryName: null };
-        continue;
-      }
+        session = await sessionFor(input.method, input.cursor);
+        const items: StudioDirectorCommandRef[] = [];
+        let work = 0;
+        while (work < input.limit) {
+          if (session.ledger !== null) {
+            const ledger = session.ledger;
+            work += 1;
+            let entry: Dirent | null;
+            try {
+              // eslint-disable-next-line no-await-in-loop
+              entry = await ledger.directory.read();
+            } catch (error) {
+              if (!input.tolerateProjectErrors) throw error;
+              // eslint-disable-next-line no-await-in-loop
+              await closeLedger(session);
+              safeLog('[CreativeStudio] Director command receipt maintenance skipped unsafe storage');
+              continue;
+            }
+            if (entry === null) {
+              // eslint-disable-next-line no-await-in-loop
+              await closeLedger(session);
+              continue;
+            }
+            if (!entry.name.endsWith('.json')) continue;
+            const commandId = entry.name.slice(0, -'.json'.length);
+            if (!isSafeStudioDirectorId(commandId)) continue;
+            items.push({ projectId: ledger.projectId, commandId });
+            continue;
+          }
 
-      let entries: import('node:fs').Dirent[];
-      try {
-        // eslint-disable-next-line no-await-in-loop
-        entries = (await readDirectoryEntries(directories[input.directory])).toSorted((left, right) =>
-          compareCodeUnits(left.name, right.name)
-        );
-      } catch (error) {
-        if (!input.tolerateProjectErrors) throw error;
-        safeLog('[CreativeStudio] Director command receipt maintenance skipped unsafe storage');
-        lastProgress = { projectId, entryName: null };
-        continue;
-      }
+          work += 1;
+          // eslint-disable-next-line no-await-in-loop
+          const projectEntry = await session.root.read();
+          if (projectEntry === null) {
+            // eslint-disable-next-line no-await-in-loop
+            await closeSession(session);
+            return { items, nextCursor: null };
+          }
+          if (!projectEntry.isDirectory() || !isSafeStudioDirectorId(projectEntry.name)) continue;
 
-      const afterEntry = cursor?.projectId === projectId ? cursor.entryName : null;
-      for (const entry of entries) {
-        if (afterEntry !== null && compareCodeUnits(entry.name, afterEntry) <= 0) continue;
-        if (inspectedEntries >= workLimit) return boundedPage();
-        inspectedEntries += 1;
-        lastProgress = { projectId, entryName: entry.name };
-        if (!entry.name.endsWith('.json')) continue;
-        const commandId = entry.name.slice(0, -'.json'.length);
-        if (!isSafeStudioDirectorId(commandId)) continue;
-        collected.push({ ref: { projectId, commandId }, cursor: lastProgress });
-        if (collected.length > input.limit) {
-          const lastReturned = collected[input.limit - 1];
-          return {
-            items: collected.slice(0, input.limit).map((item) => item.ref),
-            nextCursor: encodeLedgerCursor(lastReturned.cursor),
-          };
+          let directories: CommandDirectories | null;
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            directories = await directoriesFor(projectEntry.name, input.createIfWhollyAbsent);
+          } catch (error) {
+            if (!input.tolerateProjectErrors) throw error;
+            safeLog('[CreativeStudio] Director command receipt maintenance skipped unsafe storage');
+            continue;
+          }
+          if (directories === null) continue;
+          try {
+            // A buffer of one keeps native directory materialization bounded with the raw-read budget.
+            // eslint-disable-next-line no-await-in-loop
+            const directory = await fs.opendir(directories[input.directory], { bufferSize: 1 });
+            session.ledger = { directory, projectId: projectEntry.name };
+          } catch (error) {
+            if (!input.tolerateProjectErrors) throw error;
+            safeLog('[CreativeStudio] Director command receipt maintenance skipped unsafe storage');
+          }
         }
+        return { items, nextCursor: session.token };
+      } catch (error) {
+        if (session !== undefined) await closeSessionAfterFailure(session);
+        if (error instanceof CreativeStudioStoreError) throw error;
+        throw storageError();
       }
-      lastProgress = { projectId, entryName: null };
-    }
-
-    return { items: collected.map((item) => item.ref), nextCursor: null };
+    });
   };
 
   const exactReceiptFrom = async (
@@ -360,18 +413,44 @@ export const createStudioDirectorCommandMailbox = (
     }
   };
 
-  const maintenanceProjectPage = async (
-    cursor: string | null,
-    limit: number
-  ): Promise<{ projectIds: string[]; nextCursor: string | null }> => {
-    requireLimit(limit);
-    const all = await listProjectIds();
-    const available = cursor === null ? all : all.filter((projectId) => projectId > cursor);
-    const projectIds = available.slice(0, limit);
-    return {
-      projectIds,
-      nextCursor: available.length > projectIds.length && projectIds.length > 0 ? projectIds.at(-1)! : null,
-    };
+  const scanProjectPage = async (input: {
+    cursor: string | null;
+    limit: number;
+    visit(projectId: string): Promise<void>;
+  }): Promise<StudioDirectorMaintenancePage> => {
+    return runCursorMethod('releaseOrphanedSlotsPage', async () => {
+      requireLimit(input.limit);
+      let session: CursorSession | undefined;
+      try {
+        session = await sessionFor('releaseOrphanedSlotsPage', input.cursor);
+        let processed = 0;
+        let work = 0;
+        while (work < input.limit) {
+          work += 1;
+          // eslint-disable-next-line no-await-in-loop
+          const projectEntry = await session.root.read();
+          if (projectEntry === null) {
+            // eslint-disable-next-line no-await-in-loop
+            await closeSession(session);
+            return { processed, nextCursor: null };
+          }
+          if (!projectEntry.isDirectory() || !isSafeStudioDirectorId(projectEntry.name)) continue;
+          processed += 1;
+          try {
+            // A failing project advances the live root cursor without weakening another project.
+            // eslint-disable-next-line no-await-in-loop
+            await input.visit(projectEntry.name);
+          } catch {
+            safeLog('[CreativeStudio] Director command slot maintenance skipped unsafe storage');
+          }
+        }
+        return { processed, nextCursor: session.token };
+      } catch (error) {
+        if (session !== undefined) await closeSessionAfterFailure(session);
+        if (error instanceof CreativeStudioStoreError) throw error;
+        throw storageError();
+      }
+    });
   };
 
   const readSlot = async (
@@ -422,7 +501,14 @@ export const createStudioDirectorCommandMailbox = (
     },
 
     async snapshotPendingPage(cursor: string | null, limit: number): Promise<StudioDirectorCommandPage> {
-      return scanLedgerPage({ cursor, limit, directory: 'pending', tolerateProjectErrors: false });
+      return scanLedgerPage({
+        method: 'snapshotPendingPage',
+        cursor,
+        limit,
+        directory: 'pending',
+        tolerateProjectErrors: false,
+        createIfWhollyAbsent: true,
+      });
     },
 
     readPending,
@@ -475,7 +561,14 @@ export const createStudioDirectorCommandMailbox = (
     },
 
     async listPendingPage(cursor: string | null, limit: number): Promise<StudioDirectorCommandPage> {
-      return scanLedgerPage({ cursor, limit, directory: 'pending', tolerateProjectErrors: false });
+      return scanLedgerPage({
+        method: 'listPendingPage',
+        cursor,
+        limit,
+        directory: 'pending',
+        tolerateProjectErrors: false,
+        createIfWhollyAbsent: false,
+      });
     },
 
     async releaseOrphanedSlotsPage(
@@ -485,44 +578,33 @@ export const createStudioDirectorCommandMailbox = (
     ): Promise<StudioDirectorMaintenancePage> {
       const nowMs = canonicalTimestamp(currentTime);
       if (nowMs === null) throw invalidPayload();
-      const page = await maintenanceProjectPage(cursor, limit);
       const canonicalRoot = await canonicalRootPromise;
-      for (const projectId of page.projectIds) {
-        try {
-          // A failing project advances the cursor but cannot weaken another project's authority.
-          // eslint-disable-next-line no-await-in-loop
+      return scanProjectPage({
+        cursor,
+        limit,
+        visit: async (projectId) => {
           const directories = await directoriesFor(projectId, false);
-          if (directories === null) continue;
-          // eslint-disable-next-line no-await-in-loop
+          if (directories === null) return;
           const slotRead = await readSlot(canonicalRoot, directories, currentTime);
-          if (slotRead.status === 'absent') continue;
+          if (slotRead.status === 'absent') return;
           if (slotRead.status === 'invalid') {
             if (slotRead.commandId === null) throw storageError();
-            // eslint-disable-next-line no-await-in-loop
-            if (await pathExists(path.join(directories.pending, `${slotRead.commandId}.json`))) continue;
+            if (await pathExists(path.join(directories.pending, `${slotRead.commandId}.json`))) return;
             // A bounded invalid reservation cannot remain live authority once its pending record is absent.
-            // eslint-disable-next-line no-await-in-loop
             await removeRecord(canonicalRoot, path.join(directories.slots, '0.slot'));
-            continue;
+            return;
           }
           const { slot } = slotRead;
-          // eslint-disable-next-line no-await-in-loop
-          if (await pathExists(path.join(directories.pending, `${slot.commandId}.json`))) continue;
-          // eslint-disable-next-line no-await-in-loop
+          if (await pathExists(path.join(directories.pending, `${slot.commandId}.json`))) return;
           const deadlineMs = canonicalTimestamp(slot.deadlineAt);
-          if (deadlineMs === null) continue;
+          if (deadlineMs === null) return;
           if (deadlineMs >= nowMs) {
             // A live slot is releasable only with its exact durable terminal receipt.
-            // eslint-disable-next-line no-await-in-loop
-            if ((await exactReceiptFrom(canonicalRoot, directories, projectId, slot.commandId)) === null) continue;
+            if ((await exactReceiptFrom(canonicalRoot, directories, projectId, slot.commandId)) === null) return;
           }
-          // eslint-disable-next-line no-await-in-loop
           await removeRecord(canonicalRoot, path.join(directories.slots, '0.slot'));
-        } catch {
-          safeLog('[CreativeStudio] Director command slot maintenance skipped unsafe storage');
-        }
-      }
-      return { processed: page.projectIds.length, nextCursor: page.nextCursor };
+        },
+      });
     },
 
     async pruneReceiptsPage(
@@ -532,7 +614,14 @@ export const createStudioDirectorCommandMailbox = (
     ): Promise<StudioDirectorMaintenancePage> {
       const cutoffMs = canonicalTimestamp(decidedBefore);
       if (cutoffMs === null) throw invalidPayload();
-      const page = await scanLedgerPage({ cursor, limit, directory: 'receipts', tolerateProjectErrors: true });
+      const page = await scanLedgerPage({
+        method: 'pruneReceiptsPage',
+        cursor,
+        limit,
+        directory: 'receipts',
+        tolerateProjectErrors: true,
+        createIfWhollyAbsent: false,
+      });
       const canonicalRoot = await canonicalRootPromise;
       for (const ref of page.items) {
         try {
@@ -600,6 +689,23 @@ export const createStudioDirectorCommandMailbox = (
         closed = true;
         watcher.close();
       };
+    },
+
+    async dispose(): Promise<void> {
+      if (disposed) return;
+      disposed = true;
+      await Promise.all(cursorOperations.values());
+      let failed = false;
+      for (const session of sessions.values()) {
+        try {
+          // Dispose is best-effort across every method-owned traversal.
+          // eslint-disable-next-line no-await-in-loop
+          await closeSession(session);
+        } catch {
+          failed = true;
+        }
+      }
+      if (failed) throw storageError();
     },
   };
 };

@@ -178,7 +178,23 @@ export async function readBoundedRegularFile(input: {
   let handle: Awaited<ReturnType<RecordIoFileSystem['open']>> | undefined;
   try {
     await assertNoUnconfirmedPublication(input.fs, file);
-    const flags = process.platform === 'win32' ? fsConstants.O_RDONLY : fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW;
+    let preliminaryStats: Awaited<ReturnType<RecordIoFileSystem['lstat']>>;
+    try {
+      preliminaryStats = await input.fs.lstat(file);
+    } catch (error) {
+      if (hasErrorCode(error, 'ENOENT')) return null;
+      throw error;
+    }
+    if (preliminaryStats.isSymbolicLink() || !preliminaryStats.isFile()) {
+      throw new RecordIoError('unsafe_file');
+    }
+    if (preliminaryStats.size > input.maxBytes) throw new RecordIoError('record_too_large');
+    // Windows does not expose a portable no-follow/nonblocking open combination. Its preliminary
+    // lstat plus pre-read handle identity check keeps a raced replacement from being consumed.
+    const flags =
+      process.platform === 'win32'
+        ? fsConstants.O_RDONLY
+        : fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK;
     try {
       handle = await input.fs.open(file, flags);
     } catch (error) {
@@ -189,7 +205,9 @@ export async function readBoundedRegularFile(input: {
       throw error;
     }
     const stats = await handle.stat();
-    if (!stats.isFile()) throw new RecordIoError('unsafe_file');
+    if (!stats.isFile() || stats.dev !== preliminaryStats.dev || stats.ino !== preliminaryStats.ino) {
+      throw new RecordIoError('unsafe_file');
+    }
     if (stats.size > input.maxBytes) throw new RecordIoError('record_too_large');
     const bytes = Buffer.alloc(input.maxBytes + 1);
     let offset = 0;
