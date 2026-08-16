@@ -1028,7 +1028,7 @@ describe('CreativeStudioService', () => {
       const { projectDir, pendingDir, referencePendingDir } = await store.resolveProposalPaths(current.id);
       const config = { projectId: current.id, projectDir, pendingDir, referencePendingDir };
       const tool = vi.fn();
-      registerStudioTools({ tool: tool as never }, config);
+      registerStudioTools({ tool: tool as never, registerTool: vi.fn() as never }, config);
       const registration = tool.mock.calls.find(([name]) => name === 'propose_brief_rule');
       expect(registration).toBeDefined();
 
@@ -1217,6 +1217,16 @@ describe('CreativeStudioService', () => {
   it('builds a project-scoped Brief session-server descriptor', async () => {
     const project = await service.createProject(makeInput());
     const scriptPath = '/tmp/builtin-mcp-studio.js';
+    const ensureOrder: string[] = [];
+    const ensureDirectorCommandMailbox = vi.fn(async () => {
+      ensureOrder.push('ensure');
+    });
+    const paths = await store.resolveProposalPaths(project.id);
+    const resolveProposalPaths = store.resolveProposalPaths.bind(store);
+    vi.spyOn(store, 'resolveProposalPaths').mockImplementation(async (projectId) => {
+      ensureOrder.push('paths');
+      return resolveProposalPaths(projectId);
+    });
     const descriptorService = createCreativeStudioService({
       store,
       onProjectUpdated,
@@ -1230,11 +1240,13 @@ describe('CreativeStudioService', () => {
         isGenerationRouteAvailable: async () => true,
       },
       getStudioServerScriptPath: () => scriptPath,
+      ensureDirectorCommandMailbox,
     } as unknown as Parameters<typeof createCreativeStudioService>[0]);
-    const paths = await store.resolveProposalPaths(project.id);
     const routeCatalog = await descriptorService.listRoutes({ projectId: project.id });
 
-    await expect(descriptorService.getBriefSessionServer({ projectId: project.id })).resolves.toEqual({
+    const descriptor = await descriptorService.getBriefSessionServer({ projectId: project.id });
+
+    expect(descriptor).toEqual({
       id: `studio-brief-${project.id}`,
       name: BUILTIN_STUDIO_NAME,
       transport: {
@@ -1250,6 +1262,9 @@ describe('CreativeStudioService', () => {
         },
       },
     });
+    expect(ensureDirectorCommandMailbox).toHaveBeenCalledWith(project.id);
+    expect(ensureOrder).toEqual(['ensure', 'paths']);
+    expect(Object.keys(descriptor.transport.env ?? {}).toSorted()).toEqual(Object.values(STUDIO_ENV).toSorted());
   });
 
   it('reports the newest verified cut file and its render time without exposing a storage path', async () => {
@@ -5865,14 +5880,148 @@ describe('CreativeStudioService', () => {
 describe('Studio MCP server', () => {
   it('registers the reference request tool with the approval-before-spend instruction', () => {
     const tool = vi.fn();
+    const registerTool = vi.fn();
 
-    registerStudioTools({ tool: tool as never }, null);
+    registerStudioTools({ tool: tool as never, registerTool: registerTool as never }, null);
 
     const registration = tool.mock.calls.find(([name]) => name === 'studio_request_reference_images');
     expect(tool).toHaveBeenCalledTimes(5);
+    expect(registerTool).toHaveBeenCalledTimes(2);
+    expect(tool.mock.calls.length + registerTool.mock.calls.length).toBe(7);
     expect(registration?.[1]).toBe(
       'Request a supporting reference image for one or more scenes. This does NOT generate anything — it queues a request the user approves before any money is spent. One image per scene; do not request a scene that already has one unless the user asked you to replace it.'
     );
+  });
+
+  it('registers direct edits and exact status with strict bounded nested schemas', () => {
+    const tool = vi.fn();
+    const registerTool = vi.fn();
+    registerStudioTools({ tool: tool as never, registerTool: registerTool as never }, null);
+    const applyRegistration = registerTool.mock.calls.find(([name]) => name === 'studio_apply_edits');
+    const statusRegistration = registerTool.mock.calls.find(([name]) => name === 'studio_get_command_status');
+    const applySchema = applyRegistration?.[1].inputSchema as z.ZodType;
+    const statusSchema = statusRegistration?.[1].inputSchema as z.ZodType;
+    const validScene = {
+      title: 'Opening',
+      purpose: 'Set the scene',
+      visualPrompt: 'A dawn skyline',
+      narration: 'A new day begins.',
+      onScreenText: '',
+      mediaKind: 'image',
+      durationSeconds: 5,
+    };
+    const valid = { expectedRevision: 7, operations: [{ kind: 'set_brief', brief: 'A sharper brief' }] };
+    const invalidCases: Array<{ name: string; input: unknown }> = [
+      { name: 'unknown top-level key', input: { ...valid, unknown: true } },
+      { name: 'empty operations', input: { expectedRevision: 7, operations: [] } },
+      {
+        name: 'more than 32 operations',
+        input: {
+          expectedRevision: 7,
+          operations: Array.from({ length: 33 }, (_, index) => ({ kind: 'set_brief', brief: `Brief ${index}` })),
+        },
+      },
+      {
+        name: 'empty edit patch',
+        input: { expectedRevision: 7, operations: [{ kind: 'edit_scene', sceneId: 'scene_1', changes: {} }] },
+      },
+      {
+        name: 'add and reorder mixture',
+        input: {
+          expectedRevision: 7,
+          operations: [
+            { kind: 'add_scene', scene: validScene, beforeSceneId: null },
+            { kind: 'reorder_scenes', sceneOrder: ['scene_1'] },
+          ],
+        },
+      },
+      {
+        name: 'caller-supplied add id',
+        input: {
+          expectedRevision: 7,
+          operations: [{ kind: 'add_scene', sceneId: 'caller_id', scene: validScene, beforeSceneId: null }],
+        },
+      },
+      {
+        name: 'unknown nested scene key',
+        input: {
+          expectedRevision: 7,
+          operations: [{ kind: 'add_scene', scene: { ...validScene, referenceAssetId: null }, beforeSceneId: null }],
+        },
+      },
+      {
+        name: 'unsafe scene id',
+        input: {
+          expectedRevision: 7,
+          operations: [{ kind: 'select_take', sceneId: '../scene', assetId: 'take_1' }],
+        },
+      },
+      {
+        name: 'unbounded text',
+        input: { expectedRevision: 7, operations: [{ kind: 'set_brief', brief: 'x'.repeat(16 * 1024 + 1) }] },
+      },
+    ];
+
+    expect(applyRegistration).toBeDefined();
+    expect(statusRegistration).toBeDefined();
+    expect(applySchema.safeParse(valid).success).toBe(true);
+    for (const invalidCase of invalidCases) {
+      expect(applySchema.safeParse(invalidCase.input).success, invalidCase.name).toBe(false);
+    }
+    expect(statusSchema.safeParse({ commandId: 'command_1' }).success).toBe(true);
+    expect(statusSchema.safeParse({ commandId: 'unsafe/id' }).success).toBe(false);
+    expect(statusSchema.safeParse({ commandId: 'command_1', unknown: true }).success).toBe(false);
+  });
+
+  it('describes revision-first edits and explicit unconfirmed and indeterminate recovery without undo claims', () => {
+    const registerTool = vi.fn();
+    registerStudioTools({ tool: vi.fn() as never, registerTool: registerTool as never }, null);
+    const applyDescription = String(
+      registerTool.mock.calls.find(([name]) => name === 'studio_apply_edits')?.[1].description
+    );
+    const statusDescription = String(
+      registerTool.mock.calls.find(([name]) => name === 'studio_get_command_status')?.[1].description
+    );
+
+    expect(applyDescription).toMatch(/read the current revision first/i);
+    expect(applyDescription).toMatch(/unconfirmed.*must not be retried/i);
+    expect(statusDescription).toMatch(/indeterminate.*must not be retried/i);
+    expect(statusDescription).toMatch(/reread canonical state/i);
+    expect(statusDescription).toMatch(/report uncertainty/i);
+    expect(statusDescription).toMatch(/await explicit user direction/i);
+    expect(`${applyDescription} ${statusDescription}`).not.toMatch(/undo|reversib/i);
+  });
+
+  it('lets SDK validation reject before id minting and returns commandId from every accepted handler outcome', async () => {
+    const createId = vi.fn(() => 'command_accepted');
+    const registerTool = vi.fn();
+    registerStudioTools({ tool: vi.fn() as never, registerTool: registerTool as never }, null, {
+      createId,
+      now: () => Date.parse('2026-08-17T01:02:03.000Z'),
+      sleep: async () => undefined,
+    });
+    const applyRegistration = registerTool.mock.calls.find(([name]) => name === 'studio_apply_edits');
+    const statusRegistration = registerTool.mock.calls.find(([name]) => name === 'studio_get_command_status');
+    const applySchema = applyRegistration?.[1].inputSchema as z.ZodType;
+    const applyHandler = applyRegistration?.[2] as (input: unknown) => Promise<{ content: Array<{ text: string }> }>;
+    const statusHandler = statusRegistration?.[2] as (input: unknown) => Promise<{ content: Array<{ text: string }> }>;
+
+    expect(applySchema.safeParse({ expectedRevision: 7, operations: [], unknown: true }).success).toBe(false);
+    expect(createId).not.toHaveBeenCalled();
+
+    const accepted = applySchema.parse({
+      expectedRevision: 7,
+      operations: [{ kind: 'set_brief', brief: 'Accepted by the schema' }],
+    });
+    const applyResult = JSON.parse((await applyHandler(accepted)).content[0].text) as Record<string, unknown>;
+    const statusResult = JSON.parse((await statusHandler({ commandId: 'command_status' })).content[0].text) as Record<
+      string,
+      unknown
+    >;
+
+    expect(applyResult).toMatchObject({ status: 'storage_error', commandId: 'command_accepted' });
+    expect(statusResult).toMatchObject({ status: 'storage_error', commandId: 'command_status' });
+    expect(createId).toHaveBeenCalledTimes(1);
   });
 
   it('exposes the route catalog with constraints and never mutates the project', async () => {

@@ -24,6 +24,7 @@ import {
   STUDIO_MAX_MCP_AVAILABLE_TAKE_IDS_PER_SCENE,
   STUDIO_MAX_REFERENCE_REQUEST_SCENES,
   STUDIO_MAX_SCENES,
+  STUDIO_DIRECTOR_COMMAND_MAX_OPERATIONS,
   type StudioAsset,
   type StudioEditableScene,
   type StudioProject,
@@ -38,6 +39,12 @@ import {
   writeReferenceRequestRecord,
 } from '@process/resources/builtinMcp/studioReferenceRequestWriter';
 import { StudioPendingRecordWriteError } from '@process/resources/builtinMcp/studioPendingRecordWriter';
+import {
+  createStudioDirectorCommandWriter,
+  type StudioApplyEditsInput,
+  type StudioDirectorCommandWriterDeps,
+  type StudioGetCommandStatusInput,
+} from '@process/resources/builtinMcp/studioDirectorCommandWriter';
 
 export type StudioServerEnv = {
   projectId: string;
@@ -124,6 +131,93 @@ export const editableSceneSchema = z
     mediaKind: z.enum(['image', 'video']),
     durationSeconds: z.number().int().min(1).max(60),
     referenceAssetId: z.string().regex(SAFE_ID).nullable(),
+  })
+  .strict();
+
+const studioDirectorIdSchema = z.string().min(1).max(256).regex(SAFE_ID);
+const studioDirectorNewSceneSchema = z
+  .object({
+    title: z.string().max(256),
+    purpose: z.string().max(256),
+    visualPrompt: z.string().max(8 * 1024),
+    narration: z.string().max(4 * 1024),
+    onScreenText: z.string().max(1024),
+    mediaKind: z.enum(['image', 'video']),
+    durationSeconds: z.number().int().min(1).max(60),
+  })
+  .strict();
+const studioDirectorEditChangesSchema = z
+  .object({
+    title: z.string().max(256).optional(),
+    purpose: z.string().max(256).optional(),
+    visualPrompt: z
+      .string()
+      .max(8 * 1024)
+      .optional(),
+    narration: z
+      .string()
+      .max(4 * 1024)
+      .optional(),
+    onScreenText: z.string().max(1024).optional(),
+    durationSeconds: z.number().int().min(1).max(60).optional(),
+  })
+  .strict()
+  .refine((changes) => Object.keys(changes).length > 0, { message: 'At least one edit field is required.' });
+const studioDirectorOperationSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('set_brief'), brief: z.string().max(16 * 1024) }).strict(),
+  z
+    .object({
+      kind: z.literal('add_scene'),
+      scene: studioDirectorNewSceneSchema,
+      beforeSceneId: studioDirectorIdSchema.nullable(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('edit_scene'),
+      sceneId: studioDirectorIdSchema,
+      changes: studioDirectorEditChangesSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('reorder_scenes'),
+      sceneOrder: z
+        .array(studioDirectorIdSchema)
+        .min(1)
+        .max(STUDIO_MAX_SCENES)
+        .refine((sceneOrder) => new Set(sceneOrder).size === sceneOrder.length, {
+          message: 'sceneOrder must not contain duplicate ids.',
+        }),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('select_take'),
+      sceneId: studioDirectorIdSchema,
+      assetId: studioDirectorIdSchema,
+    })
+    .strict(),
+]);
+
+export const studioApplyEditsInputSchema = z
+  .object({
+    expectedRevision: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+    operations: z.array(studioDirectorOperationSchema).min(1).max(STUDIO_DIRECTOR_COMMAND_MAX_OPERATIONS),
+  })
+  .strict()
+  .refine(
+    ({ operations }) =>
+      !(
+        operations.some((operation) => operation.kind === 'add_scene') &&
+        operations.some((operation) => operation.kind === 'reorder_scenes')
+      ),
+    { message: 'add_scene and reorder_scenes cannot be combined in one command.', path: ['operations'] }
+  );
+
+export const studioGetCommandStatusInputSchema = z
+  .object({
+    commandId: studioDirectorIdSchema,
   })
   .strict();
 
@@ -419,7 +513,37 @@ export function createRequestReferenceImagesHandler(
   };
 }
 
-export function registerStudioTools(server: Pick<McpServer, 'tool'>, config: StudioServerEnv | null): void {
+const commandToolResult = (value: unknown): StudioToolResult => ({
+  content: [{ type: 'text', text: JSON.stringify(value) }],
+});
+
+export function createStudioApplyEditsHandler(
+  config: StudioServerEnv | null,
+  deps: StudioDirectorCommandWriterDeps = {}
+): (input: StudioApplyEditsInput) => Promise<StudioToolResult> {
+  const writer = createStudioDirectorCommandWriter(
+    config === null ? null : { projectId: config.projectId, projectDir: config.projectDir },
+    deps
+  );
+  return async (input) => commandToolResult(await writer.apply(input));
+}
+
+export function createStudioGetCommandStatusHandler(
+  config: StudioServerEnv | null,
+  deps: StudioDirectorCommandWriterDeps = {}
+): (input: StudioGetCommandStatusInput) => Promise<StudioToolResult> {
+  const writer = createStudioDirectorCommandWriter(
+    config === null ? null : { projectId: config.projectId, projectDir: config.projectDir },
+    deps
+  );
+  return async (input) => commandToolResult(await writer.getStatus(input));
+}
+
+export function registerStudioTools(
+  server: Pick<McpServer, 'tool' | 'registerTool'>,
+  config: StudioServerEnv | null,
+  writerDeps: StudioDirectorCommandWriterDeps = {}
+): void {
   server.tool(
     'studio_list_routes',
     "Read the generation routes available to this project, with their constraints. Call this before proposing scene durations: a scene shorter than the video route's minDurationSeconds cannot be produced. Never assume a limit; read it.",
@@ -472,6 +596,24 @@ export function registerStudioTools(server: Pick<McpServer, 'tool'>, config: Stu
         .describe('Words that must never appear in a visual prompt. Empty for an unenforced rule.'),
     },
     createProposeBriefRuleHandler(config)
+  );
+  server.registerTool(
+    'studio_apply_edits',
+    {
+      description:
+        'Read the current revision first with read_storyboard, then apply one bounded ordered batch of free edits to that exact revision. This never starts paid generation. If the result is unconfirmed, it must not be retried; call studio_get_command_status with the returned commandId.',
+      inputSchema: studioApplyEditsInputSchema,
+    },
+    createStudioApplyEditsHandler(config, writerDeps)
+  );
+  server.registerTool(
+    'studio_get_command_status',
+    {
+      description:
+        'Read the exact durable or pending status for one commandId. Unconfirmed and indeterminate outcomes must not be retried. For indeterminate, reread canonical state, report uncertainty, and await explicit user direction.',
+      inputSchema: studioGetCommandStatusInputSchema,
+    },
+    createStudioGetCommandStatusHandler(config, writerDeps)
   );
 }
 
