@@ -7,8 +7,11 @@
 import {
   STUDIO_MAX_CLIPS_PER_PROJECT,
   STUDIO_MAX_CLIPS_PER_SECTION,
+  STUDIO_MAX_CUT_PLACEMENT_CLIPS,
   STUDIO_MAX_SECTIONS,
   STUDIO_MAX_SHELF_ITEMS,
+  STUDIO_MAX_SHELF_SECTION_ITEMS,
+  STUDIO_MAX_SHELF_TAKE_ALIASES,
   STUDIO_MAX_VIDEO_CLIP_SECONDS,
   STUDIO_MIN_VIDEO_CLIP_SECONDS,
   type StudioAssetV2,
@@ -30,6 +33,7 @@ import {
   isStudioReferenceImageMimeType,
 } from '@/common/types/project/creativeStudioManagedAssetCollections';
 import { STUDIO_RULE_LIMITS, hasRuleToken } from '@/common/types/project/creativeStudioRules';
+import { isValidProviderJobId } from '@process/services/creative-studio/adapters/types';
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const ASPECT_RATIOS = new Set(['16:9', '9:16', '1:1', '4:3', '3:4']);
@@ -386,7 +390,8 @@ const validateJob = (jobId: string, projectId: string, value: unknown): value is
     JOB_STATUSES.has(value.status) &&
     validateProvider(value.provider) &&
     isSafeId(value.idempotencyKey) &&
-    (value.providerJobId === null || isNonEmptyStringWithin(value.providerJobId, 1024)) &&
+    (value.providerJobId === null ||
+      (typeof value.providerJobId === 'string' && isValidProviderJobId(value.providerJobId))) &&
     (value.remoteStartedAt === undefined ||
       (value.providerJobId === null ? value.remoteStartedAt === null : isCanonicalTimestamp(value.remoteStartedAt))) &&
     (value.cancellationPolicy === 'none' ||
@@ -474,7 +479,7 @@ const validateCut = (cutId: string, project: StudioProjectV2, value: unknown): v
     !isNonEmptyStringWithin(value.name, 256) ||
     (value.orderMode !== 'storyboard' && value.orderMode !== 'manual') ||
     !isUniqueSafeIdArray(value.clipOrder) ||
-    value.clipOrder.length > STUDIO_MAX_CLIPS_PER_PROJECT ||
+    value.clipOrder.length > STUDIO_MAX_CUT_PLACEMENT_CLIPS ||
     value.clipOrder.length !== cutClipIds.length ||
     !value.clipOrder.every((cutClipId) => Object.hasOwn(cutClips, cutClipId)) ||
     !cutClipIds.every((cutClipId) => validateCutClip(cutClipId, project, cutClips[cutClipId]))
@@ -676,6 +681,8 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
   const activeSectionIds = new Set(project.sectionOrder);
   const shelfIdentityKeys = new Set<string>();
   const parkedSectionIds = new Set<string>();
+  let parkedSectionItemCount = 0;
+  let takeAliasItemCount = 0;
   const cutAssetIds = new Set(
     Object.values(project.cuts).flatMap((cut) => Object.values(cut.clips).map((cutClip) => cutClip.assetId))
   );
@@ -684,10 +691,14 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     if (shelfIdentityKeys.has(identityKey)) return false;
     shelfIdentityKeys.add(identityKey);
     if (item.kind === 'section') {
+      parkedSectionItemCount += 1;
+      if (parkedSectionItemCount > STUDIO_MAX_SHELF_SECTION_ITEMS) return false;
       if (!Object.hasOwn(project.sections, item.sectionId) || activeSectionIds.has(item.sectionId)) return false;
       parkedSectionIds.add(item.sectionId);
       continue;
     }
+    takeAliasItemCount += 1;
+    if (takeAliasItemCount > STUDIO_MAX_SHELF_TAKE_ALIASES) return false;
     const asset = project.assets[item.assetId];
     if (asset?.clipId === null || asset === undefined) return false;
     const clip = project.clips[asset.clipId];

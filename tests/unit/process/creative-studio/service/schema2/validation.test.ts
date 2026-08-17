@@ -156,6 +156,15 @@ const addClips = (project: StudioProjectV2, sectionId: string, count: number, of
   }
 };
 
+const addShelfTakeAliases = (project: StudioProjectV2, count: number, offset = 0): void => {
+  for (let index = 0; index < count; index += 1) {
+    const assetId = `asset_${offset + index + 1}`;
+    project.assets[assetId] = makeAsset(assetId);
+    project.clips.clip_1!.assetIds.push(assetId);
+    project.shelf.push({ kind: 'asset', assetId });
+  }
+};
+
 describe('validateStudioProjectV2 exact schema', () => {
   it('accepts a valid schema-2 project', () => {
     expect(validateStudioProjectV2(makeValidProject())).toBe(true);
@@ -163,6 +172,40 @@ describe('validateStudioProjectV2 exact schema', () => {
 
   it('accepts valid asset, job, reference, cut, and project-level Cast ownership', () => {
     expect(validateStudioProjectV2(makePopulatedProject())).toBe(true);
+  });
+
+  it('accepts an opaque 512-character provider job ID', () => {
+    const project = makeValidProject();
+    project.clips.clip_1!.jobIds = ['job_1'];
+    project.jobs.job_1 = {
+      ...makeJob('job_1'),
+      status: 'queued_remote',
+      providerJobId: 'a'.repeat(512),
+      remoteStartedAt: timestamp,
+    };
+
+    expect(validateStudioProjectV2(project)).toBe(true);
+  });
+
+  it.each([
+    'https://provider.example/jobs/remote_1',
+    '../remote_1',
+    'remote_1?token=secret',
+    'remote_1#fragment',
+    'remote job',
+    'remote\njob',
+    'a'.repeat(513),
+  ])('rejects unsafe provider job ID %j', (providerJobId) => {
+    const project = makeValidProject();
+    project.clips.clip_1!.jobIds = ['job_1'];
+    project.jobs.job_1 = {
+      ...makeJob('job_1'),
+      status: 'queued_remote',
+      providerJobId,
+      remoteStartedAt: timestamp,
+    };
+
+    expect(validateStudioProjectV2(project)).toBe(false);
   });
 
   it.each([
@@ -485,21 +528,50 @@ describe('validateStudioProjectV2 capacities', () => {
     expect(validateStudioProjectV2(project)).toBe(false);
   });
 
-  it('accepts exactly 120 shelf items and rejects 121', () => {
+  it('accepts exactly 24 parked sections and rejects 25', () => {
     const project = makeValidProject();
+    project.sectionOrder = [];
+    project.shelf.push({ kind: 'section', sectionId: 'section_1' });
     for (let index = 2; index <= 24; index += 1) {
       const sectionId = `section_${index}`;
       project.sections[sectionId] = makeSection(sectionId);
       project.shelf.push({ kind: 'section', sectionId });
     }
-    for (let index = 1; index <= 98; index += 1) {
-      const assetId = `asset_${index}`;
-      project.assets[assetId] = makeAsset(assetId);
-      project.clips.clip_1!.assetIds.push(assetId);
-      project.shelf.push({ kind: 'asset', assetId });
+
+    expect(project.shelf).toHaveLength(24);
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    project.sections.section_25 = makeSection('section_25');
+    project.shelf.push({ kind: 'section', sectionId: 'section_25' });
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it('accepts exactly 96 take aliases and rejects 97', () => {
+    const project = makeValidProject();
+    addShelfTakeAliases(project, 96);
+
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    addShelfTakeAliases(project, 1, 96);
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it('accepts exactly 120 total shelf identities and rejects 121', () => {
+    const project = makeValidProject();
+    project.sectionOrder = [];
+    project.shelf.push({ kind: 'section', sectionId: 'section_1' });
+    for (let index = 2; index <= 24; index += 1) {
+      const sectionId = `section_${index}`;
+      project.sections[sectionId] = makeSection(sectionId);
+      project.shelf.push({ kind: 'section', sectionId });
     }
+    addShelfTakeAliases(project, 96);
+
+    expect(project.shelf).toHaveLength(120);
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    addShelfTakeAliases(project, 1, 96);
     expect(project.shelf).toHaveLength(121);
-    expect(validateStudioProjectV2({ ...project, shelf: project.shelf.slice(0, 120) })).toBe(true);
     expect(validateStudioProjectV2(project)).toBe(false);
   });
 });
