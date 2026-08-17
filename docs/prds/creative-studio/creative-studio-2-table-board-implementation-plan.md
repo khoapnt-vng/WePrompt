@@ -108,10 +108,44 @@ export const STUDIO_MAX_VIDEO_CLIP_SECONDS = 15;
 - `referenceAssetId` remains singular and nullable in Phase 2B. Multi-reference provider input is a
   separate provider/model capability and is not introduced by this UI slice.
 - Shelf capacity is 120 total identities: at most 24 parked sections plus 96 take aliases. This is a
-  UI/project bound, independent from asset-ledger retention.
+  UI/project bound, independent from asset-ledger retention. Both per-kind maxima are enforced, not
+  only the total. The 24 parked sections are already implied by `STUDIO_MAX_SECTIONS`, which bounds
+  active plus parked sections together; the 96 take aliases are implied by nothing and need their
+  own count.
+- Asset `durationSeconds` is a finite number greater than `0` and at most `Number.MAX_SAFE_INTEGER`,
+  the bound the schema-1 validator already applies. `Number.MAX_VALUE` is not a bound: it admits
+  `1e308` and makes every cut trim comparison against the asset duration vacuously true.
 
 Generation, reference-request, cut-placement, dirty-report, and MCP projection limits remain
-independently named even when values coincide.
+independently named even when values coincide, and each validator consumes the constant named for
+its own contract. Cut placement uses `STUDIO_MAX_CUT_PLACEMENT_CLIPS`, never
+`STUDIO_MAX_CLIPS_PER_PROJECT`, even while both are 96. `STUDIO_PROJECT_SCHEMA_VERSION` is the only
+source of the persisted version literal in validators and factories.
+
+### Validator totality and lookup rules
+
+`validateStudioProjectV2` is a total function. Every input, including a corrupt or hostile persisted
+record, returns `true` or `false`. It never throws: callers read `false` as "quarantine this record",
+and an exception escaping a declared type guard bypasses that path entirely.
+
+- Resolve every record entry by own key. `project.clips[id]`, `project.assets[id]`, and
+  `project.jobs[id]` inherit `Object.prototype` members, so an ID of `constructor`, `toString`, or
+  `__proto__` — each of which satisfies the safe-ID contract — resolves to an inherited value that is
+  not `undefined`. Guard with `Object.hasOwn(record, id)`, or re-check identity with
+  `resolved?.id === id` as `creativeStudioProjectSummary.ts` already does. A bare `=== undefined`
+  guard is not sufficient, and reading a field through it throws.
+- Walk the retry graph iteratively with an explicit stack. Job count is unbounded by this contract,
+  so a recursive walk raises `RangeError: Maximum call stack size exceeded` on a long chain instead
+  of returning `false`.
+- Hoist every key set to module scope. A per-item `new Set([...])` inside a validator allocates once
+  per shelf entry on every project read and write.
+
+**Amendment 1 — post-Task-1 contract review.** The three rules above, the two bounds above them, and
+the per-contract constant rule are an amendment to this frozen contract under the review rule at the
+top of this section. They name behaviour the Task 1 head
+`bd2cc4824252ec58976f8597648c8e39612f95f8` does not have; they rename and reinterpret nothing.
+Task 1 Fix Round 1 implements them, and the Gate 1 independent schema review covers the amended
+contract.
 
 ### Persisted entities
 
@@ -354,16 +388,25 @@ if a new directory has fewer than two or more than ten direct children.
 - Create: `tests/unit/process/creative-studio/service/schema2/validation.test.ts`
 - Create: `tests/unit/process/creative-studio/service/schema2/factories.test.ts`
 - Modify: `tests/unit/process/creative-studio/types/canonicalTake.test.ts`
+- Create: `tests/unit/process/creative-studio/types/projectSummaryV2.test.ts`
 
 **Steps**
 
 - [ ] Add exact V2 types and independently named constants from the frozen contract while retaining
-      the current V1 public aliases only as an unexposed staging seam.
+      the current V1 public aliases only as an unexposed staging seam. Every constant added must have
+      at least one consumer by the end of its owning task; an unreferenced limit is not centralized.
 - [ ] RED: reject unknown keys, duplicate ownership, orphan assets/jobs/cuts, active+shelf section
       overlap, invalid shelf aliases, 25 sections, 9 clips in one section, 97 clips, shelf item 121,
-      video 3/16 seconds; accept every exact boundary.
+      97 take aliases, video 3/16 seconds; accept every exact boundary. Build the shelf capacity
+      fixture so the accepted 120-item case holds at most 96 take aliases — a fixture of 23 parked
+      sections plus 97 aliases asserts the wrong contract and locks the defect in.
+- [ ] RED totality, per the validator totality and lookup rules: an asset `clipId`, job `clipId`,
+      shelf `assetId`, `selectedAssetId`, or `referenceAssetId` of `constructor`, `toString`, or
+      `__proto__`; a 20,000-link retry chain; and an asset `durationSeconds` of `1e308`. Assert
+      `toBe(false)` on each, never `toThrow`, so a regression to an exception fails the test.
 - [ ] Implement dependency-free exact validators and `createEmptyStudioProjectV2()` with empty
-      Section/Clip/shelf/cut state.
+      Section/Clip/shelf/cut state. Resolve every record entry by own key, walk the retry graph
+      iteratively, and consume the constant named for each contract.
 - [ ] Convert canonical-take and summary projection helpers to explicit V2 variants; test stable
       active Section→Clip poster ordering and exclusion of parked sections.
 - [ ] Mutation proof: remove unique clip-ownership validation and prove the cross-section duplicate
@@ -372,6 +415,54 @@ if a new directory has fewer than two or more than ten direct children.
       `bunx vitest run tests/unit/process/creative-studio/service/schema2 tests/unit/process/creative-studio/types/canonicalTake.test.ts`
       and `bunx tsc --noEmit`.
 - [ ] Commit: `feat(studio): define schema 2 section and clip contracts`.
+
+### Task 1 Fix Round 1 — satisfy Amendment 1 before Task 2
+
+Independent review of `bd2cc4824252ec58976f8597648c8e39612f95f8` found the contract gaps Amendment 1
+names. All six defects below were reproduced by running `validateStudioProjectV2` against crafted
+records; the 139 tests that head ships pass without covering any of them. Task 2 does not start until
+this round is re-reviewed.
+
+**Files**
+
+- Modify: `packages/desktop/src/process/services/creative-studio/service/schema2/validation.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/schema2/factories.ts`
+- Modify: `tests/unit/process/creative-studio/service/schema2/validation.test.ts`
+
+**Steps**
+
+- [ ] RED the three totality defects, asserting `toBe(false)` on each. An asset `clipId` of
+      `constructor` throws `TypeError` on a missing `assetIds` at `validation.ts:590`; a job `clipId`
+      of `constructor` throws the same on a missing `jobIds` at `validation.ts:611`; a 20,000-link
+      retry chain throws `RangeError` at `validation.ts:497`.
+- [ ] Fix both lookups by own key. These two loops are the only replacement schema 2 has for the
+      schema-1 guard `sceneIds.has(value.sceneId)` (`store.ts:730` and `store.ts:1022`), which
+      `validateAsset`/`validateJob` dropped when they stopped taking an ID set. Verify no other
+      lookup site regressed: shelf `assetId`, `selectedAssetId`, and `referenceAssetId` already
+      reject inherited values and must keep doing so.
+- [ ] Replace the recursion in `retryGraphHasCycle` with an explicit stack, preserving the
+      three-colour visiting/visited semantics and the existing cross-clip and ordering checks.
+- [ ] RED the exact take-alias boundary at 96 accepted and 97 rejected, retaining the total 120/121
+      coverage, then enforce the per-kind maximum. Rebuild the existing capacity fixture: its accepted
+      120-item case is currently 23 parked sections plus 97 aliases, so it asserts the wrong contract
+      and turns red when the maximum lands. No new parked-section rule is needed — 25 parked sections
+      is already impossible under `STUDIO_MAX_SECTIONS`, which the suite should state once so the
+      absence of a shelf-side section count reads as deliberate.
+- [ ] RED an asset `durationSeconds` of `1e308` accepted today, plus a cut clip on it with
+      `sourceInSeconds: 1e300`, then bound the field at `Number.MAX_SAFE_INTEGER` to match
+      `store.ts:742`. This bound is the one field where the schema-2 copy has already drifted from the
+      schema-1 predicate it was derived from.
+- [ ] Consume `STUDIO_MAX_CUT_PLACEMENT_CLIPS` in `validateCut` and `STUDIO_PROJECT_SCHEMA_VERSION` in
+      both `validateStudioProjectV2` and `createEmptyStudioProjectV2`, replacing
+      `STUDIO_MAX_CLIPS_PER_PROJECT` and the two hardcoded `2` literals. Hoist the two shelf-item key
+      sets in `shelfItemIsExact` to module scope alongside every other key set in the file.
+- [ ] Mutation proof: restore the bare `=== undefined` guard at one of the two lookup sites and prove
+      the matching totality test fails; restore the fix.
+- [ ] Run:
+      `bunx vitest run tests/unit/process/creative-studio/service/schema2 tests/unit/process/creative-studio/types`
+      and `bunx tsc --noEmit`.
+- [ ] Obtain independent re-review of this round against Amendment 1 before Task 2.
+- [ ] Commit: `fix(studio): enforce exact schema 2 validation contract`.
 
 ### Task 2 — Implement the shared ordered reducer and clip-aware cuts
 
@@ -733,6 +824,15 @@ if a new directory has fewer than two or more than ten direct children.
       model/update-scene/reorder-scenes/select-asset/Cut provider, and manifest/schema parity.
 - [ ] Replace the public `StudioProject`/renderer aliases with V2; delete temporary V1 aliases and
       staging methods. Keep independent connection/adapter/prompt protocol V1 names unchanged.
+- [ ] Delete the schema-1 `validateProject` in `store.ts` and every predicate and value set it alone
+      kept alive: `isRecord`, `hasExactKeys`, `isSafeId`, `isIntegerInRange`, `isFiniteInRange`,
+      `isCanonicalIsoTimestamp`, `isSafeAssetFileName`, `SAFE_ID`, `ASPECT_RATIOS`, `RESOLUTIONS`,
+      `MEDIA_KINDS`, `ADAPTER_IDS`, `JOB_STATUSES`, `JOB_ERROR_CODES`, and `CUT_FILTER_IDS`. Tasks 1–5
+      deliberately duplicate these in `schema2/validation.ts` rather than extracting them, because
+      additive staging must not touch the V1 read path; this step is what stops the duplication
+      surviving the cutover. Move anything still reachable from connection, adapter, or prompt
+      validation instead of leaving a second copy. Assert afterwards that each name has exactly one
+      definition under `creative-studio/`.
 - [ ] Switch runtime startup to classify supported V2 projects before any mutating lifecycle action.
       Unsupported V1 bypasses cleanup, reapers, mailboxes, watchers, protocol, job recovery,
       resolvers, and adapters and returns the explicit UI state.
