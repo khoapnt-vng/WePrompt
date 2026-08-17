@@ -58,6 +58,20 @@ export type StudioProviderRef = {
   model: string;
 };
 
+/** Durable schema-2 media route identity. */
+export type StudioMediaModelRef = {
+  providerId: string;
+  adapterId: StudioProviderAdapterId;
+  model: string;
+};
+
+/** Renderer-safe schema-2 media route identity. */
+export type StudioRendererMediaModelRef = {
+  choiceId: string;
+  providerId: string;
+  model: string;
+};
+
 export type StudioTextModelRef = {
   providerId: string;
   model: string;
@@ -147,6 +161,19 @@ export type StudioCancellationPolicy = 'none' | 'queued_only' | 'queued_and_runn
 export type StudioOutputRole = 'take' | 'reference';
 
 export const STUDIO_REFERENCE_PROMPT_MAX_LENGTH = 4 * 1024;
+export const STUDIO_PROJECT_SCHEMA_VERSION = 2 as const;
+export const STUDIO_MAX_SECTIONS = 24;
+export const STUDIO_MAX_CLIPS_PER_SECTION = 8;
+export const STUDIO_MAX_CLIPS_PER_PROJECT = 96;
+export const STUDIO_MAX_SHELF_ITEMS = 120;
+export const STUDIO_MAX_GENERATION_CLIPS_PER_REQUEST = 24;
+export const STUDIO_MAX_REFERENCE_REQUEST_CLIPS = 24;
+export const STUDIO_MAX_CUT_PLACEMENT_CLIPS = 96;
+export const STUDIO_MAX_DIRTY_CLIPS_REPORTED = 96;
+export const STUDIO_MAX_MCP_AVAILABLE_TAKE_IDS_PER_CLIP = 24;
+export const STUDIO_MIN_VIDEO_CLIP_SECONDS = 4;
+export const STUDIO_MAX_VIDEO_CLIP_SECONDS = 15;
+export const STUDIO_MAX_MUTATION_OPERATIONS = 32;
 export const STUDIO_MAX_SCENES = 24;
 export const STUDIO_MAX_GENERATION_SCENES_PER_REQUEST = 24;
 export const STUDIO_MAX_REFERENCE_REQUEST_SCENES = 24;
@@ -468,6 +495,183 @@ export type StudioRendererRoutingPreferences = {
 export type StudioRendererProject = Omit<StudioProject, 'jobs' | 'routing'> & {
   jobs: Record<string, StudioRendererJob>;
   routing: StudioRendererRoutingPreferences;
+};
+
+export type StudioAssetV2 = Omit<StudioAsset, 'sceneId'> & {
+  clipId: string | null;
+};
+
+export type StudioJobV2 = Omit<StudioJob, 'sceneId'> & {
+  clipId: string;
+};
+
+export type StudioRendererJobV2 = Omit<
+  StudioJobV2,
+  'provider' | 'idempotencyKey' | 'providerJobId' | 'remoteStartedAt' | 'cancellationPolicy' | 'referenceInputSnapshot'
+> & {
+  provider: StudioRendererMediaModelRef;
+  canCancel: boolean;
+  canRetryDownload: boolean;
+};
+
+export type StudioSection = {
+  id: string;
+  title: string;
+  storyLine: string;
+  visualPrompt: string;
+  clipOrder: string[];
+};
+
+export type StudioClip = {
+  id: string;
+  shotPrompt: string;
+  narration: string;
+  onScreenText: string;
+  mediaKind: StudioMediaKind;
+  durationSeconds: number;
+  referenceAssetId: string | null;
+  selectedAssetId: string | null;
+  assetIds: string[];
+  jobIds: string[];
+};
+
+export type StudioShelfItem = { kind: 'section'; sectionId: string } | { kind: 'asset'; assetId: string };
+
+export type StudioEditableSection = Pick<StudioSection, 'title' | 'storyLine' | 'visualPrompt'>;
+
+export type StudioEditableClip = Pick<
+  StudioClip,
+  'shotPrompt' | 'narration' | 'onScreenText' | 'mediaKind' | 'durationSeconds' | 'referenceAssetId'
+>;
+
+type StudioNonEmptyPartial<T> = {
+  [Key in keyof T]-?: Required<Pick<T, Key>> & Partial<Omit<T, Key>>;
+}[keyof T];
+
+export type StudioEditableSectionChanges = StudioNonEmptyPartial<StudioEditableSection>;
+export type StudioEditableClipChanges = StudioNonEmptyPartial<StudioEditableClip>;
+
+export type StudioCutClipV2 = Omit<StudioCutClip, 'sceneId'> & {
+  clipId: string;
+};
+
+export type StudioCutV2 = Omit<StudioCut, 'clips'> & {
+  clips: Record<string, StudioCutClipV2>;
+};
+
+export type StudioRoutingPreferencesV2 = {
+  image: StudioMediaModelRef | null;
+  video: StudioMediaModelRef | null;
+};
+
+export type StudioRendererRoutingPreferencesV2 = {
+  image: StudioRendererMediaModelRef | null;
+  video: StudioRendererMediaModelRef | null;
+};
+
+export type StudioProjectV2 = Omit<
+  StudioProject,
+  'schemaVersion' | 'sceneOrder' | 'scenes' | 'cuts' | 'activeCutId' | 'assets' | 'jobs' | 'routing'
+> & {
+  schemaVersion: 2;
+  sectionOrder: string[];
+  sections: Record<string, StudioSection>;
+  clips: Record<string, StudioClip>;
+  shelf: StudioShelfItem[];
+  cuts: Record<string, StudioCutV2>;
+  activeCutId: string | null;
+  assets: Record<string, StudioAssetV2>;
+  jobs: Record<string, StudioJobV2>;
+  routing: StudioRoutingPreferencesV2;
+};
+
+export type StudioRendererProjectV2 = Omit<StudioProjectV2, 'jobs' | 'routing'> & {
+  jobs: Record<string, StudioRendererJobV2>;
+  routing: StudioRendererRoutingPreferencesV2;
+};
+
+export type StudioProjectSummaryV2 = {
+  id: string;
+  name: string;
+  forgeProjectId?: string;
+  aspectRatio: StudioAspectRatio;
+  targetDurationSeconds: number;
+  resolution: StudioResolution;
+  sectionCount: number;
+  clipCount: number;
+  selectedAssetCount: number;
+  poster?: {
+    sectionId: string;
+    clipId: string;
+    assetId: string;
+    sectionPosition: number;
+    clipPosition: number;
+  };
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateStudioProjectInputV2 = {
+  name: string;
+  brief: string;
+  forgeProjectId?: string;
+  aspectRatio: StudioAspectRatio;
+  targetDurationSeconds: number;
+  resolution: StudioResolution;
+};
+
+export type StudioProjectLoadResultV2 =
+  | { status: 'supported'; project: StudioRendererProjectV2 }
+  | { status: 'unsupported_prototype_schema'; projectId: string }
+  | { status: 'not_found'; projectId: string };
+
+export type StudioProjectListResultV2 = {
+  projects: StudioProjectSummaryV2[];
+  unsupportedProjectIds: string[];
+  quarantinedProjectIds: string[];
+};
+
+export type StudioMutationOperationV2 =
+  | { kind: 'set_brief'; brief: string }
+  | {
+      kind: 'add_section';
+      sectionId: string;
+      section: StudioEditableSection;
+      firstClipId: string;
+      firstClip: StudioEditableClip;
+      beforeSectionId: string | null;
+    }
+  | { kind: 'edit_section'; sectionId: string; changes: StudioEditableSectionChanges }
+  | { kind: 'reorder_sections'; sectionOrder: string[] }
+  | { kind: 'park_section'; sectionId: string }
+  | { kind: 'restore_section'; sectionId: string; beforeSectionId: string | null }
+  | {
+      kind: 'add_clip';
+      sectionId: string;
+      clipId: string;
+      clip: StudioEditableClip;
+      beforeClipId: string | null;
+    }
+  | { kind: 'edit_clip'; clipId: string; changes: StudioEditableClipChanges }
+  | { kind: 'delete_clip'; clipId: string }
+  | { kind: 'reorder_clips'; sectionId: string; clipOrder: string[] }
+  | { kind: 'park_take'; clipId: string; assetId: string }
+  | { kind: 'select_shelved_take'; clipId: string; assetId: string }
+  | { kind: 'remove_shelf_alias'; assetId: string }
+  | { kind: 'reorder_shelf'; shelf: StudioShelfItem[] }
+  | { kind: 'select_take'; clipId: string; assetId: string };
+
+export type StudioMutationBatchV2 = {
+  schemaVersion: 2;
+  projectId: string;
+  expectedRevision: number;
+  operations: StudioMutationOperationV2[];
+};
+
+export type StudioMutationBatchResultV2 = {
+  project: StudioRendererProjectV2;
+  createdSectionIds: string[];
+  createdClipIds: string[];
 };
 
 export type StudioProposalStatus = 'pending' | 'accepted' | 'rejected' | 'expired';
