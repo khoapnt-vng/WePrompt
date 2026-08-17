@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { types as nodeTypes } from 'node:util';
 import {
   isValidProviderJobId,
   STUDIO_MAX_CLIPS_PER_PROJECT,
@@ -168,6 +169,100 @@ const RULE_PREDICATE_KEYS = new Set(['kind', 'terms']);
 const RULE_UNDO_KEYS = new Set(['capturedRevision', 'previousRules']);
 const SHELF_SECTION_KEYS = new Set(['kind', 'sectionId']);
 const SHELF_ASSET_KEYS = new Set(['kind', 'assetId']);
+
+const INVALID_DATA_SNAPSHOT = Symbol('invalid-data-snapshot');
+type DataPropertySnapshot = {
+  key: PropertyKey;
+  value: unknown;
+  enumerable: boolean;
+};
+type DataNodeSnapshot = {
+  source: object;
+  target: object;
+  properties: DataPropertySnapshot[];
+};
+
+const captureDataNode = (source: object): DataNodeSnapshot | undefined => {
+  if (nodeTypes.isProxy(source)) return undefined;
+
+  let isArray: boolean;
+  let keys: PropertyKey[];
+  try {
+    isArray = Array.isArray(source);
+    keys = Reflect.ownKeys(source);
+  } catch {
+    // Revoked and hostile proxies are invalid persisted data.
+    return undefined;
+  }
+
+  const properties: DataPropertySnapshot[] = [];
+  for (const key of keys) {
+    let descriptor: PropertyDescriptor | undefined;
+    try {
+      descriptor = Reflect.getOwnPropertyDescriptor(source, key);
+    } catch {
+      // Keep input-originating descriptor traps outside the validator proper.
+      return undefined;
+    }
+    if (descriptor === undefined || !Object.hasOwn(descriptor, 'value')) return undefined;
+    properties.push({ key, value: descriptor.value, enumerable: descriptor.enumerable === true });
+  }
+
+  if (!isArray) {
+    return { source, target: Object.create(null) as object, properties };
+  }
+
+  const length = properties.find(({ key }) => key === 'length')?.value;
+  if (!Number.isInteger(length) || (length as number) < 0 || (length as number) > 0xffff_ffff) return undefined;
+  const target: unknown[] = [];
+  target.length = length as number;
+  return { source, target, properties };
+};
+
+/**
+ * Takes a getter-free, own-data-property snapshot before semantic validation.
+ *
+ * The catches are deliberately limited to reflection operations controlled by the input. Validation
+ * bugs still escape instead of being converted into corrupt-data results.
+ */
+const snapshotOwnDataGraph = (value: unknown): unknown | typeof INVALID_DATA_SNAPSHOT => {
+  if (typeof value !== 'object' || value === null) return value;
+
+  const root = captureDataNode(value);
+  if (root === undefined) return INVALID_DATA_SNAPSHOT;
+  const snapshots = new Map<object, object>([[root.source, root.target]]);
+  const pending = [root];
+
+  for (let pendingIndex = 0; pendingIndex < pending.length; pendingIndex += 1) {
+    const node = pending[pendingIndex]!;
+    for (const property of node.properties) {
+      if (Array.isArray(node.target) && property.key === 'length') continue;
+
+      let propertyValue = property.value;
+      if (typeof propertyValue === 'object' && propertyValue !== null) {
+        const existing = snapshots.get(propertyValue);
+        if (existing !== undefined) {
+          propertyValue = existing;
+        } else {
+          const child = captureDataNode(propertyValue);
+          if (child === undefined) return INVALID_DATA_SNAPSHOT;
+          snapshots.set(child.source, child.target);
+          pending.push(child);
+          propertyValue = child.target;
+        }
+      }
+
+      Object.defineProperty(node.target, property.key, {
+        configurable: true,
+        enumerable: property.enumerable,
+        value: propertyValue,
+        writable: true,
+      });
+    }
+  }
+
+  return root.target;
+};
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -582,6 +677,10 @@ const shelfItemIsExact = (value: unknown): value is StudioShelfItem => {
 
 /** Validates the complete persisted schema-2 project contract without I/O or normalization. */
 export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV2 => {
+  const dataSnapshot = snapshotOwnDataGraph(value);
+  if (dataSnapshot === INVALID_DATA_SNAPSHOT) return false;
+  value = dataSnapshot;
+
   if (
     !isRecord(value) ||
     !hasKeys(value, PROJECT_REQUIRED_KEYS, PROJECT_OPTIONAL_KEYS) ||

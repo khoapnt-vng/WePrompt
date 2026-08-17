@@ -245,6 +245,130 @@ describe('validateStudioProjectV2 exact schema', () => {
     expect(validateStudioProjectV2(makeValidProject())).toBe(true);
   });
 
+  it('rejects a throwing schema-version accessor without invoking it', () => {
+    const project = makeValidProject();
+    let getterCalls = 0;
+    Object.defineProperty(project, 'schemaVersion', {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        throw new Error('schemaVersion getter must not run');
+      },
+    });
+
+    const result = validateStudioProjectV2(project);
+
+    expect({ getterCalls, result }).toEqual({ getterCalls: 0, result: false });
+  });
+
+  it('rejects a throwing nested record accessor without invoking it', () => {
+    const project = makeValidProject();
+    let getterCalls = 0;
+    Object.defineProperty(project.sections, 'section_1', {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        throw new Error('section getter must not run');
+      },
+    });
+
+    const result = validateStudioProjectV2(project);
+
+    expect({ getterCalls, result }).toEqual({ getterCalls: 0, result: false });
+  });
+
+  it('rejects a throwing nested array accessor without invoking it', () => {
+    const project = makeValidProject();
+    let getterCalls = 0;
+    Object.defineProperty(project.sectionOrder, 0, {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        throw new Error('section-order getter must not run');
+      },
+    });
+
+    const result = validateStudioProjectV2(project);
+
+    expect({ getterCalls, result }).toEqual({ getterCalls: 0, result: false });
+  });
+
+  it('rejects a revoked project proxy without throwing', () => {
+    const { proxy, revoke } = Proxy.revocable(makeValidProject(), {});
+    revoke();
+
+    expect(validateStudioProjectV2(proxy)).toBe(false);
+  });
+
+  it('rejects a project proxy with a throwing get trap without invoking it', () => {
+    let getTrapCalls = 0;
+    const project = new Proxy(makeValidProject(), {
+      get: () => {
+        getTrapCalls += 1;
+        throw new Error('get trap must not run');
+      },
+    });
+
+    const result = validateStudioProjectV2(project);
+
+    expect({ getTrapCalls, result }).toEqual({ getTrapCalls: 0, result: false });
+  });
+
+  it('rejects a project proxy that lies about schemaVersion without invoking its get trap', () => {
+    let getTrapCalls = 0;
+    const project = new Proxy(makeValidProject(), {
+      get: (target, property, receiver) => {
+        getTrapCalls += 1;
+        return property === 'schemaVersion' ? 1 : Reflect.get(target, property, receiver);
+      },
+    });
+
+    const result = validateStudioProjectV2(project);
+
+    expect({ getTrapCalls, result }).toEqual({ getTrapCalls: 0, result: false });
+  });
+
+  it('rejects a nested record proxy whose own-key trap throws', () => {
+    const project = makeValidProject();
+    project.sections = new Proxy(project.sections, {
+      ownKeys: () => {
+        throw new Error('ownKeys failed');
+      },
+    });
+
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it('accepts valid values stored in read-only own data descriptors', () => {
+    const project = makeValidProject();
+    Object.defineProperty(project, 'schemaVersion', {
+      configurable: false,
+      enumerable: true,
+      value: 2,
+      writable: false,
+    });
+
+    expect(validateStudioProjectV2(project)).toBe(true);
+  });
+
+  it('accepts a valid project with a custom prototype without invoking inherited getters', () => {
+    const project = makeValidProject();
+    let getterCalls = 0;
+    Object.setPrototypeOf(project, {
+      get inheritedValue() {
+        getterCalls += 1;
+        throw new Error('inherited getter must not run');
+      },
+    });
+
+    const result = validateStudioProjectV2(project);
+
+    expect({ getterCalls, result }).toEqual({ getterCalls: 0, result: true });
+  });
+
   it('accepts valid asset, job, reference, cut, and project-level Cast ownership', () => {
     expect(validateStudioProjectV2(makePopulatedProject())).toBe(true);
   });
