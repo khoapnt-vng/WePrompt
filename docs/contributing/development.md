@@ -215,11 +215,36 @@ bun run start:multi
 This sets `AIONUI_MULTI_INSTANCE=1`, which:
 
 - Skips the Electron single-instance lock
-- Uses a separate userData directory (`AionUi-Dev-2`) to avoid database and config conflicts
+- Uses a separate userData directory (`Forge-Dev-2`) to avoid database and config conflicts
 - Isolates data/config symlink paths (`~/.aionui-dev-2`, `~/.aionui-config-dev-2`)
 - Vite renderer, CDP, and WebUI proxy ports auto-increment to avoid collisions
 
 > **Note:** The multi-instance WebUI defaults to port 25810 (instead of 25809). When accessing WebUI in a browser, use an **incognito/private window** for the second instance — both instances share the `localhost` cookie jar, and their JWT secrets differ, causing authentication failures if the same browser session is reused.
+
+### Development Profiles
+
+The ordinary development instance stores Electron user data in a profile named `Forge-Dev`; the
+multi-instance command uses the isolated `Forge-Dev-2` profile. These directories live below the
+platform application-data directory:
+
+| Platform | Ordinary profile                                             | Multi-instance profile                                           |
+| -------- | ------------------------------------------------------------ | ---------------------------------------------------------------- |
+| macOS    | `~/Library/Application Support/Forge-Dev`                    | `~/Library/Application Support/Forge-Dev-2`                      |
+| Windows  | `%APPDATA%\Forge-Dev`                                        | `%APPDATA%\Forge-Dev-2`                                          |
+| Linux    | `$XDG_CONFIG_HOME/Forge-Dev` (default `~/.config/Forge-Dev`) | `$XDG_CONFIG_HOME/Forge-Dev-2` (default `~/.config/Forge-Dev-2`) |
+
+For a fresh, explicitly named test profile:
+
+1. Quit every running WePrompt development instance and confirm its Electron processes have stopped.
+2. Rename the profile you will test, for example from `Forge-Dev` to
+   `Forge-Dev.saved-2026-08-17`. Keep that saved directory until the test is complete.
+3. Run `bun run start`. WePrompt creates a new empty `Forge-Dev` profile.
+4. When finished, quit WePrompt again. Rename the test profile to a descriptive archive name, or
+   remove it manually, then restore the saved profile to `Forge-Dev` if needed.
+
+Only rename or remove a profile while the app is stopped. A running process can still be writing its
+database, configuration, or Creative Studio manifests; changing the directory underneath it can
+corrupt the profile. The same workflow applies to `Forge-Dev-2` when testing `bun run start:multi`.
 
 ## Code Checks (prek)
 

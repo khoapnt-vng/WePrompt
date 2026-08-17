@@ -440,6 +440,11 @@ describe('initCreativeStudioBridge', () => {
       'storage_error',
       'conversation.creativeStudio.errors.storage',
     ],
+    [
+      new CreativeStudioStoreError('unsupported_prototype_schema', 'raw schema boundary detail'),
+      'storage_error',
+      'conversation.creativeStudio.errors.storage',
+    ],
   ] as const)('maps model-selection service failures without exposing details', async (failure, code, messageKey) => {
     const service = {
       ...dependencies.getService(),
@@ -513,6 +518,13 @@ describe('initCreativeStudioBridge', () => {
   });
 
   it.each([
+    [
+      'cancelJob',
+      mocks.cancelJobProvider,
+      new StudioJobManagerError('invalid_request'),
+      'invalid_payload',
+      'conversation.creativeStudio.errors.invalidPayload',
+    ],
     [
       'cancelJob',
       mocks.cancelJobProvider,
@@ -755,6 +767,8 @@ describe('initCreativeStudioBridge', () => {
   });
 
   it.each([
+    [new CreativeStudioMediaError('not_found'), 'not_found', 'conversation.creativeStudio.errors.projectNotFound'],
+    [new CreativeStudioMediaError('stale_project'), 'stale_project', 'conversation.creativeStudio.errors.staleProject'],
     [
       new CreativeStudioMediaError('invalid_media'),
       'invalid_payload',
@@ -1037,6 +1051,7 @@ describe('createCreativeStudioCloseHandshake', () => {
   );
 
   it.each([
+    'file:///Applications/WePrompt/index.html',
     'file:///Applications/WePrompt/index.html#/guid',
     'file:///Applications/WePrompt/index.html#/studio',
     'http://localhost:5173/#/studio-tools',
@@ -1130,6 +1145,21 @@ describe('createCreativeStudioCloseHandshake', () => {
       message: 'conversation.creativeStudio.close.unavailableMessage',
     });
     expect(dependencies.flushUnsavedWork).not.toHaveBeenCalled();
+  });
+
+  it('keeps the window open when an unavailable-renderer discard prompt is cancelled', async () => {
+    const dependencies = createCloseHandshakeDependencies({
+      queryUnsavedWork: vi.fn(async () => {
+        throw new Error('renderer query timed out');
+      }),
+      showMessageBox: vi.fn(async () => ({ response: 1 })),
+    });
+    const handshake = createCreativeStudioCloseHandshake(dependencies);
+
+    handshake.handleWindowClose(createCloseEvent());
+
+    await vi.waitFor(() => expect(dependencies.showMessageBox).toHaveBeenCalledOnce());
+    expect(dependencies.closeWindow).not.toHaveBeenCalled();
   });
 
   it('offers only discard or cancel when saving cannot complete', async () => {

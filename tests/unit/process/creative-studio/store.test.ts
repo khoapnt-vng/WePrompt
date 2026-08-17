@@ -11,6 +11,7 @@ import {
   promises as nodeFs,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -21,7 +22,10 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import type {
   CreateStudioProjectInput,
+  CreateStudioProjectInputV2,
   StudioAsset,
+  StudioAssetV2,
+  StudioClip,
   StudioConnectionBinding,
   StudioConnectionCandidate,
   StudioConnectionInventory,
@@ -34,8 +38,11 @@ import type {
   StudioEditableCut,
   StudioEditableCutClip,
   StudioJob,
+  StudioJobV2,
+  StudioMutationBatchV2,
   StudioProject,
   StudioProjectSummary,
+  StudioProjectV2,
   StudioMediaChoiceRef,
   StudioProposalPayload,
   StudioRendererJob,
@@ -49,6 +56,7 @@ import {
   STUDIO_BRIEF_REFERENCE_LABEL_MAX_LENGTH,
 } from '@/common/types/project/creativeStudioManagedAssetCollections';
 import { jobOutputRole } from '@/common/types/project/creativeStudioOutputRole';
+import { createEmptyStudioProjectV2 } from '@process/services/creative-studio/service/schema2';
 import { STUDIO_EDITABLE_SCENE_LIMITS, editableSceneSchema } from '@process/resources/builtinMcp/studioServer';
 import type { StudioProposalWriteError } from '@process/resources/builtinMcp/studioProposalWriter';
 import { writeProposalRecord } from '@process/resources/builtinMcp/studioProposalWriter';
@@ -57,7 +65,10 @@ import {
   createCreativeStudioStore,
   STUDIO_PROPOSAL_MAX_PENDING_PER_PROJECT,
   STUDIO_PROPOSAL_PENDING_TTL_MS,
+  STUDIO_PROJECT_V2_MAX_RECORD_BYTES,
   type CreativeStudioStore,
+  type StudioProjectInventoryV2,
+  type StudioProjectStoreLoadResultV2,
   type StudioProjectCommitObserver,
 } from '@process/services/creative-studio/store';
 
@@ -3387,6 +3398,1043 @@ describe('creative studio project store', () => {
         await rm(outsideDir, { recursive: true, force: true });
       }
     });
+  });
+});
+
+const makeStudioMutationBatchV2 = (
+  project: StudioProjectV2,
+  operations: StudioMutationBatchV2['operations'],
+  expectedRevision = project.revision
+): StudioMutationBatchV2 => ({
+  schemaVersion: 2,
+  projectId: project.id,
+  expectedRevision,
+  operations,
+});
+
+const makeBoundaryMutationBatchV2 = (projectId: string, expectedRevision = 1): StudioMutationBatchV2 => ({
+  schemaVersion: 2,
+  projectId,
+  expectedRevision,
+  operations: [{ kind: 'set_brief', brief: 'Updated without a commit tag' }],
+});
+
+describe('schema-2 creative studio project store', () => {
+  const timestamp = '2026-08-17T12:00:00.000Z';
+  const inputV2: CreateStudioProjectInputV2 = {
+    name: 'Schema Two Film',
+    brief: 'A clean-cutover project',
+    aspectRatio: '16:9',
+    targetDurationSeconds: 30,
+    resolution: '1080p',
+  };
+  let rootDir: string;
+
+  const readJson = <T>(file: string): T => JSON.parse(readFileSync(file, 'utf8')) as T;
+
+  const seedProjectV2 = (project: StudioProjectV2): void => {
+    const directory = path.join(rootDir, project.id);
+    mkdirSync(directory);
+    writeFileSync(path.join(directory, 'project.json'), JSON.stringify(project, null, 2));
+  };
+
+  const seedPrototypeProject = async (projectId = 'prototype_v1'): Promise<StudioProject> => {
+    const prototypeStore = createCreativeStudioStore({
+      rootDir,
+      createId: () => projectId,
+      now: () => timestamp,
+    });
+    return prototypeStore.createProject(makeInput({ name: 'Prototype project' }));
+  };
+
+  const protectPrototypeIndex = (): { fs: typeof nodeFs; accesses: string[] } => {
+    const prototypeIndex = path.join(realpathSync(rootDir), 'projects.json');
+    const accesses: string[] = [];
+    const fs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver) as unknown;
+        if (typeof value !== 'function') return value;
+        return (...args: unknown[]): unknown => {
+          const touchesPrototypeIndex = args.some((argument) => {
+            if (typeof argument !== 'string') return false;
+            const resolved = path.resolve(argument);
+            return resolved === prototypeIndex || resolved.startsWith(`${prototypeIndex}.`);
+          });
+          if (touchesPrototypeIndex) {
+            accesses.push(String(property));
+            throw new Error(`schema-2 path accessed projects.json through ${String(property)}`);
+          }
+          return Reflect.apply(value, target, args);
+        };
+      },
+    }) as typeof nodeFs;
+    return { fs, accesses };
+  };
+
+  const createStoreV2 = (
+    overrides: Omit<Parameters<typeof createCreativeStudioStore>[0], 'rootDir' | 'fs'> = {}
+  ): { store: CreativeStudioStore; prototypeIndexAccesses: string[] } => {
+    const protectedFs = protectPrototypeIndex();
+    return {
+      store: createCreativeStudioStore({
+        rootDir,
+        fs: protectedFs.fs,
+        logError: () => undefined,
+        ...overrides,
+      }),
+      prototypeIndexAccesses: protectedFs.accesses,
+    };
+  };
+
+  const observeFileSystemMethods = (
+    observedMethods: ReadonlySet<string>,
+    baseFs: typeof nodeFs = nodeFs
+  ): { fs: typeof nodeFs; calls: string[] } => {
+    const calls: string[] = [];
+    const fs = new Proxy(baseFs, {
+      get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver) as unknown;
+        if (typeof property !== 'string' || typeof value !== 'function' || !observedMethods.has(property)) {
+          return value;
+        }
+        return (...args: unknown[]): unknown => {
+          calls.push(property);
+          return Reflect.apply(value, target, args);
+        };
+      },
+    }) as typeof nodeFs;
+    return { fs, calls };
+  };
+
+  const makePosterProjectV2 = (id = 'poster_v2'): StudioProjectV2 => {
+    const project = createEmptyStudioProjectV2(inputV2, id, timestamp);
+    const clip: StudioClip = {
+      id: 'clip_video',
+      shotPrompt: 'A launch vehicle crosses frame',
+      narration: '',
+      onScreenText: '',
+      mediaKind: 'video',
+      durationSeconds: 4,
+      referenceAssetId: null,
+      selectedAssetId: 'asset_video',
+      assetIds: ['asset_video', 'asset_thumbnail'],
+      jobIds: ['job_video'],
+    };
+    const video: StudioAssetV2 = {
+      id: 'asset_video',
+      projectId: id,
+      clipId: clip.id,
+      mediaKind: 'video',
+      mimeType: 'video/mp4',
+      managedAsset: { collection: 'assets', fileName: 'asset_video.mp4' },
+      byteSize: 1,
+      sha256: 'a'.repeat(64),
+      durationSeconds: 4,
+      createdAt: timestamp,
+    };
+    const thumbnail: StudioAssetV2 = {
+      id: 'asset_thumbnail',
+      projectId: id,
+      clipId: clip.id,
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'thumbnails', fileName: 'asset_thumbnail.png' },
+      byteSize: 1,
+      sha256: 'b'.repeat(64),
+      createdAt: timestamp,
+    };
+    const job: StudioJobV2 = {
+      id: 'job_video',
+      projectId: id,
+      clipId: clip.id,
+      status: 'succeeded',
+      provider: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'model_1' },
+      idempotencyKey: 'idem_job_video',
+      providerJobId: 'remote_job_video',
+      remoteStartedAt: timestamp,
+      cancellationPolicy: 'none',
+      outputAssetIds: [video.id, thumbnail.id],
+      error: null,
+      retryOfJobId: null,
+      retryReason: null,
+      duplicateChargeAcknowledged: false,
+      duplicateChargeAcknowledgedAt: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    project.sectionOrder = ['section_1'];
+    project.sections.section_1 = {
+      id: 'section_1',
+      title: 'Opening',
+      storyLine: '',
+      visualPrompt: '',
+      clipOrder: [clip.id],
+    };
+    project.clips[clip.id] = clip;
+    project.assets = { [video.id]: video, [thumbnail.id]: thumbnail };
+    project.jobs[job.id] = job;
+    return project;
+  };
+
+  beforeEach(() => {
+    rootDir = mkdtempSync(path.join(tmpdir(), 'creative-studio-store-v2-'));
+  });
+
+  afterEach(() => {
+    rmSync(rootDir, { recursive: true, force: true });
+  });
+
+  it('returns exact load discriminants without parsing a schema-1 payload as schema 2', async () => {
+    const prototypeId = 'prototype_minimal';
+    mkdirSync(path.join(rootDir, prototypeId));
+    writeFileSync(
+      path.join(rootDir, prototypeId, 'project.json'),
+      JSON.stringify({ schemaVersion: 1, id: prototypeId, deliberatelyNotAProject: true })
+    );
+    const malformedId = 'malformed_v2';
+    mkdirSync(path.join(rootDir, malformedId));
+    writeFileSync(
+      path.join(rootDir, malformedId, 'project.json'),
+      JSON.stringify({ schemaVersion: 2, id: malformedId })
+    );
+    const project = createEmptyStudioProjectV2(inputV2, 'supported_v2', timestamp);
+    seedProjectV2(project);
+    const { store, prototypeIndexAccesses } = createStoreV2();
+
+    const supported: StudioProjectStoreLoadResultV2 = { status: 'supported', project };
+    const unsupported: StudioProjectStoreLoadResultV2 = {
+      status: 'unsupported_prototype_schema',
+      projectId: prototypeId,
+    };
+    const missing: StudioProjectStoreLoadResultV2 = { status: 'not_found', projectId: 'missing_v2' };
+    await expect(store.getProjectV2(project.id)).resolves.toEqual(supported);
+    await expect(store.getProjectV2(prototypeId)).resolves.toEqual(unsupported);
+    await expect(store.getProjectV2('missing_v2')).resolves.toEqual(missing);
+    await expect(store.getProjectV2(malformedId)).rejects.toMatchObject({ code: 'storage_error' });
+    expect(prototypeIndexAccesses).toEqual([]);
+  });
+
+  it('rejects an oversized schema-2 manifest before opening or reading its bytes', async () => {
+    const projectId = 'oversized_v2';
+    const projectFile = path.join(rootDir, projectId, 'project.json');
+    mkdirSync(path.dirname(projectFile));
+    writeFileSync(projectFile, JSON.stringify({ schemaVersion: 2, id: projectId }));
+    const protectedFs = protectPrototypeIndex();
+    let projectOpenCount = 0;
+    let projectReadFileCount = 0;
+    const boundedFs = new Proxy(protectedFs.fs, {
+      get(target, property, receiver) {
+        if (property === 'lstat') {
+          return async (...args: Parameters<typeof nodeFs.lstat>) => {
+            const stats = await nodeFs.lstat(...args);
+            if (path.resolve(String(args[0])) !== projectFile) return stats;
+            return new Proxy(stats, {
+              get(statsTarget, statsProperty, statsReceiver) {
+                if (statsProperty === 'size') return STUDIO_PROJECT_V2_MAX_RECORD_BYTES + 1;
+                return Reflect.get(statsTarget, statsProperty, statsReceiver) as unknown;
+              },
+            });
+          };
+        }
+        if (property === 'open') {
+          return (...args: Parameters<typeof nodeFs.open>) => {
+            if (path.resolve(String(args[0])) === projectFile) projectOpenCount += 1;
+            return nodeFs.open(...args);
+          };
+        }
+        if (property === 'readFile') {
+          return (...args: Parameters<typeof nodeFs.readFile>) => {
+            if (path.resolve(String(args[0])) === projectFile) projectReadFileCount += 1;
+            return nodeFs.readFile(...args);
+          };
+        }
+        return Reflect.get(target, property, receiver) as unknown;
+      },
+    }) as typeof nodeFs;
+    const store = createCreativeStudioStore({ rootDir, fs: boundedFs });
+
+    await expect(store.getProjectV2(projectId)).rejects.toMatchObject({ code: 'storage_error' });
+    expect(projectOpenCount).toBe(0);
+    expect(projectReadFileCount).toBe(0);
+    expect(protectedFs.accesses).toEqual([]);
+  });
+
+  it('does not annex a pre-existing project directory that has sidecar data but no manifest', async () => {
+    const projectId = 'reserved_v2';
+    const projectDirectory = path.join(rootDir, projectId);
+    const sidecarFile = path.join(projectDirectory, 'pending-command.sidecar');
+    mkdirSync(projectDirectory);
+    writeFileSync(sidecarFile, Buffer.from([0, 1, 2, 254, 255]));
+    const rootEntriesBefore = readdirSync(rootDir).toSorted();
+    const projectEntriesBefore = readdirSync(projectDirectory).toSorted();
+    const sidecarBytesBefore = readFileSync(sidecarFile);
+    const protectedFs = protectPrototypeIndex();
+    const mutations = observeFileSystemMethods(
+      new Set(['mkdir', 'open', 'rename', 'rm', 'rmdir', 'truncate', 'unlink', 'writeFile']),
+      protectedFs.fs
+    );
+    const store = createCreativeStudioStore({
+      rootDir,
+      fs: mutations.fs,
+      createId: () => projectId,
+      now: () => timestamp,
+    });
+
+    await expect(store.createProjectV2(inputV2)).rejects.toMatchObject({ code: 'invalid_payload' });
+
+    expect(readdirSync(rootDir).toSorted()).toEqual(rootEntriesBefore);
+    expect(readdirSync(projectDirectory).toSorted()).toEqual(projectEntriesBefore);
+    expect(readFileSync(sidecarFile)).toEqual(sidecarBytesBefore);
+    expect(existsSync(path.join(projectDirectory, 'project.json'))).toBe(false);
+    expect(existsSync(path.join(rootDir, 'projects-v2.json'))).toBe(false);
+    expect(mutations.calls).toEqual([]);
+    expect(protectedFs.accesses).toEqual([]);
+  });
+
+  it('allows exactly one winner when two stores concurrently create the same generated project ID', async () => {
+    const projectId = 'concurrent_v2';
+    const leftInput = { ...inputV2, name: 'Left contender', brief: 'Created by the left store' };
+    const rightInput = { ...inputV2, name: 'Right contender', brief: 'Created by the right store' };
+    const left = createStoreV2({ createId: () => projectId, now: () => timestamp });
+    const right = createStoreV2({ createId: () => projectId, now: () => timestamp });
+
+    const outcomes = await Promise.allSettled([
+      left.store.createProjectV2(leftInput),
+      right.store.createProjectV2(rightInput),
+    ]);
+    const fulfilled = outcomes.filter(
+      (outcome): outcome is PromiseFulfilledResult<StudioProjectV2> => outcome.status === 'fulfilled'
+    );
+    const rejected = outcomes.filter((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.reason).toMatchObject({ code: 'invalid_payload' });
+    const winner = fulfilled[0]!.value;
+    const summary = {
+      id: projectId,
+      name: winner.name,
+      aspectRatio: winner.aspectRatio,
+      targetDurationSeconds: winner.targetDurationSeconds,
+      resolution: winner.resolution,
+      sectionCount: 0,
+      clipCount: 0,
+      selectedAssetCount: 0,
+      createdAt: winner.createdAt,
+      updatedAt: winner.updatedAt,
+    };
+    expect(readJson<StudioProjectV2>(path.join(rootDir, projectId, 'project.json'))).toEqual(winner);
+    expect(readJson(path.join(rootDir, 'projects-v2.json'))).toEqual({ schemaVersion: 2, projects: [summary] });
+    const restarted = createStoreV2().store;
+    await expect(restarted.getProjectV2(projectId)).resolves.toEqual({ status: 'supported', project: winner });
+    await expect(restarted.listProjectsV2()).resolves.toEqual({
+      projects: [summary],
+      unsupportedProjectIds: [],
+      quarantinedProjectIds: [],
+    });
+    expect(left.prototypeIndexAccesses).toEqual([]);
+    expect(right.prototypeIndexAccesses).toEqual([]);
+  });
+
+  it('validates create input before creating or writing an absent storage root', async () => {
+    const absentRoot = path.join(rootDir, 'absent-store');
+    const mutations = observeFileSystemMethods(new Set(['mkdir', 'open', 'rename', 'rm', 'writeFile']));
+    const store = createCreativeStudioStore({
+      rootDir: absentRoot,
+      fs: mutations.fs,
+      createId: () => 'invalid_input_v2',
+      now: () => timestamp,
+    });
+    const invalidInput = { ...inputV2, unexpected: true } as CreateStudioProjectInputV2;
+
+    await expect(store.createProjectV2(invalidInput)).rejects.toMatchObject({ code: 'invalid_payload' });
+
+    expect(mutations.calls).toEqual([]);
+    expect(existsSync(absentRoot)).toBe(false);
+  });
+
+  it('rejects oversized generated and caller project IDs before any filesystem path access', async () => {
+    const oversizedId = 'p'.repeat(257);
+    const pathAccesses = observeFileSystemMethods(
+      new Set([
+        'access',
+        'appendFile',
+        'chmod',
+        'chown',
+        'copyFile',
+        'cp',
+        'link',
+        'lstat',
+        'mkdir',
+        'open',
+        'readFile',
+        'readdir',
+        'readlink',
+        'realpath',
+        'rename',
+        'rm',
+        'rmdir',
+        'stat',
+        'symlink',
+        'truncate',
+        'unlink',
+        'utimes',
+        'writeFile',
+      ])
+    );
+    const store = createCreativeStudioStore({
+      rootDir,
+      fs: pathAccesses.fs,
+      createId: () => oversizedId,
+      now: () => timestamp,
+    });
+    const oversizedBatch: StudioMutationBatchV2 = {
+      schemaVersion: 2,
+      projectId: oversizedId,
+      expectedRevision: 1,
+      operations: [{ kind: 'set_brief', brief: 'must not reach storage' }],
+    };
+
+    await expect(store.createProjectV2(inputV2)).rejects.toMatchObject({ code: 'invalid_payload' });
+    await expect(store.getProjectV2(oversizedId)).resolves.toEqual({ status: 'not_found', projectId: oversizedId });
+    await expect(store.applyMutationBatchV2(oversizedBatch)).rejects.toMatchObject({ code: 'invalid_payload' });
+    await expect(store.deleteProjectV2(oversizedId, 1)).resolves.toBe(false);
+    expect(pathAccesses.calls).toEqual([]);
+  });
+
+  it('scans schema-2 manifests sequentially with one bounded read handle at a time', async () => {
+    const projectIds = ['scan_a', 'scan_b', 'scan_c'];
+    for (const projectId of projectIds) seedProjectV2(createEmptyStudioProjectV2(inputV2, projectId, timestamp));
+    let activeManifestHandles = 0;
+    let maxConcurrentManifestHandles = 0;
+    const sequentialFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        if (property !== 'open') return Reflect.get(target, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.open>) => {
+          const file = path.resolve(String(args[0]));
+          const handle = await nodeFs.open(...args);
+          if (!file.endsWith(`${path.sep}project.json`)) return handle;
+          activeManifestHandles += 1;
+          maxConcurrentManifestHandles = Math.max(maxConcurrentManifestHandles, activeManifestHandles);
+          let closed = false;
+          return new Proxy(handle, {
+            get(handleTarget, handleProperty, handleReceiver) {
+              const value = Reflect.get(handleTarget, handleProperty, handleReceiver) as unknown;
+              if (typeof value !== 'function') return value;
+              if (handleProperty === 'read') {
+                return async (...readArgs: unknown[]) => {
+                  await new Promise<void>((resolve) => setTimeout(resolve, 10));
+                  return Reflect.apply(value, handleTarget, readArgs);
+                };
+              }
+              if (handleProperty === 'close') {
+                return async (...closeArgs: unknown[]): Promise<void> => {
+                  try {
+                    await Reflect.apply(value, handleTarget, closeArgs);
+                  } finally {
+                    if (!closed) {
+                      closed = true;
+                      activeManifestHandles -= 1;
+                    }
+                  }
+                };
+              }
+              return value.bind(handleTarget);
+            },
+          });
+        };
+      },
+    }) as typeof nodeFs;
+    const store = createCreativeStudioStore({ rootDir, fs: sequentialFs });
+
+    await expect(store.inspectProjectsV2()).resolves.toEqual({
+      supportedProjectIds: projectIds,
+      unsupportedProjectIds: [],
+      quarantinedProjectIds: [],
+    });
+    expect(maxConcurrentManifestHandles).toBe(1);
+    expect(activeManifestHandles).toBe(0);
+  });
+
+  it('keeps an absent storage root read-only while reporting empty and missing results', async () => {
+    const absentRoot = path.join(rootDir, 'absent-read-store');
+    const store = createCreativeStudioStore({ rootDir: absentRoot });
+
+    await expect(store.inspectProjectsV2()).resolves.toEqual({
+      supportedProjectIds: [],
+      unsupportedProjectIds: [],
+      quarantinedProjectIds: [],
+    });
+    await expect(store.listProjectsV2()).resolves.toEqual({
+      projects: [],
+      unsupportedProjectIds: [],
+      quarantinedProjectIds: [],
+    });
+    await expect(store.getProjectV2('missing_v2')).resolves.toEqual({
+      status: 'not_found',
+      projectId: 'missing_v2',
+    });
+    expect(existsSync(absentRoot)).toBe(false);
+  });
+
+  it('does not create absent storage while rejecting and ignoring missing mutations', async () => {
+    const absentRoot = path.join(rootDir, 'absent-mutation-store');
+    const store = createCreativeStudioStore({ rootDir: absentRoot });
+
+    await expect(store.applyMutationBatchV2(makeBoundaryMutationBatchV2('missing_v2'))).rejects.toMatchObject({
+      code: 'not_found',
+    });
+    await expect(store.deleteProjectV2('missing_v2', 1)).resolves.toBe(false);
+    expect(existsSync(absentRoot)).toBe(false);
+  });
+
+  it('rejects malformed create arguments before allocating storage', async () => {
+    const absentRoot = path.join(rootDir, 'absent-create-store');
+    const createId = vi.fn(() => 'generated_v2');
+    const store = createCreativeStudioStore({ rootDir: absentRoot, createId, now: () => timestamp });
+
+    await expect(store.createProjectV2(null as never)).rejects.toMatchObject({ code: 'invalid_payload' });
+    await expect(
+      store.createProjectV2({ ...inputV2, id: 'caller_v2' } as CreateStudioProjectInputV2)
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+    expect(createId).not.toHaveBeenCalled();
+    expect(existsSync(absentRoot)).toBe(false);
+  });
+
+  it('rejects invalid mutation revisions before consulting storage', async () => {
+    const absentRoot = path.join(rootDir, 'absent-revision-store');
+    const store = createCreativeStudioStore({ rootDir: absentRoot });
+
+    await expect(store.applyMutationBatchV2(makeBoundaryMutationBatchV2('missing_v2', 0))).rejects.toMatchObject({
+      code: 'invalid_payload',
+    });
+    await expect(store.deleteProjectV2('missing_v2', 0)).rejects.toMatchObject({ code: 'invalid_payload' });
+    expect(existsSync(absentRoot)).toBe(false);
+  });
+
+  it('distinguishes absent manifests in an existing storage root', async () => {
+    const { store, prototypeIndexAccesses } = createStoreV2();
+
+    await expect(store.applyMutationBatchV2(makeBoundaryMutationBatchV2('missing_v2'))).rejects.toMatchObject({
+      code: 'not_found',
+    });
+    await expect(store.deleteProjectV2('missing_v2', 1)).resolves.toBe(false);
+    expect(prototypeIndexAccesses).toEqual([]);
+  });
+
+  it('refuses prototype and malformed manifests through mutation entry points', async () => {
+    mkdirSync(path.join(rootDir, 'prototype_boundary_v1'));
+    mkdirSync(path.join(rootDir, 'malformed_boundary_v2'));
+    writeFileSync(
+      path.join(rootDir, 'prototype_boundary_v1', 'project.json'),
+      JSON.stringify({ schemaVersion: 1, id: 'prototype_boundary_v1' })
+    );
+    writeFileSync(
+      path.join(rootDir, 'malformed_boundary_v2', 'project.json'),
+      JSON.stringify({ schemaVersion: 2, id: 'malformed_boundary_v2' })
+    );
+    const { store, prototypeIndexAccesses } = createStoreV2();
+
+    await expect(
+      store.applyMutationBatchV2(makeBoundaryMutationBatchV2('prototype_boundary_v1'))
+    ).rejects.toMatchObject({ code: 'unsupported_prototype_schema' });
+    await expect(
+      store.applyMutationBatchV2(makeBoundaryMutationBatchV2('malformed_boundary_v2'))
+    ).rejects.toMatchObject({ code: 'storage_error' });
+    await expect(store.deleteProjectV2('malformed_boundary_v2', 1)).rejects.toMatchObject({ code: 'storage_error' });
+    expect(prototypeIndexAccesses).toEqual([]);
+  });
+
+  it('records an omitted commit tag and rejects deletion with the previous revision', async () => {
+    const onProjectCommitted = vi.fn();
+    const { store, prototypeIndexAccesses } = createStoreV2({
+      createId: () => 'committed_boundary_v2',
+      now: () => timestamp,
+      onProjectCommitted,
+    });
+    const project = await store.createProjectV2(inputV2);
+
+    const applied = await store.applyMutationBatchV2(makeBoundaryMutationBatchV2(project.id, project.revision));
+
+    expect(applied.project.revision).toBe(project.revision + 1);
+    expect(onProjectCommitted).toHaveBeenLastCalledWith(expect.objectContaining({ commitTag: null }));
+    await expect(store.deleteProjectV2(project.id, project.revision)).rejects.toMatchObject({ code: 'stale_project' });
+    expect(prototypeIndexAccesses).toEqual([]);
+  });
+
+  it('rejects a symlinked project identity during inventory inspection', async () => {
+    const backingDirectory = path.join(rootDir, '.inventory-symlink-backing');
+    mkdirSync(backingDirectory);
+    symlinkSync(backingDirectory, path.join(rootDir, 'unsafe_inventory_v2'), 'dir');
+    const { store, prototypeIndexAccesses } = createStoreV2();
+
+    await expect(store.inspectProjectsV2()).rejects.toMatchObject({ code: 'storage_error' });
+    expect(prototypeIndexAccesses).toEqual([]);
+  });
+
+  it('creates an exact empty project in projects-v2.json and reloads it after restart', async () => {
+    const { store, prototypeIndexAccesses } = createStoreV2({
+      createId: () => 'created_v2',
+      now: () => timestamp,
+    });
+
+    const project = await store.createProjectV2(inputV2);
+
+    expect(project).toEqual(createEmptyStudioProjectV2(inputV2, 'created_v2', timestamp));
+    expect(existsSync(path.join(rootDir, 'projects.json'))).toBe(false);
+    expect(readJson(path.join(rootDir, 'projects-v2.json'))).toEqual({
+      schemaVersion: 2,
+      projects: [
+        {
+          id: project.id,
+          name: 'Schema Two Film',
+          aspectRatio: '16:9',
+          targetDurationSeconds: 30,
+          resolution: '1080p',
+          sectionCount: 0,
+          clipCount: 0,
+          selectedAssetCount: 0,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        },
+      ],
+    });
+
+    const restarted = createStoreV2().store;
+    await expect(restarted.getProjectV2(project.id)).resolves.toEqual({ status: 'supported', project });
+    await expect(restarted.listProjectsV2()).resolves.toEqual({
+      projects: [expect.objectContaining({ id: project.id, sectionCount: 0, clipCount: 0 })],
+      unsupportedProjectIds: [],
+      quarantinedProjectIds: [],
+    });
+    expect(prototypeIndexAccesses).toEqual([]);
+  });
+
+  it.each([
+    ['missing', null],
+    [
+      'stale',
+      JSON.stringify({
+        schemaVersion: 2,
+        projects: [
+          {
+            id: 'phantom_v2',
+            name: 'Phantom project',
+            aspectRatio: '9:16',
+            targetDurationSeconds: 99,
+            resolution: '4k',
+            sectionCount: 9,
+            clipCount: 9,
+            selectedAssetCount: 9,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          },
+        ],
+      }),
+    ],
+    ['corrupt', '{not-json'],
+    ['wrong schema', JSON.stringify({ schemaVersion: 1, projects: [] })],
+  ])('repairs a %s schema-2 index from classified manifests only', async (_label, indexBytes) => {
+    const prototype = await seedPrototypeProject();
+    const project = createEmptyStudioProjectV2(inputV2, 'healthy_v2', timestamp);
+    seedProjectV2(project);
+    const malformedId = 'broken_v2';
+    mkdirSync(path.join(rootDir, malformedId));
+    writeFileSync(
+      path.join(rootDir, malformedId, 'project.json'),
+      JSON.stringify({ schemaVersion: 2, id: malformedId })
+    );
+    if (indexBytes !== null) writeFileSync(path.join(rootDir, 'projects-v2.json'), indexBytes);
+    const prototypeIndexBefore = readFileSync(path.join(rootDir, 'projects.json'));
+    const { store, prototypeIndexAccesses } = createStoreV2();
+    const expectedSummary = {
+      id: project.id,
+      name: project.name,
+      aspectRatio: project.aspectRatio,
+      targetDurationSeconds: project.targetDurationSeconds,
+      resolution: project.resolution,
+      sectionCount: 0,
+      clipCount: 0,
+      selectedAssetCount: 0,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+
+    await expect(store.listProjectsV2()).resolves.toEqual({
+      projects: [expectedSummary],
+      unsupportedProjectIds: [prototype.id],
+      quarantinedProjectIds: [malformedId],
+    });
+    expect(readJson(path.join(rootDir, 'projects-v2.json'))).toEqual({
+      schemaVersion: 2,
+      projects: [expectedSummary],
+    });
+    expect(readFileSync(path.join(rootDir, 'projects.json'))).toEqual(prototypeIndexBefore);
+    expect(prototypeIndexAccesses).toEqual([]);
+  });
+
+  it('lists schema-1 separately and persists the exact active video poster summary', async () => {
+    const prototype = await seedPrototypeProject();
+    const project = makePosterProjectV2();
+    seedProjectV2(project);
+    writeFileSync(path.join(rootDir, 'projects-v2.json'), JSON.stringify({ schemaVersion: 2, projects: [] }));
+    const { store, prototypeIndexAccesses } = createStoreV2();
+    const summary = {
+      id: project.id,
+      name: project.name,
+      aspectRatio: '16:9',
+      targetDurationSeconds: 30,
+      resolution: '1080p',
+      sectionCount: 1,
+      clipCount: 1,
+      selectedAssetCount: 1,
+      poster: {
+        sectionId: 'section_1',
+        clipId: 'clip_video',
+        assetId: 'asset_thumbnail',
+        sectionPosition: 1,
+        clipPosition: 1,
+      },
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+
+    await expect(store.listProjectsV2()).resolves.toEqual({
+      projects: [summary],
+      unsupportedProjectIds: [prototype.id],
+      quarantinedProjectIds: [],
+    });
+    expect(readJson(path.join(rootDir, 'projects-v2.json'))).toEqual({ schemaVersion: 2, projects: [summary] });
+    expect(prototypeIndexAccesses).toEqual([]);
+  });
+
+  it('rolls back an earlier operation when a later operation fails', async () => {
+    const onProjectCommitted = vi.fn<StudioProjectCommitObserver>();
+    const { store } = createStoreV2({ createId: () => 'rollback_v2', now: () => timestamp, onProjectCommitted });
+    const project = await store.createProjectV2(inputV2);
+    const projectFile = path.join(rootDir, project.id, 'project.json');
+    const indexFile = path.join(rootDir, 'projects-v2.json');
+    const beforeProject = readFileSync(projectFile);
+    const beforeIndex = readFileSync(indexFile);
+
+    await expect(
+      store.applyMutationBatchV2(
+        makeStudioMutationBatchV2(project, [
+          { kind: 'set_brief', brief: 'must roll back' },
+          { kind: 'delete_clip', clipId: 'missing_clip' },
+        ]),
+        'rollback/test'
+      )
+    ).rejects.toMatchObject({ reasonCode: 'invalid_operation' });
+
+    expect(readFileSync(projectFile)).toEqual(beforeProject);
+    expect(readFileSync(indexFile)).toEqual(beforeIndex);
+    expect(onProjectCommitted).not.toHaveBeenCalled();
+  });
+
+  it('rejects stale mutation authority before writing or observing', async () => {
+    const onProjectCommitted = vi.fn<StudioProjectCommitObserver>();
+    const { store } = createStoreV2({ createId: () => 'stale_v2', now: () => timestamp, onProjectCommitted });
+    const project = await store.createProjectV2(inputV2);
+    const projectFile = path.join(rootDir, project.id, 'project.json');
+    const indexFile = path.join(rootDir, 'projects-v2.json');
+    const beforeProject = readFileSync(projectFile);
+    const beforeIndex = readFileSync(indexFile);
+
+    await expect(
+      store.applyMutationBatchV2(
+        makeStudioMutationBatchV2(project, [{ kind: 'set_brief', brief: 'stale write' }], project.revision + 1),
+        'stale/test'
+      )
+    ).rejects.toMatchObject({ code: 'stale_project' });
+
+    expect(readFileSync(projectFile)).toEqual(beforeProject);
+    expect(readFileSync(indexFile)).toEqual(beforeIndex);
+    expect(onProjectCommitted).not.toHaveBeenCalled();
+  });
+
+  it('commits a multi-operation batch as one revision and one frozen observer fact', async () => {
+    const facts: Parameters<StudioProjectCommitObserver>[0][] = [];
+    const events: string[] = [];
+    let clock = Date.parse(timestamp);
+    const canonicalRoot = realpathSync(rootDir);
+    const committedProjectDirectory = path.join(canonicalRoot, 'committed_v2');
+    const protectedFs = protectPrototypeIndex();
+    const trackingFs = new Proxy(protectedFs.fs, {
+      get(target, property, receiver) {
+        if (property === 'rename') {
+          return async (...args: Parameters<typeof nodeFs.rename>): ReturnType<typeof nodeFs.rename> => {
+            const destination = path.resolve(String(args[1]));
+            await protectedFs.fs.rename(...args);
+            if (destination.endsWith(`${path.sep}project.json`)) events.push('project-rename');
+            if (destination === path.join(canonicalRoot, 'projects-v2.json')) events.push('index-rename');
+          };
+        }
+        if (property !== 'open') return Reflect.get(target, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.open>) => {
+          const file = path.resolve(String(args[0]));
+          const handle = await protectedFs.fs.open(...args);
+          return new Proxy(handle, {
+            get(handleTarget, handleProperty, handleReceiver) {
+              if (handleProperty === 'sync' && file === committedProjectDirectory) {
+                return async (): Promise<void> => {
+                  await handleTarget.sync();
+                  events.push('project-directory-sync');
+                };
+              }
+              const value = Reflect.get(handleTarget, handleProperty, handleReceiver) as unknown;
+              return typeof value === 'function' ? value.bind(handleTarget) : value;
+            },
+          });
+        };
+      },
+    }) as typeof nodeFs;
+    const store = createCreativeStudioStore({
+      rootDir,
+      fs: trackingFs,
+      createId: () => 'committed_v2',
+      now: () => new Date((clock += 1_000)).toISOString(),
+      logError: () => undefined,
+      onProjectCommitted: (fact) => {
+        events.push('observer');
+        facts.push(fact);
+      },
+    });
+    const project = await store.createProjectV2(inputV2);
+    events.length = 0;
+
+    const result = await store.applyMutationBatchV2(
+      makeStudioMutationBatchV2(project, [
+        {
+          kind: 'add_section',
+          sectionId: 'section_new',
+          section: { title: 'First title', storyLine: '', visualPrompt: '' },
+          firstClipId: 'clip_new',
+          firstClip: {
+            shotPrompt: '',
+            narration: '',
+            onScreenText: '',
+            mediaKind: 'image',
+            durationSeconds: 1,
+            referenceAssetId: null,
+          },
+          beforeSectionId: null,
+        },
+        { kind: 'edit_section', sectionId: 'section_new', changes: { title: 'Final title' } },
+      ]),
+      'opaque/task-3-tag'
+    );
+
+    expect(result.project).toMatchObject({ revision: project.revision + 1, brief: project.brief });
+    expect(result.project.sections.section_new?.title).toBe('Final title');
+    expect(result.createdSectionIds).toEqual(['section_new']);
+    expect(result.createdClipIds).toEqual(['clip_new']);
+    expect(facts).toEqual([
+      {
+        projectId: project.id,
+        previousRevision: project.revision,
+        committedRevision: project.revision + 1,
+        committedAt: result.project.updatedAt,
+        commitTag: 'opaque/task-3-tag',
+      },
+    ]);
+    expect(facts.every(Object.isFrozen)).toBe(true);
+    expect(events).toEqual(['project-rename', 'project-directory-sync', 'observer', 'index-rename']);
+    expect(
+      readJson<{ schemaVersion: number; projects: Array<{ sectionCount: number; clipCount: number }> }>(
+        path.join(rootDir, 'projects-v2.json')
+      )
+    ).toMatchObject({ schemaVersion: 2, projects: [{ sectionCount: 1, clipCount: 1 }] });
+    expect(protectedFs.accesses).toEqual([]);
+  });
+
+  it('returns a committed batch after one V2 index failure and retries only that V2 index', async () => {
+    const projectId = 'repair_retry_v2';
+    const facts: Parameters<StudioProjectCommitObserver>[0][] = [];
+    const logError = vi.fn();
+    const renameDestinations: string[] = [];
+    const protectedFs = protectPrototypeIndex();
+    let armed = false;
+    let indexRenameAttempts = 0;
+    const failingOnceFs = new Proxy(protectedFs.fs, {
+      get(target, property, receiver) {
+        if (property !== 'rename') return Reflect.get(target, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.rename>): ReturnType<typeof nodeFs.rename> => {
+          const destination = path.resolve(String(args[1]));
+          if (armed) {
+            renameDestinations.push(destination);
+            if (destination.endsWith(`${path.sep}projects-v2.json`)) {
+              indexRenameAttempts += 1;
+              if (indexRenameAttempts === 1) throw new Error('schema-2 index rename failed once');
+            }
+          }
+          return protectedFs.fs.rename(...args);
+        };
+      },
+    }) as typeof nodeFs;
+    let clock = Date.parse(timestamp);
+    const store = createCreativeStudioStore({
+      rootDir,
+      fs: failingOnceFs,
+      createId: () => projectId,
+      now: () => new Date((clock += 1_000)).toISOString(),
+      logError,
+      onProjectCommitted: (fact) => facts.push(fact),
+    });
+    const project = await store.createProjectV2(inputV2);
+    armed = true;
+
+    const result = await store.applyMutationBatchV2(
+      makeStudioMutationBatchV2(project, [
+        {
+          kind: 'add_section',
+          sectionId: 'section_retry',
+          section: { title: 'Retry summary', storyLine: '', visualPrompt: '' },
+          firstClipId: 'clip_retry',
+          firstClip: {
+            shotPrompt: '',
+            narration: '',
+            onScreenText: '',
+            mediaKind: 'image',
+            durationSeconds: 1,
+            referenceAssetId: null,
+          },
+          beforeSectionId: null,
+        },
+      ]),
+      'opaque/retry-tag'
+    );
+
+    expect(result.project).toMatchObject({ id: projectId, revision: project.revision + 1 });
+    expect(facts).toEqual([
+      {
+        projectId,
+        previousRevision: project.revision,
+        committedRevision: result.project.revision,
+        committedAt: result.project.updatedAt,
+        commitTag: 'opaque/retry-tag',
+      },
+    ]);
+    expect(facts.every(Object.isFrozen)).toBe(true);
+    await vi.waitFor(() => {
+      expect(
+        readJson<{ projects: Array<{ sectionCount: number; clipCount: number }> }>(
+          path.join(rootDir, 'projects-v2.json')
+        ).projects
+      ).toEqual([expect.objectContaining({ sectionCount: 1, clipCount: 1 })]);
+    });
+    expect(renameDestinations.map((destination) => path.basename(destination))).toEqual([
+      'project.json',
+      'projects-v2.json',
+      'projects-v2.json',
+    ]);
+    expect(indexRenameAttempts).toBe(2);
+    expect(logError).toHaveBeenCalledExactlyOnceWith(
+      '[CreativeStudio] Schema-2 project summary repair failed after commit',
+      expect.objectContaining({ message: 'schema-2 index rename failed once' })
+    );
+    expect(protectedFs.accesses).toEqual([]);
+  });
+
+  it('reports a busy V2 delete before stale revision when both conditions apply', async () => {
+    const project = makePosterProjectV2('busy_delete_v2');
+    project.jobs.job_video!.status = 'running';
+    seedProjectV2(project);
+    const manifestFile = path.join(rootDir, project.id, 'project.json');
+    const manifestBefore = readFileSync(manifestFile);
+    const { store, prototypeIndexAccesses } = createStoreV2();
+
+    await expect(store.deleteProjectV2(project.id, project.revision + 1)).rejects.toMatchObject({ code: 'busy' });
+
+    expect(readFileSync(manifestFile)).toEqual(manifestBefore);
+    expect(existsSync(path.join(rootDir, 'projects-v2.json'))).toBe(false);
+    expect(prototypeIndexAccesses).toEqual([]);
+  });
+
+  it('rejects a symlinked V2 project directory before issuing any remove', async () => {
+    const projectId = 'symlink_delete_v2';
+    const project = createEmptyStudioProjectV2(inputV2, projectId, timestamp);
+    const backingDirectory = path.join(rootDir, '.symlink-delete-backing');
+    const manifestFile = path.join(backingDirectory, 'project.json');
+    mkdirSync(backingDirectory);
+    writeFileSync(manifestFile, JSON.stringify(project, null, 2));
+    symlinkSync(backingDirectory, path.join(rootDir, projectId), 'dir');
+    const manifestBefore = readFileSync(manifestFile);
+    const protectedFs = protectPrototypeIndex();
+    const rmCalls: string[] = [];
+    const noDeleteFs = new Proxy(protectedFs.fs, {
+      get(target, property, receiver) {
+        if (property !== 'rm') return Reflect.get(target, property, receiver);
+        return (...args: Parameters<typeof nodeFs.rm>): ReturnType<typeof nodeFs.rm> => {
+          rmCalls.push(String(args[0]));
+          return protectedFs.fs.rm(...args);
+        };
+      },
+    }) as typeof nodeFs;
+    const store = createCreativeStudioStore({ rootDir, fs: noDeleteFs });
+
+    await expect(store.deleteProjectV2(projectId, project.revision)).rejects.toMatchObject({ code: 'storage_error' });
+
+    expect(rmCalls).toEqual([]);
+    expect(existsSync(path.join(rootDir, projectId))).toBe(true);
+    expect(readFileSync(manifestFile)).toEqual(manifestBefore);
+    expect(protectedFs.accesses).toEqual([]);
+  });
+
+  it('deletes only a supported schema-2 project and refuses the schema-1 identity without touching it', async () => {
+    const prototype = await seedPrototypeProject();
+    const prototypeManifest = readFileSync(path.join(rootDir, prototype.id, 'project.json'));
+    const prototypeIndex = readFileSync(path.join(rootDir, 'projects.json'));
+    const { store, prototypeIndexAccesses } = createStoreV2({ createId: () => 'deleted_v2', now: () => timestamp });
+    const project = await store.createProjectV2(inputV2);
+
+    await expect(store.deleteProjectV2(prototype.id, prototype.revision)).rejects.toMatchObject({
+      code: 'unsupported_prototype_schema',
+    });
+    await expect(store.deleteProjectV2(project.id, project.revision)).resolves.toBe(true);
+
+    expect(existsSync(path.join(rootDir, project.id))).toBe(false);
+    expect(readFileSync(path.join(rootDir, prototype.id, 'project.json'))).toEqual(prototypeManifest);
+    expect(readFileSync(path.join(rootDir, 'projects.json'))).toEqual(prototypeIndex);
+    expect(readJson(path.join(rootDir, 'projects-v2.json'))).toEqual({ schemaVersion: 2, projects: [] });
+    expect(prototypeIndexAccesses).toEqual([]);
+  });
+
+  it('keeps inspection read-only and refreshes its classified ID inventory after create and delete', async () => {
+    const prototype = await seedPrototypeProject();
+    const malformedId = 'inventory_broken_v2';
+    mkdirSync(path.join(rootDir, malformedId));
+    writeFileSync(
+      path.join(rootDir, malformedId, 'project.json'),
+      JSON.stringify({ schemaVersion: 2, id: malformedId })
+    );
+    const ids = ['inventory_a', 'inventory_b'];
+    const { store, prototypeIndexAccesses } = createStoreV2({
+      createId: () => ids.shift() ?? 'unexpected_id',
+      now: () => timestamp,
+    });
+    const first = await store.createProjectV2(inputV2);
+    rmSync(path.join(rootDir, 'projects-v2.json'));
+
+    const firstInventory: StudioProjectInventoryV2 = {
+      supportedProjectIds: [first.id],
+      unsupportedProjectIds: [prototype.id],
+      quarantinedProjectIds: [malformedId],
+    };
+    await expect(store.inspectProjectsV2()).resolves.toEqual(firstInventory);
+    expect(existsSync(path.join(rootDir, 'projects-v2.json'))).toBe(false);
+
+    const second = await store.createProjectV2(inputV2);
+    await expect(store.inspectProjectsV2()).resolves.toEqual({
+      ...firstInventory,
+      supportedProjectIds: [first.id, second.id],
+    });
+    await store.deleteProjectV2(first.id, first.revision);
+    await expect(store.inspectProjectsV2()).resolves.toEqual({
+      ...firstInventory,
+      supportedProjectIds: [second.id],
+    });
+    expect(prototypeIndexAccesses).toEqual([]);
   });
 });
 

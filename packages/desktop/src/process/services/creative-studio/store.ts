@@ -13,6 +13,7 @@ import {
   STUDIO_MAX_SCENES,
   STUDIO_REFERENCE_PROMPT_MAX_LENGTH,
   type CreateStudioProjectInput,
+  type CreateStudioProjectInputV2,
   type StudioAsset,
   type StudioCancellationPolicy,
   type StudioConnectionBinding,
@@ -21,9 +22,13 @@ import {
   type StudioCutFilter,
   type StudioJob,
   type StudioManagedAssetRef,
+  type StudioMutationBatchV2,
   type StudioOutputRole,
   type StudioProject,
+  type StudioProjectListResultV2,
   type StudioProjectSummary,
+  type StudioProjectSummaryV2,
+  type StudioProjectV2,
   type StudioProposal,
   type StudioProposalPayload,
   type StudioReferenceRequest,
@@ -42,7 +47,7 @@ import {
   STUDIO_MANAGED_ASSET_COLLECTIONS,
   STUDIO_MAX_ACTIVE_BRIEF_REFERENCES,
 } from '@/common/types/project/creativeStudioManagedAssetCollections';
-import { toStudioProjectSummary } from '@/common/types/project/creativeStudioProjectSummary';
+import { toStudioProjectSummary, toStudioProjectSummaryV2 } from '@/common/types/project/creativeStudioProjectSummary';
 import {
   canonicalizeRecordRoot,
   publishImmutableRecord,
@@ -51,8 +56,15 @@ import {
   resolveConfinedRecordPath,
   resolveSafeRecordDirectory,
 } from './service/recordIo';
+import {
+  applyStudioMutationBatchV2,
+  createEmptyStudioProjectV2,
+  validateStudioProjectV2,
+  type StudioMutationApplyResultV2,
+} from './service/schema2';
 
 const SAFE_ID = /^[A-Za-z0-9_-]+$/;
+const STUDIO_PROJECT_V2_MAX_ID_LENGTH = 256;
 const ASPECT_RATIOS = new Set(['16:9', '9:16', '1:1', '4:3', '3:4']);
 const RESOLUTIONS = new Set(['720p', '1080p']);
 const MEDIA_KINDS = new Set(['image', 'video']);
@@ -248,11 +260,18 @@ const REFERENCE_REQUEST_RECORD_KEYS = new Set(['schemaVersion', 'id', 'projectId
 export const STUDIO_PROPOSAL_MAX_RECORD_BYTES = 256 * 1024;
 export const STUDIO_PROPOSAL_MAX_PENDING_PER_PROJECT = 50;
 export const STUDIO_PROPOSAL_PENDING_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
+export const STUDIO_PROJECT_V2_MAX_RECORD_BYTES = 64 * 1024 * 1024;
 const STUDIO_PROPOSAL_STALE_SLOT_MS = 60 * 1_000;
 
 let temporaryFileCounter = 0;
 
-type StoreErrorCode = 'invalid_payload' | 'not_found' | 'stale_project' | 'busy' | 'storage_error';
+type StoreErrorCode =
+  | 'invalid_payload'
+  | 'not_found'
+  | 'stale_project'
+  | 'busy'
+  | 'storage_error'
+  | 'unsupported_prototype_schema';
 
 export class CreativeStudioStoreError extends Error {
   readonly code: StoreErrorCode;
@@ -279,9 +298,26 @@ export type StudioProjectCommitFacts = Readonly<{
 
 export type StudioProjectCommitObserver = (facts: StudioProjectCommitFacts) => void;
 
+export type StudioProjectStoreLoadResultV2 =
+  | { status: 'supported'; project: StudioProjectV2 }
+  | { status: 'unsupported_prototype_schema'; projectId: string }
+  | { status: 'not_found'; projectId: string };
+
+export type StudioProjectInventoryV2 = {
+  supportedProjectIds: string[];
+  unsupportedProjectIds: string[];
+  quarantinedProjectIds: string[];
+};
+
 export type CreativeStudioStore = {
   listProjects(): Promise<StudioProjectSummary[]>;
   listQuarantinedProjectIds(): Promise<string[]>;
+  inspectProjectsV2(): Promise<StudioProjectInventoryV2>;
+  listProjectsV2(): Promise<StudioProjectListResultV2>;
+  createProjectV2(input: CreateStudioProjectInputV2): Promise<StudioProjectV2>;
+  getProjectV2(projectId: string): Promise<StudioProjectStoreLoadResultV2>;
+  applyMutationBatchV2(batch: StudioMutationBatchV2, commitTag?: string): Promise<StudioMutationApplyResultV2>;
+  deleteProjectV2(projectId: string, expectedRevision: number): Promise<boolean>;
   createProject(input: CreateStudioProjectInput): Promise<StudioProject>;
   getProject(projectId: string): Promise<StudioProject | null>;
   updateProject(
@@ -336,6 +372,19 @@ type ProjectListingSweep = {
   quarantinedProjectIds: string[];
 };
 
+type ProjectListingSweepV2 = {
+  supportedProjectIds: string[];
+  summaries: StudioProjectSummaryV2[];
+  unsupportedProjectIds: string[];
+  quarantinedProjectIds: string[];
+};
+
+type ProjectFileInspectionV2 =
+  | { status: 'supported'; project: StudioProjectV2 }
+  | { status: 'unsupported_prototype_schema'; projectId: string }
+  | { status: 'not_found'; projectId: string }
+  | { status: 'malformed_v2'; projectId: string; error: CreativeStudioStoreError };
+
 type JsonRecord = Record<string, unknown>;
 
 type StudioProposalDecision = {
@@ -388,6 +437,8 @@ const containsForbiddenConnectionField = (value: unknown): boolean => {
 };
 
 const isSafeId = (value: unknown): value is string => typeof value === 'string' && SAFE_ID.test(value);
+const isSafeIdV2 = (value: unknown): value is string =>
+  isSafeId(value) && value.length <= STUDIO_PROJECT_V2_MAX_ID_LENGTH;
 const isSafeProposalId = (value: unknown): value is string =>
   typeof value === 'string' && value.length <= 256 && SAFE_ID.test(value);
 const isSafeConnectionId = (value: unknown): value is string =>
@@ -1303,6 +1354,11 @@ const compareSummaries = (left: StudioProjectSummary, right: StudioProjectSummar
   return byUpdatedAt !== 0 ? byUpdatedAt : left.id.localeCompare(right.id);
 };
 
+const compareSummariesV2 = (left: StudioProjectSummaryV2, right: StudioProjectSummaryV2): number => {
+  const byUpdatedAt = right.updatedAt.localeCompare(left.updatedAt);
+  return byUpdatedAt !== 0 ? byUpdatedAt : left.id.localeCompare(right.id);
+};
+
 const sameJson = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
 
 const createProjectFromInput = (input: CreateStudioProjectInput, id: string, timestamp: string): StudioProject => ({
@@ -1351,6 +1407,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
   const queues = new Map<string, Promise<unknown>>();
   const proposalReapedAt = new Map<string, number>();
   let summaryQueue: Promise<unknown> = Promise.resolve();
+  let summaryV2Queue: Promise<unknown> = Promise.resolve();
   let connectionsQueue: Promise<unknown> = Promise.resolve();
   let sharedListingSweep:
     | { result: ProjectListingSweep; remainingConsumer: 'projects' | 'quarantinedProjectIds' }
@@ -1403,6 +1460,22 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       throw storageError(error, 'Creative Studio root is unavailable');
     }
   };
+
+  const existingCanonicalRootV2 = async (): Promise<string | null> => {
+    try {
+      const stats = await fs.lstat(rootDir);
+      if (!stats.isDirectory() || stats.isSymbolicLink()) {
+        throw new CreativeStudioStoreError('storage_error', 'Creative Studio root is unsafe');
+      }
+      return await fs.realpath(rootDir);
+    } catch (error) {
+      if (error instanceof CreativeStudioStoreError) throw error;
+      if (isRecord(error) && error.code === 'ENOENT') return null;
+      throw storageError(error, 'Creative Studio root is unavailable');
+    }
+  };
+
+  const writableCanonicalRootV2 = async (): Promise<string> => (await existingCanonicalRootV2()) ?? canonicalRoot();
 
   const resolveRootChild = (root: string, child: string): string => {
     try {
@@ -1465,6 +1538,37 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     }
   };
 
+  const createProjectDirectoryV2 = async (root: string, projectId: string): Promise<string> => {
+    if (!isSafeIdV2(projectId)) {
+      throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio project id');
+    }
+    const directory = resolveRootChild(root, projectId);
+    try {
+      await fs.mkdir(directory);
+    } catch (error) {
+      if (isRecord(error) && error.code === 'EEXIST') {
+        throw new CreativeStudioStoreError('invalid_payload', 'Studio project already exists');
+      }
+      throw storageError(error, 'Creative Studio project directory could not be created');
+    }
+    try {
+      const stats = await fs.lstat(directory);
+      const canonicalDirectory = await fs.realpath(directory);
+      if (
+        !stats.isDirectory() ||
+        stats.isSymbolicLink() ||
+        !isInsideRoot(root, canonicalDirectory) ||
+        canonicalDirectory === root
+      ) {
+        throw new CreativeStudioStoreError('storage_error', 'Creative Studio project directory is unsafe');
+      }
+      return canonicalDirectory;
+    } catch (error) {
+      if (error instanceof CreativeStudioStoreError) throw error;
+      throw storageError(error, 'Creative Studio project directory is unavailable');
+    }
+  };
+
   const projectFile = async (root: string, projectId: string, createDirectory: boolean): Promise<string | null> => {
     const directory = await projectDirectory(root, projectId, createDirectory);
     if (directory === null) return null;
@@ -1477,6 +1581,38 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     const file = resolveRootChild(root, 'projects.json');
     await assertRegularFileOrMissing(file);
     return file;
+  };
+
+  const summariesFileV2 = async (root: string): Promise<string> => {
+    const file = resolveRootChild(root, 'projects-v2.json');
+    await assertRegularFileOrMissing(file);
+    return file;
+  };
+
+  const readBoundedStudioV2File = async (root: string, file: string): Promise<string | null> => {
+    let stats: Awaited<ReturnType<typeof fs.lstat>>;
+    try {
+      stats = await fs.lstat(file);
+    } catch (error) {
+      if (isRecord(error) && error.code === 'ENOENT') return null;
+      throw storageError(error, 'Schema-2 Studio file is unavailable');
+    }
+    if (stats.isSymbolicLink() || !stats.isFile()) {
+      throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio file is unsafe');
+    }
+    if (stats.size > STUDIO_PROJECT_V2_MAX_RECORD_BYTES) {
+      throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio file is too large');
+    }
+    try {
+      return await readBoundedRegularFile({
+        fs,
+        canonicalRoot: root,
+        file,
+        maxBytes: stats.size,
+      });
+    } catch (error) {
+      throw storageError(error, 'Schema-2 Studio file could not be read');
+    }
   };
 
   const connectionsFile = async (root: string): Promise<string> => {
@@ -1979,6 +2115,82 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     }
   };
 
+  const inspectProjectFileV2 = async (root: string, projectId: string): Promise<ProjectFileInspectionV2> => {
+    const file = await projectFile(root, projectId, false);
+    if (file === null) return { status: 'not_found', projectId };
+    const bytes = await readBoundedStudioV2File(root, file);
+    if (bytes === null) return { status: 'not_found', projectId };
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(bytes) as unknown;
+    } catch {
+      return {
+        status: 'malformed_v2',
+        projectId,
+        error: new CreativeStudioStoreError('storage_error', 'Malformed schema-2 Studio project manifest'),
+      };
+    }
+    if (isRecord(parsed) && parsed.schemaVersion === 1) {
+      return { status: 'unsupported_prototype_schema', projectId };
+    }
+    if (
+      !isRecord(parsed) ||
+      parsed.schemaVersion !== 2 ||
+      !validateStudioProjectV2(parsed) ||
+      parsed.id !== projectId
+    ) {
+      return {
+        status: 'malformed_v2',
+        projectId,
+        error: new CreativeStudioStoreError('storage_error', 'Malformed schema-2 Studio project manifest'),
+      };
+    }
+    return { status: 'supported', project: parsed };
+  };
+
+  const scanProjectsV2 = async (root: string): Promise<ProjectListingSweepV2> => {
+    let entries: import('node:fs').Dirent[];
+    try {
+      entries = await fs.readdir(root, { withFileTypes: true });
+    } catch (error) {
+      throw storageError(error, 'Studio project inventory could not be inspected');
+    }
+    const unsafeProjectEntry = entries.find((entry) => isSafeIdV2(entry.name) && entry.isSymbolicLink());
+    if (unsafeProjectEntry !== undefined) {
+      throw new CreativeStudioStoreError('storage_error', 'Creative Studio project directory is unsafe');
+    }
+    const projectEntries = entries
+      .filter((entry) => entry.isDirectory() && isSafeIdV2(entry.name))
+      .toSorted((left, right) => left.name.localeCompare(right.name));
+    const supportedProjectIds: string[] = [];
+    const summaries: StudioProjectSummaryV2[] = [];
+    const unsupportedProjectIds: string[] = [];
+    const quarantinedProjectIds: string[] = [];
+    for (const entry of projectEntries) {
+      const projectId = entry.name;
+      let inspected: ProjectFileInspectionV2;
+      try {
+        // A schema-2 record may be large, so inventory reads stay sequential and bounded.
+        // eslint-disable-next-line no-await-in-loop
+        inspected = await inspectProjectFileV2(root, projectId);
+      } catch (error) {
+        quarantinedProjectIds.push(projectId);
+        safeLogError(`[CreativeStudio] Quarantined corrupt schema-2 project manifest: ${projectId}`, error);
+        continue;
+      }
+      if (inspected.status === 'supported') {
+        supportedProjectIds.push(inspected.project.id);
+        summaries.push(toStudioProjectSummaryV2(inspected.project));
+      } else if (inspected.status === 'unsupported_prototype_schema') unsupportedProjectIds.push(projectId);
+      else if (inspected.status === 'malformed_v2') {
+        quarantinedProjectIds.push(projectId);
+        safeLogError(`[CreativeStudio] Quarantined corrupt schema-2 project manifest: ${projectId}`, inspected.error);
+      }
+    }
+    return { supportedProjectIds, summaries, unsupportedProjectIds, quarantinedProjectIds };
+  };
+
   const readAllProjects = async (
     root: string
   ): Promise<{ projects: StudioProject[]; quarantinedProjectIds: string[] }> => {
@@ -2042,6 +2254,51 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       safeLogError('[CreativeStudio] Project summary repair failed after commit', error);
       void repairSummaryIndex().catch((retryError: unknown): void => {
         safeLogError('[CreativeStudio] Project summary repair retry failed', retryError);
+      });
+    }
+  };
+
+  const toProjectListResultV2 = (sweep: ProjectListingSweepV2): StudioProjectListResultV2 => ({
+    projects: sweep.summaries.toSorted(compareSummariesV2),
+    unsupportedProjectIds: [...sweep.unsupportedProjectIds].toSorted((left, right) => left.localeCompare(right)),
+    quarantinedProjectIds: [...sweep.quarantinedProjectIds].toSorted((left, right) => left.localeCompare(right)),
+  });
+
+  const repairSummaryIndexV2 = (): Promise<StudioProjectListResultV2> => {
+    const rebuild = async (): Promise<StudioProjectListResultV2> => {
+      const root = await existingCanonicalRootV2();
+      if (root === null) return { projects: [], unsupportedProjectIds: [], quarantinedProjectIds: [] };
+      const indexFile = await summariesFileV2(root);
+      const sweep = await scanProjectsV2(root);
+      const result = toProjectListResultV2(sweep);
+      let existing: unknown = null;
+      let indexExists = true;
+      try {
+        const bytes = await readBoundedStudioV2File(root, indexFile);
+        indexExists = bytes !== null;
+        if (bytes !== null) existing = JSON.parse(bytes) as unknown;
+      } catch {
+        // A malformed or oversized schema-2 summary index is rebuilt from project manifests below.
+      }
+      const ownsIndex = indexExists || sweep.supportedProjectIds.length > 0 || sweep.quarantinedProjectIds.length > 0;
+      if (ownsIndex) {
+        const next = { schemaVersion: 2, projects: result.projects };
+        if (!sameJson(existing, next)) await writeJsonAtomic(root, indexFile, next);
+      }
+      return result;
+    };
+    const next = summaryV2Queue.catch((): undefined => undefined).then(() => rebuild());
+    summaryV2Queue = next.catch((): undefined => undefined);
+    return next;
+  };
+
+  const repairSummaryV2AfterCommit = async (): Promise<void> => {
+    try {
+      await repairSummaryIndexV2();
+    } catch (error) {
+      safeLogError('[CreativeStudio] Schema-2 project summary repair failed after commit', error);
+      void repairSummaryIndexV2().catch((retryError: unknown): void => {
+        safeLogError('[CreativeStudio] Schema-2 project summary repair retry failed', retryError);
       });
     }
   };
@@ -2130,6 +2387,144 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     });
 
   return {
+    async inspectProjectsV2(): Promise<StudioProjectInventoryV2> {
+      const root = await existingCanonicalRootV2();
+      if (root === null) {
+        return { supportedProjectIds: [], unsupportedProjectIds: [], quarantinedProjectIds: [] };
+      }
+      const sweep = await scanProjectsV2(root);
+      return {
+        supportedProjectIds: [...sweep.supportedProjectIds].toSorted((left, right) => left.localeCompare(right)),
+        unsupportedProjectIds: [...sweep.unsupportedProjectIds].toSorted((left, right) => left.localeCompare(right)),
+        quarantinedProjectIds: [...sweep.quarantinedProjectIds].toSorted((left, right) => left.localeCompare(right)),
+      };
+    },
+
+    async listProjectsV2(): Promise<StudioProjectListResultV2> {
+      return repairSummaryIndexV2();
+    },
+
+    async createProjectV2(input: CreateStudioProjectInputV2): Promise<StudioProjectV2> {
+      if (!isRecord(input) || Object.hasOwn(input, 'id')) {
+        throw new CreativeStudioStoreError('invalid_payload', 'Studio project ids are generated by the store');
+      }
+      const projectId = createId();
+      if (!isSafeIdV2(projectId)) throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio project id');
+      let candidate: StudioProjectV2;
+      try {
+        candidate = createEmptyStudioProjectV2(input, projectId, now());
+      } catch {
+        throw new CreativeStudioStoreError('invalid_payload', 'Invalid schema-2 Studio project payload');
+      }
+      return enqueue(projectId, async () => {
+        const root = await writableCanonicalRootV2();
+        await summariesFileV2(root);
+        if ((await projectDirectory(root, projectId, false)) !== null) {
+          throw new CreativeStudioStoreError('invalid_payload', 'Studio project already exists');
+        }
+        const directory = await createProjectDirectoryV2(root, projectId);
+        const file = resolveRootChild(directory, 'project.json');
+        await assertRegularFileOrMissing(file);
+        await writeJsonAtomic(root, file, candidate);
+        await repairSummaryIndexV2();
+        return candidate;
+      });
+    },
+
+    async getProjectV2(projectId: string): Promise<StudioProjectStoreLoadResultV2> {
+      if (!isSafeIdV2(projectId)) return { status: 'not_found', projectId };
+      const root = await existingCanonicalRootV2();
+      if (root === null) return { status: 'not_found', projectId };
+      const inspected = await inspectProjectFileV2(root, projectId);
+      if (inspected.status === 'malformed_v2') throw inspected.error;
+      return inspected;
+    },
+
+    async applyMutationBatchV2(batch: StudioMutationBatchV2, commitTag?: string): Promise<StudioMutationApplyResultV2> {
+      if (!isRecord(batch) || !isSafeIdV2(batch.projectId)) {
+        throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio project id');
+      }
+      if (!isIntegerInRange(batch.expectedRevision, 1, Number.MAX_SAFE_INTEGER)) {
+        throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio project revision');
+      }
+      return enqueue(batch.projectId, async () => {
+        const root = await existingCanonicalRootV2();
+        if (root === null) throw new CreativeStudioStoreError('not_found', 'Studio project not found');
+        const inspected = await inspectProjectFileV2(root, batch.projectId);
+        if (inspected.status === 'not_found') {
+          throw new CreativeStudioStoreError('not_found', 'Studio project not found');
+        }
+        if (inspected.status === 'unsupported_prototype_schema') {
+          throw new CreativeStudioStoreError('unsupported_prototype_schema', 'Unsupported prototype Studio schema');
+        }
+        if (inspected.status === 'malformed_v2') throw inspected.error;
+        const current = inspected.project;
+        if (current.revision !== batch.expectedRevision) {
+          throw new CreativeStudioStoreError('stale_project', 'Studio project has changed');
+        }
+        await summariesFileV2(root);
+        const applied = applyStudioMutationBatchV2(current, batch);
+        const committed: StudioProjectV2 = {
+          ...applied.project,
+          revision: current.revision + 1,
+          updatedAt: now(),
+        };
+        if (!validateStudioProjectV2(committed)) {
+          throw new CreativeStudioStoreError('invalid_payload', 'Invalid schema-2 Studio project payload');
+        }
+        const file = await projectFile(root, current.id, false);
+        if (file === null) {
+          throw new CreativeStudioStoreError('storage_error', 'Creative Studio project storage is unavailable');
+        }
+        await writeJsonAtomic(root, file, committed);
+        observeProjectCommit(
+          Object.freeze({
+            projectId: current.id,
+            previousRevision: current.revision,
+            committedRevision: committed.revision,
+            committedAt: committed.updatedAt,
+            commitTag: commitTag ?? null,
+          })
+        );
+        await repairSummaryV2AfterCommit();
+        return { ...applied, project: committed };
+      });
+    },
+
+    async deleteProjectV2(projectId: string, expectedRevision: number): Promise<boolean> {
+      if (!isSafeIdV2(projectId)) return false;
+      if (!isIntegerInRange(expectedRevision, 1, Number.MAX_SAFE_INTEGER)) {
+        throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio project revision');
+      }
+      return enqueue(projectId, async () => {
+        const root = await existingCanonicalRootV2();
+        if (root === null) return false;
+        const inspected = await inspectProjectFileV2(root, projectId);
+        if (inspected.status === 'not_found') return false;
+        if (inspected.status === 'unsupported_prototype_schema') {
+          throw new CreativeStudioStoreError('unsupported_prototype_schema', 'Unsupported prototype Studio schema');
+        }
+        if (inspected.status === 'malformed_v2') throw inspected.error;
+        const current = inspected.project;
+        if (Object.values(current.jobs).some((job) => NONTERMINAL_JOB_STATUSES.has(job.status))) {
+          throw new CreativeStudioStoreError('busy', 'Studio project has active generation jobs');
+        }
+        if (current.revision !== expectedRevision) {
+          throw new CreativeStudioStoreError('stale_project', 'Studio project has changed');
+        }
+        await summariesFileV2(root);
+        const targetDir = await projectDirectory(root, projectId, false);
+        if (targetDir === null) return false;
+        try {
+          await fs.rm(targetDir, { recursive: true, force: false });
+        } catch (error) {
+          throw storageError(error, 'Studio project deletion failed');
+        }
+        await repairSummaryIndexV2();
+        return true;
+      });
+    },
+
     async listProjects(): Promise<StudioProjectSummary[]> {
       if (sharedListingSweep?.remainingConsumer === 'projects') {
         const { result } = sharedListingSweep;

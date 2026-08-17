@@ -9,4 +9,6 @@ export {
   createCreativeStudioStore,
   type CreativeStudioStore,
   type CreativeStudioStoreDeps,
+  type StudioProjectInventoryV2,
+  type StudioProjectStoreLoadResultV2,
 } from './store';

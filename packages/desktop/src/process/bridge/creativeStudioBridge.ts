@@ -51,26 +51,33 @@ const renderErrorMessageKeys: Record<StudioRenderErrorCode, string> = {
   cancelled: 'conversation.creativeStudio.phase.review.render.errors.cancelled',
 };
 
+const legacyStoreErrorCode = (error: CreativeStudioStoreError): StudioCommandErrorCode =>
+  error.code === 'unsupported_prototype_schema' ? 'storage_error' : error.code;
+
 const toCommandError = (error: unknown): StudioCommandResult<never> => {
   if (error instanceof StudioRenderRunnerError) {
     return { ok: false, error: { code: error.code, messageKey: renderErrorMessageKeys[error.code] } };
   }
+  // Schema-2 providers remain unregistered until the public cutover; keep the legacy bridge's
+  // existing error vocabulary until that provider surface is installed.
   const code: StudioCommandErrorCode =
-    error instanceof CreativeStudioStoreError || error instanceof CreativeStudioServiceError
-      ? error.code
-      : error instanceof StudioJobManagerError
-        ? error.code === 'invalid_request'
-          ? 'invalid_payload'
-          : error.code
-        : error instanceof CreativeStudioMediaError
-          ? error.code === 'not_found'
-            ? 'not_found'
-            : error.code === 'stale_project'
-              ? 'stale_project'
-              : error.code === 'invalid_media'
-                ? 'invalid_payload'
-                : 'storage_error'
-          : 'storage_error';
+    error instanceof CreativeStudioStoreError
+      ? legacyStoreErrorCode(error)
+      : error instanceof CreativeStudioServiceError
+        ? error.code
+        : error instanceof StudioJobManagerError
+          ? error.code === 'invalid_request'
+            ? 'invalid_payload'
+            : error.code
+          : error instanceof CreativeStudioMediaError
+            ? error.code === 'not_found'
+              ? 'not_found'
+              : error.code === 'stale_project'
+                ? 'stale_project'
+                : error.code === 'invalid_media'
+                  ? 'invalid_payload'
+                  : 'storage_error'
+            : 'storage_error';
   return { ok: false, error: { code, messageKey: errorMessageKeys[code] } };
 };
 
