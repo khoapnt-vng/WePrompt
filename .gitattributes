@@ -24,6 +24,9 @@
 *.woff2 binary
 *.ttf binary
 
+# Immutable generated Creative Studio design fixture. Keep byte-for-byte authority.
+docs/prds/creative-studio/creative-studio-2-table-board-reference.html.txt binary
+
 # Locale JSON: key-level three-way merge — register the driver once per clone
 # with `just git-setup` (unregistered clones silently fall back to line merge).
 packages/desktop/src/renderer/services/i18n/locales/**/*.json merge=locale-json
