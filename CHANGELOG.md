@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.40-internal (2026-08-17)
+
+### Core
+
+#### Bug Fixes
+
+- **db:** preserve existing Windows data when upgrading databases whose initial migration checksum was recorded from CRLF migration files
+
+---
+
 ## [2.1.39](https://github.com/iOfficeAI/AionUi/compare/v2.1.38...v2.1.39) (2026-07-21)
 
 ### Desktop

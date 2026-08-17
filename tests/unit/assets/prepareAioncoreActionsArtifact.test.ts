@@ -15,7 +15,7 @@ const { acceptedMigrationLineage } = require('../../../packages/shared-scripts/s
 
 const posixFakeToolchainIt = process.platform === 'win32' ? it.skip : it;
 const publishedAioncoreRefs =
-  '8ddae6e0c6773ed4871e0719f7a89924d9a5e6bb\trefs/heads/codex/internal-sprint3-aioncore-package\n';
+  'eff4007daf1adced4b932c885b98b0b44603177d\trefs/heads/codex/fix-windows-crlf-migration-compat\n';
 const resolvePublishedAioncoreRefs = () => publishedAioncoreRefs;
 
 function writeFile(filePath: string, contents = 'x') {
@@ -137,7 +137,7 @@ afterEach(() => {
 
 describe('prepare-aioncore GitHub Actions artifact resolver', () => {
   it('pins the Sprint 3 internal AionCore package commit and migration lineage', () => {
-    expect(ACCEPTED_AIONCORE_SOURCE_COMMIT).toBe('8ddae6e0c6773ed4871e0719f7a89924d9a5e6bb');
+    expect(ACCEPTED_AIONCORE_SOURCE_COMMIT).toBe('eff4007daf1adced4b932c885b98b0b44603177d');
     expect(acceptedMigrationLineage).toMatchObject({
       latestVersion: 28,
       entryCount: 28,
