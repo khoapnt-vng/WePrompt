@@ -65,18 +65,20 @@ closeout record.
 
 ## Final closeout gates
 
-On the final source tree, all of the following commands exited 0:
+All results below were measured on the final executable source and test tree. Their numeric values
+were inserted afterward in this documentation-only update, so no source or test input changed after
+the measurements. All of the following commands exited 0:
 
 | Gate                      | Command                                                                          | Fresh result                                                                                                                            |
 | ------------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | Types                     | `bunx tsc --noEmit`                                                              | 0 errors                                                                                                                                |
-| Gate documentation        | `bunx vitest run tests/unit/process/creative-studio/types/documentation.test.ts` | 1 file, 19/19 passed                                                                                                                    |
+| Gate documentation        | `bunx vitest run tests/unit/process/creative-studio/types/documentation.test.ts` | 1 file, 20/20 passed                                                                                                                    |
 | i18n                      | `bun run i18n:types && node scripts/check-i18n.js`                               | passed; the existing 25-key warnings for zh-CN, ja-JP, zh-TW, and ko-KR remain warnings                                                 |
-| Full suite                | `bun run test`                                                                   | 652 passed/1 skipped files; 9,244 passed/19 skipped tests; 213.98 s                                                                     |
-| Coverage                  | `bun run test:coverage`                                                          | 652 passed/1 skipped files; 9,244 passed/19 skipped tests; 67.27% statements, 63.82% branches, 63.88% functions, 68.78% lines; 289.49 s |
+| Full suite                | `bun run test`                                                                   | 652 passed/1 skipped files; 9,245 passed/19 skipped tests; 220.21 s                                                                     |
+| Coverage                  | `bun run test:coverage`                                                          | 652 passed/1 skipped files; 9,245 passed/19 skipped tests; 67.27% statements, 63.81% branches, 63.88% functions, 68.78% lines; 223.98 s |
 | Lint                      | `bun run lint --quiet`                                                           | exit 0; 1,244 warnings and 0 errors                                                                                                     |
 | Format                    | `bun run format`                                                                 | exit 0                                                                                                                                  |
-| Post-format documentation | `bunx vitest run tests/unit/process/creative-studio/types/documentation.test.ts` | exit 0; 1 file, 19/19 passed                                                                                                            |
+| Post-format documentation | `bunx vitest run tests/unit/process/creative-studio/types/documentation.test.ts` | exit 0; 1 file, 20/20 passed                                                                                                            |
 | Diff check                | `git diff --check`                                                               | exit 0                                                                                                                                  |
 
 Two earlier full-suite attempts on the same source tree were diagnostic failures under sustained host

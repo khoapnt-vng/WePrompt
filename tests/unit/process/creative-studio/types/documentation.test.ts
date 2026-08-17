@@ -36,7 +36,7 @@ const PHASE_2A_GATE = 'docs/design/creative-studio-2-gates/phase-2a.md';
 const FINAL_GATE_EVIDENCE = [
   /\|\s*Lint\s*\|\s*`bun run lint --quiet`\s*\|\s*exit 0; 1,244 warnings and 0 errors\s*\|/,
   /\|\s*Format\s*\|\s*`bun run format`\s*\|\s*exit 0\s*\|/,
-  /\|\s*Post-format documentation\s*\|\s*`bunx vitest run tests\/unit\/process\/creative-studio\/types\/documentation\.test\.ts`\s*\|\s*exit 0; 1 file, 19\/19 passed\s*\|/,
+  /\|\s*Post-format documentation\s*\|\s*`bunx vitest run tests\/unit\/process\/creative-studio\/types\/documentation\.test\.ts`\s*\|\s*exit 0; 1 file, 20\/20 passed\s*\|/,
   /\|\s*Diff check\s*\|\s*`git diff --check`\s*\|\s*exit 0\s*\|/,
 ] as const;
 
