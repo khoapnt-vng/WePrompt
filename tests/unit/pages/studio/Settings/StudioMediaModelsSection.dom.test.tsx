@@ -14,8 +14,12 @@ import type {
   StudioConnectionInventory,
   StudioConnectionRecord,
   StudioConnectionValidationResult,
+  StudioRendererConnectionCapabilities,
 } from '@/common/types/project/creativeStudioTypes';
-import { StudioMediaModelsSection } from '@renderer/components/settings/SettingsModal/contents/ModelModalContent/StudioMediaModelsSection';
+import {
+  sanitizeStudioMediaModelCapabilities,
+  StudioMediaModelsSection,
+} from '@renderer/components/settings/SettingsModal/contents/ModelModalContent/StudioMediaModelsSection';
 
 const bridge = vi.hoisted(() => ({
   listConnectionCandidates: { invoke: vi.fn() },
@@ -190,6 +194,7 @@ const binding = (overrides: Partial<StudioConnectionRecord> = {}): StudioConnect
     minDurationSeconds: 2,
     maxDurationSeconds: 12,
     supportsFirstFrame: true,
+    maxConditioningImages: 0,
   },
   validatedAt: '2026-07-30T00:00:00.000Z',
   ...overrides,
@@ -234,6 +239,29 @@ const fillVideoTuple = async (model = 'open-sora-manual'): Promise<HTMLElement> 
   });
   return dialog;
 };
+
+describe('sanitizeStudioMediaModelCapabilities', () => {
+  const capabilities = (maxConditioningImages?: number): StudioRendererConnectionCapabilities => ({
+    mediaKinds: ['image'],
+    ...(maxConditioningImages === undefined ? {} : { maxConditioningImages }),
+  });
+
+  it('preserves only absent or integer conditioning capacity values from zero through six', () => {
+    const absent = sanitizeStudioMediaModelCapabilities(capabilities());
+    const zero = sanitizeStudioMediaModelCapabilities(capabilities(0));
+    const six = sanitizeStudioMediaModelCapabilities(capabilities(6));
+    const negative = sanitizeStudioMediaModelCapabilities(capabilities(-1));
+    const fractional = sanitizeStudioMediaModelCapabilities(capabilities(1.5));
+    const excessive = sanitizeStudioMediaModelCapabilities(capabilities(7));
+
+    expect(absent).not.toHaveProperty('maxConditioningImages');
+    expect(zero).toHaveProperty('maxConditioningImages', 0);
+    expect(six).toHaveProperty('maxConditioningImages', 6);
+    expect(negative).not.toHaveProperty('maxConditioningImages');
+    expect(fractional).not.toHaveProperty('maxConditioningImages');
+    expect(excessive).not.toHaveProperty('maxConditioningImages');
+  });
+});
 
 describe('StudioMediaModelsSection', () => {
   beforeEach(() => {
@@ -486,6 +514,44 @@ describe('StudioMediaModelsSection', () => {
     await waitFor(() => expect(bridge.validateConnection.invoke).toHaveBeenCalledExactlyOnceWith(request));
     await waitFor(() => expect(bridge.saveConnection.invoke).toHaveBeenCalledExactlyOnceWith(request));
     await waitFor(() => expect(screen.getAllByRole('listitem', { name: 'open-sora' })).toHaveLength(1));
+  });
+
+  it('sanitizes admitted capacity through load and revalidation without rendering new capacity copy', async () => {
+    const capacityReads = vi.fn();
+    const capabilities = {
+      ...binding().capabilities,
+      get maxConditioningImages(): number {
+        capacityReads();
+        return 6;
+      },
+    };
+    bridge.listConnections.invoke.mockResolvedValue(
+      ok(inventory([{ ...binding(), capabilities } as StudioConnectionRecord]))
+    );
+    bridge.validateConnection.invoke.mockResolvedValue(
+      ok(validation({ capabilities: capabilities as StudioConnectionValidationResult['capabilities'] }))
+    );
+    bridge.saveConnection.invoke.mockResolvedValue(
+      ok(
+        binding({
+          bindingId: 'binding_revalidated',
+          capabilities: capabilities as StudioConnectionRecord['capabilities'],
+        })
+      )
+    );
+    render(<StudioMediaModelsSection providerRefreshToken={0} onAddProvider={vi.fn()} />);
+    const row = await screen.findByRole('listitem', { name: 'open-sora' });
+
+    fireEvent.click(within(row).getByRole('button', { name: 'settings.mediaModels.revalidate' }));
+
+    await waitFor(() => expect(bridge.saveConnection.invoke).toHaveBeenCalledOnce());
+    expect(capacityReads).toHaveBeenCalled();
+    const capacityCopy =
+      /(?:conditioning|reference|images?|maximum|max|up to).*\b6\b|\b6\b.*(?:conditioning|reference|images?|maximum|max|up to)/i;
+    expect(document.body).not.toHaveTextContent(capacityCopy);
+    for (const element of [document.body, ...document.body.querySelectorAll('*')]) {
+      expect(element).not.toHaveAccessibleName(capacityCopy);
+    }
   });
 
   it('same-tuple edit replaces the visible row instead of duplicating it', async () => {

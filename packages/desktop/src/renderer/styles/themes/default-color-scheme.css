@@ -28,7 +28,8 @@
   --bg-3: #e5dcc9; /* warm hairline border / 边框分隔 */
   --bg-chat-surface: #fffdf9;
   --bg-artifact-surface: #fffdf9;
-  --studio-page-background: #e9e3d6;
+  --studio-page-background: #ffffff;
+  --studio-director-surface: #f0eadd;
   --studio-slate-surface: #f0eadd;
   --studio-slate-border: #d4a98d;
   --studio-slate-text: #b4380f;
@@ -42,11 +43,10 @@
   --control-zero-tick: #14181f;
   --studio-library-hairline: #e4dccb;
   --studio-library-chip-text: #54503f;
-  --studio-library-shape-surface: #fbf8f1;
-  --studio-library-shape-border: #e7decb;
-  --studio-library-control-surface: #f4eee2;
+  --studio-library-control-surface: var(--bg-2);
   --studio-library-control-border: #e1d9c8;
-  --studio-library-attach-text: #5e5747;
+  --studio-script-label-surface: var(--text-primary);
+  --studio-script-label-text: var(--text-white);
   --bg-4: #d8cbb6;
   --bg-5: #d0c3ad;
   --bg-6: #8a93a1; /* ink-500 — muted / tertiary text / 禁用·次要文字 */
@@ -132,6 +132,7 @@
   --bg-chat-surface: var(--bg-base);
   --bg-artifact-surface: var(--bg-1);
   --studio-page-background: var(--bg-base);
+  --studio-director-surface: var(--color-fill-1);
   --studio-slate-surface: var(--color-fill-2);
   --studio-slate-border: var(--color-border-2);
   --studio-slate-text: var(--danger);
@@ -145,11 +146,10 @@
   --control-zero-tick: #e6ecf5;
   --studio-library-hairline: var(--color-border-2);
   --studio-library-chip-text: var(--text-secondary);
-  --studio-library-shape-surface: var(--color-fill-1);
-  --studio-library-shape-border: var(--color-border-2);
   --studio-library-control-surface: var(--color-fill-2);
   --studio-library-control-border: var(--color-border-2);
-  --studio-library-attach-text: var(--text-secondary);
+  --studio-script-label-surface: var(--text-primary);
+  --studio-script-label-text: var(--bg-base);
   --bg-4: #2a3344;
   --bg-5: #3b4658;
   --bg-6: #5e7086; /* 禁用/次要文字 */

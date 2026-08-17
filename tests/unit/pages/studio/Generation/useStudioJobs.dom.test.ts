@@ -12,6 +12,7 @@ import type {
   StudioCommandResult,
   StudioRendererJob,
   StudioRendererProject,
+  StudioReferenceRequest,
   StudioScene,
   StudioSceneGenerationChoice,
 } from '@/common/types/project/creativeStudioTypes';
@@ -19,6 +20,9 @@ import { useStudioJobs } from '@renderer/pages/studio/hooks/useStudioJobs';
 
 const bridge = vi.hoisted(() => ({
   projectUpdated: { on: vi.fn() },
+  proposalUpdated: { on: vi.fn() },
+  listPendingReferenceRequests: { invoke: vi.fn() },
+  dismissReferenceRequests: { invoke: vi.fn() },
   submitScenes: { invoke: vi.fn() },
   cancelJob: { invoke: vi.fn() },
   retryJob: { invoke: vi.fn() },
@@ -118,6 +122,7 @@ const deferred = <T>() => {
 };
 
 let projectUpdatedListener: ((event: { projectId: string }) => void) | null;
+let proposalUpdatedListener: ((event: { projectId: string }) => void) | null;
 let unsubscribe: ReturnType<typeof vi.fn>;
 
 const emitProjectUpdated = (projectId: string): void => {
@@ -125,15 +130,27 @@ const emitProjectUpdated = (projectId: string): void => {
   act(() => projectUpdatedListener?.({ projectId }));
 };
 
+const emitProposalUpdated = (projectId: string): void => {
+  if (proposalUpdatedListener === null) throw new Error('Studio proposal listener was not registered');
+  act(() => proposalUpdatedListener?.({ projectId }));
+};
+
 describe('useStudioJobs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     projectUpdatedListener = null;
+    proposalUpdatedListener = null;
     unsubscribe = vi.fn();
     bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
       projectUpdatedListener = listener;
       return unsubscribe;
     });
+    bridge.proposalUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
+      proposalUpdatedListener = listener;
+      return vi.fn();
+    });
+    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([]));
+    bridge.dismissReferenceRequests.invoke.mockResolvedValue(ok(true));
     bridge.submitScenes.invoke.mockResolvedValue(ok([]));
     bridge.cancelJob.invoke.mockImplementation(async ({ jobId }: { jobId: string }) => ok(job(jobId)));
     bridge.retryJob.invoke.mockImplementation(async ({ jobId }: { jobId: string }) => ok(job(`${jobId}-retry`)));
@@ -259,6 +276,92 @@ describe('useStudioJobs', () => {
       expectedRevision: 3,
     });
     expect(result.current.project?.revision).toBe(4);
+  });
+
+  it('carries a reviewed reference role and prompt through the renderer IPC boundary', async () => {
+    const refetch = vi.fn(async () => project(3));
+    const { result } = renderHook(() => useStudioJobs({ project: project(), refetch }));
+
+    await act(async () => {
+      expect(
+        await result.current.submitScenes({
+          mode: 'single',
+          sceneIds: ['scene-1'],
+          routes: [{ ...route, kind: 'image', choiceId: 'choice_image' }],
+          catalogVersion: 'catalog-1',
+          expectedRevision: 2,
+          outputRole: 'reference',
+          referencePrompts: [{ sceneId: 'scene-1', prompt: 'Edited first-frame prompt' }],
+        })
+      ).toBe(true);
+    });
+
+    expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project-1',
+      mode: 'single',
+      sceneIds: ['scene-1'],
+      expectedRevision: 2,
+      routes: [{ ...route, kind: 'image', choiceId: 'choice_image' }],
+      catalogVersion: 'catalog-1',
+      outputRole: 'reference',
+      referencePrompts: [{ sceneId: 'scene-1', prompt: 'Edited first-frame prompt' }],
+    });
+  });
+
+  it('does not resurrect dismissed reference requests from an in-flight load', async () => {
+    const request: StudioReferenceRequest = {
+      schemaVersion: 1,
+      id: 'reference-request-1',
+      projectId: 'project-1',
+      sceneId: 'scene-1',
+      status: 'pending',
+      createdAt: '2026-08-11T00:00:00.000Z',
+    };
+    const staleLoad = deferred<StudioCommandResult<StudioReferenceRequest[]>>();
+    bridge.listPendingReferenceRequests.invoke
+      .mockResolvedValueOnce(ok([request]))
+      .mockReturnValueOnce(staleLoad.promise);
+    const { result } = renderHook(() => useStudioJobs({ project: project(), refetch: vi.fn(async () => project()) }));
+    await waitFor(() => expect(result.current.referenceRequests).toEqual([request]));
+
+    emitProposalUpdated('project-1');
+    await waitFor(() => expect(bridge.listPendingReferenceRequests.invoke).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      expect(await result.current.consumeReferenceRequests([{ id: request.id, sceneId: request.sceneId }], 2)).toBe(
+        'consumed'
+      );
+    });
+    expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledWith({
+      projectId: 'project-1',
+      requestIds: [request.id],
+      expectedRevision: 2,
+      expectedRequests: [{ id: request.id, sceneId: request.sceneId }],
+    });
+    expect(result.current.referenceRequests).toEqual([]);
+
+    await act(async () => staleLoad.resolve(ok([request])));
+    expect(result.current.referenceRequests).toEqual([]);
+  });
+
+  it('omits reference-only fields from an ordinary take submission', async () => {
+    const refetch = vi.fn(async () => project(3));
+    const { result } = renderHook(() => useStudioJobs({ project: project(), refetch }));
+
+    await act(async () => {
+      expect(
+        await result.current.submitScenes({
+          mode: 'single',
+          sceneIds: ['scene-1'],
+          routes: [route],
+          catalogVersion: 'catalog-1',
+          expectedRevision: 2,
+        })
+      ).toBe(true);
+    });
+
+    const payload = bridge.submitScenes.invoke.mock.calls[0]?.[0];
+    expect(payload).not.toHaveProperty('outputRole');
+    expect(payload).not.toHaveProperty('referencePrompts');
   });
 
   it('serializes concurrently requested mutations before reading each canonical revision', async () => {
@@ -571,6 +674,20 @@ describe('useStudioJobs', () => {
       code: 'invalid_payload',
       messageKey: 'conversation.creativeStudio.errors.invalidPayload',
     });
+  });
+
+  it('retains a reference output role when sanitizing a renderer job', async () => {
+    const { result } = renderHook(() =>
+      useStudioJobs({ project: project(2, { 'job-reference': job('job-reference', { outputRole: 'reference' }) }) })
+    );
+
+    await waitFor(() => expect(result.current.jobs[0]).toMatchObject({ id: 'job-reference', outputRole: 'reference' }));
+  });
+
+  it('does not invent an output role when sanitizing a legacy job', async () => {
+    const { result } = renderHook(() => useStudioJobs({ project: project(2, { 'job-legacy': job('job-legacy') }) }));
+
+    await waitFor(() => expect(result.current.jobs[0]).not.toHaveProperty('outputRole'));
   });
 
   it('trusts main-derived canCancel instead of inferring authority from job status', async () => {

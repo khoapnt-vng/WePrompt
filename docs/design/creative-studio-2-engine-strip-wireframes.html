@@ -1,0 +1,1447 @@
+<title>Engine Strip — Wireframes</title>
+
+<style>
+  :root {
+    --paper: #f0eee9;
+    --panel: #faf8f4;
+    --panel-2: #f4f1ea;
+    --ink: #141820;
+    --ink-2: #5b6472;
+    --ink-3: #8a919d;
+    --rule: #ddd7cc;
+    --rule-strong: #c3bcae;
+    --brand: #f05a22;
+    --warn: #9a5b06;
+    --warn-bg: #fdf6e7;
+    --err: #a5321f;
+    --err-bg: #fcf1ee;
+    --info: #4a5568;
+    --info-bg: #f1f2f4;
+    --ok: #2f6b4f;
+    --mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+    --ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #14161a;
+      --panel: #1b1e24;
+      --panel-2: #21252c;
+      --ink: #eceef1;
+      --ink-2: #a2abb8;
+      --ink-3: #737c89;
+      --rule: #2e333c;
+      --rule-strong: #464d58;
+      --brand: #ff7a49;
+      --warn: #e0b061;
+      --warn-bg: #2a2318;
+      --err: #e8917c;
+      --err-bg: #2c1d19;
+      --info: #a2abb8;
+      --info-bg: #23262c;
+      --ok: #74c39c;
+    }
+  }
+
+  :root[data-theme='dark'] {
+    --paper: #14161a;
+    --panel: #1b1e24;
+    --panel-2: #21252c;
+    --ink: #eceef1;
+    --ink-2: #a2abb8;
+    --ink-3: #737c89;
+    --rule: #2e333c;
+    --rule-strong: #464d58;
+    --brand: #ff7a49;
+    --warn: #e0b061;
+    --warn-bg: #2a2318;
+    --err: #e8917c;
+    --err-bg: #2c1d19;
+    --info: #a2abb8;
+    --info-bg: #23262c;
+    --ok: #74c39c;
+  }
+
+  :root[data-theme='light'] {
+    --paper: #f0eee9;
+    --panel: #faf8f4;
+    --panel-2: #f4f1ea;
+    --ink: #141820;
+    --ink-2: #5b6472;
+    --ink-3: #8a919d;
+    --rule: #ddd7cc;
+    --rule-strong: #c3bcae;
+    --brand: #f05a22;
+    --warn: #9a5b06;
+    --warn-bg: #fdf6e7;
+    --err: #a5321f;
+    --err-bg: #fcf1ee;
+    --info: #4a5568;
+    --info-bg: #f1f2f4;
+    --ok: #2f6b4f;
+  }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--ui);
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 56px 28px 96px;
+  }
+
+  /* ── masthead ─────────────────────────────────────────── */
+  .masthead {
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 20px;
+    margin-bottom: 8px;
+  }
+  h1 {
+    margin: 0 0 6px;
+    font-size: clamp(28px, 4.4vw, 42px);
+    font-weight: 680;
+    letter-spacing: -0.021em;
+    text-wrap: balance;
+  }
+  .standfirst {
+    margin: 0;
+    max-width: 62ch;
+    color: var(--ink-2);
+    font-size: 16.5px;
+  }
+  .provenance {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 20px;
+    margin-top: 18px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  /* ── legend ───────────────────────────────────────────── */
+  .legend {
+    display: grid;
+    gap: 8px 26px;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    margin: 30px 0 4px;
+    padding: 16px 18px;
+    border: 1px solid var(--rule);
+    background: var(--panel);
+    font-size: 13.5px;
+    color: var(--ink-2);
+  }
+  .legend b {
+    color: var(--ink);
+    font-weight: 620;
+  }
+
+  /* ── state blocks ─────────────────────────────────────── */
+  section {
+    margin-top: 54px;
+  }
+  .shead {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    border-bottom: 1px solid var(--rule-strong);
+    padding-bottom: 7px;
+  }
+  .letter {
+    flex: none;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--paper);
+    background: var(--ink);
+    padding: 3px 8px;
+    letter-spacing: 0.08em;
+  }
+  .shead h2 {
+    margin: 0;
+    font-size: 15.5px;
+    font-weight: 640;
+    text-transform: uppercase;
+    letter-spacing: 0.055em;
+  }
+  .shead .flag {
+    margin-left: auto;
+    flex: none;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.07em;
+    color: var(--brand);
+    text-transform: uppercase;
+  }
+  .note {
+    margin: 14px 0 0;
+    max-width: 74ch;
+    color: var(--ink-2);
+    font-size: 14.5px;
+  }
+  .note strong {
+    color: var(--ink);
+    font-weight: 620;
+  }
+  .note code,
+  .inline-code {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: var(--panel-2);
+    padding: 1px 4px;
+    border: 1px solid var(--rule);
+  }
+
+  /* ── the drawing surface ──────────────────────────────── */
+  .frame {
+    margin-top: 20px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  .strip {
+    min-width: 660px;
+    border: 1px solid var(--rule-strong);
+    background: var(--panel);
+    padding: 14px 16px 15px;
+  }
+  .striphead {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    margin-bottom: 12px;
+  }
+  .striptitle {
+    font-size: 13px;
+    font-weight: 660;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+  }
+  .stripscope {
+    margin-left: auto;
+    color: var(--ink-3);
+    font-size: 12.5px;
+  }
+  .vhide {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-3);
+    border-left: 2px solid var(--rule-strong);
+    padding-left: 8px;
+    margin-bottom: 11px;
+  }
+
+  .slots {
+    display: grid;
+    gap: 14px;
+    grid-template-columns: 1fr 1fr;
+  }
+  @media (max-width: 620px) {
+    .slots {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .slot {
+    border: 1px solid var(--rule-strong);
+    background: var(--paper);
+    padding: 0 0 10px;
+  }
+  .slot[data-unset] {
+    border-style: dashed;
+  }
+  .slotrole {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    padding: 6px 10px 0;
+  }
+  .trigger {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 5px 10px 7px;
+    padding: 7px 9px;
+    border: 1px solid var(--rule-strong);
+    background: var(--panel-2);
+    font-size: 14px;
+    font-weight: 560;
+  }
+  .trigger .caret {
+    margin-left: auto;
+    color: var(--ink-3);
+    font-family: var(--mono);
+  }
+  .trigger[data-armed] {
+    border-color: var(--brand);
+    box-shadow: inset 0 0 0 1px var(--brand);
+  }
+  .trigger[data-dead] {
+    color: var(--ink-3);
+    text-decoration: line-through;
+    text-decoration-thickness: 1px;
+  }
+  .trigger[data-busy] {
+    color: var(--ink-3);
+    font-style: italic;
+  }
+  .caps {
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--ink-2);
+    padding: 0 10px;
+    font-variant-numeric: tabular-nums;
+  }
+  .caps .off {
+    color: var(--warn);
+  }
+  .slotmsg {
+    padding: 0 10px;
+    font-size: 13.5px;
+    line-height: 1.45;
+  }
+  .notset {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--warn);
+    padding: 0 10px;
+  }
+
+  /* tone lines */
+  .tone {
+    display: flex;
+    gap: 9px;
+    align-items: flex-start;
+    padding: 8px 10px;
+    margin: 11px 0 0;
+    font-size: 13.8px;
+    line-height: 1.45;
+  }
+  .tone .badge {
+    flex: none;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border: 1px solid currentColor;
+    letter-spacing: 0;
+  }
+  .tone[data-t='warn'] {
+    color: var(--warn);
+    background: var(--warn-bg);
+  }
+  .tone[data-t='err'] {
+    color: var(--err);
+    background: var(--err-bg);
+  }
+  .tone[data-t='info'] {
+    color: var(--info);
+    background: var(--info-bg);
+  }
+  .tone[data-t='ok'] {
+    color: var(--ok);
+    background: transparent;
+    padding-left: 0;
+  }
+  .tone span:last-child {
+    color: var(--ink);
+  }
+  .tone[data-t='ok'] span:last-child {
+    color: var(--ink-2);
+  }
+
+  /* menu */
+  .menu {
+    min-width: 460px;
+    max-width: 560px;
+    border: 1px solid var(--ink);
+    background: var(--panel);
+  }
+  .menuhead {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 11px;
+    border-bottom: 1px solid var(--rule-strong);
+    font-size: 13.5px;
+  }
+  .opt {
+    display: grid;
+    gap: 2px;
+    padding: 9px 11px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .opt:last-of-type {
+    border-bottom: 1px solid var(--rule-strong);
+  }
+  .opt[data-focus] {
+    background: var(--panel-2);
+    box-shadow: inset 3px 0 0 var(--brand);
+  }
+  .optname {
+    font-size: 13.5px;
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+  }
+  .optname .radio {
+    font-family: var(--mono);
+    color: var(--ink-3);
+  }
+  .optname .unver {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--info);
+  }
+  .optcaps {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--ink-2);
+    padding-left: 20px;
+    font-variant-numeric: tabular-nums;
+  }
+  .menufoot {
+    padding: 8px 11px;
+    font-size: 13px;
+    color: var(--ink-2);
+    display: grid;
+    gap: 4px;
+  }
+  .menufoot .ext::after {
+    content: ' ↗';
+    color: var(--ink-3);
+  }
+  .focusnote {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--brand);
+    padding: 0 11px 8px;
+  }
+
+  /* consequence blocks (shot cards, batch) */
+  .consequence {
+    margin-top: 16px;
+    border-left: 2px solid var(--rule-strong);
+    padding: 2px 0 2px 14px;
+  }
+  .consequence h3 {
+    margin: 0 0 8px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    font-weight: 600;
+  }
+  .btn {
+    display: inline-block;
+    border: 1px solid var(--rule-strong);
+    background: var(--panel-2);
+    padding: 5px 11px;
+    font-size: 13px;
+    font-weight: 560;
+  }
+  .btn[data-disabled] {
+    color: var(--ink-3);
+    border-style: dashed;
+    background: transparent;
+  }
+  .btn[data-primary] {
+    border-color: var(--brand);
+    color: var(--brand);
+  }
+  .btnrow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  /* the causes table */
+  .tablewrap {
+    margin-top: 20px;
+    overflow-x: auto;
+  }
+  table {
+    border-collapse: collapse;
+    min-width: 640px;
+    width: 100%;
+    font-size: 13.5px;
+  }
+  caption {
+    caption-side: top;
+    text-align: left;
+    padding-bottom: 9px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  th,
+  td {
+    text-align: left;
+    padding: 9px 12px 9px 0;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  th {
+    font-weight: 620;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ink-3);
+  }
+  td:last-child {
+    padding-right: 0;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .none {
+    color: var(--err);
+    font-weight: 700;
+  }
+
+  /* compact + table row */
+  .compact {
+    min-width: 660px;
+    border: 1px solid var(--rule-strong);
+    background: var(--panel);
+    padding: 11px 14px;
+  }
+  .compactline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+  }
+  .compactline .lbl {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  .ctrigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    border: 1px solid var(--rule-strong);
+    background: var(--panel-2);
+    padding: 5px 9px;
+    font-size: 13.5px;
+  }
+  .ctrigger[data-unset] {
+    border-style: dashed;
+    color: var(--warn);
+  }
+  .shotrow {
+    display: grid;
+    grid-template-columns: 78px 1fr 132px;
+    gap: 0;
+    min-width: 660px;
+    margin-top: 10px;
+    border: 1px solid var(--rule);
+    border-top: none;
+    background: var(--paper);
+    font-size: 13px;
+  }
+  .shotrow > div {
+    padding: 9px 11px;
+    border-right: 1px solid var(--rule);
+  }
+  .shotrow > div:last-child {
+    border-right: none;
+  }
+  .shotrow .mono {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+
+  /* closing */
+  .open {
+    margin-top: 62px;
+    border-top: 2px solid var(--ink);
+    padding-top: 22px;
+  }
+  .open h2 {
+    margin: 0 0 4px;
+    font-size: 19px;
+    font-weight: 660;
+    letter-spacing: -0.012em;
+  }
+  .open > p {
+    margin: 0 0 20px;
+    color: var(--ink-2);
+    max-width: 68ch;
+  }
+  .qlist {
+    display: grid;
+    gap: 16px;
+  }
+  .q {
+    border-left: 2px solid var(--brand);
+    padding-left: 14px;
+  }
+  .q h3 {
+    margin: 0 0 3px;
+    font-size: 14.5px;
+    font-weight: 640;
+  }
+  .q p {
+    margin: 0;
+    color: var(--ink-2);
+    font-size: 14px;
+    max-width: 70ch;
+  }
+
+  /* ── J: the pinch-width comparison ─────────────────────── */
+  .derivation {
+    margin-top: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--rule);
+    background: var(--panel-2);
+    overflow-x: auto;
+    color: var(--ink-2);
+    font-family: var(--mono);
+    font-size: 12.5px;
+    font-variant-numeric: tabular-nums;
+  }
+  .derivation b {
+    color: var(--ink);
+  }
+  .pinchrow {
+    display: grid;
+    min-width: 692px;
+    gap: 22px;
+    grid-template-columns: 325px 325px;
+  }
+  .pinchlabel {
+    margin-bottom: 7px;
+    color: var(--ink-3);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+  }
+  .slot.pinch {
+    box-sizing: border-box;
+    width: 325px;
+  }
+  .linecount {
+    margin-top: 7px;
+    color: var(--ink-3);
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+  .linecount[data-cost] {
+    color: var(--brand);
+  }
+  .tbadge {
+    padding: 1px 5px;
+    border: 1px solid currentColor;
+    color: var(--warn);
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    text-decoration: none;
+  }
+  .tbadge[data-err] {
+    color: var(--err);
+  }
+
+  a {
+    color: var(--brand);
+  }
+  :focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <h1>The Engine Strip</h1>
+    <p class="standfirst">
+      Wireframes for media-engine selection in Creative Studio — nine states of one component, drawn from the
+      specification rather than around it. The surface that says an engine is unset is the surface that sets it.
+    </p>
+    <div class="provenance">
+      <span>Spec · creative-studio-2-engine-strip.md</span>
+      <span>Branch · feat/creative-studio-2</span>
+      <span>Replaces · EngineBar (read-only)</span>
+    </div>
+  </header>
+
+  <div class="legend">
+    <div><b>Solid border</b> — an engine is set</div>
+    <div><b>Dashed border</b> — nothing written yet</div>
+    <div><b>(!)</b> warning · <b>(x)</b> error · <b>(i)</b> neutral</div>
+    <div><b>▾</b> a dropdown trigger · <b>«…»</b> visually hidden</div>
+    <div><b>Monospace</b> — capability data, verbatim</div>
+    <div><b>Orange rule</b> — where keyboard focus lands</div>
+  </div>
+
+  <!-- ─────────────────────────── A ─────────────────────────── -->
+  <section>
+    <div class="shead">
+      <span class="letter">A</span>
+      <h2>Chosen, both live, chain intact</h2>
+      <span class="flag">full variant</span>
+    </div>
+    <div class="frame">
+      <div class="strip">
+        <div class="vhide">«h2 data-studio-phase-heading tabindex=-1: Rendering with —»</div>
+        <div class="striphead">
+          <span class="striptitle">Engines</span>
+          <span class="stripscope">Used by every shot in this project</span>
+        </div>
+        <div class="slots">
+          <div class="slot">
+            <div class="slotrole">Image</div>
+            <div class="trigger">gemini-3-pro-image <span class="caret">▾</span></div>
+            <div class="caps">1080p · Starts from a frame</div>
+          </div>
+          <div class="slot">
+            <div class="slotrole">Video</div>
+            <div class="trigger">seedance-1-0-pro <span class="caret">▾</span></div>
+            <div class="caps">720p · 4–12s · Silent · Starts from a frame</div>
+          </div>
+        </div>
+        <div class="tone" data-t="ok">
+          <span class="badge">✓</span><span>Coherence: on — each clip continues from the one before it.</span>
+        </div>
+      </div>
+    </div>
+    <p class="note">
+      No status word, no icon, no warning. The healthy state is nearly silent — the one sentence it does spend is the
+      only place the first-frame chain gets a product noun instead of a capability tag. In the compact variant this
+      collapses to a single line: two triggers and nothing else.
+    </p>
+  </section>
+
+  <!-- ─────────────────────────── B ─────────────────────────── -->
+  <section>
+    <div class="shead">
+      <span class="letter">B</span>
+      <h2>Ambiguous — two video engines bound, none chosen</h2>
+      <span class="flag">the reported bug</span>
+    </div>
+    <div class="frame">
+      <div class="strip">
+        <div class="striphead">
+          <span class="striptitle">Engines</span>
+          <span class="stripscope">Used by every shot in this project</span>
+        </div>
+        <div class="tone" data-t="warn" style="margin: 0 0 12px">
+          <span class="badge">!</span><span>Set a video engine too — no clip can be made without one.</span>
+        </div>
+        <div class="slots">
+          <div class="slot">
+            <div class="slotrole">Image</div>
+            <div class="trigger">gemini-3-pro-image <span class="caret">▾</span></div>
+            <div class="caps">1080p · Starts from a frame</div>
+          </div>
+          <div class="slot" data-unset>
+            <div class="slotrole">Video</div>
+            <div class="trigger" data-armed>
+              <span
+                class="badge"
+                style="
+                  font-family: var(--mono);
+                  font-size: 11px;
+                  color: var(--warn);
+                  border: 1px solid currentColor;
+                  padding: 1px 5px;
+                "
+                >!</span
+              >
+              No video engine is set. <span class="caret">▾</span>
+            </div>
+            <div class="notset">Not set · 3 available</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <p class="note">
+      Today this exact state renders as a <strong>healthy</strong> Produce phase reading “Engines: Image”.
+      <code>getReadySelectedRoutes</code> keeps only roles whose status is already <code>ready</code>, and the
+      connect-engine door appears only when that list is <em>empty</em> — so one working role masks one broken one.
+      Deleting that filter is the whole fix.
+    </p>
+
+    <div class="frame">
+      <div class="menu">
+        <div class="menuhead">
+          <span
+            class="badge"
+            style="
+              font-family: var(--mono);
+              font-size: 11px;
+              color: var(--warn);
+              border: 1px solid currentColor;
+              padding: 1px 5px;
+            "
+            >!</span
+          >
+          <span>No video engine is set.</span>
+          <span class="caret" style="margin-left: auto; font-family: var(--mono); color: var(--ink-3)">▴</span>
+        </div>
+        <div class="opt" data-focus>
+          <div class="optname"><span class="radio">○</span> seedance-1-0-pro · BytePlus · Seedance</div>
+          <div class="optcaps">720p · 4–12s · Silent · Starts from a frame</div>
+        </div>
+        <div class="opt">
+          <div class="optname">
+            <span class="radio">○</span> seedance-1-0-pro · BytePlus · Self-hosted video gateway
+          </div>
+          <div class="optcaps">
+            1080p · 5–10s · Silent · <span style="color: var(--warn)">Cannot start from a frame</span>
+          </div>
+        </div>
+        <div class="opt">
+          <div class="optname">
+            <span class="radio">○</span> veo-3 · Google · OpenRouter video
+            <span class="unver">(i) Not verified yet</span>
+          </div>
+          <div class="optcaps">1080p · 4–8s · With sound · Starts from a frame</div>
+        </div>
+        <div class="focusnote">↑ focus opens here</div>
+        <div class="menufoot">
+          <span>Refresh engine list</span>
+          <span class="ext">Manage engines in Model settings</span>
+        </div>
+      </div>
+    </div>
+
+    <p class="note">
+      Rows 1 and 2 are the <strong>same provider and same model</strong> bound under two different adapters.
+      <code>createStudioMediaChoiceId</code> hashes the adapter so they carry distinct ids and genuinely different
+      capabilities — but <code>toRendererRoute</code> strips the adapter, so without the integration label they render
+      as two identical rows and this menu is unusable. That is the reported bug one layer down, and it is why the
+      contract change is blocking rather than cosmetic. While refreshing, the option area becomes one row: “Checking
+      engines…”.
+    </p>
+
+    <div class="consequence">
+      <h3>What the shots below say</h3>
+      <span class="btn" data-disabled>Render</span>
+      <div class="tone" data-t="warn" style="margin-top: 9px">
+        <span class="badge">!</span><span>No engine is set for this kind of shot.</span>
+      </div>
+      <div class="btnrow"><span class="btn">Set engines</span></div>
+      <div class="tone" data-t="warn" style="margin-top: 14px">
+        <span class="badge">!</span
+        ><span><b>Generate 4 ready shots</b> — 2 shots are not here, no video engine is set.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────── C ─────────────────────────── -->
+  <section>
+    <div class="shead">
+      <span class="letter">C</span>
+      <h2>Exactly one option, not yet chosen</h2>
+      <span class="flag">pre-armed, never pre-written</span>
+    </div>
+    <div class="frame">
+      <div class="strip">
+        <div class="striphead">
+          <span class="striptitle">Engines</span>
+          <span class="stripscope">Used by every shot in this project</span>
+        </div>
+        <div class="tone" data-t="warn" style="margin: 0 0 12px">
+          <span class="badge">!</span><span>No engines are set. Nothing can be rendered yet.</span>
+        </div>
+        <div class="slots">
+          <div class="slot" data-unset>
+            <div class="slotrole">Image</div>
+            <div class="trigger" data-armed style="color: var(--ink-3)">
+              gemini-3-pro-image <span class="caret">▾</span>
+            </div>
+            <div class="notset">Not set · 1 available</div>
+          </div>
+          <div class="slot" data-unset>
+            <div class="slotrole">Video</div>
+            <div class="trigger" data-armed style="color: var(--ink-3)">
+              seedance-1-0-pro <span class="caret">▾</span>
+            </div>
+            <div class="notset">Not set · 1 available</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="note">
+      The slot says what the engine <em>would</em> be, greyed, with “Not set” beside it — so the name is information,
+      not a claim. Opening the menu focuses the single row, so Enter commits: two clicks for a fresh project, once,
+      ever. <strong>Nothing is written until then.</strong> This is what replaces auto-adoption, which wrote the same
+      value with no gesture and no record.
+    </p>
+  </section>
+
+  <!-- ─────────────────────────── D ─────────────────────────── -->
+  <section>
+    <div class="shead">
+      <span class="letter">D</span>
+      <h2>No engine fits at all</h2>
+      <span class="flag">zero options for the role</span>
+    </div>
+    <div class="frame">
+      <div class="strip">
+        <div class="striphead">
+          <span class="striptitle">Engines</span>
+          <span class="stripscope">Used by every shot in this project</span>
+        </div>
+        <div class="tone" data-t="warn" style="margin: 0 0 12px">
+          <span class="badge">!</span><span>Set a video engine too — no clip can be made without one.</span>
+        </div>
+        <div class="slots">
+          <div class="slot">
+            <div class="slotrole">Image</div>
+            <div class="trigger">gemini-3-pro-image <span class="caret">▾</span></div>
+            <div class="caps">1080p · Starts from a frame</div>
+          </div>
+          <div class="slot" data-unset>
+            <div class="slotrole">Video</div>
+            <div class="slotmsg" style="padding-top: 6px; color: var(--warn)">
+              <span
+                class="badge"
+                style="font-family: var(--mono); font-size: 11px; border: 1px solid currentColor; padding: 1px 5px"
+                >!</span
+              >
+              No video engine fits this project.
+            </div>
+            <div class="slotmsg" style="margin-top: 6px">Connect one, or check it supports 16:9 at 1080p.</div>
+            <div class="btnrow" style="padding: 0 10px"><span class="btn">Manage engines ↗</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="note">
+      No dropdown, because there is nothing to drop down. The second sentence is written to be true whether zero engines
+      exist <em>or</em> every one was filtered out on health, silent output, aspect ratio or resolution — main discards
+      the rejection reason, so the UI must not pretend to know which. Today's copy, “Connect an engine — about a minute,
+      once for the whole workspace”, is <strong>a flat lie</strong> to a user with three engines connected and working.
+    </p>
+    <div class="consequence">
+      <h3>Both roles empty — the grid region only, never the phase</h3>
+      <p class="note" style="margin-top: 0">Connect an engine — about a minute, once for the whole workspace.</p>
+      <div class="btnrow">
+        <span class="btn" data-primary>Open Model settings</span><span class="btn">Ask a teammate</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────── E ─────────────────────────── -->
+  <section>
+    <div class="shead">
+      <span class="letter">E</span>
+      <h2>Invalid — the chosen engine is gone</h2>
+      <span class="flag">dangling reference kept</span>
+    </div>
+    <div class="frame">
+      <div class="strip">
+        <div class="striphead">
+          <span class="striptitle">Engines</span>
+          <span class="stripscope">Used by every shot in this project</span>
+        </div>
+        <div class="tone" data-t="err" style="margin: 0 0 12px">
+          <span class="badge">x</span><span>Set a video engine too — no clip can be made without one.</span>
+        </div>
+        <div class="slots">
+          <div class="slot">
+            <div class="slotrole">Image</div>
+            <div class="trigger">gemini-3-pro-image <span class="caret">▾</span></div>
+            <div class="caps">1080p · Starts from a frame</div>
+          </div>
+          <div class="slot" data-unset>
+            <div class="slotrole">Video</div>
+            <div class="trigger" data-dead>
+              <span
+                class="badge"
+                style="
+                  font-family: var(--mono);
+                  font-size: 11px;
+                  color: var(--err);
+                  border: 1px solid currentColor;
+                  padding: 1px 5px;
+                  text-decoration: none;
+                "
+                >x</span
+              >
+              seedance-1-0-lite <span class="caret">▾</span>
+            </div>
+            <div class="slotmsg" style="color: var(--err)">
+              seedance-1-0-lite is no longer available. Choose another engine.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="note">
+      The dead engine <strong>keeps its name</strong>. The dangling reference is not cleared and not auto-replaced, even
+      when exactly one option survives — silently substituting an engine the user never chose is the behaviour this
+      design exists to remove. Opening the menu lists survivors under a header: “Replacing seedance-1-0-lite”.
+    </p>
+    <div class="tablewrap">
+      <table>
+        <caption>
+          Six causes, six sentences — and two that offer no action at all
+        </caption>
+        <thead>
+          <tr>
+            <th>Cause</th>
+            <th>What the slot says</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Binding removed / model retired</td>
+            <td>“…is no longer available. Choose another engine.”</td>
+            <td>menu</td>
+          </tr>
+          <tr>
+            <td>Provider unconfigured</td>
+            <td>
+              “BytePlus has no usable credential in this workspace. Add one in Model settings, or ask whoever manages
+              them.”
+            </td>
+            <td>Manage ↗</td>
+          </tr>
+          <tr>
+            <td>Health unavailable</td>
+            <td>“…is not answering. Wait, or choose another engine.”</td>
+            <td class="none">none</td>
+          </tr>
+          <tr>
+            <td>Capability narrowed on revalidation</td>
+            <td>“This engine no longer starts from a frame.”</td>
+            <td>menu</td>
+          </tr>
+          <tr>
+            <td>Project frame no longer supported</td>
+            <td>“…cannot make 9:16 at 1080p.”</td>
+            <td>menu</td>
+          </tr>
+          <tr>
+            <td>Catalog fault</td>
+            <td>“(i) The engine list has not loaded yet.”</td>
+            <td class="none">none</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">
+      The two no-action rows are the load-bearing part. Offering “Open Model settings” for a health flip or a catalog
+      fault sends the user to a screen that cannot help them, and dresses a system fault as their problem.
+    </p>
+  </section>
+
+  <!-- ─────────────────────────── F ─────────────────────────── -->
+  <section>
+    <div class="shead">
+      <span class="letter">F</span>
+      <h2>Healthy engine, no chain</h2>
+      <span class="flag">coherence off</span>
+    </div>
+    <div class="frame">
+      <div class="strip">
+        <div class="striphead">
+          <span class="striptitle">Engines</span>
+          <span class="stripscope">Used by every shot in this project</span>
+        </div>
+        <div class="slots">
+          <div class="slot">
+            <div class="slotrole">Image</div>
+            <div class="trigger">gemini-3-pro-image <span class="caret">▾</span></div>
+            <div class="caps">1080p · Starts from a frame</div>
+          </div>
+          <div class="slot">
+            <div class="slotrole">Video</div>
+            <div class="trigger">seedance-lite <span class="caret">▾</span></div>
+            <div class="caps">720p · 5–10s · Silent · <span class="off">Cannot start from a frame</span></div>
+          </div>
+        </div>
+        <div class="tone" data-t="warn">
+          <span class="badge">!</span>
+          <span
+            >Coherence: off — this video engine cannot start from a frame. Each clip will start fresh instead of
+            continuing from the one before.</span
+          >
+        </div>
+      </div>
+    </div>
+    <p class="note">
+      Nothing is blocked: the engine is healthy and independent clips are a legitimate choice. The line is persistent
+      and non-dismissable, because the alternative is a silently incoherent film. Today that shot reads “This route is
+      no longer valid. Review it before generating” — a false statement about a working engine, and
+      <strong>deleting that lie is the highest-value copy change in the spec.</strong>
+    </p>
+    <div class="consequence">
+      <h3>Only shots carrying a reference lose their action</h3>
+      <span class="btn" data-disabled>Render</span>
+      <div class="tone" data-t="warn" style="margin-top: 9px">
+        <span class="badge">!</span><span>This engine cannot start from a reference image.</span>
+      </div>
+      <div class="btnrow"><span class="btn">Remove the reference</span><span class="btn">Set engines</span></div>
+      <div class="tone" data-t="warn" style="margin-top: 14px">
+        <span class="badge">!</span>
+        <span
+          >Image variant, same weight, same slot: “Coherence: off — this image engine cannot take reference images, so
+          the cast and look cannot carry into the still.”</span
+        >
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────── G ─────────────────────────── -->
+  <section>
+    <div class="shead">
+      <span class="letter">G</span>
+      <h2>Writing</h2>
+      <span class="flag">single-flight, no Apply</span>
+    </div>
+    <div class="frame">
+      <div class="strip">
+        <div class="slots">
+          <div class="slot">
+            <div class="slotrole">Image</div>
+            <div class="trigger" data-busy>gemini-3-pro-image <span class="caret">▾</span></div>
+            <div class="caps">Saving the other engine… <span style="color: var(--ink-3)">(disabled)</span></div>
+          </div>
+          <div class="slot">
+            <div class="slotrole">Video</div>
+            <div class="trigger" data-busy>Saving… <span class="caret">⟳</span></div>
+            <div class="caps" style="color: var(--ink-3)">(disabled, aria-busy)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="note">
+      <code>updateSelection</code> refuses while another write is in flight, so the sibling trigger disables for the
+      duration. There is <strong>no Apply button</strong>, so there is never a partial-success state to model — two
+      independent atomic writes, each with its own revision guard, and the renderer never shows an optimistic value.
+      Three distinct failures, three sentences: a generic refusal; “Your unsaved changes could not be saved, so the
+      engine was not set”; and a stale project, which must <em>not</em> reuse the existing copy about someone else
+      changing it.
+    </p>
+  </section>
+
+  <!-- ─────────────────────────── H ─────────────────────────── -->
+  <section>
+    <div class="shead">
+      <span class="letter">H</span>
+      <h2>Locked while the money gate is open</h2>
+    </div>
+    <div class="frame">
+      <div class="strip">
+        <div class="slots">
+          <div class="slot">
+            <div class="slotrole">Image</div>
+            <div class="trigger" data-busy>gemini-3-pro-image <span class="caret">▾</span></div>
+            <div class="caps" style="color: var(--ink-3)">(disabled)</div>
+          </div>
+          <div class="slot">
+            <div class="slotrole">Video</div>
+            <div class="trigger" data-busy>seedance-1-0-pro <span class="caret">▾</span></div>
+            <div class="caps" style="color: var(--ink-3)">(disabled)</div>
+          </div>
+        </div>
+        <div class="tone" data-t="info">
+          <span class="badge">i</span><span>Finish or cancel the render review first.</span>
+        </div>
+      </div>
+    </div>
+    <p class="note">
+      Justified by the project revision alone — a route write bumps it, and the render confirmation compares the
+      revision it was built from. The catalog version is <em>not</em> affected by a selection write, so this lock is
+      about not invalidating the review the user is currently reading, and nothing more.
+    </p>
+  </section>
+
+  <!-- ─────────────────────────── I ─────────────────────────── -->
+  <section>
+    <div class="shead">
+      <span class="letter">I</span>
+      <h2>Compact variant</h2>
+      <span class="flag">Write / Table, and Brief</span>
+    </div>
+    <div class="frame">
+      <div class="compact">
+        <div class="compactline">
+          <span class="lbl">Engines</span>
+          <span class="ctrigger">gemini-3-pro-image <span style="color: var(--ink-3)">▾</span></span>
+          <span class="ctrigger" data-unset>
+            <span style="font-family: var(--mono); font-size: 11px; border: 1px solid currentColor; padding: 0 4px"
+              >!</span
+            >
+            No video engine is set. <span>▾</span>
+          </span>
+        </div>
+        <div class="caps" style="padding: 8px 0 0">4–12s — the range the available engines share.</div>
+      </div>
+      <div class="shotrow">
+        <div class="mono">Shot 03</div>
+        <div>…visual prompt…</div>
+        <div>Duration <span class="ctrigger" style="padding: 2px 7px">3s ▾</span></div>
+      </div>
+    </div>
+    <p class="note">
+      One line when healthy. The second line appears only when the duration bounds fall back — and then states the
+      <strong>intersection of the available engines' ranges</strong> rather than silently widening to the 1–60s storage
+      bounds. A third mount lives in Brief, because a brand-new project opens there:
+      <code>defaultStudioPhase</code> returns <code>'brief'</code> at zero scenes, so a Produce-only strip would never
+      meet the user who has just connected nothing.
+    </p>
+  </section>
+
+  <!-- ─────────────────────────── J ─────────────────────────── -->
+  <section>
+    <div class="shead">
+      <span class="letter">J</span>
+      <h2>German, at the narrowest width</h2>
+      <span class="flag">the blocking case</span>
+    </div>
+
+    <p class="note">
+      The pinch is not the smallest window — it is the width just <em>above</em> the inline threshold, because below it
+      the Director becomes an overlay and the work panel gets wider. At a shell of 1121px: content <b>665px</b>, each
+      slot <b>325px</b>, text <b>≈305px</b>.
+    </p>
+    <div class="derivation">
+      1121 shell − 352 pane − 68 gutter − 36 inset = <b>665</b> content · (665 − 14 gap) ÷ 2 = <b>325</b> per slot · −
+      20 padding = <b>305</b> of text
+    </div>
+
+    <p class="note">
+      German keeps <b>“Engine”</b> as a loanword — a real saving the wireframe depends on. What costs is the compounds:
+      <span class="inline-code">Arbeitsbereich</span>, <span class="inline-code">Zugangsdaten</span>,
+      <span class="inline-code">Modelleinstellungen</span>, <span class="inline-code">Seitenverhältnis</span>. Unit
+      spacing changes too: “4–12s” becomes “4–12 s”.
+    </p>
+
+    <div class="frame">
+      <div class="pinchrow">
+        <div>
+          <div class="pinchlabel">en-US · 325px</div>
+          <div class="slot pinch" data-unset>
+            <div class="slotrole">Video</div>
+            <div class="trigger" data-armed>
+              <span class="tbadge">!</span>No video engine is set. <span class="caret">▾</span>
+            </div>
+            <div class="notset">Not set · 3 available</div>
+          </div>
+          <div class="linecount">1 line · slot 103px</div>
+        </div>
+        <div>
+          <div class="pinchlabel">de-DE · 325px</div>
+          <div class="slot pinch" data-unset>
+            <div class="slotrole">Video</div>
+            <div class="trigger" data-armed>
+              <span class="tbadge">!</span>Keine Video-Engine festgelegt. <span class="caret">▾</span>
+            </div>
+            <div class="notset">Nicht festgelegt · 3 verfügbar</div>
+          </div>
+          <div class="linecount">1 line · slot 103px · no cost</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="frame">
+      <div class="pinchrow">
+        <div>
+          <div class="pinchlabel">en-US · capability summary</div>
+          <div class="slot pinch">
+            <div class="slotrole">Video</div>
+            <div class="trigger">seedance-1-0-pro <span class="caret">▾</span></div>
+            <div class="caps">720p · 4–12s · Silent · Starts from a frame</div>
+          </div>
+          <div class="linecount">2 lines · slot 120px</div>
+        </div>
+        <div>
+          <div class="pinchlabel">de-DE · capability summary</div>
+          <div class="slot pinch">
+            <div class="slotrole">Video</div>
+            <div class="trigger">seedance-1-0-pro <span class="caret">▾</span></div>
+            <div class="caps">720p · 4–12 s · Ohne Ton · Startet aus einem Standbild</div>
+          </div>
+          <div class="linecount">2 lines · slot 120px · no cost</div>
+        </div>
+      </div>
+    </div>
+
+    <p class="note">
+      <strong>Measured, German is far cheaper here than the character counts suggest.</strong> The trigger and the
+      capability summary cost <b>nothing at all</b> — both wrap to the same number of lines as English and produce
+      byte-identical slot heights. Only one string grows: the unconfigured-provider sentence, 107 characters in English
+      against 154 in German, a +44% expansion that buys <b>one extra line</b>.
+    </p>
+
+    <div class="frame">
+      <div class="pinchrow">
+        <div>
+          <div class="pinchlabel">en-US · state E, provider unconfigured</div>
+          <div class="slot pinch" data-unset>
+            <div class="slotrole">Video</div>
+            <div class="trigger" data-dead>
+              <span class="tbadge" data-err>x</span>seedance-1-0-pro <span class="caret">▾</span>
+            </div>
+            <div class="slotmsg" style="color: var(--err)">
+              BytePlus has no usable credential in this workspace. Add one in Model settings, or ask whoever manages
+              them.
+            </div>
+            <div class="btnrow" style="padding: 8px 10px 0"><span class="btn">Manage engines ↗</span></div>
+          </div>
+          <div class="linecount">3 lines · slot 191px</div>
+        </div>
+        <div>
+          <div class="pinchlabel">de-DE · state E, provider unconfigured</div>
+          <div class="slot pinch" data-unset>
+            <div class="slotrole">Video</div>
+            <div class="trigger" data-dead>
+              <span class="tbadge" data-err>x</span>seedance-1-0-pro <span class="caret">▾</span>
+            </div>
+            <div class="slotmsg" style="color: var(--err)">
+              Für BytePlus gibt es in diesem Arbeitsbereich keine nutzbaren Zugangsdaten. Füge welche in den
+              Modelleinstellungen hinzu oder frage die zuständige Person.
+            </div>
+            <div class="btnrow" style="padding: 8px 10px 0"><span class="btn">Engines verwalten ↗</span></div>
+          </div>
+          <div class="linecount" data-cost>4 lines · slot 210px · +19px</div>
+        </div>
+      </div>
+    </div>
+
+    <p class="note">
+      One compound is worth naming on its own:
+      <span class="inline-code">Modelleinstellungen</span> is 19 characters with no break opportunity a browser will
+      take. At this column width it can be the only word on its line. If that reads badly the fix is copy, not layout —
+      “in den Einstellungen” shortens it by seven characters and loses nothing, since the link already says where it
+      goes.
+    </p>
+
+    <div class="tablewrap">
+      <table>
+        <caption>
+          Vertical cost at a 325px slot — measured in the rendered page, not estimated
+        </caption>
+        <thead>
+          <tr>
+            <th>State</th>
+            <th>en-US</th>
+            <th>de-DE</th>
+            <th>Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>B · ambiguous — trigger + meta</td>
+            <td>1 + 1 lines · 103px</td>
+            <td>1 + 1 lines · 103px</td>
+            <td>none</td>
+          </tr>
+          <tr>
+            <td>A · capability summary</td>
+            <td>2 lines · 120px</td>
+            <td>2 lines · 120px</td>
+            <td>none</td>
+          </tr>
+          <tr>
+            <td>E · provider unconfigured</td>
+            <td>3 lines · 191px</td>
+            <td>4 lines · 210px</td>
+            <td class="none">+19px</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="note">
+      The lesson is not the one the concern predicted.
+      <strong>A 305px column is wider than German needs for short strings</strong> — a four-part capability summary
+      wraps to two lines in both languages, and “Keine Video-Engine festgelegt.” fits on one. Length only becomes height
+      when a string is a <em>sentence</em>, and the strip has exactly one of those per slot. The states not measured
+      here — the coherence line and the compact fallback, both of which span the full 665px rather than a column — have
+      far more room again, so they are lower risk than these, not higher.
+    </p>
+
+    <p class="note">
+      <strong>The recommendation: let the slots size to their content and never truncate.</strong>
+      Worst case the strip is <b>19px</b> taller in German than in English — one line, in one state, which is already an
+      error and already the most important thing on screen. Equal-height slots would be worse — it would pay the tallest
+      state's cost in every state. Setting a fixed height and clipping is not an option: these are the facts that decide
+      whether a render can happen and what it will cost.
+    </p>
+
+    <div class="tone" data-t="info" style="max-width: 74ch; margin-top: 18px">
+      <span class="badge">i</span>
+      <span>
+        The German here follows the product's existing register — informal address, “Engine” retained, “Arbeitsbereich”
+        for workspace, “Einstellung” for shot — but it is drawn for layout, not signed off as copy. A native reviewer
+        should see it before it becomes locale files.
+      </span>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────── open ─────────────────────────── -->
+  <div class="open">
+    <h2>Still open</h2>
+    <p>Three questions the drawing cannot settle. The blocking one is now drawn, in J.</p>
+    <div class="qlist">
+      <div class="q" data-resolved>
+        <h3>German at the narrowest width — <span>drawn, in J</span></h3>
+        <p>
+          Answered, and smaller than feared: measured at a 325px slot, German costs nothing in the trigger or the
+          capability summary and one line (+19px) in the unconfigured-provider sentence. Let slots size to their content
+          and never truncate. What remains is a copy decision, not a layout one: whether “Modelleinstellungen” shortens
+          to “Einstellungen”. And the German is drawn for layout, not signed off — a native reviewer should see it
+          first.
+        </p>
+      </div>
+      <div class="q">
+        <h3>Does “Coherence: on” earn a permanent line?</h3>
+        <p>
+          Kept here because the chain needs a name and this is the only place it gets one. A designer may reasonably
+          rule that a healthy-state sentence is noise and only the off states should speak. Copy exists for both.
+        </p>
+      </div>
+      <div class="q">
+        <h3>Does the Brief mount survive Table / Board / Cut?</h3>
+        <p>
+          It is one of three and nothing depends on it. Dropping it costs the zero-scene onboarding moment. Decide once
+          the new shell is real.
+        </p>
+      </div>
+      <div class="q">
+        <h3>The Director will plan against dead bounds</h3>
+        <p>
+          The route catalog is a frozen snapshot handed to the Director when its server starts. Making engine switching
+          easy and in-place <em>increases</em> how often it proposes 12-second clips to a 4–8s engine. A notice is a
+          weak remedy; the real fix is a refreshable snapshot, outside this surface. This design creates that cost
+          rather than inheriting it.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>

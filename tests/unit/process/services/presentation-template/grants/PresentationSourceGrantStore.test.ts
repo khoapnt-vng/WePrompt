@@ -1228,7 +1228,12 @@ describe('PresentationRunStore source grants', () => {
     await expect(
       createGrantBatch({ owner: owners[4]!, expectedOwnerRevision: 0, grantIds: [sixtyFifth] })
     ).rejects.toMatchObject({ code: 'GRANT_LIMIT_EXCEEDED' });
-  });
+    // Explicit budget: this writes 65 real grants through the journal and the file store, and
+    // measured 2,219ms alone against the 10s default. That looks like ample headroom and is not:
+    // in a full-suite run on a loaded machine the same test took 10,463ms and timed out. Vitest
+    // durations here inflate several-fold under concurrent work, so a test doing real I/O needs a
+    // budget set from its loaded cost, not its idle one. Lower this only with a measurement.
+  }, 30_000);
 
   it('accepts exactly 256 MiB per owner and 512 MiB per app, then rejects the next accounted byte', async () => {
     files = new QuotaAccountingFiles({ userDataDir, tempDir });

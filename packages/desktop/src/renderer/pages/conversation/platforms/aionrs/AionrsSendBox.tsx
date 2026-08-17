@@ -1452,6 +1452,10 @@ const AionrsSendBox: React.FC<{
   const sendBoxWidthClass = getChatSurfaceWidthClass(Boolean(teamPermission));
   const thoughtDisplayRunning = teamRuntime?.loading ?? (runtimeView.hydrated ? runtimeView.isProcessing : running);
   const thoughtDisplayThought = thoughtDisplayRunning ? thought : undefined;
+  // Mirrors isConversationAwaitingApproval: a pending confirmation means the run is blocked
+  // on the user, not on the model, so the indicator must say so instead of counting time.
+  const thoughtDisplayAwaitingApproval =
+    runtimeView.hydrated && (runtimeView.state === 'waiting_confirmation' || runtimeView.pendingConfirmations > 0);
 
   return (
     <div className={`${sendBoxWidthClass} flex flex-col mt-auto mb-16px`}>
@@ -1484,6 +1488,7 @@ const AionrsSendBox: React.FC<{
         statusText={teamRuntime?.statusText}
         externalElapsedSource={Boolean(teamRuntime)}
         startedAtMs={teamRuntime?.startedAtMs ?? null}
+        awaitingApproval={thoughtDisplayAwaitingApproval}
         onStop={effectiveHandleStop}
       />
 

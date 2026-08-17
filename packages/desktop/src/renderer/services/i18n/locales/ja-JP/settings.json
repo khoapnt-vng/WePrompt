@@ -442,7 +442,7 @@
   "toolsDescription": "MCP サーバーと画像生成などの組み込みツールを設定します。画像生成は、モデルページで画像対応モデルを設定した後にのみ有効化できます。",
   "modelDescription": "テキスト、画像、動画モデルのプロバイダーと API キーを設定します。",
   "mediaModels": {
-    "title": "Creative Studio メディアモデル",
+    "title": "Creative Studio エンジン",
     "description": "認証情報を表示せず、既存のプロバイダーを画像・動画連携に割り当てます。",
     "add": "メディアモデルを追加",
     "empty": "メディアモデルはまだ設定されていません。",
@@ -708,6 +708,7 @@
   "mcpJsonBareServerError": "MCPサーバー設定をトップレベルの \"mcpServers\" オブジェクトに入れるか、配列項目に \"name\" を追加してください。",
   "mcpJsonUrlRequiredError": "HTTPおよびSSE MCPサーバーには空でない \"url\" が必要です。",
   "mcpJsonStdioCommandRequiredError": "Stdio MCPサーバーには空でない \"command\" が必要です。",
+  "mcpJsonReservedNameError": "この名前は WePrompt が予約しているため、MCP サーバーには使用できません。名前を変更して再試行してください。",
   "mcpTestConnection": "MCP可用状態を検出",
   "mcpTestConnectionSuccess": "接続テスト成功",
   "mcpConnected": "利用可能",

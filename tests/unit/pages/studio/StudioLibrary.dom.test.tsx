@@ -16,13 +16,12 @@ import type {
   StudioRouteCatalog,
 } from '@/common/types/project/creativeStudioTypes';
 import { StudioLibrary } from '@renderer/pages/studio/components';
-import { readLastStudioPhase } from '@renderer/pages/studio/studioPhaseRoute';
+import { readLastStudioView } from '@renderer/pages/studio/studioPhaseRoute';
 import SiderStudioEntry from '@renderer/components/layout/Sider/SiderNav/SiderStudioEntry';
 
 const bridge = vi.hoisted(() => ({
   listProjects: { invoke: vi.fn() },
   createProject: { invoke: vi.fn() },
-  updateScene: { invoke: vi.fn() },
   getProject: { invoke: vi.fn() },
   deleteProject: { invoke: vi.fn() },
   listRoutes: { invoke: vi.fn() },
@@ -30,7 +29,6 @@ const bridge = vi.hoisted(() => ({
 }));
 const navigate = vi.hoisted(() => vi.fn());
 const activeLanguage = vi.hoisted(() => ({ value: 'en-US' }));
-const activePlatform = vi.hoisted(() => ({ isMacOS: true }));
 
 vi.mock('@/common', () => ({ ipcBridge: { creativeStudio: bridge } }));
 // Creative Studio ships behind a default-off release gate, so the sidebar entry this
@@ -41,7 +39,6 @@ vi.mock('@/common/config/constants', async (importOriginal) => ({
 }));
 vi.mock('@renderer/utils/platform', () => ({
   isElectronDesktop: () => true,
-  isMacOS: () => activePlatform.isMacOS,
 }));
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
@@ -53,28 +50,12 @@ vi.mock('react-i18next', () => ({
     t: (key: string, params?: Record<string, string | number>) => {
       const copy: Record<string, string> = {
         'conversation.creativeStudio.library.composer.label': 'What are we making?',
-        'conversation.creativeStudio.library.composer.submit': 'Read my brief →',
+        'conversation.creativeStudio.library.composer.submit': 'Start',
         'conversation.creativeStudio.library.composer.empty': 'One sentence is enough — say what we are making.',
-        'conversation.creativeStudio.library.composer.attachBrief': 'Attach a brief doc',
-        'conversation.creativeStudio.library.composer.attachBriefUnavailable':
-          'Brief document attachments are not available yet.',
         'conversation.creativeStudio.library.sectionLabel': 'OR PICK UP WHERE YOU LEFT OFF',
-        'conversation.creativeStudio.library.shape.productStory.name': 'Product story',
-        'conversation.creativeStudio.library.shape.productStory.starter':
-          'A product story for people who have never heard of us — four beats, ending on the wordmark.',
-        'conversation.creativeStudio.library.shape.featureTeaser.name': 'Feature teaser',
-        'conversation.creativeStudio.library.shape.featureTeaser.starter':
-          'A short teaser for one new feature, aimed at customers already using the product.',
-        'conversation.creativeStudio.library.shape.recapReel.name': 'Recap reel',
-        'conversation.creativeStudio.library.shape.recapReel.starter':
-          'A recap reel of the quarter for the whole company, warm and a little proud.',
         'conversation.creativeStudio.library.scriptOnly': 'SCRIPT ONLY',
       };
       if (key === 'conversation.creativeStudio.library.deleteConfirmBody') return `${key}:${params?.name}`;
-      if (key === 'conversation.creativeStudio.library.shape.label') {
-        return `${params?.name} · ${params?.count} shots · ${params?.seconds}s`;
-      }
-      if (key === 'conversation.creativeStudio.library.shape.sceneTitle') return `Shot ${params?.number}`;
       if (key === 'conversation.creativeStudio.library.shotCount') return `${params?.count} shots`;
       if (key === 'conversation.creativeStudio.library.projectCount') return `${params?.count} projects`;
       if (key === 'conversation.creativeStudio.library.posterBadge') {
@@ -135,24 +116,27 @@ const project = (overrides: Partial<StudioRendererProject> = {}): StudioRenderer
   ...overrides,
 });
 
-const routes = (health: 'ready' | 'setup_required' | 'unavailable' = 'ready'): StudioRouteCatalog => ({
+const routes = ({
+  image = 'ready',
+  video = 'ready',
+}: {
+  image?: StudioRouteCatalog['image']['status'];
+  video?: StudioRouteCatalog['video']['status'];
+} = {}): StudioRouteCatalog => ({
   storyboard: {
-    status: health === 'ready' ? 'ready' : 'setup_required',
-    selected: health === 'ready' ? { providerId: 'provider-1', model: 'operations-model' } : null,
-    options:
-      health === 'ready'
-        ? [
-            {
-              providerId: 'provider-1',
-              providerName: 'Provider',
-              model: 'operations-model',
-              health: 'available',
-            },
-          ]
-        : [],
+    status: 'ready',
+    selected: { providerId: 'provider-1', model: 'operations-model' },
+    options: [
+      {
+        providerId: 'provider-1',
+        providerName: 'Provider',
+        model: 'operations-model',
+        health: 'available',
+      },
+    ],
   },
-  image: { status: 'setup_required', selected: null, selectedRoute: null, options: [] },
-  video: { status: 'setup_required', selected: null, selectedRoute: null, options: [] },
+  image: { status: image, selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+  video: { status: video, selected: null, selectedRoute: null, selectionIssue: null, options: [] },
   catalogVersion: 'catalog-1',
 });
 
@@ -160,11 +144,9 @@ describe('StudioLibrary', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     activeLanguage.value = 'en-US';
-    activePlatform.isMacOS = true;
     window.localStorage.clear();
     bridge.listProjects.invoke.mockResolvedValue(ok([]));
     bridge.createProject.invoke.mockResolvedValue(ok(project()));
-    bridge.updateScene.invoke.mockResolvedValue(ok(project()));
     bridge.getProject.invoke.mockResolvedValue(ok(project()));
     bridge.deleteProject.invoke.mockResolvedValue(ok(true));
     bridge.listRoutes.invoke.mockResolvedValue(ok(routes()));
@@ -197,15 +179,66 @@ describe('StudioLibrary', () => {
     expect(screen.getByText('6 projects')).toBeInTheDocument();
   });
 
-  it('keeps global Storyboard readiness hidden when the optional probe throws', async () => {
+  it.each([{ image: 'setup_required' }, { video: 'selection_required' }])(
+    'shows the setup badge when a media role is not ready: %j',
+    async (status) => {
+      bridge.listProjects.invoke.mockResolvedValue(ok([summary()]));
+      bridge.listRoutes.invoke.mockResolvedValue(ok(routes(status)));
+
+      render(<StudioLibrary />);
+
+      expect(await screen.findByText('conversation.creativeStudio.library.readinessSetupRequired')).toBeInTheDocument();
+    }
+  );
+
+  it('does not show the setup badge when both media roles are ready', async () => {
+    bridge.listProjects.invoke.mockResolvedValue(ok([summary()]));
+    bridge.listRoutes.invoke.mockResolvedValue(ok(routes()));
+
+    render(<StudioLibrary />);
+
+    await screen.findByText('Launch film');
+    await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalledWith({ projectId: 'project-1' }));
+    expect(screen.queryByText('conversation.creativeStudio.library.readinessSetupRequired')).not.toBeInTheDocument();
+  });
+
+  it('keeps a card usable without a setup badge while its readiness probe is pending', async () => {
+    const pending = deferred<StudioCommandResult<StudioRouteCatalog>>();
+    bridge.listProjects.invoke.mockResolvedValue(ok([summary()]));
+    bridge.listRoutes.invoke.mockReturnValue(pending.promise);
+
+    render(<StudioLibrary />);
+
+    const openProject = await screen.findByRole('button', { name: 'Launch film' });
+    expect(screen.queryByText('conversation.creativeStudio.library.readinessSetupRequired')).not.toBeInTheDocument();
+    fireEvent.click(openProject);
+    expect(navigate).toHaveBeenCalledWith('/studio/project-1/table');
+  });
+
+  it('keeps a card usable without a setup badge when its readiness probe fails', async () => {
+    bridge.listProjects.invoke.mockResolvedValue(ok([summary()]));
     bridge.listRoutes.invoke.mockRejectedValue(new Error('bridge unavailable'));
 
     render(<StudioLibrary />);
 
-    await screen.findByText('conversation.creativeStudio.empty.title');
+    const openProject = await screen.findByRole('button', { name: 'Launch film' });
     await act(async () => {});
-    expect(screen.queryByText('conversation.creativeStudio.library.readinessLabel')).not.toBeInTheDocument();
     expect(screen.queryByText('conversation.creativeStudio.library.readinessSetupRequired')).not.toBeInTheDocument();
+    fireEvent.click(openProject);
+    expect(navigate).toHaveBeenCalledWith('/studio/project-1/table');
+  });
+
+  it('keeps a card usable without a setup badge when its readiness command fails', async () => {
+    bridge.listProjects.invoke.mockResolvedValue(ok([summary()]));
+    bridge.listRoutes.invoke.mockResolvedValue(failure<StudioRouteCatalog>('storage_error'));
+
+    render(<StudioLibrary />);
+
+    const openProject = await screen.findByRole('button', { name: 'Launch film' });
+    await act(async () => {});
+    expect(screen.queryByText('conversation.creativeStudio.library.readinessSetupRequired')).not.toBeInTheDocument();
+    fireEvent.click(openProject);
+    expect(navigate).toHaveBeenCalledWith('/studio/project-1/table');
   });
 
   it('renders the canonical project summaries returned by the bridge', async () => {
@@ -224,7 +257,7 @@ describe('StudioLibrary', () => {
     fireEvent.change(screen.getByLabelText('What are we making?'), {
       target: { value: 'A brief for a launch video.' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Read my brief →' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
     await waitFor(() =>
       expect(bridge.createProject.invoke).toHaveBeenCalledWith({
@@ -235,8 +268,10 @@ describe('StudioLibrary', () => {
         resolution: '720p',
       })
     );
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/studio/canonical-project/brief'));
-    expect(readLastStudioPhase('canonical-project')).toBe('brief');
+    await waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith('/studio/canonical-project/table', { state: { openBrief: true } })
+    );
+    expect(readLastStudioView('canonical-project')).toBe('table');
   });
 
   it('submits the composer with Command-Enter', async () => {
@@ -248,90 +283,29 @@ describe('StudioLibrary', () => {
     fireEvent.keyDown(composer, { key: 'Enter', metaKey: true });
 
     await waitFor(() => expect(bridge.createProject.invoke).toHaveBeenCalledTimes(1));
-    expect(navigate).toHaveBeenCalledWith('/studio/shortcut-project/brief');
+    expect(navigate).toHaveBeenCalledWith('/studio/shortcut-project/table', { state: { openBrief: true } });
   });
 
-  it('shows the platform-correct shortcut hint for the supported submit chord', () => {
-    const view = render(<StudioLibrary />);
-
-    expect(screen.getByText('⌘↵')).toBeInTheDocument();
-
-    view.unmount();
-    activePlatform.isMacOS = false;
+  it('keeps the submit chord out of the visible composer controls', () => {
     render(<StudioLibrary />);
 
-    expect(screen.getByText('Ctrl+↵')).toBeInTheDocument();
+    expect(screen.queryByText('⌘↵')).not.toBeInTheDocument();
+    expect(screen.queryByText('Ctrl+↵')).not.toBeInTheDocument();
   });
 
-  it('keeps brief-document attachment unavailable when the Library has no import path', () => {
+  it('does not advertise brief-document attachment without an import path', () => {
     render(<StudioLibrary />);
 
-    expect(screen.getByRole('button', { name: 'Attach a brief doc' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Attach a brief doc' })).not.toBeInTheDocument();
   });
 
   it('shows the one-sentence inline validation without creating', async () => {
     render(<StudioLibrary />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Read my brief →' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('One sentence is enough — say what we are making.');
     expect(bridge.createProject.invoke).not.toHaveBeenCalled();
-  });
-
-  it('names a shape-created project after the shape alone and seeds its starter sentence', async () => {
-    bridge.createProject.invoke.mockResolvedValue(ok(project({ id: 'shape-project', revision: 1 })));
-    bridge.updateScene.invoke.mockImplementation(async (input: { expectedRevision: number }) =>
-      ok(project({ id: 'shape-project', revision: input.expectedRevision + 1 }))
-    );
-    render(<StudioLibrary />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Product story · 4 shots · 15s' }));
-
-    await waitFor(() => expect(bridge.updateScene.invoke).toHaveBeenCalledTimes(4));
-    expect(bridge.createProject.invoke).toHaveBeenCalledWith({
-      name: 'Product story',
-      brief: 'A product story for people who have never heard of us — four beats, ending on the wordmark.',
-      aspectRatio: '16:9',
-      targetDurationSeconds: 15,
-      resolution: '720p',
-    });
-    expect(bridge.updateScene.invoke.mock.calls.map(([input]) => input)).toEqual([
-      {
-        projectId: 'shape-project',
-        sceneId: 'scene_1',
-        expectedRevision: 1,
-        scene: {
-          title: 'Shot 1',
-          purpose: '',
-          visualPrompt: '',
-          narration: '',
-          onScreenText: '',
-          mediaKind: 'video',
-          durationSeconds: 4,
-          referenceAssetId: null,
-        },
-      },
-      expect.objectContaining({
-        projectId: 'shape-project',
-        sceneId: 'scene_2',
-        expectedRevision: 2,
-        scene: expect.objectContaining({ title: 'Shot 2', durationSeconds: 4 }),
-      }),
-      expect.objectContaining({
-        projectId: 'shape-project',
-        sceneId: 'scene_3',
-        expectedRevision: 3,
-        scene: expect.objectContaining({ title: 'Shot 3', durationSeconds: 4 }),
-      }),
-      expect.objectContaining({
-        projectId: 'shape-project',
-        sceneId: 'scene_4',
-        expectedRevision: 4,
-        scene: expect.objectContaining({ title: 'Shot 4', durationSeconds: 3 }),
-      }),
-    ]);
-    expect(navigate).toHaveBeenCalledWith('/studio/shape-project/write');
-    expect(readLastStudioPhase('shape-project')).toBe('write');
   });
 
   it('shows a canonical poster URL for a rendered project and SCRIPT ONLY otherwise', async () => {
@@ -356,6 +330,39 @@ describe('StudioLibrary', () => {
     expect(screen.getByText('SCRIPT ONLY')).toBeInTheDocument();
   });
 
+  it('falls back to the script-only poster when a managed poster fails to load', async () => {
+    bridge.listProjects.invoke.mockResolvedValue(
+      ok([
+        summary({
+          name: 'Unreadable poster',
+          sceneCount: 2,
+          selectedAssetCount: 1,
+          poster: { assetId: 'missing-poster', sceneNumber: 1, takeNumber: 2 },
+        }),
+      ])
+    );
+
+    render(<StudioLibrary />);
+
+    fireEvent.error(await screen.findByRole('img', { name: 'Unreadable poster' }));
+
+    expect(screen.queryByRole('img', { name: 'Unreadable poster' })).not.toBeInTheDocument();
+    expect(screen.getByText('SCRIPT ONLY')).toBeInTheDocument();
+    expect(screen.queryByText('TAKE 2 · SHOT 01')).not.toBeInTheDocument();
+  });
+
+  it('assigns stable gradients to script-only posters from their project ids', async () => {
+    bridge.listProjects.invoke.mockResolvedValue(
+      ok([summary({ id: 'project-alpha', name: 'Alpha script' }), summary({ id: 'project-beta', name: 'Beta script' })])
+    );
+
+    render(<StudioLibrary />);
+
+    const scriptLabels = await screen.findAllByText('SCRIPT ONLY');
+    expect(scriptLabels[0].closest('[data-gradient]')).toHaveAttribute('data-gradient', '2');
+    expect(scriptLabels[1].closest('[data-gradient]')).toHaveAttribute('data-gradient', '4');
+  });
+
   it('labels a rendered poster with the take first and a zero-padded shot number', async () => {
     bridge.listProjects.invoke.mockResolvedValue(
       ok([
@@ -372,6 +379,15 @@ describe('StudioLibrary', () => {
     expect(await screen.findByText('TAKE 1 · SHOT 02')).toBeInTheDocument();
   });
 
+  it('uses a progress tone for a partially rendered project', async () => {
+    bridge.listProjects.invoke.mockResolvedValue(ok([summary({ sceneCount: 5, selectedAssetCount: 2 })]));
+
+    render(<StudioLibrary />);
+
+    const status = await screen.findByText('conversation.creativeStudio.library.status.partiallyRendered');
+    expect(status.closest('[data-status]')?.querySelector('span')).toHaveClass('bg-warning-6');
+  });
+
   it('formats project recency with Intl.RelativeTimeFormat in the active non-English locale', async () => {
     activeLanguage.value = 'de-DE';
     const updatedAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1_000).toISOString();
@@ -382,32 +398,35 @@ describe('StudioLibrary', () => {
     expect(await screen.findByText((content) => content.includes(relative))).toBeInTheDocument();
   });
 
-  it('opens a zero-scene project card at Brief', async () => {
-    bridge.listProjects.invoke.mockResolvedValue(ok([summary({ sceneCount: 0 })]));
+  // The scene count used to pick the landing step. Views are not steps, so both counts land on
+  // the same default — asserting each of them is what would catch the old branch coming back.
+  it.each([0, 2])('opens a card with %i scenes at the default view when nothing was saved', async (sceneCount) => {
+    bridge.listProjects.invoke.mockResolvedValue(ok([summary({ sceneCount })]));
     render(<StudioLibrary />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Launch film' }));
 
-    expect(navigate).toHaveBeenCalledWith('/studio/project-1/brief');
+    expect(navigate).toHaveBeenCalledWith('/studio/project-1/table');
   });
 
-  it('opens an existing project card at Write when no phase was saved', async () => {
+  it('opens a project card at its saved view', async () => {
+    window.localStorage.setItem('aionui:creative-studio:last-view:project-1', 'board');
     bridge.listProjects.invoke.mockResolvedValue(ok([summary({ sceneCount: 2 })]));
     render(<StudioLibrary />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Launch film' }));
 
-    expect(navigate).toHaveBeenCalledWith('/studio/project-1/write');
+    expect(navigate).toHaveBeenCalledWith('/studio/project-1/board');
   });
 
-  it('opens a project card at its saved phase', async () => {
-    window.localStorage.setItem('aionui:creative-studio:last-phase:project-1', 'produce');
+  it('discards a saved value from the retired phase vocabulary instead of routing to a dead view', async () => {
+    window.localStorage.setItem('aionui:creative-studio:last-view:project-1', 'produce');
     bridge.listProjects.invoke.mockResolvedValue(ok([summary({ sceneCount: 2 })]));
     render(<StudioLibrary />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Launch film' }));
 
-    expect(navigate).toHaveBeenCalledWith('/studio/project-1/produce');
+    expect(navigate).toHaveBeenCalledWith('/studio/project-1/table');
   });
 
   it('gives both composer guesses explicit accessible names and defaults', () => {
@@ -427,7 +446,7 @@ describe('StudioLibrary', () => {
     fireEvent.change(screen.getByLabelText('What are we making?'), {
       target: { value: 'Failed project sentence.' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Read my brief →' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('conversation.creativeStudio.errors.storage');
     expect(navigate).not.toHaveBeenCalled();
@@ -511,6 +530,65 @@ describe('StudioLibrary', () => {
     expect(screen.queryByText('Older project')).not.toBeInTheDocument();
   });
 
+  it('does not let an older readiness probe overwrite the newer listing', async () => {
+    let onUpdate: ((event: { projectId: string }) => void) | undefined;
+    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
+      onUpdate = listener;
+      return () => {};
+    });
+    const olderRoutes = deferred<StudioCommandResult<StudioRouteCatalog>>();
+    bridge.listProjects.invoke
+      .mockResolvedValueOnce(ok([summary({ name: 'Older project' })]))
+      .mockResolvedValueOnce(ok([summary({ name: 'Newest project' })]));
+    bridge.listRoutes.invoke.mockReturnValueOnce(olderRoutes.promise).mockResolvedValueOnce(ok(routes()));
+
+    render(<StudioLibrary />);
+
+    await screen.findByText('Older project');
+    act(() => onUpdate?.({ projectId: 'project-1' }));
+    await screen.findByText('Newest project');
+    await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(2));
+
+    olderRoutes.resolve(ok(routes({ image: 'setup_required' })));
+    await act(async () => {});
+
+    expect(screen.queryByText('conversation.creativeStudio.library.readinessSetupRequired')).not.toBeInTheDocument();
+  });
+
+  it('limits readiness probes to four in-flight route requests', async () => {
+    const routeRequests = new Map<string, ReturnType<typeof deferred<StudioCommandResult<StudioRouteCatalog>>>>();
+    let inFlight = 0;
+    let maxInFlight = 0;
+    bridge.listProjects.invoke.mockResolvedValue(
+      ok(Array.from({ length: 7 }, (_, index) => summary({ id: `project-${index + 1}`, name: `Project ${index + 1}` })))
+    );
+    bridge.listRoutes.invoke.mockImplementation(({ projectId }: { projectId: string }) => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      const request = deferred<StudioCommandResult<StudioRouteCatalog>>();
+      routeRequests.set(projectId, request);
+      return request.promise.finally(() => {
+        inFlight -= 1;
+      });
+    });
+
+    render(<StudioLibrary />);
+
+    await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(4));
+    expect(maxInFlight).toBe(4);
+
+    for (const projectId of ['project-1', 'project-2', 'project-3', 'project-4']) {
+      routeRequests.get(projectId)?.resolve(ok(routes()));
+    }
+    await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(7));
+
+    for (const request of routeRequests.values()) {
+      request.resolve(ok(routes()));
+    }
+    await act(async () => {});
+    expect(maxInFlight).toBe(4);
+  });
+
   it('keeps a composer command error when a background project refresh succeeds', async () => {
     let onUpdate: ((event: { projectId: string }) => void) | undefined;
     bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
@@ -522,7 +600,7 @@ describe('StudioLibrary', () => {
     fireEvent.change(screen.getByLabelText('What are we making?'), {
       target: { value: 'Failed project sentence.' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Read my brief →' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('conversation.creativeStudio.errors.storage');
 
     await act(async () => onUpdate?.({ projectId: 'project-1' }));
@@ -544,7 +622,7 @@ describe('StudioLibrary', () => {
       deleteButtons[0].click();
       deleteButtons[1].click();
     });
-    expect(screen.getByRole('button', { name: 'Read my brief →' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
     expect(deleteButtons[0]).toBeDisabled();
     expect(deleteButtons[1]).toBeDisabled();
 

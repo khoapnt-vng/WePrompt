@@ -20,6 +20,7 @@ export { default as AionScrollArea } from './AionScrollArea';
 export { default as AionSteps } from './AionSteps';
 export { default as AionSearchInput } from './AionSearchInput';
 export { default as AionInlineSearchInput } from './AionInlineSearchInput';
+export { default as SidebarIcon } from './SidebarIcon';
 
 // ==================== 类型导出 / Type Exports ====================
 
@@ -47,3 +48,6 @@ export type { AionSearchInputProps } from './AionSearchInput';
 
 // AionInlineSearchInput 类型 / AionInlineSearchInput types
 export type { AionInlineSearchInputProps } from './AionInlineSearchInput';
+
+// SidebarIcon 类型 / SidebarIcon types
+export type { SidebarIconProps } from './SidebarIcon';

@@ -13,11 +13,11 @@ import type {
   StudioRendererProject,
   StudioScene,
 } from '@/common/types/project/creativeStudioTypes';
+import { STUDIO_MAX_SCENES } from '@/common/types/project/creativeStudioTypes';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { draftKey, persistDrafts, takePersistedDrafts, type PersistedDrafts } from './useDraftPersistence';
 
-const MAX_SCENES = 24;
 const DEFAULT_SCENE_DURATION_SECONDS = 5;
 const SCENE_SAVE_DEBOUNCE_MS = 450;
 const MAX_PROJECT_NAME_CHARS = 256;
@@ -1341,7 +1341,7 @@ export const useStoryboardEditor = ({
 
   const addScene = useCallback(async (): Promise<boolean> => {
     const current = projectRef.current;
-    if (current === null || current.sceneOrder.length >= MAX_SCENES) return false;
+    if (current === null || current.sceneOrder.length >= STUDIO_MAX_SCENES) return false;
     const sceneId = globalThis.crypto.randomUUID();
     const remainingSeconds =
       current.targetDurationSeconds -
@@ -1391,6 +1391,14 @@ export const useStoryboardEditor = ({
     });
   }, [enqueueIntent, suggestedExpandedTargetSeconds]);
 
+  /**
+   * NO UI CALLER. The only chain into this was the Write phase pacing bar's "Fit to goal"
+   * button, removed on 2026-08-11 at the product owner's request. The main-process
+   * `fitStoryboard` capability behind it is deliberately retained for the Creative Director
+   * to drive once project-level settings become proposable — it is kept, not abandoned.
+   * `latestFitOutcome` / `latestFitCatalogVersion` / `clearLatestFitOutcome` are orphaned
+   * alongside it. Do not treat this as live code when reading the Write phase.
+   */
   const fitToTarget = useCallback(
     async (catalogVersion: string): Promise<StudioFitStoryboardOutcome | null> => {
       if (projectRef.current === null) return null;
@@ -1551,6 +1559,12 @@ export const useStoryboardEditor = ({
       if (pendingConflict?.intent.operation === 'draft_storyboard') {
         internalConflictRef.current = null;
         if (mountedRef.current) setConflict(null);
+        resumePausedIntents();
+      }
+
+      if (dirtySceneIdsRef.current.size > 0) {
+        const flushed = await flushAllSceneDrafts();
+        if (flushed.failed.length > 0 || flushed.dirtied.length > 0) return false;
       }
 
       const drafted = await runDraftIntent({
@@ -1572,7 +1586,7 @@ export const useStoryboardEditor = ({
       if (!drafted && internalConflictRef.current === null) resumePausedIntents();
       return drafted;
     },
-    [clearAllDrafts, discardPausedIntents, resumePausedIntents, runDraftIntent]
+    [clearAllDrafts, discardPausedIntents, flushAllSceneDrafts, resumePausedIntents, runDraftIntent]
   );
 
   return {
@@ -1605,7 +1619,7 @@ export const useStoryboardEditor = ({
     removeScene,
     reorderScenes,
     moveScene,
-    canAddScene: project !== null && project.sceneOrder.length < MAX_SCENES,
+    canAddScene: project !== null && project.sceneOrder.length < STUDIO_MAX_SCENES,
     durationTotalSeconds,
     durationMatchesTarget: project !== null && durationTotalSeconds === project.targetDurationSeconds,
     remainingDurationSeconds,

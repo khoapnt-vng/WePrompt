@@ -5,6 +5,6 @@
  */
 
 export { ConnectEngineCard, type ConnectEngineCardProps } from './ConnectEngineCard';
-export { EngineBar, getReadySelectedRoutes, type EngineBarProps, type ReadyStudioRoute } from './EngineBar';
+export { getReadySelectedRoutes, type ReadyStudioRoute } from '../../../EngineStrip';
 export { ShotCard, type ShotCardProps } from './ShotCard';
 export { ShotGrid, type ShotGridProps } from './ShotGrid';

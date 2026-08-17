@@ -25,6 +25,8 @@ export type StudioReadinessSummary = {
   totalSceneCount: number;
   readySceneIds: string[];
   selectedAssetCount: number;
+  /** Summed over the canonical shot order, so a duplicated scene id counts once. */
+  durationTotalSeconds: number;
   durationDeltaSeconds: number;
 };
 
@@ -123,6 +125,7 @@ export const deriveStudioReadiness = (project: StudioRendererProject): StudioRea
     totalSceneCount: scenes.length,
     readySceneIds,
     selectedAssetCount,
+    durationTotalSeconds,
     durationDeltaSeconds: durationTotalSeconds - project.targetDurationSeconds,
   };
 };

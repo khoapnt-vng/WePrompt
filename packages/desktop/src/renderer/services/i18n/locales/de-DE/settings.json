@@ -434,7 +434,7 @@
   "toolsDescription": "MCP-Server und integrierte Tools wie die Bildgenerierung konfigurieren. Die Bildgenerierung kann erst aktiviert werden, nachdem auf der Modellseite ein bildfähiges Modell konfiguriert wurde.",
   "modelDescription": "Anbieter und API-Schlüssel für Text-, Bild- und Videomodelle konfigurieren.",
   "mediaModels": {
-    "title": "Creative-Studio-Medienmodelle",
+    "title": "Creative-Studio-Engines",
     "description": "Vorhandene Anbieter mit Bild- und Video-Integrationen verbinden, ohne Zugangsdaten anzuzeigen.",
     "add": "Medienmodell hinzufügen",
     "empty": "Noch keine Medienmodelle konfiguriert.",
@@ -701,6 +701,7 @@
   "mcpJsonBareServerError": "Wickle die MCP-Serverkonfiguration in ein übergeordnetes \"mcpServers\"-Objekt ein oder füge einen \"name\" in einem Array-Element hinzu.",
   "mcpJsonUrlRequiredError": "HTTP- und SSE-MCP-Server erfordern eine nicht leere \"url\".",
   "mcpJsonStdioCommandRequiredError": "Stdio-MCP-Server erfordern einen nicht leeren \"command\".",
+  "mcpJsonReservedNameError": "Dieser Name ist von WePrompt reserviert und kann nicht für einen MCP-Server verwendet werden. Benenne den Server um und versuche es erneut.",
   "mcpTestConnection": "MCP-Verfügbarkeit prüfen",
   "mcpTestConnectionSuccess": "Verbindungstest erfolgreich",
   "mcpConnected": "Verbunden",

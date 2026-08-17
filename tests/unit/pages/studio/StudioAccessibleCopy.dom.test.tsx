@@ -15,21 +15,18 @@ import { describe, expect, it, vi } from 'vitest';
 import i18nConfig from '@/common/config/i18n-config.json';
 import type { StudioAsset, StudioRendererProject, StudioScene } from '@/common/types/project/creativeStudioTypes';
 import { GenerationReviewModal } from '@renderer/pages/studio/components/Generation/GenerationReviewModal';
-import { AssistantDock } from '@renderer/pages/studio/components/PhaseShell/AssistantDock';
 import { StudioPhaseHeader } from '@renderer/pages/studio/components/PhaseShell/StudioPhaseHeader';
-import { StudioPhaseNav } from '@renderer/pages/studio/components/PhaseShell/StudioPhaseNav';
 import { StudioPhaseShell } from '@renderer/pages/studio/components/PhaseShell/StudioPhaseShell';
-import { deriveStudioPhaseCompletion } from '@renderer/pages/studio/components/PhaseShell/studioPhaseCompletion';
+import { StudioViewSwitch } from '@renderer/pages/studio/components/PhaseShell/StudioViewSwitch';
 import type { StudioPhaseControllers } from '@renderer/pages/studio/components/PhaseShell/types';
 import { AssetStrip } from '@renderer/pages/studio/components/Preview/AssetStrip';
 import { StudioExportModal } from '@renderer/pages/studio/components/Preview/StudioExportModal';
 import { SceneTimeline } from '@renderer/pages/studio/components/SceneTimeline';
-import { SceneCard } from '@renderer/pages/studio/components/Storyboard/SceneCard';
-import { StoryboardPanel } from '@renderer/pages/studio/components/Storyboard/StoryboardPanel';
 import type { UseStoryboardEditorResult } from '@renderer/pages/studio/hooks/useStoryboardEditor';
 import type { UseStudioJobsResult } from '@renderer/pages/studio/hooks/useStudioJobs';
 import type { UseStudioModelsResult } from '@renderer/pages/studio/hooks/useStudioModels';
-import { STUDIO_PHASES } from '@renderer/pages/studio/studioPhaseRoute';
+import type { UseStudioRenderResult } from '@renderer/pages/studio/hooks/useStudioRender';
+import { STUDIO_VIEWS } from '@renderer/pages/studio/studioPhaseRoute';
 import conversation from '@renderer/services/i18n/locales/en-US/conversation.json';
 
 vi.mock('@dnd-kit/core', async () => {
@@ -58,6 +55,14 @@ vi.mock('@dnd-kit/sortable', async () => {
     }),
   };
 });
+
+vi.mock('@renderer/pages/studio/components/PhaseShell/phases/brief/useBriefConversation', () => ({
+  useBriefConversation: () => ({
+    state: { kind: 'absent' },
+    errorMessageKey: null,
+    recreate: vi.fn(),
+  }),
+}));
 
 const localeRoot = join(process.cwd(), 'packages/desktop/src/renderer/services/i18n/locales');
 
@@ -132,7 +137,7 @@ const project = (overrides: Partial<StudioRendererProject> = {}): StudioRenderer
   ...overrides,
 });
 
-const phaseController = (): StudioPhaseControllers => {
+const phaseController = (overrides: Partial<StudioPhaseControllers> = {}): StudioPhaseControllers => {
   const currentProject = project();
   const editor: UseStoryboardEditorResult = {
     project: currentProject,
@@ -204,8 +209,25 @@ const phaseController = (): StudioPhaseControllers => {
     retryJob: vi.fn(async () => true),
     retryDownload: vi.fn(async () => true),
   };
+  // Copy under an idle cut render - the state Review showed before the render was hoisted.
+  const cutRender: UseStudioRenderResult = {
+    status: 'idle',
+    progress: 0,
+    clipIndex: null,
+    clipTotal: null,
+    assetId: null,
+    missingSceneIds: null,
+    errorCode: null,
+    errorMessageKey: null,
+    busy: false,
+    render: vi.fn(async () => undefined),
+    cancel: vi.fn(async () => undefined),
+  };
 
   return {
+    proposals: [],
+    acceptProposal: vi.fn(),
+    rejectProposal: vi.fn(),
     project: currentProject,
     readiness: {
       sceneStatuses: {},
@@ -217,6 +239,7 @@ const phaseController = (): StudioPhaseControllers => {
     editor,
     models,
     jobs,
+    render: cutRender,
     selectedAsset: null,
     posterAsset: null,
     selectedReferenceAsset: null,
@@ -224,6 +247,8 @@ const phaseController = (): StudioPhaseControllers => {
     advisory: null,
     mutationPending: false,
     requestTransition: vi.fn(),
+    openBrief: vi.fn(),
+    openRules: vi.fn(),
     openDraftReview: vi.fn(),
     openSingleGenerationReview: vi.fn(),
     openBatchGenerationReview: vi.fn(),
@@ -233,33 +258,173 @@ const phaseController = (): StudioPhaseControllers => {
     selectVariation: vi.fn(async () => undefined),
     clearWriteFocusIntent: vi.fn(),
     openDuplicateChargeConfirmation: vi.fn(),
+    ...overrides,
+  };
+};
+
+/**
+ * A workspace with one adopted, ready image engine and one shot ready to generate — the only state
+ * in which the frame shows its paid control. The default fixture has no engine, so every header
+ * assertion below would otherwise be counting buttons in a workspace that cannot spend at all.
+ */
+const readyEngineController = (): StudioPhaseControllers => {
+  const imageRoute = {
+    choiceId: 'choice-image',
+    providerId: 'provider-image',
+    providerName: 'Image provider',
+    model: 'image-model',
+    integrationLabelKey: 'imageApi' as const,
+    health: 'available' as const,
+    kind: 'image' as const,
+    constraints: {
+      aspectRatios: ['16:9' as const],
+      resolutions: ['720p' as const],
+      minDurationSeconds: 1,
+      maxDurationSeconds: 60,
+      supportsFirstFrame: true,
+      maxConditioningImages: 0,
+      silentOutput: true,
+    },
+  };
+  const readyScene = scene({ id: 'scene-1', mediaKind: 'image' });
+  const currentProject = project({
+    sceneOrder: [readyScene.id],
+    scenes: { [readyScene.id]: readyScene },
+    routing: {
+      storyboard: null,
+      image: {
+        choiceId: imageRoute.choiceId,
+        providerId: imageRoute.providerId,
+        model: imageRoute.model,
+      },
+      video: null,
+    },
+  });
+  const controller = phaseController();
+
+  return {
+    ...controller,
+    project: currentProject,
+    editor: {
+      ...controller.editor,
+      project: currentProject,
+      orderedScenes: [readyScene],
+      selectedSceneId: readyScene.id,
+      selectedScene: readyScene,
+    },
+    jobs: { ...controller.jobs, project: currentProject },
+    models: {
+      catalog: {
+        storyboard: { status: 'ready', selected: null, options: [] },
+        image: {
+          status: 'ready',
+          selected: { choiceId: imageRoute.choiceId, providerId: imageRoute.providerId, model: imageRoute.model },
+          selectedRoute: imageRoute,
+          selectionIssue: null,
+          options: [imageRoute],
+        },
+        video: { status: 'setup_required', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+        catalogVersion: 'catalog-v1',
+      },
+      loading: false,
+      errorMessageKey: null,
+      pendingRole: null,
+      refresh: vi.fn(async () => undefined),
+      updateSelection: vi.fn(async () => true),
+    },
+    readiness: {
+      sceneStatuses: { 'scene-1': 'ready' },
+      totalSceneCount: 1,
+      readySceneIds: ['scene-1'],
+      selectedAssetCount: 0,
+      durationDeltaSeconds: 0,
+    },
   };
 };
 
 describe('Creative Studio full-sentence English copy', () => {
-  it('keeps Brief start-writing only in its validated footer', async () => {
+  it('keeps the Brief and Rules project objects together in the frame', async () => {
+    await renderEnglish(
+      <StudioPhaseShell activeView='table' controller={phaseController()} navigationDisabled={false} onBack={vi.fn()} />
+    );
+
+    const headerActions = document.querySelector<HTMLElement>('[data-studio-phase-actions]');
+    expect(headerActions).not.toBeNull();
+    expect(within(headerActions!).getAllByRole('button')).toHaveLength(2);
+    expect(within(headerActions!).getByRole('button', { name: 'Brief' })).toBeInTheDocument();
+    expect(within(headerActions!).getByRole('button', { name: 'Rules' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Start writing' })).not.toBeInTheDocument();
+  });
+
+  /**
+   * The readout's three terms in English, because the third one is a copy decision as much as a
+   * data one: it says "rendered", not "ready". `readySceneIds` counts shots waiting to be
+   * generated and drains to nothing as the film gets made, so a readout worded "ready" would
+   * invite exactly the wrong field — and would read as progress running backwards.
+   */
+  it('reads the storyboard state as shots, runtime and rendered takes', async () => {
     await renderEnglish(
       <StudioPhaseShell
-        activePhase='brief'
-        controller={phaseController()}
+        activeView='table'
+        controller={phaseController({
+          readiness: {
+            sceneStatuses: {},
+            totalSceneCount: 9,
+            readySceneIds: ['scene-8', 'scene-9'],
+            selectedAssetCount: 7,
+            durationTotalSeconds: 178,
+            durationDeltaSeconds: 173,
+          },
+        })}
+        navigationDisabled={false}
+        onBack={vi.fn()}
+      />
+    );
+
+    const readout = document.querySelector<HTMLElement>('[data-studio-state-readout]');
+    expect(readout).toHaveTextContent('9 shots · 2:58 total · 7 rendered');
+    expect(readout).not.toHaveTextContent('2 rendered');
+  });
+
+  /**
+   * The frame's third action is the document's only spend, so what it says and when it appears are
+   * both copy decisions. Two buttons that cost nothing and one that charges a provider sit in the
+   * same row: the label has to name the charge and its size, which is why it counts the shots
+   * rather than reading "Generate".
+   */
+  it('names the paid generation control by the shots it will charge for', async () => {
+    await renderEnglish(
+      <StudioPhaseShell
+        activeView='table'
+        controller={readyEngineController()}
         navigationDisabled={false}
         onBack={vi.fn()}
       />
     );
 
     const headerActions = document.querySelector<HTMLElement>('[data-studio-phase-actions]');
-    expect(headerActions).toBeNull();
-    expect(screen.getAllByRole('button', { name: 'Start writing' })).toHaveLength(1);
+    expect(within(headerActions!).getAllByRole('button')).toHaveLength(3);
+    expect(within(headerActions!).getByRole('button', { name: 'Generate 1 ready scene' })).toBeEnabled();
   });
 
-  it.each([
-    ['write', 'Continue to Produce'],
-    ['produce', 'Review cut'],
-    ['review', 'Prepare handoff'],
-  ] as const)('renders one %s phase action in the header', async (activePhase, actionName) => {
+  /**
+   * Table and Board offer no header action at all. Both used to carry a "Continue" that walked the
+   * four-step rail forward; with a view switch every destination is already visible and one click
+   * away, so there is no next step for a call to action to name — and two buttons reading the same
+   * word while going to different places was ambiguous besides.
+   *
+   * Asserting the exact button count *and* the absence of the retired word keeps this falsifiable
+   * in both directions: restoring either CTA makes the header hold three buttons and match "Continue".
+   *
+   * The header does carry a third button now — the paid generation control — but only where there
+   * is an engine to spend against, and it is an action on the document rather than a step through
+   * it. This fixture has no engine, so the count is still two; the engine-bound count is pinned by
+   * "names the paid generation control by the shots it will charge for" above.
+   */
+  it.each(['table', 'board'] as const)('offers no progression action in the %s view header', async (activeView) => {
     await renderEnglish(
       <StudioPhaseShell
-        activePhase={activePhase}
+        activeView={activeView}
         controller={phaseController()}
         navigationDisabled={false}
         onBack={vi.fn()}
@@ -268,11 +433,50 @@ describe('Creative Studio full-sentence English copy', () => {
 
     const headerActions = document.querySelector<HTMLElement>('[data-studio-phase-actions]');
     expect(headerActions).not.toBeNull();
-    expect(within(headerActions!).getAllByRole('button')).toHaveLength(1);
-    expect(within(headerActions!).getByRole('button', { name: actionName })).toBeInTheDocument();
+    expect(within(headerActions!).getAllByRole('button')).toHaveLength(2);
+    expect(within(headerActions!).getByRole('button', { name: 'Brief' })).toBeInTheDocument();
+    expect(within(headerActions!).getByRole('button', { name: 'Rules' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Generate/ })).toBeNull();
   });
 
-  it('renders every phase in every configured locale without raw visible or accessible copy', async () => {
+  it('renders the Rules action and the Cut handoff action in the header', async () => {
+    await renderEnglish(
+      <StudioPhaseShell activeView='cut' controller={phaseController()} navigationDisabled={false} onBack={vi.fn()} />
+    );
+
+    const headerActions = document.querySelector<HTMLElement>('[data-studio-phase-actions]');
+    expect(headerActions).not.toBeNull();
+    expect(within(headerActions!).getAllByRole('button')).toHaveLength(3);
+    expect(within(headerActions!).getByRole('button', { name: 'Brief' })).toBeInTheDocument();
+    expect(within(headerActions!).getByRole('button', { name: 'Rules' })).toBeInTheDocument();
+    expect(within(headerActions!).getByRole('button', { name: 'Prepare handoff' })).toBeInTheDocument();
+  });
+
+  /**
+   * Cut is the one view whose own header action is also `type='primary'`. The paid control and the
+   * export handoff therefore sit side by side, and the pair has to stay distinguishable by name
+   * alone — "Prepare handoff" costs nothing, the other charges a provider per shot.
+   */
+  it('keeps the paid control distinguishable from the free handoff on the Cut view', async () => {
+    await renderEnglish(
+      <StudioPhaseShell
+        activeView='cut'
+        controller={readyEngineController()}
+        navigationDisabled={false}
+        onBack={vi.fn()}
+      />
+    );
+
+    const headerActions = document.querySelector<HTMLElement>('[data-studio-phase-actions]');
+    expect(
+      within(headerActions!)
+        .getAllByRole('button')
+        .map((button) => button.textContent)
+    ).toEqual(['Brief', 'Rules', 'Generate 1 ready scene', 'Prepare handoff']);
+  });
+
+  it('renders every view in every configured locale without raw visible or accessible copy', async () => {
     const rawKey = /conversation\.creativeStudio\./i;
     const issues: string[] = [];
     const localeInstances = await Promise.all(
@@ -280,11 +484,11 @@ describe('Creative Studio full-sentence English copy', () => {
     );
 
     for (const [locale, instance] of localeInstances) {
-      for (const activePhase of STUDIO_PHASES) {
+      for (const activeView of STUDIO_VIEWS) {
         const { container, unmount } = render(
           <I18nextProvider i18n={instance}>
             <StudioPhaseShell
-              activePhase={activePhase}
+              activeView={activeView}
               controller={phaseController()}
               navigationDisabled={false}
               onBack={vi.fn()}
@@ -292,14 +496,21 @@ describe('Creative Studio full-sentence English copy', () => {
           </I18nextProvider>
         );
 
+        // Guards the guard: a view id the shell cannot mount renders an empty frame, and an empty
+        // frame satisfies every absence check below without exercising a single string.
+        const focusTargets = container.querySelectorAll('[data-studio-phase-heading]');
+        if (focusTargets.length !== 1) {
+          issues.push(`${locale}.${activeView} mounted ${focusTargets.length} focused headings`);
+        }
+
         if (rawKey.test(container.textContent ?? '')) {
-          issues.push(`${locale}.${activePhase} exposes a raw key as visible text`);
+          issues.push(`${locale}.${activeView} exposes a raw key as visible text`);
         }
 
         for (const role of Object.keys(getRoles(container))) {
           const rawNames = within(container).queryAllByRole(role, { name: rawKey });
           if (rawNames.length > 0) {
-            issues.push(`${locale}.${activePhase} exposes ${rawNames.length} raw accessible name(s) for ${role}`);
+            issues.push(`${locale}.${activeView} exposes ${rawNames.length} raw accessible name(s) for ${role}`);
           }
         }
 
@@ -310,176 +521,18 @@ describe('Creative Studio full-sentence English copy', () => {
     expect(issues).toEqual([]);
   }, 30_000);
 
-  it('renders the phase workflow and assistant dock with localized accessible names', async () => {
-    await renderEnglish(
-      <>
-        <StudioPhaseNav
-          activePhase='brief'
-          project={project()}
-          readiness={{
-            sceneStatuses: {},
-            totalSceneCount: 0,
-            readySceneIds: [],
-            selectedAssetCount: 0,
-            durationDeltaSeconds: -5,
-          }}
-          disabled={false}
-          onSelect={vi.fn()}
-        />
-        <AssistantDock>
-          <span>Assistant controls</span>
-        </AssistantDock>
-        <AssistantDock kind='produce'>
-          <span>Generation controls</span>
-        </AssistantDock>
-      </>
-    );
+  it('renders the view switch with localized accessible names and no step semantics', async () => {
+    await renderEnglish(<StudioViewSwitch activeView='table' disabled={false} onSelect={vi.fn()} />);
 
-    const navigation = screen.getByRole('navigation', { name: 'Creative workflow' });
-    expect(within(navigation).getAllByRole('button')).toHaveLength(4);
-    for (const phaseName of ['Brief', 'Write', 'Produce', 'Review']) {
-      expect(within(navigation).getByRole('button', { name: phaseName })).toBeVisible();
+    const navigation = screen.getByRole('navigation', { name: 'Project views' });
+    expect(within(navigation).getAllByRole('button')).toHaveLength(3);
+    for (const viewName of ['Table', 'Board', 'Cut']) {
+      expect(within(navigation).getByRole('button', { name: viewName })).toBeVisible();
     }
-    expect(screen.getByRole('complementary', { name: 'Writing assistant' })).toBeInTheDocument();
-    expect(screen.getByRole('complementary', { name: 'Generation activity' })).toBeInTheDocument();
-  });
 
-  it('derives phase completion from durable project content', () => {
-    const completeScene = scene({ id: 'scene-1', visualPrompt: 'A finished visual prompt' });
-    const currentProject = project({
-      brief: 'A useful intent',
-      sceneOrder: [completeScene.id],
-      scenes: { [completeScene.id]: completeScene },
-    });
-
-    expect(
-      deriveStudioPhaseCompletion(currentProject, {
-        sceneStatuses: { [completeScene.id]: 'generated' },
-        totalSceneCount: 1,
-        readySceneIds: [],
-        selectedAssetCount: 1,
-        durationDeltaSeconds: 0,
-      })
-    ).toEqual({ brief: true, write: true, produce: true, review: false });
-  });
-
-  it('derives rail checkmarks from phase content while keeping Review numbered', async () => {
-    const completeScene = scene({ id: 'scene-1', visualPrompt: 'A finished visual prompt' });
-    const completeProject = project({
-      brief: 'A useful intent',
-      sceneOrder: [completeScene.id],
-      scenes: { [completeScene.id]: completeScene },
-    });
-    await renderEnglish(
-      <StudioPhaseNav
-        activePhase='review'
-        project={completeProject}
-        readiness={{
-          sceneStatuses: { [completeScene.id]: 'generated' },
-          totalSceneCount: 1,
-          readySceneIds: [],
-          selectedAssetCount: 1,
-          durationDeltaSeconds: 0,
-        }}
-        disabled={false}
-        onSelect={vi.fn()}
-      />
-    );
-
-    expect(document.querySelector('[data-studio-phase-marker="brief"]')).toHaveAttribute('data-complete', 'true');
-    expect(document.querySelector('[data-studio-phase-marker="write"]')).toHaveAttribute('data-complete', 'true');
-    expect(document.querySelector('[data-studio-phase-marker="produce"]')).toHaveAttribute('data-complete', 'true');
-    expect(document.querySelector('[data-studio-phase-marker="review"]')).toHaveAttribute('data-complete', 'false');
-    expect(document.querySelector('[data-studio-phase-marker="review"]')).toHaveTextContent('4');
-    expect(screen.getByRole('button', { current: 'step' })).toHaveTextContent('Review');
-  });
-
-  it('keeps Write incomplete when any ordered shot has a blank visual prompt', async () => {
-    const completeScene = scene({ id: 'scene-1', visualPrompt: 'A finished visual prompt' });
-    const blankScene = scene({ id: 'scene-2', visualPrompt: '   ' });
-    await renderEnglish(
-      <StudioPhaseNav
-        activePhase='write'
-        project={project({
-          brief: '   ',
-          sceneOrder: [completeScene.id, blankScene.id],
-          scenes: { [completeScene.id]: completeScene, [blankScene.id]: blankScene },
-        })}
-        readiness={{
-          sceneStatuses: { [completeScene.id]: 'ready', [blankScene.id]: 'needs_prompt' },
-          totalSceneCount: 2,
-          readySceneIds: [completeScene.id],
-          selectedAssetCount: 0,
-          durationDeltaSeconds: 5,
-        }}
-        disabled={false}
-        onSelect={vi.fn()}
-      />
-    );
-
-    expect(document.querySelector('[data-studio-phase-marker="brief"]')).toHaveAttribute('data-complete', 'false');
-    expect(document.querySelector('[data-studio-phase-marker="write"]')).toHaveAttribute('data-complete', 'false');
-    expect(document.querySelector('[data-studio-phase-marker="produce"]')).toHaveAttribute('data-complete', 'false');
-  });
-
-  it('renders complete scene action names and a grammatically singular duration', async () => {
-    await renderEnglish(
-      <SceneCard
-        scene={scene({ durationSeconds: 1 })}
-        index={1}
-        selected={false}
-        status='ready'
-        removeDisabled={false}
-        mutationPending={false}
-        moveUpDisabled={false}
-        moveDownDisabled={false}
-        onSelect={vi.fn()}
-        onRemove={vi.fn()}
-        onMove={vi.fn()}
-      />
-    );
-
-    expect(screen.getByRole('button', { name: 'Drag scene 2: Product close-up' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Move scene 2: Product close-up up' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Move scene 2: Product close-up down' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Remove scene 2: Product close-up' })).toBeInTheDocument();
-    expect(screen.getByText('1 second')).toBeInTheDocument();
-  });
-
-  it('keeps the full removal action name in the confirmation dialog', async () => {
-    await renderEnglish(
-      <StoryboardPanel
-        orderedScenes={[scene()]}
-        selectedSceneId='scene-2'
-        targetDurationSeconds={5}
-        durationTotalSeconds={5}
-        durationMatchesTarget
-        remainingDurationSeconds={0}
-        suggestedExpandedTargetSeconds={10}
-        canAddScene
-        mutationPending={false}
-        fitDisabled={false}
-        fitOutcome={null}
-        hasLockedScenes={false}
-        sceneStatuses={{ 'scene-2': 'ready' }}
-        conflict={false}
-        onSelectScene={vi.fn()}
-        onAddScene={vi.fn()}
-        onIncreaseTargetDuration={vi.fn()}
-        onFitToTarget={vi.fn()}
-        onRemoveScene={vi.fn()}
-        onReorderScenes={vi.fn()}
-        onMoveScene={vi.fn()}
-        onRetryConflict={vi.fn()}
-        onDiscardConflict={vi.fn()}
-      />
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Remove scene 1: Product close-up' }));
-
-    expect(
-      within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove scene 1: Product close-up' })
-    ).toBeInTheDocument();
+    // A switch, not a stepper: the active view is a page, not a step in a sequence.
+    expect(within(navigation).getByRole('button', { current: 'page' })).toHaveTextContent('Table');
+    expect(within(navigation).queryByRole('button', { current: 'step' })).not.toBeInTheDocument();
   });
 
   it('renders complete timeline and variation selection names without translated fragments', async () => {
@@ -548,14 +601,9 @@ describe('Creative Studio full-sentence English copy', () => {
     ).toHaveAccessibleDescription('In cut');
   });
 
-  it('describes the Review handoff as a manifest plus selected media without exported slates', async () => {
+  it('describes the Cut handoff as a manifest plus selected media without exported slates', async () => {
     await renderEnglish(
-      <StudioPhaseShell
-        activePhase='review'
-        controller={phaseController()}
-        navigationDisabled={false}
-        onBack={vi.fn()}
-      />
+      <StudioPhaseShell activeView='cut' controller={phaseController()} navigationDisabled={false} onBack={vi.fn()} />
     );
 
     expect(

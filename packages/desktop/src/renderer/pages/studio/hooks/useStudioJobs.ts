@@ -9,6 +9,8 @@ import type {
   StudioCommandErrorCode,
   StudioCommandResult,
   StudioJobErrorCode,
+  StudioReferenceRequest,
+  StudioReferenceRequestAuthority,
   StudioRendererJob,
   StudioRendererProject,
   StudioSubmitScenesRequest,
@@ -25,6 +27,7 @@ const COMMAND_MESSAGE_KEYS: Record<StudioCommandErrorCode, string> = {
   stale_project: 'conversation.creativeStudio.errors.staleProject',
   planning_unavailable: 'conversation.creativeStudio.errors.planningUnavailable',
   invalid_route: 'conversation.creativeStudio.errors.invalidRoute',
+  rule_breach: 'conversation.creativeStudio.errors.ruleBreach',
   cancellation_refused: 'conversation.creativeStudio.errors.cancellationRefused',
   duplicate_charge_acknowledgement_required:
     'conversation.creativeStudio.errors.duplicateChargeAcknowledgementRequired',
@@ -69,7 +72,7 @@ export type StudioJobIssue = {
 
 export type StudioSubmitIntent = Pick<
   StudioSubmitScenesRequest,
-  'mode' | 'sceneIds' | 'routes' | 'catalogVersion' | 'expectedRevision'
+  'mode' | 'sceneIds' | 'routes' | 'catalogVersion' | 'expectedRevision' | 'outputRole' | 'referencePrompts'
 >;
 
 export type StudioStaleIntent =
@@ -88,6 +91,7 @@ export type UseStudioJobsOptions = {
 export type UseStudioJobsResult = {
   project: StudioRendererProject | null;
   jobs: StudioRendererJob[];
+  referenceRequests: StudioReferenceRequest[];
   mutationPending: boolean;
   issue: StudioJobIssue | null;
   staleIntent: StudioStaleIntent | null;
@@ -97,6 +101,15 @@ export type UseStudioJobsResult = {
   cancelJob: (jobId: string) => Promise<boolean>;
   retryJob: (jobId: string, acknowledgePossibleDuplicateCharge?: boolean) => Promise<boolean>;
   retryDownload: (jobId: string) => Promise<boolean>;
+  dismissReferenceRequests: (requestIds: string[]) => Promise<boolean>;
+  refreshReferenceAuthority: () => Promise<{
+    project: StudioRendererProject;
+    requests: StudioReferenceRequest[];
+  } | null>;
+  consumeReferenceRequests: (
+    expectedRequests: StudioReferenceRequestAuthority[],
+    expectedRevision: number
+  ) => Promise<'consumed' | 'changed' | 'failed'>;
 };
 
 type StudioMutationIntent = StudioStaleIntent;
@@ -130,6 +143,7 @@ const sanitizeJob = (candidate: StudioRendererJob): StudioRendererJob => {
       providerId: candidate.provider.providerId,
       model: candidate.provider.model,
     },
+    ...(candidate.outputRole === undefined ? {} : { outputRole: candidate.outputRole }),
     outputAssetIds: [...candidate.outputAssetIds],
     canRetryDownload: candidate.canRetryDownload === true,
     canCancel: candidate.canCancel === true,
@@ -171,6 +185,10 @@ const cloneSubmitIntent = (
   routes: input.routes.map((route) => ({ ...route })),
   catalogVersion: input.catalogVersion,
   expectedRevision: input.expectedRevision,
+  ...(input.outputRole === undefined ? {} : { outputRole: input.outputRole }),
+  ...(input.referencePrompts === undefined
+    ? {}
+    : { referencePrompts: input.referencePrompts.map((entry) => ({ ...entry })) }),
 });
 
 const toIssue = (
@@ -236,6 +254,7 @@ export const useStudioJobs = ({
   const [mutationCount, setMutationCount] = useState(0);
   const [issue, setIssue] = useState<StudioJobIssue | null>(null);
   const [staleIntent, setStaleIntent] = useState<StudioStaleIntent | null>(null);
+  const [referenceRequests, setReferenceRequests] = useState<StudioReferenceRequest[]>([]);
 
   const mountedRef = useRef(true);
   const projectRef = useRef<StudioRendererProject | null>(project);
@@ -244,6 +263,7 @@ export const useStudioJobs = ({
   const refetchEpochRef = useRef(0);
   const mutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const pendingMutationKeysRef = useRef(new Map<string, symbol>());
+  const referenceRequestEpochRef = useRef(0);
 
   refetchRef.current = refetch;
 
@@ -300,12 +320,14 @@ export const useStudioJobs = ({
     refetchEpochRef.current += 1;
     mutationQueueRef.current = Promise.resolve();
     pendingMutationKeysRef.current.clear();
+    referenceRequestEpochRef.current += 1;
     projectRef.current = candidate;
     if (mountedRef.current) {
       setProject(candidate);
       setMutationCount(0);
       setIssue(null);
       setStaleIntent(null);
+      setReferenceRequests([]);
     }
   }, []);
 
@@ -333,10 +355,59 @@ export const useStudioJobs = ({
       projectSessionRef.current += 1;
       refetchEpochRef.current += 1;
       pendingMutationKeysRef.current.clear();
+      referenceRequestEpochRef.current += 1;
     };
   }, []);
 
   const activeProjectId = parentProject?.id;
+  const refreshReferenceRequests = useCallback(async (): Promise<StudioReferenceRequest[] | null> => {
+    if (activeProjectId === undefined) return null;
+    const session = projectSessionRef.current;
+    const epoch = ++referenceRequestEpochRef.current;
+    try {
+      const result = await ipcBridge.creativeStudio.listPendingReferenceRequests.invoke({
+        projectId: activeProjectId,
+      });
+      if (
+        !mountedRef.current ||
+        projectSessionRef.current !== session ||
+        projectRef.current?.id !== activeProjectId ||
+        referenceRequestEpochRef.current !== epoch
+      ) {
+        return null;
+      }
+      if (result.ok === false) {
+        publishIssue(toIssue('refresh', result.error));
+        return null;
+      }
+      setReferenceRequests(result.data);
+      return result.data;
+    } catch {
+      if (
+        mountedRef.current &&
+        projectSessionRef.current === session &&
+        projectRef.current?.id === activeProjectId &&
+        referenceRequestEpochRef.current === epoch
+      ) {
+        publishIssue(localIssue('refresh', 'storage_error'));
+      }
+      return null;
+    }
+  }, [activeProjectId, publishIssue]);
+
+  const refreshReferenceAuthority = useCallback(async (): Promise<{
+    project: StudioRendererProject;
+    requests: StudioReferenceRequest[];
+  } | null> => {
+    const current = projectRef.current;
+    if (current === null) return null;
+    const session = projectSessionRef.current;
+    const canonical = await refetchCanonical(current.id, session);
+    if (canonical === null) return null;
+    const requests = await refreshReferenceRequests();
+    return requests === null ? null : { project: canonical, requests };
+  }, [refetchCanonical, refreshReferenceRequests]);
+
   useEffect(() => {
     if (activeProjectId === undefined) return;
     const session = projectSessionRef.current;
@@ -358,9 +429,18 @@ export const useStudioJobs = ({
       }
       reconcile();
     });
+    const unsubscribeReferenceRequests = ipcBridge.creativeStudio.proposalUpdated.on(
+      ({ projectId: updatedProjectId }) => {
+        if (updatedProjectId === activeProjectId) void refreshReferenceRequests();
+      }
+    );
+    void refreshReferenceRequests();
     if (reconcileOnSubscribe) reconcile();
-    return unsubscribe;
-  }, [activeProjectId, publishIssue, reconcileOnSubscribe, refetchCanonical]);
+    return () => {
+      unsubscribe();
+      unsubscribeReferenceRequests();
+    };
+  }, [activeProjectId, reconcileOnSubscribe, refetchCanonical, refreshReferenceRequests]);
 
   const invokeMutation = useCallback(
     (current: StudioRendererProject, intent: StudioMutationIntent): Promise<StudioMutationResult> => {
@@ -373,6 +453,10 @@ export const useStudioJobs = ({
             expectedRevision: intent.expectedRevision,
             routes: intent.routes.map((route) => ({ ...route })),
             catalogVersion: intent.catalogVersion,
+            ...(intent.outputRole === undefined ? {} : { outputRole: intent.outputRole }),
+            ...(intent.referencePrompts === undefined
+              ? {}
+              : { referencePrompts: intent.referencePrompts.map((entry) => ({ ...entry })) }),
           });
         case 'cancel_job':
           return ipcBridge.creativeStudio.cancelJob.invoke({
@@ -574,6 +658,84 @@ export const useStudioJobs = ({
     [enqueueMutation]
   );
 
+  const dismissReferenceRequests = useCallback(
+    async (requestIds: string[]): Promise<boolean> => {
+      referenceRequestEpochRef.current += 1;
+      const current = projectRef.current;
+      if (current === null || requestIds.length === 0 || !mountedRef.current) return false;
+      const session = projectSessionRef.current;
+      setMutationCount((count) => count + 1);
+      try {
+        const result = await ipcBridge.creativeStudio.dismissReferenceRequests.invoke({
+          projectId: current.id,
+          requestIds: [...requestIds],
+        });
+        if (!mountedRef.current || projectSessionRef.current !== session || projectRef.current?.id !== current.id) {
+          return false;
+        }
+        if (result.ok === false) {
+          publishIssue(toIssue('refresh', result.error));
+          return false;
+        }
+        const dismissedIds = new Set(requestIds);
+        setReferenceRequests((requests) => requests.filter((request) => !dismissedIds.has(request.id)));
+        return true;
+      } catch {
+        if (mountedRef.current && projectSessionRef.current === session && projectRef.current?.id === current.id) {
+          publishIssue(localIssue('refresh', 'storage_error'));
+        }
+        return false;
+      } finally {
+        if (mountedRef.current && projectSessionRef.current === session) {
+          setMutationCount((count) => Math.max(0, count - 1));
+        }
+      }
+    },
+    [publishIssue]
+  );
+
+  const consumeReferenceRequests = useCallback(
+    async (
+      expectedRequests: StudioReferenceRequestAuthority[],
+      expectedRevision: number
+    ): Promise<'consumed' | 'changed' | 'failed'> => {
+      referenceRequestEpochRef.current += 1;
+      const current = projectRef.current;
+      if (current === null || expectedRequests.length === 0 || !mountedRef.current) return 'failed';
+      const session = projectSessionRef.current;
+      setMutationCount((count) => count + 1);
+      try {
+        const result = await ipcBridge.creativeStudio.dismissReferenceRequests.invoke({
+          projectId: current.id,
+          requestIds: expectedRequests.map(({ id }) => id),
+          expectedRevision,
+          expectedRequests: expectedRequests.map((request) => ({ ...request })),
+        });
+        if (!mountedRef.current || projectSessionRef.current !== session || projectRef.current?.id !== current.id) {
+          return 'failed';
+        }
+        if (result.ok === false) {
+          if (result.error.code === 'stale_project' || result.error.code === 'invalid_payload') return 'changed';
+          publishIssue(toIssue('refresh', result.error));
+          return 'failed';
+        }
+        const consumedIds = new Set(expectedRequests.map(({ id }) => id));
+        setReferenceRequests((requests) => requests.filter((request) => !consumedIds.has(request.id)));
+        return 'consumed';
+      } catch {
+        if (mountedRef.current && projectSessionRef.current === session && projectRef.current?.id === current.id) {
+          publishIssue(localIssue('refresh', 'storage_error'));
+        }
+        return 'failed';
+      } finally {
+        if (mountedRef.current && projectSessionRef.current === session) {
+          setMutationCount((count) => Math.max(0, count - 1));
+        }
+      }
+    },
+    [publishIssue]
+  );
+
   const clearIssue = useCallback(() => setIssue(null), []);
   const clearStaleIntent = useCallback(() => setStaleIntent(null), []);
   const jobs = useMemo(() => (project === null ? [] : Object.values(project.jobs)), [project]);
@@ -581,6 +743,7 @@ export const useStudioJobs = ({
   return {
     project,
     jobs,
+    referenceRequests,
     mutationPending: mutationCount > 0,
     issue,
     staleIntent,
@@ -590,5 +753,8 @@ export const useStudioJobs = ({
     cancelJob,
     retryJob,
     retryDownload,
+    dismissReferenceRequests,
+    refreshReferenceAuthority,
+    consumeReferenceRequests,
   };
 };

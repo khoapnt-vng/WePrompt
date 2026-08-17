@@ -6,11 +6,16 @@
 
 import type {
   StudioAspectRatio,
+  StudioConnectionIntegrationLabelKey,
   StudioMediaKind,
+  StudioOutputRole,
   StudioResolution,
   StudioSceneGenerationChoice,
+  StudioSceneReferencePrompt,
 } from '@/common/types/project/creativeStudioTypes';
-import type { GenerationReviewRouteSnapshot } from './GenerationControls';
+import type { StudioRuleBreach } from '@/common/types/project/creativeStudioRules';
+import type { StudioReferencePlateFreshness } from '@/common/types/project/creativeStudioManagedAssetCollections';
+import type { GenerationReferenceConditioningSnapshot, GenerationReviewRouteSnapshot } from './generationRequests';
 import { Alert, Button, Modal, Tag } from '@arco-design/web-react';
 import React, { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -24,6 +29,7 @@ export type GenerationReviewRoute =
       status: 'valid' | 'invalid';
       snapshot: GenerationReviewRouteSnapshot;
       providerName: string | null;
+      integrationLabelKey: StudioConnectionIntegrationLabelKey | null;
       silentOutput: boolean | null;
     }
   | {
@@ -36,19 +42,174 @@ export type GenerationReviewScene = {
   id: string;
   title: string;
   mediaKind: StudioMediaKind;
+  outputRole: StudioOutputRole;
   durationSeconds: number;
+  /**
+   * The authored string main evaluates before sending the prompt: the reference plate subject for
+   * outputRole 'reference', the scene's visual prompt otherwise. It mirrors jobManager's
+   * `output.role === 'reference' ? stripFirstFramePromptPrefix(baseRequest.prompt, aspectRatio) :
+   * baseRequest.prompt`, because a rule verdict computed against a different string than main checks
+   * is worse than no verdict.
+   */
+  promptText: string;
   route: GenerationReviewRoute;
+  /** The picture this scene's reference plate should paint. Present only for outputRole 'reference'. */
+  referencePrompt?: string;
+  /** Frozen disclosure/authorization data for reference-plate image inputs. */
+  conditioning?: GenerationReferenceConditioningSnapshot;
+  conditioningIssue?: 'malformed';
+  /** Review-only warning for a selected generated plate used by a take. */
+  referencePlateFreshness?: StudioReferencePlateFreshness;
 };
 
 export type GenerationReviewConfirmation = {
   sceneIds: string[];
   routes: StudioSceneGenerationChoice[];
+  conditioning?: Array<{
+    sceneId: string;
+    maximum: number;
+    integrationLabelKey: StudioConnectionIntegrationLabelKey;
+    inputs: GenerationReferenceConditioningSnapshot['inputs'];
+  }>;
+};
+
+/**
+ * The submission the modal's confirm button would produce, or `null` when it would be disabled.
+ *
+ * Exported so the Director's auto-submitted image requests go through the *same* validity rule as
+ * a human pressing Confirm. Both paths spend money, so a second implementation that drifted from
+ * this one would submit routes the modal refuses. Returns `null` unless every scene resolves to a
+ * valid, matching route — a partial batch is never submitted silently.
+ */
+export const collectSubmittableRoutes = (
+  scenes: readonly GenerationReviewScene[]
+): GenerationReviewConfirmation | null => {
+  if (scenes.length === 0) return null;
+  const validRoutes = scenes
+    .filter((scene) => scene.route.status === 'valid' && routeMatchesScene(scene))
+    .map((scene) => scene.route.snapshot)
+    .filter((route): route is GenerationReviewRouteSnapshot => route !== null);
+  if (validRoutes.length !== scenes.length) return null;
+  const conditioning = scenes.flatMap((scene) =>
+    scene.conditioning === undefined
+      ? []
+      : [
+          {
+            sceneId: scene.id,
+            maximum: scene.conditioning.maximum,
+            integrationLabelKey: scene.conditioning.integrationLabelKey,
+            inputs: scene.conditioning.inputs.map((input) => ({ ...input })),
+          },
+        ]
+  );
+  return {
+    sceneIds: scenes.map((scene) => scene.id),
+    routes: validRoutes.map(({ sceneId, choiceId, kind }) => ({ sceneId, choiceId, kind })),
+    ...(conditioning.length === 0 ? {} : { conditioning }),
+  };
+};
+
+export type ExactGenerationReviewSubmitResult = 'rejected' | 'not_submitted' | 'submitted';
+
+/** Keeps the reviewed IDs/routes as the final authority immediately in front of paid submission. */
+export const submitExactGenerationReview = async (
+  scenes: readonly GenerationReviewScene[],
+  confirmation: GenerationReviewConfirmation,
+  submitScenes: (confirmation: GenerationReviewConfirmation) => Promise<boolean>
+): Promise<ExactGenerationReviewSubmitResult> => {
+  const reviewed = collectSubmittableRoutes(scenes);
+  const matches =
+    reviewed !== null &&
+    reviewed.sceneIds.length === confirmation.sceneIds.length &&
+    reviewed.sceneIds.every((sceneId, index) => sceneId === confirmation.sceneIds[index]) &&
+    reviewed.routes.length === confirmation.routes.length &&
+    reviewed.routes.every((route, index) => {
+      const candidate = confirmation.routes[index];
+      return (
+        candidate !== undefined &&
+        candidate.sceneId === route.sceneId &&
+        candidate.choiceId === route.choiceId &&
+        candidate.kind === route.kind
+      );
+    }) &&
+    (reviewed.conditioning ?? []).length === (confirmation.conditioning ?? []).length &&
+    (reviewed.conditioning ?? []).every((snapshot, index) => {
+      const candidate = confirmation.conditioning?.[index];
+      return (
+        candidate !== undefined &&
+        candidate.sceneId === snapshot.sceneId &&
+        candidate.maximum === snapshot.maximum &&
+        candidate.integrationLabelKey === snapshot.integrationLabelKey &&
+        candidate.inputs.length === snapshot.inputs.length &&
+        candidate.inputs.every((input, inputIndex) => {
+          const reviewedInput = snapshot.inputs[inputIndex];
+          return (
+            reviewedInput !== undefined &&
+            input.assetId === reviewedInput.assetId &&
+            input.label === reviewedInput.label &&
+            input.role === reviewedInput.role
+          );
+        })
+      );
+    });
+  if (!matches) return 'rejected';
+  return (await submitScenes(reviewed)) ? 'submitted' : 'not_submitted';
+};
+
+/**
+ * The per-scene reference prompts a submission must carry, or `null` when any submitted scene has
+ * none.
+ *
+ * Main refuses a reference submission whose scenes are not all described, so a caller that cannot
+ * build this list must not spend: returning `null` sends it back to the review surface instead.
+ */
+export const collectReferencePrompts = (
+  scenes: readonly GenerationReviewScene[],
+  sceneIds: readonly string[]
+): StudioSceneReferencePrompt[] | null => {
+  const sceneById = new Map(scenes.map((scene) => [scene.id, scene]));
+  const prompts: StudioSceneReferencePrompt[] = [];
+  for (const sceneId of sceneIds) {
+    const prompt = sceneById.get(sceneId)?.referencePrompt;
+    if (prompt === undefined || prompt.trim().length === 0) return null;
+    prompts.push({ sceneId, prompt });
+  }
+  return prompts;
+};
+
+export type GenerationReviewExcludedScene = {
+  id: string;
+  title: string;
+  reasonValues?: Record<string, string | number>;
+  reasonMessageKey:
+    | 'conversation.creativeStudio.scene.status.needs_title'
+    | 'conversation.creativeStudio.scene.status.needs_prompt'
+    | 'conversation.creativeStudio.scene.status.generating'
+    | 'conversation.creativeStudio.scene.status.needs_selection'
+    | 'conversation.creativeStudio.scene.status.generated'
+    | 'conversation.creativeStudio.scene.status.needs_attention'
+    | 'conversation.creativeStudio.reference.excludedUnavailable'
+    | 'conversation.creativeStudio.reference.excludedPromptUnusable'
+    | 'conversation.creativeStudio.review.excludedFirstFrame'
+    | 'conversation.creativeStudio.models.blocked.catalogUnloaded'
+    | 'conversation.creativeStudio.models.blocked.noEngine'
+    | 'conversation.creativeStudio.models.blocked.needsSetup'
+    | 'conversation.creativeStudio.models.blocked.notAnswering'
+    | 'conversation.creativeStudio.models.blocked.retired'
+    | 'conversation.creativeStudio.models.engine.frameMismatch'
+    | 'conversation.creativeStudio.models.blocked.frame'
+    | 'conversation.creativeStudio.models.blocked.resolution'
+    | 'conversation.creativeStudio.models.blocked.duration'
+    | 'conversation.creativeStudio.models.blocked.firstFrame'
+    | 'conversation.creativeStudio.conditioning.unsupported'
+    | 'conversation.creativeStudio.conditioning.overflow';
 };
 
 export type GenerationReviewModalProps = {
   visible: boolean;
   mode: 'single' | 'batch';
   scenes: GenerationReviewScene[];
+  excludedScenes?: GenerationReviewExcludedScene[];
   aspectRatio: StudioAspectRatio;
   resolution: StudioResolution;
   targetDurationSeconds: number;
@@ -58,6 +219,12 @@ export type GenerationReviewModalProps = {
   /** Blocks another paid submit until the parent supplies a newly reviewed intent. */
   submissionBlocked?: boolean;
   errorMessageKey?: string | null;
+  /** Breaches computed by the page with the same shared evaluator main uses. */
+  ruleBreachesBySceneId?: Record<string, StudioRuleBreach[]>;
+  /** Hands the breach to the Director. Absent hides the affordance. */
+  onAskDirector?: () => void;
+  /** Closes route-blocked review and focuses the matching project engine slot. */
+  onSetEngines?: (role: StudioMediaKind) => void;
   onCancel: () => void;
   onConfirm: (confirmation: GenerationReviewConfirmation) => ActionResult;
 };
@@ -66,6 +233,19 @@ const routeMatchesScene = (scene: GenerationReviewScene): boolean =>
   scene.route.snapshot !== null &&
   scene.route.snapshot.sceneId === scene.id &&
   scene.route.snapshot.kind === scene.mediaKind;
+
+const integrationTranslationKey = (
+  integrationLabelKey: StudioConnectionIntegrationLabelKey
+): `settings.mediaModels.integration.${StudioConnectionIntegrationLabelKey}` =>
+  `settings.mediaModels.integration.${integrationLabelKey}`;
+
+/**
+ * Hoisted, not inlined as `= {}`. A fresh object literal in the destructuring default is a new
+ * identity on every render, and this value goes into the review `useMemo`'s dependency array — an
+ * inline default would defeat that memo for every project with no rules, which is all of them until
+ * the user pins one.
+ */
+const NO_RULE_BREACHES: Record<string, StudioRuleBreach[]> = {};
 
 /**
  * Final paid-generation authorization surface.
@@ -78,6 +258,7 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
   visible,
   mode,
   scenes,
+  excludedScenes = [],
   aspectRatio,
   resolution,
   targetDurationSeconds,
@@ -86,6 +267,9 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
   submitting,
   submissionBlocked = false,
   errorMessageKey = null,
+  ruleBreachesBySceneId = NO_RULE_BREACHES,
+  onAskDirector,
+  onSetEngines,
   onCancel,
   onConfirm,
 }) => {
@@ -99,6 +283,12 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
     const invalidRoute = scenes.some(
       (scene) => scene.route.status === 'invalid' || (scene.route.snapshot !== null && !routeMatchesScene(scene))
     );
+    const blockedRouteCount = scenes.filter(
+      (scene) =>
+        scene.route.status === 'missing' ||
+        scene.route.status === 'invalid' ||
+        (scene.route.snapshot !== null && !routeMatchesScene(scene))
+    ).length;
     const durationMismatch = mode === 'batch' && projectDurationSeconds !== targetDurationSeconds;
     const validRoutes = scenes
       .filter((scene) => scene.route.status === 'valid' && routeMatchesScene(scene))
@@ -112,6 +302,7 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
       : knownAudioPolicies.length > 0
         ? 'conversation.creativeStudio.review.audioOff'
         : null;
+    const ruleBreached = scenes.some((scene) => (ruleBreachesBySceneId[scene.id] ?? []).length > 0);
 
     return {
       videoSeconds,
@@ -120,26 +311,57 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
       durationMismatch,
       validRoutes,
       audioMessageKey,
-      canConfirm: scenes.length > 0 && !missingRoute && !invalidRoute && validRoutes.length === scenes.length,
+      ruleBreached,
+      blockedRouteCount,
+      canConfirm:
+        scenes.length > 0 && !missingRoute && !invalidRoute && !ruleBreached && validRoutes.length === scenes.length,
     };
-  }, [mode, projectDurationSeconds, scenes, targetDurationSeconds]);
+  }, [mode, projectDurationSeconds, ruleBreachesBySceneId, scenes, targetDurationSeconds]);
 
   const handleConfirm = (): void => {
     if (!review.canConfirm || submissionBlocked || submitting) return;
+    const conditioning = scenes.flatMap((scene) =>
+      scene.conditioning === undefined
+        ? []
+        : [
+            {
+              sceneId: scene.id,
+              maximum: scene.conditioning.maximum,
+              integrationLabelKey: scene.conditioning.integrationLabelKey,
+              inputs: scene.conditioning.inputs.map((input) => ({ ...input })),
+            },
+          ]
+    );
     void onConfirm({
       sceneIds: scenes.map((scene) => scene.id),
       routes: review.validRoutes.map(({ sceneId, choiceId, kind }) => ({ sceneId, choiceId, kind })),
+      ...(conditioning.length === 0 ? {} : { conditioning }),
     });
   };
 
-  const disabledReason =
-    review.missingRoute || review.invalidRoute ? 'conversation.creativeStudio.review.disabledMissingRoutes' : null;
+  const disabledReason = review.ruleBreached
+    ? t('conversation.creativeStudio.rules.breachBlockedConfirm')
+    : review.missingRoute || review.invalidRoute
+      ? t('conversation.creativeStudio.review.disabledMissingRoutes', { count: review.blockedRouteCount })
+      : null;
+  const routeBlockRole = scenes.find((scene) => scene.route.status !== 'valid' || !routeMatchesScene(scene))?.mediaKind;
+  const firstFrameExclusions = excludedScenes.filter(
+    (scene) => scene.reasonMessageKey === 'conversation.creativeStudio.review.excludedFirstFrame'
+  );
+  const otherExclusions = excludedScenes.filter(
+    (scene) => scene.reasonMessageKey !== 'conversation.creativeStudio.review.excludedFirstFrame'
+  );
 
   const footer = (
     <div className='flex flex-wrap justify-end gap-8px'>
       <Button disabled={submitting} onClick={onCancel}>
         {t('conversation.creativeStudio.review.cancel')}
       </Button>
+      {routeBlockRole !== undefined && onSetEngines !== undefined && (
+        <Button disabled={submitting} onClick={() => onSetEngines(routeBlockRole)}>
+          {t('conversation.creativeStudio.review.setEngines')}
+        </Button>
+      )}
       <Button
         type='primary'
         loading={submitting}
@@ -204,6 +426,7 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
                       : 'conversation.creativeStudio.scene.video'
                   )}
                 </Tag>
+                {scene.outputRole === 'reference' && <Tag>{t('conversation.creativeStudio.reference.reviewTag')}</Tag>}
                 <Tag>
                   {t('conversation.creativeStudio.scene.durationSeconds', {
                     count: scene.durationSeconds,
@@ -224,6 +447,14 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
                     </dd>
                     <dt className='text-12px text-t-tertiary'>{t('conversation.creativeStudio.review.modelLabel')}</dt>
                     <dd className='m-0 break-all text-12px text-t-primary'>{scene.route.snapshot.model}</dd>
+                    {scene.route.status !== 'missing' && typeof scene.route.integrationLabelKey === 'string' && (
+                      <>
+                        <dt className='text-12px text-t-tertiary'>{t('settings.mediaModels.integrationLabel')}</dt>
+                        <dd className='m-0 break-all text-12px text-t-primary'>
+                          {t(integrationTranslationKey(scene.route.integrationLabelKey))}
+                        </dd>
+                      </>
+                    )}
                   </dl>
                   {(scene.route.status === 'invalid' || !routeMatchesScene(scene)) && (
                     <Alert
@@ -234,9 +465,108 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
                   )}
                 </>
               )}
+              {(ruleBreachesBySceneId[scene.id] ?? []).map((breach) => (
+                <Alert
+                  key={breach.ruleId}
+                  className='mt-10px'
+                  type='error'
+                  content={t('conversation.creativeStudio.rules.breachScene', {
+                    rule: breach.ruleText,
+                    term: breach.matchedTerm,
+                  })}
+                />
+              ))}
+              {scene.conditioning !== undefined && (
+                <div className='mt-10px rounded-8px bg-fill-1 p-10px'>
+                  <div className='mb-6px text-12px font-600 text-t-primary'>
+                    {t('conversation.creativeStudio.conditioning.inputsTitle')}
+                  </div>
+                  <ul className='m-0 flex list-none flex-col gap-4px p-0'>
+                    {scene.conditioning.inputs.map((input) => (
+                      <li key={input.assetId} className='flex items-center gap-8px text-12px text-t-primary'>
+                        <Tag>{t(`conversation.creativeStudio.conditioning.role.${input.role}`)}</Tag>
+                        <span>{input.label}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className='mb-0 mt-6px text-12px text-t-secondary'>
+                    {t('conversation.creativeStudio.conditioning.maximum', {
+                      count: scene.conditioning.maximum,
+                    })}
+                  </p>
+                  {scene.conditioning.inputs.length > scene.conditioning.maximum && (
+                    <Alert
+                      className='mt-10px'
+                      type='error'
+                      content={t(
+                        scene.conditioning.maximum === 0
+                          ? 'conversation.creativeStudio.conditioning.unsupported'
+                          : 'conversation.creativeStudio.conditioning.overflow',
+                        {
+                          count: scene.conditioning.inputs.length,
+                          maximum: scene.conditioning.maximum,
+                        }
+                      )}
+                    />
+                  )}
+                </div>
+              )}
+              {scene.conditioningIssue === 'malformed' && (
+                <Alert
+                  className='mt-10px'
+                  type='error'
+                  content={t('conversation.creativeStudio.conditioning.malformed')}
+                />
+              )}
+              {scene.referencePlateFreshness === 'out_of_date' && (
+                <Alert
+                  className='mt-10px'
+                  type='warning'
+                  content={t('conversation.creativeStudio.conditioning.plateOutOfDate')}
+                />
+              )}
             </article>
           ))}
         </div>
+
+        {otherExclusions.length > 0 && (
+          <Alert
+            type='warning'
+            content={
+              <div>
+                <p className='m-0'>{t('conversation.creativeStudio.reference.excludedSummary')}</p>
+                <ul className='mb-0 mt-6px pl-18px'>
+                  {otherExclusions.map((scene) => (
+                    <li key={scene.id}>
+                      <span>{scene.title}</span>
+                      <span> — {t(scene.reasonMessageKey, scene.reasonValues)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            }
+          />
+        )}
+
+        {firstFrameExclusions.length > 0 && (
+          <Alert
+            type='warning'
+            content={
+              <div>
+                <p className='m-0'>
+                  {t('conversation.creativeStudio.review.excludedFirstFrame', {
+                    count: firstFrameExclusions.length,
+                  })}
+                </p>
+                <ul className='mb-0 mt-6px pl-18px'>
+                  {firstFrameExclusions.map((scene) => (
+                    <li key={scene.id}>{scene.title}</li>
+                  ))}
+                </ul>
+              </div>
+            }
+          />
+        )}
 
         {review.durationMismatch && (
           <Alert type='warning' content={t('conversation.creativeStudio.review.durationMismatch')} />
@@ -250,8 +580,13 @@ export const GenerationReviewModal: React.FC<GenerationReviewModalProps> = ({
 
         {disabledReason && (
           <p role='status' className='m-0 rounded-8px bg-fill-1 p-10px text-12px text-t-secondary'>
-            {t(disabledReason)}
+            {disabledReason}
           </p>
+        )}
+        {review.ruleBreached && onAskDirector !== undefined && (
+          <div>
+            <Button onClick={onAskDirector}>{t('conversation.creativeStudio.rules.breachAskDirector')}</Button>
+          </div>
         )}
         {errorMessageKey && (
           <div role='alert' className='rounded-8px border border-danger-3 bg-danger-light-1 p-10px text-danger'>

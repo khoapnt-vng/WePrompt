@@ -442,7 +442,7 @@
   "toolsDescription": "سرورهای MCP و ابزارهای داخلی مانند تولید تصویر را پیکربندی کنید. تولید تصویر تنها پس از پیکربندی یک مدل پشتیبان تصویر در صفحه مدل فعال می‌شود.",
   "modelDescription": "ارائه‌دهندگان و کلیدهای API را برای مدل‌های متن، تصویر و ویدیو پیکربندی کنید.",
   "mediaModels": {
-    "title": "مدل‌های رسانه‌ای Creative Studio",
+    "title": "موتورهای Creative Studio",
     "description": "ارائه‌دهندگان موجود را بدون نمایش اطلاعات ورود به یکپارچه‌سازی‌های تصویر و ویدیو متصل کنید.",
     "add": "افزودن مدل رسانه‌ای",
     "empty": "هنوز مدل رسانه‌ای پیکربندی نشده است.",
@@ -709,6 +709,7 @@
   "mcpJsonBareServerError": "پیکربندی سرور MCP را در یک شیء سطح بالای «mcpServers» قرار دهید یا در آیتم آرایه یک «name» اضافه کنید.",
   "mcpJsonUrlRequiredError": "سرورهای HTTP و SSE MCP به یک «url» غیرخالی نیاز دارند.",
   "mcpJsonStdioCommandRequiredError": "سرورهای Stdio MCP به یک «command» غیرخالی نیاز دارند.",
+  "mcpJsonReservedNameError": "این نام توسط WePrompt رزرو شده و نمی‌توان از آن برای سرور MCP استفاده کرد. نام سرور را تغییر دهید و دوباره تلاش کنید.",
   "mcpTestConnection": "بررسی دسترسی MCP",
   "mcpTestConnectionSuccess": "آزمایش اتصال موفق بود",
   "mcpConnected": "در دسترس",

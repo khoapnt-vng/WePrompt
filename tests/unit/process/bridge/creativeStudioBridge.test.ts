@@ -7,7 +7,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { StudioProject } from '@/common/types/project/creativeStudioTypes';
+import { STUDIO_VIEWS, type StudioProject } from '@/common/types/project/creativeStudioTypes';
 import { CreativeStudioStoreError } from '@process/services/creative-studio/store';
 import { CreativeStudioMediaError } from '@process/services/creative-studio/mediaStore';
 
@@ -15,12 +15,17 @@ const mocks = vi.hoisted(() => ({
   listProjectsProvider: vi.fn(),
   createProjectProvider: vi.fn(),
   getProjectProvider: vi.fn(),
+  getBriefSessionServerProvider: vi.fn(),
   listProposalsProvider: vi.fn(),
+  listPendingReferenceRequestsProvider: vi.fn(),
+  dismissReferenceRequestsProvider: vi.fn(),
   acceptProposalProvider: vi.fn(),
   rejectProposalProvider: vi.fn(),
   proposeStoryboardProvider: vi.fn(),
   updateModelSelectionProvider: vi.fn(),
   updateProjectProvider: vi.fn(),
+  setBriefRulesProvider: vi.fn(),
+  undoBriefRulesProvider: vi.fn(),
   bindBriefConversationProvider: vi.fn(),
   updateCutProvider: vi.fn(),
   placeCutScenesProvider: vi.fn(),
@@ -31,6 +36,7 @@ const mocks = vi.hoisted(() => ({
   selectAssetProvider: vi.fn(),
   persistCapturedPosterProvider: vi.fn(),
   chooseAndImportReferenceProvider: vi.fn(),
+  detachBriefReferenceProvider: vi.fn(),
   chooseAndExportAssetsProvider: vi.fn(),
   getLatestRenderProvider: vi.fn(),
   renderCutProvider: vi.fn(),
@@ -54,12 +60,17 @@ vi.mock('@/common', () => ({
       listProjects: { provider: mocks.listProjectsProvider },
       createProject: { provider: mocks.createProjectProvider },
       getProject: { provider: mocks.getProjectProvider },
+      getBriefSessionServer: { provider: mocks.getBriefSessionServerProvider },
       listProposals: { provider: mocks.listProposalsProvider },
+      listPendingReferenceRequests: { provider: mocks.listPendingReferenceRequestsProvider },
+      dismissReferenceRequests: { provider: mocks.dismissReferenceRequestsProvider },
       acceptProposal: { provider: mocks.acceptProposalProvider },
       rejectProposal: { provider: mocks.rejectProposalProvider },
       proposeStoryboard: { provider: mocks.proposeStoryboardProvider },
       updateModelSelection: { provider: mocks.updateModelSelectionProvider },
       updateProject: { provider: mocks.updateProjectProvider },
+      setBriefRules: { provider: mocks.setBriefRulesProvider },
+      undoBriefRules: { provider: mocks.undoBriefRulesProvider },
       bindBriefConversation: { provider: mocks.bindBriefConversationProvider },
       updateCut: { provider: mocks.updateCutProvider },
       placeCutScenes: { provider: mocks.placeCutScenesProvider },
@@ -70,6 +81,7 @@ vi.mock('@/common', () => ({
       selectAsset: { provider: mocks.selectAssetProvider },
       persistCapturedPoster: { provider: mocks.persistCapturedPosterProvider },
       chooseAndImportReference: { provider: mocks.chooseAndImportReferenceProvider },
+      detachBriefReference: { provider: mocks.detachBriefReferenceProvider },
       chooseAndExportAssets: { provider: mocks.chooseAndExportAssetsProvider },
       getLatestRender: { provider: mocks.getLatestRenderProvider },
       renderCut: { provider: mocks.renderCutProvider },
@@ -97,7 +109,7 @@ import {
   type CreativeStudioBridgeDependencies,
   type CreativeStudioCloseHandshakeDependencies,
 } from '@process/bridge/creativeStudioBridge';
-import { CreativeStudioServiceError } from '@process/services/creative-studio/creativeStudioService';
+import { CreativeStudioServiceError } from '@process/services/creative-studio/service';
 import { StudioJobManagerError } from '@process/services/creative-studio/jobManager';
 import { StudioRenderRunnerError } from '@process/services/creative-studio/renderService';
 
@@ -115,6 +127,8 @@ const project: StudioProject = {
   assets: {},
   jobs: {},
   routing: { storyboard: null, image: null, video: null },
+  rules: [],
+  ruleListUndo: null,
   createdAt: '2026-07-30T00:00:00.000Z',
   updatedAt: '2026-07-30T00:00:00.000Z',
 };
@@ -131,12 +145,21 @@ describe('initCreativeStudioBridge', () => {
         listProjects: vi.fn(async () => []),
         createProject: vi.fn(async () => project),
         getProject: vi.fn(async () => project),
+        getBriefSessionServer: vi.fn(async () => ({
+          id: 'studio-brief-project_1',
+          name: 'aionui-creative-studio',
+          transport: { type: 'stdio' as const, command: 'node', args: ['/tmp/builtin-mcp-studio.js'] },
+        })),
         listProposals: vi.fn(async () => []),
+        listPendingReferenceRequests: vi.fn(async () => []),
+        dismissReferenceRequests: vi.fn(async () => true),
         acceptProposal: vi.fn(),
         rejectProposal: vi.fn(),
         proposeStoryboard: vi.fn(async () => project),
         updateModelSelection: vi.fn(async () => project),
         updateProject: vi.fn(async () => project),
+        setBriefRules: vi.fn(async () => project),
+        undoBriefRules: vi.fn(async () => project),
         bindBriefConversation: vi.fn(async () => project),
         updateCut: vi.fn(async () => project),
         placeCutScenes: vi.fn(async () => project),
@@ -152,6 +175,7 @@ describe('initCreativeStudioBridge', () => {
         selectAsset: vi.fn(async () => project),
         persistCapturedPoster: vi.fn(),
         importReferenceFromPath: vi.fn(),
+        detachBriefReference: vi.fn(async () => project),
         exportAssetsToDirectory: vi.fn(),
         getLatestRender: vi.fn(async () => null),
         submitScenes: vi.fn(async () => []),
@@ -179,12 +203,17 @@ describe('initCreativeStudioBridge', () => {
     expect(mocks.listProjectsProvider).toHaveBeenCalledOnce();
     expect(mocks.createProjectProvider).toHaveBeenCalledOnce();
     expect(mocks.getProjectProvider).toHaveBeenCalledOnce();
+    expect(mocks.getBriefSessionServerProvider).toHaveBeenCalledOnce();
     expect(mocks.listProposalsProvider).toHaveBeenCalledOnce();
+    expect(mocks.listPendingReferenceRequestsProvider).toHaveBeenCalledOnce();
+    expect(mocks.dismissReferenceRequestsProvider).toHaveBeenCalledOnce();
     expect(mocks.acceptProposalProvider).toHaveBeenCalledOnce();
     expect(mocks.rejectProposalProvider).toHaveBeenCalledOnce();
     expect(mocks.proposeStoryboardProvider).toHaveBeenCalledOnce();
     expect(mocks.updateModelSelectionProvider).toHaveBeenCalledOnce();
     expect(mocks.updateProjectProvider).toHaveBeenCalledOnce();
+    expect(mocks.setBriefRulesProvider).toHaveBeenCalledOnce();
+    expect(mocks.undoBriefRulesProvider).toHaveBeenCalledOnce();
     expect(mocks.bindBriefConversationProvider).toHaveBeenCalledOnce();
     expect(mocks.updateCutProvider).toHaveBeenCalledOnce();
     expect(mocks.placeCutScenesProvider).toHaveBeenCalledOnce();
@@ -195,6 +224,7 @@ describe('initCreativeStudioBridge', () => {
     expect(mocks.selectAssetProvider).toHaveBeenCalledOnce();
     expect(mocks.persistCapturedPosterProvider).toHaveBeenCalledOnce();
     expect(mocks.chooseAndImportReferenceProvider).toHaveBeenCalledOnce();
+    expect(mocks.detachBriefReferenceProvider).toHaveBeenCalledOnce();
     expect(mocks.chooseAndExportAssetsProvider).toHaveBeenCalledOnce();
     expect(mocks.getLatestRenderProvider).toHaveBeenCalledOnce();
     expect(mocks.renderCutProvider).toHaveBeenCalledOnce();
@@ -225,6 +255,7 @@ describe('initCreativeStudioBridge', () => {
     const getProject = mocks.getProjectProvider.mock.calls[0]?.[0] as ProviderHandler;
     const getLatestRender = mocks.getLatestRenderProvider.mock.calls[0]?.[0] as ProviderHandler;
     const updateProject = mocks.updateProjectProvider.mock.calls[0]?.[0] as ProviderHandler;
+    const setBriefRules = mocks.setBriefRulesProvider.mock.calls[0]?.[0] as ProviderHandler;
     const renderCut = mocks.renderCutProvider.mock.calls[0]?.[0] as ProviderHandler;
     const disabled = {
       ok: false,
@@ -239,12 +270,14 @@ describe('initCreativeStudioBridge', () => {
     await expect(updateProject({ projectId: 'project_1', expectedRevision: 1, name: 'Changed' })).resolves.toEqual(
       disabled
     );
+    await expect(setBriefRules({ projectId: 'project_1', expectedRevision: 1, rules: [] })).resolves.toEqual(disabled);
     await expect(renderCut({ projectId: 'project_1' })).resolves.toEqual(disabled);
     expect(getService).not.toHaveBeenCalled();
     expect(getRenderRunner).not.toHaveBeenCalled();
     expect(service.getProject).not.toHaveBeenCalled();
     expect(service.getLatestRender).not.toHaveBeenCalled();
     expect(service.updateProject).not.toHaveBeenCalled();
+    expect(service.setBriefRules).not.toHaveBeenCalled();
     expect(runner.renderCut).not.toHaveBeenCalled();
   });
 
@@ -255,11 +288,16 @@ describe('initCreativeStudioBridge', () => {
     const getProject = mocks.getProjectProvider.mock.calls[0]?.[0] as ProviderHandler;
     const getLatestRender = mocks.getLatestRenderProvider.mock.calls[0]?.[0] as ProviderHandler;
     const updateProject = mocks.updateProjectProvider.mock.calls[0]?.[0] as ProviderHandler;
+    const setBriefRules = mocks.setBriefRulesProvider.mock.calls[0]?.[0] as ProviderHandler;
     const renderCut = mocks.renderCutProvider.mock.calls[0]?.[0] as ProviderHandler;
 
     await expect(getProject({ projectId: 'project_1' })).resolves.toEqual({ ok: true, data: project });
     await expect(getLatestRender({ projectId: 'project_1' })).resolves.toEqual({ ok: true, data: null });
     await expect(updateProject({ projectId: 'project_1', expectedRevision: 1, name: 'Changed' })).resolves.toEqual({
+      ok: true,
+      data: project,
+    });
+    await expect(setBriefRules({ projectId: 'project_1', expectedRevision: 1, rules: [] })).resolves.toEqual({
       ok: true,
       data: project,
     });
@@ -580,10 +618,9 @@ describe('initCreativeStudioBridge', () => {
     const importHandler = mocks.chooseAndImportReferenceProvider.mock.calls[0]?.[0] as ProviderHandler;
     const exportHandler = mocks.chooseAndExportAssetsProvider.mock.calls[0]?.[0] as ProviderHandler;
 
-    await expect(importHandler({ projectId: 'project_1', expectedRevision: 1, sceneId: 'scene_1' })).resolves.toEqual({
-      ok: true,
-      data: { status: 'cancelled' },
-    });
+    await expect(
+      importHandler({ projectId: 'project_1', expectedRevision: 1, briefReferenceRole: 'cast' })
+    ).resolves.toEqual({ ok: true, data: { status: 'cancelled' } });
     await expect(exportHandler({ projectId: 'project_1', includeReferences: true })).resolves.toEqual({
       ok: true,
       data: { status: 'cancelled' },
@@ -608,7 +645,7 @@ describe('initCreativeStudioBridge', () => {
     };
     const service = {
       ...dependencies.getService(),
-      importReferenceFromPath: vi.fn(async () => asset),
+      importReferenceFromPath: vi.fn(async () => ({ asset, project })),
       exportAssetsToDirectory: vi.fn(async () => ({
         folderName: 'Film-20260730-120000',
         exported: [{ assetId: 'asset_1', fileName: 'scene-01.png' }],
@@ -624,12 +661,17 @@ describe('initCreativeStudioBridge', () => {
     const importHandler = mocks.chooseAndImportReferenceProvider.mock.calls[0]?.[0] as ProviderHandler;
     const exportHandler = mocks.chooseAndExportAssetsProvider.mock.calls[0]?.[0] as ProviderHandler;
 
-    const imported = await importHandler({ projectId: 'project_1', expectedRevision: 1 });
+    const imported = await importHandler({
+      projectId: 'project_1',
+      expectedRevision: 1,
+      briefReferenceRole: 'look',
+    });
     const exported = await exportHandler({ projectId: 'project_1', includeReferences: false });
 
     expect(service.importReferenceFromPath).toHaveBeenCalledWith({
       projectId: 'project_1',
       expectedRevision: 1,
+      briefReferenceRole: 'look',
       sourcePath: importPath,
     });
     expect(service.exportAssetsToDirectory).toHaveBeenCalledWith({
@@ -637,7 +679,7 @@ describe('initCreativeStudioBridge', () => {
       includeReferences: false,
       destinationDirectory: exportPath,
     });
-    expect(imported).toEqual({ ok: true, data: { status: 'imported', asset } });
+    expect(imported).toEqual({ ok: true, data: { status: 'imported', asset, project } });
     expect(exported).toEqual({
       ok: true,
       data: {
@@ -648,6 +690,68 @@ describe('initCreativeStudioBridge', () => {
       },
     });
     expect(JSON.stringify({ imported, exported })).not.toContain('/private/user');
+  });
+
+  it('forwards a legacy scene reference exactly and returns its canonical import outcome', async () => {
+    const importPath = '/private/user/scene-reference.png';
+    const asset = {
+      id: 'asset_scene_reference',
+      projectId: 'project_1',
+      sceneId: 'scene_1',
+      mediaKind: 'image' as const,
+      mimeType: 'image/png',
+      managedAsset: { collection: 'imports' as const, fileName: 'asset_scene_reference.png' },
+      byteSize: 33,
+      sha256: 'b'.repeat(64),
+      createdAt: '2026-07-30T00:00:00.000Z',
+    };
+    const importedProject = structuredClone(project);
+    importedProject.sceneOrder = ['scene_1'];
+    importedProject.scenes.scene_1 = {
+      id: 'scene_1',
+      title: 'Opening',
+      purpose: '',
+      visualPrompt: '',
+      narration: '',
+      onScreenText: '',
+      mediaKind: 'image',
+      durationSeconds: 5,
+      referenceAssetId: null,
+      selectedAssetId: null,
+      assetIds: [],
+      jobIds: [],
+      reviewState: 'draft',
+    };
+    importedProject.assets[asset.id] = asset;
+    importedProject.scenes.scene_1.assetIds.push(asset.id);
+    importedProject.scenes.scene_1.referenceAssetId = asset.id;
+    const service = {
+      ...dependencies.getService(),
+      importReferenceFromPath: vi.fn(async () => ({ asset, project: importedProject })),
+    };
+    initCreativeStudioBridge({
+      getService: () => service,
+      getParentWindow: () => undefined,
+      showOpenDialog: async () => ({ canceled: false, filePaths: [importPath] }),
+    });
+    const importHandler = mocks.chooseAndImportReferenceProvider.mock.calls[0]?.[0] as ProviderHandler;
+    const input = { projectId: 'project_1', sceneId: 'scene_1', expectedRevision: 4 };
+
+    await expect(importHandler(input)).resolves.toEqual({
+      ok: true,
+      data: { status: 'imported', asset, project: importedProject },
+    });
+    expect(service.importReferenceFromPath).toHaveBeenCalledExactlyOnceWith({ ...input, sourcePath: importPath });
+  });
+
+  it('forwards detach exactly once and returns the canonical project from the successful mutation', async () => {
+    const service = dependencies.getService();
+    initCreativeStudioBridge({ getService: () => service });
+    const handler = mocks.detachBriefReferenceProvider.mock.calls[0]?.[0] as ProviderHandler;
+    const input = { projectId: 'project_1', assetId: 'asset_1', expectedRevision: 1 };
+
+    await expect(handler(input)).resolves.toEqual({ ok: true, data: project });
+    expect(service.detachBriefReference).toHaveBeenCalledExactlyOnceWith(input);
   });
 
   it.each([
@@ -799,6 +903,7 @@ describe('initCreativeStudioBridge', () => {
         { name: 'Launch film', brief: '', aspectRatio: '16:9', targetDurationSeconds: 12, resolution: '1080p' },
       ],
       [mocks.getProjectProvider, { projectId: 'project_1' }],
+      [mocks.getBriefSessionServerProvider, { projectId: 'project_1' }],
       [mocks.proposeStoryboardProvider, { projectId: 'project_1', expectedRevision: 1, replaceExisting: false }],
       [
         mocks.updateModelSelectionProvider,
@@ -810,6 +915,8 @@ describe('initCreativeStudioBridge', () => {
         },
       ],
       [mocks.updateProjectProvider, { projectId: 'project_1', expectedRevision: 1, name: 'Changed' }],
+      [mocks.setBriefRulesProvider, { projectId: 'project_1', expectedRevision: 1, rules: [] }],
+      [mocks.undoBriefRulesProvider, { projectId: 'project_1' }],
       [
         mocks.bindBriefConversationProvider,
         { projectId: 'project_1', expectedRevision: 1, conversationId: 'conversation_brief' },
@@ -853,9 +960,12 @@ describe('initCreativeStudioBridge', () => {
     expect(service.listProjects).toHaveBeenCalledOnce();
     expect(service.createProject).toHaveBeenCalledOnce();
     expect(service.getProject).toHaveBeenCalledOnce();
+    expect(service.getBriefSessionServer).toHaveBeenCalledOnce();
     expect(service.proposeStoryboard).toHaveBeenCalledOnce();
     expect(service.updateModelSelection).toHaveBeenCalledOnce();
     expect(service.updateProject).toHaveBeenCalledOnce();
+    expect(service.setBriefRules).toHaveBeenCalledOnce();
+    expect(service.undoBriefRules).toHaveBeenCalledOnce();
     expect(service.bindBriefConversation).toHaveBeenCalledOnce();
     expect(service.updateCut).toHaveBeenCalledOnce();
     expect(service.deleteProject).toHaveBeenCalledOnce();
@@ -873,7 +983,7 @@ const createCloseEvent = (): CloseEvent => ({ preventDefault: vi.fn() });
 const createCloseHandshakeDependencies = (
   overrides: Partial<CreativeStudioCloseHandshakeDependencies> = {}
 ): CreativeStudioCloseHandshakeDependencies => ({
-  getCurrentUrl: () => 'file:///Applications/WePrompt/index.html#/studio/project_1/write',
+  getCurrentUrl: () => 'file:///Applications/WePrompt/index.html#/studio/project_1/table',
   queryUnsavedWork: vi.fn(async () => ({ dirtySceneCount: 0 })),
   flushUnsavedWork: vi.fn(async () => ({ saved: true })),
   showMessageBox: vi.fn(async () => ({ response: 2 })),
@@ -885,12 +995,57 @@ const createCloseHandshakeDependencies = (
   ...overrides,
 });
 
+const studioViewUrl = (segment: string): string =>
+  `file:///Applications/WePrompt/index.html#/studio/project_1${segment ? `/${segment}` : ''}`;
+
+/** Segments the rail or view switch used and later retired. */
+const retiredPhaseSegments = ['brief', 'write', 'produce', 'review'] as const;
+
 describe('createCreativeStudioCloseHandshake', () => {
+  /**
+   * The unsaved-draft preflight is gated by a route pattern that names every view segment. A view
+   * the pattern does not know about closes the window silently, losing the drafts the handshake
+   * exists to save, and no other assertion in this suite notices — the default fixture URL is one
+   * single segment, so it can be the only recognised one and everything still passes.
+   *
+   * Enumerated from the shared `STUDIO_VIEWS` rather than a literal list, so a fifth view is
+   * covered the day it is added and the bridge cannot pass by hardcoding a subset of the segments.
+   */
+  it('interpolates view segments into the route pattern without needing regex escaping', () => {
+    // Guards the guard: an empty shared list would make every derived case below vacuous.
+    expect(STUDIO_VIEWS).toEqual(['table', 'board', 'cut']);
+    for (const view of STUDIO_VIEWS) {
+      expect(view, `${view} must stay a plain lowercase segment`).toMatch(/^[a-z]+$/);
+    }
+    // The negative cases below only mean something while these names are genuinely not views.
+    expect(STUDIO_VIEWS.filter((view) => retiredPhaseSegments.includes(view as never))).toEqual([]);
+  });
+
+  it.each([studioViewUrl(''), ...STUDIO_VIEWS.map(studioViewUrl)])(
+    'runs the unsaved-work preflight for the Studio view route %s',
+    async (currentUrl) => {
+      const dependencies = createCloseHandshakeDependencies({ getCurrentUrl: () => currentUrl });
+      const handshake = createCreativeStudioCloseHandshake(dependencies);
+      const event = createCloseEvent();
+
+      expect(handshake.handleWindowClose(event)).toBe(true);
+      expect(event.preventDefault).toHaveBeenCalledOnce();
+      await vi.waitFor(() =>
+        expect(dependencies.queryUnsavedWork).toHaveBeenCalledExactlyOnceWith({ timeoutMs: 3_000 })
+      );
+    }
+  );
+
   it.each([
     'file:///Applications/WePrompt/index.html#/guid',
     'file:///Applications/WePrompt/index.html#/studio',
     'http://localhost:5173/#/studio-tools',
     'not a renderer URL',
+    // The retired phase segments. They are no longer routes, so a URL carrying one is not a Studio
+    // document and must not be treated as one — this half is what stops the pattern from being
+    // widened into a match-anything that would make the positive cases above meaningless. Asserted
+    // against the shared list too: a retired name must never come back as a view.
+    ...retiredPhaseSegments.map(studioViewUrl),
   ])('leaves a non-Studio renderer route to the normal close lifecycle: %s', (currentUrl) => {
     const dependencies = createCloseHandshakeDependencies({ getCurrentUrl: () => currentUrl });
     const handshake = createCreativeStudioCloseHandshake(dependencies);

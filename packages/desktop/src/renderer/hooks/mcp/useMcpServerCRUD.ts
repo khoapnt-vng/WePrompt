@@ -3,6 +3,7 @@ import { Message } from '@arco-design/web-react';
 import { useTranslation } from 'react-i18next';
 import { mcpService } from '@/common/adapter/ipcBridge';
 import { isBackendHttpError } from '@/common/adapter/httpBridge';
+import { isReservedMcpServerName } from '@/common/config/builtinCapabilities';
 import type { IMcpServer } from '@/common/config/storage';
 import { toBackendMcpPayload } from './catalog';
 
@@ -47,6 +48,11 @@ export const useMcpServerCRUD = (
 
   const handleAddMcpServer = useCallback(
     async (serverData: Omit<IMcpServer, 'id' | 'created_at' | 'updated_at'>) => {
+      if (isReservedMcpServerName(serverData.name)) {
+        Message.error(t('settings.mcpJsonReservedNameError'));
+        return undefined;
+      }
+
       try {
         let persisted = await mcpService.createServer.invoke(toBackendMcpPayload(serverData));
         persisted = await persistEnabledState(persisted, serverData.enabled);
@@ -64,14 +70,25 @@ export const useMcpServerCRUD = (
 
   const handleBatchImportMcpServers = useCallback(
     async (serversData: Omit<IMcpServer, 'id' | 'created_at' | 'updated_at'>[]) => {
+      // Backstop for callers that do not go through parseMcpJsonImport (the one-click
+      // importer builds its entries directly). Reserved entries are dropped rather than
+      // failing the batch, matching how that importer already skips name collisions.
+      const allowedServers = serversData.filter((server) => !isReservedMcpServerName(server.name));
+      if (allowedServers.length !== serversData.length) {
+        Message.error(t('settings.mcpJsonReservedNameError'));
+      }
+      if (allowedServers.length === 0) {
+        return undefined;
+      }
+
       try {
         const imported = await mcpService.importServers.invoke({
-          servers: serversData.map((server) => toBackendMcpPayload(server)),
+          servers: allowedServers.map((server) => toBackendMcpPayload(server)),
         });
 
         const finalServers: IMcpServer[] = [];
         for (const importedServer of imported) {
-          const original = serversData.find((server) => server.name === importedServer.name);
+          const original = allowedServers.find((server) => server.name === importedServer.name);
           const persisted = await persistEnabledState(importedServer, original?.enabled ?? false);
           finalServers.push(mergeServerState(persisted, original));
         }
@@ -108,6 +125,13 @@ export const useMcpServerCRUD = (
       serverData: Omit<IMcpServer, 'id' | 'created_at' | 'updated_at'>
     ): Promise<IMcpServer | undefined> => {
       if (!editingMcpServer) {
+        return undefined;
+      }
+
+      // Renaming an existing server is a registration too — without this, the add-path guard
+      // is trivially sidestepped by creating under a benign name and editing it afterwards.
+      if (isReservedMcpServerName(serverData.name)) {
+        Message.error(t('settings.mcpJsonReservedNameError'));
         return undefined;
       }
 

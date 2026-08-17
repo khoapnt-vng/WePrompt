@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import ts from 'typescript';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   NATIVE_BRIDGE_PROVIDER_KEYS,
   RENDERER_BRIDGE_QUERY_KEYS,
@@ -223,7 +223,13 @@ const VALID_PAYLOADS = {
     resolution: '1080p',
   },
   'creative-studio.get-project': { projectId: 'project_1' },
+  'creative-studio.get-brief-session-server': { projectId: 'project_1' },
   'creative-studio.list-proposals': { projectId: 'project_1' },
+  'creative-studio.list-pending-reference-requests': { projectId: 'project_1' },
+  'creative-studio.dismiss-reference-requests': {
+    projectId: 'project_1',
+    requestIds: ['reference_request_1'],
+  },
   'creative-studio.accept-proposal': { projectId: 'project_1', proposalId: 'proposal_1' },
   'creative-studio.reject-proposal': { projectId: 'project_1', proposalId: 'proposal_1' },
   'creative-studio.propose-storyboard': { projectId: 'project_1', expectedRevision: 1, replaceExisting: false },
@@ -234,6 +240,18 @@ const VALID_PAYLOADS = {
     selection: { choiceId: 'binding_1' },
   },
   'creative-studio.update-project': { projectId: 'project_1', expectedRevision: 1, name: 'Changed launch film' },
+  'creative-studio.set-brief-rules': {
+    projectId: 'project_1',
+    expectedRevision: 1,
+    rules: [
+      {
+        id: 'rule_1',
+        text: 'Keep the kits generic.',
+        predicate: { kind: 'forbidden_terms', terms: ['acme'] },
+      },
+    ],
+  },
+  'creative-studio.undo-brief-rules': { projectId: 'project_1' },
   'creative-studio.bind-brief-conversation': {
     projectId: 'project_1',
     expectedRevision: 1,
@@ -296,7 +314,12 @@ const VALID_PAYLOADS = {
   },
   'creative-studio.choose-and-import-reference': {
     projectId: 'project_1',
-    sceneId: 'scene_1',
+    briefReferenceRole: 'cast',
+    expectedRevision: 1,
+  },
+  'creative-studio.detach-brief-reference': {
+    projectId: 'project_1',
+    assetId: 'asset_1',
     expectedRevision: 1,
   },
   'creative-studio.choose-and-export-assets': { projectId: 'project_1', includeReferences: true },
@@ -973,6 +996,16 @@ const INVALID_PAYLOADS = [
   ['creative-studio.choose-and-import-reference', 'missing expected revision', { projectId: 'project_1' }],
   [
     'creative-studio.choose-and-import-reference',
+    'invalid Brief reference role',
+    { projectId: 'project_1', briefReferenceRole: 'subject', expectedRevision: 1 },
+  ],
+  [
+    'creative-studio.choose-and-import-reference',
+    'Brief role combined with a scene',
+    { projectId: 'project_1', sceneId: 'scene_1', briefReferenceRole: 'look', expectedRevision: 1 },
+  ],
+  [
+    'creative-studio.choose-and-import-reference',
     'attempted source path',
     { projectId: 'project_1', expectedRevision: 1, sourcePath: '/tmp/reference.png' },
   ],
@@ -980,6 +1013,21 @@ const INVALID_PAYLOADS = [
     'creative-studio.choose-and-import-reference',
     'scene traversal',
     { projectId: 'project_1', sceneId: '../scene_1', expectedRevision: 1 },
+  ],
+  [
+    'creative-studio.detach-brief-reference',
+    'missing expected revision',
+    { projectId: 'project_1', assetId: 'asset_1' },
+  ],
+  [
+    'creative-studio.detach-brief-reference',
+    'asset traversal',
+    { projectId: 'project_1', assetId: '../asset_1', expectedRevision: 1 },
+  ],
+  [
+    'creative-studio.detach-brief-reference',
+    'project traversal',
+    { projectId: '../project_1', assetId: 'asset_1', expectedRevision: 1 },
   ],
   [
     'creative-studio.choose-and-export-assets',
@@ -1058,6 +1106,25 @@ const INVALID_PAYLOADS = [
     'creative-studio.update-project',
     'missing expected revision',
     { projectId: 'project_1', name: 'Changed launch film' },
+  ],
+  ['creative-studio.set-brief-rules', 'missing expected revision', { projectId: 'project_1', rules: [] }],
+  [
+    'creative-studio.set-brief-rules',
+    'unknown predicate kind',
+    {
+      projectId: 'project_1',
+      expectedRevision: 1,
+      rules: [{ id: 'rule_1', text: 'x', predicate: { kind: 'regex', terms: ['x'] } }],
+    },
+  ],
+  [
+    'creative-studio.set-brief-rules',
+    'too many rules',
+    {
+      projectId: 'project_1',
+      expectedRevision: 1,
+      rules: Array.from({ length: 25 }, (_, index) => ({ id: `rule_${index}`, text: 'x', predicate: null })),
+    },
   ],
   [
     'creative-studio.update-model-selection',
@@ -1372,6 +1439,33 @@ const INVALID_PAYLOADS = [
       ],
     },
   ],
+  [
+    'creative-studio.submit-scenes',
+    'reference prompt without a reference output role',
+    {
+      ...VALID_PAYLOADS['creative-studio.submit-scenes'],
+      referencePrompts: [{ sceneId: 'scene_1', prompt: 'A close-up of the product label' }],
+    },
+  ],
+  [
+    'creative-studio.submit-scenes',
+    'reference output role with no prompt to paint',
+    { ...VALID_PAYLOADS['creative-studio.submit-scenes'], outputRole: 'reference' },
+  ],
+  [
+    'creative-studio.submit-scenes',
+    'reference prompt naming a scene outside the submission',
+    {
+      ...VALID_PAYLOADS['creative-studio.submit-scenes'],
+      outputRole: 'reference',
+      referencePrompts: [{ sceneId: 'scene_2', prompt: 'A close-up of the product label' }],
+    },
+  ],
+  [
+    'creative-studio.submit-scenes',
+    'unknown output role',
+    { ...VALID_PAYLOADS['creative-studio.submit-scenes'], outputRole: 'poster' },
+  ],
   ['creative-studio.cancel-job', 'missing expected revision', { projectId: 'project_1', jobId: 'job_1' }],
   [
     'creative-studio.retry-job',
@@ -1543,6 +1637,59 @@ describe('native bridge payload schemas', () => {
         conversationId: '../conversation',
       }).success
     ).toBe(false);
+  });
+
+  it('accepts only paired exact authority for checked reference-request consumption', () => {
+    const checked = {
+      projectId: 'project_1',
+      requestIds: ['reference_request_1'],
+      expectedRevision: 2,
+      expectedRequests: [{ id: 'reference_request_1', sceneId: 'scene_1' }],
+    };
+
+    expect(parseNativeBridgePayload('creative-studio.dismiss-reference-requests', checked)).toEqual(checked);
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.dismiss-reference-requests', {
+        projectId: checked.projectId,
+        requestIds: checked.requestIds,
+        expectedRevision: checked.expectedRevision,
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.dismiss-reference-requests', {
+        ...checked,
+        expectedRequests: [{ id: 'reference_request_other', sceneId: 'scene_1' }],
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
+  it('accepts a single-mode reference output submission with a reference prompt', () => {
+    const payload = {
+      ...VALID_PAYLOADS['creative-studio.submit-scenes'],
+      outputRole: 'reference',
+      referencePrompts: [{ sceneId: 'scene_1', prompt: 'A close-up of the product label' }],
+    };
+
+    expect(parseNativeBridgePayload('creative-studio.submit-scenes', payload)).toEqual(payload);
+  });
+
+  it('accepts a batch reference submission across multiple scenes', () => {
+    const payload = {
+      ...VALID_PAYLOADS['creative-studio.submit-scenes'],
+      mode: 'batch',
+      sceneIds: ['scene_1', 'scene_2'],
+      outputRole: 'reference',
+      routes: [
+        ...VALID_PAYLOADS['creative-studio.submit-scenes'].routes,
+        { sceneId: 'scene_2', choiceId: 'binding_2', kind: 'video' },
+      ],
+      referencePrompts: [
+        { sceneId: 'scene_1', prompt: 'A close-up of the product label' },
+        { sceneId: 'scene_2', prompt: 'A wide shot of the empty workshop' },
+      ],
+    };
+
+    expect(parseNativeBridgePayload('creative-studio.submit-scenes', payload)).toEqual(payload);
   });
 
   it('accepts an empty Studio scene title for display-only seeded placeholders', () => {
@@ -1764,6 +1911,71 @@ describe('native bridge payload schemas', () => {
 
   it.each(NATIVE_BRIDGE_PROVIDER_KEYS)('accepts the current payload shape for %s', (providerKey) => {
     expect(() => parseNativeBridgePayload(providerKey, VALID_PAYLOADS[providerKey])).not.toThrow();
+  });
+
+  it('reads reorder, generation, cut, and dirty bounds from their shared independently named authorities', async () => {
+    vi.resetModules();
+    vi.doMock('@/common/types/project/creativeStudioTypes', async (importOriginal) => ({
+      ...(await importOriginal<Record<string, unknown>>()),
+      STUDIO_MAX_SCENES: 2,
+      STUDIO_MAX_GENERATION_SCENES_PER_REQUEST: 2,
+      STUDIO_MAX_CUT_PLACEMENT_SCENES: 2,
+      STUDIO_MAX_DIRTY_SCENES_REPORTED: 2,
+    }));
+    try {
+      const schemas = await import('@/common/adapter/native/payloadSchemas');
+      const sceneIds = ['scene_1', 'scene_2', 'scene_3'];
+      expect(() =>
+        schemas.parseNativeBridgePayload('creative-studio.reorder-scenes', {
+          projectId: 'project_1',
+          expectedRevision: 1,
+          sceneOrder: sceneIds,
+        })
+      ).toThrow(schemas.INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+      expect(() =>
+        schemas.parseNativeBridgePayload('creative-studio.submit-scenes', {
+          projectId: 'project_1',
+          expectedRevision: 1,
+          mode: 'batch',
+          sceneIds,
+          catalogVersion: '0123456789abcdef',
+          routes: sceneIds.map((sceneId) => ({ sceneId, choiceId: `route_${sceneId}`, kind: 'video' })),
+        })
+      ).toThrow(schemas.INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+      expect(() =>
+        schemas.parseNativeBridgePayload('creative-studio.place-cut-scenes', {
+          projectId: 'project_1',
+          expectedRevision: 1,
+          cutId: 'cut_1',
+          sceneIds,
+          beforeClipId: null,
+        })
+      ).toThrow(schemas.INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+      expect(() =>
+        schemas.parseRendererBridgeQueryResponse('creative-studio.has-unsaved-work', { dirtySceneCount: 3 })
+      ).toThrow(schemas.INVALID_RENDERER_BRIDGE_QUERY_PAYLOAD_MESSAGE);
+    } finally {
+      vi.doUnmock('@/common/types/project/creativeStudioTypes');
+      vi.resetModules();
+    }
+  });
+
+  it.each(['cast', 'look'] as const)('accepts %s as a classified Brief-reference import role', (role) => {
+    expect(
+      parseNativeBridgePayload('creative-studio.choose-and-import-reference' as NativeBridgeProviderKey, {
+        projectId: 'project_1',
+        briefReferenceRole: role,
+        expectedRevision: 1,
+      })
+    ).toEqual({ projectId: 'project_1', briefReferenceRole: role, expectedRevision: 1 });
+  });
+
+  it('preserves a valid scene reference import through strict payload parsing', () => {
+    const payload = { projectId: 'project_1', sceneId: 'scene_1', expectedRevision: 7 };
+
+    expect(
+      parseNativeBridgePayload('creative-studio.choose-and-import-reference' as NativeBridgeProviderKey, payload)
+    ).toEqual(payload);
   });
 
   it.each(VOID_PROVIDER_KEYS)('rejects a supplied payload for void provider %s', (providerKey) => {

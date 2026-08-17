@@ -15,7 +15,7 @@ import {
   type StudioE2EFakeBundle,
   type StudioE2EFakeRemoteState,
 } from '@process/services/creative-studio/adapters/e2eFakeAdapter';
-import { createCreativeStudioService } from '@process/services/creative-studio/creativeStudioService';
+import { createCreativeStudioService } from '@process/services/creative-studio/service';
 import {
   createStudioJobManager,
   type StudioJobManager,

@@ -442,7 +442,7 @@
   "toolsDescription": "MCP sunucularını ve görüntü oluşturma gibi yerleşik araçları yapılandırın. Görüntü oluşturma yalnızca Model sayfasında görüntü destekli bir model yapılandırıldıktan sonra etkinleştirilebilir.",
   "modelDescription": "Metin, görüntü ve video modelleri için sağlayıcıları ve API anahtarlarını yapılandırın.",
   "mediaModels": {
-    "title": "Creative Studio medya modelleri",
+    "title": "Creative Studio motorları",
     "description": "Kimlik bilgilerini göstermeden mevcut sağlayıcıları görüntü ve video entegrasyonlarına bağlayın.",
     "add": "Medya modeli ekle",
     "empty": "Henüz medya modeli yapılandırılmadı.",
@@ -708,6 +708,7 @@
   "mcpJsonBareServerError": "MCP sunucu yapılandırmasını üst düzey bir \"mcpServers\" nesnesine sarın veya dizi öğesine \"name\" ekleyin.",
   "mcpJsonUrlRequiredError": "HTTP ve SSE MCP sunucuları boş olmayan bir \"url\" gerektirir.",
   "mcpJsonStdioCommandRequiredError": "Stdio MCP sunucuları boş olmayan bir \"command\" gerektirir.",
+  "mcpJsonReservedNameError": "Bu ad WePrompt tarafından ayrılmıştır ve bir MCP sunucusu için kullanılamaz. Sunucuyu yeniden adlandırıp tekrar deneyin.",
   "mcpTestConnection": "MCP Erişilebilirliğini Kontrol Et",
   "mcpTestConnectionSuccess": "Bağlantı testi başarılı",
   "mcpConnected": "Kullanılabilir",

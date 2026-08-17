@@ -19,6 +19,38 @@ export type StudioRouteSupportContext = {
   resolution?: StudioResolution;
   durationSeconds?: number;
   hasReference?: boolean;
+  /** Active Brief inputs for an image reference plate. Undefined for ordinary takes and batches. */
+  conditioningReferenceCount?: number;
+};
+
+export type StudioRouteSupportReason = 'health' | 'frame' | 'resolution' | 'duration' | 'first_frame' | 'conditioning';
+
+export const explainRouteSupport = (
+  route: StudioRouteCatalogEntry,
+  context: Omit<StudioRouteSupportContext, 'kind' | 'sceneId' | 'routeSceneId'>
+): StudioRouteSupportReason | null => {
+  if (route.health === 'unavailable') return 'health';
+  if (context.aspectRatio !== undefined && !route.constraints.aspectRatios.includes(context.aspectRatio)) {
+    return 'frame';
+  }
+  if (context.resolution !== undefined && !route.constraints.resolutions.includes(context.resolution)) {
+    return 'resolution';
+  }
+  if (
+    context.durationSeconds !== undefined &&
+    (context.durationSeconds < route.constraints.minDurationSeconds ||
+      context.durationSeconds > route.constraints.maxDurationSeconds)
+  ) {
+    return 'duration';
+  }
+  if (context.hasReference === true && !route.constraints.supportsFirstFrame) return 'first_frame';
+  if (
+    context.conditioningReferenceCount !== undefined &&
+    context.conditioningReferenceCount > route.constraints.maxConditioningImages
+  ) {
+    return 'conditioning';
+  }
+  return null;
 };
 
 /**
@@ -31,14 +63,23 @@ export type StudioRouteSupportContext = {
  */
 export const routeSupportsScene = (
   route: StudioRouteCatalogEntry,
-  { kind, sceneId, routeSceneId, aspectRatio, resolution, durationSeconds, hasReference }: StudioRouteSupportContext
+  {
+    kind,
+    sceneId,
+    routeSceneId,
+    aspectRatio,
+    resolution,
+    durationSeconds,
+    hasReference,
+    conditioningReferenceCount,
+  }: StudioRouteSupportContext
 ): boolean =>
-  route.health !== 'unavailable' &&
   (kind === undefined || route.kind === kind) &&
   (sceneId === undefined || routeSceneId === sceneId) &&
-  (aspectRatio === undefined || route.constraints.aspectRatios.includes(aspectRatio)) &&
-  (resolution === undefined || route.constraints.resolutions.includes(resolution)) &&
-  (durationSeconds === undefined ||
-    (durationSeconds >= route.constraints.minDurationSeconds &&
-      durationSeconds <= route.constraints.maxDurationSeconds)) &&
-  (hasReference !== true || route.constraints.supportsFirstFrame);
+  explainRouteSupport(route, {
+    aspectRatio,
+    resolution,
+    durationSeconds,
+    hasReference,
+    conditioningReferenceCount,
+  }) === null;

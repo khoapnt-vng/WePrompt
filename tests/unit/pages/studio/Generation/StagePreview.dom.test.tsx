@@ -91,6 +91,7 @@ const catalog = (): StudioRouteCatalog => {
     providerId: 'provider-image',
     providerName: 'Image provider',
     model: 'image-model',
+    integrationLabelKey: 'imageApi',
     health: 'available',
     kind: 'image',
     constraints: {
@@ -99,6 +100,7 @@ const catalog = (): StudioRouteCatalog => {
       minDurationSeconds: 1,
       maxDurationSeconds: 60,
       supportsFirstFrame: true,
+      maxConditioningImages: 0,
       silentOutput: true,
     },
   };
@@ -108,9 +110,10 @@ const catalog = (): StudioRouteCatalog => {
       status: 'ready',
       selected: { choiceId: 'choice-image', providerId: 'provider-image', model: 'image-model' },
       selectedRoute,
+      selectionIssue: null,
       options: [selectedRoute],
     },
-    video: { status: 'setup_required', selected: null, selectedRoute: null, options: [] },
+    video: { status: 'setup_required', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
     catalogVersion: 'catalog-1',
   };
 };

@@ -239,7 +239,7 @@ describe('PresentationRunStore', () => {
       store.allocateRun(input),
       store.allocateRun({ ...input, requestFingerprint: 'a'.repeat(64) }),
     ]);
-    expect([first, replay].map((result) => (result.ok ? result.status : result.code)).sort()).toEqual([
+    expect([first, replay].map((result) => (result.ok ? result.status : result.code)).toSorted()).toEqual([
       'created',
       'existing',
     ]);
@@ -1557,10 +1557,12 @@ describe('PresentationRunStore', () => {
     });
 
     await store.initialize();
-    expect((await store.listPublicRecoverable(CONVERSATION_ID)).map(({ runId }) => runId).sort()).toEqual(
-      [RUN_ID, RUN_B, RUN_C].sort()
+    expect((await store.listPublicRecoverable(CONVERSATION_ID)).map(({ runId }) => runId).toSorted()).toEqual(
+      [RUN_ID, RUN_B, RUN_C].toSorted()
     );
-    expect((await store.listDispatchReconciliation()).map(({ runId }) => runId).sort()).toEqual([RUN_D, RUN_E].sort());
+    expect((await store.listDispatchReconciliation()).map(({ runId }) => runId).toSorted()).toEqual(
+      [RUN_D, RUN_E].toSorted()
+    );
     expect((await store.listTerminalReconciliation()).map(({ runId }) => runId)).toEqual([RUN_F]);
     expect((await store.listCommittedForInitialDispatch()).map(({ runId }) => runId)).toEqual([]);
   });
@@ -1742,7 +1744,7 @@ describe('PresentationRunStore', () => {
 
     const results = await Promise.allSettled([store.bindRunTurn(RUN_ID, binding), store.bindRunTurn(RUN_B, binding)]);
 
-    expect(results.map(({ status }) => status).sort()).toEqual(['fulfilled', 'rejected']);
+    expect(results.map(({ status }) => status).toSorted()).toEqual(['fulfilled', 'rejected']);
     const fulfilled = results.find((result) => result.status === 'fulfilled');
     if (fulfilled?.status !== 'fulfilled') throw new Error('binding unexpectedly failed');
     expect(fulfilled.value.manifest).toEqual(
@@ -2271,8 +2273,8 @@ describe('PresentationRunStore', () => {
     clock = boundaryClock;
     const swept = await sweepingStore.sweepExpiredRuns();
 
-    expect(swept.failedRetained.sort()).toEqual([RUN_B, RUN_D].sort());
-    expect(swept.tombstoned.sort()).toEqual([RUN_F, RUN_G, RUN_H, RUN_J].sort());
+    expect(swept.failedRetained.toSorted()).toEqual([RUN_B, RUN_D].toSorted());
+    expect(swept.tombstoned.toSorted()).toEqual([RUN_F, RUN_G, RUN_H, RUN_J].toSorted());
     expect(swept.operatorAlerts).toEqual([RUN_I]);
     await expect(sweepingStore.getRun(RUN_ID)).resolves.toMatchObject({ dispatchStatus: 'allocating' });
     await expect(sweepingStore.getRun(RUN_C)).resolves.toMatchObject({ dispatchStatus: 'committed' });
@@ -2415,7 +2417,7 @@ describe('PresentationRunStore', () => {
       dispatchStatus: 'discarded',
       sourceGrants: [GRANT_A],
     });
-    expect((await files.listEntityIds('grant')).sort()).toEqual([GRANT_A, GRANT_B].sort());
+    expect((await files.listEntityIds('grant')).toSorted()).toEqual([GRANT_A, GRANT_B].toSorted());
 
     vi.mocked(files.removeGrant).mockImplementation(originalRemoveGrant);
     await expect(grantStore.discardRun(RUN_ID, 0)).resolves.toMatchObject({ dispatchStatus: 'discarded' });

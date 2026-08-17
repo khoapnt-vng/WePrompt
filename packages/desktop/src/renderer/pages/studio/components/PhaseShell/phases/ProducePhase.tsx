@@ -4,15 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Button } from '@arco-design/web-react';
 import React, { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { buildBatchGenerationReviewRequest, GenerationJobList } from '../../Generation';
-import { StudioModelBar } from '../../Models';
+import { EngineStrip } from '../../EngineStrip';
+import { GenerationJobList } from '../../Generation';
 import type { ProducePhaseController } from '../types';
 import type { StudioLayoutMode } from '../useStudioLayoutMode';
-import { ConnectEngineCard, getReadySelectedRoutes, ShotGrid } from './produce';
+import { ConnectEngineCard, ShotGrid } from './produce';
 import styles from './produce/produce.module.css';
 
 export type ProducePhaseProps = {
@@ -28,11 +27,11 @@ export const ProducePhase: React.FC<ProducePhaseProps> = ({ controller, layoutMo
     editor,
     models,
     jobs,
-    advisory,
     mutationPending,
+    generationReviewOpen,
     requestTransition,
     openSingleGenerationReview,
-    openBatchGenerationReview,
+    focusEngineRole,
     openModelSettings,
     openDuplicateChargeConfirmation,
   } = controller;
@@ -48,7 +47,6 @@ export const ProducePhase: React.FC<ProducePhaseProps> = ({ controller, layoutMo
     () => Object.fromEntries(orderedScenes.map((candidate) => [candidate.id, candidate.title])),
     [orderedScenes]
   );
-  const readyRoutes = getReadySelectedRoutes(models.catalog);
   const generationBlocked =
     editor.hasUnsavedProjectDraft ||
     editor.hasUnsavedSceneDrafts ||
@@ -59,52 +57,68 @@ export const ProducePhase: React.FC<ProducePhaseProps> = ({ controller, layoutMo
     jobs.issue?.jobId !== undefined && jobs.jobs.some((candidate) => candidate.id === jobs.issue?.jobId)
       ? { jobId: jobs.issue.jobId, code: jobs.issue.code, messageKey: jobs.issue.messageKey }
       : null;
-  const batchReviewRequest = useMemo(
-    () => buildBatchGenerationReviewRequest({ project, catalog: models.catalog }),
-    [models.catalog, project]
-  );
-  const batchDisabled = generationBlocked || models.loading || readiness.readySceneIds.length < 1;
-
-  if (readyRoutes.length === 0) {
-    return (
-      <section data-layout={layoutMode} className={styles.phase} aria-labelledby='studio-produce-phase-heading'>
-        <ConnectEngineCard disabled={mutationPending} onOpenSettings={openModelSettings} />
-      </section>
-    );
-  }
+  const showConnectDoor =
+    models.catalog !== null && models.catalog.image.options.length === 0 && models.catalog.video.options.length === 0;
 
   return (
     <section data-layout={layoutMode} className={styles.phase} aria-labelledby='studio-produce-phase-heading'>
-      <StudioModelBar
-        catalog={models.catalog}
-        disabled={mutationPending || editor.drafting || jobs.mutationPending}
-        onOpenSettings={openModelSettings}
+      {/* The Board view's focus target. StudioPhaseShell focuses [data-studio-phase-heading] after
+          every view change, so it must name the view — the engine strip names the engine. */}
+      <h2 id='studio-produce-phase-heading' data-studio-phase-heading tabIndex={-1} className='sr-only'>
+        {t('conversation.creativeStudio.phase.produce.title')}
+      </h2>
+      <EngineStrip
+        project={project}
+        models={models}
+        variant='full'
+        locked={generationReviewOpen}
+        openModelSettings={openModelSettings}
       />
 
       <div className={styles.content}>
-        <ShotGrid
-          project={project}
-          scenes={orderedScenes}
-          sceneStatuses={readiness.sceneStatuses}
-          selectedSceneId={editor.selectedSceneId}
-          catalog={models.catalog}
-          catalogLoading={models.loading}
-          generationDisabled={generationBlocked}
-          mutationPending={mutationPending}
-          jobs={jobs.jobs}
-          jobsMutationPending={jobs.mutationPending}
-          onSelectScene={editor.selectScene}
-          onWriteVisual={(sceneId) => {
-            editor.selectScene(sceneId);
-            requestTransition({
-              phase: 'write',
-              state: { writeFocus: { sceneId, field: 'visualPrompt' } },
-            });
-          }}
-          onOpenSingleReview={openSingleGenerationReview}
-          onCancelJob={jobs.cancelJob}
-        />
+        <div className={styles.gridRegion} data-studio-board-grid-region>
+          {showConnectDoor ? (
+            <ConnectEngineCard disabled={mutationPending} onOpenSettings={openModelSettings} />
+          ) : (
+            <ShotGrid
+              project={project}
+              scenes={orderedScenes}
+              sceneStatuses={readiness.sceneStatuses}
+              selectedSceneId={editor.selectedSceneId}
+              catalog={models.catalog}
+              catalogLoading={models.loading}
+              generationDisabled={generationBlocked}
+              mutationPending={mutationPending}
+              jobs={jobs.jobs}
+              jobsMutationPending={jobs.mutationPending}
+              onSelectScene={editor.selectScene}
+              onWriteVisual={(sceneId) => {
+                editor.selectScene(sceneId);
+                requestTransition({
+                  view: 'table',
+                  state: { writeFocus: { sceneId, field: 'visualPrompt' } },
+                });
+              }}
+              onFocusEngineRole={focusEngineRole}
+              onRemoveReference={(sceneId) => {
+                editor.updateSceneDraftById(sceneId, { referenceAssetId: null });
+                void editor.flushSceneDraftById(sceneId);
+              }}
+              onShorten={(sceneId) => {
+                requestTransition({
+                  view: 'table',
+                  state: { writeFocus: { sceneId, field: 'duration' } },
+                });
+              }}
+              onOpenSingleReview={openSingleGenerationReview}
+              onCancelJob={jobs.cancelJob}
+            />
+          )}
+        </div>
 
+        {/* The activity feed only. The batch control that used to close this column is the
+            document's one spend, so it moved to the frame's top bar with its advisory — a paid
+            action reachable from one view was reachable only by knowing which view held it. */}
         <aside className={styles.activityColumn}>
           <div className={styles.activityList}>
             <GenerationJobList
@@ -118,25 +132,6 @@ export const ProducePhase: React.FC<ProducePhaseProps> = ({ controller, layoutMo
               onRetryDownload={jobs.retryDownload}
               onReviewUnknownSubmission={openDuplicateChargeConfirmation}
             />
-          </div>
-          <div className={styles.batchFooter}>
-            <Button
-              type='primary'
-              long
-              disabled={batchDisabled}
-              onClick={() => {
-                if (!batchDisabled) openBatchGenerationReview(batchReviewRequest);
-              }}
-            >
-              {t('conversation.creativeStudio.review.generateReadyScenes', {
-                count: readiness.readySceneIds.length,
-              })}
-            </Button>
-            {advisory?.anchor === 'batch' && (
-              <p aria-live='polite' className={styles.batchAdvisory}>
-                {t(advisory.messageKey)}
-              </p>
-            )}
           </div>
         </aside>
       </div>

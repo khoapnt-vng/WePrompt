@@ -36,7 +36,13 @@ export type StudioGenerationRequest = {
 
 export type ResolvedStudioGenerationRequest = StudioGenerationRequest & {
   firstFrame?: ResolvedProviderInput;
+  conditioningImages?: readonly ResolvedProviderInput[];
+  conditioningImageLimit?: number;
 };
+
+/** Runtime shape guard: conditioning fields are reserved for image jobs, even if explicitly undefined. */
+export const hasImageConditioningFields = (request: ResolvedStudioGenerationRequest): boolean =>
+  'conditioningImages' in request || 'conditioningImageLimit' in request;
 
 export type { NormalizedStudioGenerationParameters, StudioRouteIssue, StudioRouteValidation };
 
@@ -90,7 +96,7 @@ export type GenerationProviderAdapter = {
     provider: IProvider,
     signal: AbortSignal
   ): Promise<StudioConnectionValidation>;
-  validateRequest(request: StudioGenerationRequest, provider: TProviderWithModel): StudioRouteValidation;
+  validateRequest(request: ResolvedStudioGenerationRequest, provider: TProviderWithModel): StudioRouteValidation;
   submit(
     request: ResolvedStudioGenerationRequest,
     provider: TProviderWithModel,

@@ -8,9 +8,12 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { GenerationReviewRouteSnapshot } from '@renderer/pages/studio/components/Generation/GenerationControls';
+import type { GenerationReviewRouteSnapshot } from '@renderer/pages/studio/components/Generation/generationRequests';
 import {
+  collectSubmittableRoutes,
   GenerationReviewModal,
+  submitExactGenerationReview,
+  type GenerationReviewConfirmation,
   type GenerationReviewModalProps,
   type GenerationReviewScene,
 } from '@renderer/pages/studio/components/Generation/GenerationReviewModal';
@@ -47,24 +50,56 @@ const validReviewRoute = (
   snapshot: GenerationReviewRouteSnapshot,
   providerName: string,
   silentOutput: boolean
-): GenerationReviewScene['route'] => ({ status: 'valid', snapshot, providerName, silentOutput });
+): GenerationReviewScene['route'] => ({
+  status: 'valid',
+  snapshot,
+  providerName,
+  integrationLabelKey: snapshot.kind === 'image' ? 'imageApi' : 'selfHostedVideoGateway',
+  silentOutput,
+});
 
 const mixedScenes = (): GenerationReviewScene[] => [
   {
     id: 'scene-image',
     title: 'Opening image',
     mediaKind: 'image',
+    outputRole: 'take',
     durationSeconds: 5,
+    promptText: 'A paper airplane crossing a sunrise',
     route: validReviewRoute(imageRoute, 'Provider One', true),
   },
   {
     id: 'scene-video',
     title: 'Product motion',
     mediaKind: 'video',
+    outputRole: 'take',
     durationSeconds: 7,
+    promptText: 'A product turning slowly',
     route: validReviewRoute(videoRoute, 'Provider Two', false),
   },
 ];
+
+const breach = { ruleId: 'rule_1', ruleText: 'No competitor logos.', scope: 'project' as const, matchedTerm: 'acme' };
+
+const breachingScene = (): GenerationReviewScene => ({
+  ...mixedScenes()[0]!,
+  id: 'scene-image',
+  title: 'Opening image',
+  promptText: 'An ACME billboard at dusk',
+});
+
+const conditionedReferenceScene = (): GenerationReviewScene => ({
+  ...mixedScenes()[0]!,
+  outputRole: 'reference',
+  conditioning: {
+    maximum: 3,
+    integrationLabelKey: 'imageApi',
+    inputs: [
+      { assetId: 'asset-cast', label: 'Scarf and telescope', role: 'cast' },
+      { assetId: 'asset-look', label: 'Blue hour', role: 'look' },
+    ],
+  },
+});
 
 const createProps = (overrides: Partial<GenerationReviewModalProps> = {}): GenerationReviewModalProps => ({
   visible: true,
@@ -83,6 +118,220 @@ const createProps = (overrides: Partial<GenerationReviewModalProps> = {}): Gener
 });
 
 describe('GenerationReviewModal', () => {
+  it.each([
+    {
+      condition: 'reordered IDs and routes',
+      confirmation: {
+        sceneIds: ['scene-video', 'scene-image'],
+        routes: [
+          { sceneId: 'scene-video', choiceId: 'choice_video', kind: 'video' as const },
+          { sceneId: 'scene-image', choiceId: 'choice_image', kind: 'image' as const },
+        ],
+      },
+    },
+    {
+      condition: 'an omitted ID and route',
+      confirmation: {
+        sceneIds: ['scene-image'],
+        routes: [{ sceneId: 'scene-image', choiceId: 'choice_image', kind: 'image' as const }],
+      },
+    },
+    {
+      condition: 'a substituted ID',
+      confirmation: {
+        sceneIds: ['scene-image', 'scene-other'],
+        routes: [
+          { sceneId: 'scene-image', choiceId: 'choice_image', kind: 'image' as const },
+          { sceneId: 'scene-other', choiceId: 'choice_video', kind: 'video' as const },
+        ],
+      },
+    },
+    {
+      condition: 'a substituted route',
+      confirmation: {
+        sceneIds: ['scene-image', 'scene-video'],
+        routes: [
+          { sceneId: 'scene-image', choiceId: 'choice_image', kind: 'image' as const },
+          { sceneId: 'scene-video', choiceId: 'choice_other', kind: 'video' as const },
+        ],
+      },
+    },
+  ])('rejects $condition before the paid submit callback', async ({ confirmation }) => {
+    const submitScenes = vi.fn(async () => true);
+
+    await expect(submitExactGenerationReview(mixedScenes(), confirmation, submitScenes)).resolves.toBe('rejected');
+    expect(submitScenes).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['reordered inputs', (value: GenerationReviewConfirmation) => value.conditioning![0]!.inputs.reverse()],
+    ['an omitted input', (value: GenerationReviewConfirmation) => value.conditioning![0]!.inputs.pop()],
+    [
+      'a substituted input ID',
+      (value: GenerationReviewConfirmation) => {
+        value.conditioning![0]!.inputs[0]!.assetId = 'asset-other';
+      },
+    ],
+    [
+      'a changed label',
+      (value: GenerationReviewConfirmation) => {
+        value.conditioning![0]!.inputs[0]!.label = 'Different cast';
+      },
+    ],
+    [
+      'a changed role',
+      (value: GenerationReviewConfirmation) => {
+        value.conditioning![0]!.inputs[0]!.role = 'look';
+      },
+    ],
+    [
+      'a changed maximum',
+      (value: GenerationReviewConfirmation) => {
+        value.conditioning![0]!.maximum = 4;
+      },
+    ],
+    [
+      'a changed integration',
+      (value: GenerationReviewConfirmation) => {
+        value.conditioning![0]!.integrationLabelKey = 'openRouter';
+      },
+    ],
+  ])('rejects conditioning authority with %s before the paid submit callback', async (_condition, mutate) => {
+    const reviewedScenes = [conditionedReferenceScene()];
+    const confirmation = structuredClone(collectSubmittableRoutes(reviewedScenes)!);
+    mutate(confirmation);
+    const submitScenes = vi.fn(async () => true);
+
+    await expect(submitExactGenerationReview(reviewedScenes, confirmation, submitScenes)).resolves.toBe('rejected');
+    expect(submitScenes).not.toHaveBeenCalled();
+  });
+
+  it('names the breached rule on the shot and blocks Confirm before anything is charged', () => {
+    render(
+      <GenerationReviewModal
+        {...createProps({
+          mode: 'single',
+          scenes: [breachingScene()],
+          ruleBreachesBySceneId: { 'scene-image': [breach] },
+        })}
+      />
+    );
+
+    expect(
+      screen.getByText('conversation.creativeStudio.rules.breachScene:rule=No competitor logos.,term=acme')
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.review.confirm' })).toBeDisabled();
+    expect(screen.getByText('conversation.creativeStudio.rules.breachBlockedConfirm')).toBeInTheDocument();
+  });
+
+  it('names ordered conditioning labels, roles, integration and maximum without exposing asset IDs', () => {
+    render(<GenerationReviewModal {...createProps({ mode: 'single', scenes: [conditionedReferenceScene()] })} />);
+
+    const dialog = screen.getByRole('dialog');
+    const text = dialog.textContent ?? '';
+    expect(text.indexOf('Scarf and telescope')).toBeLessThan(text.indexOf('Blue hour'));
+    expect(within(dialog).getByText('conversation.creativeStudio.conditioning.role.cast')).toBeVisible();
+    expect(within(dialog).getByText('conversation.creativeStudio.conditioning.role.look')).toBeVisible();
+    expect(within(dialog).getByText('conversation.creativeStudio.conditioning.maximum:count=3')).toBeVisible();
+    expect(within(dialog).getByText('settings.mediaModels.integration.imageApi')).toBeVisible();
+    expect(text).not.toContain('asset-cast');
+    expect(text).not.toContain('asset-look');
+  });
+
+  it('does not claim cast or look conditioning for an ordinary clip review', () => {
+    render(<GenerationReviewModal {...createProps({ mode: 'single', scenes: [mixedScenes()[1]!] })} />);
+
+    expect(screen.queryByText('conversation.creativeStudio.conditioning.inputsTitle')).not.toBeInTheDocument();
+    expect(screen.queryByText('conversation.creativeStudio.conditioning.role.cast')).not.toBeInTheDocument();
+  });
+
+  it('warns about an out-of-date selected plate without disabling deliberate clip confirmation', () => {
+    render(
+      <GenerationReviewModal
+        {...createProps({
+          mode: 'single',
+          scenes: [{ ...mixedScenes()[1]!, referencePlateFreshness: 'out_of_date' }],
+        })}
+      />
+    );
+
+    expect(screen.getByText('conversation.creativeStudio.conditioning.plateOutOfDate')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.review.confirm' })).toBeEnabled();
+  });
+
+  it('offers to hand the breach to the Director rather than leaving a dead end', () => {
+    const onAskDirector = vi.fn();
+    render(
+      <GenerationReviewModal
+        {...createProps({
+          mode: 'single',
+          scenes: [breachingScene()],
+          ruleBreachesBySceneId: { 'scene-image': [breach] },
+          onAskDirector,
+        })}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.rules.breachAskDirector' }));
+
+    expect(onAskDirector).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides the ask-the-Director affordance when the page cannot supply it', () => {
+    render(
+      <GenerationReviewModal
+        {...createProps({
+          mode: 'single',
+          scenes: [breachingScene()],
+          ruleBreachesBySceneId: { 'scene-image': [breach] },
+        })}
+      />
+    );
+
+    // Task 10 ships before Task 11 wires the sender, so `onAskDirector` is absent in between. A button
+    // that does nothing is worse than no button.
+    expect(
+      screen.queryByRole('button', { name: 'conversation.creativeStudio.rules.breachAskDirector' })
+    ).not.toBeInTheDocument();
+  });
+
+  it('blocks Confirm for the whole batch when one shot breaches, and says so', () => {
+    render(<GenerationReviewModal {...createProps({ ruleBreachesBySceneId: { 'scene-image': [breach] } })} />);
+
+    // main aborts the entire submitScenes call on the first breach (jobManager.ts:1297), so a
+    // per-shot reading of this copy would be wrong.
+    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.review.confirm' })).toBeDisabled();
+    expect(screen.getByText('conversation.creativeStudio.rules.breachBlockedConfirm')).toBeInTheDocument();
+  });
+
+  it('names the breached rule on a batch shot even when that media kind has no route', () => {
+    const routelessVideo = {
+      ...mixedScenes()[1]!,
+      route: { status: 'missing' as const, snapshot: null, providerName: null },
+    };
+    render(
+      <GenerationReviewModal
+        {...createProps({
+          scenes: [routelessVideo],
+          ruleBreachesBySceneId: { 'scene-video': [breach] },
+        })}
+      />
+    );
+
+    expect(screen.getByText('conversation.creativeStudio.review.missingRoute')).toBeInTheDocument();
+    expect(
+      screen.getByText('conversation.creativeStudio.rules.breachScene:rule=No competitor logos.,term=acme')
+    ).toBeInTheDocument();
+    expect(screen.getByText('conversation.creativeStudio.rules.breachBlockedConfirm')).toBeInTheDocument();
+  });
+
+  it('leaves Confirm alone when no rule is breached', () => {
+    render(<GenerationReviewModal {...createProps({ mode: 'single', scenes: [mixedScenes()[0]!] })} />);
+
+    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.review.confirm' })).toBeEnabled();
+    expect(screen.queryByText(/rules\.breachScene/)).not.toBeInTheDocument();
+  });
+
   it('discloses every exact mixed-media route and requested output setting', () => {
     render(<GenerationReviewModal {...createProps()} />);
 
@@ -146,6 +395,20 @@ describe('GenerationReviewModal', () => {
     expect(screen.queryByText(/credits|estimated cost/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /audio/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: /audio/i })).not.toBeInTheDocument();
+  });
+
+  it('names a reference generation while keeping the charge disclosure visible', () => {
+    render(
+      <GenerationReviewModal
+        {...createProps({
+          mode: 'single',
+          scenes: [{ ...mixedScenes()[0]!, outputRole: 'reference' }],
+        })}
+      />
+    );
+
+    expect(screen.getByText('conversation.creativeStudio.reference.reviewTag')).toBeInTheDocument();
+    expect(screen.getByText('conversation.creativeStudio.review.chargeNotice')).toBeInTheDocument();
   });
 
   it('keeps a mismatched batch advisory and submits after explicit confirmation', () => {
@@ -263,8 +526,63 @@ describe('GenerationReviewModal', () => {
     expect(screen.queryByText('provider_stale')).not.toBeInTheDocument();
     expect(screen.queryByText('weprompt-media-gateway-v1')).not.toBeInTheDocument();
     expect(screen.getByText('open-sora-stale')).toBeInTheDocument();
-    expect(screen.getByText('conversation.creativeStudio.review.disabledMissingRoutes')).toBeInTheDocument();
+    expect(screen.getByText('conversation.creativeStudio.review.disabledMissingRoutes:count=2')).toBeInTheDocument();
+    expect(screen.queryByText(/\{\{count\}\}/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'conversation.creativeStudio.review.confirm' })).toBeDisabled();
+  });
+
+  it('offers the route role to Close and set engines only while a route blocks review', () => {
+    const onSetEngines = vi.fn();
+    render(
+      <GenerationReviewModal
+        {...createProps({
+          scenes: [
+            {
+              ...mixedScenes()[0]!,
+              route: { status: 'missing', snapshot: null, providerName: null },
+            },
+          ],
+          onSetEngines,
+        })}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.review.setEngines' }));
+
+    expect(onSetEngines).toHaveBeenCalledExactlyOnceWith('image');
+  });
+
+  it('does not show the engine escape when every reviewed route is valid', () => {
+    render(<GenerationReviewModal {...createProps({ onSetEngines: vi.fn() })} />);
+
+    expect(
+      screen.queryByRole('button', { name: 'conversation.creativeStudio.review.setEngines' })
+    ).not.toBeInTheDocument();
+  });
+
+  it('groups first-frame exclusions with their frozen count in an already-open review', () => {
+    render(
+      <GenerationReviewModal
+        {...createProps({
+          excludedScenes: [
+            {
+              id: 'scene-excluded-1',
+              title: 'Reference opening',
+              reasonMessageKey: 'conversation.creativeStudio.review.excludedFirstFrame',
+            },
+            {
+              id: 'scene-excluded-2',
+              title: 'Reference closing',
+              reasonMessageKey: 'conversation.creativeStudio.review.excludedFirstFrame',
+            },
+          ],
+        })}
+      />
+    );
+
+    expect(screen.getByText('conversation.creativeStudio.review.excludedFirstFrame:count=2')).toBeInTheDocument();
+    expect(screen.getByText('Reference opening')).toBeInTheDocument();
+    expect(screen.getByText('Reference closing')).toBeInTheDocument();
   });
 
   it('keeps confirmation blocked after a submission error until the parent supplies a refreshed review', () => {

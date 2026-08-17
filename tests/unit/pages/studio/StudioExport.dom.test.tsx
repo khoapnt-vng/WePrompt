@@ -62,6 +62,13 @@ vi.mock('react-i18next', () => ({
     i18n: { language: 'en-US' },
   }),
 }));
+vi.mock('@renderer/pages/studio/components/PhaseShell/phases/brief/useBriefConversation', () => ({
+  useBriefConversation: () => ({
+    state: { kind: 'absent' },
+    errorMessageKey: null,
+    recreate: vi.fn(),
+  }),
+}));
 
 const ok = <T,>(data: T): StudioCommandResult<T> => ({ ok: true, data });
 
@@ -102,6 +109,8 @@ const project = (withSelectedAssets = true): StudioRendererProject => {
     id: 'project-1',
     name: 'Launch film',
     brief: 'A short launch video',
+    rules: [],
+    ruleListUndo: null,
     aspectRatio: '16:9',
     targetDurationSeconds: 10,
     resolution: '720p',
@@ -133,14 +142,14 @@ const routes = (): StudioRouteCatalog => ({
       },
     ],
   },
-  image: { status: 'setup_required', selected: null, selectedRoute: null, options: [] },
-  video: { status: 'setup_required', selected: null, selectedRoute: null, options: [] },
+  image: { status: 'setup_required', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+  video: { status: 'setup_required', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
   catalogVersion: 'catalog-1',
 });
 
-const renderProject = (phase: 'write' | 'review' = 'review') => {
-  const router = createMemoryRouter([{ path: '/studio/:id/:phase?', element: <StudioPage /> }], {
-    initialEntries: [`/studio/project-1/${phase}`],
+const renderProject = (view: 'table' | 'cut' = 'cut') => {
+  const router = createMemoryRouter([{ path: '/studio/:id/:view?', element: <StudioPage /> }], {
+    initialEntries: [`/studio/project-1/${view}`],
   });
   return { router, view: render(<RouterProvider router={router} />) };
 };
@@ -214,7 +223,7 @@ describe('Studio asset export', () => {
       })
     );
     expect(screen.getByRole('dialog')).toHaveTextContent('conversation.creativeStudio.export.body');
-    within(screen.getByRole('navigation', { name: 'conversation.creativeStudio.phase.nav.label' }))
+    within(screen.getByRole('navigation', { name: 'conversation.creativeStudio.phase.nav.viewsLabel' }))
       .getAllByRole('button')
       .forEach((button) => expect(button).toBeDisabled());
 
@@ -321,7 +330,7 @@ describe('Studio asset export', () => {
         name: 'conversation.creativeStudio.phase.review.openProduce',
       })
     );
-    await waitFor(() => expect(router.state.location.pathname).toBe('/studio/project-1/produce'));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/studio/project-1/board'));
   });
 
   it('reports a complete selected-assets handoff without slate or movie claims', async () => {
@@ -400,21 +409,21 @@ describe('Studio asset export', () => {
   it('cannot export stale canonical data while a scene edit is unsaved or still saving', async () => {
     const save = deferred<StudioCommandResult<StudioRendererProject>>();
     bridge.updateScene.invoke.mockReturnValueOnce(save.promise);
-    const { router } = renderProject('write');
+    const { router } = renderProject('table');
 
     const openingRow = await screen.findByRole('region', { name: 'Opening' });
     const prompt = within(openingRow).getByLabelText('conversation.creativeStudio.inspector.visualPromptLabel');
     fireEvent.change(prompt, { target: { value: 'A newly edited cinematic frame' } });
     fireEvent.click(
-      within(screen.getByRole('navigation', { name: 'conversation.creativeStudio.phase.nav.label' })).getByRole(
+      within(screen.getByRole('navigation', { name: 'conversation.creativeStudio.phase.nav.viewsLabel' })).getByRole(
         'button',
         {
-          name: 'conversation.creativeStudio.phase.nav.review',
+          name: 'conversation.creativeStudio.phase.nav.cut',
         }
       )
     );
     await waitFor(() => expect(bridge.updateScene.invoke).toHaveBeenCalledTimes(1));
-    expect(router.state.location.pathname).toBe('/studio/project-1/write');
+    expect(router.state.location.pathname).toBe('/studio/project-1/table');
     expect(screen.queryByRole('button', { name: 'conversation.creativeStudio.phase.review.handoff' })).toBeNull();
     expect(bridge.chooseAndExportAssets.invoke).not.toHaveBeenCalled();
 
@@ -422,7 +431,7 @@ describe('Studio asset export', () => {
       save.resolve(ok(project()));
       await save.promise;
     });
-    await waitFor(() => expect(router.state.location.pathname).toBe('/studio/project-1/review'));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/studio/project-1/cut'));
     expect(screen.getByRole('button', { name: 'conversation.creativeStudio.phase.review.handoff' })).toBeEnabled();
   });
 });

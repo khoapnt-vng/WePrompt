@@ -12,6 +12,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { isCanonicalStudioGeneratedTake } from '@/common/types/project/creativeStudioCanonicalTake';
+import type { StudioBriefReferenceRole, StudioProject } from '@/common/types/project/creativeStudioTypes';
 import { STUDIO_E2E_BOUNDARY_SENTINELS } from '@process/services/creative-studio/adapters/e2eFakeAdapter';
 import {
   createCreativeStudioStore,
@@ -134,6 +136,81 @@ const addActiveVideoJob = async (store: CreativeStudioStore): Promise<void> => {
   });
 };
 
+const addActiveReferenceJob = async (store: CreativeStudioStore, visualPrompt = ''): Promise<void> => {
+  await addActiveVideoJob(store);
+  await store.updateProject('project_1', (project) => {
+    const next = structuredClone(project);
+    next.scenes.scene_1.visualPrompt = visualPrompt;
+    next.jobs.job_1.provider = {
+      providerId: 'provider_1',
+      adapterId: 'weprompt-image-v1',
+      model: 'image-model',
+    };
+    next.jobs.job_1.outputRole = 'reference';
+    if (visualPrompt.trim()) {
+      next.jobs.job_1.referenceInputSnapshot = {
+        sourceVisualPrompt: visualPrompt.trim(),
+        conditioningReferenceAssetIds: [],
+        aspectRatio: next.aspectRatio,
+        resolution: next.resolution,
+      };
+    }
+    return next;
+  });
+};
+
+const seedLegacySceneCount = async (rootDir: string, store: CreativeStudioStore, count: number): Promise<void> => {
+  const project = await store.getProject('project_1');
+  if (project === null) throw new Error('project fixture missing');
+  const legacy = structuredClone(project);
+  for (let index = legacy.sceneOrder.length; index < count; index += 1) {
+    const sceneId = `scene_${index + 1}`;
+    legacy.sceneOrder.push(sceneId);
+    legacy.scenes[sceneId] = {
+      id: sceneId,
+      title: `Scene ${index + 1}`,
+      purpose: '',
+      visualPrompt: '',
+      narration: '',
+      onScreenText: '',
+      mediaKind: 'image',
+      durationSeconds: 1,
+      referenceAssetId: null,
+      selectedAssetId: null,
+      assetIds: [],
+      jobIds: [],
+      reviewState: 'draft',
+    };
+  }
+  await fs.writeFile(path.join(rootDir, 'project_1', 'project.json'), JSON.stringify(legacy));
+};
+
+const addBriefReferences = async (
+  store: CreativeStudioStore,
+  count: number,
+  role: StudioBriefReferenceRole = 'cast'
+): Promise<StudioProject> =>
+  store.updateProject('project_1', (project) => {
+    const next = structuredClone(project);
+    for (let index = 1; index <= count; index += 1) {
+      const assetId = `brief_${index}`;
+      next.assets[assetId] = {
+        id: assetId,
+        projectId: project.id,
+        sceneId: null,
+        mediaKind: 'image',
+        mimeType: 'image/png',
+        managedAsset: { collection: 'imports', fileName: `${assetId}.png` },
+        byteSize: 1,
+        sha256: String(index).repeat(64).slice(0, 64),
+        briefReferenceRole: role,
+        briefReferenceLabel: `Reference ${index}`,
+        createdAt: `2026-08-15T00:00:0${index}.000Z`,
+      };
+    }
+    return next;
+  });
+
 afterEach(async () => {
   await Promise.all(created.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
 });
@@ -216,6 +293,281 @@ describe('createStudioMediaStore', () => {
     expect(JSON.stringify(asset)).not.toContain(sourcePath);
     await expect(fs.access(path.join(rootDir, 'project_1', 'imports', 'asset_1.png'))).resolves.toBeUndefined();
   });
+
+  it('classifies a verified project reference and allocates its stable label in the same CAS mutation', async () => {
+    const { rootDir, store } = await makeStore();
+    const sourcePath = path.join(rootDir, '  Hero\t  Portrait.PNG');
+    await fs.writeFile(sourcePath, png);
+    const media = createStudioMediaStore({
+      store,
+      createId: () => 'asset_cast',
+      now: () => '2026-08-15T01:02:03.000Z',
+    });
+
+    const imported = await media.importReferenceFromPath({
+      projectId: 'project_1',
+      sourcePath,
+      expectedRevision: 1,
+      briefReferenceRole: 'cast',
+      returnProject: true,
+    });
+
+    expect(imported.asset).toMatchObject({
+      id: 'asset_cast',
+      sceneId: null,
+      briefReferenceRole: 'cast',
+      briefReferenceLabel: 'Hero Portrait',
+      byteSize: png.length,
+      sha256: createHash('sha256').update(png).digest('hex'),
+    });
+    expect(imported.project).toMatchObject({
+      revision: 2,
+      assets: { asset_cast: imported.asset },
+    });
+    await expect(fs.access(path.join(rootDir, 'project_1', 'imports', 'asset_cast.png'))).resolves.toBeUndefined();
+  });
+
+  it('suffixes a duplicate classified basename against labels in the successful project revision', async () => {
+    const { rootDir, store } = await makeStore();
+    const sourcePath = path.join(rootDir, 'Reference 1.png');
+    await fs.writeFile(sourcePath, png);
+    const seeded = await addBriefReferences(store, 1);
+    const media = createStudioMediaStore({ store, createId: () => 'asset_look' });
+
+    const imported = await media.importReferenceFromPath({
+      projectId: 'project_1',
+      sourcePath,
+      expectedRevision: seeded.revision,
+      briefReferenceRole: 'look',
+      returnProject: true,
+    });
+
+    expect(imported.asset.briefReferenceLabel).toBe('Reference 1 (2)');
+    expect(imported.project.assets.asset_look.briefReferenceLabel).toBe('Reference 1 (2)');
+  });
+
+  it('allocates a classified label against a competing reference in the CAS candidate', async () => {
+    const { rootDir, store } = await makeStore();
+    const sourcePath = path.join(rootDir, 'Hero.png');
+    await fs.writeFile(sourcePath, png);
+    const preflightProject = await store.getProject('project_1');
+    if (preflightProject === null) throw new Error('project fixture missing');
+    const casCandidate = structuredClone(preflightProject);
+    casCandidate.assets.competing_reference = {
+      id: 'competing_reference',
+      projectId: 'project_1',
+      sceneId: null,
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'imports', fileName: 'competing_reference.png' },
+      byteSize: 1,
+      sha256: 'c'.repeat(64),
+      briefReferenceRole: 'look',
+      briefReferenceLabel: 'Hero',
+      createdAt: '2026-08-15T00:00:01.000Z',
+    };
+    const updateProject = vi.fn(async (_projectId, update) => update(casCandidate));
+    const media = createStudioMediaStore({
+      store: { ...store, getProject: vi.fn(async () => preflightProject), updateProject },
+      createId: () => 'asset_cast',
+    });
+
+    const imported = await media.importReferenceFromPath({
+      projectId: 'project_1',
+      sourcePath,
+      expectedRevision: preflightProject.revision,
+      briefReferenceRole: 'cast',
+      returnProject: true,
+    });
+
+    expect(imported.asset.briefReferenceLabel).toBe('Hero (2)');
+    expect(imported.project.assets.asset_cast.briefReferenceLabel).toBe('Hero (2)');
+  });
+
+  it('preserves the legacy scene reference association in the manifest', async () => {
+    const { rootDir, store } = await makeStore();
+    await addImageScene(store);
+    const project = await store.getProject('project_1');
+    if (project === null) throw new Error('project fixture missing');
+    const sourcePath = path.join(rootDir, 'scene-reference.png');
+    await fs.writeFile(sourcePath, png);
+    const media = createStudioMediaStore({ store, createId: () => 'asset_scene_reference' });
+
+    const asset = await media.importReferenceFromPath({
+      projectId: 'project_1',
+      sceneId: 'scene_1',
+      sourcePath,
+      expectedRevision: project.revision,
+    });
+
+    expect(asset.sceneId).toBe('scene_1');
+    await expect(store.getProject('project_1')).resolves.toMatchObject({
+      assets: { asset_scene_reference: { sceneId: 'scene_1' } },
+      scenes: {
+        scene_1: {
+          assetIds: ['asset_scene_reference'],
+          referenceAssetId: 'asset_scene_reference',
+        },
+      },
+    });
+  });
+
+  it('refuses a seventh active Brief reference before starting the manifest mutation', async () => {
+    const { rootDir, store } = await makeStore();
+    const sourcePath = path.join(rootDir, 'seventh.png');
+    await fs.writeFile(sourcePath, png);
+    const seeded = await addBriefReferences(store, 6);
+    const updateProject = vi.fn(store.updateProject.bind(store));
+    const media = createStudioMediaStore({ store: { ...store, updateProject }, createId: () => 'asset_seventh' });
+
+    await expect(
+      media.importReferenceFromPath({
+        projectId: 'project_1',
+        sourcePath,
+        expectedRevision: seeded.revision,
+        briefReferenceRole: 'cast',
+      })
+    ).rejects.toMatchObject<Partial<CreativeStudioMediaError>>({ code: 'invalid_media' });
+    expect(updateProject).not.toHaveBeenCalled();
+    await expect(fs.access(path.join(rootDir, 'project_1', 'imports', 'asset_seventh.png'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it('rechecks Brief-reference capacity inside the import CAS and cleans every transient file', async () => {
+    const { rootDir, store } = await makeStore();
+    const sourcePath = path.join(rootDir, 'concurrent-sixth.png');
+    await fs.writeFile(sourcePath, png);
+    await addBriefReferences(store, 5);
+    const fiveReferences = await store.getProject('project_1');
+    if (fiveReferences === null) throw new Error('project fixture missing');
+    const sixReferences = structuredClone(fiveReferences);
+    sixReferences.assets.brief_6 = {
+      id: 'brief_6',
+      projectId: 'project_1',
+      sceneId: null,
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'imports', fileName: 'brief_6.png' },
+      byteSize: 1,
+      sha256: '6'.repeat(64),
+      briefReferenceRole: 'look',
+      briefReferenceLabel: 'Concurrent sixth',
+      createdAt: '2026-08-15T00:00:06.000Z',
+    };
+    const concurrentStore: CreativeStudioStore = {
+      ...store,
+      getProject: vi.fn(async () => fiveReferences),
+      updateProject: vi.fn(async (_projectId, update) => update(sixReferences)),
+    };
+    const media = createStudioMediaStore({ store: concurrentStore, createId: () => 'asset_seventh' });
+
+    await expect(
+      media.importReferenceFromPath({
+        projectId: 'project_1',
+        sourcePath,
+        expectedRevision: fiveReferences.revision,
+        briefReferenceRole: 'cast',
+      })
+    ).rejects.toMatchObject<Partial<CreativeStudioMediaError>>({ code: 'invalid_media' });
+    const imports = await fs.readdir(path.join(rootDir, 'project_1', 'imports')).catch(() => []);
+    const parts = await fs.readdir(path.join(rootDir, 'project_1', 'parts')).catch(() => []);
+    expect(imports).not.toContain('asset_seventh.png');
+    expect(parts.filter((name) => name.endsWith('.part'))).toEqual([]);
+  });
+
+  it('clears only Brief classification in one revision while preserving the managed import and file', async () => {
+    const { rootDir, store } = await makeStore();
+    const sourcePath = path.join(rootDir, 'hero.png');
+    await fs.writeFile(sourcePath, png);
+    const media = createStudioMediaStore({ store, createId: () => 'asset_cast' });
+    const imported = await media.importReferenceFromPath({
+      projectId: 'project_1',
+      sourcePath,
+      expectedRevision: 1,
+      briefReferenceRole: 'cast',
+      returnProject: true,
+    });
+
+    const detached = await media.detachBriefReference({
+      projectId: 'project_1',
+      assetId: 'asset_cast',
+      expectedRevision: imported.project.revision,
+    });
+
+    expect(detached.revision).toBe(imported.project.revision + 1);
+    expect(detached.assets.asset_cast).toEqual({
+      ...imported.asset,
+      briefReferenceRole: undefined,
+      briefReferenceLabel: undefined,
+    });
+    await expect(fs.readFile(path.join(rootDir, 'project_1', 'imports', 'asset_cast.png'))).resolves.toEqual(png);
+  });
+
+  it('rejects a stale detach without changing classification or the managed file', async () => {
+    const { rootDir, store } = await makeStore();
+    const sourcePath = path.join(rootDir, 'hero.png');
+    await fs.writeFile(sourcePath, png);
+    const media = createStudioMediaStore({ store, createId: () => 'asset_cast' });
+    const imported = await media.importReferenceFromPath({
+      projectId: 'project_1',
+      sourcePath,
+      expectedRevision: 1,
+      briefReferenceRole: 'cast',
+      returnProject: true,
+    });
+    await store.updateProject('project_1', (project) => ({ ...project, brief: 'Concurrent edit' }));
+
+    await expect(
+      media.detachBriefReference({
+        projectId: 'project_1',
+        assetId: 'asset_cast',
+        expectedRevision: imported.project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'stale_project' });
+    await expect(store.getProject('project_1')).resolves.toMatchObject({
+      brief: 'Concurrent edit',
+      assets: {
+        asset_cast: { briefReferenceRole: 'cast', briefReferenceLabel: 'hero' },
+      },
+    });
+    await expect(fs.readFile(path.join(rootDir, 'project_1', 'imports', 'asset_cast.png'))).resolves.toEqual(png);
+  });
+
+  it.each(['missing', 'foreign', 'scene-owned', 'unclassified'] as const)(
+    'refuses to detach a %s asset without changing the project',
+    async (fixture) => {
+      const { store } = await makeStore();
+      const persisted = await store.getProject('project_1');
+      if (persisted === null) throw new Error('project fixture missing');
+      const candidate = structuredClone(persisted);
+      if (fixture !== 'missing') {
+        candidate.assets.asset_target = {
+          id: 'asset_target',
+          projectId: fixture === 'foreign' ? 'project_other' : candidate.id,
+          sceneId: fixture === 'scene-owned' ? 'scene_1' : null,
+          mediaKind: 'image',
+          mimeType: 'image/png',
+          managedAsset: { collection: 'imports', fileName: 'asset_target.png' },
+          byteSize: 7,
+          sha256: 'a'.repeat(64),
+          ...(fixture === 'unclassified' ? {} : { briefReferenceRole: 'cast' as const, briefReferenceLabel: 'Target' }),
+          createdAt: candidate.createdAt,
+        };
+      }
+      const updateProject = vi.fn(async (_projectId, update) => update(candidate));
+      const media = createStudioMediaStore({ store: { ...store, updateProject } });
+
+      await expect(
+        media.detachBriefReference({
+          projectId: 'project_1',
+          assetId: 'asset_target',
+          expectedRevision: candidate.revision,
+        })
+      ).rejects.toMatchObject({ code: fixture === 'missing' ? 'not_found' : 'invalid_media' });
+      await expect(store.getProject('project_1')).resolves.toEqual(persisted);
+    }
+  );
 
   it('rejects a non-image reference before it can enter the manifest', async () => {
     const { rootDir, store } = await makeStore();
@@ -396,6 +748,143 @@ describe('createStudioMediaStore', () => {
     expect((await store.getProject('project_1'))?.assets).toEqual({});
   });
 
+  it('never deletes a replacement part installed at the cleanup ownership boundary', async () => {
+    const { rootDir, store } = await makeStore();
+    const canonicalRootDir = await fs.realpath(rootDir);
+    const sourcePath = path.join(rootDir, 'invalid-reference.txt');
+    const replacementPath = path.join(rootDir, 'replacement-part');
+    const partPath = path.join(canonicalRootDir, 'project_1', 'parts', 'asset_part_race.part');
+    await fs.writeFile(sourcePath, 'not media');
+    await fs.writeFile(replacementPath, 'replacement part');
+    let swapped = false;
+    const cleanupTargets: string[] = [];
+    const media = createStudioMediaStore({
+      store,
+      createId: () => 'asset_part_race',
+      beforeCleanupOwnership: async (target) => {
+        cleanupTargets.push(target);
+        if (target !== partPath) return;
+        await fs.rm(partPath, { force: true });
+        await fs.rename(replacementPath, partPath);
+        swapped = true;
+      },
+    });
+
+    await expect(
+      media.importReferenceFromPath({ projectId: 'project_1', sourcePath, expectedRevision: 1 })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+
+    expect(cleanupTargets).toEqual([partPath]);
+    expect(swapped).toBe(true);
+    await expect(fs.readFile(partPath, 'utf8')).resolves.toBe('replacement part');
+  });
+
+  it('retains a mismatched quarantine across a replacement after no-replace restoration', async () => {
+    const { rootDir, store } = await makeStore();
+    const canonicalRootDir = await fs.realpath(rootDir);
+    const sourcePath = path.join(rootDir, 'invalid-reference.txt');
+    const replacementPath = path.join(rootDir, 'unverified-replacement-part');
+    const laterOwnerPath = path.join(rootDir, 'later-owner-part');
+    const partPath = path.join(canonicalRootDir, 'project_1', 'parts', 'asset_restore_race.part');
+    await fs.writeFile(sourcePath, 'not media');
+    await fs.writeFile(replacementPath, 'unverified replacement bytes');
+    await fs.writeFile(laterOwnerPath, 'later owner bytes');
+    let quarantinePath: string | null = null;
+    let restorationWindowReached = false;
+    const media = createStudioMediaStore({
+      store,
+      createId: () => 'asset_restore_race',
+      beforeCleanupOwnership: async (target) => {
+        if (target !== partPath) return;
+        await fs.rm(partPath, { force: true });
+        await fs.rename(replacementPath, partPath);
+      },
+      afterCleanupRestore: async (target, quarantined) => {
+        if (target !== partPath) return;
+        quarantinePath = quarantined;
+        await fs.unlink(partPath);
+        await fs.rename(laterOwnerPath, partPath);
+        restorationWindowReached = true;
+      },
+    });
+
+    await expect(
+      media.importReferenceFromPath({ projectId: 'project_1', sourcePath, expectedRevision: 1 })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+
+    expect(restorationWindowReached).toBe(true);
+    expect(quarantinePath).not.toBeNull();
+    await expect(fs.readFile(partPath, 'utf8')).resolves.toBe('later owner bytes');
+    await expect(fs.readFile(quarantinePath!, 'utf8')).resolves.toBe('unverified replacement bytes');
+  });
+
+  it('never deletes a final-path replacement installed after the old identity-check window', async () => {
+    const { rootDir, store } = await makeStore();
+    const canonicalRootDir = await fs.realpath(rootDir);
+    const sourcePath = path.join(rootDir, 'reference.png');
+    const replacementPath = path.join(rootDir, 'replacement-final');
+    const finalPath = path.join(canonicalRootDir, 'project_1', 'imports', 'asset_final_race.png');
+    await fs.writeFile(sourcePath, png);
+    await fs.writeFile(replacementPath, 'replacement final');
+    let cleanupReady = false;
+    const staleStore: CreativeStudioStore = {
+      ...store,
+      async updateProject() {
+        cleanupReady = true;
+        throw new CreativeStudioStoreError('stale_project', 'forced stale CAS');
+      },
+    };
+    let swapped = false;
+    const cleanupTargets: string[] = [];
+    const media = createStudioMediaStore({
+      store: staleStore,
+      createId: () => 'asset_final_race',
+      beforeCleanupOwnership: async (target) => {
+        cleanupTargets.push(target);
+        if (target !== finalPath || !cleanupReady) return;
+        await fs.rm(finalPath, { force: true });
+        await fs.rename(replacementPath, finalPath);
+        swapped = true;
+      },
+    });
+
+    await expect(
+      media.importReferenceFromPath({ projectId: 'project_1', sourcePath, expectedRevision: 1 })
+    ).rejects.toMatchObject({ code: 'stale_project' });
+
+    expect(cleanupTargets).toEqual([finalPath]);
+    expect(swapped).toBe(true);
+    await expect(fs.readFile(finalPath, 'utf8')).resolves.toBe('replacement final');
+    expect((await store.getProject('project_1'))?.assets).toEqual({});
+  });
+
+  it('leaves no classified manifest entry, part, or unreferenced final import after a stale CAS', async () => {
+    const { rootDir, store } = await makeStore();
+    const sourcePath = path.join(rootDir, 'stale-cast.png');
+    await fs.writeFile(sourcePath, png);
+    const staleStore: CreativeStudioStore = {
+      ...store,
+      async updateProject() {
+        throw new CreativeStudioStoreError('stale_project', 'forced stale CAS');
+      },
+    };
+    const media = createStudioMediaStore({ store: staleStore, createId: () => 'asset_stale_cast' });
+
+    await expect(
+      media.importReferenceFromPath({
+        projectId: 'project_1',
+        sourcePath,
+        expectedRevision: 1,
+        briefReferenceRole: 'cast',
+      })
+    ).rejects.toMatchObject({ code: 'stale_project' });
+    expect((await store.getProject('project_1'))?.assets).toEqual({});
+    const parts = await fs.readdir(path.join(rootDir, 'project_1', 'parts')).catch(() => []);
+    const imports = await fs.readdir(path.join(rootDir, 'project_1', 'imports')).catch(() => []);
+    expect(parts.filter((name) => name.endsWith('.part'))).toEqual([]);
+    expect(imports).not.toContain('asset_stale_cast.png');
+  });
+
   it('persists a generated image stream with a verified hash and no provider URL', async () => {
     const { rootDir, store } = await makeStore();
     await store.updateProject(
@@ -488,6 +977,330 @@ describe('createStudioMediaStore', () => {
       reviewState: 'complete',
     });
     expect(project?.routing.image).toBeNull();
+  });
+
+  it('commits a real generated output without rewriting or truncating a legacy 25-scene project', async () => {
+    const { rootDir, store } = await makeStore();
+    await addActiveImageJob(store);
+    await seedLegacySceneCount(rootDir, store, 25);
+    const media = createStudioMediaStore({ store, createId: () => 'asset_legacy_take' });
+
+    const asset = await media.persistProviderOutputForJob({
+      projectId: 'project_1',
+      sceneId: 'scene_1',
+      jobId: 'job_1',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      body: Readable.from([png]),
+    });
+
+    const project = await store.getProject('project_1');
+    expect(project?.sceneOrder).toHaveLength(25);
+    expect(project?.sceneOrder.at(-1)).toBe('scene_25');
+    expect(project?.scenes.scene_1.selectedAssetId).toBe(asset.id);
+    expect(project?.jobs.job_1).toMatchObject({ status: 'succeeded', outputAssetIds: [asset.id] });
+  });
+
+  it('commits a reference to the scene without selecting it as the take', async () => {
+    const { rootDir, store } = await makeStore();
+    await addActiveReferenceJob(store);
+    const media = createStudioMediaStore({ store, createId: () => 'asset_reference_1' });
+
+    const committed = await media.persistProviderOutputForJob({
+      projectId: 'project_1',
+      sceneId: 'scene_1',
+      jobId: 'job_1',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      body: Readable.from([png]),
+    });
+
+    const project = await store.getProject('project_1');
+    expect(project?.scenes.scene_1.referenceAssetId).toBe(committed.id);
+    // assetIds is "assets owned by this scene", not "takes" — imports and posters
+    // live there too, and store.ts:993 requires the reverse link. What must stay
+    // true is that the plate is not the take and the scene is not produced.
+    expect(project?.scenes.scene_1.assetIds).toContain(committed.id);
+    expect(project?.scenes.scene_1.selectedAssetId).toBeNull();
+    // Regression: a reference commit must clear the submit-time generating state without marking the scene produced.
+    expect(project?.scenes.scene_1.reviewState).toBe('draft');
+    expect(project?.assets[committed.id].sceneId).toBe('scene_1');
+    expect(project?.assets[committed.id].managedAsset.collection).toBe('references');
+    await expect(
+      fs.access(path.join(rootDir, 'project_1', 'references', 'asset_reference_1.png'))
+    ).resolves.toBeUndefined();
+  });
+
+  it('commits a real reference output without rewriting or truncating a legacy 25-scene project', async () => {
+    const { rootDir, store } = await makeStore();
+    await addActiveReferenceJob(store, 'A supporting plate');
+    await seedLegacySceneCount(rootDir, store, 25);
+    const media = createStudioMediaStore({ store, createId: () => 'asset_legacy_reference' });
+
+    const asset = await media.persistProviderOutputForJob({
+      projectId: 'project_1',
+      sceneId: 'scene_1',
+      jobId: 'job_1',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      body: Readable.from([png]),
+    });
+
+    const project = await store.getProject('project_1');
+    expect(project?.sceneOrder).toHaveLength(25);
+    expect(project?.sceneOrder.at(-1)).toBe('scene_25');
+    expect(project?.scenes.scene_1).toMatchObject({ referenceAssetId: asset.id, selectedAssetId: null });
+    expect(project?.assets[asset.id].managedAsset.collection).toBe('references');
+  });
+
+  it('restores a produced scene to complete after committing a new reference', async () => {
+    const { store } = await makeStore();
+    await addActiveReferenceJob(store);
+    await store.updateProject('project_1', (project) => {
+      const next = structuredClone(project);
+      next.assets.asset_existing_take = {
+        id: 'asset_existing_take',
+        projectId: project.id,
+        sceneId: 'scene_1',
+        mediaKind: 'video',
+        mimeType: 'video/mp4',
+        managedAsset: { collection: 'assets', fileName: 'asset_existing_take.mp4' },
+        byteSize: 1,
+        sha256: '0'.repeat(64),
+        durationSeconds: 5,
+        createdAt: project.createdAt,
+      };
+      next.scenes.scene_1.assetIds.push('asset_existing_take');
+      next.scenes.scene_1.selectedAssetId = 'asset_existing_take';
+      return next;
+    });
+    const media = createStudioMediaStore({ store, createId: () => 'asset_replacement_reference' });
+
+    const committed = await media.persistProviderOutputForJob({
+      projectId: 'project_1',
+      sceneId: 'scene_1',
+      jobId: 'job_1',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      body: Readable.from([png]),
+    });
+
+    const project = await store.getProject('project_1');
+    expect(project?.scenes.scene_1.referenceAssetId).toBe(committed.id);
+    expect(project?.scenes.scene_1.selectedAssetId).toBe('asset_existing_take');
+    expect(project?.scenes.scene_1.reviewState).toBe('complete');
+  });
+
+  it('leaves a persisted cut untouched when committing a reference', async () => {
+    const { store } = await makeStore();
+    await addActiveReferenceJob(store);
+    await store.updateProject('project_1', (project) => {
+      const next = structuredClone(project);
+      next.assets.asset_video_old = {
+        id: 'asset_video_old',
+        projectId: project.id,
+        sceneId: 'scene_1',
+        mediaKind: 'video',
+        mimeType: 'video/mp4',
+        managedAsset: { collection: 'assets', fileName: 'asset_video_old.mp4' },
+        byteSize: 1,
+        sha256: '0'.repeat(64),
+        durationSeconds: 5.085,
+        createdAt: project.createdAt,
+      };
+      next.scenes.scene_1.assetIds.push('asset_video_old');
+      next.scenes.scene_1.selectedAssetId = 'asset_video_old';
+      next.cuts = {
+        cut_1: {
+          id: 'cut_1',
+          name: project.name,
+          orderMode: 'storyboard',
+          clipOrder: ['clip_scene_1'],
+          clips: {
+            clip_scene_1: {
+              id: 'clip_scene_1',
+              sceneId: 'scene_1',
+              assetId: 'asset_video_old',
+              sourceInSeconds: 0.5,
+              sourceOutSeconds: 4.5,
+              crop: { x: 0.1, y: 0.1, width: 0.8, height: 0.8 },
+              filters: [{ id: 'contrast', amount: 0.25 }],
+            },
+          },
+        },
+      };
+      next.activeCutId = 'cut_1';
+      return next;
+    });
+    const media = createStudioMediaStore({ store, createId: () => 'asset_reference_cut' });
+
+    await media.persistProviderOutputForJob({
+      projectId: 'project_1',
+      sceneId: 'scene_1',
+      jobId: 'job_1',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      body: Readable.from([png]),
+    });
+
+    // A plate must never become a clip in the rendered cut: reconciliation runs
+    // unconditionally now, but it derives clips solely from selectedTake, which a
+    // reference commit never changes, so the pre-existing take clip must survive as-is.
+    expect((await store.getProject('project_1'))?.cuts?.cut_1?.clips.clip_scene_1).toMatchObject({
+      assetId: 'asset_video_old',
+      sourceInSeconds: 0.5,
+      sourceOutSeconds: 4.5,
+      crop: { x: 0.1, y: 0.1, width: 0.8, height: 0.8 },
+      filters: [{ id: 'contrast', amount: 0.25 }],
+    });
+  });
+
+  it('does not create a canonical generated take when committing a reference', async () => {
+    const { store } = await makeStore();
+    await addActiveReferenceJob(store);
+    const media = createStudioMediaStore({ store, createId: () => 'asset_reference_not_take' });
+
+    await media.persistProviderOutputForJob({
+      projectId: 'project_1',
+      sceneId: 'scene_1',
+      jobId: 'job_1',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      body: Readable.from([png]),
+    });
+
+    const project = await store.getProject('project_1');
+    const scene = project?.scenes.scene_1;
+    expect(
+      project && scene
+        ? Object.values(project.assets).some((asset) => isCanonicalStudioGeneratedTake(asset, project.id, scene))
+        : true
+    ).toBe(false);
+  });
+
+  it('records the visual prompt the image was generated from, trimmed', async () => {
+    const { store } = await makeStore();
+    await addActiveReferenceJob(store, '  Aerial, drifting.  ');
+    const media = createStudioMediaStore({ store, createId: () => 'asset_reference_prompt' });
+
+    const committed = await media.persistProviderOutputForJob({
+      projectId: 'project_1',
+      sceneId: 'scene_1',
+      jobId: 'job_1',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      body: Readable.from([png]),
+    });
+
+    expect((await store.getProject('project_1'))?.assets[committed.id].sourceVisualPrompt).toBe('Aerial, drifting.');
+  });
+
+  it('copies complete reference provenance from the durable job snapshot instead of current project state', async () => {
+    const { store } = await makeStore();
+    await addActiveReferenceJob(store, 'Original reviewed plate');
+    const withSources = await addBriefReferences(store, 2);
+    await store.updateProject(
+      'project_1',
+      (project) => {
+        const next = structuredClone(project);
+        next.jobs.job_1.referenceInputSnapshot = {
+          sourceVisualPrompt: 'Original reviewed plate',
+          conditioningReferenceAssetIds: ['brief_1', 'brief_2'],
+          aspectRatio: '16:9',
+          resolution: '720p',
+        };
+        next.scenes.scene_1.visualPrompt = 'Changed while provider was running';
+        next.aspectRatio = '1:1';
+        next.resolution = '1080p';
+        return next;
+      },
+      withSources.revision
+    );
+    const media = createStudioMediaStore({ store, createId: () => 'asset_reference_snapshot' });
+
+    const committed = await media.persistProviderOutputForJob({
+      projectId: 'project_1',
+      sceneId: 'scene_1',
+      jobId: 'job_1',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      body: Readable.from([png]),
+    });
+
+    expect((await store.getProject('project_1'))?.assets[committed.id]).toMatchObject({
+      sourceVisualPrompt: 'Original reviewed plate',
+      sourceReferenceAssetIds: ['brief_1', 'brief_2'],
+      sourceAspectRatio: '16:9',
+      sourceResolution: '720p',
+    });
+  });
+
+  it('retains scene-prompt fallback only for a legacy reference job without a snapshot', async () => {
+    const { store } = await makeStore();
+    await addActiveReferenceJob(store, '  Legacy scene prompt  ');
+    await store.updateProject('project_1', (project) => {
+      const next = structuredClone(project);
+      delete next.jobs.job_1.referenceInputSnapshot;
+      return next;
+    });
+    const media = createStudioMediaStore({ store, createId: () => 'asset_reference_legacy' });
+
+    const committed = await media.persistProviderOutputForJob({
+      projectId: 'project_1',
+      sceneId: 'scene_1',
+      jobId: 'job_1',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      body: Readable.from([png]),
+    });
+
+    expect((await store.getProject('project_1'))?.assets[committed.id]).toMatchObject({
+      sourceVisualPrompt: 'Legacy scene prompt',
+    });
+    expect((await store.getProject('project_1'))?.assets[committed.id]).not.toHaveProperty('sourceReferenceAssetIds');
+  });
+
+  it('still commits a take exactly as before', async () => {
+    const { store } = await makeStore();
+    await addActiveVideoJob(store);
+    await store.updateProject('project_1', (project) => {
+      const next = structuredClone(project);
+      next.scenes.scene_1.visualPrompt = '  Aerial, drifting.  ';
+      return next;
+    });
+    const media = createStudioMediaStore({ store, createId: () => 'asset_video_take' });
+
+    const committed = await media.persistProviderOutputForJob({
+      projectId: 'project_1',
+      sceneId: 'scene_1',
+      jobId: 'job_1',
+      mediaKind: 'video',
+      declaredMimeType: 'video/mp4',
+      body: Readable.from([mp4]),
+    });
+
+    const project = await store.getProject('project_1');
+    expect(project?.scenes.scene_1.selectedAssetId).toBe(committed.id);
+    expect(project?.scenes.scene_1.assetIds).toContain(committed.id);
+    expect(project?.scenes.scene_1.reviewState).toBe('complete');
+    expect(project?.assets[committed.id].sourceVisualPrompt).toBe('Aerial, drifting.');
+  });
+
+  it('rejects a reference whose output is not an image', async () => {
+    const { store } = await makeStore();
+    await addActiveReferenceJob(store);
+    const media = createStudioMediaStore({ store, createId: () => 'asset_reference_video' });
+
+    await expect(
+      media.persistProviderOutputForJob({
+        projectId: 'project_1',
+        sceneId: 'scene_1',
+        jobId: 'job_1',
+        mediaKind: 'video',
+        declaredMimeType: 'video/mp4',
+        body: Readable.from([mp4]),
+      })
+    ).rejects.toMatchObject<Partial<CreativeStudioMediaError>>({ code: 'invalid_media' });
   });
 
   it('persists a fractional provider-reported video duration', async () => {

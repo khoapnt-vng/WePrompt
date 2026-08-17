@@ -7,13 +7,17 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { promises as nodeFs } from 'node:fs';
 import { EventEmitter } from 'node:events';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import https from 'node:https';
 import { Readable } from 'node:stream';
 import type { IProvider, TProviderWithModel } from '@/common/config/storage';
+import { buildFirstFramePrompt } from '@/common/types/project/creativeStudioReferencePrompt';
 import type {
+  StudioBriefRule,
   StudioCancellationPolicy,
+  StudioDirectorCommandRecordV1,
   StudioJob,
   StudioJobStatus,
   StudioProject,
@@ -22,11 +26,13 @@ import type {
   StudioScene,
 } from '@/common/types/project/creativeStudioTypes';
 import type { StudioGenerationRouteCatalog } from '@process/services/creative-studio/providerResolver';
-import type {
-  GenerationProviderAdapter,
-  ProviderJobSnapshot,
-  ProviderOutput,
-  ProviderSubmitResult,
+import {
+  createImageGenerationAdapter,
+  type GenerationProviderAdapter,
+  type ProviderJobSnapshot,
+  type ProviderOutput,
+  type ProviderSubmitResult,
+  validateImageConditioningRequest,
 } from '@process/services/creative-studio/adapters';
 import {
   createStudioJobManager,
@@ -34,7 +40,9 @@ import {
   type StudioJobManagerDeps,
   type StudioResolvedSceneRouteSnapshot,
 } from '@process/services/creative-studio/jobManager';
+import { createOpenRouterVideoAdapter } from '@process/services/creative-studio/adapters/openRouterVideoAdapter';
 import { createStudioMediaStore, type StudioMediaStore } from '@process/services/creative-studio/mediaStore';
+import { createStudioDirectorCommandService } from '@process/services/creative-studio/service/directorCommandService';
 import { createCreativeStudioStore, type CreativeStudioStore } from '@process/services/creative-studio/store';
 import type { RemoteMediaBudget } from '@process/services/remote-media';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -98,9 +106,11 @@ const catalog = (
       minDurationSeconds: 1,
       maxDurationSeconds: 60,
       supportsFirstFrame: true,
+      maxConditioningImages: 0,
       silentOutput: true,
     },
   })),
+  diagnostics: [],
   generationCatalogVersion: 'catalog_1',
 });
 
@@ -436,6 +446,143 @@ afterEach(async () => {
 });
 
 describe('StudioJobManager durable submission', () => {
+  it('rejects a revision-N request after a real Director edit commits N+1 before any paid boundary or job write', async () => {
+    const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-job-manager-director-race-'));
+    const store = createCreativeStudioStore({ rootDir });
+    const created = await store.createProject({
+      name: 'Director race',
+      brief: 'Keep the paid review pinned',
+      aspectRatio: '16:9',
+      targetDurationSeconds: 5,
+      resolution: '720p',
+    });
+    const reviewed = await store.updateProject(created.id, (current) => ({
+      ...current,
+      sceneOrder: ['scene_1'],
+      scenes: { scene_1: scene({ visualPrompt: 'Prompt A' }) },
+      routing: { storyboard: null, image: selectionFor(route), video: null },
+    }));
+    const commandCreatedAtMs = Date.now();
+    const command: StudioDirectorCommandRecordV1 = {
+      schemaVersion: 1,
+      commandId: 'command_director_paid_race',
+      projectId: reviewed.id,
+      expectedRevision: reviewed.revision,
+      createdAt: new Date(commandCreatedAtMs).toISOString(),
+      deadlineAt: new Date(commandCreatedAtMs + 15_000).toISOString(),
+      policy: 'auto_apply',
+      operations: [{ kind: 'edit_scene', sceneId: 'scene_1', changes: { visualPrompt: 'Prompt B' } }],
+    };
+    const directorService = createStudioDirectorCommandService({ store, now: () => commandCreatedAtMs });
+    const directorResult = await directorService.apply(command, commandCreatedAtMs + 13_000, {
+      commitTag: command.commandId,
+    });
+
+    const listGenerationRoutes = vi.fn(async () => {
+      throw new Error('provider catalog must stay unreachable');
+    });
+    const isGenerationRouteAvailable = vi.fn(async () => {
+      throw new Error('provider resolver must stay unreachable');
+    });
+    const listProviders = vi.fn(async () => {
+      throw new Error('provider inventory must stay unreachable');
+    });
+    const submit = vi.fn(async () => {
+      throw new Error('adapter submit must stay unreachable');
+    });
+    const poll = vi.fn(async () => {
+      throw new Error('adapter poll must stay unreachable');
+    });
+    const adapter = controllableAdapter('weprompt-image-v1', { submit, poll });
+    const createJobId = vi.fn(() => {
+      throw new Error('job id must stay unreachable');
+    });
+    const createIdempotencyKey = vi.fn(() => {
+      throw new Error('idempotency key must stay unreachable');
+    });
+    const onProjectUpdated = vi.fn();
+    const mediaStore = createStudioMediaStore({ store });
+    const manager = createStudioJobManager({
+      store,
+      mediaStore,
+      providerResolver: {
+        listConnectionCandidates: async () => [],
+        listGenerationRoutes,
+        isGenerationRouteAvailable,
+      },
+      adapters: new Map([[adapter.id, adapter]]),
+      listProviders,
+      createJobId,
+      createIdempotencyKey,
+      onProjectUpdated,
+    });
+    harnesses.push({ rootDir, store, mediaStore, project: directorResult.project, manager });
+
+    await expect(
+      manager.submitScenes({
+        projectId: reviewed.id,
+        expectedRevision: reviewed.revision,
+        sceneIds: ['scene_1'],
+        routes: [route],
+        catalogVersion: 'catalog_1',
+      })
+    ).rejects.toMatchObject({ code: 'stale_project' });
+
+    const after = await store.getProject(reviewed.id);
+    expect(after).toMatchObject({
+      revision: reviewed.revision + 1,
+      scenes: { scene_1: { visualPrompt: 'Prompt B', jobIds: [] } },
+      jobs: {},
+    });
+    expect(onProjectUpdated).not.toHaveBeenCalled();
+    expect(listGenerationRoutes).not.toHaveBeenCalled();
+    expect(isGenerationRouteAvailable).not.toHaveBeenCalled();
+    expect(listProviders).not.toHaveBeenCalled();
+    expect(createJobId).not.toHaveBeenCalled();
+    expect(createIdempotencyKey).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+    expect(poll).not.toHaveBeenCalled();
+  });
+
+  it('persists real same-count job lifecycle updates on a legacy 25-scene project', async () => {
+    const submission = deferred<ProviderSubmitResult>();
+    const submit = vi.fn(async () => submission.promise);
+    const harness = await createHarness(
+      controllableAdapter('weprompt-image-v1', {
+        submit,
+      })
+    );
+    const legacy = structuredClone(harness.project);
+    for (let index = 1; index < 25; index += 1) {
+      const sceneId = `scene_${index + 1}`;
+      legacy.sceneOrder.push(sceneId);
+      legacy.scenes[sceneId] = scene({ id: sceneId, title: `Scene ${index + 1}` });
+    }
+    await writeFile(path.join(harness.rootDir, legacy.id, 'project.json'), JSON.stringify(legacy));
+
+    await expect(
+      harness.manager.submitScenes({
+        projectId: legacy.id,
+        expectedRevision: legacy.revision,
+        sceneIds: ['scene_1'],
+        routes: [route],
+        catalogVersion: 'catalog_1',
+      })
+    ).resolves.toMatchObject([{ id: 'job_1', status: 'queued_local' }]);
+    await waitFor(async () =>
+      expect((await harness.store.getProject(legacy.id))?.jobs.job_1.status).toBe('submitting')
+    );
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+
+    submission.reject(new Error('transport interrupted'));
+    await waitFor(async () => {
+      const persisted = await harness.store.getProject(legacy.id);
+      expect(persisted?.jobs.job_1).toMatchObject({ status: 'needs_attention' });
+      expect(persisted?.sceneOrder).toHaveLength(25);
+      expect(persisted?.sceneOrder.at(-1)).toBe('scene_25');
+    });
+  });
+
   it('persists the local job and idempotency key before adapter submission begins', async () => {
     const submission = deferred<ProviderSubmitResult>();
     let observedProject: StudioProject | null = null;
@@ -467,6 +614,7 @@ describe('StudioJobManager durable submission', () => {
     });
 
     expect(jobs).toMatchObject([{ id: 'job_1', idempotencyKey: 'key_1', status: 'queued_local' }]);
+    expect((await store.getProject(project.id))!.jobs.job_1).not.toHaveProperty('outputRole');
     await waitFor(() => expect(observedProject?.jobs.job_1.status).toBe('submitting'));
     expect(observedProject?.scenes.scene_1.jobIds).toContain('job_1');
     submission.reject(new Error('transport interrupted'));
@@ -1629,6 +1777,130 @@ describe('StudioJobManager route and reference isolation', () => {
     expect((await harness.store.getProject(harness.project.id))?.jobs).toEqual({});
   });
 
+  it('submits an image scene reference through the production image adapter as one image URI', async () => {
+    const executeImageGeneration = vi.fn(async () => ({ success: false, text: 'none', error: 'no_output' }));
+    const imageAdapter = createImageGenerationAdapter({
+      executeImageGeneration,
+      workspaceDir: '/private/studio',
+    });
+    const selectedProvider: IProvider = {
+      ...provider,
+      platform: 'gemini',
+      base_url: 'https://generativelanguage.googleapis.com',
+      models: ['gemini-2.5-flash-image'],
+    };
+    const selectedRoute: StudioResolvedSceneRouteSnapshot = {
+      ...route,
+      providerId: selectedProvider.id,
+      model: 'gemini-2.5-flash-image',
+    };
+    const harness = await createHarness(imageAdapter, {
+      provider: selectedProvider,
+      routes: [selectedRoute],
+    });
+    const sourcePath = path.join(harness.rootDir, 'reference.png');
+    await writeFile(sourcePath, png);
+    await harness.mediaStore.importReferenceFromPath({
+      projectId: harness.project.id,
+      sceneId: 'scene_1',
+      sourcePath,
+      expectedRevision: harness.project.revision,
+    });
+    const withReference = (await harness.store.getProject(harness.project.id))!;
+
+    await expect(
+      harness.manager.submitScenes({
+        projectId: withReference.id,
+        expectedRevision: withReference.revision,
+        sceneIds: ['scene_1'],
+        routes: [selectedRoute],
+        catalogVersion: 'catalog_1',
+      })
+    ).resolves.toHaveLength(1);
+
+    await waitFor(() => expect(executeImageGeneration).toHaveBeenCalledOnce());
+    expect(executeImageGeneration).toHaveBeenCalledWith(
+      expect.objectContaining({ image_uris: [expect.stringMatching(/^data:image\/png;base64,/)] }),
+      expect.objectContaining({ use_model: 'gemini-2.5-flash-image' }),
+      '/private/studio',
+      undefined,
+      expect.any(AbortSignal),
+      { hostedImageDownloader: expect.any(Function) }
+    );
+    await waitFor(async () =>
+      expect((await harness.store.getProject(harness.project.id))?.jobs.job_1).toMatchObject({
+        status: 'failed',
+        error: { code: 'no_output' },
+      })
+    );
+  });
+
+  it('submits exactly one managed first frame through a fresh OpenRouter scene submission', async () => {
+    const fetch = vi.fn(async () => ({
+      status: 400,
+      json: async () => ({ error: { metadata: { error_type: 'controlled_test_failure' } } }),
+    }));
+    const openRouterAdapter = createOpenRouterVideoAdapter({ fetch });
+    const openRouterProvider: IProvider = {
+      ...provider,
+      base_url: 'https://openrouter.ai/api/v1',
+      api_key: 'sk-or-test',
+      models: ['bytedance/seedance-2.0'],
+    };
+    const openRouterRoute: StudioResolvedSceneRouteSnapshot = {
+      sceneId: 'scene_1',
+      providerId: openRouterProvider.id,
+      adapterId: 'openrouter-video-v1',
+      model: 'bytedance/seedance-2.0',
+      kind: 'video',
+    };
+    const harness = await createHarness(openRouterAdapter, {
+      provider: openRouterProvider,
+      routes: [openRouterRoute],
+      scenes: [scene({ mediaKind: 'video', durationSeconds: 5 })],
+    });
+    const sourcePath = path.join(harness.rootDir, 'reference.png');
+    await writeFile(sourcePath, png);
+    await harness.mediaStore.importReferenceFromPath({
+      projectId: harness.project.id,
+      sceneId: 'scene_1',
+      sourcePath,
+      expectedRevision: harness.project.revision,
+    });
+    const withReference = (await harness.store.getProject(harness.project.id))!;
+
+    await expect(
+      harness.manager.submitScenes({
+        projectId: withReference.id,
+        expectedRevision: withReference.revision,
+        sceneIds: ['scene_1'],
+        routes: [openRouterRoute],
+        catalogVersion: 'catalog_1',
+      })
+    ).resolves.toHaveLength(1);
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    const [url, init] = fetch.mock.calls[0]!;
+    expect(url).toBe('https://openrouter.ai/api/v1/videos');
+    expect(init).toMatchObject({ method: 'POST' });
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      model: 'bytedance/seedance-2.0',
+      frame_images: [
+        {
+          type: 'image_url',
+          image_url: { url: expect.stringMatching(/^data:image\/png;base64,/) },
+          frame_type: 'first_frame',
+        },
+      ],
+    });
+    await waitFor(async () =>
+      expect((await harness.store.getProject(harness.project.id))?.jobs.job_1).toMatchObject({
+        status: 'needs_attention',
+        error: { code: 'submission_unknown' },
+      })
+    );
+  });
+
   it('serializes deletion behind durable submission and refuses the active project atomically', async () => {
     const submission = deferred<ProviderSubmitResult>();
     const submit = vi.fn(async () => submission.promise);
@@ -1665,7 +1937,971 @@ describe('StudioJobManager route and reference isolation', () => {
   });
 });
 
+describe('StudioJobManager reference output routing', () => {
+  const imageAdapterWithSubmit = (
+    submit: ReturnType<typeof vi.fn>,
+    currentSafetyLimit = 6
+  ): GenerationProviderAdapter => ({
+    id: 'weprompt-image-v1',
+    validateConnection: async () => ({ ok: true }),
+    validateRequest: (request) =>
+      validateImageConditioningRequest(request, currentSafetyLimit, false).ok
+        ? {
+            ok: true,
+            normalized: {
+              aspectRatio: request.aspectRatio,
+              resolution: request.resolution,
+              durationSeconds: request.durationSeconds,
+            },
+          }
+        : { ok: false, issues: [{ code: 'provider_unavailable' }] },
+    submit,
+  });
+
+  const referenceProvider: IProvider = { ...provider, models: ['image-model', 'video-model'] };
+  const imageRoute: StudioResolvedSceneRouteSnapshot = route;
+  const videoRoute: StudioResolvedSceneRouteSnapshot = {
+    sceneId: 'scene_1',
+    providerId: provider.id,
+    adapterId: 'weprompt-media-gateway-v1',
+    model: 'video-model',
+    kind: 'video',
+  };
+
+  /** Uses a non-default duration so the request assertion proves the scene duration is forwarded. */
+  const videoScene = (): StudioScene =>
+    scene({ id: 'scene_1', mediaKind: 'video', durationSeconds: 8, visualPrompt: 'video_prompt' });
+
+  const createReferenceHarness = (
+    submit: ReturnType<typeof vi.fn>,
+    overrides: Partial<HarnessOptions> = {},
+    currentSafetyLimit = 6
+  ): Promise<Harness> =>
+    createHarness(imageAdapterWithSubmit(submit, currentSafetyLimit), {
+      scenes: [videoScene()],
+      routes: [imageRoute, videoRoute],
+      provider: referenceProvider,
+      ...overrides,
+    });
+
+  const conditioningCatalog = (maximum: number): StudioGenerationRouteCatalog => {
+    const built = catalog([imageRoute, videoRoute]);
+    built.routes.find((candidate) => candidate.kind === 'image')!.constraints.maxConditioningImages = maximum;
+    return built;
+  };
+
+  const importBriefReference = async (
+    harness: Harness,
+    role: 'cast' | 'look',
+    index: number,
+    bytes: Buffer = Buffer.concat([png, Buffer.from([index])])
+  ) => {
+    const sourcePath = path.join(harness.rootDir, `${role}-${index}.png`);
+    await writeFile(sourcePath, bytes);
+    const current = (await harness.store.getProject(harness.project.id))!;
+    return harness.mediaStore.importReferenceFromPath({
+      projectId: current.id,
+      briefReferenceRole: role,
+      sourcePath,
+      expectedRevision: current.revision,
+    });
+  };
+
+  const seedUnknownSubmission = (harness: Harness, outputRole: 'take' | 'reference'): Promise<StudioProject> =>
+    harness.store.updateProject(harness.project.id, (project) => {
+      const next = structuredClone(project);
+      next.jobs.job_seed = {
+        id: 'job_seed',
+        projectId: project.id,
+        sceneId: 'scene_1',
+        status: 'needs_attention',
+        provider: selectionFor(outputRole === 'reference' ? imageRoute : videoRoute),
+        idempotencyKey: 'key_seed',
+        providerJobId: null,
+        remoteStartedAt: null,
+        cancellationPolicy: 'none',
+        ...(outputRole === 'reference' ? { outputRole: 'reference' as const } : {}),
+        outputAssetIds: [],
+        error: {
+          code: 'submission_unknown',
+          messageKey: 'conversation.creativeStudio.jobs.errors.submissionUnknown',
+        },
+        retryOfJobId: null,
+        retryReason: null,
+        duplicateChargeAcknowledged: false,
+        duplicateChargeAcknowledgedAt: null,
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt,
+      };
+      next.scenes.scene_1.jobIds = ['job_seed'];
+      next.scenes.scene_1.reviewState = 'blocked';
+      return next;
+    });
+
+  it('derives one active Brief reference in main before persisting and submitting a plate', async () => {
+    const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
+    const validateRequest = vi.fn((request) => ({
+      ok: true as const,
+      normalized: {
+        aspectRatio: request.aspectRatio,
+        resolution: request.resolution,
+        durationSeconds: request.durationSeconds,
+      },
+    }));
+    const listGenerationRoutes = vi.fn(async () => conditioningCatalog(6));
+    const onProjectUpdated = vi.fn();
+    const harness = await createHarness(
+      {
+        ...imageAdapterWithSubmit(submit),
+        validateRequest,
+      },
+      {
+        scenes: [videoScene()],
+        routes: [imageRoute, videoRoute],
+        provider: referenceProvider,
+        catalog: listGenerationRoutes,
+        onProjectUpdated,
+      }
+    );
+    const imported = await importBriefReference(harness, 'cast', 1);
+    const withCast = (await harness.store.getProject(harness.project.id))!;
+    onProjectUpdated.mockClear();
+
+    const [job] = await harness.manager.submitScenes({
+      projectId: withCast.id,
+      expectedRevision: withCast.revision,
+      sceneIds: ['scene_1'],
+      routes: [imageRoute],
+      catalogVersion: 'catalog_1',
+      outputRole: 'reference',
+      referencePrompts: [{ sceneId: 'scene_1', prompt: 'A calm establishing plate' }],
+    });
+
+    expect(job?.referenceInputSnapshot).toEqual({
+      sourceVisualPrompt: 'A calm establishing plate',
+      conditioningReferenceAssetIds: [imported.id],
+      aspectRatio: '16:9',
+      resolution: '720p',
+    });
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    expect(submit.mock.calls[0]?.[0]).toMatchObject({
+      conditioningImageLimit: 6,
+      conditioningImages: [{ assetId: imported.id }],
+    });
+    expect(listGenerationRoutes).toHaveBeenCalledOnce();
+    expect(validateRequest).toHaveBeenCalled();
+    expect(onProjectUpdated).toHaveBeenCalled();
+  });
+
+  it.each([
+    { label: 'the route maximum', count: 3, maximum: 3 },
+    { label: 'the application maximum', count: 6, maximum: 6 },
+  ])('admits active Brief references at $label', async ({ count, maximum }) => {
+    const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
+    const harness = await createReferenceHarness(submit, {
+      catalog: async () => conditioningCatalog(maximum),
+    });
+    for (let index = 1; index <= count; index += 1) {
+      await importBriefReference(harness, index % 2 === 0 ? 'look' : 'cast', index);
+    }
+    const current = (await harness.store.getProject(harness.project.id))!;
+
+    await expect(
+      harness.manager.submitScenes({
+        projectId: current.id,
+        expectedRevision: current.revision,
+        sceneIds: ['scene_1'],
+        routes: [imageRoute],
+        catalogVersion: 'catalog_1',
+        outputRole: 'reference',
+        referencePrompts: [{ sceneId: 'scene_1', prompt: 'A calm establishing plate' }],
+      })
+    ).resolves.toMatchObject([{ outputRole: 'reference' }]);
+
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    expect(submit.mock.calls[0]?.[0].conditioningImages).toHaveLength(count);
+    expect(submit.mock.calls[0]?.[0].conditioningImageLimit).toBe(maximum);
+  });
+
+  it('preserves canonical cast/look order and the exact managed bytes without consuming the scene reference', async () => {
+    const observedInputs: Array<{ assetId: string; sha256: string }> = [];
+    const submit = vi.fn(async (request) => {
+      for (const input of request.conditioningImages ?? []) {
+        const chunks: Buffer[] = [];
+        for await (const chunk of await input.openStream()) chunks.push(Buffer.from(chunk));
+        observedInputs.push({
+          assetId: input.assetId,
+          sha256: createHash('sha256').update(Buffer.concat(chunks)).digest('hex'),
+        });
+      }
+      return { kind: 'complete' as const, outputs: [] };
+    });
+    const harness = await createReferenceHarness(submit, {
+      catalog: async () => conditioningCatalog(6),
+    });
+    const look = await importBriefReference(harness, 'look', 1);
+    const castLater = await importBriefReference(harness, 'cast', 2);
+    const castLatest = await importBriefReference(harness, 'cast', 3);
+    const scenePath = path.join(harness.rootDir, 'scene-reference.png');
+    await writeFile(scenePath, Buffer.concat([png, Buffer.from([99])]));
+    const beforeSceneReference = (await harness.store.getProject(harness.project.id))!;
+    const sceneReference = await harness.mediaStore.importReferenceFromPath({
+      projectId: beforeSceneReference.id,
+      sceneId: 'scene_1',
+      sourcePath: scenePath,
+      expectedRevision: beforeSceneReference.revision,
+    });
+    const current = (await harness.store.getProject(harness.project.id))!;
+
+    await harness.manager.submitScenes({
+      projectId: current.id,
+      expectedRevision: current.revision,
+      sceneIds: ['scene_1'],
+      routes: [imageRoute],
+      catalogVersion: 'catalog_1',
+      outputRole: 'reference',
+      referencePrompts: [{ sceneId: 'scene_1', prompt: 'A calm establishing plate' }],
+    });
+
+    await waitFor(() => expect(observedInputs).toHaveLength(3));
+    expect(observedInputs).toEqual(
+      [castLater, castLatest, look].map((asset) => ({ assetId: asset.id, sha256: asset.sha256 }))
+    );
+    expect(observedInputs.map(({ assetId }) => assetId).includes(sceneReference.id)).toBe(false);
+    expect(submit.mock.calls[0]?.[0]).not.toHaveProperty('firstFrame');
+  });
+
+  it.each([
+    { label: 'a zero-capacity route', maximum: 0, currentSafety: 6, count: 1 },
+    { label: 'route maximum plus one', maximum: 2, currentSafety: 6, count: 3 },
+    { label: 'a frozen route maximum above current safety', maximum: 6, currentSafety: 2, count: 1 },
+  ])(
+    'rejects $label before persistence, notification, or provider submit',
+    async ({ maximum, currentSafety, count }) => {
+      const submit = vi.fn();
+      const onProjectUpdated = vi.fn();
+      const harness = await createReferenceHarness(
+        submit,
+        {
+          catalog: async () => conditioningCatalog(maximum),
+          onProjectUpdated,
+        },
+        currentSafety
+      );
+      for (let index = 1; index <= count; index += 1) await importBriefReference(harness, 'cast', index);
+      const before = (await harness.store.getProject(harness.project.id))!;
+      onProjectUpdated.mockClear();
+
+      await expect(
+        harness.manager.submitScenes({
+          projectId: before.id,
+          expectedRevision: before.revision,
+          sceneIds: ['scene_1'],
+          routes: [imageRoute],
+          catalogVersion: 'catalog_1',
+          outputRole: 'reference',
+          referencePrompts: [{ sceneId: 'scene_1', prompt: 'A calm establishing plate' }],
+        })
+      ).rejects.toMatchObject({ code: 'invalid_route' });
+
+      expect(await harness.store.getProject(before.id)).toEqual(before);
+      expect(onProjectUpdated).not.toHaveBeenCalled();
+      expect(submit).not.toHaveBeenCalled();
+    }
+  );
+
+  it('rejects aggregate conditioning bytes above 30 MiB before persistence or provider submit', async () => {
+    const submit = vi.fn();
+    const onProjectUpdated = vi.fn();
+    const harness = await createReferenceHarness(submit, {
+      catalog: async () => conditioningCatalog(6),
+      onProjectUpdated,
+      decorateMediaStore: (mediaStore) => ({
+        ...mediaStore,
+        resolveProviderInput: async (projectId, assetId) => ({
+          ...(await mediaStore.resolveProviderInput(projectId, assetId)),
+          byteSize: 30 * 1024 * 1024 + 1,
+        }),
+      }),
+    });
+    await importBriefReference(harness, 'cast', 1);
+    const before = (await harness.store.getProject(harness.project.id))!;
+    onProjectUpdated.mockClear();
+
+    await expect(
+      harness.manager.submitScenes({
+        projectId: before.id,
+        expectedRevision: before.revision,
+        sceneIds: ['scene_1'],
+        routes: [imageRoute],
+        catalogVersion: 'catalog_1',
+        outputRole: 'reference',
+        referencePrompts: [{ sceneId: 'scene_1', prompt: 'A calm establishing plate' }],
+      })
+    ).rejects.toMatchObject({ code: 'invalid_route' });
+
+    expect(await harness.store.getProject(before.id)).toEqual(before);
+    expect(onProjectUpdated).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed active-Brief metadata before route lookup, persistence, notification or adapter activity', async () => {
+    const submit = vi.fn();
+    const validateRequest = vi.fn((request) => ({
+      ok: true as const,
+      normalized: {
+        aspectRatio: request.aspectRatio,
+        resolution: request.resolution,
+        durationSeconds: request.durationSeconds,
+      },
+    }));
+    const listGenerationRoutes = vi.fn(async () => catalog([imageRoute, videoRoute]));
+    const onProjectUpdated = vi.fn();
+    const harness = await createHarness(
+      {
+        ...imageAdapterWithSubmit(submit),
+        validateRequest,
+      },
+      {
+        scenes: [videoScene()],
+        routes: [imageRoute, videoRoute],
+        provider: referenceProvider,
+        catalog: listGenerationRoutes,
+        onProjectUpdated,
+      }
+    );
+    const sourcePath = path.join(harness.rootDir, 'malformed-cast.png');
+    await writeFile(sourcePath, png);
+    await harness.mediaStore.importReferenceFromPath({
+      projectId: harness.project.id,
+      briefReferenceRole: 'cast',
+      sourcePath,
+      expectedRevision: harness.project.revision,
+    });
+    const stored = (await harness.store.getProject(harness.project.id))!;
+    const malformed = structuredClone(stored);
+    const imported = Object.values(malformed.assets).find((asset) => asset.briefReferenceRole === 'cast')!;
+    delete imported.briefReferenceLabel;
+    const getProject = vi.spyOn(harness.store, 'getProject').mockResolvedValueOnce(malformed);
+    onProjectUpdated.mockClear();
+
+    await expect(
+      harness.manager.submitScenes({
+        projectId: malformed.id,
+        expectedRevision: malformed.revision,
+        sceneIds: ['scene_1'],
+        routes: [imageRoute],
+        catalogVersion: 'catalog_1',
+        outputRole: 'reference',
+        referencePrompts: [{ sceneId: 'scene_1', prompt: 'A calm establishing plate' }],
+      })
+    ).rejects.toMatchObject({ code: 'invalid_request' });
+
+    getProject.mockRestore();
+    expect(await harness.store.getProject(stored.id)).toEqual(stored);
+    expect(listGenerationRoutes).not.toHaveBeenCalled();
+    expect(onProjectUpdated).not.toHaveBeenCalled();
+    expect(validateRequest).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: 'missing',
+      mutate: (project: StudioProject, importedId: string) => {
+        const imported = project.assets[importedId]!;
+        delete project.assets[importedId];
+        project.assets.missing_reference = { ...imported, id: 'missing_reference' };
+      },
+    },
+    {
+      label: 'foreign',
+      mutate: (project: StudioProject, importedId: string) => {
+        project.assets[importedId]!.projectId = 'foreign_project';
+      },
+    },
+    {
+      label: 'scene-owned',
+      mutate: (project: StudioProject, importedId: string) => {
+        project.assets[importedId]!.sceneId = 'scene_1';
+      },
+    },
+    {
+      label: 'non-image',
+      mutate: (project: StudioProject, importedId: string) => {
+        project.assets[importedId]!.mediaKind = 'video';
+        project.assets[importedId]!.mimeType = 'video/mp4';
+      },
+    },
+  ])('rejects a $label canonical conditioning input with zero observable mutation', async ({ mutate }) => {
+    const submit = vi.fn();
+    const onProjectUpdated = vi.fn();
+    const harness = await createReferenceHarness(submit, {
+      catalog: async () => conditioningCatalog(6),
+      onProjectUpdated,
+    });
+    const imported = await importBriefReference(harness, 'cast', 1);
+    const stored = (await harness.store.getProject(harness.project.id))!;
+    const forged = structuredClone(stored);
+    mutate(forged, imported.id);
+    vi.spyOn(harness.store, 'getProject').mockResolvedValueOnce(forged);
+    onProjectUpdated.mockClear();
+
+    await expect(
+      harness.manager.submitScenes({
+        projectId: forged.id,
+        expectedRevision: forged.revision,
+        sceneIds: ['scene_1'],
+        routes: [imageRoute],
+        catalogVersion: 'catalog_1',
+        outputRole: 'reference',
+        referencePrompts: [{ sceneId: 'scene_1', prompt: 'A calm establishing plate' }],
+      })
+    ).rejects.toMatchObject({ code: 'invalid_request' });
+
+    expect(await harness.store.getProject(stored.id)).toEqual(stored);
+    expect(onProjectUpdated).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it('a reference job on a video scene resolves an image route', async () => {
+    const submit = vi.fn(async () => ({ kind: 'complete', outputs: [] }));
+    const harness = await createReferenceHarness(submit);
+
+    const [job] = await harness.manager.submitScenes({
+      projectId: harness.project.id,
+      expectedRevision: harness.project.revision,
+      sceneIds: ['scene_1'],
+      routes: [imageRoute],
+      catalogVersion: 'catalog_1',
+      outputRole: 'reference',
+      referencePrompts: [{ sceneId: 'scene_1', prompt: '  A calm establishing plate  ' }],
+    });
+
+    expect(job).toMatchObject({ id: 'job_1', outputRole: 'reference', provider: selectionFor(imageRoute) });
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    expect(submit.mock.calls[0]?.[0]).toMatchObject({
+      mediaKind: 'image',
+      prompt: buildFirstFramePrompt('A calm establishing plate', '16:9'),
+      durationSeconds: 8,
+      conditioningImages: [],
+      conditioningImageLimit: 0,
+    });
+    await waitFor(async () =>
+      expect((await harness.store.getProject(harness.project.id))?.jobs.job_1).toMatchObject({
+        status: 'failed',
+        error: { code: 'no_output' },
+      })
+    );
+  });
+
+  it('paints each scene in a reference batch with that scene own prompt', async () => {
+    // A reference plate is one scene's first frame. A batch that carried a single prompt could
+    // only ever describe one of its scenes, so the prompt each provider call receives has to be
+    // the one submitted for that scene - not the first, and not a shared one.
+    const submit = vi.fn(async () => ({ kind: 'complete', outputs: [] }));
+    const scenes = [
+      scene({ id: 'scene_1', mediaKind: 'video', durationSeconds: 8, visualPrompt: 'video_prompt' }),
+      scene({ id: 'scene_2', mediaKind: 'video', durationSeconds: 8, visualPrompt: 'video_prompt' }),
+    ];
+    const harness = await createReferenceHarness(submit, {
+      scenes,
+      routes: [imageRoute, videoRoute],
+      jobIds: ['job_1', 'job_2'],
+      idempotencyKeys: ['key_1', 'key_2'],
+    });
+
+    await harness.manager.submitScenes({
+      projectId: harness.project.id,
+      expectedRevision: harness.project.revision,
+      sceneIds: ['scene_1', 'scene_2'],
+      routes: [imageRoute, { ...imageRoute, sceneId: 'scene_2' }],
+      catalogVersion: 'catalog_1',
+      outputRole: 'reference',
+      referencePrompts: [
+        { sceneId: 'scene_1', prompt: 'A calm establishing plate' },
+        { sceneId: 'scene_2', prompt: 'A rain-slicked alley at dusk' },
+      ],
+    });
+
+    await waitFor(() => expect(submit).toHaveBeenCalledTimes(2));
+    expect(submit.mock.calls.map((call) => (call[0] as { prompt: string }).prompt)).toEqual([
+      buildFirstFramePrompt('A calm establishing plate', '16:9'),
+      buildFirstFramePrompt('A rain-slicked alley at dusk', '16:9'),
+    ]);
+  });
+
+  it('a take job still requires the route kind to match the scene', async () => {
+    const submit = vi.fn();
+    const harness = await createReferenceHarness(submit);
+
+    await expect(
+      harness.manager.submitScenes({
+        projectId: harness.project.id,
+        expectedRevision: harness.project.revision,
+        sceneIds: ['scene_1'],
+        routes: [imageRoute],
+        catalogVersion: 'catalog_1',
+      })
+    ).rejects.toMatchObject({ code: 'invalid_route' });
+
+    expect(submit).not.toHaveBeenCalled();
+    expect((await harness.store.getProject(harness.project.id))?.jobs).toEqual({});
+  });
+
+  it('a reference job ignores scene.referenceAssetId', async () => {
+    const submit = vi.fn(async () => ({ kind: 'complete', outputs: [] }));
+    const harness = await createReferenceHarness(submit, {
+      catalog: async () => {
+        const built = catalog([imageRoute, videoRoute]);
+        built.routes.find((candidate) => candidate.kind === 'image')!.constraints.supportsFirstFrame = false;
+        return built;
+      },
+    });
+    const sourcePath = path.join(harness.rootDir, 'reference.png');
+    await writeFile(sourcePath, png);
+    await harness.mediaStore.importReferenceFromPath({
+      projectId: harness.project.id,
+      sceneId: 'scene_1',
+      sourcePath,
+      expectedRevision: harness.project.revision,
+    });
+    const withReference = (await harness.store.getProject(harness.project.id))!;
+    expect(withReference.scenes.scene_1.referenceAssetId).not.toBeNull();
+    const resolveProviderInput = vi.spyOn(harness.mediaStore, 'resolveProviderInput');
+
+    await expect(
+      harness.manager.submitScenes({
+        projectId: withReference.id,
+        expectedRevision: withReference.revision,
+        sceneIds: ['scene_1'],
+        routes: [imageRoute],
+        catalogVersion: 'catalog_1',
+        outputRole: 'reference',
+        referencePrompts: [{ sceneId: 'scene_1', prompt: 'A calm establishing plate' }],
+      })
+    ).resolves.toMatchObject([{ id: 'job_1', outputRole: 'reference' }]);
+
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    expect(submit.mock.calls[0]?.[0]).not.toHaveProperty('firstFrame');
+    expect(resolveProviderInput).not.toHaveBeenCalled();
+    await waitFor(async () =>
+      expect((await harness.store.getProject(harness.project.id))?.jobs.job_1).toMatchObject({
+        status: 'failed',
+        error: { code: 'no_output' },
+      })
+    );
+  });
+
+  it.each([
+    { label: 'absent', referencePrompts: undefined },
+    { label: 'blank', referencePrompts: [{ sceneId: 'scene_1', prompt: '   ' }] },
+    { label: 'other-scene', referencePrompts: [{ sceneId: 'scene_2', prompt: 'A calm establishing plate' }] },
+  ])('a reference job with a $label referencePrompt is rejected', async ({ referencePrompts }) => {
+    const submit = vi.fn();
+    const listGenerationRoutes = vi.fn(async () => catalog([imageRoute, videoRoute]));
+    const harness = await createReferenceHarness(submit, { catalog: listGenerationRoutes });
+
+    await expect(
+      harness.manager.submitScenes({
+        projectId: harness.project.id,
+        expectedRevision: harness.project.revision,
+        sceneIds: ['scene_1'],
+        routes: [imageRoute],
+        catalogVersion: 'stale_catalog',
+        outputRole: 'reference',
+        ...(referencePrompts === undefined ? {} : { referencePrompts }),
+      })
+    ).rejects.toMatchObject({ code: 'invalid_request' });
+
+    expect(submit).not.toHaveBeenCalled();
+    expect(listGenerationRoutes).not.toHaveBeenCalled();
+    expect((await harness.store.getProject(harness.project.id))?.jobs).toEqual({});
+  });
+
+  it('applies the reference prompt limit after trimming', async () => {
+    const submit = vi.fn(async () => ({ kind: 'complete', outputs: [] }));
+    const harness = await createReferenceHarness(submit);
+    const referencePrompt = `${'a'.repeat(4090)}${' '.repeat(10)}`;
+
+    await expect(
+      harness.manager.submitScenes({
+        projectId: harness.project.id,
+        expectedRevision: harness.project.revision,
+        sceneIds: ['scene_1'],
+        routes: [imageRoute],
+        catalogVersion: 'catalog_1',
+        outputRole: 'reference',
+        referencePrompts: [{ sceneId: 'scene_1', prompt: referencePrompt }],
+      })
+    ).resolves.toMatchObject([{ id: 'job_1', outputRole: 'reference' }]);
+
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    expect(submit.mock.calls[0]?.[0].prompt).toBe(buildFirstFramePrompt('a'.repeat(4090), '16:9'));
+    await waitFor(async () =>
+      expect((await harness.store.getProject(harness.project.id))?.jobs.job_1).toMatchObject({
+        status: 'failed',
+        error: { code: 'no_output' },
+      })
+    );
+  });
+
+  it('reference lineage does not cross-fire take lineage', async () => {
+    const takeSeeded = await createReferenceHarness(vi.fn());
+    const afterTake = await seedUnknownSubmission(takeSeeded, 'take');
+
+    await expect(
+      takeSeeded.manager.submitScenes({
+        projectId: afterTake.id,
+        expectedRevision: afterTake.revision,
+        sceneIds: ['scene_1'],
+        routes: [videoRoute],
+        catalogVersion: 'catalog_1',
+      })
+    ).rejects.toMatchObject({ code: 'duplicate_charge_acknowledgement_required' });
+
+    await expect(
+      takeSeeded.manager.submitScenes({
+        projectId: afterTake.id,
+        expectedRevision: afterTake.revision,
+        sceneIds: ['scene_1'],
+        routes: [imageRoute],
+        catalogVersion: 'catalog_1',
+        outputRole: 'reference',
+        referencePrompts: [{ sceneId: 'scene_1', prompt: 'A calm establishing plate' }],
+      })
+    ).rejects.toMatchObject({ code: 'busy' });
+
+    const referenceSeeded = await createReferenceHarness(vi.fn());
+    const afterReference = await seedUnknownSubmission(referenceSeeded, 'reference');
+
+    await expect(
+      referenceSeeded.manager.submitScenes({
+        projectId: afterReference.id,
+        expectedRevision: afterReference.revision,
+        sceneIds: ['scene_1'],
+        routes: [imageRoute],
+        catalogVersion: 'catalog_1',
+        outputRole: 'reference',
+        referencePrompts: [{ sceneId: 'scene_1', prompt: 'A calm establishing plate' }],
+      })
+    ).rejects.toMatchObject({ code: 'duplicate_charge_acknowledgement_required' });
+
+    await expect(
+      referenceSeeded.manager.submitScenes({
+        projectId: afterReference.id,
+        expectedRevision: afterReference.revision,
+        sceneIds: ['scene_1'],
+        routes: [videoRoute],
+        catalogVersion: 'catalog_1',
+      })
+    ).rejects.toMatchObject({ code: 'busy' });
+  });
+
+  it('refuses to retry a reference job rather than silently retrying it as a take', async () => {
+    const submit = vi.fn();
+    const harness = await createReferenceHarness(submit);
+    const seeded = await harness.store.updateProject(harness.project.id, (project) => {
+      const next = structuredClone(project);
+      next.jobs.job_reference = {
+        id: 'job_reference',
+        projectId: project.id,
+        sceneId: 'scene_1',
+        status: 'failed',
+        provider: selectionFor(imageRoute),
+        idempotencyKey: 'key_reference',
+        providerJobId: null,
+        remoteStartedAt: null,
+        cancellationPolicy: 'none',
+        outputRole: 'reference',
+        outputAssetIds: [],
+        error: { code: 'unknown', messageKey: 'conversation.creativeStudio.jobs.errors.unknown' },
+        retryOfJobId: null,
+        retryReason: null,
+        duplicateChargeAcknowledged: false,
+        duplicateChargeAcknowledgedAt: null,
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt,
+      };
+      next.scenes.scene_1.jobIds = ['job_reference'];
+      next.scenes.scene_1.reviewState = 'blocked';
+      return next;
+    });
+
+    await expect(
+      harness.manager.retryJob({
+        projectId: seeded.id,
+        jobId: 'job_reference',
+        expectedRevision: seeded.revision,
+      })
+    ).rejects.toMatchObject({ code: 'invalid_request' });
+
+    expect(submit).not.toHaveBeenCalled();
+    expect(Object.keys((await harness.store.getProject(harness.project.id))!.jobs)).toEqual(['job_reference']);
+  });
+
+  it('uses the durable reviewed snapshot when a reference job completes after restart and project drift', async () => {
+    const firstPoll = deferred<ProviderJobSnapshot>();
+    const submit = vi.fn(async () => ({ kind: 'remote' as const, providerJobId: 'remote_reference' }));
+    const firstAdapter: GenerationProviderAdapter = {
+      ...imageAdapterWithSubmit(submit),
+      poll: vi.fn(async (_providerJobId, _provider, signal) => {
+        rejectDeferredOnAbort(firstPoll, signal);
+        return firstPoll.promise;
+      }),
+    };
+    const harness = await createHarness(firstAdapter, {
+      scenes: [videoScene()],
+      routes: [imageRoute, videoRoute],
+      provider: referenceProvider,
+      catalog: async () => conditioningCatalog(6),
+      sleep: async () => undefined,
+    });
+    const originalCast = await importBriefReference(harness, 'cast', 1);
+    const admitted = (await harness.store.getProject(harness.project.id))!;
+
+    await harness.manager.submitScenes({
+      projectId: admitted.id,
+      expectedRevision: admitted.revision,
+      sceneIds: ['scene_1'],
+      routes: [imageRoute],
+      catalogVersion: 'catalog_1',
+      outputRole: 'reference',
+      referencePrompts: [{ sceneId: 'scene_1', prompt: '  Reviewed one-off plate  ' }],
+    });
+    await waitFor(() => expect(firstAdapter.poll).toHaveBeenCalled());
+    const beforeRestart = (await harness.store.getProject(admitted.id))!;
+    expect(beforeRestart.jobs.job_1.referenceInputSnapshot).toEqual({
+      sourceVisualPrompt: 'Reviewed one-off plate',
+      conditioningReferenceAssetIds: [originalCast.id],
+      aspectRatio: '16:9',
+      resolution: '720p',
+    });
+
+    await harness.manager.dispose();
+    const newLook = await importBriefReference(harness, 'look', 2);
+    await harness.store.updateProject(admitted.id, (project) => {
+      const next = structuredClone(project);
+      delete next.assets[originalCast.id].briefReferenceRole;
+      delete next.assets[originalCast.id].briefReferenceLabel;
+      next.scenes.scene_1.visualPrompt = 'Changed scene prompt';
+      next.aspectRatio = '1:1';
+      next.resolution = '1080p';
+      return next;
+    });
+    const outputPath = path.join(harness.rootDir, 'recovered-reference.png');
+    await writeFile(outputPath, png);
+    const recoveredAdapter: GenerationProviderAdapter = {
+      ...imageAdapterWithSubmit(vi.fn()),
+      poll: vi.fn(async () => ({
+        status: 'succeeded' as const,
+        outputs: [
+          {
+            mediaKind: 'image' as const,
+            role: 'primary' as const,
+            source: { kind: 'file' as const, path: outputPath },
+            mimeType: 'image/png' as const,
+          },
+        ],
+      })),
+    };
+    const videoSubmit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
+    const recoveredVideoAdapter = controllableAdapter('weprompt-media-gateway-v1', { submit: videoSubmit });
+    harness.manager = createStudioJobManager({
+      store: harness.store,
+      mediaStore: harness.mediaStore,
+      providerResolver: {
+        listConnectionCandidates: async () => [],
+        listGenerationRoutes: async () => conditioningCatalog(6),
+        isGenerationRouteAvailable: async () => true,
+      },
+      adapters: new Map([
+        [recoveredAdapter.id, recoveredAdapter],
+        [recoveredVideoAdapter.id, recoveredVideoAdapter],
+      ]),
+      listProviders: async () => [referenceProvider],
+      sleep: async () => undefined,
+    });
+
+    await harness.manager.resumePendingJobs();
+    await waitFor(async () =>
+      expect((await harness.store.getProject(admitted.id))?.jobs.job_1.status).toBe('succeeded')
+    );
+    const completed = (await harness.store.getProject(admitted.id))!;
+    const plate = completed.assets[completed.jobs.job_1.outputAssetIds[0]!]!;
+    expect(plate).toMatchObject({
+      sourceVisualPrompt: 'Reviewed one-off plate',
+      sourceReferenceAssetIds: [originalCast.id],
+      sourceAspectRatio: '16:9',
+      sourceResolution: '720p',
+    });
+    expect(plate.sourceReferenceAssetIds).not.toContain(newLook.id);
+
+    const readyForClip = await harness.store.updateProject(completed.id, (project) => ({
+      ...project,
+      aspectRatio: '16:9',
+      resolution: '720p',
+    }));
+    await harness.manager.submitScenes({
+      projectId: readyForClip.id,
+      expectedRevision: readyForClip.revision,
+      sceneIds: ['scene_1'],
+      routes: [videoRoute],
+      catalogVersion: 'catalog_1',
+    });
+    await waitFor(() => expect(videoSubmit).toHaveBeenCalledOnce());
+    expect(videoSubmit.mock.calls[0]?.[0]).toMatchObject({ firstFrame: { assetId: plate.id } });
+    expect(videoSubmit.mock.calls[0]?.[0]).not.toHaveProperty('conditioningImages');
+    expect(videoSubmit.mock.calls[0]?.[0]).not.toHaveProperty('conditioningImageLimit');
+  });
+
+  it('retries a failed reference download against the durable snapshot without leaving a partial plate', async () => {
+    const validOutputPath = path.join(os.tmpdir(), `studio-reference-retry-${Date.now()}.png`);
+    await writeFile(validOutputPath, png);
+    let pollAttempt = 0;
+    const submit = vi.fn(async () => ({ kind: 'remote' as const, providerJobId: 'remote_download' }));
+    const adapter: GenerationProviderAdapter = {
+      ...imageAdapterWithSubmit(submit),
+      poll: vi.fn(async () => {
+        pollAttempt += 1;
+        return {
+          status: 'succeeded' as const,
+          outputs: [
+            {
+              mediaKind: 'image' as const,
+              role: 'primary' as const,
+              source: {
+                kind: 'file' as const,
+                path: pollAttempt === 1 ? '/definitely/missing/reference-retry.png' : validOutputPath,
+              },
+              mimeType: 'image/png' as const,
+            },
+          ],
+        };
+      }),
+    };
+    const harness = await createHarness(adapter, {
+      scenes: [videoScene()],
+      routes: [imageRoute, videoRoute],
+      provider: referenceProvider,
+      catalog: async () => conditioningCatalog(6),
+      sleep: async () => undefined,
+    });
+    const originalCast = await importBriefReference(harness, 'cast', 1);
+    const admitted = (await harness.store.getProject(harness.project.id))!;
+
+    await harness.manager.submitScenes({
+      projectId: admitted.id,
+      expectedRevision: admitted.revision,
+      sceneIds: ['scene_1'],
+      routes: [imageRoute],
+      catalogVersion: 'catalog_1',
+      outputRole: 'reference',
+      referencePrompts: [{ sceneId: 'scene_1', prompt: 'Reviewed retry plate' }],
+    });
+    await waitFor(async () =>
+      expect((await harness.store.getProject(admitted.id))?.jobs.job_1).toMatchObject({
+        status: 'failed',
+        error: { code: 'download_failed' },
+      })
+    );
+    const afterFailure = (await harness.store.getProject(admitted.id))!;
+    expect(afterFailure.jobs.job_1.outputAssetIds).toEqual([]);
+    expect(
+      Object.values(afterFailure.assets).filter((asset) => asset.managedAsset.collection === 'references')
+    ).toEqual([]);
+    const drifted = await harness.store.updateProject(admitted.id, (project) => {
+      const next = structuredClone(project);
+      next.scenes.scene_1.visualPrompt = 'Changed after failed download';
+      next.aspectRatio = '1:1';
+      next.resolution = '1080p';
+      return next;
+    });
+
+    await harness.manager.retryDownload({
+      projectId: drifted.id,
+      jobId: 'job_1',
+      expectedRevision: drifted.revision,
+    });
+
+    const completed = (await harness.store.getProject(admitted.id))!;
+    const plate = completed.assets[completed.jobs.job_1.outputAssetIds[0]!]!;
+    expect(plate).toMatchObject({
+      sourceVisualPrompt: 'Reviewed retry plate',
+      sourceReferenceAssetIds: [originalCast.id],
+      sourceAspectRatio: '16:9',
+      sourceResolution: '720p',
+    });
+    await rm(validOutputPath, { force: true });
+  });
+});
+
 describe('StudioJobManager scheduling', () => {
+  it('uses image semaphore capacity for reference jobs on video scenes', async () => {
+    const scenes = Array.from({ length: 3 }, (_, index) =>
+      scene({
+        id: `scene_${index + 1}`,
+        title: `Scene ${index + 1}`,
+        visualPrompt: `video_prompt_${index + 1}`,
+        mediaKind: 'video',
+      })
+    );
+    const routes = scenes.map(
+      (candidate): StudioResolvedSceneRouteSnapshot => ({
+        sceneId: candidate.id,
+        providerId: provider.id,
+        adapterId: 'weprompt-image-v1',
+        model: 'image-model',
+        kind: 'image',
+      })
+    );
+    const gates: Array<Deferred<ProviderSubmitResult>> = [];
+    let active = 0;
+    let maximumActive = 0;
+    const adapter = controllableAdapter('weprompt-image-v1', {
+      submit: async () => {
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        const gate = deferred<ProviderSubmitResult>();
+        gates.push(gate);
+        try {
+          return await gate.promise;
+        } finally {
+          active -= 1;
+        }
+      },
+    });
+    const harness = await createHarness(adapter, {
+      scenes,
+      routes,
+      jobIds: ['job_1', 'job_2', 'job_3'],
+      idempotencyKeys: ['key_1', 'key_2', 'key_3'],
+    });
+
+    await harness.manager.submitScenes({
+      projectId: harness.project.id,
+      expectedRevision: harness.project.revision,
+      sceneIds: scenes.map((candidate) => candidate.id),
+      routes,
+      catalogVersion: 'catalog_1',
+      outputRole: 'reference',
+      referencePrompts: scenes.map((candidate) => ({
+        sceneId: candidate.id,
+        prompt: `A reference plate for ${candidate.id}`,
+      })),
+    });
+
+    await waitFor(() => expect(gates).toHaveLength(2));
+    gates[0]!.reject(Object.assign(new Error('provider failed'), { code: 'no_output' }));
+    await waitFor(() => expect(gates).toHaveLength(3));
+    expect(maximumActive).toBe(2);
+    for (const gate of gates) gate.reject(Object.assign(new Error('provider failed'), { code: 'no_output' }));
+    await waitFor(async () => {
+      const current = await harness.store.getProject(harness.project.id);
+      expect(Object.values(current?.jobs ?? {}).every((job) => job.status === 'failed')).toBe(true);
+    });
+  });
+
   it.each([
     { kind: 'image' as const, adapterId: 'weprompt-image-v1' as const, capacity: 2, count: 3 },
     { kind: 'video' as const, adapterId: 'weprompt-media-gateway-v1' as const, capacity: 1, count: 2 },
@@ -5302,5 +6538,282 @@ describe('StudioJobManager provider failures', () => {
         outputAssetIds: [],
       })
     );
+  });
+});
+
+describe('StudioJobManager pinned rule gate', () => {
+  // Same shape as the file's other local adapter helpers (:1365-1377, :1670-1682): the id must be
+  // 'weprompt-image-v1' because that is what `route` resolves to.
+  const adapterWithSubmit = (submit: ReturnType<typeof vi.fn>): GenerationProviderAdapter => ({
+    id: 'weprompt-image-v1',
+    validateConnection: async () => ({ ok: true }),
+    validateRequest: (request) => ({
+      ok: true,
+      normalized: {
+        aspectRatio: request.aspectRatio,
+        resolution: request.resolution,
+        durationSeconds: request.durationSeconds,
+      },
+    }),
+    submit,
+  });
+
+  const enforcedRule: StudioBriefRule = {
+    id: 'rule_1',
+    scope: 'project',
+    text: 'No competitor logos.',
+    predicate: { kind: 'forbidden_terms', terms: ['acme'] },
+    createdAt: '2026-08-13T00:00:00.000Z',
+  };
+
+  const nonmatchingRule: StudioBriefRule = {
+    id: 'rule_2',
+    scope: 'project',
+    text: 'No horses.',
+    predicate: { kind: 'forbidden_terms', terms: ['horse'] },
+    createdAt: '2026-08-13T00:00:00.000Z',
+  };
+
+  /** Pins rules the only way anything pins them: through the store, which bumps the revision. */
+  const withRules = (harness: Harness, rules: StudioBriefRule[]): Promise<StudioProject> =>
+    harness.store.updateProject(harness.project.id, (current) => ({ ...current, rules }));
+
+  it('refuses a submission whose visual prompt breaks an enforced rule, before anything is spent', async () => {
+    const submit = vi.fn();
+    const harness = await createHarness(adapterWithSubmit(submit), {
+      scenes: [scene({ visualPrompt: 'An ACME billboard at dusk' })],
+    });
+    const guarded = await withRules(harness, [enforcedRule, nonmatchingRule]);
+
+    await expect(
+      harness.manager.submitScenes({
+        projectId: guarded.id,
+        expectedRevision: guarded.revision,
+        sceneIds: ['scene_1'],
+        routes: [route],
+        catalogVersion: 'catalog_1',
+      })
+    ).rejects.toMatchObject({ code: 'rule_breach' });
+
+    expect(submit).not.toHaveBeenCalled();
+    // The gate sits before persistPreparedJobs (:1300) and trackRun (:1302), so the refusal leaves
+    // no job record and no scene linkage behind either.
+    const after = (await harness.store.getProject(guarded.id))!;
+    expect(Object.keys(after.jobs)).toEqual([]);
+    expect(after.scenes.scene_1.jobIds).toEqual([]);
+  });
+
+  it('refuses a reference plate whose own prompt breaks a rule, which the durable record never holds', async () => {
+    const submit = vi.fn();
+    const harness = await createHarness(adapterWithSubmit(submit), {
+      scenes: [scene({ visualPrompt: 'A clean studio plate' })],
+    });
+    const guarded = await withRules(harness, [enforcedRule]);
+
+    await expect(
+      harness.manager.submitScenes({
+        projectId: guarded.id,
+        expectedRevision: guarded.revision,
+        sceneIds: ['scene_1'],
+        routes: [route],
+        catalogVersion: 'catalog_1',
+        outputRole: 'reference',
+        referencePrompts: [{ sceneId: 'scene_1', prompt: 'An ACME logo, centred' }],
+      })
+    ).rejects.toMatchObject({ code: 'rule_breach' });
+
+    expect(submit).not.toHaveBeenCalled();
+    // This is the test that justifies the gate's placement: scene.visualPrompt is clean, the breach
+    // exists only in baseRequest.prompt, and a store-side check would wave this through.
+    expect((await harness.store.getProject(guarded.id))!.scenes.scene_1.visualPrompt).toBe('A clean studio plate');
+  });
+
+  it('refuses a retry that would resend a breaching prompt', async () => {
+    const submit = vi.fn();
+    const harness = await createHarness(adapterWithSubmit(submit), {
+      scenes: [scene({ visualPrompt: 'An ACME billboard at dusk' })],
+      jobIds: ['job_2'],
+      idempotencyKeys: ['key_2'],
+    });
+    // Seeded exactly as the file's other retry tests do (:4001-4028): a failed job written straight
+    // onto the record, plus the rule pinned in the same write. That is the real sequence — the user
+    // reads the failure, pins the rule, and only then presses Retry.
+    const failed = await harness.store.updateProject(harness.project.id, (project) => {
+      const next = structuredClone(project);
+      next.jobs.job_1 = {
+        id: 'job_1',
+        projectId: project.id,
+        sceneId: 'scene_1',
+        status: 'failed',
+        provider: selectionFor(route),
+        idempotencyKey: 'key_1',
+        providerJobId: null,
+        cancellationPolicy: 'none',
+        outputAssetIds: [],
+        error: { code: 'no_output', messageKey: 'conversation.creativeStudio.jobs.errors.noOutput' },
+        retryOfJobId: null,
+        retryReason: null,
+        duplicateChargeAcknowledged: false,
+        duplicateChargeAcknowledgedAt: null,
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt,
+      };
+      next.scenes.scene_1.jobIds.push('job_1');
+      next.scenes.scene_1.reviewState = 'blocked';
+      next.rules = [enforcedRule];
+      return next;
+    });
+
+    await expect(
+      harness.manager.retryJob({ projectId: failed.id, jobId: 'job_1', expectedRevision: failed.revision })
+    ).rejects.toMatchObject({ code: 'rule_breach' });
+
+    expect(submit).not.toHaveBeenCalled();
+    expect((await harness.store.getProject(failed.id))!.jobs.job_2).toBeUndefined();
+  });
+
+  it('lets a visual prompt through when an enforced rule does not match', async () => {
+    const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
+    const harness = await createHarness(adapterWithSubmit(submit), {
+      scenes: [scene({ visualPrompt: 'A generic kit on a plain background' })],
+    });
+    const guarded = await withRules(harness, [enforcedRule]);
+
+    const [job] = await harness.manager.submitScenes({
+      projectId: guarded.id,
+      expectedRevision: guarded.revision,
+      sceneIds: ['scene_1'],
+      routes: [route],
+      catalogVersion: 'catalog_1',
+    });
+
+    expect(job).toMatchObject({ id: 'job_1', sceneId: 'scene_1' });
+    expect((await harness.store.getProject(guarded.id))!.jobs.job_1).toBeDefined();
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+  });
+
+  it('lets a reference plate through when only the app-authored prefix matches an enforced rule', async () => {
+    const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
+    const subject = 'A red bicycle leaning on a wall at dawn';
+    const harness = await createHarness(adapterWithSubmit(submit), {
+      scenes: [scene({ visualPrompt: subject })],
+    });
+    const guarded = await withRules(harness, [
+      {
+        id: 'rule_1',
+        scope: 'project',
+        text: 'No on-screen text.',
+        predicate: { kind: 'forbidden_terms', terms: ['text'] },
+        createdAt: '2026-08-13T00:00:00.000Z',
+      },
+    ]);
+
+    const [job] = await harness.manager.submitScenes({
+      projectId: guarded.id,
+      expectedRevision: guarded.revision,
+      sceneIds: ['scene_1'],
+      routes: [route],
+      catalogVersion: 'catalog_1',
+      outputRole: 'reference',
+      referencePrompts: [{ sceneId: 'scene_1', prompt: buildFirstFramePrompt(subject, guarded.aspectRatio) }],
+    });
+
+    expect(job).toMatchObject({ id: 'job_1', sceneId: 'scene_1', outputRole: 'reference' });
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+  });
+
+  it('evaluates only the authored subject before adding conditioning-role instructions', async () => {
+    const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
+    const harness = await createHarness(adapterWithSubmit(submit), {
+      catalog: async () => {
+        const built = catalog();
+        built.routes[0]!.constraints.maxConditioningImages = 6;
+        return built;
+      },
+    });
+    const sourcePath = path.join(harness.rootDir, 'Hero headshot.png');
+    await writeFile(sourcePath, png);
+    await harness.mediaStore.importReferenceFromPath({
+      projectId: harness.project.id,
+      briefReferenceRole: 'cast',
+      sourcePath,
+      expectedRevision: harness.project.revision,
+    });
+    const current = (await harness.store.getProject(harness.project.id))!;
+    const guarded = await harness.store.updateProject(current.id, (project) => ({
+      ...project,
+      rules: [
+        {
+          id: 'rule_instruction',
+          scope: 'project',
+          text: 'No conditioning instructions in authored content.',
+          predicate: { kind: 'forbidden_terms', terms: ['conditioning image position'] },
+          createdAt: '2026-08-13T00:00:00.000Z',
+        },
+      ],
+    }));
+
+    await harness.manager.submitScenes({
+      projectId: guarded.id,
+      expectedRevision: guarded.revision,
+      sceneIds: ['scene_1'],
+      routes: [route],
+      catalogVersion: 'catalog_1',
+      outputRole: 'reference',
+      referencePrompts: [{ sceneId: 'scene_1', prompt: buildFirstFramePrompt('A quiet hero', '16:9') }],
+    });
+
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    expect(submit.mock.calls[0]?.[0].prompt).toContain('Conditioning image position 1 is a cast reference.');
+    expect(submit.mock.calls[0]?.[0].prompt).not.toContain('Hero headshot');
+    expect(submit.mock.calls[0]?.[0].prompt).not.toContain(harness.rootDir);
+  });
+
+  it('refuses a visual prompt when only the second pinned rule matches', async () => {
+    const submit = vi.fn();
+    const harness = await createHarness(adapterWithSubmit(submit), {
+      scenes: [scene({ visualPrompt: 'An ACME billboard at dusk' })],
+    });
+    const guarded = await withRules(harness, [nonmatchingRule, enforcedRule]);
+
+    await expect(
+      harness.manager.submitScenes({
+        projectId: guarded.id,
+        expectedRevision: guarded.revision,
+        sceneIds: ['scene_1'],
+        routes: [route],
+        catalogVersion: 'catalog_1',
+      })
+    ).rejects.toMatchObject({ code: 'rule_breach' });
+
+    expect(submit).not.toHaveBeenCalled();
+    expect(Object.keys((await harness.store.getProject(guarded.id))!.jobs)).toEqual([]);
+  });
+
+  it('lets a prompt through when the rule carries no predicate', async () => {
+    const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
+    const harness = await createHarness(adapterWithSubmit(submit), {
+      scenes: [scene({ visualPrompt: 'A generic kit on a plain background' })],
+    });
+    const guarded = await withRules(harness, [
+      {
+        id: 'rule_1',
+        scope: 'project',
+        text: 'Keep the kits generic.',
+        predicate: null,
+        createdAt: '2026-08-13T00:00:00.000Z',
+      },
+    ]);
+
+    const [job] = await harness.manager.submitScenes({
+      projectId: guarded.id,
+      expectedRevision: guarded.revision,
+      sceneIds: ['scene_1'],
+      routes: [route],
+      catalogVersion: 'catalog_1',
+    });
+
+    expect(job).toMatchObject({ id: 'job_1', sceneId: 'scene_1' });
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
   });
 });

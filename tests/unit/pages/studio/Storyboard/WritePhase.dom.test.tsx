@@ -4,8 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { Input } from '@arco-design/web-react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -16,16 +19,58 @@ import type {
   StudioRouteCatalog,
   StudioScene,
 } from '@/common/types/project/creativeStudioTypes';
+import type { TChatConversation } from '@/common/config/storage';
+import { BriefConversationProvider } from '@renderer/pages/studio/components/Shell/BriefConversationContext';
 import { WritePhase } from '@renderer/pages/studio/components/PhaseShell/phases/WritePhase';
+import type { StudioLayoutMode } from '@renderer/pages/studio/components/PhaseShell/useStudioLayoutMode';
 import type { WritePhaseController } from '@renderer/pages/studio/components/PhaseShell/types';
 import type { UseStoryboardEditorResult } from '@renderer/pages/studio/hooks/useStoryboardEditor';
 import type { UseStudioModelsResult } from '@renderer/pages/studio/hooks/useStudioModels';
+
+const writeConversationHarness = vi.hoisted(() => ({
+  result: {
+    state: { kind: 'absent' } as { kind: string; conversation?: TChatConversation },
+    errorMessageKey: null,
+    recreate: vi.fn(),
+  },
+  messages: [] as string[],
+  mountedConversationIds: [] as string[],
+  providedProjectIds: [] as string[],
+}));
+
+vi.mock('@renderer/pages/studio/components/PhaseShell/phases/brief/useBriefConversation', () => ({
+  useBriefConversation: (provided: { id: string }) => {
+    writeConversationHarness.providedProjectIds.push(provided.id);
+    return writeConversationHarness.result;
+  },
+}));
+vi.mock('@renderer/pages/studio/components/PhaseShell/phases/StudioConversationSurface', () => ({
+  StudioConversationSurface: ({ conversation }: { conversation: TChatConversation }) => {
+    writeConversationHarness.mountedConversationIds.push(conversation.id);
+    return (
+      <div>
+        {writeConversationHarness.messages.map((message) => (
+          <p key={message}>{message}</p>
+        ))}
+      </div>
+    );
+  },
+}));
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string) => (key === 'common.unit.second_short' ? 's' : key),
   }),
 }));
+
+// jsdom measures every element at 0 width, so the real shell would always pick `compact` and the
+// docked Director pane could never be exercised. The mode is driven directly instead.
+const shellLayout = vi.hoisted(() => ({ mode: 'inline' as 'inline' | 'drawer' | 'compact' }));
+vi.mock('@renderer/pages/studio/components/PhaseShell/useStudioLayoutMode', () => ({
+  useStudioLayoutMode: () => ({ containerRef: { current: null }, layoutMode: shellLayout.mode }),
+}));
+
+const { StudioShell } = await import('@renderer/pages/studio/components/Shell/StudioShell');
 
 const observedTargets: Element[] = [];
 
@@ -124,6 +169,7 @@ const catalog: StudioRouteCatalog = {
       providerId: 'image-provider',
       providerName: 'Image Provider',
       model: 'image-model',
+      integrationLabelKey: 'imageApi',
       health: 'available',
       kind: 'image',
       constraints: {
@@ -132,9 +178,11 @@ const catalog: StudioRouteCatalog = {
         minDurationSeconds: 2,
         maxDurationSeconds: 8,
         supportsFirstFrame: true,
+        maxConditioningImages: 0,
         silentOutput: true,
       },
     },
+    selectionIssue: null,
     options: [],
   },
   video: {
@@ -145,6 +193,7 @@ const catalog: StudioRouteCatalog = {
       providerId: 'video-provider',
       providerName: 'Video Provider',
       model: 'video-model',
+      integrationLabelKey: 'selfHostedVideoGateway',
       health: 'available',
       kind: 'video',
       constraints: {
@@ -153,9 +202,11 @@ const catalog: StudioRouteCatalog = {
         minDurationSeconds: 4,
         maxDurationSeconds: 12,
         supportsFirstFrame: true,
+        maxConditioningImages: 0,
         silentOutput: true,
       },
     },
+    selectionIssue: null,
     options: [],
   },
   catalogVersion: '0123456789abcdef',
@@ -220,6 +271,7 @@ const models = (overrides: Partial<UseStudioModelsResult> = {}): UseStudioModels
   catalog,
   loading: false,
   errorMessageKey: null,
+  selectionIssue: null,
   pendingRole: null,
   refresh: vi.fn(async () => {}),
   updateSelection: vi.fn(async () => true),
@@ -241,36 +293,174 @@ const controller = (overrides: Partial<WritePhaseController> = {}): WritePhaseCo
   writeFocusIntent: null,
   advisory: null,
   mutationPending: false,
+  generationReviewOpen: false,
   requestTransition: vi.fn(),
+  openModelSettings: vi.fn(),
   openDraftReview: vi.fn(),
+  openSingleGenerationReview: vi.fn(),
   importReference: vi.fn(async () => {}),
   clearWriteFocusIntent: vi.fn(),
   ...overrides,
 });
 
+const directorConversation: TChatConversation = {
+  id: 'conversation_brief',
+  name: 'Launch film',
+  type: 'aionrs',
+  model: { id: 'provider-1', use_model: 'model-1' },
+  created_at: 1,
+  modified_at: 1,
+  extra: { backend: 'aionrs', workspace: '', studio_project_id: project.id },
+};
+
+/** Stands in for the Director pane, which the shell renders outside the phase. */
+const DirectorPaneStub: React.FC = () => (
+  <div data-studio-director>
+    <Input.TextArea />
+  </div>
+);
+
+/**
+ * Renders Write the way the shell does: underneath the one Director conversation provider.
+ *
+ * Without it `useBriefConversationContext` falls back to ABSENT, so every assertion about the
+ * conversation-ready branch is true by construction no matter what the phase renders.
+ */
+const renderInShell = (ui: React.ReactElement, director?: React.ReactNode) =>
+  render(
+    <BriefConversationProvider project={project}>
+      {director}
+      {ui}
+    </BriefConversationProvider>
+  );
+
+const DIRECTOR_COLLAPSED_KEY = 'studio.directorPane.collapsed';
+
+/**
+ * Renders Write inside the **real** shell, which is the only thing that can reveal the Director.
+ *
+ * A stub shell would let "reveal" mean whatever the test wanted it to mean. jsdom focuses hidden
+ * elements happily, so `toHaveFocus()` alone cannot tell a revealed pane from a shut one — the
+ * pane's own collapse attribute and Arco's drawer class are what carry that, and they only exist
+ * if the real shell is mounted.
+ */
+const renderInStudioShell = (
+  ui: React.ReactElement,
+  { mode = 'inline', collapsed = false }: { mode?: StudioLayoutMode; collapsed?: boolean } = {}
+) => {
+  shellLayout.mode = mode;
+  localStorage.setItem(DIRECTOR_COLLAPSED_KEY, collapsed ? '1' : '0');
+  return render(
+    <BriefConversationProvider project={project}>
+      <StudioShell projectId={project.id} director={<DirectorPaneStub />}>
+        {ui}
+      </StudioShell>
+    </BriefConversationProvider>
+  );
+};
+
+const directorPane = (): HTMLElement => {
+  const pane = document.querySelector<HTMLElement>('[data-studio-director-pane]');
+  if (pane === null) throw new Error('the shell rendered no Director pane');
+  return pane;
+};
+
+/** Arco marks a shut Drawer with `-wrapper-hide` (`display: none`) rather than unmounting it. */
+const directorOverlayVisible = (): boolean => {
+  const wrapper = document.querySelector('.arco-drawer-wrapper');
+  return wrapper !== null && !wrapper.classList.contains('arco-drawer-wrapper-hide');
+};
+
+const directorComposer = (): HTMLElement | null =>
+  document.querySelector<HTMLElement>('[data-studio-director] textarea');
+
+const emptyVisualSetup = (): { props: WritePhaseController; phaseEditor: UseStoryboardEditorResult } => {
+  const emptyReveal = scene('scene-2', {
+    visualPrompt: '',
+    referenceAssetId: reference.id,
+    assetIds: [reference.id],
+  });
+  const emptyScenes = [scenes[0]!, emptyReveal];
+  const emptyProject: StudioRendererProject = {
+    ...project,
+    sceneOrder: emptyScenes.map(({ id }) => id),
+    scenes: Object.fromEntries(emptyScenes.map((item) => [item.id, item])),
+  };
+  const phaseEditor = editor('scene-1', {
+    project: emptyProject,
+    orderedScenes: emptyScenes,
+    sceneDrafts: Object.fromEntries(emptyScenes.map((item) => [item.id, editable(item)])),
+  });
+  return { props: controller({ project: emptyProject, editor: phaseEditor }), phaseEditor };
+};
+
 describe('WritePhase', () => {
   beforeEach(() => {
     observedTargets.length = 0;
+    // The pane preference persists by design, so it must be cleared or one test decides the next.
+    localStorage.clear();
+    shellLayout.mode = 'inline';
     vi.stubGlobal('ResizeObserver', ResizeObserverMock);
+    writeConversationHarness.result.state = { kind: 'absent' };
+    writeConversationHarness.messages = [];
+    writeConversationHarness.mountedConversationIds = [];
+    writeConversationHarness.providedProjectIds = [];
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it('lays out every seeded shot as one four-zone script row', () => {
+  it('mounts the compact Engine Strip above the script table with one phase heading', () => {
+    const { container } = render(<WritePhase controller={controller()} />);
+    const strip = screen.getByRole('region', { name: 'conversation.creativeStudio.models.engine.label' });
+    const table = screen.getByRole('region', {
+      name: 'conversation.creativeStudio.phase.write.scriptTableTitle',
+    });
+
+    expect(strip).toHaveAttribute('data-variant', 'compact');
+    expect(strip.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(container.querySelectorAll('[data-studio-phase-heading]')).toHaveLength(1);
+  });
+
+  it('locks both Table engine slots only while generation review is open', () => {
+    render(<WritePhase controller={controller({ generationReviewOpen: true })} />);
+
+    for (const button of [
+      screen.getByRole('button', { name: 'image-model' }),
+      screen.getByRole('button', { name: 'video-model' }),
+    ]) {
+      expect(button).toBeDisabled();
+      expect(button).toHaveAccessibleDescription('conversation.creativeStudio.models.engine.lockedDuringReview');
+    }
+  });
+
+  it('keeps the six named headers aligned with every six-zone script row', () => {
     render(<WritePhase controller={controller()} />);
 
     const table = screen.getByRole('region', {
       name: 'conversation.creativeStudio.phase.write.scriptTableTitle',
     });
+    const expectedZones = ['timing', 'script', 'visual', 'output', 'length', 'state'];
+    const headers = [...table.querySelectorAll('[data-script-column]')];
+    expect(headers.map((header) => header.getAttribute('data-script-column'))).toEqual(expectedZones);
+    expect(headers.map((header) => header.textContent)).toEqual([
+      'conversation.creativeStudio.phase.write.shotColumn',
+      'conversation.creativeStudio.phase.write.scriptColumn',
+      'conversation.creativeStudio.phase.write.visualColumn',
+      'conversation.creativeStudio.phase.write.outputColumn',
+      'conversation.creativeStudio.phase.write.lengthColumn',
+      'conversation.creativeStudio.phase.write.stateColumn',
+    ]);
+    expect(headers[0]?.parentElement).toHaveAttribute('aria-hidden', 'true');
+
     const opening = within(table).getByRole('region', { name: 'Opening' });
     const reveal = within(table).getByRole('region', { name: 'Reveal' });
 
     for (const row of [opening, reveal]) {
       expect(
         [...row.querySelectorAll('[data-script-zone]')].map((zone) => zone.getAttribute('data-script-zone'))
-      ).toEqual(['timing', 'script', 'visual', 'output']);
+      ).toEqual(expectedZones);
       expect(
         within(row).getByRole('combobox', { name: 'conversation.creativeStudio.inspector.durationLabel' })
       ).toBeInTheDocument();
@@ -289,6 +479,51 @@ describe('WritePhase', () => {
     }
   });
 
+  it('keeps row readiness without repeating the scene save status', () => {
+    render(<WritePhase controller={controller()} />);
+
+    expect(screen.getAllByText('conversation.creativeStudio.scene.status.ready')).toHaveLength(2);
+    expect(screen.queryByText('conversation.creativeStudio.inspector.saved')).not.toBeInTheDocument();
+  });
+
+  it('puts readiness in the state column and keeps it out of output', () => {
+    render(<WritePhase controller={controller()} />);
+
+    const opening = screen.getByRole('region', { name: 'Opening' });
+    const state = opening.querySelector('[data-script-zone="state"]');
+    const output = opening.querySelector('[data-script-zone="output"]');
+    expect(state).not.toBeNull();
+    expect(output).not.toBeNull();
+    expect(within(state!).getByRole('status')).toHaveAttribute('data-readiness', 'ready');
+    expect(within(output!).queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['needs_title', 'conversation.creativeStudio.scene.status.needs_title'],
+    ['needs_prompt', 'conversation.creativeStudio.scene.status.needs_prompt'],
+    ['ready', 'conversation.creativeStudio.scene.status.ready'],
+    ['generating', 'conversation.creativeStudio.scene.status.generating'],
+    ['needs_selection', 'conversation.creativeStudio.scene.status.needs_selection'],
+    ['generated', 'conversation.creativeStudio.scene.status.generated'],
+    ['needs_attention', 'conversation.creativeStudio.scene.status.needs_attention'],
+  ] as const)('renders the %s readiness variant with its own label', (status, expectedLabel) => {
+    render(
+      <WritePhase
+        controller={controller({
+          readiness: {
+            ...controller().readiness,
+            sceneStatuses: { 'scene-1': status, 'scene-2': 'ready' },
+          },
+        })}
+      />
+    );
+
+    const opening = screen.getByRole('region', { name: 'Opening' });
+    const state = opening.querySelector('[data-script-zone="state"]');
+    expect(state).not.toBeNull();
+    expect(within(state!).getByRole('status')).toHaveTextContent(expectedLabel);
+  });
+
   it('shows compact zone headings while every scene field keeps its accessible name', () => {
     render(<WritePhase controller={controller()} layoutMode='compact' />);
 
@@ -302,6 +537,8 @@ describe('WritePhase', () => {
       'conversation.creativeStudio.phase.write.scriptColumn',
       'conversation.creativeStudio.phase.write.visualColumn',
       'conversation.creativeStudio.phase.write.outputColumn',
+      'conversation.creativeStudio.phase.write.lengthColumn',
+      'conversation.creativeStudio.phase.write.stateColumn',
     ]);
     expect(
       within(opening).getByRole('combobox', { name: 'conversation.creativeStudio.inspector.durationLabel' })
@@ -325,24 +562,7 @@ describe('WritePhase', () => {
   });
 
   it('offers a visual suggestion from an empty visual cell', () => {
-    const emptyReveal = scene('scene-2', {
-      visualPrompt: '',
-      referenceAssetId: reference.id,
-      assetIds: [reference.id],
-    });
-    const emptyScenes = [scenes[0]!, emptyReveal];
-    const emptyProject: StudioRendererProject = {
-      ...project,
-      sceneOrder: emptyScenes.map(({ id }) => id),
-      scenes: Object.fromEntries(emptyScenes.map((item) => [item.id, item])),
-    };
-    const phaseEditor = editor('scene-1', {
-      project: emptyProject,
-      orderedScenes: emptyScenes,
-      sceneDrafts: Object.fromEntries(emptyScenes.map((item) => [item.id, editable(item)])),
-    });
-
-    render(<WritePhase controller={controller({ project: emptyProject, editor: phaseEditor })} />);
+    render(<WritePhase controller={emptyVisualSetup().props} />);
 
     const reveal = screen.getByRole('region', { name: 'Reveal' });
     expect(within(reveal).getByLabelText('conversation.creativeStudio.inspector.visualPromptLabel')).toHaveAttribute(
@@ -352,6 +572,107 @@ describe('WritePhase', () => {
     expect(
       within(reveal).getByRole('button', { name: 'conversation.creativeStudio.phase.write.suggestVisual' })
     ).toBeInTheDocument();
+  });
+
+  /**
+   * "Suggest a visual" has no surface of its own to fall back to any more.
+   *
+   * It used to focus the composer of the conversation Write mounted itself, then — once the shell
+   * took that conversation — Write's own writing assistant whenever the Director was out of reach.
+   * That assistant is gone (D10), so the Director has to be *made* reachable: the pane expands, or
+   * the overlay opens, and only then does the composer take the caret.
+   *
+   * Every case below asserts the reveal, not just the focus. jsdom focuses hidden elements without
+   * complaint, so `toHaveFocus()` on its own passes just as happily against a pane that never
+   * opened — which is precisely how the original silent no-op survived its guard.
+   */
+  describe('suggest a visual', () => {
+    const clickSuggest = (): void => {
+      const reveal = screen.getByRole('region', { name: 'Reveal' });
+      fireEvent.click(
+        within(reveal).getByRole('button', { name: 'conversation.creativeStudio.phase.write.suggestVisual' })
+      );
+    };
+
+    it('hands the request to the Director composer when the pane is already on screen', () => {
+      writeConversationHarness.result.state = { kind: 'ready', conversation: directorConversation };
+      const { props, phaseEditor } = emptyVisualSetup();
+      renderInStudioShell(<WritePhase controller={props} />);
+      expect(directorPane()).toHaveAttribute('data-collapsed', 'false');
+
+      clickSuggest();
+
+      expect(phaseEditor.selectScene).toHaveBeenCalledWith('scene-2');
+      expect(directorPane()).toHaveAttribute('data-collapsed', 'false');
+      expect(directorComposer()).toHaveFocus();
+    });
+
+    /**
+     * The reveal is transient, at inline width just as much as in the overlay.
+     *
+     * Clicking a button in the work panel is a request to see the Director *now*; it is not the
+     * user revisiting the collapse they chose from the shell's own toggle. Persisting `expanded`
+     * here would destroy that choice silently and for good — the pane would come back open on
+     * every later load and nothing would tell them why.
+     */
+    it('expands a collapsed Director pane without touching the stored preference', () => {
+      writeConversationHarness.result.state = { kind: 'ready', conversation: directorConversation };
+      const { props } = emptyVisualSetup();
+      renderInStudioShell(<WritePhase controller={props} />, { collapsed: true });
+      // Guards the guard: a pane that started open would make the reveal assertion vacuous.
+      expect(directorPane()).toHaveAttribute('data-collapsed', 'true');
+      expect(directorComposer()).not.toHaveFocus();
+
+      clickSuggest();
+
+      expect(directorPane()).toHaveAttribute('data-collapsed', 'false');
+      expect(directorComposer()).toHaveFocus();
+      expect(localStorage.getItem(DIRECTOR_COLLAPSED_KEY)).toBe('1');
+    });
+
+    it('opens the Director overlay below inline width and lands in its composer', () => {
+      writeConversationHarness.result.state = { kind: 'ready', conversation: directorConversation };
+      const { props } = emptyVisualSetup();
+      renderInStudioShell(<WritePhase controller={props} layoutMode='drawer' />, { mode: 'drawer' });
+      expect(directorOverlayVisible()).toBe(false);
+      expect(directorComposer()).not.toHaveFocus();
+
+      clickSuggest();
+
+      expect(directorOverlayVisible()).toBe(true);
+      expect(directorComposer()).toHaveFocus();
+    });
+
+    /**
+     * Opening the overlay is a UI action bound to the narrow presentation, not a change of intent.
+     * Writing `expanded` here would silently overwrite a collapse the user chose at full width, and
+     * writing `collapsed` would leave the pane shut when they widened the window again.
+     */
+    it('leaves the stored pane preference untouched when it reveals the overlay', () => {
+      writeConversationHarness.result.state = { kind: 'ready', conversation: directorConversation };
+      const { props } = emptyVisualSetup();
+      renderInStudioShell(<WritePhase controller={props} layoutMode='drawer' />, {
+        mode: 'drawer',
+        collapsed: true,
+      });
+
+      clickSuggest();
+
+      expect(directorOverlayVisible()).toBe(true);
+      expect(localStorage.getItem(DIRECTOR_COLLAPSED_KEY)).toBe('1');
+    });
+
+    it('reveals the Director but keeps out of the composer that writes the brief', () => {
+      const { props } = emptyVisualSetup();
+      renderInStudioShell(<WritePhase controller={props} />, { collapsed: true });
+
+      clickSuggest();
+
+      // The Director is on screen, so the user can see there is no thread yet and start one — but
+      // that composer's first message becomes the project brief, not a note about one shot.
+      expect(directorPane()).toHaveAttribute('data-collapsed', 'false');
+      expect(directorComposer()).not.toHaveFocus();
+    });
   });
 
   it('keeps a cleared title local and surfaces the required field error', () => {
@@ -554,6 +875,28 @@ describe('WritePhase', () => {
     );
   });
 
+  it('keeps the duration control and its invalid-value alert together in the length column', () => {
+    const phaseEditor = editor('scene-1', {
+      sceneDrafts: {
+        'scene-1': editable(scene('scene-1', { durationSeconds: 9 })),
+        'scene-2': editable(scene('scene-2')),
+      },
+    });
+    render(<WritePhase controller={controller({ editor: phaseEditor })} />);
+
+    const opening = screen.getByRole('region', { name: 'Opening' });
+    const length = opening.querySelector('[data-script-zone="length"]');
+    expect(length).not.toBeNull();
+    expect(
+      within(length!).getByRole('combobox', {
+        name: 'conversation.creativeStudio.inspector.durationLabel',
+      })
+    ).toHaveAttribute('aria-invalid', 'true');
+    expect(within(length!).getByRole('alert')).toHaveTextContent(
+      'conversation.creativeStudio.inspector.invalidDuration'
+    );
+  });
+
   it('keeps the duration chip keyboard-operable', async () => {
     const user = userEvent.setup();
     const phaseEditor = editor();
@@ -563,9 +906,10 @@ describe('WritePhase', () => {
     const duration = within(opening).getByRole('combobox', {
       name: 'conversation.creativeStudio.inspector.durationLabel',
     });
-    await user.tab();
-    await user.tab();
-    await user.tab();
+    // A fixed Tab count pins the table's column order, not whether the duration control is keyboard-reachable.
+    for (let step = 0; step < 24 && document.activeElement !== duration; step += 1) {
+      await user.tab();
+    }
     expect(duration).toHaveFocus();
 
     fireEvent.keyDown(duration, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13 });
@@ -637,105 +981,223 @@ describe('WritePhase', () => {
     await waitFor(() => expect(props.importReference).toHaveBeenCalledWith('scene-2'));
   });
 
-  it('keeps Fit to goal at summary level and contains no media-generation or spend action', () => {
-    const phaseEditor = editor('scene-1', { hasUnsavedSceneDrafts: false });
-    const props = controller({ editor: phaseEditor });
-    render(<WritePhase controller={props} />);
-
-    const fitButton = screen.getByRole('button', {
-      name: 'conversation.creativeStudio.phase.write.fitToGoal',
-    });
-    expect(fitButton).toBeEnabled();
-    fireEvent.click(fitButton);
-    expect(phaseEditor.fitToTarget).toHaveBeenCalledWith('0123456789abcdef');
-    expect(screen.queryByRole('button', { name: /render|generate image|generate video/i })).not.toBeInTheDocument();
-    expect(screen.queryByText(/credit|session spend|estimated cost/i)).not.toBeInTheDocument();
-  });
-
-  it('renders proportional pacing blocks, positions the goal marker, and selects a clicked shot', () => {
-    const phaseEditor = editor('scene-1', { hasUnsavedSceneDrafts: false });
-    render(<WritePhase controller={controller({ editor: phaseEditor })} />);
-
-    const pacing = screen.getByRole('region', {
-      name: 'conversation.creativeStudio.phase.write.pacingTitle',
-    });
-    const blocks = [...pacing.querySelectorAll<HTMLElement>('[data-pacing-scene]')];
-    expect(blocks.map((block) => block.style.flexGrow)).toEqual(['5', '6']);
-    expect(pacing.querySelector<HTMLElement>('[data-pacing-shot-span]')).toHaveStyle({
-      width: `${(11 / 15) * 100}%`,
-    });
-    expect(pacing.querySelector<HTMLElement>('[data-pacing-goal]')).toHaveStyle({
-      left: `${(15 / 11) * 100}%`,
-    });
-
-    fireEvent.click(within(pacing).getAllByRole('button')[1]!);
-    expect(phaseEditor.selectScene).toHaveBeenCalledWith('scene-2');
-  });
-
-  it('announces the Write timing advisory politely at the pacing bar', () => {
+  it('shows a generated plate from the references collection in its scene row', () => {
+    const generatedReference: StudioAsset = {
+      ...reference,
+      managedAsset: { collection: 'references', fileName: 'reference-2.png' },
+      sourceVisualPrompt: 'First-frame reference plate',
+    };
     render(
       <WritePhase
         controller={controller({
-          advisory: {
-            messageKey: 'conversation.creativeStudio.review.durationMismatch',
-            anchor: 'pacing',
+          project: {
+            ...project,
+            assets: { [generatedReference.id]: generatedReference },
           },
         })}
       />
     );
 
-    const advisory = screen.getByText('conversation.creativeStudio.review.durationMismatch');
-    expect(advisory).toHaveAttribute('role', 'status');
-    expect(advisory).toHaveAttribute('aria-live', 'polite');
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'conversation.creativeStudio.preview.importReference' })).toHaveAttribute(
+      'src',
+      'weprompt-studio://asset/project-1/reference-2'
+    );
   });
 
-  it('keeps unreachable fit errors assertive', () => {
-    const fitOutcome = {
-      status: 'unreachable' as const,
-      reason: 'target_out_of_bounds' as const,
-      project,
-      lockedSceneIds: [],
-      minimumTotalSeconds: 18,
-      maximumTotalSeconds: 24,
+  it('does not offer reference generation while any scene draft is dirty', () => {
+    render(<WritePhase controller={controller()} />);
+
+    expect(
+      screen.queryByRole('button', { name: 'conversation.creativeStudio.reference.generate' })
+    ).not.toBeInTheDocument();
+  });
+
+  it('prefills the reference prompt from the live scene draft', async () => {
+    const phaseEditor = editor('scene-1', {
+      hasUnsavedSceneDrafts: false,
+      sceneDrafts: {
+        'scene-1': { ...editable(scenes[0]!), visualPrompt: 'A live draft first-frame subject' },
+        'scene-2': editable(scenes[1]!),
+      },
+    });
+    render(<WritePhase controller={controller({ editor: phaseEditor })} />);
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'conversation.creativeStudio.reference.generate' })[0]!);
+    const dialog = await screen.findByRole('dialog', {
+      name: 'conversation.creativeStudio.reference.dialogTitle',
+    });
+
+    expect(within(dialog).getByLabelText('conversation.creativeStudio.reference.promptLabel')).toHaveValue(
+      'A single cinematic frame, 16:9, no text, no labels, no collage, no split panels. A live draft first-frame subject'
+    );
+  });
+
+  it('blocks a boilerplate-only reference prompt but accepts an explicit subject', async () => {
+    const emptyOpening = scene('scene-1', { visualPrompt: '' });
+    const emptyProject = {
+      ...project,
+      scenes: { ...project.scenes, [emptyOpening.id]: emptyOpening },
     };
-    render(
+    const phaseEditor = editor('scene-1', {
+      project: emptyProject,
+      hasUnsavedSceneDrafts: false,
+      orderedScenes: [emptyOpening, scenes[1]!],
+      sceneDrafts: {
+        'scene-1': editable(emptyOpening),
+        'scene-2': editable(scenes[1]!),
+      },
+    });
+    render(<WritePhase controller={controller({ project: emptyProject, editor: phaseEditor })} />);
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'conversation.creativeStudio.reference.generate' })[0]!);
+    const dialog = await screen.findByRole('dialog', {
+      name: 'conversation.creativeStudio.reference.dialogTitle',
+    });
+    const prompt = within(dialog).getByLabelText('conversation.creativeStudio.reference.promptLabel');
+    const confirm = within(dialog).getByRole('button', {
+      name: 'conversation.creativeStudio.reference.generate',
+    });
+
+    expect(prompt).toHaveAttribute('maxlength', '4096');
+    expect(confirm).toBeDisabled();
+
+    fireEvent.change(prompt, { target: { value: 'A single cinematic frame of a cobalt travel mug' } });
+    expect(confirm).toBeEnabled();
+  });
+
+  it('closes the reference prompt dialog when the image catalog role loses readiness', async () => {
+    const props = controller({ editor: editor('scene-1', { hasUnsavedSceneDrafts: false }) });
+    const view = render(<WritePhase controller={props} />);
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'conversation.creativeStudio.reference.generate' })[0]!);
+    expect(
+      screen.getByRole('dialog', { name: 'conversation.creativeStudio.reference.dialogTitle' })
+    ).toBeInTheDocument();
+
+    view.rerender(
       <WritePhase
         controller={controller({
-          editor: editor('scene-1', {
-            latestFitOutcome: fitOutcome,
-            latestFitCatalogVersion: catalog.catalogVersion,
+          models: models({
+            catalog: {
+              ...catalog,
+              image: {
+                status: 'setup_required',
+                selected: null,
+                selectedRoute: null,
+                selectionIssue: null,
+                options: [],
+              },
+            },
           }),
+          openSingleGenerationReview: props.openSingleGenerationReview,
         })}
       />
     );
 
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      'conversation.creativeStudio.storyboard.fitUnreachable.target_out_of_bounds'
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('dialog', { name: 'conversation.creativeStudio.reference.dialogTitle' })
+      ).not.toBeInTheDocument()
     );
+    expect(
+      screen.queryByRole('button', { name: 'conversation.creativeStudio.reference.generate' })
+    ).not.toBeInTheDocument();
+    expect(props.openSingleGenerationReview).not.toHaveBeenCalled();
   });
 
-  it('docks the assistant in the inline right column and keeps the drawer trigger for narrower layouts', () => {
+  it('contains no media-generation or spend action anywhere in Write', () => {
+    render(<WritePhase controller={controller({ editor: editor('scene-1', { hasUnsavedSceneDrafts: false }) })} />);
+
+    expect(screen.queryByRole('button', { name: /render|generate image|generate video/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/credit|session spend|estimated cost/i)).not.toBeInTheDocument();
+  });
+
+  /**
+   * D10: the Director is the only writing assistant in Studio.
+   *
+   * Write used to dock a second one — inline at full width, behind an "Ask assistant" opener below
+   * it — offering a subset of what the pane beside it already does. Removed means removed at every
+   * width, opener included; an assistant that only appears in one layout is the same surface hiding.
+   */
+  it('hosts no writing assistant of its own at any width', () => {
     const view = render(<WritePhase controller={controller()} layoutMode='inline' />);
 
-    const assistant = screen.getByRole('complementary', {
-      name: 'conversation.creativeStudio.phase.write.assistantTitle',
-    });
-    expect(assistant).toHaveAttribute('data-assistant-presentation', 'inline');
-    expect(assistant.closest('[data-write-assistant-column]')).toHaveAttribute('data-layout', 'inline');
-    expect(
-      screen.queryByRole('button', { name: 'conversation.creativeStudio.phase.write.askAssistant' })
-    ).not.toBeInTheDocument();
+    for (const mode of ['inline', 'drawer', 'compact'] as const) {
+      view.rerender(<WritePhase controller={controller()} layoutMode={mode} />);
+      const scriptTable = screen.getByRole('region', {
+        name: 'conversation.creativeStudio.phase.write.scriptTableTitle',
+      });
+      // Guards the guard: the phase really did render at this width.
+      expect(scriptTable, mode).toBeVisible();
 
-    view.rerender(<WritePhase controller={controller()} layoutMode='drawer' />);
+      // The only sibling admitted beside the script is the project Engine Strip. An assistant here
+      // would restore the old inline card or narrow-width opener; checking the exact pair catches
+      // both without mistaking the new engine control for a writing surface.
+      const workspace = scriptTable.parentElement;
+      expect(workspace, mode).not.toBeNull();
+      const engineStrip = screen.getByRole('region', {
+        name: 'conversation.creativeStudio.models.engine.label',
+      });
+      expect([...workspace!.children], mode).toEqual([engineStrip, scriptTable]);
+      expect(screen.queryByRole('complementary'), mode).not.toBeInTheDocument();
+      expect(document.querySelector('.arco-drawer'), mode).toBeNull();
+      expect(document.querySelector('[data-assistant-presentation]'), mode).toBeNull();
+    }
+  });
+
+  /**
+   * Write must NOT mount its own conversation.
+   *
+   * It used to, which meant one thread had two mounts and each phase called
+   * `useBriefConversation` separately. The shell now owns the single mount, so a phase change
+   * cannot tear down a streaming reply — and this asserts Write does not quietly reintroduce a
+   * second one. Presence of the mount is covered by StudioShell.dom.test.tsx.
+   *
+   * The provider is what gives this teeth. Rendered bare, Write reads the ABSENT fallback, so a
+   * conversation surface put back behind `state.kind === 'ready'` would never render and the
+   * assertion would hold no matter what the component does.
+   */
+  it('leaves the conversation to the shell instead of mounting a second copy', () => {
+    writeConversationHarness.result.state = { kind: 'ready', conversation: directorConversation };
+    writeConversationHarness.messages = ['A 20-second teaser.', 'Five shots, 20 seconds.'];
+
+    renderInShell(<WritePhase controller={controller()} layoutMode='inline' />);
+
+    // Guards the guard: the provider is live and feeding Write a ready conversation.
+    expect(writeConversationHarness.providedProjectIds).toEqual([project.id]);
+    expect(writeConversationHarness.mountedConversationIds).toEqual([]);
+    expect(screen.queryByText('Five shots, 20 seconds.')).not.toBeInTheDocument();
+  });
+
+  it('adds no second conversation region once the Director thread exists', () => {
+    writeConversationHarness.result.state = { kind: 'ready', conversation: directorConversation };
+
+    renderInShell(<WritePhase controller={controller()} layoutMode='inline' />);
+
+    // Guards the guard: the provider is live and feeding Write a ready conversation.
+    expect(writeConversationHarness.providedProjectIds).toEqual([project.id]);
+    // The Director pane already carries this name. A second region under it sends a screen-reader
+    // user landmark-hopping into a rail that holds no conversation at all.
     expect(
-      screen.getByRole('button', { name: 'conversation.creativeStudio.phase.write.askAssistant' })
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole('complementary', { name: 'conversation.creativeStudio.phase.write.assistantTitle' })
+      screen.queryByRole('complementary', { name: 'conversation.creativeStudio.brief.conversationTitle' })
     ).not.toBeInTheDocument();
   });
 
+  it('leaves no stylesheet behind for the surfaces it no longer renders', () => {
+    const stylesheet = readFileSync(
+      resolve(
+        process.cwd(),
+        'packages/desktop/src/renderer/pages/studio/components/PhaseShell/phases/write/write.module.css'
+      ),
+      'utf8'
+    );
+
+    // Guards the guard: a wrong path would make the assertions below pass on an empty string.
+    expect(stylesheet).toMatch(/^\.workspace\b/m);
+    expect(stylesheet).not.toMatch(/^\.conversation(Rail|Surface)\b/m);
+    expect(stylesheet).not.toMatch(/^\.assistantSlot\b/m);
+    expect(stylesheet).not.toMatch(/assistantSlot/);
+  });
   it('selects and focuses the requested visual prompt, then clears the route intent', async () => {
     const firstEditor = editor('scene-1');
     const props = controller({
@@ -754,6 +1216,18 @@ describe('WritePhase', () => {
     view.rerender(<WritePhase controller={selectedProps} />);
 
     await waitFor(() => expect(screen.getByDisplayValue('A detailed reveal')).toHaveFocus());
+    expect(props.clearWriteFocusIntent).toHaveBeenCalledOnce();
+  });
+
+  it('focuses the requested duration control without falling back to the visual prompt', async () => {
+    const props = controller({
+      editor: editor('scene-2'),
+      writeFocusIntent: { sceneId: 'scene-2', field: 'duration' },
+    });
+    render(<WritePhase controller={props} />);
+
+    await waitFor(() => expect(document.getElementById('studio-scene-duration-scene-2')).toHaveFocus());
+    expect(screen.getByDisplayValue('A detailed reveal')).not.toHaveFocus();
     expect(props.clearWriteFocusIntent).toHaveBeenCalledOnce();
   });
 

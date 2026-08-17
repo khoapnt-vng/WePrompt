@@ -9,10 +9,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
   StudioCommandResult,
-  StudioMediaRouteCatalog,
   StudioRendererProject,
   StudioRouteCatalog,
-  StudioRouteCatalogEntry,
 } from '@/common/types/project/creativeStudioTypes';
 import { useStudioModels } from '@renderer/pages/studio/hooks/useStudioModels';
 
@@ -49,39 +47,9 @@ const project = (id = 'project-1', revision = 4): StudioRendererProject => ({
 
 const catalog = (version: string): StudioRouteCatalog => ({
   storyboard: { status: 'selection_required', selected: null, options: [] },
-  image: { status: 'selection_required', selected: null, selectedRoute: null, options: [] },
-  video: { status: 'selection_required', selected: null, selectedRoute: null, options: [] },
+  image: { status: 'selection_required', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+  video: { status: 'selection_required', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
   catalogVersion: version,
-});
-
-const route = (kind: 'image' | 'video', overrides: Partial<StudioRouteCatalogEntry> = {}): StudioRouteCatalogEntry => ({
-  choiceId: `choice_${kind}`,
-  providerId: `provider-${kind}`,
-  providerName: `${kind} provider`,
-  model: `${kind}-model`,
-  health: 'available',
-  kind,
-  constraints: {
-    aspectRatios: ['16:9'],
-    resolutions: ['720p'],
-    minDurationSeconds: 1,
-    maxDurationSeconds: 60,
-    supportsFirstFrame: true,
-    silentOutput: true,
-  },
-  ...overrides,
-});
-
-const unchosen = (entry: StudioRouteCatalogEntry, ...rest: StudioRouteCatalogEntry[]): StudioMediaRouteCatalog => ({
-  status: 'selection_required',
-  selected: null,
-  selectedRoute: null,
-  options: [entry, ...rest],
-});
-
-const catalogWith = (version: string, media: Partial<StudioRouteCatalog>): StudioRouteCatalog => ({
-  ...catalog(version),
-  ...media,
 });
 
 const deferred = <T>() => {
@@ -180,6 +148,7 @@ describe('useStudioModels', () => {
     expect(bridge.updateModelSelection.invoke).toHaveBeenCalledWith(
       expect.objectContaining({ projectId: 'project-1', role: 'storyboard' })
     );
+    expect(view.result.current.selectionIssue).toBeNull();
   });
 
   it('does not carry a selection mutation to a project entered while edit flushing', async () => {
@@ -240,6 +209,8 @@ describe('useStudioModels', () => {
 
     expect(updated).toBe(false);
     expect(bridge.updateModelSelection.invoke).not.toHaveBeenCalled();
+    expect(view.result.current.selectionIssue).toBe('save_blocked');
+    expect(view.result.current.errorMessageKey).toBeNull();
   });
 
   it('supports clearing a selection and refetches before refreshing the catalog', async () => {
@@ -272,6 +243,7 @@ describe('useStudioModels', () => {
       selection: null,
     });
     expect(events).toEqual(['mutation', 'refetch', 'catalog']);
+    expect(view.result.current.selectionIssue).toBeNull();
   });
 
   it('refetches a stale project without replaying the mutation', async () => {
@@ -293,10 +265,12 @@ describe('useStudioModels', () => {
     expect(updated).toBe(false);
     expect(bridge.updateModelSelection.invoke).toHaveBeenCalledOnce();
     expect(refetch).toHaveBeenCalledOnce();
-    expect(view.result.current.errorMessageKey).toBe('conversation.creativeStudio.errors.staleProject');
+    expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(2);
+    expect(view.result.current.selectionIssue).toBe('save_stale');
+    expect(view.result.current.errorMessageKey).toBeNull();
   });
 
-  it('uses safe model copy for list and mutation failures', async () => {
+  it('keeps catalog-loading copy separate from selection failures', async () => {
     bridge.listRoutes.invoke.mockResolvedValueOnce(failed('provider_error'));
     const view = renderHook(() =>
       useStudioModels({
@@ -312,7 +286,24 @@ describe('useStudioModels', () => {
     bridge.updateModelSelection.invoke.mockResolvedValueOnce(failed('storage_error'));
     await act(() => view.result.current.updateSelection({ role: 'storyboard', selection: null }));
 
-    expect(view.result.current.errorMessageKey).toBe('conversation.creativeStudio.models.updateFailed');
+    expect(view.result.current.errorMessageKey).toBe('conversation.creativeStudio.errors.provider_error');
+    expect(view.result.current.selectionIssue).toBe('save_failed');
+  });
+
+  it('reports a thrown selection command as a selection failure', async () => {
+    bridge.updateModelSelection.invoke.mockRejectedValueOnce(new Error('bridge unavailable'));
+    const view = renderHook(() =>
+      useStudioModels({
+        project: project(),
+        refetch: vi.fn(async () => project()),
+        beforeMutation: vi.fn(async () => true),
+      })
+    );
+
+    await act(() => view.result.current.updateSelection({ role: 'storyboard', selection: null }));
+
+    expect(view.result.current.selectionIssue).toBe('save_failed');
+    expect(view.result.current.errorMessageKey).toBeNull();
   });
 
   it('ignores a catalog response after unmount', async () => {
@@ -347,6 +338,25 @@ describe('useStudioModels', () => {
 
     expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(2);
     expect(bridge.listRoutes.invoke).toHaveBeenLastCalledWith({ projectId: 'project-1' });
+  });
+
+  it('refreshes on window focus and removes the listener on cleanup', async () => {
+    const view = renderHook(() =>
+      useStudioModels({
+        project: project(),
+        refetch: vi.fn(async () => project()),
+        beforeMutation: vi.fn(async () => true),
+      })
+    );
+    await waitFor(() => expect(view.result.current.loading).toBe(false));
+
+    window.dispatchEvent(new Event('focus'));
+    await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(2));
+
+    view.unmount();
+    window.dispatchEvent(new Event('focus'));
+    await act(async () => {});
+    expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(2);
   });
 
   it('makes a successful refresh catalog available to the awaiting caller', async () => {
@@ -404,75 +414,101 @@ describe('useStudioModels', () => {
     expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(2);
   });
 
-  it('adopts the only compatible engine as the project route with the canonical revision', async () => {
-    bridge.listRoutes.invoke.mockResolvedValue(ok(catalogWith('catalog-1', { image: unchosen(route('image')) })));
-    renderHook(() =>
-      useStudioModels({
-        project: project(),
-        refetch: vi.fn(async () => project('project-1', 5)),
-        beforeMutation: vi.fn(async () => true),
-        autoSelectSoleRoute: true,
+  it('loads and refreshes a sole-option catalog without writing either media selection', async () => {
+    bridge.listRoutes.invoke.mockResolvedValue(
+      ok({
+        ...catalog('catalog-1'),
+        image: {
+          status: 'selection_required',
+          selected: null,
+          selectedRoute: null,
+          selectionIssue: null,
+          options: [
+            {
+              choiceId: 'choice_image',
+              providerId: 'provider-image',
+              providerName: 'Image provider',
+              model: 'image-model',
+              integrationLabelKey: 'imageApi',
+              health: 'available',
+              kind: 'image',
+              constraints: {
+                aspectRatios: ['16:9'],
+                resolutions: ['720p'],
+                minDurationSeconds: 4,
+                maxDurationSeconds: 15,
+                supportsFirstFrame: true,
+                maxConditioningImages: 0,
+                silentOutput: true,
+              },
+            },
+          ],
+        },
       })
     );
-
-    await waitFor(() => expect(bridge.updateModelSelection.invoke).toHaveBeenCalledOnce());
-    expect(bridge.updateModelSelection.invoke).toHaveBeenCalledWith({
-      projectId: 'project-1',
-      expectedRevision: 4,
-      role: 'image',
-      selection: { choiceId: 'choice_image' },
-    });
-  });
-
-  it('leaves the project route alone while automatic selection is withheld', async () => {
-    bridge.listRoutes.invoke.mockResolvedValue(ok(catalogWith('catalog-1', { image: unchosen(route('image')) })));
     const view = renderHook(() =>
       useStudioModels({
         project: project(),
         refetch: vi.fn(async () => project()),
         beforeMutation: vi.fn(async () => true),
-        autoSelectSoleRoute: false,
       })
     );
 
     await waitFor(() => expect(view.result.current.loading).toBe(false));
+    await act(() => view.result.current.refresh());
     expect(bridge.updateModelSelection.invoke).not.toHaveBeenCalled();
   });
 
-  it('adopts each media role once, in sequence', async () => {
+  it('does not replace a dangling explicit choice when one survivor remains', async () => {
     bridge.listRoutes.invoke.mockResolvedValue(
-      ok(catalogWith('catalog-1', { image: unchosen(route('image')), video: unchosen(route('video')) }))
-    );
-    renderHook(() =>
-      useStudioModels({
-        project: project(),
-        refetch: vi.fn(async () => project('project-1', 5)),
-        beforeMutation: vi.fn(async () => true),
-        autoSelectSoleRoute: true,
+      ok({
+        ...catalog('catalog-1'),
+        video: {
+          status: 'unavailable',
+          selected: { choiceId: 'retired-choice', providerId: 'retired-provider', model: 'retired-model' },
+          selectedRoute: null,
+          selectionIssue: { code: 'retired' },
+          options: [
+            {
+              choiceId: 'survivor-choice',
+              providerId: 'survivor-provider',
+              providerName: 'Survivor provider',
+              model: 'survivor-model',
+              integrationLabelKey: 'selfHostedVideoGateway',
+              health: 'available',
+              kind: 'video',
+              constraints: {
+                aspectRatios: ['16:9'],
+                resolutions: ['720p'],
+                minDurationSeconds: 4,
+                maxDurationSeconds: 15,
+                supportsFirstFrame: true,
+                maxConditioningImages: 0,
+                silentOutput: true,
+              },
+            },
+          ],
+        },
       })
     );
-
-    await waitFor(() => expect(bridge.updateModelSelection.invoke).toHaveBeenCalledTimes(2));
-    expect(bridge.updateModelSelection.invoke.mock.calls.map(([request]) => request.role)).toEqual(['image', 'video']);
-  });
-
-  it('stops after one attempt when the canonical command refuses the adopted route', async () => {
-    bridge.listRoutes.invoke.mockResolvedValue(ok(catalogWith('catalog-1', { image: unchosen(route('image')) })));
-    bridge.updateModelSelection.invoke.mockResolvedValue(failed('storage_error'));
     const view = renderHook(() =>
       useStudioModels({
-        project: project(),
+        project: {
+          ...project(),
+          routing: {
+            storyboard: null,
+            image: null,
+            video: { choiceId: 'retired-choice', providerId: 'retired-provider', model: 'retired-model' },
+          },
+        },
         refetch: vi.fn(async () => project()),
         beforeMutation: vi.fn(async () => true),
-        autoSelectSoleRoute: true,
       })
     );
 
-    await waitFor(() =>
-      expect(view.result.current.errorMessageKey).toBe('conversation.creativeStudio.models.updateFailed')
-    );
+    await waitFor(() => expect(view.result.current.loading).toBe(false));
     await act(() => view.result.current.refresh());
-    expect(bridge.updateModelSelection.invoke).toHaveBeenCalledOnce();
+    expect(bridge.updateModelSelection.invoke).not.toHaveBeenCalled();
   });
 
   it('refreshes when project aspect ratio or resolution changes', async () => {

@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { isImageGenSupported, isImagesApiModel } from './imageModelAllowlist';
+import { getImageModelMaxConditioningImages, isImageGenSupported, isImagesApiModel } from './imageModelAllowlist';
 
 const VNG_BASE_URL = 'https://maas-llm-aiplatform-hcm.api.vngcloud.vn/v1';
 
@@ -44,5 +44,24 @@ describe('isImageGenSupported', () => {
     expect(
       isImageGenSupported({ base_url: 'https://openrouter.ai/api/v1' }, 'google/gemini-2.5-flash-image-preview')
     ).toBe(true);
+  });
+});
+
+describe('getImageModelMaxConditioningImages', () => {
+  it('admits the evidence-backed OpenRouter Gemini 3 Pro Image route exactly', () => {
+    expect(
+      getImageModelMaxConditioningImages({ base_url: 'https://openrouter.ai/api/v1' }, 'google/gemini-3-pro-image')
+    ).toBe(2);
+  });
+
+  it.each([
+    [{ base_url: 'https://openrouter.ai/api/v1/' }, 'google/gemini-3-pro-image'],
+    [{ base_url: 'https://openrouter.ai/api/v1' }, 'google/gemini-3-pro-image-preview'],
+    [{ base_url: VNG_BASE_URL, platform: 'openai' }, 'openai/gpt-image-1'],
+    [{ platform: 'gemini' }, 'gemini-2.5-flash-image-preview'],
+    [{ base_url: 'https://openrouter.ai/api/v1' }, 'google/gemini-2.5-flash-image-preview'],
+    [{ platform: 'gemini', name: 'WePrompt Studio E2E' }, 'weprompt-e2e-image'],
+  ])('keeps production tuple %j / %s fail-closed at zero', (provider, model) => {
+    expect(getImageModelMaxConditioningImages(provider, model)).toBe(0);
   });
 });

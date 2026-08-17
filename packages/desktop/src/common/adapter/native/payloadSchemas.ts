@@ -10,6 +10,14 @@ import {
   OFFICE_ARTIFACT_MAX_SELECTION_MESSAGE_BYTES,
 } from '../../types/office/artifactEditor';
 import { PRESENTATION_RUN_LIMITS } from '../../types/office/presentationRunPolicy';
+import { STUDIO_RULE_LIMITS } from '../../types/project/creativeStudioRules';
+import {
+  STUDIO_MAX_CUT_PLACEMENT_SCENES,
+  STUDIO_MAX_DIRTY_SCENES_REPORTED,
+  STUDIO_MAX_GENERATION_SCENES_PER_REQUEST,
+  STUDIO_MAX_SCENES,
+  STUDIO_REFERENCE_PROMPT_MAX_LENGTH,
+} from '../../types/project/creativeStudioTypes';
 import type { NativeBridgeProviderKey, RendererBridgeQueryKey } from './constants';
 
 const MAX_PATH_LENGTH = 4096;
@@ -349,10 +357,23 @@ const studioSubmitScenesSchema = z
     sceneIds: z
       .array(safeIdSchema)
       .min(1)
-      .max(24)
+      .max(STUDIO_MAX_GENERATION_SCENES_PER_REQUEST)
       .refine((ids) => new Set(ids).size === ids.length),
     catalogVersion: z.string().regex(/^[a-f0-9]{16}$/),
-    routes: z.array(studioSceneRouteSnapshotSchema).min(1).max(24),
+    routes: z.array(studioSceneRouteSnapshotSchema).min(1).max(STUDIO_MAX_GENERATION_SCENES_PER_REQUEST),
+    outputRole: z.enum(['take', 'reference']).optional(),
+    referencePrompts: z
+      .array(
+        z
+          .object({
+            sceneId: safeIdSchema,
+            prompt: z.string().trim().min(1).max(STUDIO_REFERENCE_PROMPT_MAX_LENGTH),
+          })
+          .strict()
+      )
+      .min(1)
+      .max(STUDIO_MAX_GENERATION_SCENES_PER_REQUEST)
+      .optional(),
   })
   .strict()
   .superRefine((input, context) => {
@@ -367,6 +388,28 @@ const studioSubmitScenesSchema = z
       routeSceneIds.some((sceneId) => !selectedSceneIds.has(sceneId))
     ) {
       context.addIssue({ code: 'custom', message: 'routes must exactly match sceneIds', path: ['routes'] });
+    }
+    if (input.outputRole === 'reference') {
+      // A reference plate without a prompt has nothing to paint, and a prompt that names no
+      // submitted scene describes nothing. Both are refused here rather than at the provider.
+      const promptSceneIds = (input.referencePrompts ?? []).map(({ sceneId }) => sceneId);
+      if (
+        promptSceneIds.length !== input.sceneIds.length ||
+        new Set(promptSceneIds).size !== promptSceneIds.length ||
+        promptSceneIds.some((sceneId) => !selectedSceneIds.has(sceneId))
+      ) {
+        context.addIssue({
+          code: 'custom',
+          message: 'reference submissions need exactly one referencePrompt per scene',
+          path: ['referencePrompts'],
+        });
+      }
+    } else if (input.referencePrompts !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'referencePrompts requires outputRole reference',
+        path: ['referencePrompts'],
+      });
     }
   });
 const studioFitStoryboardSchema = z
@@ -393,6 +436,29 @@ const studioSceneSchema = z
     mediaKind: z.enum(['image', 'video']),
     durationSeconds: z.number().finite().int().min(1).max(60),
     referenceAssetId: safeIdSchema.nullable(),
+  })
+  .strict();
+const studioBriefRulePredicateSchema = z
+  .object({
+    kind: z.literal('forbidden_terms'),
+    terms: z.array(z.string().trim().min(1).max(STUDIO_RULE_LIMITS.term)).min(1).max(STUDIO_RULE_LIMITS.maxTerms),
+  })
+  .strict();
+const studioSetBriefRulesSchema = z
+  .object({
+    projectId: safeIdSchema,
+    expectedRevision: studioExpectedRevisionSchema,
+    rules: z
+      .array(
+        z
+          .object({
+            id: safeIdSchema,
+            text: z.string().trim().min(1).max(STUDIO_RULE_LIMITS.text),
+            predicate: studioBriefRulePredicateSchema.nullable(),
+          })
+          .strict()
+      )
+      .max(STUDIO_RULE_LIMITS.maxRules),
   })
   .strict();
 const studioUpdateProjectSchema = z
@@ -467,7 +533,9 @@ export const INVALID_RENDERER_BRIDGE_QUERY_PAYLOAD_MESSAGE =
 export const rendererBridgeQuerySchemas = {
   'creative-studio.has-unsaved-work': {
     request: voidPayloadSchema,
-    response: z.object({ dirtySceneCount: z.number().finite().int().min(0).max(24) }).strict(),
+    response: z
+      .object({ dirtySceneCount: z.number().finite().int().min(0).max(STUDIO_MAX_DIRTY_SCENES_REPORTED) })
+      .strict(),
   },
   'creative-studio.flush-unsaved-work': {
     request: voidPayloadSchema,
@@ -673,7 +741,40 @@ export const nativeBridgePayloadSchemas = {
   'creative-studio.list-projects': voidPayloadSchema,
   'creative-studio.create-project': studioProjectInputSchema,
   'creative-studio.get-project': studioProjectRequestSchema,
+  'creative-studio.get-brief-session-server': studioProjectRequestSchema,
   'creative-studio.list-proposals': studioProjectRequestSchema,
+  'creative-studio.list-pending-reference-requests': studioProjectRequestSchema,
+  'creative-studio.dismiss-reference-requests': z
+    .object({
+      projectId: safeIdSchema,
+      requestIds: z
+        .array(safeIdSchema)
+        .min(1)
+        .max(50)
+        .refine((ids) => new Set(ids).size === ids.length),
+      expectedRevision: studioExpectedRevisionSchema.optional(),
+      expectedRequests: z
+        .array(z.object({ id: safeIdSchema, sceneId: safeIdSchema }).strict())
+        .min(1)
+        .max(50)
+        .optional(),
+    })
+    .strict()
+    .superRefine((value, context) => {
+      const hasExpectedRevision = value.expectedRevision !== undefined;
+      const hasExpectedRequests = value.expectedRequests !== undefined;
+      if (hasExpectedRevision !== hasExpectedRequests) {
+        context.addIssue({ code: 'custom', message: 'Checked consume authority must be paired' });
+        return;
+      }
+      if (
+        value.expectedRequests !== undefined &&
+        (value.expectedRequests.length !== value.requestIds.length ||
+          value.expectedRequests.some((request, index) => request.id !== value.requestIds[index]))
+      ) {
+        context.addIssue({ code: 'custom', message: 'Checked consume authority must match request order' });
+      }
+    }),
   'creative-studio.accept-proposal': z.object({ projectId: safeIdSchema, proposalId: safeIdSchema }).strict(),
   'creative-studio.reject-proposal': z.object({ projectId: safeIdSchema, proposalId: safeIdSchema }).strict(),
   'creative-studio.propose-storyboard': z
@@ -685,6 +786,8 @@ export const nativeBridgePayloadSchemas = {
     .strict(),
   'creative-studio.update-model-selection': studioUpdateModelSelectionSchema,
   'creative-studio.update-project': studioUpdateProjectSchema,
+  'creative-studio.set-brief-rules': studioSetBriefRulesSchema,
+  'creative-studio.undo-brief-rules': studioProjectRequestSchema,
   'creative-studio.bind-brief-conversation': z
     .object({
       projectId: safeIdSchema,
@@ -701,7 +804,7 @@ export const nativeBridgePayloadSchemas = {
       sceneIds: z
         .array(safeIdSchema)
         .min(1)
-        .max(24)
+        .max(STUDIO_MAX_CUT_PLACEMENT_SCENES)
         .refine((ids) => new Set(ids).size === ids.length),
       beforeClipId: safeIdSchema.nullable(),
     })
@@ -724,7 +827,7 @@ export const nativeBridgePayloadSchemas = {
       sceneOrder: z
         .array(safeIdSchema)
         .min(1)
-        .max(24)
+        .max(STUDIO_MAX_SCENES)
         .refine((ids) => new Set(ids).size === ids.length),
     })
     .strict(),
@@ -741,6 +844,15 @@ export const nativeBridgePayloadSchemas = {
     .object({
       projectId: safeIdSchema,
       sceneId: safeIdSchema.optional(),
+      briefReferenceRole: z.enum(['cast', 'look']).optional(),
+      expectedRevision: studioExpectedRevisionSchema,
+    })
+    .strict()
+    .refine((input) => input.sceneId === undefined || input.briefReferenceRole === undefined),
+  'creative-studio.detach-brief-reference': z
+    .object({
+      projectId: safeIdSchema,
+      assetId: safeIdSchema,
       expectedRevision: studioExpectedRevisionSchema,
     })
     .strict(),

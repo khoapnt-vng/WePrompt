@@ -18,9 +18,12 @@ import type {
   ProviderJobSnapshot,
   ProviderOutput,
   ProviderSubmitResult,
-  StudioGenerationRequest,
+  ResolvedStudioGenerationRequest,
   StudioRouteValidation,
 } from './types';
+import { hasImageConditioningFields } from './types';
+import { BYTEPLUS_SEEDANCE_BASE_URL } from './bytePlusSeedanceAdapter';
+import { validateImageConditioningRequest } from './imageAdapter';
 
 export const STUDIO_E2E_FAKE_PROVIDER_ID = 'weprompt_studio_e2e';
 export const STUDIO_E2E_CREDENTIAL_SENTINEL = 'STUDIO_SECRET_CREDENTIAL_SENTINEL';
@@ -39,6 +42,7 @@ export const STUDIO_E2E_FAKE_FIXTURE_DIRECTORY = '.studio-raw-output-path-sentin
 const STUDIO_E2E_IMAGE_MODEL = 'weprompt-e2e-image';
 const STUDIO_E2E_NEXT_IMAGE_MODEL = 'weprompt-e2e-image-next';
 const STUDIO_E2E_VIDEO_MODEL = 'weprompt-e2e-video';
+const STUDIO_E2E_EXPLICIT_SELECTION_VIDEO_MODEL = 'dreamina-seedance-2-0-260128';
 const FAKE_FIXTURE_DIRECTORY = STUDIO_E2E_FAKE_FIXTURE_DIRECTORY;
 const RAW_OUTPUT_SENTINEL_BYTES = Buffer.from(STUDIO_E2E_RAW_OUTPUT_BODY_SENTINEL);
 const IMAGE_BYTES = Buffer.from(
@@ -68,14 +72,19 @@ export const createStudioE2EFakeRemoteState = (): StudioE2EFakeRemoteState => ({
 });
 
 export type StudioE2EFakeBundle = {
+  catalogProfile: StudioE2EFakeCatalogProfile;
   provider: IProvider;
   connections: StudioConnectionBinding[];
   adapters: ReadonlyMap<StudioProviderAdapterId, GenerationProviderAdapter>;
   dispose(): Promise<void>;
 };
 
+/** The lifecycle profile is retained for direct tests; explicit selection is only for the E2E journey. */
+export type StudioE2EFakeCatalogProfile = 'lifecycle' | 'explicit-selection';
+
 export type StudioE2EFakeBundleDeps = {
   rootDir: string;
+  catalogProfile?: StudioE2EFakeCatalogProfile;
   /** Test-only remote service state may outlive a runtime to model provider-side durability. */
   remoteState?: StudioE2EFakeRemoteState;
 };
@@ -90,26 +99,41 @@ class StudioE2EFakeAdapterError extends Error {
   }
 }
 
-const expectedModels = (mediaKind: StudioMediaKind): readonly string[] =>
-  mediaKind === 'image' ? [STUDIO_E2E_IMAGE_MODEL, STUDIO_E2E_NEXT_IMAGE_MODEL] : [STUDIO_E2E_VIDEO_MODEL];
+const expectedModels = (catalogProfile: StudioE2EFakeCatalogProfile, mediaKind: StudioMediaKind): readonly string[] =>
+  mediaKind === 'image'
+    ? catalogProfile === 'explicit-selection'
+      ? [STUDIO_E2E_IMAGE_MODEL]
+      : [STUDIO_E2E_IMAGE_MODEL, STUDIO_E2E_NEXT_IMAGE_MODEL]
+    : catalogProfile === 'explicit-selection'
+      ? [STUDIO_E2E_EXPLICIT_SELECTION_VIDEO_MODEL]
+      : [STUDIO_E2E_VIDEO_MODEL];
 
-const acceptsModel = (mediaKind: StudioMediaKind, model: string): boolean => expectedModels(mediaKind).includes(model);
+const acceptsModel = (
+  catalogProfile: StudioE2EFakeCatalogProfile,
+  mediaKind: StudioMediaKind,
+  model: string
+): boolean => expectedModels(catalogProfile, mediaKind).includes(model);
 
 const validateRequest = (
-  request: StudioGenerationRequest,
+  request: ResolvedStudioGenerationRequest,
   provider: { id: string; use_model: string },
+  catalogProfile: StudioE2EFakeCatalogProfile,
   mediaKind: StudioMediaKind
 ): StudioRouteValidation => {
   const issues: StudioRouteIssue[] = [];
   if (
     provider.id !== STUDIO_E2E_FAKE_PROVIDER_ID ||
-    !acceptsModel(mediaKind, provider.use_model) ||
-    request.mediaKind !== mediaKind
+    !acceptsModel(catalogProfile, mediaKind, provider.use_model) ||
+    request.mediaKind !== mediaKind ||
+    (mediaKind === 'video' && hasImageConditioningFields(request))
   ) {
     issues.push({ code: 'provider_unavailable' });
   }
   if (!Number.isInteger(request.durationSeconds) || request.durationSeconds < 1 || request.durationSeconds > 60) {
     issues.push({ code: 'invalid_duration' });
+  }
+  if (mediaKind === 'image' && !validateImageConditioningRequest(request, 6, false).ok) {
+    issues.push({ code: 'provider_unavailable' });
   }
   return issues.length > 0
     ? { ok: false, issues }
@@ -126,6 +150,7 @@ const validateRequest = (
 /** Builds the deterministic fake only for a runtime that has already passed both E2E flag gates. */
 export const createStudioE2EFakeBundle = ({
   rootDir,
+  catalogProfile = 'lifecycle',
   remoteState: injectedRemoteState,
 }: StudioE2EFakeBundleDeps): StudioE2EFakeBundle => {
   const resolvedRoot = path.resolve(rootDir);
@@ -166,13 +191,13 @@ export const createStudioE2EFakeBundle = ({
   };
 
   const createAdapter = (
-    id: Extract<StudioProviderAdapterId, 'weprompt-image-v1' | 'weprompt-media-gateway-v1'>,
+    id: Extract<StudioProviderAdapterId, 'byteplus-seedance-v1' | 'weprompt-image-v1' | 'weprompt-media-gateway-v1'>,
     mediaKind: StudioMediaKind
   ): GenerationProviderAdapter => ({
     id,
     async validateConnection(input, provider, signal) {
       signal.throwIfAborted();
-      return provider.id === STUDIO_E2E_FAKE_PROVIDER_ID && acceptsModel(mediaKind, input.model)
+      return provider.id === STUDIO_E2E_FAKE_PROVIDER_ID && acceptsModel(catalogProfile, mediaKind, input.model)
         ? {
             ok: true,
             capabilities: {
@@ -183,15 +208,17 @@ export const createStudioE2EFakeBundle = ({
               minDurationSeconds: 1,
               maxDurationSeconds: 60,
               supportsFirstFrame: true,
+              maxConditioningImages: mediaKind === 'image' ? 6 : 0,
               cancellationPolicy: 'queued_only',
             },
           }
         : { ok: false, error: { code: 'unsupported' } };
     },
-    validateRequest: (request, provider) => validateRequest(request, provider, mediaKind),
+    validateRequest: (request, provider) => validateRequest(request, provider, catalogProfile, mediaKind),
     async submit(request, provider, signal) {
       signal.throwIfAborted();
-      if (!validateRequest(request, provider, mediaKind).ok) throw new StudioE2EFakeAdapterError('unsupported');
+      if (!validateRequest(request, provider, catalogProfile, mediaKind).ok)
+        throw new StudioE2EFakeAdapterError('unsupported');
       remoteState.taskCounter += 1;
       const providerJobId = `${STUDIO_E2E_PROVIDER_JOB_SENTINEL}_${remoteState.taskCounter}`;
       remoteState.tasks.set(providerJobId, {
@@ -208,7 +235,7 @@ export const createStudioE2EFakeBundle = ({
     },
     async poll(providerJobId, provider, signal): Promise<ProviderJobSnapshot> {
       signal.throwIfAborted();
-      if (provider.id !== STUDIO_E2E_FAKE_PROVIDER_ID || !acceptsModel(mediaKind, provider.use_model)) {
+      if (provider.id !== STUDIO_E2E_FAKE_PROVIDER_ID || !acceptsModel(catalogProfile, mediaKind, provider.use_model)) {
         throw new StudioE2EFakeAdapterError('unsupported');
       }
       const task = remoteState.tasks.get(providerJobId);
@@ -223,7 +250,7 @@ export const createStudioE2EFakeBundle = ({
     },
     async cancel(providerJobId, provider, signal) {
       signal.throwIfAborted();
-      if (provider.id !== STUDIO_E2E_FAKE_PROVIDER_ID || !acceptsModel(mediaKind, provider.use_model)) {
+      if (provider.id !== STUDIO_E2E_FAKE_PROVIDER_ID || !acceptsModel(catalogProfile, mediaKind, provider.use_model)) {
         throw new StudioE2EFakeAdapterError('unsupported');
       }
       const task = remoteState.tasks.get(providerJobId);
@@ -241,22 +268,28 @@ export const createStudioE2EFakeBundle = ({
     id: STUDIO_E2E_FAKE_PROVIDER_ID,
     platform: 'gemini',
     name: 'WePrompt Studio E2E',
-    base_url: STUDIO_E2E_PROVIDER_URL_SENTINEL,
+    base_url: catalogProfile === 'explicit-selection' ? BYTEPLUS_SEEDANCE_BASE_URL : STUDIO_E2E_PROVIDER_URL_SENTINEL,
     api_key: STUDIO_E2E_CREDENTIAL_SENTINEL,
-    models: [STUDIO_E2E_IMAGE_MODEL, STUDIO_E2E_NEXT_IMAGE_MODEL, STUDIO_E2E_VIDEO_MODEL],
+    models: [...expectedModels(catalogProfile, 'image'), ...expectedModels(catalogProfile, 'video')],
     enabled: true,
     model_enabled: {
       [STUDIO_E2E_IMAGE_MODEL]: true,
-      [STUDIO_E2E_NEXT_IMAGE_MODEL]: true,
-      [STUDIO_E2E_VIDEO_MODEL]: true,
+      ...(catalogProfile === 'lifecycle'
+        ? { [STUDIO_E2E_NEXT_IMAGE_MODEL]: true, [STUDIO_E2E_VIDEO_MODEL]: true }
+        : {}),
+      ...(catalogProfile === 'explicit-selection' ? { [STUDIO_E2E_EXPLICIT_SELECTION_VIDEO_MODEL]: true } : {}),
     },
     model_health: {
       [STUDIO_E2E_IMAGE_MODEL]: { status: 'healthy' },
-      [STUDIO_E2E_NEXT_IMAGE_MODEL]: { status: 'healthy' },
-      [STUDIO_E2E_VIDEO_MODEL]: { status: 'healthy' },
+      ...(catalogProfile === 'lifecycle'
+        ? { [STUDIO_E2E_NEXT_IMAGE_MODEL]: { status: 'healthy' }, [STUDIO_E2E_VIDEO_MODEL]: { status: 'healthy' } }
+        : {}),
+      ...(catalogProfile === 'explicit-selection'
+        ? { [STUDIO_E2E_EXPLICIT_SELECTION_VIDEO_MODEL]: { status: 'healthy' } }
+        : {}),
     },
   };
-  const connections: StudioConnectionBinding[] = [
+  const lifecycleConnections: StudioConnectionBinding[] = [
     {
       schemaVersion: 1,
       id: 'weprompt_studio_e2e_video',
@@ -271,6 +304,7 @@ export const createStudioE2EFakeBundle = ({
         minDurationSeconds: 1,
         maxDurationSeconds: 60,
         supportsFirstFrame: true,
+        maxConditioningImages: 0,
         cancellationPolicy: 'queued_only',
       },
       validatedAt: '1970-01-01T00:00:00.000Z',
@@ -288,6 +322,7 @@ export const createStudioE2EFakeBundle = ({
         minDurationSeconds: 1,
         maxDurationSeconds: 60,
         supportsFirstFrame: true,
+        maxConditioningImages: 6,
         cancellationPolicy: 'queued_only',
       },
       validatedAt: '1970-01-01T00:00:00.000Z',
@@ -305,17 +340,62 @@ export const createStudioE2EFakeBundle = ({
         minDurationSeconds: 1,
         maxDurationSeconds: 60,
         supportsFirstFrame: true,
+        maxConditioningImages: 6,
         cancellationPolicy: 'queued_only',
       },
       validatedAt: '1970-01-01T00:00:00.000Z',
     },
   ];
+  const explicitSelectionConnections: StudioConnectionBinding[] = [
+    {
+      schemaVersion: 1,
+      id: 'weprompt_studio_e2e_explicit_selection_image',
+      providerId: STUDIO_E2E_FAKE_PROVIDER_ID,
+      adapterId: 'weprompt-image-v1',
+      model: STUDIO_E2E_IMAGE_MODEL,
+      capabilities: {
+        mediaKinds: ['image'],
+        aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
+        resolutions: ['720p', '1080p'],
+        minDurationSeconds: 1,
+        maxDurationSeconds: 60,
+        supportsFirstFrame: true,
+        maxConditioningImages: 6,
+        cancellationPolicy: 'queued_only',
+      },
+      validatedAt: '1970-01-01T00:00:00.000Z',
+    },
+    ...((['byteplus-seedance-v1', 'weprompt-media-gateway-v1'] as const).map((adapterId) => ({
+      schemaVersion: 1,
+      id: `weprompt_studio_e2e_explicit_selection_${adapterId}`,
+      providerId: STUDIO_E2E_FAKE_PROVIDER_ID,
+      adapterId,
+      model: STUDIO_E2E_EXPLICIT_SELECTION_VIDEO_MODEL,
+      capabilities: {
+        mediaKinds: ['video'] as const,
+        audioModes: ['none'],
+        aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
+        resolutions: ['720p', '1080p'],
+        minDurationSeconds: 4,
+        maxDurationSeconds: 15,
+        supportsFirstFrame: true,
+        maxConditioningImages: 0,
+        cancellationPolicy: 'queued_only' as const,
+      },
+      validatedAt: '1970-01-01T00:00:00.000Z',
+    })) satisfies StudioConnectionBinding[]),
+  ];
+  const connections = catalogProfile === 'explicit-selection' ? explicitSelectionConnections : lifecycleConnections;
   const adapters = new Map<StudioProviderAdapterId, GenerationProviderAdapter>([
     ['weprompt-image-v1', createAdapter('weprompt-image-v1', 'image')],
     ['weprompt-media-gateway-v1', createAdapter('weprompt-media-gateway-v1', 'video')],
+    ...(catalogProfile === 'explicit-selection'
+      ? [['byteplus-seedance-v1', createAdapter('byteplus-seedance-v1', 'video')] as const]
+      : []),
   ]);
 
   return {
+    catalogProfile,
     provider,
     connections,
     adapters,

@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { StudioSceneStatus } from '../../../../studioReadiness';
 import { useStudioVideoPosterCapture } from '../../../../hooks/useStudioVideoPosterCapture';
+import { describeSceneRenderBlockMessage, type StudioSceneRenderBlock } from '../../../Generation/generationRequests';
 import styles from './produce.module.css';
 
 export type ShotCardProps = {
@@ -28,10 +29,14 @@ export type ShotCardProps = {
   displayedJob: StudioRendererJob | null;
   mutationPending: boolean;
   cancelPending: boolean;
-  reviewAvailable: boolean;
+  renderBlock: StudioSceneRenderBlock | null;
+  renderDisabled: boolean;
   onSelect: () => void;
   onOpenPreview: () => void;
   onWriteVisual: () => void;
+  onFocusEngineRole: () => void;
+  onRemoveReference: () => void;
+  onShorten: () => void;
   onOpenReview: () => void;
   onCancelJob: (jobId: string) => void | Promise<unknown>;
 };
@@ -51,10 +56,14 @@ export const ShotCard: React.FC<ShotCardProps> = ({
   displayedJob,
   mutationPending,
   cancelPending,
-  reviewAvailable,
+  renderBlock,
+  renderDisabled,
   onSelect,
   onOpenPreview,
   onWriteVisual,
+  onFocusEngineRole,
+  onRemoveReference,
+  onShorten,
   onOpenReview,
   onCancelJob,
 }) => {
@@ -71,6 +80,14 @@ export const ShotCard: React.FC<ShotCardProps> = ({
     videoAssetId: selectedTakeId,
     enabled: scene.mediaKind === 'video' && selectedTakeId !== null && posterSource === null,
   });
+  const renderBlockMessage = renderBlock === null ? null : describeSceneRenderBlockMessage(renderBlock);
+  const renderBlockReason = renderBlockMessage === null ? null : t(renderBlockMessage.key, renderBlockMessage.values);
+  const renderBlockDescriptionId = `studio-shot-render-block-${scene.id}`;
+  const canSetEngines =
+    renderBlock !== null &&
+    ['no_engine', 'needs_setup', 'retired', 'project_frame', 'frame', 'resolution', 'first_frame'].includes(
+      renderBlock.code
+    );
 
   return (
     <li aria-label={sceneLabel} data-selected={selected || undefined} className={styles.shotCard}>
@@ -160,16 +177,43 @@ export const ShotCard: React.FC<ShotCardProps> = ({
               {t('conversation.creativeStudio.jobs.cancel')}
             </Button>
           )}
-          {reviewAvailable && (
-            <Button type='primary' size='small' disabled={mutationPending} onClick={onOpenReview}>
-              {t(
-                takeTotal > 0
-                  ? 'conversation.creativeStudio.phase.produce.renderAnother'
-                  : 'conversation.creativeStudio.phase.produce.render'
-              )}
+          {renderBlock?.code === 'first_frame' && (
+            <Button size='mini' disabled={mutationPending} onClick={onRemoveReference}>
+              {t('conversation.creativeStudio.models.blocked.actionRemoveReference')}
             </Button>
           )}
+          {canSetEngines && (
+            <Button size='mini' disabled={mutationPending} onClick={onFocusEngineRole}>
+              {t('conversation.creativeStudio.models.blocked.actionSetEngines')}
+            </Button>
+          )}
+          {renderBlock?.code === 'duration' && (
+            <Button size='mini' disabled={mutationPending} onClick={onShorten}>
+              {t('conversation.creativeStudio.models.blocked.actionShorten')}
+            </Button>
+          )}
+          <Button
+            type='primary'
+            size='small'
+            disabled={mutationPending || renderDisabled || renderBlock !== null}
+            aria-describedby={renderBlock === null ? undefined : renderBlockDescriptionId}
+            onClick={onOpenReview}
+          >
+            {t(
+              takeTotal > 0
+                ? 'conversation.creativeStudio.phase.produce.renderAnother'
+                : 'conversation.creativeStudio.phase.produce.render'
+            )}
+          </Button>
         </div>
+        {renderBlockReason !== null && (
+          <>
+            <span className='text-12px text-t-secondary'>{renderBlockReason}</span>
+            <span id={renderBlockDescriptionId} className='sr-only'>
+              {t('conversation.creativeStudio.models.blocked.aria', { reason: renderBlockReason })}
+            </span>
+          </>
+        )}
       </div>
     </li>
   );

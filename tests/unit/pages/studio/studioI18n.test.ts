@@ -14,7 +14,10 @@ type JsonObject = Record<string, unknown>;
 const localeRoot = new URL('../../../../packages/desktop/src/renderer/services/i18n/locales/', import.meta.url);
 
 const plannedGroups = [
+  'brief',
+  'briefReferences',
   'close',
+  'conditioning',
   'create',
   'draft',
   'empty',
@@ -28,46 +31,141 @@ const plannedGroups = [
   'phase',
   'preview',
   'project',
+  'reference',
   'review',
-  'routing',
+  'rules',
   'scene',
+  'shell',
   'storyboard',
   'timeline',
   'transition',
 ] as const;
 
+const briefReferenceKeys = [
+  'briefReferences.title',
+  'briefReferences.inheritanceDescription',
+  'briefReferences.castHeading',
+  'briefReferences.lookHeading',
+  'briefReferences.castEmpty',
+  'briefReferences.lookEmpty',
+  'briefReferences.addCast',
+  'briefReferences.addLook',
+  'briefReferences.activeCount',
+  'briefReferences.limitReached',
+  'briefReferences.removeFromBrief',
+  'briefReferences.removeAccessible',
+  'briefReferences.previewAccessible',
+  'briefReferences.engineCapacityNone',
+  'briefReferences.engineMenuCapacityNone',
+  'briefReferences.engineCapacityMaximum',
+  'briefReferences.capacityMismatch',
+  'briefReferences.importError',
+] as const;
+
+const conditioningKeys = [
+  'conditioning.inputsTitle',
+  'conditioning.role.cast',
+  'conditioning.role.look',
+  'conditioning.maximum',
+  'conditioning.unsupported',
+  'conditioning.overflow',
+  'conditioning.malformed',
+  'conditioning.reviewChanged',
+  'conditioning.plateOutOfDate',
+] as const;
+
+const briefKeys = [
+  'brief.conversationTitle',
+  'brief.danglingNotice',
+  'brief.danglingStartFresh',
+  'brief.proposalTitle',
+  'brief.proposalMeta',
+  'brief.proposalSummary',
+  'brief.proposalAccept',
+  'brief.proposalReject',
+  'brief.proposalAccepted',
+  'brief.proposalRejected',
+  'brief.proposalExpired',
+  'brief.proposalStale',
+  'brief.proposalRepropose',
+  'brief.proposalFlushRefused',
+] as const;
+
+/**
+ * Every entry is rendered by code in Tasks 7-14, and each is named next to its render site so the
+ * list cannot quietly outlive a surface. `check-i18n.js` has no unused-key detection, and this
+ * presence loop pins whatever it lists into all twelve locales, so every entry must have a shipped
+ * surface.
+ */
+const rulesKeys = [
+  'rules.open', // StudioPhaseShell, Rules button
+  'rules.title', // StudioRulesDrawer, Drawer title
+  'rules.description', // StudioRulesDrawer
+  'rules.precedence', // StudioRulesDrawer
+  'rules.empty', // StudioRulesDrawer, both layers empty
+  'rules.scope.organisation', // StudioRulesDrawer, scope Tag
+  'rules.scope.project', // StudioRulesDrawer, scope Tag
+  'rules.scope.organisationLocked', // StudioRulesDrawer, locked Tag
+  'rules.contextOnlyBadge', // StudioRulesDrawer, enforcement Tag + legend
+  'rules.enforcedBadge', // StudioRulesDrawer, enforcement Tag + legend
+  'rules.removeAccessible', // StudioRulesDrawer, per-rule aria-label
+  'rules.remove', // StudioRulesDrawer, per-rule button text
+  'rules.undo', // StudioRulesDrawer, undo button
+  'rules.undoAdded', // StudioRulesDrawer, added-rule undo notice
+  'rules.undoRemoved', // StudioRulesDrawer, removed-rule undo notice
+  'rules.undoChanged', // StudioRulesDrawer, changed-list undo notice
+  'rules.enforcedHelp', // StudioRulesDrawer, badge legend
+  'rules.contextOnlyHelp', // StudioRulesDrawer, badge legend
+  'rules.textLabel', // StudioRulesDrawer, label + aria-label
+  'rules.textPlaceholder', // StudioRulesDrawer
+  'rules.invalidText', // StudioRulesDrawer, empty-text alert
+  'rules.textTooLong', // StudioRulesDrawer, overlong-text alert
+  'rules.tooManyTerms', // StudioRulesDrawer, term-count alert
+  'rules.termTooLong', // StudioRulesDrawer, overlong-term alert
+  'rules.termUnusable', // StudioRulesDrawer, unusable-term alert
+  'rules.duplicateTerm', // StudioRulesDrawer, duplicate-term alert
+  'rules.termsLabel', // StudioRulesDrawer, label + aria-label
+  'rules.termsPlaceholder', // StudioRulesDrawer
+  'rules.termsHelp', // StudioRulesDrawer
+  'rules.limitReached', // StudioRulesDrawer, at the cap
+  'rules.add', // StudioRulesDrawer, submit
+  'rules.breachScene', // GenerationReviewModal, per-scene Alert
+  'rules.breachBlockedConfirm', // GenerationReviewModal, disabledReason
+  'rules.breachAskDirector', // GenerationReviewModal, escape hatch
+  'rules.autoSubmitBlocked', // StudioPage, queued-reference guard
+  'rules.proposalTitle', // DirectorProposalCard, pin_rule Card title
+  'rules.proposalBody', // DirectorProposalCard, pin_rule
+  'rules.proposalTerms', // DirectorProposalCard, pin_rule predicate
+  'errors.ruleBreach', // creativeStudioBridge + useStudioJobs rule_breach mapping
+] as const;
+
 const phaseKeys = [
-  'phase.nav.label',
-  'phase.nav.brief',
-  'phase.nav.write',
-  'phase.nav.produce',
-  'phase.nav.review',
-  'phase.nav.saved',
-  'phase.nav.saving',
+  'phase.nav.viewsLabel',
+  'phase.nav.table',
+  'phase.nav.board',
+  'phase.nav.cut',
+  'phase.nav.saved', // StudioPhaseHeader save chip, not the view switch
+  'phase.nav.saving', // StudioPhaseHeader save chip, not the view switch
   'phase.shared.backToLibrary',
   'phase.shared.noMediaGeneration',
+  'phase.shared.activityLabel',
+  'phase.shared.activityGenerating',
+  'phase.shared.activityRendering',
+  'phase.shared.activityRenderingLabel',
+  'phase.shared.readoutShots', // StudioPhaseShell state readout, beside the view switch
+  'phase.shared.readoutDuration', // ditto — a formatted runtime, not a seconds count
+  'phase.shared.readoutRendered', // ditto — selectedAssetCount, the shots that are finished
   'phase.brief.title',
   'phase.brief.description',
   'phase.brief.nameLabel',
   'phase.brief.intentLabel',
   'phase.brief.durationLabel',
   'phase.brief.aspectRatioLabel',
-  'phase.brief.startWriting',
-  'phase.brief.saved',
-  'phase.brief.saving',
-  'phase.brief.unsaved',
   'phase.brief.invalidName',
   'phase.brief.aspectLocked',
   'phase.brief.aspectLockedHelp',
   'phase.write.title',
-  'phase.write.continueToProduce',
-  'phase.write.askAssistant',
-  'phase.write.assistantTitle',
-  'phase.write.assistantDescription',
-  'phase.write.textChargeDisclosure',
-  'phase.write.draftStoryboard',
   'phase.write.addShot',
-  'phase.write.fitToGoal',
   'phase.write.noScenes',
   'phase.write.scriptTableTitle',
   'phase.write.scriptTableHelp',
@@ -75,6 +173,8 @@ const phaseKeys = [
   'phase.write.scriptColumn',
   'phase.write.visualColumn',
   'phase.write.outputColumn',
+  'phase.write.lengthColumn',
+  'phase.write.stateColumn',
   'phase.write.visualPlaceholder',
   'phase.write.suggestVisual',
   'phase.write.addReference',
@@ -84,10 +184,7 @@ const phaseKeys = [
   'phase.write.placeholder.middle',
   'phase.write.placeholder.closing',
   'phase.write.needsTitle',
-  'phase.write.pacingTitle',
-  'phase.write.pacingSummary',
-  'phase.write.goalMarker',
-  'phase.produce.reviewCut',
+  'phase.produce.title',
   'phase.produce.modelsTitle',
   'phase.produce.activityTitle',
   'phase.produce.activityEmpty',
@@ -112,6 +209,9 @@ const phasePluralLogicalKeys = [
   'phase.produce.jobsRunning',
   'phase.review.renderedShots',
   'phase.review.missingSlates',
+  'phase.shared.activityGenerating',
+  'phase.shared.readoutShots',
+  'phase.shared.readoutRendered',
 ] as const;
 
 const closeKeys = [
@@ -153,7 +253,6 @@ const taskSevenKeys = [
   'project.notFound',
   'project.title',
   'project.brief',
-  'project.aspectRatio',
   'project.targetDuration',
   'project.resolution',
   'project.sceneCount',
@@ -186,6 +285,83 @@ const stableMessageKeys = [
   'jobs.errors.unknown',
 ] as const;
 
+const engineStripKeys = [
+  'models.engine.label',
+  'models.engine.scope',
+  'models.engine.roleImage',
+  'models.engine.roleVideo',
+  'models.engine.roleImageHint',
+  'models.engine.roleVideoHint',
+  'models.engine.optionLabel',
+  'models.engine.summary',
+  'models.engine.summaryImage',
+  'models.engine.durationRange',
+  'models.engine.frameYes',
+  'models.engine.frameNo',
+  'models.engine.audioSilent',
+  'models.engine.audioOn',
+  'models.engine.unverified',
+  'models.engine.notSetImage',
+  'models.engine.notSetVideo',
+  'models.engine.notSetCount',
+  'models.engine.notSetCount_one',
+  'models.engine.notSetCount_other',
+  'models.engine.noFitImage',
+  'models.engine.noFitVideo',
+  'models.engine.noFitHint',
+  'models.engine.pairNeedImage',
+  'models.engine.pairNeedVideo',
+  'models.engine.pairNeither',
+  'models.engine.retired',
+  'models.engine.retiredAction',
+  'models.engine.replacing',
+  'models.engine.needsSetup',
+  'models.engine.needsSetupHint',
+  'models.engine.notAnswering',
+  'models.engine.frameMismatch',
+  'models.engine.catalogUnloaded',
+  'models.engine.refresh',
+  'models.engine.refreshing',
+  'models.engine.manage',
+  'models.engine.manageShort',
+  'models.engine.saving',
+  'models.engine.savingOther',
+  'models.engine.saveFailed',
+  'models.engine.saveBlocked',
+  'models.engine.saveStale',
+  'models.engine.lockedDuringReview',
+  'models.engine.boundsFromEngine',
+  'models.engine.boundsFromOptions',
+  'models.engine.boundsUnbounded',
+  'models.engine.directorStale',
+  'models.engine.directorStaleAction',
+  'models.blocked.noEngine',
+  'models.blocked.needsSetup',
+  'models.blocked.notAnswering',
+  'models.blocked.retired',
+  'models.blocked.frame',
+  'models.blocked.resolution',
+  'models.blocked.duration',
+  'models.blocked.firstFrame',
+  'models.blocked.catalogUnloaded',
+  'models.blocked.aria',
+  'models.blocked.actionSetEngines',
+  'models.blocked.actionRemoveReference',
+  'models.blocked.actionShorten',
+  'review.disabledMissingRoutes',
+  'review.setEngines',
+  'review.excludedFirstFrame',
+  'phase.produce.batchExcluded',
+  'phase.produce.batchExcluded_one',
+  'phase.produce.askTeammateCopy',
+  'conditioning.unsupported',
+  'conditioning.overflow',
+  'conditioning.malformed',
+  'conditioning.reviewChanged',
+  'conditioning.plateOutOfDate',
+  'library.readinessSetupRequired',
+] as const;
+
 const ordinaryRetryConfirmationKeys = [
   'jobs.retryConfirmationTitle',
   'jobs.retryConfirmationBody',
@@ -215,6 +391,8 @@ const renderStateAndExportKeys = [
 ] as const;
 
 const pluralLogicalKeys = [
+  'briefReferences.activeCount',
+  'briefReferences.engineCapacityMaximum',
   'export.confirmSelectedCount',
   'export.gapWarning',
   'phase.review.render.errors.noRenderableShots',
@@ -228,10 +406,22 @@ const pluralLogicalKeys = [
   'timeline.selectSceneAccessible',
   'review.selectedDurationFull',
   'review.targetDurationFull',
+  'review.disabledMissingRoutes',
+  'review.excludedFirstFrame',
+  'models.engine.notSetCount',
+  'phase.produce.batchExcluded',
   ...phasePluralLogicalKeys,
 ] as const;
 
 const streamFullSentenceKeys = [
+  'briefReferences.inheritanceDescription',
+  'briefReferences.castEmpty',
+  'briefReferences.lookEmpty',
+  'briefReferences.limitReached',
+  'briefReferences.removeAccessible',
+  'briefReferences.engineCapacityNone',
+  'briefReferences.capacityMismatch',
+  'briefReferences.importError',
   'storyboard.dragSceneAccessible',
   'storyboard.moveSceneUpAccessible',
   'storyboard.moveSceneDownAccessible',
@@ -241,8 +431,6 @@ const streamFullSentenceKeys = [
   'phase.brief.description',
   'phase.brief.invalidName',
   'phase.brief.aspectLockedHelp',
-  'phase.write.assistantDescription',
-  'phase.write.textChargeDisclosure',
   'phase.write.noScenes',
   'phase.write.scriptTableHelp',
   'phase.write.visualPlaceholder',
@@ -255,6 +443,57 @@ const streamFullSentenceKeys = [
   'phase.review.handoffDescription',
   'phase.review.partialHandoff',
   'transition.savingBlocked',
+  'shell.directorStarting',
+  'rules.description',
+  'rules.precedence',
+  'rules.empty',
+  'rules.removeAccessible',
+  'rules.undoAdded',
+  'rules.undoRemoved',
+  'rules.undoChanged',
+  'rules.enforcedHelp',
+  'rules.contextOnlyHelp',
+  'rules.textPlaceholder',
+  'rules.invalidText',
+  'rules.textTooLong',
+  'rules.tooManyTerms',
+  'rules.termTooLong',
+  'rules.termUnusable',
+  'rules.duplicateTerm',
+  'rules.termsPlaceholder',
+  'rules.termsHelp',
+  'rules.limitReached',
+  'rules.breachScene',
+  'rules.breachBlockedConfirm',
+  'rules.autoSubmitBlocked',
+  'rules.proposalBody',
+  'errors.ruleBreach',
+  'models.engine.scope',
+  'models.engine.roleImageHint',
+  'models.engine.roleVideoHint',
+  'models.engine.noFitHint',
+  'models.engine.pairNeedImage',
+  'models.engine.pairNeedVideo',
+  'models.engine.pairNeither',
+  'models.engine.needsSetupHint',
+  'models.engine.notAnswering',
+  'models.engine.catalogUnloaded',
+  'models.engine.saveFailed',
+  'models.engine.saveBlocked',
+  'models.engine.saveStale',
+  'models.engine.lockedDuringReview',
+  'models.engine.boundsFromOptions',
+  'models.engine.boundsUnbounded',
+  'models.engine.directorStale',
+  'models.blocked.noEngine',
+  'models.blocked.needsSetup',
+  'models.blocked.notAnswering',
+  'models.blocked.retired',
+  'models.blocked.firstFrame',
+  'models.blocked.catalogUnloaded',
+  'review.disabledMissingRoutes',
+  'review.excludedFirstFrame',
+  'phase.produce.askTeammateCopy',
   ...pluralLogicalKeys,
 ] as const;
 
@@ -297,32 +536,171 @@ function isPluralVariantKey(key: string): boolean {
   return pluralLogicalKeys.some((base) => key.startsWith(`${base}_`));
 }
 
-const truthfulAssistantDescriptions: Record<string, string> = {
-  'zh-CN': '根据创作简报生成故事板草稿。',
-  'en-US': 'Draft a storyboard from your brief.',
-  'ja-JP': 'ブリーフをもとにストーリーボードの下書きを作成します。',
-  'zh-TW': '根據創作簡報產生分鏡腳本草稿。',
-  'ko-KR': '브리프를 바탕으로 스토리보드 초안을 만듭니다.',
-  'tr-TR': 'Kısa açıklamanızdan bir storyboard taslağı oluşturun.',
-  'ru-RU': 'Создайте черновик раскадровки на основе брифа.',
-  'uk-UA': 'Створіть чернетку розкадрування на основі брифу.',
-  'pt-BR': 'Crie um rascunho de storyboard a partir do seu briefing.',
-  'de-DE': 'Erstelle aus deinem Briefing einen Storyboard-Entwurf.',
-  'es-ES': 'Crea un borrador de storyboard a partir de tu brief.',
-  'fa-IR': 'از شرح مختصر خود یک پیش‌نویس استوری‌بورد بسازید.',
-};
+/**
+ * Copy that belonged to Write's own writing assistant, which D10 removed.
+ *
+ * Deleting a surface leaves its strings behind in twelve files, where nothing complains about them:
+ * `check-i18n.js` only compares locales against each other, so an orphan present everywhere looks
+ * perfectly healthy. This is what notices.
+ */
+const removedWriteAssistantKeys = [
+  'phase.write.askAssistant',
+  'phase.write.assistantTitle',
+  'phase.write.assistantDescription',
+  'phase.write.textChargeDisclosure',
+  'phase.write.draftStoryboard',
+] as const;
+
+/**
+ * Copy for the four-step Brief/Write/Produce/Review rail that the view switch replaced — both its
+ * labels and its two progression calls to action.
+ *
+ * `phase.nav.saved` and `phase.nav.saving` are not rail copy at all; they are the header's
+ * save chip, and a prefix-wide sweep of `phase.nav.*` would take them with it.
+ *
+ * `phase.write.continueToProduce` and `phase.produce.reviewCut` were the rail's step-forward
+ * buttons, which outlived the rail in the top bar. A switch has no next step — every destination is
+ * already visible — and both rendered the same word "Continue" while going to different places.
+ * `phase.review.handoff` is deliberately not here: it opens export, so it is an action on the
+ * document rather than progression through it.
+ */
+const removedPhaseRailKeys = [
+  'phase.nav.label',
+  'phase.nav.write',
+  'phase.nav.produce',
+  'phase.nav.review',
+  'phase.write.continueToProduce',
+  'phase.produce.reviewCut',
+] as const;
+
+/** Copy retired when Brief moved from the view switch into a project-level drawer. */
+const removedBriefViewKeys = ['phase.nav.brief', 'phase.brief.startWriting'] as const;
+
+const retiredEngineBarKeys = [
+  'phase.produce.renderingWith',
+  'phase.produce.engineSummary',
+  'phase.produce.changeEngines',
+  'phase.produce.engineKinds',
+  'routing.title',
+  'routing.modelLabel',
+  'routing.missingRoute',
+  'routing.invalidRoute',
+] as const;
 
 describe('Creative Studio localization contract', () => {
-  it('describes the Write assistant truthfully in every configured locale', () => {
-    expect(Object.keys(truthfulAssistantDescriptions).toSorted()).toEqual(
-      [...i18nConfig.supportedLanguages].toSorted()
-    );
+  it('carries no copy for the four-step phase rail the view switch replaced, in any configured locale', () => {
+    for (const locale of i18nConfig.supportedLanguages) {
+      const leaves = flattenStringLeaves(loadConversationLocale(locale).creativeStudio);
+      // Guards the guard: a wrong path or an empty read would make every absence assertion pass.
+      // One live neighbour per prefix the removed set spans, so a mistyped prefix cannot pass either.
+      expect(leaves['phase.nav.table'], `${locale}/phase.nav.table`).toBeTruthy();
+      expect(leaves['phase.nav.saved'], `${locale}/phase.nav.saved`).toBeTruthy();
+      expect(leaves['phase.write.title'], `${locale}/phase.write.title`).toBeTruthy();
+      expect(leaves['phase.produce.modelsTitle'], `${locale}/phase.produce.modelsTitle`).toBeTruthy();
+      // The Cut view's export action is not progression and stays.
+      expect(leaves['phase.review.handoff'], `${locale}/phase.review.handoff`).toBeTruthy();
+      for (const key of removedPhaseRailKeys) {
+        expect(leaves[key], `${locale}/${key} outlived the rail that used it`).toBeUndefined();
+      }
+    }
+  });
+
+  it('carries no switch label or progression action for Brief now that it is a drawer', () => {
+    for (const locale of i18nConfig.supportedLanguages) {
+      const leaves = flattenStringLeaves(loadConversationLocale(locale).creativeStudio);
+      expect(leaves['phase.brief.title'], `${locale}/phase.brief.title`).toBeTruthy();
+      expect(leaves['phase.brief.durationLabel'], `${locale}/phase.brief.durationLabel`).toBeTruthy();
+      for (const key of removedBriefViewKeys) {
+        expect(leaves[key], `${locale}/${key} outlived the Brief view`).toBeUndefined();
+      }
+    }
+  });
+
+  it('retires the read-only engine bar and its route vocabulary in every locale', () => {
+    for (const locale of i18nConfig.supportedLanguages) {
+      const leaves = flattenStringLeaves(loadConversationLocale(locale).creativeStudio);
+      for (const key of retiredEngineBarKeys) {
+        expect(leaves[key], `${locale}/${key} outlived the Engine Strip`).toBeUndefined();
+      }
+    }
+  });
+
+  it('uses engine rather than route in every English Creative Studio message', () => {
+    const leaves = flattenStringLeaves(loadConversationLocale('en-US').creativeStudio);
+    const offenders = Object.entries(leaves)
+      .filter(([, value]) => /\broutes?\b/i.test(value))
+      .map(([key]) => key);
+
+    expect(offenders).toEqual([]);
+  });
+
+  /**
+   * A view's heading is the first thing a screen reader speaks after the switch moves focus, because
+   * `StudioPhaseShell` focuses `[data-studio-phase-heading]` on every view change. Activating "Cut"
+   * and landing on a heading that says "Review" is not a wording preference; it is the switch and the
+   * document disagreeing about where you are. Asserting equality rather than exact strings keeps the
+   * two surfaces consistent by construction, so improving a view's name only takes one edit.
+   *
+   * The Engine Strip has its own section label and never owns this phase focus target.
+   */
+  it.each([
+    ['phase.write.title', 'phase.nav.table'],
+    ['phase.produce.title', 'phase.nav.board'],
+    ['phase.review.title', 'phase.nav.cut'],
+  ])('words %s exactly as the switch label %s in every configured locale', (headingKey, navKey) => {
+    const issues: string[] = [];
 
     for (const locale of i18nConfig.supportedLanguages) {
-      const creativeStudio = loadConversationLocale(locale).creativeStudio;
-      const description = flattenStringLeaves(creativeStudio)['phase.write.assistantDescription'];
+      const leaves = flattenStringLeaves(loadConversationLocale(locale).creativeStudio);
+      const heading = leaves[headingKey];
+      const label = leaves[navKey];
+      if (!heading?.trim() || !label?.trim()) {
+        issues.push(`${locale} is missing ${headingKey} or ${navKey}`);
+        continue;
+      }
+      if (heading !== label) {
+        issues.push(`${locale}.${headingKey} says "${heading}" but the switch says "${label}"`);
+      }
+    }
 
-      expect(description, `${locale}/phase.write.assistantDescription`).toBe(truthfulAssistantDescriptions[locale]);
+    expect(issues).toEqual([]);
+  });
+
+  /**
+   * The same contract for cross-view calls to action, where the view name sits inside a sentence
+   * rather than standing alone, so containment is the honest assertion and equality is not.
+   *
+   * Both keys below outlived the phase rail still saying "Produce" — a primary button reading
+   * "Open Produce" that navigates to a tab labelled "Board", in twelve languages. Retiring a view
+   * name from the switch does not retire it from the sentences that point at that view.
+   *
+   * **Reference locale only, deliberately.** Russian and Ukrainian decline the noun: the switch
+   * says «Доска» / «Дошка» while the sentences need «доску» / «дошки», so a containment assertion
+   * is structurally wrong for inflected languages and would force translators into ungrammatical
+   * copy to satisfy it. Drift is introduced in the reference locale — translators work from it —
+   * and the other eleven are already held by the parity and copied-English guards above.
+   */
+  it.each([
+    ['phase.review.openProduce', 'phase.nav.board'],
+    ['phase.review.render.openProduce', 'phase.nav.board'],
+  ])('names the destination view in %s using the reference switch label %s', (ctaKey, navKey) => {
+    const leaves = flattenStringLeaves(loadConversationLocale(i18nConfig.referenceLanguage).creativeStudio);
+    const cta = leaves[ctaKey];
+    const label = leaves[navKey];
+
+    expect(cta?.trim(), `${ctaKey} is missing`).toBeTruthy();
+    expect(label?.trim(), `${navKey} is missing`).toBeTruthy();
+    expect(cta, `${ctaKey} says "${cta}" but the switch calls that view "${label}"`).toContain(label);
+  });
+
+  it('carries no copy for the Write assistant it removed, in any configured locale', () => {
+    for (const locale of i18nConfig.supportedLanguages) {
+      const leaves = flattenStringLeaves(loadConversationLocale(locale).creativeStudio);
+      // Guards the guard: a wrong path or an empty read would make every absence assertion pass.
+      expect(leaves['phase.write.suggestVisual'], `${locale}/phase.write.suggestVisual`).toBeTruthy();
+      for (const key of removedWriteAssistantKeys) {
+        expect(leaves[key], `${locale}/${key} outlived the surface that used it`).toBeUndefined();
+      }
     }
   });
 
@@ -345,6 +723,15 @@ describe('Creative Studio localization contract', () => {
     const body = flattenStringLeaves(creativeStudio)['jobs.retryConfirmationBody'];
 
     expect(body).toBe('Retrying resubmits this generation to the provider and may incur provider charges.');
+  });
+
+  it('keeps the Engine menu zero-capacity label short while Brief recovery stays cautious', () => {
+    const leaves = flattenStringLeaves(loadConversationLocale(i18nConfig.referenceLanguage).creativeStudio);
+
+    expect(leaves['briefReferences.engineMenuCapacityNone']).toBe('No reference images');
+    expect(leaves['briefReferences.engineCapacityNone']).toBe(
+      'This image engine has not been validated for reference images. Open Model Settings and revalidate it.'
+    );
   });
 
   // Asserts the ABSENCE of a fabricated cost fragment rather than exact wording,
@@ -374,6 +761,18 @@ describe('Creative Studio localization contract', () => {
     expect(Object.keys(creativeStudio).toSorted()).toEqual([...plannedGroups].toSorted());
 
     const leaves = flattenStringLeaves(creativeStudio);
+    for (const key of briefKeys) {
+      expect(leaves[key], `Missing conversation.creativeStudio.${key}`).toBeTruthy();
+    }
+    for (const key of briefReferenceKeys) {
+      expect(leaves[key], `Missing conversation.creativeStudio.${key}`).toBeTruthy();
+    }
+    for (const key of rulesKeys) {
+      expect(leaves[key], `Missing conversation.creativeStudio.${key}`).toBeTruthy();
+    }
+    for (const key of conditioningKeys) {
+      expect(leaves[key], `Missing conversation.creativeStudio.${key}`).toBeTruthy();
+    }
     for (const key of taskSevenKeys) {
       expect(leaves[key], `Missing conversation.creativeStudio.${key}`).toBeTruthy();
     }
@@ -381,6 +780,9 @@ describe('Creative Studio localization contract', () => {
       expect(leaves[key], `Missing conversation.creativeStudio.${key}`).toBeTruthy();
     }
     for (const key of closeKeys) {
+      expect(leaves[key], `Missing conversation.creativeStudio.${key}`).toBeTruthy();
+    }
+    for (const key of engineStripKeys) {
       expect(leaves[key], `Missing conversation.creativeStudio.${key}`).toBeTruthy();
     }
   });
@@ -452,6 +854,23 @@ describe('Creative Studio localization contract', () => {
 
     expect(creativeStudio.connection).toBeUndefined();
     expect(JSON.stringify(creativeStudio)).not.toContain('App Operations');
+  });
+
+  /**
+   * The frame's header is the single save-state readout. Brief's copy went with its duplicate
+   * readout; leaving the keys behind would let the duplicate be restored without a translation
+   * round, which is how it comes back.
+   */
+  it('retains no copy for the Brief save-state readout the frame replaced', () => {
+    for (const locale of i18nConfig.supportedLanguages) {
+      const leaves = flattenStringLeaves(loadConversationLocale(locale).creativeStudio);
+
+      for (const key of ['phase.brief.saved', 'phase.brief.saving', 'phase.brief.unsaved'] as const) {
+        expect(leaves[key], `${locale}/${key} must be removed`).toBeUndefined();
+      }
+      // Guards the guard: a wrong lookup shape would make the assertions above vacuous.
+      expect(leaves['phase.brief.title'], `${locale}/phase.brief.title`).toBeTruthy();
+    }
   });
 
   it('explains that imported media also protects a scene from deletion', () => {
@@ -704,5 +1123,62 @@ describe('Creative Studio localization contract', () => {
       expect(leaves['inspector.unsavedChanges']).toBe(expected);
       expect(leaves['inspector.unsavedChanges']).not.toBe(leaves['inspector.saved']);
     }
+  });
+
+  /**
+   * Seven readiness states, not two.
+   *
+   * An earlier pass at this copy collapsed the row to a binary derived from whether a reference
+   * image existed. That is not what readiness means: `studioReadiness.ts` never consults
+   * `referenceAssetId`, and a reference image is optional. A scene with no plate is still ready to
+   * produce, while one missing a title is not — so a scene could read "Ready to produce" and then
+   * be silently excluded from Produce, or read "needs an image" when nothing was missing.
+   *
+   * Distinctness is the part that matters: collapsing two states onto one string is how the
+   * information gets lost, and it cannot be seen by a key-presence check alone.
+   */
+  it('words every scene readiness state distinctly in every configured locale', () => {
+    const readinessStates = [
+      'needs_title',
+      'needs_prompt',
+      'generating',
+      'needs_selection',
+      'generated',
+      'needs_attention',
+      'ready',
+    ] as const;
+    const issues: string[] = [];
+
+    for (const locale of i18nConfig.supportedLanguages) {
+      const leaves = flattenStringLeaves(loadConversationLocale(locale).creativeStudio);
+      const wordingToState = new Map<string, string>();
+
+      for (const state of readinessStates) {
+        const wording = leaves[`scene.status.${state}`]?.trim();
+        if (!wording) {
+          issues.push(`${locale} is missing conversation.creativeStudio.scene.status.${state}`);
+          continue;
+        }
+        const clash = wordingToState.get(wording);
+        if (clash !== undefined) {
+          issues.push(`${locale} words scene.status.${state} the same as scene.status.${clash}: "${wording}"`);
+        }
+        wordingToState.set(wording, state);
+      }
+    }
+
+    expect(issues).toEqual([]);
+  });
+
+  /**
+   * Studio produces shots. "Ready to generate" describes the engine; the row describes the film.
+   * `phase.write.needsTitle` is the same statement shown from an unsaved draft before readiness has
+   * recomputed, so the two must never drift apart and say different things about one scene.
+   */
+  it('describes a ready scene in production language rather than engine language', () => {
+    const leaves = flattenStringLeaves(loadConversationLocale('en-US').creativeStudio);
+
+    expect(leaves['scene.status.ready']).toBe('Ready to produce');
+    expect(leaves['phase.write.needsTitle']).toBe(leaves['scene.status.needs_title']);
   });
 });

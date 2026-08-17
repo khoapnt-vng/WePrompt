@@ -23,13 +23,13 @@ export const studioProjectSummarySchema = z
     aspectRatio: z.enum(['16:9', '9:16', '1:1', '4:3', '3:4']),
     targetDurationSeconds: z.number().finite().int().min(5).max(60),
     resolution: z.enum(['720p', '1080p']),
-    sceneCount: z.number().finite().int().nonnegative().max(24),
-    selectedAssetCount: z.number().finite().int().nonnegative().max(24),
+    sceneCount: z.number().finite().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    selectedAssetCount: z.number().finite().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
     poster: z
       .object({
         assetId: safeStudioIdSchema,
-        sceneNumber: z.number().finite().int().positive().max(24),
-        takeNumber: z.number().finite().int().positive().max(256),
+        sceneNumber: z.number().finite().int().positive().max(Number.MAX_SAFE_INTEGER),
+        takeNumber: z.number().finite().int().positive().max(Number.MAX_SAFE_INTEGER),
       })
       .strict()
       .nullable(),

@@ -442,7 +442,7 @@
   "toolsDescription": "Configure MCP servers and built-in tools like image generation. Image generation must be enabled after configuring an image-capable model on the Model page.",
   "modelDescription": "Configure providers and API keys for text, image, and video models.",
   "mediaModels": {
-    "title": "Creative Studio media models",
+    "title": "Creative Studio engines",
     "description": "Bind existing providers to image and video integrations without exposing credentials.",
     "add": "Add media model",
     "empty": "No media models configured yet.",
@@ -709,6 +709,7 @@
   "mcpJsonBareServerError": "Wrap the MCP server config in a top-level \"mcpServers\" object or add a \"name\" in an array item.",
   "mcpJsonUrlRequiredError": "HTTP and SSE MCP servers require a non-empty \"url\".",
   "mcpJsonStdioCommandRequiredError": "Stdio MCP servers require a non-empty \"command\".",
+  "mcpJsonReservedNameError": "That name is reserved by WePrompt and cannot be used for an MCP server. Rename the server and try again.",
   "mcpTestConnection": "Check MCP Availability",
   "mcpTestConnectionSuccess": "Connection test successful",
   "mcpConnected": "Available",

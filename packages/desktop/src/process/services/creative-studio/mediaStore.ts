@@ -9,7 +9,19 @@ import { constants as fsConstants, createReadStream, createWriteStream, promises
 import path from 'node:path';
 import { PassThrough, Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import type { StudioAsset, StudioProject } from '@/common/types/project/creativeStudioTypes';
+import { jobOutputRole } from '@/common/types/project/creativeStudioOutputRole';
+import type {
+  StudioAsset,
+  StudioBriefReferenceRole,
+  StudioDetachBriefReferenceRequest,
+  StudioProject,
+} from '@/common/types/project/creativeStudioTypes';
+import {
+  allocateStudioBriefReferenceLabel,
+  resolveActiveStudioBriefReferences,
+  STUDIO_MANAGED_ASSET_COLLECTIONS,
+  STUDIO_MAX_ACTIVE_BRIEF_REFERENCES,
+} from '@/common/types/project/creativeStudioManagedAssetCollections';
 import { CreativeStudioStoreError, reconcilePersistedStudioCuts, type CreativeStudioStore } from './store';
 import { downloadRemoteMedia, type RemoteMediaDownloadDeps } from '../remote-media/remoteMediaDownloader';
 
@@ -81,8 +93,12 @@ export type InternalImportReferenceInput = {
   projectId: string;
   sourcePath: string;
   sceneId?: string;
+  briefReferenceRole?: StudioBriefReferenceRole;
   expectedRevision: number;
+  returnProject?: boolean;
 };
+
+export type StudioMediaImportResult = { asset: StudioAsset; project: StudioProject };
 
 export type InternalExportStudioAssetsInput = {
   projectId: string;
@@ -162,7 +178,11 @@ export type InternalStudioExportResult = {
 };
 
 export type StudioMediaStore = {
+  importReferenceFromPath(
+    input: InternalImportReferenceInput & { returnProject: true }
+  ): Promise<StudioMediaImportResult>;
   importReferenceFromPath(input: InternalImportReferenceInput): Promise<StudioAsset>;
+  detachBriefReference(input: StudioDetachBriefReferenceRequest): Promise<StudioProject>;
   persistProviderOutput(input: PersistProviderOutputInput): Promise<StudioAsset>;
   persistProviderOutputFromUrl(input: PersistProviderOutputUrlInput): Promise<StudioAsset>;
   persistProviderOutputForJob(input: PersistProviderJobOutputInput): Promise<StudioAsset>;
@@ -201,6 +221,10 @@ export type StudioMediaStoreDeps = {
   getAvailableDiskBytes?: (directory: string) => Promise<number>;
   /** Test seam for byte-boundary coverage without allocating production-sized fixtures. */
   limits?: Partial<StudioMediaLimits>;
+  /** Test seam for deterministic replacement exactly before cleanup takes ownership of a path. */
+  beforeCleanupOwnership?: (filePath: string) => Promise<void>;
+  /** Test seam for a replacement after no-replace restoration of a mismatched quarantine. */
+  afterCleanupRestore?: (filePath: string, quarantinePath: string) => Promise<void>;
 };
 
 const truncateUtf8 = (value: string, maxBytes: number): string => {
@@ -503,16 +527,52 @@ const finalizeManagedPart = async (
   }
 };
 
-/** Removes only the inode created by this operation; a replacement is user-owned and preserved. */
-const unlinkIfIdentityMatches = async (filePath: string, expected: FileIdentity): Promise<void> => {
+/**
+ * Atomically takes ownership of the current directory entry before inspecting it. A mismatched
+ * entry may be restored without replacement, but is always retained in quarantine for recovery.
+ */
+const unlinkIfIdentityMatches = async (
+  filePath: string,
+  expected: FileIdentity,
+  beforeOwnership?: (filePath: string) => Promise<void>,
+  afterRestore?: (filePath: string, quarantinePath: string) => Promise<void>
+): Promise<void> => {
+  let quarantineDirectory: string | null = null;
+  let quarantinePath: string | null = null;
   try {
-    const stats = await fs.lstat(filePath);
+    quarantineDirectory = await fs.mkdtemp(path.join(path.dirname(filePath), '.studio-cleanup-'));
+    quarantinePath = path.join(quarantineDirectory, path.basename(filePath));
+    await beforeOwnership?.(filePath);
+    await fs.rename(filePath, quarantinePath);
+  } catch {
+    if (quarantineDirectory !== null) {
+      await fs.rmdir(quarantineDirectory).catch((): undefined => undefined);
+    }
+    return;
+  }
+  if (quarantineDirectory === null || quarantinePath === null) return;
+
+  try {
+    const stats = await fs.lstat(quarantinePath);
     const current = fileIdentity(stats);
     if (stats.isFile() && !stats.isSymbolicLink() && current.dev === expected.dev && current.ino === expected.ino) {
-      await fs.unlink(filePath);
+      await fs.unlink(quarantinePath);
+    } else {
+      try {
+        // link() never replaces a new owner at the original path. If that path is occupied or
+        // restoration otherwise fails, the unverified entry remains in its private quarantine.
+        // The quarantine is retained even after restoration so no later pathname race can remove
+        // the final link to an inode that this cleanup operation does not own.
+        await fs.link(quarantinePath, filePath);
+        await afterRestore?.(filePath, quarantinePath);
+      } catch {
+        // Preserve the unverified entry in quarantine rather than broadening cleanup.
+      }
     }
   } catch {
-    // Cleanup is best-effort and never broadens to an unverified replacement.
+    // Cleanup is best-effort; unverifiable quarantine contents are preserved.
+  } finally {
+    await fs.rmdir(quarantineDirectory).catch((): undefined => undefined);
   }
 };
 
@@ -659,8 +719,21 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     };
   };
 
-  const importReferenceFromPath = async (input: InternalImportReferenceInput): Promise<StudioAsset> => {
-    if (!SAFE_ID.test(input.projectId) || (!SAFE_ID.test(input.sceneId ?? '') && input.sceneId !== undefined)) {
+  async function importReferenceFromPath(
+    input: InternalImportReferenceInput & { returnProject: true }
+  ): Promise<StudioMediaImportResult>;
+  async function importReferenceFromPath(input: InternalImportReferenceInput): Promise<StudioAsset>;
+  async function importReferenceFromPath(
+    input: InternalImportReferenceInput
+  ): Promise<StudioAsset | StudioMediaImportResult> {
+    if (
+      !SAFE_ID.test(input.projectId) ||
+      (!SAFE_ID.test(input.sceneId ?? '') && input.sceneId !== undefined) ||
+      (input.briefReferenceRole !== undefined &&
+        input.briefReferenceRole !== 'cast' &&
+        input.briefReferenceRole !== 'look') ||
+      (input.sceneId !== undefined && input.briefReferenceRole !== undefined)
+    ) {
       throw new CreativeStudioMediaError('invalid_media');
     }
     if (
@@ -674,6 +747,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     if (!SAFE_ID.test(assetId)) throw new CreativeStudioMediaError('storage_error');
 
     let partPath: string | null = null;
+    let partIdentity: FileIdentity | null = null;
     let finalPath: string | null = null;
     let finalIdentity: FileIdentity | null = null;
     try {
@@ -685,6 +759,12 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       if (project.revision !== input.expectedRevision) throw new CreativeStudioMediaError('stale_project');
       if (input.sceneId !== undefined && !Object.hasOwn(project.scenes, input.sceneId)) {
         throw new CreativeStudioMediaError('not_found');
+      }
+      if (input.briefReferenceRole !== undefined) {
+        const activeReferences = resolveActiveStudioBriefReferences(project.assets);
+        if (activeReferences === null || activeReferences.length >= STUDIO_MAX_ACTIVE_BRIEF_REFERENCES) {
+          throw new CreativeStudioMediaError('invalid_media');
+        }
       }
       const capacity = await planWriteCapacity(project, projectDir, limits.referenceMaxBytes, sourceStats.size);
       const partsDir = await ensureManagedDirectory(projectDir, 'parts');
@@ -707,12 +787,23 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
           callback(null, chunk);
         },
       });
-      await pipeline(
-        await openVerifiedReadStream(input.sourcePath),
-        checker,
-        createWriteStream(partPath, { flags: 'wx' })
-      );
-      await regularFile(partPath);
+      const partHandle = await fs.open(partPath, 'wx');
+      try {
+        const openedPart = await partHandle.stat();
+        if (!openedPart.isFile()) throw new CreativeStudioMediaError('storage_error');
+        partIdentity = fileIdentity(openedPart);
+        await pipeline(
+          await openVerifiedReadStream(input.sourcePath),
+          checker,
+          createWriteStream(partPath, { fd: partHandle.fd, autoClose: false })
+        );
+      } finally {
+        await partHandle.close().catch((): undefined => undefined);
+      }
+      const completedPartIdentity = fileIdentity(await regularFile(partPath));
+      if (completedPartIdentity.dev !== partIdentity.dev || completedPartIdentity.ino !== partIdentity.ino) {
+        throw new CreativeStudioMediaError('storage_error');
+      }
       const signature = sniff(sample);
       if (signature === null || !signature.mimeType.startsWith('image/')) {
         throw new CreativeStudioMediaError('invalid_media');
@@ -721,8 +812,9 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       if (path.dirname(finalPath) !== importsDir) throw new CreativeStudioMediaError('storage_error');
       finalIdentity = await finalizeManagedPart(partPath, partsDir, finalPath, importsDir);
       partPath = null;
+      partIdentity = null;
 
-      const asset: StudioAsset = {
+      const baseAsset: StudioAsset = {
         id: assetId,
         projectId: input.projectId,
         sceneId: input.sceneId ?? null,
@@ -733,26 +825,86 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         sha256: hash.digest('hex'),
         createdAt: now(),
       };
-      await deps.store.updateProject(
+      let importedAsset: StudioAsset | null = null;
+      const updatedProject = await deps.store.updateProject(
         input.projectId,
         (current) => {
           const next = structuredClone(current);
+          const activeReferences = resolveActiveStudioBriefReferences(current.assets);
+          if (
+            input.briefReferenceRole !== undefined &&
+            (activeReferences === null || activeReferences.length >= STUDIO_MAX_ACTIVE_BRIEF_REFERENCES)
+          ) {
+            throw new CreativeStudioMediaError('invalid_media');
+          }
+          const asset: StudioAsset =
+            input.briefReferenceRole === undefined
+              ? baseAsset
+              : {
+                  ...baseAsset,
+                  briefReferenceRole: input.briefReferenceRole,
+                  briefReferenceLabel: allocateStudioBriefReferenceLabel(
+                    path.basename(input.sourcePath),
+                    activeReferences!.map((reference) => reference.briefReferenceLabel!)
+                  ),
+                };
           next.assets[asset.id] = asset;
           if (asset.sceneId !== null) {
             const scene = next.scenes[asset.sceneId];
             scene.assetIds.push(asset.id);
             scene.referenceAssetId = asset.id;
           }
+          importedAsset = asset;
           return next;
         },
         input.expectedRevision
       );
-      return asset;
+      if (importedAsset === null) throw new CreativeStudioMediaError('storage_error');
+      return input.returnProject ? { asset: importedAsset, project: updatedProject } : importedAsset;
     } catch (error) {
-      if (partPath !== null) await fs.rm(partPath, { force: true }).catch((): undefined => undefined);
-      if (finalPath !== null && finalIdentity !== null) {
-        await unlinkIfIdentityMatches(finalPath, finalIdentity);
+      if (partPath !== null && partIdentity !== null) {
+        await unlinkIfIdentityMatches(partPath, partIdentity, deps.beforeCleanupOwnership, deps.afterCleanupRestore);
       }
+      if (finalPath !== null && finalIdentity !== null) {
+        await unlinkIfIdentityMatches(finalPath, finalIdentity, deps.beforeCleanupOwnership, deps.afterCleanupRestore);
+      }
+      return mapStoreError(error);
+    }
+  }
+
+  const detachBriefReference = async (input: StudioDetachBriefReferenceRequest): Promise<StudioProject> => {
+    if (
+      !SAFE_ID.test(input.projectId) ||
+      !SAFE_ID.test(input.assetId) ||
+      !Number.isSafeInteger(input.expectedRevision) ||
+      input.expectedRevision < 1
+    ) {
+      throw new CreativeStudioMediaError('invalid_media');
+    }
+    try {
+      return await deps.store.updateProject(
+        input.projectId,
+        (current) => {
+          const asset = current.assets[input.assetId];
+          if (asset === undefined) throw new CreativeStudioMediaError('not_found');
+          if (
+            asset.projectId !== current.id ||
+            asset.sceneId !== null ||
+            asset.mediaKind !== 'image' ||
+            asset.managedAsset.collection !== 'imports' ||
+            (asset.briefReferenceRole !== 'cast' && asset.briefReferenceRole !== 'look') ||
+            asset.briefReferenceLabel === undefined
+          ) {
+            throw new CreativeStudioMediaError('invalid_media');
+          }
+          const next = structuredClone(current);
+          delete next.assets[input.assetId].briefReferenceRole;
+          delete next.assets[input.assetId].briefReferenceLabel;
+          return next;
+        },
+        input.expectedRevision
+      );
+    } catch (error) {
       return mapStoreError(error);
     }
   };
@@ -894,7 +1046,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       if (!projectDir || !project) return null;
       const asset = project.assets[assetId] ?? (await readProjectOutputAsset(projectDir, projectId, assetId));
       if (!asset || asset.projectId !== projectId) return null;
-      if (!['assets', 'imports', 'thumbnails'].includes(asset.managedAsset.collection)) return null;
+      if (!STUDIO_MANAGED_ASSET_COLLECTIONS.has(asset.managedAsset.collection)) return null;
       if (!/^[A-Za-z0-9_-]+\.(?:jpg|png|webp|mp4|webm)$/.test(asset.managedAsset.fileName)) return null;
       const collectionDir = path.join(projectDir, asset.managedAsset.collection);
       if (path.dirname(collectionDir) !== projectDir) return null;
@@ -1031,7 +1183,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     projectDir: string;
     project: StudioProject;
     capacity: WriteCapacity;
-    collection: 'assets' | 'thumbnails';
+    collection: 'assets' | 'thumbnails' | 'references';
   };
 
   const validateProviderOutputMetadata = (
@@ -1095,8 +1247,13 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       deps.store.getVerifiedProjectDirectory(input.projectId),
       deps.store.getProject(input.projectId),
     ]);
+    const scene = project?.scenes[input.sceneId];
     const job = project?.jobs[input.jobId];
-    if (project?.scenes[input.sceneId] && project.scenes[input.sceneId].mediaKind !== input.mediaKind) {
+    // Must match commitProviderJobAsset: StudioJob.outputRole is immutable after creation.
+    const role = job ? jobOutputRole(job) : null;
+    const mediaKindMatchesRole =
+      role === 'reference' ? input.mediaKind === 'image' : scene?.mediaKind === input.mediaKind;
+    if (scene && !mediaKindMatchesRole) {
       throw new CreativeStudioMediaError('invalid_media');
     }
     const active =
@@ -1106,20 +1263,22 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     if (
       !projectDir ||
       !project ||
-      !project.scenes[input.sceneId] ||
-      project.scenes[input.sceneId].mediaKind !== input.mediaKind ||
+      !scene ||
+      !mediaKindMatchesRole ||
       !job ||
       job.sceneId !== input.sceneId ||
       !active
     ) {
       throw new CreativeStudioMediaError(project && job ? 'job_inactive' : 'not_found');
     }
+    // A reference is already required to be an image above, so the kind check alone is sufficient;
+    // the references collection also keeps plates out of canonical-take predicates as defence in depth.
     const perAssetMaxBytes = input.mediaKind === 'video' ? limits.videoOutputMaxBytes : limits.imageOutputMaxBytes;
     return {
       projectDir,
       project,
       capacity: await planWriteCapacity(project, projectDir, perAssetMaxBytes, input.declaredByteSize),
-      collection: 'assets',
+      collection: role === 'reference' ? 'references' : 'assets',
     };
   };
 
@@ -1411,22 +1570,57 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         job?.status === 'submitting' ||
         job?.status === 'running' ||
         (job?.status === 'failed' && job.error?.code === 'download_failed');
-      if (!job || !scene || scene.mediaKind !== input.mediaKind || job.sceneId !== input.sceneId || !active) {
+      if (!job || !scene || job.sceneId !== input.sceneId || !active) {
         throw new CreativeStudioMediaError('job_inactive');
+      }
+      // Must match prepareProviderJobWrite: StudioJob.outputRole is immutable after creation.
+      const role = jobOutputRole(job);
+      if (role === 'take' && scene.mediaKind !== input.mediaKind) {
+        throw new CreativeStudioMediaError('job_inactive');
+      }
+      if (role === 'reference' && input.mediaKind !== 'image') {
+        // Deliberately invalid_media: immutable outputRole and stable input.mediaKind cannot race like scene.mediaKind.
+        throw new CreativeStudioMediaError('invalid_media');
       }
       const usedBytes = Object.values(current.assets).reduce((total, candidate) => total + candidate.byteSize, 0);
       if (usedBytes + asset.byteSize > limits.projectMaxBytes) {
         throw new CreativeStudioMediaError('invalid_media');
       }
+      if (role === 'reference' && job.referenceInputSnapshot !== undefined) {
+        asset.sourceVisualPrompt = job.referenceInputSnapshot.sourceVisualPrompt;
+        asset.sourceReferenceAssetIds = [...job.referenceInputSnapshot.conditioningReferenceAssetIds];
+        asset.sourceAspectRatio = job.referenceInputSnapshot.aspectRatio;
+        asset.sourceResolution = job.referenceInputSnapshot.resolution;
+      } else {
+        // Legacy reference jobs predate the durable request snapshot. Preserve their historical
+        // prompt-only provenance without inventing complete frame authority from current state.
+        asset.sourceVisualPrompt = scene.visualPrompt.trim();
+      }
       current.assets[asset.id] = asset;
+      // Every scene-owned asset must be reverse-linked in assetIds (store.ts:993) —
+      // exactly as imported references and posters already are — regardless of role.
       scene.assetIds.push(asset.id);
-      scene.selectedAssetId = asset.id;
-      scene.reviewState = 'complete';
+      if (role === 'reference') {
+        scene.referenceAssetId = asset.id;
+        // A plate settles the scene out of 'generating' but must never mark it produced.
+        // A scene that already has a take stays complete - regenerating its plate does
+        // not un-produce it. One with no take returns to its resting state.
+        // The ready -> draft demotion is known and accepted while only the busy gate reads reviewState;
+        // revisit this before making the distinction user-visible rather than duplicating readiness rules here.
+        scene.reviewState = scene.selectedAssetId === null ? 'draft' : 'complete';
+      } else {
+        scene.selectedAssetId = asset.id;
+        scene.reviewState = 'complete';
+      }
       job.status = 'succeeded';
       job.outputAssetIds = [asset.id];
       job.error = null;
       delete job.progress;
       job.updatedAt = now();
+      // reconcileCut derives clips solely from selectedTake (store.ts:769/:780), which a
+      // reference commit never changes, so this is a no-op for the reference path today —
+      // but keeping one path means reconciliation starting to read assetIds can't silently
+      // let a plate become a clip without this call already being in place.
       return reconcilePersistedStudioCuts(current);
     });
   };
@@ -1684,6 +1878,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
 
   return {
     importReferenceFromPath,
+    detachBriefReference,
     persistProviderOutput,
     persistProviderOutputFromUrl,
     persistProviderOutputForJob,

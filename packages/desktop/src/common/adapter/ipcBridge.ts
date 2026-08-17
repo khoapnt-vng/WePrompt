@@ -108,12 +108,16 @@ import type {
   StudioCommandResult,
   StudioChooseAndExportAssetsRequest,
   StudioChooseAndImportReferenceRequest,
+  StudioDetachBriefReferenceRequest,
+  StudioDismissReferenceRequestsRequest,
   StudioDeleteProjectRequest,
   StudioProjectRequest,
   StudioProjectSummary,
   StudioProposal,
   StudioProposalAcceptance,
   StudioProposalRequest,
+  StudioReferenceRequest,
+  StudioSetBriefRulesRequest,
   StudioPersistCapturedPosterRequest,
   StudioPlaceCutScenesRequest,
   StudioRendererProject,
@@ -145,6 +149,7 @@ import type {
   StudioUpdateProjectRequest,
   StudioUpdateSceneRequest,
 } from '../types/project/creativeStudioTypes';
+import { STUDIO_MAX_DIRTY_SCENES_REPORTED } from '../types/project/creativeStudioTypes';
 import type {
   CreateProviderRequest,
   FetchModelsAnonymousRequest,
@@ -1201,8 +1206,18 @@ export const creativeStudio = {
   getProject: bridge.buildProvider<StudioCommandResult<StudioRendererProject | null>, StudioProjectRequest>(
     'creative-studio.get-project'
   ),
+  getBriefSessionServer: bridge.buildProvider<StudioCommandResult<ISessionMcpServer>, StudioProjectRequest>(
+    'creative-studio.get-brief-session-server'
+  ),
   listProposals: bridge.buildProvider<StudioCommandResult<StudioProposal[]>, StudioProjectRequest>(
     'creative-studio.list-proposals'
+  ),
+  listPendingReferenceRequests: bridge.buildProvider<
+    StudioCommandResult<StudioReferenceRequest[]>,
+    StudioProjectRequest
+  >('creative-studio.list-pending-reference-requests'),
+  dismissReferenceRequests: bridge.buildProvider<StudioCommandResult<boolean>, StudioDismissReferenceRequestsRequest>(
+    'creative-studio.dismiss-reference-requests'
   ),
   acceptProposal: bridge.buildProvider<StudioCommandResult<StudioProposalAcceptance>, StudioProposalRequest>(
     'creative-studio.accept-proposal'
@@ -1219,6 +1234,12 @@ export const creativeStudio = {
   >('creative-studio.update-model-selection'),
   updateProject: bridge.buildProvider<StudioCommandResult<StudioRendererProject>, StudioUpdateProjectRequest>(
     'creative-studio.update-project'
+  ),
+  setBriefRules: bridge.buildProvider<StudioCommandResult<StudioRendererProject>, StudioSetBriefRulesRequest>(
+    'creative-studio.set-brief-rules'
+  ),
+  undoBriefRules: bridge.buildProvider<StudioCommandResult<StudioRendererProject>, StudioProjectRequest>(
+    'creative-studio.undo-brief-rules'
   ),
   bindBriefConversation: bridge.buildProvider<
     StudioCommandResult<StudioRendererProject>,
@@ -1249,6 +1270,10 @@ export const creativeStudio = {
     StudioCommandResult<StudioImportOutcome>,
     StudioChooseAndImportReferenceRequest
   >('creative-studio.choose-and-import-reference'),
+  detachBriefReference: bridge.buildProvider<
+    StudioCommandResult<StudioRendererProject>,
+    StudioDetachBriefReferenceRequest
+  >('creative-studio.detach-brief-reference'),
   chooseAndExportAssets: bridge.buildProvider<
     StudioCommandResult<StudioExportOutcome>,
     StudioChooseAndExportAssetsRequest
@@ -1297,7 +1322,7 @@ export const creativeStudio = {
     'creative-studio.list-routes'
   ),
   hasUnsavedWork: bridge.buildRendererQuery<StudioUnsavedWorkStatus>('creative-studio.has-unsaved-work', {
-    dirtySceneCount: 24,
+    dirtySceneCount: STUDIO_MAX_DIRTY_SCENES_REPORTED,
   }),
   flushUnsavedWork: bridge.buildRendererQuery<StudioFlushUnsavedWorkResult>('creative-studio.flush-unsaved-work', {
     saved: false,

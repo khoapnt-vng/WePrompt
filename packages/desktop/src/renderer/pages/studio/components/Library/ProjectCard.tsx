@@ -7,7 +7,7 @@
 import type { StudioProjectSummary } from '@/common/types/project/creativeStudioTypes';
 import { Button, Card, Tag } from '@arco-design/web-react';
 import { Delete } from '@icon-park/react';
-import React from 'react';
+import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { createManagedStudioAssetUrl } from '../Preview';
@@ -22,6 +22,16 @@ const RELATIVE_UNITS: ReadonlyArray<{ unit: Intl.RelativeTimeFormatUnit; millise
   { unit: 'year', milliseconds: 31_536_000_000, limit: Number.POSITIVE_INFINITY },
 ];
 
+const SCRIPT_POSTER_GRADIENT_COUNT = 6;
+
+const getScriptPosterGradientIndex = (projectId: string): number => {
+  let hash = 0;
+  for (const character of projectId) {
+    hash = (Math.imul(hash, 31) + character.charCodeAt(0)) >>> 0;
+  }
+  return hash % SCRIPT_POSTER_GRADIENT_COUNT;
+};
+
 export const formatStudioRelativeTime = (timestamp: string, locale: string, now = Date.now()): string => {
   const delta = Date.parse(timestamp) - now;
   const absolute = Math.abs(delta);
@@ -34,15 +44,27 @@ export const formatStudioRelativeTime = (timestamp: string, locale: string, now 
 
 export type ProjectCardProps = {
   project: StudioProjectSummary;
+  engineReadiness?: ProjectEngineReadiness;
   locale: string;
   disabled: boolean;
   onOpen: () => void;
   onDelete: () => void;
 };
 
-export const ProjectCard: React.FC<ProjectCardProps> = ({ project, locale, disabled, onOpen, onDelete }) => {
+export type ProjectEngineReadiness = 'ready' | 'setup_required' | 'unknown';
+
+export const ProjectCard: React.FC<ProjectCardProps> = ({
+  project,
+  engineReadiness,
+  locale,
+  disabled,
+  onOpen,
+  onDelete,
+}) => {
   const { t } = useTranslation();
   const posterSource = project.poster === null ? null : createManagedStudioAssetUrl(project.id, project.poster.assetId);
+  const [failedPosterSource, setFailedPosterSource] = useState<string | null>(null);
+  const showScriptPoster = posterSource === null || failedPosterSource === posterSource;
   const complete = project.sceneCount > 0 && project.selectedAssetCount >= project.sceneCount;
   const partial = !complete && project.selectedAssetCount > 0;
   const statusKey = complete
@@ -50,21 +72,26 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project, locale, disab
     : partial
       ? 'conversation.creativeStudio.library.status.partiallyRendered'
       : 'conversation.creativeStudio.library.status.scriptOnly';
-  const statusClass = complete ? 'bg-success-6' : partial ? 'bg-danger-6' : 'bg-fill-4';
+  const statusClass = complete ? 'bg-success-6' : partial ? 'bg-warning-6' : 'bg-fill-4';
 
   return (
     <Card
       className={styles.projectCard}
       cover={
         <div className={styles.poster}>
-          {posterSource === null ? (
-            <div className={styles.scriptPoster}>
+          {showScriptPoster ? (
+            <div className={styles.scriptPoster} data-gradient={getScriptPosterGradientIndex(project.id)}>
               <Tag className={styles.posterLabel}>{t('conversation.creativeStudio.library.scriptOnly')}</Tag>
             </div>
           ) : (
-            <img className={styles.posterImage} src={posterSource} alt={project.name} />
+            <img
+              className={styles.posterImage}
+              src={posterSource}
+              alt={project.name}
+              onError={() => setFailedPosterSource(posterSource)}
+            />
           )}
-          {project.poster !== null && posterSource !== null && (
+          {project.poster !== null && !showScriptPoster && (
             <Tag className={styles.posterBadge}>
               {t('conversation.creativeStudio.library.posterBadge', {
                 scene: String(project.poster.sceneNumber).padStart(2, '0'),
@@ -98,6 +125,11 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project, locale, disab
           seconds: project.targetDurationSeconds,
         })}
       </p>
+      {engineReadiness === 'setup_required' && (
+        <Tag color='orange' className={styles.engineReadinessTag}>
+          {t('conversation.creativeStudio.library.readinessSetupRequired')}
+        </Tag>
+      )}
       <p className={styles.projectMeta}>
         {t('conversation.creativeStudio.library.meta', {
           shots: t('conversation.creativeStudio.library.shotCount', { count: project.sceneCount }),

@@ -17,10 +17,14 @@ import type {
   SanitizedProviderError,
   StudioConnectionCandidate,
   StudioConnectionValidation,
-  StudioGenerationRequest,
   StudioRouteValidation,
 } from './types';
-import { isValidProviderJobId, ProviderDeadlineError, runWithProviderDeadline } from './types';
+import {
+  hasImageConditioningFields,
+  isValidProviderJobId,
+  ProviderDeadlineError,
+  runWithProviderDeadline,
+} from './types';
 
 const FIRST_FRAME_MAX_BYTES = 30 * 1024 * 1024;
 const VALIDATION_TIMEOUT_MS = 10_000;
@@ -169,6 +173,7 @@ const sanitizedCapabilities = (value: unknown, model: string): Record<string, un
     minDurationSeconds: minimum as number,
     maxDurationSeconds: maximum as number,
     supportsFirstFrame: selectedVideo.supports_first_frame === true,
+    maxConditioningImages: 0,
     cancellationPolicy:
       cancellationPolicy === 'none' ||
       cancellationPolicy === 'queued_only' ||
@@ -245,10 +250,15 @@ const firstFramePayload = async (request: ResolvedStudioGenerationRequest): Prom
 };
 
 const requestValidation = (
-  request: StudioGenerationRequest,
+  request: ResolvedStudioGenerationRequest,
   provider: Pick<IProvider, 'base_url' | 'api_key'>
 ): StudioRouteValidation => {
-  if (request.mediaKind !== 'video' || !normalizedBaseUrl(provider.base_url) || !provider.api_key.trim()) {
+  if (
+    request.mediaKind !== 'video' ||
+    hasImageConditioningFields(request) ||
+    !normalizedBaseUrl(provider.base_url) ||
+    !provider.api_key.trim()
+  ) {
     return { ok: false, issues: [{ code: 'provider_unavailable' }] };
   }
   if (!Number.isInteger(request.durationSeconds) || request.durationSeconds < 1 || request.durationSeconds > 60) {

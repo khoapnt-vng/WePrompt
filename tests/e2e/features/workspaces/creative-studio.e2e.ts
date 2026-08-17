@@ -8,7 +8,9 @@
  */
 import { expect, test } from '../../fixtures';
 import { navigateTo, ROUTES } from '../../helpers';
-import type { Page } from '@playwright/test';
+import { STUDIO_VIEWS, type StudioView } from '@/common/types/project/creativeStudioTypes';
+import type { ElectronApplication, Page } from '@playwright/test';
+import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const mainProcessOnlySentinels = [
@@ -19,36 +21,48 @@ const mainProcessOnlySentinels = [
   '/private/STUDIO_RAW_OUTPUT_PATH_SENTINEL/provider-output.bin',
 ];
 
-const studioPhases = ['brief', 'write', 'produce', 'review'] as const;
-type StudioPhase = (typeof studioPhases)[number];
+/**
+ * The vocabulary comes from the shipped shared constant, not a copy: a view added there must show
+ * up in this spec's coverage rather than leaving it silently green on three of four views.
+ */
+const studioViews = STUDIO_VIEWS;
 
-const phaseLabels: Record<StudioPhase, string> = {
-  brief: 'Brief',
-  write: 'Write',
-  produce: 'Produce',
-  review: 'Review',
+const viewLabels: Record<StudioView, string> = {
+  table: 'Table',
+  board: 'Board',
+  cut: 'Cut',
 };
 
-const phaseCtas: Record<StudioPhase, string> = {
-  brief: 'Start writing',
-  write: 'Continue to Produce',
-  produce: 'Review cut',
-  review: 'Prepare handoff',
+/**
+ * The page-level action each view offers, verbatim from en-US — `null` where the view offers none.
+ *
+ * Table and Board offer none. Both carried the phase rail's step-forward button, which outlived the
+ * rail in the top bar; a view switch has no next step, and the two buttons rendered the same word
+ * "Continue" while going to different places — an ambiguity this helper could not see through
+ * either, since both entries used to read `'Continue'`. Cut's "Prepare handoff" opens export,
+ * so it stays as a document action.
+ */
+const viewCtas: Record<StudioView, string | null> = {
+  table: null,
+  board: null,
+  cut: 'Prepare handoff',
 };
 
-const phaseCtaPattern = /^(Start writing|Continue to Produce|Review cut|Prepare handoff)$/;
+/**
+ * "Continue" stays in this pattern precisely because nothing renders it any more: it is what makes
+ * the zero-action assertion on Table and Board falsifiable. Restoring either progression CTA turns
+ * the expected count of 0 into 1 and fails `expectStudioView` on both views.
+ */
+const viewCtaPattern = /^(Continue|Prepare handoff)$/;
 const timingGateCopy = [
   'Match the storyboard duration to the target before generating all ready shots.',
   'Scene timing must match the project target before batch generation.',
 ];
 
-// A project adopts a generation route only when exactly one compatible engine exists.
-// The unpackaged fake catalog exposes two image models but a single video model, so a
-// freshly created project arrives with the video route adopted and the image route open.
-const fakeCatalogRoutes = {
-  image: null,
-  video: expect.objectContaining({ providerId: 'weprompt_studio_e2e', model: 'weprompt-e2e-video' }),
-};
+const referenceFixtureBytes = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWMwTpv5HwAENAIyeXoBdAAAAABJRU5ErkJggg==',
+  'base64'
+);
 
 type CanonicalStudioSnapshot = {
   projectId: string;
@@ -63,30 +77,59 @@ type CanonicalStudioSnapshot = {
     narration: string;
     visualPrompt: string;
     durationSeconds: number;
+    referenceAssetId: string | null;
+    selectedAssetId: string | null;
   }>;
-  jobs: Array<{ id: string; sceneId: string; status: string }>;
+  assets: Array<{
+    id: string;
+    sceneId: string | null;
+    collection: string;
+    briefReferenceRole?: 'cast' | 'look';
+    briefReferenceLabel?: string;
+    sourceReferenceAssetIds?: string[];
+  }>;
+  jobs: Array<{
+    id: string;
+    sceneId: string;
+    status: string;
+    outputRole?: 'reference';
+    outputAssetIds: string[];
+  }>;
 };
 
 type StudioRouteOptionSnapshot = {
+  choiceId: string;
   providerId: string;
   providerName: string;
   model: string;
+  integrationLabelKey: 'bytePlusSeedance' | 'imageApi' | 'openRouterVideo' | 'selfHostedVideoGateway';
 };
+
+type StudioRouteChoiceSnapshot = Pick<StudioRouteOptionSnapshot, 'choiceId' | 'providerId' | 'model'>;
 
 type StudioRouteCatalogSnapshot = {
   image: {
-    selected: { choiceId: string; providerId: string; model: string } | null;
+    selected: StudioRouteChoiceSnapshot | null;
+    selectedRoute: StudioRouteOptionSnapshot | null;
     options: StudioRouteOptionSnapshot[];
   };
   video: {
-    selected: { choiceId: string; providerId: string; model: string } | null;
+    selected: StudioRouteChoiceSnapshot | null;
+    selectedRoute: StudioRouteOptionSnapshot | null;
     options: StudioRouteOptionSnapshot[];
   };
 };
 
-const summarizeStudioRoute = ({ selected, options }: StudioRouteCatalogSnapshot['image']) => ({
+const summarizeStudioRoute = ({ selected, selectedRoute, options }: StudioRouteCatalogSnapshot['image']) => ({
   selected,
-  options: options.map(({ providerId, providerName, model }) => ({ providerId, providerName, model })),
+  selectedRoute,
+  options: options.map(({ choiceId, providerId, providerName, model, integrationLabelKey }) => ({
+    choiceId,
+    providerId,
+    providerName,
+    model,
+    integrationLabelKey,
+  })),
 });
 
 async function invokeStudioBridge<T>(
@@ -168,9 +211,25 @@ async function readCanonicalStudioSnapshot(page: Page, projectId: string): Promi
         narration: string;
         visualPrompt: string;
         durationSeconds: number;
+        referenceAssetId: string | null;
+        selectedAssetId: string | null;
       }
     >;
-    jobs: Record<string, { id: string; sceneId: string; status: string }>;
+    assets: Record<
+      string,
+      {
+        id: string;
+        sceneId: string | null;
+        managedAsset: { collection: string };
+        briefReferenceRole?: 'cast' | 'look';
+        briefReferenceLabel?: string;
+        sourceReferenceAssetIds?: string[];
+      }
+    >;
+    jobs: Record<
+      string,
+      { id: string; sceneId: string; status: string; outputRole?: 'reference'; outputAssetIds: string[] }
+    >;
   };
   const project = await invokeStudioBridge<RendererProject>(page, 'get-project', { projectId });
 
@@ -191,14 +250,44 @@ async function readCanonicalStudioSnapshot(page: Page, projectId: string): Promi
               narration: scene.narration,
               visualPrompt: scene.visualPrompt,
               durationSeconds: scene.durationSeconds,
+              referenceAssetId: scene.referenceAssetId,
+              selectedAssetId: scene.selectedAssetId,
             },
           ]
         : [];
     }),
+    assets: Object.values(project.assets)
+      .map((asset) => ({
+        id: asset.id,
+        sceneId: asset.sceneId,
+        collection: asset.managedAsset.collection,
+        ...(asset.briefReferenceRole === undefined ? {} : { briefReferenceRole: asset.briefReferenceRole }),
+        ...(asset.briefReferenceLabel === undefined ? {} : { briefReferenceLabel: asset.briefReferenceLabel }),
+        ...(asset.sourceReferenceAssetIds === undefined
+          ? {}
+          : { sourceReferenceAssetIds: [...asset.sourceReferenceAssetIds] }),
+      }))
+      .toSorted((left, right) => left.id.localeCompare(right.id)),
     jobs: Object.values(project.jobs)
-      .map((job) => ({ id: job.id, sceneId: job.sceneId, status: job.status }))
+      .map((job) => ({
+        id: job.id,
+        sceneId: job.sceneId,
+        status: job.status,
+        ...(job.outputRole === undefined ? {} : { outputRole: job.outputRole }),
+        outputAssetIds: [...job.outputAssetIds],
+      }))
       .toSorted((left, right) => left.id.localeCompare(right.id)),
   };
+}
+
+async function mockNextStudioReferenceImport(electronApp: ElectronApplication, sourcePath: string): Promise<void> {
+  await electronApp.evaluate(({ dialog }, targetPath) => {
+    const originalShowOpenDialog = dialog.showOpenDialog;
+    dialog.showOpenDialog = () => {
+      dialog.showOpenDialog = originalShowOpenDialog;
+      return Promise.resolve({ canceled: false, filePaths: [targetPath] });
+    };
+  }, sourcePath);
 }
 
 async function readStudioRouteCatalog(page: Page, projectId: string): Promise<StudioRouteCatalogSnapshot> {
@@ -215,12 +304,12 @@ async function readStudioRouteCatalog(page: Page, projectId: string): Promise<St
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-const studioPhaseHash = (projectId: string, phase: StudioPhase): string =>
-  `#/studio/${encodeURIComponent(projectId)}/${phase}`;
+const studioViewHash = (projectId: string, view: StudioView): string =>
+  `#/studio/${encodeURIComponent(projectId)}/${view}`;
 
-const projectIdFromPhaseUrl = (page: Page, phase: StudioPhase): string => {
-  const match = new URL(page.url()).hash.match(new RegExp(`^#/studio/([^/]+)/${phase}$`));
-  if (!match?.[1]) throw new Error(`Creative Studio ${phase} route did not contain a project id`);
+const projectIdFromViewUrl = (page: Page, view: StudioView): string => {
+  const match = new URL(page.url()).hash.match(new RegExp(`^#/studio/([^/]+)/${view}$`));
+  if (!match?.[1]) throw new Error(`Creative Studio ${view} route did not contain a project id`);
   return decodeURIComponent(match[1]);
 };
 
@@ -232,41 +321,63 @@ async function openStudioLibrary(page: Page): Promise<void> {
   await expect(studioLibrary).toBeVisible({ timeout: 15_000 });
 }
 
+/**
+ * Leaves the open project the way the phase header offers. The crumb is named by the words it
+ * shows ("Creative Studio"); where it leads is carried by the breadcrumb landmark around it, so
+ * the button cannot be addressed by the destination.
+ */
+async function leaveStudioProject(page: Page): Promise<void> {
+  await page.getByRole('navigation', { name: 'Back to project library' }).getByRole('button').click();
+}
+
 async function assertStudioInvariants(page: Page): Promise<void> {
   const visibleAlertCount = await page.locator('[role="alert"]:visible').count();
   expect(visibleAlertCount, 'Creative Studio must never show competing alerts').toBeLessThanOrEqual(1);
   await Promise.all(timingGateCopy.map((copy) => expect(page.locator('body')).not.toContainText(copy)));
 }
 
-async function expectStudioPhase(page: Page, projectId: string, phase: StudioPhase): Promise<void> {
+async function expectStudioView(page: Page, projectId: string, view: StudioView): Promise<void> {
   const encodedProjectId = escapeRegExp(encodeURIComponent(projectId));
-  await expect(page).toHaveURL(new RegExp(`#\\/studio\\/${encodedProjectId}\\/${phase}$`));
+  await expect(page).toHaveURL(new RegExp(`#\\/studio\\/${encodedProjectId}\\/${view}$`));
 
-  const workflow = page.getByRole('navigation', { name: 'Creative workflow' });
-  await expect(workflow).toBeVisible();
-  await expect(workflow.getByRole('button')).toHaveCount(4);
-  await expect(workflow.getByRole('button', { name: phaseLabels[phase], exact: true })).toHaveAttribute(
+  const viewSwitch = page.getByRole('navigation', { name: 'Project views' });
+  await expect(viewSwitch).toBeVisible();
+  await expect(viewSwitch.getByRole('button')).toHaveCount(4);
+  // `page`, not `step`: the switch addresses four routable views, not four stages of a sequence.
+  await expect(viewSwitch.getByRole('button', { name: viewLabels[view], exact: true })).toHaveAttribute(
     'aria-current',
-    'step'
+    'page'
   );
-  await expect(page.getByRole('button', { name: phaseCtaPattern })).toHaveCount(1);
-  await expect(page.getByRole('button', { name: phaseCtas[phase], exact: true })).toBeVisible();
+  const cta = viewCtas[view];
+  await expect(page.getByRole('button', { name: viewCtaPattern })).toHaveCount(cta === null ? 0 : 1);
+  if (cta !== null) await expect(page.getByRole('button', { name: cta, exact: true })).toBeVisible();
   await assertStudioInvariants(page);
 }
 
-async function selectStudioPhase(page: Page, projectId: string, phase: StudioPhase): Promise<void> {
+async function selectStudioView(page: Page, projectId: string, view: StudioView): Promise<void> {
   await page
-    .getByRole('navigation', { name: 'Creative workflow' })
-    .getByRole('button', { name: phaseLabels[phase], exact: true })
+    .getByRole('navigation', { name: 'Project views' })
+    .getByRole('button', { name: viewLabels[view], exact: true })
     .click();
-  await expectStudioPhase(page, projectId, phase);
+  await expectStudioView(page, projectId, view);
+}
+
+async function selectEngineOption(page: Page, role: 'image' | 'video', optionLabel: string): Promise<void> {
+  const slot = page.locator(`[data-engine-role="${role}"]`).first();
+  await slot.getByRole('button').click();
+  await page.getByRole('menu').getByText(optionLabel, { exact: true }).click();
 }
 
 /**
- * Produce's door when the workspace has NO compatible engine: the connect card is the
- * only content and no route can have been adopted.
+ * Produce's door when the workspace has NO compatible engine: the Engine Strip remains
+ * visible above the connection card, while the top-bar paid Generate control is absent.
+ * The door intentionally replaces the shot grid, so it cannot assert a per-shot Render control.
  */
 async function expectConnectEngineDoor(page: Page, projectId: string): Promise<void> {
+  const engineStrip = page.getByRole('region', { name: 'Engines' });
+  await expect(engineStrip).toBeVisible();
+  await expect(engineStrip.locator('[data-engine-role="image"]')).toBeVisible();
+  await expect(engineStrip.locator('[data-engine-role="video"]')).toBeVisible();
   const connectionHeading = page.getByRole('heading', {
     level: 2,
     name: 'Connect an engine — about a minute, once for the whole workspace',
@@ -277,9 +388,14 @@ async function expectConnectEngineDoor(page: Page, projectId: string): Promise<v
   await expect(connectionCard.getByRole('button', { name: 'Open Model Settings' })).toBeVisible();
   await expect(connectionCard.getByRole('button', { name: 'Ask a teammate' })).toBeVisible();
 
-  const phaseShell = page.locator('[data-studio-layout-root]');
+  // The work panel, not the layout root: the root now also holds the Director pane, whose
+  // conversation surface has controls of its own that this "nothing was generated" check must
+  // not count.
+  const phaseShell = page.locator('[data-studio-work-panel]');
   await expect(phaseShell.getByRole('combobox')).toHaveCount(0);
-  await expect(phaseShell.getByRole('button', { name: /^(Render|Generate)/i })).toHaveCount(0);
+  await expect(
+    page.locator('[data-studio-phase-shell] > header').getByRole('button', { name: /^Generate/i })
+  ).toHaveCount(0);
   await expect(phaseShell.getByRole('region', { name: 'Storyboard' })).toHaveCount(0);
   await expect(phaseShell.getByText('Generation activity', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('dialog', { name: 'Review generation' })).toHaveCount(0);
@@ -293,12 +409,14 @@ async function expectConnectEngineDoor(page: Page, projectId: string): Promise<v
 }
 
 /**
- * Produce with the fake catalog's adopted video engine: the engine bar replaces the
- * connect door, but nothing has been generated and no generation dialog is open.
+ * Produce with the explicitly selected fake engines: the Engine Strip stays visible,
+ * no connection door replaces the board, and no generation dialog is open.
  */
-async function expectIdleProduceSurface(page: Page, projectId: string): Promise<void> {
-  await expect(page.getByRole('heading', { level: 2, name: /^Rendering with/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Change engines' })).toBeVisible();
+async function expectIdleProduceSurface(page: Page, projectId: string, expectedJobCount = 0): Promise<void> {
+  const engineStrip = page.getByRole('region', { name: 'Engines' });
+  await expect(engineStrip).toBeVisible();
+  await expect(engineStrip.locator('[data-engine-role="image"]')).toContainText('weprompt-e2e-image');
+  await expect(engineStrip.locator('[data-engine-role="video"]')).toContainText('dreamina-seedance-2-0-260128');
   await expect(
     page.getByRole('heading', {
       level: 2,
@@ -307,11 +425,9 @@ async function expectIdleProduceSurface(page: Page, projectId: string): Promise<
   ).toHaveCount(0);
   await expect(page.getByRole('dialog', { name: 'Review generation' })).toHaveCount(0);
 
-  expect(await readCanonicalStudioSnapshot(page, projectId)).toMatchObject({
-    projectId,
-    routes: fakeCatalogRoutes,
-    jobs: [],
-  });
+  const snapshot = await readCanonicalStudioSnapshot(page, projectId);
+  expect(snapshot.projectId).toBe(projectId);
+  expect(snapshot.jobs).toHaveLength(expectedJobCount);
   await assertStudioInvariants(page);
 }
 
@@ -322,15 +438,20 @@ test.describe('Creative Studio workspace', () => {
     'Creative Studio E2E requires both fake-provider flags and an explicit unpackaged dev launch.'
   );
 
-  test('uses the current phase shell while keeping Write available without an engine', async ({
-    electronApp,
-    page,
-  }) => {
+  test('uses the current view shell with explicit engine selection', async ({ electronApp, page }) => {
     const projectBrief = `A paper airplane carries a launch message across a calm blue studio ${Date.now()}.`;
     const shotTitle = 'Paper airplane launch';
     const narration = 'One small idea can carry a team forward.';
     const visualPrompt = 'A paper airplane crossing a calm blue studio backdrop.';
     let projectId = '';
+    let selectedImage: StudioRouteOptionSnapshot | null = null;
+    let selectedVideo: StudioRouteOptionSnapshot | null = null;
+    let castReferencePath = '';
+    let lookReferencePath = '';
+    let firstSceneId = '';
+    let firstPlateId = '';
+    let secondSceneId = '';
+    let secondPlateId = '';
 
     await test.step('prove the fake-provider runtime gate is active', async () => {
       const gate = await electronApp.evaluate(({ app }) => ({
@@ -347,6 +468,13 @@ test.describe('Creative Studio workspace', () => {
       });
       expect(gate.expectedUserDataPath).toBeTruthy();
       expect(gate.userDataPath).toBe(gate.expectedUserDataPath);
+      if (typeof gate.userDataPath !== 'string') throw new Error('Studio E2E user-data path was unavailable');
+      castReferencePath = path.join(gate.userDataPath, 'Lead Hero.png');
+      lookReferencePath = path.join(gate.userDataPath, 'Golden Atrium.png');
+      await Promise.all([
+        writeFile(castReferencePath, referenceFixtureBytes),
+        writeFile(lookReferencePath, referenceFixtureBytes),
+      ]);
 
       const systemInfo = await electronApp.evaluate(async () => {
         const port = (globalThis as typeof globalThis & { __backendPort?: number }).__backendPort;
@@ -367,7 +495,7 @@ test.describe('Creative Studio workspace', () => {
       });
     });
 
-    await test.step('create a one-sentence project in the library and land on Brief', async () => {
+    await test.step('create a one-sentence project on Table with the Brief drawer open', async () => {
       await openStudioLibrary(page);
       const studioLibrary = page.getByRole('region', { name: 'Creative Studio' });
       await expect(studioLibrary.getByRole('heading', { level: 1, name: 'Creative Studio' })).toBeVisible();
@@ -380,67 +508,145 @@ test.describe('Creative Studio workspace', () => {
       await composer.fill(projectBrief);
       await studioLibrary.getByRole('button', { name: 'Read my brief →' }).click();
 
-      await expect(page).toHaveURL(/#\/studio\/[^/]+\/brief$/);
-      projectId = projectIdFromPhaseUrl(page, 'brief');
+      await expect(page).toHaveURL(/#\/studio\/[^/]+\/table$/);
+      projectId = projectIdFromViewUrl(page, 'table');
       await expect(page.getByRole('heading', { level: 1, name: projectBrief })).toBeVisible();
       await expect(page.getByLabel('Aspect ratio: 16:9')).toBeVisible();
-      await expectStudioPhase(page, projectId, 'brief');
-      await expect(page.getByRole('region', { name: 'Brief' }).getByLabel('Creative intent')).toHaveValue(projectBrief);
-      await expect(page.locator('[data-studio-layout-root] > header [role="status"]')).toHaveText('Saved');
-      // A project adopts a route only when exactly one compatible engine exists, so the
-      // fake catalog's single video model is adopted while its two image models are not.
+      await expectStudioView(page, projectId, 'table');
+      const briefDrawer = page.getByRole('dialog', { name: 'Brief' });
+      await expect(briefDrawer.getByRole('textbox', { name: 'Brief' })).toHaveValue(projectBrief);
+      // `data-studio-layout-root` is StudioShell's root now, and the phase shell hangs two levels
+      // below it: work panel > phase shell > header. The chain stays direct-child on purpose — the
+      // phases render headers and save-state regions of their own (a scene row, the script table),
+      // and only the project's save state belongs to this assertion. The header itself now holds a
+      // second live region (the document activity indicator), so the chip is addressed by its own
+      // hook rather than by `[role="status"]`.
+      await expect(page.locator('[data-studio-phase-shell] > header [data-studio-save-state]')).toHaveText('Saved');
       const snapshot = await readCanonicalStudioSnapshot(page, projectId);
       expect(snapshot).toMatchObject({
         projectId,
-        routes: { image: null },
+        routes: { image: null, video: null },
         scenes: [],
         jobs: [],
       });
-      expect(snapshot.routes.video).toMatchObject({
-        providerId: 'weprompt_studio_e2e',
-        model: 'weprompt-e2e-video',
-      });
       const routeCatalog = await readStudioRouteCatalog(page, projectId);
       expect(routeCatalog.image.selected).toBeNull();
-      expect(routeCatalog.video.selected).toMatchObject({ model: 'weprompt-e2e-video' });
-      expect(routeCatalog.image.options).toEqual(
-        expect.arrayContaining([
-          {
-            providerId: 'weprompt_studio_e2e',
-            providerName: 'WePrompt Studio E2E',
-            model: 'weprompt-e2e-image',
-          },
-          {
-            providerId: 'weprompt_studio_e2e',
-            providerName: 'WePrompt Studio E2E',
-            model: 'weprompt-e2e-image-next',
-          },
-        ])
-      );
-      expect(routeCatalog.video.options).toEqual(
-        expect.arrayContaining([
-          {
-            providerId: 'weprompt_studio_e2e',
-            providerName: 'WePrompt Studio E2E',
-            model: 'weprompt-e2e-video',
-          },
-        ])
-      );
+      expect(routeCatalog.video.selected).toBeNull();
+      expect(routeCatalog.image.selectedRoute).toBeNull();
+      expect(routeCatalog.video.selectedRoute).toBeNull();
+      expect(routeCatalog.image.options).toHaveLength(1);
+      expect(routeCatalog.image.options[0]).toMatchObject({
+        providerId: 'weprompt_studio_e2e',
+        providerName: 'WePrompt Studio E2E',
+        model: 'weprompt-e2e-image',
+        integrationLabelKey: 'imageApi',
+      });
+      expect(routeCatalog.video.options).toHaveLength(2);
+      expect(
+        routeCatalog.video.options.map(({ model, integrationLabelKey }) => ({ model, integrationLabelKey }))
+      ).toEqual([
+        { model: 'dreamina-seedance-2-0-260128', integrationLabelKey: 'bytePlusSeedance' },
+        { model: 'dreamina-seedance-2-0-260128', integrationLabelKey: 'selfHostedVideoGateway' },
+      ]);
+      selectedImage = routeCatalog.image.options[0]!;
+      selectedVideo = routeCatalog.video.options.find((option) => option.integrationLabelKey === 'bytePlusSeedance')!;
     });
 
-    await test.step('add and save a complete shot in Write without configuring an engine', async () => {
-      await page.getByRole('button', { name: 'Start writing' }).click();
-      await expectStudioPhase(page, projectId, 'write');
-      const writePhase = page.getByRole('region', { name: 'Write' });
-      await expect(writePhase.getByText('This step does not generate images or video.', { exact: true })).toBeVisible();
-      await expect(writePhase.getByRole('button', { name: /render|generate/i })).toHaveCount(0);
+    await test.step('explicitly select both engine roles before any paid review', async () => {
+      if (selectedImage === null || selectedVideo === null) throw new Error('explicit fake catalog was unavailable');
+      const imageChoice = selectedImage;
+      const videoChoice = selectedVideo;
+      await page.getByRole('dialog', { name: 'Brief' }).getByRole('button', { name: 'Close' }).click();
+      await expect(page.getByRole('dialog', { name: 'Brief' })).toHaveCount(0);
+      await expectStudioView(page, projectId, 'table');
+      await selectEngineOption(page, 'image', 'weprompt-e2e-image · WePrompt Studio E2E · Image API');
+      const videoSlot = page.locator('[data-engine-role="video"]').first();
+      await videoSlot.getByRole('button').click();
+      const videoMenu = page.getByRole('menu');
+      const bytePlusOption = 'dreamina-seedance-2-0-260128 · WePrompt Studio E2E · BytePlus Seedance';
+      const bytePlusMenuItem = videoMenu.getByRole('menuitem').filter({ hasText: bytePlusOption });
+      const gatewayOption = 'dreamina-seedance-2-0-260128 · WePrompt Studio E2E · Self-hosted video gateway';
+      const gatewayMenuItem = videoMenu.getByRole('menuitem').filter({ hasText: gatewayOption });
+      await expect(bytePlusMenuItem).toHaveCount(1);
+      await expect(bytePlusMenuItem.getByText(bytePlusOption, { exact: true })).toBeVisible();
+      await expect(gatewayMenuItem).toHaveCount(1);
+      await expect(gatewayMenuItem.getByText(gatewayOption, { exact: true })).toBeVisible();
+      await bytePlusMenuItem.click();
 
-      const scriptTable = writePhase.getByRole('region', { name: 'Script' });
-      await expect(scriptTable.locator('div[aria-hidden="true"] > span')).toHaveText([
+      await expect
+        .poll(async () => {
+          const snapshot = await readCanonicalStudioSnapshot(page, projectId);
+          const catalog = await readStudioRouteCatalog(page, projectId);
+          return {
+            routes: snapshot.routes,
+            selections: {
+              image: { choice: catalog.image.selected, route: catalog.image.selectedRoute },
+              video: { choice: catalog.video.selected, route: catalog.video.selectedRoute },
+            },
+          };
+        })
+        .toMatchObject({
+          routes: {
+            image: { choiceId: imageChoice.choiceId, model: imageChoice.model },
+            video: { choiceId: videoChoice.choiceId, model: videoChoice.model },
+          },
+          selections: {
+            image: {
+              choice: { choiceId: imageChoice.choiceId },
+              route: { choiceId: imageChoice.choiceId, integrationLabelKey: 'imageApi' },
+            },
+            video: {
+              choice: { choiceId: videoChoice.choiceId },
+              route: { choiceId: videoChoice.choiceId, integrationLabelKey: 'bytePlusSeedance' },
+            },
+          },
+        });
+    });
+
+    await test.step('add one Cast and one Look reference through the native managed import', async () => {
+      await page.getByRole('button', { name: 'Brief', exact: true }).click();
+      const briefDrawer = page.getByRole('dialog', { name: 'Brief' });
+      const projectReferences = briefDrawer.getByRole('region', { name: 'Project references' });
+      await expect(projectReferences).toBeVisible();
+
+      await mockNextStudioReferenceImport(electronApp, castReferencePath);
+      await projectReferences.getByRole('button', { name: 'Add cast reference' }).click();
+      await expect(projectReferences.getByText('Lead Hero', { exact: true })).toBeVisible();
+
+      await mockNextStudioReferenceImport(electronApp, lookReferencePath);
+      await projectReferences.getByRole('button', { name: 'Add look reference' }).click();
+      await expect(projectReferences.getByText('Golden Atrium', { exact: true })).toBeVisible();
+      await expect(projectReferences.getByText('2 active references', { exact: true })).toBeVisible();
+
+      await briefDrawer.getByRole('button', { name: 'Close' }).click();
+      await expect(briefDrawer).toHaveCount(0);
+      await expect
+        .poll(async () => {
+          const snapshot = await readCanonicalStudioSnapshot(page, projectId);
+          return snapshot.assets
+            .filter(({ briefReferenceRole }) => briefReferenceRole !== undefined)
+            .map(({ briefReferenceRole, briefReferenceLabel }) => [briefReferenceRole, briefReferenceLabel])
+            .toSorted((left, right) => String(left[0]).localeCompare(String(right[0])));
+        })
+        .toEqual([
+          ['cast', 'Lead Hero'],
+          ['look', 'Golden Atrium'],
+        ]);
+    });
+
+    await test.step('add and save a complete shot in the Table view after configuring engines', async () => {
+      const tableView = page.getByRole('region', { name: 'Table' });
+      await expect(tableView.getByText('This step does not generate images or video.', { exact: true })).toBeVisible();
+      await expect(tableView.getByRole('button', { name: /render|generate/i })).toHaveCount(0);
+
+      const scriptTable = tableView.getByRole('region', { name: 'Script' });
+      await expect(scriptTable.locator('[data-script-column]')).toHaveText([
         'Shot',
         'Script',
         'Visual',
         'Output',
+        'Length',
+        'State',
       ]);
       await scriptTable.getByRole('button', { name: 'Add shot' }).click();
 
@@ -452,7 +658,7 @@ test.describe('Creative Studio workspace', () => {
       await expect(emptyRow.getByRole('button', { name: 'More details' })).toHaveAttribute('aria-expanded', 'false');
       await expect(emptyRow.getByRole('button', { name: 'Suggest a visual' })).toBeVisible();
       await expect(emptyRow.getByRole('button', { name: 'Add reference' })).toBeVisible();
-      await expect(emptyRow.getByRole('status').filter({ hasText: 'Needs title' })).toBeVisible();
+      await expect(emptyRow.getByRole('status').filter({ hasText: 'Needs a title' })).toBeVisible();
       await expect(page.getByText('Untitled scene', { exact: true })).toHaveCount(0);
 
       await expect
@@ -477,12 +683,18 @@ test.describe('Creative Studio workspace', () => {
       await visual.blur();
 
       await expect(shotRow.locator('[role="status"][data-state="saved"]')).toHaveText('Scene saved');
-      await expect(page.locator('[data-studio-layout-root] > header [role="status"]')).toHaveText('Saved');
-      const pacing = writePhase.getByRole('region', { name: 'Pacing' });
-      await expect(pacing.getByRole('status')).toHaveText('5s total · 18s goal');
-      await expect(pacing.getByRole('alert')).toHaveText('Storyboard timing does not match the project target.');
-      const continueToProduce = page.getByRole('button', { name: 'Continue to Produce' });
-      await expect(continueToProduce).toBeEnabled();
+      await expect(page.locator('[data-studio-phase-shell] > header [data-studio-save-state]')).toHaveText('Saved');
+      // The pacing bar is gone; the off-target warning now lives in the shell advisory slot.
+      // Scoped to the work panel: the Director pane renders alerts of its own and sits ahead of
+      // the phase shell in document order.
+      await expect(page.locator('[data-studio-phase-shell] > [role="alert"]')).toHaveText(
+        'Storyboard timing does not match the project target.'
+      );
+      // An off-target advisory must not lock the way out of Table. The switch is the only way out
+      // now that Table's "Continue" is gone, so the advisory is asserted against the switch itself.
+      await expect(
+        page.getByRole('navigation', { name: 'Project views' }).getByRole('button', { name: 'Board', exact: true })
+      ).toBeEnabled();
 
       await expect
         .poll(async () => {
@@ -501,34 +713,287 @@ test.describe('Creative Studio workspace', () => {
           };
         })
         .toEqual({
-          routes: fakeCatalogRoutes,
+          routes: {
+            image: { model: 'weprompt-e2e-image' },
+            video: { model: 'dreamina-seedance-2-0-260128' },
+          },
           scenes: [{ title: shotTitle, narration, visualPrompt, durationSeconds: 5 }],
           jobs: [],
         });
-      await continueToProduce.click();
-      await expectStudioPhase(page, projectId, 'produce');
-      await expectIdleProduceSurface(page, projectId);
+      firstSceneId = (await readCanonicalStudioSnapshot(page, projectId)).scenes[0]?.id ?? '';
+      if (!firstSceneId) throw new Error('First Studio scene id was unavailable');
+
+      await shotRow.getByRole('button', { name: 'Generate reference' }).click();
+      const referencePromptDialog = page.getByRole('dialog', { name: 'Generate a reference image' });
+      await expect(referencePromptDialog.getByRole('textbox', { name: 'Reference prompt' })).toHaveValue(
+        new RegExp(escapeRegExp(visualPrompt))
+      );
+      await referencePromptDialog.getByRole('button', { name: 'Generate reference' }).click();
+
+      const stillReview = page.getByRole('dialog', { name: 'Review generation' });
+      await expect(stillReview.getByText('Reference', { exact: true })).toBeVisible();
+      await expect(stillReview.getByText('Lead Hero', { exact: true })).toBeVisible();
+      await expect(stillReview.getByText('Golden Atrium', { exact: true })).toBeVisible();
+      await stillReview.getByRole('button', { name: 'Confirm and generate' }).click();
+      await expect(stillReview).toHaveCount(0);
+      await expect
+        .poll(
+          async () => {
+            const snapshot = await readCanonicalStudioSnapshot(page, projectId);
+            const currentScene = snapshot.scenes.find(({ id }) => id === firstSceneId);
+            const referenceJob = snapshot.jobs.find(
+              ({ sceneId, outputRole }) => sceneId === firstSceneId && outputRole === 'reference'
+            );
+            return {
+              referenceAssetId: currentScene?.referenceAssetId ?? null,
+              jobStatus: referenceJob?.status ?? null,
+              outputAssetIds: referenceJob?.outputAssetIds ?? [],
+            };
+          },
+          { timeout: 30_000 }
+        )
+        .toMatchObject({ referenceAssetId: expect.any(String), jobStatus: 'succeeded' });
+      const plated = await readCanonicalStudioSnapshot(page, projectId);
+      firstPlateId = plated.scenes.find(({ id }) => id === firstSceneId)?.referenceAssetId ?? '';
+      if (!firstPlateId) throw new Error('First generated plate was unavailable');
+      const conditioningReferenceIds = (['cast', 'look'] as const).map(
+        (role) => plated.assets.find(({ briefReferenceRole }) => briefReferenceRole === role)?.id ?? ''
+      );
+      if (conditioningReferenceIds.some((assetId) => !assetId)) {
+        throw new Error('Active Cast/Look references were unavailable after still generation');
+      }
+      expect(plated.assets.find(({ id }) => id === firstPlateId)).toMatchObject({
+        sceneId: firstSceneId,
+        collection: 'references',
+        sourceReferenceAssetIds: conditioningReferenceIds,
+      });
+      await expect(shotRow.getByAltText('Import first-frame image')).toBeVisible();
+      await selectStudioView(page, projectId, 'board');
+      await expectIdleProduceSurface(page, projectId, 1);
     });
 
-    await test.step('navigate every phase in both directions and recover a deep-linked reload', async () => {
-      await selectStudioPhase(page, projectId, 'review');
-      await expect(page.getByRole('heading', { level: 2, name: 'Review' })).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Prepare handoff' })).toBeDisabled();
+    await test.step('confirm the separately reviewed clip and reload its selected plate and take', async () => {
+      const firstShot = page.getByRole('listitem', { name: `Scene 1: ${shotTitle}` });
+      await firstShot.getByRole('button', { name: 'Render', exact: true }).click();
+      const clipReview = page.getByRole('dialog', { name: 'Review generation' });
+      await expect(clipReview.getByText('Reference', { exact: true })).toHaveCount(0);
+      await expect(clipReview.getByText('5 requested video seconds', { exact: true })).toBeVisible();
+      await clipReview.getByRole('button', { name: 'Confirm and generate' }).click();
+      await expect(clipReview).toHaveCount(0);
 
-      await selectStudioPhase(page, projectId, 'produce');
-      await expectIdleProduceSurface(page, projectId);
-      await selectStudioPhase(page, projectId, 'write');
-      await expect(page.getByRole('heading', { level: 2, name: 'Write' })).toBeVisible();
-      await selectStudioPhase(page, projectId, 'brief');
-      await expect(page.getByRole('heading', { level: 2, name: 'Brief' })).toBeVisible();
+      await expect
+        .poll(
+          async () => {
+            const snapshot = await readCanonicalStudioSnapshot(page, projectId);
+            const currentScene = snapshot.scenes.find(({ id }) => id === firstSceneId);
+            const clipJob = snapshot.jobs.find(
+              ({ sceneId, outputRole }) => sceneId === firstSceneId && outputRole === undefined
+            );
+            return {
+              referenceAssetId: currentScene?.referenceAssetId ?? null,
+              selectedAssetId: currentScene?.selectedAssetId ?? null,
+              clipStatus: clipJob?.status ?? null,
+            };
+          },
+          { timeout: 30_000 }
+        )
+        .toEqual({
+          referenceAssetId: firstPlateId,
+          selectedAssetId: expect.any(String),
+          clipStatus: 'succeeded',
+        });
 
-      await navigateTo(page, studioPhaseHash(projectId, 'write'));
-      await expectStudioPhase(page, projectId, 'write');
+      const deepLinkedUrl = page.url();
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await expect(page).toHaveURL(deepLinkedUrl);
+      await expectStudioView(page, projectId, 'board');
+      const reloaded = await readCanonicalStudioSnapshot(page, projectId);
+      expect(reloaded.scenes.find(({ id }) => id === firstSceneId)).toMatchObject({
+        referenceAssetId: firstPlateId,
+        selectedAssetId: expect.any(String),
+      });
+      expect(reloaded.jobs).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ sceneId: firstSceneId, status: 'succeeded', outputRole: 'reference' }),
+          expect.objectContaining({ sceneId: firstSceneId, status: 'succeeded' }),
+        ])
+      );
+      await expectIdleProduceSurface(page, projectId, 2);
+    });
+
+    await test.step('cancel then explicitly confirm an out-of-date second-scene clip with its existing plate', async () => {
+      const secondTitle = 'Paper airplane payoff';
+      const secondVisual = 'The paper airplane lands beside the launch message in warm evening light.';
+      await selectStudioView(page, projectId, 'table');
+      const scriptTable = page.getByRole('region', { name: 'Script' });
+      await scriptTable.getByRole('button', { name: 'Add shot' }).click();
+      const emptySecondRow = scriptTable.getByRole('region', { name: 'Middle shot' });
+      await emptySecondRow.getByLabel('Scene title').fill(secondTitle);
+      const secondRow = scriptTable.getByRole('region', { name: secondTitle });
+      await secondRow.getByLabel('Visual prompt').fill(secondVisual);
+      await secondRow.getByLabel('Visual prompt').blur();
+      await expect(secondRow.locator('[role="status"][data-state="saved"]')).toHaveText('Scene saved');
+      const withSecondScene = await readCanonicalStudioSnapshot(page, projectId);
+      secondSceneId = withSecondScene.scenes.find(({ title }) => title === secondTitle)?.id ?? '';
+      if (!secondSceneId) throw new Error('Second Studio scene id was unavailable');
+
+      await secondRow.getByRole('button', { name: 'Generate reference' }).click();
+      const referencePromptDialog = page.getByRole('dialog', { name: 'Generate a reference image' });
+      await referencePromptDialog.getByRole('button', { name: 'Generate reference' }).click();
+      const stillReview = page.getByRole('dialog', { name: 'Review generation' });
+      await expect(stillReview.getByText('Lead Hero', { exact: true })).toBeVisible();
+      await expect(stillReview.getByText('Golden Atrium', { exact: true })).toBeVisible();
+      await stillReview.getByRole('button', { name: 'Confirm and generate' }).click();
+      await expect(stillReview).toHaveCount(0);
+      await expect
+        .poll(
+          async () => {
+            const snapshot = await readCanonicalStudioSnapshot(page, projectId);
+            const currentScene = snapshot.scenes.find(({ id }) => id === secondSceneId);
+            const referenceJob = snapshot.jobs.find(
+              ({ sceneId, outputRole }) => sceneId === secondSceneId && outputRole === 'reference'
+            );
+            return {
+              referenceAssetId: currentScene?.referenceAssetId ?? null,
+              referenceStatus: referenceJob?.status ?? null,
+            };
+          },
+          { timeout: 30_000 }
+        )
+        .toEqual({ referenceAssetId: expect.any(String), referenceStatus: 'succeeded' });
+      secondPlateId =
+        (await readCanonicalStudioSnapshot(page, projectId)).scenes.find(({ id }) => id === secondSceneId)
+          ?.referenceAssetId ?? '';
+      if (!secondPlateId) throw new Error('Second generated plate was unavailable');
+
+      await page.getByRole('button', { name: 'Brief', exact: true }).click();
+      const briefDrawer = page.getByRole('dialog', { name: 'Brief' });
+      const projectReferences = briefDrawer.getByRole('region', { name: 'Project references' });
+      await projectReferences.getByRole('button', { name: 'Remove Golden Atrium from Brief' }).click();
+      await expect(projectReferences.getByText('Golden Atrium', { exact: true })).toHaveCount(0);
+      await mockNextStudioReferenceImport(electronApp, lookReferencePath);
+      await projectReferences.getByRole('button', { name: 'Add look reference' }).click();
+      await expect(projectReferences.getByText('Golden Atrium', { exact: true })).toBeVisible();
+      await briefDrawer.getByRole('button', { name: 'Close' }).click();
+      await expect(briefDrawer).toHaveCount(0);
+
+      await selectStudioView(page, projectId, 'board');
+      await expectIdleProduceSurface(page, projectId, 3);
+      const secondShot = page.getByRole('listitem', { name: `Scene 2: ${secondTitle}` });
+      const snapshotBeforeCancel = await readCanonicalStudioSnapshot(page, projectId);
+      const jobIdsBeforeCancel = snapshotBeforeCancel.jobs.map(({ id }) => id).sort();
+      await secondShot.getByRole('button', { name: 'Render', exact: true }).click();
+      const staleClipReview = page.getByRole('dialog', { name: 'Review generation' });
+      await expect(
+        staleClipReview.getByText(
+          'This selected first frame was made with different Brief references, aspect ratio, or resolution. You can still render this clip.',
+          { exact: true }
+        )
+      ).toBeVisible();
+      await staleClipReview.getByRole('button', { name: 'Cancel', exact: true }).click();
+      await expect(staleClipReview).toHaveCount(0);
+      const cancelQuietPeriodDeadline = Date.now() + 1_500;
+      do {
+        await page.waitForTimeout(100);
+        const quietPeriodSnapshot = await readCanonicalStudioSnapshot(page, projectId);
+        expect(quietPeriodSnapshot.jobs.map(({ id }) => id).sort()).toEqual(jobIdsBeforeCancel);
+      } while (Date.now() < cancelQuietPeriodDeadline);
+
+      const snapshotBeforeConfirm = await readCanonicalStudioSnapshot(page, projectId);
+      const secondSceneBeforeConfirm = snapshotBeforeConfirm.scenes.find(({ id }) => id === secondSceneId);
+      expect(secondSceneBeforeConfirm?.referenceAssetId).toBe(secondPlateId);
+      expect(secondSceneBeforeConfirm?.selectedAssetId).toBeNull();
+      const jobIdsBeforeConfirm = new Set(snapshotBeforeConfirm.jobs.map(({ id }) => id));
+
+      await secondShot.getByRole('button', { name: 'Render', exact: true }).click();
+      const confirmedClipReview = page.getByRole('dialog', { name: 'Review generation' });
+      await expect(confirmedClipReview.getByText('Reference', { exact: true })).toHaveCount(0);
+      await confirmedClipReview.getByRole('button', { name: 'Confirm and generate' }).click();
+      await expect(confirmedClipReview).toHaveCount(0);
+      await expect
+        .poll(
+          async () => {
+            const snapshot = await readCanonicalStudioSnapshot(page, projectId);
+            const currentScene = snapshot.scenes.find(({ id }) => id === secondSceneId);
+            const newVideoJobs = snapshot.jobs
+              .filter(
+                ({ id, sceneId, outputRole }) =>
+                  !jobIdsBeforeConfirm.has(id) && sceneId === secondSceneId && outputRole === undefined
+              )
+              .map(({ id, status, outputAssetIds }) => ({ id, status, outputAssetIds }));
+            return {
+              jobs: snapshot.jobs.length,
+              referenceJobs: snapshot.jobs.filter(
+                ({ sceneId, outputRole }) => sceneId === secondSceneId && outputRole === 'reference'
+              ).length,
+              referenceAssetId: currentScene?.referenceAssetId ?? null,
+              selectedAssetId: currentScene?.selectedAssetId ?? null,
+              newVideoJobs,
+              selectedAssetIsNewVideoOutput:
+                newVideoJobs.length === 1 &&
+                newVideoJobs[0]?.outputAssetIds.length === 1 &&
+                newVideoJobs[0].outputAssetIds[0] === currentScene?.selectedAssetId,
+            };
+          },
+          { timeout: 30_000 }
+        )
+        .toEqual({
+          jobs: snapshotBeforeConfirm.jobs.length + 1,
+          referenceJobs: 1,
+          referenceAssetId: secondPlateId,
+          selectedAssetId: expect.any(String),
+          newVideoJobs: [
+            {
+              id: expect.any(String),
+              status: 'succeeded',
+              outputAssetIds: [expect.any(String)],
+            },
+          ],
+          selectedAssetIsNewVideoOutput: true,
+        });
+
+      const reloadedUrl = page.url();
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await expect(page).toHaveURL(reloadedUrl);
+      await expectStudioView(page, projectId, 'board');
+      expect((await readCanonicalStudioSnapshot(page, projectId)).scenes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: firstSceneId,
+            referenceAssetId: firstPlateId,
+            selectedAssetId: expect.any(String),
+          }),
+          expect.objectContaining({
+            id: secondSceneId,
+            referenceAssetId: secondPlateId,
+            selectedAssetId: expect.any(String),
+          }),
+        ])
+      );
+    });
+
+    await test.step('navigate every view in both directions and recover a deep-linked reload', async () => {
+      await selectStudioView(page, projectId, 'cut');
+      await expect(page.getByRole('heading', { level: 2, name: 'Cut' })).toBeVisible();
+      await expect(page.getByRole('region', { name: 'Engines' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Prepare handoff' })).toBeEnabled();
+
+      await selectStudioView(page, projectId, 'board');
+      await expectIdleProduceSurface(page, projectId, 4);
+      await selectStudioView(page, projectId, 'table');
+      await expect(page.getByRole('heading', { level: 2, name: 'Table' })).toBeVisible();
+      await page.getByRole('button', { name: 'Brief', exact: true }).click();
+      await expect(page.getByRole('dialog', { name: 'Brief' })).toBeVisible();
+      await page.getByRole('dialog', { name: 'Brief' }).getByRole('button', { name: 'Close' }).click();
+      await expect(page.getByRole('dialog', { name: 'Brief' })).toHaveCount(0);
+
+      await navigateTo(page, studioViewHash(projectId, 'table'));
+      await expectStudioView(page, projectId, 'table');
       const deepLinkedUrl = page.url();
       await page.reload({ waitUntil: 'domcontentloaded' });
 
       await expect(page).toHaveURL(deepLinkedUrl);
-      await expectStudioPhase(page, projectId, 'write');
+      await expectStudioView(page, projectId, 'table');
       const reloadedRow = page.getByRole('region', { name: shotTitle });
       await expect(reloadedRow.getByLabel('Scene title')).toHaveValue(shotTitle);
       await expect(reloadedRow.getByLabel('Narration')).toHaveValue(narration);
@@ -537,20 +1002,20 @@ test.describe('Creative Studio workspace', () => {
       await assertStudioInvariants(page);
     });
 
-    await test.step('show the project card and create a seeded shape directly into Write', async () => {
-      await page.getByRole('button', { name: 'Back to project library' }).click();
+    await test.step('show the project card and create a seeded shape directly into the Table view', async () => {
+      await leaveStudioProject(page);
       const studioLibrary = page.getByRole('region', { name: 'Creative Studio' });
       await expect(studioLibrary).toBeVisible();
       await expect(studioLibrary.getByRole('button', { name: projectBrief })).toBeVisible();
-      await expect(studioLibrary.getByText(/^1 shots? written, none rendered$/)).toBeVisible();
-      await expect(studioLibrary.getByText(/^1 shot · 18s ·/)).toBeVisible();
+      await expect(studioLibrary.getByText('Handed off · 18s', { exact: true })).toBeVisible();
+      await expect(studioLibrary.getByText(/^2 shots · 18s ·/)).toBeVisible();
 
       const shapes = studioLibrary.getByRole('region', { name: 'Start from a shape' });
       await shapes.getByRole('button', { name: '3 shots · 15s' }).click();
 
-      await expect(page).toHaveURL(/#\/studio\/[^/]+\/write$/);
-      const shapeProjectId = projectIdFromPhaseUrl(page, 'write');
-      await expectStudioPhase(page, shapeProjectId, 'write');
+      await expect(page).toHaveURL(/#\/studio\/[^/]+\/table$/);
+      const shapeProjectId = projectIdFromViewUrl(page, 'table');
+      await expectStudioView(page, shapeProjectId, 'table');
       const scriptTable = page.getByRole('region', { name: 'Script' });
       await expect(scriptTable.getByLabel('Scene title')).toHaveCount(3);
       await Promise.all(
@@ -563,10 +1028,11 @@ test.describe('Creative Studio workspace', () => {
           ];
         })
       );
-      await expect(page.getByRole('region', { name: 'Pacing' }).getByRole('status')).toHaveText('15s total · 15s goal');
+      // A seeded 3x5s shape hits the 15s target exactly, so no shell advisory is raised.
+      await expect(page.locator('[data-studio-phase-shell] > [role="alert"]')).toHaveCount(0);
       await expect(page.getByText('Untitled scene', { exact: true })).toHaveCount(0);
       expect(await readCanonicalStudioSnapshot(page, shapeProjectId)).toMatchObject({
-        routes: fakeCatalogRoutes,
+        routes: { image: null, video: null },
         scenes: [
           { title: 'Shot 1', visualPrompt: '', durationSeconds: 5 },
           { title: 'Shot 2', visualPrompt: '', durationSeconds: 5 },
@@ -576,7 +1042,7 @@ test.describe('Creative Studio workspace', () => {
       });
       await assertStudioInvariants(page);
 
-      await page.getByRole('button', { name: 'Back to project library' }).click();
+      await leaveStudioProject(page);
       await expect(studioLibrary.getByText('3 shots written, none rendered', { exact: true })).toBeVisible();
       await expect(studioLibrary.getByText(/^3 shots · 15s ·/)).toBeVisible();
       await assertStudioInvariants(page);
@@ -593,7 +1059,7 @@ test.describe('Creative Studio packaged workspace', () => {
     'Packaged Studio smoke requires an isolated E2E profile; the packaged runtime still refuses the fake adapter.'
   );
 
-  test('creates and reloads a phase route without activating the fake provider', async ({ electronApp, page }) => {
+  test('creates and reloads a view route without activating the fake provider', async ({ electronApp, page }) => {
     const projectBrief = `A packaged Creative Studio phase-shell smoke ${Date.now()}.`;
     const gate = await electronApp.evaluate(({ app }) => ({
       isPackaged: app.isPackaged,
@@ -609,10 +1075,11 @@ test.describe('Creative Studio packaged workspace', () => {
     await studioLibrary.getByLabel('What are we making?').fill(projectBrief);
     await studioLibrary.getByRole('button', { name: 'Read my brief →' }).click();
 
-    await expect(page).toHaveURL(/#\/studio\/[^/]+\/brief$/);
-    const projectId = projectIdFromPhaseUrl(page, 'brief');
+    await expect(page).toHaveURL(/#\/studio\/[^/]+\/table$/);
+    const projectId = projectIdFromViewUrl(page, 'table');
     await expect(page.getByRole('heading', { level: 1, name: projectBrief })).toBeVisible();
-    await expectStudioPhase(page, projectId, 'brief');
+    await expectStudioView(page, projectId, 'table');
+    await expect(page.getByRole('dialog', { name: 'Brief' })).toBeVisible();
     await expect(page.getByText('WePrompt Studio E2E')).toHaveCount(0);
     const routeCatalog = await readStudioRouteCatalog(page, projectId);
     expect(routeCatalog.image.selected).toBeNull();
@@ -627,7 +1094,7 @@ test.describe('Creative Studio packaged workspace', () => {
       )
     ).toBe(false);
 
-    await selectStudioPhase(page, projectId, 'produce');
+    await selectStudioView(page, projectId, 'board');
     await expectConnectEngineDoor(page, projectId);
     await expect(page.getByText('WePrompt Studio E2E')).toHaveCount(0);
     await expect(page.getByText('weprompt-e2e-video')).toHaveCount(0);
@@ -636,10 +1103,10 @@ test.describe('Creative Studio packaged workspace', () => {
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(page).toHaveURL(projectUrl);
     await expect(page.getByRole('heading', { level: 1, name: projectBrief })).toBeVisible();
-    await expectStudioPhase(page, projectId, 'produce');
+    await expectStudioView(page, projectId, 'board');
     await expectConnectEngineDoor(page, projectId);
 
-    await selectStudioPhase(page, projectId, 'review');
+    await selectStudioView(page, projectId, 'cut');
     await expect(page.getByRole('button', { name: 'Prepare handoff' })).toBeDisabled();
     await expect(page.getByRole('dialog', { name: 'Export assets' })).toHaveCount(0);
 

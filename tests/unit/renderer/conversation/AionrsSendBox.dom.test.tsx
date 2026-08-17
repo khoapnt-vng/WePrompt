@@ -35,6 +35,7 @@ type RuntimeViewStateMock = {
   hydrated: boolean;
   canSendMessage: boolean;
   isProcessing: boolean;
+  pendingConfirmations: number;
   state: string;
   activeTurnId: string | null;
   markSendStarted: ReturnType<typeof vi.fn>;
@@ -51,6 +52,7 @@ type ThoughtDisplayPropsMock = {
     description: string;
   };
   running?: boolean;
+  awaitingApproval?: boolean;
   onStop?: () => void;
 };
 
@@ -116,6 +118,7 @@ const {
     hydrated: true,
     canSendMessage: true,
     isProcessing: false,
+    pendingConfirmations: 0,
     state: 'idle',
     activeTurnId: null,
     markSendStarted: vi.fn(),
@@ -2207,6 +2210,70 @@ describe('AionrsSendBox', () => {
 
     expect(screen.getByTestId('thought-display')).toBeInTheDocument();
     expect(thoughtDisplayProps.current?.running).toBe(true);
+  });
+
+  it('declares the user as the blocker while a confirmation is pending', () => {
+    aionrsMessageState.current = createAionrsMessageState();
+    runtimeViewState.current = {
+      ...createRuntimeViewState(),
+      hydrated: true,
+      isProcessing: true,
+      canSendMessage: false,
+      pendingConfirmations: 1,
+      state: 'running',
+    };
+
+    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+
+    expect(thoughtDisplayProps.current?.awaitingApproval).toBe(true);
+  });
+
+  it('declares the user as the blocker while the runtime reports waiting_confirmation', () => {
+    aionrsMessageState.current = createAionrsMessageState();
+    runtimeViewState.current = {
+      ...createRuntimeViewState(),
+      hydrated: true,
+      isProcessing: false,
+      canSendMessage: false,
+      pendingConfirmations: 0,
+      state: 'waiting_confirmation',
+    };
+
+    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+
+    expect(thoughtDisplayProps.current?.awaitingApproval).toBe(true);
+  });
+
+  it('does not claim the user is blocking an ordinary processing turn', () => {
+    aionrsMessageState.current = createAionrsMessageState();
+    runtimeViewState.current = {
+      ...createRuntimeViewState(),
+      hydrated: true,
+      isProcessing: true,
+      canSendMessage: false,
+      pendingConfirmations: 0,
+      state: 'running',
+    };
+
+    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+
+    expect(thoughtDisplayProps.current?.awaitingApproval).toBe(false);
+  });
+
+  it('withholds the approval claim until the runtime view has hydrated', () => {
+    aionrsMessageState.current = createAionrsMessageState();
+    runtimeViewState.current = {
+      ...createRuntimeViewState(),
+      hydrated: false,
+      isProcessing: true,
+      canSendMessage: false,
+      pendingConfirmations: 1,
+      state: 'waiting_confirmation',
+    };
+
+    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+
+    expect(thoughtDisplayProps.current?.awaitingApproval).toBe(false);
   });
 
   it('advertises the native context command in the shared slash menu', () => {

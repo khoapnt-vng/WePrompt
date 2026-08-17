@@ -110,7 +110,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const ENTITY_KINDS: readonly PresentationRunEntityKind[] = [
+const ENTITY_KINDS: ReadonlySet<PresentationRunEntityKind> = new Set([
   'run',
   'grant',
   'draft',
@@ -118,7 +118,7 @@ const ENTITY_KINDS: readonly PresentationRunEntityKind[] = [
   'run-tombstone',
   'grant-tombstone',
   'draft-tombstone',
-];
+]);
 
 /** Identifies canonical bytes that are safe to quarantine rather than an I/O failure. */
 export class PresentationCanonicalCorruptionError extends Error {}
@@ -159,7 +159,7 @@ function parseMutation(value: unknown): PresentationRunJournalMutation {
   if (
     !isRecord(value) ||
     !hasExactKeys(value, ['entityKind', 'entityId', 'expectedRevision', 'nextManifest']) ||
-    !ENTITY_KINDS.includes(value.entityKind as PresentationRunEntityKind) ||
+    !ENTITY_KINDS.has(value.entityKind as PresentationRunEntityKind) ||
     typeof value.entityId !== 'string' ||
     !UUID_RE.test(value.entityId) ||
     (value.expectedRevision !== null &&
@@ -847,7 +847,7 @@ export class PresentationRunJournal {
           await directoryLease.assertCurrent();
           return null;
         }
-        if (error instanceof SyntaxError) throw new Error('Presentation run index is corrupt');
+        if (error instanceof SyntaxError) throw new Error('Presentation run index is corrupt', { cause: error });
         throw error;
       }
     });

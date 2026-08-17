@@ -1,5 +1,3 @@
-export { PacingBar } from './PacingBar';
-export type { PacingBarProps } from './PacingBar';
 export { ScriptRow } from './ScriptRow';
 export type { ScriptRowProps } from './ScriptRow';
 export { ScriptTable } from './ScriptTable';

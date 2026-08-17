@@ -148,6 +148,58 @@ describe('local bridge', () => {
     );
   });
 
+  it('uses the bounded Creative Studio dirty-scene fallback when the renderer query rejects', async () => {
+    await loadLoopbackBridge();
+    const error = new Error('storyboard renderer unavailable');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { creativeStudio } = await import('@/common/adapter/ipcBridge');
+    creativeStudio.hasUnsavedWork.provider(() => Promise.reject(error));
+
+    await expect(creativeStudio.hasUnsavedWork.invoke({ timeoutMs: 100 })).resolves.toEqual({ dirtySceneCount: 24 });
+    expect(console.error).toHaveBeenCalledWith(
+      '[bridge] Renderer query provider "creative-studio.has-unsaved-work" failed:',
+      error
+    );
+  });
+
+  it('preserves a Studio scene-limit store rejection as invalid_payload across the bridge', async () => {
+    await loadLoopbackBridge();
+    vi.doMock('@process/services/creative-studio/runtime', () => ({
+      getCreativeStudioRuntime: vi.fn(),
+      getCreativeStudioService: vi.fn(),
+    }));
+    const [{ creativeStudio }, { initCreativeStudioBridge }, { CreativeStudioStoreError }] = await Promise.all([
+      import('@/common/adapter/ipcBridge'),
+      import('@process/bridge/creativeStudioBridge'),
+      import('@process/services/creative-studio/store'),
+    ]);
+    initCreativeStudioBridge({
+      isFeatureEnabled: () => true,
+      getService: () =>
+        ({
+          updateScene: async () => {
+            throw new CreativeStudioStoreError('invalid_payload', 'Studio scene limit exceeded');
+          },
+        }) as never,
+    });
+
+    await expect(
+      creativeStudio.updateScene.invoke({
+        projectId: 'project_1',
+        expectedRevision: 1,
+        sceneId: 'scene_25',
+        scene: null,
+      })
+    ).resolves.toEqual({
+      ok: false,
+      error: {
+        code: 'invalid_payload',
+        messageKey: 'conversation.creativeStudio.errors.invalidPayload',
+      },
+    });
+    vi.doUnmock('@process/services/creative-studio/runtime');
+  });
+
   it('disposes a renderer query callback listener when the invoke times out', async () => {
     vi.useFakeTimers();
     const { bridge, getIncoming, outbound } = await loadLoopbackBridge();

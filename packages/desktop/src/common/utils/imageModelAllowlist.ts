@@ -65,3 +65,10 @@ export const isImageGenSupported = (provider: ProviderShape, modelName: string):
   if (!IMAGE_NAME_PATTERN.test(modelName) && !isImagesApiModel(modelName)) return false;
   return RULES.some((rule) => rule.match(provider));
 };
+
+/** Exact production admission point; stays fail-closed until a tuple passes the paid Task 8.5 evidence gate. */
+export const getImageModelMaxConditioningImages = (provider: ProviderShape, modelName: string): number => {
+  // Task 8.5 evidence-backed admission: exactly two inputs visibly influenced the verified still.
+  if (provider.base_url === 'https://openrouter.ai/api/v1' && modelName === 'google/gemini-3-pro-image') return 2;
+  return 0;
+};

@@ -52,39 +52,15 @@
   white-space: nowrap;
 }
 
+/*
+  One column at every width. It used to reserve a 352px rail for Write's own writing assistant;
+  that assistant is gone (D10) and the Director pane beside the work panel is the only one.
+*/
 .workspace {
-  display: grid;
-  min-width: 0;
-  align-items: start;
-  grid-template-columns: minmax(0, 1fr) 352px;
-  gap: 16px;
-}
-
-.mainColumn {
   display: flex;
   min-width: 0;
   flex-direction: column;
   gap: 16px;
-}
-
-.assistantSlot {
-  position: sticky;
-  top: 16px;
-  width: 352px;
-  min-width: 0;
-}
-
-.workspace[data-layout='drawer'],
-.workspace[data-layout='compact'] {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.workspace[data-layout='drawer'] .assistantSlot,
-.workspace[data-layout='compact'] .assistantSlot {
-  position: static;
-  display: flex;
-  width: auto;
-  justify-content: flex-end;
 }
 
 .scriptTable {
@@ -123,8 +99,8 @@
 .tableHeader,
 .scriptRow {
   display: grid;
-  min-width: 900px;
-  grid-template-columns: minmax(106px, 0.55fr) minmax(245px, 1.35fr) minmax(260px, 1.45fr) minmax(160px, 0.8fr);
+  min-width: 808px;
+  grid-template-columns: 56px minmax(176px, 1.4fr) minmax(220px, 2fr) 120px 96px 140px;
 }
 
 .tableHeader {
@@ -149,7 +125,7 @@
 }
 
 .scriptRowItem {
-  min-width: 900px;
+  min-width: 808px;
 }
 
 .scriptRowItem[data-dragging='true'] {
@@ -185,6 +161,10 @@
 }
 
 .timingZone {
+  align-items: flex-start;
+}
+
+.lengthZone {
   align-items: flex-start;
 }
 
@@ -250,6 +230,10 @@
 
 .editorControl::placeholder {
   color: var(--color-text-3);
+}
+
+.visualPromptControl {
+  min-height: 120px;
 }
 
 .durationChip {
@@ -375,9 +359,9 @@
 }
 
 .readiness {
-  composes: meta from '../../../../StudioTypography.module.css';
+  composes: body from '../../../../StudioTypography.module.css';
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
 }
 
@@ -385,6 +369,7 @@
   width: 8px;
   height: 8px;
   flex: none;
+  margin-block-start: 0.4em;
   border-radius: 50%;
   background: var(--color-fill-4);
 }
@@ -398,6 +383,7 @@
   background: var(--color-primary-6);
 }
 
+.readiness[data-readiness='needs_title'] .readinessDot,
 .readiness[data-readiness='needs_prompt'] .readinessDot,
 .readiness[data-readiness='needs_selection'] .readinessDot {
   background: var(--color-warning-6);
@@ -405,10 +391,6 @@
 
 .readiness[data-readiness='needs_attention'] .readinessDot {
   background: var(--color-danger-6);
-}
-
-.saveStatus {
-  composes: meta from '../../../../StudioTypography.module.css';
 }
 
 .fieldError,
@@ -457,127 +439,6 @@
   margin: 0;
   padding: 32px 16px;
   text-align: center;
-}
-
-.pacingBar {
-  min-width: 0;
-  overflow: hidden;
-  padding: 16px;
-  border: 1px solid var(--color-border-2);
-  border-radius: 12px;
-  background: var(--color-bg-2);
-}
-
-.pacingHeader,
-.pacingFooter {
-  display: flex;
-  min-width: 0;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.pacingTitle {
-  composes: cardTitle from '../../../../StudioTypography.module.css';
-  margin: 0;
-  color: var(--text-primary);
-}
-
-.pacingSummary {
-  composes: meta from '../../../../StudioTypography.module.css';
-  margin: 3px 0 0;
-}
-
-.pacingTrackWrap {
-  min-width: 0;
-  margin: 20px 0 14px;
-}
-
-.pacingScale {
-  min-width: 0;
-  min-height: 44px;
-  border: 1px solid var(--color-border-2);
-  border-radius: 8px;
-  background: var(--color-fill-1);
-}
-
-.pacingShotSpan {
-  position: relative;
-  min-height: 42px;
-}
-
-.pacingTrack {
-  display: flex;
-  min-width: 0;
-  min-height: 42px;
-  overflow: hidden;
-  margin: 0;
-  padding: 0;
-  border-radius: 7px;
-  gap: 2px;
-  list-style: none;
-}
-
-.pacingBlock {
-  composes: meta from '../../../../StudioTypography.module.css';
-  display: flex;
-  min-width: 54px;
-  background: var(--color-fill-2);
-}
-
-.pacingBlock :global(.arco-btn) {
-  /* Arco's `long` prop sets display:block, which leaves justify-content inert
-     and runs the shot number into the duration ("015 seconds"). */
-  display: flex;
-  height: 100%;
-  min-width: 0;
-  flex: 1;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  border-radius: 0;
-  color: var(--color-text-2);
-}
-
-.pacingBlock :global(.arco-btn)[aria-current='true'] {
-  background: var(--color-primary-light-1);
-  color: var(--color-primary-6);
-}
-
-.goalMarker {
-  position: absolute;
-  top: -8px;
-  bottom: -8px;
-  width: 2px;
-  background: var(--color-danger-6);
-  pointer-events: none;
-  transform: translateX(-1px);
-  z-index: 1;
-}
-
-.goalMarker::before {
-  position: absolute;
-  top: -3px;
-  left: 50%;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--color-danger-6);
-  content: '';
-  transform: translateX(-50%);
-}
-
-.pacingFeedback {
-  composes: body from '../../../../StudioTypography.module.css';
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.pacingFeedback p {
-  margin: 0;
 }
 
 .srOnly {

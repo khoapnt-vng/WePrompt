@@ -1,0 +1,137 @@
+/* Studio's two-pane frame: the always-on Director conversation beside the work panel.
+   The app side menu is not ours — it belongs to the application layout outside this page. */
+
+.shell {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  align-items: stretch;
+}
+
+/* Fixed width from the design: the Director pane does not compete with the work panel for space. */
+.directorPane {
+  display: flex;
+  width: 352px;
+  min-width: 352px;
+  min-height: 0;
+  flex-direction: column;
+  border-right: 1px solid var(--color-border-2);
+  background: var(--studio-director-surface);
+}
+
+/*
+ * Collapsed hides the pane without unmounting it.
+ *
+ * `display: none` would tear down the conversation's DOM, and a reply streaming into it would be
+ * lost the moment someone collapsed the pane. Width and visibility are animated instead so the
+ * subtree survives, which is the same reason the assistant dock keeps its drawer children mounted.
+ */
+.directorPaneCollapsed {
+  width: 0;
+  min-width: 0;
+  border-right: none;
+  overflow: hidden;
+  visibility: hidden;
+}
+
+/* The Director's single DOM home, moved between the pane and the overlay rather than re-created.
+   It carries the pane's layout so the conversation fills whichever container currently holds it. */
+.directorHost {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+/* The overlay's own slot: Arco's drawer body is a plain block, so the pane needs a flex column to
+   fill it the way it fills the inline pane. */
+.overlayBody {
+  display: flex;
+  min-width: 0;
+  min-height: 100%;
+  flex-direction: column;
+}
+
+/* `position: relative` is what makes `.paneToggle` land on this panel rather than on whatever
+   positioned ancestor Studio happens to sit inside; the left gutter is the space it floats in, so
+   the toggle never covers the breadcrumb the phase header starts with.
+   `overflow: hidden` keeps the panel itself still so the toggle stays pinned while the work
+   scrolls — an absolutely positioned child of a scroll container scrolls away with the content. */
+.workPanel {
+  /* The page used to supply this inset. It moved here when the frame went flush against the app
+     side menu, and the toggle's offset is derived from it below so the two cannot drift apart. */
+  --studio-work-inset-block: clamp(16px, 3vw, 28px);
+  --studio-work-inset-inline: clamp(16px, 3.5vw, 36px);
+
+  /* How far the collapse toggle sits from the panel's edge, and the box it occupies there. The
+     size is Arco's rendered footprint for a text Button at size='small', measured, not assumed. */
+  --studio-toggle-inset: 8px;
+  --studio-toggle-size: 28px;
+  /*
+   * Clear space after the toggle, and the reason this gutter is a calculation rather than a round
+   * number that looked about right.
+   *
+   * The toggle used to end 8px before the breadcrumb, and two things 8px apart read as one control
+   * group — which is how a panel toggle came to look like the back button for the trail beside it.
+   * Proximity is the grouping signal, so the separation is a measurement: below roughly 24px they
+   * group, above it they read as two. Anything that narrows this re-creates the confusion.
+   */
+  --studio-toggle-clear: 32px;
+
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+  padding-left: calc(var(--studio-toggle-inset) + var(--studio-toggle-size) + var(--studio-toggle-clear));
+}
+
+/* The work panel's scroll box, so a phase taller than the window scrolls here rather than taking
+   the whole frame with it — which is what kept the Director's composer off screen on Review. */
+.workScroll {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: var(--studio-work-inset-block) var(--studio-work-inset-inline) var(--studio-work-inset-block) 0;
+}
+
+/* Absolute offsets are measured from the panel's padding box, so the panel's own block inset does
+   not move this: add it back explicitly to keep the toggle level with the header row it sits
+   beside. */
+.paneToggle {
+  position: absolute;
+  z-index: 2;
+  top: calc(var(--studio-work-inset-block) + 14px);
+  left: var(--studio-toggle-inset);
+}
+
+/*
+ * Chrome, not a primary action.
+ *
+ * Arco paints a text Button in the brand colour, and the panel glyph is drawn with
+ * `stroke: currentColor`, so it inherited that and rendered brand-orange next to a grey breadcrumb —
+ * reading as the loudest control in the row. The icon-park chevron it replaced never showed this
+ * because those icons carry their own fill and ignore `currentColor`.
+ *
+ * The doubled `:global` selectors are specificity, not decoration: Arco's own
+ * `.arco-btn-text:not(.arco-btn-disabled)` is two classes and outranks a bare module class, and its
+ * `:hover` variant is three, so both have to be matched or the colour silently does nothing. The
+ * hover background Arco supplies is left alone; only the colour is pinned.
+ */
+.paneToggle:global(.arco-btn-text):not(:global(.arco-btn-disabled)),
+.paneToggle:global(.arco-btn-text):not(:global(.arco-btn-disabled)):hover {
+  color: var(--text-secondary);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .directorPane {
+    transition: width 160ms ease;
+  }
+}

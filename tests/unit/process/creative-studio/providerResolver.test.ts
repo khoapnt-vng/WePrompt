@@ -27,6 +27,7 @@ const gatewayCapabilities = (overrides: Partial<StudioConnectionCapabilities> = 
   minDurationSeconds: 2,
   maxDurationSeconds: 30,
   supportsFirstFrame: false,
+  maxConditioningImages: 0,
   cancellationPolicy: 'none',
   ...overrides,
 });
@@ -162,6 +163,53 @@ describe('createStudioProviderResolver', () => {
     expect(changed.generationCatalogVersion).not.toBe(first.generationCatalogVersion);
   });
 
+  it('projects legacy image capacity as zero and changes the generation version when admitted capacity changes', async () => {
+    const image = binding({
+      id: 'binding_image',
+      adapterId: 'weprompt-image-v1',
+      model: 'gemini-2.5-flash-image',
+      capabilities: { mediaKinds: ['image'], supportsFirstFrame: true },
+    });
+    const providers = [provider({ models: ['gemini-2.5-flash-image'] })];
+
+    const legacy = await resolver(providers, [image]).listGenerationRoutes();
+    const admitted = await resolver(providers, [
+      { ...image, capabilities: { ...image.capabilities, maxConditioningImages: 6 } },
+    ]).listGenerationRoutes();
+
+    expect(legacy.routes[0]?.constraints).toHaveProperty('maxConditioningImages', 0);
+    expect(admitted.routes[0]?.constraints).toHaveProperty('maxConditioningImages', 6);
+    expect(admitted.generationCatalogVersion).not.toBe(legacy.generationCatalogVersion);
+  });
+
+  it('keeps video capacity zero even when a persisted binding claims six', async () => {
+    const claimed = binding({ capabilities: gatewayCapabilities({ maxConditioningImages: 6 }) });
+
+    const catalog = await resolver([provider()], [claimed]).listGenerationRoutes();
+
+    expect(catalog.routes[0]?.constraints).toHaveProperty('maxConditioningImages', 0);
+  });
+
+  it('keeps an Images API route at zero even when a persisted binding claims six', async () => {
+    const vng = provider({
+      platform: 'openai',
+      base_url: 'https://maas-llm-aiplatform-hcm.api.vngcloud.vn/v1',
+      models: ['openai/gpt-image-1'],
+    });
+    const claimed = binding({
+      adapterId: 'weprompt-image-v1',
+      model: 'openai/gpt-image-1',
+      capabilities: { mediaKinds: ['image'], supportsFirstFrame: false, maxConditioningImages: 6 },
+    });
+
+    const catalog = await resolver([vng], [claimed]).listGenerationRoutes();
+
+    expect(catalog.routes[0]?.constraints).toMatchObject({
+      supportsFirstFrame: false,
+      maxConditioningImages: 0,
+    });
+  });
+
   it('changes the main-only generation version when cancellation policy changes', async () => {
     const first = await resolver().listGenerationRoutes();
     const changed = await resolver(
@@ -222,6 +270,54 @@ describe('createStudioProviderResolver', () => {
     expect((await resolver(unavailableProviders, connections).listGenerationRoutes()).routes).toEqual([]);
   });
 
+  it('keeps renderer-safe diagnostics for unavailable validated bindings', async () => {
+    const unavailableProviders = [
+      provider({ id: 'disabled', enabled: false }),
+      provider({ id: 'credentialless', api_key: '', name: 'Needs Setup' }),
+      provider({
+        id: 'unhealthy',
+        model_health: { 'video-model': { status: 'unhealthy', last_check: 1 } },
+      }),
+    ];
+    const connections = [
+      binding({ id: 'binding_removed', providerId: 'removed' }),
+      ...unavailableProviders.map((candidate) => binding({ id: `binding_${candidate.id}`, providerId: candidate.id })),
+    ];
+
+    const catalog = await resolver(unavailableProviders, connections).listGenerationRoutes();
+
+    expect(catalog.diagnostics).toEqual(
+      expect.arrayContaining([
+        {
+          status: 'retired',
+          providerId: 'removed',
+          adapterId: 'weprompt-media-gateway-v1',
+          model: 'video-model',
+        },
+        {
+          status: 'needs_setup',
+          providerId: 'credentialless',
+          providerName: 'Needs Setup',
+          adapterId: 'weprompt-media-gateway-v1',
+          model: 'video-model',
+        },
+        {
+          status: 'health',
+          providerId: 'disabled',
+          adapterId: 'weprompt-media-gateway-v1',
+          model: 'video-model',
+        },
+        {
+          status: 'health',
+          providerId: 'unhealthy',
+          adapterId: 'weprompt-media-gateway-v1',
+          model: 'video-model',
+        },
+      ])
+    );
+    expect(JSON.stringify(catalog.diagnostics)).not.toMatch(/api_key|base_url|never-return-this/i);
+  });
+
   it('requires silent output and complete constraints for media gateway routes', async () => {
     const missingSilent = binding({
       id: 'binding_audio',
@@ -258,8 +354,56 @@ describe('createStudioProviderResolver', () => {
     expect(catalog.routes).toEqual([
       expect.objectContaining({
         adapterId: 'openrouter-video-v1',
-        constraints: expect.objectContaining({ silentOutput: false }),
+        constraints: expect.objectContaining({
+          silentOutput: false,
+          supportsFirstFrame: false,
+          maxConditioningImages: 0,
+        }),
       }),
+    ]);
+  });
+
+  it('does not let a legacy binding broaden an unevidenced OpenRouter route', async () => {
+    const openRouter = provider({
+      base_url: 'https://openrouter.ai/api/v1',
+      api_key: 'sk-or-test',
+      models: ['bytedance/seedance-2.0-fast'],
+    });
+    const legacyBinding = binding({
+      adapterId: 'openrouter-video-v1',
+      model: 'bytedance/seedance-2.0-fast',
+      capabilities: gatewayCapabilities({ audioModes: ['audio'], supportsFirstFrame: true }),
+    });
+
+    const catalog = await resolver([openRouter], [legacyBinding]).listGenerationRoutes();
+
+    expect(catalog.routes).toMatchObject([
+      {
+        adapterId: 'openrouter-video-v1',
+        constraints: { supportsFirstFrame: false, maxConditioningImages: 0 },
+      },
+    ]);
+  });
+
+  it('advertises first-frame support only for the evidenced Seedance 2.0 route', async () => {
+    const openRouter = provider({
+      base_url: 'https://openrouter.ai/api/v1',
+      api_key: 'sk-or-test',
+      models: ['bytedance/seedance-2.0'],
+    });
+    const evidencedBinding = binding({
+      adapterId: 'openrouter-video-v1',
+      model: 'bytedance/seedance-2.0',
+      capabilities: gatewayCapabilities({ audioModes: ['audio'], supportsFirstFrame: false }),
+    });
+
+    const catalog = await resolver([openRouter], [evidencedBinding]).listGenerationRoutes();
+
+    expect(catalog.routes).toMatchObject([
+      {
+        adapterId: 'openrouter-video-v1',
+        constraints: { supportsFirstFrame: true, maxConditioningImages: 0 },
+      },
     ]);
   });
 
@@ -280,7 +424,9 @@ describe('createStudioProviderResolver', () => {
       models: [],
     });
 
-    expect((await resolver([supported], [seedanceBinding]).listGenerationRoutes()).routes).toHaveLength(1);
+    expect((await resolver([supported], [seedanceBinding]).listGenerationRoutes()).routes).toMatchObject([
+      { constraints: { maxConditioningImages: 0 } },
+    ]);
     expect((await resolver([spoofed], [seedanceBinding]).listGenerationRoutes()).routes).toEqual([]);
   });
 

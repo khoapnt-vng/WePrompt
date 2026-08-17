@@ -6,6 +6,30 @@
 
 /** Shared, renderer-safe Creative Studio domain and desktop contract types. */
 
+import type { ISessionMcpServer } from '@/common/config/storage';
+import type { StudioBriefRule, StudioBriefRuleDraft, StudioBriefRulePredicate } from './creativeStudioRules';
+
+export type {
+  StudioBriefRule,
+  StudioBriefRuleDraft,
+  StudioBriefRulePredicate,
+  StudioBriefRuleScope,
+  StudioRuleBreach,
+  StudioRuleVerdict,
+} from './creativeStudioRules';
+
+/**
+ * The document's views, in switch order.
+ *
+ * Shared rather than renderer-private because the main process needs the same vocabulary: it
+ * matches the renderer's Studio URL against these segments to decide whether to run the
+ * unsaved-scene-draft preflight before closing the window. A second copy of this list would not
+ * just be a style problem — a view missing from main's copy closes with no prompt and loses the drafts.
+ */
+export const STUDIO_VIEWS = ['table', 'board', 'cut'] as const;
+
+export type StudioView = (typeof STUDIO_VIEWS)[number];
+
 export type StudioMediaKind = 'image' | 'video';
 
 export type StudioAspectRatio = '16:9' | '9:16' | '1:1' | '4:3' | '3:4';
@@ -53,9 +77,19 @@ export type StudioMediaChoiceRef = {
 
 /** An app-managed asset identity, deliberately not a filesystem path or URL. */
 export type StudioManagedAssetRef = {
-  collection: 'assets' | 'imports' | 'thumbnails';
+  collection:
+    /** A generated take: the finished shot committed to a scene. */
+    | 'assets'
+    /** User-imported reference material. `StudioScene.referenceAssetId` points here today. */
+    | 'imports'
+    /** Captured or provider-generated poster frames for video takes. */
+    | 'thumbnails'
+    /** A generated reference plate (not user-imported); distinct from the `imports` sense of "reference". */
+    | 'references';
   fileName: string;
 };
+
+export type StudioBriefReferenceRole = 'cast' | 'look';
 
 export type StudioAsset = {
   id: string;
@@ -71,6 +105,19 @@ export type StudioAsset = {
   height?: number;
   durationSeconds?: number;
   createdAt: string;
+  /** Optional Brief classification. Role and label are persisted together or both absent. */
+  briefReferenceRole?: StudioBriefReferenceRole;
+  briefReferenceLabel?: string;
+  /**
+   * The scene's visual prompt at the moment this asset was generated, trimmed.
+   * Absent means unknown provenance — an asset written before this field existed,
+   * or one that did not come from a prompt (an import). Absent is NOT stale.
+   */
+  sourceVisualPrompt?: string;
+  /** Complete frame-input provenance for generated reference plates; the trio is all-or-neither. */
+  sourceReferenceAssetIds?: string[];
+  sourceAspectRatio?: StudioAspectRatio;
+  sourceResolution?: StudioResolution;
 };
 
 export type StudioJobErrorCode =
@@ -96,6 +143,42 @@ export type StudioJobRetryReason = 'provider_failure' | 'submission_unknown';
 
 export type StudioCancellationPolicy = 'none' | 'queued_only' | 'queued_and_running';
 
+/** What a job's output becomes once it lands: the scene's finished take, or its supporting reference plate. */
+export type StudioOutputRole = 'take' | 'reference';
+
+export const STUDIO_REFERENCE_PROMPT_MAX_LENGTH = 4 * 1024;
+export const STUDIO_MAX_SCENES = 24;
+export const STUDIO_MAX_GENERATION_SCENES_PER_REQUEST = 24;
+export const STUDIO_MAX_REFERENCE_REQUEST_SCENES = 24;
+export const STUDIO_MAX_CUT_PLACEMENT_SCENES = 24;
+export const STUDIO_MAX_DIRTY_SCENES_REPORTED = 24;
+export const STUDIO_MAX_MCP_AVAILABLE_TAKE_IDS_PER_SCENE = 24;
+export const STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION = 1 as const;
+export const STUDIO_DIRECTOR_COMMAND_MAX_OPERATIONS = 32;
+export const STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES = 256 * 1024;
+export const STUDIO_DIRECTOR_COMMAND_RECEIPT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+export const STUDIO_DIRECTOR_COMMAND_MAX_SWEEP_RECORDS = 64;
+export const STUDIO_DIRECTOR_COMMAND_MAINTENANCE_INTERVAL_MS = 60_000;
+export const STUDIO_DIRECTOR_COMMAND_SWEEP_INTERVAL_MS = 500;
+export const STUDIO_DIRECTOR_COMMAND_CLOCK_SKEW_MS = 2_000;
+export const STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS = 2_000;
+export const STUDIO_DIRECTOR_COMMAND_SLOT_LEASE_MS = STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS;
+export const STUDIO_DIRECTOR_COMMAND_WAIT_MS = 15_000;
+
+/** Preserves readable legacy projects while preventing any further scene-count growth above the current cap. */
+export function isStudioSceneCountTransitionAllowed(currentCount: number, nextCount: number): boolean {
+  if (currentCount <= STUDIO_MAX_SCENES) return nextCount <= STUDIO_MAX_SCENES;
+  return nextCount <= currentCount;
+}
+
+/** Main-only frame-defining authority frozen before a reference plate is submitted. */
+export type StudioReferenceInputSnapshot = {
+  sourceVisualPrompt: string;
+  conditioningReferenceAssetIds: string[];
+  aspectRatio: StudioAspectRatio;
+  resolution: StudioResolution;
+};
+
 export type StudioJob = {
   id: string;
   projectId: string;
@@ -107,6 +190,10 @@ export type StudioJob = {
   /** Set once when providerJobId becomes durable. Optional only for old schema-v1 jobs. */
   remoteStartedAt?: string | null;
   cancellationPolicy: StudioCancellationPolicy;
+  /** Absent means 'take', the pre-existing default. Never backfilled onto old records; read via jobOutputRole(job). */
+  outputRole?: StudioOutputRole;
+  /** Optional only for legacy reference jobs. Never project this main-only authority to the renderer. */
+  referenceInputSnapshot?: StudioReferenceInputSnapshot;
   outputAssetIds: string[];
   error: StudioJobError | null;
   progress?: number;
@@ -118,10 +205,14 @@ export type StudioJob = {
   updatedAt: string;
 };
 
-/** Renderer-facing job metadata. Provider task, adapter, and charge identities stay in main. */
+/**
+ * Renderer-facing job metadata. Provider task, adapter, and charge identities stay in main.
+ * `outputRole` is an optional renderer field: absent remains the legacy `take` default and must not
+ * be backfilled onto older jobs.
+ */
 export type StudioRendererJob = Omit<
   StudioJob,
-  'provider' | 'idempotencyKey' | 'providerJobId' | 'remoteStartedAt' | 'cancellationPolicy'
+  'provider' | 'idempotencyKey' | 'providerJobId' | 'remoteStartedAt' | 'cancellationPolicy' | 'referenceInputSnapshot'
 > & {
   provider: StudioMediaChoiceRef;
   /** Main-derived cancellation capability; renderer code never infers it from status or provider metadata. */
@@ -160,6 +251,130 @@ export type StudioEditableScene = Pick<
   | 'durationSeconds'
   | 'referenceAssetId'
 >;
+
+export type StudioDirectorNewSceneV1 = {
+  title: string;
+  purpose: string;
+  visualPrompt: string;
+  narration: string;
+  onScreenText: string;
+  mediaKind: StudioMediaKind;
+  durationSeconds: number;
+};
+
+export type StudioDirectorOperationV1 =
+  | { kind: 'set_brief'; brief: string }
+  | {
+      kind: 'add_scene';
+      sceneId: string;
+      scene: StudioDirectorNewSceneV1;
+      beforeSceneId: string | null;
+    }
+  | {
+      kind: 'edit_scene';
+      sceneId: string;
+      changes: Partial<
+        Pick<
+          StudioEditableScene,
+          'title' | 'purpose' | 'visualPrompt' | 'narration' | 'onScreenText' | 'durationSeconds'
+        >
+      >;
+    }
+  | { kind: 'reorder_scenes'; sceneOrder: string[] }
+  | { kind: 'select_take'; sceneId: string; assetId: string };
+
+export type StudioDirectorCommandRecordV1 = {
+  schemaVersion: 1;
+  commandId: string;
+  projectId: string;
+  expectedRevision: number;
+  createdAt: string;
+  deadlineAt: string;
+  policy: 'auto_apply';
+  operations: StudioDirectorOperationV1[];
+};
+
+export type StudioDirectorCommandSlotV1 = {
+  schemaVersion: 1;
+  commandId: string;
+  reservedAt: string;
+  deadlineAt: string;
+};
+
+export type StudioDirectorCommandSlotLeaseV1 = {
+  schemaVersion: 1;
+  leaseId: string;
+  owner: 'writer' | 'main';
+  commandId: string | null;
+  reservedAt: string | null;
+  deadlineAt: string | null;
+  acquiredAt: string;
+  expiresAt: string;
+};
+
+export type StudioDirectorCommandRejectionCode =
+  | 'malformed_record'
+  | 'unsupported_version'
+  | 'stale_revision'
+  | 'future_revision'
+  | 'project_not_found'
+  | 'validation_failed'
+  | 'scene_limit_exceeded'
+  | 'project_over_capacity';
+
+export type StudioDirectorCommandExpiryCode = 'deadline_elapsed' | 'expired_after_restart';
+
+export type StudioDirectorCommandIndeterminateCode = 'commit_attribution_unknown' | 'indeterminate_after_restart';
+
+export type StudioDirectorAppliedReceiptV1 = {
+  schemaVersion: 1;
+  commandId: string;
+  projectId: string;
+  expectedRevision: number;
+  decidedAt: string;
+  status: 'applied';
+  appliedRevision: number;
+  createdSceneIds: string[];
+};
+
+export type StudioDirectorRejectedReceiptV1 = {
+  schemaVersion: 1;
+  commandId: string;
+  projectId: string;
+  expectedRevision: number | null;
+  decidedAt: string;
+  status: 'rejected';
+  observedRevision: number | null;
+  reasonCode: StudioDirectorCommandRejectionCode;
+};
+
+export type StudioDirectorExpiredReceiptV1 = {
+  schemaVersion: 1;
+  commandId: string;
+  projectId: string;
+  expectedRevision: number;
+  decidedAt: string;
+  status: 'expired';
+  observedRevision: number | null;
+  reasonCode: StudioDirectorCommandExpiryCode;
+};
+
+export type StudioDirectorIndeterminateReceiptV1 = {
+  schemaVersion: 1;
+  commandId: string;
+  projectId: string;
+  expectedRevision: number;
+  decidedAt: string;
+  status: 'indeterminate';
+  observedRevision: number | null;
+  reasonCode: StudioDirectorCommandIndeterminateCode;
+};
+
+export type StudioDirectorCommandReceiptV1 =
+  | StudioDirectorAppliedReceiptV1
+  | StudioDirectorRejectedReceiptV1
+  | StudioDirectorExpiredReceiptV1
+  | StudioDirectorIndeterminateReceiptV1;
 
 export type StudioNormalisedRect = {
   x: number;
@@ -206,12 +421,27 @@ export type StudioRoutingPreferences = {
   video: StudioProviderRef | null;
 };
 
+/** The single durable inverse available for the project's most recent rule-list write. */
+export type StudioRuleListUndo = {
+  capturedRevision: number;
+  previousRules: StudioBriefRule[];
+};
+
 export type StudioProject = {
   schemaVersion: 1;
   revision: number;
   id: string;
   name: string;
   brief: string;
+  /**
+   * The executable part of the brief. REQUIRED, not optional: `StudioRendererProject` is
+   * `Omit<StudioProject, 'jobs' | 'routing'> & …` and `toRendererProject` declares that return
+   * type, so a required field makes omitting it from the projection a tsc error. Optional and it
+   * would be persisted, validated, visible to the MCP tools and silently invisible to the renderer —
+   * the documented `outputRole` trap (see the warning at :154-159).
+   */
+  rules: StudioBriefRule[];
+  ruleListUndo: StudioRuleListUndo | null;
   forgeProjectId?: string;
   briefConversationId?: string | null;
   aspectRatio: StudioAspectRatio;
@@ -243,10 +473,44 @@ export type StudioRendererProject = Omit<StudioProject, 'jobs' | 'routing'> & {
 export type StudioProposalStatus = 'pending' | 'accepted' | 'rejected' | 'expired';
 
 /** A complete replacement for the editable storyboard region named by a proposal. */
-export type StudioProposalPayload = {
+export type StudioReplaceStoryboardProposalPayload = {
   kind: 'replace_storyboard';
   sceneOrder: string[];
   scenes: Record<string, StudioEditableScene>;
+};
+
+/**
+ * One rule the Director wants pinned to the project.
+ *
+ * A rule pin rides the proposal protocol rather than a new pending-record family: the writer, the
+ * slot reservation, the CAS on accept, the decision ledger, the three IPC channels and the card in
+ * the Director pane all already exist and are all kind-agnostic. What is NOT kind-agnostic is
+ * `validateProposalPayload` — see store.ts — which is why the discriminant must be validated
+ * per-kind before any record of this shape reaches disk.
+ */
+export type StudioPinRuleProposalPayload = {
+  kind: 'pin_rule';
+  rule: {
+    text: string;
+    predicate: StudioBriefRulePredicate | null;
+  };
+};
+
+export type StudioProposalPayload = StudioReplaceStoryboardProposalPayload | StudioPinRuleProposalPayload;
+
+export type StudioEditableSceneField = keyof StudioEditableScene;
+
+/** The fields one shot would have rewritten, identified by its 1-based position in the proposed order. */
+export type StudioProposalSceneChange = {
+  position: number;
+  fields: StudioEditableSceneField[];
+};
+
+/** What a proposal would change, matched by shot position. Main computes it; nothing else may claim it. */
+export type StudioProposalDiff = {
+  added: number;
+  removed: number;
+  changed: StudioProposalSceneChange[];
 };
 
 /** Renderer-safe durable proposal state derived from an immutable record and optional decision marker. */
@@ -259,6 +523,13 @@ export type StudioProposal = {
   payload: StudioProposalPayload;
   createdAt: string;
   decidedAt: string | null;
+  /**
+   * Frozen at the moment main first saw this proposal against the project it was drafted from, and never
+   * recomputed — a diff recomputed after acceptance reads as zero changes. Absent means main never observed
+   * the proposal while the project still stood at `baseRevision`, so the truth is unknowable, not empty.
+   * The durable record never carries it: `validateProposalRecord` exact-matches its keys.
+   */
+  diff?: StudioProposalDiff;
 };
 
 export type StudioRecordProposalInput = {
@@ -275,6 +546,25 @@ export type StudioProposalRequest = StudioProjectRequest & {
 export type StudioProposalAcceptance = {
   proposal: StudioProposal;
   project: StudioRendererProject;
+};
+
+/** A durable request for one scene reference image; generation begins only after renderer approval. */
+export type StudioReferenceRequest = {
+  schemaVersion: 1;
+  id: string;
+  projectId: string;
+  sceneId: string;
+  status: 'pending';
+  createdAt: string;
+};
+
+export type StudioReferenceRequestAuthority = Pick<StudioReferenceRequest, 'id' | 'sceneId'>;
+
+export type StudioDismissReferenceRequestsRequest = StudioProjectRequest & {
+  requestIds: string[];
+  /** Both fields are present only for an atomic checked consume before a human-confirmed spend. */
+  expectedRevision?: number;
+  expectedRequests?: StudioReferenceRequestAuthority[];
 };
 
 export type StudioProjectSummary = {
@@ -339,11 +629,18 @@ export type StudioConnectionCandidate = {
   models: StudioConnectionCandidateModel[];
 };
 
+export type StudioConnectionIntegrationLabelKey =
+  | 'imageApi'
+  | 'bytePlusSeedance'
+  | 'selfHostedVideoGateway'
+  | 'openRouterVideo';
+
 export type StudioRouteCatalogEntry = {
   choiceId: string;
   providerId: string;
   providerName: string;
   model: string;
+  integrationLabelKey: StudioConnectionIntegrationLabelKey;
   health: 'available' | 'unknown' | 'unavailable';
   kind: StudioMediaKind;
   constraints: StudioRouteConstraints;
@@ -357,6 +654,7 @@ export type StudioConnectionCapabilities = {
   minDurationSeconds?: number;
   maxDurationSeconds?: number;
   supportsFirstFrame?: boolean;
+  maxConditioningImages?: number;
   cancellationPolicy?: StudioCancellationPolicy;
   /** Legacy schema-v1 ingress only. Canonical reads and new writes omit it. */
   cancellation?: boolean;
@@ -368,6 +666,7 @@ export type StudioRouteConstraints = {
   minDurationSeconds: number;
   maxDurationSeconds: number;
   supportsFirstFrame: boolean;
+  maxConditioningImages: number;
   silentOutput: boolean;
 };
 
@@ -381,12 +680,6 @@ export type StudioConnectionBinding = {
   capabilities: StudioConnectionCapabilities;
   validatedAt: string;
 };
-
-export type StudioConnectionIntegrationLabelKey =
-  | 'imageApi'
-  | 'bytePlusSeedance'
-  | 'selfHostedVideoGateway'
-  | 'openRouterVideo';
 
 export type StudioConnectionIntegration = {
   integrationId: string;
@@ -418,10 +711,17 @@ export type StudioConnectionValidationResult = Omit<StudioConnectionRecord, 'bin
 
 export type StudioModelAvailability = 'ready' | 'selection_required' | 'setup_required' | 'unavailable';
 
+export type StudioMediaSelectionIssue =
+  | { code: 'retired' }
+  | { code: 'needs_setup'; providerName: string }
+  | { code: 'health' }
+  | { code: 'frame'; aspectRatio: StudioAspectRatio; resolution: StudioResolution };
+
 export type StudioMediaRouteCatalog = {
   status: StudioModelAvailability;
   selected: StudioMediaChoiceRef | null;
   selectedRoute: StudioRouteCatalogEntry | null;
+  selectionIssue: StudioMediaSelectionIssue | null;
   options: StudioRouteCatalogEntry[];
 };
 
@@ -444,6 +744,7 @@ export type StudioCommandErrorCode =
   | 'stale_project'
   | 'planning_unavailable'
   | 'invalid_route'
+  | 'rule_breach'
   | 'cancellation_refused'
   | 'duplicate_charge_acknowledgement_required'
   | 'unsupported'
@@ -526,6 +827,12 @@ export type StudioBindBriefConversationRequest = StudioProjectRequest & {
   conversationId: string | null;
 };
 
+/** Replaces the project's whole rule list. Main mints scope and createdAt; ids come from the caller. */
+export type StudioSetBriefRulesRequest = StudioProjectRequest & {
+  expectedRevision: number;
+  rules: StudioBriefRuleDraft[];
+};
+
 export type StudioUpdateCutRequest = StudioProjectRequest & {
   expectedRevision: number;
   cutId: string;
@@ -605,12 +912,23 @@ export type StudioSceneGenerationChoice = {
 
 export type StudioGenerationSubmitMode = 'single' | 'batch';
 
+/** The picture one scene's reference plate should paint. A plate is that scene's first frame, so
+ *  the prompt is per scene: a batch-wide prompt would paint every scene the same. */
+export type StudioSceneReferencePrompt = {
+  sceneId: string;
+  prompt: string;
+};
+
 export type StudioSubmitScenesRequest = StudioProjectRequest & {
   mode: StudioGenerationSubmitMode;
   sceneIds: string[];
   expectedRevision: number;
   routes: StudioSceneGenerationChoice[];
   catalogVersion: string;
+  /** Absent means 'take'. Batch submissions may request 'reference' across multiple scenes, same as single mode. */
+  outputRole?: StudioOutputRole;
+  /** Required by, and only valid with, outputRole: 'reference' — exactly one entry per submitted scene. */
+  referencePrompts?: StudioSceneReferencePrompt[];
 };
 
 export type StudioFitStoryboardRequest = StudioProjectRequest & {
@@ -656,6 +974,12 @@ export type StudioFitStoryboardOutcome =
 
 export type StudioChooseAndImportReferenceRequest = StudioProjectRequest & {
   sceneId?: string;
+  briefReferenceRole?: StudioBriefReferenceRole;
+  expectedRevision: number;
+};
+
+export type StudioDetachBriefReferenceRequest = StudioProjectRequest & {
+  assetId: string;
   expectedRevision: number;
 };
 
@@ -675,7 +999,9 @@ export type StudioSaveConnectionRequest = StudioValidateConnectionRequest;
 
 export type StudioRemoveConnectionRequest = { bindingId: string };
 
-export type StudioImportOutcome = { status: 'imported'; asset: StudioAsset } | { status: 'cancelled' };
+export type StudioImportOutcome =
+  | { status: 'imported'; asset: StudioAsset; project: StudioRendererProject }
+  | { status: 'cancelled' };
 
 export type StudioExportItem = { assetId: string; fileName: string };
 
@@ -688,6 +1014,7 @@ export type StudioDesktopApi = {
   listProjects(): Promise<StudioCommandResult<StudioProjectSummary[]>>;
   createProject(input: CreateStudioProjectInput): Promise<StudioCommandResult<StudioRendererProject>>;
   getProject(input: StudioProjectRequest): Promise<StudioCommandResult<StudioRendererProject | null>>;
+  getBriefSessionServer(input: StudioProjectRequest): Promise<StudioCommandResult<ISessionMcpServer>>;
   proposeStoryboard(input: ProposeStudioStoryboardInput): Promise<StudioCommandResult<StudioRendererProject>>;
   updateModelSelection(input: StudioUpdateModelSelectionRequest): Promise<StudioCommandResult<StudioRendererProject>>;
   updateProject(input: StudioUpdateProjectRequest): Promise<StudioCommandResult<StudioRendererProject>>;
@@ -702,6 +1029,7 @@ export type StudioDesktopApi = {
   chooseAndImportReference(
     input: StudioChooseAndImportReferenceRequest
   ): Promise<StudioCommandResult<StudioImportOutcome>>;
+  detachBriefReference(input: StudioDetachBriefReferenceRequest): Promise<StudioCommandResult<StudioRendererProject>>;
   selectVariation(input: StudioSelectVariationRequest): Promise<StudioCommandResult<StudioRendererProject>>;
   submitScenes(input: StudioSubmitScenesRequest): Promise<StudioCommandResult<StudioRendererJob[]>>;
   fitStoryboard(input: StudioFitStoryboardRequest): Promise<StudioCommandResult<StudioFitStoryboardOutcome>>;

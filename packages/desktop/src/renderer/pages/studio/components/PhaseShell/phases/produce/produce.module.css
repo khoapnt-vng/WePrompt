@@ -8,88 +8,16 @@
   gap: 14px;
 }
 
-.engineBar {
-  display: flex;
-  min-width: 0;
-  padding: 10px 12px;
-  border: 1px solid var(--color-border-2);
-  border-radius: var(--border-radius-medium);
-  background: var(--color-fill-1);
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.engineSummary {
-  display: flex;
-  min-width: 0;
-  flex: 1 1 auto;
-  align-items: center;
-  flex-wrap: nowrap;
-  gap: 8px;
-}
-
-.engineHeading,
 .connectHeading {
+  composes: cardTitle from '../../../../StudioTypography.module.css';
   margin: 0;
   color: var(--color-text-1);
   scroll-margin-block: 24px;
 }
 
-.engineHeading {
-  composes: eyebrow from '../../../../StudioTypography.module.css';
-}
-
-.connectHeading {
-  composes: cardTitle from '../../../../StudioTypography.module.css';
-}
-
-.engineHeading:focus-visible,
 .connectHeading:focus-visible {
   outline: 2px solid var(--color-primary-6);
   outline-offset: 4px;
-}
-
-.engineHeading {
-  min-width: 0;
-  overflow: hidden;
-  flex: 0 1 auto;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.engineRoutes {
-  display: flex;
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  overflow: hidden;
-  flex: 1 1 0;
-  align-items: center;
-  flex-wrap: nowrap;
-  gap: 8px;
-  list-style: none;
-}
-
-.engineRoute {
-  composes: meta from '../../../../StudioTypography.module.css';
-  min-width: 0;
-  overflow: hidden;
-  flex: 1 1 0;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.engineRoute + .engineRoute::before {
-  margin-inline-end: 8px;
-  color: var(--color-text-4);
-  content: '+';
-}
-
-.changeEnginesButton {
-  composes: cardTitle bodyTextAction from '../../../../StudioTypography.module.css';
-  flex: none;
-  white-space: nowrap;
 }
 
 .connectCard {
@@ -123,6 +51,10 @@
   align-items: stretch;
   grid-template-columns: minmax(0, 1fr) 290px;
   gap: 16px;
+}
+
+.gridRegion {
+  min-width: 0;
 }
 
 .shotGridSection {
@@ -342,20 +274,6 @@
   padding: 0;
 }
 
-.batchFooter {
-  display: flex;
-  padding-top: 10px;
-  border-top: 1px solid var(--color-border-2);
-  flex-direction: column;
-  gap: 8px;
-}
-
-.batchAdvisory {
-  margin: 0;
-  color: var(--color-warning-6);
-  font-size: 12px;
-}
-
 .previewModal :global(.arco-modal-content) {
   min-width: 0;
 }
@@ -370,8 +288,4 @@
 
 .phase[data-layout='compact'] .content {
   grid-template-columns: minmax(0, 1fr);
-}
-
-.phase[data-layout='compact'] .engineBar {
-  align-items: flex-start;
 }

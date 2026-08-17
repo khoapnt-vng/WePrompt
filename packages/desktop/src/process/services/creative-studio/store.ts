@@ -7,27 +7,50 @@
 import { promises as nodeFs } from 'node:fs';
 import { watch as watchFileSystem } from 'node:fs';
 import path from 'node:path';
-import type {
-  CreateStudioProjectInput,
-  StudioAsset,
-  StudioCancellationPolicy,
-  StudioConnectionBinding,
-  StudioCut,
-  StudioCutClip,
-  StudioCutFilter,
-  StudioJob,
-  StudioProject,
-  StudioProjectSummary,
-  StudioProposal,
-  StudioProposalPayload,
-  StudioRecordProposalInput,
-  StudioProviderRef,
-  StudioScene,
-  StudioTextModelRef,
+import {
+  isStudioSceneCountTransitionAllowed,
+  STUDIO_MAX_SCENES,
+  STUDIO_REFERENCE_PROMPT_MAX_LENGTH,
+  type CreateStudioProjectInput,
+  type StudioAsset,
+  type StudioCancellationPolicy,
+  type StudioConnectionBinding,
+  type StudioCut,
+  type StudioCutClip,
+  type StudioCutFilter,
+  type StudioJob,
+  type StudioManagedAssetRef,
+  type StudioOutputRole,
+  type StudioProject,
+  type StudioProjectSummary,
+  type StudioProposal,
+  type StudioProposalPayload,
+  type StudioReferenceRequest,
+  type StudioReferenceRequestAuthority,
+  type StudioRecordProposalInput,
+  type StudioProviderRef,
+  type StudioScene,
+  type StudioTextModelRef,
 } from '@/common/types/project/creativeStudioTypes';
+import { hasRuleToken, STUDIO_RULE_LIMITS, type StudioBriefRule } from '@/common/types/project/creativeStudioRules';
 import { isCanonicalStudioGeneratedTake } from '@/common/types/project/creativeStudioCanonicalTake';
+import {
+  isStudioBriefReferenceLabel,
+  isStudioReferenceImageMimeType,
+  resolveActiveStudioBriefReferences,
+  STUDIO_MANAGED_ASSET_COLLECTIONS,
+  STUDIO_MAX_ACTIVE_BRIEF_REFERENCES,
+} from '@/common/types/project/creativeStudioManagedAssetCollections';
 import { isValidProviderJobId } from '@process/services/creative-studio/adapters/types';
 import { toStudioProjectSummary } from '@/common/types/project/creativeStudioProjectSummary';
+import {
+  canonicalizeRecordRoot,
+  publishImmutableRecord,
+  readBoundedRegularFile,
+  RecordIoError,
+  resolveConfinedRecordPath,
+  resolveSafeRecordDirectory,
+} from './service/recordIo';
 
 const SAFE_ID = /^[A-Za-z0-9_-]+$/;
 const ASPECT_RATIOS = new Set(['16:9', '9:16', '1:1', '4:3', '3:4']);
@@ -47,6 +70,7 @@ const JOB_STATUSES = new Set([
 const NONTERMINAL_JOB_STATUSES = new Set(['queued_local', 'submitting', 'queued_remote', 'running', 'needs_attention']);
 const JOB_RETRY_REASONS = new Set(['provider_failure', 'submission_unknown']);
 const CANCELLATION_POLICIES = new Set<StudioCancellationPolicy>(['none', 'queued_only', 'queued_and_running']);
+const JOB_OUTPUT_ROLES = new Set<StudioOutputRole>(['take', 'reference']);
 const ADAPTER_IDS = new Set([
   'weprompt-image-v1',
   'byteplus-seedance-v1',
@@ -71,6 +95,12 @@ const PROVIDER_REF_KEYS = new Set(['providerId', 'adapterId', 'model']);
 const ROUTING_KEYS = new Set(['storyboard', 'image', 'video']);
 const TEXT_MODEL_REF_KEYS = new Set(['providerId', 'model']);
 const JOB_ERROR_KEYS = new Set(['code', 'messageKey']);
+const REFERENCE_INPUT_SNAPSHOT_KEYS = new Set([
+  'sourceVisualPrompt',
+  'conditioningReferenceAssetIds',
+  'aspectRatio',
+  'resolution',
+]);
 const SCENE_KEYS = new Set([
   'id',
   'title',
@@ -99,6 +129,12 @@ const ASSET_KEYS = new Set([
   'height',
   'durationSeconds',
   'createdAt',
+  'briefReferenceRole',
+  'briefReferenceLabel',
+  'sourceVisualPrompt',
+  'sourceReferenceAssetIds',
+  'sourceAspectRatio',
+  'sourceResolution',
 ]);
 const MANAGED_ASSET_KEYS = new Set(['collection', 'fileName']);
 const CUT_KEYS = new Set(['id', 'name', 'orderMode', 'clipOrder', 'clips']);
@@ -116,6 +152,8 @@ const JOB_KEYS = new Set([
   'providerJobId',
   'remoteStartedAt',
   'cancellationPolicy',
+  'outputRole',
+  'referenceInputSnapshot',
   'outputAssetIds',
   'error',
   'progress',
@@ -126,7 +164,6 @@ const JOB_KEYS = new Set([
   'createdAt',
   'updatedAt',
 ]);
-const ASSET_COLLECTIONS = new Set(['assets', 'imports', 'thumbnails']);
 const CONNECTION_BINDING_KEYS = new Set([
   'schemaVersion',
   'id',
@@ -145,6 +182,7 @@ const CONNECTION_CAPABILITY_KEYS = new Set([
   'minDurationSeconds',
   'maxDurationSeconds',
   'supportsFirstFrame',
+  'maxConditioningImages',
   'cancellationPolicy',
 ]);
 const FORBIDDEN_CONNECTION_KEY_FRAGMENTS = [
@@ -185,7 +223,9 @@ const PROPOSAL_RECORD_KEYS = new Set([
   'createdAt',
   'decidedAt',
 ]);
-const PROPOSAL_PAYLOAD_KEYS = new Set(['kind', 'sceneOrder', 'scenes']);
+const PROPOSAL_STORYBOARD_PAYLOAD_KEYS = new Set(['kind', 'sceneOrder', 'scenes']);
+const PROPOSAL_PIN_RULE_PAYLOAD_KEYS = new Set(['kind', 'rule']);
+const PROPOSAL_RULE_KEYS = new Set(['text', 'predicate']);
 const PROPOSAL_SCENE_KEYS = new Set([
   'title',
   'purpose',
@@ -196,9 +236,14 @@ const PROPOSAL_SCENE_KEYS = new Set([
   'durationSeconds',
   'referenceAssetId',
 ]);
+const BRIEF_RULE_KEYS = new Set(['id', 'scope', 'text', 'predicate', 'createdAt']);
+const BRIEF_RULE_PREDICATE_KEYS = new Set(['kind', 'terms']);
+const RULE_LIST_UNDO_KEYS = new Set(['capturedRevision', 'previousRules']);
 const PROPOSAL_DECISION_KEYS = new Set(['schemaVersion', 'proposalId', 'status', 'decidedAt']);
 const PROPOSAL_SLOT_KEYS = new Set(['schemaVersion', 'proposalId', 'reservedAt']);
+const REFERENCE_REQUEST_SLOT_KEYS = new Set(['schemaVersion', 'requestId', 'reservedAt']);
 const PROPOSAL_DECISION_STATUSES = new Set(['accepted', 'rejected', 'expired']);
+const REFERENCE_REQUEST_RECORD_KEYS = new Set(['schemaVersion', 'id', 'projectId', 'sceneId', 'status', 'createdAt']);
 
 export const STUDIO_PROPOSAL_MAX_RECORD_BYTES = 256 * 1024;
 export const STUDIO_PROPOSAL_MAX_PENDING_PER_PROJECT = 50;
@@ -219,6 +264,21 @@ export class CreativeStudioStoreError extends Error {
   }
 }
 
+export type StudioReferenceRequestDismissAuthority = {
+  expectedRevision: number;
+  expectedRequests: StudioReferenceRequestAuthority[];
+};
+
+export type StudioProjectCommitFacts = Readonly<{
+  projectId: string;
+  previousRevision: number;
+  committedRevision: number;
+  committedAt: string;
+  commitTag: string | null;
+}>;
+
+export type StudioProjectCommitObserver = (facts: StudioProjectCommitFacts) => void;
+
 export type CreativeStudioStore = {
   listProjects(): Promise<StudioProjectSummary[]>;
   listQuarantinedProjectIds(): Promise<string[]>;
@@ -227,7 +287,8 @@ export type CreativeStudioStore = {
   updateProject(
     projectId: string,
     update: (project: StudioProject) => StudioProject,
-    expectedRevision?: number
+    expectedRevision?: number,
+    commitTag?: string
   ): Promise<StudioProject>;
   deleteProject(projectId: string, expectedRevision: number): Promise<boolean>;
   listConnections(): Promise<StudioConnectionBinding[]>;
@@ -235,6 +296,12 @@ export type CreativeStudioStore = {
   removeConnection(connectionId: string): Promise<boolean>;
   recordProposal(input: StudioRecordProposalInput): Promise<StudioProposal>;
   listProposals(projectId: string): Promise<StudioProposal[]>;
+  listPendingReferenceRequests(projectId: string): Promise<StudioReferenceRequest[]>;
+  dismissReferenceRequests(
+    projectId: string,
+    requestIds: string[],
+    authority?: StudioReferenceRequestDismissAuthority
+  ): Promise<void>;
   acceptProposal(
     projectId: string,
     proposalId: string,
@@ -243,6 +310,9 @@ export type CreativeStudioStore = {
   rejectProposal(projectId: string, proposalId: string): Promise<StudioProposal>;
   reapAbandonedProposals(): Promise<void>;
   watchProposals(listener: (projectId: string, proposalId: string) => void): Promise<() => Promise<void>>;
+  resolveProposalPaths(
+    projectId: string
+  ): Promise<{ projectDir: string; pendingDir: string; referencePendingDir: string }>;
   /** Main-process-only canonical project path; never return this through IPC. */
   getVerifiedProjectDirectory(projectId: string): Promise<string | null>;
 };
@@ -252,6 +322,7 @@ export type CreativeStudioStoreDeps = {
   now?: () => string;
   createId?: () => string;
   fs?: typeof nodeFs;
+  onProjectCommitted?: StudioProjectCommitObserver;
   logError?: (message: string, error: unknown) => void;
   watchProposalTree?: (input: {
     rootDir: string;
@@ -277,6 +348,12 @@ type StudioProposalDecision = {
 type StudioProposalSlot = {
   schemaVersion: 1;
   proposalId: string;
+  reservedAt: string;
+};
+
+type StudioReferenceRequestSlot = {
+  schemaVersion: 1;
+  requestId: string;
   reservedAt: string;
 };
 
@@ -368,21 +445,78 @@ const validateProposalScene = (value: unknown): boolean =>
   isIntegerInRange(value.durationSeconds, 1, 60) &&
   (value.referenceAssetId === null || isSafeId(value.referenceAssetId));
 
-const validateProposalPayload = (value: unknown): value is StudioProposalPayload => {
-  if (!isRecord(value) || !isRecord(value.scenes) || !hasExactKeys(value, PROPOSAL_PAYLOAD_KEYS)) return false;
+const validateBriefRulePredicate = (value: unknown): boolean =>
+  value === null ||
+  (isRecord(value) &&
+    hasExactKeys(value, BRIEF_RULE_PREDICATE_KEYS) &&
+    value.kind === 'forbidden_terms' &&
+    Array.isArray(value.terms) &&
+    value.terms.length > 0 &&
+    value.terms.length <= STUDIO_RULE_LIMITS.maxTerms &&
+    value.terms.every((term) => isNonEmptyString(term) && term.length <= STUDIO_RULE_LIMITS.term) &&
+    new Set(value.terms).size === value.terms.length);
+
+const validateStoredBriefRulePredicate = (value: unknown): boolean =>
+  validateBriefRulePredicate(value) &&
+  (value === null ||
+    (isRecord(value) && Array.isArray(value.terms) && value.terms.every((term) => hasRuleToken(String(term)))));
+
+/**
+ * A rule on the project record is always project-scoped. The organisation layer is code-resident
+ * (ORGANISATION_STUDIO_RULES) and is refused here on purpose: a locked rule cached on disk could be
+ * edited out of the file by hand, which is exactly what "locked" must not mean.
+ */
+const validateBriefRule = (value: unknown): value is StudioBriefRule =>
+  isRecord(value) &&
+  hasExactKeys(value, BRIEF_RULE_KEYS) &&
+  isSafeId(value.id) &&
+  value.scope === 'project' &&
+  isNonEmptyString(value.text) &&
+  value.text.length <= STUDIO_RULE_LIMITS.text &&
+  validateStoredBriefRulePredicate(value.predicate) &&
+  isCanonicalIsoTimestamp(value.createdAt);
+
+const validateBriefRules = (value: unknown): value is StudioBriefRule[] =>
+  Array.isArray(value) &&
+  value.length <= STUDIO_RULE_LIMITS.maxRules &&
+  value.every(validateBriefRule) &&
+  new Set(value.map((rule) => (rule as StudioBriefRule).id)).size === value.length;
+
+const validateRuleListUndo = (value: unknown): boolean =>
+  value === null ||
+  (isRecord(value) &&
+    hasExactKeys(value, RULE_LIST_UNDO_KEYS) &&
+    isIntegerInRange(value.capturedRevision, 1, Number.MAX_SAFE_INTEGER) &&
+    validateBriefRules(value.previousRules));
+
+const validateStoryboardProposalPayload = (value: Record<string, unknown>): boolean => {
+  if (!isRecord(value.scenes) || !hasExactKeys(value, PROPOSAL_STORYBOARD_PAYLOAD_KEYS)) return false;
   const scenes = value.scenes;
   const sceneOrder = value.sceneOrder;
   if (!asArrayOfSafeIds(sceneOrder)) return false;
   const sceneIds = Object.keys(scenes);
   return (
-    value.kind === 'replace_storyboard' &&
     sceneOrder.length > 0 &&
-    sceneOrder.length <= 24 &&
+    sceneOrder.length <= STUDIO_MAX_SCENES &&
     new Set(sceneOrder).size === sceneOrder.length &&
     sceneIds.length === sceneOrder.length &&
-    sceneIds.every((sceneId) => sceneOrder.includes(sceneId) && validateProposalScene(scenes[sceneId])) &&
-    !containsForbiddenRendererField(value)
+    sceneIds.every((sceneId) => sceneOrder.includes(sceneId) && validateProposalScene(scenes[sceneId]))
   );
+};
+
+const validatePinRuleProposalPayload = (value: Record<string, unknown>): boolean =>
+  hasExactKeys(value, PROPOSAL_PIN_RULE_PAYLOAD_KEYS) &&
+  isRecord(value.rule) &&
+  hasExactKeys(value.rule, PROPOSAL_RULE_KEYS) &&
+  isNonEmptyString(value.rule.text) &&
+  value.rule.text.length <= STUDIO_RULE_LIMITS.text &&
+  validateBriefRulePredicate(value.rule.predicate);
+
+const validateProposalPayload = (value: unknown): value is StudioProposalPayload => {
+  if (!isRecord(value) || containsForbiddenRendererField(value)) return false;
+  if (value.kind === 'replace_storyboard') return validateStoryboardProposalPayload(value);
+  if (value.kind === 'pin_rule') return validatePinRuleProposalPayload(value);
+  return false;
 };
 
 const validateProposalRecord = (projectId: string, proposalId: string, value: unknown): value is StudioProposal =>
@@ -414,6 +548,29 @@ const validateProposalSlot = (value: unknown): value is StudioProposalSlot =>
   value.schemaVersion === 1 &&
   isSafeProposalId(value.proposalId) &&
   isCanonicalIsoTimestamp(value.reservedAt);
+
+const validateReferenceRequestSlot = (value: unknown): value is StudioReferenceRequestSlot =>
+  isRecord(value) &&
+  hasExactKeys(value, REFERENCE_REQUEST_SLOT_KEYS) &&
+  value.schemaVersion === 1 &&
+  isSafeProposalId(value.requestId) &&
+  isCanonicalIsoTimestamp(value.reservedAt);
+
+const validateReferenceRequestRecord = (
+  project: StudioProject,
+  requestId: string,
+  value: unknown
+): value is StudioReferenceRequest =>
+  isRecord(value) &&
+  hasExactKeys(value, REFERENCE_REQUEST_RECORD_KEYS) &&
+  value.schemaVersion === 1 &&
+  value.id === requestId &&
+  isSafeProposalId(value.id) &&
+  value.projectId === project.id &&
+  isSafeId(value.sceneId) &&
+  project.scenes[value.sceneId] !== undefined &&
+  value.status === 'pending' &&
+  isCanonicalIsoTimestamp(value.createdAt);
 
 const validateProviderRef = (value: unknown): value is StudioProviderRef =>
   isRecord(value) &&
@@ -484,6 +641,7 @@ const validateConnectionBinding = (value: unknown): value is StudioConnectionBin
     optionalAspectRatios &&
     optionalResolutions &&
     (capabilities.supportsFirstFrame === undefined || typeof capabilities.supportsFirstFrame === 'boolean') &&
+    (capabilities.maxConditioningImages === undefined || isIntegerInRange(capabilities.maxConditioningImages, 0, 6)) &&
     isString(capabilities.cancellationPolicy) &&
     CANCELLATION_POLICIES.has(capabilities.cancellationPolicy as StudioCancellationPolicy) &&
     (capabilities.minDurationSeconds === undefined || isIntegerInRange(capabilities.minDurationSeconds, 1, 60)) &&
@@ -556,6 +714,12 @@ const validateAsset = (
   value: unknown
 ): value is StudioAsset => {
   if (!isRecord(value) || !isRecord(value.managedAsset)) return false;
+  const hasBriefReferenceRole = value.briefReferenceRole !== undefined;
+  const hasBriefReferenceLabel = value.briefReferenceLabel !== undefined;
+  const hasSourceReferenceAssetIds = value.sourceReferenceAssetIds !== undefined;
+  const hasSourceAspectRatio = value.sourceAspectRatio !== undefined;
+  const hasSourceResolution = value.sourceResolution !== undefined;
+  const hasCompleteSourceProvenance = hasSourceReferenceAssetIds && hasSourceAspectRatio && hasSourceResolution;
   return (
     Object.keys(value).every((key) => ASSET_KEYS.has(key)) &&
     Object.keys(value.managedAsset).length === MANAGED_ASSET_KEYS.size &&
@@ -568,7 +732,7 @@ const validateAsset = (
     MEDIA_KINDS.has(value.mediaKind) &&
     isNonEmptyString(value.mimeType) &&
     isString(value.managedAsset.collection) &&
-    ASSET_COLLECTIONS.has(value.managedAsset.collection) &&
+    STUDIO_MANAGED_ASSET_COLLECTIONS.has(value.managedAsset.collection as StudioManagedAssetRef['collection']) &&
     isSafeAssetFileName(value.managedAsset.fileName) &&
     isIntegerInRange(value.byteSize, 0, Number.MAX_SAFE_INTEGER) &&
     isString(value.sha256) &&
@@ -577,7 +741,31 @@ const validateAsset = (
     (value.height === undefined || isIntegerInRange(value.height, 1, Number.MAX_SAFE_INTEGER)) &&
     (value.durationSeconds === undefined ||
       (isFiniteInRange(value.durationSeconds, 0, Number.MAX_SAFE_INTEGER) && value.durationSeconds > 0)) &&
-    isNonEmptyString(value.createdAt)
+    isNonEmptyString(value.createdAt) &&
+    hasBriefReferenceRole === hasBriefReferenceLabel &&
+    (!hasBriefReferenceRole ||
+      ((value.briefReferenceRole === 'cast' || value.briefReferenceRole === 'look') &&
+        isStudioBriefReferenceLabel(value.briefReferenceLabel) &&
+        value.sceneId === null &&
+        value.mediaKind === 'image' &&
+        isStudioReferenceImageMimeType(value.mimeType) &&
+        value.managedAsset.collection === 'imports')) &&
+    (value.sourceVisualPrompt === undefined || isString(value.sourceVisualPrompt)) &&
+    hasSourceReferenceAssetIds === hasSourceAspectRatio &&
+    hasSourceAspectRatio === hasSourceResolution &&
+    (!hasCompleteSourceProvenance ||
+      (asArrayOfSafeIds(value.sourceReferenceAssetIds) &&
+        value.sourceReferenceAssetIds.length <= STUDIO_MAX_ACTIVE_BRIEF_REFERENCES &&
+        new Set(value.sourceReferenceAssetIds).size === value.sourceReferenceAssetIds.length &&
+        isString(value.sourceAspectRatio) &&
+        ASPECT_RATIOS.has(value.sourceAspectRatio) &&
+        isString(value.sourceResolution) &&
+        RESOLUTIONS.has(value.sourceResolution) &&
+        value.sourceVisualPrompt !== undefined &&
+        value.mediaKind === 'image' &&
+        isStudioReferenceImageMimeType(value.mimeType) &&
+        value.sceneId !== null &&
+        value.managedAsset.collection === 'references'))
   );
 };
 
@@ -809,6 +997,22 @@ const validateJob = (jobId: string, projectId: string, sceneIds: Set<string>, va
       isString(value.error.code) &&
       JOB_ERROR_CODES.has(value.error.code) &&
       isNonEmptyString(value.error.messageKey));
+  const referenceInputSnapshotIsValid =
+    value.referenceInputSnapshot === undefined ||
+    (value.outputRole === 'reference' &&
+      isRecord(value.referenceInputSnapshot) &&
+      hasExactKeys(value.referenceInputSnapshot, REFERENCE_INPUT_SNAPSHOT_KEYS) &&
+      isNonEmptyString(value.referenceInputSnapshot.sourceVisualPrompt) &&
+      value.referenceInputSnapshot.sourceVisualPrompt === value.referenceInputSnapshot.sourceVisualPrompt.trim() &&
+      value.referenceInputSnapshot.sourceVisualPrompt.length <= STUDIO_REFERENCE_PROMPT_MAX_LENGTH &&
+      asArrayOfSafeIds(value.referenceInputSnapshot.conditioningReferenceAssetIds) &&
+      value.referenceInputSnapshot.conditioningReferenceAssetIds.length <= STUDIO_MAX_ACTIVE_BRIEF_REFERENCES &&
+      new Set(value.referenceInputSnapshot.conditioningReferenceAssetIds).size ===
+        value.referenceInputSnapshot.conditioningReferenceAssetIds.length &&
+      isString(value.referenceInputSnapshot.aspectRatio) &&
+      ASPECT_RATIOS.has(value.referenceInputSnapshot.aspectRatio) &&
+      isString(value.referenceInputSnapshot.resolution) &&
+      RESOLUTIONS.has(value.referenceInputSnapshot.resolution));
   return (
     Object.keys(value).every((key) => JOB_KEYS.has(key)) &&
     value.id === jobId &&
@@ -827,6 +1031,9 @@ const validateJob = (jobId: string, projectId: string, sceneIds: Set<string>, va
         : isCanonicalIsoTimestamp(value.remoteStartedAt))) &&
     isString(value.cancellationPolicy) &&
     CANCELLATION_POLICIES.has(value.cancellationPolicy as StudioCancellationPolicy) &&
+    (value.outputRole === undefined ||
+      (isString(value.outputRole) && JOB_OUTPUT_ROLES.has(value.outputRole as StudioOutputRole))) &&
+    referenceInputSnapshotIsValid &&
     asArrayOfSafeIds(value.outputAssetIds) &&
     new Set(value.outputAssetIds).size === value.outputAssetIds.length &&
     errorIsValid &&
@@ -884,7 +1091,21 @@ const migrateSchemaV1Project = (value: unknown): unknown => {
     isRecord(value.routing) && !Object.hasOwn(value.routing, 'storyboard')
       ? { ...value.routing, storyboard: null }
       : value.routing;
-  return changed || routing !== value.routing ? { ...value, jobs, routing } : value;
+  // Defaulted here, before validateProject runs at readProject, so a manifest written before rules
+  // existed reads back rather than being quarantined. The migrator is unconditional for any record
+  // that could otherwise pass validation, which is what makes it safe to validate `rules` as
+  // required in the same change.
+  const rulesMissing = !Object.hasOwn(value, 'rules');
+  const ruleListUndoMissing = !Object.hasOwn(value, 'ruleListUndo');
+  return changed || routing !== value.routing || rulesMissing || ruleListUndoMissing
+    ? {
+        ...value,
+        jobs,
+        routing,
+        ...(rulesMissing ? { rules: [] } : {}),
+        ...(ruleListUndoMissing ? { ruleListUndo: null } : {}),
+      }
+    : value;
 };
 
 const retryGraphHasCycle = (jobs: Record<string, StudioJob>): boolean => {
@@ -930,6 +1151,8 @@ const validateProject = (value: unknown): value is StudioProject => {
     !isIntegerInRange(value.revision, 1, Number.MAX_SAFE_INTEGER) ||
     !isNonEmptyString(value.name) ||
     !isString(value.brief) ||
+    !validateBriefRules(value.rules) ||
+    !validateRuleListUndo(value.ruleListUndo) ||
     (value.forgeProjectId !== undefined && !isSafeId(value.forgeProjectId)) ||
     (value.briefConversationId !== undefined &&
       value.briefConversationId !== null &&
@@ -972,6 +1195,39 @@ const validateProject = (value: unknown): value is StudioProject => {
   const typedScenes = scenes as Record<string, StudioScene>;
   const typedAssets = assets as Record<string, StudioAsset>;
   const typedJobs = jobs as Record<string, StudioJob>;
+  if (resolveActiveStudioBriefReferences(typedAssets) === null) return false;
+  const provenanceReferencesAreValid = Object.values(typedAssets).every(
+    (asset) =>
+      asset.sourceReferenceAssetIds === undefined ||
+      asset.sourceReferenceAssetIds.every((sourceAssetId) => {
+        const sourceAsset = typedAssets[sourceAssetId];
+        return (
+          sourceAsset?.id === sourceAssetId &&
+          sourceAsset.projectId === projectId &&
+          sourceAsset.sceneId === null &&
+          sourceAsset.mediaKind === 'image' &&
+          isStudioReferenceImageMimeType(sourceAsset.mimeType) &&
+          sourceAsset.managedAsset.collection === 'imports'
+        );
+      })
+  );
+  if (!provenanceReferencesAreValid) return false;
+  const jobSnapshotReferencesAreValid = Object.values(typedJobs).every(
+    (job) =>
+      job.referenceInputSnapshot === undefined ||
+      job.referenceInputSnapshot.conditioningReferenceAssetIds.every((sourceAssetId) => {
+        const sourceAsset = typedAssets[sourceAssetId];
+        return (
+          sourceAsset?.id === sourceAssetId &&
+          sourceAsset.projectId === projectId &&
+          sourceAsset.sceneId === null &&
+          sourceAsset.mediaKind === 'image' &&
+          isStudioReferenceImageMimeType(sourceAsset.mimeType) &&
+          sourceAsset.managedAsset.collection === 'imports'
+        );
+      })
+  );
+  if (!jobSnapshotReferencesAreValid) return false;
   if (cutsPresent) {
     if (!isRecord(value.cuts)) return false;
     const cuts = value.cuts;
@@ -1055,6 +1311,8 @@ const createProjectFromInput = (input: CreateStudioProjectInput, id: string, tim
   id,
   name: input.name.trim(),
   brief: input.brief,
+  rules: [],
+  ruleListUndo: null,
   ...(input.forgeProjectId === undefined ? {} : { forgeProjectId: input.forgeProjectId }),
   briefConversationId: null,
   aspectRatio: input.aspectRatio,
@@ -1075,6 +1333,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
   const now = deps.now ?? (() => new Date().toISOString());
   const createId = deps.createId ?? (() => crypto.randomUUID().replaceAll('-', '_'));
   const fs = deps.fs ?? nodeFs;
+  const onProjectCommitted = deps.onProjectCommitted;
   const logError = deps.logError ?? ((message: string, error: unknown): void => console.error(message, error));
   const watchProposalTree =
     deps.watchProposalTree ??
@@ -1097,6 +1356,36 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     | { result: ProjectListingSweep; remainingConsumer: 'projects' | 'quarantinedProjectIds' }
     | undefined;
 
+  const safeLogError = (message: string, error: unknown): void => {
+    try {
+      logError(message, error);
+    } catch {
+      // Logging is diagnostic and cannot veto an already-authoritative project commit.
+    }
+  };
+
+  const observeProjectCommit = (facts: StudioProjectCommitFacts): void => {
+    if (onProjectCommitted === undefined) return;
+    let observerResult: unknown;
+    try {
+      observerResult = (onProjectCommitted as (observed: StudioProjectCommitFacts) => unknown)(facts);
+    } catch (error) {
+      safeLogError('[CreativeStudio] Project commit observer failed', error);
+      return;
+    }
+    if ((typeof observerResult !== 'object' || observerResult === null) && typeof observerResult !== 'function') {
+      return;
+    }
+    try {
+      if (typeof Reflect.get(observerResult, 'then') !== 'function') return;
+      void Promise.resolve(observerResult).catch((error: unknown): void => {
+        safeLogError('[CreativeStudio] Project commit observer rejected', error);
+      });
+    } catch (error) {
+      safeLogError('[CreativeStudio] Project commit observer rejected', error);
+    }
+  };
+
   const requireSafeId = (projectId: string): void => {
     if (!isSafeId(projectId)) throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio project id');
   };
@@ -1109,24 +1398,18 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
 
   const canonicalRoot = async (): Promise<string> => {
     try {
-      await fs.mkdir(rootDir, { recursive: true });
-      const stats = await fs.lstat(rootDir);
-      if (!stats.isDirectory() || stats.isSymbolicLink()) {
-        throw new CreativeStudioStoreError('storage_error', 'Creative Studio root must be a directory');
-      }
-      return await fs.realpath(rootDir);
+      return await canonicalizeRecordRoot({ fs, rootDir });
     } catch (error) {
-      if (error instanceof CreativeStudioStoreError) throw error;
       throw storageError(error, 'Creative Studio root is unavailable');
     }
   };
 
   const resolveRootChild = (root: string, child: string): string => {
-    const resolved = path.resolve(root, child);
-    if (!isInsideRoot(root, resolved)) {
+    try {
+      return resolveConfinedRecordPath(root, root, child);
+    } catch {
       throw new CreativeStudioStoreError('storage_error', 'Creative Studio storage target escaped its root');
     }
-    return resolved;
   };
 
   const assertRegularFileOrMissing = async (file: string): Promise<void> => {
@@ -1208,36 +1491,16 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     name: string,
     createIfMissing: boolean
   ): Promise<string | null> => {
-    const directory = resolveRootChild(parent, name);
-    if (!isInsideRoot(root, directory)) {
-      throw new CreativeStudioStoreError('storage_error', 'Creative Studio proposal directory escaped its root');
-    }
     try {
-      const stats = await fs.lstat(directory);
-      if (!stats.isDirectory() || stats.isSymbolicLink()) {
-        throw new CreativeStudioStoreError('storage_error', 'Creative Studio proposal directory is unsafe');
-      }
+      return await resolveSafeRecordDirectory({
+        fs,
+        canonicalRoot: root,
+        parent,
+        name,
+        createIfMissing,
+      });
     } catch (error) {
-      if (error instanceof CreativeStudioStoreError) throw error;
-      if (!isRecord(error) || error.code !== 'ENOENT') {
-        throw storageError(error, 'Creative Studio proposal directory is unavailable');
-      }
-      if (!createIfMissing) return null;
-      try {
-        await fs.mkdir(directory);
-      } catch (mkdirError) {
-        throw storageError(mkdirError, 'Creative Studio proposal directory could not be created');
-      }
-    }
-    try {
-      const canonicalDirectory = await fs.realpath(directory);
-      if (canonicalDirectory !== directory || !isInsideRoot(root, canonicalDirectory)) {
-        throw new CreativeStudioStoreError('storage_error', 'Creative Studio proposal directory is unsafe');
-      }
-      return canonicalDirectory;
-    } catch (error) {
-      if (error instanceof CreativeStudioStoreError) throw error;
-      throw storageError(error, 'Creative Studio proposal directory is unavailable');
+      throw storageError(error, 'Creative Studio queue directory is unavailable');
     }
   };
 
@@ -1258,6 +1521,24 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       throw new CreativeStudioStoreError('storage_error', 'Creative Studio proposal slots are unavailable');
     }
     return { root: proposalRoot, pending, decisions, slots };
+  };
+
+  const referenceRequestDirectories = async (
+    root: string,
+    projectId: string,
+    createIfMissing: boolean
+  ): Promise<{ root: string; pending: string; slots: string } | null> => {
+    const project = await projectDirectory(root, projectId, false);
+    if (project === null) throw new CreativeStudioStoreError('not_found', 'Studio project not found');
+    const requestRoot = await safeNestedDirectory(root, project, 'reference-requests', createIfMissing);
+    if (requestRoot === null) return null;
+    const pending = await safeNestedDirectory(root, requestRoot, 'pending', createIfMissing);
+    if (pending === null) return null;
+    const slots = await safeNestedDirectory(root, requestRoot, 'slots', true);
+    if (slots === null) {
+      throw new CreativeStudioStoreError('storage_error', 'Creative Studio reference request slots are unavailable');
+    }
+    return { root: requestRoot, pending, slots };
   };
 
   const readConnections = async (root: string): Promise<StudioConnectionBinding[]> => {
@@ -1330,44 +1611,17 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
   };
 
   const writeJsonExclusiveAtomic = async (root: string, file: string, serialized: string): Promise<void> => {
-    const parent = path.dirname(file);
-    if (!isInsideRoot(root, parent)) {
-      throw new CreativeStudioStoreError('storage_error', 'Creative Studio proposal target escaped its root');
-    }
-    const parentStats = await fs.lstat(parent);
-    if (!parentStats.isDirectory() || parentStats.isSymbolicLink() || (await fs.realpath(parent)) !== parent) {
-      throw new CreativeStudioStoreError('storage_error', 'Creative Studio proposal parent is unsafe');
-    }
-    const temporaryFile = `${file}.${process.pid}.${++temporaryFileCounter}.tmp`;
-    let temporaryHandle: Awaited<ReturnType<typeof fs.open>> | undefined;
     try {
-      temporaryHandle = await fs.open(temporaryFile, 'wx');
-      await temporaryHandle.writeFile(serialized, { encoding: 'utf8' });
-      await temporaryHandle.sync();
-      await temporaryHandle.close();
-      temporaryHandle = undefined;
-      await fs.link(temporaryFile, file);
-      await fs.rm(temporaryFile);
-      const directoryHandle = await fs.open(parent, 'r');
-      try {
-        await directoryHandle.sync();
-      } finally {
-        await directoryHandle.close();
-      }
+      await publishImmutableRecord({ fs, canonicalRoot: root, file, bytes: serialized });
     } catch (error) {
-      await temporaryHandle?.close().catch((): undefined => undefined);
-      await fs.rm(temporaryFile, { force: true }).catch((): undefined => undefined);
-      if (isRecord(error) && error.code === 'EEXIST') {
+      if (error instanceof RecordIoError && error.code === 'already_exists') {
         throw new CreativeStudioStoreError('invalid_payload', 'Studio proposal already exists');
       }
-      throw new CreativeStudioStoreError(
-        'storage_error',
-        error instanceof Error ? error.message : 'Studio proposal write failed'
-      );
+      throw storageError(error, 'Studio proposal write failed');
     }
   };
 
-  const proposalFileEntries = async (directory: string): Promise<import('node:fs').Dirent[]> => {
+  const pendingRecordFileEntries = async (directory: string): Promise<import('node:fs').Dirent[]> => {
     try {
       return await fs.readdir(directory, { withFileTypes: true });
     } catch (error) {
@@ -1375,26 +1629,39 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     }
   };
 
-  const readBoundedProposalJson = async (file: string): Promise<unknown> => {
-    const stats = await fs.lstat(file);
-    if (stats.isSymbolicLink() || !stats.isFile() || stats.size > STUDIO_PROPOSAL_MAX_RECORD_BYTES) {
-      throw new CreativeStudioStoreError('storage_error', 'Creative Studio proposal record is unsafe');
+  const readBoundedPendingRecordJson = async (
+    file: string,
+    region: 'proposal' | 'reference request' = 'proposal'
+  ): Promise<unknown> => {
+    try {
+      const bytes = await readBoundedRegularFile({
+        fs,
+        canonicalRoot: await canonicalRoot(),
+        file,
+        maxBytes: STUDIO_PROPOSAL_MAX_RECORD_BYTES,
+      });
+      if (bytes === null) {
+        throw new CreativeStudioStoreError('storage_error', `Creative Studio ${region} record is unavailable`);
+      }
+      return JSON.parse(bytes) as unknown;
+    } catch (error) {
+      if (error instanceof CreativeStudioStoreError) throw error;
+      throw storageError(error, `Creative Studio ${region} record is unsafe`);
     }
-    return JSON.parse(await fs.readFile(file, 'utf8')) as unknown;
   };
 
   const readProposalRecords = async (
     projectId: string,
     directories: { pending: string }
   ): Promise<StudioProposal[]> => {
-    const entries = await proposalFileEntries(directories.pending);
+    const entries = await pendingRecordFileEntries(directories.pending);
     const proposals: StudioProposal[] = [];
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
       const proposalId = entry.name.slice(0, -'.json'.length);
       if (!isSafeProposalId(proposalId)) continue;
       try {
-        const value = await readBoundedProposalJson(path.join(directories.pending, entry.name));
+        const value = await readBoundedPendingRecordJson(path.join(directories.pending, entry.name));
         if (validateProposalRecord(projectId, proposalId, value)) proposals.push(value);
         else logError('[CreativeStudio] Ignoring malformed proposal record', new Error('InvalidProposalRecord'));
       } catch (error) {
@@ -1404,17 +1671,48 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     return proposals;
   };
 
+  const readReferenceRequestRecords = async (
+    project: StudioProject,
+    directories: { pending: string }
+  ): Promise<StudioReferenceRequest[]> => {
+    const entries = await pendingRecordFileEntries(directories.pending);
+    const requests: StudioReferenceRequest[] = [];
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+      const requestId = entry.name.slice(0, -'.json'.length);
+      if (!isSafeProposalId(requestId)) continue;
+      try {
+        // The bounded queue contains at most 50 records and logs each malformed entry independently.
+        // eslint-disable-next-line no-await-in-loop
+        const value = await readBoundedPendingRecordJson(
+          path.join(directories.pending, entry.name),
+          'reference request'
+        );
+        if (validateReferenceRequestRecord(project, requestId, value)) requests.push(value);
+        else {
+          logError(
+            '[CreativeStudio] Ignoring malformed reference request record',
+            new Error('InvalidReferenceRequestRecord')
+          );
+        }
+      } catch (error) {
+        logError('[CreativeStudio] Ignoring unreadable reference request record', error);
+      }
+    }
+    return requests;
+  };
+
   const readProposalDecisions = async (directories: {
     decisions: string;
   }): Promise<Map<string, StudioProposalDecision>> => {
-    const entries = await proposalFileEntries(directories.decisions);
+    const entries = await pendingRecordFileEntries(directories.decisions);
     const decisions = new Map<string, StudioProposalDecision>();
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
       const proposalId = entry.name.slice(0, -'.json'.length);
       if (!isSafeProposalId(proposalId)) continue;
       try {
-        const value = await readBoundedProposalJson(path.join(directories.decisions, entry.name));
+        const value = await readBoundedPendingRecordJson(path.join(directories.decisions, entry.name));
         if (validateProposalDecision(proposalId, value)) decisions.set(proposalId, value);
         else logError('[CreativeStudio] Ignoring malformed proposal decision', new Error('InvalidProposalDecision'));
       } catch (error) {
@@ -1468,53 +1766,100 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     await fs.rm(file, { force: true });
   };
 
-  const cleanupProposalSlots = async (directories: { slots: string }, proposals: StudioProposal[]): Promise<void> => {
-    const liveProposalIds = new Set(
-      proposals.filter((proposal) => proposal.status === 'pending').map((proposal) => proposal.id)
-    );
-    const entries = await proposalFileEntries(directories.slots);
-    const retainedProposalIds = new Set<string>();
+  const cleanupPendingRecordSlots = async <Slot extends { reservedAt: string }>(
+    directories: { slots: string },
+    liveRecordIds: Set<string>,
+    validateSlot: (value: unknown) => value is Slot,
+    recordIdOf: (slot: Slot) => string,
+    region: 'Proposal' | 'Reference request'
+  ): Promise<void> => {
+    const entries = await pendingRecordFileEntries(directories.slots);
+    const retainedRecordIds = new Set<string>();
     const cutoff = Date.parse(now()) - STUDIO_PROPOSAL_STALE_SLOT_MS;
     for (const entry of entries) {
       if (!entry.isFile() || !/^\d+\.slot$/.test(entry.name)) continue;
       const file = path.join(directories.slots, entry.name);
       try {
         // eslint-disable-next-line no-await-in-loop
-        const value = await readBoundedProposalJson(file);
-        const retain =
-          validateProposalSlot(value) &&
-          liveProposalIds.has(value.proposalId) &&
-          !retainedProposalIds.has(value.proposalId);
+        const value = await readBoundedPendingRecordJson(
+          file,
+          region === 'Proposal' ? 'proposal' : 'reference request'
+        );
+        const slot = validateSlot(value) ? value : undefined;
+        const recordId = slot === undefined ? undefined : recordIdOf(slot);
+        const retain = recordId !== undefined && liveRecordIds.has(recordId) && !retainedRecordIds.has(recordId);
         if (retain) {
-          retainedProposalIds.add(value.proposalId);
+          retainedRecordIds.add(recordId);
           continue;
         }
         const activeReservation =
-          validateProposalSlot(value) &&
-          !liveProposalIds.has(value.proposalId) &&
-          Date.parse(value.reservedAt) > cutoff;
+          recordId !== undefined &&
+          !liveRecordIds.has(recordId) &&
+          slot !== undefined &&
+          Date.parse(slot.reservedAt) > cutoff;
         if (activeReservation) continue;
         // eslint-disable-next-line no-await-in-loop
         await releaseProposalSlotFile(file);
       } catch (error) {
-        logError('[CreativeStudio] Proposal slot cleanup failed', error);
+        logError(`[CreativeStudio] ${region} slot cleanup failed`, error);
       }
     }
   };
 
+  const cleanupProposalSlots = async (directories: { slots: string }, proposals: StudioProposal[]): Promise<void> =>
+    cleanupPendingRecordSlots(
+      directories,
+      new Set(proposals.filter((proposal) => proposal.status === 'pending').map((proposal) => proposal.id)),
+      validateProposalSlot,
+      (slot) => slot.proposalId,
+      'Proposal'
+    );
+
+  const cleanupReferenceRequestSlots = async (
+    directories: { slots: string },
+    requests: StudioReferenceRequest[]
+  ): Promise<void> =>
+    cleanupPendingRecordSlots(
+      directories,
+      new Set(requests.map((request) => request.id)),
+      validateReferenceRequestSlot,
+      (slot) => slot.requestId,
+      'Reference request'
+    );
+
   const releaseProposalSlot = async (directories: { slots: string }, proposalId: string): Promise<void> => {
-    const entries = await proposalFileEntries(directories.slots);
+    const entries = await pendingRecordFileEntries(directories.slots);
     for (const entry of entries) {
       if (!entry.isFile() || !/^\d+\.slot$/.test(entry.name)) continue;
       const file = path.join(directories.slots, entry.name);
       try {
         // eslint-disable-next-line no-await-in-loop
-        const value = await readBoundedProposalJson(file);
+        const value = await readBoundedPendingRecordJson(file);
         if (!validateProposalSlot(value) || value.proposalId !== proposalId) continue;
         // eslint-disable-next-line no-await-in-loop
         await releaseProposalSlotFile(file);
       } catch (error) {
         logError('[CreativeStudio] Proposal slot release failed', error);
+      }
+    }
+  };
+
+  const releaseReferenceRequestSlots = async (
+    directories: { slots: string },
+    requestIds: ReadonlySet<string>
+  ): Promise<void> => {
+    const entries = await pendingRecordFileEntries(directories.slots);
+    for (const entry of entries) {
+      if (!entry.isFile() || !/^\d+\.slot$/.test(entry.name)) continue;
+      const file = path.join(directories.slots, entry.name);
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const value = await readBoundedPendingRecordJson(file);
+        if (!validateReferenceRequestSlot(value) || !requestIds.has(value.requestId)) continue;
+        // eslint-disable-next-line no-await-in-loop
+        await releaseProposalSlotFile(file);
+      } catch (error) {
+        logError('[CreativeStudio] Reference request slot release failed', error);
       }
     }
   };
@@ -1573,6 +1918,30 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     if (lastReapedAt !== undefined && currentTime - lastReapedAt < STUDIO_PROPOSAL_STALE_SLOT_MS) return;
     await reapPendingProposals(root, directories);
     proposalReapedAt.set(projectId, currentTime);
+  };
+
+  const reapPendingReferenceRequests = async (
+    project: StudioProject,
+    directories: { pending: string; slots: string }
+  ): Promise<void> => {
+    const requests = await readReferenceRequestRecords(project, directories);
+    const cutoff = Date.parse(now()) - STUDIO_PROPOSAL_PENDING_TTL_MS;
+    const retained: StudioReferenceRequest[] = [];
+    for (const request of requests) {
+      if (Date.parse(request.createdAt) > cutoff) {
+        retained.push(request);
+        continue;
+      }
+      try {
+        // A bounded project ledger has at most 50 live pending records.
+        // eslint-disable-next-line no-await-in-loop
+        await fs.rm(path.join(directories.pending, `${request.id}.json`));
+      } catch (error) {
+        retained.push(request);
+        logError('[CreativeStudio] Reference request expiry failed', error);
+      }
+    }
+    await cleanupReferenceRequestSlots(directories, retained);
   };
 
   const listProjectProposals = async (
@@ -1666,6 +2035,17 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     return next;
   };
 
+  const repairSummaryAfterCommit = async (): Promise<void> => {
+    try {
+      await repairSummaryIndex();
+    } catch (error) {
+      safeLogError('[CreativeStudio] Project summary repair failed after commit', error);
+      void repairSummaryIndex().catch((retryError: unknown): void => {
+        safeLogError('[CreativeStudio] Project summary repair retry failed', retryError);
+      });
+    }
+  };
+
   const enqueue = <T>(projectId: string, work: () => Promise<T>): Promise<T> => {
     const previous = queues.get(projectId) ?? Promise.resolve();
     const next = previous.catch((): undefined => undefined).then(() => work());
@@ -1682,7 +2062,8 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     root: string,
     projectId: string,
     update: (project: StudioProject) => StudioProject,
-    expectedRevision?: number
+    expectedRevision: number | undefined,
+    commitTag: string | null
   ): Promise<StudioProject> => {
     await summariesFile(root);
     const current = await readProject(root, projectId);
@@ -1693,6 +2074,12 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     const updated = update(structuredClone(current));
     if (!isRecord(updated) || updated.id !== current.id || updated.createdAt !== current.createdAt) {
       throw new CreativeStudioStoreError('invalid_payload', 'Studio project identity cannot change');
+    }
+    if (
+      Array.isArray(updated.sceneOrder) &&
+      !isStudioSceneCountTransitionAllowed(current.sceneOrder.length, updated.sceneOrder.length)
+    ) {
+      throw new CreativeStudioStoreError('invalid_payload', 'Studio scene limit exceeded');
     }
     const next: StudioProject = {
       ...updated,
@@ -1708,7 +2095,16 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       throw new CreativeStudioStoreError('storage_error', 'Creative Studio project storage is unavailable');
     }
     await writeJsonAtomic(root, file, next);
-    await repairSummaryIndex();
+    observeProjectCommit(
+      Object.freeze({
+        projectId,
+        previousRevision: current.revision,
+        committedRevision: next.revision,
+        committedAt: next.updatedAt,
+        commitTag,
+      })
+    );
+    await repairSummaryAfterCommit();
     return next;
   };
 
@@ -1719,6 +2115,18 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       if (project === null) throw new CreativeStudioStoreError('not_found', 'Studio project not found');
       const directories = await proposalDirectories(root, projectId, false);
       return directories === null ? [] : listProjectProposals(root, projectId, directories);
+    });
+
+  const listReferenceRequestsThroughQueue = (projectId: string): Promise<StudioReferenceRequest[]> =>
+    enqueue(projectId, async (): Promise<StudioReferenceRequest[]> => {
+      const root = await canonicalRoot();
+      const project = await readProject(root, projectId);
+      if (project === null) throw new CreativeStudioStoreError('not_found', 'Studio project not found');
+      const directories = await referenceRequestDirectories(root, projectId, false);
+      if (directories === null) return [];
+      return (await readReferenceRequestRecords(project, directories)).toSorted(
+        (left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)
+      );
     });
 
   return {
@@ -1778,6 +2186,29 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       return projectDirectory(await canonicalRoot(), projectId, false);
     },
 
+    async resolveProposalPaths(
+      projectId: string
+    ): Promise<{ projectDir: string; pendingDir: string; referencePendingDir: string }> {
+      if (!isSafeId(projectId)) {
+        throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio project id');
+      }
+      return enqueue(projectId, async () => {
+        const root = await canonicalRoot();
+        const project = await projectDirectory(root, projectId, false);
+        if (project === null) throw new CreativeStudioStoreError('not_found', 'Studio project not found');
+        const directories = await proposalDirectories(root, projectId, true);
+        const referenceDirectories = await referenceRequestDirectories(root, projectId, true);
+        if (directories === null || referenceDirectories === null) {
+          throw new CreativeStudioStoreError('storage_error', 'Creative Studio proposal storage is unavailable');
+        }
+        return {
+          projectDir: project,
+          pendingDir: directories.pending,
+          referencePendingDir: referenceDirectories.pending,
+        };
+      });
+    },
+
     async recordProposal(input: StudioRecordProposalInput): Promise<StudioProposal> {
       if (!isSafeId(input.projectId) || !isSafeProposalId(input.proposalId)) {
         throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio proposal identity');
@@ -1829,6 +2260,79 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       return listProposalsThroughQueue(projectId);
     },
 
+    async listPendingReferenceRequests(projectId: string): Promise<StudioReferenceRequest[]> {
+      if (!isSafeId(projectId)) {
+        throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio project id');
+      }
+      return listReferenceRequestsThroughQueue(projectId);
+    },
+
+    async dismissReferenceRequests(
+      projectId: string,
+      requestIds: string[],
+      authority?: StudioReferenceRequestDismissAuthority
+    ): Promise<void> {
+      if (
+        !isSafeId(projectId) ||
+        requestIds.length === 0 ||
+        requestIds.length > STUDIO_PROPOSAL_MAX_PENDING_PER_PROJECT ||
+        new Set(requestIds).size !== requestIds.length ||
+        requestIds.some((requestId) => !isSafeProposalId(requestId)) ||
+        (authority !== undefined &&
+          (!isIntegerInRange(authority.expectedRevision, 1, Number.MAX_SAFE_INTEGER) ||
+            !Array.isArray(authority.expectedRequests) ||
+            authority.expectedRequests.length !== requestIds.length ||
+            authority.expectedRequests.some(
+              (request, index) =>
+                request.id !== requestIds[index] || !isSafeProposalId(request.id) || !isSafeId(request.sceneId)
+            )))
+      ) {
+        throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio reference request identities');
+      }
+      await enqueue(projectId, async (): Promise<void> => {
+        const root = await canonicalRoot();
+        const project = await readProject(root, projectId);
+        if (project === null) throw new CreativeStudioStoreError('not_found', 'Studio project not found');
+        if (authority !== undefined && project.revision !== authority.expectedRevision) {
+          throw new CreativeStudioStoreError('stale_project', 'Studio project has changed');
+        }
+        const directories = await referenceRequestDirectories(root, projectId, false);
+        if (directories === null) {
+          if (authority !== undefined) {
+            throw new CreativeStudioStoreError('invalid_payload', 'Studio reference request authority changed');
+          }
+          return;
+        }
+        const requests = await readReferenceRequestRecords(project, directories);
+        if (authority !== undefined) {
+          const currentSceneById = new Map(requests.map((request) => [request.id, request.sceneId]));
+          if (authority.expectedRequests.some((expected) => currentSceneById.get(expected.id) !== expected.sceneId)) {
+            throw new CreativeStudioStoreError('invalid_payload', 'Studio reference request authority changed');
+          }
+        }
+        const requestedIds = new Set(requestIds);
+        const dismissibleIds = new Set(
+          requests.filter((request) => requestedIds.has(request.id)).map((request) => request.id)
+        );
+        for (const requestId of dismissibleIds) {
+          try {
+            // The bounded queue contains at most 50 records.
+            // eslint-disable-next-line no-await-in-loop
+            await fs.rm(path.join(directories.pending, `${requestId}.json`));
+          } catch (error) {
+            if (!isRecord(error) || error.code !== 'ENOENT') {
+              throw storageError(error, 'Creative Studio reference request could not be dismissed');
+            }
+          }
+        }
+        await releaseReferenceRequestSlots(directories, dismissibleIds);
+        await cleanupReferenceRequestSlots(
+          directories,
+          requests.filter((request) => !dismissibleIds.has(request.id))
+        );
+      });
+    },
+
     async rejectProposal(projectId: string, proposalId: string): Promise<StudioProposal> {
       if (!isSafeId(projectId) || !isSafeProposalId(proposalId)) {
         throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio proposal identity');
@@ -1859,10 +2363,16 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       await Promise.all(
         projects.map((project) =>
           enqueue(project.id, async () => {
-            const directories = await proposalDirectories(root, project.id, false);
+            const [directories, referenceDirectories] = await Promise.all([
+              proposalDirectories(root, project.id, false),
+              referenceRequestDirectories(root, project.id, false),
+            ]);
             if (directories !== null) {
               await reapPendingProposals(root, directories);
               proposalReapedAt.set(project.id, Date.parse(now()));
+            }
+            if (referenceDirectories !== null) {
+              await reapPendingReferenceRequests(project, referenceDirectories);
             }
           })
         )
@@ -1872,30 +2382,32 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     async watchProposals(listener: (projectId: string, proposalId: string) => void): Promise<() => Promise<void>> {
       const root = await canonicalRoot();
       let closed = false;
-      const observedStatuses = new Map<string, StudioProposal['status']>();
+      const observedStatuses = new Map<string, StudioProposal['status'] | StudioReferenceRequest['status']>();
       const validateAndNotify = async (relativeFile: string): Promise<void> => {
         const segments = path.normalize(relativeFile).split(path.sep);
+        const isProposalChange =
+          segments[1] === 'proposals' && (segments[2] === 'pending' || segments[2] === 'decisions');
+        const isReferenceRequestChange = segments[1] === 'reference-requests' && segments[2] === 'pending';
         if (
           segments.length !== 4 ||
           !isSafeId(segments[0]) ||
-          segments[1] !== 'proposals' ||
-          (segments[2] !== 'pending' && segments[2] !== 'decisions') ||
+          (!isProposalChange && !isReferenceRequestChange) ||
           !segments[3].endsWith('.json')
         ) {
           return;
         }
         const projectId = segments[0];
-        const proposalId = segments[3].slice(0, -'.json'.length);
-        if (!isSafeProposalId(proposalId)) return;
+        const recordId = segments[3].slice(0, -'.json'.length);
+        if (!isSafeProposalId(recordId)) return;
         try {
-          const proposal = (await listProposalsThroughQueue(projectId)).find(
-            (candidate) => candidate.id === proposalId
-          );
-          if (closed || proposal === undefined) return;
-          const key = `${projectId}:${proposalId}`;
-          if (observedStatuses.get(key) === proposal.status) return;
-          observedStatuses.set(key, proposal.status);
-          listener(projectId, proposalId);
+          const record = isProposalChange
+            ? (await listProposalsThroughQueue(projectId)).find((candidate) => candidate.id === recordId)
+            : (await listReferenceRequestsThroughQueue(projectId)).find((candidate) => candidate.id === recordId);
+          if (closed || record === undefined) return;
+          const key = `${projectId}:${recordId}`;
+          if (observedStatuses.get(key) === record.status) return;
+          observedStatuses.set(key, record.status);
+          listener(projectId, recordId);
         } catch (error) {
           if (!closed) logError('[CreativeStudio] Proposal watcher ignored an invalid record', error);
         }
@@ -1947,7 +2459,8 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
           root,
           projectId,
           (candidate) => update(candidate, structuredClone(proposal.payload)),
-          proposal.baseRevision
+          proposal.baseRevision,
+          null
         );
         const decision = await appendProposalDecision(root, directories.decisions, proposalId, 'accepted');
         await releaseProposalSlot(directories, proposalId);
@@ -1958,7 +2471,8 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     async updateProject(
       projectId: string,
       update: (project: StudioProject) => StudioProject,
-      expectedRevision?: number
+      expectedRevision?: number,
+      commitTag?: string
     ): Promise<StudioProject> {
       if (!isSafeId(projectId)) throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio project id');
       if (expectedRevision !== undefined && !isIntegerInRange(expectedRevision, 1, Number.MAX_SAFE_INTEGER)) {
@@ -1967,7 +2481,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       sharedListingSweep = undefined;
       return enqueue(projectId, async () => {
         const root = await canonicalRoot();
-        return updateProjectInsideQueue(root, projectId, update, expectedRevision);
+        return updateProjectInsideQueue(root, projectId, update, expectedRevision, commitTag ?? null);
       });
     },
 

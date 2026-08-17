@@ -5,9 +5,11 @@
  */
 
 import type {
+  StudioMediaChoiceRef,
   StudioMediaKind,
   StudioRendererProject,
   StudioRouteCatalog,
+  StudioScene,
 } from '@/common/types/project/creativeStudioTypes';
 
 const STORAGE_BOUNDS = { minDurationSeconds: 1, maxDurationSeconds: 60 } as const;
@@ -18,13 +20,18 @@ export type StudioSceneDurationBounds = {
   source: 'selected_route' | 'fallback';
 };
 
+export const resolveShotEngine = (
+  project: Pick<StudioRendererProject, 'routing'>,
+  shot: Pick<StudioScene, 'mediaKind'>
+): StudioMediaChoiceRef | null => project.routing[shot.mediaKind];
+
 /** Resolves the editable duration range for the selected route and media kind. */
 export const resolveSceneDurationBounds = (
   project: StudioRendererProject,
   catalog: StudioRouteCatalog | null,
   mediaKind: StudioMediaKind
 ): StudioSceneDurationBounds => {
-  const selected = project.routing[mediaKind];
+  const selected = resolveShotEngine(project, { mediaKind });
   const route = catalog?.[mediaKind].selectedRoute ?? null;
   const matches =
     selected !== null &&

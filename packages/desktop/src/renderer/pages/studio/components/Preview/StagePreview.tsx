@@ -16,7 +16,7 @@ import { Picture, VideoOne, VolumeUp } from '@icon-park/react';
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { buildSingleSceneReviewRequest, type GenerationSingleReviewRequest } from '../Generation/GenerationControls';
+import { buildSingleSceneReviewRequest, type GenerationSingleReviewRequest } from '../Generation/generationRequests';
 import { canOpenSingleSceneReview, deriveStudioReadiness } from '../../studioReadiness';
 import studioType from '../../StudioTypography.module.css';
 import {

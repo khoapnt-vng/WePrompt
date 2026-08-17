@@ -22,6 +22,7 @@ const route = (
   providerId: `provider-${kind}`,
   providerName: `${kind} provider`,
   model: `${kind}-model`,
+  integrationLabelKey: kind === 'image' ? 'imageApi' : 'selfHostedVideoGateway',
   health: 'available',
   kind,
   constraints: {
@@ -30,6 +31,7 @@ const route = (
     minDurationSeconds,
     maxDurationSeconds,
     supportsFirstFrame: true,
+    maxConditioningImages: 0,
     silentOutput: true,
   },
 });
@@ -65,12 +67,14 @@ const catalog = (): StudioRouteCatalog => ({
     status: 'ready',
     selected: { choiceId: imageRoute.choiceId, providerId: imageRoute.providerId, model: imageRoute.model },
     selectedRoute: imageRoute,
+    selectionIssue: null,
     options: [imageRoute],
   },
   video: {
     status: 'ready',
     selected: { choiceId: videoRoute.choiceId, providerId: videoRoute.providerId, model: videoRoute.model },
     selectedRoute: videoRoute,
+    selectionIssue: null,
     options: [videoRoute],
   },
   catalogVersion: 'catalog-1',

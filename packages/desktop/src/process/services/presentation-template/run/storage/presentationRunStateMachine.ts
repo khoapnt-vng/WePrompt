@@ -1073,7 +1073,15 @@ export type PresentationSourceDraftTombstone = {
   boundConversationId: string | null;
 };
 
-const SOURCE_FORMATS: readonly PresentationSourceFormat[] = ['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'md', 'csv'];
+const SOURCE_FORMATS: ReadonlySet<PresentationSourceFormat> = new Set([
+  'pdf',
+  'docx',
+  'xlsx',
+  'pptx',
+  'txt',
+  'md',
+  'csv',
+]);
 const SOURCE_KINDS: readonly PresentationSourceKind[] = ['native-picker', 'external-drop', 'workspace-relative'];
 const SOURCE_STATES: readonly PresentationSourceGrantManifest['state'][] = [
   'active',
@@ -1194,7 +1202,7 @@ export function assertPresentationSourceGrantManifest(value: PresentationSourceG
     !isIdentifier(value.displayName) ||
     value.displayName.includes('/') ||
     value.displayName.includes('\\') ||
-    !SOURCE_FORMATS.includes(value.format) ||
+    !SOURCE_FORMATS.has(value.format) ||
     !SOURCE_KINDS.includes(value.sourceKind) ||
     value.snapshotRelativePath !== `source.${value.format}` ||
     !/^[0-9a-f]{64}$/.test(value.sha256) ||

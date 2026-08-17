@@ -442,7 +442,7 @@
   "toolsDescription": "Configure servidores MCP e ferramentas integradas, como geração de imagens. A geração de imagens só pode ser ativada após configurar um modelo compatível com imagens na página de Modelos.",
   "modelDescription": "Configure provedores e chaves de API para modelos de texto, imagem e vídeo.",
   "mediaModels": {
-    "title": "Modelos de mídia do Creative Studio",
+    "title": "Mecanismos do Creative Studio",
     "description": "Vincule provedores existentes a integrações de imagem e vídeo sem exibir credenciais.",
     "add": "Adicionar modelo de mídia",
     "empty": "Nenhum modelo de mídia configurado ainda.",
@@ -709,6 +709,7 @@
   "mcpJsonBareServerError": "Envolva a configuração do servidor MCP em um objeto \"mcpServers\" no nível superior ou adicione um \"name\" em um item do array.",
   "mcpJsonUrlRequiredError": "Servidores MCP HTTP e SSE exigem um \"url\" não vazio.",
   "mcpJsonStdioCommandRequiredError": "Servidores MCP stdio exigem um \"command\" não vazio.",
+  "mcpJsonReservedNameError": "Esse nome é reservado pelo WePrompt e não pode ser usado em um servidor MCP. Renomeie o servidor e tente novamente.",
   "mcpTestConnection": "Verificar Disponibilidade do MCP",
   "mcpTestConnectionSuccess": "Teste de conexão bem-sucedido",
   "mcpConnected": "Conectado",

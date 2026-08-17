@@ -6,37 +6,55 @@
 
 import type {
   StudioAsset,
+  StudioCommandResult,
+  StudioProposal,
+  StudioProposalAcceptance,
+  StudioProposalRequest,
   StudioRendererProject,
   StudioSelectVariationRequest,
 } from '@/common/types/project/creativeStudioTypes';
 import type { UseStoryboardEditorResult } from '../../hooks/useStoryboardEditor';
 import type { UseStudioJobsResult } from '../../hooks/useStudioJobs';
 import type { UseStudioModelsResult } from '../../hooks/useStudioModels';
-import type { StudioPhaseTransition, StudioWriteFocusIntent } from '../../studioPhaseRoute';
+import type { UseStudioRenderResult } from '../../hooks/useStudioRender';
+import type { StudioViewTransition, StudioWriteFocusIntent } from '../../studioPhaseRoute';
 import type { StudioReadinessSummary } from '../../studioReadiness';
-import type { GenerationBatchReviewRequest, GenerationSingleReviewRequest } from '../Generation/GenerationControls';
+import type { GenerationBatchReviewRequest, GenerationSingleReviewRequest } from '../Generation/generationRequests';
 
 export type StudioPhaseAdvisory = {
   messageKey: string;
-  anchor: 'shell' | 'pacing' | 'batch';
+  anchor: 'shell' | 'batch';
 };
 
 export type StudioPhaseControllers = {
   project: StudioRendererProject;
+  proposals: StudioProposal[];
   readiness: StudioReadinessSummary;
   editor: UseStoryboardEditorResult;
   models: UseStudioModelsResult;
   jobs: UseStudioJobsResult;
+  /** The cut render, held at project scope so it stays observable from any view. */
+  render: UseStudioRenderResult;
   selectedAsset: StudioAsset | null;
   posterAsset: StudioAsset | null;
   selectedReferenceAsset: StudioAsset | null;
   writeFocusIntent: StudioWriteFocusIntent | null;
   advisory: StudioPhaseAdvisory | null;
   mutationPending: boolean;
-  requestTransition: (transition: StudioPhaseTransition) => void;
+  /** A paid generation review freezes project revision until it is confirmed or closed. */
+  generationReviewOpen: boolean;
+  requestTransition: (transition: StudioViewTransition) => void;
+  /** Opens the project draft settings from the frame. */
+  openBrief: () => void;
+  /** Opens the document's rule list. The frame owns it, so every view can reach it. */
+  openRules: () => void;
+  acceptProposal: (request: StudioProposalRequest) => Promise<StudioCommandResult<StudioProposalAcceptance>>;
+  rejectProposal: (request: StudioProposalRequest) => Promise<StudioCommandResult<StudioProposal>>;
   openDraftReview: () => void;
   openSingleGenerationReview: (request: GenerationSingleReviewRequest) => void;
   openBatchGenerationReview: (request: GenerationBatchReviewRequest) => void;
+  /** Focuses the active phase's existing engine control without changing the selected route. */
+  focusEngineRole: (role: 'image' | 'video') => void;
   openExport: () => void;
   refreshProject?: () => Promise<StudioRendererProject | null>;
   openModelSettings: () => void;
@@ -45,11 +63,6 @@ export type StudioPhaseControllers = {
   clearWriteFocusIntent: () => void;
   openDuplicateChargeConfirmation: (jobId: string) => void;
 };
-
-export type BriefPhaseController = Pick<
-  StudioPhaseControllers,
-  'project' | 'readiness' | 'editor' | 'advisory' | 'mutationPending' | 'requestTransition'
->;
 
 export type WritePhaseController = Pick<
   StudioPhaseControllers,
@@ -61,8 +74,10 @@ export type WritePhaseController = Pick<
   | 'writeFocusIntent'
   | 'advisory'
   | 'mutationPending'
+  | 'generationReviewOpen'
   | 'requestTransition'
-  | 'openDraftReview'
+  | 'openModelSettings'
+  | 'openSingleGenerationReview'
   | 'importReference'
   | 'clearWriteFocusIntent'
 >;
@@ -78,9 +93,11 @@ export type ProducePhaseController = Pick<
   | 'posterAsset'
   | 'advisory'
   | 'mutationPending'
+  | 'generationReviewOpen'
   | 'requestTransition'
   | 'openSingleGenerationReview'
   | 'openBatchGenerationReview'
+  | 'focusEngineRole'
   | 'openModelSettings'
   | 'selectVariation'
   | 'openDuplicateChargeConfirmation'
@@ -91,6 +108,7 @@ export type ReviewPhaseController = Pick<
   | 'project'
   | 'readiness'
   | 'editor'
+  | 'render'
   | 'selectedAsset'
   | 'posterAsset'
   | 'advisory'

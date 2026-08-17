@@ -1,0 +1,118 @@
+.body {
+  composes: body from '../../StudioTypography.module.css';
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.description {
+  margin: 0;
+  color: var(--color-text-2);
+}
+
+.undo {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--color-border-2);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--color-bg-2);
+}
+
+.undoCopy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--color-text-2);
+}
+
+.list {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rule {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid var(--color-border-2);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--color-bg-2);
+}
+
+.ruleCopy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ruleText {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.ruleMeta {
+  composes: meta from '../../StudioTypography.module.css';
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--color-text-3);
+}
+
+.legend {
+  composes: meta from '../../StudioTypography.module.css';
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  color: var(--color-text-3);
+  list-style: none;
+}
+
+.legendRow {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.form {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--color-border-2);
+  padding-top: 16px;
+}
+
+.label {
+  composes: meta from '../../StudioTypography.module.css';
+}
+
+.help,
+.limit {
+  margin: 0;
+  color: var(--color-text-3);
+  font-size: 12px;
+}
+
+.error {
+  color: var(--color-danger-6);
+  font-size: 12px;
+}

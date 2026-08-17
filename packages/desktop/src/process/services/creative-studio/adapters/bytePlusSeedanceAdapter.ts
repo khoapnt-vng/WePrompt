@@ -17,11 +17,15 @@ import type {
   SanitizedProviderError,
   StudioConnectionCandidate,
   StudioConnectionValidation,
-  StudioGenerationRequest,
   StudioRouteIssue,
   StudioRouteValidation,
 } from './types';
-import { isValidProviderJobId, ProviderDeadlineError, runWithProviderDeadline } from './types';
+import {
+  hasImageConditioningFields,
+  isValidProviderJobId,
+  ProviderDeadlineError,
+  runWithProviderDeadline,
+} from './types';
 
 export const BYTEPLUS_SEEDANCE_BASE_URL = 'https://ark.ap-southeast.bytepluses.com/api/v3';
 const VALIDATION_TIMEOUT_MS = 10_000;
@@ -97,10 +101,14 @@ export const isSupportedBytePlusSeedanceProvider = (provider: Pick<IProvider, 'b
 export const getBytePlusSeedanceModelSpec = (model: string): SeedanceModelSpec | null =>
   BYTEPLUS_SEEDANCE_MODELS[model] ?? null;
 
-const requestValidation = (request: StudioGenerationRequest, provider: TProviderWithModel): StudioRouteValidation => {
+const requestValidation = (
+  request: ResolvedStudioGenerationRequest,
+  provider: TProviderWithModel
+): StudioRouteValidation => {
   const spec = getBytePlusSeedanceModelSpec(provider.use_model);
   if (
     request.mediaKind !== 'video' ||
+    hasImageConditioningFields(request) ||
     !isSupportedBytePlusSeedanceProvider(provider, provider.use_model) ||
     !spec ||
     !provider.api_key.trim()
@@ -289,6 +297,7 @@ export const createBytePlusSeedanceAdapter = (deps: BytePlusSeedanceAdapterDeps 
             minDurationSeconds: spec.minDuration,
             maxDurationSeconds: spec.maxDuration,
             supportsFirstFrame: true,
+            maxConditioningImages: 0,
             cancellationPolicy: 'queued_only',
           },
         };
@@ -307,7 +316,7 @@ export const createBytePlusSeedanceAdapter = (deps: BytePlusSeedanceAdapterDeps 
       }
     },
 
-    validateRequest(request: StudioGenerationRequest, provider: TProviderWithModel): StudioRouteValidation {
+    validateRequest(request: ResolvedStudioGenerationRequest, provider: TProviderWithModel): StudioRouteValidation {
       return requestValidation(request, provider);
     },
 

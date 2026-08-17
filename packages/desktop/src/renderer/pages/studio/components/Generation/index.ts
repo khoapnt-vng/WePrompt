@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export * from './GenerationControls';
+export * from './generationRequests';
 export * from './GenerationJobList';
 export * from './GenerationReviewModal';
 export * from './routeSupport';

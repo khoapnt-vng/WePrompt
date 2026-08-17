@@ -8,20 +8,31 @@ import { randomUUID } from 'node:crypto';
 import { promises as dns } from 'node:dns';
 import { createReadStream, promises as fs } from 'node:fs';
 import type { IProvider, TProviderWithModel } from '@/common/config/storage';
-import type {
-  StudioJob,
-  StudioCancellationPolicy,
-  StudioJobError,
-  StudioJobErrorCode,
-  StudioJobRequest,
-  StudioMediaKind,
-  StudioProject,
-  StudioProviderAdapterId,
-  StudioProviderRef,
-  StudioRetryDownloadRequest,
-  StudioRetryJobRequest,
-  StudioSubmitScenesRequest,
+import {
+  buildConditionedFirstFramePrompt,
+  stripFirstFramePromptPrefix,
+} from '@/common/types/project/creativeStudioReferencePrompt';
+import { evaluateStudioRules, resolveEffectiveStudioRules } from '@/common/types/project/creativeStudioRules';
+import {
+  STUDIO_MAX_GENERATION_SCENES_PER_REQUEST,
+  STUDIO_REFERENCE_PROMPT_MAX_LENGTH,
+  type StudioCancellationPolicy,
+  type StudioJob,
+  type StudioJobError,
+  type StudioJobErrorCode,
+  type StudioJobRequest,
+  type StudioMediaKind,
+  type StudioOutputRole,
+  type StudioProject,
+  type StudioProviderAdapterId,
+  type StudioProviderRef,
+  type StudioReferenceInputSnapshot,
+  type StudioRetryDownloadRequest,
+  type StudioRetryJobRequest,
+  type StudioSubmitScenesRequest,
 } from '@/common/types/project/creativeStudioTypes';
+import { jobOutputRole, requestedMediaKind } from '@/common/types/project/creativeStudioOutputRole';
+import { resolveActiveStudioBriefReferences } from '@/common/types/project/creativeStudioManagedAssetCollections';
 import {
   ProviderDeadlineError,
   runWithProviderDeadline,
@@ -90,6 +101,7 @@ export type StudioResolvedSubmitScenesRequest = Omit<StudioSubmitScenesRequest, 
 export type StudioJobManagerErrorCode =
   | 'invalid_request'
   | 'invalid_route'
+  | 'rule_breach'
   | 'provider_error'
   | 'busy'
   | 'unsupported'
@@ -111,6 +123,8 @@ type ExecutionContext = {
   projectId: string;
   sceneId: string;
   mediaKind: StudioMediaKind;
+  /** Always explicit in memory; only 'reference' is written to the durable record. */
+  outputRole: StudioOutputRole;
   jobId: string;
   adapter: GenerationProviderAdapter;
   provider: TProviderWithModel;
@@ -119,7 +133,20 @@ type ExecutionContext = {
 type PreparedSubmission = ExecutionContext & {
   request: ResolvedStudioGenerationRequest;
   cancellationPolicy: StudioCancellationPolicy;
+  referenceInputSnapshot?: StudioReferenceInputSnapshot;
 };
+
+/**
+ * What a submission asks the provider to produce. A reference plate is always an image,
+ * whatever the scene's own media kind, and carries its own prompt instead of the scene's.
+ */
+type RequestedOutput = {
+  readonly role: StudioOutputRole;
+  readonly referencePrompt?: string;
+  readonly referenceInputs?: readonly StudioProject['assets'][string][];
+};
+
+const TAKE_OUTPUT: RequestedOutput = { role: 'take' };
 
 class JobMutationSkipped extends Error {
   readonly job: StudioJob;
@@ -508,10 +535,15 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     project: StudioProject,
     sceneId: string,
     route: StudioResolvedSceneRouteSnapshot,
+    output: RequestedOutput,
     catalogVersion?: string
   ): Promise<PreparedSubmission> => {
     const scene = project.scenes[sceneId];
-    if (!scene || route.sceneId !== sceneId || route.kind !== scene.mediaKind) {
+    if (!scene || route.sceneId !== sceneId) {
+      throw new StudioJobManagerError('invalid_route');
+    }
+    const requestedKind = requestedMediaKind(scene.mediaKind, output.role);
+    if (route.kind !== requestedKind) {
       throw new StudioJobManagerError('invalid_route');
     }
     let catalog: Awaited<ReturnType<StudioProviderResolver['listGenerationRoutes']>>;
@@ -532,7 +564,9 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       !catalogRoute.constraints.resolutions.includes(project.resolution) ||
       scene.durationSeconds < catalogRoute.constraints.minDurationSeconds ||
       scene.durationSeconds > catalogRoute.constraints.maxDurationSeconds ||
-      (scene.referenceAssetId !== null && !catalogRoute.constraints.supportsFirstFrame)
+      // A reference plate never consumes the scene's own reference as a first frame,
+      // so the route's first-frame capability is irrelevant to it.
+      (output.role !== 'reference' && scene.referenceAssetId !== null && !catalogRoute.constraints.supportsFirstFrame)
     ) {
       throw new StudioJobManagerError('invalid_route');
     }
@@ -553,18 +587,50 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       throw new CreativeStudioStoreError('storage_error', 'Unable to allocate Studio idempotency identity');
     }
     const baseRequest = {
-      prompt: scene.visualPrompt.trim(),
-      mediaKind: scene.mediaKind,
+      prompt: (output.role === 'reference' ? (output.referencePrompt ?? '') : scene.visualPrompt).trim(),
+      mediaKind: requestedKind,
       aspectRatio: project.aspectRatio,
       resolution: project.resolution,
       durationSeconds: scene.durationSeconds,
       idempotencyKey,
     } as const;
     if (!baseRequest.prompt) invalidRequest();
-    const validation = adapter.validateRequest(baseRequest, resolvedProvider);
+    /**
+     * The money gate for pinned rules.
+     *
+     * Here and nowhere else: this is the only point where the resolved prompt exists for BOTH paid
+     * entry points (submitScenes and retryJob) and for both output roles — a reference plate's
+     * prompt lives only in the request, never on the durable record, so a check that read
+     * scene.visualPrompt from the store would not see it. The reference request sent to the provider
+     * includes an app-authored first-frame prefix; rules evaluate only the authored subject, while
+     * baseRequest.prompt remains unchanged. Likewise, imageGenCore.ts prepends `Generate image: `
+     * only after the gate, so app-authored text is never rule-checked. The gate is also strictly
+     * before persistPreparedJobs and trackRun, so a breach costs nothing.
+     *
+     * The renderer runs the same evaluator to say the consequence before Confirm is pressable. This
+     * one exists because the Director's queued reference requests are auto-submitted with no modal.
+     */
+    const authored =
+      output.role === 'reference'
+        ? stripFirstFramePromptPrefix(baseRequest.prompt, project.aspectRatio)
+        : baseRequest.prompt;
+    if (output.role === 'reference' && !authored) invalidRequest();
+    const breaches = evaluateStudioRules(resolveEffectiveStudioRules(project.rules), authored).breaches;
+    if (breaches.length > 0) throw new StudioJobManagerError('rule_breach');
+    const referenceInputs = output.referenceInputs ?? [];
+    const providerPrompt =
+      output.role === 'reference'
+        ? buildConditionedFirstFramePrompt(
+            authored,
+            project.aspectRatio,
+            referenceInputs.map((asset) => asset.briefReferenceRole!)
+          )
+        : baseRequest.prompt;
+    const promptedRequest = { ...baseRequest, prompt: providerPrompt };
+    const validation = adapter.validateRequest(promptedRequest, resolvedProvider);
     if (!validation.ok) throw new StudioJobManagerError('invalid_route');
     let firstFrame: ResolvedStudioGenerationRequest['firstFrame'];
-    if (scene.referenceAssetId !== null) {
+    if (output.role !== 'reference' && scene.referenceAssetId !== null) {
       const reference = project.assets[scene.referenceAssetId];
       if (
         !reference ||
@@ -579,18 +645,51 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
         throw new StudioJobManagerError('invalid_route');
       }
     }
+    let conditioningImages: ResolvedStudioGenerationRequest['conditioningImages'];
+    if (output.role === 'reference') {
+      try {
+        conditioningImages = await Promise.all(
+          referenceInputs.map((asset) => deps.mediaStore.resolveProviderInput(project.id, asset.id))
+        );
+      } catch {
+        invalidRequest();
+      }
+    }
+    const resolvedRequest: ResolvedStudioGenerationRequest = {
+      ...promptedRequest,
+      ...validation.normalized,
+      ...(firstFrame ? { firstFrame } : {}),
+      ...(output.role === 'reference'
+        ? {
+            conditioningImages: conditioningImages!,
+            conditioningImageLimit: catalogRoute.constraints.maxConditioningImages,
+          }
+        : {}),
+    };
+    const resolvedValidation = adapter.validateRequest(resolvedRequest, resolvedProvider);
+    if (!resolvedValidation.ok) throw new StudioJobManagerError('invalid_route');
     return {
       projectId: project.id,
       sceneId,
-      mediaKind: scene.mediaKind,
+      mediaKind: requestedKind,
+      outputRole: output.role,
       jobId: '',
       adapter,
       provider: resolvedProvider,
       cancellationPolicy: catalogRoute.cancellationPolicy,
+      ...(output.role === 'reference'
+        ? {
+            referenceInputSnapshot: {
+              sourceVisualPrompt: authored,
+              conditioningReferenceAssetIds: referenceInputs.map((asset) => asset.id),
+              aspectRatio: project.aspectRatio,
+              resolution: project.resolution,
+            },
+          }
+        : {}),
       request: {
-        ...baseRequest,
-        ...validation.normalized,
-        ...(firstFrame ? { firstFrame } : {}),
+        ...resolvedRequest,
+        ...resolvedValidation.normalized,
       },
     };
   };
@@ -599,10 +698,12 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     const scene = project.scenes[job.sceneId];
     if (!scene) return null;
     try {
+      const outputRole = jobOutputRole(job);
+      const mediaKind = requestedMediaKind(scene.mediaKind, outputRole);
       const route = {
         sceneId: scene.id,
         ...job.provider,
-        kind: scene.mediaKind,
+        kind: mediaKind,
       } satisfies StudioResolvedSceneRouteSnapshot;
       if (!(await deps.providerResolver.isGenerationRouteAvailable(route))) return null;
       const provider = (await deps.listProviders()).find((candidate) => candidate.id === job.provider.providerId);
@@ -611,7 +712,8 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       return {
         projectId: project.id,
         sceneId: scene.id,
-        mediaKind: scene.mediaKind,
+        mediaKind,
+        outputRole,
         jobId: job.id,
         adapter,
         provider: providerWithModel(provider, job.provider.model),
@@ -628,13 +730,15 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     const scene = project.scenes[job.sceneId];
     if (!scene) return null;
     try {
+      const outputRole = jobOutputRole(job);
       const provider = (await deps.listProviders()).find((candidate) => candidate.id === job.provider.providerId);
       const adapter = deps.adapters.get(job.provider.adapterId);
       if (!provider || !adapter || !providerCredentialsAreUsable(provider)) return null;
       return {
         projectId: project.id,
         sceneId: scene.id,
-        mediaKind: scene.mediaKind,
+        mediaKind: requestedMediaKind(scene.mediaKind, outputRole),
+        outputRole,
         jobId: job.id,
         adapter,
         provider: providerWithModel(provider, job.provider.model),
@@ -1118,6 +1222,11 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
         providerJobId: null,
         remoteStartedAt: null,
         cancellationPolicy: candidate.cancellationPolicy,
+        // Absent means 'take'; the default is never written so old and new take records stay identical.
+        ...(candidate.outputRole === 'reference' ? { outputRole: 'reference' as const } : {}),
+        ...(candidate.referenceInputSnapshot === undefined
+          ? {}
+          : { referenceInputSnapshot: structuredClone(candidate.referenceInputSnapshot) }),
         outputAssetIds: [],
         error: null,
         retryOfJobId: lineage?.retryOfJobId ?? null,
@@ -1172,17 +1281,56 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     if (disposed) throw new StudioJobManagerError('invalid_request');
     const project = await requireExpectedProject(input.projectId, input.expectedRevision);
     if (disposed) throw new StudioJobManagerError('invalid_request');
+    const outputRole = input.outputRole ?? 'take';
+    const activeBriefReferences = outputRole === 'reference' ? resolveActiveStudioBriefReferences(project.assets) : [];
+    if (
+      activeBriefReferences === null ||
+      activeBriefReferences.some(
+        (asset) =>
+          asset.projectId !== project.id ||
+          project.assets[asset.id] !== asset ||
+          asset.sceneId !== null ||
+          asset.mediaKind !== 'image' ||
+          asset.managedAsset.collection !== 'imports'
+      ) ||
+      new Set(activeBriefReferences.map((asset) => asset.id)).size !== activeBriefReferences.length
+    ) {
+      invalidRequest();
+    }
+    // A reference plate paints one scene's first frame, so each scene brings its own prompt. A
+    // batch-wide prompt could only ever describe one of them correctly.
+    const referencePromptByScene = new Map<string, string>();
+    if (input.referencePrompts !== undefined) {
+      if (!Array.isArray(input.referencePrompts)) invalidRequest();
+      for (const entry of input.referencePrompts) {
+        if (
+          typeof entry?.sceneId !== 'string' ||
+          typeof entry.prompt !== 'string' ||
+          referencePromptByScene.has(entry.sceneId)
+        ) {
+          invalidRequest();
+        }
+        const prompt = entry.prompt.trim();
+        if (prompt.length === 0 || prompt.length > STUDIO_REFERENCE_PROMPT_MAX_LENGTH) invalidRequest();
+        referencePromptByScene.set(entry.sceneId, prompt);
+      }
+    }
     if (
       !Array.isArray(input.sceneIds) ||
       input.sceneIds.length < 1 ||
-      input.sceneIds.length > 24 ||
+      input.sceneIds.length > STUDIO_MAX_GENERATION_SCENES_PER_REQUEST ||
       input.sceneIds.some((sceneId) => typeof sceneId !== 'string' || !SAFE_ID.test(sceneId)) ||
       new Set(input.sceneIds).size !== input.sceneIds.length ||
       !Array.isArray(input.routes) ||
       input.routes.length !== input.sceneIds.length ||
       typeof input.catalogVersion !== 'string' ||
       input.catalogVersion.length < 1 ||
-      input.catalogVersion.length > 256
+      input.catalogVersion.length > 256 ||
+      (input.outputRole !== undefined && input.outputRole !== 'take' && input.outputRole !== 'reference') ||
+      (outputRole === 'reference' &&
+        (referencePromptByScene.size !== input.sceneIds.length ||
+          input.sceneIds.some((sceneId) => !referencePromptByScene.has(sceneId)))) ||
+      (outputRole !== 'reference' && referencePromptByScene.size > 0)
     ) {
       invalidRequest();
     }
@@ -1205,7 +1353,13 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       if (!route) invalidRequest();
       const scene = project.scenes[sceneId];
       if (!scene) throw new StudioJobManagerError('invalid_route');
-      const selected = project.routing[scene.mediaKind];
+      const scenePrompt = referencePromptByScene.get(sceneId);
+      const requestedOutput: RequestedOutput = {
+        role: outputRole,
+        ...(scenePrompt === undefined ? {} : { referencePrompt: scenePrompt }),
+        ...(outputRole === 'reference' ? { referenceInputs: activeBriefReferences } : {}),
+      };
+      const selected = project.routing[requestedMediaKind(scene.mediaKind, requestedOutput.role)];
       if (
         selected === null ||
         selected.providerId !== route.providerId ||
@@ -1219,8 +1373,14 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
           const job = project.jobs[jobId];
           return job?.projectId === project.id && job.sceneId === sceneId ? [job] : [];
         }) ?? [];
+      // Duplicate-charge lineage is per (scene, output role): an unresolved take says nothing
+      // about whether a reference plate was already paid for, and the reverse holds too. The
+      // cross-role request is still refused as busy while the unresolved job remains non-terminal.
       const hasUnresolvedUnknownSubmission = sceneJobs.some(
-        (job) => job.status === 'needs_attention' && job.error?.code === 'submission_unknown'
+        (job) =>
+          job.status === 'needs_attention' &&
+          job.error?.code === 'submission_unknown' &&
+          jobOutputRole(job) === requestedOutput.role
       );
       if (hasUnresolvedUnknownSubmission) {
         throw new StudioJobManagerError('duplicate_charge_acknowledgement_required');
@@ -1228,7 +1388,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       if (scene?.reviewState === 'generating' || sceneJobs.some((job) => !TERMINAL_STATUSES.has(job.status))) {
         throw new StudioJobManagerError('busy');
       }
-      prepared.push(await resolveProvider(project, sceneId, route, input.catalogVersion));
+      prepared.push(await resolveProvider(project, sceneId, route, requestedOutput, input.catalogVersion));
     }
     if (disposed) throw new StudioJobManagerError('invalid_request');
     const persisted = await persistPreparedJobs(project, prepared, input.expectedRevision);
@@ -1366,6 +1526,9 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     if (!previous) throw new CreativeStudioStoreError('not_found', 'Studio job not found');
     const scene = project.scenes[previous.sceneId];
     if (!scene) throw new CreativeStudioStoreError('not_found', 'Studio scene not found');
+    // Retry rebuilds the request from the scene, which only ever reconstructs a take: the
+    // reference prompt is not on the durable record. Refuse rather than charge for the wrong output.
+    if (jobOutputRole(previous) !== 'take') throw new StudioJobManagerError('invalid_request');
     const sceneJobs = scene.jobIds.flatMap((jobId) => {
       const job = project.jobs[jobId];
       return job?.projectId === project.id && job.sceneId === scene.id ? [job] : [];
@@ -1426,7 +1589,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       ...previous.provider,
       kind: scene.mediaKind,
     } satisfies StudioResolvedSceneRouteSnapshot;
-    const prepared = await resolveProvider(project, scene.id, route);
+    const prepared = await resolveProvider(project, scene.id, route, TAKE_OUTPUT);
     if (disposed) throw new StudioJobManagerError('invalid_request');
     const persisted = await persistPreparedJobs(project, [prepared], input.expectedRevision, {
       retryOfJobId: previous.id,
