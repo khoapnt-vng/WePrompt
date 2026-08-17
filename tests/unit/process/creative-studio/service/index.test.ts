@@ -5908,6 +5908,8 @@ describe('Studio MCP server', () => {
       const { tools } = await harness.client.listTools();
       const applyEdits = tools.find((tool) => tool.name === 'studio_apply_edits');
       const inputSchema = applyEdits?.inputSchema;
+      const applyDescription = applyEdits?.description ?? '';
+      const canonicalExample = applyDescription.match(/(\{"expectedRevision":8,"operations":\[[^]*\]\})\./)?.[1];
       const operationItems = inputSchema?.properties?.operations as { items?: Record<string, unknown> } | undefined;
       const operationVariants = (operationItems?.items?.anyOf ?? operationItems?.items?.oneOf) as
         | Array<{ properties?: { kind?: { const?: string } } }>
@@ -5955,6 +5957,20 @@ describe('Studio MCP server', () => {
       });
       expect(advertisedValidator(checkpointBatch)).toMatchObject({ valid: true });
       expect(advertisedValidator(legacyWholeProject)).toMatchObject({ valid: false });
+      expect(canonicalExample).toBeDefined();
+      expect(JSON.parse(canonicalExample ?? '{}')).toEqual({
+        expectedRevision: 8,
+        operations: [
+          { kind: 'set_brief', brief: '...' },
+          { kind: 'edit_scene', sceneId: 'scene_1', changes: { title: '...' } },
+          { kind: 'reorder_scenes', sceneOrder: ['scene_2', 'scene_1'] },
+        ],
+      });
+      expect(applyDescription).toMatch(
+        /direct patch contract, not legacy whole-project base_revision\/scene_order\/scenes/i
+      );
+      expect(applyDescription).toMatch(/never starts paid generation/i);
+      expect(applyDescription).toMatch(/validation errors and unconfirmed results must not be retried/i);
       expect(
         advertisedValidator({
           expectedRevision: 8,
@@ -6005,6 +6021,7 @@ describe('Studio MCP server', () => {
       await expect(nodeFs.readdir(path.join(projectDir, 'commands'))).rejects.toMatchObject({ code: 'ENOENT' });
     } finally {
       await harness.close();
+      await rm(projectDir, { recursive: true, force: true });
     }
   });
 
