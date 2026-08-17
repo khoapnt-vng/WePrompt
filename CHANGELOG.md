@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.1.41-internal (2026-08-17)
+
+### Core
+
+#### Bug Fixes
+
+- **db:** repair verified Windows upgrade histories whose applied migrations were recorded with CRLF checksums, including databases partially normalized by 2.1.40
+- **db:** keep unknown, changed, or mixed migration histories fail-closed without partially rewriting checksums
+
+---
+
 ## 2.1.40-internal (2026-08-17)
 
 ### Core
