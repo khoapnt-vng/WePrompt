@@ -959,6 +959,7 @@ export function parseStudioDirectorCommandReceiptV2(input: {
     if (
       !hasExactKeysV2(value, V2_APPLIED_RECEIPT_KEYS) ||
       !isRevision(value.expectedRevision) ||
+      !isRevision(value.appliedRevision) ||
       value.appliedRevision !== value.expectedRevision + 1 ||
       !isUniqueSafeIdArrayV2(value.createdSectionIds, 0, STUDIO_MAX_MUTATION_OPERATIONS) ||
       !isUniqueSafeIdArrayV2(value.createdClipIds, 0, STUDIO_MAX_MUTATION_OPERATIONS)

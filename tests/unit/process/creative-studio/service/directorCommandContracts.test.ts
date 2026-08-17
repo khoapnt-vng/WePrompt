@@ -915,6 +915,52 @@ describe('Studio Director V2 receipt contracts', () => {
     ).toEqual(receipts.map((receipt) => ({ status: 'valid', record: receipt })));
   });
 
+  it('accepts the largest safe applied revision when its expected revision is one lower', () => {
+    const receipt = {
+      ...receipts[0],
+      expectedRevision: Number.MAX_SAFE_INTEGER - 1,
+      appliedRevision: Number.MAX_SAFE_INTEGER,
+    };
+
+    expect(
+      parseStudioDirectorCommandReceiptV2({ projectId: 'project_1', commandId: 'command_1', value: receipt })
+    ).toEqual({ status: 'valid', record: receipt });
+  });
+
+  it.each([
+    [
+      'a maximum-safe expected revision whose successor is unsafe',
+      Number.MAX_SAFE_INTEGER,
+      Number.MAX_SAFE_INTEGER + 1,
+    ],
+    ['an unsafe expected revision', Number.MAX_SAFE_INTEGER + 1, Number.MAX_SAFE_INTEGER + 1],
+    ['a fractional expected revision', 4.5, 5.5],
+    ['a fractional applied revision', 4, 5.5],
+    ['a non-finite expected revision', Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY],
+    ['a non-finite applied revision', 4, Number.NaN],
+  ])('rejects an applied receipt with %s', (_label, expectedRevision, appliedRevision) => {
+    expect(
+      parseStudioDirectorCommandReceiptV2({
+        projectId: 'project_1',
+        commandId: 'command_1',
+        value: { ...receipts[0], expectedRevision, appliedRevision },
+      })
+    ).toEqual({ status: 'invalid' });
+  });
+
+  it('keeps the maximum safe expected revision valid for a rejected receipt', () => {
+    const receipt = {
+      ...receipts[1],
+      expectedRevision: Number.MAX_SAFE_INTEGER,
+      observedRevision: Number.MAX_SAFE_INTEGER,
+      reasonCode: 'stale_revision' as const,
+    };
+
+    expect(
+      parseStudioDirectorCommandReceiptV2({ projectId: 'project_1', commandId: 'command_1', value: receipt })
+    ).toEqual({ status: 'valid', record: receipt });
+  });
+
   it.each([
     { ...receipts[0], appliedRevision: 9 },
     { ...receipts[0], createdSectionIds: ['section_new', 'section_new'] },
