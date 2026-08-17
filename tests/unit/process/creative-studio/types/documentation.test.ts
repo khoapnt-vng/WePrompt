@@ -7,7 +7,7 @@
  */
 
 import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const DOCUMENTS = [
@@ -15,6 +15,22 @@ const DOCUMENTS = [
   'docs/design/creative-studio-2-design-handoff.md',
   'docs/design/creative-studio-2-programme-plan.md',
   'docs/design/creative-studio-2-handoff-state.md',
+] as const;
+
+const CLOSEOUT_AUTHORITY_DOCUMENTS = [
+  'docs/design/creative-studio-2-director-autonomy-roadmap.md',
+  'docs/design/creative-studio-2-programme-plan.md',
+  'docs/design/creative-studio-2-handoff-state.md',
+] as const;
+const GATE_RECORDS = [
+  'docs/design/creative-studio-2-gates/phase-1.md',
+  'docs/design/creative-studio-2-gates/phase-2a.md',
+] as const;
+const OBSOLETE_PHASE_1_GATE = 'docs/design/creative-studio-2-phase-1-gate.md';
+const PHASE_2_CLOSEOUT = 'Phase 2A happy path complete; Level 1 not hardened; 2B next; 2C remains recovery gate.';
+const GATE_LINKS = [
+  ['Phase 1', 'creative-studio-2-gates/phase-1.md'],
+  ['Phase 2A', 'creative-studio-2-gates/phase-2a.md'],
 ] as const;
 
 const PHASE_2_STATUS_HEADING = '## Current Phase 2 status';
@@ -44,6 +60,33 @@ const readCurrentPhase2Status = async (path: string): Promise<string> => {
 };
 
 describe('Creative Studio 2 authority documents', () => {
+  it('keeps both gate records and removes the obsolete flat Phase 1 gate', async () => {
+    await expect(
+      Promise.all(GATE_RECORDS.map((path) => readFile(resolve(process.cwd(), path), 'utf8')))
+    ).resolves.toHaveLength(GATE_RECORDS.length);
+    await expect(readFile(resolve(process.cwd(), OBSOLETE_PHASE_1_GATE), 'utf8')).rejects.toThrow('ENOENT');
+  });
+
+  it.each(CLOSEOUT_AUTHORITY_DOCUMENTS)(
+    'links each closeout authority document to both gate records in %s',
+    async (path) => {
+      const document = await readFile(resolve(process.cwd(), path), 'utf8');
+
+      for (const [label, target] of GATE_LINKS) {
+        const link = document.match(new RegExp(`\\[${label}\\]\\(([^)]+)\\)`));
+
+        expect(link?.[1]).toBe(target);
+        await expect(readFile(resolve(process.cwd(), dirname(path), link![1]), 'utf8')).resolves.not.toBe('');
+      }
+    }
+  );
+
+  it.each(CLOSEOUT_AUTHORITY_DOCUMENTS)('records the Phase 2A closeout boundary in %s', async (path) => {
+    const status = await readCurrentPhase2Status(path);
+
+    expect(status).toContain(PHASE_2_CLOSEOUT);
+  });
+
   it.each(DOCUMENTS)('defines the staged Level 1 boundary in %s', async (path) => {
     const status = await readCurrentPhase2Status(path);
 

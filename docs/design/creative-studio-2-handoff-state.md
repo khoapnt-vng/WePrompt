@@ -10,11 +10,16 @@ the architecture. Then `creative-studio-2-design-handoff.md` for the reasoning b
 
 ## Current Phase 2 status
 
+Phase 2A happy path complete; Level 1 not hardened; 2B next; 2C remains recovery gate.
+
 Phase 2A is the Level 1 happy path over the existing flat storyboard. Phase 2B broadens that
 happy path with Section -> Clip -> Take and Table/Board review. Phase 2C hardens Level 1 with
 versioned recovery/checkpointing and exactly-once attribution. 2A/2B are not full or hardened
 Level 1. Their direct edits are temporarily not generally undoable; StudioRuleListUndo remains
 rule-list-specific and unchanged. Paid authority remains Phase 3b.
+
+The audited records are [Phase 1](creative-studio-2-gates/phase-1.md) and
+[Phase 2A](creative-studio-2-gates/phase-2a.md).
 
 `set_brief` is the sharpest temporary recovery gap. CAS and receipts prevent stale/ambiguous writes
 but are not undo.
@@ -40,7 +45,7 @@ and a slow run is not a failing one.
 
 **Phase 1 — the Brief with enforced rules.** Prose is context; pinned rules are predicates checked in
 `jobManager` **before** money is spent. Includes one-step undo of the last rule-list write. The gate
-record is `creative-studio-2-phase-1-gate.md`.
+record is [Phase 1](creative-studio-2-gates/phase-1.md).
 
 **S1 — the view switch.** The Brief/Write/Produce/Review rail is gone. Table · Board · Cut, routed at
 `/studio/:id/<view>`, with Brief as a header drawer beside Rules. Then, in order: the two
