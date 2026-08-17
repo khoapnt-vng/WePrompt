@@ -32,6 +32,13 @@ const GATE_LINKS = [
   ['Phase 1', 'creative-studio-2-gates/phase-1.md'],
   ['Phase 2A', 'creative-studio-2-gates/phase-2a.md'],
 ] as const;
+const PHASE_2A_GATE = 'docs/design/creative-studio-2-gates/phase-2a.md';
+const FINAL_GATE_EVIDENCE = [
+  /\|\s*Lint\s*\|\s*`bun run lint --quiet`\s*\|\s*exit 0; 1,244 warnings and 0 errors\s*\|/,
+  /\|\s*Format\s*\|\s*`bun run format`\s*\|\s*exit 0\s*\|/,
+  /\|\s*Post-format documentation\s*\|\s*`bunx vitest run tests\/unit\/process\/creative-studio\/types\/documentation\.test\.ts`\s*\|\s*exit 0; 1 file, 19\/19 passed\s*\|/,
+  /\|\s*Diff check\s*\|\s*`git diff --check`\s*\|\s*exit 0\s*\|/,
+] as const;
 
 const PHASE_2_STATUS_HEADING = '## Current Phase 2 status';
 const PHASE_2_DECISION = [
@@ -60,6 +67,12 @@ const readCurrentPhase2Status = async (path: string): Promise<string> => {
 };
 
 describe('Creative Studio 2 authority documents', () => {
+  it('records the required final lint, format, documentation, and diff evidence in the Phase 2A gate', async () => {
+    const gate = await readFile(resolve(process.cwd(), PHASE_2A_GATE), 'utf8');
+
+    for (const evidence of FINAL_GATE_EVIDENCE) expect(gate).toMatch(evidence);
+  });
+
   it('keeps both gate records and removes the obsolete flat Phase 1 gate', async () => {
     await expect(
       Promise.all(GATE_RECORDS.map((path) => readFile(resolve(process.cwd(), path), 'utf8')))
