@@ -8,6 +8,7 @@ import { promises as nodeFs } from 'node:fs';
 import { watch as watchFileSystem } from 'node:fs';
 import path from 'node:path';
 import {
+  isValidProviderJobId,
   isStudioSceneCountTransitionAllowed,
   STUDIO_MAX_SCENES,
   STUDIO_REFERENCE_PROMPT_MAX_LENGTH,
@@ -41,7 +42,6 @@ import {
   STUDIO_MANAGED_ASSET_COLLECTIONS,
   STUDIO_MAX_ACTIVE_BRIEF_REFERENCES,
 } from '@/common/types/project/creativeStudioManagedAssetCollections';
-import { isValidProviderJobId } from '@process/services/creative-studio/adapters/types';
 import { toStudioProjectSummary } from '@/common/types/project/creativeStudioProjectSummary';
 import {
   canonicalizeRecordRoot,

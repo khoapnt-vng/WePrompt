@@ -76,6 +76,13 @@ default-enablement, release, profile-deletion, provider-run, or customer-migrati
     next gate.
 12. **Feature/release boundary.** Preserve `AIONUI_ENABLE_CREATIVE_STUDIO`; do not enable Studio by
     default, remove the flag, claim packaged acceptance, or launch a provider as part of this plan.
+13. **Changed-runtime coverage ratchet.** At every delivery gate, retain the aggregate coverage run
+    and record per-file line and branch coverage for every Studio production `.ts`/`.tsx` file changed
+    from the frozen baseline. Each changed runtime file must be at least 80% for both measures. A
+    tracked include-only `vitest.creative-studio-coverage.config.ts` must collect executable helpers
+    under `common/types/**` explicitly, because the repository-wide configuration excludes that tree;
+    pure type-only files remain exempt. Update the include manifest as each task lands and never
+    satisfy the ratchet by excluding an executable changed file.
 
 ---
 
@@ -101,6 +108,7 @@ export const STUDIO_MAX_DIRTY_CLIPS_REPORTED = 96;
 export const STUDIO_MAX_MCP_AVAILABLE_TAKE_IDS_PER_CLIP = 24;
 export const STUDIO_MIN_VIDEO_CLIP_SECONDS = 4;
 export const STUDIO_MAX_VIDEO_CLIP_SECONDS = 15;
+export const STUDIO_MAX_MUTATION_OPERATIONS = 32;
 ```
 
 - IDs match the existing safe-ID contract: 1–256 ASCII letters, digits, `_`, or `-`.
@@ -108,16 +116,54 @@ export const STUDIO_MAX_VIDEO_CLIP_SECONDS = 15;
 - Section title 256; story line 4 KiB; inherited visual prompt 8 KiB.
 - Clip shot prompt 8 KiB; narration 4 KiB; on-screen text 1 KiB.
 - Video duration is an integer 4–15 seconds. Image duration remains an integer 1–60 seconds.
-- Persisted provider job IDs reuse `isValidProviderJobId`: 1–512 URL-unreserved opaque characters;
-  URLs, paths, queries, fragments, whitespace, controls, and longer values are rejected.
+- Persisted provider job IDs reuse the neutral common `isValidProviderJobId` predicate: 1–512
+  URL-unreserved opaque characters; URLs, paths, queries, fragments, whitespace, controls, and
+  longer values are rejected. Adapter modules re-export the predicate but do not own its definition.
 - `referenceAssetId` remains singular and nullable in Phase 2B. Multi-reference provider input is a
   separate provider/model capability and is not introduced by this UI slice.
 - Shelf capacity is 120 total identities, independently bounded by
   `STUDIO_MAX_SHELF_SECTION_ITEMS` at 24 parked sections and `STUDIO_MAX_SHELF_TAKE_ALIASES` at 96
-  take aliases. This is a UI/project bound, independent from asset-ledger retention.
+  take aliases. Both per-kind maxima are enforced, not only the total. The section limit also follows
+  from `STUDIO_MAX_SECTIONS`, but the take-alias limit is an independent shelf contract. Shelf bounds
+  are UI/project bounds, independent from asset-ledger retention.
+- Asset `durationSeconds` is a finite number greater than `0` and at most `Number.MAX_SAFE_INTEGER`,
+  the bound the schema-1 validator already applies. `Number.MAX_VALUE` is not a bound: it admits
+  `1e308` and makes every cut trim comparison against the asset duration vacuously true.
 
 Generation, reference-request, cut-placement, dirty-report, and MCP projection limits remain
-independently named even when values coincide.
+independently named even when values coincide, and each validator consumes the constant named for
+its own contract. Cut placement uses `STUDIO_MAX_CUT_PLACEMENT_CLIPS`, never
+`STUDIO_MAX_CLIPS_PER_PROJECT`, even while both are 96. `STUDIO_PROJECT_SCHEMA_VERSION` is the only
+source of the persisted version literal in validators and factories.
+
+### Validator totality and lookup rules
+
+`validateStudioProjectV2` is a total function. Every input, including a corrupt or hostile persisted
+record, returns `true` or `false`. It never throws: callers read `false` as "quarantine this record",
+and an exception escaping a declared type guard bypasses that path entirely.
+
+- Resolve every record entry by own key. `project.clips[id]`, `project.assets[id]`, and
+  `project.jobs[id]` inherit `Object.prototype` members, so an ID of `constructor`, `toString`, or
+  `__proto__` — each of which satisfies the safe-ID contract — resolves to an inherited value that is
+  not `undefined`. A shared own-value helper must call `Object.hasOwn(record, id)` before reading;
+  neither `=== undefined` nor an identity-only recheck is sufficient after prototype pollution.
+- Create every ID-indexed record with null-prototype/from-entries semantics, or insert with
+  `Object.defineProperty`. Direct assignment of `record['__proto__']` on `{}` mutates the prototype
+  instead of creating an own entry. Valid own entries named `constructor`, `toString`, and
+  `__proto__` must survive mutation, serialization, restart, and validation.
+- Walk the retry graph iteratively with an explicit stack. Job count is unbounded by this contract,
+  so validation must be O(entities + reference edges): precompute clip asset membership and job
+  positions rather than calling `includes`/`indexOf` per asset or job. A valid acyclic 20,000-link
+  chain returns `true`; the same graph with a back-edge returns `false`; neither throws.
+- Hoist every key set to module scope. A per-item `new Set([...])` inside a validator allocates once
+  per shelf entry on every project read and write.
+
+**Amendment 1 — post-Task-1 contract review.** The provider-job, shelf, duration, totality,
+prototype-safe read/write, linear retry, and per-contract constant rules above amend this frozen
+contract under the review rule at the top of this section. They name behaviour Task 1 head
+`bd2cc4824252ec58976f8597648c8e39612f95f8` does not have; they rename and reinterpret nothing.
+Task 1 Fix Round 1 implements the complete amendment, and Gate 1 independently reviews its exact
+head before Task 2.
 
 ### Persisted entities
 
@@ -258,8 +304,9 @@ produce a receipt or release/delete its V1 slot.
 The V2 proposal payload is exactly
 `{ kind: 'mutation_batch', operations: StudioMutationOperationV2[] }` or the existing exact
 `{ kind: 'pin_rule', rule }` shape under a schema-2 proposal envelope. A V2 reference request is
-exactly `{ clipIds: string[] }` under its schema-2 envelope. Proposal acceptance delegates to the
-same reducer; reference requests never submit work.
+exactly `{ clipIds: string[] }` under its schema-2 envelope, with 1–24 unique active clip IDs in the
+requested order and the `STUDIO_MAX_REFERENCE_REQUEST_CLIPS` bound. Proposal acceptance delegates to
+the same reducer; reference requests never submit work.
 
 `derivePayableClipIds` walks selected active sections in `sectionOrder`, then their `clipOrder`, and
 stable-deduplicates IDs. A clip is payable only when the section has a nonempty title and inherited
@@ -365,15 +412,26 @@ if a new directory has fewer than two or more than ten direct children.
 **Steps**
 
 - [ ] Add exact V2 types and independently named constants from the frozen contract while retaining
-      the current V1 public aliases only as an unexposed staging seam.
+      the current V1 public aliases only as an unexposed staging seam. Every constant added must have
+      at least one consumer by the end of its owning task; an unreferenced limit is not centralized.
+      Task 1 declares `STUDIO_MAX_MUTATION_OPERATIONS`, and Task 2 owns its first consumer because no
+      mutation batch parser or reducer exists before Task 2.
 - [ ] RED: reject unknown keys, duplicate ownership, orphan assets/jobs/cuts, active+shelf section
       overlap, invalid shelf aliases, 25 sections, 9 clips in one section, 97 clips, 25 parked shelf
       sections, 97 take aliases, shelf item 121, video 3/16 seconds, and unsafe provider job IDs;
       accept every exact boundary, including 24 parked sections, 96 take aliases, and 120 total shelf
-      identities.
+      identities. Build the accepted 120-item shelf fixture with 24 parked sections plus 96 aliases;
+      the former 23-plus-97 fixture asserted the wrong contract.
+- [ ] RED totality, per the validator totality and lookup rules: an asset `clipId`, job `clipId`,
+      shelf `assetId`, `selectedAssetId`, or `referenceAssetId` of `constructor`, `toString`, or
+      `__proto__`; a 20,000-link retry graph; and an asset `durationSeconds` of `1e308`. Invalid
+      inherited references and a long graph with a back-edge return `false`; a valid acyclic 20,000-
+      link chain returns `true`; none throws. Positive cases prove own record entries named
+      `constructor`, `toString`, and `__proto__` remain valid IDs.
 - [ ] Implement dependency-free exact validators and `createEmptyStudioProjectV2()` with empty
-      Section/Clip/shelf/cut state. Reuse `isValidProviderJobId` for persisted remote IDs and use
-      `STUDIO_MAX_CUT_PLACEMENT_CLIPS` rather than the numerically equal project clip limit.
+      Section/Clip/shelf/cut state. Resolve every record entry by own key, walk the retry graph
+      iteratively in linear time with precomputed per-clip membership and job-position indexes, reuse
+      the neutral common provider-job-ID predicate, and consume the constant named for each contract.
 - [ ] Convert canonical-take and summary projection helpers to explicit V2 variants; test stable
       active Section→Clip poster ordering and exclusion of parked sections.
 - [ ] Mutation proof: remove unique clip-ownership validation and prove the cross-section duplicate
@@ -382,6 +440,48 @@ if a new directory has fewer than two or more than ten direct children.
       `bunx vitest run tests/unit/process/creative-studio/service/schema2 tests/unit/process/creative-studio/types/canonicalTake.test.ts tests/unit/process/creative-studio/types/projectSummaryV2.test.ts`
       and `bunx tsc --noEmit`.
 - [ ] Commit: `feat(studio): define schema 2 section and clip contracts`.
+
+### Task 1 Fix Round 1 — satisfy Amendment 1 before Task 2
+
+Independent reviews of `bd2cc4824252ec58976f8597648c8e39612f95f8` found the contract gaps Amendment 1
+names. The original tests pass without covering them. Task 2 does not start until the complete round
+below is green and independently re-reviewed.
+
+**Files**
+
+- Modify: `packages/desktop/src/common/types/project/creativeStudioTypes.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/adapters/types.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/store.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/schema2/validation.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/schema2/factories.ts`
+- Modify: `tests/unit/process/creative-studio/service/schema2/validation.test.ts`
+
+**Steps**
+
+- [ ] RED provider job IDs at 512/513 and URL/path/query/fragment/whitespace/control boundaries. Move
+      the single pure predicate to the common contract, re-export it from adapter types, and import it
+      directly from common in both schema validators. The schema2 directory imports no adapter code.
+- [ ] RED 24/25 parked sections, 96/97 take aliases, 120/121 total shelf identities, asset duration at
+      `Number.MAX_SAFE_INTEGER`/`1e308`, and a cut trim of `1e300` against a safely bounded asset.
+- [ ] RED every reference-derived clip/asset/job/cut/provenance/output/snapshot/retry/shelf lookup with
+      inherited `constructor`, `toString`, and `__proto__` values. Each invalid case returns `false`
+      without throwing. Positive fixtures built with `Object.fromEntries` prove valid own records using
+      all three names are accepted; prototype-polluted valid-looking inherited records are rejected.
+- [ ] RED a valid acyclic 20,000-job retry chain as `true`, the same chain with a back-edge as `false`,
+      plus self-cycle, missing predecessor, reversed order, and converging-chain cases. Keep the normal
+      test timeout; do not replace total validation with a depth cap or catch-and-return-false.
+- [ ] Implement one own-value helper, iterative three-colour retry traversal, and precomputed per-clip
+      asset-membership/job-position indexes so validation is linear in entities and links.
+- [ ] Consume the shelf, cut-placement, and schema-version constants named for their contracts. Bound
+      asset duration at `Number.MAX_SAFE_INTEGER`; hoist every key set. The mutation-operation constant
+      remains deliberately declaration-only until Task 2 introduces the batch boundary.
+- [ ] Mutation proofs: reintroduce a bare inherited lookup and prove the matching totality test fails;
+      restore recursive retry traversal and prove the reversed 20,000-chain test fails; restore both.
+- [ ] Run:
+      `bunx vitest run tests/unit/process/creative-studio/service/schema2 tests/unit/process/creative-studio/types tests/unit/process/creative-studio/providerAdapters.test.ts`
+      and `bunx tsc --noEmit`.
+- [ ] Obtain independent re-review of this round against Amendment 1 before Task 2.
+- [ ] Commit: `fix(studio): enforce exact schema 2 validation contract`.
 
 ### Task 2 — Implement the shared ordered reducer and clip-aware cuts
 
@@ -402,12 +502,17 @@ if a new directory has fewer than two or more than ten direct children.
 - [ ] Preserve the current V1 helper behavior under its renamed file only until Task 6 removes it;
       do not mix V1 and V2 branches in one reducer.
 - [ ] RED every V2 operation, ordered later-op visibility, input immutability, late-op rollback,
-      capacity precedence, collision rejection, exact permutations, and created-ID ordering.
+      1/32/33 operation boundaries, capacity precedence, collision rejection, exact permutations, and
+      created-ID ordering.
 - [ ] RED dependency-free clip deletion, park/restore, asset alias constraints, selected/cut take
       refusal, select-shelved atomicity, and shelf focus identity inputs.
 - [ ] Implement `applyStudioMutationBatchV2(project, batch)` as a pure draft reducer returning the
       next project plus created IDs. Preserve jobs/assets/routing/rules/rule-list undo unless an
-      exact operation owns a field.
+      exact operation owns a field. Enforce the nonempty batch boundary with
+      `STUDIO_MAX_MUTATION_OPERATIONS`; do not duplicate the literal. Insert IDs with
+      own-property/null-prototype semantics; RED
+      add-section/add-clip IDs of `constructor`, `toString`, and `__proto__`, then serialize, parse,
+      validate, and apply a later mutation to the same identities.
 - [ ] Implement clip-aware cut reconciliation: storyboard ordering, dormant parked entries, complete
       manual order, trim clamping, no new manual entry, and no cut-linked deletion.
 - [ ] Static fence the schema2 directory from filesystem, IPC, job manager, resolver, adapter,
@@ -432,18 +537,24 @@ if a new directory has fewer than two or more than ten direct children.
 
 - [ ] Add a bounded schema sniff before V2 parsing and return supported, unsupported V1, not-found,
       and malformed-V2 states explicitly. Do not call `migrateSchemaV1Project` on the V2 path.
-- [ ] Add V2 create/read/list/summary/update-batch store seams used only by V2 tests until Task 6.
-      Keep rename+directory-fsync commit facts, one-revision CAS, summary-repair isolation, and commit
-      tags unchanged.
+- [ ] Add V2 create/read/list/summary/update-batch/delete store seams used only by V2 tests until Task 6.
+      Keep rename+directory-fsync commit facts, one-revision CAS, and commit tags unchanged. V2 owns a
+      separate root `projects-v2.json` index with `schemaVersion: 2`; no V2 read, repair, create,
+      delete, or commit path reads or writes the prototype `projects.json` index.
 - [ ] RED a complete V1 profile tree containing `project.json`, `projects.json`, `.part`, proposal,
       decision, reference request, command, slot, lease, and receipt. First test the V1-only profile;
       then place that same tree beside a valid V2 project whose normal lifecycle is allowed to run.
       Call get/list/start-facing inspection and assert the V1 tree has an identical path set, bytes,
       metadata hashes, zero mkdir/write/rename/rm, and no quarantine in both cases.
 - [ ] RED malformed schema 2 separately and prove it remains a loud storage/quarantine failure.
-- [ ] RED fresh empty V2 create/restart, mixed V1+V2 listing and lifecycle scoping, poster summary,
-      batch rollback, stale CAS, and exactly one revision/observer fact. The supported-ID set used by
-      cleanup, reaping, watching, mailbox sweeping, and recovery must exclude every V1 project.
+- [ ] RED fresh empty V2 create/restart, V2 delete, mixed V1+V2 listing, poster summary, batch rollback,
+      stale CAS, and exactly one revision/observer fact. V2 delete removes only the resolved supported
+      project tree and updates only `projects-v2.json`; an unsupported V1 ID returns
+      `unsupported_prototype_schema` without touching its tree or `projects.json`. Expose an
+      unregistered, side-effect-free supported-V2 ID inventory that refreshes after create/delete and
+      always excludes V1. Task 3 owns no runtime activation: it does not start cleanup, watchers,
+      protocol, mailbox processing, or recovery. Task 6 owns activation and proves that every
+      lifecycle consumer uses this inventory.
 - [ ] Update `docs/contributing/development.md` with accurate `Forge-Dev`/`Forge-Dev-2`, a fresh named
       profile workflow, and manual profile removal only while the app is stopped. Add no app reset
       command.
@@ -458,6 +569,7 @@ if a new directory has fewer than two or more than ten direct children.
 
 **Files**
 
+- Modify/finalize: `packages/desktop/src/common/types/project/creativeStudioOutputRole.ts`
 - Modify: `packages/desktop/src/process/services/creative-studio/service/index.ts`
 - Create: `packages/desktop/src/process/services/creative-studio/service/v2Service.ts`
 - Modify: `packages/desktop/src/process/services/creative-studio/jobManager.ts`
@@ -466,15 +578,22 @@ if a new directory has fewer than two or more than ten direct children.
 - Modify: `tests/unit/process/creative-studio/service/index.test.ts`
 - Modify: `tests/unit/process/creative-studio/jobManager.test.ts`
 - Modify: `tests/unit/process/creative-studio/mediaStore.test.ts`
+- Modify: `tests/unit/process/creative-studio/store.test.ts`
 - Modify: `tests/integration/creative-studio/renderService.integration.test.ts`
 - Modify: `tests/integration/creative-studio/generationLifecycle.integration.test.ts`
 - Modify: `tests/integration/creative-studio/projectRecovery.integration.test.ts`
 
 **Steps**
 
-- [ ] Add V2 service methods beside the unregistered V1 service surface: load/list/create V2,
+- [ ] Add V2 service methods beside the unregistered V1 service surface: load/list/create/delete V2,
       `applyMutations`, clip-owned media attachment, clip-owned route/readiness projection, and
       `submitClips`. Do not expose them through IPC yet.
+- [ ] Add explicitly named V2-only cleanup, recovery, resume, submit, retry, retry-download, cancel,
+      attachment, and render-projection entrypoints in job manager/media store/render service. Convert
+      `creativeStudioOutputRole.ts` to accept both explicitly named job contracts without weakening the
+      output-role default. Keep the existing singleton V1 methods wired and behaviourally unchanged
+      through Gate 1; Task 6C switches runtime ownership and Task 6D removes the unreachable V1
+      entrypoints.
 - [ ] Convert V2 asset/job/reference/poster/output/retry/cancel/recovery checks to `clipId`; keep
       project-level Cast/Look assets at `clipId: null`. Preserve provider identity, idempotency,
       submission ambiguity, download recovery, cancellation policy, and rule enforcement.
@@ -499,6 +618,7 @@ if a new directory has fewer than two or more than ten direct children.
 
 **Files**
 
+- Create: `vitest.creative-studio-coverage.config.ts`
 - Modify: `packages/desktop/src/common/types/project/creativeStudioTypes.ts`
 - Modify: `packages/desktop/src/process/services/creative-studio/service/directorCommandContracts.ts`
 - Modify: `packages/desktop/src/process/services/creative-studio/service/directorCommandService.ts`
@@ -517,6 +637,7 @@ if a new directory has fewer than two or more than ten direct children.
 - Modify: `tests/unit/process/creative-studio/service/directorCommandSpendFence.test.ts`
 - Modify: `tests/unit/process/creative-studio/service/index.test.ts`
 - Modify: `tests/integration/creative-studio/directorCommandLifecycle.integration.test.ts`
+- Modify/stage V2 fixtures: `tests/integration/creative-studio/directorCommandLatency.integration.test.ts`
 
 **Steps**
 
@@ -542,8 +663,13 @@ if a new directory has fewer than two or more than ten direct children.
       handler execution or ID minting.
 - [ ] Bound available-take projection to 24 per clip in deterministic clip asset order; selected
       take remains visible even when it would otherwise fall beyond the slice.
-- [ ] RED every operation, created-ID arrays, V1 no-touch, malformed V2, lease races, cursor recovery,
-      restart receipt repair, and no paid dependency. Preserve existing writer/mailbox mutation tests.
+- [ ] Add the tracked include-only Studio coverage configuration. Its explicit manifest covers every
+      executable production file changed since the frozen baseline, including runtime helpers under
+      `common/types/**`, and enforces per-file line and branch thresholds of 80%. Later tasks update the
+      manifest whenever they add or change executable production files.
+- [ ] RED every operation, created-ID arrays, reference-request 0/24/25 and duplicate clip IDs, V1
+      no-touch, malformed V2, lease races, cursor recovery, restart receipt repair, and no paid
+      dependency. Preserve existing writer/mailbox mutation tests.
 - [ ] Mutation proofs: send a V1 record through terminal cleanup and prove the byte-tree test fails;
       bypass the shared reducer and prove reducer-parity tests fail; restore.
 - [ ] Run:
@@ -556,7 +682,9 @@ if a new directory has fewer than two or more than ten direct children.
 - [ ] Freeze the exact Task 1–5 head and obtain independent process/schema and security/spend review.
 - [ ] Verify V2 code is still unregistered from the renderer bridge, current V1 UI behavior is
       unchanged, and no V1 profile tree changed during tests.
-- [ ] Run `bun run test`, `bun run test:coverage`, `bun run lint --quiet`,
+- [ ] Run `bun run test`, `bun run test:coverage`,
+      `bunx vitest run --config vitest.creative-studio-coverage.config.ts --coverage`,
+      `bun run lint --quiet`,
       `bun run format:check`, `bunx tsc --noEmit`, and
       `git diff --check 21bf87ae1674598bd42ea88c5f13c74e8389b3c0...HEAD -- . ':(exclude)docs/prds/creative-studio/creative-studio-2-table-board-reference.html.txt'`.
       Verify the excluded frozen reference separately against its required SHA-256.
@@ -570,15 +698,35 @@ if a new directory has fewer than two or more than ten direct children.
 
 **Files**
 
+- Modify: `vitest.creative-studio-coverage.config.ts`
 - Modify: `packages/desktop/src/common/types/project/creativeStudioTypes.ts`
+- Modify/finalize: `packages/desktop/src/common/types/project/creativeStudioCanonicalTake.ts`
+- Modify/finalize: `packages/desktop/src/common/types/project/creativeStudioProjectSummary.ts`
+- Modify/finalize: `packages/desktop/src/common/types/project/creativeStudioManagedAssetCollections.ts`
+- Modify/finalize: `packages/desktop/src/common/types/project/creativeStudioOutputRole.ts`
+- Delete/replace: `packages/desktop/src/common/types/project/creativeStudioProposalDiff.ts`
 - Modify: `packages/desktop/src/common/adapter/ipcBridge.ts`
 - Modify: `packages/desktop/src/common/adapter/native/constants.ts`
 - Modify: `packages/desktop/src/common/adapter/native/payloadSchemas.ts`
 - Modify: `packages/desktop/src/process/bridge/creativeStudioBridge.ts`
 - Modify: `packages/desktop/src/process/services/creative-studio/runtime.ts`
+- Modify/finalize: `packages/desktop/src/process/services/creative-studio/index.ts`
 - Modify: `packages/desktop/src/process/services/creative-studio/store.ts`
+- Modify/finalize: `packages/desktop/src/process/services/creative-studio/jobManager.ts`
+- Modify/finalize: `packages/desktop/src/process/services/creative-studio/mediaStore.ts`
+- Modify/finalize: `packages/desktop/src/process/services/creative-studio/renderService.ts`
 - Modify: `packages/desktop/src/process/services/creative-studio/service/index.ts`
 - Modify: `packages/desktop/src/process/services/creative-studio/service/v2Service.ts`
+- Delete after 6C switch: `packages/desktop/src/process/services/creative-studio/service/projectMutations.ts`
+- Modify/finalize: `packages/desktop/src/process/services/creative-studio/service/directorCommandContracts.ts`
+- Modify/finalize: `packages/desktop/src/process/services/creative-studio/service/directorCommandService.ts`
+- Modify/finalize: `packages/desktop/src/process/services/creative-studio/service/directorCommandMailbox.ts`
+- Modify/finalize: `packages/desktop/src/process/services/creative-studio/service/directorCommandProcessor.ts`
+- Modify/finalize: `packages/desktop/src/process/resources/builtinMcp/studioDirectorCommandWriter.ts`
+- Modify/finalize: `packages/desktop/src/process/resources/builtinMcp/studioProposalWriter.ts`
+- Modify/finalize: `packages/desktop/src/process/resources/builtinMcp/studioReferenceRequestWriter.ts`
+- Modify/finalize: `packages/desktop/src/process/resources/builtinMcp/studioPendingRecordWriter.ts`
+- Modify/finalize: `packages/desktop/src/process/resources/builtinMcp/studioServer.ts`
 - Delete: `packages/desktop/src/process/services/creative-studio/planning/index.ts`
 - Delete: `packages/desktop/src/process/services/creative-studio/planning/storyboardPlanner.ts`
 - Delete: `packages/desktop/src/process/services/creative-studio/planning/storyboardPrompt.ts`
@@ -634,13 +782,13 @@ if a new directory has fewer than two or more than ten direct children.
 - Move: `packages/desktop/src/renderer/pages/studio/components/PhaseShell/BriefDrawer/StudioBriefReferences.module.css` →
   `packages/desktop/src/renderer/pages/studio/components/Workspace/Brief/StudioBriefReferences.module.css`
 - Delete after export rewrite: `packages/desktop/src/renderer/pages/studio/components/PhaseShell/BriefDrawer/index.ts`
-- Create: `packages/desktop/src/renderer/pages/studio/hooks/workspace/index.ts`
-- Move: `packages/desktop/src/renderer/pages/studio/hooks/useStudioProject.ts` →
-  `packages/desktop/src/renderer/pages/studio/hooks/workspace/useWorkspaceProject.ts`
-- Move: `packages/desktop/src/renderer/pages/studio/hooks/useStoryboardEditor.ts` →
-  `packages/desktop/src/renderer/pages/studio/hooks/workspace/useWorkspaceEditor.ts`
-- Move: `packages/desktop/src/renderer/pages/studio/hooks/useDraftPersistence.ts` →
-  `packages/desktop/src/renderer/pages/studio/hooks/workspace/useWorkspaceDraftPersistence.ts`
+- Create in 6B: `packages/desktop/src/renderer/pages/studio/hooks/workspace/index.ts`
+- Create in 6B: `packages/desktop/src/renderer/pages/studio/hooks/workspace/useWorkspaceProject.ts`
+- Create in 6B: `packages/desktop/src/renderer/pages/studio/hooks/workspace/useWorkspaceEditor.ts`
+- Create in 6B: `packages/desktop/src/renderer/pages/studio/hooks/workspace/useWorkspaceDraftPersistence.ts`
+- Delete in 6D: `packages/desktop/src/renderer/pages/studio/hooks/useStudioProject.ts`
+- Delete in 6D: `packages/desktop/src/renderer/pages/studio/hooks/useStoryboardEditor.ts`
+- Delete in 6D: `packages/desktop/src/renderer/pages/studio/hooks/useDraftPersistence.ts`
 - Modify for V2 compilation: `packages/desktop/src/renderer/pages/studio/components/Generation/GenerationJobList.tsx`
 - Modify for V2 compilation: `packages/desktop/src/renderer/pages/studio/components/Generation/GenerationReviewModal.tsx`
 - Modify for V2 compilation: `packages/desktop/src/renderer/pages/studio/components/Generation/generationRequests.ts`
@@ -672,8 +820,22 @@ if a new directory has fewer than two or more than ten direct children.
 - Modify: `tests/unit/process/bridge/creativeStudioBridge.test.ts`
 - Modify: `tests/unit/process/bridge/nativePayloadSchemas.test.ts`
 - Modify: `tests/unit/process/creative-studio/runtime.test.ts`
+- Modify: `tests/unit/process/creative-studio/store.test.ts`
+- Modify: `tests/unit/process/creative-studio/jobManager.test.ts`
+- Modify: `tests/unit/process/creative-studio/mediaStore.test.ts`
 - Modify: `tests/unit/process/creative-studio/service/index.test.ts`
+- Modify: `tests/unit/process/creative-studio/service/directorCommandContracts.test.ts`
 - Modify: `tests/unit/process/creative-studio/service/directorCommandService.test.ts`
+- Modify: `tests/unit/process/creative-studio/service/directorCommandMailbox.test.ts`
+- Modify: `tests/unit/process/creative-studio/service/directorCommandProcessor.test.ts`
+- Modify: `tests/unit/process/creative-studio/service/studioDirectorCommandWriter.test.ts`
+- Delete after 6C switch: `tests/unit/process/creative-studio/service/projectMutations.test.ts`
+- Modify: `tests/unit/process/creative-studio/types/canonicalTake.test.ts`
+- Modify: `tests/unit/process/creative-studio/types/projectSummaryV2.test.ts`
+- Delete/replace: `tests/unit/process/creative-studio/types/proposalDiff.test.ts`
+- Modify: `tests/integration/creative-studio/schema2Cutover.integration.test.ts`
+- Modify: `tests/integration/creative-studio/directorCommandLifecycle.integration.test.ts`
+- Modify/finalize: `tests/integration/creative-studio/directorCommandLatency.integration.test.ts`
 - Modify: `tests/integration/creative-studio/generationLifecycle.integration.test.ts`
 - Modify: `tests/integration/creative-studio/renderService.integration.test.ts`
 - Modify: `tests/integration/creative-studio/projectRecovery.integration.test.ts`
@@ -710,10 +872,10 @@ if a new directory has fewer than two or more than ten direct children.
   `tests/unit/pages/studio/Workspace/State/studioReadiness.test.ts`
 - Move: `tests/unit/pages/studio/studioRouteConstraints.test.ts` →
   `tests/unit/pages/studio/Workspace/State/studioRouteConstraints.test.ts`
-- Move/rewrite: `tests/unit/pages/studio/Storyboard/useStoryboardEditor.dom.test.ts` →
-  `tests/unit/pages/studio/Workspace/State/useWorkspaceEditor.dom.test.ts`
-- Move/rewrite: `tests/unit/pages/studio/Storyboard/useDraftPersistence.dom.test.ts` →
-  `tests/unit/pages/studio/Workspace/State/useWorkspaceDraftPersistence.dom.test.ts`
+- Create for the 6B V2 stubs: `tests/unit/pages/studio/Workspace/State/useWorkspaceEditor.dom.test.ts`
+- Create for the 6B V2 stubs: `tests/unit/pages/studio/Workspace/State/useWorkspaceDraftPersistence.dom.test.ts`
+- Delete in 6D: `tests/unit/pages/studio/Storyboard/useStoryboardEditor.dom.test.ts`
+- Delete in 6D: `tests/unit/pages/studio/Storyboard/useDraftPersistence.dom.test.ts`
 - Delete: `tests/unit/pages/studio/Storyboard/StoryboardDraftModal.dom.test.tsx`
 - Delete: `tests/unit/pages/studio/Storyboard/WritePhase.dom.test.tsx`
 - Delete: `tests/unit/pages/studio/Generation/ProducePhase.dom.test.tsx`
@@ -746,31 +908,118 @@ Task 6 preserves one atomic public contract switch, but it is not one review-siz
 these phases serially, keep each phase compiling with its focused tests, and never expose V1 and V2
 as simultaneous public choices:
 
-- **6A — behavior-neutral relocation:** perform the `PhaseShell`/`Shell`/hook/test moves and import
-  rewrites without changing the registered V1 bridge, runtime, routes, or behavior. Do not delete a
-  source path until every consumer has moved. Commit: `refactor(studio): prepare workspace ownership`.
-- **6B — unregistered V2 renderer closure:** convert retained Library, Generation, Preview, engine,
-  readiness, route, and workspace-placeholder modules plus direct tests to the staged V2 types while
-  the public V1 product remains registered. Commit: `refactor(studio): prepare schema 2 renderer`.
-- **6C — atomic public cutover:** in one commit switch aliases, native bridge, runtime lifecycle, MCP
-  entrypoints, routes, and renderer orchestration to V2; remove reference-request auto-submit before
-  clip submission becomes reachable; remove public Cut/render providers. Before this commit only V1
-  is public, and after it only V2 is public. Commit: `feat(studio): cut over public studio to schema 2`.
-- **6D — legacy deletion and ratchet:** delete the unreachable scene phases, Storyboard, Cut/Export UI,
-  planner, obsolete tests, and temporary V1 staging exports; finish V2 seeds, locales, and directory
-  counts. Commit: `refactor(studio): remove legacy scene workspace`.
+- **6A — behavior-neutral relocation:** execute every Task 6 `Move` row under `PhaseShell`, `Shell`,
+  Brief, and their tests as a byte/behavior-preserving move plus import/barrel rewrites. For each
+  `Move/rewrite` row, 6A performs only the move; 6C owns the V2 rewrite at the destination. The three
+  legacy root hooks stay at their original paths until 6D. Registered V1 bridge, runtime, routes,
+  props, fixtures, and behavior remain unchanged. Run the relocated Shell/Brief/Director tests and
+  `bunx tsc --noEmit`. Commit: `refactor(studio): prepare workspace ownership`.
+- **6B — unregistered V2 renderer closure:** create exactly `Workspace/index.tsx`,
+  `Workspace/types.ts`, `Workspace/WorkspaceShell/**`, `hooks/workspace/index.ts`,
+  `hooks/workspace/useWorkspaceProject.ts`, `hooks/workspace/useWorkspaceEditor.ts`,
+  `hooks/workspace/useWorkspaceDraftPersistence.ts`, and their new Workspace/State/Shell tests behind
+  an unregistered V2 entrypoint. `useWorkspaceProject` may load the staged V2 service. The editor and
+  draft hooks are typed read-only compilation stubs with no V1 key access, save, replay, or mutation
+  behavior. Every
+  active Library, Generation, Preview, EngineStrip, readiness, and route file listed as “Modify for V2
+  compilation” is deferred intact to 6C—there is no implementer choice or unnamed counterpart. Run
+  the new Workspace/State/Shell tests, assert no native/route/barrel registration reaches the V2
+  entrypoint, and run `bunx tsc --noEmit`. Commit: `refactor(studio): prepare schema 2 renderer`.
+- **6C — atomic public cutover:** modify the listed common aliases/projections, native/bridge paths,
+  root `creative-studio/index.ts`, store/runtime/service/job/media/render paths, Director/MCP paths,
+  `StudioPage`, Library, Generation, Preview, EngineStrip, readiness/routes, every 6A destination
+  marked “rewrite”, and their listed tests/integrations/locales/E2E in one commit. Switch all public
+  ownership to V2, remove reference-request auto-submit before clip submission is reachable, and
+  remove public Cut/render providers. The only temporary legacy aliases permitted after the switch are
+  `StudioProjectV1`, `StudioRendererProjectV1`, `StudioProjectSummaryV1`, `StudioSceneV1`,
+  `StudioAssetV1`, `StudioJobV1`, `StudioCutV1`, `StudioCutClipV1`,
+  `StudioUpdateSceneRequestV1`, `StudioReorderScenesRequestV1`, `StudioPlaceCutScenesRequestV1`,
+  `StudioSubmitScenesRequestV1`, `StudioFitStoryboardRequestV1`, and
+  `StudioDismissReferenceRequestsRequestV1`, plus Task 5's exact `StudioDirectorNewSceneV1`,
+  `StudioDirectorOperationV1`, `StudioDirectorCommandRecordV1`, `StudioDirectorCommandSlotV1`,
+  `StudioDirectorCommandSlotLeaseV1`, `StudioDirectorAppliedReceiptV1`,
+  `StudioDirectorRejectedReceiptV1`, `StudioDirectorExpiredReceiptV1`,
+  `StudioDirectorIndeterminateReceiptV1`, and `StudioDirectorCommandReceiptV1`; each may be imported
+  only by a 6D deletion target.
+  Before this commit only V1 is public, and after it only V2 is public. Run the complete process,
+  bridge, lifecycle, StudioPage/Library/Generation/Preview/EngineStrip, route, selector, and feature-
+  flag test set listed below, then `bunx tsc --noEmit`. Commit:
+  `feat(studio): cut over public studio to schema 2`.
+- **6D — legacy deletion and ratchet:** delete every Task 6 `Delete` row, the three original root hooks,
+  V1-only tests, `projectMutations`, planner, scene phases, Storyboard, Cut/Export UI, all temporary V1
+  aliases above, and all compatibility barrels. Finalize direct V2 seeds, locales, coverage manifest,
+  and directory counts. Run the full Task 6 focused command, i18n, TypeScript, lint, format, and the
+  retained-source legacy-symbol scan. Commit: `refactor(studio): remove legacy scene workspace`.
+
+Use these phase gates; a later phase does not begin on a failing command:
+
+```bash
+# 6A
+bunx vitest run tests/unit/pages/studio/Workspace/DirectorLayout tests/unit/pages/studio/Workspace/Shell
+bunx tsc --noEmit
+
+# 6B
+bunx vitest run tests/unit/pages/studio/Workspace/State tests/unit/pages/studio/Workspace/Shell tests/unit/pages/studio/StudioPage.dom.test.tsx tests/unit/process/bridge/creativeStudioBridge.test.ts
+bunx tsc --noEmit
+
+# 6C
+# Run the complete focused Vitest command under Task 6 Steps, then:
+bun run i18n:types
+node scripts/check-i18n.js
+bunx tsc --noEmit
+
+# 6D
+# Re-run the complete focused Vitest command under Task 6 Steps, then:
+bun run i18n:types
+node scripts/check-i18n.js
+bunx tsc --noEmit
+bun run lint --quiet
+bun run format:check
+```
 
 **Steps**
 
-- [ ] RED exact native provider inventory: one `apply-mutations` provider, V2 load/list/create,
-      clip media/submit providers, one image/video-only model-selection provider, no storyboard
-      model/update-scene/reorder-scenes/select-asset/Cut provider, and manifest/schema parity.
+- [ ] RED exact native provider inventory: one `apply-mutations` provider, V2 load/list/create/delete,
+      one `retry-runtime-activation` provider, clip media/submit providers, one image/video-only
+      model-selection provider, and manifest/schema parity. The inventory has no storyboard model,
+      update-scene, reorder-scenes, select-asset, or Cut provider.
 - [ ] Replace the public `StudioProject`/renderer aliases with V2; delete temporary V1 aliases and
       staging methods. Keep independent connection/adapter/prompt protocol V1 names unchanged.
+- [ ] Delete schema-1 `validateProject` in `store.ts`, then delete only predicates/value sets proven
+      dead by TypeScript, lint, and exact symbol-usage review. Keep boundary-local `isRecord`, safe-ID,
+      provider, media, protocol, mailbox, and adapter guards that still have independent consumers;
+      generic identifier-name uniqueness is not a correctness oracle. After 6D, scan the retained
+      compilation closure for V1 project/scene types and obsolete validator exports, not helper names.
 - [ ] Switch runtime startup to classify supported V2 projects before any mutating lifecycle action.
       Unsupported V1 bypasses cleanup, reapers, mailboxes, watchers, protocol, job recovery,
       resolvers, and adapters and returns the explicit UI state. In a mixed root, all lifecycle
-      traversals receive or derive a supported-V2 ID set and leave the complete V1 tree untouched.
+      traversals receive or derive a refreshable supported-V2 ID set and leave the complete V1 tree
+      and `projects.json` untouched. If startup has no V2 project, first V2 creation performs one
+      idempotent activation of protocol/watchers/processor/recovery; V1-only→create-V2 and
+      empty→create-V2 work without restart.
+- [ ] Define first-V2 activation as a single-flight state machine. Commit and fsync the new project and
+      `projects-v2.json` before activation, refresh the supported-ID inventory, then install protocol,
+      watchers, processor, and recovery in a fixed order. Concurrent creates join the same activation.
+      On rejection, tear down only components installed by that attempt in reverse order, clear the
+      single-flight promise, retain every committed project, perform zero provider work, and allow the
+      next create or explicitly named `retryStudioRuntimeActivationV2` service call to activate. A
+      create whose durable commit succeeded but activation failed returns the discriminated
+      `created_runtime_degraded` result with its project ID; clients must not retry creation. Shutdown
+      cancels/awaits the in-flight attempt and prevents any post-shutdown install. RED concurrent
+      creates, failure at each install boundary, retry after failure, and create-versus-shutdown;
+      assert no project rollback/deletion, no V1 byte change, no duplicate watcher/processor, and no
+      paid dependency.
+- [ ] Deleting the last V2 project refreshes the supported-ID set to empty but does not tear down the
+      ready global infrastructure; every traversal becomes a gated no-op, leaves any V1 tree untouched,
+      and a later V2 create reuses the ready runtime without duplicate installation. RED
+      create→delete-last→V1-only idle→create-again in one process.
+- [ ] Expose `retryStudioRuntimeActivationV2` through the typed native bridge only for the degraded
+      state. The provider stays statically registered for manifest/schema parity and returns the typed
+      `already_ready` result when ready. Library renders one non-spending “Retry Studio runtime” action
+      only for a degraded project; the call joins the same single-flight state machine and has no
+      project/provider arguments. RED the degraded result → visible action → successful in-process
+      retry path, double activation clicks, retry during shutdown, `already_ready`, and absence of the
+      Library action when runtime is ready.
 - [ ] Register only V2 bridge providers and remove legacy scene providers. Generic preload remains
       unchanged. Switch the builtin MCP server/writers/mailbox/runtime from the staged V1 entrypoints
       to the reviewed V2 entrypoints and then delete the V1 entrypoints.
@@ -791,11 +1040,15 @@ as simultaneous public choices:
       preserve route-close dirty checks, and remove Cut/Export controls.
 - [ ] Complete every move listed above before deleting `PhaseShell`, `Shell`, or `Storyboard`.
       Preserve proposal cards, required actions, rules, Brief, and the one conversation owner.
-- [ ] Rewrite retained Library list/unsupported states, summary/poster fields, proposal
-      mutation-batch rendering/editor dependencies, Director conversation fixtures, and Brief
-      controller props to V2 before removing the V1 aliases and phase controller types. Component
-      module entry points use `index.tsx`; no moved file may import a deleted
+- [ ] Rewrite retained Library list/delete/unsupported/degraded-runtime states and summary/poster
+      fields. Rewrite proposal mutation-batch rendering/editor dependencies, Director conversation
+      fixtures, and Brief controller props to V2 before removing V1 aliases and phase controller
+      types. Component module entry points use `index.tsx`; no moved file may import a deleted
       PhaseShell/Shell/Storyboard path.
+- [ ] In 6B create a load-capable V2 `useWorkspaceProject` plus read-only, V2-typed editor and draft
+      stubs. In 6C wire only those V2 paths publicly; they never read, write, or delete the V1 scene
+      draft key. Task 7, not Task 6, owns the serialized mutation queue, V2 draft persistence, rebase,
+      and conflict behavior.
 - [ ] Delete the dormant paid storyboard planner/draft/fit providers, runtime dependency, modal, and
       tests; V2 MCP mutation proposals remain and are not routed through a second text-provider call.
 - [ ] Convert every retained Generation/Preview/hook/readiness/route file in the explicit compilation
@@ -813,7 +1066,7 @@ as simultaneous public choices:
 - [ ] Mutation proof: install protocol before V2 classification and prove poison startup fails;
       re-add `cut` to `STUDIO_VIEWS` and prove route/provider inventory tests fail; restore.
 - [ ] Run:
-      `bunx vitest run tests/unit/process/bridge/creativeStudioBridge.test.ts tests/unit/process/bridge/nativePayloadSchemas.test.ts tests/unit/process/creative-studio/runtime.test.ts tests/unit/process/creative-studio/service/index.test.ts tests/unit/process/creative-studio/service/directorCommandService.test.ts tests/integration/creative-studio/generationLifecycle.integration.test.ts tests/integration/creative-studio/renderService.integration.test.ts tests/integration/creative-studio/projectRecovery.integration.test.ts tests/unit/pages/studio/StudioLibrary.dom.test.tsx tests/unit/pages/studio/StudioPage.dom.test.tsx tests/unit/pages/studio/Workspace/State tests/unit/pages/studio/Workspace/Shell tests/unit/pages/studio/Workspace/DirectorLayout tests/unit/pages/studio/Generation tests/unit/pages/studio/EngineStrip tests/unit/pages/studio/studioI18n.test.ts tests/unit/e2e/creativeStudioSelectors.dom.test.tsx tests/unit/renderer/layout/StudioRouteVisibility.dom.test.tsx tests/unit/common-config/creativeStudioFeatureFlag.test.ts`,
+      `bunx vitest run tests/unit/process/bridge/creativeStudioBridge.test.ts tests/unit/process/bridge/nativePayloadSchemas.test.ts tests/unit/process/creative-studio/runtime.test.ts tests/unit/process/creative-studio/store.test.ts tests/unit/process/creative-studio/jobManager.test.ts tests/unit/process/creative-studio/mediaStore.test.ts tests/unit/process/creative-studio/service/schema2 tests/unit/process/creative-studio/service/index.test.ts tests/unit/process/creative-studio/service/directorCommandContracts.test.ts tests/unit/process/creative-studio/service/directorCommandService.test.ts tests/unit/process/creative-studio/service/directorCommandMailbox.test.ts tests/unit/process/creative-studio/service/directorCommandProcessor.test.ts tests/unit/process/creative-studio/service/studioDirectorCommandWriter.test.ts tests/unit/process/creative-studio/service/directorCommandSpendFence.test.ts tests/unit/process/creative-studio/types tests/integration/creative-studio/schema2Cutover.integration.test.ts tests/integration/creative-studio/directorCommandLifecycle.integration.test.ts tests/integration/creative-studio/directorCommandLatency.integration.test.ts tests/integration/creative-studio/generationLifecycle.integration.test.ts tests/integration/creative-studio/renderService.integration.test.ts tests/integration/creative-studio/projectRecovery.integration.test.ts tests/unit/pages/studio/StudioLibrary.dom.test.tsx tests/unit/pages/studio/StudioPage.dom.test.tsx tests/unit/pages/studio/Workspace/State tests/unit/pages/studio/Workspace/Shell tests/unit/pages/studio/Workspace/DirectorLayout tests/unit/pages/studio/Generation tests/unit/pages/studio/EngineStrip tests/unit/pages/studio/studioI18n.test.ts tests/unit/e2e/creativeStudioSelectors.dom.test.tsx tests/unit/renderer/layout/StudioRouteVisibility.dom.test.tsx tests/unit/common-config/creativeStudioFeatureFlag.test.ts`,
       `bun run i18n:types && node scripts/check-i18n.js`, and `bunx tsc --noEmit`.
 - [ ] Complete and retain the four reviewed commits specified in **Execution decomposition**; do not
       squash them into one opaque cutover commit before review.
@@ -825,12 +1078,27 @@ as simultaneous public choices:
 - [ ] Prove 6A and 6B never registered V2 publicly, 6C exposed exactly one V2 contract, and 6D left no
       compiled legacy UI or V1 staging export.
 - [ ] Re-run the Task 6 focused gate plus the mixed V1+V2 byte-tree integration and resolve every
-      Critical/Important finding in separate commits before Task 7.
+      Critical/Important finding in separate commits before Task 7. Build exact HEAD with
+      `bun run package`, then run the existing `creative-studio.e2e.ts` in an isolated fake profile;
+      stale `out/` is not evidence. The layout E2E does not exist until Task 8 and first joins the gate
+      there.
 
 ### Task 7 — Build shared workspace projection, drafts, selection, and reviewed render state
 
 **Files**
 
+- Modify: `vitest.creative-studio-coverage.config.ts`
+- Modify: `packages/desktop/src/common/types/project/creativeStudioTypes.ts`
+- Modify: `packages/desktop/src/common/adapter/ipcBridge.ts`
+- Modify: `packages/desktop/src/common/adapter/native/constants.ts`
+- Modify: `packages/desktop/src/common/adapter/native/payloadSchemas.ts`
+- Modify: `packages/desktop/src/process/bridge/creativeStudioBridge.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/store.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/jobManager.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/index.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/v2Service.ts`
+- Modify: `packages/desktop/src/renderer/pages/studio/StudioPage.tsx`
+- Modify: `packages/desktop/src/renderer/pages/studio/components/Workspace/index.tsx`
 - Modify: `packages/desktop/src/renderer/pages/studio/hooks/workspace/index.ts`
 - Modify: `packages/desktop/src/renderer/pages/studio/hooks/workspace/useWorkspaceProject.ts`
 - Modify: `packages/desktop/src/renderer/pages/studio/hooks/workspace/useWorkspaceEditor.ts`
@@ -845,15 +1113,22 @@ as simultaneous public choices:
 - Create: `tests/unit/pages/studio/Workspace/State/useWorkspaceReview.dom.test.ts`
 - Modify: `packages/desktop/src/renderer/pages/studio/components/Generation/GenerationReviewModal.tsx`
 - Modify: `tests/unit/pages/studio/Generation/GenerationReviewModal.dom.test.tsx`
+- Modify: `tests/unit/process/bridge/creativeStudioBridge.test.ts`
+- Modify: `tests/unit/process/bridge/nativePayloadSchemas.test.ts`
+- Modify: `tests/unit/process/creative-studio/store.test.ts`
+- Modify: `tests/unit/process/creative-studio/service/index.test.ts`
+- Modify: `tests/integration/creative-studio/directorCommandLifecycle.integration.test.ts`
+- Modify: `tests/integration/creative-studio/generationLifecycle.integration.test.ts`
+- Modify: `tests/unit/pages/studio/StudioPage.dom.test.tsx`
 
 **Steps**
 
 - [ ] Use a V2 session-storage namespace and exact versioned section/clip field records. Never read
       or delete the old scene draft key.
-- [ ] Port the serialized intent queue to one `applyMutations` IPC call. Track dirtiness per authored
-      section/clip field; adopt untouched canonical fields; retain both values plus an explicit
-      conflict for same-field changes; never save during adoption; explicit save uses newest
-      revision; stale refetch does not replay.
+- [ ] Extend Task 6's read-only V2 stubs with the serialized intent queue and one `applyMutations` IPC
+      call. Track dirtiness per authored section/clip field and adopt untouched canonical fields.
+      Retain both values plus an explicit conflict for same-field changes; never save during adoption;
+      explicit save uses newest revision; stale refetch does not replay.
 - [ ] Add one shared ordered active-section selection model with stable identity anchor, pointer and
       Shift range, ready-only selection, park clearing, restore non-selection, and cross-view
       preservation.
@@ -862,14 +1137,46 @@ as simultaneous public choices:
 - [ ] Preserve reviewed generation semantics: zero disabled, 1–24 one reviewed request, 25+ disabled,
       no chunking/subset, and first confirmation after revision drift submits zero and rebuilds.
 - [ ] Connect the durable V2 Director reference requests left queued by Task 6 to the same reviewed
-      modal; only explicit human confirmation may dismiss the request and reach `submitClips` for
-      reference output. Director does not create a take-generation request.
+      modal with a discriminated review state: ordinary take review derives current payable selection;
+      Director reference review displays and submits the request's immutable ordered `clipIds` and
+      derives reference output from those IDs, independent of current UI selection. Director does not
+      create a take-generation request.
+- [ ] Add one main-process `confirmReferenceRequestV2({ projectId, requestId, expectedRevision })`
+      bridge/service operation; the renderer cannot supply replacement clip IDs. Under the project
+      queue, re-read the pending request and its exact ordered clip IDs. Derive one unique bounded key
+      per clip as `refv2_${sha256(requestId + "\0" + ordinal + "\0" + clipId)}` and hand the exact
+      request plus those keys to `submitClips` as reference output. All local jobs and keys become
+      durable in the project commit before any provider call.
+- [ ] Journal the cross-file handoff in this order: project/job commit → fsynced immutable
+      `StudioReferenceReviewReceiptV2` under `reference-requests/receipts/` → idempotent pending/slot
+      cleanup. The exact receipt records schema/project/request ID, original and resulting revisions,
+      ordered clip IDs, per-clip keys, job IDs, and timestamp. The receipt is authoritative; cleanup is
+      never evidence of confirmation, and no step pretends project JSON plus sidecars share one atomic
+      filesystem transaction.
+- [ ] On every call, look up a valid receipt first and return it before ordinary stale-revision checks.
+      If no receipt exists, read the still-pending request, derive its keys, and reconcile matching
+      durable jobs before testing `expectedRevision`; the job commit itself advances the project
+      revision. An exact/partial matching job set is completed idempotently and then journaled, never
+      submitted again. Only a request with no matching jobs reaches the normal revision check and new
+      confirmation path.
+- [ ] Make confirmation retry-safe at every crash boundary. Before durable jobs, the request remains
+      pending and no provider call occurred. After durable jobs/provider ambiguity but before receipt,
+      replay recovers the per-clip job set and cannot duplicate submission. After receipt but before
+      cleanup or IPC response, replay returns the receipt and finishes cleanup idempotently. Restart
+      never confirms an unconfirmed pending request; normal recovery may resume jobs already durably
+      authorized by a prior human confirmation. Closing/cancelling the modal leaves the request
+      pending.
 - [ ] RED unrelated-field rebase, same-field comparison, no implicit save, stale no-retry, reload of
-      V2 drafts, selection parity, exact 0/24/25 payable cases, and Director request no-submit.
+      V2 drafts, selection parity, exact 0/24/25 payable cases, take/reference discrimination, request-
+      order independence from UI selection, stale request revision, pre-confirm zero-submit, exactly-
+      once confirmed submit, distinct deterministic keys for multiple clips, duplicate clip-ID
+      rejection, each crash boundary, receipt/job lookup before stale rejection, receipt replay,
+      unconfirmed restart with zero paid work, and recovery of only the already-authorized confirmed
+      jobs.
 - [ ] Mutation proofs: drop local-dirty overlay and prove conflict tests fail; chunk 25 clips and prove
       paid-boundary tests fail; restore.
 - [ ] Run:
-      `bunx vitest run tests/unit/pages/studio/Workspace tests/unit/pages/studio/Generation/GenerationReviewModal.dom.test.tsx tests/unit/pages/studio/Generation/useStudioJobs.dom.test.ts tests/unit/pages/studio/StudioPage.dom.test.tsx`
+      `bunx vitest run tests/unit/process/bridge/creativeStudioBridge.test.ts tests/unit/process/bridge/nativePayloadSchemas.test.ts tests/unit/process/creative-studio/store.test.ts tests/unit/process/creative-studio/service/index.test.ts tests/integration/creative-studio/directorCommandLifecycle.integration.test.ts tests/integration/creative-studio/generationLifecycle.integration.test.ts tests/unit/pages/studio/Workspace tests/unit/pages/studio/Generation/GenerationReviewModal.dom.test.tsx tests/unit/pages/studio/Generation/useStudioJobs.dom.test.ts tests/unit/pages/studio/StudioPage.dom.test.tsx`
       and `bunx tsc --noEmit`.
 - [ ] Commit: `feat(studio): add shared workspace state and review`.
 
@@ -877,6 +1184,7 @@ as simultaneous public choices:
 
 **Files**
 
+- Modify: `vitest.creative-studio-coverage.config.ts`
 - Modify: `packages/desktop/src/renderer/pages/studio/components/Workspace/index.tsx`
 - Modify: `packages/desktop/src/renderer/pages/studio/components/Workspace/DirectorLayout/index.tsx`
 - Modify: `packages/desktop/src/renderer/pages/studio/components/Workspace/DirectorLayout/DirectorLayout.module.css`
@@ -942,7 +1250,7 @@ as simultaneous public choices:
       conversation by layout mode and prove identity/stream tests fail; restore.
 - [ ] Run:
       `bunx vitest run tests/unit/pages/studio/Workspace/DirectorLayout tests/unit/pages/studio/Workspace/Shell tests/unit/pages/studio/StudioPage.dom.test.tsx tests/unit/pages/studio/studioI18n.test.ts`
-      and
+      then build the exact Task 8 head with `bun run package`, then run
       `AIONUI_E2E_TEST=1 AIONUI_E2E_STUDIO_FAKE=1 E2E_DEV=1 bunx playwright test --config playwright.config.ts tests/e2e/features/workspaces/creative-studio-layout.e2e.ts`.
 - [ ] Commit: `feat(studio): keep director chat beside the workspace`.
 
@@ -952,9 +1260,12 @@ as simultaneous public choices:
       accessibility review.
 - [ ] Confirm no V1 public alias/provider/route remains, unsupported V1 startup is byte-tree clean,
       and the feature flag/default remain unchanged.
-- [ ] Run focused process+renderer gates, `bun run test`, `bun run test:coverage`,
-      `bunx tsc --noEmit`, i18n generation/check, lint, format, Playwright layout, and diff check.
-      The diff check is
+- [ ] Run focused process+renderer gates, `bun run test`, `bun run test:coverage`, and
+      `bunx vitest run --config vitest.creative-studio-coverage.config.ts --coverage`; the changed-file
+      report must satisfy the 80% line/branch ratchet, including executable `common/types` helpers.
+      Then run `bunx tsc --noEmit`, i18n generation/check, lint, and format. Build the exact Gate 2
+      head with `bun run package`, then run both `creative-studio.e2e.ts` and
+      `creative-studio-layout.e2e.ts` in isolated fake profiles. The diff check is
       `git diff --check 21bf87ae1674598bd42ea88c5f13c74e8389b3c0...HEAD -- . ':(exclude)docs/prds/creative-studio/creative-studio-2-table-board-reference.html.txt'`;
       verify the excluded reference by SHA-256.
 - [ ] Resolve Critical/Important findings in separate commits and re-review before Task 9.
@@ -967,6 +1278,7 @@ as simultaneous public choices:
 
 **Files**
 
+- Modify: `vitest.creative-studio-coverage.config.ts`
 - Modify: `packages/desktop/src/renderer/pages/studio/components/Workspace/index.tsx`
 - Modify: `packages/desktop/src/renderer/pages/studio/components/Workspace/WorkspaceShell/index.tsx`
 - Modify: `packages/desktop/src/renderer/pages/studio/components/Workspace/SelectionBar/index.tsx`
@@ -1002,7 +1314,7 @@ as simultaneous public choices:
 - [ ] Mutation proofs: render Table with div roles and prove semantics tests fail; reorder only local
       state and prove restart/canonical tests fail; restore.
 - [ ] Run:
-      `bunx vitest run tests/unit/pages/studio/Workspace/Shell tests/unit/pages/studio/Workspace/TableView tests/unit/pages/studio/studioI18n.test.ts`
+      `bunx vitest run tests/unit/pages/studio/Workspace/Shell tests/unit/pages/studio/Workspace/TableView tests/unit/pages/studio/StudioPage.dom.test.tsx tests/unit/pages/studio/studioI18n.test.ts`
       and `bunx tsc --noEmit`.
 - [ ] Commit: `feat(studio): build the section table workspace`.
 
@@ -1010,6 +1322,7 @@ as simultaneous public choices:
 
 **Files**
 
+- Modify: `vitest.creative-studio-coverage.config.ts`
 - Modify: `packages/desktop/src/renderer/pages/studio/components/Workspace/index.tsx`
 - Modify: `packages/desktop/src/renderer/pages/studio/components/Workspace/TableView/index.tsx`
 - Create: `packages/desktop/src/renderer/pages/studio/components/Workspace/SectionInspector/index.tsx`
@@ -1050,7 +1363,7 @@ as simultaneous public choices:
 - [ ] Mutation proofs: allow deleting a cut-linked clip and prove dependency tests fail; close dirty
       inspector by flushing and prove no-implicit-save tests fail; restore.
 - [ ] Run:
-      `bunx vitest run tests/unit/pages/studio/Workspace/SectionInspector tests/unit/pages/studio/Workspace/State/useWorkspaceEditor.dom.test.ts tests/unit/pages/studio/Generation/StagePreview.dom.test.tsx tests/unit/pages/studio/studioI18n.test.ts`
+      `bunx vitest run tests/unit/pages/studio/Workspace/SectionInspector tests/unit/pages/studio/Workspace/TableView tests/unit/pages/studio/Workspace/Shell tests/unit/pages/studio/Workspace/State/useWorkspaceEditor.dom.test.ts tests/unit/pages/studio/Generation/StagePreview.dom.test.tsx tests/unit/pages/studio/StudioPage.dom.test.tsx tests/unit/pages/studio/studioI18n.test.ts`
       and `bunx tsc --noEmit`.
 - [ ] Commit: `feat(studio): add the shared section inspector`.
 
@@ -1060,6 +1373,16 @@ as simultaneous public choices:
       paid-boundary review.
 - [ ] Compare Table at 1600×1000 and medium/narrow against the frozen reference; record every
       accessibility-driven size/contrast departure.
+- [ ] Run the focused Task 9–10 tests, `bun run test`, `bun run test:coverage`,
+      `bunx vitest run --config vitest.creative-studio-coverage.config.ts --coverage`,
+      `bunx tsc --noEmit`, i18n generation/check, lint, and format. Require the changed-runtime
+      coverage report to meet the 80% per-file line/branch ratchet.
+- [ ] Build the exact Gate 3 head with `bun run package`, then run `creative-studio.e2e.ts` and
+      `creative-studio-layout.e2e.ts` in separate isolated fake profiles as the composed
+      Table/Inspector and persistent-layout smoke.
+- [ ] Run
+      `git diff --check 21bf87ae1674598bd42ea88c5f13c74e8389b3c0...HEAD -- . ':(exclude)docs/prds/creative-studio/creative-studio-2-table-board-reference.html.txt'`
+      and verify the excluded frozen reference against its required SHA-256.
 - [ ] Resolve Critical/Important findings and re-review before Task 11.
 
 ---
@@ -1070,6 +1393,7 @@ as simultaneous public choices:
 
 **Files**
 
+- Modify: `vitest.creative-studio-coverage.config.ts`
 - Modify: `packages/desktop/src/renderer/pages/studio/components/Workspace/index.tsx`
 - Modify: `packages/desktop/src/renderer/pages/studio/components/Workspace/SectionInspector/index.tsx`
 - Create: `packages/desktop/src/renderer/pages/studio/components/Workspace/BoardView/index.tsx`
@@ -1111,7 +1435,7 @@ as simultaneous public choices:
 - [ ] Mutation proofs: choose most recent instead of first canonical cover and prove projection tests
       fail; delete parked cuts and prove restore tests fail; restore.
 - [ ] Run:
-      `bunx vitest run tests/unit/pages/studio/Workspace/BoardView tests/unit/pages/studio/Workspace/State/useWorkspaceSelection.dom.test.ts tests/unit/pages/studio/Workspace/SectionInspector tests/unit/pages/studio/studioI18n.test.ts`
+      `bunx vitest run tests/unit/pages/studio/Workspace/BoardView tests/unit/pages/studio/Workspace/State/useWorkspaceSelection.dom.test.ts tests/unit/pages/studio/Workspace/SectionInspector tests/unit/pages/studio/Workspace/Shell tests/unit/pages/studio/StudioPage.dom.test.tsx tests/unit/pages/studio/studioI18n.test.ts`
       and `bunx tsc --noEmit`.
 - [ ] Commit: `feat(studio): build the board and shelf`.
 
@@ -1121,6 +1445,16 @@ as simultaneous public choices:
       review.
 - [ ] Compare Board at 1600×1000 plus medium/narrow to the frozen reference and resolve all Critical/
       Important findings before hardening.
+- [ ] Run the focused Task 11 tests, `bun run test`, `bun run test:coverage`,
+      `bunx vitest run --config vitest.creative-studio-coverage.config.ts --coverage`,
+      `bunx tsc --noEmit`, i18n generation/check, lint, and format. Require the changed-runtime
+      coverage report to meet the 80% per-file line/branch ratchet.
+- [ ] Build the exact Gate 4 head with `bun run package`, then run `creative-studio.e2e.ts` and
+      `creative-studio-layout.e2e.ts` in separate isolated fake profiles as the composed Board/shelf,
+      inspector, and persistent-layout smoke.
+- [ ] Run
+      `git diff --check 21bf87ae1674598bd42ea88c5f13c74e8389b3c0...HEAD -- . ':(exclude)docs/prds/creative-studio/creative-studio-2-table-board-reference.html.txt'`
+      and verify the excluded frozen reference against its required SHA-256.
 
 ---
 
@@ -1146,6 +1480,7 @@ as simultaneous public choices:
 - Modify: `tests/e2e/features/workspaces/creative-studio-layout.e2e.ts`
 - Modify: `tests/e2e/features/workspaces/creative-studio.e2e.ts`
 - Modify: `tests/e2e/fixtures.ts`
+- Create: `tests/e2e/features/workspaces/creative-studio-accessibility.e2e.ts`
 - Create: `tests/e2e/features/workspaces/creative-studio-capacity.e2e.ts`
 
 **Steps**
@@ -1158,6 +1493,16 @@ as simultaneous public choices:
 - [ ] Verify native Table/list and Board/shelf names, view navigation `aria-current`, exact focused
       localized heading, selection/progress/conflict/reorder live regions, dialog naming, Escape,
       separator values, and focus return.
+- [ ] Add a named browser accessibility suite that computes effective foreground/background contrast
+      from rendered styles in light and dark themes for normal text (≥4.5:1), large text and non-text
+      state/focus boundaries (≥3:1), including selected, ready, rendering, blocked, breach, disabled,
+      hover, and focus states. Measure every interactive bounding box at each responsive presentation
+      and fail below 28×28 CSS px.
+- [ ] Audit the browser accessibility tree and keyboard order for one unambiguous accessible name per
+      action, native Table/list/Board/shelf semantics, dialog and separator values, live regions, and no
+      hidden or duplicate tab stops. Assert each state has a text/icon/pattern cue independent of color.
+      RED each oracle, then prove it catches one lowered-contrast token, one 27px hit target, one removed
+      non-color cue, and one missing accessible name before restoring the implementation.
 - [ ] Use logical CSS throughout. In `fa-IR`, mirror visual docking/alignment/directional icons and
       separator direction without changing canonical order; authored fields use `dir="auto"`; IDs,
       hashes, paths, and durations use LTR `bdi` isolation.
@@ -1183,8 +1528,12 @@ as simultaneous public choices:
       `bun run i18n:types && node scripts/check-i18n.js`,
       `bunx vitest run tests/unit/pages/studio/studioI18n.test.ts tests/unit/pages/studio/Workspace/Shell/StudioAccessibleCopy.dom.test.tsx tests/unit/pages/studio/Workspace/Shell/studioStylesheetComposes.test.ts`,
       `bun run package`,
-      `AIONUI_E2E_TEST=1 AIONUI_E2E_STUDIO_FAKE=1 E2E_RELEASE_UNPACKAGED=1 bunx playwright test --config playwright.config.ts tests/e2e/features/workspaces/creative-studio-capacity.e2e.ts` twice, and
-      `AIONUI_E2E_TEST=1 AIONUI_E2E_STUDIO_FAKE=1 E2E_DEV=1 bunx playwright test --config playwright.config.ts tests/e2e/features/workspaces/creative-studio-layout.e2e.ts tests/e2e/features/workspaces/creative-studio.e2e.ts`.
+      `AIONUI_E2E_TEST=1 AIONUI_E2E_STUDIO_FAKE=1 E2E_RELEASE_UNPACKAGED=1 bunx playwright test --config playwright.config.ts tests/e2e/features/workspaces/creative-studio-capacity.e2e.ts`,
+      `AIONUI_E2E_TEST=1 AIONUI_E2E_STUDIO_FAKE=1 E2E_RELEASE_UNPACKAGED=1 bunx playwright test --config playwright.config.ts tests/e2e/features/workspaces/creative-studio-capacity.e2e.ts`, and
+      `AIONUI_E2E_TEST=1 AIONUI_E2E_STUDIO_FAKE=1 E2E_DEV=1 bunx playwright test --config playwright.config.ts tests/e2e/features/workspaces/creative-studio-accessibility.e2e.ts tests/e2e/features/workspaces/creative-studio-layout.e2e.ts tests/e2e/features/workspaces/creative-studio.e2e.ts`.
+      Record each command's direct exit code. Each capacity invocation must launch and log a fresh
+      Electron process ID and fresh temporary profile path, assert an empty initial test profile, and
+      close that process before returning; a reused process/profile is invalid evidence.
 - [ ] Confirm the generated ignored `i18n-keys.d.ts` is current but do not force-add it.
 - [ ] Commit: `test(studio): harden workspace accessibility and layouts`.
 
@@ -1221,7 +1570,11 @@ as simultaneous public choices:
       allowlisted.
 - [ ] Update E2E to create an isolated V2 project, add/edit/reorder in Table, open Inspector, switch to
       Board without state loss, select/reorder, park/restore, open/collapse/full-screen Director
-      without overlap/remount, and reach reviewed generation without a real provider.
+      without overlap/remount, and complete reviewed generation through the fake provider only. The
+      automated test clicks Confirm, asserts exactly one renderer IPC and one fake-adapter submission,
+      then observes the canonical job, output asset/take, and selected result. It fails on zero,
+      duplicate, automatic, or pre-confirmation submission. This automated fake-provider proof is
+      separate from the non-spending owner walkthrough below.
 - [ ] Copy the frozen reference to a temporary `.html` and inspect it in a network-isolated browser.
       Capture candidate Table and Board at 1600×1000 plus medium and narrow. Record hierarchy,
       density, alignment, state-language, and accessibility corrections in the tracked gate.
@@ -1244,10 +1597,11 @@ as simultaneous public choices:
   node scripts/check-i18n.js
   bun run test
   bun run test:coverage
+  bunx vitest run --config vitest.creative-studio-coverage.config.ts --coverage
   bun run package
   AIONUI_E2E_TEST=1 AIONUI_E2E_STUDIO_FAKE=1 E2E_RELEASE_UNPACKAGED=1 bunx playwright test --config playwright.config.ts tests/e2e/features/workspaces/creative-studio-capacity.e2e.ts
   AIONUI_E2E_TEST=1 AIONUI_E2E_STUDIO_FAKE=1 E2E_RELEASE_UNPACKAGED=1 bunx playwright test --config playwright.config.ts tests/e2e/features/workspaces/creative-studio-capacity.e2e.ts
-  AIONUI_E2E_TEST=1 AIONUI_E2E_STUDIO_FAKE=1 E2E_DEV=1 bunx playwright test --config playwright.config.ts tests/e2e/features/workspaces/creative-studio.e2e.ts tests/e2e/features/workspaces/creative-studio-layout.e2e.ts
+  AIONUI_E2E_TEST=1 AIONUI_E2E_STUDIO_FAKE=1 E2E_DEV=1 bunx playwright test --config playwright.config.ts tests/e2e/features/workspaces/creative-studio.e2e.ts tests/e2e/features/workspaces/creative-studio-layout.e2e.ts tests/e2e/features/workspaces/creative-studio-accessibility.e2e.ts
   bun run lint --quiet
   bun run format:check
   git diff --check 21bf87ae1674598bd42ea88c5f13c74e8389b3c0...HEAD -- . ':(exclude)docs/prds/creative-studio/creative-studio-2-table-board-reference.html.txt'
@@ -1272,6 +1626,9 @@ as simultaneous public choices:
     packages/desktop/src/process/resources/builtinMcp/studioReferenceRequestWriter.ts \
     packages/desktop/src/process/resources/builtinMcp/studioPendingRecordWriter.ts \
     packages/desktop/src/process/resources/builtinMcp/studioServer.ts \
+    packages/desktop/src/renderer/pages/studio/StudioPage.tsx \
+    packages/desktop/src/renderer/pages/studio/components/Generation/GenerationReviewModal.tsx \
+    packages/desktop/src/renderer/pages/studio/components/Generation/generationRequests.ts \
     packages/desktop/src/renderer/pages/studio/components/Workspace \
     packages/desktop/src/renderer/pages/studio/hooks/workspace \
     --glob '!useWorkspaceReview.ts'
@@ -1289,6 +1646,9 @@ as simultaneous public choices:
 - [ ] Resolve every Critical/Important finding in separate commits and rerun the proportional gate.
 - [ ] Re-run the complete final gate on the exact reviewed head; update only truthful results in the
       tracked gate, then re-review any documentation fix.
+- [ ] Confirm the tracked changed-runtime coverage report includes every executable Studio file changed
+      since the frozen baseline—including common-type projection helpers—and meets the 80% per-file
+      line and branch thresholds without exclusions added to make the gate pass.
 - [ ] Report Phase 2B implementation complete only when automated evidence passes and the owner has
       explicitly supplied PASS for the human visual/workflow checkpoint. Keep default enablement,
       packaging, merge, and release as separate owner decisions.

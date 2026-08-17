@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { CreateStudioProjectInputV2, StudioProjectV2 } from '@/common/types/project/creativeStudioTypes';
+import {
+  STUDIO_PROJECT_SCHEMA_VERSION,
+  type CreateStudioProjectInputV2,
+  type StudioProjectV2,
+} from '@/common/types/project/creativeStudioTypes';
 import { validateStudioProjectV2 } from './validation';
 
 const INPUT_KEYS = new Set(['name', 'brief', 'forgeProjectId', 'aspectRatio', 'targetDurationSeconds', 'resolution']);
@@ -28,7 +32,7 @@ export const createEmptyStudioProjectV2 = (
 ): StudioProjectV2 => {
   if (!hasExactInputKeys(input)) throw new TypeError('Invalid schema-2 project input');
   const project: StudioProjectV2 = {
-    schemaVersion: 2,
+    schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
     revision: 1,
     id,
     name: input.name.trim(),

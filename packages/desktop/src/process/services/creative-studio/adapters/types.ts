@@ -16,6 +16,8 @@ import type {
   StudioRouteValidation,
 } from '@/common/types/project/creativeStudioTypes';
 
+export { isValidProviderJobId } from '@/common/types/project/creativeStudioTypes';
+
 /** Main-process-only reference material resolved by the managed Studio media store. */
 export type ResolvedProviderInput = {
   assetId: string;
@@ -118,13 +120,6 @@ export type ProviderFetch = (
     redirect?: RequestRedirect;
   }
 ) => Promise<ProviderHttpResponse>;
-
-/**
- * Bounds remote IDs to URL-unreserved opaque tokens before they are retained or
- * interpolated into provider routes. URL, path, query, and fragment syntax is rejected.
- */
-export const isValidProviderJobId = (value: string): boolean =>
-  value.length <= 512 && /^[A-Za-z0-9][A-Za-z0-9._~-]*$/.test(value);
 
 export class ProviderDeadlineError extends Error {
   constructor() {

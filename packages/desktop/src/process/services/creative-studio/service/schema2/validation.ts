@@ -5,9 +5,11 @@
  */
 
 import {
+  isValidProviderJobId,
   STUDIO_MAX_CLIPS_PER_PROJECT,
   STUDIO_MAX_CLIPS_PER_SECTION,
   STUDIO_MAX_CUT_PLACEMENT_CLIPS,
+  STUDIO_PROJECT_SCHEMA_VERSION,
   STUDIO_MAX_SECTIONS,
   STUDIO_MAX_SHELF_ITEMS,
   STUDIO_MAX_SHELF_SECTION_ITEMS,
@@ -33,7 +35,6 @@ import {
   isStudioReferenceImageMimeType,
 } from '@/common/types/project/creativeStudioManagedAssetCollections';
 import { STUDIO_RULE_LIMITS, hasRuleToken } from '@/common/types/project/creativeStudioRules';
-import { isValidProviderJobId } from '@process/services/creative-studio/adapters/types';
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const ASPECT_RATIOS = new Set(['16:9', '9:16', '1:1', '4:3', '3:4']);
@@ -166,9 +167,14 @@ const FILTER_KEYS = new Set(['id', 'amount']);
 const RULE_KEYS = new Set(['id', 'scope', 'text', 'predicate', 'createdAt']);
 const RULE_PREDICATE_KEYS = new Set(['kind', 'terms']);
 const RULE_UNDO_KEYS = new Set(['capturedRevision', 'previousRules']);
+const SHELF_SECTION_KEYS = new Set(['kind', 'sectionId']);
+const SHELF_ASSET_KEYS = new Set(['kind', 'assetId']);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const ownValue = <T>(record: Record<string, T>, id: string): T | undefined =>
+  Object.hasOwn(record, id) ? record[id] : undefined;
 
 const hasKeys = (
   value: Record<string, unknown>,
@@ -308,7 +314,7 @@ const validateAsset = (assetId: string, projectId: string, value: unknown): valu
     (value.width !== undefined && !isIntegerInRange(value.width, 1, Number.MAX_SAFE_INTEGER)) ||
     (value.height !== undefined && !isIntegerInRange(value.height, 1, Number.MAX_SAFE_INTEGER)) ||
     (value.durationSeconds !== undefined &&
-      !isFiniteInRange(value.durationSeconds, Number.MIN_VALUE, Number.MAX_VALUE)) ||
+      !isFiniteInRange(value.durationSeconds, Number.MIN_VALUE, Number.MAX_SAFE_INTEGER)) ||
     !isCanonicalTimestamp(value.createdAt)
   ) {
     return false;
@@ -439,8 +445,8 @@ const validateFilter = (value: unknown): value is StudioCutFilter =>
 
 const validateCutClip = (cutClipId: string, project: StudioProjectV2, value: unknown): value is StudioCutClipV2 => {
   if (!isRecord(value) || !hasExactKeys(value, CUT_CLIP_KEYS)) return false;
-  const clip = isSafeId(value.clipId) ? project.clips[value.clipId] : undefined;
-  const asset = isSafeId(value.assetId) ? project.assets[value.assetId] : undefined;
+  const clip = isSafeId(value.clipId) ? ownValue(project.clips, value.clipId) : undefined;
+  const asset = isSafeId(value.assetId) ? ownValue(project.assets, value.assetId) : undefined;
   if (
     value.id !== cutClipId ||
     !isSafeId(cutClipId) ||
@@ -491,27 +497,30 @@ const validateCut = (cutId: string, project: StudioProjectV2, value: unknown): v
 };
 
 const retryGraphHasCycle = (jobs: Record<string, StudioJobV2>): boolean => {
-  const visiting = new Set<string>();
-  const visited = new Set<string>();
-  const visit = (jobId: string): boolean => {
-    if (visiting.has(jobId)) return true;
-    if (visited.has(jobId)) return false;
-    visiting.add(jobId);
-    const predecessorId = jobs[jobId]?.retryOfJobId;
-    if (predecessorId !== null && predecessorId !== undefined && Object.hasOwn(jobs, predecessorId)) {
-      if (visit(predecessorId)) return true;
+  const states = new Map<string, 'visiting' | 'visited'>();
+  for (const startJobId of Object.keys(jobs)) {
+    if (states.get(startJobId) === 'visited') continue;
+    const path: string[] = [];
+    let jobId: string | null = startJobId;
+    while (jobId !== null) {
+      const state = states.get(jobId);
+      if (state === 'visiting') return true;
+      if (state === 'visited') break;
+      const job = ownValue(jobs, jobId);
+      if (job === undefined) break;
+      states.set(jobId, 'visiting');
+      path.push(jobId);
+      jobId = job.retryOfJobId !== null && Object.hasOwn(jobs, job.retryOfJobId) ? job.retryOfJobId : null;
     }
-    visiting.delete(jobId);
-    visited.add(jobId);
-    return false;
-  };
-  return Object.keys(jobs).some(visit);
+    for (const visitedJobId of path) states.set(visitedJobId, 'visited');
+  }
+  return false;
 };
 
 const shelfItemIsExact = (value: unknown): value is StudioShelfItem => {
   if (!isRecord(value)) return false;
-  if (value.kind === 'section') return hasExactKeys(value, new Set(['kind', 'sectionId'])) && isSafeId(value.sectionId);
-  if (value.kind === 'asset') return hasExactKeys(value, new Set(['kind', 'assetId'])) && isSafeId(value.assetId);
+  if (value.kind === 'section') return hasExactKeys(value, SHELF_SECTION_KEYS) && isSafeId(value.sectionId);
+  if (value.kind === 'asset') return hasExactKeys(value, SHELF_ASSET_KEYS) && isSafeId(value.assetId);
   return false;
 };
 
@@ -520,7 +529,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
   if (
     !isRecord(value) ||
     !hasKeys(value, PROJECT_REQUIRED_KEYS, PROJECT_OPTIONAL_KEYS) ||
-    value.schemaVersion !== 2 ||
+    value.schemaVersion !== STUDIO_PROJECT_SCHEMA_VERSION ||
     !isIntegerInRange(value.revision, 1, Number.MAX_SAFE_INTEGER) ||
     !isSafeId(value.id) ||
     !isNonEmptyStringWithin(value.name, 256) ||
@@ -587,17 +596,24 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     return false;
   }
 
+  const clipAssetIdsByClipId = new Map<string, ReadonlySet<string>>();
+  const clipJobPositionsByClipId = new Map<string, ReadonlyMap<string, number>>();
+  for (const clip of Object.values(project.clips)) {
+    clipAssetIdsByClipId.set(clip.id, new Set(clip.assetIds));
+    clipJobPositionsByClipId.set(clip.id, new Map(clip.jobIds.map((jobId, index) => [jobId, index])));
+  }
+
   const projectReferenceCount = Object.values(project.assets).filter((asset) => asset.clipId === null).length;
   if (projectReferenceCount > STUDIO_MAX_ACTIVE_BRIEF_REFERENCES) return false;
   for (const asset of Object.values(project.assets)) {
     if (asset.clipId !== null) {
-      const clip = project.clips[asset.clipId];
-      if (clip === undefined || !clip.assetIds.includes(asset.id)) return false;
+      const clip = ownValue(project.clips, asset.clipId);
+      if (clip === undefined || !clipAssetIdsByClipId.get(clip.id)?.has(asset.id)) return false;
     }
     if (
       asset.sourceReferenceAssetIds !== undefined &&
       !asset.sourceReferenceAssetIds.every((sourceId) => {
-        const source = project.assets[sourceId];
+        const source = ownValue(project.assets, sourceId);
         return (
           source?.clipId === null &&
           source.mediaKind === 'image' &&
@@ -612,12 +628,12 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
   }
 
   for (const job of Object.values(project.jobs)) {
-    const clip = project.clips[job.clipId];
-    if (clip === undefined || !clip.jobIds.includes(job.id)) return false;
+    const clip = ownValue(project.clips, job.clipId);
+    if (clip === undefined || !clipJobPositionsByClipId.get(clip.id)?.has(job.id)) return false;
     if (
       !job.outputAssetIds.every((assetId) => {
-        const asset = project.assets[assetId];
-        return asset?.clipId === clip.id && clip.assetIds.includes(assetId);
+        const asset = ownValue(project.assets, assetId);
+        return asset?.clipId === clip.id && clipAssetIdsByClipId.get(clip.id)?.has(assetId) === true;
       })
     ) {
       return false;
@@ -625,7 +641,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     if (
       job.referenceInputSnapshot !== undefined &&
       !job.referenceInputSnapshot.conditioningReferenceAssetIds.every((sourceId) => {
-        const source = project.assets[sourceId];
+        const source = ownValue(project.assets, sourceId);
         return source?.clipId === null && source.managedAsset.collection === 'imports';
       })
     ) {
@@ -634,27 +650,28 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
   }
 
   for (const clip of Object.values(project.clips)) {
-    if (!clip.assetIds.every((assetId) => project.assets[assetId]?.clipId === clip.id)) return false;
-    if (!clip.jobIds.every((jobId) => project.jobs[jobId]?.clipId === clip.id)) return false;
+    if (!clip.assetIds.every((assetId) => ownValue(project.assets, assetId)?.clipId === clip.id)) return false;
+    if (!clip.jobIds.every((jobId) => ownValue(project.jobs, jobId)?.clipId === clip.id)) return false;
     if (clip.selectedAssetId !== null) {
-      const selected = project.assets[clip.selectedAssetId];
+      const selected = ownValue(project.assets, clip.selectedAssetId);
       if (selected === undefined || !isCanonicalStudioGeneratedTakeV2(selected, project.id, clip)) return false;
     }
     if (clip.referenceAssetId !== null) {
-      const reference = project.assets[clip.referenceAssetId];
-      if (reference?.clipId !== clip.id || !clip.assetIds.includes(reference.id)) return false;
+      const reference = ownValue(project.assets, clip.referenceAssetId);
+      if (reference?.clipId !== clip.id || !clipAssetIdsByClipId.get(clip.id)?.has(reference.id)) return false;
     }
   }
 
   if (retryGraphHasCycle(project.jobs)) return false;
   for (const job of Object.values(project.jobs)) {
     if (job.retryOfJobId === null) continue;
-    const predecessor = project.jobs[job.retryOfJobId];
-    const owner = project.clips[job.clipId];
+    const predecessor = ownValue(project.jobs, job.retryOfJobId);
+    const owner = ownValue(project.clips, job.clipId);
     if (predecessor === undefined || owner === undefined || predecessor.clipId !== job.clipId) return false;
-    const predecessorIndex = owner.jobIds.indexOf(predecessor.id);
-    const retryIndex = owner.jobIds.indexOf(job.id);
-    if (predecessorIndex < 0 || retryIndex < 0 || predecessorIndex >= retryIndex) return false;
+    const ownerJobPositions = clipJobPositionsByClipId.get(owner.id);
+    const predecessorIndex = ownerJobPositions?.get(predecessor.id);
+    const retryIndex = ownerJobPositions?.get(job.id);
+    if (predecessorIndex === undefined || retryIndex === undefined || predecessorIndex >= retryIndex) return false;
     if (job.retryReason === 'submission_unknown') {
       if (
         (predecessor.status !== 'needs_attention' && predecessor.status !== 'failed') ||
@@ -699,9 +716,9 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     }
     takeAliasItemCount += 1;
     if (takeAliasItemCount > STUDIO_MAX_SHELF_TAKE_ALIASES) return false;
-    const asset = project.assets[item.assetId];
+    const asset = ownValue(project.assets, item.assetId);
     if (asset?.clipId === null || asset === undefined) return false;
-    const clip = project.clips[asset.clipId];
+    const clip = ownValue(project.clips, asset.clipId);
     if (
       clip === undefined ||
       !isCanonicalStudioGeneratedTakeV2(asset, project.id, clip) ||

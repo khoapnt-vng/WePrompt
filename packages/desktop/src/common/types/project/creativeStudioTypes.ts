@@ -176,6 +176,14 @@ export const STUDIO_MAX_MCP_AVAILABLE_TAKE_IDS_PER_CLIP = 24;
 export const STUDIO_MIN_VIDEO_CLIP_SECONDS = 4;
 export const STUDIO_MAX_VIDEO_CLIP_SECONDS = 15;
 export const STUDIO_MAX_MUTATION_OPERATIONS = 32;
+
+/**
+ * Bounds persisted remote job IDs to URL-unreserved opaque tokens before they
+ * can reach provider polling or cancellation routes.
+ */
+export const isValidProviderJobId = (value: string): boolean =>
+  value.length <= 512 && /^[A-Za-z0-9][A-Za-z0-9._~-]*$/.test(value);
+
 export const STUDIO_MAX_SCENES = 24;
 export const STUDIO_MAX_GENERATION_SCENES_PER_REQUEST = 24;
 export const STUDIO_MAX_REFERENCE_REQUEST_SCENES = 24;

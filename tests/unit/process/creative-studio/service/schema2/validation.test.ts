@@ -71,6 +71,12 @@ const makeJob = (id: string, clipId = 'clip_1'): StudioJobV2 => ({
   updatedAt: timestamp,
 });
 
+const ownRecord = <T>(entries: Array<readonly [string, T]>): Record<string, T> =>
+  Object.fromEntries(entries) as Record<string, T>;
+
+const recordWithInheritedValue = <T>(record: Record<string, T>, id: string, value: T): Record<string, T> =>
+  Object.assign(Object.create(ownRecord([[id, value]]) as object) as Record<string, T>, record);
+
 const makeValidProject = (): StudioProjectV2 => ({
   schemaVersion: 2,
   revision: 1,
@@ -165,6 +171,69 @@ const addShelfTakeAliases = (project: StudioProjectV2, count: number, offset = 0
   }
 };
 
+const makeRetryChainProject = (count: number): StudioProjectV2 => {
+  const project = makeValidProject();
+  const jobIds = Array.from({ length: count }, (_, index) => `job_${index}`);
+  project.clips.clip_1!.jobIds = jobIds;
+  project.jobs = ownRecord(
+    jobIds
+      .map(
+        (jobId, index) =>
+          [
+            jobId,
+            {
+              ...makeJob(jobId),
+              status: 'failed',
+              error: { code: 'timeout', messageKey: 'timeout' },
+              retryOfJobId: index === 0 ? null : jobIds[index - 1]!,
+              retryReason: index === 0 ? null : 'provider_failure',
+            },
+          ] as const
+      )
+      .toReversed()
+  );
+  return project;
+};
+
+const makeOwnPrototypeKeyProject = (id: string): StudioProjectV2 => {
+  const project = makeValidProject();
+  const clip = makeClip(id, { selectedAssetId: id, assetIds: [id], jobIds: [id] });
+  const asset = makeAsset(id, id);
+  const job = makeJob(id, id);
+  project.sectionOrder = [id];
+  project.sections = ownRecord([[id, makeSection(id, [id])]]);
+  project.clips = ownRecord([[id, clip]]);
+  project.assets = ownRecord([[id, asset]]);
+  project.jobs = ownRecord([[id, job]]);
+  project.cuts = ownRecord([
+    [
+      id,
+      {
+        id,
+        name: 'Own prototype key cut',
+        orderMode: 'storyboard',
+        clipOrder: [id],
+        clips: ownRecord([
+          [
+            id,
+            {
+              id,
+              clipId: id,
+              assetId: id,
+              sourceInSeconds: null,
+              sourceOutSeconds: null,
+              crop: null,
+              filters: [],
+            },
+          ],
+        ]),
+      },
+    ],
+  ]);
+  project.activeCutId = id;
+  return project;
+};
+
 describe('validateStudioProjectV2 exact schema', () => {
   it('accepts a valid schema-2 project', () => {
     expect(validateStudioProjectV2(makeValidProject())).toBe(true);
@@ -204,6 +273,146 @@ describe('validateStudioProjectV2 exact schema', () => {
       providerJobId,
       remoteStartedAt: timestamp,
     };
+
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it.each(['constructor', 'toString', '__proto__'])('accepts valid own record entries named %s', (id) => {
+    expect(validateStudioProjectV2(makeOwnPrototypeKeyProject(id))).toBe(true);
+  });
+
+  it.each([
+    [
+      'asset owner clip',
+      (project: StudioProjectV2, id: string) => {
+        project.assets.asset_1 = makeAsset('asset_1', id);
+      },
+    ],
+    [
+      'job owner clip',
+      (project: StudioProjectV2, id: string) => {
+        project.jobs.job_1 = makeJob('job_1', id);
+      },
+    ],
+    [
+      'selected asset',
+      (project: StudioProjectV2, id: string) => {
+        project.clips.clip_1!.selectedAssetId = id;
+      },
+    ],
+    [
+      'reference asset',
+      (project: StudioProjectV2, id: string) => {
+        project.clips.clip_1!.referenceAssetId = id;
+      },
+    ],
+    [
+      'clip asset reverse link',
+      (project: StudioProjectV2, id: string) => {
+        project.clips.clip_1!.assetIds = [id];
+      },
+    ],
+    [
+      'clip job reverse link',
+      (project: StudioProjectV2, id: string) => {
+        project.clips.clip_1!.jobIds = [id];
+      },
+    ],
+    [
+      'shelf asset',
+      (project: StudioProjectV2, id: string) => {
+        project.shelf = [{ kind: 'asset', assetId: id }];
+      },
+    ],
+    [
+      'cut clip',
+      (project: StudioProjectV2, id: string) => {
+        const populated = makePopulatedProject();
+        Object.assign(project, populated);
+        project.cuts.cut_1!.clips.cut_clip_1!.clipId = id;
+      },
+    ],
+    [
+      'cut asset',
+      (project: StudioProjectV2, id: string) => {
+        const populated = makePopulatedProject();
+        Object.assign(project, populated);
+        project.cuts.cut_1!.clips.cut_clip_1!.assetId = id;
+      },
+    ],
+    [
+      'asset provenance source',
+      (project: StudioProjectV2, id: string) => {
+        project.clips.clip_1!.assetIds = ['asset_1'];
+        project.assets.asset_1 = {
+          ...makeAsset('asset_1'),
+          managedAsset: { collection: 'references', fileName: 'asset_1.png' },
+          sourceVisualPrompt: 'Reference',
+          sourceReferenceAssetIds: [id],
+          sourceAspectRatio: '16:9',
+          sourceResolution: '1080p',
+        };
+      },
+    ],
+    [
+      'job output asset',
+      (project: StudioProjectV2, id: string) => {
+        project.clips.clip_1!.jobIds = ['job_1'];
+        project.jobs.job_1 = { ...makeJob('job_1'), outputAssetIds: [id] };
+      },
+    ],
+    [
+      'job snapshot source',
+      (project: StudioProjectV2, id: string) => {
+        project.clips.clip_1!.jobIds = ['job_1'];
+        project.jobs.job_1 = {
+          ...makeJob('job_1'),
+          outputRole: 'reference',
+          referenceInputSnapshot: {
+            sourceVisualPrompt: 'Reference',
+            conditioningReferenceAssetIds: [id],
+            aspectRatio: '16:9',
+            resolution: '1080p',
+          },
+        };
+      },
+    ],
+    [
+      'retry predecessor',
+      (project: StudioProjectV2, id: string) => {
+        project.clips.clip_1!.jobIds = [id, 'job_1'];
+        project.jobs.job_1 = {
+          ...makeJob('job_1'),
+          retryOfJobId: id,
+          retryReason: 'provider_failure',
+        };
+      },
+    ],
+  ])('rejects an inherited prototype value used as a %s', (_label, mutate) => {
+    for (const id of ['constructor', 'toString', '__proto__']) {
+      const project = makeValidProject();
+      mutate(project, id);
+      expect(validateStudioProjectV2(project)).toBe(false);
+    }
+  });
+
+  it('rejects valid-looking values inherited through record prototypes', () => {
+    const project = makeValidProject();
+    const inheritedClip = makeClip('inherited_clip', { assetIds: ['inherited_asset'], jobIds: ['inherited_job'] });
+    const inheritedAsset = makeAsset('inherited_asset', 'inherited_clip');
+    const inheritedJob = makeJob('inherited_job', 'inherited_clip');
+    project.clips = recordWithInheritedValue(project.clips, inheritedClip.id, inheritedClip);
+    project.assets = recordWithInheritedValue(project.assets, inheritedAsset.id, inheritedAsset);
+    project.jobs = recordWithInheritedValue(project.jobs, inheritedJob.id, inheritedJob);
+    project.assets.asset_1 = makeAsset('asset_1', inheritedClip.id);
+
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it('rejects an inherited alias that resolves to an otherwise canonical own asset', () => {
+    const project = makePopulatedProject();
+    project.assets = recordWithInheritedValue(project.assets, 'inherited_alias', project.assets.asset_1!);
+    project.clips.clip_1!.selectedAssetId = 'inherited_alias';
 
     expect(validateStudioProjectV2(project)).toBe(false);
   });
@@ -364,6 +573,57 @@ describe('validateStudioProjectV2 exact schema', () => {
     };
 
     expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it('accepts an acyclic 20,000-job retry chain without recursion or quadratic lookup', () => {
+    expect(validateStudioProjectV2(makeRetryChainProject(20_000))).toBe(true);
+  });
+
+  it('rejects a cycle at the end of a 20,000-job retry chain without throwing', () => {
+    const project = makeRetryChainProject(20_000);
+    project.jobs.job_0 = {
+      ...project.jobs.job_0!,
+      retryOfJobId: 'job_19999',
+      retryReason: 'provider_failure',
+    };
+
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it('rejects a retry self-cycle', () => {
+    const selfCycle = makeRetryChainProject(1);
+    selfCycle.jobs.job_0 = {
+      ...selfCycle.jobs.job_0!,
+      retryOfJobId: 'job_0',
+      retryReason: 'provider_failure',
+    };
+    expect(validateStudioProjectV2(selfCycle)).toBe(false);
+  });
+
+  it('rejects a missing retry predecessor', () => {
+    const missingPredecessor = makeRetryChainProject(1);
+    missingPredecessor.jobs.job_0 = {
+      ...missingPredecessor.jobs.job_0!,
+      retryOfJobId: 'missing_job',
+      retryReason: 'provider_failure',
+    };
+    expect(validateStudioProjectV2(missingPredecessor)).toBe(false);
+  });
+
+  it('rejects a retry predecessor ordered after its retry', () => {
+    const reversedOrder = makeRetryChainProject(2);
+    reversedOrder.clips.clip_1!.jobIds = reversedOrder.clips.clip_1!.jobIds.toReversed();
+    expect(validateStudioProjectV2(reversedOrder)).toBe(false);
+  });
+
+  it('accepts retry branches that converge on the same earlier failed job', () => {
+    const project = makeRetryChainProject(3);
+    project.jobs.job_2 = {
+      ...project.jobs.job_2!,
+      retryOfJobId: 'job_0',
+    };
+
+    expect(validateStudioProjectV2(project)).toBe(true);
   });
 
   it('rejects a cut that names an orphan clip', () => {
@@ -572,6 +832,30 @@ describe('validateStudioProjectV2 capacities', () => {
 
     addShelfTakeAliases(project, 1, 96);
     expect(project.shelf).toHaveLength(121);
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+});
+
+describe('validateStudioProjectV2 asset duration boundaries', () => {
+  it('accepts Number.MAX_SAFE_INTEGER as the persisted asset duration boundary', () => {
+    const project = makePopulatedProject();
+    project.assets.asset_1!.durationSeconds = Number.MAX_SAFE_INTEGER;
+
+    expect(validateStudioProjectV2(project)).toBe(true);
+  });
+
+  it('rejects an asset duration of 1e308', () => {
+    const project = makePopulatedProject();
+    project.assets.asset_1!.durationSeconds = 1e308;
+
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it('rejects a cut trim beyond a safely bounded asset duration', () => {
+    const project = makePopulatedProject();
+    project.assets.asset_1!.durationSeconds = Number.MAX_SAFE_INTEGER;
+    project.cuts.cut_1!.clips.cut_clip_1!.sourceInSeconds = 1e300;
+
     expect(validateStudioProjectV2(project)).toBe(false);
   });
 });
