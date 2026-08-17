@@ -14,8 +14,14 @@ export function useHubAgents() {
     try {
       const extensionList = await ipcBridge.hub.getExtensionList.invoke();
       if (extensionList) {
-        // Filter agents
-        const agentExtensions = extensionList.filter((ext: IHubAgentItem) => ext.hubs?.includes('acpAdapters'));
+        // Filter agents. Codex is disabled in this build (its bundle is stripped at
+        // packaging), so hide it from the install market too.
+        const agentExtensions = extensionList.filter(
+          (ext: IHubAgentItem) =>
+            ext.hubs?.includes('acpAdapters') &&
+            !ext.name?.toLowerCase().includes('codex') &&
+            !ext.contributes?.acpAdapters?.some((id) => id.toLowerCase().includes('codex'))
+        );
         setAgents(agentExtensions);
       }
     } catch (err) {

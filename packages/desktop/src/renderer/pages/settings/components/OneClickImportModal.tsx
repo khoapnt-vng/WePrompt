@@ -15,7 +15,7 @@ type DetectedMcpServer = IMcpServer & {
 
 const IMPORTABLE_AGENTS = [
   { backend: 'claude', name: 'Claude' },
-  { backend: 'codex', name: 'Codex' },
+  // Codex is disabled in this build (its bundle is stripped at packaging).
 ] as const;
 
 const normalizeImportSkipReason = (reason: string | undefined) =>

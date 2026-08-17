@@ -73,6 +73,24 @@ function runTool(command, args) {
   return { status: result.status ?? 1, output: `${result.stdout || ''}${result.stderr || ''}` };
 }
 
+// The codex ACP agent is disabled in this product build. Remove its bundled tool
+// (managed-resources/acp/codex-acp) from the packaged app BEFORE signing so its
+// vendored, ad-hoc-signed helper binaries (rg, zsh) never ship — after this, aioncore
+// is the only Mach-O that still needs a Developer ID signature for notarization.
+// Safe at runtime: aioncore resolves ACP tools lazily (only when a codex conversation
+// starts, which the UI hides), so a missing codex-acp does not affect startup or any
+// other agent. Escape hatch: set WEPROMPT_KEEP_CODEX=1 to keep codex bundled.
+function pruneExcludedAcpTools(resourcesDir, runtimeKey, env = process.env) {
+  if (env.WEPROMPT_KEEP_CODEX === '1') return { removed: false };
+  const codexRoot = path.join(resourcesDir, 'bundled-aioncore', runtimeKey, 'managed-resources', 'acp', 'codex-acp');
+  if (!fs.existsSync(codexRoot)) return { removed: false };
+  fs.rmSync(codexRoot, { recursive: true, force: true });
+  console.log(
+    `   ✂️  Removed bundled codex-acp (with its unsigned rg/zsh) from ${runtimeKey} — codex agent disabled in this build`
+  );
+  return { removed: true };
+}
+
 // Only sign for real Developer ID builds — never for internal-release / local ad-hoc
 // builds, whose afterSign step intentionally applies (and enforces) an ad-hoc signature.
 function shouldSignBundledAioncore(electronPlatformName, env) {
@@ -199,6 +217,10 @@ async function afterPack(context) {
     }
 
     verifyBundledResources(resourcesDir, electronPlatformName, targetArch);
+
+    // Drop the disabled codex agent's bundle BEFORE signing so its unsigned vendored
+    // rg/zsh binaries never ship (notarization then only needs the aioncore binary).
+    pruneExcludedAcpTools(resourcesDir, `${electronPlatformName}-${targetArch}`);
 
     // Notarization prerequisite: sign the ad-hoc bundled-aioncore binaries that
     // electron-builder leaves untouched (extraResources are never auto-signed).
@@ -364,3 +386,4 @@ module.exports.resolveResourcesDir = resolveResourcesDir;
 module.exports.shouldSignBundledAioncore = shouldSignBundledAioncore;
 module.exports.resolveSigningIdentity = resolveSigningIdentity;
 module.exports.signBundledAioncoreBinaries = signBundledAioncoreBinaries;
+module.exports.pruneExcludedAcpTools = pruneExcludedAcpTools;

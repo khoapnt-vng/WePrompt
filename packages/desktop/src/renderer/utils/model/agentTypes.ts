@@ -169,7 +169,10 @@ export async function fetchManagedAgents(): Promise<ManagedAgent[]> {
   try {
     const agents = await ipcBridge.acpConversation.getManagedAgents.invoke();
     if (Array.isArray(agents)) {
-      return agents as ManagedAgent[];
+      // Codex agent is disabled in this build (its bundle is stripped at packaging),
+      // so hide it from every managed-agent surface (Agent settings, assistant editor
+      // backend picker, and the runtime catalog used by guid/cron lookups).
+      return (agents as ManagedAgent[]).filter((a) => a.backend !== 'codex');
     }
   } catch {
     // fallback to empty

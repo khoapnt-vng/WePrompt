@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -13,6 +13,7 @@ type AfterPackModule = {
     resourcesDir: string,
     options?: { env?: NodeJS.ProcessEnv; run?: RunFn; projectRoot?: string; logger?: Pick<Console, 'log' | 'warn'> }
   ) => { signed: number; skipped: number };
+  pruneExcludedAcpTools: (resourcesDir: string, runtimeKey: string, env?: NodeJS.ProcessEnv) => { removed: boolean };
 };
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -179,5 +180,47 @@ describe('signBundledAioncoreBinaries', () => {
     expect(() =>
       afterPack.signBundledAioncoreBinaries(resourcesDir, { env: {}, run, projectRoot, logger: silentLogger })
     ).toThrow(/Failed to codesign/);
+  });
+});
+
+describe('pruneExcludedAcpTools', () => {
+  function makeManagedResources(runtimeKey: string): string {
+    const resourcesDir = makeTemp();
+    const acpDir = join(resourcesDir, 'bundled-aioncore', runtimeKey, 'managed-resources', 'acp');
+    mkdirSync(join(acpDir, 'codex-acp', '1.1.2'), { recursive: true });
+    writeFileSync(join(acpDir, 'codex-acp', '1.1.2', 'rg'), 'binary');
+    mkdirSync(join(acpDir, 'claude-agent-acp', '0.58.1'), { recursive: true });
+    writeFileSync(join(acpDir, 'claude-agent-acp', '0.58.1', 'claude'), 'binary');
+    return resourcesDir;
+  }
+
+  it('removes codex-acp (and its vendored binaries) but keeps claude-agent-acp', () => {
+    const resourcesDir = makeManagedResources('darwin-arm64');
+    const acpDir = join(resourcesDir, 'bundled-aioncore', 'darwin-arm64', 'managed-resources', 'acp');
+
+    const result = afterPack.pruneExcludedAcpTools(resourcesDir, 'darwin-arm64', {});
+
+    expect(result.removed).toBe(true);
+    expect(existsSync(join(acpDir, 'codex-acp'))).toBe(false);
+    expect(existsSync(join(acpDir, 'claude-agent-acp', '0.58.1', 'claude'))).toBe(true);
+  });
+
+  it('keeps codex bundled when WEPROMPT_KEEP_CODEX=1', () => {
+    const resourcesDir = makeManagedResources('darwin-arm64');
+    const acpDir = join(resourcesDir, 'bundled-aioncore', 'darwin-arm64', 'managed-resources', 'acp');
+
+    const result = afterPack.pruneExcludedAcpTools(resourcesDir, 'darwin-arm64', { WEPROMPT_KEEP_CODEX: '1' });
+
+    expect(result.removed).toBe(false);
+    expect(existsSync(join(acpDir, 'codex-acp'))).toBe(true);
+  });
+
+  it('is a no-op when codex-acp is not present', () => {
+    const resourcesDir = makeTemp();
+    mkdirSync(join(resourcesDir, 'bundled-aioncore', 'win32-x64', 'managed-resources', 'acp'), { recursive: true });
+
+    const result = afterPack.pruneExcludedAcpTools(resourcesDir, 'win32-x64', {});
+
+    expect(result.removed).toBe(false);
   });
 });

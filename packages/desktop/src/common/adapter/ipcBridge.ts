@@ -268,7 +268,12 @@ export const shell = {
 // ---------------------------------------------------------------------------
 
 export const assistants = {
-  list: httpGet<Assistant[], void>('/api/assistants'),
+  // Codex agent is disabled in this build (its bundle is stripped at packaging), so
+  // hide every codex-backed assistant here — the single chokepoint feeding all
+  // assistant-selection surfaces (guid, team, cron, channel bots, skills, settings).
+  list: withResponseMap(httpGet<Assistant[], void>('/api/assistants'), (rows) =>
+    Array.isArray(rows) ? rows.filter((a) => a.agent?.acp_backend !== 'codex') : rows
+  ),
   get: httpGet<AssistantDetail, { id: string; locale?: string }>(
     ({ id, locale }) =>
       `/api/assistants/${encodeURIComponent(id)}${locale ? `?locale=${encodeURIComponent(locale)}` : ''}`
