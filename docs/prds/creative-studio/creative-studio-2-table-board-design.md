@@ -1,6 +1,6 @@
 # Creative Studio 2 — Table, Board, and Director Workspace
 
-**Status:** Approved in design conversation; awaiting written-spec review
+**Status:** Approved and independently reviewed; implementation planning
 **Date:** 2026-08-17
 **Baseline:** `integration/studio-director` at `21bf87ae1674598bd42ea88c5f13c74e8389b3c0`
 **Phase:** 2B — Section → Clip → Take and Table/Board review
@@ -73,8 +73,9 @@ The slice succeeds when:
 
 - Cut redesign, export redesign, folder mirroring, first/last-frame chains, or audio.
 - General Director undo, recovery checkpoints, or an `Undo all` control; those remain Phase 2C.
-- Direct paid action by the Director, provider changes, route procurement, or generation-policy
-  changes.
+- Direct paid action by the Director, provider/route workflow redesign, route procurement, or
+  generation-policy changes. The existing user-controlled image/video engine selection remains a
+  renderer-only, catalog-validated configuration seam; it is not exposed to Director.
 - Spatial canvas, multi-track editing, keyframes, grading, crop, filters, or aspect-ratio variants.
 - Default enablement, release acceptance, or removing the existing Creative Studio feature flag.
 - Production migration or backward compatibility for schema-1 prototype data.
@@ -214,8 +215,8 @@ it does not ship a customer migration/reset flow.
 
 Gate 1 and all automated tests use fresh, explicitly named development/test profiles and create
 schema-2 seed data directly. Existing prototype profiles remain untouched. A developer who no longer
-needs one may remove it through the repository's existing profile-cleanup workflow, outside this
-feature; Phase 2B adds no reset command and no destructive startup behavior.
+needs one may remove it manually using the development-profile instructions added by this phase,
+outside the running app; Phase 2B adds no reset command and no destructive startup behavior.
 
 ### Cut model boundary without Cut UI
 
@@ -249,6 +250,10 @@ The schema-2 mutation vocabulary covers:
   shelf alias, and reorder shelf identities;
 - select take for a clip.
 
+Existing image/video engine selection is not a free authoring mutation and is not added to this
+vocabulary. It remains the catalog-validated renderer-only configuration seam, reduced to image and
+video roles in schema 2; Director cannot call it or resolve providers.
+
 Each batch:
 
 1. Carries project ID, expected revision, version, and an ordered bounded operation list.
@@ -264,8 +269,8 @@ a shelved take atomically removes its shelf alias and updates the owning clip's 
 canonical take predicate and cut reconciliation. The previously selected take remains an ordinary
 unselected take and is not shelved implicitly.
 
-Renderer mutations and Director commands call the same pure helpers. Error types are bounded and
-machine-readable; UI copy never depends on parsing exception prose.
+Renderer free-authoring mutations and Director commands call the same pure helpers. Error types are
+bounded and machine-readable; UI copy never depends on parsing exception prose.
 
 ### Draft and conflict behavior
 
