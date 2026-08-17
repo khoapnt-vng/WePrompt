@@ -119,6 +119,19 @@ import {
 
 export { CreativeStudioServiceError } from './projectMutations';
 export {
+  createCreativeStudioServiceV2,
+  derivePayableClipIds,
+  type CreativeStudioServiceV2,
+  type CreativeStudioServiceV2Deps,
+  type StudioClipGenerationChoiceV2,
+  type StudioClipGenerationReadinessV2,
+  type StudioClipReadinessIssueV2,
+  type StudioClipReferencePromptV2,
+  type StudioGenerationReadinessV2,
+  type StudioRouteCatalogV2,
+  type StudioSubmitClipsRequestV2,
+} from './v2Service';
+export {
   createStudioDirectorCommandService,
   StudioDirectorCommandApplyError,
   type StudioDirectorCommandApplyErrorCode,

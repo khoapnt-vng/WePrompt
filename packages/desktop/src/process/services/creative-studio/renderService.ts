@@ -13,17 +13,25 @@ import { pipeline } from 'node:stream/promises';
 import type {
   StudioAspectRatio,
   StudioAsset,
+  StudioAssetV2,
+  StudioClip,
   StudioCutClip,
+  StudioCutClipV2,
   StudioCutFilter,
+  StudioCutV2,
   StudioNormalisedRect,
   StudioProject,
+  StudioProjectV2,
   StudioRenderCutResult,
   StudioRenderErrorCode,
   StudioRenderProgressEvent,
   StudioResolution,
   StudioScene,
 } from '@/common/types/project/creativeStudioTypes';
-import { isCanonicalStudioGeneratedTake } from '@/common/types/project/creativeStudioCanonicalTake';
+import {
+  isCanonicalStudioGeneratedTake,
+  isCanonicalStudioGeneratedTakeV2,
+} from '@/common/types/project/creativeStudioCanonicalTake';
 import type { StudioMediaStore } from './mediaStore';
 import type { CreativeStudioStore } from './store';
 
@@ -56,6 +64,99 @@ export const resolveStudioRenderDimensions = (
   resolution: StudioResolution,
   aspectRatio: StudioAspectRatio
 ): { width: number; height: number } => ({ ...RENDER_DIMENSIONS[resolution][aspectRatio] });
+
+export type StudioRenderPlacementV2 = Readonly<
+  Omit<StudioCutClipV2, 'crop' | 'filters'> & {
+    crop: Readonly<StudioNormalisedRect> | null;
+    filters: readonly Readonly<StudioCutFilter>[];
+  }
+>;
+
+export type StudioPersistedRenderProjectionV2 = Readonly<{
+  scope: 'persisted';
+  projectId: string;
+  cutId: string;
+  orderMode: StudioCutV2['orderMode'];
+  placements: readonly StudioRenderPlacementV2[];
+}>;
+
+export type StudioActiveRenderProjectionV2 = Readonly<{
+  scope: 'active';
+  projectId: string;
+  cutId: string;
+  orderMode: StudioCutV2['orderMode'];
+  placements: readonly StudioRenderPlacementV2[];
+}>;
+
+const ownValue = <T>(record: Record<string, T>, id: string): T | undefined =>
+  Object.hasOwn(record, id) ? record[id] : undefined;
+
+const copyRenderPlacementV2 = (placement: StudioCutClipV2): StudioRenderPlacementV2 => ({
+  ...placement,
+  crop: placement.crop === null ? null : { ...placement.crop },
+  filters: placement.filters.map((filter) => ({ ...filter })),
+});
+
+/** Projects the complete persisted active cut, including dormant parked-section placements. */
+export const resolvePersistedStudioRenderCutV2 = (
+  project: StudioProjectV2
+): StudioPersistedRenderProjectionV2 | null => {
+  if (project.activeCutId === null) return null;
+  const cut = ownValue(project.cuts, project.activeCutId);
+  if (cut === undefined) return null;
+  const placements: StudioRenderPlacementV2[] = [];
+  for (const placementId of cut.clipOrder) {
+    const placement = ownValue(cut.clips, placementId);
+    if (placement !== undefined) placements.push(copyRenderPlacementV2(placement));
+  }
+  return {
+    scope: 'persisted',
+    projectId: project.id,
+    cutId: cut.id,
+    orderMode: cut.orderMode,
+    placements,
+  };
+};
+
+const activeClipIdsV2 = (project: StudioProjectV2): ReadonlySet<string> => {
+  const clipIds = new Set<string>();
+  for (const sectionId of project.sectionOrder) {
+    const section = ownValue(project.sections, sectionId);
+    if (section === undefined) continue;
+    for (const clipId of section.clipOrder) clipIds.add(clipId);
+  }
+  return clipIds;
+};
+
+const activePlacementIsRenderableV2 = (
+  project: StudioProjectV2,
+  activeClipIds: ReadonlySet<string>,
+  placement: StudioRenderPlacementV2
+): boolean => {
+  if (!activeClipIds.has(placement.clipId)) return false;
+  const clip: StudioClip | undefined = ownValue(project.clips, placement.clipId);
+  if (clip === undefined || clip.selectedAssetId === null) return false;
+  const selected: StudioAssetV2 | undefined = ownValue(project.assets, clip.selectedAssetId);
+  if (selected === undefined || !isCanonicalStudioGeneratedTakeV2(selected, project.id, clip)) return false;
+  const placementAsset = ownValue(project.assets, placement.assetId);
+  return placementAsset !== undefined && isCanonicalStudioGeneratedTakeV2(placementAsset, project.id, clip);
+};
+
+/** Filters the persisted order for rendering without deleting dormant placement decisions. */
+export const resolveActiveStudioRenderCutV2 = (project: StudioProjectV2): StudioActiveRenderProjectionV2 | null => {
+  const persisted = resolvePersistedStudioRenderCutV2(project);
+  if (persisted === null) return null;
+  const activeClipIds = activeClipIdsV2(project);
+  return {
+    scope: 'active',
+    projectId: persisted.projectId,
+    cutId: persisted.cutId,
+    orderMode: persisted.orderMode,
+    placements: persisted.placements.filter((placement) =>
+      activePlacementIsRenderableV2(project, activeClipIds, placement)
+    ),
+  };
+};
 
 export type StudioRenderResult =
   | { status: 'rendered'; assetId: string; missingSceneIds: string[] }

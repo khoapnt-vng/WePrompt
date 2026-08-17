@@ -4436,27 +4436,243 @@ describe('schema-2 creative studio project store', () => {
     });
     expect(prototypeIndexAccesses).toEqual([]);
   });
+
+  it('updates one supported schema-2 project with one revision, observer fact, and V2 summary repair', async () => {
+    const prototype = await seedPrototypeProject();
+    const prototypeManifestFile = path.join(rootDir, prototype.id, 'project.json');
+    const prototypeIndexFile = path.join(rootDir, 'projects.json');
+    const prototypeManifestBefore = readFileSync(prototypeManifestFile);
+    const prototypeIndexBefore = readFileSync(prototypeIndexFile);
+    const facts: Parameters<StudioProjectCommitObserver>[0][] = [];
+    let clock = Date.parse(timestamp);
+    const { store, prototypeIndexAccesses } = createStoreV2({
+      createId: () => 'updated_v2',
+      now: () => new Date((clock += 1_000)).toISOString(),
+      onProjectCommitted: (fact) => facts.push(fact),
+    });
+    const project = await store.createProjectV2(inputV2);
+
+    const updated = await store.updateProjectV2(
+      project.id,
+      (candidate) => ({ ...candidate, name: 'Retitled schema-2 film', brief: 'Updated atomically' }),
+      project.revision,
+      'media/attach-v2'
+    );
+
+    expect(updated).toMatchObject({
+      id: project.id,
+      name: 'Retitled schema-2 film',
+      brief: 'Updated atomically',
+      revision: project.revision + 1,
+      createdAt: project.createdAt,
+    });
+    expect(updated.updatedAt).not.toBe(project.updatedAt);
+    expect(project).toMatchObject({ name: inputV2.name, brief: inputV2.brief, revision: 1 });
+    expect(readJson<StudioProjectV2>(path.join(rootDir, project.id, 'project.json'))).toEqual(updated);
+    expect(readJson(path.join(rootDir, 'projects-v2.json'))).toEqual({
+      schemaVersion: 2,
+      projects: [
+        {
+          id: project.id,
+          name: updated.name,
+          aspectRatio: updated.aspectRatio,
+          targetDurationSeconds: updated.targetDurationSeconds,
+          resolution: updated.resolution,
+          sectionCount: 0,
+          clipCount: 0,
+          selectedAssetCount: 0,
+          createdAt: updated.createdAt,
+          updatedAt: updated.updatedAt,
+        },
+      ],
+    });
+    expect(facts).toEqual([
+      {
+        projectId: project.id,
+        previousRevision: project.revision,
+        committedRevision: updated.revision,
+        committedAt: updated.updatedAt,
+        commitTag: 'media/attach-v2',
+      },
+    ]);
+    expect(facts.every(Object.isFrozen)).toBe(true);
+    expect(readFileSync(prototypeManifestFile)).toEqual(prototypeManifestBefore);
+    expect(readFileSync(prototypeIndexFile)).toEqual(prototypeIndexBefore);
+    expect(prototypeIndexAccesses).toEqual([]);
+  });
+
+  it('rejects stale schema-2 update authority before invoking the callback or writing', async () => {
+    const onProjectCommitted = vi.fn<StudioProjectCommitObserver>();
+    const update = vi.fn(
+      (candidate: StudioProjectV2): StudioProjectV2 => ({
+        ...candidate,
+        brief: 'must never run',
+      })
+    );
+    const { store, prototypeIndexAccesses } = createStoreV2({
+      createId: () => 'stale_update_v2',
+      now: () => timestamp,
+      onProjectCommitted,
+    });
+    const project = await store.createProjectV2(inputV2);
+    const projectFile = path.join(rootDir, project.id, 'project.json');
+    const indexFile = path.join(rootDir, 'projects-v2.json');
+    const projectBefore = readFileSync(projectFile);
+    const indexBefore = readFileSync(indexFile);
+
+    await expect(store.updateProjectV2(project.id, update, project.revision + 1)).rejects.toMatchObject({
+      code: 'stale_project',
+    });
+
+    expect(update).not.toHaveBeenCalled();
+    expect(onProjectCommitted).not.toHaveBeenCalled();
+    expect(readFileSync(projectFile)).toEqual(projectBefore);
+    expect(readFileSync(indexFile)).toEqual(indexBefore);
+    expect(prototypeIndexAccesses).toEqual([]);
+  });
+
+  it('rolls back an invalid schema-2 update callback result without observing it', async () => {
+    const onProjectCommitted = vi.fn<StudioProjectCommitObserver>();
+    const { store, prototypeIndexAccesses } = createStoreV2({
+      createId: () => 'invalid_update_v2',
+      now: () => timestamp,
+      onProjectCommitted,
+    });
+    const project = await store.createProjectV2(inputV2);
+    const projectFile = path.join(rootDir, project.id, 'project.json');
+    const indexFile = path.join(rootDir, 'projects-v2.json');
+    const projectBefore = readFileSync(projectFile);
+    const indexBefore = readFileSync(indexFile);
+
+    await expect(
+      store.updateProjectV2(project.id, (candidate) => ({ ...candidate, sectionOrder: ['missing_section'] }))
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+
+    expect(onProjectCommitted).not.toHaveBeenCalled();
+    expect(readFileSync(projectFile)).toEqual(projectBefore);
+    expect(readFileSync(indexFile)).toEqual(indexBefore);
+    expect(prototypeIndexAccesses).toEqual([]);
+  });
+
+  it('preserves a schema-2 update callback error and leaves durable state unchanged', async () => {
+    const callbackError = new Error('attachment staging failed');
+    const onProjectCommitted = vi.fn<StudioProjectCommitObserver>();
+    const { store, prototypeIndexAccesses } = createStoreV2({
+      createId: () => 'callback_error_v2',
+      now: () => timestamp,
+      onProjectCommitted,
+    });
+    const project = await store.createProjectV2(inputV2);
+    const projectFile = path.join(rootDir, project.id, 'project.json');
+    const indexFile = path.join(rootDir, 'projects-v2.json');
+    const projectBefore = readFileSync(projectFile);
+    const indexBefore = readFileSync(indexFile);
+
+    await expect(
+      store.updateProjectV2(project.id, () => {
+        throw callbackError;
+      })
+    ).rejects.toBe(callbackError);
+
+    expect(onProjectCommitted).not.toHaveBeenCalled();
+    expect(readFileSync(projectFile)).toEqual(projectBefore);
+    expect(readFileSync(indexFile)).toEqual(indexBefore);
+    expect(prototypeIndexAccesses).toEqual([]);
+  });
+
+  it('classifies unsupported, malformed, and missing projects before a schema-2 update callback', async () => {
+    const prototype = await seedPrototypeProject();
+    const prototypeManifestFile = path.join(rootDir, prototype.id, 'project.json');
+    const prototypeIndexFile = path.join(rootDir, 'projects.json');
+    const prototypeManifestBefore = readFileSync(prototypeManifestFile);
+    const prototypeIndexBefore = readFileSync(prototypeIndexFile);
+    const malformedId = 'update_malformed_v2';
+    mkdirSync(path.join(rootDir, malformedId));
+    writeFileSync(
+      path.join(rootDir, malformedId, 'project.json'),
+      JSON.stringify({ schemaVersion: 2, id: malformedId })
+    );
+    const update = vi.fn((project: StudioProjectV2): StudioProjectV2 => project);
+    const { store, prototypeIndexAccesses } = createStoreV2();
+
+    await expect(store.updateProjectV2(prototype.id, update)).rejects.toMatchObject({
+      code: 'unsupported_prototype_schema',
+    });
+    await expect(store.updateProjectV2(malformedId, update)).rejects.toMatchObject({ code: 'storage_error' });
+    await expect(store.updateProjectV2('missing_update_v2', update)).rejects.toMatchObject({ code: 'not_found' });
+
+    expect(update).not.toHaveBeenCalled();
+    expect(readFileSync(prototypeManifestFile)).toEqual(prototypeManifestBefore);
+    expect(readFileSync(prototypeIndexFile)).toEqual(prototypeIndexBefore);
+    expect(existsSync(path.join(rootDir, 'projects-v2.json'))).toBe(false);
+    expect(prototypeIndexAccesses).toEqual([]);
+  });
+
+  it('returns a verified path only for a supported schema-2 manifest without touching the V1 index', async () => {
+    const prototype = await seedPrototypeProject();
+    const prototypeManifestFile = path.join(rootDir, prototype.id, 'project.json');
+    const prototypeIndexFile = path.join(rootDir, 'projects.json');
+    const prototypeManifestBefore = readFileSync(prototypeManifestFile);
+    const prototypeIndexBefore = readFileSync(prototypeIndexFile);
+    const supported = createEmptyStudioProjectV2(inputV2, 'verified_path_v2', timestamp);
+    seedProjectV2(supported);
+    const malformedId = 'path_malformed_v2';
+    mkdirSync(path.join(rootDir, malformedId));
+    writeFileSync(
+      path.join(rootDir, malformedId, 'project.json'),
+      JSON.stringify({ schemaVersion: 2, id: malformedId })
+    );
+    const orphanId = 'path_without_manifest_v2';
+    mkdirSync(path.join(rootDir, orphanId));
+    writeFileSync(path.join(rootDir, orphanId, 'sidecar.bin'), Buffer.from([0, 1, 2]));
+    const { store, prototypeIndexAccesses } = createStoreV2();
+
+    await expect(store.getVerifiedProjectDirectoryV2(supported.id)).resolves.toBe(
+      realpathSync(path.join(rootDir, supported.id))
+    );
+    await expect(store.getVerifiedProjectDirectoryV2(prototype.id)).rejects.toMatchObject({
+      code: 'unsupported_prototype_schema',
+    });
+    await expect(store.getVerifiedProjectDirectoryV2(malformedId)).rejects.toMatchObject({ code: 'storage_error' });
+    await expect(store.getVerifiedProjectDirectoryV2(orphanId)).resolves.toBeNull();
+    await expect(store.getVerifiedProjectDirectoryV2('missing_path_v2')).resolves.toBeNull();
+    await expect(store.getVerifiedProjectDirectoryV2('../unsafe')).resolves.toBeNull();
+
+    expect(readFileSync(prototypeManifestFile)).toEqual(prototypeManifestBefore);
+    expect(readFileSync(prototypeIndexFile)).toEqual(prototypeIndexBefore);
+    expect(existsSync(path.join(rootDir, 'projects-v2.json'))).toBe(false);
+    expect(prototypeIndexAccesses).toEqual([]);
+  });
 });
 
+const makeBareJob = (overrides: Partial<StudioJob> = {}): StudioJob => ({
+  id: 'job_1',
+  projectId: 'project_1',
+  sceneId: 'scene_1',
+  status: 'succeeded',
+  provider: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'model_1' },
+  idempotencyKey: 'key_1',
+  providerJobId: null,
+  cancellationPolicy: 'none',
+  outputAssetIds: [],
+  error: null,
+  retryOfJobId: null,
+  retryReason: null,
+  duplicateChargeAcknowledged: false,
+  duplicateChargeAcknowledgedAt: null,
+  createdAt: '2026-08-06T00:00:00.000Z',
+  updatedAt: '2026-08-06T00:00:00.000Z',
+  ...overrides,
+});
+
+const makeBareJobV2 = (overrides: Partial<StudioJobV2> = {}): StudioJobV2 => {
+  const { sceneId: _sceneId, ...job } = makeBareJob();
+  return { ...job, clipId: 'clip_1', ...overrides };
+};
+
 describe('jobOutputRole', () => {
-  const makeBareJob = (overrides: Partial<StudioJob> = {}): StudioJob => ({
-    id: 'job_1',
-    projectId: 'project_1',
-    sceneId: 'scene_1',
-    status: 'succeeded',
-    provider: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'model_1' },
-    idempotencyKey: 'key_1',
-    providerJobId: null,
-    cancellationPolicy: 'none',
-    outputAssetIds: [],
-    error: null,
-    retryOfJobId: null,
-    retryReason: null,
-    duplicateChargeAcknowledged: false,
-    duplicateChargeAcknowledgedAt: null,
-    createdAt: '2026-08-06T00:00:00.000Z',
-    updatedAt: '2026-08-06T00:00:00.000Z',
-    ...overrides,
+  it('accepts exactly the schema-1 and schema-2 durable job contracts', () => {
+    expectTypeOf(jobOutputRole).parameter(0).toEqualTypeOf<StudioJob | StudioJobV2>();
   });
 
   it('defaults an old schema-v1 job that lacks the field to take', () => {
@@ -4469,6 +4685,11 @@ describe('jobOutputRole', () => {
 
   it('reads an explicit reference role', () => {
     expect(jobOutputRole(makeBareJob({ outputRole: 'reference' }))).toBe('reference');
+  });
+
+  it('keeps the absent take default and explicit reference role for schema-2 jobs', () => {
+    expect(jobOutputRole(makeBareJobV2())).toBe('take');
+    expect(jobOutputRole(makeBareJobV2({ outputRole: 'reference' }))).toBe('reference');
   });
 });
 

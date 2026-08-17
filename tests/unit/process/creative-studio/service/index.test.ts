@@ -18,12 +18,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import type {
   CreateStudioProjectInput,
+  CreateStudioProjectInputV2,
   StudioAsset,
   StudioCut,
   StudioEditableCut,
   StudioEditableScene,
   StudioJob,
+  StudioJobV2,
   StudioProject,
+  StudioProjectV2,
   StudioRendererProject,
   StudioRouteCatalog,
   StudioRouteCatalogEntry,
@@ -41,9 +44,15 @@ import type { CreativeStudioStore, CreativeStudioStoreError } from '@process/ser
 import { createCreativeStudioStore } from '@process/services/creative-studio/store';
 import {
   createCreativeStudioService,
+  createCreativeStudioServiceV2,
   createStudioDirectorCommandService,
+  derivePayableClipIds,
   type CreativeStudioService,
 } from '@process/services/creative-studio/service';
+import {
+  applyStudioMutationBatchV2,
+  createEmptyStudioProjectV2,
+} from '@process/services/creative-studio/service/schema2';
 import { createStudioMediaChoiceId } from '@process/services/creative-studio/providerResolver';
 import { canCancelJob } from '@process/services/creative-studio/jobManager';
 import {
@@ -5898,6 +5907,832 @@ describe('CreativeStudioService', () => {
       ).rejects.toMatchObject({ code: 'planning_unavailable' });
       expect(harness.draft).not.toHaveBeenCalled();
     });
+  });
+});
+
+const makeSchema2ServiceProject = (): StudioProjectV2 => {
+  const input: CreateStudioProjectInputV2 = {
+    name: 'Schema 2 launch',
+    brief: 'A clip-owned launch film',
+    aspectRatio: '16:9',
+    targetDurationSeconds: 12,
+    resolution: '1080p',
+  };
+  const empty = createEmptyStudioProjectV2(input, 'project_v2', '2026-08-17T00:00:00.000Z');
+  return applyStudioMutationBatchV2(empty, {
+    schemaVersion: 2,
+    projectId: empty.id,
+    expectedRevision: empty.revision,
+    operations: [
+      {
+        kind: 'add_section',
+        sectionId: 'section_1',
+        section: { title: 'Opening', storyLine: '', visualPrompt: 'Warm sunrise over a quiet city' },
+        firstClipId: 'clip_1',
+        firstClip: {
+          shotPrompt: 'A wide establishing shot',
+          narration: '',
+          onScreenText: '',
+          mediaKind: 'image',
+          durationSeconds: 5,
+          referenceAssetId: null,
+        },
+        beforeSectionId: null,
+      },
+      {
+        kind: 'add_section',
+        sectionId: 'section_2',
+        section: { title: 'Close', storyLine: '', visualPrompt: 'Soft evening light over the skyline' },
+        firstClipId: 'clip_2',
+        firstClip: {
+          shotPrompt: 'A slow closing composition',
+          narration: '',
+          onScreenText: '',
+          mediaKind: 'image',
+          durationSeconds: 5,
+          referenceAssetId: null,
+        },
+        beforeSectionId: null,
+      },
+    ],
+  }).project;
+};
+
+describe('CreativeStudioServiceV2', () => {
+  const imageRoute = {
+    choiceId: createStudioMediaChoiceId({
+      providerId: 'provider_1',
+      adapterId: 'weprompt-image-v1',
+      model: 'image-model',
+      kind: 'image',
+    }),
+    providerId: 'provider_1',
+    providerName: 'Image provider',
+    adapterId: 'weprompt-image-v1' as const,
+    model: 'image-model',
+    health: 'available' as const,
+    kind: 'image' as const,
+    cancellationPolicy: 'none' as const,
+    constraints: {
+      aspectRatios: ['16:9' as const],
+      resolutions: ['1080p' as const],
+      minDurationSeconds: 1,
+      maxDurationSeconds: 60,
+      supportsFirstFrame: true,
+      maxConditioningImages: 1,
+      silentOutput: true,
+    },
+  };
+
+  const makeSchema2Job = (project: StudioProjectV2, overrides: Partial<StudioJobV2> = {}): StudioJobV2 => ({
+    id: 'job_1',
+    projectId: project.id,
+    clipId: 'clip_1',
+    status: 'failed',
+    provider: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'image-model' },
+    idempotencyKey: 'idempotency_secret',
+    providerJobId: null,
+    remoteStartedAt: null,
+    cancellationPolicy: 'none',
+    outputAssetIds: [],
+    error: { code: 'provider_unavailable', messageKey: 'providerUnavailable' },
+    retryOfJobId: null,
+    retryReason: null,
+    duplicateChargeAcknowledged: false,
+    duplicateChargeAcknowledgedAt: null,
+    createdAt: '2026-08-17T00:00:00.000Z',
+    updatedAt: '2026-08-17T00:00:01.000Z',
+    ...overrides,
+  });
+
+  const makeHarness = (project = makeSchema2ServiceProject(), options: { includeMediaStore?: boolean } = {}) => {
+    let current = structuredClone(project);
+    const store = {
+      listProjectsV2: vi.fn(async () => ({ projects: [], unsupportedProjectIds: [], quarantinedProjectIds: [] })),
+      createProjectV2: vi.fn(async () => structuredClone(current)),
+      getProjectV2: vi.fn(async () => ({ status: 'supported' as const, project: structuredClone(current) })),
+      applyMutationBatchV2: vi.fn(async () => ({
+        project: structuredClone(current),
+        createdSectionIds: [],
+        createdClipIds: [],
+      })),
+      deleteProjectV2: vi.fn(async () => true),
+    };
+    const submitClips = vi.fn(async () => []);
+    const cancelJobV2 = vi.fn(async () => makeSchema2Job(current, { status: 'cancelled', error: null }));
+    const retryJobV2 = vi.fn(async () => makeSchema2Job(current, { status: 'queued_local', error: null }));
+    const retryDownloadV2 = vi.fn(async () => makeSchema2Job(current, { status: 'succeeded', error: null }));
+    const referenceAsset = {
+      id: 'reference_1',
+      projectId: current.id,
+      clipId: 'clip_1',
+      mediaKind: 'image' as const,
+      mimeType: 'image/png',
+      managedAsset: { collection: 'imports' as const, fileName: 'reference_1.png' },
+      byteSize: 8,
+      sha256: 'a'.repeat(64),
+      createdAt: '2026-08-17T00:00:00.000Z',
+    };
+    const importReferenceFromPathV2 = vi.fn(async () => ({
+      asset: structuredClone(referenceAsset),
+      project: structuredClone(current),
+    }));
+    const detachBriefReferenceV2 = vi.fn(async () => structuredClone(current));
+    const persistCapturedPosterV2 = vi.fn(async () => structuredClone(referenceAsset));
+    const providerResolver = {
+      listGenerationRoutes: vi.fn(async () => ({
+        routes: [structuredClone(imageRoute)],
+        diagnostics: [{ status: 'available' as const, route: structuredClone(imageRoute) }],
+        generationCatalogVersion: 'catalog_v2',
+      })),
+    };
+    const onProjectUpdated = vi.fn();
+    const service = createCreativeStudioServiceV2({
+      store: store as unknown as CreativeStudioStore,
+      jobManager: { submitClips, cancelJobV2, retryJobV2, retryDownloadV2 } as never,
+      providerResolver: providerResolver as never,
+      ...(options.includeMediaStore === false
+        ? {}
+        : {
+            mediaStore: {
+              importReferenceFromPathV2,
+              detachBriefReferenceV2,
+              persistCapturedPosterV2,
+            } as never,
+          }),
+      onProjectUpdated,
+    });
+    return {
+      service,
+      store,
+      submitClips,
+      cancelJobV2,
+      retryJobV2,
+      retryDownloadV2,
+      importReferenceFromPathV2,
+      detachBriefReferenceV2,
+      persistCapturedPosterV2,
+      providerResolver,
+      onProjectUpdated,
+      setProject: (next: StudioProjectV2): void => {
+        current = structuredClone(next);
+      },
+    };
+  };
+
+  it('derives payable clips in persisted section and clip order', async () => {
+    const project = makeSchema2ServiceProject();
+    const harness = makeHarness(project);
+
+    const result = await harness.service.getGenerationReadiness({
+      projectId: 'project_v2',
+      sectionIds: ['section_2', 'section_1'],
+    });
+
+    expect(derivePayableClipIds(project, ['section_2', 'section_1'])).toEqual(['clip_1', 'clip_2']);
+    expect(result.payableClipIds).toEqual(['clip_1', 'clip_2']);
+    expect(result.clips.every((clip) => clip.ready)).toBe(true);
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+  });
+
+  it('reports exact authored and durable blockers without treating optional copy as required', async () => {
+    const project = makeSchema2ServiceProject();
+    project.sections.section_1.title = '';
+    project.clips.clip_2.shotPrompt = '';
+    const harness = makeHarness(project);
+
+    const result = await harness.service.getGenerationReadiness({
+      projectId: project.id,
+      sectionIds: ['section_1', 'section_2'],
+    });
+
+    expect(result.payableClipIds).toEqual([]);
+    expect(result.clips.map(({ clipId, issues }) => ({ clipId, issues }))).toEqual([
+      { clipId: 'clip_1', issues: ['missing_section_title'] },
+      { clipId: 'clip_2', issues: ['missing_shot_prompt'] },
+    ]);
+  });
+
+  it('projects only image and video route catalogs without storyboard authority', async () => {
+    const project = makeSchema2ServiceProject();
+    project.routing.image = {
+      providerId: imageRoute.providerId,
+      adapterId: imageRoute.adapterId,
+      model: imageRoute.model,
+    };
+    const harness = makeHarness(project);
+
+    const catalog = await harness.service.listRoutes({ projectId: project.id });
+
+    expect(Object.keys(catalog)).toEqual(['image', 'video', 'catalogVersion']);
+    expect(catalog.image.selectedRoute?.choiceId).toBe(imageRoute.choiceId);
+    expect(catalog.catalogVersion).toBe('catalog_v2');
+  });
+
+  it('strips durable provider, charge, and remote-task authority from schema-2 jobs', async () => {
+    const project = makeSchema2ServiceProject();
+    const job: StudioJobV2 = {
+      id: 'job_1',
+      projectId: project.id,
+      clipId: 'clip_1',
+      status: 'queued_remote',
+      provider: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'image-model' },
+      idempotencyKey: 'idempotency_secret',
+      providerJobId: 'provider_job_secret',
+      remoteStartedAt: '2026-08-17T00:00:01.000Z',
+      cancellationPolicy: 'queued_only',
+      outputAssetIds: [],
+      error: null,
+      retryOfJobId: null,
+      retryReason: null,
+      duplicateChargeAcknowledged: false,
+      duplicateChargeAcknowledgedAt: null,
+      createdAt: '2026-08-17T00:00:00.000Z',
+      updatedAt: '2026-08-17T00:00:01.000Z',
+    };
+    project.jobs[job.id] = job;
+    project.clips.clip_1.jobIds = [job.id];
+    const harness = makeHarness(project);
+
+    const loaded = await harness.service.getProject(project.id);
+    const rendererJob = loaded.status === 'supported' ? loaded.project.jobs.job_1 : undefined;
+
+    expect(rendererJob?.provider).toEqual({
+      choiceId: imageRoute.choiceId,
+      providerId: 'provider_1',
+      model: 'image-model',
+    });
+    expect(rendererJob).not.toHaveProperty('providerJobId');
+    expect(rendererJob).not.toHaveProperty('idempotencyKey');
+  });
+
+  it('resolves a reviewed clip route immediately before the sole paid boundary', async () => {
+    const project = makeSchema2ServiceProject();
+    project.routing.image = {
+      providerId: imageRoute.providerId,
+      adapterId: imageRoute.adapterId,
+      model: imageRoute.model,
+    };
+    const harness = makeHarness(project);
+
+    await harness.service.submitClips({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      clipIds: ['clip_1'],
+      routes: [{ clipId: 'clip_1', choiceId: imageRoute.choiceId, kind: 'image' }],
+      catalogVersion: 'catalog_v2',
+    });
+
+    expect(harness.submitClips).toHaveBeenCalledTimes(1);
+    expect(harness.submitClips).toHaveBeenCalledWith({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      clipIds: ['clip_1'],
+      routes: [
+        {
+          clipId: 'clip_1',
+          providerId: imageRoute.providerId,
+          adapterId: imageRoute.adapterId,
+          model: imageRoute.model,
+          kind: 'image',
+        },
+      ],
+      catalogVersion: 'catalog_v2',
+    });
+  });
+
+  it('keeps an explicit reference request separate from take-payability', async () => {
+    const project = makeSchema2ServiceProject();
+    project.routing.image = {
+      providerId: imageRoute.providerId,
+      adapterId: imageRoute.adapterId,
+      model: imageRoute.model,
+    };
+    project.assets.take_1 = {
+      id: 'take_1',
+      projectId: project.id,
+      clipId: 'clip_1',
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'assets', fileName: 'take_1.png' },
+      byteSize: 8,
+      sha256: 'a'.repeat(64),
+      createdAt: '2026-08-17T00:00:00.000Z',
+    };
+    project.clips.clip_1.assetIds = ['take_1'];
+    project.clips.clip_1.selectedAssetId = 'take_1';
+    const harness = makeHarness(project);
+
+    await harness.service.submitClips({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      clipIds: ['clip_1'],
+      routes: [{ clipId: 'clip_1', choiceId: imageRoute.choiceId, kind: 'image' }],
+      catalogVersion: 'catalog_v2',
+      outputRole: 'reference',
+      referencePrompts: [{ clipId: 'clip_1', prompt: 'A clean first-frame reference' }],
+    });
+
+    expect(harness.submitClips).toHaveBeenCalledOnce();
+    expect(harness.submitClips).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outputRole: 'reference',
+        referencePrompts: [{ clipId: 'clip_1', prompt: 'A clean first-frame reference' }],
+      })
+    );
+  });
+
+  it('submits nothing when the project changes while routes are being refreshed', async () => {
+    const project = makeSchema2ServiceProject();
+    project.routing.image = {
+      providerId: imageRoute.providerId,
+      adapterId: imageRoute.adapterId,
+      model: imageRoute.model,
+    };
+    const harness = makeHarness(project);
+    harness.providerResolver.listGenerationRoutes.mockImplementationOnce(async () => {
+      harness.setProject({ ...project, revision: project.revision + 1 });
+      return {
+        routes: [structuredClone(imageRoute)],
+        diagnostics: [{ status: 'available' as const, route: structuredClone(imageRoute) }],
+        generationCatalogVersion: 'catalog_v2',
+      };
+    });
+
+    await expect(
+      harness.service.submitClips({
+        projectId: project.id,
+        expectedRevision: project.revision,
+        clipIds: ['clip_1'],
+        routes: [{ clipId: 'clip_1', choiceId: imageRoute.choiceId, kind: 'image' }],
+        catalogVersion: 'catalog_v2',
+      })
+    ).rejects.toMatchObject({ code: 'stale_project' });
+    expect(harness.submitClips).not.toHaveBeenCalled();
+  });
+
+  it('rejects a stale catalog before job submission', async () => {
+    const project = makeSchema2ServiceProject();
+    project.routing.image = {
+      providerId: imageRoute.providerId,
+      adapterId: imageRoute.adapterId,
+      model: imageRoute.model,
+    };
+    const harness = makeHarness(project);
+
+    await expect(
+      harness.service.submitClips({
+        projectId: project.id,
+        expectedRevision: project.revision,
+        clipIds: ['clip_1'],
+        routes: [{ clipId: 'clip_1', choiceId: imageRoute.choiceId, kind: 'image' }],
+        catalogVersion: 'stale_catalog',
+      })
+    ).rejects.toMatchObject({ code: 'invalid_route' });
+    expect(harness.submitClips).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-bijective route list before resolving providers', async () => {
+    const project = makeSchema2ServiceProject();
+    const harness = makeHarness(project);
+
+    await expect(
+      harness.service.submitClips({
+        projectId: project.id,
+        expectedRevision: project.revision,
+        clipIds: ['clip_1'],
+        routes: [
+          { clipId: 'clip_1', choiceId: imageRoute.choiceId, kind: 'image' },
+          { clipId: 'clip_1', choiceId: imageRoute.choiceId, kind: 'image' },
+        ],
+        catalogVersion: 'catalog_v2',
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+  });
+
+  it('keeps free schema-2 project operations outside provider and job-manager code', async () => {
+    const project = makeSchema2ServiceProject();
+    const harness = makeHarness(project);
+    const poison = (): never => {
+      throw new Error('paid boundary reached by a free operation');
+    };
+    harness.providerResolver.listGenerationRoutes.mockImplementation(poison);
+    harness.submitClips.mockImplementation(poison);
+    harness.cancelJobV2.mockImplementation(poison);
+    harness.retryJobV2.mockImplementation(poison);
+    harness.retryDownloadV2.mockImplementation(poison);
+
+    await harness.service.listProjects();
+    await harness.service.getProject(project.id);
+    await harness.service.createProject({
+      name: 'New project',
+      brief: '',
+      aspectRatio: '16:9',
+      targetDurationSeconds: 12,
+      resolution: '1080p',
+    });
+    await harness.service.applyMutations({
+      schemaVersion: 2,
+      projectId: project.id,
+      expectedRevision: project.revision,
+      operations: [{ kind: 'set_brief', brief: 'Updated' }],
+    });
+    await harness.service.getGenerationReadiness({ projectId: project.id, sectionIds: ['section_1'] });
+    await harness.service.importReferenceFromPath({
+      projectId: project.id,
+      clipId: 'clip_1',
+      expectedRevision: project.revision,
+      sourcePath: '/chosen/reference.png',
+    });
+    await harness.service.detachBriefReference({
+      projectId: project.id,
+      assetId: 'reference_1',
+      expectedRevision: project.revision,
+    });
+    await harness.service.persistCapturedPoster({
+      projectId: project.id,
+      clipId: 'clip_1',
+      videoAssetId: 'video_1',
+      dataUrl: `data:image/png;base64,${Buffer.from('89504e470d0a1a0a', 'hex').toString('base64')}`,
+      width: 1280,
+      height: 720,
+    });
+    await harness.service.deleteProject({ projectId: project.id, expectedRevision: project.revision });
+
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+    expect(harness.submitClips).not.toHaveBeenCalled();
+    expect(harness.cancelJobV2).not.toHaveBeenCalled();
+    expect(harness.retryJobV2).not.toHaveBeenCalled();
+    expect(harness.retryDownloadV2).not.toHaveBeenCalled();
+  });
+
+  it('attaches a reference through the clip-owned media seam and returns a renderer projection', async () => {
+    const project = makeSchema2ServiceProject();
+    const harness = makeHarness(project);
+
+    const result = await harness.service.importReferenceFromPath({
+      projectId: project.id,
+      clipId: 'clip_1',
+      expectedRevision: project.revision,
+      sourcePath: '/chosen/reference.png',
+    });
+
+    expect(harness.importReferenceFromPathV2).toHaveBeenCalledWith({
+      projectId: project.id,
+      clipId: 'clip_1',
+      expectedRevision: project.revision,
+      sourcePath: '/chosen/reference.png',
+      returnProject: true,
+    });
+    expect(result.asset).toMatchObject({ id: 'reference_1', clipId: 'clip_1' });
+    expect(harness.onProjectUpdated).toHaveBeenCalledWith(project.id);
+  });
+
+  it('decodes a bounded PNG before forwarding a captured poster to V2 media storage', async () => {
+    const project = makeSchema2ServiceProject();
+    const harness = makeHarness(project);
+    const png = Buffer.from('89504e470d0a1a0a', 'hex');
+
+    await harness.service.persistCapturedPoster({
+      projectId: project.id,
+      clipId: 'clip_1',
+      videoAssetId: 'video_1',
+      dataUrl: `data:image/png;base64,${png.toString('base64')}`,
+      width: 1280,
+      height: 720,
+    });
+
+    expect(harness.persistCapturedPosterV2).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: project.id,
+        clipId: 'clip_1',
+        videoAssetId: 'video_1',
+        declaredByteSize: png.length,
+      })
+    );
+    expect(harness.onProjectUpdated).toHaveBeenCalledWith(project.id);
+  });
+
+  it('forwards cancel, retry, and retry-download through only their named V2 manager seams', async () => {
+    const project = makeSchema2ServiceProject();
+    const harness = makeHarness(project);
+    const projectedJob = makeSchema2Job(project, {
+      status: 'failed',
+      providerJobId: 'remote_job_1',
+      outputRole: 'reference',
+      error: { code: 'download_failed', messageKey: 'downloadFailed' },
+      progress: 0.5,
+    });
+    harness.cancelJobV2.mockResolvedValueOnce(projectedJob);
+    harness.retryJobV2.mockResolvedValueOnce(projectedJob);
+    harness.retryDownloadV2.mockResolvedValueOnce(projectedJob);
+    const request = { projectId: project.id, jobId: projectedJob.id, expectedRevision: project.revision };
+
+    const cancelled = await harness.service.cancelJob(request);
+    const retried = await harness.service.retryJob({ ...request, acknowledgePossibleDuplicateCharge: true });
+    const downloaded = await harness.service.retryDownload(request);
+
+    expect(harness.cancelJobV2).toHaveBeenCalledWith(request);
+    expect(harness.retryJobV2).toHaveBeenCalledWith({ ...request, acknowledgePossibleDuplicateCharge: true });
+    expect(harness.retryDownloadV2).toHaveBeenCalledWith(request);
+    for (const job of [cancelled, retried, downloaded]) {
+      expect(job).toMatchObject({
+        id: projectedJob.id,
+        clipId: 'clip_1',
+        outputRole: 'reference',
+        progress: 0.5,
+        canRetryDownload: true,
+        error: { code: 'download_failed' },
+      });
+      expect(job).not.toHaveProperty('providerJobId');
+      expect(job).not.toHaveProperty('idempotencyKey');
+    }
+    expect(harness.submitClips).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid duplicate-charge acknowledgement before retry manager work', async () => {
+    const project = makeSchema2ServiceProject();
+    const harness = makeHarness(project);
+
+    await expect(
+      harness.service.retryJob({
+        projectId: project.id,
+        jobId: 'job_1',
+        expectedRevision: project.revision,
+        acknowledgePossibleDuplicateCharge: 'yes' as never,
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+    expect(harness.retryJobV2).not.toHaveBeenCalled();
+  });
+
+  it('derives visual, duration, active-job, generated-take, and latest-failure blockers', async () => {
+    const project = makeSchema2ServiceProject();
+    project.sections.section_1.visualPrompt = '   ';
+    project.clips.clip_1.mediaKind = 'video';
+    project.clips.clip_1.durationSeconds = 3;
+    project.assets.take_1 = {
+      id: 'take_1',
+      projectId: project.id,
+      clipId: 'clip_1',
+      mediaKind: 'video',
+      mimeType: 'video/mp4',
+      managedAsset: { collection: 'assets', fileName: 'take_1.mp4' },
+      byteSize: 8,
+      sha256: 'b'.repeat(64),
+      createdAt: project.createdAt,
+    };
+    project.clips.clip_1.assetIds = ['take_1'];
+    project.jobs.active_job = makeSchema2Job(project, {
+      id: 'active_job',
+      status: 'running',
+      providerJobId: 'remote_active',
+      error: null,
+    });
+    project.jobs.failed_job = makeSchema2Job(project, {
+      id: 'failed_job',
+      clipId: 'clip_2',
+      error: { code: 'timeout', messageKey: 'timeout' },
+    });
+    project.clips.clip_1.jobIds = ['active_job'];
+    project.clips.clip_2.jobIds = ['failed_job'];
+    const harness = makeHarness(project);
+
+    const readiness = await harness.service.getGenerationReadiness({
+      projectId: project.id,
+      sectionIds: ['section_1', 'section_2'],
+    });
+
+    expect(readiness.clips).toEqual([
+      {
+        clipId: 'clip_1',
+        sectionId: 'section_1',
+        ready: false,
+        issues: ['missing_visual_prompt', 'invalid_clip_duration', 'active_job', 'generated_take_exists'],
+      },
+      {
+        clipId: 'clip_2',
+        sectionId: 'section_2',
+        ready: false,
+        issues: ['latest_job_failed'],
+      },
+    ]);
+    expect(readiness.payableClipIds).toEqual([]);
+  });
+
+  it.each([
+    ['a non-array', null],
+    ['a duplicate active section', ['section_1', 'section_1']],
+    ['a non-active section', ['section_missing']],
+  ])('rejects %s in a readiness selection', async (_label, sectionIds) => {
+    const project = makeSchema2ServiceProject();
+    const harness = makeHarness(project);
+
+    await expect(
+      harness.service.getGenerationReadiness({ projectId: project.id, sectionIds: sectionIds as never })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'frame mismatch',
+      [{ ...imageRoute, constraints: { ...imageRoute.constraints, aspectRatios: ['9:16' as const] } }],
+      [],
+      { code: 'frame', aspectRatio: '16:9', resolution: '1080p' },
+    ],
+    [
+      'missing setup',
+      [],
+      [
+        {
+          status: 'needs_setup' as const,
+          providerId: imageRoute.providerId,
+          providerName: imageRoute.providerName,
+          adapterId: imageRoute.adapterId,
+          model: imageRoute.model,
+        },
+      ],
+      { code: 'needs_setup', providerName: imageRoute.providerName },
+    ],
+    [
+      'provider health',
+      [],
+      [
+        {
+          status: 'health' as const,
+          providerId: imageRoute.providerId,
+          adapterId: imageRoute.adapterId,
+          model: imageRoute.model,
+        },
+      ],
+      { code: 'health' },
+    ],
+    ['retired route', [], [], { code: 'retired' }],
+  ])('projects an unavailable selection caused by %s', async (_label, routes, diagnostics, expectedIssue) => {
+    const project = makeSchema2ServiceProject();
+    project.routing.image = {
+      providerId: imageRoute.providerId,
+      adapterId: imageRoute.adapterId,
+      model: imageRoute.model,
+    };
+    const harness = makeHarness(project);
+    harness.providerResolver.listGenerationRoutes.mockResolvedValueOnce({
+      routes,
+      diagnostics,
+      generationCatalogVersion: 'catalog_v2',
+    });
+
+    const catalog = await harness.service.listRoutes({ projectId: project.id });
+
+    expect(catalog.image.status).toBe('unavailable');
+    expect(catalog.image.selectedRoute).toBeNull();
+    expect(catalog.image.selectionIssue).toEqual(expectedIssue);
+  });
+
+  it('projects selection-required catalogs globally and maps resolver failure', async () => {
+    const harness = makeHarness();
+
+    await expect(harness.service.listRoutes()).resolves.toMatchObject({
+      image: { status: 'selection_required', selectionIssue: null },
+    });
+    harness.providerResolver.listGenerationRoutes.mockRejectedValueOnce(new Error('resolver unavailable'));
+    await expect(harness.service.listRoutes()).rejects.toMatchObject({ code: 'provider_error' });
+  });
+
+  it.each([
+    ['unsupported prototype', { status: 'unsupported_prototype_schema' as const, projectId: 'project_v2' }],
+    ['missing project', { status: 'not_found' as const, projectId: 'project_v2' }],
+  ])('keeps %s distinct on V2 operational reads', async (_label, loadResult) => {
+    const harness = makeHarness();
+    harness.store.getProjectV2.mockResolvedValue(loadResult);
+
+    await expect(
+      harness.service.getGenerationReadiness({ projectId: 'project_v2', sectionIds: [] })
+    ).rejects.toMatchObject({
+      code: loadResult.status === 'unsupported_prototype_schema' ? 'unsupported_prototype_schema' : 'not_found',
+    });
+    await expect(harness.service.getProject('project_v2')).resolves.toEqual(loadResult);
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+  });
+
+  it('rejects unavailable media seams before any storage work can be mistaken for success', async () => {
+    const project = makeSchema2ServiceProject();
+    const harness = makeHarness(project, { includeMediaStore: false });
+    const png = Buffer.from('89504e470d0a1a0a', 'hex');
+
+    await expect(
+      harness.service.importReferenceFromPath({
+        projectId: project.id,
+        clipId: 'clip_1',
+        expectedRevision: project.revision,
+        sourcePath: '/chosen/reference.png',
+      })
+    ).rejects.toMatchObject({ code: 'storage_error' });
+    await expect(
+      harness.service.detachBriefReference({
+        projectId: project.id,
+        assetId: 'reference_1',
+        expectedRevision: project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'storage_error' });
+    await expect(
+      harness.service.persistCapturedPoster({
+        projectId: project.id,
+        clipId: 'clip_1',
+        videoAssetId: 'video_1',
+        dataUrl: `data:image/png;base64,${png.toString('base64')}`,
+        width: 1280,
+        height: 720,
+      })
+    ).rejects.toMatchObject({ code: 'storage_error' });
+    expect(harness.onProjectUpdated).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['invalid dimensions', { width: 0, dataUrl: 'data:image/png;base64,iVBORw0KGgo=' }],
+    ['invalid data URL', { width: 1280, dataUrl: 'data:image/jpeg;base64,iVBORw0KGgo=' }],
+    ['non-canonical base64', { width: 1280, dataUrl: 'data:image/png;base64,AAAA====' }],
+  ])('rejects a captured poster with %s before media storage', async (_label, override) => {
+    const project = makeSchema2ServiceProject();
+    const harness = makeHarness(project);
+
+    await expect(
+      harness.service.persistCapturedPoster({
+        projectId: project.id,
+        clipId: 'clip_1',
+        videoAssetId: 'video_1',
+        width: override.width,
+        height: 720,
+        dataUrl: override.dataUrl,
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+    expect(harness.persistCapturedPosterV2).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['unknown top-level key', { unexpected: true }],
+    ['empty selection', { clipIds: [], routes: [] }],
+    ['duplicate clips', { clipIds: ['clip_1', 'clip_1'] }],
+    ['reference without prompts', { outputRole: 'reference', referencePrompts: [] }],
+    [
+      'take with reference prompts',
+      { referencePrompts: [{ clipId: 'clip_1', prompt: 'Unexpected reference prompt' }] },
+    ],
+  ])('rejects a submit boundary with %s before resolver or manager work', async (_label, override) => {
+    const project = makeSchema2ServiceProject();
+    const harness = makeHarness(project);
+    const request = {
+      projectId: project.id,
+      expectedRevision: project.revision,
+      clipIds: ['clip_1'],
+      routes: [{ clipId: 'clip_1', choiceId: imageRoute.choiceId, kind: 'image' as const }],
+      catalogVersion: 'catalog_v2',
+      ...override,
+    };
+
+    await expect(harness.service.submitClips(request as never)).rejects.toMatchObject({ code: 'invalid_payload' });
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+    expect(harness.submitClips).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['missing route', 'choice_missing', imageRoute, { providerId: imageRoute.providerId }],
+    ['missing selection', imageRoute.choiceId, imageRoute, null],
+    ['mismatched selection', imageRoute.choiceId, imageRoute, { providerId: 'provider_other' }],
+    [
+      'duration mismatch',
+      imageRoute.choiceId,
+      { ...imageRoute, constraints: { ...imageRoute.constraints, minDurationSeconds: 6 } },
+      { providerId: imageRoute.providerId },
+    ],
+  ])('rejects a reviewed clip with %s before the paid manager boundary', async (_label, choiceId, route, selection) => {
+    const project = makeSchema2ServiceProject();
+    project.routing.image =
+      selection === null
+        ? null
+        : {
+            providerId: selection.providerId,
+            adapterId: imageRoute.adapterId,
+            model: imageRoute.model,
+          };
+    const harness = makeHarness(project);
+    harness.providerResolver.listGenerationRoutes.mockResolvedValue({
+      routes: [route],
+      diagnostics: [{ status: 'available', route }],
+      generationCatalogVersion: 'catalog_v2',
+    });
+
+    await expect(
+      harness.service.submitClips({
+        projectId: project.id,
+        expectedRevision: project.revision,
+        clipIds: ['clip_1'],
+        routes: [{ clipId: 'clip_1', choiceId, kind: 'image' }],
+        catalogVersion: 'catalog_v2',
+      })
+    ).rejects.toMatchObject({ code: 'invalid_route' });
+    expect(harness.submitClips).not.toHaveBeenCalled();
   });
 });
 

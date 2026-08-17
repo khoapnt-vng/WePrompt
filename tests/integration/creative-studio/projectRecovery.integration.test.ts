@@ -19,6 +19,7 @@ import { createCreativeStudioService } from '@process/services/creative-studio/s
 import {
   createStudioJobManager,
   type StudioJobManager,
+  type StudioResolvedClipRouteSnapshotV2,
   type StudioResolvedSceneRouteSnapshot,
 } from '@process/services/creative-studio/jobManager';
 import { createStudioMediaStore } from '@process/services/creative-studio/mediaStore';
@@ -33,7 +34,7 @@ import {
   type CreativeStudioRuntimeFactories,
 } from '@process/services/creative-studio/runtime';
 import { createCreativeStudioStore } from '@process/services/creative-studio/store';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const scene: StudioScene = {
   id: 'scene_recovery',
@@ -654,5 +655,179 @@ describe('Creative Studio project recovery integration', () => {
       adapterId: harness.route.adapterId,
       model: harness.route.model,
     });
+  });
+
+  it('recovers a clip-owned remote job after restart even when its section was parked', async () => {
+    const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-v2-recovery-integration-'));
+    const remoteState = createStudioE2EFakeRemoteState();
+    const fake = createStudioE2EFakeBundle({ rootDir, remoteState });
+    const managers: Array<{ manager: ReturnType<typeof createStudioJobManager>; clock: ControlledPollClock }> = [];
+    try {
+      const store = createCreativeStudioStore({ rootDir });
+      await Promise.all(fake.connections.map((connection) => store.saveConnection(connection)));
+      const listProviders = async () => [fake.provider];
+      const providerResolver = resolverFor(store, listProviders);
+      const catalog = await providerResolver.listGenerationRoutes();
+      const imageRoute = catalog.routes.find((candidate) => candidate.kind === 'image');
+      if (!imageRoute) throw new Error('V2 recovery did not resolve the fake image route');
+      const route: StudioResolvedClipRouteSnapshotV2 = {
+        clipId: 'clip_recovery',
+        providerId: imageRoute.providerId,
+        adapterId: imageRoute.adapterId,
+        model: imageRoute.model,
+        kind: 'image',
+      };
+      const created = await store.createProjectV2({
+        name: 'Durable V2 film',
+        brief: 'Recover already-paid clip work after parking',
+        aspectRatio: '16:9',
+        targetDurationSeconds: 5,
+        resolution: '720p',
+      });
+      const unsupported = await store.createProject({
+        name: 'Unsupported V1 neighbor',
+        brief: 'Recovery must not enter this prototype',
+        aspectRatio: '16:9',
+        targetDurationSeconds: 5,
+        resolution: '720p',
+      });
+      const configured = await store.updateProjectV2(created.id, (project) => ({
+        ...project,
+        sectionOrder: ['section_recovery'],
+        sections: {
+          section_recovery: {
+            id: 'section_recovery',
+            title: 'Recovery section',
+            storyLine: 'Keep the paid work durable',
+            visualPrompt: 'A sunrise reflected in a glass city',
+            clipOrder: ['clip_recovery'],
+          },
+        },
+        clips: {
+          clip_recovery: {
+            id: 'clip_recovery',
+            shotPrompt: 'A paper aircraft crosses the reflection',
+            narration: '',
+            onScreenText: '',
+            mediaKind: 'image',
+            durationSeconds: 5,
+            referenceAssetId: null,
+            selectedAssetId: null,
+            assetIds: [],
+            jobIds: [],
+          },
+        },
+        routing: {
+          image: {
+            providerId: route.providerId,
+            adapterId: route.adapterId,
+            model: route.model,
+          },
+          video: null,
+        },
+      }));
+      const beforeClock = new ControlledPollClock();
+      const before = createStudioJobManager({
+        store,
+        mediaStore: createStudioMediaStore({ store }),
+        providerResolver,
+        adapters: fake.adapters,
+        listProviders,
+        createJobId: () => 'job_v2_recovery',
+        createIdempotencyKey: () => 'idempotency_v2_recovery',
+        sleep: beforeClock.sleep,
+        jitterMs: (baseMs) => baseMs,
+      });
+      managers.push({ manager: before, clock: beforeClock });
+
+      await before.submitClips({
+        projectId: configured.id,
+        expectedRevision: configured.revision,
+        clipIds: ['clip_recovery'],
+        routes: [route],
+        catalogVersion: catalog.generationCatalogVersion,
+      });
+      const pending = await waitFor(async () => {
+        try {
+          const loaded = await store.getProjectV2(configured.id);
+          if (loaded.status !== 'supported') return null;
+          const job = loaded.project.jobs.job_v2_recovery;
+          return job?.status === 'queued_remote' && job.providerJobId ? job : null;
+        } catch {
+          return null;
+        }
+      });
+      await store.updateProjectV2(configured.id, (project) => ({
+        ...project,
+        sectionOrder: [],
+        shelf: [{ kind: 'section', sectionId: 'section_recovery' }],
+      }));
+      await beforeClock.take(2_000);
+      await before.dispose();
+
+      const restartedStore = createCreativeStudioStore({ rootDir });
+      const listProjectsV1 = vi.spyOn(restartedStore, 'listProjects').mockImplementation(async () => {
+        throw new Error('V1 project listing must stay unreachable from V2 recovery');
+      });
+      const getProjectV1 = vi.spyOn(restartedStore, 'getProject').mockImplementation(async () => {
+        throw new Error('V1 project loading must stay unreachable from V2 recovery');
+      });
+      const restartedResolver = resolverFor(restartedStore, listProviders);
+      const afterClock = new ControlledPollClock();
+      const after = createStudioJobManager({
+        store: restartedStore,
+        mediaStore: createStudioMediaStore({ store: restartedStore }),
+        providerResolver: restartedResolver,
+        adapters: fake.adapters,
+        listProviders,
+        sleep: afterClock.sleep,
+        jitterMs: (baseMs) => baseMs,
+      });
+      managers.push({ manager: after, clock: afterClock });
+      await after.resumePendingJobsV2([unsupported.id, configured.id]);
+      (await afterClock.take(2_000)).release();
+      (await afterClock.take(4_000)).release();
+      (await afterClock.take(8_000)).release();
+
+      const recovered = await waitFor(async () => {
+        try {
+          const loaded = await restartedStore.getProjectV2(configured.id);
+          return loaded.status === 'supported' && loaded.project.jobs.job_v2_recovery.status === 'succeeded'
+            ? loaded.project
+            : null;
+        } catch {
+          // A separate store instance can observe the guarded lstat/open identity changing across an atomic replace.
+          return null;
+        }
+      });
+      const recoveredJob = recovered.jobs.job_v2_recovery;
+      const selectedAssetId = recovered.clips.clip_recovery.selectedAssetId;
+      expect({
+        providerJobId: recoveredJob.providerJobId,
+        status: recoveredJob.status,
+        clipId: recoveredJob.clipId,
+        outputAssetIds: recoveredJob.outputAssetIds,
+        selectedAssetId,
+        assetClipId: selectedAssetId ? recovered.assets[selectedAssetId]?.clipId : null,
+        sectionOrder: recovered.sectionOrder,
+        shelf: recovered.shelf,
+      }).toEqual({
+        providerJobId: pending.providerJobId,
+        status: 'succeeded',
+        clipId: 'clip_recovery',
+        outputAssetIds: [selectedAssetId],
+        selectedAssetId,
+        assetClipId: 'clip_recovery',
+        sectionOrder: [],
+        shelf: [{ kind: 'section', sectionId: 'section_recovery' }],
+      });
+      expect(listProjectsV1).not.toHaveBeenCalled();
+      expect(getProjectV1).not.toHaveBeenCalled();
+    } finally {
+      for (const { clock } of managers) clock.releaseAll();
+      await Promise.all(managers.map(({ manager }) => manager.dispose().catch((): undefined => undefined)));
+      await fake.dispose().catch((): undefined => undefined);
+      await rm(rootDir, { recursive: true, force: true });
+    }
   });
 });

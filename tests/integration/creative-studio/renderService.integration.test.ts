@@ -16,11 +16,16 @@ import { PassThrough } from 'node:stream';
 import { promisify } from 'node:util';
 import type {
   StudioAsset,
+  StudioAssetV2,
+  StudioClip,
   StudioCut,
+  StudioCutClipV2,
   StudioEditableCutClip,
   StudioMediaKind,
+  StudioProjectV2,
   StudioRenderProgressEvent,
   StudioScene,
+  StudioSection,
 } from '@/common/types/project/creativeStudioTypes';
 import { createStudioMediaStore } from '@process/services/creative-studio/mediaStore';
 import { createCreativeStudioService } from '@process/services/creative-studio/service';
@@ -29,11 +34,14 @@ import {
   createStudioRenderRunner,
   CreativeStudioRenderError,
   renderCut,
+  resolveActiveStudioRenderCutV2,
+  resolvePersistedStudioRenderCutV2,
   resolveStudioRenderDimensions,
   type StudioRenderOperation,
   type StudioRenderSpawn,
   type StudioRenderResult,
 } from '@process/services/creative-studio/renderService';
+import { createEmptyStudioProjectV2 } from '@process/services/creative-studio/service/schema2';
 import { createCreativeStudioStore, type CreativeStudioStore } from '@process/services/creative-studio/store';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -150,6 +158,96 @@ const createPpm = (
     }
   }
   return Buffer.concat([Buffer.from(`P6\n${width} ${height}\n255\n`, 'ascii'), pixels]);
+};
+
+const renderProjectionTimestamp = '2026-08-17T00:00:00.000Z';
+
+const makeProjectionSection = (id: string, clipOrder: string[]): StudioSection => ({
+  id,
+  title: id,
+  storyLine: '',
+  visualPrompt: '',
+  clipOrder,
+});
+
+const makeProjectionClip = (id: string, selectedAssetId: string): StudioClip => ({
+  id,
+  shotPrompt: id,
+  narration: '',
+  onScreenText: '',
+  mediaKind: 'video',
+  durationSeconds: 5,
+  referenceAssetId: null,
+  selectedAssetId,
+  assetIds: [selectedAssetId],
+  jobIds: [],
+});
+
+const makeProjectionAsset = (id: string, clipId: string): StudioAssetV2 => ({
+  id,
+  projectId: 'projection_project',
+  clipId,
+  mediaKind: 'video',
+  mimeType: 'video/mp4',
+  managedAsset: { collection: 'assets', fileName: `${id}.mp4` },
+  byteSize: 1,
+  sha256: 'a'.repeat(64),
+  durationSeconds: 10,
+  createdAt: renderProjectionTimestamp,
+});
+
+const makeProjectionPlacement = (id: string, clipId: string, assetId: string): StudioCutClipV2 => ({
+  id,
+  clipId,
+  assetId,
+  sourceInSeconds: 1,
+  sourceOutSeconds: 8,
+  crop: { x: 0, y: 0, width: 1, height: 1 },
+  filters: [{ id: 'contrast', amount: 0.25 }],
+});
+
+const makeRenderProjectionProjectV2 = (): StudioProjectV2 => {
+  const project = createEmptyStudioProjectV2(
+    {
+      name: 'Projection project',
+      brief: '',
+      aspectRatio: '16:9',
+      targetDurationSeconds: 30,
+      resolution: '1080p',
+    },
+    'projection_project',
+    renderProjectionTimestamp
+  );
+  project.sectionOrder = ['section_a', 'section_b'];
+  project.sections = {
+    section_a: makeProjectionSection('section_a', ['clip_a']),
+    section_b: makeProjectionSection('section_b', ['clip_b']),
+    section_c: makeProjectionSection('section_c', ['clip_c']),
+  };
+  project.clips = {
+    clip_a: makeProjectionClip('clip_a', 'asset_a'),
+    clip_b: makeProjectionClip('clip_b', 'asset_b'),
+    clip_c: makeProjectionClip('clip_c', 'asset_c'),
+  };
+  project.assets = {
+    asset_a: makeProjectionAsset('asset_a', 'clip_a'),
+    asset_b: makeProjectionAsset('asset_b', 'clip_b'),
+    asset_c: makeProjectionAsset('asset_c', 'clip_c'),
+  };
+  project.shelf = [{ kind: 'section', sectionId: 'section_c' }];
+  project.cuts.cut_1 = {
+    id: 'cut_1',
+    name: 'Projection cut',
+    orderMode: 'storyboard',
+    clipOrder: ['placement_a', 'placement_b', 'placement_c'],
+    clips: {
+      placement_a: makeProjectionPlacement('placement_a', 'clip_a', 'asset_a'),
+      placement_b: makeProjectionPlacement('placement_b', 'clip_b', 'asset_b'),
+      placement_c: makeProjectionPlacement('placement_c', 'clip_c', 'asset_c'),
+    },
+  };
+  project.activeCutId = 'cut_1';
+  return project;
 };
 
 const createFixtures = async (): Promise<FixturePaths> => {
@@ -645,6 +743,126 @@ describe('resolveStudioRenderDimensions', () => {
     ['1080p', '3:4', 1080, 1440],
   ] as const)('maps %s %s to an even %sx%s frame', (resolution, aspectRatio, width, height) => {
     expect(resolveStudioRenderDimensions(resolution, aspectRatio)).toEqual({ width, height });
+  });
+});
+
+describe('schema-2 render cut projections', () => {
+  it('does not synthesize the schema-1 implicit cut when schema 2 has no active cut', () => {
+    const project = createEmptyStudioProjectV2(
+      {
+        name: 'Empty projection',
+        brief: '',
+        aspectRatio: '16:9',
+        targetDurationSeconds: 30,
+        resolution: '1080p',
+      },
+      'empty_projection',
+      renderProjectionTimestamp
+    );
+
+    expect(resolvePersistedStudioRenderCutV2(project)).toBeNull();
+    expect(resolveActiveStudioRenderCutV2(project)).toBeNull();
+  });
+
+  it('retains parked placements in persistence while filtering them from active rendering', () => {
+    const project = makeRenderProjectionProjectV2();
+    const before = structuredClone(project);
+
+    const persisted = resolvePersistedStudioRenderCutV2(project);
+    const active = resolveActiveStudioRenderCutV2(project);
+
+    expect(persisted).toMatchObject({ scope: 'persisted', projectId: project.id, cutId: 'cut_1' });
+    expect(persisted?.placements.map(({ id }) => id)).toEqual(['placement_a', 'placement_b', 'placement_c']);
+    expect(active?.placements.map(({ id }) => id)).toEqual(['placement_a', 'placement_b']);
+    expect(project).toEqual(before);
+  });
+
+  it('deep-clones persisted crop and filter decisions', () => {
+    const project = makeRenderProjectionProjectV2();
+    const source = project.cuts.cut_1!.clips.placement_a!;
+
+    const projected = resolvePersistedStudioRenderCutV2(project)!.placements[0]!;
+
+    expect(projected).not.toBe(source);
+    expect(projected.crop).not.toBe(source.crop);
+    expect(projected.filters).not.toBe(source.filters);
+    expect(projected.filters[0]).not.toBe(source.filters[0]);
+  });
+
+  it('preserves manual placement order as a filtered subsequence instead of storyboard order', () => {
+    const project = makeRenderProjectionProjectV2();
+    const cut = project.cuts.cut_1!;
+    cut.orderMode = 'manual';
+    cut.clipOrder = ['placement_c', 'placement_b', 'placement_a'];
+
+    const persisted = resolvePersistedStudioRenderCutV2(project);
+    const active = resolveActiveStudioRenderCutV2(project);
+
+    expect(persisted?.placements.map(({ id }) => id)).toEqual(['placement_c', 'placement_b', 'placement_a']);
+    expect(active?.placements.map(({ id }) => id)).toEqual(['placement_b', 'placement_a']);
+  });
+
+  it('restores a dormant placement when its owning section becomes active', () => {
+    const project = makeRenderProjectionProjectV2();
+    expect(resolveActiveStudioRenderCutV2(project)?.placements.map(({ id }) => id)).toEqual([
+      'placement_a',
+      'placement_b',
+    ]);
+
+    project.sectionOrder.push('section_c');
+    project.shelf = [];
+
+    expect(resolveActiveStudioRenderCutV2(project)?.placements.map(({ id }) => id)).toEqual([
+      'placement_a',
+      'placement_b',
+      'placement_c',
+    ]);
+  });
+
+  it.each([
+    [
+      'missing selection',
+      (project: StudioProjectV2) => {
+        project.clips.clip_a!.selectedAssetId = null;
+      },
+    ],
+    [
+      'foreign-clip selection',
+      (project: StudioProjectV2) => {
+        project.assets.foreign_selected = makeProjectionAsset('foreign_selected', 'clip_b');
+        project.clips.clip_a!.assetIds.push('foreign_selected');
+        project.clips.clip_a!.selectedAssetId = 'foreign_selected';
+      },
+    ],
+    [
+      'wrong-kind selection',
+      (project: StudioProjectV2) => {
+        project.assets.wrong_kind_selected = {
+          ...makeProjectionAsset('wrong_kind_selected', 'clip_a'),
+          mediaKind: 'image',
+          mimeType: 'image/png',
+        };
+        project.clips.clip_a!.assetIds.push('wrong_kind_selected');
+        project.clips.clip_a!.selectedAssetId = 'wrong_kind_selected';
+      },
+    ],
+  ] as const)('filters an active placement with %s', (_label, mutate) => {
+    const project = makeRenderProjectionProjectV2();
+    mutate(project);
+
+    expect(resolveActiveStudioRenderCutV2(project)?.placements.map(({ id }) => id)).toEqual(['placement_b']);
+  });
+
+  it('filters a placement whose cut asset is not a canonical generated take', () => {
+    const project = makeRenderProjectionProjectV2();
+    project.assets.imported_placement = {
+      ...makeProjectionAsset('imported_placement', 'clip_a'),
+      managedAsset: { collection: 'imports', fileName: 'imported_placement.mp4' },
+    };
+    project.clips.clip_a!.assetIds.push('imported_placement');
+    project.cuts.cut_1!.clips.placement_a!.assetId = 'imported_placement';
+
+    expect(resolveActiveStudioRenderCutV2(project)?.placements.map(({ id }) => id)).toEqual(['placement_b']);
   });
 });
 

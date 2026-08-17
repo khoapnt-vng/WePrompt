@@ -572,6 +572,7 @@ below is green and independently re-reviewed.
 - Modify/finalize: `packages/desktop/src/common/types/project/creativeStudioOutputRole.ts`
 - Modify: `packages/desktop/src/process/services/creative-studio/service/index.ts`
 - Create: `packages/desktop/src/process/services/creative-studio/service/v2Service.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/store.ts`
 - Modify: `packages/desktop/src/process/services/creative-studio/jobManager.ts`
 - Modify: `packages/desktop/src/process/services/creative-studio/mediaStore.ts`
 - Modify: `packages/desktop/src/process/services/creative-studio/renderService.ts`
@@ -579,40 +580,45 @@ below is green and independently re-reviewed.
 - Modify: `tests/unit/process/creative-studio/jobManager.test.ts`
 - Modify: `tests/unit/process/creative-studio/mediaStore.test.ts`
 - Modify: `tests/unit/process/creative-studio/store.test.ts`
+- Modify: `tests/unit/process/creative-studio/service/directorCommandSpendFence.test.ts`
 - Modify: `tests/integration/creative-studio/renderService.integration.test.ts`
 - Modify: `tests/integration/creative-studio/generationLifecycle.integration.test.ts`
 - Modify: `tests/integration/creative-studio/projectRecovery.integration.test.ts`
 
 **Steps**
 
-- [ ] Add V2 service methods beside the unregistered V1 service surface: load/list/create/delete V2,
+- [x] Add V2 service methods beside the unregistered V1 service surface: load/list/create/delete V2,
       `applyMutations`, clip-owned media attachment, clip-owned route/readiness projection, and
       `submitClips`. Do not expose them through IPC yet.
-- [ ] Add explicitly named V2-only cleanup, recovery, resume, submit, retry, retry-download, cancel,
+- [x] Add a schema-2 operational store callback and verified-directory seam that share Task 3's
+      per-project queue, CAS, one-revision commit, observer, validator, and `projects-v2.json` repair.
+      They classify schema 1 before invoking callbacks or returning a path and never call the schema-1
+      migrator, `projects.json`, or a schema-blind writable-root helper.
+- [x] Add explicitly named V2-only cleanup, recovery, resume, submit, retry, retry-download, cancel,
       attachment, and render-projection entrypoints in job manager/media store/render service. Convert
       `creativeStudioOutputRole.ts` to accept both explicitly named job contracts without weakening the
       output-role default. Keep the existing singleton V1 methods wired and behaviourally unchanged
       through Gate 1; Task 6C switches runtime ownership and Task 6D removes the unreachable V1
       entrypoints.
-- [ ] Convert V2 asset/job/reference/poster/output/retry/cancel/recovery checks to `clipId`; keep
+- [x] Convert V2 asset/job/reference/poster/output/retry/cancel/recovery checks to `clipId`; keep
       project-level Cast/Look assets at `clipId: null`. Preserve provider identity, idempotency,
       submission ambiguity, download recovery, cancellation policy, and rule enforcement.
-- [ ] Replace the implicit legacy cut with V2 clip-aware persisted and active render projections.
+- [x] Replace the implicit legacy cut with V2 clip-aware persisted and active render projections.
       Rendering filters dormant entries; persistence never deletes them merely because a section is
       parked.
-- [ ] Replace generation input with ordered unique `clipIds` and route entries keyed by `clipId`.
+- [x] Replace generation input with ordered unique `clipIds` and route entries keyed by `clipId`.
       Process rechecks active ownership, authored readiness, 1–24 count, catalog/revision, and
       routes immediately before the sole `jobManager.submitClips` boundary.
-- [ ] RED foreign-clip output, wrong-kind selection, poster lineage, retry recovery, dormant cuts,
+- [x] RED foreign-clip output, wrong-kind selection, poster lineage, retry recovery, dormant cuts,
       manual order, stale catalog, ambiguous submit, and unsupported-project recovery exclusion.
-- [ ] Extend the dynamic paid fence with submit/retry/retryDownload/cancel/render/resolver/adapter
+- [x] Extend the dynamic paid fence with submit/retry/retryDownload/cancel/render/resolver/adapter
       poisons around every free V2 operation.
-- [ ] Mutation proof: permit a foreign-clip output attachment and prove media tests fail; move V2
+- [x] Mutation proof: permit a foreign-clip output attachment and prove media tests fail; move V2
       revision checking after job preparation and prove the zero-spend stale test fails; restore.
-- [ ] Run:
-      `bunx vitest run tests/unit/process/creative-studio/mediaStore.test.ts tests/unit/process/creative-studio/jobManager.test.ts tests/unit/process/creative-studio/service/index.test.ts tests/integration/creative-studio/renderService.integration.test.ts tests/integration/creative-studio/generationLifecycle.integration.test.ts tests/integration/creative-studio/projectRecovery.integration.test.ts`
+- [x] Run:
+      `bunx vitest run tests/unit/process/creative-studio/mediaStore.test.ts tests/unit/process/creative-studio/jobManager.test.ts tests/unit/process/creative-studio/service/index.test.ts tests/unit/process/creative-studio/service/directorCommandSpendFence.test.ts tests/integration/creative-studio/renderService.integration.test.ts tests/integration/creative-studio/generationLifecycle.integration.test.ts tests/integration/creative-studio/projectRecovery.integration.test.ts`
       and `bunx tsc --noEmit`.
-- [ ] Commit: `refactor(studio): make operations clip owned`.
+- [x] Commit: `refactor(studio): make operations clip owned`.
 
 ### Task 5 — Version Director, proposal, reference, and MCP records
 

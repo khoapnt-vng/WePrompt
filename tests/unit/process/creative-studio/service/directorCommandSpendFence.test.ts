@@ -102,11 +102,38 @@ describe('Studio Director dynamic spend fence', () => {
     const serviceRetryJob = vi.fn(async () => {
       throw new Error('ordinary service retry must stay unreachable');
     });
+    const serviceSubmitClips = vi.fn(async () => {
+      throw new Error('V2 service submit must stay unreachable');
+    });
+    const serviceRetryDownload = vi.fn(async () => {
+      throw new Error('V2 service retry-download must stay unreachable');
+    });
+    const serviceCancelJob = vi.fn(async () => {
+      throw new Error('V2 service cancel must stay unreachable');
+    });
+    const serviceRender = vi.fn(async () => {
+      throw new Error('service render must stay unreachable');
+    });
     const jobSubmit = vi.fn(async () => {
       throw new Error('job manager submit must stay unreachable');
     });
     const jobRetry = vi.fn(async () => {
       throw new Error('job manager retry must stay unreachable');
+    });
+    const jobSubmitClips = vi.fn(async () => {
+      throw new Error('V2 job manager submit must stay unreachable');
+    });
+    const jobRetryV2 = vi.fn(async () => {
+      throw new Error('V2 job manager retry must stay unreachable');
+    });
+    const jobRetryDownloadV2 = vi.fn(async () => {
+      throw new Error('V2 job manager retry-download must stay unreachable');
+    });
+    const jobCancelV2 = vi.fn(async () => {
+      throw new Error('V2 job manager cancel must stay unreachable');
+    });
+    const renderCutV2 = vi.fn(async () => {
+      throw new Error('V2 render runner must stay unreachable');
     });
     const listConnectionCandidates = vi.fn(async () => {
       throw new Error('provider candidates must stay unreachable');
@@ -129,12 +156,16 @@ describe('Studio Director dynamic spend fence', () => {
     const adapterPoll = vi.fn(async () => {
       throw new Error('adapter poll must stay unreachable');
     });
+    const adapterCancel = vi.fn(async () => {
+      throw new Error('adapter cancel must stay unreachable');
+    });
     const adapter: GenerationProviderAdapter = {
       id: 'weprompt-image-v1',
       validateConnection: adapterValidateConnection,
       validateRequest: adapterValidateRequest,
       submit: adapterSubmit,
       poll: adapterPoll,
+      cancel: adapterCancel,
     };
 
     const pending = new Map<string, StudioDirectorCommandRecordV1>();
@@ -164,7 +195,19 @@ describe('Studio Director dynamic spend fence', () => {
     const processorService = Object.assign(directorService, {
       submitScenes: serviceSubmitScenes,
       retryJob: serviceRetryJob,
-      jobManager: { submitScenes: jobSubmit, retryJob: jobRetry },
+      submitClips: serviceSubmitClips,
+      retryDownload: serviceRetryDownload,
+      cancelJob: serviceCancelJob,
+      renderCut: serviceRender,
+      jobManager: {
+        submitScenes: jobSubmit,
+        retryJob: jobRetry,
+        submitClips: jobSubmitClips,
+        retryJobV2: jobRetryV2,
+        retryDownloadV2: jobRetryDownloadV2,
+        cancelJobV2: jobCancelV2,
+      },
+      renderRunner: { renderCutV2 },
       providerResolver: { listConnectionCandidates, listGenerationRoutes, isGenerationRouteAvailable },
       adapterRegistry: new Map([[adapter.id, adapter]]),
     });
@@ -239,8 +282,17 @@ describe('Studio Director dynamic spend fence', () => {
     });
     expect(serviceSubmitScenes).not.toHaveBeenCalled();
     expect(serviceRetryJob).not.toHaveBeenCalled();
+    expect(serviceSubmitClips).not.toHaveBeenCalled();
+    expect(serviceRetryDownload).not.toHaveBeenCalled();
+    expect(serviceCancelJob).not.toHaveBeenCalled();
+    expect(serviceRender).not.toHaveBeenCalled();
     expect(jobSubmit).not.toHaveBeenCalled();
     expect(jobRetry).not.toHaveBeenCalled();
+    expect(jobSubmitClips).not.toHaveBeenCalled();
+    expect(jobRetryV2).not.toHaveBeenCalled();
+    expect(jobRetryDownloadV2).not.toHaveBeenCalled();
+    expect(jobCancelV2).not.toHaveBeenCalled();
+    expect(renderCutV2).not.toHaveBeenCalled();
     expect(listConnectionCandidates).not.toHaveBeenCalled();
     expect(listGenerationRoutes).not.toHaveBeenCalled();
     expect(isGenerationRouteAvailable).not.toHaveBeenCalled();
@@ -248,6 +300,7 @@ describe('Studio Director dynamic spend fence', () => {
     expect(adapterValidateRequest).not.toHaveBeenCalled();
     expect(adapterSubmit).not.toHaveBeenCalled();
     expect(adapterPoll).not.toHaveBeenCalled();
+    expect(adapterCancel).not.toHaveBeenCalled();
 
     await processor.stop();
   });

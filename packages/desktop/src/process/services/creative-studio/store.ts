@@ -10,6 +10,7 @@ import path from 'node:path';
 import {
   isValidProviderJobId,
   isStudioSceneCountTransitionAllowed,
+  STUDIO_PROJECT_SCHEMA_VERSION,
   STUDIO_MAX_SCENES,
   STUDIO_REFERENCE_PROMPT_MAX_LENGTH,
   type CreateStudioProjectInput,
@@ -317,6 +318,12 @@ export type CreativeStudioStore = {
   createProjectV2(input: CreateStudioProjectInputV2): Promise<StudioProjectV2>;
   getProjectV2(projectId: string): Promise<StudioProjectStoreLoadResultV2>;
   applyMutationBatchV2(batch: StudioMutationBatchV2, commitTag?: string): Promise<StudioMutationApplyResultV2>;
+  updateProjectV2(
+    projectId: string,
+    update: (project: StudioProjectV2) => StudioProjectV2,
+    expectedRevision?: number,
+    commitTag?: string
+  ): Promise<StudioProjectV2>;
   deleteProjectV2(projectId: string, expectedRevision: number): Promise<boolean>;
   createProject(input: CreateStudioProjectInput): Promise<StudioProject>;
   getProject(projectId: string): Promise<StudioProject | null>;
@@ -351,6 +358,8 @@ export type CreativeStudioStore = {
   ): Promise<{ projectDir: string; pendingDir: string; referencePendingDir: string }>;
   /** Main-process-only canonical project path; never return this through IPC. */
   getVerifiedProjectDirectory(projectId: string): Promise<string | null>;
+  /** Main-process-only schema-2 path; classifies the manifest before returning a directory. */
+  getVerifiedProjectDirectoryV2(projectId: string): Promise<string | null>;
 };
 
 export type CreativeStudioStoreDeps = {
@@ -2365,6 +2374,57 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     return next;
   };
 
+  const updateProjectV2InsideQueue = async (
+    root: string,
+    projectId: string,
+    update: (project: StudioProjectV2) => StudioProjectV2,
+    expectedRevision: number | undefined,
+    commitTag: string | null
+  ): Promise<StudioProjectV2> => {
+    const inspected = await inspectProjectFileV2(root, projectId);
+    if (inspected.status === 'not_found') {
+      throw new CreativeStudioStoreError('not_found', 'Studio project not found');
+    }
+    if (inspected.status === 'unsupported_prototype_schema') {
+      throw new CreativeStudioStoreError('unsupported_prototype_schema', 'Unsupported prototype Studio schema');
+    }
+    if (inspected.status === 'malformed_v2') throw inspected.error;
+    const current = inspected.project;
+    if (expectedRevision !== undefined && expectedRevision !== current.revision) {
+      throw new CreativeStudioStoreError('stale_project', 'Studio project has changed');
+    }
+    await summariesFileV2(root);
+    const updated = update(structuredClone(current));
+    if (!isRecord(updated) || updated.id !== current.id || updated.createdAt !== current.createdAt) {
+      throw new CreativeStudioStoreError('invalid_payload', 'Studio project identity cannot change');
+    }
+    const next: StudioProjectV2 = {
+      ...updated,
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      revision: current.revision + 1,
+      updatedAt: now(),
+    };
+    if (!validateStudioProjectV2(next)) {
+      throw new CreativeStudioStoreError('invalid_payload', 'Invalid schema-2 Studio project payload');
+    }
+    const file = await projectFile(root, projectId, false);
+    if (file === null) {
+      throw new CreativeStudioStoreError('storage_error', 'Creative Studio project storage is unavailable');
+    }
+    await writeJsonAtomic(root, file, next);
+    observeProjectCommit(
+      Object.freeze({
+        projectId,
+        previousRevision: current.revision,
+        committedRevision: next.revision,
+        committedAt: next.updatedAt,
+        commitTag,
+      })
+    );
+    await repairSummaryV2AfterCommit();
+    return next;
+  };
+
   const listProposalsThroughQueue = (projectId: string): Promise<StudioProposal[]> =>
     enqueue(projectId, async (): Promise<StudioProposal[]> => {
       const root = await canonicalRoot();
@@ -2491,6 +2551,25 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       });
     },
 
+    async updateProjectV2(
+      projectId: string,
+      update: (project: StudioProjectV2) => StudioProjectV2,
+      expectedRevision?: number,
+      commitTag?: string
+    ): Promise<StudioProjectV2> {
+      if (!isSafeIdV2(projectId)) {
+        throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio project id');
+      }
+      if (expectedRevision !== undefined && !isIntegerInRange(expectedRevision, 1, Number.MAX_SAFE_INTEGER)) {
+        throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio project revision');
+      }
+      return enqueue(projectId, async () => {
+        const root = await existingCanonicalRootV2();
+        if (root === null) throw new CreativeStudioStoreError('not_found', 'Studio project not found');
+        return updateProjectV2InsideQueue(root, projectId, update, expectedRevision, commitTag ?? null);
+      });
+    },
+
     async deleteProjectV2(projectId: string, expectedRevision: number): Promise<boolean> {
       if (!isSafeIdV2(projectId)) return false;
       if (!isIntegerInRange(expectedRevision, 1, Number.MAX_SAFE_INTEGER)) {
@@ -2579,6 +2658,19 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     async getVerifiedProjectDirectory(projectId: string): Promise<string | null> {
       if (!isSafeId(projectId)) return null;
       return projectDirectory(await canonicalRoot(), projectId, false);
+    },
+
+    async getVerifiedProjectDirectoryV2(projectId: string): Promise<string | null> {
+      if (!isSafeIdV2(projectId)) return null;
+      const root = await existingCanonicalRootV2();
+      if (root === null) return null;
+      const inspected = await inspectProjectFileV2(root, projectId);
+      if (inspected.status === 'not_found') return null;
+      if (inspected.status === 'unsupported_prototype_schema') {
+        throw new CreativeStudioStoreError('unsupported_prototype_schema', 'Unsupported prototype Studio schema');
+      }
+      if (inspected.status === 'malformed_v2') throw inspected.error;
+      return projectDirectory(root, projectId, false);
     },
 
     async resolveProposalPaths(
