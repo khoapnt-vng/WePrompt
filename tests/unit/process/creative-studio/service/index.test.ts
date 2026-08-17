@@ -16,29 +16,36 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import type {
-  CreateStudioProjectInput,
-  CreateStudioProjectInputV2,
-  StudioAsset,
-  StudioCut,
-  StudioEditableCut,
-  StudioEditableScene,
-  StudioJob,
-  StudioJobV2,
-  StudioProject,
-  StudioProjectV2,
-  StudioRendererProject,
-  StudioRouteCatalog,
-  StudioRouteCatalogEntry,
-  StudioScene,
-  StudioSetBriefRulesRequest,
-  StudioTextModelOption,
-  StudioUpdateModelSelectionRequest,
+import {
+  STUDIO_PROJECT_SCHEMA_VERSION,
+  type CreateStudioProjectInput,
+  type CreateStudioProjectInputV2,
+  type StudioAsset,
+  type StudioAssetV2,
+  type StudioCut,
+  type StudioEditableCut,
+  type StudioEditableScene,
+  type StudioJob,
+  type StudioJobV2,
+  type StudioProject,
+  type StudioProjectV2,
+  type StudioRendererProject,
+  type StudioRouteCatalog,
+  type StudioRouteCatalogEntry,
+  type StudioScene,
+  type StudioSetBriefRulesRequest,
+  type StudioTextModelOption,
+  type StudioUpdateModelSelectionRequest,
 } from '@/common/types/project/creativeStudioTypes';
 import type { StudioBriefRule, StudioBriefRuleDraft } from '@/common/types/project/creativeStudioRules';
 import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
 import type { IProvider } from '@/common/config/storage';
 import type { GenerationProviderAdapter } from '@process/services/creative-studio/adapters';
+import {
+  hasImageConditioningFields,
+  ProviderDeadlineError,
+  runWithProviderDeadline,
+} from '@process/services/creative-studio/adapters/types';
 import { STUDIO_E2E_BOUNDARY_SENTINELS } from '@process/services/creative-studio/adapters/e2eFakeAdapter';
 import type { CreativeStudioStore, CreativeStudioStoreError } from '@process/services/creative-studio/store';
 import { createCreativeStudioStore } from '@process/services/creative-studio/store';
@@ -62,14 +69,24 @@ import {
 import {
   createListRoutesHandler,
   createProposeBriefRuleHandler,
+  createProposeBriefRuleHandlerV2,
   createProposeStoryboardHandler,
+  createProposeStoryboardHandlerV2,
   createReadStoryboardHandler,
+  createReadStoryboardHandlerV2,
   createRequestReferenceImagesHandler,
+  createRequestReferenceImagesHandlerV2,
   parseStudioServerEnv,
   registerStudioTools,
+  registerStudioToolsV2,
+  studioApplyEditsInputSchemaV2,
+  studioProposeStoryboardInputSchemaV2,
+  studioRequestReferenceImagesInputSchemaV2,
 } from '@process/resources/builtinMcp/studioServer';
 import { BUILTIN_STUDIO_NAME } from '@process/resources/builtinMcp/constants';
 import * as referenceRequestWriter from '@process/resources/builtinMcp/studioReferenceRequestWriter';
+import { writeProposalRecordV2 } from '@process/resources/builtinMcp/studioProposalWriter';
+import { writePendingRecordV2 } from '@process/resources/builtinMcp/studioPendingRecordWriter';
 
 const createStudioMcpProtocolHarness = async (
   config: Parameters<typeof registerStudioTools>[1] = null,
@@ -78,6 +95,22 @@ const createStudioMcpProtocolHarness = async (
   const server = new McpServer({ name: 'studio-test', version: '1.0.0' });
   registerStudioTools(server, config, writerDeps);
   const client = new Client({ name: 'studio-test-client', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  return {
+    client,
+    close: () => server.close(),
+  };
+};
+
+const createStudioMcpProtocolHarnessV2 = async (
+  config: Parameters<typeof registerStudioToolsV2>[1] = null,
+  writerDeps: Parameters<typeof registerStudioToolsV2>[2] = {}
+) => {
+  const server = new McpServer({ name: 'studio-v2-test', version: '2.0.0' });
+  registerStudioToolsV2(server, config, writerDeps);
+  const client = new Client({ name: 'studio-v2-test-client', version: '2.0.0' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   await client.connect(clientTransport);
@@ -3183,6 +3216,37 @@ describe('CreativeStudioService', () => {
 
     await rejection;
     expect(validationSignal?.aborted).toBe(true);
+  });
+
+  it('propagates an already-aborted parent signal before starting provider work', async () => {
+    const parent = new AbortController();
+    parent.abort();
+    let operationSignal: AbortSignal | undefined;
+    const operation = vi.fn((signal: AbortSignal) => {
+      operationSignal = signal;
+      return new Promise<never>(() => undefined);
+    });
+
+    await expect(runWithProviderDeadline(parent.signal, 30_000, operation)).rejects.toBeInstanceOf(
+      ProviderDeadlineError
+    );
+    expect(operation).toHaveBeenCalledOnce();
+    expect(operationSignal?.aborted).toBe(true);
+  });
+
+  it('detects either reserved image-conditioning field even when its value is undefined', () => {
+    const baseRequest = {
+      prompt: 'A product on a clean table',
+      mediaKind: 'image' as const,
+      aspectRatio: '16:9' as const,
+      resolution: '1080p' as const,
+      durationSeconds: 5,
+      idempotencyKey: 'conditioning_shape',
+    };
+
+    expect(hasImageConditioningFields(baseRequest)).toBe(false);
+    expect(hasImageConditioningFields({ ...baseRequest, conditioningImages: undefined })).toBe(true);
+    expect(hasImageConditioningFields({ ...baseRequest, conditioningImageLimit: undefined })).toBe(true);
   });
 
   it('maps resolver dependency failures to a provider error', async () => {
@@ -6737,6 +6801,38 @@ describe('CreativeStudioServiceV2', () => {
 });
 
 describe('Studio MCP server', () => {
+  it('keeps optional descriptor fallbacks bounded when project or catalog fields are absent', () => {
+    const required = {
+      [STUDIO_ENV.projectId]: 'project_1',
+      [STUDIO_ENV.projectDir]: '/tmp/project_1',
+      [STUDIO_ENV.pendingDir]: '/tmp/project_1/proposals/pending',
+      [STUDIO_ENV.referencePendingDir]: '/tmp/project_1/reference-requests/pending',
+    };
+
+    expect(parseStudioServerEnv(required)).toMatchObject({ routeCatalog: null });
+    expect(parseStudioServerEnv({ ...required, [STUDIO_ENV.routeCatalog]: '{invalid' })).toMatchObject({
+      routeCatalog: null,
+    });
+    expect(
+      parseStudioServerEnv({
+        [STUDIO_ENV.projectId]: 'project_1',
+        [STUDIO_ENV.pendingDir]: '/tmp/project_1/proposals/pending',
+      })
+    ).toBeNull();
+  });
+
+  it.each([
+    ['storyboard reader', () => createReadStoryboardHandler(null)({})],
+    ['proposal writer', () => createProposeStoryboardHandler(null)({ base_revision: 1, scene_order: [], scenes: {} })],
+    ['rule writer', () => createProposeBriefRuleHandler(null)({ base_revision: 1, text: 'Rule', forbidden_terms: [] })],
+    ['reference writer', () => createRequestReferenceImagesHandler(null)({ sceneIds: ['scene_1'] })],
+  ] as const)('fails closed when the V1 %s has no project descriptor', async (_label, invoke) => {
+    await expect(invoke()).resolves.toMatchObject({
+      isError: true,
+      content: [{ text: expect.stringMatching(/unavailable/i) }],
+    });
+  });
+
   it('publishes the direct edit contract through the real MCP tools/list boundary', async () => {
     const harness = await createStudioMcpProtocolHarness();
     try {
@@ -7629,5 +7725,1771 @@ describe('Studio MCP server', () => {
     await createRequestReferenceImagesHandler(env)({ sceneIds: ['scene_1'] });
 
     expect(await readFile(projectFile, 'utf8')).toBe(before);
+  });
+});
+
+const editableSectionV2 = () => ({
+  title: 'Opening',
+  storyLine: 'Introduce the product',
+  visualPrompt: 'Warm sunrise over a quiet city',
+});
+
+const editableClipV2 = (mediaKind: 'image' | 'video' = 'image') => ({
+  shotPrompt: 'A wide establishing shot',
+  narration: '',
+  onScreenText: '',
+  mediaKind,
+  durationSeconds: mediaKind === 'video' ? 4 : 5,
+  referenceAssetId: null,
+});
+
+const capturePendingProjectAuthorityV2 = async (projectRoot: string) => {
+  const canonicalRoot = await nodeFs.realpath(projectRoot);
+  const stats = await nodeFs.lstat(canonicalRoot);
+  return { canonicalRoot, rootIdentity: { dev: stats.dev, ino: stats.ino } };
+};
+
+const createPendingQueueFixtureV2 = async () => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), 'studio-pending-v2-boundary-'));
+  const familyRoot = path.join(projectRoot, 'proposals');
+  const pendingDir = path.join(familyRoot, 'pending');
+  const slotsDir = path.join(familyRoot, 'slots');
+  await mkdir(pendingDir, { recursive: true });
+  await mkdir(slotsDir);
+  return { projectRoot, pendingDir, slotsDir };
+};
+
+const pendingRequestInputV2 = (pendingDir: string, recordId = 'request_boundary') => ({
+  pendingDir,
+  recordId,
+  record: { marker: recordId },
+  slotRecordKey: 'requestId' as const,
+  capacityMessage: 'full',
+  tooLargeMessage: 'too large',
+});
+
+describe('Studio MCP schema-2 server', () => {
+  it('publishes all Section/Clip operations as strict bounded schemas through real MCP tools/list', async () => {
+    const harness = await createStudioMcpProtocolHarnessV2();
+    try {
+      const { tools } = await harness.client.listTools();
+      const applyEdits = tools.find((tool) => tool.name === 'studio_apply_edits');
+      const applySchema = applyEdits?.inputSchema;
+      const operationItems = applySchema?.properties?.operations as { items?: Record<string, unknown> } | undefined;
+      const operationVariants = (operationItems?.items?.anyOf ?? operationItems?.items?.oneOf) as
+        | Array<{
+            additionalProperties?: boolean;
+            required?: string[];
+            properties?: Record<string, { const?: string; additionalProperties?: boolean }>;
+          }>
+        | undefined;
+      const advertisedValidator = new AjvJsonSchemaValidator().getValidator(applySchema as never);
+      const canonicalExample = (applyEdits?.description ?? '').match(
+        /(\{"expectedRevision":8,"operations":\[[^]*\]\})\./
+      )?.[1];
+
+      expect(tools.map(({ name }) => name).toSorted()).toEqual([
+        'propose_brief_rule',
+        'propose_storyboard',
+        'read_storyboard',
+        'studio_apply_edits',
+        'studio_get_command_status',
+        'studio_list_routes',
+        'studio_request_reference_images',
+      ]);
+      expect(tools.every((tool) => Object.keys(tool.inputSchema).length > 0)).toBe(true);
+      expect(applySchema).toMatchObject({
+        type: 'object',
+        additionalProperties: false,
+        required: ['expectedRevision', 'operations'],
+      });
+      expect(operationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual([
+        'add_clip',
+        'add_section',
+        'delete_clip',
+        'edit_clip',
+        'edit_section',
+        'park_section',
+        'park_take',
+        'remove_shelf_alias',
+        'reorder_clips',
+        'reorder_sections',
+        'reorder_shelf',
+        'restore_section',
+        'select_shelved_take',
+        'select_take',
+        'set_brief',
+      ]);
+      const addSection = operationVariants?.find((variant) => variant.properties?.kind?.const === 'add_section');
+      const addClip = operationVariants?.find((variant) => variant.properties?.kind?.const === 'add_clip');
+      expect(addSection).toMatchObject({
+        additionalProperties: false,
+        required: ['kind', 'section', 'firstClip', 'beforeSectionId'],
+      });
+      expect(addSection?.properties).not.toHaveProperty('sectionId');
+      expect(addSection?.properties).not.toHaveProperty('firstClipId');
+      expect(addClip).toMatchObject({
+        additionalProperties: false,
+        required: ['kind', 'sectionId', 'clip', 'beforeClipId'],
+      });
+      expect(addClip?.properties).not.toHaveProperty('clipId');
+
+      const canonicalBatch = {
+        expectedRevision: 8,
+        operations: [
+          { kind: 'set_brief', brief: '...' },
+          { kind: 'edit_section', sectionId: 'section_1', changes: { title: '...' } },
+          { kind: 'edit_clip', clipId: 'clip_1', changes: { shotPrompt: '...' } },
+          { kind: 'reorder_sections', sectionOrder: ['section_2', 'section_1'] },
+        ],
+      };
+      expect(advertisedValidator(canonicalBatch)).toMatchObject({ valid: true });
+      expect(
+        advertisedValidator({
+          ...canonicalBatch,
+          operations: [
+            {
+              kind: 'add_clip',
+              sectionId: 'section_1',
+              clipId: 'caller_id',
+              clip: editableClipV2(),
+              beforeClipId: null,
+            },
+          ],
+        })
+      ).toMatchObject({ valid: false });
+      expect(canonicalExample).toBeDefined();
+      expect(JSON.parse(canonicalExample ?? '{}')).toEqual(canonicalBatch);
+      expect(applyEdits?.description).toMatch(/never starts paid generation/i);
+
+      const referenceSchema = tools.find((tool) => tool.name === 'studio_request_reference_images')?.inputSchema;
+      const referenceValidator = new AjvJsonSchemaValidator().getValidator(referenceSchema as never);
+      expect(referenceSchema).toMatchObject({ type: 'object', additionalProperties: false, required: ['clipIds'] });
+      expect(referenceValidator({ clipIds: Array.from({ length: 24 }, (_, index) => `clip_${index}`) })).toMatchObject({
+        valid: true,
+      });
+      expect(referenceValidator({ clipIds: [], unknown: true })).toMatchObject({ valid: false });
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('advertises uniqueness, conflict, and video-duration rules that an AJV client can enforce', async () => {
+    const harness = await createStudioMcpProtocolHarnessV2();
+    try {
+      const { tools } = await harness.client.listTools();
+      const applySchema = tools.find((tool) => tool.name === 'studio_apply_edits')?.inputSchema;
+      const proposalSchema = tools.find((tool) => tool.name === 'propose_storyboard')?.inputSchema;
+      const referenceSchema = tools.find((tool) => tool.name === 'studio_request_reference_images')?.inputSchema;
+      const applyValidator = new AjvJsonSchemaValidator().getValidator(applySchema as never);
+      const proposalValidator = new AjvJsonSchemaValidator().getValidator(proposalSchema as never);
+      const referenceValidator = new AjvJsonSchemaValidator().getValidator(referenceSchema as never);
+      const invalidApplyInputs = [
+        {
+          expectedRevision: 7,
+          operations: [{ kind: 'reorder_sections', sectionOrder: ['section_1', 'section_1'] }],
+        },
+        {
+          expectedRevision: 7,
+          operations: [
+            {
+              kind: 'reorder_clips',
+              sectionId: 'section_1',
+              clipOrder: ['clip_1', 'clip_1'],
+            },
+          ],
+        },
+        {
+          expectedRevision: 7,
+          operations: [
+            {
+              kind: 'reorder_shelf',
+              shelf: [
+                { kind: 'asset', assetId: 'take_1' },
+                { kind: 'asset', assetId: 'take_1' },
+              ],
+            },
+          ],
+        },
+        {
+          expectedRevision: 7,
+          operations: [
+            { kind: 'add_section', section: editableSectionV2(), firstClip: editableClipV2(), beforeSectionId: null },
+            { kind: 'reorder_sections', sectionOrder: ['section_1'] },
+          ],
+        },
+        {
+          expectedRevision: 7,
+          operations: [
+            {
+              kind: 'add_clip',
+              sectionId: 'section_1',
+              clip: { ...editableClipV2('video'), durationSeconds: 3 },
+              beforeClipId: null,
+            },
+          ],
+        },
+        {
+          expectedRevision: 7,
+          operations: [
+            {
+              kind: 'edit_clip',
+              clipId: 'clip_1',
+              changes: { mediaKind: 'video', durationSeconds: 3 },
+            },
+          ],
+        },
+      ];
+
+      for (const input of invalidApplyInputs) expect(applyValidator(input)).toMatchObject({ valid: false });
+      expect(
+        proposalValidator({
+          base_revision: 7,
+          operations: [
+            {
+              kind: 'add_section',
+              sectionId: 'section_new',
+              section: editableSectionV2(),
+              firstClipId: 'clip_new',
+              firstClip: editableClipV2(),
+              beforeSectionId: null,
+            },
+            { kind: 'reorder_sections', sectionOrder: ['section_1'] },
+          ],
+        })
+      ).toMatchObject({ valid: false });
+      expect(referenceValidator({ clipIds: ['clip_1', 'clip_1'] })).toMatchObject({ valid: false });
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('documents the two deliberate tools/list supersets while enforcing them before handlers', async () => {
+    const harness = await createStudioMcpProtocolHarnessV2();
+    try {
+      const { tools } = await harness.client.listTools();
+      const applyTool = tools.find((tool) => tool.name === 'studio_apply_edits');
+      const proposalTool = tools.find((tool) => tool.name === 'propose_storyboard');
+      const applyValidator = new AjvJsonSchemaValidator().getValidator(applyTool?.inputSchema as never);
+      const proposalValidator = new AjvJsonSchemaValidator().getValidator(proposalTool?.inputSchema as never);
+      const sameSectionApply = {
+        expectedRevision: 7,
+        operations: [
+          { kind: 'add_clip', sectionId: 'section_1', clip: editableClipV2(), beforeClipId: null },
+          { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_1'] },
+        ],
+      };
+      const differentSectionApply = {
+        expectedRevision: 7,
+        operations: [
+          { kind: 'add_clip', sectionId: 'section_1', clip: editableClipV2(), beforeClipId: null },
+          { kind: 'reorder_clips', sectionId: 'section_2', clipOrder: ['clip_2'] },
+        ],
+      };
+      const sameSectionProposal = {
+        base_revision: 7,
+        operations: [
+          {
+            kind: 'add_clip',
+            sectionId: 'section_1',
+            clipId: 'clip_new',
+            clip: editableClipV2(),
+            beforeClipId: null,
+          },
+          { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_1'] },
+        ],
+      };
+      const differentSectionProposal = {
+        ...sameSectionProposal,
+        operations: [
+          sameSectionProposal.operations[0],
+          { ...sameSectionProposal.operations[1], sectionId: 'section_2' },
+        ],
+      };
+      const oversizedOperations = Array.from({ length: 32 }, (_, index) => ({
+        kind: 'set_brief',
+        brief: `${index}:${'x'.repeat(16 * 1024 - String(index).length - 1)}`,
+      }));
+      const oversizedApply = { expectedRevision: 7, operations: oversizedOperations };
+      const oversizedProposal = { base_revision: 7, operations: oversizedOperations };
+
+      expect(applyValidator(sameSectionApply)).toMatchObject({ valid: true });
+      expect(applyValidator(differentSectionApply)).toMatchObject({ valid: true });
+      expect(applyValidator(oversizedApply)).toMatchObject({ valid: true });
+      expect(studioApplyEditsInputSchemaV2.safeParse(sameSectionApply).success).toBe(false);
+      expect(studioApplyEditsInputSchemaV2.safeParse(differentSectionApply).success).toBe(true);
+      expect(studioApplyEditsInputSchemaV2.safeParse(oversizedApply).success).toBe(false);
+
+      expect(proposalValidator(sameSectionProposal)).toMatchObject({ valid: true });
+      expect(proposalValidator(differentSectionProposal)).toMatchObject({ valid: true });
+      expect(proposalValidator(oversizedProposal)).toMatchObject({ valid: true });
+      expect(studioProposeStoryboardInputSchemaV2.safeParse(sameSectionProposal).success).toBe(false);
+      expect(studioProposeStoryboardInputSchemaV2.safeParse(differentSectionProposal).success).toBe(true);
+      expect(studioProposeStoryboardInputSchemaV2.safeParse(oversizedProposal).success).toBe(false);
+
+      for (const description of [applyTool?.description, proposalTool?.description]) {
+        expect(description).toMatch(/same section/i);
+        expect(description).toMatch(/256 KiB/i);
+      }
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('accepts every V2 operation independently and rejects mutation-sensitive malformed batches', () => {
+    const validOperations = [
+      { kind: 'set_brief', brief: 'A concise launch story' },
+      { kind: 'add_section', section: editableSectionV2(), firstClip: editableClipV2(), beforeSectionId: null },
+      { kind: 'edit_section', sectionId: 'section_1', changes: { title: 'A new opening' } },
+      { kind: 'reorder_sections', sectionOrder: ['section_2', 'section_1'] },
+      { kind: 'park_section', sectionId: 'section_2' },
+      { kind: 'restore_section', sectionId: 'section_2', beforeSectionId: 'section_1' },
+      { kind: 'add_clip', sectionId: 'section_1', clip: editableClipV2(), beforeClipId: null },
+      { kind: 'edit_clip', clipId: 'clip_1', changes: { shotPrompt: 'A tighter shot' } },
+      { kind: 'delete_clip', clipId: 'clip_2' },
+      { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_2', 'clip_1'] },
+      { kind: 'park_take', clipId: 'clip_1', assetId: 'take_1' },
+      { kind: 'select_shelved_take', clipId: 'clip_1', assetId: 'take_2' },
+      { kind: 'remove_shelf_alias', assetId: 'take_3' },
+      { kind: 'reorder_shelf', shelf: [{ kind: 'asset', assetId: 'take_3' }] },
+      { kind: 'reorder_shelf', shelf: [{ kind: 'section', sectionId: 'section_2' }] },
+      { kind: 'select_take', clipId: 'clip_1', assetId: 'take_1' },
+    ];
+    for (const operation of validOperations) {
+      expect(
+        studioApplyEditsInputSchemaV2.safeParse({ expectedRevision: 7, operations: [operation] }).success,
+        operation.kind
+      ).toBe(true);
+    }
+
+    const invalidBatches = [
+      { expectedRevision: 7, operations: [] },
+      {
+        expectedRevision: 7,
+        operations: Array.from({ length: 33 }, (_, index) => ({ kind: 'set_brief', brief: `Brief ${index}` })),
+      },
+      { expectedRevision: 7, operations: [{ kind: 'edit_section', sectionId: 'section_1', changes: {} }] },
+      { expectedRevision: 7, operations: [{ kind: 'edit_clip', clipId: 'clip_1', changes: {} }] },
+      { expectedRevision: 7, operations: [{ kind: 'park_section', sectionId: '../section' }] },
+      {
+        expectedRevision: 7,
+        operations: [
+          {
+            kind: 'add_section',
+            sectionId: 'caller_section',
+            section: editableSectionV2(),
+            firstClip: editableClipV2(),
+            beforeSectionId: null,
+          },
+        ],
+      },
+      {
+        expectedRevision: 7,
+        operations: [
+          {
+            kind: 'add_clip',
+            sectionId: 'section_1',
+            clip: { ...editableClipV2('video'), durationSeconds: 3 },
+            beforeClipId: null,
+          },
+        ],
+      },
+      {
+        expectedRevision: 7,
+        operations: [
+          {
+            kind: 'add_clip',
+            sectionId: 'section_1',
+            clip: { ...editableClipV2('video'), durationSeconds: 16 },
+            beforeClipId: null,
+          },
+        ],
+      },
+      {
+        expectedRevision: 7,
+        operations: [{ kind: 'edit_clip', clipId: 'clip_1', changes: { mediaKind: 'video', durationSeconds: 3 } }],
+      },
+      {
+        expectedRevision: 7,
+        operations: [{ kind: 'edit_clip', clipId: 'clip_1', changes: { mediaKind: 'video', durationSeconds: 16 } }],
+      },
+      {
+        expectedRevision: 7,
+        operations: [
+          { kind: 'add_section', section: editableSectionV2(), firstClip: editableClipV2(), beforeSectionId: null },
+          { kind: 'reorder_sections', sectionOrder: ['section_1'] },
+        ],
+      },
+      {
+        expectedRevision: 7,
+        operations: [
+          { kind: 'add_clip', sectionId: 'section_1', clip: editableClipV2(), beforeClipId: null },
+          { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_1'] },
+        ],
+      },
+      { expectedRevision: 7, operations: [{ kind: 'set_brief', brief: 'Valid', unknown: true }] },
+      { expectedRevision: 7, operations: [{ kind: 'set_brief', brief: 'Valid' }], unknown: true },
+    ];
+    for (const input of invalidBatches) expect(studioApplyEditsInputSchemaV2.safeParse(input).success).toBe(false);
+
+    expect(
+      studioApplyEditsInputSchemaV2.safeParse({
+        expectedRevision: 7,
+        operations: [
+          { kind: 'add_clip', sectionId: 'section_1', clip: editableClipV2(), beforeClipId: null },
+          { kind: 'reorder_clips', sectionId: 'section_2', clipOrder: ['clip_2'] },
+        ],
+      }).success
+    ).toBe(true);
+    expect(
+      studioProposeStoryboardInputSchemaV2.safeParse({
+        base_revision: 7,
+        operations: [
+          {
+            kind: 'add_section',
+            sectionId: 'section_new',
+            section: editableSectionV2(),
+            firstClipId: 'clip_new',
+            firstClip: editableClipV2(),
+            beforeSectionId: null,
+          },
+        ],
+      }).success
+    ).toBe(true);
+    expect(
+      studioProposeStoryboardInputSchemaV2.safeParse({
+        base_revision: 7,
+        operations: [
+          {
+            kind: 'add_clip',
+            sectionId: 'section_1',
+            clipId: 'clip_new',
+            clip: editableClipV2(),
+            beforeClipId: null,
+          },
+          { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_1'] },
+        ],
+      }).success
+    ).toBe(false);
+    expect(
+      studioProposeStoryboardInputSchemaV2.safeParse({
+        base_revision: 7,
+        operations: [{ kind: 'set_brief', brief: 'Valid', unknown: true }],
+      }).success
+    ).toBe(false);
+    for (const clipIds of [
+      [],
+      Array.from({ length: 25 }, (_, index) => `clip_${index}`),
+      ['clip_1', 'clip_1'],
+      ['unsafe/clip'],
+    ]) {
+      expect(studioRequestReferenceImagesInputSchemaV2.safeParse({ clipIds }).success).toBe(false);
+    }
+  });
+
+  it('rejects conflicting add/reorder commands through the SDK before IDs or mailbox IO', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-'));
+    const ids = ['command_valid', 'clip_new', 'lease_valid'];
+    const createId = vi.fn(() => ids.shift() ?? 'lease_fallback');
+    const harness = await createStudioMcpProtocolHarnessV2(
+      { projectId: 'project_v2', projectDir, pendingDir: '', referencePendingDir: '' },
+      { createId }
+    );
+    try {
+      for (const operations of [
+        [
+          { kind: 'add_section', section: editableSectionV2(), firstClip: editableClipV2(), beforeSectionId: null },
+          { kind: 'reorder_sections', sectionOrder: ['section_1'] },
+        ],
+        [
+          { kind: 'add_clip', sectionId: 'section_1', clip: editableClipV2(), beforeClipId: null },
+          { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_1'] },
+        ],
+      ]) {
+        // The second rejection must observe that the first rejection minted nothing.
+        // eslint-disable-next-line no-await-in-loop
+        await expect(
+          harness.client.callTool({ name: 'studio_apply_edits', arguments: { expectedRevision: 7, operations } })
+        ).resolves.toMatchObject({ isError: true });
+      }
+      expect(createId).not.toHaveBeenCalled();
+      await expect(nodeFs.readdir(path.join(projectDir, 'commands'))).rejects.toMatchObject({ code: 'ENOENT' });
+
+      const unrelated = await harness.client.callTool({
+        name: 'studio_apply_edits',
+        arguments: {
+          expectedRevision: 7,
+          operations: [
+            { kind: 'add_clip', sectionId: 'section_1', clip: editableClipV2(), beforeClipId: null },
+            { kind: 'reorder_clips', sectionId: 'section_2', clipOrder: ['clip_2'] },
+          ],
+        },
+      });
+      expect(JSON.parse(String(unrelated.content[0]?.type === 'text' ? unrelated.content[0].text : '{}'))).toEqual({
+        status: 'storage_error',
+        commandId: 'command_valid',
+      });
+      expect(createId).toHaveBeenCalledTimes(3);
+    } finally {
+      await harness.close();
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects maximum-count oversized commands and proposals before IDs or sidecar IO', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-pre-handler-'));
+    const createId = vi.fn(() => 'unexpected_id');
+    const config = {
+      projectId: 'project_v2',
+      projectDir,
+      pendingDir: path.join(projectDir, 'proposals', 'pending'),
+      referencePendingDir: path.join(projectDir, 'reference-requests', 'pending'),
+    };
+    const harness = await createStudioMcpProtocolHarnessV2(config, { createId });
+    const operations = Array.from({ length: 32 }, (_, index) => ({
+      kind: 'set_brief',
+      brief: `${index}:${'x'.repeat(16 * 1024 - String(index).length - 1)}`,
+    }));
+    try {
+      await expect(
+        harness.client.callTool({
+          name: 'studio_apply_edits',
+          arguments: { expectedRevision: 7, operations },
+        })
+      ).resolves.toMatchObject({ isError: true });
+      await expect(
+        harness.client.callTool({
+          name: 'propose_storyboard',
+          arguments: { base_revision: 7, operations },
+        })
+      ).resolves.toMatchObject({ isError: true });
+      expect(createId).not.toHaveBeenCalled();
+      await expect(nodeFs.lstat(path.join(projectDir, 'commands'))).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(nodeFs.lstat(path.join(projectDir, 'proposals'))).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await harness.close();
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('projects validated Section/Clip state with selected-first bounded canonical takes', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-'));
+    const project = makeSchema2ServiceProject();
+    const assets = Array.from({ length: 26 }, (_, index): StudioAssetV2 => {
+      const id = `take_${String(index + 1).padStart(2, '0')}`;
+      return {
+        id,
+        projectId: project.id,
+        clipId: 'clip_1',
+        mediaKind: 'image',
+        mimeType: 'image/png',
+        managedAsset: { collection: 'assets', fileName: `${id}.png` },
+        byteSize: 1,
+        sha256: 'a'.repeat(64),
+        createdAt: '2026-08-17T00:00:00.000Z',
+      };
+    });
+    const briefReferences: StudioAssetV2[] = [
+      ['cast_b', 'cast', 'Second cast'],
+      ['cast_a', 'cast', 'First cast'],
+      ['look_a', 'look', 'Golden look'],
+    ].map(([id, role, label]) => ({
+      id: id!,
+      projectId: project.id,
+      clipId: null,
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'imports', fileName: `${id}.png` },
+      byteSize: 1,
+      sha256: 'b'.repeat(64),
+      briefReferenceRole: role as 'cast' | 'look',
+      briefReferenceLabel: label!,
+      createdAt: '2026-08-17T00:00:00.000Z',
+    }));
+    project.assets = Object.fromEntries([...assets, ...briefReferences].map((asset) => [asset.id, asset]));
+    project.clips.clip_1.assetIds = assets.map(({ id }) => id);
+    project.clips.clip_1.selectedAssetId = 'take_26';
+    project.rules = [
+      {
+        id: 'rule_context',
+        scope: 'project',
+        text: 'Keep the tone optimistic.',
+        predicate: null,
+        createdAt: '2026-08-17T00:00:00.000Z',
+      },
+      {
+        id: 'rule_enforced',
+        scope: 'project',
+        text: 'Never show competitors.',
+        predicate: { kind: 'forbidden_terms', terms: ['competitor'] },
+        createdAt: '2026-08-17T00:00:01.000Z',
+      },
+    ];
+    await writeFile(path.join(projectDir, 'project.json'), JSON.stringify(project));
+
+    const result = await createReadStoryboardHandlerV2({
+      projectId: project.id,
+      projectDir,
+      pendingDir: '',
+      referencePendingDir: '',
+    })({});
+    const view = JSON.parse(result.content[0].text) as {
+      sectionOrder: string[];
+      sections: Record<string, { clipOrder: string[] }>;
+      clips: Record<string, { selectedTakeId: string | null; availableTakeIds: string[] }>;
+      shelf: unknown[];
+      briefReferences: unknown[];
+      rules: unknown[];
+    };
+
+    expect(result.isError).toBeUndefined();
+    expect(view.sectionOrder).toEqual(['section_1', 'section_2']);
+    expect(view.sections.section_1.clipOrder).toEqual(['clip_1']);
+    expect(view.clips.clip_1).toMatchObject({ selectedTakeId: 'take_26' });
+    expect(view.clips.clip_1.availableTakeIds).toEqual([
+      'take_26',
+      ...Array.from({ length: 23 }, (_, index) => `take_${String(index + 1).padStart(2, '0')}`),
+    ]);
+    expect(view.shelf).toEqual([]);
+    expect(view.briefReferences).toEqual([
+      { id: 'cast_a', label: 'First cast', role: 'cast' },
+      { id: 'cast_b', label: 'Second cast', role: 'cast' },
+      { id: 'look_a', label: 'Golden look', role: 'look' },
+    ]);
+    expect(view.rules).toEqual([
+      { scope: 'project', text: 'Keep the tone optimistic.', enforced: false },
+      {
+        scope: 'project',
+        text: 'Never show competitors.',
+        enforced: true,
+        forbiddenTerms: ['competitor'],
+      },
+    ]);
+    expect(view).not.toHaveProperty('sceneOrder');
+    expect(view).not.toHaveProperty('scenes');
+    await rm(projectDir, { recursive: true, force: true });
+  });
+
+  it('counts a parked section against the schema-2 section capacity', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-capacity-'));
+    const empty = createEmptyStudioProjectV2(
+      {
+        name: 'Capacity boundary',
+        brief: '',
+        aspectRatio: '16:9',
+        targetDurationSeconds: 24,
+        resolution: '1080p',
+      },
+      'project_capacity',
+      '2026-08-17T00:00:00.000Z'
+    );
+    let project = applyStudioMutationBatchV2(empty, {
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      projectId: empty.id,
+      expectedRevision: empty.revision,
+      operations: Array.from({ length: 24 }, (_, index) => {
+        const ordinal = index + 1;
+        return {
+          kind: 'add_section' as const,
+          sectionId: `section_${ordinal}`,
+          section: {
+            title: `Section ${ordinal}`,
+            storyLine: '',
+            visualPrompt: `Visual ${ordinal}`,
+          },
+          firstClipId: `clip_${ordinal}`,
+          firstClip: editableClipV2(),
+          beforeSectionId: null,
+        };
+      }),
+    }).project;
+    project = applyStudioMutationBatchV2(project, {
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      projectId: project.id,
+      expectedRevision: project.revision,
+      operations: [{ kind: 'park_section', sectionId: 'section_24' }],
+    }).project;
+    await writeFile(path.join(projectDir, 'project.json'), JSON.stringify(project));
+
+    try {
+      const result = await createReadStoryboardHandlerV2({
+        projectId: project.id,
+        projectDir,
+        pendingDir: '',
+        referencePendingDir: '',
+      })({});
+      const view = JSON.parse(result.content[0].text) as {
+        sectionOrder: string[];
+        sectionCapacity: { current: number; maximum: number; remaining: number; overCapacity: boolean };
+      };
+
+      expect(project.sectionOrder).toHaveLength(23);
+      expect(Object.keys(project.sections)).toHaveLength(24);
+      expect(view.sectionCapacity).toEqual({ current: 24, maximum: 24, remaining: 0, overCapacity: false });
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a schema-1 manifest as unsupported before proposal or reference sidecar IO', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-legacy-'));
+    await writeFile(path.join(projectDir, 'project.json'), JSON.stringify(studioServerProjectFixture));
+    const config = {
+      projectId: studioServerProjectFixture.id,
+      projectDir,
+      pendingDir: path.join(projectDir, 'proposals', 'pending'),
+      referencePendingDir: path.join(projectDir, 'reference-requests', 'pending'),
+    };
+
+    try {
+      const outcomes = await Promise.all([
+        createReadStoryboardHandlerV2(config)({}),
+        createProposeStoryboardHandlerV2(config)({
+          base_revision: studioServerProjectFixture.revision,
+          operations: [{ kind: 'set_brief', brief: 'Must remain schema 1' }],
+        }),
+        createRequestReferenceImagesHandlerV2(config)({ clipIds: ['clip_1'] }),
+      ]);
+
+      expect(outcomes.every((result) => result.isError === true)).toBe(true);
+      expect(outcomes.every((result) => result.content[0].text.includes('unsupported_prototype_schema'))).toBe(true);
+      await expect(readdir(projectDir)).resolves.toEqual(['project.json']);
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['proposal', 'reference'] as const)(
+    'rejects a %s queue rooted in another project without changing the foreign project',
+    async (requestKind) => {
+      const parentDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-cross-root-'));
+      const projectDir = path.join(parentDir, 'authorizing-project');
+      const foreignProjectDir = path.join(parentDir, 'foreign-project');
+      const project = makeSchema2ServiceProject();
+      const foreignPendingDir = path.join(foreignProjectDir, 'proposals', 'pending');
+      const foreignProposalSlotsDir = path.join(foreignProjectDir, 'proposals', 'slots');
+      const foreignReferencePendingDir = path.join(foreignProjectDir, 'reference-requests', 'pending');
+      const foreignReferenceSlotsDir = path.join(foreignProjectDir, 'reference-requests', 'slots');
+      await mkdir(projectDir);
+      await writeFile(path.join(projectDir, 'project.json'), JSON.stringify(project));
+      await mkdir(foreignPendingDir, { recursive: true });
+      await mkdir(foreignProposalSlotsDir);
+      await mkdir(foreignReferencePendingDir, { recursive: true });
+      await mkdir(foreignReferenceSlotsDir);
+      await writeFile(path.join(foreignProjectDir, 'project.json'), JSON.stringify(studioServerProjectFixture));
+      const captureForeignProject = async () => {
+        const captureDirectory = async (directory: string) =>
+          Promise.all(
+            (await readdir(directory))
+              .toSorted()
+              .map(async (name) => ({ name, bytes: await readFile(path.join(directory, name), 'utf8') }))
+          );
+        return {
+          project: await readFile(path.join(foreignProjectDir, 'project.json'), 'utf8'),
+          proposalPending: await captureDirectory(foreignPendingDir),
+          proposalSlots: await captureDirectory(foreignProposalSlotsDir),
+          referencePending: await captureDirectory(foreignReferencePendingDir),
+          referenceSlots: await captureDirectory(foreignReferenceSlotsDir),
+        };
+      };
+      const before = await captureForeignProject();
+      const config = {
+        projectId: project.id,
+        projectDir,
+        pendingDir: foreignPendingDir,
+        referencePendingDir: foreignReferencePendingDir,
+      };
+
+      try {
+        const result =
+          requestKind === 'proposal'
+            ? await createProposeStoryboardHandlerV2(config)({
+                base_revision: project.revision,
+                operations: [{ kind: 'set_brief', brief: 'Must stay in the authorizing project' }],
+              })
+            : await createRequestReferenceImagesHandlerV2(config)({ clipIds: ['clip_1'] });
+
+        expect(result.isError).toBe(true);
+        expect(await captureForeignProject()).toEqual(before);
+      } finally {
+        await rm(parentDir, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each(['proposal', 'reference'] as const)(
+    'rejects a whole-project-root replacement before publishing a %s sidecar',
+    async (requestKind) => {
+      const parentDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-root-generation-'));
+      const projectDir = path.join(parentDir, 'project_v2');
+      const displacedProjectDir = path.join(parentDir, 'project_v2-original');
+      const familyName = requestKind === 'proposal' ? 'proposals' : 'reference-requests';
+      const pendingDir = path.join(projectDir, familyName, 'pending');
+      const referencePendingDir = path.join(projectDir, 'reference-requests', 'pending');
+      const originalProject = makeSchema2ServiceProject();
+      const replacementProject = { ...structuredClone(originalProject), revision: originalProject.revision + 1 };
+      const createdAt = '2026-08-17T01:02:03.000Z';
+
+      const seedProjectRoot = async (root: string, project: StudioProjectV2, marker: string): Promise<void> => {
+        const familyRoot = path.join(root, familyName);
+        const familyPendingDir = path.join(familyRoot, 'pending');
+        const familySlotsDir = path.join(familyRoot, 'slots');
+        const recordId = `${marker}_${requestKind}`;
+        await mkdir(familyPendingDir, { recursive: true });
+        await mkdir(familySlotsDir);
+        await writeFile(path.join(root, 'project.json'), JSON.stringify(project));
+        await writeFile(
+          path.join(familyPendingDir, `${recordId}.json`),
+          JSON.stringify(
+            requestKind === 'proposal'
+              ? {
+                  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+                  id: recordId,
+                  projectId: project.id,
+                  status: 'pending',
+                  baseRevision: project.revision,
+                  payload: { kind: 'mutation_batch', operations: [{ kind: 'set_brief', brief: marker }] },
+                  createdAt,
+                  decidedAt: null,
+                }
+              : {
+                  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+                  id: recordId,
+                  projectId: project.id,
+                  clipIds: ['clip_2'],
+                  status: 'pending',
+                  createdAt,
+                }
+          )
+        );
+        await writeFile(
+          path.join(familySlotsDir, '49.slot'),
+          JSON.stringify({
+            schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+            [requestKind === 'proposal' ? 'proposalId' : 'requestId']: recordId,
+            reservedAt: createdAt,
+          })
+        );
+      };
+      const readSidecarSnapshot = async (root: string) => {
+        const familyRoot = path.join(root, familyName);
+        const snapshotDirectory = async (name: 'pending' | 'slots') => {
+          const directory = path.join(familyRoot, name);
+          const entries = (await readdir(directory)).toSorted();
+          return Promise.all(
+            entries.map(async (entry) => ({ entry, bytes: await readFile(path.join(directory, entry), 'utf8') }))
+          );
+        };
+        return { pending: await snapshotDirectory('pending'), slots: await snapshotDirectory('slots') };
+      };
+
+      await mkdir(projectDir);
+      await seedProjectRoot(projectDir, originalProject, 'original_existing');
+      const originalSidecars = await readSidecarSnapshot(projectDir);
+      let replacementSidecars: Awaited<ReturnType<typeof readSidecarSnapshot>> | undefined;
+      let initialProjectReadClosed = false;
+      let rootStatsAfterInitialRead = 0;
+      let replacementInstalled = false;
+      const swappingFs = new Proxy(nodeFs, {
+        get(target, property, receiver) {
+          if (property === 'open') {
+            return async (file: Parameters<typeof nodeFs.open>[0], ...args: unknown[]) => {
+              const handle = await Reflect.apply(nodeFs.open, nodeFs, [file, ...args]);
+              if (replacementInstalled || path.basename(String(file)) !== 'project.json') return handle;
+              return new Proxy(handle, {
+                get(current, key, currentReceiver) {
+                  if (key === 'close') {
+                    return async () => {
+                      await current.close();
+                      initialProjectReadClosed = true;
+                    };
+                  }
+                  const value = Reflect.get(current, key, currentReceiver) as unknown;
+                  return typeof value === 'function' ? value.bind(current) : value;
+                },
+              });
+            };
+          }
+          if (property === 'lstat') {
+            return async (file: Parameters<typeof nodeFs.lstat>[0], ...args: unknown[]) => {
+              if (
+                initialProjectReadClosed &&
+                !replacementInstalled &&
+                path.resolve(String(file)) === path.resolve(projectDir)
+              ) {
+                rootStatsAfterInitialRead += 1;
+                if (rootStatsAfterInitialRead === 2) {
+                  await nodeFs.rename(projectDir, displacedProjectDir);
+                  await mkdir(projectDir);
+                  await seedProjectRoot(projectDir, replacementProject, 'replacement_existing');
+                  replacementSidecars = await readSidecarSnapshot(projectDir);
+                  replacementInstalled = true;
+                }
+              }
+              return Reflect.apply(nodeFs.lstat, nodeFs, [file, ...args]);
+            };
+          }
+          const value = Reflect.get(target, property, receiver) as unknown;
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+      const config = {
+        projectId: originalProject.id,
+        projectDir,
+        pendingDir: requestKind === 'proposal' ? pendingDir : path.join(projectDir, 'proposals', 'pending'),
+        referencePendingDir,
+        fs: swappingFs,
+      };
+
+      try {
+        const result =
+          requestKind === 'proposal'
+            ? await createProposeStoryboardHandlerV2(config)({
+                base_revision: originalProject.revision,
+                operations: [{ kind: 'set_brief', brief: 'Must not cross the root generation' }],
+              })
+            : await createRequestReferenceImagesHandlerV2(config)({ clipIds: ['clip_1'] });
+
+        expect(replacementInstalled).toBe(true);
+        expect(result.isError).toBe(true);
+        expect(await readSidecarSnapshot(displacedProjectDir)).toEqual(originalSidecars);
+        expect(await readSidecarSnapshot(projectDir)).toEqual(replacementSidecars);
+      } finally {
+        await rm(parentDir, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each(['symlink', 'oversized'] as const)(
+    'rejects a %s schema-2 manifest before proposal or reference sidecar IO',
+    async (manifestKind) => {
+      const projectDir = await mkdtemp(path.join(tmpdir(), `studio-server-v2-${manifestKind}-`));
+      const projectFile = path.join(projectDir, 'project.json');
+      if (manifestKind === 'symlink') {
+        const target = path.join(projectDir, 'project-target.json');
+        await writeFile(target, JSON.stringify(makeSchema2ServiceProject()));
+        await nodeFs.symlink(target, projectFile);
+      } else {
+        await writeFile(projectFile, '');
+        await nodeFs.truncate(projectFile, 64 * 1024 * 1024 + 1);
+      }
+      const config = {
+        projectId: 'project_v2',
+        projectDir,
+        pendingDir: path.join(projectDir, 'proposals', 'pending'),
+        referencePendingDir: path.join(projectDir, 'reference-requests', 'pending'),
+      };
+
+      try {
+        const outcomes = await Promise.all([
+          createReadStoryboardHandlerV2(config)({}),
+          createProposeStoryboardHandlerV2(config)({
+            base_revision: 3,
+            operations: [{ kind: 'set_brief', brief: 'Must not be queued' }],
+          }),
+          createRequestReferenceImagesHandlerV2(config)({ clipIds: ['clip_1'] }),
+        ]);
+
+        expect(outcomes.every((result) => result.isError === true)).toBe(true);
+        await expect(nodeFs.lstat(path.join(projectDir, 'proposals'))).rejects.toMatchObject({ code: 'ENOENT' });
+        await expect(nodeFs.lstat(path.join(projectDir, 'reference-requests'))).rejects.toMatchObject({
+          code: 'ENOENT',
+        });
+      } finally {
+        await rm(projectDir, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it('rejects a manifest whose identity differs from config before proposal or reference IO', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-'));
+    const project = makeSchema2ServiceProject();
+    const pendingDir = path.join(projectDir, 'proposals', 'pending');
+    const referencePendingDir = path.join(projectDir, 'reference-requests', 'pending');
+    await mkdir(pendingDir, { recursive: true });
+    await mkdir(path.join(projectDir, 'proposals', 'slots'), { recursive: true });
+    await mkdir(referencePendingDir, { recursive: true });
+    await mkdir(path.join(projectDir, 'reference-requests', 'slots'), { recursive: true });
+    await writeFile(path.join(projectDir, 'project.json'), JSON.stringify(project));
+    const config = { projectId: 'other_project', projectDir, pendingDir, referencePendingDir };
+
+    await expect(createReadStoryboardHandlerV2(config)({})).resolves.toMatchObject({ isError: true });
+    await expect(
+      createProposeStoryboardHandlerV2(config)({
+        base_revision: project.revision,
+        operations: [{ kind: 'set_brief', brief: 'Must not be written' }],
+      })
+    ).resolves.toMatchObject({ isError: true });
+    await expect(createRequestReferenceImagesHandlerV2(config)({ clipIds: ['clip_1'] })).resolves.toMatchObject({
+      isError: true,
+    });
+    await expect(readdir(pendingDir)).resolves.toEqual([]);
+    await expect(readdir(path.join(projectDir, 'proposals', 'slots'))).resolves.toEqual([]);
+    await expect(readdir(referencePendingDir)).resolves.toEqual([]);
+    await expect(readdir(path.join(projectDir, 'reference-requests', 'slots'))).resolves.toEqual([]);
+    await rm(projectDir, { recursive: true, force: true });
+  });
+
+  it('validates proposal records before any slot or record side effect', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-proposal-v2-'));
+    const pendingDir = path.join(projectDir, 'proposals', 'pending');
+    const slotsDir = path.join(projectDir, 'proposals', 'slots');
+    await mkdir(pendingDir, { recursive: true });
+    await mkdir(slotsDir);
+    const projectAuthority = await capturePendingProjectAuthorityV2(projectDir);
+
+    const record = await writeProposalRecordV2({
+      pendingDir,
+      projectId: 'project_v2',
+      proposalId: 'proposal_valid',
+      baseRevision: 7,
+      payload: { kind: 'mutation_batch', operations: [{ kind: 'set_brief', brief: 'A validated proposal' }] },
+      projectAuthority,
+    });
+    expect(record.schemaVersion).toBe(STUDIO_PROJECT_SCHEMA_VERSION);
+    expect(JSON.parse(await readFile(path.join(slotsDir, '0.slot'), 'utf8'))).toMatchObject({
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      proposalId: 'proposal_valid',
+    });
+    const beforePending = await readdir(pendingDir);
+    const beforeSlots = await readdir(slotsDir);
+    const invalidInputs = [
+      {
+        pendingDir,
+        projectId: '../project',
+        proposalId: 'unsafe_project',
+        baseRevision: 7,
+        payload: { kind: 'mutation_batch', operations: [{ kind: 'set_brief', brief: 'No' }] },
+        projectAuthority,
+      },
+      {
+        pendingDir,
+        projectId: 'project_v2',
+        proposalId: 'bad_revision',
+        baseRevision: 0,
+        payload: { kind: 'mutation_batch', operations: [{ kind: 'set_brief', brief: 'No' }] },
+        projectAuthority,
+      },
+      {
+        pendingDir,
+        projectId: 'project_v2',
+        proposalId: 'unknown_nested',
+        baseRevision: 7,
+        payload: { kind: 'mutation_batch', operations: [{ kind: 'set_brief', brief: 'No', unknown: true }] },
+        projectAuthority,
+      },
+      new Proxy({} as never, {
+        get() {
+          throw new Error('hostile input getter');
+        },
+      }),
+    ];
+    for (const input of invalidInputs) {
+      // Each rejection must leave the same queue snapshot for the next boundary case.
+      // eslint-disable-next-line no-await-in-loop
+      await expect(writeProposalRecordV2(input as never)).rejects.toMatchObject({ code: 'storage' });
+    }
+    await expect(readdir(pendingDir)).resolves.toEqual(beforePending);
+    await expect(readdir(slotsDir)).resolves.toEqual(beforeSlots);
+    await rm(projectDir, { recursive: true, force: true });
+  });
+
+  it('writes one bounded exact V2 reference batch and ignores malformed dedup records', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-reference-v2-'));
+    const pendingDir = path.join(projectDir, 'reference-requests', 'pending');
+    const slotsDir = path.join(projectDir, 'reference-requests', 'slots');
+    await mkdir(pendingDir, { recursive: true });
+    await mkdir(slotsDir);
+    const clipIds = Array.from({ length: 24 }, (_, index) => `clip_${index + 1}`);
+    const projectAuthority = await capturePendingProjectAuthorityV2(projectDir);
+
+    const record = await referenceRequestWriter.writeReferenceRequestRecordV2({
+      pendingDir,
+      projectId: 'project_v2',
+      requestId: 'request_valid',
+      clipIds,
+      projectAuthority,
+    });
+    expect(record).toMatchObject({ schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, clipIds });
+    expect(JSON.parse(await readFile(path.join(slotsDir, '0.slot'), 'utf8'))).toMatchObject({
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      requestId: 'request_valid',
+    });
+    const beforePending = await readdir(pendingDir);
+    const beforeSlots = await readdir(slotsDir);
+    const hostileClipIds = new Proxy(['clip_1'], {
+      ownKeys() {
+        throw new Error('hostile ownKeys');
+      },
+    });
+    for (const invalidClipIds of [
+      [],
+      Array.from({ length: 25 }, (_, index) => `clip_${index}`),
+      ['clip_1', 'clip_1'],
+      ['unsafe/clip'],
+      hostileClipIds,
+    ]) {
+      // Keep the no-side-effect queue oracle deterministic between malformed direct calls.
+      // eslint-disable-next-line no-await-in-loop
+      await expect(
+        referenceRequestWriter.writeReferenceRequestRecordV2({
+          pendingDir,
+          projectId: 'project_v2',
+          requestId: `invalid_${invalidClipIds.length}`,
+          clipIds: invalidClipIds,
+          projectAuthority,
+        })
+      ).rejects.toMatchObject({ code: 'storage' });
+    }
+    await expect(readdir(pendingDir)).resolves.toEqual(beforePending);
+    await expect(readdir(slotsDir)).resolves.toEqual(beforeSlots);
+
+    await writeFile(
+      path.join(pendingDir, 'bad_date.json'),
+      JSON.stringify({ ...record, id: 'bad_date', clipIds: ['clip_bad_date'], createdAt: '2026-08-17' })
+    );
+    await writeFile(
+      path.join(pendingDir, 'legacy.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        id: 'legacy',
+        projectId: 'project_v2',
+        sceneId: 'scene_legacy',
+        status: 'pending',
+        createdAt: '2026-08-17T00:00:00.000Z',
+      })
+    );
+    await expect(
+      referenceRequestWriter.listPendingReferenceRequestClipIdsV2(pendingDir, 'project_v2')
+    ).resolves.toEqual(new Set(clipIds));
+
+    const racedFile = path.join(pendingDir, 'raced.json');
+    const canonicalRacedFile = path.join(await nodeFs.realpath(pendingDir), 'raced.json');
+    const oversizedTarget = path.join(projectDir, 'oversized.json');
+    await writeFile(racedFile, JSON.stringify({ ...record, id: 'raced', clipIds: ['clip_raced'] }));
+    await writeFile(oversizedTarget, 'x'.repeat(256 * 1024 + 1));
+    let swapped = false;
+    const racedFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        if (property === 'lstat') {
+          return async (file: Parameters<typeof nodeFs.lstat>[0], ...args: unknown[]) => {
+            const stats = await Reflect.apply(nodeFs.lstat, nodeFs, [file, ...args]);
+            if (!swapped && String(file) === canonicalRacedFile) {
+              swapped = true;
+              await rm(racedFile);
+              await nodeFs.symlink(oversizedTarget, racedFile);
+            }
+            return stats;
+          };
+        }
+        const value = Reflect.get(target, property, receiver) as unknown;
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    await expect(
+      referenceRequestWriter.listPendingReferenceRequestClipIdsV2(pendingDir, 'project_v2', racedFs)
+    ).resolves.toEqual(new Set(clipIds));
+    expect(swapped).toBe(true);
+
+    const canonicalPendingDir = await nodeFs.realpath(pendingDir);
+    let directoryStatReads = 0;
+    const mismatchedDirectoryFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        if (property === 'lstat') {
+          return async (file: Parameters<typeof nodeFs.lstat>[0], ...args: unknown[]) => {
+            const stats = await Reflect.apply(nodeFs.lstat, nodeFs, [file, ...args]);
+            if (String(file) === pendingDir || String(file) === canonicalPendingDir) {
+              directoryStatReads += 1;
+              if (directoryStatReads === 2) {
+                return new Proxy(stats, {
+                  get(current, key, currentReceiver) {
+                    if (key === 'ino') return current.ino + 1;
+                    const value = Reflect.get(current, key, currentReceiver) as unknown;
+                    return typeof value === 'function' ? value.bind(current) : value;
+                  },
+                });
+              }
+            }
+            return stats;
+          };
+        }
+        const value = Reflect.get(target, property, receiver) as unknown;
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    await expect(
+      referenceRequestWriter.listPendingReferenceRequestClipIdsV2(pendingDir, 'project_v2', mismatchedDirectoryFs)
+    ).resolves.toEqual(new Set());
+    await rm(projectDir, { recursive: true, force: true });
+  });
+
+  it('covers V2 proposal, rule, reference, and unavailable handler outcomes without spending', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-v2-handler-outcomes-'));
+    const pendingDir = path.join(projectDir, 'proposals', 'pending');
+    const referencePendingDir = path.join(projectDir, 'reference-requests', 'pending');
+    await mkdir(pendingDir, { recursive: true });
+    await mkdir(path.join(projectDir, 'proposals', 'slots'), { recursive: true });
+    await mkdir(referencePendingDir, { recursive: true });
+    await mkdir(path.join(projectDir, 'reference-requests', 'slots'), { recursive: true });
+    const project = makeSchema2ServiceProject();
+    await writeFile(path.join(projectDir, 'project.json'), JSON.stringify(project));
+    const config = { projectId: project.id, projectDir, pendingDir, referencePendingDir };
+
+    await expect(createReadStoryboardHandlerV2(null)({})).resolves.toMatchObject({ isError: true });
+    await expect(createListRoutesHandler({ ...config, routeCatalog: null })({})).resolves.toMatchObject({
+      isError: true,
+    });
+    await expect(
+      createProposeStoryboardHandlerV2(null)({
+        base_revision: project.revision,
+        operations: [{ kind: 'set_brief', brief: 'Unavailable' }],
+      })
+    ).resolves.toMatchObject({ isError: true });
+    const proposed = await createProposeStoryboardHandlerV2(config)({
+      base_revision: project.revision,
+      operations: [{ kind: 'set_brief', brief: 'Proposed only' }],
+    });
+    expect(proposed.isError).toBeUndefined();
+    expect(proposed.content[0].text).toMatch(/recorded for user review/i);
+    await expect(
+      createProposeStoryboardHandlerV2(config)({
+        base_revision: project.revision - 1,
+        operations: [{ kind: 'set_brief', brief: 'Stale' }],
+      })
+    ).resolves.toMatchObject({ isError: true });
+
+    const ruleHandler = createProposeBriefRuleHandlerV2(config);
+    for (const input of [
+      { base_revision: project.revision, text: '   ', forbidden_terms: [] },
+      { base_revision: project.revision, text: 'x'.repeat(241), forbidden_terms: [] },
+      { base_revision: project.revision, text: 'No repeats', forbidden_terms: ['logo', 'logo'] },
+      { base_revision: project.revision, text: 'Must be enforceable', forbidden_terms: ['+++'] },
+      { base_revision: project.revision - 1, text: 'Stale rule', forbidden_terms: [] },
+    ]) {
+      // These handler outcomes share one durable inbox and are intentionally observed in order.
+      // eslint-disable-next-line no-await-in-loop
+      await expect(ruleHandler(input)).resolves.toMatchObject({ isError: true });
+    }
+    await expect(
+      createProposeBriefRuleHandlerV2(null)({ base_revision: 1, text: 'Rule', forbidden_terms: [] })
+    ).resolves.toMatchObject({
+      isError: true,
+    });
+    await expect(
+      ruleHandler({ base_revision: project.revision, text: 'Keep the palette warm.', forbidden_terms: [] })
+    ).resolves.not.toHaveProperty('isError');
+    await expect(
+      ruleHandler({ base_revision: project.revision, text: 'No competitor logos.', forbidden_terms: ['competitor'] })
+    ).resolves.not.toHaveProperty('isError');
+
+    const referenceHandler = createRequestReferenceImagesHandlerV2(config);
+    for (const input of [
+      { clipIds: null as unknown as string[] },
+      { clipIds: [] },
+      { clipIds: Array.from({ length: 25 }, (_, index) => `clip_${index}`) },
+      { clipIds: ['unsafe/clip'] },
+      { clipIds: ['clip_1', 'clip_1'] },
+      { clipIds: ['inactive_clip'] },
+    ]) {
+      // These validation outcomes share one dedup inbox and are intentionally observed in order.
+      // eslint-disable-next-line no-await-in-loop
+      await expect(referenceHandler(input)).resolves.toMatchObject({ isError: true });
+    }
+    await expect(createRequestReferenceImagesHandlerV2(null)({ clipIds: ['clip_1'] })).resolves.toMatchObject({
+      isError: true,
+    });
+    const queued = await referenceHandler({ clipIds: ['clip_1', 'clip_2'] });
+    expect(queued.content[0].text).toMatch(/Queued 2 of 2.*Nothing was generated/i);
+    const repeated = await referenceHandler({ clipIds: ['clip_1', 'clip_2'] });
+    expect(repeated.content[0].text).toMatch(/Queued 0 of 2.*Already queued: clip_1, clip_2/i);
+    expect(await readdir(referencePendingDir)).toHaveLength(1);
+    await rm(projectDir, { recursive: true, force: true });
+  });
+
+  it.each(['pending_basename', 'family_name', 'project_root'] as const)(
+    'rejects the unsafe V2 pending path boundary: %s',
+    async (boundary) => {
+      const base = await mkdtemp(path.join(tmpdir(), 'studio-pending-v2-path-'));
+      let pendingDir: string;
+      if (boundary === 'pending_basename') {
+        pendingDir = path.join(base, 'proposals', 'inbox');
+      } else if (boundary === 'family_name') {
+        pendingDir = path.join(base, 'unsafe.family', 'pending');
+      } else {
+        const projectRoot = path.join(base, 'project-file');
+        await writeFile(projectRoot, 'unchanged project-root sentinel');
+        pendingDir = path.join(projectRoot, 'proposals', 'pending');
+      }
+      const beforeEntries = (await readdir(base)).toSorted();
+
+      try {
+        await expect(writePendingRecordV2(pendingRequestInputV2(pendingDir))).rejects.toMatchObject({
+          code: 'storage',
+        });
+        await expect(readdir(base)).resolves.toEqual(beforeEntries);
+        if (boundary === 'project_root') {
+          await expect(readFile(path.join(base, 'project-file'), 'utf8')).resolves.toBe(
+            'unchanged project-root sentinel'
+          );
+        }
+      } finally {
+        await rm(base, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each([
+    ['unsupported prototype', 'unsupported_prototype_schema', 'unsupported_prototype_schema'],
+    ['invalid authority', 'invalid', 'storage'],
+  ] as const)('rejects a %s authority result before reserving a V2 slot', async (_label, status, expectedCode) => {
+    const fixture = await createPendingQueueFixtureV2();
+    const authorityFence = vi.fn(async () => status);
+    try {
+      await expect(
+        writePendingRecordV2({ ...pendingRequestInputV2(fixture.pendingDir), authorityFence })
+      ).rejects.toMatchObject({ code: expectedCode });
+      expect(authorityFence).toHaveBeenCalledOnce();
+      await expect(readdir(fixture.pendingDir)).resolves.toEqual([]);
+      await expect(readdir(fixture.slotsDir)).resolves.toEqual([]);
+    } finally {
+      await rm(fixture.projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('cleans its exact reservation when schema-2 authority is revoked immediately before publication', async () => {
+    const fixture = await createPendingQueueFixtureV2();
+    const statuses = ['valid', 'valid', 'valid', 'unsupported_prototype_schema'] as const;
+    const authorityFence = vi.fn(async () => statuses[authorityFence.mock.calls.length - 1] ?? 'invalid');
+    try {
+      await expect(
+        writePendingRecordV2({ ...pendingRequestInputV2(fixture.pendingDir), authorityFence })
+      ).rejects.toMatchObject({ code: 'unsupported_prototype_schema' });
+      expect(authorityFence).toHaveBeenCalledTimes(4);
+      await expect(readdir(fixture.pendingDir)).resolves.toEqual([]);
+      await expect(readdir(fixture.slotsDir)).resolves.toEqual([]);
+    } finally {
+      await rm(fixture.projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves an unsupported authority result when its reservation was concurrently reaped', async () => {
+    const fixture = await createPendingQueueFixtureV2();
+    let fenceCalls = 0;
+    const authorityFence = vi.fn(async () => {
+      fenceCalls += 1;
+      if (fenceCalls !== 4) return 'valid' as const;
+      await rm(path.join(fixture.slotsDir, '0.slot'));
+      return 'unsupported_prototype_schema' as const;
+    });
+    try {
+      await expect(
+        writePendingRecordV2({ ...pendingRequestInputV2(fixture.pendingDir), authorityFence })
+      ).rejects.toMatchObject({ code: 'unsupported_prototype_schema' });
+      await expect(readdir(fixture.pendingDir)).resolves.toEqual([]);
+      await expect(readdir(fixture.slotsDir)).resolves.toEqual([]);
+    } finally {
+      await rm(fixture.projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rescans the complete family at the final publication fence and preserves a late V1 slot', async () => {
+    const fixture = await createPendingQueueFixtureV2();
+    const legacySlot = path.join(fixture.slotsDir, '1.slot');
+    const legacyBytes = JSON.stringify({
+      schemaVersion: 1,
+      requestId: 'late_legacy_request',
+      reservedAt: '2026-08-17T00:00:00.000Z',
+    });
+    let fenceCalls = 0;
+    const authorityFence = vi.fn(async () => {
+      fenceCalls += 1;
+      if (fenceCalls === 4) await writeFile(legacySlot, legacyBytes);
+      return 'valid' as const;
+    });
+    try {
+      await expect(
+        writePendingRecordV2({ ...pendingRequestInputV2(fixture.pendingDir), authorityFence })
+      ).rejects.toMatchObject({ code: 'unsupported_prototype_schema' });
+      await expect(readdir(fixture.pendingDir)).resolves.toEqual([]);
+      await expect(readFile(legacySlot, 'utf8')).resolves.toBe(legacyBytes);
+      await expect(readdir(fixture.slotsDir)).resolves.toEqual(['1.slot']);
+    } finally {
+      await rm(fixture.projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves a valid replacement when its reserved slot inode changes before final publication', async () => {
+    const fixture = await createPendingQueueFixtureV2();
+    const slotFile = path.join(fixture.slotsDir, '0.slot');
+    const replacement = JSON.stringify({
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      requestId: 'other_request',
+      reservedAt: '2026-08-17T00:00:00.000Z',
+    });
+    let fenceCalls = 0;
+    const authorityFence = vi.fn(async () => {
+      fenceCalls += 1;
+      if (fenceCalls === 4) {
+        await rm(slotFile);
+        await writeFile(slotFile, replacement);
+      }
+      return 'valid' as const;
+    });
+    try {
+      await expect(
+        writePendingRecordV2({ ...pendingRequestInputV2(fixture.pendingDir), authorityFence })
+      ).rejects.toMatchObject({ code: 'storage' });
+      expect(authorityFence).toHaveBeenCalledTimes(4);
+      await expect(readFile(slotFile, 'utf8')).resolves.toBe(replacement);
+      await expect(readdir(fixture.pendingDir)).resolves.toEqual([]);
+      await expect(readdir(fixture.slotsDir)).resolves.toEqual(['0.slot']);
+    } finally {
+      await rm(fixture.projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rechecks its exact reserved slot after syncing the pending temp and immediately before linking', async () => {
+    const fixture = await createPendingQueueFixtureV2();
+    const recordId = 'request_prelink_recheck';
+    const slotFile = path.join(await nodeFs.realpath(fixture.slotsDir), '0.slot');
+    const finalFile = path.join(await nodeFs.realpath(fixture.pendingDir), `${recordId}.json`);
+    const replacement = JSON.stringify({
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      requestId: 'other_request',
+      reservedAt: '2026-08-17T00:00:00.000Z',
+    });
+    let replaced = false;
+    const racingFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        if (property === 'open') {
+          return async (file: Parameters<typeof nodeFs.open>[0], ...args: unknown[]) => {
+            const handle = await Reflect.apply(nodeFs.open, nodeFs, [file, ...args]);
+            const fileName = String(file);
+            if (!fileName.startsWith(`${finalFile}.`) || !fileName.endsWith('.tmp')) return handle;
+            return new Proxy(handle, {
+              get(current, key, currentReceiver) {
+                if (key === 'sync') {
+                  return async () => {
+                    await current.sync();
+                    if (!replaced) {
+                      replaced = true;
+                      await rm(slotFile);
+                      await writeFile(slotFile, replacement);
+                    }
+                  };
+                }
+                const value = Reflect.get(current, key, currentReceiver) as unknown;
+                return typeof value === 'function' ? value.bind(current) : value;
+              },
+            });
+          };
+        }
+        const value = Reflect.get(target, property, receiver) as unknown;
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    try {
+      await expect(
+        writePendingRecordV2({ ...pendingRequestInputV2(fixture.pendingDir, recordId), fs: racingFs })
+      ).rejects.toMatchObject({ code: 'storage' });
+      expect(replaced).toBe(true);
+      await expect(readFile(slotFile, 'utf8')).resolves.toBe(replacement);
+      await expect(readdir(fixture.pendingDir)).resolves.toEqual([]);
+    } finally {
+      await rm(fixture.projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('durably restores a replacement moved during exact-slot quarantine cleanup', async () => {
+    const fixture = await createPendingQueueFixtureV2();
+    const recordId = 'request_cleanup_restore';
+    const canonicalSlots = await nodeFs.realpath(fixture.slotsDir);
+    const canonicalPending = await nodeFs.realpath(fixture.pendingDir);
+    const slotFile = path.join(canonicalSlots, '0.slot');
+    const finalFile = path.join(canonicalPending, `${recordId}.json`);
+    const replacement = JSON.stringify({
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      requestId: 'other_request',
+      reservedAt: '2026-08-17T00:00:00.000Z',
+    });
+    let installedFinal = false;
+    let installedReplacement = false;
+    let restoredDirectorySyncs = 0;
+    const racingFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        if (property === 'link') {
+          return async (
+            existingPath: Parameters<typeof nodeFs.link>[0],
+            newPath: Parameters<typeof nodeFs.link>[1]
+          ) => {
+            await nodeFs.link(existingPath, newPath);
+            if (!installedFinal && String(newPath) === slotFile) {
+              installedFinal = true;
+              await writeFile(finalFile, JSON.stringify({ schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION }));
+            }
+          };
+        }
+        if (property === 'rename') {
+          return async (oldPath: Parameters<typeof nodeFs.rename>[0], newPath: Parameters<typeof nodeFs.rename>[1]) => {
+            if (!installedReplacement && String(oldPath) === slotFile && String(newPath).endsWith('.cleanup')) {
+              installedReplacement = true;
+              await rm(slotFile);
+              await writeFile(slotFile, replacement);
+            }
+            await nodeFs.rename(oldPath, newPath);
+          };
+        }
+        if (property === 'open') {
+          return async (file: Parameters<typeof nodeFs.open>[0], ...args: unknown[]) => {
+            const handle = await Reflect.apply(nodeFs.open, nodeFs, [file, ...args]);
+            if (String(file) !== canonicalSlots) return handle;
+            return new Proxy(handle, {
+              get(current, key, currentReceiver) {
+                if (key === 'sync') {
+                  return async () => {
+                    await current.sync();
+                    if (installedReplacement) restoredDirectorySyncs += 1;
+                  };
+                }
+                const value = Reflect.get(current, key, currentReceiver) as unknown;
+                return typeof value === 'function' ? value.bind(current) : value;
+              },
+            });
+          };
+        }
+        const value = Reflect.get(target, property, receiver) as unknown;
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    try {
+      await expect(
+        writePendingRecordV2({ ...pendingRequestInputV2(fixture.pendingDir, recordId), fs: racingFs })
+      ).rejects.toMatchObject({ code: 'storage' });
+      expect(installedFinal).toBe(true);
+      expect(installedReplacement).toBe(true);
+      expect(restoredDirectorySyncs).toBeGreaterThan(0);
+      await expect(readFile(slotFile, 'utf8')).resolves.toBe(replacement);
+      expect((await readdir(fixture.slotsDir)).filter((name) => name.endsWith('.cleanup'))).toEqual([]);
+    } finally {
+      await rm(fixture.projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['primitive', 'null', 'storage'],
+    ['missing version', JSON.stringify({ requestId: 'missing_version' }), 'storage'],
+    [
+      'unknown version',
+      JSON.stringify({ schemaVersion: 99, requestId: 'unknown_version', reservedAt: '2026-08-17T00:00:00.000Z' }),
+      'storage',
+    ],
+    [
+      'schema-1 request slot',
+      JSON.stringify({ schemaVersion: 1, requestId: 'legacy_request', reservedAt: '2026-08-17T00:00:00.000Z' }),
+      'unsupported_prototype_schema',
+    ],
+    [
+      'malformed schema-2 request slot',
+      JSON.stringify({ schemaVersion: 2, requestId: 'unsafe/request', reservedAt: '2026-08-17T00:00:00.000Z' }),
+      'storage',
+    ],
+  ] as const)('rejects a %s without changing the V2 queue', async (_label, slotBytes, expectedCode) => {
+    const fixture = await createPendingQueueFixtureV2();
+    const slotFile = path.join(fixture.slotsDir, '0.slot');
+    await writeFile(slotFile, slotBytes);
+    try {
+      await expect(writePendingRecordV2(pendingRequestInputV2(fixture.pendingDir))).rejects.toMatchObject({
+        code: expectedCode,
+      });
+      await expect(readFile(slotFile, 'utf8')).resolves.toBe(slotBytes);
+      await expect(readdir(fixture.pendingDir)).resolves.toEqual([]);
+      await expect(readdir(fixture.slotsDir)).resolves.toEqual(['0.slot']);
+    } finally {
+      await rm(fixture.projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    [
+      'schema-1',
+      JSON.stringify({ schemaVersion: 1, requestId: 'late_legacy', reservedAt: '2026-08-17T00:00:00.000Z' }),
+      'unsupported_prototype_schema',
+    ],
+    [
+      'malformed schema-2',
+      JSON.stringify({ schemaVersion: 2, requestId: 'unsafe/late', reservedAt: '2026-08-17T00:00:00.000Z' }),
+      'storage',
+    ],
+  ] as const)(
+    'classifies a late %s request-slot collision without overwriting it',
+    async (_label, installedBytes, expectedCode) => {
+      const fixture = await createPendingQueueFixtureV2();
+      const slotFile = path.join(fixture.slotsDir, '0.slot');
+      let installed = false;
+      const collisionFs = new Proxy(nodeFs, {
+        get(target, property, receiver) {
+          if (property === 'link') {
+            return async (
+              existingPath: Parameters<typeof nodeFs.link>[0],
+              newPath: Parameters<typeof nodeFs.link>[1]
+            ) => {
+              if (!installed && String(newPath).endsWith(`${path.sep}slots${path.sep}0.slot`)) {
+                installed = true;
+                await writeFile(slotFile, installedBytes, { flag: 'wx' });
+                throw Object.assign(new Error('late slot collision'), { code: 'EEXIST' });
+              }
+              return Reflect.apply(nodeFs.link, nodeFs, [existingPath, newPath]);
+            };
+          }
+          const value = Reflect.get(target, property, receiver) as unknown;
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+      try {
+        await expect(
+          writePendingRecordV2({ ...pendingRequestInputV2(fixture.pendingDir), fs: collisionFs })
+        ).rejects.toMatchObject({ code: expectedCode });
+        expect(installed).toBe(true);
+        await expect(readFile(slotFile, 'utf8')).resolves.toBe(installedBytes);
+        await expect(readdir(fixture.pendingDir)).resolves.toEqual([]);
+        await expect(readdir(fixture.slotsDir)).resolves.toEqual(['0.slot']);
+      } finally {
+        await rm(fixture.projectRoot, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each([
+    ['ambiguous link-attempt storage failure', 'storage', false],
+    ['late schema-1 record collision', 'unsupported_prototype_schema', true],
+  ] as const)('fails closed on a %s after reserving a V2 slot', async (_label, expectedCode, installLegacyRecord) => {
+    const fixture = await createPendingQueueFixtureV2();
+    const recordId = installLegacyRecord ? 'late_record_collision' : 'pre_link_failure';
+    const recordFile = path.join(fixture.pendingDir, `${recordId}.json`);
+    const legacyBytes = JSON.stringify({ schemaVersion: 1, id: recordId });
+    let failed = false;
+    const failingFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        if (property === 'link') {
+          return async (
+            existingPath: Parameters<typeof nodeFs.link>[0],
+            newPath: Parameters<typeof nodeFs.link>[1]
+          ) => {
+            if (
+              !failed &&
+              path.basename(String(newPath)) === `${recordId}.json` &&
+              path.basename(path.dirname(String(newPath))) === 'pending'
+            ) {
+              failed = true;
+              if (installLegacyRecord) await writeFile(recordFile, legacyBytes, { flag: 'wx' });
+              throw Object.assign(new Error('injected final publication failure'), {
+                code: installLegacyRecord ? 'EEXIST' : 'EIO',
+              });
+            }
+            return Reflect.apply(nodeFs.link, nodeFs, [existingPath, newPath]);
+          };
+        }
+        const value = Reflect.get(target, property, receiver) as unknown;
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    try {
+      await expect(
+        writePendingRecordV2({ ...pendingRequestInputV2(fixture.pendingDir, recordId), fs: failingFs })
+      ).rejects.toMatchObject({ code: expectedCode });
+      expect(failed).toBe(true);
+      if (installLegacyRecord) {
+        await expect(readFile(recordFile, 'utf8')).resolves.toBe(legacyBytes);
+        await expect(readdir(fixture.slotsDir)).resolves.toEqual([]);
+      } else {
+        await expect(readdir(fixture.pendingDir)).resolves.toEqual([]);
+        await expect(readdir(fixture.slotsDir)).resolves.toEqual(['0.slot']);
+      }
+    } finally {
+      await rm(fixture.projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('retains the exact pending record and slot when the final link takes effect before reporting EIO', async () => {
+    const fixture = await createPendingQueueFixtureV2();
+    const recordId = 'pending_link_effect';
+    const recordFile = path.join(await nodeFs.realpath(fixture.pendingDir), `${recordId}.json`);
+    let failedAfterEffect = false;
+    const ambiguousFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        if (property === 'link') {
+          return async (
+            existingPath: Parameters<typeof nodeFs.link>[0],
+            newPath: Parameters<typeof nodeFs.link>[1]
+          ) => {
+            await nodeFs.link(existingPath, newPath);
+            if (!failedAfterEffect && String(newPath) === recordFile) {
+              failedAfterEffect = true;
+              throw Object.assign(new Error('link result was ambiguous'), { code: 'EIO' });
+            }
+          };
+        }
+        const value = Reflect.get(target, property, receiver) as unknown;
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    try {
+      await expect(
+        writePendingRecordV2({ ...pendingRequestInputV2(fixture.pendingDir, recordId), fs: ambiguousFs })
+      ).rejects.toMatchObject({ code: 'storage' });
+      expect(failedAfterEffect).toBe(true);
+      await expect(readFile(recordFile, 'utf8')).resolves.toBe(JSON.stringify({ marker: recordId }));
+      await expect(readdir(fixture.slotsDir)).resolves.toEqual(['0.slot']);
+    } finally {
+      await rm(fixture.projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('bounds pending-record capacity, size, and storage failures behind typed errors', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-pending-v2-'));
+    const pendingDir = path.join(projectDir, 'pending');
+    const slotsDir = path.join(projectDir, 'slots');
+    await mkdir(pendingDir);
+    await mkdir(slotsDir);
+    const input = (recordId: string, record: unknown) => ({
+      pendingDir,
+      recordId,
+      record,
+      slotRecordKey: 'proposalId' as const,
+      capacityMessage: 'full',
+      tooLargeMessage: 'too large',
+    });
+
+    await expect(writePendingRecordV2(input('oversize', { text: 'x'.repeat(256 * 1024) }))).rejects.toMatchObject({
+      code: 'too_large',
+    });
+    await rm(slotsDir, { recursive: true });
+    await expect(writePendingRecordV2(input('missing_slots', { ok: true }))).rejects.toMatchObject({
+      code: 'storage',
+    });
+    await mkdir(slotsDir);
+
+    const storageFailureFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        if (property === 'open') {
+          return async (file: Parameters<typeof nodeFs.open>[0], ...args: unknown[]) => {
+            if (String(file).includes(`${path.sep}slots${path.sep}0.slot.`)) {
+              throw Object.assign(new Error('injected storage failure'), { code: 'EIO' });
+            }
+            return Reflect.apply(nodeFs.open, nodeFs, [file, ...args]);
+          };
+        }
+        const value = Reflect.get(target, property, receiver) as unknown;
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    await expect(
+      writePendingRecordV2({ ...input('record_storage_failure', { ok: true }), fs: storageFailureFs })
+    ).rejects.toMatchObject({
+      code: 'storage',
+    });
+    await expect(readdir(slotsDir)).resolves.toEqual([]);
+
+    await rm(projectDir, { recursive: true, force: true });
   });
 });

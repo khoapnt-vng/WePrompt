@@ -17,18 +17,29 @@ import {
   type StudioDirectorCommandRecordV1,
   type StudioDirectorCommandSlotV1,
   type StudioProject,
+  type StudioProjectV2,
   type StudioScene,
 } from '@/common/types/project/creativeStudioTypes';
-import { createStudioDirectorCommandWriter } from '@process/resources/builtinMcp/studioDirectorCommandWriter';
+import {
+  createStudioDirectorCommandWriter,
+  createStudioDirectorCommandWriterV2,
+} from '@process/resources/builtinMcp/studioDirectorCommandWriter';
 import {
   createStudioDirectorCommandMailbox,
+  createStudioDirectorCommandMailboxV2,
   type StudioDirectorCommandMailbox,
+  type StudioDirectorCommandMailboxV2,
 } from '@process/services/creative-studio/service/directorCommandMailbox';
 import {
   createStudioDirectorCommandProcessor,
+  createStudioDirectorCommandProcessorV2,
   createStudioDirectorCommitTracker,
+  createStudioDirectorCommitTrackerV2,
 } from '@process/services/creative-studio/service/directorCommandProcessor';
-import { createStudioDirectorCommandService } from '@process/services/creative-studio/service/directorCommandService';
+import {
+  createStudioDirectorCommandService,
+  createStudioDirectorCommandServiceV2,
+} from '@process/services/creative-studio/service/directorCommandService';
 import { createCreativeStudioStore } from '@process/services/creative-studio/store';
 
 const roots: string[] = [];
@@ -262,6 +273,181 @@ describe('Studio Director real-boundary lifecycle', () => {
     });
     expect(graph.onProjectUpdated).toHaveBeenCalledExactlyOnceWith(graph.project.id);
     await graph.processor.stop();
+  });
+});
+
+describe('Studio Director schema-2 real-boundary lifecycle', () => {
+  it('commits one reducer revision before receipt-first cleanup and one notification', async () => {
+    const rootDir = await mkdtemp(path.join(tmpdir(), 'studio-director-lifecycle-v2-'));
+    roots.push(rootDir);
+    const tracker = createStudioDirectorCommitTrackerV2();
+    const store = createCreativeStudioStore({
+      rootDir,
+      createId: () => 'project_v2_live',
+      onProjectCommitted: tracker.observe,
+    });
+    const project: StudioProjectV2 = await store.createProjectV2({
+      name: 'Director V2 lifecycle',
+      brief: 'Original brief',
+      aspectRatio: '16:9',
+      targetDurationSeconds: 5,
+      resolution: '720p',
+    });
+    const mailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      watchCommandTree: () => ({ close: () => undefined }),
+    });
+    await mailbox.ensure(project.id);
+    const onProjectUpdated = vi.fn();
+    const processor = createStudioDirectorCommandProcessorV2({
+      store,
+      mailbox,
+      service: createStudioDirectorCommandServiceV2({ store }),
+      tracker,
+      onProjectUpdated,
+    });
+    await processor.start();
+    const projectDir = await store.getVerifiedProjectDirectoryV2(project.id);
+    if (projectDir === null) throw new Error('schema-2 project directory missing');
+    const commandId = 'command_v2_live';
+    const writer = createStudioDirectorCommandWriterV2(
+      { projectId: project.id, projectDir },
+      { createId: idSequence([commandId, 'section_v2', 'clip_v2', 'lease_v2']) }
+    );
+    const pendingFile = path.join(projectDir, 'commands', 'pending', `${commandId}.json`);
+    const applying = writer.apply({
+      expectedRevision: project.revision,
+      operations: [
+        {
+          kind: 'add_section',
+          section: { title: 'Opening', storyLine: 'Reveal the product', visualPrompt: 'Cinematic studio light' },
+          firstClip: {
+            shotPrompt: 'Slow product reveal',
+            narration: '',
+            onScreenText: '',
+            mediaKind: 'image',
+            durationSeconds: 5,
+            referenceAssetId: null,
+          },
+          beforeSectionId: null,
+        },
+      ],
+    });
+    await waitForCondition(async () => ((await fileExists(pendingFile)) ? true : null), 'schema-2 pending publication');
+    processor.trigger(project.id, commandId);
+
+    await expect(applying).resolves.toMatchObject({
+      schemaVersion: 2,
+      status: 'applied',
+      appliedRevision: project.revision + 1,
+      createdSectionIds: ['section_v2'],
+      createdClipIds: ['clip_v2'],
+    });
+    await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
+      status: 'supported',
+      project: {
+        revision: project.revision + 1,
+        sectionOrder: ['section_v2'],
+        sections: { section_v2: { clipOrder: ['clip_v2'] } },
+        clips: { clip_v2: { shotPrompt: 'Slow product reveal' } },
+      },
+    });
+    await expect(mailbox.readReceipt(project.id, commandId)).resolves.toMatchObject({
+      status: 'valid',
+      record: { status: 'applied', createdSectionIds: ['section_v2'], createdClipIds: ['clip_v2'] },
+    });
+    await waitForCondition(
+      async () =>
+        !(await fileExists(pendingFile)) && !(await fileExists(path.join(projectDir, 'commands', 'slots', '0.slot')))
+          ? true
+          : null,
+      'schema-2 receipt-first cleanup'
+    );
+    await waitForCondition(
+      () => (onProjectUpdated.mock.calls.length === 1 ? true : null),
+      'schema-2 renderer notification'
+    );
+    expect(await fileExists(pendingFile)).toBe(false);
+    expect(await fileExists(path.join(projectDir, 'commands', 'slots', '0.slot'))).toBe(false);
+    expect(onProjectUpdated).toHaveBeenCalledExactlyOnceWith(project.id);
+    await processor.stop();
+  });
+
+  it('repairs the real CAS crash window after receipt publication fails without replaying the reducer', async () => {
+    const rootDir = await mkdtemp(path.join(tmpdir(), 'studio-director-lifecycle-v2-repair-'));
+    roots.push(rootDir);
+    const tracker = createStudioDirectorCommitTrackerV2();
+    const store = createCreativeStudioStore({
+      rootDir,
+      createId: () => 'project_v2_repair',
+      onProjectCommitted: tracker.observe,
+    });
+    const project = await store.createProjectV2({
+      name: 'Director V2 repair',
+      brief: 'Original brief',
+      aspectRatio: '16:9',
+      targetDurationSeconds: 5,
+      resolution: '720p',
+    });
+    const mailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      watchCommandTree: () => ({ close: () => undefined }),
+    });
+    await mailbox.ensure(project.id);
+    let failReceipt = true;
+    const processorMailbox: StudioDirectorCommandMailboxV2 = {
+      ...mailbox,
+      writeReceipt: async (projectId, receipt) => {
+        if (failReceipt) {
+          failReceipt = false;
+          throw new Error('injected schema-2 receipt publication failure');
+        }
+        await mailbox.writeReceipt(projectId, receipt);
+      },
+    };
+    const service = createStudioDirectorCommandServiceV2({ store });
+    const apply = vi.fn(service.apply);
+    const onProjectUpdated = vi.fn();
+    const processor = createStudioDirectorCommandProcessorV2({
+      store,
+      mailbox: processorMailbox,
+      service: { apply },
+      tracker,
+      onProjectUpdated,
+    });
+    await processor.start();
+    const projectDir = await store.getVerifiedProjectDirectoryV2(project.id);
+    if (projectDir === null) throw new Error('schema-2 project directory missing');
+    const commandId = 'command_v2_repair';
+    const writer = createStudioDirectorCommandWriterV2(
+      { projectId: project.id, projectDir },
+      { createId: idSequence([commandId, 'lease_v2_repair']) }
+    );
+    const pendingFile = path.join(projectDir, 'commands', 'pending', `${commandId}.json`);
+    const applying = writer.apply({
+      expectedRevision: project.revision,
+      operations: [{ kind: 'set_brief', brief: 'Committed once, receipt repaired' }],
+    });
+    await waitForCondition(async () => ((await fileExists(pendingFile)) ? true : null), 'schema-2 repair pending');
+    processor.trigger(project.id, commandId);
+
+    await expect(applying).resolves.toMatchObject({ status: 'applied', appliedRevision: project.revision + 1 });
+    await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
+      status: 'supported',
+      project: {
+        revision: project.revision + 1,
+        brief: 'Committed once, receipt repaired',
+      },
+    });
+    expect(apply).toHaveBeenCalledOnce();
+    await waitForCondition(
+      () => (onProjectUpdated.mock.calls.length === 1 ? true : null),
+      'schema-2 repaired notification'
+    );
+    expect(onProjectUpdated).toHaveBeenCalledExactlyOnceWith(project.id);
+    await processor.stop();
   });
 });
 

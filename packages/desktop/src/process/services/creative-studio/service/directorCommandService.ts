@@ -5,11 +5,14 @@
  */
 
 import {
+  STUDIO_PROJECT_SCHEMA_VERSION,
   STUDIO_MAX_SCENES,
   type StudioDirectorCommandRecordV1,
+  type StudioDirectorCommandRecordV2,
   type StudioDirectorOperationV1,
   type StudioEditableScene,
   type StudioProject,
+  type StudioProjectV2,
   type StudioScene,
 } from '@/common/types/project/creativeStudioTypes';
 import { CreativeStudioStoreError, type CreativeStudioStore } from '@process/services/creative-studio/store';
@@ -19,6 +22,7 @@ import {
   applyStudioSceneOrder,
   applyStudioTakeSelection,
 } from './projectMutations';
+import { applyStudioMutationBatchV2, StudioMutationErrorV2, type StudioMutationReasonV2 } from './schema2';
 
 export type StudioDirectorCommandApplyResult = {
   project: StudioProject;
@@ -57,6 +61,39 @@ export type StudioDirectorCommandService = {
 
 export type StudioDirectorCommandServiceDeps = {
   store: CreativeStudioStore;
+  now?: () => number;
+};
+
+export type StudioDirectorCommandApplyResultV2 = {
+  project: StudioProjectV2;
+  appliedRevision: number;
+  createdSectionIds: string[];
+  createdClipIds: string[];
+};
+
+export type StudioDirectorCommandApplyErrorCodeV2 = 'deadline_elapsed' | StudioMutationReasonV2;
+
+/** Bounded schema-2 precommit outcome consumed by the staged main-process command processor. */
+export class StudioDirectorCommandApplyErrorV2 extends Error {
+  readonly reasonCode: StudioDirectorCommandApplyErrorCodeV2;
+
+  constructor(reasonCode: StudioDirectorCommandApplyErrorCodeV2) {
+    super(reasonCode);
+    this.name = 'StudioDirectorCommandApplyErrorV2';
+    this.reasonCode = reasonCode;
+  }
+}
+
+export type StudioDirectorCommandServiceV2 = {
+  apply(
+    command: StudioDirectorCommandRecordV2,
+    latestApplyStartMs: number,
+    attribution: StudioDirectorCommitAttribution
+  ): Promise<StudioDirectorCommandApplyResultV2>;
+};
+
+export type StudioDirectorCommandServiceDepsV2 = {
+  store: Pick<CreativeStudioStore, 'updateProjectV2'>;
   now?: () => number;
 };
 
@@ -193,6 +230,64 @@ export const createStudioDirectorCommandService = (
       } catch (error) {
         if (error instanceof StudioDirectorCommandApplyError || isProjectStoreError(error)) throw error;
         throw applyError('validation_failed');
+      }
+    },
+  };
+};
+
+const applyErrorV2 = (reasonCode: StudioDirectorCommandApplyErrorCodeV2): StudioDirectorCommandApplyErrorV2 =>
+  new StudioDirectorCommandApplyErrorV2(reasonCode);
+
+const isProjectStoreErrorV2 = (error: unknown): error is CreativeStudioStoreError =>
+  error instanceof CreativeStudioStoreError &&
+  (error.code === 'stale_project' ||
+    error.code === 'not_found' ||
+    error.code === 'busy' ||
+    error.code === 'storage_error' ||
+    error.code === 'unsupported_prototype_schema');
+
+/** Creates the staged schema-2 atomic command service without registering it in the runtime. */
+export const createStudioDirectorCommandServiceV2 = (
+  deps: StudioDirectorCommandServiceDepsV2
+): StudioDirectorCommandServiceV2 => {
+  const now = deps.now ?? Date.now;
+  return {
+    async apply(command, latestApplyStartMs, attribution) {
+      let createdSectionIds: string[] = [];
+      let createdClipIds: string[] = [];
+      try {
+        const project = await deps.store.updateProjectV2(
+          command.projectId,
+          (openingProject) => {
+            try {
+              if (now() >= latestApplyStartMs) throw applyErrorV2('deadline_elapsed');
+              const applied = applyStudioMutationBatchV2(openingProject, {
+                schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+                projectId: command.projectId,
+                expectedRevision: command.expectedRevision,
+                operations: command.operations,
+              });
+              createdSectionIds = [...applied.createdSectionIds];
+              createdClipIds = [...applied.createdClipIds];
+              return applied.project;
+            } catch (error) {
+              if (error instanceof StudioDirectorCommandApplyErrorV2) throw error;
+              if (error instanceof StudioMutationErrorV2) throw applyErrorV2(error.reasonCode);
+              throw applyErrorV2('validation_failed');
+            }
+          },
+          command.expectedRevision,
+          attribution.commitTag
+        );
+        return {
+          project,
+          appliedRevision: project.revision,
+          createdSectionIds: [...createdSectionIds],
+          createdClipIds: [...createdClipIds],
+        };
+      } catch (error) {
+        if (error instanceof StudioDirectorCommandApplyErrorV2 || isProjectStoreErrorV2(error)) throw error;
+        throw applyErrorV2('validation_failed');
       }
     },
   };

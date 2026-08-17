@@ -11,9 +11,14 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   CreateStudioProjectInput,
+  CreateStudioProjectInputV2,
   StudioDirectorCommandReceiptV1,
+  StudioDirectorCommandReceiptV2,
   StudioDirectorCommandRecordV1,
+  StudioDirectorCommandRecordV2,
+  StudioDirectorCommandSlotLeaseV2,
   StudioDirectorCommandSlotV1,
+  StudioDirectorCommandSlotV2,
 } from '@/common/types/project/creativeStudioTypes';
 import {
   STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS,
@@ -22,7 +27,9 @@ import {
 } from '@/common/types/project/creativeStudioTypes';
 import {
   createStudioDirectorCommandMailbox,
+  createStudioDirectorCommandMailboxV2,
   type StudioDirectorCommandMailbox,
+  type StudioDirectorCommandMailboxV2,
 } from '@process/services/creative-studio/service/directorCommandMailbox';
 import { publishImmutableRecord } from '@process/services/creative-studio/service/recordIo';
 import { createCreativeStudioStore, type CreativeStudioStore } from '@process/services/creative-studio/store';
@@ -1738,6 +1745,1388 @@ describe('Studio Director command mailbox', () => {
     expect(trigger).toHaveBeenCalledWith(projectId, undefined);
     expect(trigger).toHaveBeenCalledTimes(2);
     expect(close).toHaveBeenCalledTimes(1);
+  });
+});
+
+const makeInputV2 = (name: string): CreateStudioProjectInputV2 => ({
+  name,
+  brief: 'A bounded schema-2 project',
+  aspectRatio: '16:9',
+  targetDurationSeconds: 12,
+  resolution: '1080p',
+});
+
+const makeCommandV2 = (
+  projectId: string,
+  commandId: string,
+  overrides: Partial<StudioDirectorCommandRecordV2> = {}
+): StudioDirectorCommandRecordV2 => ({
+  schemaVersion: 2,
+  commandId,
+  projectId,
+  expectedRevision: 1,
+  createdAt: NOW,
+  deadlineAt: '2026-08-16T12:00:15.000Z',
+  policy: 'auto_apply',
+  operations: [{ kind: 'set_brief', brief: 'A schema-2 direct edit.' }],
+  ...overrides,
+});
+
+const makeSlotV2 = (
+  commandId: string,
+  overrides: Partial<StudioDirectorCommandSlotV2> = {}
+): StudioDirectorCommandSlotV2 => ({
+  schemaVersion: 2,
+  commandId,
+  reservedAt: NOW,
+  deadlineAt: '2026-08-16T12:00:15.000Z',
+  ...overrides,
+});
+
+const makeLeaseV2 = (input: {
+  leaseId: string;
+  owner: 'writer' | 'main';
+  slot: StudioDirectorCommandSlotV2;
+  acquiredAt?: string;
+}): StudioDirectorCommandSlotLeaseV2 => {
+  const acquiredAt = input.acquiredAt ?? NOW;
+  return {
+    schemaVersion: 2,
+    leaseId: input.leaseId,
+    owner: input.owner,
+    commandId: input.slot.commandId,
+    reservedAt: input.slot.reservedAt,
+    deadlineAt: input.slot.deadlineAt,
+    acquiredAt,
+    expiresAt: new Date(Date.parse(acquiredAt) + STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS).toISOString(),
+  };
+};
+
+const makeReceiptV2 = (
+  projectId: string,
+  commandId: string,
+  overrides: Partial<StudioDirectorCommandReceiptV2> = {}
+): StudioDirectorCommandReceiptV2 =>
+  ({
+    schemaVersion: 2,
+    commandId,
+    projectId,
+    expectedRevision: 1,
+    decidedAt: NOW,
+    status: 'applied',
+    appliedRevision: 2,
+    createdSectionIds: [],
+    createdClipIds: [],
+    ...overrides,
+  }) as StudioDirectorCommandReceiptV2;
+
+const snapshotDirectoryBytes = async (root: string): Promise<Record<string, string>> => {
+  const result: Record<string, string> = {};
+  const visit = async (directory: string): Promise<void> => {
+    const entries = await nodeFs.readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      const file = path.join(directory, entry.name);
+      const relative = path.relative(root, file);
+      if (entry.isDirectory()) {
+        result[`${relative}/`] = 'directory';
+        // eslint-disable-next-line no-await-in-loop
+        await visit(file);
+      } else {
+        // eslint-disable-next-line no-await-in-loop
+        result[relative] = (await nodeFs.readFile(file)).toString('base64');
+      }
+    }
+  };
+  await visit(root);
+  return result;
+};
+
+describe('Studio Director schema-2 command mailbox', () => {
+  let rootDir: string;
+  let store: CreativeStudioStore;
+  let mailbox: StudioDirectorCommandMailboxV2;
+  let projectId: string;
+  let legacyProjectId: string;
+
+  beforeEach(async () => {
+    rootDir = mkdtempSync(path.join(tmpdir(), 'studio-command-mailbox-v2-'));
+    const ids = ['legacy_v1', 'project_v2'];
+    let idIndex = 0;
+    store = createCreativeStudioStore({
+      rootDir,
+      now: () => NOW,
+      createId: () => ids[idIndex++]!,
+    });
+    legacyProjectId = (await store.createProject(makeInput('Legacy V1'))).id;
+    projectId = (await store.createProjectV2(makeInputV2('Primary V2'))).id;
+    mailbox = createStudioDirectorCommandMailboxV2({ rootDir, store, now: () => NOW, waitMs: WAIT_MS });
+  });
+
+  afterEach(async () => {
+    await mailbox.dispose();
+    vi.restoreAllMocks();
+    rmSync(rootDir, { recursive: true, force: true });
+  });
+
+  it('reads, receipts, and finishes exact schema-2 command records', async () => {
+    await mailbox.ensure(projectId);
+    const directories = commandDirectories(rootDir, projectId);
+    const command = makeCommandV2(projectId, 'command_v2');
+    await nodeFs.writeFile(path.join(directories.pending, 'command_v2.json'), JSON.stringify(command));
+    await nodeFs.writeFile(path.join(directories.slots, '0.slot'), JSON.stringify(makeSlotV2('command_v2')));
+
+    await expect(mailbox.readPending(projectId, 'command_v2')).resolves.toEqual({ status: 'valid', record: command });
+    const receipt = makeReceiptV2(projectId, 'command_v2', {
+      createdSectionIds: ['section_1'],
+      createdClipIds: ['clip_1'],
+    });
+    await mailbox.writeReceipt(projectId, receipt);
+    await expect(mailbox.readReceipt(projectId, 'command_v2')).resolves.toEqual({
+      status: 'valid',
+      record: receipt,
+    });
+
+    await mailbox.finish(projectId, 'command_v2');
+
+    await expect(nodeFs.readdir(directories.pending)).resolves.toEqual([]);
+    await expect(nodeFs.readdir(directories.slots)).resolves.toEqual([]);
+    await expect(nodeFs.readdir(directories.receipts)).resolves.toEqual(['command_v2.json']);
+  });
+
+  it('rechecks V2 project classification after reading pending and slot records', async () => {
+    await mailbox.ensure(projectId);
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const command = makeCommandV2(projectId, 'command_pending_project_race');
+    const pendingFile = path.join(directories.pending, `${command.commandId}.json`);
+    const slotFile = path.join(directories.slots, '0.slot');
+    const manifestFile = path.join(canonicalRoot, projectId, 'project.json');
+    const replacementManifest = `${manifestFile}.legacy`;
+    const legacyManifest = JSON.stringify({ schemaVersion: 1, id: projectId });
+    const pendingBytes = JSON.stringify(command);
+    const slotBytes = JSON.stringify(makeSlotV2(command.commandId));
+    await nodeFs.writeFile(pendingFile, pendingBytes);
+    await nodeFs.writeFile(slotFile, slotBytes);
+    let swapped = false;
+    const racingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property !== 'open') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.open>) => {
+          if (!swapped && String(args[0]) === slotFile) {
+            swapped = true;
+            await nodeFs.writeFile(replacementManifest, legacyManifest);
+            await nodeFs.rename(replacementManifest, manifestFile);
+          }
+          return nodeFs.open(...args);
+        };
+      },
+    }) as typeof nodeFs;
+    const racingMailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      fs: racingFs,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+
+    await expect(racingMailbox.readPending(projectId, command.commandId)).rejects.toMatchObject({
+      code: 'unsupported_prototype_schema',
+    });
+
+    expect(swapped).toBe(true);
+    await expect(nodeFs.readFile(pendingFile, 'utf8')).resolves.toBe(pendingBytes);
+    await expect(nodeFs.readFile(slotFile, 'utf8')).resolves.toBe(slotBytes);
+    await racingMailbox.dispose();
+  });
+
+  it('rechecks V2 project classification after an absent receipt read', async () => {
+    await mailbox.ensure(projectId);
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const commandId = 'command_absent_receipt_project_race';
+    const receiptFile = path.join(directories.receipts, `${commandId}.json`);
+    const manifestFile = path.join(canonicalRoot, projectId, 'project.json');
+    const replacementManifest = `${manifestFile}.legacy`;
+    const legacyManifest = JSON.stringify({ schemaVersion: 1, id: projectId });
+    let swapped = false;
+    const racingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property !== 'lstat') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.lstat>) => {
+          if (!swapped && String(args[0]) === receiptFile) {
+            swapped = true;
+            await nodeFs.writeFile(replacementManifest, legacyManifest);
+            await nodeFs.rename(replacementManifest, manifestFile);
+          }
+          return nodeFs.lstat(...args);
+        };
+      },
+    }) as typeof nodeFs;
+    const racingMailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      fs: racingFs,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+
+    await expect(racingMailbox.readReceipt(projectId, commandId)).rejects.toMatchObject({
+      code: 'unsupported_prototype_schema',
+    });
+
+    expect(swapped).toBe(true);
+    expect(existsSync(receiptFile)).toBe(false);
+    await racingMailbox.dispose();
+  });
+
+  it('durably removes the V2 receipt guard before pending and slot cleanup', async () => {
+    await mailbox.ensure(projectId);
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const receiptFile = path.join(directories.receipts, 'command_ordered.json');
+    const pendingFile = path.join(directories.pending, 'command_ordered.json');
+    const slotFile = path.join(directories.slots, '0.slot');
+    const events: string[] = [];
+    await nodeFs.writeFile(pendingFile, JSON.stringify(makeCommandV2(projectId, 'command_ordered')));
+    await nodeFs.writeFile(slotFile, JSON.stringify(makeSlotV2('command_ordered')));
+    const observedFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property === 'link') {
+          return async (...args: Parameters<typeof nodeFs.link>) => {
+            await nodeFs.link(...args);
+            if (String(args[1]) === receiptFile) events.push('receipt-link');
+          };
+        }
+        if (property === 'rm') {
+          return async (...args: Parameters<typeof nodeFs.rm>) => {
+            const target = String(args[0]);
+            if (target === `${receiptFile}.unconfirmed`) events.push('receipt-guard-rm');
+            else if (target === pendingFile) events.push('pending-rm');
+            else if (target === slotFile) events.push('slot-rm');
+            return nodeFs.rm(...args);
+          };
+        }
+        if (property === 'rename') {
+          return async (...args: Parameters<typeof nodeFs.rename>) => {
+            const source = String(args[0]);
+            await nodeFs.rename(...args);
+            if (source === pendingFile) events.push('pending-quarantine');
+            else if (source === slotFile) events.push('slot-quarantine');
+          };
+        }
+        if (property !== 'open') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.open>) => {
+          const handle = await nodeFs.open(...args);
+          if (String(args[0]) !== directories.receipts) return handle;
+          return new Proxy(handle, {
+            get(realHandle, handleProperty) {
+              if (handleProperty === 'sync') {
+                return async () => {
+                  events.push('receipts-sync');
+                  return realHandle.sync();
+                };
+              }
+              const value = Reflect.get(realHandle, handleProperty, realHandle) as unknown;
+              return typeof value === 'function' ? value.bind(realHandle) : value;
+            },
+          });
+        };
+      },
+    }) as typeof nodeFs;
+    const observedMailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      fs: observedFs,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+
+    await observedMailbox.writeReceipt(projectId, makeReceiptV2(projectId, 'command_ordered'));
+    await observedMailbox.finish(projectId, 'command_ordered');
+
+    expect(events).toEqual([
+      'receipts-sync',
+      'receipt-link',
+      'receipts-sync',
+      'receipt-guard-rm',
+      'receipts-sync',
+      'receipts-sync',
+      'pending-quarantine',
+      'slot-quarantine',
+    ]);
+    await expect(observedMailbox.readReceipt(projectId, 'command_ordered')).resolves.toMatchObject({
+      status: 'valid',
+    });
+    await observedMailbox.dispose();
+  });
+
+  it('retains cleanup authority when the final V2 receipt sync is indeterminate across restart states', async () => {
+    await mailbox.ensure(projectId);
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const receipt = makeReceiptV2(projectId, 'command_indeterminate');
+    const receiptFile = path.join(directories.receipts, 'command_indeterminate.json');
+    const pendingFile = path.join(directories.pending, 'command_indeterminate.json');
+    const slotFile = path.join(directories.slots, '0.slot');
+    await nodeFs.writeFile(pendingFile, JSON.stringify(makeCommandV2(projectId, 'command_indeterminate')));
+    await nodeFs.writeFile(slotFile, JSON.stringify(makeSlotV2('command_indeterminate')));
+    let receiptDirectorySyncs = 0;
+    const failingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property !== 'open') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.open>) => {
+          const handle = await nodeFs.open(...args);
+          if (String(args[0]) !== directories.receipts) return handle;
+          return new Proxy(handle, {
+            get(realHandle, handleProperty) {
+              if (handleProperty === 'sync') {
+                return async () => {
+                  receiptDirectorySyncs += 1;
+                  if (receiptDirectorySyncs === 3) throw new Error('final receipt directory sync failed');
+                  return realHandle.sync();
+                };
+              }
+              const value = Reflect.get(realHandle, handleProperty, realHandle) as unknown;
+              return typeof value === 'function' ? value.bind(realHandle) : value;
+            },
+          });
+        };
+      },
+    }) as typeof nodeFs;
+    const failingMailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      fs: failingFs,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+
+    await expect(failingMailbox.writeReceipt(projectId, receipt)).rejects.toMatchObject({ code: 'storage_error' });
+    expect(receiptDirectorySyncs).toBe(3);
+    await expect(failingMailbox.readReceipt(projectId, receipt.commandId)).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+    await expect(failingMailbox.finish(projectId, receipt.commandId)).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+    expect(existsSync(pendingFile)).toBe(true);
+    expect(existsSync(slotFile)).toBe(true);
+    await failingMailbox.dispose();
+
+    await nodeFs.writeFile(`${receiptFile}.unconfirmed`, '1');
+    const guardedRestart = createStudioDirectorCommandMailboxV2({ rootDir, store, now: () => NOW, waitMs: WAIT_MS });
+    await expect(guardedRestart.readReceipt(projectId, receipt.commandId)).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+    await expect(guardedRestart.finish(projectId, receipt.commandId)).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+    expect(existsSync(pendingFile)).toBe(true);
+    expect(existsSync(slotFile)).toBe(true);
+    await guardedRestart.dispose();
+
+    await nodeFs.rm(`${receiptFile}.unconfirmed`);
+    const cleanRestart = createStudioDirectorCommandMailboxV2({ rootDir, store, now: () => NOW, waitMs: WAIT_MS });
+    await expect(cleanRestart.readReceipt(projectId, receipt.commandId)).resolves.toEqual({
+      status: 'valid',
+      record: receipt,
+    });
+    await expect(cleanRestart.finish(projectId, receipt.commandId)).resolves.toBeUndefined();
+    expect(existsSync(pendingFile)).toBe(false);
+    expect(existsSync(slotFile)).toBe(false);
+    await cleanRestart.dispose();
+  });
+
+  it('refuses to link a V2 receipt into a replacement receipts-directory generation', async () => {
+    await mailbox.ensure(projectId);
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const receiptFile = path.join(directories.receipts, 'command_receipt_generation.json');
+    const pendingFile = path.join(directories.pending, 'command_receipt_generation.json');
+    const slotFile = path.join(directories.slots, '0.slot');
+    const retiredReceipts = `${directories.receipts}.retired`;
+    await nodeFs.writeFile(pendingFile, JSON.stringify(makeCommandV2(projectId, 'command_receipt_generation')));
+    await nodeFs.writeFile(slotFile, JSON.stringify(makeSlotV2('command_receipt_generation')));
+    let swapped = false;
+    let finalLinks = 0;
+    const racingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property === 'link') {
+          return async (...args: Parameters<typeof nodeFs.link>) => {
+            if (String(args[1]) === receiptFile) finalLinks += 1;
+            return nodeFs.link(...args);
+          };
+        }
+        if (property !== 'open') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.open>) => {
+          const file = String(args[0]);
+          if (!swapped && file.startsWith(`${receiptFile}.`) && file.endsWith('.tmp')) {
+            swapped = true;
+            await nodeFs.rename(directories.receipts, retiredReceipts);
+            await nodeFs.mkdir(directories.receipts);
+          }
+          return nodeFs.open(...args);
+        };
+      },
+    }) as typeof nodeFs;
+    const racingMailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      fs: racingFs,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+
+    await expect(
+      racingMailbox.writeReceipt(projectId, makeReceiptV2(projectId, 'command_receipt_generation'))
+    ).rejects.toMatchObject({ code: 'storage_error' });
+
+    expect(swapped).toBe(true);
+    expect(finalLinks).toBe(0);
+    await expect(nodeFs.readdir(directories.receipts)).resolves.toEqual([]);
+    await expect(nodeFs.readdir(retiredReceipts)).resolves.toEqual([]);
+    expect(existsSync(pendingFile)).toBe(true);
+    expect(existsSync(slotFile)).toBe(true);
+    await racingMailbox.dispose();
+  });
+
+  it('refuses to link a V2 receipt after the project manifest becomes V1 during temp sync', async () => {
+    await mailbox.ensure(projectId);
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const commandId = 'command_receipt_project_race';
+    const receiptFile = path.join(directories.receipts, `${commandId}.json`);
+    const manifestFile = path.join(canonicalRoot, projectId, 'project.json');
+    const replacementManifest = `${manifestFile}.legacy`;
+    const legacyManifest = JSON.stringify({ schemaVersion: 1, id: projectId });
+    let swapped = false;
+    let finalLinks = 0;
+    const racingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property === 'link') {
+          return async (...args: Parameters<typeof nodeFs.link>) => {
+            if (String(args[1]) === receiptFile) finalLinks += 1;
+            return nodeFs.link(...args);
+          };
+        }
+        if (property !== 'open') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.open>) => {
+          const file = String(args[0]);
+          if (!swapped && file.startsWith(`${receiptFile}.`) && file.endsWith('.tmp')) {
+            swapped = true;
+            await nodeFs.writeFile(replacementManifest, legacyManifest);
+            await nodeFs.rename(replacementManifest, manifestFile);
+          }
+          return nodeFs.open(...args);
+        };
+      },
+    }) as typeof nodeFs;
+    const racingMailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      fs: racingFs,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+
+    await expect(racingMailbox.writeReceipt(projectId, makeReceiptV2(projectId, commandId))).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+
+    expect(swapped).toBe(true);
+    expect(finalLinks).toBe(0);
+    await expect(nodeFs.readFile(manifestFile, 'utf8')).resolves.toBe(legacyManifest);
+    await expect(nodeFs.readdir(directories.receipts)).resolves.toEqual([]);
+    await racingMailbox.dispose();
+  });
+
+  it('fences an after-effect receipt-link failure until restart durably revalidates it', async () => {
+    await mailbox.ensure(projectId);
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const command = makeCommandV2(projectId, 'command_receipt_link_ambiguity');
+    const receipt = makeReceiptV2(projectId, command.commandId);
+    const receiptFile = path.join(directories.receipts, `${command.commandId}.json`);
+    const pendingFile = path.join(directories.pending, `${command.commandId}.json`);
+    const slotFile = path.join(directories.slots, '0.slot');
+    await nodeFs.writeFile(pendingFile, JSON.stringify(command));
+    await nodeFs.writeFile(slotFile, JSON.stringify(makeSlotV2(command.commandId)));
+    const failingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property !== 'link') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.link>) => {
+          await nodeFs.link(...args);
+          if (String(args[1]) === receiptFile) throw new Error('receipt link result lost');
+        };
+      },
+    }) as typeof nodeFs;
+    const failingMailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      fs: failingFs,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+
+    await expect(failingMailbox.writeReceipt(projectId, receipt)).rejects.toMatchObject({ code: 'storage_error' });
+    await expect(failingMailbox.readReceipt(projectId, command.commandId)).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+    await expect(failingMailbox.finish(projectId, command.commandId)).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+    expect(existsSync(pendingFile)).toBe(true);
+    expect(existsSync(slotFile)).toBe(true);
+    expect(existsSync(receiptFile)).toBe(true);
+    await failingMailbox.dispose();
+
+    const events: string[] = [];
+    const restartFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property === 'rename') {
+          return async (...args: Parameters<typeof nodeFs.rename>) => {
+            const source = String(args[0]);
+            await nodeFs.rename(...args);
+            if (source === pendingFile) events.push('pending-quarantine');
+            else if (source === slotFile) events.push('slot-quarantine');
+          };
+        }
+        if (property !== 'open') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.open>) => {
+          const handle = await nodeFs.open(...args);
+          if (String(args[0]) !== directories.receipts) return handle;
+          return new Proxy(handle, {
+            get(realHandle, handleProperty) {
+              if (handleProperty === 'sync') {
+                return async () => {
+                  events.push('receipts-sync');
+                  return realHandle.sync();
+                };
+              }
+              const value = Reflect.get(realHandle, handleProperty, realHandle) as unknown;
+              return typeof value === 'function' ? value.bind(realHandle) : value;
+            },
+          });
+        };
+      },
+    }) as typeof nodeFs;
+    const restartedMailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      fs: restartFs,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+
+    await expect(restartedMailbox.readReceipt(projectId, command.commandId)).resolves.toEqual({
+      status: 'valid',
+      record: receipt,
+    });
+    expect(events).toEqual(['receipts-sync']);
+    events.length = 0;
+    await restartedMailbox.finish(projectId, command.commandId);
+    expect(events).toEqual(['receipts-sync', 'pending-quarantine', 'slot-quarantine']);
+    await restartedMailbox.dispose();
+  });
+
+  it('refuses to link a V2 main lease into a replacement slots-directory generation', async () => {
+    await mailbox.ensure(projectId);
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const pendingFile = path.join(directories.pending, 'command_lease_generation.json');
+    const slotFile = path.join(directories.slots, '0.slot');
+    const leaseFile = `${slotFile}.lease`;
+    const retiredSlots = `${directories.slots}.retired`;
+    await nodeFs.writeFile(pendingFile, JSON.stringify(makeCommandV2(projectId, 'command_lease_generation')));
+    await nodeFs.writeFile(slotFile, JSON.stringify(makeSlotV2('command_lease_generation')));
+    await mailbox.writeReceipt(projectId, makeReceiptV2(projectId, 'command_lease_generation'));
+    let swapped = false;
+    let finalLinks = 0;
+    const racingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property === 'link') {
+          return async (...args: Parameters<typeof nodeFs.link>) => {
+            if (String(args[1]) === leaseFile) finalLinks += 1;
+            return nodeFs.link(...args);
+          };
+        }
+        if (property !== 'open') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.open>) => {
+          const file = String(args[0]);
+          if (!swapped && file.startsWith(`${leaseFile}.`) && file.endsWith('.tmp')) {
+            swapped = true;
+            await nodeFs.rename(directories.slots, retiredSlots);
+            await nodeFs.mkdir(directories.slots);
+          }
+          return nodeFs.open(...args);
+        };
+      },
+    }) as typeof nodeFs;
+    const racingMailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      fs: racingFs,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+
+    await expect(racingMailbox.finish(projectId, 'command_lease_generation')).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+
+    expect(swapped).toBe(true);
+    expect(finalLinks).toBe(0);
+    expect(existsSync(pendingFile)).toBe(true);
+    await expect(nodeFs.readdir(directories.slots)).resolves.toEqual([]);
+    await expect(nodeFs.readFile(path.join(retiredSlots, '0.slot'), 'utf8')).resolves.toBe(
+      JSON.stringify(makeSlotV2('command_lease_generation'))
+    );
+    await racingMailbox.dispose();
+  });
+
+  it('exact-cleans its linked V2 main lease when the project manifest becomes V1 after link', async () => {
+    await mailbox.ensure(projectId);
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const command = makeCommandV2(projectId, 'command_lease_project_race');
+    const receipt = makeReceiptV2(projectId, command.commandId);
+    const slot = makeSlotV2(command.commandId);
+    const pendingFile = path.join(directories.pending, `${command.commandId}.json`);
+    const slotFile = path.join(directories.slots, '0.slot');
+    const leaseFile = `${slotFile}.lease`;
+    const receiptFile = path.join(directories.receipts, `${command.commandId}.json`);
+    const manifestFile = path.join(canonicalRoot, projectId, 'project.json');
+    const replacementManifest = `${manifestFile}.legacy`;
+    const legacyManifest = JSON.stringify({ schemaVersion: 1, id: projectId });
+    const pendingBytes = JSON.stringify(command);
+    const slotBytes = JSON.stringify(slot);
+    const receiptBytes = JSON.stringify(receipt);
+    await nodeFs.writeFile(pendingFile, pendingBytes);
+    await nodeFs.writeFile(slotFile, slotBytes);
+    await mailbox.writeReceipt(projectId, receipt);
+    let swapped = false;
+    let linkedLeaseBytes: string | undefined;
+    const racingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property !== 'link') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.link>) => {
+          await nodeFs.link(...args);
+          if (!swapped && String(args[1]) === leaseFile) {
+            swapped = true;
+            linkedLeaseBytes = await nodeFs.readFile(leaseFile, 'utf8');
+            await nodeFs.writeFile(replacementManifest, legacyManifest);
+            await nodeFs.rename(replacementManifest, manifestFile);
+          }
+        };
+      },
+    }) as typeof nodeFs;
+    const racingMailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      fs: racingFs,
+      createId: () => 'lease_project_race',
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+
+    await expect(racingMailbox.finish(projectId, command.commandId)).rejects.toMatchObject({
+      code: 'unsupported_prototype_schema',
+    });
+
+    expect(swapped).toBe(true);
+    expect(linkedLeaseBytes).toContain('lease_project_race');
+    await expect(nodeFs.readFile(manifestFile, 'utf8')).resolves.toBe(legacyManifest);
+    await expect(nodeFs.readFile(pendingFile, 'utf8')).resolves.toBe(pendingBytes);
+    await expect(nodeFs.readFile(slotFile, 'utf8')).resolves.toBe(slotBytes);
+    await expect(nodeFs.readFile(receiptFile, 'utf8')).resolves.toBe(receiptBytes);
+    expect(existsSync(leaseFile)).toBe(false);
+    expect((await nodeFs.readdir(directories.slots)).some((entry) => entry.endsWith('.cleanup'))).toBe(false);
+    await racingMailbox.dispose();
+  });
+
+  it('refuses to link a stale V2 main lease after its slot changes during temp sync', async () => {
+    await mailbox.ensure(projectId);
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const pendingFile = path.join(directories.pending, 'command_lease_slot_race.json');
+    const slotFile = path.join(directories.slots, '0.slot');
+    const leaseFile = `${slotFile}.lease`;
+    const successorBytes = JSON.stringify(makeSlotV2('command_slot_successor'));
+    await nodeFs.writeFile(pendingFile, JSON.stringify(makeCommandV2(projectId, 'command_lease_slot_race')));
+    await nodeFs.writeFile(slotFile, JSON.stringify(makeSlotV2('command_lease_slot_race')));
+    await mailbox.writeReceipt(projectId, makeReceiptV2(projectId, 'command_lease_slot_race'));
+    let replaced = false;
+    let finalLinks = 0;
+    const racingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property === 'link') {
+          return async (...args: Parameters<typeof nodeFs.link>) => {
+            if (String(args[1]) === leaseFile) finalLinks += 1;
+            return nodeFs.link(...args);
+          };
+        }
+        if (property !== 'open') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.open>) => {
+          const file = String(args[0]);
+          if (!replaced && file.startsWith(`${leaseFile}.`) && file.endsWith('.tmp')) {
+            replaced = true;
+            await nodeFs.rm(slotFile);
+            await nodeFs.writeFile(slotFile, successorBytes);
+          }
+          return nodeFs.open(...args);
+        };
+      },
+    }) as typeof nodeFs;
+    const racingMailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      fs: racingFs,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+
+    await expect(racingMailbox.finish(projectId, 'command_lease_slot_race')).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+
+    expect(replaced).toBe(true);
+    expect(finalLinks).toBe(0);
+    await expect(nodeFs.readFile(slotFile, 'utf8')).resolves.toBe(successorBytes);
+    expect(existsSync(pendingFile)).toBe(true);
+    await racingMailbox.dispose();
+  });
+
+  it('reports V1 sidecars as unsupported and leaves their complete byte tree untouched', async () => {
+    await mailbox.ensure(projectId);
+    const directories = commandDirectories(rootDir, projectId);
+    const command = makeCommand(projectId, 'command_v1');
+    const slot = makeSlot('command_v1');
+    const receipt = makeReceipt(projectId, 'command_v1');
+    await nodeFs.writeFile(path.join(directories.pending, 'command_v1.json'), JSON.stringify(command));
+    await nodeFs.writeFile(path.join(directories.slots, '0.slot'), JSON.stringify(slot));
+    await nodeFs.writeFile(path.join(directories.receipts, 'command_v1.json'), JSON.stringify(receipt));
+    await nodeFs.writeFile(
+      path.join(directories.slots, '0.slot.lease'),
+      JSON.stringify(makeLease({ leaseId: 'lease_v1', owner: 'writer', slot }))
+    );
+    const before = await snapshotDirectoryBytes(directories.root);
+
+    await expect(mailbox.readPending(projectId, 'command_v1')).resolves.toEqual({
+      status: 'unsupported_prototype_schema',
+      commandId: 'command_v1',
+      expectedRevision: 1,
+    });
+    await expect(mailbox.readReceipt(projectId, 'command_v1')).resolves.toEqual({
+      status: 'unsupported_prototype_schema',
+    });
+    await expect(mailbox.finish(projectId, 'command_v1')).rejects.toMatchObject({ code: 'storage_error' });
+    await mailbox.releaseOrphanedSlotsPage(null, '2026-08-16T12:00:20.000Z', 64);
+    await mailbox.pruneReceiptsPage(null, '2026-08-17T12:00:00.000Z', 64);
+
+    expect(await snapshotDirectoryBytes(directories.root)).toEqual(before);
+  });
+
+  it('refuses receipt-first cleanup when the same-ID pending authority is V1', async () => {
+    await mailbox.ensure(projectId);
+    const directories = commandDirectories(rootDir, projectId);
+    await nodeFs.writeFile(
+      path.join(directories.pending, 'command_mixed.json'),
+      JSON.stringify(makeCommand(projectId, 'command_mixed'))
+    );
+    await nodeFs.writeFile(path.join(directories.slots, '0.slot'), JSON.stringify(makeSlotV2('command_mixed')));
+    await nodeFs.writeFile(
+      path.join(directories.receipts, 'command_mixed.json'),
+      JSON.stringify(makeReceiptV2(projectId, 'command_mixed'))
+    );
+    const before = await snapshotDirectoryBytes(directories.root);
+
+    await expect(mailbox.finish(projectId, 'command_mixed')).rejects.toMatchObject({ code: 'storage_error' });
+
+    expect(await snapshotDirectoryBytes(directories.root)).toEqual(before);
+  });
+
+  it('classifies a V1 pending before reclaiming its expired V2 lease', async () => {
+    await mailbox.ensure(projectId);
+    const directories = commandDirectories(rootDir, projectId);
+    const slot = makeSlotV2('command_mixed');
+    await nodeFs.writeFile(
+      path.join(directories.pending, 'command_mixed.json'),
+      JSON.stringify(makeCommand(projectId, 'command_mixed'))
+    );
+    await nodeFs.writeFile(path.join(directories.slots, '0.slot'), JSON.stringify(slot));
+    await nodeFs.writeFile(
+      path.join(directories.slots, '0.slot.lease'),
+      JSON.stringify(
+        makeLeaseV2({
+          leaseId: 'lease_mixed',
+          owner: 'main',
+          slot,
+          acquiredAt: '2026-08-16T11:59:30.000Z',
+        })
+      )
+    );
+    const before = await snapshotDirectoryBytes(directories.root);
+
+    await mailbox.releaseOrphanedSlotsPage(null, '2026-08-16T12:00:20.000Z', 64);
+
+    expect(await snapshotDirectoryBytes(directories.root)).toEqual(before);
+  });
+
+  it('accepts an unrelated valid successor published after old cleanup releases its lease', async () => {
+    await mailbox.ensure(projectId);
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const pendingA = path.join(directories.pending, 'command_a.json');
+    const pendingB = path.join(directories.pending, 'command_b.json');
+    const slotFile = path.join(directories.slots, '0.slot');
+    const leaseFile = `${slotFile}.lease`;
+    const successorCommand = makeCommandV2(projectId, 'command_b');
+    const successorSlot = makeSlotV2('command_b');
+    await nodeFs.writeFile(pendingA, JSON.stringify(makeCommandV2(projectId, 'command_a')));
+    await nodeFs.writeFile(slotFile, JSON.stringify(makeSlotV2('command_a')));
+    await mailbox.writeReceipt(projectId, makeReceiptV2(projectId, 'command_a'));
+    let successorPublished = false;
+    const racingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property !== 'rm') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.rm>) => {
+          const target = String(args[0]);
+          await nodeFs.rm(...args);
+          if (!target.startsWith(`${leaseFile}.`) || !target.endsWith('.cleanup') || successorPublished) return;
+          successorPublished = true;
+          await nodeFs.writeFile(slotFile, JSON.stringify(successorSlot));
+          await nodeFs.writeFile(pendingB, JSON.stringify(successorCommand));
+        };
+      },
+    }) as typeof nodeFs;
+    const racingMailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      fs: racingFs,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+
+    await expect(racingMailbox.finish(projectId, 'command_a')).resolves.toBeUndefined();
+
+    expect(successorPublished).toBe(true);
+    expect(existsSync(pendingA)).toBe(false);
+    expect(JSON.parse(await nodeFs.readFile(pendingB, 'utf8'))).toEqual(successorCommand);
+    expect(JSON.parse(await nodeFs.readFile(slotFile, 'utf8'))).toEqual(successorSlot);
+    expect(existsSync(leaseFile)).toBe(false);
+    await racingMailbox.dispose();
+  });
+
+  it('restores a same-inode V1 pending replacement raced into V2 finish cleanup', async () => {
+    await mailbox.ensure(projectId);
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const pendingFile = path.join(directories.pending, 'command_pending_race.json');
+    const slotFile = path.join(directories.slots, '0.slot');
+    const leaseFile = `${slotFile}.lease`;
+    const legacyBytes = JSON.stringify(makeCommand(projectId, 'command_pending_race'));
+    await nodeFs.writeFile(pendingFile, JSON.stringify(makeCommandV2(projectId, 'command_pending_race')));
+    await nodeFs.writeFile(slotFile, JSON.stringify(makeSlotV2('command_pending_race')));
+    await mailbox.writeReceipt(projectId, makeReceiptV2(projectId, 'command_pending_race'));
+    let replaced = false;
+    const racingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property !== 'rm' && property !== 'rename') return Reflect.get(realFs, property, receiver);
+        if (property === 'rm') {
+          return async (...args: Parameters<typeof nodeFs.rm>) => {
+            if (!replaced && String(args[0]) === pendingFile) {
+              replaced = true;
+              await nodeFs.writeFile(pendingFile, legacyBytes);
+            }
+            return nodeFs.rm(...args);
+          };
+        }
+        return async (...args: Parameters<typeof nodeFs.rename>) => {
+          if (!replaced && String(args[0]) === pendingFile) {
+            replaced = true;
+            await nodeFs.writeFile(pendingFile, legacyBytes);
+          }
+          return nodeFs.rename(...args);
+        };
+      },
+    }) as typeof nodeFs;
+    const racingMailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      fs: racingFs,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+
+    await expect(racingMailbox.finish(projectId, 'command_pending_race')).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+
+    expect(replaced).toBe(true);
+    await expect(nodeFs.readFile(pendingFile, 'utf8')).resolves.toBe(legacyBytes);
+    await expect(nodeFs.readFile(slotFile, 'utf8')).resolves.toBe(JSON.stringify(makeSlotV2('command_pending_race')));
+    expect(existsSync(leaseFile)).toBe(true);
+    await racingMailbox.dispose();
+  });
+
+  it('restores exact V2 cleanup records when the project manifest becomes V1 during quarantine', async () => {
+    await mailbox.ensure(projectId);
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const command = makeCommandV2(projectId, 'command_project_cleanup_race');
+    const slot = makeSlotV2(command.commandId);
+    const pendingFile = path.join(directories.pending, `${command.commandId}.json`);
+    const slotFile = path.join(directories.slots, '0.slot');
+    const leaseFile = `${slotFile}.lease`;
+    const manifestFile = path.join(canonicalRoot, projectId, 'project.json');
+    const replacementManifest = `${manifestFile}.legacy`;
+    const legacyManifest = JSON.stringify({ schemaVersion: 1, id: projectId });
+    const pendingBytes = JSON.stringify(command);
+    const slotBytes = JSON.stringify(slot);
+    await nodeFs.writeFile(pendingFile, pendingBytes);
+    await nodeFs.writeFile(slotFile, slotBytes);
+    await mailbox.writeReceipt(projectId, makeReceiptV2(projectId, command.commandId));
+    let leaseBytesBeforeSwap: string | undefined;
+    let swapped = false;
+    const racingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property !== 'rename') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.rename>) => {
+          if (!swapped && String(args[0]) === pendingFile) {
+            swapped = true;
+            leaseBytesBeforeSwap = await nodeFs.readFile(leaseFile, 'utf8');
+            await nodeFs.writeFile(replacementManifest, legacyManifest);
+            await nodeFs.rename(replacementManifest, manifestFile);
+          }
+          return nodeFs.rename(...args);
+        };
+      },
+    }) as typeof nodeFs;
+    const racingMailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      fs: racingFs,
+      createId: () => 'lease_project_cleanup_race',
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+
+    await expect(racingMailbox.finish(projectId, command.commandId)).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+
+    expect(swapped).toBe(true);
+    expect(leaseBytesBeforeSwap).toBeDefined();
+    await expect(nodeFs.readFile(manifestFile, 'utf8')).resolves.toBe(legacyManifest);
+    await expect(nodeFs.readFile(pendingFile, 'utf8')).resolves.toBe(pendingBytes);
+    await expect(nodeFs.readFile(slotFile, 'utf8')).resolves.toBe(slotBytes);
+    await expect(nodeFs.readFile(leaseFile, 'utf8')).resolves.toBe(leaseBytesBeforeSwap);
+    await expect(nodeFs.readdir(directories.pending)).resolves.toEqual([`${command.commandId}.json`]);
+    await racingMailbox.dispose();
+  });
+
+  it('restores V2 pending when held lease authority changes during its quarantine rename', async () => {
+    await mailbox.ensure(projectId);
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const command = makeCommandV2(projectId, 'command_pending_lease_race');
+    const pendingFile = path.join(directories.pending, command.commandId + '.json');
+    const slot = makeSlotV2(command.commandId);
+    const slotFile = path.join(directories.slots, '0.slot');
+    const leaseFile = `${slotFile}.lease`;
+    const replacementBytes = JSON.stringify(
+      makeLeaseV2({ leaseId: 'lease_pending_replacement', owner: 'writer', slot })
+    );
+    await nodeFs.writeFile(pendingFile, JSON.stringify(command));
+    await nodeFs.writeFile(slotFile, JSON.stringify(slot));
+    await mailbox.writeReceipt(projectId, makeReceiptV2(projectId, command.commandId));
+    let replaced = false;
+    const racingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property !== 'rename') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.rename>) => {
+          if (!replaced && String(args[0]) === pendingFile) {
+            replaced = true;
+            await nodeFs.rm(leaseFile);
+            await nodeFs.writeFile(leaseFile, replacementBytes);
+          }
+          return nodeFs.rename(...args);
+        };
+      },
+    }) as typeof nodeFs;
+    const racingMailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      fs: racingFs,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+
+    await expect(racingMailbox.finish(projectId, command.commandId)).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+
+    expect(replaced).toBe(true);
+    await expect(nodeFs.readFile(pendingFile, 'utf8')).resolves.toBe(JSON.stringify(command));
+    await expect(nodeFs.readFile(slotFile, 'utf8')).resolves.toBe(JSON.stringify(slot));
+    await expect(nodeFs.readFile(leaseFile, 'utf8')).resolves.toBe(replacementBytes);
+    await racingMailbox.dispose();
+  });
+
+  it('restores a successor slot raced into V2 finish cleanup', async () => {
+    await mailbox.ensure(projectId);
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const pendingFile = path.join(directories.pending, 'command_slot_race.json');
+    const slotFile = path.join(directories.slots, '0.slot');
+    const leaseFile = `${slotFile}.lease`;
+    const successorBytes = JSON.stringify(makeSlotV2('command_successor'));
+    await nodeFs.writeFile(pendingFile, JSON.stringify(makeCommandV2(projectId, 'command_slot_race')));
+    await nodeFs.writeFile(slotFile, JSON.stringify(makeSlotV2('command_slot_race')));
+    await mailbox.writeReceipt(projectId, makeReceiptV2(projectId, 'command_slot_race'));
+    let replaced = false;
+    const racingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property !== 'rm' && property !== 'rename') return Reflect.get(realFs, property, receiver);
+        const replace = async (source: string): Promise<void> => {
+          if (replaced || source !== slotFile) return;
+          replaced = true;
+          await nodeFs.rm(slotFile);
+          await nodeFs.writeFile(slotFile, successorBytes);
+        };
+        if (property === 'rm') {
+          return async (...args: Parameters<typeof nodeFs.rm>) => {
+            await replace(String(args[0]));
+            return nodeFs.rm(...args);
+          };
+        }
+        return async (...args: Parameters<typeof nodeFs.rename>) => {
+          await replace(String(args[0]));
+          return nodeFs.rename(...args);
+        };
+      },
+    }) as typeof nodeFs;
+    const racingMailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      fs: racingFs,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+
+    await expect(racingMailbox.finish(projectId, 'command_slot_race')).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+
+    expect(replaced).toBe(true);
+    await expect(nodeFs.readFile(slotFile, 'utf8')).resolves.toBe(successorBytes);
+    expect(existsSync(leaseFile)).toBe(true);
+    await racingMailbox.dispose();
+  });
+
+  it('restores a replacement lease raced into V2 finish release', async () => {
+    await mailbox.ensure(projectId);
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const pendingFile = path.join(directories.pending, 'command_lease_race.json');
+    const slot = makeSlotV2('command_lease_race');
+    const slotFile = path.join(directories.slots, '0.slot');
+    const leaseFile = `${slotFile}.lease`;
+    const replacementLease = makeLeaseV2({ leaseId: 'lease_replacement', owner: 'writer', slot });
+    const replacementBytes = JSON.stringify(replacementLease);
+    await nodeFs.writeFile(pendingFile, JSON.stringify(makeCommandV2(projectId, 'command_lease_race')));
+    await nodeFs.writeFile(slotFile, JSON.stringify(slot));
+    await mailbox.writeReceipt(projectId, makeReceiptV2(projectId, 'command_lease_race'));
+    let replaced = false;
+    const racingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property !== 'rm' && property !== 'rename') return Reflect.get(realFs, property, receiver);
+        const replace = async (source: string): Promise<void> => {
+          if (replaced || source !== leaseFile) return;
+          replaced = true;
+          await nodeFs.rm(leaseFile);
+          await nodeFs.writeFile(leaseFile, replacementBytes);
+        };
+        if (property === 'rm') {
+          return async (...args: Parameters<typeof nodeFs.rm>) => {
+            await replace(String(args[0]));
+            return nodeFs.rm(...args);
+          };
+        }
+        return async (...args: Parameters<typeof nodeFs.rename>) => {
+          await replace(String(args[0]));
+          return nodeFs.rename(...args);
+        };
+      },
+    }) as typeof nodeFs;
+    const racingMailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      fs: racingFs,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+
+    await expect(racingMailbox.finish(projectId, 'command_lease_race')).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+
+    expect(replaced).toBe(true);
+    await expect(nodeFs.readFile(leaseFile, 'utf8')).resolves.toBe(replacementBytes);
+    await racingMailbox.dispose();
+  });
+
+  it('restores an active lease raced into V2 expired-lease reclaim', async () => {
+    await mailbox.ensure(projectId);
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const slot = makeSlotV2('command_reclaim_race', {
+      reservedAt: '2026-08-16T11:59:40.000Z',
+      deadlineAt: '2026-08-16T11:59:55.000Z',
+    });
+    const slotFile = path.join(directories.slots, '0.slot');
+    const leaseFile = `${slotFile}.lease`;
+    const expiredLease = makeLeaseV2({
+      leaseId: 'lease_expired',
+      owner: 'main',
+      slot,
+      acquiredAt: '2026-08-16T11:59:57.999Z',
+    });
+    const replacementLease = makeLeaseV2({ leaseId: 'lease_active', owner: 'writer', slot });
+    const replacementBytes = JSON.stringify(replacementLease);
+    await nodeFs.writeFile(slotFile, JSON.stringify(slot));
+    await nodeFs.writeFile(leaseFile, JSON.stringify(expiredLease));
+    let replaced = false;
+    const racingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property !== 'rm' && property !== 'rename') return Reflect.get(realFs, property, receiver);
+        const replace = async (source: string): Promise<void> => {
+          if (replaced || source !== leaseFile) return;
+          replaced = true;
+          await nodeFs.rm(leaseFile);
+          await nodeFs.writeFile(leaseFile, replacementBytes);
+        };
+        if (property === 'rm') {
+          return async (...args: Parameters<typeof nodeFs.rm>) => {
+            await replace(String(args[0]));
+            return nodeFs.rm(...args);
+          };
+        }
+        return async (...args: Parameters<typeof nodeFs.rename>) => {
+          await replace(String(args[0]));
+          return nodeFs.rename(...args);
+        };
+      },
+    }) as typeof nodeFs;
+    const racingMailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      fs: racingFs,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+
+    await racingMailbox.releaseOrphanedSlotsPage(null, NOW, 64);
+
+    expect(replaced).toBe(true);
+    await expect(nodeFs.readFile(slotFile, 'utf8')).resolves.toBe(JSON.stringify(slot));
+    await expect(nodeFs.readFile(leaseFile, 'utf8')).resolves.toBe(replacementBytes);
+    await racingMailbox.dispose();
+  });
+
+  it('restores an orphan slot when held lease authority changes during its quarantine rename', async () => {
+    await mailbox.ensure(projectId);
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const slot = makeSlotV2('command_orphan_lease_race', {
+      reservedAt: '2026-08-16T11:59:40.000Z',
+      deadlineAt: '2026-08-16T11:59:55.000Z',
+    });
+    const slotFile = path.join(directories.slots, '0.slot');
+    const leaseFile = `${slotFile}.lease`;
+    const replacementBytes = JSON.stringify(
+      makeLeaseV2({ leaseId: 'lease_orphan_replacement', owner: 'writer', slot })
+    );
+    await nodeFs.writeFile(slotFile, JSON.stringify(slot));
+    let replaced = false;
+    const racingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property !== 'rename') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.rename>) => {
+          if (!replaced && String(args[0]) === slotFile) {
+            replaced = true;
+            await nodeFs.rm(leaseFile);
+            await nodeFs.writeFile(leaseFile, replacementBytes);
+          }
+          return nodeFs.rename(...args);
+        };
+      },
+    }) as typeof nodeFs;
+    const racingMailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      fs: racingFs,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+
+    await racingMailbox.releaseOrphanedSlotsPage(null, NOW, 64);
+
+    expect(replaced).toBe(true);
+    await expect(nodeFs.readFile(slotFile, 'utf8')).resolves.toBe(JSON.stringify(slot));
+    await expect(nodeFs.readFile(leaseFile, 'utf8')).resolves.toBe(replacementBytes);
+    await racingMailbox.dispose();
+  });
+
+  it('restores a V1 receipt replacement raced into V2 retention cleanup', async () => {
+    await mailbox.ensure(projectId);
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const commandId = 'command_receipt_prune_race';
+    const receiptFile = path.join(directories.receipts, `${commandId}.json`);
+    const legacyBytes = JSON.stringify(makeReceipt(projectId, commandId));
+    await mailbox.writeReceipt(projectId, makeReceiptV2(projectId, commandId));
+    let replaced = false;
+    const racingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property !== 'rm' && property !== 'rename') return Reflect.get(realFs, property, receiver);
+        const replace = async (source: string): Promise<void> => {
+          if (replaced || source !== receiptFile) return;
+          replaced = true;
+          await nodeFs.rm(receiptFile);
+          await nodeFs.writeFile(receiptFile, legacyBytes);
+        };
+        if (property === 'rm') {
+          return async (...args: Parameters<typeof nodeFs.rm>) => {
+            await replace(String(args[0]));
+            return nodeFs.rm(...args);
+          };
+        }
+        return async (...args: Parameters<typeof nodeFs.rename>) => {
+          await replace(String(args[0]));
+          return nodeFs.rename(...args);
+        };
+      },
+    }) as typeof nodeFs;
+    const racingMailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      fs: racingFs,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+
+    await racingMailbox.pruneReceiptsPage(null, '2026-08-17T12:00:00.000Z', 64);
+
+    expect(replaced).toBe(true);
+    await expect(nodeFs.readFile(receiptFile, 'utf8')).resolves.toBe(legacyBytes);
+    await racingMailbox.dispose();
+  });
+
+  it('exactly prunes an eligible V2 receipt without cleanup residue', async () => {
+    await mailbox.ensure(projectId);
+    const directories = commandDirectories(rootDir, projectId);
+    const commandId = 'command_receipt_prune';
+    await mailbox.writeReceipt(projectId, makeReceiptV2(projectId, commandId));
+
+    await mailbox.pruneReceiptsPage(null, '2026-08-17T12:00:00.000Z', 64);
+
+    await expect(nodeFs.readdir(directories.receipts)).resolves.toEqual([]);
+  });
+
+  it('retains a V2 receipt while matching pending authority remains', async () => {
+    await mailbox.ensure(projectId);
+    const directories = commandDirectories(rootDir, projectId);
+    const commandId = 'command_receipt_pending';
+    await mailbox.writeReceipt(projectId, makeReceiptV2(projectId, commandId));
+    await nodeFs.writeFile(
+      path.join(directories.pending, `${commandId}.json`),
+      JSON.stringify(makeCommandV2(projectId, commandId))
+    );
+
+    await mailbox.pruneReceiptsPage(null, '2026-08-17T12:00:00.000Z', 64);
+
+    await expect(nodeFs.readdir(directories.receipts)).resolves.toEqual([`${commandId}.json`]);
+  });
+
+  it('retains a V2 receipt while its matching slot authority remains', async () => {
+    await mailbox.ensure(projectId);
+    const directories = commandDirectories(rootDir, projectId);
+    const commandId = 'command_receipt_slot';
+    await mailbox.writeReceipt(projectId, makeReceiptV2(projectId, commandId));
+    await nodeFs.writeFile(path.join(directories.slots, '0.slot'), JSON.stringify(makeSlotV2(commandId)));
+
+    await mailbox.pruneReceiptsPage(null, '2026-08-17T12:00:00.000Z', 64);
+
+    await expect(nodeFs.readdir(directories.receipts)).resolves.toEqual([`${commandId}.json`]);
+  });
+
+  it('gates recursive watcher events on schema-2 project classification', async () => {
+    let onChange: ((relativeFile: string) => void) | undefined;
+    const close = vi.fn();
+    const trigger = vi.fn();
+    const watchingMailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+      watchCommandTree: ({ onChange: notify }) => {
+        onChange = notify;
+        return { close };
+      },
+    });
+    const stop = await watchingMailbox.watch(trigger);
+
+    onChange?.(`${legacyProjectId}/commands/pending/legacy_command.json`);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(trigger).not.toHaveBeenCalled();
+
+    onChange?.(`${projectId}/commands/pending/command_v2.json`);
+    await vi.waitFor(() => expect(trigger).toHaveBeenCalledExactlyOnceWith(projectId, 'command_v2'));
+
+    await stop();
+    await stop();
+    expect(close).toHaveBeenCalledOnce();
+    await watchingMailbox.dispose();
+  });
+
+  it('skips V1 projects during bounded sweeps without creating a mailbox', async () => {
+    await mailbox.ensure(projectId);
+    const command = makeCommandV2(projectId, 'command_v2');
+    const directories = commandDirectories(rootDir, projectId);
+    await nodeFs.writeFile(path.join(directories.pending, 'command_v2.json'), JSON.stringify(command));
+    await nodeFs.writeFile(path.join(directories.slots, '0.slot'), JSON.stringify(makeSlotV2('command_v2')));
+    const legacyProjectFile = path.join(rootDir, legacyProjectId, 'project.json');
+    const legacyBytes = await nodeFs.readFile(legacyProjectFile);
+
+    const discovered: Array<{ projectId: string; commandId: string }> = [];
+    let cursor: string | null = null;
+    do {
+      // eslint-disable-next-line no-await-in-loop
+      const page = await mailbox.snapshotPendingPage(cursor, 64);
+      discovered.push(...page.items);
+      cursor = page.nextCursor;
+    } while (cursor !== null);
+
+    expect(discovered).toEqual([{ projectId, commandId: 'command_v2' }]);
+    expect(await nodeFs.readFile(legacyProjectFile)).toEqual(legacyBytes);
+    await expect(nodeFs.access(path.join(rootDir, legacyProjectId, 'commands'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it('returns explicit unsupported reads for a V1 project without touching its directory', async () => {
+    const before = await snapshotDirectoryBytes(path.join(rootDir, legacyProjectId));
+
+    await expect(mailbox.readPending(legacyProjectId, 'command_missing')).resolves.toEqual({
+      status: 'unsupported_prototype_schema',
+      commandId: 'command_missing',
+      expectedRevision: null,
+    });
+    await expect(mailbox.readReceipt(legacyProjectId, 'command_missing')).resolves.toEqual({
+      status: 'unsupported_prototype_schema',
+    });
+    expect(await snapshotDirectoryBytes(path.join(rootDir, legacyProjectId))).toEqual(before);
   });
 });
 

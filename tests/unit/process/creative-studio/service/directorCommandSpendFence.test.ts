@@ -10,11 +10,16 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type {
-  StudioAsset,
-  StudioDirectorCommandReceiptV1,
-  StudioDirectorCommandRecordV1,
-  StudioScene,
+import {
+  STUDIO_PROJECT_SCHEMA_VERSION,
+  type CreateStudioProjectInputV2,
+  type StudioAsset,
+  type StudioDirectorCommandReceiptV1,
+  type StudioDirectorCommandRecordV1,
+  type StudioDirectorCommandRecordV2,
+  type StudioDirectorOperationV2,
+  type StudioProjectV2,
+  type StudioScene,
 } from '@/common/types/project/creativeStudioTypes';
 import type { GenerationProviderAdapter } from '@process/services/creative-studio/adapters';
 import type { StudioDirectorCommandMailbox } from '@process/services/creative-studio/service/directorCommandMailbox';
@@ -22,7 +27,10 @@ import {
   createStudioDirectorCommandProcessor,
   createStudioDirectorCommitTracker,
 } from '@process/services/creative-studio/service/directorCommandProcessor';
-import { createStudioDirectorCommandService } from '@process/services/creative-studio/service/directorCommandService';
+import {
+  createStudioDirectorCommandService,
+  createStudioDirectorCommandServiceV2,
+} from '@process/services/creative-studio/service/directorCommandService';
 import { createCreativeStudioStore } from '@process/services/creative-studio/store';
 
 const roots: string[] = [];
@@ -72,6 +80,30 @@ const waitForReceipt = async (
   }
   throw new Error(`Timed out waiting for receipt ${commandId}`);
 };
+
+const directorClipV2 = () => ({
+  shotPrompt: 'A clean product composition',
+  narration: '',
+  onScreenText: '',
+  mediaKind: 'image' as const,
+  durationSeconds: 5,
+  referenceAssetId: null,
+});
+
+const directorCommandV2 = (
+  project: StudioProjectV2,
+  commandId: string,
+  operations: StudioDirectorOperationV2[]
+): StudioDirectorCommandRecordV2 => ({
+  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  commandId,
+  projectId: project.id,
+  expectedRevision: project.revision,
+  createdAt: '2026-08-17T00:00:00.000Z',
+  deadlineAt: '2026-08-17T00:00:15.000Z',
+  policy: 'auto_apply',
+  operations,
+});
 
 describe('Studio Director dynamic spend fence', () => {
   it('applies all five free operations without reaching submit, retry, job, resolver, or adapter boundaries', async () => {
@@ -303,5 +335,164 @@ describe('Studio Director dynamic spend fence', () => {
     expect(adapterCancel).not.toHaveBeenCalled();
 
     await processor.stop();
+  });
+
+  it('applies every schema-2 mutation kind while every paid boundary remains poisoned', async () => {
+    const rootDir = await mkdtemp(path.join(tmpdir(), 'studio-director-spend-fence-v2-'));
+    roots.push(rootDir);
+    const store = createCreativeStudioStore({
+      rootDir,
+      createId: () => 'project_v2',
+      now: () => '2026-08-17T00:00:00.000Z',
+    });
+    const input: CreateStudioProjectInputV2 = {
+      name: 'Schema-2 spend fence',
+      brief: 'Original brief',
+      aspectRatio: '16:9',
+      targetDurationSeconds: 15,
+      resolution: '1080p',
+    };
+    let project = await store.createProjectV2(input);
+    const paidBoundaryNames = [
+      'submitScenes',
+      'submitClips',
+      'retryJob',
+      'retryJobV2',
+      'retryDownload',
+      'retryDownloadV2',
+      'cancelJob',
+      'cancelJobV2',
+      'renderCut',
+      'renderCutV2',
+      'listConnectionCandidates',
+      'listGenerationRoutes',
+      'isGenerationRouteAvailable',
+      'validateConnection',
+      'validateRequest',
+      'submit',
+      'poll',
+      'cancel',
+    ] as const;
+    const paidBoundaries = Object.fromEntries(
+      paidBoundaryNames.map((name) => [
+        name,
+        vi.fn(() => {
+          throw new Error(`${name} must stay unreachable`);
+        }),
+      ])
+    ) as Record<(typeof paidBoundaryNames)[number], ReturnType<typeof vi.fn>>;
+    const service = createStudioDirectorCommandServiceV2({
+      store: Object.assign(store, paidBoundaries),
+      now: () => Date.parse('2026-08-17T00:00:01.000Z'),
+    });
+    const apply = async (commandId: string, operations: StudioDirectorOperationV2[]): Promise<StudioProjectV2> => {
+      const result = await service.apply(
+        directorCommandV2(project, commandId, operations),
+        Date.parse('2026-08-17T00:00:14.000Z'),
+        { commitTag: `spend-fence:${commandId}` }
+      );
+      project = result.project;
+      return project;
+    };
+
+    await apply('command_structure', [
+      {
+        kind: 'add_section',
+        sectionId: 'section_1',
+        section: { title: 'Opening', storyLine: '', visualPrompt: 'Warm sunrise' },
+        firstClipId: 'clip_1',
+        firstClip: directorClipV2(),
+        beforeSectionId: null,
+      },
+      {
+        kind: 'add_section',
+        sectionId: 'section_2',
+        section: { title: 'Close', storyLine: '', visualPrompt: 'Soft evening light' },
+        firstClipId: 'clip_2',
+        firstClip: directorClipV2(),
+        beforeSectionId: null,
+      },
+      {
+        kind: 'add_clip',
+        sectionId: 'section_1',
+        clipId: 'clip_3',
+        clip: directorClipV2(),
+        beforeClipId: null,
+      },
+    ]);
+
+    project = await store.updateProjectV2(
+      project.id,
+      (current) => ({
+        ...current,
+        assets: {
+          take_1: {
+            id: 'take_1',
+            projectId: current.id,
+            clipId: 'clip_1',
+            mediaKind: 'image',
+            mimeType: 'image/png',
+            managedAsset: { collection: 'assets', fileName: 'take_1.png' },
+            byteSize: 1,
+            sha256: 'a'.repeat(64),
+            createdAt: '2026-08-17T00:00:00.000Z',
+          },
+          take_2: {
+            id: 'take_2',
+            projectId: current.id,
+            clipId: 'clip_1',
+            mediaKind: 'image',
+            mimeType: 'image/png',
+            managedAsset: { collection: 'assets', fileName: 'take_2.png' },
+            byteSize: 1,
+            sha256: 'b'.repeat(64),
+            createdAt: '2026-08-17T00:00:00.000Z',
+          },
+        },
+        clips: {
+          ...current.clips,
+          clip_1: { ...current.clips.clip_1!, assetIds: ['take_1', 'take_2'] },
+        },
+      }),
+      project.revision
+    );
+
+    await apply('command_all_other_mutations', [
+      { kind: 'set_brief', brief: 'Director-authored free edits' },
+      { kind: 'edit_section', sectionId: 'section_1', changes: { storyLine: 'A precise opening beat' } },
+      { kind: 'edit_clip', clipId: 'clip_1', changes: { shotPrompt: 'A tighter product composition' } },
+      { kind: 'reorder_sections', sectionOrder: ['section_2', 'section_1'] },
+      { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_3', 'clip_1'] },
+      { kind: 'park_section', sectionId: 'section_2' },
+      { kind: 'park_take', clipId: 'clip_1', assetId: 'take_1' },
+      { kind: 'park_take', clipId: 'clip_1', assetId: 'take_2' },
+      {
+        kind: 'reorder_shelf',
+        shelf: [
+          { kind: 'asset', assetId: 'take_2' },
+          { kind: 'section', sectionId: 'section_2' },
+          { kind: 'asset', assetId: 'take_1' },
+        ],
+      },
+      { kind: 'select_shelved_take', clipId: 'clip_1', assetId: 'take_2' },
+      { kind: 'remove_shelf_alias', assetId: 'take_1' },
+      { kind: 'restore_section', sectionId: 'section_2', beforeSectionId: 'section_1' },
+      { kind: 'select_take', clipId: 'clip_1', assetId: 'take_1' },
+      { kind: 'delete_clip', clipId: 'clip_3' },
+    ]);
+
+    expect(project).toMatchObject({
+      brief: 'Director-authored free edits',
+      sectionOrder: ['section_2', 'section_1'],
+      sections: {
+        section_1: { storyLine: 'A precise opening beat', clipOrder: ['clip_1'] },
+      },
+      clips: {
+        clip_1: { shotPrompt: 'A tighter product composition', selectedAssetId: 'take_1' },
+      },
+      shelf: [],
+    });
+    expect(project.clips).not.toHaveProperty('clip_3');
+    for (const boundary of Object.values(paidBoundaries)) expect(boundary).not.toHaveBeenCalled();
   });
 });

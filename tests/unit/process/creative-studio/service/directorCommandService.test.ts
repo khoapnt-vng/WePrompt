@@ -6,25 +6,32 @@
  * @vitest-environment node
  */
 
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   CreateStudioProjectInput,
+  CreateStudioProjectInputV2,
   StudioAsset,
   StudioDirectorCommandRecordV1,
+  StudioDirectorCommandRecordV2,
   StudioDirectorNewSceneV1,
   StudioDirectorOperationV1,
+  StudioDirectorOperationV2,
   StudioJob,
   StudioProject,
+  StudioProjectV2,
   StudioScene,
 } from '@/common/types/project/creativeStudioTypes';
 import { createCreativeStudioService } from '@process/services/creative-studio/service';
 import {
   createStudioDirectorCommandService,
+  createStudioDirectorCommandServiceV2,
   StudioDirectorCommandApplyError,
+  StudioDirectorCommandApplyErrorV2,
   type StudioDirectorCommandService,
+  type StudioDirectorCommandServiceV2,
 } from '@process/services/creative-studio/service/directorCommandService';
 import type { StudioStoryboardPlanner } from '@process/services/creative-studio/planning/storyboardPlanner';
 import {
@@ -43,6 +50,230 @@ const makeInput = (): CreateStudioProjectInput => ({
   aspectRatio: '16:9',
   targetDurationSeconds: 24,
   resolution: '1080p',
+});
+
+const makeInputV2 = (): CreateStudioProjectInputV2 => ({
+  name: 'Director schema-2 command project',
+  brief: 'Opening brief',
+  aspectRatio: '16:9',
+  targetDurationSeconds: 24,
+  resolution: '1080p',
+});
+
+const emptyClipV2 = () => ({
+  shotPrompt: '',
+  narration: '',
+  onScreenText: '',
+  mediaKind: 'image' as const,
+  durationSeconds: 5,
+  referenceAssetId: null,
+});
+
+const makeCommandV2 = (
+  project: StudioProjectV2,
+  operations: StudioDirectorOperationV2[],
+  overrides: Partial<StudioDirectorCommandRecordV2> = {}
+): StudioDirectorCommandRecordV2 => ({
+  schemaVersion: 2,
+  commandId: 'command_v2',
+  projectId: project.id,
+  expectedRevision: project.revision,
+  createdAt: NOW,
+  deadlineAt: '2026-08-17T00:00:15.000Z',
+  policy: 'auto_apply',
+  operations,
+  ...overrides,
+});
+
+describe('Studio Director schema-2 command service', () => {
+  let rootDir = '';
+  let store: CreativeStudioStore;
+  let service: StudioDirectorCommandServiceV2;
+  let project: StudioProjectV2;
+  let nowMs = NOW_MS;
+
+  beforeEach(async () => {
+    rootDir = await mkdtemp(path.join(tmpdir(), 'studio-director-command-service-v2-'));
+    nowMs = NOW_MS;
+    store = createCreativeStudioStore({ rootDir, now: () => NOW, createId: () => 'project_v2' });
+    project = await store.createProjectV2(makeInputV2());
+    service = createStudioDirectorCommandServiceV2({ store, now: () => nowMs });
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await rm(rootDir, { recursive: true, force: true });
+  });
+
+  it('delegates the ordered batch inside one correlated schema-2 store callback', async () => {
+    const operations: StudioDirectorOperationV2[] = [
+      {
+        kind: 'add_section',
+        sectionId: 'section_1',
+        section: { title: 'Opening', storyLine: '', visualPrompt: 'Cinematic light' },
+        firstClipId: 'clip_1',
+        firstClip: emptyClipV2(),
+        beforeSectionId: null,
+      },
+      { kind: 'add_clip', sectionId: 'section_1', clipId: 'clip_2', clip: emptyClipV2(), beforeClipId: null },
+      { kind: 'edit_section', sectionId: 'section_1', changes: { storyLine: 'A clear story beat' } },
+      { kind: 'edit_clip', clipId: 'clip_2', changes: { shotPrompt: 'Close product reveal' } },
+      { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_2', 'clip_1'] },
+    ];
+    const command = makeCommandV2(project, operations);
+    const commandBytes = JSON.stringify(command);
+    const updateProjectV2 = vi.spyOn(store, 'updateProjectV2');
+
+    const result = await service.apply(command, APPLY_CUTOFF_MS, { commitTag: 'opaque-v2-command-tag' });
+
+    expect(result).toMatchObject({
+      appliedRevision: project.revision + 1,
+      createdSectionIds: ['section_1'],
+      createdClipIds: ['clip_1', 'clip_2'],
+      project: {
+        revision: project.revision + 1,
+        sectionOrder: ['section_1'],
+        sections: { section_1: { storyLine: 'A clear story beat', clipOrder: ['clip_2', 'clip_1'] } },
+        clips: { clip_2: { shotPrompt: 'Close product reveal' } },
+      },
+    });
+    expect(updateProjectV2).toHaveBeenCalledOnce();
+    expect(updateProjectV2.mock.calls[0]?.slice(0, 2)).toEqual([project.id, expect.any(Function)]);
+    expect(updateProjectV2.mock.calls[0]?.slice(2)).toEqual([project.revision, 'opaque-v2-command-tag']);
+    expect(JSON.stringify(command)).toBe(commandBytes);
+  });
+
+  it('checks the deadline only after schema-2 CAS admits the correlated callback', async () => {
+    const realStore = store;
+    const queuedStore: CreativeStudioStore = {
+      ...realStore,
+      updateProjectV2: (projectId, update, expectedRevision, commitTag) =>
+        realStore.updateProjectV2(
+          projectId,
+          (current) => {
+            nowMs = APPLY_CUTOFF_MS;
+            return update(current);
+          },
+          expectedRevision,
+          commitTag
+        ),
+    };
+    service = createStudioDirectorCommandServiceV2({ store: queuedStore, now: () => nowMs });
+
+    await expect(
+      service.apply(makeCommandV2(project, [{ kind: 'set_brief', brief: 'Too late' }]), APPLY_CUTOFF_MS, {
+        commitTag: 'command_v2',
+      })
+    ).rejects.toMatchObject({ reasonCode: 'deadline_elapsed', message: 'deadline_elapsed' });
+    await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
+      status: 'supported',
+      project: { revision: project.revision, brief: project.brief },
+    });
+  });
+
+  it('keeps stale CAS precedence ahead of deadline and reducer work', async () => {
+    const now = vi.fn(() => APPLY_CUTOFF_MS);
+    service = createStudioDirectorCommandServiceV2({ store, now });
+    await store.updateProjectV2(project.id, (current) => ({ ...current, name: 'Concurrent winner' }), project.revision);
+
+    await expect(
+      service.apply(makeCommandV2(project, [{ kind: 'set_brief', brief: 'Must not apply' }]), APPLY_CUTOFF_MS, {
+        commitTag: 'command_v2',
+      })
+    ).rejects.toMatchObject({ code: 'stale_project' });
+
+    expect(now).not.toHaveBeenCalled();
+    await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
+      status: 'supported',
+      project: { revision: project.revision + 1, name: 'Concurrent winner', brief: project.brief },
+    });
+  });
+
+  it('returns the exact bounded reducer reason and rolls the whole draft back', async () => {
+    const command = makeCommandV2(project, [
+      {
+        kind: 'add_section',
+        sectionId: 'section_1',
+        section: { title: 'Opening', storyLine: '', visualPrompt: 'Cinematic light' },
+        firstClipId: 'clip_1',
+        firstClip: { ...emptyClipV2(), mediaKind: 'video', durationSeconds: 3 },
+        beforeSectionId: null,
+      },
+    ]);
+
+    const error = await service
+      .apply(command, APPLY_CUTOFF_MS, { commitTag: command.commandId })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(StudioDirectorCommandApplyErrorV2);
+    expect(error).toMatchObject({ reasonCode: 'invalid_clip_duration', message: 'invalid_clip_duration' });
+    await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
+      status: 'supported',
+      project: { revision: project.revision, sectionOrder: [], sections: {}, clips: {} },
+    });
+  });
+
+  it('returns schema-1 projects as unsupported without changing any project byte', async () => {
+    const legacyRoot = await mkdtemp(path.join(tmpdir(), 'studio-director-command-service-v1-no-touch-'));
+    try {
+      const legacyStore = createCreativeStudioStore({
+        rootDir: legacyRoot,
+        now: () => NOW,
+        createId: () => 'legacy_1',
+      });
+      const legacy = await legacyStore.createProject(makeInput());
+      const projectFile = path.join(legacyRoot, legacy.id, 'project.json');
+      const before = await readFile(projectFile, 'utf8');
+      const command = makeCommandV2({ id: legacy.id, revision: legacy.revision } as StudioProjectV2, [
+        { kind: 'set_brief', brief: 'Must not touch V1' },
+      ]);
+
+      const error = await createStudioDirectorCommandServiceV2({ store: legacyStore, now: () => NOW_MS })
+        .apply(command, APPLY_CUTOFF_MS, { commitTag: command.commandId })
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(CreativeStudioStoreError);
+      expect(error).toMatchObject({ code: 'unsupported_prototype_schema' });
+      expect(await readFile(projectFile, 'utf8')).toBe(before);
+      expect(await readdir(path.join(legacyRoot, legacy.id))).toEqual(['project.json']);
+    } finally {
+      await rm(legacyRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves an exact busy store boundary for deferred processor handling', async () => {
+    const busy = new CreativeStudioStoreError('busy', 'opaque busy detail');
+    const updateProjectV2 = vi.fn(async () => {
+      throw busy;
+    });
+    service = createStudioDirectorCommandServiceV2({ store: { updateProjectV2 } });
+
+    const error = await service
+      .apply(makeCommandV2(project, [{ kind: 'set_brief', brief: 'Defer me' }]), APPLY_CUTOFF_MS, {
+        commitTag: 'command_v2',
+      })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBe(busy);
+    expect(updateProjectV2).toHaveBeenCalledOnce();
+  });
+
+  it('bounds store invalid_payload as validation_failed instead of leaking store prose', async () => {
+    const updateProjectV2 = vi.fn(async () => {
+      throw new CreativeStudioStoreError('invalid_payload', 'credential at /Users/private');
+    });
+    service = createStudioDirectorCommandServiceV2({ store: { updateProjectV2 } });
+
+    const error = await service
+      .apply(makeCommandV2(project, [{ kind: 'set_brief', brief: 'Invalid' }]), APPLY_CUTOFF_MS, {
+        commitTag: 'command_v2',
+      })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(StudioDirectorCommandApplyErrorV2);
+    expect(error).toMatchObject({ reasonCode: 'validation_failed', message: 'validation_failed' });
+    expect(JSON.stringify(error)).not.toContain('/Users/private');
+  });
 });
 
 const makeNewScene = (overrides: Partial<StudioDirectorNewSceneV1> = {}): StudioDirectorNewSceneV1 => ({

@@ -647,41 +647,45 @@ below is green and independently re-reviewed.
 
 **Steps**
 
-- [ ] Add exact schema-2 command/slot/lease/receipt/proposal/decision/reference shapes and all V2
+- [x] Add exact schema-2 command/slot/lease/receipt/proposal/decision/reference shapes and all V2
       operations. Preserve existing record byte, timing, lease, cursor, retention, and immutable-I/O
       constants.
-- [ ] Keep the current V1 writer/server exports registered through Gate 1. Add explicitly named V2
+- [x] Keep the current V1 writer/server exports registered through Gate 1. Add explicitly named V2
       writer/tool-definition entry points in the same existing files and test them directly; do not
       switch the builtin server, mailbox coordinator, runtime, or descriptor until Task 6.
-- [ ] Make V1 sidecars an explicit read-only unsupported result. A V1 pending record must not call
+- [x] Make V1 sidecars an explicit read-only unsupported result. A V1 pending record must not call
       `completeTerminal`, write a receipt, delete pending, remove a slot/lease, or create a mailbox
       directory.
-- [ ] Delegate Director application to `applyStudioMutationBatchV2` inside the existing correlated
+- [x] Delegate Director application to `applyStudioMutationBatchV2` inside the existing correlated
       store callback. Preserve CAS-before-callback, deadline, unsupported/capacity/semantic
       precedence, one revision, commit attribution, receipt-first cleanup, restart ambiguity, and
       exactly-once notification.
-- [ ] Update `read_storyboard`, `studio_apply_edits`, `studio_get_command_status`, proposal, and
+- [x] Update `read_storyboard`, `studio_apply_edits`, `studio_get_command_status`, proposal, and
       reference tools to Section/Clip V2. `tools/list` must serialize nonempty exact schemas with a
       canonical V2 example; do not carry legacy `scene*` names.
-- [ ] Instantiate a real `McpServer` over paired in-memory transports and assert `tools/list` exposes
+- [x] Instantiate a real `McpServer` over paired in-memory transports and assert `tools/list` exposes
       required `expectedRevision`/`operations`, every operation alternative and nested field, strict
       unknown-key rejection, and the canonical V2 batch. Prove add+reorder rejection happens before
-      handler execution or ID minting.
-- [ ] Bound available-take projection to 24 per clip in deterministic clip asset order; selected
+      handler execution or ID minting. Advertise every constraint expressible in portable Draft-7.
+      Keep same-section `add_clip` + `reorder_clips` correlation and the aggregate 256 KiB serialized
+      record cap as Zod 4 pre-handler refinements because Draft-7 cannot express cross-item value
+      equality or serialized UTF-8 byte length; test the deliberate listed-schema superset and real
+      SDK rejection explicitly. Do not globally reject valid different-section batches to fake parity.
+- [x] Bound available-take projection to 24 per clip in deterministic clip asset order; selected
       take remains visible even when it would otherwise fall beyond the slice.
-- [ ] Add the tracked include-only Studio coverage configuration. Its explicit manifest covers every
+- [x] Add the tracked include-only Studio coverage configuration. Its explicit manifest covers every
       executable production file changed since the frozen baseline, including runtime helpers under
       `common/types/**`, and enforces per-file line and branch thresholds of 80%. Later tasks update the
       manifest whenever they add or change executable production files.
-- [ ] RED every operation, created-ID arrays, reference-request 0/24/25 and duplicate clip IDs, V1
+- [x] RED every operation, created-ID arrays, reference-request 0/24/25 and duplicate clip IDs, V1
       no-touch, malformed V2, lease races, cursor recovery, restart receipt repair, and no paid
       dependency. Preserve existing writer/mailbox mutation tests.
-- [ ] Mutation proofs: send a V1 record through terminal cleanup and prove the byte-tree test fails;
+- [x] Mutation proofs: send a V1 record through terminal cleanup and prove the byte-tree test fails;
       bypass the shared reducer and prove reducer-parity tests fail; restore.
-- [ ] Run:
+- [x] Run:
       `bunx vitest run tests/unit/process/creative-studio/service/directorCommandContracts.test.ts tests/unit/process/creative-studio/service/directorCommandService.test.ts tests/unit/process/creative-studio/service/directorCommandMailbox.test.ts tests/unit/process/creative-studio/service/directorCommandProcessor.test.ts tests/unit/process/creative-studio/service/studioDirectorCommandWriter.test.ts tests/unit/process/creative-studio/service/directorCommandSpendFence.test.ts tests/unit/process/creative-studio/service/index.test.ts tests/integration/creative-studio/directorCommandLifecycle.integration.test.ts`
       and `bunx tsc --noEmit`.
-- [ ] Commit: `feat(studio): version director commands for schema 2`.
+- [x] Commit: `feat(studio): version director commands for schema 2`.
 
 ### Gate 1 review checkpoint
 
@@ -991,6 +995,17 @@ bun run format:check
       update-scene, reorder-scenes, select-asset, or Cut provider.
 - [ ] Replace the public `StudioProject`/renderer aliases with V2; delete temporary V1 aliases and
       staging methods. Keep independent connection/adapter/prompt protocol V1 names unchanged.
+- [ ] Add schema-2 proposal list/accept/reject ownership before the public proposal UI switch.
+      `acceptProposalV2` runs inside the existing per-project queue, classifies the V2 manifest and
+      every addressed sidecar before mutation, and applies a `mutation_batch` through
+      `applyStudioMutationBatchV2` inside `updateProjectV2InsideQueue`—never by nesting the public
+      queued method. Commit the project once at `baseRevision`, preserve ordered created Section/Clip
+      IDs, then append the immutable accepted decision and release only the matching V2 slot.
+      Already-accepted retries are idempotent with no reducer call or duplicate notification;
+      rejected/expired, malformed, stale, V1, and reducer-failure paths leave project, decision, slot,
+      and the complete V1 byte tree unchanged. `pin_rule` keeps exact bounded rule semantics and
+      returns empty created-ID arrays. RED decision-write crash/restart attribution explicitly so a
+      committed project can never cause a proposal mutation to replay.
 - [ ] Delete schema-1 `validateProject` in `store.ts`, then delete only predicates/value sets proven
       dead by TypeScript, lint, and exact symbol-usage review. Keep boundary-local `isRecord`, safe-ID,
       provider, media, protocol, mailbox, and adapter guards that still have independent consumers;

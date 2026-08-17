@@ -191,6 +191,8 @@ export const STUDIO_MAX_CUT_PLACEMENT_SCENES = 24;
 export const STUDIO_MAX_DIRTY_SCENES_REPORTED = 24;
 export const STUDIO_MAX_MCP_AVAILABLE_TAKE_IDS_PER_SCENE = 24;
 export const STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION = 1 as const;
+/** Additive Gate-1 Director contract; the registered V1 writer remains on schema 1 until atomic cutover. */
+export const STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 = STUDIO_PROJECT_SCHEMA_VERSION;
 export const STUDIO_DIRECTOR_COMMAND_MAX_OPERATIONS = 32;
 export const STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES = 256 * 1024;
 export const STUDIO_DIRECTOR_COMMAND_RECEIPT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -412,6 +414,104 @@ export type StudioDirectorCommandReceiptV1 =
   | StudioDirectorRejectedReceiptV1
   | StudioDirectorExpiredReceiptV1
   | StudioDirectorIndeterminateReceiptV1;
+
+/** Schema-2 Director commands use the same free mutation vocabulary as the renderer. */
+export type StudioDirectorOperationV2 = StudioMutationOperationV2;
+
+export type StudioDirectorCommandRecordV2 = {
+  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  commandId: string;
+  projectId: string;
+  expectedRevision: number;
+  createdAt: string;
+  deadlineAt: string;
+  policy: 'auto_apply';
+  operations: StudioDirectorOperationV2[];
+};
+
+export type StudioDirectorCommandSlotV2 = {
+  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  commandId: string;
+  reservedAt: string;
+  deadlineAt: string;
+};
+
+export type StudioDirectorCommandSlotLeaseV2 = {
+  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  leaseId: string;
+  owner: 'writer' | 'main';
+  commandId: string | null;
+  reservedAt: string | null;
+  deadlineAt: string | null;
+  acquiredAt: string;
+  expiresAt: string;
+};
+
+export type StudioDirectorCommandRejectionCodeV2 =
+  | 'malformed_record'
+  | 'unsupported_version'
+  | 'stale_revision'
+  | 'future_revision'
+  | 'project_not_found'
+  | 'section_capacity_reached'
+  | 'section_clip_capacity_reached'
+  | 'project_clip_capacity_reached'
+  | 'invalid_clip_duration'
+  | 'dependency_blocked'
+  | 'identity_collision'
+  | 'invalid_operation'
+  | 'validation_failed';
+
+export type StudioDirectorAppliedReceiptV2 = {
+  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  commandId: string;
+  projectId: string;
+  expectedRevision: number;
+  decidedAt: string;
+  status: 'applied';
+  appliedRevision: number;
+  createdSectionIds: string[];
+  createdClipIds: string[];
+};
+
+export type StudioDirectorRejectedReceiptV2 = {
+  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  commandId: string;
+  projectId: string;
+  expectedRevision: number | null;
+  decidedAt: string;
+  status: 'rejected';
+  observedRevision: number | null;
+  reasonCode: StudioDirectorCommandRejectionCodeV2;
+};
+
+export type StudioDirectorExpiredReceiptV2 = {
+  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  commandId: string;
+  projectId: string;
+  expectedRevision: number;
+  decidedAt: string;
+  status: 'expired';
+  observedRevision: number | null;
+  reasonCode: StudioDirectorCommandExpiryCode;
+};
+
+export type StudioDirectorIndeterminateReceiptV2 = {
+  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  commandId: string;
+  projectId: string;
+  expectedRevision: number;
+  decidedAt: string;
+  status: 'indeterminate';
+  observedRevision: number | null;
+  reasonCode: StudioDirectorCommandIndeterminateCode;
+};
+
+export type StudioDirectorCommandReceiptV2 =
+  | StudioDirectorAppliedReceiptV2
+  | StudioDirectorRejectedReceiptV2
+  | StudioDirectorExpiredReceiptV2
+  | StudioDirectorIndeterminateReceiptV2;
 
 export type StudioNormalisedRect = {
   x: number;
@@ -761,6 +861,74 @@ export type StudioProposalAcceptance = {
   proposal: StudioProposal;
   project: StudioRendererProject;
 };
+
+/** A reviewed schema-2 proposal delegates its ordered free edits to the shared mutation reducer. */
+export type StudioMutationBatchProposalPayloadV2 = {
+  kind: 'mutation_batch';
+  operations: StudioMutationOperationV2[];
+};
+
+export type StudioPinRuleProposalPayloadV2 = StudioPinRuleProposalPayload;
+
+export type StudioProposalPayloadV2 = StudioMutationBatchProposalPayloadV2 | StudioPinRuleProposalPayloadV2;
+
+/** Exact immutable record written under proposals/pending. Decisions remain separate append-only records. */
+export type StudioProposalRecordV2 = {
+  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  id: string;
+  projectId: string;
+  status: 'pending';
+  baseRevision: number;
+  payload: StudioProposalPayloadV2;
+  createdAt: string;
+  decidedAt: null;
+};
+
+/** Renderer-safe effective proposal after overlaying an optional immutable decision. */
+export type StudioProposalV2 =
+  | StudioProposalRecordV2
+  | (Omit<StudioProposalRecordV2, 'status' | 'decidedAt'> & {
+      status: Exclude<StudioProposalStatus, 'pending'>;
+      decidedAt: string;
+    });
+
+export type StudioProposalDecisionV2 = {
+  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  proposalId: string;
+  status: Exclude<StudioProposalStatus, 'pending'>;
+  decidedAt: string;
+};
+
+export type StudioProposalSlotV2 = {
+  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  proposalId: string;
+  reservedAt: string;
+};
+
+export type StudioRecordProposalInputV2 = {
+  projectId: string;
+  proposalId: string;
+  baseRevision: number;
+  payload: StudioProposalPayloadV2;
+};
+
+/** A durable schema-2 request for reviewed reference generation across ordered active clips. */
+export type StudioReferenceRequestV2 = {
+  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  id: string;
+  projectId: string;
+  clipIds: string[];
+  status: 'pending';
+  createdAt: string;
+};
+
+export type StudioReferenceRequestSlotV2 = {
+  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  requestId: string;
+  reservedAt: string;
+};
+
+export type StudioReferenceRequestAuthorityV2 = Pick<StudioReferenceRequestV2, 'id' | 'clipIds'>;
 
 /** A durable request for one scene reference image; generation begins only after renderer approval. */
 export type StudioReferenceRequest = {

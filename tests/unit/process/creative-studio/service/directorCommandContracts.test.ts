@@ -12,15 +12,40 @@ import {
   STUDIO_DIRECTOR_COMMAND_MAX_OPERATIONS,
   STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
   STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION,
+  STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+  STUDIO_MAX_MUTATION_OPERATIONS,
+  STUDIO_MAX_REFERENCE_REQUEST_CLIPS,
+  STUDIO_PROJECT_SCHEMA_VERSION,
+  isStudioSceneCountTransitionAllowed,
+  isValidProviderJobId,
   type StudioDirectorCommandReceiptV1,
+  type StudioDirectorCommandReceiptV2,
   type StudioDirectorCommandRecordV1,
+  type StudioDirectorCommandRecordV2,
   type StudioDirectorCommandSlotV1,
+  type StudioDirectorCommandSlotLeaseV2,
+  type StudioDirectorCommandSlotV2,
+  type StudioMutationOperationV2,
+  type StudioProposalDecisionV2,
+  type StudioProposalRecordV2,
+  type StudioProposalSlotV2,
+  type StudioReferenceRequestSlotV2,
+  type StudioReferenceRequestV2,
 } from '@/common/types/project/creativeStudioTypes';
 import * as directorCommandContracts from '@process/services/creative-studio/service/directorCommandContracts';
 import {
   parseStudioDirectorCommandReceipt,
+  parseStudioDirectorCommandReceiptV2,
   parseStudioDirectorCommandSlot,
+  parseStudioDirectorCommandSlotLeaseV2,
+  parseStudioDirectorCommandSlotV2,
   parseStudioDirectorPendingRecord,
+  parseStudioDirectorPendingRecordV2,
+  parseStudioProposalDecisionV2,
+  parseStudioProposalRecordV2,
+  parseStudioProposalSlotV2,
+  parseStudioReferenceRequestSlotV2,
+  parseStudioReferenceRequestV2,
 } from '@process/services/creative-studio/service/directorCommandContracts';
 
 const NOW = '2026-08-16T12:00:00.000Z';
@@ -78,6 +103,57 @@ const validSlot = (overrides: Partial<StudioDirectorCommandSlotV1> = {}): Studio
 
 const parsePending = (value: unknown, slot: unknown = validSlot()) =>
   parseStudioDirectorPendingRecord({
+    projectId: 'project_1',
+    commandId: 'command_1',
+    value,
+    slot,
+    now: NOW,
+    waitMs: WAIT_MS,
+  });
+
+const emptyClipV2 = () => ({
+  shotPrompt: '',
+  narration: '',
+  onScreenText: '',
+  mediaKind: 'image' as const,
+  durationSeconds: 5,
+  referenceAssetId: null,
+});
+
+const validCommandV2 = (overrides: Partial<StudioDirectorCommandRecordV2> = {}): StudioDirectorCommandRecordV2 => ({
+  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  commandId: 'command_1',
+  projectId: 'project_1',
+  expectedRevision: 4,
+  createdAt: NOW,
+  deadlineAt: '2026-08-16T12:00:15.000Z',
+  policy: 'auto_apply',
+  operations: [{ kind: 'set_brief', brief: 'A quieter launch story.' }],
+  ...overrides,
+});
+
+const validSlotV2 = (overrides: Partial<StudioDirectorCommandSlotV2> = {}): StudioDirectorCommandSlotV2 => ({
+  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  commandId: 'command_1',
+  reservedAt: NOW,
+  deadlineAt: '2026-08-16T12:00:15.000Z',
+  ...overrides,
+});
+
+const validLeaseV2 = (overrides: Partial<StudioDirectorCommandSlotLeaseV2> = {}): StudioDirectorCommandSlotLeaseV2 => ({
+  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  leaseId: 'lease_1',
+  owner: 'writer',
+  commandId: 'command_1',
+  reservedAt: NOW,
+  deadlineAt: '2026-08-16T12:00:15.000Z',
+  acquiredAt: NOW,
+  expiresAt: new Date(Date.parse(NOW) + STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS).toISOString(),
+  ...overrides,
+});
+
+const parsePendingV2 = (value: unknown, slot: unknown = validSlotV2()) =>
+  parseStudioDirectorPendingRecordV2({
     projectId: 'project_1',
     commandId: 'command_1',
     value,
@@ -470,5 +546,592 @@ describe('Studio Director V1 receipt contracts', () => {
         value: { ...receipts[1], reasonCode: { toString } },
       })
     ).toBeNull();
+  });
+});
+
+describe('Studio Director V2 command contracts', () => {
+  const operations: StudioMutationOperationV2[] = [
+    { kind: 'set_brief', brief: '' },
+    {
+      kind: 'add_section',
+      sectionId: 'section_new',
+      section: { title: 'Opening', storyLine: 'Establish the place', visualPrompt: 'Morning light' },
+      firstClipId: 'clip_new',
+      firstClip: emptyClipV2(),
+      beforeSectionId: null,
+    },
+    { kind: 'edit_section', sectionId: 'section_1', changes: { storyLine: 'A quieter opening.' } },
+    { kind: 'reorder_sections', sectionOrder: ['section_2', 'section_1'] },
+    { kind: 'park_section', sectionId: 'section_1' },
+    { kind: 'restore_section', sectionId: 'section_1', beforeSectionId: null },
+    {
+      kind: 'add_clip',
+      sectionId: 'section_1',
+      clipId: 'clip_new',
+      clip: emptyClipV2(),
+      beforeClipId: null,
+    },
+    { kind: 'edit_clip', clipId: 'clip_1', changes: { narration: 'Hello.' } },
+    { kind: 'delete_clip', clipId: 'clip_1' },
+    { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_2', 'clip_1'] },
+    { kind: 'park_take', clipId: 'clip_1', assetId: 'asset_1' },
+    { kind: 'select_shelved_take', clipId: 'clip_1', assetId: 'asset_1' },
+    { kind: 'remove_shelf_alias', assetId: 'asset_1' },
+    {
+      kind: 'reorder_shelf',
+      shelf: [
+        { kind: 'asset', assetId: 'asset_1' },
+        { kind: 'section', sectionId: 'section_1' },
+      ],
+    },
+    { kind: 'select_take', clipId: 'clip_1', assetId: 'asset_1' },
+  ];
+
+  it('accepts the exact schema-2 envelope and every shared mutation operation', () => {
+    expect(operations.map((operation) => parsePendingV2(validCommandV2({ operations: [operation] })).status)).toEqual(
+      Array.from({ length: operations.length }, () => 'valid')
+    );
+    expect(STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2).toBe(STUDIO_PROJECT_SCHEMA_VERSION);
+    expect(STUDIO_MAX_MUTATION_OPERATIONS).toBe(32);
+  });
+
+  it('keeps executable shared-type guards covered by the tracked Gate-1 manifest', () => {
+    expect(isValidProviderJobId('provider_job-1.~')).toBe(true);
+    expect(isValidProviderJobId('')).toBe(false);
+    expect(isValidProviderJobId(`j${'x'.repeat(512)}`)).toBe(false);
+    expect(isValidProviderJobId('https://provider.example/job')).toBe(false);
+    expect(isStudioSceneCountTransitionAllowed(24, 24)).toBe(true);
+    expect(isStudioSceneCountTransitionAllowed(24, 25)).toBe(false);
+    expect(isStudioSceneCountTransitionAllowed(25, 25)).toBe(true);
+    expect(isStudioSceneCountTransitionAllowed(25, 26)).toBe(false);
+  });
+
+  it.each([
+    ['command envelope', { ...validCommandV2(), unexpected: true }],
+    [
+      'new section',
+      validCommandV2({
+        operations: [
+          {
+            ...operations[1],
+            section: { title: '', storyLine: '', visualPrompt: '', rawPath: '/private/tmp/secret' },
+          } as never,
+        ],
+      }),
+    ],
+    [
+      'new clip',
+      validCommandV2({
+        operations: [
+          {
+            ...operations[6],
+            clip: { ...emptyClipV2(), providerJobId: 'credential' },
+          } as never,
+        ],
+      }),
+    ],
+    [
+      'section edit',
+      validCommandV2({
+        operations: [{ kind: 'edit_section', sectionId: 'section_1', changes: { title: 'x', extra: true } } as never],
+      }),
+    ],
+    [
+      'clip edit',
+      validCommandV2({
+        operations: [{ kind: 'edit_clip', clipId: 'clip_1', changes: { narration: 'x', jobIds: [] } } as never],
+      }),
+    ],
+    [
+      'shelf item',
+      validCommandV2({
+        operations: [
+          { kind: 'reorder_shelf', shelf: [{ kind: 'asset', assetId: 'asset_1', url: 'file:///tmp/x' }] } as never,
+        ],
+      }),
+    ],
+  ])('rejects unknown keys in the %s without reflecting their values', (_label, command) => {
+    const result = parsePendingV2(command);
+
+    expect(result).toEqual({
+      status: 'invalid',
+      commandId: 'command_1',
+      expectedRevision: 4,
+      reasonCode: 'malformed_record',
+    });
+    expect(JSON.stringify(result)).not.toContain('/private/tmp');
+    expect(JSON.stringify(result)).not.toContain('credential');
+  });
+
+  it('requires a dense one-through-32 operation list and nonempty exact edit patches', () => {
+    const tooMany = Array.from({ length: STUDIO_MAX_MUTATION_OPERATIONS + 1 }, () => ({
+      kind: 'set_brief' as const,
+      brief: 'x',
+    }));
+    const sparse = Array(1) as StudioMutationOperationV2[];
+
+    expect(parsePendingV2(validCommandV2({ operations: [] })).status).toBe('invalid');
+    expect(parsePendingV2(validCommandV2({ operations: tooMany })).status).toBe('invalid');
+    expect(parsePendingV2(validCommandV2({ operations: sparse })).status).toBe('invalid');
+    expect(
+      parsePendingV2(validCommandV2({ operations: [{ kind: 'edit_section', sectionId: 'section_1', changes: {} }] }))
+        .status
+    ).toBe('invalid');
+    expect(
+      parsePendingV2(validCommandV2({ operations: [{ kind: 'edit_clip', clipId: 'clip_1', changes: {} }] })).status
+    ).toBe('invalid');
+  });
+
+  it('uses own exact keys, rejects array baggage, and accepts safe magic identities', () => {
+    const magicIds = ['constructor', 'toString', '__proto__'];
+    const command = validCommandV2({
+      operations: [{ kind: 'reorder_sections', sectionOrder: magicIds }],
+    });
+    const withSymbol = validCommandV2();
+    Object.defineProperty(withSymbol, Symbol('extra'), { value: true, enumerable: true });
+    const withHiddenKey = validCommandV2();
+    Object.defineProperty(withHiddenKey, 'hidden', { value: true, enumerable: false });
+    const operationsWithBaggage = [{ kind: 'set_brief' as const, brief: 'x' }];
+    Object.defineProperty(operationsWithBaggage, 'extra', { value: true, enumerable: true });
+
+    expect(parsePendingV2(command).status).toBe('valid');
+    expect(parsePendingV2(withSymbol).status).toBe('invalid');
+    expect(parsePendingV2(withHiddenKey).status).toBe('invalid');
+    expect(parsePendingV2(validCommandV2({ operations: operationsWithBaggage })).status).toBe('invalid');
+  });
+
+  it('enforces V2 authored bounds, safe identities, and media-specific durations', () => {
+    const video = { ...emptyClipV2(), mediaKind: 'video' as const, durationSeconds: 4 };
+    const validVideo = {
+      kind: 'add_clip' as const,
+      sectionId: 'section_1',
+      clipId: 'clip_video',
+      clip: video,
+      beforeClipId: null,
+    };
+
+    expect(parsePendingV2(validCommandV2({ operations: [validVideo] })).status).toBe('valid');
+    expect(
+      parsePendingV2(validCommandV2({ operations: [{ ...validVideo, clip: { ...video, durationSeconds: 3 } }] })).status
+    ).toBe('invalid');
+    expect(parsePendingV2(validCommandV2({ operations: [{ ...validVideo, clipId: '../unsafe' }] })).status).toBe(
+      'invalid'
+    );
+    expect(
+      parsePendingV2(validCommandV2({ operations: [{ kind: 'set_brief', brief: 'x'.repeat(16 * 1024 + 1) }] })).status
+    ).toBe('invalid');
+  });
+
+  it('reports schema-1 pending bytes as unsupported before slot validation and never as a terminal rejection', () => {
+    expect(parsePendingV2(validCommand(), { malformed: true })).toEqual({
+      status: 'unsupported_prototype_schema',
+      commandId: 'command_1',
+      expectedRevision: 4,
+    });
+    expect(parsePendingV2({ schemaVersion: 1 }, { malformed: true })).toEqual({
+      status: 'unsupported_prototype_schema',
+      commandId: 'command_1',
+      expectedRevision: null,
+    });
+  });
+
+  it('distinguishes unknown versions from malformed schema-2 records', () => {
+    expect(parsePendingV2({ ...validCommandV2(), schemaVersion: 3 })).toEqual({
+      status: 'invalid',
+      commandId: 'command_1',
+      expectedRevision: 4,
+      reasonCode: 'unsupported_version',
+    });
+    expect(parsePendingV2({ ...validCommandV2(), policy: 'review' })).toEqual({
+      status: 'invalid',
+      commandId: 'command_1',
+      expectedRevision: 4,
+      reasonCode: 'malformed_record',
+    });
+  });
+
+  it('keeps authority and timing checks ahead of accepting an otherwise exact record', () => {
+    expect(parsePendingV2({ ...validCommandV2(), projectId: 'other' })).toMatchObject({
+      status: 'invalid',
+      expectedRevision: null,
+    });
+    expect(parsePendingV2(validCommandV2(), validSlotV2({ commandId: 'other' }))).toMatchObject({
+      status: 'invalid',
+      reasonCode: 'malformed_record',
+    });
+    expect(
+      parsePendingV2(
+        validCommandV2({
+          createdAt: new Date(Date.parse(NOW) + STUDIO_DIRECTOR_COMMAND_CLOCK_SKEW_MS + 1).toISOString(),
+          deadlineAt: new Date(Date.parse(NOW) + STUDIO_DIRECTOR_COMMAND_CLOCK_SKEW_MS + 2).toISOString(),
+        })
+      )
+    ).toMatchObject({ status: 'invalid', reasonCode: 'malformed_record' });
+  });
+
+  it('is total on accessor and revoked-Proxy input without executing attacker-controlled getters', () => {
+    let getterCalls = 0;
+    const accessorRecord: Record<string, unknown> = {
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      commandId: 'command_1',
+      expectedRevision: 4,
+    };
+    Object.defineProperty(accessorRecord, 'projectId', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        throw new Error('must not execute');
+      },
+    });
+    const revocable = Proxy.revocable({}, {});
+    revocable.revoke();
+
+    expect(() => parsePendingV2(accessorRecord)).not.toThrow();
+    expect(parsePendingV2(accessorRecord)).toEqual({
+      status: 'invalid',
+      commandId: 'command_1',
+      expectedRevision: null,
+      reasonCode: 'malformed_record',
+    });
+    expect(getterCalls).toBe(0);
+    expect(() => parsePendingV2(revocable.proxy)).not.toThrow();
+    expect(parsePendingV2(revocable.proxy)).toMatchObject({ status: 'invalid', expectedRevision: null });
+  });
+
+  it('rejects executable JSON hooks before measuring record bytes', () => {
+    let toJsonCalls = 0;
+    const command = validCommandV2({
+      operations: [
+        {
+          kind: 'set_brief',
+          brief: 'Safe text',
+          toJSON: () => {
+            toJsonCalls += 1;
+            return { kind: 'set_brief', brief: 'rewritten' };
+          },
+        } as never,
+      ],
+    });
+
+    expect(parsePendingV2(command)).toMatchObject({ status: 'invalid', reasonCode: 'malformed_record' });
+    expect(toJsonCalls).toBe(0);
+  });
+});
+
+describe('Studio Director V2 slot and lease contracts', () => {
+  it('accepts exact V2 sidecars and reports V1 sidecars as unsupported', () => {
+    expect(parseStudioDirectorCommandSlotV2(validSlotV2(), NOW, WAIT_MS)).toEqual({
+      status: 'valid',
+      record: validSlotV2(),
+    });
+    expect(parseStudioDirectorCommandSlotV2(validSlot(), NOW, WAIT_MS)).toEqual({
+      status: 'unsupported_prototype_schema',
+    });
+    expect(parseStudioDirectorCommandSlotLeaseV2(validLeaseV2(), NOW, WAIT_MS)).toEqual({
+      status: 'valid',
+      record: validLeaseV2(),
+    });
+    expect(parseStudioDirectorCommandSlotLeaseV2(validLease(), NOW, WAIT_MS)).toEqual({
+      status: 'unsupported_prototype_schema',
+    });
+  });
+
+  it.each([
+    ['slot unknown key', () => parseStudioDirectorCommandSlotV2({ ...validSlotV2(), extra: true }, NOW, WAIT_MS)],
+    [
+      'slot unknown version',
+      () => parseStudioDirectorCommandSlotV2({ ...validSlotV2(), schemaVersion: 3 }, NOW, WAIT_MS),
+    ],
+    [
+      'lease partial identity',
+      () => parseStudioDirectorCommandSlotLeaseV2(validLeaseV2({ reservedAt: null }), NOW, WAIT_MS),
+    ],
+    [
+      'lease wrong duration',
+      () =>
+        parseStudioDirectorCommandSlotLeaseV2(
+          validLeaseV2({
+            expiresAt: new Date(Date.parse(NOW) + STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS + 1).toISOString(),
+          }),
+          NOW,
+          WAIT_MS
+        ),
+    ],
+  ])('rejects an invalid V2 sidecar: %s', (_label, parse) => {
+    expect(parse()).toEqual({ status: 'invalid' });
+  });
+});
+
+describe('Studio Director V2 receipt contracts', () => {
+  const receipts: StudioDirectorCommandReceiptV2[] = [
+    {
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      commandId: 'command_1',
+      projectId: 'project_1',
+      expectedRevision: 4,
+      decidedAt: NOW,
+      status: 'applied',
+      appliedRevision: 5,
+      createdSectionIds: ['section_new'],
+      createdClipIds: ['clip_new', 'clip_extra'],
+    },
+    {
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      commandId: 'command_1',
+      projectId: 'project_1',
+      expectedRevision: null,
+      decidedAt: NOW,
+      status: 'rejected',
+      observedRevision: null,
+      reasonCode: 'malformed_record',
+    },
+    {
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      commandId: 'command_1',
+      projectId: 'project_1',
+      expectedRevision: 4,
+      decidedAt: NOW,
+      status: 'expired',
+      observedRevision: 4,
+      reasonCode: 'deadline_elapsed',
+    },
+    {
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      commandId: 'command_1',
+      projectId: 'project_1',
+      expectedRevision: 4,
+      decidedAt: NOW,
+      status: 'indeterminate',
+      observedRevision: 5,
+      reasonCode: 'commit_attribution_unknown',
+    },
+  ];
+
+  it('accepts each exact V2 receipt and both ordered created-ID arrays', () => {
+    expect(
+      receipts.map((receipt) =>
+        parseStudioDirectorCommandReceiptV2({ projectId: 'project_1', commandId: 'command_1', value: receipt })
+      )
+    ).toEqual(receipts.map((receipt) => ({ status: 'valid', record: receipt })));
+  });
+
+  it.each([
+    { ...receipts[0], appliedRevision: 9 },
+    { ...receipts[0], createdSectionIds: ['section_new', 'section_new'] },
+    { ...receipts[0], createdClipIds: ['../unsafe'] },
+    { ...receipts[1], reasonCode: 'unsupported_prototype_schema' },
+    { ...receipts[1], expectedRevision: null, reasonCode: 'stale_revision' },
+    { ...receipts[2], rawError: '/private/tmp/project.json' },
+  ])('rejects an inconsistent, unbounded, or authority-bearing receipt', (receipt) => {
+    expect(
+      parseStudioDirectorCommandReceiptV2({ projectId: 'project_1', commandId: 'command_1', value: receipt })
+    ).toEqual({ status: 'invalid' });
+  });
+
+  it('accepts every frozen mutation reason as a bounded rejection code', () => {
+    const reasons = [
+      'section_capacity_reached',
+      'section_clip_capacity_reached',
+      'project_clip_capacity_reached',
+      'invalid_clip_duration',
+      'dependency_blocked',
+      'identity_collision',
+      'invalid_operation',
+      'validation_failed',
+    ] as const;
+
+    for (const reasonCode of reasons) {
+      const receipt = { ...receipts[1], expectedRevision: 4, reasonCode };
+      expect(
+        parseStudioDirectorCommandReceiptV2({ projectId: 'project_1', commandId: 'command_1', value: receipt })
+      ).toEqual({ status: 'valid', record: receipt });
+    }
+  });
+
+  it('reports a V1 receipt as unsupported without accepting it as V2', () => {
+    const legacy: StudioDirectorCommandReceiptV1 = {
+      schemaVersion: 1,
+      commandId: 'command_1',
+      projectId: 'project_1',
+      expectedRevision: 4,
+      decidedAt: NOW,
+      status: 'applied',
+      appliedRevision: 5,
+      createdSceneIds: ['scene_1'],
+    };
+
+    expect(
+      parseStudioDirectorCommandReceiptV2({ projectId: 'project_1', commandId: 'command_1', value: legacy })
+    ).toEqual({ status: 'unsupported_prototype_schema' });
+  });
+});
+
+describe('Studio proposal and reference sidecar V2 contracts', () => {
+  const mutationProposal: StudioProposalRecordV2 = {
+    schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+    id: 'proposal_1',
+    projectId: 'project_1',
+    status: 'pending',
+    baseRevision: 4,
+    payload: { kind: 'mutation_batch', operations: [{ kind: 'set_brief', brief: 'A focused launch.' }] },
+    createdAt: NOW,
+    decidedAt: null,
+  };
+  const decision: StudioProposalDecisionV2 = {
+    schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+    proposalId: 'proposal_1',
+    status: 'accepted',
+    decidedAt: NOW,
+  };
+  const proposalSlot: StudioProposalSlotV2 = {
+    schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+    proposalId: 'proposal_1',
+    reservedAt: NOW,
+  };
+
+  it('accepts exact mutation-batch and pin-rule proposals plus their decision and slot', () => {
+    const pinRule: StudioProposalRecordV2 = {
+      ...mutationProposal,
+      id: 'proposal_rule',
+      payload: {
+        kind: 'pin_rule',
+        rule: { text: 'Avoid brand names.', predicate: { kind: 'forbidden_terms', terms: ['Acme'] } },
+      },
+    };
+
+    expect(
+      parseStudioProposalRecordV2({ projectId: 'project_1', proposalId: 'proposal_1', value: mutationProposal })
+    ).toEqual({ status: 'valid', record: mutationProposal });
+    expect(
+      parseStudioProposalRecordV2({ projectId: 'project_1', proposalId: 'proposal_rule', value: pinRule })
+    ).toEqual({ status: 'valid', record: pinRule });
+    expect(parseStudioProposalDecisionV2({ proposalId: 'proposal_1', value: decision })).toEqual({
+      status: 'valid',
+      record: decision,
+    });
+    expect(parseStudioProposalSlotV2(proposalSlot)).toEqual({ status: 'valid', record: proposalSlot });
+  });
+
+  it('rejects unknown proposal keys, empty mutation batches, and malformed decisions', () => {
+    expect(
+      parseStudioProposalRecordV2({
+        projectId: 'project_1',
+        proposalId: 'proposal_1',
+        value: { ...mutationProposal, rawPrompt: 'secret' },
+      })
+    ).toEqual({ status: 'invalid' });
+    expect(
+      parseStudioProposalRecordV2({
+        projectId: 'project_1',
+        proposalId: 'proposal_1',
+        value: { ...mutationProposal, payload: { kind: 'mutation_batch', operations: [] } },
+      })
+    ).toEqual({ status: 'invalid' });
+    expect(
+      parseStudioProposalDecisionV2({ proposalId: 'proposal_1', value: { ...decision, status: 'pending' } })
+    ).toEqual({ status: 'invalid' });
+  });
+
+  it('reports every V1 proposal-family sidecar as unsupported and leaves its bytes uninterpreted', () => {
+    expect(
+      parseStudioProposalRecordV2({
+        projectId: 'project_1',
+        proposalId: 'proposal_1',
+        value: { ...mutationProposal, schemaVersion: 1 },
+      })
+    ).toEqual({ status: 'unsupported_prototype_schema' });
+    expect(
+      parseStudioProposalDecisionV2({ proposalId: 'proposal_1', value: { ...decision, schemaVersion: 1 } })
+    ).toEqual({ status: 'unsupported_prototype_schema' });
+    expect(parseStudioProposalSlotV2({ ...proposalSlot, schemaVersion: 1 })).toEqual({
+      status: 'unsupported_prototype_schema',
+    });
+  });
+
+  it('accepts 1 and 24 ordered unique clip IDs and rejects 0, 25, or duplicates', () => {
+    const clips24 = Array.from({ length: STUDIO_MAX_REFERENCE_REQUEST_CLIPS }, (_, index) => `clip_${index}`);
+    const reference = (clipIds: string[]): StudioReferenceRequestV2 => ({
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      id: 'request_1',
+      projectId: 'project_1',
+      clipIds,
+      status: 'pending',
+      createdAt: NOW,
+    });
+    const parse = (clipIds: string[]) =>
+      parseStudioReferenceRequestV2({ projectId: 'project_1', requestId: 'request_1', value: reference(clipIds) });
+
+    expect(parse(['clip_1'])).toMatchObject({ status: 'valid' });
+    expect(parse(['constructor', 'toString', '__proto__'])).toMatchObject({ status: 'valid' });
+    expect(parse(clips24)).toEqual({ status: 'valid', record: reference(clips24) });
+    expect(parse([])).toEqual({ status: 'invalid' });
+    expect(parse([...clips24, 'clip_25'])).toEqual({ status: 'invalid' });
+    expect(parse(['clip_1', 'clip_1'])).toEqual({ status: 'invalid' });
+  });
+
+  it('accepts an exact V2 reference slot and reports V1 reference sidecars as unsupported', () => {
+    const slot: StudioReferenceRequestSlotV2 = {
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      requestId: 'request_1',
+      reservedAt: NOW,
+    };
+    const reference: StudioReferenceRequestV2 = {
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      id: 'request_1',
+      projectId: 'project_1',
+      clipIds: ['clip_1'],
+      status: 'pending',
+      createdAt: NOW,
+    };
+
+    expect(parseStudioReferenceRequestSlotV2(slot)).toEqual({ status: 'valid', record: slot });
+    expect(parseStudioReferenceRequestSlotV2({ ...slot, schemaVersion: 1 })).toEqual({
+      status: 'unsupported_prototype_schema',
+    });
+    expect(
+      parseStudioReferenceRequestV2({
+        projectId: 'project_1',
+        requestId: 'request_1',
+        value: { ...reference, schemaVersion: 1 },
+      })
+    ).toEqual({ status: 'unsupported_prototype_schema' });
+  });
+
+  it('returns bounded invalid results for revoked proxies across every V2 sidecar parser', () => {
+    const makeRevokedProxy = (): unknown => {
+      const revocable = Proxy.revocable({}, {});
+      revocable.revoke();
+      return revocable.proxy;
+    };
+    const parsers = [
+      () => parseStudioDirectorCommandSlotV2(makeRevokedProxy(), NOW, WAIT_MS),
+      () => parseStudioDirectorCommandSlotLeaseV2(makeRevokedProxy(), NOW, WAIT_MS),
+      () =>
+        parseStudioDirectorCommandReceiptV2({
+          projectId: 'project_1',
+          commandId: 'command_1',
+          value: makeRevokedProxy(),
+        }),
+      () =>
+        parseStudioProposalRecordV2({
+          projectId: 'project_1',
+          proposalId: 'proposal_1',
+          value: makeRevokedProxy(),
+        }),
+      () => parseStudioProposalDecisionV2({ proposalId: 'proposal_1', value: makeRevokedProxy() }),
+      () => parseStudioProposalSlotV2(makeRevokedProxy()),
+      () =>
+        parseStudioReferenceRequestV2({
+          projectId: 'project_1',
+          requestId: 'request_1',
+          value: makeRevokedProxy(),
+        }),
+      () => parseStudioReferenceRequestSlotV2(makeRevokedProxy()),
+    ];
+
+    for (const parse of parsers) {
+      expect(parse).not.toThrow();
+      expect(parse()).toEqual({ status: 'invalid' });
+    }
   });
 });
