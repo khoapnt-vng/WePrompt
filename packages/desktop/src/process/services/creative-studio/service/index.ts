@@ -115,9 +115,9 @@ import {
   applyStudioTakeSelection,
   assertStudioEditableScene,
   CreativeStudioServiceError,
-} from './mutationHelpers';
+} from './projectMutations';
 
-export { CreativeStudioServiceError } from './mutationHelpers';
+export { CreativeStudioServiceError } from './projectMutations';
 export {
   createStudioDirectorCommandService,
   StudioDirectorCommandApplyError,

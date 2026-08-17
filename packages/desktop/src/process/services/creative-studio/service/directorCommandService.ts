@@ -18,7 +18,7 @@ import {
   applyStudioSceneMutation,
   applyStudioSceneOrder,
   applyStudioTakeSelection,
-} from './mutationHelpers';
+} from './projectMutations';
 
 export type StudioDirectorCommandApplyResult = {
   project: StudioProject;

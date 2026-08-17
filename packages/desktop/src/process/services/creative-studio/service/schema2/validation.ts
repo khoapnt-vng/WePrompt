@@ -27,7 +27,6 @@ import {
   type StudioSection,
   type StudioShelfItem,
 } from '@/common/types/project/creativeStudioTypes';
-import { isCanonicalStudioGeneratedTakeV2 } from '@/common/types/project/creativeStudioCanonicalTake';
 import {
   STUDIO_MANAGED_ASSET_COLLECTIONS,
   STUDIO_MAX_ACTIVE_BRIEF_REFERENCES,
@@ -218,26 +217,62 @@ const isSafeModel = (value: unknown): value is string => {
     return code <= 0x1f || (code >= 0x7f && code <= 0x9f);
   });
 };
-const isUniqueSafeIdArray = (value: unknown): value is string[] =>
-  Array.isArray(value) && value.every(isSafeId) && new Set(value).size === value.length;
+
+const isDenseArray = (value: unknown, maximumLength = Number.MAX_SAFE_INTEGER): value is unknown[] => {
+  try {
+    if (!Array.isArray(value) || value.length > maximumLength || Reflect.ownKeys(value).length !== value.length + 1) {
+      return false;
+    }
+    for (let index = 0; index < value.length; index += 1) {
+      if (!Object.hasOwn(value, index)) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const arrayEvery = <T>(value: readonly T[], predicate: (item: T, index: number) => boolean): boolean => {
+  for (let index = 0; index < value.length; index += 1) {
+    if (!predicate(value[index]!, index)) return false;
+  }
+  return true;
+};
+
+const arrayMap = <T, U>(value: readonly T[], mapper: (item: T, index: number) => U): U[] => {
+  const result: U[] = [];
+  for (let index = 0; index < value.length; index += 1) result.push(mapper(value[index]!, index));
+  return result;
+};
+
+const isUniqueSafeIdArray = (value: unknown, maximumLength = Number.MAX_SAFE_INTEGER): value is string[] => {
+  if (!isDenseArray(value, maximumLength)) return false;
+  const ids = new Set<string>();
+  for (let index = 0; index < value.length; index += 1) {
+    const id = value[index];
+    if (!isSafeId(id) || ids.has(id)) return false;
+    ids.add(id);
+  }
+  return true;
+};
 
 const validateRulePredicate = (value: unknown): boolean =>
   value === null ||
   (isRecord(value) &&
     hasExactKeys(value, RULE_PREDICATE_KEYS) &&
     value.kind === 'forbidden_terms' &&
-    Array.isArray(value.terms) &&
+    isDenseArray(value.terms, STUDIO_RULE_LIMITS.maxTerms) &&
     value.terms.length > 0 &&
-    value.terms.length <= STUDIO_RULE_LIMITS.maxTerms &&
-    value.terms.every(
+    arrayEvery(
+      value.terms,
       (term) => isNonEmptyStringWithin(term, STUDIO_RULE_LIMITS.term) && hasRuleToken(term as string)
     ) &&
-    new Set(value.terms).size === value.terms.length);
+    new Set(arrayMap(value.terms, (term) => term)).size === value.terms.length);
 
 const validateRules = (value: unknown): boolean =>
-  Array.isArray(value) &&
-  value.length <= STUDIO_RULE_LIMITS.maxRules &&
-  value.every(
+  isDenseArray(value, STUDIO_RULE_LIMITS.maxRules) &&
+  arrayEvery(
+    value,
     (rule) =>
       isRecord(rule) &&
       hasExactKeys(rule, RULE_KEYS) &&
@@ -247,7 +282,7 @@ const validateRules = (value: unknown): boolean =>
       validateRulePredicate(rule.predicate) &&
       isCanonicalTimestamp(rule.createdAt)
   ) &&
-  new Set(value.map((rule) => (rule as Record<string, unknown>).id)).size === value.length;
+  new Set(arrayMap(value, (rule) => (rule as Record<string, unknown>).id)).size === value.length;
 
 const validateRuleUndo = (value: unknown): boolean =>
   value === null ||
@@ -264,8 +299,7 @@ const validateSection = (sectionId: string, value: unknown): value is StudioSect
   isStringWithin(value.title, 256) &&
   isStringWithin(value.storyLine, 4 * 1024) &&
   isStringWithin(value.visualPrompt, 8 * 1024) &&
-  isUniqueSafeIdArray(value.clipOrder) &&
-  value.clipOrder.length <= STUDIO_MAX_CLIPS_PER_SECTION;
+  isUniqueSafeIdArray(value.clipOrder, STUDIO_MAX_CLIPS_PER_SECTION);
 
 const validateClip = (clipId: string, value: unknown): value is StudioClip => {
   if (
@@ -343,8 +377,7 @@ const validateAsset = (assetId: string, projectId: string, value: unknown): valu
   if (hasReferenceIds !== hasAspectRatio || hasAspectRatio !== hasResolution) return false;
   return (
     !hasReferenceIds ||
-    (isUniqueSafeIdArray(value.sourceReferenceAssetIds) &&
-      value.sourceReferenceAssetIds.length <= STUDIO_MAX_ACTIVE_BRIEF_REFERENCES &&
+    (isUniqueSafeIdArray(value.sourceReferenceAssetIds, STUDIO_MAX_ACTIVE_BRIEF_REFERENCES) &&
       value.sourceVisualPrompt !== undefined &&
       value.mediaKind === 'image' &&
       isStudioReferenceImageMimeType(value.mimeType) &&
@@ -381,8 +414,10 @@ const validateJob = (jobId: string, projectId: string, value: unknown): value is
       hasExactKeys(value.referenceInputSnapshot, REFERENCE_INPUT_KEYS) &&
       isNonEmptyStringWithin(value.referenceInputSnapshot.sourceVisualPrompt, 4 * 1024) &&
       value.referenceInputSnapshot.sourceVisualPrompt === value.referenceInputSnapshot.sourceVisualPrompt.trim() &&
-      isUniqueSafeIdArray(value.referenceInputSnapshot.conditioningReferenceAssetIds) &&
-      value.referenceInputSnapshot.conditioningReferenceAssetIds.length <= STUDIO_MAX_ACTIVE_BRIEF_REFERENCES &&
+      isUniqueSafeIdArray(
+        value.referenceInputSnapshot.conditioningReferenceAssetIds,
+        STUDIO_MAX_ACTIVE_BRIEF_REFERENCES
+      ) &&
       typeof value.referenceInputSnapshot.aspectRatio === 'string' &&
       ASPECT_RATIOS.has(value.referenceInputSnapshot.aspectRatio) &&
       typeof value.referenceInputSnapshot.resolution === 'string' &&
@@ -443,7 +478,24 @@ const validateFilter = (value: unknown): value is StudioCutFilter =>
   CUT_FILTER_IDS.has(value.id) &&
   isFiniteInRange(value.amount, -1, 1);
 
-const validateCutClip = (cutClipId: string, project: StudioProjectV2, value: unknown): value is StudioCutClipV2 => {
+const isCanonicalGeneratedTake = (
+  asset: StudioAssetV2,
+  projectId: string,
+  clip: StudioClip,
+  clipAssetIdsByClipId: ReadonlyMap<string, ReadonlySet<string>>
+): boolean =>
+  asset.projectId === projectId &&
+  asset.clipId === clip.id &&
+  asset.mediaKind === clip.mediaKind &&
+  asset.managedAsset.collection === 'assets' &&
+  clipAssetIdsByClipId.get(clip.id)?.has(asset.id) === true;
+
+const validateCutClip = (
+  cutClipId: string,
+  project: StudioProjectV2,
+  clipAssetIdsByClipId: ReadonlyMap<string, ReadonlySet<string>>,
+  value: unknown
+): value is StudioCutClipV2 => {
   if (!isRecord(value) || !hasExactKeys(value, CUT_CLIP_KEYS)) return false;
   const clip = isSafeId(value.clipId) ? ownValue(project.clips, value.clipId) : undefined;
   const asset = isSafeId(value.assetId) ? ownValue(project.assets, value.assetId) : undefined;
@@ -452,19 +504,19 @@ const validateCutClip = (cutClipId: string, project: StudioProjectV2, value: unk
     !isSafeId(cutClipId) ||
     clip === undefined ||
     asset === undefined ||
-    !isCanonicalStudioGeneratedTakeV2(asset, project.id, clip) ||
+    !isCanonicalGeneratedTake(asset, project.id, clip, clipAssetIdsByClipId) ||
     (value.sourceInSeconds !== null && !isFiniteInRange(value.sourceInSeconds, 0, Number.MAX_VALUE)) ||
     (value.sourceOutSeconds !== null && !isFiniteInRange(value.sourceOutSeconds, 0, Number.MAX_VALUE)) ||
     (value.sourceInSeconds !== null &&
       value.sourceOutSeconds !== null &&
       (value.sourceInSeconds as number) >= (value.sourceOutSeconds as number)) ||
     (value.crop !== null && !validateRect(value.crop)) ||
-    !Array.isArray(value.filters) ||
-    !value.filters.every(validateFilter)
+    !isDenseArray(value.filters, CUT_FILTER_IDS.size) ||
+    !arrayEvery(value.filters, validateFilter)
   ) {
     return false;
   }
-  const filterIds = value.filters.map((filter) => (filter as StudioCutFilter).id);
+  const filterIds = arrayMap(value.filters, (filter) => (filter as StudioCutFilter).id);
   if (new Set(filterIds).size !== filterIds.length) return false;
   if (asset.durationSeconds === undefined) return true;
   const sourceInSeconds = value.sourceInSeconds as number | null;
@@ -475,7 +527,12 @@ const validateCutClip = (cutClipId: string, project: StudioProjectV2, value: unk
   );
 };
 
-const validateCut = (cutId: string, project: StudioProjectV2, value: unknown): value is StudioCutV2 => {
+const validateCut = (
+  cutId: string,
+  project: StudioProjectV2,
+  clipAssetIdsByClipId: ReadonlyMap<string, ReadonlySet<string>>,
+  value: unknown
+): value is StudioCutV2 => {
   if (!isRecord(value) || !hasExactKeys(value, CUT_KEYS) || !isRecord(value.clips)) return false;
   const cutClips = value.clips;
   const cutClipIds = Object.keys(cutClips);
@@ -484,11 +541,10 @@ const validateCut = (cutId: string, project: StudioProjectV2, value: unknown): v
     !isSafeId(cutId) ||
     !isNonEmptyStringWithin(value.name, 256) ||
     (value.orderMode !== 'storyboard' && value.orderMode !== 'manual') ||
-    !isUniqueSafeIdArray(value.clipOrder) ||
-    value.clipOrder.length > STUDIO_MAX_CUT_PLACEMENT_CLIPS ||
+    !isUniqueSafeIdArray(value.clipOrder, STUDIO_MAX_CUT_PLACEMENT_CLIPS) ||
     value.clipOrder.length !== cutClipIds.length ||
-    !value.clipOrder.every((cutClipId) => Object.hasOwn(cutClips, cutClipId)) ||
-    !cutClipIds.every((cutClipId) => validateCutClip(cutClipId, project, cutClips[cutClipId]))
+    !arrayEvery(value.clipOrder, (cutClipId) => Object.hasOwn(cutClips, cutClipId)) ||
+    !cutClipIds.every((cutClipId) => validateCutClip(cutClipId, project, clipAssetIdsByClipId, cutClips[cutClipId]))
   ) {
     return false;
   }
@@ -545,12 +601,11 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     !isIntegerInRange(value.targetDurationSeconds, 5, 60) ||
     typeof value.resolution !== 'string' ||
     !RESOLUTIONS.has(value.resolution) ||
-    !isUniqueSafeIdArray(value.sectionOrder) ||
+    !isUniqueSafeIdArray(value.sectionOrder, STUDIO_MAX_SECTIONS) ||
     !isRecord(value.sections) ||
     !isRecord(value.clips) ||
-    !Array.isArray(value.shelf) ||
-    value.shelf.length > STUDIO_MAX_SHELF_ITEMS ||
-    !value.shelf.every(shelfItemIsExact) ||
+    !isDenseArray(value.shelf, STUDIO_MAX_SHELF_ITEMS) ||
+    !arrayEvery(value.shelf, shelfItemIsExact) ||
     !isRecord(value.cuts) ||
     (value.activeCutId !== null && !isSafeId(value.activeCutId)) ||
     !isRecord(value.assets) ||
@@ -573,14 +628,16 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     clipIds.length > STUDIO_MAX_CLIPS_PER_PROJECT ||
     !sectionIds.every((sectionId) => validateSection(sectionId, project.sections[sectionId])) ||
     !clipIds.every((clipId) => validateClip(clipId, project.clips[clipId])) ||
-    !project.sectionOrder.every((sectionId) => Object.hasOwn(project.sections, sectionId))
+    !arrayEvery(project.sectionOrder, (sectionId) => Object.hasOwn(project.sections, sectionId))
   ) {
     return false;
   }
 
   const clipOwners = new Map<string, string>();
   for (const sectionId of sectionIds) {
-    for (const clipId of project.sections[sectionId]!.clipOrder) {
+    const clipOrder = project.sections[sectionId]!.clipOrder;
+    for (let clipIndex = 0; clipIndex < clipOrder.length; clipIndex += 1) {
+      const clipId = clipOrder[clipIndex]!;
       if (!Object.hasOwn(project.clips, clipId) || clipOwners.has(clipId)) return false;
       clipOwners.set(clipId, sectionId);
     }
@@ -599,8 +656,8 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
   const clipAssetIdsByClipId = new Map<string, ReadonlySet<string>>();
   const clipJobPositionsByClipId = new Map<string, ReadonlyMap<string, number>>();
   for (const clip of Object.values(project.clips)) {
-    clipAssetIdsByClipId.set(clip.id, new Set(clip.assetIds));
-    clipJobPositionsByClipId.set(clip.id, new Map(clip.jobIds.map((jobId, index) => [jobId, index])));
+    clipAssetIdsByClipId.set(clip.id, new Set(arrayMap(clip.assetIds, (assetId) => assetId)));
+    clipJobPositionsByClipId.set(clip.id, new Map(arrayMap(clip.jobIds, (jobId, index) => [jobId, index] as const)));
   }
 
   const projectReferenceCount = Object.values(project.assets).filter((asset) => asset.clipId === null).length;
@@ -612,7 +669,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     }
     if (
       asset.sourceReferenceAssetIds !== undefined &&
-      !asset.sourceReferenceAssetIds.every((sourceId) => {
+      !arrayEvery(asset.sourceReferenceAssetIds, (sourceId) => {
         const source = ownValue(project.assets, sourceId);
         return (
           source?.clipId === null &&
@@ -631,7 +688,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     const clip = ownValue(project.clips, job.clipId);
     if (clip === undefined || !clipJobPositionsByClipId.get(clip.id)?.has(job.id)) return false;
     if (
-      !job.outputAssetIds.every((assetId) => {
+      !arrayEvery(job.outputAssetIds, (assetId) => {
         const asset = ownValue(project.assets, assetId);
         return asset?.clipId === clip.id && clipAssetIdsByClipId.get(clip.id)?.has(assetId) === true;
       })
@@ -640,7 +697,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     }
     if (
       job.referenceInputSnapshot !== undefined &&
-      !job.referenceInputSnapshot.conditioningReferenceAssetIds.every((sourceId) => {
+      !arrayEvery(job.referenceInputSnapshot.conditioningReferenceAssetIds, (sourceId) => {
         const source = ownValue(project.assets, sourceId);
         return source?.clipId === null && source.managedAsset.collection === 'imports';
       })
@@ -650,11 +707,13 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
   }
 
   for (const clip of Object.values(project.clips)) {
-    if (!clip.assetIds.every((assetId) => ownValue(project.assets, assetId)?.clipId === clip.id)) return false;
-    if (!clip.jobIds.every((jobId) => ownValue(project.jobs, jobId)?.clipId === clip.id)) return false;
+    if (!arrayEvery(clip.assetIds, (assetId) => ownValue(project.assets, assetId)?.clipId === clip.id)) return false;
+    if (!arrayEvery(clip.jobIds, (jobId) => ownValue(project.jobs, jobId)?.clipId === clip.id)) return false;
     if (clip.selectedAssetId !== null) {
       const selected = ownValue(project.assets, clip.selectedAssetId);
-      if (selected === undefined || !isCanonicalStudioGeneratedTakeV2(selected, project.id, clip)) return false;
+      if (selected === undefined || !isCanonicalGeneratedTake(selected, project.id, clip, clipAssetIdsByClipId)) {
+        return false;
+      }
     }
     if (clip.referenceAssetId !== null) {
       const reference = ownValue(project.assets, clip.referenceAssetId);
@@ -692,10 +751,10 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
   }
 
   const cutIds = Object.keys(project.cuts);
-  if (!cutIds.every((cutId) => validateCut(cutId, project, project.cuts[cutId]))) return false;
+  if (!cutIds.every((cutId) => validateCut(cutId, project, clipAssetIdsByClipId, project.cuts[cutId]))) return false;
   if (project.activeCutId !== null && !Object.hasOwn(project.cuts, project.activeCutId)) return false;
 
-  const activeSectionIds = new Set(project.sectionOrder);
+  const activeSectionIds = new Set(arrayMap(project.sectionOrder, (sectionId) => sectionId));
   const shelfIdentityKeys = new Set<string>();
   const parkedSectionIds = new Set<string>();
   let parkedSectionItemCount = 0;
@@ -703,7 +762,8 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
   const cutAssetIds = new Set(
     Object.values(project.cuts).flatMap((cut) => Object.values(cut.clips).map((cutClip) => cutClip.assetId))
   );
-  for (const item of project.shelf) {
+  for (let shelfIndex = 0; shelfIndex < project.shelf.length; shelfIndex += 1) {
+    const item = project.shelf[shelfIndex]!;
     const identityKey = item.kind === 'section' ? `section:${item.sectionId}` : `asset:${item.assetId}`;
     if (shelfIdentityKeys.has(identityKey)) return false;
     shelfIdentityKeys.add(identityKey);
@@ -721,7 +781,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     const clip = ownValue(project.clips, asset.clipId);
     if (
       clip === undefined ||
-      !isCanonicalStudioGeneratedTakeV2(asset, project.id, clip) ||
+      !isCanonicalGeneratedTake(asset, project.id, clip, clipAssetIdsByClipId) ||
       clip.selectedAssetId === asset.id ||
       cutAssetIds.has(asset.id)
     ) {

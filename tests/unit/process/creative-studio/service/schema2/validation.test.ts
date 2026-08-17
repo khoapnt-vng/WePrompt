@@ -74,6 +74,12 @@ const makeJob = (id: string, clipId = 'clip_1'): StudioJobV2 => ({
 const ownRecord = <T>(entries: Array<readonly [string, T]>): Record<string, T> =>
   Object.fromEntries(entries) as Record<string, T>;
 
+const sparseArray = <T>(length: number): T[] => {
+  const value: T[] = [];
+  value.length = length;
+  return value;
+};
+
 const recordWithInheritedValue = <T>(record: Record<string, T>, id: string, value: T): Record<string, T> =>
   Object.assign(Object.create(ownRecord([[id, value]]) as object) as Record<string, T>, record);
 
@@ -415,6 +421,47 @@ describe('validateStudioProjectV2 exact schema', () => {
     project.clips.clip_1!.selectedAssetId = 'inherited_alias';
 
     expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it.each([
+    [
+      'clip job IDs',
+      (project: StudioProjectV2) => {
+        project.clips.clip_1!.jobIds = sparseArray<string>(1);
+      },
+    ],
+    [
+      'shelf identities',
+      (project: StudioProjectV2) => {
+        project.shelf = sparseArray(1);
+      },
+    ],
+    [
+      'cut filters',
+      (project: StudioProjectV2) => {
+        Object.assign(project, makePopulatedProject());
+        project.cuts.cut_1!.clips.cut_clip_1!.filters = sparseArray(1);
+      },
+    ],
+  ])('rejects a sparse %s array without throwing', (_label, mutate) => {
+    const project = makeValidProject();
+    mutate(project);
+
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it('rejects a non-enumerable own array method shadow without throwing', () => {
+    const project = makeValidProject();
+    Object.defineProperty(project.shelf, 'every', { value: null });
+
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it('does not invoke inherited array iteration methods', () => {
+    const project = makeValidProject();
+    Object.setPrototypeOf(project.sectionOrder, { every: null, [Symbol.iterator]: null });
+
+    expect(validateStudioProjectV2(project)).toBe(true);
   });
 
   it.each([

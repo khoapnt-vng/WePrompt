@@ -19,7 +19,7 @@ import {
   applyStudioSceneMutation,
   applyStudioSceneOrder,
   applyStudioTakeSelection,
-} from '@process/services/creative-studio/service/mutationHelpers';
+} from '@process/services/creative-studio/service/projectMutations';
 
 const makeEditableScene = (overrides: Partial<StudioEditableScene> = {}): StudioEditableScene => ({
   title: 'Opening',
