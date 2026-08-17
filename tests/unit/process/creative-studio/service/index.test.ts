@@ -10,6 +10,10 @@ import { promises as nodeFs } from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import type {
@@ -57,6 +61,22 @@ import {
 } from '@process/resources/builtinMcp/studioServer';
 import { BUILTIN_STUDIO_NAME } from '@process/resources/builtinMcp/constants';
 import * as referenceRequestWriter from '@process/resources/builtinMcp/studioReferenceRequestWriter';
+
+const createStudioMcpProtocolHarness = async (
+  config: Parameters<typeof registerStudioTools>[1] = null,
+  writerDeps: Parameters<typeof registerStudioTools>[2] = {}
+) => {
+  const server = new McpServer({ name: 'studio-test', version: '1.0.0' });
+  registerStudioTools(server, config, writerDeps);
+  const client = new Client({ name: 'studio-test-client', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  return {
+    client,
+    close: () => server.close(),
+  };
+};
 
 const makeInput = (overrides: Partial<CreateStudioProjectInput> = {}): CreateStudioProjectInput => ({
   name: 'Launch film',
@@ -5882,6 +5902,112 @@ describe('CreativeStudioService', () => {
 });
 
 describe('Studio MCP server', () => {
+  it('publishes the direct edit contract through the real MCP tools/list boundary', async () => {
+    const harness = await createStudioMcpProtocolHarness();
+    try {
+      const { tools } = await harness.client.listTools();
+      const applyEdits = tools.find((tool) => tool.name === 'studio_apply_edits');
+      const inputSchema = applyEdits?.inputSchema;
+      const operationItems = inputSchema?.properties?.operations as { items?: Record<string, unknown> } | undefined;
+      const operationVariants = (operationItems?.items?.anyOf ?? operationItems?.items?.oneOf) as
+        | Array<{ properties?: { kind?: { const?: string } } }>
+        | undefined;
+      const advertisedValidator = new AjvJsonSchemaValidator().getValidator(inputSchema as never);
+      const checkpointBatch = {
+        expectedRevision: 8,
+        operations: [
+          { kind: 'set_brief', brief: 'Phase 2A checkpoint: direct free edits verified.' },
+          { kind: 'edit_scene', sceneId: 'scene_1', changes: { title: 'Shot 1 - Phase 2A check' } },
+          { kind: 'reorder_scenes', sceneOrder: ['scene_2', 'scene_1'] },
+        ],
+      };
+      const legacyWholeProject = {
+        base_revision: 8,
+        scene_order: ['scene_2', 'scene_1'],
+        scenes: {},
+      };
+
+      expect(inputSchema).toMatchObject({
+        type: 'object',
+        additionalProperties: false,
+        required: ['expectedRevision', 'operations'],
+        properties: {
+          expectedRevision: { type: 'integer' },
+          operations: { type: 'array' },
+        },
+      });
+      expect(operationVariants?.map((variant) => variant.properties?.kind?.const).sort()).toEqual([
+        'add_scene',
+        'edit_scene',
+        'reorder_scenes',
+        'select_take',
+        'set_brief',
+      ]);
+      expect(operationVariants?.find((variant) => variant.properties?.kind?.const === 'edit_scene')).toMatchObject({
+        required: ['kind', 'sceneId', 'changes'],
+        properties: {
+          changes: { anyOf: expect.any(Array) },
+        },
+      });
+      expect(operationVariants?.find((variant) => variant.properties?.kind?.const === 'reorder_scenes')).toMatchObject({
+        required: ['kind', 'sceneOrder'],
+        properties: { sceneOrder: { type: 'array' } },
+      });
+      expect(advertisedValidator(checkpointBatch)).toMatchObject({ valid: true });
+      expect(advertisedValidator(legacyWholeProject)).toMatchObject({ valid: false });
+      expect(
+        advertisedValidator({
+          expectedRevision: 8,
+          operations: [{ kind: 'edit_scene', sceneId: 'scene_1', changes: {} }],
+        })
+      ).toMatchObject({ valid: false });
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('rejects an add-and-reorder batch through the SDK before minting an ID or writing a mailbox record', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-'));
+    const createId = vi.fn(() => 'command_should_not_be_minted');
+    const harness = await createStudioMcpProtocolHarness(
+      { projectId: 'project_1', projectDir, pendingDir: '', referencePendingDir: '' },
+      { createId }
+    );
+    try {
+      await expect(
+        harness.client.callTool({
+          name: 'studio_apply_edits',
+          arguments: {
+            expectedRevision: 8,
+            operations: [
+              {
+                kind: 'add_scene',
+                scene: {
+                  title: 'Added scene',
+                  purpose: 'Add a beat',
+                  visualPrompt: 'A skyline at dawn',
+                  narration: 'A new day begins.',
+                  onScreenText: '',
+                  mediaKind: 'image',
+                  durationSeconds: 5,
+                },
+                beforeSceneId: null,
+              },
+              { kind: 'reorder_scenes', sceneOrder: ['scene_1'] },
+            ],
+          },
+        })
+      ).resolves.toMatchObject({
+        isError: true,
+        content: [{ text: expect.stringMatching(/add_scene and reorder_scenes cannot be combined/i) }],
+      });
+      expect(createId).not.toHaveBeenCalled();
+      await expect(nodeFs.readdir(path.join(projectDir, 'commands'))).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await harness.close();
+    }
+  });
+
   it('registers the reference request tool with the approval-before-spend instruction', () => {
     const tool = vi.fn();
     const registerTool = vi.fn();

@@ -146,23 +146,22 @@ const studioDirectorNewSceneSchema = z
     durationSeconds: z.number().int().min(1).max(60),
   })
   .strict();
-const studioDirectorEditChangesSchema = z
-  .object({
-    title: z.string().max(256).optional(),
-    purpose: z.string().max(256).optional(),
-    visualPrompt: z
-      .string()
-      .max(8 * 1024)
-      .optional(),
-    narration: z
-      .string()
-      .max(4 * 1024)
-      .optional(),
-    onScreenText: z.string().max(1024).optional(),
-    durationSeconds: z.number().int().min(1).max(60).optional(),
-  })
-  .strict()
-  .refine((changes) => Object.keys(changes).length > 0, { message: 'At least one edit field is required.' });
+const studioDirectorEditChangesFields = {
+  title: z.string().max(256),
+  purpose: z.string().max(256),
+  visualPrompt: z.string().max(8 * 1024),
+  narration: z.string().max(4 * 1024),
+  onScreenText: z.string().max(1024),
+  durationSeconds: z.number().int().min(1).max(60),
+};
+const studioDirectorEditChangesSchema = z.union([
+  z.object(studioDirectorEditChangesFields).partial().required({ title: true }).strict(),
+  z.object(studioDirectorEditChangesFields).partial().required({ purpose: true }).strict(),
+  z.object(studioDirectorEditChangesFields).partial().required({ visualPrompt: true }).strict(),
+  z.object(studioDirectorEditChangesFields).partial().required({ narration: true }).strict(),
+  z.object(studioDirectorEditChangesFields).partial().required({ onScreenText: true }).strict(),
+  z.object(studioDirectorEditChangesFields).partial().required({ durationSeconds: true }).strict(),
+]);
 const studioDirectorOperationSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('set_brief'), brief: z.string().max(16 * 1024) }).strict(),
   z
@@ -200,20 +199,25 @@ const studioDirectorOperationSchema = z.discriminatedUnion('kind', [
     .strict(),
 ]);
 
-export const studioApplyEditsInputSchema = z
-  .object({
-    expectedRevision: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
-    operations: z.array(studioDirectorOperationSchema).min(1).max(STUDIO_DIRECTOR_COMMAND_MAX_OPERATIONS),
-  })
-  .strict()
+const studioDirectorOperationsSchema = z
+  .array(studioDirectorOperationSchema)
+  .min(1)
+  .max(STUDIO_DIRECTOR_COMMAND_MAX_OPERATIONS)
   .refine(
-    ({ operations }) =>
+    (operations) =>
       !(
         operations.some((operation) => operation.kind === 'add_scene') &&
         operations.some((operation) => operation.kind === 'reorder_scenes')
       ),
-    { message: 'add_scene and reorder_scenes cannot be combined in one command.', path: ['operations'] }
+    { message: 'add_scene and reorder_scenes cannot be combined in one command.' }
   );
+
+export const studioApplyEditsInputSchema = z
+  .object({
+    expectedRevision: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+    operations: studioDirectorOperationsSchema,
+  })
+  .strict();
 
 export const studioGetCommandStatusInputSchema = z
   .object({
@@ -601,7 +605,7 @@ export function registerStudioTools(
     'studio_apply_edits',
     {
       description:
-        'Read the current revision first with read_storyboard, then apply one bounded ordered batch of free edits to that exact revision. This never starts paid generation. If the result is unconfirmed, it must not be retried; call studio_get_command_status with the returned commandId.',
+        'Read the current revision first with read_storyboard, then apply one bounded ordered batch of free edits to that exact revision. Use this direct patch contract, not legacy whole-project base_revision/scene_order/scenes: {"expectedRevision":8,"operations":[{"kind":"set_brief","brief":"..."},{"kind":"edit_scene","sceneId":"scene_1","changes":{"title":"..."}},{"kind":"reorder_scenes","sceneOrder":["scene_2","scene_1"]}]}. This never starts paid generation. Validation errors and unconfirmed results must not be retried; for unconfirmed, call studio_get_command_status with the returned commandId.',
       inputSchema: studioApplyEditsInputSchema,
     },
     createStudioApplyEditsHandler(config, writerDeps)
