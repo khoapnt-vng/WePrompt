@@ -23,16 +23,18 @@ i18next across 12 locales, repository-managed media URLs.
 
 **Spec:**
 [creative-studio-3-direction-and-answers.md](./creative-studio-3-direction-and-answers.md) (§1–§11),
-SHA-256 `f4dfd4b761d0451f5c5e06eb1b8846275c914f79c40dafed8c7ec1d259cdd66e`; frozen visual reference
+SHA-256 `c5ed4f533f0f354208fb38df21b036fbaa3cf95151501e5c9cacc7fc33c3ff4e`; frozen visual reference
 [creative-studio-3-beat-and-shot-reference.html.txt](./creative-studio-3-beat-and-shot-reference.html.txt),
 SHA-256 `642c8b16a56c2799d119c6077c7282969c1d612bd9aca606e39da51c710846ee`. The reference is the
 offline bundle of the prototype the review was conducted against; the direction document refers to
 it by its authoring name, `Creative Studio 3 - Beat and Shot.dc.html`.
 
-> **Verify the direction document before relying on the pin.** It was transcribed into the
-> repository from the authoring copy rather than exported from it, and repository formatting was
-> applied. Diff it against the authoring copy once; if they differ, re-commit and re-pin. A hash is
-> only an anchor if it names the file everyone means.
+> **Authority record.** The direction document was originally transcribed into the repository rather
+> than exported from its authoring copy. On 2026-08-18 the product owner explicitly approved the
+> repository text as authoritative, including the parked-shot amendment recorded at its top. That
+> approval supersedes the earlier authoring-copy comparison requirement for this revision. Any later
+> semantic edit still requires explicit product approval, an independent contract review, and a new
+> pin. A hash is only an anchor if it names the file everyone approved.
 
 **Execution baseline:** `7176e3f6b` on `codex/creative-studio-table-board-ui-design` — CS2 Tasks 1–5
 complete and Gate 1 closed after the independent review/fix sequence through `12a8d7fe7`. The three
@@ -181,6 +183,7 @@ export const STUDIO_MAX_BEATS = 24;
 export const STUDIO_MAX_SHOTS_PER_BEAT = 8;
 export const STUDIO_MAX_SHOTS_PER_PROJECT = 96;
 export const STUDIO_MAX_BIN_BEAT_ITEMS = 24;
+export const STUDIO_MAX_BIN_SHOT_ITEMS = 96;
 export const STUDIO_MAX_BIN_TAKE_ITEMS = 96;
 export const STUDIO_MAX_LINE_HISTORY_PER_BEAT = 20;
 export const STUDIO_MAX_UNDO_ENTRIES = 20;
@@ -258,6 +261,7 @@ export type StudioShot = {
 
 export type StudioBinItem =
   | { kind: 'beat'; beatId: string; reason: 'lifted' | 'alternate' }
+  | { kind: 'shot'; beatId: string; shotId: string; reason: 'lifted' }
   | { kind: 'take'; assetId: string; reason: 'lifted' | 'alternate' };
 
 export type StudioProposedShot = {
@@ -385,16 +389,21 @@ export type StudioUndoEntry = {
 };
 ```
 
-**`StudioBinItem` is reference-only and has exactly two kinds: `beat` and `take`.** Every kind names
-an existing record. A shot never enters the Bin. To remove a shot with takes, park each take, clear
-the remaining persisted dependencies, then use dependency-free `delete_shot`. Authored text never
-enters the Bin — it goes to the owning beat's `lineHistory`.
+**`StudioBinItem` is reference-only and has exactly three kinds: `beat`, `shot`, and `take`.** Every
+kind names an existing record. Beat and take entries may be `lifted` or `alternate`; a shot entry is
+`lifted` only because there is no add-alternate-shot product path. Authored text never enters the Bin
+— it goes to the owning beat's `lineHistory`.
 
 Beat and shot IDs are immutable and unique within a project. Every beat is either in `beatOrder` or
-in the Bin, exactly once. Every shot belongs to exactly one beat's `shotOrder`; there is no parked
-shot state. A take Bin alias points to a canonical, non-selected take owned by exactly one shot and
-cannot name a current seed or conditioning input. Every shot-owned asset, job, and take relation
-resolves to that shot. Validation rejects orphaned, duplicated, or cross-owned identities.
+in one beat Bin item, exactly once. Every shot is either in exactly one beat's `shotOrder` or in
+exactly one shot Bin item, never both and never neither. A shot Bin item stores the `beatId` of the
+shot's owner at park time; that beat must still exist, may itself be active or binned, and is the only
+beat into which the shot may be restored. The reducer records this ownership edge while the shot is
+active, and validation treats the persisted `beatId` as the parked shot's authoritative owner. A take
+Bin alias points to a canonical, non-selected take owned by exactly one shot and cannot name a current
+seed or conditioning input. Every shot-owned asset, job, receipt, frame, and take relation continues
+to resolve to that shot while it is binned. Validation rejects orphaned, duplicated, cross-owned, or
+active-and-binned identities.
 
 `StudioAsset.mediaKind` is widened to `'image' | 'video' | 'audio'`. Audio is imported managed
 media only in this plan; `bedAssetId` must resolve to a canonical project-owned audio asset.
@@ -619,6 +628,8 @@ export type StudioMutationOperation =
   | { kind: 'add_shot'; beatId: string; shotId: string; shot: StudioEditableShot; beforeShotId: string | null }
   | { kind: 'edit_shot'; shotId: string; changes: StudioEditableShotChanges }
   | { kind: 'delete_shot'; shotId: string } // dependency-free only
+  | { kind: 'park_shot'; shotId: string }
+  | { kind: 'restore_shot'; shotId: string; beforeShotId: string | null }
   | { kind: 'reorder_shots'; beatId: string; shotOrder: string[] } // rewrites the chain
   | {
       kind: 'apply_coverage';
@@ -644,11 +655,27 @@ export type StudioMutationOperation =
   | { kind: 'undo_last'; entryId: string };
 ```
 
-There is no `park_shot`: the Bin has no shot kind. `delete_shot` is dependency-free only. The author
-must park eligible takes individually and clear jobs, seed/conditioning, selection, match-to, and
-other references before deletion. `park_beat` and `park_take` create `lifted` entries;
-`add_binned_beat` and `add_alternate_take` create `alternate` entries. No generic
-`remove_bin_item` may orphan the referent.
+`delete_shot` remains an active-shot, dependency-free operation for ungenerated coverage.
+`park_shot` is the non-destructive path for a shot with paid lineage: it removes the shot ID from its
+current owner's `shotOrder`, appends exactly
+`{ kind: 'shot', beatId: owner.id, shotId, reason: 'lifted' }`, and leaves the shot plus every owned
+asset, terminal job, receipt, authorization, selected/seed take, and completed/failed frame record
+unchanged. It refuses while the shot has a nonterminal job or a pending/extracting frame operation.
+It also derives inbound references from current active project and chain state and fails closed for a
+current `matchToShotId` or a nonterminal downstream job/extraction actively consuming the shot or its
+take/frame lineage. Historical terminal downstream conditioning snapshots and receipts are retained
+lineage, not blockers; parking makes the affected active downstream chain stale. The author must
+clear or repoint Match To, or wait for/cancel the active consumer through its existing reviewed
+lifecycle, before retrying. Parking never cancels, rewrites, or silently detaches it.
+
+`restore_shot` consumes the one matching shot Bin item and inserts the same shot ID into that item's
+recorded `beatId` before `beforeShotId` (or at the end for `null`). The recorded beat may itself be
+active or binned, but must still exist; the anchor must belong to it and the eight-shot active
+capacity must hold. Restore never reparents the shot and never rewrites paid lineage. `park_beat`,
+`park_shot`, and `park_take` create `lifted` entries; `add_binned_beat` and `add_alternate_take` create
+`alternate` entries. There is no add-alternate-shot operation and no generic `remove_bin_item` that
+may orphan a referent. `apply_coverage` reads and replaces only the named beat's active `shotOrder`;
+it never edits or deletes a binned shot or its lineage.
 
 Editable change objects are exact-key, nonempty partials of authored fields only. Callers mint safe
 IDs; main rejects collisions and returns created IDs in operation order. `reorder_*` inputs are exact
@@ -684,18 +711,20 @@ folded into the contract above. Recorded so a later reader can tell a ruling fro
    admission; only exports participate in count-based retention.
 7. **Seedance's last frame is an optimization, not universal provenance.** It can satisfy an
    untrimmed exact-take conditioning request; a trimmed endpoint is decoded locally.
-8. **The Bin has exactly two kinds.** Beats and takes may be referenced; shots never are.
+8. **The Bin has exactly three reference kinds.** Beats and takes may be `lifted` or `alternate`;
+   shots are `lifted` only and retain their original `beatId` ownership for exact restoration.
 9. **Paid work uses prepare/confirm.** Quotes and authorizations are main-owned durable records;
    proposal acceptance and Director paths cannot dispatch.
 
 ### Blocker closure ledger
 
 | Former blocker                                      | Closed contract / owning task                                                                                                                     |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Docs fork did not contain green Gate 1              | Execute only with `7176e3f6b` as ancestor; CS3 docs were transplanted onto that lineage.                                                          |
 | No valid pre-seed authoring state                   | Null pin derives latest still or projects `seed_pending`; Task 5 owns reviewed seed jobs and the video readiness gate.                            |
 | Full-video poster could not represent a tail trim   | Conditioning frame is distinct, keyed by selected take plus played endpoint; Tasks 1C/5 own provenance, extraction, recovery, and the 10s→8s RED. |
-| Bin had two versus three incompatible kinds         | Exactly `beat                                                                                                                                     | take`; no shot variant or generic alias removal exists. |
+| Bin had two versus three incompatible kinds         | Exactly `beat \| shot \| take`; a shot reference is lifted-only, preserves its original beat and paid lineage, and has no generic removal.        |
+| Ever-rendered shots could never leave coverage      | `park_shot`/`restore_shot` move the exact shot reference across the active/Bin XOR; Tasks 1C/2/5 own lineage and fail-closed dependency proofs.   |
 | Coverage proposal/result type was undefined         | `StudioProposedShot` and ordered `StudioCoverageApplyResult` are frozen above; Task 2 owns fixed-boundary enforcement.                            |
 | Re-split invalidated historical line ordinals       | Ordinal is historical 1–8 provenance, independent of current shot count; Task 1C owns shrink/restart REDs.                                        |
 | Native names landed before atomic cutover           | Tasks 1B/6 keep native/manifest/bridge byte-identical; all public names move together in Task 7.                                                  |
@@ -735,9 +764,9 @@ contract-breaking one.
 
 **Steps**
 
-- [ ] Confirm both spec pins still match the committed files (`shasum -a 256`), and that the
-      direction document has been diffed against its authoring copy at least once. Stop if not. The
-      inference decisions are already closed — see _Decisions closed_.
+- [ ] Confirm both spec pins still match the committed files (`shasum -a 256`) and the approved
+      authority record is present in the direction document. Stop on either mismatch. The inference
+      decisions are already closed — see _Decisions closed_.
 - [ ] Confirm Gate 1 is green before starting. A rename entered from a red baseline is unverifiable.
 - [ ] Perform the identifier rename across `packages/` and `tests/`.
 - [ ] **Gate — the free proof:** `bun run test` fully green, and `git diff` contains **no change to
@@ -763,12 +792,18 @@ signal that distinguishes it from 1A.
 - [ ] Rename persisted property names: `sections` → `beats`, `clips` → `shots`, `shelf` → `bin`,
       `sectionOrder` → `beatOrder`, `clipOrder` → `shotOrder`, `clipId` → `shotId`, `sectionId` →
       `beatId`, `storyLine` → `action`, `visualPrompt` → `look`, `shotPrompt` → `line`,
-      `selectedAssetId` → `selectedTakeId`. Move the validator's key Sets with them.
+      `selectedAssetId` → `selectedTakeId`. Rename every schema-2 singular, plural, and compound wire
+      form with them — including `sectionIds`/`clipIds`, `createdSectionIds`/`createdClipIds`,
+      `payableClipIds`, `firstClipId`, `beforeSectionId`/`beforeClipId`, and capacity/projection keys.
+      Move the validator's key Sets with them.
 - [ ] Rename the MCP operation names carried in `studio_apply_edits`' `mutation_batch` —
-      `add_section` → `add_beat`, `reorder_sections` → `reorder_beats`, `add_clip` → `add_shot`,
-      `reorder_clips` → `reorder_shots`, `park_section` → `park_beat`, `restore_section` →
-      `restore_beat`, `reorder_shelf` → `reorder_bin`, and `select_shelved_take` → `restore_take`.
-      These are persisted and **unregistered MCP** contract changes only.
+      `add_section` → `add_beat`, `edit_section` → `edit_beat`, `reorder_sections` → `reorder_beats`,
+      `park_section` → `park_beat`, `restore_section` → `restore_beat`, `add_clip` → `add_shot`,
+      `edit_clip` → `edit_shot`, `delete_clip` → `delete_shot`, `reorder_clips` → `reorder_shots`,
+      `select_shelved_take` → `restore_take`, `remove_shelf_alias` → `remove_bin_item`, and
+      `reorder_shelf` → `reorder_bin`. `remove_bin_item` is a rename-only transitional variant; Task
+      1C removes it when it installs the frozen no-generic-removal vocabulary. These are persisted and
+      **unregistered MCP** contract changes only.
 - [ ] Assert the native constants, payload schemas, provider inventory, manifest, bridge, preload,
       runtime, and renderer are byte-identical to the green Gate 1 baseline and contain no Beat/Shot
       provider vocabulary. Native/public work belongs to Task 7's atomic cutover.
@@ -810,10 +845,13 @@ The only pass that adds meaning.
       audio; `bedAssetId` accepts audio only.
 - [ ] Change `canonicalVideoPosterV2` to resolve the poster **by output role**, not by
       `outputAssetIds[1]`. RED that a job with a third output still resolves its cover.
-- [ ] RED: unknown keys; duplicate ownership; orphan assets/jobs; beat active-and-binned overlap;
-      invalid Bin items of each kind; 25 beats; 9 shots in one beat; 97 shots; each per-kind Bin
-      maximum at exactly N and N+1; shot duration 3 and 16; line history at 20 and 21. Accept every
-      exact boundary.
+- [ ] RED: unknown keys; duplicate ownership; orphan assets/jobs; beat or shot active-and-binned
+      overlap; invalid Bin items of each kind; 25 beats; 9 active shots in one beat; 97 total unique
+      shot records across active orders and shot Bin membership; each beat/shot/take Bin maximum at
+      exactly N and N+1; shot duration 3 and 16; line history at 20 and 21. A shot Bin item adds no
+      second project-shot budget: `STUDIO_MAX_SHOTS_PER_PROJECT` counts its referenced record once,
+      while `STUDIO_MAX_BIN_SHOT_ITEMS` independently bounds the number of shot Bin entries. Accept
+      every exact boundary.
 - [ ] RED totality per the validator rules: an asset `shotId`, job `shotId`, Bin `assetId`,
       `selectedTakeId`, `seedStillId`, or `matchToShotId` of `constructor`, `toString`, or
       `__proto__`; a 20,000-link retry chain; a 20,000-link shot chain; an asset `durationSeconds` of
@@ -824,8 +862,11 @@ The only pass that adds meaning.
 - [ ] RED the chain invariants: a segment head with no seed remains valid but projects
       `seed_pending` and cannot submit video; null pin plus completed image takes derives the latest
       deterministic seed; an explicit pin wins; a non-heading shot carrying a pin; a chain edge
-      crossing a beat boundary; `chainBreak` set by anything but an author operation; a conditioning
-      snapshot that does not resolve to the exact current take/frame/endpoint.
+      crossing a beat boundary; `chainBreak` set by anything but an author operation; and a
+      conditioning snapshot whose recorded shot/take/frame IDs, ownership, or endpoint do not resolve
+      to its exact immutable historical provenance. Equality with the **current** active predecessor,
+      selected take, trim endpoint, or extraction key is not a schema-validity predicate; Task 2
+      compares those values to project staleness.
 - [ ] RED extraction state exactness: pending/extracting have no frame/error; ready has one canonical
       managed frame and no error; failed has no frame and one frozen error code; IDs are the stable
       canonical-input digest and duplicate inputs cannot create two records.
@@ -835,8 +876,18 @@ The only pass that adds meaning.
 - [ ] RED trim numeric bounds: finite nonnegative values only, each less than source duration, and
       `trimInSeconds + trimOutSeconds < durationSeconds`. Reject NaN, infinity, negative zero policy
       drift, and an empty played interval.
-- [ ] RED the two Bin kinds and no third: exact beat/take maxima, no shot item, no generic removal,
-      and take aliases cannot name selected, seed, or conditioning media.
+- [ ] RED all three reference-only Bin kinds and no fourth: exact beat/shot/take maxima, no generic
+      removal, beat/take `lifted | alternate` reasons, shot `lifted` only, and take aliases cannot name
+      selected, seed, or conditioning media. For shots, prove exact active-or-binned XOR, one unique
+      Bin item, a safe existing `shotId`, a safe existing authoritative `beatId`, no other beat's
+      `shotOrder` membership, and rejection of missing, duplicated, cross-owned, or magic IDs.
+- [ ] RED a binned shot retaining canonical selected/seed takes, terminal jobs, receipts,
+      authorizations, and completed/failed frame lineage. Every relation must still resolve to that
+      shot; no ownership field is nulled or reparented. Reject a binned shot with a nonterminal job or
+      pending/extracting frame operation, and reject any nonterminal downstream job/extraction that
+      consumes the binned shot or its take/frame lineage. Positively validate a terminal downstream
+      snapshot with exact immutable historical provenance after its predecessor is binned even though
+      it no longer equals the current active chain; Task 2 must project that accepted state as stale.
 - [ ] RED `StudioProposedShot`: exact keys, safe supplied IDs, fixed-ID preservation, and ordered
       created/retained/removed/fixed result IDs.
 - [ ] Implement the exact validators and `createEmptyStudioProject()` with empty
@@ -844,10 +895,12 @@ The only pass that adds meaning.
       iteratively, and consume the constant named for each contract.
 - [ ] Convert canonical-take and summary projection helpers to Beat/Shot. The summary is active-only
       and the film-duration projection returns known seconds plus unresolved beat IDs; test target,
-      null-target, covered, and binned cases without null-to-zero coercion.
+      null-target, covered, binned-beat, and binned-shot cases without null-to-zero coercion. Binned
+      shots and their retained assets/jobs contribute zero active shot, duration, and readiness count.
 - [ ] Mutation proof: restore a bare `=== undefined` guard at one lookup site and prove the matching
-      totality test fails; remove the per-kind Bin maximum and prove the boundary test fails; restore
-      both.
+      totality test fails; lower each per-kind Bin maximum by one in turn and prove the exact
+      beat/shot/take N-boundary test fails; remove the shot active-or-binned XOR and prove its ownership
+      test fails; restore all mutations.
 - [ ] Run: `bunx vitest run tests/unit/process/creative-studio` and `bunx tsc --noEmit`.
 - [ ] Commit: `feat(studio): define beat and shot contracts`.
 
@@ -865,14 +918,26 @@ The only pass that adds meaning.
 
 - [ ] RED every operation, ordered later-op visibility, input immutability, late-op rollback,
       capacity precedence, collision rejection, exact permutations, and created-ID ordering.
-- [ ] RED the removal rules: `delete_shot` refused for every persisted dependency; no `park_shot` or
-      shot Bin variant exists; `park_take` clears an eligible take from selection and creates an exact
-      lifted alias; deletion succeeds only after every dependency is explicitly cleared.
+- [ ] RED the removal rules: `delete_shot` is active-only and refused for every persisted dependency;
+      `park_take` clears an eligible take from selection and creates an exact lifted alias; and
+      `park_shot` moves the exact active membership to one lifted shot Bin item without changing the
+      shot or any paid-lineage record. Refuse an already-binned/missing shot, Bin overflow, any
+      nonterminal job, any pending/extracting frame operation, a current `matchToShotId`, and every
+      nonterminal downstream job/extraction actively consuming that shot or its take/frame lineage.
+      Prove each refusal is pre-mutation and leaves the whole batch unchanged; prove historical
+      terminal downstream conditioning snapshots do not block and instead become stale.
+- [ ] RED `restore_shot`: consume exactly one lifted shot item, use only its recorded original beat,
+      validate the current `beforeShotId` anchor and per-beat capacity, and restore the same shot ID
+      with byte-identical asset/job/receipt/authorization/frame lineage. Cover a recorded beat that is
+      itself binned, wrong-owner anchors, duplicate/active membership, later-op visibility, and
+      late-operation rollback. No operation reparents a shot or creates an alternate shot item.
 - [ ] RED `apply_coverage` against the exact `StudioProposedShot` wire shape. It must derive and
       report the fixed set, reject a caller's mismatched `fixedShotIds`, preserve every fixed shot's
       cumulative start/end boundary, reuse requested current IDs, create requested new IDs in order,
       and move every removed detached line to beat history without invalidating an ordinal that no
-      longer exists in current coverage.
+      longer exists in current coverage. Its input and fixed-set derivation are active-order only;
+      prove that a previously parked rendered shot is absent from coverage and remains byte-identical
+      through re-split, while every remaining active dependent shot stays fixed.
 - [ ] RED derivation: edit detaches; `rederive_line` writes the previous line to history and restores
       derivation; editing the action bumps `actionRevision` and marks derived lines stale while
       leaving detached lines untouched; history evicts oldest at 20.
@@ -880,18 +945,26 @@ The only pass that adds meaning.
       cause, and what a cascade would cost in generations. Compare each video job's persisted
       conditioning snapshot with current seed/predecessor/take/frame/endpoint state. Cover
       tail-versus-head trim asymmetry, selected-take replacement, `reorder_shots` invalidating
-      downstream, `hard_cut` starting a fresh seed-pending segment, and beat reorder changing nothing.
+      downstream, `park_shot`/`restore_shot` invalidating the affected downstream active chain,
+      `hard_cut` starting a fresh seed-pending segment, and beat reorder changing nothing. Add one
+      pure inbound-reference derivation used by `park_shot`; current match-to and nonterminal
+      downstream jobs/extractions consuming its shot/take/frame lineage block, while historical
+      terminal conditioning snapshots and receipts do not and instead project staleness.
 - [ ] Implement `applyStudioMutationBatch(project, batch)` as a pure draft reducer returning the next
       project plus ordered created/retained/removed/fixed IDs. Every successful free authoring batch
       appends one bounded entry containing canonical before-fragments for exactly the project/beat/
       shot/Bin records it touched in the same revision; `undo_last` must be sole-op, CAS-aware, apply
       only those internal patches, revalidate the full result, and remain unable to alter provider
-      jobs, receipts, or authorizations.
+      jobs, receipts, or authorizations. Park/restore patches capture only the owning beat membership
+      and Bin before-fragment; the shot and its paid arrays are never snapshotted or overwritten.
 - [ ] Static fence the `schema2` directory from filesystem, IPC, job manager, resolver, adapter,
       polling, retry, cancel, and render imports.
-- [ ] Mutation proofs: allow `apply_coverage` to move a shot with takes and prove the fixed-point
-      test fails; make `reorder_shots` non-invalidating and prove the staleness test fails; restore
-      both.
+- [ ] Mutation proofs: allow `apply_coverage` to move an active shot with takes and prove the
+      fixed-point test fails; make `park_shot` reject terminal paid lineage or drop a retained record
+      and prove the park/re-split test fails; bypass either current Match To or one nonterminal
+      downstream consumer and prove the fail-closed test fails; incorrectly block a historical
+      terminal conditioning snapshot and prove the staleness test fails; make `reorder_shots`
+      non-invalidating and prove the staleness test fails; restore all mutations.
 - [ ] Run: `bunx vitest run tests/unit/process/creative-studio/service/schema2` and
       `bunx tsc --noEmit`.
 - [ ] Commit: `feat(studio): add beat and shot mutations`.
@@ -922,6 +995,11 @@ Carries CS2 Task 3 almost intact. Only the seam type signatures change.
       `Forge-Dev-2` profiles contain.
 - [ ] RED fresh empty V2 create/restart, mixed V1+V2 listing, summary totals, batch rollback, stale
       CAS, and exactly one revision/observer fact.
+- [ ] RED a store round trip with one lifted shot whose original beat is active and one whose original
+      beat is binned. Preserve the shot and every asset/job/receipt/authorization/frame byte across
+      update, atomic rename, index repair, and restart; summaries count neither lifted shot. RED stale
+      CAS and a late invalid anchor/reference as zero-write rollbacks, and quarantine malformed
+      active-and-binned, missing-owner, duplicate-shot-item, and in-flight-binned records loudly.
 - [ ] Update `docs/contributing/development.md` with the fresh named profile workflow and manual
       profile removal only while the app is stopped. Add no app reset command.
 - [ ] Mutation proof: route V1 through the old migrator and prove the no-touch test fails; restore.
@@ -956,6 +1034,10 @@ Carries CS2 Task 3 almost intact. Only the seam type signatures change.
       and never billed again, and with the cascade priced as a **separate** line from the base set.
       Lower is one generation per shot; upper is the requested 1–4 generations per shot. Reject
       mixed currencies, unsafe integer totals, missing rates, and overlapping base/cascade sets.
+- [ ] Derive every quote from active beat/shot membership. A lifted shot and its retained jobs,
+      receipts, takes, and frames are historical context only: they appear in neither base nor cascade
+      items and are never billed again. RED active → park and park → restore quote invalidation under
+      exact revision comparison.
 - [ ] RED that the headline cost, the generation count, and the button label are all derived from the
       same shot set — a test that fails if any is computed independently.
 - [ ] Implement the receipt: persisted on the job, recording route, seconds, generation count, and
@@ -1006,6 +1088,13 @@ Carries CS2 Task 3 almost intact. Only the seam type signatures change.
 - [ ] Convert V2 asset/job/take/poster/output/retry/cancel/recovery checks to `shotId`. Preserve
       provider identity, idempotency, submission ambiguity, download recovery, cancellation policy,
       and rule enforcement.
+- [ ] Treat active-or-binned membership as authoring state, not media ownership. Media resolution and
+      historical terminal job/receipt/frame lineage continue to resolve through a lifted shot, but
+      readiness, quote, submit, retry, seed/take selection, and chain scheduling accept active shots
+      only. RED every forbidden binned-shot entrypoint before resolver/adapter/provider access. Because
+      `park_shot` refuses nonterminal jobs and pending/extracting frames, recovery must never discover
+      an admitted in-flight binned record; malformed persisted input fails validation rather than
+      being repaired or dispatched.
 - [ ] RED that the poster resolves **by role** and that a job carrying a third output still yields a
       cover — the inverse of the old positional assumption.
 - [ ] Add explicit job purposes. A reviewed `seed_still` job uses the selected image route and creates
@@ -1032,7 +1121,9 @@ Carries CS2 Task 3 almost intact. Only the seam type signatures change.
       duplicate confirm, close immediately before/after durable authorization, and provider throw.
       No refusal reaches resolver/adapter/provider; no dispatched job lacks authorization.
 - [ ] RED that retention cannot reach takes, seed stills, or conditioning frames, and that the
-      existing project write-admission cap refuses a new large write without evicting anything.
+      existing project write-admission cap refuses a new large write without evicting anything. Add a
+      lifted shot with terminal paid lineage and prove retention, cleanup, and restart leave every
+      referenced byte and record untouched.
 - [ ] Mutation proof: allow submission without the predecessor's frame asset and prove the
       sequencing test fails; restore.
 - [ ] Run the studio unit and integration suites and `bunx tsc --noEmit`.
@@ -1069,8 +1160,10 @@ Carries CS2 Task 3 almost intact. Only the seam type signatures change.
 - [ ] Freeze Director policy in schemas, not prose. `studio_apply_edits` exposes only direct-safe
       text/pre-picture operations. Structural or staleness-producing operations exist only in the
       proposal writer. Motion/take decisions (`select_take`, take park/restore), Cut choices, undo,
-      and paid confirmation are omitted from every Director-callable schema. There is no registered
-      but disabled tool state.
+      lifted-shot park/restore, and paid confirmation are omitted from every Director-callable schema.
+      A re-split proposal may report an active shot as fixed but may not bundle `park_shot`; lifting
+      paid coverage remains an explicit human-native action. There is no registered but disabled tool
+      state. RED exact absence from direct, proposal, parser, projection, and writer surfaces.
 - [ ] RED the spend fence against the new surface, including operations that are free but create
       staleness: the director may create staleness only through a reviewed proposal, never silently.
 - [ ] Finish schema-2 store ownership for proposals: list/watch/accept/reject/expire/reap exact V2
@@ -1091,6 +1184,8 @@ Carries CS2 Task 3 almost intact. Only the seam type signatures change.
 - [ ] Account for each operation as a reducer op, unregistered MCP schema/parser variant, proposal
       acceptance case, exact projection, and test. **Do not** add native constants, payload schemas,
       manifest entries, bridge providers, or renderer types in Task 6; those land together in Task 7.
+      Human-only `park_shot`/`restore_shot` are accounted for by explicit MCP/proposal absence tests,
+      not by callable variants.
 - [ ] Mutation proof: let a director path create staleness outside a proposal and prove the fence
       test fails; restore.
 - [ ] Run the full suite and `bunx tsc --noEmit`.
@@ -1099,6 +1194,14 @@ Carries CS2 Task 3 almost intact. Only the seam type signatures change.
 ### Gate 1 review checkpoint
 
 - [ ] Freeze the exact Task 1–6 head and obtain independent process/schema and security/spend review.
+- [ ] Run the focused three-kind Bin proof across validator, reducer/chain, store/restart, pricing,
+      job/media lifecycle, and Director/MCP absence suites. The positive oracle is a rendered terminal
+      shot parking with byte-identical paid lineage and then surviving re-split; the negative oracles
+      are active-and-binned ownership, own in-flight work, current Match To, and each nonterminal
+      downstream job/extraction actively consuming its lineage. Prove a historical terminal
+      conditioning snapshot permits parking and becomes stale. Independently review original-beat
+      restoration and the distinction between active blockers and historical lineage before
+      accepting the gate.
 - [ ] Verify V2 code is still unregistered from the renderer bridge, current V1 UI behavior is
       unchanged, and no V1 profile tree changed during tests. This check is what certifies the pivot
       premise: the vocabulary must never have reached the bridge, the manifest, or the renderer.
@@ -1111,7 +1214,8 @@ Carries CS2 Task 3 almost intact. Only the seam type signatures change.
 - [ ] Update `vitest.creative-studio-coverage.config.ts` to exactly the Task 1–6 executable production
       diff and run it with coverage. Record every file's line/branch result; all must be at least
       80/80. Assert native manifest/provider inventory and renderer/preload/runtime activation remain
-      absent, not merely unused.
+      absent, not merely unused. Include every new shot-Bin validator, ownership, inbound-reference,
+      reducer, summary, and lifecycle branch in the executable manifest.
 - [ ] Resolve every Critical/Important finding in separate commits and re-review before Task 7.
 
 ---
@@ -1132,6 +1236,11 @@ Carries CS2 Task 6 in shape: one atomic switch, legacy deletion in the same task
 - [ ] RED exact native provider inventory and manifest/schema parity, then add every Beat/Shot
       constant, payload schema, provider, and manifest entry in this task only. No Section/Clip V2
       provider survives the same commit.
+- [ ] Add the human-native `park_shot` and `restore_shot` payloads/providers atomically with the
+      renderer cutover. Schemas are exact (`shotId`, plus nullable `beforeShotId` for restore), both
+      route through the Task 2 reducer/store queue, and neither appears in Director/MCP inventory.
+      Native parity, manifest, bridge, preload, runtime, and renderer tests must fail if either side is
+      missing, renamed, or registered twice.
 - [ ] Replace public `StudioProject`/renderer aliases with the Beat/Shot types; delete staging seams.
 - [ ] Implement one runtime activation controller with explicit
       `inactive | activating | active | degraded | disposed` state and a supported-project ID set.
@@ -1176,7 +1285,10 @@ direct children.
 
 **Steps**
 
-- [ ] Build the shared sanitized projection consumed by Table, Board, beat panel, and Cut.
+- [ ] Build the shared sanitized projection consumed by Table, Board, beat panel, and Cut. Project
+      active shots from `shotOrder` only and project all three Bin reference kinds separately; a
+      lifted shot exposes its recorded owner, authored fields, deterministic cover, take count, and
+      park/restore eligibility without exposing provider credentials or mutable paid records.
 - [ ] Implement draft persistence and the selection model once, shared across views.
 - [ ] Put image-route and video-route selection in the Brief, using the sanitized catalog and exact
       readiness projection. Missing image route blocks seed generation only; missing video route
@@ -1220,9 +1332,13 @@ the new `workspace/` test directory has exactly ten direct children; add no peer
 
 - [ ] Run focused node/jsdom suites for runtime activation, native parity, proposal/reference
       decisions, workspace projection, draft persistence, route readiness, gate quote/confirm, and
-      Director persistence; then `bun run test`.
+      Director persistence; include exact native `park_shot`/`restore_shot` schema-to-reducer parity,
+      three-kind projection, active-only quote/readiness omission, and Director/MCP absence; then
+      `bun run test`.
 - [ ] Run `bunx playwright test tests/e2e/features/workspaces/creative-studio.e2e.ts` after replacing
-      its scene-shaped fixtures/assertions with Beat/Shot lifecycle and V1 no-touch cases.
+      its scene-shaped fixtures/assertions with Beat/Shot lifecycle and V1 no-touch cases. Exercise a
+      rendered terminal shot through native lift, verify its retained-work Bin projection and zero
+      provider calls, then restore it to the recorded beat at a current anchor.
 - [ ] Update and run `vitest.creative-studio-coverage.config.ts`; every executable changed file is
       present and at least 80% lines/branches. Run `bun run lint --quiet`, `bun run format:check`,
       `bunx tsc --noEmit`, i18n type/check commands, and `git diff --check`.
@@ -1271,11 +1387,22 @@ The core interaction of CS3, and the largest single task. Split it if it exceeds
       reviewed route/gate rules. Video submission is impossible without the required seed.
 - [ ] Takes, human-only video-take selection, and per-shot render with its own gate. Director tools
       cannot select, park, or restore a take.
+- [ ] Add an explicit human-only **Lift shot** action. Its confirmation states that authored and paid
+      work is retained, names any downstream staleness, and never calls delete. Disable it with a
+      specific reason for an in-flight job/extraction, current Match To, or nonterminal downstream
+      job/extraction consuming its lineage; terminal downstream conditioning history becomes stale
+      and does not block. Clearing or repointing Match To is a separate action. RED that cancel and
+      every refusal preserve project bytes and invoke no paid boundary.
 - [ ] Derivation: derived versus detached, staleness against the action, re-derive, and line history
       restore.
 - [ ] `PART DONE` recovery: the resume affordance, undrawn in the prototype.
 - [ ] Reorder inside a beat must not look like reordering beats, and must show the staleness it
       creates.
+- [ ] RED the coverage lifecycle: a rendered shot is fixed during re-split; after explicit lift it
+      leaves active coverage, re-split may replace only the remaining dependency-free intervals, and
+      the lifted shot plus takes remain available in the Bin. Restoring it at a current anchor
+      reintroduces the same identity and shows the resulting downstream staleness/cascade before any
+      paid confirmation.
 - [ ] RED tail trim end to end: trimming a selected 10s take to an 8s played endpoint displays stale
       downstream state, queues the 8s conditioning extraction after confirmation, and never presents
       the full-video poster as chain authority. Head trim does not invalidate downstream.
@@ -1291,12 +1418,20 @@ The core interaction of CS3, and the largest single task. Split it if it exceeds
 
 - [ ] Deterministic covers and the no-coverage placeholder.
 - [ ] Three card sizes rather than zoom.
-- [ ] The Bin: exactly two reference kinds, Beat and Take. Both reasons are labelled — lifted versus
-      alternate — with restore for each and drag/keyboard reorder with announcements. Assert no Shot
-      kind/control/schema can be rendered or submitted.
+- [ ] The Bin: exactly three reference kinds, Beat, Shot, and Take. Beat/Take show lifted versus
+      alternate; Shot is visibly lifted only. Each has deterministic restore behavior plus
+      drag/keyboard reorder with kind-and-reason announcements. A Shot card shows its recorded owner
+      beat, deterministic cover, take count, and retained-work state; it exposes no generate, retry,
+      select-take, or generic-remove control while binned.
 - [ ] RED canonical membership and dependency-safe restoration: a selected/seed/conditioning take
-      cannot be binned; a binned beat is absent from the film; replacement races preserve the
-      referent and alias.
+      cannot be binned separately; a binned beat is absent from the film; an active shot cannot also
+      render in the Bin; and replacement races preserve every referent and alias. Restoring a shot
+      uses only its recorded beat and a current anchor, works while that beat is itself binned, refuses
+      a full beat or stale/wrong-owner anchor without mutation, and preserves the same paid lineage.
+- [ ] Add responsive and human-acceptance coverage for a lifted rendered shot at desktop, compact,
+      narrow, and RTL: the confirmation says its takes are kept, the Bin card remains understandable
+      without its source panel, focus moves predictably after lift/restore, and screen-reader output
+      announces owner, reason, position, and refusal cause.
 - [ ] Commit: `feat(studio): build the board and bin`.
 
 ### Task 13 — The Cut
@@ -1312,6 +1447,9 @@ Playwright file with imported-audio bed, match-to gate, and export cases.
       no paid audio-generation route is introduced.
 - [ ] The Cut cannot reach inside a beat: no trims, no retiming, no take selection.
 - [ ] `MATCH TO` presented as a costed re-render, never as a free grade.
+- [ ] Treat current `matchToShotId` as an inbound active reference: lifting that shot is refused until
+      the author clears or repoints Match To in a separate revision. RED the Cut and beat-panel error
+      states and prove neither refusal nor clearing invokes generation before reviewed confirmation.
 - [ ] **No `AUTO-DUCKED`.** If narration state is shown at all it says there is no voice track yet.
 - [ ] Export shapes: editor folder always; a still; **`script.md` on demand**, generated at export
       time and never written to the project root or ingested. One-file stitched export is not in v1
@@ -1326,7 +1464,11 @@ Playwright file with imported-audio bed, match-to gate, and export cases.
 - [ ] Run the workspace Playwright lifecycle at desktop (1440×900), compact (1100×760), narrow
       (760×900), and RTL. Capture Table, beat panel/coverage, Board/Bin, and Cut screenshots and
       compare structure/content against the frozen reference; intentional corrections (Director
-      rail, no density label, target/actual, no AUTO-DUCKED) are asserted explicitly.
+      rail, no density label, target/actual, no AUTO-DUCKED) are asserted explicitly. At every
+      viewport, lift a rendered shot, assert the retained-work confirmation/card, active-view
+      disappearance, focus and screen-reader announcement, then restore the same identity to its
+      recorded beat without a provider call. Include refusal UI for own in-flight work, current Match
+      To, and a nonterminal downstream consumer, plus the permitted/stale terminal-history case.
 - [ ] Update/run the Creative Studio coverage manifest at 80/80 per file; run lint, format, typecheck,
       i18n, and diff-check. Freeze the exact head; independently review keyboard/a11y, trim-aware
       conditioning, Bin invariants, audio bed, retention, and visual evidence. Resolve every
@@ -1351,9 +1493,12 @@ Playwright file with imported-audio bed, match-to gate, and export cases.
       across authoring undo; refuse `undo_conflict` if a newly created beat/shot gained dependencies,
       a touched authored fragment changed outside the journal, or any restored reference is no longer
       valid. The entry remains available after conflict.
-- [ ] RED restart and exact inverse behavior for re-split, detach/rederive, beat/take park/restore,
-      trim, shot/beat reorder, hard cut, seed/take selection, routes, spend policy, bed, and match-to.
-      Director-applied free edits are undoable; proposal rejection and paid confirmation are not.
+- [ ] RED restart and exact inverse behavior for re-split, detach/rederive, beat/shot/take
+      park/restore, trim, shot/beat reorder, hard cut, seed/take selection, routes, spend policy, bed,
+      and match-to. Shot park/restore undo changes only the owning beat membership and Bin fragment;
+      it reuses the current shot record and cannot replace, delete, or rewind any retained paid
+      lineage. Director-applied free edits are undoable; proposal rejection and paid confirmation are
+      not.
 - [ ] Line history is the undo substrate for **text**. `RESET` is not: it discards the renderer draft
       through the existing `useDraftPersistence`, writes nothing to history, and never reaches main.
       It is deliberately absent from the mutation vocabulary — RED that no reducer operation exists
@@ -1375,16 +1520,22 @@ Playwright file with imported-audio bed, match-to gate, and export cases.
       forced to RTL against English strings.
 - [ ] Confirm `check-i18n.js` reports only warnings for the deferred locales and no errors, and that
       every new string resolves through a key rather than a literal.
-- [ ] Capacity: 24 beats and 96 shots render and reorder without virtualization. In Playwright, after
-      five warmups, 20 keyboard reorders must settle projection, focus, and announcement within
-      250ms p95 on the CI runner; record raw samples. Also assert bounded render counts so a faster
-      machine cannot hide an accidental quadratic rerender.
+- [ ] Capacity: 24 beats, 96 total unique shots across active and binned membership, and each
+      24-beat/96-shot/96-take Bin boundary render and reorder without virtualization. A shot Bin item
+      never doubles the project-shot count. In Playwright, after five warmups, 20 keyboard reorders
+      must settle projection, focus, and announcement within 250ms p95 on the CI runner; record raw
+      samples. Also assert bounded render counts so a faster machine cannot hide an accidental
+      quadratic rerender.
 - [ ] Commit: `feat(studio): harden accessibility and capacity`.
 
 ### Task 16 — Lifecycle, spend, and acceptance
 
 - [ ] Prove the whole lifecycle end to end on a fresh named profile: brief, spine, coverage, render,
       reviewed seed still, video take, trim-aware chain, cut, export.
+- [ ] In the same named-profile matrix, prove render → lift shot → re-split → restart → restore. The
+      original shot ID, takes, jobs, receipts, authorization, and frame lineage remain exact; the
+      binned interval is absent from active duration/readiness/quotes; restore uses the recorded beat
+      and a current anchor; and no provider call occurs until a newly reviewed confirmation.
 - [ ] Prove the spend fences: no unreviewed submission; cascade priced separately; budget cap refuses
       pre-dispatch; quote tamper/staleness/expiry refuses; authorization and jobs precede provider;
       in-flight work never billed twice; receipts written per take.
@@ -1404,6 +1555,11 @@ Playwright file with imported-audio bed, match-to gate, and export cases.
       and `bun run test:coverage`. Update/run the Creative Studio manifest and require every changed
       executable file at 80% lines/branches. Run lint, full format-check, typecheck, i18n checks,
       diff-check, directory-ratchet audit, and frozen reference/spec hash verification.
+- [ ] Make the named-profile render → lift shot → re-split → restart → restore flow a required Gate 4
+      E2E oracle, not a manual checklist. Fail the gate if identity, authored fields, takes, jobs,
+      receipts, authorization, frames, original-beat ownership, active-only summaries/quotes, current
+      anchor restoration, or the zero-provider-before-new-confirmation assertion differs after
+      restart.
 - [ ] Freeze the exact head; obtain independent process/schema, security/spend, renderer/a11y, and
       recovery/publication reviews. Resolve every Critical/Important finding and re-run affected plus
       full gates; store exact commands, results, coverage summary, screenshot set, and reviewed SHA in

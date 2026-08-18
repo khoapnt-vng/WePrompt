@@ -4,7 +4,12 @@ Companion to `Creative Studio 3 - Beat and Shot.dc.html`. Written in response to
 review questions on that prototype. Where an answer changes CS2's contract, it says so.
 
 Amended on 2026-08-18 after executable-plan review to close seed-pending authoring, trim-endpoint
-conditioning, two-kind Bin ownership, route selection, spend authorization, and undo semantics.
+conditioning, Bin ownership, route selection, spend authorization, and undo semantics.
+
+**Approved product amendment — 2026-08-18:** the Bin has three reference kinds: `beat`, `shot`, and
+`take`. A Shot reference and `park_shot` / `restore_shot` are the non-destructive path for removing
+an individual rendered shot from active coverage. This approved ruling supersedes the earlier
+two-kind-Bin answer and is incorporated throughout this document.
 
 ---
 
@@ -204,14 +209,25 @@ prototype does not draw them. Two immediate consequences:
 
 ## 7. Inherit or restate
 
-**Bin = Shelf, and it inherits the hardened shelf invariants** (XOR beat membership; a take
-alias must be canonical, non-selected, and not used as a seed or conditioning input; per-kind
-maxima). It has exactly two reference kinds — `beat` and `take` — and each item carries one of
-two labelled reasons. A shot is never a Bin item: park its takes individually, then delete the
-now dependency-free shot.
+**Bin = Shelf, and it inherits the hardened shelf invariants** (XOR ordered/Bin membership for
+beats and shots; canonical take aliases; dependency-safe restoration; per-kind maxima). It has
+exactly three reference kinds — `beat`, `shot`, and `take`.
 
-- **Lifted** — was in the film, removed. ("Store walkthrough")
-- **Alternate** — never in the film. ("Alternative cold open")
+- A beat reference preserves the beat and all of its coverage.
+- A shot reference records both the shot ID and its original beat ID. `park_shot` removes the shot
+  from that beat's active coverage and creates a `lifted` reference; `restore_shot` returns it to the
+  same beat at an author-chosen current position.
+- A take alias must be canonical, non-selected, and not used as a current seed or conditioning
+  input.
+
+Parking a shot changes membership, not ownership. Its authored line, takes, assets, jobs, spend
+receipts, and frame/conditioning records remain attached to the shot. No park or restore operation
+deletes or reparents paid media. A Shot Bin item references the existing shot record and therefore
+remains inside the existing 96-shot project cap; it does not create a second shot budget.
+
+- **Lifted** — was in the film, removed. ("Store walkthrough") Shot items are lifted in v1.
+- **Alternate** — never in the film. ("Alternative cold open") Beat and take items may be alternate
+  in v1.
 
 **Limits** — carry CS2's, renamed: **24 beats**, **8 shots per beat**, **96 shots** per
 project.
@@ -239,8 +255,8 @@ soft, and the Look is guidance.
 uncommitted draft and never reaches main. Every committed free authoring batch stores a bounded
 validated before-fragment entry in the project revision; `undo_last` applies it through the same
 reducer under expected-revision CAS only while the edited authoring fragments still match. It never
-cancels, retries, or refunds paid work. Re-split, detach, lift/restore, trim, reorder, seed selection,
-take selection, bed, and match-to are all covered.
+cancels, retries, or refunds paid work. Re-split, detach, beat/shot/take park and restore, trim,
+reorder, seed selection, take selection, bed, and match-to are all covered.
 
 ---
 
@@ -324,7 +340,7 @@ persists one authorization plus all idempotent job records **before** the first 
 Recovery may dispatch only jobs named by that authorization. The per-batch budget compares the
 quote's upper bound; revisions beyond the authorized generation count require a new quote.
 
-### 10.3 The Bin contradiction: take the second option
+### 10.3 The Bin contradiction: preserve text and ownership
 
 The critique is right that a detached line is a value and every hardened shelf invariant is
 reference-shaped. So:
@@ -340,8 +356,14 @@ reference-shaped. So:
   line and marks it detached.
 - Bounds live with the beat: a fixed cap of entries per beat, oldest evicted, and a per-entry
   length bound that is just the prompt field's bound.
-- `StudioBinItem` stays a union of two reference kinds: `beat` and `take`. No `shot` kind, no bytes,
-  no new ownership graph.
+- `StudioBinItem` is a union of three reference kinds: `beat`, `shot`, and `take`. A shot item carries
+  its `shotId`, original `beatId`, and `lifted` reason; it contains no media bytes.
+- Every shot is in exactly one place: present in its original beat's shot order — whether that beat
+  is active or binned — or individually parked by one Shot Bin reference. It is never both.
+  Restoring chooses a valid current position in that original beat.
+- Parking retains the complete shot record and its authored and paid lineage. Takes, assets, jobs,
+  receipts, frame extractions, and conditioning frames remain attached to the parked shot; there is
+  no destructive take-deletion or ownership-transfer step.
 
 §4 above is amended accordingly.
 
@@ -362,8 +384,8 @@ free, and it is the single most valuable thing the director does after the spine
 coverage: shot records with durations and derived prompts. Nothing to remember, nothing to
 re-apply, no preference to store.
 
-**Re-splitting never deletes or silently detaches persisted dependencies.** Takes, jobs, seeds,
-conditioning frames, and match-to references belong to exact shots; if a re-split moved those
+**Re-splitting never deletes, parks, or silently detaches persisted dependencies.** Takes, jobs,
+seeds, conditioning frames, and match-to references belong to exact shots; if a re-split moved those
 boundaries, the dependencies would no longer describe the authored film. So:
 
 - The director's proposal must name every fixed shot **before** it applies, with the reason it is
@@ -371,9 +393,16 @@ boundaries, the dependencies would no longer describe the authored film. So:
 - The accepted operation is always a **boundary-preserving split**: it may replace only
   dependency-free shots and leaves any shot with assets, jobs, selected/seed media, or another
   persisted reference at the same start/end offsets. The proposal lists those fixed shot IDs.
-- If the author wants a fixed boundary gone, they first park each take as a `take` Bin alias, clear
-  any seed/conditioning dependency, and explicitly delete the now dependency-free shot. Re-split
-  never performs that destructive sequence implicitly.
+- If the author wants a fixed boundary gone, they explicitly `park_shot` first. That removes the shot
+  from active coverage while preserving it, its original beat ownership, and all attached authored
+  and paid lineage in the Bin. Parking is refused while the shot is the current match-to target,
+  while it has a nonterminal job or frame extraction, or while downstream nonterminal work is
+  actively consuming that shot, one of its takes, or one of its frames. Match-to must be cleared or
+  retargeted explicitly; parking never does that silently. A terminal downstream conditioning
+  snapshot is retained as historical lineage, does not block parking, and becomes stale against the
+  post-park chain.
+- Re-split then evaluates the post-park active coverage and remaining fixed shots. It never parks,
+  restores, deletes, or reparents a shot or take implicitly.
 
 **And the prototype's `WIDE · FULL DETAIL` label is wrong.** It is a debug readout of the
 density tier that should never have been visible — it reads as a mode the user picked. Remove
@@ -383,22 +412,32 @@ it from the coverage bar header.
 
 ## 11. Third round — closing the orphan clause and folding in the frame ruling
 
-### 11.1 Re-split cannot delete a shot that has takes
+### 11.1 Re-split parks, rather than deletes, a shot that has takes
 
-Taking the second option, and the reasoning holds: authors do not need a destructive split in
-one gesture. Deleting coverage that cost money is a decision worth its own step, and it
-already has defined semantics.
+The approved third-reference-kind amendment keeps the original safety goal: authors do not need a
+destructive split in one gesture. Removing paid coverage is an explicit, reversible park operation,
+separate from accepting a re-split proposal.
 
 - A re-split proposal may only change dependency-free shots. Any shot with an asset, job,
   selected/seed media, conditioning-frame dependency, match target, or another persisted reference
   is a fixed point the split works around.
-- If the author wants those boundaries gone, they first park each take, clear remaining
-  dependencies, explicitly delete the now dependency-free shot, and then re-split.
+- If the author wants one of those boundaries gone, they first `park_shot`. The operation removes its
+  ID from the original beat's active shot order and creates a Shot Bin reference containing that beat
+  ID; the shot and its assets, jobs, receipts, takes, and frame records remain intact and resolvable.
+- Parking may make downstream continuity stale because active coverage changed. That state remains
+  visible and playable under the existing staleness rules; it is not repaired or re-rendered
+  implicitly. `park_shot` refuses a current match-to target and any nonterminal job or extraction on
+  the shot or downstream that is actively consuming the shot, take, or frame. Terminal downstream
+  conditioning snapshots remain attached as historical lineage and become stale rather than
+  blocking; match-to must be cleared or retargeted first.
+- Re-split uses the post-park active coverage and its remaining fixed set. `restore_shot` returns the
+  preserved shot to its original beat at a currently valid position and applies the same continuity
+  and capacity checks as any other structural edit.
 - The director's proposal states which shots it treated as fixed, so the constraint is visible
   rather than mysterious.
 
-No third Bin kind, no dangling `clipId`, no schema change. §10.5's orphan clause is
-withdrawn: nothing becomes orphaned because nothing is deleted.
+The Shot Bin reference is the ownership seam that prevents an orphan: nothing becomes dangling,
+nothing paid is deleted, and no take has to be detached from the shot that produced it.
 
 ### 11.2 Render outputs, posters, and conditioning frames stay distinct
 
