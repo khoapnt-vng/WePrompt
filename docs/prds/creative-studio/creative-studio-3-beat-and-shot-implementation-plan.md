@@ -35,7 +35,7 @@ it by its authoring name, `Creative Studio 3 - Beat and Shot.dc.html`.
 > only an anchor if it names the file everyone means.
 
 **Planning baseline:** `00cac2a08` on `codex/creative-studio-table-board-ui-design` — CS2 Tasks 1–5
-complete, Gate 1 pending. Verify that ancestry and a clean worktree before Task 1. Enter Task 1 only
+complete, Gate 1 pending. Verify that ancestry and a clean worktree before Task 1A. Enter Task 1A only
 from a **green Gate 1**: the rename below touches roughly a thousand lines across thirty-odd files
 and 18,874 lines of tests, and a red baseline makes rename breakage indistinguishable from
 pre-existing breakage.
@@ -163,7 +163,7 @@ loud quarantine path, which is correct and already specified.
 
 ## Frozen schema-2 contract
 
-Task 1 implements these names exactly. Later tasks may not rename or reinterpret them without a spec
+Task 1C implements these names exactly. Later tasks may not rename or reinterpret them without a spec
 amendment and a new independent contract review.
 
 ### Limits and text bounds
@@ -505,7 +505,80 @@ written without knowing the adapter already supplies the frame: the fifth manage
 
 ## Delivery Gate 1 — schema, reducer, store, money
 
-### Task 1 — Beat and Shot contracts and pure validation
+> **Task 1 is three passes, deliberately.** The rename and the schema extension have different risk
+> profiles and different proofs, and bundling them destroys both. Pass 1A cannot change behaviour, so
+> the whole suite must stay green with no assertion touched — that proof is available exactly once
+> and only if nothing else rides along. Pass 1B changes names that cross a boundary, so expectations
+> move but logic does not. Pass 1C is the only pass that adds meaning. Run them as three commits with
+> three reviews; a red test then names its own cause.
+
+### Task 1A — Rename internal identifiers only
+
+Zero behaviour change. Nothing in this pass may alter a byte that is serialized, sent over IPC, or
+named in an MCP schema.
+
+**Rename:** type names (`StudioSection` → `StudioBeat`, `StudioClip` → `StudioShot`,
+`StudioShelfItem` → `StudioBinItem`), function names (`validateSection` → `validateBeat`), local
+variables and parameters (`clipOwners` → `shotOwners`), constant identifiers
+(`STUDIO_MAX_CLIPS_PER_SECTION` → `STUDIO_MAX_SHOTS_PER_BEAT`), and test helper names (`makeClip` →
+`makeShot`).
+
+**Do not touch:** any string literal, and any property name on a persisted or wire-facing type.
+`sections`, `clips`, `shelf`, `clipId`, and `sectionId` are serialized keys — renaming them is a
+contract change and belongs to 1B. The temptation on a find-and-replace is to sweep `'add_section'`
+and `clipId` along with everything else; that silently converts a provably safe pass into a
+contract-breaking one.
+
+**Steps**
+
+- [ ] Confirm both spec pins still match the committed files (`shasum -a 256`), and that the
+      direction document has been diffed against its authoring copy at least once. Stop if not. The
+      seven inference decisions are already closed — see _Decisions closed_.
+- [ ] Confirm Gate 1 is green before starting. A rename entered from a red baseline is unverifiable.
+- [ ] Perform the identifier rename across `packages/` and `tests/`.
+- [ ] **Gate — the free proof:** `bun run test` fully green, and `git diff` contains **no change to
+      any assertion, expectation, or fixture value**. If an expectation moved, something in the pass
+      crossed a contract boundary; find it and move it to 1B rather than updating the test.
+- [ ] Run `bunx tsc --noEmit` and `bun run lint --quiet`.
+- [ ] Commit: `refactor(studio): rename internal identifiers to beat and shot`.
+
+### Task 1B — Rename wire and persisted names
+
+Behaviour changes; semantics do not. Expectations and fixtures move in this pass, and that is the
+signal that distinguishes it from 1A.
+
+**Files**
+
+- Modify: `packages/desktop/src/common/types/project/creativeStudioTypes.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/schema2/validation.ts`
+- Modify: `packages/desktop/src/common/adapter/native/payloadSchemas.ts`
+- Modify: `packages/desktop/src/common/adapter/native/constants.ts`
+- Modify: `packages/desktop/src/process/resources/builtinMcp/studioServer.ts`
+- Modify: the schema-2 store seams and every affected test
+
+**Steps**
+
+- [ ] Rename persisted property names: `sections` → `beats`, `clips` → `shots`, `shelf` → `bin`,
+      `sectionOrder` → `beatOrder`, `clipOrder` → `shotOrder`, `clipId` → `shotId`, `sectionId` →
+      `beatId`, `storyLine` → `action`, `visualPrompt` → `look`, `shotPrompt` → `line`,
+      `selectedAssetId` → `selectedTakeId`. Move the validator's key Sets with them.
+- [ ] Rename the MCP operation names carried in `studio_apply_edits`' `mutation_batch` —
+      `add_section` → `add_beat`, `reorder_sections` → `reorder_beats`, `add_clip` → `add_shot`,
+      `reorder_clips` → `reorder_shots`, `park_section` → `park_beat`, `restore_section` →
+      `restore_beat`, `reorder_shelf` → `reorder_bin`, `remove_shelf_alias` → `remove_bin_item`,
+      `select_shelved_take` → `select_binned_take` — and move the native payload schemas and manifest
+      entries with them **in the same commit**.
+- [ ] **Gate:** the whole suite green, `tests/unit/process/bridge/nativePayloadSchemas.test.ts`
+      explicitly among it. That parity test exists precisely to catch a provider renamed without its
+      manifest entry, and it once sat red on an integration branch for four slices because nobody ran
+      the repo-wide gate. Run everything, not the changed files.
+- [ ] **Review the diff for logic changes.** This pass should contain renames, moved expectations,
+      and nothing else. Any conditional, bound, or branch that changed belongs in 1C.
+- [ ] Commit: `refactor(studio): rename persisted and wire names to beat and shot`.
+
+### Task 1C — Beat and Shot contracts and pure validation
+
+The only pass that adds meaning.
 
 **Files**
 
@@ -514,6 +587,8 @@ written without knowing the adapter already supplies the frame: the fifth manage
 - Modify: `packages/desktop/src/common/types/project/creativeStudioCanonicalTake.ts`
 - Modify: `packages/desktop/src/process/services/creative-studio/service/schema2/validation.ts`
 - Modify: `packages/desktop/src/process/services/creative-studio/service/schema2/factories.ts`
+- Delete: `packages/desktop/src/process/services/creative-studio/service/schema2/cuts.ts`
+- Delete: `tests/unit/process/creative-studio/service/schema2/cuts.test.ts`
 - Modify: `tests/unit/process/creative-studio/service/schema2/validation.test.ts`
 - Modify: `tests/unit/process/creative-studio/service/schema2/factories.test.ts`
 - Modify: `tests/unit/process/creative-studio/types/canonicalTake.test.ts`
@@ -521,12 +596,11 @@ written without knowing the adapter already supplies the frame: the fifth manage
 
 **Steps**
 
-- [ ] Confirm both spec pins still match the committed files (`shasum -a 256`), and that the
-      direction document has been diffed against its authoring copy at least once. Stop if not. The
-      seven inference decisions are already closed — see _Decisions closed_.
-- [ ] Replace the Section/Clip/Shelf types with Beat/Shot/Bin and the independently named constants
-      from the frozen contract. Delete `cuts` and `activeCutId`; add `bedAssetId` and
-      `matchToShotId`. Widen `targetDurationSeconds` to 5–1440 in the validator **and** the summary
+- [ ] Add the new persisted fields from the frozen contract: `actionRevision`, `targetSeconds`,
+      `lineHistory`, `derivation`, `derivedFromActionRevision`, `chainBreak`, `seedStillId`,
+      `trimInSeconds`, `trimOutSeconds`.
+- [ ] Delete `cuts` and `activeCutId` and the `cuts.ts` module; add `bedAssetId` and `matchToShotId`
+      to the project. Widen `targetDurationSeconds` to 5–1440 in the validator **and** the summary
       schema together. The managed-asset collection set is unchanged — there is no fifth collection.
 - [ ] Change `canonicalVideoPosterV2` to resolve the poster **by output role**, not by
       `outputAssetIds[1]`. RED that a job with a third output still resolves its cover.
