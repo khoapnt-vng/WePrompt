@@ -3,6 +3,9 @@
 Companion to `Creative Studio 3 - Beat and Shot.dc.html`. Written in response to the
 review questions on that prototype. Where an answer changes CS2's contract, it says so.
 
+Amended on 2026-08-18 after executable-plan review to close seed-pending authoring, trim-endpoint
+conditioning, two-kind Bin ownership, route selection, spend authorization, and undo semantics.
+
 ---
 
 ## 1. What CS3 is
@@ -105,8 +108,9 @@ Consequences, all deliberate:
   intent (e.g. `~24s target`), actual as a fact (`24s`).
 - Re-splitting coverage changes `actual` and leaves `target` alone. That is the point: the
   gap between them is the director's cue.
-- A no-coverage beat's slate **is** `target` seconds long. So it is a promise, and it is the
-  only case where an authored number reaches the renderer.
+- A no-coverage beat with a target exports a slate exactly `target` seconds long. A no-coverage
+  beat whose target is still null is **duration pending**: it is valid authoring state, contributes
+  no invented seconds, and blocks film render until the author or Director supplies a target.
 
 ---
 
@@ -135,8 +139,11 @@ an inference.
 
 **`STARTS FROM THE STILL`**: the head shot of every beat conditions on a still generated
 from cast + look + that shot's prompt on the **image route**. Stills are takes too — several
-per shot — and the user picks; default is the latest. This is why every project needs two
-live routes by construction (CS2 §4).
+per shot — and the user picks; default is the latest unpinned still. A newly authored or
+re-split head is allowed to have no still yet: that is **seed pending**, not malformed data.
+Seed-pending coverage remains editable but cannot submit a video generation. Importing a still
+or completing a separately reviewed `seed_still` image job closes the gate. This is why every
+project needs two live routes by construction (CS2 §4).
 
 **Chains are strictly beat-scoped. Freeze it as an invariant.** Beats are therefore the unit
 of parallelism: a project at the cap is 24 parallelisable groups rather than one long series.
@@ -186,20 +193,22 @@ prototype does not draw them. Two immediate consequences:
 
 ## 6. Cut capabilities — descope honestly
 
-| Item                               | Ruling                                                                                                                                                                                                            |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ONE FILE · STITCHED WITH THE BED` | ffmpeg-class (concat + mix + fade), spiked out and unbuilt. Needs a scope and an owner. If it cannot ship, the Cut offers the **editor folder only** and the one-file option is hidden — never shown and failing. |
-| `MATCH TO`                         | v1 is **prompt-level**, therefore a re-render, therefore costed. The UI must say so — it currently reads as a free grade. A real colour pipeline is a separate, later decision.                                   |
-| Bed 3:04 vs cut 2:58               | **Fade out at the cut's end.** Never extend, never hard-truncate.                                                                                                                                                 |
-| Export retention                   | Keep the last **5 per shape**, oldest evicted, counts against project size, listed in the assets drawer with its size.                                                                                            |
+| Item                               | Ruling                                                                                                                                                                                                                                                          |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ONE FILE · STITCHED WITH THE BED` | Not in v1. It is ffmpeg-class concat + mix + fade work with no implementation owner, so the option is hidden. V1 offers the editor folder, still, and on-demand script exports; it never shows a control that fails.                                            |
+| `MATCH TO`                         | v1 is **prompt-level**, therefore a re-render, therefore costed. The UI must say so — it currently reads as a free grade. A real colour pipeline is a separate, later decision.                                                                                 |
+| Bed 3:04 vs cut 2:58               | **Fade out at the cut's end.** Never extend, never hard-truncate. The bed is one imported managed audio asset; this plan adds no audio-generation route.                                                                                                        |
+| Export retention                   | Keep the last **5 per shape**, oldest evicted, listed in the assets drawer with its size. The existing write-admission safety cap still fails a write before mutation; it is not an eviction budget and never authorizes deleting takes or conditioning frames. |
 
 ---
 
 ## 7. Inherit or restate
 
-**Bin = Shelf, and it inherits the hardened shelf invariants** (XOR membership, alias must be
-a canonical non-selected non-cut take, per-kind maxima). Two item kinds, and both must be
-labelled — the prototype tags one and not the other:
+**Bin = Shelf, and it inherits the hardened shelf invariants** (XOR beat membership; a take
+alias must be canonical, non-selected, and not used as a seed or conditioning input; per-kind
+maxima). It has exactly two reference kinds — `beat` and `take` — and each item carries one of
+two labelled reasons. A shot is never a Bin item: park its takes individually, then delete the
+now dependency-free shot.
 
 - **Lifted** — was in the film, removed. ("Store walkthrough")
 - **Alternate** — never in the film. ("Alternative cold open")
@@ -212,24 +221,26 @@ what conditioning is for, not a predicate. Hard blocks on prose invite workaroun
 (abbreviations, run-on compounds) that make the output worse. Rules are hard; guidance is
 soft, and the Look is guidance.
 
-**Spend.** Two paid entry points, one predicate set:
+**Spend.** One reviewed `prepare` → `confirm` protocol covers both seed-still and video-take jobs:
 
-- Estimate = route price × seconds × generations, and it must be a **range**, not a point,
-  once takes are in play. Nobody gets 16 shots right first time; a quote that says $6.40 and
-  bills $18 is worse than no quote. Quote the first pass and state that revisions are extra.
+- Estimate = route unit price × billable units × generations, and it must be a **range**, not a
+  point, once takes are in play. Image routes bill per generation; video routes bill per second.
+  Quote the authorized pass and state that later revisions require a new quote.
 - All three numbers in a gate — headline cost, generation count, button label — must come
   from **one set of shots**. In-flight work is context, never billed again.
-- Reconcile after: actual charge per take in the assets drawer; if actual exceeds estimate by
-  more than 20%, say so unprompted.
-- **A budget cap belongs in the Brief as a pinned rule.** "Keep this under $10" is a
-  predicate checked before dispatch, the same mechanism as "no real club crests". This is the
-  honest answer to "I don't know what this will cost": you tell it what it may cost.
+- Persist an authorization-linked rate-card receipt per completed take. Do not claim provider-bill
+  reconciliation without provider billing data.
+- **A budget cap belongs in the Brief as a pinned policy.** "Keep this under $10" is checked against
+  the quote's upper bound before dispatch, separately from content predicates such as forbidden
+  terms. This is the honest answer to "I don't know what this will cost": you tell it what it may
+  cost.
 
-**Undo is still the open gap.** `RESET` in the beat bar means: revert _this beat's_ shot
-lengths, trims, and derived prompts to last saved. Nothing else. Everything else needs the
-revision-aware undo from CS2 §5, and CS3 adds destructive moves CS2 did not have —
-re-split, detach, lift, changing match-to. The Bin protects beats, takes, and (per §4 above)
-authored text. It does not protect coverage or joins. Those need undo.
+**Undo is a persisted, revision-aware authoring journal.** `RESET` only discards the renderer's
+uncommitted draft and never reaches main. Every committed free authoring batch stores a bounded
+validated before-fragment entry in the project revision; `undo_last` applies it through the same
+reducer under expected-revision CAS only while the edited authoring fragments still match. It never
+cancels, retries, or refunds paid work. Re-split, detach, lift/restore, trim, reorder, seed selection,
+take selection, bed, and match-to are all covered.
 
 ---
 
@@ -248,7 +259,9 @@ product name.
 Listed so nobody estimates around a gap they think is a decision:
 
 1. **The Director rail** — deliberately out of the prototype.
-2. **Route selection** — still the design item from CS2 §9.
+2. **Route selection** — the Brief owns one image route and one video route selected from the
+   sanitized catalog. A project is authorable with either missing, but a paid gate is blocked until
+   the route required by that job is selected and ready.
 3. **`PART DONE` recovery** — the resume affordance from §3.
 4. **Target vs actual duration** — needs distinct visual treatment per §2.2.
 5. **Narration fields** — see §5.
@@ -258,51 +271,58 @@ Listed so nobody estimates around a gap they think is a decision:
 
 ## 10. Second round — blockers, contradictions, and the question I answered wrong
 
-### 10.1 Frame extraction is on the critical path. §6 was wrong to imply otherwise.
+### 10.1 Conditioning-frame extraction is on the critical path
 
-Correct: the chain cannot advance without the last frame of the previous take, so this is
-core authoring, not export. §6's descoping applies to **stitch/mix/fade** only.
+The chain cannot advance without the frame at the **played endpoint** of the selected upstream
+take. That is not necessarily the provider's full-video last frame: after a ten-second take is
+tail-trimmed to eight seconds, the next shot must start from the decoded eight-second endpoint.
 
-**Ruling: the last frame is a persisted asset, not a runtime value.** On take completion,
-write `beats/<n>/shot-<k>/take-<t>/last-frame.png` into the project folder. Nothing in the
-chain reads a frame from memory.
+**Ruling: the conditioning frame is a persisted, provenance-bound asset, not a runtime value and
+not the Board poster.** It records the selected take asset and the exact trim endpoint it was
+decoded from. A provider-returned last frame may satisfy extraction only when the selected take is
+untrimmed and the provider output is for that exact immutable take. Otherwise main decodes the
+managed video at the played endpoint. Renderer canvas capture may create a Board poster, but it is
+never chain authority.
 
-That one decision dissolves the renderer/main problem. Source order of preference:
+**Invariant: no chain advance without the exact conditioning frame on disk.** Because takes are
+immutable and already on disk, a missing frame is re-extractable. Closing the window mid-chain
+stalls the chain rather than losing it, and recovery asks whether the frame for the selected take
+and trim endpoint exists. Changing take selection or tail trim invalidates that provenance and
+queues a new local extraction before downstream submission.
 
-1. **Provider-returned last frame** — check Seedance first. If it returns one, prefer it: it
-   is the pixels the engine actually ended on, not our re-decode of a compressed file.
-2. **Main-process decode** — for headless, window-closed, and recovery paths.
-3. **Renderer canvas capture** — `useStudioVideoPosterCapture.ts`, already proven untainted
-   by the poster spike. Cheapest, and fine as the happy path.
-
-**Invariant: no chain advance without the frame asset on disk.** Because takes are immutable
-and already on disk, a missing frame is always **re-extractable** — so closing the window
-mid-chain stalls the chain rather than losing it, and job recovery is "is the frame file
-there? if not, extract it" rather than "re-render". Main needs a decode path, but only as a
-recovery step, not as the primary loop.
-
-This does mean frame extraction must be a **named job step** with its own state, not a side
-effect of render completion.
+Extraction is a **named, durable local lifecycle step** with `pending | extracting | ready | failed`
+state. It is not a paid provider generation and does not masquerade as a render-job status.
 
 ### 10.2 Money: build the rate card, drop the reconciliation
 
 Agreed, none of it exists. Three rulings:
 
-**Price source is a config rate card** — per route, per second, with an explicit currency
-field, owned by whoever owns route bindings. Not a provider API in v1. The UI must say the
-number comes from our rate card, not from the provider.
+**Price source is a config rate card** — per route, with an explicit currency and unit, owned by
+whoever owns route bindings. Video routes are priced per second; image routes are priced per
+generation. Not a provider API in v1. The UI must say the number comes from our rate card, not from
+the provider.
 
 **Drop reconciliation. It was theatre and the critique is correct** — if actual is computed
 from the same table as the estimate, the two can only differ by generation count, which we
 know before dispatch. The ">20% over, say so unprompted" rule is **withdrawn**.
 
 **Replace it with a receipt, which is honest and useful.** Per take, persist what actually
-ran: route, seconds, generation count, and the rate in force at the time. That gives the
+ran: authorization, purpose, route, currency, rate unit/value, seconds where applicable,
+generation index/count, and integer total. That gives the
 assets drawer "this beat cost you N" without claiming to know your bill. If a provider later
 returns real billing data, reconciliation becomes possible and can be added then.
 
 The **budget cap as a pinned brief rule survives** — it is checked against _our_ estimate
 before dispatch, which is a legitimate predicate regardless of what the provider reports.
+
+The paid boundary is a two-step main-process protocol. `prepare` snapshots the project revision,
+ordered seed/video generation lines, conditioning inputs, route IDs, requested generation counts,
+rate-card digest, currency, and lower/upper minor-unit totals into an expiring quote. `confirm`
+re-derives that quote inside the project queue; any changed input returns stale and spends nothing.
+A successful confirm
+persists one authorization plus all idempotent job records **before** the first provider call.
+Recovery may dispatch only jobs named by that authorization. The per-batch budget compares the
+quote's upper bound; revisions beyond the authorized generation count require a new quote.
 
 ### 10.3 The Bin contradiction: take the second option
 
@@ -314,12 +334,14 @@ reference-shaped. So:
 - Line history is **beat-scoped**, each entry recording the shot ordinal it was written
   against, the text, and a timestamp. Beat-scoped rather than shot-scoped so that
   re-splitting cannot orphan it.
+- The ordinal is historical provenance in the fixed range 1–8; it is not required to be within the
+  beat's current shot count. Shrinking coverage therefore cannot make preserved writing invalid.
 - Restore is well-defined: pick an entry, choose a shot in that beat, it becomes that shot's
   line and marks it detached.
 - Bounds live with the beat: a fixed cap of entries per beat, oldest evicted, and a per-entry
   length bound that is just the prompt field's bound.
-- `StudioShelfItem` stays a union of two reference kinds. No third kind, no bytes, no new
-  invariants.
+- `StudioBinItem` stays a union of two reference kinds: `beat` and `take`. No `shot` kind, no bytes,
+  no new ownership graph.
 
 §4 above is amended accordingly.
 
@@ -340,16 +362,18 @@ free, and it is the single most valuable thing the director does after the spine
 coverage: shot records with durations and derived prompts. Nothing to remember, nothing to
 re-apply, no preference to store.
 
-**Re-splitting a beat that has rendered takes never bins them silently.** Takes belong to
-shots; if a re-split moves shot boundaries, existing takes correspond to nothing. So:
+**Re-splitting never deletes or silently detaches persisted dependencies.** Takes, jobs, seeds,
+conditioning frames, and match-to references belong to exact shots; if a re-split moved those
+boundaries, the dependencies would no longer describe the authored film. So:
 
-- The director's proposal must state what becomes orphaned **before** it applies, by name and
-  count, in the same shape as the render gate.
-- Orphaned takes go to the **Bin** as `asset` items — reference-shaped, so §7's invariants
-  hold unchanged.
-- If the user declines, the director proposes a **boundary-preserving split**: re-split only
-  the shots with no takes, and leave rendered shots alone. This is usually what they wanted,
-  and it should probably be the default offer rather than the fallback.
+- The director's proposal must name every fixed shot **before** it applies, with the reason it is
+  fixed, in the same review card as the proposed coverage.
+- The accepted operation is always a **boundary-preserving split**: it may replace only
+  dependency-free shots and leaves any shot with assets, jobs, selected/seed media, or another
+  persisted reference at the same start/end offsets. The proposal lists those fixed shot IDs.
+- If the author wants a fixed boundary gone, they first park each take as a `take` Bin alias, clear
+  any seed/conditioning dependency, and explicitly delete the now dependency-free shot. Re-split
+  never performs that destructive sequence implicitly.
 
 **And the prototype's `WIDE · FULL DETAIL` label is wrong.** It is a debug readout of the
 density tier that should never have been visible — it reads as a mode the user picked. Remove
@@ -365,38 +389,37 @@ Taking the second option, and the reasoning holds: authors do not need a destruc
 one gesture. Deleting coverage that cost money is a decision worth its own step, and it
 already has defined semantics.
 
-- A re-split proposal **may only change boundaries of shots with no takes.** Shots with takes
-  are fixed points the split works around.
-- If the author wants those boundaries gone, they delete the shot explicitly first — Task 2's
-  dependency-free deletion — and then re-split.
+- A re-split proposal may only change dependency-free shots. Any shot with an asset, job,
+  selected/seed media, conditioning-frame dependency, match target, or another persisted reference
+  is a fixed point the split works around.
+- If the author wants those boundaries gone, they first park each take, clear remaining
+  dependencies, explicitly delete the now dependency-free shot, and then re-split.
 - The director's proposal states which shots it treated as fixed, so the constraint is visible
   rather than mysterious.
 
 No third Bin kind, no dangling `clipId`, no schema change. §10.5's orphan clause is
 withdrawn: nothing becomes orphaned because nothing is deleted.
 
-### 11.2 Extraction is its own job with a single output
+### 11.2 Render outputs, posters, and conditioning frames stay distinct
 
 Stated for the contract, since the fork is easy to get wrong:
 
-- The **render job keeps exactly two outputs** — take, poster — so `canonicalVideoPosterV2`
-  and everything reading `outputAssetIds[1]` is untouched. Adding last-frame as a third
-  output breaks the Board cover and the library card silently. Do not.
-- **Frame extraction is a distinct job with one output**, queued on render completion,
-  depending on the take.
-- It needs **its own `StudioJobStatus` value** (the set is closed and exactly validated), not
-  a sub-state smuggled into an existing one.
+- Render outputs are read **by role, never array position**. A video take is canonical from its
+  `primary` output. A provider `poster` is optional representative artwork; a third output must not
+  change either selection.
+- A Board poster lives in `thumbnails`. A conditioning frame lives in its own managed
+  `conditioningFrames` collection and records `{ takeAssetId, endpointSeconds }` provenance.
+- The local extraction record has its own lifecycle state and one conditioning-frame output. It is
+  queued whenever an exact selected-take/endpoint frame is absent, including after tail trim.
 
 **Storage:** flat `fileName`, location encoded by the collection — `isSafeFileName` rejects
-separators and the store quarantines path-shaped keys. And it gets a **fifth collection of its
-own**, not `thumbnails`: a conditioning input and a representative frame are different things
-with different lifetimes, and conflating them means an eviction or a regeneration policy
-written for one silently applies to the other.
+separators and the store quarantines path-shaped keys. A take-relative path never appears in a
+record.
 
-**Takes are exempt from eviction. Pin it.** §6's retention and project-size accounting reach
-**exports only** — never takes, never conditioning frames. "A missing frame is always
-re-extractable" is true only while the take video survives; if eviction can reach takes,
-recovery silently becomes re-render, which is recovery that costs money.
+**Takes are exempt from retention eviction. Pin it.** Export retention reaches exports only — never
+takes, never seed stills, never conditioning frames. The existing project write-admission cap may
+refuse a new managed write before mutation; it never selects existing authored or paid media for
+deletion.
 
 ### 11.3 Money, folded in
 
@@ -421,7 +444,9 @@ recovery silently becomes re-render, which is recovery that costs money.
   (a line someone wrote and then replaced); RESET discards uncommitted state. Two mechanisms,
   two jobs, and the distinction is what keeps RESET from being a way to lose writing.
 
-### 11.5 Open empirically
+### 11.5 Closed empirically
 
-Whether Seedance returns a last frame. Worth checking early because it is free information
-and the better source if it exists, but the design does not depend on it.
+Seedance returns `last_frame_url`, and the adapter already exposes it as an optional `poster` role.
+That output may satisfy the conditioning-frame lifecycle only for the exact untrimmed take. The
+design still requires local main-process decoding for trimmed endpoints and routes without that
+output, so provider behavior is an optimization rather than an invariant.

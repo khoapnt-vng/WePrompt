@@ -23,7 +23,7 @@ i18next across 12 locales, repository-managed media URLs.
 
 **Spec:**
 [creative-studio-3-direction-and-answers.md](./creative-studio-3-direction-and-answers.md) (§1–§11),
-SHA-256 `4211c28b9c0b131e6867c3a2a1c137b8b3e211ddefa61fef76ba7779687b8d4a`; frozen visual reference
+SHA-256 `f4dfd4b761d0451f5c5e06eb1b8846275c914f79c40dafed8c7ec1d259cdd66e`; frozen visual reference
 [creative-studio-3-beat-and-shot-reference.html.txt](./creative-studio-3-beat-and-shot-reference.html.txt),
 SHA-256 `642c8b16a56c2799d119c6077c7282969c1d612bd9aca606e39da51c710846ee`. The reference is the
 offline bundle of the prototype the review was conducted against; the direction document refers to
@@ -34,11 +34,13 @@ it by its authoring name, `Creative Studio 3 - Beat and Shot.dc.html`.
 > applied. Diff it against the authoring copy once; if they differ, re-commit and re-pin. A hash is
 > only an anchor if it names the file everyone means.
 
-**Planning baseline:** `00cac2a08` on `codex/creative-studio-table-board-ui-design` — CS2 Tasks 1–5
-complete, Gate 1 pending. Verify that ancestry and a clean worktree before Task 1A. Enter Task 1A only
-from a **green Gate 1**: the rename below touches roughly a thousand lines across thirty-odd files
-and 18,874 lines of tests, and a red baseline makes rename breakage indistinguishable from
-pre-existing breakage.
+**Execution baseline:** `7176e3f6b` on `codex/creative-studio-table-board-ui-design` — CS2 Tasks 1–5
+complete and Gate 1 closed after the independent review/fix sequence through `12a8d7fe7`. The three
+CS3 documentation commits were transplanted onto that lineage before this amendment; do not begin
+implementation from the divergent pre-review docs fork. Verify `7176e3f6b` is an ancestor and the
+worktree is clean before Task 1A. The rename below touches roughly a thousand lines across
+thirty-odd files and 18,874 lines of tests, and a red baseline makes rename breakage
+indistinguishable from new breakage.
 
 **Authorization boundary:** This document is an implementation plan, not implementation, merge,
 default-enablement, release, profile-deletion, provider-run, or customer-migration authorization.
@@ -109,9 +111,10 @@ loud quarantine path, which is correct and already specified.
 4. **One free mutation authority.** Renderer free-authoring IPC and Director processing call the same
    pure ordered reducer inside the store queue. The reducer imports no filesystem, IPC, renderer, job
    manager, provider resolver, adapter registry, polling, retry, cancel, or render code.
-5. **Reviewed spend only.** The only paid boundary is the reviewed submission path. Director
-   reference/generation requests are queued for human review. No Director path may submit, retry,
-   cancel, download, render, resolve routes/providers, or invoke adapters.
+5. **Reviewed spend only.** The only paid boundary is main's `prepare` → human `confirm` protocol.
+   Director reference/generation requests are queued for human review. Accepting a proposal may
+   populate a gate but never confirms it. No Director path may submit, retry, cancel, download,
+   render, resolve routes/providers, invoke adapters, or mint a spend authorization.
 6. **Free operations may create future spend, and must say so.** New in CS3. Tail-trimming a
    non-final shot and reordering shots inside a beat are free at the moment they happen but mark
    downstream frames stale. Any surface that performs one must show the staleness it created, and the
@@ -158,6 +161,10 @@ loud quarantine path, which is correct and already specified.
     diff review. Critical/Important findings block the next gate.
 16. **Feature/release boundary.** Preserve `AIONUI_ENABLE_CREATIVE_STUDIO`; do not enable Studio by
     default, remove the flag, claim packaged acceptance, or launch a provider as part of this plan.
+17. **Per-file coverage ratchet.** Keep
+    `vitest.creative-studio-coverage.config.ts` equal to the executable production diff for each
+    delivery head. Every listed file must remain at least 80% lines and 80% branches; a root
+    aggregate percentage is not a substitute.
 
 ---
 
@@ -174,11 +181,12 @@ export const STUDIO_MAX_BEATS = 24;
 export const STUDIO_MAX_SHOTS_PER_BEAT = 8;
 export const STUDIO_MAX_SHOTS_PER_PROJECT = 96;
 export const STUDIO_MAX_BIN_BEAT_ITEMS = 24;
-export const STUDIO_MAX_BIN_SHOT_ITEMS = 96;
 export const STUDIO_MAX_BIN_TAKE_ITEMS = 96;
 export const STUDIO_MAX_LINE_HISTORY_PER_BEAT = 20;
+export const STUDIO_MAX_UNDO_ENTRIES = 20;
 export const STUDIO_MIN_SHOT_SECONDS = 4;
 export const STUDIO_MAX_SHOT_SECONDS = 15;
+export const STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION = 4;
 export const STUDIO_LOOK_SOFT_WORD_LIMIT = 25;
 export const STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST = 24;
 export const STUDIO_MAX_REFERENCE_REQUEST_SHOTS = 24;
@@ -225,7 +233,8 @@ export type StudioBeat = {
 };
 
 export type StudioLineHistoryEntry = {
-  shotOrdinal: number; // the ordinal the line was written against
+  id: string;
+  shotOrdinal: number; // historical 1..8 provenance; may exceed the current shot count
   text: string;
   capturedAt: string;
 };
@@ -241,26 +250,168 @@ export type StudioShot = {
   trimInSeconds: number | null; // head trim, what it plays
   trimOutSeconds: number | null; // tail trim, what it plays
   chainBreak: 'none' | 'hard_cut'; // author-chosen; never system-set
-  seedStillId: string | null; // required iff this shot heads a chain segment
-  selectedTakeId: string | null;
+  seedStillId: string | null; // explicit image-take pin; null derives latest or seed-pending
+  selectedTakeId: string | null; // selected video take only
   assetIds: string[];
   jobIds: string[];
 };
 
 export type StudioBinItem =
   | { kind: 'beat'; beatId: string; reason: 'lifted' | 'alternate' }
-  | { kind: 'shot'; shotId: string; reason: 'lifted' | 'alternate' }
   | { kind: 'take'; assetId: string; reason: 'lifted' | 'alternate' };
+
+export type StudioProposedShot = {
+  shotId: string; // an existing ID to preserve, or a safe caller-minted new ID
+  line: string;
+  narration: string;
+  onScreenText: string;
+  durationSeconds: number;
+  chainBreak: 'none' | 'hard_cut';
+};
+
+export type StudioCoverageApplyResult = {
+  beatId: string;
+  createdShotIds: string[];
+  retainedShotIds: string[];
+  removedShotIds: string[];
+  fixedShotIds: string[];
+};
+
+export type StudioConditioningInputSnapshot =
+  | { kind: 'seed_still'; assetId: string }
+  | {
+      kind: 'predecessor_frame';
+      predecessorShotId: string;
+      takeAssetId: string;
+      frameAssetId: string;
+      endpointSeconds: number;
+    };
+
+export type StudioFrameExtraction = {
+  id: string;
+  shotId: string;
+  takeAssetId: string;
+  endpointSeconds: number;
+  frameAssetId: string | null;
+  status: 'pending' | 'extracting' | 'ready' | 'failed';
+  errorCode: 'decode_failed' | 'source_missing' | 'storage_error' | null;
+};
+
+export type StudioSpendPolicy = {
+  currency: string;
+  maxPerBatchMinorUnits: number;
+};
+
+export type StudioQuotedGeneration = {
+  id: string;
+  shotId: string;
+  purpose: 'seed_still' | 'video_take';
+  routeId: string;
+  generationCount: number;
+  durationSeconds: number | null; // null for per-generation image pricing
+  conditioningInput: StudioConditioningInputSnapshot | null; // null for seed stills
+  rateUnit: 'generation' | 'second';
+  rateMinorUnits: number;
+};
+
+export type StudioSubmissionQuote = {
+  id: string;
+  projectId: string;
+  projectRevision: number;
+  rateCardDigest: string;
+  currency: string;
+  baseItems: StudioQuotedGeneration[];
+  cascadeItems: StudioQuotedGeneration[];
+  lowerMinorUnits: number;
+  upperMinorUnits: number;
+  expiresAt: string;
+};
+
+export type StudioSpendAuthorization = StudioSubmissionQuote & {
+  confirmedAt: string;
+  idempotencyKeys: { itemId: string; generationIndex: number; key: string }[];
+};
+
+export type StudioSpendReceipt = {
+  authorizationId: string;
+  itemId: string;
+  jobId: string;
+  purpose: 'seed_still' | 'video_take';
+  routeId: string;
+  currency: string;
+  rateUnit: 'generation' | 'second';
+  rateMinorUnits: number;
+  durationSeconds: number | null;
+  generationIndex: number;
+  generationCount: number;
+  totalMinorUnits: number;
+};
+
+export type StudioUndoPatch =
+  | {
+      kind: 'project_fields';
+      before: {
+        brief: string;
+        beatOrder: string[];
+        imageRouteId: string | null;
+        videoRouteId: string | null;
+        spendPolicy: StudioSpendPolicy | null;
+        bedAssetId: string | null;
+        matchToShotId: string | null;
+      };
+      afterDigest: string;
+    }
+  | {
+      kind: 'beat_fields';
+      beatId: string;
+      before: StudioBeat | null;
+      afterDigest: string;
+    }
+  | {
+      kind: 'shot_fields';
+      shotId: string;
+      before: Omit<StudioShot, 'assetIds' | 'jobIds'> | null;
+      beforeBeatId: string | null;
+      beforeIndex: number | null;
+      afterDigest: string;
+    }
+  | { kind: 'bin'; before: StudioBinItem[]; afterDigest: string };
+
+export type StudioUndoEntry = {
+  id: string;
+  sourceRevision: number;
+  label: string;
+  patches: StudioUndoPatch[];
+};
 ```
 
-**`StudioBinItem` is reference-only.** Every kind names an existing record. Authored text never
-enters the Bin — it goes to the owning beat's `lineHistory`, which is why the hardened membership,
-canonicality, and per-kind maxima all survive unchanged.
+**`StudioBinItem` is reference-only and has exactly two kinds: `beat` and `take`.** Every kind names
+an existing record. A shot never enters the Bin. To remove a shot with takes, park each take, clear
+the remaining persisted dependencies, then use dependency-free `delete_shot`. Authored text never
+enters the Bin — it goes to the owning beat's `lineHistory`.
 
 Beat and shot IDs are immutable and unique within a project. Every beat is either in `beatOrder` or
-in the Bin, exactly once. Every shot belongs to exactly one beat's `shotOrder`, or is in the Bin.
-Every shot-owned asset, job, and take relation resolves to that shot. Validation rejects orphaned,
-duplicated, or cross-owned identities.
+in the Bin, exactly once. Every shot belongs to exactly one beat's `shotOrder`; there is no parked
+shot state. A take Bin alias points to a canonical, non-selected take owned by exactly one shot and
+cannot name a current seed or conditioning input. Every shot-owned asset, job, and take relation
+resolves to that shot. Validation rejects orphaned, duplicated, or cross-owned identities.
+
+`StudioAsset.mediaKind` is widened to `'image' | 'video' | 'audio'`. Audio is imported managed
+media only in this plan; `bedAssetId` must resolve to a canonical project-owned audio asset.
+`StudioAsset.shotId` is nullable only for project-owned audio/exports; canonical image/video takes,
+posters, and conditioning frames remain shot-owned. Image seed stills and video takes remain
+distinct by media kind even though both are shot-owned. Video generation jobs
+persist `purpose: 'video_take'`, `authorizationId`, `generationIndex`, and the exact
+`StudioConditioningInputSnapshot`; image generation jobs persist `purpose: 'seed_still'` with the
+same authorization link. Conditioning-frame extraction is represented by
+`StudioFrameExtraction`, not by a provider job status.
+
+The project persists `spendPolicy`, `spendAuthorizations`, `frameExtractions`, and a capped
+`undoHistory`. Prepared quotes live only in a bounded main-process cache and expire; restart requires
+a new prepare and cannot spend an old UI payload. Confirm copies the re-derived quote by value into
+`spendAuthorizations` in the same revision as its jobs. A successful free authoring batch writes its
+inverse in the same project revision. Paid lifecycle bookkeeping and local recovery maintenance do
+not create undo entries; undo never reverses external spend.
 
 ### Duration: authored target, derived actual
 
@@ -268,11 +419,12 @@ duplicated, or cross-owned identities.
   Derived, never persisted as a competing author-editable value.
 - **`targetSeconds`** = nullable authored intent. Never constrains shot durations; the engine never
   has to satisfy it. It is what the director works toward when proposing coverage.
-- **A beat with no coverage contributes `targetSeconds` to the film**, because it exports as a slate
-  of that length. This is the only case where an authored number reaches the renderer.
-- Therefore **the film total is `Σ (actual if the beat has coverage else targetSeconds)`** — a mixed
-  figure by construction. State it wherever it is computed; it is not reproducible otherwise, and the
-  under/over readout compares this mixed figure against the project target.
+- **A beat with no coverage and a non-null target contributes `targetSeconds` to the film**, because
+  it exports as a slate of that length. A no-coverage/null-target beat is `duration_pending`: valid
+  authoring state, but not renderable.
+- The film-duration projection is therefore `{ knownSeconds, unresolvedBeatIds }`, where
+  `knownSeconds = Σ (actual if covered else target when present)`. The under/over readout and film
+  render are available only when `unresolvedBeatIds` is empty; no code coerces null to zero.
 - Target and actual **must render distinctly** (`~24s target` versus `24s`). Rendering them
   identically is the defect this split exists to prevent.
 
@@ -281,8 +433,11 @@ duplicated, or cross-owned identities.
 - **Chains are strictly beat-scoped.** Beats are therefore the unit of parallelism: a project at the
   cap is 24 parallelisable groups, never one long series. Freeze this as an invariant.
 - The **head of a chain segment** conditions on a still (`seedStillId`); every other shot conditions
-  on the previous shot's last frame. A shot heads a segment if it is first in `shotOrder` **or** its
-  `chainBreak` is `hard_cut`.
+  on the previous shot's trim-aware conditioning frame. A shot heads a segment if it is first in
+  `shotOrder` **or** its `chainBreak` is `hard_cut`. `seedStillId` is an explicit pin; when null, the
+  effective seed is the eligible completed image take with greatest `createdAt`, breaking ties by
+  lexical asset ID. A head with neither pin nor eligible take is valid `seed_pending` authoring state
+  and blocks video submission rather than persistence.
 - **`hard_cut` is author-chosen; continuity break is system-detected.** They are different things and
   must never share a name or a visual treatment. A continuity break means the frame a shot was
   generated from no longer exists — upstream was re-rendered or tail-trimmed.
@@ -292,8 +447,9 @@ duplicated, or cross-owned identities.
   continuity unless the shot is last in its chain segment.
 - **Reordering shots inside a beat rewrites the chain and is not free.** Reordering beats is free.
   The UI must not make the two look alike.
-- **No chain advance without the frame asset on disk.** Frame extraction is a distinct job, not a
-  side effect of render completion.
+- **No chain advance without the exact frame asset on disk.** Each video job stores its immutable
+  conditioning snapshot. Staleness is a pure comparison between that snapshot and the current
+  predecessor/selected-take/trim endpoint or selected seed; no process-local flag is authoritative.
 
 ### Derivation
 
@@ -308,10 +464,15 @@ duplicated, or cross-owned identities.
   `Knowledge Base/` folder trained users that a visible file is the source of truth, and a generated
   `script.md` sitting beside it would read as the same contract while being the opposite. It is also
   why `script.md` is never ingested — the reducer stays the only writer.
-- **Re-splitting coverage may only change the boundaries of shots that have no takes.** Shots with
-  takes are fixed points the split works around, and the director's proposal must state which shots
-  it treated as fixed. A shot with takes is removed only by lifting it to the Bin — never by
-  re-split, and never by deletion.
+- **Re-splitting coverage may only change dependency-free shot boundaries.** Shots with any asset,
+  job, selected/seed media, conditioning-frame dependency, match target, or other persisted
+  reference are fixed points. `StudioProposedShot` is the complete ordered result. Its
+  existing IDs preserve identity; new safe IDs are caller-minted. The reducer derives the fixed set,
+  requires the proposal's `fixedShotIds` to match it, and requires every fixed shot's cumulative
+  start/end boundary to remain unchanged. Removed dependency-free detached lines enter beat-scoped
+  history. The apply result returns ordered `createdShotIds`, `retainedShotIds`, `removedShotIds`,
+  and `fixedShotIds`.
+  Created, retained, and fixed IDs follow proposal order; removed IDs follow the prior `shotOrder`.
 
 ### The Cut
 
@@ -329,40 +490,38 @@ cut-clip record, its validator, and the dormancy rule that kept binned beats' cu
 - **`AUTO-DUCKED` must not ship.** There is no voice track to duck for until TTS lands. `narration`
   and `onScreenText` are retained as authored fields with no downstream consumer.
 - Export retention keeps the last **5 per shape**, oldest evicted, listed in the assets drawer with
-  its size. Size is shown for visibility only: there is **no project size budget**, because takes and
-  frames are exempt from eviction by ruling, so a budget could only ever reach exports — which the
-  per-shape count already bounds.
+  its size. The existing `projectMaxBytes` write-admission cap remains a fail-before-mutation safety
+  bound for every managed write; it is not a user budget and never authorizes eviction of authored
+  or paid media.
 - **Retention reaches exports only — never takes, never conditioning frames.** "A missing frame is
   always re-derivable" holds only while the take video survives; eviction that reaches takes turns
   recovery into a re-render that charges.
 
-### The conditioning frame is the poster
+### The conditioning frame is not the poster
 
-**There is no fifth collection, and there is no extraction job.** The provider's last frame and the
-Board cover are the same artifact, so they cannot have divergent lifetimes.
+The Board poster is representative artwork in `thumbnails`. The conditioning frame is chain input
+in `conditioningFrames`, keyed by the selected immutable take and its played endpoint. They have
+different provenance and retention authority and may not alias merely because an untrimmed provider
+output happens to contain the same pixels.
 
-`bytePlusSeedanceAdapter.ts` already reads `content.last_frame_url` and emits it as a
-`ProviderOutput` with `role: 'poster'`; the adapter contract's own comment on that field reads
-_"Distinguishes a generated video's optional last-frame poster from primary output."_ The frame
-arrives with the take, at no extra cost, and lands in `thumbnails`.
+The endpoint is exactly `take.durationSeconds - (trimOutSeconds ?? 0)`; head trim is irrelevant.
+Extraction identity is the stable digest of canonical `{ shotId, takeAssetId, endpointSeconds }`, so
+restart and duplicate scheduling converge on one record. A ready record is authoritative only when
+its managed frame inode/bytes and all three provenance fields still match.
 
 - **Read outputs by role, never by position.** `jobManager` already filters
   `outputs.filter((o) => o.role === 'poster')`. The fragile code is `canonicalVideoPosterV2` reading
   `outputAssetIds[1]`; fix that instead of constraining output count. This replaces any
   "exactly two outputs" rule — with role-addressed reads, a third output is harmless.
-- **Local extraction is a route-conditional fallback inside output persistence, not a job.** Only
-  Seedance emits a poster role; `openRouterVideoAdapter`, `mediaGatewayAdapter`, and
-  `e2eFakeAdapter` emit `primary` only, so those routes need a locally produced frame. It enters
-  through the existing path: synthesize a `ProviderOutput` with `role: 'poster'`,
-  `mediaKind: 'image'`, and `source: { kind: 'file', path }` — the shape `imageAdapter` already
-  uses and `jobManager`'s poster persistence already accepts. No provider-less job, no new adapter
-  id, no new `StudioJobStatus` value.
+- **Extraction is a named local lifecycle, not a provider job.** An untrimmed take may adopt a
+  provider-returned last frame after proving exact take provenance. Every other route/endpoint is
+  decoded by main. The durable extraction state is `pending | extracting | ready | failed`; it has
+  no provider route, adapter, receipt, retry charge, or `StudioJobStatus` value.
 - **No chain advance without the frame asset on disk.** Because takes are immutable and on disk, a
   missing frame is always re-derivable, so closing the window mid-chain stalls the chain rather than
-  losing it, and recovery asks "is the frame there?" rather than re-rendering.
-- Because canonical-take identity requires `collection === 'assets'`, a `thumbnails` frame is
-  automatically ineligible for selection and for the Bin. That falls out of the existing invariants
-  and must not be re-implemented.
+  losing it, and recovery asks "is the exact selected-take/endpoint frame there?" rather than
+  re-rendering. Tail trim or take selection creates a new extraction key before downstream work.
+- Conditioning frames are ineligible for take selection, seed selection, and the Bin by collection.
 - **Storage:** flat `fileName`, location encoded by the collection. `isSafeFileName` rejects path
   separators, and the store quarantines any record carrying a path-shaped key at any depth, so a
   take-relative path may never appear in the record.
@@ -370,22 +529,30 @@ arrives with the take, at no extra cost, and lands in `thumbnails`.
 
 ### Money
 
-- **Price source is a config rate card** — per route, per second, with an explicit currency field,
-  owned by whoever owns route bindings. Not a provider API in v1. The UI must say the number comes
-  from our rate card, not from the provider.
+- **Price source is a config rate card** — per route, with explicit currency and unit, owned by
+  whoever owns route bindings. Video routes are per second; image routes are per generation. Not a
+  provider API in v1. The UI must say the number comes from our rate card, not from the provider.
 - **The estimate is a range, not a point**, once takes are in play. Quote the first pass and state
-  that revisions are extra.
+  that revisions are extra. In v1 the lower bound is one generation per shot and the upper bound is
+  the user-requested 1–4 generations per shot; work beyond that authorization requires a new quote.
 - All three numbers in a gate — headline cost, generation count, button label — come from **one set
   of shots**. In-flight work is context, never billed again.
 - **No reconciliation.** Actual computed from the same table as the estimate can only differ by a
   generation count known before dispatch. Instead, persist a **receipt** per take on the **job**:
-  route, seconds, generation count, and the **rate value in force** — stored by value, never as a
-  card reference, so a card update cannot rewrite history.
+  authorization ID, purpose, route, currency, rate unit/value, seconds when applicable, generation
+  index/count, and integer total — stored by value, never as a card reference, so a card update
+  cannot rewrite history.
 - **Budget cap is a pinned brief rule in the user's mental model and a separate mechanism in the
-  code.** `validateRulePredicate` accepts exactly `forbidden_terms`; a budget check has a different
-  input (a batch estimate), a different site (pre-dispatch, not per prompt), and a different breach
-  shape. **Scope in v1 is per batch** — "under $10" means this run. The project-total reading needs
-  receipts to exist first and is sequenced after.
+  code.** It persists as `StudioSpendPolicy`, not a `StudioRulePredicate`. Scope in v1 is per batch;
+  the quote's upper bound in one explicit currency must fit `maxPerBatchMinorUnits`.
+- **Prepare never spends.** It snapshots revision, exact ordered shot/cascade sets, conditioning
+  inputs, routes, generation counts, rate-card digest/value, currency, bounds, and expiry into a
+  `StudioSubmissionQuote`.
+- **Confirm is the only spend authority.** Inside the project queue it re-derives the quote; any
+  mismatch is stale. Success durably stores a `StudioSpendAuthorization` and idempotent jobs before
+  the first provider call. Quote expiry governs confirmation only; once confirmed, recovery finishes
+  the authorized jobs regardless of the old quote expiry. Restart may dispatch only authorized jobs;
+  accepting a Director proposal cannot manufacture or confirm authorization.
 
 ### Validator totality and lookup rules
 
@@ -442,64 +609,101 @@ export type StudioMutationOperation =
   | { kind: 'reorder_beats'; beatOrder: string[] }
   | { kind: 'park_beat'; beatId: string }
   | { kind: 'restore_beat'; beatId: string; beforeBeatId: string | null }
+  | {
+      kind: 'add_binned_beat';
+      beatId: string;
+      beat: StudioEditableBeat;
+      firstShotId: string;
+      firstShot: StudioEditableShot;
+    }
   | { kind: 'add_shot'; beatId: string; shotId: string; shot: StudioEditableShot; beforeShotId: string | null }
   | { kind: 'edit_shot'; shotId: string; changes: StudioEditableShotChanges }
   | { kind: 'delete_shot'; shotId: string } // dependency-free only
-  | { kind: 'park_shot'; shotId: string } // the removal path for a shot with takes
-  | { kind: 'restore_shot'; shotId: string; beatId: string; beforeShotId: string | null }
   | { kind: 'reorder_shots'; beatId: string; shotOrder: string[] } // rewrites the chain
-  | { kind: 'apply_coverage'; beatId: string; shots: StudioProposedShot[] } // re-split
+  | {
+      kind: 'apply_coverage';
+      beatId: string;
+      shots: StudioProposedShot[];
+      fixedShotIds: string[];
+    }
   | { kind: 'set_hard_cut'; shotId: string; hardCut: boolean }
-  | { kind: 'set_seed_still'; shotId: string; assetId: string }
+  | { kind: 'set_seed_still'; shotId: string; assetId: string | null }
   | { kind: 'trim_shot'; shotId: string; trimInSeconds: number | null; trimOutSeconds: number | null }
   | { kind: 'redetach_line'; shotId: string; line: string }
   | { kind: 'rederive_line'; shotId: string }
-  | { kind: 'restore_line'; shotId: string; historyIndex: number }
+  | { kind: 'restore_line'; shotId: string; historyEntryId: string }
   | { kind: 'park_take'; shotId: string; assetId: string }
+  | { kind: 'add_alternate_take'; shotId: string; assetId: string }
   | { kind: 'restore_take'; shotId: string; assetId: string }
-  | { kind: 'remove_bin_item'; item: StudioBinItem }
   | { kind: 'reorder_bin'; bin: StudioBinItem[] }
   | { kind: 'select_take'; shotId: string; assetId: string }
+  | { kind: 'set_routes'; imageRouteId: string | null; videoRouteId: string | null }
+  | { kind: 'set_spend_policy'; policy: StudioSpendPolicy | null }
   | { kind: 'set_match_to'; shotId: string | null }
-  | { kind: 'set_bed'; assetId: string | null };
+  | { kind: 'set_bed'; assetId: string | null }
+  | { kind: 'undo_last'; entryId: string };
 ```
 
-`park_shot` is the removal path for a shot that has takes. `delete_shot` remains dependency-free
-only, exactly as CS2 specified — a shot with assets, jobs, or cut dependencies cannot be deleted, and
-that is why `park_shot` exists.
+There is no `park_shot`: the Bin has no shot kind. `delete_shot` is dependency-free only. The author
+must park eligible takes individually and clear jobs, seed/conditioning, selection, match-to, and
+other references before deletion. `park_beat` and `park_take` create `lifted` entries;
+`add_binned_beat` and `add_alternate_take` create `alternate` entries. No generic
+`remove_bin_item` may orphan the referent.
 
 Editable change objects are exact-key, nonempty partials of authored fields only. Callers mint safe
 IDs; main rejects collisions and returns created IDs in operation order. `reorder_*` inputs are exact
-permutations. Batches are 1–32 operations.
+permutations. Batches are 1–32 operations. `undo_last` must be the only operation in its batch and
+must name the current top entry in the bounded persisted undo journal. Undo patches are internal
+validated before-fragments, never accepted from renderer, IPC, MCP, or a proposal. Each patch's
+`afterDigest` must still match the current authored fragment. Shot patches never overwrite
+`assetIds`/`jobIds`; removing a beat/shot created by the undone edit is refused if it gained a
+persisted dependency. Any mismatch returns `undo_conflict`, consumes no entry, and changes no bytes.
 
 ---
 
 ## Decisions closed on 2026-08-18
 
-These seven were inferences this plan drew rather than rulings it received. All are now closed and
+These decisions were inferences this plan drew rather than rulings it received. All are now closed and
 folded into the contract above. Recorded so a later reader can tell a ruling from an assumption.
 
 1. **Shot media model — confirmed as drafted.** Shots carry no `mediaKind`; every shot is video.
-   `mediaKind` lives only on the asset, so stills are image takes on the image route. `seedStillId`
-   is required on any shot heading a chain segment, **including one after a `hard_cut`** — a hard cut
-   establishes a new look, so it re-seeds rather than continuing.
+   `mediaKind` lives only on the asset, so stills are image takes on the image route. A segment head
+   may persist with `seedStillId: null`; that is seed-pending and blocks video submission. A hard cut
+   establishes a new segment and therefore needs a selected or newly generated seed before video.
 2. **The Cut collapses into project fields.** `cuts` and `activeCutId` are deleted; the project
    carries `bedAssetId` and `matchToShotId`. There are no alternate named cuts in CS3.
-3. **There is no extraction job** — resolved by evidence, not by ruling. See _The conditioning frame
-   is the poster_. Local extraction is a route-conditional fallback inside output persistence, so the
-   provider-less-job problem does not arise.
+3. **Conditioning extraction is a durable local lifecycle, not a provider job.** It is keyed by
+   selected take plus played endpoint and stored separately from Board posters. See _The
+   conditioning frame is not the poster_.
 4. **`RESET` is a renderer draft discard.** It uses the existing `useDraftPersistence`, is not a
    reducer operation, and never reaches main. This is what makes "RESET cannot lose writing" true; it
    is why RESET is absent from the mutation vocabulary.
 5. **`script.md` is an on-demand export shape**, not a file kept at the project root and never
    ingested.
-6. **No project size budget.** The phrase is withdrawn; per-shape export retention is the only bound.
-7. **Seedance returns the last frame** (`bytePlusSeedanceAdapter.ts:206`), and CS2 already persists
-   it as the poster. The other three adapters do not, which is why the fallback exists.
+6. **Storage has a safety cap, not an eviction budget.** Preserve fail-before-mutation write
+   admission; only exports participate in count-based retention.
+7. **Seedance's last frame is an optimization, not universal provenance.** It can satisfy an
+   untrimmed exact-take conditioning request; a trimmed endpoint is decoded locally.
+8. **The Bin has exactly two kinds.** Beats and takes may be referenced; shots never are.
+9. **Paid work uses prepare/confirm.** Quotes and authorizations are main-owned durable records;
+   proposal acceptance and Director paths cannot dispatch.
 
-**Two rulings in the direction document are superseded by decisions 3 and 7**, because they were
-written without knowing the adapter already supplies the frame: the fifth managed-asset collection
-(§11.2) and the "render job keeps exactly two outputs" rule (§11.2). Read outputs by role instead.
+### Blocker closure ledger
+
+| Former blocker                                      | Closed contract / owning task                                                                                                                     |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| Docs fork did not contain green Gate 1              | Execute only with `7176e3f6b` as ancestor; CS3 docs were transplanted onto that lineage.                                                          |
+| No valid pre-seed authoring state                   | Null pin derives latest still or projects `seed_pending`; Task 5 owns reviewed seed jobs and the video readiness gate.                            |
+| Full-video poster could not represent a tail trim   | Conditioning frame is distinct, keyed by selected take plus played endpoint; Tasks 1C/5 own provenance, extraction, recovery, and the 10s→8s RED. |
+| Bin had two versus three incompatible kinds         | Exactly `beat                                                                                                                                     | take`; no shot variant or generic alias removal exists. |
+| Coverage proposal/result type was undefined         | `StudioProposedShot` and ordered `StudioCoverageApplyResult` are frozen above; Task 2 owns fixed-boundary enforcement.                            |
+| Re-split invalidated historical line ordinals       | Ordinal is historical 1–8 provenance, independent of current shot count; Task 1C owns shrink/restart REDs.                                        |
+| Native names landed before atomic cutover           | Tasks 1B/6 keep native/manifest/bridge byte-identical; all public names move together in Task 7.                                                  |
+| Runtime activation and rollback were unspecified    | Task 7 owns the five-state single-flight controller, mixed-root filtering, rollback, retry, and shutdown races.                                   |
+| Proposal/reference ownership stopped at publication | Task 6 owns V2 list/watch/decision/reap, commit attribution, restart repair, and reviewed reference handoff.                                      |
+| Pricing types were detached from dispatch authority | Tasks 4/5 own exact-unit rate cards, cached quotes, persisted authorization/jobs-before-provider, receipts, budget, and recovery.                 |
+| Undo was only a label                               | Tasks 1C/2/14 own bounded before-fragment journal, post-edit digests, conflict rules, CAS, and paid-state exclusion.                              |
+| Gates 2–4 were not executable                       | Each gate now names focused suites, full suite, per-file 80/80 coverage, Playwright/visual evidence, static checks, and independent reviews.      |
 
 ---
 
@@ -533,7 +737,7 @@ contract-breaking one.
 
 - [ ] Confirm both spec pins still match the committed files (`shasum -a 256`), and that the
       direction document has been diffed against its authoring copy at least once. Stop if not. The
-      seven inference decisions are already closed — see _Decisions closed_.
+      inference decisions are already closed — see _Decisions closed_.
 - [ ] Confirm Gate 1 is green before starting. A rename entered from a red baseline is unverifiable.
 - [ ] Perform the identifier rename across `packages/` and `tests/`.
 - [ ] **Gate — the free proof:** `bun run test` fully green, and `git diff` contains **no change to
@@ -551,8 +755,6 @@ signal that distinguishes it from 1A.
 
 - Modify: `packages/desktop/src/common/types/project/creativeStudioTypes.ts`
 - Modify: `packages/desktop/src/process/services/creative-studio/service/schema2/validation.ts`
-- Modify: `packages/desktop/src/common/adapter/native/payloadSchemas.ts`
-- Modify: `packages/desktop/src/common/adapter/native/constants.ts`
 - Modify: `packages/desktop/src/process/resources/builtinMcp/studioServer.ts`
 - Modify: the schema-2 store seams and every affected test
 
@@ -565,13 +767,13 @@ signal that distinguishes it from 1A.
 - [ ] Rename the MCP operation names carried in `studio_apply_edits`' `mutation_batch` —
       `add_section` → `add_beat`, `reorder_sections` → `reorder_beats`, `add_clip` → `add_shot`,
       `reorder_clips` → `reorder_shots`, `park_section` → `park_beat`, `restore_section` →
-      `restore_beat`, `reorder_shelf` → `reorder_bin`, `remove_shelf_alias` → `remove_bin_item`,
-      `select_shelved_take` → `select_binned_take` — and move the native payload schemas and manifest
-      entries with them **in the same commit**.
-- [ ] **Gate:** the whole suite green, `tests/unit/process/bridge/nativePayloadSchemas.test.ts`
-      explicitly among it. That parity test exists precisely to catch a provider renamed without its
-      manifest entry, and it once sat red on an integration branch for four slices because nobody ran
-      the repo-wide gate. Run everything, not the changed files.
+      `restore_beat`, `reorder_shelf` → `reorder_bin`, and `select_shelved_take` → `restore_take`.
+      These are persisted and **unregistered MCP** contract changes only.
+- [ ] Assert the native constants, payload schemas, provider inventory, manifest, bridge, preload,
+      runtime, and renderer are byte-identical to the green Gate 1 baseline and contain no Beat/Shot
+      provider vocabulary. Native/public work belongs to Task 7's atomic cutover.
+- [ ] **Gate:** the whole suite green. Run everything, not the changed files; also run the native
+      parity test as an absence oracle proving no V2 provider was staged early.
 - [ ] **Review the diff for logic changes.** This pass should contain renames, moved expectations,
       and nothing else. Any conditional, bound, or branch that changed belongs in 1C.
 - [ ] Commit: `refactor(studio): rename persisted and wire names to beat and shot`.
@@ -598,31 +800,51 @@ The only pass that adds meaning.
 
 - [ ] Add the new persisted fields from the frozen contract: `actionRevision`, `targetSeconds`,
       `lineHistory`, `derivation`, `derivedFromActionRevision`, `chainBreak`, `seedStillId`,
-      `trimInSeconds`, `trimOutSeconds`.
+      `trimInSeconds`, `trimOutSeconds`, `spendPolicy`, `spendAuthorizations`, `frameExtractions`, and
+      `undoHistory`. Add and exact-validate every supporting proposed-shot, conditioning, extraction,
+      quote/authorization, receipt, and undo type shown in the frozen contract; factories start all
+      collections empty and policies/routes null.
 - [ ] Delete `cuts` and `activeCutId` and the `cuts.ts` module; add `bedAssetId` and `matchToShotId`
       to the project. Widen `targetDurationSeconds` to 5–1440 in the validator **and** the summary
-      schema together. The managed-asset collection set is unchanged — there is no fifth collection.
+      schema together. Add managed `conditioningFrames` and widen assets to canonical imported
+      audio; `bedAssetId` accepts audio only.
 - [ ] Change `canonicalVideoPosterV2` to resolve the poster **by output role**, not by
       `outputAssetIds[1]`. RED that a job with a third output still resolves its cover.
 - [ ] RED: unknown keys; duplicate ownership; orphan assets/jobs; beat active-and-binned overlap;
       invalid Bin items of each kind; 25 beats; 9 shots in one beat; 97 shots; each per-kind Bin
       maximum at exactly N and N+1; shot duration 3 and 16; line history at 20 and 21. Accept every
       exact boundary.
-- [ ] RED totality per the validator rules: an asset `clipId`, job `clipId`, Bin `assetId`,
+- [ ] RED totality per the validator rules: an asset `shotId`, job `shotId`, Bin `assetId`,
       `selectedTakeId`, `seedStillId`, or `matchToShotId` of `constructor`, `toString`, or
       `__proto__`; a 20,000-link retry chain; a 20,000-link shot chain; an asset `durationSeconds` of
       `1e308`. Assert `toBe(false)` on each, never `toThrow`.
-- [ ] RED the chain invariants: a shot heading a segment without a `seedStillId`; a non-heading shot
-      carrying one; a chain edge crossing a beat boundary; `chainBreak` set by anything but an author
-      operation.
+- [ ] RED asset ownership/media compatibility: project-owned audio accepted only for bed/import;
+      shot-owned audio rejected; project-owned image/video rejected as takes; canonical image seed,
+      video take, poster, conditioning frame, and export ownership each exact.
+- [ ] RED the chain invariants: a segment head with no seed remains valid but projects
+      `seed_pending` and cannot submit video; null pin plus completed image takes derives the latest
+      deterministic seed; an explicit pin wins; a non-heading shot carrying a pin; a chain edge
+      crossing a beat boundary; `chainBreak` set by anything but an author operation; a conditioning
+      snapshot that does not resolve to the exact current take/frame/endpoint.
+- [ ] RED extraction state exactness: pending/extracting have no frame/error; ready has one canonical
+      managed frame and no error; failed has no frame and one frozen error code; IDs are the stable
+      canonical-input digest and duplicate inputs cannot create two records.
 - [ ] RED the derivation invariants: `derived` with a null `derivedFromActionRevision`; `detached`
-      with a non-null one; a history entry whose `shotOrdinal` exceeds the beat's shot count.
+      with a non-null one; history ordinal 0 and 9 rejected, while ordinal 8 remains valid after the
+      beat shrinks to one shot and survives restart.
+- [ ] RED trim numeric bounds: finite nonnegative values only, each less than source duration, and
+      `trimInSeconds + trimOutSeconds < durationSeconds`. Reject NaN, infinity, negative zero policy
+      drift, and an empty played interval.
+- [ ] RED the two Bin kinds and no third: exact beat/take maxima, no shot item, no generic removal,
+      and take aliases cannot name selected, seed, or conditioning media.
+- [ ] RED `StudioProposedShot`: exact keys, safe supplied IDs, fixed-ID preservation, and ordered
+      created/retained/removed/fixed result IDs.
 - [ ] Implement the exact validators and `createEmptyStudioProject()` with empty
       beat/shot/Bin/history state. Resolve every record entry by own key, walk both graphs
       iteratively, and consume the constant named for each contract.
 - [ ] Convert canonical-take and summary projection helpers to Beat/Shot. The summary is active-only
-      and the film total uses the mixed rule from the frozen contract; test that a no-coverage beat
-      contributes its target and a binned beat contributes nothing.
+      and the film-duration projection returns known seconds plus unresolved beat IDs; test target,
+      null-target, covered, and binned cases without null-to-zero coercion.
 - [ ] Mutation proof: restore a bare `=== undefined` guard at one lookup site and prove the matching
       totality test fails; remove the per-kind Bin maximum and prove the boundary test fails; restore
       both.
@@ -633,31 +855,38 @@ The only pass that adds meaning.
 
 **Files**
 
-- Create: `packages/desktop/src/process/services/creative-studio/service/schema2/mutations.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/schema2/mutations.ts`
 - Create: `packages/desktop/src/process/services/creative-studio/service/schema2/chain.ts`
 - Modify: `packages/desktop/src/process/services/creative-studio/service/schema2/index.ts`
-- Create: `tests/unit/process/creative-studio/service/schema2/mutations.test.ts`
+- Modify: `tests/unit/process/creative-studio/service/schema2/mutations.test.ts`
 - Create: `tests/unit/process/creative-studio/service/schema2/chain.test.ts`
 
 **Steps**
 
 - [ ] RED every operation, ordered later-op visibility, input immutability, late-op rollback,
       capacity precedence, collision rejection, exact permutations, and created-ID ordering.
-- [ ] RED the removal rules: `delete_shot` refused when the shot has assets, jobs, or cut
-      dependencies; `park_shot` accepted in exactly that case; `restore_shot` returning it to a named
-      beat; takes surviving both with a live referent throughout.
-- [ ] RED `apply_coverage` refusing to move the boundary of any shot that has takes, and reporting
-      which shots it treated as fixed.
+- [ ] RED the removal rules: `delete_shot` refused for every persisted dependency; no `park_shot` or
+      shot Bin variant exists; `park_take` clears an eligible take from selection and creates an exact
+      lifted alias; deletion succeeds only after every dependency is explicitly cleared.
+- [ ] RED `apply_coverage` against the exact `StudioProposedShot` wire shape. It must derive and
+      report the fixed set, reject a caller's mismatched `fixedShotIds`, preserve every fixed shot's
+      cumulative start/end boundary, reuse requested current IDs, create requested new IDs in order,
+      and move every removed detached line to beat history without invalidating an ordinal that no
+      longer exists in current coverage.
 - [ ] RED derivation: edit detaches; `rederive_line` writes the previous line to history and restores
       derivation; editing the action bumps `actionRevision` and marks derived lines stale while
       leaving detached lines untouched; history evicts oldest at 20.
 - [ ] Implement staleness as a pure derivation in `chain.ts`: which shots are stale, from which
-      cause, and what a cascade would cost in generations. Cover tail-versus-head trim asymmetry,
-      `reorder_shots` invalidating downstream, `hard_cut` starting a fresh segment, and beat reorder
-      changing nothing.
+      cause, and what a cascade would cost in generations. Compare each video job's persisted
+      conditioning snapshot with current seed/predecessor/take/frame/endpoint state. Cover
+      tail-versus-head trim asymmetry, selected-take replacement, `reorder_shots` invalidating
+      downstream, `hard_cut` starting a fresh seed-pending segment, and beat reorder changing nothing.
 - [ ] Implement `applyStudioMutationBatch(project, batch)` as a pure draft reducer returning the next
-      project plus created IDs. Preserve jobs, assets, routing, rules, and undo state unless an exact
-      operation owns a field.
+      project plus ordered created/retained/removed/fixed IDs. Every successful free authoring batch
+      appends one bounded entry containing canonical before-fragments for exactly the project/beat/
+      shot/Bin records it touched in the same revision; `undo_last` must be sole-op, CAS-aware, apply
+      only those internal patches, revalidate the full result, and remain unable to alter provider
+      jobs, receipts, or authorizations.
 - [ ] Static fence the `schema2` directory from filesystem, IPC, job manager, resolver, adapter,
       polling, retry, cancel, and render imports.
 - [ ] Mutation proofs: allow `apply_coverage` to move a shot with takes and prove the fixed-point
@@ -676,7 +905,7 @@ Carries CS2 Task 3 almost intact. Only the seam type signatures change.
 - Modify: `packages/desktop/src/process/services/creative-studio/store.ts`
 - Modify: `packages/desktop/src/process/services/creative-studio/index.ts`
 - Modify: `tests/unit/process/creative-studio/store.test.ts`
-- Create: `tests/integration/creative-studio/schema2Cutover.integration.test.ts`
+- Modify: `tests/integration/creative-studio/schema2Cutover.integration.test.ts`
 - Modify: `docs/contributing/development.md`
 
 **Steps**
@@ -705,28 +934,48 @@ Carries CS2 Task 3 almost intact. Only the seam type signatures change.
 
 **Files**
 
-- Create: `packages/desktop/src/process/services/creative-studio/pricing/rateCard.ts`
-- Create: `packages/desktop/src/process/services/creative-studio/pricing/estimate.ts`
-- Create: `packages/desktop/src/process/services/creative-studio/pricing/index.ts`
+- Create: `packages/desktop/src/process/services/creative-studio/service/pricing/rateCard.ts`
+- Create: `packages/desktop/src/process/services/creative-studio/service/pricing/estimate.ts`
+- Create: `packages/desktop/src/process/services/creative-studio/service/pricing/authorization.ts`
+- Create: `packages/desktop/src/process/services/creative-studio/service/pricing/index.ts`
 - Modify: `packages/desktop/src/common/types/project/creativeStudioTypes.ts`
 - Create: `tests/unit/process/creative-studio/pricing/rateCard.test.ts`
 - Create: `tests/unit/process/creative-studio/pricing/estimate.test.ts`
+- Move: the three existing adapter/resolver tests into
+  `tests/unit/process/creative-studio/adapters/` before adding `pricing/`; this reduces the existing
+  over-limit test directory to ten direct children. Moves are byte-identical and happen in their own
+  commit before pricing assertions change.
 
 **Steps**
 
-- [ ] Define the rate card: per route, per second, explicit currency, versioned by value. Load it as
-      config; it is never a provider API call in v1.
+- [ ] Define the rate card: safe route ID, ISO currency, stable digest over canonical values, and an
+      exact rate union — image routes use integer minor units per generation; video routes use
+      integer minor units per second. Load it as config; it is never a provider API call in v1. A
+      quote may contain exactly one currency and the route kind must match the job purpose.
 - [ ] RED the estimate as a **range** over one set of shots, with in-flight work counted as context
       and never billed again, and with the cascade priced as a **separate** line from the base set.
+      Lower is one generation per shot; upper is the requested 1–4 generations per shot. Reject
+      mixed currencies, unsafe integer totals, missing rates, and overlapping base/cascade sets.
 - [ ] RED that the headline cost, the generation count, and the button label are all derived from the
       same shot set — a test that fails if any is computed independently.
 - [ ] Implement the receipt: persisted on the job, recording route, seconds, generation count, and
-      the rate **value** in force. RED that a rate-card change does not alter an existing receipt.
+      the complete frozen `StudioSpendReceipt` by value. RED image/per-generation and
+      video/per-second totals, safe integer bounds, authorization/item/job correlation, and that a
+      rate-card change does not alter an existing receipt.
 - [ ] Implement the budget predicate as its own pre-dispatch mechanism, scoped per batch, with its
-      own breach shape. It is not a `forbidden_terms` variant and does not run per prompt.
+      own breach shape. It is not a `forbidden_terms` variant and does not run per prompt. Compare
+      the quote's upper minor-unit bound to the persisted same-currency `StudioSpendPolicy`.
+- [ ] Implement pure quote derivation and confirmation comparison. The quote freezes project
+      revision, exact ordered base/cascade sets, route IDs, generation counts, conditioning inputs,
+      rate-card digest/values, currency, totals, and expiry. Confirmation accepts only a byte-equal
+      re-derivation; no tolerant or subset comparison.
+- [ ] RED quote tampering, expiry, revision change, route/rate/seed/predecessor/trim/take/order change,
+      and budget change. Every refusal creates zero authorization/job records and reaches zero
+      resolver, adapter, or provider calls.
 - [ ] Mutation proof: make the receipt store a card reference instead of a value and prove the
       card-change test fails; restore.
-- [ ] Run: `bunx vitest run tests/unit/process/creative-studio/pricing` and `bunx tsc --noEmit`.
+- [ ] Run: `bunx vitest run tests/unit/process/creative-studio/pricing` plus the moved adapter tests,
+      then `bunx tsc --noEmit`.
 - [ ] Commit: `feat(studio): add rate card estimates and receipts`.
 
 ### Task 5 — Shot ownership, chain sequencing, and the conditioning frame
@@ -736,18 +985,19 @@ Carries CS2 Task 3 almost intact. Only the seam type signatures change.
 > **This task is a rename plus an addition, not a build.** `v2Service.ts` (815 lines), the clip-owned
 > `jobManager` and `mediaStore` conversions, and their ~5,600 lines of tests already exist from CS2
 > Task 4 and are CS3-valid. Rename `clipId` → `shotId` (≈218 production lines, ≈334 test lines), then
-> add the chain and the frame fallback on top. Do not re-derive the idempotency, submission
+> add the seed-still purpose, chain, trim-aware extraction, and spend authorization on top. Do not
+> re-derive the idempotency, submission
 > ambiguity, download recovery, cancellation, or retry-lineage logic — it is done and tested.
 
 - Modify: `packages/desktop/src/process/services/creative-studio/service/index.ts`
 - Modify: `packages/desktop/src/process/services/creative-studio/service/v2Service.ts`
 - Modify: `packages/desktop/src/process/services/creative-studio/jobManager.ts`
-- Create: `packages/desktop/src/process/services/creative-studio/lastFrame.ts`
+- Create: `packages/desktop/src/process/services/creative-studio/adapters/conditioningFrame.ts`
 - Modify: `packages/desktop/src/process/services/creative-studio/mediaStore.ts`
 - Modify: `packages/desktop/src/process/services/creative-studio/renderService.ts`
 - Modify: `tests/unit/process/creative-studio/service/index.test.ts`
 - Modify: `tests/unit/process/creative-studio/jobManager.test.ts`
-- Create: `tests/unit/process/creative-studio/lastFrame.test.ts`
+- Modify: `tests/unit/process/creative-studio/adapters/providerAdapters.test.ts`
 - Modify: `tests/integration/creative-studio/generationLifecycle.integration.test.ts`
 - Modify: `tests/integration/creative-studio/projectRecovery.integration.test.ts`
 
@@ -758,16 +1008,31 @@ Carries CS2 Task 3 almost intact. Only the seam type signatures change.
       and rule enforcement.
 - [ ] RED that the poster resolves **by role** and that a job carrying a third output still yields a
       cover — the inverse of the old positional assumption.
-- [ ] Implement the local last-frame fallback in `lastFrame.ts`, entering output persistence as a
-      synthesized `ProviderOutput` with `role: 'poster'`, `mediaKind: 'image'`, and
-      `source: { kind: 'file', path }`. RED per route: Seedance supplies the frame and the fallback
-      never runs; `openrouter-video-v1` and `weprompt-media-gateway-v1` do not, and it does.
+- [ ] Add explicit job purposes. A reviewed `seed_still` job uses the selected image route and creates
+      an image take; a `video_take` job uses the selected video route and persists its exact
+      conditioning snapshot. The newest completed still becomes the default seed only while the user
+      has not pinned another; generation completion never replaces a pinned seed or selected video
+      take.
+- [ ] Implement trim-aware local extraction in `conditioningFrame.ts`. RED an untrimmed exact
+      Seedance take adopting its provider last frame; all other routes locally decoding; and a 10s
+      selected take trimmed to 8s producing an 8s conditioning frame rather than reusing the 10s
+      poster. Poster and conditioning-frame IDs, collections, and retention remain distinct.
 - [ ] RED the recovery invariant: with the frame asset deleted from disk, recovery re-derives it and
-      **never** re-renders. RED that the window closing mid-chain stalls the chain and resumes.
+      **never** re-renders. RED that the window closing mid-extraction or mid-chain stalls and resumes
+      from the durable extraction/authorization record.
 - [ ] Implement chain sequencing: a shot is submitted only once its predecessor has succeeded and its
-      frame asset exists. RED mid-chain failure keeping the partial, billing only completed
-      generations, and resuming from the break.
-- [ ] RED that eviction cannot reach takes or conditioning frames.
+      exact selected-take/endpoint frame exists. Segment heads require a current selected seed. RED
+      seed-pending authoring accepted but video submission refused; mid-chain failure keeps the
+      partial, records receipts only for completed generations, and resumes from the break.
+- [ ] Implement unregistered `prepareSubmissionV2` and `confirmSubmissionV2` service seams. Confirm
+      runs quote re-derivation under the project queue and durably commits the authorization plus all
+      idempotent jobs before dispatch. A close after authorization may resume only that exact ordered
+      base/cascade set; a merely stale downstream shot without authorization never auto-dispatches.
+- [ ] RED every confirm race: project/route/rate/budget/order/seed/take/trim/frame change, expiry,
+      duplicate confirm, close immediately before/after durable authorization, and provider throw.
+      No refusal reaches resolver/adapter/provider; no dispatched job lacks authorization.
+- [ ] RED that retention cannot reach takes, seed stills, or conditioning frames, and that the
+      existing project write-admission cap refuses a new large write without evicting anything.
 - [ ] Mutation proof: allow submission without the predecessor's frame asset and prove the
       sequencing test fails; restore.
 - [ ] Run the studio unit and integration suites and `bunx tsc --noEmit`.
@@ -785,28 +1050,47 @@ Carries CS2 Task 3 almost intact. Only the seam type signatures change.
 **Files**
 
 - Modify: `packages/desktop/src/process/services/creative-studio/service/directorCommandContracts.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/store.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/v2Service.ts`
 - Modify the Director command service, mailbox, processor, writer, and spend-fence modules and their
   tests as the V1 equivalents are versioned.
 - Modify: the builtin Studio MCP server and its tool definitions.
+- Modify: proposal/reference store, service, MCP, and integration tests; add restart/race cases to
+  `tests/integration/creative-studio/directorCommandLifecycle.integration.test.ts`.
 
 **Steps**
 
 - [ ] Rename the Director, proposal, and reference record vocabulary to Beat/Shot. Preserve the
       mailbox, processor, latency, and spend-fence behaviour — it is built and tested.
-- [ ] Extend the MCP operation surface with the CS3 additions — `park_shot`, `restore_shot`,
-      `apply_coverage`, `trim_shot`, `set_hard_cut`, `set_seed_still`, `rederive_line`,
-      `restore_line`, `restore_take`, `set_match_to`, `set_bed` — routed through the same reducer as
-      the existing ops.
-- [ ] Gate the operations the director must not call yet. **Freeze granularity is per server, not per
-      tool**, so this needs either a second server or an explicit per-tool gate; decide and record
-      which, because "the tool exists but is not callable" is not a state the current mechanism has.
+- [ ] Extend the unregistered MCP direct-edit and proposal schemas with only the CS3 operations their
+      policy permits, routed through the same reducer as renderer edits. Human-only reducer
+      operations remain absent from MCP schemas even though Task 2 implements them for later native
+      handlers.
+- [ ] Freeze Director policy in schemas, not prose. `studio_apply_edits` exposes only direct-safe
+      text/pre-picture operations. Structural or staleness-producing operations exist only in the
+      proposal writer. Motion/take decisions (`select_take`, take park/restore), Cut choices, undo,
+      and paid confirmation are omitted from every Director-callable schema. There is no registered
+      but disabled tool state.
 - [ ] RED the spend fence against the new surface, including operations that are free but create
       staleness: the director may create staleness only through a reviewed proposal, never silently.
-- [ ] RED that proposal cards survive and that required actions are gone, their two cases now being
-      the render gate and the chain gate.
-- [ ] Account for the per-operation cost honestly: each is a reducer op, an MCP tool, a native
-      constant, a payload schema, a manifest entry, and a parity test. The manifest parity test sat
-      red for four slices once; run the **whole** suite, not the slice's own files.
+- [ ] Finish schema-2 store ownership for proposals: list/watch/accept/reject/expire/reap exact V2
+      records and decisions. Acceptance applies a mutation proposal through the reducer inside the
+      same project queue, commits once, writes one durable decision, and releases only the matching
+      slot. Accepted retry is idempotent and never reapplies or re-notifies. V1 sidecars remain
+      byte-identical unsupported data.
+- [ ] Attribute an accepted mutation commit with the proposal ID and resulting revision/created IDs.
+      If decision publication fails after the project commit, restart repairs the decision from that
+      exact commit fact before cleanup/notification; it never invokes the reducer again. A stale or
+      mismatched commit fact leaves project, proposal, decision, and slot untouched and loud.
+- [ ] Finish schema-2 reference-request ownership with the same list/watch/decision discipline.
+      Acceptance may import an author-chosen reference or populate a reviewed seed-generation gate;
+      it never auto-submits. Persist a decision/receipt so restart cannot repeat the handoff.
+- [ ] RED that proposal cards and reference requests survive restart, stale CAS, decision-write
+      ambiguity, duplicate watchers, and receipt-first repair; required actions are absent, their
+      product cases represented by the render and chain gates.
+- [ ] Account for each operation as a reducer op, unregistered MCP schema/parser variant, proposal
+      acceptance case, exact projection, and test. **Do not** add native constants, payload schemas,
+      manifest entries, bridge providers, or renderer types in Task 6; those land together in Task 7.
 - [ ] Mutation proof: let a director path create staleness outside a proposal and prove the fence
       test fails; restore.
 - [ ] Run the full suite and `bunx tsc --noEmit`.
@@ -824,6 +1108,10 @@ Carries CS2 Task 3 almost intact. Only the seam type signatures change.
       cross-file parity test for four slices because nobody ran the repo-wide gate.
 - [ ] Run `bun run test`, `bun run test:coverage`, `bun run lint --quiet`, `bun run format:check`,
       `bunx tsc --noEmit`, and `git diff --check`.
+- [ ] Update `vitest.creative-studio-coverage.config.ts` to exactly the Task 1–6 executable production
+      diff and run it with coverage. Record every file's line/branch result; all must be at least
+      80/80. Assert native manifest/provider inventory and renderer/preload/runtime activation remain
+      absent, not merely unused.
 - [ ] Resolve every Critical/Important finding in separate commits and re-review before Task 7.
 
 ---
@@ -834,15 +1122,31 @@ Carries CS2 Task 3 almost intact. Only the seam type signatures change.
 
 Carries CS2 Task 6 in shape: one atomic switch, legacy deletion in the same task, no dual contract.
 
+**Primary tests:** `tests/unit/process/creative-studio/runtime.test.ts`,
+`tests/unit/process/bridge/nativePayloadSchemas.test.ts`,
+`tests/integration/creative-studio/schema2Cutover.integration.test.ts`, and
+`tests/e2e/features/workspaces/creative-studio.e2e.ts`.
+
 **Steps**
 
-- [ ] RED exact native provider inventory and manifest/schema parity.
+- [ ] RED exact native provider inventory and manifest/schema parity, then add every Beat/Shot
+      constant, payload schema, provider, and manifest entry in this task only. No Section/Clip V2
+      provider survives the same commit.
 - [ ] Replace public `StudioProject`/renderer aliases with the Beat/Shot types; delete staging seams.
-- [ ] Switch runtime startup to classify supported V2 before any mutating lifecycle action.
+- [ ] Implement one runtime activation controller with explicit
+      `inactive | activating | active | degraded | disposed` state and a supported-project ID set.
+      Startup classifies the root before constructing or starting any V2 watcher, timer, cleanup,
+      recovery, resolver, adapter, media protocol, or mailbox. Mixed roots feed V2 IDs only.
+- [ ] RED the full activation lifecycle: V1-only startup stays inactive; the first successful V2
+      project commit triggers one single-flight activation; concurrent create/import events do not
+      double-install; partial startup disposes everything it installed and enters degraded; the next
+      inventory event retries; deleting the last V2 project stops per-project lifecycle; shutdown
+      during activation disposes once. A failed project commit never activates.
 - [ ] Register only V2 bridge providers; remove legacy scene providers; switch the builtin MCP server
       to the reviewed V2 entrypoints and delete the V1 entrypoints.
 - [ ] Delete the `StudioPage` Director reference-request auto-submit and auto-dismiss path before any
-      V2 submit provider becomes reachable.
+      V2 paid provider becomes reachable. Wire the reviewed V2 proposal/reference list, watch, and
+      decision APIs; accepting a paid request opens gate state and still performs zero provider work.
 - [ ] Delete the schema-1 `validateProject` in `store.ts` and every predicate and value set it alone
       keeps alive, so schema 2's copies become the only definitions. Assert each name has exactly one
       definition under `creative-studio/`.
@@ -851,23 +1155,55 @@ Carries CS2 Task 6 in shape: one atomic switch, legacy deletion in the same task
       regex gates the unsaved-work close dialog, so it is not renderer-only.
 - [ ] Delete the scene-based Write, Produce, Review, and Export implementations rather than projecting
       beats as scenes.
+- [ ] Register read/free-authoring/proposal/reference V2 providers, but deliberately omit paid
+      `confirm_submission` from native constants, schemas, manifest, and bridge until Task 8 lands
+      the reviewed gate and provider atomically. `prepare_submission` remains read-only and may be
+      exposed for gate projection.
 - [ ] Run the full suite and `bunx tsc --noEmit`.
 - [ ] Commit: `feat(studio): cut over the workspace to beat and shot`.
 
 ### Task 8 — Workspace projection, drafts, selection, and gate state
 
+**Tests:** create `tests/unit/pages/studio/workspace/WorkspaceProjection.test.ts` and
+`tests/unit/pages/studio/workspace/SpendGate.dom.test.tsx`; extend service/index and workspace E2E.
+
+**Renderer structure:** create `components/Workspace/` under the currently compliant
+`components/` parent. Task 8 starts it with `index.ts`, `workspaceProjection.ts`,
+`useWorkspaceDrafts.ts`, `spendGate.ts`, and `Views/{index.ts,viewTypes.ts}`. Task 9 adds the shell
+and `DirectorRail/`; Task 11 adds `BeatPanel/`; Table, Board, and Cut live under `Views/`. Every leaf
+directory has component plus styles/tests as applicable, and `Workspace/` stays at no more than ten
+direct children.
+
 **Steps**
 
 - [ ] Build the shared sanitized projection consumed by Table, Board, beat panel, and Cut.
 - [ ] Implement draft persistence and the selection model once, shared across views.
+- [ ] Put image-route and video-route selection in the Brief, using the sanitized catalog and exact
+      readiness projection. Missing image route blocks seed generation only; missing video route
+      blocks video generation only. No default route is silently selected by main.
 - [ ] Implement the render gate's state: the shot set, the base estimate range, the cascade as a
       separate priced option, and the free alternative when a beat has no coverage.
 - [ ] Implement the chain gate's state: what is stale, from which cause, and what resolving costs.
+- [ ] Add the paid native boundary and UI in one commit: `prepare_submission` returns the exact quote;
+      the modal renders its ordered base/cascade lines, currency, lower/upper minor-unit range,
+      generation counts, budget result, and expiry; the explicit confirm action sends only `quoteId`
+      plus expected revision. Main re-derives and authorizes. Close/cancel spends nothing.
+- [ ] Project proposal/reference decisions into persistent cards. Accepting text/structure calls the
+      reducer path; accepting a generation request pre-populates this gate; neither bypasses confirm.
 - [ ] RED that switching views changes presentation only — it never saves, refetches, or discards
       drafts.
+- [ ] RED with provider/resolver/adapter spies that opening, recomputing, cancelling, expiring, or
+      accepting a proposal/reference card performs zero paid work; only exact confirm can dispatch.
 - [ ] Commit: `feat(studio): add the shared workspace projection`.
 
 ### Task 9 — Project shell and the collapsible Director rail
+
+**Tests:** create `tests/unit/pages/studio/workspace/DirectorRail.dom.test.tsx`; extend existing
+`StudioPage`, Director proposal/card, and conversation-owner tests. Together with Tasks 8 and 10–14,
+the new `workspace/` test directory has exactly ten direct children; add no peer without splitting it.
+
+**Source:** add `WorkspaceShell.tsx`, `Workspace.module.css`, and
+`DirectorRail/{index.tsx,DirectorRail.module.css}` under `components/Workspace/`.
 
 **Steps**
 
@@ -882,8 +1218,17 @@ Carries CS2 Task 6 in shape: one atomic switch, legacy deletion in the same task
 
 ### Gate 2 review checkpoint
 
-- [ ] Freeze the head; independent review; full gate commands; resolve Critical/Important before
-      Task 10.
+- [ ] Run focused node/jsdom suites for runtime activation, native parity, proposal/reference
+      decisions, workspace projection, draft persistence, route readiness, gate quote/confirm, and
+      Director persistence; then `bun run test`.
+- [ ] Run `bunx playwright test tests/e2e/features/workspaces/creative-studio.e2e.ts` after replacing
+      its scene-shaped fixtures/assertions with Beat/Shot lifecycle and V1 no-touch cases.
+- [ ] Update and run `vitest.creative-studio-coverage.config.ts`; every executable changed file is
+      present and at least 80% lines/branches. Run `bun run lint --quiet`, `bun run format:check`,
+      `bunx tsc --noEmit`, i18n type/check commands, and `git diff --check`.
+- [ ] Freeze the exact head; independently review activation rollback, V1 isolation, native parity,
+      proposal/reference crash recovery, and paid confirmation. Resolve every Critical/Important
+      before Task 10.
 
 ---
 
@@ -891,14 +1236,28 @@ Carries CS2 Task 6 in shape: one atomic switch, legacy deletion in the same task
 
 ### Task 10 — The Table
 
+**Tests:** create `tests/unit/pages/studio/workspace/TableView.dom.test.tsx` and add the Table cases
+to `tests/e2e/features/workspaces/creative-studio.e2e.ts`.
+
+**Source:** create `components/Workspace/Views/Table/{index.tsx,Table.module.css}`.
+
 - [ ] Real data-grid semantics: row and cell roles, keyboard traversal, and a visible focus ring.
 - [ ] Columns per the prototype, with **target and actual visually distinct**.
-- [ ] Beat states including no coverage, part done, rendering, and stale.
+- [ ] Beat states including duration pending, no coverage, seed pending, part done, rendering, and
+      stale. A nullable target never renders as zero seconds.
+- [ ] RED 24-beat keyboard traversal, selection shared with Board/panel, and no mutation on view
+      switch.
 - [ ] Commit: `feat(studio): build the table view`.
 
 ### Task 11 — The beat panel and the coverage bar
 
 The core interaction of CS3, and the largest single task. Split it if it exceeds one reviewable diff.
+
+**Tests:** create `tests/unit/pages/studio/workspace/BeatPanel.dom.test.tsx` and
+`tests/unit/pages/studio/workspace/CoverageBar.dom.test.tsx`; extend the workspace Playwright file.
+
+**Source:** create `components/Workspace/BeatPanel/` with `index.tsx`, `BeatPanel.module.css`,
+`CoverageBar.tsx`, and pure `coverageGeometry.ts`.
 
 - [ ] Action and Look editors, with the soft 25-word Look counter that warns and never blocks.
 - [ ] The coverage bar: boundary drag changes what a shot generates; edge drag trims what it plays.
@@ -907,40 +1266,71 @@ The core interaction of CS3, and the largest single task. Split it if it exceeds
       from its narrowest segment. Nothing persisted, nothing chosen, **no tier label rendered**.
 - [ ] Chain presentation: segment heads, seed stills, author `hard_cut` distinct in name and treatment
       from system-detected continuity break.
-- [ ] Takes, take selection, and per-shot render with its own gate.
+- [ ] Seed workflow: seed-pending is editable; imported/generated image takes are visible separately
+      from video takes; latest is the default until the user pins one; clear/pin/generate all use the
+      reviewed route/gate rules. Video submission is impossible without the required seed.
+- [ ] Takes, human-only video-take selection, and per-shot render with its own gate. Director tools
+      cannot select, park, or restore a take.
 - [ ] Derivation: derived versus detached, staleness against the action, re-derive, and line history
       restore.
 - [ ] `PART DONE` recovery: the resume affordance, undrawn in the prototype.
 - [ ] Reorder inside a beat must not look like reordering beats, and must show the staleness it
       creates.
+- [ ] RED tail trim end to end: trimming a selected 10s take to an 8s played endpoint displays stale
+      downstream state, queues the 8s conditioning extraction after confirmation, and never presents
+      the full-video poster as chain authority. Head trim does not invalidate downstream.
 - [ ] Commit: `feat(studio): build the beat panel and coverage bar`.
 
 ### Task 12 — The Board and the Bin
 
+**Tests:** create `tests/unit/pages/studio/workspace/BoardView.dom.test.tsx` and
+`tests/unit/pages/studio/workspace/Bin.dom.test.tsx`; extend the workspace Playwright file.
+
+**Source:** create `components/Workspace/Views/Board/` with `index.tsx`, `Board.module.css`, and
+`Bin.tsx`.
+
 - [ ] Deterministic covers and the no-coverage placeholder.
 - [ ] Three card sizes rather than zoom.
-- [ ] The Bin: three reference kinds, **both reasons labelled** — lifted versus alternate — with
-      restore for each, and drag/keyboard reorder with announcements.
+- [ ] The Bin: exactly two reference kinds, Beat and Take. Both reasons are labelled — lifted versus
+      alternate — with restore for each and drag/keyboard reorder with announcements. Assert no Shot
+      kind/control/schema can be rendered or submitted.
+- [ ] RED canonical membership and dependency-safe restoration: a selected/seed/conditioning take
+      cannot be binned; a binned beat is absent from the film; replacement races preserve the
+      referent and alias.
 - [ ] Commit: `feat(studio): build the board and bin`.
 
 ### Task 13 — The Cut
 
+**Tests:** create `tests/unit/pages/studio/workspace/CutView.dom.test.tsx`; extend the workspace
+Playwright file with imported-audio bed, match-to gate, and export cases.
+
+**Source:** create `components/Workspace/Views/Cut/{index.tsx,Cut.module.css}`.
+
 - [ ] Beat order, one bed fading out at the cut's end, match-to, and export.
+- [ ] Import and validate managed audio for the bed. Reject image/video IDs, unsafe/missing media,
+      and a bed shorter/longer than the film only according to the explicit fade-at-end playback rule;
+      no paid audio-generation route is introduced.
 - [ ] The Cut cannot reach inside a beat: no trims, no retiming, no take selection.
 - [ ] `MATCH TO` presented as a costed re-render, never as a free grade.
 - [ ] **No `AUTO-DUCKED`.** If narration state is shown at all it says there is no voice track yet.
 - [ ] Export shapes: editor folder always; a still; **`script.md` on demand**, generated at export
-      time and never written to the project root or ingested; and **one-file stitched only if the
-      ffmpeg scope has an owner and has landed** — otherwise that option is hidden, never shown and
-      failing.
+      time and never written to the project root or ingested. One-file stitched export is not in v1
+      and its control is absent, never shown disabled or failing.
 - [ ] Retention is per shape, count-based, with size shown for visibility only. RED that it can
       never evict a take or a conditioning frame.
 - [ ] Commit: `feat(studio): build the cut view`.
 
 ### Gate 3 review checkpoint
 
-- [ ] Freeze the head; independent review; full gate commands; resolve Critical/Important before
-      Task 14.
+- [ ] Run the five workspace jsdom files plus relevant projection/reducer tests, then `bun run test`.
+- [ ] Run the workspace Playwright lifecycle at desktop (1440×900), compact (1100×760), narrow
+      (760×900), and RTL. Capture Table, beat panel/coverage, Board/Bin, and Cut screenshots and
+      compare structure/content against the frozen reference; intentional corrections (Director
+      rail, no density label, target/actual, no AUTO-DUCKED) are asserted explicitly.
+- [ ] Update/run the Creative Studio coverage manifest at 80/80 per file; run lint, format, typecheck,
+      i18n, and diff-check. Freeze the exact head; independently review keyboard/a11y, trim-aware
+      conditioning, Bin invariants, audio bed, retention, and visual evidence. Resolve every
+      Critical/Important before Task 14.
 
 ---
 
@@ -948,12 +1338,29 @@ The core interaction of CS3, and the largest single task. Split it if it exceeds
 
 ### Task 14 — Undo
 
-- [ ] Revision-aware undo covering the destructive moves: re-split, detach, park, restore, and
-      match-to change. Director edits are undoable.
+- [ ] Complete the `StudioUndoEntry` journal staged in Tasks 1–2. Every successful free authoring
+      batch appends exactly one canonical before-fragment entry in the same project revision, capped
+      at 20 oldest-first;
+      paid lifecycle/recovery writes append none. A new non-undo edit after undo discards abandoned
+      forward history; redo is not in v1.
+- [ ] `undo_last` must be the sole operation, name the current top entry, and run through the same
+      reducer/store queue under expected-revision CAS. It writes one new revision, removes the entry
+      it consumed, and never retries a stale/ambiguous result. It cannot cancel/retry provider work,
+      delete a receipt/authorization, or claim a refund.
+- [ ] Re-prove every patch's post-edit digest immediately before apply. Preserve shot asset/job arrays
+      across authoring undo; refuse `undo_conflict` if a newly created beat/shot gained dependencies,
+      a touched authored fragment changed outside the journal, or any restored reference is no longer
+      valid. The entry remains available after conflict.
+- [ ] RED restart and exact inverse behavior for re-split, detach/rederive, beat/take park/restore,
+      trim, shot/beat reorder, hard cut, seed/take selection, routes, spend policy, bed, and match-to.
+      Director-applied free edits are undoable; proposal rejection and paid confirmation are not.
 - [ ] Line history is the undo substrate for **text**. `RESET` is not: it discards the renderer draft
       through the existing `useDraftPersistence`, writes nothing to history, and never reaches main.
       It is deliberately absent from the mutation vocabulary — RED that no reducer operation exists
       for it, so it can never revert a committed revision and therefore can never lose writing.
+- [ ] Tests: extend reducer/store/service suites and create
+      `tests/unit/pages/studio/workspace/Undo.dom.test.tsx`; mutation-kill missing inverse append,
+      stale entry acceptance, and paid-state rollback.
 - [ ] Commit: `feat(studio): add revision-aware undo`.
 
 ### Task 15 — Accessibility, RTL, localization, and capacity
@@ -968,21 +1375,39 @@ The core interaction of CS3, and the largest single task. Split it if it exceeds
       forced to RTL against English strings.
 - [ ] Confirm `check-i18n.js` reports only warnings for the deferred locales and no errors, and that
       every new string resolves through a key rather than a literal.
-- [ ] Capacity: 24 beats and 96 shots render and reorder without virtualization.
+- [ ] Capacity: 24 beats and 96 shots render and reorder without virtualization. In Playwright, after
+      five warmups, 20 keyboard reorders must settle projection, focus, and announcement within
+      250ms p95 on the CI runner; record raw samples. Also assert bounded render counts so a faster
+      machine cannot hide an accidental quadratic rerender.
 - [ ] Commit: `feat(studio): harden accessibility and capacity`.
 
 ### Task 16 — Lifecycle, spend, and acceptance
 
 - [ ] Prove the whole lifecycle end to end on a fresh named profile: brief, spine, coverage, render,
-      chain, cut, export.
+      reviewed seed still, video take, trim-aware chain, cut, export.
 - [ ] Prove the spend fences: no unreviewed submission; cascade priced separately; budget cap refuses
-      pre-dispatch; in-flight work never billed twice; receipts written per take.
-- [ ] Prove recovery: window closed mid-chain, frame deleted, app restarted, provider ambiguous.
+      pre-dispatch; quote tamper/staleness/expiry refuses; authorization and jobs precede provider;
+      in-flight work never billed twice; receipts written per take.
+- [ ] Prove recovery: window closed after authorization and during extraction, conditioning frame
+      deleted, app restarted, provider ambiguous, proposal/reference decision interrupted, and no
+      authorization for a merely stale chain. Each resumes exactly once or fails closed.
+- [ ] Prove a V1-only and mixed profile run creates no V2 watcher/timer/cleanup/provider side effect,
+      while creating the first V2 project after startup single-flight activates the V2 lifecycle.
+- [ ] Run the full Beat/Shot Playwright flow using deterministic fake image/video routes and assert
+      the conditioning frame is decoded from the selected trim endpoint. A separate manual-provider
+      checklist may validate real media quality but is not substituted for automated acceptance.
 - [ ] Commit: `feat(studio): prove the beat and shot lifecycle`.
 
 ### Gate 4 review checkpoint
 
-- [ ] Freeze the head; independent process/schema and security/spend review; full gate commands.
+- [ ] Run all focused node/jsdom suites, `bun run test`, the complete workspace Playwright matrix,
+      and `bun run test:coverage`. Update/run the Creative Studio manifest and require every changed
+      executable file at 80% lines/branches. Run lint, full format-check, typecheck, i18n checks,
+      diff-check, directory-ratchet audit, and frozen reference/spec hash verification.
+- [ ] Freeze the exact head; obtain independent process/schema, security/spend, renderer/a11y, and
+      recovery/publication reviews. Resolve every Critical/Important finding and re-run affected plus
+      full gates; store exact commands, results, coverage summary, screenshot set, and reviewed SHA in
+      a Gate 4 status document.
 - [ ] Studio remains behind `AIONUI_ENABLE_CREATIVE_STUDIO` and off by default. This plan does not
       authorize enablement, packaged acceptance, or a provider launch.
 
@@ -995,7 +1420,11 @@ The core interaction of CS3, and the largest single task. Split it if it exceeds
   gap, not a cosmetic one: a three-minute feature walkthrough is a narrated format by definition, and
   without voice the tool produces a mood piece over a music bed.
 - **A real colour pipeline.** `MATCH TO` is prompt-level in v1.
-- **Multi-reference provider input.** Still a separate provider capability.
+- **One-file stitched export.** V1 ships editor-folder, still, and on-demand script exports. Concatenation,
+  audio mix, and fade need a separately owned ffmpeg sequence.
+- **Multi-reference provider payloads.** V1 reference attachments inform Director/seed prompt
+  authoring, but each paid image request sends at most the one explicitly selected canonical image
+  reference supported by its route. The gate names that reference; it never implies all attachments
+  are provider conditioning. True multi-image provider payloads need a separate route capability.
 - **Project-total budget scope.** Sequenced after receipts exist.
-- **Route selection UI.** Carried forward as an open design item.
 - **Reconciliation against real provider billing.** Withdrawn until a provider returns billing data.
