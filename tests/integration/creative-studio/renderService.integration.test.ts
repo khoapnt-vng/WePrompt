@@ -165,28 +165,28 @@ const renderProjectionTimestamp = '2026-08-17T00:00:00.000Z';
 const makeProjectionBeat = (id: string, shotOrder: string[]): StudioBeat => ({
   id,
   title: id,
-  storyLine: '',
-  visualPrompt: '',
-  clipOrder: shotOrder,
+  action: '',
+  look: '',
+  shotOrder,
 });
 
-const makeProjectionShot = (id: string, selectedAssetId: string): StudioShot => ({
+const makeProjectionShot = (id: string, selectedTakeId: string): StudioShot => ({
   id,
-  shotPrompt: id,
+  line: id,
   narration: '',
   onScreenText: '',
   mediaKind: 'video',
   durationSeconds: 5,
   referenceAssetId: null,
-  selectedAssetId,
-  assetIds: [selectedAssetId],
+  selectedTakeId,
+  assetIds: [selectedTakeId],
   jobIds: [],
 });
 
 const makeProjectionAsset = (id: string, shotId: string): StudioAssetV2 => ({
   id,
   projectId: 'projection_project',
-  clipId: shotId,
+  shotId,
   mediaKind: 'video',
   mimeType: 'video/mp4',
   managedAsset: { collection: 'assets', fileName: `${id}.mp4` },
@@ -218,13 +218,13 @@ const makeRenderProjectionProjectV2 = (): StudioProjectV2 => {
     'projection_project',
     renderProjectionTimestamp
   );
-  project.sectionOrder = ['section_a', 'section_b'];
-  project.sections = {
+  project.beatOrder = ['section_a', 'section_b'];
+  project.beats = {
     section_a: makeProjectionBeat('section_a', ['clip_a']),
     section_b: makeProjectionBeat('section_b', ['clip_b']),
     section_c: makeProjectionBeat('section_c', ['clip_c']),
   };
-  project.clips = {
+  project.shots = {
     clip_a: makeProjectionShot('clip_a', 'asset_a'),
     clip_b: makeProjectionShot('clip_b', 'asset_b'),
     clip_c: makeProjectionShot('clip_c', 'asset_c'),
@@ -234,7 +234,7 @@ const makeRenderProjectionProjectV2 = (): StudioProjectV2 => {
     asset_b: makeProjectionAsset('asset_b', 'clip_b'),
     asset_c: makeProjectionAsset('asset_c', 'clip_c'),
   };
-  project.shelf = [{ kind: 'section', sectionId: 'section_c' }];
+  project.bin = [{ kind: 'beat', beatId: 'section_c' }];
   project.cuts.cut_1 = {
     id: 'cut_1',
     name: 'Projection cut',
@@ -809,8 +809,8 @@ describe('schema-2 render cut projections', () => {
       'placement_b',
     ]);
 
-    project.sectionOrder.push('section_c');
-    project.shelf = [];
+    project.beatOrder.push('section_c');
+    project.bin = [];
 
     expect(resolveActiveStudioRenderCutV2(project)?.placements.map(({ id }) => id)).toEqual([
       'placement_a',
@@ -823,15 +823,15 @@ describe('schema-2 render cut projections', () => {
     [
       'missing selection',
       (project: StudioProjectV2) => {
-        project.clips.clip_a!.selectedAssetId = null;
+        project.shots.clip_a!.selectedTakeId = null;
       },
     ],
     [
       'foreign-clip selection',
       (project: StudioProjectV2) => {
         project.assets.foreign_selected = makeProjectionAsset('foreign_selected', 'clip_b');
-        project.clips.clip_a!.assetIds.push('foreign_selected');
-        project.clips.clip_a!.selectedAssetId = 'foreign_selected';
+        project.shots.clip_a!.assetIds.push('foreign_selected');
+        project.shots.clip_a!.selectedTakeId = 'foreign_selected';
       },
     ],
     [
@@ -842,8 +842,8 @@ describe('schema-2 render cut projections', () => {
           mediaKind: 'image',
           mimeType: 'image/png',
         };
-        project.clips.clip_a!.assetIds.push('wrong_kind_selected');
-        project.clips.clip_a!.selectedAssetId = 'wrong_kind_selected';
+        project.shots.clip_a!.assetIds.push('wrong_kind_selected');
+        project.shots.clip_a!.selectedTakeId = 'wrong_kind_selected';
       },
     ],
   ] as const)('filters an active placement with %s', (_label, mutate) => {
@@ -859,7 +859,7 @@ describe('schema-2 render cut projections', () => {
       ...makeProjectionAsset('imported_placement', 'clip_a'),
       managedAsset: { collection: 'imports', fileName: 'imported_placement.mp4' },
     };
-    project.clips.clip_a!.assetIds.push('imported_placement');
+    project.shots.clip_a!.assetIds.push('imported_placement');
     project.cuts.cut_1!.clips.placement_a!.assetId = 'imported_placement';
 
     expect(resolveActiveStudioRenderCutV2(project)?.placements.map(({ id }) => id)).toEqual(['placement_b']);

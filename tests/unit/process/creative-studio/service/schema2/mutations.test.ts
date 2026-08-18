@@ -27,13 +27,13 @@ const timestamp = '2026-08-17T00:00:00.000Z';
 
 const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot => ({
   id,
-  shotPrompt: '',
+  line: '',
   narration: '',
   onScreenText: '',
   mediaKind: 'image',
   durationSeconds: 5,
   referenceAssetId: null,
-  selectedAssetId: null,
+  selectedTakeId: null,
   assetIds: [],
   jobIds: [],
   ...overrides,
@@ -42,15 +42,15 @@ const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot =
 const makeBeat = (id: string, shotOrder: string[]): StudioBeat => ({
   id,
   title: '',
-  storyLine: '',
-  visualPrompt: '',
-  clipOrder: shotOrder,
+  action: '',
+  look: '',
+  shotOrder,
 });
 
 const makeAsset = (id: string, shotId: string): StudioAssetV2 => ({
   id,
   projectId: 'project_1',
-  clipId: shotId,
+  shotId,
   mediaKind: 'image',
   mimeType: 'image/png',
   managedAsset: { collection: 'assets', fileName: `${id}.png` },
@@ -62,7 +62,7 @@ const makeAsset = (id: string, shotId: string): StudioAssetV2 => ({
 const makeJob = (id: string, shotId: string): StudioJobV2 => ({
   id,
   projectId: 'project_1',
-  clipId: shotId,
+  shotId,
   status: 'queued_local',
   provider: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'image-model' },
   idempotencyKey: `idem_${id}`,
@@ -90,16 +90,16 @@ const makeProject = (): StudioProjectV2 => ({
   aspectRatio: '16:9',
   targetDurationSeconds: 30,
   resolution: '1080p',
-  sectionOrder: ['section_1', 'section_2'],
-  sections: {
+  beatOrder: ['section_1', 'section_2'],
+  beats: {
     section_1: makeBeat('section_1', ['clip_1']),
     section_2: makeBeat('section_2', ['clip_2']),
   },
-  clips: {
+  shots: {
     clip_1: makeShot('clip_1'),
     clip_2: makeShot('clip_2'),
   },
-  shelf: [],
+  bin: [],
   cuts: {},
   activeCutId: null,
   assets: {},
@@ -111,7 +111,7 @@ const makeProject = (): StudioProjectV2 => ({
 
 const addCanonicalAsset = (project: StudioProjectV2, shotId: string, assetId: string): void => {
   project.assets[assetId] = makeAsset(assetId, shotId);
-  project.clips[shotId]!.assetIds.push(assetId);
+  project.shots[shotId]!.assetIds.push(assetId);
 };
 
 const batch = (
@@ -125,8 +125,8 @@ const batch = (
   ...overrides,
 });
 
-const emptyShotInput = (): Extract<StudioMutationOperationV2, { kind: 'add_clip' }>['clip'] => ({
-  shotPrompt: '',
+const emptyShotInput = (): Extract<StudioMutationOperationV2, { kind: 'add_shot' }>['shot'] => ({
+  line: '',
   narration: '',
   onScreenText: '',
   mediaKind: 'image',
@@ -160,7 +160,7 @@ describe('applyStudioMutationBatchV2 operations', () => {
   it('preserves unrelated cut state when setting the brief', () => {
     const project = makeProject();
     addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.clips.clip_1!.selectedAssetId = 'asset_1';
+    project.shots.clip_1!.selectedTakeId = 'asset_1';
     project.cuts.cut_1 = { id: 'cut_1', name: 'Cut', orderMode: 'storyboard', clipOrder: [], clips: {} };
     project.activeCutId = 'cut_1';
     const cutsBefore = JSON.stringify(project.cuts);
@@ -174,10 +174,10 @@ describe('applyStudioMutationBatchV2 operations', () => {
     const project = makeProject();
     addCanonicalAsset(project, 'clip_1', 'asset_1');
     project.jobs.job_1 = makeJob('job_1', 'clip_1');
-    project.clips.clip_1!.jobIds.push('job_1');
+    project.shots.clip_1!.jobIds.push('job_1');
     project.assets.cast_1 = {
       ...makeAsset('cast_1', 'clip_1'),
-      clipId: null,
+      shotId: null,
       managedAsset: { collection: 'imports', fileName: 'cast_1.png' },
       briefReferenceRole: 'cast',
       briefReferenceLabel: 'Lead',
@@ -198,7 +198,7 @@ describe('applyStudioMutationBatchV2 operations', () => {
 
     const result = applyStudioMutationBatchV2(
       project,
-      batch([{ kind: 'edit_section', sectionId: 'section_1', changes: { title: 'Opening' } }])
+      batch([{ kind: 'edit_beat', beatId: 'section_1', changes: { title: 'Opening' } }])
     );
 
     expect({
@@ -210,52 +210,52 @@ describe('applyStudioMutationBatchV2 operations', () => {
     }).toEqual(preserved);
   });
 
-  it('adds a section and its first clip at the requested active position', () => {
+  it('adds a beat and its first shot at the requested active position', () => {
     const result = applyStudioMutationBatchV2(
       makeProject(),
       batch([
         {
-          kind: 'add_section',
-          sectionId: 'section_new',
-          section: { title: 'New', storyLine: 'Story', visualPrompt: 'Look' },
-          firstClipId: 'clip_new',
-          firstClip: emptyShotInput(),
-          beforeSectionId: 'section_2',
+          kind: 'add_beat',
+          beatId: 'section_new',
+          beat: { title: 'New', action: 'Story', look: 'Look' },
+          firstShotId: 'clip_new',
+          firstShot: emptyShotInput(),
+          beforeBeatId: 'section_2',
         },
       ])
     );
 
     expect(result).toMatchObject({
-      project: { sectionOrder: ['section_1', 'section_new', 'section_2'] },
-      createdSectionIds: ['section_new'],
-      createdClipIds: ['clip_new'],
+      project: { beatOrder: ['section_1', 'section_new', 'section_2'] },
+      createdBeatIds: ['section_new'],
+      createdShotIds: ['clip_new'],
     });
-    expect(result.project.sections.section_new!.clipOrder).toEqual(['clip_new']);
+    expect(result.project.beats.section_new!.shotOrder).toEqual(['clip_new']);
   });
 
-  it('edits authored section fields without replacing its clip ownership', () => {
+  it('edits authored beat fields without replacing its shot ownership', () => {
     const result = applyStudioMutationBatchV2(
       makeProject(),
-      batch([{ kind: 'edit_section', sectionId: 'section_1', changes: { title: 'Opening' } }])
+      batch([{ kind: 'edit_beat', beatId: 'section_1', changes: { title: 'Opening' } }])
     );
 
-    expect(result.project.sections.section_1).toMatchObject({ title: 'Opening', clipOrder: ['clip_1'] });
+    expect(result.project.beats.section_1).toMatchObject({ title: 'Opening', shotOrder: ['clip_1'] });
   });
 
-  it('reorders the complete active section permutation', () => {
+  it('reorders the complete active beat permutation', () => {
     const result = applyStudioMutationBatchV2(
       makeProject(),
-      batch([{ kind: 'reorder_sections', sectionOrder: ['section_2', 'section_1'] }])
+      batch([{ kind: 'reorder_beats', beatOrder: ['section_2', 'section_1'] }])
     );
 
-    expect(result.project.sectionOrder).toEqual(['section_2', 'section_1']);
+    expect(result.project.beatOrder).toEqual(['section_2', 'section_1']);
   });
 
-  it('reorders sections without retargeting a deliberate cut take', () => {
+  it('reorders beats without retargeting a deliberate cut take', () => {
     const project = makeProject();
     addCanonicalAsset(project, 'clip_1', 'asset_selected');
     addCanonicalAsset(project, 'clip_1', 'asset_cut');
-    project.clips.clip_1!.selectedAssetId = 'asset_selected';
+    project.shots.clip_1!.selectedTakeId = 'asset_selected';
     project.cuts.cut_1 = {
       id: 'cut_1',
       name: 'Cut',
@@ -276,63 +276,63 @@ describe('applyStudioMutationBatchV2 operations', () => {
 
     const result = applyStudioMutationBatchV2(
       project,
-      batch([{ kind: 'reorder_sections', sectionOrder: ['section_2', 'section_1'] }])
+      batch([{ kind: 'reorder_beats', beatOrder: ['section_2', 'section_1'] }])
     );
 
     expect(result.project.cuts.cut_1!.clips.cut_clip_1!.assetId).toBe('asset_cut');
   });
 
-  it('parks an active section by appending its shelf identity', () => {
-    const result = applyStudioMutationBatchV2(makeProject(), batch([{ kind: 'park_section', sectionId: 'section_1' }]));
+  it('parks an active beat by appending its Bin identity', () => {
+    const result = applyStudioMutationBatchV2(makeProject(), batch([{ kind: 'park_beat', beatId: 'section_1' }]));
 
     expect(result.project).toMatchObject({
-      sectionOrder: ['section_2'],
-      shelf: [{ kind: 'section', sectionId: 'section_1' }],
+      beatOrder: ['section_2'],
+      bin: [{ kind: 'beat', beatId: 'section_1' }],
     });
-    expect(result.project.sections.section_1!.clipOrder).toEqual(['clip_1']);
+    expect(result.project.beats.section_1!.shotOrder).toEqual(['clip_1']);
   });
 
-  it('restores a parked section before the requested active section', () => {
+  it('restores a parked beat before the requested active beat', () => {
     const project = makeProject();
-    project.sectionOrder = ['section_2'];
-    project.shelf = [{ kind: 'section', sectionId: 'section_1' }];
+    project.beatOrder = ['section_2'];
+    project.bin = [{ kind: 'beat', beatId: 'section_1' }];
 
     const result = applyStudioMutationBatchV2(
       project,
-      batch([{ kind: 'restore_section', sectionId: 'section_1', beforeSectionId: 'section_2' }])
+      batch([{ kind: 'restore_beat', beatId: 'section_1', beforeBeatId: 'section_2' }])
     );
 
-    expect(result.project).toMatchObject({ sectionOrder: ['section_1', 'section_2'], shelf: [] });
+    expect(result.project).toMatchObject({ beatOrder: ['section_1', 'section_2'], bin: [] });
   });
 
-  it('adds a clip before an existing clip in its owning section', () => {
+  it('adds a shot before an existing shot in its owning beat', () => {
     const result = applyStudioMutationBatchV2(
       makeProject(),
       batch([
         {
-          kind: 'add_clip',
-          sectionId: 'section_1',
-          clipId: 'clip_new',
-          clip: emptyShotInput(),
-          beforeClipId: 'clip_1',
+          kind: 'add_shot',
+          beatId: 'section_1',
+          shotId: 'clip_new',
+          shot: emptyShotInput(),
+          beforeShotId: 'clip_1',
         },
       ])
     );
 
-    expect(result.project.sections.section_1!.clipOrder).toEqual(['clip_new', 'clip_1']);
-    expect(result.createdClipIds).toEqual(['clip_new']);
+    expect(result.project.beats.section_1!.shotOrder).toEqual(['clip_new', 'clip_1']);
+    expect(result.createdShotIds).toEqual(['clip_new']);
   });
 
-  it('edits authored clip fields without replacing operational arrays', () => {
+  it('edits authored shot fields without replacing operational arrays', () => {
     const project = makeProject();
     addCanonicalAsset(project, 'clip_1', 'asset_1');
 
     const result = applyStudioMutationBatchV2(
       project,
-      batch([{ kind: 'edit_clip', clipId: 'clip_1', changes: { shotPrompt: 'Wide shot' } }])
+      batch([{ kind: 'edit_shot', shotId: 'clip_1', changes: { line: 'Wide shot' } }])
     );
 
-    expect(result.project.clips.clip_1).toMatchObject({ shotPrompt: 'Wide shot', assetIds: ['asset_1'], jobIds: [] });
+    expect(result.project.shots.clip_1).toMatchObject({ line: 'Wide shot', assetIds: ['asset_1'], jobIds: [] });
   });
 
   it('accepts an unchanged reference identity allowed by the schema validator', () => {
@@ -343,95 +343,95 @@ describe('applyStudioMutationBatchV2 operations', () => {
       mimeType: 'video/mp4',
       managedAsset: { collection: 'assets', fileName: 'video_reference.mp4' },
     };
-    project.clips.clip_1!.assetIds.push('video_reference');
-    project.clips.clip_1!.referenceAssetId = 'video_reference';
+    project.shots.clip_1!.assetIds.push('video_reference');
+    project.shots.clip_1!.referenceAssetId = 'video_reference';
 
     const result = applyStudioMutationBatchV2(
       project,
-      batch([{ kind: 'edit_clip', clipId: 'clip_1', changes: { narration: 'Narration' } }])
+      batch([{ kind: 'edit_shot', shotId: 'clip_1', changes: { narration: 'Narration' } }])
     );
 
-    expect(result.project.clips.clip_1).toMatchObject({
+    expect(result.project.shots.clip_1).toMatchObject({
       narration: 'Narration',
       referenceAssetId: 'video_reference',
     });
   });
 
-  it('deletes a dependency-free clip and its ownership link', () => {
-    const result = applyStudioMutationBatchV2(makeProject(), batch([{ kind: 'delete_clip', clipId: 'clip_1' }]));
+  it('deletes a dependency-free shot and its ownership link', () => {
+    const result = applyStudioMutationBatchV2(makeProject(), batch([{ kind: 'delete_shot', shotId: 'clip_1' }]));
 
-    expect(Object.hasOwn(result.project.clips, 'clip_1')).toBe(false);
-    expect(result.project.sections.section_1!.clipOrder).toEqual([]);
+    expect(Object.hasOwn(result.project.shots, 'clip_1')).toBe(false);
+    expect(result.project.beats.section_1!.shotOrder).toEqual([]);
   });
 
-  it('reorders the complete clip permutation for an active or parked section', () => {
+  it('reorders the complete shot permutation for an active or parked beat', () => {
     const project = makeProject();
-    project.sections.section_1!.clipOrder.push('clip_3');
-    project.clips.clip_3 = makeShot('clip_3');
-    project.sectionOrder = ['section_2'];
-    project.shelf = [{ kind: 'section', sectionId: 'section_1' }];
+    project.beats.section_1!.shotOrder.push('clip_3');
+    project.shots.clip_3 = makeShot('clip_3');
+    project.beatOrder = ['section_2'];
+    project.bin = [{ kind: 'beat', beatId: 'section_1' }];
 
     const result = applyStudioMutationBatchV2(
       project,
-      batch([{ kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_3', 'clip_1'] }])
+      batch([{ kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_3', 'clip_1'] }])
     );
 
-    expect(result.project.sections.section_1!.clipOrder).toEqual(['clip_3', 'clip_1']);
+    expect(result.project.beats.section_1!.shotOrder).toEqual(['clip_3', 'clip_1']);
   });
 
-  it('parks an unselected canonical take as an appended asset alias', () => {
-    const project = makeProject();
-    addCanonicalAsset(project, 'clip_1', 'asset_1');
-
-    const result = applyStudioMutationBatchV2(
-      project,
-      batch([{ kind: 'park_take', clipId: 'clip_1', assetId: 'asset_1' }])
-    );
-
-    expect(result.project.shelf).toEqual([{ kind: 'asset', assetId: 'asset_1' }]);
-  });
-
-  it('selects a shelved take and removes its alias atomically', () => {
+  it('parks an unselected canonical take as an appended Bin take reference', () => {
     const project = makeProject();
     addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.shelf = [{ kind: 'asset', assetId: 'asset_1' }];
 
     const result = applyStudioMutationBatchV2(
       project,
-      batch([{ kind: 'select_shelved_take', clipId: 'clip_1', assetId: 'asset_1' }])
+      batch([{ kind: 'park_take', shotId: 'clip_1', assetId: 'asset_1' }])
     );
 
-    expect(result.project.clips.clip_1!.selectedAssetId).toBe('asset_1');
-    expect(result.project.shelf).toEqual([]);
+    expect(result.project.bin).toEqual([{ kind: 'take', assetId: 'asset_1' }]);
   });
 
-  it('creates a dormant storyboard entry when selecting a take for a parked clip', () => {
+  it('selects a binned take and removes its reference atomically', () => {
+    const project = makeProject();
+    addCanonicalAsset(project, 'clip_1', 'asset_1');
+    project.bin = [{ kind: 'take', assetId: 'asset_1' }];
+
+    const result = applyStudioMutationBatchV2(
+      project,
+      batch([{ kind: 'restore_take', shotId: 'clip_1', assetId: 'asset_1' }])
+    );
+
+    expect(result.project.shots.clip_1!.selectedTakeId).toBe('asset_1');
+    expect(result.project.bin).toEqual([]);
+  });
+
+  it('creates a dormant storyboard entry when selecting a take for a parked shot', () => {
     const project = makeProject();
     addCanonicalAsset(project, 'clip_2', 'asset_2');
-    project.sectionOrder = ['section_1'];
-    project.shelf = [
-      { kind: 'section', sectionId: 'section_2' },
-      { kind: 'asset', assetId: 'asset_2' },
+    project.beatOrder = ['section_1'];
+    project.bin = [
+      { kind: 'beat', beatId: 'section_2' },
+      { kind: 'take', assetId: 'asset_2' },
     ];
     project.cuts.cut_1 = { id: 'cut_1', name: 'Cut', orderMode: 'storyboard', clipOrder: [], clips: {} };
 
     const result = applyStudioMutationBatchV2(
       project,
-      batch([{ kind: 'select_shelved_take', clipId: 'clip_2', assetId: 'asset_2' }])
+      batch([{ kind: 'restore_take', shotId: 'clip_2', assetId: 'asset_2' }])
     );
 
     expect(result.project.cuts.cut_1!.clipOrder).toEqual(['clip_clip_2']);
     expect(result.project.cuts.cut_1!.clips.clip_clip_2).toMatchObject({ clipId: 'clip_2', assetId: 'asset_2' });
   });
 
-  it('switches a cut to a shelved take without implicitly shelving the prior selection', () => {
+  it('switches a cut to a binned take without implicitly binning the prior selection', () => {
     const project = makeProject();
     addCanonicalAsset(project, 'clip_1', 'asset_old');
     addCanonicalAsset(project, 'clip_1', 'asset_new');
     project.assets.asset_old!.durationSeconds = 10;
     project.assets.asset_new!.durationSeconds = 6;
-    project.clips.clip_1!.selectedAssetId = 'asset_old';
-    project.shelf = [{ kind: 'asset', assetId: 'asset_new' }];
+    project.shots.clip_1!.selectedTakeId = 'asset_old';
+    project.bin = [{ kind: 'take', assetId: 'asset_new' }];
     project.cuts.cut_1 = {
       id: 'cut_1',
       name: 'Cut',
@@ -452,53 +452,53 @@ describe('applyStudioMutationBatchV2 operations', () => {
 
     const result = applyStudioMutationBatchV2(
       project,
-      batch([{ kind: 'select_shelved_take', clipId: 'clip_1', assetId: 'asset_new' }])
+      batch([{ kind: 'restore_take', shotId: 'clip_1', assetId: 'asset_new' }])
     );
 
     expect(result.project).toMatchObject({
-      shelf: [],
-      clips: { clip_1: { selectedAssetId: 'asset_new' } },
+      bin: [],
+      shots: { clip_1: { selectedTakeId: 'asset_new' } },
       cuts: { cut_1: { clips: { cut_clip_1: { assetId: 'asset_new', sourceOutSeconds: 6 } } } },
     });
     expect(result.project.assets.asset_old).toEqual(project.assets.asset_old);
   });
 
-  it('removes an asset alias without deleting the retained asset', () => {
+  it('removes a take reference without deleting the retained asset', () => {
     const project = makeProject();
     addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.shelf = [{ kind: 'asset', assetId: 'asset_1' }];
+    project.bin = [{ kind: 'take', assetId: 'asset_1' }];
 
-    const result = applyStudioMutationBatchV2(project, batch([{ kind: 'remove_shelf_alias', assetId: 'asset_1' }]));
+    const result = applyStudioMutationBatchV2(project, batch([{ kind: 'remove_bin_item', assetId: 'asset_1' }]));
 
-    expect(result.project.shelf).toEqual([]);
+    expect(result.project.bin).toEqual([]);
     expect(result.project.assets.asset_1).toEqual(project.assets.asset_1);
   });
 
-  it('reorders the exact complete shelf identity permutation', () => {
+  it('reorders the exact complete Bin identity permutation', () => {
     const project = makeProject();
     addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.sectionOrder = ['section_1'];
-    project.shelf = [
-      { kind: 'section', sectionId: 'section_2' },
-      { kind: 'asset', assetId: 'asset_1' },
+    project.beatOrder = ['section_1'];
+    project.bin = [
+      { kind: 'beat', beatId: 'section_2' },
+      { kind: 'take', assetId: 'asset_1' },
     ];
 
     const result = applyStudioMutationBatchV2(
       project,
       batch([
         {
-          kind: 'reorder_shelf',
-          shelf: [
-            { kind: 'asset', assetId: 'asset_1' },
-            { kind: 'section', sectionId: 'section_2' },
+          kind: 'reorder_bin',
+          bin: [
+            { kind: 'take', assetId: 'asset_1' },
+            { kind: 'beat', beatId: 'section_2' },
           ],
         },
       ])
     );
 
-    expect(result.project.shelf).toEqual([
-      { kind: 'asset', assetId: 'asset_1' },
-      { kind: 'section', sectionId: 'section_2' },
+    expect(result.project.bin).toEqual([
+      { kind: 'take', assetId: 'asset_1' },
+      { kind: 'beat', beatId: 'section_2' },
     ]);
   });
 
@@ -510,10 +510,10 @@ describe('applyStudioMutationBatchV2 operations', () => {
 
     const result = applyStudioMutationBatchV2(
       project,
-      batch([{ kind: 'select_take', clipId: 'clip_1', assetId: 'asset_1' }])
+      batch([{ kind: 'select_take', shotId: 'clip_1', assetId: 'asset_1' }])
     );
 
-    expect(result.project.clips.clip_1!.selectedAssetId).toBe('asset_1');
+    expect(result.project.shots.clip_1!.selectedTakeId).toBe('asset_1');
     expect(Object.values(result.project.cuts.cut_1!.clips)[0]).toMatchObject({ clipId: 'clip_1', assetId: 'asset_1' });
   });
 });
@@ -524,26 +524,26 @@ describe('applyStudioMutationBatchV2 ordering and atomicity', () => {
       makeProject(),
       batch([
         {
-          kind: 'add_clip',
-          sectionId: 'section_1',
-          clipId: 'clip_new',
-          clip: emptyShotInput(),
-          beforeClipId: null,
+          kind: 'add_shot',
+          beatId: 'section_1',
+          shotId: 'clip_new',
+          shot: emptyShotInput(),
+          beforeShotId: null,
         },
-        { kind: 'edit_clip', clipId: 'clip_new', changes: { narration: 'Visible later' } },
-        { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_new', 'clip_1'] },
+        { kind: 'edit_shot', shotId: 'clip_new', changes: { narration: 'Visible later' } },
+        { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_new', 'clip_1'] },
       ])
     );
 
-    expect(result.project.clips.clip_new!.narration).toBe('Visible later');
-    expect(result.project.sections.section_1!.clipOrder).toEqual(['clip_new', 'clip_1']);
+    expect(result.project.shots.clip_new!.narration).toBe('Visible later');
+    expect(result.project.beats.section_1!.shotOrder).toEqual(['clip_new', 'clip_1']);
   });
 
   it('makes cut reconciliation visible before a later take park', () => {
     const project = makeProject();
     addCanonicalAsset(project, 'clip_1', 'asset_old');
     addCanonicalAsset(project, 'clip_1', 'asset_new');
-    project.clips.clip_1!.selectedAssetId = 'asset_old';
+    project.shots.clip_1!.selectedTakeId = 'asset_old';
     project.cuts.cut_1 = {
       id: 'cut_1',
       name: 'Cut',
@@ -565,12 +565,12 @@ describe('applyStudioMutationBatchV2 ordering and atomicity', () => {
     const result = applyStudioMutationBatchV2(
       project,
       batch([
-        { kind: 'select_take', clipId: 'clip_1', assetId: 'asset_new' },
-        { kind: 'park_take', clipId: 'clip_1', assetId: 'asset_old' },
+        { kind: 'select_take', shotId: 'clip_1', assetId: 'asset_new' },
+        { kind: 'park_take', shotId: 'clip_1', assetId: 'asset_old' },
       ])
     );
 
-    expect(result.project.shelf).toEqual([{ kind: 'asset', assetId: 'asset_old' }]);
+    expect(result.project.bin).toEqual([{ kind: 'take', assetId: 'asset_old' }]);
     expect(result.project.cuts.cut_1!.clips.cut_clip_1!.assetId).toBe('asset_new');
   });
 
@@ -579,32 +579,32 @@ describe('applyStudioMutationBatchV2 ordering and atomicity', () => {
       makeProject(),
       batch([
         {
-          kind: 'add_clip',
-          sectionId: 'section_1',
-          clipId: 'clip_3',
-          clip: emptyShotInput(),
-          beforeClipId: null,
+          kind: 'add_shot',
+          beatId: 'section_1',
+          shotId: 'clip_3',
+          shot: emptyShotInput(),
+          beforeShotId: null,
         },
         {
-          kind: 'add_section',
-          sectionId: 'section_3',
-          section: { title: '', storyLine: '', visualPrompt: '' },
-          firstClipId: 'clip_4',
-          firstClip: emptyShotInput(),
-          beforeSectionId: null,
+          kind: 'add_beat',
+          beatId: 'section_3',
+          beat: { title: '', action: '', look: '' },
+          firstShotId: 'clip_4',
+          firstShot: emptyShotInput(),
+          beforeBeatId: null,
         },
         {
-          kind: 'add_clip',
-          sectionId: 'section_3',
-          clipId: 'clip_5',
-          clip: emptyShotInput(),
-          beforeClipId: null,
+          kind: 'add_shot',
+          beatId: 'section_3',
+          shotId: 'clip_5',
+          shot: emptyShotInput(),
+          beforeShotId: null,
         },
       ])
     );
 
-    expect(result.createdSectionIds).toEqual(['section_3']);
-    expect(result.createdClipIds).toEqual(['clip_3', 'clip_4', 'clip_5']);
+    expect(result.createdBeatIds).toEqual(['section_3']);
+    expect(result.createdShotIds).toEqual(['clip_3', 'clip_4', 'clip_5']);
   });
 
   it('does not mutate the input after a successful batch', () => {
@@ -626,7 +626,7 @@ describe('applyStudioMutationBatchV2 ordering and atomicity', () => {
           project,
           batch([
             { kind: 'set_brief', brief: 'Must roll back' },
-            { kind: 'delete_clip', clipId: 'missing_clip' },
+            { kind: 'delete_shot', shotId: 'missing_clip' },
           ])
         ),
       'invalid_operation'
@@ -634,37 +634,37 @@ describe('applyStudioMutationBatchV2 ordering and atomicity', () => {
     expect(JSON.stringify(project)).toBe(before);
   });
 
-  it('allows delete-before-add to free section capacity', () => {
+  it('allows delete-before-add to free beat capacity', () => {
     const project = makeProject();
     for (let index = 3; index <= 9; index += 1) {
       const shotId = `clip_${index}`;
-      project.clips[shotId] = makeShot(shotId);
-      project.sections.section_1!.clipOrder.push(shotId);
+      project.shots[shotId] = makeShot(shotId);
+      project.beats.section_1!.shotOrder.push(shotId);
     }
 
     const result = applyStudioMutationBatchV2(
       project,
       batch([
-        { kind: 'delete_clip', clipId: 'clip_1' },
+        { kind: 'delete_shot', shotId: 'clip_1' },
         {
-          kind: 'add_clip',
-          sectionId: 'section_1',
-          clipId: 'clip_10',
-          clip: emptyShotInput(),
-          beforeClipId: null,
+          kind: 'add_shot',
+          beatId: 'section_1',
+          shotId: 'clip_10',
+          shot: emptyShotInput(),
+          beforeShotId: null,
         },
       ])
     );
 
-    expect(result.project.sections.section_1!.clipOrder).toHaveLength(8);
+    expect(result.project.beats.section_1!.shotOrder).toHaveLength(8);
   });
 
-  it('rejects add-before-delete at section capacity', () => {
+  it('rejects add-before-delete at beat capacity', () => {
     const project = makeProject();
     for (let index = 3; index <= 9; index += 1) {
       const shotId = `clip_${index}`;
-      project.clips[shotId] = makeShot(shotId);
-      project.sections.section_1!.clipOrder.push(shotId);
+      project.shots[shotId] = makeShot(shotId);
+      project.beats.section_1!.shotOrder.push(shotId);
     }
 
     expectReason(
@@ -673,16 +673,16 @@ describe('applyStudioMutationBatchV2 ordering and atomicity', () => {
           project,
           batch([
             {
-              kind: 'add_clip',
-              sectionId: 'section_1',
-              clipId: 'clip_10',
-              clip: emptyShotInput(),
-              beforeClipId: null,
+              kind: 'add_shot',
+              beatId: 'section_1',
+              shotId: 'clip_10',
+              shot: emptyShotInput(),
+              beforeShotId: null,
             },
-            { kind: 'delete_clip', clipId: 'clip_1' },
+            { kind: 'delete_shot', shotId: 'clip_1' },
           ])
         ),
-      'section_clip_capacity_reached'
+      'beat_shot_capacity_reached'
     );
   });
 });
@@ -752,14 +752,14 @@ describe('applyStudioMutationBatchV2 boundaries', () => {
     expectReason(() => applyStudioMutationBatchV2(makeProject(), input), 'invalid_operation');
   });
 
-  it('reports section capacity before identity collision', () => {
+  it('reports beat capacity before identity collision', () => {
     const project = makeProject();
     for (let index = 3; index <= 24; index += 1) {
       const beatId = `section_${index}`;
       const shotId = `section_clip_${index}`;
-      project.sections[beatId] = makeBeat(beatId, [shotId]);
-      project.clips[shotId] = makeShot(shotId);
-      project.sectionOrder.push(beatId);
+      project.beats[beatId] = makeBeat(beatId, [shotId]);
+      project.shots[shotId] = makeShot(shotId);
+      project.beatOrder.push(beatId);
     }
 
     expectReason(
@@ -768,16 +768,16 @@ describe('applyStudioMutationBatchV2 boundaries', () => {
           project,
           batch([
             {
-              kind: 'add_section',
-              sectionId: 'section_1',
-              section: { title: '', storyLine: '', visualPrompt: '' },
-              firstClipId: 'new_clip',
-              firstClip: emptyShotInput(),
-              beforeSectionId: null,
+              kind: 'add_beat',
+              beatId: 'section_1',
+              beat: { title: '', action: '', look: '' },
+              firstShotId: 'new_clip',
+              firstShot: emptyShotInput(),
+              beforeBeatId: null,
             },
           ])
         ),
-      'section_capacity_reached'
+      'beat_capacity_reached'
     );
   });
 
@@ -788,41 +788,41 @@ describe('applyStudioMutationBatchV2 boundaries', () => {
           makeProject(),
           batch([
             {
-              kind: 'add_clip',
-              sectionId: 'section_1',
-              clipId: 'clip_new',
-              clip: { ...emptyShotInput(), mediaKind: 'video', durationSeconds: 3 },
-              beforeClipId: null,
+              kind: 'add_shot',
+              beatId: 'section_1',
+              shotId: 'clip_new',
+              shot: { ...emptyShotInput(), mediaKind: 'video', durationSeconds: 3 },
+              beforeShotId: null,
             },
           ])
         ),
-      'invalid_clip_duration'
+      'invalid_shot_duration'
     );
   });
 
-  it('reports invalid duration for a clip edit', () => {
+  it('reports invalid duration for a shot edit', () => {
     expectReason(
       () =>
         applyStudioMutationBatchV2(
           makeProject(),
-          batch([{ kind: 'edit_clip', clipId: 'clip_1', changes: { mediaKind: 'video', durationSeconds: 3 } }])
+          batch([{ kind: 'edit_shot', shotId: 'clip_1', changes: { mediaKind: 'video', durationSeconds: 3 } }])
         ),
-      'invalid_clip_duration'
+      'invalid_shot_duration'
     );
   });
 
-  it('reports project clip capacity when the target section still has room', () => {
+  it('reports project shot capacity when the target beat still has room', () => {
     const project = makeProject();
-    project.sectionOrder = [];
-    project.sections = {};
-    project.clips = {};
+    project.beatOrder = [];
+    project.beats = {};
+    project.shots = {};
     for (let beatIndex = 1; beatIndex <= 13; beatIndex += 1) {
       const beatId = `section_${beatIndex}`;
       const count = beatIndex === 1 ? 1 : beatIndex === 13 ? 7 : 8;
       const shotOrder = Array.from({ length: count }, (_, shotIndex) => `clip_${beatIndex}_${shotIndex}`);
-      project.sectionOrder.push(beatId);
-      project.sections[beatId] = makeBeat(beatId, shotOrder);
-      for (const shotId of shotOrder) project.clips[shotId] = makeShot(shotId);
+      project.beatOrder.push(beatId);
+      project.beats[beatId] = makeBeat(beatId, shotOrder);
+      for (const shotId of shotOrder) project.shots[shotId] = makeShot(shotId);
     }
 
     expect(validateStudioProjectV2(project)).toBe(true);
@@ -832,29 +832,29 @@ describe('applyStudioMutationBatchV2 boundaries', () => {
           project,
           batch([
             {
-              kind: 'add_clip',
-              sectionId: 'section_1',
-              clipId: 'clip_new',
-              clip: emptyShotInput(),
-              beforeClipId: null,
+              kind: 'add_shot',
+              beatId: 'section_1',
+              shotId: 'clip_new',
+              shot: emptyShotInput(),
+              beforeShotId: null,
             },
           ])
         ),
-      'project_clip_capacity_reached'
+      'project_shot_capacity_reached'
     );
   });
 
-  it('reports section capacity before simultaneous project, collision, and duration failures', () => {
+  it('reports beat capacity before simultaneous project, collision, and duration failures', () => {
     const project = makeProject();
-    project.sectionOrder = [];
-    project.sections = {};
-    project.clips = {};
+    project.beatOrder = [];
+    project.beats = {};
+    project.shots = {};
     for (let beatIndex = 1; beatIndex <= 12; beatIndex += 1) {
       const beatId = `section_${beatIndex}`;
       const shotOrder = Array.from({ length: 8 }, (_, shotIndex) => `clip_${beatIndex}_${shotIndex}`);
-      project.sectionOrder.push(beatId);
-      project.sections[beatId] = makeBeat(beatId, shotOrder);
-      for (const shotId of shotOrder) project.clips[shotId] = makeShot(shotId);
+      project.beatOrder.push(beatId);
+      project.beats[beatId] = makeBeat(beatId, shotOrder);
+      for (const shotId of shotOrder) project.shots[shotId] = makeShot(shotId);
     }
 
     expectReason(
@@ -863,15 +863,15 @@ describe('applyStudioMutationBatchV2 boundaries', () => {
           project,
           batch([
             {
-              kind: 'add_clip',
-              sectionId: 'section_1',
-              clipId: 'clip_1_0',
-              clip: { ...emptyShotInput(), mediaKind: 'video', durationSeconds: 3 },
-              beforeClipId: null,
+              kind: 'add_shot',
+              beatId: 'section_1',
+              shotId: 'clip_1_0',
+              shot: { ...emptyShotInput(), mediaKind: 'video', durationSeconds: 3 },
+              beforeShotId: null,
             },
           ])
         ),
-      'section_clip_capacity_reached'
+      'beat_shot_capacity_reached'
     );
   });
 
@@ -882,11 +882,11 @@ describe('applyStudioMutationBatchV2 boundaries', () => {
           makeProject(),
           batch([
             {
-              kind: 'add_clip',
-              sectionId: 'section_1',
-              clipId: 'clip_1',
-              clip: { ...emptyShotInput(), mediaKind: 'video', durationSeconds: 3 },
-              beforeClipId: null,
+              kind: 'add_shot',
+              beatId: 'section_1',
+              shotId: 'clip_1',
+              shot: { ...emptyShotInput(), mediaKind: 'video', durationSeconds: 3 },
+              beforeShotId: null,
             },
           ])
         ),
@@ -900,13 +900,13 @@ describe('applyStudioMutationBatchV2 boundaries', () => {
         applyStudioMutationBatchV2(
           makeProject(),
           batch([
-            { kind: 'delete_clip', clipId: 'clip_1' },
+            { kind: 'delete_shot', shotId: 'clip_1' },
             {
-              kind: 'add_clip',
-              sectionId: 'section_1',
-              clipId: 'clip_1',
-              clip: emptyShotInput(),
-              beforeClipId: null,
+              kind: 'add_shot',
+              beatId: 'section_1',
+              shotId: 'clip_1',
+              shot: emptyShotInput(),
+              beforeShotId: null,
             },
           ])
         ),
@@ -924,11 +924,11 @@ describe('applyStudioMutationBatchV2 validation and dependencies', () => {
 
   it('rejects an unknown nested add payload key', () => {
     const operation = {
-      kind: 'add_clip',
-      sectionId: 'section_1',
-      clipId: 'clip_new',
-      clip: { ...emptyShotInput(), extra: true },
-      beforeClipId: null,
+      kind: 'add_shot',
+      beatId: 'section_1',
+      shotId: 'clip_new',
+      shot: { ...emptyShotInput(), extra: true },
+      beforeShotId: null,
     } as unknown as StudioMutationOperationV2;
 
     expectReason(() => applyStudioMutationBatchV2(makeProject(), batch([operation])), 'invalid_operation');
@@ -936,22 +936,22 @@ describe('applyStudioMutationBatchV2 validation and dependencies', () => {
 
   it('rejects an unknown edit changes key', () => {
     const operation = {
-      kind: 'edit_section',
-      sectionId: 'section_1',
+      kind: 'edit_beat',
+      beatId: 'section_1',
       changes: { title: 'Opening', extra: true },
     } as unknown as StudioMutationOperationV2;
 
     expectReason(() => applyStudioMutationBatchV2(makeProject(), batch([operation])), 'invalid_operation');
   });
 
-  it('rejects a sparse shelf reorder with a bounded error', () => {
+  it('rejects a sparse Bin reorder with a bounded error', () => {
     const project = makeProject();
     addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.shelf = [{ kind: 'asset', assetId: 'asset_1' }];
-    const sparseBin = sparseArray<StudioProjectV2['shelf'][number]>(1);
+    project.bin = [{ kind: 'take', assetId: 'asset_1' }];
+    const sparseBin = sparseArray<StudioProjectV2['bin'][number]>(1);
 
     expectReason(
-      () => applyStudioMutationBatchV2(project, batch([{ kind: 'reorder_shelf', shelf: sparseBin }])),
+      () => applyStudioMutationBatchV2(project, batch([{ kind: 'reorder_bin', bin: sparseBin }])),
       'invalid_operation'
     );
   });
@@ -960,12 +960,9 @@ describe('applyStudioMutationBatchV2 validation and dependencies', () => {
     const beatOrder = ['section_2', 'section_1'];
     Object.defineProperty(beatOrder, 'every', { value: null });
 
-    const result = applyStudioMutationBatchV2(
-      makeProject(),
-      batch([{ kind: 'reorder_sections', sectionOrder: beatOrder }])
-    );
+    const result = applyStudioMutationBatchV2(makeProject(), batch([{ kind: 'reorder_beats', beatOrder: beatOrder }]));
 
-    expect(result.project.sectionOrder).toEqual(['section_2', 'section_1']);
+    expect(result.project.beatOrder).toEqual(['section_2', 'section_1']);
   });
 
   it('maps a hostile operation proxy to a bounded error', () => {
@@ -1015,7 +1012,7 @@ describe('applyStudioMutationBatchV2 validation and dependencies', () => {
 
   it('maps a malformed sparse project to validation_failed', () => {
     const project = makeProject();
-    project.clips.clip_1!.jobIds = sparseArray<string>(1);
+    project.shots.clip_1!.jobIds = sparseArray<string>(1);
 
     expectReason(
       () => applyStudioMutationBatchV2(project, batch([{ kind: 'set_brief', brief: 'x' }])),
@@ -1024,7 +1021,7 @@ describe('applyStudioMutationBatchV2 validation and dependencies', () => {
   });
 
   it('rejects an empty edit changes object', () => {
-    const operation = { kind: 'edit_clip', clipId: 'clip_1', changes: {} } as StudioMutationOperationV2;
+    const operation = { kind: 'edit_shot', shotId: 'clip_1', changes: {} } as StudioMutationOperationV2;
 
     expectReason(() => applyStudioMutationBatchV2(makeProject(), batch([operation])), 'invalid_operation');
   });
@@ -1034,34 +1031,34 @@ describe('applyStudioMutationBatchV2 validation and dependencies', () => {
       () =>
         applyStudioMutationBatchV2(
           makeProject(),
-          batch([{ kind: 'reorder_sections', sectionOrder: ['section_1', 'section_1'] }])
+          batch([{ kind: 'reorder_beats', beatOrder: ['section_1', 'section_1'] }])
         ),
       'invalid_operation'
     );
   });
 
-  it('rejects a clip reorder that omits an owned clip', () => {
+  it('rejects a shot reorder that omits an owned shot', () => {
     const project = makeProject();
-    project.sections.section_1!.clipOrder.push('clip_3');
-    project.clips.clip_3 = makeShot('clip_3');
+    project.beats.section_1!.shotOrder.push('clip_3');
+    project.shots.clip_3 = makeShot('clip_3');
 
     expectReason(
       () =>
         applyStudioMutationBatchV2(
           project,
-          batch([{ kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_1'] }])
+          batch([{ kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_1'] }])
         ),
       'invalid_operation'
     );
   });
 
-  it('rejects a shelf reorder that duplicates an identity', () => {
+  it('rejects a Bin reorder that duplicates an identity', () => {
     const project = makeProject();
     addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.sectionOrder = ['section_1'];
-    project.shelf = [
-      { kind: 'section', sectionId: 'section_2' },
-      { kind: 'asset', assetId: 'asset_1' },
+    project.beatOrder = ['section_1'];
+    project.bin = [
+      { kind: 'beat', beatId: 'section_2' },
+      { kind: 'take', assetId: 'asset_1' },
     ];
 
     expectReason(
@@ -1070,10 +1067,10 @@ describe('applyStudioMutationBatchV2 validation and dependencies', () => {
           project,
           batch([
             {
-              kind: 'reorder_shelf',
-              shelf: [
-                { kind: 'asset', assetId: 'asset_1' },
-                { kind: 'asset', assetId: 'asset_1' },
+              kind: 'reorder_bin',
+              bin: [
+                { kind: 'take', assetId: 'asset_1' },
+                { kind: 'take', assetId: 'asset_1' },
               ],
             },
           ])
@@ -1082,18 +1079,18 @@ describe('applyStudioMutationBatchV2 validation and dependencies', () => {
     );
   });
 
-  it('rejects a non-null reference identity on a newly created clip', () => {
+  it('rejects a non-null reference identity on a newly created shot', () => {
     expectReason(
       () =>
         applyStudioMutationBatchV2(
           makeProject(),
           batch([
             {
-              kind: 'add_clip',
-              sectionId: 'section_1',
-              clipId: 'clip_new',
-              clip: { ...emptyShotInput(), referenceAssetId: 'asset_1' },
-              beforeClipId: null,
+              kind: 'add_shot',
+              beatId: 'section_1',
+              shotId: 'clip_new',
+              shot: { ...emptyShotInput(), referenceAssetId: 'asset_1' },
+              beforeShotId: null,
             },
           ])
         ),
@@ -1101,33 +1098,33 @@ describe('applyStudioMutationBatchV2 validation and dependencies', () => {
     );
   });
 
-  it('blocks deletion of a clip with an asset dependency', () => {
+  it('blocks deletion of a shot with an asset dependency', () => {
     const project = makeProject();
     addCanonicalAsset(project, 'clip_1', 'asset_1');
 
     expectReason(
-      () => applyStudioMutationBatchV2(project, batch([{ kind: 'delete_clip', clipId: 'clip_1' }])),
+      () => applyStudioMutationBatchV2(project, batch([{ kind: 'delete_shot', shotId: 'clip_1' }])),
       'dependency_blocked'
     );
   });
 
-  it('blocks deletion of a clip with a job dependency', () => {
+  it('blocks deletion of a shot with a job dependency', () => {
     const project = makeProject();
     project.jobs.job_1 = makeJob('job_1', 'clip_1');
-    project.clips.clip_1!.jobIds.push('job_1');
+    project.shots.clip_1!.jobIds.push('job_1');
 
     expectReason(
-      () => applyStudioMutationBatchV2(project, batch([{ kind: 'delete_clip', clipId: 'clip_1' }])),
+      () => applyStudioMutationBatchV2(project, batch([{ kind: 'delete_shot', shotId: 'clip_1' }])),
       'dependency_blocked'
     );
   });
 
-  it('blocks deletion of a clip referenced by a dormant cut entry', () => {
+  it('blocks deletion of a shot referenced by a dormant cut entry', () => {
     const project = makeProject();
     addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.clips.clip_1!.selectedAssetId = 'asset_1';
-    project.sectionOrder = ['section_2'];
-    project.shelf = [{ kind: 'section', sectionId: 'section_1' }];
+    project.shots.clip_1!.selectedTakeId = 'asset_1';
+    project.beatOrder = ['section_2'];
+    project.bin = [{ kind: 'beat', beatId: 'section_1' }];
     project.cuts.cut_1 = {
       id: 'cut_1',
       name: 'Cut',
@@ -1147,7 +1144,7 @@ describe('applyStudioMutationBatchV2 validation and dependencies', () => {
     };
 
     expectReason(
-      () => applyStudioMutationBatchV2(project, batch([{ kind: 'delete_clip', clipId: 'clip_1' }])),
+      () => applyStudioMutationBatchV2(project, batch([{ kind: 'delete_shot', shotId: 'clip_1' }])),
       'dependency_blocked'
     );
   });
@@ -1155,10 +1152,10 @@ describe('applyStudioMutationBatchV2 validation and dependencies', () => {
   it('refuses to park a selected take', () => {
     const project = makeProject();
     addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.clips.clip_1!.selectedAssetId = 'asset_1';
+    project.shots.clip_1!.selectedTakeId = 'asset_1';
 
     expectReason(
-      () => applyStudioMutationBatchV2(project, batch([{ kind: 'park_take', clipId: 'clip_1', assetId: 'asset_1' }])),
+      () => applyStudioMutationBatchV2(project, batch([{ kind: 'park_take', shotId: 'clip_1', assetId: 'asset_1' }])),
       'dependency_blocked'
     );
   });
@@ -1167,7 +1164,7 @@ describe('applyStudioMutationBatchV2 validation and dependencies', () => {
     const project = makeProject();
     addCanonicalAsset(project, 'clip_1', 'asset_1');
     addCanonicalAsset(project, 'clip_1', 'asset_2');
-    project.clips.clip_1!.selectedAssetId = 'asset_2';
+    project.shots.clip_1!.selectedTakeId = 'asset_2';
     project.cuts.cut_1 = {
       id: 'cut_1',
       name: 'Cut',
@@ -1188,67 +1185,67 @@ describe('applyStudioMutationBatchV2 validation and dependencies', () => {
 
     expect(validateStudioProjectV2(project)).toBe(true);
     expectReason(
-      () => applyStudioMutationBatchV2(project, batch([{ kind: 'park_take', clipId: 'clip_1', assetId: 'asset_1' }])),
+      () => applyStudioMutationBatchV2(project, batch([{ kind: 'park_take', shotId: 'clip_1', assetId: 'asset_1' }])),
       'dependency_blocked'
     );
   });
 
-  it('rejects a noncanonical asset alias', () => {
+  it('rejects a noncanonical take reference', () => {
     const project = makeProject();
     project.assets.import_1 = {
       ...makeAsset('import_1', 'clip_1'),
       managedAsset: { collection: 'imports', fileName: 'import_1.png' },
     };
-    project.clips.clip_1!.assetIds.push('import_1');
+    project.shots.clip_1!.assetIds.push('import_1');
 
     expectReason(
-      () => applyStudioMutationBatchV2(project, batch([{ kind: 'park_take', clipId: 'clip_1', assetId: 'import_1' }])),
+      () => applyStudioMutationBatchV2(project, batch([{ kind: 'park_take', shotId: 'clip_1', assetId: 'import_1' }])),
       'invalid_operation'
     );
   });
 
-  it('rejects a duplicate asset alias identity', () => {
+  it('rejects a duplicate take reference identity', () => {
     const project = makeProject();
     addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.shelf = [{ kind: 'asset', assetId: 'asset_1' }];
+    project.bin = [{ kind: 'take', assetId: 'asset_1' }];
 
     expectReason(
-      () => applyStudioMutationBatchV2(project, batch([{ kind: 'park_take', clipId: 'clip_1', assetId: 'asset_1' }])),
+      () => applyStudioMutationBatchV2(project, batch([{ kind: 'park_take', shotId: 'clip_1', assetId: 'asset_1' }])),
       'invalid_operation'
     );
   });
 
-  it('blocks a media-kind edit while the clip has a shelved take', () => {
+  it('blocks a media-kind edit while the shot has a binned take', () => {
     const project = makeProject();
     addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.shelf = [{ kind: 'asset', assetId: 'asset_1' }];
+    project.bin = [{ kind: 'take', assetId: 'asset_1' }];
 
     expectReason(
       () =>
         applyStudioMutationBatchV2(
           project,
-          batch([{ kind: 'edit_clip', clipId: 'clip_1', changes: { mediaKind: 'video', durationSeconds: 5 } }])
+          batch([{ kind: 'edit_shot', shotId: 'clip_1', changes: { mediaKind: 'video', durationSeconds: 5 } }])
         ),
       'dependency_blocked'
     );
   });
 
-  it('blocks a media-kind edit while the clip has a selected take', () => {
+  it('blocks a media-kind edit while the shot has a selected take', () => {
     const project = makeProject();
     addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.clips.clip_1!.selectedAssetId = 'asset_1';
+    project.shots.clip_1!.selectedTakeId = 'asset_1';
 
     expectReason(
       () =>
         applyStudioMutationBatchV2(
           project,
-          batch([{ kind: 'edit_clip', clipId: 'clip_1', changes: { mediaKind: 'video', durationSeconds: 5 } }])
+          batch([{ kind: 'edit_shot', shotId: 'clip_1', changes: { mediaKind: 'video', durationSeconds: 5 } }])
         ),
       'dependency_blocked'
     );
   });
 
-  it('blocks a media-kind edit while a cut depends on the clip', () => {
+  it('blocks a media-kind edit while a cut clip depends on the shot', () => {
     const project = makeProject();
     addCanonicalAsset(project, 'clip_1', 'asset_1');
     project.cuts.cut_1 = {
@@ -1273,96 +1270,96 @@ describe('applyStudioMutationBatchV2 validation and dependencies', () => {
       () =>
         applyStudioMutationBatchV2(
           project,
-          batch([{ kind: 'edit_clip', clipId: 'clip_1', changes: { mediaKind: 'video', durationSeconds: 5 } }])
+          batch([{ kind: 'edit_shot', shotId: 'clip_1', changes: { mediaKind: 'video', durationSeconds: 5 } }])
         ),
       'dependency_blocked'
     );
   });
 
-  it('blocks a media-kind edit while the clip has a nonterminal job', () => {
+  it('blocks a media-kind edit while the shot has a nonterminal job', () => {
     const project = makeProject();
     project.jobs.job_1 = makeJob('job_1', 'clip_1');
-    project.clips.clip_1!.jobIds.push('job_1');
+    project.shots.clip_1!.jobIds.push('job_1');
 
     expectReason(
       () =>
         applyStudioMutationBatchV2(
           project,
-          batch([{ kind: 'edit_clip', clipId: 'clip_1', changes: { mediaKind: 'video', durationSeconds: 5 } }])
+          batch([{ kind: 'edit_shot', shotId: 'clip_1', changes: { mediaKind: 'video', durationSeconds: 5 } }])
         ),
       'dependency_blocked'
     );
   });
 
-  it('allows removing a shelf alias before changing media kind in one batch', () => {
+  it('allows removing a Bin item before changing media kind in one batch', () => {
     const project = makeProject();
     addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.shelf = [{ kind: 'asset', assetId: 'asset_1' }];
+    project.bin = [{ kind: 'take', assetId: 'asset_1' }];
 
     const result = applyStudioMutationBatchV2(
       project,
       batch([
-        { kind: 'remove_shelf_alias', assetId: 'asset_1' },
-        { kind: 'edit_clip', clipId: 'clip_1', changes: { mediaKind: 'video', durationSeconds: 5 } },
+        { kind: 'remove_bin_item', assetId: 'asset_1' },
+        { kind: 'edit_shot', shotId: 'clip_1', changes: { mediaKind: 'video', durationSeconds: 5 } },
       ])
     );
 
-    expect(result.project.clips.clip_1).toMatchObject({ mediaKind: 'video', durationSeconds: 5 });
-    expect(result.project.shelf).toEqual([]);
+    expect(result.project.shots.clip_1).toMatchObject({ mediaKind: 'video', durationSeconds: 5 });
+    expect(result.project.bin).toEqual([]);
   });
 
-  it('treats equal raw section and asset IDs as distinct shelf identities', () => {
+  it('treats equal raw beat and asset IDs as distinct Bin identities', () => {
     const project = makeProject();
-    project.sections.same = makeBeat('same', ['clip_same']);
-    project.clips.clip_same = makeShot('clip_same');
+    project.beats.same = makeBeat('same', ['clip_same']);
+    project.shots.clip_same = makeShot('clip_same');
     addCanonicalAsset(project, 'clip_1', 'same');
-    project.shelf = [
-      { kind: 'section', sectionId: 'same' },
-      { kind: 'asset', assetId: 'same' },
+    project.bin = [
+      { kind: 'beat', beatId: 'same' },
+      { kind: 'take', assetId: 'same' },
     ];
 
     const result = applyStudioMutationBatchV2(
       project,
       batch([
         {
-          kind: 'reorder_shelf',
-          shelf: [
-            { kind: 'asset', assetId: 'same' },
-            { kind: 'section', sectionId: 'same' },
+          kind: 'reorder_bin',
+          bin: [
+            { kind: 'take', assetId: 'same' },
+            { kind: 'beat', beatId: 'same' },
           ],
         },
       ])
     );
 
-    expect(result.project.shelf).toEqual([
-      { kind: 'asset', assetId: 'same' },
-      { kind: 'section', sectionId: 'same' },
+    expect(result.project.bin).toEqual([
+      { kind: 'take', assetId: 'same' },
+      { kind: 'beat', beatId: 'same' },
     ]);
   });
 
-  it('requires the dedicated atomic operation to select a shelved take', () => {
+  it('requires the dedicated atomic operation to select a binned take', () => {
     const project = makeProject();
     addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.shelf = [{ kind: 'asset', assetId: 'asset_1' }];
+    project.bin = [{ kind: 'take', assetId: 'asset_1' }];
 
     expectReason(
-      () => applyStudioMutationBatchV2(project, batch([{ kind: 'select_take', clipId: 'clip_1', assetId: 'asset_1' }])),
+      () => applyStudioMutationBatchV2(project, batch([{ kind: 'select_take', shotId: 'clip_1', assetId: 'asset_1' }])),
       'invalid_operation'
     );
   });
 
-  it('rejects parking a take when the take-alias shelf capacity is full', () => {
+  it('rejects parking a take when the take-alias Bin capacity is full', () => {
     const project = makeProject();
     for (let index = 1; index <= 96; index += 1) {
       const assetId = `asset_${index}`;
       addCanonicalAsset(project, 'clip_1', assetId);
-      project.shelf.push({ kind: 'asset', assetId });
+      project.bin.push({ kind: 'take', assetId });
     }
     addCanonicalAsset(project, 'clip_1', 'asset_97');
 
     expect(validateStudioProjectV2(project)).toBe(true);
     expectReason(
-      () => applyStudioMutationBatchV2(project, batch([{ kind: 'park_take', clipId: 'clip_1', assetId: 'asset_97' }])),
+      () => applyStudioMutationBatchV2(project, batch([{ kind: 'park_take', shotId: 'clip_1', assetId: 'asset_97' }])),
       'validation_failed'
     );
   });
@@ -1372,12 +1369,12 @@ describe('applyStudioMutationBatchV2 validation and dependencies', () => {
       makeProject(),
       batch([
         {
-          kind: 'add_section',
-          sectionId: id,
-          section: { title: '', storyLine: '', visualPrompt: '' },
-          firstClipId: `${id}_clip`,
-          firstClip: emptyShotInput(),
-          beforeSectionId: null,
+          kind: 'add_beat',
+          beatId: id,
+          beat: { title: '', action: '', look: '' },
+          firstShotId: `${id}_clip`,
+          firstShot: emptyShotInput(),
+          beforeBeatId: null,
         },
       ])
     );
@@ -1385,26 +1382,26 @@ describe('applyStudioMutationBatchV2 validation and dependencies', () => {
 
     const second = applyStudioMutationBatchV2(
       restarted,
-      batch([{ kind: 'edit_section', sectionId: id, changes: { title: 'After restart' } }])
+      batch([{ kind: 'edit_beat', beatId: id, changes: { title: 'After restart' } }])
     );
 
-    expect(Object.hasOwn(second.project.sections, id)).toBe(true);
-    expect(second.project.sections[id]!.title).toBe('After restart');
+    expect(Object.hasOwn(second.project.beats, id)).toBe(true);
+    expect(second.project.beats[id]!.title).toBe('After restart');
     expect(validateStudioProjectV2(second.project)).toBe(true);
   });
 
   it.each(['constructor', 'toString', '__proto__'])(
-    'round-trips and later mutates own magic clip identity %s',
+    'round-trips and later mutates own magic shot identity %s',
     (id) => {
       const first = applyStudioMutationBatchV2(
         makeProject(),
         batch([
           {
-            kind: 'add_clip',
-            sectionId: 'section_1',
-            clipId: id,
-            clip: emptyShotInput(),
-            beforeClipId: null,
+            kind: 'add_shot',
+            beatId: 'section_1',
+            shotId: id,
+            shot: emptyShotInput(),
+            beforeShotId: null,
           },
         ])
       );
@@ -1413,34 +1410,34 @@ describe('applyStudioMutationBatchV2 validation and dependencies', () => {
       const second = applyStudioMutationBatchV2(
         restarted,
         batch([
-          { kind: 'edit_clip', clipId: id, changes: { shotPrompt: 'After restart' } },
-          { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: [id, 'clip_1'] },
+          { kind: 'edit_shot', shotId: id, changes: { line: 'After restart' } },
+          { kind: 'reorder_shots', beatId: 'section_1', shotOrder: [id, 'clip_1'] },
         ])
       );
 
-      expect(Object.hasOwn(second.project.clips, id)).toBe(true);
-      expect(second.project.clips[id]!.shotPrompt).toBe('After restart');
+      expect(Object.hasOwn(second.project.shots, id)).toBe(true);
+      expect(second.project.shots[id]!.line).toBe('After restart');
       expect(validateStudioProjectV2(second.project)).toBe(true);
     }
   );
 
-  it('rolls back the shelf and selection when a later operation fails', () => {
+  it('rolls back the Bin and selection when a later operation fails', () => {
     const project = makeProject();
     addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.shelf = [{ kind: 'asset', assetId: 'asset_1' }];
+    project.bin = [{ kind: 'take', assetId: 'asset_1' }];
 
     expectReason(
       () =>
         applyStudioMutationBatchV2(
           project,
           batch([
-            { kind: 'select_shelved_take', clipId: 'clip_1', assetId: 'asset_1' },
-            { kind: 'delete_clip', clipId: 'missing_clip' },
+            { kind: 'restore_take', shotId: 'clip_1', assetId: 'asset_1' },
+            { kind: 'delete_shot', shotId: 'missing_clip' },
           ])
         ),
       'invalid_operation'
     );
-    expect(project.clips.clip_1!.selectedAssetId).toBeNull();
-    expect(project.shelf).toEqual([{ kind: 'asset', assetId: 'asset_1' }]);
+    expect(project.shots.clip_1!.selectedTakeId).toBeNull();
+    expect(project.bin).toEqual([{ kind: 'take', assetId: 'asset_1' }]);
   });
 });

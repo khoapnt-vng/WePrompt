@@ -187,11 +187,11 @@ export const createStudioDirectorCommitTrackerV2 = (): StudioDirectorCommitTrack
       const createdBeatIds: string[] = [];
       const createdShotIds: string[] = [];
       for (const operation of command.operations) {
-        if (operation.kind === 'add_section') {
-          createdBeatIds.push(operation.sectionId);
-          createdShotIds.push(operation.firstClipId);
-        } else if (operation.kind === 'add_clip') {
-          createdShotIds.push(operation.clipId);
+        if (operation.kind === 'add_beat') {
+          createdBeatIds.push(operation.beatId);
+          createdShotIds.push(operation.firstShotId);
+        } else if (operation.kind === 'add_shot') {
+          createdShotIds.push(operation.shotId);
         }
       }
       expectations.set(
@@ -225,8 +225,8 @@ export const createStudioDirectorCommitTrackerV2 = (): StudioDirectorCommitTrack
         decidedAt: facts.committedAt,
         status: 'applied',
         appliedRevision: facts.committedRevision,
-        createdSectionIds: [...expected.createdBeatIds],
-        createdClipIds: [...expected.createdShotIds],
+        createdBeatIds: [...expected.createdBeatIds],
+        createdShotIds: [...expected.createdShotIds],
       });
     },
 
@@ -953,8 +953,8 @@ export const createStudioDirectorCommandProcessorV2 = (
           decidedAt: result.project.updatedAt,
           status: 'applied',
           appliedRevision: result.appliedRevision,
-          createdSectionIds: [...result.createdSectionIds],
-          createdClipIds: [...result.createdClipIds],
+          createdBeatIds: [...result.createdBeatIds],
+          createdShotIds: [...result.createdShotIds],
         };
       } catch (error) {
         const provenCommit = deps.tracker.pendingReceipt(projectId, commandId);

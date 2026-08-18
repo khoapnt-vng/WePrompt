@@ -14,10 +14,10 @@ export const isCanonicalStudioGeneratedTake = (asset: StudioAsset, projectId: st
   asset.managedAsset.collection === 'assets' &&
   scene.assetIds.includes(asset.id);
 
-/** Returns whether an asset is the generated take owned and indexed by a schema-2 clip. */
+/** Returns whether an asset is the generated take owned and indexed by a schema-2 shot. */
 export const isCanonicalStudioGeneratedTakeV2 = (asset: StudioAssetV2, projectId: string, shot: StudioShot): boolean =>
   asset.projectId === projectId &&
-  asset.clipId === shot.id &&
+  asset.shotId === shot.id &&
   asset.mediaKind === shot.mediaKind &&
   asset.managedAsset.collection === 'assets' &&
   shot.assetIds.includes(asset.id);

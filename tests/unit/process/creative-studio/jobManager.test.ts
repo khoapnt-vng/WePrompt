@@ -81,7 +81,7 @@ const route: StudioResolvedSceneRouteSnapshot = {
 };
 
 const shotRoute: StudioResolvedShotRouteSnapshotV2 = {
-  clipId: 'clip_1',
+  shotId: 'clip_1',
   providerId: provider.id,
   adapterId: 'weprompt-image-v1',
   model: 'image-model',
@@ -332,8 +332,8 @@ type V2Harness = {
 };
 
 type V2HarnessOptions = {
-  visualPrompt?: string;
-  shotPrompt?: string;
+  look?: string;
+  line?: string;
   route?: StudioResolvedShotRouteSnapshotV2;
   jobIds?: string[];
   idempotencyKeys?: string[];
@@ -366,26 +366,26 @@ const createV2Harness = async (
   });
   const project = await store.updateProjectV2(created.id, (current) => ({
     ...current,
-    sectionOrder: ['section_1'],
-    sections: {
+    beatOrder: ['section_1'],
+    beats: {
       section_1: {
         id: 'section_1',
         title: 'Opening',
-        storyLine: 'Introduce the product',
-        visualPrompt: options.visualPrompt ?? 'A luminous paper world',
-        clipOrder: ['clip_1'],
+        action: 'Introduce the product',
+        look: options.look ?? 'A luminous paper world',
+        shotOrder: ['clip_1'],
       },
     },
-    clips: {
+    shots: {
       clip_1: {
         id: 'clip_1',
-        shotPrompt: options.shotPrompt ?? 'A paper airplane crosses a sunrise',
+        line: options.line ?? 'A paper airplane crosses a sunrise',
         narration: '',
         onScreenText: '',
         mediaKind: selectedRoute.kind,
         durationSeconds: 5,
         referenceAssetId: null,
-        selectedAssetId: null,
+        selectedTakeId: null,
         assetIds: [],
         jobIds: [],
       },
@@ -456,7 +456,7 @@ const seedV2Job = async (harness: V2Harness, overrides: Partial<StudioJobV2> = {
     const job: StudioJobV2 = {
       id: 'job_v2_1',
       projectId: project.id,
-      clipId: 'clip_1',
+      shotId: 'clip_1',
       status: 'failed',
       provider: selectionFor(shotRoute),
       idempotencyKey: 'key_v2_1',
@@ -477,7 +477,7 @@ const seedV2Job = async (harness: V2Harness, overrides: Partial<StudioJobV2> = {
       ...overrides,
     };
     project.jobs = { [job.id]: job };
-    project.clips.clip_1.jobIds = [job.id];
+    project.shots.clip_1.jobIds = [job.id];
     return project;
   });
 
@@ -485,7 +485,7 @@ const submitSingleShotV2 = (harness: V2Harness, selectedRoute = shotRoute) =>
   harness.manager.submitShots({
     projectId: harness.project.id,
     expectedRevision: harness.project.revision,
-    clipIds: ['clip_1'],
+    shotIds: ['clip_1'],
     routes: [selectedRoute],
     catalogVersion: 'catalog_v2',
   });
@@ -7042,7 +7042,7 @@ describe('StudioJobManager pinned rule gate', () => {
   });
 });
 
-describe('StudioJobManager V2 clip-owned lifecycle', () => {
+describe('StudioJobManager V2 shot-owned lifecycle', () => {
   it('makes the complete ordered job/key set durable before either provider submission starts', async () => {
     const submission = deferred<ProviderSubmitResult>();
     const observedProjects: StudioProjectV2[] = [];
@@ -7058,38 +7058,38 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
       idempotencyKeys: ['unused_key_1', 'unused_key_2'],
     });
     harness.project = await harness.store.updateProjectV2(harness.project.id, (project) => {
-      project.sections.section_1.clipOrder.push('clip_2');
-      project.clips.clip_2 = {
-        ...structuredClone(project.clips.clip_1),
+      project.beats.section_1.shotOrder.push('clip_2');
+      project.shots.clip_2 = {
+        ...structuredClone(project.shots.clip_1),
         id: 'clip_2',
-        shotPrompt: 'The airplane banks over a bright paper city',
+        line: 'The airplane banks over a bright paper city',
         jobIds: [],
       };
       return project;
     });
-    const secondRoute = { ...shotRoute, clipId: 'clip_2' };
+    const secondRoute = { ...shotRoute, shotId: 'clip_2' };
 
     const jobs = await harness.manager.submitShots({
       projectId: harness.project.id,
       expectedRevision: harness.project.revision,
-      clipIds: ['clip_1', 'clip_2'],
+      shotIds: ['clip_1', 'clip_2'],
       routes: [shotRoute, secondRoute],
       catalogVersion: 'catalog_v2',
       idempotencyKeys: [
-        { clipId: 'clip_1', key: 'fixed_key_1' },
-        { clipId: 'clip_2', key: 'fixed_key_2' },
+        { shotId: 'clip_1', key: 'fixed_key_1' },
+        { shotId: 'clip_2', key: 'fixed_key_2' },
       ],
     });
 
-    expect(jobs.map(({ id, clipId, idempotencyKey, status }) => ({ id, clipId, idempotencyKey, status }))).toEqual([
-      { id: 'job_v2_1', clipId: 'clip_1', idempotencyKey: 'fixed_key_1', status: 'queued_local' },
-      { id: 'job_v2_2', clipId: 'clip_2', idempotencyKey: 'fixed_key_2', status: 'queued_local' },
+    expect(jobs.map(({ id, shotId, idempotencyKey, status }) => ({ id, shotId, idempotencyKey, status }))).toEqual([
+      { id: 'job_v2_1', shotId: 'clip_1', idempotencyKey: 'fixed_key_1', status: 'queued_local' },
+      { id: 'job_v2_2', shotId: 'clip_2', idempotencyKey: 'fixed_key_2', status: 'queued_local' },
     ]);
     await waitFor(() => expect(submit).toHaveBeenCalledTimes(2));
     for (const observed of observedProjects) {
       expect(Object.keys(observed.jobs)).toEqual(['job_v2_1', 'job_v2_2']);
-      expect(observed.clips.clip_1.jobIds).toEqual(['job_v2_1']);
-      expect(observed.clips.clip_2.jobIds).toEqual(['job_v2_2']);
+      expect(observed.shots.clip_1.jobIds).toEqual(['job_v2_1']);
+      expect(observed.shots.clip_2.jobIds).toEqual(['job_v2_2']);
       expect(observed.jobs.job_v2_1.idempotencyKey).toBe('fixed_key_1');
       expect(observed.jobs.job_v2_2.idempotencyKey).toBe('fixed_key_2');
     }
@@ -7110,20 +7110,20 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
   });
 
   it.each([
-    { label: 'inherited visual prompt', visualPrompt: '   ', shotPrompt: 'A precise camera move' },
-    { label: 'clip shot prompt', visualPrompt: 'A precise visual world', shotPrompt: '   ' },
-  ])('refuses a blank $label before a submit job or paid call exists', async ({ visualPrompt, shotPrompt }) => {
+    { label: 'inherited look', look: '   ', line: 'A precise camera move' },
+    { label: 'shot line', look: 'A precise visual world', line: '   ' },
+  ])('refuses a blank $label before a submit job or paid call exists', async ({ look, line }) => {
     const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
     const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit }), {
-      visualPrompt,
-      shotPrompt,
+      look,
+      line,
     });
 
     await expect(
       harness.manager.submitShots({
         projectId: harness.project.id,
         expectedRevision: harness.project.revision,
-        clipIds: ['clip_1'],
+        shotIds: ['clip_1'],
         routes: [shotRoute],
         catalogVersion: 'catalog_v2',
       })
@@ -7135,15 +7135,15 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
   });
 
   it.each([
-    { label: 'inherited visual prompt', visualPrompt: '', shotPrompt: 'A precise camera move' },
-    { label: 'clip shot prompt', visualPrompt: 'A precise visual world', shotPrompt: '' },
-  ])('rebuilds paid retry input and refuses a now-blank $label', async ({ visualPrompt, shotPrompt }) => {
+    { label: 'inherited look', look: '', line: 'A precise camera move' },
+    { label: 'shot line', look: 'A precise visual world', line: '' },
+  ])('rebuilds paid retry input and refuses a now-blank $label', async ({ look, line }) => {
     const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
     const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit }));
     const seeded = await seedV2Job(harness);
     const edited = await harness.store.updateProjectV2(seeded.id, (project) => {
-      project.sections.section_1.visualPrompt = visualPrompt;
-      project.clips.clip_1.shotPrompt = shotPrompt;
+      project.beats.section_1.look = look;
+      project.shots.clip_1.line = line;
       return project;
     });
 
@@ -7156,14 +7156,14 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     expect(submit).not.toHaveBeenCalled();
   });
 
-  it('refuses a paid retry for a parked clip without removing its durable job', async () => {
+  it('refuses a paid retry for a parked shot without removing its durable job', async () => {
     const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
     const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit }));
     const seeded = await seedV2Job(harness);
     const parked = await harness.store.updateProjectV2(seeded.id, (project) => ({
       ...project,
-      sectionOrder: [],
-      shelf: [{ kind: 'section', sectionId: 'section_1' }],
+      beatOrder: [],
+      bin: [{ kind: 'beat', beatId: 'section_1' }],
     }));
 
     await expect(
@@ -7181,13 +7181,13 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     const seeded = await seedV2Job(harness, { status: 'queued_local', error: null });
     const parked = await harness.store.updateProjectV2(seeded.id, (project) => ({
       ...project,
-      sectionOrder: [],
-      shelf: [{ kind: 'section', sectionId: 'section_1' }],
+      beatOrder: [],
+      bin: [{ kind: 'beat', beatId: 'section_1' }],
     }));
 
     await expect(
       harness.manager.cancelJobV2({ projectId: parked.id, jobId: 'job_v2_1', expectedRevision: parked.revision })
-    ).resolves.toMatchObject({ status: 'cancelled', clipId: 'clip_1' });
+    ).resolves.toMatchObject({ status: 'cancelled', shotId: 'clip_1' });
     expect(submit).not.toHaveBeenCalled();
   });
 
@@ -7228,13 +7228,13 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     });
     const parked = await harness.store.updateProjectV2(seeded.id, (project) => ({
       ...project,
-      sectionOrder: [],
-      shelf: [{ kind: 'section', sectionId: 'section_1' }],
+      beatOrder: [],
+      bin: [{ kind: 'beat', beatId: 'section_1' }],
     }));
 
     await expect(
       harness.manager.retryDownloadV2({ projectId: parked.id, jobId: 'job_v2_1', expectedRevision: parked.revision })
-    ).resolves.toMatchObject({ clipId: 'clip_1', status: 'failed', error: { code: 'no_output' } });
+    ).resolves.toMatchObject({ shotId: 'clip_1', status: 'failed', error: { code: 'no_output' } });
     expect(poll).toHaveBeenCalledOnce();
     expect(submit).not.toHaveBeenCalled();
   });
@@ -7299,7 +7299,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
       harness.manager.submitShots({
         projectId: harness.project.id,
         expectedRevision: harness.project.revision,
-        clipIds: ['clip_1'],
+        shotIds: ['clip_1'],
         routes: [shotRoute],
         catalogVersion: 'catalog_v2',
       })
@@ -7333,7 +7333,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     await harness.manager.submitShots({
       projectId: harness.project.id,
       expectedRevision: harness.project.revision,
-      clipIds: ['clip_1'],
+      shotIds: ['clip_1'],
       routes: [shotRoute],
       catalogVersion: 'catalog_v2',
     });
@@ -7365,7 +7365,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     });
     expect(successor).toMatchObject({
       id: 'job_v2_2',
-      clipId: 'clip_1',
+      shotId: 'clip_1',
       status: 'queued_local',
       retryOfJobId: 'job_v2_1',
       retryReason: 'submission_unknown',
@@ -7381,7 +7381,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
         error: { code: 'submission_unknown' },
       });
       expect(replaced.project.jobs.job_v2_2).toMatchObject({ status: 'needs_attention' });
-      expect(replaced.project.clips.clip_1.jobIds).toEqual(['job_v2_1', 'job_v2_2']);
+      expect(replaced.project.shots.clip_1.jobIds).toEqual(['job_v2_1', 'job_v2_2']);
     });
   });
 
@@ -7425,7 +7425,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     expect(cancel).not.toHaveBeenCalled();
   });
 
-  it('persists magic clip/job/key IDs as own data without prototype lookup or mutation', async () => {
+  it('persists magic shot/job/key IDs as own data without prototype lookup or mutation', async () => {
     const submit = vi.fn(async () => {
       throw new Error('finish after the durable magic-ID assertion');
     });
@@ -7434,38 +7434,38 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
       createIdempotencyKey: () => 'prototype',
     });
     harness.project = await harness.store.updateProjectV2(harness.project.id, (project) => {
-      const magicShot = { ...project.clips.clip_1, id: '__proto__' };
-      const shots: StudioProjectV2['clips'] = {};
+      const magicShot = { ...project.shots.clip_1, id: '__proto__' };
+      const shots: StudioProjectV2['shots'] = {};
       Object.defineProperty(shots, '__proto__', {
         value: magicShot,
         configurable: true,
         enumerable: true,
         writable: true,
       });
-      project.clips = shots;
-      project.sections.section_1.clipOrder = ['__proto__'];
+      project.shots = shots;
+      project.beats.section_1.shotOrder = ['__proto__'];
       return project;
     });
-    const magicRoute = { ...shotRoute, clipId: '__proto__' };
+    const magicRoute = { ...shotRoute, shotId: '__proto__' };
 
     await expect(
       harness.manager.submitShots({
         projectId: harness.project.id,
         expectedRevision: harness.project.revision,
-        clipIds: ['__proto__'],
+        shotIds: ['__proto__'],
         routes: [magicRoute],
         catalogVersion: 'catalog_v2',
       })
-    ).resolves.toMatchObject([{ id: 'constructor', clipId: '__proto__', idempotencyKey: 'prototype' }]);
+    ).resolves.toMatchObject([{ id: 'constructor', shotId: '__proto__', idempotencyKey: 'prototype' }]);
     await waitFor(() => expect(submit).toHaveBeenCalledOnce());
     await waitFor(async () => {
       const loaded = await harness.store.getProjectV2(harness.project.id);
       if (loaded.status !== 'supported') throw new Error('V2 project disappeared');
-      expect(Object.hasOwn(loaded.project.clips, '__proto__')).toBe(true);
+      expect(Object.hasOwn(loaded.project.shots, '__proto__')).toBe(true);
       expect(Object.hasOwn(loaded.project.jobs, 'constructor')).toBe(true);
-      expect(loaded.project.clips.__proto__.jobIds).toEqual(['constructor']);
+      expect(loaded.project.shots.__proto__.jobIds).toEqual(['constructor']);
       expect(loaded.project.jobs.constructor).toMatchObject({
-        clipId: '__proto__',
+        shotId: '__proto__',
         idempotencyKey: 'prototype',
         status: 'needs_attention',
       });
@@ -7475,20 +7475,20 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
 
   it.each([
     {
-      label: 'a sparse clip array',
+      label: 'a sparse shot array',
       mutate: (request: Record<string, unknown>) => {
         const shotIds: string[] = [];
         shotIds.length = 1;
-        request.clipIds = shotIds;
+        request.shotIds = shotIds;
       },
     },
     {
-      label: 'a key-count-compensated sparse clip array',
+      label: 'a key-count-compensated sparse shot array',
       mutate: (request: Record<string, unknown>) => {
         const shotIds: string[] = [];
         shotIds.length = 1;
         Object.defineProperty(shotIds, 'extra', { value: true, enumerable: true });
-        request.clipIds = shotIds;
+        request.shotIds = shotIds;
       },
     },
     {
@@ -7506,21 +7506,21 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     {
       label: 'an extra fixed-key-entry key',
       mutate: (request: Record<string, unknown>) => {
-        request.idempotencyKeys = [{ clipId: 'clip_1', key: 'fixed_key', extra: true }];
+        request.idempotencyKeys = [{ shotId: 'clip_1', key: 'fixed_key', extra: true }];
       },
     },
     {
       label: 'an extra reference-prompt-entry key',
       mutate: (request: Record<string, unknown>) => {
         request.outputRole = 'reference';
-        request.referencePrompts = [{ clipId: 'clip_1', prompt: 'A clean first frame', extra: true }];
+        request.referencePrompts = [{ shotId: 'clip_1', prompt: 'A clean first frame', extra: true }];
       },
     },
     {
       label: 'a key-count-compensated sparse reference-prompt array',
       mutate: (request: Record<string, unknown>) => {
         request.outputRole = 'reference';
-        const referencePrompts: Array<{ clipId: string; prompt: string }> = [];
+        const referencePrompts: Array<{ shotId: string; prompt: string }> = [];
         referencePrompts.length = 1;
         Object.defineProperty(referencePrompts, 'extra', { value: true, enumerable: true });
         request.referencePrompts = referencePrompts;
@@ -7529,7 +7529,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     {
       label: 'a key-count-compensated sparse fixed-key array',
       mutate: (request: Record<string, unknown>) => {
-        const idempotencyKeys: Array<{ clipId: string; key: string }> = [];
+        const idempotencyKeys: Array<{ shotId: string; key: string }> = [];
         idempotencyKeys.length = 1;
         Object.defineProperty(idempotencyKeys, 'extra', { value: true, enumerable: true });
         request.idempotencyKeys = idempotencyKeys;
@@ -7559,7 +7559,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     const request: Record<string, unknown> = {
       projectId: harness.project.id,
       expectedRevision: harness.project.revision,
-      clipIds: ['clip_1'],
+      shotIds: ['clip_1'],
       routes: [{ ...shotRoute }],
       catalogVersion: 'catalog_v2',
     };
@@ -7752,8 +7752,8 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     const loaded = await harness.store.getProjectV2(harness.project.id);
     if (loaded.status !== 'supported') throw new Error('V2 project disappeared');
     const [assetId] = loaded.project.jobs.job_v2_1.outputAssetIds;
-    expect(loaded.project.clips.clip_1).toMatchObject({ selectedAssetId: assetId, assetIds: [assetId] });
-    expect(loaded.project.assets[assetId!]).toMatchObject({ clipId: 'clip_1', mediaKind: 'image' });
+    expect(loaded.project.shots.clip_1).toMatchObject({ selectedTakeId: assetId, assetIds: [assetId] });
+    expect(loaded.project.assets[assetId!]).toMatchObject({ shotId: 'clip_1', mediaKind: 'image' });
   });
 
   it('persists a valid remote V2 primary with its declared media budget', async () => {
@@ -8120,16 +8120,16 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     const [job] = await harness.manager.submitShots({
       projectId: harness.project.id,
       expectedRevision: harness.project.revision,
-      clipIds: ['clip_1'],
+      shotIds: ['clip_1'],
       routes: [shotRoute],
       catalogVersion: 'catalog_v2',
       outputRole: 'reference',
-      referencePrompts: [{ clipId: 'clip_1', prompt: '  Portrait of the hero at sunrise  ' }],
+      referencePrompts: [{ shotId: 'clip_1', prompt: '  Portrait of the hero at sunrise  ' }],
     });
     expect(job).toMatchObject({
       outputRole: 'reference',
       referenceInputSnapshot: {
-        sourceVisualPrompt: 'Portrait of the hero at sunrise',
+        sourceLook: 'Portrait of the hero at sunrise',
         conditioningReferenceAssetIds: [imported.asset.id],
         aspectRatio: '16:9',
         resolution: '720p',
@@ -8501,16 +8501,16 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
 
   it.each([
     {
-      label: 'an empty clip list',
+      label: 'an empty shot list',
       mutate: (request: Record<string, unknown>) => {
-        request.clipIds = [];
+        request.shotIds = [];
         request.routes = [];
       },
     },
     {
-      label: 'duplicate clip IDs',
+      label: 'duplicate shot IDs',
       mutate: (request: Record<string, unknown>) => {
-        request.clipIds = ['clip_1', 'clip_1'];
+        request.shotIds = ['clip_1', 'clip_1'];
         request.routes = [{ ...shotRoute }, { ...shotRoute }];
       },
     },
@@ -8539,7 +8539,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
       },
     },
     {
-      label: 'a reference request without a clip prompt',
+      label: 'a reference request without a shot prompt',
       mutate: (request: Record<string, unknown>) => {
         request.outputRole = 'reference';
       },
@@ -8547,28 +8547,28 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     {
       label: 'a take request carrying a reference prompt',
       mutate: (request: Record<string, unknown>) => {
-        request.referencePrompts = [{ clipId: 'clip_1', prompt: 'Reference-only prompt' }];
+        request.referencePrompts = [{ shotId: 'clip_1', prompt: 'Reference-only prompt' }];
       },
     },
     {
-      label: 'a reference prompt for another clip',
+      label: 'a reference prompt for another shot',
       mutate: (request: Record<string, unknown>) => {
         request.outputRole = 'reference';
-        request.referencePrompts = [{ clipId: 'clip_other', prompt: 'Reference-only prompt' }];
+        request.referencePrompts = [{ shotId: 'clip_other', prompt: 'Reference-only prompt' }];
       },
     },
     {
-      label: 'a non-string reference clip ID',
+      label: 'a non-string reference shot ID',
       mutate: (request: Record<string, unknown>) => {
         request.outputRole = 'reference';
-        request.referencePrompts = [{ clipId: 1, prompt: 'Reference-only prompt' }];
+        request.referencePrompts = [{ shotId: 1, prompt: 'Reference-only prompt' }];
       },
     },
     {
       label: 'a non-string reference prompt',
       mutate: (request: Record<string, unknown>) => {
         request.outputRole = 'reference';
-        request.referencePrompts = [{ clipId: 'clip_1', prompt: 1 }];
+        request.referencePrompts = [{ shotId: 'clip_1', prompt: 1 }];
       },
     },
     {
@@ -8576,8 +8576,8 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
       mutate: (request: Record<string, unknown>) => {
         request.outputRole = 'reference';
         request.referencePrompts = [
-          { clipId: 'clip_1', prompt: 'First prompt' },
-          { clipId: 'clip_1', prompt: 'Second prompt' },
+          { shotId: 'clip_1', prompt: 'First prompt' },
+          { shotId: 'clip_1', prompt: 'Second prompt' },
         ];
       },
     },
@@ -8585,28 +8585,28 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
       label: 'a blank reference prompt',
       mutate: (request: Record<string, unknown>) => {
         request.outputRole = 'reference';
-        request.referencePrompts = [{ clipId: 'clip_1', prompt: '   ' }];
+        request.referencePrompts = [{ shotId: 'clip_1', prompt: '   ' }];
       },
     },
     {
       label: 'an overlong reference prompt',
       mutate: (request: Record<string, unknown>) => {
         request.outputRole = 'reference';
-        request.referencePrompts = [{ clipId: 'clip_1', prompt: 'x'.repeat(4 * 1024 + 1) }];
+        request.referencePrompts = [{ shotId: 'clip_1', prompt: 'x'.repeat(4 * 1024 + 1) }];
       },
     },
     {
       label: 'an unsafe fixed idempotency key',
       mutate: (request: Record<string, unknown>) => {
-        request.idempotencyKeys = [{ clipId: 'clip_1', key: '../unsafe' }];
+        request.idempotencyKeys = [{ shotId: 'clip_1', key: '../unsafe' }];
       },
     },
     {
       label: 'duplicate fixed idempotency entries',
       mutate: (request: Record<string, unknown>) => {
         request.idempotencyKeys = [
-          { clipId: 'clip_1', key: 'fixed_one' },
-          { clipId: 'clip_1', key: 'fixed_two' },
+          { shotId: 'clip_1', key: 'fixed_one' },
+          { shotId: 'clip_1', key: 'fixed_two' },
         ];
       },
     },
@@ -8645,7 +8645,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     const request: Record<string, unknown> = {
       projectId: harness.project.id,
       expectedRevision: harness.project.revision,
-      clipIds: ['clip_1'],
+      shotIds: ['clip_1'],
       routes: [{ ...shotRoute }],
       catalogVersion: 'catalog_v2',
     };
@@ -8923,7 +8923,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
       harness.manager.submitShots({
         projectId: projectId === 'current' ? harness.project.id : projectId,
         expectedRevision,
-        clipIds: ['clip_1'],
+        shotIds: ['clip_1'],
         routes: [shotRoute],
         catalogVersion: 'catalog_v2',
       })
@@ -8946,7 +8946,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
       harness.manager.submitShots({
         projectId: prototype.id,
         expectedRevision: prototype.revision,
-        clipIds: ['clip_1'],
+        shotIds: ['clip_1'],
         routes: [shotRoute],
         catalogVersion: 'catalog_v2',
       })
@@ -8980,8 +8980,8 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
       if (scenario === 'parked_clip') {
         harness.project = await harness.store.updateProjectV2(harness.project.id, (project) => ({
           ...project,
-          sectionOrder: [],
-          shelf: [{ kind: 'section', sectionId: 'section_1' }],
+          beatOrder: [],
+          bin: [{ kind: 'beat', beatId: 'section_1' }],
         }));
       } else if (scenario === 'routing_null') {
         harness.project = await harness.store.updateProjectV2(harness.project.id, (project) => ({
@@ -9021,7 +9021,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
   });
 
   it.each(['successor', 'other_active'] as const)(
-    'rejects V2 retry while the clip has $case work',
+    'rejects V2 retry while the shot has $case work',
     async (scenario) => {
       const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
       const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit }));
@@ -9039,7 +9039,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
           retryOfJobId: scenario === 'successor' ? predecessor.id : null,
           retryReason: scenario === 'successor' ? 'provider_failure' : null,
         };
-        project.clips.clip_1.jobIds.push('job_v2_2');
+        project.shots.clip_1.jobIds.push('job_v2_2');
         return project;
       });
 
@@ -9088,7 +9088,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     const seeded = await seedV2Job(harness, {
       outputRole: 'reference',
       referenceInputSnapshot: {
-        sourceVisualPrompt: 'A durable look reference',
+        sourceLook: 'A durable look reference',
         conditioningReferenceAssetIds: [imported.asset.id],
         aspectRatio: '16:9',
         resolution: '720p',
@@ -9105,7 +9105,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     await waitFor(() => expect(submit).toHaveBeenCalledOnce());
   });
 
-  it('rejects V2 retry-download while the clip has other active work', async () => {
+  it('rejects V2 retry-download while the shot has other active work', async () => {
     const harness = await createV2Harness(
       controllableAdapter('weprompt-image-v1', {
         submit: async () => ({ kind: 'complete', outputs: [] }),
@@ -9129,7 +9129,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
         retryOfJobId: null,
         retryReason: null,
       };
-      project.clips.clip_1.jobIds.push('job_v2_2');
+      project.shots.clip_1.jobIds.push('job_v2_2');
       return project;
     });
 
@@ -9160,7 +9160,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
       const imported = await harness.mediaStore.importReferenceFromPathV2({
         projectId: harness.project.id,
         sourcePath,
-        clipId: 'clip_1',
+        shotId: 'clip_1',
         expectedRevision: harness.project.revision,
         returnProject: true,
       });

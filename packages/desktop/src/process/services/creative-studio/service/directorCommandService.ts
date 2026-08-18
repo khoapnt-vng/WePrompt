@@ -67,8 +67,8 @@ export type StudioDirectorCommandServiceDeps = {
 export type StudioDirectorCommandApplyResultV2 = {
   project: StudioProjectV2;
   appliedRevision: number;
-  createdSectionIds: string[];
-  createdClipIds: string[];
+  createdBeatIds: string[];
+  createdShotIds: string[];
 };
 
 export type StudioDirectorCommandApplyErrorCodeV2 = 'deadline_elapsed' | StudioMutationReasonV2;
@@ -267,8 +267,8 @@ export const createStudioDirectorCommandServiceV2 = (
                 expectedRevision: command.expectedRevision,
                 operations: command.operations,
               });
-              createdBeatIds = [...applied.createdSectionIds];
-              createdShotIds = [...applied.createdClipIds];
+              createdBeatIds = [...applied.createdBeatIds];
+              createdShotIds = [...applied.createdShotIds];
               return applied.project;
             } catch (error) {
               if (error instanceof StudioDirectorCommandApplyErrorV2) throw error;
@@ -282,8 +282,8 @@ export const createStudioDirectorCommandServiceV2 = (
         return {
           project,
           appliedRevision: project.revision,
-          createdSectionIds: [...createdBeatIds],
-          createdClipIds: [...createdShotIds],
+          createdBeatIds: [...createdBeatIds],
+          createdShotIds: [...createdShotIds],
         };
       } catch (error) {
         if (error instanceof StudioDirectorCommandApplyErrorV2 || isProjectStoreErrorV2(error)) throw error;

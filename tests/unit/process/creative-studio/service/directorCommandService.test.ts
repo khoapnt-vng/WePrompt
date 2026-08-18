@@ -61,7 +61,7 @@ const makeInputV2 = (): CreateStudioProjectInputV2 => ({
 });
 
 const emptyShotV2 = () => ({
-  shotPrompt: '',
+  line: '',
   narration: '',
   onScreenText: '',
   mediaKind: 'image' as const,
@@ -108,17 +108,17 @@ describe('Studio Director schema-2 command service', () => {
   it('delegates the ordered batch inside one correlated schema-2 store callback', async () => {
     const operations: StudioDirectorOperationV2[] = [
       {
-        kind: 'add_section',
-        sectionId: 'section_1',
-        section: { title: 'Opening', storyLine: '', visualPrompt: 'Cinematic light' },
-        firstClipId: 'clip_1',
-        firstClip: emptyShotV2(),
-        beforeSectionId: null,
+        kind: 'add_beat',
+        beatId: 'section_1',
+        beat: { title: 'Opening', action: '', look: 'Cinematic light' },
+        firstShotId: 'clip_1',
+        firstShot: emptyShotV2(),
+        beforeBeatId: null,
       },
-      { kind: 'add_clip', sectionId: 'section_1', clipId: 'clip_2', clip: emptyShotV2(), beforeClipId: null },
-      { kind: 'edit_section', sectionId: 'section_1', changes: { storyLine: 'A clear story beat' } },
-      { kind: 'edit_clip', clipId: 'clip_2', changes: { shotPrompt: 'Close product reveal' } },
-      { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_2', 'clip_1'] },
+      { kind: 'add_shot', beatId: 'section_1', shotId: 'clip_2', shot: emptyShotV2(), beforeShotId: null },
+      { kind: 'edit_beat', beatId: 'section_1', changes: { action: 'A clear story beat' } },
+      { kind: 'edit_shot', shotId: 'clip_2', changes: { line: 'Close product reveal' } },
+      { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_2', 'clip_1'] },
     ];
     const command = makeCommandV2(project, operations);
     const commandBytes = JSON.stringify(command);
@@ -128,13 +128,13 @@ describe('Studio Director schema-2 command service', () => {
 
     expect(result).toMatchObject({
       appliedRevision: project.revision + 1,
-      createdSectionIds: ['section_1'],
-      createdClipIds: ['clip_1', 'clip_2'],
+      createdBeatIds: ['section_1'],
+      createdShotIds: ['clip_1', 'clip_2'],
       project: {
         revision: project.revision + 1,
-        sectionOrder: ['section_1'],
-        sections: { section_1: { storyLine: 'A clear story beat', clipOrder: ['clip_2', 'clip_1'] } },
-        clips: { clip_2: { shotPrompt: 'Close product reveal' } },
+        beatOrder: ['section_1'],
+        beats: { section_1: { action: 'A clear story beat', shotOrder: ['clip_2', 'clip_1'] } },
+        shots: { clip_2: { line: 'Close product reveal' } },
       },
     });
     expect(updateProjectV2).toHaveBeenCalledOnce();
@@ -192,12 +192,12 @@ describe('Studio Director schema-2 command service', () => {
   it('returns the exact bounded reducer reason and rolls the whole draft back', async () => {
     const command = makeCommandV2(project, [
       {
-        kind: 'add_section',
-        sectionId: 'section_1',
-        section: { title: 'Opening', storyLine: '', visualPrompt: 'Cinematic light' },
-        firstClipId: 'clip_1',
-        firstClip: { ...emptyShotV2(), mediaKind: 'video', durationSeconds: 3 },
-        beforeSectionId: null,
+        kind: 'add_beat',
+        beatId: 'section_1',
+        beat: { title: 'Opening', action: '', look: 'Cinematic light' },
+        firstShotId: 'clip_1',
+        firstShot: { ...emptyShotV2(), mediaKind: 'video', durationSeconds: 3 },
+        beforeBeatId: null,
       },
     ]);
 
@@ -206,10 +206,10 @@ describe('Studio Director schema-2 command service', () => {
       .catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(StudioDirectorCommandApplyErrorV2);
-    expect(error).toMatchObject({ reasonCode: 'invalid_clip_duration', message: 'invalid_clip_duration' });
+    expect(error).toMatchObject({ reasonCode: 'invalid_shot_duration', message: 'invalid_shot_duration' });
     await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
       status: 'supported',
-      project: { revision: project.revision, sectionOrder: [], sections: {}, clips: {} },
+      project: { revision: project.revision, beatOrder: [], beats: {}, shots: {} },
     });
   });
 

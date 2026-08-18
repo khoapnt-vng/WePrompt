@@ -31,6 +31,7 @@ import {
   type StudioProviderAdapterId,
   type StudioProviderRef,
   type StudioReferenceInputSnapshot,
+  type StudioReferenceInputSnapshotV2,
   type StudioRetryDownloadRequest,
   type StudioRetryJobRequest,
   type StudioSubmitScenesRequest,
@@ -60,11 +61,11 @@ const SUBMISSION_DEADLINE_MS = 5 * 60_000;
 const REMOTE_POLL_ATTEMPT_TIMEOUT_MS = 60_000;
 const REMOTE_POLL_DEADLINE_MS = 30 * 60_000;
 const MAX_IN_FLIGHT_PAID_JOBS_PER_PROJECT = 2;
-const SUBMIT_SHOTS_REQUIRED_KEYS_V2 = new Set(['projectId', 'clipIds', 'expectedRevision', 'routes', 'catalogVersion']);
+const SUBMIT_SHOTS_REQUIRED_KEYS_V2 = new Set(['projectId', 'shotIds', 'expectedRevision', 'routes', 'catalogVersion']);
 const SUBMIT_SHOTS_OPTIONAL_KEYS_V2 = new Set(['outputRole', 'referencePrompts', 'idempotencyKeys']);
-const SHOT_ROUTE_KEYS_V2 = new Set(['clipId', 'providerId', 'adapterId', 'model', 'kind']);
-const SHOT_REFERENCE_PROMPT_KEYS_V2 = new Set(['clipId', 'prompt']);
-const SHOT_IDEMPOTENCY_KEY_KEYS_V2 = new Set(['clipId', 'key']);
+const SHOT_ROUTE_KEYS_V2 = new Set(['shotId', 'providerId', 'adapterId', 'model', 'kind']);
+const SHOT_REFERENCE_PROMPT_KEYS_V2 = new Set(['shotId', 'prompt']);
+const SHOT_IDEMPOTENCY_KEY_KEYS_V2 = new Set(['shotId', 'key']);
 
 type OutputDownloaderDeps = Omit<RemoteMediaDownloadDeps, 'write' | 'maxBytes'>;
 
@@ -116,20 +117,20 @@ export type StudioResolvedSubmitScenesRequest = Omit<StudioSubmitScenesRequest, 
 };
 
 export type StudioResolvedShotRouteSnapshotV2 = StudioProviderRef & {
-  clipId: string;
+  shotId: string;
   kind: StudioMediaKind;
 };
 
 export type StudioResolvedSubmitShotsRequestV2 = {
   projectId: string;
-  clipIds: string[];
+  shotIds: string[];
   expectedRevision: number;
   routes: StudioResolvedShotRouteSnapshotV2[];
   catalogVersion: string;
   outputRole?: StudioOutputRole;
-  referencePrompts?: Array<{ clipId: string; prompt: string }>;
+  referencePrompts?: Array<{ shotId: string; prompt: string }>;
   /** Privileged replay seam. Ordinary service calls omit this and let the manager allocate keys. */
-  idempotencyKeys?: Array<{ clipId: string; key: string }>;
+  idempotencyKeys?: Array<{ shotId: string; key: string }>;
 };
 
 export type StudioJobManagerErrorCode =
@@ -183,7 +184,7 @@ type ExecutionContextV2 = {
 type PreparedSubmissionV2 = ExecutionContextV2 & {
   request: ResolvedStudioGenerationRequest;
   cancellationPolicy: StudioCancellationPolicy;
-  referenceInputSnapshot?: StudioReferenceInputSnapshot;
+  referenceInputSnapshot?: StudioReferenceInputSnapshotV2;
   fixedIdempotencyKey: boolean;
 };
 
@@ -437,17 +438,17 @@ const defineOwnV2 = <T>(record: Record<string, T>, id: string, value: T): void =
 
 const jobOutputRoleV2 = (job: StudioJobV2): StudioOutputRole => (job.outputRole === 'reference' ? 'reference' : 'take');
 
-const activeBeatForShotV2 = (project: StudioProjectV2, shotId: string): StudioProjectV2['sections'][string] | null => {
-  for (const beatId of project.sectionOrder) {
-    const beat = ownValueV2(project.sections, beatId);
-    if (beat?.clipOrder.includes(shotId)) return beat;
+const activeBeatForShotV2 = (project: StudioProjectV2, shotId: string): StudioProjectV2['beats'][string] | null => {
+  for (const beatId of project.beatOrder) {
+    const beat = ownValueV2(project.beats, beatId);
+    if (beat?.shotOrder.includes(shotId)) return beat;
   }
   return null;
 };
 
-const composeTakePromptV2 = (visualPrompt: string, shotPrompt: string): string => {
-  const inherited = visualPrompt.trim();
-  const shot = shotPrompt.trim();
+const composeTakePromptV2 = (look: string, line: string): string => {
+  const inherited = look.trim();
+  const shot = line.trim();
   if (!inherited || !shot) invalidRequest();
   return `${inherited}\n\n${shot}`;
 };
@@ -2016,7 +2017,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       StudioProject['assets'][string]
     >;
     for (const [assetId, asset] of Object.entries(project.assets)) {
-      const { clipId: shotId, ...shared } = asset;
+      const { shotId, ...shared } = asset;
       defineOwnV2(compatible, assetId, { ...shared, sceneId: shotId });
     }
     const active = resolveActiveStudioBriefReferences(compatible);
@@ -2032,9 +2033,9 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     catalogVersion?: string,
     fixedIdempotencyKey?: string
   ): Promise<PreparedSubmissionV2> => {
-    const shot = ownValueV2(project.clips, shotId);
+    const shot = ownValueV2(project.shots, shotId);
     const beat = activeBeatForShotV2(project, shotId);
-    if (!shot || !beat || route.clipId !== shotId) {
+    if (!shot || !beat || route.shotId !== shotId) {
       throw new StudioJobManagerError('invalid_route');
     }
     const requestedKind = requestedMediaKind(shot.mediaKind, output.role);
@@ -2078,9 +2079,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     }
     const baseRequest = {
       prompt:
-        output.role === 'reference'
-          ? (output.referencePrompt ?? '').trim()
-          : composeTakePromptV2(beat.visualPrompt, shot.shotPrompt),
+        output.role === 'reference' ? (output.referencePrompt ?? '').trim() : composeTakePromptV2(beat.look, shot.line),
       mediaKind: requestedKind,
       aspectRatio: project.aspectRatio,
       resolution: project.resolution,
@@ -2113,7 +2112,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       if (
         !reference ||
         reference.projectId !== project.id ||
-        reference.clipId !== shot.id ||
+        reference.shotId !== shot.id ||
         reference.mediaKind !== 'image'
       ) {
         throw new StudioJobManagerError('invalid_route');
@@ -2159,7 +2158,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       ...(output.role === 'reference'
         ? {
             referenceInputSnapshot: {
-              sourceVisualPrompt: authored,
+              sourceLook: authored,
               conditioningReferenceAssetIds: referenceInputs.map((asset) => asset.id),
               aspectRatio: project.aspectRatio,
               resolution: project.resolution,
@@ -2174,13 +2173,13 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     project: StudioProjectV2,
     job: StudioJobV2
   ): Promise<ExecutionContextV2 | null> => {
-    const shot = ownValueV2(project.clips, job.clipId);
+    const shot = ownValueV2(project.shots, job.shotId);
     if (!shot || !shot.jobIds.includes(job.id)) return null;
     try {
       const outputRole = jobOutputRoleV2(job);
       const mediaKind = requestedMediaKind(shot.mediaKind, outputRole);
       const route = {
-        clipId: shot.id,
+        shotId: shot.id,
         ...job.provider,
         kind: mediaKind,
       } satisfies StudioResolvedShotRouteSnapshotV2;
@@ -2206,7 +2205,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     project: StudioProjectV2,
     job: StudioJobV2
   ): Promise<ExecutionContextV2 | null> => {
-    const shot = ownValueV2(project.clips, job.clipId);
+    const shot = ownValueV2(project.shots, job.shotId);
     if (!shot || !shot.jobIds.includes(job.id)) return null;
     try {
       const outputRole = jobOutputRoleV2(job);
@@ -2254,7 +2253,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
         const budget = resolveRemoteMediaBudget({ byteSize: poster.byteSize, mediaKind: poster.mediaKind });
         await deps.mediaStore.persistProviderPosterFromUrlForJobV2({
           projectId: context.projectId,
-          clipId: context.shotId,
+          shotId: context.shotId,
           jobId: context.jobId,
           primaryAssetId,
           declaredMimeType: poster.mimeType,
@@ -2277,7 +2276,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       try {
         await deps.mediaStore.persistProviderPosterForJobV2({
           projectId: context.projectId,
-          clipId: context.shotId,
+          shotId: context.shotId,
           jobId: context.jobId,
           primaryAssetId,
           declaredMimeType: poster.mimeType,
@@ -2339,7 +2338,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
         const budget = resolveRemoteMediaBudget({ byteSize: output.byteSize, mediaKind: output.mediaKind });
         const primaryAsset = await deps.mediaStore.persistProviderOutputFromUrlForJobV2({
           projectId: context.projectId,
-          clipId: context.shotId,
+          shotId: context.shotId,
           jobId: context.jobId,
           mediaKind: output.mediaKind,
           declaredMimeType: output.mimeType,
@@ -2363,7 +2362,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
         try {
           const primaryAsset = await deps.mediaStore.persistProviderOutputForJobV2({
             projectId: context.projectId,
-            clipId: context.shotId,
+            shotId: context.shotId,
             jobId: context.jobId,
             mediaKind: output.mediaKind,
             declaredMimeType: output.mimeType,
@@ -2677,7 +2676,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       const job: StudioJobV2 = {
         id: jobId,
         projectId: project.id,
-        clipId: candidate.shotId,
+        shotId: candidate.shotId,
         status: 'queued_local',
         provider: {
           providerId: candidate.provider.id,
@@ -2722,7 +2721,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
             predecessor.updatedAt = timestamp;
           }
           for (const { job } of jobs) {
-            const shot = ownValueV2(current.clips, job.clipId);
+            const shot = ownValueV2(current.shots, job.shotId);
             if (!shot) invalidRequest();
             defineOwnV2(current.jobs, job.id, job);
             shot.jobIds.push(job.id);
@@ -2757,7 +2756,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
         (asset) =>
           asset.projectId !== project.id ||
           ownValueV2(project.assets, asset.id) !== asset ||
-          asset.clipId !== null ||
+          asset.shotId !== null ||
           asset.mediaKind !== 'image' ||
           asset.managedAsset.collection !== 'imports'
       ) ||
@@ -2771,15 +2770,15 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       for (const entry of input.referencePrompts) {
         if (
           !hasExactKeysV2(entry, SHOT_REFERENCE_PROMPT_KEYS_V2) ||
-          typeof entry?.clipId !== 'string' ||
+          typeof entry?.shotId !== 'string' ||
           typeof entry.prompt !== 'string' ||
-          referencePromptByShot.has(entry.clipId)
+          referencePromptByShot.has(entry.shotId)
         ) {
           invalidRequest();
         }
         const prompt = entry.prompt.trim();
         if (prompt.length === 0 || prompt.length > STUDIO_REFERENCE_PROMPT_MAX_LENGTH) invalidRequest();
-        referencePromptByShot.set(entry.clipId, prompt);
+        referencePromptByShot.set(entry.shotId, prompt);
       }
     }
     const idempotencyKeyByShot = new Map<string, string>();
@@ -2788,34 +2787,34 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       for (const entry of input.idempotencyKeys) {
         if (
           !hasExactKeysV2(entry, SHOT_IDEMPOTENCY_KEY_KEYS_V2) ||
-          typeof entry?.clipId !== 'string' ||
+          typeof entry?.shotId !== 'string' ||
           typeof entry.key !== 'string' ||
           !SAFE_ID.test(entry.key) ||
-          idempotencyKeyByShot.has(entry.clipId)
+          idempotencyKeyByShot.has(entry.shotId)
         ) {
           invalidRequest();
         }
-        idempotencyKeyByShot.set(entry.clipId, entry.key);
+        idempotencyKeyByShot.set(entry.shotId, entry.key);
       }
     }
     if (
-      !isDenseArrayV2(input.clipIds, STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST) ||
-      input.clipIds.length < 1 ||
-      input.clipIds.some((shotId) => typeof shotId !== 'string' || !SAFE_ID.test(shotId)) ||
-      new Set(input.clipIds).size !== input.clipIds.length ||
+      !isDenseArrayV2(input.shotIds, STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST) ||
+      input.shotIds.length < 1 ||
+      input.shotIds.some((shotId) => typeof shotId !== 'string' || !SAFE_ID.test(shotId)) ||
+      new Set(input.shotIds).size !== input.shotIds.length ||
       !isDenseArrayV2(input.routes, STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST) ||
-      input.routes.length !== input.clipIds.length ||
+      input.routes.length !== input.shotIds.length ||
       typeof input.catalogVersion !== 'string' ||
       input.catalogVersion.length < 1 ||
       input.catalogVersion.length > 256 ||
       (input.outputRole !== undefined && input.outputRole !== 'take' && input.outputRole !== 'reference') ||
       (outputRole === 'reference' &&
-        (referencePromptByShot.size !== input.clipIds.length ||
-          input.clipIds.some((shotId) => !referencePromptByShot.has(shotId)))) ||
+        (referencePromptByShot.size !== input.shotIds.length ||
+          input.shotIds.some((shotId) => !referencePromptByShot.has(shotId)))) ||
       (outputRole !== 'reference' && referencePromptByShot.size > 0) ||
       (input.idempotencyKeys !== undefined &&
-        (idempotencyKeyByShot.size !== input.clipIds.length ||
-          input.clipIds.some((shotId) => !idempotencyKeyByShot.has(shotId))))
+        (idempotencyKeyByShot.size !== input.shotIds.length ||
+          input.shotIds.some((shotId) => !idempotencyKeyByShot.has(shotId))))
     ) {
       invalidRequest();
     }
@@ -2824,9 +2823,9 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       const route = candidate as StudioResolvedShotRouteSnapshotV2;
       if (
         !hasExactKeysV2(route, SHOT_ROUTE_KEYS_V2) ||
-        typeof route?.clipId !== 'string' ||
-        !input.clipIds.includes(route.clipId) ||
-        routeByShot.has(route.clipId) ||
+        typeof route?.shotId !== 'string' ||
+        !input.shotIds.includes(route.shotId) ||
+        routeByShot.has(route.shotId) ||
         typeof route.providerId !== 'string' ||
         !SAFE_ID.test(route.providerId) ||
         typeof route.model !== 'string' ||
@@ -2835,13 +2834,13 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       ) {
         invalidRequest();
       }
-      routeByShot.set(route.clipId, route);
+      routeByShot.set(route.shotId, route);
     }
     const prepared: PreparedSubmissionV2[] = [];
-    for (const shotId of input.clipIds) {
+    for (const shotId of input.shotIds) {
       const route = routeByShot.get(shotId);
       if (!route) invalidRequest();
-      const shot = ownValueV2(project.clips, shotId);
+      const shot = ownValueV2(project.shots, shotId);
       if (!shot || !activeBeatForShotV2(project, shotId)) {
         throw new StudioJobManagerError('invalid_route');
       }
@@ -2862,7 +2861,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       }
       const shotJobs = shot.jobIds.flatMap((jobId) => {
         const job = ownValueV2(project.jobs, jobId);
-        return job?.projectId === project.id && job.clipId === shotId ? [job] : [];
+        return job?.projectId === project.id && job.shotId === shotId ? [job] : [];
       });
       if (
         shotJobs.some(
@@ -3018,14 +3017,14 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     if (disposed) throw new StudioJobManagerError('invalid_request');
     const previous = ownValueV2(project.jobs, input.jobId);
     if (!previous) throw new CreativeStudioStoreError('not_found', 'Studio job not found');
-    const shot = ownValueV2(project.clips, previous.clipId);
+    const shot = ownValueV2(project.shots, previous.shotId);
     if (!shot || !shot.jobIds.includes(previous.id)) {
-      throw new CreativeStudioStoreError('not_found', 'Studio clip not found');
+      throw new CreativeStudioStoreError('not_found', 'Studio shot not found');
     }
     if (!activeBeatForShotV2(project, shot.id)) throw new StudioJobManagerError('invalid_request');
     const shotJobs = shot.jobIds.flatMap((jobId) => {
       const job = ownValueV2(project.jobs, jobId);
-      return job?.projectId === project.id && job.clipId === shot.id ? [job] : [];
+      return job?.projectId === project.id && job.shotId === shot.id ? [job] : [];
     });
     if (
       shotJobs.some((job) => job.retryOfJobId === previous.id) ||
@@ -3088,7 +3087,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
         if (
           !asset ||
           asset.projectId !== project.id ||
-          asset.clipId !== null ||
+          asset.shotId !== null ||
           asset.mediaKind !== 'image' ||
           asset.managedAsset.collection !== 'imports' ||
           (asset.briefReferenceRole !== 'cast' && asset.briefReferenceRole !== 'look')
@@ -3099,12 +3098,12 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       }
       requestedOutput = {
         role: 'reference',
-        referencePrompt: snapshot.sourceVisualPrompt,
+        referencePrompt: snapshot.sourceLook,
         referenceInputs,
       };
     }
     const route = {
-      clipId: shot.id,
+      shotId: shot.id,
       ...previous.provider,
       kind: requestedMediaKind(shot.mediaKind, outputRole),
     } satisfies StudioResolvedShotRouteSnapshotV2;
@@ -3131,11 +3130,11 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     if (!job || job.status !== 'failed' || job.error?.code !== 'download_failed') {
       throw new StudioJobManagerError('invalid_request');
     }
-    const shot = ownValueV2(project.clips, job.clipId);
+    const shot = ownValueV2(project.shots, job.shotId);
     const shotJobs =
       shot?.jobIds.flatMap((jobId) => {
         const candidate = ownValueV2(project.jobs, jobId);
-        return candidate?.projectId === project.id && candidate.clipId === job.clipId ? [candidate] : [];
+        return candidate?.projectId === project.id && candidate.shotId === job.shotId ? [candidate] : [];
       }) ?? [];
     if (
       shotJobs.some((candidate) => candidate.retryOfJobId === job.id) ||

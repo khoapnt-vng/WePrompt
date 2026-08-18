@@ -97,7 +97,7 @@ const copyRenderPlacementV2 = (placement: StudioCutClipV2): StudioRenderPlacemen
   filters: placement.filters.map((filter) => ({ ...filter })),
 });
 
-/** Projects the complete persisted active cut, including dormant parked-section placements. */
+/** Projects the complete persisted active cut, including dormant parked-beat placements. */
 export const resolvePersistedStudioRenderCutV2 = (
   project: StudioProjectV2
 ): StudioPersistedRenderProjectionV2 | null => {
@@ -120,10 +120,10 @@ export const resolvePersistedStudioRenderCutV2 = (
 
 const activeShotIdsV2 = (project: StudioProjectV2): ReadonlySet<string> => {
   const shotIds = new Set<string>();
-  for (const beatId of project.sectionOrder) {
-    const beat = ownValue(project.sections, beatId);
+  for (const beatId of project.beatOrder) {
+    const beat = ownValue(project.beats, beatId);
     if (beat === undefined) continue;
-    for (const shotId of beat.clipOrder) shotIds.add(shotId);
+    for (const shotId of beat.shotOrder) shotIds.add(shotId);
   }
   return shotIds;
 };
@@ -134,9 +134,9 @@ const activePlacementIsRenderableV2 = (
   placement: StudioRenderPlacementV2
 ): boolean => {
   if (!activeShotIds.has(placement.clipId)) return false;
-  const shot: StudioShot | undefined = ownValue(project.clips, placement.clipId);
-  if (shot === undefined || shot.selectedAssetId === null) return false;
-  const selected: StudioAssetV2 | undefined = ownValue(project.assets, shot.selectedAssetId);
+  const shot: StudioShot | undefined = ownValue(project.shots, placement.clipId);
+  if (shot === undefined || shot.selectedTakeId === null) return false;
+  const selected: StudioAssetV2 | undefined = ownValue(project.assets, shot.selectedTakeId);
   if (selected === undefined || !isCanonicalStudioGeneratedTakeV2(selected, project.id, shot)) return false;
   const placementAsset = ownValue(project.assets, placement.assetId);
   return placementAsset !== undefined && isCanonicalStudioGeneratedTakeV2(placementAsset, project.id, shot);

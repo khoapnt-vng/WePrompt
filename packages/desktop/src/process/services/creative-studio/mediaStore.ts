@@ -46,7 +46,7 @@ const resolveActiveStudioBriefReferencesV2 = (
 ): StudioAssetV2[] | null => {
   const compatibleAssets = Object.create(null) as Record<string, StudioAsset>;
   for (const [assetId, asset] of Object.entries(assets)) {
-    defineRecordValue(compatibleAssets, assetId, { ...asset, sceneId: asset.clipId });
+    defineRecordValue(compatibleAssets, assetId, { ...asset, sceneId: asset.shotId });
   }
   const resolved = resolveActiveStudioBriefReferences(compatibleAssets);
   if (resolved === null) return null;
@@ -129,7 +129,7 @@ export type InternalImportReferenceInput = {
 export type StudioMediaImportResult = { asset: StudioAsset; project: StudioProject };
 
 export type InternalImportReferenceInputV2 = Omit<InternalImportReferenceInput, 'sceneId'> & {
-  clipId?: string;
+  shotId?: string;
 };
 
 export type StudioMediaImportResultV2 = { asset: StudioAssetV2; project: StudioProjectV2 };
@@ -168,11 +168,11 @@ export type PersistProviderJobOutputUrlInput = Omit<PersistProviderOutputUrlInpu
 };
 
 export type PersistProviderJobOutputInputV2 = Omit<PersistProviderJobOutputInput, 'sceneId'> & {
-  clipId: string;
+  shotId: string;
 };
 
 export type PersistProviderJobOutputUrlInputV2 = Omit<PersistProviderJobOutputUrlInput, 'sceneId'> & {
-  clipId: string;
+  shotId: string;
 };
 
 export type PersistProviderJobPosterInput = {
@@ -193,11 +193,11 @@ export type PersistProviderJobPosterUrlInput = Omit<PersistProviderJobPosterInpu
 };
 
 export type PersistProviderJobPosterInputV2 = Omit<PersistProviderJobPosterInput, 'sceneId'> & {
-  clipId: string;
+  shotId: string;
 };
 
 export type PersistProviderJobPosterUrlInputV2 = Omit<PersistProviderJobPosterUrlInput, 'sceneId'> & {
-  clipId: string;
+  shotId: string;
 };
 
 export type PersistCapturedPosterInput = {
@@ -211,7 +211,7 @@ export type PersistCapturedPosterInput = {
 };
 
 export type PersistCapturedPosterInputV2 = Omit<PersistCapturedPosterInput, 'sceneId'> & {
-  clipId: string;
+  shotId: string;
 };
 
 /** A derived project output whose lifecycle is independent from editable scenes. */
@@ -1368,11 +1368,11 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
   ): Promise<StudioAssetV2 | StudioMediaImportResultV2> {
     if (
       !SAFE_ID.test(input.projectId) ||
-      (!SAFE_ID.test(input.clipId ?? '') && input.clipId !== undefined) ||
+      (!SAFE_ID.test(input.shotId ?? '') && input.shotId !== undefined) ||
       (input.briefReferenceRole !== undefined &&
         input.briefReferenceRole !== 'cast' &&
         input.briefReferenceRole !== 'look') ||
-      (input.clipId === undefined) === (input.briefReferenceRole === undefined) ||
+      (input.shotId === undefined) === (input.briefReferenceRole === undefined) ||
       !Number.isSafeInteger(input.expectedRevision) ||
       input.expectedRevision < 1 ||
       typeof input.sourcePath !== 'string'
@@ -1394,7 +1394,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       const { projectDir, project } = context;
       authority = context.authority;
       if (project.revision !== input.expectedRevision) throw new CreativeStudioMediaError('stale_project');
-      if (input.clipId !== undefined && !Object.hasOwn(project.clips, input.clipId)) {
+      if (input.shotId !== undefined && !Object.hasOwn(project.shots, input.shotId)) {
         throw new CreativeStudioMediaError('not_found');
       }
       if (input.briefReferenceRole !== undefined) {
@@ -1469,7 +1469,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       const baseAsset: StudioAssetV2 = {
         id: assetId,
         projectId: input.projectId,
-        clipId: input.clipId ?? null,
+        shotId: input.shotId ?? null,
         mediaKind: 'image',
         mimeType: signature.mimeType,
         managedAsset: { collection: 'imports', fileName: `${assetId}.${signature.extension}` },
@@ -1502,8 +1502,8 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
                   ),
                 };
           defineRecordValue(next.assets, asset.id, asset);
-          if (asset.clipId !== null) {
-            const shot = ownRecordValue(next.clips, asset.clipId);
+          if (asset.shotId !== null) {
+            const shot = ownRecordValue(next.shots, asset.shotId);
             if (shot === undefined) throw new CreativeStudioMediaError('not_found');
             shot.assetIds.push(asset.id);
             shot.referenceAssetId = asset.id;
@@ -1540,7 +1540,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       if (
         currentAsset === undefined ||
         currentAsset.projectId !== project.id ||
-        currentAsset.clipId !== null ||
+        currentAsset.shotId !== null ||
         currentAsset.mediaKind !== 'image' ||
         currentAsset.managedAsset.collection !== 'imports' ||
         (currentAsset.briefReferenceRole !== 'cast' && currentAsset.briefReferenceRole !== 'look') ||
@@ -1578,7 +1578,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
           if (asset === undefined) throw new CreativeStudioMediaError('not_found');
           if (
             asset.projectId !== current.id ||
-            asset.clipId !== null ||
+            asset.shotId !== null ||
             asset.mediaKind !== 'image' ||
             asset.managedAsset.collection !== 'imports' ||
             (asset.briefReferenceRole !== 'cast' && asset.briefReferenceRole !== 'look') ||
@@ -1825,7 +1825,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       const keys = new Set([
         'id',
         'projectId',
-        'clipId',
+        'shotId',
         'mediaKind',
         'mimeType',
         'managedAsset',
@@ -1840,7 +1840,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         Object.keys(parsed).some((key) => !keys.has(key)) ||
         candidate.id !== assetId ||
         candidate.projectId !== projectId ||
-        candidate.clipId !== null ||
+        candidate.shotId !== null ||
         candidate.mediaKind !== 'video' ||
         candidate.mimeType !== 'video/mp4' ||
         typeof managedAsset !== 'object' ||
@@ -2237,7 +2237,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
   const validateProviderOutputMetadataV2 = (input: ProviderJobOutputMetadataV2 | ProviderJobPosterMetadataV2): void => {
     if (
       !SAFE_ID.test(input.projectId) ||
-      !SAFE_ID.test(input.clipId) ||
+      !SAFE_ID.test(input.shotId) ||
       !SAFE_ID.test(input.jobId) ||
       typeof input.declaredMimeType !== 'string' ||
       ('mediaKind' in input && input.mediaKind !== 'image' && input.mediaKind !== 'video') ||
@@ -2255,11 +2255,8 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     }
   };
 
-  const owningBeatForShotV2 = (
-    project: StudioProjectV2,
-    shotId: string
-  ): StudioProjectV2['sections'][string] | null => {
-    const owners = Object.values(project.sections).filter((beat) => beat.clipOrder.includes(shotId));
+  const owningBeatForShotV2 = (project: StudioProjectV2, shotId: string): StudioProjectV2['beats'][string] | null => {
+    const owners = Object.values(project.beats).filter((beat) => beat.shotOrder.includes(shotId));
     return owners.length === 1 ? owners[0]! : null;
   };
 
@@ -2325,9 +2322,9 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
   const prepareProviderJobWriteV2 = async (input: ProviderJobOutputMetadataV2): Promise<ManagedWritePlanV2> => {
     validateProviderOutputMetadataV2(input);
     const { projectDir, project, authority } = await loadProjectContextV2(input.projectId);
-    const shot = ownRecordValue(project.clips, input.clipId);
+    const shot = ownRecordValue(project.shots, input.shotId);
     const job = ownRecordValue(project.jobs, input.jobId);
-    const beat = owningBeatForShotV2(project, input.clipId);
+    const beat = owningBeatForShotV2(project, input.shotId);
     const role = job ? jobOutputRole(job) : null;
     const mediaKindMatchesRole =
       role === 'reference' ? input.mediaKind === 'image' : shot?.mediaKind === input.mediaKind;
@@ -2341,7 +2338,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       !beat ||
       !job ||
       job.projectId !== input.projectId ||
-      job.clipId !== input.clipId ||
+      job.shotId !== input.shotId ||
       !shot.jobIds.includes(job.id) ||
       !mediaKindMatchesRole ||
       !active
@@ -2411,8 +2408,8 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
   const validateProviderPosterLineageV2 = (
     project: StudioProjectV2,
     input: ProviderJobPosterMetadataV2
-  ): { shot: StudioProjectV2['clips'][string]; job: StudioProjectV2['jobs'][string] } => {
-    const shot = ownRecordValue(project.clips, input.clipId);
+  ): { shot: StudioProjectV2['shots'][string]; job: StudioProjectV2['jobs'][string] } => {
+    const shot = ownRecordValue(project.shots, input.shotId);
     const job = ownRecordValue(project.jobs, input.jobId);
     if (!shot || !job) throw new CreativeStudioMediaError('not_found');
     if (shot.mediaKind !== 'video') throw new CreativeStudioMediaError('invalid_media');
@@ -2421,7 +2418,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     if (
       !primary ||
       primary.projectId !== input.projectId ||
-      primary.clipId !== input.clipId ||
+      primary.shotId !== input.shotId ||
       primary.mediaKind !== 'video' ||
       primary.managedAsset.collection !== 'assets'
     ) {
@@ -2430,7 +2427,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     if (
       jobOutputRole(job) === 'reference' ||
       job.projectId !== input.projectId ||
-      job.clipId !== input.clipId ||
+      job.shotId !== input.shotId ||
       job.outputAssetIds.length !== 1 ||
       job.outputAssetIds[0] !== input.primaryAssetId ||
       !shot.assetIds.includes(input.primaryAssetId) ||
@@ -2524,16 +2521,16 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
   const validateCapturedPosterLineageV2 = (
     project: StudioProjectV2,
     input: CapturedPosterMetadataV2
-  ): { shot: StudioProjectV2['clips'][string]; job: StudioProjectV2['jobs'][string] } => {
-    const shot = ownRecordValue(project.clips, input.clipId);
+  ): { shot: StudioProjectV2['shots'][string]; job: StudioProjectV2['jobs'][string] } => {
+    const shot = ownRecordValue(project.shots, input.shotId);
     const video = ownRecordValue(project.assets, input.videoAssetId);
     if (!shot || !video) throw new CreativeStudioMediaError('not_found');
     if (
       shot.mediaKind !== 'video' ||
-      shot.selectedAssetId !== input.videoAssetId ||
+      shot.selectedTakeId !== input.videoAssetId ||
       !shot.assetIds.includes(input.videoAssetId) ||
       video.projectId !== input.projectId ||
-      video.clipId !== input.clipId ||
+      video.shotId !== input.shotId ||
       video.mediaKind !== 'video' ||
       video.managedAsset.collection !== 'assets'
     ) {
@@ -2542,7 +2539,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     const producers = shot.jobIds.flatMap((jobId) => {
       const job = ownRecordValue(project.jobs, jobId);
       return job?.projectId === input.projectId &&
-        job.clipId === input.clipId &&
+        job.shotId === input.shotId &&
         jobOutputRole(job) !== 'reference' &&
         job.status === 'succeeded' &&
         job.outputAssetIds.length === 1 &&
@@ -2557,7 +2554,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
   const prepareCapturedPosterWriteV2 = async (input: CapturedPosterMetadataV2): Promise<ManagedWritePlanV2> => {
     if (
       !SAFE_ID.test(input.projectId) ||
-      !SAFE_ID.test(input.clipId) ||
+      !SAFE_ID.test(input.shotId) ||
       !SAFE_ID.test(input.videoAssetId) ||
       !Number.isSafeInteger(input.width) ||
       input.width < 1 ||
@@ -2591,7 +2588,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     body: AsyncIterable<Uint8Array>;
   };
 
-  type ManagedStreamInputV2 = Omit<ManagedStreamInput, 'sceneId'> & { clipId: string | null };
+  type ManagedStreamInputV2 = Omit<ManagedStreamInput, 'sceneId'> & { shotId: string | null };
 
   const persistManagedOutputWithPlan = async (
     input: ManagedStreamInput,
@@ -2740,7 +2737,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       const asset: StudioAssetV2 = {
         id: assetId,
         projectId: input.projectId,
-        clipId: input.clipId,
+        shotId: input.shotId,
         mediaKind: input.mediaKind,
         mimeType: signature.mimeType,
         managedAsset: { collection: plan.collection, fileName: `${assetId}.${signature.extension}` },
@@ -2889,7 +2886,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
 
   const persistProjectOutputV2 = async (input: PersistProjectOutputInputV2): Promise<StudioAssetV2> => {
     const plan = await prepareProjectOutputWriteV2(input);
-    return persistManagedOutputWithPlanV2({ ...input, clipId: null, mediaKind: 'video' }, plan, async (asset) => {
+    return persistManagedOutputWithPlanV2({ ...input, shotId: null, mediaKind: 'video' }, plan, async (asset) => {
       const partsDirectory = await ensureManagedDirectoryV2(plan.authority, 'parts');
       const assetsDirectory = await ensureManagedDirectoryV2(plan.authority, 'assets');
       const partsDir = partsDirectory.directory;
@@ -3028,8 +3025,8 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
   const commitProviderJobAssetV2 = async (input: ProviderJobOutputMetadataV2, asset: StudioAssetV2): Promise<void> => {
     await deps.store.updateProjectV2(input.projectId, (current) => {
       const job = ownRecordValue(current.jobs, input.jobId);
-      const shot = ownRecordValue(current.clips, input.clipId);
-      const beat = owningBeatForShotV2(current, input.clipId);
+      const shot = ownRecordValue(current.shots, input.shotId);
+      const beat = owningBeatForShotV2(current, input.shotId);
       const active =
         job?.status === 'submitting' ||
         job?.status === 'running' ||
@@ -3039,7 +3036,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         !shot ||
         !beat ||
         job.projectId !== input.projectId ||
-        job.clipId !== input.clipId ||
+        job.shotId !== input.shotId ||
         !shot.jobIds.includes(job.id) ||
         !active
       ) {
@@ -3054,7 +3051,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       }
       if (
         asset.projectId !== current.id ||
-        asset.clipId !== shot.id ||
+        asset.shotId !== shot.id ||
         asset.mediaKind !== input.mediaKind ||
         asset.managedAsset.collection !== (role === 'reference' ? 'references' : 'assets')
       ) {
@@ -3065,17 +3062,17 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         throw new CreativeStudioMediaError('invalid_media');
       }
       if (role === 'reference' && job.referenceInputSnapshot !== undefined) {
-        asset.sourceVisualPrompt = job.referenceInputSnapshot.sourceVisualPrompt;
+        asset.sourceLook = job.referenceInputSnapshot.sourceLook;
         asset.sourceReferenceAssetIds = [...job.referenceInputSnapshot.conditioningReferenceAssetIds];
         asset.sourceAspectRatio = job.referenceInputSnapshot.aspectRatio;
         asset.sourceResolution = job.referenceInputSnapshot.resolution;
       } else {
-        asset.sourceVisualPrompt = `${beat.visualPrompt.trim()}\n\n${shot.shotPrompt.trim()}`;
+        asset.sourceLook = `${beat.look.trim()}\n\n${shot.line.trim()}`;
       }
       defineRecordValue(current.assets, asset.id, asset);
       shot.assetIds.push(asset.id);
       if (role === 'reference') shot.referenceAssetId = asset.id;
-      else shot.selectedAssetId = asset.id;
+      else shot.selectedTakeId = asset.id;
       job.status = 'succeeded';
       job.outputAssetIds = [asset.id];
       job.error = null;
@@ -3123,7 +3120,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       const { shot, job } = validateProviderPosterLineageV2(current, input);
       if (
         posterAsset.projectId !== current.id ||
-        posterAsset.clipId !== shot.id ||
+        posterAsset.shotId !== shot.id ||
         posterAsset.mediaKind !== 'image' ||
         posterAsset.managedAsset.collection !== 'thumbnails'
       ) {
@@ -3177,7 +3174,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       const { shot, job } = validateCapturedPosterLineageV2(current, input);
       if (
         posterAsset.projectId !== current.id ||
-        posterAsset.clipId !== shot.id ||
+        posterAsset.shotId !== shot.id ||
         posterAsset.mediaKind !== 'image' ||
         posterAsset.managedAsset.collection !== 'thumbnails'
       ) {

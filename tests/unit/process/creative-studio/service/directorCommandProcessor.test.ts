@@ -1482,14 +1482,14 @@ const createHarnessV2 = (
     return {
       project,
       appliedRevision: project.revision,
-      createdSectionIds: command.operations
-        .filter((operation) => operation.kind === 'add_section')
-        .map((operation) => operation.sectionId),
-      createdClipIds: command.operations.flatMap((operation) =>
-        operation.kind === 'add_section'
-          ? [operation.firstClipId]
-          : operation.kind === 'add_clip'
-            ? [operation.clipId]
+      createdBeatIds: command.operations
+        .filter((operation) => operation.kind === 'add_beat')
+        .map((operation) => operation.beatId),
+      createdShotIds: command.operations.flatMap((operation) =>
+        operation.kind === 'add_beat'
+          ? [operation.firstShotId]
+          : operation.kind === 'add_shot'
+            ? [operation.shotId]
             : []
       ),
     };
@@ -1562,38 +1562,38 @@ const waitForReceiptV2 = async (
 };
 
 describe('Studio Director schema-2 commit tracker', () => {
-  it('materializes ordered section and clip identities only for the exact tagged commit', () => {
+  it('materializes ordered beat and shot identities only for the exact tagged commit', () => {
     const tracker = createStudioDirectorCommitTrackerV2();
     const command = makeCommandV2('project_v2', 'command_v2', {
       operations: [
         {
-          kind: 'add_section',
-          sectionId: 'section_1',
-          section: { title: '', storyLine: '', visualPrompt: '' },
-          firstClipId: 'clip_1',
-          firstClip: {
-            shotPrompt: '',
+          kind: 'add_beat',
+          beatId: 'section_1',
+          beat: { title: '', action: '', look: '' },
+          firstShotId: 'clip_1',
+          firstShot: {
+            line: '',
             narration: '',
             onScreenText: '',
             mediaKind: 'image',
             durationSeconds: 5,
             referenceAssetId: null,
           },
-          beforeSectionId: null,
+          beforeBeatId: null,
         },
         {
-          kind: 'add_clip',
-          sectionId: 'section_1',
-          clipId: 'clip_2',
-          clip: {
-            shotPrompt: '',
+          kind: 'add_shot',
+          beatId: 'section_1',
+          shotId: 'clip_2',
+          shot: {
+            line: '',
             narration: '',
             onScreenText: '',
             mediaKind: 'image',
             durationSeconds: 5,
             referenceAssetId: null,
           },
-          beforeClipId: null,
+          beforeShotId: null,
         },
       ],
     });
@@ -1614,8 +1614,8 @@ describe('Studio Director schema-2 commit tracker', () => {
       decidedAt: COMMITTED_AT,
       status: 'applied',
       appliedRevision: 2,
-      createdSectionIds: ['section_1'],
-      createdClipIds: ['clip_1', 'clip_2'],
+      createdBeatIds: ['section_1'],
+      createdShotIds: ['clip_1', 'clip_2'],
     });
   });
 
@@ -1672,8 +1672,8 @@ describe('Studio Director schema-2 command processor', () => {
       schemaVersion: 2,
       status: 'applied',
       appliedRevision: 2,
-      createdSectionIds: [],
-      createdClipIds: [],
+      createdBeatIds: [],
+      createdShotIds: [],
     });
     expect(harness.serviceApply).toHaveBeenCalledOnce();
     expect(harness.finish).toHaveBeenCalledExactlyOnceWith(command.projectId, command.commandId);
@@ -1752,8 +1752,8 @@ describe('Studio Director schema-2 command processor', () => {
         decidedAt: COMMITTED_AT,
         status: 'applied',
         appliedRevision: 2,
-        createdSectionIds: [],
-        createdClipIds: [],
+        createdBeatIds: [],
+        createdShotIds: [],
       },
     });
 
@@ -1818,8 +1818,8 @@ describe('Studio Director schema-2 command processor', () => {
         return {
           project: makeProjectV2(command.projectId, 2),
           appliedRevision: 2,
-          createdSectionIds: [],
-          createdClipIds: [],
+          createdBeatIds: [],
+          createdShotIds: [],
         };
       },
     });
@@ -1850,8 +1850,8 @@ describe('Studio Director schema-2 command processor', () => {
         return {
           project: makeProjectV2(command.projectId, 2),
           appliedRevision: 2,
-          createdSectionIds: [],
-          createdClipIds: [],
+          createdBeatIds: [],
+          createdShotIds: [],
         };
       },
     });
@@ -2014,7 +2014,7 @@ describe('Studio Director schema-2 command processor', () => {
   });
 
   it.each([
-    ['section_capacity_reached', 'rejected'],
+    ['beat_capacity_reached', 'rejected'],
     ['dependency_blocked', 'rejected'],
     ['validation_failed', 'rejected'],
     ['deadline_elapsed', 'expired'],

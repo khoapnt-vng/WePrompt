@@ -29,7 +29,7 @@ const isCanonicalGeneratedTake = (
   clipAssetIdsByClipId: ReadonlyMap<string, ReadonlySet<string>>
 ): boolean =>
   asset.projectId === project.id &&
-  asset.clipId === clip.id &&
+  asset.shotId === clip.id &&
   asset.mediaKind === clip.mediaKind &&
   asset.managedAsset.collection === 'assets' &&
   clipAssetIdsByClipId.get(clip.id)?.has(asset.id) === true;
@@ -39,8 +39,8 @@ const selectedTake = (
   clip: StudioShot,
   clipAssetIdsByClipId: ReadonlyMap<string, ReadonlySet<string>>
 ): StudioAssetV2 | null => {
-  if (clip.selectedAssetId === null) return null;
-  const asset = ownValue(project.assets, clip.selectedAssetId);
+  if (clip.selectedTakeId === null) return null;
+  const asset = ownValue(project.assets, clip.selectedTakeId);
   return asset !== undefined && isCanonicalGeneratedTake(project, clip, asset, clipAssetIdsByClipId) ? asset : null;
 };
 
@@ -89,25 +89,25 @@ const pristineCutClip = (clip: StudioShot, asset: StudioAssetV2, id: string): St
   filters: [],
 });
 
-const appendSectionClipOrder = (project: StudioProjectV2, sectionId: string, result: string[]): void => {
-  const clipOrder = ownValue(project.sections, sectionId)?.clipOrder;
-  if (clipOrder === undefined) return;
-  for (let clipIndex = 0; clipIndex < clipOrder.length; clipIndex += 1) result.push(clipOrder[clipIndex]!);
+const appendBeatShotOrder = (project: StudioProjectV2, beatId: string, result: string[]): void => {
+  const shotOrder = ownValue(project.beats, beatId)?.shotOrder;
+  if (shotOrder === undefined) return;
+  for (let shotIndex = 0; shotIndex < shotOrder.length; shotIndex += 1) result.push(shotOrder[shotIndex]!);
 };
 
 const activeClipOrder = (project: StudioProjectV2): string[] => {
   const result: string[] = [];
-  for (let sectionIndex = 0; sectionIndex < project.sectionOrder.length; sectionIndex += 1) {
-    appendSectionClipOrder(project, project.sectionOrder[sectionIndex]!, result);
+  for (let beatIndex = 0; beatIndex < project.beatOrder.length; beatIndex += 1) {
+    appendBeatShotOrder(project, project.beatOrder[beatIndex]!, result);
   }
   return result;
 };
 
 const parkedClipOrder = (project: StudioProjectV2): string[] => {
   const result: string[] = [];
-  for (let shelfIndex = 0; shelfIndex < project.shelf.length; shelfIndex += 1) {
-    const item = project.shelf[shelfIndex]!;
-    if (item.kind === 'section') appendSectionClipOrder(project, item.sectionId, result);
+  for (let binIndex = 0; binIndex < project.bin.length; binIndex += 1) {
+    const item = project.bin[binIndex]!;
+    if (item.kind === 'beat') appendBeatShotOrder(project, item.beatId, result);
   }
   return result;
 };
@@ -139,7 +139,7 @@ const reconcileCut = (
 
   for (const cutClipId of completePriorOrder) {
     const cutClip = ownValue(cut.clips, cutClipId);
-    const clip = cutClip === undefined ? undefined : ownValue(project.clips, cutClip.clipId);
+    const clip = cutClip === undefined ? undefined : ownValue(project.shots, cutClip.clipId);
     const persistedAsset = cutClip === undefined ? undefined : ownValue(project.assets, cutClip.assetId);
     const asset =
       clip === undefined
@@ -169,7 +169,7 @@ const reconcileCut = (
   if (cut.orderMode === 'storyboard') {
     for (const clipId of missingCandidateClipOrder) {
       if (cutClipIdByClipId.has(clipId) || !scopeOwnsMissingStoryboardEntry(scope, clipId)) continue;
-      const clip = ownValue(project.clips, clipId);
+      const clip = ownValue(project.shots, clipId);
       const asset = clip === undefined ? null : selectedTake(project, clip, clipAssetIdsByClipId);
       if (clip === undefined || asset === null) continue;
       const cutClipId = allocateCutClipId(clip.id, occupied);
@@ -208,7 +208,7 @@ export const reconcileStudioCutsV2 = (
   scope: StudioCutReconciliationScopeV2 = { kind: 'all' }
 ): StudioProjectV2 => {
   const clipAssetIdsByClipId = new Map<string, ReadonlySet<string>>();
-  for (const clip of Object.values(project.clips)) {
+  for (const clip of Object.values(project.shots)) {
     const assetIds = new Set<string>();
     for (let assetIndex = 0; assetIndex < clip.assetIds.length; assetIndex += 1) {
       assetIds.add(clip.assetIds[assetIndex]!);

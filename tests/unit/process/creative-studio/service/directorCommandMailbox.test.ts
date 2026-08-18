@@ -1815,8 +1815,8 @@ const makeReceiptV2 = (
     decidedAt: NOW,
     status: 'applied',
     appliedRevision: 2,
-    createdSectionIds: [],
-    createdClipIds: [],
+    createdBeatIds: [],
+    createdShotIds: [],
     ...overrides,
   }) as StudioDirectorCommandReceiptV2;
 
@@ -1893,8 +1893,8 @@ describe('Studio Director schema-2 command mailbox', () => {
 
     await expect(mailbox.readPending(projectId, 'command_v2')).resolves.toEqual({ status: 'valid', record: command });
     const receipt = makeReceiptV2(projectId, 'command_v2', {
-      createdSectionIds: ['section_1'],
-      createdClipIds: ['clip_1'],
+      createdBeatIds: ['section_1'],
+      createdShotIds: ['clip_1'],
     });
     await mailbox.writeReceipt(projectId, receipt);
     await expect(mailbox.readReceipt(projectId, 'command_v2')).resolves.toEqual({
@@ -2234,8 +2234,8 @@ describe('Studio Director schema-2 command mailbox', () => {
               decidedAt: NOW,
               status,
               appliedRevision: 3,
-              createdSectionIds: [],
-              createdClipIds: [],
+              createdBeatIds: [],
+              createdShotIds: [],
             }
           : {
               schemaVersion: 2,

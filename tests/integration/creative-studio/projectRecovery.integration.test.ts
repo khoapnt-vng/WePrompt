@@ -657,7 +657,7 @@ describe('Creative Studio project recovery integration', () => {
     });
   });
 
-  it('recovers a clip-owned remote job after restart even when its section was parked', async () => {
+  it('recovers a shot-owned remote job after restart even when its beat was parked', async () => {
     const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-v2-recovery-integration-'));
     const remoteState = createStudioE2EFakeRemoteState();
     const fake = createStudioE2EFakeBundle({ rootDir, remoteState });
@@ -671,7 +671,7 @@ describe('Creative Studio project recovery integration', () => {
       const imageRoute = catalog.routes.find((candidate) => candidate.kind === 'image');
       if (!imageRoute) throw new Error('V2 recovery did not resolve the fake image route');
       const route: StudioResolvedShotRouteSnapshotV2 = {
-        clipId: 'clip_recovery',
+        shotId: 'clip_recovery',
         providerId: imageRoute.providerId,
         adapterId: imageRoute.adapterId,
         model: imageRoute.model,
@@ -679,7 +679,7 @@ describe('Creative Studio project recovery integration', () => {
       };
       const created = await store.createProjectV2({
         name: 'Durable V2 film',
-        brief: 'Recover already-paid clip work after parking',
+        brief: 'Recover already-paid shot work after parking',
         aspectRatio: '16:9',
         targetDurationSeconds: 5,
         resolution: '720p',
@@ -693,26 +693,26 @@ describe('Creative Studio project recovery integration', () => {
       });
       const configured = await store.updateProjectV2(created.id, (project) => ({
         ...project,
-        sectionOrder: ['section_recovery'],
-        sections: {
+        beatOrder: ['section_recovery'],
+        beats: {
           section_recovery: {
             id: 'section_recovery',
-            title: 'Recovery section',
-            storyLine: 'Keep the paid work durable',
-            visualPrompt: 'A sunrise reflected in a glass city',
-            clipOrder: ['clip_recovery'],
+            title: 'Recovery beat',
+            action: 'Keep the paid work durable',
+            look: 'A sunrise reflected in a glass city',
+            shotOrder: ['clip_recovery'],
           },
         },
-        clips: {
+        shots: {
           clip_recovery: {
             id: 'clip_recovery',
-            shotPrompt: 'A paper aircraft crosses the reflection',
+            line: 'A paper aircraft crosses the reflection',
             narration: '',
             onScreenText: '',
             mediaKind: 'image',
             durationSeconds: 5,
             referenceAssetId: null,
-            selectedAssetId: null,
+            selectedTakeId: null,
             assetIds: [],
             jobIds: [],
           },
@@ -743,7 +743,7 @@ describe('Creative Studio project recovery integration', () => {
       await before.submitShots({
         projectId: configured.id,
         expectedRevision: configured.revision,
-        clipIds: ['clip_recovery'],
+        shotIds: ['clip_recovery'],
         routes: [route],
         catalogVersion: catalog.generationCatalogVersion,
       });
@@ -759,8 +759,8 @@ describe('Creative Studio project recovery integration', () => {
       });
       await store.updateProjectV2(configured.id, (project) => ({
         ...project,
-        sectionOrder: [],
-        shelf: [{ kind: 'section', sectionId: 'section_recovery' }],
+        beatOrder: [],
+        bin: [{ kind: 'beat', beatId: 'section_recovery' }],
       }));
       await beforeClock.take(2_000);
       await before.dispose();
@@ -801,25 +801,25 @@ describe('Creative Studio project recovery integration', () => {
         }
       });
       const recoveredJob = recovered.jobs.job_v2_recovery;
-      const selectedAssetId = recovered.clips.clip_recovery.selectedAssetId;
+      const selectedTakeId = recovered.shots.clip_recovery.selectedTakeId;
       expect({
         providerJobId: recoveredJob.providerJobId,
         status: recoveredJob.status,
-        clipId: recoveredJob.clipId,
+        shotId: recoveredJob.shotId,
         outputAssetIds: recoveredJob.outputAssetIds,
-        selectedAssetId,
-        assetClipId: selectedAssetId ? recovered.assets[selectedAssetId]?.clipId : null,
-        sectionOrder: recovered.sectionOrder,
-        shelf: recovered.shelf,
+        selectedTakeId,
+        assetShotId: selectedTakeId ? recovered.assets[selectedTakeId]?.shotId : null,
+        beatOrder: recovered.beatOrder,
+        bin: recovered.bin,
       }).toEqual({
         providerJobId: pending.providerJobId,
         status: 'succeeded',
-        clipId: 'clip_recovery',
-        outputAssetIds: [selectedAssetId],
-        selectedAssetId,
-        assetClipId: 'clip_recovery',
-        sectionOrder: [],
-        shelf: [{ kind: 'section', sectionId: 'section_recovery' }],
+        shotId: 'clip_recovery',
+        outputAssetIds: [selectedTakeId],
+        selectedTakeId,
+        assetShotId: 'clip_recovery',
+        beatOrder: [],
+        bin: [{ kind: 'beat', beatId: 'section_recovery' }],
       });
       expect(listProjectsV1).not.toHaveBeenCalled();
       expect(getProjectV1).not.toHaveBeenCalled();

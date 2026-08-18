@@ -82,7 +82,7 @@ const waitForReceipt = async (
 };
 
 const directorShotV2 = () => ({
-  shotPrompt: 'A clean product composition',
+  line: 'A clean product composition',
   narration: '',
   onScreenText: '',
   mediaKind: 'image' as const,
@@ -355,7 +355,7 @@ describe('Studio Director dynamic spend fence', () => {
     let project = await store.createProjectV2(input);
     const paidBoundaryNames = [
       'submitScenes',
-      'submitClips',
+      'submitShots',
       'retryJob',
       'retryJobV2',
       'retryDownload',
@@ -397,27 +397,27 @@ describe('Studio Director dynamic spend fence', () => {
 
     await apply('command_structure', [
       {
-        kind: 'add_section',
-        sectionId: 'section_1',
-        section: { title: 'Opening', storyLine: '', visualPrompt: 'Warm sunrise' },
-        firstClipId: 'clip_1',
-        firstClip: directorShotV2(),
-        beforeSectionId: null,
+        kind: 'add_beat',
+        beatId: 'section_1',
+        beat: { title: 'Opening', action: '', look: 'Warm sunrise' },
+        firstShotId: 'clip_1',
+        firstShot: directorShotV2(),
+        beforeBeatId: null,
       },
       {
-        kind: 'add_section',
-        sectionId: 'section_2',
-        section: { title: 'Close', storyLine: '', visualPrompt: 'Soft evening light' },
-        firstClipId: 'clip_2',
-        firstClip: directorShotV2(),
-        beforeSectionId: null,
+        kind: 'add_beat',
+        beatId: 'section_2',
+        beat: { title: 'Close', action: '', look: 'Soft evening light' },
+        firstShotId: 'clip_2',
+        firstShot: directorShotV2(),
+        beforeBeatId: null,
       },
       {
-        kind: 'add_clip',
-        sectionId: 'section_1',
-        clipId: 'clip_3',
-        clip: directorShotV2(),
-        beforeClipId: null,
+        kind: 'add_shot',
+        beatId: 'section_1',
+        shotId: 'clip_3',
+        shot: directorShotV2(),
+        beforeShotId: null,
       },
     ]);
 
@@ -429,7 +429,7 @@ describe('Studio Director dynamic spend fence', () => {
           take_1: {
             id: 'take_1',
             projectId: current.id,
-            clipId: 'clip_1',
+            shotId: 'clip_1',
             mediaKind: 'image',
             mimeType: 'image/png',
             managedAsset: { collection: 'assets', fileName: 'take_1.png' },
@@ -440,7 +440,7 @@ describe('Studio Director dynamic spend fence', () => {
           take_2: {
             id: 'take_2',
             projectId: current.id,
-            clipId: 'clip_1',
+            shotId: 'clip_1',
             mediaKind: 'image',
             mimeType: 'image/png',
             managedAsset: { collection: 'assets', fileName: 'take_2.png' },
@@ -449,9 +449,9 @@ describe('Studio Director dynamic spend fence', () => {
             createdAt: '2026-08-17T00:00:00.000Z',
           },
         },
-        clips: {
-          ...current.clips,
-          clip_1: { ...current.clips.clip_1!, assetIds: ['take_1', 'take_2'] },
+        shots: {
+          ...current.shots,
+          clip_1: { ...current.shots.clip_1!, assetIds: ['take_1', 'take_2'] },
         },
       }),
       project.revision
@@ -459,40 +459,40 @@ describe('Studio Director dynamic spend fence', () => {
 
     await apply('command_all_other_mutations', [
       { kind: 'set_brief', brief: 'Director-authored free edits' },
-      { kind: 'edit_section', sectionId: 'section_1', changes: { storyLine: 'A precise opening beat' } },
-      { kind: 'edit_clip', clipId: 'clip_1', changes: { shotPrompt: 'A tighter product composition' } },
-      { kind: 'reorder_sections', sectionOrder: ['section_2', 'section_1'] },
-      { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_3', 'clip_1'] },
-      { kind: 'park_section', sectionId: 'section_2' },
-      { kind: 'park_take', clipId: 'clip_1', assetId: 'take_1' },
-      { kind: 'park_take', clipId: 'clip_1', assetId: 'take_2' },
+      { kind: 'edit_beat', beatId: 'section_1', changes: { action: 'A precise opening beat' } },
+      { kind: 'edit_shot', shotId: 'clip_1', changes: { line: 'A tighter product composition' } },
+      { kind: 'reorder_beats', beatOrder: ['section_2', 'section_1'] },
+      { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_3', 'clip_1'] },
+      { kind: 'park_beat', beatId: 'section_2' },
+      { kind: 'park_take', shotId: 'clip_1', assetId: 'take_1' },
+      { kind: 'park_take', shotId: 'clip_1', assetId: 'take_2' },
       {
-        kind: 'reorder_shelf',
-        shelf: [
-          { kind: 'asset', assetId: 'take_2' },
-          { kind: 'section', sectionId: 'section_2' },
-          { kind: 'asset', assetId: 'take_1' },
+        kind: 'reorder_bin',
+        bin: [
+          { kind: 'take', assetId: 'take_2' },
+          { kind: 'beat', beatId: 'section_2' },
+          { kind: 'take', assetId: 'take_1' },
         ],
       },
-      { kind: 'select_shelved_take', clipId: 'clip_1', assetId: 'take_2' },
-      { kind: 'remove_shelf_alias', assetId: 'take_1' },
-      { kind: 'restore_section', sectionId: 'section_2', beforeSectionId: 'section_1' },
-      { kind: 'select_take', clipId: 'clip_1', assetId: 'take_1' },
-      { kind: 'delete_clip', clipId: 'clip_3' },
+      { kind: 'restore_take', shotId: 'clip_1', assetId: 'take_2' },
+      { kind: 'remove_bin_item', assetId: 'take_1' },
+      { kind: 'restore_beat', beatId: 'section_2', beforeBeatId: 'section_1' },
+      { kind: 'select_take', shotId: 'clip_1', assetId: 'take_1' },
+      { kind: 'delete_shot', shotId: 'clip_3' },
     ]);
 
     expect(project).toMatchObject({
       brief: 'Director-authored free edits',
-      sectionOrder: ['section_2', 'section_1'],
-      sections: {
-        section_1: { storyLine: 'A precise opening beat', clipOrder: ['clip_1'] },
+      beatOrder: ['section_2', 'section_1'],
+      beats: {
+        section_1: { action: 'A precise opening beat', shotOrder: ['clip_1'] },
       },
-      clips: {
-        clip_1: { shotPrompt: 'A tighter product composition', selectedAssetId: 'take_1' },
+      shots: {
+        clip_1: { line: 'A tighter product composition', selectedTakeId: 'take_1' },
       },
-      shelf: [],
+      bin: [],
     });
-    expect(project.clips).not.toHaveProperty('clip_3');
+    expect(project.shots).not.toHaveProperty('clip_3');
     for (const boundary of Object.values(paidBoundaries)) expect(boundary).not.toHaveBeenCalled();
   });
 });

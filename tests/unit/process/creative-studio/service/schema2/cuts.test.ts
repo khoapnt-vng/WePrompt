@@ -23,31 +23,31 @@ import { validateStudioProjectV2 } from '@/process/services/creative-studio/serv
 
 const timestamp = '2026-08-17T00:00:00.000Z';
 
-const makeShot = (id: string, selectedAssetId: string): StudioShot => ({
+const makeShot = (id: string, selectedTakeId: string): StudioShot => ({
   id,
-  shotPrompt: '',
+  line: '',
   narration: '',
   onScreenText: '',
   mediaKind: 'video',
   durationSeconds: 5,
   referenceAssetId: null,
-  selectedAssetId,
-  assetIds: [selectedAssetId],
+  selectedTakeId,
+  assetIds: [selectedTakeId],
   jobIds: [],
 });
 
-const makeBeat = (id: string, clipOrder: string[]): StudioBeat => ({
+const makeBeat = (id: string, shotOrder: string[]): StudioBeat => ({
   id,
   title: '',
-  storyLine: '',
-  visualPrompt: '',
-  clipOrder,
+  action: '',
+  look: '',
+  shotOrder,
 });
 
-const makeAsset = (id: string, clipId: string, durationSeconds = 10): StudioAssetV2 => ({
+const makeAsset = (id: string, shotId: string, durationSeconds = 10): StudioAssetV2 => ({
   id,
   projectId: 'project_1',
-  clipId,
+  shotId,
   mediaKind: 'video',
   mimeType: 'video/mp4',
   managedAsset: { collection: 'assets', fileName: `${id}.mp4` },
@@ -91,16 +91,16 @@ const makeProject = (): StudioProjectV2 => ({
   aspectRatio: '16:9',
   targetDurationSeconds: 30,
   resolution: '1080p',
-  sectionOrder: ['section_1', 'section_2'],
-  sections: {
+  beatOrder: ['section_1', 'section_2'],
+  beats: {
     section_1: makeBeat('section_1', ['clip_1']),
     section_2: makeBeat('section_2', ['clip_2']),
   },
-  clips: {
+  shots: {
     clip_1: makeShot('clip_1', 'asset_1'),
     clip_2: makeShot('clip_2', 'asset_2'),
   },
-  shelf: [],
+  bin: [],
   cuts: {},
   activeCutId: null,
   assets: {
@@ -114,9 +114,9 @@ const makeProject = (): StudioProjectV2 => ({
 });
 
 describe('reconcileStudioCutsV2', () => {
-  it('orders storyboard cut entries by active Section-to-Clip order', () => {
+  it('orders storyboard cut entries by active Beat-to-Shot order', () => {
     const project = makeProject();
-    project.sectionOrder = ['section_2', 'section_1'];
+    project.beatOrder = ['section_2', 'section_1'];
     project.cuts.cut_1 = makeCut('storyboard', ['cut_clip_1', 'cut_clip_2'], {
       cut_clip_1: makeCutClip('cut_clip_1', 'clip_1', 'asset_1'),
       cut_clip_2: makeCutClip('cut_clip_2', 'clip_2', 'asset_2'),
@@ -128,7 +128,7 @@ describe('reconcileStudioCutsV2', () => {
     expect(validateStudioProjectV2(next)).toBe(true);
   });
 
-  it('creates a pristine storyboard entry for a newly selected active clip', () => {
+  it('creates a pristine storyboard entry for a newly selected active shot', () => {
     const project = makeProject();
     project.cuts.cut_1 = makeCut('storyboard', ['cut_clip_1'], {
       cut_clip_1: makeCutClip('cut_clip_1', 'clip_1', 'asset_1'),
@@ -140,10 +140,10 @@ describe('reconcileStudioCutsV2', () => {
     expect(next.cuts.cut_1!.clips.clip_clip_2).toEqual(makeCutClip('clip_clip_2', 'clip_2', 'asset_2'));
   });
 
-  it('creates a dormant storyboard entry when selection changes on a parked clip', () => {
+  it('creates a dormant storyboard entry when selection changes on a parked shot', () => {
     const project = makeProject();
-    project.sectionOrder = ['section_1'];
-    project.shelf = [{ kind: 'section', sectionId: 'section_2' }];
+    project.beatOrder = ['section_1'];
+    project.bin = [{ kind: 'beat', beatId: 'section_2' }];
     project.cuts.cut_1 = makeCut('storyboard', ['cut_clip_1'], {
       cut_clip_1: makeCutClip('cut_clip_1', 'clip_1', 'asset_1'),
     });
@@ -157,7 +157,7 @@ describe('reconcileStudioCutsV2', () => {
   it('preserves a deliberate cut take and trims during structural reconciliation', () => {
     const project = makeProject();
     project.assets.asset_1_alt = makeAsset('asset_1_alt', 'clip_1', 12);
-    project.clips.clip_1!.assetIds.push('asset_1_alt');
+    project.shots.clip_1!.assetIds.push('asset_1_alt');
     const deliberate = {
       ...makeCutClip('cut_clip_1', 'clip_1', 'asset_1_alt'),
       sourceInSeconds: 2,
@@ -173,14 +173,14 @@ describe('reconcileStudioCutsV2', () => {
     expect(next.cuts.cut_1!.clips.clip_clip_2).toEqual(makeCutClip('clip_clip_2', 'clip_2', 'asset_2'));
   });
 
-  it('retargets only the selected clip during scoped selection reconciliation', () => {
+  it('retargets only the selected shot during scoped selection reconciliation', () => {
     const project = makeProject();
     project.assets.asset_1_alt = makeAsset('asset_1_alt', 'clip_1', 6);
     project.assets.asset_2_alt = makeAsset('asset_2_alt', 'clip_2', 6);
-    project.clips.clip_1!.assetIds.push('asset_1_alt');
-    project.clips.clip_2!.assetIds.push('asset_2_alt');
-    project.clips.clip_1!.selectedAssetId = 'asset_1_alt';
-    project.clips.clip_2!.selectedAssetId = 'asset_2_alt';
+    project.shots.clip_1!.assetIds.push('asset_1_alt');
+    project.shots.clip_2!.assetIds.push('asset_2_alt');
+    project.shots.clip_1!.selectedTakeId = 'asset_1_alt';
+    project.shots.clip_2!.selectedTakeId = 'asset_2_alt';
     project.cuts.cut_1 = makeCut('manual', ['cut_clip_1', 'cut_clip_2'], {
       cut_clip_1: {
         ...makeCutClip('cut_clip_1', 'clip_1', 'asset_1'),
@@ -204,8 +204,8 @@ describe('reconcileStudioCutsV2', () => {
       sourceOutSeconds: 8,
       filters: [{ id: 'contrast' as const, amount: 0.25 }],
     };
-    project.sectionOrder = ['section_1'];
-    project.shelf = [{ kind: 'section', sectionId: 'section_2' }];
+    project.beatOrder = ['section_1'];
+    project.bin = [{ kind: 'beat', beatId: 'section_2' }];
     project.cuts.cut_1 = makeCut('storyboard', ['cut_clip_2', 'cut_clip_1'], {
       cut_clip_1: makeCutClip('cut_clip_1', 'clip_1', 'asset_1'),
       cut_clip_2: dormant,
@@ -225,7 +225,7 @@ describe('reconcileStudioCutsV2', () => {
       sourceOutSeconds: 8,
       filters: [{ id: 'contrast' as const, amount: 0.25 }],
     };
-    project.sectionOrder = ['section_2', 'section_1'];
+    project.beatOrder = ['section_2', 'section_1'];
     project.cuts.cut_1 = makeCut('storyboard', ['cut_clip_1', 'cut_clip_2'], {
       cut_clip_1: makeCutClip('cut_clip_1', 'clip_1', 'asset_1'),
       cut_clip_2: dormant,
@@ -239,8 +239,8 @@ describe('reconcileStudioCutsV2', () => {
 
   it('retains the complete persisted manual order including dormant entries', () => {
     const project = makeProject();
-    project.sectionOrder = ['section_1'];
-    project.shelf = [{ kind: 'section', sectionId: 'section_2' }];
+    project.beatOrder = ['section_1'];
+    project.bin = [{ kind: 'beat', beatId: 'section_2' }];
     project.cuts.cut_1 = makeCut('manual', ['cut_clip_2', 'cut_clip_1'], {
       cut_clip_1: makeCutClip('cut_clip_1', 'clip_1', 'asset_1'),
       cut_clip_2: makeCutClip('cut_clip_2', 'clip_2', 'asset_2'),
@@ -252,7 +252,7 @@ describe('reconcileStudioCutsV2', () => {
     expect(Object.keys(next.cuts.cut_1!.clips)).toHaveLength(2);
   });
 
-  it('does not create an entry for a newly selected clip in manual mode', () => {
+  it('does not create an entry for a newly selected shot in manual mode', () => {
     const project = makeProject();
     project.cuts.cut_1 = makeCut('manual', ['cut_clip_1'], {
       cut_clip_1: makeCutClip('cut_clip_1', 'clip_1', 'asset_1'),
@@ -267,8 +267,8 @@ describe('reconcileStudioCutsV2', () => {
   it('updates the selected asset and clamps an oversized out trim', () => {
     const project = makeProject();
     project.assets.asset_1_next = makeAsset('asset_1_next', 'clip_1', 6);
-    project.clips.clip_1!.assetIds.push('asset_1_next');
-    project.clips.clip_1!.selectedAssetId = 'asset_1_next';
+    project.shots.clip_1!.assetIds.push('asset_1_next');
+    project.shots.clip_1!.selectedTakeId = 'asset_1_next';
     project.cuts.cut_1 = makeCut('storyboard', ['cut_clip_1'], {
       cut_clip_1: {
         ...makeCutClip('cut_clip_1', 'clip_1', 'asset_1'),
@@ -325,8 +325,8 @@ describe('reconcileStudioCutsV2', () => {
   it('clears both trims when the in point reaches the selected asset duration', () => {
     const project = makeProject();
     project.assets.asset_1_next = makeAsset('asset_1_next', 'clip_1', 4);
-    project.clips.clip_1!.assetIds.push('asset_1_next');
-    project.clips.clip_1!.selectedAssetId = 'asset_1_next';
+    project.shots.clip_1!.assetIds.push('asset_1_next');
+    project.shots.clip_1!.selectedTakeId = 'asset_1_next';
     project.cuts.cut_1 = makeCut('storyboard', ['cut_clip_1'], {
       cut_clip_1: {
         ...makeCutClip('cut_clip_1', 'clip_1', 'asset_1'),
@@ -380,8 +380,8 @@ describe('reconcileStudioCutsV2', () => {
 describe('studioClipHasCutDependencyV2', () => {
   it('reports a dependency from any cut, including a dormant clip entry', () => {
     const project = makeProject();
-    project.sectionOrder = ['section_1'];
-    project.shelf = [{ kind: 'section', sectionId: 'section_2' }];
+    project.beatOrder = ['section_1'];
+    project.bin = [{ kind: 'beat', beatId: 'section_2' }];
     project.cuts.cut_1 = makeCut('manual', ['cut_clip_2'], {
       cut_clip_2: makeCutClip('cut_clip_2', 'clip_2', 'asset_2'),
     });

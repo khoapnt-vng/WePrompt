@@ -218,6 +218,10 @@ export type StudioReferenceInputSnapshot = {
   resolution: StudioResolution;
 };
 
+export type StudioReferenceInputSnapshotV2 = Omit<StudioReferenceInputSnapshot, 'sourceVisualPrompt'> & {
+  sourceLook: string;
+};
+
 export type StudioJob = {
   id: string;
   projectId: string;
@@ -453,10 +457,10 @@ export type StudioDirectorCommandRejectionCodeV2 =
   | 'stale_revision'
   | 'future_revision'
   | 'project_not_found'
-  | 'section_capacity_reached'
-  | 'section_clip_capacity_reached'
-  | 'project_clip_capacity_reached'
-  | 'invalid_clip_duration'
+  | 'beat_capacity_reached'
+  | 'beat_shot_capacity_reached'
+  | 'project_shot_capacity_reached'
+  | 'invalid_shot_duration'
   | 'dependency_blocked'
   | 'identity_collision'
   | 'invalid_operation'
@@ -470,8 +474,8 @@ export type StudioDirectorAppliedReceiptV2 = {
   decidedAt: string;
   status: 'applied';
   appliedRevision: number;
-  createdSectionIds: string[];
-  createdClipIds: string[];
+  createdBeatIds: string[];
+  createdShotIds: string[];
 };
 
 export type StudioDirectorRejectedReceiptV2 = {
@@ -607,12 +611,14 @@ export type StudioRendererProject = Omit<StudioProject, 'jobs' | 'routing'> & {
   routing: StudioRendererRoutingPreferences;
 };
 
-export type StudioAssetV2 = Omit<StudioAsset, 'sceneId'> & {
-  clipId: string | null;
+export type StudioAssetV2 = Omit<StudioAsset, 'sceneId' | 'sourceVisualPrompt'> & {
+  shotId: string | null;
+  sourceLook?: string;
 };
 
-export type StudioJobV2 = Omit<StudioJob, 'sceneId'> & {
-  clipId: string;
+export type StudioJobV2 = Omit<StudioJob, 'sceneId' | 'referenceInputSnapshot'> & {
+  shotId: string;
+  referenceInputSnapshot?: StudioReferenceInputSnapshotV2;
 };
 
 export type StudioRendererJobV2 = Omit<
@@ -627,31 +633,31 @@ export type StudioRendererJobV2 = Omit<
 export type StudioBeat = {
   id: string;
   title: string;
-  storyLine: string;
-  visualPrompt: string;
-  clipOrder: string[];
+  action: string;
+  look: string;
+  shotOrder: string[];
 };
 
 export type StudioShot = {
   id: string;
-  shotPrompt: string;
+  line: string;
   narration: string;
   onScreenText: string;
   mediaKind: StudioMediaKind;
   durationSeconds: number;
   referenceAssetId: string | null;
-  selectedAssetId: string | null;
+  selectedTakeId: string | null;
   assetIds: string[];
   jobIds: string[];
 };
 
-export type StudioBinItem = { kind: 'section'; sectionId: string } | { kind: 'asset'; assetId: string };
+export type StudioBinItem = { kind: 'beat'; beatId: string } | { kind: 'take'; assetId: string };
 
-export type StudioEditableBeat = Pick<StudioBeat, 'title' | 'storyLine' | 'visualPrompt'>;
+export type StudioEditableBeat = Pick<StudioBeat, 'title' | 'action' | 'look'>;
 
 export type StudioEditableShot = Pick<
   StudioShot,
-  'shotPrompt' | 'narration' | 'onScreenText' | 'mediaKind' | 'durationSeconds' | 'referenceAssetId'
+  'line' | 'narration' | 'onScreenText' | 'mediaKind' | 'durationSeconds' | 'referenceAssetId'
 >;
 
 type StudioNonEmptyPartial<T> = {
@@ -684,10 +690,10 @@ export type StudioProjectV2 = Omit<
   'schemaVersion' | 'sceneOrder' | 'scenes' | 'cuts' | 'activeCutId' | 'assets' | 'jobs' | 'routing'
 > & {
   schemaVersion: 2;
-  sectionOrder: string[];
-  sections: Record<string, StudioBeat>;
-  clips: Record<string, StudioShot>;
-  shelf: StudioBinItem[];
+  beatOrder: string[];
+  beats: Record<string, StudioBeat>;
+  shots: Record<string, StudioShot>;
+  bin: StudioBinItem[];
   cuts: Record<string, StudioCutV2>;
   activeCutId: string | null;
   assets: Record<string, StudioAssetV2>;
@@ -707,15 +713,15 @@ export type StudioProjectSummaryV2 = {
   aspectRatio: StudioAspectRatio;
   targetDurationSeconds: number;
   resolution: StudioResolution;
-  sectionCount: number;
-  clipCount: number;
-  selectedAssetCount: number;
+  beatCount: number;
+  shotCount: number;
+  selectedTakeCount: number;
   poster?: {
-    sectionId: string;
-    clipId: string;
+    beatId: string;
+    shotId: string;
     assetId: string;
-    sectionPosition: number;
-    clipPosition: number;
+    beatPosition: number;
+    shotPosition: number;
   };
   createdAt: string;
   updatedAt: string;
@@ -744,32 +750,32 @@ export type StudioProjectListResultV2 = {
 export type StudioMutationOperationV2 =
   | { kind: 'set_brief'; brief: string }
   | {
-      kind: 'add_section';
-      sectionId: string;
-      section: StudioEditableBeat;
-      firstClipId: string;
-      firstClip: StudioEditableShot;
-      beforeSectionId: string | null;
+      kind: 'add_beat';
+      beatId: string;
+      beat: StudioEditableBeat;
+      firstShotId: string;
+      firstShot: StudioEditableShot;
+      beforeBeatId: string | null;
     }
-  | { kind: 'edit_section'; sectionId: string; changes: StudioEditableBeatChanges }
-  | { kind: 'reorder_sections'; sectionOrder: string[] }
-  | { kind: 'park_section'; sectionId: string }
-  | { kind: 'restore_section'; sectionId: string; beforeSectionId: string | null }
+  | { kind: 'edit_beat'; beatId: string; changes: StudioEditableBeatChanges }
+  | { kind: 'reorder_beats'; beatOrder: string[] }
+  | { kind: 'park_beat'; beatId: string }
+  | { kind: 'restore_beat'; beatId: string; beforeBeatId: string | null }
   | {
-      kind: 'add_clip';
-      sectionId: string;
-      clipId: string;
-      clip: StudioEditableShot;
-      beforeClipId: string | null;
+      kind: 'add_shot';
+      beatId: string;
+      shotId: string;
+      shot: StudioEditableShot;
+      beforeShotId: string | null;
     }
-  | { kind: 'edit_clip'; clipId: string; changes: StudioEditableShotChanges }
-  | { kind: 'delete_clip'; clipId: string }
-  | { kind: 'reorder_clips'; sectionId: string; clipOrder: string[] }
-  | { kind: 'park_take'; clipId: string; assetId: string }
-  | { kind: 'select_shelved_take'; clipId: string; assetId: string }
-  | { kind: 'remove_shelf_alias'; assetId: string }
-  | { kind: 'reorder_shelf'; shelf: StudioBinItem[] }
-  | { kind: 'select_take'; clipId: string; assetId: string };
+  | { kind: 'edit_shot'; shotId: string; changes: StudioEditableShotChanges }
+  | { kind: 'delete_shot'; shotId: string }
+  | { kind: 'reorder_shots'; beatId: string; shotOrder: string[] }
+  | { kind: 'park_take'; shotId: string; assetId: string }
+  | { kind: 'restore_take'; shotId: string; assetId: string }
+  | { kind: 'remove_bin_item'; assetId: string }
+  | { kind: 'reorder_bin'; bin: StudioBinItem[] }
+  | { kind: 'select_take'; shotId: string; assetId: string };
 
 export type StudioMutationBatchV2 = {
   schemaVersion: 2;
@@ -780,8 +786,8 @@ export type StudioMutationBatchV2 = {
 
 export type StudioMutationBatchResultV2 = {
   project: StudioRendererProjectV2;
-  createdSectionIds: string[];
-  createdClipIds: string[];
+  createdBeatIds: string[];
+  createdShotIds: string[];
 };
 
 export type StudioProposalStatus = 'pending' | 'accepted' | 'rejected' | 'expired';
@@ -912,12 +918,12 @@ export type StudioRecordProposalInputV2 = {
   payload: StudioProposalPayloadV2;
 };
 
-/** A durable schema-2 request for reviewed reference generation across ordered active clips. */
+/** A durable schema-2 request for reviewed reference generation across ordered active shots. */
 export type StudioReferenceRequestV2 = {
   schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
   id: string;
   projectId: string;
-  clipIds: string[];
+  shotIds: string[];
   status: 'pending';
   createdAt: string;
 };
@@ -928,7 +934,7 @@ export type StudioReferenceRequestSlotV2 = {
   reservedAt: string;
 };
 
-export type StudioReferenceRequestAuthorityV2 = Pick<StudioReferenceRequestV2, 'id' | 'clipIds'>;
+export type StudioReferenceRequestAuthorityV2 = Pick<StudioReferenceRequestV2, 'id' | 'shotIds'>;
 
 /** A durable request for one scene reference image; generation begins only after renderer approval. */
 export type StudioReferenceRequest = {

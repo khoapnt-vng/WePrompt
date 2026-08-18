@@ -64,10 +64,10 @@ const ROUTE_INTEGRATION_LABELS = {
 const CAPTURED_POSTER_DATA_URL_PREFIX = 'data:image/png;base64,';
 const CAPTURED_POSTER_MAX_BYTES = 50 * 1024 * 1024;
 const CAPTURED_POSTER_MAX_BASE64_LENGTH = Math.ceil(CAPTURED_POSTER_MAX_BYTES / 3) * 4;
-const SUBMIT_REQUIRED_KEYS = new Set(['projectId', 'clipIds', 'expectedRevision', 'routes', 'catalogVersion']);
+const SUBMIT_REQUIRED_KEYS = new Set(['projectId', 'shotIds', 'expectedRevision', 'routes', 'catalogVersion']);
 const SUBMIT_OPTIONAL_KEYS = new Set(['outputRole', 'referencePrompts']);
-const ROUTE_CHOICE_KEYS = new Set(['clipId', 'choiceId', 'kind']);
-const REFERENCE_PROMPT_KEYS = new Set(['clipId', 'prompt']);
+const ROUTE_CHOICE_KEYS = new Set(['shotId', 'choiceId', 'kind']);
+const REFERENCE_PROMPT_KEYS = new Set(['shotId', 'prompt']);
 
 export type StudioRouteCatalogV2 = {
   image: StudioMediaRouteCatalog;
@@ -76,19 +76,19 @@ export type StudioRouteCatalogV2 = {
 };
 
 export type StudioShotGenerationChoiceV2 = {
-  clipId: string;
+  shotId: string;
   choiceId: string;
   kind: StudioMediaKind;
 };
 
 export type StudioShotReferencePromptV2 = {
-  clipId: string;
+  shotId: string;
   prompt: string;
 };
 
 export type StudioSubmitShotsRequestV2 = {
   projectId: string;
-  clipIds: string[];
+  shotIds: string[];
   expectedRevision: number;
   routes: StudioShotGenerationChoiceV2[];
   catalogVersion: string;
@@ -97,17 +97,17 @@ export type StudioSubmitShotsRequestV2 = {
 };
 
 export type StudioShotReadinessIssueV2 =
-  | 'missing_section_title'
-  | 'missing_visual_prompt'
-  | 'missing_shot_prompt'
-  | 'invalid_clip_duration'
+  | 'missing_beat_title'
+  | 'missing_look'
+  | 'missing_line'
+  | 'invalid_shot_duration'
   | 'active_job'
   | 'generated_take_exists'
   | 'latest_job_failed';
 
 export type StudioShotGenerationReadinessV2 = {
-  clipId: string;
-  sectionId: string;
+  shotId: string;
+  beatId: string;
   ready: boolean;
   issues: StudioShotReadinessIssueV2[];
 };
@@ -115,8 +115,8 @@ export type StudioShotGenerationReadinessV2 = {
 export type StudioGenerationReadinessV2 = {
   projectId: string;
   revision: number;
-  clips: StudioShotGenerationReadinessV2[];
-  payableClipIds: string[];
+  shots: StudioShotGenerationReadinessV2[];
+  payableShotIds: string[];
 };
 
 export type CreativeStudioServiceV2 = {
@@ -127,7 +127,7 @@ export type CreativeStudioServiceV2 = {
   applyMutations(input: StudioMutationBatchV2): Promise<StudioMutationBatchResultV2>;
   importReferenceFromPath(input: {
     projectId: string;
-    clipId?: string;
+    shotId?: string;
     briefReferenceRole?: StudioBriefReferenceRole;
     expectedRevision: number;
     sourcePath: string;
@@ -135,14 +135,14 @@ export type CreativeStudioServiceV2 = {
   detachBriefReference(input: StudioDetachBriefReferenceRequest): Promise<StudioRendererProjectV2>;
   persistCapturedPoster(input: {
     projectId: string;
-    clipId: string;
+    shotId: string;
     videoAssetId: string;
     dataUrl: string;
     width: number;
     height: number;
   }): Promise<StudioAssetV2>;
   listRoutes(input?: { projectId?: string }): Promise<StudioRouteCatalogV2>;
-  getGenerationReadiness(input: { projectId: string; sectionIds: string[] }): Promise<StudioGenerationReadinessV2>;
+  getGenerationReadiness(input: { projectId: string; beatIds: string[] }): Promise<StudioGenerationReadinessV2>;
   submitShots(input: StudioSubmitShotsRequestV2): Promise<StudioRendererJobV2[]>;
   cancelJob(input: StudioJobRequest): Promise<StudioRendererJobV2>;
   retryJob(input: StudioRetryJobRequest): Promise<StudioRendererJobV2>;
@@ -348,12 +348,12 @@ const toRouteCatalog = (
 };
 
 const requestedKind = (project: StudioProjectV2, job: StudioJobV2): StudioMediaKind =>
-  jobOutputRole(job) === 'reference' ? 'image' : (ownValue(project.clips, job.clipId)?.mediaKind ?? 'image');
+  jobOutputRole(job) === 'reference' ? 'image' : (ownValue(project.shots, job.shotId)?.mediaKind ?? 'image');
 
 const toRendererJob = (project: StudioProjectV2, job: StudioJobV2): StudioRendererJobV2 => ({
   id: job.id,
   projectId: job.projectId,
-  clipId: job.clipId,
+  shotId: job.shotId,
   status: job.status,
   provider: toMediaChoice(job.provider, requestedKind(project, job)),
   ...(job.outputRole === undefined ? {} : { outputRole: job.outputRole }),
@@ -390,7 +390,7 @@ const supportedProject = (result: StudioProjectStoreLoadResultV2): StudioProject
   throw new CreativeStudioStoreError('not_found', 'Studio project not found');
 };
 
-const shotDurationIsValid = (shot: StudioProjectV2['clips'][string]): boolean =>
+const shotDurationIsValid = (shot: StudioProjectV2['shots'][string]): boolean =>
   shot.mediaKind === 'video'
     ? Number.isInteger(shot.durationSeconds) &&
       shot.durationSeconds >= STUDIO_MIN_SHOT_SECONDS &&
@@ -402,16 +402,16 @@ const readinessForShot = (
   beatId: string,
   shotId: string
 ): StudioShotGenerationReadinessV2 => {
-  const beat = ownValue(project.sections, beatId)!;
-  const shot = ownValue(project.clips, shotId)!;
+  const beat = ownValue(project.beats, beatId)!;
+  const shot = ownValue(project.shots, shotId)!;
   const issues: StudioShotReadinessIssueV2[] = [];
-  if (beat.title.trim().length === 0) issues.push('missing_section_title');
-  if (beat.visualPrompt.trim().length === 0) issues.push('missing_visual_prompt');
-  if (shot.shotPrompt.trim().length === 0) issues.push('missing_shot_prompt');
-  if (!shotDurationIsValid(shot)) issues.push('invalid_clip_duration');
+  if (beat.title.trim().length === 0) issues.push('missing_beat_title');
+  if (beat.look.trim().length === 0) issues.push('missing_look');
+  if (shot.line.trim().length === 0) issues.push('missing_line');
+  if (!shotDurationIsValid(shot)) issues.push('invalid_shot_duration');
   const jobs = shot.jobIds.flatMap((jobId) => {
     const job = ownValue(project.jobs, jobId);
-    return job?.id === jobId && job.projectId === project.id && job.clipId === shot.id ? [job] : [];
+    return job?.id === jobId && job.projectId === project.id && job.shotId === shot.id ? [job] : [];
   });
   if (jobs.some((job) => ACTIVE_JOB_STATUSES.has(job.status))) issues.push('active_job');
   if (
@@ -424,17 +424,17 @@ const readinessForShot = (
   }
   const latest = jobs.at(-1);
   if (latest?.status === 'failed' || latest?.status === 'needs_attention') issues.push('latest_job_failed');
-  return { clipId: shotId, sectionId: beatId, ready: issues.length === 0, issues };
+  return { shotId, beatId, ready: issues.length === 0, issues };
 };
 
 const activeShotOwners = (project: StudioProjectV2): Map<string, string> => {
   const owners = new Map<string, string>();
-  for (let beatIndex = 0; beatIndex < project.sectionOrder.length; beatIndex += 1) {
-    const beatId = project.sectionOrder[beatIndex]!;
-    const beat = ownValue(project.sections, beatId);
+  for (let beatIndex = 0; beatIndex < project.beatOrder.length; beatIndex += 1) {
+    const beatId = project.beatOrder[beatIndex]!;
+    const beat = ownValue(project.beats, beatId);
     if (beat === undefined) continue;
-    for (let shotIndex = 0; shotIndex < beat.clipOrder.length; shotIndex += 1) {
-      owners.set(beat.clipOrder[shotIndex]!, beatId);
+    for (let shotIndex = 0; shotIndex < beat.shotOrder.length; shotIndex += 1) {
+      owners.set(beat.shotOrder[shotIndex]!, beatId);
     }
   }
   return owners;
@@ -444,13 +444,13 @@ export const derivePayableShotIds = (project: StudioProjectV2, selectedBeatIds: 
   const selected = new Set(selectedBeatIds);
   const payable: string[] = [];
   const seen = new Set<string>();
-  for (let beatIndex = 0; beatIndex < project.sectionOrder.length; beatIndex += 1) {
-    const beatId = project.sectionOrder[beatIndex]!;
+  for (let beatIndex = 0; beatIndex < project.beatOrder.length; beatIndex += 1) {
+    const beatId = project.beatOrder[beatIndex]!;
     if (!selected.has(beatId)) continue;
-    const beat = ownValue(project.sections, beatId);
+    const beat = ownValue(project.beats, beatId);
     if (beat === undefined) continue;
-    for (let shotIndex = 0; shotIndex < beat.clipOrder.length; shotIndex += 1) {
-      const shotId = beat.clipOrder[shotIndex]!;
+    for (let shotIndex = 0; shotIndex < beat.shotOrder.length; shotIndex += 1) {
+      const shotId = beat.shotOrder[shotIndex]!;
       if (!seen.has(shotId) && readinessForShot(project, beatId, shotId).ready) {
         seen.add(shotId);
         payable.push(shotId);
@@ -466,12 +466,12 @@ const orderedReadiness = (
 ): StudioShotGenerationReadinessV2[] => {
   const selected = new Set(selectedBeatIds);
   const result: StudioShotGenerationReadinessV2[] = [];
-  for (let beatIndex = 0; beatIndex < project.sectionOrder.length; beatIndex += 1) {
-    const beatId = project.sectionOrder[beatIndex]!;
+  for (let beatIndex = 0; beatIndex < project.beatOrder.length; beatIndex += 1) {
+    const beatId = project.beatOrder[beatIndex]!;
     if (!selected.has(beatId)) continue;
-    const beat = ownValue(project.sections, beatId)!;
-    for (let shotIndex = 0; shotIndex < beat.clipOrder.length; shotIndex += 1) {
-      result.push(readinessForShot(project, beatId, beat.clipOrder[shotIndex]!));
+    const beat = ownValue(project.beats, beatId)!;
+    for (let shotIndex = 0; shotIndex < beat.shotOrder.length; shotIndex += 1) {
+      result.push(readinessForShot(project, beatId, beat.shotOrder[shotIndex]!));
     }
   }
   return result;
@@ -481,13 +481,13 @@ const assertBeatSelection: (project: StudioProjectV2, beatIds: unknown) => asser
   project,
   beatIds
 ) => {
-  if (!isDenseArray(beatIds, STUDIO_MAX_BEATS)) throw invalid('Invalid Studio section selection');
-  const active = new Set(project.sectionOrder);
+  if (!isDenseArray(beatIds, STUDIO_MAX_BEATS)) throw invalid('Invalid Studio beat selection');
+  const active = new Set(project.beatOrder);
   const seen = new Set<string>();
   for (let index = 0; index < beatIds.length; index += 1) {
     const beatId = beatIds[index];
     if (!isSafeId(beatId) || !active.has(beatId) || seen.has(beatId)) {
-      throw invalid('Invalid Studio section selection');
+      throw invalid('Invalid Studio beat selection');
     }
     seen.add(beatId);
   }
@@ -495,26 +495,26 @@ const assertBeatSelection: (project: StudioProjectV2, beatIds: unknown) => asser
 
 const assertSubmitRequest = (input: StudioSubmitShotsRequestV2): void => {
   if (!isRecord(input) || !hasKeys(input, SUBMIT_REQUIRED_KEYS, SUBMIT_OPTIONAL_KEYS)) {
-    throw invalid('Invalid Studio clip generation request');
+    throw invalid('Invalid Studio shot generation request');
   }
   assertSafeId(input.projectId, 'project id');
   assertRevision(input.expectedRevision);
   if (
-    !isDenseArray(input.clipIds, STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST) ||
-    input.clipIds.length < 1 ||
+    !isDenseArray(input.shotIds, STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST) ||
+    input.shotIds.length < 1 ||
     !isDenseArray(input.routes, STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST) ||
-    input.routes.length !== input.clipIds.length ||
+    input.routes.length !== input.shotIds.length ||
     typeof input.catalogVersion !== 'string' ||
     input.catalogVersion.length < 1 ||
     input.catalogVersion.length > 64 ||
     (input.outputRole !== undefined && input.outputRole !== 'take' && input.outputRole !== 'reference')
   ) {
-    throw invalid('Invalid Studio clip generation request');
+    throw invalid('Invalid Studio shot generation request');
   }
   const selected = new Set<string>();
-  for (let index = 0; index < input.clipIds.length; index += 1) {
-    const shotId = input.clipIds[index];
-    if (!isSafeId(shotId) || selected.has(shotId)) throw invalid('Invalid Studio clip generation selection');
+  for (let index = 0; index < input.shotIds.length; index += 1) {
+    const shotId = input.shotIds[index];
+    if (!isSafeId(shotId) || selected.has(shotId)) throw invalid('Invalid Studio shot generation selection');
     selected.add(shotId);
   }
   const routed = new Set<string>();
@@ -523,20 +523,20 @@ const assertSubmitRequest = (input: StudioSubmitShotsRequestV2): void => {
     if (
       !isRecord(route) ||
       !hasExactKeys(route, ROUTE_CHOICE_KEYS) ||
-      !isSafeId(route.clipId) ||
-      !selected.has(route.clipId) ||
-      routed.has(route.clipId) ||
+      !isSafeId(route.shotId) ||
+      !selected.has(route.shotId) ||
+      routed.has(route.shotId) ||
       !isSafeId(route.choiceId) ||
       (route.kind !== 'image' && route.kind !== 'video')
     ) {
-      throw invalid('Invalid Studio clip generation route');
+      throw invalid('Invalid Studio shot generation route');
     }
-    routed.add(route.clipId);
+    routed.add(route.shotId);
   }
   const outputRole = input.outputRole ?? 'take';
   if (outputRole === 'reference') {
     if (!isDenseArray(input.referencePrompts, STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST)) {
-      throw invalid('Invalid Studio clip reference prompts');
+      throw invalid('Invalid Studio shot reference prompts');
     }
     const promptShots = new Set<string>();
     for (let index = 0; index < input.referencePrompts.length; index += 1) {
@@ -544,19 +544,19 @@ const assertSubmitRequest = (input: StudioSubmitShotsRequestV2): void => {
       if (
         !isRecord(prompt) ||
         !hasExactKeys(prompt, REFERENCE_PROMPT_KEYS) ||
-        !selected.has(prompt.clipId) ||
-        promptShots.has(prompt.clipId) ||
+        !selected.has(prompt.shotId) ||
+        promptShots.has(prompt.shotId) ||
         typeof prompt.prompt !== 'string' ||
         prompt.prompt.trim().length < 1 ||
         prompt.prompt.length > STUDIO_REFERENCE_PROMPT_MAX_LENGTH
       ) {
-        throw invalid('Invalid Studio clip reference prompts');
+        throw invalid('Invalid Studio shot reference prompts');
       }
-      promptShots.add(prompt.clipId);
+      promptShots.add(prompt.shotId);
     }
-    if (promptShots.size !== selected.size) throw invalid('Invalid Studio clip reference prompts');
+    if (promptShots.size !== selected.size) throw invalid('Invalid Studio shot reference prompts');
   } else if (input.referencePrompts !== undefined) {
-    throw invalid('Invalid Studio clip reference prompts');
+    throw invalid('Invalid Studio shot reference prompts');
   }
 };
 
@@ -565,25 +565,25 @@ const assertReviewedShots = (project: StudioProjectV2, input: StudioSubmitShotsR
     throw new CreativeStudioStoreError('stale_project', 'Studio project has changed');
   }
   const owners = activeShotOwners(project);
-  const requested = new Set(input.clipIds);
+  const requested = new Set(input.shotIds);
   const canonicalOrder: string[] = [];
-  for (let beatIndex = 0; beatIndex < project.sectionOrder.length; beatIndex += 1) {
-    const beat = ownValue(project.sections, project.sectionOrder[beatIndex]!)!;
-    for (let shotIndex = 0; shotIndex < beat.clipOrder.length; shotIndex += 1) {
-      const shotId = beat.clipOrder[shotIndex]!;
+  for (let beatIndex = 0; beatIndex < project.beatOrder.length; beatIndex += 1) {
+    const beat = ownValue(project.beats, project.beatOrder[beatIndex]!)!;
+    for (let shotIndex = 0; shotIndex < beat.shotOrder.length; shotIndex += 1) {
+      const shotId = beat.shotOrder[shotIndex]!;
       if (requested.has(shotId)) canonicalOrder.push(shotId);
     }
   }
   if (
-    canonicalOrder.length !== input.clipIds.length ||
-    canonicalOrder.some((shotId, index) => shotId !== input.clipIds[index]) ||
-    input.clipIds.some((shotId) => {
+    canonicalOrder.length !== input.shotIds.length ||
+    canonicalOrder.some((shotId, index) => shotId !== input.shotIds[index]) ||
+    input.shotIds.some((shotId) => {
       const beatId = owners.get(shotId);
       if (beatId === undefined) return true;
       if ((input.outputRole ?? 'take') === 'take') {
         return !readinessForShot(project, beatId, shotId).ready;
       }
-      const shot = ownValue(project.clips, shotId)!;
+      const shot = ownValue(project.shots, shotId)!;
       return shot.jobIds.some((jobId) => {
         const job = ownValue(project.jobs, jobId);
         return job !== undefined && ACTIVE_JOB_STATUSES.has(job.status);
@@ -600,7 +600,7 @@ const routeSupportsShot = (
   shotId: string,
   outputRole: StudioOutputRole
 ): boolean => {
-  const shot = ownValue(project.clips, shotId);
+  const shot = ownValue(project.shots, shotId);
   if (shot === undefined) return false;
   const kind = outputRole === 'reference' ? 'image' : shot.mediaKind;
   return (
@@ -654,20 +654,20 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       const result = await deps.store.applyMutationBatchV2(input);
       return {
         project: notify(result.project),
-        createdSectionIds: [...result.createdSectionIds],
-        createdClipIds: [...result.createdClipIds],
+        createdBeatIds: [...result.createdBeatIds],
+        createdShotIds: [...result.createdShotIds],
       };
     },
 
     async importReferenceFromPath(input): Promise<{ asset: StudioAssetV2; project: StudioRendererProjectV2 }> {
       assertSafeId(input.projectId, 'project id');
       assertRevision(input.expectedRevision);
-      if (input.clipId !== undefined) assertSafeId(input.clipId, 'clip id');
+      if (input.shotId !== undefined) assertSafeId(input.shotId, 'shot id');
       if (
         (input.briefReferenceRole !== undefined &&
           input.briefReferenceRole !== 'cast' &&
           input.briefReferenceRole !== 'look') ||
-        (input.clipId !== undefined && input.briefReferenceRole !== undefined) ||
+        (input.shotId !== undefined && input.briefReferenceRole !== undefined) ||
         typeof input.sourcePath !== 'string' ||
         input.sourcePath.length === 0
       ) {
@@ -695,7 +695,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
 
     async persistCapturedPoster(input): Promise<StudioAssetV2> {
       assertSafeId(input.projectId, 'project id');
-      assertSafeId(input.clipId, 'clip id');
+      assertSafeId(input.shotId, 'shot id');
       assertSafeId(input.videoAssetId, 'video asset id');
       if (
         !Number.isSafeInteger(input.width) ||
@@ -713,7 +713,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       }
       const asset = await deps.mediaStore.persistCapturedPosterV2({
         projectId: input.projectId,
-        clipId: input.clipId,
+        shotId: input.shotId,
         videoAssetId: input.videoAssetId,
         width: input.width,
         height: input.height,
@@ -733,13 +733,13 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     async getGenerationReadiness(input): Promise<StudioGenerationReadinessV2> {
       assertSafeId(input.projectId, 'project id');
       const project = await loadSupported(input.projectId);
-      assertBeatSelection(project, input.sectionIds);
-      const shots = orderedReadiness(project, input.sectionIds);
+      assertBeatSelection(project, input.beatIds);
+      const shots = orderedReadiness(project, input.beatIds);
       return {
         projectId: project.id,
         revision: project.revision,
-        clips: shots,
-        payableClipIds: shots.filter((shot) => shot.ready).map((shot) => shot.clipId),
+        shots: shots,
+        payableShotIds: shots.filter((shot) => shot.ready).map((shot) => shot.shotId),
       };
     },
 
@@ -762,12 +762,12 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
           route === undefined ||
           selected === null ||
           !routeMatchesSelection(route, selected) ||
-          !routeSupportsShot(route, project, choice.clipId, outputRole)
+          !routeSupportsShot(route, project, choice.shotId, outputRole)
         ) {
           throw new CreativeStudioServiceError('invalid_route');
         }
         return {
-          clipId: choice.clipId,
+          shotId: choice.shotId,
           providerId: route.providerId,
           adapterId: route.adapterId,
           model: route.model,
@@ -776,7 +776,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       });
       const jobs = await deps.jobManager.submitShots({
         projectId: input.projectId,
-        clipIds: [...input.clipIds],
+        shotIds: [...input.shotIds],
         expectedRevision: input.expectedRevision,
         routes: resolvedRoutes,
         catalogVersion: generation.generationCatalogVersion,

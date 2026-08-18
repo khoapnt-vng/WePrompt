@@ -239,36 +239,36 @@ const makeStoreV2 = async (
   });
   const operations = [
     {
-      kind: 'add_section' as const,
-      sectionId: 'section_1',
-      section: { title: 'Opening', storyLine: '', visualPrompt: 'A visual language inherited by the clip' },
-      firstClipId: 'clip_1',
-      firstClip: {
-        shotPrompt: 'A precise opening frame',
+      kind: 'add_beat' as const,
+      beatId: 'section_1',
+      beat: { title: 'Opening', action: '', look: 'A visual language inherited by the clip' },
+      firstShotId: 'clip_1',
+      firstShot: {
+        line: 'A precise opening frame',
         narration: '',
         onScreenText: '',
         mediaKind: options.mediaKind ?? ('image' as const),
         durationSeconds: options.mediaKind === 'video' ? 5 : 1,
         referenceAssetId: null,
       },
-      beforeSectionId: null,
+      beforeBeatId: null,
     },
     ...(options.addSecondShot
       ? [
           {
-            kind: 'add_section' as const,
-            sectionId: 'section_2',
-            section: { title: 'Closing', storyLine: '', visualPrompt: '' },
-            firstClipId: 'clip_2',
-            firstClip: {
-              shotPrompt: 'A separate closing frame',
+            kind: 'add_beat' as const,
+            beatId: 'section_2',
+            beat: { title: 'Closing', action: '', look: '' },
+            firstShotId: 'clip_2',
+            firstShot: {
+              line: 'A separate closing frame',
               narration: '',
               onScreenText: '',
               mediaKind: options.mediaKind ?? ('image' as const),
               durationSeconds: options.mediaKind === 'video' ? 5 : 1,
               referenceAssetId: null,
             },
-            beforeSectionId: null,
+            beforeBeatId: null,
           },
         ]
       : []),
@@ -284,7 +284,7 @@ const makeStoreV2 = async (
     next.jobs.job_1 = {
       id: 'job_1',
       projectId: next.id,
-      clipId: 'clip_1',
+      shotId: 'clip_1',
       status: 'running',
       provider: {
         providerId: 'provider_1',
@@ -301,7 +301,7 @@ const makeStoreV2 = async (
       ...(options.outputRole === 'reference'
         ? {
             referenceInputSnapshot: {
-              sourceVisualPrompt: next.clips.clip_1.shotPrompt,
+              sourceLook: next.shots.clip_1.line,
               conditioningReferenceAssetIds: [],
               aspectRatio: next.aspectRatio,
               resolution: next.resolution,
@@ -317,7 +317,7 @@ const makeStoreV2 = async (
       createdAt: next.createdAt,
       updatedAt: next.updatedAt,
     };
-    next.clips.clip_1.jobIds.push('job_1');
+    next.shots.clip_1.jobIds.push('job_1');
     return next;
   });
   return { rootDir, store, project };
@@ -2728,13 +2728,13 @@ describe('createStudioMediaStore', () => {
 });
 
 describe('createStudioMediaStore schema 2', () => {
-  it('commits a clip-owned take, selects it, and resolves the verified bytes', async () => {
+  it('commits a shot-owned take, selects it, and resolves the verified bytes', async () => {
     const { store, project } = await makeStoreV2();
     const media = createStudioMediaStore({ store, createId: () => 'take_1' });
 
     const asset = await media.persistProviderOutputForJobV2({
       projectId: project.id,
-      clipId: 'clip_1',
+      shotId: 'clip_1',
       jobId: 'job_1',
       mediaKind: 'image',
       declaredMimeType: 'image/png',
@@ -2745,10 +2745,10 @@ describe('createStudioMediaStore schema 2', () => {
     expect(asset).toMatchObject({
       id: 'take_1',
       projectId: project.id,
-      clipId: 'clip_1',
+      shotId: 'clip_1',
       mediaKind: 'image',
       managedAsset: { collection: 'assets', fileName: 'take_1.png' },
-      sourceVisualPrompt: 'A visual language inherited by the clip\n\nA precise opening frame',
+      sourceLook: 'A visual language inherited by the clip\n\nA precise opening frame',
     });
     expect(asset).not.toHaveProperty('sceneId');
     const loaded = await store.getProjectV2(project.id);
@@ -2756,7 +2756,7 @@ describe('createStudioMediaStore schema 2', () => {
       status: 'supported',
       project: {
         revision: project.revision + 1,
-        clips: { clip_1: { selectedAssetId: 'take_1', assetIds: ['take_1'] } },
+        shots: { clip_1: { selectedTakeId: 'take_1', assetIds: ['take_1'] } },
         jobs: { job_1: { status: 'succeeded', outputAssetIds: ['take_1'], error: null } },
       },
     });
@@ -2767,7 +2767,7 @@ describe('createStudioMediaStore schema 2', () => {
     expect(Buffer.concat(chunks)).toEqual(png);
   });
 
-  it('rejects foreign-clip and wrong-kind outputs before consuming either body', async () => {
+  it('rejects foreign-shot and wrong-kind outputs before consuming either body', async () => {
     const { rootDir, store, project } = await makeStoreV2({ addSecondShot: true });
     const media = createStudioMediaStore({ store, createId: idSequence('foreign_take', 'wrong_kind_take') });
     let consumed = 0;
@@ -2779,7 +2779,7 @@ describe('createStudioMediaStore schema 2', () => {
     await expect(
       media.persistProviderOutputForJobV2({
         projectId: project.id,
-        clipId: 'clip_2',
+        shotId: 'clip_2',
         jobId: 'job_1',
         mediaKind: 'image',
         declaredMimeType: 'image/png',
@@ -2789,7 +2789,7 @@ describe('createStudioMediaStore schema 2', () => {
     await expect(
       media.persistProviderOutputForJobV2({
         projectId: project.id,
-        clipId: 'clip_1',
+        shotId: 'clip_1',
         jobId: 'job_1',
         mediaKind: 'video',
         declaredMimeType: 'video/mp4',
@@ -2810,7 +2810,7 @@ describe('createStudioMediaStore schema 2', () => {
     const media = createStudioMediaStore({ store, createId: () => 'must_not_allocate' });
     const cases: Array<[string, (input: Record<string, unknown>) => void]> = [
       ['project id', (input) => (input.projectId = 'bad/project')],
-      ['clip id', (input) => (input.clipId = 'bad/clip')],
+      ['shot id', (input) => (input.shotId = 'bad/clip')],
       ['job id', (input) => (input.jobId = 'bad/job')],
       ['MIME type', (input) => (input.declaredMimeType = 7)],
       ['media kind', (input) => (input.mediaKind = 'audio')],
@@ -2829,7 +2829,7 @@ describe('createStudioMediaStore schema 2', () => {
       let consumed = false;
       const input: Record<string, unknown> = {
         projectId: project.id,
-        clipId: 'clip_1',
+        shotId: 'clip_1',
         jobId: 'job_1',
         mediaKind: 'image',
         declaredMimeType: 'image/png',
@@ -2885,7 +2885,7 @@ describe('createStudioMediaStore schema 2', () => {
 
     const posterCases: Array<[string, (input: Record<string, unknown>) => void]> = [
       ['project id', (input) => (input.projectId = 'bad/project')],
-      ['clip id', (input) => (input.clipId = 'bad/clip')],
+      ['shot id', (input) => (input.shotId = 'bad/clip')],
       ['video id', (input) => (input.videoAssetId = 'bad/video')],
       ['fractional width', (input) => (input.width = 1.5)],
       ['zero width', (input) => (input.width = 0)],
@@ -2898,7 +2898,7 @@ describe('createStudioMediaStore schema 2', () => {
       let consumed = false;
       const input: Record<string, unknown> = {
         projectId: project.id,
-        clipId: 'clip_1',
+        shotId: 'clip_1',
         videoAssetId: 'video_1',
         width: 640,
         height: 360,
@@ -2991,7 +2991,7 @@ describe('createStudioMediaStore schema 2', () => {
     await expect(
       createStudioMediaStore({ store, createId: () => 'missing_clip_import' }).importReferenceFromPathV2({
         projectId: project.id,
-        clipId: 'missing_clip',
+        shotId: 'missing_clip',
         sourcePath: source,
         expectedRevision: project.revision,
       })
@@ -3014,7 +3014,7 @@ describe('createStudioMediaStore schema 2', () => {
       briefReferenceRole: 'look',
       expectedRevision: project.revision,
     });
-    expect(asset).toMatchObject({ id: 'asset_only_import', projectId: project.id, clipId: null });
+    expect(asset).toMatchObject({ id: 'asset_only_import', projectId: project.id, shotId: null });
     expect(asset).not.toHaveProperty('project');
     expect(
       (await fs.readdir(path.join(rootDir, project.id, 'parts'))).filter((name) => name.endsWith('.part'))
@@ -3061,7 +3061,7 @@ describe('createStudioMediaStore schema 2', () => {
     const media = createStudioMediaStore({ store, createId: () => 'provider_input' });
     const asset = await media.persistProviderOutputForJobV2({
       projectId: project.id,
-      clipId: 'clip_1',
+      shotId: 'clip_1',
       jobId: 'job_1',
       mediaKind: 'image',
       declaredMimeType: 'image/png',
@@ -3095,7 +3095,7 @@ describe('createStudioMediaStore schema 2', () => {
       createId: () => 'provider_video',
     }).persistProviderOutputForJobV2({
       projectId: videoFixture.project.id,
-      clipId: 'clip_1',
+      shotId: 'clip_1',
       jobId: 'job_1',
       mediaKind: 'video',
       declaredMimeType: 'video/mp4',
@@ -3120,7 +3120,7 @@ describe('createStudioMediaStore schema 2', () => {
         createId: () => `recoverable_${status}`,
       }).persistProviderOutputForJobV2({
         projectId: project.id,
-        clipId: 'clip_1',
+        shotId: 'clip_1',
         jobId: 'job_1',
         mediaKind: 'image',
         declaredMimeType: 'image/png',
@@ -3137,7 +3137,7 @@ describe('createStudioMediaStore schema 2', () => {
       createId: () => 'poster_primary',
     }).persistProviderOutputForJobV2({
       projectId: project.id,
-      clipId: 'clip_1',
+      shotId: 'clip_1',
       jobId: 'job_1',
       mediaKind: 'video',
       declaredMimeType: 'video/mp4',
@@ -3152,7 +3152,7 @@ describe('createStudioMediaStore schema 2', () => {
       await expect(
         createStudioMediaStore({ store }).persistProviderPosterForJobV2({
           projectId: project.id,
-          clipId: 'clip_1',
+          shotId: 'clip_1',
           jobId: 'job_1',
           primaryAssetId: primary.id,
           declaredMimeType: 'image/png',
@@ -3180,7 +3180,7 @@ describe('createStudioMediaStore schema 2', () => {
     await expect(
       media.persistProviderOutputForJobV2({
         projectId: project.id,
-        clipId: 'clip_1',
+        shotId: 'clip_1',
         jobId: 'job_1',
         mediaKind: 'image',
         declaredMimeType: 'image/png',
@@ -3289,7 +3289,7 @@ describe('createStudioMediaStore schema 2', () => {
     await expect(
       media.persistProviderOutputForJobV2({
         projectId: project.id,
-        clipId: 'clip_1',
+        shotId: 'clip_1',
         jobId: 'job_1',
         mediaKind: 'image',
         declaredMimeType: 'image/png',
@@ -3346,7 +3346,7 @@ describe('createStudioMediaStore schema 2', () => {
     await expect(
       media.persistProviderOutputForJobV2({
         projectId: project.id,
-        clipId: 'clip_1',
+        shotId: 'clip_1',
         jobId: 'job_1',
         mediaKind: 'image',
         declaredMimeType: 'image/png',
@@ -3391,7 +3391,7 @@ describe('createStudioMediaStore schema 2', () => {
     await expect(
       media.persistProviderOutputForJobV2({
         projectId: project.id,
-        clipId: 'clip_1',
+        shotId: 'clip_1',
         jobId: 'job_1',
         mediaKind: 'image',
         declaredMimeType: 'image/png',
@@ -3451,7 +3451,7 @@ describe('createStudioMediaStore schema 2', () => {
       await expect(
         media.persistProviderOutputForJobV2({
           projectId: project.id,
-          clipId: 'clip_1',
+          shotId: 'clip_1',
           jobId: 'job_1',
           mediaKind: 'image',
           declaredMimeType: 'image/png',
@@ -3496,7 +3496,7 @@ describe('createStudioMediaStore schema 2', () => {
     await expect(
       media.persistProviderOutputForJobV2({
         projectId: project.id,
-        clipId: 'clip_1',
+        shotId: 'clip_1',
         jobId: 'job_1',
         mediaKind: 'image',
         declaredMimeType: 'image/png',
@@ -3622,7 +3622,7 @@ describe('createStudioMediaStore schema 2', () => {
     await expect(
       media.persistProviderOutputForJobV2({
         projectId: project.id,
-        clipId: 'clip_1',
+        shotId: 'clip_1',
         jobId: 'job_1',
         mediaKind: 'image',
         declaredMimeType: 'image/png',
@@ -3640,8 +3640,8 @@ describe('createStudioMediaStore schema 2', () => {
       project: {
         revision: project.revision + 1,
         assets: { cleanup_owned_output: { id: 'cleanup_owned_output' } },
-        clips: {
-          clip_1: { selectedAssetId: 'cleanup_owned_output', assetIds: ['cleanup_owned_output'] },
+        shots: {
+          clip_1: { selectedTakeId: 'cleanup_owned_output', assetIds: ['cleanup_owned_output'] },
         },
         jobs: { job_1: { status: 'succeeded', outputAssetIds: ['cleanup_owned_output'] } },
       },
@@ -3752,7 +3752,7 @@ describe('createStudioMediaStore schema 2', () => {
 
     const asset = await media.persistProviderOutputForJobV2({
       projectId: project.id,
-      clipId: 'clip_1',
+      shotId: 'clip_1',
       jobId: 'job_1',
       mediaKind: 'image',
       declaredMimeType: 'image/png',
@@ -3760,9 +3760,9 @@ describe('createStudioMediaStore schema 2', () => {
     });
 
     expect(asset).toMatchObject({
-      clipId: 'clip_1',
+      shotId: 'clip_1',
       managedAsset: { collection: 'references' },
-      sourceVisualPrompt: 'A precise opening frame',
+      sourceLook: 'A precise opening frame',
       sourceReferenceAssetIds: [],
       sourceAspectRatio: '16:9',
       sourceResolution: '1080p',
@@ -3770,13 +3770,13 @@ describe('createStudioMediaStore schema 2', () => {
     expect(await store.getProjectV2(project.id)).toMatchObject({
       status: 'supported',
       project: {
-        clips: { clip_1: { referenceAssetId: 'plate_1', selectedAssetId: null, assetIds: ['plate_1'] } },
+        shots: { clip_1: { referenceAssetId: 'plate_1', selectedTakeId: null, assetIds: ['plate_1'] } },
         jobs: { job_1: { status: 'succeeded', outputAssetIds: ['plate_1'] } },
       },
     });
   });
 
-  it('imports a clip-owned reference without classifying it as a project-level Cast or Look', async () => {
+  it('imports a shot-owned reference without classifying it as a project-level Cast or Look', async () => {
     const { rootDir, store, project } = await makeStoreV2();
     const source = path.join(rootDir, 'clip-reference.png');
     await fs.writeFile(source, png);
@@ -3784,7 +3784,7 @@ describe('createStudioMediaStore schema 2', () => {
 
     const imported = await media.importReferenceFromPathV2({
       projectId: project.id,
-      clipId: 'clip_1',
+      shotId: 'clip_1',
       sourcePath: source,
       expectedRevision: project.revision,
       returnProject: true,
@@ -3793,15 +3793,15 @@ describe('createStudioMediaStore schema 2', () => {
     expect(imported.asset).toMatchObject({
       id: 'clip_reference_1',
       projectId: project.id,
-      clipId: 'clip_1',
+      shotId: 'clip_1',
       mediaKind: 'image',
       managedAsset: { collection: 'imports', fileName: 'clip_reference_1.png' },
     });
     expect(imported.asset).not.toHaveProperty('briefReferenceRole');
     expect(imported.asset).not.toHaveProperty('briefReferenceLabel');
-    expect(imported.project.clips.clip_1).toMatchObject({
+    expect(imported.project.shots.clip_1).toMatchObject({
       referenceAssetId: 'clip_reference_1',
-      selectedAssetId: null,
+      selectedTakeId: null,
       assetIds: ['clip_reference_1'],
     });
     await expect(fs.readFile(source)).resolves.toEqual(png);
@@ -3813,7 +3813,7 @@ describe('createStudioMediaStore schema 2', () => {
     const media = createStudioMediaStore({ store, createId: idSequence('video_1', 'poster_1') });
     const primary = await media.persistProviderOutputForJobV2({
       projectId: project.id,
-      clipId: 'clip_1',
+      shotId: 'clip_1',
       jobId: 'job_1',
       mediaKind: 'video',
       declaredMimeType: 'video/mp4',
@@ -3823,7 +3823,7 @@ describe('createStudioMediaStore schema 2', () => {
     await expect(
       media.persistProviderPosterForJobV2({
         projectId: project.id,
-        clipId: 'clip_2',
+        shotId: 'clip_2',
         jobId: 'job_1',
         primaryAssetId: primary.id,
         declaredMimeType: 'image/png',
@@ -3842,14 +3842,14 @@ describe('createStudioMediaStore schema 2', () => {
         managedAsset: { collection: 'assets', fileName: 'newer_take.mp4' },
         createdAt: '2026-08-17T12:00:01.000Z',
       };
-      next.clips.clip_1.assetIds.push('newer_take');
-      next.clips.clip_1.selectedAssetId = 'newer_take';
+      next.shots.clip_1.assetIds.push('newer_take');
+      next.shots.clip_1.selectedTakeId = 'newer_take';
       return next;
     });
 
     const poster = await media.persistProviderPosterForJobV2({
       projectId: project.id,
-      clipId: 'clip_1',
+      shotId: 'clip_1',
       jobId: 'job_1',
       primaryAssetId: primary.id,
       declaredMimeType: 'image/png',
@@ -3858,14 +3858,14 @@ describe('createStudioMediaStore schema 2', () => {
 
     expect(poster).toMatchObject({
       id: 'poster_1',
-      clipId: 'clip_1',
+      shotId: 'clip_1',
       mediaKind: 'image',
       managedAsset: { collection: 'thumbnails' },
     });
     expect(await store.getProjectV2(project.id)).toMatchObject({
       status: 'supported',
       project: {
-        clips: { clip_1: { selectedAssetId: 'newer_take', assetIds: ['video_1', 'newer_take', 'poster_1'] } },
+        shots: { clip_1: { selectedTakeId: 'newer_take', assetIds: ['video_1', 'newer_take', 'poster_1'] } },
         jobs: { job_1: { outputAssetIds: ['video_1', 'poster_1'] } },
       },
     });
@@ -3887,7 +3887,7 @@ describe('createStudioMediaStore schema 2', () => {
 
     expect(output).toMatchObject({
       id: 'render_1',
-      clipId: null,
+      shotId: null,
       mediaKind: 'video',
       managedAsset: { collection: 'assets', fileName: 'render_1.mp4' },
     });
@@ -3909,7 +3909,7 @@ describe('createStudioMediaStore schema 2', () => {
     const media = createStudioMediaStore({ store, createId: idSequence('video_1', 'captured_1', 'captured_2') });
     const primary = await media.persistProviderOutputForJobV2({
       projectId: project.id,
-      clipId: 'clip_1',
+      shotId: 'clip_1',
       jobId: 'job_1',
       mediaKind: 'video',
       declaredMimeType: 'video/mp4',
@@ -3917,7 +3917,7 @@ describe('createStudioMediaStore schema 2', () => {
     });
     const captured = await media.persistCapturedPosterV2({
       projectId: project.id,
-      clipId: 'clip_1',
+      shotId: 'clip_1',
       videoAssetId: primary.id,
       width: 640,
       height: 360,
@@ -3926,14 +3926,14 @@ describe('createStudioMediaStore schema 2', () => {
     });
     expect(captured).toMatchObject({
       id: 'captured_1',
-      clipId: 'clip_1',
+      shotId: 'clip_1',
       managedAsset: { collection: 'thumbnails' },
     });
     let consumed = false;
     await expect(
       media.persistCapturedPosterV2({
         projectId: project.id,
-        clipId: 'clip_1',
+        shotId: 'clip_1',
         videoAssetId: primary.id,
         width: 640,
         height: 360,

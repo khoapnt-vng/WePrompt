@@ -23,13 +23,13 @@ const timestamp = '2026-08-17T00:00:00.000Z';
 
 const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot => ({
   id,
-  shotPrompt: '',
+  line: '',
   narration: '',
   onScreenText: '',
   mediaKind: 'image',
   durationSeconds: 1,
   referenceAssetId: null,
-  selectedAssetId: null,
+  selectedTakeId: null,
   assetIds: [],
   jobIds: [],
   ...overrides,
@@ -38,15 +38,15 @@ const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot =
 const makeBeat = (id: string, shotOrder: string[]): StudioBeat => ({
   id,
   title: id,
-  storyLine: '',
-  visualPrompt: '',
-  clipOrder: shotOrder,
+  action: '',
+  look: '',
+  shotOrder,
 });
 
 const makeAsset = (id: string, shotId: string, overrides: Partial<StudioAssetV2> = {}): StudioAssetV2 => ({
   id,
   projectId: 'project_1',
-  clipId: shotId,
+  shotId,
   mediaKind: 'image',
   mimeType: 'image/png',
   managedAsset: { collection: 'assets', fileName: `${id}.png` },
@@ -59,7 +59,7 @@ const makeAsset = (id: string, shotId: string, overrides: Partial<StudioAssetV2>
 const makeJob = (id: string, shotId: string, outputAssetIds: string[]): StudioJobV2 => ({
   id,
   projectId: 'project_1',
-  clipId: shotId,
+  shotId,
   status: 'succeeded',
   provider: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'model_1' },
   idempotencyKey: `idem_${id}`,
@@ -88,10 +88,10 @@ const makeProject = (): StudioProjectV2 => ({
   aspectRatio: '16:9',
   targetDurationSeconds: 30,
   resolution: '1080p',
-  sectionOrder: [],
-  sections: {},
-  clips: {},
-  shelf: [],
+  beatOrder: [],
+  beats: {},
+  shots: {},
+  bin: [],
   cuts: {},
   activeCutId: null,
   assets: {},
@@ -102,25 +102,25 @@ const makeProject = (): StudioProjectV2 => ({
 });
 
 describe('toStudioProjectSummaryV2', () => {
-  it('uses stable active Section-to-Clip order, skips unusable previews, and excludes parked sections', () => {
+  it('uses stable active Beat-to-Shot order, skips unusable previews, and excludes parked beats', () => {
     const project = makeProject();
-    project.sectionOrder = ['section_2', 'section_1'];
-    project.sections = {
+    project.beatOrder = ['section_2', 'section_1'];
+    project.beats = {
       section_parked: makeBeat('section_parked', ['clip_parked']),
       section_1: makeBeat('section_1', ['clip_later']),
       section_2: makeBeat('section_2', ['clip_video_bad', 'clip_image']),
     };
-    project.shelf = [{ kind: 'section', sectionId: 'section_parked' }];
-    project.clips = {
-      clip_parked: makeShot('clip_parked', { selectedAssetId: 'asset_parked', assetIds: ['asset_parked'] }),
-      clip_later: makeShot('clip_later', { selectedAssetId: 'asset_later', assetIds: ['asset_later'] }),
+    project.bin = [{ kind: 'beat', beatId: 'section_parked' }];
+    project.shots = {
+      clip_parked: makeShot('clip_parked', { selectedTakeId: 'asset_parked', assetIds: ['asset_parked'] }),
+      clip_later: makeShot('clip_later', { selectedTakeId: 'asset_later', assetIds: ['asset_later'] }),
       clip_video_bad: makeShot('clip_video_bad', {
         mediaKind: 'video',
         durationSeconds: 4,
-        selectedAssetId: 'asset_video',
+        selectedTakeId: 'asset_video',
         assetIds: ['asset_video'],
       }),
-      clip_image: makeShot('clip_image', { selectedAssetId: 'asset_image', assetIds: ['asset_image'] }),
+      clip_image: makeShot('clip_image', { selectedTakeId: 'asset_image', assetIds: ['asset_image'] }),
     };
     project.assets = {
       asset_parked: makeAsset('asset_parked', 'clip_parked'),
@@ -139,15 +139,15 @@ describe('toStudioProjectSummaryV2', () => {
       aspectRatio: '16:9',
       targetDurationSeconds: 30,
       resolution: '1080p',
-      sectionCount: 2,
-      clipCount: 3,
-      selectedAssetCount: 3,
+      beatCount: 2,
+      shotCount: 3,
+      selectedTakeCount: 3,
       poster: {
-        sectionId: 'section_2',
-        clipId: 'clip_image',
+        beatId: 'section_2',
+        shotId: 'clip_image',
         assetId: 'asset_image',
-        sectionPosition: 1,
-        clipPosition: 2,
+        beatPosition: 1,
+        shotPosition: 2,
       },
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -156,12 +156,12 @@ describe('toStudioProjectSummaryV2', () => {
 
   it('uses the single canonical thumbnail from the selected video take producer', () => {
     const project = makeProject();
-    project.sectionOrder = ['section_1'];
-    project.sections.section_1 = makeBeat('section_1', ['clip_1']);
-    project.clips.clip_1 = makeShot('clip_1', {
+    project.beatOrder = ['section_1'];
+    project.beats.section_1 = makeBeat('section_1', ['clip_1']);
+    project.shots.clip_1 = makeShot('clip_1', {
       mediaKind: 'video',
       durationSeconds: 4,
-      selectedAssetId: 'asset_video',
+      selectedTakeId: 'asset_video',
       assetIds: ['asset_video', 'asset_thumbnail'],
       jobIds: ['job_1'],
     });
@@ -176,11 +176,11 @@ describe('toStudioProjectSummaryV2', () => {
     project.jobs.job_1 = makeJob('job_1', 'clip_1', ['asset_video', 'asset_thumbnail']);
 
     expect(toStudioProjectSummaryV2(project).poster).toEqual({
-      sectionId: 'section_1',
-      clipId: 'clip_1',
+      beatId: 'section_1',
+      shotId: 'clip_1',
       assetId: 'asset_thumbnail',
-      sectionPosition: 1,
-      clipPosition: 1,
+      beatPosition: 1,
+      shotPosition: 1,
     });
   });
 
@@ -189,12 +189,12 @@ describe('toStudioProjectSummaryV2', () => {
     ['multiple thumbnails', ['asset_thumbnail_1', 'asset_thumbnail_2']],
   ] as const)('omits poster for a selected video with %s', (_label, thumbnailIds) => {
     const project = makeProject();
-    project.sectionOrder = ['section_1'];
-    project.sections.section_1 = makeBeat('section_1', ['clip_1']);
-    project.clips.clip_1 = makeShot('clip_1', {
+    project.beatOrder = ['section_1'];
+    project.beats.section_1 = makeBeat('section_1', ['clip_1']);
+    project.shots.clip_1 = makeShot('clip_1', {
       mediaKind: 'video',
       durationSeconds: 4,
-      selectedAssetId: 'asset_video',
+      selectedTakeId: 'asset_video',
       assetIds: ['asset_video', ...thumbnailIds],
       jobIds: ['job_1'],
     });
@@ -211,18 +211,18 @@ describe('toStudioProjectSummaryV2', () => {
     project.jobs.job_1 = makeJob('job_1', 'clip_1', ['asset_video', ...thumbnailIds]);
 
     const summary = toStudioProjectSummaryV2(project);
-    expect(summary.selectedAssetCount).toBe(1);
+    expect(summary.selectedTakeCount).toBe(1);
     expect(Object.hasOwn(summary, 'poster')).toBe(false);
   });
 
   it('omits poster when a video producer mixes one canonical and one foreign thumbnail', () => {
     const project = makeProject();
-    project.sectionOrder = ['section_1'];
-    project.sections.section_1 = makeBeat('section_1', ['clip_1']);
-    project.clips.clip_1 = makeShot('clip_1', {
+    project.beatOrder = ['section_1'];
+    project.beats.section_1 = makeBeat('section_1', ['clip_1']);
+    project.shots.clip_1 = makeShot('clip_1', {
       mediaKind: 'video',
       durationSeconds: 4,
-      selectedAssetId: 'asset_video',
+      selectedTakeId: 'asset_video',
       assetIds: ['asset_video', 'asset_thumbnail', 'asset_foreign_thumbnail'],
       jobIds: ['job_1'],
     });

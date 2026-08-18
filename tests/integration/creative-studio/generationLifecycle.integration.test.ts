@@ -315,7 +315,7 @@ afterEach(async () => {
 });
 
 describe('Creative Studio generation lifecycle integration', () => {
-  it('runs a real V2 clip submission through durable job, asset, and selected-take ownership', async () => {
+  it('runs a real V2 shot submission through durable job, asset, and selected-take ownership', async () => {
     const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-v2-generation-integration-'));
     const fake = createStudioE2EFakeBundle({ rootDir });
     const clock = new ControlledPollClock();
@@ -332,7 +332,7 @@ describe('Creative Studio generation lifecycle integration', () => {
       const imageRoute = catalog.routes.find((candidate) => candidate.kind === 'image');
       if (!imageRoute) throw new Error('V2 lifecycle did not resolve the fake image route');
       const route: StudioResolvedShotRouteSnapshotV2 = {
-        clipId: 'clip_lifecycle',
+        shotId: 'clip_lifecycle',
         providerId: imageRoute.providerId,
         adapterId: imageRoute.adapterId,
         model: imageRoute.model,
@@ -347,26 +347,26 @@ describe('Creative Studio generation lifecycle integration', () => {
       });
       const configured = await store.updateProjectV2(created.id, (project) => ({
         ...project,
-        sectionOrder: ['section_lifecycle'],
-        sections: {
+        beatOrder: ['section_lifecycle'],
+        beats: {
           section_lifecycle: {
             id: 'section_lifecycle',
             title: 'Opening',
-            storyLine: 'Introduce the product',
-            visualPrompt: 'A luminous folded-paper world',
-            clipOrder: ['clip_lifecycle'],
+            action: 'Introduce the product',
+            look: 'A luminous folded-paper world',
+            shotOrder: ['clip_lifecycle'],
           },
         },
-        clips: {
+        shots: {
           clip_lifecycle: {
             id: 'clip_lifecycle',
-            shotPrompt: 'A paper aircraft banks across a sunrise',
+            line: 'A paper aircraft banks across a sunrise',
             narration: '',
             onScreenText: '',
             mediaKind: 'image',
             durationSeconds: 5,
             referenceAssetId: null,
-            selectedAssetId: null,
+            selectedTakeId: null,
             assetIds: [],
             jobIds: [],
           },
@@ -393,14 +393,14 @@ describe('Creative Studio generation lifecycle integration', () => {
         manager.submitShots({
           projectId: configured.id,
           expectedRevision: configured.revision,
-          clipIds: ['clip_lifecycle'],
+          shotIds: ['clip_lifecycle'],
           routes: [route],
           catalogVersion: catalog.generationCatalogVersion,
         })
       ).resolves.toMatchObject([
         {
           id: 'job_v2_lifecycle',
-          clipId: 'clip_lifecycle',
+          shotId: 'clip_lifecycle',
           idempotencyKey: 'idempotency_v2_lifecycle',
           status: 'queued_local',
         },
@@ -418,27 +418,27 @@ describe('Creative Studio generation lifecycle integration', () => {
         }
       });
       const job = completed.jobs.job_v2_lifecycle;
-      const shot = completed.clips.clip_lifecycle;
-      const selectedAssetId = shot.selectedAssetId;
-      const asset = selectedAssetId ? completed.assets[selectedAssetId] : null;
+      const shot = completed.shots.clip_lifecycle;
+      const selectedTakeId = shot.selectedTakeId;
+      const asset = selectedTakeId ? completed.assets[selectedTakeId] : null;
       expect({
-        jobClipId: job.clipId,
+        jobShotId: job.shotId,
         outputAssetIds: job.outputAssetIds,
-        clipJobIds: shot.jobIds,
-        clipAssetIds: shot.assetIds,
-        selectedAssetId,
-        assetClipId: asset?.clipId,
+        shotJobIds: shot.jobIds,
+        shotAssetIds: shot.assetIds,
+        selectedTakeId,
+        assetShotId: asset?.shotId,
         collection: asset?.managedAsset.collection,
       }).toEqual({
-        jobClipId: 'clip_lifecycle',
-        outputAssetIds: [selectedAssetId],
-        clipJobIds: ['job_v2_lifecycle'],
-        clipAssetIds: [selectedAssetId],
-        selectedAssetId,
-        assetClipId: 'clip_lifecycle',
+        jobShotId: 'clip_lifecycle',
+        outputAssetIds: [selectedTakeId],
+        shotJobIds: ['job_v2_lifecycle'],
+        shotAssetIds: [selectedTakeId],
+        selectedTakeId,
+        assetShotId: 'clip_lifecycle',
         collection: 'assets',
       });
-      expect(selectedAssetId ? await mediaStore.resolveAssetV2(completed.id, selectedAssetId) : null).not.toBeNull();
+      expect(selectedTakeId ? await mediaStore.resolveAssetV2(completed.id, selectedTakeId) : null).not.toBeNull();
     } finally {
       clock.releaseAll();
       await manager?.dispose().catch((): undefined => undefined);

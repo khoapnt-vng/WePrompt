@@ -3510,20 +3510,20 @@ describe('schema-2 creative studio project store', () => {
     const project = createEmptyStudioProjectV2(inputV2, id, timestamp);
     const shot: StudioShot = {
       id: 'clip_video',
-      shotPrompt: 'A launch vehicle crosses frame',
+      line: 'A launch vehicle crosses frame',
       narration: '',
       onScreenText: '',
       mediaKind: 'video',
       durationSeconds: 4,
       referenceAssetId: null,
-      selectedAssetId: 'asset_video',
+      selectedTakeId: 'asset_video',
       assetIds: ['asset_video', 'asset_thumbnail'],
       jobIds: ['job_video'],
     };
     const video: StudioAssetV2 = {
       id: 'asset_video',
       projectId: id,
-      clipId: shot.id,
+      shotId: shot.id,
       mediaKind: 'video',
       mimeType: 'video/mp4',
       managedAsset: { collection: 'assets', fileName: 'asset_video.mp4' },
@@ -3535,7 +3535,7 @@ describe('schema-2 creative studio project store', () => {
     const thumbnail: StudioAssetV2 = {
       id: 'asset_thumbnail',
       projectId: id,
-      clipId: shot.id,
+      shotId: shot.id,
       mediaKind: 'image',
       mimeType: 'image/png',
       managedAsset: { collection: 'thumbnails', fileName: 'asset_thumbnail.png' },
@@ -3546,7 +3546,7 @@ describe('schema-2 creative studio project store', () => {
     const job: StudioJobV2 = {
       id: 'job_video',
       projectId: id,
-      clipId: shot.id,
+      shotId: shot.id,
       status: 'succeeded',
       provider: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'model_1' },
       idempotencyKey: 'idem_job_video',
@@ -3562,15 +3562,15 @@ describe('schema-2 creative studio project store', () => {
       createdAt: timestamp,
       updatedAt: timestamp,
     };
-    project.sectionOrder = ['section_1'];
-    project.sections.section_1 = {
+    project.beatOrder = ['section_1'];
+    project.beats.section_1 = {
       id: 'section_1',
       title: 'Opening',
-      storyLine: '',
-      visualPrompt: '',
-      clipOrder: [shot.id],
+      action: '',
+      look: '',
+      shotOrder: [shot.id],
     };
-    project.clips[shot.id] = shot;
+    project.shots[shot.id] = shot;
     project.assets = { [video.id]: video, [thumbnail.id]: thumbnail };
     project.jobs[job.id] = job;
     return project;
@@ -4001,9 +4001,9 @@ describe('schema-2 creative studio project store', () => {
       aspectRatio: winner.aspectRatio,
       targetDurationSeconds: winner.targetDurationSeconds,
       resolution: winner.resolution,
-      sectionCount: 0,
-      clipCount: 0,
-      selectedAssetCount: 0,
+      beatCount: 0,
+      shotCount: 0,
+      selectedTakeCount: 0,
       createdAt: winner.createdAt,
       updatedAt: winner.updatedAt,
     };
@@ -4275,9 +4275,9 @@ describe('schema-2 creative studio project store', () => {
           aspectRatio: '16:9',
           targetDurationSeconds: 30,
           resolution: '1080p',
-          sectionCount: 0,
-          clipCount: 0,
-          selectedAssetCount: 0,
+          beatCount: 0,
+          shotCount: 0,
+          selectedTakeCount: 0,
           createdAt: timestamp,
           updatedAt: timestamp,
         },
@@ -4287,7 +4287,7 @@ describe('schema-2 creative studio project store', () => {
     const restarted = createStoreV2().store;
     await expect(restarted.getProjectV2(project.id)).resolves.toEqual({ status: 'supported', project });
     await expect(restarted.listProjectsV2()).resolves.toEqual({
-      projects: [expect.objectContaining({ id: project.id, sectionCount: 0, clipCount: 0 })],
+      projects: [expect.objectContaining({ id: project.id, beatCount: 0, shotCount: 0 })],
       unsupportedProjectIds: [],
       quarantinedProjectIds: [],
     });
@@ -4307,9 +4307,9 @@ describe('schema-2 creative studio project store', () => {
             aspectRatio: '9:16',
             targetDurationSeconds: 99,
             resolution: '4k',
-            sectionCount: 9,
-            clipCount: 9,
-            selectedAssetCount: 9,
+            beatCount: 9,
+            shotCount: 9,
+            selectedTakeCount: 9,
             createdAt: timestamp,
             updatedAt: timestamp,
           },
@@ -4337,9 +4337,9 @@ describe('schema-2 creative studio project store', () => {
       aspectRatio: project.aspectRatio,
       targetDurationSeconds: project.targetDurationSeconds,
       resolution: project.resolution,
-      sectionCount: 0,
-      clipCount: 0,
-      selectedAssetCount: 0,
+      beatCount: 0,
+      shotCount: 0,
+      selectedTakeCount: 0,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -4369,15 +4369,15 @@ describe('schema-2 creative studio project store', () => {
       aspectRatio: '16:9',
       targetDurationSeconds: 30,
       resolution: '1080p',
-      sectionCount: 1,
-      clipCount: 1,
-      selectedAssetCount: 1,
+      beatCount: 1,
+      shotCount: 1,
+      selectedTakeCount: 1,
       poster: {
-        sectionId: 'section_1',
-        clipId: 'clip_video',
+        beatId: 'section_1',
+        shotId: 'clip_video',
         assetId: 'asset_thumbnail',
-        sectionPosition: 1,
-        clipPosition: 1,
+        beatPosition: 1,
+        shotPosition: 1,
       },
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -4405,7 +4405,7 @@ describe('schema-2 creative studio project store', () => {
       store.applyMutationBatchV2(
         makeStudioMutationBatchV2(project, [
           { kind: 'set_brief', brief: 'must roll back' },
-          { kind: 'delete_clip', clipId: 'missing_clip' },
+          { kind: 'delete_shot', shotId: 'missing_clip' },
         ]),
         'rollback/test'
       )
@@ -4490,29 +4490,29 @@ describe('schema-2 creative studio project store', () => {
     const result = await store.applyMutationBatchV2(
       makeStudioMutationBatchV2(project, [
         {
-          kind: 'add_section',
-          sectionId: 'section_new',
-          section: { title: 'First title', storyLine: '', visualPrompt: '' },
-          firstClipId: 'clip_new',
-          firstClip: {
-            shotPrompt: '',
+          kind: 'add_beat',
+          beatId: 'section_new',
+          beat: { title: 'First title', action: '', look: '' },
+          firstShotId: 'clip_new',
+          firstShot: {
+            line: '',
             narration: '',
             onScreenText: '',
             mediaKind: 'image',
             durationSeconds: 1,
             referenceAssetId: null,
           },
-          beforeSectionId: null,
+          beforeBeatId: null,
         },
-        { kind: 'edit_section', sectionId: 'section_new', changes: { title: 'Final title' } },
+        { kind: 'edit_beat', beatId: 'section_new', changes: { title: 'Final title' } },
       ]),
       'opaque/task-3-tag'
     );
 
     expect(result.project).toMatchObject({ revision: project.revision + 1, brief: project.brief });
-    expect(result.project.sections.section_new?.title).toBe('Final title');
-    expect(result.createdSectionIds).toEqual(['section_new']);
-    expect(result.createdClipIds).toEqual(['clip_new']);
+    expect(result.project.beats.section_new?.title).toBe('Final title');
+    expect(result.createdBeatIds).toEqual(['section_new']);
+    expect(result.createdShotIds).toEqual(['clip_new']);
     expect(facts).toEqual([
       {
         projectId: project.id,
@@ -4525,10 +4525,10 @@ describe('schema-2 creative studio project store', () => {
     expect(facts.every(Object.isFrozen)).toBe(true);
     expect(events).toEqual(['project-rename', 'project-directory-sync', 'observer', 'index-rename']);
     expect(
-      readJson<{ schemaVersion: number; projects: Array<{ sectionCount: number; clipCount: number }> }>(
+      readJson<{ schemaVersion: number; projects: Array<{ beatCount: number; shotCount: number }> }>(
         path.join(rootDir, 'projects-v2.json')
       )
-    ).toMatchObject({ schemaVersion: 2, projects: [{ sectionCount: 1, clipCount: 1 }] });
+    ).toMatchObject({ schemaVersion: 2, projects: [{ beatCount: 1, shotCount: 1 }] });
     expect(protectedFs.accesses).toEqual([]);
   });
 
@@ -4571,19 +4571,19 @@ describe('schema-2 creative studio project store', () => {
     const result = await store.applyMutationBatchV2(
       makeStudioMutationBatchV2(project, [
         {
-          kind: 'add_section',
-          sectionId: 'section_retry',
-          section: { title: 'Retry summary', storyLine: '', visualPrompt: '' },
-          firstClipId: 'clip_retry',
-          firstClip: {
-            shotPrompt: '',
+          kind: 'add_beat',
+          beatId: 'section_retry',
+          beat: { title: 'Retry summary', action: '', look: '' },
+          firstShotId: 'clip_retry',
+          firstShot: {
+            line: '',
             narration: '',
             onScreenText: '',
             mediaKind: 'image',
             durationSeconds: 1,
             referenceAssetId: null,
           },
-          beforeSectionId: null,
+          beforeBeatId: null,
         },
       ]),
       'opaque/retry-tag'
@@ -4602,10 +4602,9 @@ describe('schema-2 creative studio project store', () => {
     expect(facts.every(Object.isFrozen)).toBe(true);
     await vi.waitFor(() => {
       expect(
-        readJson<{ projects: Array<{ sectionCount: number; clipCount: number }> }>(
-          path.join(rootDir, 'projects-v2.json')
-        ).projects
-      ).toEqual([expect.objectContaining({ sectionCount: 1, clipCount: 1 })]);
+        readJson<{ projects: Array<{ beatCount: number; shotCount: number }> }>(path.join(rootDir, 'projects-v2.json'))
+          .projects
+      ).toEqual([expect.objectContaining({ beatCount: 1, shotCount: 1 })]);
     });
     expect(renameDestinations.map((destination) => path.basename(destination))).toEqual([
       'project.json',
@@ -4762,9 +4761,9 @@ describe('schema-2 creative studio project store', () => {
           aspectRatio: updated.aspectRatio,
           targetDurationSeconds: updated.targetDurationSeconds,
           resolution: updated.resolution,
-          sectionCount: 0,
-          clipCount: 0,
-          selectedAssetCount: 0,
+          beatCount: 0,
+          shotCount: 0,
+          selectedTakeCount: 0,
           createdAt: updated.createdAt,
           updatedAt: updated.updatedAt,
         },
@@ -4829,7 +4828,7 @@ describe('schema-2 creative studio project store', () => {
     const indexBefore = readFileSync(indexFile);
 
     await expect(
-      store.updateProjectV2(project.id, (candidate) => ({ ...candidate, sectionOrder: ['missing_section'] }))
+      store.updateProjectV2(project.id, (candidate) => ({ ...candidate, beatOrder: ['missing_section'] }))
     ).rejects.toMatchObject({ code: 'invalid_payload' });
 
     expect(onProjectCommitted).not.toHaveBeenCalled();
@@ -4854,7 +4853,7 @@ describe('schema-2 creative studio project store', () => {
 
     await expect(
       store.updateProjectV2(project.id, (candidate) => {
-        Object.setPrototypeOf(candidate.sectionOrder, {
+        Object.setPrototypeOf(candidate.beatOrder, {
           toJSON() {
             toJsonCalls += 1;
             return ['missing_section'];
@@ -5017,7 +5016,7 @@ const makeBareJob = (overrides: Partial<StudioJob> = {}): StudioJob => ({
 
 const makeBareJobV2 = (overrides: Partial<StudioJobV2> = {}): StudioJobV2 => {
   const { sceneId: _sceneId, ...job } = makeBareJob();
-  return { ...job, clipId: 'clip_1', ...overrides };
+  return { ...job, shotId: 'clip_1', ...overrides };
 };
 
 describe('jobOutputRole', () => {

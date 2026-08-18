@@ -66,18 +66,18 @@ export type StudioApplyEditsInput = {
 };
 
 export type StudioDirectorToolOperationV2 =
-  | Exclude<StudioDirectorCommandRecordV2['operations'][number], { kind: 'add_section' | 'add_clip' }>
+  | Exclude<StudioDirectorCommandRecordV2['operations'][number], { kind: 'add_beat' | 'add_shot' }>
   | {
-      kind: 'add_section';
-      section: StudioEditableBeat;
-      firstClip: StudioEditableShot;
-      beforeSectionId: string | null;
+      kind: 'add_beat';
+      beat: StudioEditableBeat;
+      firstShot: StudioEditableShot;
+      beforeBeatId: string | null;
     }
   | {
-      kind: 'add_clip';
-      sectionId: string;
-      clip: StudioEditableShot;
-      beforeClipId: string | null;
+      kind: 'add_shot';
+      beatId: string;
+      shot: StudioEditableShot;
+      beforeShotId: string | null;
     };
 
 export type StudioApplyEditsInputV2 = {
@@ -140,14 +140,14 @@ export const studioDirectorToolInputFitsDurableRecordV2 = (
 ): boolean => {
   try {
     const operations = toolInput.operations.map((operation) => {
-      if (operation.kind === 'add_section') {
+      if (operation.kind === 'add_beat') {
         return {
           ...operation,
-          sectionId: MAX_SAFE_STUDIO_ID_PREVIEW,
-          firstClipId: MAX_SAFE_STUDIO_ID_PREVIEW,
+          beatId: MAX_SAFE_STUDIO_ID_PREVIEW,
+          firstShotId: MAX_SAFE_STUDIO_ID_PREVIEW,
         };
       }
-      if (operation.kind === 'add_clip') return { ...operation, clipId: MAX_SAFE_STUDIO_ID_PREVIEW };
+      if (operation.kind === 'add_shot') return { ...operation, shotId: MAX_SAFE_STUDIO_ID_PREVIEW };
       return operation;
     });
     const preview: StudioDirectorCommandRecordV2 = {
@@ -700,16 +700,16 @@ const prepareCommandV2 = (input: {
   const toolOperations = Array.isArray(input.toolInput.operations) ? input.toolInput.operations : [];
   const createdIds: string[] = [];
   const operations = toolOperations.map((operation) => {
-    if (typeof operation === 'object' && operation !== null && operation.kind === 'add_section') {
+    if (typeof operation === 'object' && operation !== null && operation.kind === 'add_beat') {
       const beatId = input.createId();
       const firstShotId = input.createId();
       createdIds.push(beatId, firstShotId);
-      return { ...operation, sectionId: beatId, firstClipId: firstShotId };
+      return { ...operation, beatId, firstShotId };
     }
-    if (typeof operation === 'object' && operation !== null && operation.kind === 'add_clip') {
+    if (typeof operation === 'object' && operation !== null && operation.kind === 'add_shot') {
       const shotId = input.createId();
       createdIds.push(shotId);
-      return { ...operation, clipId: shotId };
+      return { ...operation, shotId };
     }
     return operation;
   }) as StudioDirectorCommandRecordV2['operations'];

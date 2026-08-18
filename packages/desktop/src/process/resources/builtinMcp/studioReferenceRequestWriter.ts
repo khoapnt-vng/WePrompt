@@ -34,7 +34,7 @@ export type WriteReferenceRequestInput = {
 export type WriteReferenceRequestInputV2 = {
   pendingDir: string;
   projectId: string;
-  clipIds: string[];
+  shotIds: string[];
   /** Test seam; production omits it and gets a UUID. */
   requestId?: string;
   /** Test seam for V2 identity and publication races. */
@@ -107,7 +107,7 @@ export const listPendingReferenceRequestSceneIds = async (
   return sceneIds;
 };
 
-/** Reads only exact schema-2 request records; schema-1 sidecars never establish clip deduplication. */
+/** Reads only exact schema-2 request records; schema-1 sidecars never establish shot deduplication. */
 export const listPendingReferenceRequestShotIdsV2 = async (
   pendingDir: string,
   projectId: string,
@@ -150,7 +150,7 @@ export const listPendingReferenceRequestShotIdsV2 = async (
       const value = JSON.parse(bytes) as unknown;
       const parsed = parseStudioReferenceRequestV2({ projectId, requestId, value });
       if (parsed.status !== 'valid') continue;
-      for (const shotId of parsed.record.clipIds) shotIds.add(shotId);
+      for (const shotId of parsed.record.shotIds) shotIds.add(shotId);
     } catch {
       // Main owns authoritative validation; malformed and V1 records cannot establish V2 dedup state.
     }
@@ -190,7 +190,7 @@ export const writeReferenceRequestRecord = async (
   });
 };
 
-/** Writes one ordered schema-2 clip batch without starting generation. */
+/** Writes one ordered schema-2 shot batch without starting generation. */
 export const writeReferenceRequestRecordV2 = async (
   input: WriteReferenceRequestInputV2
 ): Promise<StudioReferenceRequestV2> => {
@@ -198,7 +198,7 @@ export const writeReferenceRequestRecordV2 = async (
   try {
     const projectId = input.projectId;
     const requestId = input.requestId;
-    const requestedShotIds = input.clipIds;
+    const requestedShotIds = input.shotIds;
     if (
       !isSafeId(projectId) ||
       (requestId !== undefined && !isSafeId(requestId)) ||
@@ -229,7 +229,7 @@ export const writeReferenceRequestRecordV2 = async (
         schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         id: validationId,
         projectId,
-        clipIds: shotIds,
+        shotIds,
         status: 'pending',
         createdAt: '1970-01-01T00:00:00.000Z',
       },
@@ -237,7 +237,7 @@ export const writeReferenceRequestRecordV2 = async (
     if (validation.status !== 'valid') {
       throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 reference request');
     }
-    validated = { projectId: validation.record.projectId, requestId, shotIds: validation.record.clipIds };
+    validated = { projectId: validation.record.projectId, requestId, shotIds: validation.record.shotIds };
   } catch (error) {
     if (error instanceof StudioPendingRecordWriteError) throw error;
     throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 reference request');
@@ -246,7 +246,7 @@ export const writeReferenceRequestRecordV2 = async (
     schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
     id: validated.requestId ?? randomUUID(),
     projectId: validated.projectId,
-    clipIds: validated.shotIds,
+    shotIds: validated.shotIds,
     status: 'pending',
     createdAt: new Date().toISOString(),
   };

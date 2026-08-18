@@ -320,17 +320,17 @@ describe('Studio Director schema-2 real-boundary lifecycle', () => {
       expectedRevision: project.revision,
       operations: [
         {
-          kind: 'add_section',
-          section: { title: 'Opening', storyLine: 'Reveal the product', visualPrompt: 'Cinematic studio light' },
-          firstClip: {
-            shotPrompt: 'Slow product reveal',
+          kind: 'add_beat',
+          beat: { title: 'Opening', action: 'Reveal the product', look: 'Cinematic studio light' },
+          firstShot: {
+            line: 'Slow product reveal',
             narration: '',
             onScreenText: '',
             mediaKind: 'image',
             durationSeconds: 5,
             referenceAssetId: null,
           },
-          beforeSectionId: null,
+          beforeBeatId: null,
         },
       ],
     });
@@ -341,21 +341,21 @@ describe('Studio Director schema-2 real-boundary lifecycle', () => {
       schemaVersion: 2,
       status: 'applied',
       appliedRevision: project.revision + 1,
-      createdSectionIds: ['section_v2'],
-      createdClipIds: ['clip_v2'],
+      createdBeatIds: ['section_v2'],
+      createdShotIds: ['clip_v2'],
     });
     await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
       status: 'supported',
       project: {
         revision: project.revision + 1,
-        sectionOrder: ['section_v2'],
-        sections: { section_v2: { clipOrder: ['clip_v2'] } },
-        clips: { clip_v2: { shotPrompt: 'Slow product reveal' } },
+        beatOrder: ['section_v2'],
+        beats: { section_v2: { shotOrder: ['clip_v2'] } },
+        shots: { clip_v2: { line: 'Slow product reveal' } },
       },
     });
     await expect(mailbox.readReceipt(project.id, commandId)).resolves.toMatchObject({
       status: 'valid',
-      record: { status: 'applied', createdSectionIds: ['section_v2'], createdClipIds: ['clip_v2'] },
+      record: { status: 'applied', createdBeatIds: ['section_v2'], createdShotIds: ['clip_v2'] },
     });
     await waitForCondition(
       async () =>

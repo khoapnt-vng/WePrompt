@@ -101,13 +101,13 @@ describe('isCanonicalStudioGeneratedTake', () => {
 
 const makeShot = (overrides: Partial<StudioShot> = {}): StudioShot => ({
   id: 'clip_1',
-  shotPrompt: 'A product reveal',
+  line: 'A product reveal',
   narration: '',
   onScreenText: '',
   mediaKind: 'image',
   durationSeconds: 1,
   referenceAssetId: null,
-  selectedAssetId: null,
+  selectedTakeId: null,
   assetIds: ['asset_1'],
   jobIds: [],
   ...overrides,
@@ -116,7 +116,7 @@ const makeShot = (overrides: Partial<StudioShot> = {}): StudioShot => ({
 const makeAssetV2 = (overrides: Partial<StudioAssetV2> = {}): StudioAssetV2 => ({
   id: 'asset_1',
   projectId: 'project_1',
-  clipId: 'clip_1',
+  shotId: 'clip_1',
   mediaKind: 'image',
   mimeType: 'image/png',
   managedAsset: { collection: 'assets', fileName: 'asset_1.png' },
@@ -132,45 +132,45 @@ describe('isCanonicalStudioGeneratedTakeV2', () => {
       label: 'accepts a matching generated take',
       asset: makeAssetV2(),
       projectId: 'project_1',
-      clip: makeShot(),
+      shot: makeShot(),
       expected: true,
     },
     {
       label: 'rejects a take from another project',
       asset: makeAssetV2({ projectId: 'project_2' }),
       projectId: 'project_1',
-      clip: makeShot(),
+      shot: makeShot(),
       expected: false,
     },
     {
-      label: 'rejects a take from another clip',
-      asset: makeAssetV2({ clipId: 'clip_2' }),
+      label: 'rejects a take from another shot',
+      asset: makeAssetV2({ shotId: 'clip_2' }),
       projectId: 'project_1',
-      clip: makeShot(),
+      shot: makeShot(),
       expected: false,
     },
     {
       label: 'rejects a take with a different media kind',
       asset: makeAssetV2({ mediaKind: 'video', mimeType: 'video/mp4', durationSeconds: 4 }),
       projectId: 'project_1',
-      clip: makeShot(),
+      shot: makeShot(),
       expected: false,
     },
     {
       label: 'rejects an imported asset',
       asset: makeAssetV2({ managedAsset: { collection: 'imports', fileName: 'asset_1.png' } }),
       projectId: 'project_1',
-      clip: makeShot(),
+      shot: makeShot(),
       expected: false,
     },
     {
-      label: 'rejects a take absent from the clip asset index',
+      label: 'rejects a take absent from the shot asset index',
       asset: makeAssetV2(),
       projectId: 'project_1',
-      clip: makeShot({ assetIds: [] }),
+      shot: makeShot({ assetIds: [] }),
       expected: false,
     },
-  ])('$label', ({ asset, projectId, clip, expected }) => {
-    expect(isCanonicalStudioGeneratedTakeV2(asset, projectId, clip)).toBe(expected);
+  ])('$label', ({ asset, projectId, shot, expected }) => {
+    expect(isCanonicalStudioGeneratedTakeV2(asset, projectId, shot)).toBe(expected);
   });
 });

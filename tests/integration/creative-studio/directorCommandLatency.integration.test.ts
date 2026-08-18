@@ -453,17 +453,17 @@ describe('Studio Director schema-2 latency fixture', () => {
       expectedRevision: project.revision,
       operations: [
         {
-          kind: 'add_section',
-          section: { title: 'Opening', storyLine: '', visualPrompt: 'Cinematic light' },
-          firstClip: {
-            shotPrompt: 'Product reveal',
+          kind: 'add_beat',
+          beat: { title: 'Opening', action: '', look: 'Cinematic light' },
+          firstShot: {
+            line: 'Product reveal',
             narration: '',
             onScreenText: '',
             mediaKind: 'image',
             durationSeconds: 5,
             referenceAssetId: null,
           },
-          beforeSectionId: null,
+          beforeBeatId: null,
         },
       ],
     });

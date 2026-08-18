@@ -5977,7 +5977,7 @@ describe('CreativeStudioService', () => {
 const makeSchema2ServiceProject = (): StudioProjectV2 => {
   const input: CreateStudioProjectInputV2 = {
     name: 'Schema 2 launch',
-    brief: 'A clip-owned launch film',
+    brief: 'A shot-owned launch film',
     aspectRatio: '16:9',
     targetDurationSeconds: 12,
     resolution: '1080p',
@@ -5989,34 +5989,34 @@ const makeSchema2ServiceProject = (): StudioProjectV2 => {
     expectedRevision: empty.revision,
     operations: [
       {
-        kind: 'add_section',
-        sectionId: 'section_1',
-        section: { title: 'Opening', storyLine: '', visualPrompt: 'Warm sunrise over a quiet city' },
-        firstClipId: 'clip_1',
-        firstClip: {
-          shotPrompt: 'A wide establishing shot',
+        kind: 'add_beat',
+        beatId: 'section_1',
+        beat: { title: 'Opening', action: '', look: 'Warm sunrise over a quiet city' },
+        firstShotId: 'clip_1',
+        firstShot: {
+          line: 'A wide establishing shot',
           narration: '',
           onScreenText: '',
           mediaKind: 'image',
           durationSeconds: 5,
           referenceAssetId: null,
         },
-        beforeSectionId: null,
+        beforeBeatId: null,
       },
       {
-        kind: 'add_section',
-        sectionId: 'section_2',
-        section: { title: 'Close', storyLine: '', visualPrompt: 'Soft evening light over the skyline' },
-        firstClipId: 'clip_2',
-        firstClip: {
-          shotPrompt: 'A slow closing composition',
+        kind: 'add_beat',
+        beatId: 'section_2',
+        beat: { title: 'Close', action: '', look: 'Soft evening light over the skyline' },
+        firstShotId: 'clip_2',
+        firstShot: {
+          line: 'A slow closing composition',
           narration: '',
           onScreenText: '',
           mediaKind: 'image',
           durationSeconds: 5,
           referenceAssetId: null,
         },
-        beforeSectionId: null,
+        beforeBeatId: null,
       },
     ],
   }).project;
@@ -6051,7 +6051,7 @@ describe('CreativeStudioServiceV2', () => {
   const makeSchema2Job = (project: StudioProjectV2, overrides: Partial<StudioJobV2> = {}): StudioJobV2 => ({
     id: 'job_1',
     projectId: project.id,
-    clipId: 'clip_1',
+    shotId: 'clip_1',
     status: 'failed',
     provider: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'image-model' },
     idempotencyKey: 'idempotency_secret',
@@ -6077,8 +6077,8 @@ describe('CreativeStudioServiceV2', () => {
       getProjectV2: vi.fn(async () => ({ status: 'supported' as const, project: structuredClone(current) })),
       applyMutationBatchV2: vi.fn(async () => ({
         project: structuredClone(current),
-        createdSectionIds: [],
-        createdClipIds: [],
+        createdBeatIds: [],
+        createdShotIds: [],
       })),
       deleteProjectV2: vi.fn(async () => true),
     };
@@ -6089,7 +6089,7 @@ describe('CreativeStudioServiceV2', () => {
     const referenceAsset = {
       id: 'reference_1',
       projectId: current.id,
-      clipId: 'clip_1',
+      shotId: 'clip_1',
       mediaKind: 'image' as const,
       mimeType: 'image/png',
       managedAsset: { collection: 'imports' as const, fileName: 'reference_1.png' },
@@ -6144,36 +6144,36 @@ describe('CreativeStudioServiceV2', () => {
     };
   };
 
-  it('derives payable clips in persisted section and clip order', async () => {
+  it('derives payable shots in persisted beat and shot order', async () => {
     const project = makeSchema2ServiceProject();
     const harness = makeHarness(project);
 
     const result = await harness.service.getGenerationReadiness({
       projectId: 'project_v2',
-      sectionIds: ['section_2', 'section_1'],
+      beatIds: ['section_2', 'section_1'],
     });
 
     expect(derivePayableShotIds(project, ['section_2', 'section_1'])).toEqual(['clip_1', 'clip_2']);
-    expect(result.payableClipIds).toEqual(['clip_1', 'clip_2']);
-    expect(result.clips.every((clip) => clip.ready)).toBe(true);
+    expect(result.payableShotIds).toEqual(['clip_1', 'clip_2']);
+    expect(result.shots.every((shot) => shot.ready)).toBe(true);
     expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
   });
 
   it('reports exact authored and durable blockers without treating optional copy as required', async () => {
     const project = makeSchema2ServiceProject();
-    project.sections.section_1.title = '';
-    project.clips.clip_2.shotPrompt = '';
+    project.beats.section_1.title = '';
+    project.shots.clip_2.line = '';
     const harness = makeHarness(project);
 
     const result = await harness.service.getGenerationReadiness({
       projectId: project.id,
-      sectionIds: ['section_1', 'section_2'],
+      beatIds: ['section_1', 'section_2'],
     });
 
-    expect(result.payableClipIds).toEqual([]);
-    expect(result.clips.map(({ clipId, issues }) => ({ clipId, issues }))).toEqual([
-      { clipId: 'clip_1', issues: ['missing_section_title'] },
-      { clipId: 'clip_2', issues: ['missing_shot_prompt'] },
+    expect(result.payableShotIds).toEqual([]);
+    expect(result.shots.map(({ shotId, issues }) => ({ shotId, issues }))).toEqual([
+      { shotId: 'clip_1', issues: ['missing_beat_title'] },
+      { shotId: 'clip_2', issues: ['missing_line'] },
     ]);
   });
 
@@ -6198,7 +6198,7 @@ describe('CreativeStudioServiceV2', () => {
     const job: StudioJobV2 = {
       id: 'job_1',
       projectId: project.id,
-      clipId: 'clip_1',
+      shotId: 'clip_1',
       status: 'queued_remote',
       provider: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'image-model' },
       idempotencyKey: 'idempotency_secret',
@@ -6215,7 +6215,7 @@ describe('CreativeStudioServiceV2', () => {
       updatedAt: '2026-08-17T00:00:01.000Z',
     };
     project.jobs[job.id] = job;
-    project.clips.clip_1.jobIds = [job.id];
+    project.shots.clip_1.jobIds = [job.id];
     const harness = makeHarness(project);
 
     const loaded = await harness.service.getProject(project.id);
@@ -6230,7 +6230,7 @@ describe('CreativeStudioServiceV2', () => {
     expect(rendererJob).not.toHaveProperty('idempotencyKey');
   });
 
-  it('resolves a reviewed clip route immediately before the sole paid boundary', async () => {
+  it('resolves a reviewed shot route immediately before the sole paid boundary', async () => {
     const project = makeSchema2ServiceProject();
     project.routing.image = {
       providerId: imageRoute.providerId,
@@ -6242,8 +6242,8 @@ describe('CreativeStudioServiceV2', () => {
     await harness.service.submitShots({
       projectId: project.id,
       expectedRevision: project.revision,
-      clipIds: ['clip_1'],
-      routes: [{ clipId: 'clip_1', choiceId: imageRoute.choiceId, kind: 'image' }],
+      shotIds: ['clip_1'],
+      routes: [{ shotId: 'clip_1', choiceId: imageRoute.choiceId, kind: 'image' }],
       catalogVersion: 'catalog_v2',
     });
 
@@ -6251,10 +6251,10 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.submitShots).toHaveBeenCalledWith({
       projectId: project.id,
       expectedRevision: project.revision,
-      clipIds: ['clip_1'],
+      shotIds: ['clip_1'],
       routes: [
         {
-          clipId: 'clip_1',
+          shotId: 'clip_1',
           providerId: imageRoute.providerId,
           adapterId: imageRoute.adapterId,
           model: imageRoute.model,
@@ -6275,7 +6275,7 @@ describe('CreativeStudioServiceV2', () => {
     project.assets.take_1 = {
       id: 'take_1',
       projectId: project.id,
-      clipId: 'clip_1',
+      shotId: 'clip_1',
       mediaKind: 'image',
       mimeType: 'image/png',
       managedAsset: { collection: 'assets', fileName: 'take_1.png' },
@@ -6283,25 +6283,25 @@ describe('CreativeStudioServiceV2', () => {
       sha256: 'a'.repeat(64),
       createdAt: '2026-08-17T00:00:00.000Z',
     };
-    project.clips.clip_1.assetIds = ['take_1'];
-    project.clips.clip_1.selectedAssetId = 'take_1';
+    project.shots.clip_1.assetIds = ['take_1'];
+    project.shots.clip_1.selectedTakeId = 'take_1';
     const harness = makeHarness(project);
 
     await harness.service.submitShots({
       projectId: project.id,
       expectedRevision: project.revision,
-      clipIds: ['clip_1'],
-      routes: [{ clipId: 'clip_1', choiceId: imageRoute.choiceId, kind: 'image' }],
+      shotIds: ['clip_1'],
+      routes: [{ shotId: 'clip_1', choiceId: imageRoute.choiceId, kind: 'image' }],
       catalogVersion: 'catalog_v2',
       outputRole: 'reference',
-      referencePrompts: [{ clipId: 'clip_1', prompt: 'A clean first-frame reference' }],
+      referencePrompts: [{ shotId: 'clip_1', prompt: 'A clean first-frame reference' }],
     });
 
     expect(harness.submitShots).toHaveBeenCalledOnce();
     expect(harness.submitShots).toHaveBeenCalledWith(
       expect.objectContaining({
         outputRole: 'reference',
-        referencePrompts: [{ clipId: 'clip_1', prompt: 'A clean first-frame reference' }],
+        referencePrompts: [{ shotId: 'clip_1', prompt: 'A clean first-frame reference' }],
       })
     );
   });
@@ -6327,8 +6327,8 @@ describe('CreativeStudioServiceV2', () => {
       harness.service.submitShots({
         projectId: project.id,
         expectedRevision: project.revision,
-        clipIds: ['clip_1'],
-        routes: [{ clipId: 'clip_1', choiceId: imageRoute.choiceId, kind: 'image' }],
+        shotIds: ['clip_1'],
+        routes: [{ shotId: 'clip_1', choiceId: imageRoute.choiceId, kind: 'image' }],
         catalogVersion: 'catalog_v2',
       })
     ).rejects.toMatchObject({ code: 'stale_project' });
@@ -6348,8 +6348,8 @@ describe('CreativeStudioServiceV2', () => {
       harness.service.submitShots({
         projectId: project.id,
         expectedRevision: project.revision,
-        clipIds: ['clip_1'],
-        routes: [{ clipId: 'clip_1', choiceId: imageRoute.choiceId, kind: 'image' }],
+        shotIds: ['clip_1'],
+        routes: [{ shotId: 'clip_1', choiceId: imageRoute.choiceId, kind: 'image' }],
         catalogVersion: 'stale_catalog',
       })
     ).rejects.toMatchObject({ code: 'invalid_route' });
@@ -6364,10 +6364,10 @@ describe('CreativeStudioServiceV2', () => {
       harness.service.submitShots({
         projectId: project.id,
         expectedRevision: project.revision,
-        clipIds: ['clip_1'],
+        shotIds: ['clip_1'],
         routes: [
-          { clipId: 'clip_1', choiceId: imageRoute.choiceId, kind: 'image' },
-          { clipId: 'clip_1', choiceId: imageRoute.choiceId, kind: 'image' },
+          { shotId: 'clip_1', choiceId: imageRoute.choiceId, kind: 'image' },
+          { shotId: 'clip_1', choiceId: imageRoute.choiceId, kind: 'image' },
         ],
         catalogVersion: 'catalog_v2',
       })
@@ -6402,10 +6402,10 @@ describe('CreativeStudioServiceV2', () => {
       expectedRevision: project.revision,
       operations: [{ kind: 'set_brief', brief: 'Updated' }],
     });
-    await harness.service.getGenerationReadiness({ projectId: project.id, sectionIds: ['section_1'] });
+    await harness.service.getGenerationReadiness({ projectId: project.id, beatIds: ['section_1'] });
     await harness.service.importReferenceFromPath({
       projectId: project.id,
-      clipId: 'clip_1',
+      shotId: 'clip_1',
       expectedRevision: project.revision,
       sourcePath: '/chosen/reference.png',
     });
@@ -6416,7 +6416,7 @@ describe('CreativeStudioServiceV2', () => {
     });
     await harness.service.persistCapturedPoster({
       projectId: project.id,
-      clipId: 'clip_1',
+      shotId: 'clip_1',
       videoAssetId: 'video_1',
       dataUrl: `data:image/png;base64,${Buffer.from('89504e470d0a1a0a', 'hex').toString('base64')}`,
       width: 1280,
@@ -6431,25 +6431,25 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.retryDownloadV2).not.toHaveBeenCalled();
   });
 
-  it('attaches a reference through the clip-owned media seam and returns a renderer projection', async () => {
+  it('attaches a reference through the shot-owned media seam and returns a renderer projection', async () => {
     const project = makeSchema2ServiceProject();
     const harness = makeHarness(project);
 
     const result = await harness.service.importReferenceFromPath({
       projectId: project.id,
-      clipId: 'clip_1',
+      shotId: 'clip_1',
       expectedRevision: project.revision,
       sourcePath: '/chosen/reference.png',
     });
 
     expect(harness.importReferenceFromPathV2).toHaveBeenCalledWith({
       projectId: project.id,
-      clipId: 'clip_1',
+      shotId: 'clip_1',
       expectedRevision: project.revision,
       sourcePath: '/chosen/reference.png',
       returnProject: true,
     });
-    expect(result.asset).toMatchObject({ id: 'reference_1', clipId: 'clip_1' });
+    expect(result.asset).toMatchObject({ id: 'reference_1', shotId: 'clip_1' });
     expect(harness.onProjectUpdated).toHaveBeenCalledWith(project.id);
   });
 
@@ -6460,7 +6460,7 @@ describe('CreativeStudioServiceV2', () => {
 
     await harness.service.persistCapturedPoster({
       projectId: project.id,
-      clipId: 'clip_1',
+      shotId: 'clip_1',
       videoAssetId: 'video_1',
       dataUrl: `data:image/png;base64,${png.toString('base64')}`,
       width: 1280,
@@ -6470,7 +6470,7 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.persistCapturedPosterV2).toHaveBeenCalledWith(
       expect.objectContaining({
         projectId: project.id,
-        clipId: 'clip_1',
+        shotId: 'clip_1',
         videoAssetId: 'video_1',
         declaredByteSize: png.length,
       })
@@ -6503,7 +6503,7 @@ describe('CreativeStudioServiceV2', () => {
     for (const job of [cancelled, retried, downloaded]) {
       expect(job).toMatchObject({
         id: projectedJob.id,
-        clipId: 'clip_1',
+        shotId: 'clip_1',
         outputRole: 'reference',
         progress: 0.5,
         canRetryDownload: true,
@@ -6532,13 +6532,13 @@ describe('CreativeStudioServiceV2', () => {
 
   it('derives visual, duration, active-job, generated-take, and latest-failure blockers', async () => {
     const project = makeSchema2ServiceProject();
-    project.sections.section_1.visualPrompt = '   ';
-    project.clips.clip_1.mediaKind = 'video';
-    project.clips.clip_1.durationSeconds = 3;
+    project.beats.section_1.look = '   ';
+    project.shots.clip_1.mediaKind = 'video';
+    project.shots.clip_1.durationSeconds = 3;
     project.assets.take_1 = {
       id: 'take_1',
       projectId: project.id,
-      clipId: 'clip_1',
+      shotId: 'clip_1',
       mediaKind: 'video',
       mimeType: 'video/mp4',
       managedAsset: { collection: 'assets', fileName: 'take_1.mp4' },
@@ -6546,7 +6546,7 @@ describe('CreativeStudioServiceV2', () => {
       sha256: 'b'.repeat(64),
       createdAt: project.createdAt,
     };
-    project.clips.clip_1.assetIds = ['take_1'];
+    project.shots.clip_1.assetIds = ['take_1'];
     project.jobs.active_job = makeSchema2Job(project, {
       id: 'active_job',
       status: 'running',
@@ -6555,45 +6555,45 @@ describe('CreativeStudioServiceV2', () => {
     });
     project.jobs.failed_job = makeSchema2Job(project, {
       id: 'failed_job',
-      clipId: 'clip_2',
+      shotId: 'clip_2',
       error: { code: 'timeout', messageKey: 'timeout' },
     });
-    project.clips.clip_1.jobIds = ['active_job'];
-    project.clips.clip_2.jobIds = ['failed_job'];
+    project.shots.clip_1.jobIds = ['active_job'];
+    project.shots.clip_2.jobIds = ['failed_job'];
     const harness = makeHarness(project);
 
     const readiness = await harness.service.getGenerationReadiness({
       projectId: project.id,
-      sectionIds: ['section_1', 'section_2'],
+      beatIds: ['section_1', 'section_2'],
     });
 
-    expect(readiness.clips).toEqual([
+    expect(readiness.shots).toEqual([
       {
-        clipId: 'clip_1',
-        sectionId: 'section_1',
+        shotId: 'clip_1',
+        beatId: 'section_1',
         ready: false,
-        issues: ['missing_visual_prompt', 'invalid_clip_duration', 'active_job', 'generated_take_exists'],
+        issues: ['missing_look', 'invalid_shot_duration', 'active_job', 'generated_take_exists'],
       },
       {
-        clipId: 'clip_2',
-        sectionId: 'section_2',
+        shotId: 'clip_2',
+        beatId: 'section_2',
         ready: false,
         issues: ['latest_job_failed'],
       },
     ]);
-    expect(readiness.payableClipIds).toEqual([]);
+    expect(readiness.payableShotIds).toEqual([]);
   });
 
   it.each([
     ['a non-array', null],
-    ['a duplicate active section', ['section_1', 'section_1']],
-    ['a non-active section', ['section_missing']],
-  ])('rejects %s in a readiness selection', async (_label, sectionIds) => {
+    ['a duplicate active beat', ['section_1', 'section_1']],
+    ['a non-active beat', ['section_missing']],
+  ])('rejects %s in a readiness selection', async (_label, beatIds) => {
     const project = makeSchema2ServiceProject();
     const harness = makeHarness(project);
 
     await expect(
-      harness.service.getGenerationReadiness({ projectId: project.id, sectionIds: sectionIds as never })
+      harness.service.getGenerationReadiness({ projectId: project.id, beatIds: beatIds as never })
     ).rejects.toMatchObject({ code: 'invalid_payload' });
     expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
   });
@@ -6672,7 +6672,7 @@ describe('CreativeStudioServiceV2', () => {
     harness.store.getProjectV2.mockResolvedValue(loadResult);
 
     await expect(
-      harness.service.getGenerationReadiness({ projectId: 'project_v2', sectionIds: [] })
+      harness.service.getGenerationReadiness({ projectId: 'project_v2', beatIds: [] })
     ).rejects.toMatchObject({
       code: loadResult.status === 'unsupported_prototype_schema' ? 'unsupported_prototype_schema' : 'not_found',
     });
@@ -6688,7 +6688,7 @@ describe('CreativeStudioServiceV2', () => {
     await expect(
       harness.service.importReferenceFromPath({
         projectId: project.id,
-        clipId: 'clip_1',
+        shotId: 'clip_1',
         expectedRevision: project.revision,
         sourcePath: '/chosen/reference.png',
       })
@@ -6703,7 +6703,7 @@ describe('CreativeStudioServiceV2', () => {
     await expect(
       harness.service.persistCapturedPoster({
         projectId: project.id,
-        clipId: 'clip_1',
+        shotId: 'clip_1',
         videoAssetId: 'video_1',
         dataUrl: `data:image/png;base64,${png.toString('base64')}`,
         width: 1280,
@@ -6724,7 +6724,7 @@ describe('CreativeStudioServiceV2', () => {
     await expect(
       harness.service.persistCapturedPoster({
         projectId: project.id,
-        clipId: 'clip_1',
+        shotId: 'clip_1',
         videoAssetId: 'video_1',
         width: override.width,
         height: 720,
@@ -6736,12 +6736,12 @@ describe('CreativeStudioServiceV2', () => {
 
   it.each([
     ['unknown top-level key', { unexpected: true }],
-    ['empty selection', { clipIds: [], routes: [] }],
-    ['duplicate clips', { clipIds: ['clip_1', 'clip_1'] }],
+    ['empty selection', { shotIds: [], routes: [] }],
+    ['duplicate shots', { shotIds: ['clip_1', 'clip_1'] }],
     ['reference without prompts', { outputRole: 'reference', referencePrompts: [] }],
     [
       'take with reference prompts',
-      { referencePrompts: [{ clipId: 'clip_1', prompt: 'Unexpected reference prompt' }] },
+      { referencePrompts: [{ shotId: 'clip_1', prompt: 'Unexpected reference prompt' }] },
     ],
   ])('rejects a submit boundary with %s before resolver or manager work', async (_label, override) => {
     const project = makeSchema2ServiceProject();
@@ -6749,8 +6749,8 @@ describe('CreativeStudioServiceV2', () => {
     const request = {
       projectId: project.id,
       expectedRevision: project.revision,
-      clipIds: ['clip_1'],
-      routes: [{ clipId: 'clip_1', choiceId: imageRoute.choiceId, kind: 'image' as const }],
+      shotIds: ['clip_1'],
+      routes: [{ shotId: 'clip_1', choiceId: imageRoute.choiceId, kind: 'image' as const }],
       catalogVersion: 'catalog_v2',
       ...override,
     };
@@ -6770,7 +6770,7 @@ describe('CreativeStudioServiceV2', () => {
       { ...imageRoute, constraints: { ...imageRoute.constraints, minDurationSeconds: 6 } },
       { providerId: imageRoute.providerId },
     ],
-  ])('rejects a reviewed clip with %s before the paid manager boundary', async (_label, choiceId, route, selection) => {
+  ])('rejects a reviewed shot with %s before the paid manager boundary', async (_label, choiceId, route, selection) => {
     const project = makeSchema2ServiceProject();
     project.routing.image =
       selection === null
@@ -6791,8 +6791,8 @@ describe('CreativeStudioServiceV2', () => {
       harness.service.submitShots({
         projectId: project.id,
         expectedRevision: project.revision,
-        clipIds: ['clip_1'],
-        routes: [{ clipId: 'clip_1', choiceId, kind: 'image' }],
+        shotIds: ['clip_1'],
+        routes: [{ shotId: 'clip_1', choiceId, kind: 'image' }],
         catalogVersion: 'catalog_v2',
       })
     ).rejects.toMatchObject({ code: 'invalid_route' });
@@ -7730,12 +7730,12 @@ describe('Studio MCP server', () => {
 
 const editableBeatV2 = () => ({
   title: 'Opening',
-  storyLine: 'Introduce the product',
-  visualPrompt: 'Warm sunrise over a quiet city',
+  action: 'Introduce the product',
+  look: 'Warm sunrise over a quiet city',
 });
 
 const editableShotV2 = (mediaKind: 'image' | 'video' = 'image') => ({
-  shotPrompt: 'A wide establishing shot',
+  line: 'A wide establishing shot',
   narration: '',
   onScreenText: '',
   mediaKind,
@@ -7769,7 +7769,7 @@ const pendingRequestInputV2 = (pendingDir: string, recordId = 'request_boundary'
 });
 
 describe('Studio MCP schema-2 server', () => {
-  it('publishes all Section/Clip operations as strict bounded schemas through real MCP tools/list', async () => {
+  it('publishes all Beat/Shot operations as strict bounded schemas through real MCP tools/list', async () => {
     const harness = await createStudioMcpProtocolHarnessV2();
     try {
       const { tools } = await harness.client.listTools();
@@ -7804,43 +7804,43 @@ describe('Studio MCP schema-2 server', () => {
         required: ['expectedRevision', 'operations'],
       });
       expect(operationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual([
-        'add_clip',
-        'add_section',
-        'delete_clip',
-        'edit_clip',
-        'edit_section',
-        'park_section',
+        'add_beat',
+        'add_shot',
+        'delete_shot',
+        'edit_beat',
+        'edit_shot',
+        'park_beat',
         'park_take',
-        'remove_shelf_alias',
-        'reorder_clips',
-        'reorder_sections',
-        'reorder_shelf',
-        'restore_section',
-        'select_shelved_take',
+        'remove_bin_item',
+        'reorder_beats',
+        'reorder_bin',
+        'reorder_shots',
+        'restore_beat',
+        'restore_take',
         'select_take',
         'set_brief',
       ]);
-      const addBeat = operationVariants?.find((variant) => variant.properties?.kind?.const === 'add_section');
-      const addShot = operationVariants?.find((variant) => variant.properties?.kind?.const === 'add_clip');
+      const addBeat = operationVariants?.find((variant) => variant.properties?.kind?.const === 'add_beat');
+      const addShot = operationVariants?.find((variant) => variant.properties?.kind?.const === 'add_shot');
       expect(addBeat).toMatchObject({
         additionalProperties: false,
-        required: ['kind', 'section', 'firstClip', 'beforeSectionId'],
+        required: ['kind', 'beat', 'firstShot', 'beforeBeatId'],
       });
-      expect(addBeat?.properties).not.toHaveProperty('sectionId');
-      expect(addBeat?.properties).not.toHaveProperty('firstClipId');
+      expect(addBeat?.properties).not.toHaveProperty('beatId');
+      expect(addBeat?.properties).not.toHaveProperty('firstShotId');
       expect(addShot).toMatchObject({
         additionalProperties: false,
-        required: ['kind', 'sectionId', 'clip', 'beforeClipId'],
+        required: ['kind', 'beatId', 'shot', 'beforeShotId'],
       });
-      expect(addShot?.properties).not.toHaveProperty('clipId');
+      expect(addShot?.properties).not.toHaveProperty('shotId');
 
       const canonicalBatch = {
         expectedRevision: 8,
         operations: [
           { kind: 'set_brief', brief: '...' },
-          { kind: 'edit_section', sectionId: 'section_1', changes: { title: '...' } },
-          { kind: 'edit_clip', clipId: 'clip_1', changes: { shotPrompt: '...' } },
-          { kind: 'reorder_sections', sectionOrder: ['section_2', 'section_1'] },
+          { kind: 'edit_beat', beatId: 'beat_1', changes: { title: '...' } },
+          { kind: 'edit_shot', shotId: 'shot_1', changes: { line: '...' } },
+          { kind: 'reorder_beats', beatOrder: ['beat_2', 'beat_1'] },
         ],
       };
       expect(advertisedValidator(canonicalBatch)).toMatchObject({ valid: true });
@@ -7849,11 +7849,11 @@ describe('Studio MCP schema-2 server', () => {
           ...canonicalBatch,
           operations: [
             {
-              kind: 'add_clip',
-              sectionId: 'section_1',
-              clipId: 'caller_id',
-              clip: editableShotV2(),
-              beforeClipId: null,
+              kind: 'add_shot',
+              beatId: 'section_1',
+              shotId: 'caller_id',
+              shot: editableShotV2(),
+              beforeShotId: null,
             },
           ],
         })
@@ -7864,11 +7864,11 @@ describe('Studio MCP schema-2 server', () => {
 
       const referenceSchema = tools.find((tool) => tool.name === 'studio_request_reference_images')?.inputSchema;
       const referenceValidator = new AjvJsonSchemaValidator().getValidator(referenceSchema as never);
-      expect(referenceSchema).toMatchObject({ type: 'object', additionalProperties: false, required: ['clipIds'] });
-      expect(referenceValidator({ clipIds: Array.from({ length: 24 }, (_, index) => `clip_${index}`) })).toMatchObject({
+      expect(referenceSchema).toMatchObject({ type: 'object', additionalProperties: false, required: ['shotIds'] });
+      expect(referenceValidator({ shotIds: Array.from({ length: 24 }, (_, index) => `clip_${index}`) })).toMatchObject({
         valid: true,
       });
-      expect(referenceValidator({ clipIds: [], unknown: true })).toMatchObject({ valid: false });
+      expect(referenceValidator({ shotIds: [], unknown: true })).toMatchObject({ valid: false });
     } finally {
       await harness.close();
     }
@@ -7887,15 +7887,15 @@ describe('Studio MCP schema-2 server', () => {
       const invalidApplyInputs = [
         {
           expectedRevision: 7,
-          operations: [{ kind: 'reorder_sections', sectionOrder: ['section_1', 'section_1'] }],
+          operations: [{ kind: 'reorder_beats', beatOrder: ['section_1', 'section_1'] }],
         },
         {
           expectedRevision: 7,
           operations: [
             {
-              kind: 'reorder_clips',
-              sectionId: 'section_1',
-              clipOrder: ['clip_1', 'clip_1'],
+              kind: 'reorder_shots',
+              beatId: 'section_1',
+              shotOrder: ['clip_1', 'clip_1'],
             },
           ],
         },
@@ -7903,10 +7903,10 @@ describe('Studio MCP schema-2 server', () => {
           expectedRevision: 7,
           operations: [
             {
-              kind: 'reorder_shelf',
-              shelf: [
-                { kind: 'asset', assetId: 'take_1' },
-                { kind: 'asset', assetId: 'take_1' },
+              kind: 'reorder_bin',
+              bin: [
+                { kind: 'take', assetId: 'take_1' },
+                { kind: 'take', assetId: 'take_1' },
               ],
             },
           ],
@@ -7914,18 +7914,18 @@ describe('Studio MCP schema-2 server', () => {
         {
           expectedRevision: 7,
           operations: [
-            { kind: 'add_section', section: editableBeatV2(), firstClip: editableShotV2(), beforeSectionId: null },
-            { kind: 'reorder_sections', sectionOrder: ['section_1'] },
+            { kind: 'add_beat', beat: editableBeatV2(), firstShot: editableShotV2(), beforeBeatId: null },
+            { kind: 'reorder_beats', beatOrder: ['section_1'] },
           ],
         },
         {
           expectedRevision: 7,
           operations: [
             {
-              kind: 'add_clip',
-              sectionId: 'section_1',
-              clip: { ...editableShotV2('video'), durationSeconds: 3 },
-              beforeClipId: null,
+              kind: 'add_shot',
+              beatId: 'section_1',
+              shot: { ...editableShotV2('video'), durationSeconds: 3 },
+              beforeShotId: null,
             },
           ],
         },
@@ -7933,8 +7933,8 @@ describe('Studio MCP schema-2 server', () => {
           expectedRevision: 7,
           operations: [
             {
-              kind: 'edit_clip',
-              clipId: 'clip_1',
+              kind: 'edit_shot',
+              shotId: 'clip_1',
               changes: { mediaKind: 'video', durationSeconds: 3 },
             },
           ],
@@ -7947,18 +7947,18 @@ describe('Studio MCP schema-2 server', () => {
           base_revision: 7,
           operations: [
             {
-              kind: 'add_section',
-              sectionId: 'section_new',
-              section: editableBeatV2(),
-              firstClipId: 'clip_new',
-              firstClip: editableShotV2(),
-              beforeSectionId: null,
+              kind: 'add_beat',
+              beatId: 'section_new',
+              beat: editableBeatV2(),
+              firstShotId: 'clip_new',
+              firstShot: editableShotV2(),
+              beforeBeatId: null,
             },
-            { kind: 'reorder_sections', sectionOrder: ['section_1'] },
+            { kind: 'reorder_beats', beatOrder: ['section_1'] },
           ],
         })
       ).toMatchObject({ valid: false });
-      expect(referenceValidator({ clipIds: ['clip_1', 'clip_1'] })).toMatchObject({ valid: false });
+      expect(referenceValidator({ shotIds: ['clip_1', 'clip_1'] })).toMatchObject({ valid: false });
     } finally {
       await harness.close();
     }
@@ -7975,33 +7975,33 @@ describe('Studio MCP schema-2 server', () => {
       const sameBeatApply = {
         expectedRevision: 7,
         operations: [
-          { kind: 'add_clip', sectionId: 'section_1', clip: editableShotV2(), beforeClipId: null },
-          { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_1'] },
+          { kind: 'add_shot', beatId: 'section_1', shot: editableShotV2(), beforeShotId: null },
+          { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_1'] },
         ],
       };
       const differentBeatApply = {
         expectedRevision: 7,
         operations: [
-          { kind: 'add_clip', sectionId: 'section_1', clip: editableShotV2(), beforeClipId: null },
-          { kind: 'reorder_clips', sectionId: 'section_2', clipOrder: ['clip_2'] },
+          { kind: 'add_shot', beatId: 'section_1', shot: editableShotV2(), beforeShotId: null },
+          { kind: 'reorder_shots', beatId: 'section_2', shotOrder: ['clip_2'] },
         ],
       };
       const sameBeatProposal = {
         base_revision: 7,
         operations: [
           {
-            kind: 'add_clip',
-            sectionId: 'section_1',
-            clipId: 'clip_new',
-            clip: editableShotV2(),
-            beforeClipId: null,
+            kind: 'add_shot',
+            beatId: 'section_1',
+            shotId: 'clip_new',
+            shot: editableShotV2(),
+            beforeShotId: null,
           },
-          { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_1'] },
+          { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_1'] },
         ],
       };
       const differentBeatProposal = {
         ...sameBeatProposal,
-        operations: [sameBeatProposal.operations[0], { ...sameBeatProposal.operations[1], sectionId: 'section_2' }],
+        operations: [sameBeatProposal.operations[0], { ...sameBeatProposal.operations[1], beatId: 'section_2' }],
       };
       const oversizedOperations = Array.from({ length: 32 }, (_, index) => ({
         kind: 'set_brief',
@@ -8025,7 +8025,7 @@ describe('Studio MCP schema-2 server', () => {
       expect(studioProposeStoryboardInputSchemaV2.safeParse(oversizedProposal).success).toBe(false);
 
       for (const description of [applyTool?.description, proposalTool?.description]) {
-        expect(description).toMatch(/same section/i);
+        expect(description).toMatch(/same beat/i);
         expect(description).toMatch(/256 KiB/i);
       }
     } finally {
@@ -8036,21 +8036,21 @@ describe('Studio MCP schema-2 server', () => {
   it('accepts every V2 operation independently and rejects mutation-sensitive malformed batches', () => {
     const validOperations = [
       { kind: 'set_brief', brief: 'A concise launch story' },
-      { kind: 'add_section', section: editableBeatV2(), firstClip: editableShotV2(), beforeSectionId: null },
-      { kind: 'edit_section', sectionId: 'section_1', changes: { title: 'A new opening' } },
-      { kind: 'reorder_sections', sectionOrder: ['section_2', 'section_1'] },
-      { kind: 'park_section', sectionId: 'section_2' },
-      { kind: 'restore_section', sectionId: 'section_2', beforeSectionId: 'section_1' },
-      { kind: 'add_clip', sectionId: 'section_1', clip: editableShotV2(), beforeClipId: null },
-      { kind: 'edit_clip', clipId: 'clip_1', changes: { shotPrompt: 'A tighter shot' } },
-      { kind: 'delete_clip', clipId: 'clip_2' },
-      { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_2', 'clip_1'] },
-      { kind: 'park_take', clipId: 'clip_1', assetId: 'take_1' },
-      { kind: 'select_shelved_take', clipId: 'clip_1', assetId: 'take_2' },
-      { kind: 'remove_shelf_alias', assetId: 'take_3' },
-      { kind: 'reorder_shelf', shelf: [{ kind: 'asset', assetId: 'take_3' }] },
-      { kind: 'reorder_shelf', shelf: [{ kind: 'section', sectionId: 'section_2' }] },
-      { kind: 'select_take', clipId: 'clip_1', assetId: 'take_1' },
+      { kind: 'add_beat', beat: editableBeatV2(), firstShot: editableShotV2(), beforeBeatId: null },
+      { kind: 'edit_beat', beatId: 'section_1', changes: { title: 'A new opening' } },
+      { kind: 'reorder_beats', beatOrder: ['section_2', 'section_1'] },
+      { kind: 'park_beat', beatId: 'section_2' },
+      { kind: 'restore_beat', beatId: 'section_2', beforeBeatId: 'section_1' },
+      { kind: 'add_shot', beatId: 'section_1', shot: editableShotV2(), beforeShotId: null },
+      { kind: 'edit_shot', shotId: 'clip_1', changes: { line: 'A tighter shot' } },
+      { kind: 'delete_shot', shotId: 'clip_2' },
+      { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_2', 'clip_1'] },
+      { kind: 'park_take', shotId: 'clip_1', assetId: 'take_1' },
+      { kind: 'restore_take', shotId: 'clip_1', assetId: 'take_2' },
+      { kind: 'remove_bin_item', assetId: 'take_3' },
+      { kind: 'reorder_bin', bin: [{ kind: 'take', assetId: 'take_3' }] },
+      { kind: 'reorder_bin', bin: [{ kind: 'beat', beatId: 'section_2' }] },
+      { kind: 'select_take', shotId: 'clip_1', assetId: 'take_1' },
     ];
     for (const operation of validOperations) {
       expect(
@@ -8065,18 +8065,18 @@ describe('Studio MCP schema-2 server', () => {
         expectedRevision: 7,
         operations: Array.from({ length: 33 }, (_, index) => ({ kind: 'set_brief', brief: `Brief ${index}` })),
       },
-      { expectedRevision: 7, operations: [{ kind: 'edit_section', sectionId: 'section_1', changes: {} }] },
-      { expectedRevision: 7, operations: [{ kind: 'edit_clip', clipId: 'clip_1', changes: {} }] },
-      { expectedRevision: 7, operations: [{ kind: 'park_section', sectionId: '../section' }] },
+      { expectedRevision: 7, operations: [{ kind: 'edit_beat', beatId: 'section_1', changes: {} }] },
+      { expectedRevision: 7, operations: [{ kind: 'edit_shot', shotId: 'clip_1', changes: {} }] },
+      { expectedRevision: 7, operations: [{ kind: 'park_beat', beatId: '../beat' }] },
       {
         expectedRevision: 7,
         operations: [
           {
-            kind: 'add_section',
-            sectionId: 'caller_section',
-            section: editableBeatV2(),
-            firstClip: editableShotV2(),
-            beforeSectionId: null,
+            kind: 'add_beat',
+            beatId: 'caller_section',
+            beat: editableBeatV2(),
+            firstShot: editableShotV2(),
+            beforeBeatId: null,
           },
         ],
       },
@@ -8084,10 +8084,10 @@ describe('Studio MCP schema-2 server', () => {
         expectedRevision: 7,
         operations: [
           {
-            kind: 'add_clip',
-            sectionId: 'section_1',
-            clip: { ...editableShotV2('video'), durationSeconds: 3 },
-            beforeClipId: null,
+            kind: 'add_shot',
+            beatId: 'section_1',
+            shot: { ...editableShotV2('video'), durationSeconds: 3 },
+            beforeShotId: null,
           },
         ],
       },
@@ -8095,33 +8095,33 @@ describe('Studio MCP schema-2 server', () => {
         expectedRevision: 7,
         operations: [
           {
-            kind: 'add_clip',
-            sectionId: 'section_1',
-            clip: { ...editableShotV2('video'), durationSeconds: 16 },
-            beforeClipId: null,
+            kind: 'add_shot',
+            beatId: 'section_1',
+            shot: { ...editableShotV2('video'), durationSeconds: 16 },
+            beforeShotId: null,
           },
         ],
       },
       {
         expectedRevision: 7,
-        operations: [{ kind: 'edit_clip', clipId: 'clip_1', changes: { mediaKind: 'video', durationSeconds: 3 } }],
+        operations: [{ kind: 'edit_shot', shotId: 'clip_1', changes: { mediaKind: 'video', durationSeconds: 3 } }],
       },
       {
         expectedRevision: 7,
-        operations: [{ kind: 'edit_clip', clipId: 'clip_1', changes: { mediaKind: 'video', durationSeconds: 16 } }],
+        operations: [{ kind: 'edit_shot', shotId: 'clip_1', changes: { mediaKind: 'video', durationSeconds: 16 } }],
       },
       {
         expectedRevision: 7,
         operations: [
-          { kind: 'add_section', section: editableBeatV2(), firstClip: editableShotV2(), beforeSectionId: null },
-          { kind: 'reorder_sections', sectionOrder: ['section_1'] },
+          { kind: 'add_beat', beat: editableBeatV2(), firstShot: editableShotV2(), beforeBeatId: null },
+          { kind: 'reorder_beats', beatOrder: ['section_1'] },
         ],
       },
       {
         expectedRevision: 7,
         operations: [
-          { kind: 'add_clip', sectionId: 'section_1', clip: editableShotV2(), beforeClipId: null },
-          { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_1'] },
+          { kind: 'add_shot', beatId: 'section_1', shot: editableShotV2(), beforeShotId: null },
+          { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_1'] },
         ],
       },
       { expectedRevision: 7, operations: [{ kind: 'set_brief', brief: 'Valid', unknown: true }] },
@@ -8133,8 +8133,8 @@ describe('Studio MCP schema-2 server', () => {
       studioApplyEditsInputSchemaV2.safeParse({
         expectedRevision: 7,
         operations: [
-          { kind: 'add_clip', sectionId: 'section_1', clip: editableShotV2(), beforeClipId: null },
-          { kind: 'reorder_clips', sectionId: 'section_2', clipOrder: ['clip_2'] },
+          { kind: 'add_shot', beatId: 'section_1', shot: editableShotV2(), beforeShotId: null },
+          { kind: 'reorder_shots', beatId: 'section_2', shotOrder: ['clip_2'] },
         ],
       }).success
     ).toBe(true);
@@ -8143,12 +8143,12 @@ describe('Studio MCP schema-2 server', () => {
         base_revision: 7,
         operations: [
           {
-            kind: 'add_section',
-            sectionId: 'section_new',
-            section: editableBeatV2(),
-            firstClipId: 'clip_new',
-            firstClip: editableShotV2(),
-            beforeSectionId: null,
+            kind: 'add_beat',
+            beatId: 'section_new',
+            beat: editableBeatV2(),
+            firstShotId: 'clip_new',
+            firstShot: editableShotV2(),
+            beforeBeatId: null,
           },
         ],
       }).success
@@ -8158,13 +8158,13 @@ describe('Studio MCP schema-2 server', () => {
         base_revision: 7,
         operations: [
           {
-            kind: 'add_clip',
-            sectionId: 'section_1',
-            clipId: 'clip_new',
-            clip: editableShotV2(),
-            beforeClipId: null,
+            kind: 'add_shot',
+            beatId: 'section_1',
+            shotId: 'clip_new',
+            shot: editableShotV2(),
+            beforeShotId: null,
           },
-          { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_1'] },
+          { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_1'] },
         ],
       }).success
     ).toBe(false);
@@ -8174,13 +8174,13 @@ describe('Studio MCP schema-2 server', () => {
         operations: [{ kind: 'set_brief', brief: 'Valid', unknown: true }],
       }).success
     ).toBe(false);
-    for (const clipIds of [
+    for (const shotIds of [
       [],
       Array.from({ length: 25 }, (_, index) => `clip_${index}`),
       ['clip_1', 'clip_1'],
-      ['unsafe/clip'],
+      ['unsafe/shot'],
     ]) {
-      expect(studioRequestReferenceImagesInputSchemaV2.safeParse({ clipIds }).success).toBe(false);
+      expect(studioRequestReferenceImagesInputSchemaV2.safeParse({ shotIds }).success).toBe(false);
     }
   });
 
@@ -8195,12 +8195,12 @@ describe('Studio MCP schema-2 server', () => {
     try {
       for (const operations of [
         [
-          { kind: 'add_section', section: editableBeatV2(), firstClip: editableShotV2(), beforeSectionId: null },
-          { kind: 'reorder_sections', sectionOrder: ['section_1'] },
+          { kind: 'add_beat', beat: editableBeatV2(), firstShot: editableShotV2(), beforeBeatId: null },
+          { kind: 'reorder_beats', beatOrder: ['section_1'] },
         ],
         [
-          { kind: 'add_clip', sectionId: 'section_1', clip: editableShotV2(), beforeClipId: null },
-          { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_1'] },
+          { kind: 'add_shot', beatId: 'section_1', shot: editableShotV2(), beforeShotId: null },
+          { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_1'] },
         ],
       ]) {
         // The second rejection must observe that the first rejection minted nothing.
@@ -8217,8 +8217,8 @@ describe('Studio MCP schema-2 server', () => {
         arguments: {
           expectedRevision: 7,
           operations: [
-            { kind: 'add_clip', sectionId: 'section_1', clip: editableShotV2(), beforeClipId: null },
-            { kind: 'reorder_clips', sectionId: 'section_2', clipOrder: ['clip_2'] },
+            { kind: 'add_shot', beatId: 'section_1', shot: editableShotV2(), beforeShotId: null },
+            { kind: 'reorder_shots', beatId: 'section_2', shotOrder: ['clip_2'] },
           ],
         },
       });
@@ -8269,7 +8269,7 @@ describe('Studio MCP schema-2 server', () => {
     }
   });
 
-  it('projects validated Section/Clip state with selected-first bounded canonical takes', async () => {
+  it('projects validated Beat/Shot state with selected-first bounded canonical takes', async () => {
     const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-'));
     const project = makeSchema2ServiceProject();
     const assets = Array.from({ length: 26 }, (_, index): StudioAssetV2 => {
@@ -8277,7 +8277,7 @@ describe('Studio MCP schema-2 server', () => {
       return {
         id,
         projectId: project.id,
-        clipId: 'clip_1',
+        shotId: 'clip_1',
         mediaKind: 'image',
         mimeType: 'image/png',
         managedAsset: { collection: 'assets', fileName: `${id}.png` },
@@ -8293,7 +8293,7 @@ describe('Studio MCP schema-2 server', () => {
     ].map(([id, role, label]) => ({
       id: id!,
       projectId: project.id,
-      clipId: null,
+      shotId: null,
       mediaKind: 'image',
       mimeType: 'image/png',
       managedAsset: { collection: 'imports', fileName: `${id}.png` },
@@ -8304,8 +8304,8 @@ describe('Studio MCP schema-2 server', () => {
       createdAt: '2026-08-17T00:00:00.000Z',
     }));
     project.assets = Object.fromEntries([...assets, ...briefReferences].map((asset) => [asset.id, asset]));
-    project.clips.clip_1.assetIds = assets.map(({ id }) => id);
-    project.clips.clip_1.selectedAssetId = 'take_26';
+    project.shots.clip_1.assetIds = assets.map(({ id }) => id);
+    project.shots.clip_1.selectedTakeId = 'take_26';
     project.rules = [
       {
         id: 'rule_context',
@@ -8331,23 +8331,23 @@ describe('Studio MCP schema-2 server', () => {
       referencePendingDir: '',
     })({});
     const view = JSON.parse(result.content[0].text) as {
-      sectionOrder: string[];
-      sections: Record<string, { clipOrder: string[] }>;
-      clips: Record<string, { selectedTakeId: string | null; availableTakeIds: string[] }>;
-      shelf: unknown[];
+      beatOrder: string[];
+      beats: Record<string, { shotOrder: string[] }>;
+      shots: Record<string, { selectedTakeId: string | null; availableTakeIds: string[] }>;
+      bin: unknown[];
       briefReferences: unknown[];
       rules: unknown[];
     };
 
     expect(result.isError).toBeUndefined();
-    expect(view.sectionOrder).toEqual(['section_1', 'section_2']);
-    expect(view.sections.section_1.clipOrder).toEqual(['clip_1']);
-    expect(view.clips.clip_1).toMatchObject({ selectedTakeId: 'take_26' });
-    expect(view.clips.clip_1.availableTakeIds).toEqual([
+    expect(view.beatOrder).toEqual(['section_1', 'section_2']);
+    expect(view.beats.section_1.shotOrder).toEqual(['clip_1']);
+    expect(view.shots.clip_1).toMatchObject({ selectedTakeId: 'take_26' });
+    expect(view.shots.clip_1.availableTakeIds).toEqual([
       'take_26',
       ...Array.from({ length: 23 }, (_, index) => `take_${String(index + 1).padStart(2, '0')}`),
     ]);
-    expect(view.shelf).toEqual([]);
+    expect(view.bin).toEqual([]);
     expect(view.briefReferences).toEqual([
       { id: 'cast_a', label: 'First cast', role: 'cast' },
       { id: 'cast_b', label: 'Second cast', role: 'cast' },
@@ -8367,7 +8367,7 @@ describe('Studio MCP schema-2 server', () => {
     await rm(projectDir, { recursive: true, force: true });
   });
 
-  it('counts a parked section against the schema-2 section capacity', async () => {
+  it('counts a parked beat against the schema-2 beat capacity', async () => {
     const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-capacity-'));
     const empty = createEmptyStudioProjectV2(
       {
@@ -8387,16 +8387,16 @@ describe('Studio MCP schema-2 server', () => {
       operations: Array.from({ length: 24 }, (_, index) => {
         const ordinal = index + 1;
         return {
-          kind: 'add_section' as const,
-          sectionId: `section_${ordinal}`,
-          section: {
+          kind: 'add_beat' as const,
+          beatId: `section_${ordinal}`,
+          beat: {
             title: `Section ${ordinal}`,
-            storyLine: '',
-            visualPrompt: `Visual ${ordinal}`,
+            action: '',
+            look: `Visual ${ordinal}`,
           },
-          firstClipId: `clip_${ordinal}`,
-          firstClip: editableShotV2(),
-          beforeSectionId: null,
+          firstShotId: `clip_${ordinal}`,
+          firstShot: editableShotV2(),
+          beforeBeatId: null,
         };
       }),
     }).project;
@@ -8404,7 +8404,7 @@ describe('Studio MCP schema-2 server', () => {
       schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       projectId: project.id,
       expectedRevision: project.revision,
-      operations: [{ kind: 'park_section', sectionId: 'section_24' }],
+      operations: [{ kind: 'park_beat', beatId: 'section_24' }],
     }).project;
     await writeFile(path.join(projectDir, 'project.json'), JSON.stringify(project));
 
@@ -8416,13 +8416,13 @@ describe('Studio MCP schema-2 server', () => {
         referencePendingDir: '',
       })({});
       const view = JSON.parse(result.content[0].text) as {
-        sectionOrder: string[];
-        sectionCapacity: { current: number; maximum: number; remaining: number; overCapacity: boolean };
+        beatOrder: string[];
+        beatCapacity: { current: number; maximum: number; remaining: number; overCapacity: boolean };
       };
 
-      expect(project.sectionOrder).toHaveLength(23);
-      expect(Object.keys(project.sections)).toHaveLength(24);
-      expect(view.sectionCapacity).toEqual({ current: 24, maximum: 24, remaining: 0, overCapacity: false });
+      expect(project.beatOrder).toHaveLength(23);
+      expect(Object.keys(project.beats)).toHaveLength(24);
+      expect(view.beatCapacity).toEqual({ current: 24, maximum: 24, remaining: 0, overCapacity: false });
     } finally {
       await rm(projectDir, { recursive: true, force: true });
     }
@@ -8445,7 +8445,7 @@ describe('Studio MCP schema-2 server', () => {
           base_revision: studioServerProjectFixture.revision,
           operations: [{ kind: 'set_brief', brief: 'Must remain schema 1' }],
         }),
-        createRequestReferenceImagesHandlerV2(config)({ clipIds: ['clip_1'] }),
+        createRequestReferenceImagesHandlerV2(config)({ shotIds: ['clip_1'] }),
       ]);
 
       expect(outcomes.every((result) => result.isError === true)).toBe(true);
@@ -8504,7 +8504,7 @@ describe('Studio MCP schema-2 server', () => {
                 base_revision: project.revision,
                 operations: [{ kind: 'set_brief', brief: 'Must stay in the authorizing project' }],
               })
-            : await createRequestReferenceImagesHandlerV2(config)({ clipIds: ['clip_1'] });
+            : await createRequestReferenceImagesHandlerV2(config)({ shotIds: ['clip_1'] });
 
         expect(result.isError).toBe(true);
         expect(await captureForeignProject()).toEqual(before);
@@ -8553,7 +8553,7 @@ describe('Studio MCP schema-2 server', () => {
                   schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
                   id: recordId,
                   projectId: project.id,
-                  clipIds: ['clip_2'],
+                  shotIds: ['clip_2'],
                   status: 'pending',
                   createdAt,
                 }
@@ -8645,7 +8645,7 @@ describe('Studio MCP schema-2 server', () => {
                 base_revision: originalProject.revision,
                 operations: [{ kind: 'set_brief', brief: 'Must not cross the root generation' }],
               })
-            : await createRequestReferenceImagesHandlerV2(config)({ clipIds: ['clip_1'] });
+            : await createRequestReferenceImagesHandlerV2(config)({ shotIds: ['clip_1'] });
 
         expect(replacementInstalled).toBe(true);
         expect(result.isError).toBe(true);
@@ -8684,7 +8684,7 @@ describe('Studio MCP schema-2 server', () => {
             base_revision: 3,
             operations: [{ kind: 'set_brief', brief: 'Must not be queued' }],
           }),
-          createRequestReferenceImagesHandlerV2(config)({ clipIds: ['clip_1'] }),
+          createRequestReferenceImagesHandlerV2(config)({ shotIds: ['clip_1'] }),
         ]);
 
         expect(outcomes.every((result) => result.isError === true)).toBe(true);
@@ -8717,7 +8717,7 @@ describe('Studio MCP schema-2 server', () => {
         operations: [{ kind: 'set_brief', brief: 'Must not be written' }],
       })
     ).resolves.toMatchObject({ isError: true });
-    await expect(createRequestReferenceImagesHandlerV2(config)({ clipIds: ['clip_1'] })).resolves.toMatchObject({
+    await expect(createRequestReferenceImagesHandlerV2(config)({ shotIds: ['clip_1'] })).resolves.toMatchObject({
       isError: true,
     });
     await expect(readdir(pendingDir)).resolves.toEqual([]);
@@ -8797,17 +8797,17 @@ describe('Studio MCP schema-2 server', () => {
     const slotsDir = path.join(projectDir, 'reference-requests', 'slots');
     await mkdir(pendingDir, { recursive: true });
     await mkdir(slotsDir);
-    const clipIds = Array.from({ length: 24 }, (_, index) => `clip_${index + 1}`);
+    const shotIds = Array.from({ length: 24 }, (_, index) => `clip_${index + 1}`);
     const projectAuthority = await capturePendingProjectAuthorityV2(projectDir);
 
     const record = await referenceRequestWriter.writeReferenceRequestRecordV2({
       pendingDir,
       projectId: 'project_v2',
       requestId: 'request_valid',
-      clipIds,
+      shotIds,
       projectAuthority,
     });
-    expect(record).toMatchObject({ schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, clipIds });
+    expect(record).toMatchObject({ schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, shotIds });
     expect(JSON.parse(await readFile(path.join(slotsDir, '0.slot'), 'utf8'))).toMatchObject({
       schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       requestId: 'request_valid',
@@ -8823,7 +8823,7 @@ describe('Studio MCP schema-2 server', () => {
       [],
       Array.from({ length: 25 }, (_, index) => `clip_${index}`),
       ['clip_1', 'clip_1'],
-      ['unsafe/clip'],
+      ['unsafe/shot'],
       hostileShotIds,
     ]) {
       // Keep the no-side-effect queue oracle deterministic between malformed direct calls.
@@ -8833,7 +8833,7 @@ describe('Studio MCP schema-2 server', () => {
           pendingDir,
           projectId: 'project_v2',
           requestId: `invalid_${invalidShotIds.length}`,
-          clipIds: invalidShotIds,
+          shotIds: invalidShotIds,
           projectAuthority,
         })
       ).rejects.toMatchObject({ code: 'storage' });
@@ -8843,7 +8843,7 @@ describe('Studio MCP schema-2 server', () => {
 
     await writeFile(
       path.join(pendingDir, 'bad_date.json'),
-      JSON.stringify({ ...record, id: 'bad_date', clipIds: ['clip_bad_date'], createdAt: '2026-08-17' })
+      JSON.stringify({ ...record, id: 'bad_date', shotIds: ['clip_bad_date'], createdAt: '2026-08-17' })
     );
     await writeFile(
       path.join(pendingDir, 'legacy.json'),
@@ -8858,12 +8858,12 @@ describe('Studio MCP schema-2 server', () => {
     );
     await expect(
       referenceRequestWriter.listPendingReferenceRequestShotIdsV2(pendingDir, 'project_v2')
-    ).resolves.toEqual(new Set(clipIds));
+    ).resolves.toEqual(new Set(shotIds));
 
     const racedFile = path.join(pendingDir, 'raced.json');
     const canonicalRacedFile = path.join(await nodeFs.realpath(pendingDir), 'raced.json');
     const oversizedTarget = path.join(projectDir, 'oversized.json');
-    await writeFile(racedFile, JSON.stringify({ ...record, id: 'raced', clipIds: ['clip_raced'] }));
+    await writeFile(racedFile, JSON.stringify({ ...record, id: 'raced', shotIds: ['clip_raced'] }));
     await writeFile(oversizedTarget, 'x'.repeat(256 * 1024 + 1));
     let swapped = false;
     const racedFs = new Proxy(nodeFs, {
@@ -8885,7 +8885,7 @@ describe('Studio MCP schema-2 server', () => {
     });
     await expect(
       referenceRequestWriter.listPendingReferenceRequestShotIdsV2(pendingDir, 'project_v2', racedFs)
-    ).resolves.toEqual(new Set(clipIds));
+    ).resolves.toEqual(new Set(shotIds));
     expect(swapped).toBe(true);
 
     const canonicalPendingDir = await nodeFs.realpath(pendingDir);
@@ -8981,23 +8981,23 @@ describe('Studio MCP schema-2 server', () => {
 
     const referenceHandler = createRequestReferenceImagesHandlerV2(config);
     for (const input of [
-      { clipIds: null as unknown as string[] },
-      { clipIds: [] },
-      { clipIds: Array.from({ length: 25 }, (_, index) => `clip_${index}`) },
-      { clipIds: ['unsafe/clip'] },
-      { clipIds: ['clip_1', 'clip_1'] },
-      { clipIds: ['inactive_clip'] },
+      { shotIds: null as unknown as string[] },
+      { shotIds: [] },
+      { shotIds: Array.from({ length: 25 }, (_, index) => `clip_${index}`) },
+      { shotIds: ['unsafe/shot'] },
+      { shotIds: ['clip_1', 'clip_1'] },
+      { shotIds: ['inactive_clip'] },
     ]) {
       // These validation outcomes share one dedup inbox and are intentionally observed in order.
       // eslint-disable-next-line no-await-in-loop
       await expect(referenceHandler(input)).resolves.toMatchObject({ isError: true });
     }
-    await expect(createRequestReferenceImagesHandlerV2(null)({ clipIds: ['clip_1'] })).resolves.toMatchObject({
+    await expect(createRequestReferenceImagesHandlerV2(null)({ shotIds: ['clip_1'] })).resolves.toMatchObject({
       isError: true,
     });
-    const queued = await referenceHandler({ clipIds: ['clip_1', 'clip_2'] });
+    const queued = await referenceHandler({ shotIds: ['clip_1', 'clip_2'] });
     expect(queued.content[0].text).toMatch(/Queued 2 of 2.*Nothing was generated/i);
-    const repeated = await referenceHandler({ clipIds: ['clip_1', 'clip_2'] });
+    const repeated = await referenceHandler({ shotIds: ['clip_1', 'clip_2'] });
     expect(repeated.content[0].text).toMatch(/Queued 0 of 2.*Already queued: clip_1, clip_2/i);
     expect(await readdir(referencePendingDir)).toHaveLength(1);
     await rm(projectDir, { recursive: true, force: true });

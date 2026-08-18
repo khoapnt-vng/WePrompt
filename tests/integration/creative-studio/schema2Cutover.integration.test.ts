@@ -476,7 +476,7 @@ describe('Creative Studio schema-2 storage cutover', () => {
       project: { id: V2_PROJECT_ID, revision: 1 },
     });
     await expect(store.listProjectsV2()).resolves.toMatchObject({
-      projects: [{ id: V2_PROJECT_ID, sectionCount: 0, clipCount: 0, selectedAssetCount: 0 }],
+      projects: [{ id: V2_PROJECT_ID, beatCount: 0, shotCount: 0, selectedTakeCount: 0 }],
       unsupportedProjectIds: [V1_PROJECT_ID],
       quarantinedProjectIds: [],
     });
@@ -520,8 +520,8 @@ describe('Creative Studio schema-2 storage cutover', () => {
     );
     expect(applied).toMatchObject({
       project: { id: V2_PROJECT_ID, revision: 2, brief: 'Committed after restart' },
-      createdSectionIds: [],
-      createdClipIds: [],
+      createdBeatIds: [],
+      createdShotIds: [],
     });
     expect(commitFacts).toEqual([
       {

@@ -112,7 +112,7 @@ const parsePending = (value: unknown, slot: unknown = validSlot()) =>
   });
 
 const emptyShotV2 = () => ({
-  shotPrompt: '',
+  line: '',
   narration: '',
   onScreenText: '',
   mediaKind: 'image' as const,
@@ -553,38 +553,38 @@ describe('Studio Director V2 command contracts', () => {
   const operations: StudioMutationOperationV2[] = [
     { kind: 'set_brief', brief: '' },
     {
-      kind: 'add_section',
-      sectionId: 'section_new',
-      section: { title: 'Opening', storyLine: 'Establish the place', visualPrompt: 'Morning light' },
-      firstClipId: 'clip_new',
-      firstClip: emptyShotV2(),
-      beforeSectionId: null,
+      kind: 'add_beat',
+      beatId: 'section_new',
+      beat: { title: 'Opening', action: 'Establish the place', look: 'Morning light' },
+      firstShotId: 'clip_new',
+      firstShot: emptyShotV2(),
+      beforeBeatId: null,
     },
-    { kind: 'edit_section', sectionId: 'section_1', changes: { storyLine: 'A quieter opening.' } },
-    { kind: 'reorder_sections', sectionOrder: ['section_2', 'section_1'] },
-    { kind: 'park_section', sectionId: 'section_1' },
-    { kind: 'restore_section', sectionId: 'section_1', beforeSectionId: null },
+    { kind: 'edit_beat', beatId: 'section_1', changes: { action: 'A quieter opening.' } },
+    { kind: 'reorder_beats', beatOrder: ['section_2', 'section_1'] },
+    { kind: 'park_beat', beatId: 'section_1' },
+    { kind: 'restore_beat', beatId: 'section_1', beforeBeatId: null },
     {
-      kind: 'add_clip',
-      sectionId: 'section_1',
-      clipId: 'clip_new',
-      clip: emptyShotV2(),
-      beforeClipId: null,
+      kind: 'add_shot',
+      beatId: 'section_1',
+      shotId: 'clip_new',
+      shot: emptyShotV2(),
+      beforeShotId: null,
     },
-    { kind: 'edit_clip', clipId: 'clip_1', changes: { narration: 'Hello.' } },
-    { kind: 'delete_clip', clipId: 'clip_1' },
-    { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_2', 'clip_1'] },
-    { kind: 'park_take', clipId: 'clip_1', assetId: 'asset_1' },
-    { kind: 'select_shelved_take', clipId: 'clip_1', assetId: 'asset_1' },
-    { kind: 'remove_shelf_alias', assetId: 'asset_1' },
+    { kind: 'edit_shot', shotId: 'clip_1', changes: { narration: 'Hello.' } },
+    { kind: 'delete_shot', shotId: 'clip_1' },
+    { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_2', 'clip_1'] },
+    { kind: 'park_take', shotId: 'clip_1', assetId: 'asset_1' },
+    { kind: 'restore_take', shotId: 'clip_1', assetId: 'asset_1' },
+    { kind: 'remove_bin_item', assetId: 'asset_1' },
     {
-      kind: 'reorder_shelf',
-      shelf: [
-        { kind: 'asset', assetId: 'asset_1' },
-        { kind: 'section', sectionId: 'section_1' },
+      kind: 'reorder_bin',
+      bin: [
+        { kind: 'take', assetId: 'asset_1' },
+        { kind: 'beat', beatId: 'section_1' },
       ],
     },
-    { kind: 'select_take', clipId: 'clip_1', assetId: 'asset_1' },
+    { kind: 'select_take', shotId: 'clip_1', assetId: 'asset_1' },
   ];
 
   it('accepts the exact schema-2 envelope and every shared mutation operation', () => {
@@ -609,44 +609,44 @@ describe('Studio Director V2 command contracts', () => {
   it.each([
     ['command envelope', { ...validCommandV2(), unexpected: true }],
     [
-      'new section',
+      'new beat',
       validCommandV2({
         operations: [
           {
             ...operations[1],
-            section: { title: '', storyLine: '', visualPrompt: '', rawPath: '/private/tmp/secret' },
+            beat: { title: '', action: '', look: '', rawPath: '/private/tmp/secret' },
           } as never,
         ],
       }),
     ],
     [
-      'new clip',
+      'new shot',
       validCommandV2({
         operations: [
           {
             ...operations[6],
-            clip: { ...emptyShotV2(), providerJobId: 'credential' },
+            shot: { ...emptyShotV2(), providerJobId: 'credential' },
           } as never,
         ],
       }),
     ],
     [
-      'section edit',
+      'beat edit',
       validCommandV2({
-        operations: [{ kind: 'edit_section', sectionId: 'section_1', changes: { title: 'x', extra: true } } as never],
+        operations: [{ kind: 'edit_beat', beatId: 'section_1', changes: { title: 'x', extra: true } } as never],
       }),
     ],
     [
-      'clip edit',
+      'shot edit',
       validCommandV2({
-        operations: [{ kind: 'edit_clip', clipId: 'clip_1', changes: { narration: 'x', jobIds: [] } } as never],
+        operations: [{ kind: 'edit_shot', shotId: 'clip_1', changes: { narration: 'x', jobIds: [] } } as never],
       }),
     ],
     [
-      'shelf item',
+      'bin item',
       validCommandV2({
         operations: [
-          { kind: 'reorder_shelf', shelf: [{ kind: 'asset', assetId: 'asset_1', url: 'file:///tmp/x' }] } as never,
+          { kind: 'reorder_bin', bin: [{ kind: 'take', assetId: 'asset_1', url: 'file:///tmp/x' }] } as never,
         ],
       }),
     ],
@@ -674,18 +674,17 @@ describe('Studio Director V2 command contracts', () => {
     expect(parsePendingV2(validCommandV2({ operations: tooMany })).status).toBe('invalid');
     expect(parsePendingV2(validCommandV2({ operations: sparse })).status).toBe('invalid');
     expect(
-      parsePendingV2(validCommandV2({ operations: [{ kind: 'edit_section', sectionId: 'section_1', changes: {} }] }))
-        .status
+      parsePendingV2(validCommandV2({ operations: [{ kind: 'edit_beat', beatId: 'section_1', changes: {} }] })).status
     ).toBe('invalid');
     expect(
-      parsePendingV2(validCommandV2({ operations: [{ kind: 'edit_clip', clipId: 'clip_1', changes: {} }] })).status
+      parsePendingV2(validCommandV2({ operations: [{ kind: 'edit_shot', shotId: 'clip_1', changes: {} }] })).status
     ).toBe('invalid');
   });
 
   it('uses own exact keys, rejects array baggage, and accepts safe magic identities', () => {
     const magicIds = ['constructor', 'toString', '__proto__'];
     const command = validCommandV2({
-      operations: [{ kind: 'reorder_sections', sectionOrder: magicIds }],
+      operations: [{ kind: 'reorder_beats', beatOrder: magicIds }],
     });
     const withSymbol = validCommandV2();
     Object.defineProperty(withSymbol, Symbol('extra'), { value: true, enumerable: true });
@@ -703,18 +702,18 @@ describe('Studio Director V2 command contracts', () => {
   it('enforces V2 authored bounds, safe identities, and media-specific durations', () => {
     const video = { ...emptyShotV2(), mediaKind: 'video' as const, durationSeconds: 4 };
     const validVideo = {
-      kind: 'add_clip' as const,
-      sectionId: 'section_1',
-      clipId: 'clip_video',
-      clip: video,
-      beforeClipId: null,
+      kind: 'add_shot' as const,
+      beatId: 'section_1',
+      shotId: 'clip_video',
+      shot: video,
+      beforeShotId: null,
     };
 
     expect(parsePendingV2(validCommandV2({ operations: [validVideo] })).status).toBe('valid');
     expect(
-      parsePendingV2(validCommandV2({ operations: [{ ...validVideo, clip: { ...video, durationSeconds: 3 } }] })).status
+      parsePendingV2(validCommandV2({ operations: [{ ...validVideo, shot: { ...video, durationSeconds: 3 } }] })).status
     ).toBe('invalid');
-    expect(parsePendingV2(validCommandV2({ operations: [{ ...validVideo, clipId: '../unsafe' }] })).status).toBe(
+    expect(parsePendingV2(validCommandV2({ operations: [{ ...validVideo, shotId: '../unsafe' }] })).status).toBe(
       'invalid'
     );
     expect(
@@ -872,8 +871,8 @@ describe('Studio Director V2 receipt contracts', () => {
       decidedAt: NOW,
       status: 'applied',
       appliedRevision: 5,
-      createdSectionIds: ['section_new'],
-      createdClipIds: ['clip_new', 'clip_extra'],
+      createdBeatIds: ['section_new'],
+      createdShotIds: ['clip_new', 'clip_extra'],
     },
     {
       schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
@@ -963,8 +962,8 @@ describe('Studio Director V2 receipt contracts', () => {
 
   it.each([
     { ...receipts[0], appliedRevision: 9 },
-    { ...receipts[0], createdSectionIds: ['section_new', 'section_new'] },
-    { ...receipts[0], createdClipIds: ['../unsafe'] },
+    { ...receipts[0], createdBeatIds: ['section_new', 'section_new'] },
+    { ...receipts[0], createdShotIds: ['../unsafe'] },
     { ...receipts[1], reasonCode: 'unsupported_prototype_schema' },
     { ...receipts[1], expectedRevision: null, reasonCode: 'stale_revision' },
     { ...receipts[2], rawError: '/private/tmp/project.json' },
@@ -976,10 +975,10 @@ describe('Studio Director V2 receipt contracts', () => {
 
   it('accepts every frozen mutation reason as a bounded rejection code', () => {
     const reasons = [
-      'section_capacity_reached',
-      'section_clip_capacity_reached',
-      'project_clip_capacity_reached',
-      'invalid_clip_duration',
+      'beat_capacity_reached',
+      'beat_shot_capacity_reached',
+      'project_shot_capacity_reached',
+      'invalid_shot_duration',
       'dependency_blocked',
       'identity_collision',
       'invalid_operation',
@@ -1094,24 +1093,24 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
     });
   });
 
-  it('accepts 1 and 24 ordered unique clip IDs and rejects 0, 25, or duplicates', () => {
-    const clips24 = Array.from({ length: STUDIO_MAX_REFERENCE_REQUEST_SHOTS }, (_, index) => `clip_${index}`);
-    const reference = (clipIds: string[]): StudioReferenceRequestV2 => ({
+  it('accepts 1 and 24 ordered unique shot IDs and rejects 0, 25, or duplicates', () => {
+    const shots24 = Array.from({ length: STUDIO_MAX_REFERENCE_REQUEST_SHOTS }, (_, index) => `clip_${index}`);
+    const reference = (shotIds: string[]): StudioReferenceRequestV2 => ({
       schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       id: 'request_1',
       projectId: 'project_1',
-      clipIds,
+      shotIds,
       status: 'pending',
       createdAt: NOW,
     });
-    const parse = (clipIds: string[]) =>
-      parseStudioReferenceRequestV2({ projectId: 'project_1', requestId: 'request_1', value: reference(clipIds) });
+    const parse = (shotIds: string[]) =>
+      parseStudioReferenceRequestV2({ projectId: 'project_1', requestId: 'request_1', value: reference(shotIds) });
 
     expect(parse(['clip_1'])).toMatchObject({ status: 'valid' });
     expect(parse(['constructor', 'toString', '__proto__'])).toMatchObject({ status: 'valid' });
-    expect(parse(clips24)).toEqual({ status: 'valid', record: reference(clips24) });
+    expect(parse(shots24)).toEqual({ status: 'valid', record: reference(shots24) });
     expect(parse([])).toEqual({ status: 'invalid' });
-    expect(parse([...clips24, 'clip_25'])).toEqual({ status: 'invalid' });
+    expect(parse([...shots24, 'clip_25'])).toEqual({ status: 'invalid' });
     expect(parse(['clip_1', 'clip_1'])).toEqual({ status: 'invalid' });
   });
 
@@ -1125,7 +1124,7 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
       schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       id: 'request_1',
       projectId: 'project_1',
-      clipIds: ['clip_1'],
+      shotIds: ['clip_1'],
       status: 'pending',
       createdAt: NOW,
     };

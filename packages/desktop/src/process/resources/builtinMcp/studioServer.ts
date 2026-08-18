@@ -163,7 +163,7 @@ const projectShotTakesV2 = (
     }
   }
   const selectedTakeId =
-    shot.selectedAssetId !== null && canonicalTakeIds.includes(shot.selectedAssetId) ? shot.selectedAssetId : null;
+    shot.selectedTakeId !== null && canonicalTakeIds.includes(shot.selectedTakeId) ? shot.selectedTakeId : null;
   return {
     selectedTakeId,
     availableTakeIds: [
@@ -316,14 +316,14 @@ const videoDurationJsonSchemaV2 = {
 const studioBeatInputSchemaV2 = z4
   .object({
     title: z4.string().max(256),
-    storyLine: z4.string().max(4 * 1024),
-    visualPrompt: z4.string().max(8 * 1024),
+    action: z4.string().max(4 * 1024),
+    look: z4.string().max(8 * 1024),
   })
   .strict();
 
 const studioShotInputSchemaV2 = z4
   .object({
-    shotPrompt: z4.string().max(8 * 1024),
+    line: z4.string().max(8 * 1024),
     narration: z4.string().max(4 * 1024),
     onScreenText: z4.string().max(1024),
     mediaKind: z4.enum(['image', 'video']),
@@ -336,24 +336,24 @@ const studioShotInputSchemaV2 = z4
       shot.mediaKind === 'video' &&
       (shot.durationSeconds < STUDIO_MIN_SHOT_SECONDS || shot.durationSeconds > STUDIO_MAX_SHOT_SECONDS)
     ) {
-      context.addIssue({ code: 'custom', path: ['durationSeconds'], message: 'Invalid video clip duration.' });
+      context.addIssue({ code: 'custom', path: ['durationSeconds'], message: 'Invalid video shot duration.' });
     }
   })
   .meta(videoDurationJsonSchemaV2);
 
 const studioBeatChangesFieldsV2 = {
   title: z4.string().max(256),
-  storyLine: z4.string().max(4 * 1024),
-  visualPrompt: z4.string().max(8 * 1024),
+  action: z4.string().max(4 * 1024),
+  look: z4.string().max(8 * 1024),
 };
 const studioBeatChangesSchemaV2 = z4.union([
   z4.object(studioBeatChangesFieldsV2).partial().required({ title: true }).strict(),
-  z4.object(studioBeatChangesFieldsV2).partial().required({ storyLine: true }).strict(),
-  z4.object(studioBeatChangesFieldsV2).partial().required({ visualPrompt: true }).strict(),
+  z4.object(studioBeatChangesFieldsV2).partial().required({ action: true }).strict(),
+  z4.object(studioBeatChangesFieldsV2).partial().required({ look: true }).strict(),
 ]);
 
 const studioShotChangesFieldsV2 = {
-  shotPrompt: z4.string().max(8 * 1024),
+  line: z4.string().max(8 * 1024),
   narration: z4.string().max(4 * 1024),
   onScreenText: z4.string().max(1024),
   mediaKind: z4.enum(['image', 'video']),
@@ -362,7 +362,7 @@ const studioShotChangesFieldsV2 = {
 };
 const studioShotChangesSchemaV2 = z4
   .union([
-    z4.object(studioShotChangesFieldsV2).partial().required({ shotPrompt: true }).strict(),
+    z4.object(studioShotChangesFieldsV2).partial().required({ line: true }).strict(),
     z4.object(studioShotChangesFieldsV2).partial().required({ narration: true }).strict(),
     z4.object(studioShotChangesFieldsV2).partial().required({ onScreenText: true }).strict(),
     z4.object(studioShotChangesFieldsV2).partial().required({ mediaKind: true }).strict(),
@@ -375,14 +375,14 @@ const studioShotChangesSchemaV2 = z4
       changes.durationSeconds !== undefined &&
       (changes.durationSeconds < STUDIO_MIN_SHOT_SECONDS || changes.durationSeconds > STUDIO_MAX_SHOT_SECONDS)
     ) {
-      context.addIssue({ code: 'custom', path: ['durationSeconds'], message: 'Invalid video clip duration.' });
+      context.addIssue({ code: 'custom', path: ['durationSeconds'], message: 'Invalid video shot duration.' });
     }
   })
   .meta(videoDurationJsonSchemaV2);
 
 const studioBinItemSchemaV2 = z4.discriminatedUnion('kind', [
-  z4.object({ kind: z4.literal('section'), sectionId: studioDirectorIdSchemaV2 }).strict(),
-  z4.object({ kind: z4.literal('asset'), assetId: studioDirectorIdSchemaV2 }).strict(),
+  z4.object({ kind: z4.literal('beat'), beatId: studioDirectorIdSchemaV2 }).strict(),
+  z4.object({ kind: z4.literal('take'), assetId: studioDirectorIdSchemaV2 }).strict(),
 ]);
 
 const uniqueStudioIdsSchema = (maximum: number) =>
@@ -396,81 +396,80 @@ const studioMutationOperationSchemasV2 = {
   setBrief: z4.object({ kind: z4.literal('set_brief'), brief: z4.string().max(16 * 1024) }).strict(),
   addBeat: z4
     .object({
-      kind: z4.literal('add_section'),
-      sectionId: studioDirectorIdSchemaV2,
-      section: studioBeatInputSchemaV2,
-      firstClipId: studioDirectorIdSchemaV2,
-      firstClip: studioShotInputSchemaV2,
-      beforeSectionId: studioDirectorIdSchemaV2.nullable(),
+      kind: z4.literal('add_beat'),
+      beatId: studioDirectorIdSchemaV2,
+      beat: studioBeatInputSchemaV2,
+      firstShotId: studioDirectorIdSchemaV2,
+      firstShot: studioShotInputSchemaV2,
+      beforeBeatId: studioDirectorIdSchemaV2.nullable(),
     })
     .strict(),
   editBeat: z4
     .object({
-      kind: z4.literal('edit_section'),
-      sectionId: studioDirectorIdSchemaV2,
+      kind: z4.literal('edit_beat'),
+      beatId: studioDirectorIdSchemaV2,
       changes: studioBeatChangesSchemaV2,
     })
     .strict(),
   reorderBeats: z4
-    .object({ kind: z4.literal('reorder_sections'), sectionOrder: uniqueStudioIdsSchema(STUDIO_MAX_BEATS) })
+    .object({ kind: z4.literal('reorder_beats'), beatOrder: uniqueStudioIdsSchema(STUDIO_MAX_BEATS) })
     .strict(),
-  parkBeat: z4.object({ kind: z4.literal('park_section'), sectionId: studioDirectorIdSchemaV2 }).strict(),
+  parkBeat: z4.object({ kind: z4.literal('park_beat'), beatId: studioDirectorIdSchemaV2 }).strict(),
   restoreBeat: z4
     .object({
-      kind: z4.literal('restore_section'),
-      sectionId: studioDirectorIdSchemaV2,
-      beforeSectionId: studioDirectorIdSchemaV2.nullable(),
+      kind: z4.literal('restore_beat'),
+      beatId: studioDirectorIdSchemaV2,
+      beforeBeatId: studioDirectorIdSchemaV2.nullable(),
     })
     .strict(),
   addShot: z4
     .object({
-      kind: z4.literal('add_clip'),
-      sectionId: studioDirectorIdSchemaV2,
-      clipId: studioDirectorIdSchemaV2,
-      clip: studioShotInputSchemaV2,
-      beforeClipId: studioDirectorIdSchemaV2.nullable(),
+      kind: z4.literal('add_shot'),
+      beatId: studioDirectorIdSchemaV2,
+      shotId: studioDirectorIdSchemaV2,
+      shot: studioShotInputSchemaV2,
+      beforeShotId: studioDirectorIdSchemaV2.nullable(),
     })
     .strict(),
   editShot: z4
-    .object({ kind: z4.literal('edit_clip'), clipId: studioDirectorIdSchemaV2, changes: studioShotChangesSchemaV2 })
+    .object({ kind: z4.literal('edit_shot'), shotId: studioDirectorIdSchemaV2, changes: studioShotChangesSchemaV2 })
     .strict(),
-  deleteShot: z4.object({ kind: z4.literal('delete_clip'), clipId: studioDirectorIdSchemaV2 }).strict(),
+  deleteShot: z4.object({ kind: z4.literal('delete_shot'), shotId: studioDirectorIdSchemaV2 }).strict(),
   reorderShots: z4
     .object({
-      kind: z4.literal('reorder_clips'),
-      sectionId: studioDirectorIdSchemaV2,
-      clipOrder: uniqueStudioIdsSchema(STUDIO_MAX_SHOTS_PER_BEAT),
+      kind: z4.literal('reorder_shots'),
+      beatId: studioDirectorIdSchemaV2,
+      shotOrder: uniqueStudioIdsSchema(STUDIO_MAX_SHOTS_PER_BEAT),
     })
     .strict(),
   parkTake: z4
-    .object({ kind: z4.literal('park_take'), clipId: studioDirectorIdSchemaV2, assetId: studioDirectorIdSchemaV2 })
+    .object({ kind: z4.literal('park_take'), shotId: studioDirectorIdSchemaV2, assetId: studioDirectorIdSchemaV2 })
     .strict(),
-  selectBinnedTake: z4
+  restoreTake: z4
     .object({
-      kind: z4.literal('select_shelved_take'),
-      clipId: studioDirectorIdSchemaV2,
+      kind: z4.literal('restore_take'),
+      shotId: studioDirectorIdSchemaV2,
       assetId: studioDirectorIdSchemaV2,
     })
     .strict(),
-  removeBinAlias: z4.object({ kind: z4.literal('remove_shelf_alias'), assetId: studioDirectorIdSchemaV2 }).strict(),
+  removeBinItem: z4.object({ kind: z4.literal('remove_bin_item'), assetId: studioDirectorIdSchemaV2 }).strict(),
   reorderBin: z4
     .object({
-      kind: z4.literal('reorder_shelf'),
-      shelf: z4
+      kind: z4.literal('reorder_bin'),
+      bin: z4
         .array(studioBinItemSchemaV2)
         .max(STUDIO_MAX_BIN_ITEMS)
         .refine(
           (items) =>
-            new Set(
-              items.map((item) => (item.kind === 'section' ? `section:${item.sectionId}` : `asset:${item.assetId}`))
-            ).size === items.length,
-          { message: 'Shelf identities must not repeat.' }
+            new Set(items.map((item) => (item.kind === 'beat' ? `beat:${item.beatId}` : `take:${item.assetId}`)))
+              .size === items.length,
+          { message: 'Bin identities must not repeat.' }
         )
         .meta({ uniqueItems: true }),
     })
     .strict(),
   selectTake: z4
-    .object({ kind: z4.literal('select_take'), clipId: studioDirectorIdSchemaV2, assetId: studioDirectorIdSchemaV2 })
+    .object({ kind: z4.literal('select_take'), shotId: studioDirectorIdSchemaV2, assetId: studioDirectorIdSchemaV2 })
     .strict(),
 };
 
@@ -486,8 +485,8 @@ export const studioMutationOperationSchemaV2 = z4.discriminatedUnion('kind', [
   studioMutationOperationSchemasV2.deleteShot,
   studioMutationOperationSchemasV2.reorderShots,
   studioMutationOperationSchemasV2.parkTake,
-  studioMutationOperationSchemasV2.selectBinnedTake,
-  studioMutationOperationSchemasV2.removeBinAlias,
+  studioMutationOperationSchemasV2.restoreTake,
+  studioMutationOperationSchemasV2.removeBinItem,
   studioMutationOperationSchemasV2.reorderBin,
   studioMutationOperationSchemasV2.selectTake,
 ]);
@@ -496,10 +495,10 @@ export const studioDirectorOperationSchemaV2 = z4.discriminatedUnion('kind', [
   studioMutationOperationSchemasV2.setBrief,
   z4
     .object({
-      kind: z4.literal('add_section'),
-      section: studioBeatInputSchemaV2,
-      firstClip: studioShotInputSchemaV2,
-      beforeSectionId: studioDirectorIdSchemaV2.nullable(),
+      kind: z4.literal('add_beat'),
+      beat: studioBeatInputSchemaV2,
+      firstShot: studioShotInputSchemaV2,
+      beforeBeatId: studioDirectorIdSchemaV2.nullable(),
     })
     .strict(),
   studioMutationOperationSchemasV2.editBeat,
@@ -508,18 +507,18 @@ export const studioDirectorOperationSchemaV2 = z4.discriminatedUnion('kind', [
   studioMutationOperationSchemasV2.restoreBeat,
   z4
     .object({
-      kind: z4.literal('add_clip'),
-      sectionId: studioDirectorIdSchemaV2,
-      clip: studioShotInputSchemaV2,
-      beforeClipId: studioDirectorIdSchemaV2.nullable(),
+      kind: z4.literal('add_shot'),
+      beatId: studioDirectorIdSchemaV2,
+      shot: studioShotInputSchemaV2,
+      beforeShotId: studioDirectorIdSchemaV2.nullable(),
     })
     .strict(),
   studioMutationOperationSchemasV2.editShot,
   studioMutationOperationSchemasV2.deleteShot,
   studioMutationOperationSchemasV2.reorderShots,
   studioMutationOperationSchemasV2.parkTake,
-  studioMutationOperationSchemasV2.selectBinnedTake,
-  studioMutationOperationSchemasV2.removeBinAlias,
+  studioMutationOperationSchemasV2.restoreTake,
+  studioMutationOperationSchemasV2.removeBinItem,
   studioMutationOperationSchemasV2.reorderBin,
   studioMutationOperationSchemasV2.selectTake,
 ]);
@@ -531,21 +530,19 @@ const studioDirectorOperationsSchemaV2 = z4
   .refine(
     (operations) =>
       !(
-        operations.some((operation) => operation.kind === 'add_section') &&
-        operations.some((operation) => operation.kind === 'reorder_sections')
+        operations.some((operation) => operation.kind === 'add_beat') &&
+        operations.some((operation) => operation.kind === 'reorder_beats')
       ),
-    { message: 'add_section and reorder_sections cannot be combined in one command.' }
+    { message: 'add_beat and reorder_beats cannot be combined in one command.' }
   )
   .refine(
     (operations) =>
       !operations.some(
         (operation) =>
-          operation.kind === 'add_clip' &&
-          operations.some(
-            (candidate) => candidate.kind === 'reorder_clips' && candidate.sectionId === operation.sectionId
-          )
+          operation.kind === 'add_shot' &&
+          operations.some((candidate) => candidate.kind === 'reorder_shots' && candidate.beatId === operation.beatId)
       ),
-    { message: 'add_clip and reorder_clips cannot target the same section in one command.' }
+    { message: 'add_shot and reorder_shots cannot target the same beat in one command.' }
   )
   .meta({
     not: {
@@ -553,14 +550,14 @@ const studioDirectorOperationsSchemaV2 = z4
         {
           contains: {
             type: 'object',
-            properties: { kind: { const: 'add_section' } },
+            properties: { kind: { const: 'add_beat' } },
             required: ['kind'],
           },
         },
         {
           contains: {
             type: 'object',
-            properties: { kind: { const: 'reorder_sections' } },
+            properties: { kind: { const: 'reorder_beats' } },
             required: ['kind'],
           },
         },
@@ -575,21 +572,19 @@ const studioMutationOperationsSchemaV2 = z4
   .refine(
     (operations) =>
       !(
-        operations.some((operation) => operation.kind === 'add_section') &&
-        operations.some((operation) => operation.kind === 'reorder_sections')
+        operations.some((operation) => operation.kind === 'add_beat') &&
+        operations.some((operation) => operation.kind === 'reorder_beats')
       ),
-    { message: 'add_section and reorder_sections cannot be combined in one proposal.' }
+    { message: 'add_beat and reorder_beats cannot be combined in one proposal.' }
   )
   .refine(
     (operations) =>
       !operations.some(
         (operation) =>
-          operation.kind === 'add_clip' &&
-          operations.some(
-            (candidate) => candidate.kind === 'reorder_clips' && candidate.sectionId === operation.sectionId
-          )
+          operation.kind === 'add_shot' &&
+          operations.some((candidate) => candidate.kind === 'reorder_shots' && candidate.beatId === operation.beatId)
       ),
-    { message: 'add_clip and reorder_clips cannot target the same section in one proposal.' }
+    { message: 'add_shot and reorder_shots cannot target the same beat in one proposal.' }
   )
   .meta({
     not: {
@@ -597,14 +592,14 @@ const studioMutationOperationsSchemaV2 = z4
         {
           contains: {
             type: 'object',
-            properties: { kind: { const: 'add_section' } },
+            properties: { kind: { const: 'add_beat' } },
             required: ['kind'],
           },
         },
         {
           contains: {
             type: 'object',
-            properties: { kind: { const: 'reorder_sections' } },
+            properties: { kind: { const: 'reorder_beats' } },
             required: ['kind'],
           },
         },
@@ -654,11 +649,11 @@ export const studioProposeStoryboardInputSchemaV2 = z4
 
 export const studioRequestReferenceImagesInputSchemaV2 = z4
   .object({
-    clipIds: z4
+    shotIds: z4
       .array(studioDirectorIdSchemaV2)
       .min(1)
       .max(STUDIO_MAX_REFERENCE_REQUEST_SHOTS)
-      .refine((shotIds) => new Set(shotIds).size === shotIds.length, { message: 'Clip ids must not repeat.' })
+      .refine((shotIds) => new Set(shotIds).size === shotIds.length, { message: 'Shot ids must not repeat.' })
       .meta({ uniqueItems: true }),
   })
   .strict();
@@ -941,7 +936,7 @@ export function createReadStoryboardHandler(
   };
 }
 
-/** Staged Section/Clip projection; the registered schema-1 handler remains active through Gate 1. */
+/** Staged Beat/Shot projection; the registered schema-1 handler remains active through Gate 1. */
 export function createReadStoryboardHandlerV2(
   config: StudioServerEnv | null
 ): (_input: Record<string, never>) => Promise<StudioToolResult> {
@@ -952,28 +947,28 @@ export function createReadStoryboardHandlerV2(
       const project = snapshot.project;
       // readProjectV2 has already proved that every active id resolves to its exact own record.
       const beats = Object.fromEntries(
-        project.sectionOrder.map((beatId) => {
-          const beat = project.sections[beatId]!;
+        project.beatOrder.map((beatId) => {
+          const beat = project.beats[beatId]!;
           return [
             beatId,
             {
               title: beat.title,
-              storyLine: beat.storyLine,
-              visualPrompt: beat.visualPrompt,
-              clipOrder: [...beat.clipOrder],
+              action: beat.action,
+              look: beat.look,
+              shotOrder: [...beat.shotOrder],
             },
           ];
         })
       );
-      const activeShotIds = project.sectionOrder.flatMap((beatId) => project.sections[beatId]!.clipOrder);
+      const activeShotIds = project.beatOrder.flatMap((beatId) => project.beats[beatId]!.shotOrder);
       const shots = Object.fromEntries(
         activeShotIds.map((shotId) => {
-          const shot = project.clips[shotId]!;
+          const shot = project.shots[shotId]!;
           const takes = projectShotTakesV2(project, shot);
           return [
             shotId,
             {
-              shotPrompt: shot.shotPrompt,
+              line: shot.line,
               narration: shot.narration,
               onScreenText: shot.onScreenText,
               mediaKind: shot.mediaKind,
@@ -996,7 +991,7 @@ export function createReadStoryboardHandlerV2(
       const briefReferences = Object.values(project.assets)
         .filter(
           (asset) =>
-            asset.clipId === null && asset.briefReferenceRole !== undefined && asset.briefReferenceLabel !== undefined
+            asset.shotId === null && asset.briefReferenceRole !== undefined && asset.briefReferenceLabel !== undefined
         )
         .toSorted(
           (left, right) =>
@@ -1005,7 +1000,7 @@ export function createReadStoryboardHandlerV2(
             compareCodeUnits(left.id, right.id)
         )
         .map((asset) => ({ id: asset.id, label: asset.briefReferenceLabel!, role: asset.briefReferenceRole! }));
-      const beatCount = Object.keys(project.sections).length;
+      const beatCount = Object.keys(project.beats).length;
       const view = {
         revision: project.revision,
         name: project.name,
@@ -1014,16 +1009,16 @@ export function createReadStoryboardHandlerV2(
         rules,
         aspectRatio: project.aspectRatio,
         targetDurationSeconds: project.targetDurationSeconds,
-        sectionCapacity: {
+        beatCapacity: {
           current: beatCount,
           maximum: STUDIO_MAX_BEATS,
           remaining: Math.max(0, STUDIO_MAX_BEATS - beatCount),
           overCapacity: beatCount > STUDIO_MAX_BEATS,
         },
-        sectionOrder: [...project.sectionOrder],
-        sections: beats,
-        clips: shots,
-        shelf: project.shelf.map((item) => ({ ...item })),
+        beatOrder: [...project.beatOrder],
+        beats,
+        shots,
+        bin: project.bin.map((item) => ({ ...item })),
       };
       return { content: [{ type: 'text', text: JSON.stringify(view, null, 2) }] };
     } catch (error) {
@@ -1310,26 +1305,26 @@ export function createRequestReferenceImagesHandler(
 
 export function createRequestReferenceImagesHandlerV2(
   config: StudioServerEnv | null
-): (input: { clipIds: string[] }) => Promise<StudioToolResult> {
-  return async ({ clipIds: shotIds }) => {
+): (input: { shotIds: string[] }) => Promise<StudioToolResult> {
+  return async ({ shotIds }) => {
     if (!config) return errorResult('Creative Studio project is unavailable.');
-    if (!Array.isArray(shotIds)) return errorResult('clipIds must be an array.');
-    if (shotIds.length < 1) return errorResult('At least one clip id is required.');
+    if (!Array.isArray(shotIds)) return errorResult('shotIds must be an array.');
+    if (shotIds.length < 1) return errorResult('At least one shot id is required.');
     if (shotIds.length > STUDIO_MAX_REFERENCE_REQUEST_SHOTS) {
-      return errorResult(`At most ${STUDIO_MAX_REFERENCE_REQUEST_SHOTS} clip ids may be requested at once.`);
+      return errorResult(`At most ${STUDIO_MAX_REFERENCE_REQUEST_SHOTS} shot ids may be requested at once.`);
     }
     const invalidShotIds = shotIds.filter((shotId) => !studioDirectorIdSchema.safeParse(shotId).success);
-    if (invalidShotIds.length > 0) return errorResult(`Invalid clip ids: ${invalidShotIds.join(', ')}`);
+    if (invalidShotIds.length > 0) return errorResult(`Invalid shot ids: ${invalidShotIds.join(', ')}`);
     const duplicateShotIds = shotIds.filter((shotId, index) => shotIds.indexOf(shotId) !== index);
     if (duplicateShotIds.length > 0) {
-      return errorResult(`Duplicate clip ids: ${[...new Set(duplicateShotIds)].join(', ')}`);
+      return errorResult(`Duplicate shot ids: ${[...new Set(duplicateShotIds)].join(', ')}`);
     }
     try {
       const snapshot = await readProjectSnapshotV2(config);
       const project = snapshot.project;
-      const activeShotIds = new Set(project.sectionOrder.flatMap((beatId) => project.sections[beatId]!.clipOrder));
+      const activeShotIds = new Set(project.beatOrder.flatMap((beatId) => project.beats[beatId]!.shotOrder));
       const unknownShotIds = shotIds.filter((shotId) => !activeShotIds.has(shotId));
-      if (unknownShotIds.length > 0) return errorResult(`Unknown or inactive clips: ${unknownShotIds.join(', ')}`);
+      if (unknownShotIds.length > 0) return errorResult(`Unknown or inactive shots: ${unknownShotIds.join(', ')}`);
       const projectAuthority = pendingProjectAuthorityV2(snapshot);
       await assertPendingRecordProjectAuthorityV2({
         pendingDir: config.referencePendingDir,
@@ -1349,7 +1344,7 @@ export function createRequestReferenceImagesHandlerV2(
         await writeReferenceRequestRecordV2({
           pendingDir: config.referencePendingDir,
           projectId: config.projectId,
-          clipIds: shotsToQueue,
+          shotIds: shotsToQueue,
           fs: config.fs,
           authorityFence: () => projectSnapshotStatusV2(config, snapshot),
           projectAuthority,
@@ -1507,7 +1502,7 @@ export function registerStudioToolsV2(
     'studio_list_routes',
     {
       description:
-        'Read the generation routes available to this project and their constraints before drafting clip durations.',
+        'Read the generation routes available to this project and their constraints before drafting shot durations.',
       inputSchema: z.object({}).strict(),
     },
     createListRoutesHandler(config)
@@ -1516,7 +1511,7 @@ export function registerStudioToolsV2(
     'read_storyboard',
     {
       description:
-        'Read the authoritative schema-2 Section/Clip storyboard, shelf, rules, references, selected takes, and bounded available take ids before proposing changes.',
+        'Read the authoritative schema-2 Beat/Shot storyboard, bin, rules, references, selected takes, and bounded available take ids before proposing changes.',
       inputSchema: z.object({}).strict(),
     },
     createReadStoryboardHandlerV2(config)
@@ -1525,7 +1520,7 @@ export function registerStudioToolsV2(
     'studio_request_reference_images',
     {
       description:
-        'Request supporting reference images for ordered active clip ids. This only records a request for user approval and never starts paid generation.',
+        'Request supporting reference images for ordered active shot ids. This only records a request for user approval and never starts paid generation.',
       inputSchema: studioRequestReferenceImagesInputSchemaV2,
     },
     createRequestReferenceImagesHandlerV2(config)
@@ -1534,7 +1529,7 @@ export function registerStudioToolsV2(
     'propose_storyboard',
     {
       description:
-        'Record one ordered schema-2 mutation batch for user review. Requires base_revision from read_storyboard and never applies or generates anything directly. Do not combine add_clip with reorder_clips for the same section (different-section pairs are valid), and keep the final serialized proposal record within 256 KiB; these two aggregate checks are enforced by the server before any ID or I/O because portable tools/list JSON Schema cannot encode them.',
+        'Record one ordered schema-2 mutation batch for user review. Requires base_revision from read_storyboard and never applies or generates anything directly. Do not combine add_shot with reorder_shots for the same beat (different-beat pairs are valid), and keep the final serialized proposal record within 256 KiB; these two aggregate checks are enforced by the server before any ID or I/O because portable tools/list JSON Schema cannot encode them.',
       inputSchema: studioProposeStoryboardInputSchemaV2,
     },
     createProposeStoryboardHandlerV2(config)
@@ -1558,7 +1553,7 @@ export function registerStudioToolsV2(
     'studio_apply_edits',
     {
       description:
-        'Read the current revision first, then apply one bounded ordered batch of free Section/Clip edits to that exact revision. Canonical schema-2 batch: {"expectedRevision":8,"operations":[{"kind":"set_brief","brief":"..."},{"kind":"edit_section","sectionId":"section_1","changes":{"title":"..."}},{"kind":"edit_clip","clipId":"clip_1","changes":{"shotPrompt":"..."}},{"kind":"reorder_sections","sectionOrder":["section_2","section_1"]}]}. This never starts paid generation. Do not combine add_clip with reorder_clips for the same section (different-section pairs are valid), and keep the final serialized command record within 256 KiB; these two aggregate checks are enforced by the server before any ID or I/O because portable tools/list JSON Schema cannot encode them. Validation errors and unconfirmed results must not be retried; call studio_get_command_status for an unconfirmed commandId.',
+        'Read the current revision first, then apply one bounded ordered batch of free Beat/Shot edits to that exact revision. Canonical schema-2 batch: {"expectedRevision":8,"operations":[{"kind":"set_brief","brief":"..."},{"kind":"edit_beat","beatId":"beat_1","changes":{"title":"..."}},{"kind":"edit_shot","shotId":"shot_1","changes":{"line":"..."}},{"kind":"reorder_beats","beatOrder":["beat_2","beat_1"]}]}. This never starts paid generation. Do not combine add_shot with reorder_shots for the same beat (different-beat pairs are valid), and keep the final serialized command record within 256 KiB; these two aggregate checks are enforced by the server before any ID or I/O because portable tools/list JSON Schema cannot encode them. Validation errors and unconfirmed results must not be retried; call studio_get_command_status for an unconfirmed commandId.',
       inputSchema: studioApplyEditsInputSchemaV2,
     },
     createStudioApplyEditsHandlerV2(config, writerDeps)

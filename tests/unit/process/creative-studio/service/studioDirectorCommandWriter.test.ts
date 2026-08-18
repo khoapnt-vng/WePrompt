@@ -56,8 +56,8 @@ const addScene = (title: string) => ({
   beforeSceneId: null,
 });
 
-const shotInputV2 = (shotPrompt: string) => ({
-  shotPrompt,
+const shotInputV2 = (line: string) => ({
+  line,
   narration: '',
   onScreenText: '',
   mediaKind: 'image' as const,
@@ -924,7 +924,7 @@ describe('Studio Director subprocess command writer', () => {
     expect(await readdir(pendingDir)).toEqual([]);
   });
 
-  it('mints schema-2 section and clip identities in canonical operation order', async () => {
+  it('mints schema-2 beat and shot identities in canonical operation order', async () => {
     const createId = vi
       .fn<() => string>()
       .mockReturnValueOnce('command_v2')
@@ -949,16 +949,16 @@ describe('Studio Director subprocess command writer', () => {
         expectedRevision: 7,
         operations: [
           {
-            kind: 'add_section',
-            section: { title: 'Opening', storyLine: '', visualPrompt: 'A warm visual language' },
-            firstClip: shotInputV2('A wide opening shot'),
-            beforeSectionId: null,
+            kind: 'add_beat',
+            beat: { title: 'Opening', action: '', look: 'A warm visual language' },
+            firstShot: shotInputV2('A wide opening shot'),
+            beforeBeatId: null,
           },
           {
-            kind: 'add_clip',
-            sectionId: 'section_existing',
-            clip: shotInputV2('A close detail'),
-            beforeClipId: null,
+            kind: 'add_shot',
+            beatId: 'section_existing',
+            shot: shotInputV2('A close detail'),
+            beforeShotId: null,
           },
         ],
       })
@@ -973,8 +973,8 @@ describe('Studio Director subprocess command writer', () => {
       projectId: PROJECT_ID,
       expectedRevision: 7,
       operations: [
-        { kind: 'add_section', sectionId: 'section_new', firstClipId: 'clip_first' },
-        { kind: 'add_clip', sectionId: 'section_existing', clipId: 'clip_added' },
+        { kind: 'add_beat', beatId: 'section_new', firstShotId: 'clip_first' },
+        { kind: 'add_shot', beatId: 'section_existing', shotId: 'clip_added' },
       ],
     });
     expect(createId.mock.calls).toHaveLength(5);
@@ -1097,18 +1097,18 @@ describe('Studio Director subprocess command writer', () => {
       expectedRevision: 9,
       operations: [
         { kind: 'set_brief', brief: 'Free edits only' },
-        { kind: 'edit_section', sectionId: 'section_1', changes: { title: 'Opening' } },
-        { kind: 'reorder_sections', sectionOrder: ['section_2', 'section_1'] },
-        { kind: 'park_section', sectionId: 'section_2' },
-        { kind: 'restore_section', sectionId: 'section_2', beforeSectionId: 'section_1' },
-        { kind: 'edit_clip', clipId: 'clip_1', changes: { shotPrompt: 'Closer' } },
-        { kind: 'delete_clip', clipId: 'clip_old' },
-        { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_2', 'clip_1'] },
-        { kind: 'park_take', clipId: 'clip_1', assetId: 'take_1' },
-        { kind: 'select_shelved_take', clipId: 'clip_1', assetId: 'take_2' },
-        { kind: 'remove_shelf_alias', assetId: 'take_3' },
-        { kind: 'reorder_shelf', shelf: [{ kind: 'asset', assetId: 'take_3' }] },
-        { kind: 'select_take', clipId: 'clip_1', assetId: 'take_1' },
+        { kind: 'edit_beat', beatId: 'section_1', changes: { title: 'Opening' } },
+        { kind: 'reorder_beats', beatOrder: ['section_2', 'section_1'] },
+        { kind: 'park_beat', beatId: 'section_2' },
+        { kind: 'restore_beat', beatId: 'section_2', beforeBeatId: 'section_1' },
+        { kind: 'edit_shot', shotId: 'clip_1', changes: { line: 'Closer' } },
+        { kind: 'delete_shot', shotId: 'clip_old' },
+        { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_2', 'clip_1'] },
+        { kind: 'park_take', shotId: 'clip_1', assetId: 'take_1' },
+        { kind: 'restore_take', shotId: 'clip_1', assetId: 'take_2' },
+        { kind: 'remove_bin_item', assetId: 'take_3' },
+        { kind: 'reorder_bin', bin: [{ kind: 'take', assetId: 'take_3' }] },
+        { kind: 'select_take', shotId: 'clip_1', assetId: 'take_1' },
       ],
     };
 
@@ -1130,8 +1130,8 @@ describe('Studio Director subprocess command writer', () => {
       decidedAt: '2026-08-17T01:02:10.000Z',
       status: 'applied',
       appliedRevision: 8,
-      createdSectionIds: ['section_new'],
-      createdClipIds: ['clip_first', 'clip_added'],
+      createdBeatIds: ['section_new'],
+      createdShotIds: ['clip_first', 'clip_added'],
     };
     await writeFile(path.join(receiptsDir, 'command_v2_receipt.json'), JSON.stringify(receipt));
 
@@ -1159,8 +1159,8 @@ describe('Studio Director subprocess command writer', () => {
               decidedAt: '2026-08-17T01:02:10.000Z',
               status,
               appliedRevision: 9,
-              createdSectionIds: [],
-              createdClipIds: [],
+              createdBeatIds: [],
+              createdShotIds: [],
             }
           : {
               schemaVersion: 2,
@@ -1204,8 +1204,8 @@ describe('Studio Director subprocess command writer', () => {
       decidedAt: '2026-08-17T01:02:10.000Z',
       status: 'applied',
       appliedRevision: 12,
-      createdSectionIds: [],
-      createdClipIds: [],
+      createdBeatIds: [],
+      createdShotIds: [],
     };
     await writeFile(path.join(receiptsDir, `${commandId}.json`), JSON.stringify(receipt));
 
@@ -1230,8 +1230,8 @@ describe('Studio Director subprocess command writer', () => {
             decidedAt: '2026-08-17T01:02:10.000Z',
             status: 'applied',
             appliedRevision: 9,
-            createdSectionIds: [],
-            createdClipIds: [],
+            createdBeatIds: [],
+            createdShotIds: [],
           } satisfies StudioDirectorCommandReceiptV2)
         );
       },
@@ -2809,10 +2809,10 @@ describe('Studio Director subprocess command writer', () => {
         expectedRevision: 7,
         operations: [
           {
-            kind: 'add_section',
-            section: { title: 'Opening', storyLine: '', visualPrompt: '' },
-            firstClip: shotInputV2('Opening'),
-            beforeSectionId: null,
+            kind: 'add_beat',
+            beat: { title: 'Opening', action: '', look: '' },
+            firstShot: shotInputV2('Opening'),
+            beforeBeatId: null,
           },
         ],
       })
@@ -2928,8 +2928,8 @@ describe('Studio Director subprocess command writer', () => {
       decidedAt: '2026-08-17T01:02:04.000Z',
       status: 'applied',
       appliedRevision: 8,
-      createdSectionIds: [],
-      createdClipIds: [],
+      createdBeatIds: [],
+      createdShotIds: [],
     };
     let currentMs = START_MS;
     let pollCount = 0;
@@ -2983,8 +2983,8 @@ describe('Studio Director subprocess command writer', () => {
       decidedAt: '2026-08-17T01:02:04.000Z',
       status: 'applied',
       appliedRevision: committedProject.revision,
-      createdSectionIds: [],
-      createdClipIds: [],
+      createdBeatIds: [],
+      createdShotIds: [],
     };
     let racedManifestRead = false;
     const fs = bindMethods(nodeFs, {
@@ -3122,8 +3122,8 @@ describe('Studio Director subprocess command writer', () => {
         decidedAt: '2026-08-17T01:02:04.000Z',
         status: 'applied',
         appliedRevision: 8,
-        createdSectionIds: [],
-        createdClipIds: [],
+        createdBeatIds: [],
+        createdShotIds: [],
       },
       expected: { status: 'applied', appliedRevision: 8 },
     },
