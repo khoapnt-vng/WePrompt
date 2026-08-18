@@ -3614,11 +3614,74 @@ describe('schema-2 creative studio project store', () => {
     expect(prototypeIndexAccesses).toEqual([]);
   });
 
-  it('rejects an oversized schema-2 manifest before opening or reading its bytes', async () => {
+  it('classifies a reordered schema-1 manifest larger than the V2 cap without mutating its tree', async () => {
+    const projectId = 'oversized_prototype_v1';
+    const projectDirectory = path.join(rootDir, projectId);
+    const projectFile = path.join(projectDirectory, 'project.json');
+    mkdirSync(projectDirectory);
+    const handle = await nodeFs.open(projectFile, 'wx');
+    try {
+      await handle.write('{"padding":"');
+      const chunk = Buffer.alloc(1024 * 1024, 'x');
+      for (let index = 0; index <= STUDIO_PROJECT_V2_MAX_RECORD_BYTES / chunk.length; index += 1) {
+        // The fixture is deliberately streamed so the test never allocates the oversized record.
+        // eslint-disable-next-line no-await-in-loop
+        await handle.write(chunk);
+      }
+      await handle.write(
+        `","deep":${'['.repeat(300)}0${']'.repeat(300)},"id":"${projectId}",\n  "schemaVersion" \t : 1.${'0'.repeat(130)}}`
+      );
+    } finally {
+      await handle.close();
+    }
+    const before = await nodeFs.lstat(projectFile, { bigint: true });
+    const rootEntriesBefore = readdirSync(rootDir).toSorted();
+    const projectEntriesBefore = readdirSync(projectDirectory).toSorted();
+    const protectedFs = protectPrototypeIndex();
+    const mutations = observeFileSystemMethods(
+      new Set(['appendFile', 'copyFile', 'link', 'mkdir', 'rename', 'rm', 'rmdir', 'truncate', 'unlink', 'writeFile']),
+      protectedFs.fs
+    );
+    const store = createCreativeStudioStore({ rootDir, fs: mutations.fs, logError: () => undefined });
+
+    expect(before.size).toBeGreaterThan(BigInt(STUDIO_PROJECT_V2_MAX_RECORD_BYTES));
+    await expect(store.getProjectV2(projectId)).resolves.toEqual({
+      status: 'unsupported_prototype_schema',
+      projectId,
+    });
+    await expect(store.listProjectsV2()).resolves.toEqual({
+      projects: [],
+      unsupportedProjectIds: [projectId],
+      quarantinedProjectIds: [],
+    });
+    await expect(store.inspectProjectsV2()).resolves.toEqual({
+      supportedProjectIds: [],
+      unsupportedProjectIds: [projectId],
+      quarantinedProjectIds: [],
+    });
+
+    const after = await nodeFs.lstat(projectFile, { bigint: true });
+    expect({ dev: after.dev, ino: after.ino, size: after.size, mtimeNs: after.mtimeNs }).toEqual({
+      dev: before.dev,
+      ino: before.ino,
+      size: before.size,
+      mtimeNs: before.mtimeNs,
+    });
+    expect(readdirSync(rootDir).toSorted()).toEqual(rootEntriesBefore);
+    expect(readdirSync(projectDirectory).toSorted()).toEqual(projectEntriesBefore);
+    expect(mutations.calls).toEqual([]);
+    expect(protectedFs.accesses).toEqual([]);
+  });
+
+  it('rejects an oversized schema-2 manifest after a no-follow bounded schema sniff', async () => {
     const projectId = 'oversized_v2';
-    const projectFile = path.join(rootDir, projectId, 'project.json');
-    mkdirSync(path.dirname(projectFile));
-    writeFileSync(projectFile, JSON.stringify({ schemaVersion: 2, id: projectId }));
+    const projectFilePath = path.join(rootDir, projectId, 'project.json');
+    mkdirSync(path.dirname(projectFilePath));
+    writeFileSync(
+      projectFilePath,
+      `{"schemaVersion":1,"payload":{"schemaVersion":1},"schemaVersion":2,"id":"${projectId}"}`
+    );
+    const projectFile = realpathSync(projectFilePath);
     const protectedFs = protectPrototypeIndex();
     let projectOpenCount = 0;
     let projectReadFileCount = 0;
@@ -3654,9 +3717,230 @@ describe('schema-2 creative studio project store', () => {
     const store = createCreativeStudioStore({ rootDir, fs: boundedFs });
 
     await expect(store.getProjectV2(projectId)).rejects.toMatchObject({ code: 'storage_error' });
-    expect(projectOpenCount).toBe(0);
+    expect(projectOpenCount).toBe(1);
     expect(projectReadFileCount).toBe(0);
     expect(protectedFs.accesses).toEqual([]);
+  });
+
+  it.each([
+    ['nested object and array grammar', '{"payload":[{}],"schemaVersion":1}'],
+    ['a unicode escape in a root value', '{"padding":"\\u0041","schemaVersion":1}'],
+    ['a unicode escape in a nested key', '{"payload":{"\\u0078":1},"schemaVersion":1}'],
+    ['a unicode escape in a nested array value', '{"payload":["\\u0041"],"schemaVersion":1}'],
+  ])('accepts valid %s before a root schema-1 member', async (_label, bytes) => {
+    const projectId = 'oversized_nested_v1';
+    const projectFilePath = path.join(rootDir, projectId, 'project.json');
+    mkdirSync(path.dirname(projectFilePath));
+    writeFileSync(projectFilePath, bytes);
+    const projectFile = realpathSync(projectFilePath);
+    const oversizedFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        if (property !== 'lstat') return Reflect.get(target, property, receiver) as unknown;
+        return async (...args: Parameters<typeof nodeFs.lstat>) => {
+          const stats = await nodeFs.lstat(...args);
+          if (path.resolve(String(args[0])) !== projectFile) return stats;
+          return new Proxy(stats, {
+            get(statsTarget, statsProperty, statsReceiver) {
+              if (statsProperty === 'size') return STUDIO_PROJECT_V2_MAX_RECORD_BYTES + 1;
+              return Reflect.get(statsTarget, statsProperty, statsReceiver) as unknown;
+            },
+          });
+        };
+      },
+    }) as typeof nodeFs;
+    const store = createCreativeStudioStore({ rootDir, fs: oversizedFs });
+
+    await expect(store.getProjectV2(projectId)).resolves.toEqual({
+      status: 'unsupported_prototype_schema',
+      projectId,
+    });
+  });
+
+  it('keeps a million-level schema sniff compact while preserving exact nested grammar', async () => {
+    const projectId = 'oversized_compact_stack_v1';
+    const projectFilePath = path.join(rootDir, projectId, 'project.json');
+    const depth = 1_000_000;
+    mkdirSync(path.dirname(projectFilePath));
+    writeFileSync(projectFilePath, `{"payload":${'['.repeat(depth)}0${']'.repeat(depth)},"schemaVersion":1}`);
+    const projectFile = realpathSync(projectFilePath);
+    const heapBefore = process.memoryUsage().heapUsed;
+    let peakHeapGrowth = 0;
+    const oversizedFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        if (property === 'lstat') {
+          return async (...args: Parameters<typeof nodeFs.lstat>) => {
+            const stats = await nodeFs.lstat(...args);
+            if (path.resolve(String(args[0])) !== projectFile) return stats;
+            return new Proxy(stats, {
+              get(statsTarget, statsProperty, statsReceiver) {
+                if (statsProperty === 'size') return STUDIO_PROJECT_V2_MAX_RECORD_BYTES + 1;
+                return Reflect.get(statsTarget, statsProperty, statsReceiver) as unknown;
+              },
+            });
+          };
+        }
+        if (property === 'open') {
+          return async (...args: Parameters<typeof nodeFs.open>) => {
+            const handle = await nodeFs.open(...args);
+            if (path.resolve(String(args[0])) !== projectFile) return handle;
+            return new Proxy(handle, {
+              get(handleTarget, handleProperty, handleReceiver) {
+                if (handleProperty !== 'read') {
+                  const value = Reflect.get(handleTarget, handleProperty, handleReceiver) as unknown;
+                  return typeof value === 'function' ? value.bind(handleTarget) : value;
+                }
+                return (...readArgs: Parameters<typeof handle.read>) => {
+                  peakHeapGrowth = Math.max(peakHeapGrowth, process.memoryUsage().heapUsed - heapBefore);
+                  return handle.read(...readArgs);
+                };
+              },
+            });
+          };
+        }
+        return Reflect.get(target, property, receiver) as unknown;
+      },
+    }) as typeof nodeFs;
+    const store = createCreativeStudioStore({ rootDir, fs: oversizedFs });
+
+    await expect(store.getProjectV2(projectId)).resolves.toEqual({
+      status: 'unsupported_prototype_schema',
+      projectId,
+    });
+    expect(peakHeapGrowth).toBeLessThan(24 * 1024 * 1024);
+  });
+
+  it.each([
+    ['leading garbage', 'garbage{"schemaVersion":1}'],
+    ['future-version value bait', '{"schemaVersion":3,"bait":"schemaVersion":1}'],
+    ['missing root comma', '{"schemaVersion":1 "future":3}'],
+    ['valid future version with quoted bait', '{"schemaVersion":3,"bait":"schemaVersion:1"}'],
+    ['crossed nested delimiters', '{"payload":[{]},"schemaVersion":1}'],
+    ['invalid nested literal', '{"payload":{"x":garbage},"schemaVersion":1}'],
+    ['missing nested comma', '{"payload":[1 2],"schemaVersion":1}'],
+  ])('rejects an oversized %s manifest instead of treating bait as schema 1', async (_label, bytes) => {
+    const projectId = 'oversized_schema_bait';
+    const projectFilePath = path.join(rootDir, projectId, 'project.json');
+    mkdirSync(path.dirname(projectFilePath));
+    writeFileSync(projectFilePath, bytes);
+    const projectFile = realpathSync(projectFilePath);
+    const oversizedFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        if (property !== 'lstat') return Reflect.get(target, property, receiver) as unknown;
+        return async (...args: Parameters<typeof nodeFs.lstat>) => {
+          const stats = await nodeFs.lstat(...args);
+          if (path.resolve(String(args[0])) !== projectFile) return stats;
+          return new Proxy(stats, {
+            get(statsTarget, statsProperty, statsReceiver) {
+              if (statsProperty === 'size') return STUDIO_PROJECT_V2_MAX_RECORD_BYTES + 1;
+              return Reflect.get(statsTarget, statsProperty, statsReceiver) as unknown;
+            },
+          });
+        };
+      },
+    }) as typeof nodeFs;
+    const store = createCreativeStudioStore({ rootDir, fs: oversizedFs });
+
+    await expect(store.getProjectV2(projectId)).rejects.toMatchObject({ code: 'storage_error' });
+  });
+
+  it('bounds an oversized schema sniff to the opened size before rejecting concurrent growth', async () => {
+    const projectId = 'oversized_growing_v1';
+    const projectFilePath = path.join(rootDir, projectId, 'project.json');
+    mkdirSync(path.dirname(projectFilePath));
+    writeFileSync(projectFilePath, JSON.stringify({ schemaVersion: 1, id: projectId }));
+    const projectFile = realpathSync(projectFilePath);
+    let readCount = 0;
+    const growingFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        if (property === 'lstat') {
+          return async (...args: Parameters<typeof nodeFs.lstat>) => {
+            const stats = await nodeFs.lstat(...args);
+            if (path.resolve(String(args[0])) !== projectFile || readCount > 0) return stats;
+            return new Proxy(stats, {
+              get(statsTarget, statsProperty, statsReceiver) {
+                if (statsProperty === 'size') return STUDIO_PROJECT_V2_MAX_RECORD_BYTES + 1;
+                return Reflect.get(statsTarget, statsProperty, statsReceiver) as unknown;
+              },
+            });
+          };
+        }
+        if (property === 'open') {
+          return async (...args: Parameters<typeof nodeFs.open>) => {
+            const handle = await nodeFs.open(...args);
+            if (path.resolve(String(args[0])) !== projectFile) return handle;
+            return new Proxy(handle, {
+              get(handleTarget, handleProperty, handleReceiver) {
+                if (handleProperty !== 'read') {
+                  const value = Reflect.get(handleTarget, handleProperty, handleReceiver) as unknown;
+                  return typeof value === 'function' ? value.bind(handleTarget) : value;
+                }
+                return async (...readArgs: Parameters<typeof handle.read>) => {
+                  readCount += 1;
+                  if (readCount > 4) throw new Error('schema sniff did not honor the opened size');
+                  const result = await handle.read(...readArgs);
+                  writeFileSync(projectFile, ' ', { flag: 'a' });
+                  return result;
+                };
+              },
+            });
+          };
+        }
+        return Reflect.get(target, property, receiver) as unknown;
+      },
+    }) as typeof nodeFs;
+    const store = createCreativeStudioStore({ rootDir, fs: growingFs });
+
+    await expect(store.getProjectV2(projectId)).rejects.toMatchObject({ code: 'storage_error' });
+    expect(readCount).toBe(1);
+  });
+
+  it('rejects a symlink raced into the manifest name during the oversized schema sniff', async () => {
+    const projectId = 'oversized_sniff_race_v1';
+    const projectFilePath = path.join(rootDir, projectId, 'project.json');
+    const outsideDirectory = mkdtempSync(path.join(tmpdir(), 'creative-studio-schema-sniff-race-'));
+    const outsideFile = path.join(outsideDirectory, 'project.json');
+    mkdirSync(path.dirname(projectFilePath));
+    writeFileSync(projectFilePath, JSON.stringify({ schemaVersion: 1, id: projectId }));
+    writeFileSync(outsideFile, JSON.stringify({ schemaVersion: 1, id: projectId, outside: true }));
+    const projectFile = realpathSync(projectFilePath);
+    const outsideBefore = readFileSync(outsideFile);
+    let raced = false;
+    const racedFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        if (property === 'lstat') {
+          return async (...args: Parameters<typeof nodeFs.lstat>) => {
+            const stats = await nodeFs.lstat(...args);
+            if (path.resolve(String(args[0])) !== projectFile || raced) return stats;
+            return new Proxy(stats, {
+              get(statsTarget, statsProperty, statsReceiver) {
+                if (statsProperty === 'size') return STUDIO_PROJECT_V2_MAX_RECORD_BYTES + 1;
+                return Reflect.get(statsTarget, statsProperty, statsReceiver) as unknown;
+              },
+            });
+          };
+        }
+        if (property === 'open') {
+          return (...args: Parameters<typeof nodeFs.open>) => {
+            if (path.resolve(String(args[0])) === projectFile && !raced) {
+              raced = true;
+              rmSync(projectFile);
+              symlinkSync(outsideFile, projectFile);
+            }
+            return nodeFs.open(...args);
+          };
+        }
+        return Reflect.get(target, property, receiver) as unknown;
+      },
+    }) as typeof nodeFs;
+    const store = createCreativeStudioStore({ rootDir, fs: racedFs });
+
+    try {
+      await expect(store.getProjectV2(projectId)).rejects.toMatchObject({ code: 'storage_error' });
+      expect(raced).toBe(true);
+      expect(readFileSync(outsideFile)).toEqual(outsideBefore);
+    } finally {
+      await rm(outsideDirectory, { recursive: true, force: true });
+    }
   });
 
   it('does not annex a pre-existing project directory that has sidecar data but no manifest', async () => {
