@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { StudioAspectRatio, StudioAsset, StudioManagedAssetRef, StudioResolution } from './creativeStudioTypes';
+import type {
+  StudioAspectRatio,
+  StudioAsset,
+  StudioManagedAssetRef,
+  StudioManagedAssetRefV2,
+  StudioResolution,
+} from './creativeStudioTypes';
 
 /**
  * Single source of truth for every managed-asset collection the store durably recognises.
@@ -16,6 +22,14 @@ export const STUDIO_MANAGED_ASSET_COLLECTIONS: ReadonlySet<StudioManagedAssetRef
   'imports',
   'thumbnails',
   'references',
+]);
+
+/** Schema-2 collections stay separate so V1 never accepts audio conditioning media or loses references. */
+export const STUDIO_MANAGED_ASSET_COLLECTIONS_V2: ReadonlySet<StudioManagedAssetRefV2['collection']> = new Set([
+  'assets',
+  'imports',
+  'thumbnails',
+  'conditioningFrames',
 ]);
 
 export const STUDIO_MAX_ACTIVE_BRIEF_REFERENCES = 6;

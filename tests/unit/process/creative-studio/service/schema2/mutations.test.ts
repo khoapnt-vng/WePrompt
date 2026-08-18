@@ -7,75 +7,71 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type {
-  StudioAssetV2,
-  StudioShot,
-  StudioJobV2,
-  StudioMutationBatchV2,
-  StudioMutationOperationV2,
-  StudioProjectV2,
-  StudioBeat,
+import {
+  STUDIO_MAX_BEATS,
+  STUDIO_MAX_BIN_TAKE_ITEMS,
+  STUDIO_MAX_LINE_HISTORY_PER_BEAT,
+  STUDIO_MAX_MUTATION_OPERATIONS,
+  STUDIO_MAX_SHOTS_PER_BEAT,
+  STUDIO_MAX_SHOTS_PER_PROJECT,
+  type StudioAssetV2,
+  type StudioBeat,
+  type StudioConditioningInputSnapshot,
+  type StudioGenerationRequestPlan,
+  type StudioJobV2,
+  type StudioMutationBatchV2,
+  type StudioMutationOperationV2,
+  type StudioProjectV2,
+  type StudioQuotedGeneration,
+  type StudioShot,
+  type StudioSpendAuthorization,
 } from '@/common/types/project/creativeStudioTypes';
+import {
+  calculateStudioQuoteTotals,
+  createStudioQuotedGenerationId,
+} from '@/process/services/creative-studio/service/schema2/generation';
+import { createStudioLineHistoryId } from '@/process/services/creative-studio/service/schema2/mutationIdentity';
 import {
   applyStudioMutationBatchV2,
   StudioMutationErrorV2,
   type StudioMutationReasonV2,
+  validateStudioMutationOperationV2,
 } from '@/process/services/creative-studio/service/schema2/mutations';
 import { validateStudioProjectV2 } from '@/process/services/creative-studio/service/schema2/validation';
 
 const timestamp = '2026-08-17T00:00:00.000Z';
+const laterTimestamp = '2026-08-17T00:00:01.000Z';
+const digest = 'a'.repeat(64);
+const provider = { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'model_1' } as const;
 
 const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot => ({
   id,
   line: '',
+  derivation: 'derived',
+  derivedFromActionRevision: 1,
   narration: '',
   onScreenText: '',
-  mediaKind: 'image',
   durationSeconds: 5,
-  referenceAssetId: null,
+  trimInSeconds: null,
+  trimOutSeconds: null,
+  chainBreak: 'none',
+  seedStillId: null,
   selectedTakeId: null,
   assetIds: [],
   jobIds: [],
   ...overrides,
 });
 
-const makeBeat = (id: string, shotOrder: string[]): StudioBeat => ({
+const makeBeat = (id: string, shotOrder: string[] = [], overrides: Partial<StudioBeat> = {}): StudioBeat => ({
   id,
   title: '',
   action: '',
   look: '',
+  actionRevision: 1,
+  targetSeconds: null,
   shotOrder,
-});
-
-const makeAsset = (id: string, shotId: string): StudioAssetV2 => ({
-  id,
-  projectId: 'project_1',
-  shotId,
-  mediaKind: 'image',
-  mimeType: 'image/png',
-  managedAsset: { collection: 'assets', fileName: `${id}.png` },
-  byteSize: 1,
-  sha256: 'a'.repeat(64),
-  createdAt: timestamp,
-});
-
-const makeJob = (id: string, shotId: string): StudioJobV2 => ({
-  id,
-  projectId: 'project_1',
-  shotId,
-  status: 'queued_local',
-  provider: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'image-model' },
-  idempotencyKey: `idem_${id}`,
-  providerJobId: null,
-  cancellationPolicy: 'none',
-  outputAssetIds: [],
-  error: null,
-  retryOfJobId: null,
-  retryReason: null,
-  duplicateChargeAcknowledged: false,
-  duplicateChargeAcknowledgedAt: null,
-  createdAt: timestamp,
-  updatedAt: timestamp,
+  lineHistory: [],
+  ...overrides,
 });
 
 const makeProject = (): StudioProjectV2 => ({
@@ -85,1359 +81,1361 @@ const makeProject = (): StudioProjectV2 => ({
   name: 'Project One',
   brief: '',
   rules: [],
-  ruleListUndo: null,
   briefConversationId: null,
   aspectRatio: '16:9',
   targetDurationSeconds: 30,
   resolution: '1080p',
-  beatOrder: ['section_1', 'section_2'],
+  beatOrder: ['beat_1', 'beat_2'],
   beats: {
-    section_1: makeBeat('section_1', ['clip_1']),
-    section_2: makeBeat('section_2', ['clip_2']),
+    beat_1: makeBeat('beat_1', ['shot_1', 'shot_2']),
+    beat_2: makeBeat('beat_2'),
   },
   shots: {
-    clip_1: makeShot('clip_1'),
-    clip_2: makeShot('clip_2'),
+    shot_1: makeShot('shot_1'),
+    shot_2: makeShot('shot_2'),
   },
   bin: [],
-  cuts: {},
-  activeCutId: null,
+  bedAssetId: null,
+  matchToShotId: null,
+  spendPolicy: null,
+  spendAuthorizations: [],
+  frameExtractions: {},
+  undoHistory: [],
+  imageRouteId: null,
+  videoRouteId: null,
   assets: {},
   jobs: {},
-  routing: { image: null, video: null },
   createdAt: timestamp,
   updatedAt: timestamp,
 });
 
-const addCanonicalAsset = (project: StudioProjectV2, shotId: string, assetId: string): void => {
-  project.assets[assetId] = makeAsset(assetId, shotId);
-  project.shots[shotId]!.assetIds.push(assetId);
-};
-
-const batch = (
-  operations: StudioMutationOperationV2[],
-  overrides: Partial<StudioMutationBatchV2> = {}
-): StudioMutationBatchV2 => ({
-  schemaVersion: 2,
-  projectId: 'project_1',
-  expectedRevision: 7,
-  operations,
-  ...overrides,
+const editableBeat = (title = ''): Extract<StudioMutationOperationV2, { kind: 'add_beat' }>['beat'] => ({
+  title,
+  action: '',
+  look: '',
+  targetSeconds: null,
 });
 
-const emptyShotInput = (): Extract<StudioMutationOperationV2, { kind: 'add_shot' }>['shot'] => ({
+const editableShot = (
+  overrides: Partial<Extract<StudioMutationOperationV2, { kind: 'add_shot' }>['shot']> = {}
+): Extract<StudioMutationOperationV2, { kind: 'add_shot' }>['shot'] => ({
   line: '',
   narration: '',
   onScreenText: '',
-  mediaKind: 'image',
   durationSeconds: 5,
-  referenceAssetId: null,
+  ...overrides,
 });
 
-const expectReason = (action: () => unknown, reasonCode: StudioMutationReasonV2): void => {
+const makeImageAsset = (
+  id: string,
+  shotId: string | null,
+  collection: StudioAssetV2['managedAsset']['collection'] = 'imports',
+  overrides: Partial<StudioAssetV2> = {}
+): StudioAssetV2 => ({
+  id,
+  projectId: 'project_1',
+  shotId,
+  mediaKind: 'image',
+  mimeType: 'image/png',
+  managedAsset: { collection, fileName: `${id}.png` },
+  byteSize: 1,
+  sha256: digest,
+  createdAt: timestamp,
+  ...overrides,
+});
+
+const makeVideoAsset = (id: string, shotId: string, durationSeconds = 10): StudioAssetV2 => ({
+  id,
+  projectId: 'project_1',
+  shotId,
+  mediaKind: 'video',
+  mimeType: 'video/mp4',
+  managedAsset: { collection: 'assets', fileName: `${id}.mp4` },
+  byteSize: 1,
+  sha256: digest,
+  durationSeconds,
+  createdAt: timestamp,
+});
+
+const makeAudioAsset = (id: string): StudioAssetV2 => ({
+  id,
+  projectId: 'project_1',
+  shotId: null,
+  mediaKind: 'audio',
+  mimeType: 'audio/wav',
+  managedAsset: { collection: 'imports', fileName: `${id}.wav` },
+  byteSize: 1,
+  sha256: digest,
+  durationSeconds: 30,
+  createdAt: timestamp,
+});
+
+const addImageAsset = (
+  project: StudioProjectV2,
+  shotId: string,
+  assetId: string,
+  collection: StudioAssetV2['managedAsset']['collection'] = 'imports'
+): StudioAssetV2 => {
+  const asset = makeImageAsset(assetId, shotId, collection);
+  project.assets[assetId] = asset;
+  project.shots[shotId]!.assetIds.push(assetId);
+  return asset;
+};
+
+const resolvedPlan = (conditioningInput: StudioConditioningInputSnapshot | null): StudioGenerationRequestPlan => ({
+  kind: 'resolved',
+  snapshot: {
+    prompt: 'video prompt',
+    aspectRatio: '16:9',
+    resolution: '1080p',
+    durationSeconds: 5,
+    referenceInput: null,
+    conditioningInput,
+  },
+});
+
+const deferredPlan = (upstreamItemId: string, predecessorShotId: string): StudioGenerationRequestPlan => ({
+  kind: 'after_take_selection',
+  template: {
+    prompt: 'dependent prompt',
+    aspectRatio: '16:9',
+    resolution: '1080p',
+    durationSeconds: 5,
+    referenceInput: null,
+  },
+  dependency: {
+    kind: 'authorized_predecessor',
+    upstreamItemId,
+    predecessorShotId,
+  },
+});
+
+const makeItem = (
+  projectRevision: number,
+  shotId: string,
+  requestPlan: StudioGenerationRequestPlan,
+  generationCount = 1
+): StudioQuotedGeneration => ({
+  id: createStudioQuotedGenerationId({
+    projectId: 'project_1',
+    projectRevision,
+    shotId,
+    purpose: 'video_take',
+  }),
+  shotId,
+  purpose: 'video_take',
+  routeId: 'video_route',
+  generationCount,
+  requestPlan,
+  rateUnit: 'second',
+  rateMinorUnits: 2,
+});
+
+const makeAuthorization = (
+  id: string,
+  projectRevision: number,
+  baseItems: StudioQuotedGeneration[],
+  cascadeItems: StudioQuotedGeneration[] = []
+): StudioSpendAuthorization => {
+  const items = [...baseItems, ...cascadeItems];
+  const totals = calculateStudioQuoteTotals(items)!;
+  return {
+    id,
+    projectId: 'project_1',
+    projectRevision,
+    originReferenceHandoffId: null,
+    rateCardDigest: 'b'.repeat(64),
+    currency: 'USD',
+    baseItems,
+    cascadeItems,
+    lowerMinorUnits: totals.lowerMinorUnits,
+    upperMinorUnits: totals.upperMinorUnits,
+    expiresAt: '2026-08-17T00:05:00.000Z',
+    confirmedAt: laterTimestamp,
+    providerBindings: items.map((item) => ({ itemId: item.id, provider })),
+    idempotencyKeys: items.flatMap((item) =>
+      Array.from({ length: item.generationCount }, (_, generationIndex) => ({
+        itemId: item.id,
+        generationIndex,
+        key: `idem_${id}_${item.id}_${generationIndex}`,
+      }))
+    ),
+  };
+};
+
+const makeJob = (
+  id: string,
+  authorization: StudioSpendAuthorization,
+  item: StudioQuotedGeneration,
+  overrides: Partial<StudioJobV2> = {}
+): StudioJobV2 => ({
+  id,
+  projectId: 'project_1',
+  shotId: item.shotId,
+  status: item.requestPlan.kind === 'resolved' ? 'queued_local' : 'waiting_for_conditioning',
+  provider,
+  idempotencyKey: authorization.idempotencyKeys.find(
+    (entry) => entry.itemId === item.id && entry.generationIndex === 0
+  )!.key,
+  providerJobId: null,
+  cancellationPolicy: 'queued_and_running',
+  outputAssetIds: [],
+  error: null,
+  retryOfJobId: null,
+  retryReason: null,
+  duplicateChargeAcknowledged: false,
+  duplicateChargeAcknowledgedAt: null,
+  createdAt: timestamp,
+  updatedAt: timestamp,
+  purpose: 'video_take',
+  authorizationId: authorization.id,
+  authorizationItemId: item.id,
+  generationIndex: 0,
+  requestPlan: item.requestPlan,
+  requestSnapshot: item.requestPlan.kind === 'resolved' ? item.requestPlan.snapshot : null,
+  spendReceipt: null,
+  outputAssetIdsByRole: { primary: null, poster: null },
+  ...overrides,
+});
+
+const addSucceededVideoTake = (
+  project: StudioProjectV2,
+  shotId: string,
+  assetId: string,
+  selected: boolean
+): StudioAssetV2 => {
+  const shot = project.shots[shotId]!;
+  const seed = addImageAsset(project, shotId, `seed_${assetId}`);
+  shot.seedStillId = seed.id;
+  const projectRevision = project.revision - 1;
+  const item = makeItem(projectRevision, shotId, resolvedPlan({ kind: 'seed_still', assetId: seed.id }));
+  const authorization = makeAuthorization(`auth_${assetId}`, projectRevision, [item]);
+  const asset = makeVideoAsset(assetId, shotId);
+  project.assets[asset.id] = asset;
+  shot.assetIds.push(asset.id);
+  const jobId = `job_${assetId}`;
+  const job = makeJob(jobId, authorization, item, {
+    status: 'succeeded',
+    providerJobId: `remote_${assetId}`,
+    remoteStartedAt: timestamp,
+    outputAssetIds: [asset.id],
+    outputAssetIdsByRole: { primary: asset.id, poster: null },
+    spendReceipt: {
+      authorizationId: authorization.id,
+      itemId: item.id,
+      jobId,
+      purpose: 'video_take',
+      routeId: item.routeId,
+      currency: authorization.currency,
+      rateUnit: item.rateUnit,
+      rateMinorUnits: item.rateMinorUnits,
+      durationSeconds: 5,
+      generationIndex: 0,
+      generationCount: 1,
+      totalMinorUnits: 10,
+    },
+  });
+  project.spendAuthorizations.push(authorization);
+  project.jobs[job.id] = job;
+  shot.jobIds.push(job.id);
+  if (selected) shot.selectedTakeId = asset.id;
+  return asset;
+};
+
+const addWaitingDependentOnOnlyTake = (project: StudioProjectV2): StudioAssetV2 => {
+  const upstreamShot = project.shots.shot_1!;
+  const seed = addImageAsset(project, upstreamShot.id, 'waiting_seed');
+  upstreamShot.seedStillId = seed.id;
+  const projectRevision = project.revision - 1;
+  const upstream = makeItem(projectRevision, upstreamShot.id, resolvedPlan({ kind: 'seed_still', assetId: seed.id }));
+  const dependent = makeItem(projectRevision, 'shot_2', deferredPlan(upstream.id, upstreamShot.id));
+  const authorization = makeAuthorization('auth_waiting', projectRevision, [upstream], [dependent]);
+  const take = makeVideoAsset('only_take', upstreamShot.id);
+  project.assets[take.id] = take;
+  upstreamShot.assetIds.push(take.id);
+  const upstreamJob = makeJob('job_upstream', authorization, upstream, {
+    status: 'succeeded',
+    providerJobId: 'remote_upstream',
+    remoteStartedAt: timestamp,
+    outputAssetIds: [take.id],
+    outputAssetIdsByRole: { primary: take.id, poster: null },
+    spendReceipt: {
+      authorizationId: authorization.id,
+      itemId: upstream.id,
+      jobId: 'job_upstream',
+      purpose: 'video_take',
+      routeId: upstream.routeId,
+      currency: authorization.currency,
+      rateUnit: upstream.rateUnit,
+      rateMinorUnits: upstream.rateMinorUnits,
+      durationSeconds: 5,
+      generationIndex: 0,
+      generationCount: 1,
+      totalMinorUnits: 10,
+    },
+  });
+  const dependentJob = makeJob('job_dependent', authorization, dependent);
+  project.spendAuthorizations.push(authorization);
+  project.jobs[upstreamJob.id] = upstreamJob;
+  project.jobs[dependentJob.id] = dependentJob;
+  upstreamShot.jobIds.push(upstreamJob.id);
+  project.shots.shot_2!.jobIds.push(dependentJob.id);
+  return take;
+};
+
+const mutationBatch = (project: StudioProjectV2, operations: StudioMutationOperationV2[]): StudioMutationBatchV2 => ({
+  schemaVersion: 2,
+  projectId: project.id,
+  expectedRevision: project.revision,
+  operations,
+});
+
+const apply = (
+  project: StudioProjectV2,
+  operations: StudioMutationOperationV2[],
+  mutationId = 'mutation_1',
+  capturedAt = laterTimestamp
+) => applyStudioMutationBatchV2(project, mutationBatch(project, operations), { mutationId, capturedAt });
+
+const persist = (project: StudioProjectV2): StudioProjectV2 => {
+  const persisted = structuredClone(project);
+  persisted.revision += 1;
+  expect(validateStudioProjectV2(persisted)).toBe(true);
+  return persisted;
+};
+
+const expectReason = (
+  project: StudioProjectV2,
+  operations: StudioMutationOperationV2[],
+  reasonCode: StudioMutationReasonV2,
+  mutationId = 'mutation_rejected'
+): void => {
+  const before = structuredClone(project);
   try {
-    action();
+    apply(project, operations, mutationId);
     throw new Error('Expected mutation to fail');
   } catch (error) {
     expect(error).toBeInstanceOf(StudioMutationErrorV2);
     expect((error as StudioMutationErrorV2).reasonCode).toBe(reasonCode);
   }
+  expect(project).toEqual(before);
 };
 
-const sparseArray = <T>(length: number): T[] => {
-  const value: T[] = [];
-  value.length = length;
-  return value;
-};
+const FINAL_OPERATION_KINDS = [
+  'edit_project',
+  'set_brief',
+  'set_rules',
+  'add_beat',
+  'edit_beat',
+  'reorder_beats',
+  'park_beat',
+  'restore_beat',
+  'add_binned_beat',
+  'add_shot',
+  'edit_shot',
+  'delete_shot',
+  'park_shot',
+  'restore_shot',
+  'reorder_shots',
+  'apply_coverage',
+  'set_hard_cut',
+  'set_seed_still',
+  'trim_shot',
+  'redetach_line',
+  'rederive_line',
+  'restore_line',
+  'park_take',
+  'add_alternate_take',
+  'restore_take',
+  'reorder_bin',
+  'select_take',
+  'set_routes',
+  'set_spend_policy',
+  'set_match_to',
+  'set_bed',
+  'undo_last',
+] as const satisfies readonly StudioMutationOperationV2['kind'][];
 
-describe('applyStudioMutationBatchV2 operations', () => {
-  it('sets the brief without advancing the persistence revision or timestamp', () => {
-    const result = applyStudioMutationBatchV2(makeProject(), batch([{ kind: 'set_brief', brief: 'New brief' }]));
-
-    expect(result.project).toMatchObject({ brief: 'New brief', revision: 7, updatedAt: timestamp });
+describe('applyStudioMutationBatchV2 final operation contract', () => {
+  it('keeps the exact exhaustive 32-operation catalog', () => {
+    expect(FINAL_OPERATION_KINDS).toHaveLength(32);
+    expect(new Set(FINAL_OPERATION_KINDS).size).toBe(FINAL_OPERATION_KINDS.length);
   });
 
-  it('preserves unrelated cut state when setting the brief', () => {
-    const project = makeProject();
-    addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.shots.clip_1!.selectedTakeId = 'asset_1';
-    project.cuts.cut_1 = { id: 'cut_1', name: 'Cut', orderMode: 'storyboard', clipOrder: [], clips: {} };
-    project.activeCutId = 'cut_1';
-    const cutsBefore = JSON.stringify(project.cuts);
+  it('applies ordered project, rule, Beat, and alternate-Beat edits without advancing persistence fields', () => {
+    const result = apply(makeProject(), [
+      { kind: 'edit_project', changes: { name: 'Renamed', targetDurationSeconds: 60 } },
+      { kind: 'set_brief', brief: 'A precise brief' },
+      {
+        kind: 'set_rules',
+        rules: [{ id: 'rule_1', text: 'No logos', predicate: { kind: 'forbidden_terms', terms: ['logo'] } }],
+      },
+      { kind: 'add_beat', beatId: 'beat_3', beat: editableBeat('Third'), beforeBeatId: 'beat_2' },
+      { kind: 'edit_beat', beatId: 'beat_1', changes: { title: 'Opening', action: 'Begin' } },
+      { kind: 'reorder_beats', beatOrder: ['beat_3', 'beat_2', 'beat_1'] },
+      { kind: 'add_binned_beat', beatId: 'beat_alt', beat: editableBeat('Alternate') },
+    ]);
 
-    const result = applyStudioMutationBatchV2(project, batch([{ kind: 'set_brief', brief: 'New brief' }]));
-
-    expect(JSON.stringify(result.project.cuts)).toBe(cutsBefore);
+    expect(result.project).toMatchObject({
+      revision: 7,
+      updatedAt: timestamp,
+      name: 'Renamed',
+      brief: 'A precise brief',
+      targetDurationSeconds: 60,
+      beatOrder: ['beat_3', 'beat_2', 'beat_1'],
+      beats: { beat_1: { title: 'Opening', action: 'Begin', actionRevision: 2 } },
+      bin: [{ kind: 'beat', beatId: 'beat_alt', reason: 'alternate' }],
+    });
+    expect(result.project.rules).toEqual([
+      {
+        id: 'rule_1',
+        scope: 'project',
+        text: 'No logos',
+        predicate: { kind: 'forbidden_terms', terms: ['logo'] },
+        createdAt: laterTimestamp,
+      },
+    ]);
+    expect(result.createdBeatIds).toEqual(['beat_3', 'beat_alt']);
+    expect(result.createdShotIds).toEqual([]);
   });
 
-  it('preserves operational ledgers, routes, rules, and references during free authoring', () => {
+  it('parks and restores an empty Beat through one exact lifted alias', () => {
+    const parked = apply(makeProject(), [{ kind: 'park_beat', beatId: 'beat_2' }], 'mutation_park_beat');
+    expect(parked.project.beatOrder).toEqual(['beat_1']);
+    expect(parked.project.bin).toEqual([{ kind: 'beat', beatId: 'beat_2', reason: 'lifted' }]);
+
+    const restored = apply(
+      persist(parked.project),
+      [{ kind: 'restore_beat', beatId: 'beat_2', beforeBeatId: 'beat_1' }],
+      'mutation_restore_beat'
+    );
+    expect(restored.project.beatOrder).toEqual(['beat_2', 'beat_1']);
+    expect(restored.project.bin).toEqual([]);
+  });
+
+  it('applies ordered Shot creation, editing, reorder, hard-cut, and dependency-free deletion', () => {
+    const result = apply(makeProject(), [
+      {
+        kind: 'add_shot',
+        beatId: 'beat_1',
+        shotId: 'shot_3',
+        shot: editableShot({ line: 'New shot' }),
+        beforeShotId: 'shot_2',
+      },
+      { kind: 'edit_shot', shotId: 'shot_3', changes: { narration: 'Voice' } },
+      { kind: 'reorder_shots', beatId: 'beat_1', shotOrder: ['shot_2', 'shot_1', 'shot_3'] },
+      { kind: 'set_hard_cut', shotId: 'shot_3', hardCut: true },
+      { kind: 'delete_shot', shotId: 'shot_2' },
+    ]);
+
+    expect(result.createdShotIds).toEqual(['shot_3']);
+    expect(result.project.beats.beat_1!.shotOrder).toEqual(['shot_1', 'shot_3']);
+    expect(result.project.shots).not.toHaveProperty('shot_2');
+    expect(result.project.shots.shot_3).toMatchObject({
+      line: 'New shot',
+      narration: 'Voice',
+      chainBreak: 'hard_cut',
+      derivation: 'derived',
+    });
+  });
+
+  it('parks and restores a Shot only through its persisted original owner', () => {
+    const parked = apply(makeProject(), [{ kind: 'park_shot', shotId: 'shot_2' }], 'mutation_park_shot');
+    expect(parked.project.beats.beat_1!.shotOrder).toEqual(['shot_1']);
+    expect(parked.project.bin).toEqual([{ kind: 'shot', beatId: 'beat_1', shotId: 'shot_2', reason: 'lifted' }]);
+
+    const restored = apply(
+      persist(parked.project),
+      [{ kind: 'restore_shot', shotId: 'shot_2', beforeShotId: 'shot_1' }],
+      'mutation_restore_shot'
+    );
+    expect(restored.project.beats.beat_1!.shotOrder).toEqual(['shot_2', 'shot_1']);
+    expect(restored.project.bin).toEqual([]);
+  });
+
+  it('applies seed, route, spend, Match To, and bed settings through exact final fields', () => {
     const project = makeProject();
-    addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.jobs.job_1 = makeJob('job_1', 'clip_1');
-    project.shots.clip_1!.jobIds.push('job_1');
-    project.assets.cast_1 = {
-      ...makeAsset('cast_1', 'clip_1'),
-      shotId: null,
-      managedAsset: { collection: 'imports', fileName: 'cast_1.png' },
-      briefReferenceRole: 'cast',
-      briefReferenceLabel: 'Lead',
-    };
-    project.routing = {
-      image: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'image-model' },
-      video: null,
-    };
-    project.rules = [{ id: 'rule_1', scope: 'project', text: 'Keep it bright', predicate: null, createdAt: timestamp }];
-    project.ruleListUndo = { capturedRevision: 6, previousRules: [] };
-    const preserved = structuredClone({
+    addImageAsset(project, 'shot_1', 'seed_1');
+    project.assets.bed_1 = makeAudioAsset('bed_1');
+    const result = apply(project, [
+      { kind: 'set_seed_still', shotId: 'shot_1', assetId: 'seed_1' },
+      { kind: 'set_routes', imageRouteId: 'image_route', videoRouteId: 'video_route' },
+      { kind: 'set_spend_policy', policy: { currency: 'USD', maxPerBatchMinorUnits: 500 } },
+      { kind: 'set_match_to', shotId: 'shot_2' },
+      { kind: 'set_bed', assetId: 'bed_1' },
+    ]);
+
+    expect(result.project).toMatchObject({
+      imageRouteId: 'image_route',
+      videoRouteId: 'video_route',
+      spendPolicy: { currency: 'USD', maxPerBatchMinorUnits: 500 },
+      matchToShotId: 'shot_2',
+      bedAssetId: 'bed_1',
+      shots: { shot_1: { seedStillId: 'seed_1' } },
+    });
+  });
+
+  it('parks, alternates, reorders, and restores takes without implicit selection', () => {
+    const project = makeProject();
+    addImageAsset(project, 'shot_1', 'take_1');
+    addImageAsset(project, 'shot_1', 'take_2');
+    const result = apply(project, [
+      { kind: 'park_take', shotId: 'shot_1', assetId: 'take_1' },
+      { kind: 'add_alternate_take', shotId: 'shot_1', assetId: 'take_2' },
+      {
+        kind: 'reorder_bin',
+        bin: [
+          { kind: 'take', assetId: 'take_2', reason: 'alternate' },
+          { kind: 'take', assetId: 'take_1', reason: 'lifted' },
+        ],
+      },
+      { kind: 'restore_take', shotId: 'shot_1', assetId: 'take_1' },
+    ]);
+
+    expect(result.project.bin).toEqual([{ kind: 'take', assetId: 'take_2', reason: 'alternate' }]);
+    expect(result.project.shots.shot_1!.selectedTakeId).toBeNull();
+  });
+
+  it('selects and trims a canonical generated video Take', () => {
+    const project = makeProject();
+    addSucceededVideoTake(project, 'shot_1', 'take_video', false);
+    expect(validateStudioProjectV2(project)).toBe(true);
+    const result = apply(project, [
+      { kind: 'select_take', shotId: 'shot_1', assetId: 'take_video' },
+      { kind: 'trim_shot', shotId: 'shot_1', trimInSeconds: 1, trimOutSeconds: 2 },
+    ]);
+
+    expect(result.project.shots.shot_1).toMatchObject({
+      selectedTakeId: 'take_video',
+      trimInSeconds: 1,
+      trimOutSeconds: 2,
+    });
+  });
+});
+
+describe('applyStudioMutationBatchV2 coverage and fixed shots', () => {
+  const proposed = (shot: StudioShot) => ({
+    shotId: shot.id,
+    line: shot.line,
+    narration: shot.narration,
+    onScreenText: shot.onScreenText,
+    durationSeconds: shot.durationSeconds,
+    chainBreak: shot.chainBreak,
+  });
+
+  it('replaces dependency-free coverage while preserving every exact fixed row and boundary', () => {
+    const project = makeProject();
+    project.shots.shot_1!.narration = 'Voice';
+    project.shots.shot_1!.onScreenText = 'Title';
+    const result = apply(project, [
+      {
+        kind: 'apply_coverage',
+        beatId: 'beat_1',
+        shots: [
+          proposed(project.shots.shot_1!),
+          {
+            shotId: 'shot_3',
+            line: 'Replacement',
+            narration: '',
+            onScreenText: '',
+            durationSeconds: 6,
+            chainBreak: 'none',
+          },
+        ],
+        fixedShots: [{ shotId: 'shot_1', reasons: ['narration', 'on_screen_text'] }],
+      },
+    ]);
+
+    expect(result.project.beats.beat_1!.shotOrder).toEqual(['shot_1', 'shot_3']);
+    expect(result.project.shots).not.toHaveProperty('shot_2');
+    expect(result.coverageResults).toEqual([
+      {
+        beatId: 'beat_1',
+        createdShotIds: ['shot_3'],
+        retainedShotIds: ['shot_1'],
+        removedShotIds: ['shot_2'],
+        fixedShotIds: ['shot_1'],
+      },
+    ]);
+  });
+
+  it('rejects missing fixed rows and fixed-shot boundary movement byte-for-byte', () => {
+    const project = makeProject();
+    project.shots.shot_1!.narration = 'Voice';
+    const fixed = [{ shotId: 'shot_1', reasons: ['narration'] as const }];
+    expectReason(
+      project,
+      [
+        {
+          kind: 'apply_coverage',
+          beatId: 'beat_1',
+          shots: [proposed(project.shots.shot_1!), proposed(project.shots.shot_2!)],
+          fixedShots: [],
+        },
+      ],
+      'dependency_blocked',
+      'mutation_missing_fixed'
+    );
+    expectReason(
+      project,
+      [
+        {
+          kind: 'apply_coverage',
+          beatId: 'beat_1',
+          shots: [proposed(project.shots.shot_2!), proposed(project.shots.shot_1!)],
+          fixedShots: fixed.map((row) => ({ shotId: row.shotId, reasons: [...row.reasons] })),
+        },
+      ],
+      'dependency_blocked',
+      'mutation_moved_fixed'
+    );
+  });
+});
+
+describe('applyStudioMutationBatchV2 line history and unified undo', () => {
+  it('mints deterministic history for detach/rederive/restore in operation order', () => {
+    const project = makeProject();
+    project.shots.shot_1 = makeShot('shot_1', {
+      line: 'Old line',
+      derivation: 'detached',
+      derivedFromActionRevision: null,
+    });
+    const mutationId = 'mutation_lines';
+    const firstHistoryId = createStudioLineHistoryId(mutationId, 0, 'shot_1', 0);
+    const secondHistoryId = createStudioLineHistoryId(mutationId, 1, 'shot_1', 0);
+    const result = apply(
+      project,
+      [
+        { kind: 'redetach_line', shotId: 'shot_1', line: 'New line' },
+        { kind: 'rederive_line', shotId: 'shot_1', line: 'Derived line' },
+        { kind: 'restore_line', shotId: 'shot_1', historyEntryId: firstHistoryId },
+      ],
+      mutationId
+    );
+
+    expect(result.project.shots.shot_1).toMatchObject({
+      line: 'Old line',
+      derivation: 'detached',
+      derivedFromActionRevision: null,
+    });
+    expect(result.project.beats.beat_1!.lineHistory).toEqual([
+      { id: firstHistoryId, shotOrdinal: 1, text: 'Old line', capturedAt: laterTimestamp },
+      { id: secondHistoryId, shotOrdinal: 1, text: 'New line', capturedAt: laterTimestamp },
+    ]);
+  });
+
+  it('archives a detached deletion and undo restores the exact Shot and owner history', () => {
+    const project = makeProject();
+    project.shots.shot_2 = makeShot('shot_2', {
+      line: 'Deleted line',
+      derivation: 'detached',
+      derivedFromActionRevision: null,
+    });
+    const deleted = apply(project, [{ kind: 'delete_shot', shotId: 'shot_2' }], 'mutation_delete');
+    expect(deleted.project.shots).not.toHaveProperty('shot_2');
+    expect(deleted.project.beats.beat_1!.lineHistory).toEqual([
+      {
+        id: createStudioLineHistoryId('mutation_delete', 0, 'shot_2', 0),
+        shotOrdinal: 2,
+        text: 'Deleted line',
+        capturedAt: laterTimestamp,
+      },
+    ]);
+
+    const undone = apply(
+      persist(deleted.project),
+      [{ kind: 'undo_last', entryId: 'mutation_delete' }],
+      'mutation_undo_delete'
+    );
+    expect(undone.project.shots.shot_2).toEqual(project.shots.shot_2);
+    expect(undone.project.beats.beat_1).toEqual(project.beats.beat_1);
+    expect(undone.project.undoHistory).toEqual([]);
+  });
+
+  it('undo preserves paid membership arrays written after the authored mutation', () => {
+    const changed = apply(
+      makeProject(),
+      [{ kind: 'edit_shot', shotId: 'shot_1', changes: { line: 'Changed' } }],
+      'mutation_edit'
+    );
+    const withPaidWrite = persist(changed.project);
+    addImageAsset(withPaidWrite, 'shot_1', 'later_asset');
+    withPaidWrite.revision += 1;
+    expect(validateStudioProjectV2(withPaidWrite)).toBe(true);
+
+    const undone = apply(withPaidWrite, [{ kind: 'undo_last', entryId: 'mutation_edit' }], 'mutation_undo_edit');
+    expect(undone.project.shots.shot_1!.line).toBe('');
+    expect(undone.project.shots.shot_1!.assetIds).toEqual(['later_asset']);
+    expect(undone.project.assets.later_asset).toBeDefined();
+  });
+
+  it('fails closed when an authored after-fragment no longer matches the undo digest', () => {
+    const changed = persist(
+      apply(makeProject(), [{ kind: 'edit_shot', shotId: 'shot_1', changes: { line: 'Changed' } }], 'mutation_conflict')
+        .project
+    );
+    changed.shots.shot_1!.narration = 'Concurrent authored change';
+    changed.revision += 1;
+    expect(validateStudioProjectV2(changed)).toBe(true);
+    expectReason(
+      changed,
+      [{ kind: 'undo_last', entryId: 'mutation_conflict' }],
+      'undo_conflict',
+      'mutation_undo_conflict'
+    );
+  });
+
+  it('evicts only the oldest line-history row at the exact 20-row boundary', () => {
+    const project = makeProject();
+    project.shots.shot_1 = makeShot('shot_1', {
+      line: 'Current detached line',
+      derivation: 'detached',
+      derivedFromActionRevision: null,
+    });
+    project.beats.beat_1!.lineHistory = Array.from({ length: STUDIO_MAX_LINE_HISTORY_PER_BEAT }, (_, index) => ({
+      id: `history_${index}`,
+      shotOrdinal: 1,
+      text: `line ${index}`,
+      capturedAt: timestamp,
+    }));
+    const result = apply(
+      project,
+      [{ kind: 'redetach_line', shotId: 'shot_1', line: 'Replacement' }],
+      'mutation_history_cap'
+    );
+
+    expect(result.project.beats.beat_1!.lineHistory).toHaveLength(STUDIO_MAX_LINE_HISTORY_PER_BEAT);
+    expect(result.project.beats.beat_1!.lineHistory[0]!.id).toBe('history_1');
+    expect(result.project.beats.beat_1!.lineHistory.at(-1)!.id).toBe(
+      createStudioLineHistoryId('mutation_history_cap', 0, 'shot_1', 0)
+    );
+  });
+
+  it('keeps only the newest 20 undo entries and never appends an inverse for undo', () => {
+    let project = makeProject();
+    for (let index = 0; index < 21; index += 1) {
+      project = persist(
+        apply(project, [{ kind: 'set_brief', brief: `brief ${index}` }], `mutation_brief_${index}`).project
+      );
+    }
+    expect(project.undoHistory).toHaveLength(20);
+    expect(project.undoHistory[0]!.id).toBe('mutation_brief_1');
+    expect(project.undoHistory.at(-1)!.id).toBe('mutation_brief_20');
+
+    const undone = apply(project, [{ kind: 'undo_last', entryId: 'mutation_brief_20' }], 'mutation_no_inverse');
+    expect(undone.project.brief).toBe('brief 19');
+    expect(undone.project.undoHistory.at(-1)!.id).toBe('mutation_brief_19');
+    expect(undone.project.undoHistory).toHaveLength(19);
+  });
+});
+
+describe('applyStudioMutationBatchV2 park safety and retained lineage', () => {
+  it('parks terminal paid Shot lineage without dropping any asset, job, authorization, or selection', () => {
+    const project = makeProject();
+    addSucceededVideoTake(project, 'shot_1', 'terminal_take', true);
+    expect(validateStudioProjectV2(project)).toBe(true);
+    const retained = structuredClone({
+      shot: project.shots.shot_1,
       assets: project.assets,
       jobs: project.jobs,
-      routing: project.routing,
-      rules: project.rules,
-      ruleListUndo: project.ruleListUndo,
+      spendAuthorizations: project.spendAuthorizations,
     });
 
-    const result = applyStudioMutationBatchV2(
-      project,
-      batch([{ kind: 'edit_beat', beatId: 'section_1', changes: { title: 'Opening' } }])
-    );
-
+    const result = apply(project, [{ kind: 'park_shot', shotId: 'shot_1' }], 'mutation_park_paid');
+    expect(result.project.bin).toContainEqual({
+      kind: 'shot',
+      beatId: 'beat_1',
+      shotId: 'shot_1',
+      reason: 'lifted',
+    });
     expect({
+      shot: result.project.shots.shot_1,
       assets: result.project.assets,
       jobs: result.project.jobs,
-      routing: result.project.routing,
-      rules: result.project.rules,
-      ruleListUndo: result.project.ruleListUndo,
-    }).toEqual(preserved);
+      spendAuthorizations: result.project.spendAuthorizations,
+    }).toEqual(retained);
   });
 
-  it('adds a beat and its first shot at the requested active position', () => {
-    const result = applyStudioMutationBatchV2(
-      makeProject(),
-      batch([
-        {
-          kind: 'add_beat',
-          beatId: 'section_new',
-          beat: { title: 'New', action: 'Story', look: 'Look' },
-          firstShotId: 'clip_new',
-          firstShot: emptyShotInput(),
-          beforeBeatId: 'section_2',
-        },
-      ])
-    );
+  it('refuses Match To and in-flight blockers before changing a Shot or containing Beat', () => {
+    const matchProject = makeProject();
+    matchProject.matchToShotId = 'shot_1';
+    expectReason(matchProject, [{ kind: 'park_shot', shotId: 'shot_1' }], 'dependency_blocked', 'mutation_match_block');
 
-    expect(result).toMatchObject({
-      project: { beatOrder: ['section_1', 'section_new', 'section_2'] },
-      createdBeatIds: ['section_new'],
-      createdShotIds: ['clip_new'],
-    });
-    expect(result.project.beats.section_new!.shotOrder).toEqual(['clip_new']);
+    const inFlight = makeProject();
+    const seed = addImageAsset(inFlight, 'shot_1', 'inflight_seed');
+    inFlight.shots.shot_1!.seedStillId = seed.id;
+    const item = makeItem(inFlight.revision - 1, 'shot_1', resolvedPlan({ kind: 'seed_still', assetId: seed.id }));
+    const authorization = makeAuthorization('auth_inflight', inFlight.revision - 1, [item]);
+    const job = makeJob('job_inflight', authorization, item);
+    inFlight.spendAuthorizations.push(authorization);
+    inFlight.jobs[job.id] = job;
+    inFlight.shots.shot_1!.jobIds.push(job.id);
+    expect(validateStudioProjectV2(inFlight)).toBe(true);
+    expectReason(inFlight, [{ kind: 'park_beat', beatId: 'beat_1' }], 'dependency_blocked', 'mutation_beat_inflight');
   });
 
-  it('edits authored beat fields without replacing its shot ownership', () => {
-    const result = applyStudioMutationBatchV2(
-      makeProject(),
-      batch([{ kind: 'edit_beat', beatId: 'section_1', changes: { title: 'Opening' } }])
-    );
-
-    expect(result.project.beats.section_1).toMatchObject({ title: 'Opening', shotOrder: ['clip_1'] });
-  });
-
-  it('reorders the complete active beat permutation', () => {
-    const result = applyStudioMutationBatchV2(
-      makeProject(),
-      batch([{ kind: 'reorder_beats', beatOrder: ['section_2', 'section_1'] }])
-    );
-
-    expect(result.project.beatOrder).toEqual(['section_2', 'section_1']);
-  });
-
-  it('reorders beats without retargeting a deliberate cut take', () => {
-    const project = makeProject();
-    addCanonicalAsset(project, 'clip_1', 'asset_selected');
-    addCanonicalAsset(project, 'clip_1', 'asset_cut');
-    project.shots.clip_1!.selectedTakeId = 'asset_selected';
-    project.cuts.cut_1 = {
-      id: 'cut_1',
-      name: 'Cut',
-      orderMode: 'manual',
-      clipOrder: ['cut_clip_1'],
-      clips: {
-        cut_clip_1: {
-          id: 'cut_clip_1',
-          clipId: 'clip_1',
-          assetId: 'asset_cut',
-          sourceInSeconds: null,
-          sourceOutSeconds: null,
-          crop: null,
-          filters: [],
-        },
-      },
-    };
-
-    const result = applyStudioMutationBatchV2(
-      project,
-      batch([{ kind: 'reorder_beats', beatOrder: ['section_2', 'section_1'] }])
-    );
-
-    expect(result.project.cuts.cut_1!.clips.cut_clip_1!.assetId).toBe('asset_cut');
-  });
-
-  it('parks an active beat by appending its Bin identity', () => {
-    const result = applyStudioMutationBatchV2(makeProject(), batch([{ kind: 'park_beat', beatId: 'section_1' }]));
-
-    expect(result.project).toMatchObject({
-      beatOrder: ['section_2'],
-      bin: [{ kind: 'beat', beatId: 'section_1' }],
-    });
-    expect(result.project.beats.section_1!.shotOrder).toEqual(['clip_1']);
-  });
-
-  it('restores a parked beat before the requested active beat', () => {
-    const project = makeProject();
-    project.beatOrder = ['section_2'];
-    project.bin = [{ kind: 'beat', beatId: 'section_1' }];
-
-    const result = applyStudioMutationBatchV2(
-      project,
-      batch([{ kind: 'restore_beat', beatId: 'section_1', beforeBeatId: 'section_2' }])
-    );
-
-    expect(result.project).toMatchObject({ beatOrder: ['section_1', 'section_2'], bin: [] });
-  });
-
-  it('adds a shot before an existing shot in its owning beat', () => {
-    const result = applyStudioMutationBatchV2(
-      makeProject(),
-      batch([
-        {
-          kind: 'add_shot',
-          beatId: 'section_1',
-          shotId: 'clip_new',
-          shot: emptyShotInput(),
-          beforeShotId: 'clip_1',
-        },
-      ])
-    );
-
-    expect(result.project.beats.section_1!.shotOrder).toEqual(['clip_new', 'clip_1']);
-    expect(result.createdShotIds).toEqual(['clip_new']);
-  });
-
-  it('edits authored shot fields without replacing operational arrays', () => {
-    const project = makeProject();
-    addCanonicalAsset(project, 'clip_1', 'asset_1');
-
-    const result = applyStudioMutationBatchV2(
-      project,
-      batch([{ kind: 'edit_shot', shotId: 'clip_1', changes: { line: 'Wide shot' } }])
-    );
-
-    expect(result.project.shots.clip_1).toMatchObject({ line: 'Wide shot', assetIds: ['asset_1'], jobIds: [] });
-  });
-
-  it('accepts an unchanged reference identity allowed by the schema validator', () => {
-    const project = makeProject();
-    project.assets.video_reference = {
-      ...makeAsset('video_reference', 'clip_1'),
-      mediaKind: 'video',
-      mimeType: 'video/mp4',
-      managedAsset: { collection: 'assets', fileName: 'video_reference.mp4' },
-    };
-    project.shots.clip_1!.assetIds.push('video_reference');
-    project.shots.clip_1!.referenceAssetId = 'video_reference';
-
-    const result = applyStudioMutationBatchV2(
-      project,
-      batch([{ kind: 'edit_shot', shotId: 'clip_1', changes: { narration: 'Narration' } }])
-    );
-
-    expect(result.project.shots.clip_1).toMatchObject({
-      narration: 'Narration',
-      referenceAssetId: 'video_reference',
-    });
-  });
-
-  it('deletes a dependency-free shot and its ownership link', () => {
-    const result = applyStudioMutationBatchV2(makeProject(), batch([{ kind: 'delete_shot', shotId: 'clip_1' }]));
-
-    expect(Object.hasOwn(result.project.shots, 'clip_1')).toBe(false);
-    expect(result.project.beats.section_1!.shotOrder).toEqual([]);
-  });
-
-  it('reorders the complete shot permutation for an active or parked beat', () => {
-    const project = makeProject();
-    project.beats.section_1!.shotOrder.push('clip_3');
-    project.shots.clip_3 = makeShot('clip_3');
-    project.beatOrder = ['section_2'];
-    project.bin = [{ kind: 'beat', beatId: 'section_1' }];
-
-    const result = applyStudioMutationBatchV2(
-      project,
-      batch([{ kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_3', 'clip_1'] }])
-    );
-
-    expect(result.project.beats.section_1!.shotOrder).toEqual(['clip_3', 'clip_1']);
-  });
-
-  it('parks an unselected canonical take as an appended Bin take reference', () => {
-    const project = makeProject();
-    addCanonicalAsset(project, 'clip_1', 'asset_1');
-
-    const result = applyStudioMutationBatchV2(
-      project,
-      batch([{ kind: 'park_take', shotId: 'clip_1', assetId: 'asset_1' }])
-    );
-
-    expect(result.project.bin).toEqual([{ kind: 'take', assetId: 'asset_1' }]);
-  });
-
-  it('selects a binned take and removes its reference atomically', () => {
-    const project = makeProject();
-    addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.bin = [{ kind: 'take', assetId: 'asset_1' }];
-
-    const result = applyStudioMutationBatchV2(
-      project,
-      batch([{ kind: 'restore_take', shotId: 'clip_1', assetId: 'asset_1' }])
-    );
-
-    expect(result.project.shots.clip_1!.selectedTakeId).toBe('asset_1');
-    expect(result.project.bin).toEqual([]);
-  });
-
-  it('creates a dormant storyboard entry when selecting a take for a parked shot', () => {
-    const project = makeProject();
-    addCanonicalAsset(project, 'clip_2', 'asset_2');
-    project.beatOrder = ['section_1'];
-    project.bin = [
-      { kind: 'beat', beatId: 'section_2' },
-      { kind: 'take', assetId: 'asset_2' },
-    ];
-    project.cuts.cut_1 = { id: 'cut_1', name: 'Cut', orderMode: 'storyboard', clipOrder: [], clips: {} };
-
-    const result = applyStudioMutationBatchV2(
-      project,
-      batch([{ kind: 'restore_take', shotId: 'clip_2', assetId: 'asset_2' }])
-    );
-
-    expect(result.project.cuts.cut_1!.clipOrder).toEqual(['clip_clip_2']);
-    expect(result.project.cuts.cut_1!.clips.clip_clip_2).toMatchObject({ clipId: 'clip_2', assetId: 'asset_2' });
-  });
-
-  it('switches a cut to a binned take without implicitly binning the prior selection', () => {
-    const project = makeProject();
-    addCanonicalAsset(project, 'clip_1', 'asset_old');
-    addCanonicalAsset(project, 'clip_1', 'asset_new');
-    project.assets.asset_old!.durationSeconds = 10;
-    project.assets.asset_new!.durationSeconds = 6;
-    project.shots.clip_1!.selectedTakeId = 'asset_old';
-    project.bin = [{ kind: 'take', assetId: 'asset_new' }];
-    project.cuts.cut_1 = {
-      id: 'cut_1',
-      name: 'Cut',
-      orderMode: 'manual',
-      clipOrder: ['cut_clip_1'],
-      clips: {
-        cut_clip_1: {
-          id: 'cut_clip_1',
-          clipId: 'clip_1',
-          assetId: 'asset_old',
-          sourceInSeconds: 4,
-          sourceOutSeconds: 9,
-          crop: null,
-          filters: [],
-        },
-      },
-    };
-
-    const result = applyStudioMutationBatchV2(
-      project,
-      batch([{ kind: 'restore_take', shotId: 'clip_1', assetId: 'asset_new' }])
-    );
-
-    expect(result.project).toMatchObject({
-      bin: [],
-      shots: { clip_1: { selectedTakeId: 'asset_new' } },
-      cuts: { cut_1: { clips: { cut_clip_1: { assetId: 'asset_new', sourceOutSeconds: 6 } } } },
-    });
-    expect(result.project.assets.asset_old).toEqual(project.assets.asset_old);
-  });
-
-  it('removes a take reference without deleting the retained asset', () => {
-    const project = makeProject();
-    addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.bin = [{ kind: 'take', assetId: 'asset_1' }];
-
-    const result = applyStudioMutationBatchV2(project, batch([{ kind: 'remove_bin_item', assetId: 'asset_1' }]));
-
-    expect(result.project.bin).toEqual([]);
-    expect(result.project.assets.asset_1).toEqual(project.assets.asset_1);
-  });
-
-  it('reorders the exact complete Bin identity permutation', () => {
-    const project = makeProject();
-    addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.beatOrder = ['section_1'];
-    project.bin = [
-      { kind: 'beat', beatId: 'section_2' },
-      { kind: 'take', assetId: 'asset_1' },
-    ];
-
-    const result = applyStudioMutationBatchV2(
-      project,
-      batch([
-        {
-          kind: 'reorder_bin',
-          bin: [
-            { kind: 'take', assetId: 'asset_1' },
-            { kind: 'beat', beatId: 'section_2' },
-          ],
-        },
-      ])
-    );
-
-    expect(result.project.bin).toEqual([
-      { kind: 'take', assetId: 'asset_1' },
-      { kind: 'beat', beatId: 'section_2' },
-    ]);
-  });
-
-  it('selects a canonical take and reconciles a storyboard cut', () => {
-    const project = makeProject();
-    addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.cuts.cut_1 = { id: 'cut_1', name: 'Cut', orderMode: 'storyboard', clipOrder: [], clips: {} };
-    project.activeCutId = 'cut_1';
-
-    const result = applyStudioMutationBatchV2(
-      project,
-      batch([{ kind: 'select_take', shotId: 'clip_1', assetId: 'asset_1' }])
-    );
-
-    expect(result.project.shots.clip_1!.selectedTakeId).toBe('asset_1');
-    expect(Object.values(result.project.cuts.cut_1!.clips)[0]).toMatchObject({ clipId: 'clip_1', assetId: 'asset_1' });
-  });
-});
-
-describe('applyStudioMutationBatchV2 ordering and atomicity', () => {
-  it('makes a newly added identity visible to later operations in the same batch', () => {
-    const result = applyStudioMutationBatchV2(
-      makeProject(),
-      batch([
-        {
-          kind: 'add_shot',
-          beatId: 'section_1',
-          shotId: 'clip_new',
-          shot: emptyShotInput(),
-          beforeShotId: null,
-        },
-        { kind: 'edit_shot', shotId: 'clip_new', changes: { narration: 'Visible later' } },
-        { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_new', 'clip_1'] },
-      ])
-    );
-
-    expect(result.project.shots.clip_new!.narration).toBe('Visible later');
-    expect(result.project.beats.section_1!.shotOrder).toEqual(['clip_new', 'clip_1']);
-  });
-
-  it('makes cut reconciliation visible before a later take park', () => {
-    const project = makeProject();
-    addCanonicalAsset(project, 'clip_1', 'asset_old');
-    addCanonicalAsset(project, 'clip_1', 'asset_new');
-    project.shots.clip_1!.selectedTakeId = 'asset_old';
-    project.cuts.cut_1 = {
-      id: 'cut_1',
-      name: 'Cut',
-      orderMode: 'manual',
-      clipOrder: ['cut_clip_1'],
-      clips: {
-        cut_clip_1: {
-          id: 'cut_clip_1',
-          clipId: 'clip_1',
-          assetId: 'asset_old',
-          sourceInSeconds: null,
-          sourceOutSeconds: null,
-          crop: null,
-          filters: [],
-        },
-      },
-    };
-
-    const result = applyStudioMutationBatchV2(
-      project,
-      batch([
-        { kind: 'select_take', shotId: 'clip_1', assetId: 'asset_new' },
-        { kind: 'park_take', shotId: 'clip_1', assetId: 'asset_old' },
-      ])
-    );
-
-    expect(result.project.bin).toEqual([{ kind: 'take', assetId: 'asset_old' }]);
-    expect(result.project.cuts.cut_1!.clips.cut_clip_1!.assetId).toBe('asset_new');
-  });
-
-  it('returns created identities in creation operation order', () => {
-    const result = applyStudioMutationBatchV2(
-      makeProject(),
-      batch([
-        {
-          kind: 'add_shot',
-          beatId: 'section_1',
-          shotId: 'clip_3',
-          shot: emptyShotInput(),
-          beforeShotId: null,
-        },
-        {
-          kind: 'add_beat',
-          beatId: 'section_3',
-          beat: { title: '', action: '', look: '' },
-          firstShotId: 'clip_4',
-          firstShot: emptyShotInput(),
-          beforeBeatId: null,
-        },
-        {
-          kind: 'add_shot',
-          beatId: 'section_3',
-          shotId: 'clip_5',
-          shot: emptyShotInput(),
-          beforeShotId: null,
-        },
-      ])
-    );
-
-    expect(result.createdBeatIds).toEqual(['section_3']);
-    expect(result.createdShotIds).toEqual(['clip_3', 'clip_4', 'clip_5']);
-  });
-
-  it('does not mutate the input after a successful batch', () => {
-    const project = makeProject();
-    const before = structuredClone(project);
-
-    applyStudioMutationBatchV2(project, batch([{ kind: 'set_brief', brief: 'Changed' }]));
-
-    expect(project).toEqual(before);
-  });
-
-  it('rolls back all earlier operations when a later operation fails', () => {
-    const project = makeProject();
-    const before = JSON.stringify(project);
-
+  it('refuses selected and seed takes without clearing either pin', () => {
+    const selected = makeProject();
+    addSucceededVideoTake(selected, 'shot_1', 'selected_take', true);
     expectReason(
-      () =>
-        applyStudioMutationBatchV2(
-          project,
-          batch([
-            { kind: 'set_brief', brief: 'Must roll back' },
-            { kind: 'delete_shot', shotId: 'missing_clip' },
-          ])
-        ),
-      'invalid_operation'
+      selected,
+      [{ kind: 'park_take', shotId: 'shot_1', assetId: 'selected_take' }],
+      'dependency_blocked',
+      'mutation_selected_take'
     );
-    expect(JSON.stringify(project)).toBe(before);
+    expect(selected.shots.shot_1!.selectedTakeId).toBe('selected_take');
+
+    const seeded = makeProject();
+    addImageAsset(seeded, 'shot_1', 'seed_take');
+    seeded.shots.shot_1!.seedStillId = 'seed_take';
+    expectReason(
+      seeded,
+      [{ kind: 'park_take', shotId: 'shot_1', assetId: 'seed_take' }],
+      'dependency_blocked',
+      'mutation_seed_take'
+    );
+    expect(seeded.shots.shot_1!.seedStillId).toBe('seed_take');
   });
 
-  it('allows delete-before-add to free beat capacity', () => {
+  it('refuses the last selectable primary while an authorized dependent waits for that item', () => {
     const project = makeProject();
-    for (let index = 3; index <= 9; index += 1) {
-      const shotId = `clip_${index}`;
-      project.shots[shotId] = makeShot(shotId);
-      project.beats.section_1!.shotOrder.push(shotId);
-    }
-
-    const result = applyStudioMutationBatchV2(
-      project,
-      batch([
-        { kind: 'delete_shot', shotId: 'clip_1' },
-        {
-          kind: 'add_shot',
-          beatId: 'section_1',
-          shotId: 'clip_10',
-          shot: emptyShotInput(),
-          beforeShotId: null,
-        },
-      ])
-    );
-
-    expect(result.project.beats.section_1!.shotOrder).toHaveLength(8);
-  });
-
-  it('rejects add-before-delete at beat capacity', () => {
-    const project = makeProject();
-    for (let index = 3; index <= 9; index += 1) {
-      const shotId = `clip_${index}`;
-      project.shots[shotId] = makeShot(shotId);
-      project.beats.section_1!.shotOrder.push(shotId);
-    }
-
-    expectReason(
-      () =>
-        applyStudioMutationBatchV2(
-          project,
-          batch([
-            {
-              kind: 'add_shot',
-              beatId: 'section_1',
-              shotId: 'clip_10',
-              shot: emptyShotInput(),
-              beforeShotId: null,
-            },
-            { kind: 'delete_shot', shotId: 'clip_1' },
-          ])
-        ),
-      'beat_shot_capacity_reached'
-    );
-  });
-});
-
-describe('applyStudioMutationBatchV2 boundaries', () => {
-  it('accepts one mutation operation', () => {
-    const result = applyStudioMutationBatchV2(makeProject(), batch([{ kind: 'set_brief', brief: 'one' }]));
-
-    expect(result.project.brief).toBe('one');
-  });
-
-  it('accepts exactly 32 mutation operations', () => {
-    const operations = Array.from(
-      { length: 32 },
-      (_, index): StudioMutationOperationV2 => ({ kind: 'set_brief', brief: `brief ${index}` })
-    );
-
-    const result = applyStudioMutationBatchV2(makeProject(), batch(operations));
-
-    expect(result.project.brief).toBe('brief 31');
-  });
-
-  it('rejects an empty mutation batch', () => {
-    expectReason(() => applyStudioMutationBatchV2(makeProject(), batch([])), 'invalid_operation');
-  });
-
-  it('rejects 33 mutation operations', () => {
-    const operations = Array.from(
-      { length: 33 },
-      (_, index): StudioMutationOperationV2 => ({ kind: 'set_brief', brief: `brief ${index}` })
-    );
-
-    expectReason(() => applyStudioMutationBatchV2(makeProject(), batch(operations)), 'invalid_operation');
-  });
-
-  it('rejects an envelope for another revision', () => {
-    expectReason(
-      () =>
-        applyStudioMutationBatchV2(makeProject(), batch([{ kind: 'set_brief', brief: 'x' }], { expectedRevision: 6 })),
-      'invalid_operation'
-    );
-  });
-
-  it('rejects an envelope for another project', () => {
-    expectReason(
-      () =>
-        applyStudioMutationBatchV2(
-          makeProject(),
-          batch([{ kind: 'set_brief', brief: 'x' }], { projectId: 'project_2' })
-        ),
-      'invalid_operation'
-    );
-  });
-
-  it('rejects an unknown envelope key', () => {
-    const input = { ...batch([{ kind: 'set_brief', brief: 'x' }]), extra: true } as unknown as StudioMutationBatchV2;
-
-    expectReason(() => applyStudioMutationBatchV2(makeProject(), input), 'invalid_operation');
-  });
-
-  it('rejects another mutation schema version', () => {
-    const input = {
-      ...batch([{ kind: 'set_brief', brief: 'x' }]),
-      schemaVersion: 1,
-    } as unknown as StudioMutationBatchV2;
-
-    expectReason(() => applyStudioMutationBatchV2(makeProject(), input), 'invalid_operation');
-  });
-
-  it('reports beat capacity before identity collision', () => {
-    const project = makeProject();
-    for (let index = 3; index <= 24; index += 1) {
-      const beatId = `section_${index}`;
-      const shotId = `section_clip_${index}`;
-      project.beats[beatId] = makeBeat(beatId, [shotId]);
-      project.shots[shotId] = makeShot(shotId);
-      project.beatOrder.push(beatId);
-    }
-
-    expectReason(
-      () =>
-        applyStudioMutationBatchV2(
-          project,
-          batch([
-            {
-              kind: 'add_beat',
-              beatId: 'section_1',
-              beat: { title: '', action: '', look: '' },
-              firstShotId: 'new_clip',
-              firstShot: emptyShotInput(),
-              beforeBeatId: null,
-            },
-          ])
-        ),
-      'beat_capacity_reached'
-    );
-  });
-
-  it('reports invalid duration after available capacity and collision checks', () => {
-    expectReason(
-      () =>
-        applyStudioMutationBatchV2(
-          makeProject(),
-          batch([
-            {
-              kind: 'add_shot',
-              beatId: 'section_1',
-              shotId: 'clip_new',
-              shot: { ...emptyShotInput(), mediaKind: 'video', durationSeconds: 3 },
-              beforeShotId: null,
-            },
-          ])
-        ),
-      'invalid_shot_duration'
-    );
-  });
-
-  it('reports invalid duration for a shot edit', () => {
-    expectReason(
-      () =>
-        applyStudioMutationBatchV2(
-          makeProject(),
-          batch([{ kind: 'edit_shot', shotId: 'clip_1', changes: { mediaKind: 'video', durationSeconds: 3 } }])
-        ),
-      'invalid_shot_duration'
-    );
-  });
-
-  it('reports project shot capacity when the target beat still has room', () => {
-    const project = makeProject();
-    project.beatOrder = [];
-    project.beats = {};
-    project.shots = {};
-    for (let beatIndex = 1; beatIndex <= 13; beatIndex += 1) {
-      const beatId = `section_${beatIndex}`;
-      const count = beatIndex === 1 ? 1 : beatIndex === 13 ? 7 : 8;
-      const shotOrder = Array.from({ length: count }, (_, shotIndex) => `clip_${beatIndex}_${shotIndex}`);
-      project.beatOrder.push(beatId);
-      project.beats[beatId] = makeBeat(beatId, shotOrder);
-      for (const shotId of shotOrder) project.shots[shotId] = makeShot(shotId);
-    }
-
+    const take = addWaitingDependentOnOnlyTake(project);
     expect(validateStudioProjectV2(project)).toBe(true);
-    expectReason(
-      () =>
-        applyStudioMutationBatchV2(
-          project,
-          batch([
-            {
-              kind: 'add_shot',
-              beatId: 'section_1',
-              shotId: 'clip_new',
-              shot: emptyShotInput(),
-              beforeShotId: null,
-            },
-          ])
-        ),
-      'project_shot_capacity_reached'
-    );
-  });
-
-  it('reports beat capacity before simultaneous project, collision, and duration failures', () => {
-    const project = makeProject();
-    project.beatOrder = [];
-    project.beats = {};
-    project.shots = {};
-    for (let beatIndex = 1; beatIndex <= 12; beatIndex += 1) {
-      const beatId = `section_${beatIndex}`;
-      const shotOrder = Array.from({ length: 8 }, (_, shotIndex) => `clip_${beatIndex}_${shotIndex}`);
-      project.beatOrder.push(beatId);
-      project.beats[beatId] = makeBeat(beatId, shotOrder);
-      for (const shotId of shotOrder) project.shots[shotId] = makeShot(shotId);
-    }
 
     expectReason(
-      () =>
-        applyStudioMutationBatchV2(
-          project,
-          batch([
-            {
-              kind: 'add_shot',
-              beatId: 'section_1',
-              shotId: 'clip_1_0',
-              shot: { ...emptyShotInput(), mediaKind: 'video', durationSeconds: 3 },
-              beforeShotId: null,
-            },
-          ])
-        ),
-      'beat_shot_capacity_reached'
-    );
-  });
-
-  it('reports identity collision before an invalid duration when capacity remains', () => {
-    expectReason(
-      () =>
-        applyStudioMutationBatchV2(
-          makeProject(),
-          batch([
-            {
-              kind: 'add_shot',
-              beatId: 'section_1',
-              shotId: 'clip_1',
-              shot: { ...emptyShotInput(), mediaKind: 'video', durationSeconds: 3 },
-              beforeShotId: null,
-            },
-          ])
-        ),
-      'identity_collision'
-    );
-  });
-
-  it('rejects a reused identity even after deletion earlier in the batch', () => {
-    expectReason(
-      () =>
-        applyStudioMutationBatchV2(
-          makeProject(),
-          batch([
-            { kind: 'delete_shot', shotId: 'clip_1' },
-            {
-              kind: 'add_shot',
-              beatId: 'section_1',
-              shotId: 'clip_1',
-              shot: emptyShotInput(),
-              beforeShotId: null,
-            },
-          ])
-        ),
-      'identity_collision'
+      project,
+      [{ kind: 'park_take', shotId: 'shot_1', assetId: take.id }],
+      'dependency_blocked',
+      'mutation_waiting_last_take'
     );
   });
 });
 
-describe('applyStudioMutationBatchV2 validation and dependencies', () => {
-  it('rejects an unknown operation key', () => {
-    const operation = { kind: 'set_brief', brief: 'x', extra: true } as unknown as StudioMutationOperationV2;
-
-    expectReason(() => applyStudioMutationBatchV2(makeProject(), batch([operation])), 'invalid_operation');
-  });
-
-  it('rejects an unknown nested add payload key', () => {
-    const operation = {
-      kind: 'add_shot',
-      beatId: 'section_1',
-      shotId: 'clip_new',
-      shot: { ...emptyShotInput(), extra: true },
-      beforeShotId: null,
-    } as unknown as StudioMutationOperationV2;
-
-    expectReason(() => applyStudioMutationBatchV2(makeProject(), batch([operation])), 'invalid_operation');
-  });
-
-  it('rejects an unknown edit changes key', () => {
-    const operation = {
-      kind: 'edit_beat',
-      beatId: 'section_1',
-      changes: { title: 'Opening', extra: true },
-    } as unknown as StudioMutationOperationV2;
-
-    expectReason(() => applyStudioMutationBatchV2(makeProject(), batch([operation])), 'invalid_operation');
-  });
-
-  it('rejects a sparse Bin reorder with a bounded error', () => {
-    const project = makeProject();
-    addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.bin = [{ kind: 'take', assetId: 'asset_1' }];
-    const sparseBin = sparseArray<StudioProjectV2['bin'][number]>(1);
-
-    expectReason(
-      () => applyStudioMutationBatchV2(project, batch([{ kind: 'reorder_bin', bin: sparseBin }])),
-      'invalid_operation'
-    );
-  });
-
-  it('does not invoke an own array-method shadow', () => {
-    const beatOrder = ['section_2', 'section_1'];
-    Object.defineProperty(beatOrder, 'every', { value: null });
-
-    const result = applyStudioMutationBatchV2(makeProject(), batch([{ kind: 'reorder_beats', beatOrder: beatOrder }]));
-
-    expect(result.project.beatOrder).toEqual(['section_2', 'section_1']);
-  });
-
-  it('maps a hostile operation proxy to a bounded error', () => {
-    const operation = new Proxy(
-      { kind: 'set_brief', brief: 'x' },
+describe('applyStudioMutationBatchV2 bounds, totality, and rollback', () => {
+  it('validates every alternate exact operation branch without invoking the reducer', () => {
+    const validOperations: unknown[] = [
+      ...(['9:16', '1:1', '4:3', '3:4'] as const).map((aspectRatio) => ({
+        kind: 'edit_project',
+        changes: { aspectRatio },
+      })),
+      { kind: 'edit_project', changes: { resolution: '720p' } },
+      { kind: 'edit_project', changes: { targetDurationSeconds: 5 } },
+      { kind: 'edit_project', changes: { targetDurationSeconds: 1440 } },
+      { kind: 'edit_beat', beatId: 'beat_1', changes: { targetSeconds: 1 } },
+      { kind: 'edit_beat', beatId: 'beat_1', changes: { targetSeconds: 1440 } },
+      { kind: 'set_rules', rules: [{ id: 'rule_null', text: 'A rule', predicate: null }] },
       {
-        ownKeys: () => {
-          throw new Error('hostile ownKeys trap');
-        },
+        kind: 'reorder_bin',
+        bin: [
+          { kind: 'beat', beatId: 'beat_1', reason: 'alternate' },
+          { kind: 'shot', beatId: 'beat_1', shotId: 'shot_1', reason: 'lifted' },
+          { kind: 'take', assetId: 'take_1', reason: 'lifted' },
+        ],
+      },
+      { kind: 'set_routes', imageRouteId: null, videoRouteId: null },
+      { kind: 'set_spend_policy', policy: null },
+      { kind: 'set_match_to', shotId: null },
+      { kind: 'set_bed', assetId: null },
+      { kind: 'trim_shot', shotId: 'shot_1', trimInSeconds: 0, trimOutSeconds: null },
+    ];
+
+    for (const operation of validOperations) expect(validateStudioMutationOperationV2(operation)).toBe(true);
+  });
+
+  it('rejects malformed variants across every operation parser branch', () => {
+    const duplicateRules = [
+      { id: 'rule_1', text: 'One', predicate: null },
+      { id: 'rule_1', text: 'Two', predicate: null },
+    ];
+    const invalidOperations: unknown[] = [
+      null,
+      [],
+      {},
+      { kind: 1 },
+      { kind: 'unknown_operation' },
+      { kind: 'set_brief', brief: 'valid', extra: true },
+      { kind: 'edit_project', changes: null },
+      { kind: 'edit_project', changes: {} },
+      { kind: 'edit_project', changes: { unknown: true } },
+      { kind: 'edit_project', changes: { name: '   ' } },
+      { kind: 'edit_project', changes: { name: 'n'.repeat(257) } },
+      { kind: 'edit_project', changes: { aspectRatio: '2:1' } },
+      { kind: 'edit_project', changes: { resolution: '4k' } },
+      { kind: 'edit_project', changes: { targetDurationSeconds: 4 } },
+      { kind: 'set_brief', brief: 1 },
+      { kind: 'set_brief', brief: 'b'.repeat(16 * 1024 + 1) },
+      { kind: 'set_rules', rules: {} },
+      { kind: 'set_rules', rules: [{ id: 'rule_1', text: 'Rule' }] },
+      { kind: 'set_rules', rules: [{ id: '../rule', text: 'Rule', predicate: null }] },
+      { kind: 'set_rules', rules: [{ id: 'rule_1', text: ' ', predicate: null }] },
+      { kind: 'set_rules', rules: [{ id: 'rule_1', text: 'Rule', predicate: { kind: 'other', terms: ['x'] } }] },
+      {
+        kind: 'set_rules',
+        rules: [{ id: 'rule_1', text: 'Rule', predicate: { kind: 'forbidden_terms', terms: [] } }],
+      },
+      {
+        kind: 'set_rules',
+        rules: [{ id: 'rule_1', text: 'Rule', predicate: { kind: 'forbidden_terms', terms: [1] } }],
+      },
+      {
+        kind: 'set_rules',
+        rules: [{ id: 'rule_1', text: 'Rule', predicate: { kind: 'forbidden_terms', terms: [' '] } }],
+      },
+      {
+        kind: 'set_rules',
+        rules: [{ id: 'rule_1', text: 'Rule', predicate: { kind: 'forbidden_terms', terms: ['x'.repeat(257)] } }],
+      },
+      {
+        kind: 'set_rules',
+        rules: [{ id: 'rule_1', text: 'Rule', predicate: { kind: 'forbidden_terms', terms: ['---'] } }],
+      },
+      {
+        kind: 'set_rules',
+        rules: [{ id: 'rule_1', text: 'Rule', predicate: { kind: 'forbidden_terms', terms: ['same', 'same'] } }],
+      },
+      { kind: 'set_rules', rules: duplicateRules },
+      { kind: 'add_beat', beatId: '../beat', beat: editableBeat(), beforeBeatId: null },
+      { kind: 'add_beat', beatId: 'beat_3', beat: null, beforeBeatId: null },
+      { kind: 'add_beat', beatId: 'beat_3', beat: { ...editableBeat(), extra: true }, beforeBeatId: null },
+      { kind: 'add_beat', beatId: 'beat_3', beat: editableBeat('t'.repeat(257)), beforeBeatId: null },
+      {
+        kind: 'add_beat',
+        beatId: 'beat_3',
+        beat: { ...editableBeat(), action: 'a'.repeat(4 * 1024 + 1) },
+        beforeBeatId: null,
+      },
+      {
+        kind: 'add_beat',
+        beatId: 'beat_3',
+        beat: { ...editableBeat(), look: 'l'.repeat(8 * 1024 + 1) },
+        beforeBeatId: null,
+      },
+      { kind: 'add_beat', beatId: 'beat_3', beat: { ...editableBeat(), targetSeconds: 0 }, beforeBeatId: null },
+      { kind: 'add_beat', beatId: 'beat_3', beat: editableBeat(), beforeBeatId: '../beat' },
+      { kind: 'edit_beat', beatId: 'beat_1', changes: null },
+      { kind: 'edit_beat', beatId: 'beat_1', changes: {} },
+      { kind: 'edit_beat', beatId: 'beat_1', changes: { unknown: true } },
+      { kind: 'edit_beat', beatId: 'beat_1', changes: { title: 't'.repeat(257) } },
+      { kind: 'edit_beat', beatId: 'beat_1', changes: { action: 'a'.repeat(4 * 1024 + 1) } },
+      { kind: 'edit_beat', beatId: 'beat_1', changes: { look: 'l'.repeat(8 * 1024 + 1) } },
+      { kind: 'edit_beat', beatId: 'beat_1', changes: { targetSeconds: 0 } },
+      { kind: 'reorder_beats', beatOrder: {} },
+      { kind: 'reorder_beats', beatOrder: ['beat_1', 'beat_1'] },
+      { kind: 'reorder_beats', beatOrder: ['../beat'] },
+      { kind: 'park_beat', beatId: '../beat' },
+      { kind: 'restore_beat', beatId: 'beat_1', beforeBeatId: '../beat' },
+      { kind: 'add_binned_beat', beatId: '../beat', beat: editableBeat() },
+      { kind: 'add_shot', beatId: '../beat', shotId: 'shot_3', shot: editableShot(), beforeShotId: null },
+      { kind: 'add_shot', beatId: 'beat_1', shotId: '../shot', shot: editableShot(), beforeShotId: null },
+      { kind: 'add_shot', beatId: 'beat_1', shotId: 'shot_3', shot: null, beforeShotId: null },
+      {
+        kind: 'add_shot',
+        beatId: 'beat_1',
+        shotId: 'shot_3',
+        shot: { ...editableShot(), extra: true },
+        beforeShotId: null,
+      },
+      {
+        kind: 'add_shot',
+        beatId: 'beat_1',
+        shotId: 'shot_3',
+        shot: editableShot({ line: 'l'.repeat(8 * 1024 + 1) }),
+        beforeShotId: null,
+      },
+      {
+        kind: 'add_shot',
+        beatId: 'beat_1',
+        shotId: 'shot_3',
+        shot: editableShot({ narration: 'n'.repeat(4 * 1024 + 1) }),
+        beforeShotId: null,
+      },
+      {
+        kind: 'add_shot',
+        beatId: 'beat_1',
+        shotId: 'shot_3',
+        shot: editableShot({ onScreenText: 'o'.repeat(1025) }),
+        beforeShotId: null,
+      },
+      {
+        kind: 'add_shot',
+        beatId: 'beat_1',
+        shotId: 'shot_3',
+        shot: editableShot({ durationSeconds: 4.5 }),
+        beforeShotId: null,
+      },
+      { kind: 'add_shot', beatId: 'beat_1', shotId: 'shot_3', shot: editableShot(), beforeShotId: '../shot' },
+      { kind: 'edit_shot', shotId: 'shot_1', changes: null },
+      { kind: 'edit_shot', shotId: 'shot_1', changes: {} },
+      { kind: 'edit_shot', shotId: 'shot_1', changes: { unknown: true } },
+      { kind: 'edit_shot', shotId: 'shot_1', changes: { line: 'l'.repeat(8 * 1024 + 1) } },
+      { kind: 'edit_shot', shotId: 'shot_1', changes: { narration: 'n'.repeat(4 * 1024 + 1) } },
+      { kind: 'edit_shot', shotId: 'shot_1', changes: { onScreenText: 'o'.repeat(1025) } },
+      { kind: 'edit_shot', shotId: 'shot_1', changes: { durationSeconds: 4.5 } },
+      { kind: 'delete_shot', shotId: '../shot' },
+      { kind: 'park_shot', shotId: '../shot' },
+      { kind: 'restore_shot', shotId: 'shot_1', beforeShotId: '../shot' },
+      { kind: 'reorder_shots', beatId: 'beat_1', shotOrder: ['shot_1', 'shot_1'] },
+      { kind: 'apply_coverage', beatId: 'beat_1', shots: {}, fixedShots: [] },
+      { kind: 'apply_coverage', beatId: 'beat_1', shots: [{}], fixedShots: [] },
+      { kind: 'apply_coverage', beatId: 'beat_1', shots: [], fixedShots: [{}] },
+      { kind: 'set_hard_cut', shotId: 'shot_1', hardCut: 'yes' },
+      { kind: 'set_seed_still', shotId: 'shot_1', assetId: '../asset' },
+      { kind: 'trim_shot', shotId: 'shot_1', trimInSeconds: -1, trimOutSeconds: null },
+      { kind: 'trim_shot', shotId: 'shot_1', trimInSeconds: -0, trimOutSeconds: null },
+      { kind: 'trim_shot', shotId: 'shot_1', trimInSeconds: Number.POSITIVE_INFINITY, trimOutSeconds: null },
+      { kind: 'redetach_line', shotId: 'shot_1', line: 1 },
+      { kind: 'rederive_line', shotId: 'shot_1', line: 'l'.repeat(8 * 1024 + 1) },
+      { kind: 'restore_line', shotId: 'shot_1', historyEntryId: '../history' },
+      { kind: 'park_take', shotId: 'shot_1', assetId: '../asset' },
+      { kind: 'add_alternate_take', shotId: 'shot_1', assetId: '../asset' },
+      { kind: 'restore_take', shotId: 'shot_1', assetId: '../asset' },
+      { kind: 'select_take', shotId: 'shot_1', assetId: '../asset' },
+      { kind: 'reorder_bin', bin: {} },
+      { kind: 'reorder_bin', bin: [{ kind: 'unknown' }] },
+      { kind: 'reorder_bin', bin: [{ kind: 'beat', beatId: 'beat_1', reason: 'bad' }] },
+      { kind: 'reorder_bin', bin: [{ kind: 'shot', beatId: 'beat_1', shotId: 'shot_1', reason: 'bad' }] },
+      { kind: 'reorder_bin', bin: [{ kind: 'take', assetId: 'take_1', reason: 'bad' }] },
+      { kind: 'set_routes', imageRouteId: '../route', videoRouteId: null },
+      { kind: 'set_spend_policy', policy: {} },
+      { kind: 'set_spend_policy', policy: { currency: 'US', maxPerBatchMinorUnits: 1 } },
+      { kind: 'set_spend_policy', policy: { currency: 'USD', maxPerBatchMinorUnits: -1 } },
+      { kind: 'set_match_to', shotId: '../shot' },
+      { kind: 'set_bed', assetId: '../asset' },
+      { kind: 'undo_last', entryId: '../entry' },
+    ];
+
+    const cyclic = { kind: 'set_brief', brief: 'cyclic' } as Record<string, unknown>;
+    cyclic.self = cyclic;
+    invalidOperations.push(cyclic);
+
+    for (const operation of invalidOperations) expect(validateStudioMutationOperationV2(operation)).toBe(false);
+  });
+
+  it('rejects malformed batch and reducer-context envelopes before mutating project bytes', () => {
+    const project = makeProject();
+    const validBatch = mutationBatch(project, [{ kind: 'set_brief', brief: 'changed' }]);
+    const validContext = { mutationId: 'mutation_envelope', capturedAt: laterTimestamp };
+    const cases: Array<{ batch: unknown; context: unknown; reason: StudioMutationReasonV2 }> = [
+      { batch: null, context: validContext, reason: 'invalid_operation' },
+      { batch: { ...validBatch, extra: true }, context: validContext, reason: 'invalid_operation' },
+      { batch: { ...validBatch, schemaVersion: 1 }, context: validContext, reason: 'invalid_operation' },
+      { batch: { ...validBatch, projectId: 'other_project' }, context: validContext, reason: 'invalid_operation' },
+      {
+        batch: { ...validBatch, expectedRevision: project.revision + 1 },
+        context: validContext,
+        reason: 'invalid_operation',
+      },
+      { batch: { ...validBatch, expectedRevision: 7.5 }, context: validContext, reason: 'invalid_operation' },
+      { batch: { ...validBatch, operations: {} }, context: validContext, reason: 'invalid_operation' },
+      { batch: { ...validBatch, operations: [] }, context: validContext, reason: 'invalid_operation' },
+      { batch: validBatch, context: null, reason: 'invalid_operation' },
+      { batch: validBatch, context: { ...validContext, extra: true }, reason: 'invalid_operation' },
+      { batch: validBatch, context: { ...validContext, mutationId: '../mutation' }, reason: 'invalid_operation' },
+      { batch: validBatch, context: { ...validContext, capturedAt: 1 }, reason: 'invalid_operation' },
+      { batch: validBatch, context: { ...validContext, capturedAt: 'invalid' }, reason: 'invalid_operation' },
+      {
+        batch: validBatch,
+        context: { ...validContext, capturedAt: '2026-08-17T00:00:00.000+00:00' },
+        reason: 'invalid_operation',
+      },
+    ];
+
+    for (const entry of cases) {
+      const before = structuredClone(project);
+      try {
+        applyStudioMutationBatchV2(project, entry.batch as StudioMutationBatchV2, entry.context as never);
+        throw new Error('Expected malformed envelope to fail');
+      } catch (error) {
+        expect(error).toBeInstanceOf(StudioMutationErrorV2);
+        expect((error as StudioMutationErrorV2).reasonCode).toBe(entry.reason);
       }
-    ) as StudioMutationOperationV2;
+      expect(project).toEqual(before);
+    }
 
-    expectReason(() => applyStudioMutationBatchV2(makeProject(), batch([operation])), 'invalid_operation');
-  });
-
-  it('maps a throwing operation-array accessor to a bounded error', () => {
-    const input = batch([{ kind: 'set_brief', brief: 'x' }]);
-    Object.defineProperty(input.operations, 0, {
-      configurable: true,
-      enumerable: true,
-      get: () => {
-        throw new Error('hostile operation getter');
-      },
-    });
-
-    expectReason(() => applyStudioMutationBatchV2(makeProject(), input), 'invalid_operation');
-  });
-
-  it('rejects an accessor operation without invoking it or contaminating project state', () => {
-    const project = makeProject();
-    let getterCalls = 0;
-    const operation = { kind: 'set_brief' } as unknown as StudioMutationOperationV2;
-    Object.defineProperty(operation, 'brief', {
-      configurable: true,
-      enumerable: true,
-      get: () => {
-        getterCalls += 1;
-        project.name = 'Getter changed name';
-        return 'x';
-      },
-    });
-
-    expectReason(() => applyStudioMutationBatchV2(project, batch([operation])), 'invalid_operation');
-    expect(getterCalls).toBe(0);
-    expect(project.name).toBe('Project One');
-  });
-
-  it('maps a malformed sparse project to validation_failed', () => {
-    const project = makeProject();
-    project.shots.clip_1!.jobIds = sparseArray<string>(1);
-
-    expectReason(
-      () => applyStudioMutationBatchV2(project, batch([{ kind: 'set_brief', brief: 'x' }])),
-      'validation_failed'
-    );
-  });
-
-  it('rejects an empty edit changes object', () => {
-    const operation = { kind: 'edit_shot', shotId: 'clip_1', changes: {} } as StudioMutationOperationV2;
-
-    expectReason(() => applyStudioMutationBatchV2(makeProject(), batch([operation])), 'invalid_operation');
-  });
-
-  it('rejects reorder inputs that are not exact permutations', () => {
-    expectReason(
-      () =>
-        applyStudioMutationBatchV2(
-          makeProject(),
-          batch([{ kind: 'reorder_beats', beatOrder: ['section_1', 'section_1'] }])
-        ),
-      'invalid_operation'
-    );
-  });
-
-  it('rejects a shot reorder that omits an owned shot', () => {
-    const project = makeProject();
-    project.beats.section_1!.shotOrder.push('clip_3');
-    project.shots.clip_3 = makeShot('clip_3');
-
-    expectReason(
-      () =>
-        applyStudioMutationBatchV2(
-          project,
-          batch([{ kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_1'] }])
-        ),
-      'invalid_operation'
-    );
-  });
-
-  it('rejects a Bin reorder that duplicates an identity', () => {
-    const project = makeProject();
-    addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.beatOrder = ['section_1'];
-    project.bin = [
-      { kind: 'beat', beatId: 'section_2' },
-      { kind: 'take', assetId: 'asset_1' },
-    ];
-
-    expectReason(
-      () =>
-        applyStudioMutationBatchV2(
-          project,
-          batch([
-            {
-              kind: 'reorder_bin',
-              bin: [
-                { kind: 'take', assetId: 'asset_1' },
-                { kind: 'take', assetId: 'asset_1' },
-              ],
-            },
-          ])
-        ),
-      'invalid_operation'
-    );
-  });
-
-  it('rejects a non-null reference identity on a newly created shot', () => {
-    expectReason(
-      () =>
-        applyStudioMutationBatchV2(
-          makeProject(),
-          batch([
-            {
-              kind: 'add_shot',
-              beatId: 'section_1',
-              shotId: 'clip_new',
-              shot: { ...emptyShotInput(), referenceAssetId: 'asset_1' },
-              beforeShotId: null,
-            },
-          ])
-        ),
-      'invalid_operation'
-    );
-  });
-
-  it('blocks deletion of a shot with an asset dependency', () => {
-    const project = makeProject();
-    addCanonicalAsset(project, 'clip_1', 'asset_1');
-
-    expectReason(
-      () => applyStudioMutationBatchV2(project, batch([{ kind: 'delete_shot', shotId: 'clip_1' }])),
-      'dependency_blocked'
-    );
-  });
-
-  it('blocks deletion of a shot with a job dependency', () => {
-    const project = makeProject();
-    project.jobs.job_1 = makeJob('job_1', 'clip_1');
-    project.shots.clip_1!.jobIds.push('job_1');
-
-    expectReason(
-      () => applyStudioMutationBatchV2(project, batch([{ kind: 'delete_shot', shotId: 'clip_1' }])),
-      'dependency_blocked'
-    );
-  });
-
-  it('blocks deletion of a shot referenced by a dormant cut entry', () => {
-    const project = makeProject();
-    addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.shots.clip_1!.selectedTakeId = 'asset_1';
-    project.beatOrder = ['section_2'];
-    project.bin = [{ kind: 'beat', beatId: 'section_1' }];
-    project.cuts.cut_1 = {
-      id: 'cut_1',
-      name: 'Cut',
-      orderMode: 'manual',
-      clipOrder: ['cut_clip_1'],
-      clips: {
-        cut_clip_1: {
-          id: 'cut_clip_1',
-          clipId: 'clip_1',
-          assetId: 'asset_1',
-          sourceInSeconds: null,
-          sourceOutSeconds: null,
-          crop: null,
-          filters: [],
-        },
-      },
-    };
-
-    expectReason(
-      () => applyStudioMutationBatchV2(project, batch([{ kind: 'delete_shot', shotId: 'clip_1' }])),
-      'dependency_blocked'
-    );
-  });
-
-  it('refuses to park a selected take', () => {
-    const project = makeProject();
-    addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.shots.clip_1!.selectedTakeId = 'asset_1';
-
-    expectReason(
-      () => applyStudioMutationBatchV2(project, batch([{ kind: 'park_take', shotId: 'clip_1', assetId: 'asset_1' }])),
-      'dependency_blocked'
-    );
-  });
-
-  it('refuses to park a take referenced by a cut even when another take is selected', () => {
-    const project = makeProject();
-    addCanonicalAsset(project, 'clip_1', 'asset_1');
-    addCanonicalAsset(project, 'clip_1', 'asset_2');
-    project.shots.clip_1!.selectedTakeId = 'asset_2';
-    project.cuts.cut_1 = {
-      id: 'cut_1',
-      name: 'Cut',
-      orderMode: 'manual',
-      clipOrder: ['cut_clip_1'],
-      clips: {
-        cut_clip_1: {
-          id: 'cut_clip_1',
-          clipId: 'clip_1',
-          assetId: 'asset_1',
-          sourceInSeconds: null,
-          sourceOutSeconds: null,
-          crop: null,
-          filters: [],
-        },
-      },
-    };
-
-    expect(validateStudioProjectV2(project)).toBe(true);
-    expectReason(
-      () => applyStudioMutationBatchV2(project, batch([{ kind: 'park_take', shotId: 'clip_1', assetId: 'asset_1' }])),
-      'dependency_blocked'
-    );
-  });
-
-  it('rejects a noncanonical take reference', () => {
-    const project = makeProject();
-    project.assets.import_1 = {
-      ...makeAsset('import_1', 'clip_1'),
-      managedAsset: { collection: 'imports', fileName: 'import_1.png' },
-    };
-    project.shots.clip_1!.assetIds.push('import_1');
-
-    expectReason(
-      () => applyStudioMutationBatchV2(project, batch([{ kind: 'park_take', shotId: 'clip_1', assetId: 'import_1' }])),
-      'invalid_operation'
-    );
-  });
-
-  it('rejects a duplicate take reference identity', () => {
-    const project = makeProject();
-    addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.bin = [{ kind: 'take', assetId: 'asset_1' }];
-
-    expectReason(
-      () => applyStudioMutationBatchV2(project, batch([{ kind: 'park_take', shotId: 'clip_1', assetId: 'asset_1' }])),
-      'invalid_operation'
-    );
-  });
-
-  it('blocks a media-kind edit while the shot has a binned take', () => {
-    const project = makeProject();
-    addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.bin = [{ kind: 'take', assetId: 'asset_1' }];
-
-    expectReason(
-      () =>
-        applyStudioMutationBatchV2(
-          project,
-          batch([{ kind: 'edit_shot', shotId: 'clip_1', changes: { mediaKind: 'video', durationSeconds: 5 } }])
-        ),
-      'dependency_blocked'
-    );
-  });
-
-  it('blocks a media-kind edit while the shot has a selected take', () => {
-    const project = makeProject();
-    addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.shots.clip_1!.selectedTakeId = 'asset_1';
-
-    expectReason(
-      () =>
-        applyStudioMutationBatchV2(
-          project,
-          batch([{ kind: 'edit_shot', shotId: 'clip_1', changes: { mediaKind: 'video', durationSeconds: 5 } }])
-        ),
-      'dependency_blocked'
-    );
-  });
-
-  it('blocks a media-kind edit while a cut clip depends on the shot', () => {
-    const project = makeProject();
-    addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.cuts.cut_1 = {
-      id: 'cut_1',
-      name: 'Cut',
-      orderMode: 'manual',
-      clipOrder: ['cut_clip_1'],
-      clips: {
-        cut_clip_1: {
-          id: 'cut_clip_1',
-          clipId: 'clip_1',
-          assetId: 'asset_1',
-          sourceInSeconds: null,
-          sourceOutSeconds: null,
-          crop: null,
-          filters: [],
-        },
-      },
-    };
-
-    expectReason(
-      () =>
-        applyStudioMutationBatchV2(
-          project,
-          batch([{ kind: 'edit_shot', shotId: 'clip_1', changes: { mediaKind: 'video', durationSeconds: 5 } }])
-        ),
-      'dependency_blocked'
-    );
-  });
-
-  it('blocks a media-kind edit while the shot has a nonterminal job', () => {
-    const project = makeProject();
-    project.jobs.job_1 = makeJob('job_1', 'clip_1');
-    project.shots.clip_1!.jobIds.push('job_1');
-
-    expectReason(
-      () =>
-        applyStudioMutationBatchV2(
-          project,
-          batch([{ kind: 'edit_shot', shotId: 'clip_1', changes: { mediaKind: 'video', durationSeconds: 5 } }])
-        ),
-      'dependency_blocked'
-    );
-  });
-
-  it('allows removing a Bin item before changing media kind in one batch', () => {
-    const project = makeProject();
-    addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.bin = [{ kind: 'take', assetId: 'asset_1' }];
-
-    const result = applyStudioMutationBatchV2(
-      project,
-      batch([
-        { kind: 'remove_bin_item', assetId: 'asset_1' },
-        { kind: 'edit_shot', shotId: 'clip_1', changes: { mediaKind: 'video', durationSeconds: 5 } },
-      ])
+    const invalidProject = makeProject();
+    invalidProject.name = '';
+    expect(() => apply(invalidProject, [{ kind: 'set_brief', brief: 'never' }])).toThrow(
+      expect.objectContaining({ reasonCode: 'validation_failed' })
     );
 
-    expect(result.project.shots.clip_1).toMatchObject({ mediaKind: 'video', durationSeconds: 5 });
-    expect(result.project.bin).toEqual([]);
-  });
-
-  it('treats equal raw beat and asset IDs as distinct Bin identities', () => {
-    const project = makeProject();
-    project.beats.same = makeBeat('same', ['clip_same']);
-    project.shots.clip_same = makeShot('clip_same');
-    addCanonicalAsset(project, 'clip_1', 'same');
-    project.bin = [
-      { kind: 'beat', beatId: 'same' },
-      { kind: 'take', assetId: 'same' },
-    ];
-
-    const result = applyStudioMutationBatchV2(
-      project,
-      batch([
-        {
-          kind: 'reorder_bin',
-          bin: [
-            { kind: 'take', assetId: 'same' },
-            { kind: 'beat', beatId: 'same' },
-          ],
-        },
-      ])
-    );
-
-    expect(result.project.bin).toEqual([
-      { kind: 'take', assetId: 'same' },
-      { kind: 'beat', beatId: 'same' },
+    const uncloneable = mutationBatch(project, [
+      { kind: 'set_brief', brief: (() => 'not cloneable') as unknown as string },
     ]);
-  });
-
-  it('requires the dedicated atomic operation to select a binned take', () => {
-    const project = makeProject();
-    addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.bin = [{ kind: 'take', assetId: 'asset_1' }];
-
-    expectReason(
-      () => applyStudioMutationBatchV2(project, batch([{ kind: 'select_take', shotId: 'clip_1', assetId: 'asset_1' }])),
-      'invalid_operation'
+    expect(() => applyStudioMutationBatchV2(project, uncloneable, validContext)).toThrow(
+      expect.objectContaining({ reasonCode: 'validation_failed' })
     );
   });
 
-  it('rejects parking a take when the take-alias Bin capacity is full', () => {
-    const project = makeProject();
-    for (let index = 1; index <= 96; index += 1) {
-      const assetId = `asset_${index}`;
-      addCanonicalAsset(project, 'clip_1', assetId);
-      project.bin.push({ kind: 'take', assetId });
-    }
-    addCanonicalAsset(project, 'clip_1', 'asset_97');
+  it('rejects semantic no-ops, missing owners and anchors, and reused identities', () => {
+    const cases: Array<{ operation: StudioMutationOperationV2; reason: StudioMutationReasonV2 }> = [
+      { operation: { kind: 'edit_project', changes: { name: 'Project One' } }, reason: 'invalid_operation' },
+      { operation: { kind: 'set_brief', brief: '' }, reason: 'invalid_operation' },
+      { operation: { kind: 'set_rules', rules: [] }, reason: 'invalid_operation' },
+      {
+        operation: {
+          kind: 'add_beat',
+          beatId: 'beat_3',
+          beat: editableBeat(),
+          beforeBeatId: 'missing_beat',
+        },
+        reason: 'invalid_operation',
+      },
+      {
+        operation: { kind: 'add_beat', beatId: 'beat_1', beat: editableBeat(), beforeBeatId: null },
+        reason: 'identity_collision',
+      },
+      {
+        operation: { kind: 'edit_beat', beatId: 'missing_beat', changes: { title: 'Title' } },
+        reason: 'invalid_operation',
+      },
+      { operation: { kind: 'edit_beat', beatId: 'beat_1', changes: { title: '' } }, reason: 'invalid_operation' },
+      { operation: { kind: 'reorder_beats', beatOrder: ['beat_1'] }, reason: 'invalid_operation' },
+      { operation: { kind: 'reorder_beats', beatOrder: ['beat_1', 'beat_2'] }, reason: 'invalid_operation' },
+      { operation: { kind: 'park_beat', beatId: 'missing_beat' }, reason: 'invalid_operation' },
+      { operation: { kind: 'restore_beat', beatId: 'beat_1', beforeBeatId: null }, reason: 'invalid_operation' },
+      {
+        operation: {
+          kind: 'add_shot',
+          beatId: 'missing_beat',
+          shotId: 'shot_3',
+          shot: editableShot(),
+          beforeShotId: null,
+        },
+        reason: 'invalid_operation',
+      },
+      {
+        operation: {
+          kind: 'add_shot',
+          beatId: 'beat_1',
+          shotId: 'shot_3',
+          shot: editableShot(),
+          beforeShotId: 'missing_shot',
+        },
+        reason: 'invalid_operation',
+      },
+      {
+        operation: {
+          kind: 'add_shot',
+          beatId: 'beat_1',
+          shotId: 'shot_1',
+          shot: editableShot(),
+          beforeShotId: null,
+        },
+        reason: 'identity_collision',
+      },
+      {
+        operation: { kind: 'edit_shot', shotId: 'missing_shot', changes: { line: 'Line' } },
+        reason: 'invalid_operation',
+      },
+      { operation: { kind: 'edit_shot', shotId: 'shot_1', changes: { line: '' } }, reason: 'invalid_operation' },
+      { operation: { kind: 'set_hard_cut', shotId: 'shot_1', hardCut: false }, reason: 'invalid_operation' },
+      { operation: { kind: 'set_seed_still', shotId: 'shot_1', assetId: null }, reason: 'invalid_operation' },
+      {
+        operation: { kind: 'trim_shot', shotId: 'shot_1', trimInSeconds: null, trimOutSeconds: null },
+        reason: 'invalid_operation',
+      },
+      { operation: { kind: 'rederive_line', shotId: 'shot_1', line: '' }, reason: 'invalid_operation' },
+      { operation: { kind: 'set_routes', imageRouteId: null, videoRouteId: null }, reason: 'invalid_operation' },
+      { operation: { kind: 'set_spend_policy', policy: null }, reason: 'invalid_operation' },
+      { operation: { kind: 'set_match_to', shotId: null }, reason: 'invalid_operation' },
+      { operation: { kind: 'set_bed', assetId: null }, reason: 'invalid_operation' },
+    ];
 
+    for (const { operation, reason } of cases) expectReason(makeProject(), [operation], reason);
+  });
+
+  it('accepts exactly 32 ordered operations and rejects 33', () => {
+    const maximum = Array.from({ length: STUDIO_MAX_MUTATION_OPERATIONS }, (_, index) => ({
+      kind: 'set_brief' as const,
+      brief: `brief ${index}`,
+    }));
+    expect(apply(makeProject(), maximum, 'mutation_32').project.brief).toBe('brief 31');
+    expectReason(
+      makeProject(),
+      [...maximum, { kind: 'set_brief', brief: 'overflow' }],
+      'invalid_operation',
+      'mutation_33'
+    );
+  });
+
+  it('accepts inclusive 4/15-second Shot bounds and rejects values outside them', () => {
+    const result = apply(makeProject(), [
+      {
+        kind: 'add_shot',
+        beatId: 'beat_1',
+        shotId: 'shot_min',
+        shot: editableShot({ durationSeconds: 4 }),
+        beforeShotId: null,
+      },
+      {
+        kind: 'add_shot',
+        beatId: 'beat_1',
+        shotId: 'shot_max',
+        shot: editableShot({ durationSeconds: 15 }),
+        beforeShotId: null,
+      },
+    ]);
+    expect(result.project.shots.shot_min!.durationSeconds).toBe(4);
+    expect(result.project.shots.shot_max!.durationSeconds).toBe(15);
+    expectReason(
+      makeProject(),
+      [
+        {
+          kind: 'add_shot',
+          beatId: 'beat_1',
+          shotId: 'shot_short',
+          shot: editableShot({ durationSeconds: 3 }),
+          beforeShotId: null,
+        },
+      ],
+      'invalid_shot_duration',
+      'mutation_short'
+    );
+    expectReason(
+      makeProject(),
+      [
+        {
+          kind: 'add_shot',
+          beatId: 'beat_1',
+          shotId: 'shot_long',
+          shot: editableShot({ durationSeconds: 16 }),
+          beforeShotId: null,
+        },
+      ],
+      'invalid_shot_duration',
+      'mutation_long'
+    );
+  });
+
+  it('reports reachable Beat, per-Beat Shot, and project Shot capacity reasons', () => {
+    const fullBeats = makeProject();
+    fullBeats.beatOrder = [];
+    fullBeats.beats = {};
+    fullBeats.shots = {};
+    for (let index = 0; index < STUDIO_MAX_BEATS; index += 1) {
+      const beatId = `beat_${index}`;
+      fullBeats.beatOrder.push(beatId);
+      fullBeats.beats[beatId] = makeBeat(beatId);
+    }
+    expectReason(
+      fullBeats,
+      [{ kind: 'add_beat', beatId: 'beat_overflow', beat: editableBeat(), beforeBeatId: null }],
+      'beat_capacity_reached',
+      'mutation_beat_capacity'
+    );
+
+    const fullBeat = makeProject();
+    fullBeat.beats.beat_1!.shotOrder = [];
+    fullBeat.shots = {};
+    for (let index = 0; index < STUDIO_MAX_SHOTS_PER_BEAT; index += 1) {
+      const shotId = `shot_${index}`;
+      fullBeat.beats.beat_1!.shotOrder.push(shotId);
+      fullBeat.shots[shotId] = makeShot(shotId);
+    }
+    expectReason(
+      fullBeat,
+      [
+        {
+          kind: 'add_shot',
+          beatId: 'beat_1',
+          shotId: 'shot_overflow',
+          shot: editableShot(),
+          beforeShotId: null,
+        },
+      ],
+      'beat_shot_capacity_reached',
+      'mutation_beat_shot_capacity'
+    );
+
+    const fullProject = makeProject();
+    fullProject.beatOrder = [];
+    fullProject.beats = {};
+    fullProject.shots = {};
+    for (let beatIndex = 0; beatIndex < STUDIO_MAX_SHOTS_PER_PROJECT / STUDIO_MAX_SHOTS_PER_BEAT; beatIndex += 1) {
+      const beatId = `beat_${beatIndex}`;
+      const shotOrder: string[] = [];
+      for (let shotIndex = 0; shotIndex < STUDIO_MAX_SHOTS_PER_BEAT; shotIndex += 1) {
+        const shotId = `shot_${beatIndex}_${shotIndex}`;
+        shotOrder.push(shotId);
+        fullProject.shots[shotId] = makeShot(shotId);
+      }
+      fullProject.beatOrder.push(beatId);
+      fullProject.beats[beatId] = makeBeat(beatId, shotOrder);
+    }
+    fullProject.beatOrder.push('beat_empty');
+    fullProject.beats.beat_empty = makeBeat('beat_empty');
+    expectReason(
+      fullProject,
+      [
+        {
+          kind: 'add_shot',
+          beatId: 'beat_empty',
+          shotId: 'shot_overflow',
+          shot: editableShot(),
+          beforeShotId: null,
+        },
+      ],
+      'project_shot_capacity_reached',
+      'mutation_project_shot_capacity'
+    );
+  });
+
+  it('refuses the 97th Take alias at the exact Bin capacity without mutation', () => {
+    const project = makeProject();
+    for (let index = 0; index <= STUDIO_MAX_BIN_TAKE_ITEMS; index += 1) {
+      addImageAsset(project, 'shot_1', `take_${index}`);
+      if (index < STUDIO_MAX_BIN_TAKE_ITEMS) {
+        project.bin.push({ kind: 'take', assetId: `take_${index}`, reason: 'alternate' });
+      }
+    }
     expect(validateStudioProjectV2(project)).toBe(true);
     expectReason(
-      () => applyStudioMutationBatchV2(project, batch([{ kind: 'park_take', shotId: 'clip_1', assetId: 'asset_97' }])),
-      'validation_failed'
+      project,
+      [{ kind: 'park_take', shotId: 'shot_1', assetId: `take_${STUDIO_MAX_BIN_TAKE_ITEMS}` }],
+      'take_bin_capacity_reached',
+      'mutation_take_capacity'
     );
   });
 
-  it.each(['constructor', 'toString', '__proto__'])('round-trips and later mutates own magic identity %s', (id) => {
-    const first = applyStudioMutationBatchV2(
-      makeProject(),
-      batch([
-        {
-          kind: 'add_beat',
-          beatId: id,
-          beat: { title: '', action: '', look: '' },
-          firstShotId: `${id}_clip`,
-          firstShot: emptyShotInput(),
-          beforeBeatId: null,
-        },
-      ])
-    );
-    const restarted = JSON.parse(JSON.stringify(first.project)) as StudioProjectV2;
-
-    const second = applyStudioMutationBatchV2(
-      restarted,
-      batch([{ kind: 'edit_beat', beatId: id, changes: { title: 'After restart' } }])
-    );
-
-    expect(Object.hasOwn(second.project.beats, id)).toBe(true);
-    expect(second.project.beats[id]!.title).toBe('After restart');
-    expect(validateStudioProjectV2(second.project)).toBe(true);
-  });
-
-  it.each(['constructor', 'toString', '__proto__'])(
-    'round-trips and later mutates own magic shot identity %s',
-    (id) => {
-      const first = applyStudioMutationBatchV2(
-        makeProject(),
-        batch([
-          {
-            kind: 'add_shot',
-            beatId: 'section_1',
-            shotId: id,
-            shot: emptyShotInput(),
-            beforeShotId: null,
-          },
-        ])
-      );
-      const restarted = JSON.parse(JSON.stringify(first.project)) as StudioProjectV2;
-
-      const second = applyStudioMutationBatchV2(
-        restarted,
-        batch([
-          { kind: 'edit_shot', shotId: id, changes: { line: 'After restart' } },
-          { kind: 'reorder_shots', beatId: 'section_1', shotOrder: [id, 'clip_1'] },
-        ])
-      );
-
-      expect(Object.hasOwn(second.project.shots, id)).toBe(true);
-      expect(second.project.shots[id]!.line).toBe('After restart');
-      expect(validateStudioProjectV2(second.project)).toBe(true);
-    }
-  );
-
-  it('rolls back the Bin and selection when a later operation fails', () => {
+  it('rolls back an earlier valid operation when a later duration fails', () => {
     const project = makeProject();
-    addCanonicalAsset(project, 'clip_1', 'asset_1');
-    project.bin = [{ kind: 'take', assetId: 'asset_1' }];
-
     expectReason(
-      () =>
-        applyStudioMutationBatchV2(
-          project,
-          batch([
-            { kind: 'restore_take', shotId: 'clip_1', assetId: 'asset_1' },
-            { kind: 'delete_shot', shotId: 'missing_clip' },
-          ])
-        ),
-      'invalid_operation'
+      project,
+      [
+        { kind: 'set_brief', brief: 'Must roll back' },
+        { kind: 'edit_shot', shotId: 'shot_1', changes: { durationSeconds: 3 } },
+      ],
+      'invalid_shot_duration',
+      'mutation_late_failure'
     );
-    expect(project.shots.clip_1!.selectedTakeId).toBeNull();
-    expect(project.bin).toEqual([{ kind: 'take', assetId: 'asset_1' }]);
+    expect(project.brief).toBe('');
+  });
+
+  it('rejects inherited prototypes, accessors, symbols, and sparse operation arrays before cloning', () => {
+    const project = makeProject();
+    const inherited = Object.create({ kind: 'set_brief' }) as StudioMutationOperationV2;
+    Object.assign(inherited, { brief: 'inherited' });
+    expectReason(project, [inherited], 'invalid_operation', 'mutation_inherited');
+
+    const accessor = { kind: 'set_brief' } as Record<string, unknown>;
+    Object.defineProperty(accessor, 'brief', { enumerable: true, get: () => 'accessor' });
+    expectReason(project, [accessor as StudioMutationOperationV2], 'invalid_operation', 'mutation_accessor');
+
+    const symbolOperation = { kind: 'set_brief', brief: 'symbol' } as StudioMutationOperationV2 &
+      Record<symbol, unknown>;
+    symbolOperation[Symbol('hidden')] = true;
+    expectReason(project, [symbolOperation], 'invalid_operation', 'mutation_symbol');
+
+    const sparseOperations: StudioMutationOperationV2[] = [];
+    sparseOperations.length = 1;
+    const before = structuredClone(project);
+    expect(() =>
+      applyStudioMutationBatchV2(
+        project,
+        { schemaVersion: 2, projectId: project.id, expectedRevision: project.revision, operations: sparseOperations },
+        { mutationId: 'mutation_sparse', capturedAt: laterTimestamp }
+      )
+    ).toThrowError(StudioMutationErrorV2);
+    expect(project).toEqual(before);
   });
 });

@@ -321,16 +321,24 @@ describe('Studio Director schema-2 real-boundary lifecycle', () => {
       operations: [
         {
           kind: 'add_beat',
-          beat: { title: 'Opening', action: 'Reveal the product', look: 'Cinematic studio light' },
-          firstShot: {
+          beat: {
+            title: 'Opening',
+            action: 'Reveal the product',
+            look: 'Cinematic studio light',
+            targetSeconds: null,
+          },
+          beforeBeatId: null,
+        },
+        {
+          kind: 'add_shot',
+          beatId: 'section_v2',
+          shot: {
             line: 'Slow product reveal',
             narration: '',
             onScreenText: '',
-            mediaKind: 'image',
             durationSeconds: 5,
-            referenceAssetId: null,
           },
-          beforeBeatId: null,
+          beforeShotId: null,
         },
       ],
     });

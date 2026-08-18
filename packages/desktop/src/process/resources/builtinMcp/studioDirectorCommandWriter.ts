@@ -70,7 +70,6 @@ export type StudioDirectorToolOperationV2 =
   | {
       kind: 'add_beat';
       beat: StudioEditableBeat;
-      firstShot: StudioEditableShot;
       beforeBeatId: string | null;
     }
   | {
@@ -144,7 +143,6 @@ export const studioDirectorToolInputFitsDurableRecordV2 = (
         return {
           ...operation,
           beatId: MAX_SAFE_STUDIO_ID_PREVIEW,
-          firstShotId: MAX_SAFE_STUDIO_ID_PREVIEW,
         };
       }
       if (operation.kind === 'add_shot') return { ...operation, shotId: MAX_SAFE_STUDIO_ID_PREVIEW };
@@ -702,9 +700,8 @@ const prepareCommandV2 = (input: {
   const operations = toolOperations.map((operation) => {
     if (typeof operation === 'object' && operation !== null && operation.kind === 'add_beat') {
       const beatId = input.createId();
-      const firstShotId = input.createId();
-      createdIds.push(beatId, firstShotId);
-      return { ...operation, beatId, firstShotId };
+      createdIds.push(beatId);
+      return { ...operation, beatId };
     }
     if (typeof operation === 'object' && operation !== null && operation.kind === 'add_shot') {
       const shotId = input.createId();

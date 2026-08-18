@@ -25,7 +25,7 @@ import {
   type StudioDirectorCommandSlotV1,
   type StudioDirectorCommandSlotLeaseV2,
   type StudioDirectorCommandSlotV2,
-  type StudioMutationOperationV2,
+  type StudioDirectorOperationV2,
   type StudioProposalDecisionV2,
   type StudioProposalRecordV2,
   type StudioProposalSlotV2,
@@ -115,9 +115,7 @@ const emptyShotV2 = () => ({
   line: '',
   narration: '',
   onScreenText: '',
-  mediaKind: 'image' as const,
   durationSeconds: 5,
-  referenceAssetId: null,
 });
 
 const validCommandV2 = (overrides: Partial<StudioDirectorCommandRecordV2> = {}): StudioDirectorCommandRecordV2 => ({
@@ -550,20 +548,16 @@ describe('Studio Director V1 receipt contracts', () => {
 });
 
 describe('Studio Director V2 command contracts', () => {
-  const operations: StudioMutationOperationV2[] = [
+  const operations: StudioDirectorOperationV2[] = [
     { kind: 'set_brief', brief: '' },
     {
       kind: 'add_beat',
       beatId: 'section_new',
-      beat: { title: 'Opening', action: 'Establish the place', look: 'Morning light' },
-      firstShotId: 'clip_new',
-      firstShot: emptyShotV2(),
+      beat: { title: 'Opening', action: 'Establish the place', look: 'Morning light', targetSeconds: null },
       beforeBeatId: null,
     },
     { kind: 'edit_beat', beatId: 'section_1', changes: { action: 'A quieter opening.' } },
     { kind: 'reorder_beats', beatOrder: ['section_2', 'section_1'] },
-    { kind: 'park_beat', beatId: 'section_1' },
-    { kind: 'restore_beat', beatId: 'section_1', beforeBeatId: null },
     {
       kind: 'add_shot',
       beatId: 'section_1',
@@ -574,25 +568,30 @@ describe('Studio Director V2 command contracts', () => {
     { kind: 'edit_shot', shotId: 'clip_1', changes: { narration: 'Hello.' } },
     { kind: 'delete_shot', shotId: 'clip_1' },
     { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_2', 'clip_1'] },
-    { kind: 'park_take', shotId: 'clip_1', assetId: 'asset_1' },
-    { kind: 'restore_take', shotId: 'clip_1', assetId: 'asset_1' },
-    { kind: 'remove_bin_item', assetId: 'asset_1' },
     {
       kind: 'reorder_bin',
       bin: [
-        { kind: 'take', assetId: 'asset_1' },
-        { kind: 'beat', beatId: 'section_1' },
+        { kind: 'take', assetId: 'asset_1', reason: 'alternate' },
+        { kind: 'beat', beatId: 'section_1', reason: 'lifted' },
       ],
     },
-    { kind: 'select_take', shotId: 'clip_1', assetId: 'asset_1' },
   ];
 
-  it('accepts the exact schema-2 envelope and every shared mutation operation', () => {
+  it('accepts the exact schema-2 envelope and every current Director operation', () => {
     expect(operations.map((operation) => parsePendingV2(validCommandV2({ operations: [operation] })).status)).toEqual(
       Array.from({ length: operations.length }, () => 'valid')
     );
     expect(STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2).toBe(STUDIO_PROJECT_SCHEMA_VERSION);
     expect(STUDIO_MAX_MUTATION_OPERATIONS).toBe(32);
+  });
+
+  it.each([
+    { kind: 'edit_project', changes: { name: 'Not direct' } },
+    { kind: 'park_beat', beatId: 'section_1' },
+    { kind: 'select_take', shotId: 'clip_1', assetId: 'asset_1' },
+    { kind: 'undo_last', entryId: 'mutation_1' },
+  ])('rejects the known but unavailable $kind capability', (operation) => {
+    expect(parsePendingV2(validCommandV2({ operations: [operation as never] })).status).toBe('invalid');
   });
 
   it('keeps executable shared-type guards covered by the tracked Gate-1 manifest', () => {
@@ -624,7 +623,7 @@ describe('Studio Director V2 command contracts', () => {
       validCommandV2({
         operations: [
           {
-            ...operations[6],
+            ...operations[4],
             shot: { ...emptyShotV2(), providerJobId: 'credential' },
           } as never,
         ],
@@ -668,7 +667,7 @@ describe('Studio Director V2 command contracts', () => {
       kind: 'set_brief' as const,
       brief: 'x',
     }));
-    const sparse = Array(1) as StudioMutationOperationV2[];
+    const sparse = Array(1) as StudioDirectorOperationV2[];
 
     expect(parsePendingV2(validCommandV2({ operations: [] })).status).toBe('invalid');
     expect(parsePendingV2(validCommandV2({ operations: tooMany })).status).toBe('invalid');
@@ -699,21 +698,22 @@ describe('Studio Director V2 command contracts', () => {
     expect(parsePendingV2(validCommandV2({ operations: operationsWithBaggage })).status).toBe('invalid');
   });
 
-  it('enforces V2 authored bounds, safe identities, and media-specific durations', () => {
-    const video = { ...emptyShotV2(), mediaKind: 'video' as const, durationSeconds: 4 };
-    const validVideo = {
+  it('enforces V2 authored bounds, safe identities, and shot durations', () => {
+    const validShot = {
       kind: 'add_shot' as const,
       beatId: 'section_1',
       shotId: 'clip_video',
-      shot: video,
+      shot: { ...emptyShotV2(), durationSeconds: 4 },
       beforeShotId: null,
     };
 
-    expect(parsePendingV2(validCommandV2({ operations: [validVideo] })).status).toBe('valid');
+    expect(parsePendingV2(validCommandV2({ operations: [validShot] })).status).toBe('valid');
     expect(
-      parsePendingV2(validCommandV2({ operations: [{ ...validVideo, shot: { ...video, durationSeconds: 3 } }] })).status
+      parsePendingV2(
+        validCommandV2({ operations: [{ ...validShot, shot: { ...validShot.shot, durationSeconds: 3 } }] })
+      ).status
     ).toBe('invalid');
-    expect(parsePendingV2(validCommandV2({ operations: [{ ...validVideo, shotId: '../unsafe' }] })).status).toBe(
+    expect(parsePendingV2(validCommandV2({ operations: [{ ...validShot, shotId: '../unsafe' }] })).status).toBe(
       'invalid'
     );
     expect(

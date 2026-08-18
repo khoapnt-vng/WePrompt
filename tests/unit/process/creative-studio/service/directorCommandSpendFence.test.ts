@@ -85,9 +85,7 @@ const directorShotV2 = () => ({
   line: 'A clean product composition',
   narration: '',
   onScreenText: '',
-  mediaKind: 'image' as const,
   durationSeconds: 5,
-  referenceAssetId: null,
 });
 
 const directorCommandV2 = (
@@ -337,7 +335,7 @@ describe('Studio Director dynamic spend fence', () => {
     await processor.stop();
   });
 
-  it('applies every schema-2 mutation kind while every paid boundary remains poisoned', async () => {
+  it('applies every current schema-2 Director mutation kind while every paid boundary remains poisoned', async () => {
     const rootDir = await mkdtemp(path.join(tmpdir(), 'studio-director-spend-fence-v2-'));
     roots.push(rootDir);
     const store = createCreativeStudioStore({
@@ -399,18 +397,28 @@ describe('Studio Director dynamic spend fence', () => {
       {
         kind: 'add_beat',
         beatId: 'section_1',
-        beat: { title: 'Opening', action: '', look: 'Warm sunrise' },
-        firstShotId: 'clip_1',
-        firstShot: directorShotV2(),
+        beat: { title: 'Opening', action: '', look: 'Warm sunrise', targetSeconds: null },
         beforeBeatId: null,
+      },
+      {
+        kind: 'add_shot',
+        beatId: 'section_1',
+        shotId: 'clip_1',
+        shot: directorShotV2(),
+        beforeShotId: null,
       },
       {
         kind: 'add_beat',
         beatId: 'section_2',
-        beat: { title: 'Close', action: '', look: 'Soft evening light' },
-        firstShotId: 'clip_2',
-        firstShot: directorShotV2(),
+        beat: { title: 'Close', action: '', look: 'Soft evening light', targetSeconds: null },
         beforeBeatId: null,
+      },
+      {
+        kind: 'add_shot',
+        beatId: 'section_2',
+        shotId: 'clip_2',
+        shot: directorShotV2(),
+        beforeShotId: null,
       },
       {
         kind: 'add_shot',
@@ -421,63 +429,12 @@ describe('Studio Director dynamic spend fence', () => {
       },
     ]);
 
-    project = await store.updateProjectV2(
-      project.id,
-      (current) => ({
-        ...current,
-        assets: {
-          take_1: {
-            id: 'take_1',
-            projectId: current.id,
-            shotId: 'clip_1',
-            mediaKind: 'image',
-            mimeType: 'image/png',
-            managedAsset: { collection: 'assets', fileName: 'take_1.png' },
-            byteSize: 1,
-            sha256: 'a'.repeat(64),
-            createdAt: '2026-08-17T00:00:00.000Z',
-          },
-          take_2: {
-            id: 'take_2',
-            projectId: current.id,
-            shotId: 'clip_1',
-            mediaKind: 'image',
-            mimeType: 'image/png',
-            managedAsset: { collection: 'assets', fileName: 'take_2.png' },
-            byteSize: 1,
-            sha256: 'b'.repeat(64),
-            createdAt: '2026-08-17T00:00:00.000Z',
-          },
-        },
-        shots: {
-          ...current.shots,
-          clip_1: { ...current.shots.clip_1!, assetIds: ['take_1', 'take_2'] },
-        },
-      }),
-      project.revision
-    );
-
     await apply('command_all_other_mutations', [
       { kind: 'set_brief', brief: 'Director-authored free edits' },
       { kind: 'edit_beat', beatId: 'section_1', changes: { action: 'A precise opening beat' } },
       { kind: 'edit_shot', shotId: 'clip_1', changes: { line: 'A tighter product composition' } },
       { kind: 'reorder_beats', beatOrder: ['section_2', 'section_1'] },
       { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_3', 'clip_1'] },
-      { kind: 'park_beat', beatId: 'section_2' },
-      { kind: 'park_take', shotId: 'clip_1', assetId: 'take_1' },
-      { kind: 'park_take', shotId: 'clip_1', assetId: 'take_2' },
-      {
-        kind: 'reorder_bin',
-        bin: [
-          { kind: 'take', assetId: 'take_2' },
-          { kind: 'beat', beatId: 'section_2' },
-          { kind: 'take', assetId: 'take_1' },
-        ],
-      },
-      { kind: 'restore_take', shotId: 'clip_1', assetId: 'take_2' },
-      { kind: 'remove_bin_item', assetId: 'take_1' },
-      { kind: 'restore_beat', beatId: 'section_2', beforeBeatId: 'section_1' },
-      { kind: 'select_take', shotId: 'clip_1', assetId: 'take_1' },
       { kind: 'delete_shot', shotId: 'clip_3' },
     ]);
 
@@ -488,7 +445,7 @@ describe('Studio Director dynamic spend fence', () => {
         section_1: { action: 'A precise opening beat', shotOrder: ['clip_1'] },
       },
       shots: {
-        clip_1: { line: 'A tighter product composition', selectedTakeId: 'take_1' },
+        clip_1: { line: 'A tighter product composition', selectedTakeId: null },
       },
       bin: [],
     });

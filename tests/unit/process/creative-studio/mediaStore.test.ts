@@ -14,10 +14,14 @@ import { Readable } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isCanonicalStudioGeneratedTake } from '@/common/types/project/creativeStudioCanonicalTake';
 import type {
+  StudioAssetV2,
   StudioBriefReferenceRole,
-  StudioOutputRole,
+  StudioGenerationRequestPlan,
+  StudioJobV2,
   StudioProject,
   StudioProjectV2,
+  StudioQuotedGeneration,
+  StudioSpendAuthorization,
 } from '@/common/types/project/creativeStudioTypes';
 import { STUDIO_E2E_BOUNDARY_SENTINELS } from '@process/services/creative-studio/adapters/e2eFakeAdapter';
 import {
@@ -25,6 +29,13 @@ import {
   CreativeStudioStoreError,
   type CreativeStudioStore,
 } from '@process/services/creative-studio/store';
+import {
+  calculateStudioQuoteTotals,
+  createStudioFrameExtractionId,
+  createStudioQuotedGenerationId,
+} from '@process/services/creative-studio/service/schema2/generation';
+import { createStudioSpendReceiptV2 } from '@process/services/creative-studio/service/schema2/pricing';
+import { StudioConditioningFrameError } from '@process/services/creative-studio/adapters/conditioningFrame';
 import * as mediaStoreModule from '@process/services/creative-studio/mediaStore';
 import type { CreativeStudioMediaError } from '@process/services/creative-studio/mediaStore';
 import {
@@ -218,9 +229,11 @@ const addBriefReferences = async (
 
 const makeStoreV2 = async (
   options: {
-    mediaKind?: 'image' | 'video';
-    outputRole?: StudioOutputRole;
+    purpose?: StudioJobV2['purpose'];
     addSecondShot?: boolean;
+    includeAuthorizedJob?: boolean;
+    briefReference?: boolean;
+    adapterId?: StudioJobV2['provider']['adapterId'];
   } = {}
 ) => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-media-v2-'));
@@ -237,90 +250,210 @@ const makeStoreV2 = async (
     targetDurationSeconds: 12,
     resolution: '1080p',
   });
-  const operations = [
-    {
-      kind: 'add_beat' as const,
-      beatId: 'section_1',
-      beat: { title: 'Opening', action: '', look: 'A visual language inherited by the clip' },
-      firstShotId: 'clip_1',
-      firstShot: {
-        line: 'A precise opening frame',
-        narration: '',
-        onScreenText: '',
-        mediaKind: options.mediaKind ?? ('image' as const),
-        durationSeconds: options.mediaKind === 'video' ? 5 : 1,
-        referenceAssetId: null,
+  const authored = await store.updateProjectV2(createdProject.id, (current) => ({
+    ...current,
+    beatOrder: options.addSecondShot ? ['beat_1', 'beat_2'] : ['beat_1'],
+    beats: {
+      beat_1: {
+        id: 'beat_1',
+        title: 'Opening',
+        action: '',
+        look: 'A visual language inherited by the shot',
+        actionRevision: 1,
+        targetSeconds: null,
+        shotOrder: ['shot_1'],
+        lineHistory: [],
       },
-      beforeBeatId: null,
-    },
-    ...(options.addSecondShot
-      ? [
-          {
-            kind: 'add_beat' as const,
-            beatId: 'section_2',
-            beat: { title: 'Closing', action: '', look: '' },
-            firstShotId: 'clip_2',
-            firstShot: {
-              line: 'A separate closing frame',
-              narration: '',
-              onScreenText: '',
-              mediaKind: options.mediaKind ?? ('image' as const),
-              durationSeconds: options.mediaKind === 'video' ? 5 : 1,
-              referenceAssetId: null,
-            },
-            beforeBeatId: null,
-          },
-        ]
-      : []),
-  ];
-  const withShots = await store.applyMutationBatchV2({
-    schemaVersion: 2,
-    projectId: createdProject.id,
-    expectedRevision: createdProject.revision,
-    operations,
-  });
-  const project = await store.updateProjectV2(withShots.project.id, (current) => {
-    const next = structuredClone(current);
-    next.jobs.job_1 = {
-      id: 'job_1',
-      projectId: next.id,
-      shotId: 'clip_1',
-      status: 'running',
-      provider: {
-        providerId: 'provider_1',
-        adapterId:
-          options.mediaKind === 'video' && options.outputRole !== 'reference'
-            ? 'weprompt-media-gateway-v1'
-            : 'weprompt-image-v1',
-        model: options.mediaKind === 'video' && options.outputRole !== 'reference' ? 'video-model' : 'image-model',
-      },
-      idempotencyKey: 'key_1',
-      providerJobId: null,
-      cancellationPolicy: 'none',
-      ...(options.outputRole === undefined ? {} : { outputRole: options.outputRole }),
-      ...(options.outputRole === 'reference'
+      ...(options.addSecondShot
         ? {
-            referenceInputSnapshot: {
-              sourceLook: next.shots.clip_1.line,
-              conditioningReferenceAssetIds: [],
-              aspectRatio: next.aspectRatio,
-              resolution: next.resolution,
+            beat_2: {
+              id: 'beat_2',
+              title: 'Closing',
+              action: '',
+              look: '',
+              actionRevision: 1,
+              targetSeconds: null,
+              shotOrder: ['shot_2'],
+              lineHistory: [],
             },
           }
         : {}),
+    },
+    shots: {
+      shot_1: {
+        id: 'shot_1',
+        line: 'A precise opening frame',
+        derivation: 'derived',
+        derivedFromActionRevision: 1,
+        narration: '',
+        onScreenText: '',
+        durationSeconds: 5,
+        trimInSeconds: null,
+        trimOutSeconds: null,
+        chainBreak: 'none',
+        seedStillId: null,
+        selectedTakeId: null,
+        assetIds: [],
+        jobIds: [],
+      },
+      ...(options.addSecondShot
+        ? {
+            shot_2: {
+              id: 'shot_2',
+              line: 'A separate closing frame',
+              derivation: 'derived' as const,
+              derivedFromActionRevision: 1,
+              narration: '',
+              onScreenText: '',
+              durationSeconds: 5,
+              trimInSeconds: null,
+              trimOutSeconds: null,
+              chainBreak: 'none' as const,
+              seedStillId: null,
+              selectedTakeId: null,
+              assetIds: [],
+              jobIds: [],
+            },
+          }
+        : {}),
+    },
+  }));
+  let quoteBase = authored;
+  const purpose = options.purpose ?? 'seed_still';
+  if (purpose === 'video_take' || options.briefReference) {
+    const importsDirectory = path.join(rootDir, authored.id, 'imports');
+    await fs.mkdir(importsDirectory, { recursive: true });
+    if (purpose === 'video_take') await fs.writeFile(path.join(importsDirectory, 'seed_v2.png'), png);
+    if (options.briefReference) await fs.writeFile(path.join(importsDirectory, 'brief_v2.png'), png);
+    quoteBase = await store.updateProjectV2(authored.id, (current) => {
+      if (purpose === 'video_take') {
+        current.assets.seed_v2 = {
+          id: 'seed_v2',
+          projectId: current.id,
+          shotId: 'shot_1',
+          mediaKind: 'image',
+          mimeType: 'image/png',
+          managedAsset: { collection: 'imports', fileName: 'seed_v2.png' },
+          byteSize: png.length,
+          sha256: createHash('sha256').update(png).digest('hex'),
+          createdAt: current.updatedAt,
+        };
+        current.shots.shot_1!.assetIds.push('seed_v2');
+        current.shots.shot_1!.seedStillId = 'seed_v2';
+      }
+      if (options.briefReference) {
+        current.assets.brief_v2 = {
+          id: 'brief_v2',
+          projectId: current.id,
+          shotId: null,
+          mediaKind: 'image',
+          mimeType: 'image/png',
+          managedAsset: { collection: 'imports', fileName: 'brief_v2.png' },
+          byteSize: png.length,
+          sha256: createHash('sha256').update(png).digest('hex'),
+          briefReferenceRole: 'cast',
+          briefReferenceLabel: 'Cast reference',
+          createdAt: current.updatedAt,
+        };
+      }
+      return current;
+    });
+  }
+  if (options.includeAuthorizedJob === false) {
+    return { rootDir, store, project: quoteBase, authorization: null, item: null };
+  }
+  const requestPlan: Extract<StudioGenerationRequestPlan, { kind: 'resolved' }> = {
+    kind: 'resolved',
+    snapshot: {
+      prompt: purpose === 'seed_still' ? 'A frozen seed prompt' : 'A frozen video prompt',
+      aspectRatio: quoteBase.aspectRatio,
+      resolution: quoteBase.resolution,
+      durationSeconds: 5,
+      referenceInput: options.briefReference
+        ? { assetId: 'brief_v2', sha256: createHash('sha256').update(png).digest('hex') }
+        : null,
+      conditioningInput: purpose === 'video_take' ? { kind: 'seed_still', assetId: 'seed_v2' } : null,
+    },
+  };
+  const item: StudioQuotedGeneration = {
+    id: createStudioQuotedGenerationId({
+      projectId: quoteBase.id,
+      projectRevision: quoteBase.revision,
+      shotId: 'shot_1',
+      purpose,
+    }),
+    shotId: 'shot_1',
+    purpose,
+    routeId: purpose === 'seed_still' ? 'route_image' : 'route_video',
+    generationCount: 1,
+    requestPlan,
+    rateUnit: purpose === 'seed_still' ? 'generation' : 'second',
+    rateMinorUnits: 3,
+  };
+  const totals = calculateStudioQuoteTotals([item]);
+  if (totals === null) throw new Error('invalid quote fixture');
+  const provider = {
+    providerId: 'provider_1',
+    adapterId:
+      options.adapterId ??
+      (purpose === 'seed_still' ? ('weprompt-image-v1' as const) : ('weprompt-media-gateway-v1' as const)),
+    model: purpose === 'seed_still' ? 'image-model' : 'video-model',
+  };
+  const authorization: StudioSpendAuthorization = {
+    id: 'authorization_v2',
+    projectId: quoteBase.id,
+    projectRevision: quoteBase.revision,
+    originReferenceHandoffId: null,
+    rateCardDigest: 'b'.repeat(64),
+    currency: 'USD',
+    baseItems: [item],
+    cascadeItems: [],
+    lowerMinorUnits: totals.lowerMinorUnits,
+    upperMinorUnits: totals.upperMinorUnits,
+    expiresAt: '2026-08-17T12:05:00.000Z',
+    confirmedAt: '2026-08-17T12:00:01.000Z',
+    providerBindings: [{ itemId: item.id, provider }],
+    idempotencyKeys: [{ itemId: item.id, generationIndex: 0, key: 'key_1' }],
+  };
+  const receipt = createStudioSpendReceiptV2({
+    authorization,
+    itemId: item.id,
+    jobId: 'job_1',
+    generationIndex: 0,
+  });
+  const project = await store.updateProjectV2(quoteBase.id, (current) => {
+    const job: StudioJobV2 = {
+      id: 'job_1',
+      projectId: current.id,
+      shotId: 'shot_1',
+      status: 'running',
+      provider,
+      idempotencyKey: 'key_1',
+      providerJobId: null,
+      cancellationPolicy: 'none',
       outputAssetIds: [],
       error: null,
       retryOfJobId: null,
       retryReason: null,
       duplicateChargeAcknowledged: false,
       duplicateChargeAcknowledgedAt: null,
-      createdAt: next.createdAt,
-      updatedAt: next.updatedAt,
+      createdAt: current.updatedAt,
+      updatedAt: current.updatedAt,
+      purpose,
+      authorizationId: authorization.id,
+      authorizationItemId: item.id,
+      generationIndex: 0,
+      requestPlan,
+      requestSnapshot: requestPlan.snapshot,
+      spendReceipt: receipt,
+      outputAssetIdsByRole: { primary: null, poster: null },
     };
-    next.shots.clip_1.jobIds.push('job_1');
-    return next;
+    current.spendAuthorizations = [authorization];
+    current.jobs.job_1 = job;
+    current.shots.shot_1!.jobIds.push('job_1');
+    return current;
   });
-  return { rootDir, store, project };
+  return { rootDir, store, project, authorization, item };
 };
 
 const idSequence = (...ids: string[]): (() => string) => {
@@ -2725,16 +2858,119 @@ describe('createStudioMediaStore', () => {
     await expect(fs.access(path.join(parts, 'download.part'))).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(fs.readFile(path.join(parts, 'keep.txt'), 'utf8')).resolves.toBe('keep');
   });
+
+  it('rejects every malformed prototype media metadata scalar before consuming a body', async () => {
+    const { store } = await makeStore();
+    const createId = vi.fn(() => 'must_not_allocate');
+    const media = createStudioMediaStore({ store, createId });
+    const providerCases: Array<(input: Record<string, unknown>) => void> = [
+      (input) => (input.projectId = '../project'),
+      (input) => (input.sceneId = '../scene'),
+      (input) => (input.mediaKind = 'audio'),
+      (input) => (input.declaredMimeType = null),
+      (input) => (input.expectedRevision = 1.5),
+      (input) => (input.expectedRevision = 0),
+      (input) => (input.width = 1.5),
+      (input) => (input.width = 0),
+      (input) => (input.height = 1.5),
+      (input) => (input.height = 0),
+      (input) => (input.durationSeconds = Number.NaN),
+      (input) => (input.durationSeconds = 0),
+      (input) => (input.durationSeconds = Number.MAX_SAFE_INTEGER + 1),
+      (input) => (input.declaredByteSize = 1.5),
+      (input) => (input.declaredByteSize = -1),
+    ];
+    for (const mutate of providerCases) {
+      let consumed = false;
+      const input: Record<string, unknown> = {
+        projectId: 'project_1',
+        sceneId: 'scene_1',
+        expectedRevision: 1,
+        mediaKind: 'image',
+        declaredMimeType: 'image/png',
+        body: (async function* () {
+          consumed = true;
+          yield png;
+        })(),
+      };
+      mutate(input);
+      // eslint-disable-next-line no-await-in-loop -- Every scalar boundary must refuse independently.
+      await expect(media.persistProviderOutput(input as never)).rejects.toMatchObject({ code: 'invalid_media' });
+      expect(consumed).toBe(false);
+    }
+
+    await expect(
+      media.persistProviderOutputForJob({
+        projectId: 'project_1',
+        sceneId: 'scene_1',
+        jobId: '../job',
+        mediaKind: 'image',
+        declaredMimeType: 'image/png',
+        body: Readable.from([png]),
+      })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+
+    const capturedCases: Array<(input: Record<string, unknown>) => void> = [
+      (input) => (input.projectId = '../project'),
+      (input) => (input.sceneId = '../scene'),
+      (input) => (input.videoAssetId = '../video'),
+      (input) => (input.width = 1.5),
+      (input) => (input.width = 0),
+      (input) => (input.height = 1.5),
+      (input) => (input.height = 0),
+      (input) => (input.declaredByteSize = 1.5),
+      (input) => (input.declaredByteSize = -1),
+    ];
+    for (const mutate of capturedCases) {
+      const input: Record<string, unknown> = {
+        projectId: 'project_1',
+        sceneId: 'scene_1',
+        videoAssetId: 'video_1',
+        width: 1,
+        height: 1,
+        body: Readable.from([png]),
+      };
+      mutate(input);
+      // eslint-disable-next-line no-await-in-loop -- Every scalar boundary must refuse independently.
+      await expect(media.persistCapturedPoster(input as never)).rejects.toMatchObject({ code: 'invalid_media' });
+    }
+
+    const outputCases: Array<(input: Record<string, unknown>) => void> = [
+      (input) => (input.projectId = '../project'),
+      (input) => (input.declaredMimeType = 'video/webm'),
+      (input) => (input.width = 1.5),
+      (input) => (input.width = 0),
+      (input) => (input.height = 1.5),
+      (input) => (input.height = 0),
+      (input) => (input.declaredByteSize = 1.5),
+      (input) => (input.declaredByteSize = 0),
+      (input) => (input.durationSeconds = Number.NaN),
+      (input) => (input.durationSeconds = 0),
+    ];
+    for (const mutate of outputCases) {
+      const input: Record<string, unknown> = {
+        projectId: 'project_1',
+        declaredMimeType: 'video/mp4',
+        width: 1,
+        height: 1,
+        body: Readable.from([mp4]),
+      };
+      mutate(input);
+      // eslint-disable-next-line no-await-in-loop -- Every scalar boundary must refuse independently.
+      await expect(media.persistProjectOutput(input as never)).rejects.toMatchObject({ code: 'invalid_media' });
+    }
+    expect(createId).not.toHaveBeenCalled();
+  });
 });
 
-describe('createStudioMediaStore schema 2', () => {
-  it('commits a shot-owned take, selects it, and resolves the verified bytes', async () => {
+describe('createStudioMediaStore schema 2 final lifecycle', () => {
+  it('commits a seed primary by purpose and role without auto-pinning or selecting it', async () => {
     const { store, project } = await makeStoreV2();
-    const media = createStudioMediaStore({ store, createId: () => 'take_1' });
+    const media = createStudioMediaStore({ store, createId: () => 'seed_output_1' });
 
     const asset = await media.persistProviderOutputForJobV2({
       projectId: project.id,
-      shotId: 'clip_1',
+      shotId: 'shot_1',
       jobId: 'job_1',
       mediaKind: 'image',
       declaredMimeType: 'image/png',
@@ -2743,93 +2979,719 @@ describe('createStudioMediaStore schema 2', () => {
     });
 
     expect(asset).toMatchObject({
-      id: 'take_1',
+      id: 'seed_output_1',
       projectId: project.id,
-      shotId: 'clip_1',
+      shotId: 'shot_1',
       mediaKind: 'image',
-      managedAsset: { collection: 'assets', fileName: 'take_1.png' },
-      sourceLook: 'A visual language inherited by the clip\n\nA precise opening frame',
+      managedAsset: { collection: 'assets', fileName: 'seed_output_1.png' },
+      sourceLook: 'A frozen seed prompt',
     });
-    expect(asset).not.toHaveProperty('sceneId');
+    expect(asset).not.toHaveProperty('durationSeconds');
     const loaded = await store.getProjectV2(project.id);
     expect(loaded).toMatchObject({
       status: 'supported',
       project: {
-        revision: project.revision + 1,
-        shots: { clip_1: { selectedTakeId: 'take_1', assetIds: ['take_1'] } },
-        jobs: { job_1: { status: 'succeeded', outputAssetIds: ['take_1'], error: null } },
+        shots: {
+          shot_1: {
+            seedStillId: null,
+            selectedTakeId: null,
+            assetIds: ['seed_output_1'],
+            jobIds: ['job_1'],
+          },
+        },
+        jobs: {
+          job_1: {
+            status: 'succeeded',
+            outputAssetIds: ['seed_output_1'],
+            outputAssetIdsByRole: { primary: 'seed_output_1', poster: null },
+          },
+        },
       },
     });
-    const resolved = await media.resolveAssetV2(project.id, asset.id);
-    expect(resolved?.asset).toEqual(asset);
-    const chunks: Buffer[] = [];
-    for await (const chunk of await resolved!.openVerifiedStream()) chunks.push(Buffer.from(chunk));
-    expect(Buffer.concat(chunks)).toEqual(png);
   });
 
-  it('rejects foreign-shot and wrong-kind outputs before consuming either body', async () => {
-    const { rootDir, store, project } = await makeStoreV2({ addSecondShot: true });
-    const media = createStudioMediaStore({ store, createId: idSequence('foreign_take', 'wrong_kind_take') });
-    let consumed = 0;
-    const body = async function* (bytes: Buffer): AsyncGenerator<Buffer> {
-      consumed += 1;
-      yield bytes;
-    };
+  it('persists the decoded video duration and keeps it immutable after planning-duration edits', async () => {
+    const { store, project } = await makeStoreV2({ purpose: 'video_take' });
+    const probeVideoDurationSecondsV2 = vi.fn(async () => 10);
+    const media = createStudioMediaStore({
+      store,
+      createId: () => 'take_1',
+      probeVideoDurationSecondsV2,
+    });
+
+    const asset = await media.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_1',
+      mediaKind: 'video',
+      declaredMimeType: 'video/mp4',
+      declaredByteSize: mp4.length,
+      durationSeconds: 5,
+      body: Readable.from([mp4]),
+    });
+
+    expect(asset.durationSeconds).toBe(10);
+    expect(probeVideoDurationSecondsV2).toHaveBeenCalledWith({
+      filePath: expect.stringMatching(/[/\\]assets[/\\]take_1\.mp4$/),
+      byteSize: mp4.length,
+      sha256: createHash('sha256').update(mp4).digest('hex'),
+    });
+    const edited = await store.updateProjectV2(project.id, (current) => {
+      current.shots.shot_1!.durationSeconds = 8;
+      return current;
+    });
+    expect(edited.assets.take_1!.durationSeconds).toBe(10);
+    const restarted = await store.getProjectV2(project.id);
+    expect(restarted.status === 'supported' ? restarted.project.assets.take_1!.durationSeconds : null).toBe(10);
+  });
+
+  it('cleans a video whose finalized bytes cannot produce a decoded duration', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ purpose: 'video_take' });
+    const media = createStudioMediaStore({
+      store,
+      createId: () => 'invalid_video',
+      probeVideoDurationSecondsV2: async () => {
+        throw new Error('undecodable');
+      },
+    });
 
     await expect(
       media.persistProviderOutputForJobV2({
         projectId: project.id,
-        shotId: 'clip_2',
-        jobId: 'job_1',
-        mediaKind: 'image',
-        declaredMimeType: 'image/png',
-        body: body(png),
-      })
-    ).rejects.toMatchObject({ code: 'job_inactive' });
-    await expect(
-      media.persistProviderOutputForJobV2({
-        projectId: project.id,
-        shotId: 'clip_1',
+        shotId: 'shot_1',
         jobId: 'job_1',
         mediaKind: 'video',
         declaredMimeType: 'video/mp4',
-        body: body(mp4),
+        body: Readable.from([mp4]),
       })
     ).rejects.toMatchObject({ code: 'invalid_media' });
 
-    expect(consumed).toBe(0);
-    expect(await store.getProjectV2(project.id)).toMatchObject({
-      status: 'supported',
-      project: { revision: project.revision, assets: {} },
+    const loaded = await store.getProjectV2(project.id);
+    expect(loaded.status === 'supported' ? Object.keys(loaded.project.assets) : null).toEqual(['seed_v2']);
+    await expect(fs.access(path.join(rootDir, project.id, 'assets', 'invalid_video.mp4'))).rejects.toMatchObject({
+      code: 'ENOENT',
     });
-    await expect(fs.access(path.join(rootDir, project.id, 'parts'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it('rejects malformed V2 provider metadata field-by-field before consuming a body', async () => {
+  it('cleans every V2 managed-output byte, signature, identity, and duration refusal', async () => {
+    const imageFixture = await makeStoreV2();
+    const imageMedia = createStudioMediaStore({
+      store: imageFixture.store,
+      createId: idSequence('size_mismatch', 'empty_output', 'mime_mismatch'),
+    });
+    await expect(
+      imageMedia.persistProviderOutputForJobV2({
+        projectId: imageFixture.project.id,
+        shotId: 'shot_1',
+        jobId: 'job_1',
+        mediaKind: 'image',
+        declaredMimeType: 'image/png',
+        declaredByteSize: png.length + 1,
+        body: Readable.from([png]),
+      })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+    await expect(
+      imageMedia.persistProviderOutputForJobV2({
+        projectId: imageFixture.project.id,
+        shotId: 'shot_1',
+        jobId: 'job_1',
+        mediaKind: 'image',
+        declaredMimeType: 'image/png',
+        body: Readable.from([]),
+      })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+    await expect(
+      imageMedia.persistProviderOutputForJobV2({
+        projectId: imageFixture.project.id,
+        shotId: 'shot_1',
+        jobId: 'job_1',
+        mediaKind: 'image',
+        declaredMimeType: 'image/jpeg',
+        body: Readable.from([png]),
+      })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+
+    let overflowConsumed = false;
+    const overflowMedia = createStudioMediaStore({
+      store: imageFixture.store,
+      createId: () => 'overflow_output',
+      limits: { imageOutputMaxBytes: png.length - 1 },
+    });
+    await expect(
+      overflowMedia.persistProviderOutputForJobV2({
+        projectId: imageFixture.project.id,
+        shotId: 'shot_1',
+        jobId: 'job_1',
+        mediaKind: 'image',
+        declaredMimeType: 'image/png',
+        body: (async function* () {
+          overflowConsumed = true;
+          yield png;
+        })(),
+      })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+    expect(overflowConsumed).toBe(true);
+
+    const unsafeIdMedia = createStudioMediaStore({ store: imageFixture.store, createId: () => '../unsafe' });
+    await expect(
+      unsafeIdMedia.persistProviderOutputForJobV2({
+        projectId: imageFixture.project.id,
+        shotId: 'shot_1',
+        jobId: 'job_1',
+        mediaKind: 'image',
+        declaredMimeType: 'image/png',
+        body: Readable.from([png]),
+      })
+    ).rejects.toMatchObject({ code: 'storage_error' });
+
+    const videoFixture = await makeStoreV2({ purpose: 'video_take' });
+    const durations = [Number.NaN, 0, Number.MAX_SAFE_INTEGER + 1];
+    let durationIndex = 0;
+    const videoMedia = createStudioMediaStore({
+      store: videoFixture.store,
+      createId: idSequence('duration_nan', 'duration_zero', 'duration_oversized'),
+      probeVideoDurationSecondsV2: async () => durations[durationIndex++]!,
+    });
+    for (const assetId of ['duration_nan', 'duration_zero', 'duration_oversized']) {
+      // eslint-disable-next-line no-await-in-loop -- Every decoded-duration boundary must clean independently.
+      await expect(
+        videoMedia.persistProviderOutputForJobV2({
+          projectId: videoFixture.project.id,
+          shotId: 'shot_1',
+          jobId: 'job_1',
+          mediaKind: 'video',
+          declaredMimeType: 'video/mp4',
+          body: Readable.from([mp4]),
+        })
+      ).rejects.toMatchObject({ code: 'invalid_media' });
+      // eslint-disable-next-line no-await-in-loop -- Each refused final identity must be absent.
+      await expect(
+        fs.access(path.join(videoFixture.rootDir, videoFixture.project.id, 'assets', `${assetId}.mp4`))
+      ).rejects.toMatchObject({ code: 'ENOENT' });
+    }
+  });
+
+  it('rejects purpose/media and image-duration mismatches before consuming provider bytes', async () => {
+    const imageFixture = await makeStoreV2();
+    const videoFixture = await makeStoreV2({ purpose: 'video_take' });
+    const imageMedia = createStudioMediaStore({ store: imageFixture.store });
+    const videoMedia = createStudioMediaStore({ store: videoFixture.store });
+    let consumed = 0;
+    const body = async function* (): AsyncGenerator<Buffer> {
+      consumed += 1;
+      yield png;
+    };
+
+    await expect(
+      imageMedia.persistProviderOutputForJobV2({
+        projectId: imageFixture.project.id,
+        shotId: 'shot_1',
+        jobId: 'job_1',
+        mediaKind: 'video',
+        declaredMimeType: 'video/mp4',
+        body: body(),
+      })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+    await expect(
+      imageMedia.persistProviderOutputForJobV2({
+        projectId: imageFixture.project.id,
+        shotId: 'shot_1',
+        jobId: 'job_1',
+        mediaKind: 'image',
+        declaredMimeType: 'image/png',
+        durationSeconds: 5,
+        body: body(),
+      })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+    await expect(
+      videoMedia.persistProviderOutputForJobV2({
+        projectId: videoFixture.project.id,
+        shotId: 'shot_1',
+        jobId: 'job_1',
+        mediaKind: 'image',
+        declaredMimeType: 'image/png',
+        body: body(),
+      })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+    expect(consumed).toBe(0);
+  });
+
+  it('persists the video poster through the explicit role map and refuses a duplicate', async () => {
+    const { store, project } = await makeStoreV2({ purpose: 'video_take' });
+    const media = createStudioMediaStore({
+      store,
+      createId: idSequence('take_1', 'poster_1', 'must_not_allocate'),
+      probeVideoDurationSecondsV2: async () => 10,
+    });
+    await media.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_1',
+      mediaKind: 'video',
+      declaredMimeType: 'video/mp4',
+      body: Readable.from([mp4]),
+    });
+
+    const poster = await media.persistProviderPosterForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_1',
+      primaryAssetId: 'take_1',
+      declaredMimeType: 'image/png',
+      body: Readable.from([png]),
+    });
+    expect(poster).toMatchObject({
+      id: 'poster_1',
+      shotId: 'shot_1',
+      mediaKind: 'image',
+      managedAsset: { collection: 'thumbnails' },
+    });
+    const loaded = await store.getProjectV2(project.id);
+    expect(loaded).toMatchObject({
+      status: 'supported',
+      project: {
+        shots: { shot_1: { selectedTakeId: null } },
+        jobs: {
+          job_1: {
+            outputAssetIds: ['take_1', 'poster_1'],
+            outputAssetIdsByRole: { primary: 'take_1', poster: 'poster_1' },
+          },
+        },
+      },
+    });
+
+    let consumed = false;
+    await expect(
+      media.persistProviderPosterForJobV2({
+        projectId: project.id,
+        shotId: 'shot_1',
+        jobId: 'job_1',
+        primaryAssetId: 'take_1',
+        declaredMimeType: 'image/png',
+        body: (async function* () {
+          consumed = true;
+          yield png;
+        })(),
+      })
+    ).rejects.toMatchObject({ code: 'job_inactive' });
+    expect(consumed).toBe(false);
+  });
+
+  it('persists a renderer-captured V2 poster only after the canonical video is selected', async () => {
+    const { store, project } = await makeStoreV2({ purpose: 'video_take' });
+    const media = createStudioMediaStore({
+      store,
+      createId: idSequence('take_captured', 'poster_captured'),
+      probeVideoDurationSecondsV2: async () => 10,
+    });
+    await media.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_1',
+      mediaKind: 'video',
+      declaredMimeType: 'video/mp4',
+      body: Readable.from([mp4]),
+    });
+
+    const capturedInput = {
+      projectId: project.id,
+      shotId: 'shot_1',
+      videoAssetId: 'take_captured',
+      width: 1,
+      height: 1,
+      declaredByteSize: png.length,
+      body: Readable.from([png]),
+    };
+    await expect(media.persistCapturedPosterV2(capturedInput)).rejects.toMatchObject({ code: 'job_inactive' });
+
+    await store.updateProjectV2(project.id, (current) => {
+      current.shots.shot_1!.selectedTakeId = 'take_captured';
+      return current;
+    });
+    const poster = await media.persistCapturedPosterV2({ ...capturedInput, body: Readable.from([png]) });
+    expect(poster).toMatchObject({
+      id: 'poster_captured',
+      shotId: 'shot_1',
+      mediaKind: 'image',
+      managedAsset: { collection: 'thumbnails' },
+    });
+    const loaded = await store.getProjectV2(project.id);
+    expect(loaded).toMatchObject({
+      status: 'supported',
+      project: {
+        jobs: {
+          job_1: {
+            outputAssetIds: ['take_captured', 'poster_captured'],
+            outputAssetIdsByRole: { primary: 'take_captured', poster: 'poster_captured' },
+          },
+        },
+        shots: { shot_1: { selectedTakeId: 'take_captured' } },
+      },
+    });
+  });
+
+  it('persists and reopens a V2 project render without attaching it to a shot', async () => {
+    const { store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const media = createStudioMediaStore({
+      store,
+      createId: idSequence('render_v2', 'render_v2_new'),
+      now: () => '2026-08-17T12:00:00.000Z',
+      probeVideoDurationSecondsV2: async () => 12,
+    });
+    const rendered = await media.persistProjectOutputV2({
+      projectId: project.id,
+      declaredMimeType: 'video/mp4',
+      declaredByteSize: mp4.length,
+      width: 1920,
+      height: 1080,
+      durationSeconds: 12,
+      body: Readable.from([mp4]),
+    });
+    expect(rendered).toMatchObject({
+      id: 'render_v2',
+      projectId: project.id,
+      shotId: null,
+      durationSeconds: 12,
+      managedAsset: { collection: 'assets', fileName: 'render_v2.mp4' },
+    });
+    await expect(media.getLatestProjectOutputV2(project.id)).resolves.toEqual(rendered);
+    const newer = await media.persistProjectOutputV2({
+      projectId: project.id,
+      declaredMimeType: 'video/mp4',
+      width: 1920,
+      height: 1080,
+      body: Readable.from([mp4]),
+    });
+    await expect(createStudioMediaStore({ store }).getLatestProjectOutputV2(project.id)).resolves.toEqual(newer);
+    await expect(media.getLatestProjectOutputV2('../project')).rejects.toMatchObject({ code: 'invalid_media' });
+    await expect(media.getLatestProjectOutputV2('missing_project')).rejects.toMatchObject({ code: 'not_found' });
+  });
+
+  it('rejects non-finite and non-positive V2 render durations from managed metadata', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const media = createStudioMediaStore({
+      store,
+      createId: () => 'render_v2_duration_guard',
+      probeVideoDurationSecondsV2: async () => 12,
+    });
+    const rendered = await media.persistProjectOutputV2({
+      projectId: project.id,
+      declaredMimeType: 'video/mp4',
+      width: 1920,
+      height: 1080,
+      body: Readable.from([mp4]),
+    });
+    const metadataPath = path.join(rootDir, project.id, 'assets', `${rendered.id}.render-v2.json`);
+    const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8')) as Record<string, unknown>;
+    for (const durationSeconds of ['not-a-number', 0]) {
+      metadata.durationSeconds = durationSeconds;
+      // eslint-disable-next-line no-await-in-loop -- Each scalar proves a separate short-circuit branch.
+      await fs.writeFile(metadataPath, JSON.stringify(metadata));
+      // eslint-disable-next-line no-await-in-loop -- Reopen from disk for each hostile value.
+      await expect(media.getLatestProjectOutputV2(project.id)).resolves.toBeNull();
+    }
+  });
+
+  it('imports a human seed candidate without pinning, selecting, authorizing, or spending', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const sourcePath = path.join(rootDir, 'human-seed.png');
+    await fs.writeFile(sourcePath, png);
+    const media = createStudioMediaStore({ store, createId: () => 'human_seed_1' });
+
+    const imported = await media.importReferenceFromPathV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      sourcePath,
+      expectedRevision: project.revision,
+      returnProject: true,
+    });
+
+    expect(imported.asset).toMatchObject({
+      id: 'human_seed_1',
+      shotId: 'shot_1',
+      mediaKind: 'image',
+      managedAsset: { collection: 'imports' },
+    });
+    expect(imported.project).toMatchObject({
+      spendAuthorizations: [],
+      jobs: {},
+      shots: {
+        shot_1: {
+          assetIds: ['human_seed_1'],
+          seedStillId: null,
+          selectedTakeId: null,
+          jobIds: [],
+        },
+      },
+    });
+  });
+
+  it('imports, labels, and safely detaches a V2 Brief reference', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const sourcePath = path.join(rootDir, 'cast portrait.png');
+    await fs.writeFile(sourcePath, png);
+    const media = createStudioMediaStore({ store, createId: () => 'brief_imported' });
+    const asset = await media.importReferenceFromPathV2({
+      projectId: project.id,
+      briefReferenceRole: 'cast',
+      sourcePath,
+      expectedRevision: project.revision,
+    });
+    expect(asset).toMatchObject({
+      id: 'brief_imported',
+      shotId: null,
+      briefReferenceRole: 'cast',
+      briefReferenceLabel: 'cast portrait',
+    });
+    const imported = await store.getProjectV2(project.id);
+    if (imported.status !== 'supported') throw new Error('Brief import fixture missing');
+    const detached = await media.detachBriefReferenceV2({
+      projectId: project.id,
+      assetId: asset.id,
+      expectedRevision: imported.project.revision,
+    });
+    expect(detached.assets).not.toHaveProperty(asset.id);
+    await expect(fs.access(path.join(rootDir, project.id, 'imports', 'brief_imported.png'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it('imports JPEG and WebP V2 references and safely detaches a Look reference', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+    const webp = Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('WEBP'), Buffer.from([0x00])]);
+    const jpegPath = path.join(rootDir, 'look-reference.jpg');
+    const webpPath = path.join(rootDir, 'cast-reference.webp');
+    await Promise.all([fs.writeFile(jpegPath, jpeg), fs.writeFile(webpPath, webp)]);
+    const media = createStudioMediaStore({
+      store,
+      createId: idSequence('brief_look_jpeg', 'brief_cast_webp'),
+    });
+    const look = await media.importReferenceFromPathV2({
+      projectId: project.id,
+      briefReferenceRole: 'look',
+      sourcePath: jpegPath,
+      expectedRevision: project.revision,
+    });
+    expect(look).toMatchObject({ id: 'brief_look_jpeg', mimeType: 'image/jpeg', briefReferenceRole: 'look' });
+    let loaded = await store.getProjectV2(project.id);
+    if (loaded.status !== 'supported') throw new Error('V2 JPEG fixture missing');
+    const cast = await media.importReferenceFromPathV2({
+      projectId: project.id,
+      briefReferenceRole: 'cast',
+      sourcePath: webpPath,
+      expectedRevision: loaded.project.revision,
+    });
+    expect(cast).toMatchObject({ id: 'brief_cast_webp', mimeType: 'image/webp', briefReferenceRole: 'cast' });
+    loaded = await store.getProjectV2(project.id);
+    if (loaded.status !== 'supported') throw new Error('V2 WebP fixture missing');
+    await expect(
+      media.detachBriefReferenceV2({
+        projectId: project.id,
+        assetId: look.id,
+        expectedRevision: loaded.project.revision,
+      })
+    ).resolves.not.toHaveProperty(`assets.${look.id}`);
+  });
+
+  it('detaches valid V2 Brief metadata after its managed directory is already absent', async () => {
+    const { store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const withMissingBytes = await store.updateProjectV2(project.id, (current) => {
+      current.assets.brief_missing_bytes = {
+        id: 'brief_missing_bytes',
+        projectId: current.id,
+        shotId: null,
+        mediaKind: 'image',
+        mimeType: 'image/png',
+        managedAsset: { collection: 'imports', fileName: 'brief_missing_bytes.png' },
+        byteSize: png.length,
+        sha256: createHash('sha256').update(png).digest('hex'),
+        briefReferenceRole: 'cast',
+        briefReferenceLabel: 'Missing bytes',
+        createdAt: current.updatedAt,
+      };
+      return current;
+    });
+    const media = createStudioMediaStore({ store });
+    await expect(
+      media.detachBriefReferenceV2({
+        projectId: project.id,
+        assetId: 'brief_missing_bytes',
+        expectedRevision: withMissingBytes.revision,
+      })
+    ).resolves.not.toHaveProperty('assets.brief_missing_bytes');
+  });
+
+  it('refuses to detach a shot-owned V2 seed through the Brief-reference seam', async () => {
+    const { store, project } = await makeStoreV2({ purpose: 'video_take', includeAuthorizedJob: false });
+    const media = createStudioMediaStore({ store });
+    await expect(
+      media.detachBriefReferenceV2({
+        projectId: project.id,
+        assetId: 'seed_v2',
+        expectedRevision: project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+  });
+
+  it('enforces V2 import media, revision, ownership, and Brief-capacity boundaries', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const imagePath = path.join(rootDir, 'reference.png');
+    const videoPath = path.join(rootDir, 'reference.mp4');
+    await fs.writeFile(imagePath, png);
+    await fs.writeFile(videoPath, mp4);
+    let idOrdinal = 0;
+    const media = createStudioMediaStore({ store, createId: () => `import_case_${++idOrdinal}` });
+
+    await expect(
+      media.importReferenceFromPathV2({
+        projectId: project.id,
+        shotId: 'missing_shot',
+        sourcePath: imagePath,
+        expectedRevision: project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'not_found' });
+    await expect(
+      media.importReferenceFromPathV2({
+        projectId: project.id,
+        shotId: 'shot_1',
+        sourcePath: imagePath,
+        expectedRevision: project.revision - 1,
+      })
+    ).rejects.toMatchObject({ code: 'stale_project' });
+    await expect(
+      media.importReferenceFromPathV2({
+        projectId: project.id,
+        briefReferenceRole: 'look',
+        sourcePath: videoPath,
+        expectedRevision: project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+    await expect(
+      createStudioMediaStore({ store, createId: () => '../unsafe' }).importReferenceFromPathV2({
+        projectId: project.id,
+        shotId: 'shot_1',
+        sourcePath: imagePath,
+        expectedRevision: project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'storage_error' });
+
+    const importedIds: string[] = [];
+    for (let index = 0; index < 6; index += 1) {
+      // eslint-disable-next-line no-await-in-loop -- Capacity must be proven at every committed revision.
+      const loaded = await store.getProjectV2(project.id);
+      if (loaded.status !== 'supported') throw new Error('Brief capacity fixture missing');
+      // eslint-disable-next-line no-await-in-loop -- Imports are intentionally serialized by revision.
+      const imported = await media.importReferenceFromPathV2({
+        projectId: project.id,
+        briefReferenceRole: index % 2 === 0 ? 'cast' : 'look',
+        sourcePath: imagePath,
+        expectedRevision: loaded.project.revision,
+      });
+      importedIds.push(imported.id);
+    }
+    const full = await store.getProjectV2(project.id);
+    if (full.status !== 'supported') throw new Error('Brief capacity fixture missing');
+    await expect(
+      media.importReferenceFromPathV2({
+        projectId: project.id,
+        briefReferenceRole: 'cast',
+        sourcePath: imagePath,
+        expectedRevision: full.project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+    await expect(
+      media.detachBriefReferenceV2({
+        projectId: project.id,
+        assetId: importedIds[0]!,
+        expectedRevision: full.project.revision - 1,
+      })
+    ).rejects.toMatchObject({ code: 'stale_project' });
+    await expect(
+      media.detachBriefReferenceV2({
+        projectId: project.id,
+        assetId: 'missing_asset',
+        expectedRevision: full.project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'not_found' });
+  });
+
+  it('fails closed when a nonterminal immutable request still owns a Brief reference', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ briefReference: true });
+    const media = createStudioMediaStore({ store });
+    const managedPath = path.join(rootDir, project.id, 'imports', 'brief_v2.png');
+
+    await expect(
+      media.detachBriefReferenceV2({
+        projectId: project.id,
+        assetId: 'brief_v2',
+        expectedRevision: project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'media_in_use' });
+    await expect(fs.readFile(managedPath)).resolves.toEqual(png);
+    expect(await store.getProjectV2(project.id)).toEqual({ status: 'supported', project });
+
+    const terminal = await store.updateProjectV2(project.id, (current) => {
+      const job = current.jobs.job_1!;
+      job.status = 'failed';
+      job.error = { code: 'no_output', messageKey: 'conversation.creativeStudio.jobs.errors.noOutput' };
+      return current;
+    });
+    const detached = await media.detachBriefReferenceV2({
+      projectId: project.id,
+      assetId: 'brief_v2',
+      expectedRevision: terminal.revision,
+    });
+    expect(detached.assets).not.toHaveProperty('brief_v2');
+    expect(detached.jobs.job_1!.requestSnapshot?.referenceInput).toEqual({
+      assetId: 'brief_v2',
+      sha256: createHash('sha256').update(png).digest('hex'),
+    });
+    await expect(fs.access(managedPath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('re-proves V2 provider-input bytes and refuses a same-path replacement', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ briefReference: true });
+    const media = createStudioMediaStore({ store });
+    const input = await media.resolveProviderInputV2(project.id, 'brief_v2');
+    const chunks: Buffer[] = [];
+    for await (const chunk of await input.openStream()) chunks.push(Buffer.from(chunk));
+    expect(Buffer.concat(chunks)).toEqual(png);
+    await expect(input.asDataUrl(1.5)).rejects.toMatchObject({ code: 'invalid_media' });
+    await expect(input.asDataUrl(png.length - 1)).rejects.toMatchObject({ code: 'invalid_media' });
+    await expect(input.asDataUrl(png.length)).resolves.toBe(`data:image/png;base64,${png.toString('base64')}`);
+
+    const managedPath = path.join(rootDir, project.id, 'imports', 'brief_v2.png');
+    await fs.writeFile(managedPath, Buffer.concat([png, Buffer.from('replacement')]));
+    await expect(media.resolveProviderInputV2(project.id, 'brief_v2')).rejects.toMatchObject({ code: 'invalid_media' });
+  });
+
+  it('rejects hostile V2 provider metadata before allocating or consuming a body', async () => {
     const { rootDir, store, project } = await makeStoreV2();
-    const media = createStudioMediaStore({ store, createId: () => 'must_not_allocate' });
+    const createId = vi.fn(() => 'must_not_allocate');
+    const media = createStudioMediaStore({ store, createId });
     const cases: Array<[string, (input: Record<string, unknown>) => void]> = [
-      ['project id', (input) => (input.projectId = 'bad/project')],
-      ['shot id', (input) => (input.shotId = 'bad/clip')],
-      ['job id', (input) => (input.jobId = 'bad/job')],
-      ['MIME type', (input) => (input.declaredMimeType = 7)],
-      ['media kind', (input) => (input.mediaKind = 'audio')],
+      ['unsafe project', (input) => (input.projectId = '../project')],
+      ['unsafe shot', (input) => (input.shotId = '../shot')],
+      ['unsafe job', (input) => (input.jobId = '../job')],
+      ['wrong kind', (input) => (input.mediaKind = 'audio')],
+      ['missing MIME', (input) => (input.declaredMimeType = null)],
       ['fractional width', (input) => (input.width = 1.5)],
       ['zero width', (input) => (input.width = 0)],
       ['fractional height', (input) => (input.height = 1.5)],
       ['zero height', (input) => (input.height = 0)],
+      ['fractional bytes', (input) => (input.declaredByteSize = 1.5)],
+      ['negative bytes', (input) => (input.declaredByteSize = -1)],
       ['non-finite duration', (input) => (input.durationSeconds = Number.NaN)],
       ['zero duration', (input) => (input.durationSeconds = 0)],
       ['oversized duration', (input) => (input.durationSeconds = Number.MAX_SAFE_INTEGER + 1)],
-      ['fractional declared bytes', (input) => (input.declaredByteSize = 1.5)],
-      ['negative declared bytes', (input) => (input.declaredByteSize = -1)],
     ];
 
     for (const [label, mutate] of cases) {
       let consumed = false;
       const input: Record<string, unknown> = {
         projectId: project.id,
-        shotId: 'clip_1',
+        shotId: 'shot_1',
         jobId: 'job_1',
         mediaKind: 'image',
         declaredMimeType: 'image/png',
@@ -2845,1253 +3707,264 @@ describe('createStudioMediaStore schema 2', () => {
       });
       expect(consumed, label).toBe(false);
     }
+    expect(createId).not.toHaveBeenCalled();
     await expect(fs.access(path.join(rootDir, project.id, 'parts'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it('rejects malformed V2 render and captured-poster dimensions before storage access', async () => {
-    const { rootDir, store, project } = await makeStoreV2();
-    const media = createStudioMediaStore({ store, createId: () => 'must_not_allocate' });
-    const renderCases: Array<[string, (input: Record<string, unknown>) => void]> = [
-      ['project id', (input) => (input.projectId = 'bad/project')],
-      ['MIME type', (input) => (input.declaredMimeType = 'image/png')],
-      ['fractional width', (input) => (input.width = 1.5)],
-      ['zero width', (input) => (input.width = 0)],
-      ['fractional height', (input) => (input.height = 1.5)],
-      ['zero height', (input) => (input.height = 0)],
-      ['fractional declared bytes', (input) => (input.declaredByteSize = 1.5)],
-      ['zero declared bytes', (input) => (input.declaredByteSize = 0)],
-      ['non-finite duration', (input) => (input.durationSeconds = Number.NaN)],
-      ['zero duration', (input) => (input.durationSeconds = 0)],
+  it('rejects malformed V2 media envelopes before allocating, reading, or mutating storage', async () => {
+    const { store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const createId = vi.fn(() => 'unused_asset');
+    const media = createStudioMediaStore({ store, createId });
+    const sourcePath = '/must/not/be/read.png';
+    const importCases: Array<Record<string, unknown>> = [
+      {
+        projectId: '../project',
+        shotId: 'shot_1',
+        expectedRevision: project.revision,
+        sourcePath,
+      },
+      {
+        projectId: project.id,
+        shotId: '../shot',
+        expectedRevision: project.revision,
+        sourcePath,
+      },
+      {
+        projectId: project.id,
+        briefReferenceRole: 'organisation',
+        expectedRevision: project.revision,
+        sourcePath,
+      },
+      { projectId: project.id, expectedRevision: project.revision, sourcePath },
+      {
+        projectId: project.id,
+        shotId: 'shot_1',
+        briefReferenceRole: 'cast',
+        expectedRevision: project.revision,
+        sourcePath,
+      },
+      { projectId: project.id, shotId: 'shot_1', expectedRevision: 1.5, sourcePath },
+      { projectId: project.id, shotId: 'shot_1', expectedRevision: 0, sourcePath },
+      { projectId: project.id, shotId: 'shot_1', expectedRevision: project.revision, sourcePath: 42 },
     ];
-    for (const [label, mutate] of renderCases) {
-      let consumed = false;
+    for (const input of importCases) {
+      // eslint-disable-next-line no-await-in-loop -- Every hostile envelope must refuse independently.
+      await expect(media.importReferenceFromPathV2(input as never)).rejects.toMatchObject({ code: 'invalid_media' });
+    }
+
+    const detachCases: Array<Record<string, unknown>> = [
+      { projectId: '../project', assetId: 'asset_1', expectedRevision: 1 },
+      { projectId: project.id, assetId: '../asset', expectedRevision: 1 },
+      { projectId: project.id, assetId: 'asset_1', expectedRevision: 1.5 },
+      { projectId: project.id, assetId: 'asset_1', expectedRevision: 0 },
+    ];
+    for (const input of detachCases) {
+      // eslint-disable-next-line no-await-in-loop -- Every hostile envelope must refuse independently.
+      await expect(media.detachBriefReferenceV2(input as never)).rejects.toMatchObject({ code: 'invalid_media' });
+    }
+
+    for (const input of [
+      {
+        projectId: project.id,
+        shotId: 'shot_1',
+        jobId: 'job_1',
+        primaryAssetId: '../primary',
+        declaredMimeType: 'image/png',
+        body: Readable.from([png]),
+      },
+      {
+        projectId: project.id,
+        shotId: 'shot_1',
+        jobId: 'job_1',
+        primaryAssetId: 'primary_1',
+        declaredMimeType: 'video/mp4',
+        body: Readable.from([png]),
+      },
+    ]) {
+      // eslint-disable-next-line no-await-in-loop -- Each poster authority field must refuse independently.
+      await expect(media.persistProviderPosterForJobV2(input)).rejects.toMatchObject({ code: 'invalid_media' });
+    }
+
+    const capturedCases: Array<(input: Record<string, unknown>) => void> = [
+      (input) => (input.projectId = '../project'),
+      (input) => (input.shotId = '../shot'),
+      (input) => (input.videoAssetId = '../video'),
+      (input) => (input.width = 1.5),
+      (input) => (input.width = 0),
+      (input) => (input.height = 1.5),
+      (input) => (input.height = 0),
+      (input) => (input.declaredByteSize = 1.5),
+      (input) => (input.declaredByteSize = -1),
+    ];
+    for (const mutate of capturedCases) {
+      const input: Record<string, unknown> = {
+        projectId: project.id,
+        shotId: 'shot_1',
+        videoAssetId: 'take_1',
+        width: 1,
+        height: 1,
+        body: Readable.from([png]),
+      };
+      mutate(input);
+      // eslint-disable-next-line no-await-in-loop -- Every scalar boundary must refuse independently.
+      await expect(media.persistCapturedPosterV2(input as never)).rejects.toMatchObject({ code: 'invalid_media' });
+    }
+
+    const outputCases: Array<(input: Record<string, unknown>) => void> = [
+      (input) => (input.projectId = '../project'),
+      (input) => (input.declaredMimeType = 'video/webm'),
+      (input) => (input.width = 1.5),
+      (input) => (input.width = 0),
+      (input) => (input.height = 1.5),
+      (input) => (input.height = 0),
+      (input) => (input.declaredByteSize = 1.5),
+      (input) => (input.declaredByteSize = 0),
+      (input) => (input.durationSeconds = Number.NaN),
+      (input) => (input.durationSeconds = 0),
+    ];
+    for (const mutate of outputCases) {
       const input: Record<string, unknown> = {
         projectId: project.id,
         declaredMimeType: 'video/mp4',
-        width: 1920,
-        height: 1080,
-        body: (async function* () {
-          consumed = true;
-          yield mp4;
-        })(),
+        width: 1,
+        height: 1,
+        body: Readable.from([mp4]),
       };
       mutate(input);
-      // eslint-disable-next-line no-await-in-loop
-      await expect(media.persistProjectOutputV2(input as never), `render ${label}`).rejects.toMatchObject({
-        code: 'invalid_media',
-      });
-      expect(consumed, `render ${label}`).toBe(false);
+      // eslint-disable-next-line no-await-in-loop -- Every scalar boundary must refuse independently.
+      await expect(media.persistProjectOutputV2(input as never)).rejects.toMatchObject({ code: 'invalid_media' });
     }
 
-    const posterCases: Array<[string, (input: Record<string, unknown>) => void]> = [
-      ['project id', (input) => (input.projectId = 'bad/project')],
-      ['shot id', (input) => (input.shotId = 'bad/clip')],
-      ['video id', (input) => (input.videoAssetId = 'bad/video')],
-      ['fractional width', (input) => (input.width = 1.5)],
-      ['zero width', (input) => (input.width = 0)],
-      ['fractional height', (input) => (input.height = 1.5)],
-      ['zero height', (input) => (input.height = 0)],
-      ['fractional declared bytes', (input) => (input.declaredByteSize = 1.5)],
-      ['negative declared bytes', (input) => (input.declaredByteSize = -1)],
-    ];
-    for (const [label, mutate] of posterCases) {
-      let consumed = false;
-      const input: Record<string, unknown> = {
-        projectId: project.id,
-        shotId: 'clip_1',
-        videoAssetId: 'video_1',
-        width: 640,
-        height: 360,
-        body: (async function* () {
-          consumed = true;
-          yield png;
-        })(),
-      };
-      mutate(input);
-      // eslint-disable-next-line no-await-in-loop
-      await expect(media.persistCapturedPosterV2(input as never), `poster ${label}`).rejects.toMatchObject({
-        code: 'invalid_media',
-      });
-      expect(consumed, `poster ${label}`).toBe(false);
-    }
-    await expect(fs.access(path.join(rootDir, project.id, 'parts'))).rejects.toMatchObject({ code: 'ENOENT' });
-  });
-
-  it('preserves distinct V2 context errors across every classification fence', async () => {
-    const { store, project } = await makeStoreV2();
-    const supported = await store.getProjectV2(project.id);
-    if (supported.status !== 'supported') throw new Error('schema-2 fixture missing');
-    const unsupported = { status: 'unsupported_prototype_schema' as const, projectId: project.id };
-    const missing = { status: 'not_found' as const, projectId: project.id };
-    const scenarios: Array<{
-      label: string;
-      replies: Array<typeof supported | typeof unsupported | typeof missing>;
-      verifiedMissing?: boolean;
-      code?: 'unsupported_prototype_schema' | 'not_found';
-    }> = [
-      { label: 'initial missing', replies: [missing] },
-      { label: 'verified directory missing', replies: [supported], verifiedMissing: true },
-      { label: 'confirmed prototype', replies: [supported, unsupported], code: 'unsupported_prototype_schema' },
-      { label: 'confirmed missing', replies: [supported, missing], code: 'not_found' },
-      {
-        label: 'final prototype',
-        replies: [supported, supported, unsupported],
-        code: 'unsupported_prototype_schema',
-      },
-      { label: 'final missing', replies: [supported, supported, missing], code: 'not_found' },
-    ];
-
-    for (const scenario of scenarios) {
-      let readIndex = 0;
-      const scenarioStore: CreativeStudioStore = {
-        ...store,
-        async getProjectV2() {
-          const reply = scenario.replies[Math.min(readIndex, scenario.replies.length - 1)]!;
-          readIndex += 1;
-          return reply;
-        },
-        getVerifiedProjectDirectoryV2: scenario.verifiedMissing
-          ? async () => null
-          : store.getVerifiedProjectDirectoryV2,
-      };
-      const result = createStudioMediaStore({ store: scenarioStore }).resolveAssetV2(project.id, 'missing_asset');
-      if (scenario.code === undefined) {
-        // eslint-disable-next-line no-await-in-loop
-        await expect(result, scenario.label).resolves.toBeNull();
-      } else {
-        // eslint-disable-next-line no-await-in-loop
-        await expect(result, scenario.label).rejects.toMatchObject({ code: scenario.code });
-      }
-    }
-  });
-
-  it('rejects V2 import race boundaries and supports the asset-only return contract', async () => {
-    const { rootDir, store, project } = await makeStoreV2();
-    const source = path.join(rootDir, 'import-boundaries.png');
-    const videoSource = path.join(rootDir, 'import-boundaries.mp4');
-    await fs.writeFile(source, png);
-    await fs.writeFile(videoSource, mp4);
-
     await expect(
-      createStudioMediaStore({ store, createId: () => 'bad/id' }).importReferenceFromPathV2({
-        projectId: project.id,
-        sourcePath: source,
-        briefReferenceRole: 'cast',
-        expectedRevision: project.revision,
-      })
-    ).rejects.toMatchObject({ code: 'storage_error' });
-    await expect(
-      createStudioMediaStore({ store, createId: () => 'stale_import' }).importReferenceFromPathV2({
-        projectId: project.id,
-        sourcePath: source,
-        briefReferenceRole: 'cast',
-        expectedRevision: project.revision + 1,
-      })
-    ).rejects.toMatchObject({ code: 'stale_project' });
-    await expect(
-      createStudioMediaStore({ store, createId: () => 'missing_clip_import' }).importReferenceFromPathV2({
-        projectId: project.id,
-        shotId: 'missing_clip',
-        sourcePath: source,
-        expectedRevision: project.revision,
-      })
-    ).rejects.toMatchObject({ code: 'not_found' });
-    await expect(
-      createStudioMediaStore({ store, createId: () => 'video_import' }).importReferenceFromPathV2({
-        projectId: project.id,
-        sourcePath: videoSource,
-        briefReferenceRole: 'cast',
-        expectedRevision: project.revision,
-      })
-    ).rejects.toMatchObject({ code: 'invalid_media' });
-
-    const asset = await createStudioMediaStore({
-      store,
-      createId: () => 'asset_only_import',
-    }).importReferenceFromPathV2({
-      projectId: project.id,
-      sourcePath: source,
-      briefReferenceRole: 'look',
-      expectedRevision: project.revision,
-    });
-    expect(asset).toMatchObject({ id: 'asset_only_import', projectId: project.id, shotId: null });
-    expect(asset).not.toHaveProperty('project');
-    expect(
-      (await fs.readdir(path.join(rootDir, project.id, 'parts'))).filter((name) => name.endsWith('.part'))
-    ).toEqual([]);
-  });
-
-  it('distinguishes invalid, stale, and missing V2 detach requests', async () => {
-    const { rootDir, store, project } = await makeStoreV2();
-    const source = path.join(rootDir, 'detach-boundaries.png');
-    await fs.writeFile(source, png);
-    const imported = await createStudioMediaStore({
-      store,
-      createId: () => 'detach_boundary',
-    }).importReferenceFromPathV2({
-      projectId: project.id,
-      sourcePath: source,
-      briefReferenceRole: 'cast',
-      expectedRevision: project.revision,
-      returnProject: true,
-    });
-    const media = createStudioMediaStore({ store });
-    await expect(
-      media.detachBriefReferenceV2({ projectId: 'bad/project', assetId: imported.asset.id, expectedRevision: 1 })
+      media.extractConditioningFrameV2({ projectId: '../project', extractionId: 'frame_1' })
     ).rejects.toMatchObject({ code: 'invalid_media' });
     await expect(
-      media.detachBriefReferenceV2({
-        projectId: project.id,
-        assetId: imported.asset.id,
-        expectedRevision: imported.project.revision + 1,
-      })
-    ).rejects.toMatchObject({ code: 'stale_project' });
+      media.extractConditioningFrameV2({ projectId: project.id, extractionId: '../frame' })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
     await expect(
-      media.detachBriefReferenceV2({
-        projectId: project.id,
-        assetId: 'missing_asset',
-        expectedRevision: imported.project.revision,
-      })
-    ).rejects.toMatchObject({ code: 'not_found' });
-  });
-
-  it('validates V2 provider-input kind, byte bounds, and refreshed content', async () => {
-    const { rootDir, store, project } = await makeStoreV2();
-    const canonicalRoot = await fs.realpath(rootDir);
-    const media = createStudioMediaStore({ store, createId: () => 'provider_input' });
-    const asset = await media.persistProviderOutputForJobV2({
-      projectId: project.id,
-      shotId: 'clip_1',
-      jobId: 'job_1',
-      mediaKind: 'image',
-      declaredMimeType: 'image/png',
-      body: Readable.from([png]),
-    });
-    const providerInput = await media.resolveProviderInputV2(project.id, asset.id);
-    await expect(providerInput.asDataUrl(Number.NaN)).rejects.toMatchObject({ code: 'invalid_media' });
-    await expect(providerInput.asDataUrl(asset.byteSize - 1)).rejects.toMatchObject({ code: 'invalid_media' });
-    await expect(providerInput.asDataUrl(asset.byteSize)).resolves.toBe(
-      `data:image/png;base64,${png.toString('base64')}`
-    );
-    const opened: Buffer[] = [];
-    for await (const chunk of await providerInput.openStream()) opened.push(Buffer.from(chunk));
-    expect(Buffer.concat(opened)).toEqual(png);
+      media.verifyConditioningFrameV2({ projectId: '../project', extractionId: 'frame_1' })
+    ).resolves.toBeNull();
+    await expect(
+      media.verifyConditioningFrameV2({ projectId: project.id, extractionId: '../frame' })
+    ).resolves.toBeNull();
+    await expect(media.resolveAssetV2('../project', 'asset_1')).resolves.toBeNull();
+    await expect(media.resolveAssetV2(project.id, '../asset')).resolves.toBeNull();
+    await expect(media.resolveAssetV2(project.id, 'missing_asset')).resolves.toBeNull();
     await expect(media.resolveProviderInputV2(project.id, 'missing_asset')).rejects.toMatchObject({
       code: 'invalid_media',
     });
 
-    const resolved = await media.resolveAssetV2(project.id, asset.id);
-    const managed = path.join(canonicalRoot, project.id, 'assets', asset.managedAsset.fileName);
-    const tampered = Buffer.from(png);
-    tampered[tampered.length - 1] ^= 0xff;
-    await fs.writeFile(managed, tampered);
-    const future = new Date(Date.now() + 10_000);
-    await fs.utimes(managed, future, future);
-    await expect(resolved!.openVerifiedStream()).rejects.toMatchObject({ code: 'storage_error' });
-
-    const videoFixture = await makeStoreV2({ mediaKind: 'video' });
-    const video = await createStudioMediaStore({
-      store: videoFixture.store,
-      createId: () => 'provider_video',
-    }).persistProviderOutputForJobV2({
-      projectId: videoFixture.project.id,
-      shotId: 'clip_1',
-      jobId: 'job_1',
-      mediaKind: 'video',
-      declaredMimeType: 'video/mp4',
-      body: Readable.from([mp4]),
-    });
-    await expect(
-      createStudioMediaStore({ store: videoFixture.store }).resolveProviderInputV2(videoFixture.project.id, video.id)
-    ).rejects.toMatchObject({ code: 'invalid_media' });
-  });
-
-  it('accepts every recoverable V2 provider status', async () => {
-    for (const status of ['submitting', 'failed'] as const) {
-      const { store, project } = await makeStoreV2();
-      await store.updateProjectV2(project.id, (current) => {
-        const next = structuredClone(current);
-        next.jobs.job_1.status = status;
-        next.jobs.job_1.error = status === 'failed' ? { code: 'download_failed', messageKey: 'downloadFailed' } : null;
-        return next;
-      });
-      const asset = await createStudioMediaStore({
-        store,
-        createId: () => `recoverable_${status}`,
-      }).persistProviderOutputForJobV2({
-        projectId: project.id,
-        shotId: 'clip_1',
-        jobId: 'job_1',
-        mediaKind: 'image',
-        declaredMimeType: 'image/png',
-        body: Readable.from([png]),
-      });
-      expect(asset.id).toBe(`recoverable_${status}`);
+    const sparse: string[] = [];
+    sparse.length = 1;
+    for (const ids of [null, sparse, ['../project'], [project.id, project.id]] as unknown[]) {
+      // eslint-disable-next-line no-await-in-loop -- Every hostile recovery list must refuse independently.
+      await expect(media.resumeConditioningFramesV2(ids as never)).rejects.toMatchObject({ code: 'invalid_media' });
     }
+    expect(createId).not.toHaveBeenCalled();
   });
 
-  it('rejects malformed V2 provider-poster metadata before consuming poster bytes', async () => {
-    const { rootDir, store, project } = await makeStoreV2({ mediaKind: 'video' });
-    const primary = await createStudioMediaStore({
-      store,
-      createId: () => 'poster_primary',
-    }).persistProviderOutputForJobV2({
-      projectId: project.id,
-      shotId: 'clip_1',
-      jobId: 'job_1',
-      mediaKind: 'video',
-      declaredMimeType: 'video/mp4',
-      body: Readable.from([mp4]),
-    });
-    for (const [label, override] of [
-      ['unsafe primary id', { primaryAssetId: 'bad/id' }],
-      ['non-image MIME', { declaredMimeType: 'video/mp4' }],
-    ] as const) {
-      let consumed = false;
-      // eslint-disable-next-line no-await-in-loop
-      await expect(
-        createStudioMediaStore({ store }).persistProviderPosterForJobV2({
-          projectId: project.id,
-          shotId: 'clip_1',
-          jobId: 'job_1',
-          primaryAssetId: primary.id,
-          declaredMimeType: 'image/png',
-          ...override,
-          body: (async function* () {
-            consumed = true;
-            yield png;
-          })(),
-        }),
-        label
-      ).rejects.toMatchObject({ code: 'invalid_media' });
-      expect(consumed, label).toBe(false);
-    }
-    expect(await fs.readdir(path.join(rootDir, project.id, 'thumbnails')).catch(() => [])).toEqual([]);
-  });
-
-  it('neither adopts nor deletes a replacement installed over a V2 managed writer part', async () => {
-    const { rootDir, store, project } = await makeStoreV2();
-    const canonicalRoot = await fs.realpath(rootDir);
-    const partPath = path.join(canonicalRoot, project.id, 'parts', 'replaced_part.part');
-    const replacement = path.join(canonicalRoot, 'replacement-part');
-    await fs.writeFile(replacement, 'replacement bytes');
-    const media = createStudioMediaStore({ store, createId: () => 'replaced_part' });
-
-    await expect(
-      media.persistProviderOutputForJobV2({
-        projectId: project.id,
-        shotId: 'clip_1',
-        jobId: 'job_1',
-        mediaKind: 'image',
-        declaredMimeType: 'image/png',
-        body: (async function* () {
-          yield png;
-          await fs.rm(partPath, { force: true });
-          await fs.rename(replacement, partPath);
-        })(),
-      })
-    ).rejects.toMatchObject({ code: 'storage_error' });
-
-    await expect(fs.readFile(partPath, 'utf8')).resolves.toBe('replacement bytes');
-    await expect(fs.access(path.join(canonicalRoot, project.id, 'assets', 'replaced_part.png'))).rejects.toMatchObject({
-      code: 'ENOENT',
-    });
-    expect(await store.getProjectV2(project.id)).toMatchObject({
-      status: 'supported',
-      project: { revision: project.revision, assets: {}, jobs: { job_1: { status: 'running' } } },
-    });
-  });
-
-  it('identity-cleans a failed V2 render while preserving a replacement metadata part', async () => {
-    const { rootDir, store, project } = await makeStoreV2();
-    const canonicalRoot = await fs.realpath(rootDir);
-    const metadataPart = path.join(canonicalRoot, project.id, 'parts', 'render_race.render-v2-metadata.part');
-    const replacement = path.join(canonicalRoot, 'replacement-metadata');
-    await fs.writeFile(replacement, 'replacement metadata');
-    let swapped = false;
-    const media = createStudioMediaStore({
-      store,
-      createId: () => 'render_race',
-      beforeV2ManagedMutation: async () => {
-        if (swapped) return;
-        try {
-          await fs.access(metadataPart);
-        } catch {
-          return;
-        }
-        await fs.rm(metadataPart, { force: true });
-        await fs.rename(replacement, metadataPart);
-        swapped = true;
-      },
-    });
-
-    await expect(
-      media.persistProjectOutputV2({
-        projectId: project.id,
-        declaredMimeType: 'video/mp4',
-        width: 1920,
-        height: 1080,
-        body: Readable.from([mp4]),
-      })
-    ).rejects.toMatchObject({ code: 'storage_error' });
-
-    expect(swapped).toBe(true);
-    await expect(fs.readFile(metadataPart, 'utf8')).resolves.toBe('replacement metadata');
-    await expect(fs.access(path.join(canonicalRoot, project.id, 'assets', 'render_race.mp4'))).rejects.toMatchObject({
-      code: 'ENOENT',
-    });
-    await expect(
-      fs.access(path.join(canonicalRoot, project.id, 'assets', 'render_race.render-v2.json'))
-    ).rejects.toMatchObject({ code: 'ENOENT' });
-  });
-
-  it('does not consume or mutate a V1 tree swapped under captured V2 path authority', async () => {
-    const { rootDir, store, project } = await makeStoreV2();
-    const prototypeRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-media-prototype-swap-'));
-    created.push(prototypeRoot);
-    const prototypeStore = createCreativeStudioStore({
-      rootDir: prototypeRoot,
-      createId: () => 'prototype_1',
-      now: () => '2026-08-17T12:00:00.000Z',
-    });
-    await prototypeStore.createProject({
-      name: 'Protected prototype',
-      brief: '',
-      aspectRatio: '16:9',
-      targetDurationSeconds: 5,
-      resolution: '720p',
-    });
-    const canonicalRoot = await fs.realpath(rootDir);
-    const v2Directory = path.join(canonicalRoot, project.id);
-    const v1Directory = path.join(canonicalRoot, 'prototype_1');
-    const parkedV2Directory = path.join(canonicalRoot, 'parked_v2');
-    await fs.cp(path.join(prototypeRoot, 'prototype_1'), v1Directory, { recursive: true });
-    await fs.copyFile(path.join(prototypeRoot, 'projects.json'), path.join(canonicalRoot, 'projects.json'));
-    const sentinel = path.join(v1Directory, 'prototype-sidecar.bin');
-    await fs.writeFile(sentinel, Buffer.from([0, 1, 2, 3]));
-    const manifestBefore = await fs.readFile(path.join(v1Directory, 'project.json'));
-    const sidecarBefore = await fs.readFile(sentinel);
-    const indexBefore = await fs.readFile(path.join(canonicalRoot, 'projects.json'));
-    const entriesBefore = (await fs.readdir(v1Directory)).toSorted();
-    let swapped = false;
-    let consumed = false;
-    const media = createStudioMediaStore({
-      store,
-      createId: () => 'must_not_write',
-      beforeV2ManagedMutation: async () => {
-        if (swapped) return;
-        await fs.rename(v2Directory, parkedV2Directory);
-        await fs.rename(v1Directory, v2Directory);
-        swapped = true;
-      },
-    });
-
-    await expect(
-      media.persistProviderOutputForJobV2({
-        projectId: project.id,
-        shotId: 'clip_1',
-        jobId: 'job_1',
-        mediaKind: 'image',
-        declaredMimeType: 'image/png',
-        body: (async function* () {
-          consumed = true;
-          yield png;
-        })(),
-      })
-    ).rejects.toMatchObject({ code: 'storage_error' });
-
-    expect(swapped).toBe(true);
-    expect(consumed).toBe(false);
-    expect((await fs.readdir(v2Directory)).toSorted()).toEqual(entriesBefore);
-    await expect(fs.readFile(path.join(v2Directory, 'project.json'))).resolves.toEqual(manifestBefore);
-    await expect(fs.readFile(path.join(v2Directory, 'prototype-sidecar.bin'))).resolves.toEqual(sidecarBefore);
-    await expect(fs.readFile(path.join(canonicalRoot, 'projects.json'))).resolves.toEqual(indexBefore);
-    await expect(fs.access(path.join(v2Directory, 'parts'))).rejects.toMatchObject({ code: 'ENOENT' });
-    await expect(fs.access(path.join(v2Directory, 'assets'))).rejects.toMatchObject({ code: 'ENOENT' });
-  });
-
-  it('rejects an in-place V2-to-V1 manifest rewrite before creating or consuming managed output', async () => {
-    const { rootDir, store, project } = await makeStoreV2();
-    const prototypeRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-media-prototype-manifest-'));
-    created.push(prototypeRoot);
-    const prototypeStore = createCreativeStudioStore({
-      rootDir: prototypeRoot,
-      createId: () => project.id,
-      now: () => '2026-08-17T12:00:00.000Z',
-    });
-    await prototypeStore.createProject({
-      name: 'Protected prototype',
-      brief: '',
-      aspectRatio: '16:9',
-      targetDurationSeconds: 5,
-      resolution: '720p',
-    });
-    const prototypeManifest = await fs.readFile(path.join(prototypeRoot, project.id, 'project.json'));
-    const manifestPath = path.join(await fs.realpath(rootDir), project.id, 'project.json');
-    const identityBefore = await fs.lstat(manifestPath);
-    let identityAfter: Awaited<ReturnType<typeof fs.lstat>> | null = null;
-    let rewritten = false;
-    let consumed = false;
-    const media = createStudioMediaStore({
-      store,
-      createId: () => 'must_not_write',
-      beforeV2ManagedMutation: async () => {
-        if (rewritten) return;
-        await fs.writeFile(manifestPath, prototypeManifest);
-        identityAfter = await fs.lstat(manifestPath);
-        rewritten = true;
-      },
-    });
-
-    await expect(
-      media.persistProviderOutputForJobV2({
-        projectId: project.id,
-        shotId: 'clip_1',
-        jobId: 'job_1',
-        mediaKind: 'image',
-        declaredMimeType: 'image/png',
-        body: (async function* () {
-          consumed = true;
-          yield png;
-        })(),
-      })
-    ).rejects.toMatchObject({ code: 'storage_error' });
-
-    expect(rewritten).toBe(true);
-    expect(identityAfter).not.toBeNull();
-    expect(String(identityAfter!.dev)).toBe(String(identityBefore.dev));
-    expect(String(identityAfter!.ino)).toBe(String(identityBefore.ino));
-    expect(consumed).toBe(false);
-    await expect(fs.readFile(manifestPath)).resolves.toEqual(prototypeManifest);
-    await expect(fs.access(path.join(rootDir, project.id, 'parts'))).rejects.toMatchObject({ code: 'ENOENT' });
-    await expect(fs.access(path.join(rootDir, project.id, 'assets'))).rejects.toMatchObject({ code: 'ENOENT' });
-  });
-
-  it('rejects a same-inode rewrite to different valid V2 manifest bytes before managed output mutation', async () => {
-    const { rootDir, store, project } = await makeStoreV2();
-    const manifestPath = path.join(await fs.realpath(rootDir), project.id, 'project.json');
-    const original = JSON.parse(await fs.readFile(manifestPath, 'utf8')) as StudioProjectV2;
-    const rewritten = { ...original, name: 'Different valid schema-two project' };
-    const rewrittenBytes = Buffer.from(JSON.stringify(rewritten));
-    const identityBefore = await fs.lstat(manifestPath);
-    let identityAfter: Awaited<ReturnType<typeof fs.lstat>> | null = null;
-    let didRewrite = false;
-    let consumed = false;
-    const media = createStudioMediaStore({
-      store,
-      createId: () => 'must_not_write_valid_rewrite',
-      beforeV2ManagedMutation: async () => {
-        if (didRewrite) return;
-        await fs.writeFile(manifestPath, rewrittenBytes);
-        identityAfter = await fs.lstat(manifestPath);
-        didRewrite = true;
-      },
-    });
-
-    await expect(
-      media.persistProviderOutputForJobV2({
-        projectId: project.id,
-        shotId: 'clip_1',
-        jobId: 'job_1',
-        mediaKind: 'image',
-        declaredMimeType: 'image/png',
-        body: (async function* () {
-          consumed = true;
-          yield png;
-        })(),
-      })
-    ).rejects.toMatchObject({ code: 'storage_error' });
-
-    expect(didRewrite).toBe(true);
-    expect(identityAfter).not.toBeNull();
-    expect(String(identityAfter!.dev)).toBe(String(identityBefore.dev));
-    expect(String(identityAfter!.ino)).toBe(String(identityBefore.ino));
-    expect(consumed).toBe(false);
-    await expect(fs.readFile(manifestPath)).resolves.toEqual(rewrittenBytes);
-    await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
-      status: 'supported',
-      project: { id: project.id, name: rewritten.name },
-    });
-    await expect(fs.access(path.join(rootDir, project.id, 'parts'))).rejects.toMatchObject({ code: 'ENOENT' });
-    await expect(fs.access(path.join(rootDir, project.id, 'assets'))).rejects.toMatchObject({ code: 'ENOENT' });
-  });
-
-  it.each(['parts', 'assets'] as const)(
-    'rejects a bound %s directory replacement before opening the V2 writer',
-    async (directoryName) => {
-      const { rootDir, store, project } = await makeStoreV2();
-      const canonicalRoot = await fs.realpath(rootDir);
-      const projectDirectory = path.join(canonicalRoot, project.id);
-      const managedDirectory = path.join(projectDirectory, directoryName);
-      const parkedDirectory = path.join(projectDirectory, `${directoryName}-parked`);
-      const replacementDirectory = path.join(canonicalRoot, `${directoryName}-replacement`);
-      await fs.mkdir(replacementDirectory);
-      const sentinel = path.join(replacementDirectory, 'owned-elsewhere.bin');
-      await fs.writeFile(sentinel, Buffer.from([9, 8, 7, 6]));
-      const manifestBefore = await fs.readFile(path.join(projectDirectory, 'project.json'));
-      let swapped = false;
-      let consumed = false;
-      const media = createStudioMediaStore({
-        store,
-        createId: () => `swapped_${directoryName}`,
-        beforeV2ManagedMutation: async () => {
-          if (swapped) return;
-          try {
-            const stats = await fs.lstat(managedDirectory);
-            if (!stats.isDirectory()) return;
-          } catch {
-            return;
-          }
-          await fs.rename(managedDirectory, parkedDirectory);
-          await fs.rename(replacementDirectory, managedDirectory);
-          swapped = true;
-        },
-      });
-
-      await expect(
-        media.persistProviderOutputForJobV2({
-          projectId: project.id,
-          shotId: 'clip_1',
-          jobId: 'job_1',
-          mediaKind: 'image',
-          declaredMimeType: 'image/png',
-          body: (async function* () {
-            consumed = true;
-            yield png;
-          })(),
-        })
-      ).rejects.toMatchObject({ code: 'storage_error' });
-
-      expect(swapped).toBe(true);
-      expect(consumed).toBe(false);
-      await expect(fs.readFile(path.join(managedDirectory, 'owned-elsewhere.bin'))).resolves.toEqual(
-        Buffer.from([9, 8, 7, 6])
-      );
-      expect(await fs.readdir(managedDirectory)).toEqual(['owned-elsewhere.bin']);
-      await expect(fs.readFile(path.join(projectDirectory, 'project.json'))).resolves.toEqual(manifestBefore);
-    }
-  );
-
-  it('freshly identity-cleans a linked V2 output when the post-link authority fence fails', async () => {
-    const { rootDir, store, project } = await makeStoreV2();
-    const canonicalRoot = await fs.realpath(rootDir);
-    const finalPath = path.join(canonicalRoot, project.id, 'assets', 'post_link_race.png');
-    const partPath = path.join(canonicalRoot, project.id, 'parts', 'post_link_race.part');
-    let raced = false;
-    const media = createStudioMediaStore({
-      store,
-      createId: () => 'post_link_race',
-      beforeV2ManagedMutation: async () => {
-        if (raced) return;
-        try {
-          await fs.access(finalPath);
-        } catch {
-          return;
-        }
-        raced = true;
-        await store.updateProjectV2(project.id, (current) => ({ ...current, name: 'Concurrent valid edit' }));
-      },
-    });
-
-    await expect(
-      media.persistProviderOutputForJobV2({
-        projectId: project.id,
-        shotId: 'clip_1',
-        jobId: 'job_1',
-        mediaKind: 'image',
-        declaredMimeType: 'image/png',
-        body: Readable.from([png]),
-      })
-    ).rejects.toMatchObject({ code: 'storage_error' });
-
-    expect(raced).toBe(true);
-    await expect(fs.access(partPath)).rejects.toMatchObject({ code: 'ENOENT' });
-    await expect(fs.access(finalPath)).rejects.toMatchObject({ code: 'ENOENT' });
-    expect(await store.getProjectV2(project.id)).toMatchObject({
-      status: 'supported',
-      project: { revision: project.revision + 1, name: 'Concurrent valid edit', assets: {} },
-    });
-  });
-
-  it('freshly identity-cleans linked render metadata and video after a post-link authority failure', async () => {
-    const { rootDir, store, project } = await makeStoreV2();
-    const canonicalRoot = await fs.realpath(rootDir);
-    const assetsDirectory = path.join(canonicalRoot, project.id, 'assets');
-    const partsDirectory = path.join(canonicalRoot, project.id, 'parts');
-    const metadataPath = path.join(assetsDirectory, 'metadata_link_race.render-v2.json');
-    let raced = false;
-    const media = createStudioMediaStore({
-      store,
-      createId: () => 'metadata_link_race',
-      beforeV2ManagedMutation: async () => {
-        if (raced) return;
-        try {
-          await fs.access(metadataPath);
-        } catch {
-          return;
-        }
-        raced = true;
-        await store.updateProjectV2(project.id, (current) => ({ ...current, name: 'Concurrent render edit' }));
-      },
-    });
-
-    await expect(
-      media.persistProjectOutputV2({
-        projectId: project.id,
-        declaredMimeType: 'video/mp4',
-        width: 1920,
-        height: 1080,
-        body: Readable.from([mp4]),
-      })
-    ).rejects.toMatchObject({ code: 'storage_error' });
-
-    expect(raced).toBe(true);
-    await expect(fs.access(path.join(assetsDirectory, 'metadata_link_race.mp4'))).rejects.toMatchObject({
-      code: 'ENOENT',
-    });
-    await expect(fs.access(metadataPath)).rejects.toMatchObject({ code: 'ENOENT' });
-    await expect(
-      fs.access(path.join(partsDirectory, 'metadata_link_race.render-v2-metadata.part'))
-    ).rejects.toMatchObject({ code: 'ENOENT' });
-  });
-
-  it('freshly cleans an uncommitted V2 import after a concurrent valid manifest CAS', async () => {
-    const { rootDir, store, project } = await makeStoreV2();
-    const source = path.join(rootDir, 'stale-import-source.png');
-    await fs.writeFile(source, png);
-    const concurrentStore: CreativeStudioStore = {
-      ...store,
-      async updateProjectV2(projectId) {
-        await store.updateProjectV2(projectId, (current) => ({ ...current, name: 'Concurrent import edit' }));
-        throw new CreativeStudioStoreError('stale_project', 'forced concurrent V2 CAS');
-      },
+  it('rejects every malformed ready-frame proof before touching managed bytes', async () => {
+    const { store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const extractionId = 'extraction_1';
+    const frameId = 'frame_1';
+    const base = structuredClone(project);
+    base.frameExtractions[extractionId] = {
+      id: extractionId,
+      shotId: 'shot_1',
+      takeAssetId: 'take_1',
+      endpointSeconds: 5,
+      status: 'ready',
+      frameAssetId: frameId,
+      errorCode: null,
+      createdAt: base.createdAt,
+      updatedAt: base.updatedAt,
     };
-    const media = createStudioMediaStore({ store: concurrentStore, createId: () => 'stale_import_v2' });
-
-    await expect(
-      media.importReferenceFromPathV2({
-        projectId: project.id,
-        sourcePath: source,
-        briefReferenceRole: 'cast',
-        expectedRevision: project.revision,
-      })
-    ).rejects.toMatchObject({ code: 'stale_project' });
-
-    await expect(fs.readFile(source)).resolves.toEqual(png);
-    await expect(fs.access(path.join(rootDir, project.id, 'parts', 'stale_import_v2.part'))).rejects.toMatchObject({
-      code: 'ENOENT',
-    });
-    await expect(fs.access(path.join(rootDir, project.id, 'imports', 'stale_import_v2.png'))).rejects.toMatchObject({
-      code: 'ENOENT',
-    });
-    expect(await store.getProjectV2(project.id)).toMatchObject({
-      status: 'supported',
-      project: { revision: project.revision + 1, name: 'Concurrent import edit', assets: {} },
-    });
-  });
-
-  it('preserves a finalized uncommitted output when a cleanup-fence CAS claims its exact asset', async () => {
-    const { rootDir, store, project } = await makeStoreV2();
-    const canonicalRoot = await fs.realpath(rootDir);
-    const finalPath = path.join(canonicalRoot, project.id, 'assets', 'cleanup_owned_output.png');
-    const partPath = path.join(canonicalRoot, project.id, 'parts', 'cleanup_owned_output.part');
-    let stagedProject: StudioProjectV2 | null = null;
-    let commitAttempted = false;
-    let raced = false;
-    const staleStore: CreativeStudioStore = {
-      ...store,
-      async updateProjectV2(projectId, update) {
-        const loaded = await store.getProjectV2(projectId);
-        if (loaded.status !== 'supported') throw new Error('schema-2 fixture missing');
-        stagedProject = update(structuredClone(loaded.project));
-        commitAttempted = true;
-        throw new CreativeStudioStoreError('stale_project', 'forced stale CAS');
-      },
-    };
-    const media = createStudioMediaStore({
-      store: staleStore,
-      createId: () => 'cleanup_owned_output',
-      beforeCleanupOwnership: async (target) => {
-        if (!commitAttempted || raced || target !== finalPath || stagedProject === null) return;
-        raced = true;
-        const claimed = structuredClone(stagedProject);
-        await store.updateProjectV2(project.id, () => claimed);
-      },
-    });
-
-    await expect(
-      media.persistProviderOutputForJobV2({
-        projectId: project.id,
-        shotId: 'clip_1',
-        jobId: 'job_1',
-        mediaKind: 'image',
-        declaredMimeType: 'image/png',
-        body: Readable.from([png]),
-      })
-    ).rejects.toMatchObject({ code: 'stale_project' });
-
-    expect(commitAttempted).toBe(true);
-    expect(raced).toBe(true);
-    await expect(fs.readFile(finalPath)).resolves.toEqual(png);
-    await expect(fs.access(partPath)).rejects.toMatchObject({ code: 'ENOENT' });
-    const loaded = await store.getProjectV2(project.id);
-    expect(loaded).toMatchObject({
-      status: 'supported',
-      project: {
-        revision: project.revision + 1,
-        assets: { cleanup_owned_output: { id: 'cleanup_owned_output' } },
-        shots: {
-          clip_1: { selectedTakeId: 'cleanup_owned_output', assetIds: ['cleanup_owned_output'] },
-        },
-        jobs: { job_1: { status: 'succeeded', outputAssetIds: ['cleanup_owned_output'] } },
-      },
-    });
-  });
-
-  it('returns a committed V2 detach while a later revision lands before best-effort cleanup', async () => {
-    const { rootDir, store, project } = await makeStoreV2();
-    const source = path.join(rootDir, 'detach-later-revision.png');
-    await fs.writeFile(source, png);
-    const imported = await createStudioMediaStore({ store, createId: () => 'detach_later' }).importReferenceFromPathV2({
-      projectId: project.id,
-      sourcePath: source,
-      briefReferenceRole: 'look',
-      expectedRevision: project.revision,
-      returnProject: true,
-    });
-    let laterRevision = 0;
-    const racingStore: CreativeStudioStore = {
-      ...store,
-      async updateProjectV2(projectId, update, expectedRevision, commitTag) {
-        const detached = await store.updateProjectV2(projectId, update, expectedRevision, commitTag);
-        const later = await store.updateProjectV2(projectId, (current) => ({ ...current, name: 'Later valid edit' }));
-        laterRevision = later.revision;
-        return detached;
-      },
-    };
-
-    const detached = await createStudioMediaStore({ store: racingStore }).detachBriefReferenceV2({
-      projectId: project.id,
-      assetId: imported.asset.id,
-      expectedRevision: imported.project.revision,
-    });
-
-    expect(detached.revision).toBe(imported.project.revision + 1);
-    expect(laterRevision).toBe(detached.revision + 1);
-    await expect(fs.readFile(source)).resolves.toEqual(png);
-    await expect(fs.access(path.join(rootDir, project.id, 'imports', 'detach_later.png'))).rejects.toMatchObject({
-      code: 'ENOENT',
-    });
-    expect(await store.getProjectV2(project.id)).toMatchObject({
-      status: 'supported',
-      project: { revision: laterRevision, name: 'Later valid edit', assets: {} },
-    });
-  });
-
-  it('preserves a detached managed import when a cleanup-fence CAS reclaims the exact asset', async () => {
-    const { rootDir, store, project } = await makeStoreV2();
-    const source = path.join(rootDir, 'detach-reclaimed-source.png');
-    await fs.writeFile(source, png);
-    const imported = await createStudioMediaStore({
-      store,
-      createId: () => 'detach_reclaimed',
-    }).importReferenceFromPathV2({
-      projectId: project.id,
-      sourcePath: source,
-      briefReferenceRole: 'cast',
-      expectedRevision: project.revision,
-      returnProject: true,
-    });
-    const managed = path.join(await fs.realpath(rootDir), project.id, 'imports', 'detach_reclaimed.png');
-    const detachedAsset = structuredClone(imported.asset);
-    let detachCommitted = false;
-    let cleanupHookCalls = 0;
-    const detachingStore: CreativeStudioStore = {
-      ...store,
-      async updateProjectV2(projectId, update, expectedRevision, commitTag) {
-        const detached = await store.updateProjectV2(projectId, update, expectedRevision, commitTag);
-        detachCommitted = true;
-        return detached;
-      },
-    };
-    const media = createStudioMediaStore({
-      store: detachingStore,
-      beforeCleanupOwnership: async (target) => {
-        if (!detachCommitted || target !== managed || cleanupHookCalls > 0) return;
-        cleanupHookCalls += 1;
-        await store.updateProjectV2(project.id, (current) => {
-          const next = structuredClone(current);
-          next.assets[detachedAsset.id] = detachedAsset;
-          return next;
-        });
-      },
-    });
-
-    const detached = await media.detachBriefReferenceV2({
-      projectId: project.id,
-      assetId: detachedAsset.id,
-      expectedRevision: imported.project.revision,
-    });
-
-    expect(Object.hasOwn(detached.assets, detachedAsset.id)).toBe(false);
-    expect(cleanupHookCalls).toBe(1);
-    await expect(fs.readFile(managed)).resolves.toEqual(png);
-    await expect(fs.readFile(source)).resolves.toEqual(png);
-    expect(await store.getProjectV2(project.id)).toMatchObject({
-      status: 'supported',
-      project: {
-        revision: detached.revision + 1,
-        assets: { detach_reclaimed: detachedAsset },
-      },
-    });
-  });
-
-  it('commits a reference plate without selecting it and preserves the frozen request provenance', async () => {
-    const { store, project } = await makeStoreV2({ mediaKind: 'video', outputRole: 'reference' });
-    const media = createStudioMediaStore({ store, createId: () => 'plate_1' });
-
-    const asset = await media.persistProviderOutputForJobV2({
-      projectId: project.id,
-      shotId: 'clip_1',
-      jobId: 'job_1',
+    base.assets[frameId] = {
+      id: frameId,
+      projectId: base.id,
+      shotId: 'shot_1',
       mediaKind: 'image',
-      declaredMimeType: 'image/png',
-      body: Readable.from([png]),
-    });
+      mimeType: 'image/png',
+      managedAsset: { collection: 'conditioningFrames', fileName: 'frame_1.png' },
+      byteSize: png.length,
+      sha256: createHash('sha256').update(png).digest('hex'),
+      createdAt: base.createdAt,
+    };
+    base.shots.shot_1!.assetIds.push(frameId);
 
-    expect(asset).toMatchObject({
-      shotId: 'clip_1',
-      managedAsset: { collection: 'references' },
-      sourceLook: 'A precise opening frame',
-      sourceReferenceAssetIds: [],
-      sourceAspectRatio: '16:9',
-      sourceResolution: '1080p',
-    });
-    expect(await store.getProjectV2(project.id)).toMatchObject({
-      status: 'supported',
-      project: {
-        shots: { clip_1: { referenceAssetId: 'plate_1', selectedTakeId: null, assetIds: ['plate_1'] } },
-        jobs: { job_1: { status: 'succeeded', outputAssetIds: ['plate_1'] } },
-      },
-    });
-  });
+    const cases: Array<StudioProjectV2 | null> = [
+      null,
+      { ...structuredClone(base), frameExtractions: {} },
+      (() => {
+        const candidate = structuredClone(base);
+        candidate.frameExtractions[extractionId]!.status = 'pending';
+        candidate.frameExtractions[extractionId]!.frameAssetId = null;
+        return candidate;
+      })(),
+      (() => {
+        const candidate = structuredClone(base);
+        candidate.frameExtractions[extractionId]!.status = 'failed';
+        candidate.frameExtractions[extractionId]!.frameAssetId = null;
+        candidate.frameExtractions[extractionId]!.errorCode = 'decode_failed';
+        return candidate;
+      })(),
+      (() => {
+        const candidate = structuredClone(base);
+        candidate.frameExtractions[extractionId]!.frameAssetId = null;
+        return candidate;
+      })(),
+      (() => {
+        const candidate = structuredClone(base);
+        delete candidate.assets[frameId];
+        return candidate;
+      })(),
+      (() => {
+        const candidate = structuredClone(base);
+        candidate.assets[frameId]!.projectId = 'foreign_project';
+        return candidate;
+      })(),
+      (() => {
+        const candidate = structuredClone(base);
+        candidate.assets[frameId]!.shotId = 'foreign_shot';
+        return candidate;
+      })(),
+      (() => {
+        const candidate = structuredClone(base);
+        candidate.assets[frameId]!.mediaKind = 'video';
+        candidate.assets[frameId]!.mimeType = 'video/mp4';
+        candidate.assets[frameId]!.durationSeconds = 5;
+        return candidate;
+      })(),
+      (() => {
+        const candidate = structuredClone(base);
+        candidate.assets[frameId]!.managedAsset.collection = 'assets';
+        return candidate;
+      })(),
+      (() => {
+        const candidate = structuredClone(base);
+        candidate.shots.shot_1!.assetIds = [];
+        return candidate;
+      })(),
+    ];
 
-  it('imports a shot-owned reference without classifying it as a project-level Cast or Look', async () => {
-    const { rootDir, store, project } = await makeStoreV2();
-    const source = path.join(rootDir, 'clip-reference.png');
-    await fs.writeFile(source, png);
-    const media = createStudioMediaStore({ store, createId: () => 'clip_reference_1' });
-
-    const imported = await media.importReferenceFromPathV2({
-      projectId: project.id,
-      shotId: 'clip_1',
-      sourcePath: source,
-      expectedRevision: project.revision,
-      returnProject: true,
-    });
-
-    expect(imported.asset).toMatchObject({
-      id: 'clip_reference_1',
-      projectId: project.id,
-      shotId: 'clip_1',
-      mediaKind: 'image',
-      managedAsset: { collection: 'imports', fileName: 'clip_reference_1.png' },
-    });
-    expect(imported.asset).not.toHaveProperty('briefReferenceRole');
-    expect(imported.asset).not.toHaveProperty('briefReferenceLabel');
-    expect(imported.project.shots.clip_1).toMatchObject({
-      referenceAssetId: 'clip_reference_1',
-      selectedTakeId: null,
-      assetIds: ['clip_reference_1'],
-    });
-    await expect(fs.readFile(source)).resolves.toEqual(png);
-    await expect(fs.readFile(path.join(rootDir, project.id, 'imports', 'clip_reference_1.png'))).resolves.toEqual(png);
-  });
-
-  it('attaches a provider poster to its exact video lineage without replacing a newer selection', async () => {
-    const { store, project } = await makeStoreV2({ mediaKind: 'video', addSecondShot: true });
-    const media = createStudioMediaStore({ store, createId: idSequence('video_1', 'poster_1') });
-    const primary = await media.persistProviderOutputForJobV2({
-      projectId: project.id,
-      shotId: 'clip_1',
-      jobId: 'job_1',
-      mediaKind: 'video',
-      declaredMimeType: 'video/mp4',
-      body: Readable.from([mp4]),
-    });
-    let foreignBodyConsumed = false;
-    await expect(
-      media.persistProviderPosterForJobV2({
-        projectId: project.id,
-        shotId: 'clip_2',
-        jobId: 'job_1',
-        primaryAssetId: primary.id,
-        declaredMimeType: 'image/png',
-        body: (async function* () {
-          foreignBodyConsumed = true;
-          yield png;
-        })(),
-      })
-    ).rejects.toMatchObject({ code: 'job_inactive' });
-    expect(foreignBodyConsumed).toBe(false);
-    await store.updateProjectV2(project.id, (current) => {
-      const next = structuredClone(current);
-      next.assets.newer_take = {
-        ...primary,
-        id: 'newer_take',
-        managedAsset: { collection: 'assets', fileName: 'newer_take.mp4' },
-        createdAt: '2026-08-17T12:00:01.000Z',
+    for (const candidate of cases) {
+      const wrappedStore = {
+        ...store,
+        getProjectV2: vi.fn(async () =>
+          candidate === null
+            ? { status: 'unsupported_prototype_schema' as const, schemaVersion: 1 }
+            : { status: 'supported' as const, project: structuredClone(candidate) }
+        ),
       };
-      next.shots.clip_1.assetIds.push('newer_take');
-      next.shots.clip_1.selectedTakeId = 'newer_take';
-      return next;
-    });
-
-    const poster = await media.persistProviderPosterForJobV2({
-      projectId: project.id,
-      shotId: 'clip_1',
-      jobId: 'job_1',
-      primaryAssetId: primary.id,
-      declaredMimeType: 'image/png',
-      body: Readable.from([png]),
-    });
-
-    expect(poster).toMatchObject({
-      id: 'poster_1',
-      shotId: 'clip_1',
-      mediaKind: 'image',
-      managedAsset: { collection: 'thumbnails' },
-    });
-    expect(await store.getProjectV2(project.id)).toMatchObject({
-      status: 'supported',
-      project: {
-        shots: { clip_1: { selectedTakeId: 'newer_take', assetIds: ['video_1', 'newer_take', 'poster_1'] } },
-        jobs: { job_1: { outputAssetIds: ['video_1', 'poster_1'] } },
-      },
-    });
-  });
-
-  it('persists and resolves a V2 project render through its versioned sidecar only', async () => {
-    const { rootDir, store, project } = await makeStoreV2();
-    const media = createStudioMediaStore({ store, createId: () => 'render_1' });
-
-    const output = await media.persistProjectOutputV2({
-      projectId: project.id,
-      declaredMimeType: 'video/mp4',
-      declaredByteSize: mp4.length,
-      width: 1920,
-      height: 1080,
-      durationSeconds: 5.5,
-      body: Readable.from([mp4]),
-    });
-
-    expect(output).toMatchObject({
-      id: 'render_1',
-      shotId: null,
-      mediaKind: 'video',
-      managedAsset: { collection: 'assets', fileName: 'render_1.mp4' },
-    });
-    await expect(media.getLatestProjectOutputV2(project.id)).resolves.toEqual(output);
-    await expect(
-      fs.access(path.join(rootDir, project.id, 'assets', 'render_1.render-v2.json'))
-    ).resolves.toBeUndefined();
-    await expect(fs.access(path.join(rootDir, project.id, 'assets', 'render_1.render.json'))).rejects.toMatchObject({
-      code: 'ENOENT',
-    });
-    expect(await store.getProjectV2(project.id)).toMatchObject({
-      status: 'supported',
-      project: { revision: project.revision, assets: {} },
-    });
-  });
-
-  it('captures a poster only while exactly one succeeded take job owns the selected video', async () => {
-    const { store, project } = await makeStoreV2({ mediaKind: 'video' });
-    const media = createStudioMediaStore({ store, createId: idSequence('video_1', 'captured_1', 'captured_2') });
-    const primary = await media.persistProviderOutputForJobV2({
-      projectId: project.id,
-      shotId: 'clip_1',
-      jobId: 'job_1',
-      mediaKind: 'video',
-      declaredMimeType: 'video/mp4',
-      body: Readable.from([mp4]),
-    });
-    const captured = await media.persistCapturedPosterV2({
-      projectId: project.id,
-      shotId: 'clip_1',
-      videoAssetId: primary.id,
-      width: 640,
-      height: 360,
-      declaredByteSize: png.length,
-      body: Readable.from([png]),
-    });
-    expect(captured).toMatchObject({
-      id: 'captured_1',
-      shotId: 'clip_1',
-      managedAsset: { collection: 'thumbnails' },
-    });
-    let consumed = false;
-    await expect(
-      media.persistCapturedPosterV2({
-        projectId: project.id,
-        shotId: 'clip_1',
-        videoAssetId: primary.id,
-        width: 640,
-        height: 360,
-        body: (async function* () {
-          consumed = true;
-          yield png;
-        })(),
-      })
-    ).rejects.toMatchObject({ code: 'job_inactive' });
-    expect(consumed).toBe(false);
-    expect(await store.getProjectV2(project.id)).toMatchObject({
-      status: 'supported',
-      project: { jobs: { job_1: { outputAssetIds: ['video_1', 'captured_1'] } } },
-    });
-  });
-
-  it('classifies six project-level references, rejects the seventh, and supports magic own IDs', async () => {
-    const { rootDir, store, project } = await makeStoreV2();
-    const sources = await Promise.all(
-      Array.from({ length: 7 }, async (_, index) => {
-        const source = path.join(rootDir, `Cast ${index + 1}.png`);
-        await fs.writeFile(source, png);
-        return source;
-      })
-    );
-    const media = createStudioMediaStore({
-      store,
-      createId: idSequence('__proto__', 'brief_2', 'brief_3', 'brief_4', 'brief_5', 'brief_6', 'brief_7'),
-    });
-    await expect(
-      media.importReferenceFromPathV2({
-        projectId: project.id,
-        sourcePath: sources[0]!,
-        expectedRevision: project.revision,
-      })
-    ).rejects.toMatchObject({ code: 'invalid_media' });
-    let revision = project.revision;
-    for (let index = 0; index < 6; index += 1) {
-      // eslint-disable-next-line no-await-in-loop
-      const imported = await media.importReferenceFromPathV2({
-        projectId: project.id,
-        sourcePath: sources[index]!,
-        briefReferenceRole: 'cast',
-        expectedRevision: revision,
-        returnProject: true,
-      });
-      revision = imported.project.revision;
+      const media = createStudioMediaStore({ store: wrappedStore as CreativeStudioStore });
+      // eslint-disable-next-line no-await-in-loop -- Each malformed proof is independently authoritative.
+      await expect(media.verifyConditioningFrameV2({ projectId: project.id, extractionId })).resolves.toBeNull();
+      // eslint-disable-next-line no-await-in-loop -- Extraction must reject the same malformed durable authority.
+      await expect(media.extractConditioningFrameV2({ projectId: project.id, extractionId })).rejects.toBeDefined();
     }
-
-    const loaded = await store.getProjectV2(project.id);
-    expect(loaded.status).toBe('supported');
-    if (loaded.status !== 'supported') throw new Error('schema-2 fixture missing');
-    expect(Object.keys(loaded.project.assets)).toHaveLength(6);
-    expect(Object.hasOwn(loaded.project.assets, '__proto__')).toBe(true);
-    await expect(
-      media.importReferenceFromPathV2({
-        projectId: project.id,
-        sourcePath: sources[6]!,
-        briefReferenceRole: 'look',
-        expectedRevision: revision,
-      })
-    ).rejects.toMatchObject({ code: 'invalid_media' });
-    await expect(fs.access(path.join(rootDir, project.id, 'imports', 'brief_7.png'))).rejects.toMatchObject({
-      code: 'ENOENT',
-    });
   });
 
-  it('detaches only the managed copy, preserves the source, and restarts with a valid manifest', async () => {
-    const { rootDir, store, project } = await makeStoreV2();
-    const source = path.join(rootDir, 'source-cast.png');
-    await fs.writeFile(source, png);
-    const media = createStudioMediaStore({ store, createId: () => 'brief_1' });
-    const imported = await media.importReferenceFromPathV2({
-      projectId: project.id,
-      sourcePath: source,
-      briefReferenceRole: 'cast',
-      expectedRevision: project.revision,
-      returnProject: true,
-    });
-    const managed = path.join(rootDir, project.id, 'imports', 'brief_1.png');
-
-    const detached = await media.detachBriefReferenceV2({
-      projectId: project.id,
-      assetId: 'brief_1',
-      expectedRevision: imported.project.revision,
-    });
-
-    expect(Object.hasOwn(detached.assets, 'brief_1')).toBe(false);
-    await expect(fs.readFile(source)).resolves.toEqual(png);
-    await expect(fs.access(managed)).rejects.toMatchObject({ code: 'ENOENT' });
-    const restarted = createCreativeStudioStore({ rootDir });
-    await expect(restarted.getProjectV2(project.id)).resolves.toMatchObject({
-      status: 'supported',
-      project: { revision: detached.revision, assets: {} },
-    });
-  });
-
-  it('commits a V2 detach when its managed import directory is already absent', async () => {
-    const { rootDir, store, project } = await makeStoreV2();
-    const source = path.join(rootDir, 'missing-managed-look.png');
-    await fs.writeFile(source, png);
-    const media = createStudioMediaStore({ store, createId: () => 'missing_managed' });
-    const imported = await media.importReferenceFromPathV2({
-      projectId: project.id,
-      sourcePath: source,
-      briefReferenceRole: 'look',
-      expectedRevision: project.revision,
-      returnProject: true,
-    });
-    await fs.rm(path.join(rootDir, project.id, 'imports'), { recursive: true });
-
-    const detached = await media.detachBriefReferenceV2({
-      projectId: project.id,
-      assetId: imported.asset.id,
-      expectedRevision: imported.project.revision,
-    });
-
-    expect(Object.hasOwn(detached.assets, imported.asset.id)).toBe(false);
-    await expect(fs.readFile(source)).resolves.toEqual(png);
-  });
-
-  it('preserves a replacement installed at the detach cleanup ownership boundary', async () => {
-    const { rootDir, store, project } = await makeStoreV2();
-    const source = path.join(rootDir, 'source-look.png');
-    const replacement = path.join(rootDir, 'replacement-import');
-    await fs.writeFile(source, png);
-    await fs.writeFile(replacement, 'replacement owned elsewhere');
-    const canonicalRoot = await fs.realpath(rootDir);
-    const managed = path.join(canonicalRoot, project.id, 'imports', 'brief_1.png');
-    const media = createStudioMediaStore({
-      store,
-      createId: () => 'brief_1',
-      beforeCleanupOwnership: async (target) => {
-        if (target !== managed) return;
-        await fs.rm(target, { force: true });
-        await fs.rename(replacement, target);
-      },
-    });
-    const imported = await media.importReferenceFromPathV2({
-      projectId: project.id,
-      sourcePath: source,
-      briefReferenceRole: 'look',
-      expectedRevision: project.revision,
-      returnProject: true,
-    });
-
-    await media.detachBriefReferenceV2({
-      projectId: project.id,
-      assetId: 'brief_1',
-      expectedRevision: imported.project.revision,
-    });
-
-    await expect(fs.readFile(managed, 'utf8')).resolves.toBe('replacement owned elsewhere');
-    await expect(fs.readFile(source)).resolves.toEqual(png);
-    expect(await store.getProjectV2(project.id)).toMatchObject({ status: 'supported', project: { assets: {} } });
-  });
-
-  it('cleans only schema-2 regular parts and leaves prototype storage untouched', async () => {
+  it('cleans only schema-2 orphan parts and leaves prototype storage untouched', async () => {
     const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-media-v2-cleanup-'));
     created.push(rootDir);
     const store = createCreativeStudioStore({
@@ -4116,28 +3989,407 @@ describe('createStudioMediaStore schema 2', () => {
     const canonicalRoot = await fs.realpath(rootDir);
     const prototypeParts = path.join(canonicalRoot, 'prototype_1', 'parts');
     const v2Parts = path.join(canonicalRoot, 'project_v2', 'parts');
-    const racedPart = path.join(v2Parts, 'raced.part');
-    const replacement = path.join(rootDir, 'replacement-part');
     await fs.mkdir(prototypeParts);
     await fs.mkdir(v2Parts);
     await fs.writeFile(path.join(prototypeParts, 'prototype.part'), 'prototype');
     await fs.writeFile(path.join(v2Parts, 'orphan.part'), 'partial');
-    await fs.writeFile(racedPart, 'old partial');
-    await fs.writeFile(replacement, 'replacement partial');
     await fs.writeFile(path.join(v2Parts, 'keep.txt'), 'keep');
 
-    await createStudioMediaStore({
-      store,
-      beforeCleanupOwnership: async (target) => {
-        if (target !== racedPart) return;
-        await fs.rm(target, { force: true });
-        await fs.rename(replacement, target);
-      },
-    }).cleanupOrphanPartsV2();
+    await createStudioMediaStore({ store }).cleanupOrphanPartsV2();
 
     await expect(fs.readFile(path.join(prototypeParts, 'prototype.part'), 'utf8')).resolves.toBe('prototype');
     await expect(fs.access(path.join(v2Parts, 'orphan.part'))).rejects.toMatchObject({ code: 'ENOENT' });
-    await expect(fs.readFile(racedPart, 'utf8')).resolves.toBe('replacement partial');
     await expect(fs.readFile(path.join(v2Parts, 'keep.txt'), 'utf8')).resolves.toBe('keep');
+  });
+
+  it('extracts one trim-aware local conditioning frame and coalesces duplicate scheduling', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ purpose: 'video_take' });
+    let releaseExtraction!: () => void;
+    const extractionGate = new Promise<void>((resolve) => {
+      releaseExtraction = resolve;
+    });
+    const conditioningFrameExtractor = vi.fn(async (input: { destinationPath: string }) => {
+      await extractionGate;
+      await fs.writeFile(input.destinationPath, png);
+      return { source: 'local_decode' as const };
+    });
+    const media = createStudioMediaStore({
+      store,
+      createId: idSequence('take_1', 'frame_asset_1'),
+      probeVideoDurationSecondsV2: async () => 10,
+      conditioningFrameExtractor,
+    });
+    await media.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_1',
+      mediaKind: 'video',
+      declaredMimeType: 'video/mp4',
+      body: Readable.from([mp4]),
+    });
+    const extractionId = createStudioFrameExtractionId({
+      shotId: 'shot_1',
+      takeAssetId: 'take_1',
+      endpointSeconds: 8,
+    });
+    await store.updateProjectV2(project.id, (current) => {
+      current.shots.shot_1!.selectedTakeId = 'take_1';
+      current.shots.shot_1!.trimOutSeconds = 2;
+      current.frameExtractions[extractionId] = {
+        id: extractionId,
+        shotId: 'shot_1',
+        takeAssetId: 'take_1',
+        endpointSeconds: 8,
+        frameAssetId: null,
+        status: 'pending',
+        errorCode: null,
+      };
+      return current;
+    });
+
+    const first = media.extractConditioningFrameV2({ projectId: project.id, extractionId });
+    const duplicate = media.extractConditioningFrameV2({ projectId: project.id, extractionId });
+    expect(duplicate).toBe(first);
+    await vi.waitFor(() => expect(conditioningFrameExtractor).toHaveBeenCalledOnce());
+    releaseExtraction();
+    await expect(first).resolves.toMatchObject({
+      id: extractionId,
+      status: 'ready',
+      frameAssetId: 'frame_asset_1',
+      errorCode: null,
+    });
+    expect(conditioningFrameExtractor).toHaveBeenCalledWith({
+      sourcePath: expect.stringMatching(/[/\\]assets[/\\]take_1\.mp4$/),
+      sourceExpectation: {
+        byteSize: mp4.length,
+        sha256: createHash('sha256').update(mp4).digest('hex'),
+      },
+      destinationPath: expect.stringMatching(/[/\\]parts[/\\]frame_asset_1\.part$/),
+      endpointSeconds: 8,
+      sourceDurationSeconds: 10,
+      providerLastFramePath: null,
+      providerLastFrameExpectation: null,
+      allowProviderLastFrame: false,
+    });
+    const loaded = await store.getProjectV2(project.id);
+    expect(loaded).toMatchObject({
+      status: 'supported',
+      project: {
+        assets: {
+          frame_asset_1: {
+            shotId: 'shot_1',
+            mediaKind: 'image',
+            managedAsset: { collection: 'conditioningFrames', fileName: 'frame_asset_1.png' },
+          },
+        },
+        shots: { shot_1: { assetIds: ['seed_v2', 'take_1', 'frame_asset_1'] } },
+      },
+    });
+    const resolved = await media.resolveAssetV2(project.id, 'frame_asset_1');
+    const chunks: Buffer[] = [];
+    for await (const chunk of await resolved!.openVerifiedStream()) chunks.push(Buffer.from(chunk));
+    expect(Buffer.concat(chunks)).toEqual(png);
+
+    const framePath = path.join(rootDir, project.id, 'conditioningFrames', 'frame_asset_1.png');
+    const originalStats = await fs.stat(framePath);
+    await expect(media.verifyConditioningFrameV2({ projectId: project.id, extractionId })).resolves.toEqual({
+      extractionId,
+      shotId: 'shot_1',
+      takeAssetId: 'take_1',
+      endpointSeconds: 8,
+      frameAssetId: 'frame_asset_1',
+      byteSize: png.length,
+      sha256: createHash('sha256').update(png).digest('hex'),
+    });
+
+    const replacement = Buffer.from(png);
+    replacement[replacement.length - 1] ^= 0xff;
+    await fs.writeFile(framePath, replacement);
+    await fs.utimes(framePath, originalStats.atime, originalStats.mtime);
+    await expect(media.verifyConditioningFrameV2({ projectId: project.id, extractionId })).resolves.toBeNull();
+
+    await fs.writeFile(framePath, png);
+    await fs.utimes(framePath, originalStats.atime, originalStats.mtime);
+    await expect(media.verifyConditioningFrameV2({ projectId: project.id, extractionId })).resolves.not.toBeNull();
+    const renamedReplacement = path.join(rootDir, 'same-header-replacement.png');
+    await fs.writeFile(renamedReplacement, replacement);
+    await fs.utimes(renamedReplacement, originalStats.atime, originalStats.mtime);
+    await fs.rename(renamedReplacement, framePath);
+    await fs.utimes(framePath, originalStats.atime, originalStats.mtime);
+    await expect(media.verifyConditioningFrameV2({ projectId: project.id, extractionId })).resolves.toBeNull();
+  });
+
+  it('records a stable local extraction failure without creating frame bytes or paid work', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ purpose: 'video_take' });
+    const media = createStudioMediaStore({
+      store,
+      createId: idSequence('take_1', 'frame_asset_1'),
+      probeVideoDurationSecondsV2: async () => 10,
+      conditioningFrameExtractor: async () => {
+        throw new StudioConditioningFrameError('decode_failed');
+      },
+    });
+    await media.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_1',
+      mediaKind: 'video',
+      declaredMimeType: 'video/mp4',
+      body: Readable.from([mp4]),
+    });
+    const extractionId = createStudioFrameExtractionId({
+      shotId: 'shot_1',
+      takeAssetId: 'take_1',
+      endpointSeconds: 10,
+    });
+    const before = await store.updateProjectV2(project.id, (current) => {
+      current.shots.shot_1!.selectedTakeId = 'take_1';
+      current.frameExtractions[extractionId] = {
+        id: extractionId,
+        shotId: 'shot_1',
+        takeAssetId: 'take_1',
+        endpointSeconds: 10,
+        frameAssetId: null,
+        status: 'pending',
+        errorCode: null,
+      };
+      return current;
+    });
+
+    await expect(media.extractConditioningFrameV2({ projectId: project.id, extractionId })).rejects.toMatchObject({
+      code: 'decode_failed',
+    });
+    const loaded = await store.getProjectV2(project.id);
+    expect(loaded).toMatchObject({
+      status: 'supported',
+      project: {
+        frameExtractions: {
+          [extractionId]: { status: 'failed', frameAssetId: null, errorCode: 'decode_failed' },
+        },
+        spendAuthorizations: before.spendAuthorizations,
+        jobs: before.jobs,
+      },
+    });
+    await expect(fs.access(path.join(rootDir, project.id, 'parts', 'frame_asset_1.part'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it('persists each conditioning-frame byte, signature, quota, disk, and identity refusal', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ purpose: 'video_take' });
+    const setupMedia = createStudioMediaStore({
+      store,
+      createId: () => 'take_for_failures',
+      probeVideoDurationSecondsV2: async () => 10,
+    });
+    await setupMedia.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_1',
+      mediaKind: 'video',
+      declaredMimeType: 'video/mp4',
+      body: Readable.from([mp4]),
+    });
+    const extractionId = createStudioFrameExtractionId({
+      shotId: 'shot_1',
+      takeAssetId: 'take_for_failures',
+      endpointSeconds: 10,
+    });
+    await store.updateProjectV2(project.id, (current) => {
+      current.shots.shot_1!.selectedTakeId = 'take_for_failures';
+      current.frameExtractions[extractionId] = {
+        id: extractionId,
+        shotId: 'shot_1',
+        takeAssetId: 'take_for_failures',
+        endpointSeconds: 10,
+        frameAssetId: null,
+        status: 'pending',
+        errorCode: null,
+      };
+      return current;
+    });
+
+    const scenarios = [
+      {
+        id: 'frame_empty',
+        expectedCode: 'decode_failed',
+        extract: async (destinationPath: string) => fs.writeFile(destinationPath, Buffer.alloc(0)),
+      },
+      {
+        id: 'frame_video',
+        expectedCode: 'decode_failed',
+        extract: async (destinationPath: string) => fs.writeFile(destinationPath, mp4),
+      },
+      {
+        id: 'frame_asset_cap',
+        expectedCode: 'invalid_media',
+        limits: { imageOutputMaxBytes: png.length - 1 },
+        extract: async (destinationPath: string) => fs.writeFile(destinationPath, png),
+      },
+      {
+        id: 'frame_project_cap',
+        expectedCode: 'invalid_media',
+        limits: { projectMaxBytes: 1 },
+        extract: async (destinationPath: string) => fs.writeFile(destinationPath, png),
+      },
+      {
+        id: 'frame_no_disk',
+        expectedCode: 'storage_error',
+        diskBytes: 0,
+        extract: async (destinationPath: string) => fs.writeFile(destinationPath, png),
+      },
+      {
+        id: '../unsafe_frame',
+        expectedCode: 'storage_error',
+        extract: async (destinationPath: string) => fs.writeFile(destinationPath, png),
+      },
+    ] as const;
+
+    for (const scenario of scenarios) {
+      const conditioningFrameExtractor = vi.fn(async ({ destinationPath }: { destinationPath: string }) => {
+        await scenario.extract(destinationPath);
+        return { source: 'local_decode' as const };
+      });
+      const media = createStudioMediaStore({
+        store,
+        createId: () => scenario.id,
+        conditioningFrameExtractor,
+        ...('limits' in scenario ? { limits: scenario.limits } : {}),
+        ...('diskBytes' in scenario ? { getAvailableDiskBytes: async () => scenario.diskBytes } : {}),
+      });
+      // eslint-disable-next-line no-await-in-loop -- Every frame refusal must persist independently.
+      await expect(media.extractConditioningFrameV2({ projectId: project.id, extractionId })).rejects.toMatchObject({
+        code: scenario.expectedCode,
+      });
+      // eslint-disable-next-line no-await-in-loop -- Reset is the explicit provider-free retry transition.
+      await store.updateProjectV2(project.id, (current) => {
+        const extraction = current.frameExtractions[extractionId]!;
+        expect(extraction).toMatchObject({ status: 'failed', frameAssetId: null });
+        extraction.status = 'pending';
+        extraction.errorCode = null;
+        return current;
+      });
+      expect(conditioningFrameExtractor).toHaveBeenCalledTimes(scenario.id.startsWith('../') ? 0 : 1);
+    }
+    expect(await fs.readdir(path.join(rootDir, project.id, 'conditioningFrames')).catch(() => [])).toEqual([]);
+  });
+
+  it('adopts only an exact untrimmed Seedance provider last frame', async () => {
+    const { store, project } = await makeStoreV2({
+      purpose: 'video_take',
+      adapterId: 'byteplus-seedance-v1',
+    });
+    const conditioningFrameExtractor = vi.fn(async (input: { destinationPath: string }) => {
+      await fs.writeFile(input.destinationPath, png);
+      return { source: 'provider_last_frame' as const };
+    });
+    const media = createStudioMediaStore({
+      store,
+      createId: idSequence('take_1', 'poster_1', 'frame_asset_1'),
+      probeVideoDurationSecondsV2: async () => 10,
+      conditioningFrameExtractor,
+    });
+    await media.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_1',
+      mediaKind: 'video',
+      declaredMimeType: 'video/mp4',
+      body: Readable.from([mp4]),
+    });
+    await media.persistProviderPosterForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_1',
+      primaryAssetId: 'take_1',
+      declaredMimeType: 'image/png',
+      body: Readable.from([png]),
+    });
+    const extractionId = createStudioFrameExtractionId({
+      shotId: 'shot_1',
+      takeAssetId: 'take_1',
+      endpointSeconds: 10,
+    });
+    await store.updateProjectV2(project.id, (current) => {
+      current.shots.shot_1!.selectedTakeId = 'take_1';
+      current.frameExtractions[extractionId] = {
+        id: extractionId,
+        shotId: 'shot_1',
+        takeAssetId: 'take_1',
+        endpointSeconds: 10,
+        frameAssetId: null,
+        status: 'pending',
+        errorCode: null,
+      };
+      return current;
+    });
+
+    await media.extractConditioningFrameV2({ projectId: project.id, extractionId });
+    expect(conditioningFrameExtractor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowProviderLastFrame: true,
+        providerLastFramePath: expect.stringMatching(/[/\\]thumbnails[/\\]poster_1\.png$/),
+        providerLastFrameExpectation: {
+          byteSize: png.length,
+          sha256: createHash('sha256').update(png).digest('hex'),
+        },
+      })
+    );
+  });
+
+  it('re-derives a deleted ready frame into the same asset identity during recovery', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ purpose: 'video_take' });
+    const conditioningFrameExtractor = vi.fn(async (input: { destinationPath: string }) => {
+      await fs.writeFile(input.destinationPath, png);
+      return { source: 'local_decode' as const };
+    });
+    const media = createStudioMediaStore({
+      store,
+      createId: idSequence('take_1', 'frame_asset_1', 'must_not_allocate'),
+      probeVideoDurationSecondsV2: async () => 10,
+      conditioningFrameExtractor,
+    });
+    await media.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_1',
+      mediaKind: 'video',
+      declaredMimeType: 'video/mp4',
+      body: Readable.from([mp4]),
+    });
+    const extractionId = createStudioFrameExtractionId({
+      shotId: 'shot_1',
+      takeAssetId: 'take_1',
+      endpointSeconds: 10,
+    });
+    await store.updateProjectV2(project.id, (current) => {
+      current.shots.shot_1!.selectedTakeId = 'take_1';
+      current.frameExtractions[extractionId] = {
+        id: extractionId,
+        shotId: 'shot_1',
+        takeAssetId: 'take_1',
+        endpointSeconds: 10,
+        frameAssetId: null,
+        status: 'pending',
+        errorCode: null,
+      };
+      return current;
+    });
+    await media.extractConditioningFrameV2({ projectId: project.id, extractionId });
+    const framePath = path.join(rootDir, project.id, 'conditioningFrames', 'frame_asset_1.png');
+    await fs.rm(framePath);
+
+    await media.resumeConditioningFramesV2([project.id]);
+
+    expect(conditioningFrameExtractor).toHaveBeenCalledTimes(2);
+    const loaded = await store.getProjectV2(project.id);
+    expect(loaded).toMatchObject({
+      status: 'supported',
+      project: {
+        frameExtractions: { [extractionId]: { status: 'ready', frameAssetId: 'frame_asset_1' } },
+        jobs: { job_1: { id: 'job_1', status: 'succeeded' } },
+      },
+    });
+    await expect(fs.readFile(framePath)).resolves.toEqual(png);
   });
 });

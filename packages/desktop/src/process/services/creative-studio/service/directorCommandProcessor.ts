@@ -189,7 +189,6 @@ export const createStudioDirectorCommitTrackerV2 = (): StudioDirectorCommitTrack
       for (const operation of command.operations) {
         if (operation.kind === 'add_beat') {
           createdBeatIds.push(operation.beatId);
-          createdShotIds.push(operation.firstShotId);
         } else if (operation.kind === 'add_shot') {
           createdShotIds.push(operation.shotId);
         }
@@ -961,10 +960,15 @@ export const createStudioDirectorCommandProcessorV2 = (
         if (provenCommit !== null) {
           terminal = provenCommit;
         } else if (error instanceof StudioDirectorCommandApplyErrorV2) {
-          terminal =
-            error.reasonCode === 'deadline_elapsed'
-              ? expired(command, project.revision, 'deadline_elapsed')
-              : rejected(command, project.revision, error.reasonCode);
+          if (error.reasonCode === 'deadline_elapsed') {
+            terminal = expired(command, project.revision, 'deadline_elapsed');
+          } else {
+            const reasonCode: StudioDirectorCommandRejectionCodeV2 =
+              error.reasonCode === 'take_bin_capacity_reached' || error.reasonCode === 'undo_conflict'
+                ? 'invalid_operation'
+                : error.reasonCode;
+            terminal = rejected(command, project.revision, reasonCode);
+          }
         } else if (isStoreError(error, 'stale_project')) {
           terminal = rejected(command, await observedRevisionAfter(projectId, project.revision), 'stale_revision');
         } else if (isStoreError(error, 'not_found')) {

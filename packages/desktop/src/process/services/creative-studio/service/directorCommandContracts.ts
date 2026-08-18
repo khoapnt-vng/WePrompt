@@ -9,11 +9,8 @@ import {
   STUDIO_DIRECTOR_COMMAND_MAX_OPERATIONS,
   STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
   STUDIO_DIRECTOR_COMMAND_SLOT_LEASE_MS,
-  STUDIO_MAX_SHOTS_PER_BEAT,
   STUDIO_MAX_MUTATION_OPERATIONS,
   STUDIO_MAX_REFERENCE_REQUEST_SHOTS,
-  STUDIO_MAX_BEATS,
-  STUDIO_MAX_BIN_ITEMS,
   STUDIO_MAX_SHOT_SECONDS,
   STUDIO_MIN_SHOT_SECONDS,
   STUDIO_PROJECT_SCHEMA_VERSION,
@@ -27,6 +24,7 @@ import {
   type StudioDirectorCommandSlotV2,
   type StudioDirectorNewSceneV1,
   type StudioDirectorOperationV1,
+  type StudioDirectorOperationV2,
   type StudioMutationOperationV2,
   type StudioProposalDecisionV2,
   type StudioProposalRecordV2,
@@ -35,6 +33,7 @@ import {
   type StudioReferenceRequestV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { STUDIO_RULE_LIMITS } from '@/common/types/project/creativeStudioRules';
+import { validateStudioMutationOperationV2 } from './schema2/mutations';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -458,36 +457,6 @@ const V2_REJECTION_CODES = new Set([
   'validation_failed',
 ]);
 const V2_NULLABLE_EXPECTED_REVISION_CODES = new Set(['malformed_record', 'unsupported_version']);
-const V2_BEAT_KEYS = new Set(['title', 'action', 'look']);
-const V2_SHOT_KEYS = new Set(['line', 'narration', 'onScreenText', 'mediaKind', 'durationSeconds', 'referenceAssetId']);
-const V2_BEAT_CHANGE_KEYS = new Set(['title', 'action', 'look']);
-const V2_SHOT_CHANGE_KEYS = new Set([
-  'line',
-  'narration',
-  'onScreenText',
-  'mediaKind',
-  'durationSeconds',
-  'referenceAssetId',
-]);
-const V2_BIN_BEAT_KEYS = new Set(['kind', 'beatId']);
-const V2_BIN_TAKE_KEYS = new Set(['kind', 'assetId']);
-const V2_OPERATION_KEYS: Readonly<Record<StudioMutationOperationV2['kind'], ReadonlySet<string>>> = {
-  set_brief: new Set(['kind', 'brief']),
-  add_beat: new Set(['kind', 'beatId', 'beat', 'firstShotId', 'firstShot', 'beforeBeatId']),
-  edit_beat: new Set(['kind', 'beatId', 'changes']),
-  reorder_beats: new Set(['kind', 'beatOrder']),
-  park_beat: new Set(['kind', 'beatId']),
-  restore_beat: new Set(['kind', 'beatId', 'beforeBeatId']),
-  add_shot: new Set(['kind', 'beatId', 'shotId', 'shot', 'beforeShotId']),
-  edit_shot: new Set(['kind', 'shotId', 'changes']),
-  delete_shot: new Set(['kind', 'shotId']),
-  reorder_shots: new Set(['kind', 'beatId', 'shotOrder']),
-  park_take: new Set(['kind', 'shotId', 'assetId']),
-  restore_take: new Set(['kind', 'shotId', 'assetId']),
-  remove_bin_item: new Set(['kind', 'assetId']),
-  reorder_bin: new Set(['kind', 'bin']),
-  select_take: new Set(['kind', 'shotId', 'assetId']),
-};
 const V2_PROPOSAL_RECORD_KEYS = new Set([
   'schemaVersion',
   'id',
@@ -597,148 +566,39 @@ const isUniqueSafeIdArrayV2 = (value: unknown, minimum: number, maximum: number)
   return true;
 };
 
-const isV2MediaKind = (value: unknown): value is 'image' | 'video' => value === 'image' || value === 'video';
-
-const isV2Duration = (mediaKind: 'image' | 'video', value: unknown): value is number =>
-  typeof value === 'number' &&
-  Number.isSafeInteger(value) &&
-  value >= (mediaKind === 'video' ? STUDIO_MIN_SHOT_SECONDS : 1) &&
-  value <= (mediaKind === 'video' ? STUDIO_MAX_SHOT_SECONDS : 60);
-
-const isV2Anchor = (value: unknown): value is string | null => value === null || isSafeStudioDirectorId(value);
-
-const validateEditableBeatV2 = (value: unknown): boolean =>
-  isRecord(value) &&
-  hasExactKeysV2(value, V2_BEAT_KEYS) &&
-  isText(value.title, 256) &&
-  isText(value.action, 4 * 1024) &&
-  isText(value.look, 8 * 1024);
-
-const validateEditableShotV2 = (value: unknown): boolean =>
-  isRecord(value) &&
-  hasExactKeysV2(value, V2_SHOT_KEYS) &&
-  isText(value.line, 8 * 1024) &&
-  isText(value.narration, 4 * 1024) &&
-  isText(value.onScreenText, 1024) &&
-  isV2MediaKind(value.mediaKind) &&
-  isV2Duration(value.mediaKind, value.durationSeconds) &&
-  (value.referenceAssetId === null || isSafeStudioDirectorId(value.referenceAssetId));
-
-const validateEditableBeatChangesV2 = (value: unknown): boolean => {
-  if (!isRecord(value)) return false;
-  const keys = Object.keys(value);
-  return (
-    keys.length > 0 &&
-    keys.every((key) => V2_BEAT_CHANGE_KEYS.has(key)) &&
-    (!Object.hasOwn(value, 'title') || isText(value.title, 256)) &&
-    (!Object.hasOwn(value, 'action') || isText(value.action, 4 * 1024)) &&
-    (!Object.hasOwn(value, 'look') || isText(value.look, 8 * 1024))
-  );
-};
-
-const validateEditableShotChangesV2 = (value: unknown): boolean => {
-  if (!isRecord(value)) return false;
-  const keys = Object.keys(value);
-  if (keys.length === 0 || !keys.every((key) => V2_SHOT_CHANGE_KEYS.has(key))) return false;
-  if (Object.hasOwn(value, 'line') && !isText(value.line, 8 * 1024)) return false;
-  if (Object.hasOwn(value, 'narration') && !isText(value.narration, 4 * 1024)) return false;
-  if (Object.hasOwn(value, 'onScreenText') && !isText(value.onScreenText, 1024)) return false;
-  if (Object.hasOwn(value, 'mediaKind') && !isV2MediaKind(value.mediaKind)) return false;
-  if (
-    Object.hasOwn(value, 'referenceAssetId') &&
-    value.referenceAssetId !== null &&
-    !isSafeStudioDirectorId(value.referenceAssetId)
-  ) {
-    return false;
-  }
-  if (Object.hasOwn(value, 'durationSeconds')) {
-    if (typeof value.durationSeconds !== 'number' || !Number.isSafeInteger(value.durationSeconds)) return false;
-    if (isV2MediaKind(value.mediaKind)) return isV2Duration(value.mediaKind, value.durationSeconds);
-    if (value.durationSeconds < 1 || value.durationSeconds > 60) return false;
-  }
-  return true;
-};
-
-const validateBinV2 = (value: unknown): boolean => {
-  if (!isDenseArrayV2(value, 0, STUDIO_MAX_BIN_ITEMS)) return false;
-  const identities = new Set<string>();
-  for (let index = 0; index < value.length; index += 1) {
-    const item = value[index];
-    if (!isRecord(item)) return false;
-    let identity: string;
-    if (item.kind === 'beat') {
-      if (!hasExactKeysV2(item, V2_BIN_BEAT_KEYS) || !isSafeStudioDirectorId(item.beatId)) return false;
-      identity = `beat:${item.beatId}`;
-    } else if (item.kind === 'take') {
-      if (!hasExactKeysV2(item, V2_BIN_TAKE_KEYS) || !isSafeStudioDirectorId(item.assetId)) return false;
-      identity = `take:${item.assetId}`;
-    } else {
-      return false;
-    }
-    if (identities.has(identity)) return false;
-    identities.add(identity);
-  }
-  return true;
-};
-
-const validateOperationV2 = (value: unknown): value is StudioMutationOperationV2 => {
-  if (!isRecord(value) || typeof value.kind !== 'string' || !Object.hasOwn(V2_OPERATION_KEYS, value.kind)) {
-    return false;
-  }
-  const kind = value.kind as StudioMutationOperationV2['kind'];
-  if (!hasExactKeysV2(value, V2_OPERATION_KEYS[kind])) return false;
-  switch (kind) {
-    case 'set_brief':
-      return isText(value.brief, 16 * 1024);
-    case 'add_beat':
-      return (
-        isSafeStudioDirectorId(value.beatId) &&
-        validateEditableBeatV2(value.beat) &&
-        isSafeStudioDirectorId(value.firstShotId) &&
-        validateEditableShotV2(value.firstShot) &&
-        isV2Anchor(value.beforeBeatId)
-      );
-    case 'edit_beat':
-      return isSafeStudioDirectorId(value.beatId) && validateEditableBeatChangesV2(value.changes);
-    case 'reorder_beats':
-      return isUniqueSafeIdArrayV2(value.beatOrder, 0, STUDIO_MAX_BEATS);
-    case 'park_beat':
-      return isSafeStudioDirectorId(value.beatId);
-    case 'restore_beat':
-      return isSafeStudioDirectorId(value.beatId) && isV2Anchor(value.beforeBeatId);
-    case 'add_shot':
-      return (
-        isSafeStudioDirectorId(value.beatId) &&
-        isSafeStudioDirectorId(value.shotId) &&
-        validateEditableShotV2(value.shot) &&
-        isV2Anchor(value.beforeShotId)
-      );
-    case 'edit_shot':
-      return isSafeStudioDirectorId(value.shotId) && validateEditableShotChangesV2(value.changes);
-    case 'delete_shot':
-      return isSafeStudioDirectorId(value.shotId);
-    case 'reorder_shots':
-      return (
-        isSafeStudioDirectorId(value.beatId) && isUniqueSafeIdArrayV2(value.shotOrder, 0, STUDIO_MAX_SHOTS_PER_BEAT)
-      );
-    case 'park_take':
-    case 'restore_take':
-    case 'select_take':
-      return isSafeStudioDirectorId(value.shotId) && isSafeStudioDirectorId(value.assetId);
-    case 'remove_bin_item':
-      return isSafeStudioDirectorId(value.assetId);
-    case 'reorder_bin':
-      return validateBinV2(value.bin);
-  }
-};
-
 const validateOperationListV2 = (value: unknown): value is StudioMutationOperationV2[] => {
   if (!isDenseArrayV2(value, 1, STUDIO_MAX_MUTATION_OPERATIONS)) return false;
   for (let index = 0; index < value.length; index += 1) {
-    if (!validateOperationV2(value[index])) return false;
+    if (!validateStudioMutationOperationV2(value[index])) return false;
   }
   return true;
 };
+
+const DIRECTOR_OPERATION_KINDS_V2: ReadonlySet<string> = new Set([
+  'set_brief',
+  'add_beat',
+  'edit_beat',
+  'reorder_beats',
+  'add_shot',
+  'edit_shot',
+  'delete_shot',
+  'reorder_shots',
+  'reorder_bin',
+]);
+
+const validateDirectorOperationListV2 = (value: unknown): value is StudioDirectorOperationV2[] =>
+  validateOperationListV2(value) &&
+  value.every(
+    (operation) =>
+      DIRECTOR_OPERATION_KINDS_V2.has(operation.kind) &&
+      (operation.kind !== 'add_shot' ||
+        (operation.shot.durationSeconds >= STUDIO_MIN_SHOT_SECONDS &&
+          operation.shot.durationSeconds <= STUDIO_MAX_SHOT_SECONDS)) &&
+      (operation.kind !== 'edit_shot' ||
+        operation.changes.durationSeconds === undefined ||
+        (operation.changes.durationSeconds >= STUDIO_MIN_SHOT_SECONDS &&
+          operation.changes.durationSeconds <= STUDIO_MAX_SHOT_SECONDS))
+  );
 
 const recoverExpectedRevisionV2 = (value: unknown, projectId: string, commandId: string): number | null => {
   try {
@@ -911,7 +771,7 @@ export function parseStudioDirectorPendingRecordV2(input: {
     deadlineAt <= createdAt ||
     deadlineAt - createdAt > input.waitMs ||
     value.policy !== 'auto_apply' ||
-    !validateOperationListV2(value.operations)
+    !validateDirectorOperationListV2(value.operations)
   ) {
     return invalidCommandV2(input.value, input.projectId, input.commandId, 'malformed_record');
   }

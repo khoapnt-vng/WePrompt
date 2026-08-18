@@ -12,6 +12,10 @@ import {
   isCanonicalStudioGeneratedTake,
   isCanonicalStudioGeneratedTakeV2,
 } from '@/common/types/project/creativeStudioCanonicalTake';
+import {
+  STUDIO_MANAGED_ASSET_COLLECTIONS,
+  STUDIO_MANAGED_ASSET_COLLECTIONS_V2,
+} from '@/common/types/project/creativeStudioManagedAssetCollections';
 
 const makeScene = (overrides: Partial<StudioScene> = {}): StudioScene => ({
   id: 'scene_1',
@@ -102,11 +106,15 @@ describe('isCanonicalStudioGeneratedTake', () => {
 const makeShot = (overrides: Partial<StudioShot> = {}): StudioShot => ({
   id: 'clip_1',
   line: 'A product reveal',
+  derivation: 'derived',
+  derivedFromActionRevision: 1,
   narration: '',
   onScreenText: '',
-  mediaKind: 'image',
-  durationSeconds: 1,
-  referenceAssetId: null,
+  durationSeconds: 4,
+  trimInSeconds: null,
+  trimOutSeconds: null,
+  chainBreak: 'none',
+  seedStillId: null,
   selectedTakeId: null,
   assetIds: ['asset_1'],
   jobIds: [],
@@ -150,8 +158,15 @@ describe('isCanonicalStudioGeneratedTakeV2', () => {
       expected: false,
     },
     {
-      label: 'rejects a take with a different media kind',
+      label: 'accepts a generated video take for an all-video Shot',
       asset: makeAssetV2({ mediaKind: 'video', mimeType: 'video/mp4', durationSeconds: 4 }),
+      projectId: 'project_1',
+      shot: makeShot(),
+      expected: true,
+    },
+    {
+      label: 'rejects generated audio as a take',
+      asset: makeAssetV2({ mediaKind: 'audio', mimeType: 'audio/wav', durationSeconds: 4 }),
       projectId: 'project_1',
       shot: makeShot(),
       expected: false,
@@ -172,5 +187,14 @@ describe('isCanonicalStudioGeneratedTakeV2', () => {
     },
   ])('$label', ({ asset, projectId, shot, expected }) => {
     expect(isCanonicalStudioGeneratedTakeV2(asset, projectId, shot)).toBe(expected);
+  });
+});
+
+describe('managed asset collection contracts', () => {
+  it('keeps the widened V2 collections isolated from the byte-identical V1 collection set', () => {
+    expect([...STUDIO_MANAGED_ASSET_COLLECTIONS]).toEqual(['assets', 'imports', 'thumbnails', 'references']);
+    expect([...STUDIO_MANAGED_ASSET_COLLECTIONS_V2]).toEqual(['assets', 'imports', 'thumbnails', 'conditioningFrames']);
+    expect(STUDIO_MANAGED_ASSET_COLLECTIONS.has('conditioningFrames' as never)).toBe(false);
+    expect(STUDIO_MANAGED_ASSET_COLLECTIONS_V2.has('references' as never)).toBe(false);
   });
 });

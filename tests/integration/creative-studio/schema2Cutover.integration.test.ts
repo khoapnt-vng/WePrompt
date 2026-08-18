@@ -516,6 +516,7 @@ describe('Creative Studio schema-2 storage cutover', () => {
         expectedRevision: 1,
         operations: [{ kind: 'set_brief', brief: 'Committed after restart' }],
       },
+      { mutationId: 'mutation_schema2_cutover', capturedAt: FIXTURE_TIME },
       'schema2-cutover-proof'
     );
     expect(applied).toMatchObject({

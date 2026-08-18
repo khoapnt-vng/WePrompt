@@ -15,11 +15,10 @@ import {
   type StudioE2EFakeBundle,
   type StudioE2EFakeRemoteState,
 } from '@process/services/creative-studio/adapters/e2eFakeAdapter';
-import { createCreativeStudioService } from '@process/services/creative-studio/service';
+import { createCreativeStudioService, createCreativeStudioServiceV2 } from '@process/services/creative-studio/service';
 import {
   createStudioJobManager,
   type StudioJobManager,
-  type StudioResolvedShotRouteSnapshotV2,
   type StudioResolvedSceneRouteSnapshot,
 } from '@process/services/creative-studio/jobManager';
 import { createStudioMediaStore } from '@process/services/creative-studio/mediaStore';
@@ -28,6 +27,7 @@ import {
   type StudioGenerationRouteCatalog,
   type StudioProviderResolver,
 } from '@process/services/creative-studio/providerResolver';
+import { createStudioRateCardV2 } from '@process/services/creative-studio/service/schema2/pricing';
 import {
   createCreativeStudioRuntime,
   type CreativeStudioRuntime,
@@ -657,7 +657,7 @@ describe('Creative Studio project recovery integration', () => {
     });
   });
 
-  it('recovers a shot-owned remote job after restart even when its beat was parked', async () => {
+  it('recovers paid shot work while its beat is active and retains history after parking', async () => {
     const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-v2-recovery-integration-'));
     const remoteState = createStudioE2EFakeRemoteState();
     const fake = createStudioE2EFakeBundle({ rootDir, remoteState });
@@ -669,17 +669,11 @@ describe('Creative Studio project recovery integration', () => {
       const providerResolver = resolverFor(store, listProviders);
       const catalog = await providerResolver.listGenerationRoutes();
       const imageRoute = catalog.routes.find((candidate) => candidate.kind === 'image');
-      if (!imageRoute) throw new Error('V2 recovery did not resolve the fake image route');
-      const route: StudioResolvedShotRouteSnapshotV2 = {
-        shotId: 'clip_recovery',
-        providerId: imageRoute.providerId,
-        adapterId: imageRoute.adapterId,
-        model: imageRoute.model,
-        kind: 'image',
-      };
+      const videoRoute = catalog.routes.find((candidate) => candidate.kind === 'video');
+      if (!imageRoute || !videoRoute) throw new Error('V2 recovery did not resolve the fake media routes');
       const created = await store.createProjectV2({
         name: 'Durable V2 film',
-        brief: 'Recover already-paid shot work after parking',
+        brief: 'Recover already-paid shot work before parking',
         aspectRatio: '16:9',
         targetDurationSeconds: 5,
         resolution: '720p',
@@ -700,53 +694,101 @@ describe('Creative Studio project recovery integration', () => {
             title: 'Recovery beat',
             action: 'Keep the paid work durable',
             look: 'A sunrise reflected in a glass city',
+            actionRevision: 1,
+            targetSeconds: null,
             shotOrder: ['clip_recovery'],
+            lineHistory: [],
           },
         },
         shots: {
           clip_recovery: {
             id: 'clip_recovery',
             line: 'A paper aircraft crosses the reflection',
+            derivation: 'derived',
+            derivedFromActionRevision: 1,
             narration: '',
             onScreenText: '',
-            mediaKind: 'image',
             durationSeconds: 5,
-            referenceAssetId: null,
+            trimInSeconds: null,
+            trimOutSeconds: null,
+            chainBreak: 'none',
+            seedStillId: null,
             selectedTakeId: null,
             assetIds: [],
             jobIds: [],
           },
         },
-        routing: {
-          image: {
-            providerId: route.providerId,
-            adapterId: route.adapterId,
-            model: route.model,
-          },
-          video: null,
-        },
+        imageRouteId: imageRoute.choiceId,
+        videoRouteId: videoRoute.choiceId,
       }));
+      const mediaStore = createStudioMediaStore({ store });
       const beforeClock = new ControlledPollClock();
       const before = createStudioJobManager({
         store,
-        mediaStore: createStudioMediaStore({ store }),
+        mediaStore,
         providerResolver,
         adapters: fake.adapters,
         listProviders,
-        createJobId: () => 'job_v2_recovery',
-        createIdempotencyKey: () => 'idempotency_v2_recovery',
         sleep: beforeClock.sleep,
         jitterMs: (baseMs) => baseMs,
       });
       managers.push({ manager: before, clock: beforeClock });
-
-      await before.submitShots({
+      const rateCard = createStudioRateCardV2([
+        {
+          routeId: imageRoute.choiceId,
+          kind: 'image',
+          currency: 'USD',
+          rateUnit: 'generation',
+          rateMinorUnits: 3,
+        },
+        {
+          routeId: videoRoute.choiceId,
+          kind: 'video',
+          currency: 'USD',
+          rateUnit: 'second',
+          rateMinorUnits: 5,
+        },
+      ]);
+      let quoteIndex = 0;
+      const beforeService = createCreativeStudioServiceV2({
+        store,
+        mediaStore,
+        providerResolver,
+        jobManager: before,
+        rateCard: async () => rateCard,
+        createQuoteId: () => `quote_v2_recovery_${++quoteIndex}`,
+        createJobId: () => 'job_v2_recovery',
+        createIdempotencyKey: () => 'idempotency_v2_recovery',
+        onProjectUpdated: () => {},
+      });
+      const prepared = await beforeService.prepareSubmission({
         projectId: configured.id,
         expectedRevision: configured.revision,
-        shotIds: ['clip_recovery'],
-        routes: [route],
-        catalogVersion: catalog.generationCatalogVersion,
+        originReferenceHandoffId: null,
+        baseChoices: [
+          {
+            shotId: 'clip_recovery',
+            purpose: 'seed_still',
+            generationCount: 1,
+            referenceAssetId: null,
+          },
+        ],
+        cascadeChoices: [
+          {
+            shotId: 'clip_recovery',
+            purpose: 'video_take',
+            generationCount: 1,
+            referenceAssetId: null,
+          },
+        ],
       });
+      await expect(
+        beforeService.confirmSubmission({
+          projectId: configured.id,
+          quoteId: prepared.baseOnly.id,
+          expectedRevision: configured.revision,
+        })
+      ).resolves.toEqual({ projectId: configured.id, projectRevision: configured.revision + 1 });
       const pending = await waitFor(async () => {
         try {
           const loaded = await store.getProjectV2(configured.id);
@@ -757,12 +799,8 @@ describe('Creative Studio project recovery integration', () => {
           return null;
         }
       });
-      await store.updateProjectV2(configured.id, (project) => ({
-        ...project,
-        beatOrder: [],
-        bin: [{ kind: 'beat', beatId: 'section_recovery' }],
-      }));
       await beforeClock.take(2_000);
+      beforeService.dispose();
       await before.dispose();
 
       const restartedStore = createCreativeStudioStore({ rootDir });
@@ -800,26 +838,52 @@ describe('Creative Studio project recovery integration', () => {
           return null;
         }
       });
-      const recoveredJob = recovered.jobs.job_v2_recovery;
-      const selectedTakeId = recovered.shots.clip_recovery.selectedTakeId;
+      const parked = await restartedStore.updateProjectV2(
+        configured.id,
+        (project) => ({
+          ...project,
+          beatOrder: [],
+          bin: [...project.bin, { kind: 'beat' as const, beatId: 'section_recovery', reason: 'lifted' as const }],
+        }),
+        recovered.revision,
+        'park_recovered_beat'
+      );
+      const recoveredJob = parked.jobs.job_v2_recovery;
+      const primaryAssetId = recoveredJob.outputAssetIdsByRole.primary;
       expect({
         providerJobId: recoveredJob.providerJobId,
         status: recoveredJob.status,
         shotId: recoveredJob.shotId,
+        purpose: recoveredJob.purpose,
+        authorizationId: recoveredJob.authorizationId,
+        receiptAuthorizationId: recoveredJob.spendReceipt?.authorizationId,
         outputAssetIds: recoveredJob.outputAssetIds,
-        selectedTakeId,
-        assetShotId: selectedTakeId ? recovered.assets[selectedTakeId]?.shotId : null,
-        beatOrder: recovered.beatOrder,
-        bin: recovered.bin,
+        outputAssetIdsByRole: recoveredJob.outputAssetIdsByRole,
+        shotJobIds: parked.shots.clip_recovery.jobIds,
+        shotAssetIds: parked.shots.clip_recovery.assetIds,
+        selectedTakeId: parked.shots.clip_recovery.selectedTakeId,
+        assetShotId: primaryAssetId ? parked.assets[primaryAssetId]?.shotId : null,
+        assetMediaKind: primaryAssetId ? parked.assets[primaryAssetId]?.mediaKind : null,
+        authorizationIds: parked.spendAuthorizations.map((authorization) => authorization.id),
+        beatOrder: parked.beatOrder,
+        bin: parked.bin,
       }).toEqual({
         providerJobId: pending.providerJobId,
         status: 'succeeded',
         shotId: 'clip_recovery',
-        outputAssetIds: [selectedTakeId],
-        selectedTakeId,
+        purpose: 'seed_still',
+        authorizationId: prepared.baseOnly.id,
+        receiptAuthorizationId: prepared.baseOnly.id,
+        outputAssetIds: [primaryAssetId],
+        outputAssetIdsByRole: { primary: primaryAssetId, poster: null },
+        shotJobIds: ['job_v2_recovery'],
+        shotAssetIds: [primaryAssetId],
+        selectedTakeId: null,
         assetShotId: 'clip_recovery',
+        assetMediaKind: 'image',
+        authorizationIds: [prepared.baseOnly.id],
         beatOrder: [],
-        bin: [{ kind: 'beat', beatId: 'section_recovery' }],
+        bin: [{ kind: 'beat', beatId: 'section_recovery', reason: 'lifted' }],
       });
       expect(listProjectsV1).not.toHaveBeenCalled();
       expect(getProjectV1).not.toHaveBeenCalled();

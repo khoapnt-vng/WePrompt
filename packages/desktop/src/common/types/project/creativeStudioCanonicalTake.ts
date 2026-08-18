@@ -18,6 +18,6 @@ export const isCanonicalStudioGeneratedTake = (asset: StudioAsset, projectId: st
 export const isCanonicalStudioGeneratedTakeV2 = (asset: StudioAssetV2, projectId: string, shot: StudioShot): boolean =>
   asset.projectId === projectId &&
   asset.shotId === shot.id &&
-  asset.mediaKind === shot.mediaKind &&
+  (asset.mediaKind === 'image' || asset.mediaKind === 'video') &&
   asset.managedAsset.collection === 'assets' &&
   shot.assetIds.includes(asset.id);

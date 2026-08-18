@@ -3,37 +3,44 @@ import { defineConfig } from 'vitest/config';
 import baseConfig from './vitest.config';
 
 /**
- * Executable Creative Studio production files changed since the frozen Phase 2B baseline
- * (21bf87ae1674598bd42ea88c5f13c74e8389b3c0). Keep this list explicit: delivery gates review the
+ * Executable Creative Studio production files changed since the frozen Task 1B baseline
+ * (b37e00e4f6c2ca88b1f0b5a47cbb568ff4df92af). Keep this list explicit: delivery gates review the
  * diff and extend the manifest whenever a later task changes another runtime file.
  */
 const creativeStudioRuntimeManifest = [
   'packages/desktop/src/common/types/project/creativeStudioCanonicalTake.ts',
+  'packages/desktop/src/common/types/project/creativeStudioManagedAssetCollections.ts',
   'packages/desktop/src/common/types/project/creativeStudioOutputRole.ts',
   'packages/desktop/src/common/types/project/creativeStudioProjectSummary.ts',
   'packages/desktop/src/common/types/project/creativeStudioTypes.ts',
-  'packages/desktop/src/process/bridge/creativeStudioBridge.ts',
   'packages/desktop/src/process/resources/builtinMcp/studioDirectorCommandWriter.ts',
-  'packages/desktop/src/process/resources/builtinMcp/studioPendingRecordWriter.ts',
-  'packages/desktop/src/process/resources/builtinMcp/studioProposalWriter.ts',
-  'packages/desktop/src/process/resources/builtinMcp/studioReferenceRequestWriter.ts',
   'packages/desktop/src/process/resources/builtinMcp/studioServer.ts',
-  'packages/desktop/src/process/services/creative-studio/adapters/types.ts',
-  'packages/desktop/src/process/services/creative-studio/index.ts',
+  'packages/desktop/src/process/services/creative-studio/adapters/conditioningFrame.ts',
   'packages/desktop/src/process/services/creative-studio/jobManager.ts',
   'packages/desktop/src/process/services/creative-studio/mediaStore.ts',
   'packages/desktop/src/process/services/creative-studio/renderService.ts',
   'packages/desktop/src/process/services/creative-studio/service/directorCommandContracts.ts',
-  'packages/desktop/src/process/services/creative-studio/service/directorCommandMailbox.ts',
   'packages/desktop/src/process/services/creative-studio/service/directorCommandProcessor.ts',
   'packages/desktop/src/process/services/creative-studio/service/directorCommandService.ts',
   'packages/desktop/src/process/services/creative-studio/service/index.ts',
-  'packages/desktop/src/process/services/creative-studio/service/projectMutations.ts',
-  'packages/desktop/src/process/services/creative-studio/service/schema2/cuts.ts',
+  'packages/desktop/src/process/services/creative-studio/service/schema2/chain.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/factories.ts',
+  'packages/desktop/src/process/services/creative-studio/service/schema2/generation/frameExtraction.ts',
+  'packages/desktop/src/process/services/creative-studio/service/schema2/generation/generationRequest.ts',
+  'packages/desktop/src/process/services/creative-studio/service/schema2/generation/index.ts',
+  'packages/desktop/src/process/services/creative-studio/service/schema2/generation/spendMath.ts',
+  'packages/desktop/src/process/services/creative-studio/service/schema2/generation/submissionIdentity.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/index.ts',
+  'packages/desktop/src/process/services/creative-studio/service/schema2/lifecycle.ts',
+  'packages/desktop/src/process/services/creative-studio/service/schema2/mutationIdentity.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/mutations.ts',
+  'packages/desktop/src/process/services/creative-studio/service/schema2/preparedSubmissionCache.ts',
+  'packages/desktop/src/process/services/creative-studio/service/schema2/pricing/authorization.ts',
+  'packages/desktop/src/process/services/creative-studio/service/schema2/pricing/estimate.ts',
+  'packages/desktop/src/process/services/creative-studio/service/schema2/pricing/index.ts',
+  'packages/desktop/src/process/services/creative-studio/service/schema2/pricing/rateCard.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/validation.ts',
+  'packages/desktop/src/process/services/creative-studio/service/schema2/workspaceStatus.ts',
   'packages/desktop/src/process/services/creative-studio/service/v2Service.ts',
   'packages/desktop/src/process/services/creative-studio/store.ts',
 ] as const;

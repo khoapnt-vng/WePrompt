@@ -454,16 +454,19 @@ describe('Studio Director schema-2 latency fixture', () => {
       operations: [
         {
           kind: 'add_beat',
-          beat: { title: 'Opening', action: '', look: 'Cinematic light' },
-          firstShot: {
+          beat: { title: 'Opening', action: '', look: 'Cinematic light', targetSeconds: null },
+          beforeBeatId: null,
+        },
+        {
+          kind: 'add_shot',
+          beatId: 'section_latency_v2',
+          shot: {
             line: 'Product reveal',
             narration: '',
             onScreenText: '',
-            mediaKind: 'image',
             durationSeconds: 5,
-            referenceAssetId: null,
           },
-          beforeBeatId: null,
+          beforeShotId: null,
         },
       ],
     });

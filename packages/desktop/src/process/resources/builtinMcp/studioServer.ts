@@ -31,7 +31,9 @@ import {
   STUDIO_MAX_REFERENCE_REQUEST_SCENES,
   STUDIO_MAX_SCENES,
   STUDIO_MAX_BEATS,
-  STUDIO_MAX_BIN_ITEMS,
+  STUDIO_MAX_BIN_BEAT_ITEMS,
+  STUDIO_MAX_BIN_SHOT_ITEMS,
+  STUDIO_MAX_BIN_TAKE_ITEMS,
   STUDIO_MAX_SHOT_SECONDS,
   STUDIO_MIN_SHOT_SECONDS,
   STUDIO_DIRECTOR_COMMAND_MAX_OPERATIONS,
@@ -297,27 +299,12 @@ export const studioGetCommandStatusInputSchema = z
   .strict();
 
 const studioDirectorIdSchemaV2 = z4.string().min(1).max(256).regex(SAFE_ID);
-const videoDurationJsonSchemaV2 = {
-  allOf: [
-    {
-      if: { properties: { mediaKind: { const: 'video' } }, required: ['mediaKind'] },
-      then: {
-        properties: {
-          durationSeconds: {
-            minimum: STUDIO_MIN_SHOT_SECONDS,
-            maximum: STUDIO_MAX_SHOT_SECONDS,
-          },
-        },
-      },
-    },
-  ],
-};
-
 const studioBeatInputSchemaV2 = z4
   .object({
     title: z4.string().max(256),
     action: z4.string().max(4 * 1024),
     look: z4.string().max(8 * 1024),
+    targetSeconds: z4.number().int().min(1).max(1440).nullable(),
   })
   .strict();
 
@@ -326,25 +313,15 @@ const studioShotInputSchemaV2 = z4
     line: z4.string().max(8 * 1024),
     narration: z4.string().max(4 * 1024),
     onScreenText: z4.string().max(1024),
-    mediaKind: z4.enum(['image', 'video']),
-    durationSeconds: z4.number().int().min(1).max(60),
-    referenceAssetId: studioDirectorIdSchemaV2.nullable(),
+    durationSeconds: z4.number().int().min(STUDIO_MIN_SHOT_SECONDS).max(STUDIO_MAX_SHOT_SECONDS),
   })
-  .strict()
-  .superRefine((shot, context) => {
-    if (
-      shot.mediaKind === 'video' &&
-      (shot.durationSeconds < STUDIO_MIN_SHOT_SECONDS || shot.durationSeconds > STUDIO_MAX_SHOT_SECONDS)
-    ) {
-      context.addIssue({ code: 'custom', path: ['durationSeconds'], message: 'Invalid video shot duration.' });
-    }
-  })
-  .meta(videoDurationJsonSchemaV2);
+  .strict();
 
 const studioBeatChangesFieldsV2 = {
   title: z4.string().max(256),
   action: z4.string().max(4 * 1024),
   look: z4.string().max(8 * 1024),
+  targetSeconds: z4.number().int().min(1).max(1440).nullable(),
 };
 const studioBeatChangesSchemaV2 = z4.union([
   z4.object(studioBeatChangesFieldsV2).partial().required({ title: true }).strict(),
@@ -356,33 +333,38 @@ const studioShotChangesFieldsV2 = {
   line: z4.string().max(8 * 1024),
   narration: z4.string().max(4 * 1024),
   onScreenText: z4.string().max(1024),
-  mediaKind: z4.enum(['image', 'video']),
-  durationSeconds: z4.number().int().min(1).max(60),
-  referenceAssetId: studioDirectorIdSchemaV2.nullable(),
+  durationSeconds: z4.number().int().min(STUDIO_MIN_SHOT_SECONDS).max(STUDIO_MAX_SHOT_SECONDS),
 };
-const studioShotChangesSchemaV2 = z4
-  .union([
-    z4.object(studioShotChangesFieldsV2).partial().required({ line: true }).strict(),
-    z4.object(studioShotChangesFieldsV2).partial().required({ narration: true }).strict(),
-    z4.object(studioShotChangesFieldsV2).partial().required({ onScreenText: true }).strict(),
-    z4.object(studioShotChangesFieldsV2).partial().required({ mediaKind: true }).strict(),
-    z4.object(studioShotChangesFieldsV2).partial().required({ durationSeconds: true }).strict(),
-    z4.object(studioShotChangesFieldsV2).partial().required({ referenceAssetId: true }).strict(),
-  ])
-  .superRefine((changes, context) => {
-    if (
-      changes.mediaKind === 'video' &&
-      changes.durationSeconds !== undefined &&
-      (changes.durationSeconds < STUDIO_MIN_SHOT_SECONDS || changes.durationSeconds > STUDIO_MAX_SHOT_SECONDS)
-    ) {
-      context.addIssue({ code: 'custom', path: ['durationSeconds'], message: 'Invalid video shot duration.' });
-    }
-  })
-  .meta(videoDurationJsonSchemaV2);
+const studioShotChangesSchemaV2 = z4.union([
+  z4.object(studioShotChangesFieldsV2).partial().required({ line: true }).strict(),
+  z4.object(studioShotChangesFieldsV2).partial().required({ narration: true }).strict(),
+  z4.object(studioShotChangesFieldsV2).partial().required({ onScreenText: true }).strict(),
+  z4.object(studioShotChangesFieldsV2).partial().required({ durationSeconds: true }).strict(),
+]);
 
 const studioBinItemSchemaV2 = z4.discriminatedUnion('kind', [
-  z4.object({ kind: z4.literal('beat'), beatId: studioDirectorIdSchemaV2 }).strict(),
-  z4.object({ kind: z4.literal('take'), assetId: studioDirectorIdSchemaV2 }).strict(),
+  z4
+    .object({
+      kind: z4.literal('beat'),
+      beatId: studioDirectorIdSchemaV2,
+      reason: z4.enum(['lifted', 'alternate']),
+    })
+    .strict(),
+  z4
+    .object({
+      kind: z4.literal('shot'),
+      beatId: studioDirectorIdSchemaV2,
+      shotId: studioDirectorIdSchemaV2,
+      reason: z4.literal('lifted'),
+    })
+    .strict(),
+  z4
+    .object({
+      kind: z4.literal('take'),
+      assetId: studioDirectorIdSchemaV2,
+      reason: z4.enum(['lifted', 'alternate']),
+    })
+    .strict(),
 ]);
 
 const uniqueStudioIdsSchema = (maximum: number) =>
@@ -399,8 +381,6 @@ const studioMutationOperationSchemasV2 = {
       kind: z4.literal('add_beat'),
       beatId: studioDirectorIdSchemaV2,
       beat: studioBeatInputSchemaV2,
-      firstShotId: studioDirectorIdSchemaV2,
-      firstShot: studioShotInputSchemaV2,
       beforeBeatId: studioDirectorIdSchemaV2.nullable(),
     })
     .strict(),
@@ -452,17 +432,23 @@ const studioMutationOperationSchemasV2 = {
       assetId: studioDirectorIdSchemaV2,
     })
     .strict(),
-  removeBinItem: z4.object({ kind: z4.literal('remove_bin_item'), assetId: studioDirectorIdSchemaV2 }).strict(),
   reorderBin: z4
     .object({
       kind: z4.literal('reorder_bin'),
       bin: z4
         .array(studioBinItemSchemaV2)
-        .max(STUDIO_MAX_BIN_ITEMS)
+        .max(STUDIO_MAX_BIN_BEAT_ITEMS + STUDIO_MAX_BIN_SHOT_ITEMS + STUDIO_MAX_BIN_TAKE_ITEMS)
         .refine(
           (items) =>
-            new Set(items.map((item) => (item.kind === 'beat' ? `beat:${item.beatId}` : `take:${item.assetId}`)))
-              .size === items.length,
+            new Set(
+              items.map((item) =>
+                item.kind === 'beat'
+                  ? `beat:${item.beatId}`
+                  : item.kind === 'shot'
+                    ? `shot:${item.shotId}`
+                    : `take:${item.assetId}`
+              )
+            ).size === items.length,
           { message: 'Bin identities must not repeat.' }
         )
         .meta({ uniqueItems: true }),
@@ -486,7 +472,6 @@ export const studioMutationOperationSchemaV2 = z4.discriminatedUnion('kind', [
   studioMutationOperationSchemasV2.reorderShots,
   studioMutationOperationSchemasV2.parkTake,
   studioMutationOperationSchemasV2.restoreTake,
-  studioMutationOperationSchemasV2.removeBinItem,
   studioMutationOperationSchemasV2.reorderBin,
   studioMutationOperationSchemasV2.selectTake,
 ]);
@@ -497,14 +482,11 @@ export const studioDirectorOperationSchemaV2 = z4.discriminatedUnion('kind', [
     .object({
       kind: z4.literal('add_beat'),
       beat: studioBeatInputSchemaV2,
-      firstShot: studioShotInputSchemaV2,
       beforeBeatId: studioDirectorIdSchemaV2.nullable(),
     })
     .strict(),
   studioMutationOperationSchemasV2.editBeat,
   studioMutationOperationSchemasV2.reorderBeats,
-  studioMutationOperationSchemasV2.parkBeat,
-  studioMutationOperationSchemasV2.restoreBeat,
   z4
     .object({
       kind: z4.literal('add_shot'),
@@ -516,11 +498,7 @@ export const studioDirectorOperationSchemaV2 = z4.discriminatedUnion('kind', [
   studioMutationOperationSchemasV2.editShot,
   studioMutationOperationSchemasV2.deleteShot,
   studioMutationOperationSchemasV2.reorderShots,
-  studioMutationOperationSchemasV2.parkTake,
-  studioMutationOperationSchemasV2.restoreTake,
-  studioMutationOperationSchemasV2.removeBinItem,
   studioMutationOperationSchemasV2.reorderBin,
-  studioMutationOperationSchemasV2.selectTake,
 ]);
 
 const studioDirectorOperationsSchemaV2 = z4
@@ -955,6 +933,7 @@ export function createReadStoryboardHandlerV2(
               title: beat.title,
               action: beat.action,
               look: beat.look,
+              targetSeconds: beat.targetSeconds,
               shotOrder: [...beat.shotOrder],
             },
           ];
@@ -969,12 +948,12 @@ export function createReadStoryboardHandlerV2(
             shotId,
             {
               line: shot.line,
+              derivation: shot.derivation,
               narration: shot.narration,
               onScreenText: shot.onScreenText,
-              mediaKind: shot.mediaKind,
               durationSeconds: shot.durationSeconds,
-              referenceAssetId: shot.referenceAssetId,
-              hasReference: shot.referenceAssetId !== null,
+              chainBreak: shot.chainBreak,
+              hasSeedStill: shot.seedStillId !== null,
               hasSelectedTake: takes.selectedTakeId !== null,
               selectedTakeId: takes.selectedTakeId,
               availableTakeIds: takes.availableTakeIds,
@@ -1532,7 +1511,11 @@ export function registerStudioToolsV2(
         'Record one ordered schema-2 mutation batch for user review. Requires base_revision from read_storyboard and never applies or generates anything directly. Do not combine add_shot with reorder_shots for the same beat (different-beat pairs are valid), and keep the final serialized proposal record within 256 KiB; these two aggregate checks are enforced by the server before any ID or I/O because portable tools/list JSON Schema cannot encode them.',
       inputSchema: studioProposeStoryboardInputSchemaV2,
     },
-    createProposeStoryboardHandlerV2(config)
+    async (input) =>
+      createProposeStoryboardHandlerV2(config)({
+        base_revision: input.base_revision,
+        operations: input.operations as StudioMutationOperationV2[],
+      })
   );
   server.registerTool(
     'propose_brief_rule',

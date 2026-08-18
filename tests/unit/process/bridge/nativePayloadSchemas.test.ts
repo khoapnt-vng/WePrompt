@@ -1834,6 +1834,24 @@ describe('native bridge payload schemas', () => {
     expect(providerKeys).toEqual(NATIVE_BRIDGE_PROVIDER_KEYS);
   });
 
+  it('keeps Task 5 Beat/Shot authoring and paid gates off the native surface', () => {
+    const forbiddenProviderKeys = [
+      'creative-studio.apply-authoring-batch',
+      'creative-studio.park-shot',
+      'creative-studio.restore-shot',
+      'creative-studio.prepare-submission',
+      'creative-studio.confirm-submission',
+    ] as const;
+    const providerKeys = collectBridgeBuildProviderKeys(readFileSync(IPC_BRIDGE_PATH, 'utf8'));
+    const schemaKeys = Object.keys(nativeBridgePayloadSchemas);
+
+    for (const providerKey of forbiddenProviderKeys) {
+      expect(NATIVE_BRIDGE_PROVIDER_KEYS).not.toContain(providerKey);
+      expect(providerKeys).not.toContain(providerKey);
+      expect(schemaKeys).not.toContain(providerKey);
+    }
+  });
+
   it('keeps renderer-owned query declarations equal to their separate manifest', () => {
     const queryKeys = collectBridgeBuildRendererQueryKeys(readFileSync(IPC_BRIDGE_PATH, 'utf8'));
 

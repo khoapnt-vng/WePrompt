@@ -60,9 +60,7 @@ const shotInputV2 = (line: string) => ({
   line,
   narration: '',
   onScreenText: '',
-  mediaKind: 'image' as const,
   durationSeconds: 5,
-  referenceAssetId: null,
 });
 
 const bindMethods = <T extends object>(target: T, overrides: Partial<Record<keyof T, unknown>> = {}): T =>
@@ -929,7 +927,6 @@ describe('Studio Director subprocess command writer', () => {
       .fn<() => string>()
       .mockReturnValueOnce('command_v2')
       .mockReturnValueOnce('section_new')
-      .mockReturnValueOnce('clip_first')
       .mockReturnValueOnce('clip_added')
       .mockReturnValueOnce('lease_v2');
     let currentMs = START_MS;
@@ -950,8 +947,7 @@ describe('Studio Director subprocess command writer', () => {
         operations: [
           {
             kind: 'add_beat',
-            beat: { title: 'Opening', action: '', look: 'A warm visual language' },
-            firstShot: shotInputV2('A wide opening shot'),
+            beat: { title: 'Opening', action: '', look: 'A warm visual language', targetSeconds: null },
             beforeBeatId: null,
           },
           {
@@ -973,11 +969,11 @@ describe('Studio Director subprocess command writer', () => {
       projectId: PROJECT_ID,
       expectedRevision: 7,
       operations: [
-        { kind: 'add_beat', beatId: 'section_new', firstShotId: 'clip_first' },
+        { kind: 'add_beat', beatId: 'section_new' },
         { kind: 'add_shot', beatId: 'section_existing', shotId: 'clip_added' },
       ],
     });
-    expect(createId.mock.calls).toHaveLength(5);
+    expect(createId.mock.calls).toHaveLength(4);
   });
 
   it('durably removes each V2 publication guard before reporting command publication', async () => {
@@ -1099,16 +1095,10 @@ describe('Studio Director subprocess command writer', () => {
         { kind: 'set_brief', brief: 'Free edits only' },
         { kind: 'edit_beat', beatId: 'section_1', changes: { title: 'Opening' } },
         { kind: 'reorder_beats', beatOrder: ['section_2', 'section_1'] },
-        { kind: 'park_beat', beatId: 'section_2' },
-        { kind: 'restore_beat', beatId: 'section_2', beforeBeatId: 'section_1' },
         { kind: 'edit_shot', shotId: 'clip_1', changes: { line: 'Closer' } },
         { kind: 'delete_shot', shotId: 'clip_old' },
         { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_2', 'clip_1'] },
-        { kind: 'park_take', shotId: 'clip_1', assetId: 'take_1' },
-        { kind: 'restore_take', shotId: 'clip_1', assetId: 'take_2' },
-        { kind: 'remove_bin_item', assetId: 'take_3' },
-        { kind: 'reorder_bin', bin: [{ kind: 'take', assetId: 'take_3' }] },
-        { kind: 'select_take', shotId: 'clip_1', assetId: 'take_1' },
+        { kind: 'reorder_bin', bin: [{ kind: 'take', assetId: 'take_3', reason: 'alternate' }] },
       ],
     };
 
@@ -2810,8 +2800,7 @@ describe('Studio Director subprocess command writer', () => {
         operations: [
           {
             kind: 'add_beat',
-            beat: { title: 'Opening', action: '', look: '' },
-            firstShot: shotInputV2('Opening'),
+            beat: { title: 'Opening', action: '', look: '', targetSeconds: null },
             beforeBeatId: null,
           },
         ],

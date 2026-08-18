@@ -1486,11 +1486,7 @@ const createHarnessV2 = (
         .filter((operation) => operation.kind === 'add_beat')
         .map((operation) => operation.beatId),
       createdShotIds: command.operations.flatMap((operation) =>
-        operation.kind === 'add_beat'
-          ? [operation.firstShotId]
-          : operation.kind === 'add_shot'
-            ? [operation.shotId]
-            : []
+        operation.kind === 'add_shot' ? [operation.shotId] : []
       ),
     };
   };
@@ -1569,17 +1565,20 @@ describe('Studio Director schema-2 commit tracker', () => {
         {
           kind: 'add_beat',
           beatId: 'section_1',
-          beat: { title: '', action: '', look: '' },
-          firstShotId: 'clip_1',
-          firstShot: {
+          beat: { title: '', action: '', look: '', targetSeconds: null },
+          beforeBeatId: null,
+        },
+        {
+          kind: 'add_shot',
+          beatId: 'section_1',
+          shotId: 'clip_1',
+          shot: {
             line: '',
             narration: '',
             onScreenText: '',
-            mediaKind: 'image',
             durationSeconds: 5,
-            referenceAssetId: null,
           },
-          beforeBeatId: null,
+          beforeShotId: null,
         },
         {
           kind: 'add_shot',
@@ -1589,9 +1588,7 @@ describe('Studio Director schema-2 commit tracker', () => {
             line: '',
             narration: '',
             onScreenText: '',
-            mediaKind: 'image',
             durationSeconds: 5,
-            referenceAssetId: null,
           },
           beforeShotId: null,
         },

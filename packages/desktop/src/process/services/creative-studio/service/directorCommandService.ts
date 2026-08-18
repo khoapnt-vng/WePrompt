@@ -261,12 +261,19 @@ export const createStudioDirectorCommandServiceV2 = (
           (openingProject) => {
             try {
               if (now() >= latestApplyStartMs) throw applyErrorV2('deadline_elapsed');
-              const applied = applyStudioMutationBatchV2(openingProject, {
-                schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
-                projectId: command.projectId,
-                expectedRevision: command.expectedRevision,
-                operations: command.operations,
-              });
+              const applied = applyStudioMutationBatchV2(
+                openingProject,
+                {
+                  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+                  projectId: command.projectId,
+                  expectedRevision: command.expectedRevision,
+                  operations: command.operations,
+                },
+                {
+                  mutationId: command.commandId,
+                  capturedAt: command.createdAt,
+                }
+              );
               createdBeatIds = [...applied.createdBeatIds];
               createdShotIds = [...applied.createdShotIds];
               return applied.project;

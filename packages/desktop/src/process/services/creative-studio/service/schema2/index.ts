@@ -4,12 +4,34 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export { reconcileStudioCutsV2, studioClipHasCutDependencyV2 } from './cuts';
 export { createEmptyStudioProjectV2 } from './factories';
+export * from './generation';
+export * from './pricing';
+export {
+  deriveStudioDirtyShotsV2,
+  deriveStudioInboundShotReferencesV2,
+  studioShotHasBlockingInboundReferenceV2,
+  type StudioInboundShotReferenceKindV2,
+  type StudioInboundShotReferenceV2,
+} from './chain';
+export { createStudioLineHistoryId } from './mutationIdentity';
+export {
+  advanceStudioWaitingBindingsV2,
+  terminalizeStudioUnboundDependenciesV2,
+  type StudioVerifiedConditioningFrameV2,
+  type StudioWaitingBindingAdvanceV2,
+} from './lifecycle';
+export { projectStudioChainStatusV2, projectStudioWorkspaceStatusV2 } from './workspaceStatus';
 export {
   applyStudioMutationBatchV2,
   StudioMutationErrorV2,
+  validateStudioMutationOperationV2,
   type StudioMutationApplyResultV2,
   type StudioMutationReasonV2,
 } from './mutations';
-export { validateStudioProjectV2 } from './validation';
+export {
+  validateStudioFixedShotReviewV2,
+  validateStudioFixedShotReviewsV2,
+  validateStudioProjectV2,
+  validateStudioProposedShotV2,
+} from './validation';

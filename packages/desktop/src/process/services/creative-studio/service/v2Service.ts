@@ -4,40 +4,49 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import {
   STUDIO_MAX_BEATS,
-  STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
   STUDIO_MAX_SHOT_SECONDS,
   STUDIO_MIN_SHOT_SECONDS,
-  STUDIO_REFERENCE_PROMPT_MAX_LENGTH,
   type CreateStudioProjectInputV2,
   type StudioAssetV2,
   type StudioBriefReferenceRole,
+  type StudioCancellationPolicy,
+  type StudioCascadeBarrierActionRequestV2,
+  type StudioConfirmSubmissionRequestV2,
+  type StudioConfirmSubmissionResultV2,
   type StudioDetachBriefReferenceRequest,
-  type StudioJob,
   type StudioJobRequest,
   type StudioJobV2,
   type StudioMediaChoiceRef,
   type StudioMediaKind,
-  type StudioMediaModelRef,
   type StudioMediaRouteCatalog,
   type StudioModelAvailability,
   type StudioMutationBatchResultV2,
   type StudioMutationBatchV2,
-  type StudioOutputRole,
+  type StudioMutationReducerContextV2,
   type StudioProjectListResultV2,
   type StudioProjectLoadResultV2,
   type StudioProjectV2,
+  type StudioPrepareSubmissionRequestV2,
+  type StudioProviderRef,
+  type StudioQuotedGeneration,
+  type StudioRendererChainStatusV2,
   type StudioRendererJobV2,
+  type StudioRendererPreparedSubmissionOptionsV2,
   type StudioRendererProjectV2,
+  type StudioRendererWorkspaceStatusV2,
   type StudioRetryDownloadRequest,
   type StudioRetryJobRequest,
   type StudioRouteCatalogEntry,
+  type StudioSpendAuthorization,
+  type StudioSubmissionQuote,
+  type StudioSubmissionQuoteCore,
 } from '@/common/types/project/creativeStudioTypes';
 import { isCanonicalStudioGeneratedTakeV2 } from '@/common/types/project/creativeStudioCanonicalTake';
-import { jobOutputRole } from '@/common/types/project/creativeStudioOutputRole';
-import { canCancelJobV2, type StudioJobManagerV2 } from '../jobManager';
+import { canCancelJobV2, type StudioDispatchAuthorizedJobsRequestV2, type StudioJobManagerV2 } from '../jobManager';
 import type { StudioMediaStore } from '../mediaStore';
 import {
   createStudioMediaChoiceId,
@@ -45,11 +54,41 @@ import {
   type StudioGenerationRouteCatalog,
   type StudioProviderResolver,
 } from '../providerResolver';
-import { CreativeStudioStoreError, type CreativeStudioStore, type StudioProjectStoreLoadResultV2 } from '../store';
+import {
+  CreativeStudioStoreError,
+  StudioProjectConfirmationError,
+  type CreativeStudioStore,
+  type StudioProjectStoreLoadResultV2,
+} from '../store';
+import {
+  createStudioSpendAuthorizationV2,
+  deriveStudioSubmissionQuoteCoresV2,
+  evaluateStudioBudgetV2,
+  studioSubmissionQuoteCoresEqual,
+  toStudioRendererSubmissionQuoteV2,
+  type StudioRateCardV2,
+} from './schema2/pricing';
+import {
+  StudioPreparedSubmissionCacheErrorV2,
+  StudioPreparedSubmissionCacheV2,
+  type StudioPreparedSubmissionClaimV2,
+} from './schema2/preparedSubmissionCache';
+import {
+  applyStudioMutationBatchV2,
+  advanceStudioWaitingBindingsV2,
+  createStudioFrameExtractionId,
+  projectStudioChainStatusV2,
+  projectStudioWorkspaceStatusV2,
+  terminalizeStudioUnboundDependenciesV2,
+  type StudioMutationApplyResultV2,
+  type StudioVerifiedConditioningFrameV2,
+  type StudioWaitingBindingAdvanceV2,
+} from './schema2';
 import { CreativeStudioServiceError } from './projectMutations';
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
-const ACTIVE_JOB_STATUSES: ReadonlySet<StudioJob['status']> = new Set([
+const ACTIVE_JOB_STATUSES: ReadonlySet<StudioJobV2['status']> = new Set([
+  'waiting_for_conditioning',
   'queued_local',
   'submitting',
   'queued_remote',
@@ -64,36 +103,11 @@ const ROUTE_INTEGRATION_LABELS = {
 const CAPTURED_POSTER_DATA_URL_PREFIX = 'data:image/png;base64,';
 const CAPTURED_POSTER_MAX_BYTES = 50 * 1024 * 1024;
 const CAPTURED_POSTER_MAX_BASE64_LENGTH = Math.ceil(CAPTURED_POSTER_MAX_BYTES / 3) * 4;
-const SUBMIT_REQUIRED_KEYS = new Set(['projectId', 'shotIds', 'expectedRevision', 'routes', 'catalogVersion']);
-const SUBMIT_OPTIONAL_KEYS = new Set(['outputRole', 'referencePrompts']);
-const ROUTE_CHOICE_KEYS = new Set(['shotId', 'choiceId', 'kind']);
-const REFERENCE_PROMPT_KEYS = new Set(['shotId', 'prompt']);
 
 export type StudioRouteCatalogV2 = {
   image: StudioMediaRouteCatalog;
   video: StudioMediaRouteCatalog;
   catalogVersion: string;
-};
-
-export type StudioShotGenerationChoiceV2 = {
-  shotId: string;
-  choiceId: string;
-  kind: StudioMediaKind;
-};
-
-export type StudioShotReferencePromptV2 = {
-  shotId: string;
-  prompt: string;
-};
-
-export type StudioSubmitShotsRequestV2 = {
-  projectId: string;
-  shotIds: string[];
-  expectedRevision: number;
-  routes: StudioShotGenerationChoiceV2[];
-  catalogVersion: string;
-  outputRole?: StudioOutputRole;
-  referencePrompts?: StudioShotReferencePromptV2[];
 };
 
 export type StudioShotReadinessIssueV2 =
@@ -124,7 +138,10 @@ export type CreativeStudioServiceV2 = {
   createProject(input: CreateStudioProjectInputV2): Promise<StudioRendererProjectV2>;
   getProject(projectId: string): Promise<StudioProjectLoadResultV2>;
   deleteProject(input: { projectId: string; expectedRevision: number }): Promise<boolean>;
-  applyMutations(input: StudioMutationBatchV2): Promise<StudioMutationBatchResultV2>;
+  applyMutations(
+    input: StudioMutationBatchV2,
+    context: StudioMutationReducerContextV2
+  ): Promise<StudioMutationBatchResultV2>;
   importReferenceFromPath(input: {
     projectId: string;
     shotId?: string;
@@ -143,10 +160,17 @@ export type CreativeStudioServiceV2 = {
   }): Promise<StudioAssetV2>;
   listRoutes(input?: { projectId?: string }): Promise<StudioRouteCatalogV2>;
   getGenerationReadiness(input: { projectId: string; beatIds: string[] }): Promise<StudioGenerationReadinessV2>;
-  submitShots(input: StudioSubmitShotsRequestV2): Promise<StudioRendererJobV2[]>;
+  getWorkspaceStatus(input: { projectId: string }): Promise<StudioRendererWorkspaceStatusV2>;
+  getChainStatus(input: { projectId: string }): Promise<StudioRendererChainStatusV2>;
+  prepareSubmission(input: StudioPrepareSubmissionRequestV2): Promise<StudioRendererPreparedSubmissionOptionsV2>;
+  confirmSubmission(input: StudioConfirmSubmissionRequestV2): Promise<StudioConfirmSubmissionResultV2>;
+  retryConditioningFrame(input: StudioCascadeBarrierActionRequestV2): Promise<StudioRendererWorkspaceStatusV2>;
+  cancelWaitingCascade(input: StudioCascadeBarrierActionRequestV2): Promise<StudioRendererWorkspaceStatusV2>;
+  dispatchAuthorizedJobs(input: StudioDispatchAuthorizedJobsRequestV2): Promise<StudioRendererJobV2[]>;
   cancelJob(input: StudioJobRequest): Promise<StudioRendererJobV2>;
   retryJob(input: StudioRetryJobRequest): Promise<StudioRendererJobV2>;
   retryDownload(input: StudioRetryDownloadRequest): Promise<StudioRendererJobV2>;
+  dispose(): void;
 };
 
 export type CreativeStudioServiceV2Deps = {
@@ -154,6 +178,12 @@ export type CreativeStudioServiceV2Deps = {
   providerResolver: StudioProviderResolver;
   jobManager: StudioJobManagerV2;
   mediaStore?: StudioMediaStore;
+  rateCard?: () => Promise<StudioRateCardV2>;
+  preparedSubmissionCache?: StudioPreparedSubmissionCacheV2;
+  createQuoteId?: () => string;
+  createJobId?: () => string;
+  createIdempotencyKey?: () => string;
+  now?: () => Date;
   onProjectUpdated: (projectId: string) => void;
 };
 
@@ -164,22 +194,22 @@ const isSafeId = (value: unknown): value is string => typeof value === 'string' 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const hasExactKeys = (value: Record<string, unknown>, expected: ReadonlySet<string>): boolean => {
-  const keys = Reflect.ownKeys(value);
-  return keys.length === expected.size && keys.every((key) => typeof key === 'string' && expected.has(key));
-};
-
-const hasKeys = (
-  value: Record<string, unknown>,
-  required: ReadonlySet<string>,
-  optional: ReadonlySet<string>
-): boolean => {
-  const keys = Reflect.ownKeys(value);
+const hasExactKeys = (value: Record<string, unknown>, keys: readonly string[]): boolean => {
+  const expected = new Set(keys);
   return (
-    keys.every((key) => typeof key === 'string' && (required.has(key) || optional.has(key))) &&
-    [...required].every((key) => Object.hasOwn(value, key))
+    Reflect.ownKeys(value).length === expected.size &&
+    Reflect.ownKeys(value).every((key) => typeof key === 'string' && expected.has(key))
   );
 };
+
+const defaultId = (prefix: string): string => `${prefix}_${randomUUID().replaceAll('-', '')}`;
+
+const quoteCore = (quote: StudioSubmissionQuote): StudioSubmissionQuoteCore => {
+  const { id: _id, expiresAt: _expiresAt, ...core } = quote;
+  return structuredClone(core);
+};
+
+const jsonEqual = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
 
 const assertSafeId: (value: unknown, label: string) => asserts value is string = (value, label) => {
   if (!isSafeId(value)) throw invalid(`Invalid Studio ${label}`);
@@ -231,7 +261,11 @@ const isDenseArray = (value: unknown, maximum: number): value is unknown[] => {
 const ownValue = <Value>(record: Record<string, Value>, id: string): Value | undefined =>
   Object.hasOwn(record, id) ? record[id] : undefined;
 
-const toMediaChoice = (provider: StudioMediaModelRef, kind: StudioMediaKind): StudioMediaChoiceRef => ({
+const defineOwn = <Value>(record: Record<string, Value>, id: string, value: Value): void => {
+  Object.defineProperty(record, id, { value, configurable: true, enumerable: true, writable: true });
+};
+
+const toMediaChoice = (provider: StudioProviderRef, kind: StudioMediaKind): StudioMediaChoiceRef => ({
   choiceId: createStudioMediaChoiceId({ ...provider, kind }),
   providerId: provider.providerId,
   model: provider.model,
@@ -256,10 +290,8 @@ const toRendererRoute = (route: StudioGenerationRoute): StudioRouteCatalogEntry 
   },
 });
 
-const routeMatchesSelection = (route: StudioGenerationRoute, selection: StudioMediaModelRef): boolean =>
-  route.providerId === selection.providerId &&
-  route.adapterId === selection.adapterId &&
-  route.model === selection.model;
+const routeMatchesSelection = (route: StudioGenerationRoute, selection: string): boolean =>
+  route.choiceId === selection;
 
 const routeSupportsProject = (route: StudioGenerationRoute, project: StudioProjectV2 | null): boolean =>
   route.health !== 'unavailable' &&
@@ -269,7 +301,7 @@ const routeSupportsProject = (route: StudioGenerationRoute, project: StudioProje
       route.constraints.resolutions.includes(project.resolution)));
 
 const modelStatus = (
-  selected: StudioMediaModelRef | null,
+  selected: string | null,
   optionsLength: number,
   selectionIsAvailable: boolean
 ): StudioModelAvailability =>
@@ -285,7 +317,7 @@ const selectedRoute = (
   generation: StudioGenerationRouteCatalog,
   project: StudioProjectV2 | null,
   kind: StudioMediaKind,
-  selection: StudioMediaModelRef | null
+  selection: string | null
 ): StudioGenerationRoute | null => {
   if (selection === null) return null;
   return (
@@ -299,7 +331,7 @@ const selectionIssue = (
   generation: StudioGenerationRouteCatalog,
   project: StudioProjectV2 | null,
   kind: StudioMediaKind,
-  selection: StudioMediaModelRef | null,
+  selection: string | null,
   selected: StudioGenerationRoute | null
 ): StudioMediaRouteCatalog['selectionIssue'] => {
   if (selection === null || selected !== null) return null;
@@ -315,11 +347,16 @@ const selectionIssue = (
   const diagnostic = generation.diagnostics.find(
     (candidate) =>
       candidate.status !== 'available' &&
-      candidate.providerId === selection.providerId &&
-      candidate.adapterId === selection.adapterId &&
-      candidate.model === selection.model
+      createStudioMediaChoiceId({
+        providerId: candidate.providerId,
+        adapterId: candidate.adapterId,
+        model: candidate.model,
+        kind,
+      }) === selection
   );
-  if (diagnostic?.status === 'needs_setup') return { code: 'needs_setup', providerName: diagnostic.providerName };
+  if (diagnostic?.status === 'needs_setup') {
+    return { code: 'needs_setup', providerName: diagnostic.providerName };
+  }
   if (diagnostic?.status === 'health') return { code: 'health' };
   return { code: 'retired' };
 };
@@ -329,12 +366,12 @@ const toRouteCatalog = (
   project: StudioProjectV2 | null
 ): StudioRouteCatalogV2 => {
   const catalogFor = (kind: StudioMediaKind): StudioMediaRouteCatalog => {
-    const selection = project?.routing[kind] ?? null;
+    const selection = project === null ? null : kind === 'image' ? project.imageRouteId : project.videoRouteId;
     const routes = generation.routes.filter((route) => route.kind === kind && routeSupportsProject(route, project));
     const chosen = selectedRoute(generation, project, kind, selection);
     return {
       status: modelStatus(selection, routes.length, chosen !== null),
-      selected: selection === null ? null : toMediaChoice(selection, kind),
+      selected: chosen === null ? null : toMediaChoice(chosen, kind),
       selectedRoute: chosen === null ? null : toRendererRoute(chosen),
       selectionIssue: selectionIssue(generation, project, kind, selection, chosen),
       options: routes.map(toRendererRoute),
@@ -347,17 +384,97 @@ const toRouteCatalog = (
   };
 };
 
-const requestedKind = (project: StudioProjectV2, job: StudioJobV2): StudioMediaKind =>
-  jobOutputRole(job) === 'reference' ? 'image' : (ownValue(project.shots, job.shotId)?.mediaKind ?? 'image');
+const quotedItems = (
+  quote: Pick<StudioSubmissionQuoteCore, 'baseItems' | 'cascadeItems'>
+): StudioQuotedGeneration[] => [...quote.baseItems, ...quote.cascadeItems];
 
-const toRendererJob = (project: StudioProjectV2, job: StudioJobV2): StudioRendererJobV2 => ({
+const quotedDuration = (item: StudioQuotedGeneration): number =>
+  item.requestPlan.kind === 'resolved'
+    ? item.requestPlan.snapshot.durationSeconds
+    : item.requestPlan.template.durationSeconds;
+
+const resolveQuotedRoute = (
+  generation: StudioGenerationRouteCatalog,
+  project: StudioProjectV2,
+  item: StudioQuotedGeneration
+): StudioGenerationRoute => {
+  const kind: StudioMediaKind = item.purpose === 'seed_still' ? 'image' : 'video';
+  const matches = generation.routes.filter((route) => route.choiceId === item.routeId && route.kind === kind);
+  const route = matches.length === 1 ? matches[0]! : null;
+  const durationSeconds = quotedDuration(item);
+  const referenceInput =
+    item.requestPlan.kind === 'resolved'
+      ? item.requestPlan.snapshot.referenceInput
+      : item.requestPlan.template.referenceInput;
+  if (
+    route === null ||
+    !routeSupportsProject(route, project) ||
+    durationSeconds < route.constraints.minDurationSeconds ||
+    durationSeconds > route.constraints.maxDurationSeconds ||
+    (item.purpose === 'video_take' && !route.constraints.supportsFirstFrame) ||
+    (referenceInput !== null && route.constraints.maxConditioningImages < 1)
+  ) {
+    throw new CreativeStudioServiceError('invalid_route');
+  }
+  return route;
+};
+
+const resolveProviderBindings = (
+  generation: StudioGenerationRouteCatalog,
+  project: StudioProjectV2,
+  quote: Pick<StudioSubmissionQuoteCore, 'baseItems' | 'cascadeItems'>
+): StudioSpendAuthorization['providerBindings'] =>
+  quotedItems(quote).map((item) => {
+    const route = resolveQuotedRoute(generation, project, item);
+    return {
+      itemId: item.id,
+      provider: { providerId: route.providerId, adapterId: route.adapterId, model: route.model },
+    };
+  });
+
+const rendererRouteLookup =
+  (
+    generation: StudioGenerationRouteCatalog,
+    project: StudioProjectV2
+  ): ((routeId: string, purpose: StudioQuotedGeneration['purpose']) => StudioMediaChoiceRef) =>
+  (routeId, purpose) => {
+    const kind: StudioMediaKind = purpose === 'seed_still' ? 'image' : 'video';
+    const matches = generation.routes.filter((route) => route.choiceId === routeId && route.kind === kind);
+    const route = matches.length === 1 ? matches[0]! : null;
+    if (route === null || !routeSupportsProject(route, project)) {
+      throw new CreativeStudioServiceError('invalid_route');
+    }
+    return toMediaChoice(route, kind);
+  };
+
+const requestedKind = (job: StudioJobV2): StudioMediaKind => (job.purpose === 'seed_still' ? 'image' : 'video');
+
+const toRendererSpendReceipt = (job: StudioJobV2): StudioRendererJobV2['spendReceipt'] => {
+  const receipt = job.spendReceipt;
+  if (receipt === null) return null;
+  return {
+    purpose: receipt.purpose,
+    routeId: receipt.routeId,
+    currency: receipt.currency,
+    rateUnit: receipt.rateUnit,
+    rateMinorUnits: receipt.rateMinorUnits,
+    durationSeconds: receipt.durationSeconds,
+    generationIndex: receipt.generationIndex,
+    generationCount: receipt.generationCount,
+    totalMinorUnits: receipt.totalMinorUnits,
+  };
+};
+
+const toRendererJob = (job: StudioJobV2): StudioRendererJobV2 => ({
   id: job.id,
   projectId: job.projectId,
   shotId: job.shotId,
   status: job.status,
-  provider: toMediaChoice(job.provider, requestedKind(project, job)),
-  ...(job.outputRole === undefined ? {} : { outputRole: job.outputRole }),
+  purpose: job.purpose,
+  generationIndex: job.generationIndex,
+  provider: toMediaChoice(job.provider, requestedKind(job)),
   outputAssetIds: [...job.outputAssetIds],
+  outputAssetIdsByRole: { ...job.outputAssetIdsByRole },
   error: job.error === null ? null : { ...job.error },
   canCancel: canCancelJobV2(job),
   canRetryDownload: job.status === 'failed' && job.error?.code === 'download_failed' && job.providerJobId !== null,
@@ -366,19 +483,22 @@ const toRendererJob = (project: StudioProjectV2, job: StudioJobV2): StudioRender
   retryReason: job.retryReason,
   duplicateChargeAcknowledged: job.duplicateChargeAcknowledged,
   duplicateChargeAcknowledgedAt: job.duplicateChargeAcknowledgedAt,
+  spendReceipt: toRendererSpendReceipt(job),
   createdAt: job.createdAt,
   updatedAt: job.updatedAt,
 });
 
 const toRendererProject = (project: StudioProjectV2): StudioRendererProjectV2 => {
-  const cloned = structuredClone(project);
+  const {
+    spendAuthorizations: _authorizations,
+    frameExtractions: _frames,
+    undoHistory: _undo,
+    jobs: _jobs,
+    ...safe
+  } = structuredClone(project);
   return {
-    ...cloned,
-    jobs: Object.fromEntries(Object.entries(project.jobs).map(([jobId, job]) => [jobId, toRendererJob(project, job)])),
-    routing: {
-      image: project.routing.image === null ? null : toMediaChoice(project.routing.image, 'image'),
-      video: project.routing.video === null ? null : toMediaChoice(project.routing.video, 'video'),
-    },
+    ...safe,
+    jobs: Object.fromEntries(Object.entries(project.jobs).map(([jobId, job]) => [jobId, toRendererJob(job)])),
   };
 };
 
@@ -391,11 +511,9 @@ const supportedProject = (result: StudioProjectStoreLoadResultV2): StudioProject
 };
 
 const shotDurationIsValid = (shot: StudioProjectV2['shots'][string]): boolean =>
-  shot.mediaKind === 'video'
-    ? Number.isInteger(shot.durationSeconds) &&
-      shot.durationSeconds >= STUDIO_MIN_SHOT_SECONDS &&
-      shot.durationSeconds <= STUDIO_MAX_SHOT_SECONDS
-    : Number.isInteger(shot.durationSeconds) && shot.durationSeconds >= 1 && shot.durationSeconds <= 60;
+  Number.isInteger(shot.durationSeconds) &&
+  shot.durationSeconds >= STUDIO_MIN_SHOT_SECONDS &&
+  shot.durationSeconds <= STUDIO_MAX_SHOT_SECONDS;
 
 const readinessForShot = (
   project: StudioProjectV2,
@@ -425,19 +543,6 @@ const readinessForShot = (
   const latest = jobs.at(-1);
   if (latest?.status === 'failed' || latest?.status === 'needs_attention') issues.push('latest_job_failed');
   return { shotId, beatId, ready: issues.length === 0, issues };
-};
-
-const activeShotOwners = (project: StudioProjectV2): Map<string, string> => {
-  const owners = new Map<string, string>();
-  for (let beatIndex = 0; beatIndex < project.beatOrder.length; beatIndex += 1) {
-    const beatId = project.beatOrder[beatIndex]!;
-    const beat = ownValue(project.beats, beatId);
-    if (beat === undefined) continue;
-    for (let shotIndex = 0; shotIndex < beat.shotOrder.length; shotIndex += 1) {
-      owners.set(beat.shotOrder[shotIndex]!, beatId);
-    }
-  }
-  return owners;
 };
 
 export const derivePayableShotIds = (project: StudioProjectV2, selectedBeatIds: readonly string[]): string[] => {
@@ -493,127 +598,31 @@ const assertBeatSelection: (project: StudioProjectV2, beatIds: unknown) => asser
   }
 };
 
-const assertSubmitRequest = (input: StudioSubmitShotsRequestV2): void => {
-  if (!isRecord(input) || !hasKeys(input, SUBMIT_REQUIRED_KEYS, SUBMIT_OPTIONAL_KEYS)) {
-    throw invalid('Invalid Studio shot generation request');
-  }
-  assertSafeId(input.projectId, 'project id');
-  assertRevision(input.expectedRevision);
-  if (
-    !isDenseArray(input.shotIds, STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST) ||
-    input.shotIds.length < 1 ||
-    !isDenseArray(input.routes, STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST) ||
-    input.routes.length !== input.shotIds.length ||
-    typeof input.catalogVersion !== 'string' ||
-    input.catalogVersion.length < 1 ||
-    input.catalogVersion.length > 64 ||
-    (input.outputRole !== undefined && input.outputRole !== 'take' && input.outputRole !== 'reference')
-  ) {
-    throw invalid('Invalid Studio shot generation request');
-  }
-  const selected = new Set<string>();
-  for (let index = 0; index < input.shotIds.length; index += 1) {
-    const shotId = input.shotIds[index];
-    if (!isSafeId(shotId) || selected.has(shotId)) throw invalid('Invalid Studio shot generation selection');
-    selected.add(shotId);
-  }
-  const routed = new Set<string>();
-  for (let index = 0; index < input.routes.length; index += 1) {
-    const route = input.routes[index];
-    if (
-      !isRecord(route) ||
-      !hasExactKeys(route, ROUTE_CHOICE_KEYS) ||
-      !isSafeId(route.shotId) ||
-      !selected.has(route.shotId) ||
-      routed.has(route.shotId) ||
-      !isSafeId(route.choiceId) ||
-      (route.kind !== 'image' && route.kind !== 'video')
-    ) {
-      throw invalid('Invalid Studio shot generation route');
-    }
-    routed.add(route.shotId);
-  }
-  const outputRole = input.outputRole ?? 'take';
-  if (outputRole === 'reference') {
-    if (!isDenseArray(input.referencePrompts, STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST)) {
-      throw invalid('Invalid Studio shot reference prompts');
-    }
-    const promptShots = new Set<string>();
-    for (let index = 0; index < input.referencePrompts.length; index += 1) {
-      const prompt = input.referencePrompts[index];
-      if (
-        !isRecord(prompt) ||
-        !hasExactKeys(prompt, REFERENCE_PROMPT_KEYS) ||
-        !selected.has(prompt.shotId) ||
-        promptShots.has(prompt.shotId) ||
-        typeof prompt.prompt !== 'string' ||
-        prompt.prompt.trim().length < 1 ||
-        prompt.prompt.length > STUDIO_REFERENCE_PROMPT_MAX_LENGTH
-      ) {
-        throw invalid('Invalid Studio shot reference prompts');
-      }
-      promptShots.add(prompt.shotId);
-    }
-    if (promptShots.size !== selected.size) throw invalid('Invalid Studio shot reference prompts');
-  } else if (input.referencePrompts !== undefined) {
-    throw invalid('Invalid Studio shot reference prompts');
-  }
-};
-
-const assertReviewedShots = (project: StudioProjectV2, input: StudioSubmitShotsRequestV2): void => {
-  if (project.revision !== input.expectedRevision) {
-    throw new CreativeStudioStoreError('stale_project', 'Studio project has changed');
-  }
-  const owners = activeShotOwners(project);
-  const requested = new Set(input.shotIds);
-  const canonicalOrder: string[] = [];
-  for (let beatIndex = 0; beatIndex < project.beatOrder.length; beatIndex += 1) {
-    const beat = ownValue(project.beats, project.beatOrder[beatIndex]!)!;
-    for (let shotIndex = 0; shotIndex < beat.shotOrder.length; shotIndex += 1) {
-      const shotId = beat.shotOrder[shotIndex]!;
-      if (requested.has(shotId)) canonicalOrder.push(shotId);
-    }
-  }
-  if (
-    canonicalOrder.length !== input.shotIds.length ||
-    canonicalOrder.some((shotId, index) => shotId !== input.shotIds[index]) ||
-    input.shotIds.some((shotId) => {
-      const beatId = owners.get(shotId);
-      if (beatId === undefined) return true;
-      if ((input.outputRole ?? 'take') === 'take') {
-        return !readinessForShot(project, beatId, shotId).ready;
-      }
-      const shot = ownValue(project.shots, shotId)!;
-      return shot.jobIds.some((jobId) => {
-        const job = ownValue(project.jobs, jobId);
-        return job !== undefined && ACTIVE_JOB_STATUSES.has(job.status);
-      });
-    })
-  ) {
-    throw new CreativeStudioServiceError('invalid_payload');
-  }
-};
-
-const routeSupportsShot = (
-  route: StudioGenerationRoute,
-  project: StudioProjectV2,
-  shotId: string,
-  outputRole: StudioOutputRole
-): boolean => {
-  const shot = ownValue(project.shots, shotId);
-  if (shot === undefined) return false;
-  const kind = outputRole === 'reference' ? 'image' : shot.mediaKind;
-  return (
-    route.kind === kind &&
-    routeSupportsProject(route, project) &&
-    shot.durationSeconds >= route.constraints.minDurationSeconds &&
-    shot.durationSeconds <= route.constraints.maxDurationSeconds &&
-    (outputRole === 'reference' || shot.referenceAssetId === null || route.constraints.supportsFirstFrame)
-  );
-};
-
 /** Creates the schema-2 service beside, but deliberately outside, the registered schema-1 surface. */
 export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps): CreativeStudioServiceV2 => {
+  const readNow = (): Date => {
+    const value = deps.now?.() ?? new Date();
+    const timestamp = value instanceof Date ? value.getTime() : Number.NaN;
+    if (!Number.isSafeInteger(timestamp)) throw invalid('Invalid Studio service clock');
+    return new Date(timestamp);
+  };
+  const preparedSubmissionCache =
+    deps.preparedSubmissionCache ?? new StudioPreparedSubmissionCacheV2({ now: () => readNow().getTime() });
+  const createQuoteId = deps.createQuoteId ?? (() => defaultId('quote'));
+  const createJobId = deps.createJobId ?? (() => defaultId('job'));
+  const createIdempotencyKey = deps.createIdempotencyKey ?? (() => defaultId('key'));
+  const activeClaims = new Set<StudioPreparedSubmissionClaimV2>();
+  let disposed = false;
+
+  const cacheFailure = (code: 'quote_not_found'): StudioPreparedSubmissionCacheErrorV2 =>
+    new StudioPreparedSubmissionCacheErrorV2(code);
+  const assertServiceActive = (claim?: StudioPreparedSubmissionClaimV2): void => {
+    if (disposed || (claim !== undefined && !activeClaims.has(claim))) throw cacheFailure('quote_not_found');
+  };
+  const loadRateCard = async (): Promise<StudioRateCardV2> => {
+    if (deps.rateCard === undefined) throw new CreativeStudioServiceError('provider_error');
+    return deps.rateCard();
+  };
   const loadSupported = async (projectId: string): Promise<StudioProjectV2> =>
     supportedProject(await deps.store.getProjectV2(projectId));
   const notify = (project: StudioProjectV2): StudioRendererProjectV2 => {
@@ -626,6 +635,300 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     } catch {
       throw new CreativeStudioServiceError('provider_error');
     }
+  };
+
+  const createQuote = (core: StudioSubmissionQuoteCore, id: string): StudioSubmissionQuote => {
+    if (!isSafeId(id)) throw invalid('Invalid Studio quote identity');
+    return { ...structuredClone(core), id, expiresAt: '1970-01-01T00:00:00.000Z' };
+  };
+
+  const projectPreparedOptions = (
+    project: StudioProjectV2,
+    generation: StudioGenerationRouteCatalog,
+    options: { baseOnly: StudioSubmissionQuote; withCascade: StudioSubmissionQuote | null }
+  ): StudioRendererPreparedSubmissionOptionsV2 => {
+    const lookup = rendererRouteLookup(generation, project);
+    return {
+      baseOnly: toStudioRendererSubmissionQuoteV2(options.baseOnly, project.spendPolicy, lookup),
+      withCascade:
+        options.withCascade === null
+          ? null
+          : toStudioRendererSubmissionQuoteV2(options.withCascade, project.spendPolicy, lookup),
+    };
+  };
+
+  const exactSelectedBindings = (
+    claim: StudioPreparedSubmissionClaimV2
+  ): StudioSpendAuthorization['providerBindings'] => {
+    const byItem = new Map(claim.session.providerBindings.map((binding) => [binding.itemId, binding]));
+    return quotedItems(claim.quote).map((item) => {
+      const binding = byItem.get(item.id);
+      if (binding === undefined) throw invalid('Invalid cached Studio provider binding');
+      return { itemId: binding.itemId, provider: { ...binding.provider } };
+    });
+  };
+
+  const exactSelectedCancellationPolicies = (
+    claim: StudioPreparedSubmissionClaimV2
+  ): Array<{ itemId: string; policy: StudioCancellationPolicy }> => {
+    const byItem = new Map(claim.session.cancellationPolicies.map((binding) => [binding.itemId, binding]));
+    return quotedItems(claim.quote).map((item) => {
+      const binding = byItem.get(item.id);
+      if (binding === undefined) throw invalid('Invalid cached Studio cancellation policy');
+      return { itemId: binding.itemId, policy: binding.policy };
+    });
+  };
+
+  type ConfirmationRevalidation = {
+    quote: StudioSubmissionQuote;
+    providerBindings: StudioSpendAuthorization['providerBindings'];
+    cancellationPolicies: Array<{ itemId: string; policy: StudioCancellationPolicy }>;
+  };
+
+  const buildConfirmedProject = (
+    project: StudioProjectV2,
+    revalidation: ConfirmationRevalidation,
+    confirmedAt: string
+  ): { project: StudioProjectV2; dispatch: StudioDispatchAuthorizedJobsRequestV2 } => {
+    const quote = structuredClone(revalidation.quote);
+    if (
+      quote.projectId !== project.id ||
+      quote.projectRevision !== project.revision ||
+      project.spendAuthorizations.some((authorization) => authorization.id === quote.id)
+    ) {
+      throw invalid('Invalid or duplicate Studio authorization');
+    }
+    const items = quotedItems(quote);
+    const policies = new Map(revalidation.cancellationPolicies.map((entry) => [entry.itemId, entry.policy]));
+    const providerBindings = structuredClone(revalidation.providerBindings);
+    const bindingByItem = new Map(providerBindings.map((entry) => [entry.itemId, entry.provider]));
+    const existingJobIds = new Set(Object.keys(project.jobs));
+    const existingKeys = new Set(
+      project.spendAuthorizations.flatMap((authorization) => authorization.idempotencyKeys.map((entry) => entry.key))
+    );
+    for (const job of Object.values(project.jobs)) existingKeys.add(job.idempotencyKey);
+    const idempotencyKeys: StudioSpendAuthorization['idempotencyKeys'] = [];
+    const pendingJobs: StudioJobV2[] = [];
+    const dispatchJobIds: string[] = [];
+    const alreadyRetriedJobIds = new Set(
+      Object.values(project.jobs).flatMap((job) => (job.retryOfJobId === null ? [] : [job.retryOfJobId]))
+    );
+
+    for (const item of items) {
+      const provider = bindingByItem.get(item.id);
+      const cancellationPolicy = policies.get(item.id);
+      const shot = ownValue(project.shots, item.shotId);
+      if (provider === undefined || cancellationPolicy === undefined || shot === undefined) {
+        throw invalid('Invalid Studio confirmation binding');
+      }
+      const retryPredecessors = [...shot.jobIds].reverse().flatMap((jobId) => {
+        const candidate = ownValue(project.jobs, jobId);
+        if (
+          candidate === undefined ||
+          candidate.shotId !== shot.id ||
+          candidate.purpose !== item.purpose ||
+          candidate.status !== 'failed' ||
+          candidate.error === null ||
+          candidate.error.code === 'download_failed' ||
+          candidate.error.code === 'poll_deadline' ||
+          candidate.error.code === 'dependency_failed' ||
+          alreadyRetriedJobIds.has(candidate.id)
+        ) {
+          return [];
+        }
+        return [candidate];
+      });
+      for (let generationIndex = 0; generationIndex < item.generationCount; generationIndex += 1) {
+        const jobId = createJobId();
+        const idempotencyKey = createIdempotencyKey();
+        if (
+          !isSafeId(jobId) ||
+          !isSafeId(idempotencyKey) ||
+          existingJobIds.has(jobId) ||
+          existingKeys.has(idempotencyKey)
+        ) {
+          throw invalid('Invalid or duplicate Studio paid-work identity');
+        }
+        existingJobIds.add(jobId);
+        existingKeys.add(idempotencyKey);
+        idempotencyKeys.push({ itemId: item.id, generationIndex, key: idempotencyKey });
+        const requestSnapshot =
+          item.requestPlan.kind === 'resolved' ? structuredClone(item.requestPlan.snapshot) : null;
+        const resolved = requestSnapshot !== null;
+        const retryPredecessor = retryPredecessors[generationIndex];
+        const retryReason =
+          retryPredecessor === undefined
+            ? null
+            : retryPredecessor.error?.code === 'submission_unknown'
+              ? 'submission_unknown'
+              : 'provider_failure';
+        if (retryPredecessor !== undefined) alreadyRetriedJobIds.add(retryPredecessor.id);
+        const job: StudioJobV2 = {
+          id: jobId,
+          projectId: project.id,
+          shotId: shot.id,
+          status: resolved ? 'queued_local' : 'waiting_for_conditioning',
+          provider: { ...provider },
+          idempotencyKey,
+          providerJobId: null,
+          cancellationPolicy,
+          outputAssetIds: [],
+          purpose: item.purpose,
+          authorizationId: quote.id,
+          authorizationItemId: item.id,
+          generationIndex,
+          requestPlan: structuredClone(item.requestPlan),
+          requestSnapshot,
+          spendReceipt: null,
+          outputAssetIdsByRole: { primary: null, poster: null },
+          error: null,
+          retryOfJobId: retryPredecessor?.id ?? null,
+          retryReason,
+          duplicateChargeAcknowledged: retryReason === 'submission_unknown',
+          duplicateChargeAcknowledgedAt: retryReason === 'submission_unknown' ? confirmedAt : null,
+          createdAt: confirmedAt,
+          updatedAt: confirmedAt,
+        };
+        pendingJobs.push(job);
+        if (resolved) dispatchJobIds.push(job.id);
+      }
+    }
+
+    const authorization = createStudioSpendAuthorizationV2({
+      quote,
+      confirmedAt,
+      providerBindings,
+      idempotencyKeys,
+    });
+    project.spendAuthorizations.push(authorization);
+    for (const job of pendingJobs) {
+      const shot = ownValue(project.shots, job.shotId);
+      if (shot === undefined || shot.jobIds.includes(job.id)) throw invalid('Invalid Studio job ownership');
+      defineOwn(project.jobs, job.id, job);
+      shot.jobIds.push(job.id);
+    }
+    return { project, dispatch: { projectId: project.id, jobIds: dispatchJobIds } };
+  };
+
+  const assertBarrierRequest: (
+    input: StudioCascadeBarrierActionRequestV2
+  ) => asserts input is StudioCascadeBarrierActionRequestV2 = (input) => {
+    if (!isRecord(input) || !hasExactKeys(input, ['projectId', 'expectedRevision', 'dependentShotId'])) {
+      throw invalid('Invalid Studio cascade action');
+    }
+    assertSafeId(input.projectId, 'project id');
+    assertSafeId(input.dependentShotId, 'dependent shot id');
+    assertRevision(input.expectedRevision);
+  };
+
+  const activePredecessorId = (project: StudioProjectV2, dependentShotId: string): string | null => {
+    for (const beatId of project.beatOrder) {
+      const beat = ownValue(project.beats, beatId);
+      const index = beat?.shotOrder.indexOf(dependentShotId) ?? -1;
+      if (beat === undefined || index <= 0 || project.shots[dependentShotId]?.chainBreak === 'hard_cut') continue;
+      return beat.shotOrder[index - 1] ?? null;
+    }
+    return null;
+  };
+
+  const retryableExtractionId = (project: StudioProjectV2, dependentShotId: string): string => {
+    const workspaceRows = projectStudioWorkspaceStatusV2(project).cascadeProgress.filter(
+      (row) => row.dependentShotId === dependentShotId && row.canRetryConditioningFrame
+    );
+    const chainRows = projectStudioChainStatusV2(project).conditioningFailures.filter(
+      (row) => row.dependentShotId === dependentShotId && row.canRetry
+    );
+    if (workspaceRows.length + chainRows.length !== 1) throw invalid('Studio conditioning frame is not retryable');
+    const predecessorShotId = workspaceRows[0]?.upstreamShotId ?? activePredecessorId(project, dependentShotId);
+    const predecessor = predecessorShotId === null ? undefined : ownValue(project.shots, predecessorShotId);
+    const take =
+      predecessor?.selectedTakeId === null || predecessor === undefined
+        ? undefined
+        : ownValue(project.assets, predecessor.selectedTakeId);
+    if (
+      take === undefined ||
+      take.mediaKind !== 'video' ||
+      take.durationSeconds === undefined ||
+      project.bin.some((item) => item.kind === 'take' && item.assetId === take.id)
+    ) {
+      throw invalid('Studio conditioning source is unavailable');
+    }
+    const endpointSeconds = take.durationSeconds - (predecessor.trimOutSeconds ?? 0);
+    const extractionId = createStudioFrameExtractionId({
+      shotId: predecessor.id,
+      takeAssetId: take.id,
+      endpointSeconds,
+    });
+    const extraction = ownValue(project.frameExtractions, extractionId);
+    if (
+      extraction?.status !== 'failed' ||
+      extraction.frameAssetId !== null ||
+      extraction.shotId !== predecessor.id ||
+      extraction.takeAssetId !== take.id ||
+      !Object.is(extraction.endpointSeconds, endpointSeconds)
+    ) {
+      throw invalid('Studio conditioning frame is not retryable');
+    }
+    return extractionId;
+  };
+
+  const cancelWaitingItem = (project: StudioProjectV2, dependentShotId: string, cancelledAt: string): void => {
+    const progress = projectStudioWorkspaceStatusV2(project).cascadeProgress.filter(
+      (row) => row.dependentShotId === dependentShotId && row.canCancelWaiting
+    );
+    if (progress.length !== 1) throw invalid('Studio cascade is not cancellable');
+    let target:
+      | { authorization: StudioSpendAuthorization; item: StudioQuotedGeneration; itemIndex: number }
+      | undefined;
+    for (const authorization of project.spendAuthorizations) {
+      const items = quotedItems(authorization);
+      for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
+        const item = items[itemIndex]!;
+        if (
+          item.shotId === dependentShotId &&
+          item.purpose === 'video_take' &&
+          item.requestPlan.kind === 'after_take_selection'
+        ) {
+          target = { authorization, item, itemIndex };
+        }
+      }
+    }
+    if (target === undefined) throw invalid('Studio cascade is not cancellable');
+    const jobs = Object.values(project.jobs).filter(
+      (job) => job.authorizationId === target!.authorization.id && job.authorizationItemId === target!.item.id
+    );
+    const remaining = jobs.filter((job) => job.status !== 'cancelled');
+    if (
+      jobs.length !== target.item.generationCount ||
+      remaining.length === 0 ||
+      remaining.some(
+        (job) =>
+          job.status !== 'waiting_for_conditioning' ||
+          job.requestSnapshot !== null ||
+          job.providerJobId !== null ||
+          (job.remoteStartedAt !== undefined && job.remoteStartedAt !== null) ||
+          job.spendReceipt !== null ||
+          job.outputAssetIds.length !== 0 ||
+          job.outputAssetIdsByRole.primary !== null ||
+          job.outputAssetIdsByRole.poster !== null ||
+          job.error !== null ||
+          job.progress !== undefined
+      )
+    ) {
+      throw invalid('Studio cascade is not cancellable');
+    }
+    for (const job of remaining) {
+      job.status = 'cancelled';
+      job.updatedAt = cancelledAt;
+    }
+    terminalizeStudioUnboundDependenciesV2(project, cancelledAt);
+  };
+
+  const dispatchBoundJobs = async (projectId: string, jobIds: readonly string[]): Promise<void> => {
+    if (disposed || jobIds.length === 0) return;
+    await deps.jobManager
+      .dispatchAuthorizedJobsV2({ projectId, jobIds: [...jobIds] })
+      .catch((): undefined => undefined);
   };
 
   return {
@@ -650,12 +953,86 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       return deleted;
     },
 
-    async applyMutations(input): Promise<StudioMutationBatchResultV2> {
-      const result = await deps.store.applyMutationBatchV2(input);
+    async applyMutations(input, context): Promise<StudioMutationBatchResultV2> {
+      const affectsHumanBinding =
+        Array.isArray(input.operations) &&
+        input.operations.some((operation) => operation.kind === 'set_seed_still' || operation.kind === 'select_take');
+      if (!affectsHumanBinding) {
+        const result = await deps.store.applyMutationBatchV2(input, context);
+        return {
+          project: notify(result.project),
+          createdBeatIds: [...result.createdBeatIds],
+          createdShotIds: [...result.createdShotIds],
+        };
+      }
+
+      let applied: StudioMutationApplyResultV2 | null = null;
+      let advance: StudioWaitingBindingAdvanceV2 = {
+        dispatchJobIds: [],
+        extractionIds: [],
+        projectChanged: false,
+      };
+      let committed = await deps.store.updateProjectV2(
+        input.projectId,
+        (project) => {
+          applied = applyStudioMutationBatchV2(project, input, context);
+          advance = advanceStudioWaitingBindingsV2(applied.project, context.capturedAt);
+          return applied.project;
+        },
+        input.expectedRevision,
+        `mutation_with_binding:${context.mutationId}`
+      );
+      if (applied === null) throw invalid('Studio mutation was not applied');
+      await dispatchBoundJobs(committed.id, advance.dispatchJobIds);
+
+      const verifiedReadyExtractions = new Map<string, StudioVerifiedConditioningFrameV2>();
+      if (deps.mediaStore !== undefined) {
+        for (const extractionId of advance.extractionIds) {
+          try {
+            // eslint-disable-next-line no-await-in-loop -- one local decoder bounds CPU and memory.
+            const extraction = await deps.mediaStore.extractConditioningFrameV2({
+              projectId: committed.id,
+              extractionId,
+            });
+            if (extraction.status === 'ready') {
+              const verification = await deps.mediaStore.verifyConditioningFrameV2({
+                projectId: committed.id,
+                extractionId: extraction.id,
+              });
+              if (verification !== null) verifiedReadyExtractions.set(verification.extractionId, verification);
+            }
+          } catch {
+            // The durable failed extraction and waiting jobs are the recoverable result.
+          }
+        }
+      }
+      if (verifiedReadyExtractions.size > 0) {
+        let boundAfterExtraction: StudioWaitingBindingAdvanceV2 = {
+          dispatchJobIds: [],
+          extractionIds: [],
+          projectChanged: false,
+        };
+        committed = await deps.store.updateProjectV2(
+          committed.id,
+          (project) => {
+            boundAfterExtraction = advanceStudioWaitingBindingsV2(
+              project,
+              readNow().toISOString(),
+              verifiedReadyExtractions
+            );
+            return project;
+          },
+          undefined,
+          `bind_conditioning:${context.mutationId}`
+        );
+        await dispatchBoundJobs(committed.id, boundAfterExtraction.dispatchJobIds);
+      } else if (advance.extractionIds.length > 0) {
+        committed = await loadSupported(committed.id);
+      }
       return {
-        project: notify(result.project),
-        createdBeatIds: [...result.createdBeatIds],
-        createdShotIds: [...result.createdShotIds],
+        project: notify(committed),
+        createdBeatIds: [...applied.createdBeatIds],
+        createdShotIds: [...applied.createdShotIds],
       };
     },
 
@@ -743,55 +1120,181 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       };
     },
 
-    async submitShots(input): Promise<StudioRendererJobV2[]> {
-      assertSubmitRequest(input);
-      assertReviewedShots(await loadSupported(input.projectId), input);
-      const generation = await listGenerationRoutes();
-      if (generation.generationCatalogVersion !== input.catalogVersion) {
-        throw new CreativeStudioServiceError('invalid_route');
-      }
-      const project = await loadSupported(input.projectId);
-      assertReviewedShots(project, input);
-      const outputRole = input.outputRole ?? 'take';
-      const resolvedRoutes = input.routes.map((choice) => {
-        const route = generation.routes.find(
-          (candidate) => candidate.choiceId === choice.choiceId && candidate.kind === choice.kind
-        );
-        const selected = project.routing[choice.kind];
-        if (
-          route === undefined ||
-          selected === null ||
-          !routeMatchesSelection(route, selected) ||
-          !routeSupportsShot(route, project, choice.shotId, outputRole)
-        ) {
-          throw new CreativeStudioServiceError('invalid_route');
-        }
-        return {
-          shotId: choice.shotId,
-          providerId: route.providerId,
-          adapterId: route.adapterId,
-          model: route.model,
-          kind: route.kind,
-        };
-      });
-      const jobs = await deps.jobManager.submitShots({
-        projectId: input.projectId,
-        shotIds: [...input.shotIds],
-        expectedRevision: input.expectedRevision,
-        routes: resolvedRoutes,
-        catalogVersion: generation.generationCatalogVersion,
-        ...(input.outputRole === undefined ? {} : { outputRole: input.outputRole }),
-        ...(input.referencePrompts === undefined
-          ? {}
-          : { referencePrompts: input.referencePrompts.map((prompt) => ({ ...prompt })) }),
-      });
-      return jobs.map((job) => toRendererJob(project, job));
+    async getWorkspaceStatus(input): Promise<StudioRendererWorkspaceStatusV2> {
+      if (!isRecord(input) || !hasExactKeys(input, ['projectId'])) throw invalid('Invalid Studio workspace request');
+      assertSafeId(input.projectId, 'project id');
+      return projectStudioWorkspaceStatusV2(await loadSupported(input.projectId));
     },
 
+    async getChainStatus(input): Promise<StudioRendererChainStatusV2> {
+      if (!isRecord(input) || !hasExactKeys(input, ['projectId'])) throw invalid('Invalid Studio chain request');
+      assertSafeId(input.projectId, 'project id');
+      return projectStudioChainStatusV2(await loadSupported(input.projectId));
+    },
+
+    async prepareSubmission(input): Promise<StudioRendererPreparedSubmissionOptionsV2> {
+      assertServiceActive();
+      if (!isRecord(input) || input.originReferenceHandoffId !== null) {
+        throw invalid('Invalid Studio submission origin');
+      }
+      const projectId = input.projectId;
+      assertSafeId(projectId, 'project id');
+      const project = await loadSupported(projectId);
+      const rateCard = await loadRateCard();
+      const derived = deriveStudioSubmissionQuoteCoresV2({ project, request: input, rateCard });
+      const generation = await listGenerationRoutes();
+      const baseQuoteId = createQuoteId();
+      const cascadeQuoteId = derived.withCascade === null ? null : createQuoteId();
+      if (
+        !isSafeId(baseQuoteId) ||
+        (cascadeQuoteId !== null && (!isSafeId(cascadeQuoteId) || cascadeQuoteId === baseQuoteId))
+      ) {
+        throw invalid('Invalid or duplicate Studio quote identity');
+      }
+      const options = {
+        baseOnly: createQuote(derived.baseOnly, baseQuoteId),
+        withCascade:
+          derived.withCascade === null || cascadeQuoteId === null
+            ? null
+            : createQuote(derived.withCascade, cascadeQuoteId),
+      };
+      const bindingQuote = options.withCascade ?? options.baseOnly;
+      const providerBindings = resolveProviderBindings(generation, project, bindingQuote);
+      const cancellationPolicies = quotedItems(bindingQuote).map((item) => ({
+        itemId: item.id,
+        policy: resolveQuotedRoute(generation, project, item).cancellationPolicy,
+      }));
+      const session = preparedSubmissionCache.admit({
+        request: derived.request,
+        options,
+        providerBindings,
+        cancellationPolicies,
+      });
+      return projectPreparedOptions(project, generation, session.options);
+    },
+
+    async confirmSubmission(input): Promise<StudioConfirmSubmissionResultV2> {
+      assertServiceActive();
+      if (!isRecord(input) || !hasExactKeys(input, ['projectId', 'quoteId', 'expectedRevision'])) {
+        throw invalid('Invalid Studio confirmation request');
+      }
+      assertSafeId(input.projectId, 'project id');
+      assertSafeId(input.quoteId, 'quote id');
+      assertRevision(input.expectedRevision);
+      const claim = preparedSubmissionCache.claim(input.projectId, input.quoteId);
+      activeClaims.add(claim);
+      let durable = false;
+      try {
+        const committed = await deps.store.confirmProjectV2<
+          ConfirmationRevalidation,
+          StudioDispatchAuthorizedJobsRequestV2
+        >({
+          projectId: input.projectId,
+          expectedRevision: input.expectedRevision,
+          expiresAt: claim.quote.expiresAt,
+          revalidate: async (project) => {
+            assertServiceActive(claim);
+            const mutableProject = structuredClone(project) as StudioProjectV2;
+            const rateCard = await loadRateCard();
+            const derived = deriveStudioSubmissionQuoteCoresV2({
+              project: mutableProject,
+              request: claim.session.request,
+              rateCard,
+            });
+            const currentCore = claim.option === 'baseOnly' ? derived.baseOnly : derived.withCascade;
+            if (currentCore === null || !studioSubmissionQuoteCoresEqual(quoteCore(claim.quote), currentCore)) {
+              throw invalid('Studio quote is stale');
+            }
+            if (!evaluateStudioBudgetV2(currentCore, mutableProject.spendPolicy).allowed) {
+              throw invalid('Studio spend policy refused the quote');
+            }
+            const generation = await listGenerationRoutes();
+            const providerBindings = resolveProviderBindings(generation, mutableProject, currentCore);
+            if (!jsonEqual(providerBindings, exactSelectedBindings(claim))) {
+              throw new CreativeStudioServiceError('invalid_route');
+            }
+            const cancellationPolicies = quotedItems(currentCore).map((item) => ({
+              itemId: item.id,
+              policy: resolveQuotedRoute(generation, mutableProject, item).cancellationPolicy,
+            }));
+            if (!jsonEqual(cancellationPolicies, exactSelectedCancellationPolicies(claim))) {
+              throw new CreativeStudioServiceError('invalid_route');
+            }
+            return { quote: structuredClone(claim.quote), providerBindings, cancellationPolicies };
+          },
+          assertActive: () => assertServiceActive(claim),
+          buildCommit: (project, revalidation, confirmedAt) =>
+            buildConfirmedProject(project, structuredClone(revalidation) as ConfirmationRevalidation, confirmedAt),
+          commitTag: `confirm_submission:${claim.quote.id}`,
+        });
+        durable = true;
+        activeClaims.delete(claim);
+        preparedSubmissionCache.consume(claim);
+        deps.onProjectUpdated(committed.project.id);
+        if (!disposed && committed.dispatch.jobIds.length > 0) {
+          await deps.jobManager
+            .dispatchAuthorizedJobsV2({
+              projectId: committed.dispatch.projectId,
+              jobIds: [...committed.dispatch.jobIds],
+            })
+            .catch((): undefined => undefined);
+        }
+        return { projectId: committed.project.id, projectRevision: committed.project.revision };
+      } catch (error) {
+        activeClaims.delete(claim);
+        if (!durable) preparedSubmissionCache.release(claim);
+        if (error instanceof StudioProjectConfirmationError && error.code === 'expired_confirmation') {
+          throw cacheFailure('quote_not_found');
+        }
+        throw error;
+      }
+    },
+
+    async retryConditioningFrame(input): Promise<StudioRendererWorkspaceStatusV2> {
+      assertServiceActive();
+      assertBarrierRequest(input);
+      let extractionId = '';
+      const committed = await deps.store.updateProjectV2(
+        input.projectId,
+        (project) => {
+          extractionId = retryableExtractionId(project, input.dependentShotId);
+          const extraction = ownValue(project.frameExtractions, extractionId)!;
+          extraction.status = 'pending';
+          extraction.frameAssetId = null;
+          extraction.errorCode = null;
+          return project;
+        },
+        input.expectedRevision,
+        `retry_conditioning_frame:${input.dependentShotId}`
+      );
+      deps.onProjectUpdated(committed.id);
+      return projectStudioWorkspaceStatusV2(committed);
+    },
+
+    async cancelWaitingCascade(input): Promise<StudioRendererWorkspaceStatusV2> {
+      assertServiceActive();
+      assertBarrierRequest(input);
+      const cancelledAt = readNow().toISOString();
+      const committed = await deps.store.updateProjectV2(
+        input.projectId,
+        (project) => {
+          cancelWaitingItem(project, input.dependentShotId, cancelledAt);
+          return project;
+        },
+        input.expectedRevision,
+        `cancel_waiting_cascade:${input.dependentShotId}`
+      );
+      deps.onProjectUpdated(committed.id);
+      return projectStudioWorkspaceStatusV2(committed);
+    },
+
+    async dispatchAuthorizedJobs(input): Promise<StudioRendererJobV2[]> {
+      const jobs = await deps.jobManager.dispatchAuthorizedJobsV2(input);
+      return jobs.map((job) => toRendererJob(job));
+    },
     async cancelJob(input): Promise<StudioRendererJobV2> {
       assertJobRequest(input);
-      const project = await loadSupported(input.projectId);
-      return toRendererJob(project, await deps.jobManager.cancelJobV2(input));
+      return toRendererJob(await deps.jobManager.cancelJobV2(input));
     },
 
     async retryJob(input): Promise<StudioRendererJobV2> {
@@ -802,14 +1305,19 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       ) {
         throw invalid('Invalid Studio duplicate-charge acknowledgement');
       }
-      const project = await loadSupported(input.projectId);
-      return toRendererJob(project, await deps.jobManager.retryJobV2(input));
+      return toRendererJob(await deps.jobManager.retryJobV2(input));
     },
 
     async retryDownload(input): Promise<StudioRendererJobV2> {
       assertJobRequest(input);
-      const project = await loadSupported(input.projectId);
-      return toRendererJob(project, await deps.jobManager.retryDownloadV2(input));
+      return toRendererJob(await deps.jobManager.retryDownloadV2(input));
+    },
+
+    dispose(): void {
+      if (disposed) return;
+      disposed = true;
+      activeClaims.clear();
+      preparedSubmissionCache.close();
     },
   };
 };

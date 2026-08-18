@@ -7,14 +7,17 @@
 import { z } from 'zod';
 
 import { isCanonicalStudioGeneratedTakeV2 } from './creativeStudioCanonicalTake';
+import { STUDIO_MAX_SHOT_SECONDS, STUDIO_MIN_SHOT_SECONDS } from './creativeStudioTypes';
 import type {
   StudioAsset,
   StudioAssetV2,
+  StudioBeat,
   StudioShot,
   StudioProject,
   StudioProjectSummary,
   StudioProjectSummaryV2,
   StudioProjectV2,
+  StudioPlanningShotBoundaryV2,
   StudioScene,
 } from './creativeStudioTypes';
 
@@ -23,6 +26,7 @@ const safeStudioIdSchema = z
   .min(1)
   .max(256)
   .regex(/^[A-Za-z0-9_-]+$/);
+const hostileStudioPropertyIds = new Set(['__proto__', 'constructor', 'toString']);
 
 /** Runtime boundary schema for the renderer-facing Creative Studio library listing. */
 export const studioProjectSummarySchema = z
@@ -55,7 +59,7 @@ export const studioProjectSummaryV2Schema = z
     name: z.string().min(1).max(256),
     forgeProjectId: safeStudioIdSchema.optional(),
     aspectRatio: z.enum(['16:9', '9:16', '1:1', '4:3', '3:4']),
-    targetDurationSeconds: z.number().finite().int().min(5).max(60),
+    targetDurationSeconds: z.number().finite().int().min(5).max(1440),
     resolution: z.enum(['720p', '1080p']),
     beatCount: z.number().finite().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
     shotCount: z.number().finite().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
@@ -182,15 +186,20 @@ const canonicalVideoPosterV2 = (
       job.projectId === project.id &&
       job.shotId === shot.id &&
       job.status === 'succeeded' &&
-      job.outputRole !== 'reference' &&
-      job.outputAssetIds[0] === selectedTakeId
+      job.purpose === 'video_take' &&
+      job.outputAssetIdsByRole.primary === selectedTakeId &&
+      job.outputAssetIds.filter((assetId) => assetId === selectedTakeId).length === 1
       ? [job]
       : [];
   });
   if (producingJobs.length !== 1) return null;
-  const outputAssetIds = producingJobs[0]!.outputAssetIds;
-  if (outputAssetIds.length !== 2) return null;
-  const posterAssetId = outputAssetIds[1]!;
+  const posterAssetId = producingJobs[0]!.outputAssetIdsByRole.poster;
+  if (
+    posterAssetId === null ||
+    producingJobs[0]!.outputAssetIds.filter((assetId) => assetId === posterAssetId).length !== 1
+  ) {
+    return null;
+  }
   const poster = project.assets[posterAssetId];
   return poster?.id === posterAssetId &&
     poster.projectId === project.id &&
@@ -200,6 +209,136 @@ const canonicalVideoPosterV2 = (
     shot.assetIds.includes(poster.id)
     ? poster
     : null;
+};
+
+/** Returns active planning boundaries without consulting selected media, trims, or provider state. */
+export const studioPlanningShotBoundariesV2 = (
+  beat: StudioBeat,
+  shots: Readonly<Record<string, StudioShot>>
+): StudioPlanningShotBoundaryV2[] | null => {
+  if (!Array.isArray(beat.shotOrder) || typeof shots !== 'object' || shots === null) return null;
+  const boundaries: StudioPlanningShotBoundaryV2[] = [];
+  const seen = new Set<string>();
+  let cursor = 0;
+  for (const shotId of beat.shotOrder) {
+    if (
+      !safeStudioIdSchema.safeParse(shotId).success ||
+      hostileStudioPropertyIds.has(shotId) ||
+      seen.has(shotId) ||
+      !Object.hasOwn(shots, shotId)
+    ) {
+      return null;
+    }
+    const shot = shots[shotId];
+    if (
+      shot?.id !== shotId ||
+      !Number.isSafeInteger(shot.durationSeconds) ||
+      shot.durationSeconds < STUDIO_MIN_SHOT_SECONDS ||
+      shot.durationSeconds > STUDIO_MAX_SHOT_SECONDS
+    ) {
+      return null;
+    }
+    const endSeconds = cursor + shot.durationSeconds;
+    if (!Number.isSafeInteger(endSeconds)) return null;
+    boundaries.push({ shotId, startSeconds: cursor, endSeconds });
+    cursor = endSeconds;
+    seen.add(shotId);
+  }
+  return boundaries;
+};
+
+/** Returns one active Shot's played duration, using selected source media when it exists. */
+export const studioShotPlayedDurationV2 = (project: StudioProjectV2, shot: StudioShot): number | null => {
+  if (shot.selectedTakeId === null) {
+    return shot.trimInSeconds === null &&
+      shot.trimOutSeconds === null &&
+      Number.isSafeInteger(shot.durationSeconds) &&
+      shot.durationSeconds >= STUDIO_MIN_SHOT_SECONDS &&
+      shot.durationSeconds <= STUDIO_MAX_SHOT_SECONDS
+      ? shot.durationSeconds
+      : null;
+  }
+  if (!Object.hasOwn(project.assets, shot.selectedTakeId)) return null;
+  const selected = project.assets[shot.selectedTakeId];
+  if (
+    selected?.id !== shot.selectedTakeId ||
+    selected.mediaKind !== 'video' ||
+    selected.durationSeconds === undefined ||
+    !Number.isFinite(selected.durationSeconds) ||
+    selected.durationSeconds <= 0 ||
+    selected.durationSeconds > Number.MAX_SAFE_INTEGER ||
+    !isCanonicalStudioGeneratedTakeV2(selected, project.id, shot)
+  ) {
+    return null;
+  }
+  const trimInSeconds = shot.trimInSeconds ?? 0;
+  const trimOutSeconds = shot.trimOutSeconds ?? 0;
+  if (
+    !Number.isFinite(trimInSeconds) ||
+    !Number.isFinite(trimOutSeconds) ||
+    trimInSeconds < 0 ||
+    trimOutSeconds < 0 ||
+    Object.is(trimInSeconds, -0) ||
+    Object.is(trimOutSeconds, -0) ||
+    trimInSeconds >= selected.durationSeconds ||
+    trimOutSeconds >= selected.durationSeconds ||
+    trimInSeconds + trimOutSeconds >= selected.durationSeconds
+  ) {
+    return null;
+  }
+  return selected.durationSeconds - trimInSeconds - trimOutSeconds;
+};
+
+export type StudioFilmDurationProjectionV2 = {
+  knownSeconds: number;
+  unresolvedBeatIds: string[];
+};
+
+const addStudioDuration = (left: number, right: number): number | null => {
+  const result = left + right;
+  return Number.isFinite(result) && result >= 0 && result <= Number.MAX_SAFE_INTEGER ? result : null;
+};
+
+/** Projects active film duration while preserving null-target spine Beats as unresolved. */
+export const toStudioFilmDurationV2 = (project: StudioProjectV2): StudioFilmDurationProjectionV2 => {
+  let knownSeconds = 0;
+  const unresolvedBeatIds: string[] = [];
+  for (const beatId of project.beatOrder) {
+    const beat = Object.hasOwn(project.beats, beatId) ? project.beats[beatId] : undefined;
+    if (beat?.id !== beatId) {
+      unresolvedBeatIds.push(beatId);
+      continue;
+    }
+    if (beat.shotOrder.length === 0) {
+      if (beat.targetSeconds === null) unresolvedBeatIds.push(beatId);
+      else {
+        const nextKnownSeconds = addStudioDuration(knownSeconds, beat.targetSeconds);
+        if (nextKnownSeconds === null) unresolvedBeatIds.push(beatId);
+        else knownSeconds = nextKnownSeconds;
+      }
+      continue;
+    }
+    let beatSeconds = 0;
+    let resolved = true;
+    for (const shotId of beat.shotOrder) {
+      const shot = Object.hasOwn(project.shots, shotId) ? project.shots[shotId] : undefined;
+      const duration = shot?.id === shotId ? studioShotPlayedDurationV2(project, shot) : null;
+      if (duration === null) {
+        resolved = false;
+        break;
+      }
+      const nextBeatSeconds = addStudioDuration(beatSeconds, duration);
+      if (nextBeatSeconds === null) {
+        resolved = false;
+        break;
+      }
+      beatSeconds = nextBeatSeconds;
+    }
+    const nextKnownSeconds = resolved ? addStudioDuration(knownSeconds, beatSeconds) : null;
+    if (nextKnownSeconds === null) unresolvedBeatIds.push(beatId);
+    else knownSeconds = nextKnownSeconds;
+  }
+  return { knownSeconds, unresolvedBeatIds };
 };
 
 /** Projects a schema-2 project into its strict active-content library summary. */
@@ -215,11 +354,16 @@ export const toStudioProjectSummaryV2 = (project: StudioProjectV2): StudioProjec
       const shot = project.shots[shotId];
       if (shot?.id !== shotId || shot.selectedTakeId === null) return;
       const selected = project.assets[shot.selectedTakeId];
-      if (selected === undefined || !isCanonicalStudioGeneratedTakeV2(selected, project.id, shot)) return;
+      if (
+        selected === undefined ||
+        selected.mediaKind !== 'video' ||
+        !isCanonicalStudioGeneratedTakeV2(selected, project.id, shot)
+      ) {
+        return;
+      }
       selectedTakeCount += 1;
       if (poster !== undefined) return;
-      const posterAsset =
-        selected.mediaKind === 'image' ? selected : canonicalVideoPosterV2(project, shot, selected.id);
+      const posterAsset = canonicalVideoPosterV2(project, shot, selected.id);
       if (posterAsset === null) return;
       poster = {
         beatId,

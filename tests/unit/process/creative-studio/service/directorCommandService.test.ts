@@ -39,6 +39,7 @@ import {
   createCreativeStudioStore,
   type CreativeStudioStore,
 } from '@process/services/creative-studio/store';
+import { createStudioLineHistoryId } from '@process/services/creative-studio/service/schema2/mutationIdentity';
 
 const NOW = '2026-08-17T00:00:00.000Z';
 const NOW_MS = Date.parse(NOW);
@@ -64,9 +65,7 @@ const emptyShotV2 = () => ({
   line: '',
   narration: '',
   onScreenText: '',
-  mediaKind: 'image' as const,
   durationSeconds: 5,
-  referenceAssetId: null,
 });
 
 const makeCommandV2 = (
@@ -110,14 +109,14 @@ describe('Studio Director schema-2 command service', () => {
       {
         kind: 'add_beat',
         beatId: 'section_1',
-        beat: { title: 'Opening', action: '', look: 'Cinematic light' },
-        firstShotId: 'clip_1',
-        firstShot: emptyShotV2(),
+        beat: { title: 'Opening', action: '', look: 'Cinematic light', targetSeconds: null },
         beforeBeatId: null,
       },
+      { kind: 'add_shot', beatId: 'section_1', shotId: 'clip_1', shot: emptyShotV2(), beforeShotId: null },
       { kind: 'add_shot', beatId: 'section_1', shotId: 'clip_2', shot: emptyShotV2(), beforeShotId: null },
       { kind: 'edit_beat', beatId: 'section_1', changes: { action: 'A clear story beat' } },
       { kind: 'edit_shot', shotId: 'clip_2', changes: { line: 'Close product reveal' } },
+      { kind: 'edit_shot', shotId: 'clip_2', changes: { line: 'Final product reveal' } },
       { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_2', 'clip_1'] },
     ];
     const command = makeCommandV2(project, operations);
@@ -133,8 +132,28 @@ describe('Studio Director schema-2 command service', () => {
       project: {
         revision: project.revision + 1,
         beatOrder: ['section_1'],
-        beats: { section_1: { action: 'A clear story beat', shotOrder: ['clip_2', 'clip_1'] } },
-        shots: { clip_2: { line: 'Close product reveal' } },
+        beats: {
+          section_1: {
+            action: 'A clear story beat',
+            shotOrder: ['clip_2', 'clip_1'],
+            lineHistory: [
+              {
+                id: createStudioLineHistoryId(command.commandId, 5, 'clip_2', 0),
+                shotOrdinal: 2,
+                text: 'Close product reveal',
+                capturedAt: command.createdAt,
+              },
+            ],
+          },
+        },
+        shots: { clip_2: { line: 'Final product reveal' } },
+        undoHistory: [
+          {
+            id: command.commandId,
+            sourceRevision: project.revision + 1,
+            label: 'mutation_batch',
+          },
+        ],
       },
     });
     expect(updateProjectV2).toHaveBeenCalledOnce();
@@ -194,10 +213,15 @@ describe('Studio Director schema-2 command service', () => {
       {
         kind: 'add_beat',
         beatId: 'section_1',
-        beat: { title: 'Opening', action: '', look: 'Cinematic light' },
-        firstShotId: 'clip_1',
-        firstShot: { ...emptyShotV2(), mediaKind: 'video', durationSeconds: 3 },
+        beat: { title: 'Opening', action: '', look: 'Cinematic light', targetSeconds: null },
         beforeBeatId: null,
+      },
+      {
+        kind: 'add_shot',
+        beatId: 'section_1',
+        shotId: 'clip_1',
+        shot: { ...emptyShotV2(), durationSeconds: 3 },
+        beforeShotId: null,
       },
     ]);
 

@@ -39,15 +39,19 @@ import type {
   StudioEditableCutClip,
   StudioJob,
   StudioJobV2,
+  StudioGenerationRequestPlan,
   StudioMutationBatchV2,
+  StudioMutationReducerContextV2,
   StudioProject,
   StudioProjectSummary,
   StudioProjectV2,
+  StudioQuotedGeneration,
   StudioMediaChoiceRef,
   StudioProposalPayload,
   StudioRendererJob,
   StudioRendererProject,
   StudioRouteCatalog,
+  StudioSpendAuthorization,
 } from '@/common/types/project/creativeStudioTypes';
 import {
   allocateStudioBriefReferenceLabel,
@@ -56,17 +60,26 @@ import {
   STUDIO_BRIEF_REFERENCE_LABEL_MAX_LENGTH,
 } from '@/common/types/project/creativeStudioManagedAssetCollections';
 import { jobOutputRole } from '@/common/types/project/creativeStudioOutputRole';
-import { createEmptyStudioProjectV2 } from '@process/services/creative-studio/service/schema2';
+import {
+  createEmptyStudioProjectV2,
+  type StudioMutationApplyResultV2,
+} from '@process/services/creative-studio/service/schema2';
+import {
+  calculateStudioQuoteTotals,
+  createStudioQuotedGenerationId,
+} from '@process/services/creative-studio/service/schema2/generation';
 import { STUDIO_EDITABLE_SCENE_LIMITS, editableSceneSchema } from '@process/resources/builtinMcp/studioServer';
 import type { StudioProposalWriteError } from '@process/resources/builtinMcp/studioProposalWriter';
 import { writeProposalRecord } from '@process/resources/builtinMcp/studioProposalWriter';
 import { writeReferenceRequestRecord } from '@process/resources/builtinMcp/studioReferenceRequestWriter';
 import {
   createCreativeStudioStore,
+  StudioProjectConfirmationError,
   STUDIO_PROPOSAL_MAX_PENDING_PER_PROJECT,
   STUDIO_PROPOSAL_PENDING_TTL_MS,
   STUDIO_PROJECT_V2_MAX_RECORD_BYTES,
   type CreativeStudioStore,
+  type StudioProjectConfirmationInputV2,
   type StudioProjectInventoryV2,
   type StudioProjectStoreLoadResultV2,
   type StudioProjectCommitObserver,
@@ -3419,6 +3432,28 @@ const makeBoundaryMutationBatchV2 = (projectId: string, expectedRevision = 1): S
   operations: [{ kind: 'set_brief', brief: 'Updated without a commit tag' }],
 });
 
+const makeMutationContextV2 = (
+  overrides: Partial<StudioMutationReducerContextV2> = {}
+): StudioMutationReducerContextV2 => ({
+  mutationId: 'mutation_store_test',
+  capturedAt: '2026-08-17T12:00:00.000Z',
+  ...overrides,
+});
+
+const createDeferredV2 = <T>(): {
+  promise: Promise<T>;
+  resolve: (value: T | PromiseLike<T>) => void;
+  reject: (reason?: unknown) => void;
+} => {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+};
+
 describe('schema-2 creative studio project store', () => {
   const timestamp = '2026-08-17T12:00:00.000Z';
   const inputV2: CreateStudioProjectInputV2 = {
@@ -3511,14 +3546,29 @@ describe('schema-2 creative studio project store', () => {
     const shot: StudioShot = {
       id: 'clip_video',
       line: 'A launch vehicle crosses frame',
+      derivation: 'derived',
+      derivedFromActionRevision: 1,
       narration: '',
       onScreenText: '',
-      mediaKind: 'video',
       durationSeconds: 4,
-      referenceAssetId: null,
+      trimInSeconds: null,
+      trimOutSeconds: null,
+      chainBreak: 'none',
+      seedStillId: 'asset_seed',
       selectedTakeId: 'asset_video',
-      assetIds: ['asset_video', 'asset_thumbnail'],
+      assetIds: ['asset_seed', 'asset_video', 'asset_thumbnail'],
       jobIds: ['job_video'],
+    };
+    const seed: StudioAssetV2 = {
+      id: 'asset_seed',
+      projectId: id,
+      shotId: shot.id,
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'imports', fileName: 'asset_seed.png' },
+      byteSize: 1,
+      sha256: 'c'.repeat(64),
+      createdAt: timestamp,
     };
     const video: StudioAssetV2 = {
       id: 'asset_video',
@@ -3543,17 +3593,86 @@ describe('schema-2 creative studio project store', () => {
       sha256: 'b'.repeat(64),
       createdAt: timestamp,
     };
+    const requestPlan: StudioGenerationRequestPlan = {
+      kind: 'resolved',
+      snapshot: {
+        prompt: 'A launch vehicle crosses frame',
+        aspectRatio: '16:9',
+        resolution: '1080p',
+        durationSeconds: 4,
+        referenceInput: null,
+        conditioningInput: { kind: 'seed_still', assetId: seed.id },
+      },
+    };
+    const item: StudioQuotedGeneration = {
+      id: createStudioQuotedGenerationId({
+        projectId: id,
+        projectRevision: 1,
+        shotId: shot.id,
+        purpose: 'video_take',
+      }),
+      shotId: shot.id,
+      purpose: 'video_take',
+      routeId: 'video_route',
+      generationCount: 1,
+      requestPlan,
+      rateUnit: 'second',
+      rateMinorUnits: 2,
+    };
+    const totals = calculateStudioQuoteTotals([item])!;
+    const provider = {
+      providerId: 'provider_1',
+      adapterId: 'byteplus-seedance-v1',
+      model: 'model_1',
+    } as const;
+    const authorization: StudioSpendAuthorization = {
+      id: 'authorization_video',
+      projectId: id,
+      projectRevision: 1,
+      originReferenceHandoffId: null,
+      rateCardDigest: 'd'.repeat(64),
+      currency: 'USD',
+      baseItems: [item],
+      cascadeItems: [],
+      lowerMinorUnits: totals.lowerMinorUnits,
+      upperMinorUnits: totals.upperMinorUnits,
+      expiresAt: '2026-08-17T12:05:00.000Z',
+      confirmedAt: timestamp,
+      providerBindings: [{ itemId: item.id, provider }],
+      idempotencyKeys: [{ itemId: item.id, generationIndex: 0, key: 'idem_job_video' }],
+    };
     const job: StudioJobV2 = {
       id: 'job_video',
       projectId: id,
       shotId: shot.id,
       status: 'succeeded',
-      provider: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'model_1' },
+      provider,
       idempotencyKey: 'idem_job_video',
       providerJobId: 'remote_job_video',
       remoteStartedAt: timestamp,
       cancellationPolicy: 'none',
+      purpose: 'video_take',
+      authorizationId: authorization.id,
+      authorizationItemId: item.id,
+      generationIndex: 0,
+      requestPlan,
+      requestSnapshot: requestPlan.snapshot,
+      spendReceipt: {
+        authorizationId: authorization.id,
+        itemId: item.id,
+        jobId: 'job_video',
+        purpose: 'video_take',
+        routeId: item.routeId,
+        currency: authorization.currency,
+        rateUnit: 'second',
+        rateMinorUnits: item.rateMinorUnits,
+        durationSeconds: 4,
+        generationIndex: 0,
+        generationCount: 1,
+        totalMinorUnits: 8,
+      },
       outputAssetIds: [video.id, thumbnail.id],
+      outputAssetIdsByRole: { primary: video.id, poster: thumbnail.id },
       error: null,
       retryOfJobId: null,
       retryReason: null,
@@ -3568,11 +3687,16 @@ describe('schema-2 creative studio project store', () => {
       title: 'Opening',
       action: '',
       look: '',
+      actionRevision: 1,
+      targetSeconds: null,
       shotOrder: [shot.id],
+      lineHistory: [],
     };
     project.shots[shot.id] = shot;
-    project.assets = { [video.id]: video, [thumbnail.id]: thumbnail };
+    project.assets = { [seed.id]: seed, [video.id]: video, [thumbnail.id]: thumbnail };
     project.jobs[job.id] = job;
+    project.spendAuthorizations = [authorization];
+    project.revision = 2;
     return project;
   };
 
@@ -4081,7 +4205,9 @@ describe('schema-2 creative studio project store', () => {
 
     await expect(store.createProjectV2(inputV2)).rejects.toMatchObject({ code: 'invalid_payload' });
     await expect(store.getProjectV2(oversizedId)).resolves.toEqual({ status: 'not_found', projectId: oversizedId });
-    await expect(store.applyMutationBatchV2(oversizedBatch)).rejects.toMatchObject({ code: 'invalid_payload' });
+    await expect(store.applyMutationBatchV2(oversizedBatch, makeMutationContextV2())).rejects.toMatchObject({
+      code: 'invalid_payload',
+    });
     await expect(store.deleteProjectV2(oversizedId, 1)).resolves.toBe(false);
     expect(pathAccesses.calls).toEqual([]);
   });
@@ -4165,9 +4291,9 @@ describe('schema-2 creative studio project store', () => {
     const absentRoot = path.join(rootDir, 'absent-mutation-store');
     const store = createCreativeStudioStore({ rootDir: absentRoot });
 
-    await expect(store.applyMutationBatchV2(makeBoundaryMutationBatchV2('missing_v2'))).rejects.toMatchObject({
-      code: 'not_found',
-    });
+    await expect(
+      store.applyMutationBatchV2(makeBoundaryMutationBatchV2('missing_v2'), makeMutationContextV2())
+    ).rejects.toMatchObject({ code: 'not_found' });
     await expect(store.deleteProjectV2('missing_v2', 1)).resolves.toBe(false);
     expect(existsSync(absentRoot)).toBe(false);
   });
@@ -4189,19 +4315,50 @@ describe('schema-2 creative studio project store', () => {
     const absentRoot = path.join(rootDir, 'absent-revision-store');
     const store = createCreativeStudioStore({ rootDir: absentRoot });
 
-    await expect(store.applyMutationBatchV2(makeBoundaryMutationBatchV2('missing_v2', 0))).rejects.toMatchObject({
-      code: 'invalid_payload',
-    });
+    await expect(
+      store.applyMutationBatchV2(makeBoundaryMutationBatchV2('missing_v2', 0), makeMutationContextV2())
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
     await expect(store.deleteProjectV2('missing_v2', 0)).rejects.toMatchObject({ code: 'invalid_payload' });
+    expect(existsSync(absentRoot)).toBe(false);
+  });
+
+  it('requires an exact reducer context before queueing or consulting storage', async () => {
+    const absentRoot = path.join(rootDir, 'absent-context-store');
+    const mutations = observeFileSystemMethods(
+      new Set(['access', 'mkdir', 'open', 'readFile', 'readdir', 'rename', 'rm', 'stat', 'writeFile'])
+    );
+    const store = createCreativeStudioStore({ rootDir: absentRoot, fs: mutations.fs });
+    const batch = makeBoundaryMutationBatchV2('missing_v2');
+    const invokeWithoutContext = store.applyMutationBatchV2 as unknown as (
+      input: StudioMutationBatchV2
+    ) => Promise<unknown>;
+    const symbolContext = { ...makeMutationContextV2(), [Symbol('unexpected')]: true };
+    const invalidContexts: unknown[] = [
+      null,
+      {},
+      { mutationId: '../unsafe', capturedAt: timestamp },
+      { mutationId: 'mutation_bad_time', capturedAt: '2026-08-17' },
+      { ...makeMutationContextV2(), unexpected: true },
+      symbolContext,
+    ];
+
+    await expect(invokeWithoutContext(batch)).rejects.toMatchObject({ code: 'invalid_payload' });
+    for (const context of invalidContexts) {
+      await expect(store.applyMutationBatchV2(batch, context as StudioMutationReducerContextV2)).rejects.toMatchObject({
+        code: 'invalid_payload',
+      });
+    }
+
+    expect(mutations.calls).toEqual([]);
     expect(existsSync(absentRoot)).toBe(false);
   });
 
   it('distinguishes absent manifests in an existing storage root', async () => {
     const { store, prototypeIndexAccesses } = createStoreV2();
 
-    await expect(store.applyMutationBatchV2(makeBoundaryMutationBatchV2('missing_v2'))).rejects.toMatchObject({
-      code: 'not_found',
-    });
+    await expect(
+      store.applyMutationBatchV2(makeBoundaryMutationBatchV2('missing_v2'), makeMutationContextV2())
+    ).rejects.toMatchObject({ code: 'not_found' });
     await expect(store.deleteProjectV2('missing_v2', 1)).resolves.toBe(false);
     expect(prototypeIndexAccesses).toEqual([]);
   });
@@ -4220,10 +4377,10 @@ describe('schema-2 creative studio project store', () => {
     const { store, prototypeIndexAccesses } = createStoreV2();
 
     await expect(
-      store.applyMutationBatchV2(makeBoundaryMutationBatchV2('prototype_boundary_v1'))
+      store.applyMutationBatchV2(makeBoundaryMutationBatchV2('prototype_boundary_v1'), makeMutationContextV2())
     ).rejects.toMatchObject({ code: 'unsupported_prototype_schema' });
     await expect(
-      store.applyMutationBatchV2(makeBoundaryMutationBatchV2('malformed_boundary_v2'))
+      store.applyMutationBatchV2(makeBoundaryMutationBatchV2('malformed_boundary_v2'), makeMutationContextV2())
     ).rejects.toMatchObject({ code: 'storage_error' });
     await expect(store.deleteProjectV2('malformed_boundary_v2', 1)).rejects.toMatchObject({ code: 'storage_error' });
     expect(prototypeIndexAccesses).toEqual([]);
@@ -4238,12 +4395,112 @@ describe('schema-2 creative studio project store', () => {
     });
     const project = await store.createProjectV2(inputV2);
 
-    const applied = await store.applyMutationBatchV2(makeBoundaryMutationBatchV2(project.id, project.revision));
+    const applied = await store.applyMutationBatchV2(
+      makeBoundaryMutationBatchV2(project.id, project.revision),
+      makeMutationContextV2()
+    );
 
     expect(applied.project.revision).toBe(project.revision + 1);
     expect(onProjectCommitted).toHaveBeenLastCalledWith(expect.objectContaining({ commitTag: null }));
     await expect(store.deleteProjectV2(project.id, project.revision)).rejects.toMatchObject({ code: 'stale_project' });
     expect(prototypeIndexAccesses).toEqual([]);
+  });
+
+  it('snapshots reducer context before queue work and ignores later caller mutation', async () => {
+    const { store } = createStoreV2({ createId: () => 'context_snapshot_v2', now: () => timestamp });
+    const project = await store.createProjectV2(inputV2);
+    const context = makeMutationContextV2({
+      mutationId: 'mutation_context_snapshot',
+      capturedAt: '2026-08-17T12:34:56.000Z',
+    });
+    const pending = store.applyMutationBatchV2(
+      makeStudioMutationBatchV2(project, [
+        {
+          kind: 'set_rules',
+          rules: [{ id: 'rule_1', text: 'Keep the logo visible', predicate: null }],
+        },
+      ]),
+      context
+    );
+
+    context.mutationId = 'mutation_changed_after_call';
+    context.capturedAt = '2026-08-17T23:59:59.000Z';
+    const applied = await pending;
+
+    expect(applied.project.rules).toEqual([
+      {
+        id: 'rule_1',
+        scope: 'project',
+        text: 'Keep the logo visible',
+        predicate: null,
+        createdAt: '2026-08-17T12:34:56.000Z',
+      },
+    ]);
+    expect(applied.project.undoHistory.at(-1)).toMatchObject({
+      id: 'mutation_context_snapshot',
+      sourceRevision: project.revision + 1,
+    });
+  });
+
+  it('refuses stale and same-context replay without rewriting or observing a second commit', async () => {
+    const onProjectCommitted = vi.fn<StudioProjectCommitObserver>();
+    const { store } = createStoreV2({
+      createId: () => 'context_replay_v2',
+      now: () => timestamp,
+      onProjectCommitted,
+    });
+    const project = await store.createProjectV2(inputV2);
+    const context = makeMutationContextV2({ mutationId: 'mutation_replay' });
+    const originalBatch = makeStudioMutationBatchV2(project, [{ kind: 'set_brief', brief: 'Applied once' }]);
+    const first = await store.applyMutationBatchV2(originalBatch, context);
+    const projectFile = path.join(rootDir, project.id, 'project.json');
+    const indexFile = path.join(rootDir, 'projects-v2.json');
+    const committedProjectBytes = readFileSync(projectFile);
+    const committedIndexBytes = readFileSync(indexFile);
+
+    await expect(store.applyMutationBatchV2(originalBatch, context)).rejects.toMatchObject({
+      code: 'stale_project',
+    });
+    await expect(
+      store.applyMutationBatchV2({ ...originalBatch, expectedRevision: first.project.revision }, context)
+    ).rejects.toMatchObject({ reasonCode: 'identity_collision' });
+
+    expect(readFileSync(projectFile)).toEqual(committedProjectBytes);
+    expect(readFileSync(indexFile)).toEqual(committedIndexBytes);
+    expect(onProjectCommitted).toHaveBeenCalledTimes(1);
+  });
+
+  it('serializes same-revision V2 batches so exactly one context reaches the reducer commit', async () => {
+    const onProjectCommitted = vi.fn<StudioProjectCommitObserver>();
+    const { store } = createStoreV2({
+      createId: () => 'context_cas_v2',
+      now: () => timestamp,
+      onProjectCommitted,
+    });
+    const project = await store.createProjectV2(inputV2);
+    const outcomes = await Promise.allSettled([
+      store.applyMutationBatchV2(
+        makeStudioMutationBatchV2(project, [{ kind: 'set_brief', brief: 'Left winner' }]),
+        makeMutationContextV2({ mutationId: 'mutation_left' })
+      ),
+      store.applyMutationBatchV2(
+        makeStudioMutationBatchV2(project, [{ kind: 'set_brief', brief: 'Right winner' }]),
+        makeMutationContextV2({ mutationId: 'mutation_right' })
+      ),
+    ]);
+    const fulfilled = outcomes.filter(
+      (outcome): outcome is PromiseFulfilledResult<StudioMutationApplyResultV2> => outcome.status === 'fulfilled'
+    );
+    const rejected = outcomes.filter((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.reason).toMatchObject({ code: 'stale_project' });
+    await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
+      status: 'supported',
+      project: { revision: project.revision + 1, brief: fulfilled[0]!.value.project.brief },
+    });
+    expect(onProjectCommitted).toHaveBeenCalledTimes(1);
   });
 
   it('rejects a symlinked project identity during inventory inspection', async () => {
@@ -4407,6 +4664,7 @@ describe('schema-2 creative studio project store', () => {
           { kind: 'set_brief', brief: 'must roll back' },
           { kind: 'delete_shot', shotId: 'missing_clip' },
         ]),
+        makeMutationContextV2({ mutationId: 'mutation_rollback' }),
         'rollback/test'
       )
     ).rejects.toMatchObject({ reasonCode: 'invalid_operation' });
@@ -4428,6 +4686,7 @@ describe('schema-2 creative studio project store', () => {
     await expect(
       store.applyMutationBatchV2(
         makeStudioMutationBatchV2(project, [{ kind: 'set_brief', brief: 'stale write' }], project.revision + 1),
+        makeMutationContextV2({ mutationId: 'mutation_stale' }),
         'stale/test'
       )
     ).rejects.toMatchObject({ code: 'stale_project' });
@@ -4492,20 +4751,19 @@ describe('schema-2 creative studio project store', () => {
         {
           kind: 'add_beat',
           beatId: 'section_new',
-          beat: { title: 'First title', action: '', look: '' },
-          firstShotId: 'clip_new',
-          firstShot: {
-            line: '',
-            narration: '',
-            onScreenText: '',
-            mediaKind: 'image',
-            durationSeconds: 1,
-            referenceAssetId: null,
-          },
+          beat: { title: 'First title', action: '', look: '', targetSeconds: null },
           beforeBeatId: null,
+        },
+        {
+          kind: 'add_shot',
+          beatId: 'section_new',
+          shotId: 'clip_new',
+          shot: { line: '', narration: '', onScreenText: '', durationSeconds: 4 },
+          beforeShotId: null,
         },
         { kind: 'edit_beat', beatId: 'section_new', changes: { title: 'Final title' } },
       ]),
+      makeMutationContextV2({ mutationId: 'mutation_committed', capturedAt: '2026-08-17T12:00:01.000Z' }),
       'opaque/task-3-tag'
     );
 
@@ -4573,19 +4831,18 @@ describe('schema-2 creative studio project store', () => {
         {
           kind: 'add_beat',
           beatId: 'section_retry',
-          beat: { title: 'Retry summary', action: '', look: '' },
-          firstShotId: 'clip_retry',
-          firstShot: {
-            line: '',
-            narration: '',
-            onScreenText: '',
-            mediaKind: 'image',
-            durationSeconds: 1,
-            referenceAssetId: null,
-          },
+          beat: { title: 'Retry summary', action: '', look: '', targetSeconds: null },
           beforeBeatId: null,
         },
+        {
+          kind: 'add_shot',
+          beatId: 'section_retry',
+          shotId: 'clip_retry',
+          shot: { line: '', narration: '', onScreenText: '', durationSeconds: 4 },
+          beforeShotId: null,
+        },
       ]),
+      makeMutationContextV2({ mutationId: 'mutation_retry', capturedAt: '2026-08-17T12:00:02.000Z' }),
       'opaque/retry-tag'
     );
 
@@ -4621,7 +4878,18 @@ describe('schema-2 creative studio project store', () => {
 
   it('reports a busy V2 delete before stale revision when both conditions apply', async () => {
     const project = makePosterProjectV2('busy_delete_v2');
-    project.jobs.job_video!.status = 'running';
+    const shot = project.shots.clip_video!;
+    shot.selectedTakeId = null;
+    shot.assetIds = ['asset_seed'];
+    delete project.assets.asset_video;
+    delete project.assets.asset_thumbnail;
+    project.jobs.job_video = {
+      ...project.jobs.job_video!,
+      status: 'running',
+      outputAssetIds: [],
+      outputAssetIdsByRole: { primary: null, poster: null },
+      spendReceipt: null,
+    };
     seedProjectV2(project);
     const manifestFile = path.join(rootDir, project.id, 'project.json');
     const manifestBefore = readFileSync(manifestFile);
@@ -4718,6 +4986,479 @@ describe('schema-2 creative studio project store', () => {
       supportedProjectIds: [second.id],
     });
     expect(prototypeIndexAccesses).toEqual([]);
+  });
+
+  it('confirms one frozen revalidation snapshot as one durable revision and returns an isolated frozen dispatch', async () => {
+    const confirmedAt = '2026-08-17T12:00:01.000Z';
+    const expiresAt = '2026-08-17T12:05:00.000Z';
+    const facts: Parameters<StudioProjectCommitObserver>[0][] = [];
+    let clock = timestamp;
+    const { store } = createStoreV2({
+      createId: () => 'confirmed_transaction_v2',
+      now: () => clock,
+      onProjectCommitted: (fact) => facts.push(fact),
+    });
+    const project = await store.createProjectV2(inputV2);
+    clock = confirmedAt;
+    const rawRevalidation = {
+      providerBindings: [{ itemId: 'item_1', routeId: 'video_route' }],
+    };
+    const dispatchSource = {
+      jobIds: ['job_1'],
+      route: { id: 'video_route' },
+    };
+    let observedSnapshot: unknown;
+    let observedRevalidation: unknown;
+    let retainedBuilderProject: StudioProjectV2 | undefined;
+    let snapshotMutationSucceeded = true;
+    const assertActive = vi.fn();
+    const input: StudioProjectConfirmationInputV2<typeof rawRevalidation, typeof dispatchSource> = {
+      projectId: project.id,
+      expectedRevision: project.revision,
+      expiresAt,
+      async revalidate(snapshot) {
+        observedSnapshot = snapshot;
+        snapshotMutationSucceeded = Reflect.set(snapshot, 'brief', 'must not mutate');
+        return rawRevalidation;
+      },
+      assertActive,
+      buildCommit(candidate, revalidation, receivedConfirmedAt) {
+        retainedBuilderProject = candidate;
+        observedRevalidation = revalidation;
+        candidate.brief = `Confirmed at ${receivedConfirmedAt}`;
+        return { project: candidate, dispatch: dispatchSource };
+      },
+      commitTag: 'submission/confirm-v2',
+    };
+
+    const result = await store.confirmProjectV2(input);
+
+    expect(result.project).toMatchObject({
+      revision: project.revision + 1,
+      updatedAt: confirmedAt,
+      brief: `Confirmed at ${confirmedAt}`,
+    });
+    expect(readJson<StudioProjectV2>(path.join(rootDir, project.id, 'project.json'))).toEqual(result.project);
+    expect(assertActive).toHaveBeenCalledTimes(2);
+    expect(facts).toEqual([
+      {
+        projectId: project.id,
+        previousRevision: project.revision,
+        committedRevision: project.revision + 1,
+        committedAt: confirmedAt,
+        commitTag: 'submission/confirm-v2',
+      },
+    ]);
+    expect(snapshotMutationSucceeded).toBe(false);
+    expect(Object.isFrozen(observedSnapshot)).toBe(true);
+    expect(Object.isFrozen((observedSnapshot as { beatOrder: unknown }).beatOrder)).toBe(true);
+    expect(observedSnapshot).not.toBe(project);
+    expect(Object.isFrozen(observedRevalidation)).toBe(true);
+    expect(observedRevalidation).not.toBe(rawRevalidation);
+    expect(retainedBuilderProject).not.toBe(project);
+    expect(Object.isFrozen(retainedBuilderProject)).toBe(false);
+    expect(Object.isFrozen(result.dispatch)).toBe(true);
+    expect(Object.isFrozen(result.dispatch.route)).toBe(true);
+
+    rawRevalidation.providerBindings[0]!.routeId = 'changed_after_confirm';
+    dispatchSource.jobIds.push('job_2');
+    dispatchSource.route.id = 'changed_after_confirm';
+    retainedBuilderProject!.brief = 'changed after confirm';
+
+    expect(observedRevalidation).toEqual({
+      providerBindings: [{ itemId: 'item_1', routeId: 'video_route' }],
+    });
+    expect(result.dispatch).toEqual({ jobIds: ['job_1'], route: { id: 'video_route' } });
+    expect(() => {
+      (result.dispatch as { route: { id: string } }).route.id = 'forbidden';
+    }).toThrow(TypeError);
+    await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
+      status: 'supported',
+      project: { brief: `Confirmed at ${confirmedAt}` },
+    });
+  });
+
+  it('refuses stale confirmation authority before callbacks and preserves every durable byte', async () => {
+    const onProjectCommitted = vi.fn<StudioProjectCommitObserver>();
+    const { store } = createStoreV2({
+      createId: () => 'stale_confirmation_v2',
+      now: () => timestamp,
+      onProjectCommitted,
+    });
+    const project = await store.createProjectV2(inputV2);
+    const projectFile = path.join(rootDir, project.id, 'project.json');
+    const indexFile = path.join(rootDir, 'projects-v2.json');
+    const projectBefore = readFileSync(projectFile);
+    const indexBefore = readFileSync(indexFile);
+    const revalidate = vi.fn(async () => ({ routeId: 'video_route' }));
+    const assertActive = vi.fn();
+    const buildCommit = vi.fn((candidate: StudioProjectV2) => ({
+      project: candidate,
+      dispatch: { jobIds: ['job_1'] },
+    }));
+
+    await expect(
+      store.confirmProjectV2({
+        projectId: project.id,
+        expectedRevision: project.revision + 1,
+        expiresAt: '2026-08-17T12:05:00.000Z',
+        revalidate,
+        assertActive,
+        buildCommit,
+      })
+    ).rejects.toMatchObject({ code: 'stale_project' });
+
+    expect(revalidate).not.toHaveBeenCalled();
+    expect(assertActive).not.toHaveBeenCalled();
+    expect(buildCommit).not.toHaveBeenCalled();
+    expect(readFileSync(projectFile)).toEqual(projectBefore);
+    expect(readFileSync(indexFile)).toEqual(indexBefore);
+    expect(onProjectCommitted).not.toHaveBeenCalled();
+  });
+
+  it('refuses confirmation at exact expiry after revalidation without invoking the commit builder', async () => {
+    const expiry = '2026-08-17T12:05:00.000Z';
+    let clock = timestamp;
+    const { store } = createStoreV2({ createId: () => 'expired_confirmation_v2', now: () => clock });
+    const project = await store.createProjectV2(inputV2);
+    const projectFile = path.join(rootDir, project.id, 'project.json');
+    const indexFile = path.join(rootDir, 'projects-v2.json');
+    const projectBefore = readFileSync(projectFile);
+    const indexBefore = readFileSync(indexFile);
+    const revalidate = vi.fn(async () => ({ routeId: 'video_route' }));
+    const buildCommit = vi.fn((candidate: StudioProjectV2) => ({ project: candidate, dispatch: null }));
+    clock = expiry;
+
+    const confirmation = store.confirmProjectV2({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      expiresAt: expiry,
+      revalidate,
+      assertActive: () => undefined,
+      buildCommit,
+    });
+
+    await expect(confirmation).rejects.toBeInstanceOf(StudioProjectConfirmationError);
+    expect(revalidate).toHaveBeenCalledOnce();
+    expect(buildCommit).not.toHaveBeenCalled();
+    expect(readFileSync(projectFile)).toEqual(projectBefore);
+    expect(readFileSync(indexFile)).toEqual(indexBefore);
+  });
+
+  it('rechecks expiry after delayed async revalidation and changes no bytes when the clock crosses it', async () => {
+    const expiry = '2026-08-17T12:05:00.000Z';
+    let clock = timestamp;
+    const started = createDeferredV2<void>();
+    const release = createDeferredV2<void>();
+    const { store } = createStoreV2({ createId: () => 'delayed_expiry_v2', now: () => clock });
+    const project = await store.createProjectV2(inputV2);
+    const projectFile = path.join(rootDir, project.id, 'project.json');
+    const indexFile = path.join(rootDir, 'projects-v2.json');
+    const projectBefore = readFileSync(projectFile);
+    const indexBefore = readFileSync(indexFile);
+    const buildCommit = vi.fn((candidate: StudioProjectV2) => ({ project: candidate, dispatch: null }));
+    const confirmation = store.confirmProjectV2({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      expiresAt: expiry,
+      async revalidate() {
+        started.resolve(undefined);
+        await release.promise;
+        return { routeId: 'video_route' };
+      },
+      assertActive: () => undefined,
+      buildCommit,
+    });
+
+    await started.promise;
+    clock = expiry;
+    release.resolve(undefined);
+
+    await expect(confirmation).rejects.toMatchObject({ code: 'expired_confirmation' });
+    expect(buildCommit).not.toHaveBeenCalled();
+    expect(readFileSync(projectFile)).toEqual(projectBefore);
+    expect(readFileSync(indexFile)).toEqual(indexBefore);
+  });
+
+  it('preserves async revalidation and synchronous builder throws without writing', async () => {
+    const revalidationError = new Error('route resolver failed');
+    const builderError = new Error('authorization construction failed');
+    const onProjectCommitted = vi.fn<StudioProjectCommitObserver>();
+    const { store } = createStoreV2({
+      createId: () => 'confirmation_callback_error_v2',
+      now: () => timestamp,
+      onProjectCommitted,
+    });
+    const project = await store.createProjectV2(inputV2);
+    const projectFile = path.join(rootDir, project.id, 'project.json');
+    const indexFile = path.join(rootDir, 'projects-v2.json');
+    const projectBefore = readFileSync(projectFile);
+    const indexBefore = readFileSync(indexFile);
+    const buildAfterFailedRevalidation = vi.fn((candidate: StudioProjectV2) => ({
+      project: candidate,
+      dispatch: null,
+    }));
+
+    await expect(
+      store.confirmProjectV2({
+        projectId: project.id,
+        expectedRevision: project.revision,
+        expiresAt: '2026-08-17T12:05:00.000Z',
+        revalidate: async () => {
+          throw revalidationError;
+        },
+        assertActive: () => undefined,
+        buildCommit: buildAfterFailedRevalidation,
+      })
+    ).rejects.toBe(revalidationError);
+    await expect(
+      store.confirmProjectV2({
+        projectId: project.id,
+        expectedRevision: project.revision,
+        expiresAt: '2026-08-17T12:05:00.000Z',
+        revalidate: async () => ({ routeId: 'video_route' }),
+        assertActive: () => undefined,
+        buildCommit: () => {
+          throw builderError;
+        },
+      })
+    ).rejects.toBe(builderError);
+
+    expect(buildAfterFailedRevalidation).not.toHaveBeenCalled();
+    expect(readFileSync(projectFile)).toEqual(projectBefore);
+    expect(readFileSync(indexFile)).toEqual(indexBefore);
+    expect(onProjectCommitted).not.toHaveBeenCalled();
+  });
+
+  it('rejects thenable guard and commit-builder results before persistence', async () => {
+    const { store } = createStoreV2({ createId: () => 'confirmation_thenable_v2', now: () => timestamp });
+    const project = await store.createProjectV2(inputV2);
+    const projectFile = path.join(rootDir, project.id, 'project.json');
+    const indexFile = path.join(rootDir, 'projects-v2.json');
+    const projectBefore = readFileSync(projectFile);
+    const indexBefore = readFileSync(indexFile);
+    const buildCommit = vi.fn((candidate: StudioProjectV2) => ({ project: candidate, dispatch: null }));
+    const thenableGuard = (() => Promise.resolve()) as unknown as () => void;
+    const thenableBuilder = (async (candidate: StudioProjectV2) => ({
+      project: candidate,
+      dispatch: null,
+    })) as unknown as StudioProjectConfirmationInputV2<null, null>['buildCommit'];
+
+    await expect(
+      store.confirmProjectV2({
+        projectId: project.id,
+        expectedRevision: project.revision,
+        expiresAt: '2026-08-17T12:05:00.000Z',
+        revalidate: async () => null,
+        assertActive: thenableGuard,
+        buildCommit,
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+    await expect(
+      store.confirmProjectV2({
+        projectId: project.id,
+        expectedRevision: project.revision,
+        expiresAt: '2026-08-17T12:05:00.000Z',
+        revalidate: async () => null,
+        assertActive: () => undefined,
+        buildCommit: thenableBuilder,
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+
+    expect(buildCommit).not.toHaveBeenCalled();
+    expect(readFileSync(projectFile)).toEqual(projectBefore);
+    expect(readFileSync(indexFile)).toEqual(indexBefore);
+  });
+
+  it('rechecks the live session after building and refuses a close immediately before persistence', async () => {
+    const closeError = new Error('prepared submission cache closed');
+    const onProjectCommitted = vi.fn<StudioProjectCommitObserver>();
+    const { store } = createStoreV2({
+      createId: () => 'confirmation_close_fence_v2',
+      now: () => timestamp,
+      onProjectCommitted,
+    });
+    const project = await store.createProjectV2(inputV2);
+    const projectFile = path.join(rootDir, project.id, 'project.json');
+    const indexFile = path.join(rootDir, 'projects-v2.json');
+    const projectBefore = readFileSync(projectFile);
+    const indexBefore = readFileSync(indexFile);
+    let activeChecks = 0;
+    const buildCommit = vi.fn((candidate: StudioProjectV2) => ({
+      project: { ...candidate, brief: 'must not persist' },
+      dispatch: { jobIds: ['job_1'] },
+    }));
+
+    await expect(
+      store.confirmProjectV2({
+        projectId: project.id,
+        expectedRevision: project.revision,
+        expiresAt: '2026-08-17T12:05:00.000Z',
+        revalidate: async () => ({ routeId: 'video_route' }),
+        assertActive() {
+          activeChecks += 1;
+          if (activeChecks === 2) throw closeError;
+        },
+        buildCommit,
+      })
+    ).rejects.toBe(closeError);
+
+    expect(activeChecks).toBe(2);
+    expect(buildCommit).toHaveBeenCalledOnce();
+    expect(readFileSync(projectFile)).toEqual(projectBefore);
+    expect(readFileSync(indexFile)).toEqual(indexBefore);
+    expect(onProjectCommitted).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid built project and preserves project and summary bytes', async () => {
+    const onProjectCommitted = vi.fn<StudioProjectCommitObserver>();
+    const { store } = createStoreV2({
+      createId: () => 'confirmation_invalid_project_v2',
+      now: () => timestamp,
+      onProjectCommitted,
+    });
+    const project = await store.createProjectV2(inputV2);
+    const projectFile = path.join(rootDir, project.id, 'project.json');
+    const indexFile = path.join(rootDir, 'projects-v2.json');
+    const projectBefore = readFileSync(projectFile);
+    const indexBefore = readFileSync(indexFile);
+
+    await expect(
+      store.confirmProjectV2({
+        projectId: project.id,
+        expectedRevision: project.revision,
+        expiresAt: '2026-08-17T12:05:00.000Z',
+        revalidate: async () => ({ routeId: 'video_route' }),
+        assertActive: () => undefined,
+        buildCommit: (candidate) => ({
+          project: { ...candidate, beatOrder: ['missing_beat'] },
+          dispatch: { jobIds: ['job_1'] },
+        }),
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+
+    expect(readFileSync(projectFile)).toEqual(projectBefore);
+    expect(readFileSync(indexFile)).toEqual(indexBefore);
+    expect(onProjectCommitted).not.toHaveBeenCalled();
+  });
+
+  it('serializes an edit queued before confirmation so stale confirmation never revalidates', async () => {
+    const { store } = createStoreV2({ createId: () => 'edit_before_confirmation_v2', now: () => timestamp });
+    const project = await store.createProjectV2(inputV2);
+    const revalidate = vi.fn(async () => ({ routeId: 'video_route' }));
+    const edit = store.updateProjectV2(
+      project.id,
+      (candidate) => ({ ...candidate, name: 'Edited before confirmation' }),
+      project.revision
+    );
+    const confirmation = store.confirmProjectV2({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      expiresAt: '2026-08-17T12:05:00.000Z',
+      revalidate,
+      assertActive: () => undefined,
+      buildCommit: (candidate) => ({ project: candidate, dispatch: null }),
+    });
+
+    const edited = await edit;
+
+    await expect(confirmation).rejects.toMatchObject({ code: 'stale_project' });
+    expect(edited).toMatchObject({ revision: project.revision + 1, name: 'Edited before confirmation' });
+    expect(revalidate).not.toHaveBeenCalled();
+  });
+
+  it('holds an edit queued after confirmation until the confirmed revision is durable', async () => {
+    const started = createDeferredV2<void>();
+    const release = createDeferredV2<void>();
+    let clock = timestamp;
+    const { store } = createStoreV2({ createId: () => 'edit_after_confirmation_v2', now: () => clock });
+    const project = await store.createProjectV2(inputV2);
+    clock = '2026-08-17T12:00:01.000Z';
+    const confirmation = store.confirmProjectV2({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      expiresAt: '2026-08-17T12:05:00.000Z',
+      async revalidate() {
+        started.resolve(undefined);
+        await release.promise;
+        return { routeId: 'video_route' };
+      },
+      assertActive: () => undefined,
+      buildCommit: (candidate) => ({
+        project: { ...candidate, brief: 'Confirmed before the later edit' },
+        dispatch: { jobIds: ['job_1'] },
+      }),
+    });
+    await started.promise;
+    clock = '2026-08-17T12:00:02.000Z';
+    const edit = store.updateProjectV2(project.id, (candidate) => ({
+      ...candidate,
+      name: 'Edited after confirmation',
+    }));
+    release.resolve(undefined);
+
+    const confirmed = await confirmation;
+    const edited = await edit;
+
+    expect(confirmed.project).toMatchObject({
+      revision: project.revision + 1,
+      brief: 'Confirmed before the later edit',
+    });
+    expect(edited).toMatchObject({
+      revision: project.revision + 2,
+      name: 'Edited after confirmation',
+      brief: 'Confirmed before the later edit',
+    });
+    await expect(store.getProjectV2(project.id)).resolves.toMatchObject({ status: 'supported', project: edited });
+  });
+
+  it('never returns dispatch or observes a commit when the atomic project write fails', async () => {
+    const projectId = 'confirmation_write_failure_v2';
+    const protectedFs = protectPrototypeIndex();
+    const onProjectCommitted = vi.fn<StudioProjectCommitObserver>();
+    let failProjectRename = false;
+    const failingFs = new Proxy(protectedFs.fs, {
+      get(target, property, receiver) {
+        if (property !== 'rename') return Reflect.get(target, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.rename>): ReturnType<typeof nodeFs.rename> => {
+          const destination = path.resolve(String(args[1]));
+          if (failProjectRename && destination === path.join(realpathSync(rootDir), projectId, 'project.json')) {
+            throw new Error('confirmation project rename failed');
+          }
+          return protectedFs.fs.rename(...args);
+        };
+      },
+    }) as typeof nodeFs;
+    const store = createCreativeStudioStore({
+      rootDir,
+      fs: failingFs,
+      createId: () => projectId,
+      now: () => timestamp,
+      logError: () => undefined,
+      onProjectCommitted,
+    });
+    const project = await store.createProjectV2(inputV2);
+    const projectFile = path.join(rootDir, project.id, 'project.json');
+    const projectBefore = readFileSync(projectFile);
+    failProjectRename = true;
+
+    await expect(
+      store.confirmProjectV2({
+        projectId: project.id,
+        expectedRevision: project.revision,
+        expiresAt: '2026-08-17T12:05:00.000Z',
+        revalidate: async () => ({ routeId: 'video_route' }),
+        assertActive: () => undefined,
+        buildCommit: (candidate) => ({
+          project: { ...candidate, brief: 'must not survive failed durability' },
+          dispatch: { jobIds: ['job_1'] },
+        }),
+      })
+    ).rejects.toMatchObject({ code: 'storage_error' });
+
+    expect(readFileSync(projectFile)).toEqual(projectBefore);
+    expect(onProjectCommitted).not.toHaveBeenCalled();
+    expect(protectedFs.accesses).toEqual([]);
   });
 
   it('updates one supported schema-2 project with one revision, observer fact, and V2 summary repair', async () => {
@@ -4885,12 +5626,12 @@ describe('schema-2 creative studio project store', () => {
 
     await expect(
       store.updateProjectV2(project.id, (candidate) => {
-        Object.defineProperty(candidate.routing, 'toJSON', {
+        Object.defineProperty(candidate.frameExtractions, 'toJSON', {
           configurable: true,
           enumerable: false,
           value() {
             toJsonCalls += 1;
-            return { image: 'invalid-route', video: null };
+            return {};
           },
         });
         return candidate;
@@ -5014,14 +5755,9 @@ const makeBareJob = (overrides: Partial<StudioJob> = {}): StudioJob => ({
   ...overrides,
 });
 
-const makeBareJobV2 = (overrides: Partial<StudioJobV2> = {}): StudioJobV2 => {
-  const { sceneId: _sceneId, ...job } = makeBareJob();
-  return { ...job, shotId: 'clip_1', ...overrides };
-};
-
 describe('jobOutputRole', () => {
-  it('accepts exactly the schema-1 and schema-2 durable job contracts', () => {
-    expectTypeOf(jobOutputRole).parameter(0).toEqualTypeOf<StudioJob | StudioJobV2>();
+  it('accepts exactly the schema-1 durable job contract', () => {
+    expectTypeOf(jobOutputRole).parameter(0).toEqualTypeOf<StudioJob>();
   });
 
   it('defaults an old schema-v1 job that lacks the field to take', () => {
@@ -5034,11 +5770,6 @@ describe('jobOutputRole', () => {
 
   it('reads an explicit reference role', () => {
     expect(jobOutputRole(makeBareJob({ outputRole: 'reference' }))).toBe('reference');
-  });
-
-  it('keeps the absent take default and explicit reference role for schema-2 jobs', () => {
-    expect(jobOutputRole(makeBareJobV2())).toBe('take');
-    expect(jobOutputRole(makeBareJobV2({ outputRole: 'reference' }))).toBe('reference');
   });
 });
 

@@ -7,39 +7,49 @@
 import { types as nodeTypes } from 'node:util';
 import {
   isValidProviderJobId,
-  STUDIO_MAX_SHOTS_PER_PROJECT,
-  STUDIO_MAX_SHOTS_PER_BEAT,
-  STUDIO_MAX_CUT_PLACEMENT_CLIPS,
-  STUDIO_PROJECT_SCHEMA_VERSION,
   STUDIO_MAX_BEATS,
-  STUDIO_MAX_BIN_ITEMS,
   STUDIO_MAX_BIN_BEAT_ITEMS,
+  STUDIO_MAX_BIN_SHOT_ITEMS,
   STUDIO_MAX_BIN_TAKE_ITEMS,
+  STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
+  STUDIO_MAX_GENERATION_PROMPT_LENGTH,
+  STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
+  STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION,
+  STUDIO_MAX_LINE_HISTORY_PER_BEAT,
+  STUDIO_MAX_SHOTS_PER_BEAT,
+  STUDIO_MAX_SHOTS_PER_PROJECT,
   STUDIO_MAX_SHOT_SECONDS,
+  STUDIO_MAX_UNDO_ENTRIES,
+  STUDIO_MAX_UNDO_LABEL_LENGTH,
+  STUDIO_MAX_UNDO_PATCHES_PER_ENTRY,
   STUDIO_MIN_SHOT_SECONDS,
+  STUDIO_PROJECT_SCHEMA_VERSION,
   type StudioAssetV2,
-  type StudioShot,
-  type StudioCutClipV2,
-  type StudioCutFilter,
-  type StudioCutV2,
+  type StudioBeat,
+  type StudioBinItem,
   type StudioJobV2,
   type StudioProjectV2,
   type StudioProviderAdapterId,
-  type StudioBeat,
-  type StudioBinItem,
+  type StudioShot,
 } from '@/common/types/project/creativeStudioTypes';
 import {
-  STUDIO_MANAGED_ASSET_COLLECTIONS,
   STUDIO_MAX_ACTIVE_BRIEF_REFERENCES,
   isStudioBriefReferenceLabel,
   isStudioReferenceImageMimeType,
 } from '@/common/types/project/creativeStudioManagedAssetCollections';
 import { STUDIO_RULE_LIMITS, hasRuleToken } from '@/common/types/project/creativeStudioRules';
+import {
+  calculateStudioQuoteTotals,
+  calculateStudioQuotedGenerationAmounts,
+  createStudioFrameExtractionId,
+  createStudioQuotedGenerationId,
+} from './generation';
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const ASPECT_RATIOS = new Set(['16:9', '9:16', '1:1', '4:3', '3:4']);
 const RESOLUTIONS = new Set(['720p', '1080p']);
-const MEDIA_KINDS = new Set(['image', 'video']);
+const MEDIA_KINDS = new Set(['image', 'video', 'audio']);
+const MANAGED_ASSET_COLLECTIONS = new Set(['assets', 'imports', 'thumbnails', 'conditioningFrames']);
 const ADAPTER_IDS: ReadonlySet<StudioProviderAdapterId> = new Set([
   'weprompt-image-v1',
   'byteplus-seedance-v1',
@@ -55,6 +65,7 @@ const JOB_STATUSES = new Set([
   'succeeded',
   'failed',
   'cancelled',
+  'waiting_for_conditioning',
 ]);
 const JOB_ERROR_CODES = new Set([
   'invalid_request',
@@ -69,8 +80,24 @@ const JOB_ERROR_CODES = new Set([
   'download_failed',
   'unsupported',
   'unknown',
+  'dependency_failed',
 ]);
-const CUT_FILTER_IDS = new Set(['exposure', 'contrast', 'saturation', 'temperature']);
+const TERMINAL_JOB_STATUSES = new Set(['succeeded', 'failed', 'cancelled']);
+const PURPOSES = new Set(['seed_still', 'video_take']);
+const RATE_UNITS = new Set(['generation', 'second']);
+const FRAME_STATUSES = new Set(['pending', 'extracting', 'ready', 'failed']);
+const FRAME_ERROR_CODES = new Set(['decode_failed', 'source_missing', 'storage_error']);
+const FIXED_SHOT_REASONS = [
+  'owned_asset',
+  'owned_job',
+  'selected_take',
+  'seed_still',
+  'conditioning_frame',
+  'conditioning_input',
+  'match_to',
+  'narration',
+  'on_screen_text',
+] as const;
 
 const PROJECT_REQUIRED_KEYS = new Set([
   'schemaVersion',
@@ -79,7 +106,6 @@ const PROJECT_REQUIRED_KEYS = new Set([
   'name',
   'brief',
   'rules',
-  'ruleListUndo',
   'aspectRatio',
   'targetDurationSeconds',
   'resolution',
@@ -87,24 +113,43 @@ const PROJECT_REQUIRED_KEYS = new Set([
   'beats',
   'shots',
   'bin',
-  'cuts',
-  'activeCutId',
+  'bedAssetId',
+  'matchToShotId',
+  'spendPolicy',
+  'spendAuthorizations',
+  'frameExtractions',
+  'undoHistory',
+  'imageRouteId',
+  'videoRouteId',
   'assets',
   'jobs',
-  'routing',
   'createdAt',
   'updatedAt',
 ]);
 const PROJECT_OPTIONAL_KEYS = new Set(['forgeProjectId', 'briefConversationId']);
-const BEAT_KEYS = new Set(['id', 'title', 'action', 'look', 'shotOrder']);
+const BEAT_KEYS = new Set([
+  'id',
+  'title',
+  'action',
+  'look',
+  'actionRevision',
+  'targetSeconds',
+  'shotOrder',
+  'lineHistory',
+]);
+const LINE_HISTORY_KEYS = new Set(['id', 'shotOrdinal', 'text', 'capturedAt']);
 const SHOT_KEYS = new Set([
   'id',
   'line',
+  'derivation',
+  'derivedFromActionRevision',
   'narration',
   'onScreenText',
-  'mediaKind',
   'durationSeconds',
-  'referenceAssetId',
+  'trimInSeconds',
+  'trimOutSeconds',
+  'chainBreak',
+  'seedStillId',
   'selectedTakeId',
   'assetIds',
   'jobIds',
@@ -127,9 +172,6 @@ const ASSET_OPTIONAL_KEYS = new Set([
   'briefReferenceRole',
   'briefReferenceLabel',
   'sourceLook',
-  'sourceReferenceAssetIds',
-  'sourceAspectRatio',
-  'sourceResolution',
 ]);
 const MANAGED_ASSET_KEYS = new Set(['collection', 'fileName']);
 const JOB_REQUIRED_KEYS = new Set([
@@ -142,6 +184,14 @@ const JOB_REQUIRED_KEYS = new Set([
   'providerJobId',
   'cancellationPolicy',
   'outputAssetIds',
+  'purpose',
+  'authorizationId',
+  'authorizationItemId',
+  'generationIndex',
+  'requestPlan',
+  'requestSnapshot',
+  'spendReceipt',
+  'outputAssetIdsByRole',
   'error',
   'retryOfJobId',
   'retryReason',
@@ -150,20 +200,111 @@ const JOB_REQUIRED_KEYS = new Set([
   'createdAt',
   'updatedAt',
 ]);
-const JOB_OPTIONAL_KEYS = new Set(['remoteStartedAt', 'outputRole', 'referenceInputSnapshot', 'progress']);
+const JOB_OPTIONAL_KEYS = new Set(['remoteStartedAt', 'progress']);
 const PROVIDER_KEYS = new Set(['providerId', 'adapterId', 'model']);
 const JOB_ERROR_KEYS = new Set(['code', 'messageKey']);
-const REFERENCE_INPUT_KEYS = new Set(['sourceLook', 'conditioningReferenceAssetIds', 'aspectRatio', 'resolution']);
-const ROUTING_KEYS = new Set(['image', 'video']);
-const CUT_KEYS = new Set(['id', 'name', 'orderMode', 'clipOrder', 'clips']);
-const CUT_CLIP_KEYS = new Set(['id', 'clipId', 'assetId', 'sourceInSeconds', 'sourceOutSeconds', 'crop', 'filters']);
-const RECT_KEYS = new Set(['x', 'y', 'width', 'height']);
-const FILTER_KEYS = new Set(['id', 'amount']);
+const OUTPUT_ROLE_KEYS = new Set(['primary', 'poster']);
 const RULE_KEYS = new Set(['id', 'scope', 'text', 'predicate', 'createdAt']);
 const RULE_PREDICATE_KEYS = new Set(['kind', 'terms']);
-const RULE_UNDO_KEYS = new Set(['capturedRevision', 'previousRules']);
-const BIN_BEAT_KEYS = new Set(['kind', 'beatId']);
-const BIN_TAKE_KEYS = new Set(['kind', 'assetId']);
+const BIN_BEAT_KEYS = new Set(['kind', 'beatId', 'reason']);
+const BIN_SHOT_KEYS = new Set(['kind', 'beatId', 'shotId', 'reason']);
+const BIN_TAKE_KEYS = new Set(['kind', 'assetId', 'reason']);
+const SPEND_POLICY_KEYS = new Set(['currency', 'maxPerBatchMinorUnits']);
+const AUTHORIZATION_KEYS = new Set([
+  'id',
+  'projectId',
+  'projectRevision',
+  'originReferenceHandoffId',
+  'rateCardDigest',
+  'currency',
+  'baseItems',
+  'cascadeItems',
+  'lowerMinorUnits',
+  'upperMinorUnits',
+  'expiresAt',
+  'confirmedAt',
+  'providerBindings',
+  'idempotencyKeys',
+]);
+const QUOTED_ITEM_KEYS = new Set([
+  'id',
+  'shotId',
+  'purpose',
+  'routeId',
+  'generationCount',
+  'requestPlan',
+  'rateUnit',
+  'rateMinorUnits',
+]);
+const PROVIDER_BINDING_KEYS = new Set(['itemId', 'provider']);
+const IDEMPOTENCY_ENTRY_KEYS = new Set(['itemId', 'generationIndex', 'key']);
+const REQUEST_PLAN_RESOLVED_KEYS = new Set(['kind', 'snapshot']);
+const REQUEST_PLAN_DEFERRED_KEYS = new Set(['kind', 'template', 'dependency']);
+const REQUEST_SNAPSHOT_KEYS = new Set([
+  'prompt',
+  'aspectRatio',
+  'resolution',
+  'durationSeconds',
+  'referenceInput',
+  'conditioningInput',
+]);
+const REQUEST_TEMPLATE_KEYS = new Set(['prompt', 'aspectRatio', 'resolution', 'durationSeconds', 'referenceInput']);
+const REFERENCE_INPUT_KEYS = new Set(['assetId', 'sha256']);
+const CONDITIONING_SEED_KEYS = new Set(['kind', 'assetId']);
+const CONDITIONING_PREDECESSOR_KEYS = new Set([
+  'kind',
+  'predecessorShotId',
+  'takeAssetId',
+  'frameAssetId',
+  'endpointSeconds',
+]);
+const DEPENDENCY_SEED_KEYS = new Set(['kind', 'upstreamItemId', 'shotId']);
+const DEPENDENCY_PREDECESSOR_KEYS = new Set(['kind', 'upstreamItemId', 'predecessorShotId']);
+const FRAME_EXTRACTION_KEYS = new Set([
+  'id',
+  'shotId',
+  'takeAssetId',
+  'endpointSeconds',
+  'frameAssetId',
+  'status',
+  'errorCode',
+]);
+const RECEIPT_KEYS = new Set([
+  'authorizationId',
+  'itemId',
+  'jobId',
+  'purpose',
+  'routeId',
+  'currency',
+  'rateUnit',
+  'rateMinorUnits',
+  'durationSeconds',
+  'generationIndex',
+  'generationCount',
+  'totalMinorUnits',
+]);
+const UNDO_ENTRY_KEYS = new Set(['id', 'sourceRevision', 'label', 'patches']);
+const PROJECT_PATCH_KEYS = new Set(['kind', 'before', 'afterDigest']);
+const PROJECT_PATCH_BEFORE_KEYS = new Set([
+  'name',
+  'aspectRatio',
+  'resolution',
+  'targetDurationSeconds',
+  'brief',
+  'rules',
+  'beatOrder',
+  'imageRouteId',
+  'videoRouteId',
+  'spendPolicy',
+  'bedAssetId',
+  'matchToShotId',
+]);
+const BEAT_PATCH_KEYS = new Set(['kind', 'beatId', 'before', 'afterDigest']);
+const SHOT_PATCH_KEYS = new Set(['kind', 'shotId', 'before', 'beforeBeatId', 'beforeIndex', 'afterDigest']);
+const BIN_PATCH_KEYS = new Set(['kind', 'before', 'afterDigest']);
+const SHOT_BEFORE_KEYS = new Set([...SHOT_KEYS].filter((key) => key !== 'assetIds' && key !== 'jobIds'));
+const PROPOSED_SHOT_KEYS = new Set(['shotId', 'line', 'narration', 'onScreenText', 'durationSeconds', 'chainBreak']);
+const FIXED_SHOT_REVIEW_KEYS = new Set(['shotId', 'reasons']);
 
 const INVALID_DATA_SNAPSHOT = Symbol('invalid-data-snapshot');
 type DataPropertySnapshot = {
@@ -402,12 +543,37 @@ const validateRules = (value: unknown): boolean =>
   ) &&
   new Set(arrayMap(value, (rule) => (rule as Record<string, unknown>).id)).size === value.length;
 
-const validateRuleUndo = (value: unknown): boolean =>
-  value === null ||
-  (isRecord(value) &&
-    hasExactKeys(value, RULE_UNDO_KEYS) &&
-    isIntegerInRange(value.capturedRevision, 1, Number.MAX_SAFE_INTEGER) &&
-    validateRules(value.previousRules));
+const isLowercaseDigest = (value: unknown): value is string =>
+  typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+const isCurrency = (value: unknown): value is string => typeof value === 'string' && /^[A-Z]{3}$/.test(value);
+const isFiniteNonNegative = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 && !Object.is(value, -0);
+const isFinitePositive = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= Number.MAX_SAFE_INTEGER;
+const isNullableSafeId = (value: unknown): value is string | null => value === null || isSafeId(value);
+const isNullableRouteId = isNullableSafeId;
+const isNullableTrim = (value: unknown): value is number | null =>
+  value === null || (isFiniteNonNegative(value) && value <= Number.MAX_SAFE_INTEGER);
+
+const validateLineHistory = (value: unknown): boolean => {
+  if (!isDenseArray(value, STUDIO_MAX_LINE_HISTORY_PER_BEAT)) return false;
+  const ids = new Set<string>();
+  return arrayEvery(value, (entry) => {
+    if (
+      !isRecord(entry) ||
+      !hasExactKeys(entry, LINE_HISTORY_KEYS) ||
+      !isSafeId(entry.id) ||
+      ids.has(entry.id) ||
+      !isIntegerInRange(entry.shotOrdinal, 1, STUDIO_MAX_SHOTS_PER_BEAT) ||
+      !isStringWithin(entry.text, 8 * 1024) ||
+      !isCanonicalTimestamp(entry.capturedAt)
+    ) {
+      return false;
+    }
+    ids.add(entry.id);
+    return true;
+  });
+};
 
 const validateBeat = (beatId: string, value: unknown): value is StudioBeat =>
   isRecord(value) &&
@@ -417,29 +583,93 @@ const validateBeat = (beatId: string, value: unknown): value is StudioBeat =>
   isStringWithin(value.title, 256) &&
   isStringWithin(value.action, 4 * 1024) &&
   isStringWithin(value.look, 8 * 1024) &&
-  isUniqueSafeIdArray(value.shotOrder, STUDIO_MAX_SHOTS_PER_BEAT);
+  isIntegerInRange(value.actionRevision, 1, Number.MAX_SAFE_INTEGER) &&
+  (value.targetSeconds === null || isIntegerInRange(value.targetSeconds, 1, 1440)) &&
+  isUniqueSafeIdArray(value.shotOrder, STUDIO_MAX_SHOTS_PER_BEAT) &&
+  validateLineHistory(value.lineHistory);
 
-const validateShot = (shotId: string, value: unknown): value is StudioShot => {
+const validateShotRecord = (
+  shotId: string,
+  value: unknown,
+  keySet: ReadonlySet<string>,
+  requireMembership: boolean
+): value is StudioShot =>
+  isRecord(value) &&
+  hasExactKeys(value, keySet) &&
+  value.id === shotId &&
+  isSafeId(shotId) &&
+  isStringWithin(value.line, 8 * 1024) &&
+  (value.derivation === 'derived' || value.derivation === 'detached') &&
+  (value.derivedFromActionRevision === null ||
+    isIntegerInRange(value.derivedFromActionRevision, 1, Number.MAX_SAFE_INTEGER)) &&
+  ((value.derivation === 'derived' && value.derivedFromActionRevision !== null) ||
+    (value.derivation === 'detached' && value.derivedFromActionRevision === null)) &&
+  isStringWithin(value.narration, 4 * 1024) &&
+  isStringWithin(value.onScreenText, 1024) &&
+  isIntegerInRange(value.durationSeconds, STUDIO_MIN_SHOT_SECONDS, STUDIO_MAX_SHOT_SECONDS) &&
+  isNullableTrim(value.trimInSeconds) &&
+  isNullableTrim(value.trimOutSeconds) &&
+  (value.chainBreak === 'none' || value.chainBreak === 'hard_cut') &&
+  isNullableSafeId(value.seedStillId) &&
+  isNullableSafeId(value.selectedTakeId) &&
+  (!requireMembership || (isUniqueSafeIdArray(value.assetIds) && isUniqueSafeIdArray(value.jobIds)));
+
+const validateShot = (shotId: string, value: unknown): value is StudioShot =>
+  validateShotRecord(shotId, value, SHOT_KEYS, true);
+
+const validateProposedShotSnapshot = (value: unknown): boolean =>
+  isRecord(value) &&
+  hasExactKeys(value, PROPOSED_SHOT_KEYS) &&
+  isSafeId(value.shotId) &&
+  isStringWithin(value.line, 8 * 1024) &&
+  isStringWithin(value.narration, 4 * 1024) &&
+  isStringWithin(value.onScreenText, 1024) &&
+  isIntegerInRange(value.durationSeconds, STUDIO_MIN_SHOT_SECONDS, STUDIO_MAX_SHOT_SECONDS) &&
+  (value.chainBreak === 'none' || value.chainBreak === 'hard_cut');
+
+/** Validates one exact proposed-shot row without trusting prototypes, accessors, or serialization hooks. */
+export const validateStudioProposedShotV2 = (value: unknown): boolean => {
+  const snapshot = snapshotOwnDataGraph(value);
+  return snapshot !== INVALID_DATA_SNAPSHOT && validateProposedShotSnapshot(snapshot);
+};
+
+const validateFixedShotReviewSnapshot = (value: unknown): boolean => {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, SHOT_KEYS) ||
-    value.id !== shotId ||
-    !isSafeId(shotId) ||
-    !isStringWithin(value.line, 8 * 1024) ||
-    !isStringWithin(value.narration, 4 * 1024) ||
-    !isStringWithin(value.onScreenText, 1024) ||
-    typeof value.mediaKind !== 'string' ||
-    !MEDIA_KINDS.has(value.mediaKind) ||
-    (value.referenceAssetId !== null && !isSafeId(value.referenceAssetId)) ||
-    (value.selectedTakeId !== null && !isSafeId(value.selectedTakeId)) ||
-    !isUniqueSafeIdArray(value.assetIds) ||
-    !isUniqueSafeIdArray(value.jobIds)
+    !hasExactKeys(value, FIXED_SHOT_REVIEW_KEYS) ||
+    !isSafeId(value.shotId) ||
+    !isDenseArray(value.reasons, FIXED_SHOT_REASONS.length) ||
+    value.reasons.length === 0
   ) {
     return false;
   }
-  return value.mediaKind === 'video'
-    ? isIntegerInRange(value.durationSeconds, STUDIO_MIN_SHOT_SECONDS, STUDIO_MAX_SHOT_SECONDS)
-    : isIntegerInRange(value.durationSeconds, 1, 60);
+  let priorReasonIndex = -1;
+  for (let index = 0; index < value.reasons.length; index += 1) {
+    const reasonIndex = FIXED_SHOT_REASONS.indexOf(value.reasons[index] as (typeof FIXED_SHOT_REASONS)[number]);
+    if (reasonIndex <= priorReasonIndex) return false;
+    priorReasonIndex = reasonIndex;
+  }
+  return true;
+};
+
+/** Validates one exact fixed-shot review row and its canonical reason order. */
+export const validateStudioFixedShotReviewV2 = (value: unknown): boolean => {
+  const snapshot = snapshotOwnDataGraph(value);
+  return snapshot !== INVALID_DATA_SNAPSHOT && validateFixedShotReviewSnapshot(snapshot);
+};
+
+/** Validates a dense, unique list of fixed-shot review rows; Task 2 derives authoritative membership. */
+export const validateStudioFixedShotReviewsV2 = (value: unknown): boolean => {
+  const snapshot = snapshotOwnDataGraph(value);
+  if (snapshot === INVALID_DATA_SNAPSHOT || !isDenseArray(snapshot, STUDIO_MAX_SHOTS_PER_PROJECT)) return false;
+  const shotIds = new Set<string>();
+  return arrayEvery(snapshot, (row) => {
+    if (!validateFixedShotReviewSnapshot(row)) return false;
+    const shotId = (row as Record<string, unknown>).shotId as string;
+    if (shotIds.has(shotId)) return false;
+    shotIds.add(shotId);
+    return true;
+  });
 };
 
 const validateAsset = (assetId: string, projectId: string, value: unknown): value is StudioAssetV2 => {
@@ -456,17 +686,14 @@ const validateAsset = (assetId: string, projectId: string, value: unknown): valu
     !MEDIA_KINDS.has(value.mediaKind) ||
     !isNonEmptyStringWithin(value.mimeType, 256) ||
     typeof value.managedAsset.collection !== 'string' ||
-    !STUDIO_MANAGED_ASSET_COLLECTIONS.has(
-      value.managedAsset.collection as StudioAssetV2['managedAsset']['collection']
-    ) ||
+    !MANAGED_ASSET_COLLECTIONS.has(value.managedAsset.collection) ||
     !isSafeFileName(value.managedAsset.fileName) ||
     !isIntegerInRange(value.byteSize, 0, Number.MAX_SAFE_INTEGER) ||
-    typeof value.sha256 !== 'string' ||
-    !/^[a-f0-9]{64}$/i.test(value.sha256) ||
+    !isLowercaseDigest(value.sha256) ||
     (value.width !== undefined && !isIntegerInRange(value.width, 1, Number.MAX_SAFE_INTEGER)) ||
     (value.height !== undefined && !isIntegerInRange(value.height, 1, Number.MAX_SAFE_INTEGER)) ||
-    (value.durationSeconds !== undefined &&
-      !isFiniteInRange(value.durationSeconds, Number.MIN_VALUE, Number.MAX_SAFE_INTEGER)) ||
+    (value.mediaKind === 'image' && value.durationSeconds !== undefined) ||
+    (value.mediaKind !== 'image' && !isFinitePositive(value.durationSeconds)) ||
     !isCanonicalTimestamp(value.createdAt)
   ) {
     return false;
@@ -474,38 +701,29 @@ const validateAsset = (assetId: string, projectId: string, value: unknown): valu
   const hasRole = value.briefReferenceRole !== undefined;
   const hasLabel = value.briefReferenceLabel !== undefined;
   if (hasRole !== hasLabel) return false;
-  if (value.shotId === null) {
+  if (value.shotId === null && value.mediaKind === 'image') {
     if (
       !hasRole ||
       (value.briefReferenceRole !== 'cast' && value.briefReferenceRole !== 'look') ||
       !isStudioBriefReferenceLabel(value.briefReferenceLabel) ||
-      value.mediaKind !== 'image' ||
       !isStudioReferenceImageMimeType(value.mimeType) ||
       value.managedAsset.collection !== 'imports'
     ) {
       return false;
     }
-  } else if (hasRole) {
+  } else if (value.shotId === null && value.mediaKind === 'audio') {
+    if (hasRole || value.managedAsset.collection !== 'imports') return false;
+  } else if (value.shotId === null || hasRole || value.mediaKind === 'audio') {
     return false;
   }
-  if (value.sourceLook !== undefined && typeof value.sourceLook !== 'string') return false;
-  const hasReferenceIds = value.sourceReferenceAssetIds !== undefined;
-  const hasAspectRatio = value.sourceAspectRatio !== undefined;
-  const hasResolution = value.sourceResolution !== undefined;
-  if (hasReferenceIds !== hasAspectRatio || hasAspectRatio !== hasResolution) return false;
-  return (
-    !hasReferenceIds ||
-    (isUniqueSafeIdArray(value.sourceReferenceAssetIds, STUDIO_MAX_ACTIVE_BRIEF_REFERENCES) &&
-      value.sourceLook !== undefined &&
-      value.mediaKind === 'image' &&
-      isStudioReferenceImageMimeType(value.mimeType) &&
-      value.shotId !== null &&
-      value.managedAsset.collection === 'references' &&
-      typeof value.sourceAspectRatio === 'string' &&
-      ASPECT_RATIOS.has(value.sourceAspectRatio) &&
-      typeof value.sourceResolution === 'string' &&
-      RESOLUTIONS.has(value.sourceResolution))
-  );
+  if (
+    value.shotId !== null &&
+    value.managedAsset.collection === 'imports' &&
+    (value.mediaKind !== 'image' || !isStudioReferenceImageMimeType(value.mimeType))
+  ) {
+    return false;
+  }
+  return value.sourceLook === undefined || isStringWithin(value.sourceLook, 8 * 1024);
 };
 
 const validateProvider = (value: unknown): boolean =>
@@ -516,6 +734,147 @@ const validateProvider = (value: unknown): boolean =>
   ADAPTER_IDS.has(value.adapterId as StudioProviderAdapterId) &&
   isSafeModel(value.model);
 
+const providersEqual = (left: unknown, right: unknown): boolean =>
+  isRecord(left) &&
+  isRecord(right) &&
+  left.providerId === right.providerId &&
+  left.adapterId === right.adapterId &&
+  left.model === right.model;
+
+const validateReferenceInput = (value: unknown): boolean =>
+  value === null ||
+  (isRecord(value) &&
+    hasExactKeys(value, REFERENCE_INPUT_KEYS) &&
+    isSafeId(value.assetId) &&
+    isLowercaseDigest(value.sha256));
+
+const validateConditioningInput = (value: unknown): boolean => {
+  if (value === null) return true;
+  if (!isRecord(value)) return false;
+  if (value.kind === 'seed_still') {
+    return hasExactKeys(value, CONDITIONING_SEED_KEYS) && isSafeId(value.assetId);
+  }
+  return (
+    value.kind === 'predecessor_frame' &&
+    hasExactKeys(value, CONDITIONING_PREDECESSOR_KEYS) &&
+    isSafeId(value.predecessorShotId) &&
+    isSafeId(value.takeAssetId) &&
+    isSafeId(value.frameAssetId) &&
+    isFinitePositive(value.endpointSeconds)
+  );
+};
+
+const validateRequestFields = (value: Record<string, unknown>): boolean =>
+  isNonEmptyStringWithin(value.prompt, STUDIO_MAX_GENERATION_PROMPT_LENGTH) &&
+  typeof value.aspectRatio === 'string' &&
+  ASPECT_RATIOS.has(value.aspectRatio) &&
+  typeof value.resolution === 'string' &&
+  RESOLUTIONS.has(value.resolution) &&
+  isIntegerInRange(value.durationSeconds, STUDIO_MIN_SHOT_SECONDS, STUDIO_MAX_SHOT_SECONDS) &&
+  validateReferenceInput(value.referenceInput);
+
+const validateRequestSnapshot = (value: unknown): boolean =>
+  isRecord(value) &&
+  hasExactKeys(value, REQUEST_SNAPSHOT_KEYS) &&
+  validateRequestFields(value) &&
+  validateConditioningInput(value.conditioningInput);
+
+const validateRequestTemplate = (value: unknown): boolean =>
+  isRecord(value) && hasExactKeys(value, REQUEST_TEMPLATE_KEYS) && validateRequestFields(value);
+
+const validateDependency = (value: unknown): boolean => {
+  if (!isRecord(value)) return false;
+  if (value.kind === 'authorized_seed') {
+    return hasExactKeys(value, DEPENDENCY_SEED_KEYS) && isSafeId(value.upstreamItemId) && isSafeId(value.shotId);
+  }
+  return (
+    value.kind === 'authorized_predecessor' &&
+    hasExactKeys(value, DEPENDENCY_PREDECESSOR_KEYS) &&
+    isSafeId(value.upstreamItemId) &&
+    isSafeId(value.predecessorShotId)
+  );
+};
+
+const validateRequestPlan = (value: unknown): boolean => {
+  if (!isRecord(value)) return false;
+  if (value.kind === 'resolved') {
+    return hasExactKeys(value, REQUEST_PLAN_RESOLVED_KEYS) && validateRequestSnapshot(value.snapshot);
+  }
+  return (
+    value.kind === 'after_take_selection' &&
+    hasExactKeys(value, REQUEST_PLAN_DEFERRED_KEYS) &&
+    validateRequestTemplate(value.template) &&
+    validateDependency(value.dependency)
+  );
+};
+
+const referencesEqual = (left: unknown, right: unknown): boolean => {
+  if (left === null || right === null) return left === right;
+  return isRecord(left) && isRecord(right) && left.assetId === right.assetId && left.sha256 === right.sha256;
+};
+
+const conditioningInputsEqual = (left: unknown, right: unknown): boolean => {
+  if (left === null || right === null) return left === right;
+  if (!isRecord(left) || !isRecord(right) || left.kind !== right.kind) return false;
+  if (left.kind === 'seed_still') return left.assetId === right.assetId;
+  return (
+    left.predecessorShotId === right.predecessorShotId &&
+    left.takeAssetId === right.takeAssetId &&
+    left.frameAssetId === right.frameAssetId &&
+    left.endpointSeconds === right.endpointSeconds
+  );
+};
+
+const requestNonConditioningFieldsEqual = (left: unknown, right: unknown): boolean =>
+  isRecord(left) &&
+  isRecord(right) &&
+  left.prompt === right.prompt &&
+  left.aspectRatio === right.aspectRatio &&
+  left.resolution === right.resolution &&
+  left.durationSeconds === right.durationSeconds &&
+  referencesEqual(left.referenceInput, right.referenceInput);
+
+const requestSnapshotsEqual = (left: unknown, right: unknown): boolean =>
+  requestNonConditioningFieldsEqual(left, right) &&
+  isRecord(left) &&
+  isRecord(right) &&
+  conditioningInputsEqual(left.conditioningInput, right.conditioningInput);
+
+const requestPlansEqual = (left: unknown, right: unknown): boolean => {
+  if (!isRecord(left) || !isRecord(right) || left.kind !== right.kind) return false;
+  if (left.kind === 'resolved') return requestSnapshotsEqual(left.snapshot, right.snapshot);
+  if (!requestNonConditioningFieldsEqual(left.template, right.template)) return false;
+  const leftDependency = left.dependency;
+  const rightDependency = right.dependency;
+  if (!isRecord(leftDependency) || !isRecord(rightDependency) || leftDependency.kind !== rightDependency.kind) {
+    return false;
+  }
+  return leftDependency.kind === 'authorized_seed'
+    ? leftDependency.upstreamItemId === rightDependency.upstreamItemId &&
+        leftDependency.shotId === rightDependency.shotId
+    : leftDependency.upstreamItemId === rightDependency.upstreamItemId &&
+        leftDependency.predecessorShotId === rightDependency.predecessorShotId;
+};
+
+const validateReceipt = (value: unknown): boolean =>
+  isRecord(value) &&
+  hasExactKeys(value, RECEIPT_KEYS) &&
+  isSafeId(value.authorizationId) &&
+  isSafeId(value.itemId) &&
+  isSafeId(value.jobId) &&
+  typeof value.purpose === 'string' &&
+  PURPOSES.has(value.purpose) &&
+  isSafeId(value.routeId) &&
+  isCurrency(value.currency) &&
+  typeof value.rateUnit === 'string' &&
+  RATE_UNITS.has(value.rateUnit) &&
+  isIntegerInRange(value.rateMinorUnits, 1, Number.MAX_SAFE_INTEGER) &&
+  (value.durationSeconds === null ||
+    isIntegerInRange(value.durationSeconds, STUDIO_MIN_SHOT_SECONDS, STUDIO_MAX_SHOT_SECONDS)) &&
+  isIntegerInRange(value.generationIndex, 0, STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION - 1) &&
+  isIntegerInRange(value.generationCount, 1, STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION) &&
+  isIntegerInRange(value.totalMinorUnits, 0, Number.MAX_SAFE_INTEGER);
+
 const validateJob = (jobId: string, projectId: string, value: unknown): value is StudioJobV2 => {
   if (!isRecord(value) || !hasKeys(value, JOB_REQUIRED_KEYS, JOB_OPTIONAL_KEYS)) return false;
   const errorIsValid =
@@ -525,21 +884,13 @@ const validateJob = (jobId: string, projectId: string, value: unknown): value is
       typeof value.error.code === 'string' &&
       JOB_ERROR_CODES.has(value.error.code) &&
       isNonEmptyStringWithin(value.error.messageKey, 256));
-  const snapshotIsValid =
-    value.referenceInputSnapshot === undefined ||
-    (value.outputRole === 'reference' &&
-      isRecord(value.referenceInputSnapshot) &&
-      hasExactKeys(value.referenceInputSnapshot, REFERENCE_INPUT_KEYS) &&
-      isNonEmptyStringWithin(value.referenceInputSnapshot.sourceLook, 4 * 1024) &&
-      value.referenceInputSnapshot.sourceLook === value.referenceInputSnapshot.sourceLook.trim() &&
-      isUniqueSafeIdArray(
-        value.referenceInputSnapshot.conditioningReferenceAssetIds,
-        STUDIO_MAX_ACTIVE_BRIEF_REFERENCES
-      ) &&
-      typeof value.referenceInputSnapshot.aspectRatio === 'string' &&
-      ASPECT_RATIOS.has(value.referenceInputSnapshot.aspectRatio) &&
-      typeof value.referenceInputSnapshot.resolution === 'string' &&
-      RESOLUTIONS.has(value.referenceInputSnapshot.resolution));
+  const outputRolesAreValid =
+    isRecord(value.outputAssetIdsByRole) &&
+    hasExactKeys(value.outputAssetIdsByRole, OUTPUT_ROLE_KEYS) &&
+    isNullableSafeId(value.outputAssetIdsByRole.primary) &&
+    isNullableSafeId(value.outputAssetIdsByRole.poster) &&
+    (value.outputAssetIdsByRole.primary === null ||
+      value.outputAssetIdsByRole.primary !== value.outputAssetIdsByRole.poster);
   return (
     value.id === jobId &&
     isSafeId(jobId) &&
@@ -556,9 +907,16 @@ const validateJob = (jobId: string, projectId: string, value: unknown): value is
     (value.cancellationPolicy === 'none' ||
       value.cancellationPolicy === 'queued_only' ||
       value.cancellationPolicy === 'queued_and_running') &&
-    (value.outputRole === undefined || value.outputRole === 'take' || value.outputRole === 'reference') &&
-    snapshotIsValid &&
     isUniqueSafeIdArray(value.outputAssetIds) &&
+    typeof value.purpose === 'string' &&
+    PURPOSES.has(value.purpose) &&
+    isSafeId(value.authorizationId) &&
+    isSafeId(value.authorizationItemId) &&
+    isIntegerInRange(value.generationIndex, 0, STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION - 1) &&
+    validateRequestPlan(value.requestPlan) &&
+    (value.requestSnapshot === null || validateRequestSnapshot(value.requestSnapshot)) &&
+    (value.spendReceipt === null || validateReceipt(value.spendReceipt)) &&
+    outputRolesAreValid &&
     errorIsValid &&
     (value.progress === undefined || isFiniteInRange(value.progress, 0, 100)) &&
     (value.retryOfJobId === null || isSafeId(value.retryOfJobId)) &&
@@ -575,99 +933,6 @@ const validateJob = (jobId: string, projectId: string, value: unknown): value is
     isCanonicalTimestamp(value.createdAt) &&
     isCanonicalTimestamp(value.updatedAt)
   );
-};
-
-const validateRoute = (value: unknown): boolean => value === null || validateProvider(value);
-
-const validateRect = (value: unknown): boolean =>
-  isRecord(value) &&
-  hasExactKeys(value, RECT_KEYS) &&
-  isFiniteInRange(value.x, 0, 1) &&
-  isFiniteInRange(value.y, 0, 1) &&
-  isFiniteInRange(value.width, Number.MIN_VALUE, 1) &&
-  isFiniteInRange(value.height, Number.MIN_VALUE, 1) &&
-  (value.x as number) + (value.width as number) <= 1 &&
-  (value.y as number) + (value.height as number) <= 1;
-
-const validateFilter = (value: unknown): value is StudioCutFilter =>
-  isRecord(value) &&
-  hasExactKeys(value, FILTER_KEYS) &&
-  typeof value.id === 'string' &&
-  CUT_FILTER_IDS.has(value.id) &&
-  isFiniteInRange(value.amount, -1, 1);
-
-const isCanonicalGeneratedTake = (
-  asset: StudioAssetV2,
-  projectId: string,
-  shot: StudioShot,
-  shotAssetIdsByShotId: ReadonlyMap<string, ReadonlySet<string>>
-): boolean =>
-  asset.projectId === projectId &&
-  asset.shotId === shot.id &&
-  asset.mediaKind === shot.mediaKind &&
-  asset.managedAsset.collection === 'assets' &&
-  shotAssetIdsByShotId.get(shot.id)?.has(asset.id) === true;
-
-const validateCutClip = (
-  cutClipId: string,
-  project: StudioProjectV2,
-  clipAssetIdsByClipId: ReadonlyMap<string, ReadonlySet<string>>,
-  value: unknown
-): value is StudioCutClipV2 => {
-  if (!isRecord(value) || !hasExactKeys(value, CUT_CLIP_KEYS)) return false;
-  const clip = isSafeId(value.clipId) ? ownValue(project.shots, value.clipId) : undefined;
-  const asset = isSafeId(value.assetId) ? ownValue(project.assets, value.assetId) : undefined;
-  if (
-    value.id !== cutClipId ||
-    !isSafeId(cutClipId) ||
-    clip === undefined ||
-    asset === undefined ||
-    !isCanonicalGeneratedTake(asset, project.id, clip, clipAssetIdsByClipId) ||
-    (value.sourceInSeconds !== null && !isFiniteInRange(value.sourceInSeconds, 0, Number.MAX_VALUE)) ||
-    (value.sourceOutSeconds !== null && !isFiniteInRange(value.sourceOutSeconds, 0, Number.MAX_VALUE)) ||
-    (value.sourceInSeconds !== null &&
-      value.sourceOutSeconds !== null &&
-      (value.sourceInSeconds as number) >= (value.sourceOutSeconds as number)) ||
-    (value.crop !== null && !validateRect(value.crop)) ||
-    !isDenseArray(value.filters, CUT_FILTER_IDS.size) ||
-    !arrayEvery(value.filters, validateFilter)
-  ) {
-    return false;
-  }
-  const filterIds = arrayMap(value.filters, (filter) => (filter as StudioCutFilter).id);
-  if (new Set(filterIds).size !== filterIds.length) return false;
-  if (asset.durationSeconds === undefined) return true;
-  const sourceInSeconds = value.sourceInSeconds as number | null;
-  const sourceOutSeconds = value.sourceOutSeconds as number | null;
-  return (
-    (sourceInSeconds === null || sourceInSeconds <= asset.durationSeconds) &&
-    (sourceOutSeconds === null || sourceOutSeconds <= asset.durationSeconds)
-  );
-};
-
-const validateCut = (
-  cutId: string,
-  project: StudioProjectV2,
-  clipAssetIdsByClipId: ReadonlyMap<string, ReadonlySet<string>>,
-  value: unknown
-): value is StudioCutV2 => {
-  if (!isRecord(value) || !hasExactKeys(value, CUT_KEYS) || !isRecord(value.clips)) return false;
-  const cutClips = value.clips;
-  const cutClipIds = Object.keys(cutClips);
-  if (
-    value.id !== cutId ||
-    !isSafeId(cutId) ||
-    !isNonEmptyStringWithin(value.name, 256) ||
-    (value.orderMode !== 'storyboard' && value.orderMode !== 'manual') ||
-    !isUniqueSafeIdArray(value.clipOrder, STUDIO_MAX_CUT_PLACEMENT_CLIPS) ||
-    value.clipOrder.length !== cutClipIds.length ||
-    !arrayEvery(value.clipOrder, (cutClipId) => Object.hasOwn(cutClips, cutClipId)) ||
-    !cutClipIds.every((cutClipId) => validateCutClip(cutClipId, project, clipAssetIdsByClipId, cutClips[cutClipId]))
-  ) {
-    return false;
-  }
-  const ownedClipIds = cutClipIds.map((cutClipId) => (cutClips[cutClipId] as StudioCutClipV2).clipId);
-  return new Set(ownedClipIds).size === ownedClipIds.length;
 };
 
 const retryGraphHasCycle = (jobs: Record<string, StudioJobV2>): boolean => {
@@ -693,9 +958,398 @@ const retryGraphHasCycle = (jobs: Record<string, StudioJobV2>): boolean => {
 
 const binItemIsExact = (value: unknown): value is StudioBinItem => {
   if (!isRecord(value)) return false;
-  if (value.kind === 'beat') return hasExactKeys(value, BIN_BEAT_KEYS) && isSafeId(value.beatId);
-  if (value.kind === 'take') return hasExactKeys(value, BIN_TAKE_KEYS) && isSafeId(value.assetId);
+  if (value.kind === 'beat') {
+    return (
+      hasExactKeys(value, BIN_BEAT_KEYS) &&
+      isSafeId(value.beatId) &&
+      (value.reason === 'lifted' || value.reason === 'alternate')
+    );
+  }
+  if (value.kind === 'shot') {
+    return (
+      hasExactKeys(value, BIN_SHOT_KEYS) &&
+      isSafeId(value.beatId) &&
+      isSafeId(value.shotId) &&
+      value.reason === 'lifted'
+    );
+  }
+  if (value.kind === 'take') {
+    return (
+      hasExactKeys(value, BIN_TAKE_KEYS) &&
+      isSafeId(value.assetId) &&
+      (value.reason === 'lifted' || value.reason === 'alternate')
+    );
+  }
   return false;
+};
+
+const validateBinStructure = (value: unknown): value is StudioBinItem[] => {
+  if (!isDenseArray(value, STUDIO_MAX_BIN_BEAT_ITEMS + STUDIO_MAX_BIN_SHOT_ITEMS + STUDIO_MAX_BIN_TAKE_ITEMS)) {
+    return false;
+  }
+  let beatCount = 0;
+  let shotCount = 0;
+  let takeCount = 0;
+  const identities = new Set<string>();
+  for (let index = 0; index < value.length; index += 1) {
+    const item = value[index];
+    if (!binItemIsExact(item)) return false;
+    let identity: string;
+    if (item.kind === 'beat') {
+      beatCount += 1;
+      identity = `beat:${item.beatId}`;
+    } else if (item.kind === 'shot') {
+      shotCount += 1;
+      identity = `shot:${item.shotId}`;
+    } else {
+      takeCount += 1;
+      identity = `take:${item.assetId}`;
+    }
+    if (
+      beatCount > STUDIO_MAX_BIN_BEAT_ITEMS ||
+      shotCount > STUDIO_MAX_BIN_SHOT_ITEMS ||
+      takeCount > STUDIO_MAX_BIN_TAKE_ITEMS ||
+      identities.has(identity)
+    ) {
+      return false;
+    }
+    identities.add(identity);
+  }
+  return true;
+};
+
+const validateSpendPolicy = (value: unknown): boolean =>
+  value === null ||
+  (isRecord(value) &&
+    hasExactKeys(value, SPEND_POLICY_KEYS) &&
+    isCurrency(value.currency) &&
+    isIntegerInRange(value.maxPerBatchMinorUnits, 0, Number.MAX_SAFE_INTEGER));
+
+const validateQuotedItem = (value: unknown, projectId: string, projectRevision: number): boolean => {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, QUOTED_ITEM_KEYS) ||
+    !isSafeId(value.id) ||
+    !isSafeId(value.shotId) ||
+    typeof value.purpose !== 'string' ||
+    !PURPOSES.has(value.purpose) ||
+    !isSafeId(value.routeId) ||
+    !isIntegerInRange(value.generationCount, 1, STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION) ||
+    !validateRequestPlan(value.requestPlan) ||
+    typeof value.rateUnit !== 'string' ||
+    !RATE_UNITS.has(value.rateUnit) ||
+    !isIntegerInRange(value.rateMinorUnits, 1, Number.MAX_SAFE_INTEGER)
+  ) {
+    return false;
+  }
+  const plan = value.requestPlan as Record<string, unknown>;
+  if (value.purpose === 'seed_still') {
+    if (
+      value.rateUnit !== 'generation' ||
+      plan.kind !== 'resolved' ||
+      !isRecord(plan.snapshot) ||
+      plan.snapshot.conditioningInput !== null
+    ) {
+      return false;
+    }
+  } else if (
+    value.rateUnit !== 'second' ||
+    (plan.kind === 'resolved' &&
+      (!isRecord(plan.snapshot) ||
+        plan.snapshot.referenceInput !== null ||
+        plan.snapshot.conditioningInput === null)) ||
+    (plan.kind === 'after_take_selection' && (!isRecord(plan.template) || plan.template.referenceInput !== null))
+  ) {
+    return false;
+  }
+  return (
+    value.id ===
+      createStudioQuotedGenerationId({
+        projectId,
+        projectRevision,
+        shotId: value.shotId as string,
+        purpose: value.purpose as 'seed_still' | 'video_take',
+      }) &&
+    calculateStudioQuotedGenerationAmounts(value as Parameters<typeof calculateStudioQuotedGenerationAmounts>[0]) !==
+      null
+  );
+};
+
+const validateAuthorizationShape = (value: unknown, projectId: string, currentRevision: number): boolean => {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, AUTHORIZATION_KEYS) ||
+    !isSafeId(value.id) ||
+    value.projectId !== projectId ||
+    !isIntegerInRange(value.projectRevision, 1, Number.MAX_SAFE_INTEGER) ||
+    (value.projectRevision as number) >= currentRevision ||
+    !isNullableSafeId(value.originReferenceHandoffId) ||
+    !isLowercaseDigest(value.rateCardDigest) ||
+    !isCurrency(value.currency) ||
+    !isDenseArray(value.baseItems, STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST) ||
+    !isDenseArray(value.cascadeItems, STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST) ||
+    !isIntegerInRange(value.lowerMinorUnits, 0, Number.MAX_SAFE_INTEGER) ||
+    !isIntegerInRange(value.upperMinorUnits, 0, Number.MAX_SAFE_INTEGER) ||
+    (value.lowerMinorUnits as number) > (value.upperMinorUnits as number) ||
+    !isCanonicalTimestamp(value.expiresAt) ||
+    !isCanonicalTimestamp(value.confirmedAt) ||
+    (value.confirmedAt as string) >= (value.expiresAt as string)
+  ) {
+    return false;
+  }
+  const items = [...value.baseItems, ...value.cascadeItems];
+  if (items.length === 0 || items.length > STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST) return false;
+  const itemIds = new Set<string>();
+  const shotPurposeKeys = new Set<string>();
+  const shotIds = new Set<string>();
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    if (!validateQuotedItem(item, projectId, value.projectRevision as number)) return false;
+    const quoted = item as Record<string, unknown>;
+    const itemId = quoted.id as string;
+    const shotPurposeKey = `${quoted.shotId as string}\0${quoted.purpose as string}`;
+    if (itemIds.has(itemId) || shotPurposeKeys.has(shotPurposeKey)) return false;
+    itemIds.add(itemId);
+    shotPurposeKeys.add(shotPurposeKey);
+    shotIds.add(quoted.shotId as string);
+    if (shotIds.size > STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST) return false;
+  }
+  const totals = calculateStudioQuoteTotals(items as Parameters<typeof calculateStudioQuoteTotals>[0]);
+  if (
+    totals === null ||
+    totals.lowerMinorUnits !== value.lowerMinorUnits ||
+    totals.upperMinorUnits !== value.upperMinorUnits
+  ) {
+    return false;
+  }
+  if (!isDenseArray(value.providerBindings, items.length) || value.providerBindings.length !== items.length) {
+    return false;
+  }
+  for (let index = 0; index < items.length; index += 1) {
+    const binding = value.providerBindings[index];
+    if (
+      !isRecord(binding) ||
+      !hasExactKeys(binding, PROVIDER_BINDING_KEYS) ||
+      binding.itemId !== (items[index] as Record<string, unknown>).id ||
+      !validateProvider(binding.provider)
+    ) {
+      return false;
+    }
+  }
+  let expectedIdempotencyEntryCount = 0;
+  for (const item of items) {
+    expectedIdempotencyEntryCount += (item as Record<string, unknown>).generationCount as number;
+  }
+  if (
+    !isDenseArray(value.idempotencyKeys, expectedIdempotencyEntryCount) ||
+    value.idempotencyKeys.length !== expectedIdempotencyEntryCount
+  ) {
+    return false;
+  }
+  let entryIndex = 0;
+  const keys = new Set<string>();
+  for (const item of items) {
+    const quoted = item as Record<string, unknown>;
+    for (let generationIndex = 0; generationIndex < (quoted.generationCount as number); generationIndex += 1) {
+      const entry = value.idempotencyKeys[entryIndex];
+      if (
+        !isRecord(entry) ||
+        !hasExactKeys(entry, IDEMPOTENCY_ENTRY_KEYS) ||
+        entry.itemId !== quoted.id ||
+        entry.generationIndex !== generationIndex ||
+        !isSafeId(entry.key) ||
+        keys.has(entry.key)
+      ) {
+        return false;
+      }
+      keys.add(entry.key);
+      entryIndex += 1;
+    }
+  }
+  return true;
+};
+
+const validateFrameExtractionShape = (frameId: string, value: unknown): boolean => {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, FRAME_EXTRACTION_KEYS) ||
+    value.id !== frameId ||
+    !isSafeId(frameId) ||
+    !isSafeId(value.shotId) ||
+    !isSafeId(value.takeAssetId) ||
+    !isFinitePositive(value.endpointSeconds) ||
+    !isNullableSafeId(value.frameAssetId) ||
+    typeof value.status !== 'string' ||
+    !FRAME_STATUSES.has(value.status) ||
+    (value.errorCode !== null && (typeof value.errorCode !== 'string' || !FRAME_ERROR_CODES.has(value.errorCode)))
+  ) {
+    return false;
+  }
+  if (
+    value.id !==
+    createStudioFrameExtractionId({
+      shotId: value.shotId as string,
+      takeAssetId: value.takeAssetId as string,
+      endpointSeconds: value.endpointSeconds as number,
+    })
+  ) {
+    return false;
+  }
+  if (value.status === 'ready') return value.frameAssetId !== null && value.errorCode === null;
+  if (value.status === 'failed') return value.frameAssetId === null && value.errorCode !== null;
+  return value.frameAssetId === null && value.errorCode === null;
+};
+
+const validateProjectPatchBefore = (value: unknown): boolean =>
+  isRecord(value) &&
+  hasExactKeys(value, PROJECT_PATCH_BEFORE_KEYS) &&
+  isNonEmptyStringWithin(value.name, 256) &&
+  typeof value.aspectRatio === 'string' &&
+  ASPECT_RATIOS.has(value.aspectRatio) &&
+  typeof value.resolution === 'string' &&
+  RESOLUTIONS.has(value.resolution) &&
+  isIntegerInRange(value.targetDurationSeconds, 5, 1440) &&
+  isStringWithin(value.brief, 16 * 1024) &&
+  validateRules(value.rules) &&
+  isUniqueSafeIdArray(value.beatOrder, STUDIO_MAX_BEATS) &&
+  isNullableRouteId(value.imageRouteId) &&
+  isNullableRouteId(value.videoRouteId) &&
+  validateSpendPolicy(value.spendPolicy) &&
+  isNullableSafeId(value.bedAssetId) &&
+  isNullableSafeId(value.matchToShotId);
+
+const validateUndoPatch = (value: unknown): boolean => {
+  if (!isRecord(value) || !isLowercaseDigest(value.afterDigest)) return false;
+  if (value.kind === 'project_fields') {
+    return hasExactKeys(value, PROJECT_PATCH_KEYS) && validateProjectPatchBefore(value.before);
+  }
+  if (value.kind === 'beat_fields') {
+    return (
+      hasExactKeys(value, BEAT_PATCH_KEYS) &&
+      isSafeId(value.beatId) &&
+      (value.before === null || validateBeat(value.beatId, value.before))
+    );
+  }
+  if (value.kind === 'shot_fields') {
+    return (
+      hasExactKeys(value, SHOT_PATCH_KEYS) &&
+      isSafeId(value.shotId) &&
+      (value.before === null || validateShotRecord(value.shotId, value.before, SHOT_BEFORE_KEYS, false)) &&
+      isNullableSafeId(value.beforeBeatId) &&
+      (value.beforeIndex === null || isIntegerInRange(value.beforeIndex, 0, STUDIO_MAX_SHOTS_PER_BEAT - 1)) &&
+      (value.before === null ? value.beforeBeatId === null && value.beforeIndex === null : value.beforeBeatId !== null)
+    );
+  }
+  return value.kind === 'bin' && hasExactKeys(value, BIN_PATCH_KEYS) && validateBinStructure(value.before);
+};
+
+const validateUndoHistory = (value: unknown, currentRevision: number): boolean => {
+  if (!isDenseArray(value, STUDIO_MAX_UNDO_ENTRIES)) return false;
+  const entryIds = new Set<string>();
+  for (let entryIndex = 0; entryIndex < value.length; entryIndex += 1) {
+    const entry = value[entryIndex];
+    if (
+      !isRecord(entry) ||
+      !hasExactKeys(entry, UNDO_ENTRY_KEYS) ||
+      !isSafeId(entry.id) ||
+      entryIds.has(entry.id) ||
+      !isIntegerInRange(entry.sourceRevision, 1, currentRevision) ||
+      !isNonEmptyStringWithin(entry.label, STUDIO_MAX_UNDO_LABEL_LENGTH) ||
+      !isDenseArray(entry.patches, STUDIO_MAX_UNDO_PATCHES_PER_ENTRY) ||
+      entry.patches.length === 0
+    ) {
+      return false;
+    }
+    entryIds.add(entry.id);
+    let hasProjectPatch = false;
+    let hasBinPatch = false;
+    const beatIds = new Set<string>();
+    const shotIds = new Set<string>();
+    for (let patchIndex = 0; patchIndex < entry.patches.length; patchIndex += 1) {
+      const patch = entry.patches[patchIndex];
+      if (!validateUndoPatch(patch) || !isRecord(patch)) return false;
+      if (patch.kind === 'project_fields') {
+        if (hasProjectPatch) return false;
+        hasProjectPatch = true;
+      } else if (patch.kind === 'bin') {
+        if (hasBinPatch) return false;
+        hasBinPatch = true;
+      } else if (patch.kind === 'beat_fields') {
+        if (beatIds.has(patch.beatId as string)) return false;
+        beatIds.add(patch.beatId as string);
+      } else {
+        if (shotIds.has(patch.shotId as string)) return false;
+        shotIds.add(patch.shotId as string);
+      }
+    }
+  }
+  return true;
+};
+
+const isTerminalJob = (job: StudioJobV2): boolean => TERMINAL_JOB_STATUSES.has(job.status);
+const hasProviderAttempt = (job: StudioJobV2): boolean =>
+  job.providerJobId !== null ||
+  (job.remoteStartedAt !== undefined && job.remoteStartedAt !== null) ||
+  job.progress !== undefined;
+const hasNoOutput = (job: StudioJobV2): boolean =>
+  job.outputAssetIds.length === 0 &&
+  job.outputAssetIdsByRole.primary === null &&
+  job.outputAssetIdsByRole.poster === null;
+
+const isClassifiedBriefImage = (asset: StudioAssetV2): boolean =>
+  asset.shotId === null &&
+  asset.mediaKind === 'image' &&
+  asset.managedAsset.collection === 'imports' &&
+  asset.briefReferenceRole !== undefined &&
+  asset.briefReferenceLabel !== undefined;
+
+const isCanonicalImageTake = (asset: StudioAssetV2 | undefined, shotId: string): asset is StudioAssetV2 =>
+  asset !== undefined &&
+  asset.shotId === shotId &&
+  asset.mediaKind === 'image' &&
+  (asset.managedAsset.collection === 'assets' || asset.managedAsset.collection === 'imports') &&
+  asset.briefReferenceRole === undefined &&
+  asset.briefReferenceLabel === undefined;
+
+const isCanonicalVideoTake = (asset: StudioAssetV2 | undefined, shotId: string): asset is StudioAssetV2 =>
+  asset !== undefined &&
+  asset.shotId === shotId &&
+  asset.mediaKind === 'video' &&
+  asset.managedAsset.collection === 'assets' &&
+  asset.durationSeconds !== undefined;
+
+const requestReference = (job: StudioJobV2): { assetId: string; sha256: string } | null => {
+  const request = job.requestPlan.kind === 'resolved' ? job.requestPlan.snapshot : job.requestPlan.template;
+  return request.referenceInput;
+};
+
+const requestDurationSeconds = (plan: StudioJobV2['requestPlan']): number =>
+  plan.kind === 'resolved' ? plan.snapshot.durationSeconds : plan.template.durationSeconds;
+
+const validateReceiptAgainstJob = (
+  job: StudioJobV2,
+  item: StudioProjectV2['spendAuthorizations'][number]['baseItems'][number],
+  authorization: StudioProjectV2['spendAuthorizations'][number]
+): boolean => {
+  if (job.spendReceipt === null) return false;
+  const receipt = job.spendReceipt;
+  const amounts = calculateStudioQuotedGenerationAmounts(item);
+  if (amounts === null) return false;
+  const expectedDuration = item.purpose === 'seed_still' ? null : requestDurationSeconds(item.requestPlan);
+  return (
+    receipt.authorizationId === authorization.id &&
+    receipt.itemId === item.id &&
+    receipt.jobId === job.id &&
+    receipt.purpose === item.purpose &&
+    receipt.routeId === item.routeId &&
+    receipt.currency === authorization.currency &&
+    receipt.rateUnit === item.rateUnit &&
+    receipt.rateMinorUnits === item.rateMinorUnits &&
+    receipt.durationSeconds === expectedDuration &&
+    receipt.generationIndex === job.generationIndex &&
+    receipt.generationCount === item.generationCount &&
+    receipt.totalMinorUnits === amounts.oneGenerationMinorUnits
+  );
 };
 
 /** Validates the complete persisted schema-2 project contract without I/O or normalization. */
@@ -713,29 +1367,29 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     !isNonEmptyStringWithin(value.name, 256) ||
     !isStringWithin(value.brief, 16 * 1024) ||
     !validateRules(value.rules) ||
-    !validateRuleUndo(value.ruleListUndo) ||
     (value.forgeProjectId !== undefined && !isSafeId(value.forgeProjectId)) ||
     (value.briefConversationId !== undefined &&
       value.briefConversationId !== null &&
       !isSafeId(value.briefConversationId)) ||
     typeof value.aspectRatio !== 'string' ||
     !ASPECT_RATIOS.has(value.aspectRatio) ||
-    !isIntegerInRange(value.targetDurationSeconds, 5, 60) ||
+    !isIntegerInRange(value.targetDurationSeconds, 5, 1440) ||
     typeof value.resolution !== 'string' ||
     !RESOLUTIONS.has(value.resolution) ||
     !isUniqueSafeIdArray(value.beatOrder, STUDIO_MAX_BEATS) ||
     !isRecord(value.beats) ||
     !isRecord(value.shots) ||
-    !isDenseArray(value.bin, STUDIO_MAX_BIN_ITEMS) ||
-    !arrayEvery(value.bin, binItemIsExact) ||
-    !isRecord(value.cuts) ||
-    (value.activeCutId !== null && !isSafeId(value.activeCutId)) ||
+    !validateBinStructure(value.bin) ||
+    !isNullableSafeId(value.bedAssetId) ||
+    !isNullableSafeId(value.matchToShotId) ||
+    !validateSpendPolicy(value.spendPolicy) ||
+    !isDenseArray(value.spendAuthorizations) ||
+    !isRecord(value.frameExtractions) ||
+    !validateUndoHistory(value.undoHistory, value.revision as number) ||
+    !isNullableRouteId(value.imageRouteId) ||
+    !isNullableRouteId(value.videoRouteId) ||
     !isRecord(value.assets) ||
     !isRecord(value.jobs) ||
-    !isRecord(value.routing) ||
-    !hasExactKeys(value.routing, ROUTING_KEYS) ||
-    !validateRoute(value.routing.image) ||
-    !validateRoute(value.routing.video) ||
     !isCanonicalTimestamp(value.createdAt) ||
     !isCanonicalTimestamp(value.updatedAt)
   ) {
@@ -755,6 +1409,26 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     return false;
   }
 
+  const activeBeatIds = new Set(arrayMap(project.beatOrder, (beatId) => beatId));
+  const binnedBeatIds = new Set<string>();
+  const binnedShotOwnerIds = new Map<string, string>();
+  const binnedTakeIds = new Set<string>();
+  for (let binIndex = 0; binIndex < project.bin.length; binIndex += 1) {
+    const item = project.bin[binIndex]!;
+    if (item.kind === 'beat') {
+      if (!Object.hasOwn(project.beats, item.beatId) || activeBeatIds.has(item.beatId)) return false;
+      binnedBeatIds.add(item.beatId);
+    } else if (item.kind === 'shot') {
+      if (!Object.hasOwn(project.beats, item.beatId) || !Object.hasOwn(project.shots, item.shotId)) return false;
+      binnedShotOwnerIds.set(item.shotId, item.beatId);
+    } else {
+      binnedTakeIds.add(item.assetId);
+    }
+  }
+  for (const beatId of beatIds) {
+    if (Number(activeBeatIds.has(beatId)) + Number(binnedBeatIds.has(beatId)) !== 1) return false;
+  }
+
   const shotOwners = new Map<string, string>();
   for (const beatId of beatIds) {
     const shotOrder = project.beats[beatId]!.shotOrder;
@@ -764,7 +1438,28 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
       shotOwners.set(shotId, beatId);
     }
   }
+  for (const [shotId, beatId] of binnedShotOwnerIds) {
+    if (shotOwners.has(shotId)) return false;
+    shotOwners.set(shotId, beatId);
+  }
   if (shotOwners.size !== shotIds.length) return false;
+
+  const inactiveShotIds = new Set<string>(binnedShotOwnerIds.keys());
+  for (const [shotId, beatId] of shotOwners) {
+    const beat = ownValue(project.beats, beatId);
+    const shot = ownValue(project.shots, shotId);
+    if (beat === undefined || shot === undefined) return false;
+    if (binnedBeatIds.has(beatId)) inactiveShotIds.add(shotId);
+    if (shot.derivation === 'derived' && shot.derivedFromActionRevision! > beat.actionRevision) return false;
+  }
+  for (const beat of Object.values(project.beats)) {
+    for (let shotIndex = 0; shotIndex < beat.shotOrder.length; shotIndex += 1) {
+      const shot = ownValue(project.shots, beat.shotOrder[shotIndex]!);
+      if (shot === undefined) return false;
+      const isSegmentHead = shotIndex === 0 || shot.chainBreak === 'hard_cut';
+      if (!isSegmentHead && shot.seedStillId !== null) return false;
+    }
+  }
 
   const assetIds = Object.keys(project.assets);
   const jobIds = Object.keys(project.jobs);
@@ -782,28 +1477,32 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     shotJobPositionsByShotId.set(shot.id, new Map(arrayMap(shot.jobIds, (jobId, index) => [jobId, index] as const)));
   }
 
-  const projectReferenceCount = Object.values(project.assets).filter((asset) => asset.shotId === null).length;
+  const projectReferenceCount = Object.values(project.assets).filter(isClassifiedBriefImage).length;
   if (projectReferenceCount > STUDIO_MAX_ACTIVE_BRIEF_REFERENCES) return false;
   for (const asset of Object.values(project.assets)) {
     if (asset.shotId !== null) {
       const shot = ownValue(project.shots, asset.shotId);
       if (shot === undefined || !shotAssetIdsByShotId.get(shot.id)?.has(asset.id)) return false;
     }
+  }
+
+  if (project.bedAssetId !== null) {
+    const bed = ownValue(project.assets, project.bedAssetId);
     if (
-      asset.sourceReferenceAssetIds !== undefined &&
-      !arrayEvery(asset.sourceReferenceAssetIds, (sourceId) => {
-        const source = ownValue(project.assets, sourceId);
-        return (
-          source?.shotId === null &&
-          source.mediaKind === 'image' &&
-          source.managedAsset.collection === 'imports' &&
-          source.briefReferenceRole !== undefined &&
-          source.briefReferenceLabel !== undefined
-        );
-      })
+      bed === undefined ||
+      bed.shotId !== null ||
+      bed.mediaKind !== 'audio' ||
+      bed.managedAsset.collection !== 'imports' ||
+      bed.briefReferenceRole !== undefined ||
+      bed.briefReferenceLabel !== undefined
     ) {
       return false;
     }
+  }
+  if (project.matchToShotId !== null) {
+    const ownerId = shotOwners.get(project.matchToShotId);
+    if (ownerId === undefined || inactiveShotIds.has(project.matchToShotId) || !activeBeatIds.has(ownerId))
+      return false;
   }
 
   for (const job of Object.values(project.jobs)) {
@@ -817,29 +1516,156 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     ) {
       return false;
     }
+  }
+
+  const outputProducerByAssetId = new Map<string, StudioJobV2>();
+  for (const shot of Object.values(project.shots)) {
+    if (!arrayEvery(shot.assetIds, (assetId) => ownValue(project.assets, assetId)?.shotId === shot.id)) return false;
+    if (!arrayEvery(shot.jobIds, (jobId) => ownValue(project.jobs, jobId)?.shotId === shot.id)) return false;
+  }
+
+  for (const job of Object.values(project.jobs)) {
+    if ((job.status === 'failed') !== (job.error !== null) && job.status !== 'needs_attention') return false;
+    if (job.status !== 'failed' && job.status !== 'needs_attention' && job.error !== null) return false;
+    if (job.status === 'waiting_for_conditioning' && job.error !== null) return false;
+    if (job.error?.code === 'dependency_failed' && job.status !== 'failed') return false;
+    if (job.status === 'queued_local' || job.status === 'waiting_for_conditioning') {
+      if (hasProviderAttempt(job)) return false;
+    }
+    if (job.status === 'succeeded') {
+      if (job.outputAssetIdsByRole.primary === null) return false;
+    } else if (job.outputAssetIdsByRole.primary !== null || job.outputAssetIdsByRole.poster !== null) {
+      return false;
+    }
+    if (job.purpose === 'seed_still' && job.outputAssetIdsByRole.poster !== null) return false;
+    for (const outputAssetId of job.outputAssetIds) {
+      const output = ownValue(project.assets, outputAssetId);
+      if (
+        output === undefined ||
+        output.shotId !== job.shotId ||
+        (output.managedAsset.collection !== 'assets' && output.managedAsset.collection !== 'thumbnails') ||
+        outputProducerByAssetId.has(outputAssetId)
+      ) {
+        return false;
+      }
+      outputProducerByAssetId.set(outputAssetId, job);
+    }
+    const primaryId = job.outputAssetIdsByRole.primary;
+    if (primaryId !== null) {
+      if (!job.outputAssetIds.includes(primaryId)) return false;
+      const primary = ownValue(project.assets, primaryId);
+      if (
+        primary === undefined ||
+        primary.managedAsset.collection !== 'assets' ||
+        (job.purpose === 'seed_still'
+          ? primary.mediaKind !== 'image'
+          : primary.mediaKind !== 'video' || primary.durationSeconds === undefined)
+      ) {
+        return false;
+      }
+    }
+    const posterId = job.outputAssetIdsByRole.poster;
+    if (posterId !== null) {
+      if (!job.outputAssetIds.includes(posterId)) return false;
+      const poster = ownValue(project.assets, posterId);
+      if (
+        job.purpose !== 'video_take' ||
+        poster === undefined ||
+        poster.mediaKind !== 'image' ||
+        poster.managedAsset.collection !== 'thumbnails'
+      ) {
+        return false;
+      }
+    }
+  }
+
+  const frameByAssetId = new Map<string, StudioProjectV2['frameExtractions'][string]>();
+  for (const frameId of Object.keys(project.frameExtractions)) {
+    const frame = ownValue(project.frameExtractions, frameId);
+    if (frame === undefined || !validateFrameExtractionShape(frameId, frame)) return false;
+    const take = ownValue(project.assets, frame.takeAssetId);
+    const takeProducer = take === undefined ? undefined : outputProducerByAssetId.get(take.id);
     if (
-      job.referenceInputSnapshot !== undefined &&
-      !arrayEvery(job.referenceInputSnapshot.conditioningReferenceAssetIds, (sourceId) => {
-        const source = ownValue(project.assets, sourceId);
-        return source?.shotId === null && source.managedAsset.collection === 'imports';
-      })
+      !isCanonicalVideoTake(take, frame.shotId) ||
+      !shotAssetIdsByShotId.get(frame.shotId)?.has(take.id) ||
+      frame.endpointSeconds > take.durationSeconds! ||
+      takeProducer?.status !== 'succeeded' ||
+      takeProducer.purpose !== 'video_take' ||
+      takeProducer.outputAssetIdsByRole.primary !== take.id
     ) {
+      return false;
+    }
+    if (frame.frameAssetId !== null) {
+      const frameAsset = ownValue(project.assets, frame.frameAssetId);
+      if (
+        frameAsset === undefined ||
+        frameAsset.shotId !== frame.shotId ||
+        frameAsset.mediaKind !== 'image' ||
+        frameAsset.managedAsset.collection !== 'conditioningFrames' ||
+        !shotAssetIdsByShotId.get(frame.shotId)?.has(frameAsset.id) ||
+        frameByAssetId.has(frameAsset.id) ||
+        outputProducerByAssetId.has(frameAsset.id)
+      ) {
+        return false;
+      }
+      frameByAssetId.set(frameAsset.id, frame);
+    }
+  }
+
+  for (const asset of Object.values(project.assets)) {
+    if (asset.shotId === null) continue;
+    if (asset.managedAsset.collection === 'imports') {
+      if (asset.mediaKind !== 'image' || outputProducerByAssetId.has(asset.id) || frameByAssetId.has(asset.id)) {
+        return false;
+      }
+    } else if (asset.managedAsset.collection === 'conditioningFrames') {
+      if (!frameByAssetId.has(asset.id)) return false;
+    } else if (!outputProducerByAssetId.has(asset.id)) {
       return false;
     }
   }
 
-  for (const shot of Object.values(project.shots)) {
-    if (!arrayEvery(shot.assetIds, (assetId) => ownValue(project.assets, assetId)?.shotId === shot.id)) return false;
-    if (!arrayEvery(shot.jobIds, (jobId) => ownValue(project.jobs, jobId)?.shotId === shot.id)) return false;
-    if (shot.selectedTakeId !== null) {
-      const selected = ownValue(project.assets, shot.selectedTakeId);
-      if (selected === undefined || !isCanonicalGeneratedTake(selected, project.id, shot, shotAssetIdsByShotId)) {
-        return false;
-      }
+  const isCanonicalPrimary = (asset: StudioAssetV2 | undefined, shotId: string, purpose: StudioJobV2['purpose']) => {
+    if (purpose === 'seed_still') {
+      if (!isCanonicalImageTake(asset, shotId)) return false;
+      if (asset.managedAsset.collection === 'imports') return !outputProducerByAssetId.has(asset.id);
+    } else if (!isCanonicalVideoTake(asset, shotId)) {
+      return false;
     }
-    if (shot.referenceAssetId !== null) {
-      const reference = ownValue(project.assets, shot.referenceAssetId);
-      if (reference?.shotId !== shot.id || !shotAssetIdsByShotId.get(shot.id)?.has(reference.id)) return false;
+    const producer = outputProducerByAssetId.get(asset.id);
+    return (
+      producer?.status === 'succeeded' &&
+      producer.purpose === purpose &&
+      producer.outputAssetIdsByRole.primary === asset.id
+    );
+  };
+  const isSelectablePrimary = (
+    asset: StudioAssetV2 | undefined,
+    shotId: string,
+    purpose: StudioJobV2['purpose']
+  ): boolean => asset !== undefined && !binnedTakeIds.has(asset.id) && isCanonicalPrimary(asset, shotId, purpose);
+
+  for (const shot of Object.values(project.shots)) {
+    if (
+      shot.seedStillId !== null &&
+      !isSelectablePrimary(ownValue(project.assets, shot.seedStillId), shot.id, 'seed_still')
+    ) {
+      return false;
+    }
+    if (shot.selectedTakeId === null) {
+      if (shot.trimInSeconds !== null || shot.trimOutSeconds !== null) return false;
+      continue;
+    }
+    const selected = ownValue(project.assets, shot.selectedTakeId);
+    if (!isSelectablePrimary(selected, shot.id, 'video_take')) return false;
+    const trimIn = shot.trimInSeconds ?? 0;
+    const trimOut = shot.trimOutSeconds ?? 0;
+    if (
+      trimIn >= selected.durationSeconds! ||
+      trimOut >= selected.durationSeconds! ||
+      trimIn + trimOut >= selected.durationSeconds!
+    ) {
+      return false;
     }
   }
 
@@ -872,44 +1698,336 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     }
   }
 
-  const cutIds = Object.keys(project.cuts);
-  if (!cutIds.every((cutId) => validateCut(cutId, project, shotAssetIdsByShotId, project.cuts[cutId]))) return false;
-  if (project.activeCutId !== null && !Object.hasOwn(project.cuts, project.activeCutId)) return false;
-
-  const activeBeatIds = new Set(arrayMap(project.beatOrder, (beatId) => beatId));
-  const binIdentityKeys = new Set<string>();
-  const parkedBeatIds = new Set<string>();
-  let parkedBeatItemCount = 0;
-  let takeAliasItemCount = 0;
-  const cutAssetIds = new Set(
-    Object.values(project.cuts).flatMap((cut) => Object.values(cut.clips).map((cutClip) => cutClip.assetId))
-  );
-  for (let binIndex = 0; binIndex < project.bin.length; binIndex += 1) {
-    const item = project.bin[binIndex]!;
-    const identityKey = item.kind === 'beat' ? `beat:${item.beatId}` : `take:${item.assetId}`;
-    if (binIdentityKeys.has(identityKey)) return false;
-    binIdentityKeys.add(identityKey);
-    if (item.kind === 'beat') {
-      parkedBeatItemCount += 1;
-      if (parkedBeatItemCount > STUDIO_MAX_BIN_BEAT_ITEMS) return false;
-      if (!Object.hasOwn(project.beats, item.beatId) || activeBeatIds.has(item.beatId)) return false;
-      parkedBeatIds.add(item.beatId);
-      continue;
-    }
-    takeAliasItemCount += 1;
-    if (takeAliasItemCount > STUDIO_MAX_BIN_TAKE_ITEMS) return false;
-    const asset = ownValue(project.assets, item.assetId);
-    if (asset?.shotId === null || asset === undefined) return false;
-    const shot = ownValue(project.shots, asset.shotId);
+  type Authorization = StudioProjectV2['spendAuthorizations'][number];
+  type QuotedItem = Authorization['baseItems'][number];
+  type ItemLink = {
+    authorization: Authorization;
+    item: QuotedItem;
+    provider: Authorization['providerBindings'][number]['provider'];
+    idempotencyKeys: Map<number, string>;
+  };
+  const authorizationIds = new Set<string>();
+  const itemLinks = new Map<string, ItemLink>();
+  const globalIdempotencyKeys = new Set<string>();
+  for (let authorizationIndex = 0; authorizationIndex < project.spendAuthorizations.length; authorizationIndex += 1) {
+    const authorization = project.spendAuthorizations[authorizationIndex]!;
     if (
-      shot === undefined ||
-      !isCanonicalGeneratedTake(asset, project.id, shot, shotAssetIdsByShotId) ||
-      shot.selectedTakeId === asset.id ||
-      cutAssetIds.has(asset.id)
+      !validateAuthorizationShape(authorization, project.id, project.revision) ||
+      authorizationIds.has(authorization.id)
+    ) {
+      return false;
+    }
+    authorizationIds.add(authorization.id);
+    const items = [...authorization.baseItems, ...authorization.cascadeItems];
+    const itemPositions = new Map<string, number>();
+    for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
+      const item = items[itemIndex]!;
+      if (!Object.hasOwn(project.shots, item.shotId) || itemLinks.has(item.id)) return false;
+      itemPositions.set(item.id, itemIndex);
+      const idempotencyKeys = new Map<number, string>();
+      for (const entry of authorization.idempotencyKeys) {
+        if (entry.itemId !== item.id) continue;
+        if (globalIdempotencyKeys.has(entry.key)) return false;
+        globalIdempotencyKeys.add(entry.key);
+        idempotencyKeys.set(entry.generationIndex, entry.key);
+      }
+      itemLinks.set(item.id, {
+        authorization,
+        item,
+        provider: authorization.providerBindings[itemIndex]!.provider,
+        idempotencyKeys,
+      });
+    }
+    for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
+      const item = items[itemIndex]!;
+      if (item.requestPlan.kind !== 'after_take_selection') continue;
+      const dependency = item.requestPlan.dependency;
+      const upstreamPosition = itemPositions.get(dependency.upstreamItemId);
+      const upstream = items[upstreamPosition ?? -1];
+      if (upstreamPosition === undefined || upstreamPosition >= itemIndex || upstream === undefined) return false;
+      if (dependency.kind === 'authorized_seed') {
+        if (
+          upstream.purpose !== 'seed_still' ||
+          upstream.shotId !== dependency.shotId ||
+          item.shotId !== dependency.shotId
+        ) {
+          return false;
+        }
+      } else {
+        if (
+          upstream.purpose !== 'video_take' ||
+          upstream.shotId !== dependency.predecessorShotId ||
+          shotOwners.get(upstream.shotId) !== shotOwners.get(item.shotId)
+        ) {
+          return false;
+        }
+      }
+    }
+  }
+
+  const jobsByLogicalEntry = new Map<string, StudioJobV2>();
+  const jobsByItemId = new Map<string, StudioJobV2[]>();
+  for (const job of Object.values(project.jobs)) {
+    const link = itemLinks.get(job.authorizationItemId);
+    if (
+      link === undefined ||
+      link.authorization.id !== job.authorizationId ||
+      link.item.shotId !== job.shotId ||
+      link.item.purpose !== job.purpose ||
+      !requestPlansEqual(link.item.requestPlan, job.requestPlan) ||
+      !providersEqual(link.provider, job.provider) ||
+      link.idempotencyKeys.get(job.generationIndex) !== job.idempotencyKey
+    ) {
+      return false;
+    }
+    const logicalEntry = `${job.authorizationId}\0${job.authorizationItemId}\0${job.generationIndex}`;
+    if (jobsByLogicalEntry.has(logicalEntry)) return false;
+    jobsByLogicalEntry.set(logicalEntry, job);
+    const itemJobs = jobsByItemId.get(job.authorizationItemId) ?? [];
+    itemJobs.push(job);
+    jobsByItemId.set(job.authorizationItemId, itemJobs);
+
+    const plan = job.requestPlan;
+    if (plan.kind === 'resolved') {
+      if (
+        job.requestSnapshot === null ||
+        !requestSnapshotsEqual(plan.snapshot, job.requestSnapshot) ||
+        job.status === 'waiting_for_conditioning' ||
+        job.error?.code === 'dependency_failed'
+      ) {
+        return false;
+      }
+    } else if (job.requestSnapshot !== null) {
+      if (
+        !requestNonConditioningFieldsEqual(plan.template, job.requestSnapshot) ||
+        job.requestSnapshot.conditioningInput === null
+      ) {
+        return false;
+      }
+    } else {
+      const isWaiting = job.status === 'waiting_for_conditioning' && job.error === null;
+      const isDependencyFailed = job.status === 'failed' && job.error?.code === 'dependency_failed';
+      const isPrebindCancelled = job.status === 'cancelled';
+      if ((!isWaiting && !isDependencyFailed && !isPrebindCancelled) || hasProviderAttempt(job) || !hasNoOutput(job)) {
+        return false;
+      }
+    }
+
+    const reference = requestReference(job);
+    if (reference !== null && !isTerminalJob(job)) {
+      const source = ownValue(project.assets, reference.assetId);
+      if (!source || !isClassifiedBriefImage(source) || source.sha256 !== reference.sha256) return false;
+    }
+    if (job.requestSnapshot !== null) {
+      const conditioning = job.requestSnapshot.conditioningInput;
+      if (plan.kind === 'after_take_selection') {
+        const dependency = plan.dependency;
+        if (dependency.kind === 'authorized_seed') {
+          const producer =
+            conditioning?.kind === 'seed_still' ? outputProducerByAssetId.get(conditioning.assetId) : undefined;
+          if (
+            conditioning?.kind !== 'seed_still' ||
+            producer?.authorizationId !== job.authorizationId ||
+            producer.authorizationItemId !== dependency.upstreamItemId
+          ) {
+            return false;
+          }
+        } else {
+          const producer =
+            conditioning?.kind === 'predecessor_frame'
+              ? outputProducerByAssetId.get(conditioning.takeAssetId)
+              : undefined;
+          if (
+            conditioning?.kind !== 'predecessor_frame' ||
+            conditioning.predecessorShotId !== dependency.predecessorShotId ||
+            producer?.authorizationId !== job.authorizationId ||
+            producer.authorizationItemId !== dependency.upstreamItemId
+          ) {
+            return false;
+          }
+        }
+      }
+      if (conditioning?.kind === 'seed_still') {
+        if (!isCanonicalPrimary(ownValue(project.assets, conditioning.assetId), job.shotId, 'seed_still')) {
+          return false;
+        }
+      } else if (conditioning?.kind === 'predecessor_frame') {
+        const take = ownValue(project.assets, conditioning.takeAssetId);
+        const frame = ownValue(project.assets, conditioning.frameAssetId);
+        const extraction = frameByAssetId.get(conditioning.frameAssetId);
+        if (
+          !isCanonicalVideoTake(take, conditioning.predecessorShotId) ||
+          frame === undefined ||
+          frame.shotId !== conditioning.predecessorShotId ||
+          frame.mediaKind !== 'image' ||
+          frame.managedAsset.collection !== 'conditioningFrames' ||
+          extraction?.status !== 'ready' ||
+          extraction.shotId !== conditioning.predecessorShotId ||
+          extraction.takeAssetId !== conditioning.takeAssetId ||
+          extraction.endpointSeconds !== conditioning.endpointSeconds ||
+          extraction.frameAssetId !== conditioning.frameAssetId ||
+          shotOwners.get(conditioning.predecessorShotId) !== shotOwners.get(job.shotId)
+        ) {
+          return false;
+        }
+      }
+    }
+
+    const receiptRequired =
+      job.status === 'succeeded' ||
+      (job.status === 'failed' && (job.error?.code === 'no_output' || job.error?.code === 'download_failed'));
+    const receiptAllowed = receiptRequired || job.status === 'running';
+    if (
+      (receiptRequired && job.spendReceipt === null) ||
+      (!receiptAllowed && job.spendReceipt !== null) ||
+      (job.spendReceipt !== null && !validateReceiptAgainstJob(job, link.item, link.authorization))
     ) {
       return false;
     }
   }
 
-  return beatIds.every((beatId) => Number(activeBeatIds.has(beatId)) + Number(parkedBeatIds.has(beatId)) === 1);
+  for (const link of itemLinks.values()) {
+    const jobs = jobsByItemId.get(link.item.id);
+    if (jobs === undefined || jobs.length !== link.item.generationCount) return false;
+    for (let generationIndex = 0; generationIndex < link.item.generationCount; generationIndex += 1) {
+      const logicalEntry = `${link.authorization.id}\0${link.item.id}\0${generationIndex}`;
+      if (!jobsByLogicalEntry.has(logicalEntry)) return false;
+    }
+    if (!jobs.every((job) => requestPlansEqual(job.requestPlan, link.item.requestPlan))) return false;
+    if (link.item.requestPlan.kind === 'after_take_selection') {
+      const concreteJobs = jobs.filter((job) => job.requestSnapshot !== null);
+      const nonCancelledJobs = jobs.filter((job) => job.status !== 'cancelled');
+      if (concreteJobs.length > 0) {
+        const concrete = concreteJobs[0]!.requestSnapshot;
+        if (
+          nonCancelledJobs.some(
+            (job) =>
+              job.requestSnapshot === null ||
+              job.status === 'waiting_for_conditioning' ||
+              job.error?.code === 'dependency_failed' ||
+              !requestSnapshotsEqual(job.requestSnapshot, concrete)
+          ) ||
+          concreteJobs.some((job) => !requestSnapshotsEqual(job.requestSnapshot, concrete)) ||
+          jobs.some((job) => job.requestSnapshot === null && hasProviderAttempt(job))
+        ) {
+          return false;
+        }
+      } else {
+        const liveCategories = new Set(
+          nonCancelledJobs.map((job) =>
+            job.status === 'waiting_for_conditioning'
+              ? 'waiting'
+              : job.error?.code === 'dependency_failed'
+                ? 'failed'
+                : 'other'
+          )
+        );
+        if (liveCategories.has('other') || liveCategories.size > 1) return false;
+      }
+    }
+  }
+  if (jobsByLogicalEntry.size !== Object.keys(project.jobs).length) return false;
+
+  for (const link of itemLinks.values()) {
+    const jobs = jobsByItemId.get(link.item.id)!;
+    if (!jobs.some((job) => !isTerminalJob(job))) continue;
+    for (const otherLink of itemLinks.values()) {
+      if (otherLink.item.id === link.item.id) continue;
+      if (otherLink.item.shotId !== link.item.shotId || otherLink.item.purpose !== link.item.purpose) continue;
+      if (jobsByItemId.get(otherLink.item.id)?.some((job) => !isTerminalJob(job))) return false;
+    }
+  }
+
+  for (const link of itemLinks.values()) {
+    if (link.item.requestPlan.kind !== 'after_take_selection') continue;
+    const dependency = link.item.requestPlan.dependency;
+    const upstreamJobs = jobsByItemId.get(dependency.upstreamItemId);
+    if (upstreamJobs === undefined) return false;
+    const upstreamHasNonterminalJob = upstreamJobs.some((upstreamJob) => !isTerminalJob(upstreamJob));
+    const upstreamHasSelectablePrimary = upstreamJobs.some(
+      (upstreamJob) =>
+        upstreamJob.status === 'succeeded' &&
+        upstreamJob.outputAssetIdsByRole.primary !== null &&
+        isSelectablePrimary(
+          ownValue(project.assets, upstreamJob.outputAssetIdsByRole.primary),
+          upstreamJob.shotId,
+          upstreamJob.purpose
+        )
+    );
+    for (const job of jobsByItemId.get(link.item.id) ?? []) {
+      if (job.requestSnapshot !== null || job.status === 'cancelled') continue;
+      const dependencyIsExhausted = !upstreamHasNonterminalJob && !upstreamHasSelectablePrimary;
+      if (
+        (job.error?.code === 'dependency_failed' && !dependencyIsExhausted) ||
+        (job.status === 'waiting_for_conditioning' && dependencyIsExhausted)
+      ) {
+        return false;
+      }
+    }
+  }
+
+  for (const shotId of inactiveShotIds) {
+    const shot = ownValue(project.shots, shotId);
+    if (shot === undefined || project.matchToShotId === shotId) return false;
+    if (shot.jobIds.some((jobId) => !isTerminalJob(ownValue(project.jobs, jobId)!))) return false;
+    if (
+      Object.values(project.frameExtractions).some(
+        (frame) => frame.shotId === shotId && (frame.status === 'pending' || frame.status === 'extracting')
+      )
+    ) {
+      return false;
+    }
+    const ownedAssets = new Set(shot.assetIds);
+    for (const job of Object.values(project.jobs)) {
+      if (isTerminalJob(job)) continue;
+      const conditioning = job.requestSnapshot?.conditioningInput;
+      if (
+        (conditioning?.kind === 'seed_still' && ownedAssets.has(conditioning.assetId)) ||
+        (conditioning?.kind === 'predecessor_frame' &&
+          (conditioning.predecessorShotId === shotId ||
+            ownedAssets.has(conditioning.takeAssetId) ||
+            ownedAssets.has(conditioning.frameAssetId)))
+      ) {
+        return false;
+      }
+      if (job.requestPlan.kind === 'after_take_selection') {
+        const upstream = itemLinks.get(job.requestPlan.dependency.upstreamItemId)?.item;
+        if (upstream?.shotId === shotId) return false;
+      }
+    }
+  }
+
+  for (const assetId of binnedTakeIds) {
+    const asset = ownValue(project.assets, assetId);
+    if (asset?.shotId === null || asset === undefined) return false;
+    const shot = ownValue(project.shots, asset.shotId);
+    const purpose = asset.mediaKind === 'image' ? 'seed_still' : asset.mediaKind === 'video' ? 'video_take' : null;
+    if (
+      shot === undefined ||
+      purpose === null ||
+      !isCanonicalPrimary(asset, shot.id, purpose) ||
+      shot.selectedTakeId === asset.id ||
+      shot.seedStillId === asset.id
+    ) {
+      return false;
+    }
+    if (
+      Object.values(project.frameExtractions).some(
+        (frame) => frame.takeAssetId === asset.id && (frame.status === 'pending' || frame.status === 'extracting')
+      ) ||
+      Object.values(project.jobs).some((job) => {
+        if (isTerminalJob(job)) return false;
+        const conditioning = job.requestSnapshot?.conditioningInput;
+        return (
+          (conditioning?.kind === 'seed_still' && conditioning.assetId === asset.id) ||
+          (conditioning?.kind === 'predecessor_frame' &&
+            (conditioning.takeAssetId === asset.id || conditioning.frameAssetId === asset.id))
+        );
+      })
+    ) {
+      return false;
+    }
+  }
+
+  return true;
 };

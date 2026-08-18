@@ -125,11 +125,8 @@ export {
   type CreativeStudioServiceV2Deps,
   type StudioGenerationReadinessV2,
   type StudioRouteCatalogV2,
-  type StudioShotGenerationChoiceV2,
   type StudioShotGenerationReadinessV2,
   type StudioShotReadinessIssueV2,
-  type StudioShotReferencePromptV2,
-  type StudioSubmitShotsRequestV2,
 } from './v2Service';
 export {
   createStudioDirectorCommandService,

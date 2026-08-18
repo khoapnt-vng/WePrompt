@@ -24,6 +24,7 @@ import {
   type StudioJob,
   type StudioManagedAssetRef,
   type StudioMutationBatchV2,
+  type StudioMutationReducerContextV2,
   type StudioOutputRole,
   type StudioProject,
   type StudioProjectListResultV2,
@@ -286,6 +287,15 @@ export class CreativeStudioStoreError extends Error {
   }
 }
 
+export class StudioProjectConfirmationError extends Error {
+  readonly code = 'expired_confirmation' as const;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'StudioProjectConfirmationError';
+  }
+}
+
 export type StudioReferenceRequestDismissAuthority = {
   expectedRevision: number;
   expectedRequests: StudioReferenceRequestAuthority[];
@@ -306,6 +316,40 @@ export type StudioProjectStoreLoadResultV2 =
   | { status: 'unsupported_prototype_schema'; projectId: string }
   | { status: 'not_found'; projectId: string };
 
+export type StudioDeepReadonly<T> = T extends (...args: never[]) => unknown
+  ? T
+  : T extends readonly (infer Item)[]
+    ? readonly StudioDeepReadonly<Item>[]
+    : T extends object
+      ? { readonly [Key in keyof T]: StudioDeepReadonly<T[Key]> }
+      : T;
+
+export type StudioReadonlyProjectV2 = StudioDeepReadonly<StudioProjectV2>;
+
+export type StudioProjectConfirmationCommitV2<TDispatch> = {
+  project: StudioProjectV2;
+  dispatch: TDispatch;
+};
+
+export type StudioProjectConfirmationInputV2<TRevalidation, TDispatch> = {
+  projectId: string;
+  expectedRevision: number;
+  expiresAt: string;
+  revalidate: (project: StudioReadonlyProjectV2) => Promise<TRevalidation>;
+  assertActive: () => void;
+  buildCommit: (
+    project: StudioProjectV2,
+    revalidation: StudioDeepReadonly<TRevalidation>,
+    confirmedAt: string
+  ) => StudioProjectConfirmationCommitV2<TDispatch>;
+  commitTag?: string;
+};
+
+export type StudioProjectConfirmationResultV2<TDispatch> = {
+  project: StudioProjectV2;
+  dispatch: StudioDeepReadonly<TDispatch>;
+};
+
 export type StudioProjectInventoryV2 = {
   supportedProjectIds: string[];
   unsupportedProjectIds: string[];
@@ -319,7 +363,14 @@ export type CreativeStudioStore = {
   listProjectsV2(): Promise<StudioProjectListResultV2>;
   createProjectV2(input: CreateStudioProjectInputV2): Promise<StudioProjectV2>;
   getProjectV2(projectId: string): Promise<StudioProjectStoreLoadResultV2>;
-  applyMutationBatchV2(batch: StudioMutationBatchV2, commitTag?: string): Promise<StudioMutationApplyResultV2>;
+  applyMutationBatchV2(
+    batch: StudioMutationBatchV2,
+    context: StudioMutationReducerContextV2,
+    commitTag?: string
+  ): Promise<StudioMutationApplyResultV2>;
+  confirmProjectV2<TRevalidation, TDispatch>(
+    input: StudioProjectConfirmationInputV2<TRevalidation, TDispatch>
+  ): Promise<StudioProjectConfirmationResultV2<TDispatch>>;
   updateProjectV2(
     projectId: string,
     update: (project: StudioProjectV2) => StudioProjectV2,
@@ -479,6 +530,73 @@ const isCanonicalIsoTimestamp = (value: unknown): value is string => {
   if (!isString(value) || value.length !== 24) return false;
   const timestamp = Date.parse(value);
   return Number.isFinite(timestamp) && new Date(timestamp).toISOString() === value;
+};
+
+const isStudioMutationReducerContextV2 = (value: unknown): value is StudioMutationReducerContextV2 => {
+  if (!isRecord(value)) return false;
+  const keys = Reflect.ownKeys(value);
+  return (
+    keys.length === 2 &&
+    keys.every((key) => key === 'mutationId' || key === 'capturedAt') &&
+    isSafeIdV2(value.mutationId) &&
+    isCanonicalIsoTimestamp(value.capturedAt)
+  );
+};
+
+const cloneConfirmationValue = <T>(value: T, label: string): T => {
+  try {
+    return structuredClone(value);
+  } catch {
+    throw new CreativeStudioStoreError('invalid_payload', `${label} must be structured-cloneable`);
+  }
+};
+
+const deepFreezeConfirmationValue = <T>(value: T, label: string): StudioDeepReadonly<T> => {
+  const pending: object[] = [];
+  const seen = new WeakSet<object>();
+  if ((typeof value === 'object' && value !== null) || typeof value === 'function') pending.push(value as object);
+
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    if (seen.has(current)) continue;
+    seen.add(current);
+
+    const isArray = Array.isArray(current);
+    const prototype = Reflect.getPrototypeOf(current);
+    if (
+      (!isArray && prototype !== Object.prototype && prototype !== null) ||
+      (isArray && prototype !== Array.prototype)
+    ) {
+      throw new CreativeStudioStoreError('invalid_payload', `${label} must contain only plain data`);
+    }
+    for (const key of Reflect.ownKeys(current)) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(current, key);
+      if (descriptor === undefined || !Object.hasOwn(descriptor, 'value')) {
+        throw new CreativeStudioStoreError('invalid_payload', `${label} must contain only data properties`);
+      }
+      const child = descriptor.value as unknown;
+      if ((typeof child === 'object' && child !== null) || typeof child === 'function') pending.push(child as object);
+    }
+    Object.freeze(current);
+  }
+
+  return value as StudioDeepReadonly<T>;
+};
+
+const cloneAndFreezeConfirmationValue = <T>(value: T, label: string): StudioDeepReadonly<T> =>
+  deepFreezeConfirmationValue(cloneConfirmationValue(value, label), label);
+
+const assertSynchronousConfirmationResult = (value: unknown, label: string): void => {
+  if ((typeof value !== 'object' || value === null) && typeof value !== 'function') return;
+  let then: unknown;
+  try {
+    then = Reflect.get(value, 'then');
+  } catch {
+    throw new CreativeStudioStoreError('invalid_payload', `${label} must return synchronously`);
+  }
+  if (typeof then === 'function') {
+    throw new CreativeStudioStoreError('invalid_payload', `${label} must return synchronously`);
+  }
 };
 
 const isSafeAssetFileName = (value: unknown): value is string =>
@@ -3098,6 +3216,98 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     return next;
   };
 
+  const confirmProjectV2InsideQueue = async <TRevalidation, TDispatch>(
+    root: string,
+    input: StudioProjectConfirmationInputV2<TRevalidation, TDispatch>
+  ): Promise<StudioProjectConfirmationResultV2<TDispatch>> => {
+    const inspected = await inspectProjectFileV2(root, input.projectId);
+    if (inspected.status === 'not_found') {
+      throw new CreativeStudioStoreError('not_found', 'Studio project not found');
+    }
+    if (inspected.status === 'unsupported_prototype_schema') {
+      throw new CreativeStudioStoreError('unsupported_prototype_schema', 'Unsupported prototype Studio schema');
+    }
+    if (inspected.status === 'malformed_v2') throw inspected.error;
+    const current = inspected.project;
+    if (current.revision !== input.expectedRevision) {
+      throw new CreativeStudioStoreError('stale_project', 'Studio project has changed');
+    }
+
+    await summariesFileV2(root);
+    const file = await projectFile(root, input.projectId, false);
+    if (file === null) {
+      throw new CreativeStudioStoreError('storage_error', 'Creative Studio project storage is unavailable');
+    }
+
+    const snapshot = cloneAndFreezeConfirmationValue(current, 'Studio confirmation project snapshot');
+    const rawRevalidation = await input.revalidate(snapshot);
+    const revalidation = cloneAndFreezeConfirmationValue(rawRevalidation, 'Studio confirmation revalidation');
+
+    const activeAfterRevalidation = (input.assertActive as () => unknown)();
+    assertSynchronousConfirmationResult(activeAfterRevalidation, 'Studio confirmation active-session check');
+
+    const confirmedAt = now();
+    if (!isCanonicalIsoTimestamp(confirmedAt)) {
+      throw new CreativeStudioStoreError('storage_error', 'Studio confirmation clock is invalid');
+    }
+    if (Date.parse(confirmedAt) >= Date.parse(input.expiresAt)) {
+      throw new StudioProjectConfirmationError('Studio confirmation has expired');
+    }
+
+    const mutableProject = cloneConfirmationValue(current, 'Studio confirmation commit project');
+    const rawCommit = input.buildCommit(mutableProject, revalidation, confirmedAt) as unknown;
+    assertSynchronousConfirmationResult(rawCommit, 'Studio confirmation commit builder');
+    if (!isRecord(rawCommit)) {
+      throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio confirmation commit');
+    }
+    const projectDescriptor = Reflect.getOwnPropertyDescriptor(rawCommit, 'project');
+    const dispatchDescriptor = Reflect.getOwnPropertyDescriptor(rawCommit, 'dispatch');
+    if (
+      projectDescriptor === undefined ||
+      !Object.hasOwn(projectDescriptor, 'value') ||
+      dispatchDescriptor === undefined ||
+      !Object.hasOwn(dispatchDescriptor, 'value')
+    ) {
+      throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio confirmation commit');
+    }
+    const builtProject = projectDescriptor.value as unknown;
+    if (!isRecord(builtProject) || builtProject.id !== current.id || builtProject.createdAt !== current.createdAt) {
+      throw new CreativeStudioStoreError('invalid_payload', 'Studio project identity cannot change');
+    }
+    const candidate: StudioProjectV2 = {
+      ...(builtProject as StudioProjectV2),
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      revision: current.revision + 1,
+      updatedAt: confirmedAt,
+    };
+    if (!validateStudioProjectV2(candidate)) {
+      throw new CreativeStudioStoreError('invalid_payload', 'Invalid schema-2 Studio project payload');
+    }
+    const next = cloneConfirmationValue(candidate, 'Studio confirmation committed project');
+    if (!validateStudioProjectV2(next)) {
+      throw new CreativeStudioStoreError('invalid_payload', 'Invalid schema-2 Studio project payload');
+    }
+    const dispatch = cloneAndFreezeConfirmationValue(
+      dispatchDescriptor.value as TDispatch,
+      'Studio confirmation dispatch'
+    );
+
+    const activeBeforePersistence = (input.assertActive as () => unknown)();
+    assertSynchronousConfirmationResult(activeBeforePersistence, 'Studio confirmation active-session check');
+    await writeJsonAtomic(root, file, next);
+    observeProjectCommit(
+      Object.freeze({
+        projectId: current.id,
+        previousRevision: current.revision,
+        committedRevision: next.revision,
+        committedAt: next.updatedAt,
+        commitTag: input.commitTag ?? null,
+      })
+    );
+    await repairSummaryV2AfterCommit();
+    return { project: next, dispatch };
+  };
+
   const listProposalsThroughQueue = (projectId: string): Promise<StudioProposal[]> =>
     enqueue(projectId, async (): Promise<StudioProposal[]> => {
       const root = await canonicalRoot();
@@ -3173,13 +3383,24 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       return inspected;
     },
 
-    async applyMutationBatchV2(batch: StudioMutationBatchV2, commitTag?: string): Promise<StudioMutationApplyResultV2> {
+    async applyMutationBatchV2(
+      batch: StudioMutationBatchV2,
+      context: StudioMutationReducerContextV2,
+      commitTag?: string
+    ): Promise<StudioMutationApplyResultV2> {
       if (!isRecord(batch) || !isSafeIdV2(batch.projectId)) {
         throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio project id');
       }
       if (!isIntegerInRange(batch.expectedRevision, 1, Number.MAX_SAFE_INTEGER)) {
         throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio project revision');
       }
+      if (!isStudioMutationReducerContextV2(context)) {
+        throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio mutation reducer context');
+      }
+      const reducerContext = Object.freeze({
+        mutationId: context.mutationId,
+        capturedAt: context.capturedAt,
+      });
       return enqueue(batch.projectId, async () => {
         const root = await existingCanonicalRootV2();
         if (root === null) throw new CreativeStudioStoreError('not_found', 'Studio project not found');
@@ -3196,7 +3417,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
           throw new CreativeStudioStoreError('stale_project', 'Studio project has changed');
         }
         await summariesFileV2(root);
-        const applied = applyStudioMutationBatchV2(current, batch);
+        const applied = applyStudioMutationBatchV2(current, batch, reducerContext);
         const committed: StudioProjectV2 = {
           ...applied.project,
           revision: current.revision + 1,
@@ -3221,6 +3442,37 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
         );
         await repairSummaryV2AfterCommit();
         return { ...applied, project: committed };
+      });
+    },
+
+    async confirmProjectV2<TRevalidation, TDispatch>(
+      input: StudioProjectConfirmationInputV2<TRevalidation, TDispatch>
+    ): Promise<StudioProjectConfirmationResultV2<TDispatch>> {
+      if (
+        !isRecord(input) ||
+        !isSafeIdV2(input.projectId) ||
+        !isIntegerInRange(input.expectedRevision, 1, Number.MAX_SAFE_INTEGER) ||
+        !isCanonicalIsoTimestamp(input.expiresAt) ||
+        typeof input.revalidate !== 'function' ||
+        typeof input.assertActive !== 'function' ||
+        typeof input.buildCommit !== 'function' ||
+        (input.commitTag !== undefined && typeof input.commitTag !== 'string')
+      ) {
+        throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio confirmation input');
+      }
+      const confirmationInput = Object.freeze({
+        projectId: input.projectId,
+        expectedRevision: input.expectedRevision,
+        expiresAt: input.expiresAt,
+        revalidate: input.revalidate,
+        assertActive: input.assertActive,
+        buildCommit: input.buildCommit,
+        commitTag: input.commitTag,
+      });
+      return enqueue(confirmationInput.projectId, async () => {
+        const root = await existingCanonicalRootV2();
+        if (root === null) throw new CreativeStudioStoreError('not_found', 'Studio project not found');
+        return confirmProjectV2InsideQueue(root, confirmationInput);
       });
     },
 

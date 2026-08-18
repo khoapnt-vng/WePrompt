@@ -165,16 +165,34 @@ export const STUDIO_PROJECT_SCHEMA_VERSION = 2 as const;
 export const STUDIO_MAX_BEATS = 24;
 export const STUDIO_MAX_SHOTS_PER_BEAT = 8;
 export const STUDIO_MAX_SHOTS_PER_PROJECT = 96;
-export const STUDIO_MAX_BIN_ITEMS = 120;
 export const STUDIO_MAX_BIN_BEAT_ITEMS = 24;
+export const STUDIO_MAX_BIN_SHOT_ITEMS = 96;
 export const STUDIO_MAX_BIN_TAKE_ITEMS = 96;
+export const STUDIO_MAX_LINE_HISTORY_PER_BEAT = 20;
+export const STUDIO_MAX_UNDO_ENTRIES = 20;
+export const STUDIO_MAX_UNDO_PATCHES_PER_ENTRY = 2 + STUDIO_MAX_BEATS + STUDIO_MAX_SHOTS_PER_PROJECT;
+export const STUDIO_MAX_UNDO_LABEL_LENGTH = 256;
+export const STUDIO_MIN_SHOT_SECONDS = 4;
+export const STUDIO_MAX_SHOT_SECONDS = 15;
+export const STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION = 4;
+export const STUDIO_MAX_GENERATION_PROMPT_LENGTH = 32 * 1024;
+export const STUDIO_LOOK_SOFT_WORD_LIMIT = 25;
 export const STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST = 24;
+export const STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST = 2 * STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST;
+export const STUDIO_PREPARED_QUOTE_TTL_SECONDS = 5 * 60;
+export const STUDIO_MAX_PREPARED_QUOTE_SESSIONS_PER_PROJECT = 4;
+export const STUDIO_MAX_PREPARED_QUOTE_SESSIONS_GLOBAL = 16;
+export const STUDIO_MAX_PREPARED_QUOTE_SESSION_BYTES = 8 * 1024 * 1024;
+export const STUDIO_MAX_PREPARED_QUOTE_CACHE_BYTES_PER_PROJECT = 16 * 1024 * 1024;
+export const STUDIO_MAX_PREPARED_QUOTE_CACHE_BYTES_GLOBAL = 64 * 1024 * 1024;
+export const STUDIO_MAX_EXPORTS_PER_SHAPE = 5;
+export const STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT = STUDIO_MAX_SHOTS_PER_PROJECT + 8;
+export const STUDIO_MAX_EXPORT_DIRECTORY_DEPTH = 4;
+export const STUDIO_BED_FADE_OUT_SECONDS = 2;
 export const STUDIO_MAX_REFERENCE_REQUEST_SHOTS = 24;
 export const STUDIO_MAX_CUT_PLACEMENT_CLIPS = 96;
 export const STUDIO_MAX_DIRTY_SHOTS_REPORTED = 96;
 export const STUDIO_MAX_MCP_AVAILABLE_TAKE_IDS_PER_SHOT = 24;
-export const STUDIO_MIN_SHOT_SECONDS = 4;
-export const STUDIO_MAX_SHOT_SECONDS = 15;
 export const STUDIO_MAX_MUTATION_OPERATIONS = 32;
 
 /**
@@ -216,10 +234,6 @@ export type StudioReferenceInputSnapshot = {
   conditioningReferenceAssetIds: string[];
   aspectRatio: StudioAspectRatio;
   resolution: StudioResolution;
-};
-
-export type StudioReferenceInputSnapshotV2 = Omit<StudioReferenceInputSnapshot, 'sourceVisualPrompt'> & {
-  sourceLook: string;
 };
 
 export type StudioJob = {
@@ -419,8 +433,22 @@ export type StudioDirectorCommandReceiptV1 =
   | StudioDirectorExpiredReceiptV1
   | StudioDirectorIndeterminateReceiptV1;
 
-/** Schema-2 Director commands use the same free mutation vocabulary as the renderer. */
-export type StudioDirectorOperationV2 = StudioMutationOperationV2;
+/** Schema-2 Director commands expose only the current explicitly supported edit capability. */
+export type StudioDirectorOperationV2 = Extract<
+  StudioMutationOperationV2,
+  {
+    kind:
+      | 'set_brief'
+      | 'add_beat'
+      | 'edit_beat'
+      | 'reorder_beats'
+      | 'add_shot'
+      | 'edit_shot'
+      | 'delete_shot'
+      | 'reorder_shots'
+      | 'reorder_bin';
+  }
+>;
 
 export type StudioDirectorCommandRecordV2 = {
   schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
@@ -611,56 +639,743 @@ export type StudioRendererProject = Omit<StudioProject, 'jobs' | 'routing'> & {
   routing: StudioRendererRoutingPreferences;
 };
 
-export type StudioAssetV2 = Omit<StudioAsset, 'sceneId' | 'sourceVisualPrompt'> & {
-  shotId: string | null;
-  sourceLook?: string;
-};
-
-export type StudioJobV2 = Omit<StudioJob, 'sceneId' | 'referenceInputSnapshot'> & {
-  shotId: string;
-  referenceInputSnapshot?: StudioReferenceInputSnapshotV2;
-};
-
-export type StudioRendererJobV2 = Omit<
-  StudioJobV2,
-  'provider' | 'idempotencyKey' | 'providerJobId' | 'remoteStartedAt' | 'cancellationPolicy' | 'referenceInputSnapshot'
-> & {
-  provider: StudioRendererMediaModelRef;
-  canCancel: boolean;
-  canRetryDownload: boolean;
-};
-
 export type StudioBeat = {
   id: string;
   title: string;
   action: string;
   look: string;
+  actionRevision: number;
+  targetSeconds: number | null;
   shotOrder: string[];
+  lineHistory: StudioLineHistoryEntry[];
+};
+
+export type StudioLineHistoryEntry = {
+  id: string;
+  shotOrdinal: number;
+  text: string;
+  capturedAt: string;
 };
 
 export type StudioShot = {
   id: string;
   line: string;
+  derivation: 'derived' | 'detached';
+  derivedFromActionRevision: number | null;
   narration: string;
   onScreenText: string;
-  mediaKind: StudioMediaKind;
   durationSeconds: number;
-  referenceAssetId: string | null;
+  trimInSeconds: number | null;
+  trimOutSeconds: number | null;
+  chainBreak: 'none' | 'hard_cut';
+  seedStillId: string | null;
   selectedTakeId: string | null;
   assetIds: string[];
   jobIds: string[];
 };
 
-export type StudioBinItem = { kind: 'beat'; beatId: string } | { kind: 'take'; assetId: string };
+export type StudioBinItem =
+  | { kind: 'beat'; beatId: string; reason: 'lifted' | 'alternate' }
+  | { kind: 'shot'; beatId: string; shotId: string; reason: 'lifted' }
+  | { kind: 'take'; assetId: string; reason: 'lifted' | 'alternate' };
 
-export type StudioEditableBeat = Pick<StudioBeat, 'title' | 'action' | 'look'>;
+export type StudioProposedShot = {
+  shotId: string;
+  line: string;
+  narration: string;
+  onScreenText: string;
+  durationSeconds: number;
+  chainBreak: 'none' | 'hard_cut';
+};
 
-export type StudioEditableShot = Pick<
-  StudioShot,
-  'line' | 'narration' | 'onScreenText' | 'mediaKind' | 'durationSeconds' | 'referenceAssetId'
+export type StudioFixedShotReasonV2 =
+  | 'owned_asset'
+  | 'owned_job'
+  | 'selected_take'
+  | 'seed_still'
+  | 'conditioning_frame'
+  | 'conditioning_input'
+  | 'match_to'
+  | 'narration'
+  | 'on_screen_text';
+
+export type StudioFixedShotReviewV2 = {
+  shotId: string;
+  reasons: StudioFixedShotReasonV2[];
+};
+
+export type StudioCoverageApplyResult = {
+  beatId: string;
+  createdShotIds: string[];
+  retainedShotIds: string[];
+  removedShotIds: string[];
+  fixedShotIds: string[];
+};
+
+export type StudioPlanningShotBoundaryV2 = {
+  shotId: string;
+  startSeconds: number;
+  endSeconds: number;
+};
+
+export type StudioConditioningInputSnapshot =
+  | { kind: 'seed_still'; assetId: string }
+  | {
+      kind: 'predecessor_frame';
+      predecessorShotId: string;
+      takeAssetId: string;
+      frameAssetId: string;
+      endpointSeconds: number;
+    };
+
+export type StudioGenerationReferenceInputSnapshot = {
+  assetId: string;
+  sha256: string;
+};
+
+export type StudioGenerationRequestSnapshot = {
+  prompt: string;
+  aspectRatio: StudioAspectRatio;
+  resolution: StudioResolution;
+  durationSeconds: number;
+  referenceInput: StudioGenerationReferenceInputSnapshot | null;
+  conditioningInput: StudioConditioningInputSnapshot | null;
+};
+
+export type StudioAuthorizedConditioningDependency =
+  | { kind: 'authorized_seed'; upstreamItemId: string; shotId: string }
+  | {
+      kind: 'authorized_predecessor';
+      upstreamItemId: string;
+      predecessorShotId: string;
+    };
+
+export type StudioGenerationRequestTemplate = Omit<StudioGenerationRequestSnapshot, 'conditioningInput'>;
+
+export type StudioGenerationRequestPlan =
+  | { kind: 'resolved'; snapshot: StudioGenerationRequestSnapshot }
+  | {
+      kind: 'after_take_selection';
+      template: StudioGenerationRequestTemplate;
+      dependency: StudioAuthorizedConditioningDependency;
+    };
+
+export type StudioFrameExtraction = {
+  id: string;
+  shotId: string;
+  takeAssetId: string;
+  endpointSeconds: number;
+  frameAssetId: string | null;
+  status: 'pending' | 'extracting' | 'ready' | 'failed';
+  errorCode: 'decode_failed' | 'source_missing' | 'storage_error' | null;
+};
+
+export type StudioSpendPolicy = {
+  currency: string;
+  maxPerBatchMinorUnits: number;
+};
+
+export type StudioQuotedGeneration = {
+  id: string;
+  shotId: string;
+  purpose: 'seed_still' | 'video_take';
+  routeId: string;
+  generationCount: number;
+  requestPlan: StudioGenerationRequestPlan;
+  rateUnit: 'generation' | 'second';
+  rateMinorUnits: number;
+};
+
+export type StudioSubmissionQuoteCore = {
+  projectId: string;
+  projectRevision: number;
+  originReferenceHandoffId: string | null;
+  rateCardDigest: string;
+  currency: string;
+  baseItems: StudioQuotedGeneration[];
+  cascadeItems: StudioQuotedGeneration[];
+  lowerMinorUnits: number;
+  upperMinorUnits: number;
+};
+
+export type StudioSubmissionQuote = StudioSubmissionQuoteCore & {
+  id: string;
+  expiresAt: string;
+};
+
+export type StudioPrepareGenerationChoiceV2 = {
+  shotId: string;
+  purpose: 'seed_still' | 'video_take';
+  generationCount: number;
+  referenceAssetId: string | null;
+};
+
+export type StudioPrepareSubmissionRequestV2 = {
+  projectId: string;
+  expectedRevision: number;
+  originReferenceHandoffId: string | null;
+  baseChoices: StudioPrepareGenerationChoiceV2[];
+  cascadeChoices: StudioPrepareGenerationChoiceV2[];
+};
+
+export type StudioConfirmSubmissionRequestV2 = {
+  projectId: string;
+  quoteId: string;
+  expectedRevision: number;
+};
+
+export type StudioConfirmSubmissionResultV2 = {
+  projectId: string;
+  projectRevision: number;
+};
+
+export type StudioSubmissionCacheErrorCodeV2 =
+  | 'quote_not_found'
+  | 'quote_in_use'
+  | 'quote_cache_full'
+  | 'quote_too_large';
+
+export type StudioPreparedSubmissionOptionsV2 = {
+  baseOnly: StudioSubmissionQuote;
+  withCascade: StudioSubmissionQuote | null;
+};
+
+export type StudioRendererQuotedGenerationV2 = {
+  shotId: string;
+  purpose: 'seed_still' | 'video_take';
+  route: StudioRendererMediaModelRef;
+  generationCount: number;
+  durationSeconds: number | null;
+  oneGenerationMinorUnits: number;
+  requestedTotalMinorUnits: number;
+  waitsForTakeSelection: boolean;
+};
+
+export type StudioRendererBudgetVerdictV2 =
+  | { kind: 'no_policy' }
+  | { kind: 'within_cap'; policyCurrency: string; maxPerBatchMinorUnits: number }
+  | { kind: 'over_cap'; policyCurrency: string; maxPerBatchMinorUnits: number }
+  | { kind: 'currency_mismatch'; policyCurrency: string; maxPerBatchMinorUnits: number };
+
+export type StudioRendererSubmissionQuoteV2 = {
+  id: string;
+  projectId: string;
+  projectRevision: number;
+  expiresAt: string;
+  currency: string;
+  baseItems: StudioRendererQuotedGenerationV2[];
+  cascadeItems: StudioRendererQuotedGenerationV2[];
+  lowerMinorUnits: number;
+  upperMinorUnits: number;
+  budget: StudioRendererBudgetVerdictV2;
+};
+
+export type StudioRendererPreparedSubmissionOptionsV2 = {
+  baseOnly: StudioRendererSubmissionQuoteV2;
+  withCascade: StudioRendererSubmissionQuoteV2 | null;
+};
+
+export type StudioProposalCommitAttributionV2 = {
+  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  proposalId: string;
+  projectId: string;
+  baseRevision: number;
+  appliedRevision: number;
+  beforeProjectSha256: string;
+  afterProjectSha256: string;
+  createdBeatIds: string[];
+  createdShotIds: string[];
+  decidedAt: string;
+};
+
+export type StudioReferenceRequestDecisionV2 = {
+  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  requestId: string;
+  projectId: string;
+  decidedAt: string;
+  outcome:
+    | { kind: 'rejected' }
+    | { kind: 'expired' }
+    | { kind: 'imported_reference'; assetId: string; projectRevision: number }
+    | { kind: 'generation_gate'; handoffId: string; shotIds: string[] };
+};
+
+export type StudioReferenceGenerationHandoffReceiptV2 = {
+  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  handoffId: string;
+  requestId: string;
+  completedAt: string;
+  result: { kind: 'dismissed' } | { kind: 'confirmed'; authorizationId: string };
+};
+
+export type StudioRendererReferenceGenerationHandoffV2 = {
+  handoffId: string;
+  requestId: string;
+  shotIds: string[];
+  decidedAt: string;
+  status: 'open' | 'dismissed' | 'confirmed';
+  completedAt: string | null;
+};
+
+export type StudioDismissReferenceGenerationHandoffRequestV2 = {
+  projectId: string;
+  expectedRevision: number;
+  handoffId: string;
+};
+
+export type StudioDismissReferenceGenerationHandoffResultV2 = {
+  status: 'dismissed';
+  completedAt: string;
+};
+
+export type StudioCascadeProgressV2 = {
+  dependentShotId: string;
+  upstreamShotId: string;
+  eligiblePrimaryAssetIds: string[];
+  canRetryConditioningFrame: boolean;
+  canCancelWaiting: boolean;
+  waitingReason:
+    | 'upstream_running'
+    | 'choose_seed'
+    | 'choose_take'
+    | 'conditioning_frame'
+    | 'conditioning_failed'
+    | 'dependency_failed'
+    | 'cancelled';
+};
+
+export type StudioCascadeBarrierActionRequestV2 = {
+  projectId: string;
+  expectedRevision: number;
+  dependentShotId: string;
+};
+
+export type StudioParkBeatRequestV2 = {
+  projectId: string;
+  expectedRevision: number;
+  beatId: string;
+};
+
+export type StudioRestoreBeatRequestV2 = StudioParkBeatRequestV2 & { beforeBeatId: string | null };
+
+export type StudioParkShotRequestV2 = {
+  projectId: string;
+  expectedRevision: number;
+  shotId: string;
+};
+
+export type StudioRestoreShotRequestV2 = StudioParkShotRequestV2 & { beforeShotId: string | null };
+
+export type StudioTakeActionRequestV2 = {
+  projectId: string;
+  expectedRevision: number;
+  shotId: string;
+  assetId: string;
+};
+
+export type StudioReorderBinRequestV2 = {
+  projectId: string;
+  expectedRevision: number;
+  bin: StudioBinItem[];
+};
+
+export type StudioImportSeedStillRequestV2 = {
+  projectId: string;
+  expectedRevision: number;
+  shotId: string;
+};
+
+export type StudioImportBedAudioRequestV2 = {
+  projectId: string;
+  expectedRevision: number;
+};
+
+export type StudioDetachBedAudioRequestV2 = StudioImportBedAudioRequestV2 & { assetId: string };
+export type StudioSetBedRequestV2 = StudioImportBedAudioRequestV2 & { assetId: string | null };
+export type StudioSetMatchToRequestV2 = StudioImportBedAudioRequestV2 & { shotId: string | null };
+
+export type StudioImportManagedMediaResultV2 =
+  | { status: 'cancelled' }
+  | { status: 'imported'; assetId: string; projectRevision: number };
+
+export type StudioDetachManagedMediaResultV2 = {
+  status: 'detached';
+  projectRevision: number;
+};
+
+export type StudioEditProjectSettingsRequestV2 = {
+  projectId: string;
+  expectedRevision: number;
+  changes: StudioEditableProjectSettingsChanges;
+};
+
+export type StudioSetRulesRequestV2 = {
+  projectId: string;
+  expectedRevision: number;
+  rules: StudioBriefRuleDraft[];
+};
+
+export type StudioRendererAuthoringOperationV2 = Extract<
+  StudioMutationOperationV2,
+  {
+    kind:
+      | 'set_brief'
+      | 'add_beat'
+      | 'edit_beat'
+      | 'reorder_beats'
+      | 'add_binned_beat'
+      | 'add_shot'
+      | 'edit_shot'
+      | 'delete_shot'
+      | 'reorder_shots'
+      | 'set_hard_cut'
+      | 'set_seed_still'
+      | 'trim_shot'
+      | 'redetach_line'
+      | 'restore_line'
+      | 'set_routes'
+      | 'set_spend_policy';
+  }
 >;
 
-type StudioNonEmptyPartial<T> = {
+export type StudioApplyAuthoringBatchRequestV2 = {
+  projectId: string;
+  expectedRevision: number;
+  operations: StudioRendererAuthoringOperationV2[];
+};
+
+export type StudioRendererProjectCommitResultV2 = {
+  projectId: string;
+  projectRevision: number;
+  createdBeatIds: string[];
+  createdShotIds: string[];
+};
+
+export type StudioUndoLastRequestV2 = {
+  projectId: string;
+  expectedRevision: number;
+  entryId: string;
+};
+
+export type StudioRendererChainConditioningFailureV2 = {
+  dependentShotId: string;
+  reason: 'conditioning_failed';
+  canRetry: true;
+};
+
+export type StudioRendererChainStatusV2 = {
+  projectId: string;
+  projectRevision: number;
+  conditioningFailures: StudioRendererChainConditioningFailureV2[];
+};
+
+export type StudioGetChainStatusRequestV2 = { projectId: string };
+
+export type StudioRendererDirtyShotV2 = {
+  shotId: string;
+  causes: ('continuity_stale' | 'generation_out_of_date')[];
+};
+
+export type StudioRendererParkBlockerCodeV2 =
+  | 'current_match_to'
+  | 'own_nonterminal_job'
+  | 'own_pending_frame'
+  | 'downstream_nonterminal_job'
+  | 'downstream_pending_frame'
+  | 'waiting_authorization_dependency'
+  | 'bound_nonterminal_request'
+  | 'current_selected_take'
+  | 'current_seed_still'
+  | 'nonterminal_conditioning_use'
+  | 'take_bin_capacity_reached'
+  | 'beat_shot_capacity_reached';
+
+export type StudioRendererParkBlockerV2 = {
+  shotId: string | null;
+  code: StudioRendererParkBlockerCodeV2;
+};
+
+export type StudioRendererParkEligibilityV2 = {
+  subject: 'beat' | 'shot' | 'take';
+  action: 'park' | 'restore';
+  beatId: string;
+  shotId: string | null;
+  assetId: string | null;
+  allowed: boolean;
+  blockers: StudioRendererParkBlockerV2[];
+};
+
+export type StudioGetWorkspaceStatusRequestV2 = { projectId: string };
+
+export type StudioRendererWorkspaceStatusV2 = {
+  projectId: string;
+  projectRevision: number;
+  undoTop: StudioRendererUndoTopV2 | null;
+  dirtyShots: StudioRendererDirtyShotV2[];
+  cascadeProgress: StudioCascadeProgressV2[];
+  parkEligibility: StudioRendererParkEligibilityV2[];
+};
+
+export type StudioSpendAuthorization = StudioSubmissionQuote & {
+  confirmedAt: string;
+  providerBindings: { itemId: string; provider: StudioProviderRef }[];
+  idempotencyKeys: { itemId: string; generationIndex: number; key: string }[];
+};
+
+export type StudioSpendReceipt = {
+  authorizationId: string;
+  itemId: string;
+  jobId: string;
+  purpose: 'seed_still' | 'video_take';
+  routeId: string;
+  currency: string;
+  rateUnit: 'generation' | 'second';
+  rateMinorUnits: number;
+  durationSeconds: number | null;
+  generationIndex: number;
+  generationCount: number;
+  totalMinorUnits: number;
+};
+
+export type StudioMediaKindV2 = 'image' | 'video' | 'audio';
+
+export type StudioManagedAssetRefV2 = {
+  collection: 'assets' | 'imports' | 'thumbnails' | 'conditioningFrames';
+  fileName: string;
+};
+
+export type StudioAssetV2 = Omit<
+  StudioAsset,
+  | 'sceneId'
+  | 'mediaKind'
+  | 'managedAsset'
+  | 'sourceVisualPrompt'
+  | 'sourceReferenceAssetIds'
+  | 'sourceAspectRatio'
+  | 'sourceResolution'
+> & {
+  shotId: string | null;
+  mediaKind: StudioMediaKindV2;
+  managedAsset: StudioManagedAssetRefV2;
+  sourceLook?: string;
+};
+
+export type StudioExportShapeV2 = 'editor_folder' | 'still' | 'script';
+
+export type StudioManagedExportRefV2 = {
+  collection: 'exports';
+  fileName: string;
+};
+
+export type StudioExportArtifactV2 = {
+  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  id: string;
+  projectId: string;
+  sourceRevision: number;
+  shape: StudioExportShapeV2;
+  payloadKind: 'directory' | 'file';
+  managedExport: StudioManagedExportRefV2;
+  byteSize: number;
+  fileCount: number;
+  manifestSha256: string;
+  createdAt: string;
+};
+
+export type StudioExportCatalogV2 = {
+  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  projectId: string;
+  revision: number;
+  artifacts: StudioExportArtifactV2[];
+};
+
+export type StudioRendererExportArtifactV2 = Pick<
+  StudioExportArtifactV2,
+  'id' | 'sourceRevision' | 'shape' | 'byteSize' | 'fileCount' | 'createdAt'
+>;
+
+export type StudioRendererExportCatalogV2 = {
+  revision: number;
+  artifacts: StudioRendererExportArtifactV2[];
+};
+
+export type StudioExportArtifactRequestV2 = {
+  projectId: string;
+  expectedCatalogRevision: number;
+  artifactId: string;
+};
+
+export type StudioCopyExportResultV2 = { status: 'cancelled' } | { status: 'copied' };
+export type StudioRevealExportResultV2 = { status: 'revealed' };
+
+export type StudioCreateExportRequestV2 =
+  | { projectId: string; expectedRevision: number; expectedCatalogRevision: number; shape: 'editor_folder' }
+  | {
+      projectId: string;
+      expectedRevision: number;
+      expectedCatalogRevision: number;
+      shape: 'still';
+      shotId: string;
+    }
+  | { projectId: string; expectedRevision: number; expectedCatalogRevision: number; shape: 'script' };
+
+export type StudioListExportsRequestV2 = { projectId: string };
+
+export type StudioEditorFolderTimelineEntryV2 =
+  | {
+      kind: 'shot';
+      shotId: string;
+      takeAssetId: string;
+      relativePath: string;
+      timelineStartSeconds: number;
+      sourceInSeconds: number;
+      sourceOutSeconds: number;
+      durationSeconds: number;
+      chainBreak: 'none' | 'hard_cut';
+    }
+  | {
+      kind: 'slate';
+      relativePath: 'media/slate.png';
+      timelineStartSeconds: number;
+      durationSeconds: number;
+    };
+
+export type StudioEditorFolderTimelineBeatV2 = {
+  beatId: string;
+  title: string;
+  timelineStartSeconds: number;
+  durationSeconds: number;
+  entries: StudioEditorFolderTimelineEntryV2[];
+};
+
+export type StudioEditorFolderTimelineV2 = {
+  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  projectId: string;
+  sourceRevision: number;
+  name: string;
+  aspectRatio: StudioAspectRatio;
+  resolution: StudioResolution;
+  durationSeconds: number;
+  beats: StudioEditorFolderTimelineBeatV2[];
+  bed: null | {
+    assetId: string;
+    relativePath: string;
+    sourceInSeconds: 0;
+    sourceOutSeconds: number;
+    fadeOutStartSeconds: number;
+    fadeOutEndSeconds: number;
+  };
+};
+
+export type StudioJobOutputAssetIdsByRoleV2 = {
+  primary: string | null;
+  poster: string | null;
+};
+
+export type StudioJobStatusV2 = StudioJobStatus | 'waiting_for_conditioning';
+
+export type StudioJobErrorV2 = Omit<StudioJobError, 'code'> & {
+  code: StudioJobErrorCode | 'dependency_failed';
+};
+
+export type StudioJobV2 = Omit<StudioJob, 'sceneId' | 'status' | 'error' | 'outputRole' | 'referenceInputSnapshot'> & {
+  shotId: string;
+  status: StudioJobStatusV2;
+  error: StudioJobErrorV2 | null;
+  purpose: 'seed_still' | 'video_take';
+  authorizationId: string;
+  authorizationItemId: string;
+  generationIndex: number;
+  requestPlan: StudioGenerationRequestPlan;
+  requestSnapshot: StudioGenerationRequestSnapshot | null;
+  spendReceipt: StudioSpendReceipt | null;
+  outputAssetIdsByRole: StudioJobOutputAssetIdsByRoleV2;
+};
+
+export type StudioRendererSpendReceiptV2 = Pick<
+  StudioSpendReceipt,
+  | 'purpose'
+  | 'routeId'
+  | 'currency'
+  | 'rateUnit'
+  | 'rateMinorUnits'
+  | 'durationSeconds'
+  | 'generationIndex'
+  | 'generationCount'
+  | 'totalMinorUnits'
+>;
+
+export type StudioRendererUndoTopV2 = {
+  entryId: string;
+  label: string;
+  sourceRevision: number;
+};
+
+export type StudioRendererJobV2 = Omit<
+  StudioJobV2,
+  | 'provider'
+  | 'idempotencyKey'
+  | 'providerJobId'
+  | 'remoteStartedAt'
+  | 'cancellationPolicy'
+  | 'authorizationId'
+  | 'authorizationItemId'
+  | 'requestPlan'
+  | 'requestSnapshot'
+  | 'spendReceipt'
+> & {
+  provider: StudioRendererMediaModelRef;
+  canCancel: boolean;
+  canRetryDownload: boolean;
+  spendReceipt: StudioRendererSpendReceiptV2 | null;
+};
+
+export type StudioUndoPatch =
+  | {
+      kind: 'project_fields';
+      before: {
+        name: string;
+        aspectRatio: StudioAspectRatio;
+        resolution: StudioResolution;
+        targetDurationSeconds: number;
+        brief: string;
+        rules: StudioBriefRule[];
+        beatOrder: string[];
+        imageRouteId: string | null;
+        videoRouteId: string | null;
+        spendPolicy: StudioSpendPolicy | null;
+        bedAssetId: string | null;
+        matchToShotId: string | null;
+      };
+      afterDigest: string;
+    }
+  | { kind: 'beat_fields'; beatId: string; before: StudioBeat | null; afterDigest: string }
+  | {
+      kind: 'shot_fields';
+      shotId: string;
+      before: Omit<StudioShot, 'assetIds' | 'jobIds'> | null;
+      beforeBeatId: string | null;
+      beforeIndex: number | null;
+      afterDigest: string;
+    }
+  | { kind: 'bin'; before: StudioBinItem[]; afterDigest: string };
+
+export type StudioUndoEntry = {
+  id: string;
+  sourceRevision: number;
+  label: string;
+  patches: StudioUndoPatch[];
+};
+
+export type StudioMutationReducerContextV2 = {
+  mutationId: string;
+  capturedAt: string;
+};
+
+export type StudioEditableBeat = Pick<StudioBeat, 'title' | 'action' | 'look' | 'targetSeconds'>;
+
+export type StudioEditableShot = Pick<StudioShot, 'line' | 'narration' | 'onScreenText' | 'durationSeconds'>;
+
+export type StudioNonEmptyPartial<T> = {
   [Key in keyof T]-?: Required<Pick<T, Key>> & Partial<Omit<T, Key>>;
 }[keyof T];
 
@@ -675,35 +1390,38 @@ export type StudioCutV2 = Omit<StudioCut, 'clips'> & {
   clips: Record<string, StudioCutClipV2>;
 };
 
-export type StudioRoutingPreferencesV2 = {
-  image: StudioMediaModelRef | null;
-  video: StudioMediaModelRef | null;
-};
-
-export type StudioRendererRoutingPreferencesV2 = {
-  image: StudioRendererMediaModelRef | null;
-  video: StudioRendererMediaModelRef | null;
-};
+export type StudioEditableProjectSettings = Pick<
+  StudioProjectV2,
+  'name' | 'aspectRatio' | 'resolution' | 'targetDurationSeconds'
+>;
+export type StudioEditableProjectSettingsChanges = StudioNonEmptyPartial<StudioEditableProjectSettings>;
 
 export type StudioProjectV2 = Omit<
   StudioProject,
-  'schemaVersion' | 'sceneOrder' | 'scenes' | 'cuts' | 'activeCutId' | 'assets' | 'jobs' | 'routing'
+  'schemaVersion' | 'sceneOrder' | 'scenes' | 'cuts' | 'activeCutId' | 'assets' | 'jobs' | 'routing' | 'ruleListUndo'
 > & {
-  schemaVersion: 2;
+  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
   beatOrder: string[];
   beats: Record<string, StudioBeat>;
   shots: Record<string, StudioShot>;
   bin: StudioBinItem[];
-  cuts: Record<string, StudioCutV2>;
-  activeCutId: string | null;
+  bedAssetId: string | null;
+  matchToShotId: string | null;
+  spendPolicy: StudioSpendPolicy | null;
+  spendAuthorizations: StudioSpendAuthorization[];
+  frameExtractions: Record<string, StudioFrameExtraction>;
+  undoHistory: StudioUndoEntry[];
+  imageRouteId: string | null;
+  videoRouteId: string | null;
   assets: Record<string, StudioAssetV2>;
   jobs: Record<string, StudioJobV2>;
-  routing: StudioRoutingPreferencesV2;
 };
 
-export type StudioRendererProjectV2 = Omit<StudioProjectV2, 'jobs' | 'routing'> & {
+export type StudioRendererProjectV2 = Omit<
+  StudioProjectV2,
+  'jobs' | 'spendAuthorizations' | 'frameExtractions' | 'undoHistory'
+> & {
   jobs: Record<string, StudioRendererJobV2>;
-  routing: StudioRendererRoutingPreferencesV2;
 };
 
 export type StudioProjectSummaryV2 = {
@@ -748,19 +1466,20 @@ export type StudioProjectListResultV2 = {
 };
 
 export type StudioMutationOperationV2 =
+  | { kind: 'edit_project'; changes: StudioEditableProjectSettingsChanges }
   | { kind: 'set_brief'; brief: string }
+  | { kind: 'set_rules'; rules: StudioBriefRuleDraft[] }
   | {
       kind: 'add_beat';
       beatId: string;
       beat: StudioEditableBeat;
-      firstShotId: string;
-      firstShot: StudioEditableShot;
       beforeBeatId: string | null;
     }
   | { kind: 'edit_beat'; beatId: string; changes: StudioEditableBeatChanges }
   | { kind: 'reorder_beats'; beatOrder: string[] }
   | { kind: 'park_beat'; beatId: string }
   | { kind: 'restore_beat'; beatId: string; beforeBeatId: string | null }
+  | { kind: 'add_binned_beat'; beatId: string; beat: StudioEditableBeat }
   | {
       kind: 'add_shot';
       beatId: string;
@@ -770,15 +1489,29 @@ export type StudioMutationOperationV2 =
     }
   | { kind: 'edit_shot'; shotId: string; changes: StudioEditableShotChanges }
   | { kind: 'delete_shot'; shotId: string }
+  | { kind: 'park_shot'; shotId: string }
+  | { kind: 'restore_shot'; shotId: string; beforeShotId: string | null }
   | { kind: 'reorder_shots'; beatId: string; shotOrder: string[] }
+  | { kind: 'apply_coverage'; beatId: string; shots: StudioProposedShot[]; fixedShots: StudioFixedShotReviewV2[] }
+  | { kind: 'set_hard_cut'; shotId: string; hardCut: boolean }
+  | { kind: 'set_seed_still'; shotId: string; assetId: string | null }
+  | { kind: 'trim_shot'; shotId: string; trimInSeconds: number | null; trimOutSeconds: number | null }
+  | { kind: 'redetach_line'; shotId: string; line: string }
+  | { kind: 'rederive_line'; shotId: string; line: string }
+  | { kind: 'restore_line'; shotId: string; historyEntryId: string }
   | { kind: 'park_take'; shotId: string; assetId: string }
+  | { kind: 'add_alternate_take'; shotId: string; assetId: string }
   | { kind: 'restore_take'; shotId: string; assetId: string }
-  | { kind: 'remove_bin_item'; assetId: string }
   | { kind: 'reorder_bin'; bin: StudioBinItem[] }
-  | { kind: 'select_take'; shotId: string; assetId: string };
+  | { kind: 'select_take'; shotId: string; assetId: string }
+  | { kind: 'set_routes'; imageRouteId: string | null; videoRouteId: string | null }
+  | { kind: 'set_spend_policy'; policy: StudioSpendPolicy | null }
+  | { kind: 'set_match_to'; shotId: string | null }
+  | { kind: 'set_bed'; assetId: string | null }
+  | { kind: 'undo_last'; entryId: string };
 
 export type StudioMutationBatchV2 = {
-  schemaVersion: 2;
+  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
   projectId: string;
   expectedRevision: number;
   operations: StudioMutationOperationV2[];
