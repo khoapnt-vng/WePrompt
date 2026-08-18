@@ -21,15 +21,18 @@ work.
 CSS Modules and UnoCSS, native bridge schemas, MCP SDK, Vitest, Testing Library/jsdom, Playwright,
 i18next across 12 locales, repository-managed media URLs.
 
-**Spec:** `Creative Studio 3 — direction, and answers to engineering` (§1–§11), plus the Beat and
-Shot prototype. The offline prototype bundle reviewed while writing this plan is SHA-256
-`642c8b16a56c2799d119c6077c7282969c1d612bd9aca606e39da51c710846ee`
-(`Creative Studio 3 - Beat and Shot (offline).html`).
+**Spec:**
+[creative-studio-3-direction-and-answers.md](./creative-studio-3-direction-and-answers.md) (§1–§11),
+SHA-256 `4211c28b9c0b131e6867c3a2a1c137b8b3e211ddefa61fef76ba7779687b8d4a`; frozen visual reference
+[creative-studio-3-beat-and-shot-reference.html.txt](./creative-studio-3-beat-and-shot-reference.html.txt),
+SHA-256 `642c8b16a56c2799d119c6077c7282969c1d612bd9aca606e39da51c710846ee`. The reference is the
+offline bundle of the prototype the review was conducted against; the direction document refers to
+it by its authoring name, `Creative Studio 3 - Beat and Shot.dc.html`.
 
-> **Pins are incomplete.** The direction document and the `.dc.html` prototype source are not yet in
-> the repository and therefore have no SHA-256 here. Execution must commit both under
-> `docs/prds/creative-studio/`, compute their hashes, and fill them in **before Task 1**. Do not
-> invent a hash for a file you have not read.
+> **Verify the direction document before relying on the pin.** It was transcribed into the
+> repository from the authoring copy rather than exported from it, and repository formatting was
+> applied. Diff it against the authoring copy once; if they differ, re-commit and re-pin. A hash is
+> only an anchor if it names the file everyone means.
 
 **Planning baseline:** `00cac2a08` on `codex/creative-studio-table-board-ui-design` — CS2 Tasks 1–5
 complete, Gate 1 pending. Verify that ancestry and a clean worktree before Task 1. Enter Task 1 only
@@ -518,8 +521,9 @@ written without knowing the adapter already supplies the frame: the fifth manage
 
 **Steps**
 
-- [ ] Confirm the spec pins are filled in. Stop if not. (The seven inference decisions are closed —
-      see _Decisions closed_.)
+- [ ] Confirm both spec pins still match the committed files (`shasum -a 256`), and that the
+      direction document has been diffed against its authoring copy at least once. Stop if not. The
+      seven inference decisions are already closed — see _Decisions closed_.
 - [ ] Replace the Section/Clip/Shelf types with Beat/Shot/Bin and the independently named constants
       from the frozen contract. Delete `cuts` and `activeCutId`; add `bedAssetId` and
       `matchToShotId`. Widen `targetDurationSeconds` to 5–1440 in the validator **and** the summary
