@@ -182,18 +182,44 @@ type DataNodeSnapshot = {
   properties: DataPropertySnapshot[];
 };
 
+const prototypeChainHasNoSerializationHook = (prototype: object | null): boolean => {
+  let current = prototype;
+  while (current !== null) {
+    if (nodeTypes.isProxy(current)) return false;
+
+    let toJsonDescriptor: PropertyDescriptor | undefined;
+    let next: object | null;
+    try {
+      toJsonDescriptor = Reflect.getOwnPropertyDescriptor(current, 'toJSON');
+      next = Reflect.getPrototypeOf(current);
+    } catch {
+      return false;
+    }
+    if (toJsonDescriptor !== undefined) return false;
+    current = next;
+  }
+  return true;
+};
+
 const captureDataNode = (source: object): DataNodeSnapshot | undefined => {
   if (nodeTypes.isProxy(source)) return undefined;
 
   let isArray: boolean;
   let keys: PropertyKey[];
+  let prototype: object | null;
   try {
     isArray = Array.isArray(source);
     keys = Reflect.ownKeys(source);
+    prototype = Reflect.getPrototypeOf(source);
   } catch {
     // Revoked and hostile proxies are invalid persisted data.
     return undefined;
   }
+
+  if (!isArray && prototype !== Object.prototype && prototype !== null) {
+    return undefined;
+  }
+  if (!prototypeChainHasNoSerializationHook(prototype)) return undefined;
 
   const properties: DataPropertySnapshot[] = [];
   for (const key of keys) {
@@ -205,6 +231,8 @@ const captureDataNode = (source: object): DataNodeSnapshot | undefined => {
       return undefined;
     }
     if (descriptor === undefined || !Object.hasOwn(descriptor, 'value')) return undefined;
+    if (typeof key !== 'string' || key === 'toJSON') return undefined;
+    if ((!isArray || key !== 'length') && descriptor.enumerable !== true) return undefined;
     properties.push({ key, value: descriptor.value, enumerable: descriptor.enumerable === true });
   }
 

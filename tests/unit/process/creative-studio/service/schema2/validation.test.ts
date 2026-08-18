@@ -14,7 +14,10 @@ import type {
   StudioProjectV2,
   StudioSection,
 } from '@/common/types/project/creativeStudioTypes';
-import { validateStudioProjectV2 } from '@/process/services/creative-studio/service/schema2';
+import {
+  createEmptyStudioProjectV2,
+  validateStudioProjectV2,
+} from '@/process/services/creative-studio/service/schema2';
 
 const timestamp = '2026-08-17T00:00:00.000Z';
 
@@ -107,6 +110,19 @@ const makeValidProject = (): StudioProjectV2 => ({
   createdAt: timestamp,
   updatedAt: timestamp,
 });
+
+const makeEmptyProject = (): StudioProjectV2 =>
+  createEmptyStudioProjectV2(
+    {
+      name: 'Project One',
+      brief: '',
+      aspectRatio: '16:9',
+      targetDurationSeconds: 30,
+      resolution: '1080p',
+    },
+    'project_1',
+    timestamp
+  );
 
 const makePopulatedProject = (): StudioProjectV2 => {
   const project = makeValidProject();
@@ -354,19 +370,98 @@ describe('validateStudioProjectV2 exact schema', () => {
     expect(validateStudioProjectV2(project)).toBe(true);
   });
 
-  it('accepts a valid project with a custom prototype without invoking inherited getters', () => {
+  it('rejects a non-enumerable persisted field that JSON serialization would omit', () => {
     const project = makeValidProject();
-    let getterCalls = 0;
-    Object.setPrototypeOf(project, {
-      get inheritedValue() {
-        getterCalls += 1;
-        throw new Error('inherited getter must not run');
+    Object.defineProperty(project, 'name', {
+      configurable: true,
+      enumerable: false,
+      value: project.name,
+      writable: true,
+    });
+
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it('rejects an own non-enumerable serialization hook without invoking it', () => {
+    const project = makeValidProject();
+    let toJsonCalls = 0;
+    Object.defineProperty(project.routing, 'toJSON', {
+      configurable: true,
+      enumerable: false,
+      value() {
+        toJsonCalls += 1;
+        return { image: 'invalid-route', video: null };
       },
     });
 
     const result = validateStudioProjectV2(project);
 
-    expect({ getterCalls, result }).toEqual({ getterCalls: 0, result: true });
+    expect({ result, toJsonCalls }).toEqual({ result: false, toJsonCalls: 0 });
+  });
+
+  it('rejects an inherited optional field on an otherwise valid factory project', () => {
+    const project = makeEmptyProject();
+    delete (project as Partial<StudioProjectV2>).briefConversationId;
+    Object.setPrototypeOf(project, { briefConversationId: '../../malicious-conversation' });
+
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it('rejects an inherited optional-field getter without invoking it', () => {
+    const project = makeEmptyProject();
+    let getterCalls = 0;
+    const prototype = Object.create(null) as Record<string, unknown>;
+    Object.defineProperty(prototype, 'briefConversationId', {
+      get() {
+        getterCalls += 1;
+        throw new Error('briefConversationId getter must not run');
+      },
+      enumerable: true,
+    });
+    delete (project as Partial<StudioProjectV2>).briefConversationId;
+    Object.setPrototypeOf(project, prototype);
+
+    const result = validateStudioProjectV2(project);
+
+    expect({ getterCalls, result }).toEqual({ getterCalls: 0, result: false });
+  });
+
+  it.each([
+    ['record collection', (project: StudioProjectV2) => Object.setPrototypeOf(project.sections, {})],
+    ['record value', (project: StudioProjectV2) => Object.setPrototypeOf(project.sections.section_1!, {})],
+    [
+      'array value',
+      (project: StudioProjectV2) => {
+        project.rules = [
+          {
+            id: 'rule_1',
+            scope: 'project',
+            text: 'Keep the subject centered',
+            predicate: null,
+            createdAt: timestamp,
+          },
+        ];
+        Object.setPrototypeOf(project.rules[0]!, {});
+      },
+    ],
+    ['routing record', (project: StudioProjectV2) => Object.setPrototypeOf(project.routing, {})],
+  ])('rejects a nonstandard prototype on a nested %s', (_label, mutate) => {
+    const project = makeValidProject();
+    mutate(project);
+
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it('accepts valid null-prototype records throughout the captured graph', () => {
+    const project = makeValidProject();
+    Object.setPrototypeOf(project, null);
+    Object.setPrototypeOf(project.sections, null);
+    Object.setPrototypeOf(project.sections.section_1!, null);
+    Object.setPrototypeOf(project.clips, null);
+    Object.setPrototypeOf(project.clips.clip_1!, null);
+    Object.setPrototypeOf(project.routing, null);
+
+    expect(validateStudioProjectV2(project)).toBe(true);
   });
 
   it('accepts valid asset, job, reference, cut, and project-level Cast ownership', () => {
@@ -586,6 +681,37 @@ describe('validateStudioProjectV2 exact schema', () => {
     Object.setPrototypeOf(project.sectionOrder, { every: null, [Symbol.iterator]: null });
 
     expect(validateStudioProjectV2(project)).toBe(true);
+  });
+
+  it('rejects an inherited array serialization hook without invoking it', () => {
+    const project = makeValidProject();
+    let toJsonCalls = 0;
+    Object.setPrototypeOf(project.sectionOrder, {
+      toJSON() {
+        toJsonCalls += 1;
+        return ['missing_section'];
+      },
+    });
+
+    const result = validateStudioProjectV2(project);
+
+    expect({ result, toJsonCalls }).toEqual({ result: false, toJsonCalls: 0 });
+  });
+
+  it('rejects a proxy in an array prototype chain without invoking its traps', () => {
+    const project = makeValidProject();
+    let descriptorTrapCalls = 0;
+    const prototype = new Proxy(Object.create(null) as object, {
+      getOwnPropertyDescriptor() {
+        descriptorTrapCalls += 1;
+        throw new Error('prototype descriptor trap must not run');
+      },
+    });
+    Object.setPrototypeOf(project.sectionOrder, prototype);
+
+    const result = validateStudioProjectV2(project);
+
+    expect({ descriptorTrapCalls, result }).toEqual({ descriptorTrapCalls: 0, result: false });
   });
 
   it.each([

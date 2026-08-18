@@ -4838,6 +4838,72 @@ describe('schema-2 creative studio project store', () => {
     expect(prototypeIndexAccesses).toEqual([]);
   });
 
+  it('rejects an inherited array serialization hook before writing schema-2 project bytes', async () => {
+    const onProjectCommitted = vi.fn<StudioProjectCommitObserver>();
+    const { store } = createStoreV2({
+      createId: () => 'serialization_hook_v2',
+      now: () => timestamp,
+      onProjectCommitted,
+    });
+    const project = await store.createProjectV2(inputV2);
+    const projectFile = path.join(rootDir, project.id, 'project.json');
+    const indexFile = path.join(rootDir, 'projects-v2.json');
+    const projectBefore = readFileSync(projectFile);
+    const indexBefore = readFileSync(indexFile);
+    let toJsonCalls = 0;
+
+    await expect(
+      store.updateProjectV2(project.id, (candidate) => {
+        Object.setPrototypeOf(candidate.sectionOrder, {
+          toJSON() {
+            toJsonCalls += 1;
+            return ['missing_section'];
+          },
+        });
+        return candidate;
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+
+    expect(toJsonCalls).toBe(0);
+    expect(onProjectCommitted).not.toHaveBeenCalled();
+    expect(readFileSync(projectFile)).toEqual(projectBefore);
+    expect(readFileSync(indexFile)).toEqual(indexBefore);
+  });
+
+  it('rejects an own hidden serialization hook before writing schema-2 project bytes', async () => {
+    const onProjectCommitted = vi.fn<StudioProjectCommitObserver>();
+    const { store } = createStoreV2({
+      createId: () => 'hidden_serialization_hook_v2',
+      now: () => timestamp,
+      onProjectCommitted,
+    });
+    const project = await store.createProjectV2(inputV2);
+    const projectFile = path.join(rootDir, project.id, 'project.json');
+    const indexFile = path.join(rootDir, 'projects-v2.json');
+    const projectBefore = readFileSync(projectFile);
+    const indexBefore = readFileSync(indexFile);
+    let toJsonCalls = 0;
+
+    await expect(
+      store.updateProjectV2(project.id, (candidate) => {
+        Object.defineProperty(candidate.routing, 'toJSON', {
+          configurable: true,
+          enumerable: false,
+          value() {
+            toJsonCalls += 1;
+            return { image: 'invalid-route', video: null };
+          },
+        });
+        return candidate;
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+
+    expect(toJsonCalls).toBe(0);
+    expect(onProjectCommitted).not.toHaveBeenCalled();
+    expect(readFileSync(projectFile)).toEqual(projectBefore);
+    expect(readFileSync(indexFile)).toEqual(indexBefore);
+  });
+
   it('preserves a schema-2 update callback error and leaves durable state unchanged', async () => {
     const callbackError = new Error('attachment staging failed');
     const onProjectCommitted = vi.fn<StudioProjectCommitObserver>();
