@@ -1114,7 +1114,8 @@ const createStudioDirectorCommandMailboxInternal = (
     canonicalRoot: string,
     directories: CommandDirectories,
     held: Extract<LeaseRead, { status: 'valid' }>,
-    projectAuthorityV2?: ProjectAuthorityV2
+    projectAuthorityV2?: ProjectAuthorityV2,
+    additionalAuthorizationV2?: (phase: 'named' | 'quarantined') => boolean | Promise<boolean>
   ): Promise<boolean> => {
     if (deps.version === 1) {
       if (!leaseIsActive(held.lease, now())) return false;
@@ -1150,14 +1151,18 @@ const createStudioDirectorCommandMailboxInternal = (
       file: path.join(directories.slots, '0.slot.lease'),
       identity: fresh.identity,
       missingIsSuccess: false,
-      isStillAuthorized: async (_phase, file) => {
+      isStillAuthorized: async (phase, file) => {
+        if (additionalAuthorizationV2 !== undefined && !(await additionalAuthorizationV2(phase))) return false;
         if (!leaseIsActive(held.lease, now())) return false;
         const record = await readIdentifiedBytes(canonicalRoot, file);
         if (record === null || record.bytes !== fresh.bytes || !sameIdentity(record.identity, fresh.identity)) {
           return false;
         }
         const parsed = parseLeaseRecord(parseJson(record.bytes), now());
-        return parsed.status === 'valid' && sameLease(parsed.record, held.lease) && leaseIsActive(held.lease, now());
+        if (parsed.status !== 'valid' || !sameLease(parsed.record, held.lease) || !leaseIsActive(held.lease, now())) {
+          return false;
+        }
+        return additionalAuthorizationV2 === undefined || (await additionalAuthorizationV2(phase));
       },
     });
   };
@@ -1406,6 +1411,7 @@ const createStudioDirectorCommandMailboxInternal = (
         }
         const slot = await readSlot(canonicalRoot, directories, now());
         let pendingRecordV2: Awaited<ReturnType<typeof readIdentifiedBytes>> | undefined;
+        let validPendingV2: Extract<DirectorPendingRead, { status: 'valid' }> | undefined;
         if (deps.version === 2) {
           pendingRecordV2 = await readIdentifiedBytes(canonicalRoot, pendingFile);
           if (pendingRecordV2 !== null) {
@@ -1418,6 +1424,7 @@ const createStudioDirectorCommandMailboxInternal = (
               waitMs,
             });
             if (pending.status !== 'valid') throw storageError();
+            validPendingV2 = pending;
           }
         }
         if (receipt === null) {
@@ -1428,6 +1435,13 @@ const createStudioDirectorCommandMailboxInternal = (
           return;
         }
         if (receipt.status !== 'valid') throw storageError();
+        if (
+          deps.version === 2 &&
+          validPendingV2 !== undefined &&
+          receipt.record.expectedRevision !== validPendingV2.record.expectedRevision
+        ) {
+          throw storageError();
+        }
         if (deps.version === 2 && directoryAuthoritiesV2 !== undefined) {
           await syncAuthorizedDirectoryV2(directoryAuthoritiesV2.receipts, directoryAuthoritiesV2.project);
         }
@@ -1436,9 +1450,60 @@ const createStudioDirectorCommandMailboxInternal = (
             ? { authority: directoryAuthoritiesV2.receipts, expected: receiptRecordV2 }
             : undefined;
         if (deps.version === 2 && receiptAuthorityV2 === undefined) throw storageError();
+        const validReceipt = receipt.record;
         if (slot.status === 'unsupported_prototype_schema') throw storageError();
         if (slot.status === 'valid' && slot.slot.commandId !== commandId) throw storageError();
         if (slot.status === 'invalid' && slot.commandId !== commandId) throw storageError();
+        let pendingAuthorityExpectationV2: 'correlated' | 'absent' =
+          pendingRecordV2 !== undefined && pendingRecordV2 !== null ? 'correlated' : 'absent';
+        const receiptAuthorityIsCurrentV2 = async (): Promise<boolean> =>
+          receiptAuthorityV2 !== undefined &&
+          directoryAuthoritiesV2 !== undefined &&
+          (await exactReceiptRecordIsCurrentV2({
+            canonicalRoot,
+            authority: receiptAuthorityV2.authority,
+            projectAuthority: directoryAuthoritiesV2.project,
+            file: receiptFile,
+            projectId,
+            commandId,
+            expected: receiptAuthorityV2.expected,
+          }));
+        const pendingAuthorityIsCurrentV2 = async (): Promise<boolean> => {
+          if (directoryAuthoritiesV2 === undefined) return false;
+          if (pendingAuthorityExpectationV2 === 'absent') {
+            return exactPathIsAbsentV2(directoryAuthoritiesV2.pending, directoryAuthoritiesV2.project, pendingFile);
+          }
+          if (pendingRecordV2 === undefined || pendingRecordV2 === null || validPendingV2 === undefined) return false;
+          await assertProjectAuthorityV2(directoryAuthoritiesV2.project);
+          await assertDirectoryAuthorityV2(directoryAuthoritiesV2.pending);
+          const current = await readIdentifiedBytes(canonicalRoot, pendingFile);
+          if (
+            current === null ||
+            current.bytes !== pendingRecordV2.bytes ||
+            !sameIdentity(current.identity, pendingRecordV2.identity)
+          ) {
+            return false;
+          }
+          const pending = parsePendingRecord({
+            projectId,
+            commandId,
+            value: parseJson(current.bytes),
+            slot: slot.status === 'absent' ? null : parseJson(slot.bytes),
+            now: now(),
+            waitMs,
+          });
+          await assertDirectoryAuthorityV2(directoryAuthoritiesV2.pending);
+          await assertProjectAuthorityV2(directoryAuthoritiesV2.project);
+          return (
+            pending.status === 'valid' &&
+            pending.record.expectedRevision === validReceipt.expectedRevision &&
+            pending.record.expectedRevision === validPendingV2.record.expectedRevision
+          );
+        };
+        const pendingAndReceiptAuthorityIsCurrentV2 = async (): Promise<boolean> =>
+          (await receiptAuthorityIsCurrentV2()) &&
+          (await pendingAuthorityIsCurrentV2()) &&
+          (await receiptAuthorityIsCurrentV2());
         let held: Extract<LeaseRead, { status: 'valid' }> | undefined;
         let preserveHeldLease = false;
         try {
@@ -1447,8 +1512,7 @@ const createStudioDirectorCommandMailboxInternal = (
             undefined;
           if (held === undefined) throw storageError();
           if (!leaseIsActive(held.lease, now())) throw storageError();
-          const cleanupAuthorityIsCurrentV2 = async (): Promise<boolean> =>
-            receiptAuthorityV2 !== undefined &&
+          const leaseAndReceiptAuthorityIsCurrentV2 = async (): Promise<boolean> =>
             directoryAuthoritiesV2 !== undefined &&
             (await heldLeaseIsExactAndActiveV2(
               canonicalRoot,
@@ -1457,15 +1521,11 @@ const createStudioDirectorCommandMailboxInternal = (
               directoryAuthoritiesV2.slots,
               directoryAuthoritiesV2.project
             )) &&
-            (await exactReceiptRecordIsCurrentV2({
-              canonicalRoot,
-              authority: receiptAuthorityV2.authority,
-              projectAuthority: directoryAuthoritiesV2.project,
-              file: receiptFile,
-              projectId,
-              commandId,
-              expected: receiptAuthorityV2.expected,
-            }));
+            (await receiptAuthorityIsCurrentV2());
+          const slotCleanupAuthorityIsCurrentV2 = async (): Promise<boolean> =>
+            (await leaseAndReceiptAuthorityIsCurrentV2()) &&
+            (await pendingAuthorityIsCurrentV2()) &&
+            (await leaseAndReceiptAuthorityIsCurrentV2());
           const freshSlot = await readSlot(canonicalRoot, directories, now());
           if (!sameSlotRead(slot, freshSlot)) throw storageError();
 
@@ -1483,7 +1543,7 @@ const createStudioDirectorCommandMailboxInternal = (
               identity: pendingRecordV2.identity,
               missingIsSuccess: true,
               isStillAuthorized: async (_phase, file) => {
-                if (!(await cleanupAuthorityIsCurrentV2())) return false;
+                if (!(await leaseAndReceiptAuthorityIsCurrentV2())) return false;
                 const record = await readIdentifiedBytes(canonicalRoot, file);
                 if (
                   record === null ||
@@ -1500,13 +1560,18 @@ const createStudioDirectorCommandMailboxInternal = (
                   now: now(),
                   waitMs,
                 });
-                return pending.status === 'valid' && (await cleanupAuthorityIsCurrentV2());
+                return (
+                  pending.status === 'valid' &&
+                  pending.record.expectedRevision === validReceipt.expectedRevision &&
+                  (await leaseAndReceiptAuthorityIsCurrentV2())
+                );
               },
             });
             if (!removed) {
               preserveHeldLease = true;
               throw storageError();
             }
+            pendingAuthorityExpectationV2 = 'absent';
           }
           if (!leaseIsActive(held.lease, now())) throw storageError();
           if (freshSlot.status !== 'absent') {
@@ -1523,13 +1588,13 @@ const createStudioDirectorCommandMailboxInternal = (
                     identity: freshSlot.identity,
                     missingIsSuccess: true,
                     isStillAuthorized: async (_phase, file) => {
-                      if (!(await cleanupAuthorityIsCurrentV2())) return false;
+                      if (!(await slotCleanupAuthorityIsCurrentV2())) return false;
                       const record = await readIdentifiedBytes(canonicalRoot, file);
                       return (
                         record !== null &&
                         record.bytes === freshSlot.bytes &&
                         sameIdentity(record.identity, freshSlot.identity) &&
-                        (await cleanupAuthorityIsCurrentV2())
+                        (await slotCleanupAuthorityIsCurrentV2())
                       );
                     },
                   }));
@@ -1539,7 +1604,15 @@ const createStudioDirectorCommandMailboxInternal = (
             }
           }
           if (!leaseIsActive(held.lease, now())) throw storageError();
-          if (!(await releaseMainLease(canonicalRoot, directories, held, directoryAuthoritiesV2?.project))) {
+          if (
+            !(await releaseMainLease(
+              canonicalRoot,
+              directories,
+              held,
+              directoryAuthoritiesV2?.project,
+              pendingAndReceiptAuthorityIsCurrentV2
+            ))
+          ) {
             preserveHeldLease = deps.version === 2;
             throw storageError();
           }
@@ -1561,9 +1634,13 @@ const createStudioDirectorCommandMailboxInternal = (
           }
         } catch (error) {
           if (held !== undefined && !preserveHeldLease) {
-            await releaseMainLease(canonicalRoot, directories, held, directoryAuthoritiesV2?.project).catch(
-              (): undefined => undefined
-            );
+            await releaseMainLease(
+              canonicalRoot,
+              directories,
+              held,
+              directoryAuthoritiesV2?.project,
+              pendingAndReceiptAuthorityIsCurrentV2
+            ).catch((): undefined => undefined);
           }
           throw neutralizeIo(error);
         }

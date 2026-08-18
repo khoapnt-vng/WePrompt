@@ -576,15 +576,17 @@ const readNamedReceiptV2 = async (input: {
       });
 };
 
-const pendingRecordStatusV2 = (input: {
+const parsePendingRecordForWriterV2 = (input: {
   projectId: string;
   commandId: string;
   value: unknown;
   nowMs: number;
-}): 'valid' | 'unsupported_prototype_schema' | 'invalid' => {
-  if (typeof input.value !== 'object' || input.value === null || Array.isArray(input.value)) return 'invalid';
-  const candidate = input.value as Record<string, unknown>;
-  const parsed = parseStudioDirectorPendingRecordV2({
+}): ReturnType<typeof parseStudioDirectorPendingRecordV2> => {
+  const candidate =
+    typeof input.value === 'object' && input.value !== null && !Array.isArray(input.value)
+      ? (input.value as Record<string, unknown>)
+      : {};
+  return parseStudioDirectorPendingRecordV2({
     projectId: input.projectId,
     commandId: input.commandId,
     value: input.value,
@@ -597,7 +599,6 @@ const pendingRecordStatusV2 = (input: {
     now: new Date(input.nowMs).toISOString(),
     waitMs: STUDIO_DIRECTOR_COMMAND_WAIT_MS,
   });
-  return parsed.status;
 };
 
 const prepareCommand = (input: {
@@ -1028,9 +1029,10 @@ const readLeaseV2 = async (input: {
 
 type CommandAuthorityPreflightV2 = {
   receipt: Awaited<ReturnType<typeof readNamedReceiptV2>>;
-  pending: { status: 'missing' | 'valid' | 'unsupported_prototype_schema' | 'invalid' };
+  pending: { status: 'missing' } | ReturnType<typeof parsePendingRecordForWriterV2>;
   slot: ReadSlotResultV2;
   lease: ReadLeaseResultV2;
+  receiptPendingRevisionMismatch: boolean;
 };
 
 const preflightCommandAuthorityV2 = async (input: {
@@ -1051,18 +1053,20 @@ const preflightCommandAuthorityV2 = async (input: {
   const pending =
     pendingValue === null
       ? ({ status: 'missing' } as const)
-      : ({
-          status: pendingRecordStatusV2({
-            projectId: input.projectId,
-            commandId: input.commandId,
-            value: pendingValue,
-            nowMs: input.nowMs,
-          }),
-        } as const);
+      : parsePendingRecordForWriterV2({
+          projectId: input.projectId,
+          commandId: input.commandId,
+          value: pendingValue,
+          nowMs: input.nowMs,
+        });
   const slot = await readSlotV2(input);
   const lease = await readLeaseV2(input);
   await assertCommandDirectoriesV2(input.fs, input.directories);
-  return { receipt, pending, slot, lease };
+  const receiptPendingRevisionMismatch =
+    receipt.status === 'valid' &&
+    pending.status === 'valid' &&
+    receipt.record.expectedRevision !== pending.record.expectedRevision;
+  return { receipt, pending, slot, lease, receiptPendingRevisionMismatch };
 };
 
 const preflightHasStatusV2 = (
@@ -1679,6 +1683,7 @@ export const createStudioDirectorCommandWriterV2 = (
       }
       if (preflightHasStatusV2(preflight, 'unsupported_prototype_schema')) return unsupportedV2(input.commandId);
       if (preflightHasStatusV2(preflight, 'invalid')) return storageError(input.commandId);
+      if (preflight.receiptPendingRevisionMismatch) return storageError(input.commandId);
       if (preflight.receipt.status === 'valid') return preflight.receipt.record;
       if (preflight.pending.status === 'valid') return { status: 'pending', commandId: input.commandId };
       if (
@@ -1718,6 +1723,7 @@ export const createStudioDirectorCommandWriterV2 = (
       });
       if (preflightHasStatusV2(preflight, 'unsupported_prototype_schema')) return unsupportedV2(commandId);
       if (preflightHasStatusV2(preflight, 'invalid')) return storageError(commandId);
+      if (preflight.receiptPendingRevisionMismatch) return storageError(commandId);
       if (preflight.receipt.status === 'valid' || preflight.pending.status === 'valid') return storageError(commandId);
       if (preflight.slot.status === 'valid') return { status: 'busy', commandId: preflight.slot.slot.commandId };
       if (preflight.lease.status === 'valid') {
@@ -1914,12 +1920,12 @@ export const createStudioDirectorCommandWriterV2 = (
             file: pendingFile,
           });
           if (collided !== null) {
-            const parsedStatus = pendingRecordStatusV2({
+            const parsedStatus = parsePendingRecordForWriterV2({
               projectId: config.projectId,
               commandId,
               value: collided,
               nowMs: now(),
-            });
+            }).status;
             if (parsedStatus !== 'valid') collisionStatus = parsedStatus;
           }
         } catch {
@@ -1969,7 +1975,11 @@ export const createStudioDirectorCommandWriterV2 = (
       });
     try {
       let receipt = await readReceipt();
-      if (receipt.status === 'valid') return receipt.record;
+      if (receipt.status === 'valid') {
+        return receipt.record.expectedRevision === prepared.command.expectedRevision
+          ? receipt.record
+          : storageError(commandId);
+      }
       if (receipt.status === 'unsupported_prototype_schema') return unsupportedV2(commandId);
       if (receipt.status === 'invalid') return storageError(commandId);
       const deadlineMs = Date.parse(prepared.command.deadlineAt);
@@ -1979,12 +1989,20 @@ export const createStudioDirectorCommandWriterV2 = (
         await sleep(Math.min(STUDIO_DIRECTOR_COMMAND_SWEEP_INTERVAL_MS, remainingMs));
         // eslint-disable-next-line no-await-in-loop
         receipt = await readReceipt();
-        if (receipt.status === 'valid') return receipt.record;
+        if (receipt.status === 'valid') {
+          return receipt.record.expectedRevision === prepared.command.expectedRevision
+            ? receipt.record
+            : storageError(commandId);
+        }
         if (receipt.status === 'unsupported_prototype_schema') return unsupportedV2(commandId);
         if (receipt.status === 'invalid') return storageError(commandId);
       }
       receipt = await readReceipt();
-      if (receipt.status === 'valid') return receipt.record;
+      if (receipt.status === 'valid') {
+        return receipt.record.expectedRevision === prepared.command.expectedRevision
+          ? receipt.record
+          : storageError(commandId);
+      }
       if (receipt.status === 'unsupported_prototype_schema') return unsupportedV2(commandId);
       if (receipt.status === 'invalid') return storageError(commandId);
       return { status: 'unconfirmed', commandId };

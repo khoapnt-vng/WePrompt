@@ -1021,6 +1021,115 @@ describe('Studio Director subprocess command writer', () => {
     await expect(writer.getStatus({ commandId: receipt.commandId })).resolves.toEqual(receipt);
   });
 
+  it.each(['applied', 'rejected'] as const)(
+    'rejects a valid %s receipt for another pending revision during status and apply preflight',
+    async (status) => {
+      const commandId = `command_v2_revision_${status}`;
+      const publisher = writerWithIdsV2([commandId, `lease_v2_revision_${status}`]);
+      await expect(
+        publisher.apply({ expectedRevision: 7, operations: [{ kind: 'set_brief', brief: 'Revision bound' }] })
+      ).resolves.toEqual({ status: 'unconfirmed', commandId });
+      const pendingFile = path.join(pendingDir, `${commandId}.json`);
+      const slotFile = path.join(slotsDir, '0.slot');
+      const receiptFile = path.join(receiptsDir, `${commandId}.json`);
+      const receipt: StudioDirectorCommandReceiptV2 =
+        status === 'applied'
+          ? {
+              schemaVersion: 2,
+              commandId,
+              projectId: PROJECT_ID,
+              expectedRevision: 8,
+              decidedAt: '2026-08-17T01:02:10.000Z',
+              status,
+              appliedRevision: 9,
+              createdSectionIds: [],
+              createdClipIds: [],
+            }
+          : {
+              schemaVersion: 2,
+              commandId,
+              projectId: PROJECT_ID,
+              expectedRevision: 8,
+              decidedAt: '2026-08-17T01:02:10.000Z',
+              status,
+              observedRevision: 8,
+              reasonCode: 'stale_revision',
+            };
+      await writeFile(receiptFile, JSON.stringify(receipt));
+      const before = {
+        pending: await readFile(pendingFile, 'utf8'),
+        slot: await readFile(slotFile, 'utf8'),
+        receipt: await readFile(receiptFile, 'utf8'),
+      };
+      const reader = writerWithIdsV2(['unused']);
+
+      await expect(reader.getStatus({ commandId })).resolves.toEqual({ status: 'storage_error', commandId });
+      await expect(
+        writerWithIdsV2([commandId, `lease_v2_collision_${status}`]).apply({
+          expectedRevision: 7,
+          operations: [{ kind: 'set_brief', brief: 'Must not replace authority' }],
+        })
+      ).resolves.toEqual({ status: 'storage_error', commandId });
+
+      await expect(readFile(pendingFile, 'utf8')).resolves.toBe(before.pending);
+      await expect(readFile(slotFile, 'utf8')).resolves.toBe(before.slot);
+      await expect(readFile(receiptFile, 'utf8')).resolves.toBe(before.receipt);
+    }
+  );
+
+  it('keeps an absent-pending valid receipt as receipt-first terminal authority', async () => {
+    const commandId = 'command_v2_receipt_first';
+    const receipt: StudioDirectorCommandReceiptV2 = {
+      schemaVersion: 2,
+      commandId,
+      projectId: PROJECT_ID,
+      expectedRevision: 11,
+      decidedAt: '2026-08-17T01:02:10.000Z',
+      status: 'applied',
+      appliedRevision: 12,
+      createdSectionIds: [],
+      createdClipIds: [],
+    };
+    await writeFile(path.join(receiptsDir, `${commandId}.json`), JSON.stringify(receipt));
+
+    await expect(writerWithIdsV2(['unused']).getStatus({ commandId })).resolves.toEqual(receipt);
+  });
+
+  it('rejects a mismatched receipt that appears while apply is polling its exact pending command', async () => {
+    const commandId = 'command_v2_poll_revision_mismatch';
+    const receiptFile = path.join(receiptsDir, `${commandId}.json`);
+    let receiptPublished = false;
+    const writer = writerWithIdsV2([commandId, 'lease_v2_poll_revision_mismatch'], {
+      sleep: async () => {
+        if (receiptPublished) return;
+        receiptPublished = true;
+        await writeFile(
+          receiptFile,
+          JSON.stringify({
+            schemaVersion: 2,
+            commandId,
+            projectId: PROJECT_ID,
+            expectedRevision: 8,
+            decidedAt: '2026-08-17T01:02:10.000Z',
+            status: 'applied',
+            appliedRevision: 9,
+            createdSectionIds: [],
+            createdClipIds: [],
+          } satisfies StudioDirectorCommandReceiptV2)
+        );
+      },
+    });
+
+    await expect(
+      writer.apply({ expectedRevision: 7, operations: [{ kind: 'set_brief', brief: 'Poll exact revision' }] })
+    ).resolves.toEqual({ status: 'storage_error', commandId });
+    expect(receiptPublished).toBe(true);
+    await expect(readFile(path.join(pendingDir, `${commandId}.json`), 'utf8')).resolves.toContain(
+      '"expectedRevision":7'
+    );
+    await expect(readFile(receiptFile, 'utf8')).resolves.toContain('"expectedRevision":8');
+  });
+
   it('reports V1 receipts and pending records as unsupported without changing their bytes', async () => {
     const receiptFile = path.join(receiptsDir, 'legacy_receipt.json');
     const pendingFile = path.join(pendingDir, 'legacy_pending.json');

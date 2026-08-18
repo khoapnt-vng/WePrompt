@@ -1893,6 +1893,192 @@ describe('Studio Director schema-2 command mailbox', () => {
     await expect(nodeFs.readdir(directories.receipts)).resolves.toEqual(['command_v2.json']);
   });
 
+  it.each(['applied', 'rejected'] as const)(
+    'rejects a valid %s receipt for another expected revision without changing command authority',
+    async (status) => {
+      await mailbox.ensure(projectId);
+      const directories = commandDirectories(rootDir, projectId);
+      const command = makeCommandV2(projectId, `command_revision_${status}`);
+      const slot = makeSlotV2(command.commandId);
+      const receipt: StudioDirectorCommandReceiptV2 =
+        status === 'applied'
+          ? {
+              schemaVersion: 2,
+              commandId: command.commandId,
+              projectId,
+              expectedRevision: 2,
+              decidedAt: NOW,
+              status,
+              appliedRevision: 3,
+              createdSectionIds: [],
+              createdClipIds: [],
+            }
+          : {
+              schemaVersion: 2,
+              commandId: command.commandId,
+              projectId,
+              expectedRevision: 2,
+              decidedAt: NOW,
+              status,
+              observedRevision: 2,
+              reasonCode: 'stale_revision',
+            };
+      await nodeFs.writeFile(path.join(directories.pending, `${command.commandId}.json`), JSON.stringify(command));
+      await nodeFs.writeFile(path.join(directories.slots, '0.slot'), JSON.stringify(slot));
+      await mailbox.writeReceipt(projectId, receipt);
+      const before = await snapshotDirectoryBytes(directories.root);
+
+      await expect(mailbox.finish(projectId, command.commandId)).rejects.toMatchObject({ code: 'storage_error' });
+
+      expect(await snapshotDirectoryBytes(directories.root)).toEqual(before);
+
+      await nodeFs.writeFile(
+        path.join(directories.slots, '0.slot.lease'),
+        JSON.stringify(makeLeaseV2({ leaseId: `lease_revision_${status}`, owner: 'writer', slot }))
+      );
+      const withLease = await snapshotDirectoryBytes(directories.root);
+
+      await expect(mailbox.finish(projectId, command.commandId)).rejects.toMatchObject({ code: 'storage_error' });
+
+      expect(await snapshotDirectoryBytes(directories.root)).toEqual(withLease);
+    }
+  );
+
+  it('keeps a valid receipt authoritative when crash recovery finds no pending record', async () => {
+    await mailbox.ensure(projectId);
+    const directories = commandDirectories(rootDir, projectId);
+    const commandId = 'command_receipt_first_v2';
+    await nodeFs.writeFile(path.join(directories.slots, '0.slot'), JSON.stringify(makeSlotV2(commandId)));
+    const receipt = makeReceiptV2(projectId, commandId, {
+      expectedRevision: 9,
+      appliedRevision: 10,
+    });
+    await mailbox.writeReceipt(projectId, receipt);
+
+    await expect(mailbox.finish(projectId, commandId)).resolves.toBeUndefined();
+
+    await expect(nodeFs.readdir(directories.pending)).resolves.toEqual([]);
+    await expect(nodeFs.readdir(directories.slots)).resolves.toEqual([]);
+    await expect(nodeFs.readFile(path.join(directories.receipts, `${commandId}.json`), 'utf8')).resolves.toBe(
+      JSON.stringify(receipt)
+    );
+  });
+
+  it('restores a receipt-first slot when a mismatched pending record appears during quarantine', async () => {
+    await mailbox.ensure(projectId);
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const commandId = 'command_receipt_first_pending_race';
+    const pendingFile = path.join(directories.pending, `${commandId}.json`);
+    const slotFile = path.join(directories.slots, '0.slot');
+    const receiptFile = path.join(directories.receipts, `${commandId}.json`);
+    const slotBytes = JSON.stringify(makeSlotV2(commandId));
+    const receipt = makeReceiptV2(projectId, commandId);
+    const receiptBytes = JSON.stringify(receipt);
+    const mismatchedPendingBytes = JSON.stringify(makeCommandV2(projectId, commandId, { expectedRevision: 2 }));
+    await nodeFs.writeFile(slotFile, slotBytes);
+    await mailbox.writeReceipt(projectId, receipt);
+    let inserted = false;
+    const racingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property !== 'rename') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.rename>) => {
+          await nodeFs.rename(...args);
+          if (!inserted && String(args[0]) === slotFile) {
+            inserted = true;
+            await nodeFs.writeFile(pendingFile, mismatchedPendingBytes);
+          }
+        };
+      },
+    }) as typeof nodeFs;
+    const racingMailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      fs: racingFs,
+      now: () => NOW,
+      createId: () => 'lease_receipt_first_pending_race',
+      waitMs: WAIT_MS,
+    });
+
+    await expect(racingMailbox.finish(projectId, commandId)).rejects.toMatchObject({ code: 'storage_error' });
+
+    expect(inserted).toBe(true);
+    await expect(nodeFs.readFile(pendingFile, 'utf8')).resolves.toBe(mismatchedPendingBytes);
+    await expect(nodeFs.readFile(slotFile, 'utf8')).resolves.toBe(slotBytes);
+    await expect(nodeFs.readFile(receiptFile, 'utf8')).resolves.toBe(receiptBytes);
+    await racingMailbox.dispose();
+  });
+
+  it('restores its main lease when the correlated pending inode changes during lease quarantine', async () => {
+    await mailbox.ensure(projectId);
+    const canonicalRoot = await nodeFs.realpath(rootDir);
+    const directories = commandDirectories(canonicalRoot, projectId);
+    const commandId = 'command_pending_lease_race';
+    const pendingFile = path.join(directories.pending, `${commandId}.json`);
+    const slotFile = path.join(directories.slots, '0.slot');
+    const leaseFile = path.join(directories.slots, '0.slot.lease');
+    const receiptFile = path.join(directories.receipts, `${commandId}.json`);
+    const pendingBytes = JSON.stringify(makeCommandV2(projectId, commandId));
+    const slotBytes = JSON.stringify(makeSlotV2(commandId));
+    const receipt = makeReceiptV2(projectId, commandId);
+    const receiptBytes = JSON.stringify(receipt);
+    await nodeFs.writeFile(pendingFile, pendingBytes);
+    await nodeFs.writeFile(slotFile, slotBytes);
+    await mailbox.writeReceipt(projectId, receipt);
+    const originalPending = await nodeFs.lstat(pendingFile);
+    let leasePublished = false;
+    let freshSlotFailed = false;
+    let pendingReplaced = false;
+    const racingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property === 'link') {
+          return async (...args: Parameters<typeof nodeFs.link>) => {
+            await nodeFs.link(...args);
+            if (String(args[1]) === leaseFile) leasePublished = true;
+          };
+        }
+        if (property === 'open') {
+          return async (...args: Parameters<typeof nodeFs.open>) => {
+            if (leasePublished && !freshSlotFailed && String(args[0]) === slotFile) {
+              freshSlotFailed = true;
+              throw Object.assign(new Error('fresh slot read failed'), { code: 'EIO' });
+            }
+            return nodeFs.open(...args);
+          };
+        }
+        if (property !== 'rename') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.rename>) => {
+          await nodeFs.rename(...args);
+          if (freshSlotFailed && !pendingReplaced && String(args[0]) === leaseFile) {
+            const replacement = `${pendingFile}.replacement`;
+            await nodeFs.writeFile(replacement, pendingBytes);
+            await nodeFs.rename(replacement, pendingFile);
+            pendingReplaced = true;
+          }
+        };
+      },
+    }) as typeof nodeFs;
+    const racingMailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      fs: racingFs,
+      now: () => NOW,
+      createId: () => 'lease_pending_inode_race',
+      waitMs: WAIT_MS,
+    });
+
+    await expect(racingMailbox.finish(projectId, commandId)).rejects.toMatchObject({ code: 'storage_error' });
+
+    expect(freshSlotFailed).toBe(true);
+    expect(pendingReplaced).toBe(true);
+    await expect(nodeFs.readFile(pendingFile, 'utf8')).resolves.toBe(pendingBytes);
+    expect((await nodeFs.lstat(pendingFile)).ino).not.toBe(originalPending.ino);
+    await expect(nodeFs.readFile(slotFile, 'utf8')).resolves.toBe(slotBytes);
+    await expect(nodeFs.readFile(receiptFile, 'utf8')).resolves.toBe(receiptBytes);
+    await expect(nodeFs.readFile(leaseFile, 'utf8')).resolves.toContain('"leaseId":"lease_pending_inode_race"');
+    await racingMailbox.dispose();
+  });
+
   it('rechecks V2 project classification after reading pending and slot records', async () => {
     await mailbox.ensure(projectId);
     const canonicalRoot = await nodeFs.realpath(rootDir);
