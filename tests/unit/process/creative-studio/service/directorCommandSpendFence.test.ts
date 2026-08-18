@@ -81,7 +81,7 @@ const waitForReceipt = async (
   throw new Error(`Timed out waiting for receipt ${commandId}`);
 };
 
-const directorClipV2 = () => ({
+const directorShotV2 = () => ({
   shotPrompt: 'A clean product composition',
   narration: '',
   onScreenText: '',
@@ -134,7 +134,7 @@ describe('Studio Director dynamic spend fence', () => {
     const serviceRetryJob = vi.fn(async () => {
       throw new Error('ordinary service retry must stay unreachable');
     });
-    const serviceSubmitClips = vi.fn(async () => {
+    const serviceSubmitShots = vi.fn(async () => {
       throw new Error('V2 service submit must stay unreachable');
     });
     const serviceRetryDownload = vi.fn(async () => {
@@ -152,7 +152,7 @@ describe('Studio Director dynamic spend fence', () => {
     const jobRetry = vi.fn(async () => {
       throw new Error('job manager retry must stay unreachable');
     });
-    const jobSubmitClips = vi.fn(async () => {
+    const jobSubmitShots = vi.fn(async () => {
       throw new Error('V2 job manager submit must stay unreachable');
     });
     const jobRetryV2 = vi.fn(async () => {
@@ -227,14 +227,14 @@ describe('Studio Director dynamic spend fence', () => {
     const processorService = Object.assign(directorService, {
       submitScenes: serviceSubmitScenes,
       retryJob: serviceRetryJob,
-      submitClips: serviceSubmitClips,
+      submitShots: serviceSubmitShots,
       retryDownload: serviceRetryDownload,
       cancelJob: serviceCancelJob,
       renderCut: serviceRender,
       jobManager: {
         submitScenes: jobSubmit,
         retryJob: jobRetry,
-        submitClips: jobSubmitClips,
+        submitShots: jobSubmitShots,
         retryJobV2: jobRetryV2,
         retryDownloadV2: jobRetryDownloadV2,
         cancelJobV2: jobCancelV2,
@@ -314,13 +314,13 @@ describe('Studio Director dynamic spend fence', () => {
     });
     expect(serviceSubmitScenes).not.toHaveBeenCalled();
     expect(serviceRetryJob).not.toHaveBeenCalled();
-    expect(serviceSubmitClips).not.toHaveBeenCalled();
+    expect(serviceSubmitShots).not.toHaveBeenCalled();
     expect(serviceRetryDownload).not.toHaveBeenCalled();
     expect(serviceCancelJob).not.toHaveBeenCalled();
     expect(serviceRender).not.toHaveBeenCalled();
     expect(jobSubmit).not.toHaveBeenCalled();
     expect(jobRetry).not.toHaveBeenCalled();
-    expect(jobSubmitClips).not.toHaveBeenCalled();
+    expect(jobSubmitShots).not.toHaveBeenCalled();
     expect(jobRetryV2).not.toHaveBeenCalled();
     expect(jobRetryDownloadV2).not.toHaveBeenCalled();
     expect(jobCancelV2).not.toHaveBeenCalled();
@@ -401,7 +401,7 @@ describe('Studio Director dynamic spend fence', () => {
         sectionId: 'section_1',
         section: { title: 'Opening', storyLine: '', visualPrompt: 'Warm sunrise' },
         firstClipId: 'clip_1',
-        firstClip: directorClipV2(),
+        firstClip: directorShotV2(),
         beforeSectionId: null,
       },
       {
@@ -409,14 +409,14 @@ describe('Studio Director dynamic spend fence', () => {
         sectionId: 'section_2',
         section: { title: 'Close', storyLine: '', visualPrompt: 'Soft evening light' },
         firstClipId: 'clip_2',
-        firstClip: directorClipV2(),
+        firstClip: directorShotV2(),
         beforeSectionId: null,
       },
       {
         kind: 'add_clip',
         sectionId: 'section_1',
         clipId: 'clip_3',
-        clip: directorClipV2(),
+        clip: directorShotV2(),
         beforeClipId: null,
       },
     ]);

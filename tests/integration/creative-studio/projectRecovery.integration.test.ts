@@ -19,7 +19,7 @@ import { createCreativeStudioService } from '@process/services/creative-studio/s
 import {
   createStudioJobManager,
   type StudioJobManager,
-  type StudioResolvedClipRouteSnapshotV2,
+  type StudioResolvedShotRouteSnapshotV2,
   type StudioResolvedSceneRouteSnapshot,
 } from '@process/services/creative-studio/jobManager';
 import { createStudioMediaStore } from '@process/services/creative-studio/mediaStore';
@@ -670,7 +670,7 @@ describe('Creative Studio project recovery integration', () => {
       const catalog = await providerResolver.listGenerationRoutes();
       const imageRoute = catalog.routes.find((candidate) => candidate.kind === 'image');
       if (!imageRoute) throw new Error('V2 recovery did not resolve the fake image route');
-      const route: StudioResolvedClipRouteSnapshotV2 = {
+      const route: StudioResolvedShotRouteSnapshotV2 = {
         clipId: 'clip_recovery',
         providerId: imageRoute.providerId,
         adapterId: imageRoute.adapterId,
@@ -740,7 +740,7 @@ describe('Creative Studio project recovery integration', () => {
       });
       managers.push({ manager: before, clock: beforeClock });
 
-      await before.submitClips({
+      await before.submitShots({
         projectId: configured.id,
         expectedRevision: configured.revision,
         clipIds: ['clip_recovery'],

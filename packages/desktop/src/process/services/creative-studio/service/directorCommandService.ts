@@ -253,8 +253,8 @@ export const createStudioDirectorCommandServiceV2 = (
   const now = deps.now ?? Date.now;
   return {
     async apply(command, latestApplyStartMs, attribution) {
-      let createdSectionIds: string[] = [];
-      let createdClipIds: string[] = [];
+      let createdBeatIds: string[] = [];
+      let createdShotIds: string[] = [];
       try {
         const project = await deps.store.updateProjectV2(
           command.projectId,
@@ -267,8 +267,8 @@ export const createStudioDirectorCommandServiceV2 = (
                 expectedRevision: command.expectedRevision,
                 operations: command.operations,
               });
-              createdSectionIds = [...applied.createdSectionIds];
-              createdClipIds = [...applied.createdClipIds];
+              createdBeatIds = [...applied.createdSectionIds];
+              createdShotIds = [...applied.createdClipIds];
               return applied.project;
             } catch (error) {
               if (error instanceof StudioDirectorCommandApplyErrorV2) throw error;
@@ -282,8 +282,8 @@ export const createStudioDirectorCommandServiceV2 = (
         return {
           project,
           appliedRevision: project.revision,
-          createdSectionIds: [...createdSectionIds],
-          createdClipIds: [...createdClipIds],
+          createdSectionIds: [...createdBeatIds],
+          createdClipIds: [...createdShotIds],
         };
       } catch (error) {
         if (error instanceof StudioDirectorCommandApplyErrorV2 || isProjectStoreErrorV2(error)) throw error;

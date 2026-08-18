@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type { StudioAsset, StudioAssetV2, StudioClip, StudioScene } from '@/common/types/project/creativeStudioTypes';
+import type { StudioAsset, StudioAssetV2, StudioShot, StudioScene } from '@/common/types/project/creativeStudioTypes';
 import {
   isCanonicalStudioGeneratedTake,
   isCanonicalStudioGeneratedTakeV2,
@@ -99,7 +99,7 @@ describe('isCanonicalStudioGeneratedTake', () => {
   });
 });
 
-const makeClip = (overrides: Partial<StudioClip> = {}): StudioClip => ({
+const makeShot = (overrides: Partial<StudioShot> = {}): StudioShot => ({
   id: 'clip_1',
   shotPrompt: 'A product reveal',
   narration: '',
@@ -132,42 +132,42 @@ describe('isCanonicalStudioGeneratedTakeV2', () => {
       label: 'accepts a matching generated take',
       asset: makeAssetV2(),
       projectId: 'project_1',
-      clip: makeClip(),
+      clip: makeShot(),
       expected: true,
     },
     {
       label: 'rejects a take from another project',
       asset: makeAssetV2({ projectId: 'project_2' }),
       projectId: 'project_1',
-      clip: makeClip(),
+      clip: makeShot(),
       expected: false,
     },
     {
       label: 'rejects a take from another clip',
       asset: makeAssetV2({ clipId: 'clip_2' }),
       projectId: 'project_1',
-      clip: makeClip(),
+      clip: makeShot(),
       expected: false,
     },
     {
       label: 'rejects a take with a different media kind',
       asset: makeAssetV2({ mediaKind: 'video', mimeType: 'video/mp4', durationSeconds: 4 }),
       projectId: 'project_1',
-      clip: makeClip(),
+      clip: makeShot(),
       expected: false,
     },
     {
       label: 'rejects an imported asset',
       asset: makeAssetV2({ managedAsset: { collection: 'imports', fileName: 'asset_1.png' } }),
       projectId: 'project_1',
-      clip: makeClip(),
+      clip: makeShot(),
       expected: false,
     },
     {
       label: 'rejects a take absent from the clip asset index',
       asset: makeAssetV2(),
       projectId: 'project_1',
-      clip: makeClip({ assetIds: [] }),
+      clip: makeShot({ assetIds: [] }),
       expected: false,
     },
   ])('$label', ({ asset, projectId, clip, expected }) => {

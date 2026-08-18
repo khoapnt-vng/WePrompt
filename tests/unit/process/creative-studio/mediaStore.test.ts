@@ -220,7 +220,7 @@ const makeStoreV2 = async (
   options: {
     mediaKind?: 'image' | 'video';
     outputRole?: StudioOutputRole;
-    addSecondClip?: boolean;
+    addSecondShot?: boolean;
   } = {}
 ) => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-media-v2-'));
@@ -253,7 +253,7 @@ const makeStoreV2 = async (
       },
       beforeSectionId: null,
     },
-    ...(options.addSecondClip
+    ...(options.addSecondShot
       ? [
           {
             kind: 'add_section' as const,
@@ -273,13 +273,13 @@ const makeStoreV2 = async (
         ]
       : []),
   ];
-  const withClips = await store.applyMutationBatchV2({
+  const withShots = await store.applyMutationBatchV2({
     schemaVersion: 2,
     projectId: createdProject.id,
     expectedRevision: createdProject.revision,
     operations,
   });
-  const project = await store.updateProjectV2(withClips.project.id, (current) => {
+  const project = await store.updateProjectV2(withShots.project.id, (current) => {
     const next = structuredClone(current);
     next.jobs.job_1 = {
       id: 'job_1',
@@ -2768,7 +2768,7 @@ describe('createStudioMediaStore schema 2', () => {
   });
 
   it('rejects foreign-clip and wrong-kind outputs before consuming either body', async () => {
-    const { rootDir, store, project } = await makeStoreV2({ addSecondClip: true });
+    const { rootDir, store, project } = await makeStoreV2({ addSecondShot: true });
     const media = createStudioMediaStore({ store, createId: idSequence('foreign_take', 'wrong_kind_take') });
     let consumed = 0;
     const body = async function* (bytes: Buffer): AsyncGenerator<Buffer> {
@@ -3809,7 +3809,7 @@ describe('createStudioMediaStore schema 2', () => {
   });
 
   it('attaches a provider poster to its exact video lineage without replacing a newer selection', async () => {
-    const { store, project } = await makeStoreV2({ mediaKind: 'video', addSecondClip: true });
+    const { store, project } = await makeStoreV2({ mediaKind: 'video', addSecondShot: true });
     const media = createStudioMediaStore({ store, createId: idSequence('video_1', 'poster_1') });
     const primary = await media.persistProviderOutputForJobV2({
       projectId: project.id,

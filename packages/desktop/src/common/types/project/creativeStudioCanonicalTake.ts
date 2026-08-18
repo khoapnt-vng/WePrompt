@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { StudioAsset, StudioAssetV2, StudioClip, StudioScene } from './creativeStudioTypes';
+import type { StudioAsset, StudioAssetV2, StudioShot, StudioScene } from './creativeStudioTypes';
 
 /** Returns whether an asset is the generated take owned and indexed by a scene. */
 export const isCanonicalStudioGeneratedTake = (asset: StudioAsset, projectId: string, scene: StudioScene): boolean =>
@@ -15,9 +15,9 @@ export const isCanonicalStudioGeneratedTake = (asset: StudioAsset, projectId: st
   scene.assetIds.includes(asset.id);
 
 /** Returns whether an asset is the generated take owned and indexed by a schema-2 clip. */
-export const isCanonicalStudioGeneratedTakeV2 = (asset: StudioAssetV2, projectId: string, clip: StudioClip): boolean =>
+export const isCanonicalStudioGeneratedTakeV2 = (asset: StudioAssetV2, projectId: string, shot: StudioShot): boolean =>
   asset.projectId === projectId &&
-  asset.clipId === clip.id &&
-  asset.mediaKind === clip.mediaKind &&
+  asset.clipId === shot.id &&
+  asset.mediaKind === shot.mediaKind &&
   asset.managedAsset.collection === 'assets' &&
-  clip.assetIds.includes(asset.id);
+  shot.assetIds.includes(asset.id);

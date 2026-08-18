@@ -1503,10 +1503,10 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
                 };
           defineRecordValue(next.assets, asset.id, asset);
           if (asset.clipId !== null) {
-            const clip = ownRecordValue(next.clips, asset.clipId);
-            if (clip === undefined) throw new CreativeStudioMediaError('not_found');
-            clip.assetIds.push(asset.id);
-            clip.referenceAssetId = asset.id;
+            const shot = ownRecordValue(next.clips, asset.clipId);
+            if (shot === undefined) throw new CreativeStudioMediaError('not_found');
+            shot.assetIds.push(asset.id);
+            shot.referenceAssetId = asset.id;
           }
           importedAsset = asset;
           return next;
@@ -2255,11 +2255,11 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     }
   };
 
-  const owningSectionForClipV2 = (
+  const owningBeatForShotV2 = (
     project: StudioProjectV2,
-    clipId: string
+    shotId: string
   ): StudioProjectV2['sections'][string] | null => {
-    const owners = Object.values(project.sections).filter((section) => section.clipOrder.includes(clipId));
+    const owners = Object.values(project.sections).filter((beat) => beat.clipOrder.includes(shotId));
     return owners.length === 1 ? owners[0]! : null;
   };
 
@@ -2325,24 +2325,24 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
   const prepareProviderJobWriteV2 = async (input: ProviderJobOutputMetadataV2): Promise<ManagedWritePlanV2> => {
     validateProviderOutputMetadataV2(input);
     const { projectDir, project, authority } = await loadProjectContextV2(input.projectId);
-    const clip = ownRecordValue(project.clips, input.clipId);
+    const shot = ownRecordValue(project.clips, input.clipId);
     const job = ownRecordValue(project.jobs, input.jobId);
-    const section = owningSectionForClipV2(project, input.clipId);
+    const beat = owningBeatForShotV2(project, input.clipId);
     const role = job ? jobOutputRole(job) : null;
     const mediaKindMatchesRole =
-      role === 'reference' ? input.mediaKind === 'image' : clip?.mediaKind === input.mediaKind;
-    if (clip && !mediaKindMatchesRole) throw new CreativeStudioMediaError('invalid_media');
+      role === 'reference' ? input.mediaKind === 'image' : shot?.mediaKind === input.mediaKind;
+    if (shot && !mediaKindMatchesRole) throw new CreativeStudioMediaError('invalid_media');
     const active =
       job?.status === 'submitting' ||
       job?.status === 'running' ||
       (job?.status === 'failed' && job.error?.code === 'download_failed');
     if (
-      !clip ||
-      !section ||
+      !shot ||
+      !beat ||
       !job ||
       job.projectId !== input.projectId ||
       job.clipId !== input.clipId ||
-      !clip.jobIds.includes(job.id) ||
+      !shot.jobIds.includes(job.id) ||
       !mediaKindMatchesRole ||
       !active
     ) {
@@ -2411,11 +2411,11 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
   const validateProviderPosterLineageV2 = (
     project: StudioProjectV2,
     input: ProviderJobPosterMetadataV2
-  ): { clip: StudioProjectV2['clips'][string]; job: StudioProjectV2['jobs'][string] } => {
-    const clip = ownRecordValue(project.clips, input.clipId);
+  ): { shot: StudioProjectV2['clips'][string]; job: StudioProjectV2['jobs'][string] } => {
+    const shot = ownRecordValue(project.clips, input.clipId);
     const job = ownRecordValue(project.jobs, input.jobId);
-    if (!clip || !job) throw new CreativeStudioMediaError('not_found');
-    if (clip.mediaKind !== 'video') throw new CreativeStudioMediaError('invalid_media');
+    if (!shot || !job) throw new CreativeStudioMediaError('not_found');
+    if (shot.mediaKind !== 'video') throw new CreativeStudioMediaError('invalid_media');
     if (job.status !== 'succeeded') throw new CreativeStudioMediaError('job_inactive');
     const primary = ownRecordValue(project.assets, input.primaryAssetId);
     if (
@@ -2433,12 +2433,12 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       job.clipId !== input.clipId ||
       job.outputAssetIds.length !== 1 ||
       job.outputAssetIds[0] !== input.primaryAssetId ||
-      !clip.assetIds.includes(input.primaryAssetId) ||
-      !clip.jobIds.includes(input.jobId)
+      !shot.assetIds.includes(input.primaryAssetId) ||
+      !shot.jobIds.includes(input.jobId)
     ) {
       throw new CreativeStudioMediaError('job_inactive');
     }
-    return { clip, job };
+    return { shot, job };
   };
 
   const prepareProviderPosterWriteV2 = async (input: ProviderJobPosterMetadataV2): Promise<ManagedWritePlanV2> => {
@@ -2524,14 +2524,14 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
   const validateCapturedPosterLineageV2 = (
     project: StudioProjectV2,
     input: CapturedPosterMetadataV2
-  ): { clip: StudioProjectV2['clips'][string]; job: StudioProjectV2['jobs'][string] } => {
-    const clip = ownRecordValue(project.clips, input.clipId);
+  ): { shot: StudioProjectV2['clips'][string]; job: StudioProjectV2['jobs'][string] } => {
+    const shot = ownRecordValue(project.clips, input.clipId);
     const video = ownRecordValue(project.assets, input.videoAssetId);
-    if (!clip || !video) throw new CreativeStudioMediaError('not_found');
+    if (!shot || !video) throw new CreativeStudioMediaError('not_found');
     if (
-      clip.mediaKind !== 'video' ||
-      clip.selectedAssetId !== input.videoAssetId ||
-      !clip.assetIds.includes(input.videoAssetId) ||
+      shot.mediaKind !== 'video' ||
+      shot.selectedAssetId !== input.videoAssetId ||
+      !shot.assetIds.includes(input.videoAssetId) ||
       video.projectId !== input.projectId ||
       video.clipId !== input.clipId ||
       video.mediaKind !== 'video' ||
@@ -2539,7 +2539,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     ) {
       throw new CreativeStudioMediaError('job_inactive');
     }
-    const producers = clip.jobIds.flatMap((jobId) => {
+    const producers = shot.jobIds.flatMap((jobId) => {
       const job = ownRecordValue(project.jobs, jobId);
       return job?.projectId === input.projectId &&
         job.clipId === input.clipId &&
@@ -2551,7 +2551,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         : [];
     });
     if (producers.length !== 1) throw new CreativeStudioMediaError('job_inactive');
-    return { clip, job: producers[0]! };
+    return { shot, job: producers[0]! };
   };
 
   const prepareCapturedPosterWriteV2 = async (input: CapturedPosterMetadataV2): Promise<ManagedWritePlanV2> => {
@@ -3028,25 +3028,25 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
   const commitProviderJobAssetV2 = async (input: ProviderJobOutputMetadataV2, asset: StudioAssetV2): Promise<void> => {
     await deps.store.updateProjectV2(input.projectId, (current) => {
       const job = ownRecordValue(current.jobs, input.jobId);
-      const clip = ownRecordValue(current.clips, input.clipId);
-      const section = owningSectionForClipV2(current, input.clipId);
+      const shot = ownRecordValue(current.clips, input.clipId);
+      const beat = owningBeatForShotV2(current, input.clipId);
       const active =
         job?.status === 'submitting' ||
         job?.status === 'running' ||
         (job?.status === 'failed' && job.error?.code === 'download_failed');
       if (
         !job ||
-        !clip ||
-        !section ||
+        !shot ||
+        !beat ||
         job.projectId !== input.projectId ||
         job.clipId !== input.clipId ||
-        !clip.jobIds.includes(job.id) ||
+        !shot.jobIds.includes(job.id) ||
         !active
       ) {
         throw new CreativeStudioMediaError('job_inactive');
       }
       const role = jobOutputRole(job);
-      if (role === 'take' && clip.mediaKind !== input.mediaKind) {
+      if (role === 'take' && shot.mediaKind !== input.mediaKind) {
         throw new CreativeStudioMediaError('job_inactive');
       }
       if (role === 'reference' && input.mediaKind !== 'image') {
@@ -3054,7 +3054,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       }
       if (
         asset.projectId !== current.id ||
-        asset.clipId !== clip.id ||
+        asset.clipId !== shot.id ||
         asset.mediaKind !== input.mediaKind ||
         asset.managedAsset.collection !== (role === 'reference' ? 'references' : 'assets')
       ) {
@@ -3070,18 +3070,18 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         asset.sourceAspectRatio = job.referenceInputSnapshot.aspectRatio;
         asset.sourceResolution = job.referenceInputSnapshot.resolution;
       } else {
-        asset.sourceVisualPrompt = `${section.visualPrompt.trim()}\n\n${clip.shotPrompt.trim()}`;
+        asset.sourceVisualPrompt = `${beat.visualPrompt.trim()}\n\n${shot.shotPrompt.trim()}`;
       }
       defineRecordValue(current.assets, asset.id, asset);
-      clip.assetIds.push(asset.id);
-      if (role === 'reference') clip.referenceAssetId = asset.id;
-      else clip.selectedAssetId = asset.id;
+      shot.assetIds.push(asset.id);
+      if (role === 'reference') shot.referenceAssetId = asset.id;
+      else shot.selectedAssetId = asset.id;
       job.status = 'succeeded';
       job.outputAssetIds = [asset.id];
       job.error = null;
       delete job.progress;
       job.updatedAt = now();
-      return role === 'take' ? reconcileStudioCutsV2(current, { kind: 'selection', clipId: clip.id }) : current;
+      return role === 'take' ? reconcileStudioCutsV2(current, { kind: 'selection', clipId: shot.id }) : current;
     });
   };
 
@@ -3120,10 +3120,10 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     posterAsset: StudioAssetV2
   ): Promise<void> => {
     await deps.store.updateProjectV2(input.projectId, (current) => {
-      const { clip, job } = validateProviderPosterLineageV2(current, input);
+      const { shot, job } = validateProviderPosterLineageV2(current, input);
       if (
         posterAsset.projectId !== current.id ||
-        posterAsset.clipId !== clip.id ||
+        posterAsset.clipId !== shot.id ||
         posterAsset.mediaKind !== 'image' ||
         posterAsset.managedAsset.collection !== 'thumbnails'
       ) {
@@ -3134,7 +3134,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         throw new CreativeStudioMediaError('invalid_media');
       }
       defineRecordValue(current.assets, posterAsset.id, posterAsset);
-      clip.assetIds.push(posterAsset.id);
+      shot.assetIds.push(posterAsset.id);
       job.outputAssetIds.push(posterAsset.id);
       job.updatedAt = now();
       return current;
@@ -3174,10 +3174,10 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
 
   const commitCapturedPosterV2 = async (input: CapturedPosterMetadataV2, posterAsset: StudioAssetV2): Promise<void> => {
     await deps.store.updateProjectV2(input.projectId, (current) => {
-      const { clip, job } = validateCapturedPosterLineageV2(current, input);
+      const { shot, job } = validateCapturedPosterLineageV2(current, input);
       if (
         posterAsset.projectId !== current.id ||
-        posterAsset.clipId !== clip.id ||
+        posterAsset.clipId !== shot.id ||
         posterAsset.mediaKind !== 'image' ||
         posterAsset.managedAsset.collection !== 'thumbnails'
       ) {
@@ -3188,7 +3188,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         throw new CreativeStudioMediaError('invalid_media');
       }
       defineRecordValue(current.assets, posterAsset.id, posterAsset);
-      clip.assetIds.push(posterAsset.id);
+      shot.assetIds.push(posterAsset.id);
       job.outputAssetIds.push(posterAsset.id);
       job.updatedAt = now();
       return current;

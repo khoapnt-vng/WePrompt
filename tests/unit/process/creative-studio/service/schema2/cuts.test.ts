@@ -9,11 +9,11 @@
 import { describe, expect, it } from 'vitest';
 import type {
   StudioAssetV2,
-  StudioClip,
+  StudioShot,
   StudioCutClipV2,
   StudioCutV2,
   StudioProjectV2,
-  StudioSection,
+  StudioBeat,
 } from '@/common/types/project/creativeStudioTypes';
 import {
   reconcileStudioCutsV2,
@@ -23,7 +23,7 @@ import { validateStudioProjectV2 } from '@/process/services/creative-studio/serv
 
 const timestamp = '2026-08-17T00:00:00.000Z';
 
-const makeClip = (id: string, selectedAssetId: string): StudioClip => ({
+const makeShot = (id: string, selectedAssetId: string): StudioShot => ({
   id,
   shotPrompt: '',
   narration: '',
@@ -36,7 +36,7 @@ const makeClip = (id: string, selectedAssetId: string): StudioClip => ({
   jobIds: [],
 });
 
-const makeSection = (id: string, clipOrder: string[]): StudioSection => ({
+const makeBeat = (id: string, clipOrder: string[]): StudioBeat => ({
   id,
   title: '',
   storyLine: '',
@@ -93,12 +93,12 @@ const makeProject = (): StudioProjectV2 => ({
   resolution: '1080p',
   sectionOrder: ['section_1', 'section_2'],
   sections: {
-    section_1: makeSection('section_1', ['clip_1']),
-    section_2: makeSection('section_2', ['clip_2']),
+    section_1: makeBeat('section_1', ['clip_1']),
+    section_2: makeBeat('section_2', ['clip_2']),
   },
   clips: {
-    clip_1: makeClip('clip_1', 'asset_1'),
-    clip_2: makeClip('clip_2', 'asset_2'),
+    clip_1: makeShot('clip_1', 'asset_1'),
+    clip_2: makeShot('clip_2', 'asset_2'),
   },
   shelf: [],
   cuts: {},

@@ -6,7 +6,7 @@
 
 import type {
   StudioAssetV2,
-  StudioClip,
+  StudioShot,
   StudioCutClipV2,
   StudioCutV2,
   StudioProjectV2,
@@ -24,7 +24,7 @@ const ownValue = <T>(record: Record<string, T>, id: string): T | undefined =>
 
 const isCanonicalGeneratedTake = (
   project: StudioProjectV2,
-  clip: StudioClip,
+  clip: StudioShot,
   asset: StudioAssetV2,
   clipAssetIdsByClipId: ReadonlyMap<string, ReadonlySet<string>>
 ): boolean =>
@@ -36,7 +36,7 @@ const isCanonicalGeneratedTake = (
 
 const selectedTake = (
   project: StudioProjectV2,
-  clip: StudioClip,
+  clip: StudioShot,
   clipAssetIdsByClipId: ReadonlyMap<string, ReadonlySet<string>>
 ): StudioAssetV2 | null => {
   if (clip.selectedAssetId === null) return null;
@@ -79,7 +79,7 @@ const clampCutClipToAsset = (cutClip: StudioCutClipV2, asset: StudioAssetV2): St
   };
 };
 
-const pristineCutClip = (clip: StudioClip, asset: StudioAssetV2, id: string): StudioCutClipV2 => ({
+const pristineCutClip = (clip: StudioShot, asset: StudioAssetV2, id: string): StudioCutClipV2 => ({
   id,
   clipId: clip.id,
   assetId: asset.id,

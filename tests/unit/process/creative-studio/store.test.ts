@@ -25,7 +25,7 @@ import type {
   CreateStudioProjectInputV2,
   StudioAsset,
   StudioAssetV2,
-  StudioClip,
+  StudioShot,
   StudioConnectionBinding,
   StudioConnectionCandidate,
   StudioConnectionInventory,
@@ -3508,7 +3508,7 @@ describe('schema-2 creative studio project store', () => {
 
   const makePosterProjectV2 = (id = 'poster_v2'): StudioProjectV2 => {
     const project = createEmptyStudioProjectV2(inputV2, id, timestamp);
-    const clip: StudioClip = {
+    const shot: StudioShot = {
       id: 'clip_video',
       shotPrompt: 'A launch vehicle crosses frame',
       narration: '',
@@ -3523,7 +3523,7 @@ describe('schema-2 creative studio project store', () => {
     const video: StudioAssetV2 = {
       id: 'asset_video',
       projectId: id,
-      clipId: clip.id,
+      clipId: shot.id,
       mediaKind: 'video',
       mimeType: 'video/mp4',
       managedAsset: { collection: 'assets', fileName: 'asset_video.mp4' },
@@ -3535,7 +3535,7 @@ describe('schema-2 creative studio project store', () => {
     const thumbnail: StudioAssetV2 = {
       id: 'asset_thumbnail',
       projectId: id,
-      clipId: clip.id,
+      clipId: shot.id,
       mediaKind: 'image',
       mimeType: 'image/png',
       managedAsset: { collection: 'thumbnails', fileName: 'asset_thumbnail.png' },
@@ -3546,7 +3546,7 @@ describe('schema-2 creative studio project store', () => {
     const job: StudioJobV2 = {
       id: 'job_video',
       projectId: id,
-      clipId: clip.id,
+      clipId: shot.id,
       status: 'succeeded',
       provider: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'model_1' },
       idempotencyKey: 'idem_job_video',
@@ -3568,9 +3568,9 @@ describe('schema-2 creative studio project store', () => {
       title: 'Opening',
       storyLine: '',
       visualPrompt: '',
-      clipOrder: [clip.id],
+      clipOrder: [shot.id],
     };
-    project.clips[clip.id] = clip;
+    project.clips[shot.id] = shot;
     project.assets = { [video.id]: video, [thumbnail.id]: thumbnail };
     project.jobs[job.id] = job;
     return project;

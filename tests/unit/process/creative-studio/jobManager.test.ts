@@ -41,7 +41,7 @@ import {
   createStudioJobManager,
   type StudioJobManager,
   type StudioJobManagerV2,
-  type StudioResolvedClipRouteSnapshotV2,
+  type StudioResolvedShotRouteSnapshotV2,
   type StudioJobManagerDeps,
   type StudioResolvedSceneRouteSnapshot,
 } from '@process/services/creative-studio/jobManager';
@@ -80,7 +80,7 @@ const route: StudioResolvedSceneRouteSnapshot = {
   kind: 'image',
 };
 
-const clipRoute: StudioResolvedClipRouteSnapshotV2 = {
+const shotRoute: StudioResolvedShotRouteSnapshotV2 = {
   clipId: 'clip_1',
   providerId: provider.id,
   adapterId: 'weprompt-image-v1',
@@ -89,7 +89,7 @@ const clipRoute: StudioResolvedClipRouteSnapshotV2 = {
 };
 
 const v2Catalog = (
-  routeSnapshot: StudioResolvedClipRouteSnapshotV2 = clipRoute,
+  routeSnapshot: StudioResolvedShotRouteSnapshotV2 = shotRoute,
   constraintOverrides: Partial<StudioRouteConstraints> = {}
 ): StudioGenerationRouteCatalog => ({
   routes: [
@@ -334,7 +334,7 @@ type V2Harness = {
 type V2HarnessOptions = {
   visualPrompt?: string;
   shotPrompt?: string;
-  route?: StudioResolvedClipRouteSnapshotV2;
+  route?: StudioResolvedShotRouteSnapshotV2;
   jobIds?: string[];
   idempotencyKeys?: string[];
   sleep?: (delayMs: number, signal: AbortSignal) => Promise<void>;
@@ -356,7 +356,7 @@ const createV2Harness = async (
 ): Promise<V2Harness> => {
   const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-job-manager-v2-'));
   const store = createCreativeStudioStore({ rootDir, fs: fsWithoutDiskBarriers });
-  const selectedRoute = options.route ?? clipRoute;
+  const selectedRoute = options.route ?? shotRoute;
   const created = await store.createProjectV2({
     name: 'V2 launch film',
     brief: 'A concise clip-owned launch story',
@@ -458,7 +458,7 @@ const seedV2Job = async (harness: V2Harness, overrides: Partial<StudioJobV2> = {
       projectId: project.id,
       clipId: 'clip_1',
       status: 'failed',
-      provider: selectionFor(clipRoute),
+      provider: selectionFor(shotRoute),
       idempotencyKey: 'key_v2_1',
       providerJobId: null,
       remoteStartedAt: null,
@@ -481,8 +481,8 @@ const seedV2Job = async (harness: V2Harness, overrides: Partial<StudioJobV2> = {
     return project;
   });
 
-const submitSingleClipV2 = (harness: V2Harness, selectedRoute = clipRoute) =>
-  harness.manager.submitClips({
+const submitSingleShotV2 = (harness: V2Harness, selectedRoute = shotRoute) =>
+  harness.manager.submitShots({
     projectId: harness.project.id,
     expectedRevision: harness.project.revision,
     clipIds: ['clip_1'],
@@ -7067,13 +7067,13 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
       };
       return project;
     });
-    const secondRoute = { ...clipRoute, clipId: 'clip_2' };
+    const secondRoute = { ...shotRoute, clipId: 'clip_2' };
 
-    const jobs = await harness.manager.submitClips({
+    const jobs = await harness.manager.submitShots({
       projectId: harness.project.id,
       expectedRevision: harness.project.revision,
       clipIds: ['clip_1', 'clip_2'],
-      routes: [clipRoute, secondRoute],
+      routes: [shotRoute, secondRoute],
       catalogVersion: 'catalog_v2',
       idempotencyKeys: [
         { clipId: 'clip_1', key: 'fixed_key_1' },
@@ -7120,11 +7120,11 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     });
 
     await expect(
-      harness.manager.submitClips({
+      harness.manager.submitShots({
         projectId: harness.project.id,
         expectedRevision: harness.project.revision,
         clipIds: ['clip_1'],
-        routes: [clipRoute],
+        routes: [shotRoute],
         catalogVersion: 'catalog_v2',
       })
     ).rejects.toMatchObject({ code: 'invalid_request' });
@@ -7296,11 +7296,11 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     }));
 
     await expect(
-      harness.manager.submitClips({
+      harness.manager.submitShots({
         projectId: harness.project.id,
         expectedRevision: harness.project.revision,
         clipIds: ['clip_1'],
-        routes: [clipRoute],
+        routes: [shotRoute],
         catalogVersion: 'catalog_v2',
       })
     ).rejects.toMatchObject({ code: 'stale_project' });
@@ -7330,11 +7330,11 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
       idempotencyKeys: ['key_v2_1', 'key_v2_2'],
     });
 
-    await harness.manager.submitClips({
+    await harness.manager.submitShots({
       projectId: harness.project.id,
       expectedRevision: harness.project.revision,
       clipIds: ['clip_1'],
-      routes: [clipRoute],
+      routes: [shotRoute],
       catalogVersion: 'catalog_v2',
     });
     await waitFor(async () => {
@@ -7434,22 +7434,22 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
       createIdempotencyKey: () => 'prototype',
     });
     harness.project = await harness.store.updateProjectV2(harness.project.id, (project) => {
-      const magicClip = { ...project.clips.clip_1, id: '__proto__' };
-      const clips: StudioProjectV2['clips'] = {};
-      Object.defineProperty(clips, '__proto__', {
-        value: magicClip,
+      const magicShot = { ...project.clips.clip_1, id: '__proto__' };
+      const shots: StudioProjectV2['clips'] = {};
+      Object.defineProperty(shots, '__proto__', {
+        value: magicShot,
         configurable: true,
         enumerable: true,
         writable: true,
       });
-      project.clips = clips;
+      project.clips = shots;
       project.sections.section_1.clipOrder = ['__proto__'];
       return project;
     });
-    const magicRoute = { ...clipRoute, clipId: '__proto__' };
+    const magicRoute = { ...shotRoute, clipId: '__proto__' };
 
     await expect(
-      harness.manager.submitClips({
+      harness.manager.submitShots({
         projectId: harness.project.id,
         expectedRevision: harness.project.revision,
         clipIds: ['__proto__'],
@@ -7477,18 +7477,18 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     {
       label: 'a sparse clip array',
       mutate: (request: Record<string, unknown>) => {
-        const clipIds: string[] = [];
-        clipIds.length = 1;
-        request.clipIds = clipIds;
+        const shotIds: string[] = [];
+        shotIds.length = 1;
+        request.clipIds = shotIds;
       },
     },
     {
       label: 'a key-count-compensated sparse clip array',
       mutate: (request: Record<string, unknown>) => {
-        const clipIds: string[] = [];
-        clipIds.length = 1;
-        Object.defineProperty(clipIds, 'extra', { value: true, enumerable: true });
-        request.clipIds = clipIds;
+        const shotIds: string[] = [];
+        shotIds.length = 1;
+        Object.defineProperty(shotIds, 'extra', { value: true, enumerable: true });
+        request.clipIds = shotIds;
       },
     },
     {
@@ -7500,7 +7500,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     {
       label: 'an extra route-entry key',
       mutate: (request: Record<string, unknown>) => {
-        request.routes = [{ ...clipRoute, sceneId: 'legacy_scene' }];
+        request.routes = [{ ...shotRoute, sceneId: 'legacy_scene' }];
       },
     },
     {
@@ -7560,12 +7560,12 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
       projectId: harness.project.id,
       expectedRevision: harness.project.revision,
       clipIds: ['clip_1'],
-      routes: [{ ...clipRoute }],
+      routes: [{ ...shotRoute }],
       catalogVersion: 'catalog_v2',
     };
     mutate(request);
 
-    await expect(harness.manager.submitClips(request as never)).rejects.toMatchObject({ code: 'invalid_request' });
+    await expect(harness.manager.submitShots(request as never)).rejects.toMatchObject({ code: 'invalid_request' });
     const loaded = await harness.store.getProjectV2(harness.project.id);
     expect(loaded.status === 'supported' ? loaded.project.jobs : null).toEqual({});
     expect(createJobId).not.toHaveBeenCalled();
@@ -7625,7 +7625,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     });
     const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit }));
 
-    await submitSingleClipV2(harness);
+    await submitSingleShotV2(harness);
     await expectV2Job(harness, { status, error: { code } });
 
     const loaded = await harness.store.getProjectV2(harness.project.id);
@@ -7746,7 +7746,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     outputPath = path.join(harness.rootDir, 'v2-primary.png');
     await writeFile(outputPath, png);
 
-    await submitSingleClipV2(harness);
+    await submitSingleShotV2(harness);
     await expectV2Job(harness, { status: 'succeeded', error: null, outputAssetIds: [expect.any(String)] });
 
     const loaded = await harness.store.getProjectV2(harness.project.id);
@@ -7774,7 +7774,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
       { outputDownloader }
     );
 
-    await submitSingleClipV2(harness);
+    await submitSingleShotV2(harness);
     await expectV2Job(harness, { status: 'succeeded', outputAssetIds: [expect.any(String)] });
     expect(outputDownloader).toHaveBeenCalledOnce();
     expect(outputDownloader.mock.calls[0]?.[3]).toEqual({ timeoutMs: 121_000 });
@@ -7828,7 +7828,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     async ({ outputs, code }) => {
       const harness = await createV2Harness(completeAdapter('weprompt-image-v1', outputs));
 
-      await submitSingleClipV2(harness);
+      await submitSingleShotV2(harness);
       await expectV2Job(harness, { status: 'failed', error: { code }, outputAssetIds: [] });
       const loaded = await harness.store.getProjectV2(harness.project.id);
       expect(loaded.status === 'supported' ? loaded.project.assets : null).toEqual({});
@@ -7868,7 +7868,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     outputPath = path.join(harness.rootDir, 'v2-remote.png');
     await writeFile(outputPath, png);
 
-    await submitSingleClipV2(harness);
+    await submitSingleShotV2(harness);
     await expectV2Job(harness, { status: 'succeeded', providerJobId: 'remote_v2_progress' });
     expect(poll).toHaveBeenCalledTimes(3);
     expect(delays).toEqual([2_000, 4_000, 8_000]);
@@ -7949,8 +7949,8 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
   });
 
   it('persists a local V2 video primary and its optional poster without delaying job success', async () => {
-    const videoRoute: StudioResolvedClipRouteSnapshotV2 = {
-      ...clipRoute,
+    const videoRoute: StudioResolvedShotRouteSnapshotV2 = {
+      ...shotRoute,
       adapterId: 'weprompt-media-gateway-v1',
       model: 'video-model',
       kind: 'video',
@@ -7985,7 +7985,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     posterPath = path.join(harness.rootDir, 'v2-poster.png');
     await Promise.all([writeFile(primaryPath, mp4), writeFile(posterPath, png)]);
 
-    await submitSingleClipV2(harness, videoRoute);
+    await submitSingleShotV2(harness, videoRoute);
     await waitFor(async () => {
       const loaded = await harness.store.getProjectV2(harness.project.id);
       if (loaded.status !== 'supported') throw new Error('V2 project disappeared');
@@ -8000,8 +8000,8 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
   });
 
   it('downloads a V2 poster independently after the local video primary commits', async () => {
-    const videoRoute: StudioResolvedClipRouteSnapshotV2 = {
-      ...clipRoute,
+    const videoRoute: StudioResolvedShotRouteSnapshotV2 = {
+      ...shotRoute,
       adapterId: 'weprompt-media-gateway-v1',
       model: 'video-model',
       kind: 'video',
@@ -8029,7 +8029,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     primaryPath = path.join(harness.rootDir, 'v2-primary-with-remote-poster.mp4');
     await writeFile(primaryPath, mp4);
 
-    await submitSingleClipV2(harness, videoRoute);
+    await submitSingleShotV2(harness, videoRoute);
     await waitFor(async () => {
       const loaded = await harness.store.getProjectV2(harness.project.id);
       if (loaded.status !== 'supported') throw new Error('V2 project disappeared');
@@ -8072,8 +8072,8 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
   ] satisfies Array<{ label: string; posters: ProviderOutput[] }>)(
     'keeps the successful V2 video primary when the provider returns $label',
     async ({ posters }) => {
-      const videoRoute: StudioResolvedClipRouteSnapshotV2 = {
-        ...clipRoute,
+      const videoRoute: StudioResolvedShotRouteSnapshotV2 = {
+        ...shotRoute,
         adapterId: 'weprompt-media-gateway-v1',
         model: 'video-model',
         kind: 'video',
@@ -8095,7 +8095,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
       primaryPath = path.join(harness.rootDir, `v2-primary-${posters.length}.mp4`);
       await writeFile(primaryPath, mp4);
 
-      await submitSingleClipV2(harness, videoRoute);
+      await submitSingleShotV2(harness, videoRoute);
       await expectV2Job(harness, { status: 'succeeded', outputAssetIds: [expect.any(String)] });
     }
   );
@@ -8117,11 +8117,11 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     });
     harness.project = imported.project;
 
-    const [job] = await harness.manager.submitClips({
+    const [job] = await harness.manager.submitShots({
       projectId: harness.project.id,
       expectedRevision: harness.project.revision,
       clipIds: ['clip_1'],
-      routes: [clipRoute],
+      routes: [shotRoute],
       catalogVersion: 'catalog_v2',
       outputRole: 'reference',
       referencePrompts: [{ clipId: 'clip_1', prompt: '  Portrait of the hero at sunrise  ' }],
@@ -8511,7 +8511,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
       label: 'duplicate clip IDs',
       mutate: (request: Record<string, unknown>) => {
         request.clipIds = ['clip_1', 'clip_1'];
-        request.routes = [{ ...clipRoute }, { ...clipRoute }];
+        request.routes = [{ ...shotRoute }, { ...shotRoute }];
       },
     },
     {
@@ -8619,19 +8619,19 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     {
       label: 'an unsafe route provider ID',
       mutate: (request: Record<string, unknown>) => {
-        request.routes = [{ ...clipRoute, providerId: '../unsafe' }];
+        request.routes = [{ ...shotRoute, providerId: '../unsafe' }];
       },
     },
     {
       label: 'a blank route model',
       mutate: (request: Record<string, unknown>) => {
-        request.routes = [{ ...clipRoute, model: '' }];
+        request.routes = [{ ...shotRoute, model: '' }];
       },
     },
     {
       label: 'an overlong route model',
       mutate: (request: Record<string, unknown>) => {
-        request.routes = [{ ...clipRoute, model: 'x'.repeat(257) }];
+        request.routes = [{ ...shotRoute, model: 'x'.repeat(257) }];
       },
     },
   ])('rejects $label before V2 identity allocation or paid work', async ({ mutate }) => {
@@ -8646,12 +8646,12 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
       projectId: harness.project.id,
       expectedRevision: harness.project.revision,
       clipIds: ['clip_1'],
-      routes: [{ ...clipRoute }],
+      routes: [{ ...shotRoute }],
       catalogVersion: 'catalog_v2',
     };
     mutate(request);
 
-    await expect(harness.manager.submitClips(request as never)).rejects.toMatchObject({ code: 'invalid_request' });
+    await expect(harness.manager.submitShots(request as never)).rejects.toMatchObject({ code: 'invalid_request' });
     const loaded = await harness.store.getProjectV2(harness.project.id);
     expect(loaded.status === 'supported' ? loaded.project.jobs : null).toEqual({});
     expect(createJobId).not.toHaveBeenCalled();
@@ -8673,7 +8673,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     });
     harness.project = seeded;
 
-    await expect(submitSingleClipV2(harness)).rejects.toMatchObject({
+    await expect(submitSingleShotV2(harness)).rejects.toMatchObject({
       code: 'duplicate_charge_acknowledgement_required',
     });
     expect(submit).not.toHaveBeenCalled();
@@ -8812,7 +8812,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     { label: 'an unsafe generated idempotency key', mode: 'unsafe_key', code: 'storage_error' },
   ] as const)('rejects $label before a V2 job or paid call', async ({ mode, code }) => {
     const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
-    const requestRoute = mode === 'wrong_kind' ? { ...clipRoute, kind: 'video' as const } : clipRoute;
+    const requestRoute = mode === 'wrong_kind' ? { ...shotRoute, kind: 'video' as const } : shotRoute;
     const constraintOverrides: Partial<StudioRouteConstraints> =
       mode === 'aspect_ratio'
         ? { aspectRatios: ['1:1'] }
@@ -8829,7 +8829,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
         if (mode === 'catalog_throw') throw new Error('catalog unavailable');
         if (mode === 'catalog_missing') return { ...v2Catalog(), routes: [] };
         if (mode === 'catalog_version') return { ...v2Catalog(), generationCatalogVersion: 'new_catalog' };
-        return v2Catalog(clipRoute, constraintOverrides);
+        return v2Catalog(shotRoute, constraintOverrides);
       },
       isGenerationRouteAvailable: async () => true,
     };
@@ -8854,7 +8854,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
       ...(mode === 'unsafe_key' ? { createIdempotencyKey: () => '../unsafe' } : {}),
     });
 
-    await expect(submitSingleClipV2(harness, requestRoute)).rejects.toMatchObject({ code });
+    await expect(submitSingleShotV2(harness, requestRoute)).rejects.toMatchObject({ code });
     const loaded = await harness.store.getProjectV2(harness.project.id);
     expect(loaded.status === 'supported' ? loaded.project.jobs : null).toEqual({});
     expect(submit).not.toHaveBeenCalled();
@@ -8884,7 +8884,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
       submit,
     });
 
-    await expect(submitSingleClipV2(harness)).rejects.toMatchObject({ code: 'invalid_route' });
+    await expect(submitSingleShotV2(harness)).rejects.toMatchObject({ code: 'invalid_route' });
     expect(validateRequest).toHaveBeenCalledTimes(failCall);
     expect(submit).not.toHaveBeenCalled();
   });
@@ -8905,7 +8905,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
       ],
     }));
 
-    await expect(submitSingleClipV2(harness)).rejects.toMatchObject({ code: 'rule_breach' });
+    await expect(submitSingleShotV2(harness)).rejects.toMatchObject({ code: 'rule_breach' });
     const loaded = await harness.store.getProjectV2(harness.project.id);
     expect(loaded.status === 'supported' ? loaded.project.jobs : null).toEqual({});
     expect(submit).not.toHaveBeenCalled();
@@ -8920,11 +8920,11 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit }));
 
     await expect(
-      harness.manager.submitClips({
+      harness.manager.submitShots({
         projectId: projectId === 'current' ? harness.project.id : projectId,
         expectedRevision,
         clipIds: ['clip_1'],
-        routes: [clipRoute],
+        routes: [shotRoute],
         catalogVersion: 'catalog_v2',
       })
     ).rejects.toMatchObject({ code });
@@ -8943,11 +8943,11 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     });
 
     await expect(
-      harness.manager.submitClips({
+      harness.manager.submitShots({
         projectId: prototype.id,
         expectedRevision: prototype.revision,
         clipIds: ['clip_1'],
-        routes: [clipRoute],
+        routes: [shotRoute],
         catalogVersion: 'catalog_v2',
       })
     ).rejects.toMatchObject({ code: 'unsupported_prototype_schema' });
@@ -8962,7 +8962,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
     );
     const getProjectV2 = vi.spyOn(harness.store, 'getProjectV2');
 
-    await expect(harness.manager.submitClips(input as never)).rejects.toMatchObject({ code: 'invalid_request' });
+    await expect(harness.manager.submitShots(input as never)).rejects.toMatchObject({ code: 'invalid_request' });
     expect(getProjectV2).not.toHaveBeenCalled();
   });
 
@@ -8997,7 +8997,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
         });
       }
 
-      await expect(submitSingleClipV2(harness)).rejects.toMatchObject({
+      await expect(submitSingleShotV2(harness)).rejects.toMatchObject({
         code: scenario === 'active_job' ? 'busy' : 'invalid_route',
       });
       expect(submit).not.toHaveBeenCalled();
@@ -9149,7 +9149,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
       const providerResolver: StudioJobManagerDeps['providerResolver'] = {
         listConnectionCandidates: async () => [],
         listGenerationRoutes: async () =>
-          v2Catalog(clipRoute, scenario === 'unsupported' ? { supportsFirstFrame: false } : {}),
+          v2Catalog(shotRoute, scenario === 'unsupported' ? { supportsFirstFrame: false } : {}),
         isGenerationRouteAvailable: async () => true,
       };
       const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit }), {
@@ -9173,7 +9173,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
         }));
       }
 
-      const operation = submitSingleClipV2(harness);
+      const operation = submitSingleShotV2(harness);
       if (scenario === 'valid') {
         await expect(operation).resolves.toMatchObject([{ status: 'queued_local' }]);
         await waitFor(() => expect(submit).toHaveBeenCalledOnce());
@@ -9200,7 +9200,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
       { outputDownloader }
     );
 
-    await submitSingleClipV2(harness);
+    await submitSingleShotV2(harness);
     await expectV2Job(harness, { status: 'succeeded', outputAssetIds: [expect.any(String)] });
     expect(outputDownloader).toHaveBeenCalledOnce();
   });
@@ -9208,8 +9208,8 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
   it.each(['local_minimal', 'remote_full'] as const)(
     'persists V2 poster metadata for $case output',
     async (scenario) => {
-      const videoRoute: StudioResolvedClipRouteSnapshotV2 = {
-        ...clipRoute,
+      const videoRoute: StudioResolvedShotRouteSnapshotV2 = {
+        ...shotRoute,
         adapterId: 'weprompt-media-gateway-v1',
         model: 'video-model',
         kind: 'video',
@@ -9249,7 +9249,7 @@ describe('StudioJobManager V2 clip-owned lifecycle', () => {
       posterPath = path.join(harness.rootDir, `v2-poster-metadata-${scenario}.png`);
       await Promise.all([writeFile(primaryPath, mp4), writeFile(posterPath, png)]);
 
-      await submitSingleClipV2(harness, videoRoute);
+      await submitSingleShotV2(harness, videoRoute);
       await waitFor(async () => {
         const loaded = await harness.store.getProjectV2(harness.project.id);
         if (loaded.status !== 'supported') throw new Error('V2 project disappeared');

@@ -6,28 +6,28 @@
 
 import { isCanonicalStudioGeneratedTakeV2 } from '@/common/types/project/creativeStudioCanonicalTake';
 import {
-  STUDIO_MAX_CLIPS_PER_PROJECT,
-  STUDIO_MAX_CLIPS_PER_SECTION,
+  STUDIO_MAX_SHOTS_PER_PROJECT,
+  STUDIO_MAX_SHOTS_PER_BEAT,
   STUDIO_MAX_MUTATION_OPERATIONS,
-  STUDIO_MAX_SECTIONS,
-  STUDIO_MAX_SHELF_ITEMS,
-  STUDIO_MAX_SHELF_SECTION_ITEMS,
-  STUDIO_MAX_SHELF_TAKE_ALIASES,
-  STUDIO_MAX_VIDEO_CLIP_SECONDS,
-  STUDIO_MIN_VIDEO_CLIP_SECONDS,
+  STUDIO_MAX_BEATS,
+  STUDIO_MAX_BIN_ITEMS,
+  STUDIO_MAX_BIN_BEAT_ITEMS,
+  STUDIO_MAX_BIN_TAKE_ITEMS,
+  STUDIO_MAX_SHOT_SECONDS,
+  STUDIO_MIN_SHOT_SECONDS,
   STUDIO_PROJECT_SCHEMA_VERSION,
   type StudioAssetV2,
-  type StudioClip,
-  type StudioEditableClip,
-  type StudioEditableClipChanges,
-  type StudioEditableSection,
-  type StudioEditableSectionChanges,
+  type StudioShot,
+  type StudioEditableShot,
+  type StudioEditableShotChanges,
+  type StudioEditableBeat,
+  type StudioEditableBeatChanges,
   type StudioJobV2,
   type StudioMutationBatchV2,
   type StudioMutationOperationV2,
   type StudioProjectV2,
-  type StudioSection,
-  type StudioShelfItem,
+  type StudioBeat,
+  type StudioBinItem,
 } from '@/common/types/project/creativeStudioTypes';
 import { reconcileStudioCutsV2, studioClipHasCutDependencyV2, type StudioCutReconciliationScopeV2 } from './cuts';
 import { validateStudioProjectV2 } from './validation';
@@ -69,9 +69,9 @@ const NONTERMINAL_JOB_STATUSES: ReadonlySet<StudioJobV2['status']> = new Set([
   'needs_attention',
 ]);
 const BATCH_KEYS = new Set(['schemaVersion', 'projectId', 'expectedRevision', 'operations']);
-const SECTION_INPUT_KEYS = new Set(['title', 'storyLine', 'visualPrompt']);
-const SECTION_CHANGE_KEYS = new Set(['title', 'storyLine', 'visualPrompt']);
-const CLIP_INPUT_KEYS = new Set([
+const BEAT_INPUT_KEYS = new Set(['title', 'storyLine', 'visualPrompt']);
+const BEAT_CHANGE_KEYS = new Set(['title', 'storyLine', 'visualPrompt']);
+const SHOT_INPUT_KEYS = new Set([
   'shotPrompt',
   'narration',
   'onScreenText',
@@ -79,7 +79,7 @@ const CLIP_INPUT_KEYS = new Set([
   'durationSeconds',
   'referenceAssetId',
 ]);
-const CLIP_CHANGE_KEYS = new Set([
+const SHOT_CHANGE_KEYS = new Set([
   'shotPrompt',
   'narration',
   'onScreenText',
@@ -87,8 +87,8 @@ const CLIP_CHANGE_KEYS = new Set([
   'durationSeconds',
   'referenceAssetId',
 ]);
-const SHELF_SECTION_KEYS = new Set(['kind', 'sectionId']);
-const SHELF_ASSET_KEYS = new Set(['kind', 'assetId']);
+const BIN_BEAT_KEYS = new Set(['kind', 'sectionId']);
+const BIN_ASSET_KEYS = new Set(['kind', 'assetId']);
 const OPERATION_KEYS: Readonly<Record<StudioMutationOperationV2['kind'], ReadonlySet<string>>> = {
   set_brief: new Set(['kind', 'brief']),
   add_section: new Set(['kind', 'sectionId', 'section', 'firstClipId', 'firstClip', 'beforeSectionId']),
@@ -179,28 +179,28 @@ const isUniqueSafeIdArray = (value: unknown, maximumLength: number): value is st
   return true;
 };
 
-const isEditableSection = (value: unknown): value is StudioEditableSection =>
+const isEditableBeat = (value: unknown): value is StudioEditableBeat =>
   isRecord(value) &&
-  hasExactKeys(value, SECTION_INPUT_KEYS) &&
+  hasExactKeys(value, BEAT_INPUT_KEYS) &&
   isStringWithin(value.title, 256) &&
   isStringWithin(value.storyLine, 4 * 1024) &&
   isStringWithin(value.visualPrompt, 8 * 1024);
 
-const isEditableSectionChanges = (value: unknown): value is StudioEditableSectionChanges => {
+const isEditableBeatChanges = (value: unknown): value is StudioEditableBeatChanges => {
   if (!isRecord(value)) return false;
   const keys = Object.keys(value);
   return (
     keys.length > 0 &&
-    keys.every((key) => SECTION_CHANGE_KEYS.has(key)) &&
+    keys.every((key) => BEAT_CHANGE_KEYS.has(key)) &&
     (!Object.hasOwn(value, 'title') || isStringWithin(value.title, 256)) &&
     (!Object.hasOwn(value, 'storyLine') || isStringWithin(value.storyLine, 4 * 1024)) &&
     (!Object.hasOwn(value, 'visualPrompt') || isStringWithin(value.visualPrompt, 8 * 1024))
   );
 };
 
-const isEditableClipShape = (value: unknown): value is StudioEditableClip =>
+const isEditableShotShape = (value: unknown): value is StudioEditableShot =>
   isRecord(value) &&
-  hasExactKeys(value, CLIP_INPUT_KEYS) &&
+  hasExactKeys(value, SHOT_INPUT_KEYS) &&
   isStringWithin(value.shotPrompt, 8 * 1024) &&
   isStringWithin(value.narration, 4 * 1024) &&
   isStringWithin(value.onScreenText, 1024) &&
@@ -209,12 +209,12 @@ const isEditableClipShape = (value: unknown): value is StudioEditableClip =>
   Object.hasOwn(value, 'durationSeconds') &&
   (value.referenceAssetId === null || isSafeId(value.referenceAssetId));
 
-const isEditableClipChangesShape = (value: unknown): value is StudioEditableClipChanges => {
+const isEditableShotChangesShape = (value: unknown): value is StudioEditableShotChanges => {
   if (!isRecord(value)) return false;
   const keys = Object.keys(value);
   return (
     keys.length > 0 &&
-    keys.every((key) => CLIP_CHANGE_KEYS.has(key)) &&
+    keys.every((key) => SHOT_CHANGE_KEYS.has(key)) &&
     (!Object.hasOwn(value, 'shotPrompt') || isStringWithin(value.shotPrompt, 8 * 1024)) &&
     (!Object.hasOwn(value, 'narration') || isStringWithin(value.narration, 4 * 1024)) &&
     (!Object.hasOwn(value, 'onScreenText') || isStringWithin(value.onScreenText, 1024)) &&
@@ -224,17 +224,17 @@ const isEditableClipChangesShape = (value: unknown): value is StudioEditableClip
   );
 };
 
-const isShelfItem = (value: unknown): value is StudioShelfItem => {
+const isBinItem = (value: unknown): value is StudioBinItem => {
   if (!isRecord(value)) return false;
-  if (value.kind === 'section') return hasExactKeys(value, SHELF_SECTION_KEYS) && isSafeId(value.sectionId);
-  if (value.kind === 'asset') return hasExactKeys(value, SHELF_ASSET_KEYS) && isSafeId(value.assetId);
+  if (value.kind === 'section') return hasExactKeys(value, BIN_BEAT_KEYS) && isSafeId(value.sectionId);
+  if (value.kind === 'asset') return hasExactKeys(value, BIN_ASSET_KEYS) && isSafeId(value.assetId);
   return false;
 };
 
-const isShelfItemArray = (value: unknown): value is StudioShelfItem[] => {
-  if (!isDenseArray(value, STUDIO_MAX_SHELF_ITEMS)) return false;
+const isBinItemArray = (value: unknown): value is StudioBinItem[] => {
+  if (!isDenseArray(value, STUDIO_MAX_BIN_ITEMS)) return false;
   for (let index = 0; index < value.length; index += 1) {
-    if (!isShelfItem(value[index])) return false;
+    if (!isBinItem(value[index])) return false;
   }
   return true;
 };
@@ -256,20 +256,20 @@ const assertOperationShape: (value: unknown) => asserts value is StudioMutationO
       if (
         !isSafeId(operation.sectionId) ||
         !isRecord(operation.section) ||
-        !hasExactKeys(operation.section, SECTION_INPUT_KEYS) ||
+        !hasExactKeys(operation.section, BEAT_INPUT_KEYS) ||
         !isSafeId(operation.firstClipId) ||
         !isRecord(operation.firstClip) ||
-        !hasExactKeys(operation.firstClip, CLIP_INPUT_KEYS) ||
+        !hasExactKeys(operation.firstClip, SHOT_INPUT_KEYS) ||
         !isSafeAnchor(operation.beforeSectionId)
       ) {
         fail('invalid_operation');
       }
       return;
     case 'edit_section':
-      if (!isSafeId(operation.sectionId) || !isEditableSectionChanges(operation.changes)) fail('invalid_operation');
+      if (!isSafeId(operation.sectionId) || !isEditableBeatChanges(operation.changes)) fail('invalid_operation');
       return;
     case 'reorder_sections':
-      if (!isUniqueSafeIdArray(operation.sectionOrder, STUDIO_MAX_SECTIONS)) fail('invalid_operation');
+      if (!isUniqueSafeIdArray(operation.sectionOrder, STUDIO_MAX_BEATS)) fail('invalid_operation');
       return;
     case 'park_section':
       if (!isSafeId(operation.sectionId)) fail('invalid_operation');
@@ -282,20 +282,20 @@ const assertOperationShape: (value: unknown) => asserts value is StudioMutationO
         !isSafeId(operation.sectionId) ||
         !isSafeId(operation.clipId) ||
         !isRecord(operation.clip) ||
-        !hasExactKeys(operation.clip, CLIP_INPUT_KEYS) ||
+        !hasExactKeys(operation.clip, SHOT_INPUT_KEYS) ||
         !isSafeAnchor(operation.beforeClipId)
       ) {
         fail('invalid_operation');
       }
       return;
     case 'edit_clip':
-      if (!isSafeId(operation.clipId) || !isEditableClipChangesShape(operation.changes)) fail('invalid_operation');
+      if (!isSafeId(operation.clipId) || !isEditableShotChangesShape(operation.changes)) fail('invalid_operation');
       return;
     case 'delete_clip':
       if (!isSafeId(operation.clipId)) fail('invalid_operation');
       return;
     case 'reorder_clips':
-      if (!isSafeId(operation.sectionId) || !isUniqueSafeIdArray(operation.clipOrder, STUDIO_MAX_CLIPS_PER_SECTION)) {
+      if (!isSafeId(operation.sectionId) || !isUniqueSafeIdArray(operation.clipOrder, STUDIO_MAX_SHOTS_PER_BEAT)) {
         fail('invalid_operation');
       }
       return;
@@ -308,7 +308,7 @@ const assertOperationShape: (value: unknown) => asserts value is StudioMutationO
       if (!isSafeId(operation.assetId)) fail('invalid_operation');
       return;
     case 'reorder_shelf':
-      if (!isShelfItemArray(operation.shelf)) fail('invalid_operation');
+      if (!isBinItemArray(operation.shelf)) fail('invalid_operation');
       return;
   }
 };
@@ -330,12 +330,12 @@ const assertBatchEnvelope = (project: StudioProjectV2, batch: unknown): unknown[
   return envelope.operations as unknown[];
 };
 
-const assertClipDuration: (mediaKind: StudioClip['mediaKind'], value: unknown) => asserts value is number = (
+const assertShotDuration: (mediaKind: StudioShot['mediaKind'], value: unknown) => asserts value is number = (
   mediaKind,
   value
 ) => {
-  const minimum = mediaKind === 'video' ? STUDIO_MIN_VIDEO_CLIP_SECONDS : 1;
-  const maximum = mediaKind === 'video' ? STUDIO_MAX_VIDEO_CLIP_SECONDS : 60;
+  const minimum = mediaKind === 'video' ? STUDIO_MIN_SHOT_SECONDS : 1;
+  const maximum = mediaKind === 'video' ? STUDIO_MAX_SHOT_SECONDS : 60;
   if (!isInteger(value) || value < minimum || value > maximum) fail('invalid_clip_duration');
 };
 
@@ -365,42 +365,42 @@ const copyArray = <T>(value: readonly T[]): T[] => {
   return result;
 };
 
-const shelfIdentity = (item: StudioShelfItem): string =>
+const binIdentity = (item: StudioBinItem): string =>
   item.kind === 'section' ? `section:${item.sectionId}` : `asset:${item.assetId}`;
 
-const findClipOwner = (project: StudioProjectV2, clipId: string): StudioSection | undefined =>
-  Object.values(project.sections).find((section) => section.clipOrder.includes(clipId));
+const findShotOwner = (project: StudioProjectV2, shotId: string): StudioBeat | undefined =>
+  Object.values(project.sections).find((beat) => beat.clipOrder.includes(shotId));
 
 const assetHasCutDependency = (project: StudioProjectV2, assetId: string): boolean =>
   Object.values(project.cuts).some((cut) => Object.values(cut.clips).some((cutClip) => cutClip.assetId === assetId));
 
-const shelfHasAsset = (project: StudioProjectV2, assetId: string): boolean =>
+const binHasAsset = (project: StudioProjectV2, assetId: string): boolean =>
   project.shelf.some((item) => item.kind === 'asset' && item.assetId === assetId);
 
 const assertCanonicalTake = (
   project: StudioProjectV2,
-  clipId: string,
+  shotId: string,
   assetId: string
-): [StudioClip, StudioAssetV2] => {
-  const clip = ownValue(project.clips, clipId);
+): [StudioShot, StudioAssetV2] => {
+  const shot = ownValue(project.clips, shotId);
   const asset = ownValue(project.assets, assetId);
-  if (clip === undefined || asset === undefined || !isCanonicalStudioGeneratedTakeV2(asset, project.id, clip)) {
+  if (shot === undefined || asset === undefined || !isCanonicalStudioGeneratedTakeV2(asset, project.id, shot)) {
     fail('invalid_operation');
   }
-  return [clip, asset];
+  return [shot, asset];
 };
 
-const assertReferenceAsset = (project: StudioProjectV2, clip: StudioClip): void => {
-  if (clip.referenceAssetId === null) return;
-  const asset = ownValue(project.assets, clip.referenceAssetId);
-  if (asset === undefined || asset.clipId !== clip.id || !clip.assetIds.includes(asset.id)) {
+const assertReferenceAsset = (project: StudioProjectV2, shot: StudioShot): void => {
+  if (shot.referenceAssetId === null) return;
+  const asset = ownValue(project.assets, shot.referenceAssetId);
+  if (asset === undefined || asset.clipId !== shot.id || !shot.assetIds.includes(asset.id)) {
     fail('invalid_operation');
   }
 };
 
-const shelfCounts = (shelf: readonly StudioShelfItem[]): { sections: number; assets: number } => ({
-  sections: shelf.filter((item) => item.kind === 'section').length,
-  assets: shelf.filter((item) => item.kind === 'asset').length,
+const binCounts = (bin: readonly StudioBinItem[]): { beats: number; assets: number } => ({
+  beats: bin.filter((item) => item.kind === 'section').length,
+  assets: bin.filter((item) => item.kind === 'asset').length,
 });
 
 /**
@@ -426,10 +426,10 @@ export const applyStudioMutationBatchV2 = (
     fail('invalid_operation');
   }
   const operations = assertBatchEnvelope(draft, batchSnapshot);
-  const knownSectionIds = new Set(Object.keys(draft.sections));
-  const knownClipIds = new Set(Object.keys(draft.clips));
-  const createdSectionIds: string[] = [];
-  const createdClipIds: string[] = [];
+  const knownBeatIds = new Set(Object.keys(draft.sections));
+  const knownShotIds = new Set(Object.keys(draft.clips));
+  const createdBeatIds: string[] = [];
+  const createdShotIds: string[] = [];
 
   for (let operationIndex = 0; operationIndex < operations.length; operationIndex += 1) {
     const rawOperation = operations[operationIndex];
@@ -446,45 +446,45 @@ export const applyStudioMutationBatchV2 = (
         if (operation.beforeSectionId !== null && !draft.sectionOrder.includes(operation.beforeSectionId)) {
           fail('invalid_operation');
         }
-        if (Object.keys(draft.sections).length >= STUDIO_MAX_SECTIONS) fail('section_capacity_reached');
-        if (Object.keys(draft.clips).length >= STUDIO_MAX_CLIPS_PER_PROJECT) fail('project_clip_capacity_reached');
-        if (knownSectionIds.has(operation.sectionId) || knownClipIds.has(operation.firstClipId)) {
+        if (Object.keys(draft.sections).length >= STUDIO_MAX_BEATS) fail('section_capacity_reached');
+        if (Object.keys(draft.clips).length >= STUDIO_MAX_SHOTS_PER_PROJECT) fail('project_clip_capacity_reached');
+        if (knownBeatIds.has(operation.sectionId) || knownShotIds.has(operation.firstClipId)) {
           fail('identity_collision');
         }
-        if (!isEditableSection(operation.section) || !isEditableClipShape(operation.firstClip)) {
+        if (!isEditableBeat(operation.section) || !isEditableShotShape(operation.firstClip)) {
           fail('invalid_operation');
         }
         if (operation.firstClip.referenceAssetId !== null) fail('invalid_operation');
-        assertClipDuration(operation.firstClip.mediaKind, operation.firstClip.durationSeconds);
+        assertShotDuration(operation.firstClip.mediaKind, operation.firstClip.durationSeconds);
 
-        const section: StudioSection = {
+        const beat: StudioBeat = {
           id: operation.sectionId,
           title: operation.section.title,
           storyLine: operation.section.storyLine,
           visualPrompt: operation.section.visualPrompt,
           clipOrder: [operation.firstClipId],
         };
-        const clip: StudioClip = {
+        const shot: StudioShot = {
           id: operation.firstClipId,
           ...operation.firstClip,
           selectedAssetId: null,
           assetIds: [],
           jobIds: [],
         };
-        defineOwn(draft.sections, section.id, section);
-        defineOwn(draft.clips, clip.id, clip);
-        draft.sectionOrder = insertBefore(draft.sectionOrder, section.id, operation.beforeSectionId);
-        knownSectionIds.add(section.id);
-        knownClipIds.add(clip.id);
-        createdSectionIds.push(section.id);
-        createdClipIds.push(clip.id);
+        defineOwn(draft.sections, beat.id, beat);
+        defineOwn(draft.clips, shot.id, shot);
+        draft.sectionOrder = insertBefore(draft.sectionOrder, beat.id, operation.beforeSectionId);
+        knownBeatIds.add(beat.id);
+        knownShotIds.add(shot.id);
+        createdBeatIds.push(beat.id);
+        createdShotIds.push(shot.id);
         break;
       }
 
       case 'edit_section': {
-        const section = ownValue(draft.sections, operation.sectionId);
-        if (section === undefined) fail('invalid_operation');
-        defineOwn(draft.sections, section.id, { ...section, ...operation.changes, id: section.id });
+        const beat = ownValue(draft.sections, operation.sectionId);
+        if (beat === undefined) fail('invalid_operation');
+        defineOwn(draft.sections, beat.id, { ...beat, ...operation.changes, id: beat.id });
         break;
       }
 
@@ -497,68 +497,68 @@ export const applyStudioMutationBatchV2 = (
       case 'park_section': {
         const activeIndex = draft.sectionOrder.indexOf(operation.sectionId);
         if (activeIndex < 0 || ownValue(draft.sections, operation.sectionId) === undefined) fail('invalid_operation');
-        const counts = shelfCounts(draft.shelf);
-        if (draft.shelf.length >= STUDIO_MAX_SHELF_ITEMS || counts.sections >= STUDIO_MAX_SHELF_SECTION_ITEMS) {
+        const counts = binCounts(draft.shelf);
+        if (draft.shelf.length >= STUDIO_MAX_BIN_ITEMS || counts.beats >= STUDIO_MAX_BIN_BEAT_ITEMS) {
           fail('validation_failed');
         }
-        draft.sectionOrder = draft.sectionOrder.filter((sectionId) => sectionId !== operation.sectionId);
+        draft.sectionOrder = draft.sectionOrder.filter((beatId) => beatId !== operation.sectionId);
         draft.shelf = [...draft.shelf, { kind: 'section', sectionId: operation.sectionId }];
         cutReconciliation = { kind: 'structure' };
         break;
       }
 
       case 'restore_section': {
-        const shelfIndex = draft.shelf.findIndex(
+        const binIndex = draft.shelf.findIndex(
           (item) => item.kind === 'section' && item.sectionId === operation.sectionId
         );
-        if (shelfIndex < 0 || ownValue(draft.sections, operation.sectionId) === undefined) fail('invalid_operation');
+        if (binIndex < 0 || ownValue(draft.sections, operation.sectionId) === undefined) fail('invalid_operation');
         if (operation.beforeSectionId !== null && !draft.sectionOrder.includes(operation.beforeSectionId)) {
           fail('invalid_operation');
         }
-        draft.shelf = [...draft.shelf.slice(0, shelfIndex), ...draft.shelf.slice(shelfIndex + 1)];
+        draft.shelf = [...draft.shelf.slice(0, binIndex), ...draft.shelf.slice(binIndex + 1)];
         draft.sectionOrder = insertBefore(draft.sectionOrder, operation.sectionId, operation.beforeSectionId);
         cutReconciliation = { kind: 'structure' };
         break;
       }
 
       case 'add_clip': {
-        const section = ownValue(draft.sections, operation.sectionId);
-        if (section === undefined) fail('invalid_operation');
-        if (operation.beforeClipId !== null && !section.clipOrder.includes(operation.beforeClipId)) {
+        const beat = ownValue(draft.sections, operation.sectionId);
+        if (beat === undefined) fail('invalid_operation');
+        if (operation.beforeClipId !== null && !beat.clipOrder.includes(operation.beforeClipId)) {
           fail('invalid_operation');
         }
-        if (section.clipOrder.length >= STUDIO_MAX_CLIPS_PER_SECTION) fail('section_clip_capacity_reached');
-        if (Object.keys(draft.clips).length >= STUDIO_MAX_CLIPS_PER_PROJECT) fail('project_clip_capacity_reached');
-        if (knownClipIds.has(operation.clipId)) fail('identity_collision');
-        if (!isEditableClipShape(operation.clip)) fail('invalid_operation');
+        if (beat.clipOrder.length >= STUDIO_MAX_SHOTS_PER_BEAT) fail('section_clip_capacity_reached');
+        if (Object.keys(draft.clips).length >= STUDIO_MAX_SHOTS_PER_PROJECT) fail('project_clip_capacity_reached');
+        if (knownShotIds.has(operation.clipId)) fail('identity_collision');
+        if (!isEditableShotShape(operation.clip)) fail('invalid_operation');
         if (operation.clip.referenceAssetId !== null) fail('invalid_operation');
-        assertClipDuration(operation.clip.mediaKind, operation.clip.durationSeconds);
+        assertShotDuration(operation.clip.mediaKind, operation.clip.durationSeconds);
 
-        const clip: StudioClip = {
+        const shot: StudioShot = {
           id: operation.clipId,
           ...operation.clip,
           selectedAssetId: null,
           assetIds: [],
           jobIds: [],
         };
-        defineOwn(draft.clips, clip.id, clip);
-        defineOwn(draft.sections, section.id, {
-          ...section,
-          clipOrder: insertBefore(section.clipOrder, clip.id, operation.beforeClipId),
+        defineOwn(draft.clips, shot.id, shot);
+        defineOwn(draft.sections, beat.id, {
+          ...beat,
+          clipOrder: insertBefore(beat.clipOrder, shot.id, operation.beforeClipId),
         });
-        knownClipIds.add(clip.id);
-        createdClipIds.push(clip.id);
+        knownShotIds.add(shot.id);
+        createdShotIds.push(shot.id);
         break;
       }
 
       case 'edit_clip': {
         const current = ownValue(draft.clips, operation.clipId);
         if (current === undefined) fail('invalid_operation');
-        const next: StudioClip = { ...current, ...operation.changes, id: current.id };
-        assertClipDuration(next.mediaKind, next.durationSeconds);
+        const next: StudioShot = { ...current, ...operation.changes, id: current.id };
+        assertShotDuration(next.mediaKind, next.durationSeconds);
         assertReferenceAsset(draft, next);
         const mediaKindChanged = current.mediaKind !== next.mediaKind;
-        const hasShelvedTake = draft.shelf.some((item) => {
+        const hasBinnedTake = draft.shelf.some((item) => {
           if (item.kind !== 'asset') return false;
           return ownValue(draft.assets, item.assetId)?.clipId === current.id;
         });
@@ -568,7 +568,7 @@ export const applyStudioMutationBatchV2 = (
         });
         if (
           mediaKindChanged &&
-          (hasShelvedTake ||
+          (hasBinnedTake ||
             current.selectedAssetId !== null ||
             studioClipHasCutDependencyV2(draft, current.id) ||
             hasNonterminalJob)
@@ -580,47 +580,47 @@ export const applyStudioMutationBatchV2 = (
       }
 
       case 'delete_clip': {
-        const clip = ownValue(draft.clips, operation.clipId);
-        const owner = findClipOwner(draft, operation.clipId);
-        if (clip === undefined || owner === undefined) fail('invalid_operation');
-        const hasShelfAlias = draft.shelf.some((item) => {
+        const shot = ownValue(draft.clips, operation.clipId);
+        const owner = findShotOwner(draft, operation.clipId);
+        if (shot === undefined || owner === undefined) fail('invalid_operation');
+        const hasBinAlias = draft.shelf.some((item) => {
           if (item.kind !== 'asset') return false;
-          return ownValue(draft.assets, item.assetId)?.clipId === clip.id;
+          return ownValue(draft.assets, item.assetId)?.clipId === shot.id;
         });
         if (
-          clip.assetIds.length > 0 ||
-          clip.jobIds.length > 0 ||
-          hasShelfAlias ||
-          studioClipHasCutDependencyV2(draft, clip.id)
+          shot.assetIds.length > 0 ||
+          shot.jobIds.length > 0 ||
+          hasBinAlias ||
+          studioClipHasCutDependencyV2(draft, shot.id)
         ) {
           fail('dependency_blocked');
         }
-        delete draft.clips[clip.id];
+        delete draft.clips[shot.id];
         defineOwn(draft.sections, owner.id, {
           ...owner,
-          clipOrder: owner.clipOrder.filter((clipId) => clipId !== clip.id),
+          clipOrder: owner.clipOrder.filter((shotId) => shotId !== shot.id),
         });
         break;
       }
 
       case 'reorder_clips': {
-        const section = ownValue(draft.sections, operation.sectionId);
-        if (section === undefined || !isExactPermutation(section.clipOrder, operation.clipOrder, (id) => id)) {
+        const beat = ownValue(draft.sections, operation.sectionId);
+        if (beat === undefined || !isExactPermutation(beat.clipOrder, operation.clipOrder, (id) => id)) {
           fail('invalid_operation');
         }
-        defineOwn(draft.sections, section.id, { ...section, clipOrder: copyArray(operation.clipOrder) });
+        defineOwn(draft.sections, beat.id, { ...beat, clipOrder: copyArray(operation.clipOrder) });
         cutReconciliation = { kind: 'structure' };
         break;
       }
 
       case 'park_take': {
-        const [clip] = assertCanonicalTake(draft, operation.clipId, operation.assetId);
-        if (shelfHasAsset(draft, operation.assetId)) fail('invalid_operation');
-        if (clip.selectedAssetId === operation.assetId || assetHasCutDependency(draft, operation.assetId)) {
+        const [shot] = assertCanonicalTake(draft, operation.clipId, operation.assetId);
+        if (binHasAsset(draft, operation.assetId)) fail('invalid_operation');
+        if (shot.selectedAssetId === operation.assetId || assetHasCutDependency(draft, operation.assetId)) {
           fail('dependency_blocked');
         }
-        const counts = shelfCounts(draft.shelf);
-        if (draft.shelf.length >= STUDIO_MAX_SHELF_ITEMS || counts.assets >= STUDIO_MAX_SHELF_TAKE_ALIASES) {
+        const counts = binCounts(draft.shelf);
+        if (draft.shelf.length >= STUDIO_MAX_BIN_ITEMS || counts.assets >= STUDIO_MAX_BIN_TAKE_ITEMS) {
           fail('validation_failed');
         }
         draft.shelf = [...draft.shelf, { kind: 'asset', assetId: operation.assetId }];
@@ -628,29 +628,29 @@ export const applyStudioMutationBatchV2 = (
       }
 
       case 'select_shelved_take': {
-        const [clip] = assertCanonicalTake(draft, operation.clipId, operation.assetId);
-        const shelfIndex = draft.shelf.findIndex((item) => item.kind === 'asset' && item.assetId === operation.assetId);
-        if (shelfIndex < 0) fail('invalid_operation');
-        draft.shelf = [...draft.shelf.slice(0, shelfIndex), ...draft.shelf.slice(shelfIndex + 1)];
-        defineOwn(draft.clips, clip.id, { ...clip, selectedAssetId: operation.assetId });
-        cutReconciliation = { kind: 'selection', clipId: clip.id };
+        const [shot] = assertCanonicalTake(draft, operation.clipId, operation.assetId);
+        const binIndex = draft.shelf.findIndex((item) => item.kind === 'asset' && item.assetId === operation.assetId);
+        if (binIndex < 0) fail('invalid_operation');
+        draft.shelf = [...draft.shelf.slice(0, binIndex), ...draft.shelf.slice(binIndex + 1)];
+        defineOwn(draft.clips, shot.id, { ...shot, selectedAssetId: operation.assetId });
+        cutReconciliation = { kind: 'selection', clipId: shot.id };
         break;
       }
 
       case 'remove_shelf_alias': {
-        const shelfIndex = draft.shelf.findIndex((item) => item.kind === 'asset' && item.assetId === operation.assetId);
-        if (shelfIndex < 0) fail('invalid_operation');
+        const binIndex = draft.shelf.findIndex((item) => item.kind === 'asset' && item.assetId === operation.assetId);
+        if (binIndex < 0) fail('invalid_operation');
         const asset = ownValue(draft.assets, operation.assetId);
-        const clip = asset?.clipId === null || asset === undefined ? undefined : ownValue(draft.clips, asset.clipId);
-        if (clip?.selectedAssetId === operation.assetId || assetHasCutDependency(draft, operation.assetId)) {
+        const shot = asset?.clipId === null || asset === undefined ? undefined : ownValue(draft.clips, asset.clipId);
+        if (shot?.selectedAssetId === operation.assetId || assetHasCutDependency(draft, operation.assetId)) {
           fail('dependency_blocked');
         }
-        draft.shelf = [...draft.shelf.slice(0, shelfIndex), ...draft.shelf.slice(shelfIndex + 1)];
+        draft.shelf = [...draft.shelf.slice(0, binIndex), ...draft.shelf.slice(binIndex + 1)];
         break;
       }
 
       case 'reorder_shelf':
-        if (!isExactPermutation(draft.shelf, operation.shelf, shelfIdentity)) fail('invalid_operation');
+        if (!isExactPermutation(draft.shelf, operation.shelf, binIdentity)) fail('invalid_operation');
         draft.shelf = [];
         for (let index = 0; index < operation.shelf.length; index += 1) {
           draft.shelf.push({ ...operation.shelf[index]! });
@@ -658,10 +658,10 @@ export const applyStudioMutationBatchV2 = (
         break;
 
       case 'select_take': {
-        const [clip] = assertCanonicalTake(draft, operation.clipId, operation.assetId);
-        if (shelfHasAsset(draft, operation.assetId)) fail('invalid_operation');
-        defineOwn(draft.clips, clip.id, { ...clip, selectedAssetId: operation.assetId });
-        cutReconciliation = { kind: 'selection', clipId: clip.id };
+        const [shot] = assertCanonicalTake(draft, operation.clipId, operation.assetId);
+        if (binHasAsset(draft, operation.assetId)) fail('invalid_operation');
+        defineOwn(draft.clips, shot.id, { ...shot, selectedAssetId: operation.assetId });
+        cutReconciliation = { kind: 'selection', clipId: shot.id };
         break;
       }
     }
@@ -670,5 +670,5 @@ export const applyStudioMutationBatchV2 = (
   }
 
   if (!validateStudioProjectV2(draft)) fail('validation_failed');
-  return { project: draft, createdSectionIds, createdClipIds };
+  return { project: draft, createdSectionIds: createdBeatIds, createdClipIds: createdShotIds };
 };

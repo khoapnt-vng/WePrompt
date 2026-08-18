@@ -7,26 +7,26 @@
 import { types as nodeTypes } from 'node:util';
 import {
   isValidProviderJobId,
-  STUDIO_MAX_CLIPS_PER_PROJECT,
-  STUDIO_MAX_CLIPS_PER_SECTION,
+  STUDIO_MAX_SHOTS_PER_PROJECT,
+  STUDIO_MAX_SHOTS_PER_BEAT,
   STUDIO_MAX_CUT_PLACEMENT_CLIPS,
   STUDIO_PROJECT_SCHEMA_VERSION,
-  STUDIO_MAX_SECTIONS,
-  STUDIO_MAX_SHELF_ITEMS,
-  STUDIO_MAX_SHELF_SECTION_ITEMS,
-  STUDIO_MAX_SHELF_TAKE_ALIASES,
-  STUDIO_MAX_VIDEO_CLIP_SECONDS,
-  STUDIO_MIN_VIDEO_CLIP_SECONDS,
+  STUDIO_MAX_BEATS,
+  STUDIO_MAX_BIN_ITEMS,
+  STUDIO_MAX_BIN_BEAT_ITEMS,
+  STUDIO_MAX_BIN_TAKE_ITEMS,
+  STUDIO_MAX_SHOT_SECONDS,
+  STUDIO_MIN_SHOT_SECONDS,
   type StudioAssetV2,
-  type StudioClip,
+  type StudioShot,
   type StudioCutClipV2,
   type StudioCutFilter,
   type StudioCutV2,
   type StudioJobV2,
   type StudioProjectV2,
   type StudioProviderAdapterId,
-  type StudioSection,
-  type StudioShelfItem,
+  type StudioBeat,
+  type StudioBinItem,
 } from '@/common/types/project/creativeStudioTypes';
 import {
   STUDIO_MANAGED_ASSET_COLLECTIONS,
@@ -96,8 +96,8 @@ const PROJECT_REQUIRED_KEYS = new Set([
   'updatedAt',
 ]);
 const PROJECT_OPTIONAL_KEYS = new Set(['forgeProjectId', 'briefConversationId']);
-const SECTION_KEYS = new Set(['id', 'title', 'storyLine', 'visualPrompt', 'clipOrder']);
-const CLIP_KEYS = new Set([
+const BEAT_KEYS = new Set(['id', 'title', 'storyLine', 'visualPrompt', 'clipOrder']);
+const SHOT_KEYS = new Set([
   'id',
   'shotPrompt',
   'narration',
@@ -167,8 +167,8 @@ const FILTER_KEYS = new Set(['id', 'amount']);
 const RULE_KEYS = new Set(['id', 'scope', 'text', 'predicate', 'createdAt']);
 const RULE_PREDICATE_KEYS = new Set(['kind', 'terms']);
 const RULE_UNDO_KEYS = new Set(['capturedRevision', 'previousRules']);
-const SHELF_SECTION_KEYS = new Set(['kind', 'sectionId']);
-const SHELF_ASSET_KEYS = new Set(['kind', 'assetId']);
+const BIN_BEAT_KEYS = new Set(['kind', 'sectionId']);
+const BIN_ASSET_KEYS = new Set(['kind', 'assetId']);
 
 const INVALID_DATA_SNAPSHOT = Symbol('invalid-data-snapshot');
 type DataPropertySnapshot = {
@@ -414,22 +414,22 @@ const validateRuleUndo = (value: unknown): boolean =>
     isIntegerInRange(value.capturedRevision, 1, Number.MAX_SAFE_INTEGER) &&
     validateRules(value.previousRules));
 
-const validateSection = (sectionId: string, value: unknown): value is StudioSection =>
+const validateBeat = (beatId: string, value: unknown): value is StudioBeat =>
   isRecord(value) &&
-  hasExactKeys(value, SECTION_KEYS) &&
-  value.id === sectionId &&
-  isSafeId(sectionId) &&
+  hasExactKeys(value, BEAT_KEYS) &&
+  value.id === beatId &&
+  isSafeId(beatId) &&
   isStringWithin(value.title, 256) &&
   isStringWithin(value.storyLine, 4 * 1024) &&
   isStringWithin(value.visualPrompt, 8 * 1024) &&
-  isUniqueSafeIdArray(value.clipOrder, STUDIO_MAX_CLIPS_PER_SECTION);
+  isUniqueSafeIdArray(value.clipOrder, STUDIO_MAX_SHOTS_PER_BEAT);
 
-const validateClip = (clipId: string, value: unknown): value is StudioClip => {
+const validateShot = (shotId: string, value: unknown): value is StudioShot => {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, CLIP_KEYS) ||
-    value.id !== clipId ||
-    !isSafeId(clipId) ||
+    !hasExactKeys(value, SHOT_KEYS) ||
+    value.id !== shotId ||
+    !isSafeId(shotId) ||
     !isStringWithin(value.shotPrompt, 8 * 1024) ||
     !isStringWithin(value.narration, 4 * 1024) ||
     !isStringWithin(value.onScreenText, 1024) ||
@@ -443,7 +443,7 @@ const validateClip = (clipId: string, value: unknown): value is StudioClip => {
     return false;
   }
   return value.mediaKind === 'video'
-    ? isIntegerInRange(value.durationSeconds, STUDIO_MIN_VIDEO_CLIP_SECONDS, STUDIO_MAX_VIDEO_CLIP_SECONDS)
+    ? isIntegerInRange(value.durationSeconds, STUDIO_MIN_SHOT_SECONDS, STUDIO_MAX_SHOT_SECONDS)
     : isIntegerInRange(value.durationSeconds, 1, 60);
 };
 
@@ -604,14 +604,14 @@ const validateFilter = (value: unknown): value is StudioCutFilter =>
 const isCanonicalGeneratedTake = (
   asset: StudioAssetV2,
   projectId: string,
-  clip: StudioClip,
-  clipAssetIdsByClipId: ReadonlyMap<string, ReadonlySet<string>>
+  shot: StudioShot,
+  shotAssetIdsByShotId: ReadonlyMap<string, ReadonlySet<string>>
 ): boolean =>
   asset.projectId === projectId &&
-  asset.clipId === clip.id &&
-  asset.mediaKind === clip.mediaKind &&
+  asset.clipId === shot.id &&
+  asset.mediaKind === shot.mediaKind &&
   asset.managedAsset.collection === 'assets' &&
-  clipAssetIdsByClipId.get(clip.id)?.has(asset.id) === true;
+  shotAssetIdsByShotId.get(shot.id)?.has(asset.id) === true;
 
 const validateCutClip = (
   cutClipId: string,
@@ -696,10 +696,10 @@ const retryGraphHasCycle = (jobs: Record<string, StudioJobV2>): boolean => {
   return false;
 };
 
-const shelfItemIsExact = (value: unknown): value is StudioShelfItem => {
+const binItemIsExact = (value: unknown): value is StudioBinItem => {
   if (!isRecord(value)) return false;
-  if (value.kind === 'section') return hasExactKeys(value, SHELF_SECTION_KEYS) && isSafeId(value.sectionId);
-  if (value.kind === 'asset') return hasExactKeys(value, SHELF_ASSET_KEYS) && isSafeId(value.assetId);
+  if (value.kind === 'section') return hasExactKeys(value, BIN_BEAT_KEYS) && isSafeId(value.sectionId);
+  if (value.kind === 'asset') return hasExactKeys(value, BIN_ASSET_KEYS) && isSafeId(value.assetId);
   return false;
 };
 
@@ -728,11 +728,11 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     !isIntegerInRange(value.targetDurationSeconds, 5, 60) ||
     typeof value.resolution !== 'string' ||
     !RESOLUTIONS.has(value.resolution) ||
-    !isUniqueSafeIdArray(value.sectionOrder, STUDIO_MAX_SECTIONS) ||
+    !isUniqueSafeIdArray(value.sectionOrder, STUDIO_MAX_BEATS) ||
     !isRecord(value.sections) ||
     !isRecord(value.clips) ||
-    !isDenseArray(value.shelf, STUDIO_MAX_SHELF_ITEMS) ||
-    !arrayEvery(value.shelf, shelfItemIsExact) ||
+    !isDenseArray(value.shelf, STUDIO_MAX_BIN_ITEMS) ||
+    !arrayEvery(value.shelf, binItemIsExact) ||
     !isRecord(value.cuts) ||
     (value.activeCutId !== null && !isSafeId(value.activeCutId)) ||
     !isRecord(value.assets) ||
@@ -748,28 +748,28 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
   }
 
   const project = value as StudioProjectV2;
-  const sectionIds = Object.keys(project.sections);
-  const clipIds = Object.keys(project.clips);
+  const beatIds = Object.keys(project.sections);
+  const shotIds = Object.keys(project.clips);
   if (
-    sectionIds.length > STUDIO_MAX_SECTIONS ||
-    clipIds.length > STUDIO_MAX_CLIPS_PER_PROJECT ||
-    !sectionIds.every((sectionId) => validateSection(sectionId, project.sections[sectionId])) ||
-    !clipIds.every((clipId) => validateClip(clipId, project.clips[clipId])) ||
-    !arrayEvery(project.sectionOrder, (sectionId) => Object.hasOwn(project.sections, sectionId))
+    beatIds.length > STUDIO_MAX_BEATS ||
+    shotIds.length > STUDIO_MAX_SHOTS_PER_PROJECT ||
+    !beatIds.every((beatId) => validateBeat(beatId, project.sections[beatId])) ||
+    !shotIds.every((shotId) => validateShot(shotId, project.clips[shotId])) ||
+    !arrayEvery(project.sectionOrder, (beatId) => Object.hasOwn(project.sections, beatId))
   ) {
     return false;
   }
 
-  const clipOwners = new Map<string, string>();
-  for (const sectionId of sectionIds) {
-    const clipOrder = project.sections[sectionId]!.clipOrder;
-    for (let clipIndex = 0; clipIndex < clipOrder.length; clipIndex += 1) {
-      const clipId = clipOrder[clipIndex]!;
-      if (!Object.hasOwn(project.clips, clipId) || clipOwners.has(clipId)) return false;
-      clipOwners.set(clipId, sectionId);
+  const shotOwners = new Map<string, string>();
+  for (const beatId of beatIds) {
+    const shotOrder = project.sections[beatId]!.clipOrder;
+    for (let shotIndex = 0; shotIndex < shotOrder.length; shotIndex += 1) {
+      const shotId = shotOrder[shotIndex]!;
+      if (!Object.hasOwn(project.clips, shotId) || shotOwners.has(shotId)) return false;
+      shotOwners.set(shotId, beatId);
     }
   }
-  if (clipOwners.size !== clipIds.length) return false;
+  if (shotOwners.size !== shotIds.length) return false;
 
   const assetIds = Object.keys(project.assets);
   const jobIds = Object.keys(project.jobs);
@@ -780,19 +780,19 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     return false;
   }
 
-  const clipAssetIdsByClipId = new Map<string, ReadonlySet<string>>();
-  const clipJobPositionsByClipId = new Map<string, ReadonlyMap<string, number>>();
-  for (const clip of Object.values(project.clips)) {
-    clipAssetIdsByClipId.set(clip.id, new Set(arrayMap(clip.assetIds, (assetId) => assetId)));
-    clipJobPositionsByClipId.set(clip.id, new Map(arrayMap(clip.jobIds, (jobId, index) => [jobId, index] as const)));
+  const shotAssetIdsByShotId = new Map<string, ReadonlySet<string>>();
+  const shotJobPositionsByShotId = new Map<string, ReadonlyMap<string, number>>();
+  for (const shot of Object.values(project.clips)) {
+    shotAssetIdsByShotId.set(shot.id, new Set(arrayMap(shot.assetIds, (assetId) => assetId)));
+    shotJobPositionsByShotId.set(shot.id, new Map(arrayMap(shot.jobIds, (jobId, index) => [jobId, index] as const)));
   }
 
   const projectReferenceCount = Object.values(project.assets).filter((asset) => asset.clipId === null).length;
   if (projectReferenceCount > STUDIO_MAX_ACTIVE_BRIEF_REFERENCES) return false;
   for (const asset of Object.values(project.assets)) {
     if (asset.clipId !== null) {
-      const clip = ownValue(project.clips, asset.clipId);
-      if (clip === undefined || !clipAssetIdsByClipId.get(clip.id)?.has(asset.id)) return false;
+      const shot = ownValue(project.clips, asset.clipId);
+      if (shot === undefined || !shotAssetIdsByShotId.get(shot.id)?.has(asset.id)) return false;
     }
     if (
       asset.sourceReferenceAssetIds !== undefined &&
@@ -812,12 +812,12 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
   }
 
   for (const job of Object.values(project.jobs)) {
-    const clip = ownValue(project.clips, job.clipId);
-    if (clip === undefined || !clipJobPositionsByClipId.get(clip.id)?.has(job.id)) return false;
+    const shot = ownValue(project.clips, job.clipId);
+    if (shot === undefined || !shotJobPositionsByShotId.get(shot.id)?.has(job.id)) return false;
     if (
       !arrayEvery(job.outputAssetIds, (assetId) => {
         const asset = ownValue(project.assets, assetId);
-        return asset?.clipId === clip.id && clipAssetIdsByClipId.get(clip.id)?.has(assetId) === true;
+        return asset?.clipId === shot.id && shotAssetIdsByShotId.get(shot.id)?.has(assetId) === true;
       })
     ) {
       return false;
@@ -833,18 +833,18 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     }
   }
 
-  for (const clip of Object.values(project.clips)) {
-    if (!arrayEvery(clip.assetIds, (assetId) => ownValue(project.assets, assetId)?.clipId === clip.id)) return false;
-    if (!arrayEvery(clip.jobIds, (jobId) => ownValue(project.jobs, jobId)?.clipId === clip.id)) return false;
-    if (clip.selectedAssetId !== null) {
-      const selected = ownValue(project.assets, clip.selectedAssetId);
-      if (selected === undefined || !isCanonicalGeneratedTake(selected, project.id, clip, clipAssetIdsByClipId)) {
+  for (const shot of Object.values(project.clips)) {
+    if (!arrayEvery(shot.assetIds, (assetId) => ownValue(project.assets, assetId)?.clipId === shot.id)) return false;
+    if (!arrayEvery(shot.jobIds, (jobId) => ownValue(project.jobs, jobId)?.clipId === shot.id)) return false;
+    if (shot.selectedAssetId !== null) {
+      const selected = ownValue(project.assets, shot.selectedAssetId);
+      if (selected === undefined || !isCanonicalGeneratedTake(selected, project.id, shot, shotAssetIdsByShotId)) {
         return false;
       }
     }
-    if (clip.referenceAssetId !== null) {
-      const reference = ownValue(project.assets, clip.referenceAssetId);
-      if (reference?.clipId !== clip.id || !clipAssetIdsByClipId.get(clip.id)?.has(reference.id)) return false;
+    if (shot.referenceAssetId !== null) {
+      const reference = ownValue(project.assets, shot.referenceAssetId);
+      if (reference?.clipId !== shot.id || !shotAssetIdsByShotId.get(shot.id)?.has(reference.id)) return false;
     }
   }
 
@@ -854,7 +854,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     const predecessor = ownValue(project.jobs, job.retryOfJobId);
     const owner = ownValue(project.clips, job.clipId);
     if (predecessor === undefined || owner === undefined || predecessor.clipId !== job.clipId) return false;
-    const ownerJobPositions = clipJobPositionsByClipId.get(owner.id);
+    const ownerJobPositions = shotJobPositionsByShotId.get(owner.id);
     const predecessorIndex = ownerJobPositions?.get(predecessor.id);
     const retryIndex = ownerJobPositions?.get(job.id);
     if (predecessorIndex === undefined || retryIndex === undefined || predecessorIndex >= retryIndex) return false;
@@ -878,45 +878,43 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
   }
 
   const cutIds = Object.keys(project.cuts);
-  if (!cutIds.every((cutId) => validateCut(cutId, project, clipAssetIdsByClipId, project.cuts[cutId]))) return false;
+  if (!cutIds.every((cutId) => validateCut(cutId, project, shotAssetIdsByShotId, project.cuts[cutId]))) return false;
   if (project.activeCutId !== null && !Object.hasOwn(project.cuts, project.activeCutId)) return false;
 
-  const activeSectionIds = new Set(arrayMap(project.sectionOrder, (sectionId) => sectionId));
-  const shelfIdentityKeys = new Set<string>();
-  const parkedSectionIds = new Set<string>();
-  let parkedSectionItemCount = 0;
+  const activeBeatIds = new Set(arrayMap(project.sectionOrder, (beatId) => beatId));
+  const binIdentityKeys = new Set<string>();
+  const parkedBeatIds = new Set<string>();
+  let parkedBeatItemCount = 0;
   let takeAliasItemCount = 0;
   const cutAssetIds = new Set(
     Object.values(project.cuts).flatMap((cut) => Object.values(cut.clips).map((cutClip) => cutClip.assetId))
   );
-  for (let shelfIndex = 0; shelfIndex < project.shelf.length; shelfIndex += 1) {
-    const item = project.shelf[shelfIndex]!;
+  for (let binIndex = 0; binIndex < project.shelf.length; binIndex += 1) {
+    const item = project.shelf[binIndex]!;
     const identityKey = item.kind === 'section' ? `section:${item.sectionId}` : `asset:${item.assetId}`;
-    if (shelfIdentityKeys.has(identityKey)) return false;
-    shelfIdentityKeys.add(identityKey);
+    if (binIdentityKeys.has(identityKey)) return false;
+    binIdentityKeys.add(identityKey);
     if (item.kind === 'section') {
-      parkedSectionItemCount += 1;
-      if (parkedSectionItemCount > STUDIO_MAX_SHELF_SECTION_ITEMS) return false;
-      if (!Object.hasOwn(project.sections, item.sectionId) || activeSectionIds.has(item.sectionId)) return false;
-      parkedSectionIds.add(item.sectionId);
+      parkedBeatItemCount += 1;
+      if (parkedBeatItemCount > STUDIO_MAX_BIN_BEAT_ITEMS) return false;
+      if (!Object.hasOwn(project.sections, item.sectionId) || activeBeatIds.has(item.sectionId)) return false;
+      parkedBeatIds.add(item.sectionId);
       continue;
     }
     takeAliasItemCount += 1;
-    if (takeAliasItemCount > STUDIO_MAX_SHELF_TAKE_ALIASES) return false;
+    if (takeAliasItemCount > STUDIO_MAX_BIN_TAKE_ITEMS) return false;
     const asset = ownValue(project.assets, item.assetId);
     if (asset?.clipId === null || asset === undefined) return false;
-    const clip = ownValue(project.clips, asset.clipId);
+    const shot = ownValue(project.clips, asset.clipId);
     if (
-      clip === undefined ||
-      !isCanonicalGeneratedTake(asset, project.id, clip, clipAssetIdsByClipId) ||
-      clip.selectedAssetId === asset.id ||
+      shot === undefined ||
+      !isCanonicalGeneratedTake(asset, project.id, shot, shotAssetIdsByShotId) ||
+      shot.selectedAssetId === asset.id ||
       cutAssetIds.has(asset.id)
     ) {
       return false;
     }
   }
 
-  return sectionIds.every(
-    (sectionId) => Number(activeSectionIds.has(sectionId)) + Number(parkedSectionIds.has(sectionId)) === 1
-  );
+  return beatIds.every((beatId) => Number(activeBeatIds.has(beatId)) + Number(parkedBeatIds.has(beatId)) === 1);
 };

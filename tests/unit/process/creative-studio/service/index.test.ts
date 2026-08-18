@@ -53,7 +53,7 @@ import {
   createCreativeStudioService,
   createCreativeStudioServiceV2,
   createStudioDirectorCommandService,
-  derivePayableClipIds,
+  derivePayableShotIds,
   type CreativeStudioService,
 } from '@process/services/creative-studio/service';
 import {
@@ -6082,7 +6082,7 @@ describe('CreativeStudioServiceV2', () => {
       })),
       deleteProjectV2: vi.fn(async () => true),
     };
-    const submitClips = vi.fn(async () => []);
+    const submitShots = vi.fn(async () => []);
     const cancelJobV2 = vi.fn(async () => makeSchema2Job(current, { status: 'cancelled', error: null }));
     const retryJobV2 = vi.fn(async () => makeSchema2Job(current, { status: 'queued_local', error: null }));
     const retryDownloadV2 = vi.fn(async () => makeSchema2Job(current, { status: 'succeeded', error: null }));
@@ -6113,7 +6113,7 @@ describe('CreativeStudioServiceV2', () => {
     const onProjectUpdated = vi.fn();
     const service = createCreativeStudioServiceV2({
       store: store as unknown as CreativeStudioStore,
-      jobManager: { submitClips, cancelJobV2, retryJobV2, retryDownloadV2 } as never,
+      jobManager: { submitShots, cancelJobV2, retryJobV2, retryDownloadV2 } as never,
       providerResolver: providerResolver as never,
       ...(options.includeMediaStore === false
         ? {}
@@ -6129,7 +6129,7 @@ describe('CreativeStudioServiceV2', () => {
     return {
       service,
       store,
-      submitClips,
+      submitShots,
       cancelJobV2,
       retryJobV2,
       retryDownloadV2,
@@ -6153,7 +6153,7 @@ describe('CreativeStudioServiceV2', () => {
       sectionIds: ['section_2', 'section_1'],
     });
 
-    expect(derivePayableClipIds(project, ['section_2', 'section_1'])).toEqual(['clip_1', 'clip_2']);
+    expect(derivePayableShotIds(project, ['section_2', 'section_1'])).toEqual(['clip_1', 'clip_2']);
     expect(result.payableClipIds).toEqual(['clip_1', 'clip_2']);
     expect(result.clips.every((clip) => clip.ready)).toBe(true);
     expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
@@ -6239,7 +6239,7 @@ describe('CreativeStudioServiceV2', () => {
     };
     const harness = makeHarness(project);
 
-    await harness.service.submitClips({
+    await harness.service.submitShots({
       projectId: project.id,
       expectedRevision: project.revision,
       clipIds: ['clip_1'],
@@ -6247,8 +6247,8 @@ describe('CreativeStudioServiceV2', () => {
       catalogVersion: 'catalog_v2',
     });
 
-    expect(harness.submitClips).toHaveBeenCalledTimes(1);
-    expect(harness.submitClips).toHaveBeenCalledWith({
+    expect(harness.submitShots).toHaveBeenCalledTimes(1);
+    expect(harness.submitShots).toHaveBeenCalledWith({
       projectId: project.id,
       expectedRevision: project.revision,
       clipIds: ['clip_1'],
@@ -6287,7 +6287,7 @@ describe('CreativeStudioServiceV2', () => {
     project.clips.clip_1.selectedAssetId = 'take_1';
     const harness = makeHarness(project);
 
-    await harness.service.submitClips({
+    await harness.service.submitShots({
       projectId: project.id,
       expectedRevision: project.revision,
       clipIds: ['clip_1'],
@@ -6297,8 +6297,8 @@ describe('CreativeStudioServiceV2', () => {
       referencePrompts: [{ clipId: 'clip_1', prompt: 'A clean first-frame reference' }],
     });
 
-    expect(harness.submitClips).toHaveBeenCalledOnce();
-    expect(harness.submitClips).toHaveBeenCalledWith(
+    expect(harness.submitShots).toHaveBeenCalledOnce();
+    expect(harness.submitShots).toHaveBeenCalledWith(
       expect.objectContaining({
         outputRole: 'reference',
         referencePrompts: [{ clipId: 'clip_1', prompt: 'A clean first-frame reference' }],
@@ -6324,7 +6324,7 @@ describe('CreativeStudioServiceV2', () => {
     });
 
     await expect(
-      harness.service.submitClips({
+      harness.service.submitShots({
         projectId: project.id,
         expectedRevision: project.revision,
         clipIds: ['clip_1'],
@@ -6332,7 +6332,7 @@ describe('CreativeStudioServiceV2', () => {
         catalogVersion: 'catalog_v2',
       })
     ).rejects.toMatchObject({ code: 'stale_project' });
-    expect(harness.submitClips).not.toHaveBeenCalled();
+    expect(harness.submitShots).not.toHaveBeenCalled();
   });
 
   it('rejects a stale catalog before job submission', async () => {
@@ -6345,7 +6345,7 @@ describe('CreativeStudioServiceV2', () => {
     const harness = makeHarness(project);
 
     await expect(
-      harness.service.submitClips({
+      harness.service.submitShots({
         projectId: project.id,
         expectedRevision: project.revision,
         clipIds: ['clip_1'],
@@ -6353,7 +6353,7 @@ describe('CreativeStudioServiceV2', () => {
         catalogVersion: 'stale_catalog',
       })
     ).rejects.toMatchObject({ code: 'invalid_route' });
-    expect(harness.submitClips).not.toHaveBeenCalled();
+    expect(harness.submitShots).not.toHaveBeenCalled();
   });
 
   it('rejects a non-bijective route list before resolving providers', async () => {
@@ -6361,7 +6361,7 @@ describe('CreativeStudioServiceV2', () => {
     const harness = makeHarness(project);
 
     await expect(
-      harness.service.submitClips({
+      harness.service.submitShots({
         projectId: project.id,
         expectedRevision: project.revision,
         clipIds: ['clip_1'],
@@ -6382,7 +6382,7 @@ describe('CreativeStudioServiceV2', () => {
       throw new Error('paid boundary reached by a free operation');
     };
     harness.providerResolver.listGenerationRoutes.mockImplementation(poison);
-    harness.submitClips.mockImplementation(poison);
+    harness.submitShots.mockImplementation(poison);
     harness.cancelJobV2.mockImplementation(poison);
     harness.retryJobV2.mockImplementation(poison);
     harness.retryDownloadV2.mockImplementation(poison);
@@ -6425,7 +6425,7 @@ describe('CreativeStudioServiceV2', () => {
     await harness.service.deleteProject({ projectId: project.id, expectedRevision: project.revision });
 
     expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
-    expect(harness.submitClips).not.toHaveBeenCalled();
+    expect(harness.submitShots).not.toHaveBeenCalled();
     expect(harness.cancelJobV2).not.toHaveBeenCalled();
     expect(harness.retryJobV2).not.toHaveBeenCalled();
     expect(harness.retryDownloadV2).not.toHaveBeenCalled();
@@ -6512,7 +6512,7 @@ describe('CreativeStudioServiceV2', () => {
       expect(job).not.toHaveProperty('providerJobId');
       expect(job).not.toHaveProperty('idempotencyKey');
     }
-    expect(harness.submitClips).not.toHaveBeenCalled();
+    expect(harness.submitShots).not.toHaveBeenCalled();
   });
 
   it('rejects an invalid duplicate-charge acknowledgement before retry manager work', async () => {
@@ -6755,9 +6755,9 @@ describe('CreativeStudioServiceV2', () => {
       ...override,
     };
 
-    await expect(harness.service.submitClips(request as never)).rejects.toMatchObject({ code: 'invalid_payload' });
+    await expect(harness.service.submitShots(request as never)).rejects.toMatchObject({ code: 'invalid_payload' });
     expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
-    expect(harness.submitClips).not.toHaveBeenCalled();
+    expect(harness.submitShots).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -6788,7 +6788,7 @@ describe('CreativeStudioServiceV2', () => {
     });
 
     await expect(
-      harness.service.submitClips({
+      harness.service.submitShots({
         projectId: project.id,
         expectedRevision: project.revision,
         clipIds: ['clip_1'],
@@ -6796,7 +6796,7 @@ describe('CreativeStudioServiceV2', () => {
         catalogVersion: 'catalog_v2',
       })
     ).rejects.toMatchObject({ code: 'invalid_route' });
-    expect(harness.submitClips).not.toHaveBeenCalled();
+    expect(harness.submitShots).not.toHaveBeenCalled();
   });
 });
 
@@ -7728,13 +7728,13 @@ describe('Studio MCP server', () => {
   });
 });
 
-const editableSectionV2 = () => ({
+const editableBeatV2 = () => ({
   title: 'Opening',
   storyLine: 'Introduce the product',
   visualPrompt: 'Warm sunrise over a quiet city',
 });
 
-const editableClipV2 = (mediaKind: 'image' | 'video' = 'image') => ({
+const editableShotV2 = (mediaKind: 'image' | 'video' = 'image') => ({
   shotPrompt: 'A wide establishing shot',
   narration: '',
   onScreenText: '',
@@ -7820,19 +7820,19 @@ describe('Studio MCP schema-2 server', () => {
         'select_take',
         'set_brief',
       ]);
-      const addSection = operationVariants?.find((variant) => variant.properties?.kind?.const === 'add_section');
-      const addClip = operationVariants?.find((variant) => variant.properties?.kind?.const === 'add_clip');
-      expect(addSection).toMatchObject({
+      const addBeat = operationVariants?.find((variant) => variant.properties?.kind?.const === 'add_section');
+      const addShot = operationVariants?.find((variant) => variant.properties?.kind?.const === 'add_clip');
+      expect(addBeat).toMatchObject({
         additionalProperties: false,
         required: ['kind', 'section', 'firstClip', 'beforeSectionId'],
       });
-      expect(addSection?.properties).not.toHaveProperty('sectionId');
-      expect(addSection?.properties).not.toHaveProperty('firstClipId');
-      expect(addClip).toMatchObject({
+      expect(addBeat?.properties).not.toHaveProperty('sectionId');
+      expect(addBeat?.properties).not.toHaveProperty('firstClipId');
+      expect(addShot).toMatchObject({
         additionalProperties: false,
         required: ['kind', 'sectionId', 'clip', 'beforeClipId'],
       });
-      expect(addClip?.properties).not.toHaveProperty('clipId');
+      expect(addShot?.properties).not.toHaveProperty('clipId');
 
       const canonicalBatch = {
         expectedRevision: 8,
@@ -7852,7 +7852,7 @@ describe('Studio MCP schema-2 server', () => {
               kind: 'add_clip',
               sectionId: 'section_1',
               clipId: 'caller_id',
-              clip: editableClipV2(),
+              clip: editableShotV2(),
               beforeClipId: null,
             },
           ],
@@ -7914,7 +7914,7 @@ describe('Studio MCP schema-2 server', () => {
         {
           expectedRevision: 7,
           operations: [
-            { kind: 'add_section', section: editableSectionV2(), firstClip: editableClipV2(), beforeSectionId: null },
+            { kind: 'add_section', section: editableBeatV2(), firstClip: editableShotV2(), beforeSectionId: null },
             { kind: 'reorder_sections', sectionOrder: ['section_1'] },
           ],
         },
@@ -7924,7 +7924,7 @@ describe('Studio MCP schema-2 server', () => {
             {
               kind: 'add_clip',
               sectionId: 'section_1',
-              clip: { ...editableClipV2('video'), durationSeconds: 3 },
+              clip: { ...editableShotV2('video'), durationSeconds: 3 },
               beforeClipId: null,
             },
           ],
@@ -7949,9 +7949,9 @@ describe('Studio MCP schema-2 server', () => {
             {
               kind: 'add_section',
               sectionId: 'section_new',
-              section: editableSectionV2(),
+              section: editableBeatV2(),
               firstClipId: 'clip_new',
-              firstClip: editableClipV2(),
+              firstClip: editableShotV2(),
               beforeSectionId: null,
             },
             { kind: 'reorder_sections', sectionOrder: ['section_1'] },
@@ -7972,39 +7972,36 @@ describe('Studio MCP schema-2 server', () => {
       const proposalTool = tools.find((tool) => tool.name === 'propose_storyboard');
       const applyValidator = new AjvJsonSchemaValidator().getValidator(applyTool?.inputSchema as never);
       const proposalValidator = new AjvJsonSchemaValidator().getValidator(proposalTool?.inputSchema as never);
-      const sameSectionApply = {
+      const sameBeatApply = {
         expectedRevision: 7,
         operations: [
-          { kind: 'add_clip', sectionId: 'section_1', clip: editableClipV2(), beforeClipId: null },
+          { kind: 'add_clip', sectionId: 'section_1', clip: editableShotV2(), beforeClipId: null },
           { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_1'] },
         ],
       };
-      const differentSectionApply = {
+      const differentBeatApply = {
         expectedRevision: 7,
         operations: [
-          { kind: 'add_clip', sectionId: 'section_1', clip: editableClipV2(), beforeClipId: null },
+          { kind: 'add_clip', sectionId: 'section_1', clip: editableShotV2(), beforeClipId: null },
           { kind: 'reorder_clips', sectionId: 'section_2', clipOrder: ['clip_2'] },
         ],
       };
-      const sameSectionProposal = {
+      const sameBeatProposal = {
         base_revision: 7,
         operations: [
           {
             kind: 'add_clip',
             sectionId: 'section_1',
             clipId: 'clip_new',
-            clip: editableClipV2(),
+            clip: editableShotV2(),
             beforeClipId: null,
           },
           { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_1'] },
         ],
       };
-      const differentSectionProposal = {
-        ...sameSectionProposal,
-        operations: [
-          sameSectionProposal.operations[0],
-          { ...sameSectionProposal.operations[1], sectionId: 'section_2' },
-        ],
+      const differentBeatProposal = {
+        ...sameBeatProposal,
+        operations: [sameBeatProposal.operations[0], { ...sameBeatProposal.operations[1], sectionId: 'section_2' }],
       };
       const oversizedOperations = Array.from({ length: 32 }, (_, index) => ({
         kind: 'set_brief',
@@ -8013,18 +8010,18 @@ describe('Studio MCP schema-2 server', () => {
       const oversizedApply = { expectedRevision: 7, operations: oversizedOperations };
       const oversizedProposal = { base_revision: 7, operations: oversizedOperations };
 
-      expect(applyValidator(sameSectionApply)).toMatchObject({ valid: true });
-      expect(applyValidator(differentSectionApply)).toMatchObject({ valid: true });
+      expect(applyValidator(sameBeatApply)).toMatchObject({ valid: true });
+      expect(applyValidator(differentBeatApply)).toMatchObject({ valid: true });
       expect(applyValidator(oversizedApply)).toMatchObject({ valid: true });
-      expect(studioApplyEditsInputSchemaV2.safeParse(sameSectionApply).success).toBe(false);
-      expect(studioApplyEditsInputSchemaV2.safeParse(differentSectionApply).success).toBe(true);
+      expect(studioApplyEditsInputSchemaV2.safeParse(sameBeatApply).success).toBe(false);
+      expect(studioApplyEditsInputSchemaV2.safeParse(differentBeatApply).success).toBe(true);
       expect(studioApplyEditsInputSchemaV2.safeParse(oversizedApply).success).toBe(false);
 
-      expect(proposalValidator(sameSectionProposal)).toMatchObject({ valid: true });
-      expect(proposalValidator(differentSectionProposal)).toMatchObject({ valid: true });
+      expect(proposalValidator(sameBeatProposal)).toMatchObject({ valid: true });
+      expect(proposalValidator(differentBeatProposal)).toMatchObject({ valid: true });
       expect(proposalValidator(oversizedProposal)).toMatchObject({ valid: true });
-      expect(studioProposeStoryboardInputSchemaV2.safeParse(sameSectionProposal).success).toBe(false);
-      expect(studioProposeStoryboardInputSchemaV2.safeParse(differentSectionProposal).success).toBe(true);
+      expect(studioProposeStoryboardInputSchemaV2.safeParse(sameBeatProposal).success).toBe(false);
+      expect(studioProposeStoryboardInputSchemaV2.safeParse(differentBeatProposal).success).toBe(true);
       expect(studioProposeStoryboardInputSchemaV2.safeParse(oversizedProposal).success).toBe(false);
 
       for (const description of [applyTool?.description, proposalTool?.description]) {
@@ -8039,12 +8036,12 @@ describe('Studio MCP schema-2 server', () => {
   it('accepts every V2 operation independently and rejects mutation-sensitive malformed batches', () => {
     const validOperations = [
       { kind: 'set_brief', brief: 'A concise launch story' },
-      { kind: 'add_section', section: editableSectionV2(), firstClip: editableClipV2(), beforeSectionId: null },
+      { kind: 'add_section', section: editableBeatV2(), firstClip: editableShotV2(), beforeSectionId: null },
       { kind: 'edit_section', sectionId: 'section_1', changes: { title: 'A new opening' } },
       { kind: 'reorder_sections', sectionOrder: ['section_2', 'section_1'] },
       { kind: 'park_section', sectionId: 'section_2' },
       { kind: 'restore_section', sectionId: 'section_2', beforeSectionId: 'section_1' },
-      { kind: 'add_clip', sectionId: 'section_1', clip: editableClipV2(), beforeClipId: null },
+      { kind: 'add_clip', sectionId: 'section_1', clip: editableShotV2(), beforeClipId: null },
       { kind: 'edit_clip', clipId: 'clip_1', changes: { shotPrompt: 'A tighter shot' } },
       { kind: 'delete_clip', clipId: 'clip_2' },
       { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_2', 'clip_1'] },
@@ -8077,8 +8074,8 @@ describe('Studio MCP schema-2 server', () => {
           {
             kind: 'add_section',
             sectionId: 'caller_section',
-            section: editableSectionV2(),
-            firstClip: editableClipV2(),
+            section: editableBeatV2(),
+            firstClip: editableShotV2(),
             beforeSectionId: null,
           },
         ],
@@ -8089,7 +8086,7 @@ describe('Studio MCP schema-2 server', () => {
           {
             kind: 'add_clip',
             sectionId: 'section_1',
-            clip: { ...editableClipV2('video'), durationSeconds: 3 },
+            clip: { ...editableShotV2('video'), durationSeconds: 3 },
             beforeClipId: null,
           },
         ],
@@ -8100,7 +8097,7 @@ describe('Studio MCP schema-2 server', () => {
           {
             kind: 'add_clip',
             sectionId: 'section_1',
-            clip: { ...editableClipV2('video'), durationSeconds: 16 },
+            clip: { ...editableShotV2('video'), durationSeconds: 16 },
             beforeClipId: null,
           },
         ],
@@ -8116,14 +8113,14 @@ describe('Studio MCP schema-2 server', () => {
       {
         expectedRevision: 7,
         operations: [
-          { kind: 'add_section', section: editableSectionV2(), firstClip: editableClipV2(), beforeSectionId: null },
+          { kind: 'add_section', section: editableBeatV2(), firstClip: editableShotV2(), beforeSectionId: null },
           { kind: 'reorder_sections', sectionOrder: ['section_1'] },
         ],
       },
       {
         expectedRevision: 7,
         operations: [
-          { kind: 'add_clip', sectionId: 'section_1', clip: editableClipV2(), beforeClipId: null },
+          { kind: 'add_clip', sectionId: 'section_1', clip: editableShotV2(), beforeClipId: null },
           { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_1'] },
         ],
       },
@@ -8136,7 +8133,7 @@ describe('Studio MCP schema-2 server', () => {
       studioApplyEditsInputSchemaV2.safeParse({
         expectedRevision: 7,
         operations: [
-          { kind: 'add_clip', sectionId: 'section_1', clip: editableClipV2(), beforeClipId: null },
+          { kind: 'add_clip', sectionId: 'section_1', clip: editableShotV2(), beforeClipId: null },
           { kind: 'reorder_clips', sectionId: 'section_2', clipOrder: ['clip_2'] },
         ],
       }).success
@@ -8148,9 +8145,9 @@ describe('Studio MCP schema-2 server', () => {
           {
             kind: 'add_section',
             sectionId: 'section_new',
-            section: editableSectionV2(),
+            section: editableBeatV2(),
             firstClipId: 'clip_new',
-            firstClip: editableClipV2(),
+            firstClip: editableShotV2(),
             beforeSectionId: null,
           },
         ],
@@ -8164,7 +8161,7 @@ describe('Studio MCP schema-2 server', () => {
             kind: 'add_clip',
             sectionId: 'section_1',
             clipId: 'clip_new',
-            clip: editableClipV2(),
+            clip: editableShotV2(),
             beforeClipId: null,
           },
           { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_1'] },
@@ -8198,11 +8195,11 @@ describe('Studio MCP schema-2 server', () => {
     try {
       for (const operations of [
         [
-          { kind: 'add_section', section: editableSectionV2(), firstClip: editableClipV2(), beforeSectionId: null },
+          { kind: 'add_section', section: editableBeatV2(), firstClip: editableShotV2(), beforeSectionId: null },
           { kind: 'reorder_sections', sectionOrder: ['section_1'] },
         ],
         [
-          { kind: 'add_clip', sectionId: 'section_1', clip: editableClipV2(), beforeClipId: null },
+          { kind: 'add_clip', sectionId: 'section_1', clip: editableShotV2(), beforeClipId: null },
           { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_1'] },
         ],
       ]) {
@@ -8220,7 +8217,7 @@ describe('Studio MCP schema-2 server', () => {
         arguments: {
           expectedRevision: 7,
           operations: [
-            { kind: 'add_clip', sectionId: 'section_1', clip: editableClipV2(), beforeClipId: null },
+            { kind: 'add_clip', sectionId: 'section_1', clip: editableShotV2(), beforeClipId: null },
             { kind: 'reorder_clips', sectionId: 'section_2', clipOrder: ['clip_2'] },
           ],
         },
@@ -8398,7 +8395,7 @@ describe('Studio MCP schema-2 server', () => {
             visualPrompt: `Visual ${ordinal}`,
           },
           firstClipId: `clip_${ordinal}`,
-          firstClip: editableClipV2(),
+          firstClip: editableShotV2(),
           beforeSectionId: null,
         };
       }),
@@ -8817,17 +8814,17 @@ describe('Studio MCP schema-2 server', () => {
     });
     const beforePending = await readdir(pendingDir);
     const beforeSlots = await readdir(slotsDir);
-    const hostileClipIds = new Proxy(['clip_1'], {
+    const hostileShotIds = new Proxy(['clip_1'], {
       ownKeys() {
         throw new Error('hostile ownKeys');
       },
     });
-    for (const invalidClipIds of [
+    for (const invalidShotIds of [
       [],
       Array.from({ length: 25 }, (_, index) => `clip_${index}`),
       ['clip_1', 'clip_1'],
       ['unsafe/clip'],
-      hostileClipIds,
+      hostileShotIds,
     ]) {
       // Keep the no-side-effect queue oracle deterministic between malformed direct calls.
       // eslint-disable-next-line no-await-in-loop
@@ -8835,8 +8832,8 @@ describe('Studio MCP schema-2 server', () => {
         referenceRequestWriter.writeReferenceRequestRecordV2({
           pendingDir,
           projectId: 'project_v2',
-          requestId: `invalid_${invalidClipIds.length}`,
-          clipIds: invalidClipIds,
+          requestId: `invalid_${invalidShotIds.length}`,
+          clipIds: invalidShotIds,
           projectAuthority,
         })
       ).rejects.toMatchObject({ code: 'storage' });
@@ -8860,7 +8857,7 @@ describe('Studio MCP schema-2 server', () => {
       })
     );
     await expect(
-      referenceRequestWriter.listPendingReferenceRequestClipIdsV2(pendingDir, 'project_v2')
+      referenceRequestWriter.listPendingReferenceRequestShotIdsV2(pendingDir, 'project_v2')
     ).resolves.toEqual(new Set(clipIds));
 
     const racedFile = path.join(pendingDir, 'raced.json');
@@ -8887,7 +8884,7 @@ describe('Studio MCP schema-2 server', () => {
       },
     });
     await expect(
-      referenceRequestWriter.listPendingReferenceRequestClipIdsV2(pendingDir, 'project_v2', racedFs)
+      referenceRequestWriter.listPendingReferenceRequestShotIdsV2(pendingDir, 'project_v2', racedFs)
     ).resolves.toEqual(new Set(clipIds));
     expect(swapped).toBe(true);
 
@@ -8918,7 +8915,7 @@ describe('Studio MCP schema-2 server', () => {
       },
     });
     await expect(
-      referenceRequestWriter.listPendingReferenceRequestClipIdsV2(pendingDir, 'project_v2', mismatchedDirectoryFs)
+      referenceRequestWriter.listPendingReferenceRequestShotIdsV2(pendingDir, 'project_v2', mismatchedDirectoryFs)
     ).resolves.toEqual(new Set());
     await rm(projectDir, { recursive: true, force: true });
   });

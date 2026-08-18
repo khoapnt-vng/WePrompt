@@ -56,7 +56,7 @@ const addScene = (title: string) => ({
   beforeSceneId: null,
 });
 
-const clipInputV2 = (shotPrompt: string) => ({
+const shotInputV2 = (shotPrompt: string) => ({
   shotPrompt,
   narration: '',
   onScreenText: '',
@@ -951,13 +951,13 @@ describe('Studio Director subprocess command writer', () => {
           {
             kind: 'add_section',
             section: { title: 'Opening', storyLine: '', visualPrompt: 'A warm visual language' },
-            firstClip: clipInputV2('A wide opening shot'),
+            firstClip: shotInputV2('A wide opening shot'),
             beforeSectionId: null,
           },
           {
             kind: 'add_clip',
             sectionId: 'section_existing',
-            clip: clipInputV2('A close detail'),
+            clip: shotInputV2('A close detail'),
             beforeClipId: null,
           },
         ],
@@ -2811,7 +2811,7 @@ describe('Studio Director subprocess command writer', () => {
           {
             kind: 'add_section',
             section: { title: 'Opening', storyLine: '', visualPrompt: '' },
-            firstClip: clipInputV2('Opening'),
+            firstClip: shotInputV2('Opening'),
             beforeSectionId: null,
           },
         ],

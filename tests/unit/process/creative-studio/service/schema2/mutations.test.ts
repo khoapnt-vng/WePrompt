@@ -9,12 +9,12 @@
 import { describe, expect, it } from 'vitest';
 import type {
   StudioAssetV2,
-  StudioClip,
+  StudioShot,
   StudioJobV2,
   StudioMutationBatchV2,
   StudioMutationOperationV2,
   StudioProjectV2,
-  StudioSection,
+  StudioBeat,
 } from '@/common/types/project/creativeStudioTypes';
 import {
   applyStudioMutationBatchV2,
@@ -25,7 +25,7 @@ import { validateStudioProjectV2 } from '@/process/services/creative-studio/serv
 
 const timestamp = '2026-08-17T00:00:00.000Z';
 
-const makeClip = (id: string, overrides: Partial<StudioClip> = {}): StudioClip => ({
+const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot => ({
   id,
   shotPrompt: '',
   narration: '',
@@ -39,18 +39,18 @@ const makeClip = (id: string, overrides: Partial<StudioClip> = {}): StudioClip =
   ...overrides,
 });
 
-const makeSection = (id: string, clipOrder: string[]): StudioSection => ({
+const makeBeat = (id: string, shotOrder: string[]): StudioBeat => ({
   id,
   title: '',
   storyLine: '',
   visualPrompt: '',
-  clipOrder,
+  clipOrder: shotOrder,
 });
 
-const makeAsset = (id: string, clipId: string): StudioAssetV2 => ({
+const makeAsset = (id: string, shotId: string): StudioAssetV2 => ({
   id,
   projectId: 'project_1',
-  clipId,
+  clipId: shotId,
   mediaKind: 'image',
   mimeType: 'image/png',
   managedAsset: { collection: 'assets', fileName: `${id}.png` },
@@ -59,10 +59,10 @@ const makeAsset = (id: string, clipId: string): StudioAssetV2 => ({
   createdAt: timestamp,
 });
 
-const makeJob = (id: string, clipId: string): StudioJobV2 => ({
+const makeJob = (id: string, shotId: string): StudioJobV2 => ({
   id,
   projectId: 'project_1',
-  clipId,
+  clipId: shotId,
   status: 'queued_local',
   provider: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'image-model' },
   idempotencyKey: `idem_${id}`,
@@ -92,12 +92,12 @@ const makeProject = (): StudioProjectV2 => ({
   resolution: '1080p',
   sectionOrder: ['section_1', 'section_2'],
   sections: {
-    section_1: makeSection('section_1', ['clip_1']),
-    section_2: makeSection('section_2', ['clip_2']),
+    section_1: makeBeat('section_1', ['clip_1']),
+    section_2: makeBeat('section_2', ['clip_2']),
   },
   clips: {
-    clip_1: makeClip('clip_1'),
-    clip_2: makeClip('clip_2'),
+    clip_1: makeShot('clip_1'),
+    clip_2: makeShot('clip_2'),
   },
   shelf: [],
   cuts: {},
@@ -109,9 +109,9 @@ const makeProject = (): StudioProjectV2 => ({
   updatedAt: timestamp,
 });
 
-const addCanonicalAsset = (project: StudioProjectV2, clipId: string, assetId: string): void => {
-  project.assets[assetId] = makeAsset(assetId, clipId);
-  project.clips[clipId]!.assetIds.push(assetId);
+const addCanonicalAsset = (project: StudioProjectV2, shotId: string, assetId: string): void => {
+  project.assets[assetId] = makeAsset(assetId, shotId);
+  project.clips[shotId]!.assetIds.push(assetId);
 };
 
 const batch = (
@@ -125,7 +125,7 @@ const batch = (
   ...overrides,
 });
 
-const emptyClipInput = (): Extract<StudioMutationOperationV2, { kind: 'add_clip' }>['clip'] => ({
+const emptyShotInput = (): Extract<StudioMutationOperationV2, { kind: 'add_clip' }>['clip'] => ({
   shotPrompt: '',
   narration: '',
   onScreenText: '',
@@ -219,7 +219,7 @@ describe('applyStudioMutationBatchV2 operations', () => {
           sectionId: 'section_new',
           section: { title: 'New', storyLine: 'Story', visualPrompt: 'Look' },
           firstClipId: 'clip_new',
-          firstClip: emptyClipInput(),
+          firstClip: emptyShotInput(),
           beforeSectionId: 'section_2',
         },
       ])
@@ -313,7 +313,7 @@ describe('applyStudioMutationBatchV2 operations', () => {
           kind: 'add_clip',
           sectionId: 'section_1',
           clipId: 'clip_new',
-          clip: emptyClipInput(),
+          clip: emptyShotInput(),
           beforeClipId: 'clip_1',
         },
       ])
@@ -367,7 +367,7 @@ describe('applyStudioMutationBatchV2 operations', () => {
   it('reorders the complete clip permutation for an active or parked section', () => {
     const project = makeProject();
     project.sections.section_1!.clipOrder.push('clip_3');
-    project.clips.clip_3 = makeClip('clip_3');
+    project.clips.clip_3 = makeShot('clip_3');
     project.sectionOrder = ['section_2'];
     project.shelf = [{ kind: 'section', sectionId: 'section_1' }];
 
@@ -527,7 +527,7 @@ describe('applyStudioMutationBatchV2 ordering and atomicity', () => {
           kind: 'add_clip',
           sectionId: 'section_1',
           clipId: 'clip_new',
-          clip: emptyClipInput(),
+          clip: emptyShotInput(),
           beforeClipId: null,
         },
         { kind: 'edit_clip', clipId: 'clip_new', changes: { narration: 'Visible later' } },
@@ -582,7 +582,7 @@ describe('applyStudioMutationBatchV2 ordering and atomicity', () => {
           kind: 'add_clip',
           sectionId: 'section_1',
           clipId: 'clip_3',
-          clip: emptyClipInput(),
+          clip: emptyShotInput(),
           beforeClipId: null,
         },
         {
@@ -590,14 +590,14 @@ describe('applyStudioMutationBatchV2 ordering and atomicity', () => {
           sectionId: 'section_3',
           section: { title: '', storyLine: '', visualPrompt: '' },
           firstClipId: 'clip_4',
-          firstClip: emptyClipInput(),
+          firstClip: emptyShotInput(),
           beforeSectionId: null,
         },
         {
           kind: 'add_clip',
           sectionId: 'section_3',
           clipId: 'clip_5',
-          clip: emptyClipInput(),
+          clip: emptyShotInput(),
           beforeClipId: null,
         },
       ])
@@ -637,9 +637,9 @@ describe('applyStudioMutationBatchV2 ordering and atomicity', () => {
   it('allows delete-before-add to free section capacity', () => {
     const project = makeProject();
     for (let index = 3; index <= 9; index += 1) {
-      const clipId = `clip_${index}`;
-      project.clips[clipId] = makeClip(clipId);
-      project.sections.section_1!.clipOrder.push(clipId);
+      const shotId = `clip_${index}`;
+      project.clips[shotId] = makeShot(shotId);
+      project.sections.section_1!.clipOrder.push(shotId);
     }
 
     const result = applyStudioMutationBatchV2(
@@ -650,7 +650,7 @@ describe('applyStudioMutationBatchV2 ordering and atomicity', () => {
           kind: 'add_clip',
           sectionId: 'section_1',
           clipId: 'clip_10',
-          clip: emptyClipInput(),
+          clip: emptyShotInput(),
           beforeClipId: null,
         },
       ])
@@ -662,9 +662,9 @@ describe('applyStudioMutationBatchV2 ordering and atomicity', () => {
   it('rejects add-before-delete at section capacity', () => {
     const project = makeProject();
     for (let index = 3; index <= 9; index += 1) {
-      const clipId = `clip_${index}`;
-      project.clips[clipId] = makeClip(clipId);
-      project.sections.section_1!.clipOrder.push(clipId);
+      const shotId = `clip_${index}`;
+      project.clips[shotId] = makeShot(shotId);
+      project.sections.section_1!.clipOrder.push(shotId);
     }
 
     expectReason(
@@ -676,7 +676,7 @@ describe('applyStudioMutationBatchV2 ordering and atomicity', () => {
               kind: 'add_clip',
               sectionId: 'section_1',
               clipId: 'clip_10',
-              clip: emptyClipInput(),
+              clip: emptyShotInput(),
               beforeClipId: null,
             },
             { kind: 'delete_clip', clipId: 'clip_1' },
@@ -755,11 +755,11 @@ describe('applyStudioMutationBatchV2 boundaries', () => {
   it('reports section capacity before identity collision', () => {
     const project = makeProject();
     for (let index = 3; index <= 24; index += 1) {
-      const sectionId = `section_${index}`;
-      const clipId = `section_clip_${index}`;
-      project.sections[sectionId] = makeSection(sectionId, [clipId]);
-      project.clips[clipId] = makeClip(clipId);
-      project.sectionOrder.push(sectionId);
+      const beatId = `section_${index}`;
+      const shotId = `section_clip_${index}`;
+      project.sections[beatId] = makeBeat(beatId, [shotId]);
+      project.clips[shotId] = makeShot(shotId);
+      project.sectionOrder.push(beatId);
     }
 
     expectReason(
@@ -772,7 +772,7 @@ describe('applyStudioMutationBatchV2 boundaries', () => {
               sectionId: 'section_1',
               section: { title: '', storyLine: '', visualPrompt: '' },
               firstClipId: 'new_clip',
-              firstClip: emptyClipInput(),
+              firstClip: emptyShotInput(),
               beforeSectionId: null,
             },
           ])
@@ -791,7 +791,7 @@ describe('applyStudioMutationBatchV2 boundaries', () => {
               kind: 'add_clip',
               sectionId: 'section_1',
               clipId: 'clip_new',
-              clip: { ...emptyClipInput(), mediaKind: 'video', durationSeconds: 3 },
+              clip: { ...emptyShotInput(), mediaKind: 'video', durationSeconds: 3 },
               beforeClipId: null,
             },
           ])
@@ -816,13 +816,13 @@ describe('applyStudioMutationBatchV2 boundaries', () => {
     project.sectionOrder = [];
     project.sections = {};
     project.clips = {};
-    for (let sectionIndex = 1; sectionIndex <= 13; sectionIndex += 1) {
-      const sectionId = `section_${sectionIndex}`;
-      const count = sectionIndex === 1 ? 1 : sectionIndex === 13 ? 7 : 8;
-      const clipOrder = Array.from({ length: count }, (_, clipIndex) => `clip_${sectionIndex}_${clipIndex}`);
-      project.sectionOrder.push(sectionId);
-      project.sections[sectionId] = makeSection(sectionId, clipOrder);
-      for (const clipId of clipOrder) project.clips[clipId] = makeClip(clipId);
+    for (let beatIndex = 1; beatIndex <= 13; beatIndex += 1) {
+      const beatId = `section_${beatIndex}`;
+      const count = beatIndex === 1 ? 1 : beatIndex === 13 ? 7 : 8;
+      const shotOrder = Array.from({ length: count }, (_, shotIndex) => `clip_${beatIndex}_${shotIndex}`);
+      project.sectionOrder.push(beatId);
+      project.sections[beatId] = makeBeat(beatId, shotOrder);
+      for (const shotId of shotOrder) project.clips[shotId] = makeShot(shotId);
     }
 
     expect(validateStudioProjectV2(project)).toBe(true);
@@ -835,7 +835,7 @@ describe('applyStudioMutationBatchV2 boundaries', () => {
               kind: 'add_clip',
               sectionId: 'section_1',
               clipId: 'clip_new',
-              clip: emptyClipInput(),
+              clip: emptyShotInput(),
               beforeClipId: null,
             },
           ])
@@ -849,12 +849,12 @@ describe('applyStudioMutationBatchV2 boundaries', () => {
     project.sectionOrder = [];
     project.sections = {};
     project.clips = {};
-    for (let sectionIndex = 1; sectionIndex <= 12; sectionIndex += 1) {
-      const sectionId = `section_${sectionIndex}`;
-      const clipOrder = Array.from({ length: 8 }, (_, clipIndex) => `clip_${sectionIndex}_${clipIndex}`);
-      project.sectionOrder.push(sectionId);
-      project.sections[sectionId] = makeSection(sectionId, clipOrder);
-      for (const clipId of clipOrder) project.clips[clipId] = makeClip(clipId);
+    for (let beatIndex = 1; beatIndex <= 12; beatIndex += 1) {
+      const beatId = `section_${beatIndex}`;
+      const shotOrder = Array.from({ length: 8 }, (_, shotIndex) => `clip_${beatIndex}_${shotIndex}`);
+      project.sectionOrder.push(beatId);
+      project.sections[beatId] = makeBeat(beatId, shotOrder);
+      for (const shotId of shotOrder) project.clips[shotId] = makeShot(shotId);
     }
 
     expectReason(
@@ -866,7 +866,7 @@ describe('applyStudioMutationBatchV2 boundaries', () => {
               kind: 'add_clip',
               sectionId: 'section_1',
               clipId: 'clip_1_0',
-              clip: { ...emptyClipInput(), mediaKind: 'video', durationSeconds: 3 },
+              clip: { ...emptyShotInput(), mediaKind: 'video', durationSeconds: 3 },
               beforeClipId: null,
             },
           ])
@@ -885,7 +885,7 @@ describe('applyStudioMutationBatchV2 boundaries', () => {
               kind: 'add_clip',
               sectionId: 'section_1',
               clipId: 'clip_1',
-              clip: { ...emptyClipInput(), mediaKind: 'video', durationSeconds: 3 },
+              clip: { ...emptyShotInput(), mediaKind: 'video', durationSeconds: 3 },
               beforeClipId: null,
             },
           ])
@@ -905,7 +905,7 @@ describe('applyStudioMutationBatchV2 boundaries', () => {
               kind: 'add_clip',
               sectionId: 'section_1',
               clipId: 'clip_1',
-              clip: emptyClipInput(),
+              clip: emptyShotInput(),
               beforeClipId: null,
             },
           ])
@@ -927,7 +927,7 @@ describe('applyStudioMutationBatchV2 validation and dependencies', () => {
       kind: 'add_clip',
       sectionId: 'section_1',
       clipId: 'clip_new',
-      clip: { ...emptyClipInput(), extra: true },
+      clip: { ...emptyShotInput(), extra: true },
       beforeClipId: null,
     } as unknown as StudioMutationOperationV2;
 
@@ -948,19 +948,22 @@ describe('applyStudioMutationBatchV2 validation and dependencies', () => {
     const project = makeProject();
     addCanonicalAsset(project, 'clip_1', 'asset_1');
     project.shelf = [{ kind: 'asset', assetId: 'asset_1' }];
-    const sparseShelf = sparseArray<StudioProjectV2['shelf'][number]>(1);
+    const sparseBin = sparseArray<StudioProjectV2['shelf'][number]>(1);
 
     expectReason(
-      () => applyStudioMutationBatchV2(project, batch([{ kind: 'reorder_shelf', shelf: sparseShelf }])),
+      () => applyStudioMutationBatchV2(project, batch([{ kind: 'reorder_shelf', shelf: sparseBin }])),
       'invalid_operation'
     );
   });
 
   it('does not invoke an own array-method shadow', () => {
-    const sectionOrder = ['section_2', 'section_1'];
-    Object.defineProperty(sectionOrder, 'every', { value: null });
+    const beatOrder = ['section_2', 'section_1'];
+    Object.defineProperty(beatOrder, 'every', { value: null });
 
-    const result = applyStudioMutationBatchV2(makeProject(), batch([{ kind: 'reorder_sections', sectionOrder }]));
+    const result = applyStudioMutationBatchV2(
+      makeProject(),
+      batch([{ kind: 'reorder_sections', sectionOrder: beatOrder }])
+    );
 
     expect(result.project.sectionOrder).toEqual(['section_2', 'section_1']);
   });
@@ -1040,7 +1043,7 @@ describe('applyStudioMutationBatchV2 validation and dependencies', () => {
   it('rejects a clip reorder that omits an owned clip', () => {
     const project = makeProject();
     project.sections.section_1!.clipOrder.push('clip_3');
-    project.clips.clip_3 = makeClip('clip_3');
+    project.clips.clip_3 = makeShot('clip_3');
 
     expectReason(
       () =>
@@ -1089,7 +1092,7 @@ describe('applyStudioMutationBatchV2 validation and dependencies', () => {
               kind: 'add_clip',
               sectionId: 'section_1',
               clipId: 'clip_new',
-              clip: { ...emptyClipInput(), referenceAssetId: 'asset_1' },
+              clip: { ...emptyShotInput(), referenceAssetId: 'asset_1' },
               beforeClipId: null,
             },
           ])
@@ -1310,8 +1313,8 @@ describe('applyStudioMutationBatchV2 validation and dependencies', () => {
 
   it('treats equal raw section and asset IDs as distinct shelf identities', () => {
     const project = makeProject();
-    project.sections.same = makeSection('same', ['clip_same']);
-    project.clips.clip_same = makeClip('clip_same');
+    project.sections.same = makeBeat('same', ['clip_same']);
+    project.clips.clip_same = makeShot('clip_same');
     addCanonicalAsset(project, 'clip_1', 'same');
     project.shelf = [
       { kind: 'section', sectionId: 'same' },
@@ -1373,7 +1376,7 @@ describe('applyStudioMutationBatchV2 validation and dependencies', () => {
           sectionId: id,
           section: { title: '', storyLine: '', visualPrompt: '' },
           firstClipId: `${id}_clip`,
-          firstClip: emptyClipInput(),
+          firstClip: emptyShotInput(),
           beforeSectionId: null,
         },
       ])
@@ -1400,7 +1403,7 @@ describe('applyStudioMutationBatchV2 validation and dependencies', () => {
             kind: 'add_clip',
             sectionId: 'section_1',
             clipId: id,
-            clip: emptyClipInput(),
+            clip: emptyShotInput(),
             beforeClipId: null,
           },
         ])

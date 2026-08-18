@@ -17,7 +17,7 @@ import { promisify } from 'node:util';
 import type {
   StudioAsset,
   StudioAssetV2,
-  StudioClip,
+  StudioShot,
   StudioCut,
   StudioCutClipV2,
   StudioEditableCutClip,
@@ -25,7 +25,7 @@ import type {
   StudioProjectV2,
   StudioRenderProgressEvent,
   StudioScene,
-  StudioSection,
+  StudioBeat,
 } from '@/common/types/project/creativeStudioTypes';
 import { createStudioMediaStore } from '@process/services/creative-studio/mediaStore';
 import { createCreativeStudioService } from '@process/services/creative-studio/service';
@@ -162,15 +162,15 @@ const createPpm = (
 
 const renderProjectionTimestamp = '2026-08-17T00:00:00.000Z';
 
-const makeProjectionSection = (id: string, clipOrder: string[]): StudioSection => ({
+const makeProjectionBeat = (id: string, shotOrder: string[]): StudioBeat => ({
   id,
   title: id,
   storyLine: '',
   visualPrompt: '',
-  clipOrder,
+  clipOrder: shotOrder,
 });
 
-const makeProjectionClip = (id: string, selectedAssetId: string): StudioClip => ({
+const makeProjectionShot = (id: string, selectedAssetId: string): StudioShot => ({
   id,
   shotPrompt: id,
   narration: '',
@@ -183,10 +183,10 @@ const makeProjectionClip = (id: string, selectedAssetId: string): StudioClip => 
   jobIds: [],
 });
 
-const makeProjectionAsset = (id: string, clipId: string): StudioAssetV2 => ({
+const makeProjectionAsset = (id: string, shotId: string): StudioAssetV2 => ({
   id,
   projectId: 'projection_project',
-  clipId,
+  clipId: shotId,
   mediaKind: 'video',
   mimeType: 'video/mp4',
   managedAsset: { collection: 'assets', fileName: `${id}.mp4` },
@@ -196,9 +196,9 @@ const makeProjectionAsset = (id: string, clipId: string): StudioAssetV2 => ({
   createdAt: renderProjectionTimestamp,
 });
 
-const makeProjectionPlacement = (id: string, clipId: string, assetId: string): StudioCutClipV2 => ({
+const makeProjectionPlacement = (id: string, shotId: string, assetId: string): StudioCutClipV2 => ({
   id,
-  clipId,
+  clipId: shotId,
   assetId,
   sourceInSeconds: 1,
   sourceOutSeconds: 8,
@@ -220,14 +220,14 @@ const makeRenderProjectionProjectV2 = (): StudioProjectV2 => {
   );
   project.sectionOrder = ['section_a', 'section_b'];
   project.sections = {
-    section_a: makeProjectionSection('section_a', ['clip_a']),
-    section_b: makeProjectionSection('section_b', ['clip_b']),
-    section_c: makeProjectionSection('section_c', ['clip_c']),
+    section_a: makeProjectionBeat('section_a', ['clip_a']),
+    section_b: makeProjectionBeat('section_b', ['clip_b']),
+    section_c: makeProjectionBeat('section_c', ['clip_c']),
   };
   project.clips = {
-    clip_a: makeProjectionClip('clip_a', 'asset_a'),
-    clip_b: makeProjectionClip('clip_b', 'asset_b'),
-    clip_c: makeProjectionClip('clip_c', 'asset_c'),
+    clip_a: makeProjectionShot('clip_a', 'asset_a'),
+    clip_b: makeProjectionShot('clip_b', 'asset_b'),
+    clip_c: makeProjectionShot('clip_c', 'asset_c'),
   };
   project.assets = {
     asset_a: makeProjectionAsset('asset_a', 'clip_a'),

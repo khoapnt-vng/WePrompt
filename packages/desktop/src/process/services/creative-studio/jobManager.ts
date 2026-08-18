@@ -14,7 +14,7 @@ import {
 } from '@/common/types/project/creativeStudioReferencePrompt';
 import { evaluateStudioRules, resolveEffectiveStudioRules } from '@/common/types/project/creativeStudioRules';
 import {
-  STUDIO_MAX_GENERATION_CLIPS_PER_REQUEST,
+  STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
   STUDIO_MAX_GENERATION_SCENES_PER_REQUEST,
   STUDIO_REFERENCE_PROMPT_MAX_LENGTH,
   type StudioAssetV2,
@@ -60,11 +60,11 @@ const SUBMISSION_DEADLINE_MS = 5 * 60_000;
 const REMOTE_POLL_ATTEMPT_TIMEOUT_MS = 60_000;
 const REMOTE_POLL_DEADLINE_MS = 30 * 60_000;
 const MAX_IN_FLIGHT_PAID_JOBS_PER_PROJECT = 2;
-const SUBMIT_CLIPS_REQUIRED_KEYS_V2 = new Set(['projectId', 'clipIds', 'expectedRevision', 'routes', 'catalogVersion']);
-const SUBMIT_CLIPS_OPTIONAL_KEYS_V2 = new Set(['outputRole', 'referencePrompts', 'idempotencyKeys']);
-const CLIP_ROUTE_KEYS_V2 = new Set(['clipId', 'providerId', 'adapterId', 'model', 'kind']);
-const CLIP_REFERENCE_PROMPT_KEYS_V2 = new Set(['clipId', 'prompt']);
-const CLIP_IDEMPOTENCY_KEY_KEYS_V2 = new Set(['clipId', 'key']);
+const SUBMIT_SHOTS_REQUIRED_KEYS_V2 = new Set(['projectId', 'clipIds', 'expectedRevision', 'routes', 'catalogVersion']);
+const SUBMIT_SHOTS_OPTIONAL_KEYS_V2 = new Set(['outputRole', 'referencePrompts', 'idempotencyKeys']);
+const SHOT_ROUTE_KEYS_V2 = new Set(['clipId', 'providerId', 'adapterId', 'model', 'kind']);
+const SHOT_REFERENCE_PROMPT_KEYS_V2 = new Set(['clipId', 'prompt']);
+const SHOT_IDEMPOTENCY_KEY_KEYS_V2 = new Set(['clipId', 'key']);
 
 type OutputDownloaderDeps = Omit<RemoteMediaDownloadDeps, 'write' | 'maxBytes'>;
 
@@ -99,7 +99,7 @@ export type StudioJobManager = {
 };
 
 export type StudioJobManagerV2 = {
-  submitClips(input: StudioResolvedSubmitClipsRequestV2): Promise<StudioJobV2[]>;
+  submitShots(input: StudioResolvedSubmitShotsRequestV2): Promise<StudioJobV2[]>;
   cancelJobV2(input: StudioJobRequest): Promise<StudioJobV2>;
   retryJobV2(input: StudioRetryJobRequest): Promise<StudioJobV2>;
   retryDownloadV2(input: StudioRetryDownloadRequest): Promise<StudioJobV2>;
@@ -115,16 +115,16 @@ export type StudioResolvedSubmitScenesRequest = Omit<StudioSubmitScenesRequest, 
   routes: StudioResolvedSceneRouteSnapshot[];
 };
 
-export type StudioResolvedClipRouteSnapshotV2 = StudioProviderRef & {
+export type StudioResolvedShotRouteSnapshotV2 = StudioProviderRef & {
   clipId: string;
   kind: StudioMediaKind;
 };
 
-export type StudioResolvedSubmitClipsRequestV2 = {
+export type StudioResolvedSubmitShotsRequestV2 = {
   projectId: string;
   clipIds: string[];
   expectedRevision: number;
-  routes: StudioResolvedClipRouteSnapshotV2[];
+  routes: StudioResolvedShotRouteSnapshotV2[];
   catalogVersion: string;
   outputRole?: StudioOutputRole;
   referencePrompts?: Array<{ clipId: string; prompt: string }>;
@@ -172,7 +172,7 @@ type PreparedSubmission = ExecutionContext & {
 
 type ExecutionContextV2 = {
   projectId: string;
-  clipId: string;
+  shotId: string;
   mediaKind: StudioMediaKind;
   outputRole: StudioOutputRole;
   jobId: string;
@@ -378,7 +378,7 @@ const routeMatchesV2 = (
     model: string;
     kind: StudioMediaKind;
   },
-  route: StudioResolvedClipRouteSnapshotV2
+  route: StudioResolvedShotRouteSnapshotV2
 ): boolean =>
   candidate.providerId === route.providerId &&
   candidate.adapterId === route.adapterId &&
@@ -437,13 +437,10 @@ const defineOwnV2 = <T>(record: Record<string, T>, id: string, value: T): void =
 
 const jobOutputRoleV2 = (job: StudioJobV2): StudioOutputRole => (job.outputRole === 'reference' ? 'reference' : 'take');
 
-const activeSectionForClipV2 = (
-  project: StudioProjectV2,
-  clipId: string
-): StudioProjectV2['sections'][string] | null => {
-  for (const sectionId of project.sectionOrder) {
-    const section = ownValueV2(project.sections, sectionId);
-    if (section?.clipOrder.includes(clipId)) return section;
+const activeBeatForShotV2 = (project: StudioProjectV2, shotId: string): StudioProjectV2['sections'][string] | null => {
+  for (const beatId of project.sectionOrder) {
+    const beat = ownValueV2(project.sections, beatId);
+    if (beat?.clipOrder.includes(shotId)) return beat;
   }
   return null;
 };
@@ -2019,8 +2016,8 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       StudioProject['assets'][string]
     >;
     for (const [assetId, asset] of Object.entries(project.assets)) {
-      const { clipId, ...shared } = asset;
-      defineOwnV2(compatible, assetId, { ...shared, sceneId: clipId });
+      const { clipId: shotId, ...shared } = asset;
+      defineOwnV2(compatible, assetId, { ...shared, sceneId: shotId });
     }
     const active = resolveActiveStudioBriefReferences(compatible);
     if (active === null) return null;
@@ -2029,18 +2026,18 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
 
   const resolveProviderV2 = async (
     project: StudioProjectV2,
-    clipId: string,
-    route: StudioResolvedClipRouteSnapshotV2,
+    shotId: string,
+    route: StudioResolvedShotRouteSnapshotV2,
     output: RequestedOutputV2,
     catalogVersion?: string,
     fixedIdempotencyKey?: string
   ): Promise<PreparedSubmissionV2> => {
-    const clip = ownValueV2(project.clips, clipId);
-    const section = activeSectionForClipV2(project, clipId);
-    if (!clip || !section || route.clipId !== clipId) {
+    const shot = ownValueV2(project.clips, shotId);
+    const beat = activeBeatForShotV2(project, shotId);
+    if (!shot || !beat || route.clipId !== shotId) {
       throw new StudioJobManagerError('invalid_route');
     }
-    const requestedKind = requestedMediaKind(clip.mediaKind, output.role);
+    const requestedKind = requestedMediaKind(shot.mediaKind, output.role);
     if (route.kind !== requestedKind) throw new StudioJobManagerError('invalid_route');
     let catalog: Awaited<ReturnType<StudioProviderResolver['listGenerationRoutes']>>;
     try {
@@ -2056,9 +2053,9 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     if (
       !catalogRoute.constraints.aspectRatios.includes(project.aspectRatio) ||
       !catalogRoute.constraints.resolutions.includes(project.resolution) ||
-      clip.durationSeconds < catalogRoute.constraints.minDurationSeconds ||
-      clip.durationSeconds > catalogRoute.constraints.maxDurationSeconds ||
-      (output.role !== 'reference' && clip.referenceAssetId !== null && !catalogRoute.constraints.supportsFirstFrame)
+      shot.durationSeconds < catalogRoute.constraints.minDurationSeconds ||
+      shot.durationSeconds > catalogRoute.constraints.maxDurationSeconds ||
+      (output.role !== 'reference' && shot.referenceAssetId !== null && !catalogRoute.constraints.supportsFirstFrame)
     ) {
       throw new StudioJobManagerError('invalid_route');
     }
@@ -2083,11 +2080,11 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       prompt:
         output.role === 'reference'
           ? (output.referencePrompt ?? '').trim()
-          : composeTakePromptV2(section.visualPrompt, clip.shotPrompt),
+          : composeTakePromptV2(beat.visualPrompt, shot.shotPrompt),
       mediaKind: requestedKind,
       aspectRatio: project.aspectRatio,
       resolution: project.resolution,
-      durationSeconds: clip.durationSeconds,
+      durationSeconds: shot.durationSeconds,
       idempotencyKey,
     } as const;
     if (!baseRequest.prompt) invalidRequest();
@@ -2111,12 +2108,12 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     const validation = adapter.validateRequest(promptedRequest, resolvedProvider);
     if (!validation.ok) throw new StudioJobManagerError('invalid_route');
     let firstFrame: ResolvedStudioGenerationRequest['firstFrame'];
-    if (output.role !== 'reference' && clip.referenceAssetId !== null) {
-      const reference = ownValueV2(project.assets, clip.referenceAssetId);
+    if (output.role !== 'reference' && shot.referenceAssetId !== null) {
+      const reference = ownValueV2(project.assets, shot.referenceAssetId);
       if (
         !reference ||
         reference.projectId !== project.id ||
-        reference.clipId !== clip.id ||
+        reference.clipId !== shot.id ||
         reference.mediaKind !== 'image'
       ) {
         throw new StudioJobManagerError('invalid_route');
@@ -2151,7 +2148,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     if (!resolvedValidation.ok) throw new StudioJobManagerError('invalid_route');
     return {
       projectId: project.id,
-      clipId,
+      shotId,
       mediaKind: requestedKind,
       outputRole: output.role,
       jobId: '',
@@ -2177,19 +2174,23 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     project: StudioProjectV2,
     job: StudioJobV2
   ): Promise<ExecutionContextV2 | null> => {
-    const clip = ownValueV2(project.clips, job.clipId);
-    if (!clip || !clip.jobIds.includes(job.id)) return null;
+    const shot = ownValueV2(project.clips, job.clipId);
+    if (!shot || !shot.jobIds.includes(job.id)) return null;
     try {
       const outputRole = jobOutputRoleV2(job);
-      const mediaKind = requestedMediaKind(clip.mediaKind, outputRole);
-      const route = { clipId: clip.id, ...job.provider, kind: mediaKind } satisfies StudioResolvedClipRouteSnapshotV2;
+      const mediaKind = requestedMediaKind(shot.mediaKind, outputRole);
+      const route = {
+        clipId: shot.id,
+        ...job.provider,
+        kind: mediaKind,
+      } satisfies StudioResolvedShotRouteSnapshotV2;
       if (!(await deps.providerResolver.isGenerationRouteAvailable(route))) return null;
       const provider = (await deps.listProviders()).find((candidate) => candidate.id === job.provider.providerId);
       const adapter = deps.adapters.get(job.provider.adapterId);
       if (!provider || !adapter || !providerIsAvailable(provider, job.provider.model)) return null;
       return {
         projectId: project.id,
-        clipId: clip.id,
+        shotId: shot.id,
         mediaKind,
         outputRole,
         jobId: job.id,
@@ -2205,8 +2206,8 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     project: StudioProjectV2,
     job: StudioJobV2
   ): Promise<ExecutionContextV2 | null> => {
-    const clip = ownValueV2(project.clips, job.clipId);
-    if (!clip || !clip.jobIds.includes(job.id)) return null;
+    const shot = ownValueV2(project.clips, job.clipId);
+    if (!shot || !shot.jobIds.includes(job.id)) return null;
     try {
       const outputRole = jobOutputRoleV2(job);
       const provider = (await deps.listProviders()).find((candidate) => candidate.id === job.provider.providerId);
@@ -2214,8 +2215,8 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       if (!provider || !adapter || !providerCredentialsAreUsable(provider)) return null;
       return {
         projectId: project.id,
-        clipId: clip.id,
-        mediaKind: requestedMediaKind(clip.mediaKind, outputRole),
+        shotId: shot.id,
+        mediaKind: requestedMediaKind(shot.mediaKind, outputRole),
         outputRole,
         jobId: job.id,
         adapter,
@@ -2253,7 +2254,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
         const budget = resolveRemoteMediaBudget({ byteSize: poster.byteSize, mediaKind: poster.mediaKind });
         await deps.mediaStore.persistProviderPosterFromUrlForJobV2({
           projectId: context.projectId,
-          clipId: context.clipId,
+          clipId: context.shotId,
           jobId: context.jobId,
           primaryAssetId,
           declaredMimeType: poster.mimeType,
@@ -2276,7 +2277,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       try {
         await deps.mediaStore.persistProviderPosterForJobV2({
           projectId: context.projectId,
-          clipId: context.clipId,
+          clipId: context.shotId,
           jobId: context.jobId,
           primaryAssetId,
           declaredMimeType: poster.mimeType,
@@ -2338,7 +2339,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
         const budget = resolveRemoteMediaBudget({ byteSize: output.byteSize, mediaKind: output.mediaKind });
         const primaryAsset = await deps.mediaStore.persistProviderOutputFromUrlForJobV2({
           projectId: context.projectId,
-          clipId: context.clipId,
+          clipId: context.shotId,
           jobId: context.jobId,
           mediaKind: output.mediaKind,
           declaredMimeType: output.mimeType,
@@ -2362,7 +2363,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
         try {
           const primaryAsset = await deps.mediaStore.persistProviderOutputForJobV2({
             projectId: context.projectId,
-            clipId: context.clipId,
+            clipId: context.shotId,
             jobId: context.jobId,
             mediaKind: output.mediaKind,
             declaredMimeType: output.mimeType,
@@ -2676,7 +2677,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       const job: StudioJobV2 = {
         id: jobId,
         projectId: project.id,
-        clipId: candidate.clipId,
+        clipId: candidate.shotId,
         status: 'queued_local',
         provider: {
           providerId: candidate.provider.id,
@@ -2721,10 +2722,10 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
             predecessor.updatedAt = timestamp;
           }
           for (const { job } of jobs) {
-            const clip = ownValueV2(current.clips, job.clipId);
-            if (!clip) invalidRequest();
+            const shot = ownValueV2(current.clips, job.clipId);
+            if (!shot) invalidRequest();
             defineOwnV2(current.jobs, job.id, job);
-            clip.jobIds.push(job.id);
+            shot.jobIds.push(job.id);
           }
           return current;
         },
@@ -2742,9 +2743,9 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     }
   };
 
-  const submitClips = async (input: StudioResolvedSubmitClipsRequestV2): Promise<StudioJobV2[]> => {
+  const submitShots = async (input: StudioResolvedSubmitShotsRequestV2): Promise<StudioJobV2[]> => {
     if (disposed) throw new StudioJobManagerError('invalid_request');
-    if (!hasExactKeysV2(input, SUBMIT_CLIPS_REQUIRED_KEYS_V2, SUBMIT_CLIPS_OPTIONAL_KEYS_V2)) invalidRequest();
+    if (!hasExactKeysV2(input, SUBMIT_SHOTS_REQUIRED_KEYS_V2, SUBMIT_SHOTS_OPTIONAL_KEYS_V2)) invalidRequest();
     const project = await requireExpectedProjectV2(input.projectId, input.expectedRevision);
     if (disposed) throw new StudioJobManagerError('invalid_request');
     const outputRole = input.outputRole ?? 'take';
@@ -2764,68 +2765,68 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     ) {
       invalidRequest();
     }
-    const referencePromptByClip = new Map<string, string>();
+    const referencePromptByShot = new Map<string, string>();
     if (input.referencePrompts !== undefined) {
-      if (!isDenseArrayV2(input.referencePrompts, STUDIO_MAX_GENERATION_CLIPS_PER_REQUEST)) invalidRequest();
+      if (!isDenseArrayV2(input.referencePrompts, STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST)) invalidRequest();
       for (const entry of input.referencePrompts) {
         if (
-          !hasExactKeysV2(entry, CLIP_REFERENCE_PROMPT_KEYS_V2) ||
+          !hasExactKeysV2(entry, SHOT_REFERENCE_PROMPT_KEYS_V2) ||
           typeof entry?.clipId !== 'string' ||
           typeof entry.prompt !== 'string' ||
-          referencePromptByClip.has(entry.clipId)
+          referencePromptByShot.has(entry.clipId)
         ) {
           invalidRequest();
         }
         const prompt = entry.prompt.trim();
         if (prompt.length === 0 || prompt.length > STUDIO_REFERENCE_PROMPT_MAX_LENGTH) invalidRequest();
-        referencePromptByClip.set(entry.clipId, prompt);
+        referencePromptByShot.set(entry.clipId, prompt);
       }
     }
-    const idempotencyKeyByClip = new Map<string, string>();
+    const idempotencyKeyByShot = new Map<string, string>();
     if (input.idempotencyKeys !== undefined) {
-      if (!isDenseArrayV2(input.idempotencyKeys, STUDIO_MAX_GENERATION_CLIPS_PER_REQUEST)) invalidRequest();
+      if (!isDenseArrayV2(input.idempotencyKeys, STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST)) invalidRequest();
       for (const entry of input.idempotencyKeys) {
         if (
-          !hasExactKeysV2(entry, CLIP_IDEMPOTENCY_KEY_KEYS_V2) ||
+          !hasExactKeysV2(entry, SHOT_IDEMPOTENCY_KEY_KEYS_V2) ||
           typeof entry?.clipId !== 'string' ||
           typeof entry.key !== 'string' ||
           !SAFE_ID.test(entry.key) ||
-          idempotencyKeyByClip.has(entry.clipId)
+          idempotencyKeyByShot.has(entry.clipId)
         ) {
           invalidRequest();
         }
-        idempotencyKeyByClip.set(entry.clipId, entry.key);
+        idempotencyKeyByShot.set(entry.clipId, entry.key);
       }
     }
     if (
-      !isDenseArrayV2(input.clipIds, STUDIO_MAX_GENERATION_CLIPS_PER_REQUEST) ||
+      !isDenseArrayV2(input.clipIds, STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST) ||
       input.clipIds.length < 1 ||
-      input.clipIds.some((clipId) => typeof clipId !== 'string' || !SAFE_ID.test(clipId)) ||
+      input.clipIds.some((shotId) => typeof shotId !== 'string' || !SAFE_ID.test(shotId)) ||
       new Set(input.clipIds).size !== input.clipIds.length ||
-      !isDenseArrayV2(input.routes, STUDIO_MAX_GENERATION_CLIPS_PER_REQUEST) ||
+      !isDenseArrayV2(input.routes, STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST) ||
       input.routes.length !== input.clipIds.length ||
       typeof input.catalogVersion !== 'string' ||
       input.catalogVersion.length < 1 ||
       input.catalogVersion.length > 256 ||
       (input.outputRole !== undefined && input.outputRole !== 'take' && input.outputRole !== 'reference') ||
       (outputRole === 'reference' &&
-        (referencePromptByClip.size !== input.clipIds.length ||
-          input.clipIds.some((clipId) => !referencePromptByClip.has(clipId)))) ||
-      (outputRole !== 'reference' && referencePromptByClip.size > 0) ||
+        (referencePromptByShot.size !== input.clipIds.length ||
+          input.clipIds.some((shotId) => !referencePromptByShot.has(shotId)))) ||
+      (outputRole !== 'reference' && referencePromptByShot.size > 0) ||
       (input.idempotencyKeys !== undefined &&
-        (idempotencyKeyByClip.size !== input.clipIds.length ||
-          input.clipIds.some((clipId) => !idempotencyKeyByClip.has(clipId))))
+        (idempotencyKeyByShot.size !== input.clipIds.length ||
+          input.clipIds.some((shotId) => !idempotencyKeyByShot.has(shotId))))
     ) {
       invalidRequest();
     }
-    const routeByClip = new Map<string, StudioResolvedClipRouteSnapshotV2>();
+    const routeByShot = new Map<string, StudioResolvedShotRouteSnapshotV2>();
     for (const candidate of input.routes) {
-      const route = candidate as StudioResolvedClipRouteSnapshotV2;
+      const route = candidate as StudioResolvedShotRouteSnapshotV2;
       if (
-        !hasExactKeysV2(route, CLIP_ROUTE_KEYS_V2) ||
+        !hasExactKeysV2(route, SHOT_ROUTE_KEYS_V2) ||
         typeof route?.clipId !== 'string' ||
         !input.clipIds.includes(route.clipId) ||
-        routeByClip.has(route.clipId) ||
+        routeByShot.has(route.clipId) ||
         typeof route.providerId !== 'string' ||
         !SAFE_ID.test(route.providerId) ||
         typeof route.model !== 'string' ||
@@ -2834,23 +2835,23 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       ) {
         invalidRequest();
       }
-      routeByClip.set(route.clipId, route);
+      routeByShot.set(route.clipId, route);
     }
     const prepared: PreparedSubmissionV2[] = [];
-    for (const clipId of input.clipIds) {
-      const route = routeByClip.get(clipId);
+    for (const shotId of input.clipIds) {
+      const route = routeByShot.get(shotId);
       if (!route) invalidRequest();
-      const clip = ownValueV2(project.clips, clipId);
-      if (!clip || !activeSectionForClipV2(project, clipId)) {
+      const shot = ownValueV2(project.clips, shotId);
+      if (!shot || !activeBeatForShotV2(project, shotId)) {
         throw new StudioJobManagerError('invalid_route');
       }
-      const referencePrompt = referencePromptByClip.get(clipId);
+      const referencePrompt = referencePromptByShot.get(shotId);
       const requestedOutput: RequestedOutputV2 = {
         role: outputRole,
         ...(referencePrompt === undefined ? {} : { referencePrompt }),
         ...(outputRole === 'reference' ? { referenceInputs: activeBriefReferences } : {}),
       };
-      const selected = project.routing[requestedMediaKind(clip.mediaKind, requestedOutput.role)];
+      const selected = project.routing[requestedMediaKind(shot.mediaKind, requestedOutput.role)];
       if (
         selected === null ||
         selected.providerId !== route.providerId ||
@@ -2859,12 +2860,12 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       ) {
         throw new StudioJobManagerError('invalid_route');
       }
-      const clipJobs = clip.jobIds.flatMap((jobId) => {
+      const shotJobs = shot.jobIds.flatMap((jobId) => {
         const job = ownValueV2(project.jobs, jobId);
-        return job?.projectId === project.id && job.clipId === clipId ? [job] : [];
+        return job?.projectId === project.id && job.clipId === shotId ? [job] : [];
       });
       if (
-        clipJobs.some(
+        shotJobs.some(
           (job) =>
             job.status === 'needs_attention' &&
             job.error?.code === 'submission_unknown' &&
@@ -2873,17 +2874,17 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       ) {
         throw new StudioJobManagerError('duplicate_charge_acknowledgement_required');
       }
-      if (clipJobs.some((job) => !TERMINAL_STATUSES.has(job.status))) {
+      if (shotJobs.some((job) => !TERMINAL_STATUSES.has(job.status))) {
         throw new StudioJobManagerError('busy');
       }
       prepared.push(
         await resolveProviderV2(
           project,
-          clipId,
+          shotId,
           route,
           requestedOutput,
           input.catalogVersion,
-          idempotencyKeyByClip.get(clipId)
+          idempotencyKeyByShot.get(shotId)
         )
       );
     }
@@ -3017,18 +3018,18 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     if (disposed) throw new StudioJobManagerError('invalid_request');
     const previous = ownValueV2(project.jobs, input.jobId);
     if (!previous) throw new CreativeStudioStoreError('not_found', 'Studio job not found');
-    const clip = ownValueV2(project.clips, previous.clipId);
-    if (!clip || !clip.jobIds.includes(previous.id)) {
+    const shot = ownValueV2(project.clips, previous.clipId);
+    if (!shot || !shot.jobIds.includes(previous.id)) {
       throw new CreativeStudioStoreError('not_found', 'Studio clip not found');
     }
-    if (!activeSectionForClipV2(project, clip.id)) throw new StudioJobManagerError('invalid_request');
-    const clipJobs = clip.jobIds.flatMap((jobId) => {
+    if (!activeBeatForShotV2(project, shot.id)) throw new StudioJobManagerError('invalid_request');
+    const shotJobs = shot.jobIds.flatMap((jobId) => {
       const job = ownValueV2(project.jobs, jobId);
-      return job?.projectId === project.id && job.clipId === clip.id ? [job] : [];
+      return job?.projectId === project.id && job.clipId === shot.id ? [job] : [];
     });
     if (
-      clipJobs.some((job) => job.retryOfJobId === previous.id) ||
-      clipJobs.some((job) => job.id !== previous.id && !TERMINAL_STATUSES.has(job.status))
+      shotJobs.some((job) => job.retryOfJobId === previous.id) ||
+      shotJobs.some((job) => job.id !== previous.id && !TERMINAL_STATUSES.has(job.status))
     ) {
       throw new StudioJobManagerError('busy');
     }
@@ -3103,11 +3104,11 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       };
     }
     const route = {
-      clipId: clip.id,
+      clipId: shot.id,
       ...previous.provider,
-      kind: requestedMediaKind(clip.mediaKind, outputRole),
-    } satisfies StudioResolvedClipRouteSnapshotV2;
-    const prepared = await resolveProviderV2(project, clip.id, route, requestedOutput);
+      kind: requestedMediaKind(shot.mediaKind, outputRole),
+    } satisfies StudioResolvedShotRouteSnapshotV2;
+    const prepared = await resolveProviderV2(project, shot.id, route, requestedOutput);
     if (disposed) throw new StudioJobManagerError('invalid_request');
     const persisted = await persistPreparedJobsV2(project, [prepared], input.expectedRevision, {
       retryOfJobId: previous.id,
@@ -3130,15 +3131,15 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     if (!job || job.status !== 'failed' || job.error?.code !== 'download_failed') {
       throw new StudioJobManagerError('invalid_request');
     }
-    const clip = ownValueV2(project.clips, job.clipId);
-    const clipJobs =
-      clip?.jobIds.flatMap((jobId) => {
+    const shot = ownValueV2(project.clips, job.clipId);
+    const shotJobs =
+      shot?.jobIds.flatMap((jobId) => {
         const candidate = ownValueV2(project.jobs, jobId);
         return candidate?.projectId === project.id && candidate.clipId === job.clipId ? [candidate] : [];
       }) ?? [];
     if (
-      clipJobs.some((candidate) => candidate.retryOfJobId === job.id) ||
-      clipJobs.some((candidate) => candidate.id !== job.id && !TERMINAL_STATUSES.has(candidate.status))
+      shotJobs.some((candidate) => candidate.retryOfJobId === job.id) ||
+      shotJobs.some((candidate) => candidate.id !== job.id && !TERMINAL_STATUSES.has(candidate.status))
     ) {
       throw new StudioJobManagerError('busy');
     }
@@ -3304,7 +3305,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     retryJob: (input) => admitOperation(() => retryJob(input)),
     retryDownload: (input) => admitOperation(() => retryDownload(input)),
     resumePendingJobs,
-    submitClips: (input) => admitOperation(() => submitClips(input)),
+    submitShots: (input) => admitOperation(() => submitShots(input)),
     cancelJobV2: (input) => admitOperation(() => cancelJobV2(input)),
     retryJobV2: (input) => admitOperation(() => retryJobV2(input)),
     retryDownloadV2: (input) => admitOperation(() => retryDownloadV2(input)),

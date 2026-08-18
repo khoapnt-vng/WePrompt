@@ -21,7 +21,7 @@ import type { ResolvedStudioGenerationRequest } from '@process/services/creative
 import {
   createStudioJobManager,
   type StudioJobManager,
-  type StudioResolvedClipRouteSnapshotV2,
+  type StudioResolvedShotRouteSnapshotV2,
   type StudioResolvedSceneRouteSnapshot,
 } from '@process/services/creative-studio/jobManager';
 import { createStudioMediaStore } from '@process/services/creative-studio/mediaStore';
@@ -331,7 +331,7 @@ describe('Creative Studio generation lifecycle integration', () => {
       const catalog = await providerResolver.listGenerationRoutes();
       const imageRoute = catalog.routes.find((candidate) => candidate.kind === 'image');
       if (!imageRoute) throw new Error('V2 lifecycle did not resolve the fake image route');
-      const route: StudioResolvedClipRouteSnapshotV2 = {
+      const route: StudioResolvedShotRouteSnapshotV2 = {
         clipId: 'clip_lifecycle',
         providerId: imageRoute.providerId,
         adapterId: imageRoute.adapterId,
@@ -390,7 +390,7 @@ describe('Creative Studio generation lifecycle integration', () => {
       });
 
       await expect(
-        manager.submitClips({
+        manager.submitShots({
           projectId: configured.id,
           expectedRevision: configured.revision,
           clipIds: ['clip_lifecycle'],
@@ -418,14 +418,14 @@ describe('Creative Studio generation lifecycle integration', () => {
         }
       });
       const job = completed.jobs.job_v2_lifecycle;
-      const clip = completed.clips.clip_lifecycle;
-      const selectedAssetId = clip.selectedAssetId;
+      const shot = completed.clips.clip_lifecycle;
+      const selectedAssetId = shot.selectedAssetId;
       const asset = selectedAssetId ? completed.assets[selectedAssetId] : null;
       expect({
         jobClipId: job.clipId,
         outputAssetIds: job.outputAssetIds,
-        clipJobIds: clip.jobIds,
-        clipAssetIds: clip.assetIds,
+        clipJobIds: shot.jobIds,
+        clipAssetIds: shot.assetIds,
         selectedAssetId,
         assetClipId: asset?.clipId,
         collection: asset?.managedAsset.collection,

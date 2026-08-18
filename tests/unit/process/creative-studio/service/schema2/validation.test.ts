@@ -9,10 +9,10 @@
 import { describe, expect, it } from 'vitest';
 import type {
   StudioAssetV2,
-  StudioClip,
+  StudioShot,
   StudioJobV2,
   StudioProjectV2,
-  StudioSection,
+  StudioBeat,
 } from '@/common/types/project/creativeStudioTypes';
 import {
   createEmptyStudioProjectV2,
@@ -21,7 +21,7 @@ import {
 
 const timestamp = '2026-08-17T00:00:00.000Z';
 
-const makeClip = (id: string, overrides: Partial<StudioClip> = {}): StudioClip => ({
+const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot => ({
   id,
   shotPrompt: '',
   narration: '',
@@ -35,18 +35,18 @@ const makeClip = (id: string, overrides: Partial<StudioClip> = {}): StudioClip =
   ...overrides,
 });
 
-const makeSection = (id: string, clipOrder: string[] = []): StudioSection => ({
+const makeBeat = (id: string, shotOrder: string[] = []): StudioBeat => ({
   id,
   title: '',
   storyLine: '',
   visualPrompt: '',
-  clipOrder,
+  clipOrder: shotOrder,
 });
 
-const makeAsset = (id: string, clipId: string | null = 'clip_1'): StudioAssetV2 => ({
+const makeAsset = (id: string, shotId: string | null = 'clip_1'): StudioAssetV2 => ({
   id,
   projectId: 'project_1',
-  clipId,
+  clipId: shotId,
   mediaKind: 'image',
   mimeType: 'image/png',
   managedAsset: { collection: 'assets', fileName: `${id}.png` },
@@ -55,10 +55,10 @@ const makeAsset = (id: string, clipId: string | null = 'clip_1'): StudioAssetV2 
   createdAt: timestamp,
 });
 
-const makeJob = (id: string, clipId = 'clip_1'): StudioJobV2 => ({
+const makeJob = (id: string, shotId = 'clip_1'): StudioJobV2 => ({
   id,
   projectId: 'project_1',
-  clipId,
+  clipId: shotId,
   status: 'queued_local',
   provider: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'image-model' },
   idempotencyKey: `idem_${id}`,
@@ -99,8 +99,8 @@ const makeValidProject = (): StudioProjectV2 => ({
   targetDurationSeconds: 30,
   resolution: '1080p',
   sectionOrder: ['section_1'],
-  sections: { section_1: makeSection('section_1', ['clip_1']) },
-  clips: { clip_1: makeClip('clip_1') },
+  sections: { section_1: makeBeat('section_1', ['clip_1']) },
+  clips: { clip_1: makeShot('clip_1') },
   shelf: [],
   cuts: {},
   activeCutId: null,
@@ -126,7 +126,7 @@ const makeEmptyProject = (): StudioProjectV2 =>
 
 const makePopulatedProject = (): StudioProjectV2 => {
   const project = makeValidProject();
-  project.clips.clip_1 = makeClip('clip_1', {
+  project.clips.clip_1 = makeShot('clip_1', {
     referenceAssetId: 'reference_1',
     selectedAssetId: 'asset_1',
     assetIds: ['reference_1', 'asset_1', 'thumbnail_1'],
@@ -175,16 +175,16 @@ const makePopulatedProject = (): StudioProjectV2 => {
   return project;
 };
 
-const addClips = (project: StudioProjectV2, sectionId: string, count: number, offset = 0): void => {
-  const section = project.sections[sectionId]!;
+const addShots = (project: StudioProjectV2, beatId: string, count: number, offset = 0): void => {
+  const beat = project.sections[beatId]!;
   for (let index = 0; index < count; index += 1) {
-    const clipId = `clip_${offset + index + 1}`;
-    section.clipOrder.push(clipId);
-    project.clips[clipId] = makeClip(clipId);
+    const shotId = `clip_${offset + index + 1}`;
+    beat.clipOrder.push(shotId);
+    project.clips[shotId] = makeShot(shotId);
   }
 };
 
-const addShelfTakeAliases = (project: StudioProjectV2, count: number, offset = 0): void => {
+const addBinTakeAliases = (project: StudioProjectV2, count: number, offset = 0): void => {
   for (let index = 0; index < count; index += 1) {
     const assetId = `asset_${offset + index + 1}`;
     project.assets[assetId] = makeAsset(assetId);
@@ -219,12 +219,12 @@ const makeRetryChainProject = (count: number): StudioProjectV2 => {
 
 const makeOwnPrototypeKeyProject = (id: string): StudioProjectV2 => {
   const project = makeValidProject();
-  const clip = makeClip(id, { selectedAssetId: id, assetIds: [id], jobIds: [id] });
+  const shot = makeShot(id, { selectedAssetId: id, assetIds: [id], jobIds: [id] });
   const asset = makeAsset(id, id);
   const job = makeJob(id, id);
   project.sectionOrder = [id];
-  project.sections = ownRecord([[id, makeSection(id, [id])]]);
-  project.clips = ownRecord([[id, clip]]);
+  project.sections = ownRecord([[id, makeBeat(id, [id])]]);
+  project.clips = ownRecord([[id, shot]]);
   project.assets = ownRecord([[id, asset]]);
   project.jobs = ownRecord([[id, job]]);
   project.cuts = ownRecord([
@@ -623,13 +623,13 @@ describe('validateStudioProjectV2 exact schema', () => {
 
   it('rejects valid-looking values inherited through record prototypes', () => {
     const project = makeValidProject();
-    const inheritedClip = makeClip('inherited_clip', { assetIds: ['inherited_asset'], jobIds: ['inherited_job'] });
+    const inheritedShot = makeShot('inherited_clip', { assetIds: ['inherited_asset'], jobIds: ['inherited_job'] });
     const inheritedAsset = makeAsset('inherited_asset', 'inherited_clip');
     const inheritedJob = makeJob('inherited_job', 'inherited_clip');
-    project.clips = recordWithInheritedValue(project.clips, inheritedClip.id, inheritedClip);
+    project.clips = recordWithInheritedValue(project.clips, inheritedShot.id, inheritedShot);
     project.assets = recordWithInheritedValue(project.assets, inheritedAsset.id, inheritedAsset);
     project.jobs = recordWithInheritedValue(project.jobs, inheritedJob.id, inheritedJob);
-    project.assets.asset_1 = makeAsset('asset_1', inheritedClip.id);
+    project.assets.asset_1 = makeAsset('asset_1', inheritedShot.id);
 
     expect(validateStudioProjectV2(project)).toBe(false);
   });
@@ -778,14 +778,14 @@ describe('validateStudioProjectV2 exact schema', () => {
   it('rejects a clip owned by two sections', () => {
     const project = makeValidProject();
     project.sectionOrder.push('section_2');
-    project.sections.section_2 = makeSection('section_2', ['clip_1']);
+    project.sections.section_2 = makeBeat('section_2', ['clip_1']);
 
     expect(validateStudioProjectV2(project)).toBe(false);
   });
 
   it('rejects a clip with no owning section', () => {
     const project = makeValidProject();
-    project.clips.clip_2 = makeClip('clip_2');
+    project.clips.clip_2 = makeShot('clip_2');
 
     expect(validateStudioProjectV2(project)).toBe(false);
   });
@@ -821,8 +821,8 @@ describe('validateStudioProjectV2 exact schema', () => {
   it('rejects a selected take owned by another clip', () => {
     const project = makeValidProject();
     project.sectionOrder.push('section_2');
-    project.sections.section_2 = makeSection('section_2', ['clip_2']);
-    project.clips.clip_2 = makeClip('clip_2', { assetIds: ['asset_1'] });
+    project.sections.section_2 = makeBeat('section_2', ['clip_2']);
+    project.clips.clip_2 = makeShot('clip_2', { assetIds: ['asset_1'] });
     project.assets.asset_1 = makeAsset('asset_1', 'clip_2');
     project.clips.clip_1!.selectedAssetId = 'asset_1';
 
@@ -832,8 +832,8 @@ describe('validateStudioProjectV2 exact schema', () => {
   it('rejects a reference owned by another clip', () => {
     const project = makeValidProject();
     project.sectionOrder.push('section_2');
-    project.sections.section_2 = makeSection('section_2', ['clip_2']);
-    project.clips.clip_2 = makeClip('clip_2', { assetIds: ['reference_1'] });
+    project.sections.section_2 = makeBeat('section_2', ['clip_2']);
+    project.clips.clip_2 = makeShot('clip_2', { assetIds: ['reference_1'] });
     project.assets.reference_1 = {
       ...makeAsset('reference_1', 'clip_2'),
       managedAsset: { collection: 'imports', fileName: 'reference_1.png' },
@@ -846,10 +846,10 @@ describe('validateStudioProjectV2 exact schema', () => {
   it('rejects a job output owned by another clip', () => {
     const project = makeValidProject();
     project.sectionOrder.push('section_2');
-    project.sections.section_2 = makeSection('section_2', ['clip_2']);
+    project.sections.section_2 = makeBeat('section_2', ['clip_2']);
     project.clips.clip_1!.jobIds = ['job_1'];
     project.jobs.job_1 = makeJob('job_1');
-    project.clips.clip_2 = makeClip('clip_2', { assetIds: ['asset_1'] });
+    project.clips.clip_2 = makeShot('clip_2', { assetIds: ['asset_1'] });
     project.assets.asset_1 = makeAsset('asset_1', 'clip_2');
     project.jobs.job_1!.outputAssetIds = ['asset_1'];
 
@@ -859,10 +859,10 @@ describe('validateStudioProjectV2 exact schema', () => {
   it('rejects retry lineage across clips', () => {
     const project = makeValidProject();
     project.sectionOrder.push('section_2');
-    project.sections.section_2 = makeSection('section_2', ['clip_2']);
+    project.sections.section_2 = makeBeat('section_2', ['clip_2']);
     project.clips.clip_1!.jobIds = ['job_1'];
     project.jobs.job_1 = { ...makeJob('job_1'), status: 'failed', error: { code: 'timeout', messageKey: 'timeout' } };
-    project.clips.clip_2 = makeClip('clip_2', { jobIds: ['job_2'] });
+    project.clips.clip_2 = makeShot('clip_2', { jobIds: ['job_2'] });
     project.jobs.job_2 = {
       ...makeJob('job_2', 'clip_2'),
       retryOfJobId: 'job_1',
@@ -959,9 +959,9 @@ describe('validateStudioProjectV2 exact schema', () => {
   it.each([
     ['unknown section', { kind: 'section', sectionId: 'missing_section' }],
     ['unknown asset', { kind: 'asset', assetId: 'missing_asset' }],
-  ] as const)('rejects a shelf alias for an %s', (_label, shelfItem) => {
+  ] as const)('rejects a shelf alias for an %s', (_label, binItem) => {
     const project = makeValidProject();
-    project.shelf = [shelfItem];
+    project.shelf = [binItem];
 
     expect(validateStudioProjectV2(project)).toBe(false);
   });
@@ -1044,14 +1044,14 @@ describe('validateStudioProjectV2 capacities', () => {
     project.sections = {};
     project.clips = {};
     for (let index = 1; index <= 24; index += 1) {
-      const sectionId = `section_${index}`;
-      project.sectionOrder.push(sectionId);
-      project.sections[sectionId] = makeSection(sectionId);
+      const beatId = `section_${index}`;
+      project.sectionOrder.push(beatId);
+      project.sections[beatId] = makeBeat(beatId);
     }
     expect(validateStudioProjectV2(project)).toBe(true);
 
     project.sectionOrder.push('section_25');
-    project.sections.section_25 = makeSection('section_25');
+    project.sections.section_25 = makeBeat('section_25');
     expect(validateStudioProjectV2(project)).toBe(false);
   });
 
@@ -1059,10 +1059,10 @@ describe('validateStudioProjectV2 capacities', () => {
     const project = makeValidProject();
     project.sections.section_1!.clipOrder = [];
     project.clips = {};
-    addClips(project, 'section_1', 8);
+    addShots(project, 'section_1', 8);
     expect(validateStudioProjectV2(project)).toBe(true);
 
-    addClips(project, 'section_1', 1, 8);
+    addShots(project, 'section_1', 1, 8);
     expect(validateStudioProjectV2(project)).toBe(false);
   });
 
@@ -1071,17 +1071,17 @@ describe('validateStudioProjectV2 capacities', () => {
     project.sectionOrder = [];
     project.sections = {};
     project.clips = {};
-    for (let sectionIndex = 0; sectionIndex < 12; sectionIndex += 1) {
-      const sectionId = `section_${sectionIndex + 1}`;
-      project.sectionOrder.push(sectionId);
-      project.sections[sectionId] = makeSection(sectionId);
-      addClips(project, sectionId, 8, sectionIndex * 8);
+    for (let beatIndex = 0; beatIndex < 12; beatIndex += 1) {
+      const beatId = `section_${beatIndex + 1}`;
+      project.sectionOrder.push(beatId);
+      project.sections[beatId] = makeBeat(beatId);
+      addShots(project, beatId, 8, beatIndex * 8);
     }
     expect(validateStudioProjectV2(project)).toBe(true);
 
     project.sectionOrder.push('section_13');
-    project.sections.section_13 = makeSection('section_13');
-    addClips(project, 'section_13', 1, 96);
+    project.sections.section_13 = makeBeat('section_13');
+    addShots(project, 'section_13', 1, 96);
     expect(validateStudioProjectV2(project)).toBe(false);
   });
 
@@ -1090,26 +1090,26 @@ describe('validateStudioProjectV2 capacities', () => {
     project.sectionOrder = [];
     project.shelf.push({ kind: 'section', sectionId: 'section_1' });
     for (let index = 2; index <= 24; index += 1) {
-      const sectionId = `section_${index}`;
-      project.sections[sectionId] = makeSection(sectionId);
-      project.shelf.push({ kind: 'section', sectionId });
+      const beatId = `section_${index}`;
+      project.sections[beatId] = makeBeat(beatId);
+      project.shelf.push({ kind: 'section', sectionId: beatId });
     }
 
     expect(project.shelf).toHaveLength(24);
     expect(validateStudioProjectV2(project)).toBe(true);
 
-    project.sections.section_25 = makeSection('section_25');
+    project.sections.section_25 = makeBeat('section_25');
     project.shelf.push({ kind: 'section', sectionId: 'section_25' });
     expect(validateStudioProjectV2(project)).toBe(false);
   });
 
   it('accepts exactly 96 take aliases and rejects 97', () => {
     const project = makeValidProject();
-    addShelfTakeAliases(project, 96);
+    addBinTakeAliases(project, 96);
 
     expect(validateStudioProjectV2(project)).toBe(true);
 
-    addShelfTakeAliases(project, 1, 96);
+    addBinTakeAliases(project, 1, 96);
     expect(validateStudioProjectV2(project)).toBe(false);
   });
 
@@ -1118,16 +1118,16 @@ describe('validateStudioProjectV2 capacities', () => {
     project.sectionOrder = [];
     project.shelf.push({ kind: 'section', sectionId: 'section_1' });
     for (let index = 2; index <= 24; index += 1) {
-      const sectionId = `section_${index}`;
-      project.sections[sectionId] = makeSection(sectionId);
-      project.shelf.push({ kind: 'section', sectionId });
+      const beatId = `section_${index}`;
+      project.sections[beatId] = makeBeat(beatId);
+      project.shelf.push({ kind: 'section', sectionId: beatId });
     }
-    addShelfTakeAliases(project, 96);
+    addBinTakeAliases(project, 96);
 
     expect(project.shelf).toHaveLength(120);
     expect(validateStudioProjectV2(project)).toBe(true);
 
-    addShelfTakeAliases(project, 1, 96);
+    addBinTakeAliases(project, 1, 96);
     expect(project.shelf).toHaveLength(121);
     expect(validateStudioProjectV2(project)).toBe(false);
   });
@@ -1165,7 +1165,7 @@ describe('validateStudioProjectV2 clip duration boundaries', () => {
     ['image', 60],
   ] as const)('accepts %s duration %i seconds', (mediaKind, durationSeconds) => {
     const project = makeValidProject();
-    project.clips.clip_1 = makeClip('clip_1', { mediaKind, durationSeconds });
+    project.clips.clip_1 = makeShot('clip_1', { mediaKind, durationSeconds });
 
     expect(validateStudioProjectV2(project)).toBe(true);
   });
@@ -1177,7 +1177,7 @@ describe('validateStudioProjectV2 clip duration boundaries', () => {
     ['image', 61],
   ] as const)('rejects %s duration %i seconds', (mediaKind, durationSeconds) => {
     const project = makeValidProject();
-    project.clips.clip_1 = makeClip('clip_1', { mediaKind, durationSeconds });
+    project.clips.clip_1 = makeShot('clip_1', { mediaKind, durationSeconds });
 
     expect(validateStudioProjectV2(project)).toBe(false);
   });

@@ -92,8 +92,8 @@ type ExpectedCommitV2 = Readonly<{
   projectId: string;
   commandId: string;
   expectedRevision: number;
-  createdSectionIds: readonly string[];
-  createdClipIds: readonly string[];
+  createdBeatIds: readonly string[];
+  createdShotIds: readonly string[];
 }>;
 
 const stateKey = (projectId: string, commandId: string): string => `${projectId}\0${commandId}`;
@@ -184,14 +184,14 @@ export const createStudioDirectorCommitTrackerV2 = (): StudioDirectorCommitTrack
     expect(command): void {
       const key = stateKey(command.projectId, command.commandId);
       if (expectations.has(key) || terminals.has(key)) return;
-      const createdSectionIds: string[] = [];
-      const createdClipIds: string[] = [];
+      const createdBeatIds: string[] = [];
+      const createdShotIds: string[] = [];
       for (const operation of command.operations) {
         if (operation.kind === 'add_section') {
-          createdSectionIds.push(operation.sectionId);
-          createdClipIds.push(operation.firstClipId);
+          createdBeatIds.push(operation.sectionId);
+          createdShotIds.push(operation.firstClipId);
         } else if (operation.kind === 'add_clip') {
-          createdClipIds.push(operation.clipId);
+          createdShotIds.push(operation.clipId);
         }
       }
       expectations.set(
@@ -200,8 +200,8 @@ export const createStudioDirectorCommitTrackerV2 = (): StudioDirectorCommitTrack
           projectId: command.projectId,
           commandId: command.commandId,
           expectedRevision: command.expectedRevision,
-          createdSectionIds: Object.freeze(createdSectionIds),
-          createdClipIds: Object.freeze(createdClipIds),
+          createdBeatIds: Object.freeze(createdBeatIds),
+          createdShotIds: Object.freeze(createdShotIds),
         })
       );
     },
@@ -225,8 +225,8 @@ export const createStudioDirectorCommitTrackerV2 = (): StudioDirectorCommitTrack
         decidedAt: facts.committedAt,
         status: 'applied',
         appliedRevision: facts.committedRevision,
-        createdSectionIds: [...expected.createdSectionIds],
-        createdClipIds: [...expected.createdClipIds],
+        createdSectionIds: [...expected.createdBeatIds],
+        createdClipIds: [...expected.createdShotIds],
       });
     },
 

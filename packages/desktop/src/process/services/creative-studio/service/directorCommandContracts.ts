@@ -9,13 +9,13 @@ import {
   STUDIO_DIRECTOR_COMMAND_MAX_OPERATIONS,
   STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
   STUDIO_DIRECTOR_COMMAND_SLOT_LEASE_MS,
-  STUDIO_MAX_CLIPS_PER_SECTION,
+  STUDIO_MAX_SHOTS_PER_BEAT,
   STUDIO_MAX_MUTATION_OPERATIONS,
-  STUDIO_MAX_REFERENCE_REQUEST_CLIPS,
-  STUDIO_MAX_SECTIONS,
-  STUDIO_MAX_SHELF_ITEMS,
-  STUDIO_MAX_VIDEO_CLIP_SECONDS,
-  STUDIO_MIN_VIDEO_CLIP_SECONDS,
+  STUDIO_MAX_REFERENCE_REQUEST_SHOTS,
+  STUDIO_MAX_BEATS,
+  STUDIO_MAX_BIN_ITEMS,
+  STUDIO_MAX_SHOT_SECONDS,
+  STUDIO_MIN_SHOT_SECONDS,
   STUDIO_PROJECT_SCHEMA_VERSION,
   type StudioDirectorCommandReceiptV1,
   type StudioDirectorCommandReceiptV2,
@@ -458,8 +458,8 @@ const V2_REJECTION_CODES = new Set([
   'validation_failed',
 ]);
 const V2_NULLABLE_EXPECTED_REVISION_CODES = new Set(['malformed_record', 'unsupported_version']);
-const V2_SECTION_KEYS = new Set(['title', 'storyLine', 'visualPrompt']);
-const V2_CLIP_KEYS = new Set([
+const V2_BEAT_KEYS = new Set(['title', 'storyLine', 'visualPrompt']);
+const V2_SHOT_KEYS = new Set([
   'shotPrompt',
   'narration',
   'onScreenText',
@@ -467,8 +467,8 @@ const V2_CLIP_KEYS = new Set([
   'durationSeconds',
   'referenceAssetId',
 ]);
-const V2_SECTION_CHANGE_KEYS = new Set(['title', 'storyLine', 'visualPrompt']);
-const V2_CLIP_CHANGE_KEYS = new Set([
+const V2_BEAT_CHANGE_KEYS = new Set(['title', 'storyLine', 'visualPrompt']);
+const V2_SHOT_CHANGE_KEYS = new Set([
   'shotPrompt',
   'narration',
   'onScreenText',
@@ -476,8 +476,8 @@ const V2_CLIP_CHANGE_KEYS = new Set([
   'durationSeconds',
   'referenceAssetId',
 ]);
-const V2_SHELF_SECTION_KEYS = new Set(['kind', 'sectionId']);
-const V2_SHELF_ASSET_KEYS = new Set(['kind', 'assetId']);
+const V2_BIN_BEAT_KEYS = new Set(['kind', 'sectionId']);
+const V2_BIN_ASSET_KEYS = new Set(['kind', 'assetId']);
 const V2_OPERATION_KEYS: Readonly<Record<StudioMutationOperationV2['kind'], ReadonlySet<string>>> = {
   set_brief: new Set(['kind', 'brief']),
   add_section: new Set(['kind', 'sectionId', 'section', 'firstClipId', 'firstClip', 'beforeSectionId']),
@@ -609,21 +609,21 @@ const isV2MediaKind = (value: unknown): value is 'image' | 'video' => value === 
 const isV2Duration = (mediaKind: 'image' | 'video', value: unknown): value is number =>
   typeof value === 'number' &&
   Number.isSafeInteger(value) &&
-  value >= (mediaKind === 'video' ? STUDIO_MIN_VIDEO_CLIP_SECONDS : 1) &&
-  value <= (mediaKind === 'video' ? STUDIO_MAX_VIDEO_CLIP_SECONDS : 60);
+  value >= (mediaKind === 'video' ? STUDIO_MIN_SHOT_SECONDS : 1) &&
+  value <= (mediaKind === 'video' ? STUDIO_MAX_SHOT_SECONDS : 60);
 
 const isV2Anchor = (value: unknown): value is string | null => value === null || isSafeStudioDirectorId(value);
 
-const validateEditableSectionV2 = (value: unknown): boolean =>
+const validateEditableBeatV2 = (value: unknown): boolean =>
   isRecord(value) &&
-  hasExactKeysV2(value, V2_SECTION_KEYS) &&
+  hasExactKeysV2(value, V2_BEAT_KEYS) &&
   isText(value.title, 256) &&
   isText(value.storyLine, 4 * 1024) &&
   isText(value.visualPrompt, 8 * 1024);
 
-const validateEditableClipV2 = (value: unknown): boolean =>
+const validateEditableShotV2 = (value: unknown): boolean =>
   isRecord(value) &&
-  hasExactKeysV2(value, V2_CLIP_KEYS) &&
+  hasExactKeysV2(value, V2_SHOT_KEYS) &&
   isText(value.shotPrompt, 8 * 1024) &&
   isText(value.narration, 4 * 1024) &&
   isText(value.onScreenText, 1024) &&
@@ -631,22 +631,22 @@ const validateEditableClipV2 = (value: unknown): boolean =>
   isV2Duration(value.mediaKind, value.durationSeconds) &&
   (value.referenceAssetId === null || isSafeStudioDirectorId(value.referenceAssetId));
 
-const validateEditableSectionChangesV2 = (value: unknown): boolean => {
+const validateEditableBeatChangesV2 = (value: unknown): boolean => {
   if (!isRecord(value)) return false;
   const keys = Object.keys(value);
   return (
     keys.length > 0 &&
-    keys.every((key) => V2_SECTION_CHANGE_KEYS.has(key)) &&
+    keys.every((key) => V2_BEAT_CHANGE_KEYS.has(key)) &&
     (!Object.hasOwn(value, 'title') || isText(value.title, 256)) &&
     (!Object.hasOwn(value, 'storyLine') || isText(value.storyLine, 4 * 1024)) &&
     (!Object.hasOwn(value, 'visualPrompt') || isText(value.visualPrompt, 8 * 1024))
   );
 };
 
-const validateEditableClipChangesV2 = (value: unknown): boolean => {
+const validateEditableShotChangesV2 = (value: unknown): boolean => {
   if (!isRecord(value)) return false;
   const keys = Object.keys(value);
-  if (keys.length === 0 || !keys.every((key) => V2_CLIP_CHANGE_KEYS.has(key))) return false;
+  if (keys.length === 0 || !keys.every((key) => V2_SHOT_CHANGE_KEYS.has(key))) return false;
   if (Object.hasOwn(value, 'shotPrompt') && !isText(value.shotPrompt, 8 * 1024)) return false;
   if (Object.hasOwn(value, 'narration') && !isText(value.narration, 4 * 1024)) return false;
   if (Object.hasOwn(value, 'onScreenText') && !isText(value.onScreenText, 1024)) return false;
@@ -666,18 +666,18 @@ const validateEditableClipChangesV2 = (value: unknown): boolean => {
   return true;
 };
 
-const validateShelfV2 = (value: unknown): boolean => {
-  if (!isDenseArrayV2(value, 0, STUDIO_MAX_SHELF_ITEMS)) return false;
+const validateBinV2 = (value: unknown): boolean => {
+  if (!isDenseArrayV2(value, 0, STUDIO_MAX_BIN_ITEMS)) return false;
   const identities = new Set<string>();
   for (let index = 0; index < value.length; index += 1) {
     const item = value[index];
     if (!isRecord(item)) return false;
     let identity: string;
     if (item.kind === 'section') {
-      if (!hasExactKeysV2(item, V2_SHELF_SECTION_KEYS) || !isSafeStudioDirectorId(item.sectionId)) return false;
+      if (!hasExactKeysV2(item, V2_BIN_BEAT_KEYS) || !isSafeStudioDirectorId(item.sectionId)) return false;
       identity = `section:${item.sectionId}`;
     } else if (item.kind === 'asset') {
-      if (!hasExactKeysV2(item, V2_SHELF_ASSET_KEYS) || !isSafeStudioDirectorId(item.assetId)) return false;
+      if (!hasExactKeysV2(item, V2_BIN_ASSET_KEYS) || !isSafeStudioDirectorId(item.assetId)) return false;
       identity = `asset:${item.assetId}`;
     } else {
       return false;
@@ -700,15 +700,15 @@ const validateOperationV2 = (value: unknown): value is StudioMutationOperationV2
     case 'add_section':
       return (
         isSafeStudioDirectorId(value.sectionId) &&
-        validateEditableSectionV2(value.section) &&
+        validateEditableBeatV2(value.section) &&
         isSafeStudioDirectorId(value.firstClipId) &&
-        validateEditableClipV2(value.firstClip) &&
+        validateEditableShotV2(value.firstClip) &&
         isV2Anchor(value.beforeSectionId)
       );
     case 'edit_section':
-      return isSafeStudioDirectorId(value.sectionId) && validateEditableSectionChangesV2(value.changes);
+      return isSafeStudioDirectorId(value.sectionId) && validateEditableBeatChangesV2(value.changes);
     case 'reorder_sections':
-      return isUniqueSafeIdArrayV2(value.sectionOrder, 0, STUDIO_MAX_SECTIONS);
+      return isUniqueSafeIdArrayV2(value.sectionOrder, 0, STUDIO_MAX_BEATS);
     case 'park_section':
       return isSafeStudioDirectorId(value.sectionId);
     case 'restore_section':
@@ -717,17 +717,16 @@ const validateOperationV2 = (value: unknown): value is StudioMutationOperationV2
       return (
         isSafeStudioDirectorId(value.sectionId) &&
         isSafeStudioDirectorId(value.clipId) &&
-        validateEditableClipV2(value.clip) &&
+        validateEditableShotV2(value.clip) &&
         isV2Anchor(value.beforeClipId)
       );
     case 'edit_clip':
-      return isSafeStudioDirectorId(value.clipId) && validateEditableClipChangesV2(value.changes);
+      return isSafeStudioDirectorId(value.clipId) && validateEditableShotChangesV2(value.changes);
     case 'delete_clip':
       return isSafeStudioDirectorId(value.clipId);
     case 'reorder_clips':
       return (
-        isSafeStudioDirectorId(value.sectionId) &&
-        isUniqueSafeIdArrayV2(value.clipOrder, 0, STUDIO_MAX_CLIPS_PER_SECTION)
+        isSafeStudioDirectorId(value.sectionId) && isUniqueSafeIdArrayV2(value.clipOrder, 0, STUDIO_MAX_SHOTS_PER_BEAT)
       );
     case 'park_take':
     case 'select_shelved_take':
@@ -736,7 +735,7 @@ const validateOperationV2 = (value: unknown): value is StudioMutationOperationV2
     case 'remove_shelf_alias':
       return isSafeStudioDirectorId(value.assetId);
     case 'reorder_shelf':
-      return validateShelfV2(value.shelf);
+      return validateBinV2(value.shelf);
   }
 };
 
@@ -1114,7 +1113,7 @@ export function parseStudioReferenceRequestV2(input: {
     value.projectId !== input.projectId ||
     !isSafeStudioDirectorId(value.id) ||
     !isSafeStudioDirectorId(value.projectId) ||
-    !isUniqueSafeIdArrayV2(value.clipIds, 1, STUDIO_MAX_REFERENCE_REQUEST_CLIPS) ||
+    !isUniqueSafeIdArrayV2(value.clipIds, 1, STUDIO_MAX_REFERENCE_REQUEST_SHOTS) ||
     value.status !== 'pending' ||
     timestampMs(value.createdAt) === null ||
     !fitsCommandRecord(value)

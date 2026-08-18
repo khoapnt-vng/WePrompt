@@ -14,7 +14,7 @@ import type {
   StudioAspectRatio,
   StudioAsset,
   StudioAssetV2,
-  StudioClip,
+  StudioShot,
   StudioCutClip,
   StudioCutClipV2,
   StudioCutFilter,
@@ -118,42 +118,42 @@ export const resolvePersistedStudioRenderCutV2 = (
   };
 };
 
-const activeClipIdsV2 = (project: StudioProjectV2): ReadonlySet<string> => {
-  const clipIds = new Set<string>();
-  for (const sectionId of project.sectionOrder) {
-    const section = ownValue(project.sections, sectionId);
-    if (section === undefined) continue;
-    for (const clipId of section.clipOrder) clipIds.add(clipId);
+const activeShotIdsV2 = (project: StudioProjectV2): ReadonlySet<string> => {
+  const shotIds = new Set<string>();
+  for (const beatId of project.sectionOrder) {
+    const beat = ownValue(project.sections, beatId);
+    if (beat === undefined) continue;
+    for (const shotId of beat.clipOrder) shotIds.add(shotId);
   }
-  return clipIds;
+  return shotIds;
 };
 
 const activePlacementIsRenderableV2 = (
   project: StudioProjectV2,
-  activeClipIds: ReadonlySet<string>,
+  activeShotIds: ReadonlySet<string>,
   placement: StudioRenderPlacementV2
 ): boolean => {
-  if (!activeClipIds.has(placement.clipId)) return false;
-  const clip: StudioClip | undefined = ownValue(project.clips, placement.clipId);
-  if (clip === undefined || clip.selectedAssetId === null) return false;
-  const selected: StudioAssetV2 | undefined = ownValue(project.assets, clip.selectedAssetId);
-  if (selected === undefined || !isCanonicalStudioGeneratedTakeV2(selected, project.id, clip)) return false;
+  if (!activeShotIds.has(placement.clipId)) return false;
+  const shot: StudioShot | undefined = ownValue(project.clips, placement.clipId);
+  if (shot === undefined || shot.selectedAssetId === null) return false;
+  const selected: StudioAssetV2 | undefined = ownValue(project.assets, shot.selectedAssetId);
+  if (selected === undefined || !isCanonicalStudioGeneratedTakeV2(selected, project.id, shot)) return false;
   const placementAsset = ownValue(project.assets, placement.assetId);
-  return placementAsset !== undefined && isCanonicalStudioGeneratedTakeV2(placementAsset, project.id, clip);
+  return placementAsset !== undefined && isCanonicalStudioGeneratedTakeV2(placementAsset, project.id, shot);
 };
 
 /** Filters the persisted order for rendering without deleting dormant placement decisions. */
 export const resolveActiveStudioRenderCutV2 = (project: StudioProjectV2): StudioActiveRenderProjectionV2 | null => {
   const persisted = resolvePersistedStudioRenderCutV2(project);
   if (persisted === null) return null;
-  const activeClipIds = activeClipIdsV2(project);
+  const activeShotIds = activeShotIdsV2(project);
   return {
     scope: 'active',
     projectId: persisted.projectId,
     cutId: persisted.cutId,
     orderMode: persisted.orderMode,
     placements: persisted.placements.filter((placement) =>
-      activePlacementIsRenderableV2(project, activeClipIds, placement)
+      activePlacementIsRenderableV2(project, activeShotIds, placement)
     ),
   };
 };

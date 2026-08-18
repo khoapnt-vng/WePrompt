@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import {
-  STUDIO_MAX_REFERENCE_REQUEST_CLIPS,
+  STUDIO_MAX_REFERENCE_REQUEST_SHOTS,
   STUDIO_PROJECT_SCHEMA_VERSION,
   type StudioReferenceRequest,
   type StudioReferenceRequestV2,
@@ -108,7 +108,7 @@ export const listPendingReferenceRequestSceneIds = async (
 };
 
 /** Reads only exact schema-2 request records; schema-1 sidecars never establish clip deduplication. */
-export const listPendingReferenceRequestClipIdsV2 = async (
+export const listPendingReferenceRequestShotIdsV2 = async (
   pendingDir: string,
   projectId: string,
   injectedFs: RecordIoFileSystem = fs,
@@ -132,7 +132,7 @@ export const listPendingReferenceRequestClipIdsV2 = async (
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return new Set();
     throw error;
   }
-  const clipIds = new Set<string>();
+  const shotIds = new Set<string>();
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
     try {
@@ -150,7 +150,7 @@ export const listPendingReferenceRequestClipIdsV2 = async (
       const value = JSON.parse(bytes) as unknown;
       const parsed = parseStudioReferenceRequestV2({ projectId, requestId, value });
       if (parsed.status !== 'valid') continue;
-      for (const clipId of parsed.record.clipIds) clipIds.add(clipId);
+      for (const shotId of parsed.record.clipIds) shotIds.add(shotId);
     } catch {
       // Main owns authoritative validation; malformed and V1 records cannot establish V2 dedup state.
     }
@@ -166,7 +166,7 @@ export const listPendingReferenceRequestClipIdsV2 = async (
   if (projectAuthority !== undefined) {
     await assertPendingRecordProjectAuthorityV2({ pendingDir, projectAuthority, fs: injectedFs });
   }
-  return clipIds;
+  return shotIds;
 };
 
 export const writeReferenceRequestRecord = async (
@@ -194,33 +194,33 @@ export const writeReferenceRequestRecord = async (
 export const writeReferenceRequestRecordV2 = async (
   input: WriteReferenceRequestInputV2
 ): Promise<StudioReferenceRequestV2> => {
-  let validated: { projectId: string; requestId: string | undefined; clipIds: string[] };
+  let validated: { projectId: string; requestId: string | undefined; shotIds: string[] };
   try {
     const projectId = input.projectId;
     const requestId = input.requestId;
-    const requestedClipIds = input.clipIds;
+    const requestedShotIds = input.clipIds;
     if (
       !isSafeId(projectId) ||
       (requestId !== undefined && !isSafeId(requestId)) ||
-      !Array.isArray(requestedClipIds) ||
-      requestedClipIds.length < 1 ||
-      requestedClipIds.length > STUDIO_MAX_REFERENCE_REQUEST_CLIPS ||
-      Reflect.ownKeys(requestedClipIds).length !== requestedClipIds.length + 1
+      !Array.isArray(requestedShotIds) ||
+      requestedShotIds.length < 1 ||
+      requestedShotIds.length > STUDIO_MAX_REFERENCE_REQUEST_SHOTS ||
+      Reflect.ownKeys(requestedShotIds).length !== requestedShotIds.length + 1
     ) {
       throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 reference request');
     }
     const seen = new Set<string>();
-    for (let index = 0; index < requestedClipIds.length; index += 1) {
-      if (!Object.hasOwn(requestedClipIds, index)) {
+    for (let index = 0; index < requestedShotIds.length; index += 1) {
+      if (!Object.hasOwn(requestedShotIds, index)) {
         throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 reference request');
       }
-      const clipId = requestedClipIds[index];
-      if (!isSafeId(clipId) || seen.has(clipId)) {
+      const shotId = requestedShotIds[index];
+      if (!isSafeId(shotId) || seen.has(shotId)) {
         throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 reference request');
       }
-      seen.add(clipId);
+      seen.add(shotId);
     }
-    const clipIds = [...requestedClipIds];
+    const shotIds = [...requestedShotIds];
     const validationId = requestId ?? 'x'.repeat(256);
     const validation = parseStudioReferenceRequestV2({
       projectId,
@@ -229,7 +229,7 @@ export const writeReferenceRequestRecordV2 = async (
         schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         id: validationId,
         projectId,
-        clipIds,
+        clipIds: shotIds,
         status: 'pending',
         createdAt: '1970-01-01T00:00:00.000Z',
       },
@@ -237,7 +237,7 @@ export const writeReferenceRequestRecordV2 = async (
     if (validation.status !== 'valid') {
       throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 reference request');
     }
-    validated = { projectId: validation.record.projectId, requestId, clipIds: validation.record.clipIds };
+    validated = { projectId: validation.record.projectId, requestId, shotIds: validation.record.clipIds };
   } catch (error) {
     if (error instanceof StudioPendingRecordWriteError) throw error;
     throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 reference request');
@@ -246,7 +246,7 @@ export const writeReferenceRequestRecordV2 = async (
     schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
     id: validated.requestId ?? randomUUID(),
     projectId: validated.projectId,
-    clipIds: validated.clipIds,
+    clipIds: validated.shotIds,
     status: 'pending',
     createdAt: new Date().toISOString(),
   };

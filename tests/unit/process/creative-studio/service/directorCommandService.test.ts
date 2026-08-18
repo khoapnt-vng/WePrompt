@@ -60,7 +60,7 @@ const makeInputV2 = (): CreateStudioProjectInputV2 => ({
   resolution: '1080p',
 });
 
-const emptyClipV2 = () => ({
+const emptyShotV2 = () => ({
   shotPrompt: '',
   narration: '',
   onScreenText: '',
@@ -112,10 +112,10 @@ describe('Studio Director schema-2 command service', () => {
         sectionId: 'section_1',
         section: { title: 'Opening', storyLine: '', visualPrompt: 'Cinematic light' },
         firstClipId: 'clip_1',
-        firstClip: emptyClipV2(),
+        firstClip: emptyShotV2(),
         beforeSectionId: null,
       },
-      { kind: 'add_clip', sectionId: 'section_1', clipId: 'clip_2', clip: emptyClipV2(), beforeClipId: null },
+      { kind: 'add_clip', sectionId: 'section_1', clipId: 'clip_2', clip: emptyShotV2(), beforeClipId: null },
       { kind: 'edit_section', sectionId: 'section_1', changes: { storyLine: 'A clear story beat' } },
       { kind: 'edit_clip', clipId: 'clip_2', changes: { shotPrompt: 'Close product reveal' } },
       { kind: 'reorder_clips', sectionId: 'section_1', clipOrder: ['clip_2', 'clip_1'] },
@@ -196,7 +196,7 @@ describe('Studio Director schema-2 command service', () => {
         sectionId: 'section_1',
         section: { title: 'Opening', storyLine: '', visualPrompt: 'Cinematic light' },
         firstClipId: 'clip_1',
-        firstClip: { ...emptyClipV2(), mediaKind: 'video', durationSeconds: 3 },
+        firstClip: { ...emptyShotV2(), mediaKind: 'video', durationSeconds: 3 },
         beforeSectionId: null,
       },
     ]);

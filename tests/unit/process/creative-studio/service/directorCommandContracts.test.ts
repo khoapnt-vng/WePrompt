@@ -14,7 +14,7 @@ import {
   STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION,
   STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   STUDIO_MAX_MUTATION_OPERATIONS,
-  STUDIO_MAX_REFERENCE_REQUEST_CLIPS,
+  STUDIO_MAX_REFERENCE_REQUEST_SHOTS,
   STUDIO_PROJECT_SCHEMA_VERSION,
   isStudioSceneCountTransitionAllowed,
   isValidProviderJobId,
@@ -111,7 +111,7 @@ const parsePending = (value: unknown, slot: unknown = validSlot()) =>
     waitMs: WAIT_MS,
   });
 
-const emptyClipV2 = () => ({
+const emptyShotV2 = () => ({
   shotPrompt: '',
   narration: '',
   onScreenText: '',
@@ -557,7 +557,7 @@ describe('Studio Director V2 command contracts', () => {
       sectionId: 'section_new',
       section: { title: 'Opening', storyLine: 'Establish the place', visualPrompt: 'Morning light' },
       firstClipId: 'clip_new',
-      firstClip: emptyClipV2(),
+      firstClip: emptyShotV2(),
       beforeSectionId: null,
     },
     { kind: 'edit_section', sectionId: 'section_1', changes: { storyLine: 'A quieter opening.' } },
@@ -568,7 +568,7 @@ describe('Studio Director V2 command contracts', () => {
       kind: 'add_clip',
       sectionId: 'section_1',
       clipId: 'clip_new',
-      clip: emptyClipV2(),
+      clip: emptyShotV2(),
       beforeClipId: null,
     },
     { kind: 'edit_clip', clipId: 'clip_1', changes: { narration: 'Hello.' } },
@@ -625,7 +625,7 @@ describe('Studio Director V2 command contracts', () => {
         operations: [
           {
             ...operations[6],
-            clip: { ...emptyClipV2(), providerJobId: 'credential' },
+            clip: { ...emptyShotV2(), providerJobId: 'credential' },
           } as never,
         ],
       }),
@@ -701,7 +701,7 @@ describe('Studio Director V2 command contracts', () => {
   });
 
   it('enforces V2 authored bounds, safe identities, and media-specific durations', () => {
-    const video = { ...emptyClipV2(), mediaKind: 'video' as const, durationSeconds: 4 };
+    const video = { ...emptyShotV2(), mediaKind: 'video' as const, durationSeconds: 4 };
     const validVideo = {
       kind: 'add_clip' as const,
       sectionId: 'section_1',
@@ -1095,7 +1095,7 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
   });
 
   it('accepts 1 and 24 ordered unique clip IDs and rejects 0, 25, or duplicates', () => {
-    const clips24 = Array.from({ length: STUDIO_MAX_REFERENCE_REQUEST_CLIPS }, (_, index) => `clip_${index}`);
+    const clips24 = Array.from({ length: STUDIO_MAX_REFERENCE_REQUEST_SHOTS }, (_, index) => `clip_${index}`);
     const reference = (clipIds: string[]): StudioReferenceRequestV2 => ({
       schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       id: 'request_1',

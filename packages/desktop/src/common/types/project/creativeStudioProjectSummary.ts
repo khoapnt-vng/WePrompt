@@ -10,7 +10,7 @@ import { isCanonicalStudioGeneratedTakeV2 } from './creativeStudioCanonicalTake'
 import type {
   StudioAsset,
   StudioAssetV2,
-  StudioClip,
+  StudioShot,
   StudioProject,
   StudioProjectSummary,
   StudioProjectSummaryV2,
@@ -173,14 +173,14 @@ export const toStudioProjectSummary = (project: StudioProject): StudioProjectSum
 
 const canonicalVideoPosterV2 = (
   project: StudioProjectV2,
-  clip: StudioClip,
+  shot: StudioShot,
   selectedAssetId: string
 ): StudioAssetV2 | null => {
-  const producingJobs = clip.jobIds.flatMap((jobId) => {
+  const producingJobs = shot.jobIds.flatMap((jobId) => {
     const job = project.jobs[jobId];
     return job?.id === jobId &&
       job.projectId === project.id &&
-      job.clipId === clip.id &&
+      job.clipId === shot.id &&
       job.status === 'succeeded' &&
       job.outputRole !== 'reference' &&
       job.outputAssetIds[0] === selectedAssetId
@@ -194,39 +194,39 @@ const canonicalVideoPosterV2 = (
   const poster = project.assets[posterAssetId];
   return poster?.id === posterAssetId &&
     poster.projectId === project.id &&
-    poster.clipId === clip.id &&
+    poster.clipId === shot.id &&
     poster.mediaKind === 'image' &&
     poster.managedAsset.collection === 'thumbnails' &&
-    clip.assetIds.includes(poster.id)
+    shot.assetIds.includes(poster.id)
     ? poster
     : null;
 };
 
 /** Projects a schema-2 project into its strict active-content library summary. */
 export const toStudioProjectSummaryV2 = (project: StudioProjectV2): StudioProjectSummaryV2 => {
-  let clipCount = 0;
+  let shotCount = 0;
   let selectedAssetCount = 0;
   let poster: StudioProjectSummaryV2['poster'];
-  project.sectionOrder.forEach((sectionId, sectionIndex) => {
-    const section = project.sections[sectionId];
-    if (section?.id !== sectionId) return;
-    clipCount += section.clipOrder.length;
-    section.clipOrder.forEach((clipId, clipIndex) => {
-      const clip = project.clips[clipId];
-      if (clip?.id !== clipId || clip.selectedAssetId === null) return;
-      const selected = project.assets[clip.selectedAssetId];
-      if (selected === undefined || !isCanonicalStudioGeneratedTakeV2(selected, project.id, clip)) return;
+  project.sectionOrder.forEach((beatId, beatIndex) => {
+    const beat = project.sections[beatId];
+    if (beat?.id !== beatId) return;
+    shotCount += beat.clipOrder.length;
+    beat.clipOrder.forEach((shotId, shotIndex) => {
+      const shot = project.clips[shotId];
+      if (shot?.id !== shotId || shot.selectedAssetId === null) return;
+      const selected = project.assets[shot.selectedAssetId];
+      if (selected === undefined || !isCanonicalStudioGeneratedTakeV2(selected, project.id, shot)) return;
       selectedAssetCount += 1;
       if (poster !== undefined) return;
       const posterAsset =
-        selected.mediaKind === 'image' ? selected : canonicalVideoPosterV2(project, clip, selected.id);
+        selected.mediaKind === 'image' ? selected : canonicalVideoPosterV2(project, shot, selected.id);
       if (posterAsset === null) return;
       poster = {
-        sectionId,
-        clipId,
+        sectionId: beatId,
+        clipId: shotId,
         assetId: posterAsset.id,
-        sectionPosition: sectionIndex + 1,
-        clipPosition: clipIndex + 1,
+        sectionPosition: beatIndex + 1,
+        clipPosition: shotIndex + 1,
       };
     });
   });
@@ -238,7 +238,7 @@ export const toStudioProjectSummaryV2 = (project: StudioProjectV2): StudioProjec
     targetDurationSeconds: project.targetDurationSeconds,
     resolution: project.resolution,
     sectionCount: project.sectionOrder.length,
-    clipCount,
+    clipCount: shotCount,
     selectedAssetCount,
     ...(poster === undefined ? {} : { poster }),
     createdAt: project.createdAt,

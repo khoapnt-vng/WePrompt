@@ -23,23 +23,23 @@ import {
 import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
 import { resolveActiveStudioBriefReferences } from '@/common/types/project/creativeStudioManagedAssetCollections';
 import {
-  STUDIO_MAX_CLIPS_PER_SECTION,
-  STUDIO_MAX_MCP_AVAILABLE_TAKE_IDS_PER_CLIP,
+  STUDIO_MAX_SHOTS_PER_BEAT,
+  STUDIO_MAX_MCP_AVAILABLE_TAKE_IDS_PER_SHOT,
   STUDIO_MAX_MCP_AVAILABLE_TAKE_IDS_PER_SCENE,
   STUDIO_MAX_MUTATION_OPERATIONS,
-  STUDIO_MAX_REFERENCE_REQUEST_CLIPS,
+  STUDIO_MAX_REFERENCE_REQUEST_SHOTS,
   STUDIO_MAX_REFERENCE_REQUEST_SCENES,
   STUDIO_MAX_SCENES,
-  STUDIO_MAX_SECTIONS,
-  STUDIO_MAX_SHELF_ITEMS,
-  STUDIO_MAX_VIDEO_CLIP_SECONDS,
-  STUDIO_MIN_VIDEO_CLIP_SECONDS,
+  STUDIO_MAX_BEATS,
+  STUDIO_MAX_BIN_ITEMS,
+  STUDIO_MAX_SHOT_SECONDS,
+  STUDIO_MIN_SHOT_SECONDS,
   STUDIO_DIRECTOR_COMMAND_MAX_OPERATIONS,
   STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
   STUDIO_PROJECT_SCHEMA_VERSION,
   type StudioAsset,
   type StudioAssetV2,
-  type StudioClip,
+  type StudioShot,
   type StudioEditableScene,
   type StudioMutationOperationV2,
   type StudioProject,
@@ -58,7 +58,7 @@ import {
   writeProposalRecordV2,
 } from '@process/resources/builtinMcp/studioProposalWriter';
 import {
-  listPendingReferenceRequestClipIdsV2,
+  listPendingReferenceRequestShotIdsV2,
   listPendingReferenceRequestSceneIds,
   writeReferenceRequestRecord,
   writeReferenceRequestRecordV2,
@@ -146,30 +146,30 @@ const projectSceneTakes = (
   };
 };
 
-const projectClipTakesV2 = (
+const projectShotTakesV2 = (
   project: StudioProjectV2,
-  clip: StudioClip
+  shot: StudioShot
 ): { selectedTakeId: string | null; availableTakeIds: string[] } => {
   const canonicalTakeIds: string[] = [];
   const seen = new Set<string>();
-  for (const assetId of clip.assetIds) {
+  for (const assetId of shot.assetIds) {
     if (seen.has(assetId)) continue;
     seen.add(assetId);
     const asset: StudioAssetV2 | undefined = Object.hasOwn(project.assets, assetId)
       ? project.assets[assetId]
       : undefined;
-    if (asset !== undefined && asset.id === assetId && isCanonicalStudioGeneratedTakeV2(asset, project.id, clip)) {
+    if (asset !== undefined && asset.id === assetId && isCanonicalStudioGeneratedTakeV2(asset, project.id, shot)) {
       canonicalTakeIds.push(assetId);
     }
   }
   const selectedTakeId =
-    clip.selectedAssetId !== null && canonicalTakeIds.includes(clip.selectedAssetId) ? clip.selectedAssetId : null;
+    shot.selectedAssetId !== null && canonicalTakeIds.includes(shot.selectedAssetId) ? shot.selectedAssetId : null;
   return {
     selectedTakeId,
     availableTakeIds: [
       ...(selectedTakeId === null ? [] : [selectedTakeId]),
       ...canonicalTakeIds.filter((assetId) => assetId !== selectedTakeId),
-    ].slice(0, STUDIO_MAX_MCP_AVAILABLE_TAKE_IDS_PER_CLIP),
+    ].slice(0, STUDIO_MAX_MCP_AVAILABLE_TAKE_IDS_PER_SHOT),
   };
 };
 
@@ -304,8 +304,8 @@ const videoDurationJsonSchemaV2 = {
       then: {
         properties: {
           durationSeconds: {
-            minimum: STUDIO_MIN_VIDEO_CLIP_SECONDS,
-            maximum: STUDIO_MAX_VIDEO_CLIP_SECONDS,
+            minimum: STUDIO_MIN_SHOT_SECONDS,
+            maximum: STUDIO_MAX_SHOT_SECONDS,
           },
         },
       },
@@ -313,7 +313,7 @@ const videoDurationJsonSchemaV2 = {
   ],
 };
 
-const studioSectionInputSchemaV2 = z4
+const studioBeatInputSchemaV2 = z4
   .object({
     title: z4.string().max(256),
     storyLine: z4.string().max(4 * 1024),
@@ -321,7 +321,7 @@ const studioSectionInputSchemaV2 = z4
   })
   .strict();
 
-const studioClipInputSchemaV2 = z4
+const studioShotInputSchemaV2 = z4
   .object({
     shotPrompt: z4.string().max(8 * 1024),
     narration: z4.string().max(4 * 1024),
@@ -331,28 +331,28 @@ const studioClipInputSchemaV2 = z4
     referenceAssetId: studioDirectorIdSchemaV2.nullable(),
   })
   .strict()
-  .superRefine((clip, context) => {
+  .superRefine((shot, context) => {
     if (
-      clip.mediaKind === 'video' &&
-      (clip.durationSeconds < STUDIO_MIN_VIDEO_CLIP_SECONDS || clip.durationSeconds > STUDIO_MAX_VIDEO_CLIP_SECONDS)
+      shot.mediaKind === 'video' &&
+      (shot.durationSeconds < STUDIO_MIN_SHOT_SECONDS || shot.durationSeconds > STUDIO_MAX_SHOT_SECONDS)
     ) {
       context.addIssue({ code: 'custom', path: ['durationSeconds'], message: 'Invalid video clip duration.' });
     }
   })
   .meta(videoDurationJsonSchemaV2);
 
-const studioSectionChangesFieldsV2 = {
+const studioBeatChangesFieldsV2 = {
   title: z4.string().max(256),
   storyLine: z4.string().max(4 * 1024),
   visualPrompt: z4.string().max(8 * 1024),
 };
-const studioSectionChangesSchemaV2 = z4.union([
-  z4.object(studioSectionChangesFieldsV2).partial().required({ title: true }).strict(),
-  z4.object(studioSectionChangesFieldsV2).partial().required({ storyLine: true }).strict(),
-  z4.object(studioSectionChangesFieldsV2).partial().required({ visualPrompt: true }).strict(),
+const studioBeatChangesSchemaV2 = z4.union([
+  z4.object(studioBeatChangesFieldsV2).partial().required({ title: true }).strict(),
+  z4.object(studioBeatChangesFieldsV2).partial().required({ storyLine: true }).strict(),
+  z4.object(studioBeatChangesFieldsV2).partial().required({ visualPrompt: true }).strict(),
 ]);
 
-const studioClipChangesFieldsV2 = {
+const studioShotChangesFieldsV2 = {
   shotPrompt: z4.string().max(8 * 1024),
   narration: z4.string().max(4 * 1024),
   onScreenText: z4.string().max(1024),
@@ -360,28 +360,27 @@ const studioClipChangesFieldsV2 = {
   durationSeconds: z4.number().int().min(1).max(60),
   referenceAssetId: studioDirectorIdSchemaV2.nullable(),
 };
-const studioClipChangesSchemaV2 = z4
+const studioShotChangesSchemaV2 = z4
   .union([
-    z4.object(studioClipChangesFieldsV2).partial().required({ shotPrompt: true }).strict(),
-    z4.object(studioClipChangesFieldsV2).partial().required({ narration: true }).strict(),
-    z4.object(studioClipChangesFieldsV2).partial().required({ onScreenText: true }).strict(),
-    z4.object(studioClipChangesFieldsV2).partial().required({ mediaKind: true }).strict(),
-    z4.object(studioClipChangesFieldsV2).partial().required({ durationSeconds: true }).strict(),
-    z4.object(studioClipChangesFieldsV2).partial().required({ referenceAssetId: true }).strict(),
+    z4.object(studioShotChangesFieldsV2).partial().required({ shotPrompt: true }).strict(),
+    z4.object(studioShotChangesFieldsV2).partial().required({ narration: true }).strict(),
+    z4.object(studioShotChangesFieldsV2).partial().required({ onScreenText: true }).strict(),
+    z4.object(studioShotChangesFieldsV2).partial().required({ mediaKind: true }).strict(),
+    z4.object(studioShotChangesFieldsV2).partial().required({ durationSeconds: true }).strict(),
+    z4.object(studioShotChangesFieldsV2).partial().required({ referenceAssetId: true }).strict(),
   ])
   .superRefine((changes, context) => {
     if (
       changes.mediaKind === 'video' &&
       changes.durationSeconds !== undefined &&
-      (changes.durationSeconds < STUDIO_MIN_VIDEO_CLIP_SECONDS ||
-        changes.durationSeconds > STUDIO_MAX_VIDEO_CLIP_SECONDS)
+      (changes.durationSeconds < STUDIO_MIN_SHOT_SECONDS || changes.durationSeconds > STUDIO_MAX_SHOT_SECONDS)
     ) {
       context.addIssue({ code: 'custom', path: ['durationSeconds'], message: 'Invalid video clip duration.' });
     }
   })
   .meta(videoDurationJsonSchemaV2);
 
-const studioShelfItemSchemaV2 = z4.discriminatedUnion('kind', [
+const studioBinItemSchemaV2 = z4.discriminatedUnion('kind', [
   z4.object({ kind: z4.literal('section'), sectionId: studioDirectorIdSchemaV2 }).strict(),
   z4.object({ kind: z4.literal('asset'), assetId: studioDirectorIdSchemaV2 }).strict(),
 ]);
@@ -395,71 +394,71 @@ const uniqueStudioIdsSchema = (maximum: number) =>
 
 const studioMutationOperationSchemasV2 = {
   setBrief: z4.object({ kind: z4.literal('set_brief'), brief: z4.string().max(16 * 1024) }).strict(),
-  addSection: z4
+  addBeat: z4
     .object({
       kind: z4.literal('add_section'),
       sectionId: studioDirectorIdSchemaV2,
-      section: studioSectionInputSchemaV2,
+      section: studioBeatInputSchemaV2,
       firstClipId: studioDirectorIdSchemaV2,
-      firstClip: studioClipInputSchemaV2,
+      firstClip: studioShotInputSchemaV2,
       beforeSectionId: studioDirectorIdSchemaV2.nullable(),
     })
     .strict(),
-  editSection: z4
+  editBeat: z4
     .object({
       kind: z4.literal('edit_section'),
       sectionId: studioDirectorIdSchemaV2,
-      changes: studioSectionChangesSchemaV2,
+      changes: studioBeatChangesSchemaV2,
     })
     .strict(),
-  reorderSections: z4
-    .object({ kind: z4.literal('reorder_sections'), sectionOrder: uniqueStudioIdsSchema(STUDIO_MAX_SECTIONS) })
+  reorderBeats: z4
+    .object({ kind: z4.literal('reorder_sections'), sectionOrder: uniqueStudioIdsSchema(STUDIO_MAX_BEATS) })
     .strict(),
-  parkSection: z4.object({ kind: z4.literal('park_section'), sectionId: studioDirectorIdSchemaV2 }).strict(),
-  restoreSection: z4
+  parkBeat: z4.object({ kind: z4.literal('park_section'), sectionId: studioDirectorIdSchemaV2 }).strict(),
+  restoreBeat: z4
     .object({
       kind: z4.literal('restore_section'),
       sectionId: studioDirectorIdSchemaV2,
       beforeSectionId: studioDirectorIdSchemaV2.nullable(),
     })
     .strict(),
-  addClip: z4
+  addShot: z4
     .object({
       kind: z4.literal('add_clip'),
       sectionId: studioDirectorIdSchemaV2,
       clipId: studioDirectorIdSchemaV2,
-      clip: studioClipInputSchemaV2,
+      clip: studioShotInputSchemaV2,
       beforeClipId: studioDirectorIdSchemaV2.nullable(),
     })
     .strict(),
-  editClip: z4
-    .object({ kind: z4.literal('edit_clip'), clipId: studioDirectorIdSchemaV2, changes: studioClipChangesSchemaV2 })
+  editShot: z4
+    .object({ kind: z4.literal('edit_clip'), clipId: studioDirectorIdSchemaV2, changes: studioShotChangesSchemaV2 })
     .strict(),
-  deleteClip: z4.object({ kind: z4.literal('delete_clip'), clipId: studioDirectorIdSchemaV2 }).strict(),
-  reorderClips: z4
+  deleteShot: z4.object({ kind: z4.literal('delete_clip'), clipId: studioDirectorIdSchemaV2 }).strict(),
+  reorderShots: z4
     .object({
       kind: z4.literal('reorder_clips'),
       sectionId: studioDirectorIdSchemaV2,
-      clipOrder: uniqueStudioIdsSchema(STUDIO_MAX_CLIPS_PER_SECTION),
+      clipOrder: uniqueStudioIdsSchema(STUDIO_MAX_SHOTS_PER_BEAT),
     })
     .strict(),
   parkTake: z4
     .object({ kind: z4.literal('park_take'), clipId: studioDirectorIdSchemaV2, assetId: studioDirectorIdSchemaV2 })
     .strict(),
-  selectShelvedTake: z4
+  selectBinnedTake: z4
     .object({
       kind: z4.literal('select_shelved_take'),
       clipId: studioDirectorIdSchemaV2,
       assetId: studioDirectorIdSchemaV2,
     })
     .strict(),
-  removeShelfAlias: z4.object({ kind: z4.literal('remove_shelf_alias'), assetId: studioDirectorIdSchemaV2 }).strict(),
-  reorderShelf: z4
+  removeBinAlias: z4.object({ kind: z4.literal('remove_shelf_alias'), assetId: studioDirectorIdSchemaV2 }).strict(),
+  reorderBin: z4
     .object({
       kind: z4.literal('reorder_shelf'),
       shelf: z4
-        .array(studioShelfItemSchemaV2)
-        .max(STUDIO_MAX_SHELF_ITEMS)
+        .array(studioBinItemSchemaV2)
+        .max(STUDIO_MAX_BIN_ITEMS)
         .refine(
           (items) =>
             new Set(
@@ -477,19 +476,19 @@ const studioMutationOperationSchemasV2 = {
 
 export const studioMutationOperationSchemaV2 = z4.discriminatedUnion('kind', [
   studioMutationOperationSchemasV2.setBrief,
-  studioMutationOperationSchemasV2.addSection,
-  studioMutationOperationSchemasV2.editSection,
-  studioMutationOperationSchemasV2.reorderSections,
-  studioMutationOperationSchemasV2.parkSection,
-  studioMutationOperationSchemasV2.restoreSection,
-  studioMutationOperationSchemasV2.addClip,
-  studioMutationOperationSchemasV2.editClip,
-  studioMutationOperationSchemasV2.deleteClip,
-  studioMutationOperationSchemasV2.reorderClips,
+  studioMutationOperationSchemasV2.addBeat,
+  studioMutationOperationSchemasV2.editBeat,
+  studioMutationOperationSchemasV2.reorderBeats,
+  studioMutationOperationSchemasV2.parkBeat,
+  studioMutationOperationSchemasV2.restoreBeat,
+  studioMutationOperationSchemasV2.addShot,
+  studioMutationOperationSchemasV2.editShot,
+  studioMutationOperationSchemasV2.deleteShot,
+  studioMutationOperationSchemasV2.reorderShots,
   studioMutationOperationSchemasV2.parkTake,
-  studioMutationOperationSchemasV2.selectShelvedTake,
-  studioMutationOperationSchemasV2.removeShelfAlias,
-  studioMutationOperationSchemasV2.reorderShelf,
+  studioMutationOperationSchemasV2.selectBinnedTake,
+  studioMutationOperationSchemasV2.removeBinAlias,
+  studioMutationOperationSchemasV2.reorderBin,
   studioMutationOperationSchemasV2.selectTake,
 ]);
 
@@ -498,30 +497,30 @@ export const studioDirectorOperationSchemaV2 = z4.discriminatedUnion('kind', [
   z4
     .object({
       kind: z4.literal('add_section'),
-      section: studioSectionInputSchemaV2,
-      firstClip: studioClipInputSchemaV2,
+      section: studioBeatInputSchemaV2,
+      firstClip: studioShotInputSchemaV2,
       beforeSectionId: studioDirectorIdSchemaV2.nullable(),
     })
     .strict(),
-  studioMutationOperationSchemasV2.editSection,
-  studioMutationOperationSchemasV2.reorderSections,
-  studioMutationOperationSchemasV2.parkSection,
-  studioMutationOperationSchemasV2.restoreSection,
+  studioMutationOperationSchemasV2.editBeat,
+  studioMutationOperationSchemasV2.reorderBeats,
+  studioMutationOperationSchemasV2.parkBeat,
+  studioMutationOperationSchemasV2.restoreBeat,
   z4
     .object({
       kind: z4.literal('add_clip'),
       sectionId: studioDirectorIdSchemaV2,
-      clip: studioClipInputSchemaV2,
+      clip: studioShotInputSchemaV2,
       beforeClipId: studioDirectorIdSchemaV2.nullable(),
     })
     .strict(),
-  studioMutationOperationSchemasV2.editClip,
-  studioMutationOperationSchemasV2.deleteClip,
-  studioMutationOperationSchemasV2.reorderClips,
+  studioMutationOperationSchemasV2.editShot,
+  studioMutationOperationSchemasV2.deleteShot,
+  studioMutationOperationSchemasV2.reorderShots,
   studioMutationOperationSchemasV2.parkTake,
-  studioMutationOperationSchemasV2.selectShelvedTake,
-  studioMutationOperationSchemasV2.removeShelfAlias,
-  studioMutationOperationSchemasV2.reorderShelf,
+  studioMutationOperationSchemasV2.selectBinnedTake,
+  studioMutationOperationSchemasV2.removeBinAlias,
+  studioMutationOperationSchemasV2.reorderBin,
   studioMutationOperationSchemasV2.selectTake,
 ]);
 
@@ -658,8 +657,8 @@ export const studioRequestReferenceImagesInputSchemaV2 = z4
     clipIds: z4
       .array(studioDirectorIdSchemaV2)
       .min(1)
-      .max(STUDIO_MAX_REFERENCE_REQUEST_CLIPS)
-      .refine((clipIds) => new Set(clipIds).size === clipIds.length, { message: 'Clip ids must not repeat.' })
+      .max(STUDIO_MAX_REFERENCE_REQUEST_SHOTS)
+      .refine((shotIds) => new Set(shotIds).size === shotIds.length, { message: 'Clip ids must not repeat.' })
       .meta({ uniqueItems: true }),
   })
   .strict();
@@ -952,35 +951,35 @@ export function createReadStoryboardHandlerV2(
       const snapshot = await readProjectSnapshotV2(config);
       const project = snapshot.project;
       // readProjectV2 has already proved that every active id resolves to its exact own record.
-      const sections = Object.fromEntries(
-        project.sectionOrder.map((sectionId) => {
-          const section = project.sections[sectionId]!;
+      const beats = Object.fromEntries(
+        project.sectionOrder.map((beatId) => {
+          const beat = project.sections[beatId]!;
           return [
-            sectionId,
+            beatId,
             {
-              title: section.title,
-              storyLine: section.storyLine,
-              visualPrompt: section.visualPrompt,
-              clipOrder: [...section.clipOrder],
+              title: beat.title,
+              storyLine: beat.storyLine,
+              visualPrompt: beat.visualPrompt,
+              clipOrder: [...beat.clipOrder],
             },
           ];
         })
       );
-      const activeClipIds = project.sectionOrder.flatMap((sectionId) => project.sections[sectionId]!.clipOrder);
-      const clips = Object.fromEntries(
-        activeClipIds.map((clipId) => {
-          const clip = project.clips[clipId]!;
-          const takes = projectClipTakesV2(project, clip);
+      const activeShotIds = project.sectionOrder.flatMap((beatId) => project.sections[beatId]!.clipOrder);
+      const shots = Object.fromEntries(
+        activeShotIds.map((shotId) => {
+          const shot = project.clips[shotId]!;
+          const takes = projectShotTakesV2(project, shot);
           return [
-            clipId,
+            shotId,
             {
-              shotPrompt: clip.shotPrompt,
-              narration: clip.narration,
-              onScreenText: clip.onScreenText,
-              mediaKind: clip.mediaKind,
-              durationSeconds: clip.durationSeconds,
-              referenceAssetId: clip.referenceAssetId,
-              hasReference: clip.referenceAssetId !== null,
+              shotPrompt: shot.shotPrompt,
+              narration: shot.narration,
+              onScreenText: shot.onScreenText,
+              mediaKind: shot.mediaKind,
+              durationSeconds: shot.durationSeconds,
+              referenceAssetId: shot.referenceAssetId,
+              hasReference: shot.referenceAssetId !== null,
               hasSelectedTake: takes.selectedTakeId !== null,
               selectedTakeId: takes.selectedTakeId,
               availableTakeIds: takes.availableTakeIds,
@@ -1006,7 +1005,7 @@ export function createReadStoryboardHandlerV2(
             compareCodeUnits(left.id, right.id)
         )
         .map((asset) => ({ id: asset.id, label: asset.briefReferenceLabel!, role: asset.briefReferenceRole! }));
-      const sectionCount = Object.keys(project.sections).length;
+      const beatCount = Object.keys(project.sections).length;
       const view = {
         revision: project.revision,
         name: project.name,
@@ -1016,14 +1015,14 @@ export function createReadStoryboardHandlerV2(
         aspectRatio: project.aspectRatio,
         targetDurationSeconds: project.targetDurationSeconds,
         sectionCapacity: {
-          current: sectionCount,
-          maximum: STUDIO_MAX_SECTIONS,
-          remaining: Math.max(0, STUDIO_MAX_SECTIONS - sectionCount),
-          overCapacity: sectionCount > STUDIO_MAX_SECTIONS,
+          current: beatCount,
+          maximum: STUDIO_MAX_BEATS,
+          remaining: Math.max(0, STUDIO_MAX_BEATS - beatCount),
+          overCapacity: beatCount > STUDIO_MAX_BEATS,
         },
         sectionOrder: [...project.sectionOrder],
-        sections,
-        clips,
+        sections: beats,
+        clips: shots,
         shelf: project.shelf.map((item) => ({ ...item })),
       };
       return { content: [{ type: 'text', text: JSON.stringify(view, null, 2) }] };
@@ -1312,54 +1311,52 @@ export function createRequestReferenceImagesHandler(
 export function createRequestReferenceImagesHandlerV2(
   config: StudioServerEnv | null
 ): (input: { clipIds: string[] }) => Promise<StudioToolResult> {
-  return async ({ clipIds }) => {
+  return async ({ clipIds: shotIds }) => {
     if (!config) return errorResult('Creative Studio project is unavailable.');
-    if (!Array.isArray(clipIds)) return errorResult('clipIds must be an array.');
-    if (clipIds.length < 1) return errorResult('At least one clip id is required.');
-    if (clipIds.length > STUDIO_MAX_REFERENCE_REQUEST_CLIPS) {
-      return errorResult(`At most ${STUDIO_MAX_REFERENCE_REQUEST_CLIPS} clip ids may be requested at once.`);
+    if (!Array.isArray(shotIds)) return errorResult('clipIds must be an array.');
+    if (shotIds.length < 1) return errorResult('At least one clip id is required.');
+    if (shotIds.length > STUDIO_MAX_REFERENCE_REQUEST_SHOTS) {
+      return errorResult(`At most ${STUDIO_MAX_REFERENCE_REQUEST_SHOTS} clip ids may be requested at once.`);
     }
-    const invalidClipIds = clipIds.filter((clipId) => !studioDirectorIdSchema.safeParse(clipId).success);
-    if (invalidClipIds.length > 0) return errorResult(`Invalid clip ids: ${invalidClipIds.join(', ')}`);
-    const duplicateClipIds = clipIds.filter((clipId, index) => clipIds.indexOf(clipId) !== index);
-    if (duplicateClipIds.length > 0) {
-      return errorResult(`Duplicate clip ids: ${[...new Set(duplicateClipIds)].join(', ')}`);
+    const invalidShotIds = shotIds.filter((shotId) => !studioDirectorIdSchema.safeParse(shotId).success);
+    if (invalidShotIds.length > 0) return errorResult(`Invalid clip ids: ${invalidShotIds.join(', ')}`);
+    const duplicateShotIds = shotIds.filter((shotId, index) => shotIds.indexOf(shotId) !== index);
+    if (duplicateShotIds.length > 0) {
+      return errorResult(`Duplicate clip ids: ${[...new Set(duplicateShotIds)].join(', ')}`);
     }
     try {
       const snapshot = await readProjectSnapshotV2(config);
       const project = snapshot.project;
-      const activeClipIds = new Set(
-        project.sectionOrder.flatMap((sectionId) => project.sections[sectionId]!.clipOrder)
-      );
-      const unknownClipIds = clipIds.filter((clipId) => !activeClipIds.has(clipId));
-      if (unknownClipIds.length > 0) return errorResult(`Unknown or inactive clips: ${unknownClipIds.join(', ')}`);
+      const activeShotIds = new Set(project.sectionOrder.flatMap((beatId) => project.sections[beatId]!.clipOrder));
+      const unknownShotIds = shotIds.filter((shotId) => !activeShotIds.has(shotId));
+      if (unknownShotIds.length > 0) return errorResult(`Unknown or inactive clips: ${unknownShotIds.join(', ')}`);
       const projectAuthority = pendingProjectAuthorityV2(snapshot);
       await assertPendingRecordProjectAuthorityV2({
         pendingDir: config.referencePendingDir,
         projectAuthority,
         fs: config.fs,
       });
-      const pendingClipIds = await listPendingReferenceRequestClipIdsV2(
+      const pendingShotIds = await listPendingReferenceRequestShotIdsV2(
         config.referencePendingDir,
         config.projectId,
         config.fs,
         projectAuthority
       );
-      const alreadyQueued = clipIds.filter((clipId) => pendingClipIds.has(clipId));
-      const clipsToQueue = clipIds.filter((clipId) => !pendingClipIds.has(clipId));
-      if (clipsToQueue.length > 0) {
+      const alreadyQueued = shotIds.filter((shotId) => pendingShotIds.has(shotId));
+      const shotsToQueue = shotIds.filter((shotId) => !pendingShotIds.has(shotId));
+      if (shotsToQueue.length > 0) {
         await assertProjectSnapshotStatusV2(config, snapshot);
         await writeReferenceRequestRecordV2({
           pendingDir: config.referencePendingDir,
           projectId: config.projectId,
-          clipIds: clipsToQueue,
+          clipIds: shotsToQueue,
           fs: config.fs,
           authorityFence: () => projectSnapshotStatusV2(config, snapshot),
           projectAuthority,
         });
       }
       const details = [
-        `Queued ${clipsToQueue.length} of ${clipIds.length} reference image request(s) for user approval`,
+        `Queued ${shotsToQueue.length} of ${shotIds.length} reference image request(s) for user approval`,
         ...(alreadyQueued.length > 0 ? [`Already queued: ${alreadyQueued.join(', ')}`] : []),
         'Nothing was generated',
       ];

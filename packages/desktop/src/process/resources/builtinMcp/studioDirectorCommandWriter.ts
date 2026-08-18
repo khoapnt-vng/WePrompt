@@ -23,8 +23,8 @@ import {
   type StudioDirectorCommandSlotLeaseV2,
   type StudioDirectorCommandSlotV1,
   type StudioDirectorCommandSlotV2,
-  type StudioEditableClip,
-  type StudioEditableSection,
+  type StudioEditableShot,
+  type StudioEditableBeat,
   type StudioProjectV2,
   type StudioDirectorNewSceneV1,
   type StudioDirectorOperationV1,
@@ -69,14 +69,14 @@ export type StudioDirectorToolOperationV2 =
   | Exclude<StudioDirectorCommandRecordV2['operations'][number], { kind: 'add_section' | 'add_clip' }>
   | {
       kind: 'add_section';
-      section: StudioEditableSection;
-      firstClip: StudioEditableClip;
+      section: StudioEditableBeat;
+      firstClip: StudioEditableShot;
       beforeSectionId: string | null;
     }
   | {
       kind: 'add_clip';
       sectionId: string;
-      clip: StudioEditableClip;
+      clip: StudioEditableShot;
       beforeClipId: string | null;
     };
 
@@ -701,15 +701,15 @@ const prepareCommandV2 = (input: {
   const createdIds: string[] = [];
   const operations = toolOperations.map((operation) => {
     if (typeof operation === 'object' && operation !== null && operation.kind === 'add_section') {
-      const sectionId = input.createId();
-      const firstClipId = input.createId();
-      createdIds.push(sectionId, firstClipId);
-      return { ...operation, sectionId, firstClipId };
+      const beatId = input.createId();
+      const firstShotId = input.createId();
+      createdIds.push(beatId, firstShotId);
+      return { ...operation, sectionId: beatId, firstClipId: firstShotId };
     }
     if (typeof operation === 'object' && operation !== null && operation.kind === 'add_clip') {
-      const clipId = input.createId();
-      createdIds.push(clipId);
-      return { ...operation, clipId };
+      const shotId = input.createId();
+      createdIds.push(shotId);
+      return { ...operation, clipId: shotId };
     }
     return operation;
   }) as StudioDirectorCommandRecordV2['operations'];

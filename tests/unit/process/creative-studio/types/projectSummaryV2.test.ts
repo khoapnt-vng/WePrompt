@@ -13,15 +13,15 @@ import {
 } from '@/common/types/project/creativeStudioProjectSummary';
 import type {
   StudioAssetV2,
-  StudioClip,
+  StudioShot,
   StudioJobV2,
   StudioProjectV2,
-  StudioSection,
+  StudioBeat,
 } from '@/common/types/project/creativeStudioTypes';
 
 const timestamp = '2026-08-17T00:00:00.000Z';
 
-const makeClip = (id: string, overrides: Partial<StudioClip> = {}): StudioClip => ({
+const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot => ({
   id,
   shotPrompt: '',
   narration: '',
@@ -35,18 +35,18 @@ const makeClip = (id: string, overrides: Partial<StudioClip> = {}): StudioClip =
   ...overrides,
 });
 
-const makeSection = (id: string, clipOrder: string[]): StudioSection => ({
+const makeBeat = (id: string, shotOrder: string[]): StudioBeat => ({
   id,
   title: id,
   storyLine: '',
   visualPrompt: '',
-  clipOrder,
+  clipOrder: shotOrder,
 });
 
-const makeAsset = (id: string, clipId: string, overrides: Partial<StudioAssetV2> = {}): StudioAssetV2 => ({
+const makeAsset = (id: string, shotId: string, overrides: Partial<StudioAssetV2> = {}): StudioAssetV2 => ({
   id,
   projectId: 'project_1',
-  clipId,
+  clipId: shotId,
   mediaKind: 'image',
   mimeType: 'image/png',
   managedAsset: { collection: 'assets', fileName: `${id}.png` },
@@ -56,10 +56,10 @@ const makeAsset = (id: string, clipId: string, overrides: Partial<StudioAssetV2>
   ...overrides,
 });
 
-const makeJob = (id: string, clipId: string, outputAssetIds: string[]): StudioJobV2 => ({
+const makeJob = (id: string, shotId: string, outputAssetIds: string[]): StudioJobV2 => ({
   id,
   projectId: 'project_1',
-  clipId,
+  clipId: shotId,
   status: 'succeeded',
   provider: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'model_1' },
   idempotencyKey: `idem_${id}`,
@@ -106,21 +106,21 @@ describe('toStudioProjectSummaryV2', () => {
     const project = makeProject();
     project.sectionOrder = ['section_2', 'section_1'];
     project.sections = {
-      section_parked: makeSection('section_parked', ['clip_parked']),
-      section_1: makeSection('section_1', ['clip_later']),
-      section_2: makeSection('section_2', ['clip_video_bad', 'clip_image']),
+      section_parked: makeBeat('section_parked', ['clip_parked']),
+      section_1: makeBeat('section_1', ['clip_later']),
+      section_2: makeBeat('section_2', ['clip_video_bad', 'clip_image']),
     };
     project.shelf = [{ kind: 'section', sectionId: 'section_parked' }];
     project.clips = {
-      clip_parked: makeClip('clip_parked', { selectedAssetId: 'asset_parked', assetIds: ['asset_parked'] }),
-      clip_later: makeClip('clip_later', { selectedAssetId: 'asset_later', assetIds: ['asset_later'] }),
-      clip_video_bad: makeClip('clip_video_bad', {
+      clip_parked: makeShot('clip_parked', { selectedAssetId: 'asset_parked', assetIds: ['asset_parked'] }),
+      clip_later: makeShot('clip_later', { selectedAssetId: 'asset_later', assetIds: ['asset_later'] }),
+      clip_video_bad: makeShot('clip_video_bad', {
         mediaKind: 'video',
         durationSeconds: 4,
         selectedAssetId: 'asset_video',
         assetIds: ['asset_video'],
       }),
-      clip_image: makeClip('clip_image', { selectedAssetId: 'asset_image', assetIds: ['asset_image'] }),
+      clip_image: makeShot('clip_image', { selectedAssetId: 'asset_image', assetIds: ['asset_image'] }),
     };
     project.assets = {
       asset_parked: makeAsset('asset_parked', 'clip_parked'),
@@ -157,8 +157,8 @@ describe('toStudioProjectSummaryV2', () => {
   it('uses the single canonical thumbnail from the selected video take producer', () => {
     const project = makeProject();
     project.sectionOrder = ['section_1'];
-    project.sections.section_1 = makeSection('section_1', ['clip_1']);
-    project.clips.clip_1 = makeClip('clip_1', {
+    project.sections.section_1 = makeBeat('section_1', ['clip_1']);
+    project.clips.clip_1 = makeShot('clip_1', {
       mediaKind: 'video',
       durationSeconds: 4,
       selectedAssetId: 'asset_video',
@@ -190,8 +190,8 @@ describe('toStudioProjectSummaryV2', () => {
   ] as const)('omits poster for a selected video with %s', (_label, thumbnailIds) => {
     const project = makeProject();
     project.sectionOrder = ['section_1'];
-    project.sections.section_1 = makeSection('section_1', ['clip_1']);
-    project.clips.clip_1 = makeClip('clip_1', {
+    project.sections.section_1 = makeBeat('section_1', ['clip_1']);
+    project.clips.clip_1 = makeShot('clip_1', {
       mediaKind: 'video',
       durationSeconds: 4,
       selectedAssetId: 'asset_video',
@@ -218,8 +218,8 @@ describe('toStudioProjectSummaryV2', () => {
   it('omits poster when a video producer mixes one canonical and one foreign thumbnail', () => {
     const project = makeProject();
     project.sectionOrder = ['section_1'];
-    project.sections.section_1 = makeSection('section_1', ['clip_1']);
-    project.clips.clip_1 = makeClip('clip_1', {
+    project.sections.section_1 = makeBeat('section_1', ['clip_1']);
+    project.clips.clip_1 = makeShot('clip_1', {
       mediaKind: 'video',
       durationSeconds: 4,
       selectedAssetId: 'asset_video',

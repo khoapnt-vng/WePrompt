@@ -120,16 +120,16 @@ import {
 export { CreativeStudioServiceError } from './projectMutations';
 export {
   createCreativeStudioServiceV2,
-  derivePayableClipIds,
+  derivePayableShotIds,
   type CreativeStudioServiceV2,
   type CreativeStudioServiceV2Deps,
-  type StudioClipGenerationChoiceV2,
-  type StudioClipGenerationReadinessV2,
-  type StudioClipReadinessIssueV2,
-  type StudioClipReferencePromptV2,
   type StudioGenerationReadinessV2,
   type StudioRouteCatalogV2,
-  type StudioSubmitClipsRequestV2,
+  type StudioShotGenerationChoiceV2,
+  type StudioShotGenerationReadinessV2,
+  type StudioShotReadinessIssueV2,
+  type StudioShotReferencePromptV2,
+  type StudioSubmitShotsRequestV2,
 } from './v2Service';
 export {
   createStudioDirectorCommandService,
