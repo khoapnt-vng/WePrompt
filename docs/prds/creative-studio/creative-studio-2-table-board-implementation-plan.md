@@ -689,16 +689,17 @@ below is green and independently re-reviewed.
 
 ### Gate 1 review checkpoint
 
-- [ ] Freeze the exact Task 1–5 head and obtain independent process/schema and security/spend review.
-- [ ] Verify V2 code is still unregistered from the renderer bridge, current V1 UI behavior is
+- [x] Freeze the exact Task 1–5 head and obtain independent process/schema and security/spend review.
+- [x] Verify V2 code is still unregistered from the renderer bridge, current V1 UI behavior is
       unchanged, and no V1 profile tree changed during tests.
-- [ ] Run `bun run test`, `bun run test:coverage`,
+- [x] Run `bun run test`, `bun run test:coverage`,
       `bunx vitest run --config vitest.creative-studio-coverage.config.ts --coverage`,
       `bun run lint --quiet`,
       `bun run format:check`, `bunx tsc --noEmit`, and
       `git diff --check 21bf87ae1674598bd42ea88c5f13c74e8389b3c0...HEAD -- . ':(exclude)docs/prds/creative-studio/creative-studio-2-table-board-reference.html.txt'`.
       Verify the excluded frozen reference separately against its required SHA-256.
-- [ ] Resolve every Critical/Important finding in separate commits and re-review before Task 6.
+- [x] Resolve every in-scope Critical/Important finding in separate commits and re-review before Task 6. Per user direction, findings scoped exclusively to `cuts.ts` or cut-clip validation were
+      excluded from this continuation and are not part of the Gate 1 completion claim.
 
 ---
 
