@@ -42,8 +42,14 @@ import type {
   StudioDirectorCommandPage,
   StudioDirectorPendingRead,
 } from '@process/services/creative-studio/service/directorCommandMailbox';
-import { createStudioDirectorCommandMailbox } from '@process/services/creative-studio/service/directorCommandMailbox';
-import { createStudioDirectorCommandService } from '@process/services/creative-studio/service/directorCommandService';
+import {
+  createStudioDirectorCommandMailbox,
+  createStudioDirectorCommandMailboxV2,
+} from '@process/services/creative-studio/service/directorCommandMailbox';
+import {
+  createStudioDirectorCommandService,
+  createStudioDirectorCommandServiceV2,
+} from '@process/services/creative-studio/service/directorCommandService';
 import { createCreativeStudioStore, CreativeStudioStoreError } from '@process/services/creative-studio/store';
 
 const NOW_MS = Date.parse('2026-08-16T12:00:10.000Z');
@@ -60,10 +66,56 @@ const makeInput = (name: string): CreateStudioProjectInput => ({
 const realCommandDirectories = (rootDir: string, projectId: string) => {
   const root = path.join(rootDir, projectId, 'commands');
   return {
+    root,
     pending: path.join(root, 'pending'),
     slots: path.join(root, 'slots'),
     receipts: path.join(root, 'receipts'),
   };
+};
+
+const snapshotDirectoryBytes = async (root: string): Promise<Record<string, string>> => {
+  const result: Record<string, string> = {};
+  const visit = async (directory: string): Promise<void> => {
+    const entries = (await nodeFs.readdir(directory, { withFileTypes: true })).sort((left, right) =>
+      left.name.localeCompare(right.name)
+    );
+    for (const entry of entries) {
+      const file = path.join(directory, entry.name);
+      const relative = path.relative(root, file);
+      if (entry.isDirectory()) {
+        result[`${relative}/`] = 'directory';
+        // eslint-disable-next-line no-await-in-loop
+        await visit(file);
+      } else {
+        // eslint-disable-next-line no-await-in-loop
+        result[relative] = (await nodeFs.readFile(file)).toString('base64');
+      }
+    }
+  };
+  await visit(root);
+  return result;
+};
+
+const publishRealPendingV2 = async (input: {
+  rootDir: string;
+  projectId: string;
+  commandId: string;
+  pending: unknown;
+}): Promise<void> => {
+  const directories = realCommandDirectories(input.rootDir, input.projectId);
+  await nodeFs.writeFile(
+    path.join(directories.pending, `${input.commandId}.json`),
+    typeof input.pending === 'string' ? input.pending : JSON.stringify(input.pending)
+  );
+  await nodeFs.writeFile(
+    path.join(directories.slots, '0.slot'),
+    JSON.stringify({
+      schemaVersion: 2,
+      commandId: input.commandId,
+      reservedAt: '2026-08-16T12:00:00.000Z',
+      deadlineAt: '2026-08-16T12:00:15.000Z',
+    })
+  );
 };
 
 const publishRealCommand = async (rootDir: string, command: StudioDirectorCommandRecordV1): Promise<void> => {
@@ -2081,4 +2133,307 @@ describe('Studio Director schema-2 command processor', () => {
       await harness.processor.stop();
     }
   );
+});
+
+describe('Studio Director schema-2 real mailbox terminal cleanup', () => {
+  it.each([
+    {
+      label: 'malformed record with a recovered revision',
+      expectedRevision: 1,
+      reasonCode: 'malformed_record' as const,
+      pending: (projectId: string, commandId: string) => ({
+        ...makeCommandV2(projectId, commandId),
+        policy: 'manual_review',
+      }),
+    },
+    {
+      label: 'malformed record without a recoverable revision',
+      expectedRevision: null,
+      reasonCode: 'malformed_record' as const,
+      pending: (projectId: string, commandId: string) => ({
+        ...makeCommandV2(projectId, commandId),
+        expectedRevision: 'invalid',
+      }),
+    },
+    {
+      label: 'future schema record',
+      expectedRevision: 1,
+      reasonCode: 'unsupported_version' as const,
+      pending: (projectId: string, commandId: string) => ({
+        ...makeCommandV2(projectId, commandId),
+        schemaVersion: 3,
+      }),
+    },
+  ])(
+    'durably rejects and releases real mailbox authority for a $label',
+    async ({ expectedRevision, reasonCode, pending }) => {
+      const rootDir = mkdtempSync(path.join(tmpdir(), 'studio-director-v2-invalid-'));
+      let processor: StudioDirectorCommandProcessorV2 | null = null;
+      try {
+        const tracker = createStudioDirectorCommitTrackerV2();
+        const store = createCreativeStudioStore({
+          rootDir,
+          now: () => COMMITTED_AT,
+          createId: () => 'project_v2_invalid',
+          onProjectCommitted: tracker.observe,
+        });
+        const project = await store.createProjectV2(makeInput('Invalid V2 terminal cleanup'));
+        const mailbox = createStudioDirectorCommandMailboxV2({
+          rootDir,
+          store,
+          now: () => new Date(NOW_MS).toISOString(),
+          watchCommandTree: () => ({ close: vi.fn() }),
+        });
+        await mailbox.ensure(project.id);
+        const getProjectV2 = vi.fn(store.getProjectV2.bind(store));
+        const service = createStudioDirectorCommandServiceV2({ store });
+        const apply = vi.fn(service.apply);
+        const notify = vi.fn();
+        processor = createStudioDirectorCommandProcessorV2({
+          store: { getProjectV2 },
+          mailbox,
+          service: { apply },
+          tracker,
+          onProjectUpdated: notify,
+          now: () => NOW_MS,
+          setInterval: () => ({ interval: true }),
+          clearInterval: vi.fn(),
+          logError: vi.fn(),
+        });
+        await processor.start();
+        const commandId = `command_${reasonCode}_${expectedRevision === null ? 'null' : 'revision'}`;
+        await publishRealPendingV2({
+          rootDir,
+          projectId: project.id,
+          commandId,
+          pending: pending(project.id, commandId),
+        });
+
+        processor.trigger(project.id, commandId);
+        await vi.waitFor(async () =>
+          expect(await mailbox.readReceipt(project.id, commandId)).toMatchObject({
+            status: 'valid',
+            record: {
+              schemaVersion: 2,
+              commandId,
+              projectId: project.id,
+              expectedRevision,
+              status: 'rejected',
+              observedRevision: null,
+              reasonCode,
+            },
+          })
+        );
+        await vi.waitFor(async () => {
+          await expect(mailbox.readPending(project.id, commandId)).resolves.toBeNull();
+          await expect(
+            nodeFs.lstat(path.join(realCommandDirectories(rootDir, project.id).slots, '0.slot'))
+          ).rejects.toMatchObject({ code: 'ENOENT' });
+          await expect(
+            nodeFs.lstat(path.join(realCommandDirectories(rootDir, project.id).slots, '0.slot.lease'))
+          ).rejects.toMatchObject({ code: 'ENOENT' });
+        });
+
+        expect(getProjectV2).not.toHaveBeenCalled();
+        expect(apply).not.toHaveBeenCalled();
+        expect(notify).not.toHaveBeenCalled();
+        await expect(mailbox.readReceipt(project.id, commandId)).resolves.toMatchObject({
+          status: 'valid',
+          record: { status: 'rejected', expectedRevision, reasonCode },
+        });
+      } finally {
+        await processor?.stop();
+        rmSync(rootDir, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it('repairs a durable malformed rejection through a fresh real mailbox after finish fails', async () => {
+    const rootDir = mkdtempSync(path.join(tmpdir(), 'studio-director-v2-invalid-restart-'));
+    let firstProcessor: StudioDirectorCommandProcessorV2 | null = null;
+    let restartedProcessor: StudioDirectorCommandProcessorV2 | null = null;
+    try {
+      const firstTracker = createStudioDirectorCommitTrackerV2();
+      const store = createCreativeStudioStore({
+        rootDir,
+        now: () => COMMITTED_AT,
+        createId: () => 'project_v2_invalid_restart',
+        onProjectCommitted: firstTracker.observe,
+      });
+      const project = await store.createProjectV2(makeInput('Invalid V2 restart cleanup'));
+      const firstMailbox = createStudioDirectorCommandMailboxV2({
+        rootDir,
+        store,
+        now: () => new Date(NOW_MS).toISOString(),
+        watchCommandTree: () => ({ close: vi.fn() }),
+      });
+      await firstMailbox.ensure(project.id);
+      const firstFinish = vi.fn(async () => {
+        throw new CreativeStudioStoreError('storage_error', 'injected finish failure');
+      });
+      const firstApply = vi.fn(createStudioDirectorCommandServiceV2({ store }).apply);
+      const firstNotify = vi.fn();
+      firstProcessor = createStudioDirectorCommandProcessorV2({
+        store,
+        mailbox: { ...firstMailbox, finish: firstFinish },
+        service: { apply: firstApply },
+        tracker: firstTracker,
+        onProjectUpdated: firstNotify,
+        now: () => NOW_MS,
+        setInterval: () => ({ interval: true }),
+        clearInterval: vi.fn(),
+        logError: vi.fn(),
+      });
+      await firstProcessor.start();
+      const commandId = 'command_invalid_restart';
+      await publishRealPendingV2({
+        rootDir,
+        projectId: project.id,
+        commandId,
+        pending: { ...makeCommandV2(project.id, commandId), operations: [] },
+      });
+
+      firstProcessor.trigger(project.id, commandId);
+      await vi.waitFor(() => expect(firstFinish).toHaveBeenCalledExactlyOnceWith(project.id, commandId));
+      await vi.waitFor(async () =>
+        expect(await firstMailbox.readReceipt(project.id, commandId)).toMatchObject({
+          status: 'valid',
+          record: { status: 'rejected', reasonCode: 'malformed_record', expectedRevision: project.revision },
+        })
+      );
+      expect(firstApply).not.toHaveBeenCalled();
+      expect(firstNotify).not.toHaveBeenCalled();
+      const directories = realCommandDirectories(rootDir, project.id);
+      const receiptFile = path.join(directories.receipts, `${commandId}.json`);
+      const receiptBytes = await nodeFs.readFile(receiptFile, 'utf8');
+      await expect(nodeFs.lstat(path.join(directories.pending, `${commandId}.json`))).resolves.toBeDefined();
+      await expect(nodeFs.lstat(path.join(directories.slots, '0.slot'))).resolves.toBeDefined();
+      await firstProcessor.stop();
+
+      const restartedMailbox = createStudioDirectorCommandMailboxV2({
+        rootDir,
+        store,
+        now: () => new Date(NOW_MS).toISOString(),
+        watchCommandTree: () => ({ close: vi.fn() }),
+      });
+      const restartedTracker = createStudioDirectorCommitTrackerV2();
+      const restartedGetProject = vi.fn(store.getProjectV2.bind(store));
+      const restartedApply = vi.fn(createStudioDirectorCommandServiceV2({ store }).apply);
+      const restartedNotify = vi.fn();
+      restartedProcessor = createStudioDirectorCommandProcessorV2({
+        store: { getProjectV2: restartedGetProject },
+        mailbox: restartedMailbox,
+        service: { apply: restartedApply },
+        tracker: restartedTracker,
+        onProjectUpdated: restartedNotify,
+        now: () => NOW_MS,
+        setInterval: () => ({ interval: true }),
+        clearInterval: vi.fn(),
+        logError: vi.fn(),
+      });
+
+      await restartedProcessor.start();
+      await vi.waitFor(async () => {
+        await expect(restartedMailbox.readPending(project.id, commandId)).resolves.toBeNull();
+        await expect(nodeFs.lstat(path.join(directories.slots, '0.slot'))).rejects.toMatchObject({ code: 'ENOENT' });
+        await expect(nodeFs.lstat(path.join(directories.slots, '0.slot.lease'))).rejects.toMatchObject({
+          code: 'ENOENT',
+        });
+      });
+
+      await expect(nodeFs.readFile(receiptFile, 'utf8')).resolves.toBe(receiptBytes);
+      expect(restartedGetProject).not.toHaveBeenCalled();
+      expect(restartedApply).not.toHaveBeenCalled();
+      expect(restartedNotify).not.toHaveBeenCalled();
+    } finally {
+      await restartedProcessor?.stop();
+      await firstProcessor?.stop();
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves a complete V1 command tree byte-identical behind a V2 terminal receipt', async () => {
+    const rootDir = mkdtempSync(path.join(tmpdir(), 'studio-director-v2-v1-no-touch-'));
+    let processor: StudioDirectorCommandProcessorV2 | null = null;
+    try {
+      const tracker = createStudioDirectorCommitTrackerV2();
+      const store = createCreativeStudioStore({
+        rootDir,
+        now: () => COMMITTED_AT,
+        createId: () => 'project_v2_v1_no_touch',
+        onProjectCommitted: tracker.observe,
+      });
+      const project = await store.createProjectV2(makeInput('V1 command no-touch'));
+      const mailbox = createStudioDirectorCommandMailboxV2({
+        rootDir,
+        store,
+        now: () => new Date(NOW_MS).toISOString(),
+        watchCommandTree: () => ({ close: vi.fn() }),
+      });
+      await mailbox.ensure(project.id);
+      const commandId = 'command_v1_no_touch';
+      const command = makeCommand(project.id, commandId, { expectedRevision: project.revision });
+      const slot = {
+        schemaVersion: 1 as const,
+        commandId,
+        reservedAt: command.createdAt,
+        deadlineAt: command.deadlineAt,
+      };
+      const acquiredAt = '2026-08-16T12:00:00.000Z';
+      const directories = realCommandDirectories(rootDir, project.id);
+      await nodeFs.writeFile(path.join(directories.pending, `${commandId}.json`), JSON.stringify(command));
+      await nodeFs.writeFile(path.join(directories.slots, '0.slot'), JSON.stringify(slot));
+      await nodeFs.writeFile(
+        path.join(directories.slots, '0.slot.lease'),
+        JSON.stringify({
+          schemaVersion: 1,
+          leaseId: 'lease_v1_no_touch',
+          owner: 'writer',
+          commandId,
+          reservedAt: slot.reservedAt,
+          deadlineAt: slot.deadlineAt,
+          acquiredAt,
+          expiresAt: new Date(Date.parse(acquiredAt) + STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS).toISOString(),
+        })
+      );
+      await mailbox.writeReceipt(project.id, {
+        schemaVersion: 2,
+        commandId,
+        projectId: project.id,
+        expectedRevision: project.revision,
+        decidedAt: COMMITTED_AT,
+        status: 'rejected',
+        observedRevision: null,
+        reasonCode: 'malformed_record',
+      });
+      const before = await snapshotDirectoryBytes(directories.root);
+      const finish = vi.fn(mailbox.finish.bind(mailbox));
+      const getProjectV2 = vi.fn(store.getProjectV2.bind(store));
+      const apply = vi.fn(createStudioDirectorCommandServiceV2({ store }).apply);
+      const notify = vi.fn();
+      processor = createStudioDirectorCommandProcessorV2({
+        store: { getProjectV2 },
+        mailbox: { ...mailbox, finish },
+        service: { apply },
+        tracker,
+        onProjectUpdated: notify,
+        now: () => NOW_MS,
+        setInterval: () => ({ interval: true }),
+        clearInterval: vi.fn(),
+        logError: vi.fn(),
+      });
+
+      await processor.start();
+      expect(finish).toHaveBeenCalledExactlyOnceWith(project.id, commandId);
+      expect(await snapshotDirectoryBytes(directories.root)).toEqual(before);
+      expect(getProjectV2).not.toHaveBeenCalled();
+      expect(apply).not.toHaveBeenCalled();
+      expect(notify).not.toHaveBeenCalled();
+      await processor.stop();
+      expect(await snapshotDirectoryBytes(directories.root)).toEqual(before);
+    } finally {
+      await processor?.stop();
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
 });

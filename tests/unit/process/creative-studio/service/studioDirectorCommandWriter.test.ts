@@ -21,6 +21,8 @@ import {
   type StudioDirectorCommandRecordV1,
   type StudioDirectorCommandRecordV2,
   type StudioDirectorCommandSlotV1,
+  type StudioDirectorCommandSlotLeaseV2,
+  type StudioDirectorCommandSlotV2,
 } from '@/common/types/project/creativeStudioTypes';
 import {
   createStudioDirectorCommandWriter,
@@ -147,6 +149,121 @@ describe('Studio Director subprocess command writer', () => {
         ...overrides,
       }
     );
+  };
+
+  type InvalidPendingKindV2 = 'malformed_recovered_revision' | 'malformed_null_revision' | 'future_schema';
+
+  const invalidPendingCasesV2 = [
+    {
+      label: 'malformed record with a recovered revision',
+      kind: 'malformed_recovered_revision',
+      expectedRevision: 7,
+      reasonCode: 'malformed_record',
+    },
+    {
+      label: 'malformed record without a recoverable revision',
+      kind: 'malformed_null_revision',
+      expectedRevision: null,
+      reasonCode: 'malformed_record',
+    },
+    {
+      label: 'future-schema record',
+      kind: 'future_schema',
+      expectedRevision: 7,
+      reasonCode: 'unsupported_version',
+    },
+  ] as const satisfies ReadonlyArray<{
+    label: string;
+    kind: InvalidPendingKindV2;
+    expectedRevision: number | null;
+    reasonCode: 'malformed_record' | 'unsupported_version';
+  }>;
+
+  const invalidPendingRecordV2 = (commandId: string, kind: InvalidPendingKindV2): Record<string, unknown> => {
+    const base = {
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      commandId,
+      projectId: PROJECT_ID,
+      expectedRevision: 7,
+      createdAt: new Date(START_MS).toISOString(),
+      deadlineAt: new Date(START_MS + STUDIO_DIRECTOR_COMMAND_WAIT_MS).toISOString(),
+      policy: 'auto_apply',
+      operations: [{ kind: 'set_brief', brief: 'Invalid durable command' }],
+    };
+    if (kind === 'malformed_recovered_revision') return { ...base, policy: 'manual_review' };
+    if (kind === 'malformed_null_revision') return { ...base, expectedRevision: 'invalid' };
+    return { ...base, schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION + 1 };
+  };
+
+  const validPendingRecordV2 = (commandId: string): Record<string, unknown> => ({
+    ...invalidPendingRecordV2(commandId, 'malformed_recovered_revision'),
+    policy: 'auto_apply',
+  });
+
+  const writeInvalidTerminalAuthorityV2 = async (input: {
+    commandId: string;
+    kind: InvalidPendingKindV2;
+    receiptExpectedRevision: number | null;
+    receiptReasonCode: 'malformed_record' | 'unsupported_version';
+    slotCommandId?: string;
+    slotDeadlineAt?: string;
+    leaseCommandId?: string;
+  }): Promise<StudioDirectorCommandReceiptV2> => {
+    const reservedAt = new Date(START_MS).toISOString();
+    const deadlineAt = new Date(START_MS + STUDIO_DIRECTOR_COMMAND_WAIT_MS).toISOString();
+    const slot: StudioDirectorCommandSlotV2 = {
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      commandId: input.slotCommandId ?? input.commandId,
+      reservedAt,
+      deadlineAt: input.slotDeadlineAt ?? deadlineAt,
+    };
+    const receipt: StudioDirectorCommandReceiptV2 = {
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      commandId: input.commandId,
+      projectId: PROJECT_ID,
+      expectedRevision: input.receiptExpectedRevision,
+      decidedAt: '2026-08-17T01:02:10.000Z',
+      status: 'rejected',
+      observedRevision: null,
+      reasonCode: input.receiptReasonCode,
+    };
+    await writeFile(
+      path.join(pendingDir, `${input.commandId}.json`),
+      JSON.stringify(invalidPendingRecordV2(input.commandId, input.kind))
+    );
+    await writeFile(path.join(slotsDir, '0.slot'), JSON.stringify(slot));
+    await writeFile(path.join(receiptsDir, `${input.commandId}.json`), JSON.stringify(receipt));
+    if (input.leaseCommandId !== undefined) {
+      const lease: StudioDirectorCommandSlotLeaseV2 = {
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        leaseId: `main_lease_${input.commandId}`,
+        owner: 'main',
+        commandId: input.leaseCommandId,
+        reservedAt,
+        deadlineAt,
+        acquiredAt: reservedAt,
+        expiresAt: new Date(START_MS + STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS).toISOString(),
+      };
+      await writeFile(path.join(slotsDir, '0.slot.lease'), JSON.stringify(lease));
+    }
+    return receipt;
+  };
+
+  const snapshotCommandMailboxBytes = async (): Promise<Record<string, string>> => {
+    const families = [
+      ['pending', pendingDir],
+      ['slots', slotsDir],
+      ['receipts', receiptsDir],
+    ] as const;
+    const entries = await Promise.all(
+      families.map(async ([family, directory]) => {
+        const names = (await readdir(directory)).toSorted();
+        return Promise.all(
+          names.map(async (name) => [`${family}/${name}`, await readFile(path.join(directory, name), 'utf8')] as const)
+        );
+      })
+    );
+    return Object.fromEntries(entries.flat());
   };
 
   it('mints stable safe ids once, preserves operation order, and publishes one exact 15-second command', async () => {
@@ -1128,6 +1245,192 @@ describe('Studio Director subprocess command writer', () => {
       '"expectedRevision":7'
     );
     await expect(readFile(receiptFile, 'utf8')).resolves.toContain('"expectedRevision":8');
+  });
+
+  it.each(
+    invalidPendingCasesV2.flatMap((testCase) => [
+      { ...testCase, lease: 'missing' as const, leaseLabel: 'without a residual lease' },
+      { ...testCase, lease: 'matching' as const, leaseLabel: 'with its matching residual lease' },
+    ])
+  )(
+    'returns the exact durable rejection for a $label $leaseLabel while same-id apply stays fail-closed',
+    async ({ kind, expectedRevision, reasonCode, lease }) => {
+      const commandId = `terminal_${kind}_${lease}`;
+      const receipt = await writeInvalidTerminalAuthorityV2({
+        commandId,
+        kind,
+        receiptExpectedRevision: expectedRevision,
+        receiptReasonCode: reasonCode,
+        ...(lease === 'matching' ? { leaseCommandId: commandId } : {}),
+      });
+      const before = await snapshotCommandMailboxBytes();
+
+      await expect(writerWithIdsV2(['unused']).getStatus({ commandId })).resolves.toEqual(receipt);
+      await expect(
+        writerWithIdsV2([commandId, `replacement_lease_${kind}_${lease}`]).apply({
+          expectedRevision: 7,
+          operations: [{ kind: 'set_brief', brief: 'Never overwrite terminal authority' }],
+        })
+      ).resolves.toEqual({ status: 'storage_error', commandId });
+      await expect(snapshotCommandMailboxBytes()).resolves.toEqual(before);
+    }
+  );
+
+  it.each([
+    {
+      label: 'receipt reason',
+      suffix: 'reason',
+      receiptExpectedRevision: 7,
+      receiptReasonCode: 'unsupported_version',
+    },
+    {
+      label: 'receipt revision',
+      suffix: 'revision',
+      receiptExpectedRevision: 8,
+      receiptReasonCode: 'malformed_record',
+    },
+    {
+      label: 'slot command',
+      suffix: 'slot',
+      receiptExpectedRevision: 7,
+      receiptReasonCode: 'malformed_record',
+      slotCommandId: 'other_slot_command',
+    },
+    {
+      label: 'slot deadline',
+      suffix: 'slot_deadline',
+      receiptExpectedRevision: 7,
+      receiptReasonCode: 'malformed_record',
+      slotDeadlineAt: new Date(START_MS + STUDIO_DIRECTOR_COMMAND_WAIT_MS - 1_000).toISOString(),
+    },
+    {
+      label: 'lease command',
+      suffix: 'lease',
+      receiptExpectedRevision: 7,
+      receiptReasonCode: 'malformed_record',
+      leaseCommandId: 'other_lease_command',
+    },
+  ] as const)(
+    'keeps a mismatched $label fail-closed and byte-identical for status and same-id apply',
+    async ({ suffix, receiptExpectedRevision, receiptReasonCode, ...authorityOverrides }) => {
+      const commandId = `terminal_mismatch_${suffix}`;
+      await writeInvalidTerminalAuthorityV2({
+        commandId,
+        kind: 'malformed_recovered_revision',
+        receiptExpectedRevision,
+        receiptReasonCode,
+        ...authorityOverrides,
+      });
+      const before = await snapshotCommandMailboxBytes();
+
+      await expect(writerWithIdsV2(['unused']).getStatus({ commandId })).resolves.toEqual({
+        status: 'storage_error',
+        commandId,
+      });
+      await expect(
+        writerWithIdsV2([commandId, `replacement_lease_${suffix}`]).apply({
+          expectedRevision: 7,
+          operations: [{ kind: 'set_brief', brief: 'Mismatched authority must survive' }],
+        })
+      ).resolves.toEqual({ status: 'storage_error', commandId });
+      await expect(snapshotCommandMailboxBytes()).resolves.toEqual(before);
+    }
+  );
+
+  it.each([
+    { label: 'command', suffix: 'command', slotCommandId: 'other_slot_command' },
+    {
+      label: 'deadline',
+      suffix: 'deadline',
+      slotDeadlineAt: new Date(START_MS + STUDIO_DIRECTOR_COMMAND_WAIT_MS - 1_000).toISOString(),
+    },
+  ] as const)(
+    'rejects a structurally valid pending whose actual slot $label is its sole malformed condition',
+    async ({ suffix, ...slotOverrides }) => {
+      const commandId = `valid_pending_slot_mismatch_${suffix}`;
+      await writeInvalidTerminalAuthorityV2({
+        commandId,
+        kind: 'malformed_recovered_revision',
+        receiptExpectedRevision: 7,
+        receiptReasonCode: 'malformed_record',
+        ...slotOverrides,
+      });
+      await writeFile(path.join(pendingDir, `${commandId}.json`), JSON.stringify(validPendingRecordV2(commandId)));
+      const before = await snapshotCommandMailboxBytes();
+
+      await expect(writerWithIdsV2(['unused']).getStatus({ commandId })).resolves.toEqual({
+        status: 'storage_error',
+        commandId,
+      });
+      await expect(
+        writerWithIdsV2([commandId, `replacement_lease_slot_mismatch_${suffix}`]).apply({
+          expectedRevision: 7,
+          operations: [{ kind: 'set_brief', brief: 'Actual slot mismatch stays fail-closed' }],
+        })
+      ).resolves.toEqual({ status: 'storage_error', commandId });
+      await expect(snapshotCommandMailboxBytes()).resolves.toEqual(before);
+    }
+  );
+
+  it.each(['malformed_record', 'unsupported_version'] as const)(
+    'does not attribute a same-revision %s rejection to a valid pending',
+    async (reasonCode) => {
+      const commandId = `valid_pending_invalid_reason_${reasonCode}`;
+      await writeInvalidTerminalAuthorityV2({
+        commandId,
+        kind: 'malformed_recovered_revision',
+        receiptExpectedRevision: 7,
+        receiptReasonCode: reasonCode,
+      });
+      await writeFile(path.join(pendingDir, `${commandId}.json`), JSON.stringify(validPendingRecordV2(commandId)));
+      const before = await snapshotCommandMailboxBytes();
+
+      await expect(writerWithIdsV2(['unused']).getStatus({ commandId })).resolves.toEqual({
+        status: 'storage_error',
+        commandId,
+      });
+      await expect(
+        writerWithIdsV2([commandId, `replacement_lease_invalid_reason_${reasonCode}`]).apply({
+          expectedRevision: 7,
+          operations: [{ kind: 'set_brief', brief: 'Invalid-only reasons need invalid pending authority' }],
+        })
+      ).resolves.toEqual({ status: 'storage_error', commandId });
+      await expect(snapshotCommandMailboxBytes()).resolves.toEqual(before);
+    }
+  );
+
+  it('gives a complete V1 lease precedence over an otherwise attributable invalid V2 rejection', async () => {
+    const commandId = 'terminal_v1_lease_precedence';
+    await writeInvalidTerminalAuthorityV2({
+      commandId,
+      kind: 'malformed_recovered_revision',
+      receiptExpectedRevision: 7,
+      receiptReasonCode: 'malformed_record',
+    });
+    const legacyLease = JSON.stringify({
+      schemaVersion: 1,
+      leaseId: 'legacy_terminal_lease',
+      owner: 'main',
+      commandId,
+      reservedAt: new Date(START_MS).toISOString(),
+      deadlineAt: new Date(START_MS + STUDIO_DIRECTOR_COMMAND_WAIT_MS).toISOString(),
+      acquiredAt: new Date(START_MS).toISOString(),
+      expiresAt: new Date(START_MS + STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS).toISOString(),
+    });
+    await writeFile(path.join(slotsDir, '0.slot.lease'), legacyLease);
+    const before = await snapshotCommandMailboxBytes();
+
+    await expect(writerWithIdsV2(['unused']).getStatus({ commandId })).resolves.toEqual({
+      status: 'unsupported_prototype_schema',
+      commandId,
+    });
+    await expect(
+      writerWithIdsV2([commandId, 'replacement_lease_v1_precedence']).apply({
+        expectedRevision: 7,
+        operations: [{ kind: 'set_brief', brief: 'Do not cross the V1 boundary' }],
+      })
+    ).resolves.toEqual({ status: 'unsupported_prototype_schema', commandId });
+    await expect(snapshotCommandMailboxBytes()).resolves.toEqual(before);
   });
 
   it('reports V1 receipts and pending records as unsupported without changing their bytes', async () => {

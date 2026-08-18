@@ -581,6 +581,7 @@ const parsePendingRecordForWriterV2 = (input: {
   commandId: string;
   value: unknown;
   nowMs: number;
+  actualSlot?: unknown;
 }): ReturnType<typeof parseStudioDirectorPendingRecordV2> => {
   const candidate =
     typeof input.value === 'object' && input.value !== null && !Array.isArray(input.value)
@@ -590,12 +591,15 @@ const parsePendingRecordForWriterV2 = (input: {
     projectId: input.projectId,
     commandId: input.commandId,
     value: input.value,
-    slot: {
-      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
-      commandId: candidate.commandId,
-      reservedAt: candidate.createdAt,
-      deadlineAt: candidate.deadlineAt,
-    },
+    slot:
+      input.actualSlot === undefined
+        ? {
+            schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+            commandId: candidate.commandId,
+            reservedAt: candidate.createdAt,
+            deadlineAt: candidate.deadlineAt,
+          }
+        : input.actualSlot,
     now: new Date(input.nowMs).toISOString(),
     waitMs: STUDIO_DIRECTOR_COMMAND_WAIT_MS,
   });
@@ -1033,7 +1037,13 @@ type CommandAuthorityPreflightV2 = {
   slot: ReadSlotResultV2;
   lease: ReadLeaseResultV2;
   receiptPendingRevisionMismatch: boolean;
+  invalidPendingRejectionForValidPending: boolean;
+  invalidPendingSlotCorrelationMatches: boolean;
 };
+
+const receiptRequiresInvalidPendingV2 = (receipt: StudioDirectorCommandReceiptV2): boolean =>
+  receipt.status === 'rejected' &&
+  (receipt.reasonCode === 'malformed_record' || receipt.reasonCode === 'unsupported_version');
 
 const preflightCommandAuthorityV2 = async (input: {
   fs: RecordIoFileSystem;
@@ -1050,6 +1060,7 @@ const preflightCommandAuthorityV2 = async (input: {
     file: path.join(input.directories.pending, `${input.commandId}.json`),
   });
   await assertCommandDirectoriesV2(input.fs, input.directories);
+  const slot = await readSlotV2(input);
   const pending =
     pendingValue === null
       ? ({ status: 'missing' } as const)
@@ -1058,15 +1069,35 @@ const preflightCommandAuthorityV2 = async (input: {
           commandId: input.commandId,
           value: pendingValue,
           nowMs: input.nowMs,
+          actualSlot: slot.status === 'valid' ? slot.slot : null,
         });
-  const slot = await readSlotV2(input);
   const lease = await readLeaseV2(input);
   await assertCommandDirectoriesV2(input.fs, input.directories);
   const receiptPendingRevisionMismatch =
     receipt.status === 'valid' &&
     pending.status === 'valid' &&
     receipt.record.expectedRevision !== pending.record.expectedRevision;
-  return { receipt, pending, slot, lease, receiptPendingRevisionMismatch };
+  const invalidPendingRejectionForValidPending =
+    receipt.status === 'valid' && pending.status === 'valid' && receiptRequiresInvalidPendingV2(receipt.record);
+  const pendingCandidate =
+    typeof pendingValue === 'object' && pendingValue !== null && !Array.isArray(pendingValue)
+      ? (pendingValue as Record<string, unknown>)
+      : null;
+  const invalidPendingSlotCorrelationMatches =
+    pending.status === 'invalid' &&
+    pendingCandidate !== null &&
+    slot.status === 'valid' &&
+    pendingCandidate.commandId === slot.slot.commandId &&
+    pendingCandidate.deadlineAt === slot.slot.deadlineAt;
+  return {
+    receipt,
+    pending,
+    slot,
+    lease,
+    receiptPendingRevisionMismatch,
+    invalidPendingRejectionForValidPending,
+    invalidPendingSlotCorrelationMatches,
+  };
 };
 
 const preflightHasStatusV2 = (
@@ -1077,6 +1108,34 @@ const preflightHasStatusV2 = (
   preflight.pending.status === status ||
   preflight.slot.status === status ||
   preflight.lease.status === status;
+
+const terminalInvalidPendingReceiptV2 = (
+  preflight: CommandAuthorityPreflightV2,
+  commandId: string
+): StudioDirectorCommandReceiptV2 | null => {
+  if (
+    preflight.pending.status !== 'invalid' ||
+    preflight.receipt.status !== 'valid' ||
+    preflight.receipt.record.status !== 'rejected' ||
+    preflight.receipt.record.reasonCode !== preflight.pending.reasonCode ||
+    preflight.receipt.record.expectedRevision !== preflight.pending.expectedRevision ||
+    preflight.slot.status !== 'valid' ||
+    preflight.slot.slot.commandId !== commandId ||
+    !preflight.invalidPendingSlotCorrelationMatches
+  ) {
+    return null;
+  }
+  if (preflight.lease.status === 'missing') return preflight.receipt.record;
+  if (
+    preflight.lease.status !== 'valid' ||
+    preflight.lease.lease.commandId !== preflight.slot.slot.commandId ||
+    preflight.lease.lease.reservedAt !== preflight.slot.slot.reservedAt ||
+    preflight.lease.lease.deadlineAt !== preflight.slot.slot.deadlineAt
+  ) {
+    return null;
+  }
+  return preflight.receipt.record;
+};
 
 const assertCommandLeasePublicationAuthorityV2 = async (input: {
   fs: RecordIoFileSystem;
@@ -1682,8 +1741,12 @@ export const createStudioDirectorCommandWriterV2 = (
           : storageError(input.commandId);
       }
       if (preflightHasStatusV2(preflight, 'unsupported_prototype_schema')) return unsupportedV2(input.commandId);
+      const terminalInvalidReceipt = terminalInvalidPendingReceiptV2(preflight, input.commandId);
+      if (terminalInvalidReceipt !== null) return terminalInvalidReceipt;
       if (preflightHasStatusV2(preflight, 'invalid')) return storageError(input.commandId);
-      if (preflight.receiptPendingRevisionMismatch) return storageError(input.commandId);
+      if (preflight.receiptPendingRevisionMismatch || preflight.invalidPendingRejectionForValidPending) {
+        return storageError(input.commandId);
+      }
       if (preflight.receipt.status === 'valid') return preflight.receipt.record;
       if (preflight.pending.status === 'valid') return { status: 'pending', commandId: input.commandId };
       if (
@@ -1723,7 +1786,9 @@ export const createStudioDirectorCommandWriterV2 = (
       });
       if (preflightHasStatusV2(preflight, 'unsupported_prototype_schema')) return unsupportedV2(commandId);
       if (preflightHasStatusV2(preflight, 'invalid')) return storageError(commandId);
-      if (preflight.receiptPendingRevisionMismatch) return storageError(commandId);
+      if (preflight.receiptPendingRevisionMismatch || preflight.invalidPendingRejectionForValidPending) {
+        return storageError(commandId);
+      }
       if (preflight.receipt.status === 'valid' || preflight.pending.status === 'valid') return storageError(commandId);
       if (preflight.slot.status === 'valid') return { status: 'busy', commandId: preflight.slot.slot.commandId };
       if (preflight.lease.status === 'valid') {
@@ -1976,7 +2041,8 @@ export const createStudioDirectorCommandWriterV2 = (
     try {
       let receipt = await readReceipt();
       if (receipt.status === 'valid') {
-        return receipt.record.expectedRevision === prepared.command.expectedRevision
+        return receipt.record.expectedRevision === prepared.command.expectedRevision &&
+          !receiptRequiresInvalidPendingV2(receipt.record)
           ? receipt.record
           : storageError(commandId);
       }
@@ -1990,7 +2056,8 @@ export const createStudioDirectorCommandWriterV2 = (
         // eslint-disable-next-line no-await-in-loop
         receipt = await readReceipt();
         if (receipt.status === 'valid') {
-          return receipt.record.expectedRevision === prepared.command.expectedRevision
+          return receipt.record.expectedRevision === prepared.command.expectedRevision &&
+            !receiptRequiresInvalidPendingV2(receipt.record)
             ? receipt.record
             : storageError(commandId);
         }
@@ -1999,7 +2066,8 @@ export const createStudioDirectorCommandWriterV2 = (
       }
       receipt = await readReceipt();
       if (receipt.status === 'valid') {
-        return receipt.record.expectedRevision === prepared.command.expectedRevision
+        return receipt.record.expectedRevision === prepared.command.expectedRevision &&
+          !receiptRequiresInvalidPendingV2(receipt.record)
           ? receipt.record
           : storageError(commandId);
       }
