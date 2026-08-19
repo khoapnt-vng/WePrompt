@@ -169,27 +169,46 @@ before commit**. It would have been exactly the weakening plan constraint 14 for
 wall-clock assertions on this repo cannot be trusted while other sessions run dev apps on the same
 host, and a red result on this test should be re-measured against `uptime` before it is believed.
 
-## A2. Tasks 2–5 have no terminal `Commit:` step
+## A2. WITHDRAWN — the tranche is deliberate, not a missing commit step
 
-Every other task in the plan ends with one. Tasks 2, 3, 4, and 5 have **zero**:
+**This finding was wrong and is retracted.** It reported Tasks 2–5 as having no terminal `Commit:`
+step and inferred that four tasks' work landed in two commits because execution had no defined
+stopping point. Both halves are wrong. It is left in place rather than deleted so the reading error
+stays visible.
 
-| Task                     | Lines     | `Commit:` steps |
-| ------------------------ | --------- | --------------- |
-| 2 — reducer              | 2458–2656 | 0               |
-| 3 — store inspection     | 2656–2699 | 0               |
-| 4 — rate card            | 2699–2796 | 0               |
-| 5 — shot ownership/chain | 2796–3082 | 0               |
+The plan says the opposite, in the frozen contract's opening paragraph:
 
-For a plan executed task-by-task, a task with no commit step has no defined stopping point. This is
-the most likely reason execution ran 1C straight into 6: **four tasks' work was absorbed into two
-commits**. The deliverables do exist — `schema2/pricing/{rateCard,estimate,authorization}.ts`,
-`adapters/conditioningFrame.ts`, plus unplanned `chain.ts`, `lifecycle.ts`, `workspaceStatus.ts`,
-`mutationIdentity.ts`, `preparedSubmissionCache.ts` — so nothing is missing, but nothing is
-separately reviewable either.
+> Tasks 1C–5 form one atomic schema-2 core tranche because the project shape, reducer, store,
+> pricing authority, and generation lifecycle are one compile-time and durability strongly connected
+> component. Task 1C freezes the names and validators; Tasks 2–5 install their only truthful
+> consumers. Do not commit or publish an intermediate schema-2 shape, add duplicate legacy/final
+> fields, make required paid fields optional, or weaken exact validation merely to obtain an
+> artificial per-task green point. The tranche ends with one full-suite-green commit after Task 5.
 
-Compounding it: **0 of the plan's checkboxes are ticked** across 3,968 lines, so progress cannot be
-read from the plan at all — only inferred from the tree. Restore the four commit steps and adopt
-checkbox discipline before Gate 1, or the gate cannot establish what it is gating.
+It is reinforced in four further places: the Task 1A–1C preamble ("the next commit/review point is
+the full-suite-green Task 5 tranche head"), Task 4 ("include them in the atomic tranche commit; do
+not create an [artificial one]"), Task 5 ("keep the tranche uncommitted until Task 5 wires every
+authorization/job consumer"), and Task 2's note that it performs the Cut-module deletion "inside this
+tranche".
+
+Tasks 2–4 therefore end with **`Checkpoint: run …`** steps by design, and Task 5's terminal step is a
+commit step phrased as prose rather than the `Commit:` label the other tasks use — **"Commit the
+dependency-closed, full-suite-green tranche: `feat(studio): define beat and shot core`."** A
+`grep` for `Commit:` misses it. That is how the finding was manufactured.
+
+**The causation was also backwards.** `39302a957` is titled `feat(studio): define beat and shot
+core` — character-for-character the message the plan specifies for the tranche head. The work landed
+in one commit because the plan requires it to, not because execution drifted. That is compliance.
+
+**Do not act on the withdrawn finding.** Adding per-task commit steps to Tasks 2–5 would force
+precisely what the frozen contract forbids: intermediate schema-2 commits publishing a knowingly
+transitional, half-wired contract to buy an artificial green point.
+
+**What remains true, and is a different point.** Tranche commits are large — `39302a957` and
+`d384112fb` are roughly 16k and 9k insertions — which is hard to review as one unit. The lever for
+that is not splitting the tranche, whose atomicity is load-bearing, but keeping Task 6 and later
+tasks outside the tranche's shadow so they commit on their own. Task 6 already does; it carries a
+normal `Commit:` step and landed separately as `d384112fb`.
 
 ## A3. Directory ratchet violated
 
@@ -214,7 +233,13 @@ also large enough to be worth splitting on their own terms.
 
 ## A5. Scope note
 
-`d384112fb` is **16,299 insertions across 33 files**, including `store.ts` +6,167 — Task 3 territory
-— under a Task 6 label. Combined with A2, single commits are now spanning multiple planned tasks at a
-size that is difficult to review as one unit. Worth splitting future task commits even where the plan
-text has drifted.
+`d384112fb` is **16,299 insertions across 33 files**, including `store.ts` +6,167 under a Task 6
+label. This is an observation about reviewability, not a process violation — A2 establishes that
+large tranche commits are the plan's deliberate design, and Task 6 carries its own `Commit:` step
+outside the tranche.
+
+The point that survives: a commit of this size cannot be meaningfully reviewed as one unit, whatever
+the plan permits. Since the tranche's atomicity is load-bearing and should not be broken, the
+available lever is the opposite one — keep post-tranche tasks narrow, and where a task must touch a
+large shared file like `store.ts`, say so in its Files list so the size is predicted rather than
+discovered at review.
