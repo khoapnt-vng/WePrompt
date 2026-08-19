@@ -1,0 +1,195 @@
+.root {
+  display: grid;
+  min-inline-size: 0;
+  gap: 10px;
+}
+
+.scroll {
+  min-inline-size: 0;
+  overflow-x: auto;
+  border: 1px solid var(--color-border-2);
+  border-radius: 12px;
+  background: var(--color-bg-2);
+}
+
+.grid {
+  inline-size: 100%;
+  min-inline-size: 860px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  color: var(--text-secondary);
+  font-family: var(--font-body);
+}
+
+.headerCell {
+  padding-block: 9px;
+  padding-inline: 12px;
+  border-block-end: 1px solid var(--color-border-2);
+  color: var(--color-text-3);
+  background: var(--color-fill-1);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.08em;
+  text-align: start;
+  text-transform: uppercase;
+}
+
+.headerCell:nth-child(1),
+.cell:nth-child(1) {
+  inline-size: 48px;
+}
+
+.headerCell:nth-child(2),
+.cell:nth-child(2) {
+  inline-size: 150px;
+}
+
+.headerCell:nth-child(5),
+.cell:nth-child(5) {
+  inline-size: 86px;
+}
+
+.headerCell:nth-child(6),
+.cell:nth-child(6) {
+  inline-size: 142px;
+}
+
+.headerCell:nth-child(7),
+.cell:nth-child(7) {
+  inline-size: 122px;
+}
+
+.row {
+  cursor: pointer;
+}
+
+.cell {
+  padding-block: 11px;
+  padding-inline: 12px;
+  border-block-end: 1px solid var(--color-border-1);
+  background: var(--color-bg-2);
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  text-align: start;
+  vertical-align: top;
+}
+
+.row:last-child .cell {
+  border-block-end: 0;
+}
+
+.row:hover .cell {
+  background: var(--color-fill-1);
+}
+
+.row[aria-selected='true'] .cell {
+  background: var(--color-primary-light-1);
+}
+
+.cell:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--color-primary-6);
+  outline-offset: -3px;
+  box-shadow: var(--ring-focus);
+}
+
+.position,
+.shotCount,
+.durationFacts,
+.state {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.position {
+  color: var(--color-text-3);
+}
+
+.beatTitle {
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-weight: var(--fw-bold);
+}
+
+.lookMissing {
+  color: var(--color-text-3);
+  font-style: italic;
+}
+
+.shotCount {
+  white-space: nowrap;
+}
+
+.durationFacts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.actualDuration {
+  color: var(--text-primary);
+  font-weight: var(--fw-bold);
+}
+
+.targetDuration {
+  color: var(--color-text-3);
+  font-style: italic;
+}
+
+.pendingDuration {
+  color: var(--color-text-3);
+  font-weight: var(--fw-regular);
+}
+
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-2);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.stateDot {
+  inline-size: 6px;
+  block-size: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.state[data-state='ready'] {
+  color: var(--color-success-6);
+}
+
+.state[data-state='rendering'] {
+  color: var(--color-primary-6);
+}
+
+.state[data-state='duration_pending'],
+.state[data-state='seed_pending'],
+.state[data-state='part_done'] {
+  color: var(--color-warning-6);
+}
+
+.state[data-state='no_coverage'],
+.state[data-state='stale'] {
+  color: var(--color-danger-6);
+}
+
+.state[data-state='status_pending'],
+.state[data-state='draft'] {
+  color: var(--color-text-3);
+}
+
+.empty {
+  margin: 0;
+  color: var(--color-text-3);
+  font-family: var(--font-body);
+  font-size: 13px;
+}

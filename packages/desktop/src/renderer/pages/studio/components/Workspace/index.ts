@@ -30,8 +30,13 @@ export type {
   WorkspaceSelection,
 } from './useWorkspaceDrafts';
 export { projectWorkspace } from './workspaceProjection';
-export type { WorkspaceProjection, WorkspaceShotProjection } from './workspaceProjection';
+export type {
+  WorkspaceBeatDisplayState,
+  WorkspaceBeatProjection,
+  WorkspaceProjection,
+  WorkspaceShotProjection,
+} from './workspaceProjection';
 export { WorkspaceShell } from './WorkspaceShell';
 export type { WorkspaceShellProps } from './WorkspaceShell';
-export { WorkspaceControls } from './Views';
-export type { WorkspaceControlsProps, WorkspaceMutationCallbacks } from './Views';
+export { TableView, WorkspaceControls } from './Views';
+export type { TableViewProps, WorkspaceControlsProps, WorkspaceMutationCallbacks } from './Views';

@@ -371,7 +371,7 @@ const seedControlDrafts = (entries: Record<string, { baseValue: unknown; value: 
       projectId: 'project_1',
       sourceRevision: 3,
       entries,
-      selection: { selectedShotIds: [], anchorShotId: null },
+      selection: { selectedBeatId: null, selectedShotIds: [], anchorShotId: null },
     })
   );
 };
@@ -640,7 +640,7 @@ describe('WorkspaceControls', () => {
           'settings.name': { baseValue: 'Launch film', value: 'Renamed while locked' },
           'settings.aspectRatio': { baseValue: '16:9', value: '9:16' },
         },
-        selection: { selectedShotIds: [], anchorShotId: null },
+        selection: { selectedBeatId: null, selectedShotIds: [], anchorShotId: null },
       })
     );
     const mutations = workspaceCallbacks();

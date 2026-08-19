@@ -65,9 +65,34 @@ const expectedLeaves = [
   'views.table',
   'views.board',
   'views.cut',
-  'views.tablePending',
   'views.boardPending',
   'views.cutPending',
+  'table.label',
+  'table.columns.position',
+  'table.columns.beat',
+  'table.columns.action',
+  'table.columns.look',
+  'table.columns.shots',
+  'table.columns.length',
+  'table.columns.state',
+  'table.lookMissing',
+  'table.shotCount',
+  'table.shotCount_one',
+  'table.shotCount_other',
+  'table.targetDuration',
+  'table.targetPending',
+  'table.actualDuration',
+  'table.actualPending',
+  'table.empty',
+  'table.state.durationPending',
+  'table.state.noCoverage',
+  'table.state.seedPending',
+  'table.state.partDone',
+  'table.state.rendering',
+  'table.state.stale',
+  'table.state.statusPending',
+  'table.state.ready',
+  'table.state.draft',
   'library.title',
   'library.subtitle',
   'library.loading',
@@ -268,6 +293,7 @@ describe('Creative Studio workspace translations', () => {
     const leaves = flattenLeaves(englishWorkspace);
 
     expect(Object.keys(leaves).toSorted()).toEqual(expectedLeaves.toSorted());
+    expect(leaves['table.columns.position']).toBe('#');
     for (const [key, value] of Object.entries(leaves)) {
       expect(value.trim(), key).not.toBe('');
     }
@@ -279,7 +305,7 @@ describe('Creative Studio workspace translations', () => {
       .filter((key) => key.endsWith('_one'))
       .map((key) => key.slice(0, -'_one'.length));
 
-    expect(pluralBases).toHaveLength(9);
+    expect(pluralBases).toHaveLength(10);
     for (const base of pluralBases) {
       expect(leaves[`${base}_other`], `${base}_other`).toBeTypeOf('string');
       expect(placeholders(leaves[`${base}_one`]!)).toEqual(placeholders(leaves[`${base}_other`]!));

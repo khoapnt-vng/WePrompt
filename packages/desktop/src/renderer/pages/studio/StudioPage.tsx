@@ -176,6 +176,7 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
     projectId,
     projectRevision: project?.revision ?? 1,
     canonicalValues: canonicalDraftValues,
+    activeBeatIds: projection?.activeBeatIds ?? [],
     activeShotIds: projection?.activeShotIds ?? [],
     enabled: project !== null,
   });

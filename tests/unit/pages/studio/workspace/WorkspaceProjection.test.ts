@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import type {
   StudioAssetV2,
+  StudioCascadeProgressV2,
   StudioRendererJobV2,
   StudioRendererProjectV2,
   StudioRendererChainStatusV2,
@@ -19,7 +20,8 @@ const makeAsset = (
   shotId: string | null,
   mediaKind: StudioAssetV2['mediaKind'] = 'image',
   collection: StudioAssetV2['managedAsset']['collection'] = 'assets',
-  createdAt = '2026-08-19T00:00:00.000Z'
+  createdAt = '2026-08-19T00:00:00.000Z',
+  durationSeconds = 4
 ): StudioAssetV2 => ({
   id,
   projectId: 'project_1',
@@ -29,7 +31,7 @@ const makeAsset = (
   managedAsset: { collection, fileName: `${id}.bin` },
   byteSize: 10,
   sha256: 'a'.repeat(64),
-  ...(mediaKind === 'video' ? { durationSeconds: 4 } : {}),
+  ...(mediaKind === 'video' ? { durationSeconds } : {}),
   createdAt,
 });
 
@@ -151,6 +153,47 @@ const chainStatus = (revision = 3): StudioRendererChainStatusV2 => ({
   conditioningFailures: [{ dependentShotId: 'shot_2', reason: 'conditioning_failed', canRetry: true }],
 });
 
+const cleanWorkspaceStatus = (revision = 3): StudioRendererWorkspaceStatusV2 => ({
+  ...workspaceStatus(revision),
+  dirtyShots: [],
+  cascadeProgress: [],
+});
+
+const cleanChainStatus = (revision = 3): StudioRendererChainStatusV2 => ({
+  ...chainStatus(revision),
+  conditioningFailures: [],
+});
+
+const addSeed = (project: StudioRendererProjectV2, shotId: string, assetId = `seed_${shotId}`): void => {
+  const seed = makeAsset(assetId, shotId, 'image', 'imports');
+  project.assets[assetId] = seed;
+  project.shots[shotId]!.assetIds.push(assetId);
+};
+
+const addSelectedVideo = (
+  project: StudioRendererProjectV2,
+  shotId: string,
+  assetId = `take_${shotId}`,
+  durationSeconds = 4
+): void => {
+  const video = makeAsset(assetId, shotId, 'video', 'assets', '2026-08-19T00:00:00.000Z', durationSeconds);
+  project.assets[assetId] = video;
+  project.shots[shotId]!.assetIds.push(assetId);
+  project.shots[shotId]!.selectedTakeId = assetId;
+};
+
+const cascadeRow = (
+  waitingReason: StudioCascadeProgressV2['waitingReason'],
+  dependentShotId = 'shot_2'
+): StudioCascadeProgressV2 => ({
+  dependentShotId,
+  upstreamShotId: 'shot_1',
+  eligiblePrimaryAssetIds: [],
+  canRetryConditioningFrame: waitingReason === 'conditioning_failed',
+  canCancelWaiting: false,
+  waitingReason,
+});
+
 describe('projectWorkspace', () => {
   it('uses active orders only and projects Beat, Shot, and Take bin references separately', () => {
     const project = makeProject();
@@ -167,6 +210,7 @@ describe('projectWorkspace', () => {
 
     expect(result).toMatchObject({ workspaceStatusReady: true, chainStatusReady: true });
     expect(result.activeBeats.map((beat) => beat.id)).toEqual(['beat_1', 'beat_2']);
+    expect(result.activeBeatIds).toEqual(['beat_1', 'beat_2']);
     expect(result.activeShotIds).toEqual(['shot_1', 'shot_2', 'shot_3']);
     expect(result.bin.beats).toMatchObject([{ id: 'beat_parked', reason: 'lifted' }]);
     expect(result.bin.shots).toMatchObject([{ id: 'shot_parked', beatId: 'beat_parked', reason: 'lifted' }]);
@@ -248,6 +292,133 @@ describe('projectWorkspace', () => {
     expect(JSON.stringify(shot)).not.toContain('provider_safe');
   });
 
+  it('sums exact played duration from selected media and trims instead of planning duration', () => {
+    const project = makeProject();
+    project.beatOrder = ['beat_1'];
+    project.beats.beat_1!.shotOrder = ['shot_1'];
+    project.shots.shot_1!.durationSeconds = 8;
+    project.shots.shot_1!.trimInSeconds = 1;
+    project.shots.shot_1!.trimOutSeconds = 2;
+    addSeed(project, 'shot_1');
+    addSelectedVideo(project, 'shot_1', 'take_10s', 10);
+
+    const beat = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!;
+
+    expect(beat).toMatchObject({ targetSeconds: 8, actualSeconds: 7, displayState: 'ready' });
+    expect(beat.actualSeconds).not.toBe(project.shots.shot_1!.durationSeconds);
+
+    delete project.assets.take_10s;
+    expect(
+      projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!.actualSeconds
+    ).toBeNull();
+  });
+
+  it('keeps uncovered duration nullable and distinguishes pending duration from a slate target', () => {
+    const project = makeProject();
+    project.beatOrder = ['beat_1'];
+    project.beats.beat_1!.shotOrder = [];
+    project.beats.beat_1!.targetSeconds = null;
+
+    let beat = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!;
+    expect(beat).toMatchObject({ actualSeconds: null, targetSeconds: null, displayState: 'duration_pending' });
+
+    project.beats.beat_1!.targetSeconds = 8;
+    beat = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!;
+    expect(beat).toMatchObject({ actualSeconds: null, targetSeconds: 8, displayState: 'no_coverage' });
+  });
+
+  it('requires an effective seed for the first Shot and every later hard-cut segment head', () => {
+    const project = makeProject();
+    project.beatOrder = ['beat_1'];
+    project.shots.shot_1!.chainBreak = 'none';
+    project.shots.shot_2!.chainBreak = 'hard_cut';
+    addSeed(project, 'shot_1');
+
+    let beat = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!;
+    expect(beat.displayState).toBe('seed_pending');
+
+    addSeed(project, 'shot_2');
+    beat = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!;
+    expect(beat.displayState).toBe('draft');
+  });
+
+  it.each(['choose_seed', 'choose_take', 'conditioning_failed', 'dependency_failed', 'cancelled'] as const)(
+    'projects actionable or terminal cascade reason %s as part done ahead of an in-flight flag',
+    (waitingReason) => {
+      const project = makeProject();
+      project.beatOrder = ['beat_1'];
+      addSeed(project, 'shot_1');
+      project.shots.shot_2!.jobIds.push('job_waiting');
+      project.jobs.job_waiting = makeJob('job_waiting', 'shot_2', { status: 'waiting_for_conditioning' });
+      const status = cleanWorkspaceStatus();
+      status.cascadeProgress = [cascadeRow(waitingReason)];
+
+      expect(projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.displayState).toBe('part_done');
+    }
+  );
+
+  it('projects a revision-matched conditioning failure as part done ahead of an in-flight flag', () => {
+    const project = makeProject();
+    project.beatOrder = ['beat_1'];
+    addSeed(project, 'shot_1');
+    project.shots.shot_2!.jobIds.push('job_waiting');
+    project.jobs.job_waiting = makeJob('job_waiting', 'shot_2', { status: 'waiting_for_conditioning' });
+
+    expect(projectWorkspace(project, cleanWorkspaceStatus(), chainStatus()).activeBeats[0]!.displayState).toBe(
+      'part_done'
+    );
+  });
+
+  it.each(['upstream_running', 'conditioning_frame'] as const)(
+    'projects cascade reason %s as rendering',
+    (waitingReason) => {
+      const project = makeProject();
+      project.beatOrder = ['beat_1'];
+      addSeed(project, 'shot_1');
+      const status = cleanWorkspaceStatus();
+      status.cascadeProgress = [cascadeRow(waitingReason)];
+
+      expect(projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.displayState).toBe('rendering');
+    }
+  );
+
+  it('projects owned generation activity as rendering ahead of stale and seed-pending states', () => {
+    const project = makeProject();
+    project.beatOrder = ['beat_1'];
+    project.shots.shot_1!.jobIds.push('job_running');
+    project.jobs.job_running = makeJob('job_running', 'shot_1', { status: 'running' });
+    const status = cleanWorkspaceStatus();
+    status.dirtyShots = [{ shotId: 'shot_2', causes: ['continuity_stale'] }];
+
+    expect(projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.displayState).toBe('rendering');
+  });
+
+  it('projects matched dirty work as stale ahead of a missing segment seed', () => {
+    const project = makeProject();
+    project.beatOrder = ['beat_1'];
+    const status = cleanWorkspaceStatus();
+    status.dirtyShots = [{ shotId: 'shot_2', causes: ['generation_out_of_date'] }];
+
+    expect(projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.displayState).toBe('stale');
+  });
+
+  it('distinguishes status-pending, ready, and draft after higher-priority Beat states are clear', () => {
+    const project = makeProject();
+    project.beatOrder = ['beat_1'];
+    addSeed(project, 'shot_1');
+
+    expect(projectWorkspace(project, cleanWorkspaceStatus(), null).activeBeats[0]!.displayState).toBe('status_pending');
+    expect(projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!.displayState).toBe(
+      'draft'
+    );
+
+    addSelectedVideo(project, 'shot_1');
+    addSelectedVideo(project, 'shot_2');
+    expect(projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!.displayState).toBe(
+      'ready'
+    );
+  });
+
   it('fails closed on stale status and derives request-shape lock only from matched blockers', () => {
     const project = makeProject();
     const matched = workspaceStatus();
@@ -291,7 +462,13 @@ describe('useWorkspaceDrafts', () => {
   it('preserves intentional null values and a true null base through conflict detection', async () => {
     let canonical = { target: 'asset_1' as string | null, nullableBase: null as string | null };
     const view = renderHook(() =>
-      useWorkspaceDrafts({ projectId: 'project_1', projectRevision: 3, canonicalValues: canonical, activeShotIds: [] })
+      useWorkspaceDrafts({
+        projectId: 'project_1',
+        projectRevision: 3,
+        canonicalValues: canonical,
+        activeBeatIds: [],
+        activeShotIds: [],
+      })
     );
     act(() => {
       view.result.current.setValue('target', null);
@@ -309,12 +486,14 @@ describe('useWorkspaceDrafts', () => {
       projectId: 'project_1',
       projectRevision: 3,
       canonicalValues: { name: 'A', 'gate.choices': '{}' },
+      activeBeatIds: ['beat_1'],
       activeShotIds: ['shot_1'],
     };
     const first = renderHook(() => useWorkspaceDrafts(input));
     act(() => {
       first.result.current.setValue('name', 'Draft A');
       first.result.current.setValue('gate.choices', '{"shot_1:seed_still":{"generationCount":2}}');
+      first.result.current.selectBeat('beat_1');
       first.result.current.selectShot('shot_1', 'replace');
     });
     await waitFor(() => expect(window.sessionStorage.getItem(storageKey)).toContain('Draft A'));
@@ -323,7 +502,63 @@ describe('useWorkspaceDrafts', () => {
     first.unmount();
     const second = renderHook(() => useWorkspaceDrafts(input));
     expect(second.result.current.value('name')).toBe('Draft A');
+    expect(second.result.current.selection.selectedBeatId).toBe('beat_1');
     expect(second.result.current.selection.selectedShotIds).toEqual(['shot_1']);
+  });
+
+  it('persists Beat-only selection without counting it as an unsaved draft', async () => {
+    const input = {
+      projectId: 'project_1',
+      projectRevision: 3,
+      canonicalValues: {},
+      activeBeatIds: ['beat_1'],
+      activeShotIds: [] as string[],
+    };
+    const first = renderHook(() => useWorkspaceDrafts(input));
+    act(() => first.result.current.selectBeat('beat_1'));
+    await waitFor(() => expect(window.sessionStorage.getItem(storageKey)).toContain('"selectedBeatId":"beat_1"'));
+    expect(first.result.current.dirtyCount).toBe(0);
+
+    first.unmount();
+    const second = renderHook(() => useWorkspaceDrafts(input));
+    expect(second.result.current.selection.selectedBeatId).toBe('beat_1');
+    act(() => second.result.current.selectBeat(null));
+    await waitFor(() => expect(window.sessionStorage.getItem(storageKey)).toBeNull());
+  });
+
+  it('filters Beat identity independently without changing Shot selection', async () => {
+    let activeBeatIds = ['beat_1', 'beat_2'];
+    const view = renderHook(() =>
+      useWorkspaceDrafts({
+        projectId: 'project_1',
+        projectRevision: 3,
+        canonicalValues: {},
+        activeBeatIds,
+        activeShotIds: ['shot_1', 'shot_2'],
+      })
+    );
+    act(() => {
+      view.result.current.selectShot('shot_1', 'replace');
+      view.result.current.selectBeat('beat_2');
+    });
+    expect(view.result.current.selection).toEqual({
+      selectedBeatId: 'beat_2',
+      selectedShotIds: ['shot_1'],
+      anchorShotId: 'shot_1',
+    });
+
+    act(() => view.result.current.clearSelection());
+    expect(view.result.current.selection).toEqual({
+      selectedBeatId: 'beat_2',
+      selectedShotIds: [],
+      anchorShotId: null,
+    });
+    act(() => view.result.current.selectShot('shot_2', 'replace'));
+
+    activeBeatIds = ['beat_1'];
+    view.rerender();
+    await waitFor(() => expect(view.result.current.selection.selectedBeatId).toBeNull());
+    expect(view.result.current.selection.selectedShotIds).toEqual(['shot_2']);
   });
 
   it('rejects stored prototype keys, deduplicates active order, and caps runtime selection', () => {
@@ -346,15 +581,23 @@ describe('useWorkspaceDrafts', () => {
         projectId: 'project_1',
         projectRevision: 3,
         canonicalValues: { safe: 'A' },
+        activeBeatIds: ['beat_1'],
         activeShotIds: ['shot_1', 'shot_2'],
       })
     );
     expect(Object.keys(decoded.result.current.entries)).toEqual(['safe']);
+    expect(decoded.result.current.selection.selectedBeatId).toBeNull();
     expect(decoded.result.current.selection.selectedShotIds).toEqual(['shot_1', 'shot_2']);
 
     const shots = Array.from({ length: 300 }, (_, index) => `range_${index}`);
     const capped = renderHook(() =>
-      useWorkspaceDrafts({ projectId: 'project_2', projectRevision: 1, canonicalValues: {}, activeShotIds: shots })
+      useWorkspaceDrafts({
+        projectId: 'project_2',
+        projectRevision: 1,
+        canonicalValues: {},
+        activeBeatIds: [],
+        activeShotIds: shots,
+      })
     );
     act(() => capped.result.current.selectShot(shots[0]!, 'replace'));
     act(() => capped.result.current.selectShot(shots[299]!, 'range'));

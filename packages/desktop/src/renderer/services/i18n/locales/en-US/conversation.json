@@ -1442,9 +1442,40 @@
         "table": "Table",
         "board": "Board",
         "cut": "Cut",
-        "tablePending": "Beat and shot authoring arrives in the next workspace task.",
         "boardPending": "Storyboard planning arrives in the next workspace task.",
         "cutPending": "Cut editing arrives in the next workspace task."
+      },
+      "table": {
+        "label": "Beat table",
+        "columns": {
+          "position": "#",
+          "beat": "Beat",
+          "action": "Action",
+          "look": "Look",
+          "shots": "Shots",
+          "length": "Length",
+          "state": "State"
+        },
+        "lookMissing": "No look written yet",
+        "shotCount": "{{count}} shots",
+        "shotCount_one": "{{count}} shot",
+        "shotCount_other": "{{count}} shots",
+        "targetDuration": "~{{seconds}}s target",
+        "targetPending": "No target",
+        "actualDuration": "{{seconds}}s actual",
+        "actualPending": "No actual",
+        "empty": "No active beats yet.",
+        "state": {
+          "durationPending": "Duration pending",
+          "noCoverage": "No coverage",
+          "seedPending": "Seed pending",
+          "partDone": "Part done",
+          "rendering": "Rendering",
+          "stale": "Stale",
+          "statusPending": "Status pending",
+          "ready": "Ready",
+          "draft": "Draft"
+        }
       },
       "library": {
         "title": "Creative Studio",

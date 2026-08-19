@@ -124,7 +124,10 @@ export const studioPlanningShotBoundariesV2 = (
 };
 
 /** Returns one active Shot's played duration, using selected source media when it exists. */
-export const studioShotPlayedDurationV2 = (project: StudioProjectV2, shot: StudioShot): number | null => {
+export const studioShotPlayedDurationV2 = (
+  project: Pick<StudioProjectV2, 'id' | 'assets'>,
+  shot: StudioShot
+): number | null => {
   if (shot.selectedTakeId === null) {
     return shot.trimInSeconds === null &&
       shot.trimOutSeconds === null &&

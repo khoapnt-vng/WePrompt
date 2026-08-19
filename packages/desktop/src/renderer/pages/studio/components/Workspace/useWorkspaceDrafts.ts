@@ -28,6 +28,7 @@ export type WorkspaceDraftEntry = {
 };
 
 export type WorkspaceSelection = {
+  selectedBeatId: string | null;
   selectedShotIds: string[];
   anchorShotId: string | null;
 };
@@ -46,6 +47,7 @@ export type UseWorkspaceDraftsInput = {
   projectId: string;
   projectRevision: number;
   canonicalValues: Readonly<Record<string, WorkspaceDraftValue>>;
+  activeBeatIds?: readonly string[];
   activeShotIds: readonly string[];
   storage?: Storage;
   enabled?: boolean;
@@ -62,6 +64,7 @@ export type UseWorkspaceDraftsResult = {
   reset: (key: string) => void;
   resetAll: () => void;
   selection: WorkspaceSelection;
+  selectBeat: (beatId: string | null) => void;
   selectShot: (shotId: string, intent?: WorkspaceSelectionIntent) => void;
   clearSelection: () => void;
 };
@@ -100,12 +103,13 @@ const emptyDrafts = (projectId: string, sourceRevision: number): PersistedWorksp
   projectId,
   sourceRevision,
   entries: emptyEntries(),
-  selection: { selectedShotIds: [], anchorShotId: null },
+  selection: { selectedBeatId: null, selectedShotIds: [], anchorShotId: null },
 });
 
 const readDrafts = (
   projectId: string,
   projectRevision: number,
+  activeBeatIds: readonly string[],
   activeShotIds: readonly string[],
   storage?: Storage
 ): PersistedWorkspaceDrafts => {
@@ -137,15 +141,18 @@ const readDrafts = (
       }
       entries[key] = { baseValue: candidate.baseValue, value: candidate.value };
     }
-    const activeOrder = [...new Set(activeShotIds)];
-    const active = new Set(activeOrder);
+    const activeBeatOrder = [...new Set(activeBeatIds)];
+    const activeBeats = new Set(activeBeatOrder);
+    const activeShotOrder = [...new Set(activeShotIds)];
+    const activeShots = new Set(activeShotOrder);
     const requestedSelection = Array.isArray(decoded.selection?.selectedShotIds)
       ? decoded.selection.selectedShotIds
       : [];
     const requested = new Set(
-      requestedSelection.filter((shotId): shotId is string => typeof shotId === 'string' && active.has(shotId))
+      requestedSelection.filter((shotId): shotId is string => typeof shotId === 'string' && activeShots.has(shotId))
     );
-    const selectedShotIds = activeOrder.filter((shotId) => requested.has(shotId)).slice(0, MAX_SELECTION);
+    const selectedShotIds = activeShotOrder.filter((shotId) => requested.has(shotId)).slice(0, MAX_SELECTION);
+    const requestedBeatId = decoded.selection?.selectedBeatId;
     const requestedAnchor = decoded.selection?.anchorShotId;
     return {
       version: 2,
@@ -153,8 +160,10 @@ const readDrafts = (
       sourceRevision: decoded.sourceRevision,
       entries,
       selection: {
+        selectedBeatId:
+          typeof requestedBeatId === 'string' && activeBeats.has(requestedBeatId) ? requestedBeatId : null,
         selectedShotIds,
-        anchorShotId: typeof requestedAnchor === 'string' && active.has(requestedAnchor) ? requestedAnchor : null,
+        anchorShotId: typeof requestedAnchor === 'string' && activeShots.has(requestedAnchor) ? requestedAnchor : null,
       },
     };
   } catch {
@@ -166,7 +175,11 @@ const writeDrafts = (drafts: PersistedWorkspaceDrafts, storage?: Storage): void 
   try {
     const target = resolveStorage(storage);
     if (target === null) return;
-    if (Object.keys(drafts.entries).length === 0 && drafts.selection.selectedShotIds.length === 0) {
+    if (
+      Object.keys(drafts.entries).length === 0 &&
+      drafts.selection.selectedBeatId === null &&
+      drafts.selection.selectedShotIds.length === 0
+    ) {
       target.removeItem(storageKey(drafts.projectId));
       return;
     }
@@ -185,13 +198,20 @@ export const updateWorkspaceSelection = (input: {
   const activeShotIds = [...new Set(input.activeShotIds)];
   const targetIndex = activeShotIds.indexOf(input.shotId);
   if (targetIndex < 0) return input.selection;
-  if (input.intent === 'replace') return { selectedShotIds: [input.shotId], anchorShotId: input.shotId };
+  if (input.intent === 'replace') {
+    return {
+      selectedBeatId: input.selection.selectedBeatId,
+      selectedShotIds: [input.shotId],
+      anchorShotId: input.shotId,
+    };
+  }
   if (input.intent === 'range' && input.selection.anchorShotId !== null) {
     const anchorIndex = activeShotIds.indexOf(input.selection.anchorShotId);
     if (anchorIndex >= 0) {
       const start = Math.min(anchorIndex, targetIndex);
       const end = Math.max(anchorIndex, targetIndex);
       return {
+        selectedBeatId: input.selection.selectedBeatId,
         selectedShotIds: activeShotIds.slice(start, Math.min(end + 1, start + MAX_SELECTION)),
         anchorShotId: input.selection.anchorShotId,
       };
@@ -201,6 +221,7 @@ export const updateWorkspaceSelection = (input: {
   if (selected.has(input.shotId)) selected.delete(input.shotId);
   else if (selected.size < MAX_SELECTION) selected.add(input.shotId);
   return {
+    selectedBeatId: input.selection.selectedBeatId,
     selectedShotIds: activeShotIds.filter((shotId) => selected.has(shotId)).slice(0, MAX_SELECTION),
     anchorShotId: input.shotId,
   };
@@ -210,19 +231,23 @@ export const useWorkspaceDrafts = ({
   projectId,
   projectRevision,
   canonicalValues,
+  activeBeatIds = [],
   activeShotIds,
   storage,
   enabled = true,
 }: UseWorkspaceDraftsInput): UseWorkspaceDraftsResult => {
   const canonicalFingerprint = JSON.stringify(canonicalValues);
-  const activeFingerprint = activeShotIds.join('\0');
+  const activeBeatFingerprint = activeBeatIds.join('\0');
+  const activeShotFingerprint = activeShotIds.join('\0');
   const [drafts, setDrafts] = useState<PersistedWorkspaceDrafts>(() =>
-    enabled ? readDrafts(projectId, projectRevision, activeShotIds, storage) : emptyDrafts(projectId, projectRevision)
+    enabled
+      ? readDrafts(projectId, projectRevision, activeBeatIds, activeShotIds, storage)
+      : emptyDrafts(projectId, projectRevision)
   );
 
   useEffect(() => {
     if (!enabled) return;
-    setDrafts(readDrafts(projectId, projectRevision, activeShotIds, storage));
+    setDrafts(readDrafts(projectId, projectRevision, activeBeatIds, activeShotIds, storage));
   }, [enabled, projectId, storage]);
 
   useEffect(() => {
@@ -238,13 +263,18 @@ export const useWorkspaceDrafts = ({
         if (entry.baseValue !== canonical) hasConflict = true;
         entries[key] = entry.baseValue === canonical ? entry : { ...entry };
       }
-      const active = new Set(activeShotIds);
+      const activeBeats = new Set(activeBeatIds);
+      const activeShots = new Set(activeShotIds);
       const selection = {
+        selectedBeatId:
+          current.selection.selectedBeatId !== null && activeBeats.has(current.selection.selectedBeatId)
+            ? current.selection.selectedBeatId
+            : null,
         selectedShotIds: [...new Set(current.selection.selectedShotIds)]
-          .filter((shotId) => active.has(shotId))
+          .filter((shotId) => activeShots.has(shotId))
           .slice(0, MAX_SELECTION),
         anchorShotId:
-          current.selection.anchorShotId !== null && active.has(current.selection.anchorShotId)
+          current.selection.anchorShotId !== null && activeShots.has(current.selection.anchorShotId)
             ? current.selection.anchorShotId
             : null,
       };
@@ -255,7 +285,7 @@ export const useWorkspaceDrafts = ({
         selection,
       };
     });
-  }, [activeFingerprint, canonicalFingerprint, enabled, projectId, projectRevision]);
+  }, [activeBeatFingerprint, activeShotFingerprint, canonicalFingerprint, enabled, projectId, projectRevision]);
 
   useEffect(() => {
     if (enabled) writeDrafts(drafts, storage);
@@ -319,6 +349,17 @@ export const useWorkspaceDrafts = ({
     [canonicalFingerprint, drafts.entries]
   );
 
+  const selectBeat = useCallback(
+    (beatId: string | null): void => {
+      if (beatId !== null && !activeBeatIds.includes(beatId)) return;
+      setDrafts((current) => ({
+        ...current,
+        selection: { ...current.selection, selectedBeatId: beatId },
+      }));
+    },
+    [activeBeatFingerprint]
+  );
+
   const selectShot = useCallback(
     (shotId: string, intent: WorkspaceSelectionIntent = 'toggle'): void => {
       setDrafts((current) => ({
@@ -326,11 +367,14 @@ export const useWorkspaceDrafts = ({
         selection: updateWorkspaceSelection({ selection: current.selection, activeShotIds, shotId, intent }),
       }));
     },
-    [activeFingerprint]
+    [activeShotFingerprint]
   );
 
   const clearSelection = useCallback((): void => {
-    setDrafts((current) => ({ ...current, selection: { selectedShotIds: [], anchorShotId: null } }));
+    setDrafts((current) => ({
+      ...current,
+      selection: { ...current.selection, selectedShotIds: [], anchorShotId: null },
+    }));
   }, []);
 
   return {
@@ -344,6 +388,7 @@ export const useWorkspaceDrafts = ({
     reset,
     resetAll,
     selection: drafts.selection,
+    selectBeat,
     selectShot,
     clearSelection,
   };

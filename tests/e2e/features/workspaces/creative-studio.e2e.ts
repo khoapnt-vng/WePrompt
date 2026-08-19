@@ -43,6 +43,18 @@ const readStudioE2EProviderCallCounts = async (userDataDirectory: string): Promi
     '.studio-raw-output-path-sentinel',
     'provider-call-counts.json'
   );
+  let stats;
+  try {
+    stats = await lstat(file);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { validateConnection: 0, submit: 0, poll: 0, cancel: 0 };
+    }
+    throw error;
+  }
+  if (!stats.isFile() || stats.isSymbolicLink()) {
+    throw new Error('Creative Studio E2E provider call counts were unavailable');
+  }
   const parsed: unknown = JSON.parse(await readFile(file, 'utf8'));
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new Error('Creative Studio E2E provider call counts were unavailable');
@@ -183,6 +195,97 @@ test.describe('Creative Studio workspace', () => {
     // Merely loading, navigating, and restoring drafts cannot open or cross the paid boundary.
     await expect(page.locator('[data-testid="studio-spend-gate"]')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /prepare estimate|confirm .*generation/i })).toHaveCount(0);
+  });
+
+  test('traverses the 24-Beat Table without mutating the project or paid work', async ({ electronApp, page }) => {
+    const projectBrief = `A 24-beat keyboard story ${Date.now()}.`;
+
+    await navigateTo(page, ROUTES.studio);
+    const workspace = page.locator(workspaceSelector);
+    await workspace.getByLabel('What do you want to make?').fill(projectBrief);
+    await workspace.getByRole('button', { name: 'Create project' }).click();
+    await expect(page).toHaveURL(/#\/studio\/[^/]+\/table$/);
+
+    const projectId = projectIdFromStudioUrl(page);
+    const initial = await readStudioProject(page, projectId);
+    const beatIds = Array.from({ length: 24 }, (_, index) => `beat_table_${String(index + 1).padStart(2, '0')}`);
+    const authored = await invokeStudioBridge<StudioRendererProjectCommitResultV2>(page, 'apply-authoring-batch', {
+      projectId,
+      expectedRevision: initial.revision,
+      operations: beatIds.map((beatId, index) => ({
+        kind: 'add_beat',
+        beatId,
+        beat: {
+          title: `Table beat ${String(index + 1).padStart(2, '0')}`,
+          action: `Show story moment ${index + 1}.`,
+          look: index % 3 === 0 ? '' : `Visual direction ${index + 1}.`,
+          targetSeconds: index % 2 === 0 ? null : 7,
+        },
+        beforeBeatId: null,
+      })),
+    });
+    expect(authored.createdBeatIds).toEqual(beatIds);
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    const grid = page.getByRole('grid', { name: 'Beat table' });
+    await expect(grid).toBeVisible();
+    await expect(grid.getByRole('columnheader')).toHaveCount(7);
+    await expect(grid.getByRole('row')).toHaveCount(25);
+    const rows = grid.getByRole('row');
+    await expect(rows.nth(1).getByRole('gridcell')).toHaveCount(7);
+
+    const firstCell = rows.nth(1).getByRole('gridcell').first();
+    await firstCell.focus();
+    await firstCell.press('ArrowDown');
+    const secondCell = rows.nth(2).getByRole('gridcell').first();
+    await expect(secondCell).toBeFocused();
+    const focusPaint = await secondCell.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        outlineStyle: style.outlineStyle,
+        outlineWidth: style.outlineWidth,
+        boxShadow: style.boxShadow,
+      };
+    });
+    expect(
+      (focusPaint.outlineStyle !== 'none' && focusPaint.outlineWidth !== '0px') || focusPaint.boxShadow !== 'none'
+    ).toBe(true);
+    for (let index = 2; index < 24; index += 1) {
+      // eslint-disable-next-line no-await-in-loop -- traversal observes the focus produced by each prior key
+      await page.keyboard.press('ArrowDown');
+    }
+    const lastCell = rows.nth(24).getByRole('gridcell').first();
+    await expect(lastCell).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(lastCell).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(rows.nth(24)).toHaveAttribute('aria-selected', 'true');
+
+    await expect(rows.nth(1)).toContainText('Duration pending');
+    await expect(rows.nth(1)).not.toContainText(/\b0s\b/);
+    await expect(rows.nth(2)).toContainText('No coverage');
+    await expect(rows.nth(2)).toContainText('~7s target');
+
+    const beforeNavigation = await readStudioProject(page, projectId);
+    const userDataDirectory = await electronApp.evaluate(({ app }) => app.getPath('userData'));
+    const providerCallsBeforeNavigation =
+      process.env.AIONUI_E2E_STUDIO_FAKE === '1' ? await readStudioE2EProviderCallCounts(userDataDirectory) : null;
+    const navigation = page.locator(viewNavigationSelector);
+    await navigation.getByRole('link', { name: 'Board' }).click();
+    await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'board');
+    await navigation.getByRole('link', { name: 'Cut' }).click();
+    await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'cut');
+    await navigation.getByRole('link', { name: 'Table' }).click();
+    await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'table');
+    await expect(page.getByRole('grid', { name: 'Beat table' }).getByRole('row').nth(24)).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+
+    expect(await readStudioProject(page, projectId)).toEqual(beforeNavigation);
+    if (providerCallsBeforeNavigation !== null) {
+      expect(await readStudioE2EProviderCallCounts(userDataDirectory)).toEqual(providerCallsBeforeNavigation);
+    }
   });
 
   test('lifts and restores a rendered terminal Shot without another provider call', async ({ electronApp, page }) => {

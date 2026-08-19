@@ -19,8 +19,20 @@ import type {
   StudioCascadeProgressV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { isCanonicalStudioGeneratedTakeV2 } from '@/common/types/project/creativeStudioCanonicalTake';
+import { studioShotPlayedDurationV2 } from '@/common/types/project/creativeStudioProjectSummary';
 
 export type WorkspaceShotDisplayState = 'draft' | 'seed_ready' | 'takes_available' | 'selected_take';
+
+export type WorkspaceBeatDisplayState =
+  | 'duration_pending'
+  | 'no_coverage'
+  | 'part_done'
+  | 'rendering'
+  | 'stale'
+  | 'seed_pending'
+  | 'status_pending'
+  | 'ready'
+  | 'draft';
 
 export type WorkspaceShotProjection = {
   id: string;
@@ -45,6 +57,8 @@ export type WorkspaceBeatProjection = {
   action: string;
   look: string;
   targetSeconds: number | null;
+  actualSeconds: number | null;
+  displayState: WorkspaceBeatDisplayState;
   shots: WorkspaceShotProjection[];
 };
 
@@ -73,6 +87,7 @@ export type WorkspaceProjection = {
   projectId: string;
   projectRevision: number;
   activeBeats: WorkspaceBeatProjection[];
+  activeBeatIds: string[];
   activeShotIds: string[];
   coverageGapBeatIds: string[];
   workspaceStatusReady: boolean;
@@ -281,6 +296,77 @@ const validShot = (project: StudioRendererProjectV2, shotId: string): StudioShot
   return shot?.id === shotId ? shot : null;
 };
 
+const projectBeatActualSeconds = (project: StudioRendererProjectV2, beat: StudioBeat): number | null => {
+  if (beat.shotOrder.length === 0) return null;
+  let actualSeconds = 0;
+  for (const shotId of beat.shotOrder) {
+    const shot = validShot(project, shotId);
+    if (shot === null) return null;
+    const playedSeconds = studioShotPlayedDurationV2(project, shot);
+    if (playedSeconds === null) return null;
+    const nextActualSeconds = actualSeconds + playedSeconds;
+    if (!Number.isFinite(nextActualSeconds) || nextActualSeconds < 0 || nextActualSeconds > Number.MAX_SAFE_INTEGER) {
+      return null;
+    }
+    actualSeconds = nextActualSeconds;
+  }
+  return actualSeconds;
+};
+
+const PART_DONE_CASCADE_REASONS: ReadonlySet<StudioCascadeProgressV2['waitingReason']> = new Set([
+  'choose_seed',
+  'choose_take',
+  'conditioning_failed',
+  'dependency_failed',
+  'cancelled',
+]);
+
+const RENDERING_CASCADE_REASONS: ReadonlySet<StudioCascadeProgressV2['waitingReason']> = new Set([
+  'upstream_running',
+  'conditioning_frame',
+]);
+
+const projectBeatDisplayState = (input: {
+  beat: StudioBeat;
+  shots: readonly WorkspaceShotProjection[];
+  workspaceStatusReady: boolean;
+  chainStatusReady: boolean;
+  dirtyShotIds: ReadonlySet<string>;
+  partDoneShotIds: ReadonlySet<string>;
+  renderingShotIds: ReadonlySet<string>;
+}): WorkspaceBeatDisplayState => {
+  const { beat, shots } = input;
+  if (beat.shotOrder.length === 0) return beat.targetSeconds === null ? 'duration_pending' : 'no_coverage';
+
+  const activeShotIds = new Set(shots.map((shot) => shot.id));
+  if (shots.some((shot) => input.partDoneShotIds.has(shot.id))) return 'part_done';
+  if (
+    shots.some(
+      (shot) => input.renderingShotIds.has(shot.id) || shot.videoGenerationInFlight || shot.seedGenerationInFlight
+    )
+  ) {
+    return 'rendering';
+  }
+  if (shots.some((shot) => input.dirtyShotIds.has(shot.id))) return 'stale';
+
+  const shotById = new Map(shots.map((shot) => [shot.id, shot]));
+  if (
+    beat.shotOrder.some((shotId, index) => {
+      const shot = shotById.get(shotId);
+      return (
+        shot !== undefined &&
+        activeShotIds.has(shotId) &&
+        (index === 0 || shot.chainBreak === 'hard_cut') &&
+        !shot.hasEffectiveSeed
+      );
+    })
+  ) {
+    return 'seed_pending';
+  }
+  if (!input.workspaceStatusReady || !input.chainStatusReady) return 'status_pending';
+  return shots.every((shot) => shot.displayState === 'selected_take') ? 'ready' : 'draft';
+};
+
 const revisionMatches = (
   project: StudioRendererProjectV2,
   snapshot: { projectId: string; projectRevision: number } | null
@@ -295,10 +381,27 @@ export const projectWorkspace = (
   workspaceStatus: StudioRendererWorkspaceStatusV2 | null,
   chainStatus: StudioRendererChainStatusV2 | null
 ): WorkspaceProjection => {
+  const matchedWorkspaceStatus = revisionMatches(project, workspaceStatus) ? workspaceStatus : null;
+  const matchedChainStatus = revisionMatches(project, chainStatus) ? chainStatus : null;
+  const dirtyShotIds = new Set(matchedWorkspaceStatus?.dirtyShots.map((row) => row.shotId) ?? []);
+  const partDoneShotIds = new Set<string>(
+    matchedWorkspaceStatus?.cascadeProgress
+      .filter((row) => PART_DONE_CASCADE_REASONS.has(row.waitingReason))
+      .map((row) => row.dependentShotId) ?? []
+  );
+  for (const row of matchedChainStatus?.conditioningFailures ?? []) partDoneShotIds.add(row.dependentShotId);
+  const renderingShotIds = new Set(
+    matchedWorkspaceStatus?.cascadeProgress
+      .filter((row) => RENDERING_CASCADE_REASONS.has(row.waitingReason))
+      .map((row) => row.dependentShotId) ?? []
+  );
+
+  const activeBeatIds: string[] = [];
   const activeShotIds: string[] = [];
   const activeBeats = project.beatOrder.flatMap((beatId) => {
     const beat = validBeat(project, beatId);
     if (beat === null) return [];
+    activeBeatIds.push(beat.id);
     const shots = beat.shotOrder.flatMap((shotId) => {
       const shot = validShot(project, shotId);
       if (shot === null) return [];
@@ -312,6 +415,16 @@ export const projectWorkspace = (
         action: beat.action,
         look: beat.look,
         targetSeconds: beat.targetSeconds,
+        actualSeconds: projectBeatActualSeconds(project, beat),
+        displayState: projectBeatDisplayState({
+          beat,
+          shots,
+          workspaceStatusReady: matchedWorkspaceStatus !== null,
+          chainStatusReady: matchedChainStatus !== null,
+          dirtyShotIds,
+          partDoneShotIds,
+          renderingShotIds,
+        }),
         shots,
       },
     ];
@@ -370,12 +483,11 @@ export const projectWorkspace = (
     });
   }
 
-  const matchedWorkspaceStatus = revisionMatches(project, workspaceStatus) ? workspaceStatus : null;
-  const matchedChainStatus = revisionMatches(project, chainStatus) ? chainStatus : null;
   return {
     projectId: project.id,
     projectRevision: project.revision,
     activeBeats,
+    activeBeatIds,
     activeShotIds,
     coverageGapBeatIds: activeBeats.filter((beat) => beat.shots.length === 0).map((beat) => beat.id),
     workspaceStatusReady: matchedWorkspaceStatus !== null,

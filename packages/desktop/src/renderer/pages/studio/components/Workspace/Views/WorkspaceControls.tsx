@@ -15,6 +15,7 @@ import {
 } from '@/common/types/project/creativeStudioTypes';
 import { majorUnitsToMinorUnits, selectionGateDraft } from '../spendGate';
 import { hasGenerationAffectingWorkspaceDrafts, type WorkspaceDraftValue } from '../useWorkspaceDrafts';
+import { TableView } from './Table';
 import type { WorkspaceControlsProps } from './viewTypes';
 import styles from './WorkspaceControls.module.css';
 
@@ -260,6 +261,13 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
 
   return (
     <div className={styles.root} data-studio-workspace-controls data-active-view={activeView}>
+      {activeView === 'table' ? (
+        <TableView
+          beats={projection.activeBeats}
+          selectedBeatId={drafts.selection.selectedBeatId}
+          onSelectBeat={drafts.selectBeat}
+        />
+      ) : null}
       {errorMessageKey !== null || localErrorKey !== null ? (
         <Alert type='warning' content={t(localErrorKey ?? errorMessageKey!)} />
       ) : null}

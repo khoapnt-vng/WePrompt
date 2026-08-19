@@ -298,7 +298,7 @@ const seedWorkspaceDrafts = (entries: Record<string, { baseValue: unknown; value
       projectId: 'project_1',
       sourceRevision: 3,
       entries,
-      selection: { selectedShotIds: [], anchorShotId: null },
+      selection: { selectedBeatId: null, selectedShotIds: [], anchorShotId: null },
     })
   );
 };
@@ -393,6 +393,7 @@ describe('StudioPage schema-2 cutover', () => {
   });
 
   it('keeps drafts and native snapshot counts stable across Table, Board, and Cut navigation', async () => {
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: projectWithHandoffShot() }));
     renderStudio();
     const name = await screen.findByLabelText('conversation.creativeStudio.workspace.controls.name');
     const shell = document.querySelector('[data-studio-workspace-shell]');
@@ -416,10 +417,22 @@ describe('StudioPage schema-2 cutover', () => {
       edits: mocks.bridge.editProject.invoke.mock.calls.length,
       authoring: mocks.bridge.applyAuthoringBatch.invoke.mock.calls.length,
       rules: mocks.bridge.setRules.invoke.mock.calls.length,
+      acceptProposal: mocks.bridge.acceptProposal.invoke.mock.calls.length,
+      rejectProposal: mocks.bridge.rejectProposal.invoke.mock.calls.length,
+      decideReference: mocks.bridge.decideReferenceRequest.invoke.mock.calls.length,
+      dismissHandoff: mocks.bridge.dismissReferenceGenerationHandoff.invoke.mock.calls.length,
+      undo: mocks.bridge.undoLast.invoke.mock.calls.length,
+      retryConditioning: mocks.bridge.retryConditioningFrame.invoke.mock.calls.length,
+      cancelWaiting: mocks.bridge.cancelWaitingCascade.invoke.mock.calls.length,
+      selectTake: mocks.bridge.selectTake.invoke.mock.calls.length,
       prepare: mocks.bridge.prepareSubmission.invoke.mock.calls.length,
       confirm: mocks.bridge.confirmSubmission.invoke.mock.calls.length,
     };
     fireEvent.change(name, { target: { value: 'Navigation-only local draft' } });
+    const table = screen.getByRole('grid', { name: 'conversation.creativeStudio.workspace.table.label' });
+    const selectedRow = within(table).getAllByRole('row')[1]!;
+    fireEvent.click(within(selectedRow).getAllByRole('gridcell')[1]!);
+    expect(selectedRow).toHaveAttribute('aria-selected', 'true');
 
     fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.board' }));
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/board'));
@@ -433,6 +446,17 @@ describe('StudioPage schema-2 cutover', () => {
       'Navigation-only local draft'
     );
     expect(document.querySelector('[data-studio-director-conversation-owner]')).toBe(conversationOwner);
+    fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.table' }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table'));
+    expect(screen.getByLabelText('conversation.creativeStudio.workspace.controls.name')).toHaveValue(
+      'Navigation-only local draft'
+    );
+    expect(document.querySelector('[data-studio-director-conversation-owner]')).toBe(conversationOwner);
+    expect(
+      within(screen.getByRole('grid', { name: 'conversation.creativeStudio.workspace.table.label' })).getAllByRole(
+        'row'
+      )[1]
+    ).toHaveAttribute('aria-selected', 'true');
 
     expect({
       project: mocks.bridge.getProject.invoke.mock.calls.length,
@@ -445,6 +469,14 @@ describe('StudioPage schema-2 cutover', () => {
       edits: mocks.bridge.editProject.invoke.mock.calls.length,
       authoring: mocks.bridge.applyAuthoringBatch.invoke.mock.calls.length,
       rules: mocks.bridge.setRules.invoke.mock.calls.length,
+      acceptProposal: mocks.bridge.acceptProposal.invoke.mock.calls.length,
+      rejectProposal: mocks.bridge.rejectProposal.invoke.mock.calls.length,
+      decideReference: mocks.bridge.decideReferenceRequest.invoke.mock.calls.length,
+      dismissHandoff: mocks.bridge.dismissReferenceGenerationHandoff.invoke.mock.calls.length,
+      undo: mocks.bridge.undoLast.invoke.mock.calls.length,
+      retryConditioning: mocks.bridge.retryConditioningFrame.invoke.mock.calls.length,
+      cancelWaiting: mocks.bridge.cancelWaitingCascade.invoke.mock.calls.length,
+      selectTake: mocks.bridge.selectTake.invoke.mock.calls.length,
       prepare: mocks.bridge.prepareSubmission.invoke.mock.calls.length,
       confirm: mocks.bridge.confirmSubmission.invoke.mock.calls.length,
     }).toEqual(baseline);
