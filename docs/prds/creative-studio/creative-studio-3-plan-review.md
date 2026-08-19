@@ -128,32 +128,46 @@ Reviewing `d384112fb` ("feat(studio): version director commands for beat and sho
 commits beneath it, against the plan at the same head. Findings 1 and 3 above are **resolved**; see
 §A4. Line citations in §1–§4 were against `8b353ae6e` and have drifted — the plan is now 3,968 lines.
 
-## A1. BLOCKING FOR HANDOVER — head is red
+## A1. WITHDRAWN — head is not red; the failure was machine load
 
-`bun run test` at `d384112fb`: **1 failed, 10,108 passed, 19 skipped** across 672 files.
+**This finding was wrong and is retracted.** It originally reported the head as red with a
+structurally unsatisfiable latency assertion. Measurement refutes that. The finding is left in place
+rather than deleted so the reasoning error stays visible.
 
-The failure is `tests/integration/creative-studio/directorCommandLatency.integration.test.ts:372` —
-`expect(max).toBeLessThanOrEqual(thresholdMs)`, where `thresholdMs` is
-`(ACK_GRACE_MS - SWEEP_INTERVAL_MS) / 2`. (Line 373, visible in the failure output, compares two
-constants and cannot fail.)
+`bun run test` at `d384112fb` did fail once on
+`tests/integration/creative-studio/directorCommandLatency.integration.test.ts:372` —
+`expect(max).toBeLessThanOrEqual(thresholdMs)`, threshold 750ms. Investigating it produced this:
 
-Characterisation, measured:
+| load average | p50 |  max | threshold | result              |
+| -----------: | --: | ---: | --------: | ------------------- |
+|          ~21 | 602 | 1453 |       750 | fail                |
+|          ~21 | 650 | 3358 |       750 | fail                |
+|           ~2 | 541 |  551 |       750 | pass — 199ms margin |
+|           ~4 | 541 |  572 |       750 | pass — 178ms margin |
+|          ~15 |   — |    — |       750 | pass                |
 
-- **Passes in isolation** — the file alone runs 2 tests green in 43s.
-- **Fails under the full suite**, where total duration was 326s against a ~200s norm.
-- This commit _itself_ added a `creative-studio-timing` vitest project with `fileParallelism: false`,
-  `maxWorkers: 1`, and `groupOrder: 1` specifically to stop this test competing with other workers.
-  **The mitigation did not hold.**
+**The test and its threshold are correct.** On an unloaded machine the distribution is tight and
+low — min 513ms, max 551ms, a 38ms spread — leaving roughly 200ms of headroom under the 750ms
+budget. It passed here at load 15.
 
-Two things make it structurally fragile beyond ambient load: it asserts on **`max` of 30 samples**
-rather than the `p95` it already computes, so a single outlier fails the run; and the threshold is a
-derived safety budget, not an arbitrary number.
+**The root cause is ambient load from other processes on the host**, not from the suite. During the
+failing runs the machine carried two other sessions' Electron dev apps, one of them running for
+nearly fifteen hours, with load average at 21. At that level sweep ticks are missed outright and
+end-to-end latency degrades three- to six-fold. The `creative-studio-timing` project group added in
+`d384112fb` isolates the test from _vitest's own_ workers, which is correct and worth keeping, but
+no vitest setting can isolate it from unrelated processes on the box.
 
-**Do not resolve this by widening the threshold or switching to p95 without a decision.** Plan
-constraint 14 forbids weakening a timeout or assertion to obtain green, and the vitest comment
-records these as "frozen production thresholds". Either the budget is real — and then max is the
-right assertion and the scheduling fix needs to actually work — or the budget is advisory, which is a
-product decision, not a test-hygiene one.
+**The reasoning error, recorded deliberately.** The withdrawn finding modelled the measurement as a
+processing floor plus a uniformly distributed 0–500ms sweep phase, predicting a worst case of ~860ms
+and a pass probability of 0.05%. The quiet-machine distribution — 38ms of spread, not 500ms —
+disproves it: the test synchronises on the sweep rather than sampling its phase randomly. A fix
+derived from that model (comparing against `SWEEP + (ACK_GRACE − SWEEP) / 2` = 1250ms) was written,
+measured, found to raise the budget 2.3x above what the system actually delivers, and **reverted
+before commit**. It would have been exactly the weakening plan constraint 14 forbids.
+
+**Consequence for handover:** there is no latency blocker. Two operational notes stand in its place —
+wall-clock assertions on this repo cannot be trusted while other sessions run dev apps on the same
+host, and a red result on this test should be re-measured against `uptime` before it is believed.
 
 ## A2. Tasks 2–5 have no terminal `Commit:` step
 
