@@ -1,12 +1,16 @@
 # Creative Studio 3 — Gate 1 status
 
-Frozen head: **`84ca904ff`** on `codex/creative-studio-table-board-ui-design`.
-Recorded 2026-08-19. Tasks 1A, 1B, the atomic 1C–5 tranche, and Task 6 are complete.
+Branch `codex/creative-studio-table-board-ui-design`. Recorded 2026-08-19.
 
-Gate 1 defines four obligations. **Items 1 and 3 below were executed and pass. Item 2 is
-deliberately deferred and remains open.** This document exists because the plan's 267 steps carry
-no ticks, so gate execution is otherwise unrecorded — and because item 1 cannot be reproduced after
-Task 7.
+**Gate 1 is complete: items 1, 2 and 3 all pass**, with one scope limit noted under item 2.
+
+Measured at two heads, deliberately. Items 1 and 3 were executed at **`84ca904ff`** — the frozen
+Task 1–6 head, before the cutover. Item 2 was executed at **`e07cd31ba`**, after Task 7, because the
+spend surface it reviews is unchanged by the cutover and reviewing the shipped state is worth more
+than reviewing a superseded one.
+
+This document exists because the plan's 267 steps carry no ticks, so gate execution is otherwise
+unrecorded — and above all because **item 1 cannot be reproduced now that Task 7 has landed.**
 
 ---
 
@@ -36,17 +40,65 @@ Supporting tests, run together: `schema2Cutover.integration.test.ts` (V1 profile
 no-touch) and `nativePayloadSchemas.test.ts` (manifest/schema parity) — **2 files, 594 tests, all
 passing**.
 
-## 2. Independent process/schema and security/spend review — DEFERRED, OPEN
+## 2. Security and spend review — PASS
 
-Not executed. The unreviewed surface is **19,573 production lines and 24,905 test lines** across the
-tranche, including a money subsystem no independent reader has seen: `pricing/estimate.ts` (862
-lines), `pricing/authorization.ts` (287), `preparedSubmissionCache.ts` (400), `pricing/rateCard.ts`
-(120), plus the `prepare` → `confirm` protocol and the pre-dispatch budget predicate.
+Executed 2026-08-19 against `e07cd31ba` (post-cutover). The paid path was traced end to end —
+quote → authorization → confirm → dispatch → receipt — plus Director isolation. **No blocking
+findings.** The process/schema half of this item remains uncovered; what follows is the spend and
+security half only.
 
-Test coverage over that code is strong (see item 3), which is the argument for accepting the
-deferral. The argument against is that coverage demonstrates the code does what its author intended,
-not that the intent is right — which is the specific thing a spend review checks. **Decide before
-Task 7**, because the cutover diff will bury this surface.
+**Quote integrity is content-addressed.** Item IDs derive from
+`{projectId, projectRevision, shotId, purpose}` via `createStudioQuotedGenerationId` and are
+re-verified during validation, so a shot cannot be substituted into a confirmed quote. Totals are
+**recomputed** by `calculateStudioQuoteTotals` and must equal the quote's stated `lowerMinorUnits`
+and `upperMinorUnits`. That enforces in code the rule that a gate's headline cost, generation count,
+and button label all come from one set of shots.
+
+**Confirmation re-derives everything inside the store's CAS transaction.** `confirmSubmission`'s
+`revalidate` callback rebuilds the quote from the _current_ project and the _current_ rate card and
+aborts unless `studioSubmissionQuoteCoresEqual` holds. A stale quote, a drifted rate card, changed
+provider bindings, or changed cancellation policies each abort before any charge. This is stronger
+than a bare revision check.
+
+**The budget predicate runs pre-dispatch, inside that transaction** —
+`evaluateStudioBudgetV2(currentCore, project.spendPolicy).allowed` — which is the only site where it
+can refuse before money moves.
+
+**Replay is closed.** `preparedSubmissionCache.consume(claim)` removes the entry on success;
+`release(claim)` fires only `if (!durable)`. A successful submission cannot be replayed; a failed one
+can be retried. Concurrent use is refused with `quote_in_use`.
+
+**Ordering is crash-safe.** `durable` is set only after the store commit returns; `consume` follows;
+dispatch follows that. A crash before the commit charges nothing and releases the quote. A crash
+after it leaves durable jobs carrying frozen idempotency keys, so recovery cannot double-charge.
+
+**Receipts derive from the frozen authorization, never a live rate card.**
+`createStudioSpendReceiptV2` reads `item.rateMinorUnits` from the authorization, so a rate-card
+update cannot rewrite history. `studioSpendReceiptMatchesJobV2` re-derives and compares, proving a
+persisted job repeats its authorization entry exactly.
+
+**The Director cannot reach the paid boundary.** No paid symbol — `confirmSubmission`,
+`dispatchAuthorizedJobs`, `prepareSubmission`, `createStudioSpendAuthorization`,
+`createStudioSpendReceipt` — appears in any Director command module or in the builtin Studio MCP
+server and its writers. Verified by grep **exit code**, not by empty output: a later pipeline stage
+masks a no-match, and that trap produced three false readings elsewhere in this review.
+`directorCommandSpendFence.test.ts` passes.
+
+### Observation, not a defect
+
+`dispatchAuthorizedJobsV2` is invoked with `.catch((): undefined => undefined)`, so a dispatch
+failure is swallowed and `confirmSubmission` still returns success. This errs in the safe direction —
+a failed dispatch charges nothing — and the jobs are durably recorded beforehand. But the caller is
+told the submission succeeded when the work may not have started, so the guarantee rests on job
+recovery reliably collecting authorized-but-undispatched jobs. Worth a confirming test if none
+exists.
+
+### Still uncovered
+
+The **process/schema** half of Gate 1's item 2 was not performed: no independent reader has reviewed
+the tranche's contract and reducer surface for correctness beyond its own tests. That is a smaller
+risk than the spend half — it is heavily tested and was contract-reviewed during planning — but it is
+not the same as having been read.
 
 ## 3. Mechanical gate commands — PASS
 
@@ -92,9 +144,11 @@ one-line change and should land before Task 7, when the studio surface changes m
 
 ---
 
-## Carry-over into Task 7
+## Carry-over past Gate 1
 
-- Item 1's evidence above is the last reproducible proof of the pre-cutover state.
+- Item 1's evidence above is **historical as of `e07cd31ba`**: Task 7 registers V2 on the bridge, so
+  those zero-reference counts can no longer be reproduced. That is by design, and it is why the
+  measurement was recorded before the cutover rather than after.
 - `service/schema2/` and its mirrored test directory sit at **exactly 10** direct children. Any new
   peer violates the cap; group into a subdirectory of two or more files instead.
 - The `schema2` import fence is now **recursive**. It previously walked only the top level, so a
