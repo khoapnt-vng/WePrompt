@@ -35,7 +35,7 @@ import {
   deriveStudioDirtyShotsV2,
   deriveStudioInboundShotReferencesV2,
 } from '@/process/services/creative-studio/service/schema2/chain';
-import { createStudioLineHistoryId } from '@/process/services/creative-studio/service/schema2/mutationIdentity';
+import { createStudioLineHistoryId } from '@/process/services/creative-studio/service/schema2/mutations/identity';
 import {
   applyStudioMutationBatchV2,
   StudioMutationErrorV2,

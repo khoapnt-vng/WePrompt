@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { createStudioLineHistoryId } from '@process/services/creative-studio/service/schema2/mutationIdentity';
+import { createStudioLineHistoryId } from '@process/services/creative-studio/service/schema2/mutations/identity';
 import { describe, expect, it } from 'vitest';
 
 describe('Creative Studio schema-2 mutation identity', () => {

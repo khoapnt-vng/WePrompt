@@ -59,7 +59,11 @@ describe('schema2 import fence', () => {
   });
 
   it('keeps the pure schema boundary free of operational dependencies', () => {
-    const violations = readdirSync(schema2Directory)
+    // Recursive: the fence must cover every module under schema2, not only its top level.
+    // generation/, pricing/, and mutations/ all hold fenced code, and a non-recursive walk
+    // silently exempts a module the moment it moves into a subdirectory.
+    const violations = readdirSync(schema2Directory, { recursive: true })
+      .map((entry) => String(entry))
       .filter((fileName) => fileName.endsWith('.ts'))
       .flatMap((fileName) =>
         importSpecifiers(readFileSync(path.join(schema2Directory, fileName), 'utf8'))

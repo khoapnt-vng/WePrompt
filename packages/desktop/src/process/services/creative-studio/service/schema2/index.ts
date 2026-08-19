@@ -14,7 +14,7 @@ export {
   type StudioInboundShotReferenceKindV2,
   type StudioInboundShotReferenceV2,
 } from './chain';
-export { createStudioLineHistoryId } from './mutationIdentity';
+export { createStudioLineHistoryId } from './mutations/identity';
 export {
   advanceStudioWaitingBindingsV2,
   terminalizeStudioUnboundDependenciesV2,

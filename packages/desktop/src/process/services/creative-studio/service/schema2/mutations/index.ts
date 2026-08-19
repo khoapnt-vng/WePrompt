@@ -42,9 +42,9 @@ import {
   type StudioSpendPolicy,
   type StudioUndoPatch,
 } from '@/common/types/project/creativeStudioTypes';
-import { deriveStudioInboundShotReferencesV2 } from './chain';
-import { createStudioLineHistoryId } from './mutationIdentity';
-import { validateStudioFixedShotReviewsV2, validateStudioProjectV2, validateStudioProposedShotV2 } from './validation';
+import { deriveStudioInboundShotReferencesV2 } from '../chain';
+import { createStudioLineHistoryId } from './identity';
+import { validateStudioFixedShotReviewsV2, validateStudioProjectV2, validateStudioProposedShotV2 } from '../validation';
 
 export type StudioMutationReasonV2 =
   | 'beat_capacity_reached'

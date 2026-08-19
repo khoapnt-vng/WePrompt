@@ -39,7 +39,7 @@ import {
   createCreativeStudioStore,
   type CreativeStudioStore,
 } from '@process/services/creative-studio/store';
-import { createStudioLineHistoryId } from '@process/services/creative-studio/service/schema2/mutationIdentity';
+import { createStudioLineHistoryId } from '@process/services/creative-studio/service/schema2/mutations/identity';
 
 const NOW = '2026-08-17T00:00:00.000Z';
 const NOW_MS = Date.parse(NOW);
