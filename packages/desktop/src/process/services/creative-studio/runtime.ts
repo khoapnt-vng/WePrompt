@@ -51,6 +51,7 @@ import {
   type StudioE2EFakeBundleDeps,
 } from './adapters/e2eFakeAdapter';
 import { createStudioJobManager, type StudioJobManagerDeps, type StudioJobManagerV2 } from './jobManager';
+import { createConfiguredStudioRateCardV2 } from './rateCardConfig';
 import {
   installCreativeStudioProtocol,
   type CreativeStudioAssetResolver,
@@ -249,6 +250,7 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
     getAdapterRegistry: () => requireActiveGraph().adapterRegistry,
     getStudioServerScriptPath: () => getBuiltinMcpScriptPath(BUILTIN_STUDIO_SCRIPT),
     ensureDirectorCommandMailbox: (projectId) => requireActiveGraph().directorCommandMailbox.ensure(projectId),
+    rateCard: async (generation) => createConfiguredStudioRateCardV2(generation),
     onProjectUpdated: (projectId) => {
       deps.onProjectUpdated(projectId);
       if (!disposed) {

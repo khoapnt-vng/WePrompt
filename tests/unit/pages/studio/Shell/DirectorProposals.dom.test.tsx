@@ -65,18 +65,23 @@ describe('DirectorProposals', () => {
   const onRejectProposal = vi.fn(async () => undefined);
   const onGenerateReferences = vi.fn(async () => undefined);
   const onRejectReferences = vi.fn(async () => undefined);
+  const onReviewHandoff = vi.fn();
+  const onDismissHandoff = vi.fn(async () => undefined);
 
   beforeEach(() => {
     onAcceptProposal.mockClear();
     onRejectProposal.mockClear();
     onGenerateReferences.mockClear();
     onRejectReferences.mockClear();
+    onReviewHandoff.mockClear();
+    onDismissHandoff.mockClear();
   });
 
   const renderList = (
     proposals: StudioProposalV2[] = [],
     referenceRequests: StudioReferenceRequestV2[] = [],
-    referenceGenerationHandoffs: StudioRendererReferenceGenerationHandoffV2[] = []
+    referenceGenerationHandoffs: StudioRendererReferenceGenerationHandoffV2[] = [],
+    locks: { gateLocked?: boolean; reviewBlockedMessageKey?: string | null } = {}
   ) =>
     render(
       <DirectorProposals
@@ -88,6 +93,9 @@ describe('DirectorProposals', () => {
         onRejectProposal={onRejectProposal}
         onGenerateReferences={onGenerateReferences}
         onRejectReferences={onRejectReferences}
+        onReviewHandoff={onReviewHandoff}
+        onDismissHandoff={onDismissHandoff}
+        {...locks}
       />
     );
 
@@ -111,18 +119,36 @@ describe('DirectorProposals', () => {
     });
   });
 
-  it('deduplicates persistent open handoffs and gives them no paid or dismissal action', () => {
+  it('deduplicates persistent handoffs and exposes only explicit review/dismiss actions while open', async () => {
     renderList([], [], [handoff('handoff-1'), handoff('handoff-1'), handoff('dismissed', 'dismissed')]);
 
     expect(screen.getAllByTestId('studio-handoff-handoff-1')).toHaveLength(1);
-    expect(screen.queryByTestId('studio-handoff-dismissed')).not.toBeInTheDocument();
-    expect(within(screen.getByTestId('studio-handoff-handoff-1')).queryAllByRole('button')).toHaveLength(0);
-    expect(screen.getByText('conversation.creativeStudio.workspace.handoffs.awaitingGate')).toBeInTheDocument();
+    expect(screen.getByTestId('studio-handoff-dismissed')).toBeInTheDocument();
+    const open = within(screen.getByTestId('studio-handoff-handoff-1'));
+    fireEvent.click(open.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.review' }));
+    fireEvent.click(open.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.dismiss' }));
+    await waitFor(() => {
+      expect(onReviewHandoff).toHaveBeenCalledWith(expect.objectContaining({ handoffId: 'handoff-1' }));
+      expect(onDismissHandoff).toHaveBeenCalledWith(expect.objectContaining({ handoffId: 'handoff-1' }));
+    });
   });
 
-  it('renders no review surface when there is nothing pending or open', () => {
+  it('keeps terminal handoff cards persistent without actions', () => {
     const { container } = renderList([proposal('accepted', 'accepted')], [], [handoff('confirmed', 'confirmed')]);
 
-    expect(container).toBeEmptyDOMElement();
+    expect(container).not.toBeEmptyDOMElement();
+    expect(screen.getByText('conversation.creativeStudio.workspace.handoffs.confirmed')).toBeVisible();
+    expect(within(screen.getByTestId('studio-handoff-confirmed')).queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('blocks dirty-generation review with guidance while leaving free dismissal available', () => {
+    renderList([], [], [handoff('handoff-1')], {
+      reviewBlockedMessageKey: 'conversation.creativeStudio.workspace.controls.saveBeforeReview',
+    });
+
+    const card = within(screen.getByTestId('studio-handoff-handoff-1'));
+    expect(card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.review' })).toBeDisabled();
+    expect(card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.dismiss' })).toBeEnabled();
+    expect(card.getByText('conversation.creativeStudio.workspace.controls.saveBeforeReview')).toBeVisible();
   });
 });

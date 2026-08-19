@@ -231,6 +231,11 @@ export type StudioProjectConfirmationResultV2<TDispatch> = {
   dispatch: StudioDeepReadonly<TDispatch>;
 };
 
+export type StudioReferenceGenerationHandoffConfirmationInputV2<TRevalidation, TDispatch> =
+  StudioProjectConfirmationInputV2<TRevalidation, TDispatch> & {
+    handoffId: string;
+  };
+
 export type StudioProjectInventoryV2 = {
   supportedProjectIds: string[];
   unsupportedProjectIds: string[];
@@ -290,6 +295,9 @@ export type CreativeStudioStore = {
   ): Promise<StudioMutationApplyResultV2>;
   confirmProjectV2<TRevalidation, TDispatch>(
     input: StudioProjectConfirmationInputV2<TRevalidation, TDispatch>
+  ): Promise<StudioProjectConfirmationResultV2<TDispatch>>;
+  confirmReferenceGenerationHandoffV2<TRevalidation, TDispatch>(
+    input: StudioReferenceGenerationHandoffConfirmationInputV2<TRevalidation, TDispatch>
   ): Promise<StudioProjectConfirmationResultV2<TDispatch>>;
   updateProjectV2(
     projectId: string,
@@ -5585,7 +5593,12 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
         authorization.baseItems.length !== generationOutcome.shotIds.length ||
         Date.parse(authorization.confirmedAt) < Date.parse(decision.record.decidedAt) ||
         !authorization.baseItems.every(
-          (item, index) => item.purpose === 'seed_still' && item.shotId === generationOutcome.shotIds[index]
+          (item, index) =>
+            item.purpose === 'seed_still' &&
+            item.shotId === generationOutcome.shotIds[index] &&
+            item.generationCount === 1 &&
+            item.requestPlan.kind === 'resolved' &&
+            item.requestPlan.snapshot.referenceInput === null
         )
       ) {
         throw new CreativeStudioStoreError('storage_error', 'Studio authorization reference handoff scope mismatch');
@@ -6498,6 +6511,93 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     };
   };
 
+  type ReservedReferenceGenerationHandoffV2 = {
+    ledger: ReferenceRequestLedgerV2;
+    request: IdentifiedRecordV2<StudioReferenceRequestV2>;
+    decision: IdentifiedRecordV2<StudioReferenceGenerationDecisionV2>;
+    slot: IdentifiedRecordV2<StudioReferenceRequestSlotV2>;
+  };
+
+  const reserveReferenceGenerationHandoffV2InsideQueue = async (input: {
+    root: string;
+    projectId: string;
+    handoffId: string;
+    snapshot: Extract<ProjectFileInspectionV2, { status: 'supported' }>;
+  }): Promise<ReservedReferenceGenerationHandoffV2> => {
+    const ledger = await readCleanReferenceRequestLedgerV2InsideQueue({
+      root: input.root,
+      projectId: input.projectId,
+      snapshot: input.snapshot,
+      createIfWhollyAbsent: false,
+    });
+    if (ledger === null) throw new CreativeStudioStoreError('not_found', 'Studio reference handoff not found');
+    const decision = ledger.generationDecisions.get(input.handoffId);
+    if (decision === undefined || !isReferenceGenerationDecisionV2(decision.record)) {
+      throw new CreativeStudioStoreError('not_found', 'Studio reference handoff not found');
+    }
+    const generationDecision = decision as IdentifiedRecordV2<StudioReferenceGenerationDecisionV2>;
+    const request = ledger.requests.get(generationDecision.record.requestId);
+    if (
+      request === undefined ||
+      request.record.projectId !== input.projectId ||
+      generationDecision.record.projectId !== input.projectId ||
+      generationDecision.record.outcome.handoffId !== input.handoffId ||
+      !sameJson(request.record.shotIds, generationDecision.record.outcome.shotIds)
+    ) {
+      throw new CreativeStudioStoreError('storage_error', 'Studio reference handoff authority mismatch');
+    }
+    if (ledger.receipts.has(input.handoffId)) {
+      throw new CreativeStudioStoreError('invalid_payload', 'Studio reference handoff is already complete');
+    }
+    if (referenceAuthorizationByHandoffV2(input.snapshot.project).has(input.handoffId)) {
+      throw new CreativeStudioStoreError('storage_error', 'Studio reference handoff authorization is unrepaired');
+    }
+    assertReferenceRequestShotsActiveV2(input.snapshot.project, request.record);
+    const slot = assertPendingReferenceRequestSlotV2(ledger, request.record.id);
+    return { ledger, request, decision: generationDecision, slot };
+  };
+
+  const assertReservedReferenceGenerationHandoffCurrentV2 = async (input: {
+    root: string;
+    snapshot: Extract<ProjectFileInspectionV2, { status: 'supported' }>;
+    reserved: ReservedReferenceGenerationHandoffV2;
+    assertActive: () => unknown;
+  }): Promise<void> => {
+    await Promise.all([
+      assertReferenceRequestLedgerEntrySetCurrentV2(input.reserved.ledger),
+      assertIdentifiedRecordCurrentV2({
+        root: input.root,
+        authority: input.reserved.ledger.directories.pending,
+        identified: input.reserved.request,
+        maxBytes: STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES,
+      }),
+      assertIdentifiedRecordCurrentV2({
+        root: input.root,
+        authority: input.reserved.ledger.directories.decisions,
+        identified: input.reserved.decision,
+        maxBytes: STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES,
+      }),
+      assertIdentifiedRecordCurrentV2({
+        root: input.root,
+        authority: input.reserved.ledger.directories.slots,
+        identified: input.reserved.slot,
+        maxBytes: STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES,
+      }),
+      assertPathAbsentV2(
+        path.join(
+          input.reserved.ledger.directories.receipts.path,
+          `${input.reserved.decision.record.outcome.handoffId}.json`
+        )
+      ),
+    ]);
+    await assertProjectSnapshotCurrentV2({ root: input.root, snapshot: input.snapshot });
+    const activeAfterHandoffAuthority = input.assertActive();
+    assertSynchronousConfirmationResult(
+      activeAfterHandoffAuthority,
+      'Studio reference confirmation active-session check'
+    );
+  };
+
   const recordReferenceGenerationHandoffReceiptV2InsideQueue = async (input: {
     root: string;
     receiptInput: StudioRecordReferenceGenerationHandoffReceiptInputV2;
@@ -7124,7 +7224,8 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
   const confirmProjectV2InsideQueue = async <TRevalidation, TDispatch>(
     root: string,
     inspected: Extract<ProjectFileInspectionV2, { status: 'supported' }>,
-    input: StudioProjectConfirmationInputV2<TRevalidation, TDispatch>
+    input: StudioProjectConfirmationInputV2<TRevalidation, TDispatch>,
+    authorizeBeforePersistence?: (candidate: StudioProjectV2) => Promise<void>
   ): Promise<StudioProjectConfirmationResultV2<TDispatch>> => {
     const current = inspected.project;
     if (current.revision !== input.expectedRevision) {
@@ -7189,8 +7290,18 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
 
     const activeBeforePersistence = (input.assertActive as () => unknown)();
     assertSynchronousConfirmationResult(activeBeforePersistence, 'Studio confirmation active-session check');
+    const authorizedProject = cloneAndFreezeConfirmationValue(next, 'Studio confirmation authorized project');
+    if (authorizeBeforePersistence !== undefined) {
+      await authorizeBeforePersistence(authorizedProject as StudioProjectV2);
+    }
     const bytes = serializeProjectV2ForWrite(next, 'Schema-2 Studio confirmation project');
-    await writeBytesAtomic(root, file, bytes, () => assertProjectSnapshotCurrentV2({ root, snapshot: inspected }));
+    await writeBytesAtomic(root, file, bytes, async () => {
+      if (authorizeBeforePersistence === undefined) {
+        await assertProjectSnapshotCurrentV2({ root, snapshot: inspected });
+      } else {
+        await authorizeBeforePersistence(authorizedProject as StudioProjectV2);
+      }
+    });
     observeProjectCommit(
       Object.freeze({
         projectId: current.id,
@@ -7359,6 +7470,113 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
         // Delay the stale rejection until that already-started maintenance settles so callers can
         // observe the preceding mutation before handling this queued result.
         await summaryV2Queue.catch((): undefined => undefined);
+        throw error;
+      }
+      await repairSummaryV2AfterCommit();
+      return result;
+    },
+
+    async confirmReferenceGenerationHandoffV2<TRevalidation, TDispatch>(
+      input: StudioReferenceGenerationHandoffConfirmationInputV2<TRevalidation, TDispatch>
+    ): Promise<StudioProjectConfirmationResultV2<TDispatch>> {
+      if (
+        !isRecord(input) ||
+        !isSafeIdV2(input.projectId) ||
+        !isSafeIdV2(input.handoffId) ||
+        !isIntegerInRange(input.expectedRevision, 1, Number.MAX_SAFE_INTEGER) ||
+        !isCanonicalIsoTimestamp(input.expiresAt) ||
+        typeof input.revalidate !== 'function' ||
+        typeof input.assertActive !== 'function' ||
+        typeof input.buildCommit !== 'function' ||
+        (input.commitTag !== undefined && typeof input.commitTag !== 'string')
+      ) {
+        throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio reference confirmation input');
+      }
+      const confirmationInput = Object.freeze({
+        projectId: input.projectId,
+        handoffId: input.handoffId,
+        expectedRevision: input.expectedRevision,
+        expiresAt: input.expiresAt,
+        revalidate: input.revalidate,
+        assertActive: input.assertActive,
+        buildCommit: input.buildCommit,
+        commitTag: input.commitTag,
+      });
+      let result: StudioProjectConfirmationResultV2<TDispatch>;
+      let projectCommitted = false;
+      try {
+        result = await enqueue(confirmationInput.projectId, async () => {
+          const root = await existingCanonicalRootV2();
+          if (root === null) throw new CreativeStudioStoreError('not_found', 'Studio project not found');
+          const inspected = requireSupportedProjectInspectionV2(
+            await inspectProjectWithAttributionFenceV2InsideQueue(root, confirmationInput.projectId)
+          );
+          const reserved = await reserveReferenceGenerationHandoffV2InsideQueue({
+            root,
+            projectId: confirmationInput.projectId,
+            handoffId: confirmationInput.handoffId,
+            snapshot: inspected,
+          });
+          const committed = await confirmProjectV2InsideQueue(root, inspected, confirmationInput, async (candidate) => {
+            const exactAuthorizations = candidate.spendAuthorizations.filter(
+              (authorization) => authorization.originReferenceHandoffId === confirmationInput.handoffId
+            );
+            if (
+              candidate.spendAuthorizations.length !== inspected.project.spendAuthorizations.length + 1 ||
+              exactAuthorizations.length !== 1
+            ) {
+              throw new CreativeStudioStoreError(
+                'invalid_payload',
+                'Studio reference confirmation did not create one exact authorization'
+              );
+            }
+            const missing = assertReferenceAuthorizationRelationsV2({ project: candidate, ledger: reserved.ledger });
+            if (missing.length !== 1 || missing[0]?.handoffId !== confirmationInput.handoffId) {
+              throw new CreativeStudioStoreError(
+                'invalid_payload',
+                'Studio reference confirmation did not create one exact authorization'
+              );
+            }
+            await assertReservedReferenceGenerationHandoffCurrentV2({
+              root,
+              snapshot: inspected,
+              reserved,
+              assertActive: confirmationInput.assertActive,
+            });
+          });
+          projectCommitted = true;
+          const postCommit = requireSupportedProjectInspectionV2(
+            await inspectProjectFileV2(root, confirmationInput.projectId)
+          );
+          if (!sameJson(postCommit.project, committed.project)) {
+            throw new CreativeStudioStoreError('storage_error', 'Studio reference confirmation project changed');
+          }
+          await resolveReferenceAuthorizationReceiptsV2InsideQueue({
+            root,
+            projectId: confirmationInput.projectId,
+            snapshot: postCommit,
+          });
+          const finalLedger = await readReferenceRequestLedgerV2({
+            root,
+            projectId: confirmationInput.projectId,
+            directories: reserved.ledger.directories,
+          });
+          const handoff = referenceGenerationHandoffV2(finalLedger, confirmationInput.handoffId);
+          const authorization = committed.project.spendAuthorizations.find(
+            (candidate) => candidate.originReferenceHandoffId === confirmationInput.handoffId
+          );
+          if (
+            authorization === undefined ||
+            handoff?.receipt?.result.kind !== 'confirmed' ||
+            handoff.receipt.result.authorizationId !== authorization.id ||
+            handoff.receipt.completedAt !== authorization.confirmedAt
+          ) {
+            throw new CreativeStudioStoreError('storage_error', 'Studio reference confirmation receipt is missing');
+          }
+          return committed;
+        });
+      } catch (error) {
+        if (projectCommitted) await repairSummaryV2AfterCommit();
         throw error;
       }
       await repairSummaryV2AfterCommit();

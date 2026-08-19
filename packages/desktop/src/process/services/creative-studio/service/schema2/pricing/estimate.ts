@@ -34,7 +34,13 @@ import {
   createStudioQuotedGenerationId,
   createStudioResolvedGenerationRequestPlan,
 } from '../generation';
-import { getStudioRateCardEntryV2, type StudioRateCardErrorCodeV2, type StudioRateCardV2 } from './rateCard';
+import {
+  createStudioRateCardV2,
+  getStudioRateCardEntryV2,
+  StudioRateCardErrorV2,
+  type StudioRateCardErrorCodeV2,
+  type StudioRateCardV2,
+} from './rateCard';
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const CURRENCY = /^[A-Z]{3}$/;
@@ -68,6 +74,7 @@ export type StudioPricingErrorCodeV2 =
   | 'invalid_dependency'
   | 'invalid_prepare_request'
   | 'invalid_reference'
+  | 'missing_route'
   | 'missing_conditioning'
   | 'unsafe_total';
 
@@ -356,6 +363,18 @@ const validateExactCascade = (
   }
 };
 
+const validateReferenceHandoffChoices = (request: StudioPrepareSubmissionRequestV2): void => {
+  if (
+    request.originReferenceHandoffId === null ||
+    request.cascadeChoices.length !== 0 ||
+    request.baseChoices.some(
+      (choice) => choice.purpose !== 'seed_still' || choice.generationCount !== 1 || choice.referenceAssetId !== null
+    )
+  ) {
+    fail('invalid_prepare_request');
+  }
+};
+
 const isBinnedTake = (project: StudioProjectV2, assetId: string): boolean =>
   project.bin.some((item) => item.kind === 'take' && item.assetId === assetId);
 
@@ -529,7 +548,7 @@ const deriveUnpricedItems = (
   const result: StudioUnpricedQuotedGenerationV2[] = [];
   for (const choice of choices) {
     const routeId = choice.purpose === 'seed_still' ? project.imageRouteId : project.videoRouteId;
-    if (routeId === null || !SAFE_ID.test(routeId)) fail('invalid_prepare_request');
+    if (routeId === null || !SAFE_ID.test(routeId)) fail('missing_route');
     const template = createChoiceTemplate(project, choice, locations, matchTo);
     let requestPlan: StudioGenerationRequestPlan;
     if (choice.purpose === 'seed_still') {
@@ -599,42 +618,114 @@ export type StudioSubmissionQuoteCoreDerivationInputV2 = {
   rateCard: StudioRateCardV2;
 };
 
+export type StudioSubmissionQuoteGraphDerivationInputV2 = Omit<StudioSubmissionQuoteCoreDerivationInputV2, 'rateCard'>;
+
+export type StudioDerivedSubmissionQuoteGraphV2 = {
+  request: StudioPrepareSubmissionRequestV2;
+  baseItems: StudioUnpricedQuotedGenerationV2[];
+  cascadeItems: StudioUnpricedQuotedGenerationV2[] | null;
+};
+
 export type StudioDerivedSubmissionQuoteCoresV2 = {
   request: StudioPrepareSubmissionRequestV2;
   baseOnly: StudioSubmissionQuoteCore;
   withCascade: StudioSubmissionQuoteCore | null;
 };
 
+/** Validates the exact request graph before any live route or rate dependency is consulted. */
+export const deriveStudioSubmissionQuoteGraphV2 = (
+  input: StudioSubmissionQuoteGraphDerivationInputV2
+): StudioDerivedSubmissionQuoteGraphV2 => {
+  const request = parsePrepareRequest(input.request, input.project);
+  const locations = derivationShotLocations(input.project);
+  validateChoiceOrderAndIdentity(request, locations);
+  if (request.originReferenceHandoffId === null) {
+    validateIndependentBaseAnchors(input.project, request.baseChoices, locations);
+    validateExactCascade(input.project, request, locations);
+  } else {
+    validateReferenceHandoffChoices(request);
+  }
+
+  const baseItems = deriveUnpricedItems(input.project, request.baseChoices, locations);
+  let cascadeItems: StudioUnpricedQuotedGenerationV2[] | null = null;
+  if (request.cascadeChoices.length > 0) {
+    try {
+      const combinedItems = deriveUnpricedItems(
+        input.project,
+        [...request.baseChoices, ...request.cascadeChoices],
+        locations
+      );
+      cascadeItems = combinedItems.slice(request.baseChoices.length);
+    } catch (error) {
+      if (!(error instanceof StudioPricingErrorV2) || error.code !== 'missing_route') throw error;
+    }
+  }
+  return { request, baseItems, cascadeItems };
+};
+
+/**
+ * Canonicalizes every and only route entry priced by one option. This keeps a base digest stable
+ * when an optional sibling route changes without weakening exact rate parity for the selected core.
+ */
+const scopedRateCard = (
+  rateCard: StudioRateCardV2,
+  items: readonly StudioUnpricedQuotedGenerationV2[]
+): StudioRateCardV2 => {
+  const entries = new Map<string, StudioRateCardV2['entries'][number]>();
+  for (const item of items) {
+    try {
+      entries.set(item.routeId, getStudioRateCardEntryV2(rateCard, item.routeId, item.purpose));
+    } catch (error) {
+      if (error instanceof StudioRateCardErrorV2) fail(error.code);
+      throw error;
+    }
+  }
+  return createStudioRateCardV2([...entries.values()]);
+};
+
+/** Prices an already validated graph, keeping the base authority independent from cascade availability. */
+export const priceStudioSubmissionQuoteGraphV2 = (input: {
+  project: StudioProjectV2;
+  graph: StudioDerivedSubmissionQuoteGraphV2;
+  rateCard: StudioRateCardV2;
+}): StudioDerivedSubmissionQuoteCoresV2 => {
+  const { graph } = input;
+  const baseOnly = createStudioSubmissionQuoteCoreV2({
+    project: input.project,
+    originReferenceHandoffId: graph.request.originReferenceHandoffId,
+    rateCard: scopedRateCard(input.rateCard, graph.baseItems),
+    baseItems: graph.baseItems,
+    cascadeItems: [],
+  });
+
+  let withCascade: StudioSubmissionQuoteCore | null = null;
+  if (graph.cascadeItems !== null && graph.cascadeItems.length > 0) {
+    try {
+      withCascade = createStudioSubmissionQuoteCoreV2({
+        project: input.project,
+        originReferenceHandoffId: graph.request.originReferenceHandoffId,
+        rateCard: scopedRateCard(input.rateCard, [...graph.baseItems, ...graph.cascadeItems]),
+        baseItems: graph.baseItems,
+        cascadeItems: graph.cascadeItems,
+      });
+    } catch (error) {
+      if (
+        !(error instanceof StudioPricingErrorV2) ||
+        (error.code !== 'rate_not_found' && error.code !== 'route_kind_mismatch')
+      ) {
+        throw error;
+      }
+    }
+  }
+  return { request: graph.request, baseOnly, withCascade };
+};
+
 /** Re-derives the complete active-film graph and both deterministic quote cores from one untrusted prepare request. */
 export const deriveStudioSubmissionQuoteCoresV2 = (
   input: StudioSubmissionQuoteCoreDerivationInputV2
 ): StudioDerivedSubmissionQuoteCoresV2 => {
-  const request = parsePrepareRequest(input.request, input.project);
-  const locations = derivationShotLocations(input.project);
-  validateChoiceOrderAndIdentity(request, locations);
-  validateIndependentBaseAnchors(input.project, request.baseChoices, locations);
-  validateExactCascade(input.project, request, locations);
-  const combinedChoices = [...request.baseChoices, ...request.cascadeChoices];
-  const combinedItems = deriveUnpricedItems(input.project, combinedChoices, locations);
-  const baseItems = combinedItems.slice(0, request.baseChoices.length);
-  const baseOnly = createStudioSubmissionQuoteCoreV2({
-    project: input.project,
-    originReferenceHandoffId: request.originReferenceHandoffId,
-    rateCard: input.rateCard,
-    baseItems,
-    cascadeItems: [],
-  });
-  const withCascade =
-    request.cascadeChoices.length === 0
-      ? null
-      : createStudioSubmissionQuoteCoreV2({
-          project: input.project,
-          originReferenceHandoffId: request.originReferenceHandoffId,
-          rateCard: input.rateCard,
-          baseItems,
-          cascadeItems: combinedItems.slice(request.baseChoices.length),
-        });
-  return { request, baseOnly, withCascade };
+  const graph = deriveStudioSubmissionQuoteGraphV2(input);
+  return priceStudioSubmissionQuoteGraphV2({ project: input.project, graph, rateCard: input.rateCard });
 };
 
 const hasInFlightItem = (

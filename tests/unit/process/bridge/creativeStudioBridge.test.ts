@@ -11,11 +11,13 @@ import {
   STUDIO_PROJECT_SCHEMA_VERSION,
   STUDIO_VIEWS,
   type StudioMutationBatchResultV2,
+  type StudioRendererPreparedSubmissionOptionsV2,
   type StudioRendererProjectV2,
   type StudioRendererWorkspaceStatusV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { CreativeStudioStoreError } from '@process/services/creative-studio/store';
 import { CreativeStudioMediaError } from '@process/services/creative-studio/mediaStore';
+import { StudioPreparedSubmissionCacheErrorV2 } from '@process/services/creative-studio/service/schema2/preparedSubmissionCache';
 import type { CreativeStudioServiceV2 } from '@process/services/creative-studio/service/v2Service';
 
 const providerNames = [
@@ -29,6 +31,9 @@ const providerNames = [
   'listReferenceRequests',
   'decideReferenceRequest',
   'listReferenceGenerationHandoffs',
+  'prepareSubmission',
+  'confirmSubmission',
+  'dismissReferenceGenerationHandoff',
   'applyAuthoringBatch',
   'undoLast',
   'getWorkspaceStatus',
@@ -73,6 +78,9 @@ const mocks = vi.hoisted(() => ({
       'listReferenceRequests',
       'decideReferenceRequest',
       'listReferenceGenerationHandoffs',
+      'prepareSubmission',
+      'confirmSubmission',
+      'dismissReferenceGenerationHandoff',
       'applyAuthoringBatch',
       'undoLast',
       'getWorkspaceStatus',
@@ -137,6 +145,65 @@ const workspaceStatus: StudioRendererWorkspaceStatusV2 = {
   cascadeProgress: [],
   parkEligibility: [],
 };
+const preparedSubmission = {
+  baseOnly: {
+    id: 'quote_1',
+    projectId: 'project_1',
+    projectRevision: 7,
+    expiresAt: '2026-08-19T02:08:04.000Z',
+    currency: 'USD',
+    baseItems: [
+      {
+        shotId: 'shot_1',
+        purpose: 'seed_still',
+        route: { choiceId: 'route_image_1', providerId: 'provider_1', model: 'image-model' },
+        generationCount: 2,
+        durationSeconds: null,
+        oneGenerationMinorUnits: 125,
+        requestedTotalMinorUnits: 250,
+        waitsForTakeSelection: false,
+      },
+    ],
+    cascadeItems: [],
+    lowerMinorUnits: 250,
+    upperMinorUnits: 250,
+    budget: { kind: 'within_cap', policyCurrency: 'USD', maxPerBatchMinorUnits: 500 },
+  },
+  withCascade: {
+    id: 'quote_2',
+    projectId: 'project_1',
+    projectRevision: 7,
+    expiresAt: '2026-08-19T02:08:04.000Z',
+    currency: 'USD',
+    baseItems: [
+      {
+        shotId: 'shot_1',
+        purpose: 'seed_still',
+        route: { choiceId: 'route_image_1', providerId: 'provider_1', model: 'image-model' },
+        generationCount: 2,
+        durationSeconds: null,
+        oneGenerationMinorUnits: 125,
+        requestedTotalMinorUnits: 250,
+        waitsForTakeSelection: false,
+      },
+    ],
+    cascadeItems: [
+      {
+        shotId: 'shot_2',
+        purpose: 'video_take',
+        route: { choiceId: 'route_video_1', providerId: 'provider_2', model: 'video-model' },
+        generationCount: 1,
+        durationSeconds: 8,
+        oneGenerationMinorUnits: 800,
+        requestedTotalMinorUnits: 800,
+        waitsForTakeSelection: true,
+      },
+    ],
+    lowerMinorUnits: 250,
+    upperMinorUnits: 1_050,
+    budget: { kind: 'over_cap', policyCurrency: 'USD', maxPerBatchMinorUnits: 500 },
+  },
+} satisfies StudioRendererPreparedSubmissionOptionsV2;
 
 const createService = () =>
   ({
@@ -154,6 +221,12 @@ const createService = () =>
     listReferenceRequests: vi.fn(async () => []),
     decideReferenceRequest: vi.fn(),
     listReferenceGenerationHandoffs: vi.fn(async () => []),
+    prepareSubmission: vi.fn(async () => preparedSubmission),
+    confirmSubmission: vi.fn(async () => ({ projectId: 'project_1', projectRevision: 8 })),
+    dismissReferenceGenerationHandoff: vi.fn(async () => ({
+      status: 'dismissed' as const,
+      completedAt: '2026-08-19T02:03:04.000Z',
+    })),
     applyMutations: vi.fn(async () => mutationResult),
     getWorkspaceStatus: vi.fn(async () => workspaceStatus),
     getChainStatus: vi.fn(async () => ({ projectId: 'project_1', projectRevision: 8, conditioningFailures: [] })),
@@ -353,6 +426,155 @@ describe('initCreativeStudioBridge', () => {
     await registeredHandler('getChainStatus')({ projectId: 'project_1' } as never);
     expect(service.getWorkspaceStatus).toHaveBeenCalledExactlyOnceWith({ projectId: 'project_1' });
     expect(service.getChainStatus).toHaveBeenCalledExactlyOnceWith({ projectId: 'project_1' });
+  });
+
+  it('routes bounded prepare choices and returns only the renderer-safe quote allowlist', async () => {
+    initCreativeStudioBridge(dependencies);
+    const input = {
+      projectId: 'project_1',
+      expectedRevision: 7,
+      originReferenceHandoffId: null,
+      baseChoices: [{ shotId: 'shot_1', purpose: 'seed_still' as const, generationCount: 2, referenceAssetId: null }],
+      cascadeChoices: [
+        { shotId: 'shot_2', purpose: 'video_take' as const, generationCount: 1, referenceAssetId: null },
+      ],
+    };
+
+    const result = (await registeredHandler('prepareSubmission')(input as never)) as {
+      ok: true;
+      data: StudioRendererPreparedSubmissionOptionsV2;
+    };
+
+    expect(service.prepareSubmission).toHaveBeenCalledExactlyOnceWith(input);
+    expect(result).toEqual({ ok: true, data: preparedSubmission });
+    expect(Object.keys(result.data).toSorted()).toEqual(['baseOnly', 'withCascade']);
+    for (const quote of [result.data.baseOnly, result.data.withCascade]) {
+      expect(quote).not.toBeNull();
+      expect(Object.keys(quote!).toSorted()).toEqual([
+        'baseItems',
+        'budget',
+        'cascadeItems',
+        'currency',
+        'expiresAt',
+        'id',
+        'lowerMinorUnits',
+        'projectId',
+        'projectRevision',
+        'upperMinorUnits',
+      ]);
+      expect(Object.keys(quote!.budget).toSorted()).toEqual(['kind', 'maxPerBatchMinorUnits', 'policyCurrency']);
+      for (const item of [...quote!.baseItems, ...quote!.cascadeItems]) {
+        expect(Object.keys(item).toSorted()).toEqual([
+          'durationSeconds',
+          'generationCount',
+          'oneGenerationMinorUnits',
+          'purpose',
+          'requestedTotalMinorUnits',
+          'route',
+          'shotId',
+          'waitsForTakeSelection',
+        ]);
+        expect(Object.keys(item.route).toSorted()).toEqual(['choiceId', 'model', 'providerId']);
+      }
+    }
+
+    const serialized = JSON.stringify(result.data);
+    for (const forbiddenKey of [
+      'authorizationId',
+      'authorization',
+      'itemId',
+      'jobId',
+      'rateCardDigest',
+      'digest',
+      'sha256',
+      'routeId',
+      'originReferenceHandoffId',
+      'requestPlan',
+      'requestSnapshot',
+      'prompt',
+      'referenceAssetId',
+      'conditioningInput',
+      'frameAssetId',
+      'adapterId',
+      'apiKey',
+      'credentials',
+      'providerJobId',
+      'provider',
+      'providerBindings',
+      'cancellationPolicy',
+      'receipt',
+      'idempotencyKey',
+    ]) {
+      expect(serialized).not.toContain(`"${forbiddenKey}"`);
+    }
+  });
+
+  it('routes confirm and dismiss through their exact safe service seams', async () => {
+    initCreativeStudioBridge(dependencies);
+    const confirmInput = { projectId: 'project_1', quoteId: 'quote_1', expectedRevision: 7 };
+    const dismissInput = { projectId: 'project_1', expectedRevision: 7, handoffId: 'handoff_1' };
+
+    const confirmed = (await registeredHandler('confirmSubmission')(confirmInput as never)) as {
+      ok: true;
+      data: Record<string, unknown>;
+    };
+    const dismissed = (await registeredHandler('dismissReferenceGenerationHandoff')(dismissInput as never)) as {
+      ok: true;
+      data: Record<string, unknown>;
+    };
+
+    expect(service.confirmSubmission).toHaveBeenCalledExactlyOnceWith(confirmInput);
+    expect(service.dismissReferenceGenerationHandoff).toHaveBeenCalledExactlyOnceWith(dismissInput);
+    expect(confirmed).toEqual({ ok: true, data: { projectId: 'project_1', projectRevision: 8 } });
+    expect(Object.keys(confirmed.data).toSorted()).toEqual(['projectId', 'projectRevision']);
+    expect(dismissed).toEqual({
+      ok: true,
+      data: { status: 'dismissed', completedAt: '2026-08-19T02:03:04.000Z' },
+    });
+    expect(Object.keys(dismissed.data).toSorted()).toEqual(['completedAt', 'status']);
+  });
+
+  it.each([
+    ['quote_not_found', 'quoteNotFound'],
+    ['quote_in_use', 'quoteInUse'],
+    ['quote_cache_full', 'quoteCacheFull'],
+    ['quote_too_large', 'quoteTooLarge'],
+  ] as const)('preserves the %s cache error without collapsing it', async (code, messageKeyLeaf) => {
+    vi.mocked(service.prepareSubmission).mockRejectedValueOnce(new StudioPreparedSubmissionCacheErrorV2(code));
+    initCreativeStudioBridge(dependencies);
+
+    await expect(
+      registeredHandler('prepareSubmission')({
+        projectId: 'project_1',
+        expectedRevision: 7,
+        originReferenceHandoffId: null,
+        baseChoices: [{ shotId: 'shot_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
+        cascadeChoices: [],
+      } as never)
+    ).resolves.toEqual({
+      ok: false,
+      error: { code, messageKey: `conversation.creativeStudio.errors.${messageKeyLeaf}` },
+    });
+  });
+
+  it('preserves stale_project from generic prepare as the stable public command error', async () => {
+    vi.mocked(service.prepareSubmission).mockRejectedValueOnce(
+      new CreativeStudioStoreError('stale_project', 'raw prepare revision details')
+    );
+    initCreativeStudioBridge(dependencies);
+
+    await expect(
+      registeredHandler('prepareSubmission')({
+        projectId: 'project_1',
+        expectedRevision: 6,
+        originReferenceHandoffId: null,
+        baseChoices: [{ shotId: 'shot_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
+        cascadeChoices: [{ shotId: 'shot_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+      } as never)
+    ).resolves.toEqual({
+      ok: false,
+      error: { code: 'stale_project', messageKey: 'conversation.creativeStudio.errors.staleProject' },
+    });
   });
 
   it('keeps Brief and seed-still picker imports separate and returns no path or project', async () => {

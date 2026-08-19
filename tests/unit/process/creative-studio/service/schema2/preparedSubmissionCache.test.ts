@@ -371,6 +371,28 @@ describe('StudioPreparedSubmissionCacheV2', () => {
     expectCacheCode(() => cache.claim('project_3', 'quote_same'), 'quote_not_found');
   });
 
+  it('retains an exact cascade request when its sibling is unavailable and permits option-scoped rate digests', () => {
+    const unavailable = makeAdmission();
+    unavailable.request.cascadeChoices.push({
+      shotId: 'shot_2',
+      purpose: 'video_take',
+      generationCount: 1,
+      referenceAssetId: null,
+    });
+    const baseCache = new StudioPreparedSubmissionCacheV2({ now: () => PREPARED_AT_MS });
+    baseCache.admit(unavailable);
+    const baseClaim = baseCache.claim('project_1', 'quote_1');
+    expect(baseClaim.option).toBe('baseOnly');
+    expect(baseClaim.session.request.cascadeChoices).toEqual(unavailable.request.cascadeChoices);
+    expect(baseClaim.session.options.withCascade).toBeNull();
+
+    const siblings = makeAdmission({ withCascadeQuoteId: 'quote_2' });
+    siblings.options.withCascade!.rateCardDigest = 'b'.repeat(64);
+    const siblingCache = new StudioPreparedSubmissionCacheV2({ now: () => PREPARED_AT_MS });
+    siblingCache.admit(siblings);
+    expect(siblingCache.claim('project_1', 'quote_2').quote.rateCardDigest).toBe('b'.repeat(64));
+  });
+
   it('stamps its own expiry and refuses project, revision, cascade, and provider-binding mismatches', () => {
     const stamps = makeAdmission();
     stamps.options.baseOnly.expiresAt = '2025-01-01T00:00:00.000Z';
@@ -384,14 +406,9 @@ describe('StudioPreparedSubmissionCacheV2', () => {
     const wrongRevision = makeAdmission();
     wrongRevision.options.baseOnly.projectRevision = 8;
     cases.push(wrongRevision);
-    const missingCascade = makeAdmission();
-    missingCascade.request.cascadeChoices.push({
-      shotId: 'shot_2',
-      purpose: 'video_take',
-      generationCount: 1,
-      referenceAssetId: null,
-    });
-    cases.push(missingCascade);
+    const unexpectedCascade = makeAdmission({ withCascadeQuoteId: 'quote_2' });
+    unexpectedCascade.request.cascadeChoices = [];
+    cases.push(unexpectedCascade);
     const missingBinding = makeAdmission();
     missingBinding.providerBindings = [];
     cases.push(missingBinding);

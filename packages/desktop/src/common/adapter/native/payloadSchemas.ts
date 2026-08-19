@@ -17,6 +17,9 @@ import {
   STUDIO_MAX_BIN_SHOT_ITEMS,
   STUDIO_MAX_BIN_TAKE_ITEMS,
   STUDIO_MAX_DIRTY_DRAFTS_REPORTED,
+  STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
+  STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
+  STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION,
   STUDIO_MAX_MUTATION_OPERATIONS,
   STUDIO_MAX_SHOTS_PER_BEAT,
   STUDIO_MAX_SHOT_SECONDS,
@@ -267,7 +270,7 @@ const presentationRecoveryCursorSchema = z
   .max(2048)
   .regex(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
 
-const studioExpectedRevisionSchema = z.number().finite().int().positive();
+const studioExpectedRevisionSchema = z.number().finite().int().positive().max(Number.MAX_SAFE_INTEGER);
 const studioCapturedPosterDataUrlMaxLength = Math.ceil((50 * 1024 * 1024) / 3) * 4 + 22;
 const studioCapturedPosterDataUrlSchema = z
   .string()
@@ -486,6 +489,46 @@ const studioV2ReferenceDecisionSchema = z
     ]),
   })
   .strict();
+const studioV2PrepareGenerationChoiceShape = {
+  shotId: safeIdSchema,
+  generationCount: z.number().finite().int().min(1).max(STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION),
+};
+const studioV2PrepareGenerationChoiceSchema = z.discriminatedUnion('purpose', [
+  z
+    .object({
+      ...studioV2PrepareGenerationChoiceShape,
+      purpose: z.literal('seed_still'),
+      referenceAssetId: safeIdSchema.nullable(),
+    })
+    .strict(),
+  z
+    .object({
+      ...studioV2PrepareGenerationChoiceShape,
+      purpose: z.literal('video_take'),
+      referenceAssetId: z.null(),
+    })
+    .strict(),
+]);
+const studioV2PrepareSubmissionSchema = z
+  .object({
+    ...studioV2MutationRequestShape,
+    originReferenceHandoffId: safeIdSchema.nullable(),
+    baseChoices: z.array(studioV2PrepareGenerationChoiceSchema).min(1).max(STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST),
+    cascadeChoices: z.array(studioV2PrepareGenerationChoiceSchema).max(STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST),
+  })
+  .strict()
+  .superRefine((request, context) => {
+    const choices = [...request.baseChoices, ...request.cascadeChoices];
+    if (choices.length > STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST) {
+      context.addIssue({ code: 'custom', message: 'generation item bound exceeded' });
+    }
+    if (new Set(choices.map((choice) => choice.shotId)).size > STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST) {
+      context.addIssue({ code: 'custom', message: 'generation shot bound exceeded' });
+    }
+    if (new Set(choices.map((choice) => `${choice.shotId}:${choice.purpose}`)).size !== choices.length) {
+      context.addIssue({ code: 'custom', message: 'duplicate generation choice' });
+    }
+  });
 
 export const INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE = '[adapter] Native IPC request rejected: invalid operation payload';
 export const INVALID_RENDERER_BRIDGE_QUERY_PAYLOAD_MESSAGE =
@@ -709,6 +752,11 @@ export const nativeBridgePayloadSchemas = {
   'creative-studio.list-reference-requests': studioV2ProjectRequestSchema,
   'creative-studio.decide-reference-request': studioV2ReferenceDecisionSchema,
   'creative-studio.list-reference-generation-handoffs': studioV2ProjectRequestSchema,
+  'creative-studio.prepare-submission': studioV2PrepareSubmissionSchema,
+  'creative-studio.confirm-submission': z.object({ ...studioV2MutationRequestShape, quoteId: safeIdSchema }).strict(),
+  'creative-studio.dismiss-reference-generation-handoff': z
+    .object({ ...studioV2MutationRequestShape, handoffId: safeIdSchema })
+    .strict(),
   'creative-studio.apply-authoring-batch': studioV2ApplyAuthoringBatchSchema,
   'creative-studio.undo-last': z.object({ ...studioV2MutationRequestShape, entryId: safeIdSchema }).strict(),
   'creative-studio.get-workspace-status': studioV2ProjectRequestSchema,

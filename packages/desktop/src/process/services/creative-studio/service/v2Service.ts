@@ -24,6 +24,8 @@ import {
   type StudioConfirmSubmissionRequestV2,
   type StudioConfirmSubmissionResultV2,
   type StudioDetachBriefReferenceRequest,
+  type StudioDismissReferenceGenerationHandoffRequestV2,
+  type StudioDismissReferenceGenerationHandoffResultV2,
   type StudioJobRequest,
   type StudioJobV2,
   type StudioMediaChoiceRef,
@@ -79,12 +81,17 @@ import {
   StudioProjectConfirmationError,
   type CreativeStudioStore,
   type StudioDecideReferenceRequestInputV2,
+  type StudioProjectConfirmationInputV2,
+  type StudioReferenceGenerationHandoffStoreV2,
   type StudioProjectStoreLoadResultV2,
 } from '../store';
 import {
   createStudioSpendAuthorizationV2,
-  deriveStudioSubmissionQuoteCoresV2,
+  deriveStudioSubmissionQuoteGraphV2,
   evaluateStudioBudgetV2,
+  priceStudioSubmissionQuoteGraphV2,
+  StudioPricingErrorV2,
+  StudioRateCardErrorV2,
   studioSubmissionQuoteCoresEqual,
   toStudioRendererSubmissionQuoteV2,
   type StudioRateCardV2,
@@ -224,6 +231,9 @@ export type CreativeStudioServiceV2 = {
   listReferenceRequests(input: { projectId: string }): Promise<StudioReferenceRequestV2[]>;
   decideReferenceRequest(input: StudioDecideReferenceRequestInputV2): Promise<StudioReferenceRequestDecisionV2>;
   listReferenceGenerationHandoffs(input: { projectId: string }): Promise<StudioRendererReferenceGenerationHandoffV2[]>;
+  dismissReferenceGenerationHandoff(
+    input: StudioDismissReferenceGenerationHandoffRequestV2
+  ): Promise<StudioDismissReferenceGenerationHandoffResultV2>;
   prepareSubmission(input: StudioPrepareSubmissionRequestV2): Promise<StudioRendererPreparedSubmissionOptionsV2>;
   confirmSubmission(input: StudioConfirmSubmissionRequestV2): Promise<StudioConfirmSubmissionResultV2>;
   retryConditioningFrame(input: StudioCascadeBarrierActionRequestV2): Promise<StudioRendererWorkspaceStatusV2>;
@@ -250,7 +260,7 @@ export type CreativeStudioServiceV2Deps = {
   getStudioServerScriptPath?: () => string;
   ensureDirectorCommandMailbox?: (projectId: string) => Promise<void>;
   createConnectionId?: () => string;
-  rateCard?: () => Promise<StudioRateCardV2>;
+  rateCard?: (generation: StudioGenerationRouteCatalog) => Promise<StudioRateCardV2>;
   preparedSubmissionCache?: StudioPreparedSubmissionCacheV2;
   createQuoteId?: () => string;
   createJobId?: () => string;
@@ -263,6 +273,25 @@ const invalid = (message: string): CreativeStudioStoreError => new CreativeStudi
 
 const isSafeId = (value: unknown): value is string => typeof value === 'string' && SAFE_ID.test(value);
 
+const rethrowPricingFailure = (error: unknown): never => {
+  if (error instanceof StudioRateCardErrorV2) {
+    throw new CreativeStudioServiceError('invalid_route');
+  }
+  if (error instanceof StudioPricingErrorV2) {
+    if (
+      error.code === 'missing_route' ||
+      error.code === 'rate_not_found' ||
+      error.code === 'route_kind_mismatch' ||
+      error.code === 'invalid_rate_card' ||
+      error.code === 'mixed_currency'
+    ) {
+      throw new CreativeStudioServiceError('invalid_route');
+    }
+    throw invalid(`Invalid Studio submission: ${error.code}`);
+  }
+  throw error;
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -272,6 +301,72 @@ const hasExactKeys = (value: Record<string, unknown>, keys: readonly string[]): 
     Reflect.ownKeys(value).length === expected.size &&
     Reflect.ownKeys(value).every((key) => typeof key === 'string' && expected.has(key))
   );
+};
+
+const isExactDenseArray = (value: unknown): value is unknown[] => {
+  if (!Array.isArray(value)) return false;
+  const keys = Reflect.ownKeys(value);
+  if (keys.length !== value.length + 1 || !keys.includes('length')) return false;
+  for (let index = 0; index < value.length; index += 1) {
+    if (!Object.hasOwn(value, index)) return false;
+  }
+  return true;
+};
+
+const assertReferenceHandoffPrepareEnvelope: (
+  input: unknown
+) => asserts input is StudioPrepareSubmissionRequestV2 & { originReferenceHandoffId: string } = (input) => {
+  if (
+    !isRecord(input) ||
+    !hasExactKeys(input, [
+      'projectId',
+      'expectedRevision',
+      'originReferenceHandoffId',
+      'baseChoices',
+      'cascadeChoices',
+    ]) ||
+    !isSafeId(input.projectId) ||
+    !isSafeId(input.originReferenceHandoffId) ||
+    !Number.isSafeInteger(input.expectedRevision) ||
+    (input.expectedRevision as number) < 1 ||
+    !isExactDenseArray(input.baseChoices) ||
+    input.baseChoices.length === 0 ||
+    !isExactDenseArray(input.cascadeChoices) ||
+    input.cascadeChoices.length !== 0
+  ) {
+    throw invalid('Invalid Studio reference handoff submission');
+  }
+  for (const choice of input.baseChoices) {
+    if (
+      !isRecord(choice) ||
+      !hasExactKeys(choice, ['shotId', 'purpose', 'generationCount', 'referenceAssetId']) ||
+      !isSafeId(choice.shotId) ||
+      choice.purpose !== 'seed_still' ||
+      choice.generationCount !== 1 ||
+      choice.referenceAssetId !== null
+    ) {
+      throw invalid('Invalid Studio reference handoff submission');
+    }
+  }
+};
+
+const assertExactOpenReferenceHandoff = (
+  request: StudioPrepareSubmissionRequestV2 & { originReferenceHandoffId: string },
+  handoff: StudioReferenceGenerationHandoffStoreV2 | null
+): void => {
+  if (
+    handoff === null ||
+    handoff.receipt !== null ||
+    handoff.request.projectId !== request.projectId ||
+    handoff.decision.projectId !== request.projectId ||
+    handoff.decision.requestId !== handoff.request.id ||
+    handoff.decision.outcome.handoffId !== request.originReferenceHandoffId ||
+    !jsonEqual(handoff.request.shotIds, handoff.decision.outcome.shotIds) ||
+    handoff.decision.outcome.shotIds.length !== request.baseChoices.length ||
+    !handoff.decision.outcome.shotIds.every((shotId, index) => request.baseChoices[index]?.shotId === shotId)
+  ) {
+    throw invalid('Invalid Studio reference handoff submission');
+  }
 };
 
 const defaultId = (prefix: string): string => `${prefix}_${randomUUID().replaceAll('-', '')}`;
@@ -600,6 +695,43 @@ const quotedItems = (
   quote: Pick<StudioSubmissionQuoteCore, 'baseItems' | 'cascadeItems'>
 ): StudioQuotedGeneration[] => [...quote.baseItems, ...quote.cascadeItems];
 
+const assertReferenceHandoffProjectCurrent = (
+  project: StudioProjectV2,
+  request: StudioPrepareSubmissionRequestV2 & { originReferenceHandoffId: string }
+): void => {
+  if (project.id !== request.projectId || project.revision !== request.expectedRevision) {
+    throw new CreativeStudioStoreError('stale_project', 'Studio project has changed');
+  }
+  if (
+    project.spendAuthorizations.some(
+      (authorization) => authorization.originReferenceHandoffId === request.originReferenceHandoffId
+    )
+  ) {
+    throw invalid('Studio reference handoff is already authorized');
+  }
+  const locations = new Map<string, number>();
+  let filmIndex = 0;
+  for (const beatId of project.beatOrder) {
+    const beat = project.beats[beatId];
+    if (beat === undefined) throw invalid('Invalid Studio reference handoff project');
+    for (const shotId of beat.shotOrder) {
+      if (project.shots[shotId] === undefined || locations.has(shotId)) {
+        throw invalid('Invalid Studio reference handoff project');
+      }
+      locations.set(shotId, filmIndex);
+      filmIndex += 1;
+    }
+  }
+  let previousPosition = -1;
+  for (const choice of request.baseChoices) {
+    const position = locations.get(choice.shotId);
+    if (position === undefined || position <= previousPosition) {
+      throw invalid('Invalid Studio reference handoff shot order');
+    }
+    previousPosition = position;
+  }
+};
+
 const quotedDuration = (item: StudioQuotedGeneration): number =>
   item.requestPlan.kind === 'resolved'
     ? item.requestPlan.snapshot.durationSeconds
@@ -643,6 +775,20 @@ const resolveProviderBindings = (
       provider: { providerId: route.providerId, adapterId: route.adapterId, model: route.model },
     };
   });
+
+const resolveQuoteAuthority = (
+  generation: StudioGenerationRouteCatalog,
+  project: StudioProjectV2,
+  quote: Pick<StudioSubmissionQuoteCore, 'baseItems' | 'cascadeItems'>
+): Pick<StudioSpendAuthorization, 'providerBindings'> & {
+  cancellationPolicies: Array<{ itemId: string; policy: StudioCancellationPolicy }>;
+} => ({
+  providerBindings: resolveProviderBindings(generation, project, quote),
+  cancellationPolicies: quotedItems(quote).map((item) => ({
+    itemId: item.id,
+    policy: resolveQuotedRoute(generation, project, item).cancellationPolicy,
+  })),
+});
 
 const rendererRouteLookup =
   (
@@ -859,9 +1005,13 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
   const assertServiceActive = (claim?: StudioPreparedSubmissionClaimV2): void => {
     if (disposed || (claim !== undefined && !activeClaims.has(claim))) throw cacheFailure('quote_not_found');
   };
-  const loadRateCard = async (): Promise<StudioRateCardV2> => {
+  const loadRateCard = async (generation: StudioGenerationRouteCatalog): Promise<StudioRateCardV2> => {
     if (deps.rateCard === undefined) throw new CreativeStudioServiceError('provider_error');
-    return deps.rateCard();
+    try {
+      return await deps.rateCard(generation);
+    } catch (error) {
+      return rethrowPricingFailure(error);
+    }
   };
   const loadSupported = async (projectId: string): Promise<StudioProjectV2> =>
     supportedProject(await deps.store.getProjectV2(projectId));
@@ -1556,19 +1706,78 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
         );
     },
 
+    async dismissReferenceGenerationHandoff(input): Promise<StudioDismissReferenceGenerationHandoffResultV2> {
+      assertServiceActive();
+      if (!isRecord(input) || !hasExactKeys(input, ['projectId', 'expectedRevision', 'handoffId'])) {
+        throw invalid('Invalid Studio reference handoff dismissal');
+      }
+      assertSafeId(input.projectId, 'project id');
+      assertSafeId(input.handoffId, 'reference handoff id');
+      assertRevision(input.expectedRevision);
+      const completed = await deps.store.recordReferenceGenerationHandoffReceiptV2({
+        projectId: input.projectId,
+        handoffId: input.handoffId,
+        expectedRevision: input.expectedRevision,
+        result: { kind: 'dismissed' },
+      });
+      if (completed.receipt?.result.kind !== 'dismissed') {
+        throw new CreativeStudioStoreError('storage_error', 'Studio reference handoff dismissal was not persisted');
+      }
+      return { status: 'dismissed', completedAt: completed.receipt.completedAt };
+    },
+
     async prepareSubmission(input): Promise<StudioRendererPreparedSubmissionOptionsV2> {
       assertServiceActive();
-      if (!isRecord(input) || input.originReferenceHandoffId !== null) {
-        throw invalid('Invalid Studio submission origin');
+      if (!isRecord(input)) throw invalid('Invalid Studio submission request');
+      let exactHandoffRequest: (StudioPrepareSubmissionRequestV2 & { originReferenceHandoffId: string }) | null = null;
+      if (input.originReferenceHandoffId !== null) {
+        assertReferenceHandoffPrepareEnvelope(input);
+        const handoff = await deps.store.readReferenceGenerationHandoffV2(
+          input.projectId,
+          input.originReferenceHandoffId
+        );
+        assertExactOpenReferenceHandoff(input, handoff);
+        exactHandoffRequest = input;
       }
       const projectId = input.projectId;
       assertSafeId(projectId, 'project id');
+      assertRevision(input.expectedRevision);
       const project = await loadSupported(projectId);
-      const rateCard = await loadRateCard();
-      const derived = deriveStudioSubmissionQuoteCoresV2({ project, request: input, rateCard });
+      if (project.id !== projectId || project.revision !== input.expectedRevision) {
+        throw new CreativeStudioStoreError('stale_project', 'Studio project has changed');
+      }
+      if (exactHandoffRequest !== null) {
+        assertReferenceHandoffProjectCurrent(project, exactHandoffRequest);
+      }
+      let graph;
+      try {
+        graph = deriveStudioSubmissionQuoteGraphV2({ project, request: input });
+      } catch (error) {
+        return rethrowPricingFailure(error);
+      }
       const generation = await listGenerationRoutes();
+      const rateCard = await loadRateCard(generation);
+      let derived;
+      try {
+        derived = priceStudioSubmissionQuoteGraphV2({ project, graph, rateCard });
+      } catch (error) {
+        return rethrowPricingFailure(error);
+      }
+
+      const baseAuthority = resolveQuoteAuthority(generation, project, derived.baseOnly);
+      let withCascadeCore = derived.withCascade;
+      let authority = baseAuthority;
+      if (withCascadeCore !== null) {
+        try {
+          authority = resolveQuoteAuthority(generation, project, withCascadeCore);
+        } catch (error) {
+          if (!(error instanceof CreativeStudioServiceError) || error.code !== 'invalid_route') throw error;
+          withCascadeCore = null;
+        }
+      }
+
       const baseQuoteId = createQuoteId();
-      const cascadeQuoteId = derived.withCascade === null ? null : createQuoteId();
+      const cascadeQuoteId = withCascadeCore === null ? null : createQuoteId();
       if (
         !isSafeId(baseQuoteId) ||
         (cascadeQuoteId !== null && (!isSafeId(cascadeQuoteId) || cascadeQuoteId === baseQuoteId))
@@ -1578,21 +1787,13 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       const options = {
         baseOnly: createQuote(derived.baseOnly, baseQuoteId),
         withCascade:
-          derived.withCascade === null || cascadeQuoteId === null
-            ? null
-            : createQuote(derived.withCascade, cascadeQuoteId),
+          withCascadeCore === null || cascadeQuoteId === null ? null : createQuote(withCascadeCore, cascadeQuoteId),
       };
-      const bindingQuote = options.withCascade ?? options.baseOnly;
-      const providerBindings = resolveProviderBindings(generation, project, bindingQuote);
-      const cancellationPolicies = quotedItems(bindingQuote).map((item) => ({
-        itemId: item.id,
-        policy: resolveQuotedRoute(generation, project, item).cancellationPolicy,
-      }));
       const session = preparedSubmissionCache.admit({
         request: derived.request,
         options,
-        providerBindings,
-        cancellationPolicies,
+        providerBindings: authority.providerBindings,
+        cancellationPolicies: authority.cancellationPolicies,
       });
       return projectPreparedOptions(project, generation, session.options);
     },
@@ -1609,22 +1810,36 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       activeClaims.add(claim);
       let durable = false;
       try {
-        const committed = await deps.store.confirmProjectV2<
+        const confirmation: StudioProjectConfirmationInputV2<
           ConfirmationRevalidation,
           StudioDispatchAuthorizedJobsRequestV2
-        >({
+        > = {
           projectId: input.projectId,
           expectedRevision: input.expectedRevision,
           expiresAt: claim.quote.expiresAt,
           revalidate: async (project) => {
             assertServiceActive(claim);
             const mutableProject = structuredClone(project) as StudioProjectV2;
-            const rateCard = await loadRateCard();
-            const derived = deriveStudioSubmissionQuoteCoresV2({
-              project: mutableProject,
-              request: claim.session.request,
-              rateCard,
-            });
+            if (!evaluateStudioBudgetV2(quoteCore(claim.quote), mutableProject.spendPolicy).allowed) {
+              throw invalid('Studio spend policy refused the quote');
+            }
+            let graph;
+            try {
+              graph = deriveStudioSubmissionQuoteGraphV2({
+                project: mutableProject,
+                request: claim.session.request,
+              });
+            } catch (error) {
+              return rethrowPricingFailure(error);
+            }
+            const generation = await listGenerationRoutes();
+            const rateCard = await loadRateCard(generation);
+            let derived;
+            try {
+              derived = priceStudioSubmissionQuoteGraphV2({ project: mutableProject, graph, rateCard });
+            } catch (error) {
+              return rethrowPricingFailure(error);
+            }
             const currentCore = claim.option === 'baseOnly' ? derived.baseOnly : derived.withCascade;
             if (currentCore === null || !studioSubmissionQuoteCoresEqual(quoteCore(claim.quote), currentCore)) {
               throw invalid('Studio quote is stale');
@@ -1632,15 +1847,12 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
             if (!evaluateStudioBudgetV2(currentCore, mutableProject.spendPolicy).allowed) {
               throw invalid('Studio spend policy refused the quote');
             }
-            const generation = await listGenerationRoutes();
-            const providerBindings = resolveProviderBindings(generation, mutableProject, currentCore);
+            const currentAuthority = resolveQuoteAuthority(generation, mutableProject, currentCore);
+            const providerBindings = currentAuthority.providerBindings;
             if (!jsonEqual(providerBindings, exactSelectedBindings(claim))) {
               throw new CreativeStudioServiceError('invalid_route');
             }
-            const cancellationPolicies = quotedItems(currentCore).map((item) => ({
-              itemId: item.id,
-              policy: resolveQuotedRoute(generation, mutableProject, item).cancellationPolicy,
-            }));
+            const cancellationPolicies = currentAuthority.cancellationPolicies;
             if (!jsonEqual(cancellationPolicies, exactSelectedCancellationPolicies(claim))) {
               throw new CreativeStudioServiceError('invalid_route');
             }
@@ -1650,7 +1862,16 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
           buildCommit: (project, revalidation, confirmedAt) =>
             buildConfirmedProject(project, structuredClone(revalidation) as ConfirmationRevalidation, confirmedAt),
           commitTag: `confirm_submission:${claim.quote.id}`,
-        });
+        };
+        const committed =
+          claim.quote.originReferenceHandoffId === null
+            ? await deps.store.confirmProjectV2<ConfirmationRevalidation, StudioDispatchAuthorizedJobsRequestV2>(
+                confirmation
+              )
+            : await deps.store.confirmReferenceGenerationHandoffV2<
+                ConfirmationRevalidation,
+                StudioDispatchAuthorizedJobsRequestV2
+              >({ ...confirmation, handoffId: claim.quote.originReferenceHandoffId });
         durable = true;
         activeClaims.delete(claim);
         preparedSubmissionCache.consume(claim);

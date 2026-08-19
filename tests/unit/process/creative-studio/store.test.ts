@@ -3539,6 +3539,483 @@ describe('schema-2 creative studio project store', () => {
     );
   });
 
+  it('confirms one open reference handoff by committing authorization and receipt under one project queue', async () => {
+    const ids = ['reference_confirm_v2', 'handoff_confirm_v2'];
+    const { store } = createStoreV2({
+      createId: () => ids.shift() ?? 'unexpected_reference_id',
+      now: () => '2026-08-17T12:00:03.000Z',
+    });
+    const project = await addActiveReferenceShotsV2(store, await store.createProjectV2(inputV2));
+    const generated = await seedGenerationHandoffV2(store, project, { requestId: 'request_confirm_v2' });
+
+    const confirmed = await store.confirmReferenceGenerationHandoffV2({
+      projectId: project.id,
+      handoffId: generated.handoffId,
+      expectedRevision: project.revision,
+      expiresAt: '2026-08-17T12:05:00.000Z',
+      revalidate: async () => ({ routeId: 'image_route' }),
+      assertActive: () => undefined,
+      buildCommit: (candidate) => ({
+        project: addReferenceAuthorizationV2(candidate, generated.handoffId),
+        dispatch: { projectId: project.id, jobIds: [`job_${generated.handoffId}`] },
+      }),
+      commitTag: `confirm_submission:authorization_${generated.handoffId}`,
+    });
+
+    expect(confirmed.project).toMatchObject({
+      revision: project.revision + 1,
+      spendAuthorizations: [
+        expect.objectContaining({
+          id: `authorization_${generated.handoffId}`,
+          originReferenceHandoffId: generated.handoffId,
+        }),
+      ],
+    });
+    expect(confirmed.dispatch).toEqual({
+      projectId: project.id,
+      jobIds: [`job_${generated.handoffId}`],
+    });
+    await expect(store.readReferenceGenerationHandoffV2(project.id, generated.handoffId)).resolves.toMatchObject({
+      receipt: {
+        completedAt: '2026-08-17T12:00:03.000Z',
+        result: { kind: 'confirmed', authorizationId: `authorization_${generated.handoffId}` },
+      },
+    });
+    expect(readdirSync(generated.directories.slots)).toEqual([]);
+    const revalidateCompleted = vi.fn(async () => ({ routeId: 'image_route' }));
+    await expect(
+      store.confirmReferenceGenerationHandoffV2({
+        projectId: project.id,
+        handoffId: generated.handoffId,
+        expectedRevision: confirmed.project.revision,
+        expiresAt: '2026-08-17T12:05:00.000Z',
+        revalidate: revalidateCompleted,
+        assertActive: () => undefined,
+        buildCommit: (candidate) => ({ project: candidate, dispatch: { jobIds: [] } }),
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+    expect(revalidateCompleted).not.toHaveBeenCalled();
+  });
+
+  it('refuses a handoff confirmation whose project commit omits the exact origin authorization', async () => {
+    const ids = ['reference_confirm_refusal_v2', 'handoff_confirm_refusal_v2'];
+    const { store } = createStoreV2({
+      createId: () => ids.shift() ?? 'unexpected_reference_id',
+      now: () => '2026-08-17T12:00:03.000Z',
+    });
+    const project = await addActiveReferenceShotsV2(store, await store.createProjectV2(inputV2));
+    const generated = await seedGenerationHandoffV2(store, project, { requestId: 'request_confirm_refusal_v2' });
+    const before = snapshotTreeV2(path.join(rootDir, project.id));
+
+    await expect(
+      store.confirmReferenceGenerationHandoffV2({
+        projectId: project.id,
+        handoffId: generated.handoffId,
+        expectedRevision: project.revision,
+        expiresAt: '2026-08-17T12:05:00.000Z',
+        revalidate: async () => ({ routeId: 'image_route' }),
+        assertActive: () => undefined,
+        buildCommit: (candidate) => ({ project: candidate, dispatch: { jobIds: [] } }),
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+
+    expect(snapshotTreeV2(path.join(rootDir, project.id))).toEqual(before);
+    const missingRevalidation = vi.fn(async () => ({ routeId: 'image_route' }));
+    await expect(
+      store.confirmReferenceGenerationHandoffV2({
+        projectId: project.id,
+        handoffId: 'missing_handoff',
+        expectedRevision: project.revision,
+        expiresAt: '2026-08-17T12:05:00.000Z',
+        revalidate: missingRevalidation,
+        assertActive: () => undefined,
+        buildCommit: (candidate) => ({ project: candidate, dispatch: { jobIds: [] } }),
+      })
+    ).rejects.toMatchObject({ code: 'not_found' });
+    expect(missingRevalidation).not.toHaveBeenCalled();
+
+    await expect(
+      store.confirmReferenceGenerationHandoffV2({
+        projectId: project.id,
+        handoffId: generated.handoffId,
+        expectedRevision: project.revision,
+        expiresAt: '2026-08-17T12:05:00.000Z',
+        revalidate: async () => ({ routeId: 'image_route' }),
+        assertActive: () => undefined,
+        buildCommit: (candidate) => {
+          const duplicated = addReferenceAuthorizationV2(candidate, generated.handoffId);
+          duplicated.spendAuthorizations.push({
+            ...structuredClone(duplicated.spendAuthorizations[0]!),
+            id: 'duplicate_origin_authorization',
+          });
+          return { project: duplicated, dispatch: { jobIds: [] } };
+        },
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+    expect(snapshotTreeV2(path.join(rootDir, project.id))).toEqual(before);
+  });
+
+  it('refuses a handoff decision inode replaced during revalidation without changing durable bytes', async () => {
+    const ids = ['reference_confirm_replaced_v2', 'handoff_confirm_replaced_v2'];
+    const { store } = createStoreV2({
+      createId: () => ids.shift() ?? 'unexpected_reference_id',
+      now: () => '2026-08-17T12:00:03.000Z',
+    });
+    const project = await addActiveReferenceShotsV2(store, await store.createProjectV2(inputV2));
+    const generated = await seedGenerationHandoffV2(store, project, { requestId: 'request_confirm_replaced_v2' });
+    const projectFile = path.join(rootDir, project.id, 'project.json');
+    const projectBefore = readFileSync(projectFile);
+    const decisionFile = path.join(generated.directories.decisions, `${generated.request.id}.json`);
+
+    await expect(
+      store.confirmReferenceGenerationHandoffV2({
+        projectId: project.id,
+        handoffId: generated.handoffId,
+        expectedRevision: project.revision,
+        expiresAt: '2026-08-17T12:05:00.000Z',
+        revalidate: async () => {
+          const replacement = `${decisionFile}.external`;
+          writeFileSync(replacement, readFileSync(decisionFile));
+          renameSync(replacement, decisionFile);
+          return { routeId: 'image_route' };
+        },
+        assertActive: () => undefined,
+        buildCommit: (candidate) => ({
+          project: addReferenceAuthorizationV2(candidate, generated.handoffId),
+          dispatch: { jobIds: [] },
+        }),
+      })
+    ).rejects.toMatchObject({ code: 'storage_error' });
+
+    expect(readFileSync(projectFile)).toEqual(projectBefore);
+    expect(readdirSync(generated.directories.receipts)).toEqual([]);
+  });
+
+  it('rechecks the active confirmation session after the final handoff authority proof', async () => {
+    const ids = ['reference_confirm_cancelled_v2', 'handoff_confirm_cancelled_v2'];
+    const base = createStoreV2({
+      createId: () => ids.shift() ?? 'unexpected_reference_id',
+      now: () => '2026-08-17T12:00:03.000Z',
+    }).store;
+    const project = await addActiveReferenceShotsV2(base, await base.createProjectV2(inputV2));
+    const generated = await seedGenerationHandoffV2(base, project, { requestId: 'request_confirm_cancelled_v2' });
+    const projectDirectory = realpathSync(path.join(rootDir, project.id));
+    const projectFile = path.join(projectDirectory, 'project.json');
+    const before = snapshotTreeV2(path.join(rootDir, project.id));
+    const closeError = new Error('prepared handoff confirmation closed');
+    let activeChecks = 0;
+    let projectLstatsWhileTemporary = 0;
+    let closed = false;
+    const closingFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver) as unknown;
+        if (property !== 'lstat' || typeof value !== 'function') return value;
+        return (...args: unknown[]): unknown => {
+          if (
+            String(args[0]) === projectFile &&
+            readdirSync(projectDirectory).some((name) => name.startsWith('project.json.') && name.endsWith('.tmp'))
+          ) {
+            projectLstatsWhileTemporary += 1;
+            if (projectLstatsWhileTemporary === 3) closed = true;
+          }
+          return Reflect.apply(value, target, args);
+        };
+      },
+    }) as typeof nodeFs;
+    const store = createCreativeStudioStore({
+      rootDir,
+      fs: closingFs,
+      now: () => '2026-08-17T12:00:03.000Z',
+      logError: () => undefined,
+    });
+
+    await expect(
+      store.confirmReferenceGenerationHandoffV2({
+        projectId: project.id,
+        handoffId: generated.handoffId,
+        expectedRevision: project.revision,
+        expiresAt: '2026-08-17T12:05:00.000Z',
+        revalidate: async () => ({ routeId: 'image_route' }),
+        assertActive: () => {
+          activeChecks += 1;
+          if (closed) throw closeError;
+        },
+        buildCommit: (candidate) => ({
+          project: addReferenceAuthorizationV2(candidate, generated.handoffId),
+          dispatch: { jobIds: [] },
+        }),
+      })
+    ).rejects.toMatchObject({ code: 'storage_error', message: closeError.message });
+
+    expect(activeChecks).toBe(5);
+    expect(closed).toBe(true);
+    expect(snapshotTreeV2(path.join(rootDir, project.id))).toEqual(before);
+  });
+
+  it('serializes confirm and dismiss so exactly one terminal handoff outcome wins', async () => {
+    const ids = [
+      'reference_confirm_wins_v2',
+      'handoff_confirm_wins_v2',
+      'reference_dismiss_wins_v2',
+      'handoff_dismiss_wins_v2',
+    ];
+    const { store } = createStoreV2({
+      createId: () => ids.shift() ?? 'unexpected_reference_id',
+      now: () => '2026-08-17T12:00:03.000Z',
+    });
+    const confirmProject = await addActiveReferenceShotsV2(store, await store.createProjectV2(inputV2));
+    const confirmHandoff = await seedGenerationHandoffV2(store, confirmProject, {
+      requestId: 'request_confirm_wins_v2',
+    });
+    let releaseRevalidation!: () => void;
+    const revalidationGate = new Promise<void>((resolve) => {
+      releaseRevalidation = resolve;
+    });
+    let markRevalidationStarted!: () => void;
+    const revalidationStarted = new Promise<void>((resolve) => {
+      markRevalidationStarted = resolve;
+    });
+    const confirming = store.confirmReferenceGenerationHandoffV2({
+      projectId: confirmProject.id,
+      handoffId: confirmHandoff.handoffId,
+      expectedRevision: confirmProject.revision,
+      expiresAt: '2026-08-17T12:05:00.000Z',
+      revalidate: async () => {
+        markRevalidationStarted();
+        await revalidationGate;
+        return { routeId: 'image_route' };
+      },
+      assertActive: () => undefined,
+      buildCommit: (candidate) => ({
+        project: addReferenceAuthorizationV2(candidate, confirmHandoff.handoffId),
+        dispatch: { jobIds: [`job_${confirmHandoff.handoffId}`] },
+      }),
+    });
+    await revalidationStarted;
+    const losingDismiss = store.recordReferenceGenerationHandoffReceiptV2({
+      projectId: confirmProject.id,
+      handoffId: confirmHandoff.handoffId,
+      expectedRevision: confirmProject.revision,
+      result: { kind: 'dismissed' },
+    });
+    releaseRevalidation();
+    const [confirmOutcome, losingDismissOutcome] = await Promise.allSettled([confirming, losingDismiss]);
+    expect(confirmOutcome).toMatchObject({
+      status: 'fulfilled',
+      value: { project: { revision: confirmProject.revision + 1 } },
+    });
+    expect(losingDismissOutcome).toMatchObject({ status: 'rejected', reason: { code: 'invalid_payload' } });
+
+    const dismissProject = await addActiveReferenceShotsV2(store, await store.createProjectV2(inputV2));
+    const dismissHandoff = await seedGenerationHandoffV2(store, dismissProject, {
+      requestId: 'request_dismiss_wins_v2',
+    });
+    const projectBefore = readFileSync(path.join(rootDir, dismissProject.id, 'project.json'));
+    const revalidate = vi.fn(async () => ({ routeId: 'image_route' }));
+    const winningDismiss = store.recordReferenceGenerationHandoffReceiptV2({
+      projectId: dismissProject.id,
+      handoffId: dismissHandoff.handoffId,
+      expectedRevision: dismissProject.revision,
+      result: { kind: 'dismissed' },
+    });
+    const losingConfirm = store.confirmReferenceGenerationHandoffV2({
+      projectId: dismissProject.id,
+      handoffId: dismissHandoff.handoffId,
+      expectedRevision: dismissProject.revision,
+      expiresAt: '2026-08-17T12:05:00.000Z',
+      revalidate,
+      assertActive: () => undefined,
+      buildCommit: (candidate) => ({
+        project: addReferenceAuthorizationV2(candidate, dismissHandoff.handoffId),
+        dispatch: { jobIds: [] },
+      }),
+    });
+    const [winningDismissOutcome, losingConfirmOutcome] = await Promise.allSettled([winningDismiss, losingConfirm]);
+    expect(winningDismissOutcome).toMatchObject({
+      status: 'fulfilled',
+      value: { receipt: { result: { kind: 'dismissed' } } },
+    });
+    expect(losingConfirmOutcome).toMatchObject({ status: 'rejected', reason: { code: 'invalid_payload' } });
+    expect(revalidate).not.toHaveBeenCalled();
+    expect(readFileSync(path.join(rootDir, dismissProject.id, 'project.json'))).toEqual(projectBefore);
+  });
+
+  it('repairs a confirmed receipt after publication is interrupted following the project commit', async () => {
+    const ids = ['reference_confirm_crash_v2', 'handoff_confirm_crash_v2'];
+    const base = createStoreV2({
+      createId: () => ids.shift() ?? 'unexpected_reference_id',
+      now: () => '2026-08-17T12:00:03.000Z',
+    }).store;
+    const project = await addActiveReferenceShotsV2(base, await base.createProjectV2(inputV2));
+    const generated = await seedGenerationHandoffV2(base, project, { requestId: 'request_confirm_crash_v2' });
+    const receiptFile = path.join(realpathSync(generated.directories.receipts), `${generated.handoffId}.json`);
+    const crashing = createCreativeStudioStore({
+      rootDir,
+      fs: failFileSystemOnceV2((method, args) => method === 'link' && String(args[1]) === receiptFile),
+      now: () => '2026-08-17T12:00:03.000Z',
+      logError: () => undefined,
+    });
+
+    await expect(
+      crashing.confirmReferenceGenerationHandoffV2({
+        projectId: project.id,
+        handoffId: generated.handoffId,
+        expectedRevision: project.revision,
+        expiresAt: '2026-08-17T12:05:00.000Z',
+        revalidate: async () => ({ routeId: 'image_route' }),
+        assertActive: () => undefined,
+        buildCommit: (candidate) => ({
+          project: addReferenceAuthorizationV2(candidate, generated.handoffId),
+          dispatch: { jobIds: [`job_${generated.handoffId}`] },
+        }),
+      })
+    ).rejects.toMatchObject({ code: 'storage_error' });
+    expect(readJson<StudioProjectV2>(path.join(rootDir, project.id, 'project.json'))).toMatchObject({
+      revision: project.revision + 1,
+      spendAuthorizations: [expect.objectContaining({ originReferenceHandoffId: generated.handoffId })],
+    });
+
+    const restarted = createStoreV2({ now: () => '2026-08-17T12:00:04.000Z' }).store;
+    await expect(restarted.getProjectV2(project.id)).resolves.toMatchObject({
+      status: 'supported',
+      project: { revision: project.revision + 1 },
+    });
+    await expect(restarted.readReferenceGenerationHandoffV2(project.id, generated.handoffId)).resolves.toMatchObject({
+      receipt: {
+        completedAt: '2026-08-17T12:00:03.000Z',
+        result: { kind: 'confirmed', authorizationId: `authorization_${generated.handoffId}` },
+      },
+    });
+    expect(readdirSync(generated.directories.slots)).toEqual([]);
+  });
+
+  it('terminally rechecks project CAS after delayed handoff sidecar proofs', async () => {
+    const ids = ['reference_confirm_project_race_v2', 'handoff_confirm_project_race_v2'];
+    const base = createStoreV2({
+      createId: () => ids.shift() ?? 'unexpected_reference_id',
+      now: () => '2026-08-17T12:00:03.000Z',
+    }).store;
+    const project = await addActiveReferenceShotsV2(base, await base.createProjectV2(inputV2));
+    const generated = await seedGenerationHandoffV2(base, project, { requestId: 'request_confirm_project_race_v2' });
+    const projectDirectory = realpathSync(path.join(rootDir, project.id));
+    const projectFile = path.join(projectDirectory, 'project.json');
+    const decisionFile = path.join(realpathSync(generated.directories.decisions), `${generated.request.id}.json`);
+    const replacement = { ...readJson<StudioProjectV2>(projectFile), name: 'External project winner' };
+    const replacementBytes = `${JSON.stringify(replacement, null, 2)}\n`;
+    let replaced = false;
+    const racingFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver) as unknown;
+        if (property !== 'lstat' || typeof value !== 'function') return value;
+        return (...args: unknown[]): unknown => {
+          if (
+            !replaced &&
+            String(args[0]) === decisionFile &&
+            readdirSync(projectDirectory).some((name) => name.startsWith('project.json.') && name.endsWith('.tmp'))
+          ) {
+            const external = `${projectFile}.external`;
+            writeFileSync(external, replacementBytes);
+            renameSync(external, projectFile);
+            replaced = true;
+          }
+          return Reflect.apply(value, target, args);
+        };
+      },
+    }) as typeof nodeFs;
+    const racing = createCreativeStudioStore({
+      rootDir,
+      fs: racingFs,
+      now: () => '2026-08-17T12:00:03.000Z',
+      logError: () => undefined,
+    });
+
+    await expect(
+      racing.confirmReferenceGenerationHandoffV2({
+        projectId: project.id,
+        handoffId: generated.handoffId,
+        expectedRevision: project.revision,
+        expiresAt: '2026-08-17T12:05:00.000Z',
+        revalidate: async () => ({ routeId: 'image_route' }),
+        assertActive: () => undefined,
+        buildCommit: (candidate) => ({
+          project: addReferenceAuthorizationV2(candidate, generated.handoffId),
+          dispatch: { jobIds: [] },
+        }),
+      })
+    ).rejects.toMatchObject({ code: 'storage_error' });
+
+    expect(replaced).toBe(true);
+    expect(readFileSync(projectFile, 'utf8')).toBe(replacementBytes);
+    expect(readJson<StudioProjectV2>(projectFile).spendAuthorizations).toEqual([]);
+    expect(readdirSync(generated.directories.receipts)).toEqual([]);
+  });
+
+  it('refuses authorization when an external dismissal wins after the first write proof', async () => {
+    const ids = ['reference_confirm_receipt_race_v2', 'handoff_confirm_receipt_race_v2'];
+    const base = createStoreV2({
+      createId: () => ids.shift() ?? 'unexpected_reference_id',
+      now: () => '2026-08-17T12:00:03.000Z',
+    }).store;
+    const project = await addActiveReferenceShotsV2(base, await base.createProjectV2(inputV2));
+    const generated = await seedGenerationHandoffV2(base, project, { requestId: 'request_confirm_receipt_race_v2' });
+    const projectFile = path.join(realpathSync(path.join(rootDir, project.id)), 'project.json');
+    const before = readFileSync(projectFile);
+    const receiptFile = path.join(realpathSync(generated.directories.receipts), `${generated.handoffId}.json`);
+    let temporaryProofs = 0;
+    let dismissed = false;
+    const racingFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver) as unknown;
+        if (property !== 'lstat' || typeof value !== 'function') return value;
+        return (...args: unknown[]): unknown => {
+          const file = String(args[0]);
+          if (file.startsWith(`${projectFile}.`) && file.endsWith('.tmp')) {
+            temporaryProofs += 1;
+            if (temporaryProofs === 2) {
+              writeFileSync(
+                receiptFile,
+                JSON.stringify({
+                  schemaVersion: 2,
+                  handoffId: generated.handoffId,
+                  requestId: generated.request.id,
+                  completedAt: '2026-08-17T12:00:03.000Z',
+                  result: { kind: 'dismissed' },
+                })
+              );
+              dismissed = true;
+            }
+          }
+          return Reflect.apply(value, target, args);
+        };
+      },
+    }) as typeof nodeFs;
+    const racing = createCreativeStudioStore({
+      rootDir,
+      fs: racingFs,
+      now: () => '2026-08-17T12:00:03.000Z',
+      logError: () => undefined,
+    });
+
+    await expect(
+      racing.confirmReferenceGenerationHandoffV2({
+        projectId: project.id,
+        handoffId: generated.handoffId,
+        expectedRevision: project.revision,
+        expiresAt: '2026-08-17T12:05:00.000Z',
+        revalidate: async () => ({ routeId: 'image_route' }),
+        assertActive: () => undefined,
+        buildCommit: (candidate) => ({
+          project: addReferenceAuthorizationV2(candidate, generated.handoffId),
+          dispatch: { jobIds: [] },
+        }),
+      })
+    ).rejects.toMatchObject({ code: 'storage_error' });
+
+    expect(dismissed).toBe(true);
+    expect(readFileSync(projectFile)).toEqual(before);
+    expect(readJson<StudioReferenceGenerationHandoffReceiptV2>(receiptFile).result).toEqual({ kind: 'dismissed' });
+  });
+
   it('selects only a current classified Brief image and allows rejection after request shots become inactive', async () => {
     const { store } = createStoreV2({ createId: () => 'reference_import_v2', now: () => timestamp });
     const created = await store.createProjectV2(inputV2);

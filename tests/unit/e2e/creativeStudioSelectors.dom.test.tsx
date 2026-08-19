@@ -27,6 +27,9 @@ const mocks = vi.hoisted(() => {
       listReferenceRequests: { invoke: vi.fn() },
       decideReferenceRequest: { invoke: vi.fn() },
       listReferenceGenerationHandoffs: { invoke: vi.fn() },
+      getWorkspaceStatus: { invoke: vi.fn() },
+      getChainStatus: { invoke: vi.fn() },
+      listRoutes: { invoke: vi.fn() },
       hasUnsavedWork: { provider: vi.fn(() => vi.fn()) },
       flushUnsavedWork: { provider: vi.fn(() => vi.fn()) },
       projectUpdated: event(),
@@ -92,6 +95,29 @@ describe('Creative Studio E2E selectors', () => {
     mocks.bridge.listProposals.invoke.mockResolvedValue({ ok: true, data: [] });
     mocks.bridge.listReferenceRequests.invoke.mockResolvedValue({ ok: true, data: [] });
     mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue({ ok: true, data: [] });
+    mocks.bridge.getWorkspaceStatus.invoke.mockResolvedValue({
+      ok: true,
+      data: {
+        projectId: project.id,
+        projectRevision: project.revision,
+        undoTop: null,
+        dirtyShots: [],
+        cascadeProgress: [],
+        parkEligibility: [],
+      },
+    });
+    mocks.bridge.getChainStatus.invoke.mockResolvedValue({
+      ok: true,
+      data: { projectId: project.id, projectRevision: project.revision, conditioningFailures: [] },
+    });
+    mocks.bridge.listRoutes.invoke.mockResolvedValue({
+      ok: true,
+      data: {
+        image: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+        video: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+        catalogVersion: 'selector-test',
+      },
+    });
   });
 
   it('resolves every stable selector used by the E2E route smoke exactly once', async () => {
@@ -107,7 +133,7 @@ describe('Creative Studio E2E selectors', () => {
 
     await screen.findByRole('heading', { level: 1, name: 'Launch film' });
     const selectors = studioSpecSelectors();
-    expect(selectors).toHaveLength(4);
+    expect(selectors).toHaveLength(5);
 
     await waitFor(() => {
       expect(selectors.filter((selector) => document.querySelectorAll(selector).length !== 1)).toEqual([]);

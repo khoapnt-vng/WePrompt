@@ -17,6 +17,7 @@ import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv
 import { describe, expect, it, vi } from 'vitest';
 import {
   STUDIO_PROJECT_SCHEMA_VERSION,
+  STUDIO_PREPARED_QUOTE_TTL_SECONDS,
   STUDIO_PROPOSAL_V2_PENDING_TTL_MS,
   STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT,
   STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES,
@@ -46,7 +47,15 @@ import {
   validateStudioMutationOperationV2,
   validateStudioProjectV2,
 } from '@process/services/creative-studio/service/schema2';
-import { createStudioMediaChoiceId } from '@process/services/creative-studio/providerResolver';
+import {
+  createStudioMediaChoiceId,
+  type StudioGenerationRouteCatalog,
+} from '@process/services/creative-studio/providerResolver';
+import { createConfiguredStudioRateCardV2 } from '@process/services/creative-studio/rateCardConfig';
+import {
+  StudioPreparedSubmissionCacheErrorV2,
+  StudioPreparedSubmissionCacheV2,
+} from '@process/services/creative-studio/service/schema2/preparedSubmissionCache';
 import {
   createListRoutesHandler,
   createProposeBriefRuleHandlerV2,
@@ -246,6 +255,7 @@ describe('CreativeStudioServiceV2', () => {
       createQuoteId?: () => string;
       createConnectionId?: () => string;
       now?: () => Date;
+      preparedSubmissionCache?: StudioPreparedSubmissionCacheV2;
     } = {}
   ) => {
     let current = structuredClone(project);
@@ -351,6 +361,72 @@ describe('CreativeStudioServiceV2', () => {
         receipt: null,
       };
     });
+    const referenceGenerationDecision = {
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      requestId: referenceRequest.id,
+      projectId: current.id,
+      decidedAt: committedAt,
+      outcome: {
+        kind: 'generation_gate' as const,
+        handoffId: 'handoff_service_1',
+        shotIds: [...referenceRequest.shotIds],
+      },
+    };
+    let referenceGenerationReceipt:
+      | import('@/common/types/project/creativeStudioTypes').StudioReferenceGenerationHandoffReceiptV2
+      | null = null;
+    const readReferenceGenerationHandoffV2 = vi.fn<CreativeStudioStore['readReferenceGenerationHandoffV2']>(
+      async (projectId, handoffId) =>
+        projectId === current.id && handoffId === referenceGenerationDecision.outcome.handoffId
+          ? {
+              request: structuredClone(referenceRequest),
+              decision: structuredClone(referenceGenerationDecision),
+              receipt: structuredClone(referenceGenerationReceipt),
+            }
+          : null
+    );
+    const recordReferenceGenerationHandoffReceiptV2 = vi.fn<
+      CreativeStudioStore['recordReferenceGenerationHandoffReceiptV2']
+    >(async (input) => {
+      if (input.projectId !== current.id || input.handoffId !== referenceGenerationDecision.outcome.handoffId) {
+        throw new Error('missing Studio fixture handoff');
+      }
+      if (referenceGenerationReceipt !== null && referenceGenerationReceipt.result.kind !== input.result.kind) {
+        throw new Error('completed Studio fixture handoff');
+      }
+      referenceGenerationReceipt ??= {
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        handoffId: input.handoffId,
+        requestId: referenceRequest.id,
+        completedAt: committedAt,
+        result: structuredClone(input.result),
+      };
+      return {
+        request: structuredClone(referenceRequest),
+        decision: structuredClone(referenceGenerationDecision),
+        receipt: structuredClone(referenceGenerationReceipt),
+      };
+    });
+    const confirmReferenceGenerationHandoffV2 = vi.fn<CreativeStudioStore['confirmReferenceGenerationHandoffV2']>(
+      async (input) => {
+        if (input.handoffId !== referenceGenerationDecision.outcome.handoffId || referenceGenerationReceipt !== null) {
+          throw new Error('completed Studio fixture handoff');
+        }
+        const result = await confirmProjectV2(input);
+        const authorization = current.spendAuthorizations.find(
+          (candidate) => candidate.originReferenceHandoffId === input.handoffId
+        );
+        if (authorization === undefined) throw new Error('missing Studio fixture authorization');
+        referenceGenerationReceipt = {
+          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          handoffId: input.handoffId,
+          requestId: referenceRequest.id,
+          completedAt: authorization.confirmedAt,
+          result: { kind: 'confirmed', authorizationId: authorization.id },
+        };
+        return result;
+      }
+    );
     let connections: import('@/common/types/project/creativeStudioTypes').StudioConnectionBinding[] = [];
     const resolveProposalPathsV2 = vi.fn(async () => ({
       projectDir: `/studio/${current.id}`,
@@ -378,12 +454,15 @@ describe('CreativeStudioServiceV2', () => {
       applyMutationBatchV2,
       updateProjectV2,
       confirmProjectV2,
+      confirmReferenceGenerationHandoffV2,
       deleteProjectV2: vi.fn(async () => true),
       listProposalsV2,
       acceptProposalV2,
       rejectProposalV2,
       listReferenceRequestsV2,
       decideReferenceRequestV2,
+      readReferenceGenerationHandoffV2,
+      recordReferenceGenerationHandoffReceiptV2,
       resolveProposalPathsV2,
       resolveReferenceRequestPathsV2,
       listConnections,
@@ -448,6 +527,7 @@ describe('CreativeStudioServiceV2', () => {
         rateMinorUnits: 5,
       },
     ]);
+    const loadRateCard = vi.fn(async (_generation: StudioGenerationRouteCatalog) => rateCard);
     let quoteOrdinal = 0;
     let jobOrdinal = 0;
     let keyOrdinal = 0;
@@ -483,8 +563,9 @@ describe('CreativeStudioServiceV2', () => {
       getAdapterRegistry: () => adapterRegistry as never,
       getStudioServerScriptPath: () => '/bundled/builtin-mcp-studio.js',
       ensureDirectorCommandMailbox,
+      preparedSubmissionCache: options.preparedSubmissionCache,
       createConnectionId: options.createConnectionId,
-      ...(options.includeRateCard === false ? {} : { rateCard: async () => rateCard }),
+      ...(options.includeRateCard === false ? {} : { rateCard: loadRateCard }),
       ...(options.useDefaultIds
         ? {}
         : {
@@ -525,6 +606,9 @@ describe('CreativeStudioServiceV2', () => {
       referenceRequest,
       listReferenceRequestsV2,
       decideReferenceRequestV2,
+      readReferenceGenerationHandoffV2,
+      recordReferenceGenerationHandoffReceiptV2,
+      confirmReferenceGenerationHandoffV2,
       resolveProposalPathsV2,
       resolveReferenceRequestPathsV2,
       listConnections,
@@ -532,6 +616,7 @@ describe('CreativeStudioServiceV2', () => {
       removeConnection,
       listProviders,
       validateConnection,
+      loadRateCard,
       ensureDirectorCommandMailbox,
       getProject: (): StudioProjectV2 => structuredClone(current),
       setProject: (next: StudioProjectV2): void => {
@@ -802,6 +887,176 @@ describe('CreativeStudioServiceV2', () => {
     expect(JSON.stringify(handoffs)).not.toContain('authorization_secret');
   });
 
+  it('prepares and confirms only the exact ordered seed-only reference handoff', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    const harness = makeHarness(project);
+
+    const prepared = await harness.service.prepareSubmission({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: 'handoff_service_1',
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
+      cascadeChoices: [],
+    });
+
+    expect(prepared).toMatchObject({
+      baseOnly: { projectId: project.id, projectRevision: project.revision, baseItems: [{ shotId: 'clip_1' }] },
+      withCascade: null,
+    });
+    expect(harness.readReferenceGenerationHandoffV2).toHaveBeenCalledExactlyOnceWith(project.id, 'handoff_service_1');
+    await expect(
+      harness.service.confirmSubmission({
+        projectId: project.id,
+        quoteId: prepared.baseOnly.id,
+        expectedRevision: project.revision,
+      })
+    ).resolves.toEqual({ projectId: project.id, projectRevision: project.revision + 1 });
+    expect(harness.confirmReferenceGenerationHandoffV2).toHaveBeenCalledTimes(1);
+    expect(harness.getProject().spendAuthorizations).toEqual([
+      expect.objectContaining({
+        id: prepared.baseOnly.id,
+        originReferenceHandoffId: 'handoff_service_1',
+        baseItems: [expect.objectContaining({ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1 })],
+        cascadeItems: [],
+      }),
+    ]);
+    expect(Object.values(harness.getProject().jobs).map((job) => job.purpose)).toEqual(['seed_still']);
+    expect(harness.submitShots).toHaveBeenCalledTimes(1);
+    await expect(
+      harness.service.confirmSubmission({
+        projectId: project.id,
+        quoteId: prepared.baseOnly.id,
+        expectedRevision: project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'quote_not_found' });
+  });
+
+  it('refuses malformed, reordered, replaced, and broader handoff choices before pricing or provider work', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    const createQuoteId = vi.fn(() => 'quote_must_not_be_created');
+    const harness = makeHarness(project, { createQuoteId });
+    const exact = {
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: 'handoff_service_1',
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still' as const, generationCount: 1, referenceAssetId: null }],
+      cascadeChoices: [],
+    };
+    const malformed = [
+      { ...exact, baseChoices: [] },
+      {
+        ...exact,
+        baseChoices: [
+          ...exact.baseChoices,
+          { shotId: 'clip_2', purpose: 'seed_still' as const, generationCount: 1, referenceAssetId: null },
+        ],
+      },
+      { ...exact, baseChoices: [...exact.baseChoices, ...exact.baseChoices] },
+      { ...exact, baseChoices: [{ ...exact.baseChoices[0]!, purpose: 'video_take' as const }] },
+      { ...exact, baseChoices: [{ ...exact.baseChoices[0]!, generationCount: 2 }] },
+      { ...exact, baseChoices: [{ ...exact.baseChoices[0]!, referenceAssetId: 'reference_1' }] },
+      {
+        ...exact,
+        cascadeChoices: [
+          { shotId: 'clip_1', purpose: 'video_take' as const, generationCount: 1, referenceAssetId: null },
+        ],
+      },
+    ];
+
+    for (const request of malformed) {
+      // Each shape deliberately violates the frozen handoff subset.
+      // eslint-disable-next-line no-await-in-loop
+      await expect(harness.service.prepareSubmission(request)).rejects.toMatchObject({ code: 'invalid_payload' });
+    }
+    harness.readReferenceGenerationHandoffV2.mockResolvedValueOnce({
+      request: { ...harness.referenceRequest, shotIds: ['clip_1', 'clip_2'] },
+      decision: {
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        requestId: harness.referenceRequest.id,
+        projectId: project.id,
+        decidedAt: '2026-08-17T00:00:02.000Z',
+        outcome: { kind: 'generation_gate', handoffId: 'handoff_service_1', shotIds: ['clip_1', 'clip_2'] },
+      },
+      receipt: null,
+    });
+    await expect(
+      harness.service.prepareSubmission({
+        ...exact,
+        baseChoices: [
+          { shotId: 'clip_2', purpose: 'seed_still', generationCount: 1, referenceAssetId: null },
+          { shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null },
+        ],
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+    harness.readReferenceGenerationHandoffV2.mockResolvedValueOnce({
+      request: structuredClone(harness.referenceRequest),
+      decision: {
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        requestId: harness.referenceRequest.id,
+        projectId: project.id,
+        decidedAt: '2026-08-17T00:00:02.000Z',
+        outcome: { kind: 'generation_gate', handoffId: 'handoff_service_1', shotIds: ['clip_1'] },
+      },
+      receipt: {
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        handoffId: 'handoff_service_1',
+        requestId: harness.referenceRequest.id,
+        completedAt: '2026-08-17T00:00:03.000Z',
+        result: { kind: 'dismissed' },
+      },
+    });
+    await expect(harness.service.prepareSubmission(exact)).rejects.toMatchObject({ code: 'invalid_payload' });
+    harness.readReferenceGenerationHandoffV2.mockResolvedValueOnce({
+      request: structuredClone(harness.referenceRequest),
+      decision: {
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        requestId: 'other_reference_request',
+        projectId: project.id,
+        decidedAt: '2026-08-17T00:00:02.000Z',
+        outcome: { kind: 'generation_gate', handoffId: 'handoff_service_1', shotIds: ['clip_1'] },
+      },
+      receipt: null,
+    });
+    await expect(harness.service.prepareSubmission(exact)).rejects.toMatchObject({ code: 'invalid_payload' });
+    const existingOrigin = structuredClone(project);
+    existingOrigin.spendAuthorizations.push({
+      originReferenceHandoffId: 'handoff_service_1',
+    } as never);
+    harness.setProject(existingOrigin);
+    await expect(harness.service.prepareSubmission(exact)).rejects.toMatchObject({ code: 'invalid_payload' });
+
+    expect(harness.loadRateCard).not.toHaveBeenCalled();
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+    expect(createQuoteId).not.toHaveBeenCalled();
+    expect(harness.confirmReferenceGenerationHandoffV2).not.toHaveBeenCalled();
+    expect(harness.submitShots).not.toHaveBeenCalled();
+  });
+
+  it('dismisses an open reference handoff idempotently through receipt storage only', async () => {
+    const harness = makeHarness();
+
+    const first = await harness.service.dismissReferenceGenerationHandoff({
+      projectId: 'project_v2',
+      expectedRevision: 2,
+      handoffId: 'handoff_service_1',
+    });
+    const retry = await harness.service.dismissReferenceGenerationHandoff({
+      projectId: 'project_v2',
+      expectedRevision: 1,
+      handoffId: 'handoff_service_1',
+    });
+
+    expect(first).toEqual({ status: 'dismissed', completedAt: '2026-08-17T00:00:02.000Z' });
+    expect(retry).toEqual(first);
+    expect(Object.keys(first).toSorted()).toEqual(['completedAt', 'status']);
+    expect(harness.recordReferenceGenerationHandoffReceiptV2).toHaveBeenCalledTimes(2);
+    expect(harness.loadRateCard).not.toHaveBeenCalled();
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+    expect(harness.submitShots).not.toHaveBeenCalled();
+  });
+
   it('fails closed for unavailable pricing, invalid clocks, unsafe quote IDs, and disposal', async () => {
     const project = makeSchema2ServiceProject();
     project.imageRouteId = imageRoute.choiceId;
@@ -830,6 +1085,104 @@ describe('CreativeStudioServiceV2', () => {
     disposed.service.dispose();
     disposed.service.dispose();
     await expect(disposed.service.prepareSubmission(request)).rejects.toMatchObject({ code: 'quote_not_found' });
+  });
+
+  it.each(['quote_cache_full', 'quote_too_large'] as const)(
+    'preserves the distinct %s prepare error without project mutation or paid work',
+    async (code) => {
+      const project = makeSchema2ServiceProject();
+      project.imageRouteId = imageRoute.choiceId;
+      project.videoRouteId = videoRoute.choiceId;
+      const cache = new StudioPreparedSubmissionCacheV2();
+      vi.spyOn(cache, 'admit').mockImplementation(() => {
+        throw new StudioPreparedSubmissionCacheErrorV2(code);
+      });
+      const harness = makeHarness(project, { preparedSubmissionCache: cache });
+
+      await expect(
+        harness.service.prepareSubmission({
+          projectId: project.id,
+          expectedRevision: project.revision,
+          originReferenceHandoffId: null,
+          baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
+          cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+        })
+      ).rejects.toMatchObject({ code });
+
+      expect(harness.getProject()).toEqual(project);
+      expect(harness.store.confirmProjectV2).not.toHaveBeenCalled();
+      expect(harness.store.confirmReferenceGenerationHandoffV2).not.toHaveBeenCalled();
+      expect(harness.submitShots).not.toHaveBeenCalled();
+      expect(harness.onProjectUpdated).not.toHaveBeenCalled();
+      expect(harness.listProviders).not.toHaveBeenCalled();
+      expect(harness.validateConnection).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['quote_not_found', 'quote_in_use'] as const)(
+    'preserves the distinct %s confirm error before resolver, mutation, or paid work',
+    async (code) => {
+      const project = makeSchema2ServiceProject();
+      const cache = new StudioPreparedSubmissionCacheV2();
+      vi.spyOn(cache, 'claim').mockImplementation(() => {
+        throw new StudioPreparedSubmissionCacheErrorV2(code);
+      });
+      const harness = makeHarness(project, { preparedSubmissionCache: cache });
+
+      await expect(
+        harness.service.confirmSubmission({
+          projectId: project.id,
+          quoteId: 'quote_missing_or_busy',
+          expectedRevision: project.revision,
+        })
+      ).rejects.toMatchObject({ code });
+
+      expect(harness.getProject()).toEqual(project);
+      expect(harness.loadRateCard).not.toHaveBeenCalled();
+      expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+      expect(harness.store.confirmProjectV2).not.toHaveBeenCalled();
+      expect(harness.store.confirmReferenceGenerationHandoffV2).not.toHaveBeenCalled();
+      expect(harness.submitShots).not.toHaveBeenCalled();
+      expect(harness.onProjectUpdated).not.toHaveBeenCalled();
+    }
+  );
+
+  it('treats exact TTL expiry and restart cache loss as quote_not_found without automatic confirmation', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    project.videoRouteId = videoRoute.choiceId;
+    let cacheNow = Date.parse('2026-08-17T00:00:00.000Z');
+    const cache = new StudioPreparedSubmissionCacheV2({ now: () => cacheNow });
+    const harness = makeHarness(project, { preparedSubmissionCache: cache });
+    const prepared = await harness.service.prepareSubmission({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+    });
+    cacheNow += STUDIO_PREPARED_QUOTE_TTL_SECONDS * 1_000;
+
+    await expect(
+      harness.service.confirmSubmission({
+        projectId: project.id,
+        quoteId: prepared.baseOnly.id,
+        expectedRevision: project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'quote_not_found' });
+    const restarted = makeHarness(project);
+    await expect(
+      restarted.service.confirmSubmission({
+        projectId: project.id,
+        quoteId: prepared.baseOnly.id,
+        expectedRevision: project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'quote_not_found' });
+
+    expect(harness.store.confirmProjectV2).not.toHaveBeenCalled();
+    expect(restarted.store.confirmProjectV2).not.toHaveBeenCalled();
+    expect(harness.submitShots).not.toHaveBeenCalled();
+    expect(restarted.submitShots).not.toHaveBeenCalled();
   });
 
   it('uses safe default clocks and identities when no deterministic factories are injected', async () => {
@@ -1422,6 +1775,277 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.persistCapturedPosterV2).not.toHaveBeenCalled();
   });
 
+  it('returns stale_project for a generic prepare before rate, resolver, or cache work', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    project.videoRouteId = videoRoute.choiceId;
+    const preparedSubmissionCache = new StudioPreparedSubmissionCacheV2();
+    const admit = vi.spyOn(preparedSubmissionCache, 'admit');
+    const harness = makeHarness(project, { preparedSubmissionCache });
+
+    await expect(
+      harness.service.prepareSubmission({
+        projectId: project.id,
+        expectedRevision: project.revision + 1,
+        originReferenceHandoffId: null,
+        baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
+        cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+      })
+    ).rejects.toMatchObject({ code: 'stale_project' });
+    expect(harness.loadRateCard).not.toHaveBeenCalled();
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+    expect(admit).not.toHaveBeenCalled();
+  });
+
+  it('maps a missing base route to invalid_route before rate, resolver, or cache work', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = null;
+    project.videoRouteId = videoRoute.choiceId;
+    const preparedSubmissionCache = new StudioPreparedSubmissionCacheV2();
+    const admit = vi.spyOn(preparedSubmissionCache, 'admit');
+    const harness = makeHarness(project, { preparedSubmissionCache });
+
+    await expect(
+      harness.service.prepareSubmission({
+        projectId: project.id,
+        expectedRevision: project.revision,
+        originReferenceHandoffId: null,
+        baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
+        cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+      })
+    ).rejects.toMatchObject({ code: 'invalid_route' });
+    expect(harness.loadRateCard).not.toHaveBeenCalled();
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+    expect(admit).not.toHaveBeenCalled();
+  });
+
+  it('keeps and confirms the base option when only cascade binding availability changes', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    project.videoRouteId = videoRoute.choiceId;
+    const harness = makeHarness(project);
+    const unavailableVideoRoute = {
+      ...structuredClone(videoRoute),
+      constraints: { ...structuredClone(videoRoute.constraints), supportsFirstFrame: false },
+    };
+    harness.providerResolver.listGenerationRoutes.mockResolvedValueOnce({
+      routes: [structuredClone(imageRoute), unavailableVideoRoute],
+      diagnostics: [],
+      generationCatalogVersion: 'catalog_video_unavailable',
+    });
+
+    const prepared = await harness.service.prepareSubmission({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 2, referenceAssetId: null }],
+    });
+
+    expect(prepared.baseOnly).toMatchObject({
+      id: 'quote_service_1',
+      lowerMinorUnits: 3,
+      upperMinorUnits: 3,
+    });
+    expect(prepared.withCascade).toBeNull();
+    await expect(
+      harness.service.confirmSubmission({
+        projectId: project.id,
+        quoteId: prepared.baseOnly.id,
+        expectedRevision: project.revision,
+      })
+    ).resolves.toEqual({ projectId: project.id, projectRevision: project.revision + 1 });
+    expect(harness.providerResolver.listGenerationRoutes).toHaveBeenCalledTimes(2);
+    expect(harness.getProject().spendAuthorizations[0]).toMatchObject({
+      baseItems: [{ purpose: 'seed_still' }],
+      cascadeItems: [],
+    });
+  });
+
+  it('confirms an unchanged base when a previously absent cascade route becomes available', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    project.videoRouteId = videoRoute.choiceId;
+    const harness = makeHarness(project);
+    harness.loadRateCard.mockImplementation(async (generation) => createConfiguredStudioRateCardV2(generation));
+    harness.providerResolver.listGenerationRoutes.mockResolvedValueOnce({
+      routes: [structuredClone(imageRoute)],
+      diagnostics: [],
+      generationCatalogVersion: 'catalog_without_video',
+    });
+
+    const prepared = await harness.service.prepareSubmission({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+    });
+    expect(prepared.withCascade).toBeNull();
+
+    await expect(
+      harness.service.confirmSubmission({
+        projectId: project.id,
+        quoteId: prepared.baseOnly.id,
+        expectedRevision: project.revision,
+      })
+    ).resolves.toEqual({ projectId: project.id, projectRevision: project.revision + 1 });
+  });
+
+  it('confirms an unchanged base when a previously available cascade route disappears', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    project.videoRouteId = videoRoute.choiceId;
+    const harness = makeHarness(project);
+    harness.loadRateCard.mockImplementation(async (generation) => createConfiguredStudioRateCardV2(generation));
+
+    const prepared = await harness.service.prepareSubmission({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+    });
+    expect(prepared.withCascade).not.toBeNull();
+    harness.providerResolver.listGenerationRoutes.mockResolvedValueOnce({
+      routes: [structuredClone(imageRoute)],
+      diagnostics: [],
+      generationCatalogVersion: 'catalog_without_video',
+    });
+
+    await expect(
+      harness.service.confirmSubmission({
+        projectId: project.id,
+        quoteId: prepared.baseOnly.id,
+        expectedRevision: project.revision,
+      })
+    ).resolves.toEqual({ projectId: project.id, projectRevision: project.revision + 1 });
+  });
+
+  it('stales a base confirmation when its selected base rate changes', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    project.videoRouteId = videoRoute.choiceId;
+    const harness = makeHarness(project);
+    const prepared = await harness.service.prepareSubmission({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+    });
+    harness.loadRateCard.mockResolvedValueOnce(
+      createStudioRateCardV2([
+        {
+          routeId: imageRoute.choiceId,
+          kind: 'image',
+          currency: 'USD',
+          rateUnit: 'generation',
+          rateMinorUnits: 4,
+        },
+        {
+          routeId: videoRoute.choiceId,
+          kind: 'video',
+          currency: 'USD',
+          rateUnit: 'second',
+          rateMinorUnits: 5,
+        },
+      ])
+    );
+
+    await expect(
+      harness.service.confirmSubmission({
+        projectId: project.id,
+        quoteId: prepared.baseOnly.id,
+        expectedRevision: project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+    expect(harness.getProject()).toEqual(project);
+    expect(harness.submitShots).not.toHaveBeenCalled();
+  });
+
+  it('ignores a cascade-only rate change for base confirmation', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    project.videoRouteId = videoRoute.choiceId;
+    const harness = makeHarness(project);
+    const prepared = await harness.service.prepareSubmission({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+    });
+    harness.loadRateCard.mockResolvedValueOnce(
+      createStudioRateCardV2([
+        {
+          routeId: imageRoute.choiceId,
+          kind: 'image',
+          currency: 'USD',
+          rateUnit: 'generation',
+          rateMinorUnits: 3,
+        },
+        {
+          routeId: videoRoute.choiceId,
+          kind: 'video',
+          currency: 'USD',
+          rateUnit: 'second',
+          rateMinorUnits: 7,
+        },
+      ])
+    );
+
+    await expect(
+      harness.service.confirmSubmission({
+        projectId: project.id,
+        quoteId: prepared.baseOnly.id,
+        expectedRevision: project.revision,
+      })
+    ).resolves.toEqual({ projectId: project.id, projectRevision: project.revision + 1 });
+  });
+
+  it('stales a cascade confirmation when its cascade rate changes', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    project.videoRouteId = videoRoute.choiceId;
+    const harness = makeHarness(project);
+    const prepared = await harness.service.prepareSubmission({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+    });
+    harness.loadRateCard.mockResolvedValueOnce(
+      createStudioRateCardV2([
+        {
+          routeId: imageRoute.choiceId,
+          kind: 'image',
+          currency: 'USD',
+          rateUnit: 'generation',
+          rateMinorUnits: 3,
+        },
+        {
+          routeId: videoRoute.choiceId,
+          kind: 'video',
+          currency: 'USD',
+          rateUnit: 'second',
+          rateMinorUnits: 7,
+        },
+      ])
+    );
+
+    await expect(
+      harness.service.confirmSubmission({
+        projectId: project.id,
+        quoteId: prepared.withCascade!.id,
+        expectedRevision: project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+    expect(harness.getProject()).toEqual(project);
+    expect(harness.submitShots).not.toHaveBeenCalled();
+  });
+
   it('prepares sanitized base and cascade quotes, then durably commits the selected graph before dispatch', async () => {
     const project = makeSchema2ServiceProject();
     project.imageRouteId = imageRoute.choiceId;
@@ -1506,6 +2130,103 @@ describe('CreativeStudioServiceV2', () => {
     ).rejects.toMatchObject({ code: 'quote_not_found' });
   });
 
+  it('projects exact maximum-count quote rows and preserves their totals and budget in durable authority', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    project.videoRouteId = videoRoute.choiceId;
+    project.spendPolicy = { currency: 'USD', maxPerBatchMinorUnits: 112 };
+    const harness = makeHarness(project);
+
+    const prepared = await harness.service.prepareSubmission({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 4, referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 4, referenceAssetId: null }],
+    });
+    const baseRow = {
+      shotId: 'clip_1',
+      purpose: 'seed_still' as const,
+      route: { choiceId: imageRoute.choiceId, providerId: 'provider_1', model: 'image-model' },
+      generationCount: 4,
+      durationSeconds: null,
+      oneGenerationMinorUnits: 3,
+      requestedTotalMinorUnits: 12,
+      waitsForTakeSelection: false,
+    };
+    const cascadeRow = {
+      shotId: 'clip_1',
+      purpose: 'video_take' as const,
+      route: { choiceId: videoRoute.choiceId, providerId: 'provider_1', model: 'video-model' },
+      generationCount: 4,
+      durationSeconds: 5,
+      oneGenerationMinorUnits: 25,
+      requestedTotalMinorUnits: 100,
+      waitsForTakeSelection: true,
+    };
+    const budget = { kind: 'within_cap' as const, policyCurrency: 'USD', maxPerBatchMinorUnits: 112 };
+
+    expect(prepared).toEqual({
+      baseOnly: {
+        id: 'quote_service_1',
+        projectId: project.id,
+        projectRevision: project.revision,
+        expiresAt: '2026-08-17T00:05:02.000Z',
+        currency: 'USD',
+        baseItems: [baseRow],
+        cascadeItems: [],
+        lowerMinorUnits: 3,
+        upperMinorUnits: 12,
+        budget,
+      },
+      withCascade: {
+        id: 'quote_service_2',
+        projectId: project.id,
+        projectRevision: project.revision,
+        expiresAt: '2026-08-17T00:05:02.000Z',
+        currency: 'USD',
+        baseItems: [baseRow],
+        cascadeItems: [cascadeRow],
+        lowerMinorUnits: 28,
+        upperMinorUnits: 112,
+        budget,
+      },
+    });
+
+    await harness.service.confirmSubmission({
+      projectId: project.id,
+      quoteId: prepared.withCascade!.id,
+      expectedRevision: project.revision,
+    });
+    expect(harness.getProject().spendAuthorizations).toEqual([
+      expect.objectContaining({
+        id: prepared.withCascade!.id,
+        lowerMinorUnits: prepared.withCascade!.lowerMinorUnits,
+        upperMinorUnits: prepared.withCascade!.upperMinorUnits,
+        baseItems: [
+          expect.objectContaining({
+            shotId: baseRow.shotId,
+            purpose: baseRow.purpose,
+            routeId: baseRow.route.choiceId,
+            generationCount: baseRow.generationCount,
+            rateUnit: 'generation',
+            rateMinorUnits: baseRow.oneGenerationMinorUnits,
+          }),
+        ],
+        cascadeItems: [
+          expect.objectContaining({
+            shotId: cascadeRow.shotId,
+            purpose: cascadeRow.purpose,
+            routeId: cascadeRow.route.choiceId,
+            generationCount: cascadeRow.generationCount,
+            rateUnit: 'second',
+            rateMinorUnits: 5,
+          }),
+        ],
+      }),
+    ]);
+  });
+
   it('rejects reference origins before resolver work and projects spend-policy refusal without mutating', async () => {
     const project = makeSchema2ServiceProject();
     project.imageRouteId = imageRoute.choiceId;
@@ -1536,6 +2257,14 @@ describe('CreativeStudioServiceV2', () => {
       policyCurrency: 'USD',
       maxPerBatchMinorUnits: 2,
     });
+    harness.providerResolver.listGenerationRoutes.mockClear();
+    harness.loadRateCard.mockClear();
+    harness.providerResolver.listGenerationRoutes.mockImplementation(async () => {
+      throw new Error('resolver reached by refused confirmation');
+    });
+    harness.loadRateCard.mockImplementation(async () => {
+      throw new Error('rate card reached by refused confirmation');
+    });
     await expect(
       harness.service.confirmSubmission({
         projectId: project.id,
@@ -1545,6 +2274,8 @@ describe('CreativeStudioServiceV2', () => {
     ).rejects.toMatchObject({ code: 'invalid_payload' });
     expect(harness.getProject()).toEqual(project);
     expect(harness.submitShots).not.toHaveBeenCalled();
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+    expect(harness.loadRateCard).not.toHaveBeenCalled();
   });
 
   it('refuses a changed prepared cancellation policy and releases the quote for exact revalidation', async () => {

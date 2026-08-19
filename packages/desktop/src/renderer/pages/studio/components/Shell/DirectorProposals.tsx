@@ -26,22 +26,29 @@ export type DirectorProposalsProps = {
   onRejectProposal: (proposalId: string) => Promise<void>;
   onGenerateReferences: (requestId: string) => Promise<void>;
   onRejectReferences: (requestId: string) => Promise<void>;
+  onReviewHandoff: (handoff: StudioRendererReferenceGenerationHandoffV2) => void;
+  onDismissHandoff: (handoff: StudioRendererReferenceGenerationHandoffV2) => Promise<void>;
+  gateLocked?: boolean;
+  reviewBlockedMessageKey?: string | null;
 };
 
 export const pendingDirectorProposals = (proposals: readonly StudioProposalV2[]): StudioProposalV2[] =>
   proposals.filter((proposal) => proposal.status === 'pending');
 
-const uniqueOpenHandoffs = (
+const uniqueHandoffs = (
   handoffs: readonly StudioRendererReferenceGenerationHandoffV2[]
 ): StudioRendererReferenceGenerationHandoffV2[] => {
   const byId = new Map<string, StudioRendererReferenceGenerationHandoffV2>();
   for (const handoff of handoffs) {
-    if (handoff.status === 'open' && !byId.has(handoff.handoffId)) byId.set(handoff.handoffId, handoff);
+    const current = byId.get(handoff.handoffId);
+    if (current === undefined || (current.status === 'open' && handoff.status !== 'open')) {
+      byId.set(handoff.handoffId, handoff);
+    }
   }
   return [...byId.values()];
 };
 
-/** Reviewed Director output. Task 8 later gives an open generation handoff its paid gate. */
+/** Reviewed Director output with persistent, explicitly actioned generation handoffs. */
 export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
   proposals,
   referenceRequests,
@@ -53,10 +60,14 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
   onRejectProposal,
   onGenerateReferences,
   onRejectReferences,
+  onReviewHandoff,
+  onDismissHandoff,
+  gateLocked = false,
+  reviewBlockedMessageKey = null,
 }) => {
   const { t } = useTranslation();
   const pendingProposals = pendingDirectorProposals(proposals);
-  const handoffs = uniqueOpenHandoffs(referenceGenerationHandoffs);
+  const handoffs = uniqueHandoffs(referenceGenerationHandoffs);
   if (
     pendingProposals.length === 0 &&
     referenceRequests.length === 0 &&
@@ -117,7 +128,27 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
               count: handoff.shotIds.length,
             })}
           </p>
-          <p>{t('conversation.creativeStudio.workspace.handoffs.awaitingGate')}</p>
+          {handoff.status === 'open' ? (
+            <div className='flex gap-8px'>
+              <Button
+                type='primary'
+                disabled={gateLocked || reviewBlockedMessageKey !== null}
+                onClick={() => onReviewHandoff(handoff)}
+              >
+                {t('conversation.creativeStudio.workspace.handoffs.review')}
+              </Button>
+              <Button
+                disabled={gateLocked || pendingActionId === handoff.handoffId}
+                loading={pendingActionId === handoff.handoffId}
+                onClick={() => void onDismissHandoff(handoff)}
+              >
+                {t('conversation.creativeStudio.workspace.handoffs.dismiss')}
+              </Button>
+              {reviewBlockedMessageKey === null ? null : <p>{t(reviewBlockedMessageKey)}</p>}
+            </div>
+          ) : (
+            <p>{t(`conversation.creativeStudio.workspace.handoffs.${handoff.status}`)}</p>
+          )}
         </Card>
       ))}
     </section>

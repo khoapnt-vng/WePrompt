@@ -105,8 +105,12 @@ import type {
   StudioAssetV2,
   StudioCascadeBarrierActionRequestV2,
   StudioCommandResult,
+  StudioConfirmSubmissionRequestV2,
+  StudioConfirmSubmissionResultV2,
   StudioDetachManagedMediaResultV2,
   StudioDetachBriefReferenceRequest,
+  StudioDismissReferenceGenerationHandoffRequestV2,
+  StudioDismissReferenceGenerationHandoffResultV2,
   StudioEditProjectSettingsRequestV2,
   StudioGetChainStatusRequestV2,
   StudioGetWorkspaceStatusRequestV2,
@@ -114,6 +118,7 @@ import type {
   StudioImportSeedStillRequestV2,
   StudioParkBeatRequestV2,
   StudioParkShotRequestV2,
+  StudioPrepareSubmissionRequestV2,
   StudioProjectListResultV2,
   StudioProjectLoadResultV2,
   StudioProposalV2,
@@ -122,6 +127,7 @@ import type {
   StudioRendererChainStatusV2,
   StudioRendererProjectCommitResultV2,
   StudioRendererProjectV2,
+  StudioRendererPreparedSubmissionOptionsV2,
   StudioRendererReferenceGenerationHandoffV2,
   StudioRendererWorkspaceStatusV2,
   StudioRouteCatalogV2,
@@ -1244,6 +1250,18 @@ export const creativeStudio = {
     StudioCommandResult<StudioRendererReferenceGenerationHandoffV2[]>,
     StudioProjectRequestV2
   >('creative-studio.list-reference-generation-handoffs'),
+  prepareSubmission: bridge.buildProvider<
+    StudioCommandResult<StudioRendererPreparedSubmissionOptionsV2>,
+    StudioPrepareSubmissionRequestV2
+  >('creative-studio.prepare-submission'),
+  confirmSubmission: bridge.buildProvider<
+    StudioCommandResult<StudioConfirmSubmissionResultV2>,
+    StudioConfirmSubmissionRequestV2
+  >('creative-studio.confirm-submission'),
+  dismissReferenceGenerationHandoff: bridge.buildProvider<
+    StudioCommandResult<StudioDismissReferenceGenerationHandoffResultV2>,
+    StudioDismissReferenceGenerationHandoffRequestV2
+  >('creative-studio.dismiss-reference-generation-handoff'),
   applyAuthoringBatch: bridge.buildProvider<
     StudioCommandResult<StudioRendererProjectCommitResultV2>,
     StudioApplyAuthoringBatchRequestV2

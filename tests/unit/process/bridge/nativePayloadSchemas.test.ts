@@ -25,6 +25,11 @@ import {
   parseRendererBridgeQueryResponse,
   rendererBridgeQuerySchemas,
 } from '@/common/adapter/native/payloadSchemas';
+import {
+  STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
+  STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
+  STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION,
+} from '@/common/types/project/creativeStudioTypes';
 
 const VALID_PAYLOADS = {
   'restart-app': undefined,
@@ -236,6 +241,30 @@ const VALID_PAYLOADS = {
     outcome: { kind: 'generation_gate' },
   },
   'creative-studio.list-reference-generation-handoffs': { projectId: 'project_1' },
+  'creative-studio.prepare-submission': {
+    projectId: 'project_1',
+    expectedRevision: 1,
+    originReferenceHandoffId: null,
+    baseChoices: [
+      {
+        shotId: 'shot_1',
+        purpose: 'video_take',
+        generationCount: 2,
+        referenceAssetId: null,
+      },
+    ],
+    cascadeChoices: [],
+  },
+  'creative-studio.confirm-submission': {
+    projectId: 'project_1',
+    quoteId: 'quote_1',
+    expectedRevision: 1,
+  },
+  'creative-studio.dismiss-reference-generation-handoff': {
+    projectId: 'project_1',
+    expectedRevision: 1,
+    handoffId: 'handoff_1',
+  },
   'creative-studio.apply-authoring-batch': {
     projectId: 'project_1',
     expectedRevision: 1,
@@ -966,6 +995,34 @@ const INVALID_PAYLOADS = [
   ],
   ['creative-studio.get-project', 'project id traversal', { projectId: '../project_1' }],
   [
+    'creative-studio.prepare-submission',
+    'empty base choices',
+    { ...VALID_PAYLOADS['creative-studio.prepare-submission'], baseChoices: [] },
+  ],
+  [
+    'creative-studio.prepare-submission',
+    'renderer supplied request authority',
+    {
+      ...VALID_PAYLOADS['creative-studio.prepare-submission'],
+      baseChoices: [
+        {
+          ...VALID_PAYLOADS['creative-studio.prepare-submission'].baseChoices[0],
+          requestPlan: { kind: 'resolved', snapshot: { prompt: 'private' } },
+        },
+      ],
+    },
+  ],
+  [
+    'creative-studio.confirm-submission',
+    'renderer supplied authorization authority',
+    { ...VALID_PAYLOADS['creative-studio.confirm-submission'], authorizationId: 'authorization_1' },
+  ],
+  [
+    'creative-studio.dismiss-reference-generation-handoff',
+    'renderer supplied durable receipt',
+    { ...VALID_PAYLOADS['creative-studio.dismiss-reference-generation-handoff'], receipt: { kind: 'dismissed' } },
+  ],
+  [
     'creative-studio.apply-authoring-batch',
     'empty operation batch',
     { projectId: 'project_1', expectedRevision: 1, operations: [] },
@@ -1307,6 +1364,107 @@ describe('native bridge payload schemas', () => {
     expect(schema?.safeParse({ ...payload, jobId: 'internal_job' }).success).toBe(false);
   });
 
+  it('accepts only bounded dense prepare choices with exact renderer-owned keys', () => {
+    const makeChoice = (index: number, purpose: 'seed_still' | 'video_take') => ({
+      shotId: `shot_${index}`,
+      purpose,
+      generationCount: STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION,
+      referenceAssetId: purpose === 'seed_still' ? `asset_${index}` : null,
+    });
+    const maximum = {
+      projectId: 'project_1',
+      expectedRevision: 1,
+      originReferenceHandoffId: 'handoff_1',
+      baseChoices: Array.from({ length: STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST }, (_, index) =>
+        makeChoice(index, 'seed_still')
+      ),
+      cascadeChoices: Array.from({ length: STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST }, (_, index) =>
+        makeChoice(index, 'video_take')
+      ),
+    };
+
+    expect(maximum.baseChoices.length + maximum.cascadeChoices.length).toBe(STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST);
+    expect(parseNativeBridgePayload('creative-studio.prepare-submission', maximum)).toEqual(maximum);
+
+    const tooManyShots = {
+      ...maximum,
+      baseChoices: Array.from({ length: STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST + 1 }, (_, index) =>
+        makeChoice(index, 'seed_still')
+      ),
+      cascadeChoices: [],
+    };
+    expect(() => parseNativeBridgePayload('creative-studio.prepare-submission', tooManyShots)).toThrow(
+      INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+    );
+
+    const sparseChoices: unknown[] = [];
+    sparseChoices.length = 1;
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.prepare-submission', { ...maximum, baseChoices: sparseChoices })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
+  it('rejects prepare choice underflow, overflow, duplicates, and nested authority', () => {
+    const valid = VALID_PAYLOADS['creative-studio.prepare-submission'];
+    const choice = valid.baseChoices[0];
+    for (const generationCount of [0, STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION + 1]) {
+      expect(() =>
+        parseNativeBridgePayload('creative-studio.prepare-submission', {
+          ...valid,
+          baseChoices: [{ ...choice, generationCount }],
+        })
+      ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+    }
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.prepare-submission', {
+        ...valid,
+        cascadeChoices: [{ ...choice }],
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.prepare-submission', {
+        ...valid,
+        baseChoices: [{ ...choice, routeId: 'route_1' }],
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.prepare-submission', {
+        ...valid,
+        baseChoices: [{ ...choice, purpose: 'video_take', referenceAssetId: 'asset_1' }],
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
+  it.each([
+    ['creative-studio.confirm-submission', VALID_PAYLOADS['creative-studio.confirm-submission']],
+    [
+      'creative-studio.dismiss-reference-generation-handoff',
+      VALID_PAYLOADS['creative-studio.dismiss-reference-generation-handoff'],
+    ],
+  ] as const)('keeps %s exact and free of paid authority', (providerKey, payload) => {
+    expect(parseNativeBridgePayload(providerKey, payload)).toEqual(payload);
+    for (const forbiddenKey of ['authorizationId', 'itemId', 'provider', 'requestPlan', 'receipt']) {
+      expect(() => parseNativeBridgePayload(providerKey, { ...payload, [forbiddenKey]: 'private' })).toThrow(
+        INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+      );
+    }
+  });
+
+  it.each([
+    ['creative-studio.prepare-submission', VALID_PAYLOADS['creative-studio.prepare-submission']],
+    ['creative-studio.confirm-submission', VALID_PAYLOADS['creative-studio.confirm-submission']],
+    [
+      'creative-studio.dismiss-reference-generation-handoff',
+      VALID_PAYLOADS['creative-studio.dismiss-reference-generation-handoff'],
+    ],
+  ] as const)('rejects unsafe expected revisions for %s', (providerKey, payload) => {
+    for (const expectedRevision of [Number.MAX_SAFE_INTEGER + 1, 1e100]) {
+      expect(() => parseNativeBridgePayload(providerKey, { ...payload, expectedRevision })).toThrow(
+        INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+      );
+    }
+  });
+
   it('accepts every reviewed reference-decision intent and no receipt authority', () => {
     for (const outcome of [
       { kind: 'rejected' as const },
@@ -1348,7 +1506,7 @@ describe('native bridge payload schemas', () => {
     expect(providerKeys).toEqual(NATIVE_BRIDGE_PROVIDER_KEYS);
   });
 
-  it('registers the exact Task 7 surface while keeping legacy and Task 8 gates absent', () => {
+  it('registers the exact Task 8 paid boundary while keeping legacy providers absent', () => {
     const required = [
       'creative-studio.apply-authoring-batch',
       'creative-studio.undo-last',
@@ -1371,6 +1529,9 @@ describe('native bridge payload schemas', () => {
       'creative-studio.list-reference-requests',
       'creative-studio.decide-reference-request',
       'creative-studio.list-reference-generation-handoffs',
+      'creative-studio.prepare-submission',
+      'creative-studio.confirm-submission',
+      'creative-studio.dismiss-reference-generation-handoff',
     ] as const;
     const absent = [
       'creative-studio.propose-storyboard',
@@ -1393,12 +1554,14 @@ describe('native bridge payload schemas', () => {
       'creative-studio.cancel-job',
       'creative-studio.retry-job',
       'creative-studio.retry-download',
-      'creative-studio.dismiss-reference-generation-handoff',
-      'creative-studio.prepare-submission',
-      'creative-studio.confirm-submission',
     ] as const;
     const providerKeys = collectBridgeBuildProviderKeys(readFileSync(IPC_BRIDGE_PATH, 'utf8'));
     const schemaKeys = Object.keys(nativeBridgePayloadSchemas);
+    const task8ProviderKeys = [
+      'creative-studio.prepare-submission',
+      'creative-studio.confirm-submission',
+      'creative-studio.dismiss-reference-generation-handoff',
+    ] as const;
 
     for (const providerKey of required) {
       expect(NATIVE_BRIDGE_PROVIDER_KEYS).toContain(providerKey);
@@ -1409,6 +1572,14 @@ describe('native bridge payload schemas', () => {
       expect(NATIVE_BRIDGE_PROVIDER_KEYS).not.toContain(providerKey);
       expect(providerKeys).not.toContain(providerKey);
       expect(schemaKeys).not.toContain(providerKey);
+    }
+    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(41);
+    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(41);
+    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(41);
+    for (const providerKey of task8ProviderKeys) {
+      expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key === providerKey)).toHaveLength(1);
+      expect(providerKeys.filter((key) => key === providerKey)).toHaveLength(1);
+      expect(schemaKeys.filter((key) => key === providerKey)).toHaveLength(1);
     }
   });
 

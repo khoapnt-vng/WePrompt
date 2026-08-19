@@ -5,6 +5,7 @@
  */
 
 import type { IProvider } from '@/common/config/storage';
+import type { StudioProjectV2 } from '@/common/types/project/creativeStudioTypes';
 import type { StudioProjectCommitFacts } from '@process/services/creative-studio/store';
 import {
   createCreativeStudioRuntime,
@@ -13,11 +14,16 @@ import {
   type CreativeStudioRuntimeFactories,
 } from '@process/services/creative-studio/runtime';
 import type { CreativeStudioProtocolInstallation } from '@process/services/creative-studio/mediaProtocol';
-import type { CreativeStudioServiceV2 } from '@process/services/creative-studio/service';
+import { createCreativeStudioServiceV2, type CreativeStudioServiceV2 } from '@process/services/creative-studio/service';
+import { createEmptyStudioProjectV2 } from '@process/services/creative-studio/service/schema2';
 import type { CreativeStudioStore, StudioProjectInventoryV2 } from '@process/services/creative-studio/store';
 import type { StudioMediaStore } from '@process/services/creative-studio/mediaStore';
 import type { GenerationProviderAdapterRegistry } from '@process/services/creative-studio/adapters';
-import type { StudioProviderResolver } from '@process/services/creative-studio/providerResolver';
+import {
+  createStudioMediaChoiceId,
+  type StudioGenerationRouteCatalog,
+  type StudioProviderResolver,
+} from '@process/services/creative-studio/providerResolver';
 import type { StudioJobManagerV2 } from '@process/services/creative-studio/jobManager';
 import type { StudioDirectorCommandMailboxV2 } from '@process/services/creative-studio/service/directorCommandMailbox';
 import type { StudioDirectorCommandServiceV2 } from '@process/services/creative-studio/service/directorCommandService';
@@ -53,6 +59,7 @@ const createHarness = (
     holdFirstInventory?: boolean;
     holdCleanup?: boolean;
     service?: Partial<CreativeStudioServiceV2>;
+    realService?: { project: StudioProjectV2; generationCatalog: StudioGenerationRouteCatalog };
     environment?: Record<string, string | undefined>;
   } = {}
 ) => {
@@ -89,6 +96,11 @@ const createHarness = (
   });
   const store = {
     inspectProjectsV2,
+    getProjectV2: vi.fn(async (projectId: string) =>
+      input.realService?.project.id === projectId
+        ? { status: 'supported' as const, project: structuredClone(input.realService.project) }
+        : { status: 'not_found' as const, projectId }
+    ),
     listConnections: vi.fn(async () => []),
     reapAbandonedProposalsV2: vi.fn(async () => {
       calls.push('reap-proposals');
@@ -116,7 +128,17 @@ const createHarness = (
     }),
   } as unknown as StudioMediaStore;
   const adapters = new Map() as GenerationProviderAdapterRegistry;
-  const providerResolver = {} as StudioProviderResolver;
+  const providerResolver = {
+    listGenerationRoutes: vi.fn(async () =>
+      structuredClone(
+        input.realService?.generationCatalog ?? {
+          routes: [],
+          diagnostics: [],
+          generationCatalogVersion: 'runtime_test_catalog',
+        }
+      )
+    ),
+  } as unknown as StudioProviderResolver;
   const jobManager = {
     resumePendingJobsV2: vi.fn(async (projectIds: readonly string[]) => {
       calls.push(`resume-jobs:${projectIds.join(',')}`);
@@ -192,7 +214,7 @@ const createHarness = (
       factoryCalls.jobManager += 1;
       return jobManager;
     },
-    createService: () => service,
+    createService: (deps) => (input.realService === undefined ? service : createCreativeStudioServiceV2(deps)),
     createE2EFakeBundle: () => {
       factoryCalls.fakeBundle += 1;
       return {
@@ -249,6 +271,7 @@ const createHarness = (
     runtime,
     store,
     mediaStore,
+    providerResolver,
     jobManager,
     processor,
     service,
@@ -342,6 +365,103 @@ describe('Creative Studio schema-2 runtime activation', () => {
       'resume-frames:project_a,project_b',
       'resume-jobs:project_a,project_b',
     ]);
+  });
+
+  it('prepares through the real runtime service with the main config rate card and an unavailable video sibling', async () => {
+    const imageChoiceId = createStudioMediaChoiceId({
+      providerId: 'provider_1',
+      adapterId: 'weprompt-image-v1',
+      model: 'image-model',
+      kind: 'image',
+    });
+    const imageRoute = {
+      choiceId: imageChoiceId,
+      providerId: 'provider_1',
+      providerName: 'Image provider',
+      adapterId: 'weprompt-image-v1' as const,
+      model: 'image-model',
+      health: 'available' as const,
+      kind: 'image' as const,
+      cancellationPolicy: 'none' as const,
+      constraints: {
+        aspectRatios: ['16:9' as const],
+        resolutions: ['1080p' as const],
+        minDurationSeconds: 1,
+        maxDurationSeconds: 60,
+        supportsFirstFrame: true,
+        maxConditioningImages: 1,
+        silentOutput: true,
+      },
+    };
+    const project = createEmptyStudioProjectV2(
+      {
+        name: 'Runtime quote',
+        brief: 'A quiet product reveal.',
+        aspectRatio: '16:9',
+        targetDurationSeconds: 5,
+        resolution: '1080p',
+      },
+      'project_runtime_quote',
+      '2026-08-19T00:00:00.000Z'
+    );
+    project.revision = 2;
+    project.imageRouteId = imageChoiceId;
+    project.videoRouteId = null;
+    project.beatOrder = ['beat_1'];
+    project.beats.beat_1 = {
+      id: 'beat_1',
+      title: 'Opening',
+      action: 'Reveal the product',
+      look: 'Soft daylight',
+      actionRevision: 1,
+      targetSeconds: null,
+      shotOrder: ['shot_1'],
+      lineHistory: [],
+    };
+    project.shots.shot_1 = {
+      id: 'shot_1',
+      line: 'A clean hero frame',
+      derivation: 'derived',
+      derivedFromActionRevision: 1,
+      narration: '',
+      onScreenText: '',
+      durationSeconds: 5,
+      trimInSeconds: null,
+      trimOutSeconds: null,
+      chainBreak: 'none',
+      seedStillId: null,
+      selectedTakeId: null,
+      assetIds: [],
+      jobIds: [],
+    };
+    const generationCatalog: StudioGenerationRouteCatalog = {
+      routes: [imageRoute],
+      diagnostics: [{ status: 'available', route: imageRoute }],
+      generationCatalogVersion: 'runtime_quote_catalog',
+    };
+    const harness = createHarness({
+      initialInventory: inventory([project.id]),
+      realService: { project, generationCatalog },
+    });
+
+    await harness.runtime.start();
+    const prepared = await harness.runtime.service.prepareSubmission({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [{ shotId: 'shot_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'shot_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+    });
+
+    expect(prepared.baseOnly).toMatchObject({
+      currency: 'USD',
+      lowerMinorUnits: 3,
+      upperMinorUnits: 3,
+      baseItems: [{ purpose: 'seed_still', oneGenerationMinorUnits: 3 }],
+    });
+    expect(prepared.withCascade).toBeNull();
+    expect(harness.providerResolver.listGenerationRoutes).toHaveBeenCalledTimes(1);
+    await harness.runtime.dispose();
   });
 
   it('joins concurrent first-commit inventory events into one activation attempt', async () => {

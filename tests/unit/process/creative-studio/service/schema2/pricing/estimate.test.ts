@@ -327,6 +327,99 @@ describe('schema-2 Studio estimates', () => {
     ).toBe(true);
   });
 
+  it('keeps an exact seed base quote when only its cascade route or rate is unavailable', () => {
+    const project = makeDerivationProject();
+    const request = prepareRequest(
+      [choice('shot_1', 'seed_still', 2)],
+      [choice('shot_1', 'video_take'), choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
+    );
+    const available = deriveStudioSubmissionQuoteCoresV2({
+      project,
+      request,
+      rateCard: createStudioRateCardV2([imageRate, videoRate]),
+    });
+    const missingRate = deriveStudioSubmissionQuoteCoresV2({
+      project,
+      request,
+      rateCard: createStudioRateCardV2([imageRate]),
+    });
+    const missingRouteProject = structuredClone(project);
+    missingRouteProject.videoRouteId = null;
+    const missingRoute = deriveStudioSubmissionQuoteCoresV2({
+      project: missingRouteProject,
+      request,
+      rateCard: createStudioRateCardV2([imageRate, videoRate]),
+    });
+
+    expect(available.withCascade).not.toBeNull();
+    expect(available.withCascade?.rateCardDigest).not.toBe(available.baseOnly.rateCardDigest);
+    expect(missingRate).toEqual({ request, baseOnly: available.baseOnly, withCascade: null });
+    expect(missingRoute).toEqual({ request, baseOnly: available.baseOnly, withCascade: null });
+  });
+
+  it('does not hide a missing base route as cascade unavailability', () => {
+    const project = makeDerivationProject();
+    project.imageRouteId = null;
+
+    expect(() =>
+      deriveStudioSubmissionQuoteCoresV2({
+        project,
+        request: prepareRequest(
+          [choice('shot_1', 'seed_still')],
+          [choice('shot_1', 'video_take'), choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
+        ),
+        rateCard: createStudioRateCardV2([imageRate, videoRate]),
+      })
+    ).toThrow(expect.objectContaining({ code: 'missing_route' }));
+  });
+
+  it('derives an exact seed-only handoff quote for arbitrary ordered active shots without video authority', () => {
+    const project = makeDerivationProject();
+    const request: StudioPrepareSubmissionRequestV2 = {
+      ...prepareRequest([choice('shot_2', 'seed_still'), choice('shot_3', 'seed_still')], []),
+      originReferenceHandoffId: 'handoff_1',
+    };
+
+    const options = deriveStudioSubmissionQuoteCoresV2({
+      project,
+      request,
+      rateCard: createStudioRateCardV2([imageRate]),
+    });
+
+    expect(options.request).toEqual(request);
+    expect(options.withCascade).toBeNull();
+    expect(options.baseOnly).toMatchObject({
+      originReferenceHandoffId: 'handoff_1',
+      lowerMinorUnits: 50,
+      upperMinorUnits: 50,
+      cascadeItems: [],
+      baseItems: [
+        { shotId: 'shot_2', purpose: 'seed_still', routeId: 'image_route', generationCount: 1 },
+        { shotId: 'shot_3', purpose: 'seed_still', routeId: 'image_route', generationCount: 1 },
+      ],
+    });
+    expect(options.baseOnly.baseItems.every((item) => item.requestPlan.kind === 'resolved')).toBe(true);
+    expect(JSON.stringify(options)).not.toContain('video_route');
+  });
+
+  it.each([
+    ['video purpose', [choice('shot_2', 'video_take')], []],
+    ['multiple generations', [choice('shot_2', 'seed_still', 2)], []],
+    ['reference asset', [choice('shot_2', 'seed_still', 1, 'brief_ref')], []],
+    ['cascade row', [choice('shot_2', 'seed_still')], [choice('shot_2', 'video_take')]],
+  ])('rejects a reference handoff with %s', (_label, baseChoices, cascadeChoices) => {
+    expect(() =>
+      deriveStudioSubmissionQuoteCoresV2({
+        project: makeDerivationProject(),
+        request: {
+          ...prepareRequest(baseChoices, cascadeChoices),
+          originReferenceHandoffId: 'handoff_1',
+        },
+        rateCard: createStudioRateCardV2([imageRate, videoRate]),
+      })
+    ).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
+  });
+
   it('resolves the exact current predecessor frame when no earlier option item supplies it', () => {
     const project = makeDerivationProject();
     const take = addDerivationAsset(project, {

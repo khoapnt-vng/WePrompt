@@ -12,6 +12,7 @@ const workspaceSelector = '[data-studio-workspace]';
 const projectHeaderSelector = '[data-studio-project-header]';
 const viewNavigationSelector = '[data-studio-view-navigation]';
 const activeViewSelector = '[data-studio-view]';
+const controlsSelector = '[data-studio-workspace-controls]';
 
 test.describe('Creative Studio workspace', () => {
   test.describe.configure({ timeout: 60_000 });
@@ -33,22 +34,34 @@ test.describe('Creative Studio workspace', () => {
     const navigation = page.locator(viewNavigationSelector);
     await expect(navigation.getByRole('link', { name: 'Table' })).toHaveAttribute('aria-current', 'page');
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'table');
+    const controls = page.locator(controlsSelector);
+    const nameDraft = controls.getByLabel('Project name');
+    await expect(nameDraft).toHaveValue(projectBrief);
+    await nameDraft.fill(`${projectBrief} — local draft`);
 
     await navigation.getByRole('link', { name: 'Board' }).click();
     await expect(page).toHaveURL(/#\/studio\/[^/]+\/board$/);
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'board');
+    await expect(controls.getByLabel('Project name')).toHaveValue(`${projectBrief} — local draft`);
 
     await navigation.getByRole('link', { name: 'Cut' }).click();
     await expect(page).toHaveURL(/#\/studio\/[^/]+\/cut$/);
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'cut');
+    await expect(controls.getByLabel('Project name')).toHaveValue(`${projectBrief} — local draft`);
 
     const cutUrl = page.url();
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(page).toHaveURL(cutUrl);
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'cut');
+    await expect(page.locator(controlsSelector).getByLabel('Project name')).toHaveValue(
+      `${projectBrief} — local draft`
+    );
 
-    await expect(
-      page.getByRole('button', { name: /prepare submission|confirm submission|dismiss handoff/i })
-    ).toHaveCount(0);
+    await page.locator(controlsSelector).getByRole('button', { name: 'Reset settings' }).click();
+    await expect(page.locator(controlsSelector).getByLabel('Project name')).toHaveValue(projectBrief);
+
+    // Merely loading, navigating, and restoring drafts cannot open or cross the paid boundary.
+    await expect(page.locator('[data-testid="studio-spend-gate"]')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /prepare estimate|confirm .*generation/i })).toHaveCount(0);
   });
 });

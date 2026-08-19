@@ -133,7 +133,7 @@ const validateSession = (session: StudioPreparedSubmissionSessionV2, expectedExp
     return invariant('base_option_mismatch');
   }
 
-  if ((request.cascadeChoices.length === 0) !== (withCascade === null)) {
+  if (request.cascadeChoices.length === 0 && withCascade !== null) {
     return invariant('cascade_option_presence');
   }
   if (
@@ -144,7 +144,6 @@ const validateSession = (session: StudioPreparedSubmissionSessionV2, expectedExp
       withCascade.projectRevision !== request.expectedRevision ||
       withCascade.originReferenceHandoffId !== request.originReferenceHandoffId ||
       withCascade.expiresAt !== expectedExpiresAt ||
-      withCascade.rateCardDigest !== baseOnly.rateCardDigest ||
       withCascade.currency !== baseOnly.currency ||
       withCascade.cascadeItems.length === 0 ||
       !jsonEqual(withCascade.baseItems, baseOnly.baseItems))

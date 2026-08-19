@@ -18,6 +18,7 @@ import {
   type StudioRendererWorkspaceStatusV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { CreativeStudioServiceError } from '@process/services/creative-studio/service/projectMutations';
+import { StudioPreparedSubmissionCacheErrorV2 } from '@process/services/creative-studio/service/schema2/preparedSubmissionCache';
 import type { CreativeStudioServiceV2 } from '@process/services/creative-studio/service/v2Service';
 import { CreativeStudioStoreError } from '@process/services/creative-studio/store';
 import { CreativeStudioMediaError } from '@process/services/creative-studio/mediaStore';
@@ -38,6 +39,10 @@ const errorMessageKeys: Record<StudioCommandErrorCode, string> = {
   busy: 'conversation.creativeStudio.errors.busy',
   cancelled: 'conversation.creativeStudio.jobs.status.cancelled',
   provider_error: 'conversation.creativeStudio.errors.provider',
+  quote_not_found: 'conversation.creativeStudio.errors.quoteNotFound',
+  quote_in_use: 'conversation.creativeStudio.errors.quoteInUse',
+  quote_cache_full: 'conversation.creativeStudio.errors.quoteCacheFull',
+  quote_too_large: 'conversation.creativeStudio.errors.quoteTooLarge',
   media_in_use: 'conversation.creativeStudio.errors.mediaInUse',
   storage_error: 'conversation.creativeStudio.errors.storage',
 };
@@ -51,17 +56,19 @@ const toCommandError = (error: unknown): StudioCommandResult<never> => {
       ? storeErrorCode(error)
       : error instanceof CreativeStudioServiceError
         ? error.code
-        : error instanceof CreativeStudioMediaError
-          ? error.code === 'not_found'
-            ? 'not_found'
-            : error.code === 'stale_project'
-              ? 'stale_project'
-              : error.code === 'invalid_media'
-                ? 'invalid_payload'
-                : error.code === 'media_in_use'
-                  ? 'media_in_use'
-                  : 'storage_error'
-          : 'storage_error';
+        : error instanceof StudioPreparedSubmissionCacheErrorV2
+          ? error.code
+          : error instanceof CreativeStudioMediaError
+            ? error.code === 'not_found'
+              ? 'not_found'
+              : error.code === 'stale_project'
+                ? 'stale_project'
+                : error.code === 'invalid_media'
+                  ? 'invalid_payload'
+                  : error.code === 'media_in_use'
+                    ? 'media_in_use'
+                    : 'storage_error'
+            : 'storage_error';
   return { ok: false, error: { code, messageKey: errorMessageKeys[code] } };
 };
 
@@ -354,6 +361,15 @@ export function initCreativeStudioBridge(dependencies: CreativeStudioBridgeDepen
   );
   ipcBridge.creativeStudio.listReferenceGenerationHandoffs.provider((input) =>
     runCommand(() => dependencies.getService().listReferenceGenerationHandoffs(input))
+  );
+  ipcBridge.creativeStudio.prepareSubmission.provider((input) =>
+    runCommand(() => dependencies.getService().prepareSubmission(input))
+  );
+  ipcBridge.creativeStudio.confirmSubmission.provider((input) =>
+    runCommand(() => dependencies.getService().confirmSubmission(input))
+  );
+  ipcBridge.creativeStudio.dismissReferenceGenerationHandoff.provider((input) =>
+    runCommand(() => dependencies.getService().dismissReferenceGenerationHandoff(input))
   );
   ipcBridge.creativeStudio.applyAuthoringBatch.provider((input) =>
     runCommand(() => applyOperations(input, input.operations))

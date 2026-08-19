@@ -75,7 +75,7 @@ describe('Creative Studio workspace accessible copy', () => {
     expect(screen.getByRole('button', { name: 'Create project' })).toBeVisible();
   });
 
-  it('names every reviewed free decision while leaving an open paid handoff actionless', () => {
+  it('names every reviewed decision and the explicit open-handoff actions', () => {
     renderEnglish(
       <DirectorProposals
         proposals={[proposal]}
@@ -86,6 +86,8 @@ describe('Creative Studio workspace accessible copy', () => {
         onRejectProposal={vi.fn(async () => undefined)}
         onGenerateReferences={vi.fn(async () => undefined)}
         onRejectReferences={vi.fn(async () => undefined)}
+        onReviewHandoff={vi.fn()}
+        onDismissHandoff={vi.fn(async () => undefined)}
       />
     );
 
@@ -94,6 +96,8 @@ describe('Creative Studio workspace accessible copy', () => {
     expect(screen.getByRole('button', { name: 'Reject proposal' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Review generation' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Reject request' })).toBeVisible();
-    expect(within(screen.getByTestId('studio-handoff-handoff-1')).queryAllByRole('button')).toHaveLength(0);
+    const handoffCard = within(screen.getByTestId('studio-handoff-handoff-1'));
+    expect(handoffCard.getByRole('button', { name: 'Review cost' })).toBeEnabled();
+    expect(handoffCard.getByRole('button', { name: 'Dismiss' })).toBeEnabled();
   });
 });

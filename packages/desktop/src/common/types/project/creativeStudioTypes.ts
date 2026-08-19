@@ -1418,6 +1418,7 @@ export type StudioCommandErrorCode =
   | 'busy'
   | 'cancelled'
   | 'provider_error'
+  | StudioSubmissionCacheErrorCodeV2
   | 'storage_error';
 
 export type StudioCommandResult<T> =
