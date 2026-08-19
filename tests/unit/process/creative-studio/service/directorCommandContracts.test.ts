@@ -26,14 +26,18 @@ import {
   type StudioDirectorCommandSlotLeaseV2,
   type StudioDirectorCommandSlotV2,
   type StudioDirectorOperationV2,
+  type StudioMutationOperationV2,
   type StudioProposalDecisionV2,
   type StudioProposalRecordV2,
   type StudioProposalSlotV2,
+  type StudioReferenceGenerationHandoffReceiptV2,
+  type StudioReferenceRequestDecisionV2,
   type StudioReferenceRequestSlotV2,
   type StudioReferenceRequestV2,
 } from '@/common/types/project/creativeStudioTypes';
 import * as directorCommandContracts from '@process/services/creative-studio/service/directorCommandContracts';
 import {
+  classifyStudioDirectorOperationV2,
   parseStudioDirectorCommandReceipt,
   parseStudioDirectorCommandReceiptV2,
   parseStudioDirectorCommandSlot,
@@ -44,8 +48,11 @@ import {
   parseStudioProposalDecisionV2,
   parseStudioProposalRecordV2,
   parseStudioProposalSlotV2,
+  parseStudioReferenceGenerationHandoffReceiptV2,
+  parseStudioReferenceRequestDecisionV2,
   parseStudioReferenceRequestSlotV2,
   parseStudioReferenceRequestV2,
+  STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2,
 } from '@process/services/creative-studio/service/directorCommandContracts';
 
 const NOW = '2026-08-16T12:00:00.000Z';
@@ -585,6 +592,55 @@ describe('Studio Director V2 command contracts', () => {
     expect(STUDIO_MAX_MUTATION_OPERATIONS).toBe(32);
   });
 
+  it('freezes an exhaustive 32-kind capability table and rejects unknown provenance', () => {
+    const expected = {
+      edit_project: 'operation_not_permitted',
+      set_brief: 'direct',
+      set_rules: 'operation_not_permitted',
+      add_beat: 'direct',
+      edit_beat: 'direct',
+      reorder_beats: 'direct',
+      park_beat: 'operation_not_permitted',
+      restore_beat: 'operation_not_permitted',
+      add_binned_beat: 'proposal',
+      add_shot: 'direct',
+      edit_shot: 'direct',
+      delete_shot: 'direct',
+      park_shot: 'operation_not_permitted',
+      restore_shot: 'operation_not_permitted',
+      reorder_shots: 'direct',
+      apply_coverage: 'proposal',
+      set_hard_cut: 'proposal',
+      set_seed_still: 'operation_not_permitted',
+      trim_shot: 'operation_not_permitted',
+      redetach_line: 'proposal',
+      rederive_line: 'proposal',
+      restore_line: 'operation_not_permitted',
+      park_take: 'operation_not_permitted',
+      add_alternate_take: 'operation_not_permitted',
+      restore_take: 'operation_not_permitted',
+      reorder_bin: 'direct',
+      select_take: 'operation_not_permitted',
+      set_routes: 'operation_not_permitted',
+      set_spend_policy: 'operation_not_permitted',
+      set_match_to: 'operation_not_permitted',
+      set_bed: 'operation_not_permitted',
+      undo_last: 'operation_not_permitted',
+    } as const satisfies Readonly<
+      Record<StudioMutationOperationV2['kind'], 'direct' | 'proposal' | 'operation_not_permitted'>
+    >;
+
+    expect(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2).toEqual(expected);
+    expect(Object.keys(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)).toHaveLength(32);
+    expect(Object.isFrozen(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)).toBe(true);
+    for (const [kind, disposition] of Object.entries(expected)) {
+      expect(classifyStudioDirectorOperationV2(kind), kind).toBe(disposition);
+    }
+    for (const unknown of ['future_operation', 'constructor', 'toString', '__proto__', null, {}, 1]) {
+      expect(classifyStudioDirectorOperationV2(unknown)).toBeNull();
+    }
+  });
+
   it.each([
     { kind: 'edit_project', changes: { name: 'Not direct' } },
     { kind: 'park_beat', beatId: 'section_1' },
@@ -983,6 +1039,7 @@ describe('Studio Director V2 receipt contracts', () => {
       'identity_collision',
       'invalid_operation',
       'validation_failed',
+      'operation_not_permitted',
     ] as const;
 
     for (const reasonCode of reasons) {
@@ -1018,11 +1075,14 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
     projectId: 'project_1',
     status: 'pending',
     baseRevision: 4,
-    payload: { kind: 'mutation_batch', operations: [{ kind: 'set_brief', brief: 'A focused launch.' }] },
+    payload: {
+      kind: 'mutation_batch',
+      operations: [{ kind: 'rederive_line', shotId: 'clip_1', line: 'A focused launch.' }],
+    },
     createdAt: NOW,
     decidedAt: null,
   };
-  const decision: StudioProposalDecisionV2 = {
+  const proposalDecision: StudioProposalDecisionV2 = {
     schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
     proposalId: 'proposal_1',
     status: 'accepted',
@@ -1050,9 +1110,9 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
     expect(
       parseStudioProposalRecordV2({ projectId: 'project_1', proposalId: 'proposal_rule', value: pinRule })
     ).toEqual({ status: 'valid', record: pinRule });
-    expect(parseStudioProposalDecisionV2({ proposalId: 'proposal_1', value: decision })).toEqual({
+    expect(parseStudioProposalDecisionV2({ proposalId: 'proposal_1', value: proposalDecision })).toEqual({
       status: 'valid',
-      record: decision,
+      record: proposalDecision,
     });
     expect(parseStudioProposalSlotV2(proposalSlot)).toEqual({ status: 'valid', record: proposalSlot });
   });
@@ -1065,6 +1125,35 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
         value: { ...mutationProposal, rawPrompt: 'secret' },
       })
     ).toEqual({ status: 'invalid' });
+    const directProposal = {
+      ...mutationProposal,
+      payload: { kind: 'mutation_batch' as const, operations: [{ kind: 'set_brief' as const, brief: 'Reviewed.' }] },
+    };
+    expect(
+      parseStudioProposalRecordV2({ projectId: 'project_1', proposalId: 'proposal_1', value: directProposal })
+    ).toEqual({ status: 'valid', record: directProposal });
+    for (const operation of [{ kind: 'park_take', shotId: 'clip_1', assetId: 'take_1' }]) {
+      expect(
+        parseStudioProposalRecordV2({
+          projectId: 'project_1',
+          proposalId: 'proposal_1',
+          value: { ...mutationProposal, payload: { kind: 'mutation_batch', operations: [operation] } },
+        })
+      ).toEqual({ status: 'invalid' });
+    }
+    expect(
+      parseStudioProposalRecordV2({
+        projectId: 'project_1',
+        proposalId: 'proposal_1',
+        value: {
+          ...mutationProposal,
+          payload: {
+            kind: 'pin_rule',
+            rule: { text: 'Avoid punctuation.', predicate: { kind: 'forbidden_terms', terms: ['!!!'] } },
+          },
+        },
+      })
+    ).toEqual({ status: 'invalid' });
     expect(
       parseStudioProposalRecordV2({
         projectId: 'project_1',
@@ -1073,7 +1162,7 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
       })
     ).toEqual({ status: 'invalid' });
     expect(
-      parseStudioProposalDecisionV2({ proposalId: 'proposal_1', value: { ...decision, status: 'pending' } })
+      parseStudioProposalDecisionV2({ proposalId: 'proposal_1', value: { ...proposalDecision, status: 'pending' } })
     ).toEqual({ status: 'invalid' });
   });
 
@@ -1086,7 +1175,7 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
       })
     ).toEqual({ status: 'unsupported_prototype_schema' });
     expect(
-      parseStudioProposalDecisionV2({ proposalId: 'proposal_1', value: { ...decision, schemaVersion: 1 } })
+      parseStudioProposalDecisionV2({ proposalId: 'proposal_1', value: { ...proposalDecision, schemaVersion: 1 } })
     ).toEqual({ status: 'unsupported_prototype_schema' });
     expect(parseStudioProposalSlotV2({ ...proposalSlot, schemaVersion: 1 })).toEqual({
       status: 'unsupported_prototype_schema',
@@ -1142,6 +1231,171 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
     ).toEqual({ status: 'unsupported_prototype_schema' });
   });
 
+  it('accepts every exact terminal reference decision and handoff receipt variant', () => {
+    const decisions: StudioReferenceRequestDecisionV2[] = [
+      {
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        requestId: 'request_rejected',
+        projectId: 'project_1',
+        decidedAt: NOW,
+        outcome: { kind: 'rejected' },
+      },
+      {
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        requestId: 'request_expired',
+        projectId: 'project_1',
+        decidedAt: NOW,
+        outcome: { kind: 'expired' },
+      },
+      {
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        requestId: 'request_imported',
+        projectId: 'project_1',
+        decidedAt: NOW,
+        outcome: { kind: 'imported_reference', assetId: 'asset_1', projectRevision: 7 },
+      },
+      {
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        requestId: 'request_generation',
+        projectId: 'project_1',
+        decidedAt: NOW,
+        outcome: { kind: 'generation_gate', handoffId: 'handoff_1', shotIds: ['shot_2', 'shot_1'] },
+      },
+    ];
+    for (const decision of decisions) {
+      expect(
+        parseStudioReferenceRequestDecisionV2({
+          projectId: decision.projectId,
+          requestId: decision.requestId,
+          value: decision,
+        })
+      ).toEqual({ status: 'valid', record: decision });
+    }
+
+    const receipts: StudioReferenceGenerationHandoffReceiptV2[] = [
+      {
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        handoffId: 'handoff_dismissed',
+        requestId: 'request_dismissed',
+        completedAt: NOW,
+        result: { kind: 'dismissed' },
+      },
+      {
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        handoffId: 'handoff_confirmed',
+        requestId: 'request_confirmed',
+        completedAt: NOW,
+        result: { kind: 'confirmed', authorizationId: 'authorization_1' },
+      },
+    ];
+    for (const receipt of receipts) {
+      expect(parseStudioReferenceGenerationHandoffReceiptV2({ handoffId: receipt.handoffId, value: receipt })).toEqual({
+        status: 'valid',
+        record: receipt,
+      });
+    }
+  });
+
+  it('rejects malformed reference decisions without weakening exact nested contracts', () => {
+    const generationDecision: StudioReferenceRequestDecisionV2 = {
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      requestId: 'request_1',
+      projectId: 'project_1',
+      decidedAt: NOW,
+      outcome: { kind: 'generation_gate', handoffId: 'handoff_1', shotIds: ['shot_1', 'shot_2'] },
+    };
+    const parse = (value: unknown, projectId = 'project_1', requestId = 'request_1') =>
+      parseStudioReferenceRequestDecisionV2({ projectId, requestId, value });
+    const sparseShotIds = Array(2) as string[];
+    sparseShotIds[1] = 'shot_1';
+    const invalidValues: unknown[] = [
+      { ...generationDecision, provider: 'secret' },
+      { ...generationDecision, projectId: 'project_other' },
+      { ...generationDecision, requestId: 'request_other' },
+      { ...generationDecision, decidedAt: '2026-08-16' },
+      { ...generationDecision, outcome: null },
+      { ...generationDecision, outcome: { kind: 'rejected', reason: 'no' } },
+      { ...generationDecision, outcome: { kind: 'expired', decidedAt: NOW } },
+      {
+        ...generationDecision,
+        outcome: { kind: 'imported_reference', assetId: 'unsafe/asset', projectRevision: 7 },
+      },
+      {
+        ...generationDecision,
+        outcome: { kind: 'imported_reference', assetId: 'asset_1', projectRevision: 0 },
+      },
+      {
+        ...generationDecision,
+        outcome: { kind: 'imported_reference', assetId: 'asset_1', projectRevision: 7, path: '/tmp/a' },
+      },
+      {
+        ...generationDecision,
+        outcome: { kind: 'generation_gate', handoffId: 'unsafe/handoff', shotIds: ['shot_1'] },
+      },
+      {
+        ...generationDecision,
+        outcome: { kind: 'generation_gate', handoffId: 'handoff_1', shotIds: [] },
+      },
+      {
+        ...generationDecision,
+        outcome: { kind: 'generation_gate', handoffId: 'handoff_1', shotIds: ['shot_1', 'shot_1'] },
+      },
+      {
+        ...generationDecision,
+        outcome: { kind: 'generation_gate', handoffId: 'handoff_1', shotIds: sparseShotIds },
+      },
+      {
+        ...generationDecision,
+        outcome: { kind: 'generation_gate', handoffId: 'handoff_1', shotIds: ['shot_1'], extra: true },
+      },
+      { ...generationDecision, outcome: { kind: 'unknown' } },
+    ];
+    for (const value of invalidValues) expect(parse(value)).toEqual({ status: 'invalid' });
+    expect(parse(generationDecision, 'project_other')).toEqual({ status: 'invalid' });
+    expect(parse(generationDecision, 'project_1', 'request_other')).toEqual({ status: 'invalid' });
+  });
+
+  it('rejects malformed handoff receipts and preserves V1 sidecars as unsupported', () => {
+    const confirmed: StudioReferenceGenerationHandoffReceiptV2 = {
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      handoffId: 'handoff_1',
+      requestId: 'request_1',
+      completedAt: NOW,
+      result: { kind: 'confirmed', authorizationId: 'authorization_1' },
+    };
+    const parse = (value: unknown, handoffId = 'handoff_1') =>
+      parseStudioReferenceGenerationHandoffReceiptV2({ handoffId, value });
+    const invalidValues: unknown[] = [
+      { ...confirmed, quoteId: 'quote_secret' },
+      { ...confirmed, handoffId: 'handoff_other' },
+      { ...confirmed, requestId: 'unsafe/request' },
+      { ...confirmed, completedAt: 'yesterday' },
+      { ...confirmed, result: null },
+      { ...confirmed, result: { kind: 'dismissed', authorizationId: 'authorization_1' } },
+      { ...confirmed, result: { kind: 'confirmed', authorizationId: 'unsafe/authorization' } },
+      { ...confirmed, result: { kind: 'confirmed' } },
+      { ...confirmed, result: { kind: 'unknown' } },
+    ];
+    for (const value of invalidValues) expect(parse(value)).toEqual({ status: 'invalid' });
+    expect(parse(confirmed, 'handoff_other')).toEqual({ status: 'invalid' });
+    expect(parse({ ...confirmed, schemaVersion: 1 })).toEqual({ status: 'unsupported_prototype_schema' });
+
+    const rejectedDecision: StudioReferenceRequestDecisionV2 = {
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      requestId: 'request_1',
+      projectId: 'project_1',
+      decidedAt: NOW,
+      outcome: { kind: 'rejected' },
+    };
+    expect(
+      parseStudioReferenceRequestDecisionV2({
+        projectId: 'project_1',
+        requestId: 'request_1',
+        value: { ...rejectedDecision, schemaVersion: 1 },
+      })
+    ).toEqual({ status: 'unsupported_prototype_schema' });
+  });
+
   it('returns bounded invalid results for revoked proxies across every V2 sidecar parser', () => {
     const makeRevokedProxy = (): unknown => {
       const revocable = Proxy.revocable({}, {});
@@ -1172,6 +1426,17 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
           value: makeRevokedProxy(),
         }),
       () => parseStudioReferenceRequestSlotV2(makeRevokedProxy()),
+      () =>
+        parseStudioReferenceRequestDecisionV2({
+          projectId: 'project_1',
+          requestId: 'request_1',
+          value: makeRevokedProxy(),
+        }),
+      () =>
+        parseStudioReferenceGenerationHandoffReceiptV2({
+          handoffId: 'handoff_1',
+          value: makeRevokedProxy(),
+        }),
     ];
 
     for (const parse of parsers) {

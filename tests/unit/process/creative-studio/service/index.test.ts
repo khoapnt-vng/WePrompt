@@ -18,6 +18,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import {
   STUDIO_PROJECT_SCHEMA_VERSION,
+  STUDIO_PROPOSAL_V2_PENDING_TTL_MS,
+  STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT,
+  STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES,
+  STUDIO_REFERENCE_REQUEST_V2_PENDING_TTL_MS,
   type CreateStudioProjectInput,
   type CreateStudioProjectInputV2,
   type StudioAsset,
@@ -27,8 +31,11 @@ import {
   type StudioEditableScene,
   type StudioJob,
   type StudioJobV2,
+  type StudioMutationOperationV2,
   type StudioProject,
   type StudioProjectV2,
+  type StudioProposalRecordV2,
+  type StudioReferenceRequestV2,
   type StudioRendererProject,
   type StudioRouteCatalog,
   type StudioRouteCatalogEntry,
@@ -54,6 +61,7 @@ import {
   createCreativeStudioServiceV2,
   createStudioDirectorCommandService,
   derivePayableShotIds,
+  projectStudioReferenceGenerationHandoffV2,
   type CreativeStudioService,
 } from '@process/services/creative-studio/service';
 import {
@@ -62,6 +70,7 @@ import {
   createEmptyStudioProjectV2,
   createStudioQuotedGenerationId,
   createStudioRateCardV2,
+  validateStudioMutationOperationV2,
   validateStudioProjectV2,
 } from '@process/services/creative-studio/service/schema2';
 import { createStudioMediaChoiceId } from '@process/services/creative-studio/providerResolver';
@@ -90,7 +99,7 @@ import {
 import { BUILTIN_STUDIO_NAME } from '@process/resources/builtinMcp/constants';
 import * as referenceRequestWriter from '@process/resources/builtinMcp/studioReferenceRequestWriter';
 import { writeProposalRecordV2 } from '@process/resources/builtinMcp/studioProposalWriter';
-import { writePendingRecordV2 } from '@process/resources/builtinMcp/studioPendingRecordWriter';
+import { writePendingRecord, writePendingRecordV2 } from '@process/resources/builtinMcp/studioPendingRecordWriter';
 
 const createStudioMcpProtocolHarness = async (
   config: Parameters<typeof registerStudioTools>[1] = null,
@@ -6187,6 +6196,68 @@ describe('CreativeStudioServiceV2', () => {
       };
       return { project: structuredClone(current), dispatch: structuredClone(built.dispatch) };
     });
+    const proposal = {
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      id: 'proposal_service_1',
+      projectId: current.id,
+      status: 'pending' as const,
+      baseRevision: current.revision,
+      payload: {
+        kind: 'mutation_batch' as const,
+        operations: [{ kind: 'set_brief' as const, brief: 'A reviewed proposal' }],
+      },
+      createdAt: '2026-08-17T00:00:01.000Z',
+      decidedAt: null,
+    };
+    const listProposalsV2 = vi.fn(async () => [structuredClone(proposal)]);
+    const acceptProposalV2 = vi.fn(async () => ({
+      proposal: {
+        ...structuredClone(proposal),
+        status: 'accepted' as const,
+        decidedAt: committedAt,
+      },
+      project: structuredClone(current),
+      applied: true,
+    }));
+    const rejectProposalV2 = vi.fn(async () => ({
+      ...structuredClone(proposal),
+      status: 'rejected' as const,
+      decidedAt: committedAt,
+    }));
+    const referenceRequest: StudioReferenceRequestV2 = {
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      id: 'reference_request_service_1',
+      projectId: current.id,
+      shotIds: ['clip_1'],
+      status: 'pending',
+      createdAt: '2026-08-17T00:00:01.000Z',
+    };
+    const listReferenceRequestsV2 = vi.fn<CreativeStudioStore['listReferenceRequestsV2']>(async () => [
+      { request: structuredClone(referenceRequest), decision: null, receipt: null },
+    ]);
+    const decideReferenceRequestV2 = vi.fn<CreativeStudioStore['decideReferenceRequestV2']>(async (input) => {
+      const outcome =
+        input.outcome.kind === 'generation_gate'
+          ? { kind: 'generation_gate' as const, handoffId: 'handoff_service_1', shotIds: [...referenceRequest.shotIds] }
+          : input.outcome.kind === 'imported_reference'
+            ? {
+                kind: 'imported_reference' as const,
+                assetId: input.outcome.assetId,
+                projectRevision: current.revision,
+              }
+            : { kind: 'rejected' as const };
+      return {
+        request: structuredClone(referenceRequest),
+        decision: {
+          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          requestId: referenceRequest.id,
+          projectId: current.id,
+          decidedAt: committedAt,
+          outcome,
+        },
+        receipt: null,
+      };
+    });
     const store = {
       listProjectsV2: vi.fn(async () => ({ projects: [], unsupportedProjectIds: [], quarantinedProjectIds: [] })),
       createProjectV2: vi.fn(async () => structuredClone(current)),
@@ -6195,6 +6266,11 @@ describe('CreativeStudioServiceV2', () => {
       updateProjectV2,
       confirmProjectV2,
       deleteProjectV2: vi.fn(async () => true),
+      listProposalsV2,
+      acceptProposalV2,
+      rejectProposalV2,
+      listReferenceRequestsV2,
+      decideReferenceRequestV2,
     };
     const dispatchAuthorizedJobsV2 = vi.fn(async ({ jobIds }: { projectId: string; jobIds: string[] }) =>
       jobIds.map((jobId) => structuredClone(current.jobs[jobId]!))
@@ -6289,6 +6365,13 @@ describe('CreativeStudioServiceV2', () => {
       extractConditioningFrameV2,
       providerResolver,
       onProjectUpdated,
+      proposal,
+      listProposalsV2,
+      acceptProposalV2,
+      rejectProposalV2,
+      referenceRequest,
+      listReferenceRequestsV2,
+      decideReferenceRequestV2,
       getProject: (): StudioProjectV2 => structuredClone(current),
       setProject: (next: StudioProjectV2): void => {
         current = structuredClone(next);
@@ -6352,6 +6435,15 @@ describe('CreativeStudioServiceV2', () => {
           expectedRevision: 1,
           acknowledgePossibleDuplicateCharge: 'yes',
         } as never),
+      () => harness.service.listReferenceRequests({ projectId: 'project_v2', extra: true } as never),
+      () =>
+        harness.service.decideReferenceRequest({
+          projectId: 'project_v2',
+          requestId: 'reference_request_1',
+          expectedRevision: 1,
+          outcome: { kind: 'generation_gate', handoffId: 'forged' },
+        } as never),
+      () => harness.service.listReferenceGenerationHandoffs({ projectId: '../project' }),
     ];
 
     for (const attempt of attempts) {
@@ -6360,6 +6452,193 @@ describe('CreativeStudioServiceV2', () => {
     }
     expect(harness.submitShots).not.toHaveBeenCalled();
     expect(harness.importReferenceFromPathV2).not.toHaveBeenCalled();
+  });
+
+  it('projects schema-2 proposal lifecycle results without exposing persisted project authority', async () => {
+    const harness = makeHarness();
+
+    await expect(harness.service.listProposals({ projectId: 'project_v2' })).resolves.toEqual([harness.proposal]);
+    await expect(
+      harness.service.acceptProposal({ projectId: 'project_v2', proposalId: harness.proposal.id })
+    ).resolves.toMatchObject({
+      proposal: { id: harness.proposal.id, status: 'accepted' },
+      project: { id: 'project_v2' },
+      applied: true,
+    });
+    await expect(
+      harness.service.rejectProposal({ projectId: 'project_v2', proposalId: harness.proposal.id })
+    ).resolves.toMatchObject({ id: harness.proposal.id, status: 'rejected' });
+
+    harness.acceptProposalV2.mockResolvedValueOnce({
+      proposal: {
+        ...structuredClone(harness.proposal),
+        status: 'accepted',
+        decidedAt: '2026-08-17T00:00:02.000Z',
+      },
+      project: harness.getProject(),
+      applied: false,
+    });
+    const accepted = await harness.service.acceptProposal({
+      projectId: 'project_v2',
+      proposalId: harness.proposal.id,
+    });
+    expect(accepted.applied).toBe(false);
+    expect(Object.hasOwn(accepted.project, 'spendAuthorizations')).toBe(false);
+    expect(Object.hasOwn(accepted.project, 'frameExtractions')).toBe(false);
+    expect(Object.hasOwn(accepted.project, 'undoHistory')).toBe(false);
+    expect(harness.listProposalsV2).toHaveBeenCalledExactlyOnceWith('project_v2');
+    expect(harness.acceptProposalV2).toHaveBeenCalledTimes(2);
+    expect(harness.rejectProposalV2).toHaveBeenCalledExactlyOnceWith('project_v2', harness.proposal.id);
+    expect(harness.onProjectUpdated).toHaveBeenCalledTimes(1);
+
+    await expect(
+      harness.service.listProposals({ projectId: 'project_v2', extra: true } as never)
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+    await expect(
+      harness.service.acceptProposal({ projectId: 'project_v2', proposalId: '../proposal' })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+    await expect(
+      harness.service.rejectProposal({ projectId: '../project', proposalId: harness.proposal.id })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+  });
+
+  it('projects reference generation handoffs without durable authorization identity', () => {
+    const decision = {
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      requestId: 'reference_request_1',
+      projectId: 'project_v2',
+      decidedAt: '2026-08-17T00:00:01.000Z',
+      outcome: { kind: 'generation_gate' as const, handoffId: 'handoff_1', shotIds: ['clip_1', 'clip_2'] },
+    };
+
+    expect(projectStudioReferenceGenerationHandoffV2(decision, null)).toEqual({
+      handoffId: 'handoff_1',
+      requestId: 'reference_request_1',
+      shotIds: ['clip_1', 'clip_2'],
+      decidedAt: decision.decidedAt,
+      status: 'open',
+      completedAt: null,
+    });
+    const confirmed = projectStudioReferenceGenerationHandoffV2(decision, {
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      handoffId: 'handoff_1',
+      requestId: 'reference_request_1',
+      completedAt: '2026-08-17T00:00:02.000Z',
+      result: { kind: 'confirmed', authorizationId: 'authorization_secret' },
+    });
+    expect(confirmed).toEqual({
+      handoffId: 'handoff_1',
+      requestId: 'reference_request_1',
+      shotIds: ['clip_1', 'clip_2'],
+      decidedAt: decision.decidedAt,
+      status: 'confirmed',
+      completedAt: '2026-08-17T00:00:02.000Z',
+    });
+    expect(JSON.stringify(confirmed)).not.toContain('authorization_secret');
+    expect(projectStudioReferenceGenerationHandoffV2({ ...decision, outcome: { kind: 'rejected' } }, null)).toBeNull();
+    expect(() =>
+      projectStudioReferenceGenerationHandoffV2(
+        { ...decision, outcome: { kind: 'rejected' } },
+        {
+          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          handoffId: 'handoff_1',
+          requestId: 'reference_request_1',
+          completedAt: '2026-08-17T00:00:02.000Z',
+          result: { kind: 'dismissed' },
+        }
+      )
+    ).toThrowError(expect.objectContaining({ code: 'storage_error' }));
+    expect(() =>
+      projectStudioReferenceGenerationHandoffV2(decision, {
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        handoffId: 'other_handoff',
+        requestId: 'reference_request_1',
+        completedAt: '2026-08-17T00:00:02.000Z',
+        result: { kind: 'dismissed' },
+      })
+    ).toThrowError(expect.objectContaining({ code: 'storage_error' }));
+  });
+
+  it('lists and decides reference requests while projecting ordered safe handoffs only', async () => {
+    const harness = makeHarness();
+
+    await expect(harness.service.listReferenceRequests({ projectId: 'project_v2' })).resolves.toEqual([
+      harness.referenceRequest,
+    ]);
+    const decided = await harness.service.decideReferenceRequest({
+      projectId: 'project_v2',
+      requestId: harness.referenceRequest.id,
+      expectedRevision: 2,
+      outcome: { kind: 'generation_gate' },
+    });
+    expect(decided).toMatchObject({
+      requestId: harness.referenceRequest.id,
+      outcome: { kind: 'generation_gate', handoffId: 'handoff_service_1', shotIds: ['clip_1'] },
+    });
+    expect(harness.decideReferenceRequestV2).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_v2',
+      requestId: harness.referenceRequest.id,
+      expectedRevision: 2,
+      outcome: { kind: 'generation_gate' },
+    });
+
+    const laterDecision = {
+      ...structuredClone(decided),
+      requestId: 'reference_request_service_2',
+      decidedAt: '2026-08-17T00:00:03.000Z',
+      outcome: { kind: 'generation_gate' as const, handoffId: 'handoff_service_2', shotIds: ['clip_1'] },
+    };
+    harness.listReferenceRequestsV2.mockResolvedValueOnce([
+      {
+        request: {
+          ...structuredClone(harness.referenceRequest),
+          id: laterDecision.requestId,
+          createdAt: '2026-08-17T00:00:02.000Z',
+        },
+        decision: laterDecision,
+        receipt: {
+          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          handoffId: 'handoff_service_2',
+          requestId: laterDecision.requestId,
+          completedAt: '2026-08-17T00:00:04.000Z',
+          result: { kind: 'confirmed', authorizationId: 'authorization_secret' },
+        },
+      },
+      {
+        request: structuredClone(harness.referenceRequest),
+        decision: structuredClone(decided),
+        receipt: null,
+      },
+      {
+        request: { ...structuredClone(harness.referenceRequest), id: 'reference_request_service_3' },
+        decision: {
+          ...structuredClone(decided),
+          requestId: 'reference_request_service_3',
+          outcome: { kind: 'rejected' as const },
+        },
+        receipt: null,
+      },
+    ]);
+    const handoffs = await harness.service.listReferenceGenerationHandoffs({ projectId: 'project_v2' });
+    expect(handoffs).toEqual([
+      {
+        handoffId: 'handoff_service_1',
+        requestId: harness.referenceRequest.id,
+        shotIds: ['clip_1'],
+        decidedAt: decided.decidedAt,
+        status: 'open',
+        completedAt: null,
+      },
+      {
+        handoffId: 'handoff_service_2',
+        requestId: laterDecision.requestId,
+        shotIds: ['clip_1'],
+        decidedAt: laterDecision.decidedAt,
+        status: 'confirmed',
+        completedAt: '2026-08-17T00:00:04.000Z',
+      },
+    ]);
+    expect(JSON.stringify(handoffs)).not.toContain('authorization_secret');
   });
 
   it('fails closed for unavailable pricing, invalid clocks, unsafe quote IDs, and disposal', async () => {
@@ -6470,6 +6749,45 @@ describe('CreativeStudioServiceV2', () => {
     expect(Object.keys(catalog)).toEqual(['image', 'video', 'catalogVersion']);
     expect(catalog.image.selectedRoute?.choiceId).toBe(imageRoute.choiceId);
     expect(catalog.catalogVersion).toBe('catalog_v2');
+  });
+
+  it('keeps non-silent OpenRouter video routes while filtering non-silent routes from other adapters', async () => {
+    const project = makeSchema2ServiceProject();
+    const harness = makeHarness(project);
+    const openRouterAudioRoute = {
+      ...videoRoute,
+      model: 'openrouter-video-with-audio',
+      constraints: { ...videoRoute.constraints, silentOutput: false },
+    };
+    const gatewayAudioRoute = {
+      ...videoRoute,
+      choiceId: createStudioMediaChoiceId({
+        providerId: 'provider_1',
+        adapterId: 'weprompt-media-gateway-v1',
+        model: 'gateway-video-with-audio',
+        kind: 'video',
+      }),
+      adapterId: 'weprompt-media-gateway-v1' as const,
+      model: 'gateway-video-with-audio',
+      constraints: { ...videoRoute.constraints, silentOutput: false },
+    };
+    harness.providerResolver.listGenerationRoutes.mockResolvedValueOnce({
+      routes: [openRouterAudioRoute, gatewayAudioRoute],
+      diagnostics: [
+        { status: 'available', route: openRouterAudioRoute },
+        { status: 'available', route: gatewayAudioRoute },
+      ],
+      generationCatalogVersion: 'catalog_audio_routes',
+    } as never);
+
+    const catalog = await harness.service.listRoutes({ projectId: project.id });
+
+    expect(catalog.video.options).toEqual([
+      expect.objectContaining({
+        model: 'openrouter-video-with-audio',
+        constraints: expect.objectContaining({ silentOutput: false }),
+      }),
+    ]);
   });
 
   it('strips durable provider, charge, and remote-task authority from schema-2 jobs', async () => {
@@ -8159,19 +8477,132 @@ const editableShotV2 = () => ({
   durationSeconds: 5,
 });
 
+const mutationCatalogV2 = (): StudioMutationOperationV2[] => [
+  { kind: 'edit_project', changes: { name: 'A sharper launch film' } },
+  { kind: 'set_brief', brief: 'A concise launch story' },
+  {
+    kind: 'set_rules',
+    rules: [{ id: 'rule_1', text: 'Avoid competitor logos.', predicate: { kind: 'forbidden_terms', terms: ['logo'] } }],
+  },
+  { kind: 'add_beat', beatId: 'section_new', beat: editableBeatV2(), beforeBeatId: null },
+  { kind: 'edit_beat', beatId: 'section_1', changes: { targetSeconds: 12 } },
+  { kind: 'reorder_beats', beatOrder: ['section_2', 'section_1'] },
+  { kind: 'park_beat', beatId: 'section_1' },
+  { kind: 'restore_beat', beatId: 'section_1', beforeBeatId: null },
+  { kind: 'add_binned_beat', beatId: 'section_binned', beat: editableBeatV2() },
+  { kind: 'add_shot', beatId: 'section_1', shotId: 'clip_new', shot: editableShotV2(), beforeShotId: null },
+  { kind: 'edit_shot', shotId: 'clip_1', changes: { line: 'A tighter opening' } },
+  { kind: 'delete_shot', shotId: 'clip_2' },
+  { kind: 'park_shot', shotId: 'clip_1' },
+  { kind: 'restore_shot', shotId: 'clip_1', beforeShotId: null },
+  { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_2', 'clip_1'] },
+  {
+    kind: 'apply_coverage',
+    beatId: 'section_1',
+    shots: [
+      {
+        shotId: 'clip_coverage',
+        line: 'A proposed coverage row',
+        narration: '',
+        onScreenText: '',
+        durationSeconds: 5,
+        chainBreak: 'none',
+      },
+    ],
+    fixedShots: [{ shotId: 'clip_fixed', reasons: ['owned_asset', 'selected_take', 'on_screen_text'] }],
+  },
+  { kind: 'set_hard_cut', shotId: 'clip_1', hardCut: true },
+  { kind: 'set_seed_still', shotId: 'clip_1', assetId: 'asset_seed' },
+  { kind: 'trim_shot', shotId: 'clip_1', trimInSeconds: 0, trimOutSeconds: 4.5 },
+  { kind: 'redetach_line', shotId: 'clip_1', line: 'A human-authored line' },
+  { kind: 'rederive_line', shotId: 'clip_1', line: 'A reviewed derived line' },
+  { kind: 'restore_line', shotId: 'clip_1', historyEntryId: 'history_1' },
+  { kind: 'park_take', shotId: 'clip_1', assetId: 'take_1' },
+  { kind: 'add_alternate_take', shotId: 'clip_1', assetId: 'take_2' },
+  { kind: 'restore_take', shotId: 'clip_1', assetId: 'take_3' },
+  {
+    kind: 'reorder_bin',
+    bin: [
+      { kind: 'beat', beatId: 'section_2', reason: 'lifted' },
+      { kind: 'shot', beatId: 'section_1', shotId: 'clip_2', reason: 'lifted' },
+      { kind: 'take', assetId: 'take_3', reason: 'alternate' },
+    ],
+  },
+  { kind: 'select_take', shotId: 'clip_1', assetId: 'take_1' },
+  { kind: 'set_routes', imageRouteId: 'image_route', videoRouteId: 'video_route' },
+  { kind: 'set_spend_policy', policy: { currency: 'USD', maxPerBatchMinorUnits: 5_000 } },
+  { kind: 'set_match_to', shotId: 'clip_1' },
+  { kind: 'set_bed', assetId: 'bed_1' },
+  { kind: 'undo_last', entryId: 'undo_1' },
+];
+
 const capturePendingProjectAuthorityV2 = async (projectRoot: string) => {
   const canonicalRoot = await nodeFs.realpath(projectRoot);
   const stats = await nodeFs.lstat(canonicalRoot);
   return { canonicalRoot, rootIdentity: { dev: stats.dev, ino: stats.ino } };
 };
 
+const REFERENCE_WRITER_PROJECT_ID_V2 = 'project_v2';
+const REFERENCE_WRITER_NOW_MS_V2 = Date.parse('2026-08-19T12:00:00.000Z');
+
+const referenceRequestRecordV2 = (
+  requestId: string,
+  shotId: string,
+  createdAtMs: number
+): StudioReferenceRequestV2 => ({
+  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  id: requestId,
+  projectId: REFERENCE_WRITER_PROJECT_ID_V2,
+  shotIds: [shotId],
+  status: 'pending',
+  createdAt: new Date(createdAtMs).toISOString(),
+});
+
+const proposalRecordV2 = (proposalId: string, createdAtMs: number): StudioProposalRecordV2 => ({
+  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  id: proposalId,
+  projectId: REFERENCE_WRITER_PROJECT_ID_V2,
+  status: 'pending',
+  baseRevision: 1,
+  payload: { kind: 'mutation_batch', operations: [{ kind: 'set_brief', brief: `Proposal ${proposalId}` }] },
+  createdAt: new Date(createdAtMs).toISOString(),
+  decidedAt: null,
+});
+
+const createSidecarFamilyV2 = async (
+  projectDir: string,
+  family: 'proposals' | 'reference-requests'
+): Promise<{ pendingDir: string; slotsDir: string }> => {
+  const familyDir = path.join(projectDir, family);
+  const childNames =
+    family === 'proposals'
+      ? ['pending', 'decisions', 'slots', 'commits']
+      : ['pending', 'decisions', 'slots', 'receipts'];
+  await mkdir(familyDir);
+  await Promise.all(childNames.map((childName) => mkdir(path.join(familyDir, childName))));
+  return { pendingDir: path.join(familyDir, 'pending'), slotsDir: path.join(familyDir, 'slots') };
+};
+
+const createReferenceWriterQueueV2 = async () => {
+  const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-reference-writer-v2-'));
+  const { pendingDir, slotsDir } = await createSidecarFamilyV2(projectDir, 'reference-requests');
+  return {
+    projectDir,
+    pendingDir,
+    slotsDir,
+    projectAuthority: await capturePendingProjectAuthorityV2(projectDir),
+  };
+};
+
 const createPendingQueueFixtureV2 = async () => {
   const projectRoot = await mkdtemp(path.join(tmpdir(), 'studio-pending-v2-boundary-'));
-  const familyRoot = path.join(projectRoot, 'proposals');
-  const pendingDir = path.join(familyRoot, 'pending');
-  const slotsDir = path.join(familyRoot, 'slots');
-  await mkdir(pendingDir, { recursive: true });
-  await mkdir(slotsDir);
+  const { pendingDir, slotsDir } = await createSidecarFamilyV2(projectRoot, 'reference-requests');
+  return { projectRoot, pendingDir, slotsDir };
+};
+
+const createProposalQueueFixtureV2 = async () => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), 'studio-proposal-v2-boundary-'));
+  const { pendingDir, slotsDir } = await createSidecarFamilyV2(projectRoot, 'proposals');
   return { projectRoot, pendingDir, slotsDir };
 };
 
@@ -8183,6 +8614,52 @@ const pendingRequestInputV2 = (pendingDir: string, recordId = 'request_boundary'
   capacityMessage: 'full',
   tooLargeMessage: 'too large',
 });
+
+const referenceDecisionV2 = (
+  requestId: string,
+  outcome: { kind: 'rejected' } | { kind: 'generation_gate'; handoffId: string; shotIds: string[] }
+) => ({
+  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  requestId,
+  projectId: REFERENCE_WRITER_PROJECT_ID_V2,
+  decidedAt: new Date(REFERENCE_WRITER_NOW_MS_V2 + 1_000).toISOString(),
+  outcome,
+});
+
+const referenceReceiptV2 = (requestId: string, handoffId: string) => ({
+  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  handoffId,
+  requestId,
+  completedAt: new Date(REFERENCE_WRITER_NOW_MS_V2 + 2_000).toISOString(),
+  result: { kind: 'dismissed' as const },
+});
+
+const stageReadyReferenceRequestV2 = async (
+  pendingDir: string,
+  requestId: string
+): Promise<{ canonicalFile: string; readyFile: string; temporaryFile: string }> => {
+  const canonicalFile = path.join(pendingDir, `${requestId}.json`);
+  const temporaryFile = `${canonicalFile}.12345_1.tmp`;
+  const readyFile = `${canonicalFile}.12345_1.ready`;
+  await writeFile(
+    temporaryFile,
+    JSON.stringify(referenceRequestRecordV2(requestId, 'shot_existing', REFERENCE_WRITER_NOW_MS_V2))
+  );
+  await nodeFs.link(temporaryFile, readyFile);
+  return { canonicalFile, readyFile, temporaryFile };
+};
+
+const stageReadyProposalV2 = async (
+  pendingDir: string,
+  proposalId: string
+): Promise<{ canonicalFile: string; readyFile: string; temporaryFile: string }> => {
+  const canonicalFile = path.join(pendingDir, `${proposalId}.json`);
+  const temporaryFile = `${canonicalFile}.12345_1.tmp`;
+  const readyFile = `${canonicalFile}.12345_1.ready`;
+  await writeFile(temporaryFile, JSON.stringify(proposalRecordV2(proposalId, REFERENCE_WRITER_NOW_MS_V2)));
+  await nodeFs.link(temporaryFile, readyFile);
+  return { canonicalFile, readyFile, temporaryFile };
+};
 
 const addGeneratedVideoTakesForMcpV2 = (project: StudioProjectV2, count: number): void => {
   const shot = project.shots.clip_1!;
@@ -8331,6 +8808,21 @@ const addGeneratedVideoTakesForMcpV2 = (project: StudioProjectV2, count: number)
 };
 
 describe('Studio MCP schema-2 server', () => {
+  it('keeps the schema-2 registry staged while the production entrypoint registers schema 1', async () => {
+    const source = await readFile(
+      path.resolve(process.cwd(), 'packages/desktop/src/process/resources/builtinMcp/studioServer.ts'),
+      'utf8'
+    );
+    const mainStart = source.indexOf('async function main()');
+    const mainEnd = source.indexOf('// Only start the stdio loop', mainStart);
+
+    expect(mainStart).toBeGreaterThanOrEqual(0);
+    expect(mainEnd).toBeGreaterThan(mainStart);
+    const productionEntrypoint = source.slice(mainStart, mainEnd);
+    expect(productionEntrypoint).toContain('registerStudioTools(server, config);');
+    expect(productionEntrypoint).not.toContain('registerStudioToolsV2');
+  });
+
   it('publishes all Beat/Shot operations as strict bounded schemas through real MCP tools/list', async () => {
     const harness = await createStudioMcpProtocolHarnessV2();
     try {
@@ -8345,6 +8837,12 @@ describe('Studio MCP schema-2 server', () => {
             properties?: Record<string, { const?: string; additionalProperties?: boolean }>;
           }>
         | undefined;
+      const proposalSchema = tools.find((tool) => tool.name === 'propose_storyboard')?.inputSchema;
+      const proposalOperationItems = proposalSchema?.properties?.operations as
+        | { items?: Record<string, unknown> }
+        | undefined;
+      const proposalOperationVariants = (proposalOperationItems?.items?.anyOf ??
+        proposalOperationItems?.items?.oneOf) as typeof operationVariants;
       const advertisedValidator = new AjvJsonSchemaValidator().getValidator(applySchema as never);
       const canonicalExample = (applyEdits?.description ?? '').match(
         /(\{"expectedRevision":8,"operations":\[[^]*\]\})\./
@@ -8365,31 +8863,26 @@ describe('Studio MCP schema-2 server', () => {
         additionalProperties: false,
         required: ['expectedRevision', 'operations'],
       });
-      expect(operationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual([
-        'add_beat',
-        'add_shot',
-        'delete_shot',
-        'edit_beat',
-        'edit_shot',
-        'reorder_beats',
-        'reorder_bin',
-        'reorder_shots',
-        'set_brief',
-      ]);
+      const operationKinds = mutationCatalogV2()
+        .map((operation) => operation.kind)
+        .toSorted();
+      expect(operationKinds).toHaveLength(32);
+      expect(operationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual(operationKinds);
+      expect(proposalOperationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual(
+        operationKinds
+      );
       const addBeat = operationVariants?.find((variant) => variant.properties?.kind?.const === 'add_beat');
       const addShot = operationVariants?.find((variant) => variant.properties?.kind?.const === 'add_shot');
       expect(addBeat).toMatchObject({
         additionalProperties: false,
-        required: ['kind', 'beat', 'beforeBeatId'],
+        required: ['kind', 'beatId', 'beat', 'beforeBeatId'],
       });
-      expect(addBeat?.properties).not.toHaveProperty('beatId');
       expect(addBeat?.properties).not.toHaveProperty('firstShotId');
       expect(addBeat?.properties).not.toHaveProperty('firstShot');
       expect(addShot).toMatchObject({
         additionalProperties: false,
-        required: ['kind', 'beatId', 'shot', 'beforeShotId'],
+        required: ['kind', 'beatId', 'shotId', 'shot', 'beforeShotId'],
       });
-      expect(addShot?.properties).not.toHaveProperty('shotId');
 
       const canonicalBatch = {
         expectedRevision: 8,
@@ -8414,6 +8907,21 @@ describe('Studio MCP schema-2 server', () => {
             },
           ],
         })
+      ).toMatchObject({ valid: true });
+      expect(
+        advertisedValidator({
+          expectedRevision: 8,
+          operations: [
+            {
+              kind: 'add_beat',
+              beatId: 'section_new',
+              beat: editableBeatV2(),
+              beforeBeatId: null,
+              firstShotId: 'legacy_shot',
+              firstShot: editableShotV2(),
+            },
+          ],
+        })
       ).toMatchObject({ valid: false });
       expect(canonicalExample).toBeDefined();
       expect(JSON.parse(canonicalExample ?? '{}')).toEqual(canonicalBatch);
@@ -8431,7 +8939,7 @@ describe('Studio MCP schema-2 server', () => {
     }
   });
 
-  it('advertises uniqueness, conflict, and shot-duration rules that an AJV client can enforce', async () => {
+  it('advertises uniqueness and shot-duration rules that an AJV client can enforce', async () => {
     const harness = await createStudioMcpProtocolHarnessV2();
     try {
       const { tools } = await harness.client.listTools();
@@ -8471,16 +8979,10 @@ describe('Studio MCP schema-2 server', () => {
         {
           expectedRevision: 7,
           operations: [
-            { kind: 'add_beat', beat: editableBeatV2(), beforeBeatId: null },
-            { kind: 'reorder_beats', beatOrder: ['section_1'] },
-          ],
-        },
-        {
-          expectedRevision: 7,
-          operations: [
             {
               kind: 'add_shot',
               beatId: 'section_1',
+              shotId: 'clip_new',
               shot: { ...editableShotV2(), durationSeconds: 3 },
               beforeShotId: null,
             },
@@ -8514,52 +9016,31 @@ describe('Studio MCP schema-2 server', () => {
             { kind: 'reorder_beats', beatOrder: ['section_1'] },
           ],
         })
-      ).toMatchObject({ valid: false });
+      ).toMatchObject({ valid: true });
       expect(referenceValidator({ shotIds: ['clip_1', 'clip_1'] })).toMatchObject({ valid: false });
     } finally {
       await harness.close();
     }
   });
 
-  it('documents the two deliberate tools/list supersets while enforcing them before handlers', async () => {
-    const harness = await createStudioMcpProtocolHarnessV2();
+  it('keeps the full catalog structural in tools/list while handlers own capability and size policy', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-policy-'));
+    const createId = vi.fn(() => 'must_not_mint');
+    const harness = await createStudioMcpProtocolHarnessV2(
+      {
+        projectId: 'project_v2',
+        projectDir,
+        pendingDir: path.join(projectDir, 'proposals', 'pending'),
+        referencePendingDir: path.join(projectDir, 'reference-requests', 'pending'),
+      },
+      { createId }
+    );
     try {
       const { tools } = await harness.client.listTools();
       const applyTool = tools.find((tool) => tool.name === 'studio_apply_edits');
       const proposalTool = tools.find((tool) => tool.name === 'propose_storyboard');
       const applyValidator = new AjvJsonSchemaValidator().getValidator(applyTool?.inputSchema as never);
       const proposalValidator = new AjvJsonSchemaValidator().getValidator(proposalTool?.inputSchema as never);
-      const sameBeatApply = {
-        expectedRevision: 7,
-        operations: [
-          { kind: 'add_shot', beatId: 'section_1', shot: editableShotV2(), beforeShotId: null },
-          { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_1'] },
-        ],
-      };
-      const differentBeatApply = {
-        expectedRevision: 7,
-        operations: [
-          { kind: 'add_shot', beatId: 'section_1', shot: editableShotV2(), beforeShotId: null },
-          { kind: 'reorder_shots', beatId: 'section_2', shotOrder: ['clip_2'] },
-        ],
-      };
-      const sameBeatProposal = {
-        base_revision: 7,
-        operations: [
-          {
-            kind: 'add_shot',
-            beatId: 'section_1',
-            shotId: 'clip_new',
-            shot: editableShotV2(),
-            beforeShotId: null,
-          },
-          { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_1'] },
-        ],
-      };
-      const differentBeatProposal = {
-        ...sameBeatProposal,
-        operations: [sameBeatProposal.operations[0], { ...sameBeatProposal.operations[1], beatId: 'section_2' }],
-      };
       const oversizedOperations = Array.from({ length: 32 }, (_, index) => ({
         kind: 'set_brief',
         brief: `${index}:${'x'.repeat(16 * 1024 - String(index).length - 1)}`,
@@ -8567,45 +9048,39 @@ describe('Studio MCP schema-2 server', () => {
       const oversizedApply = { expectedRevision: 7, operations: oversizedOperations };
       const oversizedProposal = { base_revision: 7, operations: oversizedOperations };
 
-      expect(applyValidator(sameBeatApply)).toMatchObject({ valid: true });
-      expect(applyValidator(differentBeatApply)).toMatchObject({ valid: true });
+      for (const operation of mutationCatalogV2()) {
+        expect(applyValidator({ expectedRevision: 7, operations: [operation] }), operation.kind).toMatchObject({
+          valid: true,
+        });
+        expect(proposalValidator({ base_revision: 7, operations: [operation] }), operation.kind).toMatchObject({
+          valid: true,
+        });
+      }
       expect(applyValidator(oversizedApply)).toMatchObject({ valid: true });
-      expect(studioApplyEditsInputSchemaV2.safeParse(sameBeatApply).success).toBe(false);
-      expect(studioApplyEditsInputSchemaV2.safeParse(differentBeatApply).success).toBe(true);
-      expect(studioApplyEditsInputSchemaV2.safeParse(oversizedApply).success).toBe(false);
-
-      expect(proposalValidator(sameBeatProposal)).toMatchObject({ valid: true });
-      expect(proposalValidator(differentBeatProposal)).toMatchObject({ valid: true });
       expect(proposalValidator(oversizedProposal)).toMatchObject({ valid: true });
-      expect(studioProposeStoryboardInputSchemaV2.safeParse(sameBeatProposal).success).toBe(false);
-      expect(studioProposeStoryboardInputSchemaV2.safeParse(differentBeatProposal).success).toBe(true);
-      expect(studioProposeStoryboardInputSchemaV2.safeParse(oversizedProposal).success).toBe(false);
+      expect(studioApplyEditsInputSchemaV2.safeParse(oversizedApply).success).toBe(true);
+      expect(studioProposeStoryboardInputSchemaV2.safeParse(oversizedProposal).success).toBe(true);
 
       for (const description of [applyTool?.description, proposalTool?.description]) {
-        expect(description).toMatch(/same beat/i);
         expect(description).toMatch(/256 KiB/i);
+        expect(description).toMatch(/operation_not_permitted/i);
       }
     } finally {
       await harness.close();
+      await rm(projectDir, { recursive: true, force: true });
     }
   });
 
   it('accepts every V2 operation independently and rejects mutation-sensitive malformed batches', () => {
-    const validOperations = [
-      { kind: 'set_brief', brief: 'A concise launch story' },
-      { kind: 'add_beat', beat: editableBeatV2(), beforeBeatId: null },
-      { kind: 'edit_beat', beatId: 'section_1', changes: { title: 'A new opening' } },
-      { kind: 'reorder_beats', beatOrder: ['section_2', 'section_1'] },
-      { kind: 'add_shot', beatId: 'section_1', shot: editableShotV2(), beforeShotId: null },
-      { kind: 'edit_shot', shotId: 'clip_1', changes: { line: 'A tighter shot' } },
-      { kind: 'delete_shot', shotId: 'clip_2' },
-      { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_2', 'clip_1'] },
-      { kind: 'reorder_bin', bin: [{ kind: 'take', assetId: 'take_3', reason: 'alternate' }] },
-      { kind: 'reorder_bin', bin: [{ kind: 'beat', beatId: 'section_2', reason: 'lifted' }] },
-    ];
+    const validOperations = mutationCatalogV2();
     for (const operation of validOperations) {
+      expect(validateStudioMutationOperationV2(operation), operation.kind).toBe(true);
       expect(
         studioApplyEditsInputSchemaV2.safeParse({ expectedRevision: 7, operations: [operation] }).success,
+        operation.kind
+      ).toBe(true);
+      expect(
+        studioProposeStoryboardInputSchemaV2.safeParse({ base_revision: 7, operations: [operation] }).success,
         operation.kind
       ).toBe(true);
     }
@@ -8623,19 +9098,9 @@ describe('Studio MCP schema-2 server', () => {
         expectedRevision: 7,
         operations: [
           {
-            kind: 'add_beat',
-            beatId: 'caller_section',
-            beat: editableBeatV2(),
-            beforeBeatId: null,
-          },
-        ],
-      },
-      {
-        expectedRevision: 7,
-        operations: [
-          {
             kind: 'add_shot',
             beatId: 'section_1',
+            shotId: 'clip_short',
             shot: { ...editableShotV2(), durationSeconds: 3 },
             beforeShotId: null,
           },
@@ -8647,6 +9112,7 @@ describe('Studio MCP schema-2 server', () => {
           {
             kind: 'add_shot',
             beatId: 'section_1',
+            shotId: 'clip_long',
             shot: { ...editableShotV2(), durationSeconds: 16 },
             beforeShotId: null,
           },
@@ -8663,15 +9129,40 @@ describe('Studio MCP schema-2 server', () => {
       {
         expectedRevision: 7,
         operations: [
-          { kind: 'add_beat', beat: editableBeatV2(), beforeBeatId: null },
-          { kind: 'reorder_beats', beatOrder: ['section_1'] },
+          {
+            kind: 'set_rules',
+            rules: [
+              {
+                id: 'rule_bad',
+                text: 'This predicate cannot be enforced.',
+                predicate: { kind: 'forbidden_terms', terms: ['!!!'] },
+              },
+            ],
+          },
         ],
       },
       {
         expectedRevision: 7,
         operations: [
-          { kind: 'add_shot', beatId: 'section_1', shot: editableShotV2(), beforeShotId: null },
-          { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_1'] },
+          {
+            kind: 'apply_coverage',
+            beatId: 'section_1',
+            shots: [],
+            fixedShots: [{ shotId: 'clip_1', reasons: ['selected_take', 'owned_asset'] }],
+          },
+        ],
+      },
+      {
+        expectedRevision: 7,
+        operations: [
+          {
+            kind: 'add_beat',
+            beatId: 'section_legacy',
+            beat: editableBeatV2(),
+            beforeBeatId: null,
+            firstShotId: 'clip_legacy',
+            firstShot: editableShotV2(),
+          },
         ],
       },
       { expectedRevision: 7, operations: [{ kind: 'set_brief', brief: 'Valid', unknown: true }] },
@@ -8679,11 +9170,37 @@ describe('Studio MCP schema-2 server', () => {
     ];
     for (const input of invalidBatches) expect(studioApplyEditsInputSchemaV2.safeParse(input).success).toBe(false);
 
+    const ruleDraft = {
+      id: 'rule_reviewed',
+      text: 'Avoid competitor marks.',
+      predicate: { kind: 'forbidden_terms', terms: ['competitor'] },
+    };
+    for (const persistedProvenance of [
+      { scope: 'project' },
+      { createdAt: '2026-08-17T00:00:00.000Z' },
+      { organizationId: 'organization_1' },
+      { unknownRuleField: true },
+    ]) {
+      const operation = { kind: 'set_rules', rules: [{ ...ruleDraft, ...persistedProvenance }] };
+      expect(studioApplyEditsInputSchemaV2.safeParse({ expectedRevision: 7, operations: [operation] }).success).toBe(
+        false
+      );
+      expect(
+        studioProposeStoryboardInputSchemaV2.safeParse({ base_revision: 7, operations: [operation] }).success
+      ).toBe(false);
+    }
+
     expect(
       studioApplyEditsInputSchemaV2.safeParse({
         expectedRevision: 7,
         operations: [
-          { kind: 'add_shot', beatId: 'section_1', shot: editableShotV2(), beforeShotId: null },
+          {
+            kind: 'add_shot',
+            beatId: 'section_1',
+            shotId: 'clip_new',
+            shot: editableShotV2(),
+            beforeShotId: null,
+          },
           { kind: 'reorder_shots', beatId: 'section_2', shotOrder: ['clip_2'] },
         ],
       }).success
@@ -8715,11 +9232,17 @@ describe('Studio MCP schema-2 server', () => {
           { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_1'] },
         ],
       }).success
-    ).toBe(false);
+    ).toBe(true);
     expect(
       studioProposeStoryboardInputSchemaV2.safeParse({
         base_revision: 7,
         operations: [{ kind: 'set_brief', brief: 'Valid', unknown: true }],
+      }).success
+    ).toBe(false);
+    expect(
+      studioProposeStoryboardInputSchemaV2.safeParse({
+        base_revision: 7,
+        operations: [{ kind: 'rederive_line', shotId: 'clip_1', line: '' }],
       }).success
     ).toBe(false);
     for (const shotIds of [
@@ -8732,49 +9255,62 @@ describe('Studio MCP schema-2 server', () => {
     }
   });
 
-  it('rejects conflicting add/reorder commands through the SDK before IDs or mailbox IO', async () => {
+  it('returns exact capability denials through the SDK before IDs or sidecar IO', async () => {
     const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-'));
-    const ids = ['command_valid', 'clip_new', 'lease_valid'];
-    const createId = vi.fn(() => ids.shift() ?? 'lease_fallback');
+    const createId = vi.fn(() => 'must_not_mint');
     const harness = await createStudioMcpProtocolHarnessV2(
-      { projectId: 'project_v2', projectDir, pendingDir: '', referencePendingDir: '' },
+      {
+        projectId: 'project_v2',
+        projectDir,
+        pendingDir: path.join(projectDir, 'proposals', 'pending'),
+        referencePendingDir: path.join(projectDir, 'reference-requests', 'pending'),
+      },
       { createId }
     );
     try {
-      for (const operations of [
-        [
-          { kind: 'add_beat', beat: editableBeatV2(), beforeBeatId: null },
-          { kind: 'reorder_beats', beatOrder: ['section_1'] },
-        ],
-        [
-          { kind: 'add_shot', beatId: 'section_1', shot: editableShotV2(), beforeShotId: null },
-          { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_1'] },
-        ],
-      ]) {
-        // The second rejection must observe that the first rejection minted nothing.
+      const calls = [
+        {
+          name: 'studio_apply_edits',
+          arguments: {
+            expectedRevision: 7,
+            operations: [{ kind: 'rederive_line', shotId: 'clip_1', line: 'Proposal only' }],
+          },
+        },
+        {
+          name: 'studio_apply_edits',
+          arguments: { expectedRevision: 7, operations: [{ kind: 'undo_last', entryId: 'undo_1' }] },
+        },
+        {
+          name: 'propose_storyboard',
+          arguments: { base_revision: 7, operations: [{ kind: 'undo_last', entryId: 'undo_1' }] },
+        },
+        {
+          name: 'propose_storyboard',
+          arguments: {
+            base_revision: 7,
+            operations: [{ kind: 'select_take', shotId: 'clip_1', assetId: 'take_1' }],
+          },
+        },
+        {
+          name: 'propose_storyboard',
+          arguments: {
+            base_revision: 7,
+            operations: [
+              mutationCatalogV2().find((operation) => operation.kind === 'apply_coverage')!,
+              { kind: 'park_shot', shotId: 'clip_1' },
+            ],
+          },
+        },
+      ];
+      for (const call of calls) {
         // eslint-disable-next-line no-await-in-loop
-        await expect(
-          harness.client.callTool({ name: 'studio_apply_edits', arguments: { expectedRevision: 7, operations } })
-        ).resolves.toMatchObject({ isError: true });
+        const result = await harness.client.callTool(call);
+        expect(result.isError).toBe(true);
+        expect(result.content).toEqual([{ type: 'text', text: 'operation_not_permitted' }]);
       }
       expect(createId).not.toHaveBeenCalled();
       await expect(nodeFs.readdir(path.join(projectDir, 'commands'))).rejects.toMatchObject({ code: 'ENOENT' });
-
-      const unrelated = await harness.client.callTool({
-        name: 'studio_apply_edits',
-        arguments: {
-          expectedRevision: 7,
-          operations: [
-            { kind: 'add_shot', beatId: 'section_1', shot: editableShotV2(), beforeShotId: null },
-            { kind: 'reorder_shots', beatId: 'section_2', shotOrder: ['clip_2'] },
-          ],
-        },
-      });
-      expect(JSON.parse(String(unrelated.content[0]?.type === 'text' ? unrelated.content[0].text : '{}'))).toEqual({
-        status: 'storage_error',
-        commandId: 'command_valid',
-      });
-      expect(createId).toHaveBeenCalledTimes(3);
+      await expect(nodeFs.readdir(path.join(projectDir, 'proposals'))).rejects.toMatchObject({ code: 'ENOENT' });
     } finally {
       await harness.close();
       await rm(projectDir, { recursive: true, force: true });
@@ -9072,12 +9608,11 @@ describe('Studio MCP schema-2 server', () => {
       const createdAt = '2026-08-17T01:02:03.000Z';
 
       const seedProjectRoot = async (root: string, project: StudioProjectV2, marker: string): Promise<void> => {
-        const familyRoot = path.join(root, familyName);
-        const familyPendingDir = path.join(familyRoot, 'pending');
-        const familySlotsDir = path.join(familyRoot, 'slots');
+        const { pendingDir: familyPendingDir, slotsDir: familySlotsDir } = await createSidecarFamilyV2(
+          root,
+          familyName
+        );
         const recordId = `${marker}_${requestKind}`;
-        await mkdir(familyPendingDir, { recursive: true });
-        await mkdir(familySlotsDir);
         await writeFile(path.join(root, 'project.json'), JSON.stringify(project));
         await writeFile(
           path.join(familyPendingDir, `${recordId}.json`),
@@ -9247,10 +9782,8 @@ describe('Studio MCP schema-2 server', () => {
     const project = makeSchema2ServiceProject();
     const pendingDir = path.join(projectDir, 'proposals', 'pending');
     const referencePendingDir = path.join(projectDir, 'reference-requests', 'pending');
-    await mkdir(pendingDir, { recursive: true });
-    await mkdir(path.join(projectDir, 'proposals', 'slots'), { recursive: true });
-    await mkdir(referencePendingDir, { recursive: true });
-    await mkdir(path.join(projectDir, 'reference-requests', 'slots'), { recursive: true });
+    await createSidecarFamilyV2(projectDir, 'proposals');
+    await createSidecarFamilyV2(projectDir, 'reference-requests');
     await writeFile(path.join(projectDir, 'project.json'), JSON.stringify(project));
     const config = { projectId: 'other_project', projectDir, pendingDir, referencePendingDir };
 
@@ -9275,8 +9808,7 @@ describe('Studio MCP schema-2 server', () => {
     const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-proposal-v2-'));
     const pendingDir = path.join(projectDir, 'proposals', 'pending');
     const slotsDir = path.join(projectDir, 'proposals', 'slots');
-    await mkdir(pendingDir, { recursive: true });
-    await mkdir(slotsDir);
+    await createSidecarFamilyV2(projectDir, 'proposals');
     const projectAuthority = await capturePendingProjectAuthorityV2(projectDir);
 
     const record = await writeProposalRecordV2({
@@ -9339,8 +9871,7 @@ describe('Studio MCP schema-2 server', () => {
     const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-reference-v2-'));
     const pendingDir = path.join(projectDir, 'reference-requests', 'pending');
     const slotsDir = path.join(projectDir, 'reference-requests', 'slots');
-    await mkdir(pendingDir, { recursive: true });
-    await mkdir(slotsDir);
+    await createSidecarFamilyV2(projectDir, 'reference-requests');
     const shotIds = Array.from({ length: 24 }, (_, index) => `clip_${index + 1}`);
     const projectAuthority = await capturePendingProjectAuthorityV2(projectDir);
 
@@ -9408,6 +9939,14 @@ describe('Studio MCP schema-2 server', () => {
     const canonicalRacedFile = path.join(await nodeFs.realpath(pendingDir), 'raced.json');
     const oversizedTarget = path.join(projectDir, 'oversized.json');
     await writeFile(racedFile, JSON.stringify({ ...record, id: 'raced', shotIds: ['clip_raced'] }));
+    await writeFile(
+      path.join(slotsDir, '1.slot'),
+      JSON.stringify({
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        requestId: 'raced',
+        reservedAt: record.createdAt,
+      })
+    );
     await writeFile(oversizedTarget, 'x'.repeat(256 * 1024 + 1));
     let swapped = false;
     const racedFs = new Proxy(nodeFs, {
@@ -9429,8 +9968,10 @@ describe('Studio MCP schema-2 server', () => {
     });
     await expect(
       referenceRequestWriter.listPendingReferenceRequestShotIdsV2(pendingDir, 'project_v2', racedFs)
-    ).resolves.toEqual(new Set(shotIds));
+    ).rejects.toMatchObject({ code: 'storage' });
     expect(swapped).toBe(true);
+    await rm(racedFile);
+    await rm(path.join(slotsDir, '1.slot'));
 
     const canonicalPendingDir = await nodeFs.realpath(pendingDir);
     let directoryStatReads = 0;
@@ -9464,14 +10005,691 @@ describe('Studio MCP schema-2 server', () => {
     await rm(projectDir, { recursive: true, force: true });
   });
 
+  it('fails closed on invalid reference clocks and identities without touching an absent queue', async () => {
+    const missingRoot = await mkdtemp(path.join(tmpdir(), 'studio-reference-missing-'));
+    const missingPendingDir = path.join(missingRoot, 'pending');
+    await expect(
+      referenceRequestWriter.listPendingReferenceRequestSceneIds(missingPendingDir, REFERENCE_WRITER_PROJECT_ID_V2)
+    ).resolves.toEqual(new Set());
+    await expect(
+      referenceRequestWriter.listPendingReferenceRequestShotIdsV2(
+        missingPendingDir,
+        REFERENCE_WRITER_PROJECT_ID_V2,
+        nodeFs,
+        undefined,
+        () => REFERENCE_WRITER_NOW_MS_V2
+      )
+    ).resolves.toEqual(new Set());
+    await expect(
+      referenceRequestWriter.listPendingReferenceRequestShotIdsV2(
+        missingPendingDir,
+        REFERENCE_WRITER_PROJECT_ID_V2,
+        nodeFs,
+        undefined,
+        () => Number.NaN
+      )
+    ).rejects.toMatchObject({ code: 'storage' });
+    await rm(missingRoot, { recursive: true, force: true });
+
+    const fixture = await createReferenceWriterQueueV2();
+    const sparseShotIds = Array<string>(1);
+    Object.defineProperty(sparseShotIds, 'compensating_key', { value: 'not-an-index', enumerable: true });
+    try {
+      for (const input of [
+        { projectId: '../unsafe', requestId: 'request_safe', shotIds: ['shot_safe'] },
+        { projectId: REFERENCE_WRITER_PROJECT_ID_V2, requestId: '../unsafe', shotIds: ['shot_safe'] },
+        { projectId: REFERENCE_WRITER_PROJECT_ID_V2, requestId: 'request_sparse', shotIds: sparseShotIds },
+      ]) {
+        // Each invalid identity must fail before any V2 reservation or record publication.
+        // eslint-disable-next-line no-await-in-loop
+        await expect(
+          referenceRequestWriter.writeReferenceRequestRecordV2({
+            pendingDir: fixture.pendingDir,
+            projectAuthority: fixture.projectAuthority,
+            ...input,
+          })
+        ).rejects.toMatchObject({ code: 'storage' });
+      }
+      await expect(readdir(fixture.pendingDir)).resolves.toEqual([]);
+      await expect(readdir(fixture.slotsDir)).resolves.toEqual([]);
+    } finally {
+      await rm(fixture.projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('owns independently named reference pending TTL, count, and record-byte contracts', () => {
+    expect({
+      maxPending: STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT,
+      maxRecordBytes: STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES,
+      pendingTtlMs: STUDIO_REFERENCE_REQUEST_V2_PENDING_TTL_MS,
+    }).toEqual({
+      maxPending: 50,
+      maxRecordBytes: 256 * 1024,
+      pendingTtlMs: 7 * 24 * 60 * 60 * 1_000,
+    });
+  });
+
+  it('deduplicates only unexpired bounded V2 reference records without reaping expired bytes or slots', async () => {
+    const fixture = await createReferenceWriterQueueV2();
+    try {
+      const expired = referenceRequestRecordV2(
+        'request_expired',
+        'shot_expired',
+        REFERENCE_WRITER_NOW_MS_V2 - STUDIO_REFERENCE_REQUEST_V2_PENDING_TTL_MS
+      );
+      const current = referenceRequestRecordV2(
+        'request_current',
+        'shot_current',
+        REFERENCE_WRITER_NOW_MS_V2 - STUDIO_REFERENCE_REQUEST_V2_PENDING_TTL_MS + 1
+      );
+      const terminal = referenceRequestRecordV2('request_terminal', 'shot_terminal', REFERENCE_WRITER_NOW_MS_V2);
+      const oversized = referenceRequestRecordV2('request_oversized', 'shot_oversized', REFERENCE_WRITER_NOW_MS_V2);
+      const expiredBytes = JSON.stringify(expired);
+      const expiredSlotBytes = JSON.stringify({
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        requestId: expired.id,
+        reservedAt: expired.createdAt,
+      });
+      await writeFile(path.join(fixture.pendingDir, `${expired.id}.json`), expiredBytes);
+      await writeFile(path.join(fixture.pendingDir, `${current.id}.json`), JSON.stringify(current));
+      await writeFile(path.join(fixture.pendingDir, `${terminal.id}.json`), JSON.stringify(terminal));
+      await writeFile(
+        path.join(fixture.pendingDir, `${oversized.id}.json`),
+        `${JSON.stringify(oversized)}${' '.repeat(STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES)}`
+      );
+      await writeFile(path.join(fixture.slotsDir, '0.slot'), expiredSlotBytes);
+      await writeFile(
+        path.join(fixture.slotsDir, '1.slot'),
+        JSON.stringify({
+          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          requestId: current.id,
+          reservedAt: current.createdAt,
+        })
+      );
+
+      await expect(
+        referenceRequestWriter.listPendingReferenceRequestShotIdsV2(
+          fixture.pendingDir,
+          REFERENCE_WRITER_PROJECT_ID_V2,
+          nodeFs,
+          fixture.projectAuthority,
+          () => REFERENCE_WRITER_NOW_MS_V2
+        )
+      ).resolves.toEqual(new Set(['shot_current']));
+      await expect(readFile(path.join(fixture.pendingDir, `${expired.id}.json`), 'utf8')).resolves.toBe(expiredBytes);
+      await expect(readFile(path.join(fixture.slotsDir, '0.slot'), 'utf8')).resolves.toBe(expiredSlotBytes);
+    } finally {
+      await rm(fixture.projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects duplicate live slot authority and a pending-record replacement during V2 reference dedup', async () => {
+    const duplicateFixture = await createReferenceWriterQueueV2();
+    try {
+      const record = await referenceRequestWriter.writeReferenceRequestRecordV2({
+        pendingDir: duplicateFixture.pendingDir,
+        projectId: REFERENCE_WRITER_PROJECT_ID_V2,
+        requestId: 'request_duplicate_slot',
+        shotIds: ['shot_duplicate_slot'],
+        projectAuthority: duplicateFixture.projectAuthority,
+      });
+      const duplicateSlot = JSON.stringify({
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        requestId: record.id,
+        reservedAt: record.createdAt,
+      });
+      await writeFile(path.join(duplicateFixture.slotsDir, '1.slot'), duplicateSlot);
+      const pendingBefore = await readFile(path.join(duplicateFixture.pendingDir, `${record.id}.json`), 'utf8');
+
+      await expect(
+        referenceRequestWriter.listPendingReferenceRequestShotIdsV2(
+          duplicateFixture.pendingDir,
+          REFERENCE_WRITER_PROJECT_ID_V2,
+          nodeFs,
+          duplicateFixture.projectAuthority
+        )
+      ).rejects.toMatchObject({ code: 'storage' });
+      await expect(readFile(path.join(duplicateFixture.pendingDir, `${record.id}.json`), 'utf8')).resolves.toBe(
+        pendingBefore
+      );
+      await expect(readFile(path.join(duplicateFixture.slotsDir, '1.slot'), 'utf8')).resolves.toBe(duplicateSlot);
+    } finally {
+      await rm(duplicateFixture.projectDir, { recursive: true, force: true });
+    }
+
+    const replacementFixture = await createReferenceWriterQueueV2();
+    try {
+      const record = await referenceRequestWriter.writeReferenceRequestRecordV2({
+        pendingDir: replacementFixture.pendingDir,
+        projectId: REFERENCE_WRITER_PROJECT_ID_V2,
+        requestId: 'request_pending_replacement',
+        shotIds: ['shot_pending_replacement'],
+        projectAuthority: replacementFixture.projectAuthority,
+      });
+      const slotFile = path.join(await nodeFs.realpath(replacementFixture.slotsDir), '0.slot');
+      const pendingFile = path.join(await nodeFs.realpath(replacementFixture.pendingDir), `${record.id}.json`);
+      const replacementBytes = JSON.stringify({ ...record, shotIds: ['shot_replacement'] });
+      await writeFile(pendingFile, JSON.stringify({ ...record, createdAt: '1970-01-01T00:00:00.000Z' }));
+      let slotOpens = 0;
+      let replaced = false;
+      const replacingFs = new Proxy(nodeFs, {
+        get(target, property, receiver) {
+          if (property === 'open') {
+            return async (file: Parameters<typeof nodeFs.open>[0], ...args: unknown[]) => {
+              if (String(file) === slotFile) {
+                slotOpens += 1;
+                if (slotOpens === 2) {
+                  await rm(pendingFile);
+                  await writeFile(pendingFile, replacementBytes);
+                  replaced = true;
+                }
+              }
+              return Reflect.apply(nodeFs.open, nodeFs, [file, ...args]);
+            };
+          }
+          const value = Reflect.get(target, property, receiver) as unknown;
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+
+      await expect(
+        referenceRequestWriter.listPendingReferenceRequestShotIdsV2(
+          replacementFixture.pendingDir,
+          REFERENCE_WRITER_PROJECT_ID_V2,
+          replacingFs,
+          replacementFixture.projectAuthority
+        )
+      ).rejects.toMatchObject({ code: 'storage' });
+      expect(replaced).toBe(true);
+      await expect(readFile(pendingFile, 'utf8')).resolves.toBe(replacementBytes);
+    } finally {
+      await rm(replacementFixture.projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('retains V1 reference dedup behavior beyond the schema-2 TTL', async () => {
+    const fixture = await createReferenceWriterQueueV2();
+    try {
+      const legacyBytes = JSON.stringify({
+        schemaVersion: 1,
+        id: 'request_legacy',
+        projectId: REFERENCE_WRITER_PROJECT_ID_V2,
+        sceneId: 'scene_legacy',
+        status: 'pending',
+        createdAt: '1970-01-01T00:00:00.000Z',
+      });
+      await writeFile(path.join(fixture.pendingDir, 'request_legacy.json'), legacyBytes);
+
+      await expect(
+        referenceRequestWriter.listPendingReferenceRequestSceneIds(fixture.pendingDir, REFERENCE_WRITER_PROJECT_ID_V2)
+      ).resolves.toEqual(new Set(['scene_legacy']));
+      await expect(readFile(path.join(fixture.pendingDir, 'request_legacy.json'), 'utf8')).resolves.toBe(legacyBytes);
+    } finally {
+      await rm(fixture.projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects the next V2 reference reservation at its own pending-count boundary', async () => {
+    const fixture = await createReferenceWriterQueueV2();
+    try {
+      const reservedAt = new Date(REFERENCE_WRITER_NOW_MS_V2).toISOString();
+      await Promise.all(
+        Array.from({ length: STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT }, (_, index) => {
+          const requestId = `request_reserved_${index}`;
+          return Promise.all([
+            writeFile(
+              path.join(fixture.slotsDir, `${index}.slot`),
+              JSON.stringify({
+                schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+                requestId,
+                reservedAt,
+              })
+            ),
+            writeFile(
+              path.join(fixture.pendingDir, `${requestId}.json`),
+              JSON.stringify(referenceRequestRecordV2(requestId, `shot_${index}`, REFERENCE_WRITER_NOW_MS_V2))
+            ),
+          ]);
+        })
+      );
+
+      await expect(
+        referenceRequestWriter.writeReferenceRequestRecordV2({
+          pendingDir: fixture.pendingDir,
+          projectId: REFERENCE_WRITER_PROJECT_ID_V2,
+          requestId: 'request_over_capacity',
+          shotIds: ['shot_1'],
+          projectAuthority: fixture.projectAuthority,
+        })
+      ).rejects.toMatchObject({ code: 'capacity' });
+      await expect(readdir(fixture.pendingDir)).resolves.toHaveLength(
+        STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT
+      );
+      await expect(readdir(fixture.slotsDir)).resolves.toHaveLength(
+        STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT
+      );
+    } finally {
+      await rm(fixture.projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects unexpected, out-of-range, and unpaired V2 queue entries before reserving capacity', async () => {
+    const cases = [
+      { pendingName: 'foreign.txt', pendingBytes: 'foreign', slotName: null, slotBytes: null },
+      {
+        pendingName: null,
+        pendingBytes: null,
+        slotName: `${STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT}.slot`,
+        slotBytes: JSON.stringify({
+          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          requestId: 'request_out_of_range',
+          reservedAt: new Date(REFERENCE_WRITER_NOW_MS_V2).toISOString(),
+        }),
+      },
+      {
+        pendingName: null,
+        pendingBytes: null,
+        slotName: '0.slot',
+        slotBytes: JSON.stringify({
+          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          requestId: 'request_orphan_slot',
+          reservedAt: new Date(REFERENCE_WRITER_NOW_MS_V2).toISOString(),
+        }),
+      },
+      {
+        pendingName: 'request_orphan_pending.json',
+        pendingBytes: JSON.stringify(
+          referenceRequestRecordV2('request_orphan_pending', 'shot_orphan', REFERENCE_WRITER_NOW_MS_V2)
+        ),
+        slotName: null,
+        slotBytes: null,
+      },
+    ] as const;
+
+    for (const [index, fixtureCase] of cases.entries()) {
+      // eslint-disable-next-line no-await-in-loop
+      const fixture = await createReferenceWriterQueueV2();
+      try {
+        if (fixtureCase.pendingName !== null) {
+          // eslint-disable-next-line no-await-in-loop
+          await writeFile(path.join(fixture.pendingDir, fixtureCase.pendingName), fixtureCase.pendingBytes!);
+        }
+        if (fixtureCase.slotName !== null) {
+          // eslint-disable-next-line no-await-in-loop
+          await writeFile(path.join(fixture.slotsDir, fixtureCase.slotName), fixtureCase.slotBytes!);
+        }
+        // eslint-disable-next-line no-await-in-loop
+        await expect(
+          referenceRequestWriter.writeReferenceRequestRecordV2({
+            pendingDir: fixture.pendingDir,
+            projectId: REFERENCE_WRITER_PROJECT_ID_V2,
+            requestId: `request_rejected_${index}`,
+            shotIds: ['shot_new'],
+            projectAuthority: fixture.projectAuthority,
+          })
+        ).rejects.toMatchObject({ code: 'storage' });
+        // eslint-disable-next-line no-await-in-loop
+        await expect(
+          nodeFs.lstat(path.join(fixture.pendingDir, `request_rejected_${index}.json`))
+        ).rejects.toMatchObject({ code: 'ENOENT' });
+      } finally {
+        // eslint-disable-next-line no-await-in-loop
+        await rm(fixture.projectDir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it('rejects duplicate slot authority for one exact pending record', async () => {
+    const fixture = await createReferenceWriterQueueV2();
+    const requestId = 'request_duplicate_slot';
+    const slotBytes = JSON.stringify({
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      requestId,
+      reservedAt: new Date(REFERENCE_WRITER_NOW_MS_V2).toISOString(),
+    });
+    try {
+      await writeFile(
+        path.join(fixture.pendingDir, `${requestId}.json`),
+        JSON.stringify(referenceRequestRecordV2(requestId, 'shot_duplicate', REFERENCE_WRITER_NOW_MS_V2))
+      );
+      await Promise.all([
+        writeFile(path.join(fixture.slotsDir, '0.slot'), slotBytes),
+        writeFile(path.join(fixture.slotsDir, '1.slot'), slotBytes),
+      ]);
+
+      await expect(
+        referenceRequestWriter.writeReferenceRequestRecordV2({
+          pendingDir: fixture.pendingDir,
+          projectId: REFERENCE_WRITER_PROJECT_ID_V2,
+          requestId: 'request_after_duplicate',
+          shotIds: ['shot_new'],
+          projectAuthority: fixture.projectAuthority,
+        })
+      ).rejects.toMatchObject({ code: 'storage' });
+      await expect(readdir(fixture.slotsDir)).resolves.toEqual(['0.slot', '1.slot']);
+    } finally {
+      await rm(fixture.projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a slot-backed pending record bound to another project identity', async () => {
+    const fixture = await createReferenceWriterQueueV2();
+    const requestId = 'request_other_project';
+    try {
+      await writeFile(
+        path.join(fixture.pendingDir, `${requestId}.json`),
+        JSON.stringify({
+          ...referenceRequestRecordV2(requestId, 'shot_other_project', REFERENCE_WRITER_NOW_MS_V2),
+          projectId: 'different_project',
+        })
+      );
+      await writeFile(
+        path.join(fixture.slotsDir, '0.slot'),
+        JSON.stringify({
+          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          requestId,
+          reservedAt: new Date(REFERENCE_WRITER_NOW_MS_V2).toISOString(),
+        })
+      );
+
+      await expect(
+        referenceRequestWriter.writeReferenceRequestRecordV2({
+          pendingDir: fixture.pendingDir,
+          projectId: REFERENCE_WRITER_PROJECT_ID_V2,
+          requestId: 'request_current_project',
+          shotIds: ['shot_new'],
+          projectAuthority: fixture.projectAuthority,
+        })
+      ).rejects.toMatchObject({ code: 'storage' });
+      await expect(readdir(fixture.slotsDir)).resolves.toEqual(['0.slot']);
+    } finally {
+      await rm(fixture.projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('reconciles an exact same-inode named slot and cleanup alias before the next publication', async () => {
+    const fixture = await createReferenceWriterQueueV2();
+    const requestId = 'request_cleanup_restart';
+    const slotFile = path.join(fixture.slotsDir, '0.slot');
+    const cleanupAlias = `${slotFile}.12345_9.cleanup`;
+    try {
+      await writeFile(
+        path.join(fixture.pendingDir, `${requestId}.json`),
+        JSON.stringify(referenceRequestRecordV2(requestId, 'shot_existing', REFERENCE_WRITER_NOW_MS_V2))
+      );
+      await writeFile(
+        slotFile,
+        JSON.stringify({
+          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          requestId,
+          reservedAt: new Date(REFERENCE_WRITER_NOW_MS_V2).toISOString(),
+        })
+      );
+      await nodeFs.link(slotFile, cleanupAlias);
+
+      await expect(
+        referenceRequestWriter.writeReferenceRequestRecordV2({
+          pendingDir: fixture.pendingDir,
+          projectId: REFERENCE_WRITER_PROJECT_ID_V2,
+          requestId: 'request_after_cleanup_restart',
+          shotIds: ['shot_new'],
+          projectAuthority: fixture.projectAuthority,
+        })
+      ).resolves.toMatchObject({ id: 'request_after_cleanup_restart' });
+      await expect(nodeFs.lstat(cleanupAlias)).rejects.toMatchObject({ code: 'ENOENT' });
+      const slotEntries = await readdir(fixture.slotsDir);
+      expect(slotEntries.filter((name) => /^(?:0|[1-9]\d*)\.slot$/.test(name))).toEqual(['0.slot', '1.slot']);
+      expect(slotEntries.filter((name) => name.startsWith('1.slot.') && name.endsWith('.tmp'))).toHaveLength(1);
+      expect(slotEntries.filter((name) => name.startsWith('1.slot.') && name.endsWith('.ready'))).toHaveLength(1);
+    } finally {
+      await rm(fixture.projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('recovers recognized linked, ready, and losing slot publication phases before reserving again', async () => {
+    const fixture = await createReferenceWriterQueueV2();
+    const reservedAt = new Date(REFERENCE_WRITER_NOW_MS_V2).toISOString();
+    const writeExistingPending = async (requestId: string, shotId: string): Promise<void> => {
+      await writeFile(
+        path.join(fixture.pendingDir, `${requestId}.json`),
+        JSON.stringify(referenceRequestRecordV2(requestId, shotId, REFERENCE_WRITER_NOW_MS_V2))
+      );
+    };
+    const slotBytes = (requestId: string): string =>
+      JSON.stringify({ schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, requestId, reservedAt });
+    const writeNext = (requestId: string, shotId: string, recordFs: typeof nodeFs = nodeFs) =>
+      referenceRequestWriter.writeReferenceRequestRecordV2({
+        pendingDir: fixture.pendingDir,
+        projectId: REFERENCE_WRITER_PROJECT_ID_V2,
+        requestId,
+        shotIds: [shotId],
+        fs: recordFs,
+        projectAuthority: fixture.projectAuthority,
+      });
+
+    try {
+      const linkedRequestId = 'request_linked_phase';
+      const linkedSlot = path.join(fixture.slotsDir, '0.slot');
+      const linkedTemporary = `${linkedSlot}.12345_12.tmp`;
+      const linkedReady = `${linkedSlot}.12345_12.ready`;
+      await writeExistingPending(linkedRequestId, 'shot_linked_phase');
+      await writeFile(linkedSlot, slotBytes(linkedRequestId));
+      await nodeFs.link(linkedSlot, linkedTemporary);
+      let linkedReadyRaced = false;
+      const linkedRecoveryFs = new Proxy(nodeFs, {
+        get(target, property, receiver) {
+          if (property === 'link') {
+            return async (
+              existingPath: Parameters<typeof nodeFs.link>[0],
+              newPath: Parameters<typeof nodeFs.link>[1]
+            ) => {
+              if (
+                !linkedReadyRaced &&
+                path.basename(String(existingPath)) === path.basename(linkedTemporary) &&
+                path.basename(String(newPath)) === path.basename(linkedReady)
+              ) {
+                linkedReadyRaced = true;
+                await nodeFs.link(existingPath, newPath);
+              }
+              return nodeFs.link(existingPath, newPath);
+            };
+          }
+          const value = Reflect.get(target, property, receiver) as unknown;
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+
+      await expect(
+        writeNext('request_after_linked_phase', 'shot_after_linked_phase', linkedRecoveryFs)
+      ).resolves.toMatchObject({ id: 'request_after_linked_phase' });
+      expect(linkedReadyRaced).toBe(true);
+      const linkedIdentities = await Promise.all(
+        [linkedSlot, linkedTemporary, linkedReady].map(async (file) => {
+          const stats = await nodeFs.lstat(file);
+          return { dev: stats.dev, ino: stats.ino };
+        })
+      );
+      expect(new Set(linkedIdentities.map(({ dev, ino }) => `${dev}:${ino}`)).size).toBe(1);
+
+      const readyRequestId = 'request_ready_phase';
+      const readySlot = path.join(fixture.slotsDir, '2.slot');
+      const readyTemporary = `${readySlot}.12345_13.tmp`;
+      const readyPhase = `${readySlot}.12345_13.ready`;
+      await writeExistingPending(readyRequestId, 'shot_ready_phase');
+      await writeFile(readyTemporary, slotBytes(readyRequestId));
+      await nodeFs.link(readyTemporary, readyPhase);
+      let readyNamedRaced = false;
+      const readyRecoveryFs = new Proxy(nodeFs, {
+        get(target, property, receiver) {
+          if (property === 'link') {
+            return async (
+              existingPath: Parameters<typeof nodeFs.link>[0],
+              newPath: Parameters<typeof nodeFs.link>[1]
+            ) => {
+              if (
+                !readyNamedRaced &&
+                path.basename(String(existingPath)) === path.basename(readyPhase) &&
+                path.basename(String(newPath)) === path.basename(readySlot)
+              ) {
+                readyNamedRaced = true;
+                await nodeFs.link(existingPath, newPath);
+              }
+              return nodeFs.link(existingPath, newPath);
+            };
+          }
+          const value = Reflect.get(target, property, receiver) as unknown;
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+
+      await expect(
+        writeNext('request_after_ready_phase', 'shot_after_ready_phase', readyRecoveryFs)
+      ).resolves.toMatchObject({ id: 'request_after_ready_phase' });
+      expect(readyNamedRaced).toBe(true);
+      const recoveredReady = await nodeFs.lstat(readySlot);
+      const readySource = await nodeFs.lstat(readyPhase);
+      expect({ dev: recoveredReady.dev, ino: recoveredReady.ino }).toEqual({
+        dev: readySource.dev,
+        ino: readySource.ino,
+      });
+
+      const winnerRequestId = 'request_slot_winner';
+      const loserRequestId = 'request_slot_loser';
+      const occupiedSlot = path.join(fixture.slotsDir, '4.slot');
+      const losingTemporary = `${occupiedSlot}.12345_14.tmp`;
+      await writeExistingPending(winnerRequestId, 'shot_slot_winner');
+      await writeFile(occupiedSlot, slotBytes(winnerRequestId));
+      await writeFile(losingTemporary, slotBytes(loserRequestId));
+
+      await expect(writeNext('request_after_losing_phase', 'shot_after_losing_phase')).resolves.toMatchObject({
+        id: 'request_after_losing_phase',
+      });
+      await expect(nodeFs.lstat(losingTemporary)).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(readFile(occupiedSlot, 'utf8')).resolves.toBe(slotBytes(winnerRequestId));
+    } finally {
+      await rm(fixture.projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves an exact cleanup hardlink byte-identical when another family entry is schema-1', async () => {
+    const fixture = await createReferenceWriterQueueV2();
+    const requestId = 'request_cleanup_mixed_family';
+    const slotFile = path.join(fixture.slotsDir, '0.slot');
+    const cleanupAlias = `${slotFile}.12345_10.cleanup`;
+    const legacySlot = path.join(fixture.slotsDir, '1.slot');
+    try {
+      await writeFile(
+        path.join(fixture.pendingDir, `${requestId}.json`),
+        JSON.stringify(referenceRequestRecordV2(requestId, 'shot_existing', REFERENCE_WRITER_NOW_MS_V2))
+      );
+      await writeFile(
+        slotFile,
+        JSON.stringify({
+          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          requestId,
+          reservedAt: new Date(REFERENCE_WRITER_NOW_MS_V2).toISOString(),
+        })
+      );
+      await nodeFs.link(slotFile, cleanupAlias);
+      await writeFile(
+        legacySlot,
+        JSON.stringify({
+          schemaVersion: 1,
+          requestId: 'legacy_mixed_family',
+          reservedAt: new Date(REFERENCE_WRITER_NOW_MS_V2).toISOString(),
+        })
+      );
+      const before = await Promise.all([nodeFs.lstat(slotFile), nodeFs.lstat(cleanupAlias)]);
+
+      await expect(
+        referenceRequestWriter.writeReferenceRequestRecordV2({
+          pendingDir: fixture.pendingDir,
+          projectId: REFERENCE_WRITER_PROJECT_ID_V2,
+          requestId: 'request_after_mixed_cleanup',
+          shotIds: ['shot_new'],
+          projectAuthority: fixture.projectAuthority,
+        })
+      ).rejects.toMatchObject({ code: 'unsupported_prototype_schema' });
+      const after = await Promise.all([nodeFs.lstat(slotFile), nodeFs.lstat(cleanupAlias)]);
+      expect(after.map(({ dev, ino }) => ({ dev, ino }))).toEqual(before.map(({ dev, ino }) => ({ dev, ino })));
+      await expect(readdir(fixture.slotsDir)).resolves.toEqual(['0.slot', '0.slot.12345_10.cleanup', '1.slot']);
+    } finally {
+      await rm(fixture.projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves an exact cleanup hardlink untouched when project authority becomes schema-1 before cleanup', async () => {
+    const fixture = await createReferenceWriterQueueV2();
+    const requestId = 'request_cleanup_authority_race';
+    const slotFile = path.join(fixture.slotsDir, '0.slot');
+    const cleanupAlias = `${slotFile}.12345_11.cleanup`;
+    let fenceCalls = 0;
+    const authorityFence = vi.fn(async () => {
+      fenceCalls += 1;
+      return fenceCalls === 1 ? ('valid' as const) : ('unsupported_prototype_schema' as const);
+    });
+    try {
+      await writeFile(
+        path.join(fixture.pendingDir, `${requestId}.json`),
+        JSON.stringify(referenceRequestRecordV2(requestId, 'shot_existing', REFERENCE_WRITER_NOW_MS_V2))
+      );
+      await writeFile(
+        slotFile,
+        JSON.stringify({
+          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          requestId,
+          reservedAt: new Date(REFERENCE_WRITER_NOW_MS_V2).toISOString(),
+        })
+      );
+      await nodeFs.link(slotFile, cleanupAlias);
+      const before = await nodeFs.lstat(cleanupAlias);
+
+      await expect(
+        referenceRequestWriter.writeReferenceRequestRecordV2({
+          pendingDir: fixture.pendingDir,
+          projectId: REFERENCE_WRITER_PROJECT_ID_V2,
+          requestId: 'request_after_authority_race',
+          shotIds: ['shot_new'],
+          projectAuthority: fixture.projectAuthority,
+          authorityFence,
+        })
+      ).rejects.toMatchObject({ code: 'unsupported_prototype_schema' });
+      expect(authorityFence).toHaveBeenCalledTimes(2);
+      const after = await nodeFs.lstat(cleanupAlias);
+      expect({ dev: after.dev, ino: after.ino }).toEqual({ dev: before.dev, ino: before.ino });
+      await expect(readdir(fixture.slotsDir)).resolves.toEqual(['0.slot', '0.slot.12345_11.cleanup']);
+    } finally {
+      await rm(fixture.projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a V2 reference record above its own byte limit before queue IO', async () => {
+    const fixture = await createReferenceWriterQueueV2();
+    try {
+      await expect(
+        writePendingRecordV2({
+          pendingDir: fixture.pendingDir,
+          recordId: 'request_too_large',
+          record: { padding: 'x'.repeat(STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES) },
+          slotRecordKey: 'requestId',
+          capacityMessage: 'full',
+          tooLargeMessage: 'too large',
+          projectAuthority: fixture.projectAuthority,
+        })
+      ).rejects.toMatchObject({ code: 'too_large' });
+      await expect(readdir(fixture.pendingDir)).resolves.toEqual([]);
+      await expect(readdir(fixture.slotsDir)).resolves.toEqual([]);
+    } finally {
+      await rm(fixture.projectDir, { recursive: true, force: true });
+    }
+  });
+
   it('covers V2 proposal, rule, reference, and unavailable handler outcomes without spending', async () => {
     const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-v2-handler-outcomes-'));
     const pendingDir = path.join(projectDir, 'proposals', 'pending');
     const referencePendingDir = path.join(projectDir, 'reference-requests', 'pending');
-    await mkdir(pendingDir, { recursive: true });
-    await mkdir(path.join(projectDir, 'proposals', 'slots'), { recursive: true });
-    await mkdir(referencePendingDir, { recursive: true });
-    await mkdir(path.join(projectDir, 'reference-requests', 'slots'), { recursive: true });
+    await createSidecarFamilyV2(projectDir, 'proposals');
+    await createSidecarFamilyV2(projectDir, 'reference-requests');
     const project = makeSchema2ServiceProject();
     await writeFile(path.join(projectDir, 'project.json'), JSON.stringify(project));
     const config = { projectId: project.id, projectDir, pendingDir, referencePendingDir };
@@ -9531,6 +10749,7 @@ describe('Studio MCP schema-2 server', () => {
       { shotIds: ['unsafe/shot'] },
       { shotIds: ['clip_1', 'clip_1'] },
       { shotIds: ['inactive_clip'] },
+      { shotIds: ['clip_2', 'clip_1'] },
     ]) {
       // These validation outcomes share one dedup inbox and are intentionally observed in order.
       // eslint-disable-next-line no-await-in-loop
@@ -9543,7 +10762,10 @@ describe('Studio MCP schema-2 server', () => {
     expect(queued.content[0].text).toMatch(/Queued 2 of 2.*Nothing was generated/i);
     const repeated = await referenceHandler({ shotIds: ['clip_1', 'clip_2'] });
     expect(repeated.content[0].text).toMatch(/Queued 0 of 2.*Already queued: clip_1, clip_2/i);
-    expect(await readdir(referencePendingDir)).toHaveLength(1);
+    const referenceEntries = await readdir(referencePendingDir);
+    expect(referenceEntries.filter((name) => name.endsWith('.json'))).toHaveLength(1);
+    expect(referenceEntries.filter((name) => name.endsWith('.tmp'))).toHaveLength(1);
+    expect(referenceEntries.filter((name) => name.endsWith('.ready'))).toHaveLength(1);
     await rm(projectDir, { recursive: true, force: true });
   });
 
@@ -9579,6 +10801,553 @@ describe('Studio MCP schema-2 server', () => {
     }
   );
 
+  it('repairs an interrupted occupied-slot collision before the next V2 publication', async () => {
+    const fixture = await createPendingQueueFixtureV2();
+    const occupiedId = 'occupied_slot_request';
+    const interruptedId = 'interrupted_slot_request';
+    const projectAuthority = await capturePendingProjectAuthorityV2(fixture.projectRoot);
+    let cleanupFailed = false;
+    await writeFile(
+      path.join(fixture.pendingDir, `${occupiedId}.json`),
+      JSON.stringify(referenceRequestRecordV2(occupiedId, 'shot_occupied', REFERENCE_WRITER_NOW_MS_V2))
+    );
+    await writeFile(
+      path.join(fixture.slotsDir, '0.slot'),
+      JSON.stringify({
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        requestId: occupiedId,
+        reservedAt: new Date(REFERENCE_WRITER_NOW_MS_V2).toISOString(),
+      })
+    );
+    const interruptedCleanupFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        if (property === 'rm') {
+          return async (file: Parameters<typeof nodeFs.rm>[0], options?: Parameters<typeof nodeFs.rm>[1]) => {
+            if (
+              !cleanupFailed &&
+              String(file).includes(`${path.sep}slots${path.sep}0.slot.`) &&
+              String(file).endsWith('.ready')
+            ) {
+              cleanupFailed = true;
+              throw Object.assign(new Error('injected occupied-slot cleanup interruption'), { code: 'EIO' });
+            }
+            return nodeFs.rm(file, options);
+          };
+        }
+        const value = Reflect.get(target, property, receiver) as unknown;
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    try {
+      await expect(
+        writePendingRecordV2({
+          ...pendingRequestInputV2(fixture.pendingDir, interruptedId),
+          record: referenceRequestRecordV2(interruptedId, 'shot_interrupted', REFERENCE_WRITER_NOW_MS_V2),
+          fs: interruptedCleanupFs,
+          projectAuthority,
+        })
+      ).rejects.toMatchObject({ code: 'storage' });
+      expect(cleanupFailed).toBe(true);
+      expect((await readdir(fixture.slotsDir)).filter((name) => name.startsWith('0.slot.')).toSorted()).toEqual([
+        expect.stringMatching(/\.ready$/),
+        expect.stringMatching(/\.tmp$/),
+      ]);
+
+      await expect(
+        writePendingRecordV2({
+          ...pendingRequestInputV2(fixture.pendingDir, 'request_after_interrupted_collision'),
+          record: referenceRequestRecordV2(
+            'request_after_interrupted_collision',
+            'shot_after_interrupted',
+            REFERENCE_WRITER_NOW_MS_V2
+          ),
+          projectAuthority,
+        })
+      ).resolves.toMatchObject({ id: 'request_after_interrupted_collision' });
+      const finalSlots = await readdir(fixture.slotsDir);
+      expect(finalSlots.filter((name) => name.startsWith('0.slot.'))).toEqual([]);
+      expect(finalSlots.filter((name) => /^(?:0|[1-9]\d*)\.slot$/.test(name)).toSorted()).toEqual(['0.slot', '1.slot']);
+    } finally {
+      await rm(fixture.projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('repairs an interrupted same-ID pending collision before the next V2 publication', async () => {
+    const fixture = await createPendingQueueFixtureV2();
+    const interruptedId = 'interrupted_pending_request';
+    const canonicalFile = path.join(await nodeFs.realpath(fixture.pendingDir), `${interruptedId}.json`);
+    const winner = referenceRequestRecordV2(interruptedId, 'shot_winner', REFERENCE_WRITER_NOW_MS_V2 + 1_000);
+    const projectAuthority = await capturePendingProjectAuthorityV2(fixture.projectRoot);
+    let winnerInstalled = false;
+    let cleanupFailed = false;
+    const interruptedCleanupFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        if (property === 'link') {
+          return async (
+            existingPath: Parameters<typeof nodeFs.link>[0],
+            newPath: Parameters<typeof nodeFs.link>[1]
+          ) => {
+            if (!winnerInstalled && String(newPath) === canonicalFile && String(existingPath).endsWith('.ready')) {
+              winnerInstalled = true;
+              await writeFile(canonicalFile, JSON.stringify(winner));
+            }
+            return nodeFs.link(existingPath, newPath);
+          };
+        }
+        if (property === 'rm') {
+          return async (file: Parameters<typeof nodeFs.rm>[0], options?: Parameters<typeof nodeFs.rm>[1]) => {
+            if (
+              winnerInstalled &&
+              !cleanupFailed &&
+              String(file).startsWith(`${canonicalFile}.`) &&
+              String(file).endsWith('.ready')
+            ) {
+              cleanupFailed = true;
+              throw Object.assign(new Error('injected pending cleanup interruption'), { code: 'EIO' });
+            }
+            return nodeFs.rm(file, options);
+          };
+        }
+        const value = Reflect.get(target, property, receiver) as unknown;
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    try {
+      await expect(
+        writePendingRecordV2({
+          ...pendingRequestInputV2(fixture.pendingDir, interruptedId),
+          record: referenceRequestRecordV2(interruptedId, 'shot_loser', REFERENCE_WRITER_NOW_MS_V2),
+          fs: interruptedCleanupFs,
+          projectAuthority,
+        })
+      ).rejects.toMatchObject({ code: 'storage' });
+      expect({ winnerInstalled, cleanupFailed }).toEqual({ winnerInstalled: true, cleanupFailed: true });
+      expect(
+        (await readdir(fixture.pendingDir)).filter((name) => name.startsWith(`${interruptedId}.json.`)).toSorted()
+      ).toEqual([expect.stringMatching(/\.ready$/), expect.stringMatching(/\.tmp$/)]);
+      const winnerBeforeRecovery = await nodeFs.lstat(canonicalFile);
+
+      await expect(
+        writePendingRecordV2({
+          ...pendingRequestInputV2(fixture.pendingDir, 'request_after_pending_collision'),
+          record: referenceRequestRecordV2(
+            'request_after_pending_collision',
+            'shot_after_pending_collision',
+            REFERENCE_WRITER_NOW_MS_V2
+          ),
+          projectAuthority,
+        })
+      ).resolves.toMatchObject({ id: 'request_after_pending_collision' });
+      const winnerAfterRecovery = await nodeFs.lstat(canonicalFile);
+      expect({ dev: winnerAfterRecovery.dev, ino: winnerAfterRecovery.ino }).toEqual({
+        dev: winnerBeforeRecovery.dev,
+        ino: winnerBeforeRecovery.ino,
+      });
+      await expect(readFile(canonicalFile, 'utf8')).resolves.toBe(JSON.stringify(winner));
+      expect((await readdir(fixture.pendingDir)).filter((name) => name.startsWith(`${interruptedId}.json.`))).toEqual(
+        []
+      );
+      expect(
+        (await readdir(fixture.slotsDir)).filter((name) => /^(?:0|[1-9]\d*)\.slot$/.test(name)).toSorted()
+      ).toEqual(['0.slot', '1.slot']);
+    } finally {
+      await rm(fixture.projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['proposal', 'proposals', 'proposalId'],
+    ['reference', 'reference-requests', 'requestId'],
+    ['arbitrary', 'other-family', 'requestId'],
+  ] as const)('rejects a partial or unowned V2 %s sidecar family before publication', async (_label, family, key) => {
+    const projectRoot = await mkdtemp(path.join(tmpdir(), 'studio-pending-v2-partial-'));
+    const familyRoot = path.join(projectRoot, family);
+    const pendingDir = path.join(familyRoot, 'pending');
+    const slotsDir = path.join(familyRoot, 'slots');
+    await mkdir(pendingDir, { recursive: true });
+    await mkdir(slotsDir);
+    try {
+      await expect(
+        writePendingRecordV2({
+          pendingDir,
+          recordId: 'partial_family_record',
+          record: { marker: 'unchanged' },
+          slotRecordKey: key,
+          capacityMessage: 'full',
+          tooLargeMessage: 'too large',
+        })
+      ).rejects.toMatchObject({ code: 'storage' });
+      await expect(readdir(pendingDir)).resolves.toEqual([]);
+      await expect(readdir(slotsDir)).resolves.toEqual([]);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an extra child in an otherwise complete V2 sidecar family', async () => {
+    const fixture = await createPendingQueueFixtureV2();
+    const extraDir = path.join(path.dirname(fixture.pendingDir), 'foreign-child');
+    await mkdir(extraDir);
+    try {
+      await expect(writePendingRecordV2(pendingRequestInputV2(fixture.pendingDir))).rejects.toMatchObject({
+        code: 'storage',
+      });
+      await expect(readdir(extraDir)).resolves.toEqual([]);
+      await expect(readdir(fixture.pendingDir)).resolves.toEqual([]);
+      await expect(readdir(fixture.slotsDir)).resolves.toEqual([]);
+    } finally {
+      await rm(fixture.projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a new record id already named by a terminal family entry before reserving a slot', async () => {
+    const fixture = await createPendingQueueFixtureV2();
+    const recordId = 'request_terminal_collision';
+    const decisionFile = path.join(path.dirname(fixture.pendingDir), 'decisions', `${recordId}.json`);
+    await writeFile(decisionFile, 'terminal sentinel');
+    try {
+      await expect(writePendingRecordV2(pendingRequestInputV2(fixture.pendingDir, recordId))).rejects.toMatchObject({
+        code: 'storage',
+      });
+      await expect(readFile(decisionFile, 'utf8')).resolves.toBe('terminal sentinel');
+      await expect(readdir(fixture.pendingDir)).resolves.toEqual([]);
+      await expect(readdir(fixture.slotsDir)).resolves.toEqual([]);
+    } finally {
+      await rm(fixture.projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    [
+      'schema-1',
+      JSON.stringify({
+        schemaVersion: 1,
+        requestId: 'request_legacy_terminal',
+        projectId: REFERENCE_WRITER_PROJECT_ID_V2,
+        decidedAt: new Date(REFERENCE_WRITER_NOW_MS_V2).toISOString(),
+        outcome: { kind: 'rejected' },
+      }),
+      'unsupported_prototype_schema',
+    ],
+    [
+      'malformed schema-2',
+      JSON.stringify({
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        requestId: 'different_request',
+        projectId: REFERENCE_WRITER_PROJECT_ID_V2,
+        decidedAt: new Date(REFERENCE_WRITER_NOW_MS_V2).toISOString(),
+        outcome: { kind: 'rejected' },
+      }),
+      'storage',
+    ],
+  ] as const)('rejects an unrelated %s terminal authority before queue IO', async (_label, bytes, expectedCode) => {
+    const fixture = await createPendingQueueFixtureV2();
+    const decisionFile = path.join(path.dirname(fixture.pendingDir), 'decisions', 'request_legacy_terminal.json');
+    await writeFile(decisionFile, bytes);
+    try {
+      await expect(
+        writePendingRecordV2({
+          ...pendingRequestInputV2(fixture.pendingDir),
+          record: { marker: 'new request', projectId: REFERENCE_WRITER_PROJECT_ID_V2 },
+        })
+      ).rejects.toMatchObject({ code: expectedCode });
+      await expect(readFile(decisionFile, 'utf8')).resolves.toBe(bytes);
+      await expect(readdir(fixture.pendingDir)).resolves.toEqual([]);
+      await expect(readdir(fixture.slotsDir)).resolves.toEqual([]);
+    } finally {
+      await rm(fixture.projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('does not promote a ready pending record from a malformed terminal filename', async () => {
+    const fixture = await createPendingQueueFixtureV2();
+    const requestId = 'request_invalid_terminal_promotion';
+    const phase = await stageReadyReferenceRequestV2(fixture.pendingDir, requestId);
+    const decisionFile = path.join(path.dirname(fixture.pendingDir), 'decisions', `${requestId}.json`);
+    await writeFile(
+      decisionFile,
+      JSON.stringify({
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        requestId,
+        projectId: REFERENCE_WRITER_PROJECT_ID_V2,
+        decidedAt: new Date(REFERENCE_WRITER_NOW_MS_V2 + 1_000).toISOString(),
+        outcome: { kind: 'generation_gate' },
+      })
+    );
+    try {
+      await expect(
+        writePendingRecordV2({
+          ...pendingRequestInputV2(fixture.pendingDir),
+          record: { marker: 'new request', projectId: REFERENCE_WRITER_PROJECT_ID_V2 },
+        })
+      ).rejects.toMatchObject({ code: 'storage' });
+      await expect(nodeFs.lstat(phase.canonicalFile)).rejects.toMatchObject({ code: 'ENOENT' });
+      expect((await readdir(fixture.pendingDir)).toSorted()).toEqual(
+        [path.basename(phase.readyFile), path.basename(phase.temporaryFile)].toSorted()
+      );
+      await expect(readdir(fixture.slotsDir)).resolves.toEqual([]);
+    } finally {
+      await rm(fixture.projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['predating rejection', 'rejected', REFERENCE_WRITER_NOW_MS_V2 - 1],
+    ['early expiry', 'expired', REFERENCE_WRITER_NOW_MS_V2 + STUDIO_PROPOSAL_V2_PENDING_TTL_MS - 1],
+  ] as const)('does not promote a ready proposal from a %s decision', async (_label, status, decidedAtMs) => {
+    const fixture = await createProposalQueueFixtureV2();
+    const proposalId = `proposal_invalid_${status}`;
+    const phase = await stageReadyProposalV2(fixture.pendingDir, proposalId);
+    await writeFile(
+      path.join(path.dirname(fixture.pendingDir), 'decisions', `${proposalId}.json`),
+      JSON.stringify({
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        proposalId,
+        status,
+        decidedAt: new Date(decidedAtMs).toISOString(),
+      })
+    );
+    try {
+      const nextId = `proposal_after_invalid_${status}`;
+      await expect(
+        writePendingRecordV2({
+          pendingDir: fixture.pendingDir,
+          recordId: nextId,
+          record: proposalRecordV2(nextId, REFERENCE_WRITER_NOW_MS_V2),
+          slotRecordKey: 'proposalId',
+          capacityMessage: 'full',
+          tooLargeMessage: 'too large',
+        })
+      ).rejects.toMatchObject({ code: 'storage' });
+      await expect(nodeFs.lstat(phase.canonicalFile)).rejects.toMatchObject({ code: 'ENOENT' });
+      expect((await readdir(fixture.pendingDir)).toSorted()).toEqual(
+        [path.basename(phase.readyFile), path.basename(phase.temporaryFile)].toSorted()
+      );
+      await expect(readdir(fixture.slotsDir)).resolves.toEqual([]);
+    } finally {
+      await rm(fixture.projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['predating rejection', 'early expiry', 'wrong generation shots'] as const)(
+    'does not promote a ready reference request from a %s decision',
+    async (variant) => {
+      const fixture = await createPendingQueueFixtureV2();
+      const requestId = `request_invalid_${variant.replaceAll(' ', '_')}`;
+      const handoffId = `handoff_${requestId}`;
+      const phase = await stageReadyReferenceRequestV2(fixture.pendingDir, requestId);
+      const decision =
+        variant === 'predating rejection'
+          ? {
+              schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+              requestId,
+              projectId: REFERENCE_WRITER_PROJECT_ID_V2,
+              decidedAt: new Date(REFERENCE_WRITER_NOW_MS_V2 - 1).toISOString(),
+              outcome: { kind: 'rejected' as const },
+            }
+          : variant === 'early expiry'
+            ? {
+                schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+                requestId,
+                projectId: REFERENCE_WRITER_PROJECT_ID_V2,
+                decidedAt: new Date(
+                  REFERENCE_WRITER_NOW_MS_V2 + STUDIO_REFERENCE_REQUEST_V2_PENDING_TTL_MS - 1
+                ).toISOString(),
+                outcome: { kind: 'expired' as const },
+              }
+            : referenceDecisionV2(requestId, {
+                kind: 'generation_gate',
+                handoffId,
+                shotIds: ['shot_different'],
+              });
+      await writeFile(
+        path.join(path.dirname(fixture.pendingDir), 'decisions', `${requestId}.json`),
+        JSON.stringify(decision)
+      );
+      if (variant === 'wrong generation shots') {
+        await writeFile(
+          path.join(path.dirname(fixture.pendingDir), 'receipts', `${handoffId}.json`),
+          JSON.stringify(referenceReceiptV2(requestId, handoffId))
+        );
+      }
+      try {
+        const nextId = `request_after_${requestId}`;
+        await expect(
+          writePendingRecordV2({
+            ...pendingRequestInputV2(fixture.pendingDir, nextId),
+            record: referenceRequestRecordV2(nextId, 'shot_new', REFERENCE_WRITER_NOW_MS_V2),
+          })
+        ).rejects.toMatchObject({ code: 'storage' });
+        await expect(nodeFs.lstat(phase.canonicalFile)).rejects.toMatchObject({ code: 'ENOENT' });
+        expect((await readdir(fixture.pendingDir)).toSorted()).toEqual(
+          [path.basename(phase.readyFile), path.basename(phase.temporaryFile)].toSorted()
+        );
+        await expect(readdir(fixture.slotsDir)).resolves.toEqual([]);
+      } finally {
+        await rm(fixture.projectRoot, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it('keeps a generation-gated ready request live until its exact receipt exists', async () => {
+    const fixture = await createPendingQueueFixtureV2();
+    const requestId = 'request_open_generation_gate';
+    const handoffId = 'handoff_open_generation_gate';
+    const phase = await stageReadyReferenceRequestV2(fixture.pendingDir, requestId);
+    await writeFile(
+      path.join(path.dirname(fixture.pendingDir), 'decisions', `${requestId}.json`),
+      JSON.stringify(referenceDecisionV2(requestId, { kind: 'generation_gate', handoffId, shotIds: ['shot_existing'] }))
+    );
+    try {
+      await expect(
+        writePendingRecordV2({
+          ...pendingRequestInputV2(fixture.pendingDir),
+          record: { marker: 'new request', projectId: REFERENCE_WRITER_PROJECT_ID_V2 },
+        })
+      ).rejects.toMatchObject({ code: 'storage' });
+      await expect(nodeFs.lstat(phase.canonicalFile)).rejects.toMatchObject({ code: 'ENOENT' });
+      expect((await readdir(fixture.pendingDir)).toSorted()).toEqual(
+        [path.basename(phase.readyFile), path.basename(phase.temporaryFile)].toSorted()
+      );
+      await expect(readdir(fixture.slotsDir)).resolves.toEqual([]);
+    } finally {
+      await rm(fixture.projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('promotes a ready generation-gated request only from an exact decision and receipt journal pair', async () => {
+    const fixture = await createPendingQueueFixtureV2();
+    const requestId = 'request_completed_generation_gate';
+    const handoffId = 'handoff_completed_generation_gate';
+    const phase = await stageReadyReferenceRequestV2(fixture.pendingDir, requestId);
+    const decisionsDir = path.join(path.dirname(fixture.pendingDir), 'decisions');
+    const receiptsDir = path.join(path.dirname(fixture.pendingDir), 'receipts');
+    const decisionFile = path.join(decisionsDir, `${requestId}.json`);
+    const receiptFile = path.join(receiptsDir, `${handoffId}.json`);
+    await writeFile(
+      decisionFile,
+      JSON.stringify(referenceDecisionV2(requestId, { kind: 'generation_gate', handoffId, shotIds: ['shot_existing'] }))
+    );
+    await nodeFs.link(decisionFile, `${decisionFile}.publish`);
+    await writeFile(receiptFile, JSON.stringify(referenceReceiptV2(requestId, handoffId)));
+    await nodeFs.link(receiptFile, `${receiptFile}.publish`);
+    try {
+      await expect(
+        writePendingRecordV2({
+          ...pendingRequestInputV2(fixture.pendingDir),
+          record: { marker: 'new request', projectId: REFERENCE_WRITER_PROJECT_ID_V2 },
+        })
+      ).resolves.toMatchObject({ marker: 'new request' });
+      await expect(readFile(phase.canonicalFile, 'utf8')).resolves.toBe(
+        JSON.stringify(referenceRequestRecordV2(requestId, 'shot_existing', REFERENCE_WRITER_NOW_MS_V2))
+      );
+      await expect(nodeFs.lstat(`${decisionFile}.publish`)).resolves.toMatchObject({ isFile: expect.any(Function) });
+      await expect(nodeFs.lstat(`${receiptFile}.publish`)).resolves.toMatchObject({ isFile: expect.any(Function) });
+    } finally {
+      await rm(fixture.projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a receipt that is not bound to its generation-gate request without promoting ready data', async () => {
+    const fixture = await createPendingQueueFixtureV2();
+    const requestId = 'request_mismatched_generation_receipt';
+    const handoffId = 'handoff_mismatched_generation_receipt';
+    const phase = await stageReadyReferenceRequestV2(fixture.pendingDir, requestId);
+    await writeFile(
+      path.join(path.dirname(fixture.pendingDir), 'decisions', `${requestId}.json`),
+      JSON.stringify(referenceDecisionV2(requestId, { kind: 'generation_gate', handoffId, shotIds: ['shot_existing'] }))
+    );
+    await writeFile(
+      path.join(path.dirname(fixture.pendingDir), 'receipts', `${handoffId}.json`),
+      JSON.stringify(referenceReceiptV2('different_request', handoffId))
+    );
+    try {
+      await expect(
+        writePendingRecordV2({
+          ...pendingRequestInputV2(fixture.pendingDir),
+          record: { marker: 'new request', projectId: REFERENCE_WRITER_PROJECT_ID_V2 },
+        })
+      ).rejects.toMatchObject({ code: 'storage' });
+      await expect(nodeFs.lstat(phase.canonicalFile)).rejects.toMatchObject({ code: 'ENOENT' });
+      expect((await readdir(fixture.pendingDir)).toSorted()).toEqual(
+        [path.basename(phase.readyFile), path.basename(phase.temporaryFile)].toSorted()
+      );
+      await expect(readdir(fixture.slotsDir)).resolves.toEqual([]);
+    } finally {
+      await rm(fixture.projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('freezes terminal record bytes and inode identity through the final publication fence', async () => {
+    const fixture = await createPendingQueueFixtureV2();
+    const terminalRequestId = 'request_terminal_byte_fence';
+    const pendingFile = path.join(fixture.pendingDir, `${terminalRequestId}.json`);
+    const decisionFile = path.join(path.dirname(fixture.pendingDir), 'decisions', `${terminalRequestId}.json`);
+    const decisionBytes = JSON.stringify(referenceDecisionV2(terminalRequestId, { kind: 'rejected' }));
+    await writeFile(
+      pendingFile,
+      JSON.stringify(referenceRequestRecordV2(terminalRequestId, 'shot_existing', REFERENCE_WRITER_NOW_MS_V2))
+    );
+    await writeFile(decisionFile, decisionBytes);
+    let originalIdentity: { dev: number; ino: number } | null = null;
+    let mutatedIdentity: { dev: number; ino: number } | null = null;
+    const authorityFence = vi.fn(async () => {
+      if (originalIdentity === null && (await readdir(fixture.pendingDir)).some((name) => name.endsWith('.tmp'))) {
+        const before = await nodeFs.lstat(decisionFile);
+        originalIdentity = { dev: before.dev, ino: before.ino };
+        await writeFile(decisionFile, decisionBytes.replace('rejected', 'expired'));
+        const after = await nodeFs.lstat(decisionFile);
+        mutatedIdentity = { dev: after.dev, ino: after.ino };
+      }
+      return 'valid' as const;
+    });
+    try {
+      const recordId = 'request_after_terminal_byte_race';
+      await expect(
+        writePendingRecordV2({
+          ...pendingRequestInputV2(fixture.pendingDir, recordId),
+          record: { marker: recordId, projectId: REFERENCE_WRITER_PROJECT_ID_V2 },
+          authorityFence,
+        })
+      ).rejects.toMatchObject({ code: 'storage' });
+      expect(originalIdentity).toEqual(mutatedIdentity);
+      await expect(nodeFs.lstat(path.join(fixture.pendingDir, `${recordId}.json`))).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+      await expect(readdir(fixture.slotsDir)).resolves.toEqual([]);
+    } finally {
+      await rm(fixture.projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('freezes terminal entry-name snapshots through the final pending publication fence', async () => {
+    const fixture = await createPendingQueueFixtureV2();
+    const receiptsDir = path.join(path.dirname(fixture.pendingDir), 'receipts');
+    const terminalFile = path.join(receiptsDir, 'unrelated_handoff.json');
+    let fenceCalls = 0;
+    let installedTerminal = false;
+    const authorityFence = vi.fn(async () => {
+      fenceCalls += 1;
+      if (!installedTerminal && (await readdir(fixture.pendingDir)).some((name) => name.endsWith('.tmp'))) {
+        installedTerminal = true;
+        await writeFile(terminalFile, 'late terminal sentinel');
+      }
+      return 'valid' as const;
+    });
+    try {
+      await expect(
+        writePendingRecordV2({ ...pendingRequestInputV2(fixture.pendingDir), authorityFence })
+      ).rejects.toMatchObject({ code: 'storage' });
+      expect(installedTerminal).toBe(true);
+      expect(fenceCalls).toBeGreaterThan(3);
+      await expect(readFile(terminalFile, 'utf8')).resolves.toBe('late terminal sentinel');
+      await expect(readdir(fixture.pendingDir)).resolves.toEqual([]);
+      await expect(readdir(fixture.slotsDir)).resolves.toEqual([]);
+    } finally {
+      await rm(fixture.projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     ['unsupported prototype', 'unsupported_prototype_schema', 'unsupported_prototype_schema'],
     ['invalid authority', 'invalid', 'storage'],
@@ -9597,17 +11366,23 @@ describe('Studio MCP schema-2 server', () => {
     }
   });
 
-  it('cleans its exact reservation when schema-2 authority is revoked immediately before publication', async () => {
+  it('retains recoverable reservation authority when schema-2 authority is revoked before publication', async () => {
     const fixture = await createPendingQueueFixtureV2();
-    const statuses = ['valid', 'valid', 'valid', 'unsupported_prototype_schema'] as const;
-    const authorityFence = vi.fn(async () => statuses[authorityFence.mock.calls.length - 1] ?? 'invalid');
+    let revoked = false;
+    const authorityFence = vi.fn(async () => {
+      if (!revoked && (await readdir(fixture.pendingDir)).some((name) => name.endsWith('.tmp'))) revoked = true;
+      return revoked ? ('unsupported_prototype_schema' as const) : ('valid' as const);
+    });
     try {
       await expect(
         writePendingRecordV2({ ...pendingRequestInputV2(fixture.pendingDir), authorityFence })
       ).rejects.toMatchObject({ code: 'unsupported_prototype_schema' });
-      expect(authorityFence).toHaveBeenCalledTimes(4);
+      expect(revoked).toBe(true);
       await expect(readdir(fixture.pendingDir)).resolves.toEqual([]);
-      await expect(readdir(fixture.slotsDir)).resolves.toEqual([]);
+      const slotEntries = await readdir(fixture.slotsDir);
+      expect(slotEntries.filter((name) => name === '0.slot')).toEqual(['0.slot']);
+      expect(slotEntries.filter((name) => name.endsWith('.tmp'))).toHaveLength(1);
+      expect(slotEntries.filter((name) => name.endsWith('.ready'))).toHaveLength(1);
     } finally {
       await rm(fixture.projectRoot, { recursive: true, force: true });
     }
@@ -9615,19 +11390,22 @@ describe('Studio MCP schema-2 server', () => {
 
   it('preserves an unsupported authority result when its reservation was concurrently reaped', async () => {
     const fixture = await createPendingQueueFixtureV2();
-    let fenceCalls = 0;
+    let revoked = false;
     const authorityFence = vi.fn(async () => {
-      fenceCalls += 1;
-      if (fenceCalls !== 4) return 'valid' as const;
-      await rm(path.join(fixture.slotsDir, '0.slot'));
-      return 'unsupported_prototype_schema' as const;
+      if (!revoked && (await readdir(fixture.pendingDir)).some((name) => name.endsWith('.tmp'))) {
+        revoked = true;
+        await rm(path.join(fixture.slotsDir, '0.slot'));
+      }
+      return revoked ? ('unsupported_prototype_schema' as const) : ('valid' as const);
     });
     try {
       await expect(
         writePendingRecordV2({ ...pendingRequestInputV2(fixture.pendingDir), authorityFence })
       ).rejects.toMatchObject({ code: 'unsupported_prototype_schema' });
       await expect(readdir(fixture.pendingDir)).resolves.toEqual([]);
-      await expect(readdir(fixture.slotsDir)).resolves.toEqual([]);
+      const slotEntries = await readdir(fixture.slotsDir);
+      expect(slotEntries.filter((name) => name.endsWith('.tmp'))).toHaveLength(1);
+      expect(slotEntries.filter((name) => name.endsWith('.ready'))).toHaveLength(1);
     } finally {
       await rm(fixture.projectRoot, { recursive: true, force: true });
     }
@@ -9667,10 +11445,10 @@ describe('Studio MCP schema-2 server', () => {
       requestId: 'other_request',
       reservedAt: '2026-08-17T00:00:00.000Z',
     });
-    let fenceCalls = 0;
+    let replaced = false;
     const authorityFence = vi.fn(async () => {
-      fenceCalls += 1;
-      if (fenceCalls === 4) {
+      if (!replaced && (await readdir(fixture.pendingDir)).some((name) => name.endsWith('.tmp'))) {
+        replaced = true;
         await rm(slotFile);
         await writeFile(slotFile, replacement);
       }
@@ -9680,7 +11458,7 @@ describe('Studio MCP schema-2 server', () => {
       await expect(
         writePendingRecordV2({ ...pendingRequestInputV2(fixture.pendingDir), authorityFence })
       ).rejects.toMatchObject({ code: 'storage' });
-      expect(authorityFence).toHaveBeenCalledTimes(4);
+      expect(replaced).toBe(true);
       await expect(readFile(slotFile, 'utf8')).resolves.toBe(replacement);
       await expect(readdir(fixture.pendingDir)).resolves.toEqual([]);
       await expect(readdir(fixture.slotsDir)).resolves.toEqual(['0.slot']);
@@ -9741,7 +11519,103 @@ describe('Studio MCP schema-2 server', () => {
     }
   });
 
-  it('durably restores a replacement moved during exact-slot quarantine cleanup', async () => {
+  it('rechecks the pending temporary after the final async authority fence and preserves a replacement', async () => {
+    const fixture = await createPendingQueueFixtureV2();
+    const recordId = 'request_temp_recheck';
+    const replacementBytes = 'replacement temp bytes';
+    let temporaryFile: string | null = null;
+    const authorityFence = vi.fn(async () => {
+      if (temporaryFile === null) {
+        const temporaryName = (await readdir(fixture.pendingDir)).find((name) => name.endsWith('.tmp'));
+        if (temporaryName === undefined) return 'valid' as const;
+        temporaryFile = path.join(fixture.pendingDir, temporaryName);
+        await rm(temporaryFile);
+        await writeFile(temporaryFile, replacementBytes);
+      }
+      return 'valid' as const;
+    });
+    try {
+      await expect(
+        writePendingRecordV2({ ...pendingRequestInputV2(fixture.pendingDir, recordId), authorityFence })
+      ).rejects.toMatchObject({ code: 'storage' });
+      expect(temporaryFile).not.toBeNull();
+      await expect(readFile(temporaryFile!, 'utf8')).resolves.toBe(replacementBytes);
+      await expect(nodeFs.lstat(path.join(fixture.pendingDir, `${recordId}.json`))).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+      await expect(readdir(fixture.slotsDir)).resolves.toEqual([]);
+    } finally {
+      await rm(fixture.projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rechecks exact pending temporary bytes after the final async authority fence', async () => {
+    const fixture = await createPendingQueueFixtureV2();
+    const recordId = 'request_temp_bytes_recheck';
+    const finalFile = path.join(fixture.pendingDir, `${recordId}.json`);
+    let temporaryFile: string | null = null;
+    let originalIdentity: { dev: number; ino: number } | null = null;
+    let mutatedIdentity: { dev: number; ino: number } | null = null;
+    const authorityFence = vi.fn(async () => {
+      if (temporaryFile === null) {
+        const temporaryName = (await readdir(fixture.pendingDir)).find((name) => name.endsWith('.tmp'));
+        if (temporaryName === undefined) return 'valid' as const;
+        temporaryFile = path.join(fixture.pendingDir, temporaryName);
+        const originalBytes = await readFile(temporaryFile, 'utf8');
+        const before = await nodeFs.lstat(temporaryFile);
+        originalIdentity = { dev: before.dev, ino: before.ino };
+        await writeFile(temporaryFile, 'x'.repeat(Buffer.byteLength(originalBytes, 'utf8')));
+        const after = await nodeFs.lstat(temporaryFile);
+        mutatedIdentity = { dev: after.dev, ino: after.ino };
+      }
+      return 'valid' as const;
+    });
+    try {
+      await expect(
+        writePendingRecordV2({ ...pendingRequestInputV2(fixture.pendingDir, recordId), authorityFence })
+      ).rejects.toMatchObject({ code: 'storage' });
+      expect(originalIdentity).toEqual(mutatedIdentity);
+      await expect(nodeFs.lstat(finalFile)).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(readdir(fixture.slotsDir)).resolves.toEqual([]);
+    } finally {
+      await rm(fixture.projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('fences every V2 sidecar directory generation at the final publication boundary', async () => {
+    const fixture = await createPendingQueueFixtureV2();
+    const familyRoot = path.dirname(fixture.pendingDir);
+    const receiptsDir = path.join(familyRoot, 'receipts');
+    const displacedReceiptsDir = path.join(familyRoot, 'receipts-original');
+    const sentinel = path.join(receiptsDir, 'replacement.sentinel');
+    let replacedDirectory = false;
+    const authorityFence = vi.fn(async () => {
+      if (!replacedDirectory && (await readdir(fixture.pendingDir)).some((name) => name.endsWith('.tmp'))) {
+        replacedDirectory = true;
+        await nodeFs.rename(receiptsDir, displacedReceiptsDir);
+        await mkdir(receiptsDir);
+        await writeFile(sentinel, 'replacement bytes');
+      }
+      return 'valid' as const;
+    });
+    try {
+      await expect(
+        writePendingRecordV2({ ...pendingRequestInputV2(fixture.pendingDir), authorityFence })
+      ).rejects.toMatchObject({ code: 'storage' });
+      expect(replacedDirectory).toBe(true);
+      await expect(readFile(sentinel, 'utf8')).resolves.toBe('replacement bytes');
+      await expect(readdir(displacedReceiptsDir)).resolves.toEqual([]);
+      await expect(readdir(fixture.pendingDir)).resolves.toEqual([]);
+      const slotEntries = await readdir(fixture.slotsDir);
+      expect(slotEntries.filter((name) => name === '0.slot')).toEqual(['0.slot']);
+      expect(slotEntries.filter((name) => name.endsWith('.tmp'))).toHaveLength(1);
+      expect(slotEntries.filter((name) => name.endsWith('.ready'))).toHaveLength(1);
+    } finally {
+      await rm(fixture.projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves a replacement raced into exact-slot hardlink cleanup', async () => {
     const fixture = await createPendingQueueFixtureV2();
     const recordId = 'request_cleanup_restore';
     const canonicalSlots = await nodeFs.realpath(fixture.slotsDir);
@@ -9763,21 +11637,16 @@ describe('Studio MCP schema-2 server', () => {
             existingPath: Parameters<typeof nodeFs.link>[0],
             newPath: Parameters<typeof nodeFs.link>[1]
           ) => {
+            if (!installedReplacement && String(existingPath) === slotFile && String(newPath).endsWith('.cleanup')) {
+              installedReplacement = true;
+              await rm(slotFile);
+              await writeFile(slotFile, replacement);
+            }
             await nodeFs.link(existingPath, newPath);
             if (!installedFinal && String(newPath) === slotFile) {
               installedFinal = true;
               await writeFile(finalFile, JSON.stringify({ schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION }));
             }
-          };
-        }
-        if (property === 'rename') {
-          return async (oldPath: Parameters<typeof nodeFs.rename>[0], newPath: Parameters<typeof nodeFs.rename>[1]) => {
-            if (!installedReplacement && String(oldPath) === slotFile && String(newPath).endsWith('.cleanup')) {
-              installedReplacement = true;
-              await rm(slotFile);
-              await writeFile(slotFile, replacement);
-            }
-            await nodeFs.rename(oldPath, newPath);
           };
         }
         if (property === 'open') {
@@ -9845,6 +11714,36 @@ describe('Studio MCP schema-2 server', () => {
       await expect(readFile(slotFile, 'utf8')).resolves.toBe(slotBytes);
       await expect(readdir(fixture.pendingDir)).resolves.toEqual([]);
       await expect(readdir(fixture.slotsDir)).resolves.toEqual(['0.slot']);
+    } finally {
+      await rm(fixture.projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('classifies a slot-backed schema-1 pending record before publishing V2 queue authority', async () => {
+    const fixture = await createPendingQueueFixtureV2();
+    const requestId = 'legacy_pending_request';
+    const pendingBytes = JSON.stringify({
+      schemaVersion: 1,
+      id: requestId,
+      projectId: REFERENCE_WRITER_PROJECT_ID_V2,
+      sceneId: 'legacy_scene',
+      status: 'pending',
+      createdAt: new Date(REFERENCE_WRITER_NOW_MS_V2).toISOString(),
+    });
+    await writeFile(path.join(fixture.pendingDir, `${requestId}.json`), pendingBytes);
+    await writeFile(
+      path.join(fixture.slotsDir, '0.slot'),
+      JSON.stringify({
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        requestId,
+        reservedAt: new Date(REFERENCE_WRITER_NOW_MS_V2).toISOString(),
+      })
+    );
+    try {
+      await expect(writePendingRecordV2(pendingRequestInputV2(fixture.pendingDir))).rejects.toMatchObject({
+        code: 'unsupported_prototype_schema',
+      });
+      await expect(readFile(path.join(fixture.pendingDir, `${requestId}.json`), 'utf8')).resolves.toBe(pendingBytes);
     } finally {
       await rm(fixture.projectRoot, { recursive: true, force: true });
     }
@@ -9941,10 +11840,18 @@ describe('Studio MCP schema-2 server', () => {
       expect(failed).toBe(true);
       if (installLegacyRecord) {
         await expect(readFile(recordFile, 'utf8')).resolves.toBe(legacyBytes);
-        await expect(readdir(fixture.slotsDir)).resolves.toEqual([]);
+        const slotEntries = await readdir(fixture.slotsDir);
+        expect(slotEntries.filter((name) => name === '0.slot')).toEqual(['0.slot']);
+        expect(slotEntries.filter((name) => name.endsWith('.tmp'))).toHaveLength(1);
+        expect(slotEntries.filter((name) => name.endsWith('.ready'))).toHaveLength(1);
       } else {
-        await expect(readdir(fixture.pendingDir)).resolves.toEqual([]);
-        await expect(readdir(fixture.slotsDir)).resolves.toEqual(['0.slot']);
+        const pendingEntries = await readdir(fixture.pendingDir);
+        expect(pendingEntries.filter((name) => name.endsWith('.tmp'))).toHaveLength(1);
+        expect(pendingEntries.filter((name) => name.endsWith('.ready'))).toHaveLength(1);
+        const slotEntries = await readdir(fixture.slotsDir);
+        expect(slotEntries.filter((name) => name === '0.slot')).toEqual(['0.slot']);
+        expect(slotEntries.filter((name) => name.endsWith('.tmp'))).toHaveLength(1);
+        expect(slotEntries.filter((name) => name.endsWith('.ready'))).toHaveLength(1);
       }
     } finally {
       await rm(fixture.projectRoot, { recursive: true, force: true });
@@ -9980,7 +11887,10 @@ describe('Studio MCP schema-2 server', () => {
       ).rejects.toMatchObject({ code: 'storage' });
       expect(failedAfterEffect).toBe(true);
       await expect(readFile(recordFile, 'utf8')).resolves.toBe(JSON.stringify({ marker: recordId }));
-      await expect(readdir(fixture.slotsDir)).resolves.toEqual(['0.slot']);
+      const slotEntries = await readdir(fixture.slotsDir);
+      expect(slotEntries.filter((name) => name === '0.slot')).toEqual(['0.slot']);
+      expect(slotEntries.filter((name) => name.endsWith('.tmp'))).toHaveLength(1);
+      expect(slotEntries.filter((name) => name.endsWith('.ready'))).toHaveLength(1);
     } finally {
       await rm(fixture.projectRoot, { recursive: true, force: true });
     }
@@ -10032,5 +11942,46 @@ describe('Studio MCP schema-2 server', () => {
     await expect(readdir(slotsDir)).resolves.toEqual([]);
 
     await rm(projectDir, { recursive: true, force: true });
+  });
+
+  it('bounds schema-1 record writes before reservation and releases a reservation after record failure', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-pending-v1-boundaries-'));
+    const pendingDir = path.join(projectDir, 'pending');
+    const slotsDir = path.join(projectDir, 'slots');
+    await mkdir(pendingDir);
+    await mkdir(slotsDir);
+    const input = (recordId: string, record: unknown) => ({
+      pendingDir,
+      recordId,
+      record,
+      slotRecordKey: 'requestId' as const,
+      capacityMessage: 'full',
+      tooLargeMessage: 'too large',
+    });
+
+    try {
+      await expect(writePendingRecord(input('oversized_v1', { text: 'x'.repeat(256 * 1024) }))).rejects.toMatchObject({
+        code: 'too_large',
+      });
+
+      await rm(slotsDir, { recursive: true });
+      await expect(writePendingRecord(input('missing_slots_v1', { ok: true }))).rejects.toMatchObject({
+        code: 'storage',
+      });
+      await mkdir(slotsDir);
+
+      await rm(pendingDir, { recursive: true });
+      await expect(writePendingRecord(input('missing_pending_v1', { ok: true }))).rejects.toMatchObject({
+        code: 'storage',
+      });
+      await expect(readdir(slotsDir)).resolves.toEqual([]);
+
+      await Promise.all(
+        Array.from({ length: 50 }, (_, index) => writeFile(path.join(slotsDir, `${index}.slot`), 'occupied'))
+      );
+      await expect(writePendingRecord(input('full_v1', { ok: true }))).rejects.toMatchObject({ code: 'capacity' });
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
   });
 });

@@ -48,6 +48,14 @@ const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const ownRecordValue = <Value>(record: Readonly<Record<string, Value>>, key: string): Value | undefined =>
   Object.hasOwn(record, key) ? record[key] : undefined;
 
+const owningBeatForShotV2 = (project: StudioProjectV2, shotId: string): StudioProjectV2['beats'][string] | null => {
+  for (const beatId of project.beatOrder) {
+    const beat = ownRecordValue(project.beats, beatId);
+    if (beat?.shotOrder.includes(shotId)) return beat;
+  }
+  return null;
+};
+
 const defineRecordValue = <Value>(record: Record<string, Value>, key: string, value: Value): void => {
   Object.defineProperty(record, key, { value, writable: true, enumerable: true, configurable: true });
 };
@@ -1570,8 +1578,11 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       const { projectDir, project } = context;
       authority = context.authority;
       if (project.revision !== input.expectedRevision) throw new CreativeStudioMediaError('stale_project');
-      if (input.shotId !== undefined && !Object.hasOwn(project.shots, input.shotId)) {
-        throw new CreativeStudioMediaError('not_found');
+      if (input.shotId !== undefined) {
+        if (!Object.hasOwn(project.shots, input.shotId)) throw new CreativeStudioMediaError('not_found');
+        if (owningBeatForShotV2(project, input.shotId) === null) {
+          throw new CreativeStudioMediaError('invalid_media');
+        }
       }
       if (input.briefReferenceRole !== undefined) {
         const activeReferences = resolveActiveStudioBriefReferencesV2(project.assets);
@@ -1660,6 +1671,9 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         (current) => {
           const next = structuredClone(current);
           const activeReferences = resolveActiveStudioBriefReferencesV2(current.assets);
+          if (input.shotId !== undefined && owningBeatForShotV2(current, input.shotId) === null) {
+            throw new CreativeStudioMediaError('invalid_media');
+          }
           if (
             input.briefReferenceRole !== undefined &&
             (activeReferences === null || activeReferences.length >= STUDIO_MAX_ACTIVE_BRIEF_REFERENCES)
@@ -2775,11 +2789,6 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     if ('mediaKind' in input && input.mediaKind === 'image' && input.durationSeconds !== undefined) {
       throw new CreativeStudioMediaError('invalid_media');
     }
-  };
-
-  const owningBeatForShotV2 = (project: StudioProjectV2, shotId: string): StudioProjectV2['beats'][string] | null => {
-    const owners = Object.values(project.beats).filter((beat) => beat.shotOrder.includes(shotId));
-    return owners.length === 1 ? owners[0]! : null;
   };
 
   const prepareProviderWrite = async (input: ProviderOutputMetadata): Promise<ManagedWritePlan> => {

@@ -72,20 +72,42 @@ const bindMethods = <T extends object>(target: T, overrides: Partial<Record<keyo
     },
   });
 
+const pendingProposalV2 = (id: string) => ({
+  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  id,
+  projectId: PROJECT_ID,
+  status: 'pending' as const,
+  baseRevision: 1,
+  payload: {
+    kind: 'mutation_batch' as const,
+    operations: [{ kind: 'set_brief' as const, brief: `Proposal ${id}` }],
+  },
+  createdAt: new Date(START_MS).toISOString(),
+  decidedAt: null,
+});
+
 describe('Studio Director subprocess command writer', () => {
   let projectDir = '';
   let pendingDir = '';
   let slotsDir = '';
   let receiptsDir = '';
+  let proposalPendingDir = '';
+  let proposalSlotsDir = '';
 
   beforeEach(async () => {
     projectDir = await mkdtemp(path.join(tmpdir(), 'studio-command-writer-'));
     pendingDir = path.join(projectDir, 'commands', 'pending');
     slotsDir = path.join(projectDir, 'commands', 'slots');
     receiptsDir = path.join(projectDir, 'commands', 'receipts');
+    proposalPendingDir = path.join(projectDir, 'proposals', 'pending');
+    proposalSlotsDir = path.join(projectDir, 'proposals', 'slots');
     await mkdir(pendingDir, { recursive: true });
     await mkdir(slotsDir);
     await mkdir(receiptsDir);
+    await mkdir(proposalPendingDir, { recursive: true });
+    await mkdir(path.join(projectDir, 'proposals', 'decisions'));
+    await mkdir(proposalSlotsDir);
+    await mkdir(path.join(projectDir, 'proposals', 'commits'));
     await writeFile(
       path.join(projectDir, 'project.json'),
       JSON.stringify(
@@ -922,13 +944,8 @@ describe('Studio Director subprocess command writer', () => {
     expect(await readdir(pendingDir)).toEqual([]);
   });
 
-  it('mints schema-2 beat and shot identities in canonical operation order', async () => {
-    const createId = vi
-      .fn<() => string>()
-      .mockReturnValueOnce('command_v2')
-      .mockReturnValueOnce('section_new')
-      .mockReturnValueOnce('clip_added')
-      .mockReturnValueOnce('lease_v2');
+  it('preserves caller-authored schema-2 beat and shot identities in canonical operation order', async () => {
+    const createId = vi.fn<() => string>().mockReturnValueOnce('command_v2').mockReturnValueOnce('lease_v2');
     let currentMs = START_MS;
     const writer = createStudioDirectorCommandWriterV2(
       { projectId: PROJECT_ID, projectDir },
@@ -947,12 +964,14 @@ describe('Studio Director subprocess command writer', () => {
         operations: [
           {
             kind: 'add_beat',
+            beatId: 'section_new',
             beat: { title: 'Opening', action: '', look: 'A warm visual language', targetSeconds: null },
             beforeBeatId: null,
           },
           {
             kind: 'add_shot',
             beatId: 'section_existing',
+            shotId: 'clip_added',
             shot: shotInputV2('A close detail'),
             beforeShotId: null,
           },
@@ -973,7 +992,7 @@ describe('Studio Director subprocess command writer', () => {
         { kind: 'add_shot', beatId: 'section_existing', shotId: 'clip_added' },
       ],
     });
-    expect(createId.mock.calls).toHaveLength(4);
+    expect(createId.mock.calls).toHaveLength(2);
   });
 
   it('durably removes each V2 publication guard before reporting command publication', async () => {
@@ -1012,6 +1031,119 @@ describe('Studio Director subprocess command writer', () => {
     expect(pendingGuardRemoved).toBeGreaterThanOrEqual(0);
     expect(events.indexOf('slots-synced', slotGuardRemoved + 1)).toBeGreaterThan(slotGuardRemoved);
     expect(events.indexOf('pending-synced', pendingGuardRemoved + 1)).toBeGreaterThan(pendingGuardRemoved);
+  });
+
+  it('preserves a foreign V2 publication guard replacement instead of path-deleting it', async () => {
+    const canonicalSlots = await nodeFs.realpath(slotsDir);
+    const slotFile = path.join(canonicalSlots, '0.slot');
+    const slotGuard = `${slotFile}.unconfirmed`;
+    const foreignGuard = 'foreign guard authority';
+    let slotLinked = false;
+    let replaced = false;
+    const fs = bindMethods(nodeFs, {
+      link: async (source: Parameters<typeof nodeFs.link>[0], destination: Parameters<typeof nodeFs.link>[1]) => {
+        await nodeFs.link(source, destination);
+        if (String(destination) === slotFile) slotLinked = true;
+      },
+      open: async (...args: Parameters<typeof nodeFs.open>) => {
+        const file = String(args[0]);
+        const handle = await nodeFs.open(...args);
+        if (file !== canonicalSlots || args[1] !== 'r') return handle;
+        return bindMethods(handle, {
+          sync: async () => {
+            await handle.sync();
+            if (slotLinked && !replaced) {
+              replaced = true;
+              await rm(slotGuard);
+              await writeFile(slotGuard, foreignGuard);
+            }
+          },
+        });
+      },
+    });
+    const writer = writerWithIdsV2(['command_foreign_guard', 'lease_foreign_guard'], { fs });
+
+    await expect(
+      writer.apply({ expectedRevision: 7, operations: [{ kind: 'set_brief', brief: 'Foreign guard' }] })
+    ).resolves.toEqual({ status: 'storage_error', commandId: 'command_foreign_guard' });
+    expect(replaced).toBe(true);
+    await expect(readFile(slotGuard, 'utf8')).resolves.toBe(foreignGuard);
+  });
+
+  it('preserves a foreign V2 lease temporary replacement after durable lease publication', async () => {
+    const canonicalSlots = await nodeFs.realpath(slotsDir);
+    const leaseFile = path.join(canonicalSlots, '0.slot.lease');
+    const foreignTemp = 'foreign lease temp authority';
+    let leaseTemp: string | null = null;
+    let leaseLinked = false;
+    let replaced = false;
+    const fs = bindMethods(nodeFs, {
+      open: async (...args: Parameters<typeof nodeFs.open>) => {
+        const file = String(args[0]);
+        const handle = await nodeFs.open(...args);
+        if (file.startsWith(`${leaseFile}.`) && file.endsWith('.tmp')) leaseTemp = file;
+        if (file !== canonicalSlots || args[1] !== 'r') return handle;
+        return bindMethods(handle, {
+          sync: async () => {
+            await handle.sync();
+            if (leaseLinked && leaseTemp !== null && !replaced) {
+              replaced = true;
+              await rm(leaseTemp);
+              await writeFile(leaseTemp, foreignTemp);
+            }
+          },
+        });
+      },
+      link: async (source: Parameters<typeof nodeFs.link>[0], destination: Parameters<typeof nodeFs.link>[1]) => {
+        await nodeFs.link(source, destination);
+        if (String(destination) === leaseFile) leaseLinked = true;
+      },
+    });
+    const writer = writerWithIdsV2(['command_foreign_lease_temp', 'lease_foreign_lease_temp'], { fs });
+
+    await expect(
+      writer.apply({ expectedRevision: 7, operations: [{ kind: 'set_brief', brief: 'Foreign lease temp' }] })
+    ).resolves.toEqual({ status: 'unconfirmed', commandId: 'command_foreign_lease_temp' });
+    expect(replaced).toBe(true);
+    expect(leaseTemp).not.toBeNull();
+    await expect(readFile(leaseTemp!, 'utf8')).resolves.toBe(foreignTemp);
+  });
+
+  it('preserves a foreign V2 final-name replacement when immutable rollback sync fails', async () => {
+    const canonicalSlots = await nodeFs.realpath(slotsDir);
+    const slotFile = path.join(canonicalSlots, '0.slot');
+    const foreignSlot = 'foreign slot authority';
+    let slotLinked = false;
+    let replaced = false;
+    const fs = bindMethods(nodeFs, {
+      link: async (source: Parameters<typeof nodeFs.link>[0], destination: Parameters<typeof nodeFs.link>[1]) => {
+        await nodeFs.link(source, destination);
+        if (String(destination) === slotFile) slotLinked = true;
+      },
+      open: async (...args: Parameters<typeof nodeFs.open>) => {
+        const file = String(args[0]);
+        const handle = await nodeFs.open(...args);
+        if (file !== canonicalSlots || args[1] !== 'r') return handle;
+        return bindMethods(handle, {
+          sync: async () => {
+            if (slotLinked && !replaced) {
+              replaced = true;
+              await rm(slotFile);
+              await writeFile(slotFile, foreignSlot);
+              throw Object.assign(new Error('post-link slot sync failed'), { code: 'EIO' });
+            }
+            await handle.sync();
+          },
+        });
+      },
+    });
+    const writer = writerWithIdsV2(['command_foreign_slot', 'lease_foreign_slot'], { fs });
+
+    await expect(
+      writer.apply({ expectedRevision: 7, operations: [{ kind: 'set_brief', brief: 'Foreign slot' }] })
+    ).resolves.toEqual({ status: 'storage_error', commandId: 'command_foreign_slot' });
+    expect(replaced).toBe(true);
+    await expect(readFile(slotFile, 'utf8')).resolves.toBe(foreignSlot);
   });
 
   it('retains V2 lease authority when the post-guard slot sync is uncertain', async () => {
@@ -2413,6 +2545,37 @@ describe('Studio Director subprocess command writer', () => {
     await expect(readdir(pendingDir)).resolves.toEqual([]);
   });
 
+  it('rejects a same-revision V2 manifest replacement after lease publication', async () => {
+    const manifestFile = path.join(projectDir, 'project.json');
+    const initial = JSON.parse(await readFile(manifestFile, 'utf8')) as ReturnType<typeof createEmptyStudioProjectV2>;
+    const replacement = {
+      ...initial,
+      brief: 'Different state at the same revision',
+      updatedAt: new Date(START_MS + 1_000).toISOString(),
+    };
+    let replaced = false;
+    const fs = bindMethods(nodeFs, {
+      link: async (source: string, destination: string) => {
+        await nodeFs.link(source, destination);
+        if (!replaced && destination.endsWith('/0.slot.lease')) {
+          replaced = true;
+          const temporary = `${manifestFile}.same-revision`;
+          await writeFile(temporary, JSON.stringify(replacement));
+          await nodeFs.rename(temporary, manifestFile);
+        }
+      },
+    });
+    const writer = writerWithIdsV2(['command_same_revision_replacement', 'lease_same_revision_replacement'], { fs });
+
+    await expect(
+      writer.apply({ expectedRevision: initial.revision, operations: [{ kind: 'set_brief', brief: 'Stale state' }] })
+    ).resolves.toEqual({ status: 'storage_error', commandId: 'command_same_revision_replacement' });
+    expect(replaced).toBe(true);
+    await expect(readFile(manifestFile, 'utf8')).resolves.toBe(JSON.stringify(replacement));
+    await expect(readdir(slotsDir)).resolves.toEqual([]);
+    await expect(readdir(pendingDir)).resolves.toEqual([]);
+  });
+
   it.each(['lease', 'slot'] as const)(
     'accepts a valid atomic V2 manifest replacement after %s publication and leaves stale CAS to main',
     async (phase) => {
@@ -2559,6 +2722,54 @@ describe('Studio Director subprocess command writer', () => {
     }
   });
 
+  it.each(['lease', 'slot', 'pending'] as const)(
+    're-proves exact V2 %s temporary bytes after async publication authority',
+    async (phase) => {
+      const canonicalSlots = await nodeFs.realpath(slotsDir);
+      const canonicalPending = await nodeFs.realpath(pendingDir);
+      const canonicalReceipts = await nodeFs.realpath(receiptsDir);
+      const commandId = `command_${phase}_source_reproof`;
+      const targetFile =
+        phase === 'lease'
+          ? path.join(canonicalSlots, '0.slot.lease')
+          : phase === 'slot'
+            ? path.join(canonicalSlots, '0.slot')
+            : path.join(canonicalPending, `${commandId}.json`);
+      let sourceFile: string | null = null;
+      let mutated = false;
+      const linkedDestinations: string[] = [];
+      const fs = bindMethods(nodeFs, {
+        open: async (...args: Parameters<typeof nodeFs.open>) => {
+          const file = String(args[0]);
+          const handle = await nodeFs.open(...args);
+          if (file.startsWith(`${targetFile}.`) && file.endsWith('.tmp')) sourceFile = file;
+          return handle;
+        },
+        realpath: async (file: Parameters<typeof nodeFs.realpath>[0], ...args: unknown[]) => {
+          const resolved = await Reflect.apply(nodeFs.realpath, nodeFs, [file, ...args]);
+          if (!mutated && sourceFile !== null && String(file) === canonicalReceipts) {
+            const originalBytes = await readFile(sourceFile, 'utf8');
+            await writeFile(sourceFile, 'x'.repeat(Buffer.byteLength(originalBytes, 'utf8')));
+            mutated = true;
+          }
+          return resolved;
+        },
+        link: async (existingPath: Parameters<typeof nodeFs.link>[0], newPath: Parameters<typeof nodeFs.link>[1]) => {
+          linkedDestinations.push(String(newPath));
+          await nodeFs.link(existingPath, newPath);
+        },
+      });
+      const writer = writerWithIdsV2([commandId, `lease_${phase}_source_reproof`], { fs });
+
+      await expect(
+        writer.apply({ expectedRevision: 7, operations: [{ kind: 'set_brief', brief: `Reproof ${phase}` }] })
+      ).resolves.toEqual({ status: 'storage_error', commandId });
+      expect(mutated).toBe(true);
+      expect(linkedDestinations).not.toContain(targetFile);
+      await expect(nodeFs.lstat(targetFile)).rejects.toMatchObject({ code: 'ENOENT' });
+    }
+  );
+
   it('rejects a conservatively oversized schema-2 command before minting any identity', async () => {
     const createId = vi.fn(() => 'must_not_be_minted');
     const writer = createStudioDirectorCommandWriterV2(
@@ -2592,12 +2803,12 @@ describe('Studio Director subprocess command writer', () => {
       expected: 'unsupported_prototype_schema',
     },
   ])('classifies an exact $label proposal slot before reserving another family slot', async ({ bytes, expected }) => {
-    const slotFile = path.join(slotsDir, '1.slot');
+    const slotFile = path.join(proposalSlotsDir, '1.slot');
     await writeFile(slotFile, bytes);
 
     await expect(
       writePendingRecordV2({
-        pendingDir,
+        pendingDir: proposalPendingDir,
         recordId: 'proposal_new',
         record: { schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, id: 'proposal_new' },
         slotRecordKey: 'proposalId',
@@ -2606,12 +2817,12 @@ describe('Studio Director subprocess command writer', () => {
       })
     ).rejects.toMatchObject({ code: expected });
     await expect(readFile(slotFile, 'utf8')).resolves.toBe(bytes);
-    await expect(readdir(slotsDir)).resolves.toEqual(['1.slot']);
-    await expect(readdir(pendingDir)).resolves.toEqual([]);
+    await expect(readdir(proposalSlotsDir)).resolves.toEqual(['1.slot']);
+    await expect(readdir(proposalPendingDir)).resolves.toEqual([]);
   });
 
   it('rescans the full pending family after reservation and rejects a late V1 slot without publishing', async () => {
-    const canonicalSlots = await nodeFs.realpath(slotsDir);
+    const canonicalSlots = await nodeFs.realpath(proposalSlotsDir);
     const ownSlot = path.join(canonicalSlots, '0.slot');
     const legacySlot = path.join(canonicalSlots, '1.slot');
     const legacyBytes = JSON.stringify({
@@ -2632,7 +2843,7 @@ describe('Studio Director subprocess command writer', () => {
 
     await expect(
       writePendingRecordV2({
-        pendingDir,
+        pendingDir: proposalPendingDir,
         recordId: 'proposal_raced',
         record: { schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, id: 'proposal_raced' },
         slotRecordKey: 'proposalId',
@@ -2643,13 +2854,13 @@ describe('Studio Director subprocess command writer', () => {
     ).rejects.toMatchObject({ code: 'unsupported_prototype_schema' });
     expect(installed).toBe(true);
     await expect(readFile(legacySlot, 'utf8')).resolves.toBe(legacyBytes);
-    await expect(readdir(pendingDir)).resolves.toEqual([]);
-    await expect(readdir(slotsDir)).resolves.toEqual(['1.slot']);
+    await expect(readdir(proposalPendingDir)).resolves.toEqual([]);
+    await expect(readdir(proposalSlotsDir)).resolves.toEqual(['1.slot']);
   });
 
   it('quarantines and removes its exact slot when an identical pending record wins after reservation', async () => {
-    const canonicalSlots = await nodeFs.realpath(slotsDir);
-    const canonicalPending = await nodeFs.realpath(pendingDir);
+    const canonicalSlots = await nodeFs.realpath(proposalSlotsDir);
+    const canonicalPending = await nodeFs.realpath(proposalPendingDir);
     const ownSlot = path.join(canonicalSlots, '0.slot');
     const finalFile = path.join(canonicalPending, 'proposal_winner.json');
     const record = { schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, id: 'proposal_winner' };
@@ -2667,7 +2878,7 @@ describe('Studio Director subprocess command writer', () => {
 
     await expect(
       writePendingRecordV2({
-        pendingDir,
+        pendingDir: proposalPendingDir,
         recordId: record.id,
         record,
         slotRecordKey: 'proposalId',
@@ -2678,12 +2889,12 @@ describe('Studio Director subprocess command writer', () => {
     ).rejects.toMatchObject({ code: 'storage' });
     expect(installed).toBe(true);
     await expect(readFile(finalFile, 'utf8')).resolves.toBe(serialized);
-    await expect(readdir(slotsDir)).resolves.toEqual([]);
+    await expect(readdir(proposalSlotsDir)).resolves.toEqual([]);
   });
 
-  it('restores a replacement slot raced into the quarantine cleanup window', async () => {
-    const canonicalSlots = await nodeFs.realpath(slotsDir);
-    const canonicalPending = await nodeFs.realpath(pendingDir);
+  it('preserves a replacement slot raced into the hardlink cleanup window', async () => {
+    const canonicalSlots = await nodeFs.realpath(proposalSlotsDir);
+    const canonicalPending = await nodeFs.realpath(proposalPendingDir);
     const ownSlot = path.join(canonicalSlots, '0.slot');
     const finalFile = path.join(canonicalPending, 'proposal_cleanup_race.json');
     const record = { schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, id: 'proposal_cleanup_race' };
@@ -2696,25 +2907,22 @@ describe('Studio Director subprocess command writer', () => {
     let installedReplacement = false;
     const fs = bindMethods(nodeFs, {
       link: async (source: string, destination: string) => {
+        if (!installedReplacement && source === ownSlot && destination.endsWith('.cleanup')) {
+          installedReplacement = true;
+          await rm(ownSlot);
+          await writeFile(ownSlot, replacement);
+        }
         await nodeFs.link(source, destination);
         if (!installedPending && destination === ownSlot) {
           installedPending = true;
           await writeFile(finalFile, JSON.stringify(record));
         }
       },
-      rename: async (source: string, destination: string) => {
-        if (!installedReplacement && source === ownSlot && destination.endsWith('.cleanup')) {
-          installedReplacement = true;
-          await rm(ownSlot);
-          await writeFile(ownSlot, replacement);
-        }
-        await nodeFs.rename(source, destination);
-      },
     });
 
     await expect(
       writePendingRecordV2({
-        pendingDir,
+        pendingDir: proposalPendingDir,
         recordId: record.id,
         record,
         slotRecordKey: 'proposalId',
@@ -2726,11 +2934,11 @@ describe('Studio Director subprocess command writer', () => {
     expect(installedPending).toBe(true);
     expect(installedReplacement).toBe(true);
     await expect(readFile(ownSlot, 'utf8')).resolves.toBe(replacement);
-    expect((await readdir(slotsDir)).filter((name) => name.endsWith('.cleanup'))).toEqual([]);
+    expect((await readdir(proposalSlotsDir)).filter((name) => name.endsWith('.cleanup'))).toEqual([]);
   });
 
   it('treats a cleanup failure after durable final publication as committed success', async () => {
-    const finalFile = path.join(await nodeFs.realpath(pendingDir), 'proposal_committed.json');
+    const finalFile = path.join(await nodeFs.realpath(proposalPendingDir), 'proposal_committed.json');
     const fs = bindMethods(nodeFs, {
       rm: async (file: string, ...args: unknown[]) => {
         if (file.startsWith(`${finalFile}.`) && file.endsWith('.tmp')) {
@@ -2742,7 +2950,7 @@ describe('Studio Director subprocess command writer', () => {
 
     await expect(
       writePendingRecordV2({
-        pendingDir,
+        pendingDir: proposalPendingDir,
         recordId: 'proposal_committed',
         record: { schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, id: 'proposal_committed' },
         slotRecordKey: 'proposalId',
@@ -2754,8 +2962,88 @@ describe('Studio Director subprocess command writer', () => {
     await expect(readFile(finalFile, 'utf8')).resolves.toContain('proposal_committed');
   });
 
+  it('restores a committed ready-phase pending record before publishing the next record', async () => {
+    const first = pendingProposalV2('proposal_ready_recovery');
+    const second = pendingProposalV2('proposal_after_recovery');
+    const write = (record: ReturnType<typeof pendingProposalV2>) =>
+      writePendingRecordV2({
+        pendingDir: proposalPendingDir,
+        recordId: record.id,
+        record,
+        slotRecordKey: 'proposalId',
+        capacityMessage: 'full',
+        tooLargeMessage: 'too large',
+      });
+
+    await expect(write(first)).resolves.toEqual(first);
+    const firstFile = path.join(proposalPendingDir, `${first.id}.json`);
+    await rm(firstFile);
+    await expect(write(second)).resolves.toEqual(second);
+
+    await expect(readFile(firstFile, 'utf8')).resolves.toBe(JSON.stringify(first));
+    await expect(readFile(path.join(proposalPendingDir, `${second.id}.json`), 'utf8')).resolves.toBe(
+      JSON.stringify(second)
+    );
+    expect((await readdir(proposalSlotsDir)).filter((name) => /^\d+\.slot$/.test(name))).toHaveLength(2);
+  });
+
+  it('rolls back an orphan ready-phase slot before reusing its canonical index', async () => {
+    const orphan = pendingProposalV2('proposal_orphan_ready_slot');
+    const next = pendingProposalV2('proposal_after_orphan_slot');
+    const write = (record: ReturnType<typeof pendingProposalV2>) =>
+      writePendingRecordV2({
+        pendingDir: proposalPendingDir,
+        recordId: record.id,
+        record,
+        slotRecordKey: 'proposalId',
+        capacityMessage: 'full',
+        tooLargeMessage: 'too large',
+      });
+
+    await write(orphan);
+    for (const name of await readdir(proposalPendingDir)) await rm(path.join(proposalPendingDir, name));
+    await rm(path.join(proposalSlotsDir, '0.slot'));
+
+    await expect(write(next)).resolves.toEqual(next);
+    const slotEntries = await readdir(proposalSlotsDir);
+    expect(slotEntries.filter((name) => /^0\.slot(?:\.|$)/.test(name))).toHaveLength(3);
+    await expect(readFile(path.join(proposalSlotsDir, '0.slot'), 'utf8')).resolves.toContain(next.id);
+  });
+
+  it('never promotes a raw temporary without the durable ready phase', async () => {
+    const stranded = pendingProposalV2('proposal_raw_temp');
+    await writePendingRecordV2({
+      pendingDir: proposalPendingDir,
+      recordId: stranded.id,
+      record: stranded,
+      slotRecordKey: 'proposalId',
+      capacityMessage: 'full',
+      tooLargeMessage: 'too large',
+    });
+    const pendingEntries = await readdir(proposalPendingDir);
+    const rawTemporary = pendingEntries.find((name) => name.endsWith('.tmp'))!;
+    await Promise.all(
+      pendingEntries.filter((name) => name !== rawTemporary).map((name) => rm(path.join(proposalPendingDir, name)))
+    );
+    const beforeSlots = await readdir(proposalSlotsDir);
+
+    const next = pendingProposalV2('proposal_after_raw_temp');
+    await expect(
+      writePendingRecordV2({
+        pendingDir: proposalPendingDir,
+        recordId: next.id,
+        record: next,
+        slotRecordKey: 'proposalId',
+        capacityMessage: 'full',
+        tooLargeMessage: 'too large',
+      })
+    ).rejects.toMatchObject({ code: 'storage' });
+    await expect(readdir(proposalPendingDir)).resolves.toEqual([rawTemporary]);
+    await expect(readdir(proposalSlotsDir)).resolves.toEqual(beforeSlots);
+  });
+
   it('does not report success when the final inode is replaced during its parent-directory sync', async () => {
-    const canonicalPending = await nodeFs.realpath(pendingDir);
+    const canonicalPending = await nodeFs.realpath(proposalPendingDir);
     const finalFile = path.join(canonicalPending, 'proposal_replaced.json');
     const replacement = '{"schemaVersion":1,"replacement":true}';
     let replaced = false;
@@ -2765,7 +3053,7 @@ describe('Studio Director subprocess command writer', () => {
         if (file !== canonicalPending || flags !== 'r') return handle;
         return bindMethods(handle, {
           sync: async () => {
-            if (!replaced) {
+            if (!replaced && existsSync(finalFile)) {
               replaced = true;
               await rm(finalFile);
               await writeFile(finalFile, replacement);
@@ -2778,7 +3066,7 @@ describe('Studio Director subprocess command writer', () => {
 
     await expect(
       writePendingRecordV2({
-        pendingDir,
+        pendingDir: proposalPendingDir,
         recordId: 'proposal_replaced',
         record: { schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, id: 'proposal_replaced' },
         slotRecordKey: 'proposalId',
@@ -2789,23 +3077,32 @@ describe('Studio Director subprocess command writer', () => {
     ).rejects.toMatchObject({ code: 'storage' });
     expect(replaced).toBe(true);
     await expect(readFile(finalFile, 'utf8')).resolves.toBe(replacement);
-    await expect(readdir(slotsDir)).resolves.toEqual(['0.slot']);
+    const retainedSlotAuthority = await readdir(proposalSlotsDir);
+    expect(retainedSlotAuthority).toContain('0.slot');
+    expect(retainedSlotAuthority.filter((name) => /^0\.slot\.\d+_\d+\.tmp$/.test(name))).toHaveLength(1);
+    expect(retainedSlotAuthority.filter((name) => /^0\.slot\.\d+_\d+\.ready$/.test(name))).toHaveLength(1);
   });
 
-  it('rejects duplicate or unsafe minted schema-2 ids before touching the mailbox', async () => {
-    const writer = writerWithIdsV2(['command_v2_bad', 'command_v2_bad']);
+  it('rejects an unsafe caller-authored schema-2 entity id before minting command authority', async () => {
+    const createId = vi.fn(() => 'must_not_mint');
+    const writer = createStudioDirectorCommandWriterV2(
+      { projectId: PROJECT_ID, projectDir },
+      { createId, now: () => START_MS }
+    );
     await expect(
       writer.apply({
         expectedRevision: 7,
         operations: [
           {
             kind: 'add_beat',
+            beatId: '../unsafe',
             beat: { title: 'Opening', action: '', look: '', targetSeconds: null },
             beforeBeatId: null,
           },
         ],
       })
-    ).resolves.toEqual({ status: 'storage_error', commandId: 'command_v2_bad' });
+    ).resolves.toEqual({ status: 'storage_error', commandId: 'unavailable' });
+    expect(createId).not.toHaveBeenCalled();
     expect(await readdir(slotsDir)).toEqual([]);
     expect(await readdir(pendingDir)).toEqual([]);
   });

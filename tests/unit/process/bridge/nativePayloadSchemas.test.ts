@@ -1834,11 +1834,29 @@ describe('native bridge payload schemas', () => {
     expect(providerKeys).toEqual(NATIVE_BRIDGE_PROVIDER_KEYS);
   });
 
-  it('keeps Task 5 Beat/Shot authoring and paid gates off the native surface', () => {
+  it('keeps Task 6 Beat/Shot cutover, reference decisions, and paid gates off the native surface', () => {
     const forbiddenProviderKeys = [
       'creative-studio.apply-authoring-batch',
+      'creative-studio.undo-last',
+      'creative-studio.get-workspace-status',
+      'creative-studio.get-chain-status',
+      'creative-studio.retry-conditioning-frame',
+      'creative-studio.cancel-waiting-cascade',
+      'creative-studio.edit-project',
+      'creative-studio.set-rules',
+      'creative-studio.park-beat',
+      'creative-studio.restore-beat',
       'creative-studio.park-shot',
       'creative-studio.restore-shot',
+      'creative-studio.park-take',
+      'creative-studio.add-alternate-take',
+      'creative-studio.restore-take',
+      'creative-studio.select-take',
+      'creative-studio.reorder-bin',
+      'creative-studio.import-seed-still',
+      'creative-studio.decide-reference-request',
+      'creative-studio.list-reference-generation-handoffs',
+      'creative-studio.dismiss-reference-generation-handoff',
       'creative-studio.prepare-submission',
       'creative-studio.confirm-submission',
     ] as const;

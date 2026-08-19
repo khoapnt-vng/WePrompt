@@ -14,6 +14,7 @@ import {
   STUDIO_DIRECTOR_COMMAND_SLOT_LEASE_MS,
   STUDIO_DIRECTOR_COMMAND_SWEEP_INTERVAL_MS,
   STUDIO_DIRECTOR_COMMAND_WAIT_MS,
+  STUDIO_MAX_MUTATION_OPERATIONS,
   STUDIO_PROJECT_SCHEMA_VERSION,
   type StudioDirectorCommandReceiptV1,
   type StudioDirectorCommandReceiptV2,
@@ -23,13 +24,13 @@ import {
   type StudioDirectorCommandSlotLeaseV2,
   type StudioDirectorCommandSlotV1,
   type StudioDirectorCommandSlotV2,
-  type StudioEditableShot,
-  type StudioEditableBeat,
+  type StudioDirectorOperationV2,
   type StudioProjectV2,
   type StudioDirectorNewSceneV1,
   type StudioDirectorOperationV1,
 } from '@/common/types/project/creativeStudioTypes';
 import {
+  classifyStudioDirectorOperationV2,
   isSafeStudioDirectorId,
   parseStudioDirectorCommandReceipt,
   parseStudioDirectorCommandReceiptV2,
@@ -40,7 +41,10 @@ import {
   parseStudioDirectorPendingRecord,
   parseStudioDirectorPendingRecordV2,
 } from '@process/services/creative-studio/service/directorCommandContracts';
-import { validateStudioProjectV2 } from '@process/services/creative-studio/service/schema2';
+import {
+  validateStudioMutationOperationV2,
+  validateStudioProjectV2,
+} from '@process/services/creative-studio/service/schema2';
 import {
   RecordIoError,
   type RecordIoFileSystem,
@@ -65,19 +69,8 @@ export type StudioApplyEditsInput = {
   operations: StudioDirectorToolOperationV1[];
 };
 
-export type StudioDirectorToolOperationV2 =
-  | Exclude<StudioDirectorCommandRecordV2['operations'][number], { kind: 'add_beat' | 'add_shot' }>
-  | {
-      kind: 'add_beat';
-      beat: StudioEditableBeat;
-      beforeBeatId: string | null;
-    }
-  | {
-      kind: 'add_shot';
-      beatId: string;
-      shot: StudioEditableShot;
-      beforeShotId: string | null;
-    };
+/** Exact reducer variants; entity identities are Director-authored and survive publication unchanged. */
+export type StudioDirectorToolOperationV2 = StudioDirectorOperationV2;
 
 export type StudioApplyEditsInputV2 = {
   expectedRevision: number;
@@ -132,22 +125,25 @@ export type StudioDirectorCommandWriterV2 = {
 
 const MAX_SAFE_STUDIO_ID_PREVIEW = 'x'.repeat(256);
 
-/** Conservative pure preview used by the SDK schema and direct writer before any id is minted. */
+/** Conservative pure preview used by the direct writer before any command identity is minted. */
 export const studioDirectorToolInputFitsDurableRecordV2 = (
   toolInput: StudioApplyEditsInputV2,
   projectId = MAX_SAFE_STUDIO_ID_PREVIEW
 ): boolean => {
   try {
-    const operations = toolInput.operations.map((operation) => {
-      if (operation.kind === 'add_beat') {
-        return {
-          ...operation,
-          beatId: MAX_SAFE_STUDIO_ID_PREVIEW,
-        };
-      }
-      if (operation.kind === 'add_shot') return { ...operation, shotId: MAX_SAFE_STUDIO_ID_PREVIEW };
-      return operation;
-    });
+    if (
+      !Number.isSafeInteger(toolInput.expectedRevision) ||
+      toolInput.expectedRevision < 1 ||
+      !Array.isArray(toolInput.operations) ||
+      toolInput.operations.length < 1 ||
+      toolInput.operations.length > STUDIO_MAX_MUTATION_OPERATIONS ||
+      !toolInput.operations.every(
+        (operation) =>
+          validateStudioMutationOperationV2(operation) && classifyStudioDirectorOperationV2(operation.kind) === 'direct'
+      )
+    ) {
+      return false;
+    }
     const preview: StudioDirectorCommandRecordV2 = {
       schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
       commandId: MAX_SAFE_STUDIO_ID_PREVIEW,
@@ -156,7 +152,7 @@ export const studioDirectorToolInputFitsDurableRecordV2 = (
       createdAt: '9999-12-31T23:59:59.999Z',
       deadlineAt: '9999-12-31T23:59:59.999Z',
       policy: 'auto_apply',
-      operations: operations as StudioDirectorCommandRecordV2['operations'],
+      operations: toolInput.operations,
     };
     return Buffer.byteLength(JSON.stringify(preview), 'utf8') <= STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES;
   } catch {
@@ -246,20 +242,20 @@ const resolveCommandDirectories = async (
     const stats = await fs.lstat(configuredProjectDir);
     if (!stats.isDirectory() || stats.isSymbolicLink()) throw new RecordIoError('unsafe_path');
     const canonicalRoot = await fs.realpath(configuredProjectDir);
-    const directories = await resolveCompleteDirectorySet({
-      fs,
-      canonicalRoot,
-      parent: canonicalRoot,
-      rootName: 'commands',
-      childNames: ['pending', 'slots', 'receipts'] as const,
-      createIfWhollyAbsent: false,
-    });
-    if (directories === null) throw new RecordIoError('partial_directory_set');
+    const resolveNamedDirectory = async (...segments: string[]): Promise<string> => {
+      const candidate = path.join(canonicalRoot, ...segments);
+      const child = await fs.lstat(candidate);
+      if (child.isSymbolicLink() || !child.isDirectory() || (await fs.realpath(candidate)) !== candidate) {
+        throw new RecordIoError('unsafe_path');
+      }
+      return candidate;
+    };
+    await resolveNamedDirectory('commands');
     return {
       canonicalRoot,
-      pending: directories.pending,
-      slots: directories.slots,
-      receipts: directories.receipts,
+      pending: await resolveNamedDirectory('commands', 'pending'),
+      slots: await resolveNamedDirectory('commands', 'slots'),
+      receipts: await resolveNamedDirectory('commands', 'receipts'),
     };
   } catch (error) {
     throw error instanceof RecordIoError ? error : new RecordIoError('storage_error');
@@ -341,7 +337,7 @@ const projectAuthorityStatusV2 = async (
     }
     // Main owns CAS: a normal newer V2 commit remains eligible for a command carrying the older
     // expected revision, which main will reject deterministically instead of this writer guessing.
-    return current.authority.project.revision >= authority.project.revision ? 'valid' : 'invalid';
+    return current.authority.project.revision > authority.project.revision ? 'valid' : 'invalid';
   } catch {
     return 'invalid';
   }
@@ -695,27 +691,11 @@ const prepareCommandV2 = (input: {
   }
   const commandId = input.createId();
   const outcomeCommandId = safeOutcomeId(commandId);
-  const toolOperations = Array.isArray(input.toolInput.operations) ? input.toolInput.operations : [];
-  const createdIds: string[] = [];
-  const operations = toolOperations.map((operation) => {
-    if (typeof operation === 'object' && operation !== null && operation.kind === 'add_beat') {
-      const beatId = input.createId();
-      createdIds.push(beatId);
-      return { ...operation, beatId };
-    }
-    if (typeof operation === 'object' && operation !== null && operation.kind === 'add_shot') {
-      const shotId = input.createId();
-      createdIds.push(shotId);
-      return { ...operation, shotId };
-    }
-    return operation;
-  }) as StudioDirectorCommandRecordV2['operations'];
-  const durableIds = [commandId, ...createdIds];
-  if (!durableIds.every(isSafeStudioDirectorId) || new Set(durableIds).size !== durableIds.length) {
+  if (!isSafeStudioDirectorId(commandId)) {
     return { commandId: outcomeCommandId, prepared: null };
   }
   const leaseId = input.createId();
-  if (!isSafeStudioDirectorId(leaseId) || durableIds.includes(leaseId)) return { commandId, prepared: null };
+  if (!isSafeStudioDirectorId(leaseId) || leaseId === commandId) return { commandId, prepared: null };
   const createdAtMs = input.now();
   if (!Number.isFinite(createdAtMs)) return { commandId, prepared: null };
   const createdAt = new Date(createdAtMs).toISOString();
@@ -729,7 +709,7 @@ const prepareCommandV2 = (input: {
     createdAt,
     deadlineAt,
     policy: 'auto_apply',
-    operations,
+    operations: input.toolInput.operations,
   };
   const slot: StudioDirectorCommandSlotV2 = {
     schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
@@ -1161,6 +1141,75 @@ const assertCommandLeasePublicationAuthorityV2 = async (input: {
   }
 };
 
+const removeOwnedCommandPublicationNameV2 = async (input: {
+  fs: RecordIoFileSystem;
+  file: string;
+  identity: { dev: number; ino: number };
+}): Promise<void> => {
+  const current = await input.fs.lstat(input.file);
+  if (
+    current.isSymbolicLink() ||
+    !current.isFile() ||
+    current.dev !== input.identity.dev ||
+    current.ino !== input.identity.ino
+  ) {
+    throw new RecordIoError('unsafe_file');
+  }
+  await input.fs.rm(input.file);
+};
+
+const publicationOpenV2 = (
+  input: {
+    fs: RecordIoFileSystem;
+    finalFile: string;
+    identities: Map<string, { dev: number; ino: number }>;
+  },
+  file: Parameters<RecordIoFileSystem['open']>[0],
+  flags: Parameters<RecordIoFileSystem['open']>[1],
+  ...args: unknown[]
+): ReturnType<RecordIoFileSystem['open']> =>
+  Reflect.apply(input.fs.open, input.fs, [file, flags, ...args]).then(
+    async (handle: Awaited<ReturnType<RecordIoFileSystem['open']>>) => {
+      const name = String(file);
+      if (
+        name === `${input.finalFile}.unconfirmed` ||
+        (name.startsWith(`${input.finalFile}.`) && name.endsWith('.tmp'))
+      ) {
+        const stats = await handle.stat();
+        if (!stats.isFile()) {
+          await handle.close().catch((): undefined => undefined);
+          throw new RecordIoError('unsafe_file');
+        }
+        input.identities.set(name, { dev: stats.dev, ino: stats.ino });
+      }
+      return handle;
+    }
+  );
+
+const identifyCommandPublicationSourceV2 = async (input: {
+  fs: RecordIoFileSystem;
+  canonicalRoot: string;
+  finalFile: string;
+  sourceFile: string;
+  bytes: string;
+}): Promise<{ dev: number; ino: number }> => {
+  if (
+    path.dirname(input.sourceFile) !== path.dirname(input.finalFile) ||
+    !input.sourceFile.startsWith(`${input.finalFile}.`) ||
+    !input.sourceFile.endsWith('.tmp')
+  ) {
+    throw new RecordIoError('unsafe_path');
+  }
+  const source = await readBoundedRegularFileWithIdentity({
+    fs: input.fs,
+    canonicalRoot: input.canonicalRoot,
+    file: input.sourceFile,
+    maxBytes: Buffer.byteLength(input.bytes, 'utf8'),
+  });
+  if (source === null || source.bytes !== input.bytes) throw new RecordIoError('unsafe_file');
+  return source.identity;
+};
+
 const publishCommandLeaseRecordV2 = async (input: {
   fs: RecordIoFileSystem;
   directories: CommandDirectories;
@@ -1174,21 +1223,70 @@ const publishCommandLeaseRecordV2 = async (input: {
   let linkAttempted = false;
   let linked = false;
   let authorizationFailure: unknown;
+  const publicationIdentities = new Map<string, { dev: number; ino: number }>();
   const link: RecordIoFileSystem['link'] = async (existingPath, newPath) => {
     if (String(newPath) !== input.file) throw new RecordIoError('unsafe_path');
+    const sourceFile = String(existingPath);
+    const sourceIdentity = await identifyCommandPublicationSourceV2({
+      fs: input.fs,
+      canonicalRoot: input.directories.canonicalRoot,
+      finalFile: input.file,
+      sourceFile,
+      bytes: input.bytes,
+    });
+    const openedSourceIdentity = publicationIdentities.get(sourceFile);
+    if (
+      openedSourceIdentity === undefined ||
+      openedSourceIdentity.dev !== sourceIdentity.dev ||
+      openedSourceIdentity.ino !== sourceIdentity.ino
+    ) {
+      throw new RecordIoError('unsafe_file');
+    }
     try {
       await input.authorizeBeforeLink();
     } catch (error) {
       authorizationFailure = error;
       throw error;
     }
+    const authorizedSourceIdentity = await identifyCommandPublicationSourceV2({
+      fs: input.fs,
+      canonicalRoot: input.directories.canonicalRoot,
+      finalFile: input.file,
+      sourceFile,
+      bytes: input.bytes,
+    });
+    if (authorizedSourceIdentity.dev !== sourceIdentity.dev || authorizedSourceIdentity.ino !== sourceIdentity.ino) {
+      throw new RecordIoError('unsafe_file');
+    }
     linkAttempted = true;
-    await input.fs.link(existingPath, newPath);
+    await input.fs.link(sourceFile, newPath);
     linked = true;
+    publicationIdentities.set(input.file, sourceIdentity);
+  };
+  const rm: RecordIoFileSystem['rm'] = async (file) => {
+    const name = String(file);
+    const identity = publicationIdentities.get(name);
+    if (identity === undefined) throw new RecordIoError('unsafe_file');
+    await removeOwnedCommandPublicationNameV2({ fs: input.fs, file: name, identity });
+    publicationIdentities.delete(name);
   };
   const publishingFs = new Proxy(input.fs, {
     get(target, property, receiver) {
       if (property === 'link') return link;
+      if (property === 'open') {
+        return (
+          file: Parameters<RecordIoFileSystem['open']>[0],
+          flags: Parameters<RecordIoFileSystem['open']>[1],
+          ...args: unknown[]
+        ) =>
+          publicationOpenV2(
+            { fs: input.fs, finalFile: input.file, identities: publicationIdentities },
+            file,
+            flags,
+            ...args
+          );
+      }
+      if (property === 'rm') return rm;
       const value = Reflect.get(target, property, receiver) as unknown;
       return typeof value === 'function' ? value.bind(target) : value;
     },
@@ -1416,21 +1514,70 @@ const publishCommandImmutableRecordV2 = async (input: {
   let linkAttempted = false;
   let linked = false;
   let authorizationFailure: unknown;
+  const publicationIdentities = new Map<string, { dev: number; ino: number }>();
   const link: RecordIoFileSystem['link'] = async (existingPath, newPath) => {
     if (String(newPath) !== input.file) throw new RecordIoError('unsafe_path');
+    const sourceFile = String(existingPath);
+    const sourceIdentity = await identifyCommandPublicationSourceV2({
+      fs: input.fs,
+      canonicalRoot: input.directories.canonicalRoot,
+      finalFile: input.file,
+      sourceFile,
+      bytes: input.bytes,
+    });
+    const openedSourceIdentity = publicationIdentities.get(sourceFile);
+    if (
+      openedSourceIdentity === undefined ||
+      openedSourceIdentity.dev !== sourceIdentity.dev ||
+      openedSourceIdentity.ino !== sourceIdentity.ino
+    ) {
+      throw new RecordIoError('unsafe_file');
+    }
     try {
       await input.authorizeBeforeLink();
     } catch (error) {
       authorizationFailure = error;
       throw error;
     }
+    const authorizedSourceIdentity = await identifyCommandPublicationSourceV2({
+      fs: input.fs,
+      canonicalRoot: input.directories.canonicalRoot,
+      finalFile: input.file,
+      sourceFile,
+      bytes: input.bytes,
+    });
+    if (authorizedSourceIdentity.dev !== sourceIdentity.dev || authorizedSourceIdentity.ino !== sourceIdentity.ino) {
+      throw new RecordIoError('unsafe_file');
+    }
     linkAttempted = true;
-    await input.fs.link(existingPath, newPath);
+    await input.fs.link(sourceFile, newPath);
     linked = true;
+    publicationIdentities.set(input.file, sourceIdentity);
+  };
+  const rm: RecordIoFileSystem['rm'] = async (file) => {
+    const name = String(file);
+    const identity = publicationIdentities.get(name);
+    if (identity === undefined) throw new RecordIoError('unsafe_file');
+    await removeOwnedCommandPublicationNameV2({ fs: input.fs, file: name, identity });
+    publicationIdentities.delete(name);
   };
   const publishingFs = new Proxy(input.fs, {
     get(target, property, receiver) {
       if (property === 'link') return link;
+      if (property === 'open') {
+        return (
+          file: Parameters<RecordIoFileSystem['open']>[0],
+          flags: Parameters<RecordIoFileSystem['open']>[1],
+          ...args: unknown[]
+        ) =>
+          publicationOpenV2(
+            { fs: input.fs, finalFile: input.file, identities: publicationIdentities },
+            file,
+            flags,
+            ...args
+          );
+      }
+      if (property === 'rm') return rm;
       const value = Reflect.get(target, property, receiver) as unknown;
       return typeof value === 'function' ? value.bind(target) : value;
     },

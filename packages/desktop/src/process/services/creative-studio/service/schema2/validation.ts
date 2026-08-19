@@ -1707,6 +1707,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     idempotencyKeys: Map<number, string>;
   };
   const authorizationIds = new Set<string>();
+  const referenceHandoffOriginIds = new Set<string>();
   const itemLinks = new Map<string, ItemLink>();
   const globalIdempotencyKeys = new Set<string>();
   for (let authorizationIndex = 0; authorizationIndex < project.spendAuthorizations.length; authorizationIndex += 1) {
@@ -1718,6 +1719,10 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
       return false;
     }
     authorizationIds.add(authorization.id);
+    if (authorization.originReferenceHandoffId !== null) {
+      if (referenceHandoffOriginIds.has(authorization.originReferenceHandoffId)) return false;
+      referenceHandoffOriginIds.add(authorization.originReferenceHandoffId);
+    }
     const items = [...authorization.baseItems, ...authorization.cascadeItems];
     const itemPositions = new Map<string, number>();
     for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {

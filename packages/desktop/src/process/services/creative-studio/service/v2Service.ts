@@ -31,12 +31,17 @@ import {
   type StudioProjectLoadResultV2,
   type StudioProjectV2,
   type StudioPrepareSubmissionRequestV2,
+  type StudioProposalV2,
   type StudioProviderRef,
   type StudioQuotedGeneration,
+  type StudioReferenceGenerationHandoffReceiptV2,
+  type StudioReferenceRequestDecisionV2,
+  type StudioReferenceRequestV2,
   type StudioRendererChainStatusV2,
   type StudioRendererJobV2,
   type StudioRendererPreparedSubmissionOptionsV2,
   type StudioRendererProjectV2,
+  type StudioRendererReferenceGenerationHandoffV2,
   type StudioRendererWorkspaceStatusV2,
   type StudioRetryDownloadRequest,
   type StudioRetryJobRequest,
@@ -58,6 +63,7 @@ import {
   CreativeStudioStoreError,
   StudioProjectConfirmationError,
   type CreativeStudioStore,
+  type StudioDecideReferenceRequestInputV2,
   type StudioProjectStoreLoadResultV2,
 } from '../store';
 import {
@@ -162,6 +168,16 @@ export type CreativeStudioServiceV2 = {
   getGenerationReadiness(input: { projectId: string; beatIds: string[] }): Promise<StudioGenerationReadinessV2>;
   getWorkspaceStatus(input: { projectId: string }): Promise<StudioRendererWorkspaceStatusV2>;
   getChainStatus(input: { projectId: string }): Promise<StudioRendererChainStatusV2>;
+  listProposals(input: { projectId: string }): Promise<StudioProposalV2[]>;
+  acceptProposal(input: { projectId: string; proposalId: string }): Promise<{
+    proposal: StudioProposalV2;
+    project: StudioRendererProjectV2;
+    applied: boolean;
+  }>;
+  rejectProposal(input: { projectId: string; proposalId: string }): Promise<StudioProposalV2>;
+  listReferenceRequests(input: { projectId: string }): Promise<StudioReferenceRequestV2[]>;
+  decideReferenceRequest(input: StudioDecideReferenceRequestInputV2): Promise<StudioReferenceRequestDecisionV2>;
+  listReferenceGenerationHandoffs(input: { projectId: string }): Promise<StudioRendererReferenceGenerationHandoffV2[]>;
   prepareSubmission(input: StudioPrepareSubmissionRequestV2): Promise<StudioRendererPreparedSubmissionOptionsV2>;
   confirmSubmission(input: StudioConfirmSubmissionRequestV2): Promise<StudioConfirmSubmissionResultV2>;
   retryConditioningFrame(input: StudioCascadeBarrierActionRequestV2): Promise<StudioRendererWorkspaceStatusV2>;
@@ -499,6 +515,33 @@ const toRendererProject = (project: StudioProjectV2): StudioRendererProjectV2 =>
   return {
     ...safe,
     jobs: Object.fromEntries(Object.entries(project.jobs).map(([jobId, job]) => [jobId, toRendererJob(job)])),
+  };
+};
+
+/** Projects one validated generation-gate decision without its durable authorization correlation. */
+export const projectStudioReferenceGenerationHandoffV2 = (
+  decision: StudioReferenceRequestDecisionV2,
+  receipt: StudioReferenceGenerationHandoffReceiptV2 | null
+): StudioRendererReferenceGenerationHandoffV2 | null => {
+  if (decision.outcome.kind !== 'generation_gate') {
+    if (receipt !== null) {
+      throw new CreativeStudioStoreError('storage_error', 'Studio reference handoff receipt has no generation gate');
+    }
+    return null;
+  }
+  if (
+    receipt !== null &&
+    (receipt.handoffId !== decision.outcome.handoffId || receipt.requestId !== decision.requestId)
+  ) {
+    throw new CreativeStudioStoreError('storage_error', 'Studio reference handoff receipt authority mismatch');
+  }
+  return {
+    handoffId: decision.outcome.handoffId,
+    requestId: decision.requestId,
+    shotIds: [...decision.outcome.shotIds],
+    decidedAt: decision.decidedAt,
+    status: receipt === null ? 'open' : receipt.result.kind,
+    completedAt: receipt?.completedAt ?? null,
   };
 };
 
@@ -1130,6 +1173,105 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       if (!isRecord(input) || !hasExactKeys(input, ['projectId'])) throw invalid('Invalid Studio chain request');
       assertSafeId(input.projectId, 'project id');
       return projectStudioChainStatusV2(await loadSupported(input.projectId));
+    },
+
+    async listProposals(input): Promise<StudioProposalV2[]> {
+      if (!isRecord(input) || !hasExactKeys(input, ['projectId'])) throw invalid('Invalid Studio proposal request');
+      assertSafeId(input.projectId, 'project id');
+      return structuredClone(await deps.store.listProposalsV2(input.projectId));
+    },
+
+    async acceptProposal(input): Promise<{
+      proposal: StudioProposalV2;
+      project: StudioRendererProjectV2;
+      applied: boolean;
+    }> {
+      if (!isRecord(input) || !hasExactKeys(input, ['projectId', 'proposalId'])) {
+        throw invalid('Invalid Studio proposal request');
+      }
+      assertSafeId(input.projectId, 'project id');
+      assertSafeId(input.proposalId, 'proposal id');
+      const accepted = await deps.store.acceptProposalV2(input.projectId, input.proposalId);
+      if (accepted.applied) deps.onProjectUpdated(input.projectId);
+      return {
+        proposal: structuredClone(accepted.proposal),
+        project: toRendererProject(accepted.project),
+        applied: accepted.applied,
+      };
+    },
+
+    async rejectProposal(input): Promise<StudioProposalV2> {
+      if (!isRecord(input) || !hasExactKeys(input, ['projectId', 'proposalId'])) {
+        throw invalid('Invalid Studio proposal request');
+      }
+      assertSafeId(input.projectId, 'project id');
+      assertSafeId(input.proposalId, 'proposal id');
+      return structuredClone(await deps.store.rejectProposalV2(input.projectId, input.proposalId));
+    },
+
+    async listReferenceRequests(input): Promise<StudioReferenceRequestV2[]> {
+      if (!isRecord(input) || !hasExactKeys(input, ['projectId'])) {
+        throw invalid('Invalid Studio reference request');
+      }
+      assertSafeId(input.projectId, 'project id');
+      const entries = await deps.store.listReferenceRequestsV2(input.projectId);
+      return entries.filter((entry) => entry.decision === null).map((entry) => structuredClone(entry.request));
+    },
+
+    async decideReferenceRequest(input): Promise<StudioReferenceRequestDecisionV2> {
+      if (
+        !isRecord(input) ||
+        !hasExactKeys(input, ['projectId', 'requestId', 'expectedRevision', 'outcome']) ||
+        !isRecord(input.outcome)
+      ) {
+        throw invalid('Invalid Studio reference decision');
+      }
+      assertSafeId(input.projectId, 'project id');
+      assertSafeId(input.requestId, 'reference request id');
+      assertRevision(input.expectedRevision);
+      let outcome: StudioDecideReferenceRequestInputV2['outcome'];
+      if (input.outcome.kind === 'rejected' || input.outcome.kind === 'generation_gate') {
+        if (!hasExactKeys(input.outcome, ['kind'])) throw invalid('Invalid Studio reference decision');
+        outcome = { kind: input.outcome.kind };
+      } else if (
+        input.outcome.kind === 'imported_reference' &&
+        hasExactKeys(input.outcome, ['kind', 'assetId']) &&
+        isSafeId(input.outcome.assetId)
+      ) {
+        outcome = { kind: 'imported_reference', assetId: input.outcome.assetId };
+      } else {
+        throw invalid('Invalid Studio reference decision');
+      }
+      const entry = await deps.store.decideReferenceRequestV2({
+        projectId: input.projectId,
+        requestId: input.requestId,
+        expectedRevision: input.expectedRevision,
+        outcome,
+      });
+      if (entry.decision === null) {
+        throw new CreativeStudioStoreError('storage_error', 'Studio reference decision was not persisted');
+      }
+      return structuredClone(entry.decision);
+    },
+
+    async listReferenceGenerationHandoffs(input): Promise<StudioRendererReferenceGenerationHandoffV2[]> {
+      if (!isRecord(input) || !hasExactKeys(input, ['projectId'])) {
+        throw invalid('Invalid Studio reference handoff request');
+      }
+      assertSafeId(input.projectId, 'project id');
+      const entries = await deps.store.listReferenceRequestsV2(input.projectId);
+      return entries
+        .flatMap((entry) => {
+          if (entry.decision === null) return [];
+          const projected = projectStudioReferenceGenerationHandoffV2(entry.decision, entry.receipt);
+          return projected === null ? [] : [projected];
+        })
+        .toSorted(
+          (left, right) =>
+            left.decidedAt.localeCompare(right.decidedAt) ||
+            left.requestId.localeCompare(right.requestId) ||
+            left.handoffId.localeCompare(right.handoffId)
+        );
     },
 
     async prepareSubmission(input): Promise<StudioRendererPreparedSubmissionOptionsV2> {

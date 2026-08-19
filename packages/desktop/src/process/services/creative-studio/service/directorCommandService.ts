@@ -22,7 +22,12 @@ import {
   applyStudioSceneOrder,
   applyStudioTakeSelection,
 } from './projectMutations';
-import { applyStudioMutationBatchV2, StudioMutationErrorV2, type StudioMutationReasonV2 } from './schema2';
+import {
+  applyStudioMutationBatchV2,
+  deriveStudioDirtyShotsV2,
+  StudioMutationErrorV2,
+  type StudioMutationReasonV2,
+} from './schema2';
 
 export type StudioDirectorCommandApplyResult = {
   project: StudioProject;
@@ -71,7 +76,10 @@ export type StudioDirectorCommandApplyResultV2 = {
   createdShotIds: string[];
 };
 
-export type StudioDirectorCommandApplyErrorCodeV2 = 'deadline_elapsed' | StudioMutationReasonV2;
+export type StudioDirectorCommandApplyErrorCodeV2 =
+  | 'deadline_elapsed'
+  | 'operation_not_permitted'
+  | StudioMutationReasonV2;
 
 /** Bounded schema-2 precommit outcome consumed by the staged main-process command processor. */
 export class StudioDirectorCommandApplyErrorV2 extends Error {
@@ -95,6 +103,7 @@ export type StudioDirectorCommandServiceV2 = {
 export type StudioDirectorCommandServiceDepsV2 = {
   store: Pick<CreativeStudioStore, 'updateProjectV2'>;
   now?: () => number;
+  deriveDirtyShots?: typeof deriveStudioDirtyShotsV2;
 };
 
 const applyError = (reasonCode: StudioDirectorCommandApplyErrorCode): StudioDirectorCommandApplyError =>
@@ -238,6 +247,18 @@ export const createStudioDirectorCommandService = (
 const applyErrorV2 = (reasonCode: StudioDirectorCommandApplyErrorCodeV2): StudioDirectorCommandApplyErrorV2 =>
   new StudioDirectorCommandApplyErrorV2(reasonCode);
 
+const introducesStudioGenerationStalenessV2 = (
+  before: StudioProjectV2,
+  after: StudioProjectV2,
+  deriveDirtyShots: typeof deriveStudioDirtyShotsV2
+): boolean => {
+  const beforeCauses = new Map(deriveDirtyShots(before).map((row) => [row.shotId, new Set(row.causes)] as const));
+  return deriveDirtyShots(after).some((row) => {
+    const prior = beforeCauses.get(row.shotId);
+    return row.causes.some((cause) => prior?.has(cause) !== true);
+  });
+};
+
 const isProjectStoreErrorV2 = (error: unknown): error is CreativeStudioStoreError =>
   error instanceof CreativeStudioStoreError &&
   (error.code === 'stale_project' ||
@@ -251,6 +272,7 @@ export const createStudioDirectorCommandServiceV2 = (
   deps: StudioDirectorCommandServiceDepsV2
 ): StudioDirectorCommandServiceV2 => {
   const now = deps.now ?? Date.now;
+  const deriveDirtyShots = deps.deriveDirtyShots ?? deriveStudioDirtyShotsV2;
   return {
     async apply(command, latestApplyStartMs, attribution) {
       let createdBeatIds: string[] = [];
@@ -274,6 +296,9 @@ export const createStudioDirectorCommandServiceV2 = (
                   capturedAt: command.createdAt,
                 }
               );
+              if (introducesStudioGenerationStalenessV2(openingProject, applied.project, deriveDirtyShots)) {
+                throw applyErrorV2('operation_not_permitted');
+              }
               createdBeatIds = [...applied.createdBeatIds];
               createdShotIds = [...applied.createdShotIds];
               return applied.project;

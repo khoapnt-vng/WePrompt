@@ -35,12 +35,14 @@ import {
   STUDIO_MAX_BIN_SHOT_ITEMS,
   STUDIO_MAX_BIN_TAKE_ITEMS,
   STUDIO_MAX_SHOT_SECONDS,
+  STUDIO_MAX_SHOTS_PER_PROJECT,
   STUDIO_MIN_SHOT_SECONDS,
   STUDIO_DIRECTOR_COMMAND_MAX_OPERATIONS,
   STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
   STUDIO_PROJECT_SCHEMA_VERSION,
   type StudioAsset,
   type StudioAssetV2,
+  type StudioDirectorOperationV2,
   type StudioShot,
   type StudioEditableScene,
   type StudioMutationOperationV2,
@@ -80,6 +82,10 @@ import {
   type StudioGetCommandStatusInput,
 } from '@process/resources/builtinMcp/studioDirectorCommandWriter';
 import { validateStudioProjectV2 } from '@process/services/creative-studio/service/schema2';
+import {
+  classifyStudioDirectorOperationV2,
+  type StudioDirectorOperationDispositionV2,
+} from '@process/services/creative-studio/service/directorCommandContracts';
 import {
   type RecordIoFileSystem,
   readBoundedRegularFileWithIdentity,
@@ -299,6 +305,22 @@ export const studioGetCommandStatusInputSchema = z
   .strict();
 
 const studioDirectorIdSchemaV2 = z4.string().min(1).max(256).regex(SAFE_ID);
+const studioProjectNameSchemaV2 = z4
+  .string()
+  .max(256)
+  .refine((name) => name.trim().length > 0, { message: 'Project name must not be blank.' });
+const studioEditableProjectChangesFieldsV2 = {
+  name: studioProjectNameSchemaV2,
+  aspectRatio: z4.enum(['16:9', '9:16', '1:1', '4:3', '3:4']),
+  resolution: z4.enum(['720p', '1080p']),
+  targetDurationSeconds: z4.number().int().min(5).max(1440),
+};
+const studioEditableProjectChangesSchemaV2 = z4.union([
+  z4.object(studioEditableProjectChangesFieldsV2).partial().required({ name: true }).strict(),
+  z4.object(studioEditableProjectChangesFieldsV2).partial().required({ aspectRatio: true }).strict(),
+  z4.object(studioEditableProjectChangesFieldsV2).partial().required({ resolution: true }).strict(),
+  z4.object(studioEditableProjectChangesFieldsV2).partial().required({ targetDurationSeconds: true }).strict(),
+]);
 const studioBeatInputSchemaV2 = z4
   .object({
     title: z4.string().max(256),
@@ -327,6 +349,7 @@ const studioBeatChangesSchemaV2 = z4.union([
   z4.object(studioBeatChangesFieldsV2).partial().required({ title: true }).strict(),
   z4.object(studioBeatChangesFieldsV2).partial().required({ action: true }).strict(),
   z4.object(studioBeatChangesFieldsV2).partial().required({ look: true }).strict(),
+  z4.object(studioBeatChangesFieldsV2).partial().required({ targetSeconds: true }).strict(),
 ]);
 
 const studioShotChangesFieldsV2 = {
@@ -367,6 +390,100 @@ const studioBinItemSchemaV2 = z4.discriminatedUnion('kind', [
     .strict(),
 ]);
 
+const studioRuleTermSchemaV2 = z4
+  .string()
+  .max(STUDIO_RULE_LIMITS.term)
+  .refine((term) => term.trim().length > 0 && hasRuleToken(term), {
+    message: 'Rule terms must contain an enforceable token.',
+  });
+const studioRulePredicateSchemaV2 = z4
+  .object({
+    kind: z4.literal('forbidden_terms'),
+    terms: z4
+      .array(studioRuleTermSchemaV2)
+      .min(1)
+      .max(STUDIO_RULE_LIMITS.maxTerms)
+      .refine((terms) => new Set(terms).size === terms.length, { message: 'Rule terms must not repeat.' })
+      .meta({ uniqueItems: true }),
+  })
+  .strict();
+const studioRuleDraftSchemaV2 = z4
+  .object({
+    id: studioDirectorIdSchemaV2,
+    text: z4
+      .string()
+      .max(STUDIO_RULE_LIMITS.text)
+      .refine((text) => text.trim().length > 0, { message: 'Rule text must not be blank.' }),
+    predicate: studioRulePredicateSchemaV2.nullable(),
+  })
+  .strict();
+const studioRuleDraftsSchemaV2 = z4
+  .array(studioRuleDraftSchemaV2)
+  .max(STUDIO_RULE_LIMITS.maxRules)
+  .refine((rules) => new Set(rules.map((rule) => rule.id)).size === rules.length, {
+    message: 'Rule ids must not repeat.',
+  })
+  .meta({ uniqueItems: true });
+
+const STUDIO_FIXED_SHOT_REASONS_V2 = [
+  'owned_asset',
+  'owned_job',
+  'selected_take',
+  'seed_still',
+  'conditioning_frame',
+  'conditioning_input',
+  'match_to',
+  'narration',
+  'on_screen_text',
+] as const;
+const studioProposedShotSchemaV2 = z4
+  .object({
+    shotId: studioDirectorIdSchemaV2,
+    line: z4.string().max(8 * 1024),
+    narration: z4.string().max(4 * 1024),
+    onScreenText: z4.string().max(1024),
+    durationSeconds: z4.number().int().min(STUDIO_MIN_SHOT_SECONDS).max(STUDIO_MAX_SHOT_SECONDS),
+    chainBreak: z4.enum(['none', 'hard_cut']),
+  })
+  .strict();
+const studioFixedShotReviewSchemaV2 = z4
+  .object({
+    shotId: studioDirectorIdSchemaV2,
+    reasons: z4
+      .array(z4.enum(STUDIO_FIXED_SHOT_REASONS_V2))
+      .min(1)
+      .max(STUDIO_FIXED_SHOT_REASONS_V2.length)
+      .refine(
+        (reasons) =>
+          reasons.every(
+            (reason, index) =>
+              index === 0 ||
+              STUDIO_FIXED_SHOT_REASONS_V2.indexOf(reasons[index - 1]!) < STUDIO_FIXED_SHOT_REASONS_V2.indexOf(reason)
+          ),
+        { message: 'Fixed-shot reasons must be unique and canonically ordered.' }
+      ),
+  })
+  .strict();
+const studioFixedShotReviewsSchemaV2 = z4
+  .array(studioFixedShotReviewSchemaV2)
+  .max(STUDIO_MAX_SHOTS_PER_PROJECT)
+  .refine((rows) => new Set(rows.map((row) => row.shotId)).size === rows.length, {
+    message: 'Fixed-shot rows must not repeat a shot id.',
+  })
+  .meta({ uniqueItems: true });
+
+const studioTrimBoundarySchemaV2 = z4
+  .number()
+  .finite()
+  .nonnegative()
+  .refine((value) => !Object.is(value, -0), { message: 'Trim boundaries must not be negative zero.' });
+const studioSpendPolicySchemaV2 = z4
+  .object({
+    currency: z4.string().regex(/^[A-Z]{3}$/),
+    maxPerBatchMinorUnits: z4.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  })
+  .strict();
+
 const uniqueStudioIdsSchema = (maximum: number) =>
   z4
     .array(studioDirectorIdSchemaV2)
@@ -375,7 +492,9 @@ const uniqueStudioIdsSchema = (maximum: number) =>
     .meta({ uniqueItems: true });
 
 const studioMutationOperationSchemasV2 = {
+  editProject: z4.object({ kind: z4.literal('edit_project'), changes: studioEditableProjectChangesSchemaV2 }).strict(),
   setBrief: z4.object({ kind: z4.literal('set_brief'), brief: z4.string().max(16 * 1024) }).strict(),
+  setRules: z4.object({ kind: z4.literal('set_rules'), rules: studioRuleDraftsSchemaV2 }).strict(),
   addBeat: z4
     .object({
       kind: z4.literal('add_beat'),
@@ -402,6 +521,9 @@ const studioMutationOperationSchemasV2 = {
       beforeBeatId: studioDirectorIdSchemaV2.nullable(),
     })
     .strict(),
+  addBinnedBeat: z4
+    .object({ kind: z4.literal('add_binned_beat'), beatId: studioDirectorIdSchemaV2, beat: studioBeatInputSchemaV2 })
+    .strict(),
   addShot: z4
     .object({
       kind: z4.literal('add_shot'),
@@ -415,11 +537,65 @@ const studioMutationOperationSchemasV2 = {
     .object({ kind: z4.literal('edit_shot'), shotId: studioDirectorIdSchemaV2, changes: studioShotChangesSchemaV2 })
     .strict(),
   deleteShot: z4.object({ kind: z4.literal('delete_shot'), shotId: studioDirectorIdSchemaV2 }).strict(),
+  parkShot: z4.object({ kind: z4.literal('park_shot'), shotId: studioDirectorIdSchemaV2 }).strict(),
+  restoreShot: z4
+    .object({
+      kind: z4.literal('restore_shot'),
+      shotId: studioDirectorIdSchemaV2,
+      beforeShotId: studioDirectorIdSchemaV2.nullable(),
+    })
+    .strict(),
   reorderShots: z4
     .object({
       kind: z4.literal('reorder_shots'),
       beatId: studioDirectorIdSchemaV2,
       shotOrder: uniqueStudioIdsSchema(STUDIO_MAX_SHOTS_PER_BEAT),
+    })
+    .strict(),
+  applyCoverage: z4
+    .object({
+      kind: z4.literal('apply_coverage'),
+      beatId: studioDirectorIdSchemaV2,
+      shots: z4.array(studioProposedShotSchemaV2).max(STUDIO_MAX_SHOTS_PER_BEAT),
+      fixedShots: studioFixedShotReviewsSchemaV2,
+    })
+    .strict(),
+  setHardCut: z4
+    .object({ kind: z4.literal('set_hard_cut'), shotId: studioDirectorIdSchemaV2, hardCut: z4.boolean() })
+    .strict(),
+  setSeedStill: z4
+    .object({
+      kind: z4.literal('set_seed_still'),
+      shotId: studioDirectorIdSchemaV2,
+      assetId: studioDirectorIdSchemaV2.nullable(),
+    })
+    .strict(),
+  trimShot: z4
+    .object({
+      kind: z4.literal('trim_shot'),
+      shotId: studioDirectorIdSchemaV2,
+      trimInSeconds: studioTrimBoundarySchemaV2.nullable(),
+      trimOutSeconds: studioTrimBoundarySchemaV2.nullable(),
+    })
+    .strict(),
+  redetachLine: z4
+    .object({ kind: z4.literal('redetach_line'), shotId: studioDirectorIdSchemaV2, line: z4.string().max(8 * 1024) })
+    .strict(),
+  rederiveLine: z4
+    .object({
+      kind: z4.literal('rederive_line'),
+      shotId: studioDirectorIdSchemaV2,
+      line: z4
+        .string()
+        .min(1)
+        .max(8 * 1024),
+    })
+    .strict(),
+  restoreLine: z4
+    .object({
+      kind: z4.literal('restore_line'),
+      shotId: studioDirectorIdSchemaV2,
+      historyEntryId: studioDirectorIdSchemaV2,
     })
     .strict(),
   parkTake: z4
@@ -428,6 +604,13 @@ const studioMutationOperationSchemasV2 = {
   restoreTake: z4
     .object({
       kind: z4.literal('restore_take'),
+      shotId: studioDirectorIdSchemaV2,
+      assetId: studioDirectorIdSchemaV2,
+    })
+    .strict(),
+  addAlternateTake: z4
+    .object({
+      kind: z4.literal('add_alternate_take'),
       shotId: studioDirectorIdSchemaV2,
       assetId: studioDirectorIdSchemaV2,
     })
@@ -451,139 +634,78 @@ const studioMutationOperationSchemasV2 = {
             ).size === items.length,
           { message: 'Bin identities must not repeat.' }
         )
+        .refine((items) => items.filter((item) => item.kind === 'beat').length <= STUDIO_MAX_BIN_BEAT_ITEMS, {
+          message: 'Beat bin capacity exceeded.',
+        })
+        .refine((items) => items.filter((item) => item.kind === 'shot').length <= STUDIO_MAX_BIN_SHOT_ITEMS, {
+          message: 'Shot bin capacity exceeded.',
+        })
+        .refine((items) => items.filter((item) => item.kind === 'take').length <= STUDIO_MAX_BIN_TAKE_ITEMS, {
+          message: 'Take bin capacity exceeded.',
+        })
         .meta({ uniqueItems: true }),
     })
     .strict(),
   selectTake: z4
     .object({ kind: z4.literal('select_take'), shotId: studioDirectorIdSchemaV2, assetId: studioDirectorIdSchemaV2 })
     .strict(),
+  setRoutes: z4
+    .object({
+      kind: z4.literal('set_routes'),
+      imageRouteId: studioDirectorIdSchemaV2.nullable(),
+      videoRouteId: studioDirectorIdSchemaV2.nullable(),
+    })
+    .strict(),
+  setSpendPolicy: z4
+    .object({ kind: z4.literal('set_spend_policy'), policy: studioSpendPolicySchemaV2.nullable() })
+    .strict(),
+  setMatchTo: z4.object({ kind: z4.literal('set_match_to'), shotId: studioDirectorIdSchemaV2.nullable() }).strict(),
+  setBed: z4.object({ kind: z4.literal('set_bed'), assetId: studioDirectorIdSchemaV2.nullable() }).strict(),
+  undoLast: z4.object({ kind: z4.literal('undo_last'), entryId: studioDirectorIdSchemaV2 }).strict(),
 };
 
 export const studioMutationOperationSchemaV2 = z4.discriminatedUnion('kind', [
+  studioMutationOperationSchemasV2.editProject,
   studioMutationOperationSchemasV2.setBrief,
+  studioMutationOperationSchemasV2.setRules,
   studioMutationOperationSchemasV2.addBeat,
   studioMutationOperationSchemasV2.editBeat,
   studioMutationOperationSchemasV2.reorderBeats,
   studioMutationOperationSchemasV2.parkBeat,
   studioMutationOperationSchemasV2.restoreBeat,
+  studioMutationOperationSchemasV2.addBinnedBeat,
   studioMutationOperationSchemasV2.addShot,
   studioMutationOperationSchemasV2.editShot,
   studioMutationOperationSchemasV2.deleteShot,
+  studioMutationOperationSchemasV2.parkShot,
+  studioMutationOperationSchemasV2.restoreShot,
   studioMutationOperationSchemasV2.reorderShots,
+  studioMutationOperationSchemasV2.applyCoverage,
+  studioMutationOperationSchemasV2.setHardCut,
+  studioMutationOperationSchemasV2.setSeedStill,
+  studioMutationOperationSchemasV2.trimShot,
+  studioMutationOperationSchemasV2.redetachLine,
+  studioMutationOperationSchemasV2.rederiveLine,
+  studioMutationOperationSchemasV2.restoreLine,
   studioMutationOperationSchemasV2.parkTake,
+  studioMutationOperationSchemasV2.addAlternateTake,
   studioMutationOperationSchemasV2.restoreTake,
   studioMutationOperationSchemasV2.reorderBin,
   studioMutationOperationSchemasV2.selectTake,
+  studioMutationOperationSchemasV2.setRoutes,
+  studioMutationOperationSchemasV2.setSpendPolicy,
+  studioMutationOperationSchemasV2.setMatchTo,
+  studioMutationOperationSchemasV2.setBed,
+  studioMutationOperationSchemasV2.undoLast,
 ]);
 
-export const studioDirectorOperationSchemaV2 = z4.discriminatedUnion('kind', [
-  studioMutationOperationSchemasV2.setBrief,
-  z4
-    .object({
-      kind: z4.literal('add_beat'),
-      beat: studioBeatInputSchemaV2,
-      beforeBeatId: studioDirectorIdSchemaV2.nullable(),
-    })
-    .strict(),
-  studioMutationOperationSchemasV2.editBeat,
-  studioMutationOperationSchemasV2.reorderBeats,
-  z4
-    .object({
-      kind: z4.literal('add_shot'),
-      beatId: studioDirectorIdSchemaV2,
-      shot: studioShotInputSchemaV2,
-      beforeShotId: studioDirectorIdSchemaV2.nullable(),
-    })
-    .strict(),
-  studioMutationOperationSchemasV2.editShot,
-  studioMutationOperationSchemasV2.deleteShot,
-  studioMutationOperationSchemasV2.reorderShots,
-  studioMutationOperationSchemasV2.reorderBin,
-]);
-
-const studioDirectorOperationsSchemaV2 = z4
-  .array(studioDirectorOperationSchemaV2)
-  .min(1)
-  .max(STUDIO_MAX_MUTATION_OPERATIONS)
-  .refine(
-    (operations) =>
-      !(
-        operations.some((operation) => operation.kind === 'add_beat') &&
-        operations.some((operation) => operation.kind === 'reorder_beats')
-      ),
-    { message: 'add_beat and reorder_beats cannot be combined in one command.' }
-  )
-  .refine(
-    (operations) =>
-      !operations.some(
-        (operation) =>
-          operation.kind === 'add_shot' &&
-          operations.some((candidate) => candidate.kind === 'reorder_shots' && candidate.beatId === operation.beatId)
-      ),
-    { message: 'add_shot and reorder_shots cannot target the same beat in one command.' }
-  )
-  .meta({
-    not: {
-      allOf: [
-        {
-          contains: {
-            type: 'object',
-            properties: { kind: { const: 'add_beat' } },
-            required: ['kind'],
-          },
-        },
-        {
-          contains: {
-            type: 'object',
-            properties: { kind: { const: 'reorder_beats' } },
-            required: ['kind'],
-          },
-        },
-      ],
-    },
-  });
+/** Kept as an export for callers that named the old staged schema; capability is a handler policy. */
+export const studioDirectorOperationSchemaV2 = studioMutationOperationSchemaV2;
 
 const studioMutationOperationsSchemaV2 = z4
   .array(studioMutationOperationSchemaV2)
   .min(1)
-  .max(STUDIO_MAX_MUTATION_OPERATIONS)
-  .refine(
-    (operations) =>
-      !(
-        operations.some((operation) => operation.kind === 'add_beat') &&
-        operations.some((operation) => operation.kind === 'reorder_beats')
-      ),
-    { message: 'add_beat and reorder_beats cannot be combined in one proposal.' }
-  )
-  .refine(
-    (operations) =>
-      !operations.some(
-        (operation) =>
-          operation.kind === 'add_shot' &&
-          operations.some((candidate) => candidate.kind === 'reorder_shots' && candidate.beatId === operation.beatId)
-      ),
-    { message: 'add_shot and reorder_shots cannot target the same beat in one proposal.' }
-  )
-  .meta({
-    not: {
-      allOf: [
-        {
-          contains: {
-            type: 'object',
-            properties: { kind: { const: 'add_beat' } },
-            required: ['kind'],
-          },
-        },
-        {
-          contains: {
-            type: 'object',
-            properties: { kind: { const: 'reorder_beats' } },
-            required: ['kind'],
-          },
-        },
-      ],
-    },
-  });
+  .max(STUDIO_MAX_MUTATION_OPERATIONS);
 
 const proposalInputFitsDurableRecordV2 = (value: unknown): boolean => {
   try {
@@ -605,15 +727,17 @@ const proposalInputFitsDurableRecordV2 = (value: unknown): boolean => {
   }
 };
 
+export type StudioApplyEditsToolInputV2 = {
+  expectedRevision: number;
+  operations: StudioMutationOperationV2[];
+};
+
 export const studioApplyEditsInputSchemaV2 = z4
   .object({
     expectedRevision: z4.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
-    operations: studioDirectorOperationsSchemaV2,
+    operations: studioMutationOperationsSchemaV2,
   })
-  .strict()
-  .refine((input) => studioDirectorToolInputFitsDurableRecordV2(input as StudioApplyEditsInputV2), {
-    message: 'Command input exceeds the durable record size cap.',
-  });
+  .strict();
 
 export const studioGetCommandStatusInputSchemaV2 = z4.object({ commandId: studioDirectorIdSchemaV2 }).strict();
 
@@ -622,8 +746,7 @@ export const studioProposeStoryboardInputSchemaV2 = z4
     base_revision: z4.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
     operations: studioMutationOperationsSchemaV2,
   })
-  .strict()
-  .refine(proposalInputFitsDurableRecordV2, { message: 'Proposal input exceeds the durable record size cap.' });
+  .strict();
 
 export const studioRequestReferenceImagesInputSchemaV2 = z4
   .object({
@@ -662,6 +785,20 @@ const errorResult = (message: string): StudioToolResult => ({
 });
 
 const describeError = (error: unknown): string => String(error).replace(/^Error:\s*/, '');
+
+const operationBatchHasDispositionV2 = (
+  operations: readonly StudioMutationOperationV2[],
+  disposition: StudioDirectorOperationDispositionV2
+): boolean =>
+  Array.isArray(operations) &&
+  operations.every((operation) => classifyStudioDirectorOperationV2(operation?.kind) === disposition);
+
+const operationBatchIsProposalCapableV2 = (operations: readonly StudioMutationOperationV2[]): boolean =>
+  Array.isArray(operations) &&
+  operations.every((operation) => {
+    const disposition = classifyStudioDirectorOperationV2(operation?.kind);
+    return disposition === 'direct' || disposition === 'proposal';
+  });
 
 /**
  * The subprocess reads project.json raw: no migrateSchemaV1Project, no validateProject. Main's
@@ -821,7 +958,7 @@ const projectSnapshotStatusV2 = async (
       }
       // A normal atomic V2 commit replaces project.json's inode. The queued record retains the
       // original base revision, so main's CAS remains the authority that rejects stale work.
-      return current.project.revision >= snapshot.project.revision ? 'valid' : 'invalid';
+      return current.project.revision > snapshot.project.revision ? 'valid' : 'invalid';
     } catch (error) {
       return error instanceof StudioProjectReadErrorV2 && error.code === 'unsupported_prototype_schema'
         ? 'unsupported_prototype_schema'
@@ -1068,6 +1205,10 @@ export function createProposeStoryboardHandlerV2(
   config: StudioServerEnv | null
 ): (input: ProposeStoryboardInputV2) => Promise<StudioToolResult> {
   return async ({ base_revision, operations }) => {
+    if (!operationBatchIsProposalCapableV2(operations)) return errorResult('operation_not_permitted');
+    if (!proposalInputFitsDurableRecordV2({ base_revision, operations })) {
+      return errorResult('Proposal input exceeds the durable record size cap.');
+    }
     if (!config) return errorResult('Creative Studio project is unavailable.');
     try {
       const snapshot = await readProjectSnapshotV2(config);
@@ -1301,9 +1442,18 @@ export function createRequestReferenceImagesHandlerV2(
     try {
       const snapshot = await readProjectSnapshotV2(config);
       const project = snapshot.project;
-      const activeShotIds = new Set(project.beatOrder.flatMap((beatId) => project.beats[beatId]!.shotOrder));
+      const activeShotOrder = project.beatOrder.flatMap((beatId) => project.beats[beatId]!.shotOrder);
+      const activeShotIds = new Set(activeShotOrder);
       const unknownShotIds = shotIds.filter((shotId) => !activeShotIds.has(shotId));
       if (unknownShotIds.length > 0) return errorResult(`Unknown or inactive shots: ${unknownShotIds.join(', ')}`);
+      const activePositions = new Map(activeShotOrder.map((shotId, index) => [shotId, index] as const));
+      if (
+        shotIds.some(
+          (shotId, index) => index > 0 && activePositions.get(shotId)! <= activePositions.get(shotIds[index - 1]!)!
+        )
+      ) {
+        return errorResult('Shot ids must follow active film order.');
+      }
       const projectAuthority = pendingProjectAuthorityV2(snapshot);
       await assertPendingRecordProjectAuthorityV2({
         pendingDir: config.referencePendingDir,
@@ -1371,12 +1521,22 @@ export function createStudioGetCommandStatusHandler(
 export function createStudioApplyEditsHandlerV2(
   config: StudioServerEnv | null,
   deps: StudioDirectorCommandWriterDeps = {}
-): (input: StudioApplyEditsInputV2) => Promise<StudioToolResult> {
+): (input: StudioApplyEditsToolInputV2) => Promise<StudioToolResult> {
   const writer = createStudioDirectorCommandWriterV2(
     config === null ? null : { projectId: config.projectId, projectDir: config.projectDir },
     deps
   );
-  return async (input) => commandToolResult(await writer.apply(input));
+  return async (input) => {
+    if (!operationBatchHasDispositionV2(input.operations, 'direct')) return errorResult('operation_not_permitted');
+    const directInput: StudioApplyEditsInputV2 = {
+      expectedRevision: input.expectedRevision,
+      operations: input.operations as StudioDirectorOperationV2[],
+    };
+    if (!studioDirectorToolInputFitsDurableRecordV2(directInput)) {
+      return errorResult('Command input exceeds the durable record size cap.');
+    }
+    return commandToolResult(await writer.apply(directInput));
+  };
 }
 
 export function createStudioGetCommandStatusHandlerV2(
@@ -1470,7 +1630,7 @@ export function registerStudioTools(
 
 /**
  * Staged schema-2 tool set for direct contract tests. Gate 1 deliberately leaves `main()` registered
- * with `registerStudioTools`; Task 6 performs the atomic runtime cutover.
+ * with `registerStudioTools`; Task 7 performs the atomic runtime cutover.
  */
 export function registerStudioToolsV2(
   server: Pick<McpServer, 'registerTool'>,
@@ -1508,7 +1668,7 @@ export function registerStudioToolsV2(
     'propose_storyboard',
     {
       description:
-        'Record one ordered schema-2 mutation batch for user review. Requires base_revision from read_storyboard and never applies or generates anything directly. Do not combine add_shot with reorder_shots for the same beat (different-beat pairs are valid), and keep the final serialized proposal record within 256 KiB; these two aggregate checks are enforced by the server before any ID or I/O because portable tools/list JSON Schema cannot encode them.',
+        'Record one ordered schema-2 direct- or proposal-capable mutation batch for user review. Requires base_revision from read_storyboard and never applies or generates anything directly. Unavailable operations return operation_not_permitted before any ID or I/O; the final serialized proposal record must fit within 256 KiB.',
       inputSchema: studioProposeStoryboardInputSchemaV2,
     },
     async (input) =>
@@ -1536,7 +1696,7 @@ export function registerStudioToolsV2(
     'studio_apply_edits',
     {
       description:
-        'Read the current revision first, then apply one bounded ordered batch of free Beat/Shot edits to that exact revision. Canonical schema-2 batch: {"expectedRevision":8,"operations":[{"kind":"set_brief","brief":"..."},{"kind":"edit_beat","beatId":"beat_1","changes":{"title":"..."}},{"kind":"edit_shot","shotId":"shot_1","changes":{"line":"..."}},{"kind":"reorder_beats","beatOrder":["beat_2","beat_1"]}]}. This never starts paid generation. Do not combine add_shot with reorder_shots for the same beat (different-beat pairs are valid), and keep the final serialized command record within 256 KiB; these two aggregate checks are enforced by the server before any ID or I/O because portable tools/list JSON Schema cannot encode them. Validation errors and unconfirmed results must not be retried; call studio_get_command_status for an unconfirmed commandId.',
+        'Read the current revision first, then apply one bounded ordered batch of direct-capable Beat/Shot edits to that exact revision. Canonical schema-2 batch: {"expectedRevision":8,"operations":[{"kind":"set_brief","brief":"..."},{"kind":"edit_beat","beatId":"beat_1","changes":{"title":"..."}},{"kind":"edit_shot","shotId":"shot_1","changes":{"line":"..."}},{"kind":"reorder_beats","beatOrder":["beat_2","beat_1"]}]}. Exact add_beat and add_shot variants require caller-provided beatId and shotId and never accept legacy firstShot fields. This never starts paid generation. Known proposal-only and unavailable operations return operation_not_permitted before any ID or I/O; the final serialized command record must fit within 256 KiB. Validation errors and unconfirmed results must not be retried; call studio_get_command_status for an unconfirmed commandId.',
       inputSchema: studioApplyEditsInputSchemaV2,
     },
     createStudioApplyEditsHandlerV2(config, writerDeps)

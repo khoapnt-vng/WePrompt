@@ -118,9 +118,11 @@ import {
 } from './projectMutations';
 
 export { CreativeStudioServiceError } from './projectMutations';
+export type { StudioDecideReferenceRequestInputV2 } from '../store';
 export {
   createCreativeStudioServiceV2,
   derivePayableShotIds,
+  projectStudioReferenceGenerationHandoffV2,
   type CreativeStudioServiceV2,
   type CreativeStudioServiceV2Deps,
   type StudioGenerationReadinessV2,

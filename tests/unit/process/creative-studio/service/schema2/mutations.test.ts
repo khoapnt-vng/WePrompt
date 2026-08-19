@@ -28,8 +28,13 @@ import {
 } from '@/common/types/project/creativeStudioTypes';
 import {
   calculateStudioQuoteTotals,
+  createStudioFrameExtractionId,
   createStudioQuotedGenerationId,
 } from '@/process/services/creative-studio/service/schema2/generation';
+import {
+  deriveStudioDirtyShotsV2,
+  deriveStudioInboundShotReferencesV2,
+} from '@/process/services/creative-studio/service/schema2/chain';
 import { createStudioLineHistoryId } from '@/process/services/creative-studio/service/schema2/mutationIdentity';
 import {
   applyStudioMutationBatchV2,
@@ -383,6 +388,83 @@ const addWaitingDependentOnOnlyTake = (project: StudioProjectV2): StudioAssetV2 
   return take;
 };
 
+const addFrameExtraction = (
+  project: StudioProjectV2,
+  shotId: string,
+  status: 'pending' | 'ready'
+): { extractionId: string; frameAssetId: string | null } => {
+  const shot = project.shots[shotId]!;
+  const takeId = shot.selectedTakeId!;
+  const take = project.assets[takeId]!;
+  const endpointSeconds = take.durationSeconds!;
+  const extractionId = createStudioFrameExtractionId({ shotId, takeAssetId: takeId, endpointSeconds });
+  const frameAssetId = status === 'ready' ? `frame_${shotId}` : null;
+  if (frameAssetId !== null) {
+    project.assets[frameAssetId] = makeImageAsset(frameAssetId, shotId, 'conditioningFrames');
+    shot.assetIds.push(frameAssetId);
+  }
+  project.frameExtractions[extractionId] = {
+    id: extractionId,
+    shotId,
+    takeAssetId: takeId,
+    endpointSeconds,
+    frameAssetId,
+    status,
+    errorCode: null,
+  };
+  return { extractionId, frameAssetId };
+};
+
+const bindWaitingDependent = (project: StudioProjectV2): StudioJobV2 => {
+  const take = addWaitingDependentOnOnlyTake(project);
+  project.shots.shot_1!.selectedTakeId = take.id;
+  const { frameAssetId } = addFrameExtraction(project, 'shot_1', 'ready');
+  const dependent = project.jobs.job_dependent!;
+  if (dependent.requestPlan.kind !== 'after_take_selection' || frameAssetId === null) {
+    throw new Error('Expected one symbolic predecessor dependency');
+  }
+  dependent.status = 'queued_local';
+  dependent.requestSnapshot = {
+    ...dependent.requestPlan.template,
+    conditioningInput: {
+      kind: 'predecessor_frame',
+      predecessorShotId: 'shot_1',
+      takeAssetId: take.id,
+      frameAssetId,
+      endpointSeconds: 10,
+    },
+  };
+  return dependent;
+};
+
+const completeBoundDependent = (project: StudioProjectV2): StudioJobV2 => {
+  const dependent = bindWaitingDependent(project);
+  const take = makeVideoAsset('dependent_take', dependent.shotId);
+  project.assets[take.id] = take;
+  project.shots[dependent.shotId]!.assetIds.push(take.id);
+  project.shots[dependent.shotId]!.selectedTakeId = take.id;
+  dependent.status = 'succeeded';
+  dependent.providerJobId = 'remote_dependent';
+  dependent.remoteStartedAt = timestamp;
+  dependent.outputAssetIds = [take.id];
+  dependent.outputAssetIdsByRole = { primary: take.id, poster: null };
+  dependent.spendReceipt = {
+    authorizationId: dependent.authorizationId,
+    itemId: dependent.authorizationItemId,
+    jobId: dependent.id,
+    purpose: dependent.purpose,
+    routeId: 'video_route',
+    currency: 'USD',
+    rateUnit: 'second',
+    rateMinorUnits: 2,
+    durationSeconds: 5,
+    generationIndex: 0,
+    generationCount: 1,
+    totalMinorUnits: 10,
+  };
+  return dependent;
+};
+
 const mutationBatch = (project: StudioProjectV2, operations: StudioMutationOperationV2[]): StudioMutationBatchV2 => ({
   schemaVersion: 2,
   projectId: project.id,
@@ -614,6 +696,18 @@ describe('applyStudioMutationBatchV2 final operation contract', () => {
 });
 
 describe('applyStudioMutationBatchV2 coverage and fixed shots', () => {
+  const everyFixedReason = [
+    'owned_asset',
+    'owned_job',
+    'selected_take',
+    'seed_still',
+    'conditioning_frame',
+    'conditioning_input',
+    'match_to',
+    'narration',
+    'on_screen_text',
+  ] as const;
+
   const proposed = (shot: StudioShot) => ({
     shotId: shot.id,
     line: shot.line,
@@ -688,6 +782,159 @@ describe('applyStudioMutationBatchV2 coverage and fixed shots', () => {
       ],
       'dependency_blocked',
       'mutation_moved_fixed'
+    );
+  });
+
+  it('rejects coverage for a Beat that is retained only in the Bin before mutating', () => {
+    const project = makeProject();
+    project.beatOrder = ['beat_2'];
+    project.bin.push({ kind: 'beat', beatId: 'beat_1', reason: 'lifted' });
+    expect(validateStudioProjectV2(project)).toBe(true);
+    const before = JSON.stringify(project);
+
+    expectReason(
+      project,
+      [
+        {
+          kind: 'apply_coverage',
+          beatId: 'beat_1',
+          shots: [
+            {
+              shotId: 'shot_3',
+              line: 'Replacement',
+              narration: '',
+              onScreenText: '',
+              durationSeconds: 10,
+              chainBreak: 'none',
+            },
+          ],
+          fixedShots: [],
+        },
+      ],
+      'invalid_operation',
+      'mutation_binned_beat_coverage'
+    );
+    expect(JSON.stringify(project)).toBe(before);
+  });
+
+  it('derives all nine fixed reasons in canonical order and preserves the exact paid Shot through re-split', () => {
+    const project = makeProject();
+    const fixed = project.shots.shot_1!;
+    fixed.narration = 'Persistent narration';
+    fixed.onScreenText = 'Persistent title';
+    addSucceededVideoTake(project, fixed.id, 'fixed_take', true);
+    addFrameExtraction(project, fixed.id, 'ready');
+    project.matchToShotId = fixed.id;
+    expect(validateStudioProjectV2(project)).toBe(true);
+    const retained = structuredClone({
+      shot: fixed,
+      assets: project.assets,
+      jobs: project.jobs,
+      authorizations: project.spendAuthorizations,
+      frames: project.frameExtractions,
+    });
+
+    const result = apply(project, [
+      {
+        kind: 'apply_coverage',
+        beatId: 'beat_1',
+        shots: [
+          proposed(fixed),
+          {
+            shotId: 'shot_replacement',
+            line: 'A new active neighbor',
+            narration: '',
+            onScreenText: '',
+            durationSeconds: 5,
+            chainBreak: 'none',
+          },
+        ],
+        fixedShots: [{ shotId: fixed.id, reasons: [...everyFixedReason] }],
+      },
+    ]);
+
+    expect(result.coverageResults).toEqual([
+      {
+        beatId: 'beat_1',
+        createdShotIds: ['shot_replacement'],
+        retainedShotIds: ['shot_1'],
+        removedShotIds: ['shot_2'],
+        fixedShotIds: ['shot_1'],
+      },
+    ]);
+    expect({
+      shot: result.project.shots.shot_1,
+      assets: result.project.assets,
+      jobs: result.project.jobs,
+      authorizations: result.project.spendAuthorizations,
+      frames: result.project.frameExtractions,
+    }).toEqual(retained);
+  });
+
+  it('refuses missing, extra, reason-reordered, and row-reordered fixed proofs before mutation', () => {
+    const oneFixed = makeProject();
+    oneFixed.shots.shot_1!.narration = 'Fixed narration';
+    oneFixed.shots.shot_1!.onScreenText = 'Fixed title';
+    const shots = [proposed(oneFixed.shots.shot_1!), proposed(oneFixed.shots.shot_2!)];
+    const cases: Array<{ fixedShots: unknown; reason: StudioMutationReasonV2 }> = [
+      { fixedShots: [], reason: 'dependency_blocked' },
+      {
+        fixedShots: [{ shotId: 'shot_1', reasons: ['narration'] }],
+        reason: 'dependency_blocked',
+      },
+      {
+        fixedShots: [{ shotId: 'shot_1', reasons: ['owned_asset', 'narration', 'on_screen_text'] }],
+        reason: 'dependency_blocked',
+      },
+      {
+        fixedShots: [{ shotId: 'shot_1', reasons: ['on_screen_text', 'narration'] }],
+        reason: 'invalid_operation',
+      },
+      {
+        fixedShots: [
+          { shotId: 'shot_1', reasons: ['narration', 'on_screen_text'] },
+          { shotId: 'shot_2', reasons: ['narration'] },
+        ],
+        reason: 'dependency_blocked',
+      },
+    ];
+    for (const [index, testCase] of cases.entries()) {
+      expectReason(
+        oneFixed,
+        [
+          {
+            kind: 'apply_coverage',
+            beatId: 'beat_1',
+            shots,
+            fixedShots: testCase.fixedShots as Extract<
+              StudioMutationOperationV2,
+              { kind: 'apply_coverage' }
+            >['fixedShots'],
+          },
+        ],
+        testCase.reason,
+        `mutation_fixed_refusal_${index}`
+      );
+    }
+
+    const twoFixed = makeProject();
+    twoFixed.shots.shot_1!.narration = 'First';
+    twoFixed.shots.shot_2!.onScreenText = 'Second';
+    expectReason(
+      twoFixed,
+      [
+        {
+          kind: 'apply_coverage',
+          beatId: 'beat_1',
+          shots: [proposed(twoFixed.shots.shot_1!), proposed(twoFixed.shots.shot_2!)],
+          fixedShots: [
+            { shotId: 'shot_2', reasons: ['on_screen_text'] },
+            { shotId: 'shot_1', reasons: ['narration'] },
+          ],
+        },
+      ],
+      'dependency_blocked',
+      'mutation_fixed_row_order'
     );
   });
 });
@@ -830,6 +1077,24 @@ describe('applyStudioMutationBatchV2 line history and unified undo', () => {
 });
 
 describe('applyStudioMutationBatchV2 park safety and retained lineage', () => {
+  it('rejects Shot and Take parking when their owner Beat is retained only in the Bin', () => {
+    const project = makeProject();
+    addImageAsset(project, 'shot_1', 'inactive_take');
+    project.beatOrder = ['beat_2'];
+    project.bin.push({ kind: 'beat', beatId: 'beat_1', reason: 'lifted' });
+    expect(validateStudioProjectV2(project)).toBe(true);
+    const before = JSON.stringify(project);
+
+    expectReason(project, [{ kind: 'park_shot', shotId: 'shot_1' }], 'invalid_operation', 'mutation_binned_beat_shot');
+    expectReason(
+      project,
+      [{ kind: 'park_take', shotId: 'shot_1', assetId: 'inactive_take' }],
+      'invalid_operation',
+      'mutation_binned_beat_take'
+    );
+    expect(JSON.stringify(project)).toBe(before);
+  });
+
   it('parks terminal paid Shot lineage without dropping any asset, job, authorization, or selection', () => {
     const project = makeProject();
     addSucceededVideoTake(project, 'shot_1', 'terminal_take', true);
@@ -854,6 +1119,145 @@ describe('applyStudioMutationBatchV2 park safety and retained lineage', () => {
       jobs: result.project.jobs,
       spendAuthorizations: result.project.spendAuthorizations,
     }).toEqual(retained);
+  });
+
+  it('parks a terminal-paid Beat, re-splits an active neighbor, and restores only the original Beat ownership', () => {
+    const project = makeProject();
+    project.shots.shot_2!.chainBreak = 'hard_cut';
+    addSucceededVideoTake(project, 'shot_1', 'paid_take_1', true);
+    addSucceededVideoTake(project, 'shot_2', 'paid_take_2', true);
+    project.beats.beat_2!.shotOrder = ['shot_neighbor'];
+    project.shots.shot_neighbor = makeShot('shot_neighbor');
+    expect(validateStudioProjectV2(project)).toBe(true);
+    const retained = structuredClone({
+      beat: project.beats.beat_1,
+      shots: { shot_1: project.shots.shot_1, shot_2: project.shots.shot_2 },
+      assets: project.assets,
+      jobs: project.jobs,
+      authorizations: project.spendAuthorizations,
+    });
+
+    const parked = persist(
+      apply(project, [{ kind: 'park_beat', beatId: 'beat_1' }], 'mutation_park_paid_beat').project
+    );
+    expect(parked.beatOrder).toEqual(['beat_2']);
+    expect(parked.bin).toEqual([{ kind: 'beat', beatId: 'beat_1', reason: 'lifted' }]);
+    expect(parked.bin).not.toContainEqual(expect.objectContaining({ kind: 'shot' }));
+
+    const resplit = persist(
+      apply(
+        parked,
+        [
+          {
+            kind: 'apply_coverage',
+            beatId: 'beat_2',
+            shots: [
+              {
+                shotId: 'shot_neighbor_replacement',
+                line: 'Replacement neighbor',
+                narration: '',
+                onScreenText: '',
+                durationSeconds: 5,
+                chainBreak: 'none',
+              },
+            ],
+            fixedShots: [],
+          },
+        ],
+        'mutation_resplit_neighbor'
+      ).project
+    );
+    expect(resplit.beats.beat_2!.shotOrder).toEqual(['shot_neighbor_replacement']);
+    expect({
+      beat: resplit.beats.beat_1,
+      shots: { shot_1: resplit.shots.shot_1, shot_2: resplit.shots.shot_2 },
+      assets: resplit.assets,
+      jobs: resplit.jobs,
+      authorizations: resplit.spendAuthorizations,
+    }).toEqual(retained);
+
+    const restored = apply(
+      resplit,
+      [{ kind: 'restore_beat', beatId: 'beat_1', beforeBeatId: 'beat_2' }],
+      'mutation_restore_paid_beat'
+    ).project;
+    expect(restored.beatOrder).toEqual(['beat_1', 'beat_2']);
+    expect(restored.beats.beat_1!.shotOrder).toEqual(['shot_1', 'shot_2']);
+    expect(restored.bin).toEqual([]);
+    expect({
+      beat: restored.beats.beat_1,
+      shots: { shot_1: restored.shots.shot_1, shot_2: restored.shots.shot_2 },
+      assets: restored.assets,
+      jobs: restored.jobs,
+      authorizations: restored.spendAuthorizations,
+    }).toEqual(retained);
+  });
+
+  it('feeds every inbound blocker family into the real Shot and Beat reducer refusal', () => {
+    const assertBlocked = (project: StudioProjectV2, expectedKinds: string[], label: string): void => {
+      expect(validateStudioProjectV2(project), label).toBe(true);
+      expect(
+        deriveStudioInboundShotReferencesV2(project, ['shot_1']).map((row) => row.kind),
+        label
+      ).toEqual(expectedKinds);
+      expectReason(project, [{ kind: 'park_shot', shotId: 'shot_1' }], 'dependency_blocked', `${label}_shot`);
+      expectReason(project, [{ kind: 'park_beat', beatId: 'beat_1' }], 'dependency_blocked', `${label}_beat`);
+    };
+
+    const matchTo = makeProject();
+    matchTo.matchToShotId = 'shot_1';
+    assertBlocked(matchTo, ['current_match_to'], 'mutation_blocker_match');
+
+    const ownBound = makeProject();
+    const seed = addImageAsset(ownBound, 'shot_1', 'own_bound_seed');
+    ownBound.shots.shot_1!.seedStillId = seed.id;
+    const ownItem = makeItem(ownBound.revision - 1, 'shot_1', resolvedPlan({ kind: 'seed_still', assetId: seed.id }));
+    const ownAuthorization = makeAuthorization('auth_own_bound', ownBound.revision - 1, [ownItem]);
+    const ownJob = makeJob('job_own_bound', ownAuthorization, ownItem);
+    ownBound.spendAuthorizations.push(ownAuthorization);
+    ownBound.jobs[ownJob.id] = ownJob;
+    ownBound.shots.shot_1!.jobIds.push(ownJob.id);
+    assertBlocked(ownBound, ['own_nonterminal_job', 'bound_nonterminal_request'], 'mutation_blocker_own');
+
+    const pendingFrame = makeProject();
+    addSucceededVideoTake(pendingFrame, 'shot_1', 'pending_frame_take', true);
+    addFrameExtraction(pendingFrame, 'shot_1', 'pending');
+    assertBlocked(pendingFrame, ['own_pending_frame', 'downstream_pending_frame'], 'mutation_blocker_pending_frame');
+
+    const waiting = makeProject();
+    addWaitingDependentOnOnlyTake(waiting);
+    assertBlocked(
+      waiting,
+      ['downstream_nonterminal_job', 'waiting_authorization_dependency'],
+      'mutation_blocker_waiting'
+    );
+
+    const downstreamBound = makeProject();
+    bindWaitingDependent(downstreamBound);
+    assertBlocked(
+      downstreamBound,
+      ['downstream_nonterminal_job', 'bound_nonterminal_request'],
+      'mutation_blocker_downstream_bound'
+    );
+  });
+
+  it('permits terminal historical conditioning, then projects the parked predecessor as stale', () => {
+    const project = makeProject();
+    completeBoundDependent(project);
+    expect(validateStudioProjectV2(project)).toBe(true);
+    expect(deriveStudioDirtyShotsV2(project)).toEqual([
+      { shotId: 'shot_1', causes: ['generation_out_of_date'] },
+      { shotId: 'shot_2', causes: ['generation_out_of_date'] },
+    ]);
+    expect(deriveStudioInboundShotReferencesV2(project, ['shot_1'])).toEqual([]);
+
+    const parked = apply(project, [{ kind: 'park_shot', shotId: 'shot_1' }], 'mutation_terminal_history').project;
+
+    expect(parked.bin).toContainEqual({ kind: 'shot', beatId: 'beat_1', shotId: 'shot_1', reason: 'lifted' });
+    expect(deriveStudioInboundShotReferencesV2(parked, ['shot_1'])).toEqual([]);
+    expect(deriveStudioDirtyShotsV2(parked)).toEqual([
+      { shotId: 'shot_2', causes: ['continuity_stale', 'generation_out_of_date'] },
+    ]);
   });
 
   it('refuses Match To and in-flight blockers before changing a Shot or containing Beat', () => {
@@ -895,6 +1299,25 @@ describe('applyStudioMutationBatchV2 park safety and retained lineage', () => {
       'mutation_seed_take'
     );
     expect(seeded.shots.shot_1!.seedStillId).toBe('seed_take');
+  });
+
+  it('refuses an unpinned Take that a nonterminal concrete request is consuming', () => {
+    const project = makeProject();
+    const take = addImageAsset(project, 'shot_1', 'conditioned_take');
+    const item = makeItem(project.revision - 1, 'shot_1', resolvedPlan({ kind: 'seed_still', assetId: take.id }));
+    const authorization = makeAuthorization('auth_conditioned_take', project.revision - 1, [item]);
+    const job = makeJob('job_conditioned_take', authorization, item);
+    project.spendAuthorizations.push(authorization);
+    project.jobs[job.id] = job;
+    project.shots.shot_1!.jobIds.push(job.id);
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    expectReason(
+      project,
+      [{ kind: 'park_take', shotId: 'shot_1', assetId: take.id }],
+      'dependency_blocked',
+      'mutation_conditioned_take'
+    );
   });
 
   it('refuses the last selectable primary while an authorized dependent waits for that item', () => {
@@ -1242,6 +1665,10 @@ describe('applyStudioMutationBatchV2 bounds, totality, and rollback', () => {
     ];
 
     for (const { operation, reason } of cases) expectReason(makeProject(), [operation], reason);
+
+    const nonemptyLine = makeProject();
+    nonemptyLine.shots.shot_1!.line = 'Current reviewed line';
+    expectReason(nonemptyLine, [{ kind: 'rederive_line', shotId: 'shot_1', line: '' }], 'invalid_operation');
   });
 
   it('accepts exactly 32 ordered operations and rejects 33', () => {
@@ -1377,6 +1804,22 @@ describe('applyStudioMutationBatchV2 bounds, totality, and rollback', () => {
       ],
       'project_shot_capacity_reached',
       'mutation_project_shot_capacity'
+    );
+
+    const fullRestoreOwner = makeProject();
+    for (let index = 3; index <= STUDIO_MAX_SHOTS_PER_BEAT; index += 1) {
+      const shotId = `shot_${index}`;
+      fullRestoreOwner.beats.beat_1!.shotOrder.push(shotId);
+      fullRestoreOwner.shots[shotId] = makeShot(shotId);
+    }
+    fullRestoreOwner.shots.shot_parked = makeShot('shot_parked');
+    fullRestoreOwner.bin.push({ kind: 'shot', beatId: 'beat_1', shotId: 'shot_parked', reason: 'lifted' });
+    expect(validateStudioProjectV2(fullRestoreOwner)).toBe(true);
+    expectReason(
+      fullRestoreOwner,
+      [{ kind: 'restore_shot', shotId: 'shot_parked', beforeShotId: null }],
+      'beat_shot_capacity_reached',
+      'mutation_restore_shot_capacity'
     );
   });
 

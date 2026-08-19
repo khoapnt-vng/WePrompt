@@ -14,6 +14,7 @@ import {
   STUDIO_MAX_SHOT_SECONDS,
   STUDIO_MIN_SHOT_SECONDS,
   STUDIO_PROJECT_SCHEMA_VERSION,
+  STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES,
   type StudioDirectorCommandReceiptV1,
   type StudioDirectorCommandReceiptV2,
   type StudioDirectorCommandRecordV1,
@@ -29,10 +30,12 @@ import {
   type StudioProposalDecisionV2,
   type StudioProposalRecordV2,
   type StudioProposalSlotV2,
+  type StudioReferenceGenerationHandoffReceiptV2,
+  type StudioReferenceRequestDecisionV2,
   type StudioReferenceRequestSlotV2,
   type StudioReferenceRequestV2,
 } from '@/common/types/project/creativeStudioTypes';
-import { STUDIO_RULE_LIMITS } from '@/common/types/project/creativeStudioRules';
+import { hasRuleToken, STUDIO_RULE_LIMITS } from '@/common/types/project/creativeStudioRules';
 import { validateStudioMutationOperationV2 } from './schema2/mutations';
 
 type JsonRecord = Record<string, unknown>;
@@ -154,6 +157,14 @@ const isDuration = (value: unknown): value is number =>
 const fitsCommandRecord = (value: unknown): boolean => {
   try {
     return Buffer.byteLength(JSON.stringify(value), 'utf8') <= STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES;
+  } catch {
+    return false;
+  }
+};
+
+const fitsReferenceRequestRecordV2 = (value: unknown): boolean => {
+  try {
+    return Buffer.byteLength(JSON.stringify(value), 'utf8') <= STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES;
   } catch {
     return false;
   }
@@ -444,6 +455,7 @@ const V2_APPLIED_RECEIPT_KEYS = new Set([
 const V2_REJECTION_CODES = new Set([
   'malformed_record',
   'unsupported_version',
+  'operation_not_permitted',
   'stale_revision',
   'future_revision',
   'project_not_found',
@@ -475,6 +487,13 @@ const V2_PROPOSAL_DECISION_KEYS = new Set(['schemaVersion', 'proposalId', 'statu
 const V2_PROPOSAL_SLOT_KEYS = new Set(['schemaVersion', 'proposalId', 'reservedAt']);
 const V2_REFERENCE_REQUEST_KEYS = new Set(['schemaVersion', 'id', 'projectId', 'shotIds', 'status', 'createdAt']);
 const V2_REFERENCE_SLOT_KEYS = new Set(['schemaVersion', 'requestId', 'reservedAt']);
+const V2_REFERENCE_DECISION_KEYS = new Set(['schemaVersion', 'requestId', 'projectId', 'decidedAt', 'outcome']);
+const V2_REFERENCE_REJECTED_OUTCOME_KEYS = new Set(['kind']);
+const V2_REFERENCE_IMPORTED_OUTCOME_KEYS = new Set(['kind', 'assetId', 'projectRevision']);
+const V2_REFERENCE_GENERATION_OUTCOME_KEYS = new Set(['kind', 'handoffId', 'shotIds']);
+const V2_REFERENCE_HANDOFF_RECEIPT_KEYS = new Set(['schemaVersion', 'handoffId', 'requestId', 'completedAt', 'result']);
+const V2_REFERENCE_DISMISSED_RESULT_KEYS = new Set(['kind']);
+const V2_REFERENCE_CONFIRMED_RESULT_KEYS = new Set(['kind', 'authorizationId']);
 const V2_PROPOSAL_DECISION_STATUSES = new Set(['accepted', 'rejected', 'expired']);
 
 const sidecarSchemaV2 = (value: unknown): SidecarSchemaV2 => {
@@ -574,23 +593,58 @@ const validateOperationListV2 = (value: unknown): value is StudioMutationOperati
   return true;
 };
 
-const DIRECTOR_OPERATION_KINDS_V2: ReadonlySet<string> = new Set([
-  'set_brief',
-  'add_beat',
-  'edit_beat',
-  'reorder_beats',
-  'add_shot',
-  'edit_shot',
-  'delete_shot',
-  'reorder_shots',
-  'reorder_bin',
-]);
+export type StudioDirectorOperationDispositionV2 = 'direct' | 'proposal' | 'operation_not_permitted';
+
+/**
+ * Frozen schema-2 Director capability policy. This is deliberately exhaustive so adding a reducer
+ * gesture cannot silently make it callable by either MCP mutation surface.
+ */
+export const STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2 = Object.freeze({
+  edit_project: 'operation_not_permitted',
+  set_brief: 'direct',
+  set_rules: 'operation_not_permitted',
+  add_beat: 'direct',
+  edit_beat: 'direct',
+  reorder_beats: 'direct',
+  park_beat: 'operation_not_permitted',
+  restore_beat: 'operation_not_permitted',
+  add_binned_beat: 'proposal',
+  add_shot: 'direct',
+  edit_shot: 'direct',
+  delete_shot: 'direct',
+  park_shot: 'operation_not_permitted',
+  restore_shot: 'operation_not_permitted',
+  reorder_shots: 'direct',
+  apply_coverage: 'proposal',
+  set_hard_cut: 'proposal',
+  set_seed_still: 'operation_not_permitted',
+  trim_shot: 'operation_not_permitted',
+  redetach_line: 'proposal',
+  rederive_line: 'proposal',
+  restore_line: 'operation_not_permitted',
+  park_take: 'operation_not_permitted',
+  add_alternate_take: 'operation_not_permitted',
+  restore_take: 'operation_not_permitted',
+  reorder_bin: 'direct',
+  select_take: 'operation_not_permitted',
+  set_routes: 'operation_not_permitted',
+  set_spend_policy: 'operation_not_permitted',
+  set_match_to: 'operation_not_permitted',
+  set_bed: 'operation_not_permitted',
+  undo_last: 'operation_not_permitted',
+} as const satisfies Readonly<Record<StudioMutationOperationV2['kind'], StudioDirectorOperationDispositionV2>>);
+
+/** Returns null for malformed or future operation kinds; known denied kinds stay distinguishable. */
+export const classifyStudioDirectorOperationV2 = (kind: unknown): StudioDirectorOperationDispositionV2 | null =>
+  typeof kind === 'string' && Object.hasOwn(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2, kind)
+    ? STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2[kind as StudioMutationOperationV2['kind']]
+    : null;
 
 const validateDirectorOperationListV2 = (value: unknown): value is StudioDirectorOperationV2[] =>
   validateOperationListV2(value) &&
   value.every(
     (operation) =>
-      DIRECTOR_OPERATION_KINDS_V2.has(operation.kind) &&
+      classifyStudioDirectorOperationV2(operation.kind) === 'direct' &&
       (operation.kind !== 'add_shot' ||
         (operation.shot.durationSeconds >= STUDIO_MIN_SHOT_SECONDS &&
           operation.shot.durationSeconds <= STUDIO_MAX_SHOT_SECONDS)) &&
@@ -862,6 +916,7 @@ const validateRulePredicateV2 = (value: unknown): boolean => {
       typeof term !== 'string' ||
       term.trim().length === 0 ||
       term.length > STUDIO_RULE_LIMITS.term ||
+      !hasRuleToken(term) ||
       terms.has(term)
     ) {
       return false;
@@ -874,7 +929,13 @@ const validateRulePredicateV2 = (value: unknown): boolean => {
 const validateProposalPayloadV2 = (value: unknown): boolean => {
   if (!isRecord(value)) return false;
   if (value.kind === 'mutation_batch') {
-    return hasExactKeysV2(value, V2_PROPOSAL_MUTATION_PAYLOAD_KEYS) && validateOperationListV2(value.operations);
+    return (
+      hasExactKeysV2(value, V2_PROPOSAL_MUTATION_PAYLOAD_KEYS) &&
+      validateOperationListV2(value.operations) &&
+      value.operations.every(
+        (operation) => classifyStudioDirectorOperationV2(operation.kind) !== 'operation_not_permitted'
+      )
+    );
   }
   return (
     value.kind === 'pin_rule' &&
@@ -969,7 +1030,7 @@ export function parseStudioReferenceRequestV2(input: {
     !isUniqueSafeIdArrayV2(value.shotIds, 1, STUDIO_MAX_REFERENCE_REQUEST_SHOTS) ||
     value.status !== 'pending' ||
     timestampMs(value.createdAt) === null ||
-    !fitsCommandRecord(value)
+    !fitsReferenceRequestRecordV2(value)
   ) {
     return invalidSidecarV2();
   }
@@ -991,4 +1052,82 @@ export function parseStudioReferenceRequestSlotV2(
     return invalidSidecarV2();
   }
   return validSidecarV2(record as StudioReferenceRequestSlotV2);
+}
+
+const validateStudioReferenceRequestDecisionOutcomeV2 = (value: unknown): boolean => {
+  if (!isRecord(value)) return false;
+  if (value.kind === 'rejected' || value.kind === 'expired') {
+    return hasExactKeysV2(value, V2_REFERENCE_REJECTED_OUTCOME_KEYS);
+  }
+  if (value.kind === 'imported_reference') {
+    return (
+      hasExactKeysV2(value, V2_REFERENCE_IMPORTED_OUTCOME_KEYS) &&
+      isSafeStudioDirectorId(value.assetId) &&
+      isRevision(value.projectRevision)
+    );
+  }
+  return (
+    value.kind === 'generation_gate' &&
+    hasExactKeysV2(value, V2_REFERENCE_GENERATION_OUTCOME_KEYS) &&
+    isSafeStudioDirectorId(value.handoffId) &&
+    isUniqueSafeIdArrayV2(value.shotIds, 1, STUDIO_MAX_REFERENCE_REQUEST_SHOTS)
+  );
+};
+
+export function parseStudioReferenceRequestDecisionV2(input: {
+  projectId: string;
+  requestId: string;
+  value: unknown;
+}): StudioDirectorSidecarParseResultV2<StudioReferenceRequestDecisionV2> {
+  const schema = sidecarSchemaV2(input.value);
+  if (schema === 'v1') return unsupportedSidecarV2();
+  const value = schema === 'v2' ? snapshotDataRecordV2(input.value) : null;
+  if (
+    value === null ||
+    !hasExactKeysV2(value, V2_REFERENCE_DECISION_KEYS) ||
+    value.requestId !== input.requestId ||
+    value.projectId !== input.projectId ||
+    !isSafeStudioDirectorId(value.requestId) ||
+    !isSafeStudioDirectorId(value.projectId) ||
+    timestampMs(value.decidedAt) === null ||
+    !validateStudioReferenceRequestDecisionOutcomeV2(value.outcome) ||
+    !fitsReferenceRequestRecordV2(value)
+  ) {
+    return invalidSidecarV2();
+  }
+  return validSidecarV2(value as StudioReferenceRequestDecisionV2);
+}
+
+const validateStudioReferenceGenerationHandoffResultV2 = (value: unknown): boolean => {
+  if (!isRecord(value)) return false;
+  if (value.kind === 'dismissed') {
+    return hasExactKeysV2(value, V2_REFERENCE_DISMISSED_RESULT_KEYS);
+  }
+  return (
+    value.kind === 'confirmed' &&
+    hasExactKeysV2(value, V2_REFERENCE_CONFIRMED_RESULT_KEYS) &&
+    isSafeStudioDirectorId(value.authorizationId)
+  );
+};
+
+export function parseStudioReferenceGenerationHandoffReceiptV2(input: {
+  handoffId: string;
+  value: unknown;
+}): StudioDirectorSidecarParseResultV2<StudioReferenceGenerationHandoffReceiptV2> {
+  const schema = sidecarSchemaV2(input.value);
+  if (schema === 'v1') return unsupportedSidecarV2();
+  const value = schema === 'v2' ? snapshotDataRecordV2(input.value) : null;
+  if (
+    value === null ||
+    !hasExactKeysV2(value, V2_REFERENCE_HANDOFF_RECEIPT_KEYS) ||
+    value.handoffId !== input.handoffId ||
+    !isSafeStudioDirectorId(value.handoffId) ||
+    !isSafeStudioDirectorId(value.requestId) ||
+    timestampMs(value.completedAt) === null ||
+    !validateStudioReferenceGenerationHandoffResultV2(value.result) ||
+    !fitsReferenceRequestRecordV2(value)
+  ) {
+    return invalidSidecarV2();
+  }
+  return validSidecarV2(value as StudioReferenceGenerationHandoffReceiptV2);
 }

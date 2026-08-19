@@ -552,6 +552,52 @@ describe('Creative Studio runtime identity and lifecycle', () => {
     expect(calls).toEqual(['cleanup-parts', 'start-director', 'install-protocol']);
   });
 
+  it('keeps schema-2 activation dormant while Task 6 leaves the production runtime on schema 1', async () => {
+    const reapAbandonedProposals = vi.fn(async () => undefined);
+    const watchProposals = vi.fn(async () => async () => undefined);
+    const inspectProjectsV2 = vi.fn(async () => ({
+      supportedProjectIds: [],
+      unsupportedProjectIds: [],
+      quarantinedProjectIds: [],
+    }));
+    const listProjectsV2 = vi.fn(async () => ({
+      projects: [],
+      unsupportedProjectIds: [],
+      quarantinedProjectIds: [],
+    }));
+    const reapAbandonedProposalsV2 = vi.fn(async () => undefined);
+    const watchProposalsV2 = vi.fn(async () => async () => undefined);
+    const store = {
+      listConnections: async () => [],
+      reapAbandonedProposals,
+      watchProposals,
+      inspectProjectsV2,
+      listProjectsV2,
+      reapAbandonedProposalsV2,
+      watchProposalsV2,
+    } as unknown as CreativeStudioStore;
+    const { runtime } = createHarness({}, { store });
+    const runtimeSource = await readFile(
+      path.resolve(process.cwd(), 'packages/desktop/src/process/services/creative-studio/runtime.ts'),
+      'utf8'
+    );
+
+    await runtime.start();
+
+    expect({
+      schema1: [reapAbandonedProposals.mock.calls.length, watchProposals.mock.calls.length],
+      schema2: [
+        inspectProjectsV2.mock.calls.length,
+        listProjectsV2.mock.calls.length,
+        reapAbandonedProposalsV2.mock.calls.length,
+        watchProposalsV2.mock.calls.length,
+      ],
+    }).toEqual({ schema1: [1, 1], schema2: [0, 0, 0, 0] });
+    expect(runtimeSource).toContain('createService: createCreativeStudioService,');
+    expect(runtimeSource).not.toContain('createCreativeStudioServiceV2');
+    await runtime.dispose();
+  });
+
   it('rolls back the command processor and proposal watcher when a later protocol start fails', async () => {
     const disposeProposalWatcher = vi.fn(async () => undefined);
     const store = {

@@ -6,16 +6,20 @@
 
 import {
   existsSync,
+  linkSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   promises as nodeFs,
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -45,6 +49,13 @@ import type {
   StudioProject,
   StudioProjectSummary,
   StudioProjectV2,
+  StudioProposalCommitAttributionV2,
+  StudioProposalRecordV2,
+  StudioProposalSlotV2,
+  StudioReferenceGenerationHandoffReceiptV2,
+  StudioReferenceRequestDecisionV2,
+  StudioReferenceRequestSlotV2,
+  StudioReferenceRequestV2,
   StudioQuotedGeneration,
   StudioMediaChoiceRef,
   StudioProposalPayload,
@@ -53,6 +64,7 @@ import type {
   StudioRouteCatalog,
   StudioSpendAuthorization,
 } from '@/common/types/project/creativeStudioTypes';
+import { STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT } from '@/common/types/project/creativeStudioTypes';
 import {
   allocateStudioBriefReferenceLabel,
   getStudioReferencePlateFreshness,
@@ -3473,6 +3485,265 @@ describe('schema-2 creative studio project store', () => {
     writeFileSync(path.join(directory, 'project.json'), JSON.stringify(project, null, 2));
   };
 
+  const seedProposalV2 = async (
+    store: CreativeStudioStore,
+    project: StudioProjectV2,
+    input: {
+      proposalId?: string;
+      payload?: StudioProposalRecordV2['payload'];
+      createdAt?: string;
+    } = {}
+  ): Promise<{
+    proposal: StudioProposalRecordV2;
+    slot: StudioProposalSlotV2;
+    directories: { root: string; pending: string; decisions: string; slots: string; commits: string };
+  }> => {
+    await store.resolveProposalPathsV2(project.id);
+    const familyRoot = path.join(rootDir, project.id, 'proposals');
+    const directories = {
+      root: familyRoot,
+      pending: path.join(familyRoot, 'pending'),
+      decisions: path.join(familyRoot, 'decisions'),
+      slots: path.join(familyRoot, 'slots'),
+      commits: path.join(familyRoot, 'commits'),
+    };
+    const proposalId = input.proposalId ?? 'proposal_v2';
+    const proposal: StudioProposalRecordV2 = {
+      schemaVersion: 2,
+      id: proposalId,
+      projectId: project.id,
+      status: 'pending',
+      baseRevision: project.revision,
+      payload: input.payload ?? {
+        kind: 'mutation_batch',
+        operations: [{ kind: 'set_brief', brief: 'Accepted brief' }],
+      },
+      createdAt: input.createdAt ?? timestamp,
+      decidedAt: null,
+    };
+    const slot: StudioProposalSlotV2 = { schemaVersion: 2, proposalId, reservedAt: proposal.createdAt };
+    writeFileSync(path.join(directories.pending, `${proposalId}.json`), JSON.stringify(proposal));
+    writeFileSync(path.join(directories.slots, '0.slot'), JSON.stringify(slot));
+    return { proposal, slot, directories };
+  };
+
+  const seedReferenceRequestV2 = async (
+    store: CreativeStudioStore,
+    project: StudioProjectV2,
+    input: { requestId?: string; shotIds?: string[]; createdAt?: string; slotIndex?: number } = {}
+  ): Promise<{
+    request: StudioReferenceRequestV2;
+    slot: StudioReferenceRequestSlotV2;
+    directories: { root: string; pending: string; decisions: string; slots: string; receipts: string };
+  }> => {
+    await store.resolveReferenceRequestPathsV2(project.id);
+    const familyRoot = path.join(rootDir, project.id, 'reference-requests');
+    const directories = {
+      root: familyRoot,
+      pending: path.join(familyRoot, 'pending'),
+      decisions: path.join(familyRoot, 'decisions'),
+      slots: path.join(familyRoot, 'slots'),
+      receipts: path.join(familyRoot, 'receipts'),
+    };
+    const requestId = input.requestId ?? 'reference_request_v2';
+    const request: StudioReferenceRequestV2 = {
+      schemaVersion: 2,
+      id: requestId,
+      projectId: project.id,
+      shotIds: input.shotIds ?? ['shot_reference'],
+      status: 'pending',
+      createdAt: input.createdAt ?? timestamp,
+    };
+    const slot: StudioReferenceRequestSlotV2 = {
+      schemaVersion: 2,
+      requestId,
+      reservedAt: request.createdAt,
+    };
+    writeFileSync(path.join(directories.pending, `${requestId}.json`), JSON.stringify(request));
+    writeFileSync(path.join(directories.slots, `${input.slotIndex ?? 0}.slot`), JSON.stringify(slot));
+    return { request, slot, directories };
+  };
+
+  const seedGenerationHandoffV2 = async (
+    store: CreativeStudioStore,
+    project: StudioProjectV2,
+    input: { requestId?: string; shotIds?: string[]; slotIndex?: number } = {}
+  ): Promise<
+    Awaited<ReturnType<typeof seedReferenceRequestV2>> & {
+      decision: StudioReferenceRequestDecisionV2 & {
+        outcome: Extract<StudioReferenceRequestDecisionV2['outcome'], { kind: 'generation_gate' }>;
+      };
+      handoffId: string;
+    }
+  > => {
+    const seeded = await seedReferenceRequestV2(store, project, input);
+    const entry = await store.decideReferenceRequestV2({
+      projectId: project.id,
+      requestId: seeded.request.id,
+      expectedRevision: project.revision,
+      outcome: { kind: 'generation_gate' },
+    });
+    if (entry.decision?.outcome.kind !== 'generation_gate') {
+      throw new Error('expected generation handoff decision');
+    }
+    return {
+      ...seeded,
+      decision: entry.decision as StudioReferenceRequestDecisionV2 & {
+        outcome: Extract<StudioReferenceRequestDecisionV2['outcome'], { kind: 'generation_gate' }>;
+      },
+      handoffId: entry.decision.outcome.handoffId,
+    };
+  };
+
+  const addActiveReferenceShotsV2 = async (
+    store: CreativeStudioStore,
+    project: StudioProjectV2,
+    shotIds: string[] = ['shot_reference']
+  ): Promise<StudioProjectV2> => {
+    const operations: StudioMutationBatchV2['operations'] = [
+      {
+        kind: 'add_beat',
+        beatId: 'beat_reference',
+        beat: { title: 'Reference beat', action: '', look: '', targetSeconds: null },
+        beforeBeatId: null,
+      },
+      ...shotIds.map((shotId): StudioMutationBatchV2['operations'][number] => ({
+        kind: 'add_shot',
+        beatId: 'beat_reference',
+        shotId,
+        shot: { line: shotId, narration: '', onScreenText: '', durationSeconds: 4 },
+        beforeShotId: null,
+      })),
+    ];
+    return (
+      await store.applyMutationBatchV2(
+        { schemaVersion: 2, projectId: project.id, expectedRevision: project.revision, operations },
+        { mutationId: `seed_${project.id}`, capturedAt: timestamp }
+      )
+    ).project;
+  };
+
+  const addReferenceAuthorizationV2 = (
+    project: StudioProjectV2,
+    handoffId: string,
+    shotId = 'shot_reference'
+  ): StudioProjectV2 => {
+    const requestPlan: StudioGenerationRequestPlan = {
+      kind: 'resolved',
+      snapshot: {
+        prompt: 'Reference seed prompt',
+        aspectRatio: project.aspectRatio,
+        resolution: project.resolution,
+        durationSeconds: project.shots[shotId]!.durationSeconds,
+        referenceInput: null,
+        conditioningInput: null,
+      },
+    };
+    const item: StudioQuotedGeneration = {
+      id: createStudioQuotedGenerationId({
+        projectId: project.id,
+        projectRevision: project.revision,
+        shotId,
+        purpose: 'seed_still',
+      }),
+      shotId,
+      purpose: 'seed_still',
+      routeId: 'image_route',
+      generationCount: 1,
+      requestPlan,
+      rateUnit: 'generation',
+      rateMinorUnits: 2,
+    };
+    const totals = calculateStudioQuoteTotals([item])!;
+    const provider = {
+      providerId: 'provider_reference',
+      adapterId: 'weprompt-image-v1',
+      model: 'image-model',
+    } as const;
+    const authorization: StudioSpendAuthorization = {
+      id: `authorization_${handoffId}`,
+      projectId: project.id,
+      projectRevision: project.revision,
+      originReferenceHandoffId: handoffId,
+      rateCardDigest: 'd'.repeat(64),
+      currency: 'USD',
+      baseItems: [item],
+      cascadeItems: [],
+      lowerMinorUnits: totals.lowerMinorUnits,
+      upperMinorUnits: totals.upperMinorUnits,
+      expiresAt: '2026-08-17T12:05:00.000Z',
+      confirmedAt: '2026-08-17T12:00:03.000Z',
+      providerBindings: [{ itemId: item.id, provider }],
+      idempotencyKeys: [{ itemId: item.id, generationIndex: 0, key: `idem_${handoffId}` }],
+    };
+    const job: StudioJobV2 = {
+      id: `job_${handoffId}`,
+      projectId: project.id,
+      shotId,
+      status: 'queued_local',
+      provider,
+      idempotencyKey: `idem_${handoffId}`,
+      providerJobId: null,
+      cancellationPolicy: 'queued_and_running',
+      purpose: 'seed_still',
+      authorizationId: authorization.id,
+      authorizationItemId: item.id,
+      generationIndex: 0,
+      requestPlan,
+      requestSnapshot: requestPlan.snapshot,
+      spendReceipt: null,
+      outputAssetIds: [],
+      outputAssetIdsByRole: { primary: null, poster: null },
+      error: null,
+      retryOfJobId: null,
+      retryReason: null,
+      duplicateChargeAcknowledged: false,
+      duplicateChargeAcknowledgedAt: null,
+      createdAt: authorization.confirmedAt,
+      updatedAt: authorization.confirmedAt,
+    };
+    project.spendAuthorizations.push(authorization);
+    project.jobs[job.id] = job;
+    project.shots[shotId]!.jobIds.push(job.id);
+    return project;
+  };
+
+  const snapshotTreeV2 = (directory: string): Array<{ path: string; kind: 'directory' | 'file'; bytes?: string }> => {
+    const entries: Array<{ path: string; kind: 'directory' | 'file'; bytes?: string }> = [];
+    const visit = (current: string, relative: string): void => {
+      for (const name of readdirSync(current).toSorted()) {
+        const absolute = path.join(current, name);
+        const child = relative.length === 0 ? name : path.join(relative, name);
+        const stats = lstatSync(absolute);
+        if (stats.isDirectory()) {
+          entries.push({ path: child, kind: 'directory' });
+          visit(absolute, child);
+        } else if (stats.isFile()) {
+          entries.push({ path: child, kind: 'file', bytes: readFileSync(absolute).toString('base64') });
+        }
+      }
+    };
+    visit(directory, '');
+    return entries;
+  };
+
+  const failFileSystemOnceV2 = (shouldFail: (method: string, args: readonly unknown[]) => boolean): typeof nodeFs => {
+    let failed = false;
+    return new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver) as unknown;
+        if (typeof property !== 'string' || typeof value !== 'function') return value;
+        return (...args: unknown[]): unknown => {
+          if (!failed && shouldFail(property, args)) {
+            failed = true;
+            throw Object.assign(new Error('injected proposal crash'), { code: 'EIO' });
+          }
+          return Reflect.apply(value, target, args);
+        };
+      },
+    }) as typeof nodeFs;
+  };
+
   const seedPrototypeProject = async (projectId = 'prototype_v1'): Promise<StudioProject> => {
     const prototypeStore = createCreativeStudioStore({
       rootDir,
@@ -4442,6 +4713,123 @@ describe('schema-2 creative studio project store', () => {
     });
   });
 
+  it('snapshots the complete mutation batch before selecting its project queue', async () => {
+    const ids = ['batch_snapshot_a_v2', 'batch_snapshot_b_v2'];
+    const { store } = createStoreV2({
+      createId: () => ids.shift() ?? 'unexpected_batch_snapshot',
+      now: () => timestamp,
+    });
+    const firstProject = await store.createProjectV2(inputV2);
+    const secondProject = await store.createProjectV2(inputV2);
+    const revalidationStarted = createDeferredV2<void>();
+    const releaseRevalidation = createDeferredV2<void>();
+    const expectedFailure = new Error('release the project queue without a commit');
+    const blocker = store.confirmProjectV2({
+      projectId: firstProject.id,
+      expectedRevision: firstProject.revision,
+      expiresAt: '2026-08-17T12:05:00.000Z',
+      async revalidate() {
+        revalidationStarted.resolve(undefined);
+        await releaseRevalidation.promise;
+        throw expectedFailure;
+      },
+      assertActive: () => undefined,
+      buildCommit: (project) => ({ project, dispatch: null }),
+    });
+    await revalidationStarted.promise;
+    const batch = makeStudioMutationBatchV2(firstProject, [{ kind: 'set_brief', brief: 'Original batch' }]);
+    const pending = store.applyMutationBatchV2(batch, makeMutationContextV2({ mutationId: 'mutation_batch_snapshot' }));
+
+    batch.projectId = secondProject.id;
+    (batch.operations[0] as { kind: 'set_brief'; brief: string }).brief = 'Caller mutation';
+    releaseRevalidation.resolve(undefined);
+
+    await expect(blocker).rejects.toBe(expectedFailure);
+    await expect(pending).resolves.toMatchObject({ project: { id: firstProject.id, brief: 'Original batch' } });
+    await expect(store.getProjectV2(secondProject.id)).resolves.toMatchObject({
+      status: 'supported',
+      project: { id: secondProject.id, brief: secondProject.brief, revision: secondProject.revision },
+    });
+  });
+
+  it.each(['mutation', 'update', 'confirmation'] as const)(
+    'CAS-fences a schema-2 %s write against a same-revision project replacement',
+    async (operation) => {
+      const projectId = `ordinary_cas_${operation}_v2`;
+      const projectDirectory = path.join(realpathSync(rootDir), projectId);
+      const projectFile = path.join(projectDirectory, 'project.json');
+      const onProjectCommitted = vi.fn<StudioProjectCommitObserver>();
+      let armed = false;
+      let replaced = false;
+      let externalBytes = '';
+      const racingFs = new Proxy(nodeFs, {
+        get(target, property, receiver) {
+          const value = Reflect.get(target, property, receiver) as unknown;
+          if (property !== 'open' || typeof value !== 'function') return value;
+          return async (...args: Parameters<typeof nodeFs.open>) => {
+            const handle = await nodeFs.open(...args);
+            const opened = String(args[0]);
+            if (armed && !replaced && opened.startsWith(`${projectFile}.`) && opened.endsWith('.tmp')) {
+              const replacement = `${projectFile}.external`;
+              writeFileSync(replacement, externalBytes);
+              renameSync(replacement, projectFile);
+              replaced = true;
+            }
+            return handle;
+          };
+        },
+      }) as typeof nodeFs;
+      const store = createCreativeStudioStore({
+        rootDir,
+        fs: racingFs,
+        createId: () => projectId,
+        now: () => timestamp,
+        logError: () => undefined,
+        onProjectCommitted,
+      });
+      const project = await store.createProjectV2(inputV2);
+      const replacement: StudioProjectV2 = { ...project, name: `External ${operation} winner` };
+      externalBytes = `${JSON.stringify(replacement, null, 2)}\n`;
+      const indexFile = path.join(rootDir, 'projects-v2.json');
+      const indexBefore = readFileSync(indexFile);
+      armed = true;
+
+      const attempt =
+        operation === 'mutation'
+          ? store.applyMutationBatchV2(
+              makeStudioMutationBatchV2(project, [{ kind: 'set_brief', brief: 'Must not overwrite' }]),
+              makeMutationContextV2({ mutationId: 'mutation_ordinary_cas' })
+            )
+          : operation === 'update'
+            ? store.updateProjectV2(
+                project.id,
+                (candidate) => ({ ...candidate, brief: 'Must not overwrite' }),
+                project.revision
+              )
+            : store.confirmProjectV2({
+                projectId: project.id,
+                expectedRevision: project.revision,
+                expiresAt: '2026-08-17T12:05:00.000Z',
+                revalidate: async () => ({ routeId: 'video_route' }),
+                assertActive: () => undefined,
+                buildCommit: (candidate) => ({
+                  project: { ...candidate, brief: 'Must not overwrite' },
+                  dispatch: { jobIds: ['job_ordinary_cas'] },
+                }),
+              });
+
+      await expect(attempt).rejects.toMatchObject({ code: 'storage_error' });
+      expect(replaced).toBe(true);
+      expect(readFileSync(projectFile, 'utf8')).toBe(externalBytes);
+      expect(readFileSync(indexFile)).toEqual(indexBefore);
+      expect(onProjectCommitted).not.toHaveBeenCalled();
+      await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
+        status: 'supported',
+        project: { name: replacement.name, revision: project.revision },
+      });
+    }
+  );
+
   it('refuses stale and same-context replay without rewriting or observing a second commit', async () => {
     const onProjectCommitted = vi.fn<StudioProjectCommitObserver>();
     const { store } = createStoreV2({
@@ -4798,6 +5186,14 @@ describe('schema-2 creative studio project store', () => {
     const protectedFs = protectPrototypeIndex();
     let armed = false;
     let indexRenameAttempts = 0;
+    let signalRetryStarted: () => void = () => undefined;
+    const retryStarted = new Promise<void>((resolve) => {
+      signalRetryStarted = resolve;
+    });
+    let releaseRetry: () => void = () => undefined;
+    const retryGate = new Promise<void>((resolve) => {
+      releaseRetry = resolve;
+    });
     const failingOnceFs = new Proxy(protectedFs.fs, {
       get(target, property, receiver) {
         if (property !== 'rename') return Reflect.get(target, property, receiver);
@@ -4808,6 +5204,8 @@ describe('schema-2 creative studio project store', () => {
             if (destination.endsWith(`${path.sep}projects-v2.json`)) {
               indexRenameAttempts += 1;
               if (indexRenameAttempts === 1) throw new Error('schema-2 index rename failed once');
+              signalRetryStarted();
+              await retryGate;
             }
           }
           return protectedFs.fs.rename(...args);
@@ -4826,7 +5224,7 @@ describe('schema-2 creative studio project store', () => {
     const project = await store.createProjectV2(inputV2);
     armed = true;
 
-    const result = await store.applyMutationBatchV2(
+    const resultPromise = store.applyMutationBatchV2(
       makeStudioMutationBatchV2(project, [
         {
           kind: 'add_beat',
@@ -4845,6 +5243,19 @@ describe('schema-2 creative studio project store', () => {
       makeMutationContextV2({ mutationId: 'mutation_retry', capturedAt: '2026-08-17T12:00:02.000Z' }),
       'opaque/retry-tag'
     );
+    let settled = false;
+    void resultPromise.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      }
+    );
+    await retryStarted;
+    expect(settled).toBe(false);
+    releaseRetry();
+    const result = await resultPromise;
 
     expect(result.project).toMatchObject({ id: projectId, revision: project.revision + 1 });
     expect(facts).toEqual([
@@ -4857,12 +5268,10 @@ describe('schema-2 creative studio project store', () => {
       },
     ]);
     expect(facts.every(Object.isFrozen)).toBe(true);
-    await vi.waitFor(() => {
-      expect(
-        readJson<{ projects: Array<{ beatCount: number; shotCount: number }> }>(path.join(rootDir, 'projects-v2.json'))
-          .projects
-      ).toEqual([expect.objectContaining({ beatCount: 1, shotCount: 1 })]);
-    });
+    expect(
+      readJson<{ projects: Array<{ beatCount: number; shotCount: number }> }>(path.join(rootDir, 'projects-v2.json'))
+        .projects
+    ).toEqual([expect.objectContaining({ beatCount: 1, shotCount: 1 })]);
     expect(renameDestinations.map((destination) => path.basename(destination))).toEqual([
       'project.json',
       'projects-v2.json',
@@ -4930,6 +5339,184 @@ describe('schema-2 creative studio project store', () => {
     expect(existsSync(path.join(rootDir, projectId))).toBe(true);
     expect(readFileSync(manifestFile)).toEqual(manifestBefore);
     expect(protectedFs.accesses).toEqual([]);
+  });
+
+  it('preserves and restores a replacement project directory raced into V2 deletion', async () => {
+    const { store: base } = createStoreV2({ createId: () => 'delete_replacement_v2', now: () => timestamp });
+    const project = await base.createProjectV2(inputV2);
+    const targetDirectory = realpathSync(path.join(rootDir, project.id));
+    const originalProjectBytes = readFileSync(path.join(targetDirectory, 'project.json'));
+    const originalBackup = path.join(rootDir, '.external-original-backup');
+    const replacementBytes = Buffer.from('replacement project bytes');
+    let replacementInstalled = false;
+    const racingFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver) as unknown;
+        if (property !== 'rename' || typeof value !== 'function') return value;
+        return (...args: unknown[]): unknown => {
+          if (
+            !replacementInstalled &&
+            String(args[0]) === targetDirectory &&
+            String(args[1]).endsWith(`/.delete-${project.id}`)
+          ) {
+            renameSync(targetDirectory, originalBackup);
+            mkdirSync(targetDirectory);
+            writeFileSync(path.join(targetDirectory, 'sentinel.bin'), replacementBytes);
+            replacementInstalled = true;
+          }
+          return Reflect.apply(value, target, args);
+        };
+      },
+    }) as typeof nodeFs;
+    const racing = createCreativeStudioStore({ rootDir, fs: racingFs, logError: () => undefined });
+
+    await expect(racing.deleteProjectV2(project.id, project.revision)).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+    expect(replacementInstalled).toBe(true);
+    expect(readFileSync(path.join(targetDirectory, 'sentinel.bin'))).toEqual(replacementBytes);
+    expect(readFileSync(path.join(originalBackup, 'project.json'))).toEqual(originalProjectBytes);
+    expect(existsSync(path.join(rootDir, `.delete-${project.id}`))).toBe(false);
+  });
+
+  it('resumes an identity-bound V2 deletion on the first queued read after quarantine cleanup fails', async () => {
+    const { store: base } = createStoreV2({ createId: () => 'delete_resume_v2', now: () => timestamp });
+    const project = await base.createProjectV2(inputV2);
+    const quarantineDirectory = realpathSync(rootDir) + `/.delete-${project.id}`;
+    const crashing = createCreativeStudioStore({
+      rootDir,
+      fs: failFileSystemOnceV2(
+        (method, args) => method === 'rm' && String(args[0]) === quarantineDirectory && args[1] !== undefined
+      ),
+      logError: () => undefined,
+    });
+
+    await expect(crashing.deleteProjectV2(project.id, project.revision)).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+    expect(existsSync(path.join(rootDir, project.id))).toBe(false);
+    expect(existsSync(quarantineDirectory)).toBe(true);
+    expect(existsSync(path.join(realpathSync(rootDir), `.delete-${project.id}.json`))).toBe(true);
+
+    const restarted = createStoreV2().store;
+    await expect(restarted.getProjectV2(project.id)).resolves.toEqual({ status: 'not_found', projectId: project.id });
+    expect(existsSync(quarantineDirectory)).toBe(false);
+    expect(existsSync(path.join(realpathSync(rootDir), `.delete-${project.id}.json`))).toBe(false);
+  });
+
+  it('does not grant deletion authority to a temporary-only marker and promotes it only on an explicit retry', async () => {
+    const { store: base } = createStoreV2({ createId: () => 'delete_temp_only_v2', now: () => timestamp });
+    const project = await base.createProjectV2(inputV2);
+    const projectDirectory = realpathSync(path.join(rootDir, project.id));
+    const projectBytes = readFileSync(path.join(projectDirectory, 'project.json'), 'utf8');
+    const directory = lstatSync(projectDirectory);
+    const temporaryMarker = path.join(realpathSync(rootDir), `.delete-${project.id}.json.publish`);
+    writeFileSync(
+      temporaryMarker,
+      JSON.stringify(
+        {
+          schemaVersion: 2,
+          projectId: project.id,
+          expectedRevision: project.revision,
+          directoryDev: directory.dev,
+          directoryIno: directory.ino,
+          projectSha256: createHash('sha256').update(projectBytes).digest('hex'),
+        },
+        null,
+        2
+      )
+    );
+
+    const restarted = createStoreV2().store;
+    await expect(restarted.getProjectV2(project.id)).resolves.toEqual({ status: 'supported', project });
+    expect(existsSync(temporaryMarker)).toBe(true);
+
+    await expect(restarted.deleteProjectV2(project.id, project.revision)).resolves.toBe(true);
+    expect(existsSync(projectDirectory)).toBe(false);
+    expect(existsSync(temporaryMarker)).toBe(false);
+    expect(existsSync(path.join(realpathSync(rootDir), `.delete-${project.id}.json`))).toBe(false);
+  });
+
+  it('removes only its exact partial deletion-marker temporary when a marker write fails', async () => {
+    const { store: base } = createStoreV2({ createId: () => 'delete_partial_marker_v2', now: () => timestamp });
+    const project = await base.createProjectV2(inputV2);
+    const temporaryMarker = path.join(realpathSync(rootDir), `.delete-${project.id}.json.publish`);
+    let injected = false;
+    const failingFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        if (property !== 'open') return Reflect.get(target, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.open>) => {
+          const handle = await nodeFs.open(...args);
+          if (String(args[0]) !== temporaryMarker) return handle;
+          return new Proxy(handle, {
+            get(handleTarget, handleProperty, handleReceiver) {
+              if (handleProperty !== 'writeFile') return Reflect.get(handleTarget, handleProperty, handleReceiver);
+              return async (...writeArgs: Parameters<typeof handle.writeFile>) => {
+                if (!injected) {
+                  injected = true;
+                  await handle.writeFile('{', { encoding: 'utf8' });
+                  throw Object.assign(new Error('injected deletion marker write failure'), { code: 'EIO' });
+                }
+                return handle.writeFile(...writeArgs);
+              };
+            },
+          });
+        };
+      },
+    }) as typeof nodeFs;
+    const failing = createCreativeStudioStore({ rootDir, fs: failingFs, now: () => timestamp });
+
+    await expect(failing.deleteProjectV2(project.id, project.revision)).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+    expect(injected).toBe(true);
+    expect(existsSync(temporaryMarker)).toBe(false);
+    expect(existsSync(path.join(rootDir, `.delete-${project.id}.json`))).toBe(false);
+    await expect(base.getProjectV2(project.id)).resolves.toEqual({ status: 'supported', project });
+  });
+
+  it('preserves an exact quarantine and a replacement live directory raced in before deletion cleanup', async () => {
+    const { store: base } = createStoreV2({ createId: () => 'delete_late_replacement_v2', now: () => timestamp });
+    const project = await base.createProjectV2(inputV2);
+    const targetDirectory = realpathSync(path.join(rootDir, project.id));
+    const quarantineDirectory = realpathSync(rootDir) + `/.delete-${project.id}`;
+    const replacementBytes = Buffer.from('late replacement bytes');
+    let quarantined = false;
+    let replacementInstalled = false;
+    const racingFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver) as unknown;
+        if (typeof value !== 'function') return value;
+        if (property === 'rename') {
+          return async (...args: Parameters<typeof nodeFs.rename>) => {
+            const result = await nodeFs.rename(...args);
+            if (String(args[0]) === targetDirectory && String(args[1]) === quarantineDirectory) quarantined = true;
+            return result;
+          };
+        }
+        if (property === 'lstat') {
+          return async (...args: Parameters<typeof nodeFs.lstat>) => {
+            const result = await nodeFs.lstat(...args);
+            if (quarantined && !replacementInstalled && String(args[0]) === quarantineDirectory) {
+              mkdirSync(targetDirectory);
+              writeFileSync(path.join(targetDirectory, 'sentinel.bin'), replacementBytes);
+              replacementInstalled = true;
+            }
+            return result;
+          };
+        }
+        return value.bind(target);
+      },
+    }) as typeof nodeFs;
+    const racing = createCreativeStudioStore({ rootDir, fs: racingFs, now: () => timestamp });
+
+    await expect(racing.deleteProjectV2(project.id, project.revision)).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+    expect(replacementInstalled).toBe(true);
+    expect(readFileSync(path.join(targetDirectory, 'sentinel.bin'))).toEqual(replacementBytes);
+    expect(existsSync(path.join(quarantineDirectory, 'project.json'))).toBe(true);
+    expect(existsSync(path.join(rootDir, `.delete-${project.id}.json`))).toBe(true);
   });
 
   it('deletes only a supported schema-2 project and refuses the schema-1 identity without touching it', async () => {
@@ -5696,6 +6283,2007 @@ describe('schema-2 creative studio project store', () => {
     expect(readFileSync(prototypeIndexFile)).toEqual(prototypeIndexBefore);
     expect(existsSync(path.join(rootDir, 'projects-v2.json'))).toBe(false);
     expect(prototypeIndexAccesses).toEqual([]);
+  });
+
+  it('lists, accepts, and restart-retries one mutation proposal without reapplying it', async () => {
+    const { store } = createStoreV2({
+      createId: () => 'proposal_project_v2',
+      now: () => '2026-08-17T12:00:01.000Z',
+    });
+    const project = await store.createProjectV2(inputV2);
+    const { proposal, directories } = await seedProposalV2(store, project);
+
+    await expect(store.listProposalsV2(project.id)).resolves.toEqual([proposal]);
+    const accepted = await store.acceptProposalV2(project.id, proposal.id);
+
+    expect(accepted).toMatchObject({ applied: true, proposal: { id: proposal.id, status: 'accepted' } });
+    expect(accepted.project).toMatchObject({ revision: project.revision + 1, brief: 'Accepted brief' });
+    expect(accepted.project.undoHistory.at(-1)).toMatchObject({
+      id: proposal.id,
+      sourceRevision: project.revision + 1,
+      label: 'set_brief',
+    });
+    expect(readdirSync(directories.commits)).toEqual([]);
+    expect(readdirSync(directories.slots)).toEqual([]);
+    expect(readJson<{ status: string }>(path.join(directories.decisions, `${proposal.id}.json`)).status).toBe(
+      'accepted'
+    );
+
+    const restarted = createStoreV2({ now: () => '2026-08-17T12:00:02.000Z' }).store;
+    const retry = await restarted.acceptProposalV2(project.id, proposal.id);
+    expect(retry.applied).toBe(false);
+    expect(retry.project.revision).toBe(project.revision + 1);
+    expect(retry.project.undoHistory.filter((entry) => entry.id === proposal.id)).toHaveLength(1);
+  });
+
+  it('accepts pin_rule by applying one deterministic set_rules reducer operation', async () => {
+    const ids = ['pin_project_v2', 'pinned_rule_v2'];
+    const { store } = createStoreV2({
+      createId: () => ids.shift() ?? 'unexpected_id',
+      now: () => '2026-08-17T12:00:01.000Z',
+    });
+    const project = await store.createProjectV2(inputV2);
+    const { proposal } = await seedProposalV2(store, project, {
+      proposalId: 'proposal_pin_v2',
+      payload: { kind: 'pin_rule', rule: { text: 'Never show a logo', predicate: null } },
+    });
+
+    const accepted = await store.acceptProposalV2(project.id, proposal.id);
+
+    expect(accepted.project.rules).toEqual([
+      {
+        id: 'pinned_rule_v2',
+        scope: 'project',
+        text: 'Never show a logo',
+        predicate: null,
+        createdAt: '2026-08-17T12:00:01.000Z',
+      },
+    ]);
+    expect(accepted.project.undoHistory.at(-1)).toMatchObject({ id: proposal.id, label: 'set_rules' });
+  });
+
+  it('returns an empty V2 proposal list without creating a proposal directory family', async () => {
+    const { store } = createStoreV2({ createId: () => 'empty_proposals_v2', now: () => timestamp });
+    const project = await store.createProjectV2(inputV2);
+    const projectDir = realpathSync(path.join(rootDir, project.id));
+    const before = snapshotTreeV2(projectDir);
+
+    await expect(store.listProposalsV2(project.id)).resolves.toEqual([]);
+
+    expect(snapshotTreeV2(projectDir)).toEqual(before);
+    expect(existsSync(path.join(projectDir, 'proposals'))).toBe(false);
+  });
+
+  it.each([
+    {
+      stage: 'attribution link',
+      exactBefore: true,
+      fail: (method: string, args: readonly unknown[], projectDir: string) =>
+        method === 'link' && String(args[1]) === path.join(projectDir, 'proposals', 'commits', 'proposal_crash.json'),
+    },
+    {
+      stage: 'project rename',
+      exactBefore: true,
+      fail: (method: string, args: readonly unknown[], projectDir: string) =>
+        method === 'rename' && String(args[1]) === path.join(projectDir, 'project.json'),
+    },
+    {
+      stage: 'decision link',
+      exactBefore: false,
+      fail: (method: string, args: readonly unknown[], projectDir: string) =>
+        method === 'link' && String(args[1]) === path.join(projectDir, 'proposals', 'decisions', 'proposal_crash.json'),
+    },
+    {
+      stage: 'attribution companion cleanup',
+      exactBefore: false,
+      fail: (method: string, args: readonly unknown[], projectDir: string) =>
+        method === 'rm' &&
+        String(args[0]) === path.join(projectDir, 'proposals', 'commits', 'proposal_crash.json.publish'),
+    },
+    {
+      stage: 'attribution quarantine',
+      exactBefore: false,
+      fail: (method: string, args: readonly unknown[], projectDir: string) =>
+        method === 'rename' && String(args[0]) === path.join(projectDir, 'proposals', 'commits', 'proposal_crash.json'),
+    },
+    {
+      stage: 'attribution quarantine cleanup',
+      exactBefore: false,
+      fail: (method: string, args: readonly unknown[], projectDir: string) =>
+        method === 'rm' &&
+        String(args[0]).startsWith(path.join(projectDir, 'proposals', 'commits', 'proposal_crash.json.')) &&
+        String(args[0]).endsWith('.cleanup'),
+    },
+    {
+      stage: 'slot quarantine',
+      exactBefore: false,
+      fail: (method: string, args: readonly unknown[], projectDir: string) =>
+        method === 'rename' && String(args[0]) === path.join(projectDir, 'proposals', 'slots', '0.slot'),
+    },
+    {
+      stage: 'slot quarantine cleanup',
+      exactBefore: false,
+      fail: (method: string, args: readonly unknown[], projectDir: string) =>
+        method === 'rm' &&
+        String(args[0]).startsWith(path.join(projectDir, 'proposals', 'slots', '0.slot.')) &&
+        String(args[0]).endsWith('.cleanup'),
+    },
+  ])('repairs a restart after an injected $stage crash without reducer replay', async ({ exactBefore, fail }) => {
+    const base = createStoreV2({
+      createId: () => 'crash_project_v2',
+      now: () => '2026-08-17T12:00:00.000Z',
+    }).store;
+    const project = await base.createProjectV2(inputV2);
+    const { proposal, directories } = await seedProposalV2(base, project, { proposalId: 'proposal_crash' });
+    const projectDir = realpathSync(path.join(rootDir, project.id));
+    const crashing = createCreativeStudioStore({
+      rootDir,
+      fs: failFileSystemOnceV2((method, args) => fail(method, args, projectDir)),
+      now: () => '2026-08-17T12:00:01.000Z',
+      logError: () => undefined,
+    });
+
+    await expect(crashing.acceptProposalV2(project.id, proposal.id)).rejects.toMatchObject({ code: 'storage_error' });
+
+    const restarted = createStoreV2({ now: () => '2026-08-17T12:00:02.000Z' }).store;
+    const loaded = await restarted.getProjectV2(project.id);
+    expect(loaded.status).toBe('supported');
+    if (loaded.status !== 'supported') throw new Error('expected supported project');
+    expect(loaded.project.revision).toBe(exactBefore ? project.revision : project.revision + 1);
+    const repaired = await restarted.listProposalsV2(project.id);
+    expect(repaired).toHaveLength(1);
+    expect(repaired[0].status).toBe(exactBefore ? 'pending' : 'accepted');
+    expect(readdirSync(directories.commits)).toEqual([]);
+
+    const retry = await restarted.acceptProposalV2(project.id, proposal.id);
+    expect(retry.applied).toBe(exactBefore);
+    expect(retry.project.revision).toBe(project.revision + 1);
+    expect(retry.project.undoHistory.filter((entry) => entry.id === proposal.id)).toHaveLength(1);
+    expect(readdirSync(directories.slots)).toEqual([]);
+  });
+
+  it('rechecks exact project temp bytes after async proposal authority before rename', async () => {
+    const base = createStoreV2({ createId: () => 'project_temp_race_v2', now: () => timestamp }).store;
+    const project = await base.createProjectV2(inputV2);
+    const seeded = await seedProposalV2(base, project, { proposalId: 'proposal_project_temp_race' });
+    const projectDir = path.join(rootDir, project.id);
+    const projectFile = path.join(projectDir, 'project.json');
+    const projectBefore = readFileSync(projectFile);
+    let replacedTemporary = false;
+    const racingFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver) as unknown;
+        if (property !== 'readdir' || typeof value !== 'function') return value;
+        return (...args: unknown[]): unknown => {
+          if (!replacedTemporary && String(args[0]).endsWith('/proposals/commits')) {
+            const temporary = readdirSync(projectDir).find(
+              (name) => name.startsWith('project.json.') && name.endsWith('.tmp')
+            );
+            if (temporary !== undefined) {
+              replacedTemporary = true;
+              writeFileSync(path.join(projectDir, temporary), '{"third":"state"}');
+            }
+          }
+          return Reflect.apply(value, target, args);
+        };
+      },
+    }) as typeof nodeFs;
+    const racing = createCreativeStudioStore({
+      rootDir,
+      fs: racingFs,
+      now: () => '2026-08-17T12:00:01.000Z',
+      logError: () => undefined,
+    });
+
+    await expect(racing.acceptProposalV2(project.id, seeded.proposal.id)).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+    expect(replacedTemporary).toBe(true);
+    expect(readFileSync(projectFile)).toEqual(projectBefore);
+
+    const restarted = createStoreV2({ now: () => '2026-08-17T12:00:02.000Z' }).store;
+    await expect(restarted.getProjectV2(project.id)).resolves.toMatchObject({
+      status: 'supported',
+      project: { revision: project.revision },
+    });
+    expect(readdirSync(seeded.directories.commits)).toEqual([]);
+  });
+
+  it('rechecks the project CAS after temp verification and preserves a newer project before proposal rename', async () => {
+    const base = createStoreV2({ createId: () => 'project_cas_race_v2', now: () => timestamp }).store;
+    const project = await base.createProjectV2(inputV2);
+    const seeded = await seedProposalV2(base, project, { proposalId: 'proposal_project_cas_race' });
+    const projectDir = realpathSync(path.join(rootDir, project.id));
+    const projectFile = path.join(projectDir, 'project.json');
+    const externalProject = {
+      ...(JSON.parse(readFileSync(projectFile, 'utf8')) as StudioProjectV2),
+      name: 'External winner',
+      revision: project.revision + 1,
+      updatedAt: '2026-08-17T12:00:00.500Z',
+    };
+    const externalBytes = `${JSON.stringify(externalProject, null, 2)}\n`;
+    let replacedProject = false;
+    const racingFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver) as unknown;
+        if (property !== 'realpath' || typeof value !== 'function') return value;
+        return (...args: unknown[]): unknown => {
+          const projectTemporaryExists = readdirSync(projectDir).some(
+            (name) => name.startsWith('project.json.') && name.endsWith('.tmp')
+          );
+          if (!replacedProject && String(args[0]) === projectDir && projectTemporaryExists) {
+            const replacement = `${projectFile}.external`;
+            writeFileSync(replacement, externalBytes);
+            renameSync(replacement, projectFile);
+            replacedProject = true;
+          }
+          return Reflect.apply(value, target, args);
+        };
+      },
+    }) as typeof nodeFs;
+    const racing = createCreativeStudioStore({
+      rootDir,
+      fs: racingFs,
+      now: () => '2026-08-17T12:00:01.000Z',
+      logError: () => undefined,
+    });
+
+    await expect(racing.acceptProposalV2(project.id, seeded.proposal.id)).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+    expect(replacedProject).toBe(true);
+    expect(readFileSync(projectFile, 'utf8')).toBe(externalBytes);
+  });
+
+  it('fails every fenced project operation on attribution mismatch and preserves the byte tree', async () => {
+    const { store } = createStoreV2({
+      createId: () => 'mismatch_project_v2',
+      now: () => '2026-08-17T12:00:01.000Z',
+    });
+    const project = await store.createProjectV2(inputV2);
+    const { proposal, directories } = await seedProposalV2(store, project, { proposalId: 'proposal_mismatch' });
+    const projectBytes = readFileSync(path.join(rootDir, project.id, 'project.json'), 'utf8');
+    const attribution: StudioProposalCommitAttributionV2 = {
+      schemaVersion: 2,
+      proposalId: proposal.id,
+      projectId: project.id,
+      baseRevision: project.revision,
+      appliedRevision: project.revision + 1,
+      beforeProjectSha256: createHash('sha256').update(projectBytes).digest('hex'),
+      afterProjectSha256: 'b'.repeat(64),
+      createdBeatIds: ['forged_beat'],
+      createdShotIds: [],
+      decidedAt: '2026-08-17T12:00:01.000Z',
+    };
+    writeFileSync(path.join(directories.commits, `${proposal.id}.json`), JSON.stringify(attribution, null, 2));
+    const before = snapshotTreeV2(rootDir);
+    const update = vi.fn((current: StudioProjectV2) => current);
+
+    await expect(store.getProjectV2(project.id)).rejects.toMatchObject({ code: 'storage_error' });
+    await expect(store.updateProjectV2(project.id, update, project.revision)).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+    await expect(store.deleteProjectV2(project.id, project.revision)).rejects.toMatchObject({ code: 'storage_error' });
+    expect(update).not.toHaveBeenCalled();
+    expect(snapshotTreeV2(rootDir)).toEqual(before);
+  });
+
+  it('fails an exact-before attribution whose decision predates its immutable proposal', async () => {
+    const { store } = createStoreV2({ createId: () => 'attribution_clock_v2', now: () => timestamp });
+    const project = await store.createProjectV2(inputV2);
+    const seeded = await seedProposalV2(store, project, { proposalId: 'proposal_attribution_clock' });
+    const projectBytes = readFileSync(path.join(rootDir, project.id, 'project.json'), 'utf8');
+    const attribution: StudioProposalCommitAttributionV2 = {
+      schemaVersion: 2,
+      proposalId: seeded.proposal.id,
+      projectId: project.id,
+      baseRevision: project.revision,
+      appliedRevision: project.revision + 1,
+      beforeProjectSha256: createHash('sha256').update(projectBytes).digest('hex'),
+      afterProjectSha256: 'c'.repeat(64),
+      createdBeatIds: [],
+      createdShotIds: [],
+      decidedAt: '2026-08-17T11:59:59.000Z',
+    };
+    const attributionFile = path.join(seeded.directories.commits, `${seeded.proposal.id}.json`);
+    writeFileSync(attributionFile, JSON.stringify(attribution));
+    linkSync(attributionFile, `${attributionFile}.publish`);
+    const before = snapshotTreeV2(path.join(rootDir, project.id));
+
+    await expect(store.getProjectV2(project.id)).rejects.toMatchObject({ code: 'storage_error' });
+
+    expect(snapshotTreeV2(path.join(rootDir, project.id))).toEqual(before);
+  });
+
+  it('rejects, expires, reaps, and deduplicates watched V2 proposal status changes', async () => {
+    let notifyChange: ((relativeFile: string) => void) | undefined;
+    const listener = vi.fn();
+    const { store } = createStoreV2({
+      createId: () => 'lifecycle_project_v2',
+      now: () => '2026-08-17T12:00:01.000Z',
+      watchProposalTree: ({ onChange }) => {
+        notifyChange = onChange;
+        return { close: vi.fn() };
+      },
+    });
+    const project = await store.createProjectV2(inputV2);
+    const first = await seedProposalV2(store, project, { proposalId: 'proposal_reject' });
+    const stop = await store.watchProposalsV2(listener);
+    notifyChange?.(`${project.id}/proposals/pending/${first.proposal.id}.json`);
+    notifyChange?.(`${project.id}/proposals/pending/${first.proposal.id}.json`);
+    await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(1));
+    const projectBefore = readFileSync(path.join(rootDir, project.id, 'project.json'));
+    await expect(store.rejectProposalV2(project.id, first.proposal.id)).resolves.toMatchObject({ status: 'rejected' });
+    notifyChange?.(`${project.id}/proposals/decisions/${first.proposal.id}.json`);
+    await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(2));
+    expect(readFileSync(path.join(rootDir, project.id, 'project.json'))).toEqual(projectBefore);
+    await stop();
+
+    const expiredProposal: StudioProposalRecordV2 = {
+      ...first.proposal,
+      id: 'proposal_expire',
+      createdAt: '2026-08-01T00:00:00.000Z',
+    };
+    writeFileSync(path.join(first.directories.pending, `${expiredProposal.id}.json`), JSON.stringify(expiredProposal));
+    writeFileSync(
+      path.join(first.directories.slots, '1.slot'),
+      JSON.stringify({ schemaVersion: 2, proposalId: expiredProposal.id, reservedAt: expiredProposal.createdAt })
+    );
+    await store.reapAbandonedProposalsV2();
+    await expect(store.listProposalsV2(project.id)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: first.proposal.id, status: 'rejected' }),
+        expect.objectContaining({ id: expiredProposal.id, status: 'expired' }),
+      ])
+    );
+    expect(readdirSync(first.directories.slots)).toEqual([]);
+  });
+
+  it('arms the V2 proposal watcher before the first supported project is created', async () => {
+    let notifyChange: ((relativeFile: string) => void) | undefined;
+    const listener = vi.fn();
+    const { store } = createStoreV2({
+      createId: () => 'watch_before_project_v2',
+      now: () => timestamp,
+      watchProposalTree: ({ onChange }) => {
+        notifyChange = onChange;
+        return { close: vi.fn() };
+      },
+    });
+    const stop = await store.watchProposalsV2(listener);
+    const project = await store.createProjectV2(inputV2);
+    const seeded = await seedProposalV2(store, project, { proposalId: 'proposal_after_watch' });
+
+    notifyChange?.(`${project.id}/proposals/pending/${seeded.proposal.id}.json`);
+    await vi.waitFor(() => expect(listener).toHaveBeenCalledWith(project.id, seeded.proposal.id));
+    await stop();
+  });
+
+  it('creates only a complete V2 proposal directory generation and refuses a pre-existing partial family', async () => {
+    const { store } = createStoreV2({
+      createId: vi.fn().mockReturnValueOnce('complete_paths_v2').mockReturnValueOnce('partial_paths_v2'),
+      now: () => timestamp,
+    });
+    const complete = await store.createProjectV2(inputV2);
+    const completePaths = await store.resolveProposalPathsV2(complete.id);
+    expect(readdirSync(path.join(completePaths.projectDir, 'proposals')).toSorted()).toEqual([
+      'commits',
+      'decisions',
+      'pending',
+      'slots',
+    ]);
+
+    const partial = await store.createProjectV2(inputV2);
+    const partialRoot = path.join(rootDir, partial.id, 'proposals');
+    mkdirSync(path.join(partialRoot, 'pending'), { recursive: true });
+    mkdirSync(path.join(partialRoot, 'decisions'));
+    mkdirSync(path.join(partialRoot, 'slots'));
+    await expect(store.resolveProposalPathsV2(partial.id)).rejects.toMatchObject({ code: 'storage_error' });
+    expect(readdirSync(partialRoot).toSorted()).toEqual(['decisions', 'pending', 'slots']);
+  });
+
+  it.each([
+    ['proposal', 'proposals', ['pending', 'decisions', 'slots', 'commits']] as const,
+    ['reference', 'reference-requests', ['pending', 'decisions', 'slots', 'receipts']] as const,
+  ])('does not publish a staged %s family after the project becomes schema-1', async (kind, family, children) => {
+    const projectId = `family_schema_race_${kind}_v2`;
+    const base = createStoreV2({ createId: () => projectId, now: () => timestamp }).store;
+    await base.createProjectV2(inputV2);
+    const projectDirectory = realpathSync(path.join(rootDir, projectId));
+    const projectFile = path.join(projectDirectory, 'project.json');
+    const replacementBytes = `${JSON.stringify({ schemaVersion: 1, id: projectId, sentinel: kind }, null, 2)}\n`;
+    let replaced = false;
+    const racingFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver) as unknown;
+        if (property !== 'lstat' || typeof value !== 'function') return value;
+        return async (...args: Parameters<typeof nodeFs.lstat>) => {
+          if (!replaced && String(args[0]) === projectFile) {
+            const stageName = readdirSync(projectDirectory).find(
+              (name) => name.startsWith(`.${family}.`) && name.endsWith('.tmp')
+            );
+            const stage = stageName === undefined ? null : path.join(projectDirectory, stageName);
+            if (stage !== null && children.every((child) => existsSync(path.join(stage, child)))) {
+              const replacement = `${projectFile}.external`;
+              writeFileSync(replacement, replacementBytes);
+              renameSync(replacement, projectFile);
+              replaced = true;
+            }
+          }
+          return nodeFs.lstat(...args);
+        };
+      },
+    }) as typeof nodeFs;
+    const racing = createCreativeStudioStore({ rootDir, fs: racingFs, logError: () => undefined });
+
+    const attempt =
+      kind === 'proposal' ? racing.resolveProposalPathsV2(projectId) : racing.resolveReferenceRequestPathsV2(projectId);
+    await expect(attempt).rejects.toMatchObject({ code: 'storage_error' });
+    expect(replaced).toBe(true);
+    expect(readFileSync(projectFile, 'utf8')).toBe(replacementBytes);
+    expect(existsSync(path.join(projectDirectory, family))).toBe(false);
+    expect(readdirSync(projectDirectory).filter((name) => name.startsWith(`.${family}.`))).toEqual([]);
+  });
+
+  it('lists, generates, dismisses, and restart-retries one reference handoff without changing project bytes', async () => {
+    const ids = ['reference_lifecycle_v2', 'handoff_lifecycle_v2'];
+    const { store } = createStoreV2({
+      createId: () => ids.shift() ?? 'unexpected_reference_id',
+      now: () => '2026-08-17T12:00:02.000Z',
+    });
+    const created = await store.createProjectV2(inputV2);
+    const project = await addActiveReferenceShotsV2(store, created);
+    const { request, directories } = await seedReferenceRequestV2(store, project);
+    const projectFile = path.join(rootDir, project.id, 'project.json');
+    const projectBefore = readFileSync(projectFile);
+
+    await expect(store.listReferenceRequestsV2(project.id)).resolves.toEqual([
+      { request, decision: null, receipt: null },
+    ]);
+    const decided = await store.decideReferenceRequestV2({
+      projectId: project.id,
+      requestId: request.id,
+      expectedRevision: project.revision,
+      outcome: { kind: 'generation_gate' },
+    });
+    expect(decided).toMatchObject({
+      request: { id: request.id },
+      decision: {
+        outcome: { kind: 'generation_gate', handoffId: 'handoff_lifecycle_v2', shotIds: request.shotIds },
+      },
+      receipt: null,
+    });
+    expect(readdirSync(directories.slots)).toEqual(['0.slot']);
+    const retryDecision = await store.decideReferenceRequestV2({
+      projectId: project.id,
+      requestId: request.id,
+      expectedRevision: 1,
+      outcome: { kind: 'generation_gate' },
+    });
+    expect(retryDecision.decision).toEqual(decided.decision);
+
+    await expect(store.readReferenceGenerationHandoffV2(project.id, 'handoff_lifecycle_v2')).resolves.toEqual(decided);
+    const dismissed = await store.recordReferenceGenerationHandoffReceiptV2({
+      projectId: project.id,
+      handoffId: 'handoff_lifecycle_v2',
+      expectedRevision: project.revision,
+      result: { kind: 'dismissed' },
+    });
+    expect(dismissed.receipt).toEqual({
+      schemaVersion: 2,
+      handoffId: 'handoff_lifecycle_v2',
+      requestId: request.id,
+      completedAt: '2026-08-17T12:00:02.000Z',
+      result: { kind: 'dismissed' },
+    });
+    expect(readdirSync(directories.slots)).toEqual([]);
+    await expect(
+      store.recordReferenceGenerationHandoffReceiptV2({
+        projectId: project.id,
+        handoffId: 'handoff_lifecycle_v2',
+        expectedRevision: 1,
+        result: { kind: 'dismissed' },
+      })
+    ).resolves.toEqual(dismissed);
+    expect(readFileSync(projectFile)).toEqual(projectBefore);
+
+    const restarted = createStoreV2({ now: () => '2026-08-17T12:00:04.000Z' }).store;
+    await expect(restarted.readReferenceGenerationHandoffV2(project.id, 'handoff_lifecycle_v2')).resolves.toEqual(
+      dismissed
+    );
+  });
+
+  it('selects only a current classified Brief image and allows rejection after request shots become inactive', async () => {
+    const { store } = createStoreV2({ createId: () => 'reference_import_v2', now: () => timestamp });
+    const created = await store.createProjectV2(inputV2);
+    const active = await addActiveReferenceShotsV2(store, created);
+    const withReference = await store.updateProjectV2(
+      active.id,
+      (project) => ({
+        ...project,
+        assets: {
+          ...project.assets,
+          brief_image: {
+            id: 'brief_image',
+            projectId: project.id,
+            shotId: null,
+            mediaKind: 'image',
+            mimeType: 'image/png',
+            managedAsset: { collection: 'imports', fileName: 'brief_image.png' },
+            byteSize: 1,
+            sha256: 'a'.repeat(64),
+            createdAt: timestamp,
+            briefReferenceRole: 'look',
+            briefReferenceLabel: 'Look board',
+          },
+        },
+      }),
+      active.revision
+    );
+    const imported = await seedReferenceRequestV2(store, withReference, {
+      requestId: 'request_imported',
+      slotIndex: 0,
+    });
+    const projectFile = path.join(rootDir, withReference.id, 'project.json');
+    const projectBefore = readFileSync(projectFile);
+    await expect(
+      store.decideReferenceRequestV2({
+        projectId: withReference.id,
+        requestId: imported.request.id,
+        expectedRevision: withReference.revision,
+        outcome: { kind: 'imported_reference', assetId: 'brief_image' },
+      })
+    ).resolves.toMatchObject({
+      decision: {
+        outcome: {
+          kind: 'imported_reference',
+          assetId: 'brief_image',
+          projectRevision: withReference.revision,
+        },
+      },
+    });
+    expect(readFileSync(projectFile)).toEqual(projectBefore);
+
+    const stale = await seedReferenceRequestV2(store, withReference, {
+      requestId: 'request_inactive',
+      slotIndex: 1,
+    });
+    await expect(
+      store.decideReferenceRequestV2({
+        projectId: withReference.id,
+        requestId: stale.request.id,
+        expectedRevision: withReference.revision,
+        outcome: { kind: 'imported_reference', assetId: 'missing_asset' },
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+    const deleted = await store.applyMutationBatchV2(
+      {
+        schemaVersion: 2,
+        projectId: withReference.id,
+        expectedRevision: withReference.revision,
+        operations: [{ kind: 'delete_shot', shotId: 'shot_reference' }],
+      },
+      { mutationId: 'delete_reference_shot', capturedAt: timestamp }
+    );
+    await expect(
+      store.decideReferenceRequestV2({
+        projectId: withReference.id,
+        requestId: stale.request.id,
+        expectedRevision: deleted.project.revision,
+        outcome: { kind: 'rejected' },
+      })
+    ).resolves.toMatchObject({ decision: { outcome: { kind: 'rejected' } } });
+  });
+
+  it('revalidates imported assets at the selected revision and preserves the immutable decision afterward', async () => {
+    const { store } = createStoreV2({ createId: () => 'reference_asset_race_v2', now: () => timestamp });
+    const created = await store.createProjectV2(inputV2);
+    const active = await addActiveReferenceShotsV2(store, created);
+    const asset: StudioAssetV2 = {
+      id: 'race_brief_image',
+      projectId: active.id,
+      shotId: null,
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'imports', fileName: 'race_brief_image.png' },
+      byteSize: 1,
+      sha256: 'b'.repeat(64),
+      createdAt: timestamp,
+      briefReferenceRole: 'look',
+      briefReferenceLabel: 'Race look',
+    };
+    const selected = await store.updateProjectV2(
+      active.id,
+      (project) => ({ ...project, assets: { ...project.assets, [asset.id]: asset } }),
+      active.revision
+    );
+    const seeded = await seedReferenceRequestV2(store, selected, { requestId: 'asset_race_request' });
+    const detached = await store.updateProjectV2(
+      selected.id,
+      (project) => {
+        const assets = { ...project.assets };
+        delete assets[asset.id];
+        return { ...project, assets };
+      },
+      selected.revision
+    );
+
+    await expect(
+      store.decideReferenceRequestV2({
+        projectId: selected.id,
+        requestId: seeded.request.id,
+        expectedRevision: selected.revision,
+        outcome: { kind: 'imported_reference', assetId: asset.id },
+      })
+    ).rejects.toMatchObject({ code: 'stale_project' });
+    await expect(
+      store.decideReferenceRequestV2({
+        projectId: selected.id,
+        requestId: seeded.request.id,
+        expectedRevision: detached.revision,
+        outcome: { kind: 'imported_reference', assetId: asset.id },
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+    expect(readdirSync(seeded.directories.decisions)).toEqual([]);
+    expect(readdirSync(seeded.directories.slots)).toEqual(['0.slot']);
+
+    const reattached = await store.updateProjectV2(
+      selected.id,
+      (project) => ({ ...project, assets: { ...project.assets, [asset.id]: asset } }),
+      detached.revision
+    );
+    const imported = await store.decideReferenceRequestV2({
+      projectId: selected.id,
+      requestId: seeded.request.id,
+      expectedRevision: reattached.revision,
+      outcome: { kind: 'imported_reference', assetId: asset.id },
+    });
+    expect(imported.decision?.outcome).toEqual({
+      kind: 'imported_reference',
+      assetId: asset.id,
+      projectRevision: reattached.revision,
+    });
+    const detachedAgain = await store.updateProjectV2(
+      selected.id,
+      (project) => {
+        const assets = { ...project.assets };
+        delete assets[asset.id];
+        return { ...project, assets };
+      },
+      reattached.revision
+    );
+    await expect(
+      store.decideReferenceRequestV2({
+        projectId: selected.id,
+        requestId: seeded.request.id,
+        expectedRevision: reattached.revision,
+        outcome: { kind: 'imported_reference', assetId: asset.id },
+      })
+    ).resolves.toEqual(imported);
+    await expect(store.listReferenceRequestsV2(detachedAgain.id)).resolves.toContainEqual(imported);
+  });
+
+  it('rejects a same-inode project and asset replacement at the imported-decision publication gate', async () => {
+    const { store } = createStoreV2({ createId: () => 'asset_publication_race_v2', now: () => timestamp });
+    const active = await addActiveReferenceShotsV2(store, await store.createProjectV2(inputV2));
+    const asset: StudioAssetV2 = {
+      id: 'publication_race_image',
+      projectId: active.id,
+      shotId: null,
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'imports', fileName: 'publication_race_image.png' },
+      byteSize: 1,
+      sha256: 'e'.repeat(64),
+      createdAt: timestamp,
+      briefReferenceRole: 'look',
+      briefReferenceLabel: 'Publication race',
+    };
+    const selected = await store.updateProjectV2(
+      active.id,
+      (project) => ({ ...project, assets: { ...project.assets, [asset.id]: asset } }),
+      active.revision
+    );
+    const seeded = await seedReferenceRequestV2(store, selected, { requestId: 'asset_publication_race_request' });
+    const replacement = structuredClone(selected);
+    delete replacement.assets[asset.id];
+    let replaced = false;
+    const racingFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver) as unknown;
+        if (property !== 'open' || typeof value !== 'function') return value;
+        return (...args: unknown[]): unknown => {
+          const openedFile = String(args[0]);
+          if (
+            !replaced &&
+            openedFile.endsWith(`/${selected.id}/project.json`) &&
+            readdirSync(seeded.directories.decisions).some((name) => name.endsWith('.publish'))
+          ) {
+            replaced = true;
+            writeFileSync(openedFile, JSON.stringify(replacement, null, 2));
+          }
+          return Reflect.apply(value, target, args);
+        };
+      },
+    }) as typeof nodeFs;
+    const racing = createCreativeStudioStore({ rootDir, fs: racingFs, now: () => timestamp });
+
+    await expect(
+      racing.decideReferenceRequestV2({
+        projectId: selected.id,
+        requestId: seeded.request.id,
+        expectedRevision: selected.revision,
+        outcome: { kind: 'imported_reference', assetId: asset.id },
+      })
+    ).rejects.toMatchObject({ code: 'storage_error' });
+
+    expect(replaced).toBe(true);
+    expect(readdirSync(seeded.directories.decisions)).toEqual([]);
+    expect(readdirSync(seeded.directories.slots)).toEqual(['0.slot']);
+    expect(readJson<StudioProjectV2>(path.join(rootDir, selected.id, 'project.json')).assets[asset.id]).toBeUndefined();
+  });
+
+  it('rejects hidden and symbol extras on reference decision and receipt inputs before touching the ledger', async () => {
+    const ids = ['exact_input_project', 'exact_input_handoff'];
+    const { store } = createStoreV2({ createId: () => ids.shift() ?? 'unexpected_id', now: () => timestamp });
+    const project = await addActiveReferenceShotsV2(store, await store.createProjectV2(inputV2));
+    const seeded = await seedReferenceRequestV2(store, project, { requestId: 'exact_input_request' });
+    const decisionInput = {
+      projectId: project.id,
+      requestId: seeded.request.id,
+      expectedRevision: project.revision,
+      outcome: { kind: 'generation_gate' as const },
+    };
+    Object.defineProperty(decisionInput.outcome, 'hidden', { value: true, enumerable: false });
+    const before = snapshotTreeV2(seeded.directories.root);
+    await expect(store.decideReferenceRequestV2(decisionInput)).rejects.toMatchObject({ code: 'invalid_payload' });
+    expect(snapshotTreeV2(seeded.directories.root)).toEqual(before);
+
+    const generated = await seedGenerationHandoffV2(store, project, {
+      requestId: 'exact_receipt_request',
+      slotIndex: 1,
+    });
+    const receiptInput = {
+      projectId: project.id,
+      handoffId: generated.handoffId,
+      expectedRevision: project.revision,
+      result: { kind: 'dismissed' as const },
+    };
+    Object.defineProperty(receiptInput, Symbol('extra'), { value: true, enumerable: false });
+    const receiptBefore = snapshotTreeV2(generated.directories.root);
+    await expect(store.recordReferenceGenerationHandoffReceiptV2(receiptInput)).rejects.toMatchObject({
+      code: 'invalid_payload',
+    });
+    expect(snapshotTreeV2(generated.directories.root)).toEqual(receiptBefore);
+  });
+
+  it('rejects every malformed reference decision and receipt shape before touching the ledger', async () => {
+    const ids = ['reference_input_contract_v2', 'reference_input_contract_handoff_v2'];
+    const { store } = createStoreV2({ createId: () => ids.shift() ?? 'unexpected_id', now: () => timestamp });
+    const project = await addActiveReferenceShotsV2(store, await store.createProjectV2(inputV2));
+    const seeded = await seedReferenceRequestV2(store, project, { requestId: 'reference_input_contract_request' });
+    const decisionInput = {
+      projectId: project.id,
+      requestId: seeded.request.id,
+      expectedRevision: project.revision,
+      outcome: { kind: 'generation_gate' as const },
+    };
+    const before = snapshotTreeV2(seeded.directories.root);
+    const malformedDecisions: unknown[] = [
+      null,
+      { ...decisionInput, extra: true },
+      { ...decisionInput, projectId: '../unsafe' },
+      { ...decisionInput, requestId: '../unsafe' },
+      { ...decisionInput, expectedRevision: 0 },
+      { ...decisionInput, outcome: null },
+      { ...decisionInput, outcome: { kind: 'rejected', extra: true } },
+      { ...decisionInput, outcome: { kind: 'generation_gate', extra: true } },
+      { ...decisionInput, outcome: { kind: 'imported_reference', assetId: 'asset', extra: true } },
+      { ...decisionInput, outcome: { kind: 'imported_reference', assetId: '../unsafe' } },
+      { ...decisionInput, outcome: { kind: 'unknown' } },
+    ];
+    for (const malformed of malformedDecisions) {
+      // Each malformed shape is deliberately outside the public TypeScript contract.
+      // eslint-disable-next-line no-await-in-loop
+      await expect(store.decideReferenceRequestV2(malformed as never)).rejects.toMatchObject({
+        code: 'invalid_payload',
+      });
+    }
+    expect(snapshotTreeV2(seeded.directories.root)).toEqual(before);
+
+    const generated = await seedGenerationHandoffV2(store, project, {
+      requestId: 'reference_receipt_contract_request',
+      slotIndex: 1,
+    });
+    const receiptInput = {
+      projectId: project.id,
+      handoffId: generated.handoffId,
+      expectedRevision: project.revision,
+      result: { kind: 'dismissed' as const },
+    };
+    const receiptBefore = snapshotTreeV2(generated.directories.root);
+    const malformedReceipts: unknown[] = [
+      null,
+      { ...receiptInput, extra: true },
+      { ...receiptInput, projectId: '../unsafe' },
+      { ...receiptInput, handoffId: '../unsafe' },
+      { ...receiptInput, expectedRevision: 0 },
+      { ...receiptInput, result: null },
+      { ...receiptInput, result: { kind: 'dismissed', extra: true } },
+      { ...receiptInput, result: { kind: 'confirmed', authorizationId: 'authorization', extra: true } },
+      { ...receiptInput, result: { kind: 'confirmed', authorizationId: '../unsafe' } },
+      { ...receiptInput, result: { kind: 'unknown' } },
+    ];
+    for (const malformed of malformedReceipts) {
+      // Each malformed shape is deliberately outside the public TypeScript contract.
+      // eslint-disable-next-line no-await-in-loop
+      await expect(store.recordReferenceGenerationHandoffReceiptV2(malformed as never)).rejects.toMatchObject({
+        code: 'invalid_payload',
+      });
+    }
+    expect(snapshotTreeV2(generated.directories.root)).toEqual(receiptBefore);
+  });
+
+  it('rejects unsafe proposal and reference identities at every public ledger boundary', async () => {
+    const { store } = createStoreV2({ createId: () => 'ledger_identity_contract_v2', now: () => timestamp });
+    const project = await store.createProjectV2(inputV2);
+
+    await expect(store.listProposalsV2('../unsafe')).rejects.toMatchObject({ code: 'invalid_payload' });
+    await expect(store.acceptProposalV2('../unsafe', 'proposal')).rejects.toMatchObject({ code: 'invalid_payload' });
+    await expect(store.acceptProposalV2(project.id, '../unsafe')).rejects.toMatchObject({ code: 'invalid_payload' });
+    await expect(store.rejectProposalV2('../unsafe', 'proposal')).rejects.toMatchObject({ code: 'invalid_payload' });
+    await expect(store.rejectProposalV2(project.id, '../unsafe')).rejects.toMatchObject({ code: 'invalid_payload' });
+    await expect(store.resolveProposalPathsV2('../unsafe')).rejects.toMatchObject({ code: 'invalid_payload' });
+    await expect(store.listReferenceRequestsV2('../unsafe')).rejects.toMatchObject({ code: 'invalid_payload' });
+    await expect(store.resolveReferenceRequestPathsV2('../unsafe')).rejects.toMatchObject({ code: 'invalid_payload' });
+    await expect(store.readReferenceGenerationHandoffV2('../unsafe', 'handoff')).rejects.toMatchObject({
+      code: 'invalid_payload',
+    });
+    await expect(store.readReferenceGenerationHandoffV2(project.id, '../unsafe')).rejects.toMatchObject({
+      code: 'invalid_payload',
+    });
+  });
+
+  it('distinguishes absent ledgers from empty ledgers at every proposal and reference lookup boundary', async () => {
+    const { store } = createStoreV2({ createId: () => 'empty_ledger_contract_v2', now: () => timestamp });
+    const project = await store.createProjectV2(inputV2);
+    const missingReceipt = {
+      projectId: project.id,
+      handoffId: 'missing_handoff',
+      expectedRevision: project.revision,
+      result: { kind: 'dismissed' as const },
+    };
+    const missingDecision = {
+      projectId: project.id,
+      requestId: 'missing_request',
+      expectedRevision: project.revision,
+      outcome: { kind: 'rejected' as const },
+    };
+
+    await expect(store.acceptProposalV2(project.id, 'missing_proposal')).rejects.toMatchObject({ code: 'not_found' });
+    await expect(store.rejectProposalV2(project.id, 'missing_proposal')).rejects.toMatchObject({ code: 'not_found' });
+    await expect(store.decideReferenceRequestV2(missingDecision)).rejects.toMatchObject({ code: 'not_found' });
+    await expect(store.recordReferenceGenerationHandoffReceiptV2(missingReceipt)).rejects.toMatchObject({
+      code: 'not_found',
+    });
+    await expect(store.readReferenceGenerationHandoffV2(project.id, 'missing_handoff')).resolves.toBeNull();
+
+    await store.resolveProposalPathsV2(project.id);
+    await store.resolveReferenceRequestPathsV2(project.id);
+    await expect(store.acceptProposalV2(project.id, 'missing_proposal')).rejects.toMatchObject({ code: 'not_found' });
+    await expect(store.rejectProposalV2(project.id, 'missing_proposal')).rejects.toMatchObject({ code: 'not_found' });
+    await expect(store.decideReferenceRequestV2(missingDecision)).rejects.toMatchObject({ code: 'not_found' });
+    await expect(store.recordReferenceGenerationHandoffReceiptV2(missingReceipt)).rejects.toMatchObject({
+      code: 'not_found',
+    });
+    await expect(store.readReferenceGenerationHandoffV2(project.id, 'missing_handoff')).resolves.toBeNull();
+  });
+
+  it('fails closed without mutation for malformed proposal and reference directory entries', async () => {
+    const { store } = createStoreV2({ createId: () => 'malformed_ledger_entries_v2', now: () => timestamp });
+    const project = await addActiveReferenceShotsV2(store, await store.createProjectV2(inputV2));
+    const proposal = await seedProposalV2(store, project, { proposalId: 'malformed_entry_proposal' });
+    const reference = await seedReferenceRequestV2(store, project, {
+      requestId: 'malformed_entry_reference',
+    });
+    const cases: Array<{ root: string; directory: string; name: string; list: () => Promise<unknown> }> = [
+      {
+        root: proposal.directories.root,
+        directory: proposal.directories.pending,
+        name: 'not-json.txt',
+        list: () => store.listProposalsV2(project.id),
+      },
+      {
+        root: proposal.directories.root,
+        directory: proposal.directories.pending,
+        name: '.json',
+        list: () => store.listProposalsV2(project.id),
+      },
+      {
+        root: proposal.directories.root,
+        directory: proposal.directories.decisions,
+        name: 'not-json.txt',
+        list: () => store.listProposalsV2(project.id),
+      },
+      {
+        root: proposal.directories.root,
+        directory: proposal.directories.decisions,
+        name: '.json',
+        list: () => store.listProposalsV2(project.id),
+      },
+      {
+        root: proposal.directories.root,
+        directory: proposal.directories.slots,
+        name: '99.slot',
+        list: () => store.listProposalsV2(project.id),
+      },
+      {
+        root: proposal.directories.root,
+        directory: proposal.directories.commits,
+        name: 'not-commit.txt',
+        list: () => store.listProposalsV2(project.id),
+      },
+      {
+        root: proposal.directories.root,
+        directory: proposal.directories.commits,
+        name: '.accepted.json',
+        list: () => store.listProposalsV2(project.id),
+      },
+      {
+        root: reference.directories.root,
+        directory: reference.directories.pending,
+        name: 'not-json.txt',
+        list: () => store.listReferenceRequestsV2(project.id),
+      },
+      {
+        root: reference.directories.root,
+        directory: reference.directories.pending,
+        name: '.json',
+        list: () => store.listReferenceRequestsV2(project.id),
+      },
+      {
+        root: reference.directories.root,
+        directory: reference.directories.decisions,
+        name: 'not-json.txt',
+        list: () => store.listReferenceRequestsV2(project.id),
+      },
+      {
+        root: reference.directories.root,
+        directory: reference.directories.decisions,
+        name: '.json',
+        list: () => store.listReferenceRequestsV2(project.id),
+      },
+      {
+        root: reference.directories.root,
+        directory: reference.directories.slots,
+        name: '99.slot',
+        list: () => store.listReferenceRequestsV2(project.id),
+      },
+      {
+        root: reference.directories.root,
+        directory: reference.directories.receipts,
+        name: 'not-json.txt',
+        list: () => store.listReferenceRequestsV2(project.id),
+      },
+      {
+        root: reference.directories.root,
+        directory: reference.directories.receipts,
+        name: '.json',
+        list: () => store.listReferenceRequestsV2(project.id),
+      },
+    ];
+
+    for (const malformed of cases) {
+      const file = path.join(malformed.directory, malformed.name);
+      writeFileSync(file, '{}');
+      const before = snapshotTreeV2(malformed.root);
+      // Each case uses a different durable ledger namespace.
+      // eslint-disable-next-line no-await-in-loop
+      await expect(malformed.list()).rejects.toMatchObject({ code: 'storage_error' });
+      expect(snapshotTreeV2(malformed.root)).toEqual(before);
+      rmSync(file);
+    }
+    await expect(store.listProposalsV2(project.id)).resolves.toHaveLength(1);
+    await expect(store.listReferenceRequestsV2(project.id)).resolves.toHaveLength(1);
+  });
+
+  it('rejects malformed terminal journal publications without promoting or removing them', async () => {
+    const { store } = createStoreV2({ createId: () => 'malformed_terminal_publications_v2', now: () => timestamp });
+    const project = await addActiveReferenceShotsV2(store, await store.createProjectV2(inputV2));
+    const proposal = await seedProposalV2(store, project, { proposalId: 'malformed_journal_proposal' });
+    const reference = await seedReferenceRequestV2(store, project, {
+      requestId: 'malformed_journal_reference',
+    });
+    const cases: Array<{ root: string; file: string; bytes: string; list: () => Promise<unknown> }> = [
+      {
+        root: proposal.directories.root,
+        file: path.join(proposal.directories.decisions, `${proposal.proposal.id}.json.publish`),
+        bytes: '{}',
+        list: () => store.listProposalsV2(project.id),
+      },
+      {
+        root: proposal.directories.root,
+        file: path.join(proposal.directories.commits, `${proposal.proposal.id}.accepted.json.publish`),
+        bytes: JSON.stringify({ schemaVersion: 1 }),
+        list: () => store.listProposalsV2(project.id),
+      },
+      {
+        root: reference.directories.root,
+        file: path.join(reference.directories.decisions, `${reference.request.id}.json.publish`),
+        bytes: '{}',
+        list: () => store.listReferenceRequestsV2(project.id),
+      },
+      {
+        root: reference.directories.root,
+        file: path.join(reference.directories.receipts, 'malformed_handoff.json.publish'),
+        bytes: '{}',
+        list: () => store.listReferenceRequestsV2(project.id),
+      },
+    ];
+
+    for (const malformed of cases) {
+      writeFileSync(malformed.file, malformed.bytes);
+      const before = snapshotTreeV2(malformed.root);
+      // Each malformed publication must fail before recovery mutates the journal.
+      // eslint-disable-next-line no-await-in-loop
+      await expect(malformed.list()).rejects.toMatchObject({ code: 'storage_error' });
+      expect(snapshotTreeV2(malformed.root)).toEqual(before);
+      rmSync(malformed.file);
+    }
+  });
+
+  it('fails closed for missing or duplicate proposal and reference slot authority', async () => {
+    const { store } = createStoreV2({ createId: () => 'slot_authority_contract_v2', now: () => timestamp });
+    const project = await addActiveReferenceShotsV2(store, await store.createProjectV2(inputV2));
+    const proposal = await seedProposalV2(store, project, { proposalId: 'slot_authority_proposal' });
+    const proposalSlot = path.join(proposal.directories.slots, '0.slot');
+    const proposalSlotBytes = readFileSync(proposalSlot);
+    const duplicateProposalSlot = path.join(proposal.directories.slots, '1.slot');
+    writeFileSync(duplicateProposalSlot, proposalSlotBytes);
+    await expect(store.listProposalsV2(project.id)).rejects.toMatchObject({ code: 'storage_error' });
+    rmSync(duplicateProposalSlot);
+    rmSync(proposalSlot);
+    await expect(store.listProposalsV2(project.id)).rejects.toMatchObject({ code: 'storage_error' });
+    writeFileSync(proposalSlot, proposalSlotBytes);
+
+    const reference = await seedReferenceRequestV2(store, project, {
+      requestId: 'slot_authority_reference',
+    });
+    const referenceSlot = path.join(reference.directories.slots, '0.slot');
+    const referenceSlotBytes = readFileSync(referenceSlot);
+    const duplicateReferenceSlot = path.join(reference.directories.slots, '1.slot');
+    writeFileSync(duplicateReferenceSlot, referenceSlotBytes);
+    await expect(store.listReferenceRequestsV2(project.id)).rejects.toMatchObject({ code: 'storage_error' });
+    rmSync(duplicateReferenceSlot);
+    rmSync(referenceSlot);
+    await expect(store.listReferenceRequestsV2(project.id)).rejects.toMatchObject({ code: 'storage_error' });
+  });
+
+  it('repairs an authorization-origin handoff into one exact confirmed receipt before project exposure', async () => {
+    const ids = ['reference_repair_v2', 'handoff_repair_v2'];
+    const { store } = createStoreV2({
+      createId: () => ids.shift() ?? 'unexpected_reference_id',
+      now: () => '2026-08-17T12:00:02.000Z',
+    });
+    const created = await store.createProjectV2(inputV2);
+    const project = await addActiveReferenceShotsV2(store, created);
+    const { request, slot, directories } = await seedReferenceRequestV2(store, project, {
+      requestId: 'request_repair',
+    });
+    const decided = await store.decideReferenceRequestV2({
+      projectId: project.id,
+      requestId: request.id,
+      expectedRevision: project.revision,
+      outcome: { kind: 'generation_gate' },
+    });
+    const handoffId = (
+      decided.decision as StudioReferenceRequestDecisionV2 & {
+        outcome: { kind: 'generation_gate'; handoffId: string; shotIds: string[] };
+      }
+    ).outcome.handoffId;
+    const authorized = await store.updateProjectV2(
+      project.id,
+      (draft) => addReferenceAuthorizationV2(draft, handoffId),
+      project.revision
+    );
+    const receiptFile = path.join(directories.receipts, `${handoffId}.json`);
+    rmSync(receiptFile);
+    rmSync(`${receiptFile}.publish`);
+    writeFileSync(path.join(directories.slots, '0.slot'), JSON.stringify(slot));
+    expect(readdirSync(directories.receipts)).toEqual([]);
+
+    await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
+      status: 'supported',
+      project: { revision: authorized.revision },
+    });
+    const receipt = readJson<StudioReferenceGenerationHandoffReceiptV2>(
+      path.join(directories.receipts, `${handoffId}.json`)
+    );
+    expect(receipt).toEqual({
+      schemaVersion: 2,
+      handoffId,
+      requestId: request.id,
+      completedAt: '2026-08-17T12:00:03.000Z',
+      result: { kind: 'confirmed', authorizationId: `authorization_${handoffId}` },
+    });
+    expect(readdirSync(directories.slots)).toEqual([]);
+    await expect(store.listReferenceRequestsV2(project.id)).resolves.toEqual([expect.objectContaining({ receipt })]);
+  });
+
+  it('arms the reference watcher before any V2 project and expires old requests with deduplicated notifications', async () => {
+    let notifyChange: ((relativeFile: string) => void) | undefined;
+    const listener = vi.fn();
+    const { store } = createStoreV2({
+      createId: () => 'reference_watch_v2',
+      now: () => '2026-08-17T12:00:02.000Z',
+      watchProposalTree: ({ onChange }) => {
+        notifyChange = onChange;
+        return { close: vi.fn() };
+      },
+    });
+    const stop = await store.watchReferenceRequestsV2(listener);
+    const project = await store.createProjectV2(inputV2);
+    const active = await addActiveReferenceShotsV2(store, project);
+    const seeded = await seedReferenceRequestV2(store, active, { requestId: 'request_watch' });
+    notifyChange?.(`${active.id}/reference-requests/pending/${seeded.request.id}.json`);
+    notifyChange?.(`${active.id}/reference-requests/pending/${seeded.request.id}.json`);
+    await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(1));
+    writeFileSync(
+      path.join(seeded.directories.pending, `${seeded.request.id}.json`),
+      JSON.stringify({ ...seeded.request, createdAt: '2026-08-17T12:00:01.000Z' })
+    );
+    notifyChange?.(`${active.id}/reference-requests/pending/${seeded.request.id}.json`);
+    await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(2));
+    await store.decideReferenceRequestV2({
+      projectId: active.id,
+      requestId: seeded.request.id,
+      expectedRevision: active.revision,
+      outcome: { kind: 'rejected' },
+    });
+    notifyChange?.(`${active.id}/reference-requests/decisions/${seeded.request.id}.json`);
+    await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(3));
+    await stop();
+
+    const expired = await seedReferenceRequestV2(store, active, {
+      requestId: 'request_expired',
+      createdAt: '2026-08-01T00:00:00.000Z',
+      slotIndex: 1,
+    });
+    await store.reapAbandonedReferenceRequestsV2();
+    await expect(store.listReferenceRequestsV2(active.id)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          request: expect.objectContaining({ id: expired.request.id }),
+          decision: expect.objectContaining({ outcome: { kind: 'expired' } }),
+        }),
+      ])
+    );
+    expect(readdirSync(expired.directories.slots)).toEqual([]);
+  });
+
+  it('creates a complete reference directory family, keeps list read-only, and refuses a partial family', async () => {
+    const { store } = createStoreV2({
+      createId: vi.fn().mockReturnValueOnce('reference_paths_v2').mockReturnValueOnce('reference_partial_v2'),
+      now: () => timestamp,
+    });
+    const project = await store.createProjectV2(inputV2);
+    await expect(store.listReferenceRequestsV2(project.id)).resolves.toEqual([]);
+    expect(existsSync(path.join(rootDir, project.id, 'reference-requests'))).toBe(false);
+    const paths = await store.resolveReferenceRequestPathsV2(project.id);
+    expect(readdirSync(path.join(paths.projectDir, 'reference-requests')).toSorted()).toEqual([
+      'decisions',
+      'pending',
+      'receipts',
+      'slots',
+    ]);
+
+    const partial = await store.createProjectV2(inputV2);
+    const partialRoot = path.join(rootDir, partial.id, 'reference-requests');
+    mkdirSync(path.join(partialRoot, 'pending'), { recursive: true });
+    mkdirSync(path.join(partialRoot, 'slots'));
+    await expect(store.resolveReferenceRequestPathsV2(partial.id)).rejects.toMatchObject({ code: 'storage_error' });
+    expect(readdirSync(partialRoot).toSorted()).toEqual(['pending', 'slots']);
+  });
+
+  it('rejects a same-project generation handoff collision without changing any reference bytes', async () => {
+    const ids = ['reference_collision_v2', 'shared_handoff_v2', 'shared_handoff_v2'];
+    const { store } = createStoreV2({
+      createId: () => ids.shift() ?? 'unexpected_reference_id',
+      now: () => timestamp,
+    });
+    const created = await store.createProjectV2(inputV2);
+    const project = await addActiveReferenceShotsV2(store, created);
+    const first = await seedReferenceRequestV2(store, project, { requestId: 'request_collision_a', slotIndex: 0 });
+    await store.decideReferenceRequestV2({
+      projectId: project.id,
+      requestId: first.request.id,
+      expectedRevision: project.revision,
+      outcome: { kind: 'generation_gate' },
+    });
+    const second = await seedReferenceRequestV2(store, project, { requestId: 'request_collision_b', slotIndex: 1 });
+    const before = snapshotTreeV2(second.directories.root);
+    await expect(
+      store.decideReferenceRequestV2({
+        projectId: project.id,
+        requestId: second.request.id,
+        expectedRevision: project.revision,
+        outcome: { kind: 'generation_gate' },
+      })
+    ).rejects.toMatchObject({ code: 'storage_error' });
+    expect(snapshotTreeV2(second.directories.root)).toEqual(before);
+  });
+
+  it.each([
+    { label: 'request id', mutate: 'request' as const },
+    { label: 'handoff id', mutate: 'handoff' as const },
+  ])('fails closed on a receipt whose $label does not match its generation relation', async ({ mutate }) => {
+    const ids = [`relation_project_${mutate}`, `relation_handoff_${mutate}`];
+    const { store } = createStoreV2({ createId: () => ids.shift() ?? 'unexpected_id', now: () => timestamp });
+    const created = await store.createProjectV2(inputV2);
+    const project = await addActiveReferenceShotsV2(store, created);
+    const generated = await seedGenerationHandoffV2(store, project, { requestId: `relation_request_${mutate}` });
+    const receipt: StudioReferenceGenerationHandoffReceiptV2 = {
+      schemaVersion: 2,
+      handoffId: mutate === 'handoff' ? 'different_handoff' : generated.handoffId,
+      requestId: mutate === 'request' ? 'different_request' : generated.request.id,
+      completedAt: timestamp,
+      result: { kind: 'dismissed' },
+    };
+    writeFileSync(path.join(generated.directories.receipts, `${generated.handoffId}.json`), JSON.stringify(receipt));
+    const before = snapshotTreeV2(generated.directories.root);
+
+    await expect(store.getProjectV2(project.id)).rejects.toMatchObject({ code: 'storage_error' });
+
+    expect(snapshotTreeV2(generated.directories.root)).toEqual(before);
+    expect(readdirSync(generated.directories.slots)).toEqual(['0.slot']);
+  });
+
+  it.each([
+    { label: 'confirmed receipt without authorization', auth: false, result: 'confirmed' as const, early: false },
+    { label: 'confirmed receipt with the wrong authorization', auth: true, result: 'confirmed' as const, early: false },
+    { label: 'dismissed receipt with authorization', auth: true, result: 'dismissed' as const, early: false },
+    { label: 'authorization confirmed before its decision', auth: true, result: null, early: true },
+  ])('preserves bytes for $label', async ({ auth, result, early }) => {
+    const ids = [`auth_project_${result ?? 'early'}`, `auth_handoff_${result ?? 'early'}`];
+    const decisionTime = early ? '2026-08-17T12:00:04.000Z' : timestamp;
+    const { store } = createStoreV2({ createId: () => ids.shift() ?? 'unexpected_id', now: () => decisionTime });
+    const created = await store.createProjectV2(inputV2);
+    const project = await addActiveReferenceShotsV2(store, created);
+    const generated = await seedGenerationHandoffV2(store, project, {
+      requestId: `auth_request_${result ?? 'early'}`,
+    });
+    if (auth) {
+      writeFileSync(
+        path.join(rootDir, project.id, 'project.json'),
+        JSON.stringify(addReferenceAuthorizationV2(structuredClone(project), generated.handoffId), null, 2)
+      );
+    }
+    if (result !== null) {
+      const receipt: StudioReferenceGenerationHandoffReceiptV2 = {
+        schemaVersion: 2,
+        handoffId: generated.handoffId,
+        requestId: generated.request.id,
+        completedAt: '2026-08-17T12:00:03.000Z',
+        result:
+          result === 'dismissed'
+            ? { kind: 'dismissed' }
+            : {
+                kind: 'confirmed',
+                authorizationId: auth ? 'wrong_authorization' : 'missing_authorization',
+              },
+      };
+      const receiptFile = path.join(generated.directories.receipts, `${generated.handoffId}.json`);
+      writeFileSync(receiptFile, JSON.stringify(receipt));
+      if (auth && result === 'confirmed') linkSync(receiptFile, `${receiptFile}.publish`);
+    }
+    const before = snapshotTreeV2(path.join(rootDir, project.id));
+
+    await expect(store.getProjectV2(project.id)).rejects.toMatchObject({ code: 'storage_error' });
+
+    expect(snapshotTreeV2(path.join(rootDir, project.id))).toEqual(before);
+    expect(readdirSync(generated.directories.slots)).toEqual(['0.slot']);
+  });
+
+  it('scopes the same generated handoff identity independently across projects', async () => {
+    const ids = ['cross_project_a', 'cross_project_b', 'shared_reference_handoff', 'shared_reference_handoff'];
+    const { store } = createStoreV2({ createId: () => ids.shift() ?? 'unexpected_id', now: () => timestamp });
+    const first = await addActiveReferenceShotsV2(store, await store.createProjectV2(inputV2));
+    const second = await addActiveReferenceShotsV2(store, await store.createProjectV2(inputV2));
+    const firstHandoff = await seedGenerationHandoffV2(store, first, { requestId: 'cross_request_a' });
+    const secondHandoff = await seedGenerationHandoffV2(store, second, { requestId: 'cross_request_b' });
+
+    expect(firstHandoff.handoffId).toBe('shared_reference_handoff');
+    expect(secondHandoff.handoffId).toBe('shared_reference_handoff');
+    await expect(store.readReferenceGenerationHandoffV2(first.id, firstHandoff.handoffId)).resolves.toMatchObject({
+      request: { id: 'cross_request_a', projectId: first.id },
+    });
+    await store.recordReferenceGenerationHandoffReceiptV2({
+      projectId: first.id,
+      handoffId: firstHandoff.handoffId,
+      expectedRevision: first.revision,
+      result: { kind: 'dismissed' },
+    });
+    await expect(store.readReferenceGenerationHandoffV2(second.id, secondHandoff.handoffId)).resolves.toMatchObject({
+      request: { id: 'cross_request_b', projectId: second.id },
+      receipt: null,
+    });
+  });
+
+  it('restart-reconciles an exact linked reference decision publication residue', async () => {
+    const ids = ['decision_publish_project', 'decision_publish_handoff'];
+    const base = createStoreV2({ createId: () => ids.shift() ?? 'unexpected_id', now: () => timestamp }).store;
+    const created = await base.createProjectV2(inputV2);
+    const project = await addActiveReferenceShotsV2(base, created);
+    const seeded = await seedReferenceRequestV2(base, project, { requestId: 'decision_publish_request' });
+    const decisionFile = path.join(seeded.directories.decisions, `${seeded.request.id}.json`);
+    const crashing = createCreativeStudioStore({
+      rootDir,
+      fs: failFileSystemOnceV2(
+        (method, args) =>
+          method === 'rm' && String(args[0]).includes('/slots/0.slot.') && String(args[0]).endsWith('.cleanup')
+      ),
+      now: () => '2026-08-17T12:00:01.000Z',
+      logError: () => undefined,
+    });
+
+    await expect(
+      crashing.decideReferenceRequestV2({
+        projectId: project.id,
+        requestId: seeded.request.id,
+        expectedRevision: project.revision,
+        outcome: { kind: 'rejected' },
+      })
+    ).rejects.toMatchObject({ code: 'storage_error' });
+    expect(lstatSync(decisionFile).ino).toBe(lstatSync(`${decisionFile}.publish`).ino);
+
+    const restarted = createStoreV2({ now: () => '2026-08-17T12:00:02.000Z' }).store;
+    await expect(restarted.listReferenceRequestsV2(project.id)).resolves.toMatchObject([
+      { decision: { outcome: { kind: 'rejected' } } },
+    ]);
+    expect(existsSync(`${decisionFile}.publish`)).toBe(true);
+    expect(readdirSync(seeded.directories.slots)).toEqual([]);
+  });
+
+  it('promotes relationally valid temp-only proposal and reference journal records after restart', async () => {
+    const ids = ['temp_journal_project', 'temp_journal_handoff'];
+    const store = createStoreV2({ createId: () => ids.shift() ?? 'unexpected_id', now: () => timestamp }).store;
+    const created = await store.createProjectV2(inputV2);
+    const project = await addActiveReferenceShotsV2(store, created);
+    const proposal = await seedProposalV2(store, project, { proposalId: 'temp_journal_proposal' });
+    const proposalDecisionFile = path.join(proposal.directories.decisions, `${proposal.proposal.id}.json`);
+    writeFileSync(
+      `${proposalDecisionFile}.publish`,
+      JSON.stringify({
+        schemaVersion: 2,
+        proposalId: proposal.proposal.id,
+        status: 'rejected',
+        decidedAt: timestamp,
+      })
+    );
+    const reference = await seedReferenceRequestV2(store, project, {
+      requestId: 'temp_journal_reference',
+      slotIndex: 1,
+    });
+    const referenceDecisionFile = path.join(reference.directories.decisions, `${reference.request.id}.json`);
+    writeFileSync(
+      `${referenceDecisionFile}.publish`,
+      JSON.stringify({
+        schemaVersion: 2,
+        requestId: reference.request.id,
+        projectId: project.id,
+        decidedAt: timestamp,
+        outcome: { kind: 'rejected' },
+      })
+    );
+
+    const restarted = createStoreV2({ now: () => '2026-08-17T12:00:01.000Z' }).store;
+    await expect(restarted.listProposalsV2(project.id)).resolves.toMatchObject([
+      { id: proposal.proposal.id, status: 'rejected' },
+    ]);
+    await expect(restarted.listReferenceRequestsV2(project.id)).resolves.toMatchObject([
+      { request: { id: reference.request.id }, decision: { outcome: { kind: 'rejected' } } },
+    ]);
+    expect(existsSync(proposalDecisionFile)).toBe(true);
+    expect(existsSync(`${proposalDecisionFile}.publish`)).toBe(true);
+    expect(lstatSync(proposalDecisionFile).ino).toBe(lstatSync(`${proposalDecisionFile}.publish`).ino);
+    expect(existsSync(referenceDecisionFile)).toBe(true);
+    expect(existsSync(`${referenceDecisionFile}.publish`)).toBe(true);
+    expect(lstatSync(referenceDecisionFile).ino).toBe(lstatSync(`${referenceDecisionFile}.publish`).ino);
+  });
+
+  it('preserves a temp-only journal whose otherwise valid decision predates its immutable source', async () => {
+    const { store } = createStoreV2({ createId: () => 'temp_journal_mismatch_v2', now: () => timestamp });
+    const project = await store.createProjectV2(inputV2);
+    const proposal = await seedProposalV2(store, project, { proposalId: 'temp_journal_mismatch' });
+    const decisionFile = path.join(proposal.directories.decisions, `${proposal.proposal.id}.json`);
+    const publicationFile = `${decisionFile}.publish`;
+    writeFileSync(
+      publicationFile,
+      JSON.stringify({
+        schemaVersion: 2,
+        proposalId: proposal.proposal.id,
+        status: 'rejected',
+        decidedAt: '2026-08-16T23:59:59.999Z',
+      })
+    );
+    const before = snapshotTreeV2(proposal.directories.root);
+
+    await expect(store.listProposalsV2(project.id)).rejects.toMatchObject({ code: 'storage_error' });
+
+    expect(existsSync(decisionFile)).toBe(false);
+    expect(existsSync(publicationFile)).toBe(true);
+    expect(snapshotTreeV2(proposal.directories.root)).toEqual(before);
+  });
+
+  it('restart-reconciles an exact linked receipt publication and receipt-first slot cleanup', async () => {
+    const ids = ['receipt_publish_project', 'receipt_publish_handoff'];
+    const base = createStoreV2({ createId: () => ids.shift() ?? 'unexpected_id', now: () => timestamp }).store;
+    const created = await base.createProjectV2(inputV2);
+    const project = await addActiveReferenceShotsV2(base, created);
+    const generated = await seedGenerationHandoffV2(base, project, { requestId: 'receipt_publish_request' });
+    const receiptFile = path.join(generated.directories.receipts, `${generated.handoffId}.json`);
+    const slotFile = path.join(generated.directories.slots, '0.slot');
+    const crashingPublication = createCreativeStudioStore({
+      rootDir,
+      fs: failFileSystemOnceV2(
+        (method, args) =>
+          method === 'rm' && String(args[0]).includes('/slots/0.slot.') && String(args[0]).endsWith('.cleanup')
+      ),
+      now: () => '2026-08-17T12:00:02.000Z',
+      logError: () => undefined,
+    });
+    await expect(
+      crashingPublication.recordReferenceGenerationHandoffReceiptV2({
+        projectId: project.id,
+        handoffId: generated.handoffId,
+        expectedRevision: project.revision,
+        result: { kind: 'dismissed' },
+      })
+    ).rejects.toMatchObject({ code: 'storage_error' });
+    expect(lstatSync(receiptFile).ino).toBe(lstatSync(`${receiptFile}.publish`).ino);
+    expect(
+      readdirSync(generated.directories.slots).some((name) => name.startsWith('0.slot.') && name.endsWith('.cleanup'))
+    ).toBe(true);
+
+    const restarted = createStoreV2({ now: () => '2026-08-17T12:00:04.000Z' }).store;
+    const repaired = await restarted.recordReferenceGenerationHandoffReceiptV2({
+      projectId: project.id,
+      handoffId: generated.handoffId,
+      expectedRevision: project.revision,
+      result: { kind: 'dismissed' },
+    });
+    expect(repaired.receipt?.completedAt).toBe('2026-08-17T12:00:02.000Z');
+    expect(readdirSync(generated.directories.receipts)).toEqual([
+      `${generated.handoffId}.json`,
+      `${generated.handoffId}.json.publish`,
+    ]);
+    expect(readdirSync(generated.directories.slots)).toEqual([]);
+  });
+
+  it('reconciles exact linked pending/slot temps and PID slot cleanup residues for both V2 ledgers', async () => {
+    const ids = ['residue_project_v2', 'residue_handoff_v2'];
+    const { store } = createStoreV2({ createId: () => ids.shift() ?? 'unexpected_id', now: () => timestamp });
+    const created = await store.createProjectV2(inputV2);
+    const project = await addActiveReferenceShotsV2(store, created);
+    const proposal = await seedProposalV2(store, project, { proposalId: 'proposal_residue' });
+    const proposalFile = path.join(proposal.directories.pending, `${proposal.proposal.id}.json`);
+    const proposalSlot = path.join(proposal.directories.slots, '0.slot');
+    linkSync(proposalFile, `${proposalFile}.123_1.tmp`);
+    linkSync(proposalSlot, `${proposalSlot}.123_2.tmp`);
+    await expect(store.listProposalsV2(project.id)).resolves.toHaveLength(1);
+    expect(readdirSync(proposal.directories.pending)).toEqual([`${proposal.proposal.id}.json`]);
+    expect(readdirSync(proposal.directories.slots)).toEqual(['0.slot']);
+
+    const proposalWinnerBytes = readFileSync(proposalFile);
+    const proposalWinnerInode = lstatSync(proposalFile).ino;
+    const collidedProposalTemporary = `${proposalFile}.123_20.tmp`;
+    const collidedProposalReady = `${proposalFile}.123_20.ready`;
+    writeFileSync(
+      collidedProposalTemporary,
+      JSON.stringify({ ...proposal.proposal, createdAt: '2026-08-17T12:00:00.001Z' })
+    );
+    linkSync(collidedProposalTemporary, collidedProposalReady);
+    await expect(store.listProposalsV2(project.id)).resolves.toHaveLength(1);
+    expect(existsSync(collidedProposalTemporary)).toBe(false);
+    expect(existsSync(collidedProposalReady)).toBe(false);
+    expect(readFileSync(proposalFile)).toEqual(proposalWinnerBytes);
+    expect(lstatSync(proposalFile).ino).toBe(proposalWinnerInode);
+
+    const collidedSlotTemporary = `${proposalSlot}.123_21.tmp`;
+    const collidedSlotReady = `${proposalSlot}.123_21.ready`;
+    writeFileSync(
+      collidedSlotTemporary,
+      JSON.stringify({ schemaVersion: 2, proposalId: 'proposal_collision', reservedAt: timestamp })
+    );
+    linkSync(collidedSlotTemporary, collidedSlotReady);
+    await expect(store.listProposalsV2(project.id)).resolves.toHaveLength(1);
+    expect(existsSync(collidedSlotTemporary)).toBe(false);
+    expect(existsSync(collidedSlotReady)).toBe(false);
+    expect(readdirSync(proposal.directories.slots)).toEqual(['0.slot']);
+
+    renameSync(proposalSlot, `${proposalSlot}.123_3.cleanup`);
+    await expect(store.listProposalsV2(project.id)).resolves.toHaveLength(1);
+    expect(readdirSync(proposal.directories.slots)).toEqual(['0.slot']);
+    linkSync(proposalSlot, `${proposalSlot}.123_31.cleanup`);
+    await expect(store.listProposalsV2(project.id)).resolves.toHaveLength(1);
+    expect(readdirSync(proposal.directories.slots)).toEqual(['0.slot']);
+
+    const rolledBackProposal: StudioProposalRecordV2 = {
+      ...proposal.proposal,
+      id: 'proposal_temp_only',
+    };
+    writeFileSync(
+      path.join(proposal.directories.pending, 'proposal_temp_only.json.123_4.tmp'),
+      JSON.stringify(rolledBackProposal)
+    );
+    writeFileSync(
+      path.join(proposal.directories.slots, '9.slot.123_5.tmp'),
+      JSON.stringify({ schemaVersion: 2, proposalId: rolledBackProposal.id, reservedAt: timestamp })
+    );
+    await expect(store.listProposalsV2(project.id)).resolves.toHaveLength(1);
+    expect(readdirSync(proposal.directories.pending)).toEqual([`${proposal.proposal.id}.json`]);
+    expect(readdirSync(proposal.directories.slots)).toEqual(['0.slot']);
+
+    const readyProposal: StudioProposalRecordV2 = { ...proposal.proposal, id: 'proposal_ready_phase' };
+    const readyProposalFile = path.join(proposal.directories.pending, `${readyProposal.id}.json`);
+    const readyProposalTemporary = `${readyProposalFile}.123_32.tmp`;
+    const readyProposalPhase = `${readyProposalFile}.123_32.ready`;
+    writeFileSync(readyProposalTemporary, JSON.stringify(readyProposal));
+    linkSync(readyProposalTemporary, readyProposalPhase);
+    writeFileSync(
+      path.join(proposal.directories.slots, '2.slot'),
+      JSON.stringify({ schemaVersion: 2, proposalId: readyProposal.id, reservedAt: timestamp })
+    );
+    await expect(store.listProposalsV2(project.id)).resolves.toHaveLength(2);
+    expect(lstatSync(readyProposalFile).ino).toBe(lstatSync(readyProposalPhase).ino);
+    expect(lstatSync(readyProposalFile).ino).toBe(lstatSync(readyProposalTemporary).ino);
+
+    const orphanProposalSlot = path.join(proposal.directories.slots, '3.slot');
+    const orphanProposalTemporary = `${orphanProposalSlot}.123_33.tmp`;
+    const orphanProposalPhase = `${orphanProposalSlot}.123_33.ready`;
+    writeFileSync(
+      orphanProposalTemporary,
+      JSON.stringify({ schemaVersion: 2, proposalId: 'proposal_orphan_ready', reservedAt: timestamp })
+    );
+    linkSync(orphanProposalTemporary, orphanProposalPhase);
+    await expect(store.listProposalsV2(project.id)).resolves.toHaveLength(2);
+    expect(existsSync(orphanProposalTemporary)).toBe(false);
+    expect(existsSync(orphanProposalPhase)).toBe(false);
+
+    const reference = await seedReferenceRequestV2(store, project, { requestId: 'reference_residue', slotIndex: 1 });
+    const referenceFile = path.join(reference.directories.pending, `${reference.request.id}.json`);
+    const referenceSlot = path.join(reference.directories.slots, '1.slot');
+    linkSync(referenceFile, `${referenceFile}.123_6.tmp`);
+    linkSync(referenceSlot, `${referenceSlot}.123_7.tmp`);
+    await expect(store.listReferenceRequestsV2(project.id)).resolves.toHaveLength(1);
+    const referenceWinnerBytes = readFileSync(referenceFile);
+    const referenceWinnerInode = lstatSync(referenceFile).ino;
+    const collidedReferenceTemporary = `${referenceFile}.123_60.tmp`;
+    const collidedReferenceReady = `${referenceFile}.123_60.ready`;
+    writeFileSync(
+      collidedReferenceTemporary,
+      JSON.stringify({ ...reference.request, createdAt: '2026-08-17T12:00:00.001Z' })
+    );
+    linkSync(collidedReferenceTemporary, collidedReferenceReady);
+    await expect(store.listReferenceRequestsV2(project.id)).resolves.toHaveLength(1);
+    expect(existsSync(collidedReferenceTemporary)).toBe(false);
+    expect(existsSync(collidedReferenceReady)).toBe(false);
+    expect(readFileSync(referenceFile)).toEqual(referenceWinnerBytes);
+    expect(lstatSync(referenceFile).ino).toBe(referenceWinnerInode);
+    renameSync(referenceSlot, `${referenceSlot}.123_8.cleanup`);
+    await expect(store.listReferenceRequestsV2(project.id)).resolves.toHaveLength(1);
+    expect(readdirSync(reference.directories.slots).toSorted()).toEqual(['1.slot']);
+
+    const rolledBackReference: StudioReferenceRequestV2 = {
+      ...reference.request,
+      id: 'reference_temp_only',
+    };
+    writeFileSync(
+      path.join(reference.directories.pending, 'reference_temp_only.json.123_9.tmp'),
+      JSON.stringify(rolledBackReference)
+    );
+    writeFileSync(
+      path.join(reference.directories.slots, '9.slot.123_10.tmp'),
+      JSON.stringify({ schemaVersion: 2, requestId: rolledBackReference.id, reservedAt: timestamp })
+    );
+    await expect(store.listReferenceRequestsV2(project.id)).resolves.toHaveLength(1);
+    expect(readdirSync(reference.directories.pending)).toEqual([`${reference.request.id}.json`]);
+    expect(readdirSync(reference.directories.slots)).toEqual(['1.slot']);
+
+    const readyReference: StudioReferenceRequestV2 = { ...reference.request, id: 'reference_ready_phase' };
+    const readyReferenceFile = path.join(reference.directories.pending, `${readyReference.id}.json`);
+    const readyReferenceTemporary = `${readyReferenceFile}.123_34.tmp`;
+    const readyReferencePhase = `${readyReferenceFile}.123_34.ready`;
+    writeFileSync(readyReferenceTemporary, JSON.stringify(readyReference));
+    linkSync(readyReferenceTemporary, readyReferencePhase);
+    writeFileSync(
+      path.join(reference.directories.slots, '2.slot'),
+      JSON.stringify({ schemaVersion: 2, requestId: readyReference.id, reservedAt: timestamp })
+    );
+    await expect(store.listReferenceRequestsV2(project.id)).resolves.toHaveLength(2);
+    expect(lstatSync(readyReferenceFile).ino).toBe(lstatSync(readyReferencePhase).ino);
+    expect(lstatSync(readyReferenceFile).ino).toBe(lstatSync(readyReferenceTemporary).ino);
+  });
+
+  it('recovers terminal slot companion cleanup when the second unlink is interrupted', async () => {
+    const { store } = createStoreV2({ createId: () => 'companion_cleanup_project', now: () => timestamp });
+    const project = await store.createProjectV2(inputV2);
+    const seeded = await seedProposalV2(store, project, { proposalId: 'companion_cleanup_proposal' });
+    const slotFile = path.join(seeded.directories.slots, '0.slot');
+    const temporaryFile = `${slotFile}.123_40.tmp`;
+    const readyFile = `${slotFile}.123_40.ready`;
+    linkSync(slotFile, temporaryFile);
+    linkSync(slotFile, readyFile);
+    const interrupted = createCreativeStudioStore({
+      rootDir,
+      fs: failFileSystemOnceV2((method, args) => method === 'rm' && String(args[0]).endsWith('.tmp')),
+      now: () => '2026-08-17T12:00:01.000Z',
+      logError: () => undefined,
+    });
+
+    await expect(interrupted.rejectProposalV2(project.id, seeded.proposal.id)).rejects.toMatchObject({ code: 'EIO' });
+    expect(existsSync(readyFile)).toBe(false);
+    expect(existsSync(temporaryFile)).toBe(true);
+    expect(existsSync(slotFile)).toBe(true);
+
+    const restarted = createStoreV2({ now: () => '2026-08-17T12:00:02.000Z' }).store;
+    await expect(restarted.rejectProposalV2(project.id, seeded.proposal.id)).resolves.toMatchObject({
+      status: 'rejected',
+    });
+    expect(readdirSync(seeded.directories.slots)).toEqual([]);
+  });
+
+  it('restart-recovers an interrupted same-ID pending publication collision without replacing the winner', async () => {
+    const { store } = createStoreV2({ createId: () => 'pending_collision_project', now: () => timestamp });
+    const project = await store.createProjectV2(inputV2);
+    const seeded = await seedProposalV2(store, project, { proposalId: 'pending_collision_proposal' });
+    const proposalFile = path.join(seeded.directories.pending, `${seeded.proposal.id}.json`);
+    const temporaryFile = `${proposalFile}.123_41.tmp`;
+    const readyFile = `${proposalFile}.123_41.ready`;
+    const winnerBytes = readFileSync(proposalFile);
+    const winnerInode = lstatSync(proposalFile).ino;
+    writeFileSync(temporaryFile, JSON.stringify({ ...seeded.proposal, createdAt: '2026-08-17T12:00:00.001Z' }));
+    linkSync(temporaryFile, readyFile);
+    const interrupted = createCreativeStudioStore({
+      rootDir,
+      fs: failFileSystemOnceV2(
+        (method, args) => method === 'rm' && String(args[0]).endsWith(path.basename(temporaryFile))
+      ),
+      now: () => '2026-08-17T12:00:01.000Z',
+      logError: () => undefined,
+    });
+
+    await expect(interrupted.listProposalsV2(project.id)).rejects.toMatchObject({ code: 'storage_error' });
+    expect(existsSync(readyFile)).toBe(false);
+    expect(existsSync(temporaryFile)).toBe(true);
+    expect(readFileSync(proposalFile)).toEqual(winnerBytes);
+    expect(lstatSync(proposalFile).ino).toBe(winnerInode);
+
+    const restarted = createStoreV2({ now: () => '2026-08-17T12:00:02.000Z' }).store;
+    await expect(restarted.listProposalsV2(project.id)).resolves.toHaveLength(1);
+    expect(existsSync(temporaryFile)).toBe(false);
+    expect(readFileSync(proposalFile)).toEqual(winnerBytes);
+    expect(lstatSync(proposalFile).ino).toBe(winnerInode);
+  });
+
+  it('does not touch malformed or schema-1 same-ID pending publication collisions', async () => {
+    const { store } = createStoreV2({ createId: () => 'invalid_pending_collision_project', now: () => timestamp });
+    const created = await store.createProjectV2(inputV2);
+    const project = await addActiveReferenceShotsV2(store, created);
+    const proposal = await seedProposalV2(store, project, { proposalId: 'malformed_pending_collision' });
+    const proposalFile = path.join(proposal.directories.pending, `${proposal.proposal.id}.json`);
+    const proposalTemporary = `${proposalFile}.123_42.tmp`;
+    const proposalReady = `${proposalFile}.123_42.ready`;
+    writeFileSync(proposalTemporary, '{');
+    linkSync(proposalTemporary, proposalReady);
+    const proposalBefore = snapshotTreeV2(proposal.directories.root);
+
+    await expect(store.listProposalsV2(project.id)).rejects.toMatchObject({ code: 'storage_error' });
+    expect(snapshotTreeV2(proposal.directories.root)).toEqual(proposalBefore);
+    rmSync(proposalReady);
+    rmSync(proposalTemporary);
+
+    const reference = await seedReferenceRequestV2(store, project, {
+      requestId: 'schema_one_pending_collision',
+    });
+    const referenceFile = path.join(reference.directories.pending, `${reference.request.id}.json`);
+    const referenceTemporary = `${referenceFile}.123_43.tmp`;
+    const referenceReady = `${referenceFile}.123_43.ready`;
+    writeFileSync(referenceTemporary, JSON.stringify({ ...reference.request, schemaVersion: 1 }));
+    linkSync(referenceTemporary, referenceReady);
+    const referenceBefore = snapshotTreeV2(reference.directories.root);
+
+    await expect(store.listReferenceRequestsV2(project.id)).rejects.toMatchObject({ code: 'storage_error' });
+    expect(snapshotTreeV2(reference.directories.root)).toEqual(referenceBefore);
+  });
+
+  it('preserves incomplete temp-only writer residue and an unsafe-name collision', async () => {
+    const { store } = createStoreV2({ createId: () => 'temp_only_residue_v2', now: () => timestamp });
+    const project = await store.createProjectV2(inputV2);
+    const paths = await store.resolveProposalPathsV2(project.id);
+    const slots = path.join(path.dirname(paths.pendingDir), 'slots');
+    const pendingResidue = path.join(paths.pendingDir, 'interrupted.json.123_1.tmp');
+    const slotResidue = path.join(slots, '1.slot.123_2.tmp');
+    writeFileSync(pendingResidue, '');
+    writeFileSync(slotResidue, '{"schemaVersion":');
+
+    await expect(store.listProposalsV2(project.id)).rejects.toMatchObject({ code: 'storage_error' });
+    expect(existsSync(pendingResidue)).toBe(true);
+    expect(existsSync(slotResidue)).toBe(true);
+    rmSync(pendingResidue);
+    rmSync(slotResidue);
+
+    const collision = path.join(paths.pendingDir, 'not safe.json.123_3.tmp');
+    writeFileSync(collision, 'foreign bytes');
+    const before = readFileSync(collision);
+
+    await expect(store.listProposalsV2(project.id)).rejects.toMatchObject({ code: 'storage_error' });
+
+    expect(readFileSync(collision)).toEqual(before);
+  });
+
+  it('preserves unsafe journal residue, unowned publication collisions, and out-of-range slots', async () => {
+    const ids = ['journal_collision_project', 'journal_collision_handoff'];
+    const base = createStoreV2({ createId: () => ids.shift() ?? 'unexpected_id', now: () => timestamp }).store;
+    const project = await addActiveReferenceShotsV2(base, await base.createProjectV2(inputV2));
+    const seeded = await seedReferenceRequestV2(base, project, { requestId: 'journal_collision_request' });
+    const unsafeResidue = path.join(seeded.directories.decisions, 'not safe.json.publish');
+    writeFileSync(unsafeResidue, 'foreign journal bytes');
+    const unsafeBefore = readFileSync(unsafeResidue);
+    await expect(base.listReferenceRequestsV2(project.id)).rejects.toMatchObject({ code: 'storage_error' });
+    expect(readFileSync(unsafeResidue)).toEqual(unsafeBefore);
+    rmSync(unsafeResidue);
+
+    const decisionFile = path.join(seeded.directories.decisions, `${seeded.request.id}.json`);
+    const publication = `${decisionFile}.publish`;
+    const sentinel = 'unowned publication collision';
+    let collidedPublication: string | null = null;
+    const collisionFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver) as unknown;
+        if (property !== 'open' || typeof value !== 'function') return value;
+        return async (...args: unknown[]): Promise<unknown> => {
+          const openedFile = String(args[0]);
+          if (
+            openedFile.endsWith('/journal_collision_request.json.publish') &&
+            String(args[1]) === 'wx' &&
+            !existsSync(openedFile)
+          ) {
+            collidedPublication = openedFile;
+            writeFileSync(openedFile, sentinel);
+          }
+          return Reflect.apply(value, target, args) as unknown;
+        };
+      },
+    }) as typeof nodeFs;
+    const colliding = createCreativeStudioStore({ rootDir, fs: collisionFs, now: () => timestamp });
+    await expect(
+      colliding.decideReferenceRequestV2({
+        projectId: project.id,
+        requestId: seeded.request.id,
+        expectedRevision: project.revision,
+        outcome: { kind: 'generation_gate' },
+      })
+    ).rejects.toMatchObject({ code: 'storage_error' });
+    expect(collidedPublication?.endsWith('/journal_collision_request.json.publish')).toBe(true);
+    expect(readFileSync(publication, 'utf8')).toBe(sentinel);
+    expect(existsSync(decisionFile)).toBe(false);
+    await expect(base.listReferenceRequestsV2(project.id)).rejects.toMatchObject({ code: 'storage_error' });
+    expect(readFileSync(publication, 'utf8')).toBe(sentinel);
+    expect(existsSync(decisionFile)).toBe(false);
+    rmSync(publication);
+
+    renameSync(path.join(seeded.directories.slots, '0.slot'), path.join(seeded.directories.slots, '50.slot'));
+    const beforeRangeCheck = snapshotTreeV2(seeded.directories.root);
+    await expect(base.listReferenceRequestsV2(project.id)).rejects.toMatchObject({ code: 'storage_error' });
+    expect(snapshotTreeV2(seeded.directories.root)).toEqual(beforeRangeCheck);
+  });
+
+  it('rejects rollback clocks before proposal, reference decision, or dismissed receipt publication', async () => {
+    const ids = ['rollback_clock_project', 'rollback_clock_handoff'];
+    const base = createStoreV2({ createId: () => ids.shift() ?? 'unexpected_id', now: () => timestamp }).store;
+    const project = await addActiveReferenceShotsV2(base, await base.createProjectV2(inputV2));
+    const proposal = await seedProposalV2(base, project, { proposalId: 'rollback_clock_proposal' });
+    const reference = await seedReferenceRequestV2(base, project, {
+      requestId: 'rollback_clock_reference',
+      slotIndex: 1,
+    });
+    const rollback = createStoreV2({
+      createId: () => 'rollback_clock_handoff',
+      now: () => '2026-08-17T11:59:59.000Z',
+    }).store;
+    const before = snapshotTreeV2(path.join(rootDir, project.id));
+    await expect(rollback.rejectProposalV2(project.id, proposal.proposal.id)).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+    await expect(
+      rollback.decideReferenceRequestV2({
+        projectId: project.id,
+        requestId: reference.request.id,
+        expectedRevision: project.revision,
+        outcome: { kind: 'generation_gate' },
+      })
+    ).rejects.toMatchObject({ code: 'storage_error' });
+    expect(snapshotTreeV2(path.join(rootDir, project.id))).toEqual(before);
+
+    const generated = await seedGenerationHandoffV2(base, project, {
+      requestId: 'rollback_receipt_reference',
+      slotIndex: 2,
+    });
+    const receiptBefore = snapshotTreeV2(generated.directories.root);
+    await expect(
+      rollback.recordReferenceGenerationHandoffReceiptV2({
+        projectId: project.id,
+        handoffId: generated.handoffId,
+        expectedRevision: project.revision,
+        result: { kind: 'dismissed' },
+      })
+    ).rejects.toMatchObject({ code: 'storage_error' });
+    expect(snapshotTreeV2(generated.directories.root)).toEqual(receiptBefore);
+  });
+
+  it('fails closed when a reference directory generation is replaced', async () => {
+    const { store } = createStoreV2({ createId: () => 'reference_directory_replacement', now: () => timestamp });
+    const project = await store.createProjectV2(inputV2);
+    const seeded = await seedReferenceRequestV2(store, project, { requestId: 'directory_replacement_request' });
+    const outside = mkdtempSync(path.join(tmpdir(), 'reference-decisions-replacement-'));
+    const marker = path.join(outside, 'marker');
+    writeFileSync(marker, 'must survive');
+    rmSync(seeded.directories.decisions, { recursive: true });
+    symlinkSync(outside, seeded.directories.decisions);
+    const before = snapshotTreeV2(path.join(rootDir, project.id));
+
+    try {
+      await expect(store.listReferenceRequestsV2(project.id)).rejects.toMatchObject({ code: 'storage_error' });
+      expect(readFileSync(marker, 'utf8')).toBe('must survive');
+      expect(snapshotTreeV2(path.join(rootDir, project.id))).toEqual(before);
+    } finally {
+      rmSync(seeded.directories.decisions);
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('counts only unresolved live records against V2 proposal and reference capacity', async () => {
+    const { store } = createStoreV2({ createId: () => 'history_capacity_v2', now: () => timestamp });
+    const project = await store.createProjectV2(inputV2);
+    const proposalPaths = await store.resolveProposalPathsV2(project.id);
+    const proposalRoot = path.dirname(proposalPaths.pendingDir);
+    for (let index = 0; index < STUDIO_PROPOSAL_MAX_PENDING_PER_PROJECT; index += 1) {
+      const proposalId = `terminal_${index}`;
+      const proposal: StudioProposalRecordV2 = {
+        schemaVersion: 2,
+        id: proposalId,
+        projectId: project.id,
+        status: 'pending',
+        baseRevision: project.revision,
+        payload: { kind: 'mutation_batch', operations: [{ kind: 'set_brief', brief: proposalId }] },
+        createdAt: timestamp,
+        decidedAt: null,
+      };
+      const decision = { schemaVersion: 2, proposalId, status: 'rejected', decidedAt: timestamp };
+      writeFileSync(path.join(proposalPaths.pendingDir, `${proposalId}.json`), JSON.stringify(proposal));
+      writeFileSync(path.join(proposalRoot, 'decisions', `${proposalId}.json`), JSON.stringify(decision));
+    }
+    const live = await seedProposalV2(store, project, { proposalId: 'live_after_history' });
+    await expect(store.listProposalsV2(project.id)).resolves.toHaveLength(STUDIO_PROPOSAL_MAX_PENDING_PER_PROJECT + 1);
+    for (let index = 1; index <= STUDIO_PROPOSAL_MAX_PENDING_PER_PROJECT; index += 1) {
+      const proposalId = `live_overflow_${index}`;
+      const proposal: StudioProposalRecordV2 = {
+        ...live.proposal,
+        id: proposalId,
+      };
+      writeFileSync(path.join(live.directories.pending, `${proposalId}.json`), JSON.stringify(proposal));
+      writeFileSync(
+        path.join(live.directories.slots, `${index}.slot`),
+        JSON.stringify({ schemaVersion: 2, proposalId, reservedAt: timestamp })
+      );
+    }
+    await expect(store.listProposalsV2(project.id)).rejects.toMatchObject({ code: 'storage_error' });
+
+    const referenceStore = createStoreV2({
+      createId: () => 'reference_history_capacity_v2',
+      now: () => timestamp,
+    }).store;
+    const referenceProject = await referenceStore.createProjectV2(inputV2);
+    const referencePaths = await referenceStore.resolveReferenceRequestPathsV2(referenceProject.id);
+    const referenceRoot = path.dirname(referencePaths.pendingDir);
+    for (let index = 0; index < STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT; index += 1) {
+      const requestId = `terminal_reference_${index}`;
+      const request: StudioReferenceRequestV2 = {
+        schemaVersion: 2,
+        id: requestId,
+        projectId: referenceProject.id,
+        shotIds: ['historical_shot'],
+        status: 'pending',
+        createdAt: timestamp,
+      };
+      const decision: StudioReferenceRequestDecisionV2 = {
+        schemaVersion: 2,
+        requestId,
+        projectId: referenceProject.id,
+        decidedAt: timestamp,
+        outcome: { kind: 'rejected' },
+      };
+      writeFileSync(path.join(referencePaths.pendingDir, `${requestId}.json`), JSON.stringify(request));
+      writeFileSync(path.join(referenceRoot, 'decisions', `${requestId}.json`), JSON.stringify(decision));
+    }
+    const liveReference = await seedReferenceRequestV2(referenceStore, referenceProject, {
+      requestId: 'live_reference_after_history',
+    });
+    await expect(referenceStore.listReferenceRequestsV2(referenceProject.id)).resolves.toHaveLength(
+      STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT + 1
+    );
+    for (let index = 1; index <= STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT; index += 1) {
+      const requestId = `live_reference_overflow_${index}`;
+      const request: StudioReferenceRequestV2 = { ...liveReference.request, id: requestId };
+      writeFileSync(path.join(liveReference.directories.pending, `${requestId}.json`), JSON.stringify(request));
+      writeFileSync(
+        path.join(liveReference.directories.slots, `${index}.slot`),
+        JSON.stringify({ schemaVersion: 2, requestId, reservedAt: timestamp })
+      );
+    }
+    await expect(referenceStore.listReferenceRequestsV2(referenceProject.id)).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+  });
+
+  it('leaves a complete V1 project and sidecar tree byte-identical across every V2 ledger entrypoint', async () => {
+    const prototype = await seedPrototypeProject('prototype_proposals_v1');
+    const prototypeStore = createCreativeStudioStore({ rootDir, now: () => timestamp });
+    await prototypeStore.resolveProposalPaths(prototype.id);
+    const before = snapshotTreeV2(rootDir);
+    const watchProposalTree = vi.fn(() => ({ close: vi.fn() }));
+    const v2 = createCreativeStudioStore({
+      rootDir,
+      now: () => timestamp,
+      watchProposalTree,
+      logError: () => undefined,
+    });
+
+    await expect(v2.listProposalsV2(prototype.id)).rejects.toMatchObject({ code: 'unsupported_prototype_schema' });
+    await expect(v2.acceptProposalV2(prototype.id, 'proposal_v1')).rejects.toMatchObject({
+      code: 'unsupported_prototype_schema',
+    });
+    await expect(v2.rejectProposalV2(prototype.id, 'proposal_v1')).rejects.toMatchObject({
+      code: 'unsupported_prototype_schema',
+    });
+    await expect(v2.resolveProposalPathsV2(prototype.id)).rejects.toMatchObject({
+      code: 'unsupported_prototype_schema',
+    });
+    await expect(v2.listReferenceRequestsV2(prototype.id)).rejects.toMatchObject({
+      code: 'unsupported_prototype_schema',
+    });
+    await expect(
+      v2.decideReferenceRequestV2({
+        projectId: prototype.id,
+        requestId: 'request_v1',
+        expectedRevision: 1,
+        outcome: { kind: 'rejected' },
+      })
+    ).rejects.toMatchObject({ code: 'unsupported_prototype_schema' });
+    await expect(v2.readReferenceGenerationHandoffV2(prototype.id, 'handoff_v1')).rejects.toMatchObject({
+      code: 'unsupported_prototype_schema',
+    });
+    await expect(
+      v2.recordReferenceGenerationHandoffReceiptV2({
+        projectId: prototype.id,
+        handoffId: 'handoff_v1',
+        expectedRevision: 1,
+        result: { kind: 'dismissed' },
+      })
+    ).rejects.toMatchObject({ code: 'unsupported_prototype_schema' });
+    await expect(v2.resolveReferenceRequestPathsV2(prototype.id)).rejects.toMatchObject({
+      code: 'unsupported_prototype_schema',
+    });
+    await v2.reapAbandonedProposalsV2();
+    await v2.reapAbandonedReferenceRequestsV2();
+    const stopProposals = await v2.watchProposalsV2(vi.fn());
+    const stopReferences = await v2.watchReferenceRequestsV2(vi.fn());
+    await stopProposals();
+    await stopReferences();
+
+    expect(watchProposalTree).toHaveBeenCalledTimes(2);
+    expect(snapshotTreeV2(rootDir)).toEqual(before);
   });
 
   it('returns a verified path only for a supported schema-2 manifest without touching the V1 index', async () => {

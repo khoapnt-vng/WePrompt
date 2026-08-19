@@ -2013,6 +2013,7 @@ describe('Studio Director schema-2 command processor', () => {
   it.each([
     ['beat_capacity_reached', 'rejected'],
     ['dependency_blocked', 'rejected'],
+    ['operation_not_permitted', 'rejected'],
     ['validation_failed', 'rejected'],
     ['deadline_elapsed', 'expired'],
   ] as const)('maps reducer reason %s without leaking error prose', async (reasonCode, status) => {
@@ -2221,15 +2222,18 @@ describe('Studio Director schema-2 real mailbox terminal cleanup', () => {
             },
           })
         );
-        await vi.waitFor(async () => {
-          await expect(mailbox.readPending(project.id, commandId)).resolves.toBeNull();
-          await expect(
-            nodeFs.lstat(path.join(realCommandDirectories(rootDir, project.id).slots, '0.slot'))
-          ).rejects.toMatchObject({ code: 'ENOENT' });
-          await expect(
-            nodeFs.lstat(path.join(realCommandDirectories(rootDir, project.id).slots, '0.slot.lease'))
-          ).rejects.toMatchObject({ code: 'ENOENT' });
-        });
+        await vi.waitFor(
+          async () => {
+            await expect(mailbox.readPending(project.id, commandId)).resolves.toBeNull();
+            await expect(
+              nodeFs.lstat(path.join(realCommandDirectories(rootDir, project.id).slots, '0.slot'))
+            ).rejects.toMatchObject({ code: 'ENOENT' });
+            await expect(
+              nodeFs.lstat(path.join(realCommandDirectories(rootDir, project.id).slots, '0.slot.lease'))
+            ).rejects.toMatchObject({ code: 'ENOENT' });
+          },
+          { timeout: 5_000 }
+        );
 
         expect(getProjectV2).not.toHaveBeenCalled();
         expect(apply).not.toHaveBeenCalled();

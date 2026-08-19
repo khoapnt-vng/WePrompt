@@ -190,6 +190,10 @@ export const STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT = STUDIO_MAX_SHOTS_PER_PROJECT
 export const STUDIO_MAX_EXPORT_DIRECTORY_DEPTH = 4;
 export const STUDIO_BED_FADE_OUT_SECONDS = 2;
 export const STUDIO_MAX_REFERENCE_REQUEST_SHOTS = 24;
+export const STUDIO_PROPOSAL_V2_PENDING_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
+export const STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES = 256 * 1024;
+export const STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT = 50;
+export const STUDIO_REFERENCE_REQUEST_V2_PENDING_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
 export const STUDIO_MAX_CUT_PLACEMENT_CLIPS = 96;
 export const STUDIO_MAX_DIRTY_SHOTS_REPORTED = 96;
 export const STUDIO_MAX_MCP_AVAILABLE_TAKE_IDS_PER_SHOT = 24;
@@ -482,6 +486,7 @@ export type StudioDirectorCommandSlotLeaseV2 = {
 export type StudioDirectorCommandRejectionCodeV2 =
   | 'malformed_record'
   | 'unsupported_version'
+  | 'operation_not_permitted'
   | 'stale_revision'
   | 'future_revision'
   | 'project_not_found'
@@ -1381,14 +1386,6 @@ export type StudioNonEmptyPartial<T> = {
 
 export type StudioEditableBeatChanges = StudioNonEmptyPartial<StudioEditableBeat>;
 export type StudioEditableShotChanges = StudioNonEmptyPartial<StudioEditableShot>;
-
-export type StudioCutClipV2 = Omit<StudioCutClip, 'sceneId'> & {
-  clipId: string;
-};
-
-export type StudioCutV2 = Omit<StudioCut, 'clips'> & {
-  clips: Record<string, StudioCutClipV2>;
-};
 
 export type StudioEditableProjectSettings = Pick<
   StudioProjectV2,

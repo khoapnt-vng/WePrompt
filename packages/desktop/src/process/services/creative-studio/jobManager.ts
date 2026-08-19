@@ -2736,6 +2736,10 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     if (disposed) throw new StudioJobManagerError('invalid_request');
     requireSafeId(input.projectId);
     requireSafeId(input.jobId);
+    if (!isPositiveRevision(input.expectedRevision)) invalidRequest();
+    const key = `${executionKey(input.projectId, input.jobId)}:${input.expectedRevision}`;
+    const inFlight = cancellationFlightsV2.get(key);
+    if (inFlight) return inFlight;
     const project = await requireExpectedProjectV2(input.projectId, input.expectedRevision);
     if (disposed) throw new StudioJobManagerError('invalid_request');
     const current = ownValueV2(project.jobs, input.jobId);
@@ -2748,7 +2752,6 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     ) {
       return cancelJobV2Once(input, project);
     }
-    const key = executionKey(input.projectId, input.jobId);
     const existing = cancellationFlightsV2.get(key);
     if (existing) return existing;
     const operation = cancelJobV2Once(input, project);
@@ -2870,11 +2873,18 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       throw new StudioJobManagerError('invalid_request');
     }
     const shot = ownValueV2(project.shots, job.shotId);
-    const shotJobs =
-      shot?.jobIds.flatMap((jobId) => {
-        const candidate = ownValueV2(project.jobs, jobId);
-        return candidate?.projectId === project.id && candidate.shotId === job.shotId ? [candidate] : [];
-      }) ?? [];
+    if (
+      !shot ||
+      job.projectId !== project.id ||
+      !shot.jobIds.includes(job.id) ||
+      activeBeatForShotV2(project, shot.id) === null
+    ) {
+      throw new StudioJobManagerError('invalid_request');
+    }
+    const shotJobs = shot.jobIds.flatMap((jobId) => {
+      const candidate = ownValueV2(project.jobs, jobId);
+      return candidate?.projectId === project.id && candidate.shotId === job.shotId ? [candidate] : [];
+    });
     if (
       shotJobs.some((candidate) => candidate.retryOfJobId === job.id) ||
       shotJobs.some((candidate) => candidate.id !== job.id && !TERMINAL_STATUSES.has(candidate.status))

@@ -484,8 +484,12 @@ const assertOperationShape: (value: unknown) => asserts value is StudioMutationO
       }
       return;
     case 'redetach_line':
-    case 'rederive_line':
       if (!isSafeId(operation.shotId) || !isStringWithin(operation.line, 8 * 1024)) fail('invalid_operation');
+      return;
+    case 'rederive_line':
+      if (!isSafeId(operation.shotId) || !isStringWithin(operation.line, 8 * 1024) || operation.line.length < 1) {
+        fail('invalid_operation');
+      }
       return;
     case 'restore_line':
       if (!isSafeId(operation.shotId) || !isSafeId(operation.historyEntryId)) fail('invalid_operation');
@@ -588,8 +592,13 @@ const copyArray = <T>(value: readonly T[]): T[] => {
 const binIdentity = (item: StudioBinItem): string =>
   item.kind === 'beat' ? `beat:${item.beatId}` : item.kind === 'shot' ? `shot:${item.shotId}` : `take:${item.assetId}`;
 
-const findActiveShotOwner = (project: StudioProjectV2, shotId: string): StudioBeat | undefined =>
-  Object.values(project.beats).find((beat) => beat.shotOrder.includes(shotId));
+const findActiveShotOwner = (project: StudioProjectV2, shotId: string): StudioBeat | undefined => {
+  for (const beatId of project.beatOrder) {
+    const beat = ownValue(project.beats, beatId);
+    if (beat?.shotOrder.includes(shotId)) return beat;
+  }
+  return undefined;
+};
 
 const shotOwnerLocation = (
   project: StudioProjectV2,
@@ -1362,7 +1371,7 @@ export const applyStudioMutationBatchV2 = (
 
       case 'apply_coverage': {
         const beat = ownValue(draft.beats, operation.beatId);
-        if (beat === undefined) fail('invalid_operation');
+        if (beat === undefined || !draft.beatOrder.includes(beat.id)) fail('invalid_operation');
         const proposedIds = operation.shots.map((shot) => shot.shotId);
         if (new Set(proposedIds).size !== proposedIds.length) fail('invalid_operation');
         const currentIds = new Set(beat.shotOrder);

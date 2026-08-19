@@ -36,8 +36,14 @@ export default defineConfig({
             'tests/integration/**/*.test.ts',
             'tests/regression/**/*.test.ts',
           ],
-          exclude: ['tests/unit/**/*.dom.test.ts', 'tests/unit/**/*.dom.test.tsx'],
+          exclude: [
+            'tests/unit/**/*.dom.test.ts',
+            'tests/unit/**/*.dom.test.tsx',
+            'tests/integration/creative-studio/directorCommandLatency.integration.test.ts',
+            'tests/unit/process/creative-studio/service/directorCommandMailbox.test.ts',
+          ],
           setupFiles: ['./tests/vitest.setup.ts'],
+          sequence: { groupOrder: 2 },
         },
       },
       // jsdom environment tests (React component/hook tests)
@@ -48,6 +54,25 @@ export default defineConfig({
           environment: 'jsdom',
           include: ['tests/unit/**/*.dom.test.ts', 'tests/unit/**/*.dom.test.tsx'],
           setupFiles: ['./tests/vitest.dom.setup.ts'],
+          sequence: { groupOrder: 2 },
+        },
+      },
+      // Wall-clock latency and mailbox-load calibrations must not compete with unrelated
+      // repository workers. They still run as part of the full suite, before the functional
+      // node/jsdom group, and retain their frozen production thresholds.
+      {
+        extends: true,
+        test: {
+          name: 'creative-studio-timing',
+          environment: 'node',
+          include: [
+            'tests/integration/creative-studio/directorCommandLatency.integration.test.ts',
+            'tests/unit/process/creative-studio/service/directorCommandMailbox.test.ts',
+          ],
+          setupFiles: ['./tests/vitest.setup.ts'],
+          fileParallelism: false,
+          maxWorkers: 1,
+          sequence: { groupOrder: 1 },
         },
       },
     ],

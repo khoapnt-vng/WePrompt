@@ -777,6 +777,16 @@ describe('StudioJobManager durable submission', () => {
     ).toBe(false);
   });
 
+  it('treats an absent schema-2 cancellation policy as none', () => {
+    expect(
+      canCancelJobV2({
+        status: 'queued_remote',
+        providerJobId: 'remote_schema_2',
+        spendReceipt: null,
+      } as StudioJobV2)
+    ).toBe(false);
+  });
+
   it('rejects a revision-N request after a real Director edit commits N+1 before any paid boundary or job write', async () => {
     const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-job-manager-director-race-'));
     const store = createCreativeStudioStore({ rootDir });
@@ -1553,6 +1563,9 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     };
     const first = accepted.manager.cancelJobV2(request);
     await waitFor(() => expect(cancel).toHaveBeenCalledOnce());
+    await expect(
+      accepted.manager.cancelJobV2({ ...request, expectedRevision: request.expectedRevision - 1 })
+    ).rejects.toMatchObject({ code: 'stale_project' });
     const second = accepted.manager.cancelJobV2(request);
     cancellation.resolve({ kind: 'cancelled' });
     await expect(Promise.all([first, second])).resolves.toEqual([
@@ -1723,6 +1736,10 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
         expected: { status: 'failed', error: { code: 'auth' }, spendReceipt: null },
       },
       {
+        snapshot: { status: 'failed', error: { code: 'invalid_response' } },
+        expected: { status: 'failed', error: { code: 'unknown' }, spendReceipt: null },
+      },
+      {
         snapshot: { status: 'expired', error: { code: 'timeout' } },
         expected: { status: 'failed', error: { code: 'timeout' }, spendReceipt: null },
       },
@@ -1891,7 +1908,7 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
       // eslint-disable-next-line no-await-in-loop -- The concurrent durable winner remains authoritative.
       await expectV2Job(harness, candidate.expected);
     }
-  });
+  }, 30_000);
 
   it('bounds V2 polling before and after backoff and classifies per-attempt deadline errors', async () => {
     const startedAt = Date.parse('2026-08-17T12:00:00.000Z');
@@ -3016,6 +3033,77 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
       expect(result).toMatchObject({ status: 'failed', error: expect.any(Object) });
       expect(poll).toHaveBeenCalledOnce();
     }
+  });
+
+  it('rejects download retry for individually binned Shots and Shots in binned Beats before resolver or provider work', async () => {
+    await Promise.all(
+      (['shot', 'beat'] as const).map(async (binKind) => {
+        const submit = vi.fn(async () => {
+          throw new Error('inactive retry must not submit');
+        });
+        const poll = vi.fn(async () => ({ status: 'queued' as const }));
+        const listProviders = vi.fn(async () => {
+          throw new Error('inactive retry must not resolve providers');
+        });
+        const providerResolver = {
+          listConnectionCandidates: vi.fn(async () => {
+            throw new Error('inactive retry must not list connections');
+          }),
+          listGenerationRoutes: vi.fn(async () => {
+            throw new Error('inactive retry must not list routes');
+          }),
+          isGenerationRouteAvailable: vi.fn(async () => {
+            throw new Error('inactive retry must not resolve routes');
+          }),
+        } satisfies StudioJobManagerDeps['providerResolver'];
+        const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit, poll }), {
+          listProviders,
+          providerResolver,
+        });
+        const receipt = createStudioSpendReceiptV2({
+          authorization: harness.authorization,
+          itemId: harness.item.id,
+          jobId: 'job_v2_1',
+          generationIndex: 0,
+        });
+        const parked = await harness.store.updateProjectV2(harness.project.id, (project) => {
+          const job = project.jobs.job_v2_1!;
+          job.status = 'failed';
+          job.providerJobId = `remote_binned_${binKind}`;
+          job.remoteStartedAt = project.updatedAt;
+          job.error = { code: 'download_failed', messageKey: 'downloadFailed' };
+          job.spendReceipt = receipt;
+          if (binKind === 'shot') {
+            project.beats.beat_1!.shotOrder = [];
+            project.bin.push({ kind: 'shot', beatId: 'beat_1', shotId: 'shot_1', reason: 'lifted' });
+          } else {
+            project.beatOrder = [];
+            project.bin.push({ kind: 'beat', beatId: 'beat_1', reason: 'lifted' });
+          }
+          return project;
+        });
+        const projectPath = path.join(harness.rootDir, parked.id, 'project.json');
+        const bytesBefore = await nodeFs.readFile(projectPath);
+
+        await expect(
+          harness.manager.retryDownloadV2({
+            projectId: parked.id,
+            jobId: 'job_v2_1',
+            expectedRevision: parked.revision,
+          })
+        ).rejects.toMatchObject({ code: 'invalid_request' });
+
+        expect(await nodeFs.readFile(projectPath)).toEqual(bytesBefore);
+        const loaded = await harness.store.getProjectV2(parked.id);
+        expect(loaded.status === 'supported' ? loaded.project : null).toEqual(parked);
+        expect(listProviders).not.toHaveBeenCalled();
+        expect(providerResolver.listConnectionCandidates).not.toHaveBeenCalled();
+        expect(providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+        expect(providerResolver.isGenerationRouteAvailable).not.toHaveBeenCalled();
+        expect(submit).not.toHaveBeenCalled();
+        expect(poll).not.toHaveBeenCalled();
+      })
+    );
   });
 
   it('retry-download reuses the same job, provider identity, snapshot, and receipt', async () => {

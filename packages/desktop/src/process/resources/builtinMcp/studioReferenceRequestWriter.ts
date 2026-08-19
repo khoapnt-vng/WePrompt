@@ -10,6 +10,9 @@ import path from 'node:path';
 import {
   STUDIO_MAX_REFERENCE_REQUEST_SHOTS,
   STUDIO_PROJECT_SCHEMA_VERSION,
+  STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT,
+  STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES,
+  STUDIO_REFERENCE_REQUEST_V2_PENDING_TTL_MS,
   type StudioReferenceRequest,
   type StudioReferenceRequestV2,
 } from '@/common/types/project/creativeStudioTypes';
@@ -20,8 +23,14 @@ import {
   writePendingRecord,
   writePendingRecordV2,
 } from '@process/resources/builtinMcp/studioPendingRecordWriter';
-import { parseStudioReferenceRequestV2 } from '@process/services/creative-studio/service/directorCommandContracts';
-import { readBoundedRegularFile, type RecordIoFileSystem } from '@process/services/creative-studio/service/recordIo';
+import {
+  parseStudioReferenceRequestSlotV2,
+  parseStudioReferenceRequestV2,
+} from '@process/services/creative-studio/service/directorCommandContracts';
+import {
+  readBoundedRegularFileWithIdentity,
+  type RecordIoFileSystem,
+} from '@process/services/creative-studio/service/recordIo';
 
 export type WriteReferenceRequestInput = {
   pendingDir: string;
@@ -112,11 +121,20 @@ export const listPendingReferenceRequestShotIdsV2 = async (
   pendingDir: string,
   projectId: string,
   injectedFs: RecordIoFileSystem = fs,
-  projectAuthority?: StudioPendingProjectAuthorityV2
+  projectAuthority?: StudioPendingProjectAuthorityV2,
+  now: () => number = Date.now
 ): Promise<Set<string>> => {
+  const nowMs = now();
+  if (!Number.isSafeInteger(nowMs)) {
+    throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 reference request queue');
+  }
+  const pendingCutoffMs = nowMs - STUDIO_REFERENCE_REQUEST_V2_PENDING_TTL_MS;
   let canonicalPendingDir: string;
   let pendingIdentity: string;
-  let entries: import('node:fs').Dirent[];
+  let canonicalSlotsDir: string;
+  let slotsIdentity: string;
+  let pendingEntries: import('node:fs').Dirent[];
+  let slotEntries: import('node:fs').Dirent[];
   try {
     if (projectAuthority !== undefined) {
       await assertPendingRecordProjectAuthorityV2({ pendingDir, projectAuthority, fs: injectedFs });
@@ -127,41 +145,184 @@ export const listPendingReferenceRequestShotIdsV2 = async (
     canonicalPendingDir = await injectedFs.realpath(pendingDir);
     const canonicalStats = await injectedFs.lstat(canonicalPendingDir);
     if (directoryIdentity(canonicalStats) !== pendingIdentity) return new Set();
-    entries = await injectedFs.readdir(canonicalPendingDir, { withFileTypes: true });
+    const slotsDir = path.join(path.dirname(canonicalPendingDir), 'slots');
+    const slotsStats = await injectedFs.lstat(slotsDir);
+    if (!slotsStats.isDirectory() || slotsStats.isSymbolicLink()) return new Set();
+    slotsIdentity = directoryIdentity(slotsStats);
+    canonicalSlotsDir = await injectedFs.realpath(slotsDir);
+    const canonicalSlotsStats = await injectedFs.lstat(canonicalSlotsDir);
+    if (directoryIdentity(canonicalSlotsStats) !== slotsIdentity) return new Set();
+    [pendingEntries, slotEntries] = await Promise.all([
+      injectedFs.readdir(canonicalPendingDir, { withFileTypes: true }),
+      injectedFs.readdir(canonicalSlotsDir, { withFileTypes: true }),
+    ]);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return new Set();
     throw error;
   }
+  const pendingNames = pendingEntries.map((entry) => entry.name).toSorted();
+  const slotNames = slotEntries.map((entry) => entry.name).toSorted();
+  const liveRequestIds = new Set<string>();
+  const identifiedSlots: Array<{
+    file: string;
+    bytes: string;
+    identity: { dev: number; ino: number };
+  }> = [];
+  let duplicateLiveRequestId = false;
+  for (const entry of slotEntries) {
+    const match = /^(0|[1-9]\d*)\.slot$/.exec(entry.name);
+    if (!entry.isFile() || match === null || Number(match[1]) >= STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT) {
+      continue;
+    }
+    try {
+      const file = path.join(canonicalSlotsDir, entry.name);
+      // One verified live slot is the dedup authority. Terminal decisions release their slot while
+      // an open generation handoff deliberately retains it until its receipt is durable.
+      // eslint-disable-next-line no-await-in-loop
+      const identified = await readBoundedRegularFileWithIdentity({
+        fs: injectedFs,
+        canonicalRoot: canonicalSlotsDir,
+        file,
+        maxBytes: STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES,
+      });
+      if (identified === null) continue;
+      const parsed = parseStudioReferenceRequestSlotV2(JSON.parse(identified.bytes) as unknown);
+      if (parsed.status !== 'valid') continue;
+      if (liveRequestIds.has(parsed.record.requestId)) duplicateLiveRequestId = true;
+      liveRequestIds.add(parsed.record.requestId);
+      identifiedSlots.push({ file, ...identified });
+    } catch {
+      // Main owns authoritative validation; malformed and V1 slots cannot establish V2 dedup state.
+    }
+  }
+  if (duplicateLiveRequestId) {
+    throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 reference request queue');
+  }
   const shotIds = new Set<string>();
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+  const identifiedPending: Array<{
+    file: string;
+    bytes: string;
+    identity: { dev: number; ino: number };
+  }> = [];
+  const joinedRequestIds = new Set<string>();
+  for (const entry of pendingEntries) {
+    if (!entry.isFile()) continue;
     try {
       const file = path.join(canonicalPendingDir, entry.name);
-      const requestId = entry.name.slice(0, -'.json'.length);
-      // One no-follow descriptor binds validation to at most MAX_RECORD_BYTES from one inode.
-      // eslint-disable-next-line no-await-in-loop
-      const bytes = await readBoundedRegularFile({
+      const readyMatch = /^([A-Za-z0-9_-]{1,256}\.json)\.\d+_\d+\.ready$/.exec(entry.name);
+      const canonicalName = entry.name.endsWith('.json') ? entry.name : readyMatch?.[1];
+      if (canonicalName === undefined) continue;
+      const requestId = canonicalName.slice(0, -'.json'.length);
+      if (!liveRequestIds.has(requestId)) continue;
+      const canonicalFile = path.join(canonicalPendingDir, canonicalName);
+      let identifiedFile = file;
+      let identified = await readBoundedRegularFileWithIdentity({
         fs: injectedFs,
         canonicalRoot: canonicalPendingDir,
         file,
-        maxBytes: MAX_RECORD_BYTES,
+        maxBytes: STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES,
       });
-      if (bytes === null) continue;
-      const value = JSON.parse(bytes) as unknown;
+      if (readyMatch !== null) {
+        const named = await readBoundedRegularFileWithIdentity({
+          fs: injectedFs,
+          canonicalRoot: canonicalPendingDir,
+          file: canonicalFile,
+          maxBytes: STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES,
+        });
+        if (named !== null) continue;
+        const temporaryFile = `${file.slice(0, -'.ready'.length)}.tmp`;
+        const temporary = await readBoundedRegularFileWithIdentity({
+          fs: injectedFs,
+          canonicalRoot: canonicalPendingDir,
+          file: temporaryFile,
+          maxBytes: STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES,
+        });
+        if (
+          identified === null ||
+          temporary === null ||
+          identified.bytes !== temporary.bytes ||
+          identified.identity.dev !== temporary.identity.dev ||
+          identified.identity.ino !== temporary.identity.ino
+        ) {
+          throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 reference request queue');
+        }
+        identifiedPending.push({ file: temporaryFile, ...temporary });
+        identifiedFile = file;
+      }
+      // One no-follow descriptor binds validation to the reference-request byte contract from one inode.
+      if (identified === null) {
+        throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 reference request queue');
+      }
+      const value = JSON.parse(identified.bytes) as unknown;
       const parsed = parseStudioReferenceRequestV2({ projectId, requestId, value });
-      if (parsed.status !== 'valid') continue;
+      if (parsed.status !== 'valid') {
+        throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 reference request queue');
+      }
+      if (joinedRequestIds.has(requestId)) {
+        throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 reference request queue');
+      }
+      identifiedPending.push({ file: identifiedFile, ...identified });
+      joinedRequestIds.add(requestId);
+      if (Date.parse(parsed.record.createdAt) <= pendingCutoffMs) continue;
       for (const shotId of parsed.record.shotIds) shotIds.add(shotId);
-    } catch {
-      // Main owns authoritative validation; malformed and V1 records cannot establish V2 dedup state.
+    } catch (error) {
+      if (error instanceof StudioPendingRecordWriteError) throw error;
+      throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 reference request queue');
     }
   }
-  const finalPendingStats = await injectedFs.lstat(canonicalPendingDir);
+  if (joinedRequestIds.size !== liveRequestIds.size) {
+    throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 reference request queue');
+  }
+  const [finalPendingStats, finalSlotsStats, finalPendingEntries, finalSlotEntries] = await Promise.all([
+    injectedFs.lstat(canonicalPendingDir),
+    injectedFs.lstat(canonicalSlotsDir),
+    injectedFs.readdir(canonicalPendingDir, { withFileTypes: true }),
+    injectedFs.readdir(canonicalSlotsDir, { withFileTypes: true }),
+  ]);
   if (
     directoryIdentity(finalPendingStats) !== pendingIdentity ||
+    directoryIdentity(finalSlotsStats) !== slotsIdentity ||
     directoryIdentity(await injectedFs.lstat(pendingDir)) !== pendingIdentity ||
-    (await injectedFs.realpath(pendingDir)) !== canonicalPendingDir
+    (await injectedFs.realpath(pendingDir)) !== canonicalPendingDir ||
+    (await injectedFs.realpath(canonicalSlotsDir)) !== canonicalSlotsDir ||
+    JSON.stringify(finalPendingEntries.map((entry) => entry.name).toSorted()) !== JSON.stringify(pendingNames) ||
+    JSON.stringify(finalSlotEntries.map((entry) => entry.name).toSorted()) !== JSON.stringify(slotNames)
   ) {
     throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 reference request queue');
+  }
+  for (const identified of identifiedSlots) {
+    // eslint-disable-next-line no-await-in-loop
+    const current = await readBoundedRegularFileWithIdentity({
+      fs: injectedFs,
+      canonicalRoot: canonicalSlotsDir,
+      file: identified.file,
+      maxBytes: STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES,
+    });
+    if (
+      current === null ||
+      current.bytes !== identified.bytes ||
+      current.identity.dev !== identified.identity.dev ||
+      current.identity.ino !== identified.identity.ino
+    ) {
+      throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 reference request queue');
+    }
+  }
+  for (const identified of identifiedPending) {
+    // eslint-disable-next-line no-await-in-loop
+    const current = await readBoundedRegularFileWithIdentity({
+      fs: injectedFs,
+      canonicalRoot: canonicalPendingDir,
+      file: identified.file,
+      maxBytes: STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES,
+    });
+    if (
+      current === null ||
+      current.bytes !== identified.bytes ||
+      current.identity.dev !== identified.identity.dev ||
+      current.identity.ino !== identified.identity.ino
+    ) {
+      throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 reference request queue');
+    }
   }
   if (projectAuthority !== undefined) {
     await assertPendingRecordProjectAuthorityV2({ pendingDir, projectAuthority, fs: injectedFs });

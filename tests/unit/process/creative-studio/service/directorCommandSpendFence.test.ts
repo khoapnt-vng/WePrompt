@@ -14,12 +14,17 @@ import {
   STUDIO_PROJECT_SCHEMA_VERSION,
   type CreateStudioProjectInputV2,
   type StudioAsset,
+  type StudioAssetV2,
   type StudioDirectorCommandReceiptV1,
   type StudioDirectorCommandRecordV1,
   type StudioDirectorCommandRecordV2,
   type StudioDirectorOperationV2,
+  type StudioJobV2,
   type StudioProjectV2,
+  type StudioQuotedGeneration,
   type StudioScene,
+  type StudioShot,
+  type StudioSpendAuthorization,
 } from '@/common/types/project/creativeStudioTypes';
 import type { GenerationProviderAdapter } from '@process/services/creative-studio/adapters';
 import type { StudioDirectorCommandMailbox } from '@process/services/creative-studio/service/directorCommandMailbox';
@@ -31,6 +36,15 @@ import {
   createStudioDirectorCommandService,
   createStudioDirectorCommandServiceV2,
 } from '@process/services/creative-studio/service/directorCommandService';
+import {
+  applyStudioMutationBatchV2,
+  calculateStudioQuoteTotals,
+  createEmptyStudioProjectV2,
+  createStudioGenerationRequestTemplate,
+  createStudioQuotedGenerationId,
+  deriveStudioDirtyShotsV2,
+  validateStudioProjectV2,
+} from '@process/services/creative-studio/service/schema2';
 import { createCreativeStudioStore } from '@process/services/creative-studio/store';
 
 const roots: string[] = [];
@@ -451,5 +465,233 @@ describe('Studio Director dynamic spend fence', () => {
     });
     expect(project.shots).not.toHaveProperty('clip_3');
     for (const boundary of Object.values(paidBoundaries)) expect(boundary).not.toHaveBeenCalled();
+  });
+
+  it('uses the real dirty-shot oracle to reject a direct request edit without committing it', async () => {
+    const openedAt = '2026-08-17T00:00:00.000Z';
+    const confirmedAt = '2026-08-17T00:00:01.000Z';
+    const project = createEmptyStudioProjectV2(
+      {
+        name: 'Schema-2 staleness fence',
+        brief: 'A clean product launch story',
+        aspectRatio: '16:9',
+        targetDurationSeconds: 15,
+        resolution: '1080p',
+      },
+      'project_v2',
+      openedAt
+    );
+    project.videoRouteId = 'video_route_1';
+    project.beatOrder = ['beat_1'];
+    project.beats.beat_1 = {
+      id: 'beat_1',
+      title: 'Opening',
+      action: 'Reveal the product',
+      look: 'Clean daylight on brushed metal',
+      actionRevision: 1,
+      targetSeconds: null,
+      shotOrder: ['shot_1'],
+      lineHistory: [],
+    };
+    const shot: StudioShot = {
+      id: 'shot_1',
+      line: 'A composed hero shot',
+      derivation: 'derived',
+      derivedFromActionRevision: 1,
+      narration: '',
+      onScreenText: '',
+      durationSeconds: 8,
+      trimInSeconds: null,
+      trimOutSeconds: null,
+      chainBreak: 'none',
+      seedStillId: 'seed_1',
+      selectedTakeId: 'take_1',
+      assetIds: ['seed_1', 'take_1'],
+      jobIds: ['job_1'],
+    };
+    project.shots.shot_1 = shot;
+    const seed: StudioAssetV2 = {
+      id: 'seed_1',
+      projectId: project.id,
+      shotId: shot.id,
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'imports', fileName: 'seed_1.png' },
+      byteSize: 1,
+      sha256: 'a'.repeat(64),
+      createdAt: openedAt,
+    };
+    const take: StudioAssetV2 = {
+      id: 'take_1',
+      projectId: project.id,
+      shotId: shot.id,
+      mediaKind: 'video',
+      mimeType: 'video/mp4',
+      managedAsset: { collection: 'assets', fileName: 'take_1.mp4' },
+      byteSize: 1,
+      sha256: 'b'.repeat(64),
+      durationSeconds: 10,
+      createdAt: confirmedAt,
+    };
+    project.assets.seed_1 = seed;
+    project.assets.take_1 = take;
+    const requestSnapshot = {
+      ...createStudioGenerationRequestTemplate({
+        purpose: 'video_take',
+        brief: project.brief,
+        rules: project.rules,
+        look: project.beats.beat_1.look,
+        line: shot.line,
+        matchTo: null,
+        aspectRatio: project.aspectRatio,
+        resolution: project.resolution,
+        durationSeconds: shot.durationSeconds,
+        referenceInput: null,
+      }),
+      conditioningInput: { kind: 'seed_still' as const, assetId: seed.id },
+    };
+    const item: StudioQuotedGeneration = {
+      id: createStudioQuotedGenerationId({
+        projectId: project.id,
+        projectRevision: project.revision,
+        shotId: shot.id,
+        purpose: 'video_take',
+      }),
+      shotId: shot.id,
+      purpose: 'video_take',
+      routeId: project.videoRouteId,
+      generationCount: 1,
+      requestPlan: { kind: 'resolved', snapshot: requestSnapshot },
+      rateUnit: 'second',
+      rateMinorUnits: 2,
+    };
+    const totals = calculateStudioQuoteTotals([item]);
+    if (totals === null) throw new Error('canonical quote fixture must have finite totals');
+    const provider = { providerId: 'provider_1', adapterId: 'byteplus-seedance-v1', model: 'video-model' };
+    const authorization: StudioSpendAuthorization = {
+      id: 'authorization_1',
+      projectId: project.id,
+      projectRevision: project.revision,
+      originReferenceHandoffId: null,
+      rateCardDigest: 'c'.repeat(64),
+      currency: 'USD',
+      baseItems: [item],
+      cascadeItems: [],
+      lowerMinorUnits: totals.lowerMinorUnits,
+      upperMinorUnits: totals.upperMinorUnits,
+      expiresAt: '2026-08-17T00:05:00.000Z',
+      confirmedAt,
+      providerBindings: [{ itemId: item.id, provider }],
+      idempotencyKeys: [{ itemId: item.id, generationIndex: 0, key: 'idem_job_1' }],
+    };
+    const job: StudioJobV2 = {
+      id: 'job_1',
+      projectId: project.id,
+      shotId: shot.id,
+      status: 'succeeded',
+      provider,
+      idempotencyKey: authorization.idempotencyKeys[0]!.key,
+      providerJobId: 'remote_job_1',
+      remoteStartedAt: confirmedAt,
+      cancellationPolicy: 'queued_and_running',
+      outputAssetIds: [take.id],
+      error: null,
+      retryOfJobId: null,
+      retryReason: null,
+      duplicateChargeAcknowledged: false,
+      duplicateChargeAcknowledgedAt: null,
+      createdAt: confirmedAt,
+      updatedAt: confirmedAt,
+      purpose: item.purpose,
+      authorizationId: authorization.id,
+      authorizationItemId: item.id,
+      generationIndex: 0,
+      requestPlan: item.requestPlan,
+      requestSnapshot,
+      spendReceipt: {
+        authorizationId: authorization.id,
+        itemId: item.id,
+        jobId: 'job_1',
+        purpose: item.purpose,
+        routeId: item.routeId,
+        currency: authorization.currency,
+        rateUnit: item.rateUnit,
+        rateMinorUnits: item.rateMinorUnits,
+        durationSeconds: shot.durationSeconds,
+        generationIndex: 0,
+        generationCount: item.generationCount,
+        totalMinorUnits: totals.upperMinorUnits,
+      },
+      outputAssetIdsByRole: { primary: take.id, poster: null },
+    };
+    project.spendAuthorizations = [authorization];
+    project.jobs.job_1 = job;
+    project.revision += 1;
+    project.updatedAt = confirmedAt;
+
+    const operation: StudioDirectorOperationV2 = {
+      kind: 'edit_shot',
+      shotId: shot.id,
+      changes: { line: 'A newly authored request prompt' },
+    };
+    expect(validateStudioProjectV2(project)).toBe(true);
+    expect(deriveStudioDirtyShotsV2(project)).toEqual([]);
+    const reviewedMutation = applyStudioMutationBatchV2(
+      project,
+      {
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        projectId: project.id,
+        expectedRevision: project.revision,
+        operations: [operation],
+      },
+      { mutationId: 'reviewed_edit', capturedAt: confirmedAt }
+    ).project;
+    const reviewedCandidate: StudioProjectV2 = {
+      ...reviewedMutation,
+      revision: project.revision + 1,
+      updatedAt: '2026-08-17T00:00:02.000Z',
+    };
+    expect(validateStudioProjectV2(reviewedCandidate)).toBe(true);
+    expect(deriveStudioDirtyShotsV2(reviewedCandidate)).toEqual([
+      { shotId: shot.id, causes: ['generation_out_of_date'] },
+    ]);
+
+    const durableBefore = structuredClone(project);
+    let durableProject = structuredClone(project);
+    const updateProjectV2 = vi.fn(
+      async (
+        projectId: string,
+        update: (candidate: StudioProjectV2) => StudioProjectV2,
+        expectedRevision?: number,
+        commitTag?: string
+      ): Promise<StudioProjectV2> => {
+        expect({ projectId, expectedRevision, commitTag }).toEqual({
+          projectId: project.id,
+          expectedRevision: project.revision,
+          commitTag: 'spend-fence:command_stale',
+        });
+        const candidate = update(structuredClone(durableProject));
+        durableProject = {
+          ...candidate,
+          revision: durableProject.revision + 1,
+          updatedAt: '2026-08-17T00:00:02.000Z',
+        };
+        return structuredClone(durableProject);
+      }
+    );
+    const service = createStudioDirectorCommandServiceV2({
+      store: { updateProjectV2 },
+      now: () => Date.parse('2026-08-17T00:00:01.000Z'),
+    });
+
+    await expect(
+      service.apply(directorCommandV2(project, 'command_stale', [operation]), Date.parse('2026-08-17T00:00:14.000Z'), {
+        commitTag: 'spend-fence:command_stale',
+      })
+    ).rejects.toMatchObject({ reasonCode: 'operation_not_permitted' });
+
+    expect(durableProject).toEqual(durableBefore);
+    expect(deriveStudioDirtyShotsV2(durableProject)).toEqual([]);
+    expect(updateProjectV2).toHaveBeenCalledTimes(1);
   });
 });

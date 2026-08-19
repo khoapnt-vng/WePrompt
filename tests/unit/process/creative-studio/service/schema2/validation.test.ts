@@ -20,6 +20,7 @@ import {
   type StudioAssetV2,
   type StudioBeat,
   type StudioConditioningInputSnapshot,
+  type StudioFixedShotReasonV2,
   type StudioGenerationRequestPlan,
   type StudioJobV2,
   type StudioProjectV2,
@@ -75,11 +76,11 @@ const makeBeat = (id: string, shotOrder: string[] = [], overrides: Partial<Studi
   ...overrides,
 });
 
-const makeProject = (): StudioProjectV2 => ({
+const makeProject = (projectId = 'project_1'): StudioProjectV2 => ({
   schemaVersion: 2,
   revision: 1,
-  id: 'project_1',
-  name: 'Project One',
+  id: projectId,
+  name: `Project ${projectId}`,
   brief: '',
   rules: [],
   briefConversationId: null,
@@ -193,9 +194,10 @@ const makeItem = (
   shotId: string,
   purpose: StudioQuotedGeneration['purpose'],
   requestPlan: StudioGenerationRequestPlan,
-  generationCount = 1
+  generationCount = 1,
+  projectId = 'project_1'
 ): StudioQuotedGeneration => ({
-  id: createStudioQuotedGenerationId({ projectId: 'project_1', projectRevision, shotId, purpose }),
+  id: createStudioQuotedGenerationId({ projectId, projectRevision, shotId, purpose }),
   shotId,
   purpose,
   routeId: purpose === 'seed_still' ? 'image_route' : 'video_route',
@@ -209,13 +211,14 @@ const makeAuthorization = (
   id: string,
   projectRevision: number,
   baseItems: StudioQuotedGeneration[],
-  cascadeItems: StudioQuotedGeneration[] = []
+  cascadeItems: StudioQuotedGeneration[] = [],
+  projectId = 'project_1'
 ): StudioSpendAuthorization => {
   const items = [...baseItems, ...cascadeItems];
   const totals = calculateStudioQuoteTotals(items)!;
   return {
     id,
-    projectId: 'project_1',
+    projectId,
     projectRevision,
     originReferenceHandoffId: null,
     rateCardDigest: 'b'.repeat(64),
@@ -245,7 +248,7 @@ const makeJob = (
   overrides: Partial<StudioJobV2> = {}
 ): StudioJobV2 => ({
   id,
-  projectId: 'project_1',
+  projectId: authorization.projectId,
   shotId: item.shotId,
   status: item.requestPlan.kind === 'resolved' ? 'queued_local' : 'waiting_for_conditioning',
   provider,
@@ -284,6 +287,25 @@ const addAuthorizationWithJobs = (
     project.jobs[job.id] = job;
     project.shots[job.shotId]!.jobIds.push(job.id);
   }
+};
+
+const addFailedSeedAuthorization = (
+  project: StudioProjectV2,
+  authorizationId: string,
+  originReferenceHandoffId: string | null,
+  retryOfJobId: string | null = null
+): StudioJobV2 => {
+  const item = makeItem(project.revision, 'shot_1', 'seed_still', seedPlan(), 1, project.id);
+  const authorization = makeAuthorization(authorizationId, project.revision, [item], [], project.id);
+  authorization.originReferenceHandoffId = originReferenceHandoffId;
+  const job = makeJob(`job_${authorizationId}`, authorization, item, 0, {
+    status: 'failed',
+    error: { code: 'timeout', messageKey: 'timeout' },
+    retryOfJobId,
+    retryReason: retryOfJobId === null ? null : 'provider_failure',
+  });
+  addAuthorizationWithJobs(project, authorization, [job]);
+  return job;
 };
 
 const addHumanSeed = (project: StudioProjectV2, shotId = 'shot_1', assetId = 'seed_1'): StudioAssetV2 => {
@@ -718,6 +740,27 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
     project.jobs.job_1!.provider = provider;
     authorization.idempotencyKeys[0]!.key = 'other_key';
     expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it('requires non-null reference handoff origins to be unique within each project only', () => {
+    const duplicate = makeProject();
+    const first = addFailedSeedAuthorization(duplicate, 'auth_origin_1', 'handoff_1');
+    addFailedSeedAuthorization(duplicate, 'auth_origin_2', 'handoff_2', first.id);
+    expect(validateStudioProjectV2(duplicate)).toBe(true);
+    duplicate.spendAuthorizations[1]!.originReferenceHandoffId = 'handoff_1';
+    expect(validateStudioProjectV2(duplicate)).toBe(false);
+
+    const ordinary = makeProject();
+    const ordinaryFirst = addFailedSeedAuthorization(ordinary, 'auth_ordinary_1', null);
+    addFailedSeedAuthorization(ordinary, 'auth_ordinary_2', null, ordinaryFirst.id);
+    expect(validateStudioProjectV2(ordinary)).toBe(true);
+
+    const firstProject = makeProject('project_first');
+    const secondProject = makeProject('project_second');
+    addFailedSeedAuthorization(firstProject, 'auth_first', 'shared_handoff');
+    addFailedSeedAuthorization(secondProject, 'auth_second', 'shared_handoff');
+    expect(validateStudioProjectV2(firstProject)).toBe(true);
+    expect(validateStudioProjectV2(secondProject)).toBe(true);
   });
 
   it('requires receipts for succeeded/post-completion failures and rejects them precompletion', () => {
@@ -1201,11 +1244,31 @@ describe('proposal row validators', () => {
   });
 
   it('requires nonempty, deduplicated reasons in frozen order and unique row IDs', () => {
-    const row = { shotId: 'shot_1', reasons: ['owned_asset', 'selected_take'] };
+    const reasons = [
+      'owned_asset',
+      'owned_job',
+      'selected_take',
+      'seed_still',
+      'conditioning_frame',
+      'conditioning_input',
+      'match_to',
+      'narration',
+      'on_screen_text',
+    ] as const satisfies readonly StudioFixedShotReasonV2[];
+    const row = { shotId: 'shot_1', reasons: [...reasons] };
     expect(validateStudioFixedShotReviewV2(row)).toBe(true);
+    for (const reason of reasons) {
+      expect(validateStudioFixedShotReviewV2({ shotId: 'shot_1', reasons: [reason] }), reason).toBe(true);
+    }
     expect(validateStudioFixedShotReviewV2({ ...row, reasons: [] })).toBe(false);
     expect(validateStudioFixedShotReviewV2({ ...row, reasons: ['selected_take', 'owned_asset'] })).toBe(false);
     expect(validateStudioFixedShotReviewV2({ ...row, reasons: ['owned_asset', 'owned_asset'] })).toBe(false);
+    expect(validateStudioFixedShotReviewV2({ ...row, reasons: ['unknown_reason'] })).toBe(false);
+    expect(validateStudioFixedShotReviewV2({ ...row, unexpected: true })).toBe(false);
+    expect(validateStudioFixedShotReviewV2({ reasons: [...reasons] })).toBe(false);
+    const sparseReasons = [...reasons] as Array<StudioFixedShotReasonV2 | undefined>;
+    delete sparseReasons[3];
+    expect(validateStudioFixedShotReviewV2({ shotId: 'shot_1', reasons: sparseReasons })).toBe(false);
     expect(validateStudioFixedShotReviewsV2([row, { shotId: 'shot_1', reasons: ['owned_job'] }])).toBe(false);
   });
 });

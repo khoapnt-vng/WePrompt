@@ -133,7 +133,19 @@ type DirectorCommandReceipt = StudioDirectorCommandReceiptV1 | StudioDirectorCom
 type DirectorPendingRead = StudioDirectorPendingRead | StudioDirectorPendingReadV2;
 type SidecarVersion = 1 | 2;
 type DirectoryAuthorityV2 = { path: string; dev: number; ino: number };
-type ProjectAuthorityV2 = { projectId: string; directory: DirectoryAuthorityV2 };
+type ProjectManifestFingerprintV2 = {
+  dev: number;
+  ino: number;
+  size: number;
+  mtimeMs: number;
+  ctimeMs: number;
+};
+type ProjectAuthorityV2 = {
+  projectId: string;
+  directory: DirectoryAuthorityV2;
+  manifest: ProjectManifestFingerprintV2 | null;
+};
+const STUDIO_DIRECTOR_PROJECT_AUTHORITY_MAX_BYTES_V2 = 64 * 1024 * 1024;
 type DirectorReceiptRead =
   | { status: 'valid'; record: DirectorCommandReceipt }
   | { status: 'unsupported_prototype_schema' }
@@ -243,6 +255,7 @@ const createStudioDirectorCommandMailboxInternal = (
   const waitMs = deps.waitMs ?? STUDIO_DIRECTOR_COMMAND_WAIT_MS;
   const logError = deps.logError ?? (() => undefined);
   const canonicalRootPromise = canonicalizeRecordRoot({ fs, rootDir: deps.rootDir });
+  const verifiedProjectAuthoritiesV2 = new Map<string, ProjectAuthorityV2>();
   const watchCommandTree: WatchCommandTree =
     deps.watchCommandTree ??
     ((input) => {
@@ -334,19 +347,86 @@ const createStudioDirectorCommandMailboxInternal = (
     directories: CommandDirectories
   ): Promise<ProjectAuthorityV2> => {
     const expectedDirectory = path.dirname(directories.root);
+    const cached = verifiedProjectAuthoritiesV2.get(projectId);
+    if (cached !== undefined) {
+      if (cached.directory.path !== expectedDirectory) throw new RecordIoError('unsafe_path');
+      await assertProjectAuthorityV2(cached);
+      return cached;
+    }
     const verifiedDirectory = await deps.getVerifiedProjectDirectory(projectId);
     if (verifiedDirectory !== expectedDirectory) throw new RecordIoError('unsafe_path');
     const directory = await captureDirectoryAuthorityV2(expectedDirectory);
-    const reverifiedDirectory = await deps.getVerifiedProjectDirectory(projectId);
-    if (reverifiedDirectory !== expectedDirectory) throw new RecordIoError('unsafe_path');
-    await assertDirectoryAuthorityV2(directory);
-    return { projectId, directory };
+    const authority: ProjectAuthorityV2 = { projectId, directory, manifest: null };
+    await assertProjectAuthorityV2(authority);
+    verifiedProjectAuthoritiesV2.set(projectId, authority);
+    return authority;
   };
 
   const assertProjectAuthorityV2 = async (authority: ProjectAuthorityV2): Promise<void> => {
     await assertDirectoryAuthorityV2(authority.directory);
-    const verifiedDirectory = await deps.getVerifiedProjectDirectory(authority.projectId);
-    if (verifiedDirectory !== authority.directory.path) throw new RecordIoError('unsafe_path');
+    const projectFile = path.join(authority.directory.path, 'project.json');
+    const initial = await fs.lstat(projectFile);
+    if (initial.isSymbolicLink() || !initial.isFile()) throw new RecordIoError('unsafe_file');
+    if (
+      authority.manifest !== null &&
+      initial.dev === authority.manifest.dev &&
+      initial.ino === authority.manifest.ino &&
+      initial.size === authority.manifest.size &&
+      initial.mtimeMs === authority.manifest.mtimeMs &&
+      initial.ctimeMs === authority.manifest.ctimeMs
+    ) {
+      await assertDirectoryAuthorityV2(authority.directory);
+      return;
+    }
+    const identified = await readBoundedRegularFileWithIdentity({
+      fs,
+      canonicalRoot: authority.directory.path,
+      file: projectFile,
+      maxBytes: STUDIO_DIRECTOR_PROJECT_AUTHORITY_MAX_BYTES_V2,
+    });
+    if (identified === null) throw new RecordIoError('unsafe_file');
+    let value: unknown;
+    try {
+      value = JSON.parse(identified.bytes) as unknown;
+    } catch {
+      throw new RecordIoError('unsafe_file');
+    }
+    if (
+      typeof value === 'object' &&
+      value !== null &&
+      !Array.isArray(value) &&
+      (value as { schemaVersion?: unknown }).schemaVersion === 1
+    ) {
+      throw new CreativeStudioStoreError(
+        'unsupported_prototype_schema',
+        'Studio Director commands do not own schema-1 project bytes'
+      );
+    }
+    if (
+      typeof value !== 'object' ||
+      value === null ||
+      Array.isArray(value) ||
+      (value as { schemaVersion?: unknown }).schemaVersion !== 2 ||
+      (value as { id?: unknown }).id !== authority.projectId
+    ) {
+      throw new RecordIoError('unsafe_file');
+    }
+    const final = await fs.lstat(projectFile);
+    if (
+      final.isSymbolicLink() ||
+      !final.isFile() ||
+      final.dev !== identified.identity.dev ||
+      final.ino !== identified.identity.ino
+    ) {
+      throw new RecordIoError('unsafe_file');
+    }
+    authority.manifest = {
+      dev: final.dev,
+      ino: final.ino,
+      size: final.size,
+      mtimeMs: final.mtimeMs,
+      ctimeMs: final.ctimeMs,
+    };
     await assertDirectoryAuthorityV2(authority.directory);
   };
 
@@ -413,10 +493,28 @@ const createStudioDirectorCommandMailboxInternal = (
   ): Promise<CommandDirectories | null> => {
     requireIdentity(projectId);
     try {
-      const [canonicalRoot, projectDirectory] = await Promise.all([
-        canonicalRootPromise,
-        deps.getVerifiedProjectDirectory(projectId),
-      ]);
+      const canonicalRoot = await canonicalRootPromise;
+      let projectDirectory: string | null;
+      if (deps.version === 2) {
+        const cached = verifiedProjectAuthoritiesV2.get(projectId);
+        if (cached !== undefined) {
+          await assertProjectAuthorityV2(cached);
+          projectDirectory = cached.directory.path;
+        } else {
+          projectDirectory = await deps.getVerifiedProjectDirectory(projectId);
+          if (projectDirectory !== null) {
+            const authority: ProjectAuthorityV2 = {
+              projectId,
+              directory: await captureDirectoryAuthorityV2(projectDirectory),
+              manifest: null,
+            };
+            await assertProjectAuthorityV2(authority);
+            verifiedProjectAuthoritiesV2.set(projectId, authority);
+          }
+        }
+      } else {
+        projectDirectory = await deps.getVerifiedProjectDirectory(projectId);
+      }
       if (projectDirectory === null) {
         throw new CreativeStudioStoreError('not_found', 'Studio project not found');
       }

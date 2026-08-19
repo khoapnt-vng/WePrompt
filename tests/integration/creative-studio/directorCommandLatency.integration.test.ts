@@ -429,7 +429,7 @@ describe('Studio Director schema-2 latency fixture', () => {
     await processor.start();
     const projectDir = await store.getVerifiedProjectDirectoryV2(project.id);
     if (projectDir === null) throw new Error('schema-2 latency project directory missing');
-    const ids = ['command_latency_v2', 'section_latency_v2', 'clip_latency_v2', 'lease_latency_v2'];
+    const ids = ['command_latency_v2', 'lease_latency_v2'];
     let idIndex = 0;
     let writerPolling!: () => void;
     const writerPollStarted = new Promise<void>((resolve) => {
@@ -454,12 +454,14 @@ describe('Studio Director schema-2 latency fixture', () => {
       operations: [
         {
           kind: 'add_beat',
+          beatId: 'beat_latency_v2',
           beat: { title: 'Opening', action: '', look: 'Cinematic light', targetSeconds: null },
           beforeBeatId: null,
         },
         {
           kind: 'add_shot',
-          beatId: 'section_latency_v2',
+          beatId: 'beat_latency_v2',
+          shotId: 'shot_latency_v2',
           shot: {
             line: 'Product reveal',
             narration: '',

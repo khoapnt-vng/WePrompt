@@ -3426,6 +3426,77 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
   });
 
+  it('rejects imports for individually binned Shots and Shots contained by binned Beats before staging bytes', async () => {
+    await Promise.all(
+      (['shot', 'beat'] as const).map(async (binKind) => {
+        const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+        const sourcePath = path.join(rootDir, `${binKind}-binned-reference.png`);
+        await fs.writeFile(sourcePath, png);
+        const inactive = await store.updateProjectV2(project.id, (current) => {
+          if (binKind === 'shot') {
+            current.beats.beat_1!.shotOrder = [];
+            current.bin.push({ kind: 'shot', beatId: 'beat_1', shotId: 'shot_1', reason: 'lifted' });
+          } else {
+            current.beatOrder = [];
+            current.bin.push({ kind: 'beat', beatId: 'beat_1', reason: 'lifted' });
+          }
+          return current;
+        });
+        const projectDirectory = path.join(rootDir, project.id);
+        const entriesBefore = (await fs.readdir(projectDirectory, { recursive: true })).sort();
+        const projectBefore = JSON.stringify(inactive);
+        const media = createStudioMediaStore({ store, createId: () => `inactive_${binKind}_asset` });
+
+        await expect(
+          media.importReferenceFromPathV2({
+            projectId: project.id,
+            shotId: 'shot_1',
+            sourcePath,
+            expectedRevision: inactive.revision,
+          })
+        ).rejects.toMatchObject({ code: 'invalid_media' });
+
+        const loaded = await store.getProjectV2(project.id);
+        expect(loaded.status).toBe('supported');
+        expect(loaded.status === 'supported' ? JSON.stringify(loaded.project) : null).toBe(projectBefore);
+        expect((await fs.readdir(projectDirectory, { recursive: true })).sort()).toEqual(entriesBefore);
+      })
+    );
+  });
+
+  it('rechecks active Beat ownership inside the import commit and cleans staged bytes on refusal', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const sourcePath = path.join(rootDir, 'concurrently-binned-reference.png');
+    await fs.writeFile(sourcePath, png);
+    const binned = structuredClone(project);
+    binned.beatOrder = [];
+    binned.bin.push({ kind: 'beat', beatId: 'beat_1', reason: 'lifted' });
+    const updateProjectV2 = vi.fn(
+      async (_projectId: string, update: (current: StudioProjectV2) => StudioProjectV2): Promise<StudioProjectV2> =>
+        update(structuredClone(binned))
+    );
+    const concurrentStore: CreativeStudioStore = { ...store, updateProjectV2 };
+    const media = createStudioMediaStore({
+      store: concurrentStore,
+      createId: () => 'concurrently_binned_asset',
+    });
+
+    await expect(
+      media.importReferenceFromPathV2({
+        projectId: project.id,
+        shotId: 'shot_1',
+        sourcePath,
+        expectedRevision: project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+
+    expect(updateProjectV2).toHaveBeenCalledOnce();
+    expect(await fs.readdir(path.join(rootDir, project.id, 'parts')).catch(() => [])).toEqual([]);
+    expect(await fs.readdir(path.join(rootDir, project.id, 'imports')).catch(() => [])).toEqual([]);
+    const loaded = await store.getProjectV2(project.id);
+    expect(loaded.status === 'supported' ? loaded.project : null).toEqual(project);
+  });
+
   it('imports, labels, and safely detaches a V2 Brief reference', async () => {
     const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
     const sourcePath = path.join(rootDir, 'cast portrait.png');
