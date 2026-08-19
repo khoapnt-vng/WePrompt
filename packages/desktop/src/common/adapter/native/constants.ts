@@ -77,6 +77,8 @@ export const NATIVE_BRIDGE_PROVIDER_KEYS = [
   'creative-studio.create-project',
   'creative-studio.get-project',
   'creative-studio.get-brief-session-server',
+  'creative-studio.get-director-session-authority',
+  'creative-studio.bind-director-conversation',
   'creative-studio.list-proposals',
   'creative-studio.accept-proposal',
   'creative-studio.reject-proposal',

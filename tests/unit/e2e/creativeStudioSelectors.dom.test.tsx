@@ -40,6 +40,7 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock('@/common', () => ({ ipcBridge: { creativeStudio: mocks.bridge } }));
+vi.mock('@renderer/pages/studio/components/Workspace/DirectorRail', () => ({ DirectorRail: () => null }));
 
 import StudioPage from '@renderer/pages/studio/StudioPage';
 

@@ -27,7 +27,7 @@ import {
 } from '@process/services/creative-studio/service/schema2/generation';
 import { createStudioSpendReceiptV2 } from '@process/services/creative-studio/service/schema2/pricing';
 import { StudioConditioningFrameError } from '@process/services/creative-studio/adapters/conditioningFrame';
-import { createStudioMediaStore } from '@process/services/creative-studio/mediaStore';
+import { createStudioMediaStore, getAvailableStudioDiskBytes } from '@process/services/creative-studio/mediaStore';
 
 const { createHashSpy } = vi.hoisted(() => ({ createHashSpy: vi.fn() }));
 
@@ -285,6 +285,253 @@ afterEach(async () => {
 });
 
 describe('createStudioMediaStore schema 2 final lifecycle', () => {
+  it('rejects invalid configured limits and unsafe filesystem capacity reports', async () => {
+    const { store } = await makeStoreV2({ includeAuthorizedJob: false });
+    for (const limit of [0, -1, 1.5, Number.NaN]) {
+      expect(() => createStudioMediaStore({ store, limits: { referenceMaxBytes: limit } }), String(limit)).toThrow(
+        expect.objectContaining({ code: 'storage_error' })
+      );
+    }
+
+    const statfs = vi.spyOn(fs, 'statfs');
+    try {
+      statfs.mockResolvedValueOnce({ bavail: -1, bsize: 1 } as Awaited<ReturnType<typeof fs.statfs>>);
+      await expect(getAvailableStudioDiskBytes('/volume')).rejects.toMatchObject({ code: 'storage_error' });
+      statfs.mockResolvedValueOnce({
+        bavail: Number.MAX_SAFE_INTEGER,
+        bsize: 2,
+      } as Awaited<ReturnType<typeof fs.statfs>>);
+      await expect(getAvailableStudioDiskBytes('/volume')).resolves.toBe(Number.MAX_SAFE_INTEGER);
+      statfs.mockRejectedValueOnce(new Error('private statfs failure'));
+      await expect(getAvailableStudioDiskBytes('/volume')).rejects.toMatchObject({ code: 'storage_error' });
+    } finally {
+      statfs.mockRestore();
+    }
+  });
+
+  it.each([
+    ['not-found confirmation', ['supported', 'not_found']],
+    ['unsupported confirmation', ['supported', 'unsupported_prototype_schema']],
+    ['not-found final proof', ['supported', 'supported', 'not_found']],
+    ['unsupported final proof', ['supported', 'supported', 'unsupported_prototype_schema']],
+  ] as const)('fails closed when project classification changes at the %s', async (_label, statuses) => {
+    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const sourcePath = path.join(rootDir, 'classification-race.png');
+    await fs.writeFile(sourcePath, png);
+    let index = 0;
+    const wrappedStore = {
+      ...store,
+      getProjectV2: vi.fn(async () => {
+        const status = statuses[Math.min(index, statuses.length - 1)]!;
+        index += 1;
+        if (status === 'supported') return { status, project: structuredClone(project) };
+        return { status, projectId: project.id };
+      }),
+    } as CreativeStudioStore;
+    const media = createStudioMediaStore({ store: wrappedStore, createId: () => 'classification_asset' });
+
+    await expect(
+      media.importReferenceFromPathV2({
+        projectId: project.id,
+        shotId: 'shot_1',
+        sourcePath,
+        expectedRevision: project.revision,
+      })
+    ).rejects.toMatchObject({
+      code: statuses.at(-1) === 'unsupported_prototype_schema' ? 'unsupported_prototype_schema' : 'not_found',
+    });
+    await expect(fs.access(path.join(rootDir, project.id, 'parts'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('refuses a vanished verified project directory before allocating managed storage', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const sourcePath = path.join(rootDir, 'missing-authority.png');
+    await fs.writeFile(sourcePath, png);
+    const wrappedStore = {
+      ...store,
+      getVerifiedProjectDirectoryV2: vi.fn(async () => null),
+    } as CreativeStudioStore;
+    const media = createStudioMediaStore({ store: wrappedStore, createId: () => 'missing_authority_asset' });
+
+    await expect(
+      media.importReferenceFromPathV2({
+        projectId: project.id,
+        shotId: 'shot_1',
+        sourcePath,
+        expectedRevision: project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'not_found' });
+    await expect(fs.access(path.join(rootDir, project.id, 'parts'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it.each([Number.NaN, -1, 0, png.length - 1])(
+    'refuses an unusable disk-capacity report of %s before consuming provider bytes',
+    async (availableBytes) => {
+      const { rootDir, store, project } = await makeStoreV2();
+      let consumed = false;
+      const media = createStudioMediaStore({
+        store,
+        createId: () => 'disk_refused_output',
+        getAvailableDiskBytes: async () => availableBytes,
+      });
+
+      await expect(
+        media.persistProviderOutputForJobV2({
+          projectId: project.id,
+          shotId: 'shot_1',
+          jobId: 'job_1',
+          mediaKind: 'image',
+          declaredMimeType: 'image/png',
+          declaredByteSize: png.length,
+          body: (async function* () {
+            consumed = true;
+            yield png;
+          })(),
+        })
+      ).rejects.toMatchObject({ code: 'storage_error' });
+
+      expect(consumed).toBe(false);
+      await expect(fs.access(path.join(rootDir, project.id, 'parts'))).rejects.toMatchObject({ code: 'ENOENT' });
+    }
+  );
+
+  it('stops an undeclared provider body at the exact disk ceiling and removes its staged bytes', async () => {
+    const { rootDir, store, project } = await makeStoreV2();
+    const media = createStudioMediaStore({
+      store,
+      createId: () => 'disk_bounded_output',
+      getAvailableDiskBytes: async () => png.length - 1,
+    });
+
+    await expect(
+      media.persistProviderOutputForJobV2({
+        projectId: project.id,
+        shotId: 'shot_1',
+        jobId: 'job_1',
+        mediaKind: 'image',
+        declaredMimeType: 'image/png',
+        body: Readable.from([png]),
+      })
+    ).rejects.toMatchObject({ code: 'storage_error' });
+
+    await expect(fs.readdir(path.join(rootDir, project.id, 'parts'))).resolves.toEqual([]);
+  });
+
+  it('refuses provider bytes when durable assets have already consumed the project capacity', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ briefReference: true });
+    let consumed = false;
+    const media = createStudioMediaStore({ store, limits: { projectMaxBytes: png.length } });
+
+    await expect(
+      media.persistProviderOutputForJobV2({
+        projectId: project.id,
+        shotId: 'shot_1',
+        jobId: 'job_1',
+        mediaKind: 'image',
+        declaredMimeType: 'image/png',
+        body: (async function* () {
+          consumed = true;
+          yield png;
+        })(),
+      })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+
+    expect(consumed).toBe(false);
+    await expect(fs.access(path.join(rootDir, project.id, 'parts'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it.each([
+    ['a role without a label', (asset: Record<string, unknown>) => (asset.briefReferenceRole = 'cast')],
+    ['a label without a role', (asset: Record<string, unknown>) => (asset.briefReferenceLabel = 'Cast')],
+    [
+      'an unknown role',
+      (asset: Record<string, unknown>) => {
+        asset.briefReferenceRole = 'organisation';
+        asset.briefReferenceLabel = 'Organisation';
+      },
+    ],
+    [
+      'a blank label',
+      (asset: Record<string, unknown>) => {
+        asset.briefReferenceRole = 'cast';
+        asset.briefReferenceLabel = '   ';
+      },
+    ],
+    [
+      'shot ownership',
+      (asset: Record<string, unknown>) => {
+        asset.briefReferenceRole = 'cast';
+        asset.briefReferenceLabel = 'Cast';
+        asset.shotId = 'shot_1';
+      },
+    ],
+    [
+      'video media',
+      (asset: Record<string, unknown>) => {
+        asset.briefReferenceRole = 'cast';
+        asset.briefReferenceLabel = 'Cast';
+        asset.mediaKind = 'video';
+        asset.mimeType = 'video/mp4';
+      },
+    ],
+    [
+      'a non-reference image MIME',
+      (asset: Record<string, unknown>) => {
+        asset.briefReferenceRole = 'look';
+        asset.briefReferenceLabel = 'Look';
+        asset.mimeType = 'image/gif';
+      },
+    ],
+    [
+      'a non-import collection',
+      (asset: Record<string, unknown>) => {
+        asset.briefReferenceRole = 'look';
+        asset.briefReferenceLabel = 'Look';
+        asset.managedAsset = { collection: 'assets', fileName: 'corrupt.png' };
+      },
+    ],
+  ] as const)(
+    'rolls back staged bytes when CAS revalidation observes %s in durable Brief metadata',
+    async (_label, corrupt) => {
+      const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+      const sourcePath = path.join(rootDir, 'reference-candidate.png');
+      await fs.writeFile(sourcePath, png);
+      const candidate = structuredClone(project);
+      const corruptAsset: Record<string, unknown> = {
+        id: 'corrupt_reference',
+        projectId: project.id,
+        shotId: null,
+        mediaKind: 'image',
+        mimeType: 'image/png',
+        managedAsset: { collection: 'imports', fileName: 'corrupt.png' },
+        byteSize: png.length,
+        sha256: createHash('sha256').update(png).digest('hex'),
+        createdAt: project.createdAt,
+      };
+      corrupt(corruptAsset);
+      candidate.assets.corrupt_reference = corruptAsset as never;
+      const wrappedStore = {
+        ...store,
+        updateProjectV2: vi.fn(async (_projectId: string, update: (current: StudioProjectV2) => StudioProjectV2) =>
+          update(structuredClone(candidate))
+        ),
+      } as CreativeStudioStore;
+      const media = createStudioMediaStore({ store: wrappedStore, createId: () => 'rolled_back_reference' });
+
+      await expect(
+        media.importReferenceFromPathV2({
+          projectId: project.id,
+          briefReferenceRole: 'cast',
+          sourcePath,
+          expectedRevision: project.revision,
+        })
+      ).rejects.toMatchObject({ code: 'invalid_media' });
+
+      await expect(fs.readdir(path.join(rootDir, project.id, 'parts'))).resolves.toEqual([]);
+      await expect(fs.readdir(path.join(rootDir, project.id, 'imports'))).resolves.toEqual([]);
+    }
+  );
+
   it('commits a seed primary by purpose and role without auto-pinning or selecting it', async () => {
     const { store, project } = await makeStoreV2();
     const media = createStudioMediaStore({ store, createId: () => 'seed_output_1' });

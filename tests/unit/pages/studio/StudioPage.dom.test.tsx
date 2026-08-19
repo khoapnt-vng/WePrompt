@@ -75,6 +75,21 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('@/common', () => ({ ipcBridge: { creativeStudio: mocks.bridge } }));
 
+vi.mock('@/renderer/pages/studio/components/Workspace/DirectorRail', () => ({
+  DirectorRail: ({
+    project,
+    reviewedOutput,
+  }: {
+    project: StudioRendererProjectV2;
+    reviewedOutput?: React.ReactNode;
+  }) => (
+    <aside data-studio-director-rail>
+      <div data-studio-director-conversation-owner>{project.id}</div>
+      {reviewedOutput === undefined ? null : <div data-studio-director-reviewed-output>{reviewedOutput}</div>}
+    </aside>
+  ),
+}));
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, values?: Record<string, unknown>) =>
@@ -84,6 +99,7 @@ vi.mock('react-i18next', () => ({
 }));
 
 import StudioPage from '@/renderer/pages/studio/StudioPage';
+import { useStudioProject, type UseStudioProjectResult } from '@/renderer/pages/studio/hooks/useStudioProject';
 
 const ok = <T,>(data: T) => ({ ok: true as const, data });
 
@@ -121,6 +137,38 @@ const project = (): StudioRendererProjectV2 => ({
   updatedAt: '2026-01-01T00:00:00.000Z',
 });
 
+const projectWithHandoffShot = (): StudioRendererProjectV2 => {
+  const value = project();
+  value.beatOrder = ['beat_1'];
+  value.beats.beat_1 = {
+    id: 'beat_1',
+    title: 'Opening',
+    action: 'Open',
+    look: 'Bright',
+    actionRevision: 1,
+    targetSeconds: 4,
+    shotOrder: ['shot_3'],
+    lineHistory: [],
+  };
+  value.shots.shot_3 = {
+    id: 'shot_3',
+    line: 'Opening frame',
+    derivation: 'derived',
+    derivedFromActionRevision: 1,
+    narration: '',
+    onScreenText: '',
+    durationSeconds: 4,
+    trimInSeconds: null,
+    trimOutSeconds: null,
+    chainBreak: 'hard_cut',
+    seedStillId: null,
+    selectedTakeId: null,
+    assetIds: [],
+    jobIds: [],
+  };
+  return value;
+};
+
 const workspaceStatus = (revision: number, locked = false) => ({
   projectId: 'project_1',
   projectRevision: revision,
@@ -146,6 +194,37 @@ const chainStatus = (revision: number) => ({
   projectId: 'project_1',
   projectRevision: revision,
   conditioningFailures: [],
+});
+
+const recoveryWorkspaceStatus = (revision: number) => ({
+  ...workspaceStatus(revision),
+  undoTop: { entryId: 'undo_1', label: 'edit_shot', sourceRevision: revision - 1 },
+  cascadeProgress: [
+    {
+      dependentShotId: 'dependent_seed',
+      upstreamShotId: 'upstream_seed',
+      eligiblePrimaryAssetIds: ['seed_asset'],
+      canRetryConditioningFrame: true,
+      canCancelWaiting: true,
+      waitingReason: 'choose_seed' as const,
+    },
+    {
+      dependentShotId: 'dependent_take',
+      upstreamShotId: 'upstream_take',
+      eligiblePrimaryAssetIds: ['take_asset'],
+      canRetryConditioningFrame: false,
+      canCancelWaiting: false,
+      waitingReason: 'choose_take' as const,
+    },
+    {
+      dependentShotId: 'dependent_running',
+      upstreamShotId: 'upstream_running',
+      eligiblePrimaryAssetIds: ['ignored_asset'],
+      canRetryConditioningFrame: false,
+      canCancelWaiting: false,
+      waitingReason: 'upstream_running' as const,
+    },
+  ],
 });
 
 const commit = (revision: number) =>
@@ -187,6 +266,13 @@ const LocationProbe = () => {
   return <output data-testid='location'>{location.pathname}</output>;
 };
 
+let latestHookResult: UseStudioProjectResult | null = null;
+
+const HookProbe: React.FC<{ projectId?: string }> = ({ projectId }) => {
+  latestHookResult = useStudioProject(projectId);
+  return <output data-testid='hook-state'>{latestHookResult.loadState}</output>;
+};
+
 const renderStudio = (path = '/studio/project_1/table') =>
   render(
     <MemoryRouter initialEntries={[path]}>
@@ -221,6 +307,7 @@ describe('StudioPage schema-2 cutover', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.sessionStorage.clear();
+    latestHookResult = null;
     mocks.callOrder.length = 0;
     mocks.listeners.projectUpdated = null;
     mocks.listeners.proposalUpdated = null;
@@ -298,9 +385,25 @@ describe('StudioPage schema-2 cutover', () => {
     expect(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.cut' })).toBeVisible();
   });
 
+  it('omits the reviewed-output rail section when there are no cards or review errors', async () => {
+    renderStudio();
+
+    await screen.findByLabelText('conversation.creativeStudio.workspace.controls.name');
+    expect(document.querySelector('[data-studio-director-reviewed-output]')).toBeNull();
+  });
+
   it('keeps drafts and native snapshot counts stable across Table, Board, and Cut navigation', async () => {
     renderStudio();
     const name = await screen.findByLabelText('conversation.creativeStudio.workspace.controls.name');
+    const shell = document.querySelector('[data-studio-workspace-shell]');
+    const directorRail = document.querySelector('[data-studio-director-rail]');
+    const workPanel = document.querySelector('[data-studio-work-panel]');
+    const conversationOwner = document.querySelector('[data-studio-director-conversation-owner]');
+    expect(shell).not.toBeNull();
+    expect(directorRail?.parentElement).toBe(shell);
+    expect(workPanel?.parentElement).toBe(shell);
+    expect(directorRail?.nextElementSibling).toBe(workPanel);
+    expect(conversationOwner).not.toBeNull();
     await waitFor(() => expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalledTimes(1));
     const baseline = {
       project: mocks.bridge.getProject.invoke.mock.calls.length,
@@ -323,11 +426,13 @@ describe('StudioPage schema-2 cutover', () => {
     expect(screen.getByLabelText('conversation.creativeStudio.workspace.controls.name')).toHaveValue(
       'Navigation-only local draft'
     );
+    expect(document.querySelector('[data-studio-director-conversation-owner]')).toBe(conversationOwner);
     fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.cut' }));
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/cut'));
     expect(screen.getByLabelText('conversation.creativeStudio.workspace.controls.name')).toHaveValue(
       'Navigation-only local draft'
     );
+    expect(document.querySelector('[data-studio-director-conversation-owner]')).toBe(conversationOwner);
 
     expect({
       project: mocks.bridge.getProject.invoke.mock.calls.length,
@@ -398,6 +503,9 @@ describe('StudioPage schema-2 cutover', () => {
     expect(screen.getAllByTestId('studio-handoff-handoff_open')).toHaveLength(1);
     expect(screen.getByTestId('studio-handoff-handoff_confirmed')).toBeVisible();
     expect(screen.getByTestId('studio-handoff-handoff_dismissed')).toBeVisible();
+    const reviewedOutput = document.querySelector('[data-studio-director-reviewed-output]');
+    expect(reviewedOutput).toContainElement(screen.getByTestId('studio-proposal-proposal_1'));
+    expect(reviewedOutput).toContainElement(screen.getByTestId('studio-reference-reference_1'));
   });
 
   it('blocks handoff review for unsaved generative intent while keeping free dismissal available', async () => {
@@ -428,6 +536,30 @@ describe('StudioPage schema-2 cutover', () => {
     expect(card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.review' })).toBeDisabled();
     expect(card.getByText('conversation.creativeStudio.workspace.controls.statusRequired')).toBeVisible();
     expect(card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.dismiss' })).toBeEnabled();
+  });
+
+  it('refuses an open handoff whose shot identities are absent from the active project', async () => {
+    mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue(ok([handoff()]));
+    renderStudio();
+    const card = within(await screen.findByTestId('studio-handoff-handoff_open'));
+    fireEvent.click(card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.review' }));
+
+    expect(await screen.findByText('conversation.creativeStudio.workspace.controls.selectionNotPayable')).toBeVisible();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('opens choices for an exact active-shot handoff without preparing paid work', async () => {
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: projectWithHandoffShot() }));
+    mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue(ok([handoff()]));
+    renderStudio();
+    const card = within(await screen.findByTestId('studio-handoff-handoff_open'));
+    fireEvent.click(card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.review' }));
+
+    expect(await screen.findByTestId('studio-spend-gate')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })).toBeEnabled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
   });
 
   it('decides a generation request without submitting or dismissing it and refreshes both reference lists', async () => {
@@ -733,6 +865,319 @@ describe('StudioPage schema-2 cutover', () => {
       2
     );
     expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders not-found and storage-failure load states without mounting a workspace owner', async () => {
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'not_found', projectId: 'project_1' }));
+    const first = renderStudio();
+    expect(await screen.findByText('conversation.creativeStudio.workspace.project.notFound')).toBeVisible();
+    expect(document.querySelector('[data-studio-director-conversation-owner]')).toBeNull();
+    first.unmount();
+
+    mocks.bridge.getProject.invoke.mockRejectedValue(new Error('offline'));
+    renderStudio();
+    expect(await screen.findByRole('alert')).toHaveTextContent('conversation.creativeStudio.workspace.errors.storage');
+    expect(document.querySelector('[data-studio-director-conversation-owner]')).toBeNull();
+  });
+
+  it('surfaces independent snapshot failures while preserving the supported project shell', async () => {
+    mocks.bridge.listProposals.invoke.mockResolvedValue({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'native.proposalsFailed' },
+    });
+    mocks.bridge.listReferenceRequests.invoke.mockRejectedValue(new Error('request list offline'));
+    mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'native.handoffsFailed' },
+    });
+    mocks.bridge.getWorkspaceStatus.invoke.mockRejectedValue(new Error('workspace offline'));
+    mocks.bridge.getChainStatus.invoke.mockResolvedValue({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'native.chainFailed' },
+    });
+    mocks.bridge.listRoutes.invoke.mockResolvedValue({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'native.routesFailed' },
+    });
+
+    renderStudio();
+
+    expect(await screen.findByRole('heading', { name: 'Launch film' })).toBeVisible();
+    expect(screen.getByText('native.proposalsFailed')).toBeVisible();
+    expect(screen.getAllByText('conversation.creativeStudio.workspace.errors.storage')).toHaveLength(2);
+    expect(screen.getByText('conversation.creativeStudio.workspace.controls.statusRequired')).toBeVisible();
+    expect(screen.getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.unavailable')).toHaveLength(
+      2
+    );
+    expect(mocks.bridge.listProposals.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.bridge.listReferenceRequests.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.bridge.listReferenceGenerationHandoffs.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.bridge.getWorkspaceStatus.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.bridge.getChainStatus.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('handles the opposite asynchronous snapshot failures without combining their authority', async () => {
+    mocks.bridge.listProposals.invoke.mockRejectedValue(new Error('proposal list offline'));
+    mocks.bridge.listReferenceRequests.invoke.mockResolvedValue(ok([]));
+    mocks.bridge.listReferenceGenerationHandoffs.invoke.mockRejectedValue(new Error('handoff list offline'));
+    mocks.bridge.getWorkspaceStatus.invoke.mockResolvedValue({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'native.workspaceFailed' },
+    });
+    mocks.bridge.getChainStatus.invoke.mockRejectedValue(new Error('chain offline'));
+    mocks.bridge.listRoutes.invoke.mockRejectedValue(new Error('route list offline'));
+
+    renderStudio();
+
+    expect(await screen.findByRole('heading', { name: 'Launch film' })).toBeVisible();
+    expect(screen.getAllByText('conversation.creativeStudio.workspace.errors.storage').length).toBeGreaterThan(0);
+    expect(screen.getByText('conversation.creativeStudio.workspace.controls.statusRequired')).toBeVisible();
+    expect(screen.getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.unavailable')).toHaveLength(
+      2
+    );
+    expect(mocks.bridge.listProposals.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.bridge.listReferenceRequests.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.bridge.listReferenceGenerationHandoffs.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores native events for another project identity', async () => {
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    const counts = {
+      project: mocks.bridge.getProject.invoke.mock.calls.length,
+      proposals: mocks.bridge.listProposals.invoke.mock.calls.length,
+      references: mocks.bridge.listReferenceRequests.invoke.mock.calls.length,
+      handoffs: mocks.bridge.listReferenceGenerationHandoffs.invoke.mock.calls.length,
+    };
+
+    act(() => {
+      mocks.listeners.projectUpdated?.({ projectId: 'project_other' });
+      mocks.listeners.proposalUpdated?.({ projectId: 'project_other' });
+      mocks.listeners.referenceUpdated?.({ projectId: 'project_other' });
+    });
+
+    expect(mocks.bridge.getProject.invoke).toHaveBeenCalledTimes(counts.project);
+    expect(mocks.bridge.listProposals.invoke).toHaveBeenCalledTimes(counts.proposals);
+    expect(mocks.bridge.listReferenceRequests.invoke).toHaveBeenCalledTimes(counts.references);
+    expect(mocks.bridge.listReferenceGenerationHandoffs.invoke).toHaveBeenCalledTimes(counts.handoffs);
+  });
+
+  it('keeps every explicit refetch inert when no project identity is bound', async () => {
+    render(<HookProbe />);
+    expect(screen.getByTestId('hook-state')).toHaveTextContent('idle');
+
+    await act(async () => {
+      expect(await latestHookResult?.refetchProject()).toBeNull();
+      await latestHookResult?.refetchProposals();
+      await latestHookResult?.refetchReferences();
+      await latestHookResult?.refetchWorkspace();
+      expect(await latestHookResult?.refetchRoutes()).toBe(false);
+      await latestHookResult?.refetchAll();
+    });
+
+    expect(mocks.bridge.getProject.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.listProposals.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.listReferenceRequests.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.getWorkspaceStatus.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.listRoutes.invoke).not.toHaveBeenCalled();
+  });
+
+  it('routes every projected free recovery action through the current project revision', async () => {
+    const revised = { ...project(), revision: 4 };
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: project() }))
+      .mockResolvedValue(ok({ status: 'supported', project: revised }));
+    mocks.bridge.getWorkspaceStatus.invoke
+      .mockResolvedValueOnce(ok(recoveryWorkspaceStatus(3)))
+      .mockResolvedValue(ok(recoveryWorkspaceStatus(4)));
+    mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(3))).mockResolvedValue(ok(chainStatus(4)));
+
+    renderStudio();
+    fireEvent.click(
+      await screen.findByRole('button', { name: /conversation\.creativeStudio\.workspace\.controls\.undo/ })
+    );
+    await waitFor(() => expect(mocks.bridge.undoLast.invoke).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole('button', { name: /seed_asset/ })).toBeEnabled());
+
+    fireEvent.click(screen.getByRole('button', { name: /seed_asset/ }));
+    await waitFor(() =>
+      expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledWith({
+        projectId: 'project_1',
+        expectedRevision: 4,
+        operations: [{ kind: 'set_seed_still', shotId: 'upstream_seed', assetId: 'seed_asset' }],
+      })
+    );
+    await waitFor(() => expect(screen.getByRole('button', { name: /take_asset/ })).toBeEnabled());
+
+    fireEvent.click(screen.getByRole('button', { name: /take_asset/ }));
+    await waitFor(() =>
+      expect(mocks.bridge.selectTake.invoke).toHaveBeenCalledWith({
+        projectId: 'project_1',
+        expectedRevision: 4,
+        shotId: 'upstream_take',
+        assetId: 'take_asset',
+      })
+    );
+    fireEvent.click(screen.getByRole('button', { name: /ignored_asset/ }));
+    expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.bridge.selectTake.invoke).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.retryConditioning' })
+    );
+    await waitFor(() => expect(mocks.bridge.retryConditioningFrame.invoke).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.cancelWaiting' })
+      ).toBeEnabled()
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.cancelWaiting' })
+    );
+    await waitFor(() => expect(mocks.bridge.cancelWaitingCascade.invoke).toHaveBeenCalledTimes(1));
+  });
+
+  it('reports deterministic failures from each reviewed-output action without auto-retrying', async () => {
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok([proposal()]));
+    mocks.bridge.listReferenceRequests.invoke.mockResolvedValue(ok([referenceRequest()]));
+    mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue(ok([handoff()]));
+    mocks.bridge.acceptProposal.invoke.mockResolvedValue({
+      ok: false,
+      error: { code: 'stale_revision', messageKey: 'native.acceptFailed' },
+    });
+    mocks.bridge.rejectProposal.invoke.mockRejectedValue(new Error('offline'));
+    mocks.bridge.decideReferenceRequest.invoke.mockResolvedValue({
+      ok: false,
+      error: { code: 'stale_revision', messageKey: 'native.referenceFailed' },
+    });
+    mocks.bridge.dismissReferenceGenerationHandoff.invoke.mockRejectedValue(new Error('offline'));
+    renderStudio();
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    );
+    expect(await screen.findByText('native.acceptFailed')).toBeVisible();
+    expect(mocks.bridge.acceptProposal.invoke).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.reject' }));
+    expect(await screen.findByText('conversation.creativeStudio.workspace.errors.storage')).toBeVisible();
+    expect(mocks.bridge.rejectProposal.invoke).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.references.reject' }));
+    expect(await screen.findByText('native.referenceFailed')).toBeVisible();
+    expect(mocks.bridge.decideReferenceRequest.invoke).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.dismiss' }));
+    expect(await screen.findByText('conversation.creativeStudio.workspace.errors.storage')).toBeVisible();
+    expect(mocks.bridge.dismissReferenceGenerationHandoff.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a setting draft dirty when the post-commit snapshot is older than the commit receipt', async () => {
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: project() }));
+    renderStudio();
+    const name = await screen.findByLabelText('conversation.creativeStudio.workspace.controls.name');
+    fireEvent.change(name, { target: { value: 'Awaiting durable refresh' } });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.saveSettings' })
+    );
+
+    expect(await screen.findByText('conversation.creativeStudio.workspace.errors.storage')).toBeVisible();
+    expect(name).toHaveValue('Awaiting durable refresh');
+    expect(mocks.bridge.editProject.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.bridge.getWorkspaceStatus.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['not-json'],
+    ['{}'],
+    ['[{"id":"rule_1","text":"Avoid marks","predicate":{"kind":"forbidden_terms","terms":[1]}}]'],
+  ])('refuses a malformed close-save rule document: %s', async (value) => {
+    seedWorkspaceDrafts({ 'brief.rules': { baseValue: '[]', value } });
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+
+    let saved: { saved: boolean } | undefined;
+    await act(async () => {
+      saved = await mocks.closeHandlers.flushUnsavedWork?.();
+    });
+
+    expect(saved).toEqual({ saved: false });
+    expect(mocks.bridge.setRules.invoke).not.toHaveBeenCalled();
+    expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 });
+  });
+
+  it('rejects an invalid spend currency during close-save without issuing authoring work', async () => {
+    seedWorkspaceDrafts({
+      'brief.spendCurrency': { baseValue: '', value: 'US' },
+      'brief.spendMajorUnits': { baseValue: '', value: '12.34' },
+    });
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+
+    let saved: { saved: boolean } | undefined;
+    await act(async () => {
+      saved = await mocks.closeHandlers.flushUnsavedWork?.();
+    });
+
+    expect(saved).toEqual({ saved: false });
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 2 });
+  });
+
+  it('preserves a forbidden-terms rule and a spend policy in the close-save authority surface', async () => {
+    const governed = {
+      ...project(),
+      spendPolicy: { currency: 'USD', maxPerBatchMinorUnits: 1_234 },
+      rules: [
+        {
+          id: 'rule_1',
+          text: 'Avoid marks',
+          predicate: { kind: 'forbidden_terms' as const, terms: ['logo'] },
+        },
+      ],
+    };
+    seedWorkspaceDrafts({
+      'brief.rules': {
+        baseValue: JSON.stringify(governed.rules, null, 2),
+        value: JSON.stringify([
+          {
+            id: 'rule_1',
+            text: 'Avoid every mark',
+            predicate: { kind: 'forbidden_terms', terms: ['logo', 'watermark'] },
+          },
+        ]),
+      },
+    });
+    const revised = { ...governed, revision: 4 };
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: governed }))
+      .mockResolvedValue(ok({ status: 'supported', project: revised }));
+    mocks.bridge.getWorkspaceStatus.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(3)))
+      .mockResolvedValue(ok(workspaceStatus(4)));
+    mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(3))).mockResolvedValue(ok(chainStatus(4)));
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+
+    let saved: { saved: boolean } | undefined;
+    await act(async () => {
+      saved = await mocks.closeHandlers.flushUnsavedWork?.();
+    });
+
+    expect(saved).toEqual({ saved: true });
+    expect(mocks.bridge.setRules.invoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      rules: [
+        {
+          id: 'rule_1',
+          text: 'Avoid every mark',
+          predicate: { kind: 'forbidden_terms', terms: ['logo', 'watermark'] },
+        },
+      ],
+    });
+    expect(screen.getByLabelText('conversation.creativeStudio.workspace.controls.spendCap')).toHaveValue('12.34');
   });
 
   it('renders the unsupported prototype state without fabricating a project', async () => {

@@ -14,6 +14,7 @@ import {
   publishImmutableRecord,
   readBoundedRegularFile,
   RecordIoError,
+  removeRegularRecordIfPresent,
   removeRegularRecordIfIdentity,
   resolveCompleteDirectorySet,
   resolveConfinedRecordPath,
@@ -630,6 +631,30 @@ describe('error-neutral Creative Studio record IO', () => {
     expect(fenceCalls).toBe(1);
     expect(removeCalls).toBe(0);
     expect(await nodeFs.readFile(target, 'utf8')).toBe('owned-slot');
+  });
+
+  it('awaits an asynchronous removal fence and preserves bytes when authority expires', async () => {
+    const records = path.join(canonicalRoot, 'records');
+    await nodeFs.mkdir(records);
+    const target = path.join(records, 'receipt.json');
+    await nodeFs.writeFile(target, 'authoritative-receipt');
+    let fenceCalls = 0;
+
+    await expect(
+      removeRegularRecordIfPresent({
+        fs: nodeFs,
+        canonicalRoot,
+        file: target,
+        isStillAuthorized: async () => {
+          fenceCalls += 1;
+          await Promise.resolve();
+          return false;
+        },
+      })
+    ).rejects.toMatchObject({ code: 'storage_error', message: 'Record IO failed' });
+
+    expect(fenceCalls).toBe(1);
+    await expect(nodeFs.readFile(target, 'utf8')).resolves.toBe('authoritative-receipt');
   });
 
   it('publishes immutable bytes only after file sync and then syncs the parent directory', async () => {

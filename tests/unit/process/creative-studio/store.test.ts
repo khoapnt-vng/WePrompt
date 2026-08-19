@@ -755,6 +755,45 @@ describe('schema-2 creative studio project store', () => {
     expect(prototypeIndexAccesses).toEqual([]);
   });
 
+  it('keeps every read and mutation boundary non-allocating when the configured root is absent', async () => {
+    const absentRoot = path.join(rootDir, 'not-created');
+    const absent = createCreativeStudioStore({ rootDir: absentRoot, now: () => timestamp });
+    const notFound = { code: 'not_found' };
+
+    await expect(absent.inspectProjectsV2()).resolves.toEqual({
+      supportedProjectIds: [],
+      unsupportedProjectIds: [],
+      quarantinedProjectIds: [],
+    });
+    await expect(absent.listProjectsV2()).resolves.toEqual({
+      projects: [],
+      unsupportedProjectIds: [],
+      quarantinedProjectIds: [],
+    });
+    await expect(absent.getProjectV2('missing_project')).resolves.toEqual({
+      status: 'not_found',
+      projectId: 'missing_project',
+    });
+    await expect(absent.getVerifiedProjectDirectoryV2('missing_project')).resolves.toBeNull();
+    await expect(
+      absent.applyMutationBatchV2(makeBoundaryMutationBatchV2('missing_project'), makeMutationContextV2())
+    ).rejects.toMatchObject(notFound);
+    await expect(absent.updateProjectV2('missing_project', (project) => project)).rejects.toMatchObject(notFound);
+    await expect(absent.deleteProjectV2('missing_project', 1)).resolves.toBe(false);
+    await expect(absent.listProposalsV2('missing_project')).rejects.toMatchObject(notFound);
+    await expect(absent.acceptProposalV2('missing_project', 'proposal_1')).rejects.toMatchObject(notFound);
+    await expect(absent.rejectProposalV2('missing_project', 'proposal_1')).rejects.toMatchObject(notFound);
+    await expect(absent.resolveProposalPathsV2('missing_project')).rejects.toMatchObject(notFound);
+    await expect(absent.listReferenceRequestsV2('missing_project')).rejects.toMatchObject(notFound);
+    await expect(absent.readReferenceGenerationHandoffV2('missing_project', 'handoff_1')).rejects.toMatchObject(
+      notFound
+    );
+    await expect(absent.resolveReferenceRequestPathsV2('missing_project')).rejects.toMatchObject(notFound);
+    await expect(absent.reapAbandonedProposalsV2()).resolves.toBeUndefined();
+    await expect(absent.reapAbandonedReferenceRequestsV2()).resolves.toBeUndefined();
+    expect(existsSync(absentRoot)).toBe(false);
+  });
+
   it('classifies a reordered schema-1 manifest larger than the V2 cap without mutating its tree', async () => {
     const projectId = 'oversized_prototype_v1';
     const projectDirectory = path.join(rootDir, projectId);
@@ -868,6 +907,19 @@ describe('schema-2 creative studio project store', () => {
     ['a unicode escape in a root value', '{"padding":"\\u0041","schemaVersion":1}'],
     ['a unicode escape in a nested key', '{"payload":{"\\u0078":1},"schemaVersion":1}'],
     ['a unicode escape in a nested array value', '{"payload":["\\u0041"],"schemaVersion":1}'],
+    [
+      'every nested scalar and container state',
+      '{"payload":{"truth":true,"lie":false,"nil":null,"negative":-12,"zero":0,"fraction":1.25,"exponent":1e+2,"negativeExponent":1e-2,"array":[true,false,null,-0.1e+2,{},[]]},"schemaVersion":1}',
+    ],
+    ['root literal before the schema member', '{"enabled":true,"schemaVersion":1}'],
+    ['root number before the schema member', '{"sequence":-1.5e+2,"schemaVersion":1}'],
+    ['empty nested containers', '{"object":{},"array":[],"schemaVersion":1}'],
+    ['simple JSON escapes', '{"padding":"\\\"\\\\\\/\\b\\f\\n\\r\\t","schemaVersion":1}'],
+    ['an overflowing root-key token', `{"${'x'.repeat(300)}":0,"schemaVersion":1}`],
+    ['a fractional spelling of schema one', '{"schemaVersion":1.0}'],
+    ['a positive exponent spelling of schema one', '{"schemaVersion":1e+0}'],
+    ['a decimal exponent spelling of schema one', '{"schemaVersion":0.1e1}'],
+    ['a negative exponent spelling of schema one', '{"schemaVersion":10e-1}'],
   ])('accepts valid %s before a root schema-1 member', async (_label, bytes) => {
     const projectId = 'oversized_nested_v1';
     const projectFilePath = path.join(rootDir, projectId, 'project.json');
@@ -958,6 +1010,31 @@ describe('schema-2 creative studio project store', () => {
     ['crossed nested delimiters', '{"payload":[{]},"schemaVersion":1}'],
     ['invalid nested literal', '{"payload":{"x":garbage},"schemaVersion":1}'],
     ['missing nested comma', '{"payload":[1 2],"schemaVersion":1}'],
+    ['a non-object root', '[{"schemaVersion":1}]'],
+    ['an empty root object', '{}'],
+    ['a missing root key', '{:1,"schemaVersion":1}'],
+    ['a missing root colon', '{"padding" 1,"schemaVersion":1}'],
+    ['an invalid root value', '{"padding":?,"schemaVersion":1}'],
+    ['trailing root data', '{"schemaVersion":1}x'],
+    ['an invalid simple escape', '{"padding":"\\q","schemaVersion":1}'],
+    ['an invalid unicode escape', '{"padding":"\\u00xz","schemaVersion":1}'],
+    ['an unescaped string control', '{"padding":"line\nbreak","schemaVersion":1}'],
+    ['a truncated literal', '{"padding":tru'],
+    ['an invalid literal', '{"padding":trux,"schemaVersion":1}'],
+    ['a leading-zero number', '{"padding":01,"schemaVersion":1}'],
+    ['a lone number sign', '{"padding":-,"schemaVersion":1}'],
+    ['a fraction without digits', '{"padding":1.,"schemaVersion":1}'],
+    ['an exponent without digits', '{"padding":1e,"schemaVersion":1}'],
+    ['an exponent sign without digits', '{"padding":1e+,"schemaVersion":1}'],
+    ['an invalid number suffix', '{"padding":1x,"schemaVersion":1}'],
+    ['a nested object without a key', '{"payload":{:1},"schemaVersion":1}'],
+    ['a nested object without a colon', '{"payload":{"x" 1},"schemaVersion":1}'],
+    ['a nested object without a value', '{"payload":{"x":},"schemaVersion":1}'],
+    ['a nested object trailing comma', '{"payload":{"x":1,},"schemaVersion":1}'],
+    ['a nested array trailing comma', '{"payload":[1,],"schemaVersion":1}'],
+    ['an invalid nested array value', '{"payload":[?],"schemaVersion":1}'],
+    ['an unterminated root string', '{"padding":"open'],
+    ['an unterminated nested container', '{"payload":[1,"schemaVersion":1}'],
   ])('rejects an oversized %s manifest instead of treating bait as schema 1', async (_label, bytes) => {
     const projectId = 'oversized_schema_bait';
     const projectFilePath = path.join(rootDir, projectId, 'project.json');

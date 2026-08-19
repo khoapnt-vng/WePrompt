@@ -31,8 +31,9 @@ import {
   type StudioReferenceRequestV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
+import { STUDIO_RULE_LIMITS } from '@/common/types/project/creativeStudioRules';
 import type { IProvider } from '@/common/config/storage';
-import type { CreativeStudioStore } from '@process/services/creative-studio/store';
+import { CreativeStudioStoreError, type CreativeStudioStore } from '@process/services/creative-studio/store';
 import {
   createCreativeStudioServiceV2,
   derivePayableShotIds,
@@ -52,6 +53,7 @@ import {
   type StudioGenerationRouteCatalog,
 } from '@process/services/creative-studio/providerResolver';
 import { createConfiguredStudioRateCardV2 } from '@process/services/creative-studio/rateCardConfig';
+import { ProviderDeadlineError } from '@process/services/creative-studio/adapters/types';
 import {
   StudioPreparedSubmissionCacheErrorV2,
   StudioPreparedSubmissionCacheV2,
@@ -274,7 +276,7 @@ describe('CreativeStudioServiceV2', () => {
     const updateProjectV2 = vi.fn(
       async (...[projectId, update, expectedRevision]: Parameters<CreativeStudioStore['updateProjectV2']>) => {
         if (projectId !== current.id || (expectedRevision !== undefined && expectedRevision !== current.revision)) {
-          throw new Error('stale Studio fixture project');
+          throw new CreativeStudioStoreError('stale_project', 'stale Studio fixture project');
         }
         current = {
           ...update(structuredClone(current)),
@@ -436,6 +438,7 @@ describe('CreativeStudioServiceV2', () => {
       projectDir: `/studio/${current.id}`,
       pendingDir: `/studio/${current.id}/reference-requests/pending`,
     }));
+    const getVerifiedProjectDirectoryV2 = vi.fn(async () => `/studio/${current.id}`);
     const listConnections = vi.fn(async () => structuredClone(connections));
     const saveConnection = vi.fn(async (binding: (typeof connections)[number]) => {
       connections = [...connections, structuredClone(binding)];
@@ -465,6 +468,7 @@ describe('CreativeStudioServiceV2', () => {
       recordReferenceGenerationHandoffReceiptV2,
       resolveProposalPathsV2,
       resolveReferenceRequestPathsV2,
+      getVerifiedProjectDirectoryV2,
       listConnections,
       saveConnection,
       removeConnection,
@@ -533,6 +537,7 @@ describe('CreativeStudioServiceV2', () => {
     let keyOrdinal = 0;
     const onProjectUpdated = vi.fn();
     const ensureDirectorCommandMailbox = vi.fn(async () => undefined);
+    const getStudioServerScriptPath = vi.fn(() => '/bundled/builtin-mcp-studio.js');
     const validateConnection = vi.fn(async () => ({ ok: true as const, capabilities: { maxConditioningImages: 3 } }));
     const adapterRegistry = new Map([
       [
@@ -561,7 +566,7 @@ describe('CreativeStudioServiceV2', () => {
       providerResolver: providerResolver as never,
       listProviders,
       getAdapterRegistry: () => adapterRegistry as never,
-      getStudioServerScriptPath: () => '/bundled/builtin-mcp-studio.js',
+      getStudioServerScriptPath,
       ensureDirectorCommandMailbox,
       preparedSubmissionCache: options.preparedSubmissionCache,
       createConnectionId: options.createConnectionId,
@@ -611,13 +616,16 @@ describe('CreativeStudioServiceV2', () => {
       confirmReferenceGenerationHandoffV2,
       resolveProposalPathsV2,
       resolveReferenceRequestPathsV2,
+      getVerifiedProjectDirectoryV2,
       listConnections,
       saveConnection,
       removeConnection,
       listProviders,
       validateConnection,
+      adapterRegistry,
       loadRateCard,
       ensureDirectorCommandMailbox,
+      getStudioServerScriptPath,
       getProject: (): StudioProjectV2 => structuredClone(current),
       setProject: (next: StudioProjectV2): void => {
         current = structuredClone(next);
@@ -627,10 +635,26 @@ describe('CreativeStudioServiceV2', () => {
 
   it('rejects malformed V2 service envelopes before store, media, or paid work', async () => {
     const harness = makeHarness();
+    const symbolKeyedBinding = {
+      projectId: 'project_v2',
+      expectedRevision: 1,
+      conversationId: 'conversation_1',
+      [Symbol('unexpected')]: true,
+    };
     const attempts: Array<() => Promise<unknown>> = [
       () => harness.service.deleteProject({ projectId: '../project', expectedRevision: 1 }),
       () => harness.service.deleteProject({ projectId: 'project_v2', expectedRevision: 0 }),
       () => harness.service.getChainStatus({ projectId: 'project_v2', extra: true } as never),
+      () => harness.service.getDirectorSessionAuthority({ projectId: '../project_v2' }),
+      () => harness.service.getDirectorSessionAuthority({ projectId: 'project_v2', extra: true } as never),
+      () =>
+        harness.service.bindDirectorConversation({
+          projectId: 'project_v2',
+          expectedRevision: 1,
+          conversationId: 'conversation_1',
+          extra: true,
+        } as never),
+      () => harness.service.bindDirectorConversation(symbolKeyedBinding),
       () =>
         harness.service.getGenerationReadiness({
           projectId: 'project_v2',
@@ -698,6 +722,7 @@ describe('CreativeStudioServiceV2', () => {
     }
     expect(harness.submitShots).not.toHaveBeenCalled();
     expect(harness.importReferenceFromPathV2).not.toHaveBeenCalled();
+    expect(harness.store.updateProjectV2).not.toHaveBeenCalled();
   });
 
   it('projects schema-2 proposal lifecycle results without exposing persisted project authority', async () => {
@@ -1296,6 +1321,241 @@ describe('CreativeStudioServiceV2', () => {
     expect(routeCatalog).not.toHaveProperty('storyboard');
   });
 
+  it('reads exact Director transport authority without creating sidecars, resolving providers, or mutating', async () => {
+    const project = makeSchema2ServiceProject();
+    const harness = makeHarness(project);
+
+    const authority = await harness.service.getDirectorSessionAuthority({ projectId: project.id });
+
+    expect(authority).toEqual({
+      serverId: `studio-brief-${project.id}`,
+      serverName: BUILTIN_STUDIO_NAME,
+      scriptPath: '/bundled/builtin-mcp-studio.js',
+      projectDir: `/studio/${project.id}`,
+      pendingDir: `/studio/${project.id}/proposals/pending`,
+      referencePendingDir: `/studio/${project.id}/reference-requests/pending`,
+    });
+    expect(Object.keys(authority)).toEqual([
+      'serverId',
+      'serverName',
+      'scriptPath',
+      'projectDir',
+      'pendingDir',
+      'referencePendingDir',
+    ]);
+    expect(harness.getVerifiedProjectDirectoryV2).toHaveBeenCalledExactlyOnceWith(project.id);
+    expect(harness.getStudioServerScriptPath).toHaveBeenCalledOnce();
+    expect(harness.resolveProposalPathsV2).not.toHaveBeenCalled();
+    expect(harness.resolveReferenceRequestPathsV2).not.toHaveBeenCalled();
+    expect(harness.ensureDirectorCommandMailbox).not.toHaveBeenCalled();
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+    expect(harness.listProviders).not.toHaveBeenCalled();
+    expect(harness.validateConnection).not.toHaveBeenCalled();
+    expect(harness.loadRateCard).not.toHaveBeenCalled();
+    expect(harness.store.applyMutationBatchV2).not.toHaveBeenCalled();
+    expect(harness.store.updateProjectV2).not.toHaveBeenCalled();
+    expect(harness.store.confirmProjectV2).not.toHaveBeenCalled();
+    expect(harness.submitShots).not.toHaveBeenCalled();
+    expect(harness.onProjectUpdated).not.toHaveBeenCalled();
+  });
+
+  it('atomically binds only the Director conversation without reducer, provider, or paid work', async () => {
+    const harness = makeHarness();
+    const before = harness.getProject();
+
+    const result = await harness.service.bindDirectorConversation({
+      projectId: before.id,
+      expectedRevision: before.revision,
+      conversationId: 'conversation_1',
+    });
+    const after = harness.getProject();
+
+    expect(result).toEqual({
+      projectId: before.id,
+      projectRevision: before.revision + 1,
+      createdBeatIds: [],
+      createdShotIds: [],
+    });
+    expect(after).toEqual({
+      ...before,
+      revision: before.revision + 1,
+      updatedAt: '2026-08-17T00:00:02.000Z',
+      briefConversationId: 'conversation_1',
+    });
+    expect(harness.store.updateProjectV2).toHaveBeenCalledOnce();
+    expect(harness.onProjectUpdated).toHaveBeenCalledExactlyOnceWith(before.id);
+    expect(harness.store.applyMutationBatchV2).not.toHaveBeenCalled();
+    expect(harness.store.confirmProjectV2).not.toHaveBeenCalled();
+    expect(harness.submitShots).not.toHaveBeenCalled();
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+    expect(harness.listProviders).not.toHaveBeenCalled();
+    expect(harness.loadRateCard).not.toHaveBeenCalled();
+  });
+
+  it('replaces a different dangling Director conversation at the current revision', async () => {
+    const project = makeSchema2ServiceProject();
+    project.briefConversationId = 'conversation_missing';
+    const harness = makeHarness(project);
+
+    await expect(
+      harness.service.bindDirectorConversation({
+        projectId: project.id,
+        expectedRevision: project.revision,
+        conversationId: 'conversation_replacement',
+      })
+    ).resolves.toEqual({
+      projectId: project.id,
+      projectRevision: project.revision + 1,
+      createdBeatIds: [],
+      createdShotIds: [],
+    });
+
+    expect(harness.getProject()).toEqual({
+      ...project,
+      revision: project.revision + 1,
+      updatedAt: '2026-08-17T00:00:02.000Z',
+      briefConversationId: 'conversation_replacement',
+    });
+    expect(harness.store.updateProjectV2).toHaveBeenCalledOnce();
+    expect(harness.onProjectUpdated).toHaveBeenCalledExactlyOnceWith(project.id);
+    expect(harness.store.applyMutationBatchV2).not.toHaveBeenCalled();
+    expect(harness.submitShots).not.toHaveBeenCalled();
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+    expect(harness.listProviders).not.toHaveBeenCalled();
+    expect(harness.loadRateCard).not.toHaveBeenCalled();
+  });
+
+  it('treats an already-bound Director conversation as an idempotent replay without a revision bump', async () => {
+    const project = makeSchema2ServiceProject();
+    project.briefConversationId = 'conversation_1';
+    const harness = makeHarness(project);
+
+    const result = await harness.service.bindDirectorConversation({
+      projectId: project.id,
+      expectedRevision: project.revision - 1,
+      conversationId: 'conversation_1',
+    });
+
+    expect(result).toEqual({
+      projectId: project.id,
+      projectRevision: project.revision,
+      createdBeatIds: [],
+      createdShotIds: [],
+    });
+    expect(harness.getProject()).toEqual(project);
+    expect(harness.store.updateProjectV2).not.toHaveBeenCalled();
+    expect(harness.onProjectUpdated).not.toHaveBeenCalled();
+    expect(harness.store.applyMutationBatchV2).not.toHaveBeenCalled();
+    expect(harness.submitShots).not.toHaveBeenCalled();
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+    expect(harness.listProviders).not.toHaveBeenCalled();
+    expect(harness.loadRateCard).not.toHaveBeenCalled();
+  });
+
+  it('converges an overlapping same-conversation bind after losing the CAS race', async () => {
+    const harness = makeHarness();
+    const before = harness.getProject();
+    harness.store.updateProjectV2.mockImplementationOnce(async () => {
+      harness.setProject({
+        ...before,
+        revision: before.revision + 1,
+        updatedAt: '2026-08-17T00:00:02.000Z',
+        briefConversationId: 'conversation_1',
+      });
+      throw new CreativeStudioStoreError('stale_project', 'overlapping Director bind won the CAS race');
+    });
+
+    await expect(
+      harness.service.bindDirectorConversation({
+        projectId: before.id,
+        expectedRevision: before.revision,
+        conversationId: 'conversation_1',
+      })
+    ).resolves.toEqual({
+      projectId: before.id,
+      projectRevision: before.revision + 1,
+      createdBeatIds: [],
+      createdShotIds: [],
+    });
+
+    expect(harness.store.updateProjectV2).toHaveBeenCalledOnce();
+    expect(harness.onProjectUpdated).not.toHaveBeenCalled();
+    expect(harness.store.applyMutationBatchV2).not.toHaveBeenCalled();
+    expect(harness.submitShots).not.toHaveBeenCalled();
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+    expect(harness.listProviders).not.toHaveBeenCalled();
+    expect(harness.loadRateCard).not.toHaveBeenCalled();
+  });
+
+  it('allows exactly one winner when different Director conversations compete at the same revision', async () => {
+    const harness = makeHarness();
+    const before = harness.getProject();
+    const requests = ['conversation_alpha', 'conversation_beta'].map((conversationId) => ({
+      projectId: before.id,
+      expectedRevision: before.revision,
+      conversationId,
+    }));
+
+    const results = await Promise.allSettled(
+      requests.map((request) => harness.service.bindDirectorConversation(request))
+    );
+    const winnerIndex = results.findIndex((result) => result.status === 'fulfilled');
+    const loserIndex = results.findIndex((result) => result.status === 'rejected');
+
+    expect(winnerIndex).toBeGreaterThanOrEqual(0);
+    expect(loserIndex).toBeGreaterThanOrEqual(0);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    expect(results[winnerIndex]).toEqual({
+      status: 'fulfilled',
+      value: {
+        projectId: before.id,
+        projectRevision: before.revision + 1,
+        createdBeatIds: [],
+        createdShotIds: [],
+      },
+    });
+    expect(results[loserIndex]).toMatchObject({
+      status: 'rejected',
+      reason: { code: 'stale_project' },
+    });
+    expect(harness.getProject()).toEqual({
+      ...before,
+      revision: before.revision + 1,
+      updatedAt: '2026-08-17T00:00:02.000Z',
+      briefConversationId: requests[winnerIndex]?.conversationId,
+    });
+    expect(harness.store.updateProjectV2).toHaveBeenCalledTimes(2);
+    expect(harness.onProjectUpdated).toHaveBeenCalledExactlyOnceWith(before.id);
+    expect(harness.store.applyMutationBatchV2).not.toHaveBeenCalled();
+    expect(harness.submitShots).not.toHaveBeenCalled();
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+    expect(harness.listProviders).not.toHaveBeenCalled();
+    expect(harness.loadRateCard).not.toHaveBeenCalled();
+  });
+
+  it('preserves CAS authority when a stale request tries to replace the Director conversation', async () => {
+    const project = makeSchema2ServiceProject();
+    project.briefConversationId = 'conversation_1';
+    const harness = makeHarness(project);
+
+    await expect(
+      harness.service.bindDirectorConversation({
+        projectId: project.id,
+        expectedRevision: project.revision - 1,
+        conversationId: 'conversation_2',
+      })
+    ).rejects.toMatchObject({ code: 'stale_project' });
+
+    expect(harness.getProject()).toEqual(project);
+    expect(harness.onProjectUpdated).not.toHaveBeenCalled();
+    expect(harness.store.applyMutationBatchV2).not.toHaveBeenCalled();
+    expect(harness.submitShots).not.toHaveBeenCalled();
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+    expect(harness.listProviders).not.toHaveBeenCalled();
+    expect(harness.loadRateCard).not.toHaveBeenCalled();
+  });
+
   it('validates, stores, lists, and removes schema-independent connections through the V2 service', async () => {
     const harness = makeHarness(makeSchema2ServiceProject(), { createConnectionId: () => 'binding_v2_1' });
     const request = {
@@ -1352,6 +1612,180 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.listProviders).not.toHaveBeenCalled();
     expect(harness.validateConnection).not.toHaveBeenCalled();
     expect(harness.removeConnection).not.toHaveBeenCalled();
+  });
+
+  it.each([null, '', 'x'.repeat(257), ' leading-space', 'control\u0001character'])(
+    'rejects the unsafe connection model %j before provider access',
+    async (model) => {
+      const harness = makeHarness();
+
+      await expect(
+        harness.service.validateConnection({
+          providerId: 'provider_1',
+          integrationId: 'integration_g7Q2mB4p',
+          model,
+        } as never)
+      ).rejects.toMatchObject({ code: 'invalid_payload' });
+      expect(harness.listProviders).not.toHaveBeenCalled();
+    }
+  );
+
+  it('rejects an unknown connection integration before reading provider credentials', async () => {
+    const harness = makeHarness();
+
+    await expect(
+      harness.service.validateConnection({
+        providerId: 'provider_1',
+        integrationId: 'integration_unknown',
+        model: 'image-model',
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+    expect(harness.listProviders).not.toHaveBeenCalled();
+  });
+
+  it('maps provider inventory failures to the stable provider error', async () => {
+    const harness = makeHarness();
+    harness.listProviders.mockRejectedValueOnce(new Error('credential inventory unavailable'));
+
+    await expect(
+      harness.service.validateConnection({
+        providerId: 'provider_1',
+        integrationId: 'integration_g7Q2mB4p',
+        model: 'image-model',
+      })
+    ).rejects.toMatchObject({ code: 'provider_error' });
+    expect(harness.validateConnection).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['missing provider', []],
+    ['disabled provider', [{ enabled: false }]],
+    ['disabled model', [{ model_enabled: { 'image-model': false } }]],
+    ['unhealthy model', [{ model_health: { 'image-model': { status: 'unhealthy' } } }]],
+    ['empty API key', [{ api_key: '  ' }]],
+    ['empty base URL', [{ base_url: '  ' }]],
+  ] as const)('rejects an unavailable connection for a %s', async (_label, variants) => {
+    const harness = makeHarness();
+    const baseProvider: IProvider = {
+      id: 'provider_1',
+      platform: 'openai',
+      name: 'Image provider',
+      base_url: 'https://provider.invalid/v1',
+      api_key: 'provider-secret',
+      models: ['image-model'],
+    };
+    harness.listProviders.mockResolvedValueOnce(
+      variants.map((variant) => ({ ...baseProvider, ...variant }) as IProvider)
+    );
+
+    await expect(
+      harness.service.validateConnection({
+        providerId: 'provider_1',
+        integrationId: 'integration_g7Q2mB4p',
+        model: 'image-model',
+      })
+    ).rejects.toMatchObject({ code: 'invalid_route' });
+    expect(harness.validateConnection).not.toHaveBeenCalled();
+  });
+
+  it('rejects a connection whose integration adapter is unavailable', async () => {
+    const harness = makeHarness();
+    harness.adapterRegistry.delete('weprompt-image-v1');
+
+    await expect(
+      harness.service.validateConnection({
+        providerId: 'provider_1',
+        integrationId: 'integration_g7Q2mB4p',
+        model: 'image-model',
+      })
+    ).rejects.toMatchObject({ code: 'invalid_route' });
+    expect(harness.validateConnection).not.toHaveBeenCalled();
+  });
+
+  it('maps a bounded connection deadline and a negative validation to provider errors', async () => {
+    const harness = makeHarness();
+    const request = {
+      providerId: 'provider_1',
+      integrationId: 'integration_g7Q2mB4p',
+      model: 'image-model',
+    };
+    harness.validateConnection.mockRejectedValueOnce(new ProviderDeadlineError());
+
+    await expect(harness.service.validateConnection(request)).rejects.toMatchObject({ code: 'provider_error' });
+
+    harness.validateConnection.mockResolvedValueOnce({ ok: false, error: 'invalid credentials' });
+    await expect(harness.service.validateConnection(request)).rejects.toMatchObject({ code: 'provider_error' });
+  });
+
+  it('does not relabel an unexpected adapter implementation failure', async () => {
+    const harness = makeHarness();
+    const adapterError = new Error('adapter implementation failed');
+    harness.validateConnection.mockRejectedValueOnce(adapterError);
+
+    await expect(
+      harness.service.validateConnection({
+        providerId: 'provider_1',
+        integrationId: 'integration_g7Q2mB4p',
+        model: 'image-model',
+      })
+    ).rejects.toBe(adapterError);
+  });
+
+  it('sanitizes self-hosted video capabilities across populated and absent optional constraints', async () => {
+    const harness = makeHarness();
+    harness.adapterRegistry.set('weprompt-media-gateway-v1', {
+      id: 'weprompt-media-gateway-v1',
+      validateConnection: harness.validateConnection,
+    } as never);
+    harness.validateConnection
+      .mockResolvedValueOnce({
+        ok: true,
+        capabilities: {
+          aspectRatios: ['16:9', 'unsupported', 42],
+          resolutions: ['1080p', 'unsupported', false],
+          minDurationSeconds: 0,
+          maxDurationSeconds: 61,
+          supportsFirstFrame: true,
+          cancellationPolicy: 'queued_and_running',
+        },
+      } as never)
+      .mockResolvedValueOnce({
+        ok: true,
+        capabilities: {
+          minDurationSeconds: 4,
+          maxDurationSeconds: 15,
+          supportsFirstFrame: false,
+          cancellationPolicy: 'unsupported',
+        },
+      } as never);
+
+    const populated = await harness.service.validateConnection({
+      providerId: 'provider_1',
+      integrationId: 'integration_x5T8cW1h',
+      model: 'gateway-video-model',
+    });
+    const absent = await harness.service.validateConnection({
+      providerId: 'provider_1',
+      integrationId: 'integration_x5T8cW1h',
+      model: 'gateway-video-model-2',
+    });
+
+    expect(populated.capabilities).toEqual({
+      mediaKinds: ['video'],
+      audioModes: ['none'],
+      aspectRatios: ['16:9'],
+      resolutions: ['1080p'],
+      supportsFirstFrame: true,
+      maxConditioningImages: 0,
+    });
+    expect(absent.capabilities).toEqual({
+      mediaKinds: ['video'],
+      audioModes: ['none'],
+      minDurationSeconds: 4,
+      maxDurationSeconds: 15,
+      supportsFirstFrame: false,
+      maxConditioningImages: 0,
+    });
   });
 
   it('keeps non-silent OpenRouter video routes while filtering non-silent routes from other adapters', async () => {
@@ -2861,6 +3295,120 @@ const addGeneratedVideoTakesForMcpV2 = (project: StudioProjectV2, count: number)
 };
 
 describe('Studio MCP schema-2 server', () => {
+  it('reports route-catalog absence without exposing a partial catalog', async () => {
+    await expect(createListRoutesHandler(null)({})).resolves.toEqual({
+      content: [{ type: 'text', text: 'Creative Studio route catalog is unavailable.' }],
+      isError: true,
+    });
+    await expect(
+      createListRoutesHandler({
+        projectId: 'project_v2',
+        projectDir: '/unused',
+        pendingDir: '/unused/proposals/pending',
+        referencePendingDir: '/unused/reference-requests/pending',
+        routeCatalog: null,
+      })({})
+    ).resolves.toMatchObject({ isError: true });
+  });
+
+  it.each(['ordinary file', 'symbolic link'] as const)(
+    'refuses an %s as the configured project root',
+    async (rootKind) => {
+      const parentDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-unsafe-root-'));
+      const realProjectDir = path.join(parentDir, 'real-project');
+      const configuredProjectDir = path.join(parentDir, 'configured-project');
+      await mkdir(realProjectDir);
+      await writeFile(path.join(realProjectDir, 'project.json'), JSON.stringify(makeSchema2ServiceProject()));
+      if (rootKind === 'ordinary file') await writeFile(configuredProjectDir, 'not a directory');
+      else await nodeFs.symlink(realProjectDir, configuredProjectDir);
+
+      try {
+        const result = await createReadStoryboardHandlerV2({
+          projectId: 'project_v2',
+          projectDir: configuredProjectDir,
+          pendingDir: path.join(configuredProjectDir, 'proposals', 'pending'),
+          referencePendingDir: path.join(configuredProjectDir, 'reference-requests', 'pending'),
+        })({});
+
+        expect(result.isError).toBe(true);
+        expect(result.content[0].text).toContain('unavailable');
+      } finally {
+        await rm(parentDir, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each([
+    ['missing manifest', null],
+    ['primitive manifest', 'true'],
+    ['array manifest', '[]'],
+  ] as const)('refuses a %s without sidecar allocation', async (_label, manifestBytes) => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-invalid-manifest-'));
+    if (manifestBytes !== null) await writeFile(path.join(projectDir, 'project.json'), manifestBytes);
+
+    try {
+      const result = await createReadStoryboardHandlerV2({
+        projectId: 'project_v2',
+        projectDir,
+        pendingDir: path.join(projectDir, 'proposals', 'pending'),
+        referencePendingDir: path.join(projectDir, 'reference-requests', 'pending'),
+      })({});
+
+      expect(result.isError).toBe(true);
+      await expect(readdir(projectDir)).resolves.toEqual(manifestBytes === null ? [] : ['project.json']);
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['initial canonical-root proof', 2],
+    ['post-read canonical-root proof', 3],
+  ] as const)('rejects a directory identity change during the %s', async (_label, mismatchedRootRead) => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-root-race-'));
+    const canonicalProjectDir = await nodeFs.realpath(projectDir);
+    const manifest = path.join(projectDir, 'project.json');
+    await writeFile(manifest, JSON.stringify(makeSchema2ServiceProject()));
+    let rootReads = 0;
+    const racingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property !== 'lstat') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.lstat>) => {
+          const stats = await nodeFs.lstat(...args);
+          if (
+            (String(args[0]) !== projectDir && String(args[0]) !== canonicalProjectDir) ||
+            ++rootReads !== mismatchedRootRead
+          ) {
+            return stats;
+          }
+          return new Proxy(stats, {
+            get(target, statsProperty, statsReceiver) {
+              if (statsProperty === 'ino') return target.ino + 1;
+              const value = Reflect.get(target, statsProperty, statsReceiver) as unknown;
+              return typeof value === 'function' ? value.bind(target) : value;
+            },
+          });
+        };
+      },
+    }) as typeof nodeFs;
+
+    try {
+      const result = await createReadStoryboardHandlerV2({
+        projectId: 'project_v2',
+        projectDir,
+        pendingDir: path.join(projectDir, 'proposals', 'pending'),
+        referencePendingDir: path.join(projectDir, 'reference-requests', 'pending'),
+        fs: racingFs,
+      })({});
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('unavailable');
+      await expect(readFile(manifest, 'utf8')).resolves.toBe(JSON.stringify(makeSchema2ServiceProject()));
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
   it('exports and registers only the schema-2 Beat/Shot MCP surface', async () => {
     const [source, pendingWriterSource, proposalWriterSource, referenceWriterSource] = await Promise.all([
       readFile(
@@ -4827,6 +5375,37 @@ describe('Studio MCP schema-2 server', () => {
     expect(referenceEntries.filter((name) => name.endsWith('.tmp'))).toHaveLength(1);
     expect(referenceEntries.filter((name) => name.endsWith('.ready'))).toHaveLength(1);
     await rm(projectDir, { recursive: true, force: true });
+  });
+
+  it('refuses a new proposed rule when the durable project already holds the rule cap', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-v2-rule-cap-'));
+    const pendingDir = path.join(projectDir, 'proposals', 'pending');
+    const referencePendingDir = path.join(projectDir, 'reference-requests', 'pending');
+    await createSidecarFamilyV2(projectDir, 'proposals');
+    const project = makeSchema2ServiceProject();
+    project.rules = Array.from({ length: STUDIO_RULE_LIMITS.maxRules }, (_, index) => ({
+      id: `rule_${index + 1}`,
+      scope: 'project' as const,
+      text: `Keep authored rule ${index + 1}.`,
+      predicate: null,
+      createdAt: '2026-08-17T00:00:00.000Z',
+    }));
+    await writeFile(path.join(projectDir, 'project.json'), JSON.stringify(project));
+
+    try {
+      const result = await createProposeBriefRuleHandlerV2({
+        projectId: project.id,
+        projectDir,
+        pendingDir,
+        referencePendingDir,
+      })({ base_revision: project.revision, text: 'One rule too many.', forbidden_terms: [] });
+
+      expect(result).toMatchObject({ isError: true });
+      expect(result.content[0].text).toContain(`maximum of ${STUDIO_RULE_LIMITS.maxRules} rules`);
+      await expect(readdir(pendingDir)).resolves.toEqual([]);
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
   });
 
   it.each(['pending_basename', 'family_name', 'project_root'] as const)(

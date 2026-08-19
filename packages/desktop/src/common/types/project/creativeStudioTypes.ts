@@ -562,6 +562,22 @@ export type StudioDismissReferenceGenerationHandoffRequestV2 = {
   handoffId: string;
 };
 
+export type StudioBindDirectorConversationRequestV2 = {
+  projectId: string;
+  expectedRevision: number;
+  conversationId: string;
+};
+
+/** Main-minted trust anchors for validating a persisted Director MCP transport without resolving routes. */
+export type StudioDirectorSessionAuthorityV2 = {
+  serverId: string;
+  serverName: string;
+  scriptPath: string;
+  projectDir: string;
+  pendingDir: string;
+  referencePendingDir: string;
+};
+
 export type StudioDismissReferenceGenerationHandoffResultV2 = {
   status: 'dismissed';
   completedAt: string;

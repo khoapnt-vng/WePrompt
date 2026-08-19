@@ -746,6 +746,10 @@ export const nativeBridgePayloadSchemas = {
   'creative-studio.create-project': studioV2ProjectInputSchema,
   'creative-studio.get-project': studioV2ProjectRequestSchema,
   'creative-studio.get-brief-session-server': studioV2ProjectRequestSchema,
+  'creative-studio.get-director-session-authority': studioV2ProjectRequestSchema,
+  'creative-studio.bind-director-conversation': z
+    .object({ ...studioV2MutationRequestShape, conversationId: safeIdSchema })
+    .strict(),
   'creative-studio.list-proposals': studioV2ProjectRequestSchema,
   'creative-studio.accept-proposal': z.object({ projectId: safeIdSchema, proposalId: safeIdSchema }).strict(),
   'creative-studio.reject-proposal': z.object({ projectId: safeIdSchema, proposalId: safeIdSchema }).strict(),

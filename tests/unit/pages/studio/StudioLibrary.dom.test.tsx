@@ -25,6 +25,7 @@ vi.mock('react-i18next', () => ({
 }));
 
 import { StudioLibrary } from '@/renderer/pages/studio/components/Library/StudioLibrary';
+import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
 
 const ok = <T,>(data: T) => ({ ok: true as const, data });
 
@@ -101,6 +102,11 @@ describe('StudioLibrary schema-2 cutover', () => {
     mocks.bridge.deleteProject.invoke.mockResolvedValue(ok(true));
   });
 
+  it('rejects unsafe managed-asset URL identities at the renderer boundary', () => {
+    expect(createManagedStudioAssetUrl('../project', 'asset_1')).toBeNull();
+    expect(createManagedStudioAssetUrl('project_1', 'asset/1')).toBeNull();
+  });
+
   it('renders Beat/Shot summaries from the schema-2 list wrapper', async () => {
     renderLibrary();
 
@@ -144,6 +150,112 @@ describe('StudioLibrary schema-2 cutover', () => {
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table'));
   });
 
+  it('keeps a whitespace-only Brief local and supports the explicit keyboard submit gesture', async () => {
+    renderLibrary();
+    const composer = await screen.findByLabelText('conversation.creativeStudio.workspace.library.composer.label');
+    fireEvent.change(composer, { target: { value: '   ' } });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.library.composer.submit' })
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'conversation.creativeStudio.workspace.library.composer.empty'
+    );
+    expect(composer).toHaveAttribute('aria-describedby', 'studio-composer-error');
+    expect(mocks.bridge.createProject.invoke).not.toHaveBeenCalled();
+
+    fireEvent.change(composer, { target: { value: 'Keyboard launch' } });
+    expect(screen.queryByText('conversation.creativeStudio.workspace.library.composer.empty')).toBeNull();
+    fireEvent.keyDown(composer, { key: 'Enter' });
+    expect(mocks.bridge.createProject.invoke).not.toHaveBeenCalled();
+    fireEvent.keyDown(composer, { key: 'Enter', ctrlKey: true });
+
+    await waitFor(() =>
+      expect(mocks.bridge.createProject.invoke).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'Keyboard launch', brief: 'Keyboard launch' })
+      )
+    );
+  });
+
+  it('surfaces list and create failures without navigating or retrying', async () => {
+    mocks.bridge.listProjects.invoke.mockResolvedValue({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'native.listFailed' },
+    });
+    const first = renderLibrary();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('native.listFailed');
+    expect(mocks.bridge.listProjects.invoke).toHaveBeenCalledTimes(1);
+    first.unmount();
+
+    mocks.bridge.listProjects.invoke.mockResolvedValue(
+      ok({ projects: [], unsupportedProjectIds: [], quarantinedProjectIds: [] })
+    );
+    mocks.bridge.createProject.invoke.mockRejectedValue(new Error('offline'));
+    renderLibrary();
+    const composer = await screen.findByLabelText('conversation.creativeStudio.workspace.library.composer.label');
+    fireEvent.change(composer, { target: { value: 'Offline launch' } });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.library.composer.submit' })
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('conversation.creativeStudio.workspace.errors.storage');
+    expect(screen.getByTestId('location')).toHaveTextContent('/studio');
+    expect(mocks.bridge.createProject.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves the library on explicit create and delete-preparation command failures', async () => {
+    mocks.bridge.createProject.invoke.mockResolvedValue({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'native.createFailed' },
+    });
+    const first = renderLibrary();
+    const composer = await screen.findByLabelText('conversation.creativeStudio.workspace.library.composer.label');
+    fireEvent.change(composer, { target: { value: 'Rejected launch' } });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.library.composer.submit' })
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent('native.createFailed');
+    expect(screen.getByTestId('location')).toHaveTextContent('/studio');
+    first.unmount();
+
+    mocks.bridge.getProject.invoke.mockRejectedValue(new Error('offline'));
+    renderLibrary();
+    fireEvent.click(await screen.findByLabelText('conversation.creativeStudio.workspace.library.deleteProject'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('conversation.creativeStudio.workspace.errors.storage');
+    expect(mocks.bridge.deleteProject.invoke).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['not_found', 'conversation.creativeStudio.workspace.project.notFound'],
+    ['unsupported_prototype_schema', 'conversation.creativeStudio.workspace.project.unsupportedPrototype'],
+  ] as const)('refuses deletion when the fresh project snapshot is %s', async (status, messageKey) => {
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status, projectId: 'project_1' }));
+    renderLibrary();
+
+    fireEvent.click(await screen.findByLabelText('conversation.creativeStudio.workspace.library.deleteProject'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(messageKey);
+    expect(mocks.bridge.deleteProject.invoke).not.toHaveBeenCalled();
+  });
+
+  it('keeps the delete dialog open when the revision-bound deletion fails', async () => {
+    mocks.bridge.deleteProject.invoke.mockResolvedValue({
+      ok: false,
+      error: { code: 'stale_revision', messageKey: 'native.staleRevision' },
+    });
+    renderLibrary();
+    fireEvent.click(await screen.findByLabelText('conversation.creativeStudio.workspace.library.deleteProject'));
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'conversation.creativeStudio.workspace.library.deleteConfirm' })
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('native.staleRevision');
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.library.deleteConfirm' })
+    ).toBeVisible();
+  });
+
   it('loads the current revision before deletion and sends no job-derived authority', async () => {
     renderLibrary();
     fireEvent.click(await screen.findByLabelText('conversation.creativeStudio.workspace.library.deleteProject'));
@@ -172,9 +284,31 @@ describe('StudioLibrary schema-2 cutover', () => {
 
     renderLibrary();
 
-    expect(await screen.findByRole('img', { name: 'Launch film' })).toHaveAttribute(
-      'src',
-      'weprompt-studio://asset/project_1/asset_1'
+    const poster = await screen.findByRole('img', { name: 'Launch film' });
+    expect(poster).toHaveAttribute('src', 'weprompt-studio://asset/project_1/asset_1');
+    fireEvent.error(poster);
+    expect(screen.getByText('conversation.creativeStudio.workspace.library.noPoster')).toBeVisible();
+  });
+
+  it('distinguishes complete and untouched projects and opens the remembered workspace entry', async () => {
+    mocks.bridge.listProjects.invoke.mockResolvedValue(
+      ok({
+        projects: [
+          summary({ id: 'project_complete', name: 'Complete film', shotCount: 2, selectedTakeCount: 2 }),
+          summary({ id: 'project_spine', name: 'Spine only', selectedTakeCount: 0 }),
+        ],
+        unsupportedProjectIds: [],
+        quarantinedProjectIds: [],
+      })
     );
+    renderLibrary();
+
+    const complete = await screen.findByText('conversation.creativeStudio.workspace.library.status.complete');
+    const spine = screen.getByText('conversation.creativeStudio.workspace.library.status.spineOnly');
+    expect(complete.closest('[data-status]')).toHaveAttribute('data-status', 'complete');
+    expect(spine.closest('[data-status]')).toHaveAttribute('data-status', 'spine');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Complete film' }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_complete/table'));
   });
 });

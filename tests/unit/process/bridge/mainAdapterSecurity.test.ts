@@ -171,6 +171,101 @@ describe('main adapter IPC security boundary', () => {
     }
   );
 
+  it('allows only the strict Task 9 Director conversation binding through the native manifest', async () => {
+    const sender = createRegisteredSender();
+    const data = { projectId: 'project_1', expectedRevision: 3, conversationId: 'conversation_1' };
+
+    await getInvokeHandler()({ sender }, createRequest('subscribe-creative-studio.bind-director-conversation', data));
+
+    expect(mocks.bridgeEmitter.emit).toHaveBeenCalledWith('subscribe-creative-studio.bind-director-conversation', {
+      id: 'request-1234',
+      data,
+    });
+  });
+
+  it('allows only the strict Task 9 Director session authority request through the native manifest', async () => {
+    const sender = createRegisteredSender();
+    const data = { projectId: 'project_1' };
+
+    await getInvokeHandler()(
+      { sender },
+      createRequest('subscribe-creative-studio.get-director-session-authority', data)
+    );
+
+    expect(mocks.bridgeEmitter.emit).toHaveBeenCalledWith('subscribe-creative-studio.get-director-session-authority', {
+      id: 'request-1234',
+      data,
+    });
+  });
+
+  it.each([
+    ['unknown field', { projectId: 'project_1', extra: true }],
+    ['traversing project id', { projectId: '../project_1' }],
+    ['overlong project id', { projectId: 'p'.repeat(257) }],
+  ] as const)('rejects a Director session authority request with %s before dispatch', async (_label, data) => {
+    const sender = createRegisteredSender();
+
+    await expect(
+      getInvokeHandler()({ sender }, createRequest('subscribe-creative-studio.get-director-session-authority', data))
+    ).rejects.toThrow(/invalid operation payload/i);
+    expect(mocks.bridgeEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['missing conversation id', { projectId: 'project_1', expectedRevision: 3 }],
+    ['null conversation id', { projectId: 'project_1', expectedRevision: 3, conversationId: null }],
+    ['unknown field', { projectId: 'project_1', expectedRevision: 3, conversationId: 'conversation_1', extra: true }],
+    ['traversing project id', { projectId: '../project_1', expectedRevision: 3, conversationId: 'conversation_1' }],
+    ['overlong project id', { projectId: 'p'.repeat(257), expectedRevision: 3, conversationId: 'conversation_1' }],
+    [
+      'traversing conversation id',
+      { projectId: 'project_1', expectedRevision: 3, conversationId: '../conversation_1' },
+    ],
+    ['overlong conversation id', { projectId: 'project_1', expectedRevision: 3, conversationId: 'c'.repeat(257) }],
+    ['zero revision', { projectId: 'project_1', expectedRevision: 0, conversationId: 'conversation_1' }],
+    ['fractional revision', { projectId: 'project_1', expectedRevision: 1.5, conversationId: 'conversation_1' }],
+    [
+      'unsafe integer revision',
+      { projectId: 'project_1', expectedRevision: Number.MAX_SAFE_INTEGER + 1, conversationId: 'conversation_1' },
+    ],
+    ['infinite revision', { projectId: 'project_1', expectedRevision: Infinity, conversationId: 'conversation_1' }],
+    ['string revision', { projectId: 'project_1', expectedRevision: '3', conversationId: 'conversation_1' }],
+  ] as const)('rejects a Task 9 Director conversation binding with %s before dispatch', async (_label, data) => {
+    const sender = createRegisteredSender();
+
+    await expect(
+      getInvokeHandler()({ sender }, createRequest('subscribe-creative-studio.bind-director-conversation', data))
+    ).rejects.toThrow(/invalid operation payload/i);
+    expect(mocks.bridgeEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('rejects magic-key Director payload authority without polluting prototypes or dispatching', async () => {
+    const sender = createRegisteredSender();
+    const request =
+      '{"name":"subscribe-creative-studio.bind-director-conversation","data":{"id":"request-1234","data":{"projectId":"project_1","expectedRevision":3,"conversationId":"conversation_1","__proto__":{"paidAuthority":true}}}}';
+
+    await expect(getInvokeHandler()({ sender }, request)).rejects.toThrow(/invalid operation payload/i);
+    expect(mocks.bridgeEmitter.emit).not.toHaveBeenCalled();
+    expect(({} as { paidAuthority?: boolean }).paidAuthority).toBeUndefined();
+  });
+
+  it('sanitizes inert magic and symbol envelope baggage before Director binding dispatch', async () => {
+    const sender = createRegisteredSender();
+    const envelope = JSON.parse(
+      '{"name":"subscribe-creative-studio.bind-director-conversation","__proto__":{"paidAuthority":true},"data":{"id":"request-1234","__proto__":{"paidAuthority":true},"data":{"projectId":"project_1","expectedRevision":3,"conversationId":"conversation_1"}}}'
+    ) as { data: { data: Record<string | symbol, unknown> } };
+    envelope.data.data[Symbol('private-authority')] = true;
+    const request = JSON.stringify(envelope);
+
+    await getInvokeHandler()({ sender }, request);
+
+    expect(mocks.bridgeEmitter.emit).toHaveBeenCalledWith('subscribe-creative-studio.bind-director-conversation', {
+      id: 'request-1234',
+      data: { projectId: 'project_1', expectedRevision: 3, conversationId: 'conversation_1' },
+    });
+    expect(({} as { paidAuthority?: boolean }).paidAuthority).toBeUndefined();
+  });
+
   it('accepts a strict has-unsaved-work response for an outstanding renderer query', async () => {
     const sender = createRegisteredSender();
     const response = createRendererQueryResponse('creative-studio.has-unsaved-work', { dirtyDraftCount: 3 });

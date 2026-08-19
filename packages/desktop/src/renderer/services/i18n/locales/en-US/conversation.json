@@ -1414,8 +1414,21 @@
       "directorStarting": "Starting the Creative Director…"
     },
     "workspace": {
+      "director": {
+        "title": "Creative Director",
+        "show": "Show the Creative Director",
+        "hide": "Hide the Creative Director",
+        "starting": "Starting the Creative Director…",
+        "retry": "Retry",
+        "startFresh": "Start fresh",
+        "danglingNotice": "This project's Director conversation is no longer available.",
+        "interruptedNotice": "Director setup was interrupted before the conversation could be attached to this project.",
+        "ownerConflict": "Creative Studio found conflicting Director conversation data and will not choose one automatically.",
+        "noModelConfigured": "Configure a text model before starting the Creative Director."
+      },
       "errors": {
-        "storage": "Creative Studio could not read or save this workspace."
+        "storage": "Creative Studio could not read or save this workspace.",
+        "staleProject": "The project changed elsewhere. Review the current Director before retrying."
       },
       "project": {
         "backToLibrary": "Back to Creative Studio",

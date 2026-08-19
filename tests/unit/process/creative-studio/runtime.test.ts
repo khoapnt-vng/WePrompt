@@ -61,6 +61,14 @@ const createHarness = (
     service?: Partial<CreativeStudioServiceV2>;
     realService?: { project: StudioProjectV2; generationCatalog: StudioGenerationRouteCatalog };
     environment?: Record<string, string | undefined>;
+    disposeFailures?: readonly string[];
+    holdActivationAt?:
+      | 'reap-proposals'
+      | 'reap-references'
+      | 'watch-proposals'
+      | 'watch-references'
+      | 'processor'
+      | 'protocol';
   } = {}
 ) => {
   let currentInventory = structuredClone(input.initialInventory ?? inventory());
@@ -70,15 +78,29 @@ const createHarness = (
   const cleanupStarted = new Promise<void>((resolve) => {
     markCleanupStarted = resolve;
   });
+  let releaseActivation: (() => void) | undefined;
+  let markActivationHeld: (() => void) | undefined;
+  const activationHeld = new Promise<void>((resolve) => {
+    markActivationHeld = resolve;
+  });
   let remainingProcessorFailures = input.failProcessorStarts ?? 0;
   let remainingRecoveryFailures = input.failRecoveryResumes ?? 0;
   let releaseInventory: (() => void) | undefined;
   let markInventoryCaptured: (() => void) | undefined;
   let holdNextInventory = input.holdFirstInventory ?? false;
+  let resolverDependencies: Parameters<CreativeStudioRuntimeFactories['createProviderResolver']>[0] | undefined;
   const inventoryCaptured = new Promise<void>((resolve) => {
     markInventoryCaptured = resolve;
   });
   const calls: string[] = [];
+  const failDispose = (boundary: string): void => {
+    if (input.disposeFailures?.includes(boundary) === true) throw new Error(`dispose-${boundary}-failed`);
+  };
+  const holdActivation = async (boundary: NonNullable<typeof input.holdActivationAt>): Promise<void> => {
+    if (input.holdActivationAt !== boundary) return;
+    markActivationHeld?.();
+    await new Promise<void>((resolve) => (releaseActivation = resolve));
+  };
   const inspectProjectsV2 = vi.fn(async () => {
     const snapshot = structuredClone(currentInventory);
     if (holdNextInventory) {
@@ -90,9 +112,11 @@ const createHarness = (
   });
   const proposalDisposer = vi.fn(async () => {
     calls.push('dispose-proposal-watch');
+    failDispose('proposal');
   });
   const referenceDisposer = vi.fn(async () => {
     calls.push('dispose-reference-watch');
+    failDispose('reference');
   });
   const store = {
     inspectProjectsV2,
@@ -101,19 +125,23 @@ const createHarness = (
         ? { status: 'supported' as const, project: structuredClone(input.realService.project) }
         : { status: 'not_found' as const, projectId }
     ),
-    listConnections: vi.fn(async () => []),
+    listConnections: vi.fn(async () => [{ id: 'fake_connection' }, { id: 'persisted_connection' }]),
     reapAbandonedProposalsV2: vi.fn(async () => {
       calls.push('reap-proposals');
+      await holdActivation('reap-proposals');
     }),
     reapAbandonedReferenceRequestsV2: vi.fn(async () => {
       calls.push('reap-references');
+      await holdActivation('reap-references');
     }),
     watchProposalsV2: vi.fn(async () => {
       calls.push('watch-proposals');
+      await holdActivation('watch-proposals');
       return proposalDisposer;
     }),
     watchReferenceRequestsV2: vi.fn(async () => {
       calls.push('watch-references');
+      await holdActivation('watch-references');
       return referenceDisposer;
     }),
   } as unknown as CreativeStudioStore;
@@ -149,6 +177,7 @@ const createHarness = (
     }),
     dispose: vi.fn(async () => {
       calls.push('dispose-jobs');
+      failDispose('jobs');
     }),
   } as unknown as StudioJobManagerV2;
   const service = {
@@ -170,6 +199,7 @@ const createHarness = (
   const processor = {
     start: vi.fn(async () => {
       calls.push('start-director');
+      await holdActivation('processor');
       if (remainingProcessorFailures > 0) {
         remainingProcessorFailures -= 1;
         throw new Error('processor-start-failed');
@@ -178,6 +208,7 @@ const createHarness = (
     trigger: vi.fn(),
     stop: vi.fn(async () => {
       calls.push('stop-director');
+      failDispose('processor');
     }),
   } as StudioDirectorCommandProcessorV2;
   const protocolInstallation = { dispose: vi.fn(async () => {}) } satisfies CreativeStudioProtocolInstallation;
@@ -206,8 +237,9 @@ const createHarness = (
       factoryCalls.adapters += 1;
       return adapters;
     },
-    createProviderResolver: () => {
+    createProviderResolver: (dependencies) => {
       factoryCalls.providerResolver += 1;
+      resolverDependencies = dependencies;
       return providerResolver;
     },
     createJobManager: () => {
@@ -218,12 +250,13 @@ const createHarness = (
     createE2EFakeBundle: () => {
       factoryCalls.fakeBundle += 1;
       return {
-        provider: provider(),
-        connections: [],
+        provider: { ...provider(), name: 'Fake provider' },
+        connections: [{ id: 'fake_connection' }],
         adapters: new Map(),
         catalogProfile: 'lifecycle',
         dispose: vi.fn(async () => {
           calls.push('dispose-fake');
+          failDispose('fake');
         }),
       };
     },
@@ -251,18 +284,20 @@ const createHarness = (
     environment: input.environment ?? {},
     isPackaged: false,
     factories,
-    listProviders: async () => [provider()],
+    listProviders: async () => [provider(), { ...provider(), id: 'provider_2', name: 'Second provider' }],
     onProjectUpdated: vi.fn(),
     onProposalUpdated: vi.fn(),
     onReferenceUpdated: vi.fn(),
     protocol: {
       install: vi.fn(async () => {
         calls.push('install-protocol');
+        await holdActivation('protocol');
         return protocolInstallation;
       }),
       uninstall: vi.fn(async (installation) => {
         calls.push('uninstall-protocol');
         await installation?.dispose();
+        failDispose('protocol');
       }),
     },
   });
@@ -280,10 +315,13 @@ const createHarness = (
     inspectProjectsV2,
     proposalDisposer,
     referenceDisposer,
+    getResolverDependencies: () => resolverDependencies,
     inventoryCaptured,
     cleanupStarted,
+    activationHeld,
     releaseInventory: () => releaseInventory?.(),
     releaseCleanup: () => releaseCleanup?.(),
+    releaseActivation: () => releaseActivation?.(),
     setInventory: (next: StudioProjectInventoryV2) => {
       currentInventory = structuredClone(next);
     },
@@ -654,6 +692,26 @@ describe('Creative Studio schema-2 runtime activation', () => {
     expect(harness.runtime.activationState).toBe('disposed');
   });
 
+  it.each([
+    'reap-proposals',
+    'reap-references',
+    'watch-proposals',
+    'watch-references',
+    'processor',
+    'protocol',
+  ] as const)('rolls back safely when shutdown lands at the %s activation boundary', async (holdActivationAt) => {
+    const harness = createHarness({ initialInventory: inventory(['project_v2']), holdActivationAt });
+    const start = harness.runtime.start();
+    await harness.activationHeld;
+
+    const dispose = harness.runtime.dispose();
+    harness.releaseActivation();
+    await Promise.all([start, dispose]);
+
+    expect(harness.runtime.activationState).toBe('disposed');
+    expect(harness.jobManager.dispose).toHaveBeenCalledOnce();
+  });
+
   it('does not activate when a project creation rejects before its durable commit', async () => {
     const harness = createHarness({
       service: {
@@ -717,6 +775,60 @@ describe('Creative Studio runtime support boundaries', () => {
     expect(harness.factoryCalls.fakeBundle).toBe(1);
   });
 
+  it('replaces colliding fake providers and connections only inside the explicit E2E resolver graph', async () => {
+    const harness = createHarness({
+      initialInventory: inventory(['project_v2']),
+      environment: { AIONUI_E2E_TEST: '1', AIONUI_E2E_STUDIO_FAKE: '1' },
+    });
+
+    await harness.runtime.start();
+    const resolverDependencies = harness.getResolverDependencies();
+    if (resolverDependencies === undefined) throw new Error('Expected an active resolver graph');
+
+    await expect(resolverDependencies.listProviders()).resolves.toMatchObject([
+      { id: 'provider_2', name: 'Second provider' },
+      { id: 'provider_1', name: 'Fake provider' },
+    ]);
+    await expect(resolverDependencies.listConnections()).resolves.toEqual([
+      { id: 'persisted_connection' },
+      { id: 'fake_connection' },
+    ]);
+    await harness.runtime.dispose();
+  });
+
+  it('keeps start, inventory, and backend-ready hooks inert after disposal', async () => {
+    const harness = createHarness({ initialInventory: inventory(['project_v2']) });
+    await harness.runtime.start();
+    await harness.runtime.dispose();
+    const inspections = harness.inspectProjectsV2.mock.calls.length;
+
+    await Promise.all([harness.runtime.start(), harness.runtime.refreshInventory(), harness.runtime.onBackendReady()]);
+
+    expect(harness.runtime.activationState).toBe('disposed');
+    expect(harness.inspectProjectsV2).toHaveBeenCalledTimes(inspections);
+  });
+
+  it('attempts every installed cleanup boundary before reporting aggregate disposal failures', async () => {
+    const harness = createHarness({
+      initialInventory: inventory(['project_v2']),
+      environment: { AIONUI_E2E_TEST: '1', AIONUI_E2E_STUDIO_FAKE: '1' },
+      disposeFailures: ['protocol', 'processor', 'reference', 'proposal', 'jobs', 'fake'],
+    });
+    await harness.runtime.start();
+
+    await expect(harness.runtime.dispose()).rejects.toBeInstanceOf(AggregateError);
+
+    expect(harness.calls.slice(-6)).toEqual([
+      'uninstall-protocol',
+      'stop-director',
+      'dispose-reference-watch',
+      'dispose-proposal-watch',
+      'dispose-jobs',
+      'dispose-fake',
+    ]);
+    expect(harness.runtime.activationState).toBe('disposed');
+  });
+
   it('logs only a stable error name when backend-ready recovery rejects', async () => {
     const logError = vi.fn();
     resumeCreativeStudioAfterBackendReady(
@@ -732,5 +844,18 @@ describe('Creative Studio runtime support boundaries', () => {
 
     expect(logError).toHaveBeenCalledWith('[CreativeStudio] Failed to resume pending jobs:', 'Error');
     expect(JSON.stringify(logError.mock.calls)).not.toContain('provider secret');
+  });
+
+  it('redacts non-Error backend-ready rejections as UnknownError', async () => {
+    const logError = vi.fn();
+    resumeCreativeStudioAfterBackendReady(
+      {
+        onBackendReady: async () => Promise.reject('provider secret must not cross'),
+      },
+      logError
+    );
+    await vi.waitFor(() =>
+      expect(logError).toHaveBeenCalledWith('[CreativeStudio] Failed to resume pending jobs:', 'UnknownError')
+    );
   });
 });

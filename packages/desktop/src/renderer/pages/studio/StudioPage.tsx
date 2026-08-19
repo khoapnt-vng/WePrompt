@@ -29,11 +29,11 @@ import {
   useSpendGate,
   useWorkspaceDrafts,
   WorkspaceControls,
+  WorkspaceShell,
   type WorkspaceMutationCallbacks,
 } from './components/Workspace';
 import { useStudioProject } from './hooks/useStudioProject';
 import {
-  STUDIO_VIEWS,
   parseStudioView,
   rememberStudioView,
   resolveStudioEntryView,
@@ -115,28 +115,6 @@ const parseRuleDrafts = (value: unknown): StudioBriefRuleDraft[] | null => {
   } catch {
     return null;
   }
-};
-
-const ViewNavigation: React.FC<{ projectId: string; activeView: StudioView }> = ({ projectId, activeView }) => {
-  const { t } = useTranslation();
-  return (
-    <nav
-      aria-label={t('conversation.creativeStudio.workspace.views.title')}
-      className={styles.viewNavigation}
-      data-studio-view-navigation
-    >
-      {STUDIO_VIEWS.map((view) => (
-        <Link
-          key={view}
-          aria-current={view === activeView ? 'page' : undefined}
-          className={view === activeView ? styles.viewLinkActive : styles.viewLink}
-          to={studioViewPath(projectId, view)}
-        >
-          {t(`conversation.creativeStudio.workspace.views.${view}`)}
-        </Link>
-      ))}
-    </nav>
-  );
 };
 
 const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | null }> = ({ projectId, routeView }) => {
@@ -580,47 +558,41 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
     );
   }
 
+  const hasReviewedDirectorOutput =
+    proposals.some((proposal) => proposal.status === 'pending') ||
+    referenceRequests.length > 0 ||
+    referenceGenerationHandoffs.length > 0 ||
+    proposalErrorMessageKey !== null ||
+    referenceErrorMessageKey !== null;
+
   return (
-    <div className={styles.projectShell}>
+    <>
       <StudioCloseResponse dirtyDraftCount={drafts.dirtyCount} saveAll={saveAllDrafts} />
-      <header className={styles.workspaceHeader} data-studio-project-header>
-        <Link to='/studio'>{t('conversation.creativeStudio.workspace.project.backToLibrary')}</Link>
-        <h1>{project.name}</h1>
-        <p>
-          {t('conversation.creativeStudio.workspace.project.structure', {
-            beats: project.beatOrder.length,
-            shots: Object.keys(project.shots).length,
-          })}
-        </p>
-      </header>
-      <ViewNavigation projectId={project.id} activeView={activeView} />
-      {actionErrorMessageKey !== null ? (
-        <div role='alert' className={styles.projectAlert}>
-          {t(actionErrorMessageKey)}
-        </div>
-      ) : null}
-      <DirectorProposals
-        proposals={proposals}
-        referenceRequests={referenceRequests}
-        referenceGenerationHandoffs={referenceGenerationHandoffs}
-        pendingActionId={pendingActionId}
-        proposalErrorMessageKey={proposalErrorMessageKey}
-        referenceErrorMessageKey={referenceErrorMessageKey}
-        onAcceptProposal={acceptProposal}
-        onRejectProposal={rejectProposal}
-        onGenerateReferences={(requestId) => decideReferences(requestId, { kind: 'generation_gate' })}
-        onRejectReferences={(requestId) => decideReferences(requestId, { kind: 'rejected' })}
-        onReviewHandoff={reviewHandoff}
-        onDismissHandoff={dismissHandoff}
-        gateLocked={spendGateLocked}
-        reviewBlockedMessageKey={handoffReviewBlockedMessageKey}
-      />
-      <main
-        aria-labelledby={`studio-${activeView}-heading`}
-        className={styles.viewSurface}
-        data-studio-view={activeView}
+      <WorkspaceShell
+        project={project}
+        activeView={activeView}
+        notice={actionErrorMessageKey === null ? undefined : t(actionErrorMessageKey)}
+        reviewedOutput={
+          hasReviewedDirectorOutput ? (
+            <DirectorProposals
+              proposals={proposals}
+              referenceRequests={referenceRequests}
+              referenceGenerationHandoffs={referenceGenerationHandoffs}
+              pendingActionId={pendingActionId}
+              proposalErrorMessageKey={proposalErrorMessageKey}
+              referenceErrorMessageKey={referenceErrorMessageKey}
+              onAcceptProposal={acceptProposal}
+              onRejectProposal={rejectProposal}
+              onGenerateReferences={(requestId) => decideReferences(requestId, { kind: 'generation_gate' })}
+              onRejectReferences={(requestId) => decideReferences(requestId, { kind: 'rejected' })}
+              onReviewHandoff={reviewHandoff}
+              onDismissHandoff={dismissHandoff}
+              gateLocked={spendGateLocked}
+              reviewBlockedMessageKey={handoffReviewBlockedMessageKey}
+            />
+          ) : undefined
+        }
       >
-        <h2 id={`studio-${activeView}-heading`}>{t(`conversation.creativeStudio.workspace.views.${activeView}`)}</h2>
         {projection === null ? null : (
           <WorkspaceControls
             activeView={activeView}
@@ -635,7 +607,7 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
             openSpendGate={spendGate.open}
           />
         )}
-      </main>
+      </WorkspaceShell>
       <SpendGateModal
         state={spendGate.state}
         close={spendGate.close}
@@ -643,7 +615,7 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
         selectOption={spendGate.selectOption}
         confirm={spendGate.confirm}
       />
-    </div>
+    </>
   );
 };
 

@@ -5,6 +5,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import { Readable } from 'node:stream';
 import type { IProvider, ISessionMcpServer } from '@/common/config/storage';
 import {
@@ -13,6 +14,7 @@ import {
   STUDIO_MIN_SHOT_SECONDS,
   type CreateStudioProjectInputV2,
   type StudioAssetV2,
+  type StudioBindDirectorConversationRequestV2,
   type StudioBriefReferenceRole,
   type StudioCancellationPolicy,
   type StudioCascadeBarrierActionRequestV2,
@@ -26,6 +28,7 @@ import {
   type StudioDetachBriefReferenceRequest,
   type StudioDismissReferenceGenerationHandoffRequestV2,
   type StudioDismissReferenceGenerationHandoffResultV2,
+  type StudioDirectorSessionAuthorityV2,
   type StudioJobRequest,
   type StudioJobV2,
   type StudioMediaChoiceRef,
@@ -49,6 +52,7 @@ import {
   type StudioRendererChainStatusV2,
   type StudioRendererJobV2,
   type StudioRendererPreparedSubmissionOptionsV2,
+  type StudioRendererProjectCommitResultV2,
   type StudioRendererProjectV2,
   type StudioRendererReferenceGenerationHandoffV2,
   type StudioRendererWorkspaceStatusV2,
@@ -197,6 +201,10 @@ export type CreativeStudioServiceV2 = {
   getProject(projectId: string): Promise<StudioProjectLoadResultV2>;
   deleteProject(input: { projectId: string; expectedRevision: number }): Promise<boolean>;
   getBriefSessionServer(input: { projectId: string }): Promise<ISessionMcpServer>;
+  getDirectorSessionAuthority(input: { projectId: string }): Promise<StudioDirectorSessionAuthorityV2>;
+  bindDirectorConversation(
+    input: StudioBindDirectorConversationRequestV2
+  ): Promise<StudioRendererProjectCommitResultV2>;
   applyMutations(
     input: StudioMutationBatchV2,
     context: StudioMutationReducerContextV2
@@ -860,6 +868,13 @@ const toRendererProject = (project: StudioProjectV2): StudioRendererProjectV2 =>
   };
 };
 
+const toRendererProjectCommitResult = (project: StudioProjectV2): StudioRendererProjectCommitResultV2 => ({
+  projectId: project.id,
+  projectRevision: project.revision,
+  createdBeatIds: [],
+  createdShotIds: [],
+});
+
 /** Projects one validated generation-gate decision without its durable authorization correlation. */
 export const projectStudioReferenceGenerationHandoffV2 = (
   decision: StudioReferenceRequestDecisionV2,
@@ -1426,6 +1441,58 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
           },
         },
       };
+    },
+
+    async getDirectorSessionAuthority(input): Promise<StudioDirectorSessionAuthorityV2> {
+      if (!isRecord(input) || !hasExactKeys(input, ['projectId'])) {
+        throw invalid('Invalid Studio project request');
+      }
+      assertSafeId(input.projectId, 'project id');
+      await loadSupported(input.projectId);
+      if (deps.getStudioServerScriptPath === undefined) {
+        throw new CreativeStudioStoreError('storage_error', 'Creative Studio MCP script path is unavailable');
+      }
+      const projectDir = await deps.store.getVerifiedProjectDirectoryV2(input.projectId);
+      if (projectDir === null) {
+        throw new CreativeStudioStoreError('storage_error', 'Studio project directory is unavailable');
+      }
+      const scriptPath = deps.getStudioServerScriptPath();
+      return {
+        serverId: `studio-brief-${input.projectId}`,
+        serverName: BUILTIN_STUDIO_NAME,
+        scriptPath,
+        projectDir,
+        pendingDir: path.join(projectDir, 'proposals', 'pending'),
+        referencePendingDir: path.join(projectDir, 'reference-requests', 'pending'),
+      };
+    },
+
+    async bindDirectorConversation(input): Promise<StudioRendererProjectCommitResultV2> {
+      if (!isRecord(input) || !hasExactKeys(input, ['projectId', 'expectedRevision', 'conversationId'])) {
+        throw invalid('Invalid Studio Director conversation binding request');
+      }
+      assertSafeId(input.projectId, 'project id');
+      assertRevision(input.expectedRevision);
+      assertSafeId(input.conversationId, 'conversation id');
+
+      const project = await loadSupported(input.projectId);
+      if (project.briefConversationId === input.conversationId) return toRendererProjectCommitResult(project);
+
+      try {
+        const committed = await deps.store.updateProjectV2(
+          input.projectId,
+          (current) => ({ ...current, briefConversationId: input.conversationId }),
+          input.expectedRevision,
+          `bind_director_conversation:${input.conversationId}`
+        );
+        deps.onProjectUpdated(committed.id);
+        return toRendererProjectCommitResult(committed);
+      } catch (error) {
+        if (!(error instanceof CreativeStudioStoreError) || error.code !== 'stale_project') throw error;
+        const latest = await loadSupported(input.projectId);
+        if (latest.briefConversationId !== input.conversationId) throw error;
+        return toRendererProjectCommitResult(latest);
+      }
     },
 
     async applyMutations(input, context): Promise<StudioMutationBatchResultV2> {

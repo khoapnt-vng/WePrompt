@@ -344,6 +344,12 @@ export function initCreativeStudioBridge(dependencies: CreativeStudioBridgeDepen
   ipcBridge.creativeStudio.getBriefSessionServer.provider((input) =>
     runCommand(() => dependencies.getService().getBriefSessionServer(input))
   );
+  ipcBridge.creativeStudio.getDirectorSessionAuthority.provider((input) =>
+    runCommand(() => dependencies.getService().getDirectorSessionAuthority(input))
+  );
+  ipcBridge.creativeStudio.bindDirectorConversation.provider((input) =>
+    runCommand(() => dependencies.getService().bindDirectorConversation(input))
+  );
   ipcBridge.creativeStudio.listProposals.provider((input) =>
     runCommand(() => dependencies.getService().listProposals(input))
   );

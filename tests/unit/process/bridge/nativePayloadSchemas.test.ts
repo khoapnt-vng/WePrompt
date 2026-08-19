@@ -230,6 +230,12 @@ const VALID_PAYLOADS = {
   },
   'creative-studio.get-project': { projectId: 'project_1' },
   'creative-studio.get-brief-session-server': { projectId: 'project_1' },
+  'creative-studio.get-director-session-authority': { projectId: 'project_1' },
+  'creative-studio.bind-director-conversation': {
+    projectId: 'project_1',
+    expectedRevision: 1,
+    conversationId: 'conversation_1',
+  },
   'creative-studio.list-proposals': { projectId: 'project_1' },
   'creative-studio.accept-proposal': { projectId: 'project_1', proposalId: 'proposal_1' },
   'creative-studio.reject-proposal': { projectId: 'project_1', proposalId: 'proposal_1' },
@@ -995,6 +1001,16 @@ const INVALID_PAYLOADS = [
   ],
   ['creative-studio.get-project', 'project id traversal', { projectId: '../project_1' }],
   [
+    'creative-studio.bind-director-conversation',
+    'null Director conversation id',
+    { projectId: 'project_1', expectedRevision: 1, conversationId: null },
+  ],
+  [
+    'creative-studio.bind-director-conversation',
+    'legacy Director binding field',
+    { projectId: 'project_1', expectedRevision: 1, briefConversationId: 'conversation_1' },
+  ],
+  [
     'creative-studio.prepare-submission',
     'empty base choices',
     { ...VALID_PAYLOADS['creative-studio.prepare-submission'], baseChoices: [] },
@@ -1364,6 +1380,50 @@ describe('native bridge payload schemas', () => {
     expect(schema?.safeParse({ ...payload, jobId: 'internal_job' }).success).toBe(false);
   });
 
+  it.each([
+    ['empty project id', { projectId: '', expectedRevision: 1, conversationId: 'conversation_1' }],
+    ['traversing project id', { projectId: '../project_1', expectedRevision: 1, conversationId: 'conversation_1' }],
+    ['overlong project id', { projectId: 'p'.repeat(257), expectedRevision: 1, conversationId: 'conversation_1' }],
+    ['empty conversation id', { projectId: 'project_1', expectedRevision: 1, conversationId: '' }],
+    [
+      'traversing conversation id',
+      { projectId: 'project_1', expectedRevision: 1, conversationId: '../conversation_1' },
+    ],
+    ['overlong conversation id', { projectId: 'project_1', expectedRevision: 1, conversationId: 'c'.repeat(257) }],
+    ['zero revision', { projectId: 'project_1', expectedRevision: 0, conversationId: 'conversation_1' }],
+    ['negative revision', { projectId: 'project_1', expectedRevision: -1, conversationId: 'conversation_1' }],
+    ['fractional revision', { projectId: 'project_1', expectedRevision: 1.5, conversationId: 'conversation_1' }],
+    [
+      'unsafe integer revision',
+      { projectId: 'project_1', expectedRevision: Number.MAX_SAFE_INTEGER + 1, conversationId: 'conversation_1' },
+    ],
+    ['infinite revision', { projectId: 'project_1', expectedRevision: Infinity, conversationId: 'conversation_1' }],
+    ['string revision', { projectId: 'project_1', expectedRevision: '1', conversationId: 'conversation_1' }],
+  ])('rejects a Director conversation bind with %s', (_label, payload) => {
+    expect(() => parseNativeBridgePayload('creative-studio.bind-director-conversation', payload)).toThrow(
+      INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+    );
+  });
+
+  it('does not let symbol or magic-key baggage cross the Director conversation payload boundary', () => {
+    const symbolKeyed = {
+      ...VALID_PAYLOADS['creative-studio.bind-director-conversation'],
+      [Symbol('private-authority')]: 'secret',
+    };
+    const parsed = parseNativeBridgePayload('creative-studio.bind-director-conversation', symbolKeyed);
+
+    expect(parsed).toEqual(VALID_PAYLOADS['creative-studio.bind-director-conversation']);
+    expect(Reflect.ownKeys(parsed as object)).toEqual(['projectId', 'expectedRevision', 'conversationId']);
+
+    const magicKeyed = JSON.parse(
+      '{"projectId":"project_1","expectedRevision":1,"conversationId":"conversation_1","__proto__":{"paidAuthority":true}}'
+    ) as unknown;
+    expect(() => parseNativeBridgePayload('creative-studio.bind-director-conversation', magicKeyed)).toThrow(
+      INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+    );
+    expect(({} as { paidAuthority?: boolean }).paidAuthority).toBeUndefined();
+  });
+
   it('accepts only bounded dense prepare choices with exact renderer-owned keys', () => {
     const makeChoice = (index: number, purpose: 'seed_still' | 'video_take') => ({
       shotId: `shot_${index}`,
@@ -1506,8 +1566,10 @@ describe('native bridge payload schemas', () => {
     expect(providerKeys).toEqual(NATIVE_BRIDGE_PROVIDER_KEYS);
   });
 
-  it('registers the exact Task 8 paid boundary while keeping legacy providers absent', () => {
+  it('registers the exact Task 9 native boundary while keeping legacy providers absent', () => {
     const required = [
+      'creative-studio.get-director-session-authority',
+      'creative-studio.bind-director-conversation',
       'creative-studio.apply-authoring-batch',
       'creative-studio.undo-last',
       'creative-studio.get-workspace-status',
@@ -1557,7 +1619,9 @@ describe('native bridge payload schemas', () => {
     ] as const;
     const providerKeys = collectBridgeBuildProviderKeys(readFileSync(IPC_BRIDGE_PATH, 'utf8'));
     const schemaKeys = Object.keys(nativeBridgePayloadSchemas);
-    const task8ProviderKeys = [
+    const exactOnceProviderKeys = [
+      'creative-studio.get-director-session-authority',
+      'creative-studio.bind-director-conversation',
       'creative-studio.prepare-submission',
       'creative-studio.confirm-submission',
       'creative-studio.dismiss-reference-generation-handoff',
@@ -1573,10 +1637,10 @@ describe('native bridge payload schemas', () => {
       expect(providerKeys).not.toContain(providerKey);
       expect(schemaKeys).not.toContain(providerKey);
     }
-    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(41);
-    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(41);
-    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(41);
-    for (const providerKey of task8ProviderKeys) {
+    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(43);
+    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(43);
+    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(43);
+    for (const providerKey of exactOnceProviderKeys) {
       expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key === providerKey)).toHaveLength(1);
       expect(providerKeys.filter((key) => key === providerKey)).toHaveLength(1);
       expect(schemaKeys.filter((key) => key === providerKey)).toHaveLength(1);

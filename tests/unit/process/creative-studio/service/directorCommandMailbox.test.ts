@@ -17,13 +17,18 @@ import type {
 } from '@/common/types/project/creativeStudioTypes';
 import {
   STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS,
+  STUDIO_DIRECTOR_COMMAND_MAX_SWEEP_RECORDS,
   STUDIO_DIRECTOR_COMMAND_WAIT_MS,
 } from '@/common/types/project/creativeStudioTypes';
 import {
   createStudioDirectorCommandMailboxV2,
   type StudioDirectorCommandMailboxV2,
 } from '@process/services/creative-studio/service/directorCommandMailbox';
-import { createCreativeStudioStore, type CreativeStudioStore } from '@process/services/creative-studio/store';
+import {
+  createCreativeStudioStore,
+  CreativeStudioStoreError,
+  type CreativeStudioStore,
+} from '@process/services/creative-studio/store';
 
 const NOW = '2026-08-16T12:00:00.000Z';
 const WAIT_MS = STUDIO_DIRECTOR_COMMAND_WAIT_MS;
@@ -245,6 +250,340 @@ describe('Studio Director schema-2 command mailbox', () => {
     await expect(nodeFs.readdir(directories.pending)).resolves.toEqual([]);
     await expect(nodeFs.readdir(directories.slots)).resolves.toEqual([]);
     await expect(nodeFs.readdir(directories.receipts)).resolves.toEqual(['command_v2.json']);
+  });
+
+  it('rejects malformed identities, traversal bounds, cursors, and maintenance timestamps', async () => {
+    const invalidPayload = { code: 'invalid_payload' };
+    await expect(mailbox.ensure('../project')).rejects.toMatchObject(invalidPayload);
+    await expect(mailbox.readPending(projectId, '../command')).rejects.toMatchObject(invalidPayload);
+    await expect(mailbox.readReceipt('../project', 'command')).rejects.toMatchObject(invalidPayload);
+    await expect(mailbox.finish(projectId, 'bad/command')).rejects.toMatchObject(invalidPayload);
+
+    await expect(mailbox.snapshotPendingPage(null, 0)).rejects.toMatchObject(invalidPayload);
+    await expect(mailbox.listPendingPage(null, 1.5)).rejects.toMatchObject(invalidPayload);
+    await expect(
+      mailbox.releaseOrphanedSlotsPage(null, NOW, STUDIO_DIRECTOR_COMMAND_MAX_SWEEP_RECORDS + 1)
+    ).rejects.toMatchObject(invalidPayload);
+    await expect(mailbox.pruneReceiptsPage(null, NOW, -1)).rejects.toMatchObject(invalidPayload);
+    await expect(mailbox.releaseOrphanedSlotsPage(null, 'not-a-timestamp', 1)).rejects.toMatchObject(invalidPayload);
+    await expect(mailbox.releaseOrphanedSlotsPage(null, '2026-13-16T12:00:00.000Z', 1)).rejects.toMatchObject(
+      invalidPayload
+    );
+    await expect(mailbox.releaseOrphanedSlotsPage(null, '2026-08-16t12:00:00.000z', 1)).rejects.toMatchObject(
+      invalidPayload
+    );
+    await expect(mailbox.pruneReceiptsPage(null, '2026-08-16T12:00:00Z', 1)).rejects.toMatchObject(invalidPayload);
+
+    const firstPage = await mailbox.snapshotPendingPage(null, 1);
+    expect(firstPage.nextCursor).not.toBeNull();
+    await expect(mailbox.snapshotPendingPage('v2.not-the-live-cursor', 1)).rejects.toMatchObject(invalidPayload);
+
+    const restartedPage = await mailbox.snapshotPendingPage(null, 1);
+    expect(restartedPage.nextCursor).not.toBeNull();
+    await expect(mailbox.snapshotPendingPage('x'.repeat(257), 1)).rejects.toMatchObject(invalidPayload);
+
+    const nonStringPage = await mailbox.snapshotPendingPage(null, 1);
+    expect(nonStringPage.nextCursor).not.toBeNull();
+    await expect(mailbox.snapshotPendingPage(7 as never, 1)).rejects.toMatchObject(invalidPayload);
+  });
+
+  it('pages live pending entries while filtering unrelated and unsafe directory records', async () => {
+    await mailbox.ensure(projectId);
+    const directories = commandDirectories(rootDir, projectId);
+    await nodeFs.writeFile(
+      path.join(directories.pending, 'command_visible.json'),
+      JSON.stringify(makeCommandV2(projectId, 'command_visible'))
+    );
+    await nodeFs.writeFile(path.join(directories.pending, 'notes.txt'), 'not a command');
+    await nodeFs.writeFile(path.join(directories.pending, 'unsafe!.json'), '{}');
+    await nodeFs.writeFile(path.join(rootDir, 'top-level-file'), 'not a project');
+    await nodeFs.mkdir(path.join(rootDir, 'unsafe!'));
+
+    const collect = async (
+      page: (
+        cursor: string | null
+      ) => Promise<{ items: Array<{ projectId: string; commandId: string }>; nextCursor: string | null }>
+    ) => {
+      const items: Array<{ projectId: string; commandId: string }> = [];
+      let cursor: string | null = null;
+      do {
+        // Limit one deliberately proves that traversal resumes its owned directory handles.
+        // eslint-disable-next-line no-await-in-loop
+        const result = await page(cursor);
+        items.push(...result.items);
+        cursor = result.nextCursor;
+      } while (cursor !== null);
+      return items;
+    };
+
+    await expect(collect((cursor) => mailbox.snapshotPendingPage(cursor, 1))).resolves.toEqual([
+      { projectId, commandId: 'command_visible' },
+    ]);
+    await expect(collect((cursor) => mailbox.listPendingPage(cursor, 1))).resolves.toEqual([
+      { projectId, commandId: 'command_visible' },
+    ]);
+
+    let maintenanceCursor: string | null = null;
+    let processedProjects = 0;
+    do {
+      // The one-entry budget proves that project maintenance resumes the same bounded traversal.
+      // eslint-disable-next-line no-await-in-loop
+      const page = await mailbox.releaseOrphanedSlotsPage(maintenanceCursor, NOW, 1);
+      processedProjects += page.processed;
+      maintenanceCursor = page.nextCursor;
+    } while (maintenanceCursor !== null);
+    expect(processedProjects).toBe(2);
+  });
+
+  it('keeps absent sidecars as no-ops and fences traversal after idempotent disposal', async () => {
+    await expect(mailbox.readPending(projectId, 'missing_command')).resolves.toBeNull();
+    await expect(mailbox.readReceipt(projectId, 'missing_command')).resolves.toBeNull();
+    await expect(mailbox.finish(projectId, 'missing_command')).resolves.toBeUndefined();
+
+    await mailbox.ensure(projectId);
+    await expect(mailbox.readPending(projectId, 'still_missing')).resolves.toBeNull();
+    await expect(mailbox.readReceipt(projectId, 'still_missing')).resolves.toBeNull();
+
+    await mailbox.dispose();
+    await mailbox.dispose();
+    await expect(mailbox.snapshotPendingPage(null, 1)).rejects.toMatchObject({ code: 'invalid_payload' });
+  });
+
+  it('rejects a receipt whose embedded project authority differs from its call boundary', async () => {
+    await expect(mailbox.readPending(projectId, 'missing_receipt_command')).resolves.toBeNull();
+    await expect(
+      mailbox.writeReceipt(projectId, makeReceiptV2('different_project', 'mismatched_receipt'))
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+    expect(existsSync(path.join(rootDir, projectId, 'commands'))).toBe(false);
+  });
+
+  it('classifies malformed receipt bytes without treating them as absent or authoritative', async () => {
+    await mailbox.ensure(projectId);
+    const directories = commandDirectories(rootDir, projectId);
+    await nodeFs.writeFile(path.join(directories.receipts, 'malformed_receipt.json'), '{not-json');
+
+    await expect(mailbox.readReceipt(projectId, 'malformed_receipt')).resolves.toEqual({ status: 'invalid' });
+    await expect(nodeFs.readFile(path.join(directories.receipts, 'malformed_receipt.json'), 'utf8')).resolves.toBe(
+      '{not-json'
+    );
+  });
+
+  it('keeps a published receipt immutable across an exact duplicate write', async () => {
+    const receipt = makeReceiptV2(projectId, 'immutable_receipt');
+    await mailbox.writeReceipt(projectId, receipt);
+    const receiptFile = path.join(commandDirectories(rootDir, projectId).receipts, 'immutable_receipt.json');
+    const before = await nodeFs.readFile(receiptFile, 'utf8');
+
+    await expect(mailbox.writeReceipt(projectId, receipt)).rejects.toMatchObject({ code: 'invalid_payload' });
+    await expect(nodeFs.readFile(receiptFile, 'utf8')).resolves.toBe(before);
+  });
+
+  it('rejects unsafe and unsupported receipt identities before publishing a mailbox family', async () => {
+    await expect(mailbox.readPending(projectId, 'missing_receipt_command')).resolves.toBeNull();
+    await expect(mailbox.writeReceipt(projectId, makeReceiptV2(projectId, '../unsafe'))).rejects.toMatchObject({
+      code: 'invalid_payload',
+    });
+    await expect(
+      mailbox.writeReceipt(projectId, { ...makeReceiptV2(projectId, 'future_receipt'), schemaVersion: 3 } as never)
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+    expect(existsSync(path.join(rootDir, projectId, 'commands'))).toBe(false);
+  });
+
+  it('forwards only supported pending-tree changes and closes its watcher idempotently', async () => {
+    let callbacks:
+      | {
+          onChange(relativeFile: string): void;
+          onError(error: Error): void;
+        }
+      | undefined;
+    const close = vi.fn();
+    const logError = vi.fn();
+    const watchingMailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store: {
+        getVerifiedProjectDirectoryV2: async (candidateProjectId) => {
+          if (candidateProjectId === projectId) return path.join(rootDir, projectId);
+          if (candidateProjectId === 'unsupported_project') {
+            throw new CreativeStudioStoreError('unsupported_prototype_schema', 'unsupported');
+          }
+          if (candidateProjectId === 'unsafe_storage') throw new Error('unsafe storage');
+          return null;
+        },
+      },
+      logError,
+      watchCommandTree: (input) => {
+        callbacks = input;
+        return { close };
+      },
+    });
+    const trigger = vi.fn();
+
+    try {
+      const stop = await watchingMailbox.watch(trigger);
+      if (callbacks === undefined) throw new Error('watch callbacks were not installed');
+
+      callbacks.onChange(path.join(projectId, 'commands', 'pending'));
+      callbacks.onChange(path.join(projectId, 'commands', 'pending', 'command_watch.json'));
+      callbacks.onChange(path.join(projectId, 'commands', 'pending', 'unsafe!.json'));
+      callbacks.onChange(path.join(projectId, 'commands', 'receipts', 'ignored.json'));
+      callbacks.onChange(path.join('unsafe!', 'commands', 'pending', 'ignored.json'));
+      callbacks.onChange(path.join('missing_project', 'commands', 'pending', 'missing.json'));
+      callbacks.onChange(path.join('unsupported_project', 'commands', 'pending', 'legacy.json'));
+      callbacks.onChange(path.join('unsafe_storage', 'commands', 'pending', 'unsafe.json'));
+      callbacks.onError(new Error('watcher failure'));
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(trigger).toHaveBeenCalledTimes(2);
+      expect(trigger).toHaveBeenNthCalledWith(1, projectId, undefined);
+      expect(trigger).toHaveBeenNthCalledWith(2, projectId, 'command_watch');
+      expect(logError).toHaveBeenCalledTimes(2);
+
+      stop();
+      stop();
+      callbacks.onChange(path.join(projectId, 'commands', 'pending', 'after_close.json'));
+      callbacks.onError(new Error('ignored after close'));
+      await Promise.resolve();
+
+      expect(close).toHaveBeenCalledOnce();
+      expect(trigger).toHaveBeenCalledTimes(2);
+      expect(logError).toHaveBeenCalledTimes(2);
+    } finally {
+      await watchingMailbox.dispose();
+    }
+  });
+
+  it.each([
+    {
+      label: 'expired orphan',
+      sweepAt: '2026-08-16T12:00:20.000Z',
+      receipt: false,
+      retained: false,
+    },
+    {
+      label: 'unexpired orphan without a terminal receipt',
+      sweepAt: NOW,
+      receipt: false,
+      retained: true,
+    },
+    {
+      label: 'unexpired terminal orphan with an exact receipt',
+      sweepAt: NOW,
+      receipt: true,
+      retained: false,
+    },
+  ])('$label follows the bounded orphan-slot retention policy', async ({ label, sweepAt, receipt, retained }) => {
+    await mailbox.ensure(projectId);
+    const directories = commandDirectories(rootDir, projectId);
+    const commandId = `command_${label.replaceAll(/[^a-z]+/g, '_')}`;
+    const slotFile = path.join(directories.slots, '0.slot');
+    const leaseFile = path.join(directories.slots, '0.slot.lease');
+    await nodeFs.writeFile(slotFile, JSON.stringify(makeSlotV2(commandId)));
+    if (receipt) await mailbox.writeReceipt(projectId, makeReceiptV2(projectId, commandId));
+
+    await expect(mailbox.releaseOrphanedSlotsPage(null, sweepAt, 64)).resolves.toMatchObject({ nextCursor: null });
+
+    expect(existsSync(slotFile)).toBe(retained);
+    expect(existsSync(leaseFile)).toBe(false);
+    if (receipt) {
+      await expect(nodeFs.readFile(path.join(directories.receipts, `${commandId}.json`), 'utf8')).resolves.toBe(
+        JSON.stringify(makeReceiptV2(projectId, commandId))
+      );
+    }
+  });
+
+  it('keeps maintenance non-allocating for a supported project without a command family', async () => {
+    const commands = path.join(rootDir, projectId, 'commands');
+
+    await expect(mailbox.releaseOrphanedSlotsPage(null, NOW, 64)).resolves.toMatchObject({ nextCursor: null });
+
+    expect(existsSync(commands)).toBe(false);
+  });
+
+  it.each([
+    {
+      label: 'live pending command',
+      kind: 'valid' as const,
+      pending: true,
+      lease: 'none' as const,
+      sweepAt: NOW,
+      retained: true,
+      leaseRetained: false,
+    },
+    {
+      label: 'active writer lease',
+      kind: 'valid' as const,
+      pending: false,
+      lease: 'active' as const,
+      sweepAt: NOW,
+      retained: true,
+      leaseRetained: true,
+    },
+    {
+      label: 'expired writer lease',
+      kind: 'valid' as const,
+      pending: false,
+      lease: 'expired' as const,
+      sweepAt: '2026-08-16T12:00:20.000Z',
+      retained: false,
+      leaseRetained: false,
+    },
+    {
+      label: 'recoverable malformed orphan',
+      kind: 'invalid' as const,
+      pending: false,
+      lease: 'none' as const,
+      sweepAt: NOW,
+      retained: false,
+      leaseRetained: false,
+    },
+    {
+      label: 'recoverable malformed occupied slot',
+      kind: 'invalid' as const,
+      pending: true,
+      lease: 'none' as const,
+      sweepAt: NOW,
+      retained: true,
+      leaseRetained: false,
+    },
+  ])('retains or releases a $label from exact durable evidence', async (scenario) => {
+    await mailbox.ensure(projectId);
+    const directories = commandDirectories(rootDir, projectId);
+    const commandId = `command_${scenario.label.replaceAll(/[^a-z]+/g, '_')}`;
+    const slot = makeSlotV2(commandId);
+    const slotFile = path.join(directories.slots, '0.slot');
+    const leaseFile = `${slotFile}.lease`;
+    await nodeFs.writeFile(
+      slotFile,
+      scenario.kind === 'valid' ? JSON.stringify(slot) : JSON.stringify({ ...slot, deadlineAt: 'not-a-timestamp' })
+    );
+    if (scenario.pending) {
+      await nodeFs.writeFile(
+        path.join(directories.pending, `${commandId}.json`),
+        JSON.stringify(makeCommandV2(projectId, commandId))
+      );
+    }
+    if (scenario.lease !== 'none') {
+      await nodeFs.writeFile(
+        leaseFile,
+        JSON.stringify(
+          makeLeaseV2({
+            leaseId: `lease_${scenario.lease}`,
+            owner: 'writer',
+            slot,
+            ...(scenario.lease === 'expired' ? { acquiredAt: '2026-08-16T11:59:30.000Z' } : {}),
+          })
+        )
+      );
+    }
+
+    await expect(mailbox.releaseOrphanedSlotsPage(null, scenario.sweepAt, 64)).resolves.toMatchObject({
+      nextCursor: null,
+    });
+
+    expect(existsSync(slotFile)).toBe(scenario.retained);
+    expect(existsSync(leaseFile)).toBe(scenario.leaseRetained);
+    expect(existsSync(path.join(directories.pending, `${commandId}.json`))).toBe(scenario.pending);
   });
 
   it.each([

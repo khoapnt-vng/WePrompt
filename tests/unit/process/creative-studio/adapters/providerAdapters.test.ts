@@ -24,6 +24,8 @@ import {
 import {
   createStudioE2EFakeBundle,
   createStudioE2EFakeRemoteState,
+  STUDIO_E2E_FAKE_FIXTURE_DIRECTORY,
+  STUDIO_E2E_FAKE_PROVIDER_CALL_COUNTS_FILE,
 } from '@process/services/creative-studio/adapters/e2eFakeAdapter';
 
 const REFERENCE_BUDGET_BYTES = 30 * 1024 * 1024;
@@ -503,6 +505,124 @@ describe('Creative Studio provider adapters', () => {
       )
     ).rejects.toMatchObject({ code: 'unsupported' });
     expect(remoteState.taskCounter).toBe(1);
+  });
+
+  it('publishes bounded atomic provider-call counts only for the explicit E2E journey', async () => {
+    const lifecycleRoot = await fs.mkdtemp(path.join(tmpdir(), 'weprompt-fake-adapter-lifecycle-'));
+    const explicitRoot = await fs.mkdtemp(path.join(tmpdir(), 'weprompt-fake-adapter-explicit-'));
+    temporaryDirectories.push(lifecycleRoot, explicitRoot);
+    const lifecycle = createStudioE2EFakeBundle({ rootDir: lifecycleRoot });
+    const explicit = createStudioE2EFakeBundle({ rootDir: explicitRoot, catalogProfile: 'explicit-selection' });
+    const lifecycleAdapter = lifecycle.adapters.get('weprompt-image-v1');
+    const explicitAdapter = explicit.adapters.get('weprompt-image-v1');
+    const lifecycleProvider = { ...lifecycle.provider, use_model: 'weprompt-e2e-image' } as TProviderWithModel;
+    const explicitProvider = { ...explicit.provider, use_model: 'weprompt-e2e-image' } as TProviderWithModel;
+    if (!lifecycleAdapter || !explicitAdapter) throw new Error('expected fake image adapters');
+
+    const lifecycleSubmission = await lifecycleAdapter.submit(
+      { ...request, mediaKind: 'image', durationSeconds: 4 },
+      lifecycleProvider,
+      new AbortController().signal
+    );
+    expect(lifecycleSubmission).toMatchObject({ kind: 'remote' });
+    await expect(
+      fs.readFile(
+        path.join(lifecycleRoot, STUDIO_E2E_FAKE_FIXTURE_DIRECTORY, STUDIO_E2E_FAKE_PROVIDER_CALL_COUNTS_FILE)
+      )
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+
+    await explicitAdapter.validateConnection(
+      { model: explicitProvider.use_model },
+      explicitProvider,
+      new AbortController().signal
+    );
+    const submission = await explicitAdapter.submit(
+      { ...request, mediaKind: 'image', durationSeconds: 4 },
+      explicitProvider,
+      new AbortController().signal
+    );
+    if (submission.kind !== 'remote') throw new Error('expected a remote fake provider task');
+    await explicitAdapter.poll(submission.providerJobId, explicitProvider, new AbortController().signal);
+    await explicitAdapter.poll(submission.providerJobId, explicitProvider, new AbortController().signal);
+    await explicitAdapter.poll(submission.providerJobId, explicitProvider, new AbortController().signal);
+    await expect(
+      explicitAdapter.cancel(submission.providerJobId, explicitProvider, new AbortController().signal)
+    ).resolves.toEqual({ kind: 'refused', error: { code: 'cancellation_refused' } });
+
+    const fixtureDirectory = path.join(explicitRoot, STUDIO_E2E_FAKE_FIXTURE_DIRECTORY);
+    const countBytes = await fs.readFile(path.join(fixtureDirectory, STUDIO_E2E_FAKE_PROVIDER_CALL_COUNTS_FILE));
+    expect(countBytes.byteLength).toBeLessThanOrEqual(512);
+    expect(JSON.parse(countBytes.toString('utf8'))).toEqual({
+      validateConnection: 1,
+      submit: 1,
+      poll: 3,
+      cancel: 1,
+    });
+    expect((await fs.readdir(fixtureDirectory)).filter((entry) => entry.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it('counts rejected fake-provider calls and repeated output reads without leaking temporary files', async () => {
+    const rootDir = await fs.mkdtemp(path.join(tmpdir(), 'weprompt-fake-adapter-call-boundaries-'));
+    temporaryDirectories.push(rootDir);
+    const bundle = createStudioE2EFakeBundle({ rootDir, catalogProfile: 'explicit-selection' });
+    const adapter = bundle.adapters.get('weprompt-image-v1');
+    const fakeProvider = { ...bundle.provider, use_model: 'weprompt-e2e-image' } as TProviderWithModel;
+    const wrongProvider = { ...fakeProvider, id: 'wrong_provider' };
+    const signal = new AbortController().signal;
+    if (!adapter) throw new Error('expected fake image adapter');
+
+    expect(adapter.validateRequest({ ...request, mediaKind: 'image', durationSeconds: 0 }, fakeProvider)).toEqual({
+      ok: false,
+      issues: [{ code: 'invalid_duration' }],
+    });
+    const cancelledSubmission = await adapter.submit(
+      { ...request, mediaKind: 'image', durationSeconds: 4 },
+      fakeProvider,
+      signal
+    );
+    if (cancelledSubmission.kind !== 'remote') throw new Error('expected a remote fake provider task');
+    await expect(adapter.poll(cancelledSubmission.providerJobId, wrongProvider, signal)).rejects.toMatchObject({
+      code: 'unsupported',
+    });
+    await expect(adapter.poll('unknown_task', fakeProvider, signal)).rejects.toMatchObject({ code: 'unknown' });
+    await expect(adapter.cancel(cancelledSubmission.providerJobId, wrongProvider, signal)).rejects.toMatchObject({
+      code: 'unsupported',
+    });
+    await expect(adapter.cancel('unknown_task', fakeProvider, signal)).rejects.toMatchObject({ code: 'unknown' });
+    await expect(adapter.cancel(cancelledSubmission.providerJobId, fakeProvider, signal)).resolves.toEqual({
+      kind: 'cancelled',
+    });
+    await expect(adapter.poll(cancelledSubmission.providerJobId, fakeProvider, signal)).resolves.toEqual({
+      status: 'cancelled',
+      error: { code: 'unknown' },
+    });
+    await expect(adapter.cancel(cancelledSubmission.providerJobId, fakeProvider, signal)).resolves.toEqual({
+      kind: 'cancelled',
+    });
+
+    for (let taskIndex = 0; taskIndex < 2; taskIndex += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      const submission = await adapter.submit(
+        { ...request, mediaKind: 'image', durationSeconds: 4 },
+        fakeProvider,
+        signal
+      );
+      if (submission.kind !== 'remote') throw new Error('expected a remote fake provider task');
+      // eslint-disable-next-line no-await-in-loop
+      await adapter.poll(submission.providerJobId, fakeProvider, signal);
+      // eslint-disable-next-line no-await-in-loop
+      await adapter.poll(submission.providerJobId, fakeProvider, signal);
+      // eslint-disable-next-line no-await-in-loop
+      await adapter.poll(submission.providerJobId, fakeProvider, signal);
+    }
+
+    const fixtureDirectory = path.join(rootDir, STUDIO_E2E_FAKE_FIXTURE_DIRECTORY);
+    expect(
+      JSON.parse(await fs.readFile(path.join(fixtureDirectory, STUDIO_E2E_FAKE_PROVIDER_CALL_COUNTS_FILE), 'utf8'))
+    ).toEqual({ validateConnection: 0, submit: 3, poll: 9, cancel: 4 });
+    expect((await fs.readdir(fixtureDirectory)).filter((entry) => entry.endsWith('.tmp'))).toEqual([]);
+    await bundle.dispose();
+    await expect(fs.lstat(fixtureDirectory)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it.each(videoConditioningVariants)(

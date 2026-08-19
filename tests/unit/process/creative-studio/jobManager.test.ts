@@ -127,6 +127,7 @@ type V2HarnessOptions = {
   jobIds?: string[];
   idempotencyKeys?: string[];
   sleep?: (delayMs: number, signal: AbortSignal) => Promise<void>;
+  jitterMs?: StudioJobManagerDeps['jitterMs'] | null;
   now?: () => string;
   nowEpochMs?: () => number;
   cancellationPolicy?: StudioCancellationPolicy;
@@ -365,7 +366,7 @@ const createV2Harness = async (
     adapters: new Map([[adapter.id, adapter]]),
     listProviders,
     sleep: options.sleep,
-    jitterMs: (baseMs) => baseMs,
+    ...(options.jitterMs === null ? {} : { jitterMs: options.jitterMs ?? ((baseMs) => baseMs) }),
     now: options.now,
     nowEpochMs: options.nowEpochMs,
     ...(options.outputDownloader === undefined ? {} : { outputDownloader: options.outputDownloader }),
@@ -435,15 +436,61 @@ const createRemoteOutputDownloader = (bytes: Buffer, contentType: string) =>
   );
 
 afterEach(async () => {
-  await Promise.all(
-    v2Harnesses.splice(0).map(async (harness) => {
-      await harness.manager.dispose();
-      await rm(harness.rootDir, { recursive: true, force: true });
-    })
-  );
+  try {
+    await Promise.all(
+      v2Harnesses.splice(0).map(async (harness) => {
+        await harness.manager.dispose();
+        await rm(harness.rootDir, { recursive: true, force: true });
+      })
+    );
+  } finally {
+    vi.restoreAllMocks();
+  }
 });
 
 describe('StudioJobManager V2 durable authorized lifecycle', () => {
+  it('derives cancellation authority from durable status, provider identity, policy, and spend', async () => {
+    const harness = await createV2Harness(controllableAdapter('weprompt-image-v1'));
+    const job = harness.jobs[0]!;
+    const candidate = (overrides: Partial<StudioJobV2>): StudioJobV2 => ({ ...structuredClone(job), ...overrides });
+
+    expect(canCancelJobV2(candidate({ status: 'queued_local', cancellationPolicy: undefined as never }))).toBe(true);
+    expect(canCancelJobV2(candidate({ status: 'submitting' }))).toBe(true);
+    expect(canCancelJobV2(candidate({ status: 'queued_remote', cancellationPolicy: 'none' }))).toBe(false);
+    expect(
+      canCancelJobV2(candidate({ status: 'queued_remote', cancellationPolicy: 'queued_only', providerJobId: null }))
+    ).toBe(false);
+    expect(
+      canCancelJobV2(
+        candidate({ status: 'queued_remote', cancellationPolicy: 'queued_only', providerJobId: 'remote_1' })
+      )
+    ).toBe(true);
+    expect(
+      canCancelJobV2(
+        candidate({ status: 'running', cancellationPolicy: 'queued_and_running', providerJobId: 'remote_1' })
+      )
+    ).toBe(true);
+    expect(
+      canCancelJobV2(
+        candidate({ status: 'needs_attention', cancellationPolicy: 'queued_only', providerJobId: 'remote_1' })
+      )
+    ).toBe(false);
+    expect(canCancelJobV2(candidate({ status: 'succeeded' }))).toBe(false);
+    expect(
+      canCancelJobV2(
+        candidate({
+          status: 'queued_local',
+          spendReceipt: createStudioSpendReceiptV2({
+            authorization: harness.authorization,
+            itemId: harness.item.id,
+            jobId: job.id,
+            generationIndex: job.generationIndex,
+          }),
+        })
+      )
+    ).toBe(false);
+  });
+
   it('rejects malformed dispatch descriptors before project, resolver, or provider work', async () => {
     const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
     const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit }));
@@ -451,9 +498,24 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     const listGenerationRoutes = vi.spyOn(harness.providerResolver, 'listGenerationRoutes');
     const sparse = ['job_v2_1'];
     sparse.length = 2;
+    const deceptivelyDense = new Proxy(sparse, {
+      ownKeys: () => ['0', '1', 'length'],
+    });
+    const inheritedProjectId = new Proxy(
+      { jobIds: ['job_v2_1'] },
+      {
+        ownKeys: () => ['projectId', 'jobIds'],
+        get(target, property, receiver) {
+          return property === 'projectId' ? harness.project.id : Reflect.get(target, property, receiver);
+        },
+      }
+    );
     const cases: unknown[] = [
       null,
       'not-an-object',
+      {},
+      { projectId: harness.project.id },
+      { jobIds: ['job_v2_1'] },
       { projectId: '../unsafe', jobIds: ['job_v2_1'] },
       { projectId: harness.project.id, jobIds: [] },
       { projectId: harness.project.id, jobIds: ['job_v2_1', 'job_v2_1'] },
@@ -464,7 +526,20 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
         jobIds: Array.from({ length: 193 }, (_, index) => `job_${index}`),
       },
       { projectId: harness.project.id, jobIds: sparse },
+      { projectId: harness.project.id, jobIds: deceptivelyDense },
+      { projectId: harness.project.id, unexpected: true },
+      inheritedProjectId,
       { projectId: harness.project.id, jobIds: ['job_v2_1'], unexpected: true },
+      { projectId: harness.project.id, jobIds: Object.assign(['job_v2_1'], { unexpected: true }) },
+      { projectId: harness.project.id, jobIds: ['job_v2_1'], [Symbol('unexpected')]: true },
+      new Proxy(
+        {},
+        {
+          ownKeys() {
+            throw new Error('hostile envelope');
+          },
+        }
+      ),
     ];
 
     for (const input of cases) {
@@ -567,6 +642,37 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     ).rejects.toMatchObject({ code: 'invalid_request' });
 
     expect(listGenerationRoutes).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it('rejects absent projects, jobs, authorizations, and quoted items at their durable boundaries', async () => {
+    const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
+    const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit }));
+
+    await expect(
+      harness.manager.dispatchAuthorizedJobsV2({ projectId: 'missing_project', jobIds: ['job_v2_1'] })
+    ).rejects.toMatchObject({ code: 'invalid_request' });
+    await expect(
+      harness.manager.cancelJobV2({
+        projectId: harness.project.id,
+        jobId: 'missing_job',
+        expectedRevision: harness.project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'not_found' });
+
+    const getProjectV2 = vi.spyOn(harness.store, 'getProjectV2');
+    for (const removeAuthority of [true, false]) {
+      const project = structuredClone(harness.project);
+      if (removeAuthority) project.spendAuthorizations = [];
+      else {
+        project.spendAuthorizations[0]!.baseItems = [];
+        project.spendAuthorizations[0]!.cascadeItems = [];
+      }
+      getProjectV2.mockResolvedValueOnce({ status: 'supported', project });
+      // eslint-disable-next-line no-await-in-loop -- Each corrupted authority shape is independently refused.
+      await expect(dispatchV2(harness)).rejects.toMatchObject({ code: 'invalid_request' });
+    }
+
     expect(submit).not.toHaveBeenCalled();
   });
 
@@ -835,8 +941,11 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
       if (pollCount === 2) return { status: 'running' as const, progress: 50 };
       return { status: 'succeeded' as const, outputs: [] };
     });
+    const sleep = vi.fn(async () => undefined);
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
     const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit, poll }), {
-      sleep: async () => undefined,
+      sleep,
+      jitterMs: null,
       nowEpochMs: () => Date.parse('2026-08-17T12:00:03.000Z'),
     });
 
@@ -849,6 +958,7 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     });
     expect(submit).toHaveBeenCalledOnce();
     expect(poll).toHaveBeenCalledTimes(3);
+    expect(sleep.mock.calls.map(([delayMs]) => delayMs)).toEqual([2_000, 4_000, 8_000]);
   });
 
   it('persists every V2 remote terminal class and bounds unavailable or rejected polling', async () => {
@@ -917,6 +1027,24 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     await expectV2Job(rejected, { status: 'needs_attention', error: { code: 'unknown' } });
     const loaded = await rejected.store.getProjectV2(rejected.project.id);
     expect(JSON.stringify(loaded)).not.toContain('private provider body');
+
+    const rejectedAuth = await createV2Harness(
+      controllableAdapter('weprompt-image-v1', {
+        submit: async () => ({ kind: 'remote', providerJobId: 'remote_rejected_auth' }),
+        poll: async () => {
+          throw Object.assign(new Error('private credential detail'), { code: 'auth' });
+        },
+      }),
+      {
+        sleep: async () => undefined,
+        nowEpochMs: () => Date.parse('2026-08-17T12:00:03.000Z'),
+      }
+    );
+    await dispatchV2(rejectedAuth);
+    await expectV2Job(rejectedAuth, { status: 'needs_attention', error: { code: 'auth' } });
+    expect(JSON.stringify(await rejectedAuth.store.getProjectV2(rejectedAuth.project.id))).not.toContain(
+      'private credential detail'
+    );
   });
 
   it('ignores queued progress regression after a V2 remote job has entered running', async () => {
@@ -1148,6 +1276,38 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
       const loaded = await harness.store.getProjectV2(harness.project.id);
       expect(JSON.stringify(loaded)).not.toContain('secret provider body');
     }
+  });
+
+  it('normalizes malformed, future, and primitive submit failures without leaking provider detail', async () => {
+    const cases = [
+      ['invalid_request', 'failed', 'invalid_request'],
+      ['invalid_response', 'needs_attention', 'submission_unknown'],
+      ['future_provider_code', 'needs_attention', 'submission_unknown'],
+    ] as const;
+    for (const [providerCode, status, persistedCode] of cases) {
+      const submit = vi.fn(async () => {
+        throw Object.assign(new Error('secret provider body'), { code: providerCode });
+      });
+      // eslint-disable-next-line no-await-in-loop -- Every provider classification owns one durable transition.
+      const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit }));
+      // eslint-disable-next-line no-await-in-loop -- Dispatch persists before provider work.
+      await dispatchV2(harness);
+      // eslint-disable-next-line no-await-in-loop -- Observe the exact terminal classification.
+      await expectV2Job(harness, { status, error: { code: persistedCode }, spendReceipt: null });
+      const loaded = await harness.store.getProjectV2(harness.project.id);
+      expect(JSON.stringify(loaded)).not.toContain('secret provider body');
+    }
+
+    const primitiveSubmit = vi.fn(async () => {
+      throw 'provider failed';
+    });
+    const primitive = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit: primitiveSubmit }));
+    await dispatchV2(primitive);
+    await expectV2Job(primitive, {
+      status: 'needs_attention',
+      error: { code: 'submission_unknown' },
+      spendReceipt: null,
+    });
   });
 
   it('fails closed to needs-attention when the current route no longer byte-matches durable authority', async () => {

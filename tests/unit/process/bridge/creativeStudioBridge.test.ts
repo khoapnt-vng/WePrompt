@@ -25,6 +25,8 @@ const providerNames = [
   'createProject',
   'getProject',
   'getBriefSessionServer',
+  'getDirectorSessionAuthority',
+  'bindDirectorConversation',
   'listProposals',
   'acceptProposal',
   'rejectProposal',
@@ -72,6 +74,8 @@ const mocks = vi.hoisted(() => ({
       'createProject',
       'getProject',
       'getBriefSessionServer',
+      'getDirectorSessionAuthority',
+      'bindDirectorConversation',
       'listProposals',
       'acceptProposal',
       'rejectProposal',
@@ -215,6 +219,20 @@ const createService = () =>
       name: 'aionui-creative-studio',
       transport: { type: 'stdio' as const, command: 'node', args: ['/tmp/builtin-mcp-studio.js'] },
     })),
+    getDirectorSessionAuthority: vi.fn(async () => ({
+      serverId: 'studio-brief-project_1',
+      serverName: 'aionui-creative-studio',
+      scriptPath: '/repo/out/main/builtin-mcp-studio.js',
+      projectDir: '/studio/project_1',
+      pendingDir: '/studio/project_1/proposals/pending',
+      referencePendingDir: '/studio/project_1/reference-requests/pending',
+    })),
+    bindDirectorConversation: vi.fn(async () => ({
+      projectId: 'project_1',
+      projectRevision: 8,
+      createdBeatIds: [],
+      createdShotIds: [],
+    })),
     listProposals: vi.fn(async () => []),
     acceptProposal: vi.fn(),
     rejectProposal: vi.fn(),
@@ -244,6 +262,8 @@ const createService = () =>
     listRoutes: vi.fn(),
   }) as unknown as CreativeStudioServiceV2 & {
     getBriefSessionServer: ReturnType<typeof vi.fn>;
+    getDirectorSessionAuthority: ReturnType<typeof vi.fn>;
+    bindDirectorConversation: ReturnType<typeof vi.fn>;
     listConnectionCandidates: ReturnType<typeof vi.fn>;
     listConnections: ReturnType<typeof vi.fn>;
     validateConnection: ReturnType<typeof vi.fn>;
@@ -331,6 +351,60 @@ describe('initCreativeStudioBridge', () => {
       { mutationId: 'native_mutation_1', capturedAt: '2026-08-19T02:03:04.000Z' }
     );
     expect((await registeredHandler('applyAuthoringBatch')(input as never)) as object).not.toHaveProperty('project');
+  });
+
+  it('binds the Director conversation through the narrow service seam and returns only an empty-created commit DTO', async () => {
+    initCreativeStudioBridge(dependencies);
+    const input = { projectId: 'project_1', expectedRevision: 7, conversationId: 'conversation_1' };
+
+    const result = await registeredHandler('bindDirectorConversation')(input as never);
+
+    expect(result).toEqual({
+      ok: true,
+      data: {
+        projectId: 'project_1',
+        projectRevision: 8,
+        createdBeatIds: [],
+        createdShotIds: [],
+      },
+    });
+    expect(service.bindDirectorConversation).toHaveBeenCalledExactlyOnceWith(input);
+    expect(Object.keys((result as { data: object }).data)).toEqual([
+      'projectId',
+      'projectRevision',
+      'createdBeatIds',
+      'createdShotIds',
+    ]);
+    expect((result as { data: object }).data).not.toHaveProperty('project');
+    expect((result as { data: object }).data).not.toHaveProperty('conversationId');
+  });
+
+  it('returns only the immutable Director transport authority through the narrow restart seam', async () => {
+    initCreativeStudioBridge(dependencies);
+    const input = { projectId: 'project_1' };
+
+    const result = await registeredHandler('getDirectorSessionAuthority')(input as never);
+
+    expect(result).toEqual({
+      ok: true,
+      data: {
+        serverId: 'studio-brief-project_1',
+        serverName: 'aionui-creative-studio',
+        scriptPath: '/repo/out/main/builtin-mcp-studio.js',
+        projectDir: '/studio/project_1',
+        pendingDir: '/studio/project_1/proposals/pending',
+        referencePendingDir: '/studio/project_1/reference-requests/pending',
+      },
+    });
+    expect(service.getDirectorSessionAuthority).toHaveBeenCalledExactlyOnceWith(input);
+    expect(Object.keys((result as { data: object }).data)).toEqual([
+      'serverId',
+      'serverName',
+      'scriptPath',
+      'projectDir',
+      'pendingDir',
+      'referencePendingDir',
+    ]);
   });
 
   it.each([
@@ -633,6 +707,40 @@ describe('initCreativeStudioBridge', () => {
     ).resolves.toEqual({
       ok: false,
       error: { code: 'media_in_use', messageKey: 'conversation.creativeStudio.errors.mediaInUse' },
+    });
+  });
+
+  it.each([
+    ['not_found', 'not_found', 'projectNotFound'],
+    ['stale_project', 'stale_project', 'staleProject'],
+    ['invalid_media', 'invalid_payload', 'invalidPayload'],
+    ['storage_error', 'storage_error', 'storage'],
+    ['job_inactive', 'storage_error', 'storage'],
+  ] as const)('maps the %s media boundary to the stable %s command code', async (mediaCode, code, messageKeyLeaf) => {
+    vi.mocked(service.detachBriefReference).mockRejectedValueOnce(new CreativeStudioMediaError(mediaCode));
+    initCreativeStudioBridge(dependencies);
+
+    await expect(
+      registeredHandler('detachBriefReference')({
+        projectId: 'project_1',
+        expectedRevision: 7,
+        assetId: 'asset_1',
+      } as never)
+    ).resolves.toEqual({
+      ok: false,
+      error: { code, messageKey: `conversation.creativeStudio.errors.${messageKeyLeaf}` },
+    });
+  });
+
+  it('redacts the legacy unsupported-schema store code as a storage boundary failure', async () => {
+    vi.mocked(service.getProject).mockRejectedValueOnce(
+      new CreativeStudioStoreError('unsupported_prototype_schema', 'legacy schema path')
+    );
+    initCreativeStudioBridge(dependencies);
+
+    await expect(registeredHandler('getProject')({ projectId: 'legacy_project' } as never)).resolves.toEqual({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'conversation.creativeStudio.errors.storage' },
     });
   });
 

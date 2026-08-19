@@ -45,8 +45,12 @@ import {
   WorkspaceControls,
   formatMinorUnits,
   handoffGateDraft,
+  initialSpendGateState,
+  majorUnitsToMinorUnits,
   projectWorkspace,
+  selectedSpendGateQuote,
   selectionGateDraft,
+  spendGateReducer,
   useWorkspaceDrafts,
   useSpendGate,
   type WorkspaceMutationCallbacks,
@@ -275,7 +279,7 @@ const readyProjection = (project: StudioRendererProjectV2) =>
   projectWorkspace(project, readyWorkspaceStatus(project.revision), readyChainStatus(project.revision));
 
 const ControlsHarness: React.FC<{
-  routes: StudioRouteCatalogV2;
+  routes: StudioRouteCatalogV2 | null;
   open: ReturnType<typeof vi.fn>;
   seeded?: boolean;
   spendPolicy?: boolean;
@@ -284,6 +288,7 @@ const ControlsHarness: React.FC<{
   pending?: boolean;
   gateLocked?: boolean;
   mutations?: WorkspaceMutationCallbacks;
+  configureProject?: (project: StudioRendererProjectV2) => void;
 }> = ({
   routes,
   open,
@@ -294,6 +299,7 @@ const ControlsHarness: React.FC<{
   pending = false,
   gateLocked = false,
   mutations = workspaceCallbacks(),
+  configureProject,
 }) => {
   const project = makeProject();
   if (seeded) {
@@ -302,6 +308,7 @@ const ControlsHarness: React.FC<{
     project.shots.shot_1!.assetIds.push(seed.id);
   }
   if (spendPolicy) project.spendPolicy = { currency: 'USD', maxPerBatchMinorUnits: 1_000 };
+  configureProject?.(project);
   const projection = projectWorkspace(
     project,
     status === undefined ? readyWorkspaceStatus(project.revision) : status,
@@ -355,6 +362,19 @@ const lockedWorkspaceStatus = (): StudioRendererWorkspaceStatusV2 => ({
     },
   ],
 });
+
+const seedControlDrafts = (entries: Record<string, { baseValue: unknown; value: unknown }>): void => {
+  window.sessionStorage.setItem(
+    'aionui:creative-studio:v2:workspace-drafts:project_1',
+    JSON.stringify({
+      version: 2,
+      projectId: 'project_1',
+      sourceRevision: 3,
+      entries,
+      selection: { selectedShotIds: [], anchorShotId: null },
+    })
+  );
+};
 
 describe('spend gate draft graph', () => {
   it('fails closed until both revision-matched status snapshots are ready', () => {
@@ -452,6 +472,32 @@ describe('spend gate draft graph', () => {
 
   it('formats maximum safe integer cents without rounding them through a float', () => {
     expect(formatMinorUnits(Number.MAX_SAFE_INTEGER, 'USD', 'en-US')).toBe('$90,071,992,547,409.91');
+  });
+
+  it('rejects invalid currency drafts and unsafe formatter inputs at their numeric boundaries', () => {
+    expect(majorUnitsToMinorUnits('12')).toBe(1_200);
+    expect(majorUnitsToMinorUnits('12.3')).toBe(1_230);
+    expect(majorUnitsToMinorUnits('-1')).toBeNull();
+    expect(majorUnitsToMinorUnits('900719925474099.99')).toBeNull();
+    expect(formatMinorUnits(-1, 'USD', 'en-US')).toBe('');
+  });
+
+  it('refuses impossible gate transitions and classifies an unreviewed quote-in-use as an ordinary error', () => {
+    const closed = initialSpendGateState();
+    expect(spendGateReducer(closed, { type: 'prepare_started' })).toBe(closed);
+    expect(spendGateReducer(closed, { type: 'prepare_succeeded', options: options() })).toBe(closed);
+    expect(spendGateReducer(closed, { type: 'confirm_started' })).toBe(closed);
+    expect(spendGateReducer(closed, { type: 'confirmed' })).toBe(closed);
+    expect(spendGateReducer(closed, { type: 'select_option', option: 'withCascade' })).toBe(closed);
+
+    const opened = spendGateReducer(closed, { type: 'open', draft });
+    const baseOnly = { ...options(), withCascade: null };
+    const reviewed = spendGateReducer(opened, { type: 'prepare_succeeded', options: baseOnly });
+    expect(spendGateReducer(reviewed, { type: 'select_option', option: 'withCascade' })).toBe(reviewed);
+    expect(
+      selectedSpendGateQuote(spendGateReducer(closed, { type: 'confirm_failed', code: 'quote_in_use' }))
+    ).toBeNull();
+    expect(spendGateReducer(closed, { type: 'confirm_failed', code: 'unexpected_failure' }).phase).toBe('error');
   });
 });
 
@@ -661,6 +707,181 @@ describe('WorkspaceControls', () => {
       expect(screen.getByLabelText('conversation.creativeStudio.workspace.controls.spendCap')).toHaveValue('10.00')
     );
     expect(mutations.applyAuthoring).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed rule documents and commits the exact supported predicate surface', async () => {
+    const mutations = workspaceCallbacks();
+    render(<ControlsHarness routes={routeCatalog('ready', 'ready')} open={vi.fn()} mutations={mutations} />);
+    const rules = screen.getByLabelText('conversation.creativeStudio.workspace.controls.rules');
+    const save = screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.saveRules' });
+
+    for (const value of [
+      'not-json',
+      '{}',
+      '[null]',
+      '[{}]',
+      '[{"id":1,"text":"Keep","predicate":null}]',
+      '[{"id":"rule_1","text":"Keep","predicate":{"kind":"unsupported","terms":[]}}]',
+    ]) {
+      fireEvent.change(rules, { target: { value } });
+      fireEvent.click(save);
+    }
+
+    expect(await screen.findByText('conversation.creativeStudio.workspace.controls.invalidRules')).toBeVisible();
+    expect(mutations.setRules).not.toHaveBeenCalled();
+
+    fireEvent.change(rules, {
+      target: {
+        value: JSON.stringify([
+          { id: 'rule_1', text: 'Keep it bright', predicate: null },
+          {
+            id: 'rule_2',
+            text: 'Avoid marks',
+            predicate: { kind: 'forbidden_terms', terms: ['logo', 'watermark'] },
+          },
+        ]),
+      },
+    });
+    fireEvent.click(save);
+
+    await waitFor(() =>
+      expect(mutations.setRules).toHaveBeenCalledWith([
+        { id: 'rule_1', text: 'Keep it bright', predicate: null },
+        {
+          id: 'rule_2',
+          text: 'Avoid marks',
+          predicate: { kind: 'forbidden_terms', terms: ['logo', 'watermark'] },
+        },
+      ])
+    );
+    expect(screen.queryByText('conversation.creativeStudio.workspace.controls.invalidRules')).toBeNull();
+  });
+
+  it('blocks malformed spend policy and saves the normalized Brief and policy together', async () => {
+    const mutations = workspaceCallbacks();
+    render(<ControlsHarness routes={routeCatalog('ready', 'ready')} open={vi.fn()} mutations={mutations} />);
+    const brief = screen.getByLabelText('conversation.creativeStudio.workspace.controls.brief');
+    const currency = screen.getByLabelText('conversation.creativeStudio.workspace.controls.spendCurrency');
+    const cap = screen.getByLabelText('conversation.creativeStudio.workspace.controls.spendCap');
+    const save = screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.saveBrief' });
+
+    fireEvent.change(currency, { target: { value: 'US' } });
+    fireEvent.change(cap, { target: { value: '12.34' } });
+    fireEvent.click(save);
+    expect(await screen.findByText('conversation.creativeStudio.workspace.controls.invalidSpendPolicy')).toBeVisible();
+    expect(mutations.applyAuthoring).not.toHaveBeenCalled();
+
+    fireEvent.change(brief, { target: { value: 'A more exact launch film.' } });
+    fireEvent.change(currency, { target: { value: 'eur' } });
+    fireEvent.click(save);
+
+    await waitFor(() =>
+      expect(mutations.applyAuthoring).toHaveBeenCalledWith([
+        { kind: 'set_brief', brief: 'A more exact launch film.' },
+        { kind: 'set_spend_policy', policy: { currency: 'EUR', maxPerBatchMinorUnits: 1_234 } },
+      ])
+    );
+    expect(screen.queryByText('conversation.creativeStudio.workspace.controls.invalidSpendPolicy')).toBeNull();
+  });
+
+  it('uses only valid persisted generation preferences when preparing the reviewed draft', () => {
+    seedControlDrafts({
+      'gate.choices': {
+        baseValue: '{}',
+        value: JSON.stringify({
+          bad: { generationCount: 2, referenceAssetId: null },
+          'shot_1:seed_still': { generationCount: 4, referenceAssetId: 'brief_ref' },
+          'shot_1:video_take': { generationCount: 0, referenceAssetId: null },
+          'shot_2:video_take': null,
+          'shot_3:video_take': { generationCount: 1, referenceAssetId: 42 },
+        }),
+      },
+    });
+    const open = vi.fn();
+    render(<ControlsHarness routes={routeCatalog('ready', 'ready')} open={open} />);
+    fireEvent.click(screen.getByLabelText('shot_1'));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.reviewRender' })
+    );
+
+    expect(open).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseChoices: [expect.objectContaining({ shotId: 'shot_1', generationCount: 4, referenceAssetId: 'brief_ref' })],
+        cascadeChoices: [
+          expect.objectContaining({ shotId: 'shot_1', generationCount: 1, referenceAssetId: null }),
+          expect.objectContaining({ shotId: 'shot_2', generationCount: 1, referenceAssetId: null }),
+        ],
+      })
+    );
+  });
+
+  it('renders and invokes every free recovery action projected by workspace status', () => {
+    const mutations = workspaceCallbacks();
+    const status: StudioRendererWorkspaceStatusV2 = {
+      ...readyWorkspaceStatus(),
+      undoTop: { entryId: 'undo_1', label: 'edit_shot', sourceRevision: 2 },
+      dirtyShots: [{ shotId: 'shot_1', causes: ['continuity_stale'] }],
+      cascadeProgress: [
+        {
+          dependentShotId: 'shot_2',
+          upstreamShotId: 'shot_1',
+          eligiblePrimaryAssetIds: ['asset_choice'],
+          canRetryConditioningFrame: true,
+          canCancelWaiting: true,
+          waitingReason: 'choose_take',
+        },
+      ],
+    };
+    const chain: StudioRendererChainStatusV2 = {
+      ...readyChainStatus(),
+      conditioningFailures: [{ dependentShotId: 'shot_3', reason: 'conditioning_failed', canRetry: true }],
+    };
+    render(
+      <ControlsHarness
+        routes={routeCatalog('ready', 'ready')}
+        open={vi.fn()}
+        status={status}
+        chain={chain}
+        mutations={mutations}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /conversation\.creativeStudio\.workspace\.controls\.undo/ }));
+    fireEvent.click(screen.getByRole('button', { name: /asset_choice/ }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.retryConditioning' })
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.cancelWaiting' })
+    );
+    fireEvent.click(screen.getByRole('button', { name: /retryConditioningFor/ }));
+
+    expect(mutations.undo).toHaveBeenCalledWith('undo_1');
+    expect(mutations.chooseCascadeAsset).toHaveBeenCalledWith(
+      expect.objectContaining({ dependentShotId: 'shot_2' }),
+      'asset_choice'
+    );
+    expect(mutations.retryConditioning).toHaveBeenCalledWith('shot_2');
+    expect(mutations.retryConditioning).toHaveBeenCalledWith('shot_3');
+    expect(mutations.cancelWaiting).toHaveBeenCalledWith('shot_2');
+  });
+
+  it('keeps an uncovered beat explicitly visible and requires a route catalog before review', () => {
+    render(
+      <ControlsHarness
+        routes={null}
+        open={vi.fn()}
+        configureProject={(candidate) => {
+          candidate.beats.beat_2!.shotOrder = [];
+        }}
+      />
+    );
+
+    expect(screen.getByText('conversation.creativeStudio.workspace.controls.noCoverage')).toBeVisible();
+    expect(screen.getByText('conversation.creativeStudio.workspace.controls.routeCatalogRequired')).toBeVisible();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.keepUncoveredFree' })
+    );
   });
 });
 

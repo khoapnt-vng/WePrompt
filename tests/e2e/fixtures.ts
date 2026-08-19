@@ -267,7 +267,7 @@ function cleanupE2EWorker(): Promise<void> {
       app = null;
       mainPage = null;
     }
-    fs.rmSync(e2eStateSandboxDir, { recursive: true, force: true });
+    fs.rmSync(e2eStateSandboxDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   })();
 
   return cleanupPromise;
@@ -365,7 +365,7 @@ function registerCleanup(): void {
   // Synchronous fallback for abrupt termination
   process.on('exit', () => {
     try {
-      fs.rmSync(e2eStateSandboxDir, { recursive: true, force: true });
+      fs.rmSync(e2eStateSandboxDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     } catch {
       // best-effort
     }

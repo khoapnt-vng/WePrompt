@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CreateStudioProjectInputV2 } from '@/common/types/project/creativeStudioTypes';
 import { createCreativeStudioStore, type StudioProjectCommitFacts } from '@process/services/creative-studio/store';
+import { createCreativeStudioServiceV2 } from '@process/services/creative-studio/service';
 
 const V1_PROJECT_ID = 'project_v1';
 const V2_PROJECT_ID = 'project_v2';
@@ -562,6 +563,57 @@ describe('Creative Studio schema-2 storage cutover', () => {
     await expect(nodeFs.access(path.join(fixture.rootDir, 'projects-v2.json'))).rejects.toMatchObject({
       code: 'ENOENT',
     });
+  });
+
+  it('rejects Director binding and authority reads for schema-1 without changing any byte or inode', async () => {
+    const fixture = await createCompleteV1Profile();
+    const before = await snapshotV1Profile(fixture.rootDir);
+    const observed = createObservedFileSystem(fixture.indexFile);
+    const watchProposalTree = vi.fn(() => ({ close: vi.fn() }));
+    const store = createCreativeStudioStore({
+      rootDir: fixture.rootDir,
+      fs: observed.fs,
+      watchProposalTree,
+    });
+    const onProjectUpdated = vi.fn();
+    const providerResolver = {
+      listConnectionCandidates: vi.fn(),
+      listGenerationRoutes: vi.fn(),
+    };
+    const jobManager = {
+      dispatchAuthorizedJobsV2: vi.fn(),
+      cancelJobV2: vi.fn(),
+      retryJobV2: vi.fn(),
+      retryDownloadV2: vi.fn(),
+    };
+    const getStudioServerScriptPath = vi.fn(() => '/bundled/builtin-mcp-studio.js');
+    const service = createCreativeStudioServiceV2({
+      store,
+      providerResolver: providerResolver as never,
+      jobManager: jobManager as never,
+      getStudioServerScriptPath,
+      onProjectUpdated,
+    });
+
+    await expect(
+      service.bindDirectorConversation({
+        projectId: V1_PROJECT_ID,
+        expectedRevision: v1Project().revision,
+        conversationId: 'conversation_v2',
+      })
+    ).rejects.toMatchObject({ code: 'unsupported_prototype_schema' });
+    await expect(service.getDirectorSessionAuthority({ projectId: V1_PROJECT_ID })).rejects.toMatchObject({
+      code: 'unsupported_prototype_schema',
+    });
+
+    expect(observed.mutations).toEqual([]);
+    expect(watchProposalTree).not.toHaveBeenCalled();
+    expect(onProjectUpdated).not.toHaveBeenCalled();
+    expect(providerResolver.listConnectionCandidates).not.toHaveBeenCalled();
+    expect(providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+    expect(getStudioServerScriptPath).not.toHaveBeenCalled();
+    expect(Object.values(jobManager).every((operation) => operation.mock.calls.length === 0)).toBe(true);
+    await expectV1Snapshot(fixture.rootDir, before);
   });
 
   it('runs the V2 create, list, batch, restart, and delete lifecycle beside V1 without touching V1', async () => {

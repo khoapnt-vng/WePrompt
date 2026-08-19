@@ -44,7 +44,18 @@ const flattenLeaves = (value: JsonObject, prefix = ''): Record<string, string> =
 };
 
 const expectedLeaves = [
+  'director.title',
+  'director.show',
+  'director.hide',
+  'director.starting',
+  'director.retry',
+  'director.startFresh',
+  'director.danglingNotice',
+  'director.interruptedNotice',
+  'director.ownerConflict',
+  'director.noModelConfigured',
   'errors.storage',
+  'errors.staleProject',
   'project.backToLibrary',
   'project.loading',
   'project.notFound',
@@ -256,7 +267,7 @@ describe('Creative Studio workspace translations', () => {
   it('keeps the exact renderer workspace inventory under one en-US subtree', () => {
     const leaves = flattenLeaves(englishWorkspace);
 
-    expect(Object.keys(leaves).sort()).toEqual([...expectedLeaves].sort());
+    expect(Object.keys(leaves).toSorted()).toEqual(expectedLeaves.toSorted());
     for (const [key, value] of Object.entries(leaves)) {
       expect(value.trim(), key).not.toBe('');
     }

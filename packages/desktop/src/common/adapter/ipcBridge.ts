@@ -103,12 +103,14 @@ import type {
   CreateStudioProjectInputV2,
   StudioApplyAuthoringBatchRequestV2,
   StudioAssetV2,
+  StudioBindDirectorConversationRequestV2,
   StudioCascadeBarrierActionRequestV2,
   StudioCommandResult,
   StudioConfirmSubmissionRequestV2,
   StudioConfirmSubmissionResultV2,
   StudioDetachManagedMediaResultV2,
   StudioDetachBriefReferenceRequest,
+  StudioDirectorSessionAuthorityV2,
   StudioDismissReferenceGenerationHandoffRequestV2,
   StudioDismissReferenceGenerationHandoffResultV2,
   StudioEditProjectSettingsRequestV2,
@@ -1230,6 +1232,14 @@ export const creativeStudio = {
   getBriefSessionServer: bridge.buildProvider<StudioCommandResult<ISessionMcpServer>, StudioProjectRequestV2>(
     'creative-studio.get-brief-session-server'
   ),
+  getDirectorSessionAuthority: bridge.buildProvider<
+    StudioCommandResult<StudioDirectorSessionAuthorityV2>,
+    StudioProjectRequestV2
+  >('creative-studio.get-director-session-authority'),
+  bindDirectorConversation: bridge.buildProvider<
+    StudioCommandResult<StudioRendererProjectCommitResultV2>,
+    StudioBindDirectorConversationRequestV2
+  >('creative-studio.bind-director-conversation'),
   listProposals: bridge.buildProvider<StudioCommandResult<StudioProposalV2[]>, StudioProjectRequestV2>(
     'creative-studio.list-proposals'
   ),

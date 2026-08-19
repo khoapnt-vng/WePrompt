@@ -1,0 +1,87 @@
+.shell {
+  display: flex;
+  inline-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 0;
+  flex: 1;
+  align-items: stretch;
+  overflow: hidden;
+}
+
+.workPanel {
+  display: flex;
+  min-inline-size: 0;
+  min-block-size: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.workScroll {
+  display: flex;
+  min-inline-size: 0;
+  min-block-size: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 18px;
+  overflow: auto;
+  padding-block: clamp(16px, 3vw, 28px);
+  padding-inline: clamp(16px, 3.5vw, 36px);
+}
+
+.workspaceHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.workspaceHeader h1,
+.workspaceHeader p {
+  margin: 0;
+}
+
+.viewNavigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-block-end: 1px solid var(--color-border-2);
+  padding-block-end: 10px;
+}
+
+.viewLink,
+.viewLinkActive {
+  border-radius: 999px;
+  padding-block: 6px;
+  padding-inline: 12px;
+  color: var(--color-text-2);
+  text-decoration: none;
+}
+
+.viewLinkActive {
+  color: var(--color-text-1);
+  background: var(--color-fill-2);
+  font-weight: var(--fw-bold);
+}
+
+.viewSurface {
+  min-block-size: 220px;
+  border: 1px solid var(--color-border-2);
+  border-radius: 12px;
+  padding: 20px;
+  background: var(--color-bg-2);
+}
+
+.viewSurface h2,
+.viewSurface p {
+  margin-block-start: 0;
+}
+
+.projectAlert {
+  border: 1px solid var(--color-danger-light-3);
+  border-radius: 8px;
+  padding-block: 10px;
+  padding-inline: 12px;
+  color: var(--color-danger-6);
+  background: var(--color-danger-light-1);
+  overflow-wrap: anywhere;
+}

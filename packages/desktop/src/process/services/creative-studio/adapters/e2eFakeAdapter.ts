@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { lstat, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { IProvider } from '@/common/config/storage';
 import type {
@@ -39,20 +39,23 @@ export const STUDIO_E2E_BOUNDARY_SENTINELS = {
   rawOutputPath: STUDIO_E2E_RAW_OUTPUT_PATH_SENTINEL,
 } as const;
 export const STUDIO_E2E_FAKE_FIXTURE_DIRECTORY = '.studio-raw-output-path-sentinel';
+export const STUDIO_E2E_FAKE_PROVIDER_CALL_COUNTS_FILE = 'provider-call-counts.json';
 const STUDIO_E2E_IMAGE_MODEL = 'weprompt-e2e-image';
 const STUDIO_E2E_NEXT_IMAGE_MODEL = 'weprompt-e2e-image-next';
 const STUDIO_E2E_VIDEO_MODEL = 'weprompt-e2e-video';
 const STUDIO_E2E_EXPLICIT_SELECTION_VIDEO_MODEL = 'dreamina-seedance-2-0-260128';
 const FAKE_FIXTURE_DIRECTORY = STUDIO_E2E_FAKE_FIXTURE_DIRECTORY;
-const RAW_OUTPUT_SENTINEL_BYTES = Buffer.from(STUDIO_E2E_RAW_OUTPUT_BODY_SENTINEL);
+const PROVIDER_CALL_COUNTS_MAX_BYTES = 512;
 const IMAGE_BYTES = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWMwTpv5HwAENAIyeXoBdAAAAABJRU5ErkJggg==',
   'base64'
 );
-const VIDEO_BYTES = Buffer.concat([
-  Buffer.from('000000186674797069736f6d0000000069736f6d69736f32', 'hex'),
-  RAW_OUTPUT_SENTINEL_BYTES,
-]);
+// A deterministic 16x16, four-second H.264 MP4. The comment metadata intentionally retains the
+// raw-output sentinel so the E2E boundary oracle still proves provider-only bytes never enter JSON.
+const VIDEO_BYTES = Buffer.from(
+  'AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAOXbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAD6AAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAot0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAD6AAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAABAAAAAQAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAA+gAACAAAABAAAAAAIDbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAABAABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABrm1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAW5zdGJsAAAAvnN0c2QAAAAAAAAAAQAAAK5hdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAABAAEABIAAAASAAAAAAAAAABFExhdmM2My4xLjEwMSBsaWJ4MjY0AAAAAAAAAAAAAAAAGP//AAAANGF2Y0MBZAAK/+EAF2dkAAqs2V7ARAAAAwAEAAADAAg8SJZYAQAGaOvjyyLA/fj4AAAAABBwYXNwAAAAAQAAAAEAAAAUYnRydAAAAAAAAAXSAAAAAAAAABhzdHRzAAAAAAAAAAEAAAAEAABAAAAAABRzdHNzAAAAAAAAAAEAAAABAAAAKGN0dHMAAAAAAAAAAwAAAAEAAIAAAAAAAQABAAAAAAACAABAAAAAABxzdHNjAAAAAAAAAAEAAAABAAAABAAAAAEAAAAkc3RzegAAAAAAAAAAAAAABAAAAsUAAAAMAAAADAAAAAwAAAAUc3RjbwAAAAAAAAABAAADxwAAAJh1ZHRhAAAAkG1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAG1kaXJhcHBsAAAAAAAAAAAAAAAAY2lsc3QAAAAkqXRvbwAAABxkYXRhAAAAAQAAAABMYXZmNjMuMS4xMDEAAAA3qWNtdAAAAC9kYXRhAAAAAQAAAABTVFVESU9fUkFXX09VVFBVVF9CT0RZX1NFTlRJTkVMAAAACGZyZWUAAALxbWRhdAAAAq0GBf//qdxF6b3m2Ui3lizYINkj7u94MjY0IC0gY29yZSAxNjUgcjMyMjIgYjM1NjA1YSAtIEguMjY0L01QRUctNCBBVkMgY29kZWMgLSBDb3B5bGVmdCAyMDAzLTIwMjUgLSBodHRwOi8vd3d3LnZpZGVvbGFuLm9yZy94MjY0Lmh0bWwgLSBvcHRpb25zOiBjYWJhYz0xIHJlZj0zIGRlYmxvY2s9MTowOjAgYW5hbHlzZT0weDM6MHgxMTMgbWU9aGV4IHN1Ym1lPTcgcHN5PTEgcHN5X3JkPTEuMDA6MC4wMCBtaXhlZF9yZWY9MSBtZV9yYW5nZT0xNiBjaHJvbWFfbWU9MSB0cmVsbGlzPTEgOHg4ZGN0PTEgY3FtPTAgZGVhZHpvbmU9MjEsMTEgZmFzdF9wc2tpcD0xIGNocm9tYV9xcF9vZmZzZXQ9LTIgdGhyZWFkcz0xIGxvb2thaGVhZF90aHJlYWRzPTEgc2xpY2VkX3RocmVhZHM9MCBucj0wIGRlY2ltYXRlPTEgaW50ZXJsYWNlZD0wIGJsdXJheV9jb21wYXQ9MCBjb25zdHJhaW5lZF9pbnRyYT0wIGJmcmFtZXM9MyBiX3B5cmFtaWQ9MiBiX2FkYXB0PTEgYl9iaWFzPTAgZGlyZWN0PTEgd2VpZ2h0Yj0xIG9wZW5fZ29wPTAgd2VpZ2h0cD0yIGtleWludD0yNTAga2V5aW50X21pbj0xIHNjZW5lY3V0PTQwIGludHJhX3JlZnJlc2g9MCByY19sb29rYWhlYWQ9NDAgcmM9Y3JmIG1idHJlZT0xIGNyZj0yMy4wIHFjb21wPTAuNjAgcXBtaW49MCBxcG1heD02OSBxcHN0ZXA9NCBpcF9yYXRpbz0xLjQwIGFxPTE6MS4wMACAAAAAEGWIhAAX//731LfMsu4HI4EAAAAIQZojbEFf/vAAAAAIQZ5BeIK/koEAAAAIAZ5iakFfkoA=',
+  'base64'
+);
 
 export type StudioE2EFakeTask = {
   mediaKind: StudioMediaKind;
@@ -81,6 +84,13 @@ export type StudioE2EFakeBundle = {
 
 /** The lifecycle profile is retained for direct tests; explicit selection is only for the E2E journey. */
 export type StudioE2EFakeCatalogProfile = 'lifecycle' | 'explicit-selection';
+
+export type StudioE2EFakeProviderCallCounts = {
+  validateConnection: number;
+  submit: number;
+  poll: number;
+  cancel: number;
+};
 
 export type StudioE2EFakeBundleDeps = {
   rootDir: string;
@@ -159,16 +169,55 @@ export const createStudioE2EFakeBundle = ({
 
   const remoteState = injectedRemoteState ?? createStudioE2EFakeRemoteState();
   const ownsRemoteState = injectedRemoteState === undefined;
+  const providerCallCounts: StudioE2EFakeProviderCallCounts = {
+    validateConnection: 0,
+    submit: 0,
+    poll: 0,
+    cancel: 0,
+  };
+  let providerCallCountWrite = Promise.resolve();
+  let providerCallCountWriteOrdinal = 0;
 
-  const ensureFixture = async (mediaKind: StudioMediaKind): Promise<ProviderOutput> => {
-    const bytes = mediaKind === 'image' ? IMAGE_BYTES : VIDEO_BYTES;
-    const mimeType = mediaKind === 'image' ? 'image/png' : 'video/mp4';
-    const fileName = mediaKind === 'image' ? 'fake-image.png' : 'fake-video.mp4';
+  const ensureFixtureDirectory = async (): Promise<void> => {
     await mkdir(fixtureDirectory, { recursive: true });
     const directoryStats = await lstat(fixtureDirectory);
     if (!directoryStats.isDirectory() || directoryStats.isSymbolicLink()) {
       throw new StudioE2EFakeAdapterError('unknown');
     }
+  };
+
+  /** The explicit-selection profile exists only behind the runtime's dual E2E flags. */
+  const recordProviderCall = async (method: keyof StudioE2EFakeProviderCallCounts): Promise<void> => {
+    if (catalogProfile !== 'explicit-selection') return;
+    if (providerCallCounts[method] >= Number.MAX_SAFE_INTEGER) throw new StudioE2EFakeAdapterError('unknown');
+    providerCallCounts[method] += 1;
+    const snapshot = JSON.stringify(providerCallCounts);
+    if (Buffer.byteLength(snapshot, 'utf8') > PROVIDER_CALL_COUNTS_MAX_BYTES) {
+      throw new StudioE2EFakeAdapterError('unknown');
+    }
+    providerCallCountWriteOrdinal += 1;
+    const temporaryFile = path.join(
+      fixtureDirectory,
+      `.${STUDIO_E2E_FAKE_PROVIDER_CALL_COUNTS_FILE}.${process.pid}.${providerCallCountWriteOrdinal}.tmp`
+    );
+    providerCallCountWrite = providerCallCountWrite.then(async () => {
+      await ensureFixtureDirectory();
+      await writeFile(temporaryFile, snapshot, { flag: 'wx' });
+      try {
+        await rename(temporaryFile, path.join(fixtureDirectory, STUDIO_E2E_FAKE_PROVIDER_CALL_COUNTS_FILE));
+      } catch (error) {
+        await rm(temporaryFile, { force: true });
+        throw error;
+      }
+    });
+    await providerCallCountWrite;
+  };
+
+  const ensureFixture = async (mediaKind: StudioMediaKind): Promise<ProviderOutput> => {
+    const bytes = mediaKind === 'image' ? IMAGE_BYTES : VIDEO_BYTES;
+    const mimeType = mediaKind === 'image' ? 'image/png' : 'video/mp4';
+    const fileName = mediaKind === 'image' ? 'fake-image.png' : 'fake-video.mp4';
+    await ensureFixtureDirectory();
     const outputPath = path.join(fixtureDirectory, fileName);
     if (path.dirname(outputPath) !== fixtureDirectory) throw new StudioE2EFakeAdapterError('unknown');
     try {
@@ -197,6 +246,7 @@ export const createStudioE2EFakeBundle = ({
     id,
     async validateConnection(input, provider, signal) {
       signal.throwIfAborted();
+      await recordProviderCall('validateConnection');
       return provider.id === STUDIO_E2E_FAKE_PROVIDER_ID && acceptsModel(catalogProfile, mediaKind, input.model)
         ? {
             ok: true,
@@ -217,6 +267,7 @@ export const createStudioE2EFakeBundle = ({
     validateRequest: (request, provider) => validateRequest(request, provider, catalogProfile, mediaKind),
     async submit(request, provider, signal) {
       signal.throwIfAborted();
+      await recordProviderCall('submit');
       if (!validateRequest(request, provider, catalogProfile, mediaKind).ok)
         throw new StudioE2EFakeAdapterError('unsupported');
       remoteState.taskCounter += 1;
@@ -235,6 +286,7 @@ export const createStudioE2EFakeBundle = ({
     },
     async poll(providerJobId, provider, signal): Promise<ProviderJobSnapshot> {
       signal.throwIfAborted();
+      await recordProviderCall('poll');
       if (provider.id !== STUDIO_E2E_FAKE_PROVIDER_ID || !acceptsModel(catalogProfile, mediaKind, provider.use_model)) {
         throw new StudioE2EFakeAdapterError('unsupported');
       }
@@ -250,6 +302,7 @@ export const createStudioE2EFakeBundle = ({
     },
     async cancel(providerJobId, provider, signal) {
       signal.throwIfAborted();
+      await recordProviderCall('cancel');
       if (provider.id !== STUDIO_E2E_FAKE_PROVIDER_ID || !acceptsModel(catalogProfile, mediaKind, provider.use_model)) {
         throw new StudioE2EFakeAdapterError('unsupported');
       }
