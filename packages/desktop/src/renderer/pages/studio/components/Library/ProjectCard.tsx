@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { StudioProjectSummary } from '@/common/types/project/creativeStudioTypes';
+import type { StudioProjectSummaryV2 } from '@/common/types/project/creativeStudioTypes';
 import { Button, Card, Tag } from '@arco-design/web-react';
 import { Delete } from '@icon-park/react';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { createManagedStudioAssetUrl } from '../Preview';
+import { createManagedStudioAssetUrl } from '../../studioManagedAssetUrl';
 import styles from './StudioLibrary.module.css';
 
 const RELATIVE_UNITS: ReadonlyArray<{ unit: Intl.RelativeTimeFormatUnit; milliseconds: number; limit: number }> = [
@@ -22,14 +22,12 @@ const RELATIVE_UNITS: ReadonlyArray<{ unit: Intl.RelativeTimeFormatUnit; millise
   { unit: 'year', milliseconds: 31_536_000_000, limit: Number.POSITIVE_INFINITY },
 ];
 
-const SCRIPT_POSTER_GRADIENT_COUNT = 6;
+const POSTER_GRADIENT_COUNT = 6;
 
-const getScriptPosterGradientIndex = (projectId: string): number => {
+const getPosterGradientIndex = (projectId: string): number => {
   let hash = 0;
-  for (const character of projectId) {
-    hash = (Math.imul(hash, 31) + character.charCodeAt(0)) >>> 0;
-  }
-  return hash % SCRIPT_POSTER_GRADIENT_COUNT;
+  for (const character of projectId) hash = (Math.imul(hash, 31) + character.charCodeAt(0)) >>> 0;
+  return hash % POSTER_GRADIENT_COUNT;
 };
 
 export const formatStudioRelativeTime = (timestamp: string, locale: string, now = Date.now()): string => {
@@ -43,35 +41,25 @@ export const formatStudioRelativeTime = (timestamp: string, locale: string, now 
 };
 
 export type ProjectCardProps = {
-  project: StudioProjectSummary;
-  engineReadiness?: ProjectEngineReadiness;
+  project: StudioProjectSummaryV2;
   locale: string;
   disabled: boolean;
   onOpen: () => void;
   onDelete: () => void;
 };
 
-export type ProjectEngineReadiness = 'ready' | 'setup_required' | 'unknown';
-
-export const ProjectCard: React.FC<ProjectCardProps> = ({
-  project,
-  engineReadiness,
-  locale,
-  disabled,
-  onOpen,
-  onDelete,
-}) => {
+export const ProjectCard: React.FC<ProjectCardProps> = ({ project, locale, disabled, onOpen, onDelete }) => {
   const { t } = useTranslation();
-  const posterSource = project.poster === null ? null : createManagedStudioAssetUrl(project.id, project.poster.assetId);
+  const posterSource = project.poster ? createManagedStudioAssetUrl(project.id, project.poster.assetId) : null;
   const [failedPosterSource, setFailedPosterSource] = useState<string | null>(null);
-  const showScriptPoster = posterSource === null || failedPosterSource === posterSource;
-  const complete = project.sceneCount > 0 && project.selectedAssetCount >= project.sceneCount;
-  const partial = !complete && project.selectedAssetCount > 0;
+  const showPlaceholder = posterSource === null || failedPosterSource === posterSource;
+  const complete = project.shotCount > 0 && project.selectedTakeCount >= project.shotCount;
+  const partial = !complete && project.selectedTakeCount > 0;
   const statusKey = complete
-    ? 'conversation.creativeStudio.library.status.handedOff'
+    ? 'conversation.creativeStudio.workspace.library.status.complete'
     : partial
-      ? 'conversation.creativeStudio.library.status.partiallyRendered'
-      : 'conversation.creativeStudio.library.status.scriptOnly';
+      ? 'conversation.creativeStudio.workspace.library.status.partial'
+      : 'conversation.creativeStudio.workspace.library.status.spineOnly';
   const statusClass = complete ? 'bg-success-6' : partial ? 'bg-warning-6' : 'bg-fill-4';
 
   return (
@@ -79,9 +67,9 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
       className={styles.projectCard}
       cover={
         <div className={styles.poster}>
-          {showScriptPoster ? (
-            <div className={styles.scriptPoster} data-gradient={getScriptPosterGradientIndex(project.id)}>
-              <Tag className={styles.posterLabel}>{t('conversation.creativeStudio.library.scriptOnly')}</Tag>
+          {showPlaceholder ? (
+            <div className={styles.scriptPoster} data-gradient={getPosterGradientIndex(project.id)}>
+              <Tag className={styles.posterLabel}>{t('conversation.creativeStudio.workspace.library.noPoster')}</Tag>
             </div>
           ) : (
             <img
@@ -91,14 +79,14 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
               onError={() => setFailedPosterSource(posterSource)}
             />
           )}
-          {project.poster !== null && !showScriptPoster && (
+          {project.poster && !showPlaceholder ? (
             <Tag className={styles.posterBadge}>
-              {t('conversation.creativeStudio.library.posterBadge', {
-                scene: String(project.poster.sceneNumber).padStart(2, '0'),
-                take: project.poster.takeNumber,
+              {t('conversation.creativeStudio.workspace.library.posterBadge', {
+                beat: project.poster.beatPosition,
+                shot: project.poster.shotPosition,
               })}
             </Tag>
-          )}
+          ) : null}
         </div>
       }
     >
@@ -111,29 +99,28 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
           status='danger'
           className={styles.deleteButton}
           icon={<Delete />}
-          aria-label={t('conversation.creativeStudio.library.deleteProject')}
+          aria-label={t('conversation.creativeStudio.workspace.library.deleteProject')}
           disabled={disabled}
           onClick={onDelete}
         />
       </div>
-      <p data-status={complete ? 'complete' : partial ? 'partial' : 'script'} className={styles.statusLine}>
+      <p data-status={complete ? 'complete' : partial ? 'partial' : 'spine'} className={styles.statusLine}>
         <span aria-hidden='true' className={`h-7px w-7px flex-none rounded-full ${statusClass}`} />
-        {t(statusKey, {
-          count: project.sceneCount,
-          rendered: project.selectedAssetCount,
-          total: project.sceneCount,
-          seconds: project.targetDurationSeconds,
-        })}
+        {t(statusKey)}
       </p>
-      {engineReadiness === 'setup_required' && (
-        <Tag color='orange' className={styles.engineReadinessTag}>
-          {t('conversation.creativeStudio.library.readinessSetupRequired')}
-        </Tag>
-      )}
       <p className={styles.projectMeta}>
-        {t('conversation.creativeStudio.library.meta', {
-          shots: t('conversation.creativeStudio.library.shotCount', { count: project.sceneCount }),
-          seconds: project.targetDurationSeconds,
+        <span>{t('conversation.creativeStudio.workspace.library.beatCount', { count: project.beatCount })}</span>
+        {' · '}
+        <span>{t('conversation.creativeStudio.workspace.library.shotCount', { count: project.shotCount })}</span>
+        {' · '}
+        <span>
+          {t('conversation.creativeStudio.workspace.library.selectedTakeCount', {
+            count: project.selectedTakeCount,
+          })}
+        </span>
+      </p>
+      <p className={styles.projectMeta}>
+        {t('conversation.creativeStudio.workspace.library.updated', {
           relative: formatStudioRelativeTime(project.updatedAt, locale),
         })}
       </p>

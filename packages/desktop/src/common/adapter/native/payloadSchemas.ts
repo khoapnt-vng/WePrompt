@@ -10,13 +10,17 @@ import {
   OFFICE_ARTIFACT_MAX_SELECTION_MESSAGE_BYTES,
 } from '../../types/office/artifactEditor';
 import { PRESENTATION_RUN_LIMITS } from '../../types/office/presentationRunPolicy';
-import { STUDIO_RULE_LIMITS } from '../../types/project/creativeStudioRules';
+import { hasRuleToken, STUDIO_RULE_LIMITS } from '../../types/project/creativeStudioRules';
 import {
-  STUDIO_MAX_CUT_PLACEMENT_SCENES,
-  STUDIO_MAX_DIRTY_SCENES_REPORTED,
-  STUDIO_MAX_GENERATION_SCENES_PER_REQUEST,
-  STUDIO_MAX_SCENES,
-  STUDIO_REFERENCE_PROMPT_MAX_LENGTH,
+  STUDIO_MAX_BEATS,
+  STUDIO_MAX_BIN_BEAT_ITEMS,
+  STUDIO_MAX_BIN_SHOT_ITEMS,
+  STUDIO_MAX_BIN_TAKE_ITEMS,
+  STUDIO_MAX_DIRTY_DRAFTS_REPORTED,
+  STUDIO_MAX_MUTATION_OPERATIONS,
+  STUDIO_MAX_SHOTS_PER_BEAT,
+  STUDIO_MAX_SHOT_SECONDS,
+  STUDIO_MIN_SHOT_SECONDS,
 } from '../../types/project/creativeStudioTypes';
 import type { NativeBridgeProviderKey, RendererBridgeQueryKey } from './constants';
 
@@ -264,77 +268,12 @@ const presentationRecoveryCursorSchema = z
   .regex(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
 
 const studioExpectedRevisionSchema = z.number().finite().int().positive();
-const studioProjectInputSchema = z
-  .object({
-    name: z.string().trim().min(1).max(256),
-    brief: z.string().max(16 * 1024),
-    forgeProjectId: safeIdSchema.optional(),
-    aspectRatio: z.enum(['16:9', '9:16', '1:1', '4:3', '3:4']),
-    targetDurationSeconds: z.number().finite().int().min(5).max(60),
-    resolution: z.enum(['720p', '1080p']),
-  })
-  .strict();
-const studioProjectRequestSchema = z.object({ projectId: safeIdSchema }).strict();
 const studioCapturedPosterDataUrlMaxLength = Math.ceil((50 * 1024 * 1024) / 3) * 4 + 22;
-const studioCapturedPosterSchema = z
-  .object({
-    projectId: safeIdSchema,
-    sceneId: safeIdSchema,
-    videoAssetId: safeIdSchema,
-    dataUrl: z
-      .string()
-      .min(26)
-      .max(studioCapturedPosterDataUrlMaxLength)
-      .regex(/^data:image\/png;base64,(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
-    width: z.number().finite().int().min(1).max(16_384),
-    height: z.number().finite().int().min(1).max(16_384),
-  })
-  .strict();
-const isUnsafeStudioTextCharacter = (character: string): boolean => {
-  const codePoint = character.codePointAt(0)!;
-  return codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f) || (codePoint >= 0xd800 && codePoint <= 0xdfff);
-};
-const studioModelSchema = z
+const studioCapturedPosterDataUrlSchema = z
   .string()
-  .min(1)
-  .max(256)
-  .refine((value) => value === value.trim() && !Array.from(value).some(isUnsafeStudioTextCharacter));
-const studioTextModelSelectionSchema = z
-  .object({
-    providerId: safeIdSchema,
-    model: studioModelSchema,
-  })
-  .strict();
-const studioMediaModelSelectionSchema = z.object({ choiceId: safeIdSchema }).strict();
-const storyboardSelectionSchema = z
-  .object({
-    projectId: safeIdSchema,
-    expectedRevision: studioExpectedRevisionSchema,
-    role: z.literal('storyboard'),
-    selection: studioTextModelSelectionSchema.nullable(),
-  })
-  .strict();
-const imageSelectionSchema = z
-  .object({
-    projectId: safeIdSchema,
-    expectedRevision: studioExpectedRevisionSchema,
-    role: z.literal('image'),
-    selection: studioMediaModelSelectionSchema.nullable(),
-  })
-  .strict();
-const videoSelectionSchema = z
-  .object({
-    projectId: safeIdSchema,
-    expectedRevision: studioExpectedRevisionSchema,
-    role: z.literal('video'),
-    selection: studioMediaModelSelectionSchema.nullable(),
-  })
-  .strict();
-const studioUpdateModelSelectionSchema = z.discriminatedUnion('role', [
-  storyboardSelectionSchema,
-  imageSelectionSchema,
-  videoSelectionSchema,
-]);
+  .min(26)
+  .max(studioCapturedPosterDataUrlMaxLength)
+  .regex(/^data:image\/png;base64,(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/);
 const studioConnectionSchema = z
   .object({
     providerId: safeIdSchema,
@@ -342,187 +281,209 @@ const studioConnectionSchema = z
     model: z.string().trim().min(1).max(256),
   })
   .strict();
-const studioSceneRouteSnapshotSchema = z
+
+// Schema-2 renderer authority. These are deliberately separate from the full mutation catalog:
+// the renderer may batch only the frozen authoring subset, while settings, rules, parking, Take,
+// Bin, cascade, and undo gestures cross their dedicated narrow providers below.
+const studioV2ProjectInputSchema = z
   .object({
-    sceneId: safeIdSchema,
-    choiceId: safeIdSchema,
-    kind: z.enum(['image', 'video']),
-  })
-  .strict();
-const studioSubmitScenesSchema = z
-  .object({
-    projectId: safeIdSchema,
-    expectedRevision: studioExpectedRevisionSchema,
-    mode: z.enum(['single', 'batch']),
-    sceneIds: z
-      .array(safeIdSchema)
-      .min(1)
-      .max(STUDIO_MAX_GENERATION_SCENES_PER_REQUEST)
-      .refine((ids) => new Set(ids).size === ids.length),
-    catalogVersion: z.string().regex(/^[a-f0-9]{16}$/),
-    routes: z.array(studioSceneRouteSnapshotSchema).min(1).max(STUDIO_MAX_GENERATION_SCENES_PER_REQUEST),
-    outputRole: z.enum(['take', 'reference']).optional(),
-    referencePrompts: z
-      .array(
-        z
-          .object({
-            sceneId: safeIdSchema,
-            prompt: z.string().trim().min(1).max(STUDIO_REFERENCE_PROMPT_MAX_LENGTH),
-          })
-          .strict()
-      )
-      .min(1)
-      .max(STUDIO_MAX_GENERATION_SCENES_PER_REQUEST)
-      .optional(),
-  })
-  .strict()
-  .superRefine((input, context) => {
-    if (input.mode === 'single' && input.sceneIds.length !== 1) {
-      context.addIssue({ code: 'custom', message: 'single mode requires exactly one scene', path: ['sceneIds'] });
-    }
-    const routeSceneIds = input.routes.map((route) => route.sceneId);
-    const selectedSceneIds = new Set(input.sceneIds);
-    if (
-      new Set(routeSceneIds).size !== routeSceneIds.length ||
-      routeSceneIds.length !== input.sceneIds.length ||
-      routeSceneIds.some((sceneId) => !selectedSceneIds.has(sceneId))
-    ) {
-      context.addIssue({ code: 'custom', message: 'routes must exactly match sceneIds', path: ['routes'] });
-    }
-    if (input.outputRole === 'reference') {
-      // A reference plate without a prompt has nothing to paint, and a prompt that names no
-      // submitted scene describes nothing. Both are refused here rather than at the provider.
-      const promptSceneIds = (input.referencePrompts ?? []).map(({ sceneId }) => sceneId);
-      if (
-        promptSceneIds.length !== input.sceneIds.length ||
-        new Set(promptSceneIds).size !== promptSceneIds.length ||
-        promptSceneIds.some((sceneId) => !selectedSceneIds.has(sceneId))
-      ) {
-        context.addIssue({
-          code: 'custom',
-          message: 'reference submissions need exactly one referencePrompt per scene',
-          path: ['referencePrompts'],
-        });
-      }
-    } else if (input.referencePrompts !== undefined) {
-      context.addIssue({
-        code: 'custom',
-        message: 'referencePrompts requires outputRole reference',
-        path: ['referencePrompts'],
-      });
-    }
-  });
-const studioFitStoryboardSchema = z
-  .object({
-    projectId: safeIdSchema,
-    expectedRevision: studioExpectedRevisionSchema,
-    catalogVersion: z.string().regex(/^[a-f0-9]{16}$/),
-  })
-  .strict();
-const studioJobRequestSchema = z
-  .object({
-    projectId: safeIdSchema,
-    jobId: safeIdSchema,
-    expectedRevision: studioExpectedRevisionSchema,
-  })
-  .strict();
-const studioSceneSchema = z
-  .object({
-    title: z.string().trim().min(0).max(256),
-    purpose: z.string().max(256),
-    visualPrompt: z.string().max(8 * 1024),
-    narration: z.string().max(4 * 1024),
-    onScreenText: z.string().max(1024),
-    mediaKind: z.enum(['image', 'video']),
-    durationSeconds: z.number().finite().int().min(1).max(60),
-    referenceAssetId: safeIdSchema.nullable(),
-  })
-  .strict();
-const studioBriefRulePredicateSchema = z
-  .object({
-    kind: z.literal('forbidden_terms'),
-    terms: z.array(z.string().trim().min(1).max(STUDIO_RULE_LIMITS.term)).min(1).max(STUDIO_RULE_LIMITS.maxTerms),
-  })
-  .strict();
-const studioSetBriefRulesSchema = z
-  .object({
-    projectId: safeIdSchema,
-    expectedRevision: studioExpectedRevisionSchema,
-    rules: z
-      .array(
-        z
-          .object({
-            id: safeIdSchema,
-            text: z.string().trim().min(1).max(STUDIO_RULE_LIMITS.text),
-            predicate: studioBriefRulePredicateSchema.nullable(),
-          })
-          .strict()
-      )
-      .max(STUDIO_RULE_LIMITS.maxRules),
-  })
-  .strict();
-const studioUpdateProjectSchema = z
-  .object({
-    projectId: safeIdSchema,
-    expectedRevision: studioExpectedRevisionSchema,
-    name: z.string().trim().min(1).max(256).optional(),
-    brief: z
+    name: z
       .string()
-      .max(16 * 1024)
+      .max(256)
+      .refine((name) => name.trim().length > 0),
+    brief: z.string().max(16 * 1024),
+    forgeProjectId: safeIdSchema.optional(),
+    aspectRatio: z.enum(['16:9', '9:16', '1:1', '4:3', '3:4']),
+    targetDurationSeconds: z.number().finite().int().min(5).max(1440),
+    resolution: z.enum(['720p', '1080p']),
+  })
+  .strict();
+const studioV2ProjectRequestSchema = z.object({ projectId: safeIdSchema }).strict();
+const studioV2MutationRequestShape = {
+  projectId: safeIdSchema,
+  expectedRevision: studioExpectedRevisionSchema,
+};
+const studioV2EditableProjectChangesSchema = z
+  .object({
+    name: z
+      .string()
+      .max(256)
+      .refine((name) => name.trim().length > 0)
       .optional(),
     aspectRatio: z.enum(['16:9', '9:16', '1:1', '4:3', '3:4']).optional(),
-    targetDurationSeconds: z.number().finite().int().min(5).max(60).optional(),
     resolution: z.enum(['720p', '1080p']).optional(),
+    targetDurationSeconds: z.number().finite().int().min(5).max(1440).optional(),
   })
   .strict()
-  .refine((input) => Object.keys(input).some((key) => key !== 'projectId' && key !== 'expectedRevision'));
-const studioNormalisedRectSchema = z
+  .refine((changes) => Object.keys(changes).length > 0);
+const studioV2BeatSchema = z
   .object({
-    x: z.number().finite().min(0).max(1),
-    y: z.number().finite().min(0).max(1),
-    width: z.number().finite().positive().max(1),
-    height: z.number().finite().positive().max(1),
-  })
-  .strict()
-  .refine((rect) => rect.x + rect.width <= 1 && rect.y + rect.height <= 1);
-const studioCutFilterSchema = z
-  .object({
-    id: z.enum(['exposure', 'contrast', 'saturation', 'temperature']),
-    amount: z.number().finite().min(-1).max(1),
+    title: z.string().max(256),
+    action: z.string().max(4 * 1024),
+    look: z.string().max(8 * 1024),
+    targetSeconds: z.number().finite().int().min(1).max(1440).nullable(),
   })
   .strict();
-const studioEditableCutClipSchema = z
+const studioV2BeatChangesSchema = studioV2BeatSchema.partial().refine((changes) => Object.keys(changes).length > 0);
+const studioV2ShotSchema = z
   .object({
-    sourceInSeconds: z.number().finite().nonnegative().nullable(),
-    sourceOutSeconds: z.number().finite().nonnegative().nullable(),
-    crop: studioNormalisedRectSchema.nullable(),
-    filters: z
-      .array(studioCutFilterSchema)
-      .refine((filters) => new Set(filters.map((filter) => filter.id)).size === filters.length),
+    line: z.string().max(8 * 1024),
+    narration: z.string().max(4 * 1024),
+    onScreenText: z.string().max(1024),
+    durationSeconds: z.number().finite().int().min(STUDIO_MIN_SHOT_SECONDS).max(STUDIO_MAX_SHOT_SECONDS),
   })
-  .strict()
-  .refine(
-    (clip) =>
-      clip.sourceInSeconds === null || clip.sourceOutSeconds === null || clip.sourceInSeconds < clip.sourceOutSeconds
-  );
-const studioEditableCutSchema = z
+  .strict();
+const studioV2ShotChangesSchema = studioV2ShotSchema.partial().refine((changes) => Object.keys(changes).length > 0);
+const studioV2UniqueIdsSchema = (maximum: number) =>
+  z
+    .array(safeIdSchema)
+    .max(maximum)
+    .refine((ids) => new Set(ids).size === ids.length);
+const studioV2RuleTermSchema = z
+  .string()
+  .max(STUDIO_RULE_LIMITS.term)
+  .refine((term) => term.trim().length > 0 && hasRuleToken(term));
+const studioV2RulePredicateSchema = z
   .object({
-    orderMode: z.enum(['storyboard', 'manual']),
-    clipOrder: z.array(safeIdSchema).refine((ids) => new Set(ids).size === ids.length),
-    clips: z.record(safeIdSchema, studioEditableCutClipSchema),
+    kind: z.literal('forbidden_terms'),
+    terms: z
+      .array(studioV2RuleTermSchema)
+      .min(1)
+      .max(STUDIO_RULE_LIMITS.maxTerms)
+      .refine((terms) => new Set(terms).size === terms.length),
   })
-  .strict()
+  .strict();
+const studioV2RuleDraftSchema = z
+  .object({
+    id: safeIdSchema,
+    text: z
+      .string()
+      .max(STUDIO_RULE_LIMITS.text)
+      .refine((text) => text.trim().length > 0),
+    predicate: studioV2RulePredicateSchema.nullable(),
+  })
+  .strict();
+const studioV2RulesSchema = z
+  .array(studioV2RuleDraftSchema)
+  .max(STUDIO_RULE_LIMITS.maxRules)
+  .refine((rules) => new Set(rules.map((rule) => rule.id)).size === rules.length);
+const studioV2BinItemSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('beat'), beatId: safeIdSchema, reason: z.enum(['lifted', 'alternate']) }).strict(),
+  z
+    .object({ kind: z.literal('shot'), beatId: safeIdSchema, shotId: safeIdSchema, reason: z.literal('lifted') })
+    .strict(),
+  z.object({ kind: z.literal('take'), assetId: safeIdSchema, reason: z.enum(['lifted', 'alternate']) }).strict(),
+]);
+const studioV2BinSchema = z
+  .array(studioV2BinItemSchema)
+  .max(STUDIO_MAX_BIN_BEAT_ITEMS + STUDIO_MAX_BIN_SHOT_ITEMS + STUDIO_MAX_BIN_TAKE_ITEMS)
   .refine(
-    (cut) =>
-      cut.clipOrder.length === Object.keys(cut.clips).length &&
-      cut.clipOrder.every((clipId) => Object.hasOwn(cut.clips, clipId))
-  );
-const studioUpdateCutSchema = z
+    (items) =>
+      new Set(
+        items.map((item) =>
+          item.kind === 'beat'
+            ? `beat:${item.beatId}`
+            : item.kind === 'shot'
+              ? `shot:${item.shotId}`
+              : `take:${item.assetId}`
+        )
+      ).size === items.length
+  )
+  .refine((items) => items.filter((item) => item.kind === 'beat').length <= STUDIO_MAX_BIN_BEAT_ITEMS)
+  .refine((items) => items.filter((item) => item.kind === 'shot').length <= STUDIO_MAX_BIN_SHOT_ITEMS)
+  .refine((items) => items.filter((item) => item.kind === 'take').length <= STUDIO_MAX_BIN_TAKE_ITEMS);
+const studioV2TrimBoundarySchema = z
+  .number()
+  .finite()
+  .nonnegative()
+  .refine((value) => !Object.is(value, -0));
+const studioV2SpendPolicySchema = z
+  .object({
+    currency: z.string().regex(/^[A-Z]{3}$/),
+    maxPerBatchMinorUnits: z.number().finite().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  })
+  .strict();
+const studioV2AuthoringOperationSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('set_brief'), brief: z.string().max(16 * 1024) }).strict(),
+  z
+    .object({
+      kind: z.literal('add_beat'),
+      beatId: safeIdSchema,
+      beat: studioV2BeatSchema,
+      beforeBeatId: safeIdSchema.nullable(),
+    })
+    .strict(),
+  z.object({ kind: z.literal('edit_beat'), beatId: safeIdSchema, changes: studioV2BeatChangesSchema }).strict(),
+  z.object({ kind: z.literal('reorder_beats'), beatOrder: studioV2UniqueIdsSchema(STUDIO_MAX_BEATS) }).strict(),
+  z.object({ kind: z.literal('add_binned_beat'), beatId: safeIdSchema, beat: studioV2BeatSchema }).strict(),
+  z
+    .object({
+      kind: z.literal('add_shot'),
+      beatId: safeIdSchema,
+      shotId: safeIdSchema,
+      shot: studioV2ShotSchema,
+      beforeShotId: safeIdSchema.nullable(),
+    })
+    .strict(),
+  z.object({ kind: z.literal('edit_shot'), shotId: safeIdSchema, changes: studioV2ShotChangesSchema }).strict(),
+  z.object({ kind: z.literal('delete_shot'), shotId: safeIdSchema }).strict(),
+  z
+    .object({
+      kind: z.literal('reorder_shots'),
+      beatId: safeIdSchema,
+      shotOrder: studioV2UniqueIdsSchema(STUDIO_MAX_SHOTS_PER_BEAT),
+    })
+    .strict(),
+  z.object({ kind: z.literal('set_hard_cut'), shotId: safeIdSchema, hardCut: z.boolean() }).strict(),
+  z.object({ kind: z.literal('set_seed_still'), shotId: safeIdSchema, assetId: safeIdSchema.nullable() }).strict(),
+  z
+    .object({
+      kind: z.literal('trim_shot'),
+      shotId: safeIdSchema,
+      trimInSeconds: studioV2TrimBoundarySchema.nullable(),
+      trimOutSeconds: studioV2TrimBoundarySchema.nullable(),
+    })
+    .strict(),
+  z.object({ kind: z.literal('redetach_line'), shotId: safeIdSchema, line: z.string().max(8 * 1024) }).strict(),
+  z.object({ kind: z.literal('restore_line'), shotId: safeIdSchema, historyEntryId: safeIdSchema }).strict(),
+  z
+    .object({
+      kind: z.literal('set_routes'),
+      imageRouteId: safeIdSchema.nullable(),
+      videoRouteId: safeIdSchema.nullable(),
+    })
+    .strict(),
+  z.object({ kind: z.literal('set_spend_policy'), policy: studioV2SpendPolicySchema.nullable() }).strict(),
+]);
+const studioV2ApplyAuthoringBatchSchema = z
+  .object({
+    ...studioV2MutationRequestShape,
+    operations: z.array(studioV2AuthoringOperationSchema).min(1).max(STUDIO_MAX_MUTATION_OPERATIONS),
+  })
+  .strict();
+const studioV2SetRulesSchema = z.object({ ...studioV2MutationRequestShape, rules: studioV2RulesSchema }).strict();
+const studioV2CapturedPosterSchema = z
   .object({
     projectId: safeIdSchema,
-    expectedRevision: studioExpectedRevisionSchema,
-    cutId: safeIdSchema,
-    cut: studioEditableCutSchema,
+    shotId: safeIdSchema,
+    videoAssetId: safeIdSchema,
+    dataUrl: studioCapturedPosterDataUrlSchema,
+    width: z.number().finite().int().min(1).max(16_384),
+    height: z.number().finite().int().min(1).max(16_384),
+  })
+  .strict();
+const studioV2TakeActionSchema = z
+  .object({ ...studioV2MutationRequestShape, shotId: safeIdSchema, assetId: safeIdSchema })
+  .strict();
+const studioV2ReferenceDecisionSchema = z
+  .object({
+    ...studioV2MutationRequestShape,
+    requestId: safeIdSchema,
+    outcome: z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('rejected') }).strict(),
+      z.object({ kind: z.literal('generation_gate') }).strict(),
+      z.object({ kind: z.literal('imported_reference'), assetId: safeIdSchema }).strict(),
+    ]),
   })
   .strict();
 
@@ -534,7 +495,7 @@ export const rendererBridgeQuerySchemas = {
   'creative-studio.has-unsaved-work': {
     request: voidPayloadSchema,
     response: z
-      .object({ dirtySceneCount: z.number().finite().int().min(0).max(STUDIO_MAX_DIRTY_SCENES_REPORTED) })
+      .object({ dirtyDraftCount: z.number().finite().int().min(0).max(STUDIO_MAX_DIRTY_DRAFTS_REPORTED) })
       .strict(),
   },
   'creative-studio.flush-unsaved-work': {
@@ -739,116 +700,51 @@ export const nativeBridgePayloadSchemas = {
   'project-knowledge.remove-store': projectKnowledgeProjectIdSchema,
   'project-knowledge.get-session-mcp-server': projectKnowledgeProjectIdSchema,
   'creative-studio.list-projects': voidPayloadSchema,
-  'creative-studio.create-project': studioProjectInputSchema,
-  'creative-studio.get-project': studioProjectRequestSchema,
-  'creative-studio.get-brief-session-server': studioProjectRequestSchema,
-  'creative-studio.list-proposals': studioProjectRequestSchema,
-  'creative-studio.list-pending-reference-requests': studioProjectRequestSchema,
-  'creative-studio.dismiss-reference-requests': z
-    .object({
-      projectId: safeIdSchema,
-      requestIds: z
-        .array(safeIdSchema)
-        .min(1)
-        .max(50)
-        .refine((ids) => new Set(ids).size === ids.length),
-      expectedRevision: studioExpectedRevisionSchema.optional(),
-      expectedRequests: z
-        .array(z.object({ id: safeIdSchema, sceneId: safeIdSchema }).strict())
-        .min(1)
-        .max(50)
-        .optional(),
-    })
-    .strict()
-    .superRefine((value, context) => {
-      const hasExpectedRevision = value.expectedRevision !== undefined;
-      const hasExpectedRequests = value.expectedRequests !== undefined;
-      if (hasExpectedRevision !== hasExpectedRequests) {
-        context.addIssue({ code: 'custom', message: 'Checked consume authority must be paired' });
-        return;
-      }
-      if (
-        value.expectedRequests !== undefined &&
-        (value.expectedRequests.length !== value.requestIds.length ||
-          value.expectedRequests.some((request, index) => request.id !== value.requestIds[index]))
-      ) {
-        context.addIssue({ code: 'custom', message: 'Checked consume authority must match request order' });
-      }
-    }),
+  'creative-studio.create-project': studioV2ProjectInputSchema,
+  'creative-studio.get-project': studioV2ProjectRequestSchema,
+  'creative-studio.get-brief-session-server': studioV2ProjectRequestSchema,
+  'creative-studio.list-proposals': studioV2ProjectRequestSchema,
   'creative-studio.accept-proposal': z.object({ projectId: safeIdSchema, proposalId: safeIdSchema }).strict(),
   'creative-studio.reject-proposal': z.object({ projectId: safeIdSchema, proposalId: safeIdSchema }).strict(),
-  'creative-studio.propose-storyboard': z
-    .object({
-      projectId: safeIdSchema,
-      expectedRevision: studioExpectedRevisionSchema,
-      replaceExisting: z.boolean(),
-    })
+  'creative-studio.list-reference-requests': studioV2ProjectRequestSchema,
+  'creative-studio.decide-reference-request': studioV2ReferenceDecisionSchema,
+  'creative-studio.list-reference-generation-handoffs': studioV2ProjectRequestSchema,
+  'creative-studio.apply-authoring-batch': studioV2ApplyAuthoringBatchSchema,
+  'creative-studio.undo-last': z.object({ ...studioV2MutationRequestShape, entryId: safeIdSchema }).strict(),
+  'creative-studio.get-workspace-status': studioV2ProjectRequestSchema,
+  'creative-studio.get-chain-status': studioV2ProjectRequestSchema,
+  'creative-studio.retry-conditioning-frame': z
+    .object({ ...studioV2MutationRequestShape, dependentShotId: safeIdSchema })
     .strict(),
-  'creative-studio.update-model-selection': studioUpdateModelSelectionSchema,
-  'creative-studio.update-project': studioUpdateProjectSchema,
-  'creative-studio.set-brief-rules': studioSetBriefRulesSchema,
-  'creative-studio.undo-brief-rules': studioProjectRequestSchema,
-  'creative-studio.bind-brief-conversation': z
-    .object({
-      projectId: safeIdSchema,
-      expectedRevision: studioExpectedRevisionSchema,
-      conversationId: safeIdSchema.nullable(),
-    })
+  'creative-studio.cancel-waiting-cascade': z
+    .object({ ...studioV2MutationRequestShape, dependentShotId: safeIdSchema })
     .strict(),
-  'creative-studio.update-cut': studioUpdateCutSchema,
-  'creative-studio.place-cut-scenes': z
-    .object({
-      projectId: safeIdSchema,
-      expectedRevision: studioExpectedRevisionSchema,
-      cutId: safeIdSchema,
-      sceneIds: z
-        .array(safeIdSchema)
-        .min(1)
-        .max(STUDIO_MAX_CUT_PLACEMENT_SCENES)
-        .refine((ids) => new Set(ids).size === ids.length),
-      beforeClipId: safeIdSchema.nullable(),
-    })
+  'creative-studio.edit-project': z
+    .object({ ...studioV2MutationRequestShape, changes: studioV2EditableProjectChangesSchema })
     .strict(),
-  'creative-studio.delete-project': z
-    .object({ projectId: safeIdSchema, expectedRevision: studioExpectedRevisionSchema })
+  'creative-studio.set-rules': studioV2SetRulesSchema,
+  'creative-studio.park-beat': z.object({ ...studioV2MutationRequestShape, beatId: safeIdSchema }).strict(),
+  'creative-studio.restore-beat': z
+    .object({ ...studioV2MutationRequestShape, beatId: safeIdSchema, beforeBeatId: safeIdSchema.nullable() })
     .strict(),
-  'creative-studio.update-scene': z
-    .object({
-      projectId: safeIdSchema,
-      expectedRevision: studioExpectedRevisionSchema,
-      sceneId: safeIdSchema,
-      scene: studioSceneSchema.nullable(),
-    })
+  'creative-studio.park-shot': z.object({ ...studioV2MutationRequestShape, shotId: safeIdSchema }).strict(),
+  'creative-studio.restore-shot': z
+    .object({ ...studioV2MutationRequestShape, shotId: safeIdSchema, beforeShotId: safeIdSchema.nullable() })
     .strict(),
-  'creative-studio.reorder-scenes': z
-    .object({
-      projectId: safeIdSchema,
-      expectedRevision: studioExpectedRevisionSchema,
-      sceneOrder: z
-        .array(safeIdSchema)
-        .min(1)
-        .max(STUDIO_MAX_SCENES)
-        .refine((ids) => new Set(ids).size === ids.length),
-    })
-    .strict(),
-  'creative-studio.select-asset': z
-    .object({
-      projectId: safeIdSchema,
-      expectedRevision: studioExpectedRevisionSchema,
-      sceneId: safeIdSchema,
-      assetId: safeIdSchema,
-    })
-    .strict(),
-  'creative-studio.persist-captured-poster': studioCapturedPosterSchema,
+  'creative-studio.park-take': studioV2TakeActionSchema,
+  'creative-studio.add-alternate-take': studioV2TakeActionSchema,
+  'creative-studio.restore-take': studioV2TakeActionSchema,
+  'creative-studio.select-take': studioV2TakeActionSchema,
+  'creative-studio.reorder-bin': z.object({ ...studioV2MutationRequestShape, bin: studioV2BinSchema }).strict(),
+  'creative-studio.delete-project': z.object(studioV2MutationRequestShape).strict(),
+  'creative-studio.persist-captured-poster': studioV2CapturedPosterSchema,
   'creative-studio.choose-and-import-reference': z
     .object({
       projectId: safeIdSchema,
-      sceneId: safeIdSchema.optional(),
-      briefReferenceRole: z.enum(['cast', 'look']).optional(),
+      briefReferenceRole: z.enum(['cast', 'look']),
       expectedRevision: studioExpectedRevisionSchema,
     })
-    .strict()
-    .refine((input) => input.sceneId === undefined || input.briefReferenceRole === undefined),
+    .strict(),
   'creative-studio.detach-brief-reference': z
     .object({
       projectId: safeIdSchema,
@@ -856,19 +752,7 @@ export const nativeBridgePayloadSchemas = {
       expectedRevision: studioExpectedRevisionSchema,
     })
     .strict(),
-  'creative-studio.choose-and-export-assets': z
-    .object({ projectId: safeIdSchema, includeReferences: z.boolean() })
-    .strict(),
-  'creative-studio.get-latest-render': studioProjectRequestSchema,
-  'creative-studio.render-cut': studioProjectRequestSchema,
-  'creative-studio.cancel-render': studioProjectRequestSchema,
-  'creative-studio.fit-storyboard': studioFitStoryboardSchema,
-  'creative-studio.submit-scenes': studioSubmitScenesSchema,
-  'creative-studio.cancel-job': studioJobRequestSchema,
-  'creative-studio.retry-job': studioJobRequestSchema
-    .extend({ acknowledgePossibleDuplicateCharge: z.boolean().optional() })
-    .strict(),
-  'creative-studio.retry-download': studioJobRequestSchema,
+  'creative-studio.import-seed-still': z.object({ ...studioV2MutationRequestShape, shotId: safeIdSchema }).strict(),
   'creative-studio.list-connection-candidates': voidPayloadSchema,
   'creative-studio.list-connections': voidPayloadSchema,
   'creative-studio.validate-connection': studioConnectionSchema,

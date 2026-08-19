@@ -7,16 +7,6 @@ import { STUDIO_VIEWS, type StudioView } from '@/common/types/project/creativeSt
  */
 export { STUDIO_VIEWS, type StudioView };
 
-export type StudioWriteFocusIntent = {
-  sceneId: string;
-  field: 'visualPrompt' | 'duration';
-};
-
-export type StudioViewTransition = {
-  view: StudioView;
-  state?: { writeFocus?: StudioWriteFocusIntent };
-};
-
 /**
  * Deliberately not the old `last-phase:` key. The stored vocabulary changed wholesale, and
  * `parseStudioView` rejecting an unknown value already self-heals into one replace-navigation, so

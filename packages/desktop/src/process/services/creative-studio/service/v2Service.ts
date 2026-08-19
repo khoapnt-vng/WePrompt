@@ -6,6 +6,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
+import type { IProvider, ISessionMcpServer } from '@/common/config/storage';
 import {
   STUDIO_MAX_BEATS,
   STUDIO_MAX_SHOT_SECONDS,
@@ -15,6 +16,11 @@ import {
   type StudioBriefReferenceRole,
   type StudioCancellationPolicy,
   type StudioCascadeBarrierActionRequestV2,
+  type StudioConnectionBinding,
+  type StudioConnectionCandidate,
+  type StudioConnectionInventory,
+  type StudioConnectionRecord,
+  type StudioConnectionValidationResult,
   type StudioConfirmSubmissionRequestV2,
   type StudioConfirmSubmissionResultV2,
   type StudioDetachBriefReferenceRequest,
@@ -37,6 +43,7 @@ import {
   type StudioReferenceGenerationHandoffReceiptV2,
   type StudioReferenceRequestDecisionV2,
   type StudioReferenceRequestV2,
+  type StudioRemoveConnectionRequest,
   type StudioRendererChainStatusV2,
   type StudioRendererJobV2,
   type StudioRendererPreparedSubmissionOptionsV2,
@@ -46,13 +53,21 @@ import {
   type StudioRetryDownloadRequest,
   type StudioRetryJobRequest,
   type StudioRouteCatalogEntry,
+  type StudioRouteCatalogV2,
+  type StudioSaveConnectionRequest,
   type StudioSpendAuthorization,
   type StudioSubmissionQuote,
   type StudioSubmissionQuoteCore,
+  type StudioValidateConnectionRequest,
 } from '@/common/types/project/creativeStudioTypes';
+import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
+import { isImagesApiModel } from '@/common/utils/imageModelAllowlist';
+import { BUILTIN_STUDIO_NAME } from '@process/resources/builtinMcp/constants';
 import { isCanonicalStudioGeneratedTakeV2 } from '@/common/types/project/creativeStudioCanonicalTake';
 import { canCancelJobV2, type StudioDispatchAuthorizedJobsRequestV2, type StudioJobManagerV2 } from '../jobManager';
 import type { StudioMediaStore } from '../mediaStore';
+import type { GenerationProviderAdapterRegistry } from '../adapters';
+import { ProviderDeadlineError, runWithProviderDeadline } from '../adapters/types';
 import {
   createStudioMediaChoiceId,
   type StudioGenerationRoute,
@@ -92,6 +107,8 @@ import {
 } from './schema2';
 import { CreativeStudioServiceError } from './projectMutations';
 
+export type { StudioRouteCatalogV2 } from '@/common/types/project/creativeStudioTypes';
+
 const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const ACTIVE_JOB_STATUSES: ReadonlySet<StudioJobV2['status']> = new Set([
   'waiting_for_conditioning',
@@ -106,15 +123,43 @@ const ROUTE_INTEGRATION_LABELS = {
   'weprompt-media-gateway-v1': 'selfHostedVideoGateway',
   'openrouter-video-v1': 'openRouterVideo',
 } as const;
+const CONNECTION_VALIDATION_TIMEOUT_MS = 30_000;
+const ASPECT_RATIOS = new Set(['16:9', '9:16', '1:1', '4:3', '3:4']);
+const RESOLUTIONS = new Set(['720p', '1080p']);
+const MEDIA_INTEGRATIONS = [
+  {
+    integrationId: 'integration_g7Q2mB4p',
+    adapterId: 'weprompt-image-v1',
+    kind: 'image',
+    labelKey: 'imageApi',
+  },
+  {
+    integrationId: 'integration_r9L3vN6k',
+    adapterId: 'byteplus-seedance-v1',
+    kind: 'video',
+    labelKey: 'bytePlusSeedance',
+  },
+  {
+    integrationId: 'integration_x5T8cW1h',
+    adapterId: 'weprompt-media-gateway-v1',
+    kind: 'video',
+    labelKey: 'selfHostedVideoGateway',
+  },
+  {
+    integrationId: 'integration_o4R7vD2m',
+    adapterId: 'openrouter-video-v1',
+    kind: 'video',
+    labelKey: 'openRouterVideo',
+  },
+] as const satisfies ReadonlyArray<{
+  integrationId: string;
+  adapterId: StudioConnectionBinding['adapterId'];
+  kind: 'image' | 'video';
+  labelKey: 'imageApi' | 'bytePlusSeedance' | 'selfHostedVideoGateway' | 'openRouterVideo';
+}>;
 const CAPTURED_POSTER_DATA_URL_PREFIX = 'data:image/png;base64,';
 const CAPTURED_POSTER_MAX_BYTES = 50 * 1024 * 1024;
 const CAPTURED_POSTER_MAX_BASE64_LENGTH = Math.ceil(CAPTURED_POSTER_MAX_BYTES / 3) * 4;
-
-export type StudioRouteCatalogV2 = {
-  image: StudioMediaRouteCatalog;
-  video: StudioMediaRouteCatalog;
-  catalogVersion: string;
-};
 
 export type StudioShotReadinessIssueV2 =
   | 'missing_beat_title'
@@ -144,6 +189,7 @@ export type CreativeStudioServiceV2 = {
   createProject(input: CreateStudioProjectInputV2): Promise<StudioRendererProjectV2>;
   getProject(projectId: string): Promise<StudioProjectLoadResultV2>;
   deleteProject(input: { projectId: string; expectedRevision: number }): Promise<boolean>;
+  getBriefSessionServer(input: { projectId: string }): Promise<ISessionMcpServer>;
   applyMutations(
     input: StudioMutationBatchV2,
     context: StudioMutationReducerContextV2
@@ -186,6 +232,11 @@ export type CreativeStudioServiceV2 = {
   cancelJob(input: StudioJobRequest): Promise<StudioRendererJobV2>;
   retryJob(input: StudioRetryJobRequest): Promise<StudioRendererJobV2>;
   retryDownload(input: StudioRetryDownloadRequest): Promise<StudioRendererJobV2>;
+  listConnectionCandidates(): Promise<StudioConnectionCandidate[]>;
+  listConnections(): Promise<StudioConnectionInventory>;
+  validateConnection(input: StudioValidateConnectionRequest): Promise<StudioConnectionValidationResult>;
+  saveConnection(input: StudioSaveConnectionRequest): Promise<StudioConnectionRecord>;
+  removeConnection(input: StudioRemoveConnectionRequest): Promise<boolean>;
   dispose(): void;
 };
 
@@ -194,6 +245,11 @@ export type CreativeStudioServiceV2Deps = {
   providerResolver: StudioProviderResolver;
   jobManager: StudioJobManagerV2;
   mediaStore?: StudioMediaStore;
+  listProviders?: () => Promise<IProvider[]>;
+  getAdapterRegistry?: () => GenerationProviderAdapterRegistry;
+  getStudioServerScriptPath?: () => string;
+  ensureDirectorCommandMailbox?: (projectId: string) => Promise<void>;
+  createConnectionId?: () => string;
   rateCard?: () => Promise<StudioRateCardV2>;
   preparedSubmissionCache?: StudioPreparedSubmissionCacheV2;
   createQuoteId?: () => string;
@@ -235,6 +291,146 @@ const assertRevision: (value: unknown) => asserts value is number = (value) => {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
     throw invalid('Invalid Studio project revision');
   }
+};
+
+const isIntegerInRange = (value: unknown, minimum: number, maximum: number): value is number =>
+  typeof value === 'number' &&
+  Number.isFinite(value) &&
+  Number.isInteger(value) &&
+  value >= minimum &&
+  value <= maximum;
+
+const isUnsafeTextCharacter = (character: string): boolean => {
+  const codePoint = character.codePointAt(0)!;
+  return codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f) || (codePoint >= 0xd800 && codePoint <= 0xdfff);
+};
+
+const assertConnectionModel: (value: unknown) => asserts value is string = (value) => {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.length > 256 ||
+    value !== value.trim() ||
+    Array.from(value).some(isUnsafeTextCharacter)
+  ) {
+    throw invalid('Invalid Studio connection model');
+  }
+};
+
+const providerIsAvailable = (provider: IProvider, model: string): boolean =>
+  provider.enabled !== false &&
+  provider.model_enabled?.[model] !== false &&
+  provider.model_health?.[model]?.status !== 'unhealthy' &&
+  typeof provider.api_key === 'string' &&
+  provider.api_key.trim().length > 0 &&
+  typeof provider.base_url === 'string' &&
+  provider.base_url.trim().length > 0;
+
+const sanitizedCapabilities = (
+  adapterId: StudioConnectionBinding['adapterId'],
+  model: string,
+  capabilities: Record<string, unknown> | undefined
+): StudioConnectionBinding['capabilities'] => {
+  if (adapterId === 'weprompt-image-v1') {
+    const maximum = capabilities?.maxConditioningImages;
+    return {
+      mediaKinds: ['image'],
+      supportsFirstFrame: !isImagesApiModel(model),
+      maxConditioningImages: !isImagesApiModel(model) && isIntegerInRange(maximum, 0, 6) ? maximum : 0,
+      cancellationPolicy: 'none',
+    };
+  }
+  if (adapterId === 'byteplus-seedance-v1') {
+    const constraints =
+      model === 'seedance-1-0-pro-250528'
+        ? {
+            minDurationSeconds: 2,
+            maxDurationSeconds: 12,
+            resolutions: ['720p' as const, '1080p' as const],
+            aspectRatios: ['16:9' as const, '9:16' as const, '1:1' as const, '4:3' as const, '3:4' as const],
+          }
+        : model === 'seedance-1-5-pro-251215'
+          ? {
+              minDurationSeconds: 4,
+              maxDurationSeconds: 12,
+              resolutions: ['720p' as const, '1080p' as const],
+              aspectRatios: ['16:9' as const, '9:16' as const, '1:1' as const, '4:3' as const, '3:4' as const],
+            }
+          : {
+              minDurationSeconds: 4,
+              maxDurationSeconds: 15,
+              resolutions: ['720p' as const, '1080p' as const],
+              aspectRatios: ['16:9' as const, '9:16' as const, '1:1' as const, '4:3' as const, '3:4' as const],
+            };
+    return {
+      mediaKinds: ['video'],
+      audioModes: ['none'],
+      supportsFirstFrame: true,
+      maxConditioningImages: 0,
+      cancellationPolicy: 'queued_only',
+      ...constraints,
+    };
+  }
+  const aspectRatios = Array.isArray(capabilities?.aspectRatios)
+    ? capabilities.aspectRatios.filter(
+        (value): value is StudioConnectionBinding['capabilities']['aspectRatios'][number] =>
+          typeof value === 'string' && ASPECT_RATIOS.has(value)
+      )
+    : undefined;
+  const resolutions = Array.isArray(capabilities?.resolutions)
+    ? capabilities.resolutions.filter(
+        (value): value is StudioConnectionBinding['capabilities']['resolutions'][number] =>
+          typeof value === 'string' && RESOLUTIONS.has(value)
+      )
+    : undefined;
+  const minimum = capabilities?.minDurationSeconds;
+  const maximum = capabilities?.maxDurationSeconds;
+  return {
+    mediaKinds: ['video'],
+    audioModes: ['none'],
+    ...(aspectRatios && aspectRatios.length > 0 ? { aspectRatios } : {}),
+    ...(resolutions && resolutions.length > 0 ? { resolutions } : {}),
+    ...(isIntegerInRange(minimum, 1, 60) ? { minDurationSeconds: minimum } : {}),
+    ...(isIntegerInRange(maximum, 1, 60) ? { maxDurationSeconds: maximum } : {}),
+    supportsFirstFrame: capabilities?.supportsFirstFrame === true,
+    maxConditioningImages: 0,
+    cancellationPolicy:
+      capabilities?.cancellationPolicy === 'queued_only' || capabilities?.cancellationPolicy === 'queued_and_running'
+        ? capabilities.cancellationPolicy
+        : 'none',
+  };
+};
+
+const integrationForId = (integrationId: string) =>
+  MEDIA_INTEGRATIONS.find((integration) => integration.integrationId === integrationId);
+
+const integrationForAdapter = (adapterId: StudioConnectionBinding['adapterId']) =>
+  MEDIA_INTEGRATIONS.find((integration) => integration.adapterId === adapterId);
+
+const toConnectionRecord = (binding: StudioConnectionBinding): StudioConnectionRecord => {
+  const integration = integrationForAdapter(binding.adapterId);
+  if (integration === undefined) {
+    throw new CreativeStudioStoreError('storage_error', 'Unknown Studio connection integration');
+  }
+  const {
+    cancellationPolicy: _cancellationPolicy,
+    cancellation: _legacyCancellation,
+    ...capabilities
+  } = sanitizedCapabilities(binding.adapterId, binding.model, binding.capabilities);
+  return {
+    bindingId: binding.id,
+    providerId: binding.providerId,
+    integrationId: integration.integrationId,
+    labelKey: integration.labelKey,
+    model: binding.model,
+    capabilities,
+    validatedAt: binding.validatedAt,
+  };
+};
+
+const toConnectionValidation = (binding: StudioConnectionBinding): StudioConnectionValidationResult => {
+  const { bindingId: _bindingId, ...validation } = toConnectionRecord(binding);
+  return validation;
 };
 
 const assertJobRequest = (input: StudioJobRequest): void => {
@@ -641,7 +837,7 @@ const assertBeatSelection: (project: StudioProjectV2, beatIds: unknown) => asser
   }
 };
 
-/** Creates the schema-2 service beside, but deliberately outside, the registered schema-1 surface. */
+/** Creates the sole registered Beat/Shot service after the atomic schema-2 cutover. */
 export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps): CreativeStudioServiceV2 => {
   const readNow = (): Date => {
     const value = deps.now?.() ?? new Date();
@@ -654,6 +850,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
   const createQuoteId = deps.createQuoteId ?? (() => defaultId('quote'));
   const createJobId = deps.createJobId ?? (() => defaultId('job'));
   const createIdempotencyKey = deps.createIdempotencyKey ?? (() => defaultId('key'));
+  const createConnectionId = deps.createConnectionId ?? randomUUID;
   const activeClaims = new Set<StudioPreparedSubmissionClaimV2>();
   let disposed = false;
 
@@ -678,6 +875,55 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     } catch {
       throw new CreativeStudioServiceError('provider_error');
     }
+  };
+
+  const validateConnectionBinding = async (
+    input: StudioValidateConnectionRequest
+  ): Promise<StudioConnectionBinding> => {
+    if (!isRecord(input) || !hasExactKeys(input, ['providerId', 'integrationId', 'model'])) {
+      throw invalid('Invalid Studio connection request');
+    }
+    assertSafeId(input.providerId, 'provider id');
+    assertSafeId(input.integrationId, 'integration id');
+    assertConnectionModel(input.model);
+    const integration = integrationForId(input.integrationId);
+    if (integration === undefined) throw invalid('Invalid Studio integration');
+    if (deps.listProviders === undefined || deps.getAdapterRegistry === undefined) {
+      throw new CreativeStudioServiceError('invalid_route');
+    }
+    let providers: IProvider[];
+    try {
+      providers = await deps.listProviders();
+    } catch {
+      throw new CreativeStudioServiceError('provider_error');
+    }
+    const provider = providers.find((candidate) => candidate.id === input.providerId);
+    if (provider === undefined || !providerIsAvailable(provider, input.model)) {
+      throw new CreativeStudioServiceError('invalid_route');
+    }
+    const adapter = deps.getAdapterRegistry().get(integration.adapterId);
+    if (adapter === undefined) throw new CreativeStudioServiceError('invalid_route');
+    let validation;
+    try {
+      validation = await runWithProviderDeadline(
+        new AbortController().signal,
+        CONNECTION_VALIDATION_TIMEOUT_MS,
+        (signal) => adapter.validateConnection({ model: input.model }, provider, signal)
+      );
+    } catch (error) {
+      if (error instanceof ProviderDeadlineError) throw new CreativeStudioServiceError('provider_error');
+      throw error;
+    }
+    if (!validation.ok) throw new CreativeStudioServiceError('provider_error');
+    return {
+      schemaVersion: 1,
+      id: 'validation_only',
+      providerId: provider.id,
+      adapterId: adapter.id,
+      model: input.model,
+      capabilities: sanitizedCapabilities(adapter.id, input.model, validation.capabilities),
+      validatedAt: readNow().toISOString(),
+    };
   };
 
   const createQuote = (core: StudioSubmissionQuoteCore, id: string): StudioSubmissionQuote => {
@@ -994,6 +1240,42 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       const deleted = await deps.store.deleteProjectV2(input.projectId, input.expectedRevision);
       if (deleted) deps.onProjectUpdated(input.projectId);
       return deleted;
+    },
+
+    async getBriefSessionServer(input): Promise<ISessionMcpServer> {
+      if (!isRecord(input) || !hasExactKeys(input, ['projectId'])) {
+        throw invalid('Invalid Studio project request');
+      }
+      assertSafeId(input.projectId, 'project id');
+      if (deps.getStudioServerScriptPath === undefined) {
+        throw new CreativeStudioStoreError('storage_error', 'Creative Studio MCP script path is unavailable');
+      }
+      const project = await loadSupported(input.projectId);
+      await deps.ensureDirectorCommandMailbox?.(input.projectId);
+      const [proposalPaths, referencePaths, generation] = await Promise.all([
+        deps.store.resolveProposalPathsV2(input.projectId),
+        deps.store.resolveReferenceRequestPathsV2(input.projectId),
+        listGenerationRoutes(),
+      ]);
+      if (proposalPaths.projectDir !== referencePaths.projectDir) {
+        throw new CreativeStudioStoreError('storage_error', 'Studio sidecar authority mismatch');
+      }
+      return {
+        id: `studio-brief-${input.projectId}`,
+        name: BUILTIN_STUDIO_NAME,
+        transport: {
+          type: 'stdio',
+          command: 'node',
+          args: [deps.getStudioServerScriptPath()],
+          env: {
+            [STUDIO_ENV.projectId]: input.projectId,
+            [STUDIO_ENV.projectDir]: proposalPaths.projectDir,
+            [STUDIO_ENV.pendingDir]: proposalPaths.pendingDir,
+            [STUDIO_ENV.referencePendingDir]: referencePaths.pendingDir,
+            [STUDIO_ENV.routeCatalog]: JSON.stringify(toRouteCatalog(generation, project)),
+          },
+        },
+      };
     },
 
     async applyMutations(input, context): Promise<StudioMutationBatchResultV2> {
@@ -1453,6 +1735,49 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     async retryDownload(input): Promise<StudioRendererJobV2> {
       assertJobRequest(input);
       return toRendererJob(await deps.jobManager.retryDownloadV2(input));
+    },
+
+    async listConnectionCandidates(): Promise<StudioConnectionCandidate[]> {
+      try {
+        return structuredClone(await deps.providerResolver.listConnectionCandidates());
+      } catch {
+        throw new CreativeStudioServiceError('provider_error');
+      }
+    },
+
+    async listConnections(): Promise<StudioConnectionInventory> {
+      return {
+        integrations: MEDIA_INTEGRATIONS.map(({ integrationId, kind, labelKey }) => ({
+          integrationId,
+          kind,
+          labelKey,
+        })),
+        connections: (await deps.store.listConnections()).map(toConnectionRecord),
+      };
+    },
+
+    async validateConnection(input): Promise<StudioConnectionValidationResult> {
+      return toConnectionValidation(await validateConnectionBinding(input));
+    },
+
+    async saveConnection(input): Promise<StudioConnectionRecord> {
+      const validated = await validateConnectionBinding(input);
+      const binding: StudioConnectionBinding = {
+        ...validated,
+        id: createConnectionId(),
+      };
+      if (!isSafeId(binding.id)) {
+        throw new CreativeStudioStoreError('storage_error', 'Unable to allocate Studio connection identity');
+      }
+      return toConnectionRecord(await deps.store.saveConnection(binding));
+    },
+
+    async removeConnection(input): Promise<boolean> {
+      if (!isRecord(input) || !hasExactKeys(input, ['bindingId'])) {
+        throw invalid('Invalid Studio connection request');
+      }
+      assertSafeId(input.bindingId, 'connection id');
+      return deps.store.removeConnection(input.bindingId);
     },
 
     dispose(): void {

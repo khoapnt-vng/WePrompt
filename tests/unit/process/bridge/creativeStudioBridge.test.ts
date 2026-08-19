@@ -7,101 +7,111 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { STUDIO_VIEWS, type StudioProject } from '@/common/types/project/creativeStudioTypes';
+import {
+  STUDIO_PROJECT_SCHEMA_VERSION,
+  STUDIO_VIEWS,
+  type StudioMutationBatchResultV2,
+  type StudioRendererProjectV2,
+  type StudioRendererWorkspaceStatusV2,
+} from '@/common/types/project/creativeStudioTypes';
 import { CreativeStudioStoreError } from '@process/services/creative-studio/store';
 import { CreativeStudioMediaError } from '@process/services/creative-studio/mediaStore';
+import type { CreativeStudioServiceV2 } from '@process/services/creative-studio/service/v2Service';
 
+const providerNames = [
+  'listProjects',
+  'createProject',
+  'getProject',
+  'getBriefSessionServer',
+  'listProposals',
+  'acceptProposal',
+  'rejectProposal',
+  'listReferenceRequests',
+  'decideReferenceRequest',
+  'listReferenceGenerationHandoffs',
+  'applyAuthoringBatch',
+  'undoLast',
+  'getWorkspaceStatus',
+  'getChainStatus',
+  'retryConditioningFrame',
+  'cancelWaitingCascade',
+  'editProject',
+  'setRules',
+  'parkBeat',
+  'restoreBeat',
+  'parkShot',
+  'restoreShot',
+  'parkTake',
+  'addAlternateTake',
+  'restoreTake',
+  'selectTake',
+  'reorderBin',
+  'deleteProject',
+  'persistCapturedPoster',
+  'chooseAndImportReference',
+  'detachBriefReference',
+  'importSeedStill',
+  'listConnectionCandidates',
+  'listConnections',
+  'validateConnection',
+  'saveConnection',
+  'removeConnection',
+  'listRoutes',
+] as const;
+
+type ProviderName = (typeof providerNames)[number];
 const mocks = vi.hoisted(() => ({
-  listProjectsProvider: vi.fn(),
-  createProjectProvider: vi.fn(),
-  getProjectProvider: vi.fn(),
-  getBriefSessionServerProvider: vi.fn(),
-  listProposalsProvider: vi.fn(),
-  listPendingReferenceRequestsProvider: vi.fn(),
-  dismissReferenceRequestsProvider: vi.fn(),
-  acceptProposalProvider: vi.fn(),
-  rejectProposalProvider: vi.fn(),
-  proposeStoryboardProvider: vi.fn(),
-  updateModelSelectionProvider: vi.fn(),
-  updateProjectProvider: vi.fn(),
-  setBriefRulesProvider: vi.fn(),
-  undoBriefRulesProvider: vi.fn(),
-  bindBriefConversationProvider: vi.fn(),
-  updateCutProvider: vi.fn(),
-  placeCutScenesProvider: vi.fn(),
-  fitStoryboardProvider: vi.fn(),
-  deleteProjectProvider: vi.fn(),
-  updateSceneProvider: vi.fn(),
-  reorderScenesProvider: vi.fn(),
-  selectAssetProvider: vi.fn(),
-  persistCapturedPosterProvider: vi.fn(),
-  chooseAndImportReferenceProvider: vi.fn(),
-  detachBriefReferenceProvider: vi.fn(),
-  chooseAndExportAssetsProvider: vi.fn(),
-  getLatestRenderProvider: vi.fn(),
-  renderCutProvider: vi.fn(),
-  cancelRenderProvider: vi.fn(),
-  submitScenesProvider: vi.fn(),
-  cancelJobProvider: vi.fn(),
-  retryJobProvider: vi.fn(),
-  retryDownloadProvider: vi.fn(),
-  listConnectionCandidatesProvider: vi.fn(),
-  listConnectionsProvider: vi.fn(),
-  validateConnectionProvider: vi.fn(),
-  saveConnectionProvider: vi.fn(),
-  removeConnectionProvider: vi.fn(),
-  listRoutesProvider: vi.fn(),
-  projectUpdatedEmit: vi.fn(),
+  providers: Object.fromEntries(
+    [
+      'listProjects',
+      'createProject',
+      'getProject',
+      'getBriefSessionServer',
+      'listProposals',
+      'acceptProposal',
+      'rejectProposal',
+      'listReferenceRequests',
+      'decideReferenceRequest',
+      'listReferenceGenerationHandoffs',
+      'applyAuthoringBatch',
+      'undoLast',
+      'getWorkspaceStatus',
+      'getChainStatus',
+      'retryConditioningFrame',
+      'cancelWaitingCascade',
+      'editProject',
+      'setRules',
+      'parkBeat',
+      'restoreBeat',
+      'parkShot',
+      'restoreShot',
+      'parkTake',
+      'addAlternateTake',
+      'restoreTake',
+      'selectTake',
+      'reorderBin',
+      'deleteProject',
+      'persistCapturedPoster',
+      'chooseAndImportReference',
+      'detachBriefReference',
+      'importSeedStill',
+      'listConnectionCandidates',
+      'listConnections',
+      'validateConnection',
+      'saveConnection',
+      'removeConnection',
+      'listRoutes',
+    ].map((name) => [name, vi.fn()])
+  ) as Record<ProviderName, ReturnType<typeof vi.fn>>,
 }));
 
 vi.mock('@/common', () => ({
   ipcBridge: {
-    creativeStudio: {
-      listProjects: { provider: mocks.listProjectsProvider },
-      createProject: { provider: mocks.createProjectProvider },
-      getProject: { provider: mocks.getProjectProvider },
-      getBriefSessionServer: { provider: mocks.getBriefSessionServerProvider },
-      listProposals: { provider: mocks.listProposalsProvider },
-      listPendingReferenceRequests: { provider: mocks.listPendingReferenceRequestsProvider },
-      dismissReferenceRequests: { provider: mocks.dismissReferenceRequestsProvider },
-      acceptProposal: { provider: mocks.acceptProposalProvider },
-      rejectProposal: { provider: mocks.rejectProposalProvider },
-      proposeStoryboard: { provider: mocks.proposeStoryboardProvider },
-      updateModelSelection: { provider: mocks.updateModelSelectionProvider },
-      updateProject: { provider: mocks.updateProjectProvider },
-      setBriefRules: { provider: mocks.setBriefRulesProvider },
-      undoBriefRules: { provider: mocks.undoBriefRulesProvider },
-      bindBriefConversation: { provider: mocks.bindBriefConversationProvider },
-      updateCut: { provider: mocks.updateCutProvider },
-      placeCutScenes: { provider: mocks.placeCutScenesProvider },
-      fitStoryboard: { provider: mocks.fitStoryboardProvider },
-      deleteProject: { provider: mocks.deleteProjectProvider },
-      updateScene: { provider: mocks.updateSceneProvider },
-      reorderScenes: { provider: mocks.reorderScenesProvider },
-      selectAsset: { provider: mocks.selectAssetProvider },
-      persistCapturedPoster: { provider: mocks.persistCapturedPosterProvider },
-      chooseAndImportReference: { provider: mocks.chooseAndImportReferenceProvider },
-      detachBriefReference: { provider: mocks.detachBriefReferenceProvider },
-      chooseAndExportAssets: { provider: mocks.chooseAndExportAssetsProvider },
-      getLatestRender: { provider: mocks.getLatestRenderProvider },
-      renderCut: { provider: mocks.renderCutProvider },
-      cancelRender: { provider: mocks.cancelRenderProvider },
-      submitScenes: { provider: mocks.submitScenesProvider },
-      cancelJob: { provider: mocks.cancelJobProvider },
-      retryJob: { provider: mocks.retryJobProvider },
-      retryDownload: { provider: mocks.retryDownloadProvider },
-      listConnectionCandidates: { provider: mocks.listConnectionCandidatesProvider },
-      listConnections: { provider: mocks.listConnectionsProvider },
-      validateConnection: { provider: mocks.validateConnectionProvider },
-      saveConnection: { provider: mocks.saveConnectionProvider },
-      removeConnection: { provider: mocks.removeConnectionProvider },
-      listRoutes: { provider: mocks.listRoutesProvider },
-      projectUpdated: { emit: mocks.projectUpdatedEmit },
-    },
+    creativeStudio: Object.fromEntries(Object.entries(mocks.providers).map(([name, provider]) => [name, { provider }])),
   },
 }));
-
 vi.mock('@/common/config/constants', () => ({ CREATIVE_STUDIO_ENABLED: true }));
+vi.mock('@process/services/creative-studio/runtime', () => ({ getCreativeStudioService: vi.fn() }));
 
 import {
   createCreativeStudioCloseHandshake,
@@ -109,884 +119,353 @@ import {
   type CreativeStudioBridgeDependencies,
   type CreativeStudioCloseHandshakeDependencies,
 } from '@process/bridge/creativeStudioBridge';
-import { CreativeStudioServiceError } from '@process/services/creative-studio/service';
-import { StudioJobManagerError } from '@process/services/creative-studio/jobManager';
-import { StudioRenderRunnerError } from '@process/services/creative-studio/renderService';
+import { CreativeStudioServiceError } from '@process/services/creative-studio/service/projectMutations';
 
-const project: StudioProject = {
-  schemaVersion: 1,
-  revision: 1,
-  id: 'project_1',
-  name: 'Launch film',
-  brief: 'A short launch story',
-  aspectRatio: '16:9',
-  targetDurationSeconds: 12,
-  resolution: '1080p',
-  sceneOrder: [],
-  scenes: {},
-  assets: {},
-  jobs: {},
-  routing: { storyboard: null, image: null, video: null },
-  rules: [],
-  ruleListUndo: null,
-  createdAt: '2026-07-30T00:00:00.000Z',
-  updatedAt: '2026-07-30T00:00:00.000Z',
+type ProviderHandler = (input?: never) => Promise<unknown>;
+
+const rendererProject = { id: 'project_1', revision: 7 } as StudioRendererProjectV2;
+const mutationResult: StudioMutationBatchResultV2 = {
+  project: rendererProject,
+  createdBeatIds: ['beat_2'],
+  createdShotIds: ['shot_3'],
+};
+const workspaceStatus: StudioRendererWorkspaceStatusV2 = {
+  projectId: 'project_1',
+  projectRevision: 8,
+  undoTop: null,
+  dirtyShots: [],
+  cascadeProgress: [],
+  parkEligibility: [],
 };
 
-type ProviderHandler = (input: unknown) => Promise<unknown>;
+const createService = () =>
+  ({
+    listProjects: vi.fn(async () => ({ projects: [], unsupportedProjectIds: [], quarantinedProjectIds: [] })),
+    createProject: vi.fn(async () => rendererProject),
+    getProject: vi.fn(async () => ({ status: 'supported' as const, project: rendererProject })),
+    getBriefSessionServer: vi.fn(async () => ({
+      id: 'studio-brief-project_1',
+      name: 'aionui-creative-studio',
+      transport: { type: 'stdio' as const, command: 'node', args: ['/tmp/builtin-mcp-studio.js'] },
+    })),
+    listProposals: vi.fn(async () => []),
+    acceptProposal: vi.fn(),
+    rejectProposal: vi.fn(),
+    listReferenceRequests: vi.fn(async () => []),
+    decideReferenceRequest: vi.fn(),
+    listReferenceGenerationHandoffs: vi.fn(async () => []),
+    applyMutations: vi.fn(async () => mutationResult),
+    getWorkspaceStatus: vi.fn(async () => workspaceStatus),
+    getChainStatus: vi.fn(async () => ({ projectId: 'project_1', projectRevision: 8, conditioningFailures: [] })),
+    retryConditioningFrame: vi.fn(async () => workspaceStatus),
+    cancelWaitingCascade: vi.fn(async () => workspaceStatus),
+    deleteProject: vi.fn(async () => true),
+    persistCapturedPoster: vi.fn(async () => ({ id: 'poster_1' })),
+    importReferenceFromPath: vi.fn(async () => ({ asset: { id: 'asset_1' }, project: rendererProject })),
+    detachBriefReference: vi.fn(async () => rendererProject),
+    listConnectionCandidates: vi.fn(async () => []),
+    listConnections: vi.fn(async () => ({ integrations: [], connections: [] })),
+    validateConnection: vi.fn(),
+    saveConnection: vi.fn(),
+    removeConnection: vi.fn(async () => true),
+    listRoutes: vi.fn(),
+  }) as unknown as CreativeStudioServiceV2 & {
+    getBriefSessionServer: ReturnType<typeof vi.fn>;
+    listConnectionCandidates: ReturnType<typeof vi.fn>;
+    listConnections: ReturnType<typeof vi.fn>;
+    validateConnection: ReturnType<typeof vi.fn>;
+    saveConnection: ReturnType<typeof vi.fn>;
+    removeConnection: ReturnType<typeof vi.fn>;
+  };
+
+const registeredHandler = (name: ProviderName): ProviderHandler => {
+  const handler = mocks.providers[name].mock.calls[0]?.[0];
+  if (typeof handler !== 'function') throw new Error(`Missing ${name} provider handler`);
+  return handler as ProviderHandler;
+};
 
 describe('initCreativeStudioBridge', () => {
+  let service: ReturnType<typeof createService>;
   let dependencies: CreativeStudioBridgeDependencies;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    service = createService();
     dependencies = {
-      getService: () => ({
-        listProjects: vi.fn(async () => []),
-        createProject: vi.fn(async () => project),
-        getProject: vi.fn(async () => project),
-        getBriefSessionServer: vi.fn(async () => ({
-          id: 'studio-brief-project_1',
-          name: 'aionui-creative-studio',
-          transport: { type: 'stdio' as const, command: 'node', args: ['/tmp/builtin-mcp-studio.js'] },
-        })),
-        listProposals: vi.fn(async () => []),
-        listPendingReferenceRequests: vi.fn(async () => []),
-        dismissReferenceRequests: vi.fn(async () => true),
-        acceptProposal: vi.fn(),
-        rejectProposal: vi.fn(),
-        proposeStoryboard: vi.fn(async () => project),
-        updateModelSelection: vi.fn(async () => project),
-        updateProject: vi.fn(async () => project),
-        setBriefRules: vi.fn(async () => project),
-        undoBriefRules: vi.fn(async () => project),
-        bindBriefConversation: vi.fn(async () => project),
-        updateCut: vi.fn(async () => project),
-        placeCutScenes: vi.fn(async () => project),
-        fitStoryboard: vi.fn(async () => ({
-          status: 'already_matches' as const,
-          project,
-          changedSceneIds: [] as [],
-          lockedSceneIds: [],
-        })),
-        deleteProject: vi.fn(async () => true),
-        updateScene: vi.fn(async () => project),
-        reorderScenes: vi.fn(async () => project),
-        selectAsset: vi.fn(async () => project),
-        persistCapturedPoster: vi.fn(),
-        importReferenceFromPath: vi.fn(),
-        detachBriefReference: vi.fn(async () => project),
-        exportAssetsToDirectory: vi.fn(),
-        getLatestRender: vi.fn(async () => null),
-        submitScenes: vi.fn(async () => []),
-        cancelJob: vi.fn(),
-        retryJob: vi.fn(),
-        retryDownload: vi.fn(),
-        listConnectionCandidates: vi.fn(async () => []),
-        listConnections: vi.fn(async () => ({ integrations: [], connections: [] })),
-        validateConnection: vi.fn(),
-        saveConnection: vi.fn(),
-        removeConnection: vi.fn(),
-        listRoutes: vi.fn(),
-      }),
-      getRenderRunner: () => ({
-        renderCut: vi.fn(async () => ({ assetId: 'render_1', missingSceneIds: ['scene_2'] })),
-        cancelRender: vi.fn(() => true),
-        getState: vi.fn(() => null),
-      }),
+      getService: () => service,
+      createMutationId: () => 'native_mutation_1',
+      now: () => new Date('2026-08-19T02:03:04.000Z'),
+      getParentWindow: () => undefined,
+      showOpenDialog: vi.fn(async () => ({ canceled: false, filePaths: ['/private/reference.png'] })),
     };
   });
 
-  it('registers every project command instead of leaving the renderer without a typed provider', () => {
+  it('registers exactly the reviewed V2 and schema-independent settings providers', () => {
     initCreativeStudioBridge(dependencies);
-
-    expect(mocks.listProjectsProvider).toHaveBeenCalledOnce();
-    expect(mocks.createProjectProvider).toHaveBeenCalledOnce();
-    expect(mocks.getProjectProvider).toHaveBeenCalledOnce();
-    expect(mocks.getBriefSessionServerProvider).toHaveBeenCalledOnce();
-    expect(mocks.listProposalsProvider).toHaveBeenCalledOnce();
-    expect(mocks.listPendingReferenceRequestsProvider).toHaveBeenCalledOnce();
-    expect(mocks.dismissReferenceRequestsProvider).toHaveBeenCalledOnce();
-    expect(mocks.acceptProposalProvider).toHaveBeenCalledOnce();
-    expect(mocks.rejectProposalProvider).toHaveBeenCalledOnce();
-    expect(mocks.proposeStoryboardProvider).toHaveBeenCalledOnce();
-    expect(mocks.updateModelSelectionProvider).toHaveBeenCalledOnce();
-    expect(mocks.updateProjectProvider).toHaveBeenCalledOnce();
-    expect(mocks.setBriefRulesProvider).toHaveBeenCalledOnce();
-    expect(mocks.undoBriefRulesProvider).toHaveBeenCalledOnce();
-    expect(mocks.bindBriefConversationProvider).toHaveBeenCalledOnce();
-    expect(mocks.updateCutProvider).toHaveBeenCalledOnce();
-    expect(mocks.placeCutScenesProvider).toHaveBeenCalledOnce();
-    expect(mocks.fitStoryboardProvider).toHaveBeenCalledOnce();
-    expect(mocks.deleteProjectProvider).toHaveBeenCalledOnce();
-    expect(mocks.updateSceneProvider).toHaveBeenCalledOnce();
-    expect(mocks.reorderScenesProvider).toHaveBeenCalledOnce();
-    expect(mocks.selectAssetProvider).toHaveBeenCalledOnce();
-    expect(mocks.persistCapturedPosterProvider).toHaveBeenCalledOnce();
-    expect(mocks.chooseAndImportReferenceProvider).toHaveBeenCalledOnce();
-    expect(mocks.detachBriefReferenceProvider).toHaveBeenCalledOnce();
-    expect(mocks.chooseAndExportAssetsProvider).toHaveBeenCalledOnce();
-    expect(mocks.getLatestRenderProvider).toHaveBeenCalledOnce();
-    expect(mocks.renderCutProvider).toHaveBeenCalledOnce();
-    expect(mocks.cancelRenderProvider).toHaveBeenCalledOnce();
-    expect(mocks.submitScenesProvider).toHaveBeenCalledOnce();
-    expect(mocks.cancelJobProvider).toHaveBeenCalledOnce();
-    expect(mocks.retryJobProvider).toHaveBeenCalledOnce();
-    expect(mocks.retryDownloadProvider).toHaveBeenCalledOnce();
-    expect(mocks.listConnectionCandidatesProvider).toHaveBeenCalledOnce();
-    expect(mocks.listConnectionsProvider).toHaveBeenCalledOnce();
-    expect(mocks.validateConnectionProvider).toHaveBeenCalledOnce();
-    expect(mocks.saveConnectionProvider).toHaveBeenCalledOnce();
-    expect(mocks.removeConnectionProvider).toHaveBeenCalledOnce();
-    expect(mocks.listRoutesProvider).toHaveBeenCalledOnce();
+    for (const name of providerNames) expect(mocks.providers[name], name).toHaveBeenCalledOnce();
   });
 
-  it('refuses direct read, mutation, and render commands before any Studio runtime work when disabled', async () => {
-    const service = dependencies.getService();
-    const runner = dependencies.getRenderRunner!();
+  it('refuses commands before service, picker, or context work when disabled', async () => {
     const getService = vi.fn(() => service);
-    const getRenderRunner = vi.fn(() => runner);
-    initCreativeStudioBridge({
-      ...dependencies,
-      isFeatureEnabled: () => false,
-      getService,
-      getRenderRunner,
-    });
-    const getProject = mocks.getProjectProvider.mock.calls[0]?.[0] as ProviderHandler;
-    const getLatestRender = mocks.getLatestRenderProvider.mock.calls[0]?.[0] as ProviderHandler;
-    const updateProject = mocks.updateProjectProvider.mock.calls[0]?.[0] as ProviderHandler;
-    const setBriefRules = mocks.setBriefRulesProvider.mock.calls[0]?.[0] as ProviderHandler;
-    const renderCut = mocks.renderCutProvider.mock.calls[0]?.[0] as ProviderHandler;
-    const disabled = {
-      ok: false,
-      error: {
-        code: 'feature_disabled',
-        messageKey: 'conversation.creativeStudio.errors.featureDisabled',
-      },
-    };
-
-    await expect(getProject({ projectId: 'project_1' })).resolves.toEqual(disabled);
-    await expect(getLatestRender({ projectId: 'project_1' })).resolves.toEqual(disabled);
-    await expect(updateProject({ projectId: 'project_1', expectedRevision: 1, name: 'Changed' })).resolves.toEqual(
-      disabled
-    );
-    await expect(setBriefRules({ projectId: 'project_1', expectedRevision: 1, rules: [] })).resolves.toEqual(disabled);
-    await expect(renderCut({ projectId: 'project_1' })).resolves.toEqual(disabled);
-    expect(getService).not.toHaveBeenCalled();
-    expect(getRenderRunner).not.toHaveBeenCalled();
-    expect(service.getProject).not.toHaveBeenCalled();
-    expect(service.getLatestRender).not.toHaveBeenCalled();
-    expect(service.updateProject).not.toHaveBeenCalled();
-    expect(service.setBriefRules).not.toHaveBeenCalled();
-    expect(runner.renderCut).not.toHaveBeenCalled();
-  });
-
-  it('keeps direct read, mutation, and render commands unchanged when enabled', async () => {
-    const service = dependencies.getService();
-    const runner = dependencies.getRenderRunner!();
-    initCreativeStudioBridge({ ...dependencies, getService: () => service, getRenderRunner: () => runner });
-    const getProject = mocks.getProjectProvider.mock.calls[0]?.[0] as ProviderHandler;
-    const getLatestRender = mocks.getLatestRenderProvider.mock.calls[0]?.[0] as ProviderHandler;
-    const updateProject = mocks.updateProjectProvider.mock.calls[0]?.[0] as ProviderHandler;
-    const setBriefRules = mocks.setBriefRulesProvider.mock.calls[0]?.[0] as ProviderHandler;
-    const renderCut = mocks.renderCutProvider.mock.calls[0]?.[0] as ProviderHandler;
-
-    await expect(getProject({ projectId: 'project_1' })).resolves.toEqual({ ok: true, data: project });
-    await expect(getLatestRender({ projectId: 'project_1' })).resolves.toEqual({ ok: true, data: null });
-    await expect(updateProject({ projectId: 'project_1', expectedRevision: 1, name: 'Changed' })).resolves.toEqual({
-      ok: true,
-      data: project,
-    });
-    await expect(setBriefRules({ projectId: 'project_1', expectedRevision: 1, rules: [] })).resolves.toEqual({
-      ok: true,
-      data: project,
-    });
-    await expect(renderCut({ projectId: 'project_1' })).resolves.toEqual({
-      ok: true,
-      data: { assetId: 'render_1', missingSceneIds: ['scene_2'] },
-    });
-  });
-
-  it('delegates render start and cancellation without entering the project service', async () => {
-    const runner = dependencies.getRenderRunner!();
-    initCreativeStudioBridge({ ...dependencies, getRenderRunner: () => runner });
-    const render = mocks.renderCutProvider.mock.calls[0]?.[0] as ProviderHandler;
-    const cancel = mocks.cancelRenderProvider.mock.calls[0]?.[0] as ProviderHandler;
-
-    await expect(render({ projectId: 'project_1' })).resolves.toEqual({
-      ok: true,
-      data: { assetId: 'render_1', missingSceneIds: ['scene_2'] },
-    });
-    await expect(cancel({ projectId: 'project_1' })).resolves.toEqual({
-      ok: true,
-      data: { cancelled: true },
-    });
-    expect(runner.renderCut).toHaveBeenCalledExactlyOnceWith('project_1');
-    expect(runner.cancelRender).toHaveBeenCalledExactlyOnceWith('project_1');
-  });
-
-  it.each([
-    ['busy', 'conversation.creativeStudio.phase.review.render.errors.busy'],
-    ['ffmpeg_unavailable', 'conversation.creativeStudio.phase.review.render.errors.ffmpegUnavailable'],
-    ['render_failed', 'conversation.creativeStudio.phase.review.render.errors.failed'],
-    ['no_renderable_scenes', 'conversation.creativeStudio.phase.review.render.errors.noRenderableScenes'],
-    ['cancelled', 'conversation.creativeStudio.phase.review.render.errors.cancelled'],
-  ] as const)('maps the %s render failure to its dedicated message', async (code, messageKey) => {
-    const runner = {
-      renderCut: vi.fn(async () => {
-        throw new StudioRenderRunnerError(code);
-      }),
-      cancelRender: vi.fn(() => false),
-      getState: vi.fn(() => null),
-    };
-    initCreativeStudioBridge({ ...dependencies, getRenderRunner: () => runner });
-    const render = mocks.renderCutProvider.mock.calls[0]?.[0] as ProviderHandler;
-
-    await expect(render({ projectId: 'project_1' })).resolves.toEqual({
-      ok: false,
-      error: { code, messageKey },
-    });
-  });
-
-  it('delegates proposal listing, acceptance, and rejection through dedicated providers', async () => {
-    const service = dependencies.getService();
-    initCreativeStudioBridge({ getService: () => service });
-    const list = mocks.listProposalsProvider.mock.calls[0]?.[0] as ProviderHandler;
-    const accept = mocks.acceptProposalProvider.mock.calls[0]?.[0] as ProviderHandler;
-    const reject = mocks.rejectProposalProvider.mock.calls[0]?.[0] as ProviderHandler;
-    const projectInput = { projectId: 'project_1' };
-    const proposalInput = { ...projectInput, proposalId: 'proposal_1' };
-
-    await list(projectInput);
-    await accept(proposalInput);
-    await reject(proposalInput);
-
-    expect(service.listProposals).toHaveBeenCalledExactlyOnceWith(projectInput);
-    expect(service.acceptProposal).toHaveBeenCalledExactlyOnceWith(proposalInput);
-    expect(service.rejectProposal).toHaveBeenCalledExactlyOnceWith(proposalInput);
-  });
-
-  it('delegates one exact model-selection mutation', async () => {
-    const service = dependencies.getService();
-    initCreativeStudioBridge({ getService: () => service });
-    const handler = mocks.updateModelSelectionProvider.mock.calls[0]?.[0] as ProviderHandler;
-    const input = {
-      projectId: 'project_1',
-      expectedRevision: 4,
-      role: 'storyboard',
-      selection: { providerId: 'provider_1', model: 'gpt-4o' },
-    } as const;
-
-    await handler(input);
-
-    expect(service.updateModelSelection).toHaveBeenCalledExactlyOnceWith(input);
-  });
-
-  it('delegates one exact cut mutation through its dedicated provider', async () => {
-    const service = dependencies.getService();
-    initCreativeStudioBridge({ getService: () => service });
-    const handler = mocks.updateCutProvider.mock.calls[0]?.[0] as ProviderHandler;
-    const input = {
-      projectId: 'project_1',
-      expectedRevision: 4,
-      cutId: 'cut_1',
-      cut: {
-        orderMode: 'storyboard' as const,
-        clipOrder: ['clip_1'],
-        clips: {
-          clip_1: {
-            sourceInSeconds: 0.5,
-            sourceOutSeconds: 4.5,
-            crop: null,
-            filters: [{ id: 'contrast' as const, amount: 0.25 }],
-          },
-        },
-      },
-    };
-
-    await expect(handler(input)).resolves.toEqual({ ok: true, data: project });
-    expect(service.updateCut).toHaveBeenCalledExactlyOnceWith(input);
-  });
-
-  it('delegates canonical cut placement without letting the renderer mint clip identities', async () => {
-    const service = dependencies.getService();
-    initCreativeStudioBridge({ getService: () => service });
-    const handler = mocks.placeCutScenesProvider.mock.calls[0]?.[0] as ProviderHandler;
-    const input = {
-      projectId: 'project_1',
-      expectedRevision: 4,
-      cutId: 'cut_1',
-      sceneIds: ['scene_2'],
-      beforeClipId: 'clip_1',
-    };
-
-    await expect(handler(input)).resolves.toEqual({ ok: true, data: project });
-    expect(service.placeCutScenes).toHaveBeenCalledExactlyOnceWith(input);
-  });
-
-  it.each([
-    [
-      new CreativeStudioServiceError('invalid_route'),
-      'invalid_route',
-      'conversation.creativeStudio.errors.invalidRoute',
-    ],
-    [
-      new CreativeStudioStoreError('stale_project', 'raw compare-and-set failure'),
-      'stale_project',
-      'conversation.creativeStudio.errors.staleProject',
-    ],
-    [
-      new CreativeStudioStoreError('storage_error', 'raw storage path'),
-      'storage_error',
-      'conversation.creativeStudio.errors.storage',
-    ],
-    [
-      new CreativeStudioStoreError('unsupported_prototype_schema', 'raw schema boundary detail'),
-      'storage_error',
-      'conversation.creativeStudio.errors.storage',
-    ],
-  ] as const)('maps model-selection service failures without exposing details', async (failure, code, messageKey) => {
-    const service = {
-      ...dependencies.getService(),
-      updateModelSelection: vi.fn(async () => {
-        throw failure;
-      }),
-    };
-    initCreativeStudioBridge({ getService: () => service });
-    const handler = mocks.updateModelSelectionProvider.mock.calls[0]?.[0] as ProviderHandler;
+    const showOpenDialog = vi.fn(async () => ({ canceled: false, filePaths: ['/private/reference.png'] }));
+    initCreativeStudioBridge({ ...dependencies, isFeatureEnabled: () => false, getService, showOpenDialog });
 
     await expect(
-      handler({
+      registeredHandler('applyAuthoringBatch')({
         projectId: 'project_1',
-        expectedRevision: 4,
-        role: 'storyboard',
-        selection: { providerId: 'provider_1', model: 'gpt-4o' },
-      })
-    ).resolves.toEqual({ ok: false, error: { code, messageKey } });
+        expectedRevision: 1,
+        operations: [{ kind: 'set_brief', brief: 'x' }],
+      } as never)
+    ).resolves.toEqual({
+      ok: false,
+      error: { code: 'feature_disabled', messageKey: 'conversation.creativeStudio.errors.featureDisabled' },
+    });
+    await expect(
+      registeredHandler('importSeedStill')({
+        projectId: 'project_1',
+        expectedRevision: 1,
+        shotId: 'shot_1',
+      } as never)
+    ).resolves.toMatchObject({ ok: false });
+    expect(getService).not.toHaveBeenCalled();
+    expect(showOpenDialog).not.toHaveBeenCalled();
   });
 
-  it('delegates generation mutations with their route, revision, and acknowledgement contracts intact', async () => {
-    const service = dependencies.getService();
-    initCreativeStudioBridge({ getService: () => service });
-    const submit = mocks.submitScenesProvider.mock.calls[0]?.[0] as ProviderHandler;
-    const cancel = mocks.cancelJobProvider.mock.calls[0]?.[0] as ProviderHandler;
-    const retry = mocks.retryJobProvider.mock.calls[0]?.[0] as ProviderHandler;
-    const retryDownload = mocks.retryDownloadProvider.mock.calls[0]?.[0] as ProviderHandler;
-    const submitInput = {
-      projectId: 'project_1',
-      expectedRevision: 1,
-      mode: 'single' as const,
-      sceneIds: ['scene_1'],
-      catalogVersion: '0123456789abcdef',
-      routes: [
-        {
-          sceneId: 'scene_1',
-          choiceId: 'choice_video',
-          kind: 'video',
-        },
-      ],
-    };
-    const jobInput = { projectId: 'project_1', jobId: 'job_1', expectedRevision: 2 };
-    const retryInput = { ...jobInput, acknowledgePossibleDuplicateCharge: true };
-
-    await submit(submitInput);
-    await cancel(jobInput);
-    await retry(retryInput);
-    await retryDownload(jobInput);
-
-    expect(service.submitScenes).toHaveBeenCalledWith(submitInput);
-    expect(service.cancelJob).toHaveBeenCalledWith(jobInput);
-    expect(service.retryJob).toHaveBeenCalledWith(retryInput);
-    expect(service.retryDownload).toHaveBeenCalledWith(jobInput);
-  });
-
-  it('delegates one structured fit request and returns the structured outcome', async () => {
-    const service = dependencies.getService();
-    initCreativeStudioBridge({ getService: () => service });
-    const handler = mocks.fitStoryboardProvider.mock.calls[0]?.[0] as ProviderHandler;
+  it('mints the reducer envelope in main and returns only the exact commit DTO', async () => {
+    initCreativeStudioBridge(dependencies);
     const input = {
       projectId: 'project_1',
-      expectedRevision: 1,
-      catalogVersion: '0123456789abcdef',
+      expectedRevision: 6,
+      operations: [{ kind: 'set_brief' as const, brief: 'Revised' }],
     };
 
-    await expect(handler(input)).resolves.toMatchObject({
+    await expect(registeredHandler('applyAuthoringBatch')(input as never)).resolves.toEqual({
       ok: true,
-      data: { status: 'already_matches', changedSceneIds: [], lockedSceneIds: [] },
+      data: {
+        projectId: 'project_1',
+        projectRevision: 7,
+        createdBeatIds: ['beat_2'],
+        createdShotIds: ['shot_3'],
+      },
     });
-    expect(service.fitStoryboard).toHaveBeenCalledExactlyOnceWith(input);
+    expect(service.applyMutations).toHaveBeenCalledExactlyOnceWith(
+      {
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        projectId: input.projectId,
+        expectedRevision: input.expectedRevision,
+        operations: input.operations,
+      },
+      { mutationId: 'native_mutation_1', capturedAt: '2026-08-19T02:03:04.000Z' }
+    );
+    expect((await registeredHandler('applyAuthoringBatch')(input as never)) as object).not.toHaveProperty('project');
   });
 
   it.each([
     [
-      'cancelJob',
-      mocks.cancelJobProvider,
-      new StudioJobManagerError('invalid_request'),
-      'invalid_payload',
-      'conversation.creativeStudio.errors.invalidPayload',
+      'undoLast',
+      { projectId: 'project_1', expectedRevision: 1, entryId: 'undo_1' },
+      { kind: 'undo_last', entryId: 'undo_1' },
     ],
     [
-      'cancelJob',
-      mocks.cancelJobProvider,
-      new StudioJobManagerError('cancellation_refused'),
-      'cancellation_refused',
-      'conversation.creativeStudio.errors.cancellationRefused',
+      'editProject',
+      { projectId: 'project_1', expectedRevision: 1, changes: { name: 'Changed' } },
+      { kind: 'edit_project', changes: { name: 'Changed' } },
+    ],
+    ['setRules', { projectId: 'project_1', expectedRevision: 1, rules: [] }, { kind: 'set_rules', rules: [] }],
+    [
+      'parkBeat',
+      { projectId: 'project_1', expectedRevision: 1, beatId: 'beat_1' },
+      { kind: 'park_beat', beatId: 'beat_1' },
     ],
     [
-      'retryJob',
-      mocks.retryJobProvider,
-      new StudioJobManagerError('duplicate_charge_acknowledgement_required'),
-      'duplicate_charge_acknowledgement_required',
-      'conversation.creativeStudio.errors.duplicateChargeAcknowledgementRequired',
+      'restoreBeat',
+      { projectId: 'project_1', expectedRevision: 1, beatId: 'beat_1', beforeBeatId: null },
+      { kind: 'restore_beat', beatId: 'beat_1', beforeBeatId: null },
     ],
     [
-      'retryDownload',
-      mocks.retryDownloadProvider,
-      new StudioJobManagerError('unsupported'),
-      'unsupported',
-      'conversation.creativeStudio.jobs.errors.unsupported',
+      'parkShot',
+      { projectId: 'project_1', expectedRevision: 1, shotId: 'shot_1' },
+      { kind: 'park_shot', shotId: 'shot_1' },
     ],
-  ] as const)(
-    'redacts %s manager failures into a stable typed command envelope',
-    async (method, provider, failure, code, messageKey) => {
-      const service = {
-        ...dependencies.getService(),
-        [method]: vi.fn(async () => {
-          throw failure;
-        }),
-      };
-      initCreativeStudioBridge({ getService: () => service });
-      const handler = provider.mock.calls[0]?.[0] as ProviderHandler;
+    [
+      'restoreShot',
+      { projectId: 'project_1', expectedRevision: 1, shotId: 'shot_1', beforeShotId: null },
+      { kind: 'restore_shot', shotId: 'shot_1', beforeShotId: null },
+    ],
+    [
+      'parkTake',
+      { projectId: 'project_1', expectedRevision: 1, shotId: 'shot_1', assetId: 'asset_1' },
+      { kind: 'park_take', shotId: 'shot_1', assetId: 'asset_1' },
+    ],
+    [
+      'addAlternateTake',
+      { projectId: 'project_1', expectedRevision: 1, shotId: 'shot_1', assetId: 'asset_1' },
+      { kind: 'add_alternate_take', shotId: 'shot_1', assetId: 'asset_1' },
+    ],
+    [
+      'restoreTake',
+      { projectId: 'project_1', expectedRevision: 1, shotId: 'shot_1', assetId: 'asset_1' },
+      { kind: 'restore_take', shotId: 'shot_1', assetId: 'asset_1' },
+    ],
+    [
+      'selectTake',
+      { projectId: 'project_1', expectedRevision: 1, shotId: 'shot_1', assetId: 'asset_1' },
+      { kind: 'select_take', shotId: 'shot_1', assetId: 'asset_1' },
+    ],
+    ['reorderBin', { projectId: 'project_1', expectedRevision: 1, bin: [] }, { kind: 'reorder_bin', bin: [] }],
+  ] as const)('maps %s to one same-named reducer operation', async (providerName, input, operation) => {
+    initCreativeStudioBridge(dependencies);
+    await registeredHandler(providerName)(input as never);
+    expect(service.applyMutations).toHaveBeenCalledExactlyOnceWith(
+      {
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        projectId: input.projectId,
+        expectedRevision: input.expectedRevision,
+        operations: [operation],
+      },
+      { mutationId: 'native_mutation_1', capturedAt: '2026-08-19T02:03:04.000Z' }
+    );
+  });
 
-      await expect(handler({ projectId: 'project_1', jobId: 'job_1', expectedRevision: 1 })).resolves.toEqual({
-        ok: false,
-        error: { code, messageKey },
+  it.each(['retryConditioningFrame', 'cancelWaitingCascade'] as const)(
+    'projects %s to an empty-created-ids commit result',
+    async (providerName) => {
+      initCreativeStudioBridge(dependencies);
+      await expect(
+        registeredHandler(providerName)({
+          projectId: 'project_1',
+          expectedRevision: 7,
+          dependentShotId: 'shot_2',
+        } as never)
+      ).resolves.toEqual({
+        ok: true,
+        data: { projectId: 'project_1', projectRevision: 8, createdBeatIds: [], createdShotIds: [] },
       });
     }
   );
 
-  it('delegates connection and route commands through the same redacted command envelope', async () => {
-    const service = {
-      ...dependencies.getService(),
-      listConnectionCandidates: vi.fn(async () => [
-        {
-          providerId: 'provider_1',
-          providerName: 'Gateway',
-          models: [{ model: 'open-sora', health: 'available' as const }],
-        },
-      ]),
-      listConnections: vi.fn(async () => ({
-        integrations: [
-          {
-            integrationId: 'integration_x5T8cW1h',
-            kind: 'video' as const,
-            labelKey: 'selfHostedVideoGateway' as const,
-          },
-        ],
-        connections: [
-          {
-            bindingId: 'binding_1',
-            providerId: 'provider_1',
-            integrationId: 'integration_x5T8cW1h',
-            labelKey: 'selfHostedVideoGateway' as const,
-            model: 'open-sora',
-            capabilities: { mediaKinds: ['video' as const], audioModes: ['none'] },
-            validatedAt: '2026-07-30T00:00:00.000Z',
-          },
-        ],
-      })),
-      validateConnection: vi.fn(async () => {
-        throw new CreativeStudioServiceError('provider_error');
-      }),
-      saveConnection: vi.fn(),
-      removeConnection: vi.fn(),
-      listRoutes: vi.fn(),
-    };
-    initCreativeStudioBridge({ getService: () => service });
-    const candidates = mocks.listConnectionCandidatesProvider.mock.calls[0]?.[0] as ProviderHandler;
-    const connections = mocks.listConnectionsProvider.mock.calls[0]?.[0] as ProviderHandler;
-    const validate = mocks.validateConnectionProvider.mock.calls[0]?.[0] as ProviderHandler;
+  it('keeps read-only workspace and chain results on their exact service seams', async () => {
+    initCreativeStudioBridge(dependencies);
+    await expect(registeredHandler('getWorkspaceStatus')({ projectId: 'project_1' } as never)).resolves.toEqual({
+      ok: true,
+      data: workspaceStatus,
+    });
+    await registeredHandler('getChainStatus')({ projectId: 'project_1' } as never);
+    expect(service.getWorkspaceStatus).toHaveBeenCalledExactlyOnceWith({ projectId: 'project_1' });
+    expect(service.getChainStatus).toHaveBeenCalledExactlyOnceWith({ projectId: 'project_1' });
+  });
 
-    await expect(candidates(undefined)).resolves.toEqual({ ok: true, data: await service.listConnectionCandidates() });
-    await expect(connections(undefined)).resolves.toEqual({ ok: true, data: await service.listConnections() });
+  it('keeps Brief and seed-still picker imports separate and returns no path or project', async () => {
+    initCreativeStudioBridge(dependencies);
+    const briefInput = { projectId: 'project_1', expectedRevision: 6, briefReferenceRole: 'look' as const };
+    const seedInput = { projectId: 'project_1', expectedRevision: 6, shotId: 'shot_1' };
+
+    await expect(registeredHandler('chooseAndImportReference')(briefInput as never)).resolves.toEqual({
+      ok: true,
+      data: { status: 'imported', assetId: 'asset_1', projectRevision: 7 },
+    });
+    await expect(registeredHandler('importSeedStill')(seedInput as never)).resolves.toEqual({
+      ok: true,
+      data: { status: 'imported', assetId: 'asset_1', projectRevision: 7 },
+    });
+    expect(service.importReferenceFromPath).toHaveBeenNthCalledWith(1, {
+      ...briefInput,
+      sourcePath: '/private/reference.png',
+    });
+    expect(service.importReferenceFromPath).toHaveBeenNthCalledWith(2, {
+      ...seedInput,
+      sourcePath: '/private/reference.png',
+    });
+  });
+
+  it('returns picker cancellation without touching storage', async () => {
+    const showOpenDialog = vi.fn(async () => ({ canceled: true, filePaths: [] }));
+    initCreativeStudioBridge({ ...dependencies, showOpenDialog });
     await expect(
-      validate({ providerId: 'provider_1', integrationId: 'integration_x5T8cW1h', model: 'open-sora' })
+      registeredHandler('importSeedStill')({
+        projectId: 'project_1',
+        expectedRevision: 6,
+        shotId: 'shot_1',
+      } as never)
+    ).resolves.toEqual({ ok: true, data: { status: 'cancelled' } });
+    expect(service.importReferenceFromPath).not.toHaveBeenCalled();
+  });
+
+  it('projects Brief detach and maps media_in_use without leaking the media error', async () => {
+    initCreativeStudioBridge(dependencies);
+    await expect(
+      registeredHandler('detachBriefReference')({
+        projectId: 'project_1',
+        expectedRevision: 6,
+        assetId: 'asset_1',
+      } as never)
+    ).resolves.toEqual({ ok: true, data: { status: 'detached', projectRevision: 7 } });
+
+    vi.mocked(service.detachBriefReference).mockRejectedValueOnce(new CreativeStudioMediaError('media_in_use'));
+    await expect(
+      registeredHandler('detachBriefReference')({
+        projectId: 'project_1',
+        expectedRevision: 7,
+        assetId: 'asset_1',
+      } as never)
     ).resolves.toEqual({
       ok: false,
-      error: { code: 'provider_error', messageKey: 'conversation.creativeStudio.errors.provider' },
+      error: { code: 'media_in_use', messageKey: 'conversation.creativeStudio.errors.mediaInUse' },
     });
   });
 
-  it('returns explicit cancellation outcomes without handing a path to either service operation', async () => {
-    const service = dependencies.getService();
-    const showOpenDialog = vi.fn(async () => ({ canceled: true, filePaths: ['/private/ignored.png'] }));
-    const showExportDialog = vi.fn(async () => ({ canceled: true, filePaths: ['/private/ignored-export'] }));
-    initCreativeStudioBridge({
-      getService: () => service,
-      getParentWindow: () => undefined,
-      showOpenDialog,
-      showExportDialog,
-    });
-    const importHandler = mocks.chooseAndImportReferenceProvider.mock.calls[0]?.[0] as ProviderHandler;
-    const exportHandler = mocks.chooseAndExportAssetsProvider.mock.calls[0]?.[0] as ProviderHandler;
-
-    await expect(
-      importHandler({ projectId: 'project_1', expectedRevision: 1, briefReferenceRole: 'cast' })
-    ).resolves.toEqual({ ok: true, data: { status: 'cancelled' } });
-    await expect(exportHandler({ projectId: 'project_1', includeReferences: true })).resolves.toEqual({
-      ok: true,
-      data: { status: 'cancelled' },
-    });
-    expect(service.importReferenceFromPath).not.toHaveBeenCalled();
-    expect(service.exportAssetsToDirectory).not.toHaveBeenCalled();
-  });
-
-  it('keeps selected paths in main while returning only safe import and export DTOs', async () => {
-    const importPath = '/private/user/reference.png';
-    const exportPath = '/private/user/export-target';
-    const asset = {
-      id: 'asset_1',
-      projectId: 'project_1',
-      sceneId: null,
-      mediaKind: 'image' as const,
-      mimeType: 'image/png',
-      managedAsset: { collection: 'imports' as const, fileName: 'asset_1.png' },
-      byteSize: 33,
-      sha256: 'a'.repeat(64),
-      createdAt: '2026-07-30T00:00:00.000Z',
-    };
-    const service = {
-      ...dependencies.getService(),
-      importReferenceFromPath: vi.fn(async () => ({ asset, project })),
-      exportAssetsToDirectory: vi.fn(async () => ({
-        folderName: 'Film-20260730-120000',
-        exported: [{ assetId: 'asset_1', fileName: 'scene-01.png' }],
-        missingSceneIds: [],
-      })),
-    };
-    initCreativeStudioBridge({
-      getService: () => service,
-      getParentWindow: () => undefined,
-      showOpenDialog: async () => ({ canceled: false, filePaths: [importPath] }),
-      showExportDialog: async () => ({ canceled: false, filePaths: [exportPath] }),
-    });
-    const importHandler = mocks.chooseAndImportReferenceProvider.mock.calls[0]?.[0] as ProviderHandler;
-    const exportHandler = mocks.chooseAndExportAssetsProvider.mock.calls[0]?.[0] as ProviderHandler;
-
-    const imported = await importHandler({
-      projectId: 'project_1',
-      expectedRevision: 1,
-      briefReferenceRole: 'look',
-    });
-    const exported = await exportHandler({ projectId: 'project_1', includeReferences: false });
-
-    expect(service.importReferenceFromPath).toHaveBeenCalledWith({
-      projectId: 'project_1',
-      expectedRevision: 1,
-      briefReferenceRole: 'look',
-      sourcePath: importPath,
-    });
-    expect(service.exportAssetsToDirectory).toHaveBeenCalledWith({
-      projectId: 'project_1',
-      includeReferences: false,
-      destinationDirectory: exportPath,
-    });
-    expect(imported).toEqual({ ok: true, data: { status: 'imported', asset, project } });
-    expect(exported).toEqual({
-      ok: true,
-      data: {
-        status: 'exported',
-        folderName: 'Film-20260730-120000',
-        exported: [{ assetId: 'asset_1', fileName: 'scene-01.png' }],
-        missingSceneIds: [],
-      },
-    });
-    expect(JSON.stringify({ imported, exported })).not.toContain('/private/user');
-  });
-
-  it('forwards a legacy scene reference exactly and returns its canonical import outcome', async () => {
-    const importPath = '/private/user/scene-reference.png';
-    const asset = {
-      id: 'asset_scene_reference',
-      projectId: 'project_1',
-      sceneId: 'scene_1',
-      mediaKind: 'image' as const,
-      mimeType: 'image/png',
-      managedAsset: { collection: 'imports' as const, fileName: 'asset_scene_reference.png' },
-      byteSize: 33,
-      sha256: 'b'.repeat(64),
-      createdAt: '2026-07-30T00:00:00.000Z',
-    };
-    const importedProject = structuredClone(project);
-    importedProject.sceneOrder = ['scene_1'];
-    importedProject.scenes.scene_1 = {
-      id: 'scene_1',
-      title: 'Opening',
-      purpose: '',
-      visualPrompt: '',
-      narration: '',
-      onScreenText: '',
-      mediaKind: 'image',
-      durationSeconds: 5,
-      referenceAssetId: null,
-      selectedAssetId: null,
-      assetIds: [],
-      jobIds: [],
-      reviewState: 'draft',
-    };
-    importedProject.assets[asset.id] = asset;
-    importedProject.scenes.scene_1.assetIds.push(asset.id);
-    importedProject.scenes.scene_1.referenceAssetId = asset.id;
-    const service = {
-      ...dependencies.getService(),
-      importReferenceFromPath: vi.fn(async () => ({ asset, project: importedProject })),
-    };
-    initCreativeStudioBridge({
-      getService: () => service,
-      getParentWindow: () => undefined,
-      showOpenDialog: async () => ({ canceled: false, filePaths: [importPath] }),
-    });
-    const importHandler = mocks.chooseAndImportReferenceProvider.mock.calls[0]?.[0] as ProviderHandler;
-    const input = { projectId: 'project_1', sceneId: 'scene_1', expectedRevision: 4 };
-
-    await expect(importHandler(input)).resolves.toEqual({
-      ok: true,
-      data: { status: 'imported', asset, project: importedProject },
-    });
-    expect(service.importReferenceFromPath).toHaveBeenCalledExactlyOnceWith({ ...input, sourcePath: importPath });
-  });
-
-  it('forwards detach exactly once and returns the canonical project from the successful mutation', async () => {
-    const service = dependencies.getService();
-    initCreativeStudioBridge({ getService: () => service });
-    const handler = mocks.detachBriefReferenceProvider.mock.calls[0]?.[0] as ProviderHandler;
-    const input = { projectId: 'project_1', assetId: 'asset_1', expectedRevision: 1 };
-
-    await expect(handler(input)).resolves.toEqual({ ok: true, data: project });
-    expect(service.detachBriefReference).toHaveBeenCalledExactlyOnceWith(input);
-  });
-
-  it.each([
-    [new CreativeStudioMediaError('not_found'), 'not_found', 'conversation.creativeStudio.errors.projectNotFound'],
-    [new CreativeStudioMediaError('stale_project'), 'stale_project', 'conversation.creativeStudio.errors.staleProject'],
-    [
-      new CreativeStudioMediaError('invalid_media'),
-      'invalid_payload',
-      'conversation.creativeStudio.errors.invalidPayload',
-    ],
-    [new CreativeStudioMediaError('storage_error'), 'storage_error', 'conversation.creativeStudio.errors.storage'],
-  ] as const)('maps media failures without leaking their main-process details', async (failure, code, messageKey) => {
-    const service = {
-      ...dependencies.getService(),
-      importReferenceFromPath: vi.fn(async () => {
-        throw failure;
-      }),
-    };
-    initCreativeStudioBridge({
-      getService: () => service,
-      getParentWindow: () => undefined,
-      showOpenDialog: async () => ({ canceled: false, filePaths: ['/private/sensitive.png'] }),
-    });
-    const handler = mocks.chooseAndImportReferenceProvider.mock.calls[0]?.[0] as ProviderHandler;
-
-    await expect(handler({ projectId: 'project_1', expectedRevision: 1 })).resolves.toEqual({
-      ok: false,
-      error: { code, messageKey },
-    });
-  });
-
-  it('returns a typed storage result instead of leaking an unexpected service exception', async () => {
-    dependencies = {
-      getService: () => ({
-        listProjects: async () => {
-          throw new Error('disk path /private/user/studio leaked');
-        },
-        createProject: vi.fn(),
-        getProject: vi.fn(),
-        proposeStoryboard: vi.fn(),
-        updateProject: vi.fn(),
-        updateCut: vi.fn(),
-        deleteProject: vi.fn(),
-        updateScene: vi.fn(),
-        reorderScenes: vi.fn(),
-        selectAsset: vi.fn(),
-        importReferenceFromPath: vi.fn(),
-        exportAssetsToDirectory: vi.fn(),
-      }),
-    };
+  it('redacts stale and unexpected service failures', async () => {
+    vi.mocked(service.applyMutations).mockRejectedValueOnce(
+      new CreativeStudioStoreError('stale_project', 'raw compare-and-set details')
+    );
     initCreativeStudioBridge(dependencies);
-    const handler = mocks.listProjectsProvider.mock.calls[0]?.[0] as ProviderHandler;
+    await expect(
+      registeredHandler('undoLast')({
+        projectId: 'project_1',
+        expectedRevision: 1,
+        entryId: 'undo_1',
+      } as never)
+    ).resolves.toEqual({
+      ok: false,
+      error: { code: 'stale_project', messageKey: 'conversation.creativeStudio.errors.staleProject' },
+    });
 
-    await expect(handler(undefined)).resolves.toEqual({
+    vi.mocked(service.listProjects).mockRejectedValueOnce(new Error('private path'));
+    await expect(registeredHandler('listProjects')()).resolves.toEqual({
       ok: false,
       error: { code: 'storage_error', messageKey: 'conversation.creativeStudio.errors.storage' },
     });
   });
 
-  it('maps a stale store result instead of exposing its raw message', async () => {
-    dependencies = {
-      getService: () => ({
-        listProjects: vi.fn(async () => []),
-        createProject: vi.fn(),
-        getProject: vi.fn(),
-        proposeStoryboard: vi.fn(),
-        updateProject: async () => {
-          throw new CreativeStudioStoreError('stale_project', 'raw compare-and-set failure');
-        },
-        deleteProject: vi.fn(),
-        updateScene: vi.fn(),
-        reorderScenes: vi.fn(),
-        selectAsset: vi.fn(),
-        importReferenceFromPath: vi.fn(),
-        exportAssetsToDirectory: vi.fn(),
-      }),
-    };
+  it('retains schema-independent connection settings behind the V2 service', async () => {
     initCreativeStudioBridge(dependencies);
-    const handler = mocks.updateProjectProvider.mock.calls[0]?.[0] as ProviderHandler;
-
-    await expect(handler({ projectId: 'project_1', expectedRevision: 1, name: 'Changed' })).resolves.toEqual({
-      ok: false,
-      error: { code: 'stale_project', messageKey: 'conversation.creativeStudio.errors.staleProject' },
-    });
+    await registeredHandler('listConnectionCandidates')();
+    await registeredHandler('listConnections')();
+    await registeredHandler('validateConnection')({
+      providerId: 'provider_1',
+      integrationId: 'image',
+      model: 'm',
+    } as never);
+    await registeredHandler('saveConnection')({
+      providerId: 'provider_1',
+      integrationId: 'image',
+      model: 'm',
+    } as never);
+    await registeredHandler('removeConnection')({ bindingId: 'binding_1' } as never);
+    expect(service.listConnectionCandidates).toHaveBeenCalledOnce();
+    expect(service.listConnections).toHaveBeenCalledOnce();
+    expect(service.validateConnection).toHaveBeenCalledOnce();
+    expect(service.saveConnection).toHaveBeenCalledOnce();
+    expect(service.removeConnection).toHaveBeenCalledOnce();
   });
 
-  it('forwards an update-scene input once and returns canonical service data', async () => {
-    const service = dependencies.getService();
-    initCreativeStudioBridge({ getService: () => service });
-    const handler = mocks.updateSceneProvider.mock.calls[0]?.[0] as ProviderHandler;
-    const input = {
-      projectId: 'project_1',
-      expectedRevision: 1,
-      sceneId: 'scene_1',
-      scene: { id: 'scene_1' },
-    };
-
-    await expect(handler(input)).resolves.toEqual({ ok: true, data: project });
-    expect(service.updateScene).toHaveBeenCalledOnce();
-    expect(service.updateScene).toHaveBeenCalledWith(input);
-  });
-
-  it.each([
-    ['planning_unavailable', 'conversation.creativeStudio.errors.planningUnavailable'],
-    ['storyboard_exists', 'conversation.creativeStudio.errors.storyboardExists'],
-    ['busy', 'conversation.creativeStudio.errors.busy'],
-    ['provider_error', 'conversation.creativeStudio.errors.provider'],
-    ['stale_project', 'conversation.creativeStudio.errors.staleProject'],
-  ] as const)('returns a redacted %s planning envelope', async (code, messageKey) => {
-    dependencies = {
-      getService: () => ({
-        listProjects: vi.fn(async () => []),
-        createProject: vi.fn(),
-        getProject: vi.fn(),
-        proposeStoryboard: async () => {
-          throw code === 'stale_project'
-            ? new CreativeStudioStoreError(code, 'raw compare-and-set failure')
-            : new CreativeStudioServiceError(code);
-        },
-        updateProject: vi.fn(),
-        deleteProject: vi.fn(),
-        updateScene: vi.fn(),
-        reorderScenes: vi.fn(),
-        selectAsset: vi.fn(),
-        importReferenceFromPath: vi.fn(),
-        exportAssetsToDirectory: vi.fn(),
-      }),
-    };
+  it('maps explicit V2 service errors through the stable command envelope', async () => {
+    vi.mocked(service.listRoutes).mockRejectedValueOnce(new CreativeStudioServiceError('provider_error'));
     initCreativeStudioBridge(dependencies);
-    const handler = mocks.proposeStoryboardProvider.mock.calls[0]?.[0] as ProviderHandler;
-
-    await expect(handler({ projectId: 'project_1', expectedRevision: 1, replaceExisting: false })).resolves.toEqual({
+    await expect(registeredHandler('listRoutes')({ projectId: 'project_1' } as never)).resolves.toEqual({
       ok: false,
-      error: { code, messageKey },
+      error: { code: 'provider_error', messageKey: 'conversation.creativeStudio.errors.provider' },
     });
-  });
-
-  it('delegates every registered provider once instead of bypassing the typed service boundary', async () => {
-    const service = dependencies.getService();
-    initCreativeStudioBridge({ getService: () => service });
-    const sceneInput = {
-      projectId: 'project_1',
-      expectedRevision: 1,
-      sceneId: 'scene_1',
-      scene: { id: 'scene_1' },
-    };
-    const handlers: ReadonlyArray<[ReturnType<typeof vi.fn>, unknown]> = [
-      [mocks.listProjectsProvider, undefined],
-      [
-        mocks.createProjectProvider,
-        { name: 'Launch film', brief: '', aspectRatio: '16:9', targetDurationSeconds: 12, resolution: '1080p' },
-      ],
-      [mocks.getProjectProvider, { projectId: 'project_1' }],
-      [mocks.getBriefSessionServerProvider, { projectId: 'project_1' }],
-      [mocks.proposeStoryboardProvider, { projectId: 'project_1', expectedRevision: 1, replaceExisting: false }],
-      [
-        mocks.updateModelSelectionProvider,
-        {
-          projectId: 'project_1',
-          expectedRevision: 1,
-          role: 'storyboard',
-          selection: { providerId: 'provider_1', model: 'gpt-4o' },
-        },
-      ],
-      [mocks.updateProjectProvider, { projectId: 'project_1', expectedRevision: 1, name: 'Changed' }],
-      [mocks.setBriefRulesProvider, { projectId: 'project_1', expectedRevision: 1, rules: [] }],
-      [mocks.undoBriefRulesProvider, { projectId: 'project_1' }],
-      [
-        mocks.bindBriefConversationProvider,
-        { projectId: 'project_1', expectedRevision: 1, conversationId: 'conversation_brief' },
-      ],
-      [
-        mocks.updateCutProvider,
-        {
-          projectId: 'project_1',
-          expectedRevision: 1,
-          cutId: 'cut_1',
-          cut: { orderMode: 'storyboard', clipOrder: [], clips: {} },
-        },
-      ],
-      [mocks.deleteProjectProvider, { projectId: 'project_1', expectedRevision: 1 }],
-      [mocks.updateSceneProvider, sceneInput],
-      [mocks.reorderScenesProvider, { projectId: 'project_1', expectedRevision: 1, sceneOrder: ['scene_1'] }],
-      [
-        mocks.selectAssetProvider,
-        { projectId: 'project_1', expectedRevision: 1, sceneId: 'scene_1', assetId: 'asset_1' },
-      ],
-      [
-        mocks.persistCapturedPosterProvider,
-        {
-          projectId: 'project_1',
-          sceneId: 'scene_1',
-          videoAssetId: 'asset_1',
-          dataUrl: 'data:image/png;base64,iVBORw0KGgo=',
-          width: 1280,
-          height: 720,
-        },
-      ],
-    ];
-
-    await Promise.all(
-      handlers.map(([provider, input]) => {
-        const handler = provider.mock.calls[0]?.[0] as ProviderHandler;
-        return handler(input);
-      })
-    );
-
-    expect(service.listProjects).toHaveBeenCalledOnce();
-    expect(service.createProject).toHaveBeenCalledOnce();
-    expect(service.getProject).toHaveBeenCalledOnce();
-    expect(service.getBriefSessionServer).toHaveBeenCalledOnce();
-    expect(service.proposeStoryboard).toHaveBeenCalledOnce();
-    expect(service.updateModelSelection).toHaveBeenCalledOnce();
-    expect(service.updateProject).toHaveBeenCalledOnce();
-    expect(service.setBriefRules).toHaveBeenCalledOnce();
-    expect(service.undoBriefRules).toHaveBeenCalledOnce();
-    expect(service.bindBriefConversation).toHaveBeenCalledOnce();
-    expect(service.updateCut).toHaveBeenCalledOnce();
-    expect(service.deleteProject).toHaveBeenCalledOnce();
-    expect(service.updateScene).toHaveBeenCalledOnce();
-    expect(service.reorderScenes).toHaveBeenCalledOnce();
-    expect(service.selectAsset).toHaveBeenCalledOnce();
-    expect(service.persistCapturedPoster).toHaveBeenCalledOnce();
   });
 });
 
@@ -998,7 +477,7 @@ const createCloseHandshakeDependencies = (
   overrides: Partial<CreativeStudioCloseHandshakeDependencies> = {}
 ): CreativeStudioCloseHandshakeDependencies => ({
   getCurrentUrl: () => 'file:///Applications/WePrompt/index.html#/studio/project_1/table',
-  queryUnsavedWork: vi.fn(async () => ({ dirtySceneCount: 0 })),
+  queryUnsavedWork: vi.fn(async () => ({ dirtyDraftCount: 0 })),
   flushUnsavedWork: vi.fn(async () => ({ saved: true })),
   showMessageBox: vi.fn(async () => ({ response: 2 })),
   translate: (key, options) => (options?.count === undefined ? key : `${key}:${options.count}`),
@@ -1087,9 +566,9 @@ describe('createCreativeStudioCloseHandshake', () => {
     expect(dependencies.hideWindow).not.toHaveBeenCalled();
   });
 
-  it('offers save, discard, and cancel for dirty scenes before flushing and closing', async () => {
+  it('offers save, discard, and cancel for dirty drafts before flushing and closing', async () => {
     const dependencies = createCloseHandshakeDependencies({
-      queryUnsavedWork: vi.fn(async () => ({ dirtySceneCount: 2 })),
+      queryUnsavedWork: vi.fn(async () => ({ dirtyDraftCount: 2 })),
       showMessageBox: vi.fn(async () => ({ response: 0 })),
     });
     const handshake = createCreativeStudioCloseHandshake(dependencies);
@@ -1113,7 +592,7 @@ describe('createCreativeStudioCloseHandshake', () => {
 
   it('keeps the window open when the dirty-work dialog is cancelled', async () => {
     const dependencies = createCloseHandshakeDependencies({
-      queryUnsavedWork: vi.fn(async () => ({ dirtySceneCount: 1 })),
+      queryUnsavedWork: vi.fn(async () => ({ dirtyDraftCount: 1 })),
       showMessageBox: vi.fn(async () => ({ response: 2 })),
     });
     const handshake = createCreativeStudioCloseHandshake(dependencies);
@@ -1165,7 +644,7 @@ describe('createCreativeStudioCloseHandshake', () => {
   it('offers only discard or cancel when saving cannot complete', async () => {
     const showMessageBox = vi.fn().mockResolvedValueOnce({ response: 0 }).mockResolvedValueOnce({ response: 1 });
     const dependencies = createCloseHandshakeDependencies({
-      queryUnsavedWork: vi.fn(async () => ({ dirtySceneCount: 1 })),
+      queryUnsavedWork: vi.fn(async () => ({ dirtyDraftCount: 1 })),
       flushUnsavedWork: vi.fn(async () => {
         throw new Error('renderer flush timed out');
       }),
@@ -1186,11 +665,11 @@ describe('createCreativeStudioCloseHandshake', () => {
   });
 
   it('runs only one renderer preflight while repeated close events are in flight', async () => {
-    let resolveQuery: ((value: { dirtySceneCount: number }) => void) | undefined;
+    let resolveQuery: ((value: { dirtyDraftCount: number }) => void) | undefined;
     const dependencies = createCloseHandshakeDependencies({
       queryUnsavedWork: vi.fn(
         () =>
-          new Promise<{ dirtySceneCount: number }>((resolve) => {
+          new Promise<{ dirtyDraftCount: number }>((resolve) => {
             resolveQuery = resolve;
           })
       ),
@@ -1205,7 +684,7 @@ describe('createCreativeStudioCloseHandshake', () => {
     expect(firstEvent.preventDefault).toHaveBeenCalledOnce();
     expect(secondEvent.preventDefault).toHaveBeenCalledOnce();
     expect(dependencies.queryUnsavedWork).toHaveBeenCalledOnce();
-    resolveQuery?.({ dirtySceneCount: 0 });
+    resolveQuery?.({ dirtyDraftCount: 0 });
     await vi.waitFor(() => expect(dependencies.closeWindow).toHaveBeenCalledOnce());
   });
 
@@ -1231,7 +710,7 @@ describe('createCreativeStudioCloseHandshake', () => {
 
   it('does not hide the Studio window when explicit quit is cancelled', async () => {
     const dependencies = createCloseHandshakeDependencies({
-      queryUnsavedWork: vi.fn(async () => ({ dirtySceneCount: 1 })),
+      queryUnsavedWork: vi.fn(async () => ({ dirtyDraftCount: 1 })),
       showMessageBox: vi.fn(async () => ({ response: 2 })),
     });
     const handshake = createCreativeStudioCloseHandshake(dependencies);
@@ -1246,7 +725,7 @@ describe('createCreativeStudioCloseHandshake', () => {
   it('resets explicit-quit state after cancellation so a later quit can retry', async () => {
     const showMessageBox = vi.fn().mockResolvedValueOnce({ response: 2 }).mockResolvedValueOnce({ response: 1 });
     const dependencies = createCloseHandshakeDependencies({
-      queryUnsavedWork: vi.fn(async () => ({ dirtySceneCount: 1 })),
+      queryUnsavedWork: vi.fn(async () => ({ dirtyDraftCount: 1 })),
       showMessageBox,
     });
     const handshake = createCreativeStudioCloseHandshake(dependencies);

@@ -953,12 +953,7 @@
     "close": {
       "saveAndClose": "Guardar y cerrar",
       "discard": "Descartar y cerrar",
-      "cancel": "Cancelar",
-      "unsavedMessage": "{{count}} escenas tienen cambios sin guardar. ¿Quieres guardarlos antes de cerrar?",
-      "unsavedMessage_one": "{{count}} escena tiene cambios sin guardar. ¿Quieres guardarlos antes de cerrar?",
-      "unsavedMessage_many": "{{count}} escenas tienen cambios sin guardar. ¿Quieres guardarlos antes de cerrar?",
-      "unsavedMessage_other": "{{count}} escenas tienen cambios sin guardar. ¿Quieres guardarlos antes de cerrar?",
-      "unavailableMessage": "El Estudio creativo no respondió. Cerrar ahora puede descartar cambios de escena sin guardar."
+      "cancel": "Cancelar"
     },
     "phase": {
       "nav": {

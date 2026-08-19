@@ -72,7 +72,7 @@ const isUnsafeTextCharacter = (character: string): boolean => {
 };
 
 const isSafeProviderId = (value: string): boolean => SAFE_ID.test(value);
-const isSafeModel = (value: string): boolean =>
+const isSafeProviderModel = (value: string): boolean =>
   value.length > 0 && value.length <= 256 && value === value.trim() && !Array.from(value).some(isUnsafeTextCharacter);
 const providerIsConfigured = (provider: IProvider): boolean => {
   const apiKey = typeof provider.api_key === 'string' ? provider.api_key.trim() : '';
@@ -200,7 +200,7 @@ const resolveBindingRoute = (
     adapterId: binding.adapterId,
     model: binding.model,
   });
-  if (!provider || !isSafeProviderId(provider.id) || !isSafeModel(binding.model) || !kind) {
+  if (!provider || !isSafeProviderId(provider.id) || !isSafeProviderModel(binding.model) || !kind) {
     return retired();
   }
   if (!providerIsConfigured(provider)) {
@@ -278,7 +278,9 @@ export const createStudioProviderResolver = (deps: StudioProviderResolverDeps): 
       .map((provider) => ({
         providerId: provider.id,
         providerName: sanitizedProviderName(provider),
-        models: [...new Set(provider.models.filter((model) => isSafeModel(model) && available(provider, model)))]
+        models: [
+          ...new Set(provider.models.filter((model) => isSafeProviderModel(model) && available(provider, model))),
+        ]
           .map((model) => ({
             model,
             health: modelHealth(provider, model),

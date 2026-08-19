@@ -786,10 +786,10 @@
       "saveAndClose": "Save and close",
       "discard": "Discard and close",
       "cancel": "Cancel",
-      "unsavedMessage": "{{count}} scenes have unsaved edits. Save them before closing?",
-      "unsavedMessage_one": "{{count}} scene has unsaved edits. Save it before closing?",
-      "unsavedMessage_other": "{{count}} scenes have unsaved edits. Save them before closing?",
-      "unavailableMessage": "Creative Studio did not respond. Closing now may discard unsaved scene edits."
+      "unsavedMessage": "{{count}} drafts have unsaved edits. Save them before closing?",
+      "unsavedMessage_one": "{{count}} draft has unsaved edits. Save it before closing?",
+      "unsavedMessage_other": "{{count}} drafts have unsaved edits. Save them before closing?",
+      "unavailableMessage": "Creative Studio did not respond. Closing now may discard unsaved workspace drafts."
     },
     "phase": {
       "nav": {
@@ -1291,6 +1291,7 @@
       "staleProject": "The project changed elsewhere. Refresh it before retrying.",
       "planningUnavailable": "Storyboard drafting is unavailable. You can continue editing manually.",
       "invalidRoute": "The selected generation engine is invalid or unavailable.",
+      "mediaInUse": "This reference is in use by a queued paid request. Finish or cancel that request before detaching it.",
       "cancellationRefused": "The provider can no longer cancel this running job.",
       "duplicateChargeAcknowledgementRequired": "Acknowledge the possible duplicate provider charge before retrying.",
       "busy": "This project has active generation work.",
@@ -1407,6 +1408,98 @@
       "showDirector": "Show the Creative Director",
       "hideDirector": "Hide the Creative Director",
       "directorStarting": "Starting the Creative Director…"
+    },
+    "workspace": {
+      "errors": {
+        "storage": "Creative Studio could not read or save this workspace."
+      },
+      "project": {
+        "backToLibrary": "Back to Creative Studio",
+        "loading": "Loading workspace…",
+        "notFound": "This Creative Studio project could not be found.",
+        "structure": "{{beats}} beats · {{shots}} shots",
+        "unsupportedPrototype": "This project uses the retired scene format and cannot be opened in this workspace."
+      },
+      "views": {
+        "title": "Workspace views",
+        "table": "Table",
+        "board": "Board",
+        "cut": "Cut",
+        "tablePending": "Beat and shot authoring arrives in the next workspace task.",
+        "boardPending": "Storyboard planning arrives in the next workspace task.",
+        "cutPending": "Cut editing arrives in the next workspace task."
+      },
+      "library": {
+        "title": "Creative Studio",
+        "subtitle": "Plan stories as beats and shots, then review every generated take.",
+        "loading": "Loading projects…",
+        "empty": "Describe a new project to begin.",
+        "sectionLabel": "Projects",
+        "projectCount": "{{count}} projects",
+        "projectCount_one": "{{count}} project",
+        "projectCount_other": "{{count}} projects",
+        "unsupportedTitle": "Retired prototype projects",
+        "quarantinedTitle": "Projects needing recovery",
+        "cancel": "Cancel",
+        "deleteConfirm": "Delete project",
+        "deleteConfirmBody": "Delete “{{name}}”? This cannot be undone.",
+        "deleteConfirmTitle": "Delete Creative Studio project?",
+        "deleteProject": "Delete project",
+        "noPoster": "Storyboard",
+        "posterBadge": "Beat {{beat}} · Shot {{shot}}",
+        "beatCount": "{{count}} beats",
+        "beatCount_one": "{{count}} beat",
+        "beatCount_other": "{{count}} beats",
+        "shotCount": "{{count}} shots",
+        "shotCount_one": "{{count}} shot",
+        "shotCount_other": "{{count}} shots",
+        "selectedTakeCount": "{{count}} selected takes",
+        "selectedTakeCount_one": "{{count}} selected take",
+        "selectedTakeCount_other": "{{count}} selected takes",
+        "updated": "Updated {{relative}}",
+        "status": {
+          "complete": "All shots have selected takes",
+          "partial": "Some shots have selected takes",
+          "spineOnly": "Story spine"
+        },
+        "composer": {
+          "label": "What do you want to make?",
+          "placeholder": "Describe the story, audience, and outcome…",
+          "aspectRatioLabel": "Aspect ratio",
+          "durationLabel": "Target duration",
+          "durationGuess": "{{seconds}} sec",
+          "submit": "Create project",
+          "empty": "Describe the project before creating it."
+        }
+      },
+      "proposals": {
+        "title": "Director proposal",
+        "revision": "Based on revision {{revision}}",
+        "pinRule": "Pin this project rule",
+        "mutationCount": "{{count}} proposed edits",
+        "mutationCount_one": "{{count}} proposed edit",
+        "mutationCount_other": "{{count}} proposed edits",
+        "accept": "Accept proposal",
+        "reject": "Reject proposal"
+      },
+      "references": {
+        "title": "Reference request",
+        "shotCount": "References requested for {{count}} shots",
+        "shotCount_one": "Reference requested for {{count}} shot",
+        "shotCount_other": "References requested for {{count}} shots",
+        "generate": "Review generation",
+        "reject": "Reject request"
+      },
+      "handoffs": {
+        "title": "Reference generation handoff",
+        "shotCount": "{{count}} shots are ready for generation review",
+        "shotCount_one": "{{count}} shot is ready for generation review",
+        "shotCount_other": "{{count}} shots are ready for generation review",
+        "awaitingGate": "This reviewed request stays here until the generation gate is available."
+      },
+      "review": {
+        "title": "Reviewed Director output"
+      }
     }
   },
   "contextHandoff": {

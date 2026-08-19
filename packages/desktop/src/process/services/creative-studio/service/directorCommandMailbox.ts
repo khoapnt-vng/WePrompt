@@ -11,28 +11,19 @@ import path from 'node:path';
 import {
   STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
   STUDIO_DIRECTOR_COMMAND_MAX_SWEEP_RECORDS,
-  STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION,
   STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   STUDIO_DIRECTOR_COMMAND_SLOT_LEASE_MS,
   STUDIO_DIRECTOR_COMMAND_WAIT_MS,
-  type StudioDirectorCommandReceiptV1,
   type StudioDirectorCommandReceiptV2,
-  type StudioDirectorCommandSlotLeaseV1,
   type StudioDirectorCommandSlotLeaseV2,
-  type StudioDirectorCommandSlotV1,
   type StudioDirectorCommandSlotV2,
 } from '@/common/types/project/creativeStudioTypes';
 import {
-  parseStudioDirectorCommandReceipt,
   parseStudioDirectorCommandReceiptV2,
-  parseStudioDirectorCommandSlotLease,
   parseStudioDirectorCommandSlotLeaseV2,
-  parseStudioDirectorCommandSlot,
   parseStudioDirectorCommandSlotV2,
-  parseStudioDirectorPendingRecord,
   parseStudioDirectorPendingRecordV2,
   isSafeStudioDirectorId,
-  type StudioDirectorCommandParseResult,
   type StudioDirectorCommandParseResultV2,
   type StudioDirectorSidecarParseResultV2,
 } from './directorCommandContracts';
@@ -43,15 +34,12 @@ import {
   readBoundedRegularFile,
   readBoundedRegularFileWithIdentity,
   RecordIoError,
-  removeRegularRecordIfIdentity,
-  removeRegularRecordIfPresent,
   resolveCompleteDirectorySet,
   resolveConfinedRecordPath,
   type RecordIoFileSystem,
 } from './recordIo';
 import { CreativeStudioStoreError, type CreativeStudioStore } from '@process/services/creative-studio/store';
 
-export type StudioDirectorPendingRead = StudioDirectorCommandParseResult;
 export type StudioDirectorPendingReadV2 = StudioDirectorCommandParseResultV2;
 export type StudioDirectorReceiptReadV2 = StudioDirectorSidecarParseResultV2<StudioDirectorCommandReceiptV2>;
 
@@ -65,24 +53,6 @@ export type StudioDirectorCommandPage = {
 export type StudioDirectorMaintenancePage = {
   processed: number;
   nextCursor: string | null;
-};
-
-export type StudioDirectorCommandMailbox = {
-  ensure(projectId: string): Promise<void>;
-  snapshotPendingPage(cursor: string | null, limit: number): Promise<StudioDirectorCommandPage>;
-  readPending(projectId: string, commandId: string): Promise<StudioDirectorPendingRead | null>;
-  readReceipt(projectId: string, commandId: string): Promise<StudioDirectorCommandReceiptV1 | null>;
-  writeReceipt(projectId: string, receipt: StudioDirectorCommandReceiptV1): Promise<void>;
-  finish(projectId: string, commandId: string): Promise<void>;
-  listPendingPage(cursor: string | null, limit: number): Promise<StudioDirectorCommandPage>;
-  releaseOrphanedSlotsPage(cursor: string | null, now: string, limit: number): Promise<StudioDirectorMaintenancePage>;
-  pruneReceiptsPage(
-    cursor: string | null,
-    decidedBefore: string,
-    limit: number
-  ): Promise<StudioDirectorMaintenancePage>;
-  watch(trigger: (projectId: string, commandId?: string) => void): Promise<() => void>;
-  dispose(): Promise<void>;
 };
 
 export type StudioDirectorCommandMailboxV2 = {
@@ -127,11 +97,10 @@ type CursorSession = {
   closed: boolean;
 };
 
-type DirectorCommandSlot = StudioDirectorCommandSlotV1 | StudioDirectorCommandSlotV2;
-type DirectorCommandSlotLease = StudioDirectorCommandSlotLeaseV1 | StudioDirectorCommandSlotLeaseV2;
-type DirectorCommandReceipt = StudioDirectorCommandReceiptV1 | StudioDirectorCommandReceiptV2;
-type DirectorPendingRead = StudioDirectorPendingRead | StudioDirectorPendingReadV2;
-type SidecarVersion = 1 | 2;
+type DirectorCommandSlot = StudioDirectorCommandSlotV2;
+type DirectorCommandSlotLease = StudioDirectorCommandSlotLeaseV2;
+type DirectorCommandReceipt = StudioDirectorCommandReceiptV2;
+type DirectorPendingRead = StudioDirectorPendingReadV2;
 type DirectoryAuthorityV2 = { path: string; dev: number; ino: number };
 type ProjectManifestFingerprintV2 = {
   dev: number;
@@ -189,9 +158,9 @@ type WatchCommandTree = (input: {
   onError(error: Error): void;
 }) => { close(): void };
 
-export type StudioDirectorCommandMailboxDeps = {
+export type StudioDirectorCommandMailboxDepsV2 = {
   rootDir: string;
-  store: Pick<CreativeStudioStore, 'getVerifiedProjectDirectory'>;
+  store: Pick<CreativeStudioStore, 'getVerifiedProjectDirectoryV2'>;
   now?: () => string;
   createId?: () => string;
   waitMs?: number;
@@ -200,22 +169,8 @@ export type StudioDirectorCommandMailboxDeps = {
   watchCommandTree?: WatchCommandTree;
 };
 
-export type StudioDirectorCommandMailboxDepsV2 = Omit<StudioDirectorCommandMailboxDeps, 'store'> & {
-  store: Pick<CreativeStudioStore, 'getVerifiedProjectDirectoryV2'>;
-};
-
-type StudioDirectorCommandMailboxInternalDeps = Omit<StudioDirectorCommandMailboxDeps, 'store'> & {
-  version: SidecarVersion;
+type StudioDirectorCommandMailboxInternalDeps = Omit<StudioDirectorCommandMailboxDepsV2, 'store'> & {
   getVerifiedProjectDirectory(projectId: string): Promise<string | null>;
-};
-
-type StudioDirectorCommandMailboxInternal = Omit<
-  StudioDirectorCommandMailbox,
-  'readPending' | 'readReceipt' | 'writeReceipt'
-> & {
-  readPending(projectId: string, commandId: string): Promise<DirectorPendingRead | null>;
-  readReceipt(projectId: string, commandId: string): Promise<DirectorReceiptRead | null>;
-  writeReceipt(projectId: string, receipt: DirectorCommandReceipt): Promise<void>;
 };
 
 const COMMAND_CHILDREN = ['pending', 'slots', 'receipts'] as const;
@@ -248,7 +203,7 @@ const canonicalTimestamp = (value: string): number | null => {
 
 const createStudioDirectorCommandMailboxInternal = (
   deps: StudioDirectorCommandMailboxInternalDeps
-): StudioDirectorCommandMailboxInternal => {
+): StudioDirectorCommandMailboxV2 => {
   const fs = deps.fs ?? nodeFs;
   const now = deps.now ?? (() => new Date().toISOString());
   const createId = deps.createId ?? randomUUID;
@@ -273,8 +228,7 @@ const createStudioDirectorCommandMailboxInternal = (
     slot: unknown;
     now: string;
     waitMs: number;
-  }): DirectorPendingRead =>
-    deps.version === 1 ? parseStudioDirectorPendingRecord(input) : parseStudioDirectorPendingRecordV2(input);
+  }): DirectorPendingRead => parseStudioDirectorPendingRecordV2(input);
 
   const parseSlotRecord = (
     value: unknown,
@@ -282,11 +236,7 @@ const createStudioDirectorCommandMailboxInternal = (
   ):
     | { status: 'valid'; record: DirectorCommandSlot }
     | { status: 'unsupported_prototype_schema' }
-    | { status: 'invalid' } => {
-    if (deps.version === 2) return parseStudioDirectorCommandSlotV2(value, currentTime, waitMs);
-    const slot = parseStudioDirectorCommandSlot(value, currentTime, waitMs);
-    return slot === null ? { status: 'invalid' } : { status: 'valid', record: slot };
-  };
+    | { status: 'invalid' } => parseStudioDirectorCommandSlotV2(value, currentTime, waitMs);
 
   const parseLeaseRecord = (
     value: unknown,
@@ -294,17 +244,10 @@ const createStudioDirectorCommandMailboxInternal = (
   ):
     | { status: 'valid'; record: DirectorCommandSlotLease }
     | { status: 'unsupported_prototype_schema' }
-    | { status: 'invalid' } => {
-    if (deps.version === 2) return parseStudioDirectorCommandSlotLeaseV2(value, currentTime, waitMs);
-    const lease = parseStudioDirectorCommandSlotLease(value, currentTime, waitMs);
-    return lease === null ? { status: 'invalid' } : { status: 'valid', record: lease };
-  };
+    | { status: 'invalid' } => parseStudioDirectorCommandSlotLeaseV2(value, currentTime, waitMs);
 
-  const parseReceiptRecord = (input: { projectId: string; commandId: string; value: unknown }): DirectorReceiptRead => {
-    if (deps.version === 2) return parseStudioDirectorCommandReceiptV2(input);
-    const receipt = parseStudioDirectorCommandReceipt(input);
-    return receipt === null ? { status: 'invalid' } : { status: 'valid', record: receipt };
-  };
+  const parseReceiptRecord = (input: { projectId: string; commandId: string; value: unknown }): DirectorReceiptRead =>
+    parseStudioDirectorCommandReceiptV2(input);
 
   const safeLog = (message: string): void => {
     try {
@@ -495,25 +438,21 @@ const createStudioDirectorCommandMailboxInternal = (
     try {
       const canonicalRoot = await canonicalRootPromise;
       let projectDirectory: string | null;
-      if (deps.version === 2) {
-        const cached = verifiedProjectAuthoritiesV2.get(projectId);
-        if (cached !== undefined) {
-          await assertProjectAuthorityV2(cached);
-          projectDirectory = cached.directory.path;
-        } else {
-          projectDirectory = await deps.getVerifiedProjectDirectory(projectId);
-          if (projectDirectory !== null) {
-            const authority: ProjectAuthorityV2 = {
-              projectId,
-              directory: await captureDirectoryAuthorityV2(projectDirectory),
-              manifest: null,
-            };
-            await assertProjectAuthorityV2(authority);
-            verifiedProjectAuthoritiesV2.set(projectId, authority);
-          }
-        }
+      const cached = verifiedProjectAuthoritiesV2.get(projectId);
+      if (cached !== undefined) {
+        await assertProjectAuthorityV2(cached);
+        projectDirectory = cached.directory.path;
       } else {
         projectDirectory = await deps.getVerifiedProjectDirectory(projectId);
+        if (projectDirectory !== null) {
+          const authority: ProjectAuthorityV2 = {
+            projectId,
+            directory: await captureDirectoryAuthorityV2(projectDirectory),
+            manifest: null,
+          };
+          await assertProjectAuthorityV2(authority);
+          verifiedProjectAuthoritiesV2.set(projectId, authority);
+        }
       }
       if (projectDirectory === null) {
         throw new CreativeStudioStoreError('not_found', 'Studio project not found');
@@ -730,7 +669,7 @@ const createStudioDirectorCommandMailboxInternal = (
             // eslint-disable-next-line no-await-in-loop
             directories = await directoriesFor(projectEntry.name, input.createIfWhollyAbsent);
           } catch (error) {
-            if (deps.version === 2 && isUnsupportedProject(error)) continue;
+            if (isUnsupportedProject(error)) continue;
             if (!input.tolerateProjectErrors) throw error;
             safeLog('[CreativeStudio] Director command receipt maintenance skipped unsafe storage');
             continue;
@@ -761,29 +700,23 @@ const createStudioDirectorCommandMailboxInternal = (
     projectId: string,
     commandId: string
   ): Promise<DirectorReceiptRead | null> => {
-    if (deps.version === 2 && indeterminateReceiptPublications.has(receiptPublicationKey(projectId, commandId))) {
+    if (indeterminateReceiptPublications.has(receiptPublicationKey(projectId, commandId))) {
       throw storageError();
     }
-    const authorities =
-      deps.version === 2
-        ? {
-            project: await captureProjectAuthorityV2(projectId, directories),
-            receipts: await captureDirectoryAuthorityV2(directories.receipts),
-          }
-        : undefined;
+    const authorities = {
+      project: await captureProjectAuthorityV2(projectId, directories),
+      receipts: await captureDirectoryAuthorityV2(directories.receipts),
+    };
     const bytes = await readBytes(canonicalRoot, path.join(directories.receipts, `${commandId}.json`));
     if (bytes === null) {
-      if (authorities !== undefined) {
-        await assertDirectoryAuthorityV2(authorities.receipts);
-        await assertProjectAuthorityV2(authorities.project);
-      }
+      await assertDirectoryAuthorityV2(authorities.receipts);
+      await assertProjectAuthorityV2(authorities.project);
       return null;
     }
     const receipt = parseReceiptRecord({ projectId, commandId, value: parseJson(bytes) });
-    if (deps.version === 1 && receipt.status !== 'valid') throw storageError();
-    if (authorities !== undefined && receipt.status === 'valid') {
+    if (receipt.status === 'valid') {
       await syncAuthorizedDirectoryV2(authorities.receipts, authorities.project);
-    } else if (authorities !== undefined) {
+    } else {
       await assertDirectoryAuthorityV2(authorities.receipts);
       await assertProjectAuthorityV2(authorities.project);
     }
@@ -949,8 +882,7 @@ const createStudioDirectorCommandMailboxInternal = (
     const leaseId = createId();
     if (acquiredAtMs === null || !isSafeStudioDirectorId(leaseId)) throw storageError();
     const candidate = {
-      schemaVersion:
-        deps.version === 1 ? STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION : STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
       leaseId,
       owner: 'main',
       commandId: slot.status === 'valid' ? slot.slot.commandId : null,
@@ -974,23 +906,6 @@ const createStudioDirectorCommandMailboxInternal = (
     const lease = buildMainLease(slot, currentTime);
     const leaseFile = path.join(directories.slots, '0.slot.lease');
     const leaseBytes = JSON.stringify(lease);
-    if (deps.version === 1) {
-      try {
-        await publishExclusiveLeaseRecord({
-          fs,
-          canonicalRoot,
-          file: leaseFile,
-          bytes: leaseBytes,
-        });
-      } catch (error) {
-        if (error instanceof RecordIoError && error.code === 'already_exists') return null;
-        throw neutralizeIo(error);
-      }
-      const held = await readLease(canonicalRoot, directories, now());
-      if (held.status !== 'valid' || !sameLease(held.lease, lease)) throw storageError();
-      return held;
-    }
-
     if (projectAuthorityV2 === undefined) throw storageError();
     const authority = await captureDirectoryAuthorityV2(directories.slots);
     let linkedIdentity: { dev: number; ino: number } | undefined;
@@ -1086,19 +1001,6 @@ const createStudioDirectorCommandMailboxInternal = (
     await assertDirectoryAuthorityV2(authority);
     await assertProjectAuthorityV2(projectAuthority);
     return parsed.status === 'valid' && sameLease(parsed.record, held.lease) && leaseIsActive(held.lease, now());
-  };
-
-  const removeIdentifiedRecord = async (
-    canonicalRoot: string,
-    file: string,
-    identity: { dev: number; ino: number },
-    isStillAuthorized: () => boolean | Promise<boolean>
-  ): Promise<boolean> => {
-    try {
-      return await removeRegularRecordIfIdentity({ fs, canonicalRoot, file, identity, isStillAuthorized });
-    } catch {
-      throw storageError();
-    }
   };
 
   const restoreQuarantinedRecordV2 = async (input: {
@@ -1215,22 +1117,6 @@ const createStudioDirectorCommandMailboxInternal = (
     projectAuthorityV2?: ProjectAuthorityV2,
     additionalAuthorizationV2?: (phase: 'named' | 'quarantined') => boolean | Promise<boolean>
   ): Promise<boolean> => {
-    if (deps.version === 1) {
-      if (!leaseIsActive(held.lease, now())) return false;
-      const fresh = await readLease(canonicalRoot, directories, now());
-      if (
-        fresh.status !== 'valid' ||
-        !sameLease(fresh.lease, held.lease) ||
-        !sameIdentity(fresh.identity, held.identity) ||
-        !leaseIsActive(held.lease, now())
-      ) {
-        return false;
-      }
-      return removeIdentifiedRecord(canonicalRoot, path.join(directories.slots, '0.slot.lease'), fresh.identity, () =>
-        leaseIsActive(held.lease, now())
-      );
-    }
-
     if (!leaseIsActive(held.lease, now())) return false;
     if (projectAuthorityV2 === undefined) return false;
     const authority = await captureDirectoryAuthorityV2(directories.slots);
@@ -1271,30 +1157,6 @@ const createStudioDirectorCommandMailboxInternal = (
     currentTime: string,
     projectAuthorityV2?: ProjectAuthorityV2
   ): Promise<boolean> => {
-    if (deps.version === 1) {
-      const observed = await readLease(canonicalRoot, directories, currentTime);
-      if (observed.status === 'absent') return true;
-      if (observed.status === 'invalid') throw storageError();
-      if (observed.status === 'unsupported_prototype_schema') return false;
-      if (leaseIsActive(observed.lease, currentTime)) return false;
-
-      const fresh = await readLease(canonicalRoot, directories, currentTime);
-      if (
-        fresh.status !== 'valid' ||
-        !sameLease(fresh.lease, observed.lease) ||
-        !sameIdentity(fresh.identity, observed.identity) ||
-        leaseIsActive(fresh.lease, currentTime)
-      ) {
-        return false;
-      }
-      return removeIdentifiedRecord(
-        canonicalRoot,
-        path.join(directories.slots, '0.slot.lease'),
-        fresh.identity,
-        () => !leaseIsActive(fresh.lease, currentTime)
-      );
-    }
-
     if (projectAuthorityV2 === undefined) return false;
     const authority = await captureDirectoryAuthorityV2(directories.slots);
     const observed = await readLease(canonicalRoot, directories, currentTime);
@@ -1333,38 +1195,23 @@ const createStudioDirectorCommandMailboxInternal = (
     });
   };
 
-  const removeRecord = async (
-    canonicalRoot: string,
-    file: string,
-    isStillAuthorized?: () => boolean | Promise<boolean>
-  ): Promise<void> => {
-    try {
-      await removeRegularRecordIfPresent({ fs, canonicalRoot, file, isStillAuthorized });
-    } catch {
-      throw storageError();
-    }
-  };
-
   const readPending = async (projectId: string, commandId: string): Promise<DirectorPendingRead | null> => {
     requireIdentity(projectId, commandId);
     let directories: CommandDirectories | null;
     try {
       directories = await directoriesFor(projectId, false);
     } catch (error) {
-      if (deps.version === 2 && isUnsupportedProject(error)) {
+      if (isUnsupportedProject(error)) {
         return { status: 'unsupported_prototype_schema', commandId, expectedRevision: null };
       }
       throw error;
     }
     if (directories === null) return null;
-    const authoritiesV2 =
-      deps.version === 2
-        ? {
-            project: await captureProjectAuthorityV2(projectId, directories),
-            pending: await captureDirectoryAuthorityV2(directories.pending),
-            slots: await captureDirectoryAuthorityV2(directories.slots),
-          }
-        : undefined;
+    const authoritiesV2 = {
+      project: await captureProjectAuthorityV2(projectId, directories),
+      pending: await captureDirectoryAuthorityV2(directories.pending),
+      slots: await captureDirectoryAuthorityV2(directories.slots),
+    };
     const canonicalRoot = await canonicalRootPromise;
     const bytes = await readBytes(canonicalRoot, path.join(directories.pending, `${commandId}.json`));
     if (bytes === null) {
@@ -1415,22 +1262,22 @@ const createStudioDirectorCommandMailboxInternal = (
       try {
         directories = await directoriesFor(projectId, false);
       } catch (error) {
-        if (deps.version === 2 && isUnsupportedProject(error)) return { status: 'unsupported_prototype_schema' };
+        if (isUnsupportedProject(error)) return { status: 'unsupported_prototype_schema' };
         throw error;
       }
       if (directories === null) return null;
       return exactReceiptFrom(await canonicalRootPromise, directories, projectId, commandId);
     },
 
-    async writeReceipt(projectId: string, receipt: DirectorCommandReceipt): Promise<void> {
+    async writeReceipt(projectId: string, receipt: StudioDirectorCommandReceiptV2): Promise<void> {
       requireIdentity(projectId, receipt.commandId);
       const publicationKey = receiptPublicationKey(projectId, receipt.commandId);
-      if (deps.version === 2 && indeterminateReceiptPublications.has(publicationKey)) throw storageError();
+      if (indeterminateReceiptPublications.has(publicationKey)) throw storageError();
       const parsed = parseReceiptRecord({ projectId, commandId: receipt.commandId, value: receipt });
       if (
         receipt.projectId !== projectId ||
         parsed.status !== 'valid' ||
-        parsed.record.schemaVersion !== deps.version
+        parsed.record.schemaVersion !== STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2
       ) {
         throw invalidPayload();
       }
@@ -1441,31 +1288,21 @@ const createStudioDirectorCommandMailboxInternal = (
       let published = false;
       let linkAttempted = false;
       try {
-        const projectAuthority =
-          deps.version === 2 ? await captureProjectAuthorityV2(projectId, directories) : undefined;
-        const receiptDirectoryAuthority =
-          deps.version === 2 ? await captureDirectoryAuthorityV2(directories.receipts) : undefined;
+        const projectAuthority = await captureProjectAuthorityV2(projectId, directories);
+        const receiptDirectoryAuthority = await captureDirectoryAuthorityV2(directories.receipts);
         const receiptFile = path.join(directories.receipts, `${receipt.commandId}.json`);
         await publishImmutableRecord({
-          fs:
-            receiptDirectoryAuthority === undefined || projectAuthority === undefined
-              ? fs
-              : withExactLinkAuthorityV2(receiptDirectoryAuthority, projectAuthority, receiptFile, undefined, () => {
-                  linkAttempted = true;
-                }),
+          fs: withExactLinkAuthorityV2(receiptDirectoryAuthority, projectAuthority, receiptFile, undefined, () => {
+            linkAttempted = true;
+          }),
           canonicalRoot: await canonicalRootPromise,
           file: receiptFile,
           bytes,
         });
         published = true;
-        if (receiptDirectoryAuthority !== undefined && projectAuthority !== undefined) {
-          await syncAuthorizedDirectoryV2(receiptDirectoryAuthority, projectAuthority);
-        }
+        await syncAuthorizedDirectoryV2(receiptDirectoryAuthority, projectAuthority);
       } catch (error) {
-        if (
-          deps.version === 2 &&
-          (published || (linkAttempted && !(error instanceof RecordIoError && error.code === 'already_exists')))
-        ) {
+        if (published || (linkAttempted && !(error instanceof RecordIoError && error.code === 'already_exists'))) {
           indeterminateReceiptPublications.add(publicationKey);
         }
         if (error instanceof RecordIoError && error.code === 'already_exists') {
@@ -1484,50 +1321,39 @@ const createStudioDirectorCommandMailboxInternal = (
         const pendingFile = path.join(directories.pending, `${commandId}.json`);
         const slotFile = path.join(directories.slots, '0.slot');
         const receiptFile = path.join(directories.receipts, `${commandId}.json`);
-        const directoryAuthoritiesV2 =
-          deps.version === 2
-            ? {
-                project: await captureProjectAuthorityV2(projectId, directories),
-                pending: await captureDirectoryAuthorityV2(directories.pending),
-                slots: await captureDirectoryAuthorityV2(directories.slots),
-                receipts: await captureDirectoryAuthorityV2(directories.receipts),
-              }
-            : undefined;
-        let receiptRecordV2: Awaited<ReturnType<typeof readIdentifiedBytes>> | undefined;
-        let receipt: DirectorReceiptRead | null;
-        if (deps.version === 1) {
-          receipt = await exactReceiptFrom(canonicalRoot, directories, projectId, commandId);
-        } else {
-          if (indeterminateReceiptPublications.has(receiptPublicationKey(projectId, commandId))) {
-            throw storageError();
-          }
-          receiptRecordV2 = await readIdentifiedBytes(canonicalRoot, receiptFile);
-          receipt =
-            receiptRecordV2 === null
-              ? null
-              : parseReceiptRecord({ projectId, commandId, value: parseJson(receiptRecordV2.bytes) });
+        const directoryAuthoritiesV2 = {
+          project: await captureProjectAuthorityV2(projectId, directories),
+          pending: await captureDirectoryAuthorityV2(directories.pending),
+          slots: await captureDirectoryAuthorityV2(directories.slots),
+          receipts: await captureDirectoryAuthorityV2(directories.receipts),
+        };
+        if (indeterminateReceiptPublications.has(receiptPublicationKey(projectId, commandId))) {
+          throw storageError();
         }
+        const receiptRecordV2 = await readIdentifiedBytes(canonicalRoot, receiptFile);
+        const receipt: DirectorReceiptRead | null =
+          receiptRecordV2 === null
+            ? null
+            : parseReceiptRecord({ projectId, commandId, value: parseJson(receiptRecordV2.bytes) });
         const slot = await readSlot(canonicalRoot, directories, now());
         let pendingRecordV2: Awaited<ReturnType<typeof readIdentifiedBytes>> | undefined;
         let pendingValueV2: unknown;
         let validPendingV2: Extract<DirectorPendingRead, { status: 'valid' }> | undefined;
         let invalidPendingV2: Extract<StudioDirectorCommandParseResultV2, { status: 'invalid' }> | undefined;
-        if (deps.version === 2) {
-          pendingRecordV2 = await readIdentifiedBytes(canonicalRoot, pendingFile);
-          if (pendingRecordV2 !== null) {
-            pendingValueV2 = parseJson(pendingRecordV2.bytes);
-            const pending = parseStudioDirectorPendingRecordV2({
-              projectId,
-              commandId,
-              value: pendingValueV2,
-              slot: slot.status === 'absent' ? null : parseJson(slot.bytes),
-              now: now(),
-              waitMs,
-            });
-            if (pending.status === 'unsupported_prototype_schema') throw storageError();
-            if (pending.status === 'valid') validPendingV2 = pending;
-            else invalidPendingV2 = pending;
-          }
+        pendingRecordV2 = await readIdentifiedBytes(canonicalRoot, pendingFile);
+        if (pendingRecordV2 !== null) {
+          pendingValueV2 = parseJson(pendingRecordV2.bytes);
+          const pending = parseStudioDirectorPendingRecordV2({
+            projectId,
+            commandId,
+            value: pendingValueV2,
+            slot: slot.status === 'absent' ? null : parseJson(slot.bytes),
+            now: now(),
+            waitMs,
+          });
+          if (pending.status === 'unsupported_prototype_schema') throw storageError();
+          if (pending.status === 'valid') validPendingV2 = pending;
+          else invalidPendingV2 = pending;
         }
         if (receipt === null) {
           const attributableSlot =
@@ -1540,9 +1366,8 @@ const createStudioDirectorCommandMailboxInternal = (
         const validReceipt = receipt.record;
         const validReceiptV2 =
           validReceipt.schemaVersion === STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 ? validReceipt : undefined;
-        if (deps.version === 2 && validReceiptV2 === undefined) throw storageError();
+        if (validReceiptV2 === undefined) throw storageError();
         if (
-          deps.version === 2 &&
           validPendingV2 !== undefined &&
           validReceiptV2?.expectedRevision !== validPendingV2.record.expectedRevision
         ) {
@@ -1563,14 +1388,12 @@ const createStudioDirectorCommandMailboxInternal = (
         ) {
           throw storageError();
         }
-        if (deps.version === 2 && directoryAuthoritiesV2 !== undefined) {
-          await syncAuthorizedDirectoryV2(directoryAuthoritiesV2.receipts, directoryAuthoritiesV2.project);
-        }
+        await syncAuthorizedDirectoryV2(directoryAuthoritiesV2.receipts, directoryAuthoritiesV2.project);
         const receiptAuthorityV2 =
-          deps.version === 2 && directoryAuthoritiesV2 !== undefined && receiptRecordV2 != null
-            ? { authority: directoryAuthoritiesV2.receipts, expected: receiptRecordV2 }
-            : undefined;
-        if (deps.version === 2 && receiptAuthorityV2 === undefined) throw storageError();
+          receiptRecordV2 === null
+            ? undefined
+            : { authority: directoryAuthoritiesV2.receipts, expected: receiptRecordV2 };
+        if (receiptAuthorityV2 === undefined) throw storageError();
         if (slot.status === 'unsupported_prototype_schema') throw storageError();
         if (slot.status === 'valid' && slot.slot.commandId !== commandId) throw storageError();
         if (slot.status === 'invalid' && slot.commandId !== commandId) throw storageError();
@@ -1701,15 +1524,9 @@ const createStudioDirectorCommandMailboxInternal = (
             (await leaseReceiptAuthorityIsCurrentV2());
           const freshSlot = await readSlot(canonicalRoot, directories, now());
           if (!sameSlotRead(slot, freshSlot)) throw storageError();
-          if (deps.version === 2 && !(await terminalAuthorityIsCurrentV2())) throw storageError();
+          if (!(await terminalAuthorityIsCurrentV2())) throw storageError();
 
-          if (deps.version === 1) {
-            await removeRecord(canonicalRoot, pendingFile, () => leaseIsActive(held.lease, now()));
-          } else if (
-            pendingRecordV2 !== undefined &&
-            pendingRecordV2 !== null &&
-            directoryAuthoritiesV2 !== undefined
-          ) {
+          if (pendingRecordV2 !== undefined && pendingRecordV2 !== null && directoryAuthoritiesV2 !== undefined) {
             const removed = await quarantineRemoveIdentifiedRecordV2({
               authority: directoryAuthoritiesV2.pending,
               projectAuthority: directoryAuthoritiesV2.project,
@@ -1746,34 +1563,28 @@ const createStudioDirectorCommandMailboxInternal = (
           }
           if (!leaseIsActive(held.lease, now())) throw storageError();
           if (freshSlot.status !== 'absent') {
-            const removed =
-              deps.version === 1
-                ? await removeIdentifiedRecord(canonicalRoot, slotFile, freshSlot.identity, () =>
-                    leaseIsActive(held.lease, now())
-                  )
-                : directoryAuthoritiesV2 !== undefined &&
-                  (await quarantineRemoveIdentifiedRecordV2({
-                    authority: directoryAuthoritiesV2.slots,
-                    projectAuthority: directoryAuthoritiesV2.project,
-                    file: slotFile,
-                    identity: freshSlot.identity,
-                    missingIsSuccess: invalidPendingV2 === undefined,
-                    isStillAuthorized: async (_phase, file) => {
-                      if (!(await slotCleanupAuthorityIsCurrentV2())) return false;
-                      const record = await readIdentifiedBytes(canonicalRoot, file);
-                      return (
-                        record !== null &&
-                        record.bytes === freshSlot.bytes &&
-                        sameIdentity(record.identity, freshSlot.identity) &&
-                        (await slotCleanupAuthorityIsCurrentV2())
-                      );
-                    },
-                  }));
+            const removed = await quarantineRemoveIdentifiedRecordV2({
+              authority: directoryAuthoritiesV2.slots,
+              projectAuthority: directoryAuthoritiesV2.project,
+              file: slotFile,
+              identity: freshSlot.identity,
+              missingIsSuccess: invalidPendingV2 === undefined,
+              isStillAuthorized: async (_phase, file) => {
+                if (!(await slotCleanupAuthorityIsCurrentV2())) return false;
+                const record = await readIdentifiedBytes(canonicalRoot, file);
+                return (
+                  record !== null &&
+                  record.bytes === freshSlot.bytes &&
+                  sameIdentity(record.identity, freshSlot.identity) &&
+                  (await slotCleanupAuthorityIsCurrentV2())
+                );
+              },
+            });
             if (!removed) {
-              preserveHeldLease = deps.version === 2;
+              preserveHeldLease = true;
               throw storageError();
             }
-            if (deps.version === 2) slotAuthorityExpectationV2 = 'absent';
+            slotAuthorityExpectationV2 = 'absent';
           }
           if (!leaseIsActive(held.lease, now())) throw storageError();
           if (
@@ -1785,7 +1596,7 @@ const createStudioDirectorCommandMailboxInternal = (
               terminalAuthorityIsCurrentV2
             ))
           ) {
-            preserveHeldLease = deps.version === 2;
+            preserveHeldLease = true;
             throw storageError();
           }
           held = undefined;
@@ -1800,7 +1611,7 @@ const createStudioDirectorCommandMailboxInternal = (
           }
           if (
             finalSlot.status !== 'absent' &&
-            !(deps.version === 2 && finalSlot.status === 'valid' && finalSlot.slot.commandId !== commandId)
+            !(finalSlot.status === 'valid' && finalSlot.slot.commandId !== commandId)
           ) {
             throw storageError();
           }
@@ -1845,11 +1656,10 @@ const createStudioDirectorCommandMailboxInternal = (
           runSlotCleanup(projectId, async () => {
             const directories = await directoriesFor(projectId, false);
             if (directories === null) return;
-            const projectAuthorityV2 =
-              deps.version === 2 ? await captureProjectAuthorityV2(projectId, directories) : undefined;
+            const projectAuthorityV2 = await captureProjectAuthorityV2(projectId, directories);
             const preReclaimSlot = await readSlot(canonicalRoot, directories, currentTime);
             if (preReclaimSlot.status === 'unsupported_prototype_schema') return;
-            if (deps.version === 2 && preReclaimSlot.status !== 'absent') {
+            if (preReclaimSlot.status !== 'absent') {
               const commandId =
                 preReclaimSlot.status === 'valid' ? preReclaimSlot.slot.commandId : preReclaimSlot.commandId;
               if (commandId !== null) {
@@ -1859,15 +1669,12 @@ const createStudioDirectorCommandMailboxInternal = (
             }
             if (!(await reclaimExpiredLease(canonicalRoot, directories, currentTime, projectAuthorityV2))) return;
 
-            const orphanAuthoritiesV2 =
-              deps.version === 2
-                ? {
-                    project: projectAuthorityV2!,
-                    pending: await captureDirectoryAuthorityV2(directories.pending),
-                    slots: await captureDirectoryAuthorityV2(directories.slots),
-                    receipts: await captureDirectoryAuthorityV2(directories.receipts),
-                  }
-                : undefined;
+            const orphanAuthoritiesV2 = {
+              project: projectAuthorityV2,
+              pending: await captureDirectoryAuthorityV2(directories.pending),
+              slots: await captureDirectoryAuthorityV2(directories.slots),
+              receipts: await captureDirectoryAuthorityV2(directories.receipts),
+            };
             const observedSlot = await readSlot(canonicalRoot, directories, currentTime);
             if (observedSlot.status === 'absent') return;
             if (observedSlot.status === 'unsupported_prototype_schema') return;
@@ -1905,15 +1712,11 @@ const createStudioDirectorCommandMailboxInternal = (
               if (slotRead.status === 'invalid') {
                 if (slotRead.commandId === null) throw storageError();
                 const pendingFile = path.join(directories.pending, `${slotRead.commandId}.json`);
-                const pendingExists =
-                  deps.version === 1
-                    ? await pathExists(pendingFile)
-                    : orphanAuthoritiesV2 === undefined ||
-                      !(await exactPathIsAbsentV2(
-                        orphanAuthoritiesV2.pending,
-                        orphanAuthoritiesV2.project,
-                        pendingFile
-                      ));
+                const pendingExists = !(await exactPathIsAbsentV2(
+                  orphanAuthoritiesV2.pending,
+                  orphanAuthoritiesV2.project,
+                  pendingFile
+                ));
                 if (pendingExists) {
                   await releaseMainLease(canonicalRoot, directories, held, projectAuthorityV2);
                   held = undefined;
@@ -1922,15 +1725,11 @@ const createStudioDirectorCommandMailboxInternal = (
               } else {
                 const { slot } = slotRead;
                 const pendingFile = path.join(directories.pending, `${slot.commandId}.json`);
-                const pendingExists =
-                  deps.version === 1
-                    ? await pathExists(pendingFile)
-                    : orphanAuthoritiesV2 === undefined ||
-                      !(await exactPathIsAbsentV2(
-                        orphanAuthoritiesV2.pending,
-                        orphanAuthoritiesV2.project,
-                        pendingFile
-                      ));
+                const pendingExists = !(await exactPathIsAbsentV2(
+                  orphanAuthoritiesV2.pending,
+                  orphanAuthoritiesV2.project,
+                  pendingFile
+                ));
                 if (pendingExists) {
                   await releaseMainLease(canonicalRoot, directories, held, projectAuthorityV2);
                   held = undefined;
@@ -1940,13 +1739,7 @@ const createStudioDirectorCommandMailboxInternal = (
                 if (deadlineMs === null) throw storageError();
                 if (deadlineMs >= nowMs) {
                   let receiptIsValid = false;
-                  if (deps.version === 1) {
-                    const exactReceipt = await exactReceiptFrom(canonicalRoot, directories, projectId, slot.commandId);
-                    receiptIsValid = exactReceipt !== null && exactReceipt.status === 'valid';
-                  } else if (
-                    orphanAuthoritiesV2 !== undefined &&
-                    !indeterminateReceiptPublications.has(receiptPublicationKey(projectId, slot.commandId))
-                  ) {
+                  if (!indeterminateReceiptPublications.has(receiptPublicationKey(projectId, slot.commandId))) {
                     const receiptFile = path.join(directories.receipts, `${slot.commandId}.json`);
                     const receiptRecord = await readIdentifiedBytes(canonicalRoot, receiptFile);
                     if (receiptRecord !== null) {
@@ -2017,39 +1810,30 @@ const createStudioDirectorCommandMailboxInternal = (
                   orphanAuthoritiesV2.project
                 );
               };
-              const removed =
-                deps.version === 1
-                  ? await removeIdentifiedRecord(
-                      canonicalRoot,
-                      path.join(directories.slots, '0.slot'),
-                      slotRead.identity,
-                      () => leaseIsActive(held.lease, now())
-                    )
-                  : orphanAuthoritiesV2 !== undefined &&
-                    (await quarantineRemoveIdentifiedRecordV2({
-                      authority: orphanAuthoritiesV2.slots,
-                      projectAuthority: orphanAuthoritiesV2.project,
-                      file: path.join(directories.slots, '0.slot'),
-                      identity: slotRead.identity,
-                      missingIsSuccess: false,
-                      isStillAuthorized: async (_phase, file) => {
-                        if (!(await orphanCleanupAuthorityIsCurrentV2())) return false;
-                        const record = await readIdentifiedBytes(canonicalRoot, file);
-                        return (
-                          record !== null &&
-                          record.bytes === slotRead.bytes &&
-                          sameIdentity(record.identity, slotRead.identity) &&
-                          (await orphanCleanupAuthorityIsCurrentV2())
-                        );
-                      },
-                    }));
+              const removed = await quarantineRemoveIdentifiedRecordV2({
+                authority: orphanAuthoritiesV2.slots,
+                projectAuthority: orphanAuthoritiesV2.project,
+                file: path.join(directories.slots, '0.slot'),
+                identity: slotRead.identity,
+                missingIsSuccess: false,
+                isStillAuthorized: async (_phase, file) => {
+                  if (!(await orphanCleanupAuthorityIsCurrentV2())) return false;
+                  const record = await readIdentifiedBytes(canonicalRoot, file);
+                  return (
+                    record !== null &&
+                    record.bytes === slotRead.bytes &&
+                    sameIdentity(record.identity, slotRead.identity) &&
+                    (await orphanCleanupAuthorityIsCurrentV2())
+                  );
+                },
+              });
               if (!removed) {
-                preserveHeldLease = deps.version === 2;
+                preserveHeldLease = true;
                 throw storageError();
               }
               if (leaseIsActive(held.lease, now())) {
                 if (!(await releaseMainLease(canonicalRoot, directories, held, projectAuthorityV2))) {
-                  preserveHeldLease = deps.version === 2;
+                  preserveHeldLease = true;
                   throw storageError();
                 }
                 held = undefined;
@@ -2087,23 +1871,6 @@ const createStudioDirectorCommandMailboxInternal = (
           // eslint-disable-next-line no-await-in-loop
           const directories = await directoriesFor(ref.projectId, false);
           if (directories === null) continue;
-          if (deps.version === 1) {
-            // eslint-disable-next-line no-await-in-loop
-            const receipt = await exactReceiptFrom(canonicalRoot, directories, ref.projectId, ref.commandId);
-            if (receipt === null || receipt.status !== 'valid' || Date.parse(receipt.record.decidedAt) >= cutoffMs) {
-              continue;
-            }
-            // eslint-disable-next-line no-await-in-loop
-            if (await pathExists(path.join(directories.pending, `${ref.commandId}.json`))) continue;
-            // eslint-disable-next-line no-await-in-loop
-            const slot = await readSlot(canonicalRoot, directories, now());
-            if (slot.status === 'invalid' || slot.status === 'unsupported_prototype_schema') throw storageError();
-            if (slot.status === 'valid' && slot.slot.commandId === ref.commandId) continue;
-            // eslint-disable-next-line no-await-in-loop
-            await removeRecord(canonicalRoot, path.join(directories.receipts, `${ref.commandId}.json`));
-            continue;
-          }
-
           const authorities = {
             // eslint-disable-next-line no-await-in-loop
             project: await captureProjectAuthorityV2(ref.projectId, directories),
@@ -2188,10 +1955,6 @@ const createStudioDirectorCommandMailboxInternal = (
       let closed = false;
       let watcher: { close(): void };
       const forwardSupportedChange = (projectId: string, commandId?: string): void => {
-        if (deps.version === 1) {
-          trigger(projectId, commandId);
-          return;
-        }
         void deps
           .getVerifiedProjectDirectory(projectId)
           .then((projectDirectory) => {
@@ -2271,49 +2034,11 @@ const createStudioDirectorCommandMailboxInternal = (
   };
 };
 
-/** Creates the registered schema-1 main-process mailbox. */
-export const createStudioDirectorCommandMailbox = (
-  deps: StudioDirectorCommandMailboxDeps
-): StudioDirectorCommandMailbox => {
-  const mailbox = createStudioDirectorCommandMailboxInternal({
-    ...deps,
-    version: 1,
-    getVerifiedProjectDirectory: deps.store.getVerifiedProjectDirectory,
-  });
-  return {
-    ...mailbox,
-    readPending: async (projectId, commandId) =>
-      (await mailbox.readPending(projectId, commandId)) as StudioDirectorPendingRead | null,
-    async readReceipt(projectId, commandId): Promise<StudioDirectorCommandReceiptV1 | null> {
-      const receipt = await mailbox.readReceipt(projectId, commandId);
-      if (receipt === null) return null;
-      if (receipt.status !== 'valid' || receipt.record.schemaVersion !== 1) throw storageError();
-      return receipt.record;
-    },
-    writeReceipt: (projectId, receipt) => mailbox.writeReceipt(projectId, receipt),
-  };
-};
-
-/** Creates the additive schema-2 mailbox without registering it in the runtime. */
+/** Creates the schema-2 Director command mailbox. */
 export const createStudioDirectorCommandMailboxV2 = (
   deps: StudioDirectorCommandMailboxDepsV2
-): StudioDirectorCommandMailboxV2 => {
-  const mailbox = createStudioDirectorCommandMailboxInternal({
+): StudioDirectorCommandMailboxV2 =>
+  createStudioDirectorCommandMailboxInternal({
     ...deps,
-    version: 2,
     getVerifiedProjectDirectory: deps.store.getVerifiedProjectDirectoryV2,
   });
-  return {
-    ...mailbox,
-    readPending: async (projectId, commandId) =>
-      (await mailbox.readPending(projectId, commandId)) as StudioDirectorPendingReadV2 | null,
-    async readReceipt(projectId, commandId): Promise<StudioDirectorReceiptReadV2 | null> {
-      const receipt = await mailbox.readReceipt(projectId, commandId);
-      if (receipt?.status === 'valid' && receipt.record.schemaVersion !== STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2) {
-        return { status: 'invalid' };
-      }
-      return receipt as StudioDirectorReceiptReadV2 | null;
-    },
-    writeReceipt: (projectId, receipt) => mailbox.writeReceipt(projectId, receipt),
-  };
-};

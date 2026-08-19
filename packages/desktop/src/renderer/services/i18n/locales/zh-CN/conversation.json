@@ -948,10 +948,7 @@
     "close": {
       "saveAndClose": "保存并关闭",
       "discard": "放弃更改并关闭",
-      "cancel": "取消",
-      "unsavedMessage": "有 {{count}} 个场景包含未保存的编辑。是否保存后再关闭？",
-      "unsavedMessage_other": "有 {{count}} 个场景包含未保存的编辑。是否保存后再关闭？",
-      "unavailableMessage": "创意工作室没有响应。现在关闭可能会丢失未保存的场景编辑。"
+      "cancel": "取消"
     },
     "phase": {
       "nav": {

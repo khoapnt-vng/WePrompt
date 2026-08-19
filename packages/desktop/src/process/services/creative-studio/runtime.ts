@@ -8,27 +8,36 @@ import { ipcBridge } from '@/common';
 import { httpRequest } from '@/common/adapter/httpBridge';
 import { CREATIVE_STUDIO_ENABLED } from '@/common/config/constants';
 import type { IProvider } from '@/common/config/storage';
-import type { StudioRenderProgressEvent } from '@/common/types/project/creativeStudioTypes';
 import { app, protocol } from 'electron';
 import {
-  createCreativeStudioService,
-  createStudioDirectorCommandProcessor,
-  createStudioDirectorCommandService,
-  createStudioDirectorCommitTracker,
-  type CreativeStudioService,
-  type CreativeStudioServiceDeps,
-  type StudioDirectorCommandProcessor,
-  type StudioDirectorCommandProcessorDeps,
-  type StudioDirectorCommandService,
-  type StudioDirectorCommandServiceDeps,
-  type StudioDirectorCommitTracker,
-} from './service';
-import { createCreativeStudioStore, type CreativeStudioStore, type StudioProjectCommitObserver } from './store';
+  createCreativeStudioServiceV2,
+  type CreativeStudioServiceV2,
+  type CreativeStudioServiceV2Deps,
+} from './service/v2Service';
 import {
-  createStudioDirectorCommandMailbox,
-  type StudioDirectorCommandMailbox,
-  type StudioDirectorCommandMailboxDeps,
+  createCreativeStudioStore,
+  CreativeStudioStoreError,
+  type CreativeStudioStore,
+  type StudioProjectCommitFacts,
+  type StudioProjectCommitObserver,
+} from './store';
+import {
+  createStudioDirectorCommandMailboxV2,
+  type StudioDirectorCommandMailboxDepsV2,
+  type StudioDirectorCommandMailboxV2,
 } from './service/directorCommandMailbox';
+import {
+  createStudioDirectorCommandServiceV2,
+  type StudioDirectorCommandServiceDepsV2,
+  type StudioDirectorCommandServiceV2,
+} from './service/directorCommandService';
+import {
+  createStudioDirectorCommandProcessorV2,
+  createStudioDirectorCommitTrackerV2,
+  type StudioDirectorCommandProcessorDepsV2,
+  type StudioDirectorCommandProcessorV2,
+  type StudioDirectorCommitTrackerV2,
+} from './service/directorCommandProcessor';
 import { createStudioMediaStore, getAvailableStudioDiskBytes, type StudioMediaStore } from './mediaStore';
 import {
   createStudioProviderResolver,
@@ -41,44 +50,43 @@ import {
   type StudioE2EFakeBundle,
   type StudioE2EFakeBundleDeps,
 } from './adapters/e2eFakeAdapter';
-import { createStudioJobManager, type StudioJobManager } from './jobManager';
-import { installCreativeStudioProtocol, type CreativeStudioProtocolInstallation } from './mediaProtocol';
+import { createStudioJobManager, type StudioJobManagerDeps, type StudioJobManagerV2 } from './jobManager';
+import {
+  installCreativeStudioProtocol,
+  type CreativeStudioAssetResolver,
+  type CreativeStudioProtocolInstallation,
+} from './mediaProtocol';
 import { getBuiltinMcpScriptPath, getCreativeStudioRootDir } from '@process/utils/initStorage';
 import { BUILTIN_STUDIO_SCRIPT } from '@process/resources/builtinMcp/constants';
-import {
-  createStudioStoryboardPlanner,
-  type StudioStoryboardPlanner,
-  type StudioStoryboardPlannerDeps,
-} from './planning/storyboardPlanner';
-import { createStudioRenderRunner, renderCut, type StudioRenderRunner } from './renderService';
 
 type RuntimeEnvironment = {
   AIONUI_E2E_TEST?: string;
   AIONUI_E2E_STUDIO_FAKE?: string;
 };
 
+export type CreativeStudioRuntimeActivationState = 'inactive' | 'activating' | 'active' | 'degraded' | 'disposed';
+
 export type CreativeStudioRuntimeProtocol = {
-  install(resolver: StudioMediaStore): Promise<CreativeStudioProtocolInstallation> | CreativeStudioProtocolInstallation;
+  install(
+    resolver: CreativeStudioAssetResolver
+  ): Promise<CreativeStudioProtocolInstallation> | CreativeStudioProtocolInstallation;
   uninstall(installation: CreativeStudioProtocolInstallation | null): Promise<void> | void;
 };
 
-type RuntimeServiceDeps = CreativeStudioServiceDeps & {
-  jobManager: StudioJobManager;
-};
+type RuntimeJobManager = StudioJobManagerV2;
 
 export type CreativeStudioRuntimeFactories = {
   createStore(input: { rootDir: string; onProjectCommitted: StudioProjectCommitObserver }): CreativeStudioStore;
   createMediaStore(input: { store: CreativeStudioStore }): StudioMediaStore;
   createAdapters(input: { rootDir: string }): GenerationProviderAdapterRegistry;
-  createPlanner(input: Pick<StudioStoryboardPlannerDeps, 'listProviders'>): StudioStoryboardPlanner;
   createProviderResolver(input: StudioProviderResolverDeps): StudioProviderResolver;
-  createJobManager(input: Parameters<typeof createStudioJobManager>[0]): StudioJobManager;
-  createService(input: RuntimeServiceDeps): CreativeStudioService;
+  createJobManager(input: StudioJobManagerDeps): RuntimeJobManager;
+  createService(input: CreativeStudioServiceV2Deps): CreativeStudioServiceV2;
   createE2EFakeBundle(input: StudioE2EFakeBundleDeps): StudioE2EFakeBundle;
-  createDirectorCommitTracker?(): StudioDirectorCommitTracker;
-  createDirectorCommandMailbox?(input: StudioDirectorCommandMailboxDeps): StudioDirectorCommandMailbox;
-  createDirectorCommandService?(input: StudioDirectorCommandServiceDeps): StudioDirectorCommandService;
-  createDirectorCommandProcessor?(input: StudioDirectorCommandProcessorDeps): StudioDirectorCommandProcessor;
+  createDirectorCommitTracker(): StudioDirectorCommitTrackerV2;
+  createDirectorCommandMailbox(input: StudioDirectorCommandMailboxDepsV2): StudioDirectorCommandMailboxV2;
+  createDirectorCommandService(input: StudioDirectorCommandServiceDepsV2): StudioDirectorCommandServiceV2;
+  createDirectorCommandProcessor(input: StudioDirectorCommandProcessorDepsV2): StudioDirectorCommandProcessorV2;
 };
 
 export type CreativeStudioRuntimeDeps = {
@@ -90,24 +98,18 @@ export type CreativeStudioRuntimeDeps = {
   listProviders(): Promise<IProvider[]>;
   onProjectUpdated(projectId: string): void;
   onProposalUpdated(projectId: string, proposalId: string): void;
-  onRenderProgress?(event: StudioRenderProgressEvent): void;
+  onReferenceUpdated(projectId: string, requestId: string): void;
   protocol: CreativeStudioRuntimeProtocol;
+  logError?: (message: string, errorName: string) => void;
 };
 
 export type CreativeStudioRuntime = {
   readonly store: CreativeStudioStore;
-  readonly mediaStore: StudioMediaStore;
-  readonly adapterRegistry: GenerationProviderAdapterRegistry;
-  readonly storyboardPlanner: StudioStoryboardPlanner;
-  readonly providerResolver: StudioProviderResolver;
-  readonly jobManager: StudioJobManager;
-  readonly renderRunner: StudioRenderRunner;
-  readonly service: CreativeStudioService;
-  readonly directorCommitTracker: StudioDirectorCommitTracker;
-  readonly directorCommandMailbox: StudioDirectorCommandMailbox;
-  readonly directorCommandService: StudioDirectorCommandService;
-  readonly directorCommandProcessor: StudioDirectorCommandProcessor;
+  readonly service: CreativeStudioServiceV2;
+  readonly activationState: CreativeStudioRuntimeActivationState;
+  readonly supportedProjectIds: string[];
   start(): Promise<void>;
+  refreshInventory(): Promise<void>;
   onBackendReady(): Promise<void>;
   dispose(): Promise<void>;
 };
@@ -123,15 +125,14 @@ const defaultFactories: CreativeStudioRuntimeFactories = {
     createGenerationProviderAdapterRegistry({
       image: { workspaceDir: rootDir },
     }),
-  createPlanner: ({ listProviders }) => createStudioStoryboardPlanner({ listProviders } as StudioStoryboardPlannerDeps),
   createProviderResolver: createStudioProviderResolver,
   createJobManager: createStudioJobManager,
-  createService: createCreativeStudioService,
+  createService: createCreativeStudioServiceV2,
   createE2EFakeBundle: createStudioE2EFakeBundle,
-  createDirectorCommitTracker: createStudioDirectorCommitTracker,
-  createDirectorCommandMailbox: createStudioDirectorCommandMailbox,
-  createDirectorCommandService: createStudioDirectorCommandService,
-  createDirectorCommandProcessor: createStudioDirectorCommandProcessor,
+  createDirectorCommitTracker: createStudioDirectorCommitTrackerV2,
+  createDirectorCommandMailbox: createStudioDirectorCommandMailboxV2,
+  createDirectorCommandService: createStudioDirectorCommandServiceV2,
+  createDirectorCommandProcessor: createStudioDirectorCommandProcessorV2,
 };
 
 /** E2E generation is never enabled by a broad test mode or Studio flag alone. */
@@ -144,158 +145,400 @@ const mergeProviders = (
   listProviders: () => Promise<IProvider[]>,
   fakeBundle: StudioE2EFakeBundle | null
 ): (() => Promise<IProvider[]>) => {
-  if (!fakeBundle) return listProviders;
+  if (fakeBundle === null) return listProviders;
   return async () => [
     ...(await listProviders()).filter((provider) => provider.id !== fakeBundle.provider.id),
     fakeBundle.provider,
   ];
 };
 
-/** Builds an isolated main-process runtime graph; callers supply every external boundary. */
+type ActivationGraph = {
+  mediaStore: StudioMediaStore;
+  adapterRegistry: GenerationProviderAdapterRegistry;
+  listProviders: () => Promise<IProvider[]>;
+  providerResolver: StudioProviderResolver;
+  jobManager: RuntimeJobManager;
+  directorCommitTracker: StudioDirectorCommitTrackerV2;
+  directorCommandMailbox: StudioDirectorCommandMailboxV2;
+  directorCommandService: StudioDirectorCommandServiceV2;
+  directorCommandProcessor: StudioDirectorCommandProcessorV2;
+  fakeBundle: StudioE2EFakeBundle | null;
+  proposalWatcher: (() => Promise<void>) | null;
+  referenceWatcher: (() => Promise<void>) | null;
+  processorStartAttempted: boolean;
+  protocolInstallAttempted: boolean;
+  protocolInstallation: CreativeStudioProtocolInstallation | null;
+  recoverySignature: string | null;
+  recoveryPromise: Promise<void> | null;
+  disposePromise: Promise<void> | null;
+};
+
+const errorName = (error: unknown): string => (error instanceof Error ? error.name : 'UnknownError');
+
+/** Builds the cold schema-2 facade and installs paid/local lifecycle only after root classification. */
 export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): CreativeStudioRuntime => {
   const factories = deps.factories ?? defaultFactories;
-  const directorCommitTracker = (factories.createDirectorCommitTracker ?? createStudioDirectorCommitTracker)();
-  const fakeBundle = shouldEnableStudioE2EFakeAdapter(deps.environment ?? process.env, {
-    isPackaged: deps.isPackaged,
-  })
-    ? factories.createE2EFakeBundle({
-        rootDir: deps.rootDir,
-        // Direct bundle consumers retain the lifecycle default. The dual-gated unpackaged runtime
-        // is the E2E journey seam, so it always exposes the explicit-selection catalog.
-        catalogProfile: 'explicit-selection',
-      })
-    : null;
-  const store = factories.createStore({ rootDir: deps.rootDir, onProjectCommitted: directorCommitTracker.observe });
-  const directorCommandMailbox = (factories.createDirectorCommandMailbox ?? createStudioDirectorCommandMailbox)({
-    rootDir: deps.rootDir,
-    store,
-  });
-  const mediaStore = factories.createMediaStore({ store });
-  const baseAdapters = factories.createAdapters({ rootDir: deps.rootDir });
-  const adapterRegistry: GenerationProviderAdapterRegistry = fakeBundle
-    ? new Map([...baseAdapters, ...fakeBundle.adapters])
-    : baseAdapters;
-  const listProviders = mergeProviders(deps.listProviders, fakeBundle);
-  const listConnections = async () => {
-    const persisted = await store.listConnections();
-    if (!fakeBundle) return persisted;
-    const fakeIds = new Set(fakeBundle.connections.map((connection) => connection.id));
-    return [...persisted.filter((connection) => !fakeIds.has(connection.id)), ...fakeBundle.connections];
-  };
-  const storyboardPlanner = factories.createPlanner({ listProviders });
-  const providerResolver = factories.createProviderResolver({
-    listProviders,
-    listConnections,
-  });
-  const jobManager = factories.createJobManager({
-    store,
-    mediaStore,
-    providerResolver,
-    adapters: adapterRegistry,
-    listProviders,
-    onProjectUpdated: deps.onProjectUpdated,
-  });
-  const service = factories.createService({
-    store,
-    mediaStore,
-    providerResolver,
-    adapterRegistry,
-    listProviders,
-    jobManager,
-    storyboardPlanner,
-    getStudioServerScriptPath: () => getBuiltinMcpScriptPath(BUILTIN_STUDIO_SCRIPT),
-    ensureDirectorCommandMailbox: directorCommandMailbox.ensure,
-    onProjectUpdated: deps.onProjectUpdated,
-  });
-  const directorCommandService = (factories.createDirectorCommandService ?? createStudioDirectorCommandService)({
-    store,
-  });
-  const directorCommandProcessor = (factories.createDirectorCommandProcessor ?? createStudioDirectorCommandProcessor)({
-    store,
-    mailbox: directorCommandMailbox,
-    service: directorCommandService,
-    tracker: directorCommitTracker,
-    onProjectUpdated: deps.onProjectUpdated,
-  });
-  const renderRunner = createStudioRenderRunner({
-    startOperation: (projectId, onProgress) => renderCut(projectId, { store, mediaStore, onProgress }),
-    onStateChanged: (state) => deps.onRenderProgress?.(state),
-  });
-
+  const logError = deps.logError ?? ((message: string, name: string): void => console.error(message, name));
+  let activationState: CreativeStudioRuntimeActivationState = 'inactive';
+  let supportedProjectIds: string[] = [];
+  let activeGraph: ActivationGraph | null = null;
+  let activationPromise: Promise<void> | null = null;
+  let inventoryPromise: Promise<void> | null = null;
+  let inventoryRefreshQueued = false;
   let startPromise: Promise<void> | null = null;
   let backendReadyPromise: Promise<void> | null = null;
   let disposePromise: Promise<void> | null = null;
-  let protocolInstallAttempted = false;
-  let protocolInstalled = false;
-  let protocolInstallation: CreativeStudioProtocolInstallation | null = null;
-  let disposeProposalWatcher: (() => Promise<void>) | null = null;
-  let directorProcessorStopPromise: Promise<void> | null = null;
+  let backendReady = false;
   let disposed = false;
-  const disabledLifecycle = Promise.resolve();
 
-  const stopDirectorProcessor = (): Promise<void> => {
-    directorProcessorStopPromise ??= directorCommandProcessor.stop();
-    return directorProcessorStopPromise;
+  const report = (message: string, error: unknown): void => {
+    try {
+      logError(message, errorName(error));
+    } catch {
+      // Diagnostics cannot alter lifecycle authority.
+    }
+  };
+
+  let refreshInventoryImpl: () => Promise<void> = async () => undefined;
+
+  const observeProjectCommit = (facts: StudioProjectCommitFacts): void => {
+    activeGraph?.directorCommitTracker.observe(facts);
+    if (!deps.enabled || disposed) return;
+    void refreshInventoryImpl().catch((error: unknown) => {
+      report('[CreativeStudio] Failed to refresh the schema-2 project inventory:', error);
+    });
+  };
+
+  const store = factories.createStore({ rootDir: deps.rootDir, onProjectCommitted: observeProjectCommit });
+
+  const requireActiveGraph = (): ActivationGraph => {
+    if (activeGraph === null || activationState !== 'active') {
+      throw new CreativeStudioStoreError('storage_error', 'Creative Studio runtime is not active');
+    }
+    return activeGraph;
+  };
+
+  const lazyMediaStore = new Proxy({} as StudioMediaStore, {
+    get(_target, property) {
+      const mediaStore = requireActiveGraph().mediaStore;
+      const value: unknown = Reflect.get(mediaStore, property);
+      return typeof value === 'function' ? value.bind(mediaStore) : value;
+    },
+  });
+  const lazyProviderResolver = new Proxy({} as StudioProviderResolver, {
+    get(_target, property) {
+      const providerResolver = requireActiveGraph().providerResolver;
+      const value: unknown = Reflect.get(providerResolver, property);
+      return typeof value === 'function' ? value.bind(providerResolver) : value;
+    },
+  });
+  const lazyJobManager = new Proxy({} as StudioJobManagerV2, {
+    get(_target, property) {
+      const jobManager = requireActiveGraph().jobManager;
+      const value: unknown = Reflect.get(jobManager, property);
+      return typeof value === 'function' ? value.bind(jobManager) : value;
+    },
+  });
+
+  const coldService = factories.createService({
+    store,
+    mediaStore: lazyMediaStore,
+    providerResolver: lazyProviderResolver,
+    jobManager: lazyJobManager,
+    listProviders: () => requireActiveGraph().listProviders(),
+    getAdapterRegistry: () => requireActiveGraph().adapterRegistry,
+    getStudioServerScriptPath: () => getBuiltinMcpScriptPath(BUILTIN_STUDIO_SCRIPT),
+    ensureDirectorCommandMailbox: (projectId) => requireActiveGraph().directorCommandMailbox.ensure(projectId),
+    onProjectUpdated: (projectId) => {
+      deps.onProjectUpdated(projectId);
+      if (!disposed) {
+        void refreshInventoryImpl().catch((error: unknown) => {
+          report('[CreativeStudio] Failed to refresh the schema-2 project inventory:', error);
+        });
+      }
+    },
+  });
+
+  const recoverGraph = (graph: ActivationGraph): Promise<void> => {
+    if (!backendReady || disposed || activeGraph !== graph) return Promise.resolve();
+    if (graph.recoveryPromise !== null) return graph.recoveryPromise;
+    graph.recoveryPromise = (async () => {
+      while (!disposed && activeGraph === graph) {
+        const ids = [...supportedProjectIds];
+        const signature = ids.join('\0');
+        if (graph.recoverySignature === signature) return;
+        await graph.mediaStore.resumeConditioningFramesV2(ids);
+        if (disposed || activeGraph !== graph) return;
+        await graph.jobManager.resumePendingJobsV2(ids);
+        if (disposed || activeGraph !== graph) return;
+        graph.recoverySignature = signature;
+      }
+    })().finally(() => {
+      graph.recoveryPromise = null;
+    });
+    return graph.recoveryPromise;
+  };
+
+  const disposeGraph = (graph: ActivationGraph): Promise<void> => {
+    graph.disposePromise ??= (async () => {
+      const errors: unknown[] = [];
+      if (graph.recoveryPromise !== null) {
+        try {
+          await graph.recoveryPromise;
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+      if (graph.protocolInstallAttempted) {
+        try {
+          await deps.protocol.uninstall(graph.protocolInstallation);
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+      if (graph.processorStartAttempted) {
+        try {
+          await graph.directorCommandProcessor.stop();
+        } catch (error) {
+          errors.push(error);
+        }
+      } else {
+        try {
+          await graph.directorCommandMailbox.dispose();
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+      if (graph.referenceWatcher !== null) {
+        try {
+          await graph.referenceWatcher();
+        } catch (error) {
+          errors.push(error);
+        }
+        graph.referenceWatcher = null;
+      }
+      if (graph.proposalWatcher !== null) {
+        try {
+          await graph.proposalWatcher();
+        } catch (error) {
+          errors.push(error);
+        }
+        graph.proposalWatcher = null;
+      }
+      try {
+        await graph.jobManager.dispose();
+      } catch (error) {
+        errors.push(error);
+      }
+      if (graph.fakeBundle !== null) {
+        try {
+          await graph.fakeBundle.dispose();
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+      if (errors.length > 0) throw new AggregateError(errors, 'Creative Studio activation disposal failed');
+    })();
+    return graph.disposePromise;
+  };
+
+  const degradeInstalledGraph = async (graph: ActivationGraph, error: unknown): Promise<void> => {
+    if (disposed || activeGraph !== graph) return;
+    activeGraph = null;
+    let activationError = error;
+    try {
+      await disposeGraph(graph);
+    } catch (rollbackError) {
+      activationError = new AggregateError(
+        [error, rollbackError],
+        'Creative Studio activation recovery rollback failed'
+      );
+    }
+    if (!disposed) {
+      activationState = 'degraded';
+      report('[CreativeStudio] Schema-2 runtime activation failed:', activationError);
+    }
+  };
+
+  const buildActivationGraph = async (): Promise<ActivationGraph> => {
+    const fakeBundle = shouldEnableStudioE2EFakeAdapter(deps.environment ?? process.env, {
+      isPackaged: deps.isPackaged,
+    })
+      ? factories.createE2EFakeBundle({
+          rootDir: deps.rootDir,
+          catalogProfile: 'explicit-selection',
+        })
+      : null;
+    const mediaStore = factories.createMediaStore({ store });
+    const baseAdapters = factories.createAdapters({ rootDir: deps.rootDir });
+    const adapterRegistry: GenerationProviderAdapterRegistry = fakeBundle
+      ? new Map([...baseAdapters, ...fakeBundle.adapters])
+      : baseAdapters;
+    const listProviders = mergeProviders(deps.listProviders, fakeBundle);
+    const listConnections = async () => {
+      const persisted = await store.listConnections();
+      if (fakeBundle === null) return persisted;
+      const fakeIds = new Set(fakeBundle.connections.map((connection) => connection.id));
+      return [...persisted.filter((connection) => !fakeIds.has(connection.id)), ...fakeBundle.connections];
+    };
+    const providerResolver = factories.createProviderResolver({ listProviders, listConnections });
+    const jobManager = factories.createJobManager({
+      store,
+      mediaStore,
+      providerResolver,
+      adapters: adapterRegistry,
+      listProviders,
+      onProjectUpdated: deps.onProjectUpdated,
+    });
+    const directorCommitTracker = factories.createDirectorCommitTracker();
+    const directorCommandMailbox = factories.createDirectorCommandMailbox({ rootDir: deps.rootDir, store });
+    const directorCommandService = factories.createDirectorCommandService({ store });
+    const directorCommandProcessor = factories.createDirectorCommandProcessor({
+      store,
+      mailbox: directorCommandMailbox,
+      service: directorCommandService,
+      tracker: directorCommitTracker,
+      onProjectUpdated: deps.onProjectUpdated,
+    });
+    const graph: ActivationGraph = {
+      mediaStore,
+      adapterRegistry,
+      listProviders,
+      providerResolver,
+      jobManager,
+      directorCommitTracker,
+      directorCommandMailbox,
+      directorCommandService,
+      directorCommandProcessor,
+      fakeBundle,
+      proposalWatcher: null,
+      referenceWatcher: null,
+      processorStartAttempted: false,
+      protocolInstallAttempted: false,
+      protocolInstallation: null,
+      recoverySignature: null,
+      recoveryPromise: null,
+      disposePromise: null,
+    };
+    try {
+      await mediaStore.cleanupOrphanPartsV2();
+      if (disposed) throw new Error('Creative Studio runtime was disposed during activation');
+      await store.reapAbandonedProposalsV2();
+      if (disposed) throw new Error('Creative Studio runtime was disposed during activation');
+      await store.reapAbandonedReferenceRequestsV2();
+      if (disposed) throw new Error('Creative Studio runtime was disposed during activation');
+      graph.proposalWatcher = await store.watchProposalsV2(deps.onProposalUpdated);
+      if (disposed) throw new Error('Creative Studio runtime was disposed during activation');
+      graph.referenceWatcher = await store.watchReferenceRequestsV2(deps.onReferenceUpdated);
+      if (disposed) throw new Error('Creative Studio runtime was disposed during activation');
+      graph.processorStartAttempted = true;
+      await directorCommandProcessor.start();
+      if (disposed) throw new Error('Creative Studio runtime was disposed during activation');
+      graph.protocolInstallAttempted = true;
+      graph.protocolInstallation = await deps.protocol.install({
+        resolveAsset: (projectId, assetId) => mediaStore.resolveAssetV2(projectId, assetId),
+      });
+      if (disposed) throw new Error('Creative Studio runtime was disposed during activation');
+      return graph;
+    } catch (error) {
+      try {
+        await disposeGraph(graph);
+      } catch (rollbackError) {
+        throw new AggregateError([error, rollbackError], 'Creative Studio activation rollback failed');
+      }
+      throw error;
+    }
+  };
+
+  const activate = (): Promise<void> => {
+    if (disposed || supportedProjectIds.length === 0 || activationState === 'active') return Promise.resolve();
+    if (activationPromise !== null) return activationPromise;
+    activationState = 'activating';
+    activationPromise = (async () => {
+      let graph: ActivationGraph | null = null;
+      try {
+        graph = await buildActivationGraph();
+        if (disposed) {
+          await disposeGraph(graph);
+          return;
+        }
+        activeGraph = graph;
+        await recoverGraph(graph);
+        if (!disposed && activeGraph === graph) activationState = 'active';
+      } catch (error) {
+        if (!disposed && graph !== null && activeGraph === graph) {
+          await degradeInstalledGraph(graph, error);
+        } else if (!disposed) {
+          activationState = 'degraded';
+          report('[CreativeStudio] Schema-2 runtime activation failed:', error);
+        }
+      }
+    })().finally(() => {
+      activationPromise = null;
+    });
+    return activationPromise;
+  };
+
+  refreshInventoryImpl = (): Promise<void> => {
+    if (!deps.enabled || disposed) return Promise.resolve();
+    inventoryRefreshQueued = true;
+    if (inventoryPromise !== null) return inventoryPromise;
+    inventoryPromise = (async () => {
+      while (inventoryRefreshQueued && !disposed) {
+        inventoryRefreshQueued = false;
+        const next = await store.inspectProjectsV2();
+        if (disposed) return;
+        supportedProjectIds = [...new Set(next.supportedProjectIds)].toSorted((left, right) =>
+          left.localeCompare(right)
+        );
+        if (activeGraph !== null) {
+          await recoverGraph(activeGraph);
+          continue;
+        }
+        if (supportedProjectIds.length === 0) {
+          activationState = 'inactive';
+          continue;
+        }
+        await activate();
+      }
+    })().finally(() => {
+      inventoryPromise = null;
+    });
+    return inventoryPromise;
+  };
+
+  const service: CreativeStudioServiceV2 = {
+    ...coldService,
+    async createProject(input) {
+      const project = await coldService.createProject(input);
+      await refreshInventoryImpl();
+      return project;
+    },
+    async deleteProject(input) {
+      const deleted = await coldService.deleteProject(input);
+      if (deleted) await refreshInventoryImpl();
+      return deleted;
+    },
   };
 
   const start = (): Promise<void> => {
-    if (!deps.enabled) return disabledLifecycle;
-    startPromise ??= (async () => {
-      let processorStartAttempted = false;
-      try {
-        if (disposed) return;
-        await mediaStore.cleanupOrphanParts();
-        if (disposed) return;
-        await store.reapAbandonedProposals();
-        if (disposed) return;
-        disposeProposalWatcher = await store.watchProposals(deps.onProposalUpdated);
-        if (disposed) {
-          await disposeProposalWatcher();
-          disposeProposalWatcher = null;
-          return;
-        }
-        processorStartAttempted = true;
-        await directorCommandProcessor.start();
-        if (disposed) {
-          await stopDirectorProcessor();
-          if (disposeProposalWatcher !== null) await disposeProposalWatcher();
-          disposeProposalWatcher = null;
-          return;
-        }
-        protocolInstallAttempted = true;
-        protocolInstallation = await deps.protocol.install(mediaStore);
-        protocolInstalled = true;
-      } catch (error) {
-        const rollbackErrors: unknown[] = [];
-        if (processorStartAttempted) {
-          try {
-            await stopDirectorProcessor();
-          } catch (rollbackError) {
-            rollbackErrors.push(rollbackError);
-          }
-        }
-        if (disposeProposalWatcher !== null) {
-          try {
-            await disposeProposalWatcher();
-          } catch (rollbackError) {
-            rollbackErrors.push(rollbackError);
-          }
-          disposeProposalWatcher = null;
-        }
-        if (rollbackErrors.length > 0) {
-          throw new AggregateError([error, ...rollbackErrors], 'Creative Studio runtime startup rollback failed');
-        }
-        throw error;
-      }
-    })();
+    if (!deps.enabled || disposed) return Promise.resolve();
+    startPromise ??= refreshInventoryImpl();
     return startPromise;
   };
 
   const onBackendReady = (): Promise<void> => {
-    if (!deps.enabled) return disabledLifecycle;
+    if (!deps.enabled || disposed) return Promise.resolve();
+    backendReady = true;
     backendReadyPromise ??= (async () => {
       await start();
-      if (!disposed) await jobManager.resumePendingJobs();
+      const graph = activeGraph;
+      if (graph === null || disposed) return;
+      try {
+        await recoverGraph(graph);
+      } catch (error) {
+        await degradeInstalledGraph(graph, error);
+      }
     })();
     return backendReadyPromise;
   };
@@ -303,78 +546,44 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
   const dispose = (): Promise<void> => {
     disposePromise ??= (async () => {
       disposed = true;
+      activationState = 'disposed';
       const errors: unknown[] = [];
+      if (activationPromise !== null) {
+        try {
+          await activationPromise;
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+      if (activeGraph !== null) {
+        try {
+          await disposeGraph(activeGraph);
+        } catch (error) {
+          errors.push(error);
+        }
+        activeGraph = null;
+      }
       try {
-        await stopDirectorProcessor();
+        coldService.dispose();
       } catch (error) {
         errors.push(error);
       }
-      if (disposeProposalWatcher !== null) {
-        try {
-          await disposeProposalWatcher();
-        } catch (error) {
-          errors.push(error);
-        }
-        disposeProposalWatcher = null;
-      }
-      for (const disposeBoundary of [renderRunner.dispose, storyboardPlanner.dispose, jobManager.dispose]) {
-        try {
-          // Cleanup boundaries are intentionally attempted in deterministic order.
-          // eslint-disable-next-line no-await-in-loop
-          await disposeBoundary();
-        } catch (error) {
-          errors.push(error);
-        }
-      }
-      if (backendReadyPromise) {
-        try {
-          await backendReadyPromise;
-        } catch (error) {
-          errors.push(error);
-        }
-      }
-      if (startPromise) {
-        try {
-          await startPromise;
-        } catch (error) {
-          errors.push(error);
-        }
-      }
-      if (protocolInstallAttempted || protocolInstalled) {
-        try {
-          await deps.protocol.uninstall(protocolInstallation);
-        } catch (error) {
-          errors.push(error);
-        }
-      }
-      if (fakeBundle) {
-        try {
-          await fakeBundle.dispose();
-        } catch (error) {
-          errors.push(error);
-        }
-      }
-      if (errors.length > 0) {
-        throw new AggregateError(errors, 'Creative Studio runtime disposal failed');
-      }
+      if (errors.length > 0) throw new AggregateError(errors, 'Creative Studio runtime disposal failed');
     })();
     return disposePromise;
   };
 
   return {
     store,
-    mediaStore,
-    adapterRegistry,
-    storyboardPlanner,
-    providerResolver,
-    jobManager,
-    renderRunner,
     service,
-    directorCommitTracker,
-    directorCommandMailbox,
-    directorCommandService,
-    directorCommandProcessor,
+    get activationState(): CreativeStudioRuntimeActivationState {
+      return activationState;
+    },
+    get supportedProjectIds(): string[] {
+      return [...supportedProjectIds];
+    },
     start,
+    refreshInventory: refreshInventoryImpl,
     onBackendReady,
     dispose,
   };
@@ -407,7 +616,8 @@ export const getCreativeStudioRuntime = (): CreativeStudioRuntime => {
     onProjectUpdated: (projectId) => ipcBridge.creativeStudio.projectUpdated.emit({ projectId }),
     onProposalUpdated: (projectId, proposalId) =>
       ipcBridge.creativeStudio.proposalUpdated.emit({ projectId, proposalId }),
-    onRenderProgress: (event) => ipcBridge.creativeStudio.renderProgress.emit(event),
+    onReferenceUpdated: (projectId, requestId) =>
+      ipcBridge.creativeStudio.referenceUpdated.emit({ projectId, requestId }),
     protocol: {
       install: (resolver) => installCreativeStudioProtocol(protocol, resolver),
       uninstall: async (installation) => {
@@ -422,7 +632,7 @@ export const getCreativeStudioRuntime = (): CreativeStudioRuntime => {
   return productionRuntime;
 };
 
-export const getCreativeStudioService = (): CreativeStudioService => getCreativeStudioRuntime().service;
+export const getCreativeStudioService = (): CreativeStudioServiceV2 => getCreativeStudioRuntime().service;
 
 /** Does not instantiate Studio during a quit path that never started it. */
 export const disposeCreativeStudioRuntime = async (): Promise<void> => {

@@ -4,30 +4,31 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { randomUUID } from 'node:crypto';
 import { ipcBridge } from '@/common';
 import { CREATIVE_STUDIO_ENABLED } from '@/common/config/constants';
 import {
+  STUDIO_PROJECT_SCHEMA_VERSION,
   STUDIO_VIEWS,
   type StudioCommandErrorCode,
   type StudioCommandResult,
-  type StudioRenderErrorCode,
-  type StudioUpdateModelSelectionRequest,
+  type StudioMutationBatchResultV2,
+  type StudioMutationReducerContextV2,
+  type StudioRendererProjectCommitResultV2,
+  type StudioRendererWorkspaceStatusV2,
 } from '@/common/types/project/creativeStudioTypes';
-import { CreativeStudioServiceError, type CreativeStudioService } from '@process/services/creative-studio/service';
+import { CreativeStudioServiceError } from '@process/services/creative-studio/service/projectMutations';
+import type { CreativeStudioServiceV2 } from '@process/services/creative-studio/service/v2Service';
 import { CreativeStudioStoreError } from '@process/services/creative-studio/store';
 import { CreativeStudioMediaError } from '@process/services/creative-studio/mediaStore';
-import { getCreativeStudioRuntime, getCreativeStudioService } from '@process/services/creative-studio/runtime';
-import { StudioJobManagerError } from '@process/services/creative-studio/jobManager';
-import { StudioRenderRunnerError, type StudioRenderRunner } from '@process/services/creative-studio/renderService';
+import { getCreativeStudioService } from '@process/services/creative-studio/runtime';
 import { BrowserWindow, dialog } from 'electron';
 
 const errorMessageKeys: Record<StudioCommandErrorCode, string> = {
   feature_disabled: 'conversation.creativeStudio.errors.featureDisabled',
   invalid_payload: 'conversation.creativeStudio.errors.invalidPayload',
   not_found: 'conversation.creativeStudio.errors.projectNotFound',
-  storyboard_exists: 'conversation.creativeStudio.errors.storyboardExists',
   stale_project: 'conversation.creativeStudio.errors.staleProject',
-  planning_unavailable: 'conversation.creativeStudio.errors.planningUnavailable',
   invalid_route: 'conversation.creativeStudio.errors.invalidRoute',
   rule_breach: 'conversation.creativeStudio.errors.ruleBreach',
   cancellation_refused: 'conversation.creativeStudio.errors.cancellationRefused',
@@ -35,49 +36,32 @@ const errorMessageKeys: Record<StudioCommandErrorCode, string> = {
     'conversation.creativeStudio.errors.duplicateChargeAcknowledgementRequired',
   unsupported: 'conversation.creativeStudio.jobs.errors.unsupported',
   busy: 'conversation.creativeStudio.errors.busy',
-  ffmpeg_unavailable: 'conversation.creativeStudio.phase.review.render.errors.ffmpegUnavailable',
-  render_failed: 'conversation.creativeStudio.phase.review.render.errors.failed',
-  no_renderable_scenes: 'conversation.creativeStudio.phase.review.render.errors.noRenderableScenes',
-  cancelled: 'conversation.creativeStudio.phase.review.render.errors.cancelled',
+  cancelled: 'conversation.creativeStudio.jobs.status.cancelled',
   provider_error: 'conversation.creativeStudio.errors.provider',
+  media_in_use: 'conversation.creativeStudio.errors.mediaInUse',
   storage_error: 'conversation.creativeStudio.errors.storage',
 };
 
-const renderErrorMessageKeys: Record<StudioRenderErrorCode, string> = {
-  busy: 'conversation.creativeStudio.phase.review.render.errors.busy',
-  ffmpeg_unavailable: 'conversation.creativeStudio.phase.review.render.errors.ffmpegUnavailable',
-  render_failed: 'conversation.creativeStudio.phase.review.render.errors.failed',
-  no_renderable_scenes: 'conversation.creativeStudio.phase.review.render.errors.noRenderableScenes',
-  cancelled: 'conversation.creativeStudio.phase.review.render.errors.cancelled',
-};
-
-const legacyStoreErrorCode = (error: CreativeStudioStoreError): StudioCommandErrorCode =>
+const storeErrorCode = (error: CreativeStudioStoreError): StudioCommandErrorCode =>
   error.code === 'unsupported_prototype_schema' ? 'storage_error' : error.code;
 
 const toCommandError = (error: unknown): StudioCommandResult<never> => {
-  if (error instanceof StudioRenderRunnerError) {
-    return { ok: false, error: { code: error.code, messageKey: renderErrorMessageKeys[error.code] } };
-  }
-  // Schema-2 providers remain unregistered until the public cutover; keep the legacy bridge's
-  // existing error vocabulary until that provider surface is installed.
   const code: StudioCommandErrorCode =
     error instanceof CreativeStudioStoreError
-      ? legacyStoreErrorCode(error)
+      ? storeErrorCode(error)
       : error instanceof CreativeStudioServiceError
         ? error.code
-        : error instanceof StudioJobManagerError
-          ? error.code === 'invalid_request'
-            ? 'invalid_payload'
-            : error.code
-          : error instanceof CreativeStudioMediaError
-            ? error.code === 'not_found'
-              ? 'not_found'
-              : error.code === 'stale_project'
-                ? 'stale_project'
-                : error.code === 'invalid_media'
-                  ? 'invalid_payload'
+        : error instanceof CreativeStudioMediaError
+          ? error.code === 'not_found'
+            ? 'not_found'
+            : error.code === 'stale_project'
+              ? 'stale_project'
+              : error.code === 'invalid_media'
+                ? 'invalid_payload'
+                : error.code === 'media_in_use'
+                  ? 'media_in_use'
                   : 'storage_error'
-            : 'storage_error';
+          : 'storage_error';
   return { ok: false, error: { code, messageKey: errorMessageKeys[code] } };
 };
 
@@ -100,11 +84,11 @@ const command = async <T>(
 
 export type CreativeStudioBridgeDependencies = {
   isFeatureEnabled?: () => boolean;
-  getService: () => CreativeStudioService;
-  getRenderRunner?: () => StudioRenderRunner;
+  getService: () => CreativeStudioServiceV2;
   getParentWindow?: () => BrowserWindow | undefined;
   showOpenDialog?: (window: BrowserWindow | undefined) => Promise<{ canceled: boolean; filePaths: string[] }>;
-  showExportDialog?: (window: BrowserWindow | undefined) => Promise<{ canceled: boolean; filePaths: string[] }>;
+  createMutationId?: () => string;
+  now?: () => Date;
 };
 
 type CreativeStudioCloseEvent = {
@@ -125,7 +109,7 @@ type CreativeStudioCloseDialogOptions = {
 
 export type CreativeStudioCloseHandshakeDependencies = {
   getCurrentUrl: () => string;
-  queryUnsavedWork: (options: CreativeStudioCloseQueryOptions) => Promise<{ dirtySceneCount: number }>;
+  queryUnsavedWork: (options: CreativeStudioCloseQueryOptions) => Promise<{ dirtyDraftCount: number }>;
   flushUnsavedWork: (options: CreativeStudioCloseQueryOptions) => Promise<{ saved: boolean }>;
   showMessageBox: (options: CreativeStudioCloseDialogOptions) => Promise<{ response: number }>;
   translate: (key: string, options?: { count?: number }) => string;
@@ -144,14 +128,13 @@ const CLOSE_QUERY_TIMEOUT_MS = 3_000;
 /**
  * Built from the shared `STUDIO_VIEWS`, never from a hand-written alternation.
  *
- * This pattern gates the unsaved-scene-draft preflight: a Studio document parked on a segment it
+ * This pattern gates the unsaved-work preflight: a Studio document parked on a segment it
  * does not match closes with no prompt and loses the drafts. Deriving it means a new view is
  * covered the moment it joins the shared list, which is the whole reason the vocabulary is shared
  * rather than copied here.
  *
- * The retired `write|produce|review` segments are absent by construction and must stay absent —
- * the renderer redirects an unknown segment to a real view on its first render, so no document
- * stays on one long enough to hold work. (`brief` is not retired: it survived the rail as a view.)
+ * The retired `brief|write|produce|review` segments are absent by construction and must stay absent;
+ * the renderer redirects an unknown segment to a real view before it can become an editable document.
  *
  * The values are plain lowercase words with no regex metacharacters, so they are interpolated as
  * written rather than escaped; `creativeStudioBridge.test.ts` asserts that shape, so a view named
@@ -212,16 +195,16 @@ export function createCreativeStudioCloseHandshake(
   };
 
   const runPreflight = async (): Promise<void> => {
-    let dirtySceneCount: number;
+    let dirtyDraftCount: number;
     try {
-      ({ dirtySceneCount } = await dependencies.queryUnsavedWork({ timeoutMs: CLOSE_QUERY_TIMEOUT_MS }));
+      ({ dirtyDraftCount } = await dependencies.queryUnsavedWork({ timeoutMs: CLOSE_QUERY_TIMEOUT_MS }));
     } catch {
       if (await askToDiscardUnavailableWork()) approve();
       else cancel();
       return;
     }
 
-    if (dirtySceneCount === 0) {
+    if (dirtyDraftCount === 0) {
       approve();
       return;
     }
@@ -235,7 +218,7 @@ export function createCreativeStudioCloseHandshake(
       ],
       defaultId: 0,
       cancelId: 2,
-      message: dependencies.translate('conversation.creativeStudio.close.unsavedMessage', { count: dirtySceneCount }),
+      message: dependencies.translate('conversation.creativeStudio.close.unsavedMessage', { count: dirtyDraftCount }),
     });
 
     if (choice.response === 1) {
@@ -292,25 +275,58 @@ export function createCreativeStudioCloseHandshake(
 
 const defaultDependencies: CreativeStudioBridgeDependencies = {
   getService: getCreativeStudioService,
-  getRenderRunner: () => getCreativeStudioRuntime().renderRunner,
   getParentWindow: () => BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0],
   showOpenDialog: (window) =>
     dialog.showOpenDialog(window ?? BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0], {
       properties: ['openFile'],
       filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp'] }],
     }),
-  showExportDialog: (window) =>
-    dialog.showOpenDialog(window ?? BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0], {
-      properties: ['openDirectory', 'createDirectory'],
-    }),
 };
+
+const toCommitResult = (
+  result: StudioMutationBatchResultV2 | StudioRendererWorkspaceStatusV2
+): StudioRendererProjectCommitResultV2 =>
+  'project' in result
+    ? {
+        projectId: result.project.id,
+        projectRevision: result.project.revision,
+        createdBeatIds: [...result.createdBeatIds],
+        createdShotIds: [...result.createdShotIds],
+      }
+    : {
+        projectId: result.projectId,
+        projectRevision: result.projectRevision,
+        createdBeatIds: [],
+        createdShotIds: [],
+      };
+
+const mutationContext = (dependencies: CreativeStudioBridgeDependencies): StudioMutationReducerContextV2 => ({
+  mutationId: (dependencies.createMutationId ?? (() => `native_${randomUUID().replaceAll('-', '')}`))(),
+  capturedAt: (dependencies.now ?? (() => new Date()))().toISOString(),
+});
 
 /** Registers the typed Creative Studio IPC providers without eagerly creating storage. */
 export function initCreativeStudioBridge(dependencies: CreativeStudioBridgeDependencies = defaultDependencies): void {
   const isFeatureEnabled = dependencies.isFeatureEnabled ?? (() => CREATIVE_STUDIO_ENABLED);
   const runCommand = <T>(operation: () => Promise<T>): Promise<StudioCommandResult<T>> =>
     command(isFeatureEnabled, operation);
-  const getRenderRunner = dependencies.getRenderRunner ?? (() => getCreativeStudioRuntime().renderRunner);
+  const applyOperations = (
+    input: { projectId: string; expectedRevision: number },
+    operations: Parameters<CreativeStudioServiceV2['applyMutations']>[0]['operations']
+  ): Promise<StudioRendererProjectCommitResultV2> =>
+    dependencies
+      .getService()
+      .applyMutations(
+        {
+          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          projectId: input.projectId,
+          expectedRevision: input.expectedRevision,
+          operations,
+        },
+        mutationContext(dependencies)
+      )
+      .then(toCommitResult);
+
   ipcBridge.creativeStudio.listProjects.provider(() => runCommand(() => dependencies.getService().listProjects()));
   ipcBridge.creativeStudio.createProject.provider((input) =>
     runCommand(() => dependencies.getService().createProject(input))
@@ -324,51 +340,80 @@ export function initCreativeStudioBridge(dependencies: CreativeStudioBridgeDepen
   ipcBridge.creativeStudio.listProposals.provider((input) =>
     runCommand(() => dependencies.getService().listProposals(input))
   );
-  ipcBridge.creativeStudio.listPendingReferenceRequests.provider((input) =>
-    runCommand(() => dependencies.getService().listPendingReferenceRequests(input))
-  );
-  ipcBridge.creativeStudio.dismissReferenceRequests.provider((input) =>
-    runCommand(() => dependencies.getService().dismissReferenceRequests(input))
-  );
   ipcBridge.creativeStudio.acceptProposal.provider((input) =>
     runCommand(() => dependencies.getService().acceptProposal(input))
   );
   ipcBridge.creativeStudio.rejectProposal.provider((input) =>
     runCommand(() => dependencies.getService().rejectProposal(input))
   );
-  ipcBridge.creativeStudio.proposeStoryboard.provider((input) =>
-    runCommand(() => dependencies.getService().proposeStoryboard(input))
+  ipcBridge.creativeStudio.listReferenceRequests.provider((input) =>
+    runCommand(() => dependencies.getService().listReferenceRequests(input))
   );
-  ipcBridge.creativeStudio.updateModelSelection.provider((input: StudioUpdateModelSelectionRequest) =>
-    runCommand(() => dependencies.getService().updateModelSelection(input))
+  ipcBridge.creativeStudio.decideReferenceRequest.provider((input) =>
+    runCommand(() => dependencies.getService().decideReferenceRequest(input))
   );
-  ipcBridge.creativeStudio.updateProject.provider((input) =>
-    runCommand(() => dependencies.getService().updateProject(input))
+  ipcBridge.creativeStudio.listReferenceGenerationHandoffs.provider((input) =>
+    runCommand(() => dependencies.getService().listReferenceGenerationHandoffs(input))
   );
-  ipcBridge.creativeStudio.setBriefRules.provider((input) =>
-    runCommand(() => dependencies.getService().setBriefRules(input))
+  ipcBridge.creativeStudio.applyAuthoringBatch.provider((input) =>
+    runCommand(() => applyOperations(input, input.operations))
   );
-  ipcBridge.creativeStudio.undoBriefRules.provider((input) =>
-    runCommand(() => dependencies.getService().undoBriefRules(input))
+  ipcBridge.creativeStudio.undoLast.provider((input) =>
+    runCommand(() => applyOperations(input, [{ kind: 'undo_last', entryId: input.entryId }]))
   );
-  ipcBridge.creativeStudio.bindBriefConversation.provider((input) =>
-    runCommand(() => dependencies.getService().bindBriefConversation(input))
+  ipcBridge.creativeStudio.getWorkspaceStatus.provider((input) =>
+    runCommand(() => dependencies.getService().getWorkspaceStatus(input))
   );
-  ipcBridge.creativeStudio.updateCut.provider((input) => runCommand(() => dependencies.getService().updateCut(input)));
-  ipcBridge.creativeStudio.placeCutScenes.provider((input) =>
-    runCommand(() => dependencies.getService().placeCutScenes(input))
+  ipcBridge.creativeStudio.getChainStatus.provider((input) =>
+    runCommand(() => dependencies.getService().getChainStatus(input))
+  );
+  ipcBridge.creativeStudio.retryConditioningFrame.provider((input) =>
+    runCommand(() => dependencies.getService().retryConditioningFrame(input).then(toCommitResult))
+  );
+  ipcBridge.creativeStudio.cancelWaitingCascade.provider((input) =>
+    runCommand(() => dependencies.getService().cancelWaitingCascade(input).then(toCommitResult))
+  );
+  ipcBridge.creativeStudio.editProject.provider((input) =>
+    runCommand(() => applyOperations(input, [{ kind: 'edit_project', changes: input.changes }]))
+  );
+  ipcBridge.creativeStudio.setRules.provider((input) =>
+    runCommand(() => applyOperations(input, [{ kind: 'set_rules', rules: input.rules }]))
+  );
+  ipcBridge.creativeStudio.parkBeat.provider((input) =>
+    runCommand(() => applyOperations(input, [{ kind: 'park_beat', beatId: input.beatId }]))
+  );
+  ipcBridge.creativeStudio.restoreBeat.provider((input) =>
+    runCommand(() =>
+      applyOperations(input, [{ kind: 'restore_beat', beatId: input.beatId, beforeBeatId: input.beforeBeatId }])
+    )
+  );
+  ipcBridge.creativeStudio.parkShot.provider((input) =>
+    runCommand(() => applyOperations(input, [{ kind: 'park_shot', shotId: input.shotId }]))
+  );
+  ipcBridge.creativeStudio.restoreShot.provider((input) =>
+    runCommand(() =>
+      applyOperations(input, [{ kind: 'restore_shot', shotId: input.shotId, beforeShotId: input.beforeShotId }])
+    )
+  );
+  ipcBridge.creativeStudio.parkTake.provider((input) =>
+    runCommand(() => applyOperations(input, [{ kind: 'park_take', shotId: input.shotId, assetId: input.assetId }]))
+  );
+  ipcBridge.creativeStudio.addAlternateTake.provider((input) =>
+    runCommand(() =>
+      applyOperations(input, [{ kind: 'add_alternate_take', shotId: input.shotId, assetId: input.assetId }])
+    )
+  );
+  ipcBridge.creativeStudio.restoreTake.provider((input) =>
+    runCommand(() => applyOperations(input, [{ kind: 'restore_take', shotId: input.shotId, assetId: input.assetId }]))
+  );
+  ipcBridge.creativeStudio.selectTake.provider((input) =>
+    runCommand(() => applyOperations(input, [{ kind: 'select_take', shotId: input.shotId, assetId: input.assetId }]))
+  );
+  ipcBridge.creativeStudio.reorderBin.provider((input) =>
+    runCommand(() => applyOperations(input, [{ kind: 'reorder_bin', bin: input.bin }]))
   );
   ipcBridge.creativeStudio.deleteProject.provider((input) =>
     runCommand(() => dependencies.getService().deleteProject(input))
-  );
-  ipcBridge.creativeStudio.updateScene.provider((input) =>
-    runCommand(() => dependencies.getService().updateScene(input))
-  );
-  ipcBridge.creativeStudio.reorderScenes.provider((input) =>
-    runCommand(() => dependencies.getService().reorderScenes(input))
-  );
-  ipcBridge.creativeStudio.selectAsset.provider((input) =>
-    runCommand(() => dependencies.getService().selectAsset(input))
   );
   ipcBridge.creativeStudio.persistCapturedPoster.provider((input) =>
     runCommand(() => dependencies.getService().persistCapturedPoster(input))
@@ -381,42 +426,33 @@ export function initCreativeStudioBridge(dependencies: CreativeStudioBridgeDepen
       const imported = await dependencies
         .getService()
         .importReferenceFromPath({ ...input, sourcePath: picked.filePaths[0] });
-      return { status: 'imported' as const, ...imported };
+      return {
+        status: 'imported' as const,
+        assetId: imported.asset.id,
+        projectRevision: imported.project.revision,
+      };
     })
   );
   ipcBridge.creativeStudio.detachBriefReference.provider((input) =>
-    runCommand(() => dependencies.getService().detachBriefReference(input))
-  );
-  ipcBridge.creativeStudio.chooseAndExportAssets.provider((input) =>
     runCommand(async () => {
-      const parentWindow = (dependencies.getParentWindow ?? defaultDependencies.getParentWindow!)();
-      const picked = await (dependencies.showExportDialog ?? defaultDependencies.showExportDialog!)(parentWindow);
-      if (picked.canceled || !picked.filePaths[0]) return { status: 'cancelled' as const };
-      const result = await dependencies
-        .getService()
-        .exportAssetsToDirectory({ ...input, destinationDirectory: picked.filePaths[0] });
-      return { status: 'exported' as const, ...result };
+      const project = await dependencies.getService().detachBriefReference(input);
+      return { status: 'detached' as const, projectRevision: project.revision };
     })
   );
-  ipcBridge.creativeStudio.getLatestRender.provider((input) =>
-    runCommand(() => dependencies.getService().getLatestRender(input))
-  );
-  ipcBridge.creativeStudio.renderCut.provider((input) =>
-    runCommand(() => getRenderRunner().renderCut(input.projectId))
-  );
-  ipcBridge.creativeStudio.cancelRender.provider((input) =>
-    runCommand(async () => ({ cancelled: getRenderRunner().cancelRender(input.projectId) }))
-  );
-  ipcBridge.creativeStudio.fitStoryboard.provider((input) =>
-    runCommand(() => dependencies.getService().fitStoryboard(input))
-  );
-  ipcBridge.creativeStudio.submitScenes.provider((input) =>
-    runCommand(() => dependencies.getService().submitScenes(input))
-  );
-  ipcBridge.creativeStudio.cancelJob.provider((input) => runCommand(() => dependencies.getService().cancelJob(input)));
-  ipcBridge.creativeStudio.retryJob.provider((input) => runCommand(() => dependencies.getService().retryJob(input)));
-  ipcBridge.creativeStudio.retryDownload.provider((input) =>
-    runCommand(() => dependencies.getService().retryDownload(input))
+  ipcBridge.creativeStudio.importSeedStill.provider((input) =>
+    runCommand(async () => {
+      const parentWindow = (dependencies.getParentWindow ?? defaultDependencies.getParentWindow!)();
+      const picked = await (dependencies.showOpenDialog ?? defaultDependencies.showOpenDialog!)(parentWindow);
+      if (picked.canceled || !picked.filePaths[0]) return { status: 'cancelled' as const };
+      const imported = await dependencies
+        .getService()
+        .importReferenceFromPath({ ...input, sourcePath: picked.filePaths[0] });
+      return {
+        status: 'imported' as const,
+        assetId: imported.asset.id,
+        projectRevision: imported.project.revision,
+      };
+    })
   );
   ipcBridge.creativeStudio.listConnectionCandidates.provider(() =>
     runCommand(() => dependencies.getService().listConnectionCandidates())

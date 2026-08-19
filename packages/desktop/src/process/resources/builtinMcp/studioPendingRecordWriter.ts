@@ -32,10 +32,8 @@ import {
   parseStudioReferenceRequestSlotV2,
 } from '@process/services/creative-studio/service/directorCommandContracts';
 
-// Shared subprocess-side disk contract: an O_EXCL slot caps pending records,
-// an exclusive write prevents replacement, and main re-validates every record.
-const MAX_RECORD_BYTES = 256 * 1024;
-const MAX_PENDING_PER_PROJECT = 50;
+const STUDIO_PROPOSAL_V2_MAX_RECORD_BYTES = 256 * 1024;
+const STUDIO_PROPOSAL_V2_MAX_PENDING_PER_PROJECT = 50;
 
 export {
   STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT,
@@ -49,14 +47,17 @@ type PendingRecordLimitsV2 = Readonly<{
 }>;
 
 const pendingRecordLimitsV2 = (
-  slotRecordKey: WritePendingRecordInput<unknown>['slotRecordKey']
+  slotRecordKey: WritePendingRecordInputV2<unknown>['slotRecordKey']
 ): PendingRecordLimitsV2 =>
   slotRecordKey === 'requestId'
     ? {
         maxRecordBytes: STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES,
         maxPendingPerProject: STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT,
       }
-    : { maxRecordBytes: MAX_RECORD_BYTES, maxPendingPerProject: MAX_PENDING_PER_PROJECT };
+    : {
+        maxRecordBytes: STUDIO_PROPOSAL_V2_MAX_RECORD_BYTES,
+        maxPendingPerProject: STUDIO_PROPOSAL_V2_MAX_PENDING_PER_PROJECT,
+      };
 
 const SAFE_RECORD_ID = /^[A-Za-z0-9_-]{1,256}$/;
 
@@ -71,7 +72,7 @@ export class StudioPendingRecordWriteError extends Error {
   }
 }
 
-type WritePendingRecordInput<RecordType> = {
+type WritePendingRecordInputV2<RecordType> = {
   pendingDir: string;
   recordId: string;
   record: RecordType;
@@ -79,83 +80,17 @@ type WritePendingRecordInput<RecordType> = {
   slotRecordKey: 'proposalId' | 'requestId';
   capacityMessage: string;
   tooLargeMessage: string;
-  /** V2-only test seam; the schema-1 implementation deliberately ignores it. */
+  /** Test seam for identity and publication races. */
   fs?: RecordIoFileSystem;
-  /** V2-only manifest authority fence; V1 deliberately ignores it. */
+  /** Reasserts the manifest authority around sidecar publication. */
   authorityFence?: () => Promise<'valid' | 'unsupported_prototype_schema' | 'invalid'>;
-  /** Binds V2 sidecars to the exact project-root generation that authorized them. */
+  /** Binds sidecars to the exact project-root generation that authorized them. */
   projectAuthority?: StudioPendingProjectAuthorityV2;
 };
 
 export type StudioPendingProjectAuthorityV2 = {
   canonicalRoot: string;
   rootIdentity: { dev: number; ino: number };
-};
-
-const slotsDirOf = (pendingDir: string): string => path.join(path.dirname(pendingDir), 'slots');
-
-const reserveSlot = async (
-  slotsDir: string,
-  recordId: string,
-  slotRecordKey: WritePendingRecordInput<unknown>['slotRecordKey'],
-  capacityMessage: string
-): Promise<string> => {
-  const reservation = JSON.stringify({
-    schemaVersion: 1,
-    [slotRecordKey]: recordId,
-    reservedAt: new Date().toISOString(),
-  });
-  for (let index = 0; index < MAX_PENDING_PER_PROJECT; index += 1) {
-    const file = path.join(slotsDir, `${index}.slot`);
-    let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
-    try {
-      handle = await fs.open(file, 'wx');
-      await handle.writeFile(reservation, { encoding: 'utf8' });
-      await handle.sync();
-      return file;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') continue;
-      throw new StudioPendingRecordWriteError('storage', error instanceof Error ? error.message : 'slot write failed');
-    } finally {
-      await handle?.close().catch((): undefined => undefined);
-    }
-  }
-  throw new StudioPendingRecordWriteError('capacity', capacityMessage);
-};
-
-/** Publishes one bounded immutable record after atomically reserving queue capacity. */
-export const writePendingRecord = async <RecordType>(
-  input: WritePendingRecordInput<RecordType>
-): Promise<RecordType> => {
-  const serialized = JSON.stringify(input.record);
-  if (Buffer.byteLength(serialized, 'utf8') > MAX_RECORD_BYTES) {
-    throw new StudioPendingRecordWriteError('too_large', input.tooLargeMessage);
-  }
-
-  const slotFile = await reserveSlot(
-    slotsDirOf(input.pendingDir),
-    input.recordId,
-    input.slotRecordKey,
-    input.capacityMessage
-  );
-  const file = path.join(input.pendingDir, `${input.recordId}.json`);
-  const temporaryFile = `${file}.${process.pid}.tmp`;
-  let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
-  try {
-    handle = await fs.open(temporaryFile, 'wx');
-    await handle.writeFile(serialized, { encoding: 'utf8' });
-    await handle.sync();
-    await handle.close();
-    handle = undefined;
-    await fs.link(temporaryFile, file);
-    await fs.rm(temporaryFile);
-    return input.record;
-  } catch (error) {
-    await handle?.close().catch((): undefined => undefined);
-    await fs.rm(temporaryFile, { force: true }).catch((): undefined => undefined);
-    await fs.rm(slotFile, { force: true }).catch((): undefined => undefined);
-    throw new StudioPendingRecordWriteError('storage', error instanceof Error ? error.message : 'record write failed');
-  }
 };
 
 type DirectoryAuthorityV2 = { path: string; dev: number; ino: number };
@@ -211,7 +146,7 @@ const resolvePendingDirectoriesV2 = async (
   pendingDir: string,
   recordFs: RecordIoFileSystem,
   projectAuthority?: StudioPendingProjectAuthorityV2,
-  expectedSlotRecordKey?: WritePendingRecordInput<unknown>['slotRecordKey']
+  expectedSlotRecordKey?: WritePendingRecordInputV2<unknown>['slotRecordKey']
 ): Promise<PendingDirectoriesV2> => {
   const configuredPending = path.resolve(pendingDir);
   if (path.basename(configuredPending) !== 'pending') throw new RecordIoError('unsafe_path');
@@ -466,7 +401,7 @@ const publishOwnedExclusiveRecordV2 = async (input: {
           fs: input.fs,
           canonicalRoot: input.parent.path,
           file: input.file,
-          maxBytes: Math.max(MAX_RECORD_BYTES, STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES),
+          maxBytes: Math.max(STUDIO_PROPOSAL_V2_MAX_RECORD_BYTES, STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES),
         });
         if (
           existing !== null &&
@@ -592,7 +527,7 @@ const readSidecarSchemaV2 = async (input: {
   parent: DirectoryAuthorityV2;
   file: string;
   maxRecordBytes: number;
-  slotRecordKey?: WritePendingRecordInput<unknown>['slotRecordKey'];
+  slotRecordKey?: WritePendingRecordInputV2<unknown>['slotRecordKey'];
 }): Promise<SidecarSchemaV2> => {
   await assertDirectoryAuthorityV2(input.fs, input.parent);
   const record = await readBoundedRegularFileWithIdentity({
@@ -629,7 +564,7 @@ const throwForSidecarSchemaV2 = (schema: Exclude<SidecarSchemaV2, 'missing' | 'v
   throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 sidecar');
 };
 
-const assertPendingAuthorityV2 = async (fence: WritePendingRecordInput<unknown>['authorityFence']): Promise<void> => {
+const assertPendingAuthorityV2 = async (fence: WritePendingRecordInputV2<unknown>['authorityFence']): Promise<void> => {
   if (fence === undefined) return;
   const status = await fence();
   if (status === 'valid') return;
@@ -672,7 +607,7 @@ const captureTerminalEntrySnapshotV2 = async (
   recordFs: RecordIoFileSystem,
   directories: PendingDirectoriesV2,
   input: {
-    slotRecordKey: WritePendingRecordInput<unknown>['slotRecordKey'];
+    slotRecordKey: WritePendingRecordInputV2<unknown>['slotRecordKey'];
     expectedProjectId?: string;
     maxRecordBytes: number;
   }
@@ -935,7 +870,7 @@ const preflightPendingFamilyV2 = async (input: {
   fs: RecordIoFileSystem;
   directories: PendingDirectoriesV2;
   recordId: string;
-  slotRecordKey: WritePendingRecordInput<unknown>['slotRecordKey'];
+  slotRecordKey: WritePendingRecordInputV2<unknown>['slotRecordKey'];
   limits: PendingRecordLimitsV2;
   expectedProjectId?: string;
   authorizeBeforeCleanup?: () => Promise<void>;
@@ -1728,7 +1663,7 @@ const reserveSlotV2 = async (input: {
   fs: RecordIoFileSystem;
   directories: PendingDirectoriesV2;
   recordId: string;
-  slotRecordKey: WritePendingRecordInput<unknown>['slotRecordKey'];
+  slotRecordKey: WritePendingRecordInputV2<unknown>['slotRecordKey'];
   capacityMessage: string;
   limits: PendingRecordLimitsV2;
   authorizeBeforeLink?: () => Promise<void>;
@@ -1901,7 +1836,7 @@ const reservedSlotIsCurrentV2 = async (input: {
   directories: PendingDirectoriesV2;
   slot: { file: string; identity: { dev: number; ino: number }; readyFile: string };
   recordId: string;
-  slotRecordKey: WritePendingRecordInput<unknown>['slotRecordKey'];
+  slotRecordKey: WritePendingRecordInputV2<unknown>['slotRecordKey'];
   maxRecordBytes: number;
 }): Promise<boolean> => {
   await assertPendingDirectoriesV2(input.fs, input.directories);
@@ -1927,12 +1862,9 @@ const reservedSlotIsCurrentV2 = async (input: {
   return parsed.status === 'valid' && parsed.record.requestId === input.recordId;
 };
 
-/**
- * Staged schema-2 publisher. V1 above deliberately retains its original observable behavior; V2
- * alone binds directory generations and distinguishes committed links from ambiguous publication.
- */
+/** Publishes a crash-recoverable schema-2 record and fails closed on every ambiguous authority race. */
 export const writePendingRecordV2 = async <RecordType>(
-  input: WritePendingRecordInput<RecordType>
+  input: WritePendingRecordInputV2<RecordType>
 ): Promise<RecordType> => {
   const recordFs = input.fs ?? fs;
   const limits = pendingRecordLimitsV2(input.slotRecordKey);
@@ -1988,9 +1920,8 @@ export const writePendingRecordV2 = async <RecordType>(
       limits,
       authorizeBeforeLink: () => assertPendingAuthorityV2(input.authorityFence),
     });
-    // A second full scan catches a V1/malformed authority that appeared after the first scan but
-    // before our reservation. Gate 1 keeps V1 writers registered, so V2 publication is fail-closed
-    // if the mixed family becomes observable at either cooperative fence.
+    // A second full scan catches unsupported or malformed authority that appeared after the first
+    // scan but before our reservation, so publication fails closed at either cooperative fence.
     await preflightPendingFamilyV2({
       fs: recordFs,
       directories,

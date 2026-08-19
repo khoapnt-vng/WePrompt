@@ -951,11 +951,7 @@
     "close": {
       "saveAndClose": "Speichern und schließen",
       "discard": "Verwerfen und schließen",
-      "cancel": "Abbrechen",
-      "unsavedMessage": "{{count}} Szenen enthalten ungespeicherte Änderungen. Vor dem Schließen speichern?",
-      "unsavedMessage_one": "{{count}} Szene enthält ungespeicherte Änderungen. Vor dem Schließen speichern?",
-      "unsavedMessage_other": "{{count}} Szenen enthalten ungespeicherte Änderungen. Vor dem Schließen speichern?",
-      "unavailableMessage": "Creative Studio antwortet nicht. Beim Schließen können ungespeicherte Szenenänderungen verloren gehen."
+      "cancel": "Abbrechen"
     },
     "phase": {
       "nav": {

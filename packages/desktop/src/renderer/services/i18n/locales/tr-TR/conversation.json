@@ -952,11 +952,7 @@
     "close": {
       "saveAndClose": "Kaydet ve kapat",
       "discard": "Değişiklikleri at ve kapat",
-      "cancel": "İptal",
-      "unsavedMessage": "{{count}} sahnede kaydedilmemiş düzenleme var. Kapatmadan önce kaydedilsin mi?",
-      "unsavedMessage_one": "{{count}} sahnede kaydedilmemiş düzenleme var. Kapatmadan önce kaydedilsin mi?",
-      "unsavedMessage_other": "{{count}} sahnede kaydedilmemiş düzenleme var. Kapatmadan önce kaydedilsin mi?",
-      "unavailableMessage": "Yaratıcı Stüdyo yanıt vermedi. Şimdi kapatmak kaydedilmemiş sahne düzenlemelerini silebilir."
+      "cancel": "İptal"
     },
     "phase": {
       "nav": {

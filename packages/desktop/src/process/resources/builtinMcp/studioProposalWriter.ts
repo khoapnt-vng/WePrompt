@@ -5,18 +5,12 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type {
-  StudioProposal,
-  StudioProposalPayload,
-  StudioProposalPayloadV2,
-  StudioProposalRecordV2,
-} from '@/common/types/project/creativeStudioTypes';
+import type { StudioProposalPayloadV2, StudioProposalRecordV2 } from '@/common/types/project/creativeStudioTypes';
 import { STUDIO_PROJECT_SCHEMA_VERSION } from '@/common/types/project/creativeStudioTypes';
 import {
   StudioPendingRecordWriteError,
   type StudioPendingProjectAuthorityV2,
   type StudioPendingRecordWriteErrorCode,
-  writePendingRecord,
   writePendingRecordV2,
 } from '@process/resources/builtinMcp/studioPendingRecordWriter';
 import { parseStudioProposalRecordV2 } from '@process/services/creative-studio/service/directorCommandContracts';
@@ -24,15 +18,6 @@ import type { RecordIoFileSystem } from '@process/services/creative-studio/servi
 
 export { StudioPendingRecordWriteError as StudioProposalWriteError };
 export type StudioProposalWriteErrorCode = StudioPendingRecordWriteErrorCode;
-
-export type WriteProposalInput = {
-  pendingDir: string;
-  projectId: string;
-  baseRevision: number;
-  payload: StudioProposalPayload;
-  /** Test seam; production omits it and gets a UUID. */
-  proposalId?: string;
-};
 
 export type WriteProposalInputV2 = {
   pendingDir: string;
@@ -48,28 +33,7 @@ export type WriteProposalInputV2 = {
   projectAuthority: StudioPendingProjectAuthorityV2;
 };
 
-export const writeProposalRecord = async (input: WriteProposalInput): Promise<StudioProposal> => {
-  const record: StudioProposal = {
-    schemaVersion: 1,
-    id: input.proposalId ?? randomUUID(),
-    projectId: input.projectId,
-    status: 'pending',
-    baseRevision: input.baseRevision,
-    payload: input.payload,
-    createdAt: new Date().toISOString(),
-    decidedAt: null,
-  };
-  return writePendingRecord({
-    pendingDir: input.pendingDir,
-    recordId: record.id,
-    record,
-    slotRecordKey: 'proposalId',
-    capacityMessage: 'Proposal inbox is full for this project',
-    tooLargeMessage: 'Proposal record exceeds the size cap',
-  });
-};
-
-/** Staged schema-2 proposal writer; Gate 1 keeps the registered server on the schema-1 export. */
+/** Writes one validated schema-2 proposal without mutating project state. */
 export const writeProposalRecordV2 = async (input: WriteProposalInputV2): Promise<StudioProposalRecordV2> => {
   let validated: {
     projectId: string;

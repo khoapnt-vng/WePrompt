@@ -948,10 +948,7 @@
     "close": {
       "saveAndClose": "保存して閉じる",
       "discard": "変更を破棄して閉じる",
-      "cancel": "キャンセル",
-      "unsavedMessage": "{{count}} 件のシーンに未保存の編集があります。保存してから閉じますか？",
-      "unsavedMessage_other": "{{count}} 件のシーンに未保存の編集があります。保存してから閉じますか？",
-      "unavailableMessage": "クリエイティブスタジオが応答していません。今すぐ閉じると、未保存のシーン編集が失われる可能性があります。"
+      "cancel": "キャンセル"
     },
     "phase": {
       "nav": {

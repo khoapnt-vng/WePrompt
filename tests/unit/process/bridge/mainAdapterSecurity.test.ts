@@ -114,16 +114,46 @@ describe('main adapter IPC security boundary', () => {
     });
   });
 
+  it('allows only the strict Task 7 authoring request through the native manifest', async () => {
+    const sender = createRegisteredSender();
+    const data = {
+      projectId: 'project_1',
+      expectedRevision: 3,
+      operations: [{ kind: 'set_brief', brief: 'Revised' }],
+    };
+
+    await getInvokeHandler()({ sender }, createRequest('subscribe-creative-studio.apply-authoring-batch', data));
+
+    expect(mocks.bridgeEmitter.emit).toHaveBeenCalledWith('subscribe-creative-studio.apply-authoring-batch', {
+      id: 'request-1234',
+      data,
+    });
+  });
+
+  it.each(['prepare-submission', 'confirm-submission', 'dismiss-reference-generation-handoff'])(
+    'rejects the Task 8 Creative Studio provider %s before dispatch',
+    async (providerName) => {
+      const sender = createRegisteredSender();
+      await expect(
+        getInvokeHandler()(
+          { sender },
+          createRequest(`subscribe-creative-studio.${providerName}`, { projectId: 'project_1' })
+        )
+      ).rejects.toThrow(/operation is not allowed/i);
+      expect(mocks.bridgeEmitter.emit).not.toHaveBeenCalled();
+    }
+  );
+
   it('accepts a strict has-unsaved-work response for an outstanding renderer query', async () => {
     const sender = createRegisteredSender();
-    const response = createRendererQueryResponse('creative-studio.has-unsaved-work', { dirtySceneCount: 3 });
+    const response = createRendererQueryResponse('creative-studio.has-unsaved-work', { dirtyDraftCount: 3 });
     mocks.hasListener.mockReturnValue(true);
 
     await getInvokeHandler()({ sender }, response);
 
     expect(mocks.bridgeEmitter.emit).toHaveBeenCalledWith(
       'subscribe.callback-creative-studio.has-unsaved-workcreative-studio.has-unsaved-worka1b2c3d4',
-      { dirtySceneCount: 3 }
+      { dirtyDraftCount: 3 }
     );
   });
 
@@ -162,7 +192,7 @@ describe('main adapter IPC security boundary', () => {
     await expect(
       getInvokeHandler()(
         { sender },
-        createRendererQueryResponse('creative-studio.has-unsaved-work', { dirtySceneCount: 1 })
+        createRendererQueryResponse('creative-studio.has-unsaved-work', { dirtyDraftCount: 1 })
       )
     ).rejects.toThrow(/sender is not registered/i);
     expect(mocks.bridgeEmitter.emit).not.toHaveBeenCalled();
@@ -192,7 +222,7 @@ describe('main adapter IPC security boundary', () => {
     await expect(
       getInvokeHandler()(
         { sender },
-        createRendererQueryResponse('creative-studio.has-unsaved-work', { dirtySceneCount: 2 })
+        createRendererQueryResponse('creative-studio.has-unsaved-work', { dirtyDraftCount: 2 })
       )
     ).rejects.toThrow(/operation is not allowed/i);
     expect(mocks.bridgeEmitter.emit).not.toHaveBeenCalled();
@@ -205,7 +235,7 @@ describe('main adapter IPC security boundary', () => {
     await expect(
       getInvokeHandler()(
         { sender },
-        createRendererQueryResponse('creative-studio.has-unsaved-work', { dirtySceneCount: 2 }, 'NOT-HEX')
+        createRendererQueryResponse('creative-studio.has-unsaved-work', { dirtyDraftCount: 2 }, 'NOT-HEX')
       )
     ).rejects.toThrow(/operation is not allowed/i);
     expect(mocks.bridgeEmitter.emit).not.toHaveBeenCalled();
@@ -216,7 +246,7 @@ describe('main adapter IPC security boundary', () => {
     mocks.hasListener.mockReturnValue(true);
     const response = JSON.stringify({
       name: 'subscribe.callback-creative-studio.unknowncreative-studio.unknowna1b2c3d4',
-      data: { dirtySceneCount: 2 },
+      data: { dirtyDraftCount: 2 },
     });
 
     await expect(getInvokeHandler()({ sender }, response)).rejects.toThrow(/operation is not allowed/i);
@@ -230,7 +260,7 @@ describe('main adapter IPC security boundary', () => {
     await expect(
       getInvokeHandler()(
         { sender },
-        createRendererQueryResponse('creative-studio.has-unsaved-work', { dirtySceneCount: '2' })
+        createRendererQueryResponse('creative-studio.has-unsaved-work', { dirtyDraftCount: '2' })
       )
     ).rejects.toThrow(/invalid operation payload/i);
     expect(mocks.bridgeEmitter.emit).not.toHaveBeenCalled();

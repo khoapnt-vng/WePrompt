@@ -948,10 +948,7 @@
     "close": {
       "saveAndClose": "儲存並關閉",
       "discard": "捨棄變更並關閉",
-      "cancel": "取消",
-      "unsavedMessage": "有 {{count}} 個場景包含未儲存的編輯。要先儲存再關閉嗎？",
-      "unsavedMessage_other": "有 {{count}} 個場景包含未儲存的編輯。要先儲存再關閉嗎？",
-      "unavailableMessage": "創意工作室沒有回應。現在關閉可能會遺失未儲存的場景編輯。"
+      "cancel": "取消"
     },
     "phase": {
       "nav": {

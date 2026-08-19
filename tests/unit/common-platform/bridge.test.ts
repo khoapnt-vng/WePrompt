@@ -124,12 +124,12 @@ describe('local bridge', () => {
 
   it('routes renderer-owned queries through the subscribe protocol', async () => {
     const { bridge, outbound } = await loadLoopbackBridge();
-    const query = bridge.buildRendererQuery<{ dirtySceneCount: number }>('test.renderer-query', {
-      dirtySceneCount: 24,
+    const query = bridge.buildRendererQuery<{ dirtyDraftCount: number }>('test.renderer-query', {
+      dirtyDraftCount: 24,
     });
-    query.provider(() => ({ dirtySceneCount: 3 }));
+    query.provider(() => ({ dirtyDraftCount: 3 }));
 
-    await expect(query.invoke({ timeoutMs: 100 })).resolves.toEqual({ dirtySceneCount: 3 });
+    await expect(query.invoke({ timeoutMs: 100 })).resolves.toEqual({ dirtyDraftCount: 3 });
     expect(outbound[0]?.name).toBe('subscribe-test.renderer-query');
     expect(outbound[1]?.name).toMatch(/^subscribe\.callback-test\.renderer-querytest\.renderer-query[a-f0-9]{8}$/);
   });
@@ -148,21 +148,21 @@ describe('local bridge', () => {
     );
   });
 
-  it('uses the bounded Creative Studio dirty-scene fallback when the renderer query rejects', async () => {
+  it('uses the bounded Creative Studio dirty-draft fallback when the renderer query rejects', async () => {
     await loadLoopbackBridge();
-    const error = new Error('storyboard renderer unavailable');
+    const error = new Error('draft renderer unavailable');
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const { creativeStudio } = await import('@/common/adapter/ipcBridge');
     creativeStudio.hasUnsavedWork.provider(() => Promise.reject(error));
 
-    await expect(creativeStudio.hasUnsavedWork.invoke({ timeoutMs: 100 })).resolves.toEqual({ dirtySceneCount: 24 });
+    await expect(creativeStudio.hasUnsavedWork.invoke({ timeoutMs: 100 })).resolves.toEqual({ dirtyDraftCount: 24 });
     expect(console.error).toHaveBeenCalledWith(
       '[bridge] Renderer query provider "creative-studio.has-unsaved-work" failed:',
       error
     );
   });
 
-  it('preserves a Studio scene-limit store rejection as invalid_payload across the bridge', async () => {
+  it('preserves a Studio store rejection as invalid_payload across the V2 bridge', async () => {
     await loadLoopbackBridge();
     vi.doMock('@process/services/creative-studio/runtime', () => ({
       getCreativeStudioRuntime: vi.fn(),
@@ -177,20 +177,13 @@ describe('local bridge', () => {
       isFeatureEnabled: () => true,
       getService: () =>
         ({
-          updateScene: async () => {
-            throw new CreativeStudioStoreError('invalid_payload', 'Studio scene limit exceeded');
+          getProject: async () => {
+            throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio project id');
           },
         }) as never,
     });
 
-    await expect(
-      creativeStudio.updateScene.invoke({
-        projectId: 'project_1',
-        expectedRevision: 1,
-        sceneId: 'scene_25',
-        scene: null,
-      })
-    ).resolves.toEqual({
+    await expect(creativeStudio.getProject.invoke({ projectId: 'project_1' })).resolves.toEqual({
       ok: false,
       error: {
         code: 'invalid_payload',

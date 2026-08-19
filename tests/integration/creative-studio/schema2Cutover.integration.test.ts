@@ -13,11 +13,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type {
-  CreateStudioProjectInputV2,
-  StudioProject,
-  StudioProjectSummary,
-} from '@/common/types/project/creativeStudioTypes';
+import type { CreateStudioProjectInputV2 } from '@/common/types/project/creativeStudioTypes';
 import { createCreativeStudioStore, type StudioProjectCommitFacts } from '@process/services/creative-studio/store';
 
 const V1_PROJECT_ID = 'project_v1';
@@ -75,7 +71,7 @@ type ObservedFileSystem = {
   clearMutations(): void;
 };
 
-const v1Project = (): StudioProject => ({
+const v1Project = () => ({
   schemaVersion: 1,
   revision: 4,
   id: V1_PROJECT_ID,
@@ -112,7 +108,7 @@ const v1Project = (): StudioProject => ({
   updatedAt: FIXTURE_TIME,
 });
 
-const v1Summary = (): StudioProjectSummary => ({
+const v1Summary = () => ({
   id: V1_PROJECT_ID,
   name: 'Prototype project',
   aspectRatio: '16:9',
@@ -414,6 +410,124 @@ const expectV1Snapshot = async (rootDir: string, expected: SnapshotEntry[]): Pro
 };
 
 describe('Creative Studio schema-2 storage cutover', () => {
+  it('removes the schema-1 Studio public type and managed-asset helper surface', async () => {
+    const [typesSource, managedAssetSource] = await Promise.all([
+      readFile(path.resolve(process.cwd(), 'packages/desktop/src/common/types/project/creativeStudioTypes.ts'), 'utf8'),
+      readFile(
+        path.resolve(
+          process.cwd(),
+          'packages/desktop/src/common/types/project/creativeStudioManagedAssetCollections.ts'
+        ),
+        'utf8'
+      ),
+    ]);
+    const removedTypeExports = [
+      'STUDIO_REFERENCE_PROMPT_MAX_LENGTH',
+      'STUDIO_MAX_SCENES',
+      'STUDIO_MAX_GENERATION_SCENES_PER_REQUEST',
+      'STUDIO_MAX_REFERENCE_REQUEST_SCENES',
+      'STUDIO_MAX_CUT_PLACEMENT_SCENES',
+      'STUDIO_MAX_CUT_PLACEMENT_CLIPS',
+      'STUDIO_MAX_DIRTY_SCENES_REPORTED',
+      'STUDIO_MAX_MCP_AVAILABLE_TAKE_IDS_PER_SCENE',
+      'STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION',
+      'isStudioSceneCountTransitionAllowed',
+      'StudioTextModelRef',
+      'StudioTextModelOption',
+      'StudioManagedAssetRef',
+      'StudioAsset',
+      'StudioOutputRole',
+      'StudioReferenceInputSnapshot',
+      'StudioJob',
+      'StudioRendererJob',
+      'StudioSceneReviewState',
+      'StudioScene',
+      'StudioEditableScene',
+      'StudioDirectorNewSceneV1',
+      'StudioDirectorOperationV1',
+      'StudioDirectorCommandRecordV1',
+      'StudioDirectorCommandSlotV1',
+      'StudioDirectorCommandSlotLeaseV1',
+      'StudioDirectorCommandRejectionCode',
+      'StudioDirectorAppliedReceiptV1',
+      'StudioDirectorRejectedReceiptV1',
+      'StudioDirectorExpiredReceiptV1',
+      'StudioDirectorIndeterminateReceiptV1',
+      'StudioDirectorCommandReceiptV1',
+      'StudioNormalisedRect',
+      'StudioCutFilter',
+      'StudioCutClip',
+      'StudioCut',
+      'StudioEditableCutClip',
+      'StudioEditableCut',
+      'StudioRoutingPreferences',
+      'StudioRuleListUndo',
+      'StudioRendererRoutingPreferences',
+      'StudioReplaceStoryboardProposalPayload',
+      'StudioPinRuleProposalPayload',
+      'StudioProposalPayload',
+      'StudioEditableSceneField',
+      'StudioProposalSceneChange',
+      'StudioProposalDiff',
+      'StudioProposal',
+      'StudioRecordProposalInput',
+      'StudioProposalRequest',
+      'StudioProposalAcceptance',
+      'StudioReferenceRequest',
+      'StudioReferenceRequestAuthority',
+      'StudioDismissReferenceRequestsRequest',
+      'StudioRouteCatalog',
+      'StudioProjectRequest',
+      'StudioRenderErrorCode',
+      'StudioRenderCutResult',
+      'StudioCancelRenderResult',
+      'StudioRenderProgressEvent',
+      'StudioLatestRender',
+      'ProposeStudioStoryboardInput',
+      'StudioDeleteProjectRequest',
+      'StudioUpdateProjectRequest',
+      'StudioBindBriefConversationRequest',
+      'StudioSetBriefRulesRequest',
+      'StudioUpdateCutRequest',
+      'StudioPlaceCutScenesRequest',
+      'StudioModelSelectionChange',
+      'StudioUpdateModelSelectionRequest',
+      'StudioUpdateSceneRequest',
+      'StudioReorderScenesRequest',
+      'StudioAssetRequest',
+      'StudioPersistCapturedPosterRequest',
+      'StudioSelectVariationRequest',
+      'StudioSelectAssetRequest',
+      'StudioSceneGenerationChoice',
+      'StudioGenerationSubmitMode',
+      'StudioSceneReferencePrompt',
+      'StudioSubmitScenesRequest',
+      'StudioFitStoryboardRequest',
+      'StudioFitStoryboardOutcome',
+      'StudioChooseAndImportReferenceRequest',
+      'StudioChooseAndExportAssetsRequest',
+      'StudioListRoutesRequest',
+      'StudioImportOutcome',
+      'StudioExportItem',
+      'StudioExportOutcome',
+      'StudioDesktopApi',
+    ] as const;
+    for (const exportName of removedTypeExports) {
+      expect(typesSource, exportName).not.toMatch(new RegExp(`export (?:type|const|function) ${exportName}\\b`));
+    }
+    for (const exportName of [
+      'STUDIO_MANAGED_ASSET_COLLECTIONS',
+      'resolveActiveStudioBriefReferences',
+      'StudioReferencePlateFreshness',
+      'getStudioReferencePlateFreshness',
+    ]) {
+      expect(managedAssetSource, exportName).not.toMatch(new RegExp(`export (?:type|const|function) ${exportName}\\b`));
+    }
+    expect(typesSource).toMatch(/export type StudioAssetV2\s*=\s*\{/);
+    expect(typesSource).toMatch(/export type StudioJobV2\s*=\s*\{/);
+    expect(typesSource).toMatch(/export type StudioProjectV2\s*=\s*\{/);
+  });
+
   it('classifies a complete V1-only profile without reading its index or mutating any path', async () => {
     const fixture = await createCompleteV1Profile();
     const before = await snapshotV1Profile(fixture.rootDir);

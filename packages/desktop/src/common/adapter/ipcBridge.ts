@@ -100,56 +100,46 @@ import type {
 } from '../types/platform/acpTypes';
 import type { IProjectKnowledgeListResult } from '../types/project/knowledgeTypes';
 import type {
-  CreateStudioProjectInput,
-  ProposeStudioStoryboardInput,
-  StudioBindBriefConversationRequest,
-  StudioAsset,
-  StudioCancelRenderResult,
+  CreateStudioProjectInputV2,
+  StudioApplyAuthoringBatchRequestV2,
+  StudioAssetV2,
+  StudioCascadeBarrierActionRequestV2,
   StudioCommandResult,
-  StudioChooseAndExportAssetsRequest,
-  StudioChooseAndImportReferenceRequest,
+  StudioDetachManagedMediaResultV2,
   StudioDetachBriefReferenceRequest,
-  StudioDismissReferenceRequestsRequest,
-  StudioDeleteProjectRequest,
-  StudioProjectRequest,
-  StudioProjectSummary,
-  StudioProposal,
-  StudioProposalAcceptance,
-  StudioProposalRequest,
-  StudioReferenceRequest,
-  StudioSetBriefRulesRequest,
-  StudioPersistCapturedPosterRequest,
-  StudioPlaceCutScenesRequest,
-  StudioRendererProject,
-  StudioRenderCutResult,
-  StudioRenderProgressEvent,
-  StudioImportOutcome,
-  StudioExportOutcome,
+  StudioEditProjectSettingsRequestV2,
+  StudioGetChainStatusRequestV2,
+  StudioGetWorkspaceStatusRequestV2,
+  StudioImportManagedMediaResultV2,
+  StudioImportSeedStillRequestV2,
+  StudioParkBeatRequestV2,
+  StudioParkShotRequestV2,
+  StudioProjectListResultV2,
+  StudioProjectLoadResultV2,
+  StudioProposalV2,
+  StudioReferenceRequestDecisionV2,
+  StudioReferenceRequestV2,
+  StudioRendererChainStatusV2,
+  StudioRendererProjectCommitResultV2,
+  StudioRendererProjectV2,
+  StudioRendererReferenceGenerationHandoffV2,
+  StudioRendererWorkspaceStatusV2,
+  StudioRouteCatalogV2,
+  StudioReorderBinRequestV2,
+  StudioRestoreBeatRequestV2,
+  StudioRestoreShotRequestV2,
+  StudioSetRulesRequestV2,
+  StudioTakeActionRequestV2,
+  StudioUndoLastRequestV2,
   StudioConnectionInventory,
   StudioConnectionRecord,
   StudioConnectionValidationResult,
   StudioConnectionCandidate,
-  StudioListRoutesRequest,
-  StudioLatestRender,
   StudioRemoveConnectionRequest,
-  StudioRouteCatalog,
   StudioSaveConnectionRequest,
   StudioValidateConnectionRequest,
-  StudioReorderScenesRequest,
-  StudioRendererJob,
-  StudioJobRequest,
-  StudioRetryDownloadRequest,
-  StudioRetryJobRequest,
-  StudioSelectAssetRequest,
-  StudioSubmitScenesRequest,
-  StudioFitStoryboardOutcome,
-  StudioFitStoryboardRequest,
-  StudioUpdateModelSelectionRequest,
-  StudioUpdateCutRequest,
-  StudioUpdateProjectRequest,
-  StudioUpdateSceneRequest,
 } from '../types/project/creativeStudioTypes';
-import { STUDIO_MAX_DIRTY_SCENES_REPORTED } from '../types/project/creativeStudioTypes';
+import { STUDIO_MAX_DIRTY_DRAFTS_REPORTED } from '../types/project/creativeStudioTypes';
 import type {
   CreateProviderRequest,
   FetchModelsAnonymousRequest,
@@ -1189,119 +1179,149 @@ export const projectKnowledge = {
 // ---------------------------------------------------------------------------
 
 export type StudioUnsavedWorkStatus = {
-  dirtySceneCount: number;
+  dirtyDraftCount: number;
 };
 
 export type StudioFlushUnsavedWorkResult = {
   saved: boolean;
 };
 
+export type StudioProjectRequestV2 = { projectId: string };
+export type StudioDeleteProjectRequestV2 = StudioProjectRequestV2 & { expectedRevision: number };
+export type StudioProposalRequestV2 = StudioProjectRequestV2 & { proposalId: string };
+export type StudioProposalAcceptanceV2 = {
+  proposal: StudioProposalV2;
+  project: StudioRendererProjectV2;
+  applied: boolean;
+};
+export type StudioDecideReferenceRequestV2 = StudioProjectRequestV2 & {
+  requestId: string;
+  expectedRevision: number;
+  outcome: { kind: 'rejected' } | { kind: 'generation_gate' } | { kind: 'imported_reference'; assetId: string };
+};
+export type StudioChooseAndImportBriefReferenceRequestV2 = StudioProjectRequestV2 & {
+  briefReferenceRole: 'cast' | 'look';
+  expectedRevision: number;
+};
+export type StudioPersistCapturedPosterRequestV2 = StudioProjectRequestV2 & {
+  shotId: string;
+  videoAssetId: string;
+  dataUrl: string;
+  width: number;
+  height: number;
+};
+export type StudioListRoutesRequestV2 = { projectId?: string };
 export const creativeStudio = {
-  listProjects: bridge.buildProvider<StudioCommandResult<StudioProjectSummary[]>, void>(
+  listProjects: bridge.buildProvider<StudioCommandResult<StudioProjectListResultV2>, void>(
     'creative-studio.list-projects'
   ),
-  createProject: bridge.buildProvider<StudioCommandResult<StudioRendererProject>, CreateStudioProjectInput>(
+  createProject: bridge.buildProvider<StudioCommandResult<StudioRendererProjectV2>, CreateStudioProjectInputV2>(
     'creative-studio.create-project'
   ),
-  getProject: bridge.buildProvider<StudioCommandResult<StudioRendererProject | null>, StudioProjectRequest>(
+  getProject: bridge.buildProvider<StudioCommandResult<StudioProjectLoadResultV2>, StudioProjectRequestV2>(
     'creative-studio.get-project'
   ),
-  getBriefSessionServer: bridge.buildProvider<StudioCommandResult<ISessionMcpServer>, StudioProjectRequest>(
+  getBriefSessionServer: bridge.buildProvider<StudioCommandResult<ISessionMcpServer>, StudioProjectRequestV2>(
     'creative-studio.get-brief-session-server'
   ),
-  listProposals: bridge.buildProvider<StudioCommandResult<StudioProposal[]>, StudioProjectRequest>(
+  listProposals: bridge.buildProvider<StudioCommandResult<StudioProposalV2[]>, StudioProjectRequestV2>(
     'creative-studio.list-proposals'
   ),
-  listPendingReferenceRequests: bridge.buildProvider<
-    StudioCommandResult<StudioReferenceRequest[]>,
-    StudioProjectRequest
-  >('creative-studio.list-pending-reference-requests'),
-  dismissReferenceRequests: bridge.buildProvider<StudioCommandResult<boolean>, StudioDismissReferenceRequestsRequest>(
-    'creative-studio.dismiss-reference-requests'
-  ),
-  acceptProposal: bridge.buildProvider<StudioCommandResult<StudioProposalAcceptance>, StudioProposalRequest>(
+  acceptProposal: bridge.buildProvider<StudioCommandResult<StudioProposalAcceptanceV2>, StudioProposalRequestV2>(
     'creative-studio.accept-proposal'
   ),
-  rejectProposal: bridge.buildProvider<StudioCommandResult<StudioProposal>, StudioProposalRequest>(
+  rejectProposal: bridge.buildProvider<StudioCommandResult<StudioProposalV2>, StudioProposalRequestV2>(
     'creative-studio.reject-proposal'
   ),
-  proposeStoryboard: bridge.buildProvider<StudioCommandResult<StudioRendererProject>, ProposeStudioStoryboardInput>(
-    'creative-studio.propose-storyboard'
+  listReferenceRequests: bridge.buildProvider<StudioCommandResult<StudioReferenceRequestV2[]>, StudioProjectRequestV2>(
+    'creative-studio.list-reference-requests'
   ),
-  updateModelSelection: bridge.buildProvider<
-    StudioCommandResult<StudioRendererProject>,
-    StudioUpdateModelSelectionRequest
-  >('creative-studio.update-model-selection'),
-  updateProject: bridge.buildProvider<StudioCommandResult<StudioRendererProject>, StudioUpdateProjectRequest>(
-    'creative-studio.update-project'
+  decideReferenceRequest: bridge.buildProvider<
+    StudioCommandResult<StudioReferenceRequestDecisionV2>,
+    StudioDecideReferenceRequestV2
+  >('creative-studio.decide-reference-request'),
+  listReferenceGenerationHandoffs: bridge.buildProvider<
+    StudioCommandResult<StudioRendererReferenceGenerationHandoffV2[]>,
+    StudioProjectRequestV2
+  >('creative-studio.list-reference-generation-handoffs'),
+  applyAuthoringBatch: bridge.buildProvider<
+    StudioCommandResult<StudioRendererProjectCommitResultV2>,
+    StudioApplyAuthoringBatchRequestV2
+  >('creative-studio.apply-authoring-batch'),
+  undoLast: bridge.buildProvider<StudioCommandResult<StudioRendererProjectCommitResultV2>, StudioUndoLastRequestV2>(
+    'creative-studio.undo-last'
   ),
-  setBriefRules: bridge.buildProvider<StudioCommandResult<StudioRendererProject>, StudioSetBriefRulesRequest>(
-    'creative-studio.set-brief-rules'
+  getWorkspaceStatus: bridge.buildProvider<
+    StudioCommandResult<StudioRendererWorkspaceStatusV2>,
+    StudioGetWorkspaceStatusRequestV2
+  >('creative-studio.get-workspace-status'),
+  getChainStatus: bridge.buildProvider<StudioCommandResult<StudioRendererChainStatusV2>, StudioGetChainStatusRequestV2>(
+    'creative-studio.get-chain-status'
   ),
-  undoBriefRules: bridge.buildProvider<StudioCommandResult<StudioRendererProject>, StudioProjectRequest>(
-    'creative-studio.undo-brief-rules'
+  retryConditioningFrame: bridge.buildProvider<
+    StudioCommandResult<StudioRendererProjectCommitResultV2>,
+    StudioCascadeBarrierActionRequestV2
+  >('creative-studio.retry-conditioning-frame'),
+  cancelWaitingCascade: bridge.buildProvider<
+    StudioCommandResult<StudioRendererProjectCommitResultV2>,
+    StudioCascadeBarrierActionRequestV2
+  >('creative-studio.cancel-waiting-cascade'),
+  editProject: bridge.buildProvider<
+    StudioCommandResult<StudioRendererProjectCommitResultV2>,
+    StudioEditProjectSettingsRequestV2
+  >('creative-studio.edit-project'),
+  setRules: bridge.buildProvider<StudioCommandResult<StudioRendererProjectCommitResultV2>, StudioSetRulesRequestV2>(
+    'creative-studio.set-rules'
   ),
-  bindBriefConversation: bridge.buildProvider<
-    StudioCommandResult<StudioRendererProject>,
-    StudioBindBriefConversationRequest
-  >('creative-studio.bind-brief-conversation'),
-  updateCut: bridge.buildProvider<StudioCommandResult<StudioRendererProject>, StudioUpdateCutRequest>(
-    'creative-studio.update-cut'
+  parkBeat: bridge.buildProvider<StudioCommandResult<StudioRendererProjectCommitResultV2>, StudioParkBeatRequestV2>(
+    'creative-studio.park-beat'
   ),
-  placeCutScenes: bridge.buildProvider<StudioCommandResult<StudioRendererProject>, StudioPlaceCutScenesRequest>(
-    'creative-studio.place-cut-scenes'
+  restoreBeat: bridge.buildProvider<
+    StudioCommandResult<StudioRendererProjectCommitResultV2>,
+    StudioRestoreBeatRequestV2
+  >('creative-studio.restore-beat'),
+  parkShot: bridge.buildProvider<StudioCommandResult<StudioRendererProjectCommitResultV2>, StudioParkShotRequestV2>(
+    'creative-studio.park-shot'
   ),
-  deleteProject: bridge.buildProvider<StudioCommandResult<boolean>, StudioDeleteProjectRequest>(
+  restoreShot: bridge.buildProvider<
+    StudioCommandResult<StudioRendererProjectCommitResultV2>,
+    StudioRestoreShotRequestV2
+  >('creative-studio.restore-shot'),
+  parkTake: bridge.buildProvider<StudioCommandResult<StudioRendererProjectCommitResultV2>, StudioTakeActionRequestV2>(
+    'creative-studio.park-take'
+  ),
+  addAlternateTake: bridge.buildProvider<
+    StudioCommandResult<StudioRendererProjectCommitResultV2>,
+    StudioTakeActionRequestV2
+  >('creative-studio.add-alternate-take'),
+  restoreTake: bridge.buildProvider<
+    StudioCommandResult<StudioRendererProjectCommitResultV2>,
+    StudioTakeActionRequestV2
+  >('creative-studio.restore-take'),
+  selectTake: bridge.buildProvider<StudioCommandResult<StudioRendererProjectCommitResultV2>, StudioTakeActionRequestV2>(
+    'creative-studio.select-take'
+  ),
+  reorderBin: bridge.buildProvider<StudioCommandResult<StudioRendererProjectCommitResultV2>, StudioReorderBinRequestV2>(
+    'creative-studio.reorder-bin'
+  ),
+  deleteProject: bridge.buildProvider<StudioCommandResult<boolean>, StudioDeleteProjectRequestV2>(
     'creative-studio.delete-project'
   ),
-  updateScene: bridge.buildProvider<StudioCommandResult<StudioRendererProject>, StudioUpdateSceneRequest>(
-    'creative-studio.update-scene'
-  ),
-  reorderScenes: bridge.buildProvider<StudioCommandResult<StudioRendererProject>, StudioReorderScenesRequest>(
-    'creative-studio.reorder-scenes'
-  ),
-  selectAsset: bridge.buildProvider<StudioCommandResult<StudioRendererProject>, StudioSelectAssetRequest>(
-    'creative-studio.select-asset'
-  ),
-  persistCapturedPoster: bridge.buildProvider<StudioCommandResult<StudioAsset>, StudioPersistCapturedPosterRequest>(
+  persistCapturedPoster: bridge.buildProvider<StudioCommandResult<StudioAssetV2>, StudioPersistCapturedPosterRequestV2>(
     'creative-studio.persist-captured-poster'
   ),
   chooseAndImportReference: bridge.buildProvider<
-    StudioCommandResult<StudioImportOutcome>,
-    StudioChooseAndImportReferenceRequest
+    StudioCommandResult<StudioImportManagedMediaResultV2>,
+    StudioChooseAndImportBriefReferenceRequestV2
   >('creative-studio.choose-and-import-reference'),
   detachBriefReference: bridge.buildProvider<
-    StudioCommandResult<StudioRendererProject>,
+    StudioCommandResult<StudioDetachManagedMediaResultV2>,
     StudioDetachBriefReferenceRequest
   >('creative-studio.detach-brief-reference'),
-  chooseAndExportAssets: bridge.buildProvider<
-    StudioCommandResult<StudioExportOutcome>,
-    StudioChooseAndExportAssetsRequest
-  >('creative-studio.choose-and-export-assets'),
-  getLatestRender: bridge.buildProvider<StudioCommandResult<StudioLatestRender | null>, StudioProjectRequest>(
-    'creative-studio.get-latest-render'
-  ),
-  renderCut: bridge.buildProvider<StudioCommandResult<StudioRenderCutResult>, StudioProjectRequest>(
-    'creative-studio.render-cut'
-  ),
-  cancelRender: bridge.buildProvider<StudioCommandResult<StudioCancelRenderResult>, StudioProjectRequest>(
-    'creative-studio.cancel-render'
-  ),
-  fitStoryboard: bridge.buildProvider<StudioCommandResult<StudioFitStoryboardOutcome>, StudioFitStoryboardRequest>(
-    'creative-studio.fit-storyboard'
-  ),
-  submitScenes: bridge.buildProvider<StudioCommandResult<StudioRendererJob[]>, StudioSubmitScenesRequest>(
-    'creative-studio.submit-scenes'
-  ),
-  cancelJob: bridge.buildProvider<StudioCommandResult<StudioRendererJob>, StudioJobRequest>(
-    'creative-studio.cancel-job'
-  ),
-  retryJob: bridge.buildProvider<StudioCommandResult<StudioRendererJob>, StudioRetryJobRequest>(
-    'creative-studio.retry-job'
-  ),
-  retryDownload: bridge.buildProvider<StudioCommandResult<StudioRendererJob>, StudioRetryDownloadRequest>(
-    'creative-studio.retry-download'
-  ),
+  importSeedStill: bridge.buildProvider<
+    StudioCommandResult<StudioImportManagedMediaResultV2>,
+    StudioImportSeedStillRequestV2
+  >('creative-studio.import-seed-still'),
   listConnectionCandidates: bridge.buildProvider<StudioCommandResult<StudioConnectionCandidate[]>, void>(
     'creative-studio.list-connection-candidates'
   ),
@@ -1318,18 +1338,18 @@ export const creativeStudio = {
   removeConnection: bridge.buildProvider<StudioCommandResult<boolean>, StudioRemoveConnectionRequest>(
     'creative-studio.remove-connection'
   ),
-  listRoutes: bridge.buildProvider<StudioCommandResult<StudioRouteCatalog>, StudioListRoutesRequest | undefined>(
+  listRoutes: bridge.buildProvider<StudioCommandResult<StudioRouteCatalogV2>, StudioListRoutesRequestV2 | undefined>(
     'creative-studio.list-routes'
   ),
   hasUnsavedWork: bridge.buildRendererQuery<StudioUnsavedWorkStatus>('creative-studio.has-unsaved-work', {
-    dirtySceneCount: STUDIO_MAX_DIRTY_SCENES_REPORTED,
+    dirtyDraftCount: STUDIO_MAX_DIRTY_DRAFTS_REPORTED,
   }),
   flushUnsavedWork: bridge.buildRendererQuery<StudioFlushUnsavedWorkResult>('creative-studio.flush-unsaved-work', {
     saved: false,
   }),
   projectUpdated: bridge.buildEmitter<{ projectId: string }>('studio.project-updated'),
   proposalUpdated: bridge.buildEmitter<{ projectId: string; proposalId: string }>('studio.proposal-updated'),
-  renderProgress: bridge.buildEmitter<StudioRenderProgressEvent>('studio.render-progress'),
+  referenceUpdated: bridge.buildEmitter<{ projectId: string; requestId: string }>('studio.reference-updated'),
 };
 
 // ---------------------------------------------------------------------------
