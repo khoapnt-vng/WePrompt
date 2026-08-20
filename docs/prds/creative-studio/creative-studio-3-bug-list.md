@@ -59,10 +59,65 @@
   - Live heading trees: Table `[H1 project, H2 "Table"]`; Board `[H1 project, H2 "Board", H2 "Beat board", H2 "Bin"]`; Cut `[H1 project, H2 "Cut", H2 "Cut", H3 …]`.
   - Also an accessibility defect: two identical sibling headings at the same level give screen-reader users no way to tell the wrapper from the panel.
 
-- [ ] **[BUG-067][P3][Creative Studio] Project settings and the spend-policy panel render under all three views** — found 2026-08-21; **confirm intent before fixing**
-  - "Project settings" and "Brief, routes, and spend policy" render identically below Table, Board and Cut. Confirmed present in all three.
-  - Neither the CS3 implementation plan nor the direction document places these panels in a specific view, so this may be deliberate shared chrome rather than leftover scaffold from the Task 7 placeholder. It reads as the latter because the panels sit inside the same card as the view body.
-  - Resolve against the prototype (`creative-studio-3-beat-and-shot-reference.html.txt`) before changing anything.
+- [ ] **[BUG-067][P2][Creative Studio] The project-settings and spend-policy forms are not in the design at all, and render under all three views** — found 2026-08-21; **open question resolved 2026-08-21 against the prototype**
+  - "Project settings" and "Brief, routes, and spend policy" render identically below Table, Board and Cut.
+  - This entry originally asked whether the repetition was intentional. It is worse than repetition: the hash-pinned prototype contains **no project-settings surface anywhere** — probed for `project settings`, `spend policy` and `aspect ratio` across the whole document, all absent.
+  - So the question is not which view should host the form, but whether the form belongs in the workspace at all. Resolve with the designer before moving it.
+
+## Visual fidelity against the design
+
+> Compared 2026-08-21 against `creative-studio-3-beat-and-shot-reference.html.txt`,
+> sha256 `642c8b16…0846ee` — matching the hash pinned in the implementation plan. The prototype was
+> served locally and measured through the DOM; the built app was measured the same way over CDP, so
+> every number below is a like-for-like computed style, not an eyeball estimate.
+>
+> **These are a specification gap, not a regression.** The implementation plan references the
+> prototype once, as "an offline bundle of the prototype the review was conducted against" — context
+> for the direction document. No task in the plan carries a typography, token, layout, or
+> visual-fidelity requirement, and the view tasks (10–13) specify behaviour and data only. The views
+> were built to the spec that existed. Closing this gap needs its own task; it is not rework of
+> Tasks 10–13 against a standard they were given.
+
+- [ ] **[BUG-068][P1][Creative Studio] The designed app bar was never built; identity, stats, view switch and the primary action are separate stacked blocks** — found 2026-08-21
+  - Design: one compact bar carrying, in order — a project colour dot, the title, a stat strip `9 BEATS · 2:58 OF 3:00 · 5 READY`, a right-aligned `TABLE BOARD CUT` segmented control, a primary `Render…` button, and an overflow `⋯`.
+  - Built: a large `H1` project title, a `0 beats · 0 shots` line beneath it, then a separate row of view links. No stat strip (probed: absent), no `Render…` control anywhere in the workspace (probed: zero buttons matching /render/), no overflow menu.
+  - The stat strip is the only place the design surfaces **duration against target** (`2:58 OF 3:00`) and **readiness count**. Both are load-bearing for the costed render gate, and neither has a home in the built UI.
+
+- [ ] **[BUG-069][P1][Creative Studio] The type scale is roughly double the design throughout** — found 2026-08-21, measured
+  - Project title: design **Manrope 700 at 14.5px**; built **Manrope 700 at 29px** — exactly 2×.
+  - Largest type anywhere: design **23px**; built **29px**.
+  - The three typefaces are already correct and loaded in both — Manrope, IBM Plex Mono, Source Sans 3. Nothing needs adding. What diverges is the scale, and it is what makes the built UI read as a settings page rather than a dense production tool.
+
+- [ ] **[BUG-070][P1][Creative Studio] The view switch uses the wrong type treatment and sits in the wrong place** — found 2026-08-21, measured
+  - Design: `IBM Plex Mono`, **9.5px**, uppercase, `letter-spacing: 0.08em`, chips inside the app bar, right-aligned.
+  - Built: `Source Sans 3`, **14.5px**, sentence case, `letter-spacing: normal`, pills on their own row below the title, left-aligned.
+  - The underlying markup is sound — `<nav aria-label="Workspace views">` with `aria-current="page"`. This is styling and placement only.
+
+- [ ] **[BUG-071][P1][Creative Studio] The Cut view is a settings form; the design is a playback editor** — found 2026-08-21
+  - Design (dark surface): a large preview panel badged `BEAT 01 · Cold open`; a transport row with play, `0:00 / 2:58`, and `PICTURE ONLY — THE BED IS MUTED HERE`; a right `THE FILM` panel showing `2:58` against `OF 3:00 TARGET` with a `2s UNDER` pill and `9 BEATS · 16 SHOTS · 1 SLATE`; a `MATCH TO` panel with reference thumbnails and `03 · SHOT 01 IS THE REFERENCE`; an inline warning row `BEAT 05 — No coverage. It exports as a 24s slate.` with an `OPEN THE BEAT` action; a numbered filmstrip of every beat in play order with per-beat durations; and an audio-bed waveform strip labelled `bed-season4.wav · 3:04 · ONE BED · AUTO-DUCKED`.
+  - Built (light surface): a card with a duplicated `Cut` heading, a `0s film` chip, and three stacked form panels — Audio bed, Match To, Exports — made of dropdowns and buttons.
+  - Every concept in the design is represented in the build, so the data layer is not the problem. The presentation is a different artifact: the design lets you _watch_ the film and see the timeline; the build lets you _configure_ it.
+  - The filmstrip and the transport are the two pieces with no counterpart at all in the build, and they are the ones that make the Cut a cut.
+
+- [ ] **[BUG-072][P3][Creative Studio] The Board's S/M/L density control is not in the design** — found 2026-08-21
+  - The built Board carries an `S` / `M` / `L` toggle beside "Beat board". The prototype's Board has no density control — probed across the document, absent.
+  - The design instead fixes a three-column grid of 16:9 image cards, each with a beat-number badge, title, description, a state pill, and a `2 SHOTS · 14s` footer. A no-coverage beat renders as a diagonal-striped placeholder rather than a photo.
+  - Low priority because an extra control is additive, but it should be a deliberate decision rather than drift.
+
+## Open question — not a bug
+
+**The Director rail is in the plan and absent from the design.** The built workspace dedicates roughly
+a third of the width to a permanent "Creative Director" rail. The prototype has no such rail on any
+screen — probed for the string across the whole document, absent.
+
+This is not an implementation defect: plan Task 9 is titled "Project shell and the collapsible
+Director rail" and explicitly instructs "Build **one docked collapsible Director rail** with a single
+persistent conversation owner." Codex built exactly what was specified.
+
+So the plan and the design disagree about whether the Director is a permanent surface or is summoned.
+That is a product decision, and only the designer and owner can settle it. It is recorded here rather
+than filed because there is nothing for an engineer to fix until it is settled — and because it is the
+single largest visual difference between the two, so any fidelity work that ignores it will be redone.
 
 ## Verification notes
 
