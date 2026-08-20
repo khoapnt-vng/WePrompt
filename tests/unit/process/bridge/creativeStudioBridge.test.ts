@@ -8,6 +8,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  STUDIO_MAX_EXPORTS_PER_SHAPE,
   STUDIO_PROJECT_SCHEMA_VERSION,
   STUDIO_VIEWS,
   type StudioMutationBatchResultV2,
@@ -17,7 +18,7 @@ import {
 } from '@/common/types/project/creativeStudioTypes';
 import { CreativeStudioStoreError } from '@process/services/creative-studio/store';
 import { CreativeStudioMediaError } from '@process/services/creative-studio/mediaStore';
-import { StudioPreparedSubmissionCacheErrorV2 } from '@process/services/creative-studio/service/schema2/preparedSubmissionCache';
+import { StudioPreparedSubmissionCacheErrorV2 } from '@process/services/creative-studio/service/schema2/pricing/preparedSubmissionCache';
 import type { CreativeStudioServiceV2 } from '@process/services/creative-studio/service/v2Service';
 
 const providerNames = [
@@ -58,6 +59,14 @@ const providerNames = [
   'chooseAndImportReference',
   'detachBriefReference',
   'importSeedStill',
+  'importBedAudio',
+  'detachBedAudio',
+  'setBed',
+  'setMatchTo',
+  'createExport',
+  'listExports',
+  'copyExport',
+  'revealExport',
   'listConnectionCandidates',
   'listConnections',
   'validateConnection',
@@ -68,6 +77,7 @@ const providerNames = [
 
 type ProviderName = (typeof providerNames)[number];
 const mocks = vi.hoisted(() => ({
+  mainTranslate: vi.fn((key: string) => `main:${key}`),
   providers: Object.fromEntries(
     [
       'listProjects',
@@ -107,6 +117,14 @@ const mocks = vi.hoisted(() => ({
       'chooseAndImportReference',
       'detachBriefReference',
       'importSeedStill',
+      'importBedAudio',
+      'detachBedAudio',
+      'setBed',
+      'setMatchTo',
+      'createExport',
+      'listExports',
+      'copyExport',
+      'revealExport',
       'listConnectionCandidates',
       'listConnections',
       'validateConnection',
@@ -124,6 +142,7 @@ vi.mock('@/common', () => ({
 }));
 vi.mock('@/common/config/constants', () => ({ CREATIVE_STUDIO_ENABLED: true }));
 vi.mock('@process/services/creative-studio/runtime', () => ({ getCreativeStudioService: vi.fn() }));
+vi.mock('@process/services/i18n', () => ({ default: { t: mocks.mainTranslate } }));
 
 import {
   createCreativeStudioCloseHandshake,
@@ -253,7 +272,13 @@ const createService = () =>
     deleteProject: vi.fn(async () => true),
     persistCapturedPoster: vi.fn(async () => ({ id: 'poster_1' })),
     importReferenceFromPath: vi.fn(async () => ({ asset: { id: 'asset_1' }, project: rendererProject })),
+    importBedAudioFromPath: vi.fn(async () => ({ asset: { id: 'bed_1' }, project: rendererProject })),
+    detachBedAudio: vi.fn(async () => rendererProject),
     detachBriefReference: vi.fn(async () => rendererProject),
+    createExport: vi.fn(async () => ({ revision: 2, artifacts: [] })),
+    listExports: vi.fn(async () => ({ revision: 1, artifacts: [] })),
+    copyExport: vi.fn(async () => ({ status: 'copied' as const })),
+    revealExport: vi.fn(async () => ({ status: 'revealed' as const })),
     listConnectionCandidates: vi.fn(async () => []),
     listConnections: vi.fn(async () => ({ integrations: [], connections: [] })),
     validateConnection: vi.fn(),
@@ -290,6 +315,9 @@ describe('initCreativeStudioBridge', () => {
       now: () => new Date('2026-08-19T02:03:04.000Z'),
       getParentWindow: () => undefined,
       showOpenDialog: vi.fn(async () => ({ canceled: false, filePaths: ['/private/reference.png'] })),
+      showAudioOpenDialog: vi.fn(async () => ({ canceled: false, filePaths: ['/private/bed.wav'] })),
+      chooseExportDestination: vi.fn(async () => '/private/destination/editor-folder'),
+      revealExportPath: vi.fn(),
     };
   });
 
@@ -685,6 +713,325 @@ describe('initCreativeStudioBridge', () => {
       } as never)
     ).resolves.toEqual({ ok: true, data: { status: 'cancelled' } });
     expect(service.importReferenceFromPath).not.toHaveBeenCalled();
+  });
+
+  it('keeps the bed-audio picker and result free of renderer paths and media authority', async () => {
+    const showAudioOpenDialog = vi.fn(async () => ({ canceled: false, filePaths: ['/private/bed.wav'] }));
+    const translate = vi.fn(() => 'Translated WAV audio');
+    initCreativeStudioBridge({ ...dependencies, showAudioOpenDialog, translate });
+    const input = { projectId: 'project_1', expectedRevision: 6 };
+
+    await expect(registeredHandler('importBedAudio')(input as never)).resolves.toEqual({
+      ok: true,
+      data: { status: 'imported', assetId: 'bed_1', projectRevision: 7 },
+    });
+    expect(service.importBedAudioFromPath).toHaveBeenCalledWith({
+      ...input,
+      sourcePath: '/private/bed.wav',
+    });
+    expect(translate).toHaveBeenCalledWith('conversation.creativeStudio.workspace.cut.bed.pickerFilter');
+    expect(showAudioOpenDialog).toHaveBeenCalledWith(undefined, 'Translated WAV audio');
+    expect(dependencies.showOpenDialog).not.toHaveBeenCalled();
+  });
+
+  it('loads the default main-process translation only when the bed picker runs', async () => {
+    const showAudioOpenDialog = vi.fn(async () => ({ canceled: true, filePaths: [] }));
+    initCreativeStudioBridge({ ...dependencies, showAudioOpenDialog });
+
+    expect(mocks.mainTranslate).not.toHaveBeenCalled();
+    await expect(
+      registeredHandler('importBedAudio')({ projectId: 'project_1', expectedRevision: 6 } as never)
+    ).resolves.toEqual({ ok: true, data: { status: 'cancelled' } });
+
+    expect(mocks.mainTranslate).toHaveBeenCalledOnce();
+    expect(mocks.mainTranslate).toHaveBeenCalledWith('conversation.creativeStudio.workspace.cut.bed.pickerFilter');
+    expect(showAudioOpenDialog).toHaveBeenCalledWith(
+      undefined,
+      'main:conversation.creativeStudio.workspace.cut.bed.pickerFilter'
+    );
+  });
+
+  it('returns bed-audio picker cancellation before consulting media storage', async () => {
+    const showAudioOpenDialog = vi.fn(async () => ({ canceled: true, filePaths: [] }));
+    initCreativeStudioBridge({ ...dependencies, showAudioOpenDialog });
+
+    await expect(
+      registeredHandler('importBedAudio')({ projectId: 'project_1', expectedRevision: 6 } as never)
+    ).resolves.toEqual({ ok: true, data: { status: 'cancelled' } });
+    expect(service.importBedAudioFromPath).not.toHaveBeenCalled();
+  });
+
+  it('projects bed detach and sends bed and Match To through one exact reducer operation', async () => {
+    vi.mocked(service.applyMutations).mockResolvedValue({
+      project: rendererProject,
+      createdBeatIds: [],
+      createdShotIds: [],
+    });
+    initCreativeStudioBridge(dependencies);
+
+    await expect(
+      registeredHandler('detachBedAudio')({
+        projectId: 'project_1',
+        expectedRevision: 6,
+        assetId: 'bed_1',
+      } as never)
+    ).resolves.toEqual({ ok: true, data: { status: 'detached', projectRevision: 7 } });
+    await expect(
+      registeredHandler('setBed')({ projectId: 'project_1', expectedRevision: 7, assetId: 'bed_1' } as never)
+    ).resolves.toEqual({
+      ok: true,
+      data: { projectId: 'project_1', projectRevision: 7, createdBeatIds: [], createdShotIds: [] },
+    });
+    await expect(
+      registeredHandler('setMatchTo')({ projectId: 'project_1', expectedRevision: 7, shotId: null } as never)
+    ).resolves.toEqual({
+      ok: true,
+      data: { projectId: 'project_1', projectRevision: 7, createdBeatIds: [], createdShotIds: [] },
+    });
+    expect(service.detachBedAudio).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 6,
+      assetId: 'bed_1',
+    });
+    expect(service.applyMutations).toHaveBeenNthCalledWith(
+      1,
+      {
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        projectId: 'project_1',
+        expectedRevision: 7,
+        operations: [{ kind: 'set_bed', assetId: 'bed_1' }],
+      },
+      { mutationId: 'native_mutation_1', capturedAt: '2026-08-19T02:03:04.000Z' }
+    );
+    expect(service.applyMutations).toHaveBeenNthCalledWith(
+      2,
+      {
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        projectId: 'project_1',
+        expectedRevision: 7,
+        operations: [{ kind: 'set_match_to', shotId: null }],
+      },
+      { mutationId: 'native_mutation_1', capturedAt: '2026-08-19T02:03:04.000Z' }
+    );
+  });
+
+  it('projects only the sanitized export catalog and exact create/list requests', async () => {
+    const catalog = {
+      revision: 2,
+      artifacts: [
+        {
+          id: 'export_1',
+          sourceRevision: 7,
+          shape: 'editor_folder' as const,
+          byteSize: 1024,
+          fileCount: 3,
+          createdAt: '2026-08-19T02:03:04.000Z',
+        },
+      ],
+    };
+    vi.mocked(service.createExport).mockResolvedValueOnce(catalog);
+    vi.mocked(service.listExports).mockResolvedValueOnce(catalog);
+    initCreativeStudioBridge(dependencies);
+    const createInput = {
+      projectId: 'project_1',
+      expectedRevision: 7,
+      expectedCatalogRevision: 1,
+      shape: 'editor_folder' as const,
+    };
+
+    await expect(registeredHandler('createExport')(createInput as never)).resolves.toEqual({
+      ok: true,
+      data: catalog,
+    });
+    await expect(registeredHandler('listExports')({ projectId: 'project_1' } as never)).resolves.toEqual({
+      ok: true,
+      data: catalog,
+    });
+    expect(service.createExport).toHaveBeenCalledWith(createInput);
+    expect(service.listExports).toHaveBeenCalledWith({ projectId: 'project_1' });
+  });
+
+  it('projects a null-prototype export catalog into a plain renderer envelope', async () => {
+    const catalog = Object.assign(Object.create(null) as Record<string, unknown>, {
+      revision: 2,
+      artifacts: [],
+    });
+    vi.mocked(service.listExports).mockResolvedValueOnce(catalog as never);
+    initCreativeStudioBridge(dependencies);
+
+    await expect(registeredHandler('listExports')({ projectId: 'project_1' } as never)).resolves.toStrictEqual({
+      ok: true,
+      data: { revision: 2, artifacts: [] },
+    });
+  });
+
+  it.each([
+    [
+      'a prototype-bearing catalog',
+      (() => {
+        const catalog = { revision: 2, artifacts: [] };
+        Object.setPrototypeOf(catalog, { inherited: true });
+        return catalog;
+      })(),
+    ],
+    [
+      'a compensated sparse artifact array',
+      (() => {
+        const artifacts: unknown[] = [];
+        artifacts.length = 1;
+        Object.defineProperty(artifacts, 'compensatingOwnKey', { enumerable: true, value: true });
+        return { revision: 2, artifacts };
+      })(),
+    ],
+    [
+      'an unsupported artifact shape',
+      {
+        revision: 2,
+        artifacts: [
+          {
+            id: 'export_1',
+            sourceRevision: 7,
+            shape: 'movie',
+            byteSize: 1,
+            fileCount: 1,
+            createdAt: '2026-08-19T02:03:04.000Z',
+          },
+        ],
+      },
+    ],
+    [
+      'reverse chronological artifacts',
+      {
+        revision: 2,
+        artifacts: [
+          {
+            id: 'export_1',
+            sourceRevision: 7,
+            shape: 'still',
+            byteSize: 1,
+            fileCount: 1,
+            createdAt: '2026-08-19T02:03:05.000Z',
+          },
+          {
+            id: 'export_2',
+            sourceRevision: 7,
+            shape: 'still',
+            byteSize: 1,
+            fileCount: 1,
+            createdAt: '2026-08-19T02:03:04.000Z',
+          },
+        ],
+      },
+    ],
+    [
+      'descending IDs at the same creation time',
+      {
+        revision: 2,
+        artifacts: ['export_2', 'export_1'].map((id) => ({
+          id,
+          sourceRevision: 7,
+          shape: 'still' as const,
+          byteSize: 1,
+          fileCount: 1,
+          createdAt: '2026-08-19T02:03:04.000Z',
+        })),
+      },
+    ],
+    [
+      'more artifacts of one shape than the renderer contract permits',
+      {
+        revision: 2,
+        artifacts: Array.from({ length: STUDIO_MAX_EXPORTS_PER_SHAPE + 1 }, (_, index) => ({
+          id: `export_${index}`,
+          sourceRevision: 7,
+          shape: 'still' as const,
+          byteSize: 1,
+          fileCount: 1,
+          createdAt: new Date(Date.UTC(2026, 7, 19, 2, 3, index)).toISOString(),
+        })),
+      },
+    ],
+  ] as const)('rejects %s at the export service boundary', async (_case, catalog) => {
+    vi.mocked(service.listExports).mockResolvedValueOnce(catalog as never);
+    initCreativeStudioBridge(dependencies);
+
+    await expect(registeredHandler('listExports')({ projectId: 'project_1' } as never)).resolves.toEqual({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'conversation.creativeStudio.errors.storage' },
+    });
+  });
+
+  it('keeps export destination and managed reveal paths inside main', async () => {
+    vi.mocked(service.copyExport).mockImplementationOnce(async (_input, chooseDestination) => {
+      const destination = await chooseDestination({ suggestedName: 'editor-folder', isDirectory: true });
+      expect(destination).toBe('/private/destination/editor-folder');
+      return { status: 'copied' };
+    });
+    vi.mocked(service.revealExport).mockImplementationOnce(async (_input, revealPath) => {
+      revealPath('/private/managed/exports/export_1');
+      return { status: 'revealed' };
+    });
+    initCreativeStudioBridge(dependencies);
+    const input = { projectId: 'project_1', expectedCatalogRevision: 2, artifactId: 'export_1' };
+
+    await expect(registeredHandler('copyExport')(input as never)).resolves.toEqual({
+      ok: true,
+      data: { status: 'copied' },
+    });
+    await expect(registeredHandler('revealExport')(input as never)).resolves.toEqual({
+      ok: true,
+      data: { status: 'revealed' },
+    });
+    expect(dependencies.chooseExportDestination).toHaveBeenCalledWith(undefined, {
+      suggestedName: 'editor-folder',
+      isDirectory: true,
+    });
+    expect(dependencies.revealExportPath).toHaveBeenCalledWith('/private/managed/exports/export_1');
+    expect(service.copyExport).toHaveBeenCalledWith(input, expect.any(Function));
+    expect(service.revealExport).toHaveBeenCalledWith(input, expect.any(Function));
+  });
+
+  it('rejects hostile export service envelopes rather than leaking extra authority', async () => {
+    vi.mocked(service.listExports)
+      .mockResolvedValueOnce({
+        revision: 2,
+        artifacts: [],
+        managedExport: { collection: 'exports', fileName: 'private' },
+      } as never)
+      .mockResolvedValueOnce({
+        revision: 2,
+        artifacts: [
+          {
+            id: 'export_1',
+            sourceRevision: 7,
+            shape: 'still',
+            byteSize: 1,
+            fileCount: 2,
+            createdAt: '2026-08-19T02:03:04.000Z',
+          },
+        ],
+      } as never);
+    vi.mocked(service.copyExport).mockResolvedValueOnce({ status: 'copied', destinationPath: '/private' } as never);
+    vi.mocked(service.revealExport).mockResolvedValueOnce({ status: 'revealed', fileName: 'private' } as never);
+    initCreativeStudioBridge(dependencies);
+    const input = { projectId: 'project_1', expectedCatalogRevision: 2, artifactId: 'export_1' };
+
+    await expect(registeredHandler('listExports')({ projectId: 'project_1' } as never)).resolves.toEqual({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'conversation.creativeStudio.errors.storage' },
+    });
+    await expect(registeredHandler('listExports')({ projectId: 'project_1' } as never)).resolves.toEqual({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'conversation.creativeStudio.errors.storage' },
+    });
+    await expect(registeredHandler('copyExport')(input as never)).resolves.toEqual({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'conversation.creativeStudio.errors.storage' },
+    });
+    await expect(registeredHandler('revealExport')(input as never)).resolves.toEqual({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'conversation.creativeStudio.errors.storage' },
+    });
   });
 
   it('projects Brief detach and maps media_in_use without leaking the media error', async () => {

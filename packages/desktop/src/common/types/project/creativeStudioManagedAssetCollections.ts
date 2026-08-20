@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { StudioManagedAssetRefV2 } from './creativeStudioTypes';
+import type { StudioAssetV2, StudioManagedAssetRefV2 } from './creativeStudioTypes';
 
 /**
  * Single source of truth for every managed-asset collection the store durably recognises.
@@ -25,6 +25,24 @@ const STUDIO_REFERENCE_IMAGE_MIME_TYPES: ReadonlySet<string> = new Set(['image/j
 
 export const isStudioReferenceImageMimeType = (value: unknown): value is string =>
   typeof value === 'string' && STUDIO_REFERENCE_IMAGE_MIME_TYPES.has(value);
+
+/** Returns whether one project-owned audio record has the exact canonical WAV import shape. */
+export const isCanonicalStudioBedAudioAssetV2 = (asset: StudioAssetV2): boolean =>
+  asset.shotId === null &&
+  asset.mediaKind === 'audio' &&
+  asset.mimeType === 'audio/wav' &&
+  asset.managedAsset.collection === 'imports' &&
+  asset.managedAsset.fileName === `${asset.id}.wav` &&
+  Number.isSafeInteger(asset.byteSize) &&
+  asset.byteSize > 0 &&
+  typeof asset.durationSeconds === 'number' &&
+  Number.isFinite(asset.durationSeconds) &&
+  asset.durationSeconds > 0 &&
+  !Object.hasOwn(asset, 'width') &&
+  !Object.hasOwn(asset, 'height') &&
+  !Object.hasOwn(asset, 'sourceLook') &&
+  !Object.hasOwn(asset, 'briefReferenceRole') &&
+  !Object.hasOwn(asset, 'briefReferenceLabel');
 
 const isUnsafeLabelCharacter = (character: string): boolean => {
   const codePoint = character.codePointAt(0)!;

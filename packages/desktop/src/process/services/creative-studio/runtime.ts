@@ -52,6 +52,7 @@ import {
 } from './adapters/e2eFakeAdapter';
 import { createStudioJobManager, type StudioJobManagerDeps, type StudioJobManagerV2 } from './jobManager';
 import { createConfiguredStudioRateCardV2 } from './rateCardConfig';
+import { createStudioExportCatalogStoreV2, type StudioExportCatalogStoreV2 } from './service/schema2/exports';
 import {
   installCreativeStudioProtocol,
   type CreativeStudioAssetResolver,
@@ -78,10 +79,15 @@ type RuntimeJobManager = StudioJobManagerV2;
 
 export type CreativeStudioRuntimeFactories = {
   createStore(input: { rootDir: string; onProjectCommitted: StudioProjectCommitObserver }): CreativeStudioStore;
-  createMediaStore(input: { store: CreativeStudioStore }): StudioMediaStore;
+  createMediaStore(input: {
+    store: CreativeStudioStore;
+    exportCatalogStore: StudioExportCatalogStoreV2;
+    assertActive: () => void;
+  }): StudioMediaStore;
   createAdapters(input: { rootDir: string }): GenerationProviderAdapterRegistry;
   createProviderResolver(input: StudioProviderResolverDeps): StudioProviderResolver;
   createJobManager(input: StudioJobManagerDeps): RuntimeJobManager;
+  createExportCatalogStore(): StudioExportCatalogStoreV2;
   createService(input: CreativeStudioServiceV2Deps): CreativeStudioServiceV2;
   createE2EFakeBundle(input: StudioE2EFakeBundleDeps): StudioE2EFakeBundle;
   createDirectorCommitTracker(): StudioDirectorCommitTrackerV2;
@@ -117,10 +123,12 @@ export type CreativeStudioRuntime = {
 
 const defaultFactories: CreativeStudioRuntimeFactories = {
   createStore: ({ rootDir, onProjectCommitted }) => createCreativeStudioStore({ rootDir, onProjectCommitted }),
-  createMediaStore: ({ store }) =>
+  createMediaStore: ({ store, exportCatalogStore, assertActive }) =>
     createStudioMediaStore({
       store,
       getAvailableDiskBytes: getAvailableStudioDiskBytes,
+      withManagedMediaAuthority: exportCatalogStore.withManagedMediaAuthority.bind(exportCatalogStore),
+      assertActive,
     }),
   createAdapters: ({ rootDir }) =>
     createGenerationProviderAdapterRegistry({
@@ -128,6 +136,7 @@ const defaultFactories: CreativeStudioRuntimeFactories = {
     }),
   createProviderResolver: createStudioProviderResolver,
   createJobManager: createStudioJobManager,
+  createExportCatalogStore: createStudioExportCatalogStoreV2,
   createService: createCreativeStudioServiceV2,
   createE2EFakeBundle: createStudioE2EFakeBundle,
   createDirectorCommitTracker: createStudioDirectorCommitTrackerV2,
@@ -154,6 +163,7 @@ const mergeProviders = (
 };
 
 type ActivationGraph = {
+  authorityToken: object;
   mediaStore: StudioMediaStore;
   adapterRegistry: GenerationProviderAdapterRegistry;
   listProviders: () => Promise<IProvider[]>;
@@ -211,6 +221,7 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
   };
 
   const store = factories.createStore({ rootDir: deps.rootDir, onProjectCommitted: observeProjectCommit });
+  const exportCatalogStore = factories.createExportCatalogStore();
 
   const requireActiveGraph = (): ActivationGraph => {
     if (activeGraph === null || activationState !== 'active') {
@@ -251,6 +262,7 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
     getStudioServerScriptPath: () => getBuiltinMcpScriptPath(BUILTIN_STUDIO_SCRIPT),
     ensureDirectorCommandMailbox: (projectId) => requireActiveGraph().directorCommandMailbox.ensure(projectId),
     rateCard: async (generation) => createConfiguredStudioRateCardV2(generation),
+    exportCatalogStore,
     onProjectUpdated: (projectId) => {
       deps.onProjectUpdated(projectId);
       if (!disposed) {
@@ -269,6 +281,11 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
         const ids = [...supportedProjectIds];
         const signature = ids.join('\0');
         if (graph.recoverySignature === signature) return;
+        for (const projectId of ids) {
+          // eslint-disable-next-line no-await-in-loop -- export repair is serialized by the project's authority queue.
+          await store.withProjectAuthorityV2(projectId, (authority) => exportCatalogStore.repair(authority));
+          if (disposed || activeGraph !== graph) return;
+        }
         await graph.mediaStore.resumeConditioningFramesV2(ids);
         if (disposed || activeGraph !== graph) return;
         await graph.jobManager.resumePendingJobsV2(ids);
@@ -363,6 +380,7 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
   };
 
   const buildActivationGraph = async (): Promise<ActivationGraph> => {
+    const authorityToken = Object.freeze({});
     const fakeBundle = shouldEnableStudioE2EFakeAdapter(deps.environment ?? process.env, {
       isPackaged: deps.isPackaged,
     })
@@ -371,7 +389,15 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
           catalogProfile: 'explicit-selection',
         })
       : null;
-    const mediaStore = factories.createMediaStore({ store });
+    const mediaStore = factories.createMediaStore({
+      store,
+      exportCatalogStore,
+      assertActive: () => {
+        if (disposed || activeGraph?.authorityToken !== authorityToken) {
+          throw new CreativeStudioStoreError('storage_error', 'Creative Studio runtime is not active');
+        }
+      },
+    });
     const baseAdapters = factories.createAdapters({ rootDir: deps.rootDir });
     const adapterRegistry: GenerationProviderAdapterRegistry = fakeBundle
       ? new Map([...baseAdapters, ...fakeBundle.adapters])
@@ -403,6 +429,7 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
       onProjectUpdated: deps.onProjectUpdated,
     });
     const graph: ActivationGraph = {
+      authorityToken,
       mediaStore,
       adapterRegistry,
       listProviders,
@@ -550,9 +577,25 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
       disposed = true;
       activationState = 'disposed';
       const errors: unknown[] = [];
+      try {
+        // Close public command admission before waiting for graph teardown, so no export can begin
+        // after the runtime has crossed its disposal boundary.
+        coldService.dispose();
+      } catch (error) {
+        errors.push(error);
+      }
       if (activationPromise !== null) {
         try {
           await activationPromise;
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+      if (backendReadyPromise !== null) {
+        try {
+          // Backend-ready recovery may already have revoked activeGraph while it tears the
+          // failed graph down. Join that owner before deciding whether any graph remains.
+          await backendReadyPromise;
         } catch (error) {
           errors.push(error);
         }
@@ -564,11 +607,6 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
           errors.push(error);
         }
         activeGraph = null;
-      }
-      try {
-        coldService.dispose();
-      } catch (error) {
-        errors.push(error);
       }
       if (errors.length > 0) throw new AggregateError(errors, 'Creative Studio runtime disposal failed');
     })();

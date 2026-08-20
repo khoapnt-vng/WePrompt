@@ -210,7 +210,12 @@ vi.mock('@/renderer/pages/studio/components/Workspace/Views/Board/Bin', async ()
     }, [focusItemKey, onFocusItemSettled]);
     return (
       <section aria-label='Bin' data-testid='board-bin'>
-        <button ref={focusTarget} data-testid='bin-focus-target' type='button'>
+        <button
+          ref={focusTarget}
+          data-bin-focus-key={focusItemKey ?? undefined}
+          data-testid='bin-focus-target'
+          type='button'
+        >
           Bin focus target
         </button>
         <button onClick={() => onRestoreSuccess({ kind: 'beat', beatId: 'restored' })} type='button'>
@@ -348,6 +353,9 @@ const boardProps = (
   dirtyBeatIds: [],
   pending: false,
   actions,
+  binFocusAnnouncement: '',
+  binFocusItemKey: null,
+  onBinFocusItemSettled: vi.fn(),
   onOpenBeat: vi.fn(),
 });
 
@@ -575,6 +583,38 @@ describe('BoardView', () => {
     const list = screen.getByRole('list', { name: 'Beat board' });
     const bin = screen.getByTestId('board-bin');
     expect(list.compareDocumentPosition(bin) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('hands an external rendered-Shot request to the exact Bin focus model and does nothing without a request', async () => {
+    const projection = makeProjection([makeBeat('a')]);
+    const onBinFocusItemSettled = vi.fn();
+    const result = render(<BoardView {...boardProps(projection)} onBinFocusItemSettled={onBinFocusItemSettled} />);
+    const focusTarget = screen.getByTestId('bin-focus-target');
+    const selectedBeat = screen.getByRole('button', { name: 'Open Beat A' });
+    act(() => selectedBeat.focus());
+
+    expect(focusTarget).not.toHaveAttribute('data-bin-focus-key');
+    expect(focusTarget).not.toHaveFocus();
+    expect(onBinFocusItemSettled).not.toHaveBeenCalled();
+
+    result.rerender(
+      <BoardView
+        {...boardProps(projection)}
+        binFocusAnnouncement='Shot moved to the Bin.'
+        binFocusItemKey='shot:rendered_shot'
+        onBinFocusItemSettled={onBinFocusItemSettled}
+        selectedBeatId='a'
+      />
+    );
+
+    await waitFor(() => expect(focusTarget).toHaveFocus());
+    expect(focusTarget).toHaveAttribute('data-bin-focus-key', 'shot:rendered_shot');
+    expect(onBinFocusItemSettled).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Open Beat A' })).toHaveAttribute('aria-current', 'true');
+    const announcement = result.container.querySelector('[data-studio-shot-lift-announcement]');
+    expect(announcement).toHaveAttribute('aria-live', 'polite');
+    expect(announcement).toHaveAttribute('aria-atomic', 'true');
+    expect(announcement).toHaveTextContent('Shot moved to the Bin.');
   });
 
   it('leaves order and focus stable on reorder or lift failure and focuses a restored owner Beat after projection refresh', async () => {

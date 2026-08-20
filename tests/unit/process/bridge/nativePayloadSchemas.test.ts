@@ -364,6 +364,27 @@ const VALID_PAYLOADS = {
     expectedRevision: 1,
   },
   'creative-studio.import-seed-still': { projectId: 'project_1', expectedRevision: 1, shotId: 'shot_1' },
+  'creative-studio.import-bed-audio': { projectId: 'project_1', expectedRevision: 1 },
+  'creative-studio.detach-bed-audio': { projectId: 'project_1', expectedRevision: 1, assetId: 'asset_1' },
+  'creative-studio.set-bed': { projectId: 'project_1', expectedRevision: 1, assetId: 'asset_1' },
+  'creative-studio.set-match-to': { projectId: 'project_1', expectedRevision: 1, shotId: 'shot_1' },
+  'creative-studio.create-export': {
+    projectId: 'project_1',
+    expectedRevision: 1,
+    expectedCatalogRevision: 1,
+    shape: 'editor_folder',
+  },
+  'creative-studio.list-exports': { projectId: 'project_1' },
+  'creative-studio.copy-export': {
+    projectId: 'project_1',
+    expectedCatalogRevision: 1,
+    artifactId: 'export_1',
+  },
+  'creative-studio.reveal-export': {
+    projectId: 'project_1',
+    expectedCatalogRevision: 1,
+    artifactId: 'export_1',
+  },
   'creative-studio.list-connection-candidates': undefined,
   'creative-studio.list-connections': undefined,
   'creative-studio.validate-connection': {
@@ -1121,6 +1142,63 @@ const INVALID_PAYLOADS = [
     { projectId: 'project_1', shotId: 'shot_1', expectedRevision: 1, assetId: 'asset_1' },
   ],
   [
+    'creative-studio.import-bed-audio',
+    'renderer supplied source path',
+    { projectId: 'project_1', expectedRevision: 1, sourcePath: '/tmp/bed.wav' },
+  ],
+  [
+    'creative-studio.import-bed-audio',
+    'renderer supplied media facts',
+    { projectId: 'project_1', expectedRevision: 1, durationSeconds: 12, mimeType: 'audio/wav' },
+  ],
+  ['creative-studio.detach-bed-audio', 'missing asset id', { projectId: 'project_1', expectedRevision: 1 }],
+  [
+    'creative-studio.detach-bed-audio',
+    'unsafe asset id',
+    { projectId: 'project_1', expectedRevision: 1, assetId: '../bed' },
+  ],
+  ['creative-studio.set-bed', 'missing asset identity', { projectId: 'project_1', expectedRevision: 1 }],
+  [
+    'creative-studio.set-match-to',
+    'unsafe shot identity',
+    { projectId: 'project_1', expectedRevision: 1, shotId: '../shot' },
+  ],
+  [
+    'creative-studio.create-export',
+    'missing catalog revision',
+    { projectId: 'project_1', expectedRevision: 1, shape: 'editor_folder' },
+  ],
+  [
+    'creative-studio.create-export',
+    'still without an active shot identity',
+    { projectId: 'project_1', expectedRevision: 1, expectedCatalogRevision: 1, shape: 'still' },
+  ],
+  [
+    'creative-studio.create-export',
+    'stitched export shape',
+    { projectId: 'project_1', expectedRevision: 1, expectedCatalogRevision: 1, shape: 'stitched' },
+  ],
+  [
+    'creative-studio.copy-export',
+    'renderer supplied destination path',
+    {
+      projectId: 'project_1',
+      expectedCatalogRevision: 1,
+      artifactId: 'export_1',
+      destinationPath: '/tmp/export',
+    },
+  ],
+  [
+    'creative-studio.reveal-export',
+    'renderer supplied managed name',
+    {
+      projectId: 'project_1',
+      expectedCatalogRevision: 1,
+      artifactId: 'export_1',
+      fileName: 'managed-export',
+    },
+  ],
+  [
     'creative-studio.detach-brief-reference',
     'asset traversal',
     { projectId: 'project_1', assetId: '../asset_1', expectedRevision: 1 },
@@ -1566,7 +1644,7 @@ describe('native bridge payload schemas', () => {
     expect(providerKeys).toEqual(NATIVE_BRIDGE_PROVIDER_KEYS);
   });
 
-  it('registers the exact Task 9 native boundary while keeping legacy providers absent', () => {
+  it('registers the exact Task 13 native boundary while keeping legacy providers absent', () => {
     const required = [
       'creative-studio.get-director-session-authority',
       'creative-studio.bind-director-conversation',
@@ -1588,6 +1666,14 @@ describe('native bridge payload schemas', () => {
       'creative-studio.select-take',
       'creative-studio.reorder-bin',
       'creative-studio.import-seed-still',
+      'creative-studio.import-bed-audio',
+      'creative-studio.detach-bed-audio',
+      'creative-studio.set-bed',
+      'creative-studio.set-match-to',
+      'creative-studio.create-export',
+      'creative-studio.list-exports',
+      'creative-studio.copy-export',
+      'creative-studio.reveal-export',
       'creative-studio.list-reference-requests',
       'creative-studio.decide-reference-request',
       'creative-studio.list-reference-generation-handoffs',
@@ -1625,6 +1711,14 @@ describe('native bridge payload schemas', () => {
       'creative-studio.prepare-submission',
       'creative-studio.confirm-submission',
       'creative-studio.dismiss-reference-generation-handoff',
+      'creative-studio.import-bed-audio',
+      'creative-studio.detach-bed-audio',
+      'creative-studio.set-bed',
+      'creative-studio.set-match-to',
+      'creative-studio.create-export',
+      'creative-studio.list-exports',
+      'creative-studio.copy-export',
+      'creative-studio.reveal-export',
     ] as const;
 
     for (const providerKey of required) {
@@ -1637,9 +1731,9 @@ describe('native bridge payload schemas', () => {
       expect(providerKeys).not.toContain(providerKey);
       expect(schemaKeys).not.toContain(providerKey);
     }
-    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(43);
-    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(43);
-    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(43);
+    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(51);
+    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(51);
+    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(51);
     for (const providerKey of exactOnceProviderKeys) {
       expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key === providerKey)).toHaveLength(1);
       expect(providerKeys.filter((key) => key === providerKey)).toHaveLength(1);
@@ -1778,6 +1872,43 @@ describe('native bridge payload schemas', () => {
         briefReferenceRole: 'cast',
       })
     ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
+  it('accepts only the three exact Task 13 export shapes and keeps main-owned names absent', () => {
+    const common = { projectId: 'project_1', expectedRevision: 7, expectedCatalogRevision: 2 };
+    expect(parseNativeBridgePayload('creative-studio.create-export', { ...common, shape: 'editor_folder' })).toEqual({
+      ...common,
+      shape: 'editor_folder',
+    });
+    expect(parseNativeBridgePayload('creative-studio.create-export', { ...common, shape: 'script' })).toEqual({
+      ...common,
+      shape: 'script',
+    });
+    expect(
+      parseNativeBridgePayload('creative-studio.create-export', { ...common, shape: 'still', shotId: 'shot_1' })
+    ).toEqual({ ...common, shape: 'still', shotId: 'shot_1' });
+    for (const shape of ['stitched', 'video', 'project'] as const) {
+      expect(() => parseNativeBridgePayload('creative-studio.create-export', { ...common, shape })).toThrow(
+        INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+      );
+    }
+  });
+
+  it('accepts explicit clear intents for bed and Match To without accepting missing fields', () => {
+    expect(
+      parseNativeBridgePayload('creative-studio.set-bed', {
+        projectId: 'project_1',
+        expectedRevision: 7,
+        assetId: null,
+      })
+    ).toEqual({ projectId: 'project_1', expectedRevision: 7, assetId: null });
+    expect(
+      parseNativeBridgePayload('creative-studio.set-match-to', {
+        projectId: 'project_1',
+        expectedRevision: 7,
+        shotId: null,
+      })
+    ).toEqual({ projectId: 'project_1', expectedRevision: 7, shotId: null });
   });
 
   it.each(VOID_PROVIDER_KEYS)('rejects a supplied payload for void provider %s', (providerKey) => {

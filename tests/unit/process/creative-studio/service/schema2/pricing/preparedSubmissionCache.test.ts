@@ -23,8 +23,7 @@ import {
   StudioPreparedSubmissionCacheV2,
   type StudioPreparedSubmissionCacheAdmissionV2,
   type StudioPreparedSubmissionClaimV2,
-  type StudioPreparedSubmissionSessionV2,
-} from '@/process/services/creative-studio/service/schema2/preparedSubmissionCache';
+} from '@/process/services/creative-studio/service/schema2/pricing/preparedSubmissionCache';
 
 const PREPARED_AT = '2026-08-18T00:00:00.000Z';
 const PREPARED_AT_MS = Date.parse(PREPARED_AT);

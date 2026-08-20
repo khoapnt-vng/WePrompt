@@ -66,6 +66,9 @@ export type BoardViewProps = {
   dirtyBeatIds: readonly string[];
   pending: boolean;
   actions: BoardActions;
+  binFocusAnnouncement: string;
+  binFocusItemKey: string | null;
+  onBinFocusItemSettled: () => void;
   onOpenBeat: (beatId: string) => void;
 };
 
@@ -139,13 +142,16 @@ export const BoardView: React.FC<BoardViewProps> = ({
   dirtyBeatIds,
   pending,
   actions,
+  binFocusAnnouncement,
+  binFocusItemKey,
+  onBinFocusItemSettled,
   onOpenBeat,
 }) => {
   const { t } = useTranslation();
   const [cardSize, setCardSize] = useState<CardSize>('medium');
   const [announcement, setAnnouncement] = useState('');
   const [busyBeatId, setBusyBeatId] = useState<string | null>(null);
-  const [focusItemKey, setFocusItemKey] = useState<string | null>(null);
+  const [localFocusItemKey, setLocalFocusItemKey] = useState<string | null>(null);
   const [restoreFocusIntent, setRestoreFocusIntent] = useState<{ projectId: string; beatId: string } | null>(null);
   const [failedLiftFocusId, setFailedLiftFocusId] = useState<string | null>(null);
   const titleRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -174,7 +180,7 @@ export const BoardView: React.FC<BoardViewProps> = ({
       (entry) => entry.kind === 'beat' && entry.identity.beatId === restoreFocusIntent.beatId
     );
     if (binnedOwner !== undefined) {
-      setFocusItemKey(binItemFocusKey(binnedOwner.identity));
+      setLocalFocusItemKey(binItemFocusKey(binnedOwner.identity));
       setRestoreFocusIntent(null);
     }
   }, [projectId, projection.activeBeatIds, projection.bin.items, projection.projectId, restoreFocusIntent]);
@@ -232,7 +238,7 @@ export const BoardView: React.FC<BoardViewProps> = ({
     try {
       lifted = await actions.parkBeat(beatId);
       setAnnouncement(t(lifted ? `${KEY_ROOT}.liftSucceeded` : `${KEY_ROOT}.liftFailed`));
-      if (lifted) setFocusItemKey(binItemFocusKey({ kind: 'beat', beatId, reason: 'lifted' }));
+      if (lifted) setLocalFocusItemKey(binItemFocusKey({ kind: 'beat', beatId, reason: 'lifted' }));
     } catch {
       setAnnouncement(t(`${KEY_ROOT}.liftFailed`));
     } finally {
@@ -240,6 +246,8 @@ export const BoardView: React.FC<BoardViewProps> = ({
       if (!lifted) setFailedLiftFocusId(beatId);
     }
   };
+
+  const requestedBinFocusItemKey = binFocusItemKey ?? localFocusItemKey;
 
   return (
     <section className={styles.root} data-card-size={cardSize}>
@@ -425,8 +433,11 @@ export const BoardView: React.FC<BoardViewProps> = ({
 
       <Bin
         actions={actions}
-        focusItemKey={focusItemKey}
-        onFocusItemSettled={() => setFocusItemKey(null)}
+        focusItemKey={requestedBinFocusItemKey}
+        onFocusItemSettled={() => {
+          if (binFocusItemKey !== null) onBinFocusItemSettled();
+          else setLocalFocusItemKey(null);
+        }}
         onRestoreSuccess={(result) => {
           setRestoreFocusIntent({ projectId, beatId: result.beatId });
         }}
@@ -438,6 +449,11 @@ export const BoardView: React.FC<BoardViewProps> = ({
       <span aria-atomic='true' aria-live='polite' className={styles.srOnly}>
         {announcement}
       </span>
+      <span aria-atomic='true' aria-live='polite' className={styles.srOnly} data-studio-shot-lift-announcement>
+        {binFocusAnnouncement}
+      </span>
     </section>
   );
 };
+
+export { binItemFocusKey } from './Bin';

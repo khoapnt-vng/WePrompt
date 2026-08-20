@@ -1,0 +1,268 @@
+.root {
+  container-type: inline-size;
+  display: grid;
+  min-inline-size: 0;
+  gap: 18px;
+  color: var(--text-secondary);
+  font-family: var(--font-body);
+  font-size: 14px;
+}
+
+.header,
+.panelHeading {
+  display: flex;
+  min-inline-size: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.header h2,
+.panel h3,
+.exports h3,
+.drawerContent h3,
+.exportCard h4 {
+  margin: 0;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  overflow-wrap: anywhere;
+}
+
+.header h2 {
+  font-size: 22px;
+}
+
+.header p,
+.panelHeading p,
+.exportCard p,
+.drawerContent p,
+.empty,
+.status {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.headerActions,
+.reorderActions,
+.assetActions {
+  display: flex;
+  min-inline-size: 0;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.filmDuration {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--fw-bold);
+}
+
+.rail {
+  display: grid;
+  min-inline-size: 0;
+  grid-auto-columns: minmax(220px, 1fr);
+  grid-auto-flow: column;
+  gap: 12px;
+  margin: 0;
+  padding: 2px 2px 10px;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  list-style: none;
+}
+
+.beat,
+.panel,
+.exports,
+.exportCard {
+  min-inline-size: 0;
+  border: 1px solid var(--color-border-2);
+  border-radius: 12px;
+  background: var(--color-bg-2);
+}
+
+.beat {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 14px;
+}
+
+.ordinal,
+.beatFacts,
+.status {
+  color: var(--color-text-3);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.ordinal {
+  font-size: 14px;
+  font-weight: var(--fw-bold);
+}
+
+.beatTitle {
+  min-inline-size: 0;
+  block-size: auto;
+  margin: 0;
+  padding: 0;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: var(--fw-bold);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-align: start;
+  white-space: normal;
+}
+
+.beatTitle > span {
+  display: block;
+  inline-size: 100%;
+}
+
+.beatFacts {
+  display: flex;
+  gap: 6px 10px;
+  flex-wrap: wrap;
+  font-size: 14px;
+}
+
+.reorderActions {
+  padding-block-start: 8px;
+  border-block-start: 1px solid var(--color-border-1);
+}
+
+.sections,
+.exportGrid {
+  display: grid;
+  min-inline-size: 0;
+  gap: 14px;
+}
+
+.sections {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.panel,
+.exports {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  padding: 16px;
+}
+
+.panel label,
+.exportCard label {
+  display: grid;
+  min-inline-size: 0;
+  gap: 6px;
+}
+
+.panel :global(.arco-select),
+.exportCard :global(.arco-select) {
+  inline-size: 100%;
+  min-inline-size: 0;
+}
+
+.exportGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.exportCard {
+  display: grid;
+  min-inline-size: 0;
+  align-content: start;
+  gap: 12px;
+  padding: 14px;
+}
+
+.exportCard p {
+  min-block-size: 3em;
+}
+
+.drawerContent {
+  display: grid;
+  min-inline-size: 0;
+  gap: 20px;
+  font-size: 14px;
+}
+
+.drawerContent section {
+  display: grid;
+  min-inline-size: 0;
+  gap: 10px;
+}
+
+.assetList {
+  display: grid;
+  min-inline-size: 0;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.assetList > li {
+  display: flex;
+  min-inline-size: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--color-border-2);
+  border-radius: 10px;
+}
+
+.assetList > li > div {
+  min-inline-size: 0;
+}
+
+.assetList strong,
+.assetList p,
+.assetList span {
+  overflow-wrap: anywhere;
+}
+
+.srOnly {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@container (max-width: 599px) {
+  .sections,
+  .exportGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .exportCard p {
+    min-block-size: 0;
+  }
+}
+
+@container (max-width: 519px) {
+  .header,
+  .panelHeading,
+  .assetList > li {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .headerActions,
+  .assetActions {
+    inline-size: 100%;
+  }
+
+  .rail {
+    grid-auto-columns: minmax(min(85cqi, 260px), 1fr);
+  }
+}

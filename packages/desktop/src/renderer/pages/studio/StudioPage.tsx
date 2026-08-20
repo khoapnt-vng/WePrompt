@@ -17,6 +17,7 @@ import {
   type StudioBriefRuleDraft,
   type StudioCommandResult,
   type StudioRendererAuthoringOperationV2,
+  type StudioRendererExportCatalogV2,
   type StudioRendererProjectCommitResultV2,
   type StudioRendererProjectV2,
   type StudioRendererReferenceGenerationHandoffV2,
@@ -40,6 +41,9 @@ import {
   type BeatPanelReviewChoice,
   type BeatPanelReviewGraph,
   type BoardActions,
+  type CutActions,
+  type CutCopyResult,
+  type CutImportResult,
   type WorkspaceDraftValue,
   type WorkspaceMutationCallbacks,
 } from './components/Workspace';
@@ -185,17 +189,21 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
     workspaceStatus,
     chainStatus,
     routeCatalog,
+    exportCatalog,
     loadState,
     errorMessageKey,
     proposalErrorMessageKey,
     referenceErrorMessageKey,
     workspaceErrorMessageKey,
     routeErrorMessageKey,
+    exportErrorMessageKey,
     refetchProject,
     refetchProposals,
     refetchReferences,
     refetchWorkspace,
     refetchRoutes,
+    refetchExports,
+    installExportCatalog,
   } = useStudioProject(projectId);
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
   const [actionErrorMessageKey, setActionErrorMessageKey] = useState<string | null>(null);
@@ -203,6 +211,8 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
   const workspacePendingRef = useRef(false);
   const projectRef = useRef<StudioRendererProjectV2 | null>(project);
   projectRef.current = project;
+  const exportCatalogRef = useRef<StudioRendererExportCatalogV2 | null>(exportCatalog);
+  exportCatalogRef.current = exportCatalog;
   const activeView = routeView ?? resolveStudioEntryView(projectId);
 
   const projection = useMemo(
@@ -288,7 +298,8 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
   const runWorkspaceCommitAtRevision = useCallback(
     async (
       expectedRevision: number,
-      invoke: (current: StudioRendererProjectV2) => Promise<StudioCommandResult<StudioRendererProjectCommitResultV2>>
+      invoke: (current: StudioRendererProjectV2) => Promise<StudioCommandResult<StudioRendererProjectCommitResultV2>>,
+      onCommitted?: () => void
     ): Promise<number | null> => {
       const current = projectRef.current;
       if (current === null || current.revision !== expectedRevision || workspacePendingRef.current) return null;
@@ -301,6 +312,7 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
           setActionErrorMessageKey(result.error.messageKey);
           return null;
         }
+        onCommitted?.();
         const refreshed = await refetchProject();
         if (refreshed === null || refreshed.revision !== result.data.projectRevision) {
           setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
@@ -326,13 +338,33 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
 
   const runWorkspaceCommit = useCallback(
     async (
-      invoke: (current: StudioRendererProjectV2) => Promise<StudioCommandResult<StudioRendererProjectCommitResultV2>>
+      invoke: (current: StudioRendererProjectV2) => Promise<StudioCommandResult<StudioRendererProjectCommitResultV2>>,
+      onCommitted?: () => void
     ): Promise<boolean> => {
       const expectedRevision = projectRef.current?.revision;
-      return expectedRevision !== undefined && (await runWorkspaceCommitAtRevision(expectedRevision, invoke)) !== null;
+      return (
+        expectedRevision !== undefined &&
+        (await runWorkspaceCommitAtRevision(expectedRevision, invoke, onCommitted)) !== null
+      );
     },
     [runWorkspaceCommitAtRevision]
   );
+
+  const runWorkspaceExclusive = useCallback(async <Result,>(action: () => Promise<Result>): Promise<Result | null> => {
+    if (workspacePendingRef.current) return null;
+    workspacePendingRef.current = true;
+    setWorkspacePending(true);
+    setActionErrorMessageKey(null);
+    try {
+      return await action();
+    } catch {
+      setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+      return null;
+    } finally {
+      workspacePendingRef.current = false;
+      setWorkspacePending(false);
+    }
+  }, []);
 
   const mutations = useMemo<WorkspaceMutationCallbacks>(
     () => ({
@@ -557,13 +589,15 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
             assetId,
           })
         ),
-      parkShot: async (shotId) =>
-        runWorkspaceCommit((current) =>
-          ipcBridge.creativeStudio.parkShot.invoke({
-            projectId: current.id,
-            expectedRevision: current.revision,
-            shotId,
-          })
+      parkShot: async (shotId, onCommitted) =>
+        runWorkspaceCommit(
+          (current) =>
+            ipcBridge.creativeStudio.parkShot.invoke({
+              projectId: current.id,
+              expectedRevision: current.revision,
+              shotId,
+            }),
+          onCommitted
         ),
       parkBeat: async (beatId) =>
         runWorkspaceCommit((current) =>
@@ -705,6 +739,152 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
         ),
     }),
     [beatPanelActions, runWorkspaceCommit]
+  );
+
+  const cutActions = useMemo<CutActions>(
+    () => ({
+      reorderBeats: boardActions.reorderBeats,
+      importBedAudio: async (): Promise<CutImportResult> =>
+        (await runWorkspaceExclusive(async () => {
+          const current = projectRef.current;
+          if (current === null) return 'failed';
+          const result = await ipcBridge.creativeStudio.importBedAudio.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+          });
+          if (result.ok === false) {
+            setActionErrorMessageKey(result.error.messageKey);
+            return 'failed';
+          }
+          if (result.data.status === 'cancelled') return 'cancelled';
+          const [refreshed] = await Promise.all([refetchProject(), refetchWorkspace()]);
+          if (refreshed === null || refreshed.revision !== result.data.projectRevision) {
+            setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+            return 'failed';
+          }
+          projectRef.current = refreshed;
+          return 'imported';
+        })) ?? 'failed',
+      setBed: async (assetId) =>
+        runWorkspaceCommit((current) =>
+          ipcBridge.creativeStudio.setBed.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            assetId,
+          })
+        ),
+      detachBedAudio: async (assetId) =>
+        (await runWorkspaceExclusive(async () => {
+          const current = projectRef.current;
+          if (current === null || current.bedAssetId === assetId) return false;
+          const result = await ipcBridge.creativeStudio.detachBedAudio.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            assetId,
+          });
+          if (result.ok === false) {
+            setActionErrorMessageKey(result.error.messageKey);
+            return false;
+          }
+          const [refreshed] = await Promise.all([refetchProject(), refetchWorkspace()]);
+          if (refreshed === null || refreshed.revision !== result.data.projectRevision) {
+            setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+            return false;
+          }
+          projectRef.current = refreshed;
+          return true;
+        })) ?? false,
+      setMatchTo: async (shotId) =>
+        runWorkspaceCommit((current) =>
+          ipcBridge.creativeStudio.setMatchTo.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            shotId,
+          })
+        ),
+      createExport: async (input) =>
+        (await runWorkspaceExclusive(async () => {
+          const current = projectRef.current;
+          const catalog = exportCatalogRef.current;
+          if (current === null || catalog === null) return false;
+          const request =
+            input.shape === 'still'
+              ? {
+                  projectId: current.id,
+                  expectedRevision: current.revision,
+                  expectedCatalogRevision: catalog.revision,
+                  shape: input.shape,
+                  shotId: input.shotId,
+                }
+              : {
+                  projectId: current.id,
+                  expectedRevision: current.revision,
+                  expectedCatalogRevision: catalog.revision,
+                  shape: input.shape,
+                };
+          const result = await ipcBridge.creativeStudio.createExport.invoke(request);
+          if (result.ok === false) {
+            setActionErrorMessageKey(result.error.messageKey);
+            return false;
+          }
+          if (installExportCatalog(result.data)) return true;
+          return refetchExports();
+        })) ?? false,
+      refreshExports: async () => (await runWorkspaceExclusive(refetchExports)) ?? false,
+      copyExport: async (artifactId): Promise<CutCopyResult> =>
+        (await runWorkspaceExclusive(async () => {
+          const current = projectRef.current;
+          const catalog = exportCatalogRef.current;
+          if (
+            current === null ||
+            catalog === null ||
+            catalog.artifacts.filter((artifact) => artifact.id === artifactId).length !== 1
+          ) {
+            return 'failed';
+          }
+          const result = await ipcBridge.creativeStudio.copyExport.invoke({
+            projectId: current.id,
+            expectedCatalogRevision: catalog.revision,
+            artifactId,
+          });
+          if (result.ok === false) {
+            setActionErrorMessageKey(result.error.messageKey);
+            return 'failed';
+          }
+          return result.data.status;
+        })) ?? 'failed',
+      revealExport: async (artifactId) =>
+        (await runWorkspaceExclusive(async () => {
+          const current = projectRef.current;
+          const catalog = exportCatalogRef.current;
+          if (
+            current === null ||
+            catalog === null ||
+            catalog.artifacts.filter((artifact) => artifact.id === artifactId).length !== 1
+          ) {
+            return false;
+          }
+          const result = await ipcBridge.creativeStudio.revealExport.invoke({
+            projectId: current.id,
+            expectedCatalogRevision: catalog.revision,
+            artifactId,
+          });
+          if (result.ok === false) {
+            setActionErrorMessageKey(result.error.messageKey);
+            return false;
+          }
+          return result.data.status === 'revealed';
+        })) ?? false,
+    }),
+    [
+      boardActions.reorderBeats,
+      installExportCatalog,
+      refetchExports,
+      refetchProject,
+      refetchWorkspace,
+      runWorkspaceCommit,
+      runWorkspaceExclusive,
+    ]
   );
 
   const saveAllDrafts = useCallback(async (): Promise<boolean> => {
@@ -1148,13 +1328,16 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
           <WorkspaceControls
             activeView={activeView}
             boardActions={boardActions}
+            cutActions={cutActions}
             project={project}
             projection={projection}
             routeCatalog={routeCatalog}
+            exportCatalog={exportCatalog}
             drafts={drafts}
             pending={workspacePending}
             gateLocked={spendGateLocked}
             errorMessageKey={actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey}
+            exportErrorMessageKey={exportErrorMessageKey}
             mutations={mutations}
             beatPanelActions={beatPanelActions}
             beatPanelBriefReferenceOptions={beatPanelBriefReferenceOptions}

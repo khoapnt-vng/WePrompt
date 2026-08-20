@@ -5,14 +5,15 @@
  */
 
 import { Alert, Button, Card, Input, InputNumber, Select } from '@arco-design/web-react';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { StudioBriefRuleDraft } from '@/common/types/project/creativeStudioTypes';
 import { majorUnitsToMinorUnits } from '../spendGate';
 import type { WorkspaceDraftValue } from '../useWorkspaceDrafts';
 import { BeatPanel } from '../BeatPanel';
-import { BoardView } from './Board';
+import { BoardView, binItemFocusKey } from './Board';
+import { CutView } from './Cut';
 import { TableView } from './Table';
 import type { WorkspaceControlsProps } from './viewTypes';
 import styles from './WorkspaceControls.module.css';
@@ -64,12 +65,15 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
   project,
   projection,
   routeCatalog,
+  exportCatalog,
   drafts,
   pending,
   gateLocked,
   errorMessageKey,
+  exportErrorMessageKey,
   mutations,
   boardActions,
+  cutActions,
   beatPanelActions,
   beatPanelBriefReferenceOptions,
   beatPanelReviewGraphs,
@@ -78,7 +82,11 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
   const { t } = useTranslation();
   const [localErrorKey, setLocalErrorKey] = useState<string | null>(null);
   const [openPanel, setOpenPanel] = useState<{ projectId: string; beatId: string } | null>(null);
-  const openBeatId = openPanel?.projectId === project.id ? openPanel.beatId : null;
+  const [binFocusIntent, setBinFocusIntent] = useState<{ projectId: string; itemKey: string } | null>(null);
+  const [shotLiftAnnouncement, setShotLiftAnnouncement] = useState('');
+  const currentProjectId = useRef(project.id);
+  currentProjectId.current = project.id;
+  const openBeatId = activeView !== 'cut' && openPanel?.projectId === project.id ? openPanel.beatId : null;
   const rulesValue = asString(drafts.value('brief.rules'));
   const openBeatIndex = openBeatId === null ? -1 : projection.activeBeats.findIndex((beat) => beat.id === openBeatId);
   const openBeat = openBeatIndex < 0 ? null : (projection.activeBeats[openBeatIndex] ?? null);
@@ -103,18 +111,41 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
   useEffect(() => {
     if (
       openPanel !== null &&
-      (openPanel.projectId !== project.id || !projection.activeBeatIds.includes(openPanel.beatId))
+      (activeView === 'cut' ||
+        openPanel.projectId !== project.id ||
+        !projection.activeBeatIds.includes(openPanel.beatId))
     ) {
       setOpenPanel(null);
     }
-  }, [openPanel, project.id, projection.activeBeatIds]);
+  }, [activeView, openPanel, project.id, projection.activeBeatIds]);
+
+  useEffect(() => {
+    setBinFocusIntent(null);
+    setShotLiftAnnouncement('');
+  }, [project.id]);
 
   const selectAndOpenBeat = (beatId: string): void => {
     drafts.selectBeat(beatId);
+    setShotLiftAnnouncement('');
     setOpenPanel({ projectId: project.id, beatId });
+  };
+  const completeShotPark = (shotId: string, beatId: string, expectedProjectId: string): void => {
+    if (currentProjectId.current !== expectedProjectId) return;
+    setShotLiftAnnouncement(t('conversation.creativeStudio.workspace.beatPanel.lift.shotSucceeded'));
+    setOpenPanel(null);
+    setBinFocusIntent({
+      projectId: expectedProjectId,
+      itemKey: binItemFocusKey({ kind: 'shot', beatId, shotId, reason: 'lifted' }),
+    });
   };
   const panelActions = {
     ...beatPanelActions,
+    parkShot: async (shotId: string): Promise<boolean> => {
+      const expectedProjectId = project.id;
+      const beatId = openBeat?.id ?? null;
+      if (beatId === null) return false;
+      return beatPanelActions.parkShot(shotId, () => completeShotPark(shotId, beatId, expectedProjectId));
+    },
     requestReviewedRederive: (shotId: string): void => {
       setOpenPanel(null);
       beatPanelActions.requestReviewedRederive(shotId);
@@ -221,12 +252,25 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
       {activeView === 'board' ? (
         <BoardView
           actions={boardActions}
+          binFocusAnnouncement={shotLiftAnnouncement}
+          binFocusItemKey={binFocusIntent?.projectId === project.id ? binFocusIntent.itemKey : null}
           dirtyBeatIds={dirtyBeatIds}
+          onBinFocusItemSettled={() => setBinFocusIntent(null)}
           onOpenBeat={selectAndOpenBeat}
           pending={pending}
           projectId={project.id}
           projection={projection}
           selectedBeatId={drafts.selection.selectedBeatId}
+        />
+      ) : null}
+      {activeView === 'cut' ? (
+        <CutView
+          actions={cutActions}
+          exportCatalog={exportCatalog}
+          exportErrorMessageKey={exportErrorMessageKey}
+          pending={pending}
+          projectId={project.id}
+          projection={projection}
         />
       ) : null}
       {openBeat === null ? null : (
@@ -240,6 +284,9 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
           errorMessageKey={errorMessageKey}
           gateLocked={gateLocked}
           onClose={() => setOpenPanel(null)}
+          onParkShotSuccess={(shotId) => {
+            completeShotPark(shotId, openBeat.id, project.id);
+          }}
           onSelectBeat={selectAndOpenBeat}
           pending={pending}
           projectId={project.id}
@@ -247,6 +294,11 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
           reviewGraphs={beatPanelReviewGraphs}
           reviewBlockedMessageKey={beatPanelReviewBlockedMessageKey}
         />
+      )}
+      {activeView === 'board' ? null : (
+        <span aria-atomic='true' aria-live='polite' className={styles.srOnly} data-studio-shot-lift-announcement>
+          {shotLiftAnnouncement}
+        </span>
       )}
       {localErrorKey === null ? null : <Alert type='warning' content={t(localErrorKey)} />}
       {drafts.staleRevision ? (

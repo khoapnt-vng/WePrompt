@@ -5,11 +5,16 @@
  */
 
 import { ipcBridge } from '@/common';
+import {
+  STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT,
+  STUDIO_MAX_EXPORTS_PER_SHAPE,
+} from '@/common/types/project/creativeStudioTypes';
 import type {
   StudioProposalV2,
   StudioProjectLoadResultV2,
   StudioReferenceRequestV2,
   StudioRendererChainStatusV2,
+  StudioRendererExportCatalogV2,
   StudioRendererProjectV2,
   StudioRendererReferenceGenerationHandoffV2,
   StudioRendererWorkspaceStatusV2,
@@ -27,17 +32,21 @@ export type UseStudioProjectResult = {
   workspaceStatus: StudioRendererWorkspaceStatusV2 | null;
   chainStatus: StudioRendererChainStatusV2 | null;
   routeCatalog: StudioRouteCatalogV2 | null;
+  exportCatalog: StudioRendererExportCatalogV2 | null;
   loadState: StudioProjectLoadState;
   errorMessageKey: string | null;
   proposalErrorMessageKey: string | null;
   referenceErrorMessageKey: string | null;
   workspaceErrorMessageKey: string | null;
   routeErrorMessageKey: string | null;
+  exportErrorMessageKey: string | null;
   refetchProject: () => Promise<StudioRendererProjectV2 | null>;
   refetchProposals: () => Promise<void>;
   refetchReferences: () => Promise<void>;
   refetchWorkspace: () => Promise<void>;
   refetchRoutes: () => Promise<boolean>;
+  refetchExports: () => Promise<boolean>;
+  installExportCatalog: (catalog: StudioRendererExportCatalogV2) => boolean;
   refetchAll: () => Promise<void>;
 };
 
@@ -62,6 +71,86 @@ const uniqueHandoffs = (
 const routeRelevantSignature = (project: StudioRendererProjectV2): string =>
   JSON.stringify([project.imageRouteId, project.videoRouteId, project.aspectRatio, project.resolution]);
 
+const SAFE_STUDIO_ID = /^[A-Za-z0-9_-]{1,256}$/;
+
+const hasExactKeys = (value: object, expected: readonly string[]): boolean => {
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return false;
+  const actual = Reflect.ownKeys(value);
+  if (actual.length !== expected.length || actual.some((key) => typeof key !== 'string' || !expected.includes(key))) {
+    return false;
+  }
+  return actual.every((key) => {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor !== undefined && descriptor.enumerable && 'value' in descriptor;
+  });
+};
+
+const sanitizeExportCatalog = (
+  value: unknown,
+  currentProjectRevision: number
+): StudioRendererExportCatalogV2 | null => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const catalog = value as Record<string, unknown>;
+  if (!hasExactKeys(catalog, ['artifacts', 'revision']) || !Number.isSafeInteger(catalog.revision)) return null;
+  if (
+    (catalog.revision as number) < 1 ||
+    !Array.isArray(catalog.artifacts) ||
+    Reflect.ownKeys(catalog.artifacts).length !== catalog.artifacts.length + 1 ||
+    catalog.artifacts.length > STUDIO_MAX_EXPORTS_PER_SHAPE * 3
+  ) {
+    return null;
+  }
+
+  const ids = new Set<string>();
+  const shapeCounts = new Map<'editor_folder' | 'still' | 'script', number>();
+  const artifacts: StudioRendererExportCatalogV2['artifacts'] = [];
+  let previous: { createdAt: string; id: string } | null = null;
+  for (let index = 0; index < catalog.artifacts.length; index += 1) {
+    if (!Object.hasOwn(catalog.artifacts, index)) return null;
+    const candidate = catalog.artifacts[index];
+    if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) return null;
+    const artifact = candidate as Record<string, unknown>;
+    if (
+      !hasExactKeys(artifact, ['byteSize', 'createdAt', 'fileCount', 'id', 'shape', 'sourceRevision']) ||
+      typeof artifact.id !== 'string' ||
+      !SAFE_STUDIO_ID.test(artifact.id) ||
+      ids.has(artifact.id) ||
+      !Number.isSafeInteger(artifact.sourceRevision) ||
+      (artifact.sourceRevision as number) < 1 ||
+      (artifact.sourceRevision as number) > currentProjectRevision ||
+      (artifact.shape !== 'editor_folder' && artifact.shape !== 'still' && artifact.shape !== 'script') ||
+      !Number.isSafeInteger(artifact.byteSize) ||
+      (artifact.byteSize as number) < 0 ||
+      !Number.isSafeInteger(artifact.fileCount) ||
+      (artifact.fileCount as number) < 1 ||
+      (artifact.fileCount as number) > STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT ||
+      typeof artifact.createdAt !== 'string' ||
+      !Number.isFinite(Date.parse(artifact.createdAt)) ||
+      new Date(artifact.createdAt).toISOString() !== artifact.createdAt ||
+      (previous !== null &&
+        (previous.createdAt > artifact.createdAt ||
+          (previous.createdAt === artifact.createdAt && previous.id >= artifact.id)))
+    ) {
+      return null;
+    }
+    ids.add(artifact.id);
+    const shapeCount = (shapeCounts.get(artifact.shape) ?? 0) + 1;
+    if (shapeCount > STUDIO_MAX_EXPORTS_PER_SHAPE) return null;
+    shapeCounts.set(artifact.shape, shapeCount);
+    previous = { createdAt: artifact.createdAt, id: artifact.id };
+    artifacts.push({
+      id: artifact.id,
+      sourceRevision: artifact.sourceRevision as number,
+      shape: artifact.shape,
+      byteSize: artifact.byteSize as number,
+      fileCount: artifact.fileCount as number,
+      createdAt: artifact.createdAt,
+    });
+  }
+  return { revision: catalog.revision as number, artifacts };
+};
+
 /** Owns the schema-2 renderer snapshots and subscribes before every initial list. */
 export const useStudioProject = (projectId: string | undefined): UseStudioProjectResult => {
   const [project, setProject] = useState<StudioRendererProjectV2 | null>(null);
@@ -73,12 +162,14 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
   const [workspaceStatus, setWorkspaceStatus] = useState<StudioRendererWorkspaceStatusV2 | null>(null);
   const [chainStatus, setChainStatus] = useState<StudioRendererChainStatusV2 | null>(null);
   const [routeCatalog, setRouteCatalog] = useState<StudioRouteCatalogV2 | null>(null);
+  const [exportCatalog, setExportCatalog] = useState<StudioRendererExportCatalogV2 | null>(null);
   const [loadState, setLoadState] = useState<StudioProjectLoadState>(projectId ? 'loading' : 'idle');
   const [errorMessageKey, setErrorMessageKey] = useState<string | null>(null);
   const [proposalErrorMessageKey, setProposalErrorMessageKey] = useState<string | null>(null);
   const [referenceErrorMessageKey, setReferenceErrorMessageKey] = useState<string | null>(null);
   const [workspaceErrorMessageKey, setWorkspaceErrorMessageKey] = useState<string | null>(null);
   const [routeErrorMessageKey, setRouteErrorMessageKey] = useState<string | null>(null);
+  const [exportErrorMessageKey, setExportErrorMessageKey] = useState<string | null>(null);
   const generationRef = useRef(0);
   const projectRequestRef = useRef(0);
   const proposalRequestRef = useRef(0);
@@ -88,7 +179,9 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
   const workspaceRequestRef = useRef(0);
   const chainRequestRef = useRef(0);
   const routeRequestRef = useRef(0);
+  const exportRequestRef = useRef(0);
   const projectRef = useRef<StudioRendererProjectV2 | null>(null);
+  const exportCatalogRef = useRef<StudioRendererExportCatalogV2 | null>(null);
 
   const loadProject = useCallback(
     async (
@@ -101,9 +194,13 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
         workspaceRequestRef.current += 1;
         chainRequestRef.current += 1;
         routeRequestRef.current += 1;
+        exportRequestRef.current += 1;
         setWorkspaceStatus(null);
         setChainStatus(null);
         setRouteCatalog(null);
+        exportCatalogRef.current = null;
+        setExportCatalog(null);
+        setExportErrorMessageKey(null);
       };
       if (initial) {
         projectRef.current = null;
@@ -301,6 +398,58 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
     }
   }, []);
 
+  const applyExportCatalog = useCallback((value: unknown): boolean => {
+    const currentProject = projectRef.current;
+    const sanitized = currentProject === null ? null : sanitizeExportCatalog(value, currentProject.revision);
+    if (sanitized === null) {
+      exportCatalogRef.current = null;
+      setExportCatalog(null);
+      setExportErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+      return false;
+    }
+    const current = exportCatalogRef.current;
+    if (current !== null && sanitized.revision < current.revision) return false;
+    if (
+      current !== null &&
+      sanitized.revision === current.revision &&
+      JSON.stringify(sanitized) !== JSON.stringify(current)
+    ) {
+      exportCatalogRef.current = null;
+      setExportCatalog(null);
+      setExportErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+      return false;
+    }
+    exportCatalogRef.current = sanitized;
+    setExportCatalog(sanitized);
+    setExportErrorMessageKey(null);
+    return true;
+  }, []);
+
+  const loadExports = useCallback(
+    async (requestedProjectId: string, generation: number): Promise<boolean> => {
+      const request = ++exportRequestRef.current;
+      try {
+        const result = await ipcBridge.creativeStudio.listExports.invoke({ projectId: requestedProjectId });
+        if (generationRef.current !== generation || exportRequestRef.current !== request) return false;
+        if (result.ok === false) {
+          exportCatalogRef.current = null;
+          setExportCatalog(null);
+          setExportErrorMessageKey(result.error.messageKey);
+          return false;
+        }
+        return applyExportCatalog(result.data);
+      } catch {
+        if (generationRef.current === generation && exportRequestRef.current === request) {
+          exportCatalogRef.current = null;
+          setExportCatalog(null);
+          setExportErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+        }
+        return false;
+      }
+    },
+    [applyExportCatalog]
+  );
+
   useEffect(() => {
     const generation = generationRef.current + 1;
     generationRef.current = generation;
@@ -314,12 +463,15 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
       setWorkspaceStatus(null);
       setChainStatus(null);
       setRouteCatalog(null);
+      exportCatalogRef.current = null;
+      setExportCatalog(null);
       setLoadState('idle');
       setErrorMessageKey(null);
       setProposalErrorMessageKey(null);
       setReferenceErrorMessageKey(null);
       setWorkspaceErrorMessageKey(null);
       setRouteErrorMessageKey(null);
+      setExportErrorMessageKey(null);
       return;
     }
 
@@ -331,8 +483,11 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
     setWorkspaceStatus(null);
     setChainStatus(null);
     setRouteCatalog(null);
+    exportCatalogRef.current = null;
+    setExportCatalog(null);
     setWorkspaceErrorMessageKey(null);
     setRouteErrorMessageKey(null);
+    setExportErrorMessageKey(null);
 
     const unsubscribeProject = ipcBridge.creativeStudio.projectUpdated.on(({ projectId: updatedProjectId }) => {
       if (updatedProjectId === projectId) {
@@ -348,7 +503,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
 
     void (async () => {
       if ((await loadProject(projectId, generation, true)) !== null) {
-        await loadRoutes(projectId, generation);
+        await Promise.all([loadRoutes(projectId, generation), loadExports(projectId, generation)]);
       }
     })();
     void loadProposals(projectId, generation);
@@ -361,7 +516,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
       unsubscribeProposal();
       unsubscribeReference();
     };
-  }, [loadProject, loadProposals, loadReferences, loadRoutes, loadWorkspace, projectId]);
+  }, [loadExports, loadProject, loadProposals, loadReferences, loadRoutes, loadWorkspace, projectId]);
 
   const refetchProject = useCallback(async (): Promise<StudioRendererProjectV2 | null> => {
     if (!projectId) return null;
@@ -385,6 +540,20 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
     return loadRoutes(projectId, generationRef.current);
   }, [loadRoutes, projectId]);
 
+  const refetchExports = useCallback(async (): Promise<boolean> => {
+    if (!projectId) return false;
+    return loadExports(projectId, generationRef.current);
+  }, [loadExports, projectId]);
+
+  const installExportCatalog = useCallback(
+    (catalog: StudioRendererExportCatalogV2): boolean => {
+      if (!projectId || projectRef.current?.id !== projectId) return false;
+      exportRequestRef.current += 1;
+      return applyExportCatalog(catalog);
+    },
+    [applyExportCatalog, projectId]
+  );
+
   const refetchAll = useCallback(async (): Promise<void> => {
     if (!projectId) return;
     await Promise.all([
@@ -392,8 +561,9 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
       loadProposals(projectId, generationRef.current),
       loadReferences(projectId, generationRef.current),
       loadWorkspace(projectId, generationRef.current),
+      loadExports(projectId, generationRef.current),
     ]);
-  }, [loadProject, loadProposals, loadReferences, loadWorkspace, projectId]);
+  }, [loadExports, loadProject, loadProposals, loadReferences, loadWorkspace, projectId]);
 
   return {
     project,
@@ -403,17 +573,21 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
     workspaceStatus,
     chainStatus,
     routeCatalog,
+    exportCatalog,
     loadState,
     errorMessageKey,
     proposalErrorMessageKey,
     referenceErrorMessageKey,
     workspaceErrorMessageKey,
     routeErrorMessageKey,
+    exportErrorMessageKey,
     refetchProject,
     refetchProposals,
     refetchReferences,
     refetchWorkspace,
     refetchRoutes,
+    refetchExports,
+    installExportCatalog,
     refetchAll,
   };
 };

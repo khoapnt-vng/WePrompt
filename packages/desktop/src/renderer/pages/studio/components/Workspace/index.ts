@@ -50,16 +50,27 @@ export type {
   WorkspaceBinItemProjection,
   WorkspaceBeatDisplayState,
   WorkspaceBeatProjection,
+  WorkspaceCutAudioImportProjection,
+  WorkspaceCutBeatDurationKind,
+  WorkspaceCutBeatProjection,
+  WorkspaceCutBedProjection,
+  WorkspaceCutMatchCandidateProjection,
+  WorkspaceCutProjection,
   WorkspaceProjection,
   WorkspaceShotProjection,
   WorkspaceTakeProjection,
 } from './workspaceProjection';
 export { WorkspaceShell } from './WorkspaceShell';
 export type { WorkspaceShellProps } from './WorkspaceShell';
-export { BoardView, TableView, WorkspaceControls } from './Views';
+export { BoardView, CutView, TableView, WorkspaceControls } from './Views';
 export type {
   BoardActions,
   BoardViewProps,
+  CutActions,
+  CutCopyResult,
+  CutCreateExportInput,
+  CutImportResult,
+  CutViewProps,
   TableViewProps,
   WorkspaceControlsProps,
   WorkspaceMutationCallbacks,

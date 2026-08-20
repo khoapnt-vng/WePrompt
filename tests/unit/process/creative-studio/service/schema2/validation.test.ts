@@ -648,6 +648,21 @@ describe('validateStudioProjectV2 media, trim, and frame lineage', () => {
     expect(validateStudioProjectV2(project)).toBe(false);
   });
 
+  it.each([
+    ['a non-WAV MIME type', (asset: StudioAssetV2) => (asset.mimeType = 'audio/mpeg')],
+    ['a noncanonical managed name', (asset: StudioAssetV2) => (asset.managedAsset.fileName = 'foreign.wav')],
+    ['zero managed bytes', (asset: StudioAssetV2) => (asset.byteSize = 0)],
+    ['visual dimensions', (asset: StudioAssetV2) => (asset.width = 1)],
+    ['visual source-look metadata', (asset: StudioAssetV2) => (asset.sourceLook = 'not audio metadata')],
+  ])('rejects selected bed audio with %s', (_label, mutate) => {
+    const project = makeProject();
+    const bed = makeAudioAsset('bed_1');
+    mutate(bed);
+    project.assets.bed_1 = bed;
+    project.bedAssetId = 'bed_1';
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
   it('accepts an unclassified human seed import and rejects shot-owned audio', () => {
     const project = makeProject();
     addHumanSeed(project);

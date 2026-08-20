@@ -19,7 +19,11 @@ import type {
   StudioQuotedGeneration,
   StudioSpendAuthorization,
 } from '@/common/types/project/creativeStudioTypes';
-import { createCreativeStudioStore, type CreativeStudioStore } from '@process/services/creative-studio/store';
+import {
+  createCreativeStudioStore,
+  type CreativeStudioStore,
+  type StudioProjectAuthoritySnapshotV2,
+} from '@process/services/creative-studio/store';
 import {
   calculateStudioQuoteTotals,
   createStudioFrameExtractionId,
@@ -27,7 +31,12 @@ import {
 } from '@process/services/creative-studio/service/schema2/generation';
 import { createStudioSpendReceiptV2 } from '@process/services/creative-studio/service/schema2/pricing';
 import { StudioConditioningFrameError } from '@process/services/creative-studio/adapters/conditioningFrame';
-import { createStudioMediaStore, getAvailableStudioDiskBytes } from '@process/services/creative-studio/mediaStore';
+import {
+  createStudioMediaStore,
+  CreativeStudioMediaError,
+  getAvailableStudioDiskBytes,
+  openVerifiedReadStream,
+} from '@process/services/creative-studio/mediaStore';
 
 const { createHashSpy } = vi.hoisted(() => ({ createHashSpy: vi.fn() }));
 
@@ -44,6 +53,54 @@ vi.mock('node:crypto', async (importOriginal) => {
 
 const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489', 'hex');
 const mp4 = Buffer.from('000000186674797069736f6d00000000', 'hex');
+const decodedMp4 = Buffer.from(
+  'AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAPBbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAJxAAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAArV0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAJxAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAABAAAAAQAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAACcQAACAAAABAAAAAAItbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAACgABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAAB2G1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAZhzdGJsAAAAwHN0c2QAAAAAAAAAAQAAALBhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAABAAEABIAAAASAAAAAAAAAABFExhdmM2My4xLjEwMSBsaWJ4MjY0AAAAAAAAAAAAAAAAGP//AAAANmF2Y0MBZAAK/+EAGWdkAAqscgRewEQAAAMABAAAAwAIPEiWEYABAAZo6EOPLIv9+PgAAAAAEHBhc3AAAAABAAAAAQAAABRidHJ0AAAAAAAAApYAAAAAAAAAGHN0dHMAAAAAAAAAAQAAAAoAAEAAAAAAFHN0c3MAAAAAAAAAAQAAAAEAAAA4Y3R0cwAAAAAAAAAFAAAAAQAAgAAAAAABAAKAAAAAAAEAAQAAAAAAAwAAAAAAAAAEAABAAAAAABxzdHNjAAAAAAAAAAEAAAABAAAACgAAAAEAAAA8c3RzegAAAAAAAAAAAAAACgAAAscAAAANAAAADQAAAA0AAAANAAAADQAAAA0AAAANAAAADQAAAA0AAAAUc3RjbwAAAAAAAAABAAAD8QAAAJh1ZHRhAAAAkG1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAG1kaXJhcHBsAAAAAAAAAAAAAAAAY2lsc3QAAAAkqXRvbwAAABxkYXRhAAAAAQAAAABMYXZmNjMuMS4xMDEAAAA3qWNtdAAAAC9kYXRhAAAAAQAAAABTVFVESU9fUkFXX09VVFBVVF9CT0RZX1NFTlRJTkVMAAAACGZyZWUAAANEbWRhdAAAAq8GBf//q9xF6b3m2Ui3lizYINkj7u94MjY0IC0gY29yZSAxNjUgcjMyMjIgYjM1NjA1YSAtIEguMjY0L01QRUctNCBBVkMgY29kZWMgLSBDb3B5bGVmdCAyMDAzLTIwMjUgLSBodHRwOi8vd3d3LnZpZGVvbGFuLm9yZy94MjY0Lmh0bWwgLSBvcHRpb25zOiBjYWJhYz0xIHJlZj0xNiBkZWJsb2NrPTE6MDowIGFuYWx5c2U9MHgzOjB4MTMzIG1lPXVtaCBzdWJtZT0xMCBwc3k9MSBwc3lfcmQ9MS4wMDowLjAwIG1peGVkX3JlZj0xIG1lX3JhbmdlPTI0IGNocm9tYV9tZT0xIHRyZWxsaXM9MiA4eDhkY3Q9MSBjcW09MCBkZWFkem9uZT0yMSwxMSBmYXN0X3Bza2lwPTEgY2hyb21hX3FwX29mZnNldD0tMiB0aHJlYWRzPTEgbG9va2FoZWFkX3RocmVhZHM9MSBzbGljZWRfdGhyZWFkcz0wIG5yPTAgZGVjaW1hdGU9MSBpbnRlcmxhY2VkPTAgYmx1cmF5X2NvbXBhdD0wIGNvbnN0cmFpbmVkX2ludHJhPTAgYmZyYW1lcz04IGJfcHlyYW1pZD0yIGJfYWRhcHQ9MiBiX2JpYXM9MCBkaXJlY3Q9MyB3ZWlnaHRiPTEgb3Blbl9nb3A9MCB3ZWlnaHRwPTIga2V5aW50PTI1MCBrZXlpbnRfbWluPTEgc2NlbmVjdXQ9NDAgaW50cmFfcmVmcmVzaD0wIHJjX2xvb2thaGVhZD02MCByYz1jcmYgbWJ0cmVlPTEgY3JmPTIzLjAgcWNvbXA9MC42MCBxcG1pbj0wIHFwbWF4PTY5IHFwc3RlcD00IGlwX3JhdGlvPTEuNDAgYXE9MToxLjAwAIAAAAAQZYiBAAL//vfUt8yy7gcjgQAAAAlBmgktiCv//vAAAAAJQZ4QhxBf/4aBAAAACQGeGCaIK/+SgAAAAAkBnhhGiCv/koEAAAAJAZ4YZogr/5KBAAAACQGeGK1IK/+SgQAAAAkBnhjNSCv/koEAAAAJAZ4Y7Ugr/5KAAAAACQGeGQ1IK/+SgA==',
+  'base64'
+);
+const createWav = (sample = 0x80): Buffer => {
+  const sampleRate = 8_000;
+  const samples = Buffer.alloc(sampleRate, sample);
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + samples.length, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate, 28);
+  header.writeUInt16LE(1, 32);
+  header.writeUInt16LE(8, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(samples.length, 40);
+  return Buffer.concat([header, samples]);
+};
+const createCorruptAdpcmWav = (): Buffer => {
+  const data = Buffer.alloc(256);
+  data[2] = 0xff;
+  const header = Buffer.alloc(60);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(308, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(20, 16);
+  header.writeUInt16LE(0x11, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(8_000, 24);
+  header.writeUInt32LE(Math.floor((8_000 * 256) / 505), 28);
+  header.writeUInt16LE(256, 32);
+  header.writeUInt16LE(4, 34);
+  header.writeUInt16LE(2, 36);
+  header.writeUInt16LE(505, 38);
+  header.write('fact', 40);
+  header.writeUInt32LE(4, 44);
+  header.writeUInt32LE(505, 48);
+  header.write('data', 52);
+  header.writeUInt32LE(data.length, 56);
+  return Buffer.concat([header, data]);
+};
+const wav = createWav();
 const created: string[] = [];
 
 const makeStoreV2 = async (
@@ -280,11 +337,151 @@ const idSequence = (...ids: string[]): (() => string) => {
   return () => ids[index++] ?? `asset_${index}`;
 };
 
+const wrapFinalProjectCommitAuthorization = (
+  store: CreativeStudioStore,
+  beforeFinalAuthorization: () => Promise<void>
+): CreativeStudioStore => ({
+  ...store,
+  withProjectAuthorityV2: <T>(
+    projectId: string,
+    operation: (snapshot: StudioProjectAuthoritySnapshotV2) => Promise<T>
+  ): Promise<T> =>
+    store.withProjectAuthorityV2(projectId, (snapshot) =>
+      operation({
+        ...snapshot,
+        commit: (update, expectedRevision, commitTag, authorizeBeforeReplace) => {
+          let authorizationCount = 0;
+          return snapshot.commit(update, expectedRevision, commitTag, async () => {
+            authorizationCount += 1;
+            if (authorizationCount === 2) await beforeFinalAuthorization();
+            await authorizeBeforeReplace?.();
+          });
+        },
+      })
+    ),
+});
+
+type AmbiguousProjectCommitFailure = 'post_project_rename' | 'project_directory_sync';
+
+const createAmbiguousProjectCommitFs = (
+  projectDirectory: string,
+  failure: AmbiguousProjectCommitFailure
+): { fs: typeof fs; state: { injected: boolean } } => {
+  const projectFile = path.join(projectDirectory, 'project.json');
+  const state = { injected: false };
+  let projectRenameObserved = false;
+  const failingFs = new Proxy(fs, {
+    get(target, property, receiver) {
+      if (property === 'rename') {
+        return async (...args: Parameters<typeof fs.rename>): ReturnType<typeof fs.rename> => {
+          await fs.rename(...args);
+          if (path.resolve(String(args[1])) === projectFile) projectRenameObserved = true;
+        };
+      }
+      if (property === 'lstat') {
+        return async (...args: Parameters<typeof fs.lstat>): ReturnType<typeof fs.lstat> => {
+          if (
+            failure === 'post_project_rename' &&
+            projectRenameObserved &&
+            !state.injected &&
+            path.resolve(String(args[0])) === projectFile
+          ) {
+            state.injected = true;
+            throw Object.assign(new Error('injected post-project-rename lstat failure'), { code: 'EIO' });
+          }
+          return fs.lstat(...args);
+        };
+      }
+      if (property !== 'open') return Reflect.get(target, property, receiver);
+      return async (...args: Parameters<typeof fs.open>) => {
+        const openedPath = path.resolve(String(args[0]));
+        const handle = await fs.open(...args);
+        if (openedPath !== projectDirectory) return handle;
+        return new Proxy(handle, {
+          get(handleTarget, handleProperty, handleReceiver) {
+            if (handleProperty === 'sync') {
+              return async (): Promise<void> => {
+                await handleTarget.sync();
+                if (failure === 'project_directory_sync' && projectRenameObserved && !state.injected) {
+                  state.injected = true;
+                  throw Object.assign(new Error('injected project-directory sync failure'), { code: 'EIO' });
+                }
+              };
+            }
+            const value = Reflect.get(handleTarget, handleProperty, handleReceiver) as unknown;
+            return typeof value === 'function' ? value.bind(handleTarget) : value;
+          },
+        });
+      };
+    },
+  }) as typeof fs;
+  return { fs: failingFs, state };
+};
+
 afterEach(async () => {
   await Promise.all(created.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
 });
 
 describe('createStudioMediaStore schema 2 final lifecycle', () => {
+  it('rejects stale expected read proofs both before open and after content verification', async () => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-read-proof-v2-'));
+    created.push(rootDir);
+    const filePath = path.join(rootDir, 'proof.png');
+    await fs.writeFile(filePath, png);
+    const stats = await fs.lstat(filePath);
+    const proof = {
+      dev: String(stats.dev),
+      ino: String(stats.ino),
+      byteSize: png.length,
+      mtimeMs: stats.mtimeMs,
+      ctimeMs: stats.ctimeMs,
+      sha256: createHash('sha256').update(png).digest('hex'),
+      mimeType: 'image/png',
+      verifyContent: true,
+    };
+
+    await Promise.all(
+      [
+        { ...proof, dev: 'foreign' },
+        { ...proof, ino: 'foreign' },
+        { ...proof, byteSize: proof.byteSize + 1 },
+        { ...proof, mtimeMs: proof.mtimeMs + 1 },
+        { ...proof, ctimeMs: proof.ctimeMs + 1 },
+      ].map(async (staleProof) => {
+        await expect(
+          openVerifiedReadStream(filePath, undefined, undefined, undefined, staleProof)
+        ).rejects.toMatchObject({ code: 'storage_error' });
+      })
+    );
+    await Promise.all(
+      [
+        { ...proof, sha256: 'f'.repeat(64) },
+        { ...proof, mimeType: 'image/jpeg' },
+      ].map(async (staleProof) => {
+        await expect(
+          openVerifiedReadStream(filePath, undefined, undefined, undefined, staleProof)
+        ).rejects.toMatchObject({ code: 'storage_error' });
+      })
+    );
+
+    const unverified = await openVerifiedReadStream(filePath, undefined, undefined, undefined, {
+      ...proof,
+      verifyContent: false,
+    });
+    const chunks: Buffer[] = [];
+    for await (const chunk of unverified) chunks.push(Buffer.from(chunk));
+    expect(Buffer.concat(chunks)).toEqual(png);
+    expect(unverified.emit('error', new Error('late close after end'))).toBe(true);
+
+    const replacementPath = path.join(rootDir, 'replacement.png');
+    await fs.writeFile(replacementPath, Buffer.concat([png, Buffer.from([0x01])]));
+    await expect(
+      openVerifiedReadStream(filePath, undefined, undefined, async () => {
+        await fs.rename(replacementPath, filePath);
+      })
+    ).rejects.toMatchObject({ code: 'storage_error' });
+  });
+
   it('rejects invalid configured limits and unsafe filesystem capacity reports', async () => {
     const { store } = await makeStoreV2({ includeAuthorizedJob: false });
     for (const limit of [0, -1, 1.5, Number.NaN]) {
@@ -440,6 +637,89 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     await expect(fs.access(path.join(rootDir, project.id, 'parts'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('counts retained export bytes in the final human-import admission and removes refused managed bytes', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const sourcePath = path.join(rootDir, 'export-cap-reference.png');
+    await fs.writeFile(sourcePath, png);
+    const withManagedMediaAuthority = vi.fn(
+      async <T>(
+        authority: StudioProjectAuthoritySnapshotV2,
+        operation: (facts: Readonly<{ catalogRevision: number; managedByteSize: number }>) => Promise<T>
+      ): Promise<T> => {
+        expect(authority.project.id).toBe(project.id);
+        await authority.assertCurrent?.();
+        return operation(Object.freeze({ catalogRevision: 2, managedByteSize: 1 }));
+      }
+    );
+    const media = createStudioMediaStore({
+      store,
+      createId: () => 'export_cap_reference',
+      limits: { projectMaxBytes: png.length },
+      withManagedMediaAuthority,
+    });
+
+    await expect(
+      media.importReferenceFromPathV2({
+        projectId: project.id,
+        shotId: 'shot_1',
+        sourcePath,
+        expectedRevision: project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+
+    expect(withManagedMediaAuthority).toHaveBeenCalledOnce();
+    await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
+      status: 'supported',
+      project: {
+        revision: project.revision,
+        assets: {},
+        shots: { shot_1: { assetIds: [] } },
+      },
+    });
+    await expect(fs.readdir(path.join(rootDir, project.id, 'parts'))).resolves.toEqual([]);
+    await expect(fs.readdir(path.join(rootDir, project.id, 'imports'))).resolves.toEqual([]);
+  });
+
+  it('counts retained export bytes in the final provider-output admission', async () => {
+    const { rootDir, store, project } = await makeStoreV2();
+    const withManagedMediaAuthority = vi.fn(
+      async <T>(
+        _authority: StudioProjectAuthoritySnapshotV2,
+        operation: (facts: Readonly<{ catalogRevision: number; managedByteSize: number }>) => Promise<T>
+      ): Promise<T> => operation(Object.freeze({ catalogRevision: 2, managedByteSize: 1 }))
+    );
+    const media = createStudioMediaStore({
+      store,
+      createId: () => 'export_cap_provider',
+      limits: { projectMaxBytes: png.length },
+      withManagedMediaAuthority,
+    });
+
+    await expect(
+      media.persistProviderOutputForJobV2({
+        projectId: project.id,
+        shotId: 'shot_1',
+        jobId: 'job_1',
+        mediaKind: 'image',
+        declaredMimeType: 'image/png',
+        declaredByteSize: png.length,
+        body: Readable.from([png]),
+      })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+
+    expect(withManagedMediaAuthority).toHaveBeenCalledOnce();
+    await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
+      status: 'supported',
+      project: {
+        revision: project.revision,
+        assets: {},
+        jobs: { job_1: { status: 'running', outputAssetIds: [] } },
+      },
+    });
+    await expect(fs.readdir(path.join(rootDir, project.id, 'parts'))).resolves.toEqual([]);
+    await expect(fs.readdir(path.join(rootDir, project.id, 'assets'))).resolves.toEqual([]);
+  });
+
   it.each([
     ['a role without a label', (asset: Record<string, unknown>) => (asset.briefReferenceRole = 'cast')],
     ['a label without a role', (asset: Record<string, unknown>) => (asset.briefReferenceLabel = 'Cast')],
@@ -510,11 +790,23 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       };
       corrupt(corruptAsset);
       candidate.assets.corrupt_reference = corruptAsset as never;
+      const projectDirectory = await store.getVerifiedProjectDirectoryV2(project.id);
+      if (projectDirectory === null) throw new Error('Missing corrupt-metadata project directory');
+      const withProjectAuthorityV2 = vi.fn(
+        async (
+          _projectId: string,
+          operation: (snapshot: StudioProjectAuthoritySnapshotV2) => Promise<unknown>
+        ): Promise<unknown> =>
+          operation({
+            project: structuredClone(candidate),
+            projectDir: projectDirectory,
+            assertCurrent: async () => undefined,
+            commit: async (update) => update(structuredClone(candidate)),
+          })
+      );
       const wrappedStore = {
         ...store,
-        updateProjectV2: vi.fn(async (_projectId: string, update: (current: StudioProjectV2) => StudioProjectV2) =>
-          update(structuredClone(candidate))
-        ),
+        withProjectAuthorityV2,
       } as CreativeStudioStore;
       const media = createStudioMediaStore({ store: wrappedStore, createId: () => 'rolled_back_reference' });
 
@@ -529,6 +821,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
 
       await expect(fs.readdir(path.join(rootDir, project.id, 'parts'))).resolves.toEqual([]);
       await expect(fs.readdir(path.join(rootDir, project.id, 'imports'))).resolves.toEqual([]);
+      expect(withProjectAuthorityV2).toHaveBeenCalledOnce();
     }
   );
 
@@ -611,6 +904,37 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     expect(edited.assets.take_1!.durationSeconds).toBe(10);
     const restarted = await store.getProjectV2(project.id);
     expect(restarted.status === 'supported' ? restarted.project.assets.take_1!.durationSeconds : null).toBe(10);
+  });
+
+  it('uses the production ffprobe path for valid and undecodable video outputs', async () => {
+    const valid = await makeStoreV2({ purpose: 'video_take' });
+    const validMedia = createStudioMediaStore({ store: valid.store, createId: () => 'decoded_video' });
+    await expect(
+      validMedia.persistProviderOutputForJobV2({
+        projectId: valid.project.id,
+        shotId: 'shot_1',
+        jobId: 'job_1',
+        mediaKind: 'video',
+        declaredMimeType: 'video/mp4',
+        body: Readable.from([decodedMp4]),
+      })
+    ).resolves.toMatchObject({ id: 'decoded_video', durationSeconds: 10 });
+
+    const invalid = await makeStoreV2({ purpose: 'video_take' });
+    const invalidMedia = createStudioMediaStore({ store: invalid.store, createId: () => 'undecodable_video' });
+    await expect(
+      invalidMedia.persistProviderOutputForJobV2({
+        projectId: invalid.project.id,
+        shotId: 'shot_1',
+        jobId: 'job_1',
+        mediaKind: 'video',
+        declaredMimeType: 'video/mp4',
+        body: Readable.from([mp4]),
+      })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+    await expect(
+      fs.access(path.join(invalid.rootDir, invalid.project.id, 'assets', 'undecodable_video.mp4'))
+    ).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('cleans a video whose finalized bytes cannot produce a decoded duration', async () => {
@@ -898,68 +1222,6 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
   });
 
-  it('persists and reopens a V2 project render without attaching it to a shot', async () => {
-    const { store, project } = await makeStoreV2({ includeAuthorizedJob: false });
-    const media = createStudioMediaStore({
-      store,
-      createId: idSequence('render_v2', 'render_v2_new'),
-      now: () => '2026-08-17T12:00:00.000Z',
-      probeVideoDurationSecondsV2: async () => 12,
-    });
-    const rendered = await media.persistProjectOutputV2({
-      projectId: project.id,
-      declaredMimeType: 'video/mp4',
-      declaredByteSize: mp4.length,
-      width: 1920,
-      height: 1080,
-      durationSeconds: 12,
-      body: Readable.from([mp4]),
-    });
-    expect(rendered).toMatchObject({
-      id: 'render_v2',
-      projectId: project.id,
-      shotId: null,
-      durationSeconds: 12,
-      managedAsset: { collection: 'assets', fileName: 'render_v2.mp4' },
-    });
-    await expect(media.getLatestProjectOutputV2(project.id)).resolves.toEqual(rendered);
-    const newer = await media.persistProjectOutputV2({
-      projectId: project.id,
-      declaredMimeType: 'video/mp4',
-      width: 1920,
-      height: 1080,
-      body: Readable.from([mp4]),
-    });
-    await expect(createStudioMediaStore({ store }).getLatestProjectOutputV2(project.id)).resolves.toEqual(newer);
-    await expect(media.getLatestProjectOutputV2('../project')).rejects.toMatchObject({ code: 'invalid_media' });
-    await expect(media.getLatestProjectOutputV2('missing_project')).rejects.toMatchObject({ code: 'not_found' });
-  });
-
-  it('rejects non-finite and non-positive V2 render durations from managed metadata', async () => {
-    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
-    const media = createStudioMediaStore({
-      store,
-      createId: () => 'render_v2_duration_guard',
-      probeVideoDurationSecondsV2: async () => 12,
-    });
-    const rendered = await media.persistProjectOutputV2({
-      projectId: project.id,
-      declaredMimeType: 'video/mp4',
-      width: 1920,
-      height: 1080,
-      body: Readable.from([mp4]),
-    });
-    const metadataPath = path.join(rootDir, project.id, 'assets', `${rendered.id}.render-v2.json`);
-    const metadata = JSON.parse(await fs.readFile(metadataPath, 'utf8')) as Record<string, unknown>;
-    for (const durationSeconds of ['not-a-number', 0]) {
-      metadata.durationSeconds = durationSeconds;
-      // eslint-disable-next-line no-await-in-loop -- Each scalar proves a separate short-circuit branch.
-      await fs.writeFile(metadataPath, JSON.stringify(metadata));
-      // eslint-disable-next-line no-await-in-loop -- Reopen from disk for each hostile value.
-      await expect(media.getLatestProjectOutputV2(project.id)).resolves.toBeNull();
-    }
-  });
-
   it('imports a human seed candidate without pinning, selecting, authorizing, or spending', async () => {
     const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
     const sourcePath = path.join(rootDir, 'human-seed.png');
@@ -992,6 +1254,930 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
         },
       },
     });
+  });
+
+  it('refuses a managed-file replacement at the final project commit authorization', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const sourcePath = path.join(rootDir, 'final-authorization-seed.png');
+    const replacementPath = path.join(rootDir, 'foreign-replacement.png');
+    const replacementBytes = Buffer.concat([png, Buffer.from([0xff])]);
+    await Promise.all([fs.writeFile(sourcePath, png), fs.writeFile(replacementPath, replacementBytes)]);
+    const managedPath = path.join(rootDir, project.id, 'imports', 'final_authorization_seed.png');
+    const guardedStore = wrapFinalProjectCommitAuthorization(store, async () => {
+      await fs.rename(replacementPath, managedPath);
+    });
+    const media = createStudioMediaStore({
+      store: guardedStore,
+      createId: () => 'final_authorization_seed',
+    });
+
+    await expect(
+      media.importReferenceFromPathV2({
+        projectId: project.id,
+        shotId: 'shot_1',
+        sourcePath,
+        expectedRevision: project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'storage_error' });
+
+    await expect(store.getProjectV2(project.id)).resolves.toEqual({ status: 'supported', project });
+    await expect(fs.readFile(managedPath)).resolves.toEqual(replacementBytes);
+    await expect(fs.readdir(path.join(rootDir, project.id, 'parts'))).resolves.toEqual([]);
+  });
+
+  it('imports one verified WAV bed and records exactly one undoable set-bed revision', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const sourcePath = path.join(rootDir, 'score.wav');
+    await fs.writeFile(sourcePath, wav);
+    const probeBedAudioV2 = vi.fn(async () => ({
+      durationSeconds: 1,
+      audioStreamCount: 1,
+      otherStreamCount: 0,
+    }));
+    const media = createStudioMediaStore({
+      store,
+      createId: () => 'bed_audio_1',
+      createMutationId: () => 'bed_import_mutation_1',
+      now: () => '2026-08-17T12:05:00.000Z',
+      probeBedAudioV2,
+    });
+
+    const imported = await media.importBedAudioFromPathV2({
+      projectId: project.id,
+      sourcePath,
+      expectedRevision: project.revision,
+    });
+
+    expect(imported.asset).toEqual({
+      id: 'bed_audio_1',
+      projectId: project.id,
+      shotId: null,
+      mediaKind: 'audio',
+      mimeType: 'audio/wav',
+      managedAsset: { collection: 'imports', fileName: 'bed_audio_1.wav' },
+      byteSize: wav.length,
+      sha256: createHash('sha256').update(wav).digest('hex'),
+      durationSeconds: 1,
+      createdAt: '2026-08-17T12:05:00.000Z',
+    });
+    expect(imported.project).toMatchObject({
+      revision: project.revision + 1,
+      bedAssetId: 'bed_audio_1',
+      undoHistory: [
+        {
+          id: 'bed_import_mutation_1',
+          sourceRevision: project.revision + 1,
+          label: 'set_bed',
+          patches: [{ kind: 'project_fields', before: { bedAssetId: null } }],
+        },
+      ],
+    });
+    expect(probeBedAudioV2).toHaveBeenCalledWith({
+      filePath: expect.stringMatching(/\/project_v2\/parts\/bed_audio_1\.part$/),
+      byteSize: wav.length,
+      sha256: createHash('sha256').update(wav).digest('hex'),
+    });
+
+    const resolved = await media.resolveAssetV2(project.id, imported.asset.id);
+    const chunks: Buffer[] = [];
+    if (resolved === null) throw new Error('Imported WAV did not resolve');
+    for await (const chunk of await resolved.openVerifiedStream()) chunks.push(Buffer.from(chunk));
+    expect(Buffer.concat(chunks)).toEqual(wav);
+
+    const undone = await store.applyMutationBatchV2(
+      {
+        schemaVersion: 2,
+        projectId: project.id,
+        expectedRevision: imported.project.revision,
+        operations: [{ kind: 'undo_last', entryId: 'bed_import_mutation_1' }],
+      },
+      { mutationId: 'undo_bed_import_1', capturedAt: '2026-08-17T12:06:00.000Z' }
+    );
+    expect(undone.project.bedAssetId).toBeNull();
+    expect(undone.project.assets).toHaveProperty('bed_audio_1');
+    await expect(fs.readFile(path.join(rootDir, project.id, 'imports', 'bed_audio_1.wav'))).resolves.toEqual(wav);
+  });
+
+  it('makes both bed publication directory entries durable before committing the project', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const sourcePath = path.join(rootDir, 'durable-score.wav');
+    await fs.writeFile(sourcePath, wav);
+    const projectDirectory = await store.getVerifiedProjectDirectoryV2(project.id);
+    if (projectDirectory === null) throw new Error('Missing durable bed project directory');
+    const importsDirectory = path.join(projectDirectory, 'imports');
+    const partsDirectory = path.join(projectDirectory, 'parts');
+    const partPath = path.join(projectDirectory, 'parts', 'durable_bed.part');
+    const events: string[] = [];
+    const observedStore: CreativeStudioStore = {
+      ...store,
+      withProjectAuthorityV2: <T>(
+        projectId: string,
+        operation: (snapshot: StudioProjectAuthoritySnapshotV2) => Promise<T>
+      ): Promise<T> =>
+        store.withProjectAuthorityV2(projectId, (snapshot) =>
+          operation({
+            ...snapshot,
+            commit: (update, expectedRevision, commitTag, authorizeBeforeReplace) => {
+              events.push('project_commit');
+              return snapshot.commit(update, expectedRevision, commitTag, authorizeBeforeReplace);
+            },
+          })
+        ),
+    };
+    const media = createStudioMediaStore({
+      store: observedStore,
+      createId: () => 'durable_bed',
+      createMutationId: () => 'durable_bed_mutation',
+      now: () => '2026-08-17T12:05:00.000Z',
+      probeBedAudioV2: async () => ({ durationSeconds: 1, audioStreamCount: 1, otherStreamCount: 0 }),
+      afterV2ManagedDirectorySync: async (directory) => {
+        if (directory === importsDirectory) events.push('imports_synced');
+        if (directory === partsDirectory) {
+          const partExists = await fs.access(partPath).then(
+            () => true,
+            () => false
+          );
+          if (!partExists) events.push('parts_synced_after_unlink');
+        }
+      },
+    });
+
+    await media.importBedAudioFromPathV2({
+      projectId: project.id,
+      sourcePath,
+      expectedRevision: project.revision,
+    });
+
+    expect(events.slice(0, 3)).toEqual(['imports_synced', 'parts_synced_after_unlink', 'project_commit']);
+  });
+
+  it.each(['imports', 'parts'] as const)(
+    'refuses and rolls back a bed import when the %s publication directory cannot be synced',
+    async (failingDirectory) => {
+      const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+      const sourcePath = path.join(rootDir, `${failingDirectory}-sync-score.wav`);
+      await fs.writeFile(sourcePath, wav);
+      const projectDirectory = await store.getVerifiedProjectDirectoryV2(project.id);
+      if (projectDirectory === null) throw new Error('Missing sync-failure bed project directory');
+      const importsDirectory = path.join(projectDirectory, 'imports');
+      const partsDirectory = path.join(projectDirectory, 'parts');
+      const partPath = path.join(projectDirectory, 'parts', `bed_${failingDirectory}_sync.part`);
+      let importsSynced = false;
+      let injected = false;
+      const media = createStudioMediaStore({
+        store,
+        createId: () => `bed_${failingDirectory}_sync`,
+        createMutationId: () => `bed_${failingDirectory}_sync_mutation`,
+        now: () => '2026-08-17T12:05:00.000Z',
+        probeBedAudioV2: async () => ({ durationSeconds: 1, audioStreamCount: 1, otherStreamCount: 0 }),
+        afterV2ManagedDirectorySync: async (directory) => {
+          if (directory === importsDirectory) importsSynced = true;
+          const partExists = await fs.access(partPath).then(
+            () => true,
+            () => false
+          );
+          const shouldFail =
+            !injected &&
+            (failingDirectory === 'imports'
+              ? directory === importsDirectory
+              : directory === partsDirectory && importsSynced && !partExists);
+          if (!shouldFail) return;
+          injected = true;
+          throw Object.assign(new Error(`injected ${failingDirectory} directory sync failure`), { code: 'EIO' });
+        },
+      });
+
+      await expect(
+        media.importBedAudioFromPathV2({
+          projectId: project.id,
+          sourcePath,
+          expectedRevision: project.revision,
+        })
+      ).rejects.toMatchObject({ code: 'storage_error' });
+
+      expect(injected).toBe(true);
+      await expect(store.getProjectV2(project.id)).resolves.toEqual({ status: 'supported', project });
+      await expect(fs.readdir(path.join(projectDirectory, 'imports'))).resolves.toEqual([]);
+      await expect(fs.readdir(path.join(projectDirectory, 'parts'))).resolves.toEqual([]);
+    }
+  );
+
+  it('fully decodes the production WAV probe and rejects a corrupt single audio stream', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const validPath = path.join(rootDir, 'decoded-score.wav');
+    const corruptPath = path.join(rootDir, 'corrupt-adpcm.wav');
+    await Promise.all([fs.writeFile(validPath, wav), fs.writeFile(corruptPath, createCorruptAdpcmWav())]);
+    const media = createStudioMediaStore({
+      store,
+      createId: () => 'decoded_bed',
+      createMutationId: () => 'decoded_bed_mutation',
+      now: () => '2026-08-17T12:05:00.000Z',
+      ffprobeBinary: process.env.FFPROBE_PATH ?? 'ffprobe',
+      ffmpegBinary: process.env.FFMPEG_PATH ?? 'ffmpeg',
+    });
+
+    const imported = await media.importBedAudioFromPathV2({
+      projectId: project.id,
+      sourcePath: validPath,
+      expectedRevision: project.revision,
+    });
+    expect(imported.asset).toMatchObject({
+      id: 'decoded_bed',
+      mimeType: 'audio/wav',
+      durationSeconds: 1,
+    });
+
+    const defaultMedia = createStudioMediaStore({ store, createId: () => 'corrupt_bed' });
+    await expect(
+      defaultMedia.importBedAudioFromPathV2({
+        projectId: project.id,
+        sourcePath: corruptPath,
+        expectedRevision: imported.project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+
+    vi.stubEnv('FFPROBE_PATH', 'ffprobe');
+    vi.stubEnv('FFMPEG_PATH', 'ffmpeg');
+    try {
+      const environmentMedia = createStudioMediaStore({ store, createId: () => 'corrupt_bed_from_environment' });
+      await expect(
+        environmentMedia.importBedAudioFromPathV2({
+          projectId: project.id,
+          sourcePath: corruptPath,
+          expectedRevision: imported.project.revision,
+        })
+      ).rejects.toMatchObject({ code: 'invalid_media' });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    await expect(store.getProjectV2(project.id)).resolves.toEqual({ status: 'supported', project: imported.project });
+    await expect(fs.readdir(path.join(rootDir, project.id, 'parts'))).resolves.toEqual([]);
+    await expect(fs.readdir(path.join(rootDir, project.id, 'imports'))).resolves.toEqual(['decoded_bed.wav']);
+  });
+
+  it('resolves export media from an already-held project authority without re-entering the project queue', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const sourcePath = path.join(rootDir, 'authority-score.wav');
+    await fs.writeFile(sourcePath, wav);
+    const importer = createStudioMediaStore({
+      store,
+      createId: () => 'authority_bed',
+      createMutationId: () => 'authority_bed_import',
+      now: () => '2026-08-17T12:05:00.000Z',
+      probeBedAudioV2: async () => ({ durationSeconds: 1, audioStreamCount: 1, otherStreamCount: 0 }),
+    });
+    const imported = await importer.importBedAudioFromPathV2({
+      projectId: project.id,
+      sourcePath,
+      expectedRevision: project.revision,
+    });
+    const reentrantRead = vi.fn(async () => {
+      throw new Error('project queue was re-entered while its authority was held');
+    });
+    const guardedStore = new Proxy(store, {
+      get(target, property, receiver) {
+        if (property === 'getProjectV2') return reentrantRead;
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const exportMedia = createStudioMediaStore({ store: guardedStore });
+    const bytes = await store.withProjectAuthorityV2(project.id, async (authority) => {
+      const resolved = await exportMedia.resolveAssetWithProjectAuthorityV2(authority, imported.asset.id);
+      if (resolved === null) throw new Error('Authority-bound export media did not resolve');
+      const chunks: Buffer[] = [];
+      for await (const chunk of await resolved.openVerifiedStream()) chunks.push(Buffer.from(chunk));
+      return Buffer.concat(chunks);
+    });
+
+    expect(bytes).toEqual(wav);
+    expect(reentrantRead).not.toHaveBeenCalled();
+  });
+
+  it('counts retained export bytes before publishing a bed import', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const sourcePath = path.join(rootDir, 'export-cap-bed.wav');
+    await fs.writeFile(sourcePath, wav);
+    const withManagedMediaAuthority = vi.fn(
+      async <T>(
+        _authority: StudioProjectAuthoritySnapshotV2,
+        operation: (facts: Readonly<{ catalogRevision: number; managedByteSize: number }>) => Promise<T>
+      ): Promise<T> => operation(Object.freeze({ catalogRevision: 2, managedByteSize: 1 }))
+    );
+    const media = createStudioMediaStore({
+      store,
+      createId: () => 'export_cap_bed',
+      createMutationId: () => 'export_cap_bed_mutation',
+      limits: { projectMaxBytes: wav.length },
+      withManagedMediaAuthority,
+      probeBedAudioV2: async () => ({ durationSeconds: 1, audioStreamCount: 1, otherStreamCount: 0 }),
+    });
+
+    await expect(
+      media.importBedAudioFromPathV2({
+        projectId: project.id,
+        sourcePath,
+        expectedRevision: project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+
+    expect(withManagedMediaAuthority).toHaveBeenCalledOnce();
+    await expect(store.getProjectV2(project.id)).resolves.toEqual({ status: 'supported', project });
+    await expect(fs.readdir(path.join(rootDir, project.id, 'parts'))).resolves.toEqual([]);
+    await expect(fs.readdir(path.join(rootDir, project.id, 'imports'))).resolves.toEqual([]);
+  });
+
+  it('retains a replaced bed and detaches only the named unselected WAV', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const firstPath = path.join(rootDir, 'first.wav');
+    const secondPath = path.join(rootDir, 'second.wav');
+    await Promise.all([fs.writeFile(firstPath, wav), fs.writeFile(secondPath, createWav(0x81))]);
+    const media = createStudioMediaStore({
+      store,
+      createId: idSequence('bed_first', 'bed_second'),
+      createMutationId: idSequence('bed_first_mutation', 'bed_second_mutation'),
+      now: () => '2026-08-17T12:05:00.000Z',
+      probeBedAudioV2: async () => ({ durationSeconds: 1, audioStreamCount: 1, otherStreamCount: 0 }),
+    });
+    const first = await media.importBedAudioFromPathV2({
+      projectId: project.id,
+      sourcePath: firstPath,
+      expectedRevision: project.revision,
+    });
+    const second = await media.importBedAudioFromPathV2({
+      projectId: project.id,
+      sourcePath: secondPath,
+      expectedRevision: first.project.revision,
+    });
+
+    expect(second.project.bedAssetId).toBe('bed_second');
+    expect(Object.keys(second.project.assets)).toEqual(['bed_first', 'bed_second']);
+    await expect(
+      media.detachBedAudioV2({
+        projectId: project.id,
+        assetId: 'bed_second',
+        expectedRevision: second.project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'media_in_use' });
+
+    const detached = await media.detachBedAudioV2({
+      projectId: project.id,
+      assetId: 'bed_first',
+      expectedRevision: second.project.revision,
+    });
+    expect(detached.assets).not.toHaveProperty('bed_first');
+    expect(detached).toMatchObject({ bedAssetId: 'bed_second', undoHistory: second.project.undoHistory });
+    await expect(fs.access(path.join(rootDir, project.id, 'imports', 'bed_first.wav'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    await expect(fs.readFile(path.join(rootDir, project.id, 'imports', 'bed_second.wav'))).resolves.toEqual(
+      createWav(0x81)
+    );
+  });
+
+  it('refuses bed detach when the managed WAV is replaced at final project authorization', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const sourcePath = path.join(rootDir, 'detach-final-authorization.wav');
+    await fs.writeFile(sourcePath, wav);
+    const setupMedia = createStudioMediaStore({
+      store,
+      createId: () => 'bed_detach_final_authorization',
+      createMutationId: () => 'bed_detach_final_authorization_import',
+      probeBedAudioV2: async () => ({ durationSeconds: 1, audioStreamCount: 1, otherStreamCount: 0 }),
+    });
+    const imported = await setupMedia.importBedAudioFromPathV2({
+      projectId: project.id,
+      sourcePath,
+      expectedRevision: project.revision,
+    });
+    const cleared = await store.applyMutationBatchV2(
+      {
+        schemaVersion: 2,
+        projectId: project.id,
+        expectedRevision: imported.project.revision,
+        operations: [{ kind: 'set_bed', assetId: null }],
+      },
+      { mutationId: 'clear_bed_before_final_authorization', capturedAt: '2026-08-17T12:06:00.000Z' }
+    );
+    const managedPath = path.join(rootDir, project.id, 'imports', 'bed_detach_final_authorization.wav');
+    const replacementPath = path.join(rootDir, 'foreign-bed-replacement.wav');
+    const replacementBytes = createWav(0x91);
+    await fs.writeFile(replacementPath, replacementBytes);
+    const guardedStore = wrapFinalProjectCommitAuthorization(store, async () => {
+      await fs.rename(replacementPath, managedPath);
+    });
+    const guardedMedia = createStudioMediaStore({ store: guardedStore });
+
+    await expect(
+      guardedMedia.detachBedAudioV2({
+        projectId: project.id,
+        expectedRevision: cleared.project.revision,
+        assetId: imported.asset.id,
+      })
+    ).rejects.toMatchObject({ code: 'storage_error' });
+
+    await expect(store.getProjectV2(project.id)).resolves.toEqual({ status: 'supported', project: cleared.project });
+    await expect(fs.readFile(managedPath)).resolves.toEqual(replacementBytes);
+  });
+
+  it('rejects non-WAV and multi-stream bed inputs without publishing an asset', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const imagePath = path.join(rootDir, 'not-a-bed.png');
+    const wavPath = path.join(rootDir, 'multi-stream.wav');
+    await Promise.all([fs.writeFile(imagePath, png), fs.writeFile(wavPath, wav)]);
+    const probeBedAudioV2 = vi.fn(async () => ({
+      durationSeconds: 1,
+      audioStreamCount: 2,
+      otherStreamCount: 0,
+    }));
+    const media = createStudioMediaStore({
+      store,
+      createId: idSequence('bed_wrong_kind', 'bed_multi_stream'),
+      createMutationId: idSequence('mutation_wrong_kind', 'mutation_multi_stream'),
+      probeBedAudioV2,
+    });
+
+    await expect(
+      media.importBedAudioFromPathV2({
+        projectId: project.id,
+        sourcePath: imagePath,
+        expectedRevision: project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+    await expect(
+      media.importBedAudioFromPathV2({
+        projectId: project.id,
+        sourcePath: wavPath,
+        expectedRevision: project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+
+    expect(await store.getProjectV2(project.id)).toEqual({ status: 'supported', project });
+    expect(await fs.readdir(path.join(rootDir, project.id, 'parts')).catch(() => [])).toEqual([]);
+    expect(await fs.readdir(path.join(rootDir, project.id, 'imports')).catch(() => [])).toEqual([]);
+    expect(probeBedAudioV2).toHaveBeenCalledOnce();
+  });
+
+  it('refuses a long bed import when the main lifecycle closes before mutation', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const sourcePath = path.join(rootDir, 'close-during-probe.wav');
+    await fs.writeFile(sourcePath, wav);
+    let active = true;
+    const assertActive = (): void => {
+      if (!active) throw new CreativeStudioMediaError('job_inactive');
+    };
+    const media = createStudioMediaStore({
+      store,
+      createId: () => 'bed_closed_import',
+      createMutationId: () => 'bed_closed_import_mutation',
+      probeBedAudioV2: async () => {
+        active = false;
+        return { durationSeconds: 1, audioStreamCount: 1, otherStreamCount: 0 };
+      },
+    });
+
+    await expect(
+      media.importBedAudioFromPathV2({
+        projectId: project.id,
+        sourcePath,
+        expectedRevision: project.revision,
+        assertActive,
+      })
+    ).rejects.toMatchObject({ code: 'job_inactive' });
+
+    expect(await store.getProjectV2(project.id)).toEqual({ status: 'supported', project });
+    expect(await fs.readdir(path.join(rootDir, project.id, 'parts')).catch(() => [])).toEqual([]);
+    expect(await fs.readdir(path.join(rootDir, project.id, 'imports')).catch(() => [])).toEqual([]);
+  });
+
+  it('refuses detach while a verified export read claim is live', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const sourcePath = path.join(rootDir, 'live-export-read.wav');
+    await fs.writeFile(sourcePath, wav);
+    const media = createStudioMediaStore({
+      store,
+      createId: () => 'bed_live_read',
+      createMutationId: () => 'bed_live_read_import',
+      now: () => '2026-08-17T12:05:00.000Z',
+      probeBedAudioV2: async () => ({ durationSeconds: 1, audioStreamCount: 1, otherStreamCount: 0 }),
+    });
+    const imported = await media.importBedAudioFromPathV2({
+      projectId: project.id,
+      sourcePath,
+      expectedRevision: project.revision,
+    });
+    const cleared = await store.applyMutationBatchV2(
+      {
+        schemaVersion: 2,
+        projectId: project.id,
+        expectedRevision: imported.project.revision,
+        operations: [{ kind: 'set_bed', assetId: null }],
+      },
+      { mutationId: 'clear_live_read_bed', capturedAt: '2026-08-17T12:06:00.000Z' }
+    );
+    const resolved = await media.resolveAssetV2(project.id, imported.asset.id);
+    if (resolved === null) throw new Error('Live-read bed did not resolve');
+    const stream = await resolved.openVerifiedStream();
+
+    await expect(
+      media.detachBedAudioV2({
+        projectId: project.id,
+        assetId: imported.asset.id,
+        expectedRevision: cleared.project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'media_in_use' });
+
+    const closed = new Promise<void>((resolve) => stream.once('close', () => resolve()));
+    stream.destroy();
+    await closed;
+    await expect(
+      media.detachBedAudioV2({
+        projectId: project.id,
+        assetId: imported.asset.id,
+        expectedRevision: cleared.project.revision,
+      })
+    ).resolves.not.toHaveProperty(`assets.${imported.asset.id}`);
+  });
+
+  it('clears a published detach intent if lifecycle closes before its project mutation', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const sourcePath = path.join(rootDir, 'close-before-detach-commit.wav');
+    await fs.writeFile(sourcePath, wav);
+    const media = createStudioMediaStore({
+      store,
+      createId: () => 'bed_closed_detach',
+      createMutationId: () => 'bed_closed_detach_import',
+      now: () => '2026-08-17T12:05:00.000Z',
+      probeBedAudioV2: async () => ({ durationSeconds: 1, audioStreamCount: 1, otherStreamCount: 0 }),
+    });
+    const imported = await media.importBedAudioFromPathV2({
+      projectId: project.id,
+      sourcePath,
+      expectedRevision: project.revision,
+    });
+    const cleared = await store.applyMutationBatchV2(
+      {
+        schemaVersion: 2,
+        projectId: project.id,
+        expectedRevision: imported.project.revision,
+        operations: [{ kind: 'set_bed', assetId: null }],
+      },
+      { mutationId: 'clear_closed_detach_bed', capturedAt: '2026-08-17T12:06:00.000Z' }
+    );
+    let activeChecks = 0;
+    const assertActive = (): void => {
+      activeChecks += 1;
+      if (activeChecks >= 3) throw new CreativeStudioMediaError('job_inactive');
+    };
+
+    await expect(
+      media.detachBedAudioV2({
+        projectId: project.id,
+        assetId: imported.asset.id,
+        expectedRevision: cleared.project.revision,
+        assertActive,
+      })
+    ).rejects.toMatchObject({ code: 'job_inactive' });
+
+    const loaded = await store.getProjectV2(project.id);
+    expect(loaded.status === 'supported' ? loaded.project.assets : {}).toHaveProperty(imported.asset.id);
+    await expect(fs.readFile(path.join(rootDir, project.id, 'imports', 'bed_closed_detach.wav'))).resolves.toEqual(wav);
+    expect(await fs.readdir(path.join(rootDir, project.id, 'parts'))).toEqual([]);
+  });
+
+  it.each(['post_project_rename', 'project_directory_sync'] as const)(
+    'preserves an import journal across an ambiguous %s failure and rolls back safely on restart',
+    async (failure) => {
+      const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+      const sourcePath = path.join(rootDir, `${failure}-import.wav`);
+      await fs.writeFile(sourcePath, wav);
+      const projectDirectory = await store.getVerifiedProjectDirectoryV2(project.id);
+      if (projectDirectory === null) throw new Error('Ambiguous import project directory missing');
+      const injected = createAmbiguousProjectCommitFs(projectDirectory, failure);
+      const failingStore = createCreativeStudioStore({
+        rootDir,
+        fs: injected.fs,
+        now: () => '2026-08-17T12:07:00.000Z',
+      });
+      const media = createStudioMediaStore({
+        store: failingStore,
+        createId: () => `bed_${failure}`,
+        createMutationId: () => `bed_${failure}_mutation`,
+        now: () => '2026-08-17T12:05:00.000Z',
+        probeBedAudioV2: async () => ({ durationSeconds: 1, audioStreamCount: 1, otherStreamCount: 0 }),
+      });
+      const managedPath = path.join(projectDirectory, 'imports', `bed_${failure}.wav`);
+      const intentPath = path.join(projectDirectory, 'parts', `bed-import-bed_${failure}.json`);
+
+      await expect(
+        media.importBedAudioFromPathV2({
+          projectId: project.id,
+          sourcePath,
+          expectedRevision: project.revision,
+        })
+      ).rejects.toMatchObject({ code: 'storage_error' });
+
+      expect(injected.state.injected).toBe(true);
+      await expect(fs.readFile(managedPath)).resolves.toEqual(wav);
+      await expect(fs.access(intentPath)).resolves.toBeUndefined();
+
+      await fs.writeFile(path.join(projectDirectory, 'project.json'), `${JSON.stringify(project)}\n`, 'utf8');
+      const restartedStore = createCreativeStudioStore({
+        rootDir,
+        now: () => '2026-08-17T12:08:00.000Z',
+      });
+      await createStudioMediaStore({ store: restartedStore }).cleanupOrphanPartsV2();
+
+      await expect(restartedStore.getProjectV2(project.id)).resolves.toEqual({ status: 'supported', project });
+      await expect(fs.access(managedPath)).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(fs.access(intentPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    }
+  );
+
+  it.each(['post_project_rename', 'project_directory_sync'] as const)(
+    'preserves a detach journal across an ambiguous %s failure and restores bytes on restart rollback',
+    async (failure) => {
+      const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+      const sourcePath = path.join(rootDir, `${failure}-detach.wav`);
+      await fs.writeFile(sourcePath, wav);
+      const baseMedia = createStudioMediaStore({
+        store,
+        createId: () => `detachable_${failure}`,
+        createMutationId: () => `detachable_${failure}_import`,
+        now: () => '2026-08-17T12:05:00.000Z',
+        probeBedAudioV2: async () => ({ durationSeconds: 1, audioStreamCount: 1, otherStreamCount: 0 }),
+      });
+      const imported = await baseMedia.importBedAudioFromPathV2({
+        projectId: project.id,
+        sourcePath,
+        expectedRevision: project.revision,
+      });
+      const cleared = await store.applyMutationBatchV2(
+        {
+          schemaVersion: 2,
+          projectId: project.id,
+          expectedRevision: imported.project.revision,
+          operations: [{ kind: 'set_bed', assetId: null }],
+        },
+        {
+          mutationId: `clear_detachable_${failure}`,
+          capturedAt: '2026-08-17T12:06:00.000Z',
+        }
+      );
+      const projectDirectory = await store.getVerifiedProjectDirectoryV2(project.id);
+      if (projectDirectory === null) throw new Error('Ambiguous detach project directory missing');
+      const injected = createAmbiguousProjectCommitFs(projectDirectory, failure);
+      const failingStore = createCreativeStudioStore({
+        rootDir,
+        fs: injected.fs,
+        now: () => '2026-08-17T12:07:00.000Z',
+      });
+      const failingMedia = createStudioMediaStore({ store: failingStore });
+      const assetId = imported.asset.id;
+      const managedPath = path.join(projectDirectory, 'imports', `${assetId}.wav`);
+      const intentPath = path.join(projectDirectory, 'parts', `bed-detach-${assetId}.json`);
+
+      await expect(
+        failingMedia.detachBedAudioV2({
+          projectId: project.id,
+          expectedRevision: cleared.project.revision,
+          assetId,
+        })
+      ).rejects.toMatchObject({ code: 'storage_error' });
+
+      expect(injected.state.injected).toBe(true);
+      await expect(fs.readFile(managedPath)).resolves.toEqual(wav);
+      await expect(fs.access(intentPath)).resolves.toBeUndefined();
+
+      await fs.writeFile(path.join(projectDirectory, 'project.json'), `${JSON.stringify(cleared.project)}\n`, 'utf8');
+      const restartedStore = createCreativeStudioStore({
+        rootDir,
+        now: () => '2026-08-17T12:08:00.000Z',
+      });
+      await createStudioMediaStore({ store: restartedStore }).cleanupOrphanPartsV2();
+
+      await expect(restartedStore.getProjectV2(project.id)).resolves.toEqual({
+        status: 'supported',
+        project: cleared.project,
+      });
+      await expect(fs.readFile(managedPath)).resolves.toEqual(wav);
+      await expect(fs.access(intentPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    }
+  );
+
+  it('fails closed when detached audio bytes no longer match their canonical identity', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const sourcePath = path.join(rootDir, 'replace-before-detach.wav');
+    await fs.writeFile(sourcePath, wav);
+    const media = createStudioMediaStore({
+      store,
+      createId: () => 'bed_replaced',
+      createMutationId: () => 'bed_replaced_import',
+      now: () => '2026-08-17T12:05:00.000Z',
+      probeBedAudioV2: async () => ({ durationSeconds: 1, audioStreamCount: 1, otherStreamCount: 0 }),
+    });
+    const imported = await media.importBedAudioFromPathV2({
+      projectId: project.id,
+      sourcePath,
+      expectedRevision: project.revision,
+    });
+    const cleared = await store.applyMutationBatchV2(
+      {
+        schemaVersion: 2,
+        projectId: project.id,
+        expectedRevision: imported.project.revision,
+        operations: [{ kind: 'set_bed', assetId: null }],
+      },
+      { mutationId: 'clear_replaced_bed', capturedAt: '2026-08-17T12:06:00.000Z' }
+    );
+    const managedPath = path.join(rootDir, project.id, 'imports', 'bed_replaced.wav');
+    await fs.writeFile(managedPath, createWav(0x81));
+
+    await expect(
+      media.detachBedAudioV2({
+        projectId: project.id,
+        assetId: 'bed_replaced',
+        expectedRevision: cleared.project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'storage_error' });
+    const loaded = await store.getProjectV2(project.id);
+    expect(loaded.status === 'supported' ? loaded.project.assets : {}).toHaveProperty('bed_replaced');
+    await expect(fs.readFile(managedPath)).resolves.toEqual(createWav(0x81));
+  });
+
+  it('finishes only an identity-bound committed detach intent during restart cleanup', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const sourcePath = path.join(rootDir, 'retained.wav');
+    await fs.writeFile(sourcePath, wav);
+    const media = createStudioMediaStore({
+      store,
+      createId: () => 'bed_retained',
+      createMutationId: () => 'bed_retained_import',
+      now: () => '2026-08-17T12:05:00.000Z',
+      probeBedAudioV2: async () => ({ durationSeconds: 1, audioStreamCount: 1, otherStreamCount: 0 }),
+    });
+    const imported = await media.importBedAudioFromPathV2({
+      projectId: project.id,
+      sourcePath,
+      expectedRevision: project.revision,
+    });
+    const projectDir = await store.getVerifiedProjectDirectoryV2(project.id);
+    if (projectDir === null) throw new Error('Bed cleanup project directory missing');
+    const importsDir = path.join(projectDir, 'imports');
+    const partsDir = path.join(projectDir, 'parts');
+    const managedPath = path.join(importsDir, 'bed_retained.wav');
+    const managedStats = await fs.lstat(managedPath);
+    await store.updateProjectV2(
+      project.id,
+      (current) => {
+        current.bedAssetId = null;
+        delete current.assets.bed_retained;
+        return current;
+      },
+      imported.project.revision
+    );
+    const intentPath = path.join(partsDir, 'bed-detach-bed_retained.json');
+    await Promise.all([
+      fs.writeFile(path.join(importsDir, 'unclaimed_audio.wav'), createWav(0x81)),
+      fs.writeFile(path.join(importsDir, 'foreign.txt'), 'preserve me'),
+      fs.writeFile(
+        intentPath,
+        `${JSON.stringify({
+          schemaVersion: 2,
+          kind: 'detach_bed_audio',
+          projectId: project.id,
+          expectedRevision: imported.project.revision,
+          asset: imported.asset,
+          managedIdentity: { dev: String(managedStats.dev), ino: String(managedStats.ino) },
+        })}\n`
+      ),
+    ]);
+    await fs.rename(managedPath, `${managedPath}.bed-quarantine`);
+
+    await media.cleanupOrphanPartsV2();
+
+    await expect(fs.access(managedPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.access(`${managedPath}.bed-quarantine`)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.access(intentPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.readFile(path.join(importsDir, 'unclaimed_audio.wav'))).resolves.toEqual(createWav(0x81));
+    await expect(fs.readFile(path.join(importsDir, 'foreign.txt'), 'utf8')).resolves.toBe('preserve me');
+  });
+
+  it('rolls back an identity-bound pre-commit import intent during restart cleanup', async () => {
+    const { store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const projectDir = await store.getVerifiedProjectDirectoryV2(project.id);
+    if (projectDir === null) throw new Error('Bed import repair project directory missing');
+    const importsDir = path.join(projectDir, 'imports');
+    const partsDir = path.join(projectDir, 'parts');
+    await Promise.all([fs.mkdir(importsDir), fs.mkdir(partsDir)]);
+    const managedPath = path.join(importsDir, 'bed_interrupted_import.wav');
+    await fs.writeFile(managedPath, wav);
+    const managedStats = await fs.lstat(managedPath);
+    const asset = {
+      id: 'bed_interrupted_import',
+      projectId: project.id,
+      shotId: null,
+      mediaKind: 'audio',
+      mimeType: 'audio/wav',
+      managedAsset: { collection: 'imports', fileName: 'bed_interrupted_import.wav' },
+      byteSize: wav.length,
+      sha256: createHash('sha256').update(wav).digest('hex'),
+      durationSeconds: 1,
+      createdAt: '2026-08-17T12:05:00.000Z',
+    } as const;
+    const intentPath = path.join(partsDir, 'bed-import-bed_interrupted_import.json');
+    await fs.writeFile(
+      intentPath,
+      `${JSON.stringify({
+        schemaVersion: 2,
+        kind: 'import_bed_audio',
+        projectId: project.id,
+        expectedRevision: project.revision,
+        asset,
+        managedIdentity: { dev: String(managedStats.dev), ino: String(managedStats.ino) },
+      })}\n`
+    );
+    const media = createStudioMediaStore({ store });
+
+    await media.cleanupOrphanPartsV2();
+
+    await expect(fs.access(managedPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.access(intentPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await store.getProjectV2(project.id)).toEqual({ status: 'supported', project });
+  });
+
+  it('clears an uncommitted detach intent while preserving its still-referenced WAV', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const sourcePath = path.join(rootDir, 'uncommitted-detach.wav');
+    await fs.writeFile(sourcePath, wav);
+    const media = createStudioMediaStore({
+      store,
+      createId: () => 'bed_uncommitted',
+      createMutationId: () => 'bed_uncommitted_import',
+      now: () => '2026-08-17T12:05:00.000Z',
+      probeBedAudioV2: async () => ({ durationSeconds: 1, audioStreamCount: 1, otherStreamCount: 0 }),
+    });
+    const imported = await media.importBedAudioFromPathV2({
+      projectId: project.id,
+      sourcePath,
+      expectedRevision: project.revision,
+    });
+    const cleared = await store.applyMutationBatchV2(
+      {
+        schemaVersion: 2,
+        projectId: project.id,
+        expectedRevision: imported.project.revision,
+        operations: [{ kind: 'set_bed', assetId: null }],
+      },
+      { mutationId: 'clear_uncommitted_bed', capturedAt: '2026-08-17T12:06:00.000Z' }
+    );
+    const projectDir = await store.getVerifiedProjectDirectoryV2(project.id);
+    if (projectDir === null) throw new Error('Bed cleanup project directory missing');
+    const managedPath = path.join(projectDir, 'imports', 'bed_uncommitted.wav');
+    const managedStats = await fs.lstat(managedPath);
+    const intentPath = path.join(projectDir, 'parts', 'bed-detach-bed_uncommitted.json');
+    await fs.writeFile(
+      intentPath,
+      `${JSON.stringify({
+        schemaVersion: 2,
+        kind: 'detach_bed_audio',
+        projectId: project.id,
+        expectedRevision: cleared.project.revision,
+        asset: imported.asset,
+        managedIdentity: { dev: String(managedStats.dev), ino: String(managedStats.ino) },
+      })}\n`
+    );
+    await fs.rename(intentPath, `${intentPath}.bed-quarantine`);
+
+    await media.cleanupOrphanPartsV2();
+
+    await expect(fs.readFile(managedPath)).resolves.toEqual(wav);
+    await expect(fs.access(intentPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.access(`${intentPath}.bed-quarantine`)).rejects.toMatchObject({ code: 'ENOENT' });
+    const loaded = await store.getProjectV2(project.id);
+    expect(loaded.status === 'supported' ? loaded.project.assets : {}).toHaveProperty('bed_uncommitted');
+  });
+
+  it('rejects malformed bed import and detach envelopes before allocating managed bytes', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const sourcePath = path.join(rootDir, 'envelope.wav');
+    await fs.writeFile(sourcePath, wav);
+    const media = createStudioMediaStore({
+      store,
+      probeBedAudioV2: async () => ({ durationSeconds: 1, audioStreamCount: 1, otherStreamCount: 0 }),
+    });
+
+    await expect(
+      media.importBedAudioFromPathV2({
+        projectId: project.id,
+        sourcePath,
+        expectedRevision: project.revision,
+        extra: true,
+      } as never)
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+    await expect(
+      media.detachBedAudioV2({ projectId: project.id, expectedRevision: project.revision, assetId: '../bed' })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+    await expect(fs.access(path.join(rootDir, project.id, 'parts'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('rejects imports for individually binned Shots and Shots contained by binned Beats before staging bytes', async () => {
@@ -1039,11 +2225,21 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     const binned = structuredClone(project);
     binned.beatOrder = [];
     binned.bin.push({ kind: 'beat', beatId: 'beat_1', reason: 'lifted' });
-    const updateProjectV2 = vi.fn(
-      async (_projectId: string, update: (current: StudioProjectV2) => StudioProjectV2): Promise<StudioProjectV2> =>
-        update(structuredClone(binned))
+    const projectDirectory = await store.getVerifiedProjectDirectoryV2(project.id);
+    if (projectDirectory === null) throw new Error('Missing active-ownership project directory');
+    const withProjectAuthorityV2 = vi.fn(
+      async (
+        _projectId: string,
+        operation: (snapshot: StudioProjectAuthoritySnapshotV2) => Promise<unknown>
+      ): Promise<unknown> =>
+        operation({
+          project: structuredClone(binned),
+          projectDir: projectDirectory,
+          assertCurrent: async () => undefined,
+          commit: async (update) => update(structuredClone(binned)),
+        })
     );
-    const concurrentStore: CreativeStudioStore = { ...store, updateProjectV2 };
+    const concurrentStore = { ...store, withProjectAuthorityV2 } as CreativeStudioStore;
     const media = createStudioMediaStore({
       store: concurrentStore,
       createId: () => 'concurrently_binned_asset',
@@ -1058,7 +2254,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       })
     ).rejects.toMatchObject({ code: 'invalid_media' });
 
-    expect(updateProjectV2).toHaveBeenCalledOnce();
+    expect(withProjectAuthorityV2).toHaveBeenCalledOnce();
     expect(await fs.readdir(path.join(rootDir, project.id, 'parts')).catch(() => [])).toEqual([]);
     expect(await fs.readdir(path.join(rootDir, project.id, 'imports')).catch(() => [])).toEqual([]);
     const loaded = await store.getProjectV2(project.id);
@@ -1447,31 +2643,6 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       mutate(input);
       // eslint-disable-next-line no-await-in-loop -- Every scalar boundary must refuse independently.
       await expect(media.persistCapturedPosterV2(input as never)).rejects.toMatchObject({ code: 'invalid_media' });
-    }
-
-    const outputCases: Array<(input: Record<string, unknown>) => void> = [
-      (input) => (input.projectId = '../project'),
-      (input) => (input.declaredMimeType = 'video/webm'),
-      (input) => (input.width = 1.5),
-      (input) => (input.width = 0),
-      (input) => (input.height = 1.5),
-      (input) => (input.height = 0),
-      (input) => (input.declaredByteSize = 1.5),
-      (input) => (input.declaredByteSize = 0),
-      (input) => (input.durationSeconds = Number.NaN),
-      (input) => (input.durationSeconds = 0),
-    ];
-    for (const mutate of outputCases) {
-      const input: Record<string, unknown> = {
-        projectId: project.id,
-        declaredMimeType: 'video/mp4',
-        width: 1,
-        height: 1,
-        body: Readable.from([mp4]),
-      };
-      mutate(input);
-      // eslint-disable-next-line no-await-in-loop -- Every scalar boundary must refuse independently.
-      await expect(media.persistProjectOutputV2(input as never)).rejects.toMatchObject({ code: 'invalid_media' });
     }
 
     await expect(
@@ -2026,5 +3197,77 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       },
     });
     await expect(fs.readFile(framePath)).resolves.toEqual(png);
+  });
+
+  it('removes a refused ready-frame repair even when the stale asset id remains recorded', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ purpose: 'video_take' });
+    const extract = async (input: { destinationPath: string }): Promise<{ source: 'local_decode' }> => {
+      await fs.writeFile(input.destinationPath, png);
+      return { source: 'local_decode' };
+    };
+    const setupMedia = createStudioMediaStore({
+      store,
+      createId: idSequence('take_for_refused_repair', 'frame_for_refused_repair'),
+      probeVideoDurationSecondsV2: async () => 10,
+      conditioningFrameExtractor: extract,
+    });
+    await setupMedia.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_1',
+      mediaKind: 'video',
+      declaredMimeType: 'video/mp4',
+      body: Readable.from([mp4]),
+    });
+    const extractionId = createStudioFrameExtractionId({
+      shotId: 'shot_1',
+      takeAssetId: 'take_for_refused_repair',
+      endpointSeconds: 10,
+    });
+    await store.updateProjectV2(project.id, (current) => {
+      current.shots.shot_1!.selectedTakeId = 'take_for_refused_repair';
+      current.frameExtractions[extractionId] = {
+        id: extractionId,
+        shotId: 'shot_1',
+        takeAssetId: 'take_for_refused_repair',
+        endpointSeconds: 10,
+        frameAssetId: null,
+        status: 'pending',
+        errorCode: null,
+      };
+      return current;
+    });
+    await setupMedia.extractConditioningFrameV2({ projectId: project.id, extractionId });
+    const framePath = path.join(rootDir, project.id, 'conditioningFrames', 'frame_for_refused_repair.png');
+    await fs.rm(framePath);
+    let active = true;
+    const guardedStore = wrapFinalProjectCommitAuthorization(store, async () => {
+      active = false;
+    });
+    const replacementFrame = Buffer.concat([png, Buffer.from([0x01])]);
+    const recoveryMedia = createStudioMediaStore({
+      store: guardedStore,
+      createId: () => 'must_not_allocate_for_ready_repair',
+      assertActive: () => {
+        if (!active) throw new CreativeStudioMediaError('job_inactive');
+      },
+      conditioningFrameExtractor: async (input) => {
+        await fs.writeFile(input.destinationPath, replacementFrame);
+        return { source: 'local_decode' };
+      },
+    });
+
+    await expect(
+      recoveryMedia.extractConditioningFrameV2({ projectId: project.id, extractionId })
+    ).rejects.toMatchObject({ code: 'storage_error' });
+
+    await expect(fs.access(framePath)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
+      status: 'supported',
+      project: {
+        frameExtractions: { [extractionId]: { status: 'ready', frameAssetId: 'frame_for_refused_repair' } },
+        assets: { frame_for_refused_repair: { id: 'frame_for_refused_repair' } },
+      },
+    });
   });
 });

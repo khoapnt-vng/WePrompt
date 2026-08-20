@@ -34,6 +34,7 @@ import {
 } from '@/common/types/project/creativeStudioTypes';
 import {
   STUDIO_MAX_ACTIVE_BRIEF_REFERENCES,
+  isCanonicalStudioBedAudioAssetV2,
   isStudioBriefReferenceLabel,
   isStudioReferenceImageMimeType,
 } from '@/common/types/project/creativeStudioManagedAssetCollections';
@@ -712,7 +713,7 @@ const validateAsset = (assetId: string, projectId: string, value: unknown): valu
       return false;
     }
   } else if (value.shotId === null && value.mediaKind === 'audio') {
-    if (hasRole || value.managedAsset.collection !== 'imports') return false;
+    if (!isCanonicalStudioBedAudioAssetV2(value as StudioAssetV2)) return false;
   } else if (value.shotId === null || hasRole || value.mediaKind === 'audio') {
     return false;
   }
@@ -1488,14 +1489,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
 
   if (project.bedAssetId !== null) {
     const bed = ownValue(project.assets, project.bedAssetId);
-    if (
-      bed === undefined ||
-      bed.shotId !== null ||
-      bed.mediaKind !== 'audio' ||
-      bed.managedAsset.collection !== 'imports' ||
-      bed.briefReferenceRole !== undefined ||
-      bed.briefReferenceLabel !== undefined
-    ) {
+    if (bed === undefined || !isCanonicalStudioBedAudioAssetV2(bed)) {
       return false;
     }
   }

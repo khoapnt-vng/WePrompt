@@ -5,6 +5,7 @@
  */
 
 import type {
+  StudioCascadeProgressV2,
   StudioAssetV2,
   StudioBeat,
   StudioBinItem,
@@ -18,8 +19,8 @@ import type {
   StudioRendererUndoTopV2,
   StudioRendererWorkspaceStatusV2,
   StudioShot,
-  StudioCascadeProgressV2,
 } from '@/common/types/project/creativeStudioTypes';
+import { STUDIO_BED_FADE_OUT_SECONDS } from '@/common/types/project/creativeStudioTypes';
 import { isCanonicalStudioGeneratedTakeV2 } from '@/common/types/project/creativeStudioCanonicalTake';
 import {
   studioPlanningShotBoundariesV2,
@@ -145,6 +146,66 @@ export type WorkspaceBinItemProjection =
       value: WorkspaceBinnedTakeProjection;
     };
 
+export type WorkspaceCutBeatDurationKind = 'actual' | 'target' | 'pending';
+
+export type WorkspaceCutBeatProjection = {
+  id: string;
+  title: string;
+  shotCount: number;
+  durationKind: WorkspaceCutBeatDurationKind;
+  durationSeconds: number | null;
+  coverAssetId: string | null;
+};
+
+export type WorkspaceCutAudioImportProjection = {
+  assetId: string;
+  position: number;
+  durationSeconds: number;
+  byteSize: number;
+  createdAt: string;
+};
+
+export type WorkspaceCutBedProjection =
+  | { status: 'none'; assetId: null }
+  | { status: 'invalid'; assetId: string }
+  | {
+      status: 'duration_pending';
+      assetId: string;
+      sourceDurationSeconds: number;
+    }
+  | {
+      status: 'too_short';
+      assetId: string;
+      sourceDurationSeconds: number;
+      requiredDurationSeconds: number;
+    }
+  | {
+      status: 'ready';
+      assetId: string;
+      sourceDurationSeconds: number;
+      fadeOutStartSeconds: number;
+      fadeOutEndSeconds: number;
+    };
+
+export type WorkspaceCutMatchCandidateProjection = {
+  shotId: string;
+  beatId: string;
+  beatTitle: string;
+  line: string;
+  coverAssetId: string | null;
+};
+
+export type WorkspaceCutProjection = {
+  orderReady: boolean;
+  beats: WorkspaceCutBeatProjection[];
+  filmDurationSeconds: number | null;
+  audioImports: WorkspaceCutAudioImportProjection[];
+  bed: WorkspaceCutBedProjection;
+  matchCandidates: WorkspaceCutMatchCandidateProjection[];
+  selectedMatchShotId: string | null;
+  matchSelectionInvalid: boolean;
+};
+
 export type WorkspaceProjection = {
   projectId: string;
   projectRevision: number;
@@ -155,6 +216,7 @@ export type WorkspaceProjection = {
   workspaceStatusReady: boolean;
   chainStatusReady: boolean;
   requestShapeLocked: boolean;
+  cut: WorkspaceCutProjection;
   bin: {
     items: WorkspaceBinItemProjection[];
     beats: WorkspaceBinnedBeatProjection[];
@@ -469,6 +531,176 @@ const projectBeatActualSeconds = (project: StudioRendererProjectV2, beat: Studio
     actualSeconds = nextActualSeconds;
   }
   return actualSeconds;
+};
+
+const validCutAudioImport = (
+  project: StudioRendererProjectV2,
+  assetId: string
+): Omit<WorkspaceCutAudioImportProjection, 'position'> | null => {
+  const asset = ownValue(project.assets, assetId);
+  return asset?.id === assetId &&
+    isSafeStudioId(assetId) &&
+    asset.projectId === project.id &&
+    asset.shotId === null &&
+    asset.mediaKind === 'audio' &&
+    asset.managedAsset?.collection === 'imports' &&
+    asset.briefReferenceRole === undefined &&
+    asset.briefReferenceLabel === undefined &&
+    typeof asset.mimeType === 'string' &&
+    asset.mimeType.startsWith('audio/') &&
+    Number.isSafeInteger(asset.byteSize) &&
+    asset.byteSize > 0 &&
+    asset.durationSeconds !== undefined &&
+    Number.isFinite(asset.durationSeconds) &&
+    asset.durationSeconds > 0 &&
+    asset.durationSeconds <= Number.MAX_SAFE_INTEGER &&
+    isDisplayTimestamp(asset.createdAt)
+    ? {
+        assetId,
+        durationSeconds: asset.durationSeconds,
+        byteSize: asset.byteSize,
+        createdAt: asset.createdAt,
+      }
+    : null;
+};
+
+const projectCut = (
+  project: StudioRendererProjectV2,
+  activeBeats: readonly WorkspaceBeatProjection[]
+): WorkspaceCutProjection => {
+  const activeBeatIds = activeBeats.map((beat) => beat.id);
+  const orderReady =
+    activeBeats.length === project.beatOrder.length &&
+    new Set(activeBeatIds).size === activeBeatIds.length &&
+    activeBeatIds.every((beatId, index) => beatId === project.beatOrder[index]);
+  const beats: WorkspaceCutBeatProjection[] = [];
+  const seenBeatIds = new Set<string>();
+  let filmDurationSeconds: number | null = orderReady ? 0 : null;
+
+  for (const beat of activeBeats) {
+    if (seenBeatIds.has(beat.id) || !isSafeStudioId(beat.id) || !isDisplayText(beat.title)) {
+      filmDurationSeconds = null;
+      continue;
+    }
+    seenBeatIds.add(beat.id);
+    const durationKind: WorkspaceCutBeatDurationKind =
+      beat.shots.length === 0 ? (beat.targetSeconds === null ? 'pending' : 'target') : 'actual';
+    const candidateDuration =
+      durationKind === 'target' ? beat.targetSeconds : durationKind === 'actual' ? beat.actualSeconds : null;
+    const durationSeconds =
+      candidateDuration !== null && Number.isFinite(candidateDuration) && candidateDuration >= 0
+        ? candidateDuration
+        : null;
+    if (durationSeconds === null) {
+      filmDurationSeconds = null;
+    } else if (filmDurationSeconds !== null) {
+      const nextDuration = filmDurationSeconds + durationSeconds;
+      filmDurationSeconds =
+        Number.isFinite(nextDuration) && nextDuration <= Number.MAX_SAFE_INTEGER ? nextDuration : null;
+    }
+    beats.push({
+      id: beat.id,
+      title: beat.title,
+      shotCount: beat.shots.length,
+      durationKind: durationSeconds === null ? 'pending' : durationKind,
+      durationSeconds,
+      coverAssetId: beat.coverAssetId === null || isSafeStudioId(beat.coverAssetId) ? beat.coverAssetId : null,
+    });
+  }
+
+  const audioImports = Object.keys(project.assets)
+    .flatMap((assetId) => {
+      const candidate = validCutAudioImport(project, assetId);
+      return candidate === null ? [] : [candidate];
+    })
+    .toSorted((left, right) => {
+      if (left.createdAt !== right.createdAt) return left.createdAt < right.createdAt ? 1 : -1;
+      if (left.assetId === right.assetId) return 0;
+      return left.assetId < right.assetId ? 1 : -1;
+    })
+    .map((asset, index) => ({
+      assetId: asset.assetId,
+      position: index + 1,
+      durationSeconds: asset.durationSeconds,
+      byteSize: asset.byteSize,
+      createdAt: asset.createdAt,
+    }));
+
+  let bed: WorkspaceCutBedProjection = { status: 'none', assetId: null };
+  if (project.bedAssetId !== null) {
+    const selectedBed = isSafeStudioId(project.bedAssetId)
+      ? (audioImports.find((asset) => asset.assetId === project.bedAssetId) ?? null)
+      : null;
+    if (selectedBed === null) {
+      bed = {
+        status: 'invalid',
+        assetId: typeof project.bedAssetId === 'string' ? project.bedAssetId : '',
+      };
+    } else if (filmDurationSeconds === null) {
+      bed = {
+        status: 'duration_pending',
+        assetId: selectedBed.assetId,
+        sourceDurationSeconds: selectedBed.durationSeconds,
+      };
+    } else if (selectedBed.durationSeconds < filmDurationSeconds) {
+      bed = {
+        status: 'too_short',
+        assetId: selectedBed.assetId,
+        sourceDurationSeconds: selectedBed.durationSeconds,
+        requiredDurationSeconds: filmDurationSeconds,
+      };
+    } else {
+      bed = {
+        status: 'ready',
+        assetId: selectedBed.assetId,
+        sourceDurationSeconds: selectedBed.durationSeconds,
+        fadeOutStartSeconds: Math.max(0, filmDurationSeconds - STUDIO_BED_FADE_OUT_SECONDS),
+        fadeOutEndSeconds: filmDurationSeconds,
+      };
+    }
+  }
+
+  const matchCandidates: WorkspaceCutMatchCandidateProjection[] = [];
+  const seenShotIds = new Set<string>();
+  if (orderReady) {
+    for (const beat of activeBeats) {
+      for (const shot of beat.shots) {
+        if (
+          seenShotIds.has(shot.id) ||
+          !isSafeStudioId(shot.id) ||
+          !isDisplayText(shot.line) ||
+          !seenBeatIds.has(beat.id)
+        ) {
+          continue;
+        }
+        seenShotIds.add(shot.id);
+        matchCandidates.push({
+          shotId: shot.id,
+          beatId: beat.id,
+          beatTitle: beat.title,
+          line: shot.line,
+          coverAssetId: shot.coverAssetId === null || isSafeStudioId(shot.coverAssetId) ? shot.coverAssetId : null,
+        });
+      }
+    }
+  }
+  const selectedMatchShotId =
+    project.matchToShotId !== null &&
+    isSafeStudioId(project.matchToShotId) &&
+    matchCandidates.some((candidate) => candidate.shotId === project.matchToShotId)
+      ? project.matchToShotId
+      : null;
+
+  return {
+    orderReady,
+    beats,
+    filmDurationSeconds,
+    audioImports,
+    bed,
+    matchCandidates,
+    selectedMatchShotId,
+    matchSelectionInvalid: project.matchToShotId !== null && selectedMatchShotId === null,
+  };
 };
 
 const PART_DONE_CASCADE_REASONS: ReadonlySet<StudioCascadeProgressV2['waitingReason']> = new Set([
@@ -989,6 +1221,7 @@ export const projectWorkspace = (
       matchedWorkspaceStatus?.parkEligibility.some((row) =>
         row.blockers.some((blocker) => blocker.code === 'bound_nonterminal_request')
       ) ?? false,
+    cut: projectCut(project, activeBeats),
     bin: { items: binnedItems, beats: binnedBeats, shots: binnedShots, takes: binnedTakes },
     undoTop:
       matchedWorkspaceStatus?.undoTop === null || matchedWorkspaceStatus === null

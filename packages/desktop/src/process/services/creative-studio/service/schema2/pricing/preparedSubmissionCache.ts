@@ -186,7 +186,7 @@ const compareEntries = (left: CacheEntry, right: CacheEntry): number => {
 };
 
 /**
- * Owns every unconfirmed schema-2 quote session. All methods are synchronous so each admission,
+ * Owns all unconfirmed schema-2 quote sessions. All methods are synchronous so each admission,
  * lookup, claim, release, and consume transition is atomic on the main-process event loop.
  */
 export class StudioPreparedSubmissionCacheV2 {
@@ -333,7 +333,7 @@ export class StudioPreparedSubmissionCacheV2 {
   }
 
   #oldestIdle(entries: readonly CacheEntry[]): CacheEntry | undefined {
-    return entries.filter((entry) => entry.claimedBy === null).sort(compareEntries)[0];
+    return entries.filter((entry) => entry.claimedBy === null).toSorted(compareEntries)[0];
   }
 
   #evictForProject(projectId: string, byteSize: number): void {

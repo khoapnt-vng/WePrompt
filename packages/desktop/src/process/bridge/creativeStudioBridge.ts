@@ -9,21 +9,24 @@ import { ipcBridge } from '@/common';
 import { CREATIVE_STUDIO_ENABLED } from '@/common/config/constants';
 import {
   STUDIO_PROJECT_SCHEMA_VERSION,
+  STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT,
+  STUDIO_MAX_EXPORTS_PER_SHAPE,
   STUDIO_VIEWS,
   type StudioCommandErrorCode,
   type StudioCommandResult,
   type StudioMutationBatchResultV2,
   type StudioMutationReducerContextV2,
   type StudioRendererProjectCommitResultV2,
+  type StudioRendererExportCatalogV2,
   type StudioRendererWorkspaceStatusV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { CreativeStudioServiceError } from '@process/services/creative-studio/service/projectMutations';
-import { StudioPreparedSubmissionCacheErrorV2 } from '@process/services/creative-studio/service/schema2/preparedSubmissionCache';
+import { StudioPreparedSubmissionCacheErrorV2 } from '@process/services/creative-studio/service/schema2/pricing/preparedSubmissionCache';
 import type { CreativeStudioServiceV2 } from '@process/services/creative-studio/service/v2Service';
 import { CreativeStudioStoreError } from '@process/services/creative-studio/store';
 import { CreativeStudioMediaError } from '@process/services/creative-studio/mediaStore';
 import { getCreativeStudioService } from '@process/services/creative-studio/runtime';
-import { BrowserWindow, dialog } from 'electron';
+import { BrowserWindow, dialog, shell } from 'electron';
 
 const errorMessageKeys: Record<StudioCommandErrorCode, string> = {
   feature_disabled: 'conversation.creativeStudio.errors.featureDisabled',
@@ -94,6 +97,16 @@ export type CreativeStudioBridgeDependencies = {
   getService: () => CreativeStudioServiceV2;
   getParentWindow?: () => BrowserWindow | undefined;
   showOpenDialog?: (window: BrowserWindow | undefined) => Promise<{ canceled: boolean; filePaths: string[] }>;
+  showAudioOpenDialog?: (
+    window: BrowserWindow | undefined,
+    filterName: string
+  ) => Promise<{ canceled: boolean; filePaths: string[] }>;
+  chooseExportDestination?: (
+    window: BrowserWindow | undefined,
+    input: { suggestedName: string; isDirectory: boolean }
+  ) => Promise<string | null>;
+  revealExportPath?: (filePath: string) => void;
+  translate?: (key: string) => string | Promise<string>;
   createMutationId?: () => string;
   now?: () => Date;
 };
@@ -288,6 +301,23 @@ const defaultDependencies: CreativeStudioBridgeDependencies = {
       properties: ['openFile'],
       filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp'] }],
     }),
+  showAudioOpenDialog: (window, filterName) =>
+    dialog.showOpenDialog(window ?? BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0], {
+      properties: ['openFile'],
+      filters: [{ name: filterName, extensions: ['wav'] }],
+    }),
+  chooseExportDestination: async (window, input) => {
+    const result = await dialog.showSaveDialog(
+      window ?? BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0],
+      { defaultPath: input.suggestedName }
+    );
+    return result.canceled || !result.filePath ? null : result.filePath;
+  },
+  revealExportPath: (filePath) => shell.showItemInFolder(filePath),
+  translate: async (key) => {
+    const { default: i18n } = await import('@process/services/i18n');
+    return i18n.t(key);
+  },
 };
 
 const toCommitResult = (
@@ -306,6 +336,98 @@ const toCommitResult = (
         createdBeatIds: [],
         createdShotIds: [],
       };
+
+const exportBoundaryFailure = (): never => {
+  throw new CreativeStudioStoreError('storage_error', 'Creative Studio export result is invalid');
+};
+
+const isExactDataObject = (value: unknown, keys: readonly string[]): value is Record<string, unknown> => {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return false;
+  const ownKeys = Reflect.ownKeys(value);
+  if (ownKeys.length !== keys.length || ownKeys.some((key) => typeof key !== 'string' || !keys.includes(key))) {
+    return false;
+  }
+  return ownKeys.every((key) => {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor !== undefined && descriptor.enumerable && 'value' in descriptor;
+  });
+};
+
+const toRendererExportCatalog = (value: unknown): StudioRendererExportCatalogV2 => {
+  if (
+    !isExactDataObject(value, ['revision', 'artifacts']) ||
+    !Number.isSafeInteger(value.revision) ||
+    (value.revision as number) < 1 ||
+    !Array.isArray(value.artifacts) ||
+    Reflect.ownKeys(value.artifacts).length !== value.artifacts.length + 1 ||
+    value.artifacts.length > STUDIO_MAX_EXPORTS_PER_SHAPE * 3
+  ) {
+    return exportBoundaryFailure();
+  }
+  const artifacts: StudioRendererExportCatalogV2['artifacts'] = [];
+  const ids = new Set<string>();
+  const shapeCounts = new Map<'editor_folder' | 'still' | 'script', number>();
+  let previous: { createdAt: string; id: string } | null = null;
+  for (let index = 0; index < value.artifacts.length; index += 1) {
+    if (!Object.hasOwn(value.artifacts, index)) return exportBoundaryFailure();
+    const artifact = value.artifacts[index];
+    if (
+      !isExactDataObject(artifact, ['id', 'sourceRevision', 'shape', 'byteSize', 'fileCount', 'createdAt']) ||
+      typeof artifact.id !== 'string' ||
+      !/^[A-Za-z0-9_-]{1,256}$/.test(artifact.id) ||
+      ids.has(artifact.id) ||
+      !Number.isSafeInteger(artifact.sourceRevision) ||
+      (artifact.sourceRevision as number) < 1 ||
+      (artifact.shape !== 'editor_folder' && artifact.shape !== 'still' && artifact.shape !== 'script') ||
+      !Number.isSafeInteger(artifact.byteSize) ||
+      (artifact.byteSize as number) < 0 ||
+      !Number.isSafeInteger(artifact.fileCount) ||
+      (artifact.fileCount as number) < 1 ||
+      (artifact.fileCount as number) > STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT ||
+      (artifact.shape !== 'editor_folder' && artifact.fileCount !== 1) ||
+      typeof artifact.createdAt !== 'string' ||
+      !Number.isFinite(Date.parse(artifact.createdAt)) ||
+      new Date(artifact.createdAt).toISOString() !== artifact.createdAt
+    ) {
+      return exportBoundaryFailure();
+    }
+    if (
+      previous !== null &&
+      (previous.createdAt > artifact.createdAt ||
+        (previous.createdAt === artifact.createdAt && previous.id >= artifact.id))
+    ) {
+      return exportBoundaryFailure();
+    }
+    ids.add(artifact.id);
+    const shapeCount = (shapeCounts.get(artifact.shape) ?? 0) + 1;
+    if (shapeCount > STUDIO_MAX_EXPORTS_PER_SHAPE) return exportBoundaryFailure();
+    shapeCounts.set(artifact.shape, shapeCount);
+    previous = { createdAt: artifact.createdAt, id: artifact.id };
+    artifacts.push({
+      id: artifact.id,
+      sourceRevision: artifact.sourceRevision as number,
+      shape: artifact.shape,
+      byteSize: artifact.byteSize as number,
+      fileCount: artifact.fileCount as number,
+      createdAt: artifact.createdAt,
+    });
+  }
+  return { revision: value.revision as number, artifacts };
+};
+
+const toCopyExportResult = (value: unknown): { status: 'cancelled' } | { status: 'copied' } => {
+  if (!isExactDataObject(value, ['status']) || (value.status !== 'cancelled' && value.status !== 'copied')) {
+    return exportBoundaryFailure();
+  }
+  return { status: value.status };
+};
+
+const toRevealExportResult = (value: unknown): { status: 'revealed' } => {
+  if (!isExactDataObject(value, ['status']) || value.status !== 'revealed') return exportBoundaryFailure();
+  return { status: 'revealed' };
+};
 
 const mutationContext = (dependencies: CreativeStudioBridgeDependencies): StudioMutationReducerContextV2 => ({
   mutationId: (dependencies.createMutationId ?? (() => `native_${randomUUID().replaceAll('-', '')}`))(),
@@ -475,6 +597,64 @@ export function initCreativeStudioBridge(dependencies: CreativeStudioBridgeDepen
         projectRevision: imported.project.revision,
       };
     })
+  );
+  ipcBridge.creativeStudio.importBedAudio.provider((input) =>
+    runCommand(async () => {
+      const parentWindow = (dependencies.getParentWindow ?? defaultDependencies.getParentWindow!)();
+      const filterName = await (dependencies.translate ?? defaultDependencies.translate!)(
+        'conversation.creativeStudio.workspace.cut.bed.pickerFilter'
+      );
+      const picked = await (dependencies.showAudioOpenDialog ?? defaultDependencies.showAudioOpenDialog!)(
+        parentWindow,
+        filterName
+      );
+      if (picked.canceled || !picked.filePaths[0]) return { status: 'cancelled' as const };
+      const imported = await dependencies
+        .getService()
+        .importBedAudioFromPath({ ...input, sourcePath: picked.filePaths[0] });
+      return {
+        status: 'imported' as const,
+        assetId: imported.asset.id,
+        projectRevision: imported.project.revision,
+      };
+    })
+  );
+  ipcBridge.creativeStudio.detachBedAudio.provider((input) =>
+    runCommand(async () => {
+      const project = await dependencies.getService().detachBedAudio(input);
+      return { status: 'detached' as const, projectRevision: project.revision };
+    })
+  );
+  ipcBridge.creativeStudio.setBed.provider((input) =>
+    runCommand(() => applyOperations(input, [{ kind: 'set_bed', assetId: input.assetId }]))
+  );
+  ipcBridge.creativeStudio.setMatchTo.provider((input) =>
+    runCommand(() => applyOperations(input, [{ kind: 'set_match_to', shotId: input.shotId }]))
+  );
+  ipcBridge.creativeStudio.createExport.provider((input) =>
+    runCommand(() => dependencies.getService().createExport(input).then(toRendererExportCatalog))
+  );
+  ipcBridge.creativeStudio.listExports.provider((input) =>
+    runCommand(() => dependencies.getService().listExports(input).then(toRendererExportCatalog))
+  );
+  ipcBridge.creativeStudio.copyExport.provider((input) =>
+    runCommand(() => {
+      const parentWindow = (dependencies.getParentWindow ?? defaultDependencies.getParentWindow!)();
+      return dependencies
+        .getService()
+        .copyExport(input, (options) =>
+          (dependencies.chooseExportDestination ?? defaultDependencies.chooseExportDestination!)(parentWindow, options)
+        )
+        .then(toCopyExportResult);
+    })
+  );
+  ipcBridge.creativeStudio.revealExport.provider((input) =>
+    runCommand(() =>
+      dependencies
+        .getService()
+        .revealExport(input, dependencies.revealExportPath ?? defaultDependencies.revealExportPath!)
+        .then(toRevealExportResult)
+    )
   );
   ipcBridge.creativeStudio.listConnectionCandidates.provider(() =>
     runCommand(() => dependencies.getService().listConnectionCandidates())

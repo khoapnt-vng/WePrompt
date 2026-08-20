@@ -9,6 +9,7 @@ import type {
   StudioCascadeProgressV2,
   StudioEditableProjectSettingsChanges,
   StudioRendererAuthoringOperationV2,
+  StudioRendererExportCatalogV2,
   StudioRendererProjectV2,
   StudioRouteCatalogV2,
   StudioView,
@@ -17,6 +18,7 @@ import type { UseWorkspaceDraftsResult } from '../useWorkspaceDrafts';
 import type { WorkspaceProjection } from '../workspaceProjection';
 import type { BeatPanelActions, BeatPanelBriefReferenceOption, BeatPanelReviewGraph } from '../BeatPanel';
 import type { BoardActions } from './Board';
+import type { CutActions } from './Cut';
 
 export type WorkspaceMutationCallbacks = {
   editProject: (changes: StudioEditableProjectSettingsChanges) => Promise<boolean>;
@@ -34,12 +36,15 @@ export type WorkspaceControlsProps = {
   project: StudioRendererProjectV2;
   projection: WorkspaceProjection;
   routeCatalog: StudioRouteCatalogV2 | null;
+  exportCatalog: StudioRendererExportCatalogV2 | null;
   drafts: UseWorkspaceDraftsResult;
   pending: boolean;
   gateLocked: boolean;
   errorMessageKey: string | null;
+  exportErrorMessageKey: string | null;
   mutations: WorkspaceMutationCallbacks;
   boardActions: BoardActions;
+  cutActions: CutActions;
   beatPanelActions: BeatPanelActions;
   beatPanelBriefReferenceOptions: readonly BeatPanelBriefReferenceOption[];
   beatPanelReviewGraphs: readonly BeatPanelReviewGraph[];

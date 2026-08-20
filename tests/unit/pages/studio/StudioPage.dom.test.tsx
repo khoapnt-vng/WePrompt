@@ -7,6 +7,7 @@ import type {
   StudioAssetV2,
   StudioProposalV2,
   StudioReferenceRequestV2,
+  StudioRendererExportCatalogV2,
   StudioRendererProjectV2,
   StudioRendererReferenceGenerationHandoffV2,
 } from '@/common/types/project/creativeStudioTypes';
@@ -15,6 +16,7 @@ import type {
   BeatPanelBriefReferenceOption,
   BeatPanelImportResult,
   BoardActions,
+  CutActions,
 } from '@/renderer/pages/studio/components/Workspace';
 
 const mocks = vi.hoisted(() => {
@@ -42,6 +44,7 @@ const mocks = vi.hoisted(() => {
     closeHandlers,
     beatPanelActions: null as BeatPanelActions | null,
     boardActions: null as BoardActions | null,
+    cutActions: null as CutActions | null,
     beatPanelBriefReferenceOptions: null as readonly BeatPanelBriefReferenceOption[] | null,
     bridge: {
       getProject: { invoke: vi.fn() },
@@ -54,6 +57,14 @@ const mocks = vi.hoisted(() => {
       getWorkspaceStatus: { invoke: vi.fn() },
       getChainStatus: { invoke: vi.fn() },
       listRoutes: { invoke: vi.fn() },
+      importBedAudio: { invoke: vi.fn() },
+      detachBedAudio: { invoke: vi.fn() },
+      setBed: { invoke: vi.fn() },
+      setMatchTo: { invoke: vi.fn() },
+      createExport: { invoke: vi.fn() },
+      listExports: { invoke: vi.fn() },
+      copyExport: { invoke: vi.fn() },
+      revealExport: { invoke: vi.fn() },
       prepareSubmission: { invoke: vi.fn() },
       confirmSubmission: { invoke: vi.fn() },
       dismissReferenceGenerationHandoff: { invoke: vi.fn() },
@@ -101,6 +112,7 @@ vi.mock('@/renderer/pages/studio/components/Workspace', async (importOriginal) =
     WorkspaceControls: (props: React.ComponentProps<typeof actual.WorkspaceControls>) => {
       mocks.beatPanelActions = props.beatPanelActions;
       mocks.boardActions = props.boardActions;
+      mocks.cutActions = props.cutActions;
       mocks.beatPanelBriefReferenceOptions = props.beatPanelBriefReferenceOptions;
       return React.createElement(actual.WorkspaceControls, props);
     },
@@ -237,16 +249,16 @@ const projectWithDraftBatch = (beatCount: number): StudioRendererProjectV2 => {
   return value;
 };
 
-const recoveryAsset = (id: string, shotId: string, mediaKind: StudioAssetV2['mediaKind']): StudioAssetV2 => ({
+const recoveryAsset = (id: string, shotId: string | null, mediaKind: StudioAssetV2['mediaKind']): StudioAssetV2 => ({
   id,
   projectId: 'project_1',
   shotId,
   mediaKind,
-  mimeType: mediaKind === 'video' ? 'video/mp4' : 'image/png',
+  mimeType: mediaKind === 'video' ? 'video/mp4' : mediaKind === 'audio' ? 'audio/wav' : 'image/png',
   managedAsset: { collection: mediaKind === 'video' ? 'assets' : 'imports', fileName: `${id}.bin` },
   byteSize: 16,
   sha256: 'a'.repeat(64),
-  ...(mediaKind === 'video' ? { durationSeconds: 4 } : {}),
+  ...(mediaKind === 'video' || mediaKind === 'audio' ? { durationSeconds: 4 } : {}),
   createdAt: '2026-01-01T00:00:00.000Z',
 });
 
@@ -432,6 +444,11 @@ const capturedBoardActions = (): BoardActions => {
   return mocks.boardActions!;
 };
 
+const capturedCutActions = (): CutActions => {
+  expect(mocks.cutActions).not.toBeNull();
+  return mocks.cutActions!;
+};
+
 const expectSuccessfulBeatPanelAction = async (invoke: () => Promise<boolean>): Promise<void> => {
   let result: boolean | undefined;
   await act(async () => {
@@ -480,6 +497,7 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.closeHandlers.hasUnsavedWork = null;
     mocks.closeHandlers.flushUnsavedWork = null;
     mocks.boardActions = null;
+    mocks.cutActions = null;
     mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: project() }));
     mocks.bridge.listProposals.invoke.mockResolvedValue(ok([]));
     mocks.bridge.listReferenceRequests.invoke.mockResolvedValue(ok([]));
@@ -493,6 +511,7 @@ describe('StudioPage schema-2 cutover', () => {
         catalogVersion: 'catalog_1',
       })
     );
+    mocks.bridge.listExports.invoke.mockResolvedValue(ok({ revision: 1, artifacts: [] }));
     mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue(commit(4));
     mocks.bridge.undoLast.invoke.mockResolvedValue(commit(4));
     mocks.bridge.retryConditioningFrame.invoke.mockResolvedValue(commit(4));
@@ -500,6 +519,13 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.bridge.editProject.invoke.mockResolvedValue(commit(4));
     mocks.bridge.setRules.invoke.mockResolvedValue(commit(4));
     mocks.bridge.importSeedStill.invoke.mockResolvedValue(ok({ status: 'cancelled' }));
+    mocks.bridge.importBedAudio.invoke.mockResolvedValue(ok({ status: 'cancelled' }));
+    mocks.bridge.detachBedAudio.invoke.mockResolvedValue(ok({ status: 'detached', projectRevision: 4 }));
+    mocks.bridge.setBed.invoke.mockResolvedValue(commit(4));
+    mocks.bridge.setMatchTo.invoke.mockResolvedValue(commit(4));
+    mocks.bridge.createExport.invoke.mockResolvedValue(ok({ revision: 2, artifacts: [] }));
+    mocks.bridge.copyExport.invoke.mockResolvedValue(ok({ status: 'cancelled' }));
+    mocks.bridge.revealExport.invoke.mockResolvedValue(ok({ status: 'revealed' }));
     mocks.bridge.selectTake.invoke.mockResolvedValue(commit(4));
     mocks.bridge.parkTake.invoke.mockResolvedValue(commit(4));
     mocks.bridge.addAlternateTake.invoke.mockResolvedValue(commit(4));
@@ -614,8 +640,11 @@ describe('StudioPage schema-2 cutover', () => {
       'Navigation-only local draft'
     );
     expect(document.querySelector('[data-studio-director-conversation-owner]')).toBe(conversationOwner);
+    fireEvent.click(screen.getAllByLabelText(/conversation\.creativeStudio\.workspace\.board\.openBeat/)[0]!);
+    expect(screen.getByRole('dialog')).toBeVisible();
     fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.cut' }));
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/cut'));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(screen.getByLabelText('conversation.creativeStudio.workspace.controls.name')).toHaveValue(
       'Navigation-only local draft'
     );
@@ -1147,6 +1176,83 @@ describe('StudioPage schema-2 cutover', () => {
     expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps export catalog authority sanitized, monotonic, and isolated from an older in-flight list', async () => {
+    const listing = deferred<{ ok: true; data: StudioRendererExportCatalogV2 }>();
+    mocks.bridge.listExports.invoke.mockReturnValueOnce(listing.promise);
+    render(<HookProbe projectId='project_1' />);
+
+    await waitFor(() => expect(mocks.bridge.listExports.invoke).toHaveBeenCalledTimes(1));
+    const newest: StudioRendererExportCatalogV2 = {
+      revision: 3,
+      artifacts: [
+        {
+          id: 'export_new',
+          sourceRevision: 3,
+          shape: 'script',
+          byteSize: 24,
+          fileCount: 1,
+          createdAt: '2026-01-01T00:00:03.000Z',
+        },
+      ],
+    };
+    act(() => {
+      expect(latestHookResult?.installExportCatalog(newest)).toBe(true);
+    });
+    expect(latestHookResult?.exportCatalog).toEqual(newest);
+
+    await act(async () => {
+      listing.resolve(ok({ revision: 1, artifacts: [] }));
+      await listing.promise;
+    });
+    expect(latestHookResult?.exportCatalog).toEqual(newest);
+
+    const conflicting = {
+      ...newest,
+      artifacts: [{ ...newest.artifacts[0]!, byteSize: 25 }],
+    };
+    act(() => {
+      expect(latestHookResult?.installExportCatalog(conflicting)).toBe(false);
+    });
+    expect(latestHookResult?.exportCatalog).toBeNull();
+    expect(latestHookResult?.exportErrorMessageKey).toBe('conversation.creativeStudio.workspace.errors.storage');
+
+    const hostile = {
+      revision: 4,
+      artifacts: [
+        {
+          ...newest.artifacts[0]!,
+          managedExport: { collection: 'exports', fileName: 'private.zip' },
+        },
+      ],
+    };
+    act(() => {
+      expect(latestHookResult?.installExportCatalog(hostile as unknown as StudioRendererExportCatalogV2)).toBe(false);
+    });
+    expect(latestHookResult?.exportCatalog).toBeNull();
+
+    const overRetained = {
+      revision: 5,
+      artifacts: Array.from({ length: 6 }, (_, index) => ({
+        ...newest.artifacts[0]!,
+        id: `export_over_${index}`,
+        createdAt: `2026-01-01T00:00:0${index}.000Z`,
+      })),
+    };
+    act(() => {
+      expect(latestHookResult?.installExportCatalog(overRetained)).toBe(false);
+    });
+    expect(latestHookResult?.exportCatalog).toBeNull();
+
+    const futureSource = {
+      revision: 6,
+      artifacts: [{ ...newest.artifacts[0]!, id: 'export_future', sourceRevision: 4 }],
+    };
+    act(() => {
+      expect(latestHookResult?.installExportCatalog(futureSource)).toBe(false);
+    });
+    expect(latestHookResult?.exportCatalog).toBeNull();
+  });
+
   it('discards an in-flight catalog when its bound route signature changes', async () => {
     const catalog = deferred<ReturnType<typeof ok>>();
     const changed = { ...project(), revision: 4, aspectRatio: '9:16' as const, name: 'New frame' };
@@ -1308,6 +1414,7 @@ describe('StudioPage schema-2 cutover', () => {
       await latestHookResult?.refetchReferences();
       await latestHookResult?.refetchWorkspace();
       expect(await latestHookResult?.refetchRoutes()).toBe(false);
+      expect(await latestHookResult?.refetchExports()).toBe(false);
       await latestHookResult?.refetchAll();
     });
 
@@ -1316,6 +1423,7 @@ describe('StudioPage schema-2 cutover', () => {
     expect(mocks.bridge.listReferenceRequests.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.getWorkspaceStatus.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.listRoutes.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.listExports.invoke).not.toHaveBeenCalled();
   });
 
   it('routes projected recovery choices through exact revisioned providers', async () => {
@@ -1469,6 +1577,141 @@ describe('StudioPage schema-2 cutover', () => {
       shotId: 'upstream_seed',
     });
     expect(document.querySelector('[data-asset-id="imported_seed"]')).not.toBeNull();
+  });
+
+  it('routes the eight Cut providers through exact project and catalog revisions without paid work', async () => {
+    const projectAt = (revision: number): StudioRendererProjectV2 => {
+      const value = projectWithHandoffShot();
+      value.revision = revision;
+      const current = recoveryAsset('audio_current', null, 'audio');
+      current.durationSeconds = 20;
+      const old = recoveryAsset('audio_old', null, 'audio');
+      old.durationSeconds = 18;
+      value.assets[current.id] = current;
+      value.assets[old.id] = old;
+      value.bedAssetId = revision >= 5 ? current.id : null;
+      value.matchToShotId = revision >= 6 ? 'shot_3' : null;
+      if (revision >= 8) {
+        const imported = recoveryAsset('audio_imported', null, 'audio');
+        imported.durationSeconds = 22;
+        value.assets[imported.id] = imported;
+        value.bedAssetId = imported.id;
+      }
+      return value;
+    };
+    const projects = [3, 4, 5, 6, 7, 8].map(projectAt);
+    mocks.bridge.getProject.invoke
+      .mockReset()
+      .mockResolvedValueOnce(ok({ status: 'supported', project: projects[0]! }))
+      .mockResolvedValueOnce(ok({ status: 'supported', project: projects[1]! }))
+      .mockResolvedValueOnce(ok({ status: 'supported', project: projects[2]! }))
+      .mockResolvedValueOnce(ok({ status: 'supported', project: projects[3]! }))
+      .mockResolvedValueOnce(ok({ status: 'supported', project: projects[4]! }))
+      .mockResolvedValue(ok({ status: 'supported', project: projects[5]! }));
+    mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue(commit(4));
+    mocks.bridge.setBed.invoke.mockResolvedValue(commit(5));
+    mocks.bridge.setMatchTo.invoke.mockResolvedValue(commit(6));
+    mocks.bridge.detachBedAudio.invoke.mockResolvedValue(ok({ status: 'detached', projectRevision: 7 }));
+    mocks.bridge.importBedAudio.invoke
+      .mockResolvedValueOnce(ok({ status: 'cancelled' as const }))
+      .mockResolvedValueOnce(ok({ status: 'imported' as const, assetId: 'audio_imported', projectRevision: 8 }));
+    const catalog1: StudioRendererExportCatalogV2 = { revision: 1, artifacts: [] };
+    const artifact = {
+      id: 'export_1',
+      sourceRevision: 8,
+      shape: 'still' as const,
+      byteSize: 64,
+      fileCount: 1,
+      createdAt: '2026-01-01T00:00:08.000Z',
+    };
+    const catalog2: StudioRendererExportCatalogV2 = { revision: 2, artifacts: [artifact] };
+    const catalog3: StudioRendererExportCatalogV2 = { revision: 3, artifacts: [artifact] };
+    mocks.bridge.listExports.invoke.mockReset().mockResolvedValueOnce(ok(catalog1)).mockResolvedValue(ok(catalog3));
+    mocks.bridge.createExport.invoke.mockResolvedValue(ok(catalog2));
+    mocks.bridge.copyExport.invoke.mockResolvedValue(ok({ status: 'cancelled' as const }));
+    mocks.bridge.revealExport.invoke.mockResolvedValue(ok({ status: 'revealed' as const }));
+
+    renderStudio('/studio/project_1/cut');
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.cutActions).not.toBeNull());
+    await waitFor(() => expect(mocks.bridge.listExports.invoke).toHaveBeenCalledWith({ projectId: 'project_1' }));
+    const cutApi = capturedCutActions();
+
+    let importResult: Awaited<ReturnType<CutActions['importBedAudio']>> | undefined;
+    await act(async () => {
+      importResult = await cutApi.importBedAudio();
+    });
+    expect(importResult).toBe('cancelled');
+    expect(mocks.bridge.importBedAudio.invoke).toHaveBeenLastCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+    });
+    expect(mocks.bridge.getProject.invoke).toHaveBeenCalledTimes(1);
+
+    await expectSuccessfulBeatPanelAction(() => cutApi.reorderBeats(['beat_1']));
+    expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenLastCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      operations: [{ kind: 'reorder_beats', beatOrder: ['beat_1'] }],
+    });
+    await expectSuccessfulBeatPanelAction(() => cutApi.setBed('audio_current'));
+    expect(mocks.bridge.setBed.invoke).toHaveBeenLastCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 4,
+      assetId: 'audio_current',
+    });
+    await expectSuccessfulBeatPanelAction(() => cutApi.setMatchTo('shot_3'));
+    expect(mocks.bridge.setMatchTo.invoke).toHaveBeenLastCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 5,
+      shotId: 'shot_3',
+    });
+    await expectSuccessfulBeatPanelAction(() => cutApi.detachBedAudio('audio_old'));
+    expect(mocks.bridge.detachBedAudio.invoke).toHaveBeenLastCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 6,
+      assetId: 'audio_old',
+    });
+    await act(async () => {
+      importResult = await cutApi.importBedAudio();
+    });
+    expect(importResult).toBe('imported');
+    expect(mocks.bridge.importBedAudio.invoke).toHaveBeenLastCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 7,
+    });
+
+    const projectReadsBeforeExports = mocks.bridge.getProject.invoke.mock.calls.length;
+    await expectSuccessfulBeatPanelAction(() => cutApi.createExport({ shape: 'still', shotId: 'shot_3' }));
+    expect(mocks.bridge.createExport.invoke).toHaveBeenLastCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 8,
+      expectedCatalogRevision: 1,
+      shape: 'still',
+      shotId: 'shot_3',
+    });
+    expect(mocks.bridge.getProject.invoke).toHaveBeenCalledTimes(projectReadsBeforeExports);
+
+    let copyResult: Awaited<ReturnType<CutActions['copyExport']>> | undefined;
+    await act(async () => {
+      copyResult = await cutApi.copyExport('export_1');
+    });
+    expect(copyResult).toBe('cancelled');
+    expect(mocks.bridge.copyExport.invoke).toHaveBeenLastCalledWith({
+      projectId: 'project_1',
+      expectedCatalogRevision: 2,
+      artifactId: 'export_1',
+    });
+    await expectSuccessfulBeatPanelAction(() => cutApi.revealExport('export_1'));
+    expect(mocks.bridge.revealExport.invoke).toHaveBeenLastCalledWith({
+      projectId: 'project_1',
+      expectedCatalogRevision: 2,
+      artifactId: 'export_1',
+    });
+    await expectSuccessfulBeatPanelAction(cutApi.refreshExports);
+    expect(mocks.bridge.listExports.invoke).toHaveBeenLastCalledWith({ projectId: 'project_1' });
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
   });
 
   it('routes every captured Beat Panel edit and lifecycle action through revision-pinned providers', async () => {

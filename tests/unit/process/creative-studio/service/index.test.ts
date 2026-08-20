@@ -10,6 +10,7 @@ import { promises as nodeFs } from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -24,6 +25,7 @@ import {
   STUDIO_REFERENCE_REQUEST_V2_PENDING_TTL_MS,
   type CreateStudioProjectInputV2,
   type StudioAssetV2,
+  type StudioExportCatalogV2,
   type StudioJobV2,
   type StudioMutationOperationV2,
   type StudioProjectV2,
@@ -33,7 +35,11 @@ import {
 import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
 import { STUDIO_RULE_LIMITS } from '@/common/types/project/creativeStudioRules';
 import type { IProvider } from '@/common/config/storage';
-import { CreativeStudioStoreError, type CreativeStudioStore } from '@process/services/creative-studio/store';
+import {
+  createCreativeStudioStore,
+  CreativeStudioStoreError,
+  type CreativeStudioStore,
+} from '@process/services/creative-studio/store';
 import {
   createCreativeStudioServiceV2,
   derivePayableShotIds,
@@ -54,10 +60,15 @@ import {
 } from '@process/services/creative-studio/providerResolver';
 import { createConfiguredStudioRateCardV2 } from '@process/services/creative-studio/rateCardConfig';
 import { ProviderDeadlineError } from '@process/services/creative-studio/adapters/types';
+import type { StudioMediaStore } from '@process/services/creative-studio/mediaStore';
 import {
   StudioPreparedSubmissionCacheErrorV2,
   StudioPreparedSubmissionCacheV2,
-} from '@process/services/creative-studio/service/schema2/preparedSubmissionCache';
+} from '@process/services/creative-studio/service/schema2/pricing/preparedSubmissionCache';
+import {
+  StudioExportCatalogErrorV2,
+  type StudioExportCatalogStoreV2,
+} from '@process/services/creative-studio/service/schema2/exports';
 import {
   createListRoutesHandler,
   createProposeBriefRuleHandlerV2,
@@ -256,8 +267,15 @@ describe('CreativeStudioServiceV2', () => {
       useDefaultClock?: boolean;
       createQuoteId?: () => string;
       createConnectionId?: () => string;
+      createExportId?: () => string;
       now?: () => Date;
       preparedSubmissionCache?: StudioPreparedSubmissionCacheV2;
+      exportCatalogStore?: StudioExportCatalogStoreV2;
+      serviceStore?: CreativeStudioStore;
+      resolveAssetV2?: StudioMediaStore['resolveAssetV2'];
+      resolveAssetWithProjectAuthorityV2?: StudioMediaStore['resolveAssetWithProjectAuthorityV2'];
+      importBedAudioFromPathV2?: StudioMediaStore['importBedAudioFromPathV2'];
+      detachBedAudioV2?: StudioMediaStore['detachBedAudioV2'];
     } = {}
   ) => {
     let current = structuredClone(project);
@@ -450,6 +468,7 @@ describe('CreativeStudioServiceV2', () => {
       connections = next;
       return removed;
     });
+    const deleteProjectV2 = vi.fn(async () => true);
     const store = {
       listProjectsV2: vi.fn(async () => ({ projects: [], unsupportedProjectIds: [], quarantinedProjectIds: [] })),
       createProjectV2: vi.fn(async () => structuredClone(current)),
@@ -458,7 +477,7 @@ describe('CreativeStudioServiceV2', () => {
       updateProjectV2,
       confirmProjectV2,
       confirmReferenceGenerationHandoffV2,
-      deleteProjectV2: vi.fn(async () => true),
+      deleteProjectV2,
       listProposalsV2,
       acceptProposalV2,
       rejectProposalV2,
@@ -472,6 +491,33 @@ describe('CreativeStudioServiceV2', () => {
       listConnections,
       saveConnection,
       removeConnection,
+      withProjectAuthorityV2: vi.fn(async (projectId: string, operation: (authority: never) => Promise<unknown>) => {
+        if (projectId !== current.id) throw new CreativeStudioStoreError('not_found', 'missing Studio fixture project');
+        return operation({
+          project: structuredClone(current),
+          projectDir: `/studio/${current.id}`,
+          assertCurrent: vi.fn(async () => undefined),
+          delete: async (expectedRevision: number, authorizeBeforeDelete?: () => void | Promise<void>) => {
+            await authorizeBeforeDelete?.();
+            return deleteProjectV2(projectId, expectedRevision);
+          },
+        } as never);
+      }),
+      deleteProjectWithSidecarAuthorityV2: vi.fn(
+        async (projectId: string, _expectedRevision: number, operation: (authority: never) => Promise<boolean>) => {
+          if (projectId !== current.id) {
+            throw new CreativeStudioStoreError('not_found', 'missing Studio fixture project');
+          }
+          return operation({
+            project: structuredClone(current),
+            projectDir: `/studio/${current.id}`,
+            delete: async (expectedRevision: number, authorizeBeforeDelete?: () => void | Promise<void>) => {
+              await authorizeBeforeDelete?.();
+              return deleteProjectV2(projectId, expectedRevision);
+            },
+          } as never);
+        }
+      ),
     };
     const dispatchAuthorizedJobsV2 = vi.fn(async ({ jobIds }: { projectId: string; jobIds: string[] }) =>
       jobIds.map((jobId) => structuredClone(current.jobs[jobId]!))
@@ -495,9 +541,38 @@ describe('CreativeStudioServiceV2', () => {
       asset: structuredClone(referenceAsset),
       project: structuredClone(current),
     }));
+    const bedAsset: StudioAssetV2 = {
+      id: 'bed_service_1',
+      projectId: current.id,
+      shotId: null,
+      mediaKind: 'audio',
+      mimeType: 'audio/wav',
+      managedAsset: { collection: 'imports', fileName: 'bed_service_1.wav' },
+      byteSize: 44,
+      sha256: 'b'.repeat(64),
+      durationSeconds: 12,
+      createdAt: committedAt,
+    };
+    const importBedAudioFromPathV2 =
+      options.importBedAudioFromPathV2 ??
+      vi.fn<StudioMediaStore['importBedAudioFromPathV2']>(async (input) => {
+        input.assertActive?.();
+        const importedProject = structuredClone(current);
+        importedProject.assets[bedAsset.id] = structuredClone(bedAsset);
+        importedProject.bedAssetId = bedAsset.id;
+        return { asset: structuredClone(bedAsset), project: importedProject };
+      });
+    const detachBedAudioV2 =
+      options.detachBedAudioV2 ??
+      vi.fn<StudioMediaStore['detachBedAudioV2']>(async (input) => {
+        input.assertActive?.();
+        return structuredClone(current);
+      });
     const detachBriefReferenceV2 = vi.fn(async () => structuredClone(current));
     const persistCapturedPosterV2 = vi.fn(async () => structuredClone(referenceAsset));
     const extractConditioningFrameV2 = vi.fn(async () => ({ status: 'failed' as const }));
+    const resolveAssetV2 = options.resolveAssetV2 ?? vi.fn(async () => null);
+    const resolveAssetWithProjectAuthorityV2 = options.resolveAssetWithProjectAuthorityV2 ?? vi.fn(async () => null);
     const providerResolver = {
       listConnectionCandidates: vi.fn(async () => [
         {
@@ -560,8 +635,33 @@ describe('CreativeStudioServiceV2', () => {
         },
       ]
     );
+    const defaultExportCatalogStore = {
+      list: vi.fn(async () => ({
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        projectId: current.id,
+        revision: 1,
+        artifacts: [],
+      })),
+      create: vi.fn(async () => ({
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        projectId: current.id,
+        revision: 1,
+        artifacts: [],
+      })),
+      repair: vi.fn(async () => ({
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        projectId: current.id,
+        revision: 1,
+        artifacts: [],
+      })),
+      copy: vi.fn(async () => ({ status: 'cancelled' as const })),
+      resolveRevealPath: vi.fn(async () => '/studio/export'),
+      withManagedMediaAuthority: vi.fn(async (_authority, operation) =>
+        operation({ catalogRevision: 1, managedByteSize: 0 })
+      ),
+    } satisfies StudioExportCatalogStoreV2;
     const service = createCreativeStudioServiceV2({
-      store: store as unknown as CreativeStudioStore,
+      store: options.serviceStore ?? (store as unknown as CreativeStudioStore),
       jobManager: { dispatchAuthorizedJobsV2, cancelJobV2, retryJobV2, retryDownloadV2 } as never,
       providerResolver: providerResolver as never,
       listProviders,
@@ -570,6 +670,8 @@ describe('CreativeStudioServiceV2', () => {
       ensureDirectorCommandMailbox,
       preparedSubmissionCache: options.preparedSubmissionCache,
       createConnectionId: options.createConnectionId,
+      createExportId: options.createExportId,
+      exportCatalogStore: options.exportCatalogStore ?? defaultExportCatalogStore,
       ...(options.includeRateCard === false ? {} : { rateCard: loadRateCard }),
       ...(options.useDefaultIds
         ? {}
@@ -584,9 +686,13 @@ describe('CreativeStudioServiceV2', () => {
         : {
             mediaStore: {
               importReferenceFromPathV2,
+              importBedAudioFromPathV2,
+              detachBedAudioV2,
               detachBriefReferenceV2,
               persistCapturedPosterV2,
               extractConditioningFrameV2,
+              resolveAssetV2,
+              resolveAssetWithProjectAuthorityV2,
             } as never,
           }),
       onProjectUpdated,
@@ -594,14 +700,19 @@ describe('CreativeStudioServiceV2', () => {
     return {
       service,
       store,
+      exportCatalogStore: options.exportCatalogStore ?? defaultExportCatalogStore,
       submitShots,
       cancelJobV2,
       retryJobV2,
       retryDownloadV2,
       importReferenceFromPathV2,
+      importBedAudioFromPathV2,
+      detachBedAudioV2,
       detachBriefReferenceV2,
       persistCapturedPosterV2,
       extractConditioningFrameV2,
+      resolveAssetV2,
+      resolveAssetWithProjectAuthorityV2,
       providerResolver,
       onProjectUpdated,
       proposal,
@@ -723,6 +834,636 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.submitShots).not.toHaveBeenCalled();
     expect(harness.importReferenceFromPathV2).not.toHaveBeenCalled();
     expect(harness.store.updateProjectV2).not.toHaveBeenCalled();
+  });
+
+  it('imports bed audio through the exact main-only lifecycle fence', async () => {
+    const harness = makeHarness();
+
+    const imported = await harness.service.importBedAudioFromPath({
+      projectId: 'project_v2',
+      expectedRevision: 2,
+      sourcePath: '/chosen/bed.wav',
+    });
+
+    expect(imported).toMatchObject({
+      asset: { id: 'bed_service_1', mediaKind: 'audio', durationSeconds: 12 },
+      project: { id: 'project_v2', bedAssetId: 'bed_service_1' },
+    });
+    expect(harness.importBedAudioFromPathV2).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_v2',
+      expectedRevision: 2,
+      sourcePath: '/chosen/bed.wav',
+      assertActive: expect.any(Function),
+    });
+    expect(harness.onProjectUpdated).toHaveBeenCalledExactlyOnceWith('project_v2');
+  });
+
+  it('detaches only the named unselected bed audio through the lifecycle fence', async () => {
+    const harness = makeHarness();
+
+    await expect(
+      harness.service.detachBedAudio({ projectId: 'project_v2', expectedRevision: 2, assetId: 'bed_service_1' })
+    ).resolves.toMatchObject({ id: 'project_v2', revision: 2 });
+    expect(harness.detachBedAudioV2).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_v2',
+      expectedRevision: 2,
+      assetId: 'bed_service_1',
+      assertActive: expect.any(Function),
+    });
+    expect(harness.onProjectUpdated).toHaveBeenCalledExactlyOnceWith('project_v2');
+  });
+
+  it('rejects malformed bed-audio envelopes before media storage', async () => {
+    const harness = makeHarness();
+    const attempts: Array<() => Promise<unknown>> = [
+      () => harness.service.importBedAudioFromPath(null as never),
+      () =>
+        harness.service.importBedAudioFromPath({
+          projectId: 'project_v2',
+          expectedRevision: 2,
+          sourcePath: '/chosen/bed.wav',
+          extra: true,
+        } as never),
+      () =>
+        harness.service.importBedAudioFromPath({
+          projectId: 'project_v2',
+          expectedRevision: 2,
+          sourcePath: 42,
+        } as never),
+      () => harness.service.importBedAudioFromPath({ projectId: 'project_v2', expectedRevision: 2, sourcePath: '' }),
+      () => harness.service.detachBedAudio(null as never),
+      () =>
+        harness.service.detachBedAudio({
+          projectId: 'project_v2',
+          expectedRevision: 2,
+          assetId: 'bed_service_1',
+          extra: true,
+        } as never),
+    ];
+
+    for (const attempt of attempts) {
+      // eslint-disable-next-line no-await-in-loop -- every hostile bed envelope must refuse independently.
+      await expect(attempt()).rejects.toMatchObject({ code: 'invalid_payload' });
+    }
+    expect(harness.importBedAudioFromPathV2).not.toHaveBeenCalled();
+    expect(harness.detachBedAudioV2).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when bed media storage is unavailable', async () => {
+    const harness = makeHarness(undefined, { includeMediaStore: false });
+
+    await expect(
+      harness.service.importBedAudioFromPath({
+        projectId: 'project_v2',
+        expectedRevision: 2,
+        sourcePath: '/chosen/bed.wav',
+      })
+    ).rejects.toMatchObject({ code: 'storage_error' });
+    await expect(
+      harness.service.detachBedAudio({ projectId: 'project_v2', expectedRevision: 2, assetId: 'bed_service_1' })
+    ).rejects.toMatchObject({ code: 'storage_error' });
+  });
+
+  it('serializes exact export authority and returns only the renderer-safe catalog', async () => {
+    const rawCatalog: StudioExportCatalogV2 = {
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      projectId: 'project_v2',
+      revision: 2,
+      artifacts: [
+        {
+          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          id: 'export_service_1',
+          projectId: 'project_v2',
+          sourceRevision: 2,
+          shape: 'script',
+          payloadKind: 'file',
+          managedExport: { collection: 'exports', fileName: 'private-export-name' },
+          byteSize: 42,
+          fileCount: 1,
+          manifestSha256: 'f'.repeat(64),
+          createdAt: '2026-08-17T00:00:02.000Z',
+        },
+      ],
+    };
+    const create = vi.fn(async () => structuredClone(rawCatalog));
+    const repair = vi.fn(async () => structuredClone(rawCatalog));
+    const copy = vi.fn(async (_authority, _request, picker) => {
+      const destination =
+        typeof picker === 'function'
+          ? await picker({
+              artifactId: 'export_service_1',
+              shape: 'script',
+              payloadKind: 'file',
+              suggestedName: 'script.md',
+            })
+          : picker;
+      return destination === null ? ({ status: 'cancelled' } as const) : ({ status: 'copied' } as const);
+    });
+    const resolveRevealPath = vi.fn(async () => '/private/studio/exports/script.md');
+    const exportCatalogStore = {
+      list: vi.fn(async () => structuredClone(rawCatalog)),
+      create,
+      repair,
+      copy,
+      resolveRevealPath,
+      withManagedMediaAuthority: vi.fn(async (_authority, operation) =>
+        operation({ catalogRevision: rawCatalog.revision, managedByteSize: 0 })
+      ),
+    } satisfies StudioExportCatalogStoreV2;
+    const harness = makeHarness(undefined, {
+      exportCatalogStore,
+      createExportId: () => 'export_service_1',
+    });
+
+    const created = await harness.service.createExport({
+      projectId: 'project_v2',
+      expectedRevision: 2,
+      expectedCatalogRevision: 1,
+      shape: 'script',
+    });
+    expect(created).toEqual({
+      revision: 2,
+      artifacts: [
+        {
+          id: 'export_service_1',
+          sourceRevision: 2,
+          shape: 'script',
+          byteSize: 42,
+          fileCount: 1,
+          createdAt: '2026-08-17T00:00:02.000Z',
+        },
+      ],
+    });
+    expect(create).toHaveBeenCalledTimes(1);
+    const [authority, plan] = create.mock.calls[0]!;
+    expect(authority).toMatchObject({ project: { id: 'project_v2', revision: 2 }, projectDir: '/studio/project_v2' });
+    expect(plan).toMatchObject({
+      expectedProjectRevision: 2,
+      expectedCatalogRevision: 1,
+      artifactId: 'export_service_1',
+      managedFileName: 'export_service_1',
+      shape: 'script',
+    });
+    expect(plan.files).toHaveLength(1);
+    expect(plan.files[0]).toMatchObject({ kind: 'generated', relativePath: 'script.md' });
+    expect(Buffer.from((plan.files[0] as { bytes: Uint8Array }).bytes).toString('utf8')).toContain('# Schema 2 launch');
+
+    await expect(harness.service.listExports({ projectId: 'project_v2' })).resolves.toEqual(created);
+    expect(repair).toHaveBeenCalledTimes(1);
+
+    const chooseDestination = vi.fn(async () => '/user/Exports/script.md');
+    await expect(
+      harness.service.copyExport(
+        { projectId: 'project_v2', expectedCatalogRevision: 2, artifactId: 'export_service_1' },
+        chooseDestination
+      )
+    ).resolves.toEqual({ status: 'copied' });
+    expect(chooseDestination).toHaveBeenCalledExactlyOnceWith({ suggestedName: 'script.md', isDirectory: false });
+
+    const revealPath = vi.fn();
+    await expect(
+      harness.service.revealExport(
+        { projectId: 'project_v2', expectedCatalogRevision: 2, artifactId: 'export_service_1' },
+        revealPath
+      )
+    ).resolves.toEqual({ status: 'revealed' });
+    expect(revealPath).toHaveBeenCalledExactlyOnceWith('/private/studio/exports/script.md');
+    expect(harness.onProjectUpdated).not.toHaveBeenCalled();
+    expect(JSON.stringify(created)).not.toContain('managedExport');
+    expect(JSON.stringify(created)).not.toContain('manifestSha256');
+    expect(JSON.stringify(created)).not.toContain('private-export-name');
+  });
+
+  it('normalizes every authored script field to canonical LF bytes', async () => {
+    const project = makeSchema2ServiceProject();
+    project.name = 'Schema\r\n2 launch';
+    project.brief = 'First brief line\rSecond brief line';
+    project.beats.section_1!.title = 'Opening\r\nBeat';
+    project.beats.section_1!.action = 'Move\rthrough the city';
+    project.beats.section_1!.look = 'Warm\r\nlight';
+    project.shots.clip_1!.line = 'A wide\rcomposition';
+    project.shots.clip_1!.narration = 'A voice\r\narrives';
+    project.shots.clip_1!.onScreenText = 'WELCOME\rHOME';
+    const harness = makeHarness(project, { createExportId: () => 'export_script_lf' });
+
+    await harness.service.createExport({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      expectedCatalogRevision: 1,
+      shape: 'script',
+    });
+
+    const plan = vi.mocked(harness.exportCatalogStore.create).mock.calls[0]![1];
+    const script = Buffer.from((plan.files[0] as { bytes: Uint8Array }).bytes).toString('utf8');
+    expect(script).not.toContain('\r');
+    expect(script).toContain('# Schema\n2 launch\n\nFirst brief line\nSecond brief line');
+    expect(script).toContain('Narration: A voice\narrives\n\nOn-screen text: WELCOME\nHOME');
+  });
+
+  it('builds still and editor exports through the held project authority without re-entering media lookup', async () => {
+    const project = makeSchema2ServiceProject();
+    project.beatOrder = ['section_1'];
+    delete project.beats.section_2;
+    delete project.shots.clip_2;
+    addGeneratedVideoTakesForMcpV2(project, 1);
+    const queueReentrantResolver = vi.fn(async () => {
+      throw new Error('export media re-entered the project queue');
+    });
+    const authorityResolver = vi.fn(async (authority: { project: StudioProjectV2 }, assetId: string) => {
+      const asset = authority.project.assets[assetId];
+      if (asset === undefined) return null;
+      return {
+        asset,
+        openVerifiedStream: async () => Readable.from([Buffer.alloc(asset.byteSize, 1)]),
+      };
+    });
+    const create = vi.fn(async (_authority, plan) => {
+      for (const file of plan.files) {
+        if (file.kind !== 'verified_stream') continue;
+        // eslint-disable-next-line no-await-in-loop -- exercises every verified export stream while authority is held.
+        for await (const _chunk of await file.openVerifiedStream()) void _chunk;
+      }
+      return {
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        projectId: project.id,
+        revision: plan.expectedCatalogRevision + 1,
+        artifacts: [],
+      };
+    });
+    const exportCatalogStore = {
+      list: vi.fn(),
+      create,
+      repair: vi.fn(),
+      copy: vi.fn(),
+      resolveRevealPath: vi.fn(),
+      withManagedMediaAuthority: vi.fn(),
+    } as unknown as StudioExportCatalogStoreV2;
+    let exportOrdinal = 0;
+    const harness = makeHarness(project, {
+      exportCatalogStore,
+      createExportId: () => `authority_export_${++exportOrdinal}`,
+      resolveAssetV2: queueReentrantResolver,
+      resolveAssetWithProjectAuthorityV2: authorityResolver,
+    });
+
+    await harness.service.createExport({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      expectedCatalogRevision: 1,
+      shape: 'still',
+      shotId: 'clip_1',
+    });
+    await harness.service.createExport({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      expectedCatalogRevision: 2,
+      shape: 'editor_folder',
+    });
+
+    expect(queueReentrantResolver).not.toHaveBeenCalled();
+    expect(authorityResolver.mock.calls.map(([, assetId]) => assetId)).toEqual(['seed_clip_1', 'take_01']);
+    expect(create.mock.calls.map(([, plan]) => plan.shape)).toEqual(['still', 'editor_folder']);
+    expect(create.mock.calls[1]?.[1].files.some((file) => file.relativePath === 'media/shot-001.mp4')).toBe(true);
+  });
+
+  it('chooses the newest deterministic eligible seed when a still has no explicit cover', async () => {
+    const project = makeSchema2ServiceProject();
+    addGeneratedVideoTakesForMcpV2(project, 1);
+    const shot = project.shots.clip_1!;
+    shot.selectedTakeId = null;
+    shot.seedStillId = null;
+    const seeds: StudioAssetV2[] = [
+      {
+        id: 'seed_alpha',
+        projectId: project.id,
+        shotId: shot.id,
+        mediaKind: 'image',
+        mimeType: 'image/png',
+        managedAsset: { collection: 'imports', fileName: 'seed_alpha.png' },
+        byteSize: 2,
+        sha256: '1'.repeat(64),
+        createdAt: '2026-08-17T00:00:10.000Z',
+      },
+      {
+        id: 'seed_beta',
+        projectId: project.id,
+        shotId: shot.id,
+        mediaKind: 'image',
+        mimeType: 'image/png',
+        managedAsset: { collection: 'imports', fileName: 'seed_beta.png' },
+        byteSize: 3,
+        sha256: '2'.repeat(64),
+        createdAt: '2026-08-17T00:00:11.000Z',
+      },
+      {
+        id: 'seed_gamma',
+        projectId: project.id,
+        shotId: shot.id,
+        mediaKind: 'image',
+        mimeType: 'image/png',
+        managedAsset: { collection: 'imports', fileName: 'seed_gamma.png' },
+        byteSize: 4,
+        sha256: '3'.repeat(64),
+        createdAt: '2026-08-17T00:00:11.000Z',
+      },
+    ];
+    for (const seed of seeds) {
+      project.assets[seed.id] = seed;
+      shot.assetIds.push(seed.id);
+    }
+    const resolveAssetWithProjectAuthorityV2 = vi.fn<StudioMediaStore['resolveAssetWithProjectAuthorityV2']>(
+      async (authority, assetId) => {
+        const asset = authority.project.assets[assetId];
+        return asset === undefined
+          ? null
+          : {
+              asset,
+              openVerifiedStream: async () => Readable.from([Buffer.alloc(asset.byteSize, 1)]),
+            };
+      }
+    );
+    const harness = makeHarness(project, {
+      createExportId: () => 'fallback_still_export',
+      resolveAssetWithProjectAuthorityV2,
+    });
+
+    await harness.service.createExport({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      expectedCatalogRevision: 1,
+      shape: 'still',
+      shotId: shot.id,
+    });
+
+    expect(resolveAssetWithProjectAuthorityV2.mock.calls[0]?.[1]).toBe('seed_gamma');
+    expect(harness.exportCatalogStore.create).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['stale_catalog_revision', 'stale_project'],
+    ['stale_project_revision', 'stale_project'],
+    ['invalid_create_plan', 'invalid_payload'],
+    ['artifact_not_found', 'invalid_payload'],
+    ['storage_error', 'storage_error'],
+  ] as const)('normalizes export-catalog %s failures to %s', async (catalogCode, serviceCode) => {
+    const harness = makeHarness();
+    vi.mocked(harness.exportCatalogStore.repair).mockRejectedValueOnce(new StudioExportCatalogErrorV2(catalogCode));
+
+    await expect(harness.service.listExports({ projectId: 'project_v2' })).rejects.toMatchObject({
+      code: serviceCode,
+    });
+  });
+
+  it('normalizes an editor-folder coverage refusal without publishing an artifact', async () => {
+    const harness = makeHarness();
+
+    await expect(
+      harness.service.createExport({
+        projectId: 'project_v2',
+        expectedRevision: 2,
+        expectedCatalogRevision: 1,
+        shape: 'editor_folder',
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+    expect(harness.exportCatalogStore.create).not.toHaveBeenCalled();
+  });
+
+  it('fences copy and reveal when close wins while their main callbacks are pending', async () => {
+    const copy = vi.fn<StudioExportCatalogStoreV2['copy']>(async (_authority, _input, picker) => {
+      if (typeof picker !== 'function') throw new Error('Expected a destination picker');
+      await picker({
+        artifactId: 'export_service_1',
+        shape: 'script',
+        payloadKind: 'file',
+        suggestedName: 'script.md',
+      });
+      return { status: 'copied' as const };
+    });
+    const copyHarness = makeHarness(undefined, {
+      exportCatalogStore: {
+        ...makeHarness().exportCatalogStore,
+        copy,
+      },
+    });
+    await expect(
+      copyHarness.service.copyExport(
+        { projectId: 'project_v2', expectedCatalogRevision: 1, artifactId: 'export_service_1' },
+        async () => {
+          copyHarness.service.dispose();
+          return '/chosen/script.md';
+        }
+      )
+    ).rejects.toMatchObject({ code: 'busy' });
+
+    let closeReveal = (): void => undefined;
+    const resolveRevealPath = vi.fn<StudioExportCatalogStoreV2['resolveRevealPath']>(async () => {
+      closeReveal();
+      return '/private/studio/exports/script.md';
+    });
+    const revealHarness = makeHarness(undefined, {
+      exportCatalogStore: {
+        ...makeHarness().exportCatalogStore,
+        resolveRevealPath,
+      },
+    });
+    closeReveal = () => revealHarness.service.dispose();
+    const revealPath = vi.fn();
+    await expect(
+      revealHarness.service.revealExport(
+        { projectId: 'project_v2', expectedCatalogRevision: 1, artifactId: 'export_service_1' },
+        revealPath
+      )
+    ).rejects.toMatchObject({ code: 'busy' });
+    expect(revealPath).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed export requests before catalog or paid work', async () => {
+    const exportCatalogStore = {
+      list: vi.fn(),
+      create: vi.fn(),
+      repair: vi.fn(),
+      copy: vi.fn(),
+      resolveRevealPath: vi.fn(),
+    } as unknown as StudioExportCatalogStoreV2;
+    const harness = makeHarness(undefined, { exportCatalogStore });
+    const attempts: Array<() => Promise<unknown>> = [
+      () => harness.service.createExport(null as never),
+      () =>
+        harness.service.createExport({
+          projectId: 'project_v2',
+          expectedRevision: 2,
+          expectedCatalogRevision: 1,
+          shape: 'script',
+          shotId: 'clip_1',
+        } as never),
+      () =>
+        harness.service.createExport({
+          projectId: 'project_v2',
+          expectedRevision: 2,
+          expectedCatalogRevision: 1,
+          shape: 'one_file',
+        } as never),
+      () =>
+        harness.service.createExport({
+          projectId: 'project_v2',
+          expectedRevision: 2,
+          expectedCatalogRevision: 1,
+          shape: 'still',
+        } as never),
+      () => harness.service.listExports({ projectId: 'project_v2', extra: true } as never),
+      () => harness.service.listExports({ projectId: '../project' }),
+      () =>
+        harness.service.copyExport(
+          { projectId: 'project_v2', expectedCatalogRevision: 0, artifactId: 'export_1' },
+          vi.fn()
+        ),
+      () =>
+        harness.service.copyExport(
+          { projectId: 'project_v2', expectedCatalogRevision: 1, artifactId: 'export_1' },
+          null as never
+        ),
+      () =>
+        harness.service.revealExport(
+          { projectId: 'project_v2', expectedCatalogRevision: 1, artifactId: '../export' },
+          vi.fn()
+        ),
+      () =>
+        harness.service.revealExport(
+          { projectId: 'project_v2', expectedCatalogRevision: 1, artifactId: 'export_1' },
+          null as never
+        ),
+    ];
+    for (const attempt of attempts) {
+      // eslint-disable-next-line no-await-in-loop -- each hostile export envelope is independently refused.
+      await expect(attempt()).rejects.toMatchObject({ code: 'invalid_payload' });
+    }
+    expect(exportCatalogStore.create).not.toHaveBeenCalled();
+    expect(exportCatalogStore.repair).not.toHaveBeenCalled();
+    expect(exportCatalogStore.copy).not.toHaveBeenCalled();
+    expect(exportCatalogStore.resolveRevealPath).not.toHaveBeenCalled();
+    expect(harness.submitShots).not.toHaveBeenCalled();
+  });
+
+  it('refuses every schema-1 export boundary without observing or changing the legacy project tree', async () => {
+    const rootDir = await mkdtemp(path.join(tmpdir(), 'studio-v1-export-boundary-'));
+    const projectId = 'prototype_export_v1';
+    const projectDir = path.join(rootDir, projectId);
+    type TreeEntry = { path: string; kind: 'directory' | 'file'; bytes?: string };
+    const snapshotProjectTree = async (): Promise<TreeEntry[]> => {
+      const visit = async (directory: string, relativeDirectory: string): Promise<TreeEntry[]> => {
+        const entries = await nodeFs.readdir(directory, { withFileTypes: true });
+        const nested = await Promise.all(
+          entries.map(async (entry): Promise<TreeEntry[]> => {
+            const relativePath = path.join(relativeDirectory, entry.name);
+            const absolutePath = path.join(directory, entry.name);
+            if (entry.isDirectory()) {
+              return [{ path: relativePath, kind: 'directory' }, ...(await visit(absolutePath, relativePath))];
+            }
+            if (!entry.isFile()) throw new Error('Unexpected legacy fixture entry');
+            return [{ path: relativePath, kind: 'file', bytes: (await readFile(absolutePath)).toString('base64') }];
+          })
+        );
+        return nested.flat();
+      };
+      return (await visit(projectDir, '')).toSorted((left, right) => left.path.localeCompare(right.path));
+    };
+
+    const catalogList = vi.fn();
+    const catalogCreate = vi.fn();
+    const catalogRepair = vi.fn();
+    const catalogCopy = vi.fn();
+    const catalogResolveRevealPath = vi.fn();
+    const catalogWithManagedMediaAuthority = vi.fn();
+    const exportCatalogStore = {
+      list: catalogList,
+      create: catalogCreate,
+      repair: catalogRepair,
+      copy: catalogCopy,
+      resolveRevealPath: catalogResolveRevealPath,
+      withManagedMediaAuthority: catalogWithManagedMediaAuthority,
+    } as unknown as StudioExportCatalogStoreV2;
+    const createExportId = vi.fn(() => 'must_not_allocate_export');
+    const chooseDestination = vi.fn(async () => '/must/not/be/chosen');
+    const revealPath = vi.fn();
+
+    try {
+      await mkdir(path.join(projectDir, 'exports', 'nested'), { recursive: true });
+      await mkdir(path.join(projectDir, 'media'));
+      await writeFile(
+        path.join(projectDir, 'project.json'),
+        JSON.stringify({
+          schemaVersion: 1,
+          id: projectId,
+          revision: 7,
+          privateLegacyToken: 'must-never-cross-the-service-boundary',
+        })
+      );
+      await writeFile(path.join(projectDir, 'exports', 'catalog.json'), Buffer.from([0, 255, 1, 254]));
+      await writeFile(path.join(projectDir, 'exports', 'nested', 'legacy.json'), '{"schemaVersion":1}\r\n');
+      await writeFile(path.join(projectDir, 'media', 'legacy.bin'), Buffer.from([9, 8, 7, 6]));
+      const before = await snapshotProjectTree();
+      const serviceStore = createCreativeStudioStore({ rootDir, logError: () => undefined });
+      const harness = makeHarness(undefined, { createExportId, exportCatalogStore, serviceStore });
+
+      const outcomes = await Promise.allSettled([
+        harness.service.createExport({
+          projectId,
+          expectedRevision: 7,
+          expectedCatalogRevision: 1,
+          shape: 'script',
+        }),
+        harness.service.listExports({ projectId }),
+        harness.service.copyExport(
+          { projectId, expectedCatalogRevision: 1, artifactId: 'legacy_export' },
+          chooseDestination
+        ),
+        harness.service.revealExport(
+          { projectId, expectedCatalogRevision: 1, artifactId: 'legacy_export' },
+          revealPath
+        ),
+      ]);
+
+      expect(
+        outcomes.map((outcome) => {
+          if (outcome.status === 'fulfilled') return { status: outcome.status };
+          const error = outcome.reason;
+          return error instanceof CreativeStudioStoreError
+            ? { status: outcome.status, name: error.name, code: error.code, message: error.message }
+            : { status: outcome.status, name: 'UnknownError', code: null, message: 'redacted' };
+        })
+      ).toEqual(
+        Array.from({ length: 4 }, () => ({
+          status: 'rejected',
+          name: 'CreativeStudioStoreError',
+          code: 'unsupported_prototype_schema',
+          message: 'Unsupported prototype Studio schema',
+        }))
+      );
+      expect({
+        createExportId: createExportId.mock.calls.length,
+        catalogList: catalogList.mock.calls.length,
+        catalogCreate: catalogCreate.mock.calls.length,
+        catalogRepair: catalogRepair.mock.calls.length,
+        catalogCopy: catalogCopy.mock.calls.length,
+        catalogResolveRevealPath: catalogResolveRevealPath.mock.calls.length,
+        catalogWithManagedMediaAuthority: catalogWithManagedMediaAuthority.mock.calls.length,
+        chooseDestination: chooseDestination.mock.calls.length,
+        revealPath: revealPath.mock.calls.length,
+      }).toEqual({
+        createExportId: 0,
+        catalogList: 0,
+        catalogCreate: 0,
+        catalogRepair: 0,
+        catalogCopy: 0,
+        catalogResolveRevealPath: 0,
+        catalogWithManagedMediaAuthority: 0,
+        chooseDestination: 0,
+        revealPath: 0,
+      });
+      expect(await snapshotProjectTree()).toEqual(before);
+    } finally {
+      await rm(rootDir, { recursive: true, force: true });
+    }
   });
 
   it('projects schema-2 proposal lifecycle results without exposing persisted project authority', async () => {
@@ -1904,6 +2645,8 @@ describe('CreativeStudioServiceV2', () => {
     });
     await harness.service.deleteProject({ projectId: project.id, expectedRevision: project.revision });
 
+    expect(harness.exportCatalogStore.withManagedMediaAuthority).toHaveBeenCalledOnce();
+    expect(harness.store.deleteProjectV2).toHaveBeenCalledWith(project.id, project.revision);
     expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
     expect(harness.submitShots).not.toHaveBeenCalled();
     expect(harness.cancelJobV2).not.toHaveBeenCalled();

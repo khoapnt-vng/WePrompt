@@ -65,7 +65,6 @@ const expectedLeaves = [
   'views.table',
   'views.board',
   'views.cut',
-  'views.cutPending',
   'table.label',
   'table.columns.position',
   'table.columns.beat',
@@ -119,6 +118,102 @@ const expectedLeaves = [
   'board.liftDirtyDraft',
   'board.liftSucceeded',
   'board.liftFailed',
+  'cut.ariaLabel',
+  'cut.title',
+  'cut.description',
+  'cut.railLabel',
+  'cut.orderUnavailable',
+  'cut.empty',
+  'cut.filmDuration',
+  'cut.durationPending',
+  'cut.beatPosition',
+  'cut.shotCount',
+  'cut.shotCount_one',
+  'cut.shotCount_other',
+  'cut.actualDuration',
+  'cut.targetDuration',
+  'cut.beatDurationPending',
+  'cut.dragHandle',
+  'cut.moveEarlier',
+  'cut.moveLater',
+  'cut.reorderAnnouncement',
+  'cut.reorderFailed',
+  'cut.bed.title',
+  'cut.bed.description',
+  'cut.bed.label',
+  'cut.bed.none',
+  'cut.bed.empty',
+  'cut.bed.option',
+  'cut.bed.import',
+  'cut.bed.pickerFilter',
+  'cut.bed.imported',
+  'cut.bed.importCancelled',
+  'cut.bed.importFailed',
+  'cut.bed.selected',
+  'cut.bed.cleared',
+  'cut.bed.setFailed',
+  'cut.bed.fade',
+  'cut.bed.tooShort',
+  'cut.bed.durationPending',
+  'cut.bed.invalid',
+  'cut.match.title',
+  'cut.match.description',
+  'cut.match.label',
+  'cut.match.none',
+  'cut.match.option',
+  'cut.match.selected',
+  'cut.match.cleared',
+  'cut.match.setFailed',
+  'cut.match.invalid',
+  'cut.exports.title',
+  'cut.exports.description',
+  'cut.exports.refresh',
+  'cut.exports.refreshed',
+  'cut.exports.refreshFailed',
+  'cut.exports.catalogUnavailable',
+  'cut.exports.editorFolderTitle',
+  'cut.exports.editorFolderDescription',
+  'cut.exports.createEditorFolder',
+  'cut.exports.stillTitle',
+  'cut.exports.stillDescription',
+  'cut.exports.stillLabel',
+  'cut.exports.noStill',
+  'cut.exports.createStill',
+  'cut.exports.scriptTitle',
+  'cut.exports.scriptDescription',
+  'cut.exports.createScript',
+  'cut.exports.created',
+  'cut.exports.createFailed',
+  'assets.show',
+  'assets.title',
+  'assets.close',
+  'assets.description',
+  'assets.audioTitle',
+  'assets.audioEmpty',
+  'assets.audioItem',
+  'assets.audioFacts',
+  'assets.selectedBed',
+  'assets.detach',
+  'assets.detachTitle',
+  'assets.detachContent',
+  'assets.detached',
+  'assets.detachFailed',
+  'assets.cancel',
+  'assets.exportsTitle',
+  'assets.exportsEmpty',
+  'assets.shape.editor_folder',
+  'assets.shape.still',
+  'assets.shape.script',
+  'assets.exportFacts',
+  'assets.exportFacts_one',
+  'assets.exportFacts_other',
+  'assets.copy',
+  'assets.reveal',
+  'assets.copied',
+  'assets.copyCancelled',
+  'assets.copyFailed',
+  'assets.revealed',
+  'assets.revealFailed',
   'bin.title',
   'bin.description',
   'bin.empty',
@@ -275,6 +370,8 @@ const expectedLeaves = [
   'beatPanel.lift.shotBodyNoStale',
   'beatPanel.lift.shotBodyStale',
   'beatPanel.lift.confirmShot',
+  'beatPanel.lift.shotSucceeded',
+  'beatPanel.lift.shotFailed',
   'beatPanel.lift.beat',
   'beatPanel.lift.beatTitle',
   'beatPanel.lift.beatBodyNoStale',
@@ -555,11 +652,24 @@ describe('Creative Studio workspace translations', () => {
       .filter((key) => key.endsWith('_one'))
       .map((key) => key.slice(0, -'_one'.length));
 
-    expect(pluralBases).toHaveLength(15);
+    expect(pluralBases).toHaveLength(17);
     for (const base of pluralBases) {
       expect(leaves[`${base}_other`], `${base}_other`).toBeTypeOf('string');
       expect(placeholders(leaves[`${base}_one`]!)).toEqual(placeholders(leaves[`${base}_other`]!));
     }
+  });
+
+  it('keeps superseded Cut promises out of the renderer inventory', () => {
+    const leaves = flattenLeaves(englishWorkspace);
+    const cutInventory = Object.entries(leaves)
+      .filter(([key]) => key.startsWith('cut.') || key.startsWith('assets.'))
+      .map(([key, value]) => `${key} ${value}`)
+      .join('\n')
+      .toLowerCase();
+
+    expect(cutInventory).not.toContain('stitched');
+    expect(cutInventory).not.toContain('auto-duck');
+    expect(cutInventory).not.toContain('auto duck');
   });
 
   it('defers all 11 translations and falls each locale back to the complete en-US workspace', () => {

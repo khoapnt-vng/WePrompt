@@ -13,10 +13,12 @@ import { pipeline } from 'node:stream/promises';
 import type {
   StudioAssetV2,
   StudioBriefReferenceRole,
+  StudioDetachBedAudioRequestV2,
   StudioDetachBriefReferenceRequest,
   StudioFrameExtraction,
   StudioProjectV2,
 } from '@/common/types/project/creativeStudioTypes';
+import { STUDIO_PROJECT_SCHEMA_VERSION } from '@/common/types/project/creativeStudioTypes';
 import {
   extractConditioningFrame,
   StudioConditioningFrameError,
@@ -30,11 +32,39 @@ import {
   isStudioBriefReferenceLabel,
   isStudioReferenceImageMimeType,
 } from '@/common/types/project/creativeStudioManagedAssetCollections';
-import { validateStudioProjectV2, type StudioVerifiedConditioningFrameV2 } from './service/schema2';
-import { CreativeStudioStoreError, STUDIO_PROJECT_V2_MAX_RECORD_BYTES, type CreativeStudioStore } from './store';
+import {
+  applyStudioMutationBatchV2,
+  validateStudioProjectV2,
+  type StudioVerifiedConditioningFrameV2,
+} from './service/schema2';
+import {
+  CreativeStudioStoreError,
+  STUDIO_PROJECT_V2_MAX_RECORD_BYTES,
+  type CreativeStudioStore,
+  type StudioProjectAuthoritySnapshotV2,
+} from './store';
 import { downloadRemoteMedia, type RemoteMediaDownloadDeps } from '../remote-media/remoteMediaDownloader';
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
+const LOWERCASE_SHA256 = /^[a-f0-9]{64}$/;
+const CANONICAL_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const BED_MEDIA_INTENT_MAX_BYTES = 16 * 1024;
+const hasExactOwnKeys = (value: unknown, keys: readonly string[]): value is Record<string, unknown> => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  try {
+    const ownKeys = Reflect.ownKeys(value);
+    return (
+      ownKeys.length === keys.length &&
+      ownKeys.every((key) => typeof key === 'string' && keys.includes(key)) &&
+      ownKeys.every((key) => {
+        const descriptor = Object.getOwnPropertyDescriptor(value, key);
+        return descriptor?.enumerable === true && Object.hasOwn(descriptor, 'value');
+      })
+    );
+  } catch {
+    return false;
+  }
+};
 const ownRecordValue = <Value>(record: Readonly<Record<string, Value>>, key: string): Value | undefined =>
   Object.hasOwn(record, key) ? record[key] : undefined;
 
@@ -48,6 +78,115 @@ const owningBeatForShotV2 = (project: StudioProjectV2, shotId: string): StudioPr
 
 const defineRecordValue = <Value>(record: Record<string, Value>, key: string, value: Value): void => {
   Object.defineProperty(record, key, { value, writable: true, enumerable: true, configurable: true });
+};
+
+const isCanonicalBedAudioAssetForProjectV2 = (projectId: string, asset: StudioAssetV2): boolean =>
+  asset.projectId === projectId &&
+  SAFE_ID.test(asset.id) &&
+  asset.shotId === null &&
+  asset.mediaKind === 'audio' &&
+  asset.mimeType === 'audio/wav' &&
+  asset.managedAsset.collection === 'imports' &&
+  asset.managedAsset.fileName === `${asset.id}.wav` &&
+  Number.isFinite(asset.durationSeconds) &&
+  asset.durationSeconds! > 0 &&
+  asset.durationSeconds! <= Number.MAX_SAFE_INTEGER &&
+  asset.width === undefined &&
+  asset.height === undefined &&
+  asset.briefReferenceRole === undefined &&
+  asset.briefReferenceLabel === undefined &&
+  asset.sourceLook === undefined;
+
+const isCanonicalBedAudioAssetV2 = (project: StudioProjectV2, asset: StudioAssetV2): boolean =>
+  isCanonicalBedAudioAssetForProjectV2(project.id, asset);
+
+const sameCanonicalBedAudioAssetV2 = (left: StudioAssetV2, right: StudioAssetV2): boolean =>
+  left.id === right.id &&
+  left.projectId === right.projectId &&
+  left.shotId === right.shotId &&
+  left.mediaKind === right.mediaKind &&
+  left.mimeType === right.mimeType &&
+  left.managedAsset.collection === right.managedAsset.collection &&
+  left.managedAsset.fileName === right.managedAsset.fileName &&
+  left.byteSize === right.byteSize &&
+  left.sha256 === right.sha256 &&
+  left.durationSeconds === right.durationSeconds &&
+  left.createdAt === right.createdAt;
+
+type StudioBedMediaIntentV2 = {
+  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  kind: 'import_bed_audio' | 'detach_bed_audio';
+  projectId: string;
+  expectedRevision: number;
+  asset: StudioAssetV2;
+  managedIdentity: FileIdentity;
+};
+
+type PublishedStudioBedMediaIntentV2 = {
+  intent: StudioBedMediaIntentV2;
+  filePath: string;
+  identity: FileIdentity;
+  directory: VerifiedDirectory;
+};
+
+const bedMediaIntentFileNameV2 = (intent: Pick<StudioBedMediaIntentV2, 'kind' | 'asset'>): string =>
+  `${intent.kind === 'import_bed_audio' ? 'bed-import' : 'bed-detach'}-${intent.asset.id}.json`;
+
+const isStudioBedMediaIntentV2 = (value: unknown): value is StudioBedMediaIntentV2 => {
+  if (
+    !hasExactOwnKeys(value, ['schemaVersion', 'kind', 'projectId', 'expectedRevision', 'asset', 'managedIdentity']) ||
+    value.schemaVersion !== STUDIO_PROJECT_SCHEMA_VERSION ||
+    (value.kind !== 'import_bed_audio' && value.kind !== 'detach_bed_audio') ||
+    typeof value.projectId !== 'string' ||
+    !SAFE_ID.test(value.projectId) ||
+    typeof value.expectedRevision !== 'number' ||
+    !Number.isSafeInteger(value.expectedRevision) ||
+    value.expectedRevision < 1 ||
+    value.expectedRevision >= Number.MAX_SAFE_INTEGER ||
+    !hasExactOwnKeys(value.managedIdentity, ['dev', 'ino']) ||
+    typeof value.managedIdentity.dev !== 'string' ||
+    value.managedIdentity.dev.length < 1 ||
+    typeof value.managedIdentity.ino !== 'string' ||
+    value.managedIdentity.ino.length < 1 ||
+    !hasExactOwnKeys(value.asset, [
+      'id',
+      'projectId',
+      'shotId',
+      'mediaKind',
+      'mimeType',
+      'managedAsset',
+      'byteSize',
+      'sha256',
+      'durationSeconds',
+      'createdAt',
+    ])
+  ) {
+    return false;
+  }
+  const asset = value.asset;
+  return (
+    typeof asset.id === 'string' &&
+    SAFE_ID.test(asset.id) &&
+    typeof asset.projectId === 'string' &&
+    asset.projectId === value.projectId &&
+    asset.shotId === null &&
+    asset.mediaKind === 'audio' &&
+    asset.mimeType === 'audio/wav' &&
+    hasExactOwnKeys(asset.managedAsset, ['collection', 'fileName']) &&
+    asset.managedAsset.collection === 'imports' &&
+    asset.managedAsset.fileName === `${asset.id}.wav` &&
+    typeof asset.byteSize === 'number' &&
+    Number.isSafeInteger(asset.byteSize) &&
+    asset.byteSize >= 12 &&
+    typeof asset.sha256 === 'string' &&
+    LOWERCASE_SHA256.test(asset.sha256) &&
+    typeof asset.durationSeconds === 'number' &&
+    Number.isFinite(asset.durationSeconds) &&
+    asset.durationSeconds > 0 &&
+    asset.durationSeconds <= Number.MAX_SAFE_INTEGER &&
+    typeof asset.createdAt === 'string' &&
+    CANONICAL_TIMESTAMP.test(asset.createdAt)
+  );
 };
 
 const resolveActiveStudioBriefReferencesV2 = (
@@ -131,6 +270,11 @@ const MIME_SIGNATURES = [
     match: (bytes: Buffer) => bytes.subarray(0, 4).toString() === 'RIFF' && bytes.subarray(8, 12).toString() === 'WEBP',
   },
   {
+    mimeType: 'audio/wav',
+    extension: 'wav',
+    match: (bytes: Buffer) => bytes.subarray(0, 4).toString() === 'RIFF' && bytes.subarray(8, 12).toString() === 'WAVE',
+  },
+  {
     mimeType: 'video/mp4',
     extension: 'mp4',
     match: (bytes: Buffer) => bytes.subarray(4, 8).toString() === 'ftyp',
@@ -172,6 +316,19 @@ export type InternalImportReferenceInputV2 = {
 };
 
 export type StudioMediaImportResultV2 = { asset: StudioAssetV2; project: StudioProjectV2 };
+
+export type InternalImportBedAudioInputV2 = {
+  projectId: string;
+  sourcePath: string;
+  expectedRevision: number;
+  /** Main-only lifecycle fence; never accepted from the renderer payload. */
+  assertActive?: () => void;
+};
+
+export type InternalDetachBedAudioInputV2 = StudioDetachBedAudioRequestV2 & {
+  /** Main-only lifecycle fence; never accepted from the renderer payload. */
+  assertActive?: () => void;
+};
 
 export type PersistProviderJobOutputInputV2 = {
   projectId: string;
@@ -218,20 +375,14 @@ export type PersistCapturedPosterInputV2 = {
   body: AsyncIterable<Uint8Array>;
 };
 
-/** A derived project output whose lifecycle is independent from editable Beats and Shots. */
-export type PersistProjectOutputInputV2 = {
-  projectId: string;
-  declaredMimeType: 'video/mp4';
-  declaredByteSize?: number;
-  width: number;
-  height: number;
-  durationSeconds?: number;
-  body: AsyncIterable<Uint8Array>;
-};
-
 export type StudioConditioningFrameRequestV2 = {
   projectId: string;
   extractionId: string;
+};
+
+export type StudioResolvedAssetV2 = {
+  asset: StudioAssetV2;
+  openVerifiedStream: (start?: number, end?: number) => Promise<Readable>;
 };
 
 export type StudioMediaStore = {
@@ -239,21 +390,20 @@ export type StudioMediaStore = {
     input: InternalImportReferenceInputV2 & { returnProject: true }
   ): Promise<StudioMediaImportResultV2>;
   importReferenceFromPathV2(input: InternalImportReferenceInputV2): Promise<StudioAssetV2>;
+  importBedAudioFromPathV2(input: InternalImportBedAudioInputV2): Promise<StudioMediaImportResultV2>;
+  detachBedAudioV2(input: InternalDetachBedAudioInputV2): Promise<StudioProjectV2>;
   detachBriefReferenceV2(input: StudioDetachBriefReferenceRequest): Promise<StudioProjectV2>;
   persistProviderOutputForJobV2(input: PersistProviderJobOutputInputV2): Promise<StudioAssetV2>;
   persistProviderOutputFromUrlForJobV2(input: PersistProviderJobOutputUrlInputV2): Promise<StudioAssetV2>;
   persistProviderPosterForJobV2(input: PersistProviderJobPosterInputV2): Promise<StudioAssetV2>;
   persistProviderPosterFromUrlForJobV2(input: PersistProviderJobPosterUrlInputV2): Promise<StudioAssetV2>;
   persistCapturedPosterV2(input: PersistCapturedPosterInputV2): Promise<StudioAssetV2>;
-  persistProjectOutputV2(input: PersistProjectOutputInputV2): Promise<StudioAssetV2>;
-  getLatestProjectOutputV2(projectId: string): Promise<StudioAssetV2 | null>;
-  resolveAssetV2(
-    projectId: string,
+  resolveAssetV2(projectId: string, assetId: string): Promise<StudioResolvedAssetV2 | null>;
+  /** Resolves media while the caller already owns the Store project queue; never re-enters that queue. */
+  resolveAssetWithProjectAuthorityV2(
+    authority: Pick<StudioProjectAuthoritySnapshotV2, 'project' | 'projectDir' | 'assertCurrent'>,
     assetId: string
-  ): Promise<{
-    asset: StudioAssetV2;
-    openVerifiedStream: (start?: number, end?: number) => Promise<Readable>;
-  } | null>;
+  ): Promise<StudioResolvedAssetV2 | null>;
   resolveProviderInputV2(
     projectId: string,
     assetId: string
@@ -272,8 +422,16 @@ export type StudioMediaStore = {
 
 export type StudioMediaStoreDeps = {
   store: CreativeStudioStore;
+  /** Acquires the shared export-catalog lock after the project queue and holds it through one media commit. */
+  withManagedMediaAuthority?: <T>(
+    authority: StudioProjectAuthoritySnapshotV2,
+    operation: (facts: Readonly<{ catalogRevision: number; managedByteSize: number }>) => Promise<T>
+  ) => Promise<T>;
   createId?: () => string;
+  createMutationId?: () => string;
   now?: () => string;
+  /** Process lifecycle fence used again inside the queued project commit. */
+  assertActive?: () => void;
   /** Injectable to fail before starting a write when the volume cannot fit it. */
   getAvailableDiskBytes?: (directory: string) => Promise<number>;
   /** Test seam for byte-boundary coverage without allocating production-sized fixtures. */
@@ -284,9 +442,18 @@ export type StudioMediaStoreDeps = {
   afterCleanupRestore?: (filePath: string, quarantinePath: string) => Promise<void>;
   /** Test seam for a directory replacement exactly before a schema-2 managed mutation fence. */
   beforeV2ManagedMutation?: (projectDirectory: string) => Promise<void>;
+  /** Test seam for observing or faulting a verified managed-directory sync after the real fsync succeeds. */
+  afterV2ManagedDirectorySync?: (directory: string) => void | Promise<void>;
   /** V2 video duration is decoded from the finalized managed bytes, never trusted from provider metadata. */
   probeVideoDurationSecondsV2?: (input: { filePath: string; byteSize: number; sha256: string }) => Promise<number>;
+  /** V2 bed metadata is decoded from finalized managed bytes and must describe one audio-only stream. */
+  probeBedAudioV2?: (input: {
+    filePath: string;
+    byteSize: number;
+    sha256: string;
+  }) => Promise<{ durationSeconds: number; audioStreamCount: number; otherStreamCount: number }>;
   ffprobeBinary?: string;
+  ffmpegBinary?: string;
   conditioningFrameExtractor?: (
     input: StudioConditioningFrameExtractionInput
   ) => Promise<StudioConditioningFrameExtractionResult>;
@@ -560,6 +727,50 @@ export const openVerifiedReadStream = async (
   }
 };
 
+type ManagedFileProofV2 = Required<Omit<VerifiedReadExpectation, 'verifyContent'>>;
+
+const assertManagedFileProofV2 = async (filePath: string, proof: ManagedFileProofV2): Promise<void> => {
+  const stream = await openVerifiedReadStream(filePath, undefined, undefined, undefined, {
+    ...proof,
+    verifyContent: true,
+  });
+  stream.destroy();
+  if (!stream.closed) {
+    await new Promise<void>((resolve) => stream.once('close', resolve));
+  }
+};
+
+const captureManagedFileProofV2 = async (
+  filePath: string,
+  expectedIdentity: FileIdentity,
+  asset: Pick<StudioAssetV2, 'byteSize' | 'sha256' | 'mimeType'>
+): Promise<ManagedFileProofV2> => {
+  const stats = await regularFile(filePath);
+  const identity = fileIdentity(stats);
+  const byteSize = Number(stats.size);
+  const mtimeMs = Number(stats.mtimeMs);
+  const ctimeMs = Number(stats.ctimeMs);
+  if (
+    identity.dev !== expectedIdentity.dev ||
+    identity.ino !== expectedIdentity.ino ||
+    byteSize !== asset.byteSize ||
+    !Number.isFinite(mtimeMs) ||
+    !Number.isFinite(ctimeMs)
+  ) {
+    throw new CreativeStudioMediaError('storage_error');
+  }
+  const proof: ManagedFileProofV2 = {
+    ...identity,
+    byteSize: asset.byteSize,
+    mtimeMs,
+    ctimeMs,
+    sha256: asset.sha256,
+    mimeType: asset.mimeType,
+  };
+  await assertManagedFileProofV2(filePath, proof);
+  return proof;
+};
+
 /** Default production disk preflight; injectable tests can still model exact capacity boundaries. */
 export const getAvailableStudioDiskBytes = async (directory: string): Promise<number> => {
   try {
@@ -584,6 +795,11 @@ const ensureManagedDirectory = async (projectDir: string, name: string): Promise
   return directory;
 };
 
+type ManagedPartPublicationDurabilityV2 = {
+  syncDestinationDirectory: () => Promise<void>;
+  syncPartsDirectory: () => Promise<void>;
+};
+
 /** fsyncs a fresh part, then links it into place without ever overwriting an existing asset. */
 const finalizeManagedPartV2 = async (
   partPath: string,
@@ -592,7 +808,8 @@ const finalizeManagedPartV2 = async (
   destinationDir: string,
   expectedPartIdentity: FileIdentity,
   beforeMutation: () => Promise<void>,
-  onDestinationLinked: (identity: FileIdentity) => void
+  onDestinationLinked: (identity: FileIdentity) => void,
+  publicationDurability?: ManagedPartPublicationDurabilityV2
 ): Promise<FileIdentity> => {
   if (path.dirname(partPath) !== partsDir || path.dirname(destinationPath) !== destinationDir) {
     throw new CreativeStudioMediaError('storage_error');
@@ -654,8 +871,16 @@ const finalizeManagedPartV2 = async (
       } finally {
         await destinationHandle.close();
       }
+      if (publicationDurability !== undefined) {
+        await beforeMutation();
+        await publicationDurability.syncDestinationDirectory();
+      }
       await beforeMutation();
       await fs.unlink(partPath);
+      if (publicationDurability !== undefined) {
+        await beforeMutation();
+        await publicationDurability.syncPartsDirectory();
+      }
       verifiedFiles.delete(destinationPath);
       return expectedPartIdentity;
     } catch (error) {
@@ -750,6 +975,14 @@ const resolveFfprobeBinaryV2 = (configured: string | undefined): string => {
   return path.join(path.dirname(ffmpegBinary), `ffprobe${extension}`);
 };
 
+const resolveFfmpegBinaryV2 = (configured: string | undefined, ffprobeBinary: string): string => {
+  const explicit = configured?.trim() || process.env.FFMPEG_PATH?.trim();
+  if (explicit) return explicit;
+  if (!ffprobeBinary.includes(path.sep)) return 'ffmpeg';
+  const extension = path.extname(ffprobeBinary).toLowerCase() === '.exe' ? '.exe' : '';
+  return path.join(path.dirname(ffprobeBinary), `ffmpeg${extension}`);
+};
+
 const runFfprobeDurationV2 = async (binary: string, handle: Awaited<ReturnType<typeof fs.open>>): Promise<number> =>
   new Promise<number>((resolve, reject) => {
     const child = spawn(
@@ -786,6 +1019,158 @@ const runFfprobeDurationV2 = async (binary: string, handle: Awaited<ReturnType<t
         return;
       }
       const durationSeconds = Number(stdout.trim());
+      if (!Number.isFinite(durationSeconds) || durationSeconds <= 0 || durationSeconds > Number.MAX_SAFE_INTEGER) {
+        finish(new CreativeStudioMediaError('invalid_media'));
+        return;
+      }
+      finish(undefined, durationSeconds);
+    });
+  });
+
+type StudioBedAudioProbeV2 = {
+  durationSeconds: number;
+  audioStreamCount: number;
+  otherStreamCount: number;
+};
+
+const runFfprobeBedAudioV2 = async (
+  binary: string,
+  handle: Awaited<ReturnType<typeof fs.open>>
+): Promise<StudioBedAudioProbeV2> =>
+  new Promise<StudioBedAudioProbeV2>((resolve, reject) => {
+    const child = spawn(
+      binary,
+      ['-v', 'error', '-show_entries', 'stream=codec_type,duration:format=duration', '-of', 'json', 'pipe:3'],
+      { stdio: ['ignore', 'pipe', 'ignore', handle.fd], windowsHide: true }
+    );
+    let stdout = '';
+    let settled = false;
+    const finish = (error?: Error, result?: StudioBedAudioProbeV2): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve(result!);
+    };
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      finish(new CreativeStudioMediaError('invalid_media'));
+    }, 60_000);
+    timer.unref?.();
+    child.stdout.on('data', (chunk: Buffer) => {
+      if (stdout.length + chunk.length > 64 * 1024) {
+        child.kill('SIGKILL');
+        finish(new CreativeStudioMediaError('invalid_media'));
+        return;
+      }
+      stdout += chunk.toString('utf8');
+    });
+    child.once('error', () => finish(new CreativeStudioMediaError('invalid_media')));
+    child.once('close', (code, signal) => {
+      if (code !== 0 || signal !== null) {
+        finish(new CreativeStudioMediaError('invalid_media'));
+        return;
+      }
+      try {
+        const parsed = JSON.parse(stdout) as unknown;
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+          finish(new CreativeStudioMediaError('invalid_media'));
+          return;
+        }
+        const streams = Reflect.get(parsed, 'streams');
+        const format = Reflect.get(parsed, 'format');
+        if (!Array.isArray(streams) || typeof format !== 'object' || format === null || Array.isArray(format)) {
+          finish(new CreativeStudioMediaError('invalid_media'));
+          return;
+        }
+        let audioStreamCount = 0;
+        let otherStreamCount = 0;
+        let audioStreamDurationSeconds = Number.NaN;
+        for (const stream of streams) {
+          if (typeof stream !== 'object' || stream === null || Array.isArray(stream)) {
+            finish(new CreativeStudioMediaError('invalid_media'));
+            return;
+          }
+          if (Reflect.get(stream, 'codec_type') === 'audio') {
+            audioStreamCount += 1;
+            audioStreamDurationSeconds = Number(Reflect.get(stream, 'duration'));
+          } else otherStreamCount += 1;
+        }
+        const formatDurationSeconds = Number(Reflect.get(format, 'duration'));
+        const durationSeconds =
+          Number.isFinite(formatDurationSeconds) && formatDurationSeconds > 0
+            ? formatDurationSeconds
+            : audioStreamDurationSeconds;
+        if (audioStreamCount !== 1 || otherStreamCount !== 0) {
+          finish(new CreativeStudioMediaError('invalid_media'));
+          return;
+        }
+        finish(undefined, { durationSeconds, audioStreamCount, otherStreamCount });
+      } catch {
+        finish(new CreativeStudioMediaError('invalid_media'));
+      }
+    });
+  });
+
+const runFfmpegBedAudioDecodeV2 = async (
+  binary: string,
+  handle: Awaited<ReturnType<typeof fs.open>>
+): Promise<number> =>
+  new Promise<number>((resolve, reject) => {
+    const child = spawn(
+      binary,
+      [
+        '-nostdin',
+        '-v',
+        'error',
+        '-xerror',
+        '-i',
+        'pipe:3',
+        '-map',
+        '0:a:0',
+        '-progress',
+        'pipe:1',
+        '-nostats',
+        '-f',
+        'null',
+        '-',
+      ],
+      {
+        stdio: ['ignore', 'pipe', 'ignore', handle.fd],
+        windowsHide: true,
+      }
+    );
+    let stdout = '';
+    let settled = false;
+    const finish = (error?: Error, durationSeconds?: number): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve(durationSeconds!);
+    };
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      finish(new CreativeStudioMediaError('invalid_media'));
+    }, 60_000);
+    timer.unref?.();
+    child.stdout.on('data', (chunk: Buffer) => {
+      if (stdout.length + chunk.length > 64 * 1024) {
+        child.kill('SIGKILL');
+        finish(new CreativeStudioMediaError('invalid_media'));
+        return;
+      }
+      stdout += chunk.toString('utf8');
+    });
+    child.once('error', () => finish(new CreativeStudioMediaError('invalid_media')));
+    child.once('close', (code, signal) => {
+      if (code !== 0 || signal !== null) {
+        finish(new CreativeStudioMediaError('invalid_media'));
+        return;
+      }
+      const progressValues = Array.from(stdout.matchAll(/^out_time_us=(\d+)$/gmu));
+      const durationMicroseconds = Number(progressValues.at(-1)?.[1]);
+      const durationSeconds = durationMicroseconds / 1_000_000;
       if (!Number.isFinite(durationSeconds) || durationSeconds <= 0 || durationSeconds > Number.MAX_SAFE_INTEGER) {
         finish(new CreativeStudioMediaError('invalid_media'));
         return;
@@ -831,6 +1216,78 @@ const defaultProbeVideoDurationSecondsV2 = async (input: {
   }
 };
 
+const defaultProbeBedAudioV2 = async (input: {
+  filePath: string;
+  byteSize: number;
+  sha256: string;
+  ffprobeBinary: string;
+  ffmpegBinary: string;
+}): Promise<StudioBedAudioProbeV2> => {
+  const noFollow = process.platform === 'win32' ? 0 : fsConstants.O_NOFOLLOW;
+  let handle: Awaited<ReturnType<typeof fs.open>>;
+  try {
+    handle = await fs.open(input.filePath, fsConstants.O_RDONLY | noFollow);
+  } catch {
+    throw new CreativeStudioMediaError('invalid_media');
+  }
+  try {
+    const before = await handle.stat();
+    if (!before.isFile() || before.size !== input.byteSize || (await digestOpenedFile(handle)) !== input.sha256) {
+      throw new CreativeStudioMediaError('invalid_media');
+    }
+    const result = await runFfprobeBedAudioV2(input.ffprobeBinary, handle);
+    let decodeHandle: Awaited<ReturnType<typeof fs.open>>;
+    let decodedDurationSeconds: number;
+    try {
+      decodeHandle = await fs.open(input.filePath, fsConstants.O_RDONLY | noFollow);
+    } catch {
+      throw new CreativeStudioMediaError('invalid_media');
+    }
+    try {
+      const decodeBefore = await decodeHandle.stat();
+      if (
+        !decodeBefore.isFile() ||
+        decodeBefore.dev !== before.dev ||
+        decodeBefore.ino !== before.ino ||
+        decodeBefore.size !== before.size ||
+        decodeBefore.mtimeMs !== before.mtimeMs ||
+        decodeBefore.ctimeMs !== before.ctimeMs
+      ) {
+        throw new CreativeStudioMediaError('invalid_media');
+      }
+      decodedDurationSeconds = await runFfmpegBedAudioDecodeV2(input.ffmpegBinary, decodeHandle);
+      const decodeAfter = await decodeHandle.stat();
+      if (
+        !decodeAfter.isFile() ||
+        decodeAfter.dev !== decodeBefore.dev ||
+        decodeAfter.ino !== decodeBefore.ino ||
+        decodeAfter.size !== decodeBefore.size ||
+        decodeAfter.mtimeMs !== decodeBefore.mtimeMs ||
+        decodeAfter.ctimeMs !== decodeBefore.ctimeMs
+      ) {
+        throw new CreativeStudioMediaError('invalid_media');
+      }
+    } finally {
+      await decodeHandle.close().catch((): undefined => undefined);
+    }
+    const after = await handle.stat();
+    if (
+      !after.isFile() ||
+      after.dev !== before.dev ||
+      after.ino !== before.ino ||
+      after.size !== before.size ||
+      after.mtimeMs !== before.mtimeMs ||
+      after.ctimeMs !== before.ctimeMs ||
+      (await digestOpenedFile(handle)) !== input.sha256
+    ) {
+      throw new CreativeStudioMediaError('invalid_media');
+    }
+    return { ...result, durationSeconds: decodedDurationSeconds };
+  } finally {
+    await handle.close().catch((): undefined => undefined);
+  }
+};
+
 const mapStoreError = (error: unknown): never => {
   if (error instanceof CreativeStudioStoreError) throw error;
   if (error instanceof CreativeStudioMediaError) throw error;
@@ -840,6 +1297,7 @@ const mapStoreError = (error: unknown): never => {
 /** Persists references in a project-owned collection; source paths never become manifest data. */
 export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaStore => {
   const createId = deps.createId ?? (() => randomUUID().replaceAll('-', '_'));
+  const createMutationId = deps.createMutationId ?? (() => randomUUID().replaceAll('-', '_'));
   const now = deps.now ?? (() => new Date().toISOString());
   const getAvailableDiskBytes = deps.getAvailableDiskBytes ?? getAvailableStudioDiskBytes;
   const probeVideoDurationSecondsV2 =
@@ -849,12 +1307,45 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         ...input,
         ffprobeBinary: resolveFfprobeBinaryV2(deps.ffprobeBinary),
       }));
+  const probeBedAudioV2 =
+    deps.probeBedAudioV2 ??
+    ((input: { filePath: string; byteSize: number; sha256: string }) => {
+      const ffprobeBinary = resolveFfprobeBinaryV2(deps.ffprobeBinary);
+      return defaultProbeBedAudioV2({
+        ...input,
+        ffprobeBinary,
+        ffmpegBinary: resolveFfmpegBinaryV2(deps.ffmpegBinary, ffprobeBinary),
+      });
+    });
   const conditioningFrameExtractor = deps.conditioningFrameExtractor ?? extractConditioningFrame;
   const conditioningFrameFlights = new Map<string, Promise<StudioFrameExtraction>>();
   const limits: StudioMediaLimits = { ...STUDIO_MEDIA_LIMITS, ...deps.limits };
   if (Object.values(limits).some((limit) => !Number.isSafeInteger(limit) || limit < 1)) {
     throw new CreativeStudioMediaError('storage_error');
   }
+  const activeBedAudioReadClaims = new Map<string, number>();
+  const detachingBedAudio = new Set<string>();
+  const bedAudioClaimKey = (projectId: string, assetId: string): string => `${projectId}\u0000${assetId}`;
+  const assertOperationActive = (operationAssertActive?: () => void): void => {
+    deps.assertActive?.();
+    operationAssertActive?.();
+  };
+  const withManagedMediaAuthority =
+    deps.withManagedMediaAuthority ??
+    (async <T>(
+      _authority: StudioProjectAuthoritySnapshotV2,
+      operation: (facts: Readonly<{ catalogRevision: number; managedByteSize: number }>) => Promise<T>
+    ): Promise<T> => operation(Object.freeze({ catalogRevision: 1, managedByteSize: 0 })));
+  const withManagedProjectAuthority = <T>(
+    projectId: string,
+    operation: (
+      authority: StudioProjectAuthoritySnapshotV2,
+      facts: Readonly<{ catalogRevision: number; managedByteSize: number }>
+    ) => Promise<T>
+  ): Promise<T> =>
+    deps.store.withProjectAuthorityV2(projectId, (authority) =>
+      withManagedMediaAuthority(authority, (facts) => operation(authority, facts))
+    );
 
   type WriteCapacity = {
     maxBytes: number;
@@ -895,6 +1386,39 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       maxBytes: Math.min(nonDiskCeiling, availableDiskBytes),
       overflowCode: availableDiskBytes <= nonDiskCeiling ? 'storage_error' : 'invalid_media',
     };
+  };
+
+  const assertManagedProjectCapacity = (
+    project: { assets: Record<string, { byteSize: number }> },
+    retainedExportBytes: number,
+    addedBytes: number,
+    replacedBytes = 0
+  ): void => {
+    if (
+      !Number.isSafeInteger(retainedExportBytes) ||
+      retainedExportBytes < 0 ||
+      !Number.isSafeInteger(addedBytes) ||
+      addedBytes < 0 ||
+      !Number.isSafeInteger(replacedBytes) ||
+      replacedBytes < 0
+    ) {
+      throw new CreativeStudioMediaError('storage_error');
+    }
+    let usedBytes = retainedExportBytes;
+    for (const asset of Object.values(project.assets)) {
+      if (!Number.isSafeInteger(asset.byteSize) || asset.byteSize < 0) {
+        throw new CreativeStudioMediaError('storage_error');
+      }
+      usedBytes += asset.byteSize;
+      if (!Number.isSafeInteger(usedBytes) || usedBytes > limits.projectMaxBytes) {
+        throw new CreativeStudioMediaError('invalid_media');
+      }
+    }
+    usedBytes = usedBytes - replacedBytes + addedBytes;
+    if (usedBytes < 0) throw new CreativeStudioMediaError('storage_error');
+    if (!Number.isSafeInteger(usedBytes) || usedBytes > limits.projectMaxBytes) {
+      throw new CreativeStudioMediaError('invalid_media');
+    }
   };
 
   const loadProjectContextV2 = async (
@@ -1014,7 +1538,27 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
           // previous cleanup fence, but the generated path is removable only while it remains unowned.
           // eslint-disable-next-line no-await-in-loop
           const context = await loadProjectContextV2(projectId);
-          if (ownRecordValue(context.project.assets, assetId) !== undefined) return;
+          const committedAsset = ownRecordValue(context.project.assets, assetId);
+          if (committedAsset !== undefined) {
+            const committedDirectory = path.join(context.projectDir, committedAsset.managedAsset.collection);
+            const committedPath = path.join(committedDirectory, committedAsset.managedAsset.fileName);
+            if (
+              STUDIO_MANAGED_ASSET_COLLECTIONS_V2.has(committedAsset.managedAsset.collection) &&
+              path.dirname(committedDirectory) === context.projectDir &&
+              path.dirname(committedPath) === committedDirectory &&
+              committedPath === candidate.filePath
+            ) {
+              try {
+                // An ambiguous post-rename failure may already have committed this exact asset.
+                // Preserve it only when the current record and exact owned inode still agree.
+                // eslint-disable-next-line no-await-in-loop
+                await captureManagedFileProofV2(candidate.filePath, candidate.identity, committedAsset);
+                return;
+              } catch {
+                // A same-id stale record must not retain a different uncommitted inode.
+              }
+            }
+          }
           const directoryPath = path.dirname(candidate.filePath);
           if (path.dirname(directoryPath) !== context.projectDir) break;
           // Capture without invoking the mutation hook; cleanupManagedPathV2 owns the single cleanup fence.
@@ -1037,6 +1581,373 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         }
       }
     }
+  };
+
+  const syncVerifiedDirectoryV2 = async (directory: VerifiedDirectory): Promise<void> => {
+    await assertVerifiedDirectory(directory);
+    const handle = await fs.open(directory.directory, 'r');
+    try {
+      const opened = await handle.stat();
+      const openedIdentity = fileIdentity(opened);
+      if (
+        !opened.isDirectory() ||
+        openedIdentity.dev !== directory.identity.dev ||
+        openedIdentity.ino !== directory.identity.ino
+      ) {
+        throw new CreativeStudioMediaError('storage_error');
+      }
+      await handle.sync();
+      await deps.afterV2ManagedDirectorySync?.(directory.directory);
+    } catch (error) {
+      if (error instanceof CreativeStudioMediaError) throw error;
+      throw new CreativeStudioMediaError('storage_error');
+    } finally {
+      await handle.close().catch((): undefined => undefined);
+    }
+  };
+
+  const quarantineRemoveExactManagedPathV2 = async (
+    authority: StudioProjectPathAuthorityV2,
+    filePath: string,
+    identity: FileIdentity,
+    directory: VerifiedDirectory
+  ): Promise<void> => {
+    if (path.dirname(filePath) !== directory.directory) throw new CreativeStudioMediaError('storage_error');
+    const quarantinePath = `${filePath}.bed-quarantine`;
+    if (path.dirname(quarantinePath) !== directory.directory) throw new CreativeStudioMediaError('storage_error');
+    let moved = false;
+    try {
+      await assertV2ManagedMutation(authority, [directory]);
+      const before = await regularFile(filePath);
+      const beforeIdentity = fileIdentity(before);
+      if (
+        beforeIdentity.dev !== identity.dev ||
+        beforeIdentity.ino !== identity.ino ||
+        (await fs.realpath(filePath)) !== filePath
+      ) {
+        throw new CreativeStudioMediaError('storage_error');
+      }
+      try {
+        await fs.lstat(quarantinePath);
+        throw new CreativeStudioMediaError('storage_error');
+      } catch (error) {
+        if (error instanceof CreativeStudioMediaError) throw error;
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new CreativeStudioMediaError('storage_error');
+      }
+      await fs.rename(filePath, quarantinePath);
+      moved = true;
+      const quarantined = await regularFile(quarantinePath);
+      const quarantinedIdentity = fileIdentity(quarantined);
+      if (
+        quarantinedIdentity.dev !== identity.dev ||
+        quarantinedIdentity.ino !== identity.ino ||
+        (await fs.realpath(quarantinePath)) !== quarantinePath
+      ) {
+        throw new CreativeStudioMediaError('storage_error');
+      }
+      try {
+        await fs.lstat(filePath);
+        throw new CreativeStudioMediaError('storage_error');
+      } catch (error) {
+        if (error instanceof CreativeStudioMediaError) throw error;
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new CreativeStudioMediaError('storage_error');
+      }
+      await syncVerifiedDirectoryV2(directory);
+      await assertV2ManagedMutation(authority, [directory]);
+      const finalQuarantine = await regularFile(quarantinePath);
+      const finalIdentity = fileIdentity(finalQuarantine);
+      if (finalIdentity.dev !== identity.dev || finalIdentity.ino !== identity.ino) {
+        throw new CreativeStudioMediaError('storage_error');
+      }
+      await fs.unlink(quarantinePath);
+      moved = false;
+      await syncVerifiedDirectoryV2(directory);
+    } catch (error) {
+      if (moved) {
+        try {
+          const quarantined = await regularFile(quarantinePath);
+          const quarantinedIdentity = fileIdentity(quarantined);
+          if (quarantinedIdentity.dev === identity.dev && quarantinedIdentity.ino === identity.ino) {
+            try {
+              await fs.link(quarantinePath, filePath);
+              await syncVerifiedDirectoryV2(directory);
+            } catch {
+              // A replacement or changed authority leaves the exact quarantine and journal for repair.
+            }
+          }
+        } catch {
+          // Preserve every unverifiable residue and fail loud through the durable journal.
+        }
+      }
+      if (error instanceof CreativeStudioMediaError) throw error;
+      throw new CreativeStudioMediaError('storage_error');
+    }
+  };
+
+  const publishBedMediaIntentV2 = async (
+    authority: StudioProjectPathAuthorityV2,
+    partsDirectory: VerifiedDirectory,
+    intent: StudioBedMediaIntentV2
+  ): Promise<PublishedStudioBedMediaIntentV2> => {
+    if (!isStudioBedMediaIntentV2(intent)) throw new CreativeStudioMediaError('storage_error');
+    const filePath = path.join(partsDirectory.directory, bedMediaIntentFileNameV2(intent));
+    const temporaryPath = path.join(
+      partsDirectory.directory,
+      `.${intent.asset.id}.${process.pid}_${randomUUID().replaceAll('-', '_')}.bed-intent.tmp`
+    );
+    if (
+      path.dirname(filePath) !== partsDirectory.directory ||
+      path.dirname(temporaryPath) !== partsDirectory.directory
+    ) {
+      throw new CreativeStudioMediaError('storage_error');
+    }
+    const bytes = Buffer.from(`${JSON.stringify(intent)}\n`, 'utf8');
+    if (bytes.length < 2 || bytes.length > BED_MEDIA_INTENT_MAX_BYTES) {
+      throw new CreativeStudioMediaError('storage_error');
+    }
+    let temporaryIdentity: FileIdentity | null = null;
+    let publishedIdentity: FileIdentity | null = null;
+    try {
+      await assertV2ManagedMutation(authority, [partsDirectory]);
+      try {
+        await fs.lstat(filePath);
+        throw new CreativeStudioMediaError('storage_error');
+      } catch (error) {
+        if (error instanceof CreativeStudioMediaError) throw error;
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new CreativeStudioMediaError('storage_error');
+      }
+      const handle = await fs.open(temporaryPath, 'wx');
+      try {
+        const opened = await handle.stat();
+        if (!opened.isFile()) throw new CreativeStudioMediaError('storage_error');
+        temporaryIdentity = fileIdentity(opened);
+        await handle.writeFile(bytes);
+        await handle.sync();
+        const completed = await handle.stat();
+        const completedIdentity = fileIdentity(completed);
+        if (
+          completedIdentity.dev !== temporaryIdentity.dev ||
+          completedIdentity.ino !== temporaryIdentity.ino ||
+          completed.size !== bytes.length
+        ) {
+          throw new CreativeStudioMediaError('storage_error');
+        }
+      } finally {
+        await handle.close().catch((): undefined => undefined);
+      }
+      await assertV2ManagedMutation(authority, [partsDirectory]);
+      await fs.link(temporaryPath, filePath);
+      const published = await regularFile(filePath);
+      publishedIdentity = fileIdentity(published);
+      if (
+        publishedIdentity.dev !== temporaryIdentity.dev ||
+        publishedIdentity.ino !== temporaryIdentity.ino ||
+        published.size !== bytes.length
+      ) {
+        throw new CreativeStudioMediaError('storage_error');
+      }
+      await syncVerifiedDirectoryV2(partsDirectory);
+      await fs.unlink(temporaryPath);
+      temporaryIdentity = null;
+      await syncVerifiedDirectoryV2(partsDirectory);
+      return { intent, filePath, identity: publishedIdentity, directory: partsDirectory };
+    } catch (error) {
+      if (publishedIdentity !== null) {
+        await unlinkIfIdentityMatches(filePath, publishedIdentity).catch((): undefined => undefined);
+      }
+      if (temporaryIdentity !== null) {
+        await unlinkIfIdentityMatches(temporaryPath, temporaryIdentity).catch((): undefined => undefined);
+      }
+      return mapStoreError(error);
+    }
+  };
+
+  const readBedMediaIntentV2 = async (
+    filePath: string,
+    partsDirectory: VerifiedDirectory
+  ): Promise<PublishedStudioBedMediaIntentV2> => {
+    if (path.dirname(filePath) !== partsDirectory.directory) throw new CreativeStudioMediaError('storage_error');
+    const pathStats = await regularFile(filePath);
+    if (
+      Number(pathStats.size) < 2 ||
+      Number(pathStats.size) > BED_MEDIA_INTENT_MAX_BYTES ||
+      (await fs.realpath(filePath)) !== filePath
+    ) {
+      throw new CreativeStudioMediaError('storage_error');
+    }
+    const identity = fileIdentity(pathStats);
+    const noFollow = process.platform === 'win32' ? 0 : fsConstants.O_NOFOLLOW;
+    const handle = await fs.open(filePath, fsConstants.O_RDONLY | noFollow);
+    try {
+      const before = await handle.stat();
+      const beforeIdentity = fileIdentity(before);
+      if (
+        !before.isFile() ||
+        beforeIdentity.dev !== identity.dev ||
+        beforeIdentity.ino !== identity.ino ||
+        before.size !== pathStats.size
+      ) {
+        throw new CreativeStudioMediaError('storage_error');
+      }
+      const bytes = await handle.readFile();
+      const after = await handle.stat();
+      const afterIdentity = fileIdentity(after);
+      if (
+        afterIdentity.dev !== identity.dev ||
+        afterIdentity.ino !== identity.ino ||
+        after.size !== before.size ||
+        after.mtimeMs !== before.mtimeMs ||
+        after.ctimeMs !== before.ctimeMs ||
+        bytes.length !== before.size
+      ) {
+        throw new CreativeStudioMediaError('storage_error');
+      }
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(bytes.toString('utf8')) as unknown;
+      } catch {
+        throw new CreativeStudioMediaError('storage_error');
+      }
+      if (!isStudioBedMediaIntentV2(parsed) || bedMediaIntentFileNameV2(parsed) !== path.basename(filePath)) {
+        throw new CreativeStudioMediaError('storage_error');
+      }
+      return { intent: parsed, filePath, identity, directory: partsDirectory };
+    } finally {
+      await handle.close().catch((): undefined => undefined);
+    }
+  };
+
+  const resolveIntentManagedBedV2 = async (
+    context: Awaited<ReturnType<typeof loadProjectContextV2>>,
+    intent: StudioBedMediaIntentV2,
+    required: boolean
+  ): Promise<{ files: Array<{ filePath: string; identity: FileIdentity }>; directory: VerifiedDirectory } | null> => {
+    const importsDir = path.join(context.projectDir, 'imports');
+    let importsStats: Awaited<ReturnType<typeof fs.lstat>>;
+    try {
+      importsStats = await fs.lstat(importsDir);
+    } catch (error) {
+      if (!required && (error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw new CreativeStudioMediaError('storage_error');
+    }
+    if (
+      !importsStats.isDirectory() ||
+      importsStats.isSymbolicLink() ||
+      (await fs.realpath(importsDir)) !== importsDir
+    ) {
+      throw new CreativeStudioMediaError('storage_error');
+    }
+    const directory: VerifiedDirectory = { directory: importsDir, identity: fileIdentity(importsStats) };
+    await assertV2ManagedMutation(context.authority, [directory]);
+    const filePath = path.join(importsDir, intent.asset.managedAsset.fileName);
+    if (path.dirname(filePath) !== importsDir) throw new CreativeStudioMediaError('storage_error');
+    const verifyCandidate = async (
+      candidatePath: string
+    ): Promise<{ filePath: string; identity: FileIdentity } | null> => {
+      let stats: Awaited<ReturnType<typeof fs.lstat>>;
+      try {
+        stats = await fs.lstat(candidatePath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        throw new CreativeStudioMediaError('storage_error');
+      }
+      const identity = fileIdentity(stats);
+      if (
+        !stats.isFile() ||
+        stats.isSymbolicLink() ||
+        (await fs.realpath(candidatePath)) !== candidatePath ||
+        identity.dev !== intent.managedIdentity.dev ||
+        identity.ino !== intent.managedIdentity.ino ||
+        Number(stats.size) !== intent.asset.byteSize
+      ) {
+        throw new CreativeStudioMediaError('storage_error');
+      }
+      const stream = await openVerifiedReadStream(candidatePath, undefined, undefined, undefined, {
+        ...identity,
+        byteSize: intent.asset.byteSize,
+        mtimeMs: stats.mtimeMs,
+        ctimeMs: stats.ctimeMs,
+        sha256: intent.asset.sha256,
+        mimeType: intent.asset.mimeType,
+      });
+      let observedBytes = 0;
+      for await (const chunk of stream) observedBytes += Buffer.from(chunk).length;
+      if (observedBytes !== intent.asset.byteSize) throw new CreativeStudioMediaError('storage_error');
+      return { filePath: candidatePath, identity };
+    };
+    let canonical = await verifyCandidate(filePath);
+    const quarantinePath = `${filePath}.bed-quarantine`;
+    const quarantine = await verifyCandidate(quarantinePath);
+    if (canonical === null && quarantine === null) {
+      if (required) throw new CreativeStudioMediaError('storage_error');
+      return null;
+    }
+    if (required && canonical === null) {
+      await assertV2ManagedMutation(context.authority, [directory]);
+      await fs.link(quarantine!.filePath, filePath);
+      await syncVerifiedDirectoryV2(directory);
+      canonical = await verifyCandidate(filePath);
+      if (canonical === null) throw new CreativeStudioMediaError('storage_error');
+    }
+    if (required && quarantine !== null) {
+      await assertV2ManagedMutation(context.authority, [directory]);
+      const current = await regularFile(quarantine.filePath);
+      const currentIdentity = fileIdentity(current);
+      if (currentIdentity.dev !== quarantine.identity.dev || currentIdentity.ino !== quarantine.identity.ino) {
+        throw new CreativeStudioMediaError('storage_error');
+      }
+      await fs.unlink(quarantine.filePath);
+      await syncVerifiedDirectoryV2(directory);
+    }
+    return {
+      files: required ? [canonical!] : [quarantine, canonical].filter((value) => value !== null),
+      directory,
+    };
+  };
+
+  const removePublishedBedMediaIntentV2 = async (
+    context: Awaited<ReturnType<typeof loadProjectContextV2>>,
+    published: PublishedStudioBedMediaIntentV2
+  ): Promise<void> => {
+    const partsDir = path.join(context.projectDir, 'parts');
+    if (path.dirname(published.filePath) !== partsDir) throw new CreativeStudioMediaError('storage_error');
+    const partsDirectory = await captureManagedDirectoryV2(context.authority, partsDir);
+    await quarantineRemoveExactManagedPathV2(context.authority, published.filePath, published.identity, partsDirectory);
+  };
+
+  const repairPublishedBedMediaIntentV2 = async (published: PublishedStudioBedMediaIntentV2): Promise<void> => {
+    const context = await loadProjectContextV2(published.intent.projectId);
+    const { intent } = published;
+    const liveAsset = ownRecordValue(context.project.assets, intent.asset.id);
+    if (liveAsset !== undefined) {
+      if (
+        context.project.revision < intent.expectedRevision ||
+        !isCanonicalBedAudioAssetV2(context.project, liveAsset) ||
+        !sameCanonicalBedAudioAssetV2(liveAsset, intent.asset) ||
+        (intent.kind === 'import_bed_audio' && context.project.revision < intent.expectedRevision + 1)
+      ) {
+        throw new CreativeStudioMediaError('storage_error');
+      }
+      await resolveIntentManagedBedV2(context, intent, true);
+      await removePublishedBedMediaIntentV2(context, published);
+      return;
+    }
+    if (intent.kind === 'detach_bed_audio' && context.project.revision < intent.expectedRevision + 1) {
+      throw new CreativeStudioMediaError('storage_error');
+    }
+    const managed = await resolveIntentManagedBedV2(context, intent, false);
+    if (managed !== null) {
+      for (const candidate of managed.files) {
+        // eslint-disable-next-line no-await-in-loop
+        await quarantineRemoveExactManagedPathV2(
+          context.authority,
+          candidate.filePath,
+          candidate.identity,
+          managed.directory
+        );
+      }
+    }
+    await removePublishedBedMediaIntentV2(context, published);
   };
 
   async function importReferenceFromPathV2(
@@ -1160,44 +2071,58 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         sha256: hash.digest('hex'),
         createdAt: now(),
       };
+      if (finalPath === null || finalIdentity === null) throw new CreativeStudioMediaError('storage_error');
+      const importedFilePath = finalPath;
+      const importedFileProof = await captureManagedFileProofV2(importedFilePath, finalIdentity, baseAsset);
       let importedAsset: StudioAssetV2 | null = null;
       await assertV2ManagedMutation(authority, [importsDirectory]);
-      const updatedProject = await deps.store.updateProjectV2(
-        input.projectId,
-        (current) => {
-          const next = structuredClone(current);
-          const activeReferences = resolveActiveStudioBriefReferencesV2(current.assets);
-          if (input.shotId !== undefined && owningBeatForShotV2(current, input.shotId) === null) {
-            throw new CreativeStudioMediaError('invalid_media');
+      const updatedProject = await withManagedProjectAuthority(input.projectId, async (projectAuthority, facts) => {
+        if (projectAuthority.projectDir !== projectDir) throw new CreativeStudioMediaError('storage_error');
+        await projectAuthority.assertCurrent?.();
+        await assertV2ManagedMutation(authority, [importsDirectory]);
+        assertManagedProjectCapacity(projectAuthority.project, facts.managedByteSize, byteSize);
+        return projectAuthority.commit(
+          (current) => {
+            assertManagedProjectCapacity(current, facts.managedByteSize, byteSize);
+            const next = structuredClone(current);
+            const activeReferences = resolveActiveStudioBriefReferencesV2(current.assets);
+            if (input.shotId !== undefined && owningBeatForShotV2(current, input.shotId) === null) {
+              throw new CreativeStudioMediaError('invalid_media');
+            }
+            if (
+              input.briefReferenceRole !== undefined &&
+              (activeReferences === null || activeReferences.length >= STUDIO_MAX_ACTIVE_BRIEF_REFERENCES)
+            ) {
+              throw new CreativeStudioMediaError('invalid_media');
+            }
+            const asset: StudioAssetV2 =
+              input.briefReferenceRole === undefined
+                ? baseAsset
+                : {
+                    ...baseAsset,
+                    briefReferenceRole: input.briefReferenceRole,
+                    briefReferenceLabel: allocateStudioBriefReferenceLabel(
+                      path.basename(input.sourcePath),
+                      activeReferences!.map((reference) => reference.briefReferenceLabel!)
+                    ),
+                  };
+            defineRecordValue(next.assets, asset.id, asset);
+            if (asset.shotId !== null) {
+              const shot = ownRecordValue(next.shots, asset.shotId);
+              if (shot === undefined) throw new CreativeStudioMediaError('not_found');
+              shot.assetIds.push(asset.id);
+            }
+            importedAsset = asset;
+            return next;
+          },
+          input.expectedRevision,
+          undefined,
+          async () => {
+            assertOperationActive();
+            await assertManagedFileProofV2(importedFilePath, importedFileProof);
           }
-          if (
-            input.briefReferenceRole !== undefined &&
-            (activeReferences === null || activeReferences.length >= STUDIO_MAX_ACTIVE_BRIEF_REFERENCES)
-          ) {
-            throw new CreativeStudioMediaError('invalid_media');
-          }
-          const asset: StudioAssetV2 =
-            input.briefReferenceRole === undefined
-              ? baseAsset
-              : {
-                  ...baseAsset,
-                  briefReferenceRole: input.briefReferenceRole,
-                  briefReferenceLabel: allocateStudioBriefReferenceLabel(
-                    path.basename(input.sourcePath),
-                    activeReferences!.map((reference) => reference.briefReferenceLabel!)
-                  ),
-                };
-          defineRecordValue(next.assets, asset.id, asset);
-          if (asset.shotId !== null) {
-            const shot = ownRecordValue(next.shots, asset.shotId);
-            if (shot === undefined) throw new CreativeStudioMediaError('not_found');
-            shot.assetIds.push(asset.id);
-          }
-          importedAsset = asset;
-          return next;
-        },
-        input.expectedRevision
-      );
+        );
+      });
       if (importedAsset === null) throw new CreativeStudioMediaError('storage_error');
       return input.returnProject ? { asset: importedAsset, project: updatedProject } : importedAsset;
     } catch (error) {
@@ -1208,6 +2133,398 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       return mapStoreError(error);
     }
   }
+
+  const importBedAudioFromPathV2 = async (input: InternalImportBedAudioInputV2): Promise<StudioMediaImportResultV2> => {
+    if (
+      (!hasExactOwnKeys(input, ['projectId', 'sourcePath', 'expectedRevision']) &&
+        !hasExactOwnKeys(input, ['projectId', 'sourcePath', 'expectedRevision', 'assertActive'])) ||
+      !SAFE_ID.test(input.projectId) ||
+      typeof input.sourcePath !== 'string' ||
+      input.sourcePath.length === 0 ||
+      !Number.isSafeInteger(input.expectedRevision) ||
+      input.expectedRevision < 1 ||
+      (input.assertActive !== undefined && typeof input.assertActive !== 'function')
+    ) {
+      throw new CreativeStudioMediaError('invalid_media');
+    }
+    assertOperationActive(input.assertActive);
+    const assetId = createId();
+    const mutationId = createMutationId();
+    if (!SAFE_ID.test(assetId) || !SAFE_ID.test(mutationId)) {
+      throw new CreativeStudioMediaError('storage_error');
+    }
+
+    let partPath: string | null = null;
+    let partIdentity: FileIdentity | null = null;
+    let finalPath: string | null = null;
+    let finalIdentity: FileIdentity | null = null;
+    let publishedIntent: PublishedStudioBedMediaIntentV2 | null = null;
+    let projectCommitAttempted = false;
+    let authority: StudioProjectPathAuthorityV2 | null = null;
+    try {
+      const sourceStats = await regularFile(input.sourcePath);
+      const sourceIdentity = fileIdentity(sourceStats);
+      const sourceByteSize = Number(sourceStats.size);
+      if (!Number.isSafeInteger(sourceByteSize) || sourceByteSize < 1) {
+        throw new CreativeStudioMediaError('invalid_media');
+      }
+      const context = await loadProjectContextV2(input.projectId);
+      const { projectDir, project } = context;
+      authority = context.authority;
+      if (project.revision !== input.expectedRevision) throw new CreativeStudioMediaError('stale_project');
+      const capacity = await planWriteCapacity(project, projectDir, limits.videoOutputMaxBytes, sourceByteSize);
+      const partsDirectory = await ensureManagedDirectoryV2(authority, 'parts');
+      const importsDirectory = await ensureManagedDirectoryV2(authority, 'imports');
+      const partsDir = partsDirectory.directory;
+      const importsDir = importsDirectory.directory;
+      partPath = path.join(partsDir, `${assetId}.part`);
+      if (path.dirname(partPath) !== partsDir) throw new CreativeStudioMediaError('storage_error');
+
+      const hash = createHash('sha256');
+      let byteSize = 0;
+      let sample = Buffer.alloc(0);
+      const checker = new Transform({
+        transform(chunk: Buffer, _encoding, callback) {
+          byteSize += chunk.length;
+          if (byteSize > capacity.maxBytes) {
+            callback(new CreativeStudioMediaError(capacity.overflowCode));
+            return;
+          }
+          hash.update(chunk);
+          if (sample.length < 32) sample = Buffer.concat([sample, chunk]).subarray(0, 32);
+          callback(null, chunk);
+        },
+      });
+      await assertV2ManagedMutation(authority, [partsDirectory]);
+      const partHandle = await fs.open(partPath, 'wx');
+      try {
+        await assertV2ManagedMutation(authority, [partsDirectory]);
+        const openedPart = await partHandle.stat();
+        if (!openedPart.isFile()) throw new CreativeStudioMediaError('storage_error');
+        partIdentity = fileIdentity(openedPart);
+        const sourceStream = await openVerifiedReadStream(input.sourcePath, undefined, undefined, async () => {
+          const current = await regularFile(input.sourcePath);
+          const currentIdentity = fileIdentity(current);
+          if (
+            currentIdentity.dev !== sourceIdentity.dev ||
+            currentIdentity.ino !== sourceIdentity.ino ||
+            Number(current.size) !== sourceByteSize ||
+            current.mtimeMs !== sourceStats.mtimeMs ||
+            current.ctimeMs !== sourceStats.ctimeMs
+          ) {
+            throw new CreativeStudioMediaError('invalid_media');
+          }
+        });
+        await pipeline(sourceStream, checker, createWriteStream(partPath, { fd: partHandle.fd, autoClose: false }));
+      } finally {
+        await partHandle.close().catch((): undefined => undefined);
+      }
+      const currentSource = await regularFile(input.sourcePath);
+      const currentSourceIdentity = fileIdentity(currentSource);
+      if (
+        currentSourceIdentity.dev !== sourceIdentity.dev ||
+        currentSourceIdentity.ino !== sourceIdentity.ino ||
+        Number(currentSource.size) !== sourceByteSize ||
+        currentSource.mtimeMs !== sourceStats.mtimeMs ||
+        currentSource.ctimeMs !== sourceStats.ctimeMs
+      ) {
+        throw new CreativeStudioMediaError('invalid_media');
+      }
+      await assertV2ManagedMutation(authority, [partsDirectory]);
+      const completedPart = await regularFile(partPath);
+      const completedPartIdentity = fileIdentity(completedPart);
+      if (
+        completedPartIdentity.dev !== partIdentity.dev ||
+        completedPartIdentity.ino !== partIdentity.ino ||
+        completedPart.size !== byteSize ||
+        byteSize < 12
+      ) {
+        throw new CreativeStudioMediaError('invalid_media');
+      }
+      const signature = sniff(sample);
+      if (signature?.mimeType !== 'audio/wav') throw new CreativeStudioMediaError('invalid_media');
+      const sha256 = hash.digest('hex');
+      const probe = await probeBedAudioV2({ filePath: partPath, byteSize, sha256 });
+      if (
+        probe.audioStreamCount !== 1 ||
+        probe.otherStreamCount !== 0 ||
+        !Number.isFinite(probe.durationSeconds) ||
+        probe.durationSeconds <= 0 ||
+        probe.durationSeconds > Number.MAX_SAFE_INTEGER
+      ) {
+        throw new CreativeStudioMediaError('invalid_media');
+      }
+      assertOperationActive(input.assertActive);
+      await assertV2ManagedMutation(authority, [partsDirectory, importsDirectory]);
+      finalPath = path.join(importsDir, `${assetId}.wav`);
+      if (path.dirname(finalPath) !== importsDir) throw new CreativeStudioMediaError('storage_error');
+      const capturedAt = now();
+      const importedAsset: StudioAssetV2 = {
+        id: assetId,
+        projectId: input.projectId,
+        shotId: null,
+        mediaKind: 'audio',
+        mimeType: 'audio/wav',
+        managedAsset: { collection: 'imports', fileName: `${assetId}.wav` },
+        byteSize,
+        sha256,
+        durationSeconds: probe.durationSeconds,
+        createdAt: capturedAt,
+      };
+      if (partPath === null || partIdentity === null || finalPath === null) {
+        throw new CreativeStudioMediaError('storage_error');
+      }
+      const stagedPartPath = partPath;
+      const stagedPartIdentity = partIdentity;
+      const intendedFinalPath = finalPath;
+      const updatedProject = await withManagedProjectAuthority(input.projectId, async (projectAuthority, facts) => {
+        if (
+          projectAuthority.projectDir !== projectDir ||
+          projectAuthority.project.revision !== input.expectedRevision
+        ) {
+          throw new CreativeStudioMediaError('stale_project');
+        }
+        assertOperationActive(input.assertActive);
+        const finalSource = await regularFile(input.sourcePath);
+        const finalSourceIdentity = fileIdentity(finalSource);
+        if (
+          finalSourceIdentity.dev !== sourceIdentity.dev ||
+          finalSourceIdentity.ino !== sourceIdentity.ino ||
+          Number(finalSource.size) !== sourceByteSize ||
+          finalSource.mtimeMs !== sourceStats.mtimeMs ||
+          finalSource.ctimeMs !== sourceStats.ctimeMs
+        ) {
+          throw new CreativeStudioMediaError('invalid_media');
+        }
+        await projectAuthority.assertCurrent?.();
+        await assertV2ManagedMutation(authority, [partsDirectory, importsDirectory]);
+        assertManagedProjectCapacity(projectAuthority.project, facts.managedByteSize, byteSize);
+        publishedIntent = await publishBedMediaIntentV2(authority, partsDirectory, {
+          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          kind: 'import_bed_audio',
+          projectId: input.projectId,
+          expectedRevision: input.expectedRevision,
+          asset: importedAsset,
+          managedIdentity: stagedPartIdentity,
+        });
+        finalIdentity = await finalizeManagedPartV2(
+          stagedPartPath,
+          partsDir,
+          intendedFinalPath,
+          importsDir,
+          stagedPartIdentity,
+          () => assertV2ManagedMutation(authority!, [partsDirectory, importsDirectory]),
+          (identity) => {
+            finalIdentity = identity;
+          },
+          {
+            syncDestinationDirectory: () => syncVerifiedDirectoryV2(importsDirectory),
+            syncPartsDirectory: () => syncVerifiedDirectoryV2(partsDirectory),
+          }
+        );
+        partPath = null;
+        partIdentity = null;
+        if (finalIdentity === null) throw new CreativeStudioMediaError('storage_error');
+        const importedFileProof = await captureManagedFileProofV2(intendedFinalPath, finalIdentity, importedAsset);
+        await assertV2ManagedMutation(authority, [importsDirectory]);
+        assertOperationActive(input.assertActive);
+        projectCommitAttempted = true;
+        return projectAuthority.commit(
+          (current) => {
+            assertOperationActive(input.assertActive);
+            if (ownRecordValue(current.assets, assetId) !== undefined) {
+              throw new CreativeStudioMediaError('storage_error');
+            }
+            assertManagedProjectCapacity(current, facts.managedByteSize, byteSize);
+            const withAsset = structuredClone(current);
+            defineRecordValue(withAsset.assets, assetId, importedAsset);
+            return applyStudioMutationBatchV2(
+              withAsset,
+              {
+                schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+                projectId: current.id,
+                expectedRevision: current.revision,
+                operations: [{ kind: 'set_bed', assetId }],
+              },
+              { mutationId, capturedAt }
+            ).project;
+          },
+          input.expectedRevision,
+          'import_bed_audio',
+          async () => {
+            assertOperationActive(input.assertActive);
+            await assertManagedFileProofV2(intendedFinalPath, importedFileProof);
+          }
+        );
+      });
+      if (publishedIntent !== null) {
+        await repairPublishedBedMediaIntentV2(publishedIntent).catch((): undefined => undefined);
+      }
+      return { asset: importedAsset, project: updatedProject };
+    } catch (error) {
+      if (!projectCommitAttempted) {
+        await cleanupUncommittedManagedPathsV2(input.projectId, assetId, [
+          { filePath: partPath, identity: partIdentity },
+          { filePath: finalPath, identity: finalIdentity },
+        ]);
+        if (publishedIntent !== null) {
+          await repairPublishedBedMediaIntentV2(publishedIntent).catch((): undefined => undefined);
+        }
+      }
+      return mapStoreError(error);
+    }
+  };
+
+  const detachBedAudioV2 = async (input: InternalDetachBedAudioInputV2): Promise<StudioProjectV2> => {
+    if (
+      (!hasExactOwnKeys(input, ['projectId', 'expectedRevision', 'assetId']) &&
+        !hasExactOwnKeys(input, ['projectId', 'expectedRevision', 'assetId', 'assertActive'])) ||
+      !SAFE_ID.test(input.projectId) ||
+      !SAFE_ID.test(input.assetId) ||
+      !Number.isSafeInteger(input.expectedRevision) ||
+      input.expectedRevision < 1 ||
+      (input.assertActive !== undefined && typeof input.assertActive !== 'function')
+    ) {
+      throw new CreativeStudioMediaError('invalid_media');
+    }
+    assertOperationActive(input.assertActive);
+    const claimKey = bedAudioClaimKey(input.projectId, input.assetId);
+    let publishedIntent: PublishedStudioBedMediaIntentV2 | null = null;
+    let projectCommitAttempted = false;
+    try {
+      const { projectDir, project, authority } = await loadProjectContextV2(input.projectId);
+      if (project.revision !== input.expectedRevision) throw new CreativeStudioMediaError('stale_project');
+      const asset = ownRecordValue(project.assets, input.assetId);
+      if (asset === undefined) throw new CreativeStudioMediaError('not_found');
+      if (!isCanonicalBedAudioAssetV2(project, asset)) throw new CreativeStudioMediaError('invalid_media');
+      if (project.bedAssetId === asset.id) throw new CreativeStudioMediaError('media_in_use');
+      if ((activeBedAudioReadClaims.get(claimKey) ?? 0) > 0 || detachingBedAudio.has(claimKey)) {
+        throw new CreativeStudioMediaError('media_in_use');
+      }
+
+      const resolved = await resolveAssetV2(input.projectId, input.assetId);
+      if (
+        resolved === null ||
+        !isCanonicalBedAudioAssetV2(project, resolved.asset) ||
+        !sameCanonicalBedAudioAssetV2(asset, resolved.asset)
+      ) {
+        throw new CreativeStudioMediaError('storage_error');
+      }
+      const importsDir = path.join(projectDir, 'imports');
+      const managedFile = path.join(importsDir, asset.managedAsset.fileName);
+      if (path.dirname(managedFile) !== importsDir) throw new CreativeStudioMediaError('storage_error');
+      const importsDirectory = await captureManagedDirectoryV2(authority, importsDir);
+      const before = await regularFile(managedFile);
+      if ((await fs.realpath(managedFile)) !== managedFile) throw new CreativeStudioMediaError('storage_error');
+      const managedIdentity = fileIdentity(before);
+      let observedBytes = 0;
+      for await (const chunk of await resolved.openVerifiedStream()) observedBytes += Buffer.from(chunk).length;
+      if (observedBytes !== asset.byteSize) throw new CreativeStudioMediaError('storage_error');
+      const after = await regularFile(managedFile);
+      const afterIdentity = fileIdentity(after);
+      if (
+        afterIdentity.dev !== managedIdentity.dev ||
+        afterIdentity.ino !== managedIdentity.ino ||
+        after.size !== before.size ||
+        after.mtimeMs !== before.mtimeMs ||
+        after.ctimeMs !== before.ctimeMs
+      ) {
+        throw new CreativeStudioMediaError('storage_error');
+      }
+      const managedFileProof = await captureManagedFileProofV2(managedFile, managedIdentity, asset);
+      assertOperationActive(input.assertActive);
+      if ((activeBedAudioReadClaims.get(claimKey) ?? 0) > 0 || detachingBedAudio.has(claimKey)) {
+        throw new CreativeStudioMediaError('media_in_use');
+      }
+      const partsDirectory = await ensureManagedDirectoryV2(authority, 'parts');
+      const updated = await withManagedProjectAuthority(input.projectId, async (projectAuthority) => {
+        if (
+          projectAuthority.projectDir !== projectDir ||
+          projectAuthority.project.revision !== input.expectedRevision
+        ) {
+          throw new CreativeStudioMediaError('stale_project');
+        }
+        await projectAuthority.assertCurrent?.();
+        await assertV2ManagedMutation(authority, [importsDirectory]);
+        assertOperationActive(input.assertActive);
+        if ((activeBedAudioReadClaims.get(claimKey) ?? 0) > 0 || detachingBedAudio.has(claimKey)) {
+          throw new CreativeStudioMediaError('media_in_use');
+        }
+        const currentAsset = ownRecordValue(projectAuthority.project.assets, input.assetId);
+        if (
+          currentAsset === undefined ||
+          !isCanonicalBedAudioAssetV2(projectAuthority.project, currentAsset) ||
+          !sameCanonicalBedAudioAssetV2(asset, currentAsset)
+        ) {
+          throw new CreativeStudioMediaError('invalid_media');
+        }
+        if (projectAuthority.project.bedAssetId === input.assetId) {
+          throw new CreativeStudioMediaError('media_in_use');
+        }
+        const currentManaged = await regularFile(managedFile);
+        const currentManagedIdentity = fileIdentity(currentManaged);
+        if (
+          currentManagedIdentity.dev !== managedIdentity.dev ||
+          currentManagedIdentity.ino !== managedIdentity.ino ||
+          currentManaged.size !== before.size ||
+          currentManaged.mtimeMs !== before.mtimeMs ||
+          currentManaged.ctimeMs !== before.ctimeMs
+        ) {
+          throw new CreativeStudioMediaError('storage_error');
+        }
+        publishedIntent = await publishBedMediaIntentV2(authority, partsDirectory, {
+          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          kind: 'detach_bed_audio',
+          projectId: input.projectId,
+          expectedRevision: input.expectedRevision,
+          asset,
+          managedIdentity,
+        });
+        detachingBedAudio.add(claimKey);
+        projectCommitAttempted = true;
+        return projectAuthority.commit(
+          (current) => {
+            assertOperationActive(input.assertActive);
+            if ((activeBedAudioReadClaims.get(claimKey) ?? 0) > 0 || !detachingBedAudio.has(claimKey)) {
+              throw new CreativeStudioMediaError('media_in_use');
+            }
+            const committedAsset = ownRecordValue(current.assets, input.assetId);
+            if (committedAsset === undefined) throw new CreativeStudioMediaError('not_found');
+            if (
+              !isCanonicalBedAudioAssetV2(current, committedAsset) ||
+              !sameCanonicalBedAudioAssetV2(asset, committedAsset)
+            ) {
+              throw new CreativeStudioMediaError('invalid_media');
+            }
+            if (current.bedAssetId === input.assetId) throw new CreativeStudioMediaError('media_in_use');
+            const next = structuredClone(current);
+            delete next.assets[input.assetId];
+            return next;
+          },
+          input.expectedRevision,
+          'detach_bed_audio',
+          async () => {
+            assertOperationActive(input.assertActive);
+            if ((activeBedAudioReadClaims.get(claimKey) ?? 0) > 0 || !detachingBedAudio.has(claimKey)) {
+              throw new CreativeStudioMediaError('media_in_use');
+            }
+            await assertManagedFileProofV2(managedFile, managedFileProof);
+          }
+        );
+      });
+      if (publishedIntent !== null) {
+        await repairPublishedBedMediaIntentV2(publishedIntent).catch((): undefined => undefined);
+      }
+      return updated;
+    } catch (error) {
+      if (!projectCommitAttempted && publishedIntent !== null) {
+        await repairPublishedBedMediaIntentV2(publishedIntent).catch((): undefined => undefined);
+      }
+      return mapStoreError(error);
+    } finally {
+      detachingBedAudio.delete(claimKey);
+    }
+  };
 
   const detachBriefReferenceV2 = async (input: StudioDetachBriefReferenceRequest): Promise<StudioProjectV2> => {
     if (
@@ -1241,6 +2558,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       if (path.dirname(managedFile) !== importsDir) throw new CreativeStudioMediaError('storage_error');
       let importsDirectory: VerifiedDirectory | null = null;
       let managedIdentity: FileIdentity | null = null;
+      let managedFileProof: ManagedFileProofV2 | null = null;
       try {
         const importsStats = await fs.lstat(importsDir);
         if (
@@ -1255,35 +2573,45 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         const managedStats = await regularFile(managedFile);
         if ((await fs.realpath(managedFile)) !== managedFile) throw new CreativeStudioMediaError('storage_error');
         managedIdentity = fileIdentity(managedStats);
+        managedFileProof = await captureManagedFileProofV2(managedFile, managedIdentity, currentAsset);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       }
       await assertV2ManagedMutation(authority, importsDirectory === null ? [] : [importsDirectory]);
-      const updated = await deps.store.updateProjectV2(
-        input.projectId,
-        (current) => {
-          const asset = ownRecordValue(current.assets, input.assetId);
-          if (asset === undefined) throw new CreativeStudioMediaError('not_found');
-          if (
-            asset.projectId !== current.id ||
-            asset.shotId !== null ||
-            asset.mediaKind !== 'image' ||
-            asset.managedAsset.collection !== 'imports' ||
-            (asset.briefReferenceRole !== 'cast' && asset.briefReferenceRole !== 'look') ||
-            asset.briefReferenceLabel === undefined
-          ) {
-            throw new CreativeStudioMediaError('invalid_media');
+      const updated = await withManagedProjectAuthority(input.projectId, async (projectAuthority) => {
+        if (projectAuthority.projectDir !== projectDir) throw new CreativeStudioMediaError('storage_error');
+        await projectAuthority.assertCurrent?.();
+        await assertV2ManagedMutation(authority, importsDirectory === null ? [] : [importsDirectory]);
+        return projectAuthority.commit(
+          (current) => {
+            const asset = ownRecordValue(current.assets, input.assetId);
+            if (asset === undefined) throw new CreativeStudioMediaError('not_found');
+            if (
+              asset.projectId !== current.id ||
+              asset.shotId !== null ||
+              asset.mediaKind !== 'image' ||
+              asset.managedAsset.collection !== 'imports' ||
+              (asset.briefReferenceRole !== 'cast' && asset.briefReferenceRole !== 'look') ||
+              asset.briefReferenceLabel === undefined
+            ) {
+              throw new CreativeStudioMediaError('invalid_media');
+            }
+            if (nonterminalJobNeedsBriefReferenceV2(current, input.assetId)) {
+              throw new CreativeStudioMediaError('media_in_use');
+            }
+            const next = structuredClone(current);
+            if (!Object.hasOwn(next.assets, input.assetId)) throw new CreativeStudioMediaError('not_found');
+            delete next.assets[input.assetId];
+            return next;
+          },
+          input.expectedRevision,
+          undefined,
+          async () => {
+            assertOperationActive();
+            if (managedFileProof !== null) await assertManagedFileProofV2(managedFile, managedFileProof);
           }
-          if (nonterminalJobNeedsBriefReferenceV2(current, input.assetId)) {
-            throw new CreativeStudioMediaError('media_in_use');
-          }
-          const next = structuredClone(current);
-          if (!Object.hasOwn(next.assets, input.assetId)) throw new CreativeStudioMediaError('not_found');
-          delete next.assets[input.assetId];
-          return next;
-        },
-        input.expectedRevision
-      );
+        );
+      });
       if (managedIdentity !== null) {
         for (let attempt = 0; attempt < 2; attempt += 1) {
           try {
@@ -1341,10 +2669,59 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         // eslint-disable-next-line no-await-in-loop
         await assertV2ManagedMutation(authority, [partsDirectory]);
         // eslint-disable-next-line no-await-in-loop
-        const entries = await fs.readdir(partsDir, { withFileTypes: true });
+        let entries = await fs.readdir(partsDir, { withFileTypes: true });
+        for (const entry of entries) {
+          const match = /^(bed-(?:import|detach)-[A-Za-z0-9_-]{1,256}\.json)\.bed-quarantine$/.exec(entry.name);
+          if (match === null) continue;
+          if (!entry.isFile() || entry.isSymbolicLink()) throw new CreativeStudioMediaError('storage_error');
+          const quarantinePath = path.join(partsDir, entry.name);
+          const intentPath = path.join(partsDir, match[1]!);
+          // eslint-disable-next-line no-await-in-loop
+          const quarantineStats = await regularFile(quarantinePath);
+          const quarantineIdentity = fileIdentity(quarantineStats);
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            const intentStats = await regularFile(intentPath);
+            const intentIdentity = fileIdentity(intentStats);
+            if (intentIdentity.dev !== quarantineIdentity.dev || intentIdentity.ino !== quarantineIdentity.ino) {
+              throw new CreativeStudioMediaError('storage_error');
+            }
+          } catch (error) {
+            if (error instanceof CreativeStudioMediaError) throw error;
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new CreativeStudioMediaError('storage_error');
+            // eslint-disable-next-line no-await-in-loop
+            await fs.link(quarantinePath, intentPath);
+          }
+          // eslint-disable-next-line no-await-in-loop
+          await syncVerifiedDirectoryV2(partsDirectory);
+          // eslint-disable-next-line no-await-in-loop
+          const currentQuarantine = await regularFile(quarantinePath);
+          const currentIdentity = fileIdentity(currentQuarantine);
+          if (currentIdentity.dev !== quarantineIdentity.dev || currentIdentity.ino !== quarantineIdentity.ino) {
+            throw new CreativeStudioMediaError('storage_error');
+          }
+          // eslint-disable-next-line no-await-in-loop
+          await fs.unlink(quarantinePath);
+          // eslint-disable-next-line no-await-in-loop
+          await syncVerifiedDirectoryV2(partsDirectory);
+        }
+        // eslint-disable-next-line no-await-in-loop
+        entries = await fs.readdir(partsDir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (!/^bed-(?:import|detach)-[A-Za-z0-9_-]{1,256}\.json$/.test(entry.name)) continue;
+          if (!entry.isFile() || entry.isSymbolicLink()) throw new CreativeStudioMediaError('storage_error');
+          // eslint-disable-next-line no-await-in-loop
+          const published = await readBedMediaIntentV2(path.join(partsDir, entry.name), partsDirectory);
+          // eslint-disable-next-line no-await-in-loop
+          await repairPublishedBedMediaIntentV2(published);
+        }
         await Promise.all(
           entries
-            .filter((entry) => entry.name.endsWith('.part'))
+            .filter(
+              (entry) =>
+                entry.name.endsWith('.part') ||
+                (/^\.[A-Za-z0-9_-]{1,256}\.[A-Za-z0-9_]+\.bed-intent\.tmp$/.test(entry.name) && entry.isFile())
+            )
             .map(async (entry) => {
               const target = path.join(partsDir, entry.name);
               const targetStats = await fs.lstat(target);
@@ -1359,118 +2736,25 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     }
   };
 
-  const readProjectOutputAssetV2 = async (
-    projectDir: string,
-    projectId: string,
-    assetId: string
-  ): Promise<StudioAssetV2 | null> => {
-    const assetsDir = path.join(projectDir, 'assets');
-    const metadataPath = path.join(assetsDir, `${assetId}.render-v2.json`);
-    if (path.dirname(metadataPath) !== assetsDir) return null;
-    let handle: Awaited<ReturnType<typeof fs.open>> | null = null;
-    try {
-      const assetsStats = await fs.lstat(assetsDir);
-      if (!assetsStats.isDirectory() || assetsStats.isSymbolicLink() || (await fs.realpath(assetsDir)) !== assetsDir) {
-        return null;
-      }
-      handle = await fs.open(
-        metadataPath,
-        fsConstants.O_RDONLY | (typeof fsConstants.O_NOFOLLOW === 'number' ? fsConstants.O_NOFOLLOW : 0)
-      );
-      const before = await handle.stat();
-      if (!before.isFile() || before.size < 2 || before.size > 4096) return null;
-      const parsed = JSON.parse(await handle.readFile({ encoding: 'utf8' })) as unknown;
-      const after = await handle.stat();
-      if (
-        before.dev !== after.dev ||
-        before.ino !== after.ino ||
-        before.size !== after.size ||
-        before.mtimeMs !== after.mtimeMs
-      ) {
-        return null;
-      }
-      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
-      const candidate = parsed as Partial<StudioAssetV2>;
-      const managedAsset = candidate.managedAsset;
-      const keys = new Set([
-        'id',
-        'projectId',
-        'shotId',
-        'mediaKind',
-        'mimeType',
-        'managedAsset',
-        'byteSize',
-        'sha256',
-        'width',
-        'height',
-        'durationSeconds',
-        'createdAt',
-      ]);
-      if (
-        Object.keys(parsed).some((key) => !keys.has(key)) ||
-        candidate.id !== assetId ||
-        candidate.projectId !== projectId ||
-        candidate.shotId !== null ||
-        candidate.mediaKind !== 'video' ||
-        candidate.mimeType !== 'video/mp4' ||
-        typeof managedAsset !== 'object' ||
-        managedAsset === null ||
-        Object.keys(managedAsset).length !== 2 ||
-        managedAsset.collection !== 'assets' ||
-        managedAsset.fileName !== `${assetId}.mp4` ||
-        !Number.isSafeInteger(candidate.byteSize) ||
-        candidate.byteSize! < 1 ||
-        typeof candidate.sha256 !== 'string' ||
-        !/^[a-f0-9]{64}$/.test(candidate.sha256) ||
-        !Number.isSafeInteger(candidate.width) ||
-        candidate.width! < 1 ||
-        !Number.isSafeInteger(candidate.height) ||
-        candidate.height! < 1 ||
-        (candidate.durationSeconds !== undefined &&
-          (!Number.isFinite(candidate.durationSeconds) || candidate.durationSeconds <= 0)) ||
-        typeof candidate.createdAt !== 'string' ||
-        candidate.createdAt.length === 0
-      ) {
-        return null;
-      }
-      return candidate as StudioAssetV2;
-    } catch {
-      return null;
-    } finally {
-      await handle?.close().catch((): undefined => undefined);
-    }
-  };
+  type StudioAssetResolutionContextV2 = { projectDir: string; project: StudioProjectV2 };
+  type StudioAssetResolutionContextLoaderV2 = () => Promise<StudioAssetResolutionContextV2>;
 
-  const listProjectOutputAssetsV2 = async (projectDir: string, projectId: string): Promise<StudioAssetV2[]> => {
-    const assetsDir = path.join(projectDir, 'assets');
-    const outputMetadata = await fs.readdir(assetsDir).catch((error: NodeJS.ErrnoException): string[] => {
-      if (error.code === 'ENOENT') return [];
-      throw error;
-    });
-    const outputAssets = await Promise.all(
-      outputMetadata.flatMap((fileName) => {
-        const match = /^([A-Za-z0-9_-]{1,256})\.render-v2\.json$/.exec(fileName);
-        return match ? [readProjectOutputAssetV2(projectDir, projectId, match[1]!)] : [];
-      })
-    );
-    return outputAssets.filter((asset): asset is StudioAssetV2 => asset !== null);
-  };
-
-  const resolveAssetV2 = async (
-    projectId: string,
-    assetId: string
-  ): Promise<{
-    asset: StudioAssetV2;
-    openVerifiedStream: (start?: number, end?: number) => Promise<Readable>;
-  } | null> => {
+  const resolveAssetFromContextV2 = async (
+    context: StudioAssetResolutionContextV2,
+    assetId: string,
+    loadCurrentContext: StudioAssetResolutionContextLoaderV2
+  ): Promise<StudioResolvedAssetV2 | null> => {
+    const { projectDir, project } = context;
+    const projectId = project.id;
     if (!SAFE_ID.test(projectId) || !SAFE_ID.test(assetId)) return null;
     try {
-      const { projectDir, project } = await loadProjectContextV2(projectId);
-      const asset =
-        ownRecordValue(project.assets, assetId) ?? (await readProjectOutputAssetV2(projectDir, projectId, assetId));
+      const asset = ownRecordValue(project.assets, assetId);
       if (!asset || asset.projectId !== projectId) return null;
+      const isBedAudio = isCanonicalBedAudioAssetV2(project, asset);
+      const claimKey = bedAudioClaimKey(projectId, assetId);
+      if (isBedAudio && detachingBedAudio.has(claimKey)) return null;
       if (!STUDIO_MANAGED_ASSET_COLLECTIONS_V2.has(asset.managedAsset.collection)) return null;
-      if (!/^[A-Za-z0-9_-]+\.(?:jpg|png|webp|mp4|webm)$/.test(asset.managedAsset.fileName)) return null;
+      if (!/^[A-Za-z0-9_-]+\.(?:jpg|png|webp|mp4|webm|wav)$/.test(asset.managedAsset.fileName)) return null;
       const collectionDir = path.join(projectDir, asset.managedAsset.collection);
       if (path.dirname(collectionDir) !== projectDir) return null;
       const dirStats = await fs.lstat(collectionDir);
@@ -1567,6 +2851,19 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       return {
         asset,
         openVerifiedStream: async (start, end) => {
+          if (isBedAudio) {
+            if (detachingBedAudio.has(claimKey)) throw new CreativeStudioMediaError('storage_error');
+            const live = await loadCurrentContext();
+            const liveAsset = ownRecordValue(live.project.assets, assetId);
+            if (
+              liveAsset === undefined ||
+              !isCanonicalBedAudioAssetV2(live.project, liveAsset) ||
+              !sameCanonicalBedAudioAssetV2(asset, liveAsset) ||
+              detachingBedAudio.has(claimKey)
+            ) {
+              throw new CreativeStudioMediaError('storage_error');
+            }
+          }
           const current = await fs.stat(filePath);
           const currentIdentity = fileIdentity(current);
           const currentCached = verifiedFiles.get(filePath);
@@ -1578,16 +2875,63 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
             currentCached.ctimeMs !== current.ctimeMs ||
             currentCached.sha256 !== asset.sha256
           ) {
-            const refreshed = await resolveAssetV2(projectId, assetId);
+            const refreshedContext = await loadCurrentContext();
+            const refreshed = await resolveAssetFromContextV2(refreshedContext, assetId, loadCurrentContext);
             if (refreshed === null) throw new CreativeStudioMediaError('storage_error');
           }
-          return openVerifiedReadStream(filePath, start, end, undefined, expectation);
+          const stream = await openVerifiedReadStream(filePath, start, end, undefined, expectation);
+          if (!isBedAudio) return stream;
+          if (detachingBedAudio.has(claimKey)) {
+            stream.destroy();
+            throw new CreativeStudioMediaError('storage_error');
+          }
+          activeBedAudioReadClaims.set(claimKey, (activeBedAudioReadClaims.get(claimKey) ?? 0) + 1);
+          let released = false;
+          const release = (): void => {
+            if (released) return;
+            released = true;
+            const remaining = (activeBedAudioReadClaims.get(claimKey) ?? 1) - 1;
+            if (remaining <= 0) activeBedAudioReadClaims.delete(claimKey);
+            else activeBedAudioReadClaims.set(claimKey, remaining);
+          };
+          stream.once('end', release);
+          stream.once('error', release);
+          stream.once('close', release);
+          return stream;
         },
       };
     } catch (error) {
       if (error instanceof CreativeStudioStoreError) throw error;
       return null;
     }
+  };
+
+  const resolveAssetV2 = async (projectId: string, assetId: string): Promise<StudioResolvedAssetV2 | null> => {
+    if (!SAFE_ID.test(projectId) || !SAFE_ID.test(assetId)) return null;
+    const loadCurrentContext = async (): Promise<StudioAssetResolutionContextV2> => {
+      const { projectDir, project } = await loadProjectContextV2(projectId);
+      return { projectDir, project };
+    };
+    return resolveAssetFromContextV2(await loadCurrentContext(), assetId, loadCurrentContext);
+  };
+
+  const resolveAssetWithProjectAuthorityV2 = async (
+    authority: Pick<StudioProjectAuthoritySnapshotV2, 'project' | 'projectDir' | 'assertCurrent'>,
+    assetId: string
+  ): Promise<StudioResolvedAssetV2 | null> => {
+    if (
+      !SAFE_ID.test(assetId) ||
+      !SAFE_ID.test(authority.project.id) ||
+      typeof authority.projectDir !== 'string' ||
+      typeof authority.assertCurrent !== 'function'
+    ) {
+      return null;
+    }
+    const loadCurrentContext = async (): Promise<StudioAssetResolutionContextV2> => {
+      await authority.assertCurrent!();
+      return { projectDir: authority.projectDir, project: authority.project };
+    };
+    return resolveAssetFromContextV2(await loadCurrentContext(), assetId, loadCurrentContext);
   };
 
   const resolveProviderInputV2 = async (
@@ -1809,28 +3153,61 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         sha256: hash.digest('hex'),
         createdAt: repairingReadyAsset?.createdAt ?? now(),
       };
-      const committed = await deps.store.updateProjectV2(project.id, (current) => {
-        const currentExtraction = ownRecordValue(current.frameExtractions, extraction.id);
-        const currentShot = ownRecordValue(current.shots, shot.id);
-        const currentTake = ownRecordValue(current.assets, take.id);
-        if (
-          currentExtraction === undefined ||
-          currentShot === undefined ||
-          currentTake === undefined ||
-          currentExtraction.takeAssetId !== take.id ||
-          currentExtraction.endpointSeconds !== extraction.endpointSeconds ||
-          (repairingReadyAsset === null
-            ? currentExtraction.status !== 'extracting' || currentExtraction.frameAssetId !== null
-            : currentExtraction.status !== 'ready' || currentExtraction.frameAssetId !== frameAssetId)
-        ) {
-          throw new CreativeStudioMediaError('job_inactive');
-        }
-        defineRecordValue(current.assets, frameAsset.id, frameAsset);
-        if (!currentShot.assetIds.includes(frameAsset.id)) currentShot.assetIds.push(frameAsset.id);
-        currentExtraction.frameAssetId = frameAsset.id;
-        currentExtraction.status = 'ready';
-        currentExtraction.errorCode = null;
-        return current;
+      if (finalPath === null || finalIdentity === null) throw new CreativeStudioMediaError('storage_error');
+      const frameFilePath = finalPath;
+      const frameFileProof = await captureManagedFileProofV2(frameFilePath, finalIdentity, frameAsset);
+      const committed = await withManagedProjectAuthority(project.id, async (projectAuthority, facts) => {
+        if (projectAuthority.projectDir !== projectDir) throw new CreativeStudioMediaError('storage_error');
+        await projectAuthority.assertCurrent?.();
+        await assertV2ManagedMutation(authority, [framesDirectory]);
+        assertManagedProjectCapacity(
+          projectAuthority.project,
+          facts.managedByteSize,
+          frameAsset.byteSize,
+          repairingReadyAsset?.byteSize ?? 0
+        );
+        return projectAuthority.commit(
+          (current) => {
+            const currentExtraction = ownRecordValue(current.frameExtractions, extraction.id);
+            const currentShot = ownRecordValue(current.shots, shot.id);
+            const currentTake = ownRecordValue(current.assets, take.id);
+            const currentFrame = ownRecordValue(current.assets, frameAsset.id);
+            if (
+              currentExtraction === undefined ||
+              currentShot === undefined ||
+              currentTake === undefined ||
+              currentExtraction.takeAssetId !== take.id ||
+              currentExtraction.endpointSeconds !== extraction.endpointSeconds ||
+              (repairingReadyAsset === null
+                ? currentExtraction.status !== 'extracting' ||
+                  currentExtraction.frameAssetId !== null ||
+                  currentFrame !== undefined
+                : currentExtraction.status !== 'ready' ||
+                  currentExtraction.frameAssetId !== frameAssetId ||
+                  currentFrame?.id !== repairingReadyAsset.id)
+            ) {
+              throw new CreativeStudioMediaError('job_inactive');
+            }
+            assertManagedProjectCapacity(
+              current,
+              facts.managedByteSize,
+              frameAsset.byteSize,
+              repairingReadyAsset?.byteSize ?? 0
+            );
+            defineRecordValue(current.assets, frameAsset.id, frameAsset);
+            if (!currentShot.assetIds.includes(frameAsset.id)) currentShot.assetIds.push(frameAsset.id);
+            currentExtraction.frameAssetId = frameAsset.id;
+            currentExtraction.status = 'ready';
+            currentExtraction.errorCode = null;
+            return current;
+          },
+          projectAuthority.project.revision,
+          undefined,
+          async () => {
+            assertOperationActive();
+            await assertManagedFileProofV2(frameFilePath, frameFileProof);
+          }
+        );
       });
       finalPath = null;
       finalIdentity = null;
@@ -2111,7 +3488,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
   const persistManagedOutputWithPlanV2 = async (
     input: ManagedStreamInputV2,
     plan: ManagedWritePlanV2,
-    commit: (asset: StudioAssetV2) => Promise<void>
+    commit: (asset: StudioAssetV2, authorizeManagedFile: () => Promise<void>) => Promise<void>
   ): Promise<StudioAssetV2> => {
     const assetId = createId();
     if (!SAFE_ID.test(assetId)) throw new CreativeStudioMediaError('storage_error');
@@ -2212,8 +3589,11 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         ...(durationSeconds === undefined ? {} : { durationSeconds }),
         createdAt: now(),
       };
+      if (finalPath === null || finalIdentity === null) throw new CreativeStudioMediaError('storage_error');
+      const managedFilePath = finalPath;
+      const managedFileProof = await captureManagedFileProofV2(managedFilePath, finalIdentity, asset);
       await assertV2ManagedMutation(plan.authority, [collectionDirectory]);
-      await commit(asset);
+      await commit(asset, () => assertManagedFileProofV2(managedFilePath, managedFileProof));
       return asset;
     } catch (error) {
       await cleanupUncommittedManagedPathsV2(input.projectId, assetId, [
@@ -2224,226 +3604,163 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     }
   };
 
-  const prepareProjectOutputWriteV2 = async (
-    input: Omit<PersistProjectOutputInputV2, 'body'>
-  ): Promise<ManagedWritePlanV2> => {
-    if (
-      !SAFE_ID.test(input.projectId) ||
-      input.declaredMimeType !== 'video/mp4' ||
-      !Number.isSafeInteger(input.width) ||
-      input.width < 1 ||
-      !Number.isSafeInteger(input.height) ||
-      input.height < 1 ||
-      (input.declaredByteSize !== undefined &&
-        (!Number.isSafeInteger(input.declaredByteSize) || input.declaredByteSize < 1)) ||
-      (input.durationSeconds !== undefined && (!Number.isFinite(input.durationSeconds) || input.durationSeconds <= 0))
-    ) {
-      throw new CreativeStudioMediaError('invalid_media');
-    }
-    const { projectDir, project, authority } = await loadProjectContextV2(input.projectId);
-    const outputAssets = await listProjectOutputAssetsV2(projectDir, input.projectId);
-    const outputBytes = outputAssets.reduce((total, asset) => total + asset.byteSize, 0);
-    return {
-      projectDir,
-      project,
-      authority,
-      capacity: await planWriteCapacity(
-        project,
-        projectDir,
-        limits.videoOutputMaxBytes,
-        input.declaredByteSize,
-        outputBytes
-      ),
-      collection: 'assets',
-    };
-  };
-
-  const persistProjectOutputV2 = async (input: PersistProjectOutputInputV2): Promise<StudioAssetV2> => {
-    const plan = await prepareProjectOutputWriteV2(input);
-    return persistManagedOutputWithPlanV2({ ...input, shotId: null, mediaKind: 'video' }, plan, async (asset) => {
-      const partsDirectory = await ensureManagedDirectoryV2(plan.authority, 'parts');
-      const assetsDirectory = await ensureManagedDirectoryV2(plan.authority, 'assets');
-      const partsDir = partsDirectory.directory;
-      const assetsDir = assetsDirectory.directory;
-      let metadataPart: string | null = path.join(partsDir, `${asset.id}.render-v2-metadata.part`);
-      const metadataPath = path.join(assetsDir, `${asset.id}.render-v2.json`);
-      let metadataPartIdentity: FileIdentity | null = null;
-      let metadataFinalIdentity: FileIdentity | null = null;
-      try {
-        await assertV2ManagedMutation(plan.authority, [partsDirectory]);
-        const metadataHandle = await fs.open(metadataPart, 'wx');
-        try {
-          await assertV2ManagedMutation(plan.authority, [partsDirectory]);
-          const openedMetadata = await metadataHandle.stat();
-          if (!openedMetadata.isFile()) throw new CreativeStudioMediaError('storage_error');
-          metadataPartIdentity = fileIdentity(openedMetadata);
-          await metadataHandle.writeFile(JSON.stringify(asset), { encoding: 'utf8' });
-        } finally {
-          await metadataHandle.close().catch((): undefined => undefined);
-        }
-        await assertV2ManagedMutation(plan.authority, [partsDirectory]);
-        const completedMetadata = await regularFile(metadataPart);
-        const completedMetadataIdentity = fileIdentity(completedMetadata);
-        if (
-          metadataPartIdentity === null ||
-          completedMetadataIdentity.dev !== metadataPartIdentity.dev ||
-          completedMetadataIdentity.ino !== metadataPartIdentity.ino
-        ) {
-          throw new CreativeStudioMediaError('storage_error');
-        }
-        metadataFinalIdentity = await finalizeManagedPartV2(
-          metadataPart,
-          partsDir,
-          metadataPath,
-          assetsDir,
-          metadataPartIdentity,
-          () => assertV2ManagedMutation(plan.authority, [partsDirectory, assetsDirectory]),
-          (identity) => {
-            metadataFinalIdentity = identity;
+  const commitManagedAssetV2 = async (
+    projectId: string,
+    asset: StudioAssetV2,
+    update: (project: StudioProjectV2) => StudioProjectV2,
+    authorizeManagedFile: () => Promise<void>
+  ): Promise<void> => {
+    await withManagedProjectAuthority(projectId, async (projectAuthority, facts) => {
+      await projectAuthority.assertCurrent?.();
+      assertManagedProjectCapacity(projectAuthority.project, facts.managedByteSize, asset.byteSize);
+      await projectAuthority.commit(
+        (current) => {
+          if (ownRecordValue(current.assets, asset.id) !== undefined) {
+            throw new CreativeStudioMediaError('storage_error');
           }
-        );
-        metadataPart = null;
-        metadataPartIdentity = null;
-      } catch (error) {
-        await cleanupUncommittedManagedPathsV2(input.projectId, asset.id, [
-          { filePath: metadataPart, identity: metadataPartIdentity },
-          { filePath: metadataPath, identity: metadataFinalIdentity },
-        ]);
-        throw error;
-      }
+          assertManagedProjectCapacity(current, facts.managedByteSize, asset.byteSize);
+          return update(current);
+        },
+        projectAuthority.project.revision,
+        undefined,
+        async () => {
+          assertOperationActive();
+          await authorizeManagedFile();
+        }
+      );
     });
   };
 
-  const getLatestProjectOutputV2 = async (projectId: string): Promise<StudioAssetV2 | null> => {
-    if (!SAFE_ID.test(projectId)) throw new CreativeStudioMediaError('invalid_media');
-    const { projectDir } = await loadProjectContextV2(projectId);
-    const renderedCuts = (await listProjectOutputAssetsV2(projectDir, projectId)).toSorted(
-      (left, right) => right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id)
+  const commitProviderJobAssetV2 = async (
+    input: ProviderJobOutputMetadataV2,
+    asset: StudioAssetV2,
+    authorizeManagedFile: () => Promise<void>
+  ): Promise<void> => {
+    await commitManagedAssetV2(
+      input.projectId,
+      asset,
+      (current) => {
+        const job = ownRecordValue(current.jobs, input.jobId);
+        const shot = ownRecordValue(current.shots, input.shotId);
+        const beat = owningBeatForShotV2(current, input.shotId);
+        const active =
+          job?.status === 'submitting' ||
+          job?.status === 'running' ||
+          (job?.status === 'failed' && job.error?.code === 'download_failed');
+        if (
+          !job ||
+          !shot ||
+          !beat ||
+          job.projectId !== input.projectId ||
+          job.shotId !== input.shotId ||
+          !shot.jobIds.includes(job.id) ||
+          !active
+        ) {
+          throw new CreativeStudioMediaError('job_inactive');
+        }
+        const expectedMediaKind = job.purpose === 'seed_still' ? 'image' : 'video';
+        if (expectedMediaKind !== input.mediaKind) {
+          throw new CreativeStudioMediaError('job_inactive');
+        }
+        if (
+          asset.projectId !== current.id ||
+          asset.shotId !== shot.id ||
+          asset.mediaKind !== input.mediaKind ||
+          asset.managedAsset.collection !== 'assets'
+        ) {
+          throw new CreativeStudioMediaError('invalid_media');
+        }
+        asset.sourceLook = job.requestSnapshot?.prompt ?? `${beat.look.trim()}\n\n${shot.line.trim()}`;
+        defineRecordValue(current.assets, asset.id, asset);
+        shot.assetIds.push(asset.id);
+        job.status = 'succeeded';
+        job.outputAssetIds = [asset.id];
+        job.outputAssetIdsByRole.primary = asset.id;
+        job.error = null;
+        delete job.progress;
+        job.updatedAt = now();
+        return current;
+      },
+      authorizeManagedFile
     );
-    for (const renderedCut of renderedCuts) {
-      // eslint-disable-next-line no-await-in-loop
-      const resolved = await resolveAssetV2(projectId, renderedCut.id);
-      if (resolved !== null) return resolved.asset;
-    }
-    return null;
-  };
-
-  const commitProviderJobAssetV2 = async (input: ProviderJobOutputMetadataV2, asset: StudioAssetV2): Promise<void> => {
-    await deps.store.updateProjectV2(input.projectId, (current) => {
-      const job = ownRecordValue(current.jobs, input.jobId);
-      const shot = ownRecordValue(current.shots, input.shotId);
-      const beat = owningBeatForShotV2(current, input.shotId);
-      const active =
-        job?.status === 'submitting' ||
-        job?.status === 'running' ||
-        (job?.status === 'failed' && job.error?.code === 'download_failed');
-      if (
-        !job ||
-        !shot ||
-        !beat ||
-        job.projectId !== input.projectId ||
-        job.shotId !== input.shotId ||
-        !shot.jobIds.includes(job.id) ||
-        !active
-      ) {
-        throw new CreativeStudioMediaError('job_inactive');
-      }
-      const expectedMediaKind = job.purpose === 'seed_still' ? 'image' : 'video';
-      if (expectedMediaKind !== input.mediaKind) {
-        throw new CreativeStudioMediaError('job_inactive');
-      }
-      if (
-        asset.projectId !== current.id ||
-        asset.shotId !== shot.id ||
-        asset.mediaKind !== input.mediaKind ||
-        asset.managedAsset.collection !== 'assets'
-      ) {
-        throw new CreativeStudioMediaError('invalid_media');
-      }
-      const usedBytes = Object.values(current.assets).reduce((total, candidate) => total + candidate.byteSize, 0);
-      if (usedBytes + asset.byteSize > limits.projectMaxBytes) {
-        throw new CreativeStudioMediaError('invalid_media');
-      }
-      asset.sourceLook = job.requestSnapshot?.prompt ?? `${beat.look.trim()}\n\n${shot.line.trim()}`;
-      defineRecordValue(current.assets, asset.id, asset);
-      shot.assetIds.push(asset.id);
-      job.status = 'succeeded';
-      job.outputAssetIds = [asset.id];
-      job.outputAssetIdsByRole.primary = asset.id;
-      job.error = null;
-      delete job.progress;
-      job.updatedAt = now();
-      return current;
-    });
   };
 
   const persistProviderOutputForJobV2 = async (input: PersistProviderJobOutputInputV2): Promise<StudioAssetV2> =>
-    persistManagedOutputWithPlanV2(input, await prepareProviderJobWriteV2(input), (asset) =>
-      commitProviderJobAssetV2(input, asset)
+    persistManagedOutputWithPlanV2(input, await prepareProviderJobWriteV2(input), (asset, authorizeManagedFile) =>
+      commitProviderJobAssetV2(input, asset, authorizeManagedFile)
     );
 
   const commitProviderJobPosterV2 = async (
     input: ProviderJobPosterMetadataV2,
-    posterAsset: StudioAssetV2
+    posterAsset: StudioAssetV2,
+    authorizeManagedFile: () => Promise<void>
   ): Promise<void> => {
-    await deps.store.updateProjectV2(input.projectId, (current) => {
-      const { shot, job } = validateProviderPosterLineageV2(current, input);
-      if (
-        posterAsset.projectId !== current.id ||
-        posterAsset.shotId !== shot.id ||
-        posterAsset.mediaKind !== 'image' ||
-        posterAsset.managedAsset.collection !== 'thumbnails'
-      ) {
-        throw new CreativeStudioMediaError('invalid_media');
-      }
-      const usedBytes = Object.values(current.assets).reduce((total, candidate) => total + candidate.byteSize, 0);
-      if (usedBytes + posterAsset.byteSize > limits.projectMaxBytes) {
-        throw new CreativeStudioMediaError('invalid_media');
-      }
-      defineRecordValue(current.assets, posterAsset.id, posterAsset);
-      shot.assetIds.push(posterAsset.id);
-      job.outputAssetIds.push(posterAsset.id);
-      job.outputAssetIdsByRole.poster = posterAsset.id;
-      job.updatedAt = now();
-      return current;
-    });
+    await commitManagedAssetV2(
+      input.projectId,
+      posterAsset,
+      (current) => {
+        const { shot, job } = validateProviderPosterLineageV2(current, input);
+        if (
+          posterAsset.projectId !== current.id ||
+          posterAsset.shotId !== shot.id ||
+          posterAsset.mediaKind !== 'image' ||
+          posterAsset.managedAsset.collection !== 'thumbnails'
+        ) {
+          throw new CreativeStudioMediaError('invalid_media');
+        }
+        defineRecordValue(current.assets, posterAsset.id, posterAsset);
+        shot.assetIds.push(posterAsset.id);
+        job.outputAssetIds.push(posterAsset.id);
+        job.outputAssetIdsByRole.poster = posterAsset.id;
+        job.updatedAt = now();
+        return current;
+      },
+      authorizeManagedFile
+    );
   };
 
   const persistProviderPosterForJobV2 = async (input: PersistProviderJobPosterInputV2): Promise<StudioAssetV2> => {
     const plan = await prepareProviderPosterWriteV2(input);
-    return persistManagedOutputWithPlanV2({ ...input, mediaKind: 'image' }, plan, (asset) =>
-      commitProviderJobPosterV2(input, asset)
+    return persistManagedOutputWithPlanV2({ ...input, mediaKind: 'image' }, plan, (asset, authorizeManagedFile) =>
+      commitProviderJobPosterV2(input, asset, authorizeManagedFile)
     );
   };
 
-  const commitCapturedPosterV2 = async (input: CapturedPosterMetadataV2, posterAsset: StudioAssetV2): Promise<void> => {
-    await deps.store.updateProjectV2(input.projectId, (current) => {
-      const { shot, job } = validateCapturedPosterLineageV2(current, input);
-      if (
-        posterAsset.projectId !== current.id ||
-        posterAsset.shotId !== shot.id ||
-        posterAsset.mediaKind !== 'image' ||
-        posterAsset.managedAsset.collection !== 'thumbnails'
-      ) {
-        throw new CreativeStudioMediaError('invalid_media');
-      }
-      const usedBytes = Object.values(current.assets).reduce((total, candidate) => total + candidate.byteSize, 0);
-      if (usedBytes + posterAsset.byteSize > limits.projectMaxBytes) {
-        throw new CreativeStudioMediaError('invalid_media');
-      }
-      defineRecordValue(current.assets, posterAsset.id, posterAsset);
-      shot.assetIds.push(posterAsset.id);
-      job.outputAssetIds.push(posterAsset.id);
-      job.outputAssetIdsByRole.poster = posterAsset.id;
-      job.updatedAt = now();
-      return current;
-    });
+  const commitCapturedPosterV2 = async (
+    input: CapturedPosterMetadataV2,
+    posterAsset: StudioAssetV2,
+    authorizeManagedFile: () => Promise<void>
+  ): Promise<void> => {
+    await commitManagedAssetV2(
+      input.projectId,
+      posterAsset,
+      (current) => {
+        const { shot, job } = validateCapturedPosterLineageV2(current, input);
+        if (
+          posterAsset.projectId !== current.id ||
+          posterAsset.shotId !== shot.id ||
+          posterAsset.mediaKind !== 'image' ||
+          posterAsset.managedAsset.collection !== 'thumbnails'
+        ) {
+          throw new CreativeStudioMediaError('invalid_media');
+        }
+        defineRecordValue(current.assets, posterAsset.id, posterAsset);
+        shot.assetIds.push(posterAsset.id);
+        job.outputAssetIds.push(posterAsset.id);
+        job.outputAssetIdsByRole.poster = posterAsset.id;
+        job.updatedAt = now();
+        return current;
+      },
+      authorizeManagedFile
+    );
   };
 
   const persistCapturedPosterV2 = async (input: PersistCapturedPosterInputV2): Promise<StudioAssetV2> => {
     const plan = await prepareCapturedPosterWriteV2(input);
     const normalized = { ...input, mediaKind: 'image' as const, declaredMimeType: 'image/png' as const };
-    return persistManagedOutputWithPlanV2(normalized, plan, (asset) => commitCapturedPosterV2(input, asset));
+    return persistManagedOutputWithPlanV2(normalized, plan, (asset, authorizeManagedFile) =>
+      commitCapturedPosterV2(input, asset, authorizeManagedFile)
+    );
   };
 
   /** Pipes the single SSRF-safe downloader into the same managed `.part` persistence path without buffering media. */
@@ -2518,7 +3835,9 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
   ): Promise<StudioAssetV2> => {
     const plan = await prepareProviderJobWriteV2(input);
     return persistProviderOutputFromUrlWithPlan(input, plan, (body) =>
-      persistManagedOutputWithPlanV2({ ...input, body }, plan, (asset) => commitProviderJobAssetV2(input, asset))
+      persistManagedOutputWithPlanV2({ ...input, body }, plan, (asset, authorizeManagedFile) =>
+        commitProviderJobAssetV2(input, asset, authorizeManagedFile)
+      )
     );
   };
 
@@ -2528,21 +3847,24 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     const plan = await prepareProviderPosterWriteV2(input);
     const normalized = { ...input, mediaKind: 'image' as const };
     return persistProviderOutputFromUrlWithPlan(normalized, plan, (body) =>
-      persistManagedOutputWithPlanV2({ ...normalized, body }, plan, (asset) => commitProviderJobPosterV2(input, asset))
+      persistManagedOutputWithPlanV2({ ...normalized, body }, plan, (asset, authorizeManagedFile) =>
+        commitProviderJobPosterV2(input, asset, authorizeManagedFile)
+      )
     );
   };
 
   return {
     importReferenceFromPathV2,
+    importBedAudioFromPathV2,
+    detachBedAudioV2,
     detachBriefReferenceV2,
     persistProviderOutputForJobV2,
     persistProviderOutputFromUrlForJobV2,
     persistProviderPosterForJobV2,
     persistProviderPosterFromUrlForJobV2,
     persistCapturedPosterV2,
-    persistProjectOutputV2,
-    getLatestProjectOutputV2,
     resolveAssetV2,
+    resolveAssetWithProjectAuthorityV2,
     resolveProviderInputV2,
     extractConditioningFrameV2,
     verifyConditioningFrameV2,

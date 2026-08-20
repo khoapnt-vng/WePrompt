@@ -25,12 +25,17 @@ import {
   type StudioConnectionValidationResult,
   type StudioConfirmSubmissionRequestV2,
   type StudioConfirmSubmissionResultV2,
+  type StudioCopyExportResultV2,
+  type StudioCreateExportRequestV2,
+  type StudioDetachBedAudioRequestV2,
   type StudioDetachBriefReferenceRequest,
   type StudioDismissReferenceGenerationHandoffRequestV2,
   type StudioDismissReferenceGenerationHandoffResultV2,
   type StudioDirectorSessionAuthorityV2,
   type StudioJobRequest,
   type StudioJobV2,
+  type StudioExportArtifactRequestV2,
+  type StudioListExportsRequestV2,
   type StudioMediaChoiceRef,
   type StudioMediaKind,
   type StudioMediaRouteCatalog,
@@ -50,6 +55,7 @@ import {
   type StudioReferenceRequestV2,
   type StudioRemoveConnectionRequest,
   type StudioRendererChainStatusV2,
+  type StudioRendererExportCatalogV2,
   type StudioRendererJobV2,
   type StudioRendererPreparedSubmissionOptionsV2,
   type StudioRendererProjectCommitResultV2,
@@ -60,7 +66,9 @@ import {
   type StudioRetryJobRequest,
   type StudioRouteCatalogEntry,
   type StudioRouteCatalogV2,
+  type StudioRevealExportResultV2,
   type StudioSaveConnectionRequest,
+  type StudioShot,
   type StudioSpendAuthorization,
   type StudioSubmissionQuote,
   type StudioSubmissionQuoteCore,
@@ -85,6 +93,7 @@ import {
   StudioProjectConfirmationError,
   type CreativeStudioStore,
   type StudioDecideReferenceRequestInputV2,
+  type StudioProjectAuthoritySnapshotV2,
   type StudioProjectConfirmationInputV2,
   type StudioReferenceGenerationHandoffStoreV2,
   type StudioProjectStoreLoadResultV2,
@@ -101,10 +110,19 @@ import {
   type StudioRateCardV2,
 } from './schema2/pricing';
 import {
+  composeStudioEditorFolderV2,
+  createStudioExportCatalogStoreV2,
+  projectStudioRendererExportCatalogV2,
+  StudioEditorFolderErrorV2,
+  StudioExportCatalogErrorV2,
+  type StudioExportCatalogStoreV2,
+  type StudioExportPayloadFilePlanV2,
+} from './schema2/exports';
+import {
   StudioPreparedSubmissionCacheErrorV2,
   StudioPreparedSubmissionCacheV2,
   type StudioPreparedSubmissionClaimV2,
-} from './schema2/preparedSubmissionCache';
+} from './schema2/pricing/preparedSubmissionCache';
 import {
   applyStudioMutationBatchV2,
   advanceStudioWaitingBindingsV2,
@@ -195,6 +213,13 @@ export type StudioGenerationReadinessV2 = {
   payableShotIds: string[];
 };
 
+export type StudioExportDestinationPickerV2 = (input: {
+  suggestedName: string;
+  isDirectory: boolean;
+}) => Promise<string | null>;
+
+export type StudioExportPathRevealerV2 = (filePath: string) => void;
+
 export type CreativeStudioServiceV2 = {
   listProjects(): Promise<StudioProjectListResultV2>;
   createProject(input: CreateStudioProjectInputV2): Promise<StudioRendererProjectV2>;
@@ -216,7 +241,23 @@ export type CreativeStudioServiceV2 = {
     expectedRevision: number;
     sourcePath: string;
   }): Promise<{ asset: StudioAssetV2; project: StudioRendererProjectV2 }>;
+  importBedAudioFromPath(input: {
+    projectId: string;
+    expectedRevision: number;
+    sourcePath: string;
+  }): Promise<{ asset: StudioAssetV2; project: StudioRendererProjectV2 }>;
+  detachBedAudio(input: StudioDetachBedAudioRequestV2): Promise<StudioRendererProjectV2>;
   detachBriefReference(input: StudioDetachBriefReferenceRequest): Promise<StudioRendererProjectV2>;
+  createExport(input: StudioCreateExportRequestV2): Promise<StudioRendererExportCatalogV2>;
+  listExports(input: StudioListExportsRequestV2): Promise<StudioRendererExportCatalogV2>;
+  copyExport(
+    input: StudioExportArtifactRequestV2,
+    chooseDestination: StudioExportDestinationPickerV2
+  ): Promise<StudioCopyExportResultV2>;
+  revealExport(
+    input: StudioExportArtifactRequestV2,
+    revealPath: StudioExportPathRevealerV2
+  ): Promise<StudioRevealExportResultV2>;
   persistCapturedPoster(input: {
     projectId: string;
     shotId: string;
@@ -263,6 +304,7 @@ export type CreativeStudioServiceV2Deps = {
   providerResolver: StudioProviderResolver;
   jobManager: StudioJobManagerV2;
   mediaStore?: StudioMediaStore;
+  exportCatalogStore?: StudioExportCatalogStoreV2;
   listProviders?: () => Promise<IProvider[]>;
   getAdapterRegistry?: () => GenerationProviderAdapterRegistry;
   getStudioServerScriptPath?: () => string;
@@ -273,6 +315,7 @@ export type CreativeStudioServiceV2Deps = {
   createQuoteId?: () => string;
   createJobId?: () => string;
   createIdempotencyKey?: () => string;
+  createExportId?: () => string;
   now?: () => Date;
   onProjectUpdated: (projectId: string) => void;
 };
@@ -575,6 +618,125 @@ const isDenseArray = (value: unknown, maximum: number): value is unknown[] => {
 
 const ownValue = <Value>(record: Record<string, Value>, id: string): Value | undefined =>
   Object.hasOwn(record, id) ? record[id] : undefined;
+
+const isBinnedTakeV2 = (project: StudioProjectV2, assetId: string): boolean =>
+  project.bin.some((item) => item.kind === 'take' && item.assetId === assetId);
+
+const ownedShotAssetV2 = (project: StudioProjectV2, shot: StudioShot, assetId: string): StudioAssetV2 | null => {
+  const asset = ownValue(project.assets, assetId);
+  return asset?.id === assetId &&
+    asset.projectId === project.id &&
+    asset.shotId === shot.id &&
+    shot.assetIds.includes(assetId)
+    ? asset
+    : null;
+};
+
+const canonicalVideoPosterAssetV2 = (
+  project: StudioProjectV2,
+  shot: StudioShot,
+  selectedTake: StudioAssetV2
+): StudioAssetV2 | null => {
+  const producingJobs = shot.jobIds.flatMap((jobId) => {
+    const job = ownValue(project.jobs, jobId);
+    return job?.id === jobId &&
+      job.projectId === project.id &&
+      job.shotId === shot.id &&
+      job.status === 'succeeded' &&
+      job.purpose === 'video_take' &&
+      job.outputAssetIdsByRole.primary === selectedTake.id &&
+      job.outputAssetIds.filter((assetId) => assetId === selectedTake.id).length === 1
+      ? [job]
+      : [];
+  });
+  if (producingJobs.length !== 1) return null;
+  const posterId = producingJobs[0]!.outputAssetIdsByRole.poster;
+  if (posterId === null || producingJobs[0]!.outputAssetIds.filter((assetId) => assetId === posterId).length !== 1) {
+    return null;
+  }
+  const poster = ownedShotAssetV2(project, shot, posterId);
+  return poster !== null && poster.mediaKind === 'image' && poster.managedAsset.collection === 'thumbnails'
+    ? poster
+    : null;
+};
+
+const eligibleSeedAssetV2 = (project: StudioProjectV2, shot: StudioShot, assetId: string): StudioAssetV2 | null => {
+  const asset = ownedShotAssetV2(project, shot, assetId);
+  return asset !== null &&
+    asset.mediaKind === 'image' &&
+    (asset.managedAsset.collection === 'assets' || asset.managedAsset.collection === 'imports') &&
+    asset.briefReferenceRole === undefined &&
+    asset.briefReferenceLabel === undefined &&
+    !isBinnedTakeV2(project, asset.id)
+    ? asset
+    : null;
+};
+
+const canonicalCutCoverAssetV2 = (project: StudioProjectV2, shotId: string): StudioAssetV2 | null => {
+  let activeShot: StudioShot | null = null;
+  let segmentHead = false;
+  for (const beatId of project.beatOrder) {
+    const beat = ownValue(project.beats, beatId);
+    if (beat === undefined) continue;
+    const shotIndex = beat.shotOrder.indexOf(shotId);
+    if (shotIndex < 0) continue;
+    activeShot = ownValue(project.shots, shotId) ?? null;
+    segmentHead = shotIndex === 0 || activeShot?.chainBreak === 'hard_cut';
+    break;
+  }
+  if (activeShot === null) return null;
+
+  if (activeShot.selectedTakeId !== null && !isBinnedTakeV2(project, activeShot.selectedTakeId)) {
+    const selected = ownedShotAssetV2(project, activeShot, activeShot.selectedTakeId);
+    if (
+      selected !== null &&
+      selected.mediaKind === 'video' &&
+      isCanonicalStudioGeneratedTakeV2(selected, project.id, activeShot)
+    ) {
+      const poster = canonicalVideoPosterAssetV2(project, activeShot, selected);
+      if (poster !== null) return poster;
+    }
+  }
+  if (!segmentHead) return null;
+  if (activeShot.seedStillId !== null) {
+    const explicit = eligibleSeedAssetV2(project, activeShot, activeShot.seedStillId);
+    if (explicit !== null) return explicit;
+  }
+  const candidates = activeShot.assetIds.flatMap((assetId) => {
+    const candidate = eligibleSeedAssetV2(project, activeShot!, assetId);
+    return candidate === null ? [] : [candidate];
+  });
+  candidates.sort((left, right) =>
+    left.createdAt === right.createdAt
+      ? left.id < right.id
+        ? 1
+        : left.id > right.id
+          ? -1
+          : 0
+      : left.createdAt < right.createdAt
+        ? 1
+        : -1
+  );
+  return candidates[0] ?? null;
+};
+
+const composeStudioScriptV2 = (project: StudioProjectV2): Uint8Array => {
+  const lines: string[] = [`# ${project.name}`, '', project.brief, ''];
+  project.beatOrder.forEach((beatId, beatIndex) => {
+    const beat = ownValue(project.beats, beatId);
+    if (beat === undefined) return;
+    lines.push(`## Beat ${beatIndex + 1}: ${beat.title}`, '', `Action: ${beat.action}`, `Look: ${beat.look}`, '');
+    beat.shotOrder.forEach((shotId, shotIndex) => {
+      const shot = ownValue(project.shots, shotId);
+      if (shot === undefined) return;
+      lines.push(`### Shot ${shotIndex + 1}`, '', shot.line);
+      if (shot.narration.length > 0) lines.push('', `Narration: ${shot.narration}`);
+      if (shot.onScreenText.length > 0) lines.push('', `On-screen text: ${shot.onScreenText}`);
+      lines.push('');
+    });
+  });
+  return Buffer.from(lines.join('\n').replace(/\r\n?/gu, '\n').replace(/\n+$/u, '\n'), 'utf8');
+};
 
 const defineOwn = <Value>(record: Record<string, Value>, id: string, value: Value): void => {
   Object.defineProperty(record, id, { value, configurable: true, enumerable: true, writable: true });
@@ -1011,7 +1173,9 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
   const createQuoteId = deps.createQuoteId ?? (() => defaultId('quote'));
   const createJobId = deps.createJobId ?? (() => defaultId('job'));
   const createIdempotencyKey = deps.createIdempotencyKey ?? (() => defaultId('key'));
+  const createExportId = deps.createExportId ?? (() => defaultId('export'));
   const createConnectionId = deps.createConnectionId ?? randomUUID;
+  const exportCatalogStore = deps.exportCatalogStore ?? createStudioExportCatalogStoreV2();
   const activeClaims = new Set<StudioPreparedSubmissionClaimV2>();
   let disposed = false;
 
@@ -1040,6 +1204,117 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     } catch {
       throw new CreativeStudioServiceError('provider_error');
     }
+  };
+  const rethrowExportFailure = (error: unknown): never => {
+    if (error instanceof StudioExportCatalogErrorV2) {
+      if (error.code === 'stale_catalog_revision' || error.code === 'stale_project_revision') {
+        throw new CreativeStudioStoreError('stale_project', 'Studio export authority has changed');
+      }
+      if (error.code === 'invalid_create_plan' || error.code === 'artifact_not_found') {
+        throw invalid('Invalid Studio export request');
+      }
+      throw new CreativeStudioStoreError('storage_error', 'Studio export storage is unavailable');
+    }
+    if (error instanceof StudioEditorFolderErrorV2) {
+      throw invalid(`Invalid Studio editor-folder export: ${error.code}`);
+    }
+    throw error;
+  };
+  const assertGeneralServiceActive = (): void => {
+    if (disposed) throw new CreativeStudioStoreError('busy', 'Creative Studio service is closed');
+  };
+  const resolveExportAsset = async (authority: StudioProjectAuthoritySnapshotV2, assetId: string) => {
+    if (deps.mediaStore === undefined) {
+      throw new CreativeStudioStoreError('storage_error', 'Studio media storage is unavailable');
+    }
+    const project = authority.project;
+    const resolved = await deps.mediaStore.resolveAssetWithProjectAuthorityV2(authority, assetId);
+    const canonical = ownValue(project.assets, assetId);
+    if (
+      resolved === null ||
+      canonical === undefined ||
+      resolved.asset.id !== canonical.id ||
+      resolved.asset.projectId !== canonical.projectId ||
+      resolved.asset.byteSize !== canonical.byteSize ||
+      resolved.asset.sha256 !== canonical.sha256 ||
+      resolved.asset.managedAsset.collection !== canonical.managedAsset.collection ||
+      resolved.asset.managedAsset.fileName !== canonical.managedAsset.fileName
+    ) {
+      throw new CreativeStudioStoreError('storage_error', 'Studio export media is unavailable');
+    }
+    return {
+      asset: canonical,
+      openVerifiedStream: async (): Promise<AsyncIterable<Uint8Array>> => resolved.openVerifiedStream(),
+    };
+  };
+  const exportAssetExtension = (asset: StudioAssetV2): string => {
+    const separator = asset.managedAsset.fileName.lastIndexOf('.');
+    const extension = separator < 0 ? '' : asset.managedAsset.fileName.slice(separator + 1).toLowerCase();
+    if (!/^[a-z0-9]{1,16}$/.test(extension)) throw invalid('Invalid Studio export media extension');
+    return extension;
+  };
+  const buildExportPayload = async (
+    authority: StudioProjectAuthoritySnapshotV2,
+    input: StudioCreateExportRequestV2
+  ): Promise<StudioExportPayloadFilePlanV2[]> => {
+    const project = authority.project;
+    if (input.shape === 'script') {
+      return [{ kind: 'generated', relativePath: 'script.md', bytes: composeStudioScriptV2(project) }];
+    }
+    if (input.shape === 'still') {
+      const cover = canonicalCutCoverAssetV2(project, input.shotId);
+      if (cover === null) throw invalid('Studio still export has no canonical cover');
+      const resolved = await resolveExportAsset(authority, cover.id);
+      return [
+        {
+          kind: 'verified_stream',
+          relativePath: `still.${exportAssetExtension(cover)}`,
+          byteSize: cover.byteSize,
+          sha256: cover.sha256,
+          openVerifiedStream: resolved.openVerifiedStream,
+        },
+      ];
+    }
+
+    const requiredAssetIds: string[] = [];
+    for (const beatId of project.beatOrder) {
+      const beat = ownValue(project.beats, beatId);
+      if (beat === undefined) throw invalid('Studio export Beat is missing');
+      for (const shotId of beat.shotOrder) {
+        const shot = ownValue(project.shots, shotId);
+        if (shot === undefined || shot.selectedTakeId === null) continue;
+        requiredAssetIds.push(shot.selectedTakeId);
+      }
+    }
+    if (project.bedAssetId !== null) requiredAssetIds.push(project.bedAssetId);
+    const resolvedById = new Map<string, Awaited<ReturnType<typeof resolveExportAsset>>>();
+    for (const assetId of requiredAssetIds) {
+      if (resolvedById.has(assetId)) continue;
+      // eslint-disable-next-line no-await-in-loop -- every canonical media inode is re-proved before composition.
+      resolvedById.set(assetId, await resolveExportAsset(authority, assetId));
+    }
+    const composition = composeStudioEditorFolderV2(
+      project,
+      [...resolvedById.values()].map(({ asset }) => ({
+        assetId: asset.id,
+        byteSize: asset.byteSize,
+        sha256: asset.sha256,
+      }))
+    );
+    return composition.files.map((file): StudioExportPayloadFilePlanV2 => {
+      if (file.kind === 'generated') {
+        return { kind: 'generated', relativePath: file.relativePath, bytes: Uint8Array.from(file.bytes) };
+      }
+      const resolved = resolvedById.get(file.assetId);
+      if (resolved === undefined) throw new CreativeStudioStoreError('storage_error', 'Studio export media changed');
+      return {
+        kind: 'verified_stream',
+        relativePath: file.relativePath,
+        byteSize: file.byteSize,
+        sha256: file.sha256,
+        openVerifiedStream: resolved.openVerifiedStream,
+      };
+    });
   };
 
   const validateConnectionBinding = async (
@@ -1402,7 +1677,22 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     async deleteProject(input): Promise<boolean> {
       assertSafeId(input.projectId, 'project id');
       assertRevision(input.expectedRevision);
-      const deleted = await deps.store.deleteProjectV2(input.projectId, input.expectedRevision);
+      assertGeneralServiceActive();
+      let deleted: boolean;
+      try {
+        deleted = await deps.store.deleteProjectWithSidecarAuthorityV2(
+          input.projectId,
+          input.expectedRevision,
+          (authority) =>
+            exportCatalogStore.withManagedMediaAuthority(
+              { ...authority, assertActive: assertGeneralServiceActive },
+              () => authority.delete(input.expectedRevision, assertGeneralServiceActive)
+            )
+        );
+      } catch (error) {
+        if (error instanceof CreativeStudioStoreError && error.code === 'not_found') return false;
+        throw error;
+      }
       if (deleted) deps.onProjectUpdated(input.projectId);
       return deleted;
     },
@@ -1598,6 +1888,164 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       const imported = await deps.mediaStore.importReferenceFromPathV2({ ...input, returnProject: true });
       deps.onProjectUpdated(input.projectId);
       return { asset: structuredClone(imported.asset), project: toRendererProject(imported.project) };
+    },
+
+    async importBedAudioFromPath(input): Promise<{ asset: StudioAssetV2; project: StudioRendererProjectV2 }> {
+      if (!isRecord(input) || !hasExactKeys(input, ['projectId', 'expectedRevision', 'sourcePath'])) {
+        throw invalid('Invalid Studio bed-audio attachment');
+      }
+      assertSafeId(input.projectId, 'project id');
+      assertRevision(input.expectedRevision);
+      if (typeof input.sourcePath !== 'string' || input.sourcePath.length === 0) {
+        throw invalid('Invalid Studio bed-audio attachment');
+      }
+      if (deps.mediaStore === undefined) {
+        throw new CreativeStudioStoreError('storage_error', 'Studio media storage is unavailable');
+      }
+      const imported = await deps.mediaStore.importBedAudioFromPathV2({
+        ...input,
+        assertActive: assertGeneralServiceActive,
+      });
+      deps.onProjectUpdated(input.projectId);
+      return { asset: structuredClone(imported.asset), project: toRendererProject(imported.project) };
+    },
+
+    async detachBedAudio(input): Promise<StudioRendererProjectV2> {
+      if (!isRecord(input) || !hasExactKeys(input, ['projectId', 'expectedRevision', 'assetId'])) {
+        throw invalid('Invalid Studio bed-audio detach request');
+      }
+      assertSafeId(input.projectId, 'project id');
+      assertSafeId(input.assetId, 'asset id');
+      assertRevision(input.expectedRevision);
+      if (deps.mediaStore === undefined) {
+        throw new CreativeStudioStoreError('storage_error', 'Studio media storage is unavailable');
+      }
+      const project = await deps.mediaStore.detachBedAudioV2({
+        ...input,
+        assertActive: assertGeneralServiceActive,
+      });
+      deps.onProjectUpdated(input.projectId);
+      return toRendererProject(project);
+    },
+
+    async createExport(input): Promise<StudioRendererExportCatalogV2> {
+      if (!isRecord(input)) throw invalid('Invalid Studio export request');
+      const exactKeys =
+        input.shape === 'still'
+          ? ['projectId', 'expectedRevision', 'expectedCatalogRevision', 'shape', 'shotId']
+          : ['projectId', 'expectedRevision', 'expectedCatalogRevision', 'shape'];
+      if (
+        !hasExactKeys(input, exactKeys) ||
+        (input.shape !== 'editor_folder' && input.shape !== 'still' && input.shape !== 'script')
+      ) {
+        throw invalid('Invalid Studio export request');
+      }
+      assertSafeId(input.projectId, 'project id');
+      assertRevision(input.expectedRevision);
+      assertRevision(input.expectedCatalogRevision);
+      if (input.shape === 'still') assertSafeId(input.shotId, 'shot id');
+      assertGeneralServiceActive();
+
+      try {
+        return await deps.store.withProjectAuthorityV2(input.projectId, async (authority) => {
+          assertGeneralServiceActive();
+          if (authority.project.revision !== input.expectedRevision) {
+            throw new CreativeStudioStoreError('stale_project', 'Studio export project revision has changed');
+          }
+          const files = await buildExportPayload(authority, input);
+          assertGeneralServiceActive();
+          const artifactId = createExportId();
+          assertSafeId(artifactId, 'export id');
+          const catalog = await exportCatalogStore.create(
+            { ...authority, assertActive: assertGeneralServiceActive },
+            {
+              expectedProjectRevision: input.expectedRevision,
+              expectedCatalogRevision: input.expectedCatalogRevision,
+              artifactId,
+              managedFileName: artifactId,
+              shape: input.shape,
+              createdAt: readNow().toISOString(),
+              files,
+            }
+          );
+          return projectStudioRendererExportCatalogV2(catalog);
+        });
+      } catch (error) {
+        return rethrowExportFailure(error);
+      }
+    },
+
+    async listExports(input): Promise<StudioRendererExportCatalogV2> {
+      if (!isRecord(input) || !hasExactKeys(input, ['projectId'])) {
+        throw invalid('Invalid Studio export list request');
+      }
+      assertSafeId(input.projectId, 'project id');
+      assertGeneralServiceActive();
+      try {
+        return await deps.store.withProjectAuthorityV2(input.projectId, async (authority) => {
+          assertGeneralServiceActive();
+          const catalog = await exportCatalogStore.repair({ ...authority, assertActive: assertGeneralServiceActive });
+          return projectStudioRendererExportCatalogV2(catalog);
+        });
+      } catch (error) {
+        return rethrowExportFailure(error);
+      }
+    },
+
+    async copyExport(input, chooseDestination): Promise<StudioCopyExportResultV2> {
+      if (!isRecord(input) || !hasExactKeys(input, ['projectId', 'expectedCatalogRevision', 'artifactId'])) {
+        throw invalid('Invalid Studio export copy request');
+      }
+      assertSafeId(input.projectId, 'project id');
+      assertRevision(input.expectedCatalogRevision);
+      assertSafeId(input.artifactId, 'export artifact id');
+      if (typeof chooseDestination !== 'function') throw invalid('Invalid Studio export destination picker');
+      assertGeneralServiceActive();
+      try {
+        return await deps.store.withProjectAuthorityV2(input.projectId, async (authority) => {
+          assertGeneralServiceActive();
+          return exportCatalogStore.copy(
+            { ...authority, assertActive: assertGeneralServiceActive },
+            input,
+            async (description) => {
+              assertGeneralServiceActive();
+              const destination = await chooseDestination({
+                suggestedName: description.suggestedName,
+                isDirectory: description.payloadKind === 'directory',
+              });
+              assertGeneralServiceActive();
+              return destination;
+            }
+          );
+        });
+      } catch (error) {
+        return rethrowExportFailure(error);
+      }
+    },
+
+    async revealExport(input, revealPath): Promise<StudioRevealExportResultV2> {
+      if (!isRecord(input) || !hasExactKeys(input, ['projectId', 'expectedCatalogRevision', 'artifactId'])) {
+        throw invalid('Invalid Studio export reveal request');
+      }
+      assertSafeId(input.projectId, 'project id');
+      assertRevision(input.expectedCatalogRevision);
+      assertSafeId(input.artifactId, 'export artifact id');
+      if (typeof revealPath !== 'function') throw invalid('Invalid Studio export revealer');
+      assertGeneralServiceActive();
+      try {
+        return await deps.store.withProjectAuthorityV2(input.projectId, async (authority) => {
+          assertGeneralServiceActive();
+          const filePath = await exportCatalogStore.resolveRevealPath(
+            { ...authority, assertActive: assertGeneralServiceActive },
+            input
+          );
+          assertGeneralServiceActive();
+          revealPath(filePath);
+          return { status: 'revealed' };
+        });
+      } catch (error) {
+        return rethrowExportFailure(error);
+      }
     },
 
     async detachBriefReference(input): Promise<StudioRendererProjectV2> {

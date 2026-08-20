@@ -805,6 +805,51 @@ export const nativeBridgePayloadSchemas = {
     })
     .strict(),
   'creative-studio.import-seed-still': z.object({ ...studioV2MutationRequestShape, shotId: safeIdSchema }).strict(),
+  'creative-studio.import-bed-audio': z.object(studioV2MutationRequestShape).strict(),
+  'creative-studio.detach-bed-audio': z.object({ ...studioV2MutationRequestShape, assetId: safeIdSchema }).strict(),
+  'creative-studio.set-bed': z.object({ ...studioV2MutationRequestShape, assetId: safeIdSchema.nullable() }).strict(),
+  'creative-studio.set-match-to': z
+    .object({ ...studioV2MutationRequestShape, shotId: safeIdSchema.nullable() })
+    .strict(),
+  'creative-studio.create-export': z.discriminatedUnion('shape', [
+    z
+      .object({
+        ...studioV2MutationRequestShape,
+        expectedCatalogRevision: studioExpectedRevisionSchema,
+        shape: z.literal('editor_folder'),
+      })
+      .strict(),
+    z
+      .object({
+        ...studioV2MutationRequestShape,
+        expectedCatalogRevision: studioExpectedRevisionSchema,
+        shape: z.literal('still'),
+        shotId: safeIdSchema,
+      })
+      .strict(),
+    z
+      .object({
+        ...studioV2MutationRequestShape,
+        expectedCatalogRevision: studioExpectedRevisionSchema,
+        shape: z.literal('script'),
+      })
+      .strict(),
+  ]),
+  'creative-studio.list-exports': studioV2ProjectRequestSchema,
+  'creative-studio.copy-export': z
+    .object({
+      projectId: safeIdSchema,
+      expectedCatalogRevision: studioExpectedRevisionSchema,
+      artifactId: safeIdSchema,
+    })
+    .strict(),
+  'creative-studio.reveal-export': z
+    .object({
+      projectId: safeIdSchema,
+      expectedCatalogRevision: studioExpectedRevisionSchema,
+      artifactId: safeIdSchema,
+    })
+    .strict(),
   'creative-studio.list-connection-candidates': voidPayloadSchema,
   'creative-studio.list-connections': voidPayloadSchema,
   'creative-studio.validate-connection': studioConnectionSchema,

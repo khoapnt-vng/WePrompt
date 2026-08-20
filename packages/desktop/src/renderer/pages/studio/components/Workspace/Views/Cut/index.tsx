@@ -1,0 +1,595 @@
+/**
+ * @license
+ * Copyright 2025 AionUi (aionui.com)
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { ArrowDown, ArrowUp, Drag } from '@icon-park/react';
+import { Alert, Button, Drawer, Popconfirm, Select } from '@arco-design/web-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+
+import type { StudioRendererExportCatalogV2 } from '@/common/types/project/creativeStudioTypes';
+import type { WorkspaceProjection } from '../../workspaceProjection';
+import styles from './Cut.module.css';
+
+const CUT_ROOT = 'conversation.creativeStudio.workspace.cut';
+const ASSETS_ROOT = 'conversation.creativeStudio.workspace.assets';
+
+export type CutImportResult = 'cancelled' | 'imported' | 'failed';
+export type CutCopyResult = 'cancelled' | 'copied' | 'failed';
+
+export type CutCreateExportInput =
+  | { shape: 'editor_folder' }
+  | { shape: 'script' }
+  | { shape: 'still'; shotId: string };
+
+export type CutActions = {
+  reorderBeats: (order: readonly string[]) => Promise<boolean>;
+  importBedAudio: () => Promise<CutImportResult>;
+  setBed: (assetId: string | null) => Promise<boolean>;
+  detachBedAudio: (assetId: string) => Promise<boolean>;
+  setMatchTo: (shotId: string | null) => Promise<boolean>;
+  createExport: (input: CutCreateExportInput) => Promise<boolean>;
+  refreshExports: () => Promise<boolean>;
+  copyExport: (artifactId: string) => Promise<CutCopyResult>;
+  revealExport: (artifactId: string) => Promise<boolean>;
+};
+
+export type CutViewProps = {
+  projectId: string;
+  projection: WorkspaceProjection;
+  exportCatalog: StudioRendererExportCatalogV2 | null;
+  pending: boolean;
+  exportErrorMessageKey: string | null;
+  actions: CutActions;
+};
+
+const moveOrder = (order: readonly string[], from: number, to: number): string[] | null => {
+  if (from < 0 || from >= order.length || to < 0 || to >= order.length || from === to) return null;
+  const next = [...order];
+  const [moved] = next.splice(from, 1);
+  if (moved === undefined) return null;
+  next.splice(to, 0, moved);
+  return next;
+};
+
+const selectedBedId = (projection: WorkspaceProjection): string | null =>
+  projection.cut.bed.status === 'none' || projection.cut.bed.status === 'invalid' ? null : projection.cut.bed.assetId;
+
+const exportShapeKey = (shape: StudioRendererExportCatalogV2['artifacts'][number]['shape']): string =>
+  `${ASSETS_ROOT}.shape.${shape}`;
+
+/** Film-level Cut controls. Beat internals and paid generation remain outside this surface. */
+export const CutView: React.FC<CutViewProps> = ({
+  projectId,
+  projection,
+  exportCatalog,
+  pending,
+  exportErrorMessageKey,
+  actions,
+}) => {
+  const { t } = useTranslation();
+  const [announcement, setAnnouncement] = useState('');
+  const [assetsVisible, setAssetsVisible] = useState(false);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [reorderFocusId, setReorderFocusId] = useState<string | null>(null);
+  const [stillShotId, setStillShotId] = useState<string | null>(null);
+  const actionPendingRef = useRef(false);
+  const draggedBeatIdRef = useRef<string | null>(null);
+  const reorderRefs = useRef(new Map<string, HTMLButtonElement>());
+
+  const beatOrder = projection.cut.beats.map((beat) => beat.id);
+  const canonicalOrderReady =
+    projectId === projection.projectId &&
+    projection.cut.orderReady &&
+    beatOrder.length === projection.activeBeatIds.length &&
+    beatOrder.every((beatId, index) => beatId === projection.activeBeatIds[index]);
+  const locked = pending || actionPendingRef.current || projectId !== projection.projectId;
+  const currentBedId = selectedBedId(projection);
+  const stillCandidates = useMemo(
+    () => projection.cut.matchCandidates.filter((candidate) => candidate.coverAssetId !== null),
+    [projection.cut.matchCandidates]
+  );
+
+  useEffect(() => {
+    setStillShotId((current) => {
+      if (current !== null && stillCandidates.some((candidate) => candidate.shotId === current)) return current;
+      return stillCandidates[0]?.shotId ?? null;
+    });
+  }, [projectId, stillCandidates]);
+
+  useEffect(() => {
+    if (reorderFocusId === null || busyKey !== null) return;
+    const control = reorderRefs.current.get(reorderFocusId);
+    if (control === undefined) {
+      setReorderFocusId(null);
+      return;
+    }
+    control.focus();
+    setReorderFocusId(null);
+  }, [busyKey, projection.cut.beats, reorderFocusId]);
+
+  const runAction = async <Result,>(key: string, action: () => Promise<Result>): Promise<Result | null> => {
+    if (locked || actionPendingRef.current) return null;
+    actionPendingRef.current = true;
+    setBusyKey(key);
+    try {
+      return await action();
+    } catch {
+      return null;
+    } finally {
+      actionPendingRef.current = false;
+      setBusyKey(null);
+    }
+  };
+
+  const reorderBeat = async (beatId: string, destination: number): Promise<void> => {
+    if (!canonicalOrderReady) return;
+    const source = beatOrder.indexOf(beatId);
+    const next = moveOrder(beatOrder, source, destination);
+    if (next === null) return;
+    const reordered = await runAction(`beat:${beatId}`, () => actions.reorderBeats(next));
+    setAnnouncement(
+      reordered === true
+        ? t(`${CUT_ROOT}.reorderAnnouncement`, {
+            title: projection.cut.beats[source]?.title || beatId,
+            from: source + 1,
+            to: destination + 1,
+            total: beatOrder.length,
+          })
+        : t(`${CUT_ROOT}.reorderFailed`)
+    );
+    setReorderFocusId(beatId);
+  };
+
+  const importBed = async (): Promise<void> => {
+    const result = await runAction('bed:import', actions.importBedAudio);
+    const key = result === 'imported' ? 'imported' : result === 'cancelled' ? 'importCancelled' : 'importFailed';
+    setAnnouncement(t(`${CUT_ROOT}.bed.${key}`));
+  };
+
+  const chooseBed = async (value: unknown): Promise<void> => {
+    const assetId =
+      typeof value === 'string' && projection.cut.audioImports.some((asset) => asset.assetId === value) ? value : null;
+    if (assetId === currentBedId) return;
+    const changed = await runAction('bed:select', () => actions.setBed(assetId));
+    setAnnouncement(
+      t(`${CUT_ROOT}.bed.${changed === true ? (assetId === null ? 'cleared' : 'selected') : 'setFailed'}`)
+    );
+  };
+
+  const chooseMatch = async (value: unknown): Promise<void> => {
+    const shotId =
+      typeof value === 'string' && projection.cut.matchCandidates.some((candidate) => candidate.shotId === value)
+        ? value
+        : null;
+    if (shotId === projection.cut.selectedMatchShotId) return;
+    const changed = await runAction('match:select', () => actions.setMatchTo(shotId));
+    setAnnouncement(
+      t(`${CUT_ROOT}.match.${changed === true ? (shotId === null ? 'cleared' : 'selected') : 'setFailed'}`)
+    );
+  };
+
+  const createExport = async (input: CutCreateExportInput): Promise<void> => {
+    const created = await runAction(`export:${input.shape}`, () => actions.createExport(input));
+    setAnnouncement(t(`${CUT_ROOT}.exports.${created === true ? 'created' : 'createFailed'}`));
+  };
+
+  const refreshExports = async (): Promise<void> => {
+    const refreshed = await runAction('exports:refresh', actions.refreshExports);
+    setAnnouncement(t(`${CUT_ROOT}.exports.${refreshed === true ? 'refreshed' : 'refreshFailed'}`));
+  };
+
+  const copyExport = async (artifactId: string): Promise<void> => {
+    const result = await runAction(`copy:${artifactId}`, () => actions.copyExport(artifactId));
+    const key = result === 'copied' ? 'copied' : result === 'cancelled' ? 'copyCancelled' : 'copyFailed';
+    setAnnouncement(t(`${ASSETS_ROOT}.${key}`));
+  };
+
+  const revealExport = async (artifactId: string): Promise<void> => {
+    const revealed = await runAction(`reveal:${artifactId}`, () => actions.revealExport(artifactId));
+    setAnnouncement(t(`${ASSETS_ROOT}.${revealed === true ? 'revealed' : 'revealFailed'}`));
+  };
+
+  const detachAudio = async (assetId: string): Promise<void> => {
+    if (assetId === currentBedId) return;
+    const detached = await runAction(`detach:${assetId}`, () => actions.detachBedAudio(assetId));
+    setAnnouncement(t(`${ASSETS_ROOT}.${detached === true ? 'detached' : 'detachFailed'}`));
+  };
+
+  const bedStatus = projection.cut.bed;
+
+  return (
+    <section aria-label={t(`${CUT_ROOT}.ariaLabel`)} className={styles.root} data-studio-cut>
+      <header className={styles.header}>
+        <div>
+          <h2>{t(`${CUT_ROOT}.title`)}</h2>
+          <p>{t(`${CUT_ROOT}.description`)}</p>
+        </div>
+        <div className={styles.headerActions}>
+          <span className={styles.filmDuration}>
+            <bdi>
+              {projection.cut.filmDurationSeconds === null
+                ? t(`${CUT_ROOT}.durationPending`)
+                : t(`${CUT_ROOT}.filmDuration`, { seconds: projection.cut.filmDurationSeconds })}
+            </bdi>
+          </span>
+          <Button disabled={locked} onClick={() => setAssetsVisible(true)}>
+            {t(`${ASSETS_ROOT}.show`)}
+          </Button>
+        </div>
+      </header>
+
+      {!canonicalOrderReady ? <Alert type='warning' content={t(`${CUT_ROOT}.orderUnavailable`)} /> : null}
+
+      {projection.cut.beats.length === 0 ? (
+        <p className={styles.empty}>{t(`${CUT_ROOT}.empty`)}</p>
+      ) : (
+        <ol aria-label={t(`${CUT_ROOT}.railLabel`)} className={styles.rail}>
+          {projection.cut.beats.map((beat, index) => {
+            const title = beat.title.trim() || beat.id;
+            const mutationLocked = locked || !canonicalOrderReady;
+            return (
+              <li
+                key={beat.id}
+                className={styles.beat}
+                data-beat-id={beat.id}
+                onDragOver={(event) => {
+                  if (draggedBeatIdRef.current !== null && draggedBeatIdRef.current !== beat.id) event.preventDefault();
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const draggedBeatId = draggedBeatIdRef.current;
+                  draggedBeatIdRef.current = null;
+                  if (draggedBeatId !== null) void reorderBeat(draggedBeatId, index);
+                }}
+              >
+                <span className={styles.ordinal}>
+                  <bdi>{t(`${CUT_ROOT}.beatPosition`, { position: index + 1, total: beatOrder.length })}</bdi>
+                </span>
+                <h3 className={styles.beatTitle}>
+                  <span dir='auto'>{title}</span>
+                </h3>
+                <div className={styles.beatFacts}>
+                  <span>
+                    <bdi>{t(`${CUT_ROOT}.shotCount`, { count: beat.shotCount })}</bdi>
+                  </span>
+                  <span data-duration-kind={beat.durationKind}>
+                    <bdi>
+                      {beat.durationSeconds === null
+                        ? t(`${CUT_ROOT}.beatDurationPending`)
+                        : t(`${CUT_ROOT}.${beat.durationKind === 'target' ? 'targetDuration' : 'actualDuration'}`, {
+                            seconds: beat.durationSeconds,
+                          })}
+                    </bdi>
+                  </span>
+                </div>
+                <div className={styles.reorderActions}>
+                  <Button
+                    ref={(node) => {
+                      if (node === null) reorderRefs.current.delete(beat.id);
+                      else if (node instanceof HTMLButtonElement) reorderRefs.current.set(beat.id, node);
+                    }}
+                    aria-label={t(`${CUT_ROOT}.dragHandle`, { title, position: index + 1 })}
+                    disabled={mutationLocked}
+                    draggable={!mutationLocked}
+                    icon={<Drag />}
+                    loading={busyKey === `beat:${beat.id}`}
+                    onDragEnd={() => {
+                      draggedBeatIdRef.current = null;
+                    }}
+                    onDragStart={(event) => {
+                      draggedBeatIdRef.current = beat.id;
+                      event.dataTransfer.effectAllowed = 'move';
+                      event.dataTransfer.setData('text/plain', beat.id);
+                    }}
+                    onKeyDown={(event) => {
+                      let destination: number | null = null;
+                      if (event.key === 'ArrowUp') destination = index - 1;
+                      else if (event.key === 'ArrowDown') destination = index + 1;
+                      else if (event.key === 'Home') destination = 0;
+                      else if (event.key === 'End') destination = beatOrder.length - 1;
+                      if (destination === null) return;
+                      event.preventDefault();
+                      void reorderBeat(beat.id, destination);
+                    }}
+                    size='small'
+                  />
+                  <Button
+                    aria-label={t(`${CUT_ROOT}.moveEarlier`, { title })}
+                    disabled={mutationLocked || index === 0}
+                    icon={<ArrowUp />}
+                    onClick={() => void reorderBeat(beat.id, index - 1)}
+                    size='small'
+                  />
+                  <Button
+                    aria-label={t(`${CUT_ROOT}.moveLater`, { title })}
+                    disabled={mutationLocked || index === beatOrder.length - 1}
+                    icon={<ArrowDown />}
+                    onClick={() => void reorderBeat(beat.id, index + 1)}
+                    size='small'
+                  />
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+
+      <div className={styles.sections}>
+        <section className={styles.panel}>
+          <div className={styles.panelHeading}>
+            <div>
+              <h3>{t(`${CUT_ROOT}.bed.title`)}</h3>
+              <p>{t(`${CUT_ROOT}.bed.description`)}</p>
+            </div>
+            <Button disabled={locked} loading={busyKey === 'bed:import'} onClick={() => void importBed()}>
+              {t(`${CUT_ROOT}.bed.import`)}
+            </Button>
+          </div>
+          <label>
+            <span>{t(`${CUT_ROOT}.bed.label`)}</span>
+            <Select
+              allowClear
+              aria-label={t(`${CUT_ROOT}.bed.label`)}
+              disabled={locked}
+              onChange={(value) => void chooseBed(value)}
+              placeholder={t(`${CUT_ROOT}.bed.none`)}
+              value={currentBedId ?? undefined}
+            >
+              {projection.cut.audioImports.map((asset) => (
+                <Select.Option key={asset.assetId} value={asset.assetId}>
+                  <bdi>
+                    {t(`${CUT_ROOT}.bed.option`, {
+                      position: asset.position,
+                      seconds: asset.durationSeconds,
+                    })}
+                  </bdi>
+                </Select.Option>
+              ))}
+            </Select>
+          </label>
+          {bedStatus.status === 'ready' ? (
+            <p className={styles.status} data-bed-status='ready'>
+              <bdi>
+                {t(`${CUT_ROOT}.bed.fade`, {
+                  sourceSeconds: bedStatus.sourceDurationSeconds,
+                  startSeconds: bedStatus.fadeOutStartSeconds,
+                  endSeconds: bedStatus.fadeOutEndSeconds,
+                })}
+              </bdi>
+            </p>
+          ) : bedStatus.status === 'too_short' ? (
+            <Alert
+              type='warning'
+              content={t(`${CUT_ROOT}.bed.tooShort`, {
+                sourceSeconds: bedStatus.sourceDurationSeconds,
+                requiredSeconds: bedStatus.requiredDurationSeconds,
+              })}
+            />
+          ) : bedStatus.status === 'duration_pending' ? (
+            <Alert type='warning' content={t(`${CUT_ROOT}.bed.durationPending`)} />
+          ) : bedStatus.status === 'invalid' ? (
+            <Alert type='error' content={t(`${CUT_ROOT}.bed.invalid`)} />
+          ) : (
+            <p className={styles.status}>{t(`${CUT_ROOT}.bed.empty`)}</p>
+          )}
+        </section>
+
+        <section className={styles.panel}>
+          <div className={styles.panelHeading}>
+            <div>
+              <h3>{t(`${CUT_ROOT}.match.title`)}</h3>
+              <p>{t(`${CUT_ROOT}.match.description`)}</p>
+            </div>
+          </div>
+          <label>
+            <span>{t(`${CUT_ROOT}.match.label`)}</span>
+            <Select
+              allowClear
+              aria-label={t(`${CUT_ROOT}.match.label`)}
+              disabled={locked}
+              onChange={(value) => void chooseMatch(value)}
+              placeholder={t(`${CUT_ROOT}.match.none`)}
+              value={projection.cut.selectedMatchShotId ?? undefined}
+            >
+              {projection.cut.matchCandidates.map((candidate) => (
+                <Select.Option key={candidate.shotId} value={candidate.shotId}>
+                  <span dir='auto'>
+                    {t(`${CUT_ROOT}.match.option`, {
+                      beatTitle: candidate.beatTitle,
+                      line: candidate.line,
+                    })}
+                  </span>
+                </Select.Option>
+              ))}
+            </Select>
+          </label>
+          {projection.cut.matchSelectionInvalid ? (
+            <Alert type='warning' content={t(`${CUT_ROOT}.match.invalid`)} />
+          ) : null}
+        </section>
+      </div>
+
+      <section className={styles.exports}>
+        <div className={styles.panelHeading}>
+          <div>
+            <h3>{t(`${CUT_ROOT}.exports.title`)}</h3>
+            <p>{t(`${CUT_ROOT}.exports.description`)}</p>
+          </div>
+          <Button disabled={locked} loading={busyKey === 'exports:refresh'} onClick={() => void refreshExports()}>
+            {t(`${CUT_ROOT}.exports.refresh`)}
+          </Button>
+        </div>
+        {exportErrorMessageKey === null ? null : <Alert type='warning' content={t(exportErrorMessageKey)} />}
+        {exportCatalog === null ? <p className={styles.status}>{t(`${CUT_ROOT}.exports.catalogUnavailable`)}</p> : null}
+        <div className={styles.exportGrid}>
+          <article className={styles.exportCard} data-export-shape='editor_folder'>
+            <h4>{t(`${CUT_ROOT}.exports.editorFolderTitle`)}</h4>
+            <p>{t(`${CUT_ROOT}.exports.editorFolderDescription`)}</p>
+            <Button
+              disabled={locked || exportCatalog === null}
+              loading={busyKey === 'export:editor_folder'}
+              onClick={() => void createExport({ shape: 'editor_folder' })}
+              type='primary'
+            >
+              {t(`${CUT_ROOT}.exports.createEditorFolder`)}
+            </Button>
+          </article>
+          <article className={styles.exportCard} data-export-shape='still'>
+            <h4>{t(`${CUT_ROOT}.exports.stillTitle`)}</h4>
+            <p>{t(`${CUT_ROOT}.exports.stillDescription`)}</p>
+            <label>
+              <span>{t(`${CUT_ROOT}.exports.stillLabel`)}</span>
+              <Select
+                aria-label={t(`${CUT_ROOT}.exports.stillLabel`)}
+                disabled={locked || stillCandidates.length === 0}
+                onChange={(value) => {
+                  setStillShotId(
+                    typeof value === 'string' && stillCandidates.some((candidate) => candidate.shotId === value)
+                      ? value
+                      : null
+                  );
+                }}
+                placeholder={t(`${CUT_ROOT}.exports.noStill`)}
+                value={stillShotId ?? undefined}
+              >
+                {stillCandidates.map((candidate) => (
+                  <Select.Option key={candidate.shotId} value={candidate.shotId}>
+                    <span dir='auto'>{candidate.line || candidate.shotId}</span>
+                  </Select.Option>
+                ))}
+              </Select>
+            </label>
+            <Button
+              disabled={locked || exportCatalog === null || stillShotId === null}
+              loading={busyKey === 'export:still'}
+              onClick={() => {
+                if (stillShotId !== null) void createExport({ shape: 'still', shotId: stillShotId });
+              }}
+              type='primary'
+            >
+              {t(`${CUT_ROOT}.exports.createStill`)}
+            </Button>
+          </article>
+          <article className={styles.exportCard} data-export-shape='script'>
+            <h4>{t(`${CUT_ROOT}.exports.scriptTitle`)}</h4>
+            <p>{t(`${CUT_ROOT}.exports.scriptDescription`)}</p>
+            <Button
+              disabled={locked || exportCatalog === null}
+              loading={busyKey === 'export:script'}
+              onClick={() => void createExport({ shape: 'script' })}
+              type='primary'
+            >
+              {t(`${CUT_ROOT}.exports.createScript`)}
+            </Button>
+          </article>
+        </div>
+      </section>
+
+      <Drawer
+        footer={<Button onClick={() => setAssetsVisible(false)}>{t(`${ASSETS_ROOT}.close`)}</Button>}
+        onCancel={() => setAssetsVisible(false)}
+        title={t(`${ASSETS_ROOT}.title`)}
+        visible={assetsVisible}
+        width={560}
+      >
+        <div className={styles.drawerContent} data-studio-assets-drawer>
+          <p>{t(`${ASSETS_ROOT}.description`)}</p>
+          <section>
+            <h3>{t(`${ASSETS_ROOT}.audioTitle`)}</h3>
+            {projection.cut.audioImports.length === 0 ? (
+              <p>{t(`${ASSETS_ROOT}.audioEmpty`)}</p>
+            ) : (
+              <ul className={styles.assetList}>
+                {projection.cut.audioImports.map((asset) => {
+                  const selected = asset.assetId === currentBedId;
+                  return (
+                    <li key={asset.assetId} data-audio-position={asset.position}>
+                      <div>
+                        <strong>
+                          <bdi>{t(`${ASSETS_ROOT}.audioItem`, { position: asset.position })}</bdi>
+                        </strong>
+                        <p>
+                          <bdi>
+                            {t(`${ASSETS_ROOT}.audioFacts`, {
+                              seconds: asset.durationSeconds,
+                              bytes: asset.byteSize,
+                            })}
+                          </bdi>
+                        </p>
+                        {selected ? <span>{t(`${ASSETS_ROOT}.selectedBed`)}</span> : null}
+                      </div>
+                      <Popconfirm
+                        cancelText={t(`${ASSETS_ROOT}.cancel`)}
+                        content={t(`${ASSETS_ROOT}.detachContent`)}
+                        disabled={locked || selected}
+                        okText={t(`${ASSETS_ROOT}.detach`)}
+                        onOk={() => detachAudio(asset.assetId)}
+                        title={t(`${ASSETS_ROOT}.detachTitle`)}
+                      >
+                        <Button
+                          disabled={locked || selected}
+                          loading={busyKey === `detach:${asset.assetId}`}
+                          status='danger'
+                        >
+                          {t(`${ASSETS_ROOT}.detach`)}
+                        </Button>
+                      </Popconfirm>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+          <section>
+            <h3>{t(`${ASSETS_ROOT}.exportsTitle`)}</h3>
+            {exportCatalog === null || exportCatalog.artifacts.length === 0 ? (
+              <p>{t(`${ASSETS_ROOT}.exportsEmpty`)}</p>
+            ) : (
+              <ul className={styles.assetList}>
+                {exportCatalog.artifacts.map((artifact) => (
+                  <li key={artifact.id} data-export-artifact-id={artifact.id}>
+                    <div>
+                      <strong>{t(exportShapeKey(artifact.shape))}</strong>
+                      <p>
+                        <bdi>
+                          {t(`${ASSETS_ROOT}.exportFacts`, {
+                            bytes: artifact.byteSize,
+                            count: artifact.fileCount,
+                            revision: artifact.sourceRevision,
+                          })}
+                        </bdi>
+                      </p>
+                    </div>
+                    <div className={styles.assetActions}>
+                      <Button
+                        disabled={locked}
+                        loading={busyKey === `copy:${artifact.id}`}
+                        onClick={() => void copyExport(artifact.id)}
+                      >
+                        {t(`${ASSETS_ROOT}.copy`)}
+                      </Button>
+                      <Button
+                        disabled={locked}
+                        loading={busyKey === `reveal:${artifact.id}`}
+                        onClick={() => void revealExport(artifact.id)}
+                      >
+                        {t(`${ASSETS_ROOT}.reveal`)}
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
+      </Drawer>
+
+      <span aria-atomic='true' aria-live='polite' className={styles.srOnly}>
+        {announcement}
+      </span>
+    </section>
+  );
+};

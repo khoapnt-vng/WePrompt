@@ -69,10 +69,13 @@ import {
 } from '@process/services/creative-studio/service/schema2/generation';
 import {
   createCreativeStudioStore,
+  CreativeStudioStoreError,
   StudioProjectConfirmationError,
   STUDIO_PROPOSAL_MAX_PENDING_PER_PROJECT,
   STUDIO_PROJECT_V2_MAX_RECORD_BYTES,
   type CreativeStudioStore,
+  type StudioProjectAuthoritySnapshotV2,
+  type StudioProjectDeletionAuthoritySnapshotV2,
   type StudioProjectConfirmationInputV2,
   type StudioProjectInventoryV2,
   type StudioProjectStoreLoadResultV2,
@@ -696,6 +699,34 @@ describe('schema-2 creative studio project store', () => {
     rmSync(rootDir, { recursive: true, force: true });
   });
 
+  it('uses the default clock when no time dependency is supplied', async () => {
+    const store = createCreativeStudioStore({
+      rootDir,
+      createId: () => 'default_clock_v2',
+    });
+
+    const project = await store.createProjectV2(inputV2);
+
+    expect(new Date(project.createdAt).toISOString()).toBe(project.createdAt);
+    expect(project.updatedAt).toBe(project.createdAt);
+  });
+
+  it('uses the stable storage fallback for non-Error filesystem failures', async () => {
+    const fsWithStringFailure = new Proxy(nodeFs, {
+      get: (target, property, receiver) =>
+        property === 'readdir' ? async () => Promise.reject('string failure') : Reflect.get(target, property, receiver),
+    });
+    const store = createCreativeStudioStore({
+      rootDir,
+      fs: fsWithStringFailure,
+    });
+
+    await expect(store.listProjectsV2()).rejects.toMatchObject({
+      code: 'storage_error',
+      message: 'Studio project inventory could not be inspected',
+    });
+  });
+
   it('keeps every schema-1 project and proposal entrypoint absent while preserving connections', () => {
     const legacyMethods = [
       'listProjects',
@@ -1238,6 +1269,22 @@ describe('schema-2 creative studio project store', () => {
     expect(right.prototypeIndexAccesses).toEqual([]);
   });
 
+  it('orders summaries by newest updated timestamp before project identity', async () => {
+    const projectIds = ['older_summary_v2', 'newer_summary_v2'];
+    const observedTimes = ['2026-08-17T12:00:00.000Z', '2026-08-17T12:00:01.000Z'];
+    const { store } = createStoreV2({
+      createId: () => projectIds.shift()!,
+      now: () => observedTimes.shift()!,
+    });
+
+    const older = await store.createProjectV2({ ...inputV2, name: 'Older summary' });
+    const newer = await store.createProjectV2({ ...inputV2, name: 'Newer summary' });
+
+    await expect(store.listProjectsV2()).resolves.toMatchObject({
+      projects: [{ id: newer.id }, { id: older.id }],
+    });
+  });
+
   it('validates create input before creating or writing an absent storage root', async () => {
     const absentRoot = path.join(rootDir, 'absent-store');
     const mutations = observeFileSystemMethods(new Set(['mkdir', 'open', 'rename', 'rm', 'writeFile']));
@@ -1408,10 +1455,21 @@ describe('schema-2 creative studio project store', () => {
   it('rejects invalid mutation revisions before consulting storage', async () => {
     const absentRoot = path.join(rootDir, 'absent-revision-store');
     const store = createCreativeStudioStore({ rootDir: absentRoot });
+    const identityUpdate = (project: StudioProjectV2): StudioProjectV2 => project;
 
     await expect(
       store.applyMutationBatchV2(makeBoundaryMutationBatchV2('missing_v2', 0), makeMutationContextV2())
     ).rejects.toMatchObject({ code: 'invalid_payload' });
+    await expect(store.updateProjectV2('../unsafe', identityUpdate)).rejects.toMatchObject({ code: 'invalid_payload' });
+    await expect(store.updateProjectV2('missing_v2', identityUpdate, 0)).rejects.toMatchObject({
+      code: 'invalid_payload',
+    });
+    await expect(store.withProjectAuthorityV2('../unsafe', async () => undefined)).rejects.toMatchObject({
+      code: 'invalid_payload',
+    });
+    await expect(store.deleteProjectWithSidecarAuthorityV2('../unsafe', 1, async () => false)).rejects.toMatchObject({
+      code: 'invalid_payload',
+    });
     await expect(store.deleteProjectV2('missing_v2', 0)).rejects.toMatchObject({ code: 'invalid_payload' });
     expect(existsSync(absentRoot)).toBe(false);
   });
@@ -1493,11 +1551,280 @@ describe('schema-2 creative studio project store', () => {
       makeBoundaryMutationBatchV2(project.id, project.revision),
       makeMutationContextV2()
     );
+    const scoped = await store.withProjectAuthorityV2(applied.project.id, (snapshot) =>
+      snapshot.commit((current) => ({ ...current, brief: 'Scoped commit without a tag' }), applied.project.revision)
+    );
 
     expect(applied.project.revision).toBe(project.revision + 1);
+    expect(scoped.revision).toBe(applied.project.revision + 1);
     expect(onProjectCommitted).toHaveBeenLastCalledWith(expect.objectContaining({ commitTag: null }));
     await expect(store.deleteProjectV2(project.id, project.revision)).rejects.toMatchObject({ code: 'stale_project' });
     expect(prototypeIndexAccesses).toEqual([]);
+  });
+
+  it('holds trusted project authority on the existing project queue and returns an isolated snapshot', async () => {
+    const { store } = createStoreV2({ createId: () => 'export_authority_v2', now: () => timestamp });
+    const project = await store.createProjectV2(inputV2);
+    const entered = createDeferredV2<void>();
+    const release = createDeferredV2<void>();
+    const authority = store.withProjectAuthorityV2(project.id, async (snapshot) => {
+      expect(snapshot.project).toEqual(project);
+      expect(realpathSync(snapshot.projectDir)).toBe(snapshot.projectDir);
+      expect(snapshot.assertCurrent).toEqual(expect.any(Function));
+      await snapshot.assertCurrent?.();
+      snapshot.project.name = 'must not escape the isolated snapshot';
+      entered.resolve();
+      await release.promise;
+      return snapshot.project.revision;
+    });
+    await entered.promise;
+
+    const mutation = store.applyMutationBatchV2(
+      makeBoundaryMutationBatchV2(project.id, project.revision),
+      makeMutationContextV2()
+    );
+    let mutationSettled = false;
+    void mutation.finally(() => {
+      mutationSettled = true;
+    });
+    await Promise.resolve();
+    expect(mutationSettled).toBe(false);
+
+    release.resolve();
+    await expect(authority).resolves.toBe(project.revision);
+    const committed = await mutation;
+    expect(committed.project.name).toBe(project.name);
+    expect(committed.project.brief).toBe('Updated without a commit tag');
+  });
+
+  it('offers one scoped inside-queue commit and rejects reuse after the authority expires', async () => {
+    const onProjectCommitted = vi.fn();
+    const { store } = createStoreV2({
+      createId: () => 'export_media_authority_v2',
+      now: () => timestamp,
+      onProjectCommitted,
+    });
+    const project = await store.createProjectV2(inputV2);
+    let escapedCommit: StudioProjectAuthoritySnapshotV2['commit'] | null = null;
+
+    const committed = await store.withProjectAuthorityV2(project.id, async (snapshot) => {
+      escapedCommit = snapshot.commit;
+      const update = (current: StudioProjectV2): StudioProjectV2 => ({
+        ...current,
+        brief: 'Committed under shared managed-byte authority',
+      });
+      await expect(snapshot.commit(update, 0)).rejects.toMatchObject({ code: 'invalid_payload' });
+      await expect(snapshot.commit(update, project.revision, 1 as never)).rejects.toMatchObject({
+        code: 'invalid_payload',
+      });
+      await expect(
+        snapshot.commit(update, project.revision, 'managed_media', 'not-an-authorizer' as never)
+      ).rejects.toMatchObject({ code: 'invalid_payload' });
+      const result = await snapshot.commit(update, project.revision, 'managed_media');
+      await expect(snapshot.commit((current) => current, result.revision)).rejects.toMatchObject({
+        code: 'invalid_payload',
+      });
+      return result;
+    });
+
+    expect(committed.revision).toBe(project.revision + 1);
+    expect(committed.brief).toBe('Committed under shared managed-byte authority');
+    expect(onProjectCommitted).toHaveBeenLastCalledWith(expect.objectContaining({ commitTag: 'managed_media' }));
+    await expect(escapedCommit!((current) => current, committed.revision)).rejects.toMatchObject({
+      code: 'invalid_payload',
+    });
+    await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
+      status: 'supported',
+      project: { revision: committed.revision, brief: committed.brief },
+    });
+  });
+
+  it('offers one scoped deletion while the project authority queue remains held', async () => {
+    const { store } = createStoreV2({ createId: () => 'scoped_delete_authority_v2', now: () => timestamp });
+    const project = await store.createProjectV2(inputV2);
+    let escapedDelete: StudioProjectAuthoritySnapshotV2['delete'] | null = null;
+    const authorizeBeforeDelete = vi.fn();
+
+    const deleted = await store.withProjectAuthorityV2(project.id, async (snapshot) => {
+      escapedDelete = snapshot.delete;
+      await expect(snapshot.delete(project.revision, 'not-an-authorizer' as never)).rejects.toMatchObject({
+        code: 'invalid_payload',
+      });
+      return snapshot.delete(project.revision, authorizeBeforeDelete);
+    });
+
+    expect(deleted).toBe(true);
+    expect(authorizeBeforeDelete).toHaveBeenCalledTimes(2);
+    await expect(store.getProjectV2(project.id)).resolves.toEqual({ status: 'not_found', projectId: project.id });
+    await expect(escapedDelete!(project.revision)).rejects.toMatchObject({ code: 'invalid_payload' });
+  });
+
+  it('refuses scoped deletion at the final lifecycle fence before publishing its durable marker', async () => {
+    const { store } = createStoreV2({ createId: () => 'scoped_delete_close_v2', now: () => timestamp });
+    const project = await store.createProjectV2(inputV2);
+    const authorizeBeforeDelete = vi.fn(() => {
+      throw new CreativeStudioStoreError('busy', 'Studio service closed before deletion');
+    });
+
+    await expect(
+      store.withProjectAuthorityV2(project.id, (snapshot) => snapshot.delete(project.revision, authorizeBeforeDelete))
+    ).rejects.toMatchObject({ code: 'busy' });
+
+    expect(authorizeBeforeDelete).toHaveBeenCalledOnce();
+    await expect(store.getProjectV2(project.id)).resolves.toEqual({ status: 'supported', project });
+    expect(existsSync(path.join(realpathSync(rootDir), `.delete-${project.id}.json`))).toBe(false);
+  });
+
+  it('keeps a detached authority commit inside the queue until its publication settles', async () => {
+    const commitEntered = createDeferredV2<void>();
+    const releaseCommit = createDeferredV2<void>();
+    let delayNextProjectTemporary = false;
+    const delayedFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        if (property !== 'open') return Reflect.get(target, property, receiver) as unknown;
+        return async (...args: Parameters<typeof nodeFs.open>): Promise<Awaited<ReturnType<typeof nodeFs.open>>> => {
+          const handle = await nodeFs.open(...args);
+          const file = String(args[0]);
+          if (!delayNextProjectTemporary || !/project\.json\.\d+\.\d+\.tmp$/.test(file)) return handle;
+          delayNextProjectTemporary = false;
+          return new Proxy(handle, {
+            get(handleTarget, handleProperty) {
+              if (handleProperty !== 'sync') {
+                const value = Reflect.get(handleTarget, handleProperty, handleTarget) as unknown;
+                return typeof value === 'function' ? value.bind(handleTarget) : value;
+              }
+              return async (): Promise<void> => {
+                commitEntered.resolve();
+                await releaseCommit.promise;
+                await handle.sync();
+              };
+            },
+          });
+        };
+      },
+    }) as typeof nodeFs;
+    const store = createCreativeStudioStore({
+      rootDir,
+      fs: delayedFs,
+      createId: () => 'detached_authority_commit_v2',
+      now: () => timestamp,
+      logError: () => undefined,
+    });
+    const project = await store.createProjectV2(inputV2);
+    delayNextProjectTemporary = true;
+
+    const authority = store.withProjectAuthorityV2(project.id, async (snapshot) => {
+      void snapshot.commit(
+        (current) => ({ ...current, brief: 'Detached commit remains queue-owned' }),
+        project.revision,
+        'detached_authority'
+      );
+      return 'operation-returned';
+    });
+    await commitEntered.promise;
+    let authoritySettled = false;
+    void authority.finally(() => {
+      authoritySettled = true;
+    });
+    const following = store.updateProjectV2(project.id, (current) => ({ ...current, name: 'Following mutation' }));
+    let followingSettled = false;
+    void following.finally(() => {
+      followingSettled = true;
+    });
+    await Promise.resolve();
+    expect(authoritySettled).toBe(false);
+    expect(followingSettled).toBe(false);
+
+    releaseCommit.resolve();
+    await expect(authority).resolves.toBe('operation-returned');
+    const finalProject = await following;
+    expect(finalProject.revision).toBe(project.revision + 2);
+    expect(finalProject.brief).toBe('Detached commit remains queue-owned');
+    expect(finalProject.name).toBe('Following mutation');
+  });
+
+  it('rechecks the scoped lifecycle authorizer after the project temporary is durable', async () => {
+    const temporarySynced = createDeferredV2<void>();
+    const releaseTemporary = createDeferredV2<void>();
+    let delayNextProjectTemporary = false;
+    const delayedFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        if (property !== 'open') return Reflect.get(target, property, receiver) as unknown;
+        return async (...args: Parameters<typeof nodeFs.open>): Promise<Awaited<ReturnType<typeof nodeFs.open>>> => {
+          const handle = await nodeFs.open(...args);
+          const file = String(args[0]);
+          if (!delayNextProjectTemporary || !/project\.json\.\d+\.\d+\.tmp$/.test(file)) return handle;
+          delayNextProjectTemporary = false;
+          return new Proxy(handle, {
+            get(handleTarget, handleProperty) {
+              if (handleProperty !== 'sync') {
+                const value = Reflect.get(handleTarget, handleProperty, handleTarget) as unknown;
+                return typeof value === 'function' ? value.bind(handleTarget) : value;
+              }
+              return async (): Promise<void> => {
+                await handle.sync();
+                temporarySynced.resolve();
+                await releaseTemporary.promise;
+              };
+            },
+          });
+        };
+      },
+    }) as typeof nodeFs;
+    const store = createCreativeStudioStore({
+      rootDir,
+      fs: delayedFs,
+      createId: () => 'lifecycle_authority_commit_v2',
+      now: () => timestamp,
+      logError: () => undefined,
+    });
+    const project = await store.createProjectV2(inputV2);
+    let active = true;
+    delayNextProjectTemporary = true;
+
+    const authority = store.withProjectAuthorityV2(project.id, async (snapshot) =>
+      snapshot.commit(
+        (current) => ({ ...current, brief: 'must not publish after close' }),
+        project.revision,
+        'lifecycle_authority',
+        () => {
+          if (!active) throw new Error('Studio service is closed');
+        }
+      )
+    );
+    await temporarySynced.promise;
+    active = false;
+    releaseTemporary.resolve();
+
+    await expect(authority).rejects.toThrow('Studio service is closed');
+    await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
+      status: 'supported',
+      project: { revision: project.revision, brief: project.brief },
+    });
+  });
+
+  it('expires every captured authority capability after a detached commit fails', async () => {
+    const { store } = createStoreV2({ createId: () => 'failed_authority_commit_v2', now: () => timestamp });
+    const project = await store.createProjectV2(inputV2);
+    let escapedAssertCurrent: StudioProjectAuthoritySnapshotV2['assertCurrent'] = undefined;
+    let escapedCommit: StudioProjectAuthoritySnapshotV2['commit'] | null = null;
+
+    await expect(
+      store.withProjectAuthorityV2(project.id, async (snapshot) => {
+        escapedAssertCurrent = snapshot.assertCurrent;
+        escapedCommit = snapshot.commit;
+        void snapshot.commit(
+          (current) => ({ ...current, id: 'changed_identity_is_invalid' }),
+          project.revision,
+          'invalid_detached_authority'
+        );
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+
+    expect(() => escapedAssertCurrent!()).toThrow('Studio project authority has expired');
+    await expect(escapedCommit!((current) => current, project.revision)).rejects.toMatchObject({
+      code: 'invalid_payload',
+    });
   });
 
   it('snapshots reducer context before queue work and ignores later caller mutation', async () => {
@@ -2001,6 +2328,95 @@ describe('schema-2 creative studio project store', () => {
     expect(protectedFs.accesses).toEqual([]);
   });
 
+  it('keeps durable commits authoritative across malformed observer settlement shapes', async () => {
+    const observerFailure = new Error('observer failed');
+    const rejectedObserver = new Error('observer rejected');
+    const hostileThenable = new Error('observer then getter failed');
+    const behaviors = ['throw', 'reject', 'hostile_then', 'plain_object', 'null', 'function'] as const;
+    let behaviorIndex = 0;
+    let logAttempt = 0;
+    const logError = vi.fn(() => {
+      if (logAttempt === 0) {
+        logAttempt += 1;
+        throw new Error('diagnostic logger failed');
+      }
+      logAttempt += 1;
+    });
+    const { store } = createStoreV2({
+      createId: () => 'observer_settlement_v2',
+      now: () => timestamp,
+      logError,
+      onProjectCommitted: (() => {
+        const behavior = behaviors[behaviorIndex++];
+        if (behavior === 'throw') throw observerFailure;
+        if (behavior === 'reject') return Promise.reject(rejectedObserver);
+        if (behavior === 'hostile_then') {
+          return new Proxy(
+            {},
+            {
+              get: () => {
+                throw hostileThenable;
+              },
+            }
+          );
+        }
+        if (behavior === 'plain_object') return {};
+        if (behavior === 'null') return null;
+        return () => undefined;
+      }) as StudioProjectCommitObserver,
+    });
+
+    let project = await store.createProjectV2(inputV2);
+    for (let index = 0; index < behaviors.length; index += 1) {
+      // Each successful update advances the observer to the next malformed result shape.
+      // eslint-disable-next-line no-await-in-loop
+      project = await store.updateProjectV2(
+        project.id,
+        (current) => ({ ...current, brief: `Observer settlement ${index}` }),
+        project.revision
+      );
+    }
+
+    await vi.waitFor(() => expect(logError).toHaveBeenCalledTimes(3));
+    expect(logError.mock.calls).toEqual([
+      ['[CreativeStudio] Project commit observer failed', observerFailure],
+      ['[CreativeStudio] Project commit observer rejected', rejectedObserver],
+      ['[CreativeStudio] Project commit observer rejected', hostileThenable],
+    ]);
+    expect(behaviorIndex).toBe(behaviors.length);
+    await expect(store.getProjectV2(project.id)).resolves.toEqual({ status: 'supported', project });
+  });
+
+  it('uses default diagnostics without letting observer exceptions veto commits', async () => {
+    const observerFailure = new Error('default observer failed');
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const store = createCreativeStudioStore({
+        rootDir: path.join(rootDir, 'default-observer-log'),
+        createId: () => 'default_observer_log_v2',
+        now: () => timestamp,
+        onProjectCommitted: () => {
+          throw observerFailure;
+        },
+      });
+      const project = await store.createProjectV2(inputV2);
+
+      const committed = await store.updateProjectV2(
+        project.id,
+        (current) => ({ ...current, brief: 'Commit survives default observer diagnostics' }),
+        project.revision
+      );
+
+      expect(committed.revision).toBe(project.revision + 1);
+      expect(consoleError).toHaveBeenCalledExactlyOnceWith(
+        '[CreativeStudio] Project commit observer failed',
+        observerFailure
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it('returns a committed batch after one V2 index failure and retries only that V2 index', async () => {
     const projectId = 'repair_retry_v2';
     const facts: Parameters<StudioProjectCommitObserver>[0][] = [];
@@ -2209,7 +2625,7 @@ describe('schema-2 creative studio project store', () => {
     const crashing = createCreativeStudioStore({
       rootDir,
       fs: failFileSystemOnceV2(
-        (method, args) => method === 'rm' && String(args[0]) === quarantineDirectory && args[1] !== undefined
+        (method, args) => method === 'rmdir' && path.basename(String(args[0])).startsWith('.delete-cleanup-')
       ),
       logError: () => undefined,
     });
@@ -2218,11 +2634,56 @@ describe('schema-2 creative studio project store', () => {
       code: 'storage_error',
     });
     expect(existsSync(path.join(rootDir, project.id))).toBe(false);
-    expect(existsSync(quarantineDirectory)).toBe(true);
+    expect(existsSync(quarantineDirectory)).toBe(false);
+    const [cleanupDirectory] = readdirSync(realpathSync(rootDir)).filter((entry) =>
+      entry.startsWith('.delete-cleanup-')
+    );
+    expect(cleanupDirectory).toBeDefined();
     expect(existsSync(path.join(realpathSync(rootDir), `.delete-${project.id}.json`))).toBe(true);
 
     const restarted = createStoreV2().store;
     await expect(restarted.getProjectV2(project.id)).resolves.toEqual({ status: 'not_found', projectId: project.id });
+    expect(existsSync(quarantineDirectory)).toBe(false);
+    expect(existsSync(path.join(realpathSync(rootDir), cleanupDirectory!))).toBe(false);
+    expect(existsSync(path.join(realpathSync(rootDir), `.delete-${project.id}.json`))).toBe(false);
+  });
+
+  it('resumes an exact durable deletion marker through the sidecar-serialized deletion authority', async () => {
+    const { store: base } = createStoreV2({ createId: () => 'delete_sidecar_retry_v2', now: () => timestamp });
+    const project = await base.createProjectV2(inputV2);
+    const projectDirectory = realpathSync(path.join(rootDir, project.id));
+    const quarantineDirectory = realpathSync(rootDir) + `/.delete-${project.id}`;
+    let refusedRename = false;
+    const interruptedFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        if (property !== 'rename') return Reflect.get(target, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.rename>): Promise<void> => {
+          if (!refusedRename && String(args[0]) === projectDirectory && String(args[1]) === quarantineDirectory) {
+            refusedRename = true;
+            throw Object.assign(new Error('injected pre-quarantine interruption'), { code: 'EIO' });
+          }
+          await nodeFs.rename(...args);
+        };
+      },
+    }) as typeof nodeFs;
+    const interrupted = createCreativeStudioStore({ rootDir, fs: interruptedFs, logError: () => undefined });
+
+    await expect(interrupted.deleteProjectV2(project.id, project.revision)).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+    expect(refusedRename).toBe(true);
+    expect(existsSync(projectDirectory)).toBe(true);
+    expect(existsSync(path.join(realpathSync(rootDir), `.delete-${project.id}.json`))).toBe(true);
+
+    const restarted = createStoreV2().store;
+    const sidecarAuthority = vi.fn(async (snapshot: StudioProjectDeletionAuthoritySnapshotV2) =>
+      snapshot.delete(project.revision)
+    );
+    await expect(
+      restarted.deleteProjectWithSidecarAuthorityV2(project.id, project.revision, sidecarAuthority)
+    ).resolves.toBe(true);
+    expect(sidecarAuthority).toHaveBeenCalledOnce();
+    expect(existsSync(projectDirectory)).toBe(false);
     expect(existsSync(quarantineDirectory)).toBe(false);
     expect(existsSync(path.join(realpathSync(rootDir), `.delete-${project.id}.json`))).toBe(false);
   });
@@ -2340,6 +2801,47 @@ describe('schema-2 creative studio project store', () => {
     expect(readFileSync(path.join(targetDirectory, 'sentinel.bin'))).toEqual(replacementBytes);
     expect(existsSync(path.join(quarantineDirectory, 'project.json'))).toBe(true);
     expect(existsSync(path.join(rootDir, `.delete-${project.id}.json`))).toBe(true);
+  });
+
+  it('never removes a foreign directory swapped in for the exact cleanup claim at its destructive boundary', async () => {
+    const { store: base } = createStoreV2({ createId: () => 'delete_cleanup_claim_v2', now: () => timestamp });
+    const project = await base.createProjectV2(inputV2);
+    const canonicalRoot = realpathSync(rootDir);
+    const quarantineDirectory = path.join(canonicalRoot, `.delete-${project.id}`);
+    const displacedOwnedDirectory = path.join(canonicalRoot, '.displaced-owned-deletion-tree');
+    const externalDirectory = path.join(canonicalRoot, '.external-deletion-replacement');
+    const sentinelBytes = Buffer.from('foreign deletion sentinel');
+    mkdirSync(externalDirectory);
+    writeFileSync(path.join(externalDirectory, 'sentinel.bin'), sentinelBytes);
+    let swapped = false;
+    let cleanupDirectory: string | null = null;
+    const racingFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        if (property !== 'rmdir') return Reflect.get(target, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.rmdir>): Promise<void> => {
+          const candidate = String(args[0]);
+          if (!swapped && path.basename(candidate).startsWith('.delete-cleanup-')) {
+            cleanupDirectory = candidate;
+            renameSync(candidate, displacedOwnedDirectory);
+            renameSync(externalDirectory, candidate);
+            swapped = true;
+          }
+          await nodeFs.rmdir(...args);
+        };
+      },
+    }) as typeof nodeFs;
+    const racing = createCreativeStudioStore({ rootDir, fs: racingFs, now: () => timestamp });
+
+    await expect(racing.deleteProjectV2(project.id, project.revision)).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+
+    expect(swapped).toBe(true);
+    expect(cleanupDirectory).not.toBeNull();
+    expect(existsSync(quarantineDirectory)).toBe(false);
+    expect(readFileSync(path.join(cleanupDirectory!, 'sentinel.bin'))).toEqual(sentinelBytes);
+    expect(existsSync(displacedOwnedDirectory)).toBe(true);
+    expect(existsSync(path.join(canonicalRoot, `.delete-${project.id}.json`))).toBe(true);
   });
 
   it('deletes only a supported schema-2 project and refuses the schema-1 identity without touching it', async () => {
@@ -4519,6 +5021,12 @@ describe('schema-2 creative studio project store', () => {
       },
       {
         root: proposal.directories.root,
+        directory: proposal.directories.slots,
+        name: 'not-slot.txt',
+        list: () => store.listProposalsV2(project.id),
+      },
+      {
+        root: proposal.directories.root,
         directory: proposal.directories.commits,
         name: 'not-commit.txt',
         list: () => store.listProposalsV2(project.id),
@@ -5775,6 +6283,24 @@ describe('CreativeStudioStore connections', () => {
     }
   });
 
+  it('accepts the image adapter only with its canonical image-only capabilities', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'creative-studio-image-connection-'));
+    const connectionStore = createCreativeStudioStore({ rootDir: root });
+    try {
+      const saved = await connectionStore.saveConnection({
+        ...validConnectionBinding(),
+        adapterId: 'weprompt-image-v1',
+        model: 'image-model',
+        capabilities: { mediaKinds: ['image'] },
+      });
+
+      expect(saved.capabilities).toEqual({ mediaKinds: ['image'], cancellationPolicy: 'none' });
+      await expect(connectionStore.listConnections()).resolves.toEqual([saved]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     { legacy: true, expected: 'queued_only' },
     { legacy: false, expected: 'none' },
@@ -5827,6 +6353,8 @@ describe('CreativeStudioStore connections', () => {
 
   it.each([
     { label: 'an invalid explicit policy', capabilities: { cancellationPolicy: 'always' } },
+    { label: 'a non-string explicit policy', capabilities: { cancellationPolicy: 1 } },
+    { label: 'a non-boolean legacy policy', capabilities: { cancellation: 'yes' } },
     {
       label: 'both legacy and explicit policy fields',
       capabilities: { cancellation: true, cancellationPolicy: 'none' },
@@ -5847,6 +6375,21 @@ describe('CreativeStudioStore connections', () => {
         JSON.stringify({ schemaVersion: 1, connections: [malformed] })
       );
       await expect(connectionStore.listConnections()).rejects.toMatchObject({ code: 'storage_error' });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    { label: 'a non-record binding', malformed: null },
+    { label: 'non-record capabilities', malformed: { ...validConnectionBinding(), capabilities: null } },
+  ])('rejects $label before connection canonicalization', async ({ malformed }) => {
+    const root = mkdtempSync(path.join(tmpdir(), 'creative-studio-connections-shape-invalid-'));
+    const connectionStore = createCreativeStudioStore({ rootDir: root });
+    try {
+      await expect(connectionStore.saveConnection(malformed as never)).rejects.toMatchObject({
+        code: 'invalid_payload',
+      });
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -5903,6 +6446,7 @@ describe('CreativeStudioStore connections', () => {
     { label: 'leading model whitespace', override: { model: ' open-sora' } },
     { label: 'trailing model whitespace', override: { model: 'open-sora ' } },
     { label: 'model control characters', override: { model: 'open\nsora' } },
+    { label: 'model C1 control characters', override: { model: 'open\u0080sora' } },
     { label: 'oversized model', override: { model: 'm'.repeat(257) } },
     { label: 'non-ISO validation time', override: { validatedAt: 'yesterday' } },
     { label: 'non-canonical validation time', override: { validatedAt: '2026-07-30T07:00:00+07:00' } },

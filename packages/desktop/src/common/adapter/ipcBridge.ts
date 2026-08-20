@@ -108,6 +108,9 @@ import type {
   StudioCommandResult,
   StudioConfirmSubmissionRequestV2,
   StudioConfirmSubmissionResultV2,
+  StudioCopyExportResultV2,
+  StudioCreateExportRequestV2,
+  StudioDetachBedAudioRequestV2,
   StudioDetachManagedMediaResultV2,
   StudioDetachBriefReferenceRequest,
   StudioDirectorSessionAuthorityV2,
@@ -117,7 +120,10 @@ import type {
   StudioGetChainStatusRequestV2,
   StudioGetWorkspaceStatusRequestV2,
   StudioImportManagedMediaResultV2,
+  StudioImportBedAudioRequestV2,
   StudioImportSeedStillRequestV2,
+  StudioExportArtifactRequestV2,
+  StudioListExportsRequestV2,
   StudioParkBeatRequestV2,
   StudioParkShotRequestV2,
   StudioPrepareSubmissionRequestV2,
@@ -130,13 +136,17 @@ import type {
   StudioRendererProjectCommitResultV2,
   StudioRendererProjectV2,
   StudioRendererPreparedSubmissionOptionsV2,
+  StudioRendererExportCatalogV2,
   StudioRendererReferenceGenerationHandoffV2,
   StudioRendererWorkspaceStatusV2,
   StudioRouteCatalogV2,
+  StudioRevealExportResultV2,
   StudioReorderBinRequestV2,
   StudioRestoreBeatRequestV2,
   StudioRestoreShotRequestV2,
   StudioSetRulesRequestV2,
+  StudioSetBedRequestV2,
+  StudioSetMatchToRequestV2,
   StudioTakeActionRequestV2,
   StudioUndoLastRequestV2,
   StudioConnectionInventory,
@@ -1350,6 +1360,32 @@ export const creativeStudio = {
     StudioCommandResult<StudioImportManagedMediaResultV2>,
     StudioImportSeedStillRequestV2
   >('creative-studio.import-seed-still'),
+  importBedAudio: bridge.buildProvider<
+    StudioCommandResult<StudioImportManagedMediaResultV2>,
+    StudioImportBedAudioRequestV2
+  >('creative-studio.import-bed-audio'),
+  detachBedAudio: bridge.buildProvider<
+    StudioCommandResult<StudioDetachManagedMediaResultV2>,
+    StudioDetachBedAudioRequestV2
+  >('creative-studio.detach-bed-audio'),
+  setBed: bridge.buildProvider<StudioCommandResult<StudioRendererProjectCommitResultV2>, StudioSetBedRequestV2>(
+    'creative-studio.set-bed'
+  ),
+  setMatchTo: bridge.buildProvider<StudioCommandResult<StudioRendererProjectCommitResultV2>, StudioSetMatchToRequestV2>(
+    'creative-studio.set-match-to'
+  ),
+  createExport: bridge.buildProvider<StudioCommandResult<StudioRendererExportCatalogV2>, StudioCreateExportRequestV2>(
+    'creative-studio.create-export'
+  ),
+  listExports: bridge.buildProvider<StudioCommandResult<StudioRendererExportCatalogV2>, StudioListExportsRequestV2>(
+    'creative-studio.list-exports'
+  ),
+  copyExport: bridge.buildProvider<StudioCommandResult<StudioCopyExportResultV2>, StudioExportArtifactRequestV2>(
+    'creative-studio.copy-export'
+  ),
+  revealExport: bridge.buildProvider<StudioCommandResult<StudioRevealExportResultV2>, StudioExportArtifactRequestV2>(
+    'creative-studio.reveal-export'
+  ),
   listConnectionCandidates: bridge.buildProvider<StudioCommandResult<StudioConnectionCandidate[]>, void>(
     'creative-studio.list-connection-candidates'
   ),

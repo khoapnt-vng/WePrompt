@@ -31,11 +31,11 @@ const makeAsset = (
   projectId: 'project_1',
   shotId,
   mediaKind,
-  mimeType: mediaKind === 'video' ? 'video/mp4' : 'image/png',
+  mimeType: mediaKind === 'video' ? 'video/mp4' : mediaKind === 'audio' ? 'audio/wav' : 'image/png',
   managedAsset: { collection, fileName: `${id}.bin` },
   byteSize: 10,
   sha256: 'a'.repeat(64),
-  ...(mediaKind === 'video' ? { durationSeconds } : {}),
+  ...(mediaKind === 'video' || mediaKind === 'audio' ? { durationSeconds } : {}),
   createdAt,
 });
 
@@ -848,6 +848,91 @@ describe('projectWorkspace', () => {
       workspaceStatusReady: false,
       chainStatusReady: false,
     });
+  });
+
+  it('projects trim-aware film timing, a safe audio bed fade, and active Match To candidates', () => {
+    const project = makeProject();
+    project.beats.beat_1!.shotOrder = ['shot_1'];
+    project.shots.shot_1!.trimInSeconds = 1;
+    project.shots.shot_1!.trimOutSeconds = 2;
+    addSelectedVideo(project, 'shot_1', 'take_10s', 10);
+    project.beats.beat_2!.shotOrder = [];
+    project.beats.beat_2!.targetSeconds = 4;
+    const bed = makeAsset('audio_bed', null, 'audio', 'imports', '2026-08-19T02:00:00.000Z', 14);
+    const alternate = makeAsset('audio_old', null, 'audio', 'imports', '2026-08-19T01:00:00.000Z', 12);
+    project.assets[bed.id] = bed;
+    project.assets[alternate.id] = alternate;
+    project.bedAssetId = bed.id;
+    project.matchToShotId = 'shot_1';
+
+    const cut = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).cut;
+
+    expect(cut).toMatchObject({
+      orderReady: true,
+      filmDurationSeconds: 11,
+      beats: [
+        { id: 'beat_1', durationKind: 'actual', durationSeconds: 7, shotCount: 1 },
+        { id: 'beat_2', durationKind: 'target', durationSeconds: 4, shotCount: 0 },
+      ],
+      bed: {
+        status: 'ready',
+        assetId: 'audio_bed',
+        sourceDurationSeconds: 14,
+        fadeOutStartSeconds: 9,
+        fadeOutEndSeconds: 11,
+      },
+      selectedMatchShotId: 'shot_1',
+      matchSelectionInvalid: false,
+    });
+    expect(cut.audioImports.map(({ assetId, position }) => ({ assetId, position }))).toEqual([
+      { assetId: 'audio_bed', position: 1 },
+      { assetId: 'audio_old', position: 2 },
+    ]);
+    expect(cut.matchCandidates).toMatchObject([
+      { shotId: 'shot_1', beatId: 'beat_1', beatTitle: 'Opening', line: 'First' },
+    ]);
+    expect(JSON.stringify(cut)).not.toContain('fileName');
+    expect(JSON.stringify(cut)).not.toContain('sha256');
+    expect(JSON.stringify(cut)).not.toContain('mimeType');
+  });
+
+  it('fails Cut bed, duration, order, classification, and Match To facts closed', () => {
+    const project = makeProject();
+    project.beats.beat_1!.shotOrder = [];
+    project.beats.beat_1!.targetSeconds = 8;
+    project.beats.beat_2!.shotOrder = [];
+    project.beats.beat_2!.targetSeconds = 4;
+    const shortBed = makeAsset('audio_short', null, 'audio', 'imports', '2026-08-19T02:00:00.000Z', 10);
+    const classified = makeAsset('audio_classified', null, 'audio', 'imports', '2026-08-19T03:00:00.000Z', 20);
+    classified.briefReferenceRole = 'look';
+    classified.briefReferenceLabel = 'Not a bed';
+    project.assets[shortBed.id] = shortBed;
+    project.assets[classified.id] = classified;
+    project.bedAssetId = shortBed.id;
+    project.matchToShotId = 'shot_parked';
+
+    let cut = projectWorkspace(project, null, null).cut;
+    expect(cut.audioImports.map((asset) => asset.assetId)).toEqual(['audio_short']);
+    expect(cut.bed).toEqual({
+      status: 'too_short',
+      assetId: 'audio_short',
+      sourceDurationSeconds: 10,
+      requiredDurationSeconds: 12,
+    });
+    expect(cut).toMatchObject({ selectedMatchShotId: null, matchSelectionInvalid: true });
+
+    project.beats.beat_2!.targetSeconds = null;
+    cut = projectWorkspace(project, null, null).cut;
+    expect(cut.filmDurationSeconds).toBeNull();
+    expect(cut.bed).toMatchObject({ status: 'duration_pending', assetId: 'audio_short' });
+
+    project.bedAssetId = 'missing_audio';
+    cut = projectWorkspace(project, null, null).cut;
+    expect(cut.bed).toEqual({ status: 'invalid', assetId: 'missing_audio' });
+
+    project.beatOrder = ['beat_1', 'beat_1'];
+    cut = projectWorkspace(project, null, null).cut;
+    expect(cut).toMatchObject({ orderReady: false, filmDurationSeconds: null, matchCandidates: [] });
   });
 });
 

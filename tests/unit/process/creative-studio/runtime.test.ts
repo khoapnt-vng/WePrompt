@@ -25,6 +25,7 @@ import {
   type StudioProviderResolver,
 } from '@process/services/creative-studio/providerResolver';
 import type { StudioJobManagerV2 } from '@process/services/creative-studio/jobManager';
+import type { StudioExportCatalogStoreV2 } from '@process/services/creative-studio/service/schema2/exports';
 import type { StudioDirectorCommandMailboxV2 } from '@process/services/creative-studio/service/directorCommandMailbox';
 import type { StudioDirectorCommandServiceV2 } from '@process/services/creative-studio/service/directorCommandService';
 import type {
@@ -56,6 +57,7 @@ const createHarness = (
     enabled?: boolean;
     failProcessorStarts?: number;
     failRecoveryResumes?: number;
+    assertMediaStoreActiveOnResume?: boolean;
     holdFirstInventory?: boolean;
     holdCleanup?: boolean;
     service?: Partial<CreativeStudioServiceV2>;
@@ -89,6 +91,8 @@ const createHarness = (
   let markInventoryCaptured: (() => void) | undefined;
   let holdNextInventory = input.holdFirstInventory ?? false;
   let resolverDependencies: Parameters<CreativeStudioRuntimeFactories['createProviderResolver']>[0] | undefined;
+  let mediaStoreAssertActive: (() => void) | undefined;
+  const mediaStoreAssertActives: Array<() => void> = [];
   const inventoryCaptured = new Promise<void>((resolve) => {
     markInventoryCaptured = resolve;
   });
@@ -125,6 +129,23 @@ const createHarness = (
         ? { status: 'supported' as const, project: structuredClone(input.realService.project) }
         : { status: 'not_found' as const, projectId }
     ),
+    withProjectAuthorityV2: vi.fn(async (projectId: string, operation: (authority: never) => Promise<unknown>) => {
+      const project =
+        input.realService?.project.id === projectId
+          ? structuredClone(input.realService.project)
+          : createEmptyStudioProjectV2(
+              {
+                name: 'Runtime recovery',
+                brief: '',
+                aspectRatio: '16:9',
+                targetDurationSeconds: 5,
+                resolution: '720p',
+              },
+              projectId,
+              '2026-08-19T00:00:00.000Z'
+            );
+      return operation({ project, projectDir: `/tmp/creative-studio-runtime-test/${projectId}` } as never);
+    }),
     listConnections: vi.fn(async () => [{ id: 'fake_connection' }, { id: 'persisted_connection' }]),
     reapAbandonedProposalsV2: vi.fn(async () => {
       calls.push('reap-proposals');
@@ -153,6 +174,10 @@ const createHarness = (
     }),
     resumeConditioningFramesV2: vi.fn(async (projectIds: readonly string[]) => {
       calls.push(`resume-frames:${projectIds.join(',')}`);
+      if (input.assertMediaStoreActiveOnResume) {
+        if (mediaStoreAssertActive === undefined) throw new Error('Expected media store runtime authority');
+        mediaStoreAssertActive();
+      }
     }),
   } as unknown as StudioMediaStore;
   const adapters = new Map() as GenerationProviderAdapterRegistry;
@@ -180,10 +205,23 @@ const createHarness = (
       failDispose('jobs');
     }),
   } as unknown as StudioJobManagerV2;
+  const exportCatalogStore = {
+    list: vi.fn(),
+    create: vi.fn(),
+    copy: vi.fn(),
+    resolveRevealPath: vi.fn(),
+    repair: vi.fn(async () => ({
+      schemaVersion: 2 as const,
+      projectId: 'runtime_recovery',
+      revision: 1,
+      artifacts: [],
+    })),
+  } as unknown as StudioExportCatalogStoreV2;
   const service = {
     createProject: vi.fn(async () => {
       throw new Error('create-not-configured');
     }),
+    listExports: vi.fn(async () => ({ revision: 1, artifacts: [] })),
     dispose: vi.fn(),
     ...input.service,
   } as CreativeStudioServiceV2;
@@ -229,8 +267,10 @@ const createHarness = (
       commitObserver = onProjectCommitted;
       return store;
     },
-    createMediaStore: () => {
+    createMediaStore: (dependencies) => {
       factoryCalls.mediaStore += 1;
+      mediaStoreAssertActive = dependencies.assertActive;
+      mediaStoreAssertActives.push(dependencies.assertActive);
       return mediaStore;
     },
     createAdapters: () => {
@@ -246,6 +286,7 @@ const createHarness = (
       factoryCalls.jobManager += 1;
       return jobManager;
     },
+    createExportCatalogStore: () => exportCatalogStore,
     createService: (deps) => (input.realService === undefined ? service : createCreativeStudioServiceV2(deps)),
     createE2EFakeBundle: () => {
       factoryCalls.fakeBundle += 1;
@@ -308,6 +349,7 @@ const createHarness = (
     mediaStore,
     providerResolver,
     jobManager,
+    exportCatalogStore,
     processor,
     service,
     calls,
@@ -316,6 +358,7 @@ const createHarness = (
     proposalDisposer,
     referenceDisposer,
     getResolverDependencies: () => resolverDependencies,
+    getMediaStoreAssertActives: () => [...mediaStoreAssertActives],
     inventoryCaptured,
     cleanupStarted,
     activationHeld,
@@ -390,6 +433,11 @@ describe('Creative Studio schema-2 runtime activation', () => {
 
     expect(harness.runtime.activationState).toBe('active');
     expect(harness.runtime.supportedProjectIds).toEqual(['project_a', 'project_b']);
+    expect(harness.exportCatalogStore.repair).toHaveBeenCalledTimes(2);
+    expect(harness.exportCatalogStore.repair.mock.calls.map(([authority]) => authority.project.id)).toEqual([
+      'project_a',
+      'project_b',
+    ]);
     expect(harness.mediaStore.resumeConditioningFramesV2).toHaveBeenCalledWith(['project_a', 'project_b']);
     expect(harness.jobManager.resumePendingJobsV2).toHaveBeenCalledWith(['project_a', 'project_b']);
     expect(harness.calls).toEqual([
@@ -403,6 +451,45 @@ describe('Creative Studio schema-2 runtime activation', () => {
       'resume-frames:project_a,project_b',
       'resume-jobs:project_a,project_b',
     ]);
+  });
+
+  it('authorizes the installed graph while backend-ready startup recovery is still activating', async () => {
+    const harness = createHarness({
+      initialInventory: inventory(['project_v2']),
+      assertMediaStoreActiveOnResume: true,
+    });
+
+    await harness.runtime.onBackendReady();
+
+    expect(harness.runtime.activationState).toBe('active');
+    expect(harness.mediaStore.resumeConditioningFramesV2).toHaveBeenCalledWith(['project_v2']);
+    expect(harness.jobManager.resumePendingJobsV2).toHaveBeenCalledWith(['project_v2']);
+  });
+
+  it('rejects media authority from degraded, replaced, and disposed activation graphs', async () => {
+    const harness = createHarness({
+      initialInventory: inventory(['project_v2']),
+      failRecoveryResumes: 1,
+    });
+
+    await harness.runtime.start();
+    const [firstAssertActive] = harness.getMediaStoreAssertActives();
+    expect(firstAssertActive).toBeDefined();
+    expect(() => firstAssertActive?.()).not.toThrow();
+
+    await harness.runtime.onBackendReady();
+    expect(harness.runtime.activationState).toBe('degraded');
+    expect(() => firstAssertActive?.()).toThrow('Creative Studio runtime is not active');
+
+    await harness.runtime.refreshInventory();
+    const [, replacementAssertActive] = harness.getMediaStoreAssertActives();
+    expect(harness.runtime.activationState).toBe('active');
+    expect(replacementAssertActive).toBeDefined();
+    expect(() => firstAssertActive?.()).toThrow('Creative Studio runtime is not active');
+    expect(() => replacementAssertActive?.()).not.toThrow();
+
+    await harness.runtime.dispose();
+    expect(() => replacementAssertActive?.()).toThrow('Creative Studio runtime is not active');
   });
 
   it('prepares through the real runtime service with the main config rate card and an unavailable video sibling', async () => {
@@ -689,6 +776,38 @@ describe('Creative Studio schema-2 runtime activation', () => {
 
     expect(harness.calls).not.toContain('install-protocol');
     expect(harness.jobManager.dispose).toHaveBeenCalledOnce();
+    expect(harness.runtime.activationState).toBe('disposed');
+  });
+
+  it('joins backend-ready degradation teardown after the failed graph revokes active authority', async () => {
+    const harness = createHarness({ initialInventory: inventory(['project_v2']), failRecoveryResumes: 1 });
+    await harness.runtime.start();
+    let releaseProcessorStop: (() => void) | undefined;
+    let markProcessorStopStarted: (() => void) | undefined;
+    const processorStopStarted = new Promise<void>((resolve) => {
+      markProcessorStopStarted = resolve;
+    });
+    vi.mocked(harness.processor.stop).mockImplementationOnce(async () => {
+      harness.calls.push('stop-director');
+      markProcessorStopStarted?.();
+      await new Promise<void>((resolve) => {
+        releaseProcessorStop = resolve;
+      });
+    });
+
+    const backendReady = harness.runtime.onBackendReady();
+    await processorStopStarted;
+    let disposalSettled = false;
+    const disposal = harness.runtime.dispose().finally(() => {
+      disposalSettled = true;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(disposalSettled).toBe(false);
+    releaseProcessorStop?.();
+    await Promise.all([backendReady, disposal]);
+    expect(disposalSettled).toBe(true);
     expect(harness.runtime.activationState).toBe('disposed');
   });
 

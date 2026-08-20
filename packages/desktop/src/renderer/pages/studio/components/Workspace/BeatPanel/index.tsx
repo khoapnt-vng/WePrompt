@@ -5,7 +5,7 @@
  */
 
 import { Alert, Button, Checkbox, Input, InputNumber, Modal, Popconfirm, Select } from '@arco-design/web-react';
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -77,7 +77,7 @@ export type BeatPanelActions = {
   parkTake: (shotId: string, assetId: string) => Promise<boolean>;
   addAlternateTake: (shotId: string, assetId: string) => Promise<boolean>;
   restoreTake: (shotId: string, assetId: string) => Promise<boolean>;
-  parkShot: (shotId: string) => Promise<boolean>;
+  parkShot: (shotId: string, onCommitted?: () => void) => Promise<boolean>;
   parkBeat: (beatId: string) => Promise<boolean>;
   reviewShot: (triggerShotId: string, choices: readonly [BeatPanelReviewChoice, ...BeatPanelReviewChoice[]]) => void;
   chooseCascadeAsset: (row: StudioCascadeProgressV2, assetId: string) => Promise<boolean>;
@@ -100,6 +100,7 @@ export type BeatPanelProps = {
   pending: boolean;
   gateLocked: boolean;
   reviewBlockedMessageKey: string | null;
+  onParkShotSuccess: (shotId: string) => void;
   onSelectBeat: (beatId: string) => void;
   onClose: () => void;
   actions: BeatPanelActions;
@@ -519,6 +520,7 @@ type ShotCardProps = {
   gatePreferences: GatePreferenceRecord;
   index: number;
   onMove: (index: number, delta: -1 | 1) => void;
+  onParkSettled: (shotId: string, parked: boolean) => void;
   onUpdateReviewPreference: (
     shotId: string,
     purpose: BeatPanelReviewPreference['purpose'],
@@ -542,6 +544,7 @@ const ShotCard: React.FC<ShotCardProps> = ({
   gatePreferences,
   index,
   onMove,
+  onParkSettled,
   onUpdateReviewPreference,
   projectId,
   projection,
@@ -553,6 +556,9 @@ const ShotCard: React.FC<ShotCardProps> = ({
   const draftsRef = useLatestDrafts(drafts);
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [lifting, setLifting] = useState(false);
+  const [restoreLiftFocus, setRestoreLiftFocus] = useState(false);
+  const liftButtonRef = useRef<HTMLButtonElement | null>(null);
   const lineKey = shotDraftKey(shot.id, 'line');
   const narrationKey = shotDraftKey(shot.id, 'narration');
   const onScreenTextKey = shotDraftKey(shot.id, 'onScreenText');
@@ -639,6 +645,27 @@ const ShotCard: React.FC<ShotCardProps> = ({
     } finally {
       setImporting(false);
     }
+  };
+
+  useEffect(() => {
+    if (!restoreLiftFocus || disabled || lifting) return;
+    liftButtonRef.current?.focus();
+    setRestoreLiftFocus(false);
+  }, [disabled, lifting, restoreLiftFocus]);
+
+  const parkShot = async (): Promise<void> => {
+    if (disabled || lifting || !liftAllowed) return;
+    setLifting(true);
+    let parked = false;
+    try {
+      parked = await actions.parkShot(shot.id);
+    } catch {
+      // The action owner presents commit errors. A rejected provider is never treated as success.
+    } finally {
+      setLifting(false);
+    }
+    onParkSettled(shot.id, parked);
+    if (!parked) setRestoreLiftFocus(true);
   };
 
   const liftBodyKey = downstream.length === 0 ? `${KEY_ROOT}.lift.shotBodyNoStale` : `${KEY_ROOT}.lift.shotBodyStale`;
@@ -955,12 +982,21 @@ const ShotCard: React.FC<ShotCardProps> = ({
         <Popconfirm
           cancelText={t(`${KEY_ROOT}.common.cancel`)}
           content={t(liftBodyKey, { shots: downstreamLabels.join(', ') })}
-          disabled={disabled || !liftAllowed}
+          disabled={disabled || lifting || !liftAllowed}
           okText={t(`${KEY_ROOT}.lift.confirmShot`)}
-          onOk={() => actions.parkShot(shot.id)}
+          onCancel={() => liftButtonRef.current?.focus()}
+          onOk={parkShot}
           title={t(`${KEY_ROOT}.lift.shotTitle`, { index: index + 1 })}
         >
-          <Button disabled={disabled || !liftAllowed} status='danger'>
+          <Button
+            ref={(node) => {
+              if (node === null) liftButtonRef.current = null;
+              else if (node instanceof HTMLButtonElement) liftButtonRef.current = node;
+            }}
+            disabled={disabled || lifting || !liftAllowed}
+            loading={lifting}
+            status='danger'
+          >
             {t(`${KEY_ROOT}.lift.shot`)}
           </Button>
         </Popconfirm>
@@ -1077,6 +1113,7 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
   pending,
   gateLocked,
   reviewBlockedMessageKey,
+  onParkShotSuccess,
   onSelectBeat,
   onClose,
   actions,
@@ -1085,6 +1122,7 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
   const draftsRef = useLatestDrafts(drafts);
   const [savingBeat, setSavingBeat] = useState(false);
   const [reorderAnnouncement, setReorderAnnouncement] = useState('');
+  const [shotLiftAnnouncement, setShotLiftAnnouncement] = useState('');
   const actionKey = beatDraftKey(beat.id, 'action');
   const lookKey = beatDraftKey(beat.id, 'look');
   const targetKey = beatDraftKey(beat.id, 'targetSeconds');
@@ -1343,6 +1381,13 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
               gatePreferences={gatePreferences}
               index={index}
               onMove={(position, delta) => void moveShot(position, delta)}
+              onParkSettled={(shotId, parked) => {
+                if (parked) {
+                  onParkShotSuccess(shotId);
+                  return;
+                }
+                setShotLiftAnnouncement(t(`${KEY_ROOT}.lift.shotFailed`));
+              }}
               onUpdateReviewPreference={updateReviewPreference}
               projectId={projectId}
               projection={projection}
@@ -1382,8 +1427,8 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
             </p>
           ) : null}
         </footer>
-        <span aria-live='polite' className={styles.srOnly}>
-          {reorderAnnouncement}
+        <span aria-atomic='true' aria-live='polite' className={styles.srOnly}>
+          {shotLiftAnnouncement || reorderAnnouncement}
         </span>
       </section>
     </Modal>

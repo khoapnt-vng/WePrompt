@@ -25,8 +25,12 @@ import type {
 
 vi.mock('@arco-design/web-react', async () => {
   const ReactModule = await import('react');
-  const Button = ({ children, loading: _loading, size: _size, status: _status, type: _type, ...props }: any) => (
-    <button {...props}>{children}</button>
+  const Button = ReactModule.forwardRef<HTMLButtonElement, any>(
+    ({ children, loading: _loading, size: _size, status: _status, type: _type, ...props }, ref) => (
+      <button ref={ref} {...props}>
+        {children}
+      </button>
+    )
   );
   const TextArea = ({ autoSize: _autoSize, onChange, ...props }: any) => (
     <textarea {...props} onChange={(event) => onChange?.(event.target.value)} />
@@ -78,7 +82,7 @@ vi.mock('@arco-design/web-react', async () => {
         {children}
       </div>
     ) : null;
-  const Popconfirm = ({ cancelText, children, content, disabled, okText, onOk, title }: any) => {
+  const Popconfirm = ({ cancelText, children, content, disabled, okText, onCancel, onOk, title }: any) => {
     const childLabel = ReactModule.isValidElement(children)
       ? optionText((children.props as { children?: React.ReactNode }).children)
       : '';
@@ -95,7 +99,9 @@ vi.mock('@arco-design/web-react', async () => {
             {okText}
           </button>
         )}
-        <button type='button'>{cancelText}</button>
+        <button onClick={onCancel} type='button'>
+          {cancelText}
+        </button>
       </section>
     );
   };
@@ -150,6 +156,7 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.lift.confirmBeat': 'Confirm lift Beat',
         'conversation.creativeStudio.workspace.beatPanel.lift.confirmShot': 'Confirm lift Shot',
         'conversation.creativeStudio.workspace.beatPanel.lift.shot': 'Lift Shot',
+        'conversation.creativeStudio.workspace.beatPanel.lift.shotFailed': 'Shot was not moved to the Bin.',
         'conversation.creativeStudio.workspace.beatPanel.recovery.cancelBody': 'Cancel this waiting item only',
         'conversation.creativeStudio.workspace.beatPanel.recovery.cancelConfirm': 'Confirm cancel waiting',
         'conversation.creativeStudio.workspace.beatPanel.recovery.cancelTitle': 'Cancel waiting?',
@@ -480,6 +487,7 @@ const panelProps = (
   reviewBlockedMessageKey: null,
   onSelectBeat: vi.fn(),
   onClose: vi.fn(),
+  onParkShotSuccess: vi.fn(),
   actions,
   ...overrides,
 });
@@ -836,20 +844,24 @@ describe('BeatPanel', () => {
     expect(screen.getByText('Moved Shot 1 to 2 of 2')).toBeInTheDocument();
   });
 
-  it('names only remaining downstream positions in lift confirmations and protects unsaved local work', () => {
+  it('names only remaining downstream positions in lift confirmations and protects unsaved local work', async () => {
     const shot1 = makeShot('shot_1', 0, { downstreamShotIds: ['shot_2', 'shot_3'] });
     const shot2 = makeShot('shot_2', 1);
     const beat = makeBeat('beat_1', [shot1, shot2]);
     const nextBeat = makeBeat('beat_2', [makeShot('shot_3', 0)], { title: 'Close' });
     const projection = makeProjection([beat, nextBeat]);
     const actions = makeActions();
-    const result = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions, projection)} />);
+    const onParkShotSuccess = vi.fn();
+    const result = render(
+      <BeatPanel {...panelProps(beat, makeDrafts(), actions, projection, { onParkShotSuccess })} />
+    );
 
     const shotLift = within(shotCard(result.container, 'shot_1')).getByRole('group', { name: 'Lift Shot 1?' });
     expect(shotLift).toHaveTextContent('Beat 1, Shot 2');
     expect(shotLift).toHaveTextContent('Beat 2, Shot 1');
     fireEvent.click(within(shotLift).getByRole('button', { name: 'Confirm lift Shot' }));
-    expect(actions.parkShot).toHaveBeenCalledWith('shot_1');
+    await waitFor(() => expect(actions.parkShot).toHaveBeenCalledWith('shot_1'));
+    await waitFor(() => expect(onParkShotSuccess).toHaveBeenCalledWith('shot_1'));
 
     const beatLift = screen.getByRole('group', { name: 'Lift this Beat?' });
     expect(beatLift).toHaveTextContent('Beat 2, Shot 1');
@@ -864,6 +876,44 @@ describe('BeatPanel', () => {
       within(shotCard(result.container, 'shot_1')).getAllByRole('button', { name: 'Lift Shot' })[0]
     ).toBeDisabled();
     expect(screen.getAllByText('Save or reset local edits first').length).toBeGreaterThan(0);
+  });
+
+  it('reports only a committed Shot lift to the Board handoff owner', async () => {
+    const beat = makeBeat();
+    const actions = makeActions();
+    const onParkShotSuccess = vi.fn();
+    const result = render(
+      <BeatPanel {...panelProps(beat, makeDrafts(), actions, makeProjection([beat]), { onParkShotSuccess })} />
+    );
+
+    fireEvent.click(within(shotCard(result.container, 'shot_1')).getByRole('button', { name: 'Confirm lift Shot' }));
+
+    await waitFor(() => expect(actions.parkShot).toHaveBeenCalledWith('shot_1'));
+    await waitFor(() => expect(onParkShotSuccess).toHaveBeenCalledWith('shot_1'));
+    expect(onParkShotSuccess).toHaveBeenCalledTimes(1);
+  });
+
+  it('restores the exact Lift Shot trigger after cancel or refusal and never starts a Bin handoff', async () => {
+    const beat = makeBeat();
+    const actions = makeActions({ parkShot: vi.fn().mockResolvedValue(false) });
+    const onParkShotSuccess = vi.fn();
+    const result = render(
+      <BeatPanel {...panelProps(beat, makeDrafts(), actions, makeProjection([beat]), { onParkShotSuccess })} />
+    );
+    const card = shotCard(result.container, 'shot_1');
+    const trigger = within(card).getByRole('button', { name: 'Lift Shot' });
+    const confirmation = within(card).getByRole('group', { name: 'Lift Shot 1?' });
+
+    act(() => trigger.focus());
+    fireEvent.click(within(confirmation).getByRole('button', { name: 'Cancel' }));
+    expect(trigger).toHaveFocus();
+    expect(actions.parkShot).not.toHaveBeenCalled();
+
+    fireEvent.click(within(confirmation).getByRole('button', { name: 'Confirm lift Shot' }));
+    await waitFor(() => expect(actions.parkShot).toHaveBeenCalledWith('shot_1'));
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(screen.getByText('Shot was not moved to the Bin.')).toBeInTheDocument();
+    expect(onParkShotSuccess).not.toHaveBeenCalled();
   });
 
   it('offers exact projected video choices, free retry, and cancellation only when projected flags permit them', () => {
