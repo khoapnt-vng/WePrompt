@@ -1,5 +1,18 @@
 export { SpendGateModal, useSpendGate } from './Gate';
 export type { SpendGateModalProps, UseSpendGateInput, UseSpendGateResult } from './Gate';
+export { BeatPanel } from './BeatPanel';
+export type {
+  BeatPanelActions,
+  BeatPanelBriefReferenceOption,
+  BeatPanelGenerationCount,
+  BeatPanelImportResult,
+  BeatPanelProps,
+  BeatPanelReviewChoice,
+  BeatPanelReviewChoiceIdentity,
+  BeatPanelReviewGraph,
+  BeatPanelReviewPreference,
+  BeatPanelShotSave,
+} from './BeatPanel';
 export {
   formatMinorUnits,
   handoffGateDraft,
@@ -35,6 +48,7 @@ export type {
   WorkspaceBeatProjection,
   WorkspaceProjection,
   WorkspaceShotProjection,
+  WorkspaceTakeProjection,
 } from './workspaceProjection';
 export { WorkspaceShell } from './WorkspaceShell';
 export type { WorkspaceShellProps } from './WorkspaceShell';

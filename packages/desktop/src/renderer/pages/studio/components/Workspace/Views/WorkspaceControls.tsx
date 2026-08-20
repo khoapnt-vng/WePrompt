@@ -4,22 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Alert, Button, Card, Checkbox, Input, InputNumber, Select } from '@arco-design/web-react';
-import React, { useMemo, useState } from 'react';
+import { Alert, Button, Card, Input, InputNumber, Select } from '@arco-design/web-react';
+import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import {
-  STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION,
-  type StudioBriefRuleDraft,
-  type StudioPrepareGenerationChoiceV2,
-} from '@/common/types/project/creativeStudioTypes';
-import { majorUnitsToMinorUnits, selectionGateDraft } from '../spendGate';
-import { hasGenerationAffectingWorkspaceDrafts, type WorkspaceDraftValue } from '../useWorkspaceDrafts';
+import type { StudioBriefRuleDraft } from '@/common/types/project/creativeStudioTypes';
+import { majorUnitsToMinorUnits } from '../spendGate';
+import type { WorkspaceDraftValue } from '../useWorkspaceDrafts';
+import { BeatPanel } from '../BeatPanel';
 import { TableView } from './Table';
 import type { WorkspaceControlsProps } from './viewTypes';
 import styles from './WorkspaceControls.module.css';
-
-type GateChoicePreferences = Record<string, { generationCount: number; referenceAssetId: string | null }>;
 
 const asString = (value: WorkspaceDraftValue | undefined): string => (typeof value === 'string' ? value : '');
 const asNumber = (value: WorkspaceDraftValue | undefined): number => (typeof value === 'number' ? value : 0);
@@ -63,38 +58,6 @@ const parseRules = (value: string): StudioBriefRuleDraft[] | null => {
   }
 };
 
-const parseGatePreferences = (value: WorkspaceDraftValue | undefined): GateChoicePreferences => {
-  if (typeof value !== 'string') return {};
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
-    const result: GateChoicePreferences = Object.create(null) as GateChoicePreferences;
-    for (const [key, candidate] of Object.entries(parsed)) {
-      if (!/^[A-Za-z0-9_-]{1,256}:(seed_still|video_take)$/.test(key)) continue;
-      if (typeof candidate !== 'object' || candidate === null) continue;
-      const row = candidate as Record<string, unknown>;
-      if (
-        !Number.isSafeInteger(row.generationCount) ||
-        (row.generationCount as number) < 1 ||
-        (row.generationCount as number) > STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION ||
-        (row.referenceAssetId !== null && typeof row.referenceAssetId !== 'string')
-      ) {
-        continue;
-      }
-      result[key] = {
-        generationCount: row.generationCount as number,
-        referenceAssetId: row.referenceAssetId as string | null,
-      };
-    }
-    return result;
-  } catch {
-    return {};
-  }
-};
-
-const choiceKey = (choice: Pick<StudioPrepareGenerationChoiceV2, 'shotId' | 'purpose'>): string =>
-  `${choice.shotId}:${choice.purpose}`;
-
 export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
   activeView,
   project,
@@ -105,40 +68,42 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
   gateLocked,
   errorMessageKey,
   mutations,
-  openSpendGate,
+  beatPanelActions,
+  beatPanelBriefReferenceOptions,
+  beatPanelReviewGraphs,
+  beatPanelReviewBlockedMessageKey,
 }) => {
   const { t } = useTranslation();
   const [localErrorKey, setLocalErrorKey] = useState<string | null>(null);
+  const [openPanel, setOpenPanel] = useState<{ projectId: string; beatId: string } | null>(null);
+  const openBeatId = openPanel?.projectId === project.id ? openPanel.beatId : null;
   const rulesValue = asString(drafts.value('brief.rules'));
-  const hasGenerationAffectingDrafts = hasGenerationAffectingWorkspaceDrafts(drafts.dirtyKeys);
-  const statusReady = projection.workspaceStatusReady && projection.chainStatusReady;
-  const gatePreferences = useMemo(() => parseGatePreferences(drafts.value('gate.choices')), [drafts.entries]);
-  const defaultGateDraft = useMemo(
-    () =>
-      selectionGateDraft({
-        project,
-        projection,
-        orderedShotIds: drafts.selection.selectedShotIds,
-      }),
-    [drafts.selection.selectedShotIds, project, projection]
-  );
-  const briefReferences = Object.values(project.assets).filter(
-    (asset) =>
-      asset?.projectId === project.id &&
-      asset.shotId === null &&
-      asset.mediaKind === 'image' &&
-      asset.managedAsset.collection === 'imports' &&
-      (asset.briefReferenceRole === 'cast' || asset.briefReferenceRole === 'look')
-  );
+  const openBeatIndex = openBeatId === null ? -1 : projection.activeBeats.findIndex((beat) => beat.id === openBeatId);
+  const openBeat = openBeatIndex < 0 ? null : (projection.activeBeats[openBeatIndex] ?? null);
 
-  const updateGatePreference = (
-    choice: StudioPrepareGenerationChoiceV2,
-    changes: Partial<GateChoicePreferences[string]>
-  ): void => {
-    if (gateLocked) return;
-    const key = choiceKey(choice);
-    const current = gatePreferences[key] ?? { generationCount: 1, referenceAssetId: null };
-    drafts.setValue('gate.choices', JSON.stringify({ ...gatePreferences, [key]: { ...current, ...changes } }));
+  useEffect(() => {
+    if (
+      openPanel !== null &&
+      (openPanel.projectId !== project.id || !projection.activeBeatIds.includes(openPanel.beatId))
+    ) {
+      setOpenPanel(null);
+    }
+  }, [openPanel, project.id, projection.activeBeatIds]);
+
+  const selectAndOpenBeat = (beatId: string): void => {
+    drafts.selectBeat(beatId);
+    setOpenPanel({ projectId: project.id, beatId });
+  };
+  const panelActions = {
+    ...beatPanelActions,
+    requestReviewedRederive: (shotId: string): void => {
+      setOpenPanel(null);
+      beatPanelActions.requestReviewedRederive(shotId);
+    },
+    requestResplit: (beatId: string): void => {
+      setOpenPanel(null);
+      beatPanelActions.requestResplit(beatId);
+    },
   };
 
   const saveSettings = async (): Promise<void> => {
@@ -209,54 +174,20 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
       setLocalErrorKey('conversation.creativeStudio.workspace.controls.invalidRules');
       return;
     }
+    const canonical = project.rules.map(({ id, text, predicate }) => ({
+      id,
+      text,
+      predicate: predicate === null ? null : { kind: 'forbidden_terms' as const, terms: [...predicate.terms] },
+    }));
+    if (JSON.stringify(parsed) === JSON.stringify(canonical)) {
+      drafts.resetIfValue('brief.rules', rulesValue);
+      setLocalErrorKey(null);
+      return;
+    }
     if (await mutations.setRules(parsed)) {
-      drafts.reset('brief.rules');
+      drafts.resetIfValue('brief.rules', rulesValue);
       setLocalErrorKey(null);
     }
-  };
-
-  const reviewSelection = (): void => {
-    if (gateLocked || hasGenerationAffectingDrafts || !statusReady || routeCatalog === null) return;
-    if (defaultGateDraft === null) {
-      setLocalErrorKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
-      return;
-    }
-    if (
-      defaultGateDraft.baseChoices.some((choice) => choice.purpose === 'seed_still') &&
-      routeCatalog?.image.status !== 'ready'
-    ) {
-      setLocalErrorKey('conversation.creativeStudio.workspace.controls.imageRouteBlocked');
-      return;
-    }
-    if (routeCatalog?.video.status !== 'ready') {
-      if (defaultGateDraft.baseChoices.some((choice) => choice.purpose === 'video_take')) {
-        setLocalErrorKey('conversation.creativeStudio.workspace.controls.videoRouteBlocked');
-        return;
-      }
-    }
-    const applyPreference = (choice: StudioPrepareGenerationChoiceV2): StudioPrepareGenerationChoiceV2 => {
-      const preference = gatePreferences[choiceKey(choice)];
-      return preference === undefined
-        ? choice
-        : {
-            ...choice,
-            generationCount: preference.generationCount,
-            referenceAssetId: choice.purpose === 'seed_still' ? preference.referenceAssetId : null,
-          };
-    };
-    const reviewed = selectionGateDraft({
-      project,
-      projection,
-      orderedShotIds: drafts.selection.selectedShotIds,
-      baseChoices: defaultGateDraft.baseChoices.map(applyPreference),
-      cascadeChoices: defaultGateDraft.cascadeChoices.map(applyPreference),
-    });
-    if (reviewed === null) {
-      setLocalErrorKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
-      return;
-    }
-    setLocalErrorKey(null);
-    openSpendGate(reviewed);
   };
 
   return (
@@ -265,12 +196,29 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
         <TableView
           beats={projection.activeBeats}
           selectedBeatId={drafts.selection.selectedBeatId}
-          onSelectBeat={drafts.selectBeat}
+          onSelectBeat={selectAndOpenBeat}
         />
       ) : null}
-      {errorMessageKey !== null || localErrorKey !== null ? (
-        <Alert type='warning' content={t(localErrorKey ?? errorMessageKey!)} />
-      ) : null}
+      {openBeat === null ? null : (
+        <BeatPanel
+          actions={panelActions}
+          beat={openBeat}
+          beatIds={projection.activeBeatIds}
+          beatIndex={openBeatIndex}
+          briefReferenceOptions={beatPanelBriefReferenceOptions}
+          drafts={drafts}
+          errorMessageKey={errorMessageKey}
+          gateLocked={gateLocked}
+          onClose={() => setOpenPanel(null)}
+          onSelectBeat={selectAndOpenBeat}
+          pending={pending}
+          projectId={project.id}
+          projection={projection}
+          reviewGraphs={beatPanelReviewGraphs}
+          reviewBlockedMessageKey={beatPanelReviewBlockedMessageKey}
+        />
+      )}
+      {localErrorKey === null ? null : <Alert type='warning' content={t(localErrorKey)} />}
       {drafts.staleRevision ? (
         <Alert type='error' content={t('conversation.creativeStudio.workspace.controls.draftConflict')} />
       ) : null}
@@ -439,165 +387,23 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
         </div>
       </Card>
 
-      <section aria-label={t('conversation.creativeStudio.workspace.controls.shotsTitle')}>
-        <div className={styles.sectionHeading}>
-          <h3>{t('conversation.creativeStudio.workspace.controls.shotsTitle')}</h3>
-          <Button
-            type='primary'
-            disabled={
-              pending ||
-              gateLocked ||
-              hasGenerationAffectingDrafts ||
-              !statusReady ||
-              routeCatalog === null ||
-              drafts.selection.selectedShotIds.length === 0
-            }
-            onClick={reviewSelection}
-          >
-            {t('conversation.creativeStudio.workspace.controls.reviewRender')}
-          </Button>
-        </div>
-        {hasGenerationAffectingDrafts ? (
-          <p>{t('conversation.creativeStudio.workspace.controls.saveBeforeReview')}</p>
-        ) : !statusReady ? (
-          <p>{t('conversation.creativeStudio.workspace.controls.statusRequired')}</p>
-        ) : routeCatalog === null ? (
-          <p>{t('conversation.creativeStudio.workspace.controls.routeCatalogRequired')}</p>
-        ) : null}
-        {projection.activeBeats.map((beat) => (
-          <Card key={beat.id} title={beat.title || beat.id}>
-            {beat.shots.length === 0 ? (
-              <div>
-                <p>{t('conversation.creativeStudio.workspace.controls.noCoverage')}</p>
-                <Button onClick={drafts.clearSelection}>
-                  {t('conversation.creativeStudio.workspace.controls.keepUncoveredFree')}
-                </Button>
-              </div>
-            ) : (
-              <ul className={styles.shotList}>
-                {beat.shots.map((shot) => (
-                  <li key={shot.id}>
-                    <Checkbox
-                      checked={drafts.selection.selectedShotIds.includes(shot.id)}
-                      onChange={(_checked, event) => {
-                        const nativeEvent =
-                          (event as unknown as { nativeEvent?: Event }).nativeEvent ?? (event as unknown as Event);
-                        const shiftKey = 'shiftKey' in nativeEvent && nativeEvent.shiftKey === true;
-                        drafts.selectShot(shot.id, shiftKey ? 'range' : 'toggle');
-                      }}
-                    >
-                      <span>{shot.line || shot.id}</span>
-                    </Checkbox>
-                    <small>
-                      {t(`conversation.creativeStudio.workspace.controls.shotState.${shot.displayState}`)} ·{' '}
-                      {t('conversation.creativeStudio.workspace.controls.takeCount', { count: shot.takeCount })}
-                    </small>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-        ))}
-      </section>
-
-      {defaultGateDraft !== null && drafts.selection.selectedShotIds.length > 0 ? (
-        <Card
-          data-testid='studio-generation-choices'
-          title={t('conversation.creativeStudio.workspace.controls.generationChoices')}
-        >
-          {[...defaultGateDraft.baseChoices, ...defaultGateDraft.cascadeChoices].map((choice) => {
-            const preference = gatePreferences[choiceKey(choice)] ?? {
-              generationCount: 1,
-              referenceAssetId: null,
-            };
-            return (
-              <div key={choiceKey(choice)} className={styles.choiceRow}>
-                <span>
-                  {choice.shotId} · {t(`conversation.creativeStudio.workspace.gate.purpose.${choice.purpose}`)}
-                </span>
-                <Select
-                  disabled={pending || gateLocked}
-                  value={preference.generationCount}
-                  onChange={(value) => updateGatePreference(choice, { generationCount: Number(value) })}
-                >
-                  {Array.from({ length: STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION }, (_, index) => index + 1).map(
-                    (count) => (
-                      <Select.Option key={count} value={count}>
-                        {count}
-                      </Select.Option>
-                    )
-                  )}
-                </Select>
-                {choice.purpose === 'seed_still' ? (
-                  <Select
-                    allowClear
-                    disabled={pending || gateLocked}
-                    value={preference.referenceAssetId ?? undefined}
-                    onChange={(value) => updateGatePreference(choice, { referenceAssetId: value ?? null })}
-                  >
-                    {briefReferences.map((asset) => (
-                      <Select.Option key={asset.id} value={asset.id}>
-                        {asset.briefReferenceLabel ?? asset.id}
-                      </Select.Option>
-                    ))}
-                  </Select>
-                ) : null}
-              </div>
-            );
-          })}
-        </Card>
-      ) : null}
-
       {projection.undoTop !== null ? (
-        <Button disabled={pending} onClick={() => void mutations.undo(projection.undoTop!.entryId)}>
-          {t('conversation.creativeStudio.workspace.controls.undo', {
-            label: t(`conversation.creativeStudio.workspace.controls.undoLabel.${projection.undoTop.label}`, {
-              defaultValue: t('conversation.creativeStudio.workspace.controls.undoLabel.unknown'),
-            }),
-          })}
-        </Button>
+        <div>
+          <Button
+            disabled={pending || drafts.dirtyCount > 0}
+            onClick={() => void mutations.undo(projection.undoTop!.entryId)}
+          >
+            {t('conversation.creativeStudio.workspace.controls.undo', {
+              label: t(`conversation.creativeStudio.workspace.controls.undoLabel.${projection.undoTop.label}`, {
+                defaultValue: t('conversation.creativeStudio.workspace.controls.undoLabel.unknown'),
+              }),
+            })}
+          </Button>
+          {drafts.dirtyCount > 0 ? (
+            <p>{t('conversation.creativeStudio.workspace.beatPanel.blocker.unsavedDrafts')}</p>
+          ) : null}
+        </div>
       ) : null}
-      {projection.dirtyShots.map((shot) => (
-        <Alert
-          key={shot.shotId}
-          type='warning'
-          content={t('conversation.creativeStudio.workspace.controls.dirtyShot', {
-            shotId: shot.shotId,
-            causes: shot.causes
-              .map((cause) => t(`conversation.creativeStudio.workspace.controls.dirtyCause.${cause}`))
-              .join(', '),
-          })}
-        />
-      ))}
-      {projection.cascadeProgress.map((row) => (
-        <Card key={row.dependentShotId} title={t('conversation.creativeStudio.workspace.controls.cascadeTitle')}>
-          <p>{t(`conversation.creativeStudio.workspace.controls.cascadeReason.${row.waitingReason}`)}</p>
-          <div className={styles.actions}>
-            {row.eligiblePrimaryAssetIds.map((assetId) => (
-              <Button key={assetId} onClick={() => void mutations.chooseCascadeAsset(row, assetId)}>
-                {t('conversation.creativeStudio.workspace.controls.chooseAsset', { assetId })}
-              </Button>
-            ))}
-            {row.canRetryConditioningFrame ? (
-              <Button onClick={() => void mutations.retryConditioning(row.dependentShotId)}>
-                {t('conversation.creativeStudio.workspace.controls.retryConditioning')}
-              </Button>
-            ) : null}
-            {row.canCancelWaiting ? (
-              <Button status='danger' onClick={() => void mutations.cancelWaiting(row.dependentShotId)}>
-                {t('conversation.creativeStudio.workspace.controls.cancelWaiting')}
-              </Button>
-            ) : null}
-          </div>
-        </Card>
-      ))}
-      {projection.conditioningFailures.map((row) => (
-        <Button key={row.dependentShotId} onClick={() => void mutations.retryConditioning(row.dependentShotId)}>
-          {t('conversation.creativeStudio.workspace.controls.retryConditioningFor', {
-            shotId: row.dependentShotId,
-          })}
-        </Button>
-      ))}
     </div>
   );
 };

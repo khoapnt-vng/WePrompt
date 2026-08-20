@@ -8,6 +8,8 @@ import type {
   StudioAssetV2,
   StudioBeat,
   StudioBinItem,
+  StudioLineHistoryEntry,
+  StudioPlanningShotBoundaryV2,
   StudioRendererChainConditioningFailureV2,
   StudioRendererChainStatusV2,
   StudioRendererDirtyShotV2,
@@ -19,7 +21,10 @@ import type {
   StudioCascadeProgressV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { isCanonicalStudioGeneratedTakeV2 } from '@/common/types/project/creativeStudioCanonicalTake';
-import { studioShotPlayedDurationV2 } from '@/common/types/project/creativeStudioProjectSummary';
+import {
+  studioPlanningShotBoundariesV2,
+  studioShotPlayedDurationV2,
+} from '@/common/types/project/creativeStudioProjectSummary';
 
 export type WorkspaceShotDisplayState = 'draft' | 'seed_ready' | 'takes_available' | 'selected_take';
 
@@ -34,6 +39,18 @@ export type WorkspaceBeatDisplayState =
   | 'ready'
   | 'draft';
 
+export type WorkspaceTakeProjection = {
+  assetId: string;
+  mediaKind: Extract<StudioAssetV2['mediaKind'], 'image' | 'video'>;
+  createdAt: string;
+  selected: boolean;
+  explicitSeed: boolean;
+  effectiveSeed: boolean;
+  binReason: Extract<StudioBinItem, { kind: 'take' }>['reason'] | null;
+  sourceDurationSeconds: number | null;
+  posterAssetId: string | null;
+};
+
 export type WorkspaceShotProjection = {
   id: string;
   line: string;
@@ -42,6 +59,21 @@ export type WorkspaceShotProjection = {
   durationSeconds: number;
   chainBreak: StudioShot['chainBreak'];
   derivation: StudioShot['derivation'];
+  derivedFromActionRevision: number | null;
+  derivationStale: boolean;
+  trimInSeconds: number | null;
+  trimOutSeconds: number | null;
+  selectedTakeId: string | null;
+  selectedTakeSourceDurationSeconds: number | null;
+  playedDurationSeconds: number | null;
+  explicitSeedAssetId: string | null;
+  effectiveSeedAssetId: string | null;
+  segmentHead: boolean;
+  planningBoundary: StudioPlanningShotBoundaryV2 | null;
+  dirtyCauses: StudioRendererDirtyShotV2['causes'];
+  downstreamShotIds: string[];
+  imageTakes: WorkspaceTakeProjection[];
+  videoTakes: WorkspaceTakeProjection[];
   coverAssetId: string | null;
   takeCount: number;
   displayState: WorkspaceShotDisplayState;
@@ -56,6 +88,8 @@ export type WorkspaceBeatProjection = {
   title: string;
   action: string;
   look: string;
+  actionRevision: number;
+  lineHistory: StudioLineHistoryEntry[];
   targetSeconds: number | null;
   actualSeconds: number | null;
   displayState: WorkspaceBeatDisplayState;
@@ -113,17 +147,7 @@ const isOwnedAsset = (project: StudioRendererProjectV2, shot: StudioShot, assetI
   return asset?.id === assetId && asset.projectId === project.id && asset.shotId === shot.id ? asset : null;
 };
 
-const selectedVideoPosterId = (project: StudioRendererProjectV2, shot: StudioShot): string | null => {
-  if (shot.selectedTakeId === null) return null;
-  const selectedTake = isOwnedAsset(project, shot, shot.selectedTakeId);
-  if (
-    selectedTake === null ||
-    selectedTake.mediaKind !== 'video' ||
-    !isCanonicalStudioGeneratedTakeV2(selectedTake, project.id, shot)
-  ) {
-    return null;
-  }
-
+const videoPosterId = (project: StudioRendererProjectV2, shot: StudioShot, videoTake: StudioAssetV2): string | null => {
   const producingJobs = shot.jobIds.flatMap((jobId) => {
     const job = ownValue(project.jobs, jobId);
     return job?.id === jobId &&
@@ -131,8 +155,8 @@ const selectedVideoPosterId = (project: StudioRendererProjectV2, shot: StudioSho
       job.shotId === shot.id &&
       job.status === 'succeeded' &&
       job.purpose === 'video_take' &&
-      job.outputAssetIdsByRole.primary === selectedTake.id &&
-      job.outputAssetIds.filter((assetId) => assetId === selectedTake.id).length === 1
+      job.outputAssetIdsByRole.primary === videoTake.id &&
+      job.outputAssetIds.filter((assetId) => assetId === videoTake.id).length === 1
       ? [job]
       : [];
   });
@@ -155,6 +179,37 @@ const selectedVideoPosterId = (project: StudioRendererProjectV2, shot: StudioSho
 const isBinnedTake = (project: StudioRendererProjectV2, assetId: string): boolean =>
   project.bin.some((item) => item.kind === 'take' && item.assetId === assetId);
 
+const takeBinReason = (project: StudioRendererProjectV2, assetId: string): WorkspaceTakeProjection['binReason'] =>
+  project.bin.find((item) => item.kind === 'take' && item.assetId === assetId)?.reason ?? null;
+
+const isEligibleImageTake = (project: StudioRendererProjectV2, shot: StudioShot, asset: StudioAssetV2): boolean =>
+  asset.mediaKind === 'image' &&
+  (asset.managedAsset.collection === 'assets' || asset.managedAsset.collection === 'imports') &&
+  asset.briefReferenceRole === undefined &&
+  asset.briefReferenceLabel === undefined &&
+  asset.projectId === project.id &&
+  asset.shotId === shot.id &&
+  shot.assetIds.includes(asset.id);
+
+const validVideoSourceDuration = (asset: StudioAssetV2): number | null =>
+  asset.mediaKind === 'video' &&
+  asset.durationSeconds !== undefined &&
+  Number.isFinite(asset.durationSeconds) &&
+  asset.durationSeconds > 0 &&
+  asset.durationSeconds <= Number.MAX_SAFE_INTEGER
+    ? asset.durationSeconds
+    : null;
+
+const validSelectedVideoTake = (project: StudioRendererProjectV2, shot: StudioShot): StudioAssetV2 | null => {
+  if (shot.selectedTakeId === null || isBinnedTake(project, shot.selectedTakeId)) return null;
+  const selected = isOwnedAsset(project, shot, shot.selectedTakeId);
+  return selected !== null &&
+    selected.mediaKind === 'video' &&
+    isCanonicalStudioGeneratedTakeV2(selected, project.id, shot)
+    ? selected
+    : null;
+};
+
 const validExplicitSeedStillId = (project: StudioRendererProjectV2, shot: StudioShot): string | null => {
   if (shot.seedStillId === null || isBinnedTake(project, shot.seedStillId)) return null;
   const seed = isOwnedAsset(project, shot, shot.seedStillId);
@@ -173,13 +228,7 @@ const effectiveSeedStillId = (project: StudioRendererProjectV2, shot: StudioShot
   if (explicit !== null) return explicit;
   const candidates = shot.assetIds.flatMap((assetId) => {
     const asset = isOwnedAsset(project, shot, assetId);
-    return asset !== null &&
-      asset.mediaKind === 'image' &&
-      !isBinnedTake(project, asset.id) &&
-      (asset.managedAsset.collection === 'assets' || asset.managedAsset.collection === 'imports') &&
-      asset.briefReferenceRole === undefined &&
-      asset.briefReferenceLabel === undefined &&
-      shot.assetIds.includes(asset.id)
+    return asset !== null && !isBinnedTake(project, asset.id) && isEligibleImageTake(project, shot, asset)
       ? [asset]
       : [];
   });
@@ -197,29 +246,58 @@ const effectiveSeedStillId = (project: StudioRendererProjectV2, shot: StudioShot
   return candidates[0]?.id ?? null;
 };
 
-const canonicalTakeCount = (project: StudioRendererProjectV2, shot: StudioShot): number =>
-  shot.assetIds.filter((assetId) => {
-    const asset = isOwnedAsset(project, shot, assetId);
-    return (
-      asset !== null &&
-      !isBinnedTake(project, asset.id) &&
-      asset.briefReferenceRole === undefined &&
-      asset.briefReferenceLabel === undefined &&
-      ((asset.mediaKind === 'image' &&
-        (asset.managedAsset.collection === 'assets' || asset.managedAsset.collection === 'imports')) ||
-        (asset.mediaKind === 'video' && isCanonicalStudioGeneratedTakeV2(asset, project.id, shot)))
-    );
-  }).length;
+const compareTakeNewestFirst = (left: WorkspaceTakeProjection, right: WorkspaceTakeProjection): number => {
+  if (left.createdAt !== right.createdAt) return left.createdAt < right.createdAt ? 1 : -1;
+  if (left.assetId === right.assetId) return 0;
+  return left.assetId < right.assetId ? 1 : -1;
+};
 
-const canonicalVideoTakeCount = (project: StudioRendererProjectV2, shot: StudioShot): number =>
-  shot.assetIds.filter((assetId) => {
-    const asset = isOwnedAsset(project, shot, assetId);
-    return (
-      asset?.mediaKind === 'video' &&
-      !isBinnedTake(project, asset.id) &&
-      isCanonicalStudioGeneratedTakeV2(asset, project.id, shot)
-    );
-  }).length;
+const projectTakes = (input: {
+  project: StudioRendererProjectV2;
+  shot: StudioShot;
+  selectedTakeId: string | null;
+  explicitSeedAssetId: string | null;
+  effectiveSeedAssetId: string | null;
+}): { imageTakes: WorkspaceTakeProjection[]; videoTakes: WorkspaceTakeProjection[] } => {
+  const imageTakes: WorkspaceTakeProjection[] = [];
+  const videoTakes: WorkspaceTakeProjection[] = [];
+  for (const assetId of new Set(input.shot.assetIds)) {
+    const asset = isOwnedAsset(input.project, input.shot, assetId);
+    if (asset === null) continue;
+    const binReason = takeBinReason(input.project, asset.id);
+    if (isEligibleImageTake(input.project, input.shot, asset)) {
+      imageTakes.push({
+        assetId: asset.id,
+        mediaKind: 'image',
+        createdAt: asset.createdAt,
+        selected: false,
+        explicitSeed: input.explicitSeedAssetId === asset.id,
+        effectiveSeed: input.effectiveSeedAssetId === asset.id,
+        binReason,
+        sourceDurationSeconds: null,
+        posterAssetId: null,
+      });
+      continue;
+    }
+    if (asset.mediaKind !== 'video' || !isCanonicalStudioGeneratedTakeV2(asset, input.project.id, input.shot)) {
+      continue;
+    }
+    videoTakes.push({
+      assetId: asset.id,
+      mediaKind: 'video',
+      createdAt: asset.createdAt,
+      selected: input.selectedTakeId === asset.id,
+      explicitSeed: false,
+      effectiveSeed: false,
+      binReason,
+      sourceDurationSeconds: validVideoSourceDuration(asset),
+      posterAssetId: videoPosterId(input.project, input.shot, asset),
+    });
+  }
+  imageTakes.sort(compareTakeNewestFirst);
+  videoTakes.sort(compareTakeNewestFirst);
+  return { imageTakes, videoTakes };
+};
 
 const hasOwnedJob = (project: StudioRendererProjectV2, shot: StudioShot): boolean =>
   shot.jobIds.some((jobId) => {
@@ -252,22 +330,40 @@ const hasOwnedGenerationInFlight = (
   });
 };
 
-const projectShot = (project: StudioRendererProjectV2, shot: StudioShot): WorkspaceShotProjection => {
-  const takeCount = canonicalTakeCount(project, shot);
-  const videoTakeCount = canonicalVideoTakeCount(project, shot);
-  const seedStillId = effectiveSeedStillId(project, shot);
-  const selectedTake = shot.selectedTakeId === null ? null : isOwnedAsset(project, shot, shot.selectedTakeId);
-  const hasSelectedTake =
-    selectedTake?.mediaKind === 'video' &&
-    !isBinnedTake(project, selectedTake.id) &&
-    isCanonicalStudioGeneratedTakeV2(selectedTake, project.id, shot);
-  const displayState: WorkspaceShotDisplayState = hasSelectedTake
-    ? 'selected_take'
-    : videoTakeCount > 0
-      ? 'takes_available'
-      : seedStillId !== null
-        ? 'seed_ready'
-        : 'draft';
+const projectShot = (
+  project: StudioRendererProjectV2,
+  shot: StudioShot,
+  context: {
+    beatActionRevision: number | null;
+    segmentHead: boolean;
+    planningBoundary: StudioPlanningShotBoundaryV2 | null;
+    dirtyCauses: ReadonlyArray<StudioRendererDirtyShotV2['causes'][number]>;
+    downstreamShotIds: readonly string[];
+  }
+): WorkspaceShotProjection => {
+  const explicitSeedAssetId = validExplicitSeedStillId(project, shot);
+  const effectiveSeedAssetId = context.segmentHead ? effectiveSeedStillId(project, shot) : null;
+  const selectedTake = validSelectedVideoTake(project, shot);
+  const selectedTakeId = selectedTake?.id ?? null;
+  const { imageTakes, videoTakes } = projectTakes({
+    project,
+    shot,
+    selectedTakeId,
+    explicitSeedAssetId,
+    effectiveSeedAssetId,
+  });
+  const activeTakeCount = [...imageTakes, ...videoTakes].filter((take) => take.binReason === null).length;
+  const activeVideoTakeCount = videoTakes.filter((take) => take.binReason === null).length;
+  const selectedTakeSourceDurationSeconds = selectedTake === null ? null : validVideoSourceDuration(selectedTake);
+  const playedDurationSeconds = studioShotPlayedDurationV2(project, shot);
+  const displayState: WorkspaceShotDisplayState =
+    selectedTake !== null && selectedTakeSourceDurationSeconds !== null && playedDurationSeconds !== null
+      ? 'selected_take'
+      : activeVideoTakeCount > 0
+        ? 'takes_available'
+        : effectiveSeedAssetId !== null
+          ? 'seed_ready'
+          : 'draft';
   return {
     id: shot.id,
     line: shot.line,
@@ -276,13 +372,31 @@ const projectShot = (project: StudioRendererProjectV2, shot: StudioShot): Worksp
     durationSeconds: shot.durationSeconds,
     chainBreak: shot.chainBreak,
     derivation: shot.derivation,
-    coverAssetId: selectedVideoPosterId(project, shot) ?? seedStillId,
-    takeCount,
+    derivedFromActionRevision: shot.derivedFromActionRevision,
+    derivationStale:
+      shot.derivation === 'derived' &&
+      context.beatActionRevision !== null &&
+      shot.derivedFromActionRevision !== context.beatActionRevision,
+    trimInSeconds: shot.trimInSeconds,
+    trimOutSeconds: shot.trimOutSeconds,
+    selectedTakeId,
+    selectedTakeSourceDurationSeconds,
+    playedDurationSeconds,
+    explicitSeedAssetId,
+    effectiveSeedAssetId,
+    segmentHead: context.segmentHead,
+    planningBoundary: context.planningBoundary === null ? null : { ...context.planningBoundary },
+    dirtyCauses: [...context.dirtyCauses],
+    downstreamShotIds: [...context.downstreamShotIds],
+    imageTakes,
+    videoTakes,
+    coverAssetId: (selectedTake === null ? null : videoPosterId(project, shot, selectedTake)) ?? effectiveSeedAssetId,
+    takeCount: activeTakeCount,
     displayState,
-    retainedWork: takeCount > 0 || seedStillId !== null || hasOwnedJob(project, shot),
+    retainedWork: activeTakeCount > 0 || effectiveSeedAssetId !== null || hasOwnedJob(project, shot),
     videoGenerationInFlight: hasOwnedGenerationInFlight(project, shot, 'video_take'),
     seedGenerationInFlight: hasOwnedGenerationInFlight(project, shot, 'seed_still'),
-    hasEffectiveSeed: seedStillId !== null,
+    hasEffectiveSeed: effectiveSeedAssetId !== null,
   };
 };
 
@@ -383,7 +497,10 @@ export const projectWorkspace = (
 ): WorkspaceProjection => {
   const matchedWorkspaceStatus = revisionMatches(project, workspaceStatus) ? workspaceStatus : null;
   const matchedChainStatus = revisionMatches(project, chainStatus) ? chainStatus : null;
-  const dirtyShotIds = new Set(matchedWorkspaceStatus?.dirtyShots.map((row) => row.shotId) ?? []);
+  const dirtyCausesByShotId = new Map(
+    matchedWorkspaceStatus?.dirtyShots.map((row) => [row.shotId, [...row.causes]] as const) ?? []
+  );
+  const dirtyShotIds = new Set(dirtyCausesByShotId.keys());
   const partDoneShotIds = new Set<string>(
     matchedWorkspaceStatus?.cascadeProgress
       .filter((row) => PART_DONE_CASCADE_REASONS.has(row.waitingReason))
@@ -402,11 +519,29 @@ export const projectWorkspace = (
     const beat = validBeat(project, beatId);
     if (beat === null) return [];
     activeBeatIds.push(beat.id);
-    const shots = beat.shotOrder.flatMap((shotId) => {
+    const orderedShots = beat.shotOrder.flatMap((shotId) => {
       const shot = validShot(project, shotId);
-      if (shot === null) return [];
+      return shot === null ? [] : [shot];
+    });
+    const planningBoundaries = studioPlanningShotBoundariesV2(beat, project.shots);
+    const planningBoundaryByShotId = new Map(
+      planningBoundaries?.map((boundary) => [boundary.shotId, boundary] as const) ?? []
+    );
+    const shots = orderedShots.map((shot, shotIndex) => {
       activeShotIds.push(shot.id);
-      return [projectShot(project, shot)];
+      const downstreamShotIds: string[] = [];
+      for (let downstreamIndex = shotIndex + 1; downstreamIndex < orderedShots.length; downstreamIndex += 1) {
+        const downstream = orderedShots[downstreamIndex]!;
+        if (downstream.chainBreak === 'hard_cut') break;
+        downstreamShotIds.push(downstream.id);
+      }
+      return projectShot(project, shot, {
+        beatActionRevision: beat.actionRevision,
+        segmentHead: shotIndex === 0 || shot.chainBreak === 'hard_cut',
+        planningBoundary: planningBoundaryByShotId.get(shot.id) ?? null,
+        dirtyCauses: dirtyCausesByShotId.get(shot.id) ?? [],
+        downstreamShotIds,
+      });
     });
     return [
       {
@@ -414,6 +549,8 @@ export const projectWorkspace = (
         title: beat.title,
         action: beat.action,
         look: beat.look,
+        actionRevision: beat.actionRevision,
+        lineHistory: beat.lineHistory.map((entry) => ({ ...entry })),
         targetSeconds: beat.targetSeconds,
         actualSeconds: projectBeatActualSeconds(project, beat),
         displayState: projectBeatDisplayState({
@@ -462,7 +599,18 @@ export const projectWorkspace = (
     if (item.kind === 'shot') {
       const shot = validShot(project, item.shotId);
       if (shot === null) continue;
-      binnedShots.push({ ...projectShot(project, shot), beatId: item.beatId, reason: item.reason });
+      const owner = validBeat(project, item.beatId);
+      binnedShots.push({
+        ...projectShot(project, shot, {
+          beatActionRevision: owner?.actionRevision ?? null,
+          segmentHead: false,
+          planningBoundary: null,
+          dirtyCauses: dirtyCausesByShotId.get(shot.id) ?? [],
+          downstreamShotIds: [],
+        }),
+        beatId: item.beatId,
+        reason: item.reason,
+      });
       continue;
     }
     const asset = ownValue(project.assets, item.assetId);

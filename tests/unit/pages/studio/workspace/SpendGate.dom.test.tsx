@@ -53,6 +53,8 @@ import {
   spendGateReducer,
   useWorkspaceDrafts,
   useSpendGate,
+  type BeatPanelActions,
+  type WorkspaceDraftValue,
   type WorkspaceMutationCallbacks,
 } from '@/renderer/pages/studio/components/Workspace';
 
@@ -260,6 +262,30 @@ const workspaceCallbacks = (): WorkspaceMutationCallbacks => ({
   chooseCascadeAsset: vi.fn(async () => true),
 });
 
+const beatPanelActions = (): BeatPanelActions => ({
+  saveBeat: vi.fn(async () => true),
+  saveShot: vi.fn(async () => true),
+  setHardCut: vi.fn(async () => true),
+  setSeedStill: vi.fn(async () => true),
+  trimShot: vi.fn(async () => true),
+  reorderShots: vi.fn(async () => true),
+  redetachLine: vi.fn(async () => true),
+  restoreLine: vi.fn(async () => true),
+  importSeedStill: vi.fn(async () => 'cancelled'),
+  selectTake: vi.fn(async () => true),
+  parkTake: vi.fn(async () => true),
+  addAlternateTake: vi.fn(async () => true),
+  restoreTake: vi.fn(async () => true),
+  parkShot: vi.fn(async () => true),
+  parkBeat: vi.fn(async () => true),
+  reviewShot: vi.fn(),
+  chooseCascadeAsset: vi.fn(async () => true),
+  retryConditioning: vi.fn(async () => true),
+  cancelWaiting: vi.fn(async () => true),
+  requestReviewedRederive: vi.fn(),
+  requestResplit: vi.fn(),
+});
+
 const readyWorkspaceStatus = (revision = 3): StudioRendererWorkspaceStatusV2 => ({
   projectId: 'project_1',
   projectRevision: revision,
@@ -281,55 +307,64 @@ const readyProjection = (project: StudioRendererProjectV2) =>
 const ControlsHarness: React.FC<{
   routes: StudioRouteCatalogV2 | null;
   open: ReturnType<typeof vi.fn>;
-  seeded?: boolean;
+  project?: StudioRendererProjectV2;
   spendPolicy?: boolean;
   status?: StudioRendererWorkspaceStatusV2 | null;
   chain?: StudioRendererChainStatusV2 | null;
   pending?: boolean;
   gateLocked?: boolean;
   mutations?: WorkspaceMutationCallbacks;
-  configureProject?: (project: StudioRendererProjectV2) => void;
 }> = ({
   routes,
-  open,
-  seeded = false,
+  open: _open,
+  project: projectOverride,
   spendPolicy = false,
   status,
   chain,
   pending = false,
   gateLocked = false,
   mutations = workspaceCallbacks(),
-  configureProject,
 }) => {
-  const project = makeProject();
-  if (seeded) {
-    const seed = makeAsset('seed_1', 'shot_1', 'image', 'imports');
-    project.assets[seed.id] = seed;
-    project.shots.shot_1!.assetIds.push(seed.id);
-  }
+  const project = projectOverride === undefined ? makeProject() : { ...projectOverride };
   if (spendPolicy) project.spendPolicy = { currency: 'USD', maxPerBatchMinorUnits: 1_000 };
-  configureProject?.(project);
   const projection = projectWorkspace(
     project,
     status === undefined ? readyWorkspaceStatus(project.revision) : status,
     chain === undefined ? readyChainStatus(project.revision) : chain
   );
+  const canonicalValues: Record<string, WorkspaceDraftValue> = {
+    'settings.name': project.name,
+    'settings.targetDurationSeconds': project.targetDurationSeconds,
+    'settings.aspectRatio': project.aspectRatio,
+    'settings.resolution': project.resolution,
+    'brief.text': project.brief,
+    'brief.imageRouteId': project.imageRouteId ?? '',
+    'brief.videoRouteId': project.videoRouteId ?? '',
+    'brief.spendCurrency': project.spendPolicy?.currency ?? '',
+    'brief.spendMajorUnits': project.spendPolicy === null ? '' : '10.00',
+    'brief.rules': '[]',
+    'gate.choices': '{}',
+  };
+  for (const beatId of project.beatOrder) {
+    const beat = project.beats[beatId];
+    if (beat === undefined) continue;
+    canonicalValues[`beat.${beatId}.action`] = beat.action;
+    canonicalValues[`beat.${beatId}.look`] = beat.look;
+    canonicalValues[`beat.${beatId}.targetSeconds`] = beat.targetSeconds;
+    for (const shotId of beat.shotOrder) {
+      const shot = project.shots[shotId];
+      if (shot === undefined) continue;
+      canonicalValues[`shot.${shotId}.line`] = shot.line;
+      canonicalValues[`shot.${shotId}.narration`] = shot.narration;
+      canonicalValues[`shot.${shotId}.onScreenText`] = shot.onScreenText;
+      canonicalValues[`shot.${shotId}.durationSeconds`] = shot.durationSeconds;
+    }
+  }
   const drafts = useWorkspaceDrafts({
     projectId: project.id,
     projectRevision: project.revision,
-    canonicalValues: {
-      'settings.name': project.name,
-      'settings.targetDurationSeconds': project.targetDurationSeconds,
-      'settings.aspectRatio': project.aspectRatio,
-      'settings.resolution': project.resolution,
-      'brief.text': project.brief,
-      'brief.imageRouteId': project.imageRouteId ?? '',
-      'brief.videoRouteId': project.videoRouteId ?? '',
-      'brief.spendCurrency': project.spendPolicy?.currency ?? '',
-      'brief.spendMajorUnits': project.spendPolicy === null ? '' : '10.00',
-      'brief.rules': '[]',
-      'gate.choices': '{}',
-    },
+    canonicalValues,
+    activeBeatIds: projection.activeBeatIds,
     activeShotIds: projection.activeShotIds,
   });
   return (
@@ -343,7 +378,10 @@ const ControlsHarness: React.FC<{
       gateLocked={gateLocked}
       errorMessageKey={null}
       mutations={mutations}
-      openSpendGate={open}
+      beatPanelActions={beatPanelActions()}
+      beatPanelBriefReferenceOptions={[]}
+      beatPanelReviewGraphs={[]}
+      beatPanelReviewBlockedMessageKey={null}
     />
   );
 };
@@ -362,19 +400,6 @@ const lockedWorkspaceStatus = (): StudioRendererWorkspaceStatusV2 => ({
     },
   ],
 });
-
-const seedControlDrafts = (entries: Record<string, { baseValue: unknown; value: unknown }>): void => {
-  window.sessionStorage.setItem(
-    'aionui:creative-studio:v2:workspace-drafts:project_1',
-    JSON.stringify({
-      version: 2,
-      projectId: 'project_1',
-      sourceRevision: 3,
-      entries,
-      selection: { selectedBeatId: null, selectedShotIds: [], anchorShotId: null },
-    })
-  );
-};
 
 describe('spend gate draft graph', () => {
   it('fails closed until both revision-matched status snapshots are ready', () => {
@@ -523,110 +548,27 @@ describe('WorkspaceControls', () => {
     );
   });
 
-  it('keeps the exact full cascade when only an optional video route is unavailable', () => {
-    const open = vi.fn();
-    render(<ControlsHarness routes={routeCatalog('ready', 'unavailable')} open={open} />);
-    fireEvent.click(screen.getByLabelText('shot_1'));
-    fireEvent.click(
-      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.reviewRender' })
+  it('does not reopen a dismissed panel when a lifted Beat returns to the active film', async () => {
+    const initial = makeProject();
+    const lifted = makeProject();
+    lifted.revision = 4;
+    lifted.beatOrder = ['beat_2'];
+    const restored = makeProject();
+    restored.revision = 5;
+
+    const { rerender } = render(
+      <ControlsHarness routes={routeCatalog('ready', 'ready')} open={vi.fn()} project={initial} />
     );
-    expect(open).toHaveBeenCalledWith(
-      expect.objectContaining({
-        baseChoices: [expect.objectContaining({ purpose: 'seed_still' })],
-        cascadeChoices: [
-          expect.objectContaining({ shotId: 'shot_1', purpose: 'video_take' }),
-          expect.objectContaining({ shotId: 'shot_2', purpose: 'video_take' }),
-        ],
-      })
-    );
-  });
+    const table = screen.getByRole('grid', { name: 'conversation.creativeStudio.workspace.table.label' });
+    fireEvent.click(within(within(table).getAllByRole('row')[1]!).getAllByRole('gridcell')[1]!);
+    expect(screen.getByRole('dialog')).toBeVisible();
 
-  it('blocks only the missing route required by the base purpose', () => {
-    const missingImage = render(<ControlsHarness routes={routeCatalog('unavailable', 'ready')} open={vi.fn()} />);
-    fireEvent.click(screen.getByLabelText('shot_1'));
-    fireEvent.click(
-      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.reviewRender' })
-    );
-    expect(screen.getByText('conversation.creativeStudio.workspace.controls.imageRouteBlocked')).toBeVisible();
-    missingImage.unmount();
-    window.sessionStorage.clear();
+    rerender(<ControlsHarness routes={routeCatalog('ready', 'ready')} open={vi.fn()} project={lifted} />);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 
-    render(<ControlsHarness routes={routeCatalog('ready', 'unavailable')} open={vi.fn()} seeded />);
-    fireEvent.click(screen.getByLabelText('shot_1'));
-    fireEvent.click(
-      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.reviewRender' })
-    );
-    expect(screen.getByText('conversation.creativeStudio.workspace.controls.videoRouteBlocked')).toBeVisible();
-  });
-
-  it('keeps name and target drafts eligible for review but blocks generation-affecting drafts', () => {
-    const open = vi.fn();
-    const first = render(<ControlsHarness routes={routeCatalog('ready', 'ready')} open={open} />);
-    fireEvent.change(screen.getByLabelText('conversation.creativeStudio.workspace.controls.name'), {
-      target: { value: 'Renamed without generation' },
-    });
-    fireEvent.change(screen.getByLabelText('conversation.creativeStudio.workspace.controls.targetDuration'), {
-      target: { value: '18' },
-    });
-    fireEvent.click(screen.getByLabelText('shot_1'));
-    const review = screen.getByRole('button', {
-      name: 'conversation.creativeStudio.workspace.controls.reviewRender',
-    });
-    expect(review).toBeEnabled();
-    fireEvent.click(review);
-    expect(open).toHaveBeenCalledTimes(1);
-
-    first.unmount();
-    window.sessionStorage.clear();
-    render(<ControlsHarness routes={routeCatalog('ready', 'ready')} open={vi.fn()} />);
-    fireEvent.change(screen.getByLabelText('conversation.creativeStudio.workspace.controls.brief'), {
-      target: { value: 'Unsaved generative intent' },
-    });
-    fireEvent.click(screen.getByLabelText('shot_1'));
-    expect(
-      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.reviewRender' })
-    ).toBeDisabled();
-    expect(screen.getByText('conversation.creativeStudio.workspace.controls.saveBeforeReview')).toBeVisible();
-  });
-
-  it('freezes paid review and choice controls while confirmation authority is live', () => {
-    render(<ControlsHarness routes={routeCatalog('ready', 'ready')} open={vi.fn()} gateLocked />);
-    fireEvent.click(screen.getByLabelText('shot_1'));
-
-    expect(
-      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.reviewRender' })
-    ).toBeDisabled();
-    for (const select of within(screen.getByTestId('studio-generation-choices')).getAllByRole('combobox')) {
-      expect(select).toHaveAttribute('aria-disabled', 'true');
-    }
-  });
-
-  it('blocks review when either revision-matched status snapshot is absent or stale', () => {
-    const first = render(<ControlsHarness routes={routeCatalog('ready', 'ready')} open={vi.fn()} status={null} />);
-    fireEvent.click(screen.getByLabelText('shot_1'));
-    expect(
-      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.reviewRender' })
-    ).toBeDisabled();
-    expect(screen.getByText('conversation.creativeStudio.workspace.controls.statusRequired')).toBeVisible();
-
-    first.unmount();
-    window.sessionStorage.clear();
-    render(<ControlsHarness routes={routeCatalog('ready', 'ready')} open={vi.fn()} chain={readyChainStatus(2)} />);
-    fireEvent.click(screen.getByLabelText('shot_1'));
-    expect(
-      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.reviewRender' })
-    ).toBeDisabled();
-    expect(screen.getByText('conversation.creativeStudio.workspace.controls.statusRequired')).toBeVisible();
-  });
-
-  it('uses the native checkbox event for contiguous shift-range selection', () => {
-    render(<ControlsHarness routes={routeCatalog('ready', 'ready')} open={vi.fn()} />);
-    fireEvent.click(screen.getByLabelText('shot_1'));
-    fireEvent.click(screen.getByLabelText('shot_3'), { shiftKey: true });
-
-    expect(screen.getByLabelText('shot_1')).toBeChecked();
-    expect(screen.getByLabelText('shot_2')).toBeChecked();
-    expect(screen.getByLabelText('shot_3')).toBeChecked();
+    rerender(<ControlsHarness routes={routeCatalog('ready', 'ready')} open={vi.fn()} project={restored} />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(within(screen.getByRole('grid')).getAllByRole('row')[1]).toHaveAttribute('aria-selected', 'false');
   });
 
   it('saves unlocked settings while preserving a pre-lock request-shape draft', async () => {
@@ -666,11 +608,11 @@ describe('WorkspaceControls', () => {
     });
   });
 
-  it('translates stable undo and dirty-cause codes instead of rendering raw identifiers', () => {
+  it('translates the stable undo code instead of rendering its raw identifier', () => {
     const status: StudioRendererWorkspaceStatusV2 = {
       ...lockedWorkspaceStatus(),
       undoTop: { entryId: 'undo_1', label: 'edit_shot', sourceRevision: 2 },
-      dirtyShots: [{ shotId: 'shot_1', causes: ['continuity_stale'] }],
+      dirtyShots: [],
       parkEligibility: [],
     };
     const { container } = render(
@@ -678,9 +620,36 @@ describe('WorkspaceControls', () => {
     );
 
     expect(container).toHaveTextContent('edit shot');
-    expect(container).toHaveTextContent('continuity changed');
     expect(container).not.toHaveTextContent('edit_shot');
-    expect(container).not.toHaveTextContent('continuity_stale');
+  });
+
+  it('keeps structural undo disabled while an authored Shot draft is unsaved', () => {
+    window.sessionStorage.setItem(
+      'aionui:creative-studio:v2:workspace-drafts:project_1',
+      JSON.stringify({
+        version: 2,
+        projectId: 'project_1',
+        sourceRevision: 3,
+        entries: {
+          'shot.shot_1.line': { baseValue: 'shot_1', value: 'Unsaved replacement' },
+        },
+        selection: { selectedBeatId: null, selectedShotIds: [], anchorShotId: null },
+      })
+    );
+    const mutations = workspaceCallbacks();
+    const status: StudioRendererWorkspaceStatusV2 = {
+      ...readyWorkspaceStatus(),
+      undoTop: { entryId: 'undo_1', label: 'edit_shot', sourceRevision: 2 },
+    };
+    render(
+      <ControlsHarness routes={routeCatalog('ready', 'ready')} open={vi.fn()} status={status} mutations={mutations} />
+    );
+
+    const undo = screen.getByRole('button', { name: /conversation\.creativeStudio\.workspace\.controls\.undo/ });
+    expect(undo).toBeDisabled();
+    fireEvent.click(undo);
+    expect(mutations.undo).not.toHaveBeenCalled();
+    expect(screen.getByText('conversation.creativeStudio.workspace.beatPanel.blocker.unsavedDrafts')).toBeVisible();
   });
 
   it('clears normalized no-op setting and spend drafts without issuing a commit', async () => {
@@ -707,6 +676,15 @@ describe('WorkspaceControls', () => {
       expect(screen.getByLabelText('conversation.creativeStudio.workspace.controls.spendCap')).toHaveValue('10.00')
     );
     expect(mutations.applyAuthoring).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('conversation.creativeStudio.workspace.controls.rules'), {
+      target: { value: '  [  ]  ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.saveRules' }));
+    await waitFor(() =>
+      expect(screen.getByLabelText('conversation.creativeStudio.workspace.controls.rules')).toHaveValue('[]')
+    );
+    expect(mutations.setRules).not.toHaveBeenCalled();
   });
 
   it('rejects malformed rule documents and commits the exact supported predicate surface', async () => {
@@ -782,106 +760,6 @@ describe('WorkspaceControls', () => {
       ])
     );
     expect(screen.queryByText('conversation.creativeStudio.workspace.controls.invalidSpendPolicy')).toBeNull();
-  });
-
-  it('uses only valid persisted generation preferences when preparing the reviewed draft', () => {
-    seedControlDrafts({
-      'gate.choices': {
-        baseValue: '{}',
-        value: JSON.stringify({
-          bad: { generationCount: 2, referenceAssetId: null },
-          'shot_1:seed_still': { generationCount: 4, referenceAssetId: 'brief_ref' },
-          'shot_1:video_take': { generationCount: 0, referenceAssetId: null },
-          'shot_2:video_take': null,
-          'shot_3:video_take': { generationCount: 1, referenceAssetId: 42 },
-        }),
-      },
-    });
-    const open = vi.fn();
-    render(<ControlsHarness routes={routeCatalog('ready', 'ready')} open={open} />);
-    fireEvent.click(screen.getByLabelText('shot_1'));
-    fireEvent.click(
-      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.reviewRender' })
-    );
-
-    expect(open).toHaveBeenCalledWith(
-      expect.objectContaining({
-        baseChoices: [expect.objectContaining({ shotId: 'shot_1', generationCount: 4, referenceAssetId: 'brief_ref' })],
-        cascadeChoices: [
-          expect.objectContaining({ shotId: 'shot_1', generationCount: 1, referenceAssetId: null }),
-          expect.objectContaining({ shotId: 'shot_2', generationCount: 1, referenceAssetId: null }),
-        ],
-      })
-    );
-  });
-
-  it('renders and invokes every free recovery action projected by workspace status', () => {
-    const mutations = workspaceCallbacks();
-    const status: StudioRendererWorkspaceStatusV2 = {
-      ...readyWorkspaceStatus(),
-      undoTop: { entryId: 'undo_1', label: 'edit_shot', sourceRevision: 2 },
-      dirtyShots: [{ shotId: 'shot_1', causes: ['continuity_stale'] }],
-      cascadeProgress: [
-        {
-          dependentShotId: 'shot_2',
-          upstreamShotId: 'shot_1',
-          eligiblePrimaryAssetIds: ['asset_choice'],
-          canRetryConditioningFrame: true,
-          canCancelWaiting: true,
-          waitingReason: 'choose_take',
-        },
-      ],
-    };
-    const chain: StudioRendererChainStatusV2 = {
-      ...readyChainStatus(),
-      conditioningFailures: [{ dependentShotId: 'shot_3', reason: 'conditioning_failed', canRetry: true }],
-    };
-    render(
-      <ControlsHarness
-        routes={routeCatalog('ready', 'ready')}
-        open={vi.fn()}
-        status={status}
-        chain={chain}
-        mutations={mutations}
-      />
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: /conversation\.creativeStudio\.workspace\.controls\.undo/ }));
-    fireEvent.click(screen.getByRole('button', { name: /asset_choice/ }));
-    fireEvent.click(
-      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.retryConditioning' })
-    );
-    fireEvent.click(
-      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.cancelWaiting' })
-    );
-    fireEvent.click(screen.getByRole('button', { name: /retryConditioningFor/ }));
-
-    expect(mutations.undo).toHaveBeenCalledWith('undo_1');
-    expect(mutations.chooseCascadeAsset).toHaveBeenCalledWith(
-      expect.objectContaining({ dependentShotId: 'shot_2' }),
-      'asset_choice'
-    );
-    expect(mutations.retryConditioning).toHaveBeenCalledWith('shot_2');
-    expect(mutations.retryConditioning).toHaveBeenCalledWith('shot_3');
-    expect(mutations.cancelWaiting).toHaveBeenCalledWith('shot_2');
-  });
-
-  it('keeps an uncovered beat explicitly visible and requires a route catalog before review', () => {
-    render(
-      <ControlsHarness
-        routes={null}
-        open={vi.fn()}
-        configureProject={(candidate) => {
-          candidate.beats.beat_2!.shotOrder = [];
-        }}
-      />
-    );
-
-    expect(screen.getByText('conversation.creativeStudio.workspace.controls.noCoverage')).toBeVisible();
-    expect(screen.getByText('conversation.creativeStudio.workspace.controls.routeCatalogRequired')).toBeVisible();
-    fireEvent.click(
-      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.keepUncoveredFree' })
-    );
   });
 });
 

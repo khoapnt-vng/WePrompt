@@ -871,6 +871,136 @@ describe('applyStudioMutationBatchV2 coverage and fixed shots', () => {
     }).toEqual(retained);
   });
 
+  it('keeps same-Beat paid coverage intact through park, re-split, and changed-anchor restore', () => {
+    const project = makeProject();
+    project.beats.beat_1!.shotOrder.push('shot_3', 'shot_4');
+    project.shots.shot_3 = makeShot('shot_3');
+    project.shots.shot_4 = makeShot('shot_4');
+    completeBoundDependent(project);
+    project.shots.shot_1!.seedStillId = null;
+
+    const { frameAssetId: secondFrameAssetId } = addFrameExtraction(project, 'shot_2', 'ready');
+    addSucceededVideoTake(project, 'shot_3', 'third_take', true);
+    project.shots.shot_3!.seedStillId = null;
+    const thirdAuthorization = project.spendAuthorizations.find((entry) => entry.id === 'auth_third_take')!;
+    const thirdJob = project.jobs.job_third_take!;
+    const thirdRequestPlan = resolvedPlan({
+      kind: 'predecessor_frame',
+      predecessorShotId: 'shot_2',
+      takeAssetId: 'dependent_take',
+      frameAssetId: secondFrameAssetId!,
+      endpointSeconds: 10,
+    });
+    if (thirdRequestPlan.kind !== 'resolved') throw new Error('Expected one resolved third-shot request');
+    thirdAuthorization.baseItems[0]!.requestPlan = thirdRequestPlan;
+    thirdJob.requestPlan = thirdRequestPlan;
+    thirdJob.requestSnapshot = thirdRequestPlan.snapshot;
+
+    expect(validateStudioProjectV2(project)).toBe(true);
+    expect(deriveStudioDirtyShotsV2(project)).toEqual([
+      { shotId: 'shot_1', causes: ['generation_out_of_date'] },
+      { shotId: 'shot_2', causes: ['generation_out_of_date'] },
+      { shotId: 'shot_3', causes: ['generation_out_of_date'] },
+    ]);
+    const retainedShot = structuredClone(project.shots.shot_1);
+    const paidAuthority = structuredClone({
+      assets: project.assets,
+      jobs: project.jobs,
+      authorizations: project.spendAuthorizations,
+      frames: project.frameExtractions,
+    });
+
+    const parked = persist(
+      apply(project, [{ kind: 'park_shot', shotId: 'shot_1' }], 'mutation_lifecycle_park').project
+    );
+    expect(parked.beats.beat_1!.shotOrder).toEqual(['shot_2', 'shot_3', 'shot_4']);
+    expect(parked.bin).toEqual([{ kind: 'shot', beatId: 'beat_1', shotId: 'shot_1', reason: 'lifted' }]);
+    expect(parked.shots.shot_1).toEqual(retainedShot);
+
+    const resplitMutation = apply(
+      parked,
+      [
+        {
+          kind: 'apply_coverage',
+          beatId: 'beat_1',
+          shots: [
+            proposed(parked.shots.shot_2!),
+            proposed(parked.shots.shot_3!),
+            {
+              shotId: 'shot_replacement',
+              line: 'Replacement free interval',
+              narration: '',
+              onScreenText: '',
+              durationSeconds: 5,
+              chainBreak: 'none',
+            },
+          ],
+          fixedShots: [
+            {
+              shotId: 'shot_2',
+              reasons: ['owned_asset', 'owned_job', 'selected_take', 'conditioning_frame', 'conditioning_input'],
+            },
+            {
+              shotId: 'shot_3',
+              reasons: ['owned_asset', 'owned_job', 'selected_take'],
+            },
+          ],
+        },
+      ],
+      'mutation_lifecycle_resplit'
+    );
+    expect(resplitMutation.coverageResults).toEqual([
+      {
+        beatId: 'beat_1',
+        createdShotIds: ['shot_replacement'],
+        retainedShotIds: ['shot_2', 'shot_3'],
+        removedShotIds: ['shot_4'],
+        fixedShotIds: ['shot_2', 'shot_3'],
+      },
+    ]);
+    const resplit = persist(resplitMutation.project);
+    expect(resplit.beats.beat_1!.shotOrder).toEqual(['shot_2', 'shot_3', 'shot_replacement']);
+    expect(resplit.bin).toEqual([{ kind: 'shot', beatId: 'beat_1', shotId: 'shot_1', reason: 'lifted' }]);
+    expect(resplit.shots.shot_1).toEqual(retainedShot);
+    expect({
+      assets: resplit.assets,
+      jobs: resplit.jobs,
+      authorizations: resplit.spendAuthorizations,
+      frames: resplit.frameExtractions,
+    }).toEqual(paidAuthority);
+    expect(deriveStudioDirtyShotsV2(resplit)).toEqual([
+      { shotId: 'shot_2', causes: ['continuity_stale', 'generation_out_of_date'] },
+      { shotId: 'shot_3', causes: ['generation_out_of_date'] },
+    ]);
+
+    const restored = apply(
+      resplit,
+      [{ kind: 'restore_shot', shotId: 'shot_1', beforeShotId: 'shot_3' }],
+      'mutation_lifecycle_restore_changed_anchor'
+    ).project;
+    expect(restored.beats.beat_1!.shotOrder).toEqual(['shot_2', 'shot_1', 'shot_3', 'shot_replacement']);
+    expect(restored.bin).toEqual([]);
+    expect(restored.shots.shot_1).toEqual(retainedShot);
+    expect({
+      assets: restored.assets,
+      jobs: restored.jobs,
+      authorizations: restored.spendAuthorizations,
+      frames: restored.frameExtractions,
+    }).toEqual(paidAuthority);
+    expect(restored.jobs.job_third_take!.requestSnapshot?.conditioningInput).toEqual({
+      kind: 'predecessor_frame',
+      predecessorShotId: 'shot_2',
+      takeAssetId: 'dependent_take',
+      frameAssetId: secondFrameAssetId,
+      endpointSeconds: 10,
+    });
+    expect(deriveStudioDirtyShotsV2(restored)).toEqual([
+      { shotId: 'shot_2', causes: ['continuity_stale', 'generation_out_of_date'] },
+      { shotId: 'shot_1', causes: ['continuity_stale', 'generation_out_of_date'] },
+      { shotId: 'shot_3', causes: ['continuity_stale', 'generation_out_of_date'] },
+    ]);
+  });
+
   it('refuses missing, extra, reason-reordered, and row-reordered fixed proofs before mutation', () => {
     const oneFixed = makeProject();
     oneFixed.shots.shot_1!.narration = 'Fixed narration';

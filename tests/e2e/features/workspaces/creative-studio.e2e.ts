@@ -13,6 +13,7 @@ import type {
   StudioConfirmSubmissionResultV2,
   StudioProjectLoadResultV2,
   StudioProjectListResultV2,
+  StudioProjectV2,
   StudioRendererPreparedSubmissionOptionsV2,
   StudioRendererProjectCommitResultV2,
   StudioRendererProjectV2,
@@ -81,7 +82,6 @@ type StudioBridgeMethod =
   | 'get-project'
   | 'list-projects'
   | 'list-routes'
-  | 'park-shot'
   | 'prepare-submission'
   | 'restore-shot'
   | 'select-take';
@@ -144,6 +144,27 @@ const readStudioProject = async (page: Page, projectId: string): Promise<StudioR
   const loaded = await invokeStudioBridge<StudioProjectLoadResultV2>(page, 'get-project', { projectId });
   if (loaded.status !== 'supported') throw new Error(`Creative Studio project ${projectId} was not supported`);
   return loaded.project;
+};
+
+const readRawStudioProject = async (userDataDirectory: string, projectId: string): Promise<StudioProjectV2> => {
+  const file = path.join(studioStorageDirectory(userDataDirectory), projectId, 'project.json');
+  const stats = await lstat(file);
+  if (!stats.isFile() || stats.isSymbolicLink()) {
+    throw new Error(`Creative Studio raw project ${projectId} was unavailable`);
+  }
+  const parsed: unknown = JSON.parse(await readFile(file, 'utf8'));
+  if (
+    typeof parsed !== 'object' ||
+    parsed === null ||
+    Array.isArray(parsed) ||
+    (parsed as Record<string, unknown>).schemaVersion !== 2 ||
+    (parsed as Record<string, unknown>).id !== projectId ||
+    typeof (parsed as Record<string, unknown>).frameExtractions !== 'object' ||
+    (parsed as Record<string, unknown>).frameExtractions === null
+  ) {
+    throw new Error(`Creative Studio raw project ${projectId} was malformed`);
+  }
+  return parsed as StudioProjectV2;
 };
 
 test.describe('Creative Studio workspace', () => {
@@ -260,6 +281,11 @@ test.describe('Creative Studio workspace', () => {
     await expect(lastCell).toBeFocused();
     await page.keyboard.press('Enter');
     await expect(rows.nth(24)).toHaveAttribute('aria-selected', 'true');
+    const beatPanel = page.getByRole('dialog', { name: 'Beat panel — Table beat 24' });
+    await expect(beatPanel).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(beatPanel).toBeHidden();
+    await expect(rows.nth(24)).toHaveAttribute('aria-selected', 'true');
 
     await expect(rows.nth(1)).toContainText('Duration pending');
     await expect(rows.nth(1)).not.toContainText(/\b0s\b/);
@@ -288,7 +314,141 @@ test.describe('Creative Studio workspace', () => {
     }
   });
 
-  test('lifts and restores a rendered terminal Shot without another provider call', async ({ electronApp, page }) => {
+  test('edits a selected Beat and moves a coverage boundary without crossing the paid boundary', async ({
+    electronApp,
+    page,
+  }) => {
+    test.skip(
+      process.env.AIONUI_E2E_STUDIO_FAKE !== '1',
+      'The provider-call oracle requires the explicit development-only Studio fake adapter.'
+    );
+
+    const projectBrief = `A keyboard coverage edit ${Date.now()}.`;
+    await navigateTo(page, ROUTES.studio);
+    const workspace = page.locator(workspaceSelector);
+    await workspace.getByLabel('What do you want to make?').fill(projectBrief);
+    await workspace.getByRole('button', { name: 'Create project' }).click();
+    await expect(page).toHaveURL(/#\/studio\/[^/]+\/table$/);
+
+    const projectId = projectIdFromStudioUrl(page);
+    const beatId = `beat_panel_e2e_${Date.now()}`;
+    const firstShotId = `shot_panel_a_${Date.now()}`;
+    const secondShotId = `shot_panel_b_${Date.now()}`;
+    const initial = await readStudioProject(page, projectId);
+    const authored = await invokeStudioBridge<StudioRendererProjectCommitResultV2>(page, 'apply-authoring-batch', {
+      projectId,
+      expectedRevision: initial.revision,
+      operations: [
+        {
+          kind: 'add_beat',
+          beatId,
+          beat: {
+            title: 'Panel keyboard Beat',
+            action: 'The plane crosses the workbench.',
+            look: 'Soft studio light.',
+            targetSeconds: 12,
+          },
+          beforeBeatId: null,
+        },
+        {
+          kind: 'add_shot',
+          beatId,
+          shotId: firstShotId,
+          shot: { line: 'The plane enters.', narration: '', onScreenText: '', durationSeconds: 6 },
+          beforeShotId: null,
+        },
+        {
+          kind: 'add_shot',
+          beatId,
+          shotId: secondShotId,
+          shot: { line: 'The plane settles.', narration: '', onScreenText: '', durationSeconds: 6 },
+          beforeShotId: null,
+        },
+      ],
+    });
+    expect(authored).toMatchObject({ createdBeatIds: [beatId], createdShotIds: [firstShotId, secondShotId] });
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    const row = page
+      .getByRole('grid', { name: 'Beat table' })
+      .getByRole('row')
+      .filter({ hasText: 'Panel keyboard Beat' });
+    const firstCell = row.getByRole('gridcell').first();
+    await firstCell.focus();
+    await firstCell.press('Enter');
+
+    const panel = page.getByRole('dialog', { name: 'Beat panel — Panel keyboard Beat' });
+    await expect(panel).toBeVisible();
+    const actionEditor = panel.getByRole('textbox', { name: 'Action', exact: true });
+    const lookEditor = panel.getByRole('textbox', { name: 'Look', exact: true });
+    const targetEditor = panel.getByRole('spinbutton', { name: 'Beat target (seconds)', exact: true });
+    await expect(actionEditor).toHaveValue('The plane crosses the workbench.');
+    await expect(lookEditor).toHaveValue('Soft studio light.');
+    await expect(targetEditor).toHaveValue('12');
+    await expect(panel.locator('article[data-shot-id]')).toHaveCount(2);
+
+    const userDataDirectory = await electronApp.evaluate(({ app }) => app.getPath('userData'));
+    const providerCallsBefore = await readStudioE2EProviderCallCounts(userDataDirectory);
+    const beforeReset = await readStudioProject(page, projectId);
+    await actionEditor.fill('This local reset value must never persist.');
+    await panel.getByRole('button', { name: 'Reset Beat' }).click();
+    await expect(actionEditor).toHaveValue('The plane crosses the workbench.');
+    expect(await readStudioProject(page, projectId)).toEqual(beforeReset);
+    expect(await readStudioE2EProviderCallCounts(userDataDirectory)).toEqual(providerCallsBefore);
+
+    const longLook =
+      'soft silver morning light drifts across paper wings while shallow focus keeps the desk calm warm tactile quiet precise hopeful airy restrained cinematic natural gentle luminous';
+    await lookEditor.fill(longLook);
+    await expect(panel.locator('[data-look-warning="true"]')).toContainText('26 words');
+    await panel.getByRole('button', { name: 'Save Beat' }).click();
+    await expect.poll(async () => (await readStudioProject(page, projectId)).beats[beatId]?.look).toBe(longLook);
+
+    const afterLookSave = await readStudioProject(page, projectId);
+    expect(afterLookSave.revision).toBe(beforeReset.revision + 1);
+    expect(afterLookSave.beats[beatId]).toEqual({ ...beforeReset.beats[beatId], look: longLook });
+    expect(afterLookSave.assets).toEqual(beforeReset.assets);
+    expect(afterLookSave.jobs).toEqual(beforeReset.jobs);
+    expect(Object.hasOwn(afterLookSave, 'frameExtractions')).toBe(false);
+    expect(await readStudioE2EProviderCallCounts(userDataDirectory)).toEqual(providerCallsBefore);
+
+    const boundary = panel.getByRole('slider', { name: 'Boundary after Shot 1' });
+    await expect(boundary).toBeEnabled();
+    await expect(boundary).toHaveAttribute('aria-valuenow', '6');
+    await boundary.focus();
+    await boundary.press('ArrowRight');
+    await expect
+      .poll(async () => {
+        const project = await readStudioProject(page, projectId);
+        return [project.shots[firstShotId]?.durationSeconds, project.shots[secondShotId]?.durationSeconds];
+      })
+      .toEqual([7, 5]);
+
+    const afterBoundary = await readStudioProject(page, projectId);
+    expect(afterBoundary.revision).toBe(afterLookSave.revision + 1);
+    expect(afterBoundary.shots[firstShotId]).toEqual({ ...afterLookSave.shots[firstShotId], durationSeconds: 7 });
+    expect(afterBoundary.shots[secondShotId]).toEqual({ ...afterLookSave.shots[secondShotId], durationSeconds: 5 });
+    expect(
+      (afterBoundary.shots[firstShotId]?.durationSeconds ?? 0) +
+        (afterBoundary.shots[secondShotId]?.durationSeconds ?? 0)
+    ).toBe(12);
+    expect(afterBoundary.assets).toEqual(afterLookSave.assets);
+    expect(afterBoundary.jobs).toEqual(afterLookSave.jobs);
+    expect(await readStudioE2EProviderCallCounts(userDataDirectory)).toEqual(providerCallsBefore);
+
+    await panel.getByRole('button', { name: 'Ask Director to re-split' }).click();
+    await expect(panel).toBeHidden();
+    await expect(
+      page.getByText('Ask the Creative Director for a reviewed re-derive or re-split proposal.')
+    ).toBeVisible();
+    await expect(page.locator('[data-studio-director-toggle]')).toBeFocused();
+    expect(await readStudioProject(page, projectId)).toEqual(afterBoundary);
+    expect(await readStudioE2EProviderCallCounts(userDataDirectory)).toEqual(providerCallsBefore);
+  });
+
+  test('trims and rerenders a continuous chain before retaining it through lift and restore', async ({
+    electronApp,
+    page,
+  }) => {
     test.skip(
       process.env.AIONUI_E2E_STUDIO_FAKE !== '1',
       'The terminal Shot lifecycle requires the explicit development-only Studio fake adapter.'
@@ -326,7 +486,7 @@ test.describe('Creative Studio workspace', () => {
             title: 'Landing',
             action: 'The plane settles on the desk.',
             look: 'Soft morning light.',
-            targetSeconds: 4,
+            targetSeconds: 16,
           },
           beforeBeatId: null,
         },
@@ -334,17 +494,16 @@ test.describe('Creative Studio workspace', () => {
           kind: 'add_shot',
           beatId,
           shotId,
-          shot: { line: 'The plane lands.', narration: '', onScreenText: '', durationSeconds: 4 },
+          shot: { line: 'The plane lands.', narration: '', onScreenText: '', durationSeconds: 8 },
           beforeShotId: null,
         },
         {
           kind: 'add_shot',
           beatId,
           shotId: anchorShotId,
-          shot: { line: 'The desk remains in view.', narration: '', onScreenText: '', durationSeconds: 4 },
+          shot: { line: 'The desk remains in view.', narration: '', onScreenText: '', durationSeconds: 8 },
           beforeShotId: null,
         },
-        { kind: 'set_hard_cut', shotId: anchorShotId, hardCut: true },
       ],
     });
     expect(authored).toMatchObject({
@@ -358,9 +517,16 @@ test.describe('Creative Studio workspace', () => {
       expectedRevision: authored.projectRevision,
       originReferenceHandoffId: null,
       baseChoices: [{ shotId, purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
-      cascadeChoices: [{ shotId, purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+      cascadeChoices: [
+        { shotId, purpose: 'video_take', generationCount: 1, referenceAssetId: null },
+        { shotId: anchorShotId, purpose: 'video_take', generationCount: 1, referenceAssetId: null },
+      ],
     });
     expect(prepared.withCascade).not.toBeNull();
+    expect(prepared.withCascade?.cascadeItems.map(({ shotId: itemShotId, purpose }) => [itemShotId, purpose])).toEqual([
+      [shotId, 'video_take'],
+      [anchorShotId, 'video_take'],
+    ]);
     const confirmed = await invokeStudioBridge<StudioConfirmSubmissionResultV2>(page, 'confirm-submission', {
       projectId,
       quoteId: prepared.withCascade!.id,
@@ -375,15 +541,24 @@ test.describe('Creative Studio workspace', () => {
           const video = Object.values(project.jobs).find(
             (job) => job.shotId === shotId && job.purpose === 'video_take'
           );
+          const downstreamVideo = Object.values(project.jobs).find(
+            (job) => job.shotId === anchorShotId && job.purpose === 'video_take'
+          );
           return {
             seedStatus: seed?.status ?? null,
             seedAssetId: seed?.outputAssetIdsByRole.primary ?? null,
             videoStatus: video?.status ?? null,
+            downstreamVideoStatus: downstreamVideo?.status ?? null,
           };
         },
         { timeout: 30_000 }
       )
-      .toEqual({ seedStatus: 'succeeded', seedAssetId: expect.any(String), videoStatus: 'waiting_for_conditioning' });
+      .toEqual({
+        seedStatus: 'succeeded',
+        seedAssetId: expect.any(String),
+        videoStatus: 'waiting_for_conditioning',
+        downstreamVideoStatus: 'waiting_for_conditioning',
+      });
 
     const seededProject = await readStudioProject(page, projectId);
     const seedAssetId = Object.values(seededProject.jobs).find(
@@ -426,46 +601,312 @@ test.describe('Creative Studio workspace', () => {
       assetId: videoAssetId,
     });
 
+    await expect
+      .poll(
+        async () => {
+          const project = await readStudioProject(page, projectId);
+          const video = Object.values(project.jobs).find(
+            (job) => job.shotId === anchorShotId && job.purpose === 'video_take'
+          );
+          return {
+            status: video?.status ?? null,
+            assetId: video?.outputAssetIdsByRole.primary ?? null,
+            errorCode: video?.error?.code ?? null,
+          };
+        },
+        { timeout: 30_000 }
+      )
+      .toEqual({ status: 'succeeded', assetId: expect.any(String), errorCode: null });
+
+    const chainedProject = await readStudioProject(page, projectId);
+    const anchorVideoAssetId = Object.values(chainedProject.jobs).find(
+      (job) => job.shotId === anchorShotId && job.purpose === 'video_take'
+    )?.outputAssetIdsByRole.primary;
+    expect(anchorVideoAssetId).toBeTruthy();
+    const selectedAnchor = await invokeStudioBridge<StudioRendererProjectCommitResultV2>(page, 'select-take', {
+      projectId,
+      expectedRevision: chainedProject.revision,
+      shotId: anchorShotId,
+      assetId: anchorVideoAssetId,
+    });
+
     const terminal = await readStudioProject(page, projectId);
-    expect(terminal.revision).toBe(selected.projectRevision);
+    expect(selected.projectRevision).toBeGreaterThan(confirmed.projectRevision);
+    expect(terminal.revision).toBe(selectedAnchor.projectRevision);
     expect(terminal.revision).toBeGreaterThan(confirmed.projectRevision);
     expect(terminal.shots[shotId]?.selectedTakeId).toBe(videoAssetId);
-    const retainedShot = structuredClone(terminal.shots[shotId]);
-    const retainedAnchorShot = structuredClone(terminal.shots[anchorShotId]);
-    const retainedAssets = structuredClone(terminal.assets);
-    const retainedJobs = structuredClone(terminal.jobs);
+    expect(terminal.shots[anchorShotId]?.selectedTakeId).toBe(anchorVideoAssetId);
+    expect(terminal.assets[videoAssetId!]?.durationSeconds).toBe(10);
+    expect(terminal.assets[anchorVideoAssetId!]?.durationSeconds).toBe(10);
     const userDataDirectory = await electronApp.evaluate(({ app }) => app.getPath('userData'));
+    const initialRaw = await readRawStudioProject(userDataDirectory, projectId);
+    const initialExtraction = Object.values(initialRaw.frameExtractions).find(
+      (extraction) => extraction.takeAssetId === videoAssetId
+    );
+    expect(initialExtraction).toMatchObject({
+      shotId,
+      takeAssetId: videoAssetId,
+      endpointSeconds: 10,
+      status: 'ready',
+      frameAssetId: expect.any(String),
+    });
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    const renderedRow = page.getByRole('grid', { name: 'Beat table' }).getByRole('row').filter({ hasText: 'Landing' });
+    await renderedRow.getByRole('gridcell').first().click();
+    const panel = page.getByRole('dialog', { name: 'Beat panel — Landing' });
+    await expect(panel).toBeVisible();
+    await expect(page.locator(controlsSelector).locator('small').filter({ hasText: 'Ready' })).toHaveCount(2);
+    const playbackLane = panel.getByRole('group', { name: 'Playback coverage' });
+    const planningLane = panel.getByRole('group', { name: 'Planning overlay' });
+    await expect(playbackLane.locator(`[data-shot-id="${shotId}"]`)).toContainText('10s source');
+    await expect(planningLane.locator(`[data-shot-id="${shotId}"]`)).toContainText('8s plan');
+
+    const providerCallsBeforeTrim = await readStudioE2EProviderCallCounts(userDataDirectory);
+    const tailTrim = panel.getByRole('slider', { name: 'Trim out for Shot 1' });
+    await expect(tailTrim).toBeEnabled();
+    await expect(tailTrim).toHaveAttribute('aria-valuenow', '0');
+    await tailTrim.focus();
+    await tailTrim.press('ArrowRight');
+    await expect.poll(async () => (await readStudioProject(page, projectId)).shots[shotId]?.trimOutSeconds).toBe(0.5);
+    await expect(tailTrim).toBeEnabled();
+    await expect(tailTrim).toHaveAttribute('aria-valuenow', '0.5');
+    await tailTrim.press('ArrowRight');
+    await expect.poll(async () => (await readStudioProject(page, projectId)).shots[shotId]?.trimOutSeconds).toBe(1);
+    await expect(tailTrim).toBeEnabled();
+    await expect(tailTrim).toHaveAttribute('aria-valuenow', '1');
+    await tailTrim.press('ArrowRight');
+    await expect.poll(async () => (await readStudioProject(page, projectId)).shots[shotId]?.trimOutSeconds).toBe(1.5);
+    await expect(tailTrim).toBeEnabled();
+    await expect(tailTrim).toHaveAttribute('aria-valuenow', '1.5');
+    await tailTrim.press('ArrowRight');
+    await expect.poll(async () => (await readStudioProject(page, projectId)).shots[shotId]?.trimOutSeconds).toBe(2);
+    await expect(tailTrim).toHaveAttribute('aria-valuenow', '2');
+    await expect(panel.getByText('Tail trim breaks downstream continuity.')).toBeVisible();
+    await expect(panel.locator(`article[data-shot-id="${anchorShotId}"]`)).toContainText('Continuity is out of date');
+
+    const trimmed = await readStudioProject(page, projectId);
+    expect(trimmed.shots[shotId]).toEqual({ ...terminal.shots[shotId], trimOutSeconds: 2 });
+    expect(trimmed.shots[anchorShotId]).toEqual(terminal.shots[anchorShotId]);
+    expect(trimmed.assets).toEqual(terminal.assets);
+    expect(trimmed.jobs).toEqual(terminal.jobs);
+    expect(await readStudioE2EProviderCallCounts(userDataDirectory)).toEqual(providerCallsBeforeTrim);
+    expect((await readRawStudioProject(userDataDirectory, projectId)).frameExtractions).toEqual(
+      initialRaw.frameExtractions
+    );
+
+    const existingJobIds = new Set(Object.keys(trimmed.jobs));
+    const rerenderPrepared = await invokeStudioBridge<StudioRendererPreparedSubmissionOptionsV2>(
+      page,
+      'prepare-submission',
+      {
+        projectId,
+        expectedRevision: trimmed.revision,
+        originReferenceHandoffId: null,
+        baseChoices: [{ shotId, purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+        cascadeChoices: [{ shotId: anchorShotId, purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+      }
+    );
+    expect(rerenderPrepared.withCascade).not.toBeNull();
+    expect(
+      rerenderPrepared.withCascade?.baseItems.map(({ shotId: itemShotId, purpose }) => [itemShotId, purpose])
+    ).toEqual([[shotId, 'video_take']]);
+    expect(
+      rerenderPrepared.withCascade?.cascadeItems.map(({ shotId: itemShotId, purpose }) => [itemShotId, purpose])
+    ).toEqual([[anchorShotId, 'video_take']]);
+    await invokeStudioBridge<StudioConfirmSubmissionResultV2>(page, 'confirm-submission', {
+      projectId,
+      quoteId: rerenderPrepared.withCascade!.id,
+      expectedRevision: trimmed.revision,
+    });
+
+    await expect
+      .poll(
+        async () => {
+          const project = await readStudioProject(page, projectId);
+          const firstVideo = Object.values(project.jobs).find(
+            (job) => !existingJobIds.has(job.id) && job.shotId === shotId && job.purpose === 'video_take'
+          );
+          const downstreamVideo = Object.values(project.jobs).find(
+            (job) => !existingJobIds.has(job.id) && job.shotId === anchorShotId && job.purpose === 'video_take'
+          );
+          return {
+            firstStatus: firstVideo?.status ?? null,
+            firstAssetId: firstVideo?.outputAssetIdsByRole.primary ?? null,
+            downstreamStatus: downstreamVideo?.status ?? null,
+          };
+        },
+        { timeout: 30_000 }
+      )
+      .toEqual({
+        firstStatus: 'succeeded',
+        firstAssetId: expect.any(String),
+        downstreamStatus: 'waiting_for_conditioning',
+      });
+
+    const replacementReady = await readStudioProject(page, projectId);
+    const replacementFirstJob = Object.values(replacementReady.jobs).find(
+      (job) => !existingJobIds.has(job.id) && job.shotId === shotId && job.purpose === 'video_take'
+    );
+    const replacementVideoAssetId = replacementFirstJob?.outputAssetIdsByRole.primary;
+    expect(replacementVideoAssetId).toBeTruthy();
+    expect(replacementReady.assets[replacementVideoAssetId!]?.durationSeconds).toBe(10);
+    await invokeStudioBridge<StudioRendererProjectCommitResultV2>(page, 'select-take', {
+      projectId,
+      expectedRevision: replacementReady.revision,
+      shotId,
+      assetId: replacementVideoAssetId,
+    });
+
+    const replacementSelected = await readStudioProject(page, projectId);
+    expect(replacementSelected.shots[shotId]?.selectedTakeId).toBe(replacementVideoAssetId);
+    expect(replacementSelected.shots[shotId]?.trimOutSeconds).toBe(2);
+    await expect
+      .poll(async () => {
+        const raw = await readRawStudioProject(userDataDirectory, projectId);
+        return Object.values(raw.frameExtractions)
+          .filter((extraction) => extraction.takeAssetId === replacementVideoAssetId)
+          .map(({ shotId: extractionShotId, takeAssetId, endpointSeconds }) => ({
+            shotId: extractionShotId,
+            takeAssetId,
+            endpointSeconds,
+          }));
+      })
+      .toEqual([{ shotId, takeAssetId: replacementVideoAssetId, endpointSeconds: 8 }]);
+
+    await expect
+      .poll(
+        async () => {
+          const project = await readStudioProject(page, projectId);
+          const video = Object.values(project.jobs).find(
+            (job) => !existingJobIds.has(job.id) && job.shotId === anchorShotId && job.purpose === 'video_take'
+          );
+          return {
+            status: video?.status ?? null,
+            assetId: video?.outputAssetIdsByRole.primary ?? null,
+            errorCode: video?.error?.code ?? null,
+          };
+        },
+        { timeout: 30_000 }
+      )
+      .toEqual({ status: 'succeeded', assetId: expect.any(String), errorCode: null });
+
+    const replacementChain = await readStudioProject(page, projectId);
+    const replacementDownstreamJob = Object.values(replacementChain.jobs).find(
+      (job) => !existingJobIds.has(job.id) && job.shotId === anchorShotId && job.purpose === 'video_take'
+    );
+    const replacementDownstreamAssetId = replacementDownstreamJob?.outputAssetIdsByRole.primary;
+    expect(replacementDownstreamAssetId).toBeTruthy();
+    const selectedReplacementDownstream = await invokeStudioBridge<StudioRendererProjectCommitResultV2>(
+      page,
+      'select-take',
+      {
+        projectId,
+        expectedRevision: replacementChain.revision,
+        shotId: anchorShotId,
+        assetId: replacementDownstreamAssetId,
+      }
+    );
+
+    const shotCard = panel.locator(`[data-shot-id="${shotId}"]`);
+    const clearSeedPin = shotCard.getByRole('button', { name: 'Clear seed pin' });
+    await expect(clearSeedPin).toBeEnabled();
+    await clearSeedPin.click();
+    await expect.poll(async () => (await readStudioProject(page, projectId)).shots[shotId]?.seedStillId).toBeNull();
+
+    const terminalForLift = await readStudioProject(page, projectId);
+    expect(terminalForLift.revision).toBe(selectedReplacementDownstream.projectRevision + 1);
+    expect(terminalForLift.shots[shotId]?.selectedTakeId).toBe(replacementVideoAssetId);
+    expect(terminalForLift.shots[shotId]?.trimOutSeconds).toBe(2);
+    expect(terminalForLift.shots[anchorShotId]?.selectedTakeId).toBe(replacementDownstreamAssetId);
+    const terminalRaw = await readRawStudioProject(userDataDirectory, projectId);
+    const replacementExtraction = Object.values(terminalRaw.frameExtractions).find(
+      (extraction) => extraction.takeAssetId === replacementVideoAssetId
+    );
+    expect(replacementExtraction).toMatchObject({
+      shotId,
+      takeAssetId: replacementVideoAssetId,
+      endpointSeconds: 8,
+      status: 'ready',
+      frameAssetId: expect.any(String),
+    });
+    const frameAssetId = replacementExtraction!.frameAssetId!;
+    const rawFirstJob = terminalRaw.jobs[replacementFirstJob!.id];
+    const rawDownstreamJob = terminalRaw.jobs[replacementDownstreamJob!.id];
+    expect(rawFirstJob?.outputAssetIdsByRole.poster).toBeNull();
+    expect(frameAssetId).not.toBe(replacementVideoAssetId);
+    expect(terminalRaw.assets[frameAssetId]).toMatchObject({
+      projectId,
+      shotId,
+      mediaKind: 'image',
+      managedAsset: { collection: 'conditioningFrames' },
+    });
+    expect(rawDownstreamJob?.requestSnapshot?.conditioningInput).toEqual({
+      kind: 'predecessor_frame',
+      predecessorShotId: shotId,
+      takeAssetId: replacementVideoAssetId,
+      frameAssetId,
+      endpointSeconds: 8,
+    });
+
+    const retainedShot = structuredClone(terminalForLift.shots[shotId]);
+    const retainedAnchorShot = structuredClone(terminalForLift.shots[anchorShotId]);
+    const retainedAssets = structuredClone(terminalForLift.assets);
+    const retainedJobs = structuredClone(terminalForLift.jobs);
+    const retainedFrameExtractions = structuredClone(terminalRaw.frameExtractions);
     const providerCallsBeforeLift = await readStudioE2EProviderCallCounts(userDataDirectory);
 
-    const lifted = await invokeStudioBridge<StudioRendererProjectCommitResultV2>(page, 'park-shot', {
-      projectId,
-      expectedRevision: terminal.revision,
-      shotId,
-    });
+    const liftShot = shotCard.getByRole('button', { name: 'Lift Shot' });
+    await expect(liftShot).toBeEnabled();
+    await liftShot.click();
+    const confirmLift = page.locator('.arco-popconfirm .arco-btn-primary').filter({ hasText: 'Lift Shot' });
+    await expect(confirmLift).toBeVisible();
+    await confirmLift.click();
+    await expect
+      .poll(async () => (await readStudioProject(page, projectId)).beats[beatId]?.shotOrder)
+      .toEqual([anchorShotId]);
     const parked = await readStudioProject(page, projectId);
-    expect(parked.revision).toBe(lifted.projectRevision);
+    expect(parked.revision).toBe(terminalForLift.revision + 1);
     expect(parked.beats[beatId]?.shotOrder).toEqual([anchorShotId]);
     expect(parked.bin).toContainEqual({ kind: 'shot', beatId, shotId, reason: 'lifted' });
     expect(parked.shots[shotId]).toEqual(retainedShot);
     expect(parked.shots[anchorShotId]).toEqual(retainedAnchorShot);
     expect(parked.assets).toEqual(retainedAssets);
     expect(parked.jobs).toEqual(retainedJobs);
+    expect((await readRawStudioProject(userDataDirectory, projectId)).frameExtractions).toEqual(
+      retainedFrameExtractions
+    );
     expect(await readStudioE2EProviderCallCounts(userDataDirectory)).toEqual(providerCallsBeforeLift);
+
+    await panel.getByRole('button', { name: 'Close' }).click();
+    await expect(panel).toBeHidden();
 
     const restored = await invokeStudioBridge<StudioRendererProjectCommitResultV2>(page, 'restore-shot', {
       projectId,
       expectedRevision: parked.revision,
       shotId,
-      beforeShotId: anchorShotId,
+      beforeShotId: null,
     });
     const activeAgain = await readStudioProject(page, projectId);
     expect(activeAgain.revision).toBe(restored.projectRevision);
-    expect(activeAgain.beats[beatId]?.shotOrder).toEqual([shotId, anchorShotId]);
+    expect(activeAgain.beats[beatId]?.shotOrder).toEqual([anchorShotId, shotId]);
     expect(activeAgain.bin).not.toContainEqual({ kind: 'shot', beatId, shotId, reason: 'lifted' });
     expect(activeAgain.shots[shotId]).toEqual(retainedShot);
     expect(activeAgain.shots[anchorShotId]).toEqual(retainedAnchorShot);
     expect(activeAgain.assets).toEqual(retainedAssets);
     expect(activeAgain.jobs).toEqual(retainedJobs);
+    expect((await readRawStudioProject(userDataDirectory, projectId)).frameExtractions).toEqual(
+      retainedFrameExtractions
+    );
+    await expect(panel).toBeHidden();
+    await renderedRow.getByRole('gridcell').first().click();
+    await expect(panel).toBeVisible();
+    const restoredAnchorCard = panel.locator(`article[data-shot-id="${anchorShotId}"]`);
+    const restoredShotCard = panel.locator(`article[data-shot-id="${shotId}"]`);
+    await expect(restoredAnchorCard).toContainText('Segment head');
+    await expect(restoredAnchorCard).toContainText('Continuity is out of date');
+    await expect(restoredShotCard).toContainText('Continuous');
+    await expect(restoredShotCard).toContainText('Continuity is out of date');
     expect(await readStudioE2EProviderCallCounts(userDataDirectory)).toEqual(providerCallsBeforeLift);
   });
 

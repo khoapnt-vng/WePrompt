@@ -20,7 +20,7 @@ const GENERATION_AFFECTING_DRAFT_KEYS = new Set([
 ]);
 
 export const hasGenerationAffectingWorkspaceDrafts = (keys: readonly string[]): boolean =>
-  keys.some((key) => GENERATION_AFFECTING_DRAFT_KEYS.has(key));
+  keys.some((key) => GENERATION_AFFECTING_DRAFT_KEYS.has(key) || key.startsWith('beat.') || key.startsWith('shot.'));
 
 export type WorkspaceDraftEntry = {
   baseValue: WorkspaceDraftValue;
@@ -62,6 +62,7 @@ export type UseWorkspaceDraftsResult = {
   staleRevision: boolean;
   setValue: (key: string, value: WorkspaceDraftValue) => void;
   reset: (key: string) => void;
+  resetIfValue: (key: string, expectedValue: WorkspaceDraftValue) => void;
   resetAll: () => void;
   selection: WorkspaceSelection;
   selectBeat: (beatId: string | null) => void;
@@ -69,10 +70,12 @@ export type UseWorkspaceDraftsResult = {
   clearSelection: () => void;
 };
 
-const MAX_DRAFT_FIELDS = 12;
-const MAX_FIELD_KEY_LENGTH = 128;
+// 24 Beats × 3 fields + 192 Shots × 4 fields + shared settings fit with bounded headroom.
+const MAX_DRAFT_FIELDS = 1_024;
+const MAX_FIELD_KEY_LENGTH = 512;
 const MAX_STRING_VALUE_LENGTH = 8_192;
 const MAX_SELECTION = 256;
+const MAX_PERSISTED_DRAFT_LENGTH = 1_048_576;
 const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 const validKey = (key: string): boolean =>
@@ -95,8 +98,19 @@ const resolveStorage = (storage?: Storage): Storage | null => {
 const validValue = (value: unknown): value is WorkspaceDraftValue =>
   value === null ||
   typeof value === 'boolean' ||
-  (typeof value === 'number' && Number.isSafeInteger(value)) ||
+  (typeof value === 'number' &&
+    Number.isFinite(value) &&
+    Math.abs(value) <= Number.MAX_SAFE_INTEGER &&
+    !Object.is(value, -0)) ||
   (typeof value === 'string' && value.length <= MAX_STRING_VALUE_LENGTH);
+
+const fitsPersistedDraftBound = (drafts: PersistedWorkspaceDrafts): boolean => {
+  try {
+    return JSON.stringify(drafts).length <= MAX_PERSISTED_DRAFT_LENGTH;
+  } catch {
+    return false;
+  }
+};
 
 const emptyDrafts = (projectId: string, sourceRevision: number): PersistedWorkspaceDrafts => ({
   version: 2,
@@ -115,7 +129,7 @@ const readDrafts = (
 ): PersistedWorkspaceDrafts => {
   try {
     const bytes = resolveStorage(storage)?.getItem(storageKey(projectId));
-    if (bytes === null || bytes === undefined || bytes.length > 1_048_576)
+    if (bytes === null || bytes === undefined || bytes.length > MAX_PERSISTED_DRAFT_LENGTH)
       return emptyDrafts(projectId, projectRevision);
     const decoded = JSON.parse(bytes) as Partial<PersistedWorkspaceDrafts>;
     if (
@@ -174,7 +188,7 @@ const readDrafts = (
 const writeDrafts = (drafts: PersistedWorkspaceDrafts, storage?: Storage): void => {
   try {
     const target = resolveStorage(storage);
-    if (target === null) return;
+    if (target === null || !fitsPersistedDraftBound(drafts)) return;
     if (
       Object.keys(drafts.entries).length === 0 &&
       drafts.selection.selectedBeatId === null &&
@@ -278,12 +292,15 @@ export const useWorkspaceDrafts = ({
             ? current.selection.anchorShotId
             : null,
       };
-      return {
+      const next = {
         ...current,
         sourceRevision: hasConflict ? current.sourceRevision : projectRevision,
         entries,
         selection,
       };
+      if (fitsPersistedDraftBound(next)) return next;
+      const bounded = { ...next, sourceRevision: current.sourceRevision };
+      return fitsPersistedDraftBound(bounded) ? bounded : current;
     });
   }, [activeBeatFingerprint, activeShotFingerprint, canonicalFingerprint, enabled, projectId, projectRevision]);
 
@@ -322,7 +339,8 @@ export const useWorkspaceDrafts = ({
           entries[key] = { baseValue: existing === undefined ? canonical : existing.baseValue, value };
         }
         if (Object.keys(entries).length > MAX_DRAFT_FIELDS) return current;
-        return { ...current, entries };
+        const next = { ...current, entries };
+        return fitsPersistedDraftBound(next) ? next : current;
       });
     },
     [canonicalFingerprint, enabled]
@@ -331,6 +349,17 @@ export const useWorkspaceDrafts = ({
   const reset = useCallback((key: string): void => {
     setDrafts((current) => {
       if (!Object.hasOwn(current.entries, key)) return current;
+      const entries = { ...current.entries };
+      delete entries[key];
+      return { ...current, entries };
+    });
+  }, []);
+
+  const resetIfValue = useCallback((key: string, expectedValue: WorkspaceDraftValue): void => {
+    if (!validKey(key) || !validValue(expectedValue)) return;
+    setDrafts((current) => {
+      const entry = Object.hasOwn(current.entries, key) ? current.entries[key] : undefined;
+      if (entry === undefined || entry.value !== expectedValue) return current;
       const entries = { ...current.entries };
       delete entries[key];
       return { ...current, entries };
@@ -352,20 +381,26 @@ export const useWorkspaceDrafts = ({
   const selectBeat = useCallback(
     (beatId: string | null): void => {
       if (beatId !== null && !activeBeatIds.includes(beatId)) return;
-      setDrafts((current) => ({
-        ...current,
-        selection: { ...current.selection, selectedBeatId: beatId },
-      }));
+      setDrafts((current) => {
+        const next = {
+          ...current,
+          selection: { ...current.selection, selectedBeatId: beatId },
+        };
+        return fitsPersistedDraftBound(next) ? next : current;
+      });
     },
     [activeBeatFingerprint]
   );
 
   const selectShot = useCallback(
     (shotId: string, intent: WorkspaceSelectionIntent = 'toggle'): void => {
-      setDrafts((current) => ({
-        ...current,
-        selection: updateWorkspaceSelection({ selection: current.selection, activeShotIds, shotId, intent }),
-      }));
+      setDrafts((current) => {
+        const next = {
+          ...current,
+          selection: updateWorkspaceSelection({ selection: current.selection, activeShotIds, shotId, intent }),
+        };
+        return fitsPersistedDraftBound(next) ? next : current;
+      });
     },
     [activeShotFingerprint]
   );
@@ -386,6 +421,7 @@ export const useWorkspaceDrafts = ({
     staleRevision: conflictKeys.length > 0,
     setValue,
     reset,
+    resetIfValue,
     resetAll,
     selection: drafts.selection,
     selectBeat,

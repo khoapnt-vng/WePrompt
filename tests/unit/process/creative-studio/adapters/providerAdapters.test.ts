@@ -26,6 +26,7 @@ import {
   createStudioE2EFakeRemoteState,
   STUDIO_E2E_FAKE_FIXTURE_DIRECTORY,
   STUDIO_E2E_FAKE_PROVIDER_CALL_COUNTS_FILE,
+  STUDIO_E2E_RAW_OUTPUT_BODY_SENTINEL,
 } from '@process/services/creative-studio/adapters/e2eFakeAdapter';
 
 const REFERENCE_BUDGET_BYTES = 30 * 1024 * 1024;
@@ -559,6 +560,45 @@ describe('Creative Studio provider adapters', () => {
       cancel: 1,
     });
     expect((await fs.readdir(fixtureDirectory)).filter((entry) => entry.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it('publishes a real ten-second 16x16 H.264 fixture for the explicit E2E video journey', async () => {
+    const rootDir = await fs.mkdtemp(path.join(tmpdir(), 'weprompt-fake-adapter-video-fixture-'));
+    temporaryDirectories.push(rootDir);
+    const bundle = createStudioE2EFakeBundle({ rootDir, catalogProfile: 'explicit-selection' });
+    const adapter = bundle.adapters.get('weprompt-media-gateway-v1');
+    const fakeProvider = {
+      ...bundle.provider,
+      use_model: 'dreamina-seedance-2-0-260128',
+    } as TProviderWithModel;
+    if (!adapter) throw new Error('expected fake video adapter');
+
+    const submission = await adapter.submit(
+      { ...request, durationSeconds: 8 },
+      fakeProvider,
+      new AbortController().signal
+    );
+    if (submission.kind !== 'remote') throw new Error('expected a remote fake provider task');
+    const completed = await adapter.poll(submission.providerJobId, fakeProvider, new AbortController().signal);
+    if (completed.status !== 'succeeded') throw new Error('expected a completed fake video task');
+    const output = completed.outputs[0];
+    if (output?.source.kind !== 'file') throw new Error('expected a file-backed fake video output');
+
+    expect(output).toMatchObject({
+      mediaKind: 'video',
+      role: 'primary',
+      mimeType: 'video/mp4',
+      durationSeconds: 10,
+    });
+    const bytes = await fs.readFile(output.source.path);
+    const movieHeader = bytes.indexOf(Buffer.from('mvhd'));
+    const videoSampleEntry = bytes.lastIndexOf(Buffer.from('avc1'));
+    expect(movieHeader).toBeGreaterThanOrEqual(0);
+    expect(videoSampleEntry).toBeGreaterThanOrEqual(0);
+    expect(bytes.readUInt32BE(movieHeader + 20) / bytes.readUInt32BE(movieHeader + 16)).toBe(10);
+    expect(bytes.readUInt16BE(videoSampleEntry + 28)).toBe(16);
+    expect(bytes.readUInt16BE(videoSampleEntry + 30)).toBe(16);
+    expect(bytes.includes(Buffer.from(STUDIO_E2E_RAW_OUTPUT_BODY_SENTINEL))).toBe(true);
   });
 
   it('counts rejected fake-provider calls and repeated output reads without leaking temporary files', async () => {

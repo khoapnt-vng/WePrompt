@@ -20,6 +20,7 @@ export type DirectorProposalsProps = {
   referenceRequests: readonly StudioReferenceRequestV2[];
   referenceGenerationHandoffs: readonly StudioRendererReferenceGenerationHandoffV2[];
   pendingActionId: string | null;
+  blockMutationProposalAcceptance?: boolean;
   proposalErrorMessageKey?: string | null;
   referenceErrorMessageKey?: string | null;
   onAcceptProposal: (proposalId: string) => Promise<void>;
@@ -54,6 +55,7 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
   referenceRequests,
   referenceGenerationHandoffs,
   pendingActionId,
+  blockMutationProposalAcceptance = false,
   proposalErrorMessageKey = null,
   referenceErrorMessageKey = null,
   onAcceptProposal,
@@ -88,6 +90,11 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
           key={proposal.id}
           proposal={proposal}
           pending={pendingActionId === proposal.id}
+          acceptBlockedMessageKey={
+            blockMutationProposalAcceptance && proposal.payload.kind === 'mutation_batch'
+              ? 'conversation.creativeStudio.workspace.proposals.saveBeforeApply'
+              : null
+          }
           onAccept={onAcceptProposal}
           onReject={onRejectProposal}
         />

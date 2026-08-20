@@ -13,7 +13,11 @@ import type {
   StudioRendererChainStatusV2,
   StudioRendererWorkspaceStatusV2,
 } from '@/common/types/project/creativeStudioTypes';
-import { projectWorkspace, useWorkspaceDrafts } from '@/renderer/pages/studio/components/Workspace';
+import {
+  hasGenerationAffectingWorkspaceDrafts,
+  projectWorkspace,
+  useWorkspaceDrafts,
+} from '@/renderer/pages/studio/components/Workspace';
 
 const makeAsset = (
   id: string,
@@ -252,6 +256,76 @@ describe('projectWorkspace', () => {
     expect(shot).toMatchObject({ takeCount: 4, displayState: 'takes_available' });
   });
 
+  it('orders image and video Takes newest-first while preserving exact pins, posters, and Bin aliases', () => {
+    const project = makeProject();
+    const pinned = makeAsset('seed_pinned', 'shot_1', 'image', 'imports', '2026-08-19T01:00:00.000Z');
+    const newestLower = makeAsset('seed_a', 'shot_1', 'image', 'assets', '2026-08-19T02:00:00.000Z');
+    const newestUpper = makeAsset('seed_Z', 'shot_1', 'image', 'assets', '2026-08-19T02:00:00.000Z');
+    const binnedImage = makeAsset('seed_binned', 'shot_1', 'image', 'imports', '2026-08-19T04:00:00.000Z');
+    const selectedVideo = makeAsset('take_selected', 'shot_1', 'video', 'assets', '2026-08-19T03:00:00.000Z', 10);
+    const binnedVideo = makeAsset('take_binned', 'shot_1', 'video', 'assets', '2026-08-19T05:00:00.000Z', 9);
+    const poster = makeAsset('poster_selected', 'shot_1', 'image', 'thumbnails');
+    Object.assign(project.assets, {
+      [pinned.id]: pinned,
+      [newestLower.id]: newestLower,
+      [newestUpper.id]: newestUpper,
+      [binnedImage.id]: binnedImage,
+      [selectedVideo.id]: selectedVideo,
+      [binnedVideo.id]: binnedVideo,
+      [poster.id]: poster,
+    });
+    project.shots.shot_1!.assetIds.push(
+      pinned.id,
+      newestUpper.id,
+      newestLower.id,
+      binnedImage.id,
+      selectedVideo.id,
+      binnedVideo.id,
+      poster.id
+    );
+    project.shots.shot_1!.seedStillId = pinned.id;
+    project.shots.shot_1!.selectedTakeId = selectedVideo.id;
+    project.shots.shot_1!.jobIds.push('job_selected');
+    project.jobs.job_selected = makeJob('job_selected', 'shot_1', {
+      outputAssetIds: [selectedVideo.id, poster.id],
+      outputAssetIdsByRole: { primary: selectedVideo.id, poster: poster.id },
+    });
+    project.bin = [
+      { kind: 'take', assetId: binnedImage.id, reason: 'lifted' },
+      { kind: 'take', assetId: binnedVideo.id, reason: 'alternate' },
+    ];
+
+    let shot = projectWorkspace(project, null, null).activeBeats[0]!.shots[0]!;
+    expect(shot.imageTakes.map((take) => take.assetId)).toEqual(['seed_binned', 'seed_a', 'seed_Z', 'seed_pinned']);
+    expect(shot.imageTakes).toMatchObject([
+      { binReason: 'lifted', explicitSeed: false, effectiveSeed: false },
+      { binReason: null, explicitSeed: false, effectiveSeed: false },
+      { binReason: null, explicitSeed: false, effectiveSeed: false },
+      { binReason: null, explicitSeed: true, effectiveSeed: true },
+    ]);
+    expect(shot.videoTakes).toMatchObject([
+      {
+        assetId: 'take_binned',
+        binReason: 'alternate',
+        selected: false,
+        sourceDurationSeconds: 9,
+        posterAssetId: null,
+      },
+      {
+        assetId: 'take_selected',
+        binReason: null,
+        selected: true,
+        sourceDurationSeconds: 10,
+        posterAssetId: 'poster_selected',
+      },
+    ]);
+
+    project.shots.shot_1!.seedStillId = null;
+    shot = projectWorkspace(project, null, null).activeBeats[0]!.shots[0]!;
+    expect(shot).toMatchObject({ explicitSeedAssetId: null, effectiveSeedAssetId: 'seed_a' });
+    expect(shot.imageTakes.find((take) => take.assetId === 'seed_a')).toMatchObject({ effectiveSeed: true });
+  });
+
   it('prefers one exact succeeded selected-video poster and rejects malformed video poison', () => {
     const project = makeProject();
     const seed = makeAsset('seed_1', 'shot_1', 'image', 'imports');
@@ -306,11 +380,76 @@ describe('projectWorkspace', () => {
 
     expect(beat).toMatchObject({ targetSeconds: 8, actualSeconds: 7, displayState: 'ready' });
     expect(beat.actualSeconds).not.toBe(project.shots.shot_1!.durationSeconds);
+    expect(beat.shots[0]).toMatchObject({
+      durationSeconds: 8,
+      trimInSeconds: 1,
+      trimOutSeconds: 2,
+      selectedTakeId: 'take_10s',
+      selectedTakeSourceDurationSeconds: 10,
+      playedDurationSeconds: 7,
+      planningBoundary: { shotId: 'shot_1', startSeconds: 0, endSeconds: 8 },
+    });
 
-    delete project.assets.take_10s;
-    expect(
-      projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!.actualSeconds
-    ).toBeNull();
+    project.assets.take_10s!.durationSeconds = Number.NaN;
+    const unresolved = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!;
+    expect(unresolved.actualSeconds).toBeNull();
+    expect(unresolved.shots[0]).toMatchObject({
+      selectedTakeId: 'take_10s',
+      selectedTakeSourceDurationSeconds: null,
+      playedDurationSeconds: null,
+      displayState: 'takes_available',
+    });
+    expect(unresolved.displayState).toBe('draft');
+  });
+
+  it('projects segment heads and display-only downstream IDs only until the next hard cut', () => {
+    const project = makeProject();
+    project.beatOrder = ['beat_1'];
+    project.shots.shot_1!.chainBreak = 'none';
+    project.shots.shot_2!.chainBreak = 'none';
+    project.shots.shot_4 = makeShot('shot_4', 'Fourth', 'none');
+    project.shots.shot_5 = makeShot('shot_5', 'Fifth', 'hard_cut');
+    project.beats.beat_1!.shotOrder = ['shot_1', 'shot_2', 'shot_4', 'shot_5'];
+    addSeed(project, 'shot_2');
+
+    const shots = projectWorkspace(project, null, null).activeBeats[0]!.shots;
+
+    expect(shots.map((shot) => [shot.id, shot.segmentHead, shot.downstreamShotIds])).toEqual([
+      ['shot_1', true, ['shot_2', 'shot_4']],
+      ['shot_2', false, ['shot_4']],
+      ['shot_4', false, []],
+      ['shot_5', true, []],
+    ]);
+    expect(shots.map((shot) => shot.planningBoundary)).toEqual([
+      { shotId: 'shot_1', startSeconds: 0, endSeconds: 4 },
+      { shotId: 'shot_2', startSeconds: 4, endSeconds: 8 },
+      { shotId: 'shot_4', startSeconds: 8, endSeconds: 12 },
+      { shotId: 'shot_5', startSeconds: 12, endSeconds: 16 },
+    ]);
+    expect(shots[1]).toMatchObject({ effectiveSeedAssetId: null, hasEffectiveSeed: false });
+    expect(shots[1]!.imageTakes).toHaveLength(1);
+    expect(shots[1]!.imageTakes[0]).toMatchObject({ effectiveSeed: false });
+  });
+
+  it('derives line staleness only for derived lines and copies Beat history by value', () => {
+    const project = makeProject();
+    project.beatOrder = ['beat_1'];
+    project.beats.beat_1!.actionRevision = 2;
+    project.beats.beat_1!.lineHistory = [
+      { id: 'history_1', shotOrdinal: 1, text: 'Earlier line', capturedAt: '2026-08-19T00:00:00.000Z' },
+    ];
+    project.shots.shot_2!.derivation = 'detached';
+
+    const beat = projectWorkspace(project, null, null).activeBeats[0]!;
+
+    expect(beat.actionRevision).toBe(2);
+    expect(beat.lineHistory).toEqual(project.beats.beat_1!.lineHistory);
+    expect(beat.lineHistory).not.toBe(project.beats.beat_1!.lineHistory);
+    expect(beat.lineHistory[0]).not.toBe(project.beats.beat_1!.lineHistory[0]);
+    expect(beat.shots.map((shot) => [shot.id, shot.derivedFromActionRevision, shot.derivationStale])).toEqual([
+      ['shot_1', 1, true],
+      ['shot_2', 1, false],
+    ]);
   });
 
   it('keeps uncovered duration nullable and distinguishes pending duration from a slate target', () => {
@@ -432,7 +571,9 @@ describe('projectWorkspace', () => {
       blockers: [{ shotId: 'shot_1', code: 'bound_nonterminal_request' }],
     });
 
-    expect(projectWorkspace(project, matched, chainStatus()).requestShapeLocked).toBe(true);
+    const current = projectWorkspace(project, matched, chainStatus());
+    expect(current.requestShapeLocked).toBe(true);
+    expect(current.activeBeats[0]!.shots[1]!.dirtyCauses).toEqual(['continuity_stale']);
     const stale = projectWorkspace(project, workspaceStatus(2), chainStatus(2));
     expect(stale).toMatchObject({
       workspaceStatusReady: false,
@@ -444,6 +585,7 @@ describe('projectWorkspace', () => {
       parkEligibility: [],
       conditioningFailures: [],
     });
+    expect(stale.activeBeats.flatMap((beat) => beat.shots).every((shot) => shot.dirtyCauses.length === 0)).toBe(true);
     expect(projectWorkspace(project, null, null)).toMatchObject({
       workspaceStatusReady: false,
       chainStatusReady: false,
@@ -559,6 +701,94 @@ describe('useWorkspaceDrafts', () => {
     view.rerender();
     await waitFor(() => expect(view.result.current.selection.selectedBeatId).toBeNull());
     expect(view.result.current.selection.selectedShotIds).toEqual(['shot_2']);
+  });
+
+  it('atomically resets only the value that was saved and preserves a newer edit', () => {
+    const longShotKey = `shot.${'x'.repeat(256)}.trimInSeconds`;
+    const view = renderHook(() =>
+      useWorkspaceDrafts({
+        projectId: 'project_1',
+        projectRevision: 3,
+        canonicalValues: { [longShotKey]: 0 },
+        activeBeatIds: ['beat_1'],
+        activeShotIds: ['shot_1'],
+      })
+    );
+    act(() => view.result.current.setValue(longShotKey, 0.5));
+    expect(view.result.current.value(longShotKey)).toBe(0.5);
+
+    act(() => view.result.current.setValue(longShotKey, 1));
+    act(() => view.result.current.resetIfValue(longShotKey, 0.5));
+    expect(view.result.current.value(longShotKey)).toBe(1);
+    expect(view.result.current.dirtyKeys).toEqual([longShotKey]);
+
+    act(() => view.result.current.resetIfValue(longShotKey, 1));
+    expect(view.result.current.value(longShotKey)).toBe(0);
+    expect(view.result.current.dirtyKeys).toEqual([]);
+  });
+
+  it('round-trips the 1,024-field project draft cap and refuses the next field', async () => {
+    const keys = Array.from({ length: 1_025 }, (_, index) => `shot.shot_${index}.line`);
+    const canonicalValues = Object.fromEntries(keys.map((key) => [key, 'base']));
+    const input = {
+      projectId: 'project_1',
+      projectRevision: 3,
+      canonicalValues,
+      activeBeatIds: ['beat_1'],
+      activeShotIds: ['shot_1'],
+    };
+    const first = renderHook(() => useWorkspaceDrafts(input));
+    act(() => {
+      keys.forEach((key, index) => first.result.current.setValue(key, `draft_${index}`));
+    });
+
+    expect(Object.keys(first.result.current.entries)).toHaveLength(1_024);
+    expect(first.result.current.value(keys[1_023]!)).toBe('draft_1023');
+    expect(first.result.current.value(keys[1_024]!)).toBe('base');
+    await waitFor(() => expect(window.sessionStorage.getItem(storageKey)).toContain('draft_1023'));
+
+    first.unmount();
+    const second = renderHook(() => useWorkspaceDrafts(input));
+    expect(Object.keys(second.result.current.entries)).toHaveLength(1_024);
+    expect(second.result.current.value(keys[1_023]!)).toBe('draft_1023');
+    expect(second.result.current.value(keys[1_024]!)).toBe('base');
+  });
+
+  it('refuses an update above the persisted 1 MiB bound and round-trips every accepted field', async () => {
+    const keys = Array.from({ length: 140 }, (_, index) => `shot.shot_${index}.line`);
+    const canonicalValues = Object.fromEntries(keys.map((key) => [key, '']));
+    const input = {
+      projectId: 'project_1',
+      projectRevision: 3,
+      canonicalValues,
+      activeBeatIds: ['beat_1'],
+      activeShotIds: ['shot_1'],
+    };
+    const first = renderHook(() => useWorkspaceDrafts(input));
+    const maximumValue = 'x'.repeat(8_192);
+    act(() => keys.forEach((key) => first.result.current.setValue(key, maximumValue)));
+
+    expect(Object.keys(first.result.current.entries).length).toBeLessThan(keys.length);
+    expect(first.result.current.value(keys.at(-1)!)).toBe('');
+    await waitFor(() => {
+      const persisted = window.sessionStorage.getItem(storageKey);
+      expect(persisted).not.toBeNull();
+      expect(persisted!.length).toBeLessThanOrEqual(1_048_576);
+    });
+    const acceptedKeys = Object.keys(first.result.current.entries);
+
+    first.unmount();
+    const second = renderHook(() => useWorkspaceDrafts(input));
+    expect(Object.keys(second.result.current.entries)).toEqual(acceptedKeys);
+    expect(acceptedKeys.every((key) => second.result.current.value(key) === maximumValue)).toBe(true);
+  });
+
+  it('treats every Beat and Shot draft namespace as generation-affecting', () => {
+    expect(hasGenerationAffectingWorkspaceDrafts(['beat.beat_1.action'])).toBe(true);
+    expect(hasGenerationAffectingWorkspaceDrafts(['beat.beat_1.look'])).toBe(true);
+    expect(hasGenerationAffectingWorkspaceDrafts(['shot.shot_1.trimOutSeconds'])).toBe(true);
+    expect(hasGenerationAffectingWorkspaceDrafts(['shot.shot_1.onScreenText'])).toBe(true);
+    expect(hasGenerationAffectingWorkspaceDrafts(['settings.name', 'gate.choices'])).toBe(false);
   });
 
   it('rejects stored prototype keys, deduplicates active order, and caps runtime selection', () => {

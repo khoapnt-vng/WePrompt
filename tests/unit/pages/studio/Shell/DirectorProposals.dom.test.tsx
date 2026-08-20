@@ -39,6 +39,11 @@ const proposal = (id: string, status: StudioProposalV2['status'] = 'pending'): S
     decidedAt: status === 'pending' ? null : '2026-08-19T01:00:00.000Z',
   }) as StudioProposalV2;
 
+const pinRuleProposal = (id: string): StudioProposalV2 => ({
+  ...proposal(id),
+  payload: { kind: 'pin_rule', rule: { text: 'Never show a logo', predicate: null } },
+});
+
 const referenceRequest = (id: string): StudioReferenceRequestV2 => ({
   schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
   id,
@@ -81,7 +86,11 @@ describe('DirectorProposals', () => {
     proposals: StudioProposalV2[] = [],
     referenceRequests: StudioReferenceRequestV2[] = [],
     referenceGenerationHandoffs: StudioRendererReferenceGenerationHandoffV2[] = [],
-    locks: { gateLocked?: boolean; reviewBlockedMessageKey?: string | null } = {}
+    locks: {
+      gateLocked?: boolean;
+      reviewBlockedMessageKey?: string | null;
+      blockMutationProposalAcceptance?: boolean;
+    } = {}
   ) =>
     render(
       <DirectorProposals
@@ -150,5 +159,25 @@ describe('DirectorProposals', () => {
     expect(card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.review' })).toBeDisabled();
     expect(card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.dismiss' })).toBeEnabled();
     expect(card.getByText('conversation.creativeStudio.workspace.controls.saveBeforeReview')).toBeVisible();
+  });
+
+  it('blocks structural proposals for dirty row drafts without blocking an independent rule pin', async () => {
+    renderList([proposal('mutation'), pinRuleProposal('rule')], [], [], {
+      blockMutationProposalAcceptance: true,
+    });
+
+    const mutation = within(screen.getByTestId('studio-proposal-mutation'));
+    expect(
+      mutation.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    ).toBeDisabled();
+    expect(mutation.getByText('conversation.creativeStudio.workspace.proposals.saveBeforeApply')).toBeVisible();
+
+    const rule = within(screen.getByTestId('studio-proposal-rule'));
+    const acceptRule = rule.getByRole('button', {
+      name: 'conversation.creativeStudio.workspace.proposals.accept',
+    });
+    expect(acceptRule).toBeEnabled();
+    fireEvent.click(acceptRule);
+    await waitFor(() => expect(onAcceptProposal).toHaveBeenCalledWith('rule'));
   });
 });
