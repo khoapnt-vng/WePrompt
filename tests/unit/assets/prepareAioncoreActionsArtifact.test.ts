@@ -13,6 +13,19 @@ const {
 const { acceptedMigrationLineage } = require('../../../packages/shared-scripts/src/verify-bundled-aioncore-resources');
 
 const posixFakeToolchainIt = process.platform === 'win32' ? it.skip : it;
+
+/**
+ * These four cases build a fake POSIX toolchain on disk and run the real resolver over it.
+ * Measured in isolation on a quiet machine: 4.7s, 3.5s, 6.4s and 6.3s — the other twelve cases
+ * in this file take under a millisecond. The 10s global testTimeout leaves too little headroom
+ * to survive full-suite parallelism, where all four exceeded it reproducibly (2 runs of 2).
+ *
+ * 30s was tried first and was still not enough: the 6.4s case exceeded it once in three
+ * full-suite runs. These cases are I/O bound, so a generous ceiling costs nothing and only
+ * prevents false failures — the assertions are untouched by it. Do not lower this back toward
+ * the global default without re-measuring under full-suite load.
+ */
+const FAKE_TOOLCHAIN_TIMEOUT_MS = 120_000;
 const publishedAioncoreRefs = 'd4d8e87714690cdb230ab7a6987de3ceacbea275\trefs/tags/v0.1.51\n';
 const resolvePublishedAioncoreRefs = () => publishedAioncoreRefs;
 
@@ -222,116 +235,132 @@ describe('prepare-aioncore GitHub Actions artifact resolver', () => {
 
   // These cases execute a temporary POSIX shell-script aioncore binary. Windows
   // coverage for contract rejection lives in the verifier/local-bundle tests.
-  posixFakeToolchainIt('hard fails Actions artifact input when prepared managed resources lack contract', () => {
-    const tmp = mkdtempSync(join(tmpdir(), 'aionui-actions-gate-'));
-    const fakeBin = createFakeToolchain(tmp);
-    const previousPath = process.env.PATH;
-    process.env.PATH = `${fakeBin}${delimiter}${previousPath || ''}`;
-    process.env.AIONUI_BACKEND_RUN_ID = '123';
-    const restoreTmpdir = useIsolatedTmpdir(tmp);
+  posixFakeToolchainIt(
+    'hard fails Actions artifact input when prepared managed resources lack contract',
+    () => {
+      const tmp = mkdtempSync(join(tmpdir(), 'aionui-actions-gate-'));
+      const fakeBin = createFakeToolchain(tmp);
+      const previousPath = process.env.PATH;
+      process.env.PATH = `${fakeBin}${delimiter}${previousPath || ''}`;
+      process.env.AIONUI_BACKEND_RUN_ID = '123';
+      const restoreTmpdir = useIsolatedTmpdir(tmp);
 
-    try {
-      expect(() =>
-        prepareAioncore({
-          projectRoot: join(tmp, 'project'),
-          platform: 'linux',
-          arch: 'x64',
-          version: 'v0.1.46',
-          resolveAioncoreRefs: resolvePublishedAioncoreRefs,
-        })
-      ).toThrow(/managed-resources\/manifest\.json/);
-    } finally {
-      if (previousPath === undefined) delete process.env.PATH;
-      else process.env.PATH = previousPath;
-      restoreTmpdir();
-      rmSync(tmp, { recursive: true, force: true });
-    }
-  });
+      try {
+        expect(() =>
+          prepareAioncore({
+            projectRoot: join(tmp, 'project'),
+            platform: 'linux',
+            arch: 'x64',
+            version: 'v0.1.46',
+            resolveAioncoreRefs: resolvePublishedAioncoreRefs,
+          })
+        ).toThrow(/managed-resources\/manifest\.json/);
+      } finally {
+        if (previousPath === undefined) delete process.env.PATH;
+        else process.env.PATH = previousPath;
+        restoreTmpdir();
+        rmSync(tmp, { recursive: true, force: true });
+      }
+    },
+    FAKE_TOOLCHAIN_TIMEOUT_MS
+  );
 
-  posixFakeToolchainIt('hard fails GitHub release download input when prepared managed resources lack contract', () => {
-    const tmp = mkdtempSync(join(tmpdir(), 'aionui-download-gate-'));
-    const fakeBin = createFakeToolchain(tmp);
-    const previousPath = process.env.PATH;
-    process.env.PATH = `${fakeBin}${delimiter}${previousPath || ''}`;
-    // Bypass the pinned-digest gate (covered by verifyAioncoreArtifactDigest tests)
-    // so this test reaches the managed-resources contract check it targets.
-    const previousSkipVerify = process.env.AIONUI_SKIP_AIONCORE_VERIFY;
-    process.env.AIONUI_SKIP_AIONCORE_VERIFY = '1';
-    const restoreTmpdir = useIsolatedTmpdir(tmp);
+  posixFakeToolchainIt(
+    'hard fails GitHub release download input when prepared managed resources lack contract',
+    () => {
+      const tmp = mkdtempSync(join(tmpdir(), 'aionui-download-gate-'));
+      const fakeBin = createFakeToolchain(tmp);
+      const previousPath = process.env.PATH;
+      process.env.PATH = `${fakeBin}${delimiter}${previousPath || ''}`;
+      // Bypass the pinned-digest gate (covered by verifyAioncoreArtifactDigest tests)
+      // so this test reaches the managed-resources contract check it targets.
+      const previousSkipVerify = process.env.AIONUI_SKIP_AIONCORE_VERIFY;
+      process.env.AIONUI_SKIP_AIONCORE_VERIFY = '1';
+      const restoreTmpdir = useIsolatedTmpdir(tmp);
 
-    try {
-      expect(() =>
-        prepareAioncore({
-          projectRoot: join(tmp, 'project'),
-          platform: 'linux',
-          arch: 'x64',
-          version: 'v0.1.46',
-        })
-      ).toThrow(/managed-resources\/manifest\.json/);
-    } finally {
-      if (previousPath === undefined) delete process.env.PATH;
-      else process.env.PATH = previousPath;
-      if (previousSkipVerify === undefined) delete process.env.AIONUI_SKIP_AIONCORE_VERIFY;
-      else process.env.AIONUI_SKIP_AIONCORE_VERIFY = previousSkipVerify;
-      restoreTmpdir();
-      rmSync(tmp, { recursive: true, force: true });
-    }
-  });
+      try {
+        expect(() =>
+          prepareAioncore({
+            projectRoot: join(tmp, 'project'),
+            platform: 'linux',
+            arch: 'x64',
+            version: 'v0.1.46',
+          })
+        ).toThrow(/managed-resources\/manifest\.json/);
+      } finally {
+        if (previousPath === undefined) delete process.env.PATH;
+        else process.env.PATH = previousPath;
+        if (previousSkipVerify === undefined) delete process.env.AIONUI_SKIP_AIONCORE_VERIFY;
+        else process.env.AIONUI_SKIP_AIONCORE_VERIFY = previousSkipVerify;
+        restoreTmpdir();
+        rmSync(tmp, { recursive: true, force: true });
+      }
+    },
+    FAKE_TOOLCHAIN_TIMEOUT_MS
+  );
 
-  posixFakeToolchainIt('hard fails local binary fallback when prepared managed resources lack contract', () => {
-    const tmp = mkdtempSync(join(tmpdir(), 'aionui-local-binary-gate-'));
-    const localBinary = join(tmp, 'aioncore');
-    const localLineage = join(tmp, 'migration-lineage.json');
-    writeExecutable(localBinary, '#!/usr/bin/env bash\nexit 0\n');
-    writeFile(localLineage, `${JSON.stringify(acceptedMigrationLineage, null, 2)}\n`);
-    const fakeBin = createFakeToolchain(tmp, { curlFails: true });
-    const previousPath = process.env.PATH;
-    process.env.PATH = `${fakeBin}${delimiter}${previousPath || ''}`;
-    process.env.AIONUI_BACKEND_LOCAL_BINARY = localBinary;
-    process.env.AIONUI_BACKEND_LOCAL_LINEAGE = localLineage;
-    const restoreTmpdir = useIsolatedTmpdir(tmp);
+  posixFakeToolchainIt(
+    'hard fails local binary fallback when prepared managed resources lack contract',
+    () => {
+      const tmp = mkdtempSync(join(tmpdir(), 'aionui-local-binary-gate-'));
+      const localBinary = join(tmp, 'aioncore');
+      const localLineage = join(tmp, 'migration-lineage.json');
+      writeExecutable(localBinary, '#!/usr/bin/env bash\nexit 0\n');
+      writeFile(localLineage, `${JSON.stringify(acceptedMigrationLineage, null, 2)}\n`);
+      const fakeBin = createFakeToolchain(tmp, { curlFails: true });
+      const previousPath = process.env.PATH;
+      process.env.PATH = `${fakeBin}${delimiter}${previousPath || ''}`;
+      process.env.AIONUI_BACKEND_LOCAL_BINARY = localBinary;
+      process.env.AIONUI_BACKEND_LOCAL_LINEAGE = localLineage;
+      const restoreTmpdir = useIsolatedTmpdir(tmp);
 
-    try {
-      expect(() =>
-        prepareAioncore({
-          projectRoot: join(tmp, 'project'),
-          platform: 'linux',
-          arch: 'x64',
-          version: 'v0.1.46',
-        })
-      ).toThrow(/managed-resources\/manifest\.json/);
-    } finally {
-      if (previousPath === undefined) delete process.env.PATH;
-      else process.env.PATH = previousPath;
-      restoreTmpdir();
-      rmSync(tmp, { recursive: true, force: true });
-    }
-  });
+      try {
+        expect(() =>
+          prepareAioncore({
+            projectRoot: join(tmp, 'project'),
+            platform: 'linux',
+            arch: 'x64',
+            version: 'v0.1.46',
+          })
+        ).toThrow(/managed-resources\/manifest\.json/);
+      } finally {
+        if (previousPath === undefined) delete process.env.PATH;
+        else process.env.PATH = previousPath;
+        restoreTmpdir();
+        rmSync(tmp, { recursive: true, force: true });
+      }
+    },
+    FAKE_TOOLCHAIN_TIMEOUT_MS
+  );
 
-  posixFakeToolchainIt('fails closed when local binary fallback has no lineage provenance', () => {
-    const tmp = mkdtempSync(join(tmpdir(), 'aionui-local-binary-lineage-'));
-    const localBinary = join(tmp, 'aioncore');
-    writeExecutable(localBinary, '#!/usr/bin/env bash\nexit 0\n');
-    const fakeBin = createFakeToolchain(tmp, { curlFails: true });
-    const previousPath = process.env.PATH;
-    process.env.PATH = `${fakeBin}${delimiter}${previousPath || ''}`;
-    process.env.AIONUI_BACKEND_LOCAL_BINARY = localBinary;
-    const restoreTmpdir = useIsolatedTmpdir(tmp);
+  posixFakeToolchainIt(
+    'fails closed when local binary fallback has no lineage provenance',
+    () => {
+      const tmp = mkdtempSync(join(tmpdir(), 'aionui-local-binary-lineage-'));
+      const localBinary = join(tmp, 'aioncore');
+      writeExecutable(localBinary, '#!/usr/bin/env bash\nexit 0\n');
+      const fakeBin = createFakeToolchain(tmp, { curlFails: true });
+      const previousPath = process.env.PATH;
+      process.env.PATH = `${fakeBin}${delimiter}${previousPath || ''}`;
+      process.env.AIONUI_BACKEND_LOCAL_BINARY = localBinary;
+      const restoreTmpdir = useIsolatedTmpdir(tmp);
 
-    try {
-      expect(() =>
-        prepareAioncore({
-          projectRoot: join(tmp, 'project'),
-          platform: 'linux',
-          arch: 'x64',
-          version: 'v0.1.46',
-        })
-      ).toThrow(/AIONUI_BACKEND_LOCAL_LINEAGE/);
-    } finally {
-      if (previousPath === undefined) delete process.env.PATH;
-      else process.env.PATH = previousPath;
-      restoreTmpdir();
-      rmSync(tmp, { recursive: true, force: true });
-    }
-  });
+      try {
+        expect(() =>
+          prepareAioncore({
+            projectRoot: join(tmp, 'project'),
+            platform: 'linux',
+            arch: 'x64',
+            version: 'v0.1.46',
+          })
+        ).toThrow(/AIONUI_BACKEND_LOCAL_LINEAGE/);
+      } finally {
+        if (previousPath === undefined) delete process.env.PATH;
+        else process.env.PATH = previousPath;
+        restoreTmpdir();
+        rmSync(tmp, { recursive: true, force: true });
+      }
+    },
+    FAKE_TOOLCHAIN_TIMEOUT_MS
+  );
 });
