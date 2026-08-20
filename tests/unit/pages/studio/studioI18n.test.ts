@@ -65,7 +65,6 @@ const expectedLeaves = [
   'views.table',
   'views.board',
   'views.cut',
-  'views.boardPending',
   'views.cutPending',
   'table.label',
   'table.columns.position',
@@ -93,6 +92,70 @@ const expectedLeaves = [
   'table.state.statusPending',
   'table.state.ready',
   'table.state.draft',
+  'board.ariaLabel',
+  'board.cardSizeLabel',
+  'board.cardSizeSmall',
+  'board.cardSizeMedium',
+  'board.cardSizeLarge',
+  'board.openBeat',
+  'board.selectedBeat',
+  'board.ordinal',
+  'board.shotCount',
+  'board.shotCount_one',
+  'board.shotCount_other',
+  'board.targetDuration',
+  'board.actualDuration',
+  'board.noCoverage',
+  'board.coverUnavailable',
+  'board.dragHandle',
+  'board.moveEarlier',
+  'board.moveLater',
+  'board.reorderAnnouncement',
+  'board.reorderFailed',
+  'board.liftBeat',
+  'board.liftConfirmTitle',
+  'board.liftConfirmContent',
+  'board.liftUnavailable',
+  'board.liftDirtyDraft',
+  'board.liftSucceeded',
+  'board.liftFailed',
+  'bin.title',
+  'bin.description',
+  'bin.empty',
+  'bin.listLabel',
+  'bin.kind.beat',
+  'bin.kind.shot',
+  'bin.kind.take',
+  'bin.reason.lifted',
+  'bin.reason.alternate',
+  'bin.position',
+  'bin.itemLabel',
+  'bin.ownerLabel',
+  'bin.ownerUnavailable',
+  'bin.shotCount',
+  'bin.shotCount_one',
+  'bin.shotCount_other',
+  'bin.takeCount',
+  'bin.takeCount_one',
+  'bin.takeCount_other',
+  'bin.retainedWork',
+  'bin.stale',
+  'bin.coverAlt',
+  'bin.coverUnavailable',
+  'bin.dragHandle',
+  'bin.reorderAnnouncement',
+  'bin.restore.positionLabel',
+  'bin.restore.atEnd',
+  'bin.restore.beforeBeat',
+  'bin.restore.beforeShot',
+  'bin.restore.beat',
+  'bin.restore.shot',
+  'bin.restore.take',
+  'bin.media.image',
+  'bin.media.video',
+  'bin.blocker.statusUnavailable',
+  'bin.blocker.ownerUnavailable',
+  'bin.blocker.anchorUnavailable',
   'beatPanel.title',
   'beatPanel.label',
   'beatPanel.untitledBeat',
@@ -480,6 +543,7 @@ describe('Creative Studio workspace translations', () => {
 
     expect(Object.keys(leaves).toSorted()).toEqual(expectedLeaves.toSorted());
     expect(leaves['table.columns.position']).toBe('#');
+    expect(placeholders(leaves['bin.coverAlt']!)).toEqual(['kind', 'title']);
     for (const [key, value] of Object.entries(leaves)) {
       expect(value.trim(), key).not.toBe('');
     }
@@ -491,7 +555,7 @@ describe('Creative Studio workspace translations', () => {
       .filter((key) => key.endsWith('_one'))
       .map((key) => key.slice(0, -'_one'.length));
 
-    expect(pluralBases).toHaveLength(12);
+    expect(pluralBases).toHaveLength(15);
     for (const base of pluralBases) {
       expect(leaves[`${base}_other`], `${base}_other`).toBeTypeOf('string');
       expect(placeholders(leaves[`${base}_one`]!)).toEqual(placeholders(leaves[`${base}_other`]!));

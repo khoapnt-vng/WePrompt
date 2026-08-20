@@ -5,13 +5,14 @@
  */
 
 import { Alert, Button, Card, Input, InputNumber, Select } from '@arco-design/web-react';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { StudioBriefRuleDraft } from '@/common/types/project/creativeStudioTypes';
 import { majorUnitsToMinorUnits } from '../spendGate';
 import type { WorkspaceDraftValue } from '../useWorkspaceDrafts';
 import { BeatPanel } from '../BeatPanel';
+import { BoardView } from './Board';
 import { TableView } from './Table';
 import type { WorkspaceControlsProps } from './viewTypes';
 import styles from './WorkspaceControls.module.css';
@@ -68,6 +69,7 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
   gateLocked,
   errorMessageKey,
   mutations,
+  boardActions,
   beatPanelActions,
   beatPanelBriefReferenceOptions,
   beatPanelReviewGraphs,
@@ -80,6 +82,23 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
   const rulesValue = asString(drafts.value('brief.rules'));
   const openBeatIndex = openBeatId === null ? -1 : projection.activeBeats.findIndex((beat) => beat.id === openBeatId);
   const openBeat = openBeatIndex < 0 ? null : (projection.activeBeats[openBeatIndex] ?? null);
+  const dirtyBeatIds = useMemo(() => {
+    const dirtyKeys = new Set(drafts.dirtyKeys);
+    return projection.activeBeats.flatMap((beat) => {
+      const beatKeys = [
+        `beat.${beat.id}.action`,
+        `beat.${beat.id}.look`,
+        `beat.${beat.id}.targetSeconds`,
+        ...beat.shots.flatMap((shot) => [
+          `shot.${shot.id}.line`,
+          `shot.${shot.id}.narration`,
+          `shot.${shot.id}.onScreenText`,
+          `shot.${shot.id}.durationSeconds`,
+        ]),
+      ];
+      return beatKeys.some((key) => dirtyKeys.has(key)) ? [beat.id] : [];
+    });
+  }, [drafts.dirtyKeys, projection.activeBeats]);
 
   useEffect(() => {
     if (
@@ -197,6 +216,17 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
           beats={projection.activeBeats}
           selectedBeatId={drafts.selection.selectedBeatId}
           onSelectBeat={selectAndOpenBeat}
+        />
+      ) : null}
+      {activeView === 'board' ? (
+        <BoardView
+          actions={boardActions}
+          dirtyBeatIds={dirtyBeatIds}
+          onOpenBeat={selectAndOpenBeat}
+          pending={pending}
+          projectId={project.id}
+          projection={projection}
+          selectedBeatId={drafts.selection.selectedBeatId}
         />
       ) : null}
       {openBeat === null ? null : (

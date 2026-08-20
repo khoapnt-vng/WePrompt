@@ -1442,7 +1442,6 @@
         "table": "Table",
         "board": "Board",
         "cut": "Cut",
-        "boardPending": "Storyboard planning arrives in the next workspace task.",
         "cutPending": "Cut editing arrives in the next workspace task."
       },
       "table": {
@@ -1475,6 +1474,84 @@
           "statusPending": "Status pending",
           "ready": "Ready",
           "draft": "Draft"
+        }
+      },
+      "board": {
+        "ariaLabel": "Beat board",
+        "cardSizeLabel": "Board card size",
+        "cardSizeSmall": "S",
+        "cardSizeMedium": "M",
+        "cardSizeLarge": "L",
+        "openBeat": "Open {{title}}",
+        "selectedBeat": "Selected Beat",
+        "ordinal": "{{index}}",
+        "shotCount": "{{count}} shots",
+        "shotCount_one": "{{count}} shot",
+        "shotCount_other": "{{count}} shots",
+        "targetDuration": "~{{seconds}}s target",
+        "actualDuration": "{{seconds}}s actual",
+        "noCoverage": "No coverage",
+        "coverUnavailable": "Preview unavailable",
+        "dragHandle": "Reorder {{title}} at position {{position}}",
+        "moveEarlier": "Move {{title}} earlier",
+        "moveLater": "Move {{title}} later",
+        "reorderAnnouncement": "Moved {{title}} from position {{from}} to {{to}} of {{total}}.",
+        "reorderFailed": "Beat order was not changed.",
+        "liftBeat": "Lift Beat",
+        "liftConfirmTitle": "Lift {{title}}?",
+        "liftConfirmContent": "This Beat leaves the film. All authored work and Takes are kept in the Bin.",
+        "liftUnavailable": "Refresh the current workspace status before lifting this Beat.",
+        "liftDirtyDraft": "Save or reset local edits before lifting this Beat.",
+        "liftSucceeded": "Beat moved to the Bin.",
+        "liftFailed": "Beat was not moved to the Bin."
+      },
+      "bin": {
+        "title": "Bin",
+        "description": "Not in the film. Lifted work and alternates stay here without losing authored or paid work.",
+        "empty": "The Bin is empty.",
+        "listLabel": "Ordered Bin items",
+        "kind": {
+          "beat": "Beat",
+          "shot": "Shot",
+          "take": "Take"
+        },
+        "reason": {
+          "lifted": "Lifted",
+          "alternate": "Alternate"
+        },
+        "position": "Position {{position}} of {{total}}",
+        "itemLabel": "{{kind}}, {{reason}}, position {{position}} of {{total}}",
+        "ownerLabel": "Recorded owner Beat",
+        "ownerUnavailable": "Recorded owner unavailable",
+        "shotCount": "{{count}} shots",
+        "shotCount_one": "{{count}} shot",
+        "shotCount_other": "{{count}} shots",
+        "takeCount": "{{count}} Takes",
+        "takeCount_one": "{{count}} Take",
+        "takeCount_other": "{{count}} Takes",
+        "retainedWork": "Authored and generated work retained",
+        "stale": "Downstream continuity is out of date",
+        "coverAlt": "{{kind}} preview for {{title}}",
+        "coverUnavailable": "Preview unavailable",
+        "dragHandle": "Reorder {{kind}} at position {{position}}",
+        "reorderAnnouncement": "Moved {{reason}} {{kind}} from position {{from}} to {{to}} of {{total}}.",
+        "restore": {
+          "positionLabel": "Restore position",
+          "atEnd": "At the end",
+          "beforeBeat": "Before Beat {{position}}",
+          "beforeShot": "Before Shot {{position}}",
+          "beat": "Restore Beat",
+          "shot": "Restore Shot",
+          "take": "Restore Take"
+        },
+        "media": {
+          "image": "Image",
+          "video": "Video"
+        },
+        "blocker": {
+          "statusUnavailable": "Refresh the current workspace status before restoring this item.",
+          "ownerUnavailable": "The recorded owner Beat is unavailable.",
+          "anchorUnavailable": "No valid current restore position is available."
         }
       },
       "beatPanel": {

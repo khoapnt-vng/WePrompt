@@ -83,7 +83,6 @@ type StudioBridgeMethod =
   | 'list-projects'
   | 'list-routes'
   | 'prepare-submission'
-  | 'restore-shot'
   | 'select-take';
 
 async function invokeStudioBridge<T>(page: Page, method: StudioBridgeMethod, data: unknown): Promise<T> {
@@ -299,6 +298,17 @@ test.describe('Creative Studio workspace', () => {
     const navigation = page.locator(viewNavigationSelector);
     await navigation.getByRole('link', { name: 'Board' }).click();
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'board');
+    const board = page.getByRole('list', { name: 'Beat board' });
+    await expect(board.locator(':scope > [data-beat-id]')).toHaveCount(24);
+    await expect(page.getByRole('button', { name: 'Open Table beat 24' })).toHaveAttribute('aria-current', 'true');
+    const boardSizes = page.getByRole('group', { name: 'Board card size' });
+    await expect(boardSizes.getByRole('button', { name: 'M' })).toHaveAttribute('aria-pressed', 'true');
+    await boardSizes.getByRole('button', { name: 'S' }).click();
+    await expect(board).toHaveAttribute('data-card-size', 'small');
+    await boardSizes.getByRole('button', { name: 'L' }).click();
+    await expect(board).toHaveAttribute('data-card-size', 'large');
+    await boardSizes.getByRole('button', { name: 'M' }).click();
+    await expect(board).toHaveAttribute('data-card-size', 'medium');
     await navigation.getByRole('link', { name: 'Cut' }).click();
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'cut');
     await navigation.getByRole('link', { name: 'Table' }).click();
@@ -881,14 +891,41 @@ test.describe('Creative Studio workspace', () => {
     await panel.getByRole('button', { name: 'Close' }).click();
     await expect(panel).toBeHidden();
 
-    const restored = await invokeStudioBridge<StudioRendererProjectCommitResultV2>(page, 'restore-shot', {
-      projectId,
-      expectedRevision: parked.revision,
-      shotId,
-      beforeShotId: null,
-    });
+    const navigation = page.locator(viewNavigationSelector);
+    await navigation.getByRole('link', { name: 'Board' }).click();
+    await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'board');
+    const bin = page.locator('[data-studio-bin]');
+    await expect(bin.getByRole('heading', { name: 'Bin' })).toBeVisible();
+    const binnedShot = bin.locator(`[data-bin-item-key="shot:${shotId}"]`);
+    await expect(binnedShot).toHaveAttribute('data-bin-kind', 'shot');
+    await expect(binnedShot).toHaveAttribute('data-bin-reason', 'lifted');
+    await expect(binnedShot).toHaveAttribute('data-retained-work', 'true');
+    await expect(binnedShot).toContainText('Landing');
+    await expect(binnedShot).toContainText('The plane lands.');
+    await expect(binnedShot).toContainText('Lifted');
+    const assertBinnedShotFitsViewport = async (width: number, height: number): Promise<void> => {
+      await page.setViewportSize({ width, height });
+      await expect(binnedShot).toBeVisible();
+      const box = await binnedShot.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(width + 1);
+    };
+    await assertBinnedShotFitsViewport(1440, 900);
+    await assertBinnedShotFitsViewport(1100, 760);
+    await assertBinnedShotFitsViewport(760, 900);
+    await page.locator('html').evaluate((element) => element.setAttribute('dir', 'rtl'));
+    await expect(binnedShot).toContainText('Recorded owner Beat');
+    await expect(binnedShot.getByRole('button', { name: 'Restore Shot' })).toBeVisible();
+    expect(await readStudioE2EProviderCallCounts(userDataDirectory)).toEqual(providerCallsBeforeLift);
+    const restoreShot = binnedShot.getByRole('button', { name: 'Restore Shot' });
+    await expect(restoreShot).toBeEnabled();
+    await restoreShot.click();
+    await expect
+      .poll(async () => (await readStudioProject(page, projectId)).beats[beatId]?.shotOrder)
+      .toEqual([anchorShotId, shotId]);
     const activeAgain = await readStudioProject(page, projectId);
-    expect(activeAgain.revision).toBe(restored.projectRevision);
+    expect(activeAgain.revision).toBe(parked.revision + 1);
     expect(activeAgain.beats[beatId]?.shotOrder).toEqual([anchorShotId, shotId]);
     expect(activeAgain.bin).not.toContainEqual({ kind: 'shot', beatId, shotId, reason: 'lifted' });
     expect(activeAgain.shots[shotId]).toEqual(retainedShot);
@@ -898,7 +935,12 @@ test.describe('Creative Studio workspace', () => {
     expect((await readRawStudioProject(userDataDirectory, projectId)).frameExtractions).toEqual(
       retainedFrameExtractions
     );
+    await expect(page.getByRole('button', { name: 'Open Landing' })).toBeFocused();
     await expect(panel).toBeHidden();
+    await page.locator('html').evaluate((element) => element.setAttribute('dir', 'ltr'));
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await navigation.getByRole('link', { name: 'Table' }).click();
+    await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'table');
     await renderedRow.getByRole('gridcell').first().click();
     await expect(panel).toBeVisible();
     const restoredAnchorCard = panel.locator(`article[data-shot-id="${anchorShotId}"]`);

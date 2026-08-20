@@ -14,6 +14,7 @@ import type {
   BeatPanelActions,
   BeatPanelBriefReferenceOption,
   BeatPanelImportResult,
+  BoardActions,
 } from '@/renderer/pages/studio/components/Workspace';
 
 const mocks = vi.hoisted(() => {
@@ -40,6 +41,7 @@ const mocks = vi.hoisted(() => {
     listeners,
     closeHandlers,
     beatPanelActions: null as BeatPanelActions | null,
+    boardActions: null as BoardActions | null,
     beatPanelBriefReferenceOptions: null as readonly BeatPanelBriefReferenceOption[] | null,
     bridge: {
       getProject: { invoke: vi.fn() },
@@ -68,6 +70,9 @@ const mocks = vi.hoisted(() => {
       restoreTake: { invoke: vi.fn() },
       parkShot: { invoke: vi.fn() },
       parkBeat: { invoke: vi.fn() },
+      restoreBeat: { invoke: vi.fn() },
+      restoreShot: { invoke: vi.fn() },
+      reorderBin: { invoke: vi.fn() },
       hasUnsavedWork: {
         provider: vi.fn((handler: () => { dirtyDraftCount: number }) => {
           closeHandlers.hasUnsavedWork = handler;
@@ -95,6 +100,7 @@ vi.mock('@/renderer/pages/studio/components/Workspace', async (importOriginal) =
     ...actual,
     WorkspaceControls: (props: React.ComponentProps<typeof actual.WorkspaceControls>) => {
       mocks.beatPanelActions = props.beatPanelActions;
+      mocks.boardActions = props.boardActions;
       mocks.beatPanelBriefReferenceOptions = props.beatPanelBriefReferenceOptions;
       return React.createElement(actual.WorkspaceControls, props);
     },
@@ -421,6 +427,11 @@ const capturedBeatPanelActions = (): BeatPanelActions => {
   return mocks.beatPanelActions!;
 };
 
+const capturedBoardActions = (): BoardActions => {
+  expect(mocks.boardActions).not.toBeNull();
+  return mocks.boardActions!;
+};
+
 const expectSuccessfulBeatPanelAction = async (invoke: () => Promise<boolean>): Promise<void> => {
   let result: boolean | undefined;
   await act(async () => {
@@ -468,6 +479,7 @@ describe('StudioPage schema-2 cutover', () => {
     });
     mocks.closeHandlers.hasUnsavedWork = null;
     mocks.closeHandlers.flushUnsavedWork = null;
+    mocks.boardActions = null;
     mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: project() }));
     mocks.bridge.listProposals.invoke.mockResolvedValue(ok([]));
     mocks.bridge.listReferenceRequests.invoke.mockResolvedValue(ok([]));
@@ -494,6 +506,9 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.bridge.restoreTake.invoke.mockResolvedValue(commit(4));
     mocks.bridge.parkShot.invoke.mockResolvedValue(commit(4));
     mocks.bridge.parkBeat.invoke.mockResolvedValue(commit(4));
+    mocks.bridge.restoreBeat.invoke.mockResolvedValue(commit(4));
+    mocks.bridge.restoreShot.invoke.mockResolvedValue(commit(4));
+    mocks.bridge.reorderBin.invoke.mockResolvedValue(commit(4));
     mocks.bridge.dismissReferenceGenerationHandoff.invoke.mockResolvedValue(
       ok({ status: 'dismissed', completedAt: '2026-01-01T00:00:05.000Z' })
     );
@@ -573,6 +588,9 @@ describe('StudioPage schema-2 cutover', () => {
       restoreTake: mocks.bridge.restoreTake.invoke.mock.calls.length,
       parkShot: mocks.bridge.parkShot.invoke.mock.calls.length,
       parkBeat: mocks.bridge.parkBeat.invoke.mock.calls.length,
+      restoreBeat: mocks.bridge.restoreBeat.invoke.mock.calls.length,
+      restoreShot: mocks.bridge.restoreShot.invoke.mock.calls.length,
+      reorderBin: mocks.bridge.reorderBin.invoke.mock.calls.length,
       prepare: mocks.bridge.prepareSubmission.invoke.mock.calls.length,
       confirm: mocks.bridge.confirmSubmission.invoke.mock.calls.length,
     };
@@ -639,6 +657,9 @@ describe('StudioPage schema-2 cutover', () => {
       restoreTake: mocks.bridge.restoreTake.invoke.mock.calls.length,
       parkShot: mocks.bridge.parkShot.invoke.mock.calls.length,
       parkBeat: mocks.bridge.parkBeat.invoke.mock.calls.length,
+      restoreBeat: mocks.bridge.restoreBeat.invoke.mock.calls.length,
+      restoreShot: mocks.bridge.restoreShot.invoke.mock.calls.length,
+      reorderBin: mocks.bridge.reorderBin.invoke.mock.calls.length,
       prepare: mocks.bridge.prepareSubmission.invoke.mock.calls.length,
       confirm: mocks.bridge.confirmSubmission.invoke.mock.calls.length,
     }).toEqual(baseline);
@@ -1469,11 +1490,15 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.bridge.restoreTake.invoke.mockImplementation(nextCommit);
     mocks.bridge.parkShot.invoke.mockImplementation(nextCommit);
     mocks.bridge.parkBeat.invoke.mockImplementation(nextCommit);
+    mocks.bridge.restoreBeat.invoke.mockImplementation(nextCommit);
+    mocks.bridge.restoreShot.invoke.mockImplementation(nextCommit);
+    mocks.bridge.reorderBin.invoke.mockImplementation(nextCommit);
 
     renderStudio();
     await screen.findByRole('heading', { name: 'Launch film' });
     await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
     const actions = capturedBeatPanelActions();
+    const board = capturedBoardActions();
 
     const duplicateUpdates = [
       { shotId: 'shot_0', changes: { line: 'First duplicate' } },
@@ -1510,6 +1535,16 @@ describe('StudioPage schema-2 cutover', () => {
     await expectSuccessfulBeatPanelAction(() => actions.restoreTake('shot_0', 'take_1'));
     await expectSuccessfulBeatPanelAction(() => actions.parkShot('shot_0'));
     await expectSuccessfulBeatPanelAction(() => actions.parkBeat('beat_0'));
+    await expectSuccessfulBeatPanelAction(() => board.reorderBeats(['beat_1', 'beat_0']));
+    await expectSuccessfulBeatPanelAction(() => board.restoreBeat('beat_2', 'beat_1'));
+    await expectSuccessfulBeatPanelAction(() => board.restoreShot('shot_2', 'shot_1'));
+    await expectSuccessfulBeatPanelAction(() => board.restoreTake('shot_0', 'take_1'));
+    await expectSuccessfulBeatPanelAction(() =>
+      board.reorderBin([
+        { kind: 'take', assetId: 'take_2', reason: 'alternate' },
+        { kind: 'shot', beatId: 'beat_0', shotId: 'shot_2', reason: 'lifted' },
+      ])
+    );
 
     expect(mocks.bridge.applyAuthoringBatch.invoke.mock.calls.map(([request]) => request)).toEqual([
       {
@@ -1564,6 +1599,11 @@ describe('StudioPage schema-2 cutover', () => {
         expectedRevision: 10,
         operations: [{ kind: 'restore_line', shotId: 'shot_0', historyEntryId: 'history_1' }],
       },
+      {
+        projectId: 'project_1',
+        expectedRevision: 17,
+        operations: [{ kind: 'reorder_beats', beatOrder: ['beat_1', 'beat_0'] }],
+      },
     ]);
     expect(mocks.bridge.selectTake.invoke).toHaveBeenCalledWith({
       projectId: 'project_1',
@@ -1599,7 +1639,33 @@ describe('StudioPage schema-2 cutover', () => {
       expectedRevision: 16,
       beatId: 'beat_0',
     });
-    expect(revision).toBe(17);
+    expect(mocks.bridge.restoreBeat.invoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 18,
+      beatId: 'beat_2',
+      beforeBeatId: 'beat_1',
+    });
+    expect(mocks.bridge.restoreShot.invoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 19,
+      shotId: 'shot_2',
+      beforeShotId: 'shot_1',
+    });
+    expect(mocks.bridge.restoreTake.invoke).toHaveBeenLastCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 20,
+      shotId: 'shot_0',
+      assetId: 'take_1',
+    });
+    expect(mocks.bridge.reorderBin.invoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 21,
+      bin: [
+        { kind: 'take', assetId: 'take_2', reason: 'alternate' },
+        { kind: 'shot', beatId: 'beat_0', shotId: 'shot_2', reason: 'lifted' },
+      ],
+    });
+    expect(revision).toBe(22);
   });
 
   it('projects malformed topology defensively through both render and close-save traversal', async () => {

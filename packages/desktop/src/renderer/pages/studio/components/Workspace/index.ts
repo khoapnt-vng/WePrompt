@@ -44,6 +44,10 @@ export type {
 } from './useWorkspaceDrafts';
 export { projectWorkspace } from './workspaceProjection';
 export type {
+  WorkspaceBinnedBeatProjection,
+  WorkspaceBinnedShotProjection,
+  WorkspaceBinnedTakeProjection,
+  WorkspaceBinItemProjection,
   WorkspaceBeatDisplayState,
   WorkspaceBeatProjection,
   WorkspaceProjection,
@@ -52,5 +56,11 @@ export type {
 } from './workspaceProjection';
 export { WorkspaceShell } from './WorkspaceShell';
 export type { WorkspaceShellProps } from './WorkspaceShell';
-export { TableView, WorkspaceControls } from './Views';
-export type { TableViewProps, WorkspaceControlsProps, WorkspaceMutationCallbacks } from './Views';
+export { BoardView, TableView, WorkspaceControls } from './Views';
+export type {
+  BoardActions,
+  BoardViewProps,
+  TableViewProps,
+  WorkspaceControlsProps,
+  WorkspaceMutationCallbacks,
+} from './Views';

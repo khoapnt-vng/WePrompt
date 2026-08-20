@@ -13,6 +13,7 @@ import { ipcBridge } from '@/common';
 import {
   STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION,
   STUDIO_MAX_MUTATION_OPERATIONS,
+  type StudioBinItem,
   type StudioBriefRuleDraft,
   type StudioCommandResult,
   type StudioRendererAuthoringOperationV2,
@@ -38,6 +39,7 @@ import {
   type BeatPanelImportResult,
   type BeatPanelReviewChoice,
   type BeatPanelReviewGraph,
+  type BoardActions,
   type WorkspaceDraftValue,
   type WorkspaceMutationCallbacks,
 } from './components/Workspace';
@@ -130,6 +132,14 @@ const beatDraftKey = (beatId: string, field: 'action' | 'look' | 'targetSeconds'
 
 const shotDraftKey = (shotId: string, field: 'line' | 'narration' | 'onScreenText' | 'durationSeconds'): string =>
   `shot.${shotId}.${field}`;
+
+const cloneBinItem = (item: StudioBinItem): StudioBinItem => {
+  if (item.kind === 'beat') return { kind: 'beat', beatId: item.beatId, reason: item.reason };
+  if (item.kind === 'shot') {
+    return { kind: 'shot', beatId: item.beatId, shotId: item.shotId, reason: 'lifted' };
+  }
+  return { kind: 'take', assetId: item.assetId, reason: item.reason };
+};
 
 const projectDraftValues = (project: StudioRendererProjectV2): Record<string, WorkspaceDraftValue> => {
   const values: Record<string, WorkspaceDraftValue> = {
@@ -655,6 +665,48 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
     ]
   );
 
+  const boardActions = useMemo<BoardActions>(
+    () => ({
+      reorderBeats: async (beatOrder) =>
+        runWorkspaceCommit((current) =>
+          ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            operations: [{ kind: 'reorder_beats', beatOrder: [...beatOrder] }],
+          })
+        ),
+      parkBeat: beatPanelActions.parkBeat,
+      restoreBeat: async (beatId, beforeBeatId) =>
+        runWorkspaceCommit((current) =>
+          ipcBridge.creativeStudio.restoreBeat.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            beatId,
+            beforeBeatId,
+          })
+        ),
+      restoreShot: async (shotId, beforeShotId) =>
+        runWorkspaceCommit((current) =>
+          ipcBridge.creativeStudio.restoreShot.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            shotId,
+            beforeShotId,
+          })
+        ),
+      restoreTake: beatPanelActions.restoreTake,
+      reorderBin: async (bin) =>
+        runWorkspaceCommit((current) =>
+          ipcBridge.creativeStudio.reorderBin.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            bin: bin.map(cloneBinItem),
+          })
+        ),
+    }),
+    [beatPanelActions, runWorkspaceCommit]
+  );
+
   const saveAllDrafts = useCallback(async (): Promise<boolean> => {
     if (drafts.staleRevision) return false;
     const startingProject = projectRef.current;
@@ -1095,6 +1147,7 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
         {projection === null ? null : (
           <WorkspaceControls
             activeView={activeView}
+            boardActions={boardActions}
             project={project}
             projection={projection}
             routeCatalog={routeCatalog}

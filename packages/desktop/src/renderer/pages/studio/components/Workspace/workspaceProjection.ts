@@ -94,28 +94,56 @@ export type WorkspaceBeatProjection = {
   actualSeconds: number | null;
   displayState: WorkspaceBeatDisplayState;
   shots: WorkspaceShotProjection[];
+  coverAssetId: string | null;
+  retainedWork: boolean;
 };
 
-export type WorkspaceBinnedBeatProjection = Pick<
-  WorkspaceBeatProjection,
-  'id' | 'title' | 'action' | 'look' | 'targetSeconds'
-> & {
+export type WorkspaceBinnedBeatProjection = WorkspaceBeatProjection & {
   reason: Extract<StudioBinItem, { kind: 'beat' }>['reason'];
   shotCount: number;
 };
 
 export type WorkspaceBinnedShotProjection = WorkspaceShotProjection & {
   beatId: string;
+  beatTitle: string;
+  ownerBeatBinned: boolean;
   reason: Extract<StudioBinItem, { kind: 'shot' }>['reason'];
 };
 
 export type WorkspaceBinnedTakeProjection = {
   assetId: string;
   shotId: string;
-  beatId: string | null;
+  shotLine: string;
+  beatId: string;
+  beatTitle: string;
+  ownerBeatBinned: boolean;
   reason: Extract<StudioBinItem, { kind: 'take' }>['reason'];
   mediaKind: Extract<StudioAssetV2['mediaKind'], 'image' | 'video'>;
+  createdAt: string;
+  sourceDurationSeconds: number | null;
+  posterAssetId: string | null;
+  coverAssetId: string | null;
 };
+
+export type WorkspaceBinItemProjection =
+  | {
+      kind: 'beat';
+      position: number;
+      identity: Extract<StudioBinItem, { kind: 'beat' }>;
+      value: WorkspaceBinnedBeatProjection;
+    }
+  | {
+      kind: 'shot';
+      position: number;
+      identity: Extract<StudioBinItem, { kind: 'shot' }>;
+      value: WorkspaceBinnedShotProjection;
+    }
+  | {
+      kind: 'take';
+      position: number;
+      identity: Extract<StudioBinItem, { kind: 'take' }>;
+      value: WorkspaceBinnedTakeProjection;
+    };
 
 export type WorkspaceProjection = {
   projectId: string;
@@ -128,6 +156,7 @@ export type WorkspaceProjection = {
   chainStatusReady: boolean;
   requestShapeLocked: boolean;
   bin: {
+    items: WorkspaceBinItemProjection[];
     beats: WorkspaceBinnedBeatProjection[];
     shots: WorkspaceBinnedShotProjection[];
     takes: WorkspaceBinnedTakeProjection[];
@@ -139,12 +168,27 @@ export type WorkspaceProjection = {
   conditioningFailures: StudioRendererChainConditioningFailureV2[];
 };
 
+const SAFE_STUDIO_ID = /^[A-Za-z0-9_-]{1,256}$/;
+
+const isSafeStudioId = (value: unknown): value is string => typeof value === 'string' && SAFE_STUDIO_ID.test(value);
+
+const isDisplayText = (value: unknown): value is string => typeof value === 'string';
+
+const isDisplayTimestamp = (value: unknown): value is string =>
+  typeof value === 'string' && value.length <= 64 && Number.isFinite(Date.parse(value));
+
 const ownValue = <Value>(record: Readonly<Record<string, Value>>, id: string): Value | undefined =>
   Object.hasOwn(record, id) ? record[id] : undefined;
 
 const isOwnedAsset = (project: StudioRendererProjectV2, shot: StudioShot, assetId: string): StudioAssetV2 | null => {
   const asset = ownValue(project.assets, assetId);
-  return asset?.id === assetId && asset.projectId === project.id && asset.shotId === shot.id ? asset : null;
+  return isSafeStudioId(assetId) &&
+    asset?.id === assetId &&
+    asset.projectId === project.id &&
+    asset.shotId === shot.id &&
+    isDisplayTimestamp(asset.createdAt)
+    ? asset
+    : null;
 };
 
 const videoPosterId = (project: StudioRendererProjectV2, shot: StudioShot, videoTake: StudioAssetV2): string | null => {
@@ -393,7 +437,7 @@ const projectShot = (
     coverAssetId: (selectedTake === null ? null : videoPosterId(project, shot, selectedTake)) ?? effectiveSeedAssetId,
     takeCount: activeTakeCount,
     displayState,
-    retainedWork: activeTakeCount > 0 || effectiveSeedAssetId !== null || hasOwnedJob(project, shot),
+    retainedWork: imageTakes.length + videoTakes.length > 0 || hasOwnedJob(project, shot),
     videoGenerationInFlight: hasOwnedGenerationInFlight(project, shot, 'video_take'),
     seedGenerationInFlight: hasOwnedGenerationInFlight(project, shot, 'seed_still'),
     hasEffectiveSeed: effectiveSeedAssetId !== null,
@@ -402,12 +446,12 @@ const projectShot = (
 
 const validBeat = (project: StudioRendererProjectV2, beatId: string): StudioBeat | null => {
   const beat = ownValue(project.beats, beatId);
-  return beat?.id === beatId ? beat : null;
+  return isSafeStudioId(beatId) && beat?.id === beatId ? beat : null;
 };
 
 const validShot = (project: StudioRendererProjectV2, shotId: string): StudioShot | null => {
   const shot = ownValue(project.shots, shotId);
-  return shot?.id === shotId ? shot : null;
+  return isSafeStudioId(shotId) && shot?.id === shotId ? shot : null;
 };
 
 const projectBeatActualSeconds = (project: StudioRendererProjectV2, beat: StudioBeat): number | null => {
@@ -479,6 +523,234 @@ const projectBeatDisplayState = (input: {
   }
   if (!input.workspaceStatusReady || !input.chainStatusReady) return 'status_pending';
   return shots.every((shot) => shot.displayState === 'selected_take') ? 'ready' : 'draft';
+};
+
+const hasSafeBeatDisplayFacts = (beat: StudioBeat): boolean =>
+  isDisplayText(beat.title) &&
+  isDisplayText(beat.action) &&
+  isDisplayText(beat.look) &&
+  Number.isSafeInteger(beat.actionRevision) &&
+  beat.actionRevision >= 0 &&
+  (beat.targetSeconds === null ||
+    (Number.isSafeInteger(beat.targetSeconds) &&
+      beat.targetSeconds > 0 &&
+      beat.targetSeconds <= Number.MAX_SAFE_INTEGER)) &&
+  Array.isArray(beat.shotOrder) &&
+  Array.isArray(beat.lineHistory) &&
+  beat.lineHistory.every(
+    (entry) =>
+      entry !== null &&
+      typeof entry === 'object' &&
+      isSafeStudioId(entry.id) &&
+      Number.isSafeInteger(entry.shotOrdinal) &&
+      entry.shotOrdinal > 0 &&
+      isDisplayText(entry.text) &&
+      isDisplayTimestamp(entry.capturedAt)
+  );
+
+const hasSafeShotDisplayFacts = (shot: StudioShot): boolean =>
+  isDisplayText(shot.line) &&
+  isDisplayText(shot.narration) &&
+  isDisplayText(shot.onScreenText) &&
+  Number.isSafeInteger(shot.durationSeconds) &&
+  shot.durationSeconds > 0 &&
+  (shot.chainBreak === 'none' || shot.chainBreak === 'hard_cut') &&
+  (shot.derivation === 'derived' || shot.derivation === 'detached') &&
+  (shot.derivedFromActionRevision === null ||
+    (Number.isSafeInteger(shot.derivedFromActionRevision) && shot.derivedFromActionRevision >= 0)) &&
+  (shot.trimInSeconds === null || (Number.isFinite(shot.trimInSeconds) && shot.trimInSeconds >= 0)) &&
+  (shot.trimOutSeconds === null || (Number.isFinite(shot.trimOutSeconds) && shot.trimOutSeconds >= 0)) &&
+  (shot.seedStillId === null || isSafeStudioId(shot.seedStillId)) &&
+  (shot.selectedTakeId === null || isSafeStudioId(shot.selectedTakeId)) &&
+  Array.isArray(shot.assetIds) &&
+  Array.isArray(shot.jobIds);
+
+const binIdentityKey = (item: StudioBinItem): string | null => {
+  if (item.kind === 'beat') {
+    return isSafeStudioId(item.beatId) && (item.reason === 'lifted' || item.reason === 'alternate')
+      ? `beat:${item.beatId}`
+      : null;
+  }
+  if (item.kind === 'shot') {
+    return isSafeStudioId(item.beatId) && isSafeStudioId(item.shotId) && item.reason === 'lifted'
+      ? `shot:${item.shotId}`
+      : null;
+  }
+  return isSafeStudioId(item.assetId) && (item.reason === 'lifted' || item.reason === 'alternate')
+    ? `take:${item.assetId}`
+    : null;
+};
+
+const binIdentityCounts = (bin: readonly StudioBinItem[]): ReadonlyMap<string, number> => {
+  const counts = new Map<string, number>();
+  for (const item of bin) {
+    const key = binIdentityKey(item);
+    if (key !== null) counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+};
+
+type WorkspaceBeatMembership = {
+  beat: StudioBeat;
+  binned: boolean;
+};
+
+const projectBeatMemberships = (
+  project: StudioRendererProjectV2,
+  identityCounts: ReadonlyMap<string, number>
+): ReadonlyMap<string, WorkspaceBeatMembership> => {
+  const activeCounts = new Map<string, number>();
+  for (const beatId of project.beatOrder) {
+    if (validBeat(project, beatId) !== null) activeCounts.set(beatId, (activeCounts.get(beatId) ?? 0) + 1);
+  }
+  const binnedCounts = new Map<string, number>();
+  for (const item of project.bin) {
+    if (item.kind !== 'beat' || binIdentityKey(item) === null) continue;
+    binnedCounts.set(item.beatId, (binnedCounts.get(item.beatId) ?? 0) + 1);
+  }
+
+  const memberships = new Map<string, WorkspaceBeatMembership>();
+  for (const beatId of Object.keys(project.beats)) {
+    const beat = validBeat(project, beatId);
+    if (beat === null || !hasSafeBeatDisplayFacts(beat)) continue;
+    const activeCount = activeCounts.get(beatId) ?? 0;
+    const binnedCount = binnedCounts.get(beatId) ?? 0;
+    if (activeCount === 1 && binnedCount === 0) memberships.set(beatId, { beat, binned: false });
+    if (activeCount === 0 && binnedCount === 1 && identityCounts.get(`beat:${beatId}`) === 1) {
+      memberships.set(beatId, { beat, binned: true });
+    }
+  }
+  return memberships;
+};
+
+type WorkspaceShotOwner = {
+  beat: StudioBeat;
+  beatBinned: boolean;
+  shotIndex: number | null;
+  source: 'beat' | 'bin';
+};
+
+const projectShotOwners = (
+  project: StudioRendererProjectV2,
+  memberships: ReadonlyMap<string, WorkspaceBeatMembership>,
+  identityCounts: ReadonlyMap<string, number>
+): ReadonlyMap<string, WorkspaceShotOwner> => {
+  const candidates = new Map<string, WorkspaceShotOwner[]>();
+  const addCandidate = (shotId: string, owner: WorkspaceShotOwner): void => {
+    const current = candidates.get(shotId) ?? [];
+    current.push(owner);
+    candidates.set(shotId, current);
+  };
+
+  for (const membership of memberships.values()) {
+    membership.beat.shotOrder.forEach((shotId, shotIndex) => {
+      const shot = validShot(project, shotId);
+      if (shot === null || !hasSafeShotDisplayFacts(shot)) return;
+      addCandidate(shot.id, {
+        beat: membership.beat,
+        beatBinned: membership.binned,
+        shotIndex,
+        source: 'beat',
+      });
+    });
+  }
+  for (const item of project.bin) {
+    if (item.kind !== 'shot' || identityCounts.get(`shot:${item.shotId}`) !== 1 || binIdentityKey(item) === null) {
+      continue;
+    }
+    const membership = memberships.get(item.beatId);
+    const shot = validShot(project, item.shotId);
+    if (membership === undefined || shot === null || !hasSafeShotDisplayFacts(shot)) continue;
+    addCandidate(shot.id, {
+      beat: membership.beat,
+      beatBinned: membership.binned,
+      shotIndex: null,
+      source: 'bin',
+    });
+  }
+
+  const owners = new Map<string, WorkspaceShotOwner>();
+  for (const [shotId, rows] of candidates) {
+    if (rows.length === 1) owners.set(shotId, rows[0]!);
+  }
+  return owners;
+};
+
+type WorkspaceProjectionStatusFacts = {
+  workspaceStatusReady: boolean;
+  chainStatusReady: boolean;
+  dirtyCausesByShotId: ReadonlyMap<string, ReadonlyArray<StudioRendererDirtyShotV2['causes'][number]>>;
+  dirtyShotIds: ReadonlySet<string>;
+  partDoneShotIds: ReadonlySet<string>;
+  renderingShotIds: ReadonlySet<string>;
+};
+
+const projectStoredBeat = (input: {
+  project: StudioRendererProjectV2;
+  beat: StudioBeat;
+  reason: WorkspaceBinnedBeatProjection['reason'];
+  owners: ReadonlyMap<string, WorkspaceShotOwner>;
+  status: WorkspaceProjectionStatusFacts;
+}): WorkspaceBinnedBeatProjection | null => {
+  if (!hasSafeBeatDisplayFacts(input.beat)) return null;
+  const planningBoundaries = studioPlanningShotBoundariesV2(input.beat, input.project.shots);
+  if (planningBoundaries === null || planningBoundaries.length !== input.beat.shotOrder.length) return null;
+  const boundaryByShotId = new Map(planningBoundaries.map((boundary) => [boundary.shotId, boundary] as const));
+  const orderedShots: StudioShot[] = [];
+  for (let shotIndex = 0; shotIndex < input.beat.shotOrder.length; shotIndex += 1) {
+    const shotId = input.beat.shotOrder[shotIndex]!;
+    const shot = validShot(input.project, shotId);
+    const owner = input.owners.get(shotId);
+    if (
+      shot === null ||
+      !hasSafeShotDisplayFacts(shot) ||
+      owner?.beat.id !== input.beat.id ||
+      owner.source !== 'beat' ||
+      owner.shotIndex !== shotIndex
+    ) {
+      return null;
+    }
+    orderedShots.push(shot);
+  }
+  const shots = orderedShots.map((shot, shotIndex) => {
+    const downstreamShotIds: string[] = [];
+    for (let downstreamIndex = shotIndex + 1; downstreamIndex < orderedShots.length; downstreamIndex += 1) {
+      const downstream = orderedShots[downstreamIndex]!;
+      if (downstream.chainBreak === 'hard_cut') break;
+      downstreamShotIds.push(downstream.id);
+    }
+    return projectShot(input.project, shot, {
+      beatActionRevision: input.beat.actionRevision,
+      segmentHead: shotIndex === 0 || shot.chainBreak === 'hard_cut',
+      planningBoundary: boundaryByShotId.get(shot.id) ?? null,
+      dirtyCauses: input.status.dirtyCausesByShotId.get(shot.id) ?? [],
+      downstreamShotIds,
+    });
+  });
+  return {
+    id: input.beat.id,
+    title: input.beat.title,
+    action: input.beat.action,
+    look: input.beat.look,
+    actionRevision: input.beat.actionRevision,
+    lineHistory: input.beat.lineHistory.map((entry) => ({ ...entry })),
+    targetSeconds: input.beat.targetSeconds,
+    actualSeconds: projectBeatActualSeconds(input.project, input.beat),
+    displayState: projectBeatDisplayState({
+      beat: input.beat,
+      shots,
+      workspaceStatusReady: input.status.workspaceStatusReady,
+      chainStatusReady: input.status.chainStatusReady,
+      dirtyShotIds: input.status.dirtyShotIds,
+      partDoneShotIds: input.status.partDoneShotIds,
+      renderingShotIds: input.status.renderingShotIds,
+    }),
+    shots,
+    coverAssetId: shots.find((shot) => shot.coverAssetId !== null)?.coverAssetId ?? null,
+    retainedWork: shots.some((shot) => shot.retainedWork),
+    reason: input.reason,
+    shotCount: shots.length,
+  };
 };
 
 const revisionMatches = (
@@ -563,72 +835,145 @@ export const projectWorkspace = (
           renderingShotIds,
         }),
         shots,
+        coverAssetId: shots.find((shot) => shot.coverAssetId !== null)?.coverAssetId ?? null,
+        retainedWork: shots.some((shot) => shot.retainedWork),
       },
     ];
   });
 
-  const shotOwnerById = new Map<string, string>();
-  for (const beat of Object.values(project.beats)) {
-    if (beat?.id === undefined) continue;
-    for (const shotId of beat.shotOrder) {
-      if (!shotOwnerById.has(shotId)) shotOwnerById.set(shotId, beat.id);
-    }
-  }
-  for (const item of project.bin) {
-    if (item.kind === 'shot' && !shotOwnerById.has(item.shotId)) shotOwnerById.set(item.shotId, item.beatId);
-  }
-
+  const identityCounts = binIdentityCounts(project.bin);
+  const memberships = projectBeatMemberships(project, identityCounts);
+  const owners = projectShotOwners(project, memberships, identityCounts);
+  const statusFacts: WorkspaceProjectionStatusFacts = {
+    workspaceStatusReady: matchedWorkspaceStatus !== null,
+    chainStatusReady: matchedChainStatus !== null,
+    dirtyCausesByShotId,
+    dirtyShotIds,
+    partDoneShotIds,
+    renderingShotIds,
+  };
+  const binnedItems: WorkspaceBinItemProjection[] = [];
   const binnedBeats: WorkspaceBinnedBeatProjection[] = [];
   const binnedShots: WorkspaceBinnedShotProjection[] = [];
   const binnedTakes: WorkspaceBinnedTakeProjection[] = [];
-  for (const item of project.bin) {
+  for (let binIndex = 0; binIndex < project.bin.length; binIndex += 1) {
+    const item = project.bin[binIndex]!;
+    const identityKey = binIdentityKey(item);
+    if (identityKey === null || identityCounts.get(identityKey) !== 1) continue;
+    const position = binIndex + 1;
     if (item.kind === 'beat') {
-      const beat = validBeat(project, item.beatId);
-      if (beat === null) continue;
-      binnedBeats.push({
-        id: beat.id,
-        title: beat.title,
-        action: beat.action,
-        look: beat.look,
-        targetSeconds: beat.targetSeconds,
+      const membership = memberships.get(item.beatId);
+      if (membership === undefined || !membership.binned) continue;
+      const value = projectStoredBeat({
+        project,
+        beat: membership.beat,
         reason: item.reason,
-        shotCount: beat.shotOrder.length,
+        owners,
+        status: statusFacts,
       });
+      if (value === null) continue;
+      const identity: Extract<StudioBinItem, { kind: 'beat' }> = {
+        kind: 'beat',
+        beatId: item.beatId,
+        reason: item.reason,
+      };
+      binnedBeats.push(value);
+      binnedItems.push({ kind: 'beat', position, identity, value });
       continue;
     }
     if (item.kind === 'shot') {
       const shot = validShot(project, item.shotId);
-      if (shot === null) continue;
-      const owner = validBeat(project, item.beatId);
-      binnedShots.push({
-        ...projectShot(project, shot, {
-          beatActionRevision: owner?.actionRevision ?? null,
-          segmentHead: false,
-          planningBoundary: null,
-          dirtyCauses: dirtyCausesByShotId.get(shot.id) ?? [],
-          downstreamShotIds: [],
-        }),
-        beatId: item.beatId,
-        reason: item.reason,
+      const owner = owners.get(item.shotId);
+      if (
+        shot === null ||
+        !hasSafeShotDisplayFacts(shot) ||
+        owner === undefined ||
+        owner.source !== 'bin' ||
+        owner.beat.id !== item.beatId
+      ) {
+        continue;
+      }
+      const projectedShot = projectShot(project, shot, {
+        beatActionRevision: owner.beat.actionRevision,
+        segmentHead: shot.chainBreak === 'hard_cut',
+        planningBoundary: null,
+        dirtyCauses: dirtyCausesByShotId.get(shot.id) ?? [],
+        downstreamShotIds: [],
       });
+      const selectedTake = validSelectedVideoTake(project, shot);
+      const binnedCoverAssetId =
+        (selectedTake === null ? null : videoPosterId(project, shot, selectedTake)) ??
+        effectiveSeedStillId(project, shot);
+      const value: WorkspaceBinnedShotProjection = {
+        ...projectedShot,
+        coverAssetId: binnedCoverAssetId,
+        takeCount: projectedShot.imageTakes.length + projectedShot.videoTakes.length,
+        retainedWork:
+          projectedShot.imageTakes.length + projectedShot.videoTakes.length > 0 || hasOwnedJob(project, shot),
+        beatId: owner.beat.id,
+        beatTitle: owner.beat.title,
+        ownerBeatBinned: owner.beatBinned,
+        reason: item.reason,
+      };
+      const identity: Extract<StudioBinItem, { kind: 'shot' }> = {
+        kind: 'shot',
+        beatId: item.beatId,
+        shotId: item.shotId,
+        reason: item.reason,
+      };
+      binnedShots.push(value);
+      binnedItems.push({ kind: 'shot', position, identity, value });
       continue;
     }
+
     const asset = ownValue(project.assets, item.assetId);
+    if (asset?.id !== item.assetId || asset.shotId === null) continue;
+    const shot = validShot(project, asset.shotId);
+    const owner = shot === null ? undefined : owners.get(shot.id);
     if (
-      asset?.id !== item.assetId ||
-      asset.projectId !== project.id ||
-      asset.shotId === null ||
-      (asset.mediaKind !== 'image' && asset.mediaKind !== 'video')
+      shot === null ||
+      !hasSafeShotDisplayFacts(shot) ||
+      owner === undefined ||
+      isOwnedAsset(project, shot, item.assetId) === null
     ) {
       continue;
     }
-    binnedTakes.push({
-      assetId: asset.id,
-      shotId: asset.shotId,
-      beatId: shotOwnerById.get(asset.shotId) ?? null,
-      reason: item.reason,
-      mediaKind: asset.mediaKind,
+    const segmentHead = owner.source === 'bin' || owner.shotIndex === 0 || shot.chainBreak === 'hard_cut';
+    const explicitSeedAssetId = validExplicitSeedStillId(project, shot);
+    const effectiveSeedAssetId = segmentHead ? effectiveSeedStillId(project, shot) : null;
+    const selectedTakeId = validSelectedVideoTake(project, shot)?.id ?? null;
+    const projectedTakes = projectTakes({
+      project,
+      shot,
+      selectedTakeId,
+      explicitSeedAssetId,
+      effectiveSeedAssetId,
     });
+    const projectedTake = [...projectedTakes.imageTakes, ...projectedTakes.videoTakes].find(
+      (take) => take.assetId === item.assetId
+    );
+    if (projectedTake === undefined) continue;
+    const value: WorkspaceBinnedTakeProjection = {
+      assetId: projectedTake.assetId,
+      shotId: shot.id,
+      shotLine: shot.line,
+      beatId: owner.beat.id,
+      beatTitle: owner.beat.title,
+      ownerBeatBinned: owner.beatBinned,
+      reason: item.reason,
+      mediaKind: projectedTake.mediaKind,
+      createdAt: projectedTake.createdAt,
+      sourceDurationSeconds: projectedTake.sourceDurationSeconds,
+      posterAssetId: projectedTake.posterAssetId,
+      coverAssetId: projectedTake.mediaKind === 'image' ? projectedTake.assetId : projectedTake.posterAssetId,
+    };
+    const identity: Extract<StudioBinItem, { kind: 'take' }> = {
+      kind: 'take',
+      assetId: item.assetId,
+      reason: item.reason,
+    };
+    binnedTakes.push(value);
+    binnedItems.push({ kind: 'take', position, identity, value });
   }
 
   return {
@@ -644,7 +989,7 @@ export const projectWorkspace = (
       matchedWorkspaceStatus?.parkEligibility.some((row) =>
         row.blockers.some((blocker) => blocker.code === 'bound_nonterminal_request')
       ) ?? false,
-    bin: { beats: binnedBeats, shots: binnedShots, takes: binnedTakes },
+    bin: { items: binnedItems, beats: binnedBeats, shots: binnedShots, takes: binnedTakes },
     undoTop:
       matchedWorkspaceStatus?.undoTop === null || matchedWorkspaceStatus === null
         ? null

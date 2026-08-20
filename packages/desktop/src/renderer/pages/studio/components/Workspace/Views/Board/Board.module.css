@@ -1,0 +1,367 @@
+.root {
+  container-type: inline-size;
+  display: grid;
+  min-inline-size: 0;
+  gap: 18px;
+  color: var(--text-secondary);
+  font-family: var(--font-body);
+}
+
+.header,
+.binHeader {
+  display: flex;
+  min-inline-size: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.heading,
+.binTitle {
+  margin: 0;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 20px;
+  overflow-wrap: anywhere;
+}
+
+.cardSizeControls,
+.cardActions,
+.binActions {
+  display: flex;
+  min-inline-size: 0;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.beatList,
+.binList {
+  display: grid;
+  min-inline-size: 0;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.beatList[data-card-size='small'] {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr));
+}
+
+.beatList[data-card-size='medium'] {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
+}
+
+.beatList[data-card-size='large'] {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+}
+
+.beatCard,
+.binCard {
+  min-inline-size: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border-2);
+  border-radius: 12px;
+  background: var(--color-bg-2);
+}
+
+.beatCard {
+  display: grid;
+  align-content: start;
+}
+
+.beatCard[data-selected='true'] {
+  border-color: var(--color-primary-6);
+  box-shadow: var(--ring-focus);
+}
+
+.coverWrap,
+.binCover {
+  position: relative;
+  min-inline-size: 0;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: var(--color-fill-2);
+}
+
+.cover,
+.coverImage,
+.binCoverImage,
+.coverPlaceholder,
+.binPlaceholder {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+}
+
+.coverImage,
+.binCoverImage {
+  object-fit: cover;
+}
+
+.coverPlaceholder,
+.binPlaceholder {
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  color: var(--color-text-3);
+  background: repeating-linear-gradient(
+    135deg,
+    var(--color-fill-1) 0,
+    var(--color-fill-1) 10px,
+    var(--color-fill-2) 10px,
+    var(--color-fill-2) 20px
+  );
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.06em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.ordinal {
+  position: absolute;
+  inset-block-start: 10px;
+  inset-inline-start: 10px;
+  padding-block: 3px;
+  padding-inline: 7px;
+  border: 1px solid var(--color-border-2);
+  border-radius: 999px;
+  color: var(--text-primary);
+  background: var(--color-bg-2);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--fw-bold);
+}
+
+.cardBody,
+.binBody {
+  display: grid;
+  min-inline-size: 0;
+  align-content: start;
+  gap: 10px;
+  padding: 14px;
+}
+
+.beatTitle,
+.binItemTitle {
+  min-inline-size: 0;
+  block-size: auto;
+  padding: 0;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: var(--fw-bold);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-align: start;
+  white-space: normal;
+}
+
+.beatTitle > span:not(.srOnly) {
+  display: block;
+  inline-size: 100%;
+}
+
+.action,
+.blocker,
+.state,
+.binReason,
+.binPosition,
+.binMeta,
+.binStatus,
+.binBlockers,
+.binEmpty {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.action {
+  min-block-size: 2.8em;
+  color: var(--color-text-2);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.facts,
+.binMeta {
+  display: flex;
+  min-inline-size: 0;
+  gap: 6px 10px;
+  flex-wrap: wrap;
+  color: var(--color-text-3);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.state,
+.binStatus {
+  display: inline-flex;
+  min-inline-size: 0;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-2);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.stateDot {
+  inline-size: 7px;
+  block-size: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.state[data-state='ready'] {
+  color: var(--color-success-6);
+}
+
+.state[data-state='rendering'] {
+  color: var(--color-primary-6);
+}
+
+.state[data-state='duration_pending'],
+.state[data-state='seed_pending'],
+.state[data-state='part_done'] {
+  color: var(--color-warning-6);
+}
+
+.state[data-state='no_coverage'],
+.state[data-state='stale'] {
+  color: var(--color-danger-6);
+}
+
+.state[data-state='status_pending'],
+.state[data-state='draft'] {
+  color: var(--color-text-3);
+}
+
+.cardActions {
+  padding-block-start: 2px;
+  border-block-start: 1px solid var(--color-border-1);
+}
+
+.dragHandle,
+.binDragHandle {
+  cursor: grab;
+  touch-action: none;
+}
+
+.dragHandle:active,
+.binDragHandle:active {
+  cursor: grabbing;
+}
+
+.blocker,
+.binBlockers {
+  color: var(--color-warning-6);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.bin {
+  display: grid;
+  min-inline-size: 0;
+  gap: 12px;
+  padding-block-start: 18px;
+  border-block-start: 1px solid var(--color-border-2);
+}
+
+.binHeader > div {
+  min-inline-size: 0;
+}
+
+.binHeader p,
+.binKind {
+  margin: 4px 0 0;
+  color: var(--color-text-3);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.binEmpty {
+  color: var(--color-text-3);
+  font-size: 14px;
+}
+
+.binList {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
+}
+
+.binItem {
+  min-inline-size: 0;
+}
+
+.binCard {
+  display: grid;
+  align-content: start;
+  block-size: 100%;
+}
+
+.binCardHeader {
+  display: flex;
+  min-inline-size: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.binKind {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.binReason,
+.binPosition {
+  color: var(--color-text-3);
+  font-family: var(--font-mono);
+  font-size: 14px;
+}
+
+.binAnchor {
+  min-inline-size: min(100%, 190px);
+}
+
+.srOnly {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@container (max-width: 519px) {
+  .beatList[data-card-size='small'],
+  .beatList[data-card-size='medium'],
+  .beatList[data-card-size='large'],
+  .binList {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .header,
+  .binHeader {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .cardSizeControls,
+  .cardActions,
+  .binActions {
+    inline-size: 100%;
+  }
+}

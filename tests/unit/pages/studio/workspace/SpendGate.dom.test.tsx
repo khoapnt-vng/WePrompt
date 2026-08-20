@@ -54,6 +54,7 @@ import {
   useWorkspaceDrafts,
   useSpendGate,
   type BeatPanelActions,
+  type BoardActions,
   type WorkspaceDraftValue,
   type WorkspaceMutationCallbacks,
 } from '@/renderer/pages/studio/components/Workspace';
@@ -286,6 +287,15 @@ const beatPanelActions = (): BeatPanelActions => ({
   requestResplit: vi.fn(),
 });
 
+const boardActions = (): BoardActions => ({
+  reorderBeats: vi.fn(async () => true),
+  parkBeat: vi.fn(async () => true),
+  restoreBeat: vi.fn(async () => true),
+  restoreShot: vi.fn(async () => true),
+  restoreTake: vi.fn(async () => true),
+  reorderBin: vi.fn(async () => true),
+});
+
 const readyWorkspaceStatus = (revision = 3): StudioRendererWorkspaceStatusV2 => ({
   projectId: 'project_1',
   projectRevision: revision,
@@ -378,6 +388,7 @@ const ControlsHarness: React.FC<{
       gateLocked={gateLocked}
       errorMessageKey={null}
       mutations={mutations}
+      boardActions={boardActions()}
       beatPanelActions={beatPanelActions()}
       beatPanelBriefReferenceOptions={[]}
       beatPanelReviewGraphs={[]}

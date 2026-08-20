@@ -199,15 +199,67 @@ const cascadeRow = (
 });
 
 describe('projectWorkspace', () => {
-  it('uses active orders only and projects Beat, Shot, and Take bin references separately', () => {
+  it('projects safe prototype-named Beat, Shot, asset, and Bin identities through own-key lookup', () => {
     const project = makeProject();
+    const beatId = '__proto__';
+    const shotId = 'constructor';
+    const assetId = 'toString';
+    const asset = makeAsset(assetId, shotId, 'image', 'imports');
+    const binnedAssetId = 'constructor';
+    const binnedAsset = makeAsset(binnedAssetId, shotId, 'image', 'imports');
+
+    project.beatOrder = [beatId];
+    project.beats = Object.create(null) as StudioRendererProjectV2['beats'];
+    project.shots = Object.create(null) as StudioRendererProjectV2['shots'];
+    project.assets = Object.create(null) as StudioRendererProjectV2['assets'];
+    project.jobs = Object.create(null) as StudioRendererProjectV2['jobs'];
+    project.beats[beatId] = {
+      id: beatId,
+      title: 'Prototype-safe beat',
+      action: 'Keep the own property',
+      look: 'Exact',
+      actionRevision: 1,
+      targetSeconds: 4,
+      shotOrder: [shotId],
+      lineHistory: [],
+    };
+    project.shots[shotId] = makeShot(shotId, 'Prototype-safe shot');
+    project.shots[shotId]!.seedStillId = assetId;
+    project.shots[shotId]!.assetIds.push(assetId, binnedAssetId);
+    project.assets[assetId] = asset;
+    project.assets[binnedAssetId] = binnedAsset;
+    project.bin = [{ kind: 'take', assetId: binnedAssetId, reason: 'alternate' }];
+
+    const result = projectWorkspace(project, null, null);
+
+    expect(result.activeBeatIds).toEqual([beatId]);
+    expect(result.activeShotIds).toEqual([shotId]);
+    expect(result.activeBeats[0]).toMatchObject({ id: beatId, coverAssetId: assetId });
+    expect(result.activeBeats[0]!.shots[0]).toMatchObject({
+      id: shotId,
+      effectiveSeedAssetId: assetId,
+      coverAssetId: assetId,
+    });
+    expect(result.bin.items).toMatchObject([
+      {
+        kind: 'take',
+        position: 1,
+        identity: { kind: 'take', assetId: binnedAssetId, reason: 'alternate' },
+        value: { assetId: binnedAssetId, shotId, beatId },
+      },
+    ]);
+  });
+
+  it('preserves one mixed canonical Bin order with 1-based positions and exact cloned identities', () => {
+    const project = makeProject();
+    project.shots.shot_lifted = makeShot('shot_lifted', 'Lifted shot');
     const binnedTake = makeAsset('take_parked', 'shot_parked', 'video');
     project.assets[binnedTake.id] = binnedTake;
     project.shots.shot_parked!.assetIds.push(binnedTake.id);
     project.bin = [
-      { kind: 'beat', beatId: 'beat_parked', reason: 'lifted' },
-      { kind: 'shot', beatId: 'beat_parked', shotId: 'shot_parked', reason: 'lifted' },
       { kind: 'take', assetId: binnedTake.id, reason: 'alternate' },
+      { kind: 'beat', beatId: 'beat_parked', reason: 'lifted' },
+      { kind: 'shot', beatId: 'beat_parked', shotId: 'shot_lifted', reason: 'lifted' },
     ];
 
     const result = projectWorkspace(project, workspaceStatus(), chainStatus());
@@ -216,15 +268,220 @@ describe('projectWorkspace', () => {
     expect(result.activeBeats.map((beat) => beat.id)).toEqual(['beat_1', 'beat_2']);
     expect(result.activeBeatIds).toEqual(['beat_1', 'beat_2']);
     expect(result.activeShotIds).toEqual(['shot_1', 'shot_2', 'shot_3']);
+    expect(result.bin.items.map(({ kind, position, identity }) => ({ kind, position, identity }))).toEqual([
+      { kind: 'take', position: 1, identity: project.bin[0] },
+      { kind: 'beat', position: 2, identity: project.bin[1] },
+      { kind: 'shot', position: 3, identity: project.bin[2] },
+    ]);
+    result.bin.items.forEach((row, index) => expect(row.identity).not.toBe(project.bin[index]));
     expect(result.bin.beats).toMatchObject([{ id: 'beat_parked', reason: 'lifted' }]);
-    expect(result.bin.shots).toMatchObject([{ id: 'shot_parked', beatId: 'beat_parked', reason: 'lifted' }]);
-    expect(result.bin.takes).toEqual([
+    expect(result.bin.shots).toMatchObject([
+      { id: 'shot_lifted', beatId: 'beat_parked', beatTitle: 'Parked beat', reason: 'lifted' },
+    ]);
+    expect(result.bin.takes).toMatchObject([
       {
         assetId: 'take_parked',
         shotId: 'shot_parked',
         beatId: 'beat_parked',
+        beatTitle: 'Parked beat',
+        shotLine: 'Parked',
+        ownerBeatBinned: true,
         reason: 'alternate',
         mediaKind: 'video',
+      },
+    ]);
+    expect(result.bin.items.map((row) => row.value)).toEqual([
+      result.bin.takes[0],
+      result.bin.beats[0],
+      result.bin.shots[0],
+    ]);
+  });
+
+  it('projects a binned Beat with normal Shot planning, deterministic cover, duration, and retained work', () => {
+    const project = makeProject();
+    addSeed(project, 'shot_parked', 'seed_parked');
+    project.beats.beat_parked!.lineHistory = [
+      { id: 'history_parked', shotOrdinal: 1, text: 'Earlier parked line', capturedAt: '2026-08-19T00:00:00.000Z' },
+    ];
+    project.bin = [{ kind: 'beat', beatId: 'beat_parked', reason: 'alternate' }];
+
+    const result = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus());
+    const beat = result.bin.beats[0]!;
+
+    expect(beat).toMatchObject({
+      id: 'beat_parked',
+      reason: 'alternate',
+      shotCount: 1,
+      actualSeconds: 4,
+      displayState: 'draft',
+      coverAssetId: 'seed_parked',
+      retainedWork: true,
+    });
+    expect(beat.shots[0]).toMatchObject({
+      id: 'shot_parked',
+      segmentHead: true,
+      planningBoundary: { shotId: 'shot_parked', startSeconds: 0, endSeconds: 4 },
+      effectiveSeedAssetId: 'seed_parked',
+      coverAssetId: 'seed_parked',
+    });
+    expect(beat.lineHistory).toEqual(project.beats.beat_parked!.lineHistory);
+    expect(beat.lineHistory).not.toBe(project.beats.beat_parked!.lineHistory);
+  });
+
+  it('keeps a lifted former segment head and every retained Take fact while its owner Beat is binned', () => {
+    const project = makeProject();
+    project.shots.shot_lifted = makeShot('shot_lifted', 'Lifted opening', 'none');
+    const seed = makeAsset('seed_lifted', 'shot_lifted', 'image', 'imports', '2026-08-19T01:00:00.000Z');
+    const alternateImage = makeAsset('image_alternate', 'shot_lifted', 'image', 'imports', '2026-08-19T02:00:00.000Z');
+    const alternateVideo = makeAsset(
+      'video_alternate',
+      'shot_lifted',
+      'video',
+      'assets',
+      '2026-08-19T03:00:00.000Z',
+      9
+    );
+    const poster = makeAsset('poster_alternate', 'shot_lifted', 'image', 'thumbnails');
+    Object.assign(project.assets, {
+      [seed.id]: seed,
+      [alternateImage.id]: alternateImage,
+      [alternateVideo.id]: alternateVideo,
+      [poster.id]: poster,
+    });
+    project.shots.shot_lifted!.seedStillId = seed.id;
+    project.shots.shot_lifted!.assetIds.push(seed.id, alternateImage.id, alternateVideo.id, poster.id);
+    project.shots.shot_lifted!.jobIds.push('job_alternate');
+    project.jobs.job_alternate = makeJob('job_alternate', 'shot_lifted', {
+      outputAssetIds: [alternateVideo.id, poster.id],
+      outputAssetIdsByRole: { primary: alternateVideo.id, poster: poster.id },
+    });
+    project.bin = [
+      { kind: 'beat', beatId: 'beat_parked', reason: 'lifted' },
+      { kind: 'shot', beatId: 'beat_parked', shotId: 'shot_lifted', reason: 'lifted' },
+      { kind: 'take', assetId: alternateImage.id, reason: 'lifted' },
+      { kind: 'take', assetId: alternateVideo.id, reason: 'alternate' },
+    ];
+
+    const result = projectWorkspace(project, null, null);
+    const shot = result.bin.shots[0]!;
+
+    expect(shot).toMatchObject({
+      id: 'shot_lifted',
+      beatId: 'beat_parked',
+      beatTitle: 'Parked beat',
+      ownerBeatBinned: true,
+      reason: 'lifted',
+      chainBreak: 'none',
+      segmentHead: false,
+      effectiveSeedAssetId: null,
+      coverAssetId: 'seed_lifted',
+      takeCount: 3,
+      retainedWork: true,
+    });
+    expect(shot.imageTakes.map((take) => take.assetId)).toEqual(['image_alternate', 'seed_lifted']);
+    expect(shot.videoTakes).toMatchObject([
+      {
+        assetId: 'video_alternate',
+        binReason: 'alternate',
+        createdAt: '2026-08-19T03:00:00.000Z',
+        sourceDurationSeconds: 9,
+        posterAssetId: 'poster_alternate',
+      },
+    ]);
+    expect(result.bin.takes).toMatchObject([
+      {
+        assetId: 'image_alternate',
+        shotId: 'shot_lifted',
+        shotLine: 'Lifted opening',
+        beatId: 'beat_parked',
+        beatTitle: 'Parked beat',
+        ownerBeatBinned: true,
+        createdAt: '2026-08-19T02:00:00.000Z',
+        sourceDurationSeconds: null,
+        posterAssetId: null,
+        coverAssetId: 'image_alternate',
+      },
+      {
+        assetId: 'video_alternate',
+        shotId: 'shot_lifted',
+        shotLine: 'Lifted opening',
+        beatId: 'beat_parked',
+        beatTitle: 'Parked beat',
+        ownerBeatBinned: true,
+        createdAt: '2026-08-19T03:00:00.000Z',
+        sourceDurationSeconds: 9,
+        posterAssetId: 'poster_alternate',
+        coverAssetId: 'poster_alternate',
+      },
+    ]);
+    expect(JSON.stringify(result.bin)).not.toMatch(/provider_safe|managedAsset|fileName|job_alternate/);
+  });
+
+  it('omits Bin entries when canonical owner facts are duplicated or malformed', () => {
+    const ambiguous = makeProject();
+    const ambiguousTake = makeAsset('take_ambiguous', 'shot_1', 'video');
+    ambiguous.assets[ambiguousTake.id] = ambiguousTake;
+    ambiguous.shots.shot_1!.assetIds.push(ambiguousTake.id);
+    ambiguous.beats.beat_2!.shotOrder.push('shot_1');
+    ambiguous.bin = [{ kind: 'take', assetId: ambiguousTake.id, reason: 'alternate' }];
+
+    expect(projectWorkspace(ambiguous, null, null).bin).toEqual({ items: [], beats: [], shots: [], takes: [] });
+
+    const malformed = makeProject();
+    const malformedTake = makeAsset('take_malformed', 'shot_1', 'video');
+    malformedTake.createdAt = 'not-a-timestamp';
+    malformed.assets[malformedTake.id] = malformedTake;
+    malformed.shots.shot_1!.assetIds.push(malformedTake.id);
+    malformed.bin = [{ kind: 'take', assetId: malformedTake.id, reason: 'alternate' }];
+
+    expect(projectWorkspace(malformed, null, null).bin).toEqual({ items: [], beats: [], shots: [], takes: [] });
+
+    const malformedHistory = makeProject();
+    malformedHistory.beats.beat_parked!.lineHistory = [null] as never;
+    malformedHistory.bin = [{ kind: 'beat', beatId: 'beat_parked', reason: 'lifted' }];
+
+    expect(() => projectWorkspace(malformedHistory, null, null)).not.toThrow();
+    expect(projectWorkspace(malformedHistory, null, null).bin).toEqual({
+      items: [],
+      beats: [],
+      shots: [],
+      takes: [],
+    });
+  });
+
+  it('keeps a canonical binned video Take but nulls ambiguous poster and malformed duration facts', () => {
+    const project = makeProject();
+    const video = makeAsset('take_uncertain', 'shot_1', 'video', 'assets', undefined, Number.NaN);
+    const poster = makeAsset('poster_uncertain', 'shot_1', 'image', 'thumbnails');
+    Object.assign(project.assets, { [video.id]: video, [poster.id]: poster });
+    project.shots.shot_1!.assetIds.push(video.id, poster.id);
+    project.shots.shot_1!.jobIds.push('job_uncertain_a', 'job_uncertain_b');
+    project.jobs.job_uncertain_a = makeJob('job_uncertain_a', 'shot_1', {
+      outputAssetIds: [video.id, poster.id],
+      outputAssetIdsByRole: { primary: video.id, poster: poster.id },
+    });
+    project.jobs.job_uncertain_b = makeJob('job_uncertain_b', 'shot_1', {
+      outputAssetIds: [video.id, poster.id],
+      outputAssetIdsByRole: { primary: video.id, poster: poster.id },
+    });
+    project.bin = [{ kind: 'take', assetId: video.id, reason: 'alternate' }];
+
+    const result = projectWorkspace(project, null, null);
+
+    expect(result.bin.takes).toEqual([
+      {
+        assetId: 'take_uncertain',
+        shotId: 'shot_1',
+        shotLine: 'First',
+        beatId: 'beat_1',
+        beatTitle: 'Opening',
+        ownerBeatBinned: false,
+        reason: 'alternate',
+        mediaKind: 'video',
+        createdAt: '2026-08-19T00:00:00.000Z',
+        sourceDurationSeconds: null,
+        posterAssetId: null,
+        coverAssetId: null,
       },
     ]);
   });
@@ -351,6 +608,7 @@ describe('projectWorkspace', () => {
       takeCount: 2,
       displayState: 'selected_take',
     });
+    expect(result.activeBeats[0]).toMatchObject({ coverAssetId: 'poster_1', retainedWork: true });
     expect(result.activeBeats[0]!.shots[1]).toMatchObject({ takeCount: 0, displayState: 'draft' });
   });
 

@@ -16,6 +16,7 @@ import type {
 import type { UseWorkspaceDraftsResult } from '../useWorkspaceDrafts';
 import type { WorkspaceProjection } from '../workspaceProjection';
 import type { BeatPanelActions, BeatPanelBriefReferenceOption, BeatPanelReviewGraph } from '../BeatPanel';
+import type { BoardActions } from './Board';
 
 export type WorkspaceMutationCallbacks = {
   editProject: (changes: StudioEditableProjectSettingsChanges) => Promise<boolean>;
@@ -38,6 +39,7 @@ export type WorkspaceControlsProps = {
   gateLocked: boolean;
   errorMessageKey: string | null;
   mutations: WorkspaceMutationCallbacks;
+  boardActions: BoardActions;
   beatPanelActions: BeatPanelActions;
   beatPanelBriefReferenceOptions: readonly BeatPanelBriefReferenceOption[];
   beatPanelReviewGraphs: readonly BeatPanelReviewGraph[];
