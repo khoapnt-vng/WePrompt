@@ -38,8 +38,17 @@ number is not hypothetical, it has happened. To keep it from happening here:
 - **`BUG-061` through `BUG-079` are reserved to this list.** Nothing outside Creative Studio 3 takes
   a number in that range.
 - Anyone needing a new id here takes the next free number **inside** that range, and nowhere else.
-- **The range is now exhausted**: `BUG-061` through `BUG-079` are all allocated. The next filing needs
-  a fresh reservation, checked against every branch the way this one was, not just against `sprint4`.
+- **The range is now exhausted**: `BUG-061` through `BUG-079` are all allocated. New entries here take
+  `BUG-080` upward.
+- **The reservation did not hold, and the mechanism is the reason.** On 2026-08-21 at 11:52,
+  `sprint4-consolidated` filed its own `BUG-061` and `BUG-062` into `TASKS.md` — an unhandled
+  rejection escaping a gate run — while this list already used both numbers for the Director attach
+  failure and the mislabelled storage error. Nobody did anything wrong: a reservation written into
+  one branch's document cannot bind a branch that never reads it, so reserving a range here was never
+  a reservation at all. **Two different defects now share each of `BUG-061` and `BUG-062` across two
+  registers.** Renumbering is not proposed while Codex is working from these ids; the durable fix is a
+  register-scoped prefix rather than competing for one global `BUG-nnn` space, and that is an owner
+  decision.
 - Before this list merges into a live register, re-check the max there. `sprint4` was at `BUG-060`
   when this range was chosen on 2026-08-21 and is still at `BUG-060`, but it is active, so verify
   rather than assume.
@@ -153,6 +162,16 @@ REFERENCE_PENDING_DIR, ROUTE_CATALOG` — while the same object read back throug
   - Built: every row reads `14s actual` over `No target` on two lines. The drawing reads `14s` on one, and `~24s target` only for the uncovered Beat that has no actual length.
   - So a Beat with real coverage carries a second line saying it has no target, which is noise on every populated row, and the row grows to two lines to say it.
   - The designer's ruling for the fold is explicit that the row keeps **one height class**. A permanent second line in LENGTH works against that on every row that has shots.
+
+- [ ] **[BUG-080][P2][Creative Studio] Board Beat titles are brand orange at 17px where the drawing has near-black at 13px** — found 2026-08-21 against a seeded project
+  - Measured side by side. Drawing: `Manrope 600, 13px, #14181F`. Build: `Manrope 700, 17px, #F05A22`.
+  - So the title is 1.3× the drawn size and rendered in the brand accent. Brand colour on a heading reads as an action, and every card carries one, so the Board's dominant signal becomes nine orange strings rather than nine pictures.
+  - Same class as BUG-069, which fixed the workspace title and the view chips but not the Board card. Worth a sweep for other components still on the old scale rather than another single fix.
+
+- [ ] **[BUG-081][P2][Creative Studio] Every Board card carries five controls the drawing has none of, including a destructive one** — found 2026-08-21 against a seeded project
+  - The drawn card is `01 · Cold open · action · look · 2 shots · 14s · READY` and **no buttons at all**. The built card exposes five: the title itself as a button, a drag handle, move-earlier, move-later, and **Lift Beat** styled as destructive.
+  - Nine cards therefore show forty-five controls, with a destructive action permanently on the face of each. The drawing's Board is for looking — "picking takes is looking", in the designer's words for why the rail collapses there — and a wall of controls works against exactly that.
+  - Reordering and lifting are real capabilities and are not in question. Where they surface is: the drawing puts none of them on the resting card.
 
 ## Correctness and honesty of failures
 
