@@ -13,6 +13,7 @@ import type { StudioRendererExportCatalogV2 } from '@/common/types/project/creat
 import type { WorkspaceProjection } from '../../workspaceProjection';
 import { buildCutFilmSummary, buildCutSlateWarnings, formatCutClock } from './filmSummary';
 import { buildCutFilmstrip } from './filmstrip';
+import { buildCutMatchReference } from './matchReference';
 import styles from './Cut.module.css';
 
 const CUT_ROOT = 'conversation.creativeStudio.workspace.cut';
@@ -207,6 +208,10 @@ export const CutView: React.FC<CutViewProps> = ({
   const slates = buildCutSlateWarnings(projection.cut);
   const filmstrip = buildCutFilmstrip(projection.cut);
   const growByBeatId = new Map(filmstrip?.map((segment) => [segment.beatId, segment.growFactor]) ?? []);
+  const matchReference = buildCutMatchReference({
+    activeBeats: projection.activeBeats,
+    selectedMatchShotId: projection.cut.selectedMatchShotId,
+  });
 
   return (
     <section aria-label={t(`${CUT_ROOT}.ariaLabel`)} className={styles.root} data-studio-cut>
@@ -460,6 +465,16 @@ export const CutView: React.FC<CutViewProps> = ({
               ))}
             </Select>
           </label>
+          {matchReference === null ? null : (
+            <p className={styles.matchReference} data-cut-match-reference data-shot-id={matchReference.shotId}>
+              <bdi dir='auto'>
+                {t(`${CUT_ROOT}.match.reference`, {
+                  beat: matchReference.beatLabel,
+                  shot: matchReference.shotLabel,
+                })}
+              </bdi>
+            </p>
+          )}
           {projection.cut.matchSelectionInvalid ? (
             <Alert type='warning' content={t(`${CUT_ROOT}.match.invalid`)} />
           ) : null}

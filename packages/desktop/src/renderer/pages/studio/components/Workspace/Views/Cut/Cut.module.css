@@ -369,3 +369,13 @@
     row-gap: 6px;
   }
 }
+
+.matchReference {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  margin: 0;
+  min-inline-size: 0;
+  text-transform: uppercase;
+}

@@ -1559,7 +1559,8 @@
           "selected": "Match To reference changed. Existing media was not regenerated.",
           "cleared": "Match To reference cleared. Existing media was not regenerated.",
           "setFailed": "Match To reference was not changed.",
-          "invalid": "The selected Match To reference is not an active Shot. Clear it or choose an active Shot."
+          "invalid": "The selected Match To reference is not an active Shot. Clear it or choose an active Shot.",
+          "reference": "Beat {{beat}} · Shot {{shot}} is the reference"
         },
         "exports": {
           "title": "Exports",

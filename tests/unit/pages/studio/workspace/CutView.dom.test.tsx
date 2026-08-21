@@ -24,6 +24,7 @@ import {
   buildCutFilmstrip,
   filmstripShowsTitle,
 } from '@/renderer/pages/studio/components/Workspace/Views/Cut/filmstrip';
+import { buildCutMatchReference } from '@/renderer/pages/studio/components/Workspace/Views/Cut/matchReference';
 
 type ButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'type'> & {
   icon?: React.ReactNode;
@@ -200,11 +201,11 @@ const cut = (overrides: Partial<WorkspaceCutProjection> = {}): WorkspaceCutProje
   ...overrides,
 });
 
-const projection = (cutProjection = cut()): WorkspaceProjection =>
+const projection = (cutProjection = cut(), activeBeats: WorkspaceProjection['activeBeats'] = []): WorkspaceProjection =>
   ({
     projectId: 'project_1',
     projectRevision: 7,
-    activeBeats: [],
+    activeBeats,
     activeBeatIds: cutProjection.beats.map((beat) => beat.id),
     activeShotIds: cutProjection.matchCandidates.map((shot) => shot.shotId),
     coverageGapBeatIds: ['beat_2'],
@@ -253,6 +254,7 @@ const renderCut = (
     exportCatalog?: StudioRendererExportCatalogV2 | null;
     exportErrorMessageKey?: string | null;
     pending?: boolean;
+    activeBeats?: WorkspaceProjection['activeBeats'];
   } = {}
 ) => {
   const cutActions = input.actions ?? actions();
@@ -263,7 +265,7 @@ const renderCut = (
       exportErrorMessageKey={input.exportErrorMessageKey ?? null}
       pending={input.pending ?? false}
       projectId='project_1'
-      projection={projection(input.cutProjection)}
+      projection={projection(input.cutProjection, input.activeBeats)}
     />
   );
   return cutActions;
@@ -760,6 +762,24 @@ describe('the Cut renders the film it is judging', () => {
     expect(document.querySelector<HTMLElement>('[data-beat-id="beat_1"]')?.style.flexGrow).toBe('');
   });
 
+  it('names the Match To reference by its Beat and Shot position once one is chosen', () => {
+    renderCut({
+      cutProjection: cut({ selectedMatchShotId: 'shot_1' }),
+      activeBeats: [
+        { id: 'beat_1', shots: [{ id: 'shot_0' }, { id: 'shot_1' }] },
+      ] as unknown as WorkspaceProjection['activeBeats'],
+    });
+
+    const reference = document.querySelector('[data-cut-match-reference]');
+    expect(reference).not.toBeNull();
+    expect(reference?.getAttribute('data-shot-id')).toBe('shot_1');
+  });
+
+  it('names no reference while none is chosen', () => {
+    renderCut({ cutProjection: cut({ selectedMatchShotId: null }) });
+    expect(document.querySelector('[data-cut-match-reference]')).toBeNull();
+  });
+
   it('badges every uncovered Beat with its film position and the slate it will export', () => {
     renderCut({ cutProjection: cut({ filmDurationSeconds: 11, targetDurationSeconds: 12 }) });
 
@@ -768,5 +788,63 @@ describe('the Cut renders the film it is judging', () => {
     expect(slates).toHaveLength(1);
     expect(slates[0]?.getAttribute('data-slate-beat-id')).toBe('beat_2');
     expect(slates[0]?.textContent).toContain('02');
+  });
+});
+
+describe('the Match To reference', () => {
+  const shot = (id: string) => ({ id }) as WorkspaceProjection['activeBeats'][number]['shots'][number];
+  const refBeat = (id: string, shotIds: readonly string[]) =>
+    ({ id, shots: shotIds.map(shot) }) as WorkspaceProjection['activeBeats'][number];
+
+  it('names the reference by its Beat position in the film and its Shot position in that Beat', () => {
+    const reference = buildCutMatchReference({
+      activeBeats: [
+        refBeat('beat_1', ['shot_a']),
+        refBeat('beat_2', ['shot_b', 'shot_c']),
+        refBeat('beat_3', ['shot_d', 'shot_e']),
+      ],
+      selectedMatchShotId: 'shot_e',
+    });
+
+    expect(reference).toEqual({
+      beatId: 'beat_3',
+      shotId: 'shot_e',
+      beatPosition: 3,
+      shotPosition: 2,
+      beatLabel: '03',
+      shotLabel: '02',
+    });
+  });
+
+  it('counts the Shot position within its own Beat, not across the film', () => {
+    // shot_d is the fourth Shot in the film but the first in its Beat, and the label says 01.
+    const reference = buildCutMatchReference({
+      activeBeats: [refBeat('beat_1', ['a', 'b']), refBeat('beat_2', ['c']), refBeat('beat_3', ['shot_d'])],
+      selectedMatchShotId: 'shot_d',
+    });
+    expect(reference?.shotLabel).toBe('01');
+    expect(reference?.beatLabel).toBe('03');
+  });
+
+  it('has no reference when nothing is selected', () => {
+    expect(
+      buildCutMatchReference({ activeBeats: [refBeat('beat_1', ['shot_a'])], selectedMatchShotId: null })
+    ).toBeNull();
+  });
+
+  it('has no reference when the selected Shot is not in the film', () => {
+    // A Shot that has been parked or removed must not be named as the reference.
+    expect(
+      buildCutMatchReference({ activeBeats: [refBeat('beat_1', ['shot_a'])], selectedMatchShotId: 'shot_gone' })
+    ).toBeNull();
+  });
+
+  it('takes the first Beat that owns the Shot when identity is duplicated', () => {
+    // Duplicated ids are malformed authority; naming one deterministically beats naming none.
+    const reference = buildCutMatchReference({
+      activeBeats: [refBeat('beat_1', ['dupe']), refBeat('beat_2', ['dupe'])],
+      selectedMatchShotId: 'dupe',
+    });
+    expect(reference?.beatId).toBe('beat_1');
   });
 });

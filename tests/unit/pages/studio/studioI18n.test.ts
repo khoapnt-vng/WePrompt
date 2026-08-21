@@ -144,6 +144,7 @@ const expectedLeaves = [
   'cut.film.counts',
   'cut.slate.label',
   'cut.slate.warning',
+  'cut.match.reference',
   'cut.dragHandle',
   'cut.moveEarlier',
   'cut.moveLater',
