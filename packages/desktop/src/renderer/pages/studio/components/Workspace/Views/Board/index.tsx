@@ -6,7 +6,7 @@
 
 import { ArrowDown, ArrowUp, Drag } from '@icon-park/react';
 import { Button, Popconfirm } from '@arco-design/web-react';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type {
@@ -71,8 +71,6 @@ export type BoardViewProps = {
   onBinFocusItemSettled: () => void;
   onOpenBeat: (beatId: string) => void;
 };
-
-type CardSize = 'small' | 'medium' | 'large';
 
 type BoardCoverProps = {
   beat: WorkspaceBeatProjection;
@@ -148,7 +146,6 @@ export const BoardView: React.FC<BoardViewProps> = ({
   onOpenBeat,
 }) => {
   const { t } = useTranslation();
-  const [cardSize, setCardSize] = useState<CardSize>('medium');
   const [announcement, setAnnouncement] = useState('');
   const [busyBeatId, setBusyBeatId] = useState<string | null>(null);
   const [localFocusItemKey, setLocalFocusItemKey] = useState<string | null>(null);
@@ -156,7 +153,8 @@ export const BoardView: React.FC<BoardViewProps> = ({
   const [failedLiftFocusId, setFailedLiftFocusId] = useState<string | null>(null);
   const titleRefs = useRef(new Map<string, HTMLButtonElement>());
   const liftRefs = useRef(new Map<string, HTMLButtonElement>());
-  const reorderPendingRef = useRef(false);
+  const liftBlockerDescriptionId = useId();
+  const mutationPendingRef = useRef(false);
   const draggedBeatIdRef = useRef<string | null>(null);
   const dirtyBeatIdSet = useMemo(() => new Set(dirtyBeatIds), [dirtyBeatIds]);
   const beatOrder = projection.activeBeats.map((beat) => beat.id);
@@ -192,8 +190,7 @@ export const BoardView: React.FC<BoardViewProps> = ({
       return;
     }
     const control = liftRefs.current.get(failedLiftFocusId);
-    if (control === undefined) return;
-    control.focus();
+    (control ?? titleRefs.current.get(failedLiftFocusId))?.focus();
     setFailedLiftFocusId(null);
   }, [busyBeatId, failedLiftFocusId, projection.activeBeatIds]);
 
@@ -202,12 +199,12 @@ export const BoardView: React.FC<BoardViewProps> = ({
   };
 
   const reorderBeat = async (beatId: string, destination: number): Promise<void> => {
-    if (pending || reorderPendingRef.current || !canonicalOrderReady) return;
+    if (pending || mutationPendingRef.current || !canonicalOrderReady) return;
     const source = beatOrder.indexOf(beatId);
     const nextOrder = moveOrder(beatOrder, source, destination);
     if (nextOrder === null) return;
 
-    reorderPendingRef.current = true;
+    mutationPendingRef.current = true;
     setBusyBeatId(beatId);
     let reordered = false;
     try {
@@ -225,14 +222,15 @@ export const BoardView: React.FC<BoardViewProps> = ({
     } catch {
       setAnnouncement(t(`${KEY_ROOT}.reorderFailed`));
     } finally {
-      reorderPendingRef.current = false;
+      mutationPendingRef.current = false;
       setBusyBeatId(null);
       focusBeatTitle(beatId);
     }
   };
 
-  const liftBeat = async (beatId: string): Promise<void> => {
-    if (pending || busyBeatId !== null) return;
+  const liftBeat = async (beatId: string, liftAllowed: boolean): Promise<void> => {
+    if (!liftAllowed || pending || mutationPendingRef.current) return;
+    mutationPendingRef.current = true;
     setBusyBeatId(beatId);
     let lifted = false;
     try {
@@ -242,6 +240,7 @@ export const BoardView: React.FC<BoardViewProps> = ({
     } catch {
       setAnnouncement(t(`${KEY_ROOT}.liftFailed`));
     } finally {
+      mutationPendingRef.current = false;
       setBusyBeatId(null);
       if (!lifted) setFailedLiftFocusId(beatId);
     }
@@ -250,26 +249,12 @@ export const BoardView: React.FC<BoardViewProps> = ({
   const requestedBinFocusItemKey = binFocusItemKey ?? localFocusItemKey;
 
   return (
-    <section className={styles.root} data-card-size={cardSize}>
+    <section className={styles.root}>
       <header className={styles.header}>
         <h2 className={styles.heading}>{t(`${KEY_ROOT}.ariaLabel`)}</h2>
-        <div aria-label={t(`${KEY_ROOT}.cardSizeLabel`)} className={styles.cardSizeControls} role='group'>
-          {(['small', 'medium', 'large'] as const).map((size) => (
-            <Button
-              key={size}
-              aria-pressed={cardSize === size}
-              disabled={pending}
-              onClick={() => setCardSize(size)}
-              size='small'
-              type={cardSize === size ? 'primary' : 'secondary'}
-            >
-              {t(`${KEY_ROOT}.cardSize${size[0]!.toUpperCase()}${size.slice(1)}`)}
-            </Button>
-          ))}
-        </div>
       </header>
 
-      <ol aria-label={t(`${KEY_ROOT}.ariaLabel`)} className={styles.beatList} data-card-size={cardSize}>
+      <ol aria-label={t(`${KEY_ROOT}.ariaLabel`)} className={styles.beatList}>
         {projection.activeBeats.map((beat, index) => {
           const selected = beat.id === selectedBeatId;
           const eligibility = exactBeatParkEligibility(projection, projectId, beat.id);
@@ -286,6 +271,7 @@ export const BoardView: React.FC<BoardViewProps> = ({
                   ? []
                   : [`${KEY_ROOT}.liftUnavailable`];
           const mutationLocked = pending || busyBeatId !== null || !canonicalOrderReady;
+          const liftGuarded = mutationLocked || !liftAllowed;
           const title = beat.title.trim() || beat.id;
           const actualDuration =
             beat.actualSeconds === null ? null : t(`${KEY_ROOT}.actualDuration`, { seconds: beat.actualSeconds });
@@ -355,76 +341,108 @@ export const BoardView: React.FC<BoardViewProps> = ({
                   <span>{t(STATE_KEYS[beat.displayState])}</span>
                 </p>
 
-                <div className={styles.cardActions}>
-                  <Button
-                    aria-label={t(`${KEY_ROOT}.dragHandle`, { title, position: index + 1 })}
-                    className={styles.dragHandle}
-                    disabled={mutationLocked}
-                    draggable={!mutationLocked}
-                    icon={<Drag />}
-                    onDragEnd={() => {
-                      draggedBeatIdRef.current = null;
-                    }}
-                    onDragStart={(event) => {
-                      draggedBeatIdRef.current = beat.id;
-                      event.dataTransfer.effectAllowed = 'move';
-                      event.dataTransfer.setData('text/plain', beat.id);
-                    }}
+                {selected ? (
+                  <div
+                    aria-label={t(`${KEY_ROOT}.actionsLabel`, { title })}
+                    className={styles.selectionActions}
                     onKeyDown={(event) => {
-                      let destination: number | null = null;
-                      if (event.key === 'ArrowUp') destination = index - 1;
-                      else if (event.key === 'ArrowDown') destination = index + 1;
-                      else if (event.key === 'Home') destination = 0;
-                      else if (event.key === 'End') destination = beatOrder.length - 1;
-                      if (destination === null) return;
+                      if (event.key !== 'Escape') return;
                       event.preventDefault();
-                      void reorderBeat(beat.id, destination);
+                      event.stopPropagation();
+                      focusBeatTitle(beat.id);
                     }}
-                    size='small'
-                  />
-                  <Button
-                    aria-label={t(`${KEY_ROOT}.moveEarlier`, { title })}
-                    disabled={mutationLocked || index === 0}
-                    icon={<ArrowUp />}
-                    onClick={() => void reorderBeat(beat.id, index - 1)}
-                    size='small'
-                  />
-                  <Button
-                    aria-label={t(`${KEY_ROOT}.moveLater`, { title })}
-                    disabled={mutationLocked || index === beatOrder.length - 1}
-                    icon={<ArrowDown />}
-                    onClick={() => void reorderBeat(beat.id, index + 1)}
-                    size='small'
-                  />
-                  <Popconfirm
-                    cancelText={t(`${BEAT_PANEL_ROOT}.common.cancel`)}
-                    content={t(`${KEY_ROOT}.liftConfirmContent`)}
-                    disabled={mutationLocked || !liftAllowed}
-                    okText={t(`${KEY_ROOT}.liftBeat`)}
-                    onCancel={() => liftRefs.current.get(beat.id)?.focus()}
-                    onOk={() => liftBeat(beat.id)}
-                    title={t(`${KEY_ROOT}.liftConfirmTitle`, { title })}
+                    role='group'
                   >
-                    <Button
-                      ref={(node) => {
-                        if (node === null) liftRefs.current.delete(beat.id);
-                        else if (node instanceof HTMLButtonElement) liftRefs.current.set(beat.id, node);
-                      }}
-                      disabled={mutationLocked || !liftAllowed}
-                      size='small'
-                      status='danger'
-                    >
-                      {t(`${KEY_ROOT}.liftBeat`)}
-                    </Button>
-                  </Popconfirm>
-                </div>
-                {blockerKeys.length === 0 ? null : (
-                  <ul aria-atomic='true' aria-live='polite' className={styles.blocker}>
-                    {blockerKeys.map((blockerKey, blockerIndex) => (
-                      <li key={`${blockerKey}:${blockerIndex}`}>{t(blockerKey)}</li>
-                    ))}
-                  </ul>
-                )}
+                    <div className={styles.cardActions}>
+                      <Button
+                        aria-label={t(`${KEY_ROOT}.dragHandle`, { title, position: index + 1 })}
+                        className={styles.dragHandle}
+                        disabled={mutationLocked}
+                        draggable={!mutationLocked}
+                        icon={<Drag />}
+                        onDragEnd={() => {
+                          draggedBeatIdRef.current = null;
+                        }}
+                        onDragStart={(event) => {
+                          draggedBeatIdRef.current = beat.id;
+                          event.dataTransfer.effectAllowed = 'move';
+                          event.dataTransfer.setData('text/plain', beat.id);
+                        }}
+                        onKeyDown={(event) => {
+                          let destination: number | null = null;
+                          if (event.key === 'ArrowUp') destination = index - 1;
+                          else if (event.key === 'ArrowDown') destination = index + 1;
+                          else if (event.key === 'Home') destination = 0;
+                          else if (event.key === 'End') destination = beatOrder.length - 1;
+                          if (destination === null) return;
+                          event.preventDefault();
+                          void reorderBeat(beat.id, destination);
+                        }}
+                        size='small'
+                      />
+                      <Button
+                        aria-label={t(`${KEY_ROOT}.moveEarlier`, { title })}
+                        disabled={mutationLocked || index === 0}
+                        icon={<ArrowUp />}
+                        onClick={() => void reorderBeat(beat.id, index - 1)}
+                        size='small'
+                      />
+                      <Button
+                        aria-label={t(`${KEY_ROOT}.moveLater`, { title })}
+                        disabled={mutationLocked || index === beatOrder.length - 1}
+                        icon={<ArrowDown />}
+                        onClick={() => void reorderBeat(beat.id, index + 1)}
+                        size='small'
+                      />
+                      <Popconfirm
+                        cancelText={t(`${BEAT_PANEL_ROOT}.common.cancel`)}
+                        content={t(`${KEY_ROOT}.liftConfirmContent`)}
+                        disabled={liftGuarded}
+                        okText={t(`${KEY_ROOT}.liftBeat`)}
+                        onCancel={() => liftRefs.current.get(beat.id)?.focus()}
+                        onOk={() => liftBeat(beat.id, liftAllowed)}
+                        title={t(`${KEY_ROOT}.liftConfirmTitle`, { title })}
+                      >
+                        <Button
+                          ref={(node) => {
+                            if (node === null) liftRefs.current.delete(beat.id);
+                            else if (node instanceof HTMLButtonElement) liftRefs.current.set(beat.id, node);
+                          }}
+                          aria-describedby={blockerKeys.length === 0 ? undefined : liftBlockerDescriptionId}
+                          aria-disabled={liftGuarded || undefined}
+                          className={styles.liftBeat}
+                          onClick={(event) => {
+                            if (!liftGuarded) return;
+                            event.preventDefault();
+                            event.stopPropagation();
+                          }}
+                          onKeyDown={(event) => {
+                            if (!liftGuarded || (event.key !== 'Enter' && event.key !== ' ')) return;
+                            event.preventDefault();
+                            event.stopPropagation();
+                          }}
+                          size='small'
+                          status='danger'
+                          type='secondary'
+                        >
+                          {t(`${KEY_ROOT}.liftBeat`)}
+                        </Button>
+                      </Popconfirm>
+                    </div>
+                    {blockerKeys.length === 0 ? null : (
+                      <ul
+                        id={liftBlockerDescriptionId}
+                        aria-atomic='true'
+                        aria-live='polite'
+                        className={styles.blocker}
+                      >
+                        {blockerKeys.map((blockerKey, blockerIndex) => (
+                          <li key={`${blockerKey}:${blockerIndex}`}>{t(blockerKey)}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ) : null}
               </div>
             </li>
           );

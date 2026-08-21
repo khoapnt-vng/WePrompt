@@ -6,6 +6,8 @@
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import React, { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -125,10 +127,7 @@ vi.mock('react-i18next', () => ({
     t: (key: string, values?: Record<string, unknown>) => {
       const copy: Record<string, string> = {
         'conversation.creativeStudio.workspace.board.ariaLabel': 'Beat board',
-        'conversation.creativeStudio.workspace.board.cardSizeLabel': 'Card size',
-        'conversation.creativeStudio.workspace.board.cardSizeSmall': 'S',
-        'conversation.creativeStudio.workspace.board.cardSizeMedium': 'M',
-        'conversation.creativeStudio.workspace.board.cardSizeLarge': 'L',
+        'conversation.creativeStudio.workspace.board.actionsLabel': 'Actions for Beat A',
         'conversation.creativeStudio.workspace.board.selectedBeat': 'Selected Beat',
         'conversation.creativeStudio.workspace.board.noCoverage': 'No coverage',
         'conversation.creativeStudio.workspace.board.coverUnavailable': 'Preview unavailable',
@@ -181,6 +180,9 @@ vi.mock('react-i18next', () => ({
         return `${String(values?.seconds)}s actual`;
       }
       if (key === 'conversation.creativeStudio.workspace.board.openBeat') return `Open ${String(values?.title)}`;
+      if (key === 'conversation.creativeStudio.workspace.board.actionsLabel') {
+        return `Actions for ${String(values?.title)}`;
+      }
       if (key === 'conversation.creativeStudio.workspace.board.dragHandle') {
         return `Reorder ${String(values?.title)} at position ${String(values?.position)}`;
       }
@@ -413,27 +415,54 @@ describe('BoardView', () => {
     expect(coveredCard.querySelector('[data-cover-kind="unavailable"]')).toHaveTextContent('Preview unavailable');
   });
 
-  it('keeps S, M, and L local presentation state with M as default and no action callback', async () => {
-    const user = userEvent.setup();
+  it('uses a fixed responsive three-up grid with neutral full-card openers and exact title type', () => {
     const actions = makeActions();
-    render(<BoardView {...boardProps(makeProjection([makeBeat('a')]), actions)} />);
+    const result = render(
+      <BoardView {...boardProps(makeProjection([makeBeat('a'), makeBeat('b'), makeBeat('c')]), actions)} />
+    );
     const list = screen.getByRole('list', { name: 'Beat board' });
-    const sizeGroup = screen.getByRole('group', { name: 'Card size' });
 
-    expect(list).toHaveAttribute('data-card-size', 'medium');
-    expect(within(sizeGroup).getByRole('button', { name: 'M' })).toHaveAttribute('aria-pressed', 'true');
-    await user.click(within(sizeGroup).getByRole('button', { name: 'S' }));
-    expect(list).toHaveAttribute('data-card-size', 'small');
-    await user.click(within(sizeGroup).getByRole('button', { name: 'L' }));
-    expect(list).toHaveAttribute('data-card-size', 'large');
-    await user.click(within(sizeGroup).getByRole('button', { name: 'M' }));
-    expect(list).toHaveAttribute('data-card-size', 'medium');
+    expect(screen.queryByRole('group', { name: 'Card size' })).toBeNull();
+    expect(list).not.toHaveAttribute('data-card-size');
+    for (const beatId of ['a', 'b', 'c']) {
+      const card = cardFor(result.container, beatId);
+      expect(within(card).getAllByRole('button')).toHaveLength(1);
+      expect(within(card).getByRole('button', { name: `Open Beat ${beatId.toUpperCase()}` })).not.toHaveAttribute(
+        'aria-current'
+      );
+      expect(within(card).queryByRole('button', { name: /(?:move|reorder|lift)/i })).toBeNull();
+    }
+    expect(screen.queryByRole('group', { name: /Actions for/ })).toBeNull();
     expect(actions.reorderBeats).not.toHaveBeenCalled();
     expect(actions.parkBeat).not.toHaveBeenCalled();
     expect(actions.reorderBin).not.toHaveBeenCalled();
+
+    const css = readFileSync(
+      resolve(
+        process.cwd(),
+        'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/Board/Board.module.css'
+      ),
+      'utf8'
+    );
+    expect(css).toMatch(/\.beatList\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
+    expect(css).toMatch(/\.beatTitle\s*\{[^}]*color:\s*var\(--text-primary\)/s);
+    expect(css).toMatch(/\.beatTitle\s*\{[^}]*font-family:\s*var\(--font-display\)/s);
+    expect(css).toMatch(/\.beatTitle\s*\{[^}]*font-size:\s*13px/s);
+    expect(css).toMatch(/\.beatTitle\s*\{[^}]*font-weight:\s*var\(--fw-semibold\)/s);
+    expect(css).toMatch(/\.beatTitle\s*\{[^}]*composes:\s*inkTextAction/s);
+    expect(css).toMatch(/\.beatCard\s*\{[^}]*position:\s*relative/s);
+    expect(css).toMatch(/\.beatTitle\s*\{[^}]*position:\s*static/s);
+    expect(css).toMatch(
+      /\.beatTitle:global\(\.arco-btn-text\)[^{]*\{[^}]*border-color:\s*transparent[^}]*background-color:\s*transparent[^}]*box-shadow:\s*none/s
+    );
+    expect(css).toMatch(/\.beatTitle::before\s*\{[^}]*position:\s*absolute[^}]*inset:\s*0/s);
+    expect(css).toMatch(/\.selectionActions\s*\{[^}]*z-index:\s*2/s);
+    expect(css).toMatch(
+      /\.liftBeat[^,{]*\[aria-disabled='true'\][^{]*\{[^}]*color:\s*var\(--text-disabled\)[^}]*cursor:\s*not-allowed/s
+    );
   });
 
-  it('opens only the exact shared Beat selection and never changes paid Shot selection', async () => {
+  it('opens from the neutral full-card target, exposes actions only on the selected card, and preserves paid Shots', async () => {
     const user = userEvent.setup();
     const projection = makeProjection([makeBeat('a'), makeBeat('b')]);
     const Harness = () => {
@@ -448,13 +477,24 @@ describe('BoardView', () => {
     };
     const result = render(<Harness />);
 
-    expect(screen.getByRole('button', { name: 'Open Beat A' })).toHaveAttribute('aria-current', 'true');
-    await user.click(screen.getByRole('button', { name: 'Open Beat B' }));
+    const firstCard = cardFor(result.container, 'a');
+    const secondCard = cardFor(result.container, 'b');
+    expect(within(firstCard).getByRole('button', { name: 'Open Beat A' })).toHaveAttribute('aria-current', 'true');
+    expect(within(firstCard).getByRole('group', { name: 'Actions for Beat A' })).toBeVisible();
+    expect(within(secondCard).getAllByRole('button')).toHaveLength(1);
+    await user.click(within(secondCard).getByRole('button', { name: 'Open Beat B' }));
     expect(JSON.parse(screen.getByTestId('selection').textContent ?? '{}')).toEqual({
       selectedBeatId: 'b',
       selectedShotIds: ['a_shot'],
     });
-    expect(screen.getByRole('button', { name: 'Open Beat B' })).toHaveAttribute('aria-current', 'true');
+    expect(within(secondCard).getByRole('button', { name: 'Open Beat B' })).toHaveAttribute('aria-current', 'true');
+    const actionsGroup = within(secondCard).getByRole('group', { name: 'Actions for Beat B' });
+    expect(actionsGroup.compareDocumentPosition(within(secondCard).getByRole('button', { name: 'Open Beat B' }))).toBe(
+      Node.DOCUMENT_POSITION_PRECEDING
+    );
+    act(() => within(actionsGroup).getByRole('button', { name: 'Move Beat B earlier' }).focus());
+    fireEvent.keyDown(actionsGroup, { key: 'Escape' });
+    expect(within(secondCard).getByRole('button', { name: 'Open Beat B' })).toHaveFocus();
     fireEvent.click(cardFor(result.container, 'a'));
     expect(JSON.parse(screen.getByTestId('selection').textContent ?? '{}').selectedBeatId).toBe('b');
     expect(screen.queryByRole('checkbox')).toBeNull();
@@ -462,17 +502,30 @@ describe('BoardView', () => {
 
   it('sends exact whole-order keyboard payloads, announces global positions, and restores moved identity focus', async () => {
     const actions = makeActions();
-    render(<BoardView {...boardProps(makeProjection([makeBeat('a'), makeBeat('b'), makeBeat('c')]), actions)} />);
+    const projection = makeProjection([makeBeat('a'), makeBeat('b'), makeBeat('c')]);
+    const Harness = () => {
+      const [selectedBeatId, setSelectedBeatId] = useState<string | null>('a');
+      return (
+        <BoardView
+          {...boardProps(projection, actions)}
+          onOpenBeat={setSelectedBeatId}
+          selectedBeatId={selectedBeatId}
+        />
+      );
+    };
+    render(<Harness />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Move Beat A later' }));
     await waitFor(() => expect(actions.reorderBeats).toHaveBeenLastCalledWith(['b', 'a', 'c']));
     expect(screen.getByRole('button', { name: 'Open Beat A' })).toHaveFocus();
     expect(document.querySelector('[aria-live="polite"]')).toHaveTextContent('Moved Beat A from 1 to 2 of 3.');
 
+    fireEvent.click(screen.getByRole('button', { name: 'Open Beat C' }));
     fireEvent.keyDown(screen.getByRole('button', { name: 'Reorder Beat C at position 3' }), { key: 'Home' });
     await waitFor(() => expect(actions.reorderBeats).toHaveBeenLastCalledWith(['c', 'a', 'b']));
     expect(screen.getByRole('button', { name: 'Open Beat C' })).toHaveFocus();
 
+    fireEvent.click(screen.getByRole('button', { name: 'Open Beat A' }));
     fireEvent.keyDown(screen.getByRole('button', { name: 'Reorder Beat A at position 1' }), { key: 'End' });
     await waitFor(() => expect(actions.reorderBeats).toHaveBeenLastCalledWith(['b', 'c', 'a']));
     expect(screen.getByRole('button', { name: 'Open Beat A' })).toHaveFocus();
@@ -480,11 +533,46 @@ describe('BoardView', () => {
     expect(actions.reorderBin).not.toHaveBeenCalled();
   });
 
+  it('keeps contextual reorder single-flight while the exact native action is pending', async () => {
+    let finish!: (value: boolean) => void;
+    const actions = makeActions();
+    vi.mocked(actions.reorderBeats).mockReturnValueOnce(
+      new Promise<boolean>((resolvePromise) => {
+        finish = resolvePromise;
+      })
+    );
+    render(<BoardView {...boardProps(makeProjection([makeBeat('a'), makeBeat('b')]), actions)} selectedBeatId='a' />);
+    const moveLater = screen.getByRole('button', { name: 'Move Beat A later' });
+
+    fireEvent.click(moveLater);
+    fireEvent.click(moveLater);
+    expect(actions.reorderBeats).toHaveBeenCalledTimes(1);
+    expect(actions.reorderBeats).toHaveBeenCalledWith(['b', 'a']);
+    const guardedLift = screen.getByRole('button', { name: 'Lift Beat' });
+    expect(guardedLift).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(guardedLift);
+    expect(actions.parkBeat).not.toHaveBeenCalled();
+
+    finish(true);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Open Beat A' })).toHaveFocus());
+  });
+
   it('uses pointer drag and canonical earlier/later semantics unchanged in RTL without optimistic DOM order', async () => {
     const actions = makeActions();
+    const projection = makeProjection([makeBeat('a'), makeBeat('b'), makeBeat('c')]);
+    const Harness = () => {
+      const [selectedBeatId, setSelectedBeatId] = useState<string | null>('a');
+      return (
+        <BoardView
+          {...boardProps(projection, actions)}
+          onOpenBeat={setSelectedBeatId}
+          selectedBeatId={selectedBeatId}
+        />
+      );
+    };
     const result = render(
       <div dir='rtl'>
-        <BoardView {...boardProps(makeProjection([makeBeat('a'), makeBeat('b'), makeBeat('c')]), actions)} />
+        <Harness />
       </div>
     );
     const transferBytes = new Map<string, string>();
@@ -504,6 +592,7 @@ describe('BoardView', () => {
     ).toEqual(['a', 'b', 'c']);
     expect(screen.getByRole('button', { name: 'Open Beat A' })).toHaveFocus();
 
+    fireEvent.click(screen.getByRole('button', { name: 'Open Beat B' }));
     fireEvent.keyDown(screen.getByRole('button', { name: 'Reorder Beat B at position 2' }), { key: 'ArrowUp' });
     await waitFor(() => expect(actions.reorderBeats).toHaveBeenLastCalledWith(['b', 'a', 'c']));
 
@@ -532,39 +621,64 @@ describe('BoardView', () => {
       ],
     });
     const actions = makeActions();
-    const result = render(<BoardView {...boardProps(projection, actions)} dirtyBeatIds={['b']} />);
+    const result = render(<BoardView {...boardProps(projection, actions)} dirtyBeatIds={['b']} selectedBeatId='a' />);
 
-    expect(cardFor(result.container, 'a')).toHaveTextContent('Refresh the current workspace status');
-    expect(cardFor(result.container, 'b')).toHaveTextContent('Save or reset local edits');
-    const blockedCard = cardFor(result.container, 'c');
-    expect(blockedCard).toHaveTextContent('Own frame is pending');
-    expect(blockedCard).toHaveTextContent('Current match dependency');
-    const blockerList = within(blockedCard).getByRole('list');
+    const select = (beatId: string, nextProjection = projection, dirtyBeatIds: readonly string[] = ['b']) => {
+      result.rerender(
+        <BoardView {...boardProps(nextProjection, actions)} dirtyBeatIds={dirtyBeatIds} selectedBeatId={beatId} />
+      );
+      const card = cardFor(result.container, beatId);
+      const group = within(card).getByRole('group', { name: `Actions for Beat ${beatId.toUpperCase()}` });
+      expect(screen.getAllByRole('group', { name: /Actions for/ })).toHaveLength(1);
+      return group;
+    };
+
+    let actionRegion = select('a');
+    expect(actionRegion).toHaveTextContent('Refresh the current workspace status');
+    expect(cardFor(result.container, 'b')).not.toHaveTextContent('Refresh the current workspace status');
+    expect(within(actionRegion).getByRole('button', { name: 'Lift Beat' })).toHaveAttribute('aria-disabled', 'true');
+
+    actionRegion = select('b');
+    expect(actionRegion).toHaveTextContent('Save or reset local edits');
+    expect(cardFor(result.container, 'a')).not.toHaveTextContent('Save or reset local edits');
+    expect(within(actionRegion).getByRole('button', { name: 'Lift Beat' })).toHaveAttribute('aria-disabled', 'true');
+
+    actionRegion = select('c');
+    expect(actionRegion).toHaveTextContent('Own frame is pending');
+    expect(actionRegion).toHaveTextContent('Current match dependency');
+    expect(cardFor(result.container, 'd')).not.toHaveTextContent('Own frame is pending');
+    const blockerList = within(actionRegion).getByRole('list');
     expect(blockerList).toHaveAttribute('aria-live', 'polite');
     expect(within(blockerList).getAllByRole('listitem')).toHaveLength(2);
-    expect(blockedCard.textContent!.indexOf('Own frame is pending')).toBeLessThan(
-      blockedCard.textContent!.indexOf('Current match dependency')
+    expect(actionRegion.textContent!.indexOf('Own frame is pending')).toBeLessThan(
+      actionRegion.textContent!.indexOf('Current match dependency')
     );
-    expect(within(cardFor(result.container, 'd')).getByRole('button', { name: 'Lift Beat' })).toBeEnabled();
-    for (const beatId of ['a', 'b', 'c']) {
-      const button = within(cardFor(result.container, beatId)).getByRole('button', { name: 'Lift Beat' });
-      expect(button).toBeDisabled();
-      fireEvent.click(button);
-    }
+    const blockedLift = within(actionRegion).getByRole('button', { name: 'Lift Beat' });
+    expect(blockedLift).toBeEnabled();
+    expect(blockedLift).toHaveAttribute('aria-disabled', 'true');
+    expect(blockedLift).toHaveAttribute('aria-describedby', blockerList.id);
+    act(() => blockedLift.focus());
+    expect(blockedLift).toHaveFocus();
+    fireEvent.click(blockedLift);
+    fireEvent.keyDown(blockedLift, { key: 'Enter' });
+
+    actionRegion = select('d');
+    expect(within(actionRegion).getByRole('button', { name: 'Lift Beat' })).not.toHaveAttribute('aria-disabled');
     expect(actions.parkBeat).not.toHaveBeenCalled();
 
-    result.rerender(
-      <BoardView {...boardProps({ ...projection, workspaceStatusReady: false }, actions)} dirtyBeatIds={[]} />
-    );
-    expect(within(cardFor(result.container, 'd')).getByRole('button', { name: 'Lift Beat' })).toBeDisabled();
-    fireEvent.click(within(cardFor(result.container, 'd')).getByRole('button', { name: 'Lift Beat' }));
+    actionRegion = select('d', { ...projection, workspaceStatusReady: false }, []);
+    const unavailableLift = within(actionRegion).getByRole('button', { name: 'Lift Beat' });
+    expect(unavailableLift).toBeEnabled();
+    expect(unavailableLift).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(unavailableLift);
     expect(actions.parkBeat).not.toHaveBeenCalled();
   });
 
   it('keeps focus and calls nothing on lift cancel, then focuses the matching Bin item on exact success', async () => {
     const actions = makeActions();
-    const result = render(<BoardView {...boardProps(makeProjection([makeBeat('a')]), actions)} />);
-    const lift = within(cardFor(result.container, 'a')).getByRole('button', { name: 'Lift Beat' });
+    render(<BoardView {...boardProps(makeProjection([makeBeat('a')]), actions)} selectedBeatId='a' />);
+    const actionGroup = within(cardFor(document.body, 'a')).getByRole('group', { name: 'Actions for Beat A' });
+    const lift = within(actionGroup).getByRole('button', { name: 'Lift Beat' });
 
     act(() => lift.focus());
     fireEvent.click(lift);
@@ -622,7 +736,7 @@ describe('BoardView', () => {
     vi.mocked(actions.reorderBeats).mockResolvedValue(false);
     vi.mocked(actions.parkBeat).mockResolvedValue(false);
     const initial = makeProjection([makeBeat('a'), makeBeat('b')]);
-    const result = render(<BoardView {...boardProps(initial, actions)} />);
+    const result = render(<BoardView {...boardProps(initial, actions)} selectedBeatId='a' />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Move Beat A later' }));
     await waitFor(() => expect(actions.reorderBeats).toHaveBeenCalledWith(['b', 'a']));
@@ -644,7 +758,9 @@ describe('BoardView', () => {
     expect(document.querySelector('[aria-live="polite"]')).toHaveTextContent('Beat was not moved to the Bin.');
 
     fireEvent.click(screen.getByRole('button', { name: 'Report restored Beat' }));
-    result.rerender(<BoardView {...boardProps(makeProjection([makeBeat('a'), makeBeat('restored')]), actions)} />);
+    result.rerender(
+      <BoardView {...boardProps(makeProjection([makeBeat('a'), makeBeat('restored')]), actions)} selectedBeatId='a' />
+    );
     await waitFor(() => expect(screen.getByRole('button', { name: 'Open Beat RESTORED' })).toHaveFocus());
   });
 

@@ -1487,10 +1487,7 @@
       },
       "board": {
         "ariaLabel": "Beat board",
-        "cardSizeLabel": "Board card size",
-        "cardSizeSmall": "S",
-        "cardSizeMedium": "M",
-        "cardSizeLarge": "L",
+        "actionsLabel": "Actions for {{title}}",
         "openBeat": "Open {{title}}",
         "selectedBeat": "Selected Beat",
         "ordinal": "{{index}}",

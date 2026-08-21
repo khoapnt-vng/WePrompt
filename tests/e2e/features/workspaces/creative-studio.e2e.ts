@@ -1126,16 +1126,159 @@ test.describe('Creative Studio workspace', () => {
     await navigation.getByRole('link', { name: 'Board' }).click();
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'board');
     const board = page.getByRole('list', { name: 'Beat board' });
-    await expect(board.locator(':scope > [data-beat-id]')).toHaveCount(24);
-    await expect(page.getByRole('button', { name: 'Open Table beat 24' })).toHaveAttribute('aria-current', 'true');
-    const boardSizes = page.getByRole('group', { name: 'Board card size' });
-    await expect(boardSizes.getByRole('button', { name: 'M' })).toHaveAttribute('aria-pressed', 'true');
-    await boardSizes.getByRole('button', { name: 'S' }).click();
-    await expect(board).toHaveAttribute('data-card-size', 'small');
-    await boardSizes.getByRole('button', { name: 'L' }).click();
-    await expect(board).toHaveAttribute('data-card-size', 'large');
-    await boardSizes.getByRole('button', { name: 'M' }).click();
-    await expect(board).toHaveAttribute('data-card-size', 'medium');
+    const boardCards = board.locator(':scope > [data-beat-id]');
+    const firstBoardCard = boardCards.nth(0);
+    const selectedBoardCard = boardCards.nth(23);
+    const firstBoardOpener = firstBoardCard.getByRole('button', { name: 'Open Table beat 01' });
+    const selectedBoardOpener = selectedBoardCard.getByRole('button', { name: 'Open Table beat 24' });
+    const selectedBoardActions = selectedBoardCard.getByRole('group', { name: 'Actions for Table beat 24' });
+
+    await expect(directorToggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(boardCards).toHaveCount(24);
+    await expect(page.getByRole('group', { name: 'Board card size' })).toHaveCount(0);
+    await expect(board).not.toHaveAttribute('data-card-size');
+    await expect(firstBoardCard.getByRole('button')).toHaveCount(1);
+    await expect(firstBoardCard.getByRole('group', { name: /Actions for/ })).toHaveCount(0);
+    await expect(selectedBoardOpener).toHaveAttribute('aria-current', 'true');
+    await expect(selectedBoardActions).toBeVisible();
+    await expect(board.getByRole('group', { name: /Actions for/ })).toHaveCount(1);
+
+    const expectBoardGeometry = async (direction: 'ltr' | 'rtl'): Promise<void> => {
+      await root.evaluate((element, nextDirection) => element.setAttribute('dir', nextDirection), direction);
+      await expect(root).toHaveAttribute('dir', direction);
+      const geometry = await board.evaluate((element) => {
+        const cards = Array.from(element.querySelectorAll<HTMLElement>(':scope > [data-beat-id]')).slice(0, 4);
+        const cardRects = cards.map((card) => card.getBoundingClientRect());
+        const cover = cards[0]?.querySelector<HTMLElement>('[data-cover-kind]')?.getBoundingClientRect() ?? null;
+        const bounds = element.getBoundingClientRect();
+        const workScroll = element.closest<HTMLElement>('[data-studio-work-scroll]');
+        const workScrollBounds = workScroll?.getBoundingClientRect() ?? null;
+        return {
+          cardRects: cardRects.map(({ bottom, height, left, right, top, width }) => ({
+            bottom,
+            height,
+            left,
+            right,
+            top,
+            width,
+          })),
+          clientWidth: element.clientWidth,
+          columnCount: getComputedStyle(element).gridTemplateColumns.split(' ').filter(Boolean).length,
+          cover: cover === null ? null : { height: cover.height, width: cover.width },
+          left: bounds.left,
+          right: bounds.right,
+          scrollWidth: element.scrollWidth,
+          workScroll:
+            workScroll === null || workScrollBounds === null
+              ? null
+              : {
+                  clientWidth: workScroll.clientWidth,
+                  left: workScrollBounds.left,
+                  right: workScrollBounds.right,
+                  scrollWidth: workScroll.scrollWidth,
+                },
+        };
+      });
+      expect(geometry.columnCount).toBe(3);
+      expect(geometry.cardRects).toHaveLength(4);
+      expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
+      expect(geometry.workScroll).not.toBeNull();
+      expect(geometry.workScroll!.scrollWidth).toBeLessThanOrEqual(geometry.workScroll!.clientWidth + 1);
+      expect(geometry.left).toBeGreaterThanOrEqual(geometry.workScroll!.left - 1);
+      expect(geometry.right).toBeLessThanOrEqual(geometry.workScroll!.right + 1);
+      for (const card of geometry.cardRects) {
+        expect(card.left).toBeGreaterThanOrEqual(geometry.left - 1);
+        expect(card.right).toBeLessThanOrEqual(geometry.right + 1);
+      }
+      expect(Math.abs(geometry.cardRects[0]!.top - geometry.cardRects[1]!.top)).toBeLessThanOrEqual(1);
+      expect(Math.abs(geometry.cardRects[0]!.top - geometry.cardRects[2]!.top)).toBeLessThanOrEqual(1);
+      expect(geometry.cardRects[3]!.top).toBeGreaterThan(geometry.cardRects[0]!.bottom);
+      expect(Math.abs(geometry.cardRects[0]!.width - geometry.cardRects[1]!.width)).toBeLessThanOrEqual(1);
+      expect(Math.abs(geometry.cardRects[0]!.width - geometry.cardRects[2]!.width)).toBeLessThanOrEqual(1);
+      expect(geometry.cover).not.toBeNull();
+      expect(geometry.cover!.width / geometry.cover!.height).toBeCloseTo(16 / 9, 1);
+    };
+
+    await expectBoardGeometry('ltr');
+    const titleStyle = async (): Promise<{
+      backgroundColor: string;
+      boxShadow: string;
+      color: string;
+      fontFamily: string;
+      fontSize: string;
+      fontWeight: string;
+      ring: string;
+    }> =>
+      firstBoardOpener.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          backgroundColor: style.backgroundColor,
+          boxShadow: style.boxShadow,
+          color: style.color,
+          fontFamily: style.fontFamily,
+          fontSize: style.fontSize,
+          fontWeight: style.fontWeight,
+          ring: getComputedStyle(element, '::before').boxShadow,
+        };
+      });
+    expect(await titleStyle()).toMatchObject({
+      backgroundColor: 'rgba(0, 0, 0, 0)',
+      boxShadow: 'none',
+      color: 'rgb(20, 24, 31)',
+      fontSize: '13px',
+      fontWeight: '600',
+    });
+    expect((await titleStyle()).fontFamily).toContain('Manrope');
+    await firstBoardCard.scrollIntoViewIfNeeded();
+    await expect(firstBoardCard).toBeVisible();
+    const firstCoverBox = await firstBoardCard.locator('[data-cover-kind]').boundingBox();
+    if (firstCoverBox === null) throw new Error('The first Board cover geometry was unavailable');
+    await page.mouse.move(firstCoverBox.x + firstCoverBox.width / 2, firstCoverBox.y + firstCoverBox.height / 2);
+    expect(await titleStyle()).toMatchObject({
+      backgroundColor: 'rgba(0, 0, 0, 0)',
+      boxShadow: 'none',
+      color: 'rgb(20, 24, 31)',
+    });
+    await firstBoardOpener.focus();
+    await page.keyboard.press('Tab');
+    await expect(boardCards.nth(1).getByRole('button', { name: 'Open Table beat 02' })).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await expect(firstBoardOpener).toBeFocused();
+    expect((await titleStyle()).ring).not.toBe('none');
+
+    await selectedBoardOpener.focus();
+    await page.keyboard.press('Tab');
+    await expect(
+      selectedBoardActions.getByRole('button', { name: 'Reorder Table beat 24 at position 24' })
+    ).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(selectedBoardOpener).toBeFocused();
+    await expectBoardGeometry('rtl');
+    await root.evaluate((element) => element.setAttribute('dir', 'ltr'));
+    await expect(root).toHaveAttribute('dir', 'ltr');
+
+    await firstBoardCard.scrollIntoViewIfNeeded();
+    await expect(firstBoardCard).toBeVisible();
+    const firstCoverClickBox = await firstBoardCard.locator('[data-cover-kind]').boundingBox();
+    if (firstCoverClickBox === null) throw new Error('The first Board cover click target was unavailable');
+    await page.mouse.click(
+      firstCoverClickBox.x + firstCoverClickBox.width / 2,
+      firstCoverClickBox.y + firstCoverClickBox.height / 2
+    );
+    const firstBoardPanel = page.getByRole('dialog', { name: 'Beat panel — Table beat 01' });
+    await expect(firstBoardPanel).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(firstBoardPanel).toBeHidden();
+    await expect(firstBoardOpener).toHaveAttribute('aria-current', 'true');
+    await expect(firstBoardOpener).toBeFocused();
+
+    await selectedBoardOpener.click();
+    const selectedBoardPanel = page.getByRole('dialog', { name: 'Beat panel — Table beat 24' });
+    await expect(selectedBoardPanel).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(selectedBoardPanel).toBeHidden();
+    await expect(selectedBoardOpener).toHaveAttribute('aria-current', 'true');
+    await expect(selectedBoardOpener).toBeFocused();
     await navigation.getByRole('link', { name: 'Cut' }).click();
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'cut');
     await navigation.getByRole('link', { name: 'Table' }).click();
