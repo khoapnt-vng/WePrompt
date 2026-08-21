@@ -40,6 +40,7 @@ const candidates: StudioConnectionCandidate[] = [
       { model: 'open-sora', health: 'available' },
       { model: 'open-sora-manual', health: 'unknown' },
     ],
+    integrationModels: [],
   },
 ];
 

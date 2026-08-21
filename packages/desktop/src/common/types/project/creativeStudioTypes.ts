@@ -1311,17 +1311,23 @@ export type StudioConnectionCandidateModel = {
   health: 'available' | 'unknown' | 'unavailable';
 };
 
-export type StudioConnectionCandidate = {
-  providerId: string;
-  providerName: string;
-  models: StudioConnectionCandidateModel[];
-};
-
 export type StudioConnectionIntegrationLabelKey =
   | 'imageApi'
   | 'bytePlusSeedance'
   | 'selfHostedVideoGateway'
   | 'openRouterVideo';
+
+export type StudioConnectionCandidateIntegrationModels = {
+  integrationLabelKey: StudioConnectionIntegrationLabelKey;
+  models: StudioConnectionCandidateModel[];
+};
+
+export type StudioConnectionCandidate = {
+  providerId: string;
+  providerName: string;
+  models: StudioConnectionCandidateModel[];
+  integrationModels: StudioConnectionCandidateIntegrationModels[];
+};
 
 export type StudioRouteCatalogEntry = {
   choiceId: string;

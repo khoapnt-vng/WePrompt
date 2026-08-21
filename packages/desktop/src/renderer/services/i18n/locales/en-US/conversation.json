@@ -1424,6 +1424,8 @@
         "danglingNotice": "This project's Director conversation is no longer available.",
         "interruptedNotice": "Director setup was interrupted before the conversation could be attached to this project.",
         "ownerConflict": "Creative Studio found conflicting Director conversation data and will not choose one automatically.",
+        "sessionVerificationFailed": "Creative Studio could not verify the Director session configuration.",
+        "attachInterrupted": "Creative Studio could not complete the Director attachment. Retry to recover it safely.",
         "noModelConfigured": "Configure a text model before starting the Creative Director."
       },
       "errors": {

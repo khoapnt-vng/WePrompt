@@ -64,7 +64,13 @@ type StartOutcome =
       messageKey: string;
     }
   | { kind: 'dangling'; conversationId: string; messageKey?: string }
-  | { kind: 'failed'; messageKey: string; reuseConversationId: boolean };
+  | { kind: 'conflict' }
+  | { kind: 'failed'; messageKey: string; retryPolicy: DirectorRetryPolicy };
+
+type DirectorClaimantPolicy = 'scan-before-create' | 'require-claimant' | 'bypass';
+type DirectorRetryPolicy = Exclude<DirectorClaimantPolicy, 'bypass'>;
+const retryPolicyForClaimantPolicy = (policy?: DirectorClaimantPolicy): DirectorRetryPolicy =>
+  policy === 'require-claimant' ? 'require-claimant' : 'scan-before-create';
 
 type StartInput = {
   projectId: string;
@@ -72,7 +78,7 @@ type StartInput = {
   model?: TProviderWithModel;
   candidate?: DirectorConversation;
   conversationId?: string;
-  recoverBeforeCreate?: boolean;
+  claimantPolicy?: DirectorClaimantPolicy;
   expectedPriorBinding: string | null;
   currentAuthority: () => { revision: number; briefConversationId: string | null };
 };
@@ -83,21 +89,23 @@ type AttemptRecord = {
   expectedPriorBinding: string | null;
   settled: boolean;
   outcome?: StartOutcome;
-  conversationId?: string;
 };
 
-const STORAGE_ERROR_KEY = 'conversation.creativeStudio.workspace.errors.storage';
 const DIRECTOR_CONFLICT_KEY = 'conversation.creativeStudio.workspace.director.ownerConflict';
+const DIRECTOR_SESSION_VERIFICATION_KEY = 'conversation.creativeStudio.workspace.director.sessionVerificationFailed';
+const DIRECTOR_ATTACH_INTERRUPTED_KEY = 'conversation.creativeStudio.workspace.director.attachInterrupted';
 const expectedServerId = (projectId: string): string => `studio-brief-${projectId}`;
 
 class DirectorConversationStartError extends Error {
   constructor(
     message: string,
-    readonly reuseConversationId: boolean
+    readonly retryPolicy: DirectorRetryPolicy
   ) {
     super(message);
   }
 }
+
+class DirectorConversationConflictError extends Error {}
 
 const normalizedAbsolutePath = (value: unknown): string | null => {
   if (
@@ -122,6 +130,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const SAFE_STUDIO_ID = /^[A-Za-z0-9_-]{1,256}$/;
+const isSafeDirectorConversationId = (value: unknown): value is string =>
+  typeof value === 'string' && SAFE_STUDIO_ID.test(value);
 const SAFE_CHOICE_ID = /^choice_[a-f0-9]{24}$/;
 const CATALOG_VERSION = /^[a-f0-9]{16}$/;
 const MAX_ROUTE_OPTIONS = 256;
@@ -341,7 +351,13 @@ export const hasExactDirectorMcpSnapshot = (
   projectId: string,
   descriptor?: ISessionMcpServer
 ): conversation is DirectorConversation => {
-  if (conversation.type !== 'aionrs' || conversation.extra.studio_project_id !== projectId) return false;
+  if (
+    !isSafeDirectorConversationId(conversation.id) ||
+    conversation.type !== 'aionrs' ||
+    conversation.extra.studio_project_id !== projectId
+  ) {
+    return false;
+  }
   const serverId = expectedServerId(projectId);
   if (descriptor !== undefined && (descriptor.id !== serverId || descriptor.name !== BUILTIN_STUDIO_NAME)) return false;
 
@@ -388,6 +404,9 @@ export const hasExactDirectorAuthoritySnapshot = (
   );
 };
 
+const messageKeyFromError = (error: unknown, fallback: string): string =>
+  error instanceof Error && error.message.startsWith('conversation.') ? error.message : fallback;
+
 type DirectorAuthorityOutcome =
   | { kind: 'trusted' }
   | { kind: 'mismatch' }
@@ -412,7 +431,12 @@ const checkPersistedDirectorAuthority = (
         ? { kind: 'trusted' }
         : { kind: 'mismatch' };
     })
-    .catch((): DirectorAuthorityOutcome => ({ kind: 'unavailable', messageKey: STORAGE_ERROR_KEY }))
+    .catch(
+      (error): DirectorAuthorityOutcome => ({
+        kind: 'unavailable',
+        messageKey: messageKeyFromError(error, DIRECTOR_SESSION_VERIFICATION_KEY),
+      })
+    )
     .then((outcome) => {
       if (outcome.kind === 'unavailable' && directorAuthorityChecks.get(key)?.promise === promise) {
         directorAuthorityChecks.delete(key);
@@ -423,22 +447,77 @@ const checkPersistedDirectorAuthority = (
   return promise;
 };
 
+type DirectorClaimantRecovery =
+  | { kind: 'none' }
+  | { kind: 'trusted'; conversation: DirectorConversation }
+  | { kind: 'conflict' }
+  | { kind: 'unavailable'; messageKey: string };
+
+/**
+ * A create response can be lost after the backend commits. The requested id is not
+ * authoritative, so recovery re-reads the complete conversation catalogue and
+ * accepts only one project claimant with both exact persisted and main-process
+ * authority snapshots.
+ */
+const recoverDirectorClaimant = async (
+  projectId: string,
+  descriptor: ISessionMcpServer
+): Promise<DirectorClaimantRecovery> => {
+  let page: Awaited<ReturnType<typeof ipcBridge.database.getUserConversations.invoke>>;
+  try {
+    page = await ipcBridge.database.getUserConversations.invoke({ limit: 10_000 });
+  } catch (error) {
+    return {
+      kind: 'unavailable',
+      messageKey: messageKeyFromError(error, DIRECTOR_ATTACH_INTERRUPTED_KEY),
+    };
+  }
+  const untrustedPage: unknown = page;
+  if (
+    !isRecord(untrustedPage) ||
+    untrustedPage.has_more !== false ||
+    !Array.isArray(untrustedPage.items) ||
+    !Number.isSafeInteger(untrustedPage.total) ||
+    Number(untrustedPage.total) < 0 ||
+    untrustedPage.items.length !== untrustedPage.total ||
+    untrustedPage.items.some((conversation) => !isRecord(conversation) || !isRecord(conversation.extra))
+  ) {
+    return { kind: 'unavailable', messageKey: DIRECTOR_ATTACH_INTERRUPTED_KEY };
+  }
+
+  const items = untrustedPage.items as TChatConversation[];
+  const claimants = items.filter((conversation) => conversation.extra.studio_project_id === projectId);
+  if (claimants.length === 0) return { kind: 'none' };
+  if (claimants.length !== 1 || !hasExactDirectorMcpSnapshot(claimants[0], projectId, descriptor)) {
+    return { kind: 'conflict' };
+  }
+
+  const conversation = claimants[0];
+  const authority = await checkPersistedDirectorAuthority(conversation, projectId);
+  if (authority.kind === 'trusted') return { kind: 'trusted', conversation };
+  if (authority.kind === 'mismatch') return { kind: 'conflict' };
+  return authority;
+};
+
 const createDirectorConversation = async (input: {
   projectId: string;
   projectName: string;
   model: TProviderWithModel;
   conversationId: string;
-  recoverBeforeCreate?: boolean;
+  claimantPolicy: DirectorClaimantPolicy;
 }): Promise<DirectorConversation> => {
+  const retryPolicy = retryPolicyForClaimantPolicy(input.claimantPolicy);
   const descriptorResult = await ipcBridge.creativeStudio.getBriefSessionServer.invoke({ projectId: input.projectId });
-  if (descriptorResult.ok === false) throw new Error(descriptorResult.error.messageKey);
+  if (descriptorResult.ok === false) {
+    throw new DirectorConversationStartError(descriptorResult.error.messageKey, retryPolicy);
+  }
   const descriptor = descriptorResult.data;
   if (
     descriptor.id !== expectedServerId(input.projectId) ||
     descriptor.name !== BUILTIN_STUDIO_NAME ||
     !hasSafeDirectorTransport(descriptor, input.projectId)
   ) {
-    throw new Error(STORAGE_ERROR_KEY);
+    throw new DirectorConversationStartError(DIRECTOR_SESSION_VERIFICATION_KEY, retryPolicy);
   }
 
   const request: Parameters<typeof ipcBridge.conversation.create.invoke>[0] = {
@@ -454,35 +533,52 @@ const createDirectorConversation = async (input: {
       selected_session_mcp_servers: [descriptor],
     },
   };
-  let conversation: TChatConversation | null = null;
-  if (input.recoverBeforeCreate) {
-    try {
-      const recovered = await ipcBridge.conversation.get.invoke({ id: input.conversationId });
-      if (recovered?.id === input.conversationId) conversation = recovered;
-    } catch {
-      // The next create is idempotent by deterministic id and performs the same recovery on failure.
+  let conversation: unknown = null;
+  if (input.claimantPolicy !== 'bypass') {
+    const recovery = await recoverDirectorClaimant(input.projectId, descriptor);
+    if (recovery.kind === 'trusted') conversation = recovery.conversation;
+    if (recovery.kind === 'conflict') {
+      throw new DirectorConversationConflictError();
+    }
+    if (recovery.kind === 'unavailable') {
+      throw new DirectorConversationStartError(recovery.messageKey, retryPolicy);
+    }
+    if (recovery.kind === 'none' && input.claimantPolicy === 'require-claimant') {
+      throw new DirectorConversationConflictError();
     }
   }
   if (conversation === null) {
     try {
       conversation = await ipcBridge.conversation.create.invoke(request);
     } catch (error) {
-      try {
-        const recovered = await ipcBridge.conversation.get.invoke({ id: input.conversationId });
-        if (recovered?.id !== input.conversationId) throw error;
-        conversation = recovered;
-      } catch {
-        throw new DirectorConversationStartError(error instanceof Error ? error.message : STORAGE_ERROR_KEY, true);
+      const recovery = await recoverDirectorClaimant(input.projectId, descriptor);
+      if (recovery.kind === 'trusted') conversation = recovery.conversation;
+      else if (recovery.kind === 'conflict') {
+        throw new DirectorConversationConflictError();
+      } else if (recovery.kind === 'unavailable') {
+        throw new DirectorConversationStartError(messageKeyFromError(error, recovery.messageKey), 'scan-before-create');
+      } else {
+        throw new DirectorConversationStartError(
+          messageKeyFromError(error, DIRECTOR_ATTACH_INTERRUPTED_KEY),
+          'scan-before-create'
+        );
       }
     }
   }
-  if (conversation.id !== input.conversationId) {
-    throw new DirectorConversationStartError(STORAGE_ERROR_KEY, false);
+  if (
+    !isRecord(conversation) ||
+    !isSafeDirectorConversationId(conversation.id) ||
+    conversation.type !== 'aionrs' ||
+    !isRecord(conversation.extra) ||
+    conversation.extra.studio_project_id !== input.projectId
+  ) {
+    throw new DirectorConversationConflictError();
   }
-  if (!hasExactDirectorMcpSnapshot(conversation, input.projectId, descriptor)) {
-    throw new DirectorConversationStartError(STORAGE_ERROR_KEY, false);
+  const typedConversation = conversation as TChatConversation;
+  if (!hasExactDirectorMcpSnapshot(typedConversation, input.projectId, descriptor)) {
+    throw new DirectorConversationStartError(DIRECTOR_SESSION_VERIFICATION_KEY, 'require-claimant');
   }
-  return conversation;
+  return typedConversation;
 };
 
 const reconcileBinding = async (
@@ -509,6 +605,7 @@ const reconcileBinding = async (
 };
 
 const startDirectorConversation = async (input: StartInput): Promise<StartOutcome> => {
+  const fallbackRetryPolicy = retryPolicyForClaimantPolicy(input.claimantPolicy);
   let conversation = input.candidate;
   try {
     if (conversation !== undefined) {
@@ -522,14 +619,14 @@ const startDirectorConversation = async (input: StartInput): Promise<StartOutcom
         };
       }
       if (authority.kind === 'mismatch') {
-        return { kind: 'failed', messageKey: DIRECTOR_CONFLICT_KEY, reuseConversationId: false };
+        return { kind: 'conflict' };
       }
     } else {
       if (input.model === undefined) {
         return {
           kind: 'failed',
           messageKey: 'conversation.creativeStudio.workspace.director.noModelConfigured',
-          reuseConversationId: false,
+          retryPolicy: fallbackRetryPolicy,
         };
       }
       conversation = await createDirectorConversation({
@@ -537,15 +634,15 @@ const startDirectorConversation = async (input: StartInput): Promise<StartOutcom
         projectName: input.projectName,
         model: input.model,
         conversationId: input.conversationId ?? uuid(36),
-        recoverBeforeCreate: input.recoverBeforeCreate,
+        claimantPolicy: input.claimantPolicy ?? 'scan-before-create',
       });
     }
   } catch (error) {
+    if (error instanceof DirectorConversationConflictError) return { kind: 'conflict' };
     return {
       kind: 'failed',
-      messageKey:
-        error instanceof Error && error.message.startsWith('conversation.') ? error.message : STORAGE_ERROR_KEY,
-      reuseConversationId: error instanceof DirectorConversationStartError && error.reuseConversationId,
+      messageKey: messageKeyFromError(error, DIRECTOR_ATTACH_INTERRUPTED_KEY),
+      retryPolicy: error instanceof DirectorConversationStartError ? error.retryPolicy : fallbackRetryPolicy,
     };
   }
 
@@ -574,8 +671,13 @@ const startDirectorConversation = async (input: StartInput): Promise<StartOutcom
     });
     if (bindResult.ok === true) return { kind: 'ready', conversation };
     return reconcileBinding(input.projectId, conversation, input.expectedPriorBinding, bindResult.error.messageKey);
-  } catch {
-    return reconcileBinding(input.projectId, conversation, input.expectedPriorBinding, STORAGE_ERROR_KEY);
+  } catch (error) {
+    return reconcileBinding(
+      input.projectId,
+      conversation,
+      input.expectedPriorBinding,
+      messageKeyFromError(error, DIRECTOR_ATTACH_INTERRUPTED_KEY)
+    );
   }
 };
 
@@ -598,21 +700,24 @@ const installAttempt = (input: StartInput, replaceSettled: boolean): AttemptReco
   const existing = directorAttempts.get(input.projectId);
   if (existing !== undefined && (!existing.settled || !replaceSettled)) return existing;
 
-  const reusableConversationId =
-    existing?.outcome?.kind === 'failed' && existing.outcome.reuseConversationId ? existing.conversationId : undefined;
-  const conversationId =
-    input.candidate === undefined ? (reusableConversationId ?? input.conversationId ?? uuid(36)) : undefined;
+  const claimantPolicy =
+    input.claimantPolicy ??
+    (existing?.outcome?.kind === 'failed' ? existing.outcome.retryPolicy : 'scan-before-create');
+  const conversationId = input.candidate === undefined ? (input.conversationId ?? uuid(36)) : undefined;
   const effectiveInput = {
     ...input,
+    claimantPolicy,
     ...(conversationId === undefined ? {} : { conversationId }),
-    ...(reusableConversationId === undefined ? {} : { recoverBeforeCreate: true }),
   };
 
   const record: AttemptRecord = {
-    promise: Promise.resolve({ kind: 'failed', messageKey: STORAGE_ERROR_KEY, reuseConversationId: false }),
+    promise: Promise.resolve({
+      kind: 'failed',
+      messageKey: DIRECTOR_ATTACH_INTERRUPTED_KEY,
+      retryPolicy: 'scan-before-create',
+    }),
     expectedPriorBinding: input.expectedPriorBinding,
     settled: false,
-    conversationId,
   };
   record.promise = startDirectorConversation(effectiveInput)
     .then((outcome) => {
@@ -751,6 +856,7 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({ project, reviewedOut
       if (outcome.kind === 'ready') setState({ kind: 'ready', projectId, conversation: outcome.conversation });
       else if (outcome.kind === 'interrupted') setState({ kind: 'interrupted', projectId, ...outcome });
       else if (outcome.kind === 'dangling') setState({ kind: 'dangling', projectId, ...outcome });
+      else if (outcome.kind === 'conflict') setState({ kind: 'conflict', projectId });
       else setState({ kind: 'failed', projectId, messageKey: outcome.messageKey });
     },
     [applyBoundConversation]
@@ -826,7 +932,7 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({ project, reviewedOut
                 projectId: project.id,
                 conversation: reusable[0],
                 expectedPriorBinding: null,
-                messageKey: STORAGE_ERROR_KEY,
+                messageKey: DIRECTOR_ATTACH_INTERRUPTED_KEY,
               }
             : authority.kind === 'mismatch'
               ? { kind: 'conflict', projectId: project.id }
@@ -902,13 +1008,18 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({ project, reviewedOut
     state.projectId === project.id ? state : { kind: 'loading', projectId: project.id };
 
   const runExplicitAttempt = useCallback(
-    (candidate: DirectorConversation | undefined, expectedPriorBinding: string | null): void => {
+    (
+      candidate: DirectorConversation | undefined,
+      expectedPriorBinding: string | null,
+      claimantPolicy?: DirectorClaimantPolicy
+    ): void => {
       const attempt = installAttempt(
         {
           projectId: project.id,
           projectName: project.name,
           model: current_model,
           candidate,
+          claimantPolicy,
           expectedPriorBinding,
           currentAuthority: () => {
             const current = projectRef.current;
@@ -933,7 +1044,8 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({ project, reviewedOut
     }
     runExplicitAttempt(
       undefined,
-      visibleState.kind === 'dangling' ? visibleState.conversationId : (project.briefConversationId ?? null)
+      visibleState.kind === 'dangling' ? visibleState.conversationId : (project.briefConversationId ?? null),
+      visibleState.kind === 'conflict' ? 'bypass' : undefined
     );
   }, [project.briefConversationId, runExplicitAttempt, visibleState]);
 
@@ -985,7 +1097,7 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({ project, reviewedOut
       : t('conversation.creativeStudio.workspace.director.retry');
   const errorMessage =
     visibleState.kind === 'conflict'
-      ? t('conversation.creativeStudio.workspace.director.ownerConflict')
+      ? t(DIRECTOR_CONFLICT_KEY)
       : 'messageKey' in visibleState && visibleState.messageKey
         ? t(visibleState.messageKey)
         : null;

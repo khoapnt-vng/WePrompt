@@ -24,7 +24,7 @@ const harness = vi.hoisted(() => ({
   descriptor: vi.fn(),
   authority: vi.fn(),
   create: vi.fn(),
-  getConversation: vi.fn(),
+  listConversations: vi.fn(),
   bind: vi.fn(),
   getProject: vi.fn(),
   update: vi.fn(),
@@ -41,9 +41,11 @@ vi.mock('@/common', () => ({
     },
     conversation: {
       create: { invoke: harness.create },
-      get: { invoke: harness.getConversation },
       update: { invoke: harness.update },
       sendMessage: { invoke: harness.send },
+    },
+    database: {
+      getUserConversations: { invoke: harness.listConversations },
     },
   },
 }));
@@ -138,8 +140,13 @@ vi.mock('react-i18next', () => ({
         'Director setup was interrupted before the conversation could be attached to this project.',
       'conversation.creativeStudio.workspace.director.ownerConflict':
         'Creative Studio found conflicting Director conversation data and will not choose one automatically.',
+      'conversation.creativeStudio.workspace.director.sessionVerificationFailed':
+        'Creative Studio could not verify the Director session configuration.',
+      'conversation.creativeStudio.workspace.director.attachInterrupted':
+        'Creative Studio could not complete the Director attachment. Retry to recover it safely.',
       'conversation.creativeStudio.workspace.director.noModelConfigured':
         'Configure a text model before starting the Creative Director.',
+      'conversation.creativeStudio.workspace.errors.storage': 'Creative Studio could not read or save this workspace.',
       'conversation.creativeStudio.workspace.errors.staleProject':
         'The project changed elsewhere. Review the current Director before retrying.',
     };
@@ -310,15 +317,16 @@ describe('DirectorRail', () => {
       .mockReset()
       .mockReturnValueOnce('conversation_director')
       .mockReturnValue('conversation_director_retry');
-    harness.descriptor.mockResolvedValue(ok(descriptor));
-    harness.authority.mockResolvedValue(ok(authority));
-    harness.create.mockImplementation(async (input: { id?: string }) =>
-      exactConversation(input.id ?? 'conversation_director')
-    );
-    harness.getConversation.mockRejectedValue(new Error('not found'));
-    harness.bind.mockResolvedValue(commit());
-    harness.getProject.mockResolvedValue(supportedProject(null));
-    harness.update.mockResolvedValue(true);
+    harness.descriptor.mockReset().mockResolvedValue(ok(descriptor));
+    harness.authority.mockReset().mockResolvedValue(ok(authority));
+    harness.create
+      .mockReset()
+      .mockImplementation(async (input: { id?: string }) => exactConversation(input.id ?? 'conversation_director'));
+    harness.listConversations.mockReset().mockResolvedValue({ items: [], total: 0, has_more: false });
+    harness.bind.mockReset().mockResolvedValue(commit());
+    harness.getProject.mockReset().mockResolvedValue(supportedProject(null));
+    harness.update.mockReset().mockResolvedValue(true);
+    harness.send.mockReset();
   });
 
   it('accepts only a reciprocal Aionrs owner with the exact curated MCP snapshot', () => {
@@ -489,6 +497,357 @@ describe('DirectorRail', () => {
       conversationId: 'conversation_director',
     });
     expect(harness.send).not.toHaveBeenCalled();
+  });
+
+  it('waits for a complete claimant catalogue before an automatic fresh create', async () => {
+    const catalogue = deferred<{ items: TChatConversation[]; total: number; has_more: boolean }>();
+    harness.listConversations.mockReturnValueOnce(catalogue.promise);
+    render(<DirectorRail project={project()} />);
+
+    await waitFor(() => expect(harness.listConversations).toHaveBeenCalledWith({ limit: 10_000 }));
+    expect(harness.create).not.toHaveBeenCalled();
+
+    await act(async () => catalogue.resolve({ items: [], total: 0, has_more: false }));
+    await screen.findByRole('textbox', { name: 'Director composer' });
+    expect(harness.create).toHaveBeenCalledOnce();
+  });
+
+  it('fails closed when the cold-start claimant catalogue is incomplete', async () => {
+    harness.listConversations.mockResolvedValueOnce({ items: [], total: 1, has_more: false });
+    render(<DirectorRail project={project()} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Creative Studio could not complete the Director attachment. Retry to recover it safely.'
+    );
+    expect(harness.create).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the cold-start claimant catalogue has inconsistent pagination metadata', async () => {
+    harness.listConversations.mockResolvedValueOnce({
+      items: [exactConversation('unrelated', { studio_project_id: 'project_2' })],
+      total: 0,
+      has_more: false,
+    });
+    render(<DirectorRail project={project()} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Creative Studio could not complete the Director attachment. Retry to recover it safely.'
+    );
+    expect(harness.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      new Error('bridge unavailable'),
+      'Creative Studio could not complete the Director attachment. Retry to recover it safely.',
+    ],
+    [
+      new Error('conversation.creativeStudio.workspace.errors.storage'),
+      'Creative Studio could not read or save this workspace.',
+    ],
+  ])('fails closed when the cold-start claimant catalogue cannot be read', async (error, expectedMessage) => {
+    harness.listConversations.mockRejectedValueOnce(error);
+    render(<DirectorRail project={project()} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(expectedMessage);
+    expect(harness.create).not.toHaveBeenCalled();
+  });
+
+  it('binds one trusted claimant hidden from cold-start history instead of creating a duplicate', async () => {
+    const recovered = exactConversation('47b03580');
+    harness.listConversations.mockResolvedValueOnce({ items: [recovered], total: 1, has_more: false });
+    render(<DirectorRail project={project()} />);
+
+    expect(await screen.findByRole('textbox', { name: 'Director composer' })).toHaveAttribute(
+      'data-conversation-id',
+      '47b03580'
+    );
+    expect(harness.create).not.toHaveBeenCalled();
+    expect(harness.bind).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      conversationId: '47b03580',
+    });
+  });
+
+  it('treats a valid server-assigned short id as authoritative and binds that id', async () => {
+    harness.create.mockResolvedValueOnce(exactConversation('8a49d04b'));
+    render(<DirectorRail project={project()} />);
+
+    expect(await screen.findByRole('textbox', { name: 'Director composer' })).toHaveAttribute(
+      'data-conversation-id',
+      '8a49d04b'
+    );
+    expect(harness.create).toHaveBeenCalledOnce();
+    expect(harness.bind).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      conversationId: '8a49d04b',
+    });
+  });
+
+  it('rejects a server-assigned conversation owned by another project', async () => {
+    harness.create.mockResolvedValueOnce(
+      exactConversation('8a49d04b', {
+        studio_project_id: 'project_2',
+      })
+    );
+    render(<DirectorRail project={project()} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Creative Studio found conflicting Director conversation data and will not choose one automatically.'
+    );
+    expect(screen.getByRole('button', { name: 'Start fresh' })).toBeVisible();
+    expect(harness.bind).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start fresh' }));
+    expect(await screen.findByRole('textbox', { name: 'Director composer' })).toHaveAttribute(
+      'data-conversation-id',
+      'conversation_director_retry'
+    );
+    expect(harness.listConversations).toHaveBeenCalledOnce();
+    expect(harness.create).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['../conversation', 'conversation\0evil', 'x'.repeat(257), 123])(
+    'rejects an unsafe server-assigned conversation id: %s',
+    async (conversationId) => {
+      harness.create.mockResolvedValueOnce({
+        ...exactConversation('conversation_director'),
+        id: conversationId,
+      } as unknown as Extract<TChatConversation, { type: 'aionrs' }>);
+      render(<DirectorRail project={project()} />);
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        'Creative Studio found conflicting Director conversation data and will not choose one automatically.'
+      );
+      expect(screen.getByRole('button', { name: 'Start fresh' })).toBeVisible();
+      expect(harness.bind).not.toHaveBeenCalled();
+    }
+  );
+
+  it('reports an unverifiable descriptor as a session error', async () => {
+    harness.descriptor.mockResolvedValueOnce(ok({ ...descriptor, name: 'ambient-server' }));
+    render(<DirectorRail project={project()} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Creative Studio could not verify the Director session configuration.'
+    );
+    expect(harness.create).not.toHaveBeenCalled();
+  });
+
+  it('reports an unverifiable created MCP snapshot as a session error', async () => {
+    const drifted = exactConversation('8a49d04b', {
+      session_mcp_servers: [
+        {
+          ...descriptor,
+          transport: {
+            ...(descriptor.transport.type === 'stdio' ? descriptor.transport : {}),
+            type: 'stdio',
+            command: 'node',
+            args: ['/tmp/attacker/out/main/builtin-mcp-studio.js'],
+          },
+        },
+      ],
+    });
+    harness.listConversations
+      .mockResolvedValueOnce({ items: [], total: 0, has_more: false })
+      .mockResolvedValueOnce({ items: [drifted], total: 1, has_more: false });
+    harness.create.mockResolvedValueOnce(drifted);
+    render(<DirectorRail project={project()} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Creative Studio could not verify the Director session configuration.'
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Creative Studio found conflicting Director conversation data and will not choose one automatically.'
+    );
+    expect(screen.getByRole('button', { name: 'Start fresh' })).toBeVisible();
+    expect(harness.create).toHaveBeenCalledOnce();
+    expect(harness.bind).not.toHaveBeenCalled();
+  });
+
+  it('offers deliberate Start fresh when an invalid successful create has no recoverable claimant', async () => {
+    const drifted = exactConversation('8a49d04b', {
+      mcp_servers: [descriptor.name, 'ambient-server'],
+    });
+    harness.create.mockResolvedValueOnce(drifted);
+    render(<DirectorRail project={project()} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Creative Studio could not verify the Director session configuration.'
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Creative Studio found conflicting Director conversation data and will not choose one automatically.'
+    );
+    expect(screen.getByRole('button', { name: 'Start fresh' })).toBeVisible();
+    expect(harness.listConversations).toHaveBeenCalledTimes(2);
+    expect(harness.create).toHaveBeenCalledOnce();
+    expect(harness.bind).not.toHaveBeenCalled();
+  });
+
+  it('keeps claimant-only recovery after a transient descriptor failure', async () => {
+    const drifted = exactConversation('8a49d04b', {
+      mcp_servers: [descriptor.name, 'ambient-server'],
+    });
+    harness.descriptor
+      .mockResolvedValueOnce(ok(descriptor))
+      .mockRejectedValueOnce(new Error('descriptor bridge unavailable'));
+    harness.create.mockResolvedValueOnce(drifted);
+    render(<DirectorRail project={project()} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Creative Studio could not verify the Director session configuration.'
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Creative Studio could not complete the Director attachment. Retry to recover it safely.'
+      )
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Creative Studio found conflicting Director conversation data and will not choose one automatically.'
+      )
+    );
+    expect(screen.getByRole('button', { name: 'Start fresh' })).toBeVisible();
+    expect(harness.listConversations).toHaveBeenCalledTimes(2);
+    expect(harness.create).toHaveBeenCalledOnce();
+    expect(harness.bind).not.toHaveBeenCalled();
+  });
+
+  it('keeps claimant-only recovery while the text model is temporarily unavailable', async () => {
+    const drifted = exactConversation('8a49d04b', {
+      mcp_servers: [descriptor.name, 'ambient-server'],
+    });
+    harness.create.mockResolvedValueOnce(drifted);
+    const rendered = render(<DirectorRail project={project()} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Creative Studio could not verify the Director session configuration.'
+    );
+    harness.currentModel = undefined;
+    harness.modelList = [];
+    rendered.rerender(<DirectorRail project={project({ revision: 4 })} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Configure a text model before starting the Creative Director.'
+      )
+    );
+
+    harness.currentModel = model;
+    harness.modelList = [provider];
+    rendered.rerender(<DirectorRail project={project({ revision: 5 })} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Creative Studio found conflicting Director conversation data and will not choose one automatically.'
+      )
+    );
+    expect(screen.getByRole('button', { name: 'Start fresh' })).toBeVisible();
+    expect(harness.listConversations).toHaveBeenCalledTimes(2);
+    expect(harness.create).toHaveBeenCalledOnce();
+    expect(harness.bind).not.toHaveBeenCalled();
+  });
+
+  it('recovers exactly one trusted project claimant after an ambiguous create without creating twice', async () => {
+    const recovered = exactConversation('47b03580');
+    harness.create.mockRejectedValueOnce(new Error('response lost after commit'));
+    harness.listConversations
+      .mockResolvedValueOnce({ items: [], total: 0, has_more: false })
+      .mockResolvedValueOnce({ items: [recovered], total: 1, has_more: false });
+    render(<DirectorRail project={project()} />);
+
+    expect(await screen.findByRole('textbox', { name: 'Director composer' })).toHaveAttribute(
+      'data-conversation-id',
+      '47b03580'
+    );
+    expect(harness.listConversations).toHaveBeenCalledWith({ limit: 10_000 });
+    expect(harness.authority).toHaveBeenCalledWith({ projectId: 'project_1' });
+    expect(harness.create).toHaveBeenCalledOnce();
+    expect(harness.bind).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      conversationId: '47b03580',
+    });
+  });
+
+  it('fails closed instead of choosing the first duplicate recovery claimant', async () => {
+    harness.create.mockRejectedValueOnce(new Error('response lost after commit'));
+    harness.listConversations.mockResolvedValueOnce({ items: [], total: 0, has_more: false }).mockResolvedValueOnce({
+      items: [exactConversation('47b03580'), exactConversation('a49d04be')],
+      total: 2,
+      has_more: false,
+    });
+    render(<DirectorRail project={project()} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Creative Studio found conflicting Director conversation data and will not choose one automatically.'
+    );
+    expect(harness.bind).not.toHaveBeenCalled();
+  });
+
+  it('fails closed on a recovery claimant with a forged MCP snapshot', async () => {
+    harness.create.mockRejectedValueOnce(new Error('response lost after commit'));
+    harness.listConversations.mockResolvedValueOnce({ items: [], total: 0, has_more: false }).mockResolvedValueOnce({
+      items: [exactConversation('47b03580', { mcp_servers: [descriptor.name, 'ambient-server'] })],
+      total: 1,
+      has_more: false,
+    });
+    render(<DirectorRail project={project()} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Creative Studio found conflicting Director conversation data and will not choose one automatically.'
+    );
+    expect(harness.bind).not.toHaveBeenCalled();
+  });
+
+  it('requires exact main-process authority for claimant recovery', async () => {
+    harness.create.mockRejectedValueOnce(new Error('response lost after commit'));
+    harness.listConversations.mockResolvedValueOnce({ items: [], total: 0, has_more: false }).mockResolvedValueOnce({
+      items: [exactConversation('47b03580')],
+      total: 1,
+      has_more: false,
+    });
+    harness.authority.mockResolvedValueOnce(ok({ ...authority, projectDir: '/tmp/attacker/project_1' }));
+    render(<DirectorRail project={project()} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Creative Studio found conflicting Director conversation data and will not choose one automatically.'
+    );
+    expect(harness.bind).not.toHaveBeenCalled();
+  });
+
+  it('does not trust claimant recovery from an incomplete catalogue', async () => {
+    harness.create.mockRejectedValueOnce(new Error('response lost after commit'));
+    harness.listConversations.mockResolvedValueOnce({ items: [], total: 0, has_more: false }).mockResolvedValueOnce({
+      items: [exactConversation('47b03580')],
+      total: 2,
+      has_more: true,
+    });
+    render(<DirectorRail project={project()} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Creative Studio could not complete the Director attachment. Retry to recover it safely.'
+    );
+    expect(harness.authority).not.toHaveBeenCalled();
+    expect(harness.bind).not.toHaveBeenCalled();
+  });
+
+  it('preserves a real storage error when ambiguous-create recovery finds no claimant', async () => {
+    harness.create.mockRejectedValueOnce(new Error('conversation.creativeStudio.workspace.errors.storage'));
+    render(<DirectorRail project={project()} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Creative Studio could not read or save this workspace.'
+    );
+    expect(harness.bind).not.toHaveBeenCalled();
   });
 
   it('keeps one module-level start across an in-flight remount', async () => {
@@ -803,35 +1162,12 @@ describe('DirectorRail', () => {
     expect(screen.queryByText("This project's Director conversation is no longer available.")).toBeNull();
   });
 
-  it('refuses MCP snapshot drift, does not auto-retry, and allocates a fresh id on explicit Retry', async () => {
-    harness.create.mockResolvedValueOnce(
-      exactConversation('conversation_director', { mcp_servers: [descriptor.name, 'ambient-server'] })
-    );
-    const rendered = render(<DirectorRail project={project()} />);
-    expect(await screen.findByRole('alert')).toHaveTextContent('conversation.creativeStudio.workspace.errors.storage');
-    rendered.rerender(<DirectorRail project={project({ revision: 4, name: 'Renamed' })} />);
-    await waitFor(() => expect(harness.create).toHaveBeenCalledOnce());
-    expect(harness.bind).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(await screen.findByRole('textbox', { name: 'Director composer' })).toHaveAttribute(
-      'data-conversation-id',
-      'conversation_director_retry'
-    );
-    expect(harness.create).toHaveBeenCalledTimes(2);
-    expect(harness.create.mock.calls[1][0]).toMatchObject({ id: 'conversation_director_retry' });
-    expect(harness.getConversation).not.toHaveBeenCalled();
-    expect(harness.bind).toHaveBeenCalledWith({
-      projectId: 'project_1',
-      expectedRevision: 4,
-      conversationId: 'conversation_director_retry',
-    });
-  });
-
   it('reuses a claimant that appears after an ambiguous create failure instead of creating twice', async () => {
     harness.create.mockRejectedValueOnce(new Error('response lost after commit'));
     const rendered = render(<DirectorRail project={project()} />);
-    expect(await screen.findByRole('alert')).toHaveTextContent('conversation.creativeStudio.workspace.errors.storage');
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Creative Studio could not complete the Director attachment. Retry to recover it safely.'
+    );
     expect(harness.create).toHaveBeenCalledOnce();
 
     harness.conversations = [exactConversation()];
@@ -848,13 +1184,25 @@ describe('DirectorRail', () => {
     expect(harness.bind).toHaveBeenCalledOnce();
   });
 
-  it('recovers the deterministic conversation id immediately when create commits but its response is lost', async () => {
+  it('rechecks project claimants on Retry and does not duplicate a delayed ambiguous-create commit', async () => {
+    const recovered = exactConversation('47b03580');
     harness.create.mockRejectedValueOnce(new Error('response lost after commit'));
-    harness.getConversation.mockResolvedValueOnce(exactConversation());
+    harness.listConversations
+      .mockResolvedValueOnce({ items: [], total: 0, has_more: false })
+      .mockResolvedValueOnce({ items: [], total: 0, has_more: false })
+      .mockResolvedValueOnce({ items: [recovered], total: 1, has_more: false });
     render(<DirectorRail project={project()} />);
 
-    await screen.findByRole('textbox', { name: 'Director composer' });
-    expect(harness.getConversation).toHaveBeenCalledWith({ id: 'conversation_director' });
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Creative Studio could not complete the Director attachment. Retry to recover it safely.'
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(await screen.findByRole('textbox', { name: 'Director composer' })).toHaveAttribute(
+      'data-conversation-id',
+      '47b03580'
+    );
+    expect(harness.listConversations).toHaveBeenCalledTimes(3);
     expect(harness.create).toHaveBeenCalledOnce();
     expect(harness.bind).toHaveBeenCalledOnce();
   });

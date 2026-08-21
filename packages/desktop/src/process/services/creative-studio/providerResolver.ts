@@ -19,7 +19,11 @@ import type {
 } from '@/common/types/project/creativeStudioTypes';
 import { isImageGenSupported, isImagesApiModel } from '@/common/utils/imageModelAllowlist';
 import { getBytePlusSeedanceModelSpec, isSupportedBytePlusSeedanceProvider } from './adapters/bytePlusSeedanceAdapter';
-import { getOpenRouterVideoModelSpec, isSupportedOpenRouterVideoProvider } from './adapters/openRouterVideoAdapter';
+import {
+  getOpenRouterVideoModelSpec,
+  isSupportedOpenRouterVideoProvider,
+  OPENROUTER_VIDEO_MODELS,
+} from './adapters/openRouterVideoAdapter';
 
 export type StudioProviderResolverDeps = {
   listProviders: () => Promise<IProvider[]>;
@@ -108,6 +112,14 @@ const modelHealth = (provider: IProvider, model: string): StudioGenerationRoute[
   if (!available(provider, model)) return 'unavailable';
   return provider.model_health?.[model]?.status === 'healthy' ? 'available' : 'unknown';
 };
+
+const connectionCandidateModels = (provider: IProvider, models: readonly string[]) =>
+  [...new Set(models.filter((model) => isSafeProviderModel(model) && available(provider, model)))]
+    .map((model) => ({
+      model,
+      health: modelHealth(provider, model),
+    }))
+    .toSorted((left, right) => left.model.localeCompare(right.model));
 
 const imageConstraints = (model: string, capabilities: StudioConnectionCapabilities): StudioRouteConstraints => ({
   aspectRatios: [...ALL_RATIOS],
@@ -278,14 +290,15 @@ export const createStudioProviderResolver = (deps: StudioProviderResolverDeps): 
       .map((provider) => ({
         providerId: provider.id,
         providerName: sanitizedProviderName(provider),
-        models: [
-          ...new Set(provider.models.filter((model) => isSafeProviderModel(model) && available(provider, model))),
-        ]
-          .map((model) => ({
-            model,
-            health: modelHealth(provider, model),
-          }))
-          .toSorted((left, right) => left.model.localeCompare(right.model)),
+        models: connectionCandidateModels(provider, provider.models),
+        integrationModels: [
+          {
+            integrationLabelKey: 'openRouterVideo' as const,
+            models: isSupportedOpenRouterVideoProvider(provider)
+              ? connectionCandidateModels(provider, Object.keys(OPENROUTER_VIDEO_MODELS))
+              : [],
+          },
+        ],
       }))
       .toSorted((left, right) => left.providerId.localeCompare(right.providerId));
   };

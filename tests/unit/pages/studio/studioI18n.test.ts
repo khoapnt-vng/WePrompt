@@ -53,6 +53,8 @@ const expectedLeaves = [
   'director.danglingNotice',
   'director.interruptedNotice',
   'director.ownerConflict',
+  'director.sessionVerificationFailed',
+  'director.attachInterrupted',
   'director.noModelConfigured',
   'errors.storage',
   'errors.staleProject',

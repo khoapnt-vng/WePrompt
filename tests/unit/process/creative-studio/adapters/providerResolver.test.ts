@@ -459,6 +459,76 @@ describe('createStudioProviderResolver', () => {
     ).resolves.toBe(false);
   });
 
+  it('projects the complete curated OpenRouter video set in deterministic model order', async () => {
+    const openRouter = provider({
+      id: 'provider_openrouter',
+      name: 'OpenRouter',
+      platform: 'openrouter',
+      base_url: 'https://openrouter.ai/api/v1',
+      api_key: 'sk-or-test',
+      models: ['openai/gpt-5', 'anthropic/claude-sonnet-4'],
+    });
+
+    const candidates = await resolver([openRouter], []).listConnectionCandidates();
+
+    expect(candidates).toEqual([
+      {
+        providerId: 'provider_openrouter',
+        providerName: 'OpenRouter',
+        models: [
+          { model: 'anthropic/claude-sonnet-4', health: 'unknown' },
+          { model: 'openai/gpt-5', health: 'unknown' },
+        ],
+        integrationModels: [
+          {
+            integrationLabelKey: 'openRouterVideo',
+            models: [
+              { model: 'bytedance/seedance-2.0', health: 'unknown' },
+              { model: 'bytedance/seedance-2.0-fast', health: 'unknown' },
+              { model: 'google/veo-3.1-fast', health: 'unknown' },
+              { model: 'google/veo-3.1-lite', health: 'unknown' },
+              { model: 'kwaivgi/kling-v3.0-pro', health: 'unknown' },
+              { model: 'kwaivgi/kling-v3.0-std', health: 'unknown' },
+            ],
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('projects an empty closed OpenRouter set for a provider on the wrong host', async () => {
+    const candidates = await resolver(
+      [provider({ models: ['openai/gpt-5', 'google/veo-3.1-fast'] })],
+      []
+    ).listConnectionCandidates();
+
+    expect(candidates[0]?.integrationModels).toEqual([{ integrationLabelKey: 'openRouterVideo', models: [] }]);
+  });
+
+  it('keeps candidate ordering stable without projecting provider secrets or adapter identities', async () => {
+    const firstProvider = provider({
+      id: 'provider_z',
+      name: 'Provider Z',
+      base_url: 'https://openrouter.ai/api/v1',
+      models: ['openai/gpt-5'],
+    });
+    const secondProvider = provider({
+      id: 'provider_a',
+      name: 'Provider A',
+      base_url: 'https://openrouter.ai/api/v1',
+      models: ['anthropic/claude-sonnet-4'],
+    });
+
+    const forward = await resolver([firstProvider, secondProvider], []).listConnectionCandidates();
+    const reversed = await resolver([secondProvider, firstProvider], []).listConnectionCandidates();
+
+    expect(reversed).toEqual(forward);
+    expect(forward.map(({ providerId }) => providerId)).toEqual(['provider_a', 'provider_z']);
+    expect(JSON.stringify(forward)).not.toMatch(
+      /api_key|base_url|authorization|secret|never-return-this|adapterId|openrouter-video-v1/i
+    );
+  });
+
   it('keeps connection candidates safe and credential-gated', async () => {
     const candidates = await resolver([
       provider({ name: 'Provider\u0000 One', models: ['video-model', 'bad\nmodel'] }),
@@ -470,6 +540,7 @@ describe('createStudioProviderResolver', () => {
         providerId: 'provider_1',
         providerName: 'Provider One',
         models: [{ model: 'video-model', health: 'unknown' }],
+        integrationModels: [{ integrationLabelKey: 'openRouterVideo', models: [] }],
       },
     ]);
   });

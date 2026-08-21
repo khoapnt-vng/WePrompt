@@ -167,17 +167,28 @@ const candidate = (overrides: Partial<StudioConnectionCandidate> = {}): StudioCo
     { model: 'open-sora', health: 'available' },
     { model: 'open-sora-manual', health: 'unknown' },
   ],
+  integrationModels: [],
   ...overrides,
 });
 
 const IMAGE_INTEGRATION_ID = 'integration_g7Q2mB4p';
 const SEEDANCE_INTEGRATION_ID = 'integration_r9L3vN6k';
 const GATEWAY_INTEGRATION_ID = 'integration_x5T8cW1h';
+const OPENROUTER_INTEGRATION_ID = 'integration_o4R7vD2m';
+const OPENROUTER_VIDEO_MODELS = [
+  'bytedance/seedance-2.0',
+  'bytedance/seedance-2.0-fast',
+  'google/veo-3.1-fast',
+  'google/veo-3.1-lite',
+  'kwaivgi/kling-v3.0-pro',
+  'kwaivgi/kling-v3.0-std',
+] as const;
 
 const integrations: StudioConnectionInventory['integrations'] = [
   { integrationId: IMAGE_INTEGRATION_ID, kind: 'image', labelKey: 'imageApi' },
   { integrationId: SEEDANCE_INTEGRATION_ID, kind: 'video', labelKey: 'bytePlusSeedance' },
   { integrationId: GATEWAY_INTEGRATION_ID, kind: 'video', labelKey: 'selfHostedVideoGateway' },
+  { integrationId: OPENROUTER_INTEGRATION_ID, kind: 'video', labelKey: 'openRouterVideo' },
 ];
 
 const binding = (overrides: Partial<StudioConnectionRecord> = {}): StudioConnectionRecord => ({
@@ -403,6 +414,234 @@ describe('StudioMediaModelsSection', () => {
     expect(model).toHaveAttribute('list');
     fireEvent.change(model, { target: { value: 'manual-model' } });
     expect(model).toHaveValue('manual-model');
+  });
+
+  it('offers all curated OpenRouter video models without generic text suggestions', async () => {
+    bridge.listConnectionCandidates.invoke.mockResolvedValue(
+      ok([
+        candidate({
+          models: [
+            { model: 'openai/gpt-5', health: 'available' },
+            { model: 'anthropic/claude-sonnet-4', health: 'unknown' },
+          ],
+          integrationModels: [
+            {
+              integrationLabelKey: 'openRouterVideo',
+              models: OPENROUTER_VIDEO_MODELS.map((model) => ({ model, health: 'unknown' as const })),
+            },
+          ],
+        }),
+      ])
+    );
+    render(<StudioMediaModelsSection providerRefreshToken={0} onAddProvider={vi.fn()} />);
+    const dialog = await openAddEditor();
+
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'settings.mediaModels.outputType' }), {
+      target: { value: 'video' },
+    });
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'settings.mediaModels.provider' }), {
+      target: { value: 'provider_safe' },
+    });
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'settings.mediaModels.integrationLabel' }), {
+      target: { value: OPENROUTER_INTEGRATION_ID },
+    });
+
+    const model = within(dialog).getByRole('combobox', { name: 'settings.mediaModels.model' });
+    const options = within(model)
+      .getAllByRole('option')
+      .map((option) => (option as HTMLOptionElement).value)
+      .filter(Boolean);
+    expect(model.tagName).toBe('SELECT');
+    expect(options).toEqual(OPENROUTER_VIDEO_MODELS);
+    expect(options).not.toEqual(expect.arrayContaining(['openai/gpt-5', 'anthropic/claude-sonnet-4']));
+    expect(dialog.querySelector('#media-model-options')).toBeNull();
+  });
+
+  it('does not validate arbitrary free text for a closed OpenRouter model set', async () => {
+    bridge.listConnectionCandidates.invoke.mockResolvedValue(
+      ok([
+        candidate({
+          models: [{ model: 'openai/gpt-5', health: 'available' }],
+          integrationModels: [
+            {
+              integrationLabelKey: 'openRouterVideo',
+              models: OPENROUTER_VIDEO_MODELS.map((model) => ({ model, health: 'unknown' as const })),
+            },
+          ],
+        }),
+      ])
+    );
+    bridge.listConnections.invoke.mockResolvedValue(ok(inventory([])));
+    render(<StudioMediaModelsSection providerRefreshToken={0} onAddProvider={vi.fn()} />);
+    const dialog = await openAddEditor();
+
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'settings.mediaModels.outputType' }), {
+      target: { value: 'video' },
+    });
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'settings.mediaModels.provider' }), {
+      target: { value: 'provider_safe' },
+    });
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'settings.mediaModels.integrationLabel' }), {
+      target: { value: OPENROUTER_INTEGRATION_ID },
+    });
+    const model = within(dialog).getByRole('combobox', { name: 'settings.mediaModels.model' });
+    fireEvent.change(model, { target: { value: 'openai/gpt-5' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'settings.mediaModels.validate' }));
+
+    expect(bridge.validateConnection.invoke).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['missing projection', undefined],
+    ['missing scoped row', []],
+    ['empty scoped row', [{ integrationLabelKey: 'openRouterVideo', models: [] }]],
+    ['malformed scoped row', [null]],
+  ] as const)('fails closed for OpenRouter with a %s', async (_case, integrationModels) => {
+    const rawCandidate: Record<string, unknown> = {
+      ...candidate({
+        models: [
+          { model: 'openai/gpt-5', health: 'available' },
+          { model: 'google/veo-3.1-fast', health: 'unknown' },
+        ],
+      }),
+    };
+    if (integrationModels === undefined) delete rawCandidate.integrationModels;
+    else rawCandidate.integrationModels = integrationModels;
+    bridge.listConnectionCandidates.invoke.mockResolvedValue(ok([rawCandidate as StudioConnectionCandidate]));
+    render(<StudioMediaModelsSection providerRefreshToken={0} onAddProvider={vi.fn()} />);
+    const dialog = await openAddEditor();
+
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'settings.mediaModels.outputType' }), {
+      target: { value: 'video' },
+    });
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'settings.mediaModels.provider' }), {
+      target: { value: 'provider_safe' },
+    });
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'settings.mediaModels.integrationLabel' }), {
+      target: { value: OPENROUTER_INTEGRATION_ID },
+    });
+
+    const model = within(dialog).getByLabelText('settings.mediaModels.model');
+    expect(model).toBeDisabled();
+    expect(model).not.toHaveAttribute('list');
+    expect(dialog.querySelector('#media-model-options')).toBeNull();
+  });
+
+  it('clones only safe integration model fields before retaining renderer state', async () => {
+    const projectedModels: unknown[] = [];
+    projectedModels.length = 1;
+    projectedModels.push(
+      {
+        model: 'google/veo-3.1-lite',
+        health: 'available' as const,
+        adapterId: 'openrouter-video-v1',
+        authorization: 'Bearer private',
+      },
+      { model: 'google/veo-3.1-fast', health: 'unknown' as const },
+      { model: 'google/veo-3.1-fast', health: 'available' as const },
+      { model: 'bad\nmodel', health: 'available' as const },
+      { model: 'private-health-model', health: 'private' }
+    );
+    const source = {
+      ...candidate(),
+      integrationModels: [
+        {
+          integrationLabelKey: 'openRouterVideo',
+          models: projectedModels,
+          adapterId: 'openrouter-video-v1',
+        },
+      ],
+      apiKey: 'candidate-secret',
+      baseUrl: 'https://private.invalid',
+    } as unknown as StudioConnectionCandidate;
+    bridge.listConnectionCandidates.invoke.mockResolvedValue(ok([source]));
+    render(<StudioMediaModelsSection providerRefreshToken={0} onAddProvider={vi.fn()} />);
+    await screen.findByText('open-sora');
+    projectedModels[1] = { model: 'mutated-after-refresh', health: 'available' };
+    const dialog = await openAddEditor();
+
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'settings.mediaModels.outputType' }), {
+      target: { value: 'video' },
+    });
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'settings.mediaModels.provider' }), {
+      target: { value: 'provider_safe' },
+    });
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'settings.mediaModels.integrationLabel' }), {
+      target: { value: OPENROUTER_INTEGRATION_ID },
+    });
+
+    const model = within(dialog).getByRole('combobox', { name: 'settings.mediaModels.model' });
+    const options = within(model)
+      .getAllByRole('option')
+      .map((option) => (option as HTMLOptionElement).value)
+      .filter(Boolean);
+    expect(options).toEqual(['google/veo-3.1-fast', 'google/veo-3.1-lite']);
+    expect(document.body.innerHTML).not.toMatch(
+      /candidate-secret|private\.invalid|Bearer private|openrouter-video-v1|mutated-after-refresh/
+    );
+  });
+
+  it('clears a stale model when the selected provider changes', async () => {
+    bridge.listConnectionCandidates.invoke.mockResolvedValue(
+      ok([
+        candidate(),
+        candidate({
+          providerId: 'provider_other',
+          providerName: 'Other Provider',
+          models: [{ model: 'other-model', health: 'unknown' }],
+        }),
+      ])
+    );
+    render(<StudioMediaModelsSection providerRefreshToken={0} onAddProvider={vi.fn()} />);
+    const dialog = await openAddEditor();
+
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'settings.mediaModels.outputType' }), {
+      target: { value: 'video' },
+    });
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'settings.mediaModels.provider' }), {
+      target: { value: 'provider_safe' },
+    });
+    const model = within(dialog).getByRole('combobox', { name: 'settings.mediaModels.model' });
+    fireEvent.change(model, { target: { value: 'open-sora' } });
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'settings.mediaModels.provider' }), {
+      target: { value: 'provider_other' },
+    });
+
+    expect(within(dialog).getByRole('combobox', { name: 'settings.mediaModels.model' })).toHaveValue('');
+  });
+
+  it('clears a stale model when the selected integration changes', async () => {
+    bridge.listConnectionCandidates.invoke.mockResolvedValue(
+      ok([
+        candidate({
+          integrationModels: [
+            {
+              integrationLabelKey: 'openRouterVideo',
+              models: OPENROUTER_VIDEO_MODELS.map((model) => ({ model, health: 'unknown' as const })),
+            },
+          ],
+        }),
+      ])
+    );
+    render(<StudioMediaModelsSection providerRefreshToken={0} onAddProvider={vi.fn()} />);
+    const dialog = await openAddEditor();
+
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'settings.mediaModels.outputType' }), {
+      target: { value: 'video' },
+    });
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'settings.mediaModels.provider' }), {
+      target: { value: 'provider_safe' },
+    });
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'settings.mediaModels.integrationLabel' }), {
+      target: { value: GATEWAY_INTEGRATION_ID },
+    });
+    const model = within(dialog).getByRole('combobox', { name: 'settings.mediaModels.model' });
+    fireEvent.change(model, { target: { value: 'open-sora' } });
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'settings.mediaModels.integrationLabel' }), {
+      target: { value: OPENROUTER_INTEGRATION_ID },
+    });
+
+    expect(within(dialog).getByRole('combobox', { name: 'settings.mediaModels.model' })).toHaveValue('');
   });
 
   it('saves only the exact tuple after validation and clears validation when a field changes', async () => {

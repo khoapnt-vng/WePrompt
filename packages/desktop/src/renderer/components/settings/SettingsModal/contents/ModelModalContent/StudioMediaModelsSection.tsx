@@ -7,7 +7,9 @@
 import { ipcBridge } from '@/common';
 import type {
   StudioConnectionCandidate,
+  StudioConnectionCandidateModel,
   StudioConnectionIntegration,
+  StudioConnectionIntegrationLabelKey,
   StudioConnectionRecord,
   StudioConnectionValidationResult,
   StudioMediaKind,
@@ -19,7 +21,7 @@ import { Plus, Refresh } from '@icon-park/react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-type SafeCandidate = Pick<StudioConnectionCandidate, 'providerId' | 'providerName' | 'models'>;
+type SafeCandidate = Pick<StudioConnectionCandidate, 'providerId' | 'providerName' | 'models' | 'integrationModels'>;
 type SafeIntegration = StudioConnectionIntegration;
 type SafeBinding = StudioConnectionRecord;
 type SafeValidation = StudioConnectionValidationResult;
@@ -55,10 +57,76 @@ export const sanitizeStudioMediaModelCapabilities = (
     : {}),
 });
 
+const CONNECTION_INTEGRATION_LABEL_KEYS = [
+  'imageApi',
+  'bytePlusSeedance',
+  'selfHostedVideoGateway',
+  'openRouterVideo',
+] as const satisfies readonly StudioConnectionIntegrationLabelKey[];
+const CONNECTION_INTEGRATION_LABEL_KEY_SET: ReadonlySet<string> = new Set(CONNECTION_INTEGRATION_LABEL_KEYS);
+const CLOSED_CANDIDATE_MODEL_LABEL_KEY_SET: ReadonlySet<StudioConnectionIntegrationLabelKey> = new Set([
+  'openRouterVideo',
+]);
+const CANDIDATE_MODEL_HEALTH_PRIORITY: Record<StudioConnectionCandidateModel['health'], number> = {
+  available: 0,
+  unknown: 1,
+  unavailable: 2,
+};
+
+const isCandidateModelHealth = (value: unknown): value is StudioConnectionCandidateModel['health'] =>
+  value === 'available' || value === 'unknown' || value === 'unavailable';
+
+const isSafeCandidateModelName = (value: unknown): value is string =>
+  typeof value === 'string' &&
+  value.length > 0 &&
+  value.length <= 256 &&
+  value === value.trim() &&
+  !Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0)!;
+    return (
+      codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f) || (codePoint >= 0xd800 && codePoint <= 0xdfff)
+    );
+  });
+
+const sanitizeCandidateModels = (models: unknown): StudioConnectionCandidateModel[] => {
+  if (!Array.isArray(models)) return [];
+  const byModel = new Map<string, StudioConnectionCandidateModel>();
+  for (const value of models) {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) continue;
+    const { model, health } = value as Record<string, unknown>;
+    if (!isSafeCandidateModelName(model) || !isCandidateModelHealth(health)) continue;
+    const existing = byModel.get(model);
+    if (!existing || CANDIDATE_MODEL_HEALTH_PRIORITY[health] > CANDIDATE_MODEL_HEALTH_PRIORITY[existing.health]) {
+      byModel.set(model, { model, health });
+    }
+  }
+  return [...byModel.values()].toSorted((left, right) => left.model.localeCompare(right.model));
+};
+
+const sanitizeCandidateIntegrationModels = (rows: unknown): SafeCandidate['integrationModels'] => {
+  if (!Array.isArray(rows)) return [];
+  const byLabel = new Map<StudioConnectionIntegrationLabelKey, unknown[]>();
+  for (const value of rows) {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) continue;
+    const { integrationLabelKey, models } = value as Record<string, unknown>;
+    if (typeof integrationLabelKey !== 'string' || !CONNECTION_INTEGRATION_LABEL_KEY_SET.has(integrationLabelKey)) {
+      continue;
+    }
+    const labelKey = integrationLabelKey as StudioConnectionIntegrationLabelKey;
+    byLabel.set(labelKey, [...(byLabel.get(labelKey) ?? []), ...(Array.isArray(models) ? models : [])]);
+  }
+  return CONNECTION_INTEGRATION_LABEL_KEYS.flatMap((integrationLabelKey) =>
+    byLabel.has(integrationLabelKey)
+      ? [{ integrationLabelKey, models: sanitizeCandidateModels(byLabel.get(integrationLabelKey)) }]
+      : []
+  );
+};
+
 const sanitizeCandidate = (candidate: StudioConnectionCandidate): SafeCandidate => ({
   providerId: candidate.providerId,
   providerName: candidate.providerName,
-  models: candidate.models.map(({ model, health }) => ({ model, health })),
+  models: sanitizeCandidateModels(candidate.models),
+  integrationModels: sanitizeCandidateIntegrationModels(candidate.integrationModels),
 });
 
 const sanitizeIntegration = (integration: StudioConnectionIntegration): SafeIntegration => ({
@@ -170,16 +238,27 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
     [editor.kind, integrations]
   );
   const selectedCandidate = candidates.find((candidate) => candidate.providerId === editor.providerId) ?? null;
-  const modelOptions = selectedCandidate?.models.map(({ model }) => model) ?? [];
+  const selectedIntegration = integrations.find((integration) => integration.integrationId === editor.integrationId);
+  const integrationModels = selectedCandidate?.integrationModels.find(
+    (models) => models.integrationLabelKey === selectedIntegration?.labelKey
+  );
+  const usesClosedCandidateModelSet =
+    selectedIntegration !== undefined && CLOSED_CANDIDATE_MODEL_LABEL_KEY_SET.has(selectedIntegration.labelKey);
+  const candidateModels =
+    selectedCandidate && selectedIntegration
+      ? (integrationModels?.models ?? (usesClosedCandidateModelSet ? [] : selectedCandidate.models))
+      : [];
+  const modelOptions = candidateModels.map(({ model }) => model);
+  const closedModelIsSelectable = !usesClosedCandidateModelSet || modelOptions.includes(editor.model.trim());
   const request = useMemo<StudioSaveConnectionRequest | null>(() => {
     const normalizedModel = editor.model.trim();
-    if (!editor.providerId || !editor.integrationId || !normalizedModel) return null;
+    if (!editor.providerId || !editor.integrationId || !normalizedModel || !closedModelIsSelectable) return null;
     return {
       providerId: editor.providerId,
       integrationId: editor.integrationId,
       model: normalizedModel,
     };
-  }, [editor.integrationId, editor.model, editor.providerId]);
+  }, [closedModelIsSelectable, editor.integrationId, editor.model, editor.providerId]);
   const validationMatchesRequest = request !== null && validated !== null && tupleMatches(validated, request);
   const busy = validating || saving;
 
@@ -221,17 +300,30 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
   const updateKind = (kind: StudioMediaKind): void => {
     const firstIntegration = integrations.find((integration) => integration.kind === kind);
     if (!firstIntegration) return;
-    setEditor((current) => ({ ...current, kind, integrationId: firstIntegration.integrationId }));
+    setEditor((current) => ({
+      ...current,
+      kind,
+      integrationId: firstIntegration.integrationId,
+      ...(current.kind === kind ? {} : { model: '' }),
+    }));
     resetValidation();
   };
 
   const updateProvider = (providerId: string): void => {
-    setEditor((current) => ({ ...current, providerId }));
+    setEditor((current) => ({
+      ...current,
+      providerId,
+      ...(current.providerId === providerId ? {} : { model: '' }),
+    }));
     resetValidation();
   };
 
   const updateIntegration = (integrationId: string): void => {
-    setEditor((current) => ({ ...current, integrationId }));
+    setEditor((current) => ({
+      ...current,
+      integrationId,
+      ...(current.integrationId === integrationId ? {} : { model: '' }),
+    }));
     resetValidation();
   };
 
@@ -525,16 +617,33 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
           </div>
           <label className='flex flex-col gap-6px text-12px text-t-secondary'>
             {t('settings.mediaModels.model')}
-            <AutoComplete
-              value={editor.model}
-              data={modelOptions}
-              disabled={!editor.providerId || busy}
-              placeholder={t('settings.mediaModels.modelPlaceholder')}
-              inputProps={{
-                'aria-label': t('settings.mediaModels.model'),
-              }}
-              onChange={updateModel}
-            />
+            {usesClosedCandidateModelSet ? (
+              <Select
+                aria-label={t('settings.mediaModels.model')}
+                value={editor.model || undefined}
+                disabled={!editor.providerId || busy || modelOptions.length === 0}
+                placeholder={t('settings.mediaModels.modelPlaceholder')}
+                showSearch
+                onChange={(value) => updateModel(String(value))}
+              >
+                {modelOptions.map((model) => (
+                  <Select.Option key={model} value={model}>
+                    {model}
+                  </Select.Option>
+                ))}
+              </Select>
+            ) : (
+              <AutoComplete
+                value={editor.model}
+                data={modelOptions}
+                disabled={!editor.providerId || busy}
+                placeholder={t('settings.mediaModels.modelPlaceholder')}
+                inputProps={{
+                  'aria-label': t('settings.mediaModels.model'),
+                }}
+                onChange={updateModel}
+              />
+            )}
           </label>
           <Button long loading={validating} disabled={request === null || busy} onClick={() => void validateEditor()}>
             {t(validating ? 'settings.mediaModels.validating' : 'settings.mediaModels.validate')}

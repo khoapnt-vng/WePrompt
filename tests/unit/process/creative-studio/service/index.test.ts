@@ -579,6 +579,7 @@ describe('CreativeStudioServiceV2', () => {
           providerId: 'provider_1',
           providerName: 'Image provider',
           models: [{ model: 'image-model', health: 'available' as const }],
+          integrationModels: [{ integrationLabelKey: 'openRouterVideo' as const, models: [] }],
         },
       ]),
       listGenerationRoutes: vi.fn(async () => ({
@@ -2310,6 +2311,7 @@ describe('CreativeStudioServiceV2', () => {
         providerId: 'provider_1',
         providerName: 'Image provider',
         models: [{ model: 'image-model', health: 'available' }],
+        integrationModels: [{ integrationLabelKey: 'openRouterVideo', models: [] }],
       },
     ]);
     await expect(harness.service.validateConnection(request)).resolves.toMatchObject({
