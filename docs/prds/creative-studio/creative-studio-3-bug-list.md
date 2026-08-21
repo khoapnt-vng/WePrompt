@@ -188,12 +188,29 @@ REFERENCE_PENDING_DIR, ROUTE_CATALOG` — while the same object read back throug
   - **The cause, once visible, is an API contract nothing states.** `prepareSubmission` requires the caller to pre-compute `cascadeChoices` and supply them in the exact order the service derives, and refuses the whole request if the arrays differ by length or order. A `seed_still` on a shot implies a `video_take` **on that same shot** plus every downstream shot to the next hard cut. Sending `cascadeChoices: []` — the obvious reading of "just price one still" — is invalid. Supplying the derived pair moved the request past validation on the first try.
   - So the caller must reimplement `deriveExpectedCascadePairs` to call the API at all, and gets one unnamed error if the reimplementation drifts. That is worth fixing alongside the message: either derive the cascade server-side, or return the expected set with the refusal.
 
-- [ ] **[BUG-083][P1][Creative Studio] Generation routes vanish after a restart, leaving both connections validated and unusable** — found 2026-08-21
+- [x] **[BUG-083][~~P1~~][Creative Studio] ~~Generation routes vanish after a restart~~ — WITHDRAWN 2026-08-21, this was not a product defect**
   - `listConnections` reports both media models bound and **validated**, with capabilities: `google/gemini-3-pro-image` at `2026-08-20T22:51:18Z` and `bytedance/seedance-2.0` at `2026-08-20T23:04:54Z`.
   - `listRoutes` for the same project returns **no options at all** — empty image and video route objects — and `prepareSubmission` fails with `provider_error` thrown from `listGenerationRoutes`, immediately after a successful `GET /api/providers`.
   - Earlier in the same session the same call returned one image option and one video option with full constraints, and the route `choiceId`s it produced were stored on the project. After restarting the app those ids no longer resolve, so a stored route cannot survive the process that created it.
   - With no routes there is no rate card, so nothing can be priced and nothing can be generated. This sits underneath BUG-082: even with the payload contract satisfied, generation is unreachable.
   - **A project's routes were cleared while establishing this.** Re-setting from a fresh `listRoutes` wrote nulls, because the fresh listing was empty. Anything that re-binds routes from a listing needs to refuse an empty one rather than persist the absence.
+
+  **Withdrawn. The cause was an orphaned backend process of my own making, not the product.**
+  `aioncore` survives `SIGTERM` — repeated restarts left a detached backend holding the HTTP ports, so
+  each new app instance failed every `listProviders()` fetch and therefore produced no routes. The
+  symptom was real and reproducible; the cause was the environment.
+  - What proved it: after `kill -9` on every survivor and a start with exactly one `aioncore` process,
+    `listRoutes` returns `routesOk: true` with options, `/api/providers` succeeds five times, and a
+    quote prices normally. The earlier "clean start" was not clean — pid 41457 had survived the
+    `SIGTERM` I believed had stopped it, and I checked the app processes without rechecking the
+    backend.
+  - **Worth keeping as an operational note rather than a bug:** stopping a dev instance requires
+    `kill -9` on `bundled-aioncore`, and a surviving backend is invisible from the app's own logs — it
+    presents as unexplained fetch failures inside main while the renderer looks healthy.
+  - **One real defect stays visible underneath it**, already covered by BUG-082's pattern: the failure
+    surfaced as `provider_error` with the cause discarded by `catch { throw new
+CreativeStudioServiceError('provider_error'); }`. A single logged line would have shown
+    `TypeError: fetch failed` immediately and saved the whole investigation.
 
 ## Correctness and honesty of failures
 
