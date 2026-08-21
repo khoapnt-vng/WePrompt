@@ -125,8 +125,16 @@ the rail permanent, none of them can be transcribed from the prototype directly 
 re-proportioned against that 780px column, and the app bar has to resolve whether it spans the rail
 or starts beside it. The Board is the sharpest case: the design's three 16:9 cards sit near 430px
 each at full width, and the same three columns inside 780px fall to roughly 250px — small enough that
-three-up may stop being the right answer rather than simply shrinking. Whoever takes BUG-068 should settle that spanning question first,
-because BUG-070's placement of the view switch depends on the answer.
+three-up may stop being the right answer rather than simply shrinking. Whoever takes BUG-068 should settle that spanning question first, because BUG-070's placement of the
+view switch depends on the answer.
+
+**BUG-068 is blocked on the designer, not on engineering.** The bar's own measurements give it a
+minimum width of 808px with its flexible spacer already collapsed to zero, and the workspace column
+is 780px with the rail expanded — it is 28px short before any title longer than the prototype's
+28-character example. With the rail collapsed the column is 1158px and the bar fits with room to
+spare. The question is put to the designer in
+[creative-studio-3-app-bar-design-question.md](./creative-studio-3-app-bar-design-question.md).
+BUG-069 has no such dependency and can start immediately.
 
 ## Verification notes
 
