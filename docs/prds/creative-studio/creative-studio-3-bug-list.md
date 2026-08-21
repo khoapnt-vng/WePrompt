@@ -562,17 +562,6 @@ a fidelity fix, so it is filed as BUG-073.
   aligned with the drawing at the same time — it now keeps the warning colour the row's NO COVERAGE
   state uses, in both the folded and columnar forms, where it had been the muted text colour.
 
-## Open — three questions for the designer about the Beat panel
-
-Sent 2026-08-21. The model they answer against, the code each claim is grounded in, and the questions
-themselves live in `creative-studio-3-beat-panel-model-and-questions.md` rather than being restated
-here. In short: is `CONTINUITY BREAK` a control or a warning; is `RENDERS AS` editable; and does the
-join `+` cost a re-render and does inserting extend the Beat or redivide it.
-
-The last of those is the one that reaches furthest — it decides whether Beat duration is a target the
-Shots must fit or a total that follows from them, which the Table, the Cut and every fit-to-target
-calculation depend on.
-
 ## Verification notes
 
 ### Verified live 2026-08-21, after Codex's fixes

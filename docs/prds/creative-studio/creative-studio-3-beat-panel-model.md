@@ -1,11 +1,10 @@
-# Creative Studio 3 — the Beat panel: how the flow works, and three things it does not settle
+# Creative Studio 3 — the Beat panel: how the flow works
 
 Written 2026-08-21 against the designer's Beat panel drawing (`BEAT 03 · Card evolution`, 31s, three
 Shots) and checked against the code where the code has an opinion.
 
-Two audiences. For the **designer**, sections 1–2 state what we believe so the questions in section 4
-can be answered briefly rather than re-explained from scratch. For **anyone implementing**, section 3
-lists where each claim is grounded, so a disagreement can be settled by reading rather than arguing.
+Sections 1–2 state the model the build assumes. Section 3 lists where each claim is grounded, so a
+disagreement can be settled by reading rather than by argument.
 
 ---
 
@@ -106,44 +105,3 @@ clips actually join.
 
 Claims drawn only from the drawing, with no code behind them yet: the word counter's 25-word ceiling,
 the Beat-scoped transport, and the coverage strip's density tiers.
-
----
-
-## 4. Three things the drawing does not settle
-
-Each is a fork the build cannot straddle.
-
-### 4.1 `CONTINUES FROM 02 · CONTINUITY BREAK` — state and control, or state and warning?
-
-The two halves sit on one line and read two opposite ways.
-
-- **State plus control.** "This Shot continues from 02", and _Continuity break_ is the affordance that
-  severs it. Then it is always present, always clickable, and it sets `chainBreak: 'hard_cut'`.
-- **State plus warning.** "This Shot is meant to continue from 02, and continuity is currently
-  broken." Then it is conditional, inert, and something has to detect the break and raise it.
-
-One is a permanent button; the other an occasional alert. They cannot both be built.
-
-### 4.2 `▸ RENDERS AS` — what does the disclosure show, and can it be edited?
-
-Our reading is the resolved prompt actually sent to the model: Action, Look, Line, cast and references
-composed into one text.
-
-If that is right, the follow-up matters more than the feature itself — **is it read-only or
-editable?** Editable makes it a fourth authoring surface beside Action, Look and Line, and it would
-need its own detach rule: once a person edits the resolved prompt, does re-deriving the Line still
-overwrite it?
-
-### 4.3 The `+` on the join markers — insert a Shot, and at whose expense?
-
-We read it as "insert a Shot at this join". Two things follow that the drawing does not settle.
-
-- Inserting mid-chain changes the boundary on both sides, and the footer rules that a boundary **costs
-  a re-render**. The `+` carries no cost hint. Should it — or is an inserted Shot always a fresh slate
-  with nothing to invalidate?
-- Does inserting **extend** the Beat past its 31s, or **redistribute** the existing 31s across four
-  Shots?
-
-The second half of 4.3 is the one worth pressing. It is not really about the `+`: it decides whether
-Beat duration is a **target the Shots must fit** or a **total that follows from them**, and that
-reaches the Table, the Cut, and every fit-to-target calculation in the app.
