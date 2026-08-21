@@ -38,6 +38,8 @@ number is not hypothetical, it has happened. To keep it from happening here:
 - **`BUG-061` through `BUG-079` are reserved to this list.** Nothing outside Creative Studio 3 takes
   a number in that range.
 - Anyone needing a new id here takes the next free number **inside** that range, and nowhere else.
+- **The range is now exhausted**: `BUG-061` through `BUG-079` are all allocated. The next filing needs
+  a fresh reservation, checked against every branch the way this one was, not just against `sprint4`.
 - Before this list merges into a live register, re-check the max there. `sprint4` was at `BUG-060`
   when this range was chosen on 2026-08-21 and is still at `BUG-060`, but it is active, so verify
   rather than assume.
@@ -139,6 +141,18 @@ REFERENCE_PENDING_DIR, ROUTE_CATALOG` — while the same object read back throug
   - **The batch is not recoverable after the fact, which is the part that makes this expensive.** The refusal happens before any I/O, so the dev log records the call and nothing about its contents. The rendered journal shows the Director's prose but no tool payload. So neither an engineer nor the Director can find out what was rejected: the information needed to fix it is destroyed by the same code path that rejects it.
   - Remaining candidates, none established: the Director produced a `Style:` line and a `Final on-screen title`, and persisting a house style would reach for `set_rules`, which is `operation_not_permitted`. Naming the operation in the refusal would settle it in one turn.
   - Three separable defects, worth splitting if they are taken separately: the refusal should name the offending operation; a batch of permitted operations should not be lost to one unpermitted one; and the model should not be able to report a project-level prohibition that does not exist.
+
+- [ ] **[BUG-078][P1][Creative Studio] The Table's grid floor equals its fold threshold, so folding the Look can never make it fit and STATE is pushed off-screen** — found 2026-08-21 by seeding a project with nine Beats and looking at it
+  - `Table.module.css` sets `.grid { min-inline-size: 860px }`. The Look folds at **860px and below**. The two numbers are the same, so the grid refuses to be narrower than the width at which it starts folding, and the fold can never achieve what it is for.
+  - Measured at the Table's own design target: the scroll container is **690px**, the grid is **860px**, it overflows by **172px**, and `STATE` runs from 1453 to 1619 against a container that ends at 1448. **The whole STATE column is outside the visible area**, reachable only by horizontal scroll.
+  - So the Table hides the one column that says whether a Beat is ready, in the view whose default is the narrow one. `0 READY` in the app bar is then the only readiness signal on screen.
+  - **This is a gap in BUG-074's verification, and it is mine.** The fold was tested and mutation-proved — the heading merges, the cell merges, an unmeasured width does not fold — but nothing asserted the outcome the fold exists for: that the table fits its container afterwards. The tests verified the mechanism and not the purpose, which is the failure mode this list has recorded several times today.
+  - Fix direction: the grid's floor has to be below the fold threshold, not equal to it, and a test should assert the folded table's `scrollWidth` does not exceed its container at the 780px target. Lowering the floor alone is not enough — the five remaining columns have to be shown to fit at 780px, which is what the designer's `ACTION cell 374px` figure implies.
+
+- [ ] **[BUG-079][P3][Creative Studio] The Table's LENGTH cell states two facts where the design states one** — found 2026-08-21
+  - Built: every row reads `14s actual` over `No target` on two lines. The drawing reads `14s` on one, and `~24s target` only for the uncovered Beat that has no actual length.
+  - So a Beat with real coverage carries a second line saying it has no target, which is noise on every populated row, and the row grows to two lines to say it.
+  - The designer's ruling for the fold is explicit that the row keeps **one height class**. A permanent second line in LENGTH works against that on every row that has shots.
 
 ## Correctness and honesty of failures
 
