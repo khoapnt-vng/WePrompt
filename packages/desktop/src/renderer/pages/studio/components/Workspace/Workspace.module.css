@@ -40,6 +40,16 @@
   margin: 0;
 }
 
+/* Drawn at Manrope 700 14.5px. Left to the heading default it renders at 29px — twice the design,
+   and larger than the drawing's largest type anywhere, which is the film clock at 23px. */
+.workspaceHeader h1 {
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 14.5px;
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.145px;
+}
+
 .viewNavigation {
   display: flex;
   flex-wrap: wrap;
@@ -48,19 +58,28 @@
   padding-block-end: 10px;
 }
 
+/* Drawn as IBM Plex Mono 9.5px chips with 0.76px tracking, 6px corners and 5x11 padding. The
+   capitals are applied here rather than typed into the strings: the prototype authors them into its
+   own copy and computes text-transform: none, which would bake English casing into the eleven
+   locales that fall back to en-US and into scripts that have no case. */
 .viewLink,
 .viewLinkActive {
-  border-radius: 999px;
-  padding-block: 6px;
-  padding-inline: 12px;
-  color: var(--color-text-2);
+  border-radius: 6px;
+  padding-block: 5px;
+  padding-inline: 11px;
+  color: var(--color-text-3);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.76px;
   text-decoration: none;
+  text-transform: uppercase;
 }
 
+/* The active chip is marked by its ground, not by weight. Both chips compute 400 in the drawing,
+   and bolding one would reflow the row on every view change. */
 .viewLinkActive {
   color: var(--color-text-1);
-  background: var(--color-fill-2);
-  font-weight: var(--fw-bold);
+  background: var(--color-bg-2);
 }
 
 .viewSurface {
