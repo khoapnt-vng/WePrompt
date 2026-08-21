@@ -11,7 +11,9 @@ import type {
   StudioConnectionIntegration,
   StudioConnectionIntegrationLabelKey,
   StudioConnectionRecord,
+  StudioConnectionValidationFailureReason,
   StudioConnectionValidationResult,
+  StudioConnectionValidationSuccess,
   StudioMediaKind,
   StudioRendererConnectionCapabilities,
   StudioSaveConnectionRequest,
@@ -24,7 +26,10 @@ import { useTranslation } from 'react-i18next';
 type SafeCandidate = Pick<StudioConnectionCandidate, 'providerId' | 'providerName' | 'models' | 'integrationModels'>;
 type SafeIntegration = StudioConnectionIntegration;
 type SafeBinding = StudioConnectionRecord;
-type SafeValidation = StudioConnectionValidationResult;
+type SafeValidation = StudioConnectionValidationSuccess;
+type SafeValidationAttempt =
+  | { valid: true; validation: SafeValidation }
+  | { valid: false; reason: StudioConnectionValidationFailureReason };
 type EditorState = {
   visible: boolean;
   original: SafeBinding | null;
@@ -41,21 +46,52 @@ export type StudioMediaModelsSectionProps = {
 
 export const sanitizeStudioMediaModelCapabilities = (
   capabilities: StudioRendererConnectionCapabilities
-): StudioRendererConnectionCapabilities => ({
-  mediaKinds: [...capabilities.mediaKinds],
-  ...(capabilities.audioModes ? { audioModes: [...capabilities.audioModes] } : {}),
-  ...(capabilities.aspectRatios ? { aspectRatios: [...capabilities.aspectRatios] } : {}),
-  ...(capabilities.resolutions ? { resolutions: [...capabilities.resolutions] } : {}),
-  ...(capabilities.minDurationSeconds === undefined ? {} : { minDurationSeconds: capabilities.minDurationSeconds }),
-  ...(capabilities.maxDurationSeconds === undefined ? {} : { maxDurationSeconds: capabilities.maxDurationSeconds }),
-  ...(capabilities.supportsFirstFrame === undefined ? {} : { supportsFirstFrame: capabilities.supportsFirstFrame }),
-  ...(Number.isInteger(capabilities.maxConditioningImages) &&
-  capabilities.maxConditioningImages !== undefined &&
-  capabilities.maxConditioningImages >= 0 &&
-  capabilities.maxConditioningImages <= 6
-    ? { maxConditioningImages: capabilities.maxConditioningImages }
-    : {}),
-});
+): StudioRendererConnectionCapabilities => {
+  const supportedDurationSeconds = Array.isArray(capabilities.supportedDurationSeconds)
+    ? [...new Set(capabilities.supportedDurationSeconds)]
+        .filter((value): value is number => Number.isInteger(value) && value >= 4 && value <= 15)
+        .toSorted((left, right) => left - right)
+    : [];
+  return {
+    mediaKinds: [...capabilities.mediaKinds],
+    ...(capabilities.audioModes ? { audioModes: [...capabilities.audioModes] } : {}),
+    ...(capabilities.aspectRatios ? { aspectRatios: [...capabilities.aspectRatios] } : {}),
+    ...(capabilities.resolutions ? { resolutions: [...capabilities.resolutions] } : {}),
+    ...(capabilities.minDurationSeconds === undefined ? {} : { minDurationSeconds: capabilities.minDurationSeconds }),
+    ...(capabilities.maxDurationSeconds === undefined ? {} : { maxDurationSeconds: capabilities.maxDurationSeconds }),
+    ...(supportedDurationSeconds.length === 0 ? {} : { supportedDurationSeconds }),
+    ...(capabilities.supportsFirstFrame === undefined ? {} : { supportsFirstFrame: capabilities.supportsFirstFrame }),
+    ...(Number.isInteger(capabilities.maxConditioningImages) &&
+    capabilities.maxConditioningImages !== undefined &&
+    capabilities.maxConditioningImages >= 0 &&
+    capabilities.maxConditioningImages <= 6
+      ? { maxConditioningImages: capabilities.maxConditioningImages }
+      : {}),
+  };
+};
+
+const CONNECTION_VALIDATION_FAILURE_REASONS = [
+  'unsupported',
+  'auth',
+  'rate_limited',
+  'provider_unavailable',
+  'timeout',
+  'invalid_response',
+  'unknown',
+] as const satisfies readonly StudioConnectionValidationFailureReason[];
+const CONNECTION_VALIDATION_FAILURE_REASON_SET: ReadonlySet<unknown> = new Set(CONNECTION_VALIDATION_FAILURE_REASONS);
+const CONNECTION_VALIDATION_FAILURE_KEYS = {
+  unsupported: 'settings.mediaModels.validationFailure.unsupported',
+  auth: 'settings.mediaModels.validationFailure.auth',
+  rate_limited: 'settings.mediaModels.validationFailure.rateLimited',
+  provider_unavailable: 'settings.mediaModels.validationFailure.providerUnavailable',
+  timeout: 'settings.mediaModels.validationFailure.timeout',
+  invalid_response: 'settings.mediaModels.validationFailure.invalidResponse',
+  unknown: 'settings.mediaModels.validationFailure.unknown',
+} as const satisfies Record<StudioConnectionValidationFailureReason, string>;
+
+const sanitizeValidationFailureReason = (value: unknown): StudioConnectionValidationFailureReason =>
+  CONNECTION_VALIDATION_FAILURE_REASON_SET.has(value) ? (value as StudioConnectionValidationFailureReason) : 'unknown';
 
 const CONNECTION_INTEGRATION_LABEL_KEYS = [
   'imageApi',
@@ -145,7 +181,7 @@ const sanitizeBinding = (binding: StudioConnectionRecord): SafeBinding => ({
   validatedAt: binding.validatedAt,
 });
 
-const sanitizeValidation = (validation: StudioConnectionValidationResult): SafeValidation => ({
+const sanitizeValidation = (validation: StudioConnectionValidationSuccess): SafeValidation => ({
   providerId: validation.providerId,
   integrationId: validation.integrationId,
   labelKey: validation.labelKey,
@@ -199,7 +235,11 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
   const [busyConnectionIds, setBusyConnectionIds] = useState<readonly string[]>([]);
   const [listFailed, setListFailed] = useState(false);
   const [mutationFailed, setMutationFailed] = useState(false);
-  const [validationFailed, setValidationFailed] = useState(false);
+  const [editorValidationFailure, setEditorValidationFailure] =
+    useState<StudioConnectionValidationFailureReason | null>(null);
+  const [rowValidationFailure, setRowValidationFailure] = useState<StudioConnectionValidationFailureReason | null>(
+    null
+  );
   const requestSequence = useRef(0);
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -264,7 +304,8 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
 
   const resetValidation = (): void => {
     setValidated(null);
-    setValidationFailed(false);
+    setEditorValidationFailure(null);
+    setRowValidationFailure(null);
     setMutationFailed(false);
   };
 
@@ -332,14 +373,20 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
     resetValidation();
   };
 
-  const validateRequest = async (safeRequest: StudioSaveConnectionRequest): Promise<SafeValidation | null> => {
+  const validateRequest = async (safeRequest: StudioSaveConnectionRequest): Promise<SafeValidationAttempt> => {
     try {
       const result = await ipcBridge.creativeStudio.validateConnection.invoke(safeRequest);
-      if (result.ok === false) return null;
-      const safeValidation = sanitizeValidation(result.data);
-      return tupleMatches(safeValidation, safeRequest) ? safeValidation : null;
+      if (result.ok === false) return { valid: false, reason: 'unknown' };
+      const validation: StudioConnectionValidationResult = result.data;
+      if (validation.valid === false) {
+        return { valid: false, reason: sanitizeValidationFailureReason(validation.reason) };
+      }
+      const safeValidation = sanitizeValidation(validation.connection);
+      return tupleMatches(safeValidation, safeRequest)
+        ? { valid: true, validation: safeValidation }
+        : { valid: false, reason: 'unknown' };
     } catch {
-      return null;
+      return { valid: false, reason: 'unknown' };
     }
   };
 
@@ -347,11 +394,11 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
     if (!request || busy) return;
     setValidating(true);
     setValidated(null);
-    setValidationFailed(false);
+    setEditorValidationFailure(null);
     setMutationFailed(false);
-    const safeBinding = await validateRequest(request);
-    setValidated(safeBinding);
-    setValidationFailed(safeBinding === null);
+    const validation = await validateRequest(request);
+    setValidated(validation.valid ? validation.validation : null);
+    setEditorValidationFailure(validation.valid === false ? validation.reason : null);
     setValidating(false);
   };
 
@@ -412,13 +459,19 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
     if (busyConnectionIds.includes(binding.bindingId)) return;
     setBusyConnectionIds((current) => [...current, binding.bindingId]);
     setMutationFailed(false);
+    setRowValidationFailure(null);
     const safeRequest: StudioSaveConnectionRequest = {
       providerId: binding.providerId,
       integrationId: binding.integrationId,
       model: binding.model,
     };
     const validation = await validateRequest(safeRequest);
-    const saved = validation ? await saveRequest(safeRequest) : null;
+    if (validation.valid === false) {
+      setRowValidationFailure(validation.reason);
+      setBusyConnectionIds((current) => current.filter((id) => id !== binding.bindingId));
+      return;
+    }
+    const saved = await saveRequest(safeRequest);
     if (!saved) {
       setMutationFailed(true);
       await refresh();
@@ -432,6 +485,7 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
     if (busyConnectionIds.includes(bindingId)) return;
     setBusyConnectionIds((current) => [...current, bindingId]);
     setMutationFailed(false);
+    setRowValidationFailure(null);
     try {
       const result = await ipcBridge.creativeStudio.removeConnection.invoke({ bindingId });
       if (result.ok === false || !result.data) {
@@ -485,6 +539,9 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
             {t('settings.mediaModels.refresh')}
           </Button>
         </div>
+      )}
+      {rowValidationFailure && (
+        <Alert type='error' content={t(CONNECTION_VALIDATION_FAILURE_KEYS[rowValidationFailure])} />
       )}
       {mutationFailed && <Alert type='error' content={t('settings.mediaModels.validationFailed')} />}
 
@@ -651,8 +708,8 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
           {validated && validationMatchesRequest && (
             <Alert type='success' content={t('settings.mediaModels.validationSuccess')} />
           )}
-          {!validating && request && validationFailed && (
-            <Alert type='error' content={t('settings.mediaModels.validationFailed')} />
+          {!validating && request && editorValidationFailure && (
+            <Alert type='error' content={t(CONNECTION_VALIDATION_FAILURE_KEYS[editorValidationFailure])} />
           )}
         </div>
       </Modal>

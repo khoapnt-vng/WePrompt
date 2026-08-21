@@ -88,6 +88,7 @@ const CONNECTION_CAPABILITY_KEYS = new Set([
   'resolutions',
   'minDurationSeconds',
   'maxDurationSeconds',
+  'supportedDurationSeconds',
   'supportsFirstFrame',
   'maxConditioningImages',
   'cancellationPolicy',
@@ -696,7 +697,7 @@ const validateProjectDeletionMarkerV2 = (value: unknown): value is ProjectDeleti
 
 const serializeJsonExact = (value: unknown): string => JSON.stringify(value, null, 2);
 
-const validateConnectionBinding = (value: unknown): value is StudioConnectionBinding => {
+const validateConnectionBinding = (value: unknown, allowLegacyOpenRouter = false): value is StudioConnectionBinding => {
   if (!isRecord(value) || !isRecord(value.capabilities)) return false;
   const capabilities = value.capabilities;
   const mediaKinds = capabilities.mediaKinds;
@@ -710,7 +711,8 @@ const validateConnectionBinding = (value: unknown): value is StudioConnectionBin
     capabilities.audioModes === undefined ||
     (Array.isArray(capabilities.audioModes) &&
       capabilities.audioModes.length === 1 &&
-      capabilities.audioModes[0] === 'none');
+      (capabilities.audioModes[0] === 'none' ||
+        (value.adapterId === 'openrouter-video-v1' && capabilities.audioModes[0] === 'audio')));
   const optionalAspectRatios =
     capabilities.aspectRatios === undefined ||
     (Array.isArray(capabilities.aspectRatios) &&
@@ -723,21 +725,51 @@ const validateConnectionBinding = (value: unknown): value is StudioConnectionBin
       capabilities.resolutions.length <= 2 &&
       capabilities.resolutions.every((resolution) => isString(resolution) && RESOLUTIONS.has(resolution)) &&
       new Set(capabilities.resolutions).size === capabilities.resolutions.length);
+  const supportedDurationSeconds = capabilities.supportedDurationSeconds;
+  const optionalSupportedDurations =
+    supportedDurationSeconds === undefined ||
+    (Array.isArray(supportedDurationSeconds) &&
+      supportedDurationSeconds.length > 0 &&
+      supportedDurationSeconds.length <= 12 &&
+      supportedDurationSeconds.every(
+        (duration, index) =>
+          isIntegerInRange(duration, 4, 15) &&
+          (index === 0 || (supportedDurationSeconds[index - 1] as number) < duration)
+      ));
+  const supportedDurationEndpointsMatch =
+    supportedDurationSeconds === undefined ||
+    (Array.isArray(supportedDurationSeconds) &&
+      capabilities.minDurationSeconds === supportedDurationSeconds[0] &&
+      capabilities.maxDurationSeconds === supportedDurationSeconds.at(-1));
   const validAdapterCapabilities =
     value.adapterId === 'weprompt-image-v1'
       ? Array.isArray(mediaKinds) &&
         mediaKinds.length === 1 &&
         mediaKinds[0] === 'image' &&
         capabilities.audioModes === undefined
-      : (value.adapterId === 'byteplus-seedance-v1' ||
-          value.adapterId === 'weprompt-media-gateway-v1' ||
-          value.adapterId === 'openrouter-video-v1') &&
-        Array.isArray(mediaKinds) &&
-        mediaKinds.length === 1 &&
-        mediaKinds[0] === 'video' &&
-        Array.isArray(capabilities.audioModes) &&
-        capabilities.audioModes.length === 1 &&
-        capabilities.audioModes[0] === 'none';
+      : value.adapterId === 'openrouter-video-v1'
+        ? Array.isArray(mediaKinds) &&
+          mediaKinds.length === 1 &&
+          mediaKinds[0] === 'video' &&
+          Array.isArray(capabilities.audioModes) &&
+          capabilities.audioModes.length === 1 &&
+          (capabilities.audioModes[0] === 'none' || capabilities.audioModes[0] === 'audio') &&
+          Array.isArray(capabilities.aspectRatios) &&
+          capabilities.aspectRatios.length > 0 &&
+          Array.isArray(capabilities.resolutions) &&
+          capabilities.resolutions.length > 0 &&
+          (allowLegacyOpenRouter ||
+            (Array.isArray(capabilities.supportedDurationSeconds) &&
+              capabilities.supportedDurationSeconds.length > 0)) &&
+          capabilities.maxConditioningImages === 0 &&
+          capabilities.cancellationPolicy === 'none'
+        : (value.adapterId === 'byteplus-seedance-v1' || value.adapterId === 'weprompt-media-gateway-v1') &&
+          Array.isArray(mediaKinds) &&
+          mediaKinds.length === 1 &&
+          mediaKinds[0] === 'video' &&
+          Array.isArray(capabilities.audioModes) &&
+          capabilities.audioModes.length === 1 &&
+          capabilities.audioModes[0] === 'none';
   return (
     Object.keys(value).length === CONNECTION_BINDING_KEYS.size &&
     Object.keys(value).every((key) => CONNECTION_BINDING_KEYS.has(key)) &&
@@ -759,15 +791,20 @@ const validateConnectionBinding = (value: unknown): value is StudioConnectionBin
     CANCELLATION_POLICIES.has(capabilities.cancellationPolicy as StudioCancellationPolicy) &&
     (capabilities.minDurationSeconds === undefined || isIntegerInRange(capabilities.minDurationSeconds, 1, 60)) &&
     (capabilities.maxDurationSeconds === undefined || isIntegerInRange(capabilities.maxDurationSeconds, 1, 60)) &&
+    optionalSupportedDurations &&
     (capabilities.minDurationSeconds === undefined ||
       capabilities.maxDurationSeconds === undefined ||
       (capabilities.minDurationSeconds as number) <= (capabilities.maxDurationSeconds as number)) &&
+    supportedDurationEndpointsMatch &&
     isCanonicalIsoTimestamp(value.validatedAt) &&
     !containsForbiddenConnectionField(value)
   );
 };
 
-const canonicalizeConnectionBinding = (value: unknown): StudioConnectionBinding | null => {
+const canonicalizeConnectionBinding = (
+  value: unknown,
+  allowLegacyOpenRouter = false
+): StudioConnectionBinding | null => {
   if (!isRecord(value) || !isRecord(value.capabilities)) return null;
   const capabilities = value.capabilities;
   const hasPolicy = Object.hasOwn(capabilities, 'cancellationPolicy');
@@ -791,7 +828,7 @@ const canonicalizeConnectionBinding = (value: unknown): StudioConnectionBinding 
     ...value,
     capabilities: { ...canonicalCapabilities, cancellationPolicy },
   };
-  return validateConnectionBinding(candidate) ? candidate : null;
+  return validateConnectionBinding(candidate, allowLegacyOpenRouter) ? candidate : null;
 };
 
 const compareSummariesV2 = (left: StudioProjectSummaryV2, right: StudioProjectSummaryV2): number => {
@@ -2580,7 +2617,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       ) {
         throw new CreativeStudioStoreError('storage_error', 'Malformed Studio connection manifest');
       }
-      const connections = parsed.connections.map(canonicalizeConnectionBinding);
+      const connections = parsed.connections.map((connection) => canonicalizeConnectionBinding(connection, true));
       if (connections.some((connection) => connection === null)) {
         throw new CreativeStudioStoreError('storage_error', 'Malformed Studio connection manifest');
       }

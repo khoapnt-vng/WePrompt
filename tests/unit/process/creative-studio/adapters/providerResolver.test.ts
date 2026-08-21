@@ -7,6 +7,10 @@
 import { describe, expect, it } from 'vitest';
 import type { IProvider } from '@/common/config/storage';
 import type { StudioConnectionBinding, StudioConnectionCapabilities } from '@/common/types/project/creativeStudioTypes';
+import type {
+  OpenRouterVideoCatalog,
+  OpenRouterVideoModelSpec,
+} from '@process/services/creative-studio/adapters/openRouterVideoAdapter';
 import { createStudioProviderResolver } from '@process/services/creative-studio/providerResolver';
 
 const provider = (overrides: Partial<IProvider> = {}): IProvider => ({
@@ -32,6 +36,22 @@ const gatewayCapabilities = (overrides: Partial<StudioConnectionCapabilities> = 
   ...overrides,
 });
 
+const openRouterCapabilities = (
+  overrides: Partial<StudioConnectionCapabilities> = {}
+): StudioConnectionCapabilities => ({
+  mediaKinds: ['video'],
+  audioModes: ['audio'],
+  aspectRatios: ['16:9', '9:16'],
+  resolutions: ['720p', '1080p'],
+  minDurationSeconds: 4,
+  maxDurationSeconds: 12,
+  supportedDurationSeconds: [4, 8, 12],
+  supportsFirstFrame: false,
+  maxConditioningImages: 0,
+  cancellationPolicy: 'none',
+  ...overrides,
+});
+
 const binding = (overrides: Partial<StudioConnectionBinding> = {}): StudioConnectionBinding => ({
   schemaVersion: 1,
   id: 'binding_1',
@@ -41,6 +61,29 @@ const binding = (overrides: Partial<StudioConnectionBinding> = {}): StudioConnec
   capabilities: gatewayCapabilities(),
   validatedAt: '2026-07-30T00:00:00.000Z',
   ...overrides,
+});
+
+const openRouterSpec = (overrides: Partial<OpenRouterVideoModelSpec> = {}): OpenRouterVideoModelSpec => ({
+  durations: [4, 8, 12],
+  minDuration: 4,
+  maxDuration: 12,
+  resolutions: ['720p', '1080p'],
+  ratios: ['16:9', '9:16'],
+  supportsAudio: true,
+  supportsFirstFrame: false,
+  ...overrides,
+});
+
+const openRouterCatalog = (
+  entries: Record<string, OpenRouterVideoModelSpec> = {},
+  refreshError: Error | null = null
+): OpenRouterVideoCatalog => ({
+  refresh: async () => {
+    if (refreshError) throw refreshError;
+    return Object.keys(entries).toSorted();
+  },
+  listModels: () => Object.keys(entries).toSorted(),
+  getModelSpec: (model) => entries[model] ?? null,
 });
 
 const resolver = (
@@ -53,11 +96,13 @@ const resolver = (
       capabilities: { mediaKinds: ['image'], supportsFirstFrame: true },
     }),
     binding({ id: 'binding_video' }),
-  ]
+  ],
+  catalog: OpenRouterVideoCatalog = openRouterCatalog()
 ) =>
   createStudioProviderResolver({
     listProviders: async () => providers,
     listConnections: async () => connections,
+    openRouterVideoCatalog: catalog,
   });
 
 describe('createStudioProviderResolver', () => {
@@ -341,7 +386,7 @@ describe('createStudioProviderResolver', () => {
       id: 'binding_openrouter',
       adapterId: 'openrouter-video-v1',
       model: 'bytedance/seedance-2.0-fast',
-      capabilities: gatewayCapabilities({ audioModes: ['audio'] }),
+      capabilities: openRouterCapabilities(),
     });
     const otherAudioBinding = binding({
       id: 'binding_other_audio',
@@ -349,7 +394,11 @@ describe('createStudioProviderResolver', () => {
       capabilities: gatewayCapabilities({ audioModes: ['audio'] }),
     });
 
-    const catalog = await resolver([openRouter], [openRouterBinding, otherAudioBinding]).listGenerationRoutes();
+    const catalog = await resolver(
+      [openRouter],
+      [openRouterBinding, otherAudioBinding],
+      openRouterCatalog({ 'bytedance/seedance-2.0-fast': openRouterSpec() })
+    ).listGenerationRoutes();
 
     expect(catalog.routes).toEqual([
       expect.objectContaining({
@@ -363,7 +412,7 @@ describe('createStudioProviderResolver', () => {
     ]);
   });
 
-  it('does not let a legacy binding broaden an unevidenced OpenRouter route', async () => {
+  it('retires a legacy binding that claims an unevidenced OpenRouter first frame', async () => {
     const openRouter = provider({
       base_url: 'https://openrouter.ai/api/v1',
       api_key: 'sk-or-test',
@@ -372,17 +421,16 @@ describe('createStudioProviderResolver', () => {
     const legacyBinding = binding({
       adapterId: 'openrouter-video-v1',
       model: 'bytedance/seedance-2.0-fast',
-      capabilities: gatewayCapabilities({ audioModes: ['audio'], supportsFirstFrame: true }),
+      capabilities: openRouterCapabilities({ supportsFirstFrame: true }),
     });
 
-    const catalog = await resolver([openRouter], [legacyBinding]).listGenerationRoutes();
+    const catalog = await resolver(
+      [openRouter],
+      [legacyBinding],
+      openRouterCatalog({ 'bytedance/seedance-2.0-fast': openRouterSpec() })
+    ).listGenerationRoutes();
 
-    expect(catalog.routes).toMatchObject([
-      {
-        adapterId: 'openrouter-video-v1',
-        constraints: { supportsFirstFrame: false, maxConditioningImages: 0 },
-      },
-    ]);
+    expect(catalog.routes).toEqual([]);
   });
 
   it('advertises first-frame support only for the evidenced Seedance 2.0 route', async () => {
@@ -394,10 +442,14 @@ describe('createStudioProviderResolver', () => {
     const evidencedBinding = binding({
       adapterId: 'openrouter-video-v1',
       model: 'bytedance/seedance-2.0',
-      capabilities: gatewayCapabilities({ audioModes: ['audio'], supportsFirstFrame: false }),
+      capabilities: openRouterCapabilities({ supportsFirstFrame: true }),
     });
 
-    const catalog = await resolver([openRouter], [evidencedBinding]).listGenerationRoutes();
+    const catalog = await resolver(
+      [openRouter],
+      [evidencedBinding],
+      openRouterCatalog({ 'bytedance/seedance-2.0': openRouterSpec({ supportsFirstFrame: true }) })
+    ).listGenerationRoutes();
 
     expect(catalog.routes).toMatchObject([
       {
@@ -459,7 +511,7 @@ describe('createStudioProviderResolver', () => {
     ).resolves.toBe(false);
   });
 
-  it('projects the complete curated OpenRouter video set in deterministic model order', async () => {
+  it('projects the dynamically admitted OpenRouter video set in deterministic model order', async () => {
     const openRouter = provider({
       id: 'provider_openrouter',
       name: 'OpenRouter',
@@ -469,7 +521,15 @@ describe('createStudioProviderResolver', () => {
       models: ['openai/gpt-5', 'anthropic/claude-sonnet-4'],
     });
 
-    const candidates = await resolver([openRouter], []).listConnectionCandidates();
+    const candidates = await resolver(
+      [openRouter],
+      [],
+      openRouterCatalog({
+        'openai/sora-2-pro': openRouterSpec(),
+        'google/veo-3.1': openRouterSpec({ durations: [4, 6, 8], minDuration: 4, maxDuration: 8 }),
+        'bytedance/seedance-2.5': openRouterSpec({ durations: [4, 5, 6], minDuration: 4, maxDuration: 6 }),
+      })
+    ).listConnectionCandidates();
 
     expect(candidates).toEqual([
       {
@@ -483,12 +543,9 @@ describe('createStudioProviderResolver', () => {
           {
             integrationLabelKey: 'openRouterVideo',
             models: [
-              { model: 'bytedance/seedance-2.0', health: 'unknown' },
-              { model: 'bytedance/seedance-2.0-fast', health: 'unknown' },
-              { model: 'google/veo-3.1-fast', health: 'unknown' },
-              { model: 'google/veo-3.1-lite', health: 'unknown' },
-              { model: 'kwaivgi/kling-v3.0-pro', health: 'unknown' },
-              { model: 'kwaivgi/kling-v3.0-std', health: 'unknown' },
+              { model: 'bytedance/seedance-2.5', health: 'unknown' },
+              { model: 'google/veo-3.1', health: 'unknown' },
+              { model: 'openai/sora-2-pro', health: 'unknown' },
             ],
           },
         ],
@@ -503,6 +560,145 @@ describe('createStudioProviderResolver', () => {
     ).listConnectionCandidates();
 
     expect(candidates[0]?.integrationModels).toEqual([{ integrationLabelKey: 'openRouterVideo', models: [] }]);
+  });
+
+  it('rebuilds an OpenRouter route after restart from durable exact capabilities and a fresh catalog proof', async () => {
+    const openRouter = provider({
+      id: 'provider_openrouter',
+      name: 'OpenRouter',
+      base_url: 'https://openrouter.ai/api/v1',
+      api_key: 'sk-or-test',
+      models: [],
+    });
+    const persisted = binding({
+      id: 'binding_sora',
+      providerId: openRouter.id,
+      adapterId: 'openrouter-video-v1',
+      model: 'openai/sora-2-pro',
+      capabilities: {
+        mediaKinds: ['video'],
+        audioModes: ['audio'],
+        aspectRatios: ['16:9', '9:16'],
+        resolutions: ['720p', '1080p'],
+        minDurationSeconds: 4,
+        maxDurationSeconds: 12,
+        supportedDurationSeconds: [4, 8, 12],
+        supportsFirstFrame: false,
+        maxConditioningImages: 0,
+        cancellationPolicy: 'none',
+      },
+    });
+
+    const restarted = resolver([openRouter], [persisted], openRouterCatalog({ 'openai/sora-2-pro': openRouterSpec() }));
+
+    await expect(restarted.listGenerationRoutes()).resolves.toMatchObject({
+      routes: [
+        {
+          adapterId: 'openrouter-video-v1',
+          model: 'openai/sora-2-pro',
+          constraints: {
+            minDurationSeconds: 4,
+            maxDurationSeconds: 12,
+            supportedDurationSeconds: [4, 8, 12],
+            silentOutput: false,
+          },
+        },
+      ],
+    });
+  });
+
+  it('narrows a legacy OpenRouter duration range to fresh discrete catalog values after restart', async () => {
+    const openRouter = provider({ base_url: 'https://openrouter.ai/api/v1', api_key: 'sk-or-test', models: [] });
+    const legacy = binding({
+      adapterId: 'openrouter-video-v1',
+      model: 'google/veo-3.1-lite',
+      capabilities: {
+        mediaKinds: ['video'],
+        audioModes: ['none'],
+        aspectRatios: ['16:9', '9:16'],
+        resolutions: ['720p', '1080p'],
+        minDurationSeconds: 4,
+        maxDurationSeconds: 8,
+        supportsFirstFrame: false,
+        maxConditioningImages: 0,
+        cancellationPolicy: 'none',
+      },
+    });
+
+    const routes = await resolver(
+      [openRouter],
+      [legacy],
+      openRouterCatalog({
+        'google/veo-3.1-lite': openRouterSpec({
+          durations: [4, 6, 8, 10],
+          minDuration: 4,
+          maxDuration: 10,
+        }),
+      })
+    ).listGenerationRoutes();
+
+    expect(routes.routes[0]?.constraints).toMatchObject({
+      minDurationSeconds: 4,
+      maxDurationSeconds: 8,
+      supportedDurationSeconds: [4, 6, 8],
+      silentOutput: true,
+    });
+  });
+
+  it('retires a durable OpenRouter route that expands beyond the refreshed catalog', async () => {
+    const openRouter = provider({ base_url: 'https://openrouter.ai/api/v1', api_key: 'sk-or-test', models: [] });
+    const expanded = binding({
+      adapterId: 'openrouter-video-v1',
+      model: 'openai/sora-2-pro',
+      capabilities: {
+        mediaKinds: ['video'],
+        audioModes: ['audio'],
+        aspectRatios: ['16:9', '9:16'],
+        resolutions: ['720p', '1080p'],
+        minDurationSeconds: 4,
+        maxDurationSeconds: 15,
+        supportedDurationSeconds: [4, 8, 12, 15],
+        supportsFirstFrame: false,
+        maxConditioningImages: 0,
+        cancellationPolicy: 'none',
+      },
+    });
+
+    const routes = await resolver(
+      [openRouter],
+      [expanded],
+      openRouterCatalog({ 'openai/sora-2-pro': openRouterSpec() })
+    ).listGenerationRoutes();
+
+    expect(routes.routes).toEqual([]);
+    expect(routes.diagnostics).toMatchObject([{ status: 'retired', model: 'openai/sora-2-pro' }]);
+  });
+
+  it('fails the closed OpenRouter projection and routes when catalog refresh fails', async () => {
+    const openRouter = provider({ base_url: 'https://openrouter.ai/api/v1', api_key: 'sk-or-test', models: [] });
+    const staleCatalog = openRouterCatalog({ 'openai/sora-2-pro': openRouterSpec() }, new Error('catalog unavailable'));
+    const persisted = binding({
+      adapterId: 'openrouter-video-v1',
+      model: 'openai/sora-2-pro',
+      capabilities: {
+        mediaKinds: ['video'],
+        audioModes: ['audio'],
+        aspectRatios: ['16:9'],
+        resolutions: ['720p'],
+        minDurationSeconds: 4,
+        maxDurationSeconds: 12,
+        supportedDurationSeconds: [4, 8, 12],
+        supportsFirstFrame: false,
+        maxConditioningImages: 0,
+        cancellationPolicy: 'none',
+      },
+    });
+    const checked = resolver([openRouter], [persisted], staleCatalog);
+
+    await expect(checked.listConnectionCandidates()).resolves.toMatchObject([
+      { integrationModels: [{ integrationLabelKey: 'openRouterVideo', models: [] }] },
+    ]);
+    await expect(checked.listGenerationRoutes()).resolves.toMatchObject({ routes: [] });
   });
 
   it('keeps candidate ordering stable without projecting provider secrets or adapter identities', async () => {

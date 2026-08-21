@@ -1347,6 +1347,8 @@ export type StudioConnectionCapabilities = {
   resolutions?: StudioResolution[];
   minDurationSeconds?: number;
   maxDurationSeconds?: number;
+  /** Exact provider-supported clip lengths when the interval is not continuous. */
+  supportedDurationSeconds?: number[];
   supportsFirstFrame?: boolean;
   maxConditioningImages?: number;
   cancellationPolicy?: StudioCancellationPolicy;
@@ -1359,6 +1361,8 @@ export type StudioRouteConstraints = {
   resolutions: StudioResolution[];
   minDurationSeconds: number;
   maxDurationSeconds: number;
+  /** Exact admissible clip lengths; absent only for continuous-duration adapters. */
+  supportedDurationSeconds?: number[];
   supportsFirstFrame: boolean;
   maxConditioningImages: number;
   silentOutput: boolean;
@@ -1401,7 +1405,21 @@ export type StudioConnectionInventory = {
   connections: StudioConnectionRecord[];
 };
 
-export type StudioConnectionValidationResult = Omit<StudioConnectionRecord, 'bindingId'>;
+export type StudioConnectionValidationSuccess = Omit<StudioConnectionRecord, 'bindingId'>;
+
+/** Stable, provider-body-free reason returned by an explicit connection-validation attempt. */
+export type StudioConnectionValidationFailureReason =
+  | 'unsupported'
+  | 'auth'
+  | 'rate_limited'
+  | 'provider_unavailable'
+  | 'timeout'
+  | 'invalid_response'
+  | 'unknown';
+
+export type StudioConnectionValidationResult =
+  | { valid: true; connection: StudioConnectionValidationSuccess }
+  | { valid: false; reason: StudioConnectionValidationFailureReason };
 
 export type StudioModelAvailability = 'ready' | 'selection_required' | 'setup_required' | 'unavailable';
 

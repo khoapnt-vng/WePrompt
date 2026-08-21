@@ -17,6 +17,7 @@ import {
   createOpenRouterVideoAdapter,
   isValidProviderJobId,
   type GenerationProviderAdapter,
+  type OpenRouterVideoCatalog,
   type ProviderHttpResponse,
   type ResolvedProviderInput,
   type ResolvedStudioGenerationRequest,
@@ -107,7 +108,25 @@ type VideoAdapterFixture = {
   adapter: GenerationProviderAdapter;
   provider: TProviderWithModel;
   providerCall: ReturnType<typeof vi.fn>;
+  decorateRequest: (request: ResolvedStudioGenerationRequest) => ResolvedStudioGenerationRequest;
 };
+
+const unchangedVideoRequest = (candidate: ResolvedStudioGenerationRequest): ResolvedStudioGenerationRequest =>
+  candidate;
+
+const withOpenRouterRouteAuthority = (candidate: ResolvedStudioGenerationRequest): ResolvedStudioGenerationRequest => ({
+  ...candidate,
+  routeConstraints: {
+    aspectRatios: ['16:9'],
+    resolutions: ['720p'],
+    minDurationSeconds: 6,
+    maxDurationSeconds: 6,
+    supportedDurationSeconds: [6],
+    supportsFirstFrame: true,
+    maxConditioningImages: 0,
+    silentOutput: false,
+  },
+});
 
 const videoAdapterFixtures: ReadonlyArray<{
   label: string;
@@ -117,20 +136,43 @@ const videoAdapterFixtures: ReadonlyArray<{
     label: 'BytePlus',
     create: () => {
       const fetch = vi.fn();
-      return { adapter: createBytePlusSeedanceAdapter({ fetch }), provider: provider(), providerCall: fetch };
+      return {
+        adapter: createBytePlusSeedanceAdapter({ fetch }),
+        provider: provider(),
+        providerCall: fetch,
+        decorateRequest: unchangedVideoRequest,
+      };
     },
   },
   {
     label: 'OpenRouter',
     create: () => {
       const fetch = vi.fn();
+      const model = 'bytedance/seedance-2.0';
+      const catalog: OpenRouterVideoCatalog = {
+        refresh: async () => [model],
+        listModels: () => [model],
+        getModelSpec: (candidate) =>
+          candidate === model
+            ? {
+                durations: [6],
+                minDuration: 6,
+                maxDuration: 6,
+                resolutions: ['720p'],
+                ratios: ['16:9'],
+                supportsAudio: true,
+                supportsFirstFrame: true,
+              }
+            : null,
+      };
       return {
-        adapter: createOpenRouterVideoAdapter({ fetch }),
+        adapter: createOpenRouterVideoAdapter({ fetch, catalog }),
         provider: provider({
           base_url: 'https://openrouter.ai/api/v1',
-          use_model: 'bytedance/seedance-2.0',
+          use_model: model,
         }),
         providerCall: fetch,
+        decorateRequest: withOpenRouterRouteAuthority,
       };
     },
   },
@@ -142,6 +184,7 @@ const videoAdapterFixtures: ReadonlyArray<{
         adapter: createMediaGatewayAdapter({ fetch }),
         provider: provider({ base_url: 'https://gateway.example', use_model: 'open-sora' }),
         providerCall: fetch,
+        decorateRequest: unchangedVideoRequest,
       };
     },
   },
@@ -189,16 +232,17 @@ describe('Creative Studio provider adapters', () => {
   it.each(videoConditioningCases)(
     'rejects $conditioningLabel $firstFrameLabel on $adapterLabel video before input resolution or provider calls',
     async ({ create, fields, includeFirstFrame }) => {
-      const { adapter, provider: selectedProvider, providerCall } = create();
+      const { adapter, provider: selectedProvider, providerCall, decorateRequest } = create();
       const asDataUrl = vi.fn(async () => 'data:image/png;base64,QUJD');
       const frame = { ...firstFrame(), asDataUrl };
-      const resolvedRequest: ResolvedStudioGenerationRequest = {
+      const baselineRequest = decorateRequest({ ...request, firstFrame: frame });
+      const resolvedRequest = decorateRequest({
         ...request,
         ...(includeFirstFrame ? { firstFrame: frame } : {}),
         ...fields,
-      };
+      });
 
-      expect(adapter.validateRequest({ ...request, firstFrame: frame }, selectedProvider)).toMatchObject({ ok: true });
+      expect(adapter.validateRequest(baselineRequest, selectedProvider)).toMatchObject({ ok: true });
       expect(adapter.validateRequest(resolvedRequest, selectedProvider)).toEqual({
         ok: false,
         issues: [{ code: 'provider_unavailable' }],

@@ -2315,15 +2315,18 @@ describe('CreativeStudioServiceV2', () => {
       },
     ]);
     await expect(harness.service.validateConnection(request)).resolves.toMatchObject({
-      providerId: 'provider_1',
-      integrationId: 'integration_g7Q2mB4p',
-      model: 'image-model',
-      capabilities: {
-        mediaKinds: ['image'],
-        supportsFirstFrame: true,
-        maxConditioningImages: 3,
+      valid: true,
+      connection: {
+        providerId: 'provider_1',
+        integrationId: 'integration_g7Q2mB4p',
+        model: 'image-model',
+        capabilities: {
+          mediaKinds: ['image'],
+          supportsFirstFrame: true,
+          maxConditioningImages: 3,
+        },
+        validatedAt: '2026-08-17T00:00:02.000Z',
       },
-      validatedAt: '2026-08-17T00:00:02.000Z',
     });
     const saved = await harness.service.saveConnection(request);
     expect(saved).toMatchObject({ bindingId: 'binding_v2_1', providerId: 'provider_1' });
@@ -2445,7 +2448,7 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.validateConnection).not.toHaveBeenCalled();
   });
 
-  it('maps a bounded connection deadline and a negative validation to provider errors', async () => {
+  it('returns a bounded connection deadline as a sanitized timeout validation result', async () => {
     const harness = makeHarness();
     const request = {
       providerId: 'provider_1',
@@ -2454,10 +2457,133 @@ describe('CreativeStudioServiceV2', () => {
     };
     harness.validateConnection.mockRejectedValueOnce(new ProviderDeadlineError());
 
-    await expect(harness.service.validateConnection(request)).rejects.toMatchObject({ code: 'provider_error' });
+    await expect(harness.service.validateConnection(request)).resolves.toEqual({
+      valid: false,
+      reason: 'timeout',
+    });
+  });
+
+  it.each([
+    'unsupported',
+    'auth',
+    'rate_limited',
+    'provider_unavailable',
+    'timeout',
+    'invalid_response',
+    'unknown',
+  ] as const)('preserves the sanitized %s validation reason without provider-controlled details', async (reason) => {
+    const harness = makeHarness();
+    const request = {
+      providerId: 'provider_1',
+      integrationId: 'integration_g7Q2mB4p',
+      model: 'image-model',
+    };
+    harness.validateConnection.mockResolvedValueOnce({ ok: false, error: { code: reason } });
+
+    await expect(harness.service.validateConnection(request)).resolves.toEqual({ valid: false, reason });
+  });
+
+  it('maps the internal no-output adapter reason to the public unknown validation reason', async () => {
+    const harness = makeHarness();
+    const request = {
+      providerId: 'provider_1',
+      integrationId: 'integration_g7Q2mB4p',
+      model: 'image-model',
+    };
+    harness.validateConnection.mockResolvedValueOnce({ ok: false, error: { code: 'no_output' } });
+
+    await expect(harness.service.validateConnection(request)).resolves.toEqual({ valid: false, reason: 'unknown' });
+  });
+
+  it('keeps a malformed adapter validation failure outside the public reason contract', async () => {
+    const harness = makeHarness();
+    const request = {
+      providerId: 'provider_1',
+      integrationId: 'integration_g7Q2mB4p',
+      model: 'image-model',
+    };
 
     harness.validateConnection.mockResolvedValueOnce({ ok: false, error: 'invalid credentials' });
     await expect(harness.service.validateConnection(request)).rejects.toMatchObject({ code: 'provider_error' });
+  });
+
+  it('keeps a malformed OpenRouter success outside the public validation contract', async () => {
+    const harness = makeHarness();
+    harness.adapterRegistry.set('openrouter-video-v1', {
+      id: 'openrouter-video-v1',
+      validateConnection: harness.validateConnection,
+    } as never);
+    harness.validateConnection.mockResolvedValueOnce({ ok: true, capabilities: { mediaKinds: ['video'] } });
+
+    await expect(
+      harness.service.validateConnection({
+        providerId: 'provider_1',
+        integrationId: 'integration_o4R7vD2m',
+        model: 'image-model',
+      })
+    ).rejects.toMatchObject({ code: 'provider_error' });
+  });
+
+  it('preserves an exact OpenRouter validation capability contract through the public result', async () => {
+    const harness = makeHarness();
+    harness.adapterRegistry.set('openrouter-video-v1', {
+      id: 'openrouter-video-v1',
+      validateConnection: harness.validateConnection,
+    } as never);
+    harness.validateConnection.mockResolvedValueOnce({
+      ok: true,
+      capabilities: {
+        mediaKinds: ['video'],
+        audioModes: ['audio'],
+        aspectRatios: ['16:9', '9:16'],
+        resolutions: ['720p', '1080p'],
+        minDurationSeconds: 4,
+        maxDurationSeconds: 15,
+        supportedDurationSeconds: [4, 8, 15],
+        supportsFirstFrame: true,
+        maxConditioningImages: 0,
+        cancellationPolicy: 'none',
+      },
+    } as never);
+
+    await expect(
+      harness.service.validateConnection({
+        providerId: 'provider_1',
+        integrationId: 'integration_o4R7vD2m',
+        model: 'image-model',
+      })
+    ).resolves.toMatchObject({
+      valid: true,
+      connection: {
+        providerId: 'provider_1',
+        integrationId: 'integration_o4R7vD2m',
+        model: 'image-model',
+        capabilities: {
+          mediaKinds: ['video'],
+          audioModes: ['audio'],
+          aspectRatios: ['16:9', '9:16'],
+          resolutions: ['720p', '1080p'],
+          minDurationSeconds: 4,
+          maxDurationSeconds: 15,
+          supportedDurationSeconds: [4, 8, 15],
+          supportsFirstFrame: true,
+          maxConditioningImages: 0,
+        },
+      },
+    });
+  });
+
+  it('refuses to persist a connection when revalidation returns a sanitized business failure', async () => {
+    const harness = makeHarness();
+    const request = {
+      providerId: 'provider_1',
+      integrationId: 'integration_g7Q2mB4p',
+      model: 'image-model',
+    };
+    harness.validateConnection.mockResolvedValueOnce({ ok: false, error: { code: 'auth' } });
+
+    await expect(harness.service.saveConnection(request)).rejects.toMatchObject({ code: 'provider_error' });
+    expect(harness.saveConnection).not.toHaveBeenCalled();
   });
 
   it('does not relabel an unexpected adapter implementation failure', async () => {
@@ -2513,7 +2639,10 @@ describe('CreativeStudioServiceV2', () => {
       model: 'gateway-video-model-2',
     });
 
-    expect(populated.capabilities).toEqual({
+    expect(populated).toMatchObject({ valid: true });
+    expect(absent).toMatchObject({ valid: true });
+    if (!populated.valid || !absent.valid) throw new Error('Expected successful connection validations');
+    expect(populated.connection.capabilities).toEqual({
       mediaKinds: ['video'],
       audioModes: ['none'],
       aspectRatios: ['16:9'],
@@ -2521,7 +2650,7 @@ describe('CreativeStudioServiceV2', () => {
       supportsFirstFrame: true,
       maxConditioningImages: 0,
     });
-    expect(absent.capabilities).toEqual({
+    expect(absent.connection.capabilities).toEqual({
       mediaKinds: ['video'],
       audioModes: ['none'],
       minDurationSeconds: 4,

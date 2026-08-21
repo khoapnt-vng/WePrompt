@@ -22,7 +22,9 @@ import {
   type StudioConnectionCandidate,
   type StudioConnectionInventory,
   type StudioConnectionRecord,
+  type StudioConnectionValidationFailureReason,
   type StudioConnectionValidationResult,
+  type StudioConnectionValidationSuccess,
   type StudioConfirmSubmissionRequestV2,
   type StudioConfirmSubmissionResultV2,
   type StudioCopyExportResultV2,
@@ -354,12 +356,68 @@ const hasExactKeys = (value: Record<string, unknown>, keys: readonly string[]): 
   );
 };
 
+const connectionValidationFailureReason = (value: unknown): StudioConnectionValidationFailureReason | null => {
+  if (!isRecord(value) || !hasExactKeys(value, ['code'])) return null;
+  switch (value.code) {
+    case 'unsupported':
+    case 'auth':
+    case 'rate_limited':
+    case 'provider_unavailable':
+    case 'timeout':
+    case 'invalid_response':
+    case 'unknown':
+      return value.code;
+    case 'no_output':
+      return 'unknown';
+    default:
+      return null;
+  }
+};
+
 const isExactDenseArray = (value: unknown): value is unknown[] => {
   if (!Array.isArray(value)) return false;
   const keys = Reflect.ownKeys(value);
   if (keys.length !== value.length + 1 || !keys.includes('length')) return false;
   for (let index = 0; index < value.length; index += 1) {
     if (!Object.hasOwn(value, index)) return false;
+  }
+  return true;
+};
+
+const hasExactOpenRouterValidationCapabilities = (value: unknown): value is Record<string, unknown> => {
+  if (!isRecord(value)) return false;
+  const { mediaKinds, audioModes, aspectRatios, resolutions, supportedDurationSeconds } = value;
+  if (
+    !isExactDenseArray(mediaKinds) ||
+    mediaKinds.length !== 1 ||
+    mediaKinds[0] !== 'video' ||
+    !isExactDenseArray(audioModes) ||
+    audioModes.length !== 1 ||
+    (audioModes[0] !== 'audio' && audioModes[0] !== 'none') ||
+    !isExactDenseArray(aspectRatios) ||
+    aspectRatios.length === 0 ||
+    aspectRatios.some((item) => typeof item !== 'string' || !ASPECT_RATIOS.has(item)) ||
+    new Set(aspectRatios).size !== aspectRatios.length ||
+    !isExactDenseArray(resolutions) ||
+    resolutions.length === 0 ||
+    resolutions.some((item) => typeof item !== 'string' || !RESOLUTIONS.has(item)) ||
+    new Set(resolutions).size !== resolutions.length ||
+    !isExactDenseArray(supportedDurationSeconds) ||
+    supportedDurationSeconds.length === 0 ||
+    supportedDurationSeconds.some(
+      (item, index) =>
+        !Number.isInteger(item) ||
+        (item as number) < STUDIO_MIN_SHOT_SECONDS ||
+        (item as number) > STUDIO_MAX_SHOT_SECONDS ||
+        (index > 0 && (item as number) <= (supportedDurationSeconds[index - 1] as number))
+    ) ||
+    value.minDurationSeconds !== supportedDurationSeconds[0] ||
+    value.maxDurationSeconds !== supportedDurationSeconds.at(-1) ||
+    typeof value.supportsFirstFrame !== 'boolean' ||
+    value.maxConditioningImages !== 0 ||
+    value.cancellationPolicy !== 'none'
+  ) {
+    return false;
   }
   return true;
 };
@@ -531,6 +589,33 @@ const sanitizedCapabilities = (
     : undefined;
   const minimum = capabilities?.minDurationSeconds;
   const maximum = capabilities?.maxDurationSeconds;
+  if (adapterId === 'openrouter-video-v1') {
+    const supportedDurationSeconds = Array.isArray(capabilities?.supportedDurationSeconds)
+      ? [...new Set(capabilities.supportedDurationSeconds)]
+          .filter(
+            (value): value is number =>
+              Number.isInteger(value) && value >= STUDIO_MIN_SHOT_SECONDS && value <= STUDIO_MAX_SHOT_SECONDS
+          )
+          .toSorted((left, right) => left - right)
+      : [];
+    return {
+      mediaKinds: ['video'],
+      audioModes:
+        Array.isArray(capabilities?.audioModes) && capabilities.audioModes.includes('audio') ? ['audio'] : ['none'],
+      ...(aspectRatios && aspectRatios.length > 0 ? { aspectRatios } : {}),
+      ...(resolutions && resolutions.length > 0 ? { resolutions } : {}),
+      ...(supportedDurationSeconds.length > 0
+        ? {
+            supportedDurationSeconds,
+            minDurationSeconds: supportedDurationSeconds[0]!,
+            maxDurationSeconds: supportedDurationSeconds.at(-1)!,
+          }
+        : {}),
+      supportsFirstFrame: capabilities?.supportsFirstFrame === true,
+      maxConditioningImages: 0,
+      cancellationPolicy: 'none',
+    };
+  }
   return {
     mediaKinds: ['video'],
     audioModes: ['none'],
@@ -574,7 +659,7 @@ const toConnectionRecord = (binding: StudioConnectionBinding): StudioConnectionR
   };
 };
 
-const toConnectionValidation = (binding: StudioConnectionBinding): StudioConnectionValidationResult => {
+const toConnectionValidation = (binding: StudioConnectionBinding): StudioConnectionValidationSuccess => {
   const { bindingId: _bindingId, ...validation } = toConnectionRecord(binding);
   return validation;
 };
@@ -761,6 +846,9 @@ const toRendererRoute = (route: StudioGenerationRoute): StudioRouteCatalogEntry 
     resolutions: [...route.constraints.resolutions],
     minDurationSeconds: route.constraints.minDurationSeconds,
     maxDurationSeconds: route.constraints.maxDurationSeconds,
+    ...(route.constraints.supportedDurationSeconds === undefined
+      ? {}
+      : { supportedDurationSeconds: [...route.constraints.supportedDurationSeconds] }),
     supportsFirstFrame: route.constraints.supportsFirstFrame,
     maxConditioningImages: route.constraints.maxConditioningImages,
     silentOutput: route.constraints.silentOutput,
@@ -925,6 +1013,8 @@ const resolveQuotedRoute = (
     !routeSupportsProject(route, project) ||
     durationSeconds < route.constraints.minDurationSeconds ||
     durationSeconds > route.constraints.maxDurationSeconds ||
+    (route.constraints.supportedDurationSeconds !== undefined &&
+      !route.constraints.supportedDurationSeconds.includes(durationSeconds)) ||
     (item.purpose === 'video_take' && !route.constraints.supportsFirstFrame) ||
     (referenceInput !== null && route.constraints.maxConditioningImages < 1)
   ) {
@@ -1317,9 +1407,13 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     });
   };
 
+  type ConnectionBindingValidation =
+    | { valid: true; binding: StudioConnectionBinding }
+    | { valid: false; reason: StudioConnectionValidationFailureReason };
+
   const validateConnectionBinding = async (
     input: StudioValidateConnectionRequest
-  ): Promise<StudioConnectionBinding> => {
+  ): Promise<ConnectionBindingValidation> => {
     if (!isRecord(input) || !hasExactKeys(input, ['providerId', 'integrationId', 'model'])) {
       throw invalid('Invalid Studio connection request');
     }
@@ -1343,7 +1437,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     }
     const adapter = deps.getAdapterRegistry().get(integration.adapterId);
     if (adapter === undefined) throw new CreativeStudioServiceError('invalid_route');
-    let validation;
+    let validation: unknown;
     try {
       validation = await runWithProviderDeadline(
         new AbortController().signal,
@@ -1351,18 +1445,32 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
         (signal) => adapter.validateConnection({ model: input.model }, provider, signal)
       );
     } catch (error) {
-      if (error instanceof ProviderDeadlineError) throw new CreativeStudioServiceError('provider_error');
+      if (error instanceof ProviderDeadlineError) return { valid: false, reason: 'timeout' };
       throw error;
     }
-    if (!validation.ok) throw new CreativeStudioServiceError('provider_error');
+    if (!isRecord(validation) || (validation.ok !== true && validation.ok !== false)) {
+      throw new CreativeStudioServiceError('provider_error');
+    }
+    if (validation.ok === false) {
+      const reason = connectionValidationFailureReason(validation.error);
+      if (reason === null) throw new CreativeStudioServiceError('provider_error');
+      return { valid: false, reason };
+    }
+    const capabilities = isRecord(validation.capabilities) ? validation.capabilities : undefined;
+    if (adapter.id === 'openrouter-video-v1' && !hasExactOpenRouterValidationCapabilities(capabilities)) {
+      throw new CreativeStudioServiceError('provider_error');
+    }
     return {
-      schemaVersion: 1,
-      id: 'validation_only',
-      providerId: provider.id,
-      adapterId: adapter.id,
-      model: input.model,
-      capabilities: sanitizedCapabilities(adapter.id, input.model, validation.capabilities),
-      validatedAt: readNow().toISOString(),
+      valid: true,
+      binding: {
+        schemaVersion: 1,
+        id: 'validation_only',
+        providerId: provider.id,
+        adapterId: adapter.id,
+        model: input.model,
+        capabilities: sanitizedCapabilities(adapter.id, input.model, capabilities),
+        validatedAt: readNow().toISOString(),
+      },
     };
   };
 
@@ -2493,13 +2601,16 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     },
 
     async validateConnection(input): Promise<StudioConnectionValidationResult> {
-      return toConnectionValidation(await validateConnectionBinding(input));
+      const validation = await validateConnectionBinding(input);
+      if (validation.valid === false) return { valid: false, reason: validation.reason };
+      return { valid: true, connection: toConnectionValidation(validation.binding) };
     },
 
     async saveConnection(input): Promise<StudioConnectionRecord> {
       const validated = await validateConnectionBinding(input);
+      if (!validated.valid) throw new CreativeStudioServiceError('provider_error');
       const binding: StudioConnectionBinding = {
-        ...validated,
+        ...validated.binding,
         id: createConnectionId(),
       };
       if (!isSafeId(binding.id)) {

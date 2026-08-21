@@ -158,9 +158,23 @@ const isExactUniqueEnumArray = (value: unknown, allowed: readonly string[]): val
   new Set(value).size === value.length &&
   value.every((item) => typeof item === 'string' && allowed.includes(item));
 
-const isSafeRouteConstraints = (value: unknown): value is Record<string, unknown> =>
-  isRecord(value) &&
-  hasExactKeys(value, [
+const isSafeDiscreteDurations = (value: unknown, minimum: unknown, maximum: unknown): value is number[] =>
+  Array.isArray(value) &&
+  value.length > 0 &&
+  value.length <= 12 &&
+  value.every(
+    (duration, index) =>
+      Number.isInteger(duration) &&
+      duration >= 4 &&
+      duration <= 15 &&
+      (index === 0 || Number(value[index - 1]) < duration)
+  ) &&
+  value[0] === minimum &&
+  value.at(-1) === maximum;
+
+const isSafeRouteConstraints = (value: unknown): value is Record<string, unknown> => {
+  if (!isRecord(value)) return false;
+  const keys = [
     'aspectRatios',
     'resolutions',
     'minDurationSeconds',
@@ -168,19 +182,26 @@ const isSafeRouteConstraints = (value: unknown): value is Record<string, unknown
     'supportsFirstFrame',
     'maxConditioningImages',
     'silentOutput',
-  ]) &&
-  isExactUniqueEnumArray(value.aspectRatios, ASPECT_RATIOS) &&
-  isExactUniqueEnumArray(value.resolutions, RESOLUTIONS) &&
-  Number.isInteger(value.minDurationSeconds) &&
-  Number.isInteger(value.maxDurationSeconds) &&
-  Number(value.minDurationSeconds) >= 1 &&
-  Number(value.maxDurationSeconds) <= 60 &&
-  Number(value.minDurationSeconds) <= Number(value.maxDurationSeconds) &&
-  typeof value.supportsFirstFrame === 'boolean' &&
-  Number.isInteger(value.maxConditioningImages) &&
-  Number(value.maxConditioningImages) >= 0 &&
-  Number(value.maxConditioningImages) <= 6 &&
-  typeof value.silentOutput === 'boolean';
+  ];
+  const hasDiscreteDurations = Object.hasOwn(value, 'supportedDurationSeconds');
+  return (
+    hasExactKeys(value, hasDiscreteDurations ? [...keys, 'supportedDurationSeconds'] : keys) &&
+    isExactUniqueEnumArray(value.aspectRatios, ASPECT_RATIOS) &&
+    isExactUniqueEnumArray(value.resolutions, RESOLUTIONS) &&
+    Number.isInteger(value.minDurationSeconds) &&
+    Number.isInteger(value.maxDurationSeconds) &&
+    Number(value.minDurationSeconds) >= 1 &&
+    Number(value.maxDurationSeconds) <= 60 &&
+    Number(value.minDurationSeconds) <= Number(value.maxDurationSeconds) &&
+    (!hasDiscreteDurations ||
+      isSafeDiscreteDurations(value.supportedDurationSeconds, value.minDurationSeconds, value.maxDurationSeconds)) &&
+    typeof value.supportsFirstFrame === 'boolean' &&
+    Number.isInteger(value.maxConditioningImages) &&
+    Number(value.maxConditioningImages) >= 0 &&
+    Number(value.maxConditioningImages) <= 6 &&
+    typeof value.silentOutput === 'boolean'
+  );
+};
 
 const isSafeRoute = (value: unknown, kind: 'image' | 'video'): value is Record<string, unknown> => {
   if (
@@ -230,6 +251,8 @@ const sameSafeRoute = (left: Record<string, unknown>, right: Record<string, unkn
     JSON.stringify(leftConstraints.resolutions) === JSON.stringify(rightConstraints.resolutions) &&
     leftConstraints.minDurationSeconds === rightConstraints.minDurationSeconds &&
     leftConstraints.maxDurationSeconds === rightConstraints.maxDurationSeconds &&
+    JSON.stringify(leftConstraints.supportedDurationSeconds) ===
+      JSON.stringify(rightConstraints.supportedDurationSeconds) &&
     leftConstraints.supportsFirstFrame === rightConstraints.supportsFirstFrame &&
     leftConstraints.maxConditioningImages === rightConstraints.maxConditioningImages &&
     leftConstraints.silentOutput === rightConstraints.silentOutput

@@ -8,14 +8,20 @@ import { randomUUID } from 'node:crypto';
 import { ipcBridge } from '@/common';
 import { CREATIVE_STUDIO_ENABLED } from '@/common/config/constants';
 import {
+  STUDIO_MAX_SHOT_SECONDS,
+  STUDIO_MIN_SHOT_SECONDS,
   STUDIO_PROJECT_SCHEMA_VERSION,
   STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT,
   STUDIO_MAX_EXPORTS_PER_SHAPE,
   STUDIO_VIEWS,
   type StudioCommandErrorCode,
   type StudioCommandResult,
+  type StudioConnectionValidationFailureReason,
+  type StudioConnectionValidationResult,
+  type StudioConnectionValidationSuccess,
   type StudioMutationBatchResultV2,
   type StudioMutationReducerContextV2,
+  type StudioRendererConnectionCapabilities,
   type StudioRendererProjectCommitResultV2,
   type StudioRendererExportCatalogV2,
   type StudioRendererWorkspaceStatusV2,
@@ -355,6 +361,212 @@ const isExactDataObject = (value: unknown, keys: readonly string[]): value is Re
   });
 };
 
+const MISSING_DATA_PROPERTY = Symbol('missing-data-property');
+const CONNECTION_MAX_DURATION_SECONDS = 60;
+
+const dataRecord = (value: unknown): Record<string, unknown> | null => {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null ? (value as Record<string, unknown>) : null;
+};
+
+const ownDataProperty = (record: Record<string, unknown>, key: string): unknown | typeof MISSING_DATA_PROPERTY => {
+  const descriptor = Object.getOwnPropertyDescriptor(record, key);
+  return descriptor !== undefined && descriptor.enumerable && 'value' in descriptor
+    ? descriptor.value
+    : MISSING_DATA_PROPERTY;
+};
+
+const projectDenseArray = <T>(value: unknown, accepts: (item: unknown) => item is T): T[] | null => {
+  if (!Array.isArray(value) || Reflect.ownKeys(value).length !== value.length + 1) return null;
+  const projected: T[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, index);
+    if (descriptor === undefined || !descriptor.enumerable || !('value' in descriptor) || !accepts(descriptor.value)) {
+      return null;
+    }
+    projected.push(descriptor.value);
+  }
+  return projected;
+};
+
+const isStudioConnectionValidationFailureReason = (value: unknown): value is StudioConnectionValidationFailureReason =>
+  value === 'unsupported' ||
+  value === 'auth' ||
+  value === 'rate_limited' ||
+  value === 'provider_unavailable' ||
+  value === 'timeout' ||
+  value === 'invalid_response' ||
+  value === 'unknown';
+
+const connectionValidationBoundaryFailure = (): never => {
+  throw new CreativeStudioServiceError('provider_error');
+};
+
+const projectConnectionCapabilities = (value: unknown): StudioRendererConnectionCapabilities => {
+  const record = dataRecord(value);
+  if (record === null) return connectionValidationBoundaryFailure();
+  const mediaKinds = projectDenseArray(
+    ownDataProperty(record, 'mediaKinds'),
+    (item): item is 'image' | 'video' => item === 'image' || item === 'video'
+  );
+  if (mediaKinds === null || mediaKinds.length !== 1) return connectionValidationBoundaryFailure();
+  const projected: StudioRendererConnectionCapabilities = { mediaKinds };
+
+  const audioModesValue = ownDataProperty(record, 'audioModes');
+  if (audioModesValue !== MISSING_DATA_PROPERTY) {
+    const audioModes = projectDenseArray(
+      audioModesValue,
+      (item): item is string => item === 'audio' || item === 'none'
+    );
+    if (audioModes === null || audioModes.length !== 1) return connectionValidationBoundaryFailure();
+    projected.audioModes = audioModes;
+  }
+
+  const aspectRatiosValue = ownDataProperty(record, 'aspectRatios');
+  if (aspectRatiosValue !== MISSING_DATA_PROPERTY) {
+    const aspectRatios = projectDenseArray(
+      aspectRatiosValue,
+      (item): item is '16:9' | '9:16' | '1:1' | '4:3' | '3:4' =>
+        item === '16:9' || item === '9:16' || item === '1:1' || item === '4:3' || item === '3:4'
+    );
+    if (aspectRatios === null || aspectRatios.length === 0 || new Set(aspectRatios).size !== aspectRatios.length) {
+      return connectionValidationBoundaryFailure();
+    }
+    projected.aspectRatios = aspectRatios;
+  }
+
+  const resolutionsValue = ownDataProperty(record, 'resolutions');
+  if (resolutionsValue !== MISSING_DATA_PROPERTY) {
+    const resolutions = projectDenseArray(
+      resolutionsValue,
+      (item): item is '720p' | '1080p' => item === '720p' || item === '1080p'
+    );
+    if (resolutions === null || resolutions.length === 0 || new Set(resolutions).size !== resolutions.length) {
+      return connectionValidationBoundaryFailure();
+    }
+    projected.resolutions = resolutions;
+  }
+
+  const minimum = ownDataProperty(record, 'minDurationSeconds');
+  const maximum = ownDataProperty(record, 'maxDurationSeconds');
+  if (minimum !== MISSING_DATA_PROPERTY || maximum !== MISSING_DATA_PROPERTY) {
+    if (
+      !Number.isInteger(minimum) ||
+      !Number.isInteger(maximum) ||
+      (minimum as number) < 1 ||
+      (maximum as number) > CONNECTION_MAX_DURATION_SECONDS ||
+      (minimum as number) > (maximum as number)
+    ) {
+      return connectionValidationBoundaryFailure();
+    }
+    projected.minDurationSeconds = minimum as number;
+    projected.maxDurationSeconds = maximum as number;
+  }
+
+  const supportedDurationsValue = ownDataProperty(record, 'supportedDurationSeconds');
+  if (supportedDurationsValue !== MISSING_DATA_PROPERTY) {
+    const supportedDurationSeconds = projectDenseArray(
+      supportedDurationsValue,
+      (item): item is number =>
+        typeof item === 'number' &&
+        Number.isInteger(item) &&
+        item >= STUDIO_MIN_SHOT_SECONDS &&
+        item <= STUDIO_MAX_SHOT_SECONDS
+    );
+    if (
+      supportedDurationSeconds === null ||
+      supportedDurationSeconds.length === 0 ||
+      supportedDurationSeconds.some(
+        (duration, index) => index > 0 && duration <= supportedDurationSeconds[index - 1]!
+      ) ||
+      projected.minDurationSeconds !== supportedDurationSeconds[0] ||
+      projected.maxDurationSeconds !== supportedDurationSeconds.at(-1)
+    ) {
+      return connectionValidationBoundaryFailure();
+    }
+    projected.supportedDurationSeconds = supportedDurationSeconds;
+  }
+
+  const supportsFirstFrame = ownDataProperty(record, 'supportsFirstFrame');
+  if (supportsFirstFrame !== MISSING_DATA_PROPERTY) {
+    if (typeof supportsFirstFrame !== 'boolean') return connectionValidationBoundaryFailure();
+    projected.supportsFirstFrame = supportsFirstFrame;
+  }
+  const maxConditioningImages = ownDataProperty(record, 'maxConditioningImages');
+  if (maxConditioningImages !== MISSING_DATA_PROPERTY) {
+    if (
+      !Number.isInteger(maxConditioningImages) ||
+      (maxConditioningImages as number) < 0 ||
+      (maxConditioningImages as number) > 6
+    ) {
+      return connectionValidationBoundaryFailure();
+    }
+    projected.maxConditioningImages = maxConditioningImages as number;
+  }
+  return projected;
+};
+
+const projectConnectionValidationSuccess = (value: unknown): StudioConnectionValidationSuccess => {
+  const record = dataRecord(value);
+  if (record === null) return connectionValidationBoundaryFailure();
+  const providerId = ownDataProperty(record, 'providerId');
+  const integrationId = ownDataProperty(record, 'integrationId');
+  const labelKey = ownDataProperty(record, 'labelKey');
+  const model = ownDataProperty(record, 'model');
+  const capabilities = ownDataProperty(record, 'capabilities');
+  const validatedAt = ownDataProperty(record, 'validatedAt');
+  if (
+    typeof providerId !== 'string' ||
+    !/^[A-Za-z0-9_-]{1,256}$/.test(providerId) ||
+    typeof integrationId !== 'string' ||
+    !/^[A-Za-z0-9_-]{1,256}$/.test(integrationId) ||
+    (labelKey !== 'imageApi' &&
+      labelKey !== 'bytePlusSeedance' &&
+      labelKey !== 'selfHostedVideoGateway' &&
+      labelKey !== 'openRouterVideo') ||
+    typeof model !== 'string' ||
+    model.length === 0 ||
+    model.length > 256 ||
+    model !== model.trim() ||
+    Array.from(model).some((character) => {
+      const codePoint = character.codePointAt(0)!;
+      return (
+        codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f) || (codePoint >= 0xd800 && codePoint <= 0xdfff)
+      );
+    }) ||
+    typeof validatedAt !== 'string' ||
+    !Number.isFinite(Date.parse(validatedAt)) ||
+    new Date(validatedAt).toISOString() !== validatedAt
+  ) {
+    return connectionValidationBoundaryFailure();
+  }
+  return {
+    providerId,
+    integrationId,
+    labelKey,
+    model,
+    capabilities: projectConnectionCapabilities(capabilities),
+    validatedAt,
+  };
+};
+
+const projectConnectionValidationResult = (value: unknown): StudioConnectionValidationResult => {
+  const record = dataRecord(value);
+  if (record === null) return connectionValidationBoundaryFailure();
+  const valid = ownDataProperty(record, 'valid');
+  if (valid === false) {
+    const reason = ownDataProperty(record, 'reason');
+    if (!isStudioConnectionValidationFailureReason(reason)) return connectionValidationBoundaryFailure();
+    return { valid: false, reason };
+  }
+  if (valid !== true) return connectionValidationBoundaryFailure();
+  return {
+    valid: true,
+    connection: projectConnectionValidationSuccess(ownDataProperty(record, 'connection')),
+  };
+};
+
 const toRendererExportCatalog = (value: unknown): StudioRendererExportCatalogV2 => {
   if (
     !isExactDataObject(value, ['revision', 'artifacts']) ||
@@ -663,7 +875,7 @@ export function initCreativeStudioBridge(dependencies: CreativeStudioBridgeDepen
     runCommand(() => dependencies.getService().listConnections())
   );
   ipcBridge.creativeStudio.validateConnection.provider((input) =>
-    runCommand(() => dependencies.getService().validateConnection(input))
+    runCommand(() => dependencies.getService().validateConnection(input).then(projectConnectionValidationResult))
   );
   ipcBridge.creativeStudio.saveConnection.provider((input) =>
     runCommand(() => dependencies.getService().saveConnection(input))

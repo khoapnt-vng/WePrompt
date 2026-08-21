@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { TProviderWithModel } from '@/common/config/storage';
 import {
   createOpenRouterVideoAdapter,
-  OPENROUTER_VIDEO_MODELS,
+  createOpenRouterVideoCatalog,
 } from '@process/services/creative-studio/adapters/openRouterVideoAdapter';
 import type {
   ProviderFetch,
@@ -33,12 +33,38 @@ const request = {
   resolution: '720p' as const,
   durationSeconds: 10,
   idempotencyKey: 'request_1',
+  routeConstraints: {
+    aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4'] as const,
+    resolutions: ['720p', '1080p'] as const,
+    minDurationSeconds: 4,
+    maxDurationSeconds: 15,
+    supportedDurationSeconds: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+    supportsFirstFrame: true,
+    maxConditioningImages: 0,
+    silentOutput: false,
+  },
 };
 
 const response = (status: number, body: unknown): ProviderHttpResponse => ({
   status,
   json: async () => body,
 });
+
+const catalogRow = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+  id: 'bytedance/seedance-2.0',
+  supported_resolutions: ['480p', '720p', '1080p', '4K'],
+  supported_aspect_ratios: ['1:1', '3:4', '9:16', '4:3', '16:9', '21:9'],
+  supported_durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+  supported_frame_images: ['first_frame', 'last_frame'],
+  generate_audio: true,
+  ...overrides,
+});
+
+const admittedCatalog = async (rows: Record<string, unknown>[] = [catalogRow()]) => {
+  const catalog = createOpenRouterVideoCatalog({ fetch: async () => response(200, { data: rows }) });
+  await catalog.refresh(provider(), new AbortController().signal);
+  return catalog;
+};
 
 const firstFrame = (asDataUrl = vi.fn(async () => 'data:image/png;base64,QUJD')): ResolvedProviderInput => ({
   assetId: 'asset_1',
@@ -59,7 +85,7 @@ describe('OpenRouter video generation adapter', () => {
         status: 'pending',
       })
     );
-    const adapter = createOpenRouterVideoAdapter({ fetch });
+    const adapter = createOpenRouterVideoAdapter({ fetch, catalog: await admittedCatalog() });
 
     await expect(adapter.submit(request, provider(), new AbortController().signal)).resolves.toEqual({
       kind: 'remote',
@@ -87,18 +113,14 @@ describe('OpenRouter video generation adapter', () => {
 
   it('omits generate_audio when the selected model spec does not support it', async () => {
     const fetch = vi.fn(async () => response(202, { id: 'job_abc', status: 'pending' }));
-    const adapter = createOpenRouterVideoAdapter({ fetch });
-    const spec = OPENROUTER_VIDEO_MODELS['bytedance/seedance-2.0'];
-    if (!spec) throw new Error('Expected curated OpenRouter model spec');
+    const catalog = await admittedCatalog([catalogRow({ generate_audio: null })]);
+    const adapter = createOpenRouterVideoAdapter({ fetch, catalog });
 
-    // Every currently curated model supports audio; temporarily exercise the
-    // false branch without inventing a production model ID.
-    Reflect.set(spec, 'supportsAudio', false);
-    try {
-      await adapter.submit(request, provider(), new AbortController().signal);
-    } finally {
-      Reflect.set(spec, 'supportsAudio', true);
-    }
+    await adapter.submit(
+      { ...request, routeConstraints: { ...request.routeConstraints, silentOutput: true } },
+      provider(),
+      new AbortController().signal
+    );
 
     expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body))).not.toHaveProperty('generate_audio');
   });
@@ -106,7 +128,7 @@ describe('OpenRouter video generation adapter', () => {
   it('submits one managed first frame for the evidenced Seedance 2.0 route', async () => {
     const fetch = vi.fn(async () => response(202, { id: 'job_abc', status: 'pending' }));
     const asDataUrl = vi.fn(async () => 'data:image/png;base64,QUJD');
-    const adapter = createOpenRouterVideoAdapter({ fetch });
+    const adapter = createOpenRouterVideoAdapter({ fetch, catalog: await admittedCatalog() });
 
     await expect(
       adapter.submit({ ...request, firstFrame: firstFrame(asDataUrl) }, provider(), new AbortController().signal)
@@ -128,7 +150,7 @@ describe('OpenRouter video generation adapter', () => {
   it('keeps unevidenced OpenRouter models closed to managed first frames', async () => {
     const fetch = vi.fn(async () => response(202, { id: 'job_abc', status: 'pending' }));
     const asDataUrl = vi.fn(async () => 'data:image/png;base64,QUJD');
-    const adapter = createOpenRouterVideoAdapter({ fetch });
+    const adapter = createOpenRouterVideoAdapter({ fetch, catalog: await admittedCatalog() });
 
     await expect(
       adapter.submit(
@@ -159,7 +181,11 @@ describe('OpenRouter video generation adapter', () => {
         },
       })
     );
-    const adapter = createOpenRouterVideoAdapter({ fetch, emitHttpErrorEvidence });
+    const adapter = createOpenRouterVideoAdapter({
+      fetch,
+      catalog: await admittedCatalog(),
+      emitHttpErrorEvidence,
+    });
 
     await expect(adapter.submit(request, provider(), new AbortController().signal)).rejects.toMatchObject({
       code: 'unknown',
@@ -185,6 +211,7 @@ describe('OpenRouter video generation adapter', () => {
   it('preserves the stable adapter failure when diagnostic emission fails', async () => {
     const adapter = createOpenRouterVideoAdapter({
       fetch: async () => response(400, { error: { message: 'private prompt' } }),
+      catalog: await admittedCatalog(),
       emitHttpErrorEvidence: () => {
         throw new Error('diagnostic sink failed');
       },
@@ -210,6 +237,7 @@ describe('OpenRouter video generation adapter', () => {
           return { error: { metadata: { error_type: 'invalid_image' } } };
         },
       }),
+      catalog: await admittedCatalog(),
       emitHttpErrorEvidence,
     });
 
@@ -230,6 +258,7 @@ describe('OpenRouter video generation adapter', () => {
     const emitHttpErrorEvidence = vi.fn(() => sinkResult);
     const adapter = createOpenRouterVideoAdapter({
       fetch: async () => response(400, { error: { metadata: { error_type: 'invalid_image' } } }),
+      catalog: await admittedCatalog(),
       emitHttpErrorEvidence,
     });
 
@@ -248,6 +277,7 @@ describe('OpenRouter video generation adapter', () => {
     });
     const adapter = createOpenRouterVideoAdapter({
       fetch: async () => ({ status: 400, json: async () => stalledBody }),
+      catalog: await admittedCatalog(),
       emitHttpErrorEvidence: vi.fn(),
     });
     const submission = adapter.submit(request, provider(), new AbortController().signal);
@@ -274,7 +304,7 @@ describe('OpenRouter video generation adapter', () => {
     ['cancelled', { status: 'cancelled', error: { code: 'unknown' } }],
   ])('maps the %s polling state', async (status, expected) => {
     const fetch: ProviderFetch = async () => response(200, { status });
-    const adapter = createOpenRouterVideoAdapter({ fetch });
+    const adapter = createOpenRouterVideoAdapter({ fetch, catalog: await admittedCatalog() });
 
     await expect(adapter.poll?.('job_abc', provider(), new AbortController().signal)).resolves.toEqual(expected);
   });
@@ -286,7 +316,7 @@ describe('OpenRouter video generation adapter', () => {
         unsigned_urls: ['https://openrouter.ai/api/v1/videos/job_abc/content?index=0'],
       })
     );
-    const adapter = createOpenRouterVideoAdapter({ fetch });
+    const adapter = createOpenRouterVideoAdapter({ fetch, catalog: await admittedCatalog() });
 
     await expect(adapter.poll?.('job_abc', provider(), new AbortController().signal)).resolves.toEqual({
       status: 'succeeded',
@@ -317,6 +347,7 @@ describe('OpenRouter video generation adapter', () => {
     const adapter = createOpenRouterVideoAdapter({
       fetch: async () =>
         response(200, { status: 'completed', unsigned_urls: ['https://openrouter.ai.evil.example/video.mp4'] }),
+      catalog: await admittedCatalog(),
     });
 
     await expect(adapter.poll?.('job_abc', provider(), new AbortController().signal)).resolves.toEqual({
@@ -325,31 +356,305 @@ describe('OpenRouter video generation adapter', () => {
     });
   });
 
-  it('validates against GET /videos/models and returns the curated model capabilities', async () => {
-    const fetch = vi.fn(async () => response(200, { models: ['bytedance/seedance-2.0'] }));
+  it('authenticates, admits a dynamically discovered model, and preserves its discrete capabilities', async () => {
+    const fetch = vi.fn(async (url: string) =>
+      url.endsWith('/key')
+        ? response(200, { data: { label: 'must-not-cross-processes' } })
+        : response(200, {
+            data: [
+              catalogRow({
+                id: 'openai/sora-2-pro',
+                supported_resolutions: ['720p', '1080p'],
+                supported_aspect_ratios: ['16:9', '9:16'],
+                supported_durations: [20, 4, 16, 8, 12],
+                supported_frame_images: null,
+              }),
+            ],
+          })
+    );
     const adapter = createOpenRouterVideoAdapter({ fetch, validationTimeoutMs: 5_000 });
-    const spec = OPENROUTER_VIDEO_MODELS['bytedance/seedance-2.0'];
-    if (!spec) throw new Error('Expected curated OpenRouter model spec');
 
     await expect(
-      adapter.validateConnection({ model: 'bytedance/seedance-2.0' }, provider(), new AbortController().signal)
+      adapter.validateConnection(
+        { model: 'openai/sora-2-pro' },
+        provider({ use_model: 'openai/sora-2-pro' }),
+        new AbortController().signal
+      )
     ).resolves.toEqual({
       ok: true,
       capabilities: {
         mediaKinds: ['video'],
         audioModes: ['audio'],
-        aspectRatios: [...spec.ratios],
-        resolutions: [...spec.resolutions],
-        minDurationSeconds: spec.minDuration,
-        maxDurationSeconds: spec.maxDuration,
-        supportsFirstFrame: true,
+        aspectRatios: ['16:9', '9:16'],
+        resolutions: ['720p', '1080p'],
+        minDurationSeconds: 4,
+        maxDurationSeconds: 12,
+        supportedDurationSeconds: [4, 8, 12],
+        supportsFirstFrame: false,
         maxConditioningImages: 0,
         cancellationPolicy: 'none',
       },
     });
-    expect(fetch).toHaveBeenCalledWith(
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      'https://openrouter.ai/api/v1/key',
       'https://openrouter.ai/api/v1/videos/models',
+    ]);
+  });
+
+  it('rejects a selected model that is absent from an otherwise valid catalog', async () => {
+    const fetch = vi.fn(async (url: string) =>
+      url.endsWith('/key') ? response(200, {}) : response(200, { data: [catalogRow({ id: 'google/veo-3.1' })] })
+    );
+    const adapter = createOpenRouterVideoAdapter({ fetch });
+
+    await expect(
+      adapter.validateConnection({ model: 'openai/sora-2-pro' }, provider(), new AbortController().signal)
+    ).resolves.toEqual({ ok: false, error: { code: 'unsupported' } });
+  });
+
+  it.each([{ data: [] }, { models: [catalogRow()] }, { data: [{ id: 'broken' }] }])(
+    'fails closed for an empty or malformed catalog payload %#',
+    async (payload) => {
+      const fetch = vi.fn(async (url: string) => (url.endsWith('/key') ? response(200, {}) : response(200, payload)));
+      const adapter = createOpenRouterVideoAdapter({ fetch });
+
+      await expect(
+        adapter.validateConnection({ model: 'bytedance/seedance-2.0' }, provider(), new AbortController().signal)
+      ).resolves.toEqual({ ok: false, error: { code: 'invalid_response' } });
+    }
+  );
+
+  it('clears a previously admitted snapshot when a refresh becomes malformed', async () => {
+    let payload: unknown = { data: [catalogRow()] };
+    const catalog = createOpenRouterVideoCatalog({ fetch: async () => response(200, payload) });
+    await catalog.refresh(provider(), new AbortController().signal);
+    expect(catalog.getModelSpec('bytedance/seedance-2.0')).not.toBeNull();
+
+    payload = { data: [] };
+    await expect(catalog.refresh(provider(), new AbortController().signal)).rejects.toMatchObject({
+      code: 'invalid_response',
+    });
+    expect(catalog.getModelSpec('bytedance/seedance-2.0')).toBeNull();
+  });
+
+  it('never lets an older broad refresh overwrite a later catalog shrink', async () => {
+    let resolveBroad!: (value: ProviderHttpResponse) => void;
+    let resolveShrink!: (value: ProviderHttpResponse) => void;
+    const broad = new Promise<ProviderHttpResponse>((resolve) => {
+      resolveBroad = resolve;
+    });
+    const shrink = new Promise<ProviderHttpResponse>((resolve) => {
+      resolveShrink = resolve;
+    });
+    let call = 0;
+    const catalog = createOpenRouterVideoCatalog({
+      fetch: async () => (call++ === 0 ? broad : shrink),
+    });
+    const older = catalog.refresh(provider(), new AbortController().signal);
+    const newer = catalog.refresh(provider(), new AbortController().signal);
+
+    resolveShrink(response(200, { data: [catalogRow({ id: 'google/veo-3.1', supported_durations: [4, 8] })] }));
+    await newer;
+    resolveBroad(response(200, { data: [catalogRow(), catalogRow({ id: 'google/veo-3.1' })] }));
+    await older;
+
+    expect(catalog.listModels()).toEqual(['google/veo-3.1']);
+    expect(catalog.getModelSpec('bytedance/seedance-2.0')).toBeNull();
+  });
+
+  it('invalidates prior authority while a newer catalog refresh is pending', async () => {
+    let resolveRefresh!: (value: ProviderHttpResponse) => void;
+    const pendingResponse = new Promise<ProviderHttpResponse>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    let call = 0;
+    const catalog = createOpenRouterVideoCatalog({
+      fetch: async () => (call++ === 0 ? response(200, { data: [catalogRow()] }) : pendingResponse),
+    });
+    await catalog.refresh(provider(), new AbortController().signal);
+    const pending = catalog.refresh(provider(), new AbortController().signal);
+    const paidFetch = vi.fn(async () => response(202, { id: 'must_not_submit', status: 'pending' }));
+    const adapter = createOpenRouterVideoAdapter({ fetch: paidFetch, catalog });
+
+    expect(catalog.getModelSpec('bytedance/seedance-2.0')).toBeNull();
+    expect(adapter.validateRequest(request, provider())).toEqual({
+      ok: false,
+      issues: [{ code: 'provider_unavailable' }],
+    });
+    await expect(adapter.submit(request, provider(), new AbortController().signal)).rejects.toMatchObject({
+      code: 'unsupported',
+    });
+    expect(paidFetch).not.toHaveBeenCalled();
+
+    resolveRefresh(response(200, { data: [catalogRow({ id: 'google/veo-3.1' })] }));
+    await pending;
+  });
+
+  it('rejects duplicate model identities instead of choosing one provider-controlled row', async () => {
+    const catalog = createOpenRouterVideoCatalog({
+      fetch: async () =>
+        response(200, {
+          data: [catalogRow(), catalogRow({ supported_durations: [4, 6, 8] })],
+        }),
+    });
+
+    await expect(catalog.refresh(provider(), new AbortController().signal)).rejects.toMatchObject({
+      code: 'invalid_response',
+    });
+    expect(catalog.listModels()).toEqual([]);
+  });
+
+  it.each([
+    Array.from({ length: 257 }, () => catalogRow()),
+    Object.assign([catalogRow(), catalogRow({ id: 'google/veo-3.1' })], { 0: undefined }),
+  ])('rejects oversized or sparse catalog arrays %#', async (data) => {
+    const catalog = createOpenRouterVideoCatalog({ fetch: async () => response(200, { data }) });
+
+    await expect(catalog.refresh(provider(), new AbortController().signal)).rejects.toMatchObject({
+      code: 'invalid_response',
+    });
+  });
+
+  it('enforces discrete catalog durations instead of admitting every value between min and max', async () => {
+    const catalog = await admittedCatalog([catalogRow({ id: 'google/veo-3.1', supported_durations: [4, 6, 8] })]);
+    const adapter = createOpenRouterVideoAdapter({ catalog });
+    const veo = provider({ use_model: 'google/veo-3.1' });
+
+    const veoRequest = {
+      ...request,
+      routeConstraints: {
+        ...request.routeConstraints,
+        minDurationSeconds: 4,
+        maxDurationSeconds: 8,
+        supportedDurationSeconds: [4, 6, 8],
+        supportsFirstFrame: false,
+      },
+    };
+    expect(adapter.validateRequest({ ...veoRequest, durationSeconds: 6 }, veo)).toMatchObject({ ok: true });
+    expect(adapter.validateRequest({ ...veoRequest, durationSeconds: 5 }, veo)).toEqual({
+      ok: false,
+      issues: [{ code: 'invalid_duration' }],
+    });
+  });
+
+  it('keeps catalog first-frame claims behind the managed-input evidence gate', async () => {
+    const catalog = await admittedCatalog([
+      catalogRow({ id: 'google/veo-3.1', supported_frame_images: ['first_frame'] }),
+    ]);
+    const adapter = createOpenRouterVideoAdapter({ catalog });
+
+    expect(
+      adapter.validateRequest(
+        {
+          ...request,
+          routeConstraints: { ...request.routeConstraints, supportsFirstFrame: false },
+          firstFrame: firstFrame(),
+        },
+        provider({ use_model: 'google/veo-3.1' })
+      )
+    ).toEqual({ ok: false, issues: [{ code: 'invalid_reference' }] });
+  });
+
+  it('polls a paid job after the discovery catalog has been cleared', async () => {
+    let catalogPayload: unknown = { data: [catalogRow({ id: 'openai/sora-2-pro' })] };
+    const catalog = createOpenRouterVideoCatalog({ fetch: async () => response(200, catalogPayload) });
+    await catalog.refresh(provider(), new AbortController().signal);
+    catalogPayload = { data: [] };
+    await catalog.refresh(provider(), new AbortController().signal).catch(() => undefined);
+    const fetch = vi.fn(async () =>
+      response(200, {
+        status: 'completed',
+        unsigned_urls: ['https://openrouter.ai/api/v1/videos/job_paid/content?index=0'],
+      })
+    );
+    const adapter = createOpenRouterVideoAdapter({ fetch, catalog });
+
+    await expect(
+      adapter.poll?.('job_paid', provider({ use_model: 'openai/sora-2-pro' }), new AbortController().signal)
+    ).resolves.toMatchObject({ status: 'succeeded' });
+    expect(fetch).toHaveBeenCalledWith(
+      'https://openrouter.ai/api/v1/videos/job_paid',
       expect.objectContaining({ method: 'GET' })
     );
+  });
+
+  it('refuses a paid submit when the refreshed catalog shrinks below durable route authority', async () => {
+    let catalogPayload: unknown = {
+      data: [catalogRow({ id: 'google/veo-3.1', supported_durations: [4, 6, 8] })],
+    };
+    const catalog = createOpenRouterVideoCatalog({ fetch: async () => response(200, catalogPayload) });
+    await catalog.refresh(provider(), new AbortController().signal);
+    const submit = vi.fn(async () => response(202, { id: 'must_not_submit', status: 'pending' }));
+    const adapter = createOpenRouterVideoAdapter({ fetch: submit, catalog });
+    const veoRequest = {
+      ...request,
+      durationSeconds: 6,
+      routeConstraints: {
+        ...request.routeConstraints,
+        minDurationSeconds: 4,
+        maxDurationSeconds: 8,
+        supportedDurationSeconds: [4, 6, 8],
+        supportsFirstFrame: false,
+      },
+    };
+    catalogPayload = {
+      data: [catalogRow({ id: 'google/veo-3.1', supported_durations: [4, 8] })],
+    };
+    await catalog.refresh(provider(), new AbortController().signal);
+
+    expect(adapter.validateRequest(veoRequest, provider({ use_model: 'google/veo-3.1' }))).toEqual({
+      ok: false,
+      issues: [{ code: 'provider_unavailable' }],
+    });
+    await expect(
+      adapter.submit(veoRequest, provider({ use_model: 'google/veo-3.1' }), new AbortController().signal)
+    ).rejects.toMatchObject({ code: 'unsupported' });
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it('re-proves the catalog after materializing a first frame and before the paid POST', async () => {
+    let catalogPayload: unknown = { data: [catalogRow()] };
+    const catalog = createOpenRouterVideoCatalog({ fetch: async () => response(200, catalogPayload) });
+    await catalog.refresh(provider(), new AbortController().signal);
+    let releaseFrame!: (value: string) => void;
+    const frameReady = new Promise<string>((resolve) => {
+      releaseFrame = resolve;
+    });
+    const asDataUrl = vi.fn(async () => frameReady);
+    const paidFetch = vi.fn(async () => response(202, { id: 'must_not_submit', status: 'pending' }));
+    const adapter = createOpenRouterVideoAdapter({ fetch: paidFetch, catalog });
+    const submission = adapter.submit(
+      { ...request, firstFrame: firstFrame(asDataUrl) },
+      provider(),
+      new AbortController().signal
+    );
+    await vi.waitFor(() => expect(asDataUrl).toHaveBeenCalledOnce());
+    catalogPayload = { data: [catalogRow({ id: 'google/veo-3.1' })] };
+    await catalog.refresh(provider(), new AbortController().signal);
+    releaseFrame('data:image/png;base64,QUJD');
+
+    await expect(submission).rejects.toMatchObject({ code: 'unsupported' });
+    expect(paidFetch).not.toHaveBeenCalled();
+  });
+
+  it('intersects the provider catalog with Studio-safe resolution and ratio values', async () => {
+    const catalog = await admittedCatalog([
+      catalogRow({
+        id: 'bytedance/seedance-2.5',
+        supported_resolutions: ['480p', '720p'],
+        supported_aspect_ratios: ['21:9', '16:9', '4:3'],
+        supported_durations: [4, 5, 6],
+      }),
+    ]);
+
+    expect(catalog.getModelSpec('bytedance/seedance-2.5')).toEqual({
+      durations: [4, 5, 6],
+      minDuration: 4,
+      maxDuration: 6,
+      resolutions: ['720p'],
+      ratios: ['16:9', '4:3'],
+      supportsAudio: true,
+      supportsFirstFrame: false,
+    });
   });
 });

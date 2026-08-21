@@ -29,9 +29,18 @@ import {
 export const OPENROUTER_VIDEO_BASE_URL = 'https://openrouter.ai/api/v1';
 const OPENROUTER_HOST = 'openrouter.ai';
 const VALIDATION_TIMEOUT_MS = 10_000;
+const CATALOG_TIMEOUT_MS = 10_000;
 const FIRST_FRAME_MAX_BYTES = 30 * 1024 * 1024;
+const MAX_CATALOG_MODELS = 256;
+const MAX_CATALOG_VALUES = 128;
+const STUDIO_MIN_DURATION_SECONDS = 4;
+const STUDIO_MAX_DURATION_SECONDS = 15;
+const STUDIO_RESOLUTIONS = ['720p', '1080p'] as const;
+const STUDIO_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4'] as const;
+const MANAGED_FIRST_FRAME_MODELS = new Set(['bytedance/seedance-2.0']);
 
 export type OpenRouterVideoModelSpec = {
+  durations: readonly number[];
   minDuration: number;
   maxDuration: number;
   resolutions: readonly ('720p' | '1080p')[];
@@ -41,56 +50,16 @@ export type OpenRouterVideoModelSpec = {
   supportsFirstFrame: boolean;
 };
 
-export const OPENROUTER_VIDEO_MODELS: Readonly<Record<string, OpenRouterVideoModelSpec>> = Object.freeze({
-  'google/veo-3.1-lite': {
-    minDuration: 4,
-    maxDuration: 8,
-    resolutions: ['720p', '1080p'],
-    ratios: ['16:9', '9:16'],
-    supportsAudio: true,
-    supportsFirstFrame: false,
-  },
-  'google/veo-3.1-fast': {
-    minDuration: 4,
-    maxDuration: 8,
-    resolutions: ['720p', '1080p'],
-    ratios: ['16:9', '9:16'],
-    supportsAudio: true,
-    supportsFirstFrame: false,
-  },
-  'kwaivgi/kling-v3.0-std': {
-    minDuration: 3,
-    maxDuration: 15,
-    resolutions: ['720p'],
-    ratios: ['16:9', '9:16', '1:1'],
-    supportsAudio: true,
-    supportsFirstFrame: false,
-  },
-  'kwaivgi/kling-v3.0-pro': {
-    minDuration: 3,
-    maxDuration: 15,
-    resolutions: ['720p'],
-    ratios: ['16:9', '9:16', '1:1'],
-    supportsAudio: true,
-    supportsFirstFrame: false,
-  },
-  'bytedance/seedance-2.0': {
-    minDuration: 4,
-    maxDuration: 15,
-    resolutions: ['720p', '1080p'],
-    ratios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
-    supportsAudio: true,
-    supportsFirstFrame: true,
-  },
-  'bytedance/seedance-2.0-fast': {
-    minDuration: 4,
-    maxDuration: 15,
-    resolutions: ['720p'],
-    ratios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
-    supportsAudio: true,
-    supportsFirstFrame: false,
-  },
-});
+export type OpenRouterVideoCatalog = {
+  refresh(provider: Pick<IProvider, 'api_key' | 'base_url'>, signal: AbortSignal): Promise<readonly string[]>;
+  listModels(): readonly string[];
+  getModelSpec(model: string): OpenRouterVideoModelSpec | null;
+};
+
+export type OpenRouterVideoCatalogDeps = {
+  fetch?: ProviderFetch;
+  timeoutMs?: number;
+};
 
 export class OpenRouterVideoAdapterError extends Error {
   readonly code: SanitizedProviderError['code'];
@@ -118,6 +87,7 @@ export type OpenRouterHttpErrorEvidence = {
 
 export type OpenRouterVideoAdapterDeps = {
   fetch?: ProviderFetch;
+  catalog?: OpenRouterVideoCatalog;
   validationTimeoutMs?: number;
   emitHttpErrorEvidence?: (evidence: OpenRouterHttpErrorEvidence) => void | PromiseLike<void>;
 };
@@ -142,33 +112,76 @@ const normalizedBaseUrl = (value: string): string | null => {
   }
 };
 
-export const isSupportedOpenRouterVideoProvider = (provider: Pick<IProvider, 'base_url'>, model?: string): boolean =>
-  normalizedBaseUrl(provider.base_url) === OPENROUTER_VIDEO_BASE_URL &&
-  (model === undefined || OPENROUTER_VIDEO_MODELS[model] !== undefined);
+export const isSupportedOpenRouterVideoProvider = (provider: Pick<IProvider, 'base_url'>): boolean =>
+  normalizedBaseUrl(provider.base_url) === OPENROUTER_VIDEO_BASE_URL;
 
-export const getOpenRouterVideoModelSpec = (model: string): OpenRouterVideoModelSpec | null =>
-  OPENROUTER_VIDEO_MODELS[model] ?? null;
+const isCanonicalRouteAuthority = (spec: OpenRouterVideoModelSpec): boolean =>
+  spec.durations.length > 0 &&
+  spec.durations.every(
+    (duration, index) =>
+      Number.isInteger(duration) &&
+      duration >= STUDIO_MIN_DURATION_SECONDS &&
+      duration <= STUDIO_MAX_DURATION_SECONDS &&
+      (index === 0 || spec.durations[index - 1]! < duration)
+  ) &&
+  spec.minDuration === spec.durations[0] &&
+  spec.maxDuration === spec.durations.at(-1) &&
+  spec.resolutions.length > 0 &&
+  new Set(spec.resolutions).size === spec.resolutions.length &&
+  spec.resolutions.every((resolution) => STUDIO_RESOLUTIONS.includes(resolution)) &&
+  spec.ratios.length > 0 &&
+  new Set(spec.ratios).size === spec.ratios.length &&
+  spec.ratios.every((ratio) => STUDIO_RATIOS.includes(ratio));
+
+const requestAuthority = (request: ResolvedStudioGenerationRequest, model: string): OpenRouterVideoModelSpec | null => {
+  const constraints = request.routeConstraints;
+  const durations = constraints?.supportedDurationSeconds;
+  if (constraints === undefined || !Array.isArray(durations) || constraints.maxConditioningImages !== 0) {
+    return null;
+  }
+  const spec: OpenRouterVideoModelSpec = {
+    durations,
+    minDuration: constraints.minDurationSeconds,
+    maxDuration: constraints.maxDurationSeconds,
+    resolutions: constraints.resolutions,
+    ratios: constraints.aspectRatios,
+    supportsAudio: !constraints.silentOutput,
+    supportsFirstFrame: constraints.supportsFirstFrame && MANAGED_FIRST_FRAME_MODELS.has(model),
+  };
+  return isCanonicalRouteAuthority(spec) ? spec : null;
+};
+
+const authorityFitsCurrentCatalog = (
+  request: ResolvedStudioGenerationRequest,
+  authority: OpenRouterVideoModelSpec,
+  current: OpenRouterVideoModelSpec
+): boolean =>
+  authority.durations.every((duration) => current.durations.includes(duration)) &&
+  authority.resolutions.every((resolution) => current.resolutions.includes(resolution)) &&
+  authority.ratios.every((ratio) => current.ratios.includes(ratio)) &&
+  (!request.routeConstraints?.supportsFirstFrame || current.supportsFirstFrame) &&
+  (!authority.supportsAudio || current.supportsAudio);
 
 const requestValidation = (
   request: ResolvedStudioGenerationRequest,
-  provider: TProviderWithModel
+  provider: TProviderWithModel,
+  catalog: OpenRouterVideoCatalog
 ): StudioRouteValidation => {
-  const spec = getOpenRouterVideoModelSpec(provider.use_model);
+  const spec = requestAuthority(request, provider.use_model);
+  const current = catalog.getModelSpec(provider.use_model);
   if (
     request.mediaKind !== 'video' ||
     hasImageConditioningFields(request) ||
-    !isSupportedOpenRouterVideoProvider(provider, provider.use_model) ||
+    !isSupportedOpenRouterVideoProvider(provider) ||
     !spec ||
+    current === null ||
+    !authorityFitsCurrentCatalog(request, spec, current) ||
     !provider.api_key.trim()
   ) {
     return { ok: false, issues: [{ code: 'provider_unavailable' }] };
   }
   const issues: StudioRouteIssue[] = [];
-  if (
-    !Number.isInteger(request.durationSeconds) ||
-    request.durationSeconds < spec.minDuration ||
-    request.durationSeconds > spec.maxDuration
-  ) {
+  if (!Number.isInteger(request.durationSeconds) || !spec.durations.includes(request.durationSeconds)) {
     issues.push({ code: 'invalid_duration' });
   }
   if (!spec.resolutions.includes(request.resolution)) issues.push({ code: 'invalid_resolution' });
@@ -236,6 +249,147 @@ const defaultFetch: ProviderFetch = async (url, init) => {
   const response = await fetch(url, init);
   return { status: response.status, json: async () => response.json() };
 };
+
+const isSafeCatalogText = (value: string): boolean =>
+  value.length > 0 &&
+  value.length <= 256 &&
+  value === value.trim() &&
+  !Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0)!;
+    return (
+      codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f) || (codePoint >= 0xd800 && codePoint <= 0xdfff)
+    );
+  });
+
+const catalogArray = <T>(value: unknown, validate: (candidate: unknown) => candidate is T): readonly T[] | null => {
+  if (value === null) return null;
+  if (!Array.isArray(value) || value.length > MAX_CATALOG_VALUES) {
+    throw new OpenRouterVideoAdapterError('invalid_response');
+  }
+  for (let index = 0; index < value.length; index += 1) {
+    if (!Object.hasOwn(value, index) || !validate(value[index])) {
+      throw new OpenRouterVideoAdapterError('invalid_response');
+    }
+  }
+  return value;
+};
+
+const parseOpenRouterVideoCatalog = (value: unknown): Map<string, OpenRouterVideoModelSpec> => {
+  const data = record(value)?.data;
+  if (!Array.isArray(data) || data.length === 0 || data.length > MAX_CATALOG_MODELS) {
+    throw new OpenRouterVideoAdapterError('invalid_response');
+  }
+  const parsed = new Map<string, OpenRouterVideoModelSpec>();
+  const seen = new Set<string>();
+  for (let index = 0; index < data.length; index += 1) {
+    if (!Object.hasOwn(data, index)) throw new OpenRouterVideoAdapterError('invalid_response');
+    const candidate = record(data[index]);
+    const id = candidate?.id;
+    if (candidate === null || typeof id !== 'string' || !isSafeCatalogText(id) || seen.has(id)) {
+      throw new OpenRouterVideoAdapterError('invalid_response');
+    }
+    seen.add(id);
+    const providerResolutions = catalogArray(
+      candidate.supported_resolutions,
+      (item): item is string => typeof item === 'string' && isSafeCatalogText(item)
+    );
+    const providerRatios = catalogArray(
+      candidate.supported_aspect_ratios,
+      (item): item is string => typeof item === 'string' && isSafeCatalogText(item)
+    );
+    const providerDurations = catalogArray(
+      candidate.supported_durations,
+      (item): item is number => Number.isInteger(item) && (item as number) >= 1 && (item as number) <= 3_600
+    );
+    const providerFrames = catalogArray(
+      candidate.supported_frame_images,
+      (item): item is string => typeof item === 'string' && isSafeCatalogText(item)
+    );
+    if (candidate.generate_audio !== null && typeof candidate.generate_audio !== 'boolean') {
+      throw new OpenRouterVideoAdapterError('invalid_response');
+    }
+    if (providerResolutions === null || providerRatios === null || providerDurations === null) continue;
+    const resolutions = STUDIO_RESOLUTIONS.filter((resolution) => providerResolutions.includes(resolution));
+    const ratios = STUDIO_RATIOS.filter((ratio) => providerRatios.includes(ratio));
+    const durations = [...new Set(providerDurations)]
+      .filter((duration) => duration >= STUDIO_MIN_DURATION_SECONDS && duration <= STUDIO_MAX_DURATION_SECONDS)
+      .toSorted((left, right) => left - right);
+    if (resolutions.length === 0 || ratios.length === 0 || durations.length === 0) continue;
+    const spec: OpenRouterVideoModelSpec = Object.freeze({
+      durations: Object.freeze(durations),
+      minDuration: durations[0]!,
+      maxDuration: durations.at(-1)!,
+      resolutions: Object.freeze(resolutions),
+      ratios: Object.freeze(ratios),
+      supportsAudio: candidate.generate_audio === true,
+      supportsFirstFrame: providerFrames?.includes('first_frame') === true && MANAGED_FIRST_FRAME_MODELS.has(id),
+    });
+    parsed.set(id, spec);
+  }
+  if (parsed.size === 0) throw new OpenRouterVideoAdapterError('invalid_response');
+  return new Map([...parsed].toSorted(([left], [right]) => left.localeCompare(right)));
+};
+
+export const createOpenRouterVideoCatalog = (deps: OpenRouterVideoCatalogDeps = {}): OpenRouterVideoCatalog => {
+  const fetcher = deps.fetch ?? defaultFetch;
+  const timeoutMs = deps.timeoutMs ?? CATALOG_TIMEOUT_MS;
+  let models = new Map<string, OpenRouterVideoModelSpec>();
+  let refreshGeneration = 0;
+  const refresh = async (
+    provider: Pick<IProvider, 'api_key' | 'base_url'>,
+    signal: AbortSignal
+  ): Promise<readonly string[]> => {
+    const generation = ++refreshGeneration;
+    // A refresh is an authority transition. Invalidate synchronously so no paid request can
+    // use a prior broad snapshot while a newer shrink/removal proof is still in flight.
+    models = new Map();
+    try {
+      const baseUrl = normalizedBaseUrl(provider.base_url);
+      if (baseUrl === null) throw new OpenRouterVideoAdapterError('unsupported');
+      if (!provider.api_key.trim()) throw new OpenRouterVideoAdapterError('auth');
+      const body = await runWithProviderDeadline(signal, timeoutMs, async (deadlineSignal) => {
+        let response: ProviderHttpResponse;
+        try {
+          response = await fetcher(`${baseUrl}/videos/models`, {
+            method: 'GET',
+            headers: { Authorization: `Bearer ${provider.api_key}`, 'Content-Type': 'application/json' },
+            signal: deadlineSignal,
+          });
+        } catch (error) {
+          if (
+            (error instanceof Error && error.name === 'AbortError') ||
+            (error instanceof DOMException && error.name === 'AbortError')
+          ) {
+            throw new OpenRouterVideoAdapterError('timeout');
+          }
+          throw new OpenRouterVideoAdapterError('provider_unavailable');
+        }
+        if (response.status < 200 || response.status >= 300) {
+          throw new OpenRouterVideoAdapterError(mapStatusError(response.status).code);
+        }
+        return safeJson(response);
+      });
+      const refreshed = parseOpenRouterVideoCatalog(body);
+      if (generation === refreshGeneration) models = refreshed;
+      return Object.freeze([...models.keys()]);
+    } catch (error) {
+      if (generation === refreshGeneration) models = new Map();
+      throw error;
+    }
+  };
+  return {
+    refresh,
+    listModels: () => Object.freeze([...models.keys()]),
+    getModelSpec: (model) => models.get(model) ?? null,
+  };
+};
+
+const defaultOpenRouterVideoCatalog = createOpenRouterVideoCatalog();
+
+export const getDefaultOpenRouterVideoCatalog = (): OpenRouterVideoCatalog => defaultOpenRouterVideoCatalog;
+
+export const getOpenRouterVideoModelSpec = (model: string): OpenRouterVideoModelSpec | null =>
+  defaultOpenRouterVideoCatalog.getModelSpec(model);
 
 const SAFE_HTTP_ERROR_TAGS = new Set([
   'bad_request',
@@ -312,7 +466,7 @@ const requestJson = async (
   emitHttpErrorEvidence: (evidence: OpenRouterHttpErrorEvidence) => void | PromiseLike<void>,
   requireJson = true
 ): Promise<unknown> => {
-  if (!isSupportedOpenRouterVideoProvider(provider, provider.use_model) || !provider.api_key.trim()) {
+  if (!isSupportedOpenRouterVideoProvider(provider) || !provider.api_key.trim()) {
     throw new OpenRouterVideoAdapterError('unsupported');
   }
   let response: ProviderHttpResponse;
@@ -348,6 +502,11 @@ const requestJson = async (
 /** OpenRouter async video-generation adapter. Credentials remain in the resolved provider object only. */
 export const createOpenRouterVideoAdapter = (deps: OpenRouterVideoAdapterDeps = {}): GenerationProviderAdapter => {
   const fetcher = deps.fetch ?? defaultFetch;
+  const catalog =
+    deps.catalog ??
+    (deps.fetch === undefined
+      ? defaultOpenRouterVideoCatalog
+      : createOpenRouterVideoCatalog({ fetch: deps.fetch, timeoutMs: deps.validationTimeoutMs }));
   const validationTimeoutMs = deps.validationTimeoutMs ?? VALIDATION_TIMEOUT_MS;
   const emitHttpErrorEvidence = deps.emitHttpErrorEvidence ?? defaultEmitHttpErrorEvidence;
   const videosUrl = (provider: Pick<IProvider, 'base_url'>, id?: string): string => {
@@ -368,21 +527,22 @@ export const createOpenRouterVideoAdapter = (deps: OpenRouterVideoAdapterDeps = 
       signal: AbortSignal
     ): Promise<StudioConnectionValidation> {
       if (!provider.api_key.trim()) return { ok: false, error: { code: 'auth' } };
-      const spec = getOpenRouterVideoModelSpec(input.model);
-      if (!isSupportedOpenRouterVideoProvider(provider, input.model) || !spec) {
-        return { ok: false, error: { code: 'unsupported' } };
-      }
+      if (!isSupportedOpenRouterVideoProvider(provider)) return { ok: false, error: { code: 'unsupported' } };
       try {
-        await runWithProviderDeadline(signal, validationTimeoutMs, (deadlineSignal) =>
-          requestJson(
+        await runWithProviderDeadline(signal, validationTimeoutMs, async (deadlineSignal) => {
+          await requestJson(
             fetcher,
-            `${normalizedBaseUrl(provider.base_url)}/videos/models`,
+            `${normalizedBaseUrl(provider.base_url)}/key`,
             { ...provider, use_model: input.model },
             { method: 'GET', signal: deadlineSignal },
             'validate',
-            emitHttpErrorEvidence
-          )
-        );
+            emitHttpErrorEvidence,
+            false
+          );
+          await catalog.refresh(provider, deadlineSignal);
+        });
+        const spec = catalog.getModelSpec(input.model);
+        if (spec === null) return { ok: false, error: { code: 'unsupported' } };
         return {
           ok: true,
           capabilities: {
@@ -392,6 +552,7 @@ export const createOpenRouterVideoAdapter = (deps: OpenRouterVideoAdapterDeps = 
             resolutions: [...spec.resolutions],
             minDurationSeconds: spec.minDuration,
             maxDurationSeconds: spec.maxDuration,
+            supportedDurationSeconds: [...spec.durations],
             supportsFirstFrame: spec.supportsFirstFrame,
             maxConditioningImages: 0,
             cancellationPolicy: 'none',
@@ -413,7 +574,7 @@ export const createOpenRouterVideoAdapter = (deps: OpenRouterVideoAdapterDeps = 
     },
 
     validateRequest(request: ResolvedStudioGenerationRequest, provider: TProviderWithModel): StudioRouteValidation {
-      return requestValidation(request, provider);
+      return requestValidation(request, provider, catalog);
     },
 
     async submit(
@@ -421,9 +582,9 @@ export const createOpenRouterVideoAdapter = (deps: OpenRouterVideoAdapterDeps = 
       provider: TProviderWithModel,
       signal: AbortSignal
     ): Promise<ProviderSubmitResult> {
-      const validation = requestValidation(request, provider);
+      const validation = requestValidation(request, provider, catalog);
       if (!validation.ok) throw new OpenRouterVideoAdapterError('unsupported');
-      const spec = getOpenRouterVideoModelSpec(provider.use_model);
+      const spec = requestAuthority(request, provider.use_model);
       if (!spec) throw new OpenRouterVideoAdapterError('unsupported');
       const payload: Record<string, unknown> = {
         model: provider.use_model,
@@ -441,6 +602,11 @@ export const createOpenRouterVideoAdapter = (deps: OpenRouterVideoAdapterDeps = 
             frame_type: 'first_frame',
           },
         ];
+      }
+      // Materializing managed media can yield. Re-prove the live catalog immediately before
+      // invoking the paid endpoint so a concurrent catalog shrink cannot cross the spend gate.
+      if (!requestValidation(request, provider, catalog).ok) {
+        throw new OpenRouterVideoAdapterError('unsupported');
       }
       const body = await requestJson(
         fetcher,

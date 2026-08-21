@@ -980,6 +980,74 @@ describe('schema-2 creative studio project store', () => {
     });
   });
 
+  it('loads a legacy OpenRouter binding without exact durations so route resolution can narrow it', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'creative-studio-openrouter-legacy-'));
+    const connectionStore = createCreativeStudioStore({ rootDir: root });
+    const legacy = {
+      ...validConnectionBinding(),
+      adapterId: 'openrouter-video-v1',
+      model: 'google/veo-3.1-lite',
+      capabilities: {
+        mediaKinds: ['video'],
+        audioModes: ['none'],
+        aspectRatios: ['16:9', '9:16'],
+        resolutions: ['720p', '1080p'],
+        minDurationSeconds: 4,
+        maxDurationSeconds: 8,
+        supportsFirstFrame: false,
+        maxConditioningImages: 0,
+        cancellationPolicy: 'none',
+      },
+    };
+    try {
+      writeFileSync(path.join(root, 'connections.json'), JSON.stringify({ schemaVersion: 1, connections: [legacy] }));
+
+      await expect(connectionStore.listConnections()).resolves.toMatchObject([
+        { adapterId: 'openrouter-video-v1', capabilities: { minDurationSeconds: 4, maxDurationSeconds: 8 } },
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    {
+      label: 'OpenRouter cancellation beyond none',
+      adapterId: 'openrouter-video-v1',
+      capabilities: {
+        mediaKinds: ['video'],
+        audioModes: ['audio'],
+        aspectRatios: ['16:9'],
+        resolutions: ['720p'],
+        minDurationSeconds: 4,
+        maxDurationSeconds: 8,
+        supportedDurationSeconds: [4, 8],
+        supportsFirstFrame: false,
+        maxConditioningImages: 0,
+        cancellationPolicy: 'queued_only',
+      },
+    },
+    {
+      label: 'audio output on a media gateway',
+      adapterId: 'weprompt-media-gateway-v1',
+      capabilities: {
+        mediaKinds: ['video'],
+        audioModes: ['audio'],
+        cancellationPolicy: 'none',
+      },
+    },
+  ])('rejects $label at the durable connection boundary', async ({ adapterId, capabilities }) => {
+    const root = mkdtempSync(path.join(tmpdir(), 'creative-studio-connection-poison-'));
+    const connectionStore = createCreativeStudioStore({ rootDir: root });
+    try {
+      await expect(
+        connectionStore.saveConnection({ ...validConnectionBinding(), adapterId, capabilities } as never)
+      ).rejects.toMatchObject({ code: 'invalid_payload' });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('keeps a million-level schema sniff compact while preserving exact nested grammar', async () => {
     const projectId = 'oversized_compact_stack_v1';
     const projectFilePath = path.join(rootDir, projectId, 'project.json');
@@ -6266,18 +6334,56 @@ describe('CreativeStudioStore connections', () => {
         model: 'bytedance/seedance-2.0-fast',
         capabilities: {
           mediaKinds: ['video'],
-          audioModes: ['none'],
+          audioModes: ['audio'],
           aspectRatios: ['16:9'],
           resolutions: ['720p'],
           minDurationSeconds: 4,
           maxDurationSeconds: 15,
-          supportsFirstFrame: true,
+          supportedDurationSeconds: [4, 6, 8, 10, 12, 15],
+          supportsFirstFrame: false,
           maxConditioningImages: 0,
           cancellationPolicy: 'none',
         },
       });
 
       expect(saved.adapterId).toBe('openrouter-video-v1');
+      expect(saved.capabilities.supportedDurationSeconds).toEqual([4, 6, 8, 10, 12, 15]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    { label: 'missing exact durations', supportedDurationSeconds: undefined, min: 4, max: 15 },
+    { label: 'duplicate exact durations', supportedDurationSeconds: [4, 8, 8], min: 4, max: 8 },
+    { label: 'unsorted exact durations', supportedDurationSeconds: [4, 12, 8], min: 4, max: 12 },
+    { label: 'a lower endpoint mismatch', supportedDurationSeconds: [4, 8, 12], min: 5, max: 12 },
+    { label: 'an upper endpoint mismatch', supportedDurationSeconds: [4, 8, 12], min: 4, max: 15 },
+    { label: 'an out-of-domain duration', supportedDurationSeconds: [3, 4, 8], min: 3, max: 8 },
+  ])('rejects OpenRouter durable capabilities with $label', async ({ supportedDurationSeconds, min, max }) => {
+    const root = mkdtempSync(path.join(tmpdir(), 'creative-studio-openrouter-invalid-'));
+    const connectionStore = createCreativeStudioStore({ rootDir: root });
+    try {
+      const candidate = {
+        ...validConnectionBinding(),
+        adapterId: 'openrouter-video-v1' as const,
+        capabilities: {
+          mediaKinds: ['video'] as const,
+          audioModes: ['audio'],
+          aspectRatios: ['16:9'],
+          resolutions: ['720p'],
+          minDurationSeconds: min,
+          maxDurationSeconds: max,
+          ...(supportedDurationSeconds === undefined ? {} : { supportedDurationSeconds }),
+          supportsFirstFrame: false,
+          maxConditioningImages: 0,
+          cancellationPolicy: 'none' as const,
+        },
+      };
+
+      await expect(connectionStore.saveConnection(candidate as never)).rejects.toMatchObject({
+        code: 'invalid_payload',
+      });
     } finally {
       await rm(root, { recursive: true, force: true });
     }

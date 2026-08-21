@@ -1136,6 +1136,109 @@ describe('initCreativeStudioBridge', () => {
     expect(service.removeConnection).toHaveBeenCalledOnce();
   });
 
+  it('preserves a sanitized connection-validation reason inside a successful command envelope', async () => {
+    vi.mocked(service.validateConnection).mockResolvedValueOnce({
+      valid: false,
+      reason: 'auth',
+      rawBody: 'key=sk-or-private https://provider.invalid/private',
+      httpStatus: 401,
+    } as never);
+    initCreativeStudioBridge(dependencies);
+
+    const result = await registeredHandler('validateConnection')({
+      providerId: 'provider_1',
+      integrationId: 'integration_o4R7vD2m',
+      model: 'google/veo-3.1',
+    } as never);
+
+    expect(result).toEqual({ ok: true, data: { valid: false, reason: 'auth' } });
+    expect(JSON.stringify(result)).not.toMatch(/sk-or-private|provider\.invalid|httpStatus|rawBody/i);
+  });
+
+  it('projects a successful connection validation without private or unexpected service fields', async () => {
+    vi.mocked(service.validateConnection).mockResolvedValueOnce({
+      valid: true,
+      connection: {
+        providerId: 'provider_1',
+        integrationId: 'integration_o4R7vD2m',
+        labelKey: 'openRouterVideo',
+        model: 'google/veo-3.1',
+        capabilities: {
+          mediaKinds: ['video'],
+          audioModes: ['audio'],
+          aspectRatios: ['16:9'],
+          resolutions: ['720p'],
+          minDurationSeconds: 5,
+          maxDurationSeconds: 8,
+          supportedDurationSeconds: [5, 8],
+          supportsFirstFrame: false,
+          maxConditioningImages: 0,
+          rawBody: 'private response',
+        },
+        validatedAt: '2026-08-21T00:00:00.000Z',
+        apiKey: 'sk-or-private',
+      },
+      providerStatus: 200,
+    } as never);
+    initCreativeStudioBridge(dependencies);
+
+    const result = await registeredHandler('validateConnection')({
+      providerId: 'provider_1',
+      integrationId: 'integration_o4R7vD2m',
+      model: 'google/veo-3.1',
+    } as never);
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        valid: true,
+        connection: {
+          providerId: 'provider_1',
+          integrationId: 'integration_o4R7vD2m',
+          model: 'google/veo-3.1',
+          capabilities: { supportedDurationSeconds: [5, 8] },
+        },
+      },
+    });
+    expect(JSON.stringify(result)).not.toMatch(/private response|sk-or-private|rawBody|apiKey|providerStatus/i);
+  });
+
+  it('preserves the generic sixty-second connection ceiling outside discrete Studio durations', async () => {
+    vi.mocked(service.validateConnection).mockResolvedValueOnce({
+      valid: true,
+      connection: {
+        providerId: 'provider_1',
+        integrationId: 'integration_x5T8cW1h',
+        labelKey: 'selfHostedVideoGateway',
+        model: 'gateway-video',
+        capabilities: {
+          mediaKinds: ['video'],
+          audioModes: ['none'],
+          minDurationSeconds: 1,
+          maxDurationSeconds: 60,
+          supportsFirstFrame: false,
+          maxConditioningImages: 0,
+        },
+        validatedAt: '2026-08-21T00:00:00.000Z',
+      },
+    });
+    initCreativeStudioBridge(dependencies);
+
+    await expect(
+      registeredHandler('validateConnection')({
+        providerId: 'provider_1',
+        integrationId: 'integration_x5T8cW1h',
+        model: 'gateway-video',
+      } as never)
+    ).resolves.toMatchObject({
+      ok: true,
+      data: {
+        valid: true,
+        connection: { capabilities: { minDurationSeconds: 1, maxDurationSeconds: 60 } },
+      },
+    });
+  });
+
   it('maps explicit V2 service errors through the stable command envelope', async () => {
     vi.mocked(service.listRoutes).mockRejectedValueOnce(new CreativeStudioServiceError('provider_error'));
     initCreativeStudioBridge(dependencies);

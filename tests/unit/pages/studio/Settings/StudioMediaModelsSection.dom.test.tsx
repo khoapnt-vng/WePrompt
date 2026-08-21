@@ -14,6 +14,7 @@ import type {
   StudioConnectionInventory,
   StudioConnectionRecord,
   StudioConnectionValidationResult,
+  StudioConnectionValidationSuccess,
   StudioRendererConnectionCapabilities,
 } from '@/common/types/project/creativeStudioTypes';
 import {
@@ -211,16 +212,19 @@ const binding = (overrides: Partial<StudioConnectionRecord> = {}): StudioConnect
   ...overrides,
 });
 
-const validation = (overrides: Partial<StudioConnectionValidationResult> = {}): StudioConnectionValidationResult => {
+const validation = (overrides: Partial<StudioConnectionValidationSuccess> = {}): StudioConnectionValidationResult => {
   const record = binding();
   return {
-    providerId: record.providerId,
-    integrationId: record.integrationId,
-    labelKey: record.labelKey,
-    model: record.model,
-    capabilities: record.capabilities,
-    validatedAt: record.validatedAt,
-    ...overrides,
+    valid: true,
+    connection: {
+      providerId: record.providerId,
+      integrationId: record.integrationId,
+      labelKey: record.labelKey,
+      model: record.model,
+      capabilities: record.capabilities,
+      validatedAt: record.validatedAt,
+      ...overrides,
+    },
   };
 };
 
@@ -702,11 +706,56 @@ describe('StudioMediaModelsSection', () => {
     const save = within(dialog).getByRole('button', { name: 'settings.mediaModels.save' });
 
     fireEvent.click(validate);
-    expect(await within(dialog).findByText('settings.mediaModels.validationFailed')).toBeInTheDocument();
+    expect(await within(dialog).findByText('settings.mediaModels.validationFailure.unknown')).toBeInTheDocument();
     expect(save).toBeDisabled();
     fireEvent.click(validate);
     await waitFor(() => expect(bridge.validateConnection.invoke).toHaveBeenCalledTimes(2));
     expect(save).toBeDisabled();
+  });
+
+  it.each([
+    ['unsupported', 'settings.mediaModels.validationFailure.unsupported'],
+    ['auth', 'settings.mediaModels.validationFailure.auth'],
+    ['rate_limited', 'settings.mediaModels.validationFailure.rateLimited'],
+    ['provider_unavailable', 'settings.mediaModels.validationFailure.providerUnavailable'],
+    ['timeout', 'settings.mediaModels.validationFailure.timeout'],
+    ['invalid_response', 'settings.mediaModels.validationFailure.invalidResponse'],
+    ['unknown', 'settings.mediaModels.validationFailure.unknown'],
+  ] as const)('renders the truthful localized message for a sanitized %s failure', async (reason, messageKey) => {
+    bridge.listConnections.invoke.mockResolvedValue(ok(inventory([])));
+    bridge.validateConnection.invoke.mockResolvedValue(ok({ valid: false, reason } as never));
+    render(<StudioMediaModelsSection providerRefreshToken={0} onAddProvider={vi.fn()} />);
+    const dialog = await fillVideoTuple();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'settings.mediaModels.validate' }));
+
+    expect(await within(dialog).findByText(messageKey)).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'settings.mediaModels.save' })).toBeDisabled();
+  });
+
+  it('maps an unrecognized validation reason to unknown without rendering provider-controlled text', async () => {
+    bridge.listConnections.invoke.mockResolvedValue(ok(inventory([])));
+    bridge.validateConnection.invoke.mockResolvedValue(
+      ok({ valid: false, reason: 'key=sk-or-private https://provider.invalid/private' } as never)
+    );
+    render(<StudioMediaModelsSection providerRefreshToken={0} onAddProvider={vi.fn()} />);
+    const dialog = await fillVideoTuple();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'settings.mediaModels.validate' }));
+
+    expect(await within(dialog).findByText('settings.mediaModels.validationFailure.unknown')).toBeInTheDocument();
+    expect(dialog).not.toHaveTextContent(/sk-or-private|provider\.invalid/i);
+  });
+
+  it('surfaces a sanitized revalidation failure without attempting to save the binding', async () => {
+    bridge.validateConnection.invoke.mockResolvedValue(ok({ valid: false, reason: 'timeout' } as never));
+    render(<StudioMediaModelsSection providerRefreshToken={0} onAddProvider={vi.fn()} />);
+    const row = await screen.findByRole('listitem', { name: 'open-sora' });
+
+    fireEvent.click(within(row).getByRole('button', { name: 'settings.mediaModels.revalidate' }));
+
+    expect(await screen.findByText('settings.mediaModels.validationFailure.timeout')).toBeInTheDocument();
+    expect(bridge.saveConnection.invoke).not.toHaveBeenCalled();
   });
 
   it('saves an edited replacement before removing the prior binding', async () => {
@@ -768,7 +817,7 @@ describe('StudioMediaModelsSection', () => {
       ok(inventory([{ ...binding(), capabilities } as StudioConnectionRecord]))
     );
     bridge.validateConnection.invoke.mockResolvedValue(
-      ok(validation({ capabilities: capabilities as StudioConnectionValidationResult['capabilities'] }))
+      ok(validation({ capabilities: capabilities as StudioConnectionValidationSuccess['capabilities'] }))
     );
     bridge.saveConnection.invoke.mockResolvedValue(
       ok(

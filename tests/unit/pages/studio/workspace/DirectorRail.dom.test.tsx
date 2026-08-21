@@ -416,7 +416,15 @@ describe('DirectorRail', () => {
 
   it('accepts only a bounded, coherent, deeply exact route catalog', () => {
     const imageRoute = route('image');
-    const videoRoute = route('video', 2);
+    const videoRoute = {
+      ...route('video', 2),
+      constraints: {
+        ...route('video', 2).constraints,
+        minDurationSeconds: 4,
+        maxDurationSeconds: 8,
+        supportedDurationSeconds: [4, 6, 8],
+      },
+    };
     const valid = {
       image: {
         status: 'ready',
@@ -439,6 +447,48 @@ describe('DirectorRail', () => {
       catalogVersion: '0123456789abcdef',
     };
     expect(hasSafeRouteCatalog(JSON.stringify(valid))).toBe(true);
+    for (const supportedDurationSeconds of [
+      [4, 8, 6],
+      [4, 6, 6, 8],
+      [3, 4, 6, 8],
+      [4, 6],
+    ]) {
+      expect(
+        hasSafeRouteCatalog(
+          JSON.stringify({
+            ...valid,
+            video: {
+              ...valid.video,
+              options: [{ ...videoRoute, constraints: { ...videoRoute.constraints, supportedDurationSeconds } }],
+            },
+          })
+        )
+      ).toBe(false);
+    }
+    expect(
+      hasSafeRouteCatalog(
+        JSON.stringify({
+          ...valid,
+          video: {
+            ...valid.video,
+            selectedRoute: videoRoute,
+            selected: {
+              choiceId: videoRoute.choiceId,
+              providerId: videoRoute.providerId,
+              model: videoRoute.model,
+            },
+            status: 'ready',
+            selectionIssue: null,
+            options: [
+              {
+                ...videoRoute,
+                constraints: { ...videoRoute.constraints, supportedDurationSeconds: [4, 8] },
+              },
+            ],
+          },
+        })
+      )
+    ).toBe(false);
     expect(
       hasSafeRouteCatalog(
         JSON.stringify({

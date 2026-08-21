@@ -12,6 +12,7 @@ import type {
   StudioMediaKind,
   StudioProviderAdapterId,
   StudioResolution,
+  StudioRouteConstraints,
   StudioRouteIssue,
   StudioRouteValidation,
 } from '@/common/types/project/creativeStudioTypes';
@@ -37,6 +38,8 @@ export type StudioGenerationRequest = {
 };
 
 export type ResolvedStudioGenerationRequest = StudioGenerationRequest & {
+  /** Main-owned, durable route authority re-proved before a paid submission. */
+  routeConstraints?: Readonly<StudioRouteConstraints>;
   firstFrame?: ResolvedProviderInput;
   conditioningImages?: readonly ResolvedProviderInput[];
   conditioningImageLimit?: number;

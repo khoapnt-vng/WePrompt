@@ -630,6 +630,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     }
     const resolvedRequest: ResolvedStudioGenerationRequest = {
       ...baseRequest,
+      routeConstraints: structuredClone(route.constraints),
       ...(firstFrame === undefined ? {} : { firstFrame }),
       ...(conditioningImages === undefined
         ? {}
