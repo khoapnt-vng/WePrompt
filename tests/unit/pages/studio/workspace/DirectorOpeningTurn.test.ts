@@ -76,7 +76,12 @@ describe('the Director opening turn', () => {
   it('reports failure rather than throwing when storage refuses the write', () => {
     // A rail that cannot seed must still attach. Losing the opening turn costs a retype; throwing
     // here would lose the Director entirely.
-    const refusing = { ...storageDouble(), setItem: vi.fn(() => { throw new Error('quota'); }) } as unknown as Storage;
+    const refusing = {
+      ...storageDouble(),
+      setItem: vi.fn(() => {
+        throw new Error('quota');
+      }),
+    } as unknown as Storage;
     expect(() => seedDirectorOpeningTurn('conv_1', 'A dog finds a lost shoe', refusing)).not.toThrow();
     expect(seedDirectorOpeningTurn('conv_1', 'A dog finds a lost shoe', refusing)).toBe(false);
   });
