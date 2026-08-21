@@ -415,6 +415,19 @@ const captureCutViewportReference = async (page: Page, reference: StudioViewport
   await expect(cut).toContainText('Applying the look requires a separately reviewed, costed re-render');
   await expect(cut).not.toContainText(/stitched|auto-duck|density/i);
 
+  const filmstrip = cut.getByRole('list', { name: 'Beats in film order' });
+  await expect(filmstrip).toHaveAttribute('data-cut-filmstrip', 'true');
+  await expect(filmstrip.locator(':scope > [data-beat-id]')).not.toHaveCount(0);
+  await expect(filmstrip.getByRole('button', { name: /(?:move|reorder)/i })).toHaveCount(0);
+  const filmstripGeometry = await filmstrip.evaluate((element) => ({
+    height: element.getBoundingClientRect().height,
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(filmstripGeometry.height).toBeGreaterThanOrEqual(63);
+  expect(filmstripGeometry.height).toBeLessThanOrEqual(65);
+  expect(filmstripGeometry.scrollWidth).toBeLessThanOrEqual(filmstripGeometry.clientWidth + 1);
+
   const metrics = await cut.evaluate((element) => ({
     clientWidth: element.clientWidth,
     scrollWidth: element.scrollWidth,
@@ -729,8 +742,14 @@ const exerciseRenderedShotViewportLifecycle = async (page: Page, reference: Stud
   await expect(anchorShotCard).toContainText('The desk remains in view.');
   const playbackLane = panel.getByRole('group', { name: 'Playback coverage' });
   const planningLane = panel.getByRole('group', { name: 'Planning overlay' });
-  await expect(playbackLane.locator(`[data-shot-id="${shotId}"]`)).toContainText('10s source');
+  const renderedPlaybackSegment = playbackLane.locator(`[data-shot-id="${shotId}"]`);
+  await expect(renderedPlaybackSegment).toContainText('10s source');
   await expect(planningLane.locator(`[data-shot-id="${shotId}"]`)).toContainText('8s plan');
+  const sourceDuration = renderedPlaybackSegment.getByText('10s source', { exact: true });
+  const trimIn = renderedPlaybackSegment.getByRole('slider', { name: 'Trim in for Shot 1' });
+  const [sourceDurationBox, trimInBox] = await Promise.all([sourceDuration.boundingBox(), trimIn.boundingBox()]);
+  if (sourceDurationBox === null || trimInBox === null) throw new Error('Trim-lane geometry was unavailable');
+  expect(sourceDurationBox.y + sourceDurationBox.height).toBeLessThanOrEqual(trimInBox.y + 1);
   await expectLocatorFitsViewport(panel, reference, 'Beat panel');
   await takeScreenshot(page, `creative-studio/gate-3/beat-panel-coverage-${reference.screenshotSuffix}.png`);
 

@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -369,6 +371,41 @@ describe('CoverageBar', () => {
       );
     });
     expect(screen.getByTestId('studio-coverage-playback')).toHaveAttribute('data-density', 'medium');
+  });
+
+  it('keeps source copy outside a dedicated trim lane without weakening the sliders', () => {
+    renderCoverage([makeSelectedShot()]);
+
+    const sourceDuration = screen.getByText('10s source');
+    const trimIn = screen.getByRole('slider', { name: 'Trim in Shot 1' });
+    const trimOut = screen.getByRole('slider', { name: 'Trim out Shot 1' });
+    const trimLane = trimIn.parentElement;
+
+    expect(trimLane).not.toBeNull();
+    expect(trimOut.parentElement).toBe(trimLane);
+    expect(trimLane).not.toContainElement(sourceDuration);
+    expect(trimLane?.parentElement).toContainElement(sourceDuration);
+    expect(trimIn).toHaveAttribute('aria-orientation', 'horizontal');
+    expect(trimIn).toHaveAttribute('aria-valuemin', '0');
+    expect(trimIn).toHaveAttribute('aria-valuemax', '8');
+    expect(trimIn).toHaveAttribute('aria-valuenow', '1');
+    expect(trimIn).toHaveAttribute('aria-valuetext', '1s trimmed');
+    expect(trimIn).toHaveAttribute('tabindex', '0');
+  });
+
+  it('reserves a normal-flow bottom row for trim chrome', () => {
+    const css = readFileSync(
+      resolve(
+        process.cwd(),
+        'packages/desktop/src/renderer/pages/studio/components/Workspace/BeatPanel/BeatPanel.module.css'
+      ),
+      'utf8'
+    );
+
+    expect(css).toMatch(/\.playbackSegment\s*\{[^}]*grid-template-rows:\s*auto auto minmax\(0, 1fr\) 34px/s);
+    expect(css).toMatch(/\.trimLane\s*\{[^}]*position:\s*relative[^}]*grid-row:\s*4/s);
+    expect(css).toMatch(/\.trimHandle\s*\{[^}]*inset-block:\s*2px/s);
+    expect(css).not.toMatch(/\.trimLane\s*\{[^}]*position:\s*absolute/s);
   });
 
   it('ignores missing or invalid measurements and disconnects an installed observer', () => {

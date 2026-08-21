@@ -43,7 +43,7 @@
 }
 
 .headerActions,
-.reorderActions,
+.selectionActions,
 .assetActions {
   display: flex;
   min-inline-size: 0;
@@ -60,19 +60,21 @@
 }
 
 .rail {
-  /* Flex, not grid: each segment carries an inline flex-grow equal to its Beat's length in seconds,
-     which is how the drawing keeps the strip proportional. A grid container would ignore it. */
+  box-sizing: border-box;
   display: flex;
   min-inline-size: 0;
-  gap: 2px;
+  block-size: 64px;
+  gap: 0;
   margin: 0;
-  padding: 2px 2px 10px;
-  overflow-x: auto;
-  overscroll-behavior-inline: contain;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border-2);
+  border-radius: 10px;
+  background: var(--color-fill-1);
   list-style: none;
+  user-select: none;
 }
 
-.beat,
 .panel,
 .exports,
 .exportCard {
@@ -83,16 +85,64 @@
 }
 
 .beat {
-  display: grid;
+  position: relative;
+  container-name: cut-beat-segment;
+  container-type: inline-size;
   flex: 1 1 0;
-  align-content: start;
-  gap: 10px;
   min-inline-size: 0;
-  padding: 14px;
+  border-inline-end: 1px solid var(--color-border-2);
+  overflow: hidden;
+  background: var(--color-bg-2);
+}
+
+.beat:last-child {
+  border-inline-end: 0;
+}
+
+.beat[data-duration-kind='target'],
+.beat[data-duration-kind='pending'] {
+  background: var(--color-fill-1);
+}
+
+.beat[data-selected='true'] {
+  box-shadow: inset 0 0 0 2px var(--color-primary-6);
+}
+
+.segmentButton {
+  display: flex;
+  box-sizing: border-box;
+  inline-size: 100%;
+  block-size: 100% !important;
+  min-inline-size: 0;
+  flex-direction: column;
+  gap: 2px;
+  padding-block: 7px !important;
+  padding-inline: 9px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  color: inherit !important;
+  background: transparent !important;
+  cursor: pointer;
+  font: inherit;
+  text-align: start;
+}
+
+.segmentButton:focus-visible {
+  outline: 2px solid var(--color-primary-6);
+  outline-offset: -3px;
+}
+
+.segmentHeader {
+  display: flex;
+  min-inline-size: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 5px;
 }
 
 .ordinal,
-.beatFacts,
+.segmentDuration,
+.selectionPosition,
 .status {
   color: var(--color-text-3);
   font-family: var(--font-mono);
@@ -100,40 +150,102 @@
 }
 
 .ordinal {
-  font-size: 14px;
+  font-size: 9.5px;
   font-weight: var(--fw-bold);
+}
+
+.stateDot {
+  inline-size: 5px;
+  block-size: 5px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.beat[data-state='ready'] .ordinal,
+.beat[data-state='ready'] .stateDot {
+  color: var(--color-success-6);
+}
+
+.beat[data-state='rendering'] .ordinal,
+.beat[data-state='rendering'] .stateDot {
+  color: var(--color-primary-6);
+}
+
+.beat[data-state='duration_pending'] .ordinal,
+.beat[data-state='duration_pending'] .stateDot,
+.beat[data-state='seed_pending'] .ordinal,
+.beat[data-state='seed_pending'] .stateDot,
+.beat[data-state='part_done'] .ordinal,
+.beat[data-state='part_done'] .stateDot {
+  color: var(--color-warning-6);
+}
+
+.beat[data-state='no_coverage'] .ordinal,
+.beat[data-state='no_coverage'] .stateDot,
+.beat[data-state='stale'] .ordinal,
+.beat[data-state='stale'] .stateDot {
+  color: var(--color-danger-6);
+}
+
+.beat[data-state='status_pending'] .ordinal,
+.beat[data-state='status_pending'] .stateDot,
+.beat[data-state='draft'] .ordinal,
+.beat[data-state='draft'] .stateDot {
+  color: var(--color-text-3);
 }
 
 .beatTitle {
+  display: block;
   min-inline-size: 0;
-  block-size: auto;
-  margin: 0;
-  padding: 0;
   color: var(--text-primary);
   font-family: var(--font-display);
-  font-size: 17px;
+  font-size: 11.5px;
   font-weight: var(--fw-bold);
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-  text-align: start;
-  white-space: normal;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.beatTitle > span {
-  display: block;
-  inline-size: 100%;
+.segmentDuration {
+  margin-block-start: auto;
+  font-size: 9px;
+  white-space: nowrap;
 }
 
-.beatFacts {
+.filmstripSelection {
   display: flex;
-  gap: 6px 10px;
+  min-inline-size: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-block: 10px;
+  padding-inline: 12px;
+  border: 1px solid var(--color-border-2);
+  border-radius: 10px;
+  background: var(--color-bg-2);
   flex-wrap: wrap;
-  font-size: 14px;
 }
 
-.reorderActions {
-  padding-block-start: 8px;
-  border-block-start: 1px solid var(--color-border-1);
+.selectionIdentity {
+  display: flex;
+  min-inline-size: 0;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.selectionIdentity strong {
+  min-inline-size: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.selectionPosition {
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .sections,
@@ -263,8 +375,23 @@
     inline-size: 100%;
   }
 
-  .rail {
-    grid-auto-columns: minmax(min(85cqi, 260px), 1fr);
+  .filmstripSelection {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+@container cut-beat-segment (max-width: 111px) {
+  .beatTitle {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 }
 

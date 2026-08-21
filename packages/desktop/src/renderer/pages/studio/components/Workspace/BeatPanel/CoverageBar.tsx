@@ -433,64 +433,66 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
               </span>
               {segment.selectedTake ? (
                 <>
-                  <span
-                    aria-hidden='true'
-                    className={styles.playedRange}
-                    style={{
-                      insetInlineStart: `${(trimInSeconds / sourceDurationSeconds) * 100}%`,
-                      inlineSize: `${((playedEndSeconds - trimInSeconds) / sourceDurationSeconds) * 100}%`,
-                    }}
-                  />
-                  <Button
-                    aria-disabled={disabled}
-                    aria-label={t(`${COVERAGE_KEY_ROOT}.trimInLabel`, { index: index + 1 })}
-                    aria-orientation='horizontal'
-                    aria-valuemax={maximumIn}
-                    aria-valuemin={0}
-                    aria-valuenow={trimInSeconds}
-                    aria-valuetext={t(`${COVERAGE_KEY_ROOT}.trimValue`, {
-                      seconds: trimInSeconds,
-                    })}
-                    className={`${styles.trimHandle} ${styles.trimInHandle}`}
-                    disabled={disabled}
-                    onKeyDown={(event) => trimKeyDown(event, shot, 'in')}
-                    onLostPointerCapture={(event) => finishTrimDrag(event, false)}
-                    onPointerCancel={(event) => finishTrimDrag(event, false)}
-                    onPointerDown={(event) => beginTrimDrag(event, shot, 'in')}
-                    onPointerMove={moveTrimDrag}
-                    onPointerUp={(event) => finishTrimDrag(event, true)}
-                    role='slider'
-                    style={{ insetInlineStart: `${(trimInSeconds / sourceDurationSeconds) * 100}%` }}
-                    tabIndex={disabled ? -1 : 0}
-                  />
-                  <Button
-                    aria-disabled={disabled}
-                    aria-label={t(`${COVERAGE_KEY_ROOT}.trimOutLabel`, { index: index + 1 })}
-                    aria-orientation='horizontal'
-                    aria-valuemax={maximumOut}
-                    aria-valuemin={0}
-                    aria-valuenow={trimOutSeconds}
-                    aria-valuetext={t(`${COVERAGE_KEY_ROOT}.trimValue`, {
-                      seconds: trimOutSeconds,
-                    })}
-                    className={`${styles.trimHandle} ${styles.trimOutHandle}`}
-                    data-continuity-warning={tailWarning}
-                    disabled={disabled}
-                    onKeyDown={(event) => trimKeyDown(event, shot, 'out')}
-                    onLostPointerCapture={(event) => finishTrimDrag(event, false)}
-                    onPointerCancel={(event) => finishTrimDrag(event, false)}
-                    onPointerDown={(event) => beginTrimDrag(event, shot, 'out')}
-                    onPointerMove={moveTrimDrag}
-                    onPointerUp={(event) => finishTrimDrag(event, true)}
-                    role='slider'
-                    style={{ insetInlineStart: `${(playedEndSeconds / sourceDurationSeconds) * 100}%` }}
-                    tabIndex={disabled ? -1 : 0}
-                  />
                   {tailWarning ? (
                     <span className={styles.trimWarning} role='status'>
                       {t(`${COVERAGE_KEY_ROOT}.tailTrimWarning`)}
                     </span>
                   ) : null}
+                  <div className={styles.trimLane} data-coverage-trim-lane>
+                    <span
+                      aria-hidden='true'
+                      className={styles.playedRange}
+                      style={{
+                        insetInlineStart: `${(trimInSeconds / sourceDurationSeconds) * 100}%`,
+                        inlineSize: `${((playedEndSeconds - trimInSeconds) / sourceDurationSeconds) * 100}%`,
+                      }}
+                    />
+                    <Button
+                      aria-disabled={disabled}
+                      aria-label={t(`${COVERAGE_KEY_ROOT}.trimInLabel`, { index: index + 1 })}
+                      aria-orientation='horizontal'
+                      aria-valuemax={maximumIn}
+                      aria-valuemin={0}
+                      aria-valuenow={trimInSeconds}
+                      aria-valuetext={t(`${COVERAGE_KEY_ROOT}.trimValue`, {
+                        seconds: trimInSeconds,
+                      })}
+                      className={`${styles.trimHandle} ${styles.trimInHandle}`}
+                      disabled={disabled}
+                      onKeyDown={(event) => trimKeyDown(event, shot, 'in')}
+                      onLostPointerCapture={(event) => finishTrimDrag(event, false)}
+                      onPointerCancel={(event) => finishTrimDrag(event, false)}
+                      onPointerDown={(event) => beginTrimDrag(event, shot, 'in')}
+                      onPointerMove={moveTrimDrag}
+                      onPointerUp={(event) => finishTrimDrag(event, true)}
+                      role='slider'
+                      style={{ insetInlineStart: `${(trimInSeconds / sourceDurationSeconds) * 100}%` }}
+                      tabIndex={disabled ? -1 : 0}
+                    />
+                    <Button
+                      aria-disabled={disabled}
+                      aria-label={t(`${COVERAGE_KEY_ROOT}.trimOutLabel`, { index: index + 1 })}
+                      aria-orientation='horizontal'
+                      aria-valuemax={maximumOut}
+                      aria-valuemin={0}
+                      aria-valuenow={trimOutSeconds}
+                      aria-valuetext={t(`${COVERAGE_KEY_ROOT}.trimValue`, {
+                        seconds: trimOutSeconds,
+                      })}
+                      className={`${styles.trimHandle} ${styles.trimOutHandle}`}
+                      data-continuity-warning={tailWarning}
+                      disabled={disabled}
+                      onKeyDown={(event) => trimKeyDown(event, shot, 'out')}
+                      onLostPointerCapture={(event) => finishTrimDrag(event, false)}
+                      onPointerCancel={(event) => finishTrimDrag(event, false)}
+                      onPointerDown={(event) => beginTrimDrag(event, shot, 'out')}
+                      onPointerMove={moveTrimDrag}
+                      onPointerUp={(event) => finishTrimDrag(event, true)}
+                      role='slider'
+                      style={{ insetInlineStart: `${(playedEndSeconds / sourceDurationSeconds) * 100}%` }}
+                      tabIndex={disabled ? -1 : 0}
+                    />
+                  </div>
                 </>
               ) : null}
             </div>

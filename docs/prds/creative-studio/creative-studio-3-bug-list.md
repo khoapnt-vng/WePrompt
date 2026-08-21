@@ -228,18 +228,20 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - Mine, from the app-bar work.
   - Fixed 2026-08-21: Beat, Shot and Slate counts are pluralized independently, then interpolated into the existing film-level ordering template so punctuation, order and bidirectional isolation remain translation-owned. Because this workspace copy currently falls back to en-US, its source-language one/other category is resolved before translation instead of applying the active locale's plural rules to English words.
 
-- [ ] **[BUG-086][P2][Creative Studio] The Cut's Beat rail is a row of tall cards, not the drawn filmstrip** — found 2026-08-21 with a populated project
+- [x] **[BUG-086][P2][Creative Studio] The Cut's Beat rail is a row of tall cards, not the drawn filmstrip** — found 2026-08-21 with a populated project
   - Built: nine boxed cards roughly 100px wide and 480px tall, each carrying a drag handle and two move buttons, with titles wrapping mid-word — `Roadma p`, `Sign- off`.
   - Drawn: a single 64px-tall strip of segments proportional to Beat length, each showing a state-coloured number, the title, and the duration, with no controls on the segment.
   - The proportional sizing landed — all nine segments carry their flex-grow — but the segment itself is still the pre-existing reorder card, so the proportionality makes the cards narrow rather than making a filmstrip. Height and chrome are what remain.
   - Related to BUG-081 on the Board: the same reorder controls are on every card in both views, and the drawing has them on neither.
+  - Fixed 2026-08-21: Cut now renders one flat 64px proportional filmstrip with state-coloured positions, single-line responsive titles and rounded localized durations. Selecting a segment exposes one external Move earlier/later pair, preserving exact canonical reorder, locking, drag, announcement and focus behavior without resting controls on every segment.
 
-- [ ] **[BUG-087][P2][Creative Studio] A trim handle renders on top of the Shot's duration label and splits the text** — found 2026-08-21 in the Beat panel, with a real Take
+- [x] **[BUG-087][P2][Creative Studio] A trim handle renders on top of the Shot's duration label and splits the text** — found 2026-08-21 in the Beat panel, with a real Take
   - The label `15.069002s source` occupies x=317–460. The slider labelled **`Trim in for Shot 1`** — 18px wide, 138px tall — sits at x=349–367, **inside that span**, so the text reads as `15.0` ⎸ `002s source` with a black bar through it.
   - All 18px of the handle — its full width — lie inside the label's 143px span. Probed with an element filter corrected to the handle's real width; an earlier filter of `<= 6px` reported no overlap at all, which was the probe being wrong, not the panel being right.
   - The handle is not mispositioned: `aria-valuenow` is 1, and one second of a fifteen-second track lands about where it is drawn. The fault is that the duration label and the trim track are laid out in the same space, so any non-zero trim-in crosses the text.
   - It only appears once a Shot has a real source duration to label, which is why seeded data never showed it.
   - The drawing keeps the label inside the segment's top-left and the handles at its edges, where they cannot meet.
+  - Fixed 2026-08-21: source/planning copy and continuity warnings occupy dedicated grid rows above a normal-flow 34px trim lane. The trim handles retain their exact percentage, keyboard, pointer, RTL and ARIA authority inside that lane, so a non-zero trim can no longer cross the label.
 
 - [ ] **[BUG-088][P2][Creative Studio] The Beat panel is a stacked form modal where the drawing is a full-bleed editor** — found 2026-08-21
   - Built: a centred modal of stacked fields — Action, Look, Beat target, Save/Reset/Ask Director, then Shot cards with Line, Narration, On-screen text, Planned duration, hard-cut checkbox, and generation count.

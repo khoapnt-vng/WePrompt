@@ -6,13 +6,6 @@
 
 import type { WorkspaceCutProjection } from '../../workspaceProjection';
 
-/**
- * Below this the drawing carries no segment title. The observed boundary lies between 104px, where a
- * title is absent, and 124px, where one is present; this is the midpoint and is the only number here
- * that the drawing does not state outright. Confirm it with the designer before treating it as spec.
- */
-export const FILMSTRIP_TITLE_MIN_WIDTH_PX = 112;
-
 export type CutFilmstripSegment = {
   beatId: string;
   /** 1-based play order. */
@@ -23,7 +16,6 @@ export type CutFilmstripSegment = {
   durationSeconds: number;
   /** The drawing gives each segment `flex: <seconds> 1 0%`, so the grow factor is the duration. */
   growFactor: number;
-  clock: string;
 };
 
 type CutFilmstripInput = Pick<WorkspaceCutProjection, 'beats'>;
@@ -46,12 +38,7 @@ export const buildCutFilmstrip = (cut: CutFilmstripInput): CutFilmstripSegment[]
       title: beat.title,
       durationSeconds: beat.durationSeconds,
       growFactor: beat.durationSeconds,
-      clock: `${beat.durationSeconds}s`,
     });
   }
   return segments;
 };
-
-/** Whether a segment of this rendered width carries its Beat title. */
-export const filmstripShowsTitle = (segmentWidthPixels: number): boolean =>
-  Number.isFinite(segmentWidthPixels) && segmentWidthPixels >= FILMSTRIP_TITLE_MIN_WIDTH_PX;

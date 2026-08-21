@@ -1521,6 +1521,7 @@
         "orderUnavailable": "The current Beat order is incomplete or ambiguous. Refresh the project before rearranging it.",
         "empty": "No active Beats are in the film yet.",
         "filmDuration": "{{seconds, number(maximumFractionDigits: 0; useGrouping: false)}}s film",
+        "filmstripDuration": "{{seconds, number(maximumFractionDigits: 0; useGrouping: false)}}s",
         "durationPending": "Film duration pending",
         "beatPosition": "Beat {{position}} of {{total}}",
         "shotCount": "{{count}} Shots",

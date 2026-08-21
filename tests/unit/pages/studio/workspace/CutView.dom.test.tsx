@@ -20,10 +20,7 @@ import {
   buildCutSlateWarnings,
   formatCutClock,
 } from '@/renderer/pages/studio/components/Workspace/Views/Cut/filmSummary';
-import {
-  buildCutFilmstrip,
-  filmstripShowsTitle,
-} from '@/renderer/pages/studio/components/Workspace/Views/Cut/filmstrip';
+import { buildCutFilmstrip } from '@/renderer/pages/studio/components/Workspace/Views/Cut/filmstrip';
 import { buildCutMatchReference } from '@/renderer/pages/studio/components/Workspace/Views/Cut/matchReference';
 
 type ButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'type'> & {
@@ -149,6 +146,7 @@ vi.mock('react-i18next', () => ({
       if (key.endsWith('.film.slateCount_one')) return `${values?.count} Slate`;
       if (key.endsWith('.film.slateCount_other')) return `${values?.count} Slates`;
       if (key.endsWith('.film.counts')) return `${values?.beats} · ${values?.shots} · ${values?.slates}`;
+      if (key.endsWith('.filmstripDuration')) return `${values?.seconds}s`;
       return values === undefined ? key : `${key}:${JSON.stringify(values)}`;
     },
   }),
@@ -294,11 +292,74 @@ describe('CutView', () => {
     expect(document.body.textContent?.toLowerCase()).not.toContain('stitched');
     expect(document.body.textContent?.toLowerCase()).not.toContain('auto-duck');
     expect(document.querySelector('audio')).toBeNull();
-    expect(screen.getByRole('heading', { name: 'Opening' })).toBeVisible();
+    expect(screen.getAllByText('Opening')).toHaveLength(2);
     expect(screen.queryByLabelText(/workspace\.cut\.openBeat/)).toBeNull();
   });
 
-  it('reorders by keyboard and drag with exact canonical arrays, serialization, focus, and announcements', async () => {
+  it('renders a compact selectable filmstrip and keeps reorder controls out of its segments', () => {
+    renderCut({
+      activeBeats: [
+        { id: 'beat_1', displayState: 'ready', shots: [] },
+        { id: 'beat_2', displayState: 'no_coverage', shots: [] },
+      ] as WorkspaceProjection['activeBeats'],
+    });
+
+    const rail = screen.getByRole('list', { name: 'conversation.creativeStudio.workspace.cut.railLabel' });
+    expect(rail).toHaveAttribute('data-cut-filmstrip');
+    const segments = within(rail).getAllByRole('button');
+    expect(segments).toHaveLength(2);
+    expect(segments[0]).toHaveTextContent('01');
+    expect(segments[0]).toHaveTextContent('Opening');
+    expect(segments[0]).toHaveTextContent('7s');
+    expect(segments[0]).toHaveAccessibleName(
+      /Opening.*7s.*workspace\.cut\.beatPosition.*workspace\.table\.state\.ready/
+    );
+    expect(segments[0]?.parentElement).toHaveAttribute('data-state', 'ready');
+    expect(segments[1]?.parentElement).toHaveAttribute('data-state', 'no_coverage');
+    expect(within(rail).queryByLabelText(/workspace\.cut\.(dragHandle|moveEarlier|moveLater)/)).toBeNull();
+    expect(rail).not.toHaveTextContent('1 Shot');
+
+    const selection = document.querySelector<HTMLElement>('[data-cut-filmstrip-selection]');
+    expect(selection).not.toBeNull();
+    expect(selection).toHaveTextContent('Opening');
+    expect(selection).toHaveTextContent('1 Shot');
+    expect(within(selection!).getAllByRole('button')).toHaveLength(2);
+  });
+
+  it('keeps a populated nine-Beat film in one proportional strip', () => {
+    const beats = Array.from({ length: 9 }, (_, index) => ({
+      id: `beat_${index + 1}`,
+      title: `Beat ${index + 1}`,
+      shotCount: 1,
+      durationKind: 'actual' as const,
+      durationSeconds: index + 1,
+      coverAssetId: null,
+    }));
+    renderCut({ cutProjection: cut({ beats, filmDurationSeconds: 45 }) });
+
+    const rail = screen.getByRole('list', { name: 'conversation.creativeStudio.workspace.cut.railLabel' });
+    const segments = Array.from(rail.querySelectorAll<HTMLElement>(':scope > [data-beat-id]'));
+    expect(segments).toHaveLength(9);
+    expect(segments.map((segment) => segment.style.flexGrow)).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9']);
+    expect(within(rail).getAllByRole('button')).toHaveLength(9);
+  });
+
+  it('pins the Cut rail to one flat 64px strip with non-wrapping titles', () => {
+    const css = readFileSync(
+      resolve(
+        process.cwd(),
+        'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/Cut/Cut.module.css'
+      ),
+      'utf8'
+    );
+
+    expect(css).toMatch(/\.rail\s*\{[^}]*box-sizing:\s*border-box[^}]*block-size:\s*64px/s);
+    expect(css).toMatch(/\.rail\s*\{[^}]*gap:\s*0/s);
+    expect(css).toMatch(/\.beatTitle\s*\{[^}]*white-space:\s*nowrap/s);
+    expect(css).not.toMatch(/\.beatTitle\s*\{[^}]*overflow-wrap:\s*anywhere/s);
+  });
+
+  it('reorders by keyboard, contextual controls, and drag with exact serialization and repeat focus', async () => {
     let finish!: (value: boolean) => void;
     const cutActions = actions();
     vi.mocked(cutActions.reorderBeats).mockReturnValueOnce(
@@ -308,21 +369,28 @@ describe('CutView', () => {
     );
     renderCut({ actions: cutActions });
     const first = document.querySelector<HTMLElement>('[data-beat-id="beat_1"]')!;
-    const handle = within(first).getByLabelText(/workspace\.cut\.dragHandle/);
+    const segment = within(first).getByRole('button');
+    const selection = document.querySelector<HTMLElement>('[data-cut-filmstrip-selection]')!;
+    const moveLater = within(selection).getByLabelText(/workspace\.cut\.moveLater/);
 
-    fireEvent.keyDown(handle, { key: 'ArrowDown' });
-    fireEvent.keyDown(handle, { key: 'ArrowDown' });
+    fireEvent.keyDown(segment, { key: 'ArrowDown' });
+    fireEvent.keyDown(segment, { key: 'ArrowDown' });
     expect(cutActions.reorderBeats).toHaveBeenCalledTimes(1);
     expect(cutActions.reorderBeats).toHaveBeenCalledWith(['beat_2', 'beat_1']);
     finish(true);
-    await waitFor(() => expect(handle).toHaveFocus());
+    await waitFor(() => expect(segment).toHaveFocus());
     expect(screen.getByText(/workspace\.cut\.reorderAnnouncement/)).toBeInTheDocument();
 
+    fireEvent.click(moveLater);
+    await waitFor(() => expect(cutActions.reorderBeats).toHaveBeenCalledTimes(2));
+    expect(cutActions.reorderBeats).toHaveBeenNthCalledWith(2, ['beat_2', 'beat_1']);
+    await waitFor(() => expect(segment).toHaveFocus());
+
     const dataTransfer = { effectAllowed: '', setData: vi.fn() };
-    fireEvent.dragStart(handle, { dataTransfer });
+    fireEvent.dragStart(segment, { dataTransfer });
     fireEvent.dragOver(document.querySelector('[data-beat-id="beat_2"]')!, { dataTransfer });
     fireEvent.drop(document.querySelector('[data-beat-id="beat_2"]')!, { dataTransfer });
-    await waitFor(() => expect(cutActions.reorderBeats).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(cutActions.reorderBeats).toHaveBeenCalledTimes(3));
   });
 
   it('routes bed and Match To selection through exact values and keeps import cancellation inert', async () => {
@@ -644,7 +712,6 @@ describe('the filmstrip', () => {
         title: 'Cold open',
         durationSeconds: 14,
         growFactor: 14,
-        clock: '14s',
       },
       {
         beatId: 'beat_2',
@@ -653,9 +720,8 @@ describe('the filmstrip', () => {
         title: 'Squad building',
         durationSeconds: 22,
         growFactor: 22,
-        clock: '22s',
       },
-      { beatId: 'beat_3', position: 3, label: '03', title: 'Sign-off', durationSeconds: 9, growFactor: 9, clock: '9s' },
+      { beatId: 'beat_3', position: 3, label: '03', title: 'Sign-off', durationSeconds: 9, growFactor: 9 },
     ]);
   });
 
@@ -678,15 +744,6 @@ describe('the filmstrip', () => {
   it('refuses a Beat whose length is not a usable number', () => {
     expect(buildCutFilmstrip({ beats: [stripBeat('beat_1', 'Cold open', Number.NaN)] })).toBeNull();
     expect(buildCutFilmstrip({ beats: [stripBeat('beat_1', 'Cold open', -4)] })).toBeNull();
-  });
-
-  it('drops a segment title only when the segment is too narrow to carry one', () => {
-    // Measured off the drawing: titles are absent at 97px, 104px and 63px, and present from 124px up.
-    expect(filmstripShowsTitle(124)).toBe(true);
-    expect(filmstripShowsTitle(213)).toBe(true);
-    expect(filmstripShowsTitle(104)).toBe(false);
-    expect(filmstripShowsTitle(63)).toBe(false);
-    expect(filmstripShowsTitle(0)).toBe(false);
   });
 });
 
@@ -785,6 +842,10 @@ describe('the Cut renders the film it is judging', () => {
     const beats = cut().beats.map((beat, index) => (index === 1 ? { ...beat, durationSeconds: null } : beat));
     renderCut({ cutProjection: cut({ beats, filmDurationSeconds: null }) });
     expect(document.querySelector<HTMLElement>('[data-beat-id="beat_1"]')?.style.flexGrow).toBe('');
+    expect(document.querySelector<HTMLElement>('[data-beat-id="beat_2"]')?.style.flexGrow).toBe('');
+    expect(screen.getByRole('list', { name: 'conversation.creativeStudio.workspace.cut.railLabel' })).toHaveTextContent(
+      'conversation.creativeStudio.workspace.cut.beatDurationPending'
+    );
   });
 
   it('names the Match To reference by its Beat and Shot position once one is chosen', () => {
