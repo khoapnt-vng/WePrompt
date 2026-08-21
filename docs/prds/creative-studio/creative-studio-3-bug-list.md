@@ -212,6 +212,23 @@ REFERENCE_PENDING_DIR, ROUTE_CATALOG` — while the same object read back throug
 CreativeStudioServiceError('provider_error'); }`. A single logged line would have shown
     `TypeError: fetch failed` immediately and saved the whole investigation.
 
+- [ ] **[BUG-084][P2][Creative Studio] Generated durations are floats and leak six decimal places into the UI** — found 2026-08-21, the first time real media existed
+  - A `bytedance/seedance-2.0` take came back at **15.069002** seconds, not 15. Every surface that renders a duration with `{{seconds}}` therefore prints the float verbatim. On the Cut alone: the header chip reads **`178.069002s film`**, the Store Beat reads **`15.069002 actual`**, and the delta pill reads **`160.069002S OVER`**.
+  - Seeded projects use whole seconds, so nothing showed this until a provider returned a real one. Every screenshot before today's generation was of integer data.
+  - **The delta pill is mine.** `buildCutFilmSummary` returns `seconds: targetSeconds - filmSeconds` unrounded and `cut.film.over` renders it raw. `formatCutClock` rounds; the delta does not. The drawing reads `2s UNDER`.
+  - Fix direction: round at the formatting boundary rather than at each call site. `cut.filmDuration`, `cut.actualDuration`, `cut.targetDuration` and `cut.film.under`/`over` all interpolate a raw number today.
+
+- [ ] **[BUG-085][P3][Creative Studio] The Cut's counts are unconditionally plural — "1 SLATES"** — found 2026-08-21
+  - The film panel renders `9 BEATS · 16 SHOTS · 1 SLATES`. The drawing reads `1 SLATE`.
+  - `cut.film.counts` is one string with three interpolations and no plural forms, so no count can ever agree. `cut.shotCount` in the same file does it correctly with `_one`/`_other`, so the pattern is established and this simply does not follow it.
+  - Mine, from the app-bar work.
+
+- [ ] **[BUG-086][P2][Creative Studio] The Cut's Beat rail is a row of tall cards, not the drawn filmstrip** — found 2026-08-21 with a populated project
+  - Built: nine boxed cards roughly 100px wide and 480px tall, each carrying a drag handle and two move buttons, with titles wrapping mid-word — `Roadma p`, `Sign- off`.
+  - Drawn: a single 64px-tall strip of segments proportional to Beat length, each showing a state-coloured number, the title, and the duration, with no controls on the segment.
+  - The proportional sizing landed — all nine segments carry their flex-grow — but the segment itself is still the pre-existing reorder card, so the proportionality makes the cards narrow rather than making a filmstrip. Height and chrome are what remain.
+  - Related to BUG-081 on the Board: the same reorder controls are on every card in both views, and the drawing has them on neither.
+
 ## Correctness and honesty of failures
 
 - [x] **[BUG-062][P2][Creative Studio] Three distinct Director failures all report "could not read or save this workspace"** — found 2026-08-21 while diagnosing BUG-061
