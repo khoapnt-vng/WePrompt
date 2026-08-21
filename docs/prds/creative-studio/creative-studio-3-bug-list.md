@@ -165,6 +165,19 @@ REFERENCE_PENDING_DIR, ROUTE_CATALOG` — while the same object read back throug
   - This entry originally asked whether the repetition was intentional. It is worse than repetition: the hash-pinned prototype contains **no project-settings surface anywhere** — probed for `project settings`, `spend policy` and `aspect ratio` across the whole document, all absent.
   - So the question is not which view should host the form, but whether the form belongs in the workspace at all. Resolve with the designer before moving it.
 
+  **Measured in the running app 2026-08-21, inside a project on the Table.** The workspace carries
+  three stacked forms below the view — Project settings, Brief/routes/spend policy, and the rule
+  drafts — with **five** commit controls between them: Reset settings, Save settings, Refresh routes,
+  Save Brief settings, Save rules. Two route pickers read "Selection required" with nothing selected.
+  Raised again by the owner on the same day, looking at it: the settings and Brief are out of place.
+
+- [ ] **[BUG-075][P2][Creative Studio] The Brief's rules are edited as raw JSON in a textarea** — found 2026-08-21 by driving the running app
+  - The workspace renders a field labelled `Project rule drafts (JSON)` holding a textarea whose value is `[]`, beside a `Save rules` button. It is built at `StudioPage.tsx:161` as `JSON.stringify(projectRuleDrafts(project), null, 2)`, so the internal draft array is the user surface.
+  - **The design has no JSON editing surface anywhere.** The prototype contains six occurrences of the string `json`, and all six are inside base64 image data rather than any label or control.
+  - The plan does specify `set_rules` carrying `StudioBriefRuleDraft[]`, but that is the wire contract between renderer and reducer. Nothing in it asks for the array to be typed by hand.
+  - What this costs a user: a malformed paste is a parse failure they have to debug with no schema to consult, and a rule is authored by writing an internal shape correctly rather than by saying what the rule is. It is the one place in the workspace where the product asks someone to be a programmer.
+  - Distinct from BUG-067, which is about the settings forms being in the workspace at all. This entry stands even if those forms move: wherever rules are edited, they should not be edited as JSON.
+
 ## Visual fidelity against the design
 
 > Compared 2026-08-21 against `creative-studio-3-beat-and-shot-reference.html.txt`,
