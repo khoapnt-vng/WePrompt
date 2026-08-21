@@ -49,6 +49,7 @@ const expectedLeaves = [
   'director.hide',
   'director.starting',
   'director.retry',
+  'director.resize',
   'director.startFresh',
   'director.danglingNotice',
   'director.interruptedNotice',

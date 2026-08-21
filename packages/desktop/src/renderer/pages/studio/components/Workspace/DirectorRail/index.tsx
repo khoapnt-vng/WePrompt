@@ -832,10 +832,18 @@ export type DirectorRailProps = {
   /** Owned by the shell: the collapse control lives in the app bar, not in this pane. */
   collapsed: boolean;
   contentId: string;
+  /** Owned by the shell: the drag handle that sets it is the separator beside this pane. */
+  widthPixels?: number;
 };
 
 /** A single docked owner: collapsing or changing workspace views never unmounts its chat surface. */
-export const DirectorRail: React.FC<DirectorRailProps> = ({ project, reviewedOutput, collapsed, contentId }) => {
+export const DirectorRail: React.FC<DirectorRailProps> = ({
+  project,
+  reviewedOutput,
+  collapsed,
+  contentId,
+  widthPixels,
+}) => {
   const { t } = useTranslation();
   const { allConversations, hasLoadedConversations } = useConversationHistoryContext();
   const { current_model, modelList } = useGuidModelSelection('aionrs');
@@ -1141,6 +1149,11 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({ project, reviewedOut
     <aside
       aria-label={title}
       className={`${styles.rail} ${collapsed ? styles.collapsed : ''}`}
+      style={
+        collapsed || widthPixels === undefined
+          ? undefined
+          : { inlineSize: `${widthPixels}px`, minInlineSize: `${widthPixels}px` }
+      }
       data-studio-director-rail
     >
       <div ref={contentRef} id={contentId} className={styles.content} aria-hidden={collapsed} inert={collapsed}>

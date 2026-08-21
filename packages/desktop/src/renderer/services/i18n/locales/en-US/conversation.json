@@ -1429,7 +1429,8 @@
         "ownerConflict": "Creative Studio found conflicting Director conversation data and will not choose one automatically.",
         "sessionVerificationFailed": "Creative Studio could not verify the Director session configuration.",
         "attachInterrupted": "Creative Studio could not complete the Director attachment. Retry to recover it safely.",
-        "noModelConfigured": "Configure a text model before starting the Creative Director."
+        "noModelConfigured": "Configure a text model before starting the Creative Director.",
+        "resize": "Resize the Creative Director"
       },
       "errors": {
         "storage": "Creative Studio could not read or save this workspace.",

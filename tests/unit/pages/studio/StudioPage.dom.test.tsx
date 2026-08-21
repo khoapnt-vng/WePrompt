@@ -120,14 +120,18 @@ vi.mock('@/renderer/pages/studio/components/Workspace', async (importOriginal) =
 });
 
 vi.mock('@/renderer/pages/studio/components/Workspace/DirectorRail', () => ({
+  // Applies widthPixels the way the real pane does. A mock that drops the prop would let the shell
+  // stop passing it without a single test noticing.
   DirectorRail: ({
     project,
     reviewedOutput,
+    widthPixels,
   }: {
     project: StudioRendererProjectV2;
     reviewedOutput?: React.ReactNode;
+    widthPixels?: number;
   }) => (
-    <aside data-studio-director-rail>
+    <aside data-studio-director-rail style={widthPixels === undefined ? undefined : { inlineSize: `${widthPixels}px` }}>
       <div data-studio-director-conversation-owner>{project.id}</div>
       {reviewedOutput === undefined ? null : <div data-studio-director-reviewed-output>{reviewedOutput}</div>}
     </aside>
@@ -591,7 +595,11 @@ describe('StudioPage schema-2 cutover', () => {
     expect(panes?.parentElement).toBe(shell);
     expect(directorRail?.parentElement).toBe(panes);
     expect(workPanel?.parentElement).toBe(panes);
-    expect(directorRail?.nextElementSibling).toBe(workPanel);
+    // The rail's drag handle sits between them, so they are adjacent across it rather than directly.
+    const resizer = document.querySelector('[data-studio-rail-resizer]');
+    expect(resizer?.parentElement).toBe(panes);
+    expect(directorRail?.nextElementSibling).toBe(resizer);
+    expect(resizer?.nextElementSibling).toBe(workPanel);
     expect(conversationOwner).not.toBeNull();
     await waitFor(() => expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalledTimes(1));
     const baseline = {
@@ -1971,6 +1979,38 @@ describe('StudioPage schema-2 cutover', () => {
       { assetId: 'ref_b', label: 'Alpha' },
       { assetId: 'ref_z', label: 'Zulu' },
     ]);
+  });
+
+  it('sizes the Director rail from the keyboard through an announced separator', async () => {
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+
+    const resizer = await screen.findByRole('separator', {
+      name: 'conversation.creativeStudio.workspace.director.resize',
+    });
+    expect(resizer).toHaveAttribute('aria-orientation', 'vertical');
+    const before = Number(resizer.getAttribute('aria-valuenow'));
+    expect(before).toBeGreaterThan(0);
+
+    fireEvent.keyDown(resizer, { key: 'ArrowRight' });
+    await waitFor(() => expect(Number(resizer.getAttribute('aria-valuenow'))).toBeGreaterThan(before));
+
+    // The pane itself follows the value, not just the announcement.
+    const rail = document.querySelector<HTMLElement>('[data-studio-director-rail]');
+    expect(rail?.style.inlineSize).toBe(`${resizer.getAttribute('aria-valuenow')}px`);
+
+    fireEvent.keyDown(resizer, { key: 'Home' });
+    await waitFor(() => expect(resizer.getAttribute('aria-valuenow')).toBe(resizer.getAttribute('aria-valuemin')));
+  });
+
+  it('hides the rail separator when the rail is collapsed', async () => {
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    expect(screen.queryByRole('separator')).not.toBeNull();
+
+    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-studio-director-toggle]')!);
+    // A pane with no width to give has nothing to drag.
+    await waitFor(() => expect(screen.queryByRole('separator')).toBeNull());
   });
 
   it('focuses the Director toggle from both captured reviewed-request actions', async () => {

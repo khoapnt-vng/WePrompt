@@ -5,7 +5,7 @@
  */
 
 import { Button } from '@arco-design/web-react';
-import React, { useId, useState } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 
@@ -23,6 +23,58 @@ export type WorkspaceShellProps = {
   reviewedOutput?: React.ReactNode;
   notice?: React.ReactNode;
   children: React.ReactNode;
+};
+
+/** The rail's drawn width, and the range a person may drag it through. */
+export const RAIL_WIDTH_DEFAULT_PX = 431;
+export const RAIL_WIDTH_MIN_PX = 280;
+export const RAIL_WIDTH_MAX_PX = 720;
+export const RAIL_WIDTH_STEP_PX = 16;
+
+const RAIL_WIDTH_STORAGE_KEY = 'aionui.studio.railWidth';
+
+/**
+ * A stored preference is untrusted input — it outlives releases and can be edited by hand — so an
+ * unusable width falls back to the drawn one rather than to zero.
+ */
+export const clampRailWidth = (width: number): number => {
+  if (!Number.isFinite(width)) return RAIL_WIDTH_DEFAULT_PX;
+  return Math.round(Math.min(RAIL_WIDTH_MAX_PX, Math.max(RAIL_WIDTH_MIN_PX, width)));
+};
+
+/** The width a key produces, or null when the key is not one this handle answers to. */
+export const railWidthFromKey = (current: number, key: string): number | null => {
+  switch (key) {
+    case 'ArrowRight':
+      return clampRailWidth(current + RAIL_WIDTH_STEP_PX);
+    case 'ArrowLeft':
+      return clampRailWidth(current - RAIL_WIDTH_STEP_PX);
+    case 'Home':
+      return RAIL_WIDTH_MIN_PX;
+    case 'End':
+      return RAIL_WIDTH_MAX_PX;
+    case 'Enter':
+      return RAIL_WIDTH_DEFAULT_PX;
+    default:
+      return null;
+  }
+};
+
+const readStoredRailWidth = (): number => {
+  try {
+    const stored = window.localStorage.getItem(RAIL_WIDTH_STORAGE_KEY);
+    return stored === null ? RAIL_WIDTH_DEFAULT_PX : clampRailWidth(Number.parseFloat(stored));
+  } catch {
+    return RAIL_WIDTH_DEFAULT_PX;
+  }
+};
+
+const storeRailWidth = (width: number): void => {
+  try {
+    window.localStorage.setItem(RAIL_WIDTH_STORAGE_KEY, String(width));
+  } catch {
+    // A preference that cannot be stored is not worth failing the workspace over.
+  }
 };
 
 const clock = (seconds: number | null | undefined): string | null => {
@@ -49,6 +101,20 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
   const viewHeadingId = `studio-${activeView}-heading`;
   const railContentId = useId();
   const [railCollapsed, setRailCollapsed] = useState(false);
+  const [railWidth, setRailWidth] = useState(readStoredRailWidth);
+  const dragRef = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
+  const railRef = useRef<HTMLDivElement | null>(null);
+
+  const applyRailWidth = useCallback((width: number): void => {
+    const clamped = clampRailWidth(width);
+    setRailWidth(clamped);
+    storeRailWidth(clamped);
+  }, []);
+
+  useEffect(() => {
+    if (!railCollapsed) return;
+    dragRef.current = null;
+  }, [railCollapsed]);
 
   const toggleLabel = t(
     railCollapsed
@@ -122,7 +188,47 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
           reviewedOutput={reviewedOutput}
           collapsed={railCollapsed}
           contentId={railContentId}
+          widthPixels={railWidth}
         />
+        {railCollapsed ? null : (
+          <div
+            ref={railRef}
+            className={styles.railResizer}
+            data-studio-rail-resizer
+            role='separator'
+            tabIndex={0}
+            aria-orientation='vertical'
+            aria-controls={railContentId}
+            aria-label={t('conversation.creativeStudio.workspace.director.resize')}
+            aria-valuenow={railWidth}
+            aria-valuemin={RAIL_WIDTH_MIN_PX}
+            aria-valuemax={RAIL_WIDTH_MAX_PX}
+            onPointerDown={(event) => {
+              dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startWidth: railWidth };
+              event.currentTarget.setPointerCapture(event.pointerId);
+            }}
+            onPointerMove={(event) => {
+              const drag = dragRef.current;
+              if (drag === null || drag.pointerId !== event.pointerId) return;
+              // Right-to-left grows the pane in the opposite physical direction.
+              const direction = getComputedStyle(event.currentTarget).direction === 'rtl' ? -1 : 1;
+              applyRailWidth(drag.startWidth + (event.clientX - drag.startX) * direction);
+            }}
+            onPointerUp={(event) => {
+              dragRef.current = null;
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                event.currentTarget.releasePointerCapture(event.pointerId);
+              }
+            }}
+            onDoubleClick={() => applyRailWidth(RAIL_WIDTH_DEFAULT_PX)}
+            onKeyDown={(event) => {
+              const next = railWidthFromKey(railWidth, event.key);
+              if (next === null) return;
+              event.preventDefault();
+              applyRailWidth(next);
+            }}
+          />
+        )}
         <div className={styles.workPanel} data-studio-work-panel>
           <div className={styles.workScroll} data-studio-work-scroll>
             <Link className={styles.backLink} to='/studio'>

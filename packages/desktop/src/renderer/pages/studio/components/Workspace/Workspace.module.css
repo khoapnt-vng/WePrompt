@@ -175,3 +175,34 @@
 .backLink {
   align-self: start;
 }
+
+/* The rail's trailing edge. Wider than the line it draws so it is reachable by pointer, and
+   focusable so the pane can be sized without one. */
+.railResizer {
+  position: relative;
+  flex: 0 0 auto;
+  inline-size: 8px;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+}
+
+.railResizer::after {
+  position: absolute;
+  content: '';
+  inset-block: 0;
+  inset-inline-start: 3px;
+  inline-size: 2px;
+  background: transparent;
+  transition: background 120ms ease;
+}
+
+.railResizer:hover::after,
+.railResizer:focus-visible::after {
+  background: var(--color-primary-6, var(--text-secondary));
+}
+
+.railResizer:focus-visible {
+  outline: 2px solid var(--color-primary-6, var(--text-secondary));
+  outline-offset: -2px;
+}
