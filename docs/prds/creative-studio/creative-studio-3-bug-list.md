@@ -231,6 +231,25 @@ REFERENCE_PENDING_DIR, ROUTE_CATALOG` — while the same object read back throug
   - The design instead fixes a three-column grid of 16:9 image cards, each with a beat-number badge, title, description, a state pill, and a `2 SHOTS · 14s` footer. A no-coverage beat renders as a diagonal-striped placeholder rather than a photo.
   - **Resolved 2026-08-21, and it does not invert.** The Board defaults to a **collapsed** rail at **1158px**, where the designer confirms "three-up holds at 365px cards, so the Board needs no new column count". The density control was not a latent answer to a narrow column; there is no narrow column. Remove it unless it is wanted on its own merits.
 
+## Open — whether the bar should span the chat pane
+
+Raised by the owner on 2026-08-21, looking at the built bar: the top bar should not cover the chat
+panel. **Left as built for now, by the owner's call.**
+
+Recorded rather than actioned because it reopens the designer's Answer 1, which spans the bar across
+both panes and gives its reasons: everything the bar carries is film-scoped, and a bar living inside
+the workspace column would reassemble itself across a 378px jump every time the rail is toggled,
+making a pane control read as an application-wide change.
+
+Checked first, and it is not a rendering fault. The rail's top edge sits at exactly the bar's bottom
+edge — 101px — with no overlap. The bar spans by design.
+
+If it is revisited, note what moves with it. A bar scoped to the workspace lives in 799px rather than
+1230px, which puts it back inside the yield ladder's range where rungs begin to fire, and BUG-070's
+chip placement follows the bar wherever it goes. A smaller option was offered and not taken: keep the
+span and give the chat pane its own heading back, since it currently has no identity at all — the
+rail lost its header to the bar and shows blank space above a composer.
+
 ## Settled — the rail stays, and the bar heads the project
 
 **The rail stays.** Decided by the owner on 2026-08-21. Plan Task 9 mandates "one docked collapsible
