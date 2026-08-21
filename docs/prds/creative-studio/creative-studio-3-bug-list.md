@@ -564,46 +564,14 @@ a fidelity fix, so it is filed as BUG-073.
 
 ## Open — three questions for the designer about the Beat panel
 
-Sent 2026-08-21, against the Beat panel drawing (`BEAT 03 · Card evolution`). Recorded here rather
-than as a new file because `docs/prds/creative-studio/` already holds twelve entries against the
-repo's ten-child ratchet.
+Sent 2026-08-21. The model they answer against, the code each claim is grounded in, and the questions
+themselves live in `creative-studio-3-beat-panel-model-and-questions.md` rather than being restated
+here. In short: is `CONTINUITY BREAK` a control or a warning; is `RENDERS AS` editable; and does the
+join `+` cost a re-render and does inserting extend the Beat or redivide it.
 
-**What we already take as settled, so the answers can be short.** The Action is the only sentence a
-person writes and Shot Lines derive from it, detaching on edit. The Look is beat-level and every Shot
-inherits it. Shots chain first-frame unless a hard cut (`chainBreak: 'none' | 'hard_cut'`). A Shot
-with no Take still holds its seconds as a slate. Trimming an edge is free because it picks in and out
-inside footage we already hold; moving a boundary changes what a Shot must contain, so it must be
-made again, and the chain means that can cascade to the next Shot — which is why a quote is a range.
-
-### 1. `CONTINUES FROM 02 · CONTINUITY BREAK` — state and control, or state and warning?
-
-The two halves sit on one line and read two opposite ways.
-
-- **State plus control**: "this Shot continues from 02", and _Continuity break_ is the affordance that
-  severs it. Then it is always present, always clickable, and it sets `chainBreak: 'hard_cut'`.
-- **State plus warning**: "this Shot is meant to continue from 02, and continuity is currently
-  broken." Then it is conditional, inert, and something has to detect the break and raise it.
-
-One is a permanent button, the other an occasional alert. We cannot build both.
-
-### 2. `▸ RENDERS AS` — what does the disclosure show, and can it be edited?
-
-Our reading is the resolved prompt actually sent to the model: Action, Look, Line, cast and references
-composed into one text. If that is right, the follow-up matters more than the feature — **is it
-read-only, or editable?**
-
-Editable makes it a fourth authoring surface beside Action, Look and Line, and it would need its own
-detach rule: once a person edits the resolved prompt, does re-deriving the Line still overwrite it?
-
-### 3. The `+` on the join markers — insert a Shot, and at whose expense?
-
-We read it as "insert a Shot at this join". Two things follow that the drawing does not settle.
-
-- Inserting mid-chain changes the boundary on both sides, and the footer rules that a boundary
-  **costs a re-render**. The `+` carries no cost hint. Should it, or is an inserted Shot always a
-  fresh slate with nothing to invalidate?
-- Does inserting extend the Beat past its 31s, or redistribute the existing 31s across four Shots?
-  That decides whether Beat duration is a target the Shots must fit or a total that follows from them.
+The last of those is the one that reaches furthest — it decides whether Beat duration is a target the
+Shots must fit or a total that follows from them, which the Table, the Cut and every fit-to-target
+calculation depend on.
 
 ## Verification notes
 
