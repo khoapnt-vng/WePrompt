@@ -207,17 +207,29 @@ REFERENCE_PENDING_DIR, ROUTE_CATALOG` — while the same object read back throug
   jsdom applies no CSS-module rules, so neither was visible to any test until an assertion was added
   for each: that the shell is a column, and that the chip's ground differs from the bar's.
 
-- [ ] **[BUG-069][P1][Creative Studio] The type scale is roughly double the design throughout** — found 2026-08-21, measured
+- [x] **[BUG-069][P1][Creative Studio] The type scale is roughly double the design throughout** — found 2026-08-21, measured
   - Project title: design **Manrope 700 at 14.5px**; built **Manrope 700 at 29px** — exactly 2×.
   - Largest type anywhere: design **23px**; built **29px**.
   - The three typefaces are already correct and loaded in both — Manrope, IBM Plex Mono, Source Sans 3. Nothing needs adding. What diverges is the scale, and it is what makes the built UI read as a settings page rather than a dense production tool.
 
-- [ ] **[BUG-070][P1][Creative Studio] The view switch uses the wrong type treatment and sits in the wrong place** — found 2026-08-21, measured
+  **Fixed by `d16bce78e`.** The project title was inheriting a 29px heading default; it is now set at
+  the drawn Manrope 700 14.5px. A test asserts no rule in the workspace stylesheet exceeds 23px, the
+  largest type anywhere in the drawing.
+
+- [x] **[BUG-070][P1][Creative Studio] The view switch uses the wrong type treatment and sits in the wrong place** — found 2026-08-21, measured
   - Design: `IBM Plex Mono`, **9.5px**, uppercase, `letter-spacing: 0.08em`, chips inside the app bar, right-aligned.
   - Built: `Source Sans 3`, **14.5px**, sentence case, `letter-spacing: normal`, pills on their own row below the title, left-aligned.
   - The underlying markup is sound — `<nav aria-label="Workspace views">` with `aria-current="page"`. This is styling and placement only.
   - **Placement answered 2026-08-21: the chips live in the app bar**, right-aligned, before `Render…`. They only leave it at rung 5 of the yield ladder, below a **603px** bar — a width the product never reaches, since the bar spans 1211px. Build them in the bar and treat the ladder's rung 5 as a later concern.
   - The capitals are authored into the prototype's strings, which compute `text-transform: none`. Do not copy that — use `text-transform: uppercase` and keep the key in sentence case, or the eleven fallback locales and every caseless script inherit English casing.
+
+  **Fixed in two parts.** `d16bce78e` gave the chips the drawn treatment — IBM Plex Mono 9.5px with
+  0.76px tracking, 6px corners, 5x11 padding — and marked the active one by its ground rather than by
+  weight, since both compute 400 in the drawing and bolding one reflows the row on every view change.
+  The capitals are a CSS transform rather than typed into the strings, so the eleven locales that fall
+  back to en-US and every caseless script do not inherit English casing; a test asserts both halves.
+  `ad0d5d201` then placed them in the app bar, which is where the drawing puts them and which could
+  not happen until the bar existed.
 
 - [ ] **[BUG-071][P1][Creative Studio] The Cut view is a settings form; the design is a playback editor** — found 2026-08-21
   - Design (dark surface): a large preview panel badged `BEAT 01 · Cold open`; a transport row with play, `0:00 / 2:58`, and `PICTURE ONLY — THE BED IS MUTED HERE`; a right `THE FILM` panel showing `2:58` against `OF 3:00 TARGET` with a `2s UNDER` pill and `9 BEATS · 16 SHOTS · 1 SLATE`; a `MATCH TO` panel with reference thumbnails and `03 · SHOT 01 IS THE REFERENCE`; an inline warning row `BEAT 05 — No coverage. It exports as a 24s slate.` with an `OPEN THE BEAT` action; a numbered filmstrip of every beat in play order with per-beat durations; and an audio-bed waveform strip labelled `bed-season4.wav · 3:04 · ONE BED · AUTO-DUCKED`.
@@ -309,7 +321,7 @@ a fidelity fix, so it is filed as BUG-073.
   - The persistence scope is the part to get right: per project alone would make the Table's default fight the Board's, and a global preference would defeat the point of a per-view default.
   - New behaviour, not a fidelity fix. It is what makes the 1158px targets in BUG-071 and BUG-072 real — without it every view renders at 780px and the two collapsed-target views are wrong by default.
 
-- [ ] **[BUG-074][P2][Creative Studio] The Table needs its 860px Look-folding rule** — filed 2026-08-21, **ruled by the designer the same day; unblocked**
+- [x] **[BUG-074][P2][Creative Studio] The Table needs its 860px Look-folding rule** — filed 2026-08-21, **ruled by the designer the same day; unblocked**
   - The Table is the one view that defaults to an **expanded** rail, so 780px is its design target rather than a degraded state. At that width the designer measures `ACTION` at about 200px and `LOOK` at about 160px.
   - **The ruling: at 860px of column width and below, the `LOOK` column folds into the `ACTION` cell as a second line.** One threshold, one change. Nothing else moves — the five fixed columns keep their widths, the row keeps one height class, and the Beat panel is unaffected. At a 780px column the merged Action cell is 374px.
   - **Spec**, transcribed from the designer's drawing:
@@ -322,6 +334,12 @@ a fidelity fix, so it is filed as BUG-073.
   - **The build already has most of the pieces.** `Views/Table/index.tsx` renders a `look` cell with a `lookMissing` variant and an existing `table.lookMissing` key. What it lacks is the width measurement and the fold.
 
   **Provenance — read this before treating the spec above as pinned.** Every other design authority here is a committed file with a recorded hash: the prototype `642c8b16…0846ee`, the app-bar answer `4a00962a…52b0d6`. **This ruling arrived as a screenshot, so there is nothing to pin and the spec above is a transcription.** Three of its claims were verified against the pinned prototype and hold exactly: `#6E6553` at Source Sans 3 12.5px is already the Look column's computed style, `#B4380F` is already the row's no-coverage colour, and 12.5px is used by no other face. So the tokens introduce nothing new and the transcription is corroborated where it can be. The unverifiable parts are the two numbers that exist only in the drawing — the **860px** threshold and the **3px** offset. Ask the designer for the standalone HTML before building, or accept those two as transcribed.
+
+  **Fixed by `c503c8f9d`.** At 860px of column width and below the Look folds into the Action cell as
+  a second line, measured the way the coverage bar's density tiers are. An unmeasured width does not
+  fold, so the folded form is not rendered and then undone on every mount. The empty-Look prompt was
+  aligned with the drawing at the same time — it now keeps the warning colour the row's NO COVERAGE
+  state uses, in both the folded and columnar forms, where it had been the muted text colour.
 
 ## Verification notes
 
