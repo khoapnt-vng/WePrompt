@@ -154,10 +154,11 @@ REFERENCE_PENDING_DIR, ROUTE_CATALOG` — while the same object read back throug
   - The allowlist itself is defensible — each entry carries duration bounds, resolutions, ratios and a first-frame flag that the catalogue does not expose, and the adapter needs those facts. The defect is that it is hardcoded with no admission path, and it has already drifted behind the catalogue.
   - **Fixed by `b01c565ee`** — OpenRouter video models are now admitted from a strict live catalogue with durable discrete capabilities, refresh-race fencing, and final pre-submit revalidation.
 
-- [ ] **[BUG-066][P3][Creative Studio] The Cut view renders a duplicated "Cut" heading** — found 2026-08-21, confirmed by DOM inspection of all three views
+- [x] **[BUG-066][P3][Creative Studio] The Cut view renders a duplicated "Cut" heading** — found 2026-08-21, confirmed by DOM inspection of all three views
   - Cut emits two `H2 "Cut"` — the view wrapper's heading and the panel's own `cut.title` (`Views/Cut/index.tsx:207`). Table emits one heading; Board's second heading is "Beat board", so neither sibling collides.
   - Live heading trees: Table `[H1 project, H2 "Table"]`; Board `[H1 project, H2 "Board", H2 "Beat board", H2 "Bin"]`; Cut `[H1 project, H2 "Cut", H2 "Cut", H3 …]`.
   - Also an accessibility defect: two identical sibling headings at the same level give screen-reader users no way to tell the wrapper from the panel.
+  - **Fixed by `d1f99a2b0`** — Cut now relies on the workspace's single canonical level-two heading while retaining its independently named Film Cut region, with integrated DOM and E2E heading-count coverage.
 
 - [ ] **[BUG-067][P2][Creative Studio] The project-settings and spend-policy forms are not in the design at all, and render under all three views** — found 2026-08-21; **open question resolved 2026-08-21 against the prototype**
   - "Project settings" and "Brief, routes, and spend policy" render identically below Table, Board and Cut.
