@@ -211,10 +211,19 @@ a fidelity fix, so it is filed as BUG-073.
   - The persistence scope is the part to get right: per project alone would make the Table's default fight the Board's, and a global preference would defeat the point of a per-view default.
   - New behaviour, not a fidelity fix. It is what makes the 1158px targets in BUG-071 and BUG-072 real — without it every view renders at 780px and the two collapsed-target views are wrong by default.
 
-- [ ] **[BUG-074][P2][Creative Studio] The Table needs a responsive column rule at its 780px target** — filed 2026-08-21 from the designer's answer
-  - The Table is the one view that defaults to an **expanded** rail, so 780px is its design target rather than a degraded state.
-  - At 780px the designer measures `ACTION` falling to about 200px and `LOOK` to about 160px. The proposed rule: **`LOOK` stops being a column below 860px and becomes a second line under the Action, in the same cell.**
-  - The designer has offered to draw this before the Table is built. **Take that offer** — this is the only view whose primary state is the narrow one, and it is the view the director is loudest in.
+- [ ] **[BUG-074][P2][Creative Studio] The Table needs its 860px Look-folding rule** — filed 2026-08-21, **ruled by the designer the same day; unblocked**
+  - The Table is the one view that defaults to an **expanded** rail, so 780px is its design target rather than a degraded state. At that width the designer measures `ACTION` at about 200px and `LOOK` at about 160px.
+  - **The ruling: at 860px of column width and below, the `LOOK` column folds into the `ACTION` cell as a second line.** One threshold, one change. Nothing else moves — the five fixed columns keep their widths, the row keeps one height class, and the Beat panel is unaffected. At a 780px column the merged Action cell is 374px.
+  - **Spec**, transcribed from the designer's drawing:
+    - Threshold: **860px of column width, measured the same way the coverage bar's density tiers are** — that is `getBoundingClientRect().width` fed through a `ResizeObserver`, with a pure function deciding the tier. `CoverageBar.tsx:116-121` and `coverageDensityForWidth` are the working precedent; follow them rather than inventing a second measurement style.
+    - Look line: **Source Sans 3 12.5px, `#6E6553`**, 3px below the Action, clamped to two lines with tail ellipsis.
+    - An empty Look keeps its **`#B4380F`** prompt — the `No look written yet` state the built Table already renders through `styles.lookMissing`.
+    - Header reads `ACTION · LOOK`. Both remain sortable.
+  - **Why the Look is the one that folds**, in the designer's terms: the Action is what the Beat does, the Look is how it is conditioned. Reading a table you scan the Actions in sequence and consult a Look only for the Beat you are about to open. A subordinate line states that relationship; two columns pretend they are peers.
+  - The columnar alternative at 780px was drawn and rejected: two narrow prose columns side by side at 198px and 156px, each breaking at a different point, with row height set by whichever wrapped worse — one Beat wrapping to three lines in a 156px cell to say something the reader is not looking at yet.
+  - **The build already has most of the pieces.** `Views/Table/index.tsx` renders a `look` cell with a `lookMissing` variant and an existing `table.lookMissing` key. What it lacks is the width measurement and the fold.
+
+  **Provenance — read this before treating the spec above as pinned.** Every other design authority here is a committed file with a recorded hash: the prototype `642c8b16…0846ee`, the app-bar answer `4a00962a…52b0d6`. **This ruling arrived as a screenshot, so there is nothing to pin and the spec above is a transcription.** Three of its claims were verified against the pinned prototype and hold exactly: `#6E6553` at Source Sans 3 12.5px is already the Look column's computed style, `#B4380F` is already the row's no-coverage colour, and 12.5px is used by no other face. So the tokens introduce nothing new and the transcription is corroborated where it can be. The unverifiable parts are the two numbers that exist only in the drawing — the **860px** threshold and the **3px** offset. Ask the designer for the standalone HTML before building, or accept those two as transcribed.
 
 ## Verification notes
 
