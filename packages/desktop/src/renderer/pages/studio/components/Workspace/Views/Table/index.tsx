@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { WorkspaceBeatProjection } from '../../workspaceProjection';
+import { tableFoldsLook } from './lookFold';
 import styles from './Table.module.css';
 
 const COLUMN_KEYS = [
@@ -15,6 +16,16 @@ const COLUMN_KEYS = [
   'conversation.creativeStudio.workspace.table.columns.beat',
   'conversation.creativeStudio.workspace.table.columns.action',
   'conversation.creativeStudio.workspace.table.columns.look',
+  'conversation.creativeStudio.workspace.table.columns.shots',
+  'conversation.creativeStudio.workspace.table.columns.length',
+  'conversation.creativeStudio.workspace.table.columns.state',
+] as const;
+
+/** The Look leaves the header and the Action heading names both. Nothing else moves. */
+const FOLDED_COLUMN_KEYS = [
+  'conversation.creativeStudio.workspace.table.columns.position',
+  'conversation.creativeStudio.workspace.table.columns.beat',
+  'conversation.creativeStudio.workspace.table.columns.actionLook',
   'conversation.creativeStudio.workspace.table.columns.shots',
   'conversation.creativeStudio.workspace.table.columns.length',
   'conversation.creativeStudio.workspace.table.columns.state',
@@ -31,8 +42,6 @@ const STATE_KEYS = {
   ready: 'conversation.creativeStudio.workspace.table.state.ready',
   draft: 'conversation.creativeStudio.workspace.table.state.draft',
 } as const satisfies Record<WorkspaceBeatProjection['displayState'], string>;
-
-const COLUMN_COUNT = COLUMN_KEYS.length;
 
 type FocusedCell = {
   row: number;
@@ -54,13 +63,37 @@ export const TableView: React.FC<TableViewProps> = ({ beats, selectedBeatId, onS
     column: 0,
   });
   const cellRefs = useRef<Array<Array<HTMLTableCellElement | null>>>([]);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [columnWidthPixels, setColumnWidthPixels] = useState(0);
+
+  // Measured the way the coverage bar's density tiers are: off the rendered width, not the window's.
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (node === null) return;
+    const measure = (): void => {
+      const width = node.getBoundingClientRect().width;
+      if (Number.isFinite(width) && width >= 0) setColumnWidthPixels(width);
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width;
+      if (typeof width === 'number' && Number.isFinite(width) && width >= 0) setColumnWidthPixels(width);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  const foldsLook = tableFoldsLook(columnWidthPixels);
+  const columnKeys: readonly string[] = foldsLook ? FOLDED_COLUMN_KEYS : COLUMN_KEYS;
+  const columnCount = columnKeys.length;
   const focusedRow = Math.min(focusedCell.row, Math.max(0, beats.length - 1));
-  const focusedColumn = Math.min(focusedCell.column, COLUMN_COUNT - 1);
+  const focusedColumn = Math.min(focusedCell.column, columnCount - 1);
 
   const focusCell = (row: number, column: number): void => {
     const next = {
       row: Math.max(0, Math.min(row, beats.length - 1)),
-      column: Math.max(0, Math.min(column, COLUMN_COUNT - 1)),
+      column: Math.max(0, Math.min(column, columnCount - 1)),
     };
     setFocusedCell(next);
     cellRefs.current[next.row]?.[next.column]?.focus();
@@ -89,7 +122,7 @@ export const TableView: React.FC<TableViewProps> = ({ beats, selectedBeatId, onS
       nextColumn = 0;
     } else if (event.key === 'End') {
       nextRow = event.ctrlKey || event.metaKey ? beats.length - 1 : row;
-      nextColumn = COLUMN_COUNT - 1;
+      nextColumn = columnCount - 1;
     } else return;
 
     event.preventDefault();
@@ -98,9 +131,9 @@ export const TableView: React.FC<TableViewProps> = ({ beats, selectedBeatId, onS
 
   return (
     <section className={styles.root}>
-      <div className={styles.scroll}>
+      <div ref={scrollRef} className={styles.scroll}>
         <table
-          aria-colcount={COLUMN_COUNT}
+          aria-colcount={columnCount}
           aria-label={t('conversation.creativeStudio.workspace.table.label')}
           aria-rowcount={beats.length + 1}
           className={styles.grid}
@@ -108,7 +141,7 @@ export const TableView: React.FC<TableViewProps> = ({ beats, selectedBeatId, onS
         >
           <thead>
             <tr aria-rowindex={1} role='row'>
-              {COLUMN_KEYS.map((key, column) => (
+              {columnKeys.map((key, column) => (
                 <th key={key} aria-colindex={column + 1} className={styles.headerCell} role='columnheader' scope='col'>
                   {t(key)}
                 </th>
@@ -133,12 +166,25 @@ export const TableView: React.FC<TableViewProps> = ({ beats, selectedBeatId, onS
                 <span key='beat' className={styles.beatTitle} dir='auto'>
                   {beat.title || beat.id}
                 </span>,
-                <span key='action' dir='auto'>
-                  {beat.action}
+                <span key='action' className={foldsLook ? styles.actionFolded : undefined} dir='auto'>
+                  <span className={foldsLook ? styles.actionLine : undefined}>{beat.action}</span>
+                  {foldsLook ? (
+                    <span
+                      className={`${styles.lookLine} ${beat.look.length === 0 ? styles.lookMissing : ''}`}
+                      data-look-folded
+                      dir='auto'
+                    >
+                      {beat.look || t('conversation.creativeStudio.workspace.table.lookMissing')}
+                    </span>
+                  ) : null}
                 </span>,
-                <span key='look' className={beat.look.length === 0 ? styles.lookMissing : undefined} dir='auto'>
-                  {beat.look || t('conversation.creativeStudio.workspace.table.lookMissing')}
-                </span>,
+                ...(foldsLook
+                  ? []
+                  : [
+                      <span key='look' className={beat.look.length === 0 ? styles.lookMissing : undefined} dir='auto'>
+                        {beat.look || t('conversation.creativeStudio.workspace.table.lookMissing')}
+                      </span>,
+                    ]),
                 <span key='shots' className={styles.shotCount}>
                   <bdi>{t('conversation.creativeStudio.workspace.table.shotCount', { count: beat.shots.length })}</bdi>
                 </span>,

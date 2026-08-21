@@ -7,6 +7,7 @@ import type {
   WorkspaceBeatProjection,
   WorkspaceShotProjection,
 } from '@/renderer/pages/studio/components/Workspace/workspaceProjection';
+import { tableFoldsLook } from '@/renderer/pages/studio/components/Workspace/Views/Table/lookFold';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -17,6 +18,7 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.table.columns.beat': 'Beat',
         'conversation.creativeStudio.workspace.table.columns.action': 'Action',
         'conversation.creativeStudio.workspace.table.columns.look': 'Look',
+        'conversation.creativeStudio.workspace.table.columns.actionLook': 'Action · Look',
         'conversation.creativeStudio.workspace.table.columns.shots': 'Shots',
         'conversation.creativeStudio.workspace.table.columns.length': 'Length',
         'conversation.creativeStudio.workspace.table.columns.state': 'State',
@@ -378,5 +380,102 @@ describe('TableView', () => {
       expect(stateCell).toHaveTextContent(label);
       expect(stateCell.querySelector('[data-state]')).toHaveAttribute('data-state', state);
     }
+  });
+});
+
+describe('the Look fold threshold', () => {
+  it('folds the Look at 860px of column width and below', () => {
+    // The designer's ruling: one threshold, one change. 780px is the Table's real target, so the
+    // folded form is the common case rather than a degraded one.
+    expect(tableFoldsLook(780)).toBe(true);
+    expect(tableFoldsLook(860)).toBe(true);
+  });
+
+  it('keeps the Look a column above the threshold', () => {
+    expect(tableFoldsLook(861)).toBe(false);
+    expect(tableFoldsLook(1158)).toBe(false);
+  });
+
+  it('does not fold on an unmeasured width', () => {
+    // Before the first measurement the width is zero. Folding on that would render the folded form
+    // and then unfold it on almost every desktop window, which is a visible reflow on every mount.
+    expect(tableFoldsLook(0)).toBe(false);
+    expect(tableFoldsLook(Number.NaN)).toBe(false);
+    expect(tableFoldsLook(-40)).toBe(false);
+  });
+});
+
+describe('folding the Look at the Table target width', () => {
+  let resizeCallback: ResizeObserverCallback | null = null;
+
+  class FoldResizeObserver implements ResizeObserver {
+    constructor(callback: ResizeObserverCallback) {
+      resizeCallback = callback;
+    }
+    disconnect = vi.fn();
+    observe = vi.fn();
+    unobserve = vi.fn();
+  }
+
+  const renderAtWidth = (width: number) => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      bottom: 0,
+      height: 200,
+      left: 0,
+      right: width,
+      toJSON: () => ({}),
+      top: 0,
+      width,
+      x: 0,
+      y: 0,
+    } as DOMRect);
+    vi.stubGlobal('ResizeObserver', FoldResizeObserver);
+    render(<TableView beats={[makeBeat('beat_1')]} selectedBeatId={null} onSelectBeat={vi.fn()} />);
+    act(() => {
+      resizeCallback?.([{ contentRect: { width } } as ResizeObserverEntry], {} as ResizeObserver);
+    });
+  };
+
+  beforeEach(() => {
+    resizeCallback = null;
+    vi.restoreAllMocks();
+  });
+
+  it('keeps the Look a column when the Table has room for one', () => {
+    renderAtWidth(1158);
+
+    const rows = within(screen.getByRole('grid', { name: 'Beat table' })).getAllByRole('row');
+    expect(
+      within(rows[0]!)
+        .getAllByRole('columnheader')
+        .map((cell) => cell.textContent)
+    ).toEqual(['#', 'Beat', 'Action', 'Look', 'Shots', 'Length', 'State']);
+    expect(within(rows[1]!).getAllByRole('gridcell')).toHaveLength(7);
+  });
+
+  it('folds the Look into the Action cell at the 780px target', () => {
+    renderAtWidth(780);
+
+    const rows = within(screen.getByRole('grid', { name: 'Beat table' })).getAllByRole('row');
+    expect(
+      within(rows[0]!)
+        .getAllByRole('columnheader')
+        .map((cell) => cell.textContent)
+    ).toEqual(['#', 'Beat', 'Action · Look', 'Shots', 'Length', 'State']);
+
+    // The five fixed columns keep their places; only the Look leaves.
+    const cells = within(rows[1]!).getAllByRole('gridcell');
+    expect(cells).toHaveLength(6);
+    // The Look now lives inside the Action cell rather than beside it, and is marked as folded.
+    expect(cells[2]?.textContent).toContain('Action beat_1');
+    expect(cells[2]?.textContent).toContain('Look beat_1');
+    expect(cells[2]?.querySelector('[data-look-folded]')).not.toBeNull();
+    // And it is not also still a column of its own.
+    expect(within(rows[0]!).queryByText('Look')).toBeNull();
+  });
+
+  it('keeps the grid own column count honest when folded', () => {
+    renderAtWidth(780);
+    expect(screen.getByRole('grid', { name: 'Beat table' })).toHaveAttribute('aria-colcount', '6');
   });
 });

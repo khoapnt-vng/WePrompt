@@ -72,6 +72,7 @@ const expectedLeaves = [
   'table.columns.beat',
   'table.columns.action',
   'table.columns.look',
+  'table.columns.actionLook',
   'table.columns.shots',
   'table.columns.length',
   'table.columns.state',

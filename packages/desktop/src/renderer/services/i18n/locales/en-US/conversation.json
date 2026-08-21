@@ -1457,7 +1457,8 @@
           "look": "Look",
           "shots": "Shots",
           "length": "Length",
-          "state": "State"
+          "state": "State",
+          "actionLook": "Action · Look"
         },
         "lookMissing": "No look written yet",
         "shotCount": "{{count}} shots",
