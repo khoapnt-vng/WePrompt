@@ -173,6 +173,14 @@ REFERENCE_PENDING_DIR, ROUTE_CATALOG` — while the same object read back throug
   - Nine cards therefore show forty-five controls, with a destructive action permanently on the face of each. The drawing's Board is for looking — "picking takes is looking", in the designer's words for why the rail collapses there — and a wall of controls works against exactly that.
   - Reordering and lifting are real capabilities and are not in question. Where they surface is: the drawing puts none of them on the resting card.
 
+- [ ] **[BUG-082][P1][Creative Studio] A generation quote refuses as `invalid_payload` and discards the reason the service already computed** — found 2026-08-21 trying to price one shot
+  - `prepareSubmission` refuses every choice on a seeded project — both `seed_still` and `video_take`, identically — with `{ code: 'invalid_payload', messageKey: 'conversation.creativeStudio.errors.invalidPayload' }`. No generation can be priced, so none can be confirmed, so **nothing can be generated at all**.
+  - **The payload is not invalid.** Validated against the real wire schema in the running app — `nativeBridgePayloadSchemas['creative-studio.prepare-submission'].safeParse(...)` returns `success: true`. The name of the error is wrong as well as unhelpful.
+  - **The service knows exactly why and throws it away.** `rethrowPricingFailure` in `v2Service.ts` ends `throw invalid(\`Invalid Studio submission: ${error.code}\`)`, so the precise `StudioPricingErrorCodeV2`— one of`invalid_quote`, `inactive_shot`, `in_flight`, `duplicate_shot_purpose`, `invalid_dependency`, `invalid_prepare_request`, `invalid_reference`, `missing_conditioning`, `unsafe_total` — is in the thrown message and never reaches the renderer. Nothing is written to the dev log either.
+  - So the one path in the product that spends money is also the one that cannot be diagnosed from outside the main process. An engineer with the running app, the bridge, and the source cannot determine which of nine conditions refused a quote.
+  - Setup, for whoever picks this up: `bytedance/seedance-2.0` and `google/gemini-3-pro-image` are bound, both project routes are set by `choiceId`, the project holds nine Beats and sixteen Shots, no Takes exist, and every Beat reads `SEED PENDING`. `missing_conditioning` is the plausible code for `video_take` and does not explain `seed_still` failing the same way.
+  - Third instance of one pattern today, after BUG-062 and BUG-077: a failure the code has already classified is delivered to the caller as a generic string. Worth treating as one systemic fix rather than three.
+
 ## Correctness and honesty of failures
 
 - [x] **[BUG-062][P2][Creative Studio] Three distinct Director failures all report "could not read or save this workspace"** — found 2026-08-21 while diagnosing BUG-061
