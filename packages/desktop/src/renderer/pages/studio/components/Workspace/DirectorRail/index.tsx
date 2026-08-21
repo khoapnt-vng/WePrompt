@@ -369,6 +369,31 @@ const hasExactUniqueMembers = (actual: readonly string[] | undefined, expected: 
 };
 
 /** The persisted conversation must contain the Studio server and no ambient MCP attachment. */
+/**
+ * Recursively orders own object keys. Array order is left alone: sequence is meaning, not formatting.
+ * Nothing here currently proves that — `hasSafeDirectorTransport` runs first and admits exactly one
+ * `args` entry — so a test cannot reach a two-element case through this predicate. The rule holds on
+ * principle, for whenever that constraint loosens.
+ */
+const withOrderedKeys = (value: unknown): unknown => {
+  if (value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map(withOrderedKeys);
+  const record = value as Record<string, unknown>;
+  return Object.fromEntries(
+    Object.keys(record)
+      .sort()
+      .map((key) => [key, withOrderedKeys(record[key])])
+  );
+};
+
+/**
+ * Serialisation that does not depend on key order. The conversation store returns object keys
+ * alphabetically while a freshly built descriptor carries them in insertion order, so comparing the
+ * two with JSON.stringify rejects a session whose every value matches — which stopped every newly
+ * created project from binding its Director.
+ */
+const canonicalJson = (value: unknown): string => JSON.stringify(withOrderedKeys(value));
+
 export const hasExactDirectorMcpSnapshot = (
   conversation: TChatConversation,
   projectId: string,
@@ -403,7 +428,7 @@ export const hasExactDirectorMcpSnapshot = (
 
   if (descriptor === undefined) return true;
   const persistedDescriptor = sessionServers?.[0];
-  return JSON.stringify(persistedDescriptor?.transport) === JSON.stringify(descriptor.transport);
+  return canonicalJson(persistedDescriptor?.transport) === canonicalJson(descriptor.transport);
 };
 
 /** Compares every executable/path-bearing field with fresh, read-only main-process authority. */

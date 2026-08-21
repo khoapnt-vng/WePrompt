@@ -52,7 +52,7 @@ number is not hypothetical, it has happened. To keep it from happening here:
 
 ## Blocking a first-run user
 
-- [ ] **[BUG-061][P1][Creative Studio] Every newly created project fails its first Director attach** — **REOPENED 2026-08-21** — found 2026-08-21 by creating a project in the running app; **reproduced deterministically** on a second, clean project
+- [x] **[BUG-061][P1][Creative Studio] Every newly created project fails its first Director attach** — **REOPENED and then FIXED 2026-08-21** — found 2026-08-21 by creating a project in the running app; **reproduced deterministically** on a second, clean project
   - Actual: immediately after "Create project", the Director rail shows "Director setup was interrupted before the conversation could be attached to this project." over "Creative Studio could not read or save this workspace." The project's `briefConversationId` stays `null` at revision 1. Clicking **Retry** fixes it every time.
   - Root cause: the renderer dictates the conversation id and then hard-asserts the result — `packages/desktop/src/renderer/pages/studio/components/Workspace/DirectorRail/index.tsx:444` builds `{ type: 'aionrs', id: input.conversationId, … }`, and line 479 throws `STORAGE_ERROR_KEY` when `conversation.id !== input.conversationId`. **aioncore does not honour the requested id.** It mints its own 8-hex short id, so the assertion can never hold on a fresh create.
   - Wire evidence, one project's creation: `GET /api/conversations/f8c487cf_eb02_4c96_ac44_4434206ddc24` → **404**, immediately followed by `POST /api/conversations` → **201** with `conversation_id=8a49d04b`. The requested id is a 36-char underscore-uuid; the assigned id is 8 hex characters.
@@ -115,6 +115,20 @@ REFERENCE_PENDING_DIR, ROUTE_CATALOG` — while the same object read back throug
   a supplied id; this one assumes the backend preserves key order through a round trip. Both are
   assumptions about a wire contract that unit fixtures satisfy and the real store does not — a
   fixture built in insertion order can never fail this comparison.
+
+  **Fixed by the canonical comparison.** `hasExactDirectorMcpSnapshot` now compares the transport
+  through a serialisation that orders own object keys recursively, leaving array order alone. Verified
+  the way the bug was found — by creating projects in the running app. Three consecutive new projects
+  bound their Director on creation, `briefConversationId` set at revision 2 with no Retry, where the
+  same reproduction failed twice before.
+
+  Two notes for anyone touching that predicate. The line above the comparison already used
+  `hasExactKeys`, an order-insensitive key-set check, so the function was internally inconsistent —
+  order-blind about which keys exist and order-sensitive about how they serialise. And array order is
+  deliberately preserved but currently unprovable at this level: `hasSafeDirectorTransport` runs first
+  and admits exactly one `args` entry, so no test can reach a two-element case through this predicate.
+  An assertion claiming to cover it was written, found to pass for that reason rather than on merit,
+  and removed.
 
 ## Correctness and honesty of failures
 

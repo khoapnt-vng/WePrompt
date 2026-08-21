@@ -329,6 +329,67 @@ describe('DirectorRail', () => {
     harness.send.mockReset();
   });
 
+  it('accepts a persisted session whose keys came back in a different order', () => {
+    // The conversation store returns object keys alphabetically, while the freshly built descriptor
+    // is in insertion order. Every value is identical; only the serialisation differs. Comparing the
+    // two by JSON.stringify therefore rejects a session that matches exactly, which is what stopped
+    // every new project from binding its Director.
+    const sortKeys = (value: unknown): unknown =>
+      value === null || typeof value !== 'object'
+        ? value
+        : Array.isArray(value)
+          ? value.map(sortKeys)
+          : Object.fromEntries(
+              Object.keys(value as Record<string, unknown>)
+                .sort()
+                .map((key) => [key, sortKeys((value as Record<string, unknown>)[key])])
+            );
+
+    const exact = exactConversation();
+    const server = exact.extra.session_mcp_servers![0]!;
+    const reordered = {
+      ...exact,
+      extra: { ...exact.extra, session_mcp_servers: [{ ...server, transport: sortKeys(server.transport) }] },
+    } as TChatConversation;
+
+    // Same data, different key order.
+    expect(JSON.stringify(reordered.extra.session_mcp_servers![0]!.transport)).not.toBe(
+      JSON.stringify(server.transport)
+    );
+    expect(hasExactDirectorMcpSnapshot(reordered, 'project_1', descriptor)).toBe(true);
+
+    // Ignoring key order must not start ignoring the values themselves. A changed env value, an
+    // added one, and an extra args entry are all still rejected.
+    const withTransport = (transport: unknown): TChatConversation =>
+      ({
+        ...exact,
+        extra: { ...exact.extra, session_mcp_servers: [{ ...server, transport }] },
+      }) as TChatConversation;
+    const base = server.transport as { args: string[]; env: Record<string, string> };
+
+    expect(
+      hasExactDirectorMcpSnapshot(
+        withTransport({ ...base, env: { ...base.env, AIONUI_STUDIO_PROJECT_DIR: '/tmp/elsewhere' } }),
+        'project_1',
+        descriptor
+      )
+    ).toBe(false);
+    expect(
+      hasExactDirectorMcpSnapshot(
+        withTransport({ ...base, env: { ...base.env, AIONUI_STUDIO_EXTRA: 'smuggled' } }),
+        'project_1',
+        descriptor
+      )
+    ).toBe(false);
+    expect(
+      hasExactDirectorMcpSnapshot(
+        withTransport({ ...base, args: ['/repo/out/main/other-server.js', ...base.args] }),
+        'project_1',
+        descriptor
+      )
+    ).toBe(false);
+  });
+
   it('accepts only a reciprocal Aionrs owner with the exact curated MCP snapshot', () => {
     const exact = exactConversation();
     expect(hasExactDirectorMcpSnapshot(exact, 'project_1', descriptor)).toBe(true);
