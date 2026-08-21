@@ -247,6 +247,14 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - Action and Look are **stacked**, at y=240 and y=358, where the drawing sets them side by side under their two labelled rules.
   - The cost hint is the one absence that is not cosmetic: `BOUNDARY · COSTS A RE-RENDER` is the drawing telling a user which drag spends money, and nothing in the built panel says so. A user dragging a boundary today has no way to know it bills.
 
+- [ ] **[BUG-089][P1][Creative Studio] The composer asks what you want to make, then never tells the Director** — found 2026-08-21 by the owner, traced through the code
+  - Type an intent into "What do you want to make?", press **Create project**, and you land on the Table with an **empty Director conversation and 0 beats / 0 shots**. The sentence you just wrote has to be typed a second time, into the rail, before anything happens.
+  - The text is not discarded. `Composer.tsx:38` submits it as **both** `name` (sliced to 256 chars) and `brief`, and it is persisted on the project.
+  - It simply never reaches the Director. The rail creates the conversation with `extra: { studio_project_id, workspace: '', custom_workspace: false, selected_mcp_server_ids: [], selected_session_mcp_servers: [descriptor] }` — no opening turn, and no preset context carrying the brief. See `DirectorRail/index.tsx:571-580`.
+  - The Director _could_ find it: `read_storyboard` returns `brief: project.brief` (`studioServer.ts:860`). Nothing gives it a reason to call that on a project it has never been addressed about.
+  - So the one question the product asks a new user is answered into a field the assistant cannot see, and the empty rail reads as the Director being broken rather than un-briefed. This is the first screen of the product and the first thing a pilot user will do.
+  - Fixing it is a choice, not a mechanic, and the owner should make it: **(a)** send the brief as the conversation's opening user turn, so the Director answers immediately and the transcript shows why; **(b)** inject it as preset context, so it is present but silent and the Director still needs prompting; or **(c)** leave the rail empty and make the Table's empty state say what to do next. (a) matches what a user typing into a composer expects, and is the only one that makes the button's promise true.
+
 ## Correctness and honesty of failures
 
 - [x] **[BUG-062][P2][Creative Studio] Three distinct Director failures all report "could not read or save this workspace"** — found 2026-08-21 while diagnosing BUG-061
