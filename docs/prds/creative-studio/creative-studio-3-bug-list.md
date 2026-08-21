@@ -284,6 +284,12 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - Same anti-pattern as BUG-062: a distinct failure wearing a generic label. Two independent instances of it in one session.
   - **Fixed by `b01c565ee`** — validation now carries a seven-value, body-free failure reason through the service and IPC boundary to localized dialog and row-level messages.
 
+- [ ] **[BUG-091][P3][Creative Studio] The Cut states the film, the target and the gap between them in two different formats** — found 2026-08-21 while verifying BUG-084
+  - The film summary reads **`The film · 2:57 · of 0:18 target · 159s over`**. The total and the target are clocks; the difference between those same two numbers is raw seconds. A reader has to convert in their head to check that the third number follows from the first two.
+  - Source: `Cut/index.tsx:269-286` renders `filmClock` and `ofTarget` through `formatCutClock`, then renders the delta through `cut.film.over` / `cut.film.under`, whose strings end in a literal `s`.
+  - **Not a Codex regression, and not new.** The `{{seconds}}s` strings predate their change — they only added the rounding that BUG-084 asked for. The mixed format came in with the film summary I wrote, so this is mine.
+  - The app bar already sets the house format for film-level durations: `{{film}} of {{target}} target` rendered as clocks. Making the delta a clock too would match it. The counter-argument is that `2:39 over` reads worse than `159s over` for a small gap — so this is a judgement call, not an obvious correction.
+
 ## Coverage and polish
 
 - [x] **[BUG-064][P2][Creative Studio] The video allowlist covers 6 of the 24 models OpenRouter serves, with no way to extend it** — found 2026-08-21, verified against the live catalogue
@@ -536,6 +542,26 @@ a fidelity fix, so it is filed as BUG-073.
   state uses, in both the folded and columnar forms, where it had been the muted text colour.
 
 ## Verification notes
+
+### Verified live 2026-08-21, after Codex's fixes
+
+Measured in the running app against the project that holds real generated media, because none of
+these four can be proved by a test that renders into jsdom.
+
+| Bug     | Claim                       | What the DOM reported                                            |
+| ------- | --------------------------- | ---------------------------------------------------------------- |
+| BUG-084 | durations rounded           | `15s source`; no six-decimal float anywhere in the Cut           |
+| BUG-085 | counts pluralized           | `1 Slate`, `9 Beats`, `16 Shots`, `2 Shots`                      |
+| BUG-086 | flat proportional filmstrip | 64px tall, 9 segments each 62px, widths 76→167 tracking duration |
+| BUG-087 | handle off the label        | label y 671–690, handles y 723–753, zero overlapping elements    |
+
+BUG-087 is worth a note: the handles sit at x 349–367, still inside the label's horizontal span. The
+fix works by putting them in a different grid row, not by moving them sideways — so a future change
+that collapses those rows brings the defect straight back.
+
+Codex also removed `FILMSTRIP_TITLE_MIN_WIDTH_PX = 112` and `filmstripShowsTitle` in favour of a CSS
+rule. That was the right call: 112 was a midpoint I guessed between two observed widths and flagged
+as needing the designer's confirmation, and it is better gone than pinned by a test.
 
 - The unit suite is green on the files touched here — `studioI18n.test.ts` and `CutView.dom.test.tsx` pass, 17 tests. None of the seven bugs above is caught by a test, and BUG-061 is actively hidden by one.
 - The 11 non-`en-US` locales are missing the new Cut keys **by design**, pinned by `studioI18n.test.ts` — "defers all 11 translations and falls each locale back to the complete en-US workspace". Not a bug; recorded so it is not filed as one.
