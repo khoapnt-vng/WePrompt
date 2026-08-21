@@ -913,6 +913,21 @@
     "workspace": {
       "controls": {
         "briefAndRulesTitle": "Brief e regras"
+      },
+      "gate": {
+        "errors": {
+          "pricing": {
+            "invalidQuote": "Os dados da estimativa estavam internamente inconsistentes. Nada foi enviado.",
+            "inactiveShot": "Uma tomada selecionada não está mais ativa. Atualize o projeto e prepare novamente.",
+            "inFlight": "Uma geração selecionada já está em andamento. Aguarde a conclusão ou altere a seleção.",
+            "duplicateShotPurpose": "A mesma geração foi selecionada mais de uma vez. Revise a seleção e prepare novamente.",
+            "invalidDependency": "A dependência da continuação não é mais válida. Atualize o projeto e prepare novamente.",
+            "invalidPrepareRequest": "Não foi possível preparar a seleção de geração com segurança. Revise-a e prepare novamente.",
+            "invalidReference": "Uma referência selecionada não é mais válida para esta geração. Escolha outra referência.",
+            "missingConditioning": "Uma tomada de vídeo não tem uma imagem inicial nem um quadro predecessor elegível. Adicione ou selecione a imagem necessária.",
+            "unsafeTotal": "Não foi possível representar com segurança o total da estimativa. Reduza a seleção; nada foi enviado."
+          }
+        }
       }
     },
     "rules": {
@@ -1481,6 +1496,7 @@
     "errors": {
       "featureDisabled": "O Creative Studio está desativado nesta compilação.",
       "invalidPayload": "A solicitação contém informações inválidas ou incompletas.",
+      "pricingRefused": "A estimativa foi recusada antes do envio. Nada foi enviado.",
       "projectNotFound": "O projeto do Creative Studio não existe mais.",
       "storyboardExists": "Este projeto já tem um storyboard. Confirme a substituição antes de criar outro rascunho.",
       "staleProject": "O projeto foi alterado em outro lugar. Atualize-o antes de tentar novamente.",

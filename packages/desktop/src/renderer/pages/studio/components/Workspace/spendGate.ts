@@ -7,6 +7,7 @@
 import type {
   StudioPrepareGenerationChoiceV2,
   StudioPrepareSubmissionRequestV2,
+  StudioPricingRefusalReasonV2,
   StudioRendererPreparedSubmissionOptionsV2,
   StudioRendererProjectV2,
   StudioRendererQuotedGenerationV2,
@@ -15,6 +16,7 @@ import type {
   StudioSubmissionCacheErrorCodeV2,
 } from '@/common/types/project/creativeStudioTypes';
 import {
+  isStudioPricingRefusalReasonV2,
   STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
   STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
   STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION,
@@ -44,17 +46,20 @@ export type SpendGateState = {
   options: StudioRendererPreparedSubmissionOptionsV2 | null;
   selectedOption: SpendGateSelectedOption;
   errorCode: string | null;
+  pricingRefusalReason: StudioPricingRefusalReasonV2 | null;
 };
+
+type SpendGateFailure = { code: string; reason?: unknown };
 
 export type SpendGateAction =
   | { type: 'open'; draft: SpendGateDraft }
   | { type: 'close' }
   | { type: 'prepare_started' }
   | { type: 'prepare_succeeded'; options: StudioRendererPreparedSubmissionOptionsV2 }
-  | { type: 'prepare_failed'; code: string }
+  | { type: 'prepare_failed'; error: SpendGateFailure }
   | { type: 'select_option'; option: SpendGateSelectedOption }
   | { type: 'confirm_started' }
-  | { type: 'confirm_failed'; code: string }
+  | { type: 'confirm_failed'; error: SpendGateFailure }
   | { type: 'confirmed' };
 
 export const initialSpendGateState = (): SpendGateState => ({
@@ -63,6 +68,7 @@ export const initialSpendGateState = (): SpendGateState => ({
   options: null,
   selectedOption: 'baseOnly',
   errorCode: null,
+  pricingRefusalReason: null,
 });
 
 const cacheFailurePhase = (code: string): SpendGatePhase => {
@@ -77,37 +83,69 @@ const cacheFailurePhase = (code: string): SpendGatePhase => {
 /** Pure gate state. No transition initiates a bridge call or retries another transition. */
 export const spendGateReducer = (state: SpendGateState, action: SpendGateAction): SpendGateState => {
   if (action.type === 'open') {
-    return { phase: 'choices', draft: action.draft, options: null, selectedOption: 'baseOnly', errorCode: null };
+    return {
+      phase: 'choices',
+      draft: action.draft,
+      options: null,
+      selectedOption: 'baseOnly',
+      errorCode: null,
+      pricingRefusalReason: null,
+    };
   }
   if (action.type === 'close') return initialSpendGateState();
   if (action.type === 'prepare_started') {
     return state.draft === null
       ? state
-      : { ...state, phase: 'preparing', options: null, selectedOption: 'baseOnly', errorCode: null };
+      : {
+          ...state,
+          phase: 'preparing',
+          options: null,
+          selectedOption: 'baseOnly',
+          errorCode: null,
+          pricingRefusalReason: null,
+        };
   }
   if (action.type === 'prepare_succeeded') {
     return state.draft === null
       ? state
-      : { ...state, phase: 'review', options: action.options, selectedOption: 'baseOnly', errorCode: null };
+      : {
+          ...state,
+          phase: 'review',
+          options: action.options,
+          selectedOption: 'baseOnly',
+          errorCode: null,
+          pricingRefusalReason: null,
+        };
   }
   if (action.type === 'select_option') {
     if (state.options === null || (action.option === 'withCascade' && state.options.withCascade === null)) return state;
     return { ...state, selectedOption: action.option };
   }
   if (action.type === 'confirm_started') {
-    return state.options === null ? state : { ...state, phase: 'confirming', errorCode: null };
+    return state.options === null
+      ? state
+      : { ...state, phase: 'confirming', errorCode: null, pricingRefusalReason: null };
   }
   if (action.type === 'confirmed') {
-    return state.options === null ? state : { ...state, phase: 'confirmed', errorCode: null };
+    return state.options === null
+      ? state
+      : { ...state, phase: 'confirmed', errorCode: null, pricingRefusalReason: null };
   }
   if (action.type === 'prepare_failed' || action.type === 'confirm_failed') {
-    const classifiedPhase = cacheFailurePhase(action.code);
+    const pricingRefusalReason =
+      action.error.code === 'pricing_refused' && isStudioPricingRefusalReasonV2(action.error.reason)
+        ? action.error.reason
+        : null;
+    const errorCode =
+      action.error.code === 'pricing_refused' && pricingRefusalReason === null ? 'storage_error' : action.error.code;
+    const classifiedPhase = cacheFailurePhase(errorCode);
     const phase = classifiedPhase === 'quote_in_use' && state.options === null ? 'error' : classifiedPhase;
     return {
       ...state,
       phase,
       options: phase === 'quote_in_use' ? state.options : null,
-      errorCode: action.code,
+      errorCode,
+      pricingRefusalReason,
     };
   }
   return state;

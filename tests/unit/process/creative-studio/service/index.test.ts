@@ -1854,6 +1854,63 @@ describe('CreativeStudioServiceV2', () => {
     await expect(disposed.service.prepareSubmission(request)).rejects.toMatchObject({ code: 'quote_not_found' });
   });
 
+  it('preserves a safe missing-conditioning refusal before provider, cache, or paid work', async () => {
+    const project = makeSchema2ServiceProject();
+    project.videoRouteId = videoRoute.choiceId;
+    const preparedSubmissionCache = new StudioPreparedSubmissionCacheV2();
+    const admit = vi.spyOn(preparedSubmissionCache, 'admit');
+    const harness = makeHarness(project, { preparedSubmissionCache });
+
+    await expect(
+      harness.service.prepareSubmission({
+        projectId: project.id,
+        expectedRevision: project.revision,
+        originReferenceHandoffId: null,
+        baseChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+        cascadeChoices: [],
+      })
+    ).rejects.toMatchObject({ name: 'StudioPricingErrorV2', code: 'missing_conditioning' });
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+    expect(admit).not.toHaveBeenCalled();
+    expect(harness.submitShots).not.toHaveBeenCalled();
+  });
+
+  it('caches and confirms the server-derived default cascade instead of the caller empty list', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    project.videoRouteId = videoRoute.choiceId;
+    const preparedSubmissionCache = new StudioPreparedSubmissionCacheV2();
+    const admit = vi.spyOn(preparedSubmissionCache, 'admit');
+    const harness = makeHarness(project, { preparedSubmissionCache });
+
+    const prepared = await harness.service.prepareSubmission({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 2, referenceAssetId: null }],
+      cascadeChoices: [],
+    });
+
+    expect(admit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({
+          cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+        }),
+      })
+    );
+    expect(prepared.withCascade?.cascadeItems).toEqual([
+      expect.objectContaining({ shotId: 'clip_1', purpose: 'video_take', generationCount: 1 }),
+    ]);
+    await expect(
+      harness.service.confirmSubmission({
+        projectId: project.id,
+        quoteId: prepared.withCascade!.id,
+        expectedRevision: project.revision,
+      })
+    ).resolves.toEqual({ projectId: project.id, projectRevision: project.revision + 1 });
+    expect(harness.submitShots).toHaveBeenCalledTimes(1);
+  });
+
   it.each(['quote_cache_full', 'quote_too_large'] as const)(
     'preserves the distinct %s prepare error without project mutation or paid work',
     async (code) => {
@@ -4568,6 +4625,11 @@ describe('Studio MCP schema-2 server', () => {
         expect(description).toMatch(/256 KiB/i);
         expect(description).toMatch(/operation_not_permitted/i);
       }
+      expect(applyTool?.description).toMatch(/rejected atomically at capability preflight/i);
+      expect(applyTool?.description).toMatch(/no operation reaches command evaluation or is applied/i);
+      expect(applyTool?.description).toMatch(/zero-based index/i);
+      expect(applyTool?.description).toMatch(/whole subset to propose_storyboard/i);
+      expect(applyTool?.description).toMatch(/only when it is independently valid/i);
     } finally {
       await harness.close();
       await rm(projectDir, { recursive: true, force: true });
@@ -4758,7 +4820,7 @@ describe('Studio MCP schema-2 server', () => {
     }
   });
 
-  it('returns exact capability denials through the SDK before IDs or sidecar IO', async () => {
+  it('returns capability denials through the SDK before IDs or sidecar IO', async () => {
     const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-'));
     const createId = vi.fn(() => 'must_not_mint');
     const harness = await createStudioMcpProtocolHarnessV2(
@@ -4809,11 +4871,93 @@ describe('Studio MCP schema-2 server', () => {
         // eslint-disable-next-line no-await-in-loop
         const result = await harness.client.callTool(call);
         expect(result.isError).toBe(true);
-        expect(result.content).toEqual([{ type: 'text', text: 'operation_not_permitted' }]);
+        if (call.name === 'studio_apply_edits') {
+          const content = result.content[0];
+          expect(content?.type).toBe('text');
+          expect(JSON.parse(content?.type === 'text' ? content.text : '')).toMatchObject({
+            code: 'operation_not_permitted',
+            rejectedOperations: [{ index: 0, kind: call.arguments.operations[0]?.kind }],
+            directCapableOperationIndexes: [],
+          });
+        } else {
+          expect(result.content).toEqual([{ type: 'text', text: 'operation_not_permitted' }]);
+        }
       }
       expect(createId).not.toHaveBeenCalled();
       await expect(nodeFs.readdir(path.join(projectDir, 'commands'))).rejects.toMatchObject({ code: 'ENOENT' });
       await expect(nodeFs.readdir(path.join(projectDir, 'proposals'))).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await harness.close();
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('explains every mixed-batch capability rejection without applying its direct operations', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-mixed-capability-'));
+    const createId = vi.fn(() => 'must_not_mint');
+    const writerFsAccess = vi.fn(() => {
+      throw new Error('studio_apply_edits capability rejection must not reach writer IO');
+    });
+    const writerFs = new Proxy(nodeFs, { get: writerFsAccess });
+    const harness = await createStudioMcpProtocolHarnessV2(
+      {
+        projectId: 'project_v2',
+        projectDir,
+        pendingDir: path.join(projectDir, 'proposals', 'pending'),
+        referencePendingDir: path.join(projectDir, 'reference-requests', 'pending'),
+      },
+      { createId, fs: writerFs }
+    );
+    try {
+      const result = await harness.client.callTool({
+        name: 'studio_apply_edits',
+        arguments: {
+          expectedRevision: 7,
+          operations: [
+            { kind: 'set_brief', brief: 'Direct work must remain identifiable' },
+            { kind: 'rederive_line', shotId: 'clip_1', line: 'Proposal only' },
+            { kind: 'set_rules', rules: [] },
+            { kind: 'edit_beat', beatId: 'section_1', changes: { title: 'Also direct' } },
+          ],
+        },
+      });
+      const content = result.content[0];
+
+      expect(result.isError).toBe(true);
+      expect(content?.type).toBe('text');
+      expect(JSON.parse(content?.type === 'text' ? content.text : '')).toEqual({
+        code: 'operation_not_permitted',
+        message:
+          'studio_apply_edits rejected the batch at capability preflight; no operation reached command evaluation or was applied.',
+        operationIndexBase: 0,
+        rejectedOperations: [
+          {
+            index: 1,
+            kind: 'rederive_line',
+            disposition: 'proposal',
+            reason: 'requires_user_review',
+          },
+          {
+            index: 2,
+            kind: 'set_rules',
+            disposition: 'operation_not_permitted',
+            reason: 'unavailable_to_director',
+          },
+        ],
+        directCapableOperationIndexes: [0, 3],
+        guidance: {
+          proposal:
+            'After omitting unavailable operations, submit the full ordered direct-and-proposal-capable subset to propose_storyboard when it still expresses the intended atomic change.',
+          unavailable:
+            'Omit unavailable operations or ask the user to perform them manually in Creative Studio when supported.',
+          direct:
+            'Only if the direct-capable operations are independently valid, call read_storyboard and submit them in a new studio_apply_edits batch against the fresh revision.',
+          retry: 'Do not retry this batch unchanged.',
+        },
+      });
+      expect(createId).not.toHaveBeenCalled();
+      expect(writerFsAccess).not.toHaveBeenCalled();
+      await expect(nodeFs.readdir(projectDir)).resolves.toEqual([]);
     } finally {
       await harness.close();
       await rm(projectDir, { recursive: true, force: true });

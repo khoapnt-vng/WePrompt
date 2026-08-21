@@ -906,6 +906,21 @@
     "workspace": {
       "controls": {
         "briefAndRulesTitle": "Brief & Regeln"
+      },
+      "gate": {
+        "errors": {
+          "pricing": {
+            "invalidQuote": "Die Schätzungsdaten waren intern inkonsistent. Es wurde nichts übermittelt.",
+            "inactiveShot": "Eine ausgewählte Einstellung ist nicht mehr aktiv. Aktualisieren Sie das Projekt und bereiten Sie erneut vor.",
+            "inFlight": "Eine ausgewählte Generierung läuft bereits. Warten Sie auf den Abschluss oder ändern Sie die Auswahl.",
+            "duplicateShotPurpose": "Dieselbe Generierung wurde mehrfach ausgewählt. Prüfen Sie die Auswahl und bereiten Sie erneut vor.",
+            "invalidDependency": "Die Abhängigkeit der Fortsetzung ist nicht mehr gültig. Aktualisieren Sie das Projekt und bereiten Sie erneut vor.",
+            "invalidPrepareRequest": "Die Generierungsauswahl konnte nicht sicher vorbereitet werden. Prüfen Sie sie und versuchen Sie es erneut.",
+            "invalidReference": "Eine ausgewählte Referenz ist für diese Generierung nicht mehr gültig. Wählen Sie eine andere Referenz.",
+            "missingConditioning": "Für eine Videoaufnahme fehlt ein geeignetes Startbild oder Vorgängerbild. Fügen Sie das erforderliche Bild hinzu oder wählen Sie es aus.",
+            "unsafeTotal": "Die Gesamtsumme der Schätzung konnte nicht sicher dargestellt werden. Reduzieren Sie die Auswahl; es wurde nichts übermittelt."
+          }
+        }
       }
     },
     "rules": {
@@ -1453,6 +1468,7 @@
     "errors": {
       "featureDisabled": "Creative Studio ist in diesem Build deaktiviert.",
       "invalidPayload": "Die Anfrage enthält ungültige oder unvollständige Informationen.",
+      "pricingRefused": "Die Schätzung wurde vor der Übermittlung abgelehnt. Es wurde nichts übermittelt.",
       "projectNotFound": "Das Creative-Studio-Projekt existiert nicht mehr.",
       "storyboardExists": "Dieses Projekt hat bereits ein Storyboard. Bestätige das Ersetzen, bevor du es erneut entwirfst.",
       "staleProject": "Das Projekt wurde an anderer Stelle geändert. Aktualisiere es vor einem erneuten Versuch.",

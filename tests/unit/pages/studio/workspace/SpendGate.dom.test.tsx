@@ -553,9 +553,11 @@ describe('spend gate draft graph', () => {
     const reviewed = spendGateReducer(opened, { type: 'prepare_succeeded', options: baseOnly });
     expect(spendGateReducer(reviewed, { type: 'select_option', option: 'withCascade' })).toBe(reviewed);
     expect(
-      selectedSpendGateQuote(spendGateReducer(closed, { type: 'confirm_failed', code: 'quote_in_use' }))
+      selectedSpendGateQuote(spendGateReducer(closed, { type: 'confirm_failed', error: { code: 'quote_in_use' } }))
     ).toBeNull();
-    expect(spendGateReducer(closed, { type: 'confirm_failed', code: 'unexpected_failure' }).phase).toBe('error');
+    expect(spendGateReducer(closed, { type: 'confirm_failed', error: { code: 'unexpected_failure' } }).phase).toBe(
+      'error'
+    );
   });
 });
 
@@ -822,6 +824,47 @@ describe('SpendGateModal', () => {
 
     expect(await screen.findByText(`conversation.creativeStudio.errors.${key}`)).toBeVisible();
     expect(mocks.prepare).toHaveBeenCalledTimes(1);
+    expect(mocks.confirm).not.toHaveBeenCalled();
+  });
+
+  it('renders the structured pricing refusal reason without retrying or confirming', async () => {
+    mocks.prepare.mockResolvedValue({
+      ok: false,
+      error: {
+        code: 'pricing_refused',
+        reason: 'missing_conditioning',
+        messageKey: 'conversation.creativeStudio.errors.pricingRefused',
+      },
+    });
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
+
+    expect(
+      await screen.findByText('conversation.creativeStudio.workspace.gate.errors.pricing.missingConditioning')
+    ).toBeVisible();
+    expect(mocks.prepare).toHaveBeenCalledTimes(1);
+    expect(mocks.confirm).not.toHaveBeenCalled();
+  });
+
+  it('projects an unknown pricing reason to the generic refusal without exposing hostile diagnostics', async () => {
+    mocks.prepare.mockResolvedValue({
+      ok: false,
+      error: {
+        code: 'pricing_refused',
+        reason: 'route_secret_apiKey',
+        messageKey: 'provider body secret',
+        stack: 'private stack',
+      },
+    });
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
+
+    expect(await screen.findByText('conversation.creativeStudio.workspace.gate.errors.generic')).toBeVisible();
+    expect(document.body).not.toHaveTextContent('route_secret_apiKey');
+    expect(document.body).not.toHaveTextContent('provider body secret');
+    expect(document.body).not.toHaveTextContent('private stack');
     expect(mocks.confirm).not.toHaveBeenCalled();
   });
 

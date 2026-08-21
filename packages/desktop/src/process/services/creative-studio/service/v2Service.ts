@@ -9,6 +9,7 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import type { IProvider, ISessionMcpServer } from '@/common/config/storage';
 import {
+  isStudioPricingRefusalReasonV2,
   STUDIO_MAX_BEATS,
   STUDIO_MAX_SHOT_SECONDS,
   STUDIO_MIN_SHOT_SECONDS,
@@ -340,7 +341,8 @@ const rethrowPricingFailure = (error: unknown): never => {
     ) {
       throw new CreativeStudioServiceError('invalid_route');
     }
-    throw invalid(`Invalid Studio submission: ${error.code}`);
+    if (isStudioPricingRefusalReasonV2(error.code)) throw error;
+    throw new CreativeStudioServiceError('invalid_route');
   }
   throw error;
 };

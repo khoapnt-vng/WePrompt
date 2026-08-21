@@ -273,6 +273,7 @@ const validateChoiceOrderAndIdentity = (
   locations: ReadonlyMap<string, DerivationShotLocation>
 ): void => {
   const combined = [...request.baseChoices, ...request.cascadeChoices];
+  if (combined.length > STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST) fail('invalid_prepare_request');
   const pairKeys = new Set<string>();
   const shotIds = new Set<string>();
   for (const choice of combined) {
@@ -347,12 +348,24 @@ const deriveExpectedCascadePairs = (
   return [...expected.values()].toSorted((left, right) => comparePrepareChoices(left, right, locations));
 };
 
-const validateExactCascade = (
+const canonicalizeExactCascade = (
   project: StudioProjectV2,
   request: StudioPrepareSubmissionRequestV2,
   locations: ReadonlyMap<string, DerivationShotLocation>
-): void => {
+): StudioPrepareSubmissionRequestV2 => {
   const expected = deriveExpectedCascadePairs(project, request.baseChoices, locations);
+  if (request.cascadeChoices.length === 0) {
+    if (expected.length === 0) return request;
+    return {
+      ...request,
+      cascadeChoices: expected.map<StudioPrepareGenerationChoiceV2>(({ shotId, purpose }) => ({
+        shotId,
+        purpose,
+        generationCount: 1,
+        referenceAssetId: null,
+      })),
+    };
+  }
   if (expected.length !== request.cascadeChoices.length) fail('invalid_prepare_request');
   for (let index = 0; index < expected.length; index += 1) {
     const choice = request.cascadeChoices[index]!;
@@ -361,6 +374,7 @@ const validateExactCascade = (
       fail('invalid_prepare_request');
     }
   }
+  return request;
 };
 
 const validateReferenceHandoffChoices = (request: StudioPrepareSubmissionRequestV2): void => {
@@ -636,12 +650,13 @@ export type StudioDerivedSubmissionQuoteCoresV2 = {
 export const deriveStudioSubmissionQuoteGraphV2 = (
   input: StudioSubmissionQuoteGraphDerivationInputV2
 ): StudioDerivedSubmissionQuoteGraphV2 => {
-  const request = parsePrepareRequest(input.request, input.project);
+  let request = parsePrepareRequest(input.request, input.project);
   const locations = derivationShotLocations(input.project);
   validateChoiceOrderAndIdentity(request, locations);
   if (request.originReferenceHandoffId === null) {
     validateIndependentBaseAnchors(input.project, request.baseChoices, locations);
-    validateExactCascade(input.project, request, locations);
+    request = canonicalizeExactCascade(input.project, request, locations);
+    validateChoiceOrderAndIdentity(request, locations);
   } else {
     validateReferenceHandoffChoices(request);
   }

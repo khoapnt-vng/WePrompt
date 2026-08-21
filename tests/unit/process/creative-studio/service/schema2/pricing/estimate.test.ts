@@ -327,6 +327,60 @@ describe('schema-2 Studio estimates', () => {
     ).toBe(true);
   });
 
+  it('derives the canonical same-shot and downstream cascade when an ordinary seed request leaves it empty', () => {
+    const project = makeDerivationProject();
+    const options = deriveStudioSubmissionQuoteCoresV2({
+      project,
+      request: prepareRequest([choice('shot_1', 'seed_still', 2)], []),
+      rateCard: createStudioRateCardV2([imageRate, videoRate]),
+    });
+
+    expect(options.request.cascadeChoices).toEqual([
+      choice('shot_1', 'video_take'),
+      choice('shot_2', 'video_take'),
+      choice('shot_3', 'video_take'),
+    ]);
+    expect(options.withCascade?.cascadeItems.map(({ shotId, generationCount }) => [shotId, generationCount])).toEqual([
+      ['shot_1', 1],
+      ['shot_2', 1],
+      ['shot_3', 1],
+    ]);
+  });
+
+  it('derives only eligible downstream video choices across hard-cut and in-flight boundaries', () => {
+    const project = makeDerivationProject();
+    project.beats.beat_1!.shotOrder.push('shot_4', 'shot_5');
+    project.shots.shot_4 = makeShot('shot_4');
+    project.shots.shot_5 = makeShot('shot_5');
+    project.shots.shot_4!.chainBreak = 'hard_cut';
+    const hardCutSeed = addDerivationAsset(project, {
+      id: 'seed_4',
+      shotId: 'shot_4',
+      mediaKind: 'image',
+      managedAsset: { collection: 'assets', fileName: 'seed_4.png' },
+    });
+    project.shots.shot_4!.seedStillId = hardCutSeed.id;
+    project.jobs.external_job = {
+      shotId: 'shot_3',
+      purpose: 'video_take',
+      status: 'queued_remote',
+    } as StudioProjectV2['jobs'][string];
+
+    const beforeBarrier = deriveStudioSubmissionQuoteCoresV2({
+      project,
+      request: prepareRequest([choice('shot_1', 'video_take')], []),
+      rateCard: createStudioRateCardV2([videoRate]),
+    });
+    const afterHardCut = deriveStudioSubmissionQuoteCoresV2({
+      project,
+      request: prepareRequest([choice('shot_4', 'video_take')], []),
+      rateCard: createStudioRateCardV2([videoRate]),
+    });
+
+    expect(beforeBarrier.request.cascadeChoices).toEqual([choice('shot_2', 'video_take')]);
+    expect(afterHardCut.request.cascadeChoices).toEqual([choice('shot_5', 'video_take')]);
+  });
+
   it('keeps an exact seed base quote when only its cascade route or rate is unavailable', () => {
     const project = makeDerivationProject();
     const request = prepareRequest(
@@ -517,7 +571,7 @@ describe('schema-2 Studio estimates', () => {
     ).toThrow(expect.objectContaining({ code: 'invalid_reference' }));
   });
 
-  it('rejects missing, extra, reordered, and wrong-purpose cascade choices', () => {
+  it('rejects incomplete nonempty, extra, reordered, and wrong-purpose cascade choices', () => {
     const project = makeDerivationProject();
     const derive = (cascadeChoices: StudioPrepareSubmissionRequestV2['cascadeChoices']) =>
       deriveStudioSubmissionQuoteCoresV2({

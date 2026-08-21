@@ -1289,6 +1289,7 @@
     "errors": {
       "featureDisabled": "Creative Studio is disabled in this build.",
       "invalidPayload": "The request contains invalid or incomplete information.",
+      "pricingRefused": "The estimate was refused before submission. Nothing was submitted.",
       "projectNotFound": "The Creative Studio project no longer exists.",
       "storyboardExists": "This project already has a storyboard. Confirm replacement before drafting again.",
       "staleProject": "The project changed elsewhere. Refresh it before retrying.",
@@ -2124,7 +2125,18 @@
         "confirm": "Confirm {{count}} generations · up to {{cost}}",
         "close": "Close — spend nothing",
         "errors": {
-          "generic": "The estimate could not be prepared or confirmed. Nothing was retried automatically."
+          "generic": "The estimate could not be prepared or confirmed. Nothing was retried automatically.",
+          "pricing": {
+            "invalidQuote": "The estimate data was not internally consistent. Nothing was submitted.",
+            "inactiveShot": "One selected shot is no longer active. Refresh the project and prepare again.",
+            "inFlight": "One selected generation is already in progress. Wait for it to finish or change the selection.",
+            "duplicateShotPurpose": "The same generation was selected more than once. Review the selection and prepare again.",
+            "invalidDependency": "The continuation dependency is no longer valid. Refresh the project and prepare again.",
+            "invalidPrepareRequest": "The generation selection could not be prepared safely. Review it and prepare again.",
+            "invalidReference": "A selected reference is no longer valid for this generation. Choose another reference and prepare again.",
+            "missingConditioning": "A video take has no eligible seed or predecessor frame. Add or select the required image, then prepare again.",
+            "unsafeTotal": "The estimate total could not be represented safely. Reduce the selection; nothing was submitted."
+          }
         }
       },
       "review": {

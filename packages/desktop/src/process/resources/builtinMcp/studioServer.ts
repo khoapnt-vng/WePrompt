@@ -610,12 +610,52 @@ const errorResult = (message: string): StudioToolResult => ({
 
 const describeError = (error: unknown): string => String(error).replace(/^Error:\s*/, '');
 
-const operationBatchHasDispositionV2 = (
-  operations: readonly StudioMutationOperationV2[],
-  disposition: StudioDirectorOperationDispositionV2
-): boolean =>
-  Array.isArray(operations) &&
-  operations.every((operation) => classifyStudioDirectorOperationV2(operation?.kind) === disposition);
+type StudioApplyEditsRejectedOperationV2 = {
+  index: number;
+  kind: StudioMutationOperationV2['kind'];
+  disposition: Exclude<StudioDirectorOperationDispositionV2, 'direct'>;
+  reason: 'requires_user_review' | 'unavailable_to_director';
+};
+
+const studioApplyEditsCapabilityRejectionV2 = (
+  operations: readonly StudioMutationOperationV2[]
+): StudioToolResult | null => {
+  const rejectedOperations: StudioApplyEditsRejectedOperationV2[] = [];
+  const directCapableOperationIndexes: number[] = [];
+  operations.forEach((operation, index) => {
+    const disposition = classifyStudioDirectorOperationV2(operation.kind);
+    if (disposition === 'direct') {
+      directCapableOperationIndexes.push(index);
+      return;
+    }
+    rejectedOperations.push({
+      index,
+      kind: operation.kind,
+      disposition: disposition === 'proposal' ? 'proposal' : 'operation_not_permitted',
+      reason: disposition === 'proposal' ? 'requires_user_review' : 'unavailable_to_director',
+    });
+  });
+  if (rejectedOperations.length === 0) return null;
+  return errorResult(
+    JSON.stringify({
+      code: 'operation_not_permitted',
+      message:
+        'studio_apply_edits rejected the batch at capability preflight; no operation reached command evaluation or was applied.',
+      operationIndexBase: 0,
+      rejectedOperations,
+      directCapableOperationIndexes,
+      guidance: {
+        proposal:
+          'After omitting unavailable operations, submit the full ordered direct-and-proposal-capable subset to propose_storyboard when it still expresses the intended atomic change.',
+        unavailable:
+          'Omit unavailable operations or ask the user to perform them manually in Creative Studio when supported.',
+        direct:
+          'Only if the direct-capable operations are independently valid, call read_storyboard and submit them in a new studio_apply_edits batch against the fresh revision.',
+        retry: 'Do not retry this batch unchanged.',
+      },
+    })
+  );
+};
 
 const operationBatchIsProposalCapableV2 = (operations: readonly StudioMutationOperationV2[]): boolean =>
   Array.isArray(operations) &&
@@ -1070,7 +1110,8 @@ export function createStudioApplyEditsHandlerV2(
     deps
   );
   return async (input) => {
-    if (!operationBatchHasDispositionV2(input.operations, 'direct')) return errorResult('operation_not_permitted');
+    const capabilityRejection = studioApplyEditsCapabilityRejectionV2(input.operations);
+    if (capabilityRejection !== null) return capabilityRejection;
     const directInput: StudioApplyEditsInputV2 = {
       expectedRevision: input.expectedRevision,
       operations: input.operations as StudioDirectorOperationV2[],
@@ -1158,7 +1199,7 @@ export function registerStudioToolsV2(
     'studio_apply_edits',
     {
       description:
-        'Read the current revision first, then apply one bounded ordered batch of direct-capable Beat/Shot edits to that exact revision. Canonical schema-2 batch: {"expectedRevision":8,"operations":[{"kind":"set_brief","brief":"..."},{"kind":"edit_beat","beatId":"beat_1","changes":{"title":"..."}},{"kind":"edit_shot","shotId":"shot_1","changes":{"line":"..."}},{"kind":"reorder_beats","beatOrder":["beat_2","beat_1"]}]}. Exact add_beat and add_shot variants require caller-provided beatId and shotId and never accept legacy firstShot fields. This never starts paid generation. Known proposal-only and unavailable operations return operation_not_permitted before any ID or I/O; the final serialized command record must fit within 256 KiB. Validation errors and unconfirmed results must not be retried; call studio_get_command_status for an unconfirmed commandId.',
+        'Read the current revision first, then apply one bounded ordered batch of direct-capable Beat/Shot edits to that exact revision. Canonical schema-2 batch: {"expectedRevision":8,"operations":[{"kind":"set_brief","brief":"..."},{"kind":"edit_beat","beatId":"beat_1","changes":{"title":"..."}},{"kind":"edit_shot","shotId":"shot_1","changes":{"line":"..."}},{"kind":"reorder_beats","beatOrder":["beat_2","beat_1"]}]}. Exact add_beat and add_shot variants require caller-provided beatId and shotId and never accept legacy firstShot fields. This never starts paid generation. A batch containing proposal-only or unavailable operations is rejected atomically at capability preflight before any ID or I/O: no operation reaches command evaluation or is applied, and the operation_not_permitted error names every rejected zero-based index, kind, disposition, and reason plus every direct-capable index. Omit unavailable operations or ask the user to perform them manually when supported. If the remaining ordered direct-and-proposal-capable subset still expresses the intended atomic change, send that whole subset to propose_storyboard for user review; resubmit a direct-only subset through studio_apply_edits only when it is independently valid and only after calling read_storyboard. Never retry a rejected batch unchanged. The final serialized command record must fit within 256 KiB. Validation errors and unconfirmed results must not be retried; call studio_get_command_status for an unconfirmed commandId.',
       inputSchema: studioApplyEditsInputSchemaV2,
     },
     createStudioApplyEditsHandlerV2(config, writerDeps)

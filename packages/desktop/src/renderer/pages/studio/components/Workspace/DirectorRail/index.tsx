@@ -93,14 +93,20 @@ type AttemptRecord = {
 const DIRECTOR_CONFLICT_KEY = 'conversation.creativeStudio.workspace.director.ownerConflict';
 const DIRECTOR_SESSION_VERIFICATION_KEY = 'conversation.creativeStudio.workspace.director.sessionVerificationFailed';
 const DIRECTOR_ATTACH_INTERRUPTED_KEY = 'conversation.creativeStudio.workspace.director.attachInterrupted';
+const DIRECTOR_STORAGE_KEY = 'conversation.creativeStudio.workspace.errors.storage';
+const SAFE_DIRECTOR_REJECTION_MESSAGE_KEYS = new Set<string>([
+  DIRECTOR_SESSION_VERIFICATION_KEY,
+  DIRECTOR_ATTACH_INTERRUPTED_KEY,
+  DIRECTOR_STORAGE_KEY,
+]);
 const expectedServerId = (projectId: string): string => `studio-brief-${projectId}`;
 
 class DirectorConversationStartError extends Error {
   constructor(
-    message: string,
+    readonly messageKey: string,
     readonly retryPolicy: DirectorRetryPolicy
   ) {
-    super(message);
+    super(messageKey);
   }
 }
 
@@ -452,7 +458,7 @@ export const hasExactDirectorAuthoritySnapshot = (
 };
 
 const messageKeyFromError = (error: unknown, fallback: string): string =>
-  error instanceof Error && error.message.startsWith('conversation.') ? error.message : fallback;
+  error instanceof Error && SAFE_DIRECTOR_REJECTION_MESSAGE_KEYS.has(error.message) ? error.message : fallback;
 
 type DirectorAuthorityOutcome =
   | { kind: 'trusted' }
@@ -686,10 +692,17 @@ const startDirectorConversation = async (input: StartInput): Promise<StartOutcom
     }
   } catch (error) {
     if (error instanceof DirectorConversationConflictError) return { kind: 'conflict' };
+    if (error instanceof DirectorConversationStartError) {
+      return {
+        kind: 'failed',
+        messageKey: error.messageKey,
+        retryPolicy: error.retryPolicy,
+      };
+    }
     return {
       kind: 'failed',
       messageKey: messageKeyFromError(error, DIRECTOR_ATTACH_INTERRUPTED_KEY),
-      retryPolicy: error instanceof DirectorConversationStartError ? error.retryPolicy : fallbackRetryPolicy,
+      retryPolicy: fallbackRetryPolicy,
     };
   }
 

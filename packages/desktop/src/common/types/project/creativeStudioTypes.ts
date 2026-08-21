@@ -449,11 +449,32 @@ export type StudioPrepareGenerationChoiceV2 = {
   referenceAssetId: string | null;
 };
 
+/** Safe pricing classifications that may cross from main to the renderer without diagnostics. */
+export const STUDIO_PRICING_REFUSAL_REASONS_V2 = [
+  'invalid_quote',
+  'inactive_shot',
+  'in_flight',
+  'duplicate_shot_purpose',
+  'invalid_dependency',
+  'invalid_prepare_request',
+  'invalid_reference',
+  'missing_conditioning',
+  'unsafe_total',
+] as const;
+
+export type StudioPricingRefusalReasonV2 = (typeof STUDIO_PRICING_REFUSAL_REASONS_V2)[number];
+
+const STUDIO_PRICING_REFUSAL_REASON_SET_V2: ReadonlySet<string> = new Set(STUDIO_PRICING_REFUSAL_REASONS_V2);
+
+export const isStudioPricingRefusalReasonV2 = (value: unknown): value is StudioPricingRefusalReasonV2 =>
+  typeof value === 'string' && STUDIO_PRICING_REFUSAL_REASON_SET_V2.has(value);
+
 export type StudioPrepareSubmissionRequestV2 = {
   projectId: string;
   expectedRevision: number;
   originReferenceHandoffId: string | null;
   baseChoices: StudioPrepareGenerationChoiceV2[];
+  /** Empty asks main to derive the canonical optional continuation with one generation per row. */
   cascadeChoices: StudioPrepareGenerationChoiceV2[];
 };
 
@@ -1447,6 +1468,7 @@ export type StudioRouteCatalogV2 = {
 export type StudioCommandErrorCode =
   | 'feature_disabled'
   | 'invalid_payload'
+  | 'pricing_refused'
   | 'not_found'
   | 'stale_project'
   | 'invalid_route'
@@ -1461,14 +1483,22 @@ export type StudioCommandErrorCode =
   | StudioSubmissionCacheErrorCodeV2
   | 'storage_error';
 
+export type StudioCommandError =
+  | {
+      code: 'pricing_refused';
+      reason: StudioPricingRefusalReasonV2;
+      messageKey: string;
+    }
+  | {
+      code: Exclude<StudioCommandErrorCode, 'pricing_refused'>;
+      messageKey: string;
+    };
+
 export type StudioCommandResult<T> =
   | { ok: true; data: T }
   | {
       ok: false;
-      error: {
-        code: StudioCommandErrorCode;
-        messageKey: string;
-      };
+      error: StudioCommandError;
     };
 
 export type StudioJobRequest = {

@@ -907,6 +907,21 @@
     "workspace": {
       "controls": {
         "briefAndRulesTitle": "Brief ve kurallar"
+      },
+      "gate": {
+        "errors": {
+          "pricing": {
+            "invalidQuote": "Tahmin verileri kendi içinde tutarlı değildi. Hiçbir şey gönderilmedi.",
+            "inactiveShot": "Seçili çekimlerden biri artık etkin değil. Projeyi yenileyip yeniden hazırlayın.",
+            "inFlight": "Seçili üretimlerden biri zaten devam ediyor. Tamamlanmasını bekleyin veya seçimi değiştirin.",
+            "duplicateShotPurpose": "Aynı üretim birden fazla kez seçildi. Seçimi gözden geçirip yeniden hazırlayın.",
+            "invalidDependency": "Devam bağımlılığı artık geçerli değil. Projeyi yenileyip yeniden hazırlayın.",
+            "invalidPrepareRequest": "Üretim seçimi güvenli biçimde hazırlanamadı. Seçimi gözden geçirip yeniden hazırlayın.",
+            "invalidReference": "Seçili bir referans artık bu üretim için geçerli değil. Başka bir referans seçin.",
+            "missingConditioning": "Bir video çekimi için uygun başlangıç görseli veya önceki kare yok. Gerekli görseli ekleyin ya da seçin.",
+            "unsafeTotal": "Tahmin toplamı güvenli biçimde gösterilemedi. Seçimi azaltın; hiçbir şey gönderilmedi."
+          }
+        }
       }
     },
     "rules": {
@@ -1454,6 +1469,7 @@
     "errors": {
       "featureDisabled": "Creative Studio bu derlemede devre dışıdır.",
       "invalidPayload": "İstek geçersiz veya eksik bilgiler içeriyor.",
+      "pricingRefused": "Tahmin gönderimden önce reddedildi. Hiçbir şey gönderilmedi.",
       "projectNotFound": "Creative Studio projesi artık mevcut değil.",
       "storyboardExists": "Bu projede zaten bir storyboard var. Yeniden taslak oluşturmadan önce değiştirmeyi onaylayın.",
       "staleProject": "Proje başka bir yerde değiştirildi. Tekrar denemeden önce yenileyin.",

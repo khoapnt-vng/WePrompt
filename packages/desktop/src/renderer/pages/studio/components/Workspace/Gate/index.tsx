@@ -9,7 +9,10 @@ import React, { useCallback, useMemo, useReducer, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { ipcBridge } from '@/common';
-import type { StudioConfirmSubmissionResultV2 } from '@/common/types/project/creativeStudioTypes';
+import type {
+  StudioConfirmSubmissionResultV2,
+  StudioPricingRefusalReasonV2,
+} from '@/common/types/project/creativeStudioTypes';
 import {
   initialSpendGateState,
   formatMinorUnits,
@@ -78,13 +81,13 @@ export const useSpendGate = ({ onConfirmed }: UseSpendGateInput): UseSpendGateRe
       const result = await ipcBridge.creativeStudio.prepareSubmission.invoke(draft);
       if (gateGenerationRef.current !== generation || prepareOperationRef.current !== operation) return;
       if (result.ok === false) {
-        dispatch({ type: 'prepare_failed', code: result.error.code });
+        dispatch({ type: 'prepare_failed', error: result.error });
         return;
       }
       dispatch({ type: 'prepare_succeeded', options: result.data });
     } catch {
       if (gateGenerationRef.current === generation && prepareOperationRef.current === operation) {
-        dispatch({ type: 'prepare_failed', code: 'storage_error' });
+        dispatch({ type: 'prepare_failed', error: { code: 'storage_error' } });
       }
     } finally {
       if (prepareOperationRef.current === operation) preparingRef.current = false;
@@ -116,7 +119,7 @@ export const useSpendGate = ({ onConfirmed }: UseSpendGateInput): UseSpendGateRe
       });
       if (gateGenerationRef.current !== generation || confirmOperationRef.current !== operation) return;
       if (result.ok === false) {
-        dispatch({ type: 'confirm_failed', code: result.error.code });
+        dispatch({ type: 'confirm_failed', error: result.error });
         return;
       }
       terminalSuccessRef.current = true;
@@ -124,7 +127,7 @@ export const useSpendGate = ({ onConfirmed }: UseSpendGateInput): UseSpendGateRe
       confirmed = result.data;
     } catch {
       if (gateGenerationRef.current === generation && confirmOperationRef.current === operation) {
-        dispatch({ type: 'confirm_failed', code: 'storage_error' });
+        dispatch({ type: 'confirm_failed', error: { code: 'storage_error' } });
       }
     } finally {
       if (confirmOperationRef.current === operation) confirmingRef.current = false;
@@ -143,11 +146,26 @@ export const useSpendGate = ({ onConfirmed }: UseSpendGateInput): UseSpendGateRe
 
 export type SpendGateModalProps = Pick<UseSpendGateResult, 'state' | 'close' | 'prepare' | 'selectOption' | 'confirm'>;
 
+const pricingRefusalMessageKeys: Record<StudioPricingRefusalReasonV2, string> = {
+  invalid_quote: 'conversation.creativeStudio.workspace.gate.errors.pricing.invalidQuote',
+  inactive_shot: 'conversation.creativeStudio.workspace.gate.errors.pricing.inactiveShot',
+  in_flight: 'conversation.creativeStudio.workspace.gate.errors.pricing.inFlight',
+  duplicate_shot_purpose: 'conversation.creativeStudio.workspace.gate.errors.pricing.duplicateShotPurpose',
+  invalid_dependency: 'conversation.creativeStudio.workspace.gate.errors.pricing.invalidDependency',
+  invalid_prepare_request: 'conversation.creativeStudio.workspace.gate.errors.pricing.invalidPrepareRequest',
+  invalid_reference: 'conversation.creativeStudio.workspace.gate.errors.pricing.invalidReference',
+  missing_conditioning: 'conversation.creativeStudio.workspace.gate.errors.pricing.missingConditioning',
+  unsafe_total: 'conversation.creativeStudio.workspace.gate.errors.pricing.unsafeTotal',
+};
+
 const errorMessageKey = (state: SpendGateState): string | null => {
   if (state.phase === 'refresh_required') return 'conversation.creativeStudio.errors.quoteNotFound';
   if (state.phase === 'quote_in_use') return 'conversation.creativeStudio.errors.quoteInUse';
   if (state.phase === 'quote_cache_full') return 'conversation.creativeStudio.errors.quoteCacheFull';
   if (state.phase === 'quote_too_large') return 'conversation.creativeStudio.errors.quoteTooLarge';
+  if (state.phase === 'error' && state.pricingRefusalReason !== null) {
+    return pricingRefusalMessageKeys[state.pricingRefusalReason];
+  }
   if (state.phase === 'error') return 'conversation.creativeStudio.workspace.gate.errors.generic';
   return null;
 };

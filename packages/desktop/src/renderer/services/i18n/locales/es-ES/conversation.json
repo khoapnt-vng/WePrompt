@@ -908,6 +908,21 @@
     "workspace": {
       "controls": {
         "briefAndRulesTitle": "Brief y reglas"
+      },
+      "gate": {
+        "errors": {
+          "pricing": {
+            "invalidQuote": "Los datos de la estimación no eran coherentes internamente. No se envió nada.",
+            "inactiveShot": "Una toma seleccionada ya no está activa. Actualiza el proyecto y vuelve a preparar.",
+            "inFlight": "Una generación seleccionada ya está en curso. Espera a que termine o cambia la selección.",
+            "duplicateShotPurpose": "Se seleccionó la misma generación más de una vez. Revisa la selección y vuelve a preparar.",
+            "invalidDependency": "La dependencia de continuación ya no es válida. Actualiza el proyecto y vuelve a preparar.",
+            "invalidPrepareRequest": "No se pudo preparar la selección de generación de forma segura. Revísala y vuelve a preparar.",
+            "invalidReference": "Una referencia seleccionada ya no es válida para esta generación. Elige otra referencia.",
+            "missingConditioning": "Una toma de vídeo no tiene una imagen inicial ni un fotograma predecesor válido. Añade o selecciona la imagen necesaria.",
+            "unsafeTotal": "No se pudo representar de forma segura el total de la estimación. Reduce la selección; no se envió nada."
+          }
+        }
       }
     },
     "rules": {
@@ -1476,6 +1491,7 @@
     "errors": {
       "featureDisabled": "Creative Studio está deshabilitado en esta compilación.",
       "invalidPayload": "La solicitud contiene información no válida o incompleta.",
+      "pricingRefused": "La estimación se rechazó antes del envío. No se envió nada.",
       "projectNotFound": "El proyecto de Creative Studio ya no existe.",
       "storyboardExists": "Este proyecto ya tiene un guion gráfico. Confirma que deseas sustituirlo antes de crear otro borrador.",
       "staleProject": "El proyecto se ha modificado en otro lugar. Actualízalo antes de reintentarlo.",

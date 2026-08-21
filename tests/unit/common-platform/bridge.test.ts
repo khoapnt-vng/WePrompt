@@ -193,6 +193,53 @@ describe('local bridge', () => {
     vi.doUnmock('@process/services/creative-studio/runtime');
   });
 
+  it('preserves only an allowlisted Studio pricing reason across the V2 IPC transport', async () => {
+    await loadLoopbackBridge();
+    vi.doMock('@process/services/creative-studio/runtime', () => ({
+      getCreativeStudioRuntime: vi.fn(),
+      getCreativeStudioService: vi.fn(),
+    }));
+    const [{ creativeStudio }, { initCreativeStudioBridge }, { StudioPricingErrorV2 }] = await Promise.all([
+      import('@/common/adapter/ipcBridge'),
+      import('@process/bridge/creativeStudioBridge'),
+      import('@process/services/creative-studio/service/schema2/pricing/estimate'),
+    ]);
+    initCreativeStudioBridge({
+      isFeatureEnabled: () => true,
+      getService: () =>
+        ({
+          prepareSubmission: async () => {
+            throw Object.assign(new StudioPricingErrorV2('missing_conditioning'), {
+              body: 'private provider body',
+              routeId: 'private_route_123',
+              stack: 'private stack',
+            });
+          },
+        }) as never,
+    });
+
+    const result = await creativeStudio.prepareSubmission.invoke({
+      projectId: 'project_1',
+      expectedRevision: 1,
+      originReferenceHandoffId: null,
+      baseChoices: [{ shotId: 'shot_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+      cascadeChoices: [],
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'pricing_refused',
+        reason: 'missing_conditioning',
+        messageKey: 'conversation.creativeStudio.errors.pricingRefused',
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain('private provider body');
+    expect(JSON.stringify(result)).not.toContain('private_route_123');
+    expect(JSON.stringify(result)).not.toContain('private stack');
+    vi.doUnmock('@process/services/creative-studio/runtime');
+  });
+
   it('disposes a renderer query callback listener when the invoke times out', async () => {
     vi.useFakeTimers();
     const { bridge, getIncoming, outbound } = await loadLoopbackBridge();

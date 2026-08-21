@@ -19,6 +19,7 @@ import {
 import { CreativeStudioStoreError } from '@process/services/creative-studio/store';
 import { CreativeStudioMediaError } from '@process/services/creative-studio/mediaStore';
 import { StudioPreparedSubmissionCacheErrorV2 } from '@process/services/creative-studio/service/schema2/pricing/preparedSubmissionCache';
+import { StudioPricingErrorV2 } from '@process/services/creative-studio/service/schema2/pricing/estimate';
 import type { CreativeStudioServiceV2 } from '@process/services/creative-studio/service/v2Service';
 
 const providerNames = [
@@ -679,6 +680,61 @@ describe('initCreativeStudioBridge', () => {
     });
   });
 
+  it('returns only the allowlisted structured pricing refusal without internal diagnostics', async () => {
+    const refusal = Object.assign(new StudioPricingErrorV2('missing_conditioning'), {
+      body: 'apiKey=secret-provider-body',
+      internalDetails: { stack: 'private stack' },
+    });
+    vi.mocked(service.prepareSubmission).mockRejectedValueOnce(refusal);
+    initCreativeStudioBridge(dependencies);
+
+    const result = await registeredHandler('prepareSubmission')({
+      projectId: 'project_1',
+      expectedRevision: 7,
+      originReferenceHandoffId: null,
+      baseChoices: [{ shotId: 'shot_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+      cascadeChoices: [],
+    } as never);
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'pricing_refused',
+        reason: 'missing_conditioning',
+        messageKey: 'conversation.creativeStudio.errors.pricingRefused',
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain('secret-provider-body');
+    expect(JSON.stringify(result)).not.toContain('private stack');
+  });
+
+  it('does not project an unknown pricing classification or attached diagnostics', async () => {
+    const refusal = Object.assign(new StudioPricingErrorV2('route_secret_apiKey' as never), {
+      body: 'private provider body',
+      routeId: 'private_route_123',
+      stack: 'private stack',
+    });
+    vi.mocked(service.prepareSubmission).mockRejectedValueOnce(refusal);
+    initCreativeStudioBridge(dependencies);
+
+    const result = await registeredHandler('prepareSubmission')({
+      projectId: 'project_1',
+      expectedRevision: 7,
+      originReferenceHandoffId: null,
+      baseChoices: [{ shotId: 'shot_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+      cascadeChoices: [],
+    } as never);
+
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'conversation.creativeStudio.errors.storage' },
+    });
+    expect(JSON.stringify(result)).not.toContain('route_secret_apiKey');
+    expect(JSON.stringify(result)).not.toContain('private provider body');
+    expect(JSON.stringify(result)).not.toContain('private_route_123');
+    expect(JSON.stringify(result)).not.toContain('private stack');
+  });
+
   it('keeps Brief and seed-still picker imports separate and returns no path or project', async () => {
     initCreativeStudioBridge(dependencies);
     const briefInput = { projectId: 'project_1', expectedRevision: 6, briefReferenceRole: 'look' as const };
@@ -1203,6 +1259,34 @@ describe('initCreativeStudioBridge', () => {
     expect(JSON.stringify(result)).not.toMatch(/private response|sk-or-private|rawBody|apiKey|providerStatus/i);
   });
 
+  it('fails closed when connection capabilities are malformed without exposing attached provider diagnostics', async () => {
+    vi.mocked(service.validateConnection).mockResolvedValueOnce({
+      valid: true,
+      connection: {
+        providerId: 'provider_1',
+        integrationId: 'integration_o4R7vD2m',
+        labelKey: 'openRouterVideo',
+        model: 'google/veo-3.1',
+        capabilities: null,
+        validatedAt: '2026-08-21T00:00:00.000Z',
+        rawBody: 'private provider body',
+      },
+    } as never);
+    initCreativeStudioBridge(dependencies);
+
+    const result = await registeredHandler('validateConnection')({
+      providerId: 'provider_1',
+      integrationId: 'integration_o4R7vD2m',
+      model: 'google/veo-3.1',
+    } as never);
+
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'provider_error', messageKey: 'conversation.creativeStudio.errors.provider' },
+    });
+    expect(JSON.stringify(result)).not.toContain('private provider body');
+  });
+
   it('preserves the generic sixty-second connection ceiling outside discrete Studio durations', async () => {
     vi.mocked(service.validateConnection).mockResolvedValueOnce({
       valid: true,
@@ -1442,6 +1526,27 @@ describe('createCreativeStudioCloseHandshake', () => {
     });
     expect(dependencies.flushUnsavedWork).toHaveBeenCalledExactlyOnceWith({ timeoutMs: 3_000 });
     expect(dependencies.closeWindow).not.toHaveBeenCalled();
+  });
+
+  it('closes only after explicit discard when a bounded draft flush reports unsaved work', async () => {
+    const showMessageBox = vi.fn().mockResolvedValueOnce({ response: 0 }).mockResolvedValueOnce({ response: 0 });
+    const dependencies = createCloseHandshakeDependencies({
+      queryUnsavedWork: vi.fn(async () => ({ dirtyDraftCount: 1 })),
+      flushUnsavedWork: vi.fn(async () => ({ saved: false })),
+      showMessageBox,
+    });
+    const handshake = createCreativeStudioCloseHandshake(dependencies);
+
+    handshake.handleWindowClose(createCloseEvent());
+
+    await vi.waitFor(() => expect(dependencies.closeWindow).toHaveBeenCalledOnce());
+    expect(showMessageBox).toHaveBeenCalledTimes(2);
+    expect(showMessageBox.mock.calls[1]?.[0]).toMatchObject({
+      buttons: ['conversation.creativeStudio.close.discard', 'conversation.creativeStudio.close.cancel'],
+      defaultId: 1,
+      cancelId: 1,
+    });
+    expect(dependencies.flushUnsavedWork).toHaveBeenCalledExactlyOnceWith({ timeoutMs: 3_000 });
   });
 
   it('runs only one renderer preflight while repeated close events are in flight', async () => {

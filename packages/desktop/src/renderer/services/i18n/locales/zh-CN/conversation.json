@@ -903,6 +903,21 @@
     "workspace": {
       "controls": {
         "briefAndRulesTitle": "简报与规则"
+      },
+      "gate": {
+        "errors": {
+          "pricing": {
+            "invalidQuote": "报价数据内部不一致。未提交任何内容。",
+            "inactiveShot": "一个已选镜头已不再处于活动状态。请刷新项目后重新准备报价。",
+            "inFlight": "一个已选生成任务正在进行中。请等待其完成或更改选择。",
+            "duplicateShotPurpose": "同一生成任务被选择了多次。请检查选择后重新准备报价。",
+            "invalidDependency": "后续生成的依赖关系已失效。请刷新项目后重新准备报价。",
+            "invalidPrepareRequest": "无法安全地准备所选生成任务。请检查选择后重新准备报价。",
+            "invalidReference": "一个已选参考图已不再适用于此次生成。请选择其他参考图。",
+            "missingConditioning": "一个视频镜头缺少可用的种子图或前序帧。请添加或选择所需图像。",
+            "unsafeTotal": "无法安全表示报价总额。请减少选择；未提交任何内容。"
+          }
+        }
       }
     },
     "rules": {
@@ -1429,6 +1444,7 @@
     "errors": {
       "featureDisabled": "此版本中已禁用 Creative Studio。",
       "invalidPayload": "请求包含无效或不完整的信息。",
+      "pricingRefused": "报价在提交前被拒绝。未提交任何内容。",
       "projectNotFound": "此创意工作室项目已不存在。",
       "storyboardExists": "此项目已有故事板。再次起草前请确认替换。",
       "staleProject": "项目已在其他位置发生更改。请刷新后重试。",

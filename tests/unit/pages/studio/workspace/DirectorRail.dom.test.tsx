@@ -149,6 +149,7 @@ vi.mock('react-i18next', () => ({
       'conversation.creativeStudio.workspace.errors.storage': 'Creative Studio could not read or save this workspace.',
       'conversation.creativeStudio.workspace.errors.staleProject':
         'The project changed elsewhere. Review the current Director before retrying.',
+      'conversation.creativeStudio.errors.storage': 'Creative Studio could not update its local data.',
     };
     return { t: (key: string) => english[key] ?? key };
   },
@@ -746,6 +747,14 @@ describe('DirectorRail', () => {
     expect(harness.create).not.toHaveBeenCalled();
   });
 
+  it('preserves a structured storage failure while loading the Director descriptor', async () => {
+    harness.descriptor.mockResolvedValueOnce(failed('conversation.creativeStudio.errors.storage'));
+    render(<DirectorRail project={project()} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Creative Studio could not update its local data.');
+    expect(harness.create).not.toHaveBeenCalled();
+  });
+
   it('reports an unverifiable created MCP snapshot as a session error', async () => {
     const drifted = exactConversation('8a49d04b', {
       session_mcp_servers: [
@@ -961,6 +970,19 @@ describe('DirectorRail', () => {
     expect(harness.bind).not.toHaveBeenCalled();
   });
 
+  it('redacts a conversation-prefixed diagnostic from an ambiguous create rejection', async () => {
+    const diagnostic = 'conversation./Users/alice/private-key';
+    harness.create.mockRejectedValueOnce(new Error(diagnostic));
+    render(<DirectorRail project={project()} />);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(
+      'Creative Studio could not complete the Director attachment. Retry to recover it safely.'
+    );
+    expect(alert).not.toHaveTextContent(diagnostic);
+    expect(harness.create).toHaveBeenCalledOnce();
+  });
+
   it('keeps one module-level start across an in-flight remount', async () => {
     const pending = deferred<Extract<TChatConversation, { type: 'aionrs' }>>();
     harness.create.mockReturnValueOnce(pending.promise);
@@ -1154,6 +1176,18 @@ describe('DirectorRail', () => {
     expect(harness.authority).toHaveBeenCalledTimes(2);
     expect(harness.create).not.toHaveBeenCalled();
     expect(harness.bind).not.toHaveBeenCalled();
+  });
+
+  it('redacts a conversation-prefixed diagnostic from a persisted-authority rejection', async () => {
+    const diagnostic = 'conversation./Users/alice/private-key';
+    harness.conversations = [exactConversation()];
+    harness.authority.mockRejectedValueOnce(new Error(diagnostic));
+    render(<DirectorRail project={project({ briefConversationId: 'conversation_director' })} />);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Creative Studio could not verify the Director session configuration.');
+    expect(alert).not.toHaveTextContent(diagnostic);
+    expect(harness.create).not.toHaveBeenCalled();
   });
 
   it('requires an explicit retry for an unbound restart candidate and reuses it without creating', async () => {

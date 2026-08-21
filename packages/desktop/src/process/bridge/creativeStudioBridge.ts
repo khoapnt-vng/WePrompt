@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { ipcBridge } from '@/common';
 import { CREATIVE_STUDIO_ENABLED } from '@/common/config/constants';
 import {
+  isStudioPricingRefusalReasonV2,
   STUDIO_MAX_SHOT_SECONDS,
   STUDIO_MIN_SHOT_SECONDS,
   STUDIO_PROJECT_SCHEMA_VERSION,
@@ -28,6 +29,7 @@ import {
 } from '@/common/types/project/creativeStudioTypes';
 import { CreativeStudioServiceError } from '@process/services/creative-studio/service/projectMutations';
 import { StudioPreparedSubmissionCacheErrorV2 } from '@process/services/creative-studio/service/schema2/pricing/preparedSubmissionCache';
+import { StudioPricingErrorV2 } from '@process/services/creative-studio/service/schema2/pricing/estimate';
 import type { CreativeStudioServiceV2 } from '@process/services/creative-studio/service/v2Service';
 import { CreativeStudioStoreError } from '@process/services/creative-studio/store';
 import { CreativeStudioMediaError } from '@process/services/creative-studio/mediaStore';
@@ -37,6 +39,7 @@ import { BrowserWindow, dialog, shell } from 'electron';
 const errorMessageKeys: Record<StudioCommandErrorCode, string> = {
   feature_disabled: 'conversation.creativeStudio.errors.featureDisabled',
   invalid_payload: 'conversation.creativeStudio.errors.invalidPayload',
+  pricing_refused: 'conversation.creativeStudio.errors.pricingRefused',
   not_found: 'conversation.creativeStudio.errors.projectNotFound',
   stale_project: 'conversation.creativeStudio.errors.staleProject',
   invalid_route: 'conversation.creativeStudio.errors.invalidRoute',
@@ -56,11 +59,23 @@ const errorMessageKeys: Record<StudioCommandErrorCode, string> = {
   storage_error: 'conversation.creativeStudio.errors.storage',
 };
 
-const storeErrorCode = (error: CreativeStudioStoreError): StudioCommandErrorCode =>
+type NonPricingStudioCommandErrorCode = Exclude<StudioCommandErrorCode, 'pricing_refused'>;
+
+const storeErrorCode = (error: CreativeStudioStoreError): NonPricingStudioCommandErrorCode =>
   error.code === 'unsupported_prototype_schema' ? 'storage_error' : error.code;
 
 const toCommandError = (error: unknown): StudioCommandResult<never> => {
-  const code: StudioCommandErrorCode =
+  if (error instanceof StudioPricingErrorV2 && isStudioPricingRefusalReasonV2(error.code)) {
+    return {
+      ok: false,
+      error: {
+        code: 'pricing_refused',
+        reason: error.code,
+        messageKey: errorMessageKeys.pricing_refused,
+      },
+    };
+  }
+  const code: NonPricingStudioCommandErrorCode =
     error instanceof CreativeStudioStoreError
       ? storeErrorCode(error)
       : error instanceof CreativeStudioServiceError

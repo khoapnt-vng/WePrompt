@@ -903,6 +903,21 @@
     "workspace": {
       "controls": {
         "briefAndRulesTitle": "簡報與規則"
+      },
+      "gate": {
+        "errors": {
+          "pricing": {
+            "invalidQuote": "估價資料內部不一致。未提交任何內容。",
+            "inactiveShot": "一個已選鏡頭已不再處於啟用狀態。請重新整理專案後再次準備估價。",
+            "inFlight": "一個已選產生工作正在進行中。請等候完成或變更選擇。",
+            "duplicateShotPurpose": "同一產生工作被選取多次。請檢查選擇後再次準備估價。",
+            "invalidDependency": "後續產生的相依關係已失效。請重新整理專案後再次準備估價。",
+            "invalidPrepareRequest": "無法安全地準備所選產生工作。請檢查選擇後再次準備估價。",
+            "invalidReference": "一個已選參考圖已不再適用於此次產生。請選擇其他參考圖。",
+            "missingConditioning": "一個影片鏡頭缺少可用的種子圖或前序影格。請新增或選擇所需影像。",
+            "unsafeTotal": "無法安全表示估價總額。請減少選擇；未提交任何內容。"
+          }
+        }
       }
     },
     "rules": {
@@ -1429,6 +1444,7 @@
     "errors": {
       "featureDisabled": "此版本中已停用 Creative Studio。",
       "invalidPayload": "要求包含無效或不完整的資訊。",
+      "pricingRefused": "估價在提交前遭拒。未提交任何內容。",
       "projectNotFound": "此創意工作室專案已不存在。",
       "storyboardExists": "此專案已有分鏡。再次建立草稿前請確認取代。",
       "staleProject": "專案已在其他位置變更。請重新整理後再試。",

@@ -638,6 +638,15 @@ const expectedLeaves = [
   'gate.confirm',
   'gate.close',
   'gate.errors.generic',
+  'gate.errors.pricing.invalidQuote',
+  'gate.errors.pricing.inactiveShot',
+  'gate.errors.pricing.inFlight',
+  'gate.errors.pricing.duplicateShotPurpose',
+  'gate.errors.pricing.invalidDependency',
+  'gate.errors.pricing.invalidPrepareRequest',
+  'gate.errors.pricing.invalidReference',
+  'gate.errors.pricing.missingConditioning',
+  'gate.errors.pricing.unsafeTotal',
   'review.title',
 ] as const;
 
@@ -658,6 +667,19 @@ const briefAndRulesTitles: Record<string, string> = {
   'zh-CN': '简报与规则',
   'zh-TW': '簡報與規則',
 };
+
+const localizedWorkspaceKeys = [
+  'controls.briefAndRulesTitle',
+  'gate.errors.pricing.invalidQuote',
+  'gate.errors.pricing.inactiveShot',
+  'gate.errors.pricing.inFlight',
+  'gate.errors.pricing.duplicateShotPurpose',
+  'gate.errors.pricing.invalidDependency',
+  'gate.errors.pricing.invalidPrepareRequest',
+  'gate.errors.pricing.invalidReference',
+  'gate.errors.pricing.missingConditioning',
+  'gate.errors.pricing.unsafeTotal',
+] as const;
 
 describe('Creative Studio workspace translations', () => {
   const englishConversation = loadConversation(referenceLocale);
@@ -700,22 +722,25 @@ describe('Creative Studio workspace translations', () => {
     expect(cutInventory).not.toContain('auto duck');
   });
 
-  it('localizes Brief & rules and falls the rest of each locale back to the complete en-US workspace', () => {
+  it('localizes the authored workspace subset and falls the rest back to the complete en-US workspace', () => {
     expect(deferredLocales).toHaveLength(11);
     const englishLeaves = flattenLeaves(englishWorkspace);
 
     for (const locale of deferredLocales) {
       const localeConversation = loadConversation(locale);
       const localizedTitle = briefAndRulesTitles[locale];
+      const localizedLeaves = flattenLeaves(workspaceOf(localeConversation)!);
       expect(localizedTitle, locale).toBeTypeOf('string');
-      expect(flattenLeaves(workspaceOf(localeConversation)!), locale).toEqual({
-        'controls.briefAndRulesTitle': localizedTitle,
-      });
+      expect(Object.keys(localizedLeaves).toSorted(), locale).toEqual(localizedWorkspaceKeys.toSorted());
+      expect(localizedLeaves['controls.briefAndRulesTitle'], locale).toBe(localizedTitle);
+      for (const key of localizedWorkspaceKeys.filter((candidate) => candidate.startsWith('gate.errors.pricing.'))) {
+        expect(localizedLeaves[key]?.trim(), `${locale}:${key}`).not.toBe('');
+      }
 
       const merged = mergeWithFallback(englishConversation, localeConversation);
       expect(flattenLeaves(workspaceOf(merged)!), locale).toEqual({
         ...englishLeaves,
-        'controls.briefAndRulesTitle': localizedTitle,
+        ...localizedLeaves,
       });
     }
   });

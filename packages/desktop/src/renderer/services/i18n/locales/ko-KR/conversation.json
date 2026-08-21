@@ -903,6 +903,21 @@
     "workspace": {
       "controls": {
         "briefAndRulesTitle": "브리프 및 규칙"
+      },
+      "gate": {
+        "errors": {
+          "pricing": {
+            "invalidQuote": "견적 데이터의 내부 일관성이 맞지 않습니다. 아무것도 제출되지 않았습니다.",
+            "inactiveShot": "선택한 샷 중 하나가 더 이상 활성 상태가 아닙니다. 프로젝트를 새로 고친 후 다시 준비하세요.",
+            "inFlight": "선택한 생성 중 하나가 이미 진행 중입니다. 완료를 기다리거나 선택을 변경하세요.",
+            "duplicateShotPurpose": "같은 생성이 두 번 이상 선택되었습니다. 선택을 검토한 후 다시 준비하세요.",
+            "invalidDependency": "연속 생성의 종속 관계가 더 이상 유효하지 않습니다. 프로젝트를 새로 고친 후 다시 준비하세요.",
+            "invalidPrepareRequest": "생성 선택을 안전하게 준비할 수 없습니다. 선택을 검토한 후 다시 준비하세요.",
+            "invalidReference": "선택한 참조 중 하나가 이 생성에 더 이상 유효하지 않습니다. 다른 참조를 선택하세요.",
+            "missingConditioning": "비디오 테이크에 사용할 수 있는 시드 이미지나 이전 프레임이 없습니다. 필요한 이미지를 추가하거나 선택하세요.",
+            "unsafeTotal": "견적 합계를 안전하게 표시할 수 없습니다. 선택을 줄이세요. 아무것도 제출되지 않았습니다."
+          }
+        }
       }
     },
     "rules": {
@@ -1429,6 +1444,7 @@
     "errors": {
       "featureDisabled": "이 빌드에서는 Creative Studio가 비활성화되어 있습니다.",
       "invalidPayload": "요청에 유효하지 않거나 불완전한 정보가 포함되어 있습니다.",
+      "pricingRefused": "제출 전에 견적이 거부되었습니다. 아무것도 제출되지 않았습니다.",
       "projectNotFound": "이 크리에이티브 스튜디오 프로젝트는 더 이상 존재하지 않습니다.",
       "storyboardExists": "이 프로젝트에는 이미 스토리보드가 있습니다. 다시 초안을 만들기 전에 교체를 확인하세요.",
       "staleProject": "다른 곳에서 프로젝트가 변경되었습니다. 새로 고친 후 다시 시도하세요.",
