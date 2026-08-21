@@ -126,7 +126,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
 
   return (
     <div className={styles.shell} data-studio-workspace-shell>
-      <header className={styles.appBar} data-studio-app-bar>
+      <header className={styles.appBar} data-studio-app-bar data-studio-project-header>
         <Button
           type='text'
           shape='circle'
