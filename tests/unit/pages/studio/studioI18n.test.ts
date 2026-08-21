@@ -6,6 +6,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import i18next from 'i18next';
 import { describe, expect, it } from 'vitest';
 
 import i18nConfig from '@/common/config/i18n-config.json';
@@ -145,6 +146,12 @@ const expectedLeaves = [
   'cut.film.over',
   'cut.film.onTarget',
   'cut.film.counts',
+  'cut.film.beatCount',
+  'cut.film.beatCount_one',
+  'cut.film.beatCount_other',
+  'cut.film.slateCount',
+  'cut.film.slateCount_one',
+  'cut.film.slateCount_other',
   'cut.slate.label',
   'cut.slate.warning',
   'cut.match.reference',
@@ -702,11 +709,114 @@ describe('Creative Studio workspace translations', () => {
       .filter((key) => key.endsWith('_one'))
       .map((key) => key.slice(0, -'_one'.length));
 
-    expect(pluralBases).toHaveLength(17);
+    expect(pluralBases).toHaveLength(19);
     for (const base of pluralBases) {
       expect(leaves[`${base}_other`], `${base}_other`).toBeTypeOf('string');
       expect(placeholders(leaves[`${base}_one`]!)).toEqual(placeholders(leaves[`${base}_other`]!));
     }
+  });
+
+  it.each([
+    ['table.actualDuration', 15.069002, '15s actual'],
+    ['board.actualDuration', 15.069002, '15s actual'],
+    ['cut.filmDuration', 178.069002, '178s film'],
+    ['cut.actualDuration', 15.069002, '15s actual'],
+    ['cut.actualDuration', 15.5, '16s actual'],
+    ['cut.actualDuration', 1440, '1440s actual'],
+    ['cut.targetDuration', 15.6, '16s target slate'],
+    ['cut.film.over', 160.069002, '160s over'],
+    ['cut.film.under', 1.6, '2s under'],
+    ['beatPanel.coverage.sourceDuration', 15.069002, '15s source'],
+    ['beatPanel.takes.sourceDuration', 15.069002, '15s source'],
+  ])(
+    'rounds provider duration facts at the translation boundary for %s at %s seconds',
+    async (key, seconds, expected) => {
+      const i18n = i18next.createInstance();
+      await i18n.init({
+        lng: referenceLocale,
+        fallbackLng: false,
+        resources: { [referenceLocale]: { translation: { conversation: englishConversation } } },
+        interpolation: { escapeValue: false },
+      });
+
+      expect(i18n.t(`conversation.creativeStudio.workspace.${key}`, { seconds })).toBe(expected);
+    }
+  );
+
+  it.each([
+    ['cut.bed.option', { position: 1, seconds: 14.6 }, 'Imported bed 1 · 15s'],
+    [
+      'cut.bed.fade',
+      { sourceSeconds: 200.069002, startSeconds: 176.069002, endSeconds: 178.069002 },
+      '200s source · fade from 176s to 178s',
+    ],
+    [
+      'cut.bed.tooShort',
+      { sourceSeconds: 160.069002, requiredSeconds: 178.069002 },
+      'This audio is 160s, shorter than the 178s film. Choose a longer bed or shorten the film.',
+    ],
+    ['assets.audioFacts', { seconds: 14.6, bytes: 4096 }, '15s · 4096 bytes'],
+  ])(
+    'rounds imported-audio and derived film facts at the translation boundary for %s',
+    async (key, values, expected) => {
+      const i18n = i18next.createInstance();
+      await i18n.init({
+        lng: referenceLocale,
+        fallbackLng: false,
+        resources: { [referenceLocale]: { translation: { conversation: englishConversation } } },
+        interpolation: { escapeValue: false },
+      });
+
+      expect(i18n.t(`conversation.creativeStudio.workspace.${key}`, values)).toBe(expected);
+    }
+  );
+
+  it.each([
+    [9, 16, 1, '9 Beats · 16 Shots · 1 Slate'],
+    [1, 1, 0, '1 Beat · 1 Shot · 0 Slates'],
+    [1, 0, 1, '1 Beat · 0 Shots · 1 Slate'],
+  ])('pluralizes each Cut film count independently', async (beats, shots, slates, expected) => {
+    const i18n = i18next.createInstance();
+    await i18n.init({
+      lng: referenceLocale,
+      fallbackLng: false,
+      resources: { [referenceLocale]: { translation: { conversation: englishConversation } } },
+      interpolation: { escapeValue: false },
+    });
+    const root = 'conversation.creativeStudio.workspace.cut';
+
+    expect(
+      i18n.t(`${root}.film.counts`, {
+        beats: i18n.t(`${root}.film.beatCount`, { count: beats }),
+        shots: i18n.t(`${root}.shotCount`, { count: shots }),
+        slates: i18n.t(`${root}.film.slateCount`, { count: slates }),
+      })
+    ).toBe(expected);
+  });
+
+  it.each(deferredLocales)('keeps en-US Cut fallback plurals grammatical while %s is active', async (locale) => {
+    const localeConversation = loadConversation(locale);
+    const mergedConversation = mergeWithFallback(englishConversation, localeConversation);
+    const i18n = i18next.createInstance();
+    await i18n.init({
+      lng: locale,
+      fallbackLng: false,
+      resources: { [locale]: { translation: { conversation: mergedConversation } } },
+      interpolation: { escapeValue: false },
+    });
+    const root = 'conversation.creativeStudio.workspace.cut';
+    const counts = (count: number): string => {
+      const suffix = count === 1 ? 'one' : 'other';
+      return i18n.t(`${root}.film.counts`, {
+        beats: i18n.t(`${root}.film.beatCount_${suffix}`, { count }),
+        shots: i18n.t(`${root}.shotCount_${suffix}`, { count }),
+        slates: i18n.t(`${root}.film.slateCount_${suffix}`, { count }),
+      });
+    };
+
+    expect(counts(0)).toBe('0 Beats · 0 Shots · 0 Slates');
+    expect(counts(1)).toBe('1 Beat · 1 Shot · 1 Slate');
+    expect(counts(21)).toBe('21 Beats · 21 Shots · 21 Slates');
   });
 
   it('keeps superseded Cut promises out of the renderer inventory', () => {

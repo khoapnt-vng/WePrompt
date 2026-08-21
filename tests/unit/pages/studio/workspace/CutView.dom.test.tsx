@@ -141,8 +141,16 @@ vi.mock('@arco-design/web-react', async () => {
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string, values?: Record<string, unknown>) =>
-      values === undefined ? key : `${key}:${JSON.stringify(values)}`,
+    t: (key: string, values?: Record<string, unknown>) => {
+      if (key.endsWith('.film.beatCount_one')) return `${values?.count} Beat`;
+      if (key.endsWith('.film.beatCount_other')) return `${values?.count} Beats`;
+      if (key.endsWith('.shotCount_one')) return `${values?.count} Shot`;
+      if (key.endsWith('.shotCount_other')) return `${values?.count} Shots`;
+      if (key.endsWith('.film.slateCount_one')) return `${values?.count} Slate`;
+      if (key.endsWith('.film.slateCount_other')) return `${values?.count} Slates`;
+      if (key.endsWith('.film.counts')) return `${values?.beats} · ${values?.shots} · ${values?.slates}`;
+      return values === undefined ? key : `${key}:${JSON.stringify(values)}`;
+    },
   }),
 }));
 
@@ -564,6 +572,17 @@ describe('the film summary', () => {
     expect(summary.delta).toEqual({ kind: 'over', seconds: 7 });
   });
 
+  it('keeps provider precision in the film model until the display boundary', () => {
+    const summary = buildCutFilmSummary({
+      beats: [beat(1, 15.069002)],
+      filmDurationSeconds: 178.069002,
+      targetDurationSeconds: 18,
+    });
+
+    expect(summary.filmSeconds).toBe(178.069002);
+    expect(summary.delta).toEqual({ kind: 'over', seconds: 160.069002 });
+  });
+
   it('reports a film that lands exactly on its target', () => {
     const summary = buildCutFilmSummary({ beats: [beat(1, 18)], filmDurationSeconds: 18, targetDurationSeconds: 18 });
     expect(summary.delta).toEqual({ kind: 'on_target', seconds: 0 });
@@ -722,6 +741,12 @@ describe('the Cut renders the film it is judging', () => {
     expect(panel?.textContent).toContain('2:58');
     expect(panel?.textContent).toContain('3:00');
     expect(panel?.getAttribute('data-film-delta')).toBe('under');
+  });
+
+  it('pluralizes the film Beat, Shot, and slate counts independently', () => {
+    renderCut();
+
+    expect(document.querySelector('[data-cut-film]')).toHaveTextContent('2 Beats · 1 Shot · 1 Slate');
   });
 
   it('marks a film that runs past its target', () => {

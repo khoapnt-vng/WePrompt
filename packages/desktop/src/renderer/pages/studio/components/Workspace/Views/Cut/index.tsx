@@ -19,6 +19,11 @@ import styles from './Cut.module.css';
 const CUT_ROOT = 'conversation.creativeStudio.workspace.cut';
 const ASSETS_ROOT = 'conversation.creativeStudio.workspace.assets';
 
+// Cut workspace copy is currently authored in en-US and eagerly merged into deferred locales.
+// Resolve the source language's one/other category before translation so an active locale cannot
+// apply its own plural categories to English fallback copy (for example, CJK `1 Slates`).
+const englishFallbackPluralKey = (base: string, count: number): string => `${base}_${count === 1 ? 'one' : 'other'}`;
+
 export type CutImportResult = 'cancelled' | 'imported' | 'failed';
 export type CutCopyResult = 'cancelled' | 'copied' | 'failed';
 
@@ -258,7 +263,17 @@ export const CutView: React.FC<CutViewProps> = ({
         )}
         <span className={styles.filmCounts}>
           <bdi dir='auto'>
-            {t(`${CUT_ROOT}.film.counts`, { beats: film.beatCount, shots: film.shotCount, slates: film.slateCount })}
+            {t(`${CUT_ROOT}.film.counts`, {
+              beats: t(englishFallbackPluralKey(`${CUT_ROOT}.film.beatCount`, film.beatCount), {
+                count: film.beatCount,
+              }),
+              shots: t(englishFallbackPluralKey(`${CUT_ROOT}.shotCount`, film.shotCount), {
+                count: film.shotCount,
+              }),
+              slates: t(englishFallbackPluralKey(`${CUT_ROOT}.film.slateCount`, film.slateCount), {
+                count: film.slateCount,
+              }),
+            })}
           </bdi>
         </span>
       </div>

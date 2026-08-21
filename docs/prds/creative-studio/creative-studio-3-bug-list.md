@@ -215,16 +215,18 @@ REFERENCE_PENDING_DIR, ROUTE_CATALOG` — while the same object read back throug
 CreativeStudioServiceError('provider_error'); }`. A single logged line would have shown
     `TypeError: fetch failed` immediately and saved the whole investigation.
 
-- [ ] **[BUG-084][P2][Creative Studio] Generated durations are floats and leak six decimal places into the UI** — found 2026-08-21, the first time real media existed
+- [x] **[BUG-084][P2][Creative Studio] Generated durations are floats and leak six decimal places into the UI** — found 2026-08-21, the first time real media existed
   - A `bytedance/seedance-2.0` take came back at **15.069002** seconds, not 15. Every surface that renders a duration with `{{seconds}}` therefore prints the float verbatim. On the Cut alone: the header chip reads **`178.069002s film`**, the Store Beat reads **`15.069002 actual`**, and the delta pill reads **`160.069002S OVER`**.
   - Seeded projects use whole seconds, so nothing showed this until a provider returned a real one. Every screenshot before today's generation was of integer data.
   - **The delta pill is mine.** `buildCutFilmSummary` returns `seconds: targetSeconds - filmSeconds` unrounded and `cut.film.over` renders it raw. `formatCutClock` rounds; the delta does not. The drawing reads `2s UNDER`.
   - Fix direction: round at the formatting boundary rather than at each call site. `cut.filmDuration`, `cut.actualDuration`, `cut.targetDuration` and `cut.film.under`/`over` all interpolate a raw number today.
+  - Fixed 2026-08-21: generated-duration facts in Table, Board, Cut, Coverage and Take cards now use the i18n number formatter with zero fraction digits and no digit grouping. The projection and film-summary model retain provider precision for clocks, proportional layout and export authority; only the displayed fact is rounded.
 
-- [ ] **[BUG-085][P3][Creative Studio] The Cut's counts are unconditionally plural — "1 SLATES"** — found 2026-08-21
+- [x] **[BUG-085][P3][Creative Studio] The Cut's counts are unconditionally plural — "1 SLATES"** — found 2026-08-21
   - The film panel renders `9 BEATS · 16 SHOTS · 1 SLATES`. The drawing reads `1 SLATE`.
   - `cut.film.counts` is one string with three interpolations and no plural forms, so no count can ever agree. `cut.shotCount` in the same file does it correctly with `_one`/`_other`, so the pattern is established and this simply does not follow it.
   - Mine, from the app-bar work.
+  - Fixed 2026-08-21: Beat, Shot and Slate counts are pluralized independently, then interpolated into the existing film-level ordering template so punctuation, order and bidirectional isolation remain translation-owned. Because this workspace copy currently falls back to en-US, its source-language one/other category is resolved before translation instead of applying the active locale's plural rules to English words.
 
 - [ ] **[BUG-086][P2][Creative Studio] The Cut's Beat rail is a row of tall cards, not the drawn filmstrip** — found 2026-08-21 with a populated project
   - Built: nine boxed cards roughly 100px wide and 480px tall, each carrying a drag handle and two move buttons, with titles wrapping mid-word — `Roadma p`, `Sign- off`.
