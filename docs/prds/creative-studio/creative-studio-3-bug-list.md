@@ -130,6 +130,14 @@ REFERENCE_PENDING_DIR, ROUTE_CATALOG` — while the same object read back throug
   An assertion claiming to cover it was written, found to pass for that reason rather than on merit,
   and removed.
 
+- [ ] **[BUG-077][P1][Creative Studio] A single disallowed operation silently refuses the whole Director batch, unnamed, and the user is told something untrue** — found 2026-08-21 watching the Director write a storyboard
+  - Actual: the Director produced a complete three-Beat concept with narration, called `studio_apply_edits` three times in 18 seconds, was refused each time, and reported to the user: _"I wasn't able to save the storyboard because the current project disallows storyboard mutations."_ The Table still reads `No active beats yet` and the bar still reads `0 BEATS · 0 SHOTS`.
+  - **That explanation is false.** `add_beat` and `add_shot` are both `direct` in `STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2`. The project allows storyboard mutations; the batch was refused for something else it contained.
+  - **The refusal is all-or-nothing.** `operationBatchHasDispositionV2` is `operations.every((operation) => classify(operation.kind) === disposition)`, so one non-`direct` operation anywhere in the batch rejects every operation in it, including the Beats and Shots that were permitted.
+  - **And it names nothing.** `studioServer.ts:1073` returns `errorResult('operation_not_permitted')` — a bare string, with no indication of which operation was refused or why. The Director cannot narrow the batch and retry, because it has not been told what to remove. It retried the identical batch twice, which the tool's own description forbids: _"Validation errors and unconfirmed results must not be retried."_ The refusal does not stop the retry it prohibits.
+  - **Likely trigger, not established:** the Director planned a thirty-second film — `0–10s`, `10–20s`, `20–30s` — against a project whose target is `0:18`. Reconciling that needs `edit_project`, which is `operation_not_permitted`. A single settings operation attached to a valid storyboard would produce exactly this. Confirming it needs the tool result, which is not in the dev log; the fix does not depend on which operation it was.
+  - Three separable defects, worth splitting if they are taken separately: the refusal should name the offending operation; a batch of permitted operations should not be lost to one unpermitted one; and the model should not be able to report a project-level prohibition that does not exist.
+
 ## Correctness and honesty of failures
 
 - [x] **[BUG-062][P2][Creative Studio] Three distinct Director failures all report "could not read or save this workspace"** — found 2026-08-21 while diagnosing BUG-061
