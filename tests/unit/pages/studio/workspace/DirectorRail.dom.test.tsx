@@ -999,30 +999,45 @@ describe('DirectorRail', () => {
 
   it('reuses a reciprocal owner and collapsing never unmounts it or loses composer focus state', async () => {
     harness.conversations = [exactConversation()];
+    // The collapse control now lives in the app bar, so the rail is collapsed through its prop.
+    // What this test guards is unchanged: collapsing must not unmount the owner or lose the draft.
     const rendered = render(
       <DirectorRail
         project={project({ briefConversationId: 'conversation_director' })}
         reviewedOutput={<button type='button'>Reviewed proposal</button>}
+        collapsed={false}
+        contentId='director-content'
       />
     );
     const composer = await screen.findByRole('textbox', { name: 'Director composer' });
     expect(screen.getByRole('complementary', { name: 'Creative Director' })).toBeVisible();
     fireEvent.change(composer, { target: { value: 'Keep this draft' } });
     composer.focus();
-    const hide = screen.getByRole('button', { name: 'Hide the Creative Director' });
-    fireEvent.click(hide);
 
-    expect(hide).toHaveFocus();
+    rendered.rerender(
+      <DirectorRail
+        project={project({ briefConversationId: 'conversation_director' })}
+        reviewedOutput={<button type='button'>Reviewed proposal</button>}
+        collapsed
+        contentId='director-content'
+      />
+    );
+
     expect(composer).toBeInTheDocument();
     expect(composer).toHaveValue('Keep this draft');
     expect(harness.chatMounts).toBe(1);
     expect(harness.chatUnmounts).toBe(0);
     expect(screen.getByText('Reviewed proposal')).toBeInTheDocument();
     expect(screen.getByText('Reviewed proposal').closest('[data-studio-director-reviewed-output]')).not.toBeNull();
-    expect(screen.getByRole('button', { name: 'Show the Creative Director' })).toBe(hide);
+    // The rail no longer carries a header of its own; the bar heads the project.
+    expect(screen.queryByRole('heading', { name: 'Creative Director' })).toBeNull();
 
     rendered.rerender(
-      <DirectorRail project={project({ revision: 4, briefConversationId: 'conversation_director' })} />
+      <DirectorRail
+        project={project({ revision: 4, briefConversationId: 'conversation_director' })}
+        collapsed
+        contentId='director-content'
+      />
     );
     expect(harness.chatMounts).toBe(1);
     expect(harness.create).not.toHaveBeenCalled();

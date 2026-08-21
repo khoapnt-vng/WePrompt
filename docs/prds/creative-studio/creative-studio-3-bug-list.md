@@ -178,7 +178,7 @@ REFERENCE_PENDING_DIR, ROUTE_CATALOG` — while the same object read back throug
 > were built to the spec that existed. Closing this gap needs its own task; it is not rework of
 > Tasks 10–13 against a standard they were given.
 
-- [ ] **[BUG-068][P1][Creative Studio] The designed app bar was never built; identity, stats, view switch and the primary action are separate stacked blocks** — found 2026-08-21
+- [x] **[BUG-068][P1][Creative Studio] The designed app bar was never built; identity, stats, view switch and the primary action are separate stacked blocks** — found 2026-08-21
   - Design: one compact bar carrying, in order — a project colour dot, the title, a stat strip `9 BEATS · 2:58 OF 3:00 · 5 READY`, a right-aligned `TABLE BOARD CUT` segmented control, a primary `Render…` button, and an overflow `⋯`.
   - Built: a large `H1` project title, a `0 beats · 0 shots` line beneath it, then a separate row of view links. No stat strip (probed: absent), no `Render…` control anywhere in the workspace (probed: zero buttons matching /render/), no overflow menu.
   - The stat strip is the only place the design surfaces **duration against target** (`2:58 OF 3:00`) and **readiness count**. Both are load-bearing for the costed render gate, and neither has a home in the built UI.
@@ -186,6 +186,26 @@ REFERENCE_PENDING_DIR, ROUTE_CATALOG` — while the same object read back throug
   - The child order gains one element at the front: **the rail's collapse control is now the leftmost thing in the bar** (`⇤`), and **the rail loses its own header entirely**. Order is now: collapse control, project dot, title, stat strip, flexible spacer, view chips, `Render…`, overflow.
   - Container is unchanged from the original prototype and re-measured on the answer: height **54px**, `padding: 11px 18px`, `gap: 11px`, background `rgb(251, 247, 240)`, `border-bottom: 1px solid rgb(228, 217, 198)`. The answer's prose says 56px; the computed value in both drawings is 54px. Treat 54px as authoritative and the prose as rounding.
   - **Touches `DirectorRail/index.tsx`** to delete its `<header>` and relocate the toggle. That is the same file as BUG-061 and BUG-062. Different regions — the throw sites are near line 479, the header near line 999 — so git will usually merge cleanly, but sequence it after those two rather than alongside.
+
+  **Built 2026-08-21.** The bar spans the Studio surface above both panes and does not move when the
+  rail is toggled. Measured live at 1178px wide and 55px tall against the drawn 54px. Order as drawn:
+  the rail's collapse control, the project dot, the title, the stat strip, the flexible spacer, then
+  the view chips. The rail lost its own header, and its collapse state now lives in the shell.
+
+  The stat strip finally has a home for the two facts nothing else surfaced — the film against its
+  target and the ready count — reading `0 BEATS · 0 SHOTS  0:00 OF 0:18 TARGET  0 READY` on an empty
+  project. The title is a box with the drawn 320px ceiling, 128px floor and tail ellipsis.
+
+  **Two controls are deliberately not built.** `Render…` has no action to invoke: no render provider
+  exists in the IPC bridge, and inventing one would be inventing a spend control. The overflow `⋯`
+  has nothing to hold until it does. Both are the costed render gate's work, not fidelity work, and
+  the bar leaves room for them exactly where the drawing puts them.
+
+  **Two defects found only by looking at it, after every test passed.** The shell was a flex row, so
+  the bar laid out _beside_ the panes at 753px wide and 828px tall rather than above them. And the
+  bar and the active chip were bothwhite — the same token — so the active view was marked with nothing.
+  jsdom applies no CSS-module rules, so neither was visible to any test until an assertion was added
+  for each: that the shell is a column, and that the chip's ground differs from the bar's.
 
 - [ ] **[BUG-069][P1][Creative Studio] The type scale is roughly double the design throughout** — found 2026-08-21, measured
   - Project title: design **Manrope 700 at 14.5px**; built **Manrope 700 at 29px** — exactly 2×.

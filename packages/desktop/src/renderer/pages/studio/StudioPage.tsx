@@ -29,6 +29,7 @@ import {
   hasGenerationAffectingWorkspaceDrafts,
   handoffGateDraft,
   majorUnitsToMinorUnits,
+  buildStudioBarStats,
   projectWorkspace,
   selectionGateDraft,
   useSpendGate,
@@ -1297,6 +1298,7 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
       <WorkspaceShell
         project={project}
         activeView={activeView}
+        stats={projection === null ? undefined : buildStudioBarStats(projection)}
         notice={
           actionErrorMessageKey === null && workspaceErrorMessageKey === null && routeErrorMessageKey === null
             ? undefined

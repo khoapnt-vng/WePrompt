@@ -583,9 +583,14 @@ describe('StudioPage schema-2 cutover', () => {
     const directorRail = document.querySelector('[data-studio-director-rail]');
     const workPanel = document.querySelector('[data-studio-work-panel]');
     const conversationOwner = document.querySelector('[data-studio-director-conversation-owner]');
+    // The app bar heads the project and both panes sit under it, so the rail and the work panel are
+    // siblings inside the panes row rather than direct children of the shell. What this guards is
+    // unchanged: they are fixed siblings and a view change remounts neither.
+    const panes = document.querySelector('[data-studio-panes]');
     expect(shell).not.toBeNull();
-    expect(directorRail?.parentElement).toBe(shell);
-    expect(workPanel?.parentElement).toBe(shell);
+    expect(panes?.parentElement).toBe(shell);
+    expect(directorRail?.parentElement).toBe(panes);
+    expect(workPanel?.parentElement).toBe(panes);
     expect(directorRail?.nextElementSibling).toBe(workPanel);
     expect(conversationOwner).not.toBeNull();
     await waitFor(() => expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalledTimes(1));
@@ -1974,18 +1979,21 @@ describe('StudioPage schema-2 cutover', () => {
     await screen.findByRole('heading', { name: 'Launch film' });
     await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
     const actions = capturedBeatPanelActions();
-    const toggle = document.createElement('button');
-    toggle.dataset.studioDirectorToggle = '';
-    toggle.setAttribute('aria-expanded', 'false');
-    document.querySelector('[data-studio-workspace]')?.append(toggle);
-    const click = vi.spyOn(toggle, 'click');
+    // The app bar carries the real control, so this drives that rather than an injected stand-in.
+    const toggle = document.querySelector<HTMLButtonElement>('[data-studio-director-toggle]');
+    expect(toggle).not.toBeNull();
+    // Collapse it first: a request made while the rail is shut has to reopen it.
+    fireEvent.click(toggle!);
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    const click = vi.spyOn(toggle!, 'click');
 
     act(() => actions.requestReviewedRederive('shot_3'));
     await waitFor(() => expect(document.activeElement).toBe(toggle));
     expect(click).toHaveBeenCalledTimes(1);
     expect(screen.getByText('conversation.creativeStudio.workspace.beatPanel.directorRequestHint')).toBeVisible();
 
-    toggle.setAttribute('aria-expanded', 'true');
+    // Now open, a further request focuses it without toggling it shut again.
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-expanded', 'true'));
     act(() => actions.requestResplit('beat_1'));
     await waitFor(() => expect(document.activeElement).toBe(toggle));
     expect(click).toHaveBeenCalledTimes(1);

@@ -28,7 +28,6 @@ import type {
   StudioRendererProjectV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { uuid } from '@/common/utils';
-import SidebarIcon from '@/renderer/components/base/SidebarIcon';
 import { useProvidersQuery } from '@/renderer/hooks/agent/useModelProviderList';
 import { useConversationHistoryContext } from '@/renderer/hooks/context/ConversationHistoryContext';
 import { buildContextHandoffExtraPatch } from '@/renderer/pages/conversation/contextHandoff/contextConversationUpdate';
@@ -830,24 +829,24 @@ const DirectorConversationSurface: React.FC<{ conversation: DirectorConversation
 export type DirectorRailProps = {
   project: StudioRendererProjectV2;
   reviewedOutput?: React.ReactNode;
+  /** Owned by the shell: the collapse control lives in the app bar, not in this pane. */
+  collapsed: boolean;
+  contentId: string;
 };
 
 /** A single docked owner: collapsing or changing workspace views never unmounts its chat surface. */
-export const DirectorRail: React.FC<DirectorRailProps> = ({ project, reviewedOutput }) => {
+export const DirectorRail: React.FC<DirectorRailProps> = ({ project, reviewedOutput, collapsed, contentId }) => {
   const { t } = useTranslation();
   const { allConversations, hasLoadedConversations } = useConversationHistoryContext();
   const { current_model, modelList } = useGuidModelSelection('aionrs');
   const { data: providers, error: providersError } = useProvidersQuery();
   const [state, setState] = useState<DirectorState>({ kind: 'loading', projectId: project.id });
-  const [collapsed, setCollapsed] = useState(false);
   const stateRef = useRef(state);
   const projectRef = useRef(project);
   const conversationsRef = useRef(allConversations);
   const mountedRef = useRef(true);
   const boundResolutionVersion = useRef(0);
   const contentRef = useRef<HTMLDivElement>(null);
-  const headerRef = useRef<HTMLElement>(null);
-  const contentId = useId();
   stateRef.current = state;
   projectRef.current = project;
   conversationsRef.current = allConversations;
@@ -1126,19 +1125,7 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({ project, reviewedOut
       });
   }, [effectiveRules, visibleState]);
 
-  const handleCollapse = useCallback((): void => {
-    if (!collapsed && contentRef.current?.contains(document.activeElement)) {
-      headerRef.current?.querySelector<HTMLElement>('[data-studio-director-toggle]')?.focus();
-    }
-    setCollapsed((current) => !current);
-  }, [collapsed]);
-
   const title = t('conversation.creativeStudio.workspace.director.title');
-  const toggleLabel = t(
-    collapsed
-      ? 'conversation.creativeStudio.workspace.director.show'
-      : 'conversation.creativeStudio.workspace.director.hide'
-  );
   const recoverLabel =
     visibleState.kind === 'dangling' || visibleState.kind === 'conflict'
       ? t('conversation.creativeStudio.workspace.director.startFresh')
@@ -1156,21 +1143,6 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({ project, reviewedOut
       className={`${styles.rail} ${collapsed ? styles.collapsed : ''}`}
       data-studio-director-rail
     >
-      <header ref={headerRef} className={styles.header}>
-        <h2 className={styles.title}>{title}</h2>
-        <Button
-          type='text'
-          shape='circle'
-          icon={<SidebarIcon />}
-          className={styles.toggle}
-          data-studio-director-toggle
-          aria-controls={contentId}
-          aria-expanded={!collapsed}
-          aria-label={toggleLabel}
-          title={toggleLabel}
-          onClick={handleCollapse}
-        />
-      </header>
       <div ref={contentRef} id={contentId} className={styles.content} aria-hidden={collapsed} inert={collapsed}>
         <div className={styles.owner} data-studio-director-conversation-owner>
           {visibleState.kind === 'ready' ? (

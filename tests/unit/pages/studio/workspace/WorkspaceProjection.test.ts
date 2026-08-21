@@ -15,6 +15,7 @@ import type {
 } from '@/common/types/project/creativeStudioTypes';
 import {
   hasGenerationAffectingWorkspaceDrafts,
+  buildStudioBarStats,
   projectWorkspace,
   useWorkspaceDrafts,
 } from '@/renderer/pages/studio/components/Workspace';
@@ -196,6 +197,40 @@ const cascadeRow = (
   canRetryConditioningFrame: waitingReason === 'conditioning_failed',
   canCancelWaiting: false,
   waitingReason,
+});
+
+describe('buildStudioBarStats', () => {
+  const beat = (displayState: string, shotCount: number) =>
+    ({ displayState, shots: Array.from({ length: shotCount }, (_, i) => ({ id: `s${i}` })) }) as never;
+
+  it('counts the film the way the app bar states it', () => {
+    // The drawn strip reads "9 BEATS · 2:58 OF 3:00 · 5 READY", so it needs the Beat count, the
+    // clock pair, and how many Beats are actually ready — not how many exist.
+    const stats = buildStudioBarStats({
+      activeBeats: [beat('ready', 2), beat('rendering', 3), beat('ready', 1), beat('no_coverage', 0)],
+      cut: { filmDurationSeconds: 178, targetDurationSeconds: 180 },
+    } as never);
+
+    expect(stats).toEqual({ beatCount: 4, shotCount: 6, readyCount: 2, filmSeconds: 178, targetSeconds: 180 });
+  });
+
+  it('counts only Beats that are ready, not those merely part done or rendering', () => {
+    const stats = buildStudioBarStats({
+      activeBeats: [beat('part_done', 1), beat('rendering', 1), beat('stale', 1), beat('draft', 1)],
+      cut: { filmDurationSeconds: null, targetDurationSeconds: null },
+    } as never);
+    expect(stats.readyCount).toBe(0);
+  });
+
+  it('carries an unknown clock through rather than reporting zero', () => {
+    // A film whose length is not yet known must not read as a zero-length film in the bar.
+    const stats = buildStudioBarStats({
+      activeBeats: [],
+      cut: { filmDurationSeconds: null, targetDurationSeconds: 180 },
+    } as never);
+    expect(stats.filmSeconds).toBeNull();
+    expect(stats.targetSeconds).toBe(180);
+  });
 });
 
 describe('projectWorkspace', () => {

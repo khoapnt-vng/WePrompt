@@ -42,7 +42,7 @@ export type {
   WorkspaceDraftValue,
   WorkspaceSelection,
 } from './useWorkspaceDrafts';
-export { projectWorkspace } from './workspaceProjection';
+export { buildStudioBarStats, projectWorkspace } from './workspaceProjection';
 export type {
   WorkspaceBinnedBeatProjection,
   WorkspaceBinnedShotProjection,
@@ -59,6 +59,7 @@ export type {
   WorkspaceProjection,
   WorkspaceShotProjection,
   WorkspaceTakeProjection,
+  StudioBarStats,
 } from './workspaceProjection';
 export { WorkspaceShell } from './WorkspaceShell';
 export type { WorkspaceShellProps } from './WorkspaceShell';

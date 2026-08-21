@@ -62,6 +62,8 @@ const expectedLeaves = [
   'project.loading',
   'project.notFound',
   'project.structure',
+  'project.against',
+  'project.ready',
   'project.unsupportedPrototype',
   'views.title',
   'views.table',

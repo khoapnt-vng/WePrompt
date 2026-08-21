@@ -40,10 +40,35 @@ describe('workspace chrome type scale', () => {
   it('sets the project title at the drawn size rather than inheriting a heading default', () => {
     // Drawn: Manrope 700 at 14.5px. The build inherited a 29px h1 — twice the design, and larger
     // than the largest type anywhere in the drawing, which is the film clock at 23px.
-    const rule = block(css(), '.workspaceHeader h1');
+    const rule = block(css(), '.projectTitle');
     expect(rule).toMatch(/font-size:\s*14\.5px/);
     expect(rule).toMatch(/font-family:\s*var\(--font-display\)/);
     expect(rule).toMatch(/font-weight:\s*var\(--fw-bold\)/);
+  });
+
+  it('gives the title a ceiling and a floor rather than a fixed width', () => {
+    // The drawing rules a 320px ceiling and a 128px floor with tail ellipsis. The floor is what makes
+    // the bar shed its own derived counts before it eats further into a name the user typed.
+    const rule = block(css(), '.projectTitle');
+    expect(rule).toMatch(/max-inline-size:\s*320px/);
+    expect(rule).toMatch(/min-inline-size:\s*128px/);
+    expect(rule).toMatch(/text-overflow:\s*ellipsis/);
+    expect(rule).toMatch(/white-space:\s*nowrap/);
+  });
+
+  it('spans the surface with a spacer that absorbs the slack', () => {
+    // The bar heads the project and both panes sit under it, so it must not reassemble itself when
+    // the rail is toggled. The spacer is what keeps identity at the start and controls at the end.
+    expect(block(css(), '.appBar')).toMatch(/display:\s*flex/);
+    expect(block(css(), '.barSpacer')).toMatch(/flex:\s*1 1 auto/);
+  });
+
+  it('stacks the bar above the panes rather than beside them', () => {
+    // The shell is a flex container holding the bar and the panes row. Left as a row — which it was
+    // — the bar lays out beside the panes at a third of the width and the full height, and every
+    // test still passes because jsdom applies none of this.
+    expect(block(css(), '.shell')).toMatch(/flex-direction:\s*column/);
+    expect(block(css(), '.panes')).toMatch(/display:\s*flex/);
   });
 
   it('carries no type larger than the drawing does', () => {
@@ -87,5 +112,13 @@ describe('workspace view switch treatment', () => {
     const active = block(css(), '.viewLinkActive');
     expect(active).toMatch(/background:/);
     expect(active).not.toMatch(/font-weight/);
+
+    // A ground only marks the chip if it differs from the bar's. Both set to the same token marks
+    // the active view with nothing — which is what shipped until it was looked at.
+    const barGround = /background:\s*([^;]+);/.exec(block(css(), '.appBar'))?.[1]?.trim();
+    const chipGround = /background:\s*([^;]+);/.exec(active)?.[1]?.trim();
+    expect(barGround).toBeDefined();
+    expect(chipGround).toBeDefined();
+    expect(chipGround).not.toBe(barGround);
   });
 });

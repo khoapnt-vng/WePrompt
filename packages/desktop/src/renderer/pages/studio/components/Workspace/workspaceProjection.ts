@@ -1247,3 +1247,34 @@ export const projectWorkspace = (
     conditioningFailures: matchedChainStatus?.conditioningFailures.map((row) => ({ ...row })) ?? [],
   };
 };
+
+export type StudioBarStats = {
+  beatCount: number;
+  shotCount: number;
+  /** Beats that are actually ready, not merely present. */
+  readyCount: number;
+  filmSeconds: number | null;
+  targetSeconds: number | null;
+};
+
+/**
+ * What the app bar states about the film: how many Beats it holds, how many Shots those carry, how
+ * many are ready, and the film's length against the target it is authored to. An unknown length is
+ * carried through as null rather than defaulted to zero — a film that has not been measured must not
+ * read as a film of no length.
+ */
+export const buildStudioBarStats = (projection: WorkspaceProjection): StudioBarStats => {
+  let shotCount = 0;
+  let readyCount = 0;
+  for (const beat of projection.activeBeats) {
+    shotCount += beat.shots.length;
+    if (beat.displayState === 'ready') readyCount += 1;
+  }
+  return {
+    beatCount: projection.activeBeats.length,
+    shotCount,
+    readyCount,
+    filmSeconds: projection.cut.filmDurationSeconds,
+    targetSeconds: projection.cut.targetDurationSeconds,
+  };
+};

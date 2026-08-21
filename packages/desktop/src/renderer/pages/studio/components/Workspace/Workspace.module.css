@@ -1,9 +1,11 @@
+/* A column: the app bar heads the project and the two panes share the row beneath it. */
 .shell {
   display: flex;
   inline-size: 100%;
   min-inline-size: 0;
   min-block-size: 0;
   flex: 1;
+  flex-direction: column;
   align-items: stretch;
   overflow: hidden;
 }
@@ -41,21 +43,30 @@
 }
 
 /* Drawn at Manrope 700 14.5px. Left to the heading default it renders at 29px — twice the design,
-   and larger than the drawing's largest type anywhere, which is the film clock at 23px. */
-.workspaceHeader h1 {
+   and larger than the drawing's largest type anywhere, which is the film clock at 23px.
+   A box, not a length: it fills what the bar can spare and truncates past its ceiling, and stops
+   shrinking at its floor so the bar sheds its own counts rather than eating further into the name. */
+.projectTitle {
+  overflow: hidden;
+  flex: 0 1 auto;
+  margin: 0;
+  max-inline-size: 320px;
+  min-inline-size: 128px;
   color: var(--text-primary);
   font-family: var(--font-display);
   font-size: 14.5px;
   font-weight: var(--fw-bold);
   letter-spacing: -0.145px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+/* Inside the bar, so it carries no boundary of its own — the bar's own edge is the boundary. */
 .viewNavigation {
   display: flex;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
   gap: 8px;
-  border-block-end: 1px solid var(--color-border-2);
-  padding-block-end: 10px;
 }
 
 /* Drawn as IBM Plex Mono 9.5px chips with 0.76px tracking, 6px corners and 5x11 padding. The
@@ -103,4 +114,64 @@
   color: var(--color-danger-6);
   background: var(--color-danger-light-1);
   overflow-wrap: anywhere;
+}
+
+/* One row heading the project. Both panes sit under it, so toggling the rail must not move it. */
+.appBar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 11px;
+  border-block-end: 1px solid var(--color-border-2);
+  padding-block: 11px;
+  padding-inline: 18px;
+  min-inline-size: 0;
+  /* Tinted, so the active chip's white ground reads against it — the drawing sets a cream bar and a
+     white chip. Both white would mark the active view with nothing at all. */
+  background: var(--color-fill-1);
+}
+
+.panes {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: stretch;
+  min-block-size: 0;
+  min-inline-size: 0;
+  overflow: hidden;
+}
+
+.railToggle {
+  flex: 0 0 auto;
+}
+
+.projectDot {
+  flex: 0 0 auto;
+  border-radius: 6px;
+  inline-size: 22px;
+  block-size: 22px;
+  background: var(--color-primary-6, var(--danger));
+}
+
+.statStrip {
+  display: flex;
+  overflow: hidden;
+  flex: 0 1 auto;
+  gap: 10px;
+  min-inline-size: 0;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* Absorbs the slack so identity stays at the start and the controls stay at the end. */
+.barSpacer {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+}
+
+.backLink {
+  align-self: start;
 }
