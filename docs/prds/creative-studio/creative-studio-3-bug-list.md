@@ -288,6 +288,33 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - Same anti-pattern as BUG-062: a distinct failure wearing a generic label. Two independent instances of it in one session.
   - **Fixed by `b01c565ee`** — validation now carries a seven-value, body-free failure reason through the service and IPC boundary to localized dialog and row-level messages.
 
+- [ ] **[BUG-091][P3][Creative Studio] The Cut states the film, the target and the gap between them in two different formats** — found 2026-08-21 while verifying BUG-084
+  - The film summary reads **`The film · 2:57 · of 0:18 target · 159s over`**. The total and the target are clocks; the difference between those same two numbers is raw seconds. A reader has to convert in their head to check that the third number follows from the first two.
+  - Source: `Cut/index.tsx:269-286` renders `filmClock` and `ofTarget` through `formatCutClock`, then renders the delta through `cut.film.over` / `cut.film.under`, whose strings end in a literal `s`.
+  - **Not a Codex regression, and not new.** The `{{seconds}}s` strings predate their change — they only added the rounding that BUG-084 asked for. The mixed format came in with the film summary I wrote, so this is mine.
+  - The app bar already sets the house format for film-level durations: `{{film}} of {{target}} target` rendered as clocks. Making the delta a clock too would match it. The counter-argument is that `2:39 over` reads worse than `159s over` for a small gap — so this is a judgement call, not an obvious correction.
+
+- [ ] **[BUG-092][P2][Platform] Presentation-run recovery can never work: the IPC schema demands a UUID, conversation ids are eight characters** — found 2026-08-21, root-caused with a probe in a restarted dev build
+  - Every project creation throws an unhandled page error. The rejected call is **`presentation-runs.list-recoverable`**, and the failing field is `conversation_id`:
+    `issues=[{"validation":"regex","code":"invalid_string","path":["conversation_id"]}]`
+  - `payloadSchemas.ts:185-187` requires a strict RFC-4122 UUID: `/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i`. Read straight from the running backend, the six most recent conversation ids are `d0921953`, `a4aad241`, `b27504a8`, `7c5d6c3b`, `1b6c08c2`, `3adcd3af` — **eight hex characters, none of them a UUID**.
+  - So this is not an edge case with a bad id. **No conversation can ever satisfy the schema**, and the call fails 100% of the time. Recovering an interrupted presentation run is dead: `usePresentationTemplates.ts:234` catches the rejection and shows `recovery.loadError`, or nothing when `showFailure` is false.
+  - The renderer mints `uuid(36)` when it _asks_ for a conversation; aioncore mints its own short id and that is what is stored. The schema was written against the request, not against the record.
+  - **Fourth recurrence of the UUID-vs-short-id class** in this codebase. Loosening this one regex fixes this call and leaves the class intact — worth deciding on a canonical id type rather than patching the fourth site.
+
+- [ ] **[BUG-093][P2][Platform] The IPC payload rejection names neither the operation nor the field** — found 2026-08-21
+  - `[adapter] Native IPC request rejected: invalid operation payload`, and nothing else. Eight occurrences in one dev log with no way to tell them apart.
+  - `parseNativeBridgePayload` (`payloadSchemas.ts:905-911`) has **both** `providerKey` and `result.error.issues` in scope and throws them away.
+  - The cost is concrete: identifying BUG-092 needed a temporary probe, an app restart, and a rebuild, because nothing in the message, the log or the renderer console said which of the 140 operations had failed. Adding the operation name and the zod issue path would have made it a ten-second read.
+  - Renderer-facing text should stay generic — this is main-process logging, not a user message.
+
+- [ ] **[BUG-094][P3][Platform] A version-skewed backend binary is reported to the user as a missing-files installation problem** — found 2026-08-21, hit while restarting the dev app
+  - `~/.cargo/bin/aioncore` is **0.1.44**; the bundled binary is **0.1.55**. The dev Electron's `Resources` has no `bundled-aioncore`, so `resolveBinaryPath` falls through to the system PATH and picks the older one, which cannot open a database migrated by the newer one — `BOOTSTRAP_DATA_INIT_FAILED stage="database.open"`.
+  - The window then reads **"WePrompt installation is incomplete — this installation is missing required local resources"** and advises a reinstall. Nothing was missing; a binary was too old. A reinstall would not have fixed it.
+  - `backendStartupFailure.ts` classifies carefully — architecture mismatch, incomplete installation, database lineage, recoverable corruption — but `stage="database.open"` matches none of them and lands in a bucket whose copy asserts missing files. `classifyIncompleteInstallation` even guards on `isPackaged === true`, so in dev it cannot be the intended classification.
+  - Honest framing: I reached this by restarting the dev app, not through normal use. It would still reach a packaged user after a downgrade, and the advice it gives them is wrong.
+  - Dev workaround, no repo change: put the bundled binary first on PATH.
+
 ## Coverage and polish
 
 - [x] **[BUG-064][P2][Creative Studio] The video allowlist covers 6 of the 24 models OpenRouter serves, with no way to extend it** — found 2026-08-21, verified against the live catalogue
@@ -541,6 +568,26 @@ a fidelity fix, so it is filed as BUG-073.
   state uses, in both the folded and columnar forms, where it had been the muted text colour.
 
 ## Verification notes
+
+### Verified live 2026-08-21, after Codex's fixes
+
+Measured in the running app against the project that holds real generated media, because none of
+these four can be proved by a test that renders into jsdom.
+
+| Bug     | Claim                       | What the DOM reported                                            |
+| ------- | --------------------------- | ---------------------------------------------------------------- |
+| BUG-084 | durations rounded           | `15s source`; no six-decimal float anywhere in the Cut           |
+| BUG-085 | counts pluralized           | `1 Slate`, `9 Beats`, `16 Shots`, `2 Shots`                      |
+| BUG-086 | flat proportional filmstrip | 64px tall, 9 segments each 62px, widths 76→167 tracking duration |
+| BUG-087 | handle off the label        | label y 671–690, handles y 723–753, zero overlapping elements    |
+
+BUG-087 is worth a note: the handles sit at x 349–367, still inside the label's horizontal span. The
+fix works by putting them in a different grid row, not by moving them sideways — so a future change
+that collapses those rows brings the defect straight back.
+
+Codex also removed `FILMSTRIP_TITLE_MIN_WIDTH_PX = 112` and `filmstripShowsTitle` in favour of a CSS
+rule. That was the right call: 112 was a midpoint I guessed between two observed widths and flagged
+as needing the designer's confirmation, and it is better gone than pinned by a test.
 
 - The unit suite is green on the files touched here — `studioI18n.test.ts` and `CutView.dom.test.tsx` pass, 17 tests. None of the seven bugs above is caught by a test, and BUG-061 is actively hidden by one.
 - The 11 non-`en-US` locales are missing the new Cut keys **by design**, pinned by `studioI18n.test.ts` — "defers all 11 translations and falls each locale back to the complete en-US workspace". Not a bug; recorded so it is not filed as one.
