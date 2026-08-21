@@ -1010,7 +1010,12 @@ describe('DirectorRail', () => {
       />
     );
     const composer = await screen.findByRole('textbox', { name: 'Director composer' });
-    expect(screen.getByRole('complementary', { name: 'Creative Director' })).toBeVisible();
+    const rail = screen.getByRole('complementary', { name: 'Creative Director' });
+    const expandedClassName = rail.className;
+    const content = document.getElementById('director-content')!;
+    expect(rail).toBeVisible();
+    expect(content).toHaveAttribute('aria-hidden', 'false');
+    expect(content).not.toHaveAttribute('inert');
     fireEvent.change(composer, { target: { value: 'Keep this draft' } });
     composer.focus();
 
@@ -1025,6 +1030,9 @@ describe('DirectorRail', () => {
 
     expect(composer).toBeInTheDocument();
     expect(composer).toHaveValue('Keep this draft');
+    expect(rail.className).not.toBe(expandedClassName);
+    expect(content).toHaveAttribute('aria-hidden', 'true');
+    expect(content).toHaveAttribute('inert');
     expect(harness.chatMounts).toBe(1);
     expect(harness.chatUnmounts).toBe(0);
     expect(screen.getByText('Reviewed proposal')).toBeInTheDocument();

@@ -43,8 +43,7 @@ describe('the rail default follows the view', () => {
     expect(a).toBe(railPreferenceKey('project_1', 'table'));
   });
 
-  it('keeps a project id out of the key it cannot be confused by', () => {
-    // Ids are opaque and may contain the separator; the key must still identify one project and view.
-    expect(railPreferenceKey('a:b', 'table')).not.toBe(railPreferenceKey('a', 'b:table' as never));
+  it('length-tags an opaque project id in the persisted key', () => {
+    expect(railPreferenceKey('a.b', 'table')).toBe('aionui.studio.railCollapsed.3.a.b.table');
   });
 });

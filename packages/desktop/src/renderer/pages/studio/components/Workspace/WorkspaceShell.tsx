@@ -5,7 +5,7 @@
  */
 
 import { Button } from '@arco-design/web-react';
-import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 
@@ -22,7 +22,18 @@ export type WorkspaceShellProps = {
   stats?: StudioBarStats;
   reviewedOutput?: React.ReactNode;
   notice?: React.ReactNode;
+  projectMenu?: React.ReactNode;
   children: React.ReactNode;
+};
+
+export type WorkspaceShellHandle = {
+  /** Opens and focuses the Director without changing the person's persisted collapse choice. */
+  revealDirector: (expectedScope: { projectId: string; view: StudioView }) => boolean;
+};
+
+type DirectorFocusRequest = {
+  id: number;
+  scopeKey: string;
 };
 
 /** The rail's drawn width, and the range a person may drag it through. */
@@ -124,33 +135,56 @@ const clock = (seconds: number | null | undefined): string | null => {
  * carries is film-scoped, and it must not reassemble itself when the Director rail is toggled. The
  * rail therefore has no header of its own and its collapse control is the leftmost thing in the bar.
  */
-export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
-  project,
-  activeView,
-  stats,
-  reviewedOutput,
-  notice,
-  children,
-}) => {
+export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceShellProps>(function WorkspaceShell(
+  { project, activeView, stats, reviewedOutput, notice, projectMenu, children },
+  ref
+) {
   const { t } = useTranslation();
   const viewHeadingId = `studio-${activeView}-heading`;
   const railContentId = useId();
+  const railScopeKey = railPreferenceKey(project.id, activeView);
   const [railCollapsed, setRailCollapsed] = useState(() =>
     railCollapsedForView(activeView, readStoredRailCollapsed(project.id, activeView))
   );
 
-  // The default follows the view, and a choice made in one view does not carry to another.
-  useEffect(() => {
-    setRailCollapsed(railCollapsedForView(activeView, readStoredRailCollapsed(project.id, activeView)));
-  }, [activeView, project.id]);
+  const railToggleRef = useRef<HTMLButtonElement | null>(null);
+  const nextDirectorFocusRequestId = useRef(0);
+  const [directorFocusRequest, setDirectorFocusRequest] = useState<DirectorFocusRequest | null>(null);
+
+  // Reset before paint so one view never displays another view's choice. When a navigation leaves
+  // focus inside a rail that starts collapsed, return focus to the control that can reveal it.
+  useLayoutEffect(() => {
+    setDirectorFocusRequest(null);
+    const next = railCollapsedForView(activeView, readStoredRailCollapsed(project.id, activeView));
+    const content = document.getElementById(railContentId);
+    if (next && content?.contains(document.activeElement)) railToggleRef.current?.focus();
+    setRailCollapsed(next);
+  }, [activeView, project.id, railContentId]);
 
   const toggleRail = useCallback((): void => {
-    setRailCollapsed((current) => {
-      const next = !current;
-      storeRailCollapsed(project.id, activeView, next);
-      return next;
-    });
-  }, [activeView, project.id]);
+    setDirectorFocusRequest(null);
+    const next = !railCollapsed;
+    storeRailCollapsed(project.id, activeView, next);
+    setRailCollapsed(next);
+  }, [activeView, project.id, railCollapsed]);
+
+  const revealDirector = useCallback(
+    (expectedScope: { projectId: string; view: StudioView }): boolean => {
+      if (expectedScope.projectId !== project.id || expectedScope.view !== activeView) return false;
+      setRailCollapsed(false);
+      nextDirectorFocusRequestId.current += 1;
+      setDirectorFocusRequest({ id: nextDirectorFocusRequestId.current, scopeKey: railScopeKey });
+      return true;
+    },
+    [activeView, project.id, railScopeKey]
+  );
+
+  useImperativeHandle(ref, () => ({ revealDirector }), [revealDirector]);
+
+  useLayoutEffect(() => {
+    if (railCollapsed || directorFocusRequest?.scopeKey !== railScopeKey) return;
+    railToggleRef.current?.focus();
+  }, [directorFocusRequest, railCollapsed, railScopeKey]);
   const [railWidth, setRailWidth] = useState(readStoredRailWidth);
   const dragRef = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
   const railRef = useRef<HTMLDivElement | null>(null);
@@ -178,6 +212,9 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
     <div className={styles.shell} data-studio-workspace-shell>
       <header className={styles.appBar} data-studio-app-bar data-studio-project-header>
         <Button
+          ref={(node) => {
+            railToggleRef.current = node instanceof HTMLButtonElement ? node : null;
+          }}
           type='text'
           shape='circle'
           icon={<SidebarIcon />}
@@ -231,6 +268,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
             </Link>
           ))}
         </nav>
+        {projectMenu}
       </header>
       <div className={styles.panes} data-studio-panes>
         <DirectorRail
@@ -298,4 +336,4 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
       </div>
     </div>
   );
-};
+});

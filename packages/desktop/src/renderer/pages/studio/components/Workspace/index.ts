@@ -31,6 +31,7 @@ export type {
   SpendGateState,
 } from './spendGate';
 export {
+  countStoredWorkspaceDrafts,
   hasGenerationAffectingWorkspaceDrafts,
   updateWorkspaceSelection,
   useWorkspaceDrafts,
@@ -62,8 +63,15 @@ export type {
   StudioBarStats,
 } from './workspaceProjection';
 export { WorkspaceShell } from './WorkspaceShell';
-export type { WorkspaceShellProps } from './WorkspaceShell';
-export { BoardView, CutView, TableView, WorkspaceControls } from './Views';
+export type { WorkspaceShellHandle, WorkspaceShellProps } from './WorkspaceShell';
+export {
+  BoardView,
+  CutView,
+  TableView,
+  WorkspaceControls,
+  WorkspaceProjectMenu,
+  countStoredStudioRuleDrafts,
+} from './Views';
 export type {
   BoardActions,
   BoardViewProps,
@@ -75,4 +83,5 @@ export type {
   TableViewProps,
   WorkspaceControlsProps,
   WorkspaceMutationCallbacks,
+  WorkspaceProjectMenuProps,
 } from './Views';

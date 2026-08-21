@@ -900,6 +900,11 @@
       "capacityMismatch": "你有 {{count}} 張啟用的參考圖，但此圖片引擎僅支援 {{maximum}} 張。在移除參考圖或更換、重新驗證引擎之前，無法產生新的參考靜幀。",
       "importError": "無法新增參考圖，請再試一次。"
     },
+    "workspace": {
+      "controls": {
+        "briefAndRulesTitle": "簡報與規則"
+      }
+    },
     "rules": {
       "open": "規則",
       "title": "規則",

@@ -900,6 +900,11 @@
       "capacityMismatch": "활성 참조가 {{count}}개이지만 이 이미지 엔진은 {{maximum}}개를 지원합니다. 참조를 제거하거나 엔진을 변경 또는 재검증할 때까지 새 참조 스틸 생성이 차단됩니다.",
       "importError": "참조를 추가하지 못했습니다. 다시 시도하세요."
     },
+    "workspace": {
+      "controls": {
+        "briefAndRulesTitle": "브리프 및 규칙"
+      }
+    },
     "rules": {
       "open": "규칙",
       "title": "규칙",

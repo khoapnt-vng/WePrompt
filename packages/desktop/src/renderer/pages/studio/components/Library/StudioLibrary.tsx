@@ -17,6 +17,8 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 
 import { rememberStudioView, resolveStudioEntryView, studioViewPath } from '../../studioPhaseRoute';
+import { purgeStoredStudioRuleDrafts } from '../Workspace/Views/WorkspaceProjectMenu';
+import { purgeStoredWorkspaceDrafts } from '../Workspace/useWorkspaceDrafts';
 import { Composer } from './Composer';
 import { ProjectCard } from './ProjectCard';
 import styles from './StudioLibrary.module.css';
@@ -139,6 +141,8 @@ export const StudioLibrary: React.FC = () => {
         setDeleteErrorMessageKey(result.error.messageKey);
         return;
       }
+      purgeStoredStudioRuleDrafts(deleteCandidate.id);
+      purgeStoredWorkspaceDrafts(deleteCandidate.id);
       setDeleteCandidate(null);
       await refreshProjects();
     } catch {

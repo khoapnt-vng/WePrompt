@@ -75,6 +75,7 @@ const creativeStudioRuntimeManifest = [
   'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/Cut/index.tsx',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/Table/index.tsx',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/WorkspaceControls.tsx',
+  'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/WorkspaceProjectMenu.tsx',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/index.ts',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/WorkspaceShell.tsx',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/index.ts',

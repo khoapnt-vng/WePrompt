@@ -910,6 +910,11 @@
       "capacityMismatch": "Você tem {{count}} referências ativas, mas este mecanismo de imagem aceita {{maximum}}. A geração de novas imagens de referência fica bloqueada até você remover referências ou trocar ou revalidar o mecanismo.",
       "importError": "Não foi possível adicionar a referência. Tente novamente."
     },
+    "workspace": {
+      "controls": {
+        "briefAndRulesTitle": "Brief e regras"
+      }
+    },
     "rules": {
       "open": "Regras",
       "title": "Regras",

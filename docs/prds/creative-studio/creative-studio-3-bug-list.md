@@ -242,24 +242,17 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - Also an accessibility defect: two identical sibling headings at the same level give screen-reader users no way to tell the wrapper from the panel.
   - **Fixed by `d1f99a2b0`** — Cut now relies on the workspace's single canonical level-two heading while retaining its independently named Film Cut region, with integrated DOM and E2E heading-count coverage.
 
-- [ ] **[BUG-067][P2][Creative Studio] The project-settings and spend-policy forms are not in the design at all, and render under all three views** — found 2026-08-21; **open question resolved 2026-08-21 against the prototype**
-  - "Project settings" and "Brief, routes, and spend policy" render identically below Table, Board and Cut.
-  - This entry originally asked whether the repetition was intentional. It is worse than repetition: the hash-pinned prototype contains **no project-settings surface anywhere** — probed for `project settings`, `spend policy` and `aspect ratio` across the whole document, all absent.
-  - So the question is not which view should host the form, but whether the form belongs in the workspace at all. Resolve with the designer before moving it.
+- [x] **[BUG-067][P2][Creative Studio] Project settings and Brief controls render inline beneath every view instead of from the shared app bar** — found 2026-08-21
+  - Task 8 requires the project-settings editor and requires routes plus spend policy in Brief; removing
+    those controls would violate the functional contract. The placement defect was that one shared form
+    appeared inline beneath Table, Board and Cut even though the pinned prototype puts Brief & rules
+    behind the app-bar overflow.
+  - **Fixed 2026-08-21** — the app bar now owns one accessible More menu. Project settings and Brief,
+    routes, spend policy, and rules open in separate project-scoped modals; none of those forms render
+    inside the three view mains. Drafts survive view changes, modal cancellation, project navigation,
+    storage failures, and close/save coordination without duplicating mutations.
 
-  **Measured in the running app 2026-08-21, inside a project on the Table.** The workspace carries
-  three stacked forms below the view — Project settings, Brief/routes/spend policy, and the rule
-  drafts — with **five** commit controls between them: Reset settings, Save settings, Refresh routes,
-  Save Brief settings, Save rules. Two route pickers read "Selection required" with nothing selected.
-  Raised again by the owner on the same day, looking at it: the settings and Brief are out of place.
-
-  **Where they belong, answered 2026-08-21 by driving the pinned prototype.** They are not stacked
-  under the view; they live behind the app bar's overflow. The `⋯` menu holds six items — **Rename**,
-  **Brief & rules**, **Assets** (with a count, 23 in the drawing), **Export…**, **Engines**, **Move
-  project…** — and _Brief & rules_ opens a modal panel rather than a form in the workspace. That also
-  gives BUG-068's unbuilt overflow a defined payload.
-
-- [ ] **[BUG-075][P2][Creative Studio] The Brief's rules are edited as raw JSON in a textarea** — found 2026-08-21 by driving the running app
+- [x] **[BUG-075][P2][Creative Studio] The Brief's rules are edited as raw JSON in a textarea** — found 2026-08-21 by driving the running app
   - The workspace renders a field labelled `Project rule drafts (JSON)` holding a textarea whose value is `[]`, beside a `Save rules` button. It is built at `StudioPage.tsx:161` as `JSON.stringify(projectRuleDrafts(project), null, 2)`, so the internal draft array is the user surface.
   - **The design has no JSON editing surface anywhere.** The prototype contains six occurrences of the string `json`, and all six are inside base64 image data rather than any label or control.
   - The plan does specify `set_rules` carrying `StudioBriefRuleDraft[]`, but that is the wire contract between renderer and reducer. Nothing in it asks for the array to be typed by hand.
@@ -274,6 +267,11 @@ IT RENDERS` (IBM Plex Mono 9px, 0.9px tracking, `#8C7F6C`). Each card carries th
   `1 BREACH FIXED` in `#2E7D5B`, the same green the READY state uses.
   So a rule has a scope and a lifecycle, and the textarea expresses neither. An org-locked rule is not
   even editable, which a free-text JSON field cannot represent.
+  - **Fixed 2026-08-21** — rules are structured prose cards with explicit scope and enforcement state,
+    typed forbidden-term chips, locked organisation rules, project-rule add/edit/remove actions,
+    semantic validation, revision-guarded authoritative updates, unified undo, ambiguity-safe adoption,
+    and focus recovery. Legacy `brief.rules` JSON drafts are retired without overwriting authority;
+    bounded project-scoped draft persistence and close protection preserve unfinished human input.
 
 - [ ] **[BUG-076][P2][Creative Studio] The Brief is a string in a JSON blob, not the hand-editable `brief.md` the design promises** — found 2026-08-21 by driving the pinned prototype against the build
   - The designed Brief panel names the artefact **`brief.md`** (Manrope 700 15px), says it is `LOADED INTO EVERY DIRECTOR TURN`, and closes with `HAND-EDITABLE · THE APP READS IT, AN OUTSIDE EDIT IS RESPECTED`. That is a promise about a file on disk, not about a field.

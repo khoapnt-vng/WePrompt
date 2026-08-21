@@ -1,6 +1,6 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
@@ -125,15 +125,27 @@ vi.mock('@/renderer/pages/studio/components/Workspace/DirectorRail', () => ({
   DirectorRail: ({
     project,
     reviewedOutput,
+    collapsed,
+    contentId,
     widthPixels,
   }: {
     project: StudioRendererProjectV2;
     reviewedOutput?: React.ReactNode;
+    collapsed: boolean;
+    contentId: string;
     widthPixels?: number;
   }) => (
-    <aside data-studio-director-rail style={widthPixels === undefined ? undefined : { inlineSize: `${widthPixels}px` }}>
-      <div data-studio-director-conversation-owner>{project.id}</div>
-      {reviewedOutput === undefined ? null : <div data-studio-director-reviewed-output>{reviewedOutput}</div>}
+    <aside
+      data-studio-director-rail
+      style={collapsed || widthPixels === undefined ? undefined : { inlineSize: `${widthPixels}px` }}
+    >
+      <div id={contentId} data-studio-director-content aria-hidden={collapsed} inert={collapsed}>
+        <span tabIndex={0} data-studio-director-focus-target>
+          Director focus target
+        </span>
+        <div data-studio-director-conversation-owner>{project.id}</div>
+        {reviewedOutput === undefined ? null : <div data-studio-director-reviewed-output>{reviewedOutput}</div>}
+      </div>
     </aside>
   ),
 }));
@@ -147,6 +159,7 @@ vi.mock('react-i18next', () => ({
 }));
 
 import StudioPage from '@/renderer/pages/studio/StudioPage';
+import { railPreferenceKey } from '@/renderer/pages/studio/components/Workspace/WorkspaceShell';
 import { useStudioProject, type UseStudioProjectResult } from '@/renderer/pages/studio/hooks/useStudioProject';
 
 const ok = <T,>(data: T) => ({ ok: true as const, data });
@@ -401,6 +414,17 @@ const LocationProbe = () => {
   return <output data-testid='location'>{location.pathname}</output>;
 };
 
+const ProjectSwitchProbe = () => {
+  const navigate = useNavigate();
+  return (
+    <>
+      <button onClick={() => navigate('/studio/project_2/table')}>Switch project</button>
+      <button onClick={() => navigate('/studio/project_1/table')}>Return to first project</button>
+      <button onClick={() => navigate('/studio')}>Return to library</button>
+    </>
+  );
+};
+
 let latestHookResult: UseStudioProjectResult | null = null;
 
 const HookProbe: React.FC<{ projectId?: string }> = ({ projectId }) => {
@@ -421,17 +445,86 @@ const renderStudio = (path = '/studio/project_1/table') =>
             </>
           }
         />
+        <Route
+          path='/studio'
+          element={
+            <>
+              <StudioPage />
+              <LocationProbe />
+              <ProjectSwitchProbe />
+            </>
+          }
+        />
       </Routes>
     </MemoryRouter>
   );
 
-const seedWorkspaceDrafts = (entries: Record<string, { baseValue: unknown; value: unknown }>): void => {
+const renderStudioWithProjectSwitch = () =>
+  render(
+    <MemoryRouter initialEntries={['/studio/project_1/table']}>
+      <Routes>
+        <Route
+          path='/studio/:id/:view?'
+          element={
+            <>
+              <StudioPage />
+              <LocationProbe />
+              <ProjectSwitchProbe />
+            </>
+          }
+        />
+        <Route
+          path='/studio'
+          element={
+            <>
+              <StudioPage />
+              <LocationProbe />
+              <ProjectSwitchProbe />
+            </>
+          }
+        />
+      </Routes>
+    </MemoryRouter>
+  );
+
+const MORE = 'common.more';
+const SETTINGS_TITLE = 'conversation.creativeStudio.workspace.controls.settingsTitle';
+const BRIEF_RULES_TITLE = 'conversation.creativeStudio.workspace.controls.briefAndRulesTitle';
+const NAME = 'conversation.creativeStudio.workspace.controls.name';
+const BRIEF = 'conversation.creativeStudio.workspace.controls.brief';
+const RULE_TEXT = 'conversation.creativeStudio.rules.textLabel';
+const RULE_TERMS = 'conversation.creativeStudio.rules.termsLabel';
+
+const openProjectDialog = async (title: typeof SETTINGS_TITLE | typeof BRIEF_RULES_TITLE): Promise<HTMLElement> => {
+  fireEvent.click(await screen.findByRole('button', { name: MORE }));
+  const menu = await screen.findByRole('menu');
+  fireEvent.click(within(menu).getByRole('menuitem', { name: title }));
+  return screen.findByRole('dialog', { name: title });
+};
+
+const closeProjectDialog = async (dialog: HTMLElement, title: string): Promise<void> => {
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: title })).toBeNull());
+};
+
+const expectProjectFormsAbsentFromMain = (view: 'table' | 'board' | 'cut'): void => {
+  const main = document.querySelector<HTMLElement>(`main[data-studio-view="${view}"]`);
+  expect(main).not.toBeNull();
+  expect(within(main!).queryByLabelText(NAME)).toBeNull();
+  expect(within(main!).queryByLabelText(BRIEF)).toBeNull();
+};
+
+const seedWorkspaceDrafts = (
+  entries: Record<string, { baseValue: unknown; value: unknown }>,
+  projectId = 'project_1',
+  sourceRevision = 3
+): void => {
   window.sessionStorage.setItem(
-    'aionui:creative-studio:v2:workspace-drafts:project_1',
+    `aionui:creative-studio:v2:workspace-drafts:${projectId}`,
     JSON.stringify({
       version: 2,
-      projectId: 'project_1',
-      sourceRevision: 3,
+      projectId,
+      sourceRevision,
       entries,
       selection: { selectedBeatId: null, selectedShotIds: [], anchorShotId: null },
     })
@@ -578,7 +671,7 @@ describe('StudioPage schema-2 cutover', () => {
   it('exposes exactly one level-two heading for the Cut view', async () => {
     renderStudio('/studio/project_1/cut');
 
-    await screen.findByLabelText('conversation.creativeStudio.workspace.controls.name');
+    await screen.findByRole('heading', { name: 'Launch film' });
     const cutView = document.querySelector<HTMLElement>('main[data-studio-view="cut"]');
     expect(cutView).not.toBeNull();
     const headings = within(cutView!).getAllByRole('heading', { level: 2 });
@@ -589,14 +682,17 @@ describe('StudioPage schema-2 cutover', () => {
   it('omits the reviewed-output rail section when there are no cards or review errors', async () => {
     renderStudio();
 
-    await screen.findByLabelText('conversation.creativeStudio.workspace.controls.name');
+    await screen.findByRole('heading', { name: 'Launch film' });
     expect(document.querySelector('[data-studio-director-reviewed-output]')).toBeNull();
   });
 
-  it('keeps drafts and native snapshot counts stable across Table, Board, and Cut navigation', async () => {
+  it('keeps app-bar project drafts and native snapshot counts stable across Table, Board, and Cut navigation', async () => {
     mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: projectWithHandoffShot() }));
     renderStudio();
-    const name = await screen.findByLabelText('conversation.creativeStudio.workspace.controls.name');
+    await screen.findByRole('heading', { name: 'Launch film' });
+    expectProjectFormsAbsentFromMain('table');
+    let settingsDialog = await openProjectDialog(SETTINGS_TITLE);
+    const name = within(settingsDialog).getByLabelText(NAME);
     const shell = document.querySelector('[data-studio-workspace-shell]');
     const directorRail = document.querySelector('[data-studio-director-rail]');
     const workPanel = document.querySelector('[data-studio-work-panel]');
@@ -648,6 +744,7 @@ describe('StudioPage schema-2 cutover', () => {
       confirm: mocks.bridge.confirmSubmission.invoke.mock.calls.length,
     };
     fireEvent.change(name, { target: { value: 'Navigation-only local draft' } });
+    await closeProjectDialog(settingsDialog, SETTINGS_TITLE);
     const table = screen.getByRole('grid', { name: 'conversation.creativeStudio.workspace.table.label' });
     const selectedRow = within(table).getAllByRole('row')[1]!;
     fireEvent.click(within(selectedRow).getAllByRole('gridcell')[1]!);
@@ -663,24 +760,27 @@ describe('StudioPage schema-2 cutover', () => {
 
     fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.board' }));
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/board'));
-    expect(screen.getByLabelText('conversation.creativeStudio.workspace.controls.name')).toHaveValue(
-      'Navigation-only local draft'
-    );
+    expectProjectFormsAbsentFromMain('board');
+    settingsDialog = await openProjectDialog(SETTINGS_TITLE);
+    expect(within(settingsDialog).getByLabelText(NAME)).toHaveValue('Navigation-only local draft');
+    await closeProjectDialog(settingsDialog, SETTINGS_TITLE);
     expect(document.querySelector('[data-studio-director-conversation-owner]')).toBe(conversationOwner);
     fireEvent.click(screen.getAllByLabelText(/conversation\.creativeStudio\.workspace\.board\.openBeat/)[0]!);
     expect(screen.getByRole('dialog')).toBeVisible();
     fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.cut' }));
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/cut'));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect(screen.getByLabelText('conversation.creativeStudio.workspace.controls.name')).toHaveValue(
-      'Navigation-only local draft'
-    );
+    expectProjectFormsAbsentFromMain('cut');
+    settingsDialog = await openProjectDialog(SETTINGS_TITLE);
+    expect(within(settingsDialog).getByLabelText(NAME)).toHaveValue('Navigation-only local draft');
+    await closeProjectDialog(settingsDialog, SETTINGS_TITLE);
     expect(document.querySelector('[data-studio-director-conversation-owner]')).toBe(conversationOwner);
     fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.table' }));
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table'));
-    expect(screen.getByLabelText('conversation.creativeStudio.workspace.controls.name')).toHaveValue(
-      'Navigation-only local draft'
-    );
+    expectProjectFormsAbsentFromMain('table');
+    settingsDialog = await openProjectDialog(SETTINGS_TITLE);
+    expect(within(settingsDialog).getByLabelText(NAME)).toHaveValue('Navigation-only local draft');
+    await closeProjectDialog(settingsDialog, SETTINGS_TITLE);
     expect(document.querySelector('[data-studio-director-conversation-owner]')).toBe(conversationOwner);
     expect(
       within(screen.getByRole('grid', { name: 'conversation.creativeStudio.workspace.table.label' })).getAllByRole(
@@ -787,7 +887,9 @@ describe('StudioPage schema-2 cutover', () => {
 
     renderStudio();
     const card = within(await screen.findByTestId('studio-handoff-handoff_open'));
-    expect(card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.review' })).toBeDisabled();
+    await waitFor(() =>
+      expect(card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.review' })).toBeDisabled()
+    );
     expect(card.getByText('conversation.creativeStudio.workspace.controls.saveBeforeReview')).toBeVisible();
     const dismiss = card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.dismiss' });
     expect(dismiss).toBeEnabled();
@@ -796,6 +898,24 @@ describe('StudioPage schema-2 cutover', () => {
     await waitFor(() => expect(mocks.bridge.dismissReferenceGenerationHandoff.invoke).toHaveBeenCalledTimes(1));
     expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
     expect(screen.getByTestId('studio-handoff-handoff_confirmed')).toBeVisible();
+  });
+
+  it('blocks paid handoff review while the active project has an unsaved structured rule', async () => {
+    mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue(ok([handoff()]));
+
+    renderStudio();
+    const dialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    fireEvent.change(within(dialog).getByLabelText(RULE_TEXT), {
+      target: { value: 'Do not render the competitor logo.' },
+    });
+    await closeProjectDialog(dialog, BRIEF_RULES_TITLE);
+
+    const card = within(await screen.findByTestId('studio-handoff-handoff_open'));
+    await waitFor(() =>
+      expect(card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.review' })).toBeDisabled()
+    );
+    expect(card.getByText('conversation.creativeStudio.workspace.controls.saveBeforeReview')).toBeVisible();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
   });
 
   it('blocks handoff review until both revision-matched status snapshots are ready', async () => {
@@ -948,7 +1068,8 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(3))).mockResolvedValue(ok(chainStatus(4)));
 
     const first = renderStudio();
-    fireEvent.change(await screen.findByLabelText('conversation.creativeStudio.workspace.controls.name'), {
+    let settingsDialog = await openProjectDialog(SETTINGS_TITLE);
+    fireEvent.change(within(settingsDialog).getByLabelText(NAME), {
       target: { value: 'Saved name' },
     });
     await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork).not.toBeNull());
@@ -973,7 +1094,8 @@ describe('StudioPage schema-2 cutover', () => {
       error: { code: 'storage_error', messageKey: 'conversation.creativeStudio.workspace.errors.storage' },
     });
     const second = renderStudio();
-    fireEvent.change(await screen.findByLabelText('conversation.creativeStudio.workspace.controls.name'), {
+    settingsDialog = await openProjectDialog(SETTINGS_TITLE);
+    fireEvent.change(within(settingsDialog).getByLabelText(NAME), {
       target: { value: 'Still dirty' },
     });
     await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 }));
@@ -985,7 +1107,194 @@ describe('StudioPage schema-2 cutover', () => {
     second.unmount();
   });
 
-  it('continues close-save past locked shape drafts and commits later Brief and rule groups', async () => {
+  it('drops persisted draft values whose runtime type disagrees with project authority', async () => {
+    seedWorkspaceDrafts({
+      'settings.name': { baseValue: 'Launch film', value: 42 },
+      'brief.text': { baseValue: 'A small launch film.', value: 42 },
+    });
+
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 0 }));
+    let response: { saved: boolean } | undefined;
+    await act(async () => {
+      response = await mocks.closeHandlers.flushUnsavedWork?.();
+    });
+
+    expect(response).toEqual({ saved: true });
+    expect(mocks.bridge.editProject.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(window.sessionStorage.getItem('aionui:creative-studio:v2:workspace-drafts:project_1')).toBeNull()
+    );
+  });
+
+  it('blocks close-save and preserves structured rule drafts across project navigation', async () => {
+    const projectB = { ...project(), id: 'project_2', revision: 4, name: 'Second project' };
+    mocks.bridge.getProject.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
+      ok({ status: 'supported' as const, project: projectId === 'project_2' ? projectB : project() })
+    );
+    mocks.bridge.getWorkspaceStatus.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
+      ok(projectId === 'project_2' ? { ...workspaceStatus(4), projectId: 'project_2' } : workspaceStatus(3))
+    );
+    mocks.bridge.getChainStatus.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
+      ok(projectId === 'project_2' ? { ...chainStatus(4), projectId: 'project_2' } : chainStatus(3))
+    );
+
+    renderStudioWithProjectSwitch();
+    let briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    fireEvent.change(within(briefDialog).getByLabelText(BRIEF), {
+      target: { value: 'Keep this unrelated Brief draft too.' },
+    });
+    fireEvent.change(within(briefDialog).getByLabelText(RULE_TEXT), {
+      target: { value: 'Keep this structured rule draft.' },
+    });
+    fireEvent.change(within(briefDialog).getByLabelText(RULE_TERMS), { target: { value: 'Acme, Globex' } });
+
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 2 }));
+    let saved: { saved: boolean } | undefined;
+    await act(async () => {
+      saved = await mocks.closeHandlers.flushUnsavedWork?.();
+    });
+    expect(saved).toEqual({ saved: false });
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.setRules.invoke).not.toHaveBeenCalled();
+    expect(within(briefDialog).getByLabelText(BRIEF)).toHaveValue('Keep this unrelated Brief draft too.');
+    expect(within(briefDialog).getByLabelText(RULE_TEXT)).toHaveValue('Keep this structured rule draft.');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Switch project' }));
+    expect(await screen.findByRole('heading', { name: 'Second project' })).toBeVisible();
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 2 }));
+    await act(async () => {
+      saved = await mocks.closeHandlers.flushUnsavedWork?.();
+    });
+    expect(saved).toEqual({ saved: false });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Return to first project' }));
+    expect(await screen.findByRole('heading', { name: 'Launch film' })).toBeVisible();
+    briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    expect(within(briefDialog).getByLabelText(BRIEF)).toHaveValue('Keep this unrelated Brief draft too.');
+    expect(within(briefDialog).getByLabelText(RULE_TEXT)).toHaveValue('Keep this structured rule draft.');
+    expect(within(briefDialog).getByLabelText(RULE_TERMS)).toHaveValue('Acme, Globex');
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 2 }));
+  });
+
+  it('keeps the close contract active for stored rule drafts after returning to the library', async () => {
+    renderStudioWithProjectSwitch();
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    fireEvent.change(within(briefDialog).getByLabelText(RULE_TEXT), {
+      target: { value: 'Keep this draft when the project page unmounts.' },
+    });
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Return to library' }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio'));
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 }));
+    let saved: { saved: boolean } | undefined;
+    await act(async () => {
+      saved = await mocks.closeHandlers.flushUnsavedWork?.();
+    });
+    expect(saved).toEqual({ saved: false });
+    expect(mocks.bridge.setRules.invoke).not.toHaveBeenCalled();
+  });
+
+  it('keeps relocated settings and Brief drafts protected outside their project', async () => {
+    const projectB = { ...project(), id: 'project_2', revision: 4, name: 'Second project' };
+    mocks.bridge.getProject.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
+      ok({ status: 'supported' as const, project: projectId === 'project_2' ? projectB : project() })
+    );
+    mocks.bridge.getWorkspaceStatus.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
+      ok(projectId === 'project_2' ? { ...workspaceStatus(4), projectId: 'project_2' } : workspaceStatus(3))
+    );
+    mocks.bridge.getChainStatus.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
+      ok(projectId === 'project_2' ? { ...chainStatus(4), projectId: 'project_2' } : chainStatus(3))
+    );
+
+    renderStudioWithProjectSwitch();
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    fireEvent.change(within(briefDialog).getByLabelText(BRIEF), {
+      target: { value: 'Keep this relocated Brief draft.' },
+    });
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Switch project' }));
+    expect(await screen.findByRole('heading', { name: 'Second project' })).toBeVisible();
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 }));
+    let saved: { saved: boolean } | undefined;
+    await act(async () => {
+      saved = await mocks.closeHandlers.flushUnsavedWork?.();
+    });
+    expect(saved).toEqual({ saved: false });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Return to library' }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio'));
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 }));
+    await act(async () => {
+      saved = await mocks.closeHandlers.flushUnsavedWork?.();
+    });
+    expect(saved).toEqual({ saved: false });
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+  });
+
+  it('does not let a deferred project-A settings continuation reset project-B drafts after direct navigation', async () => {
+    const projectB = {
+      ...project(),
+      id: 'project_2',
+      revision: 4,
+      name: 'Second project',
+    };
+    seedWorkspaceDrafts({ 'settings.name': { baseValue: 'Second project', value: 'B local draft' } }, 'project_2', 4);
+    const projectACommitted = { ...project(), revision: 4, name: 'Deferred A' };
+    let projectALoads = 0;
+    const edit = deferred<ReturnType<typeof commit>>();
+    mocks.bridge.editProject.invoke.mockReturnValue(edit.promise);
+    mocks.bridge.getProject.invoke.mockImplementation(async ({ projectId }: { projectId: string }) => {
+      if (projectId === 'project_2') return ok({ status: 'supported' as const, project: projectB });
+      projectALoads += 1;
+      return ok({ status: 'supported' as const, project: projectALoads === 1 ? project() : projectACommitted });
+    });
+    mocks.bridge.getWorkspaceStatus.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
+      ok(projectId === 'project_2' ? { ...workspaceStatus(4), projectId: 'project_2' } : workspaceStatus(3))
+    );
+    mocks.bridge.getChainStatus.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
+      ok(projectId === 'project_2' ? { ...chainStatus(4), projectId: 'project_2' } : chainStatus(3))
+    );
+
+    renderStudioWithProjectSwitch();
+    const projectADialog = await openProjectDialog(SETTINGS_TITLE);
+    fireEvent.change(within(projectADialog).getByLabelText(NAME), { target: { value: 'Deferred A' } });
+    fireEvent.click(
+      within(projectADialog).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.controls.saveSettings',
+      })
+    );
+    await waitFor(() =>
+      expect(mocks.bridge.editProject.invoke).toHaveBeenCalledWith({
+        projectId: 'project_1',
+        expectedRevision: 3,
+        changes: { name: 'Deferred A' },
+      })
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Switch project' }));
+    expect(await screen.findByRole('heading', { name: 'Second project' })).toBeVisible();
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: SETTINGS_TITLE })).toBeNull());
+    const projectBDialog = await openProjectDialog(SETTINGS_TITLE);
+    const projectBName = within(projectBDialog).getByLabelText(NAME);
+    expect(projectBName).toHaveValue('B local draft');
+
+    await act(async () => edit.resolve(commit(4)));
+    await waitFor(() => expect(mocks.bridge.getProject.invoke).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Second project' })).toBeVisible());
+
+    expect(projectBName).toHaveValue('B local draft');
+    expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 2 });
+    expect(window.sessionStorage.getItem('aionui:creative-studio:v2:workspace-drafts:project_2')).toContain(
+      'B local draft'
+    );
+  });
+
+  it('continues close-save past locked shape drafts, commits Brief, and discards retired rule drafts', async () => {
     seedWorkspaceDrafts({
       'settings.aspectRatio': { baseValue: '16:9', value: '9:16' },
       'brief.text': { baseValue: 'A small launch film.', value: 'A saved Brief.' },
@@ -996,24 +1305,17 @@ describe('StudioPage schema-2 cutover', () => {
     });
     const initial = project();
     const revision4 = { ...project(), revision: 4, brief: 'A saved Brief.' };
-    const revision5 = { ...revision4, revision: 5 };
     mocks.bridge.getProject.invoke
       .mockResolvedValueOnce(ok({ status: 'supported', project: initial }))
-      .mockResolvedValueOnce(ok({ status: 'supported', project: revision4 }))
-      .mockResolvedValue(ok({ status: 'supported', project: revision5 }));
+      .mockResolvedValue(ok({ status: 'supported', project: revision4 }));
     mocks.bridge.getWorkspaceStatus.invoke
       .mockResolvedValueOnce(ok(workspaceStatus(3, true)))
-      .mockResolvedValueOnce(ok(workspaceStatus(4, true)))
-      .mockResolvedValue(ok(workspaceStatus(5, true)));
-    mocks.bridge.getChainStatus.invoke
-      .mockResolvedValueOnce(ok(chainStatus(3)))
-      .mockResolvedValueOnce(ok(chainStatus(4)))
-      .mockResolvedValue(ok(chainStatus(5)));
-    mocks.bridge.setRules.invoke.mockResolvedValue(commit(5));
+      .mockResolvedValue(ok(workspaceStatus(4, true)));
+    mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(3))).mockResolvedValue(ok(chainStatus(4)));
 
     renderStudio();
     await screen.findByRole('heading', { name: 'Launch film' });
-    await waitFor(() => expect(mocks.closeHandlers.flushUnsavedWork).not.toBeNull());
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 2 }));
     let response: { saved: boolean } | undefined;
     await act(async () => {
       response = await mocks.closeHandlers.flushUnsavedWork?.();
@@ -1026,15 +1328,11 @@ describe('StudioPage schema-2 cutover', () => {
       expectedRevision: 3,
       operations: [{ kind: 'set_brief', brief: 'A saved Brief.' }],
     });
-    expect(mocks.bridge.setRules.invoke).toHaveBeenCalledWith({
-      projectId: 'project_1',
-      expectedRevision: 4,
-      rules: [{ id: 'rule_1', text: 'Keep it bright', predicate: null }],
-    });
+    expect(mocks.bridge.setRules.invoke).not.toHaveBeenCalled();
     await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 }));
-    expect(window.sessionStorage.getItem('aionui:creative-studio:v2:workspace-drafts:project_1')).toContain(
-      'settings.aspectRatio'
-    );
+    const persisted = window.sessionStorage.getItem('aionui:creative-studio:v2:workspace-drafts:project_1') ?? '';
+    expect(persisted).toContain('settings.aspectRatio');
+    expect(persisted).not.toContain('brief.rules');
   });
 
   it('flushes Beat and Shot drafts in revisioned batches without exceeding the mutation limit', async () => {
@@ -1061,6 +1359,8 @@ describe('StudioPage schema-2 cutover', () => {
 
     renderStudio();
     await screen.findByRole('heading', { name: 'Launch film' });
+    // The close bridge has a bounded wire count. Saving still sees and flushes all 34 drafts.
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 24 }));
     let response: { saved: boolean } | undefined;
     await act(async () => {
       response = await mocks.closeHandlers.flushUnsavedWork?.();
@@ -1081,7 +1381,7 @@ describe('StudioPage schema-2 cutover', () => {
     await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 0 }));
   });
 
-  it('disables settings, Brief, and rule editors while a deferred commit is pending', async () => {
+  it('disables project editors while a deferred settings commit is pending', async () => {
     const initial = project();
     const revised = { ...project(), revision: 4, name: 'Pending name' };
     const edit = deferred<ReturnType<typeof commit>>();
@@ -1095,19 +1395,24 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(3))).mockResolvedValue(ok(chainStatus(4)));
 
     renderStudio();
-    const name = await screen.findByLabelText('conversation.creativeStudio.workspace.controls.name');
+    const settingsDialog = await openProjectDialog(SETTINGS_TITLE);
+    const name = within(settingsDialog).getByLabelText(NAME);
     fireEvent.change(name, { target: { value: 'Pending name' } });
     fireEvent.click(
-      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.saveSettings' })
+      within(settingsDialog).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.controls.saveSettings',
+      })
     );
 
     await waitFor(() => expect(name).toBeDisabled());
-    expect(screen.getByLabelText('conversation.creativeStudio.workspace.controls.brief')).toBeDisabled();
-    expect(screen.getByLabelText('conversation.creativeStudio.workspace.controls.rules')).toBeDisabled();
+    await closeProjectDialog(settingsDialog, SETTINGS_TITLE);
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    const brief = within(briefDialog).getByLabelText(BRIEF);
+    expect(brief).toBeDisabled();
+    expect(within(briefDialog).getByLabelText('conversation.creativeStudio.rules.textLabel')).toBeDisabled();
 
     await act(async () => edit.resolve(commit(4)));
-    await waitFor(() => expect(name).toBeEnabled());
-    expect(name).toHaveValue('Pending name');
+    await waitFor(() => expect(brief).toBeEnabled());
   });
 
   it('invalidates routes after an accepted set-routes proposal without invoking the resolver automatically', async () => {
@@ -1125,14 +1430,17 @@ describe('StudioPage schema-2 cutover', () => {
       .mockResolvedValue(ok({ status: 'supported', project: changed }));
 
     renderStudio();
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
     await waitFor(() =>
-      expect(screen.getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.ready')).toHaveLength(2)
+      expect(
+        within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.ready')
+      ).toHaveLength(2)
     );
     fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' }));
 
     await waitFor(() =>
       expect(
-        screen.getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.unavailable')
+        within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.unavailable')
       ).toHaveLength(2)
     );
     expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalledTimes(1);
@@ -1152,11 +1460,18 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(3))).mockResolvedValue(ok(chainStatus(4)));
 
     renderStudio();
+    let briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
     await waitFor(() =>
-      expect(screen.getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.ready')).toHaveLength(2)
+      expect(
+        within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.ready')
+      ).toHaveLength(2)
     );
+    await closeProjectDialog(briefDialog, BRIEF_RULES_TITLE);
+    const settingsDialog = await openProjectDialog(SETTINGS_TITLE);
     fireEvent.click(
-      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.saveSettings' })
+      within(settingsDialog).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.controls.saveSettings',
+      })
     );
 
     await waitFor(() =>
@@ -1166,19 +1481,25 @@ describe('StudioPage schema-2 cutover', () => {
         changes: { resolution: '1080p' },
       })
     );
+    await closeProjectDialog(settingsDialog, SETTINGS_TITLE);
+    briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
     await waitFor(() =>
       expect(
-        screen.getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.unavailable')
+        within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.unavailable')
       ).toHaveLength(2)
     );
     expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalledTimes(1);
 
     fireEvent.click(
-      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.refreshRoutes' })
+      within(briefDialog).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.controls.refreshRoutes',
+      })
     );
     await waitFor(() => expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalledTimes(2));
     await waitFor(() =>
-      expect(screen.getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.ready')).toHaveLength(2)
+      expect(
+        within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.ready')
+      ).toHaveLength(2)
     );
   });
 
@@ -1193,13 +1514,18 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(3))).mockResolvedValue(ok(chainStatus(4)));
 
     renderStudio();
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
     await waitFor(() =>
-      expect(screen.getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.ready')).toHaveLength(2)
+      expect(
+        within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.ready')
+      ).toHaveLength(2)
     );
     act(() => mocks.listeners.projectUpdated?.({ projectId: 'project_1' }));
 
     expect(await screen.findByRole('heading', { name: 'Paid update landed' })).toBeVisible();
-    expect(screen.getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.ready')).toHaveLength(2);
+    expect(
+      within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.ready')
+    ).toHaveLength(2);
     expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalledTimes(1);
   });
 
@@ -1307,12 +1633,13 @@ describe('StudioPage schema-2 cutover', () => {
       )
     );
 
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
     expect(
-      screen.queryByText('conversation.creativeStudio.workspace.controls.routeStatus.ready')
+      within(briefDialog).queryByText('conversation.creativeStudio.workspace.controls.routeStatus.ready')
     ).not.toBeInTheDocument();
-    expect(screen.getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.unavailable')).toHaveLength(
-      2
-    );
+    expect(
+      within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.unavailable')
+    ).toHaveLength(2);
   });
 
   it('invalidates paid readiness when a non-initial project refresh fails', async () => {
@@ -1324,15 +1651,18 @@ describe('StudioPage schema-2 cutover', () => {
       });
 
     renderStudio();
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
     await waitFor(() =>
-      expect(screen.getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.ready')).toHaveLength(2)
+      expect(
+        within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.ready')
+      ).toHaveLength(2)
     );
     act(() => mocks.listeners.projectUpdated?.({ projectId: 'project_1' }));
 
     await waitFor(() => expect(mocks.bridge.getProject.invoke).toHaveBeenCalledTimes(2));
-    expect(screen.getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.unavailable')).toHaveLength(
-      2
-    );
+    expect(
+      within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.unavailable')
+    ).toHaveLength(2);
     expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalledTimes(1);
   });
 
@@ -1374,9 +1704,10 @@ describe('StudioPage schema-2 cutover', () => {
     expect(await screen.findByRole('heading', { name: 'Launch film' })).toBeVisible();
     expect(screen.getByText('native.proposalsFailed')).toBeVisible();
     expect(screen.getAllByText('conversation.creativeStudio.workspace.errors.storage')).toHaveLength(2);
-    expect(screen.getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.unavailable')).toHaveLength(
-      2
-    );
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    expect(
+      within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.unavailable')
+    ).toHaveLength(2);
     expect(mocks.bridge.listProposals.invoke).toHaveBeenCalledTimes(1);
     expect(mocks.bridge.listReferenceRequests.invoke).toHaveBeenCalledTimes(1);
     expect(mocks.bridge.listReferenceGenerationHandoffs.invoke).toHaveBeenCalledTimes(1);
@@ -1401,9 +1732,10 @@ describe('StudioPage schema-2 cutover', () => {
     expect(await screen.findByRole('heading', { name: 'Launch film' })).toBeVisible();
     expect(screen.getAllByText('conversation.creativeStudio.workspace.errors.storage').length).toBeGreaterThan(0);
     expect(screen.getByText('native.workspaceFailed')).toBeVisible();
-    expect(screen.getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.unavailable')).toHaveLength(
-      2
-    );
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    expect(
+      within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.unavailable')
+    ).toHaveLength(2);
     expect(mocks.bridge.listProposals.invoke).toHaveBeenCalledTimes(1);
     expect(mocks.bridge.listReferenceRequests.invoke).toHaveBeenCalledTimes(1);
     expect(mocks.bridge.listReferenceGenerationHandoffs.invoke).toHaveBeenCalledTimes(1);
@@ -1995,45 +2327,54 @@ describe('StudioPage schema-2 cutover', () => {
     ]);
   });
 
-  it('opens the rail in the Table and shuts it in the Board and the Cut', async () => {
-    // The Director acts before the picture exists; the Board and the Cut are judgements about pixels
-    // it cannot see. The rail's default follows the view rather than being one global preference.
+  it('applies view defaults without remounting and returns focus before hiding the Director', async () => {
     renderStudio('/studio/project_1/table');
     await screen.findByRole('heading', { name: 'Launch film' });
-    expect(document.querySelector('[data-studio-director-toggle]')).toHaveAttribute('aria-expanded', 'true');
+    const toggle = document.querySelector<HTMLButtonElement>('[data-studio-director-toggle]')!;
+    const content = document.getElementById(toggle.getAttribute('aria-controls')!)!;
+    const owner = document.querySelector('[data-studio-director-conversation-owner]');
+    const focusTarget = within(content).getByText('Director focus target');
 
-    cleanup();
-    renderStudio('/studio/project_1/board');
-    await screen.findByRole('heading', { name: 'Launch film' });
-    expect(document.querySelector('[data-studio-director-toggle]')).toHaveAttribute('aria-expanded', 'false');
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(content).toHaveAttribute('aria-hidden', 'false');
+    expect(content).not.toHaveAttribute('inert');
+    expect(screen.queryByRole('separator')).not.toBeNull();
 
-    cleanup();
-    renderStudio('/studio/project_1/cut');
-    await screen.findByRole('heading', { name: 'Launch film' });
-    expect(document.querySelector('[data-studio-director-toggle]')).toHaveAttribute('aria-expanded', 'false');
+    focusTarget.focus();
+    fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.board' }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/board'));
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-expanded', 'false'));
+
+    expect(document.getElementById(toggle.getAttribute('aria-controls')!)).toBe(content);
+    expect(document.querySelector('[data-studio-director-conversation-owner]')).toBe(owner);
+    expect(content).toHaveAttribute('aria-hidden', 'true');
+    expect(content).toHaveAttribute('inert');
+    expect(screen.queryByRole('separator')).toBeNull();
+    expect(document.activeElement).toBe(toggle);
   });
 
-  it('remembers a rail choice for that view of that project, and nowhere else', async () => {
+  it('restores a manual rail choice only for its project view during live navigation', async () => {
     renderStudio('/studio/project_1/board');
     await screen.findByRole('heading', { name: 'Launch film' });
     const toggle = document.querySelector<HTMLButtonElement>('[data-studio-director-toggle]')!;
+    const content = document.getElementById(toggle.getAttribute('aria-controls')!)!;
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
 
-    // Open it in the Board, against that view's default.
     fireEvent.click(toggle);
+    await waitFor(() => expect(content).toHaveAttribute('aria-hidden', 'false'));
+    expect(window.localStorage.getItem(railPreferenceKey('project_1', 'board'))).toBe('false');
+
+    fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.cut' }));
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-expanded', 'false'));
+    expect(content).toHaveAttribute('inert');
+
+    fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.board' }));
     await waitFor(() => expect(toggle).toHaveAttribute('aria-expanded', 'true'));
+    expect(content).not.toHaveAttribute('inert');
 
-    // Returning to the Board honours the choice rather than reapplying the default.
-    cleanup();
-    renderStudio('/studio/project_1/board');
-    await screen.findByRole('heading', { name: 'Launch film' });
-    expect(document.querySelector('[data-studio-director-toggle]')).toHaveAttribute('aria-expanded', 'true');
-
-    // The Cut is a different view and keeps its own default.
-    cleanup();
-    renderStudio('/studio/project_1/cut');
-    await screen.findByRole('heading', { name: 'Launch film' });
-    expect(document.querySelector('[data-studio-director-toggle]')).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.table' }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table'));
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('sizes the Director rail from the keyboard through an announced separator', async () => {
@@ -2068,7 +2409,7 @@ describe('StudioPage schema-2 cutover', () => {
     await waitFor(() => expect(screen.queryByRole('separator')).toBeNull());
   });
 
-  it('focuses the Director toggle from both captured reviewed-request actions', async () => {
+  it('reveals reviewed requests without replacing a manually closed rail preference', async () => {
     mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: projectWithHandoffShot() }));
     renderStudio();
     await screen.findByRole('heading', { name: 'Launch film' });
@@ -2080,18 +2421,48 @@ describe('StudioPage schema-2 cutover', () => {
     // Collapse it first: a request made while the rail is shut has to reopen it.
     fireEvent.click(toggle!);
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    const click = vi.spyOn(toggle!, 'click');
+    expect(window.localStorage.getItem(railPreferenceKey('project_1', 'table'))).toBe('true');
 
     act(() => actions.requestReviewedRederive('shot_3'));
     await waitFor(() => expect(document.activeElement).toBe(toggle));
-    expect(click).toHaveBeenCalledTimes(1);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(window.localStorage.getItem(railPreferenceKey('project_1', 'table'))).toBe('true');
     expect(screen.getByText('conversation.creativeStudio.workspace.beatPanel.directorRequestHint')).toBeVisible();
 
-    // Now open, a further request focuses it without toggling it shut again.
-    await waitFor(() => expect(toggle).toHaveAttribute('aria-expanded', 'true'));
-    act(() => actions.requestResplit('beat_1'));
+    // Now open, a further request waits for the panel-closing commit before moving focus. Focusing
+    // synchronously would let Arco's still-mounted modal focus lock pull it back into the panel.
+    const focusTarget = document.querySelector<HTMLElement>('[data-studio-director-focus-target]')!;
+    focusTarget.focus();
+    let focusDuringRequest: Element | null = null;
+    act(() => {
+      actions.requestResplit('beat_1');
+      focusDuringRequest = document.activeElement;
+    });
+    expect(focusDuringRequest).toBe(focusTarget);
     await waitFor(() => expect(document.activeElement).toBe(toggle));
-    expect(click).toHaveBeenCalledTimes(1);
+    expect(window.localStorage.getItem(railPreferenceKey('project_1', 'table'))).toBe('true');
+
+    fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.board' }));
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-expanded', 'false'));
+    fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.table' }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table'));
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('ignores a reviewed-request reveal captured for a view that is no longer active', async () => {
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: projectWithHandoffShot() }));
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+    const tableActions = capturedBeatPanelActions();
+
+    fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.board' }));
+    const toggle = document.querySelector<HTMLButtonElement>('[data-studio-director-toggle]')!;
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-expanded', 'false'));
+
+    act(() => tableActions.requestReviewedRederive('shot_3'));
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('conversation.creativeStudio.workspace.beatPanel.directorRequestHint')).toBeNull();
   });
 
   it('keeps captured seed imports fail-closed across native, transport, stale, and concurrent outcomes', async () => {
@@ -2293,13 +2664,18 @@ describe('StudioPage schema-2 cutover', () => {
   it('keeps a setting draft dirty when the post-commit snapshot is older than the commit receipt', async () => {
     mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: project() }));
     renderStudio();
-    const name = await screen.findByLabelText('conversation.creativeStudio.workspace.controls.name');
+    const settingsDialog = await openProjectDialog(SETTINGS_TITLE);
+    const name = within(settingsDialog).getByLabelText(NAME);
     fireEvent.change(name, { target: { value: 'Awaiting durable refresh' } });
     fireEvent.click(
-      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.saveSettings' })
+      within(settingsDialog).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.controls.saveSettings',
+      })
     );
 
-    expect(await screen.findByText('conversation.creativeStudio.workspace.errors.storage')).toBeVisible();
+    expect(
+      await within(settingsDialog).findByText('conversation.creativeStudio.workspace.errors.storage')
+    ).toBeVisible();
     expect(name).toHaveValue('Awaiting durable refresh');
     expect(mocks.bridge.editProject.invoke).toHaveBeenCalledTimes(1);
     expect(mocks.bridge.getWorkspaceStatus.invoke).toHaveBeenCalledTimes(1);
@@ -2322,6 +2698,7 @@ describe('StudioPage schema-2 cutover', () => {
 
     renderStudio();
     await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 2 }));
     let saved: { saved: boolean } | undefined;
     await act(async () => {
       saved = await mocks.closeHandlers.flushUnsavedWork?.();
@@ -2335,9 +2712,8 @@ describe('StudioPage schema-2 cutover', () => {
     });
     expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
     expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 });
-    expect(screen.getByLabelText('conversation.creativeStudio.workspace.controls.brief')).toHaveValue(
-      'Unsaved local Brief.'
-    );
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    expect(within(briefDialog).getByLabelText(BRIEF)).toHaveValue('Unsaved local Brief.');
   });
 
   it('pins a close-save chain when a project update lands during the receipt workspace refresh', async () => {
@@ -2368,6 +2744,8 @@ describe('StudioPage schema-2 cutover', () => {
 
     renderStudio();
     await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 2 }));
+    await waitFor(() => expect(mocks.bridge.getWorkspaceStatus.invoke).toHaveBeenCalledTimes(1));
     let flushPromise: Promise<{ saved: boolean }> | undefined;
     act(() => {
       flushPromise = mocks.closeHandlers.flushUnsavedWork?.();
@@ -2396,56 +2774,61 @@ describe('StudioPage schema-2 cutover', () => {
     });
     expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
     expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 });
-    expect(screen.getByLabelText('conversation.creativeStudio.workspace.controls.brief')).toHaveValue(
-      'Unsaved local Brief.'
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    expect(within(briefDialog).getByLabelText(BRIEF)).toHaveValue('Unsaved local Brief.');
+  });
+
+  it('silently discards a retired brief.rules draft without treating it as unsaved work', async () => {
+    seedWorkspaceDrafts({
+      'brief.rules': {
+        baseValue: '[]',
+        value: '[{"id":"rule_1","text":"Legacy raw JSON","predicate":null,"scope":"poison"}]',
+      },
+    });
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 0 }));
+    expect(window.sessionStorage.getItem('aionui:creative-studio:v2:workspace-drafts:project_1') ?? '').not.toContain(
+      'brief.rules'
     );
-  });
-
-  it.each([
-    [42],
-    ['not-json'],
-    ['{}'],
-    ['[null]'],
-    ['[1]'],
-    ['[{"id":1,"text":"Avoid marks","predicate":null}]'],
-    ['[{"id":"rule_1","text":1,"predicate":null}]'],
-    ['[{"id":"rule_1","text":"Avoid marks","predicate":1}]'],
-    ['[{"id":"rule_1","text":"Avoid marks","predicate":{"kind":"forbidden_terms","terms":[1]}}]'],
-  ])('refuses a malformed close-save rule document: %s', async (value) => {
-    seedWorkspaceDrafts({ 'brief.rules': { baseValue: '[]', value } });
-    renderStudio();
-    await screen.findByRole('heading', { name: 'Launch film' });
 
     let saved: { saved: boolean } | undefined;
     await act(async () => {
       saved = await mocks.closeHandlers.flushUnsavedWork?.();
     });
 
-    expect(saved).toEqual({ saved: false });
+    expect(saved).toEqual({ saved: true });
     expect(mocks.bridge.setRules.invoke).not.toHaveBeenCalled();
-    expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 });
+    expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 0 });
   });
 
   it.each([
-    ['beat.beat_0.targetSeconds', 4, 1.5],
-    ['beat.beat_0.action', 'Action 1', 42],
-    ['shot.shot_0.durationSeconds', 4, 1.5],
-    ['shot.shot_0.line', 'Shot 1', 42],
-  ])('refuses malformed dynamic authoring draft %s', async (key, baseValue, value) => {
-    seedWorkspaceDrafts({ [key]: { baseValue, value } });
-    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: projectWithDraftBatch(1) }));
-    renderStudio();
-    await screen.findByRole('heading', { name: 'Launch film' });
+    ['beat.beat_0.targetSeconds', 4, 1.5, 1, false],
+    ['beat.beat_0.action', 'Action 1', 42, 0, true],
+    ['shot.shot_0.durationSeconds', 4, 1.5, 1, false],
+    ['shot.shot_0.line', 'Shot 1', 42, 0, true],
+  ])(
+    'refuses or discards malformed dynamic authoring draft %s',
+    async (key, baseValue, value, expectedDirtyCount, expectedSaved) => {
+      seedWorkspaceDrafts({ [key]: { baseValue, value } });
+      mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: projectWithDraftBatch(1) }));
+      renderStudio();
+      await screen.findByRole('heading', { name: 'Launch film' });
+      await waitFor(() =>
+        expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: expectedDirtyCount })
+      );
 
-    let saved: { saved: boolean } | undefined;
-    await act(async () => {
-      saved = await mocks.closeHandlers.flushUnsavedWork?.();
-    });
+      let saved: { saved: boolean } | undefined;
+      await act(async () => {
+        saved = await mocks.closeHandlers.flushUnsavedWork?.();
+      });
 
-    expect(saved).toEqual({ saved: false });
-    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
-    expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 });
-  });
+      expect(saved).toEqual({ saved: expectedSaved });
+      expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+      expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: expectedDirtyCount });
+    }
+  );
 
   it('clears semantically unchanged Beat and Shot drafts without issuing authoring work', async () => {
     seedWorkspaceDrafts({
@@ -2455,6 +2838,7 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: projectWithDraftBatch(2) }));
     renderStudio();
     await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 0 }));
 
     let saved: { saved: boolean } | undefined;
     await act(async () => {
@@ -2466,22 +2850,6 @@ describe('StudioPage schema-2 cutover', () => {
     expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 0 });
   });
 
-  it('clears a semantically unchanged rules draft during close-save without issuing a no-op mutation', async () => {
-    seedWorkspaceDrafts({ 'brief.rules': { baseValue: '[]', value: '  [  ]  ' } });
-    renderStudio();
-    await screen.findByRole('heading', { name: 'Launch film' });
-
-    let saved: { saved: boolean } | undefined;
-    await act(async () => {
-      saved = await mocks.closeHandlers.flushUnsavedWork?.();
-    });
-
-    expect(saved).toEqual({ saved: true });
-    expect(mocks.bridge.setRules.invoke).not.toHaveBeenCalled();
-    expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 0 });
-    expect(screen.getByLabelText('conversation.creativeStudio.workspace.controls.rules')).toHaveValue('[]');
-  });
-
   it('rejects an invalid spend currency during close-save without issuing authoring work', async () => {
     seedWorkspaceDrafts({
       'brief.spendCurrency': { baseValue: '', value: 'US' },
@@ -2489,6 +2857,7 @@ describe('StudioPage schema-2 cutover', () => {
     });
     renderStudio();
     await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 2 }));
 
     let saved: { saved: boolean } | undefined;
     await act(async () => {
@@ -2500,7 +2869,96 @@ describe('StudioPage schema-2 cutover', () => {
     expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 2 });
   });
 
-  it('preserves a forbidden-terms rule and a spend policy in the close-save authority surface', async () => {
+  it('keeps typed rule input and idempotently recognizes an ambiguously adopted rule on retry', async () => {
+    const omittedRuleSnapshot = { ...project(), revision: 4, rules: [] };
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: project() }))
+      .mockResolvedValue(ok({ status: 'supported', project: omittedRuleSnapshot }));
+    mocks.bridge.getWorkspaceStatus.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(3)))
+      .mockResolvedValue(ok(workspaceStatus(4)));
+    mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(3))).mockResolvedValue(ok(chainStatus(4)));
+
+    renderStudio();
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    const textInput = within(briefDialog).getByLabelText('conversation.creativeStudio.rules.textLabel');
+    const termsInput = within(briefDialog).getByLabelText('conversation.creativeStudio.rules.termsLabel');
+    fireEvent.change(textInput, { target: { value: 'Keep every frame bright' } });
+    fireEvent.change(termsInput, { target: { value: 'logo, watermark' } });
+    fireEvent.click(within(briefDialog).getByRole('button', { name: 'conversation.creativeStudio.rules.add' }));
+
+    expect(await within(briefDialog).findByText('conversation.creativeStudio.workspace.errors.storage')).toBeVisible();
+    expect(mocks.bridge.setRules.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.bridge.setRules.invoke.mock.calls[0]?.[0]).toMatchObject({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      rules: [
+        {
+          text: 'Keep every frame bright',
+          predicate: { kind: 'forbidden_terms', terms: ['logo', 'watermark'] },
+        },
+      ],
+    });
+    expect(textInput).toHaveValue('Keep every frame bright');
+    expect(termsInput).toHaveValue('logo, watermark');
+    expect(document.querySelector('[data-studio-project-rule]')).toBeNull();
+
+    const submittedRule = mocks.bridge.setRules.invoke.mock.calls[0]?.[0].rules[0];
+    expect(submittedRule?.id).toMatch(/^[A-Za-z0-9_]+$/);
+    mocks.bridge.getProject.invoke.mockResolvedValue(
+      ok({ status: 'supported', project: { ...omittedRuleSnapshot, rules: [submittedRule] } })
+    );
+    act(() => mocks.listeners.projectUpdated?.({ projectId: 'project_1' }));
+    expect(await within(briefDialog).findByText('Keep every frame bright')).toBeVisible();
+    await waitFor(() => expect(textInput).toHaveValue(''));
+    expect(termsInput).toHaveValue('');
+    expect(mocks.bridge.setRules.invoke).toHaveBeenCalledTimes(1);
+    expect(
+      within(briefDialog).queryByText('conversation.creativeStudio.workspace.errors.storage')
+    ).not.toBeInTheDocument();
+  });
+
+  it('does not let delayed rule adoption clear a newer action error', async () => {
+    const omittedRuleSnapshot = { ...project(), revision: 4, rules: [] };
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: project() }))
+      .mockResolvedValue(ok({ status: 'supported', project: omittedRuleSnapshot }));
+    mocks.bridge.getWorkspaceStatus.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(3)))
+      .mockResolvedValue(ok(workspaceStatus(4)));
+    mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(3))).mockResolvedValue(ok(chainStatus(4)));
+
+    renderStudio();
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    const textInput = within(briefDialog).getByLabelText('conversation.creativeStudio.rules.textLabel');
+    fireEvent.change(textInput, { target: { value: 'Retain the correlated failure.' } });
+    fireEvent.click(within(briefDialog).getByRole('button', { name: 'conversation.creativeStudio.rules.add' }));
+    expect(await within(briefDialog).findByText('conversation.creativeStudio.workspace.errors.storage')).toBeVisible();
+
+    mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValueOnce({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'native.newerActionFailure' },
+    });
+    let saved = true;
+    await act(async () => {
+      saved = await capturedBeatPanelActions().saveBeat('beat_0', { action: 'A later edit.' });
+    });
+    expect(saved).toBe(false);
+    expect(await within(briefDialog).findByText('native.newerActionFailure')).toBeVisible();
+
+    const submittedRule = mocks.bridge.setRules.invoke.mock.calls[0]?.[0].rules[0]!;
+    mocks.bridge.getProject.invoke.mockResolvedValue(
+      ok({ status: 'supported', project: { ...omittedRuleSnapshot, rules: [submittedRule] } })
+    );
+    act(() => mocks.listeners.projectUpdated?.({ projectId: 'project_1' }));
+
+    expect(await within(briefDialog).findByText('Retain the correlated failure.')).toBeVisible();
+    await waitFor(() => expect(textInput).toHaveValue(''));
+    expect(within(briefDialog).getByText('native.newerActionFailure')).toBeVisible();
+    expect(mocks.bridge.setRules.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders authoritative rules and spend policy in Brief & rules without legacy JSON mutation', async () => {
     const governed = {
       ...project(),
       spendPolicy: { currency: 'USD', maxPerBatchMinorUnits: 1_234 },
@@ -2512,28 +2970,18 @@ describe('StudioPage schema-2 cutover', () => {
         },
       ],
     };
-    seedWorkspaceDrafts({
-      'brief.rules': {
-        baseValue: JSON.stringify(governed.rules, null, 2),
-        value: JSON.stringify([
-          {
-            id: 'rule_1',
-            text: 'Avoid every mark',
-            predicate: { kind: 'forbidden_terms', terms: ['logo', 'watermark'] },
-          },
-        ]),
-      },
-    });
-    const revised = { ...governed, revision: 4 };
-    mocks.bridge.getProject.invoke
-      .mockResolvedValueOnce(ok({ status: 'supported', project: governed }))
-      .mockResolvedValue(ok({ status: 'supported', project: revised }));
-    mocks.bridge.getWorkspaceStatus.invoke
-      .mockResolvedValueOnce(ok(workspaceStatus(3)))
-      .mockResolvedValue(ok(workspaceStatus(4)));
-    mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(3))).mockResolvedValue(ok(chainStatus(4)));
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: governed }));
     renderStudio();
-    await screen.findByRole('heading', { name: 'Launch film' });
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+
+    expect(within(briefDialog).getByText('Avoid marks')).toBeVisible();
+    expect(within(briefDialog).getByText('logo')).toBeVisible();
+    expect(within(briefDialog).getByLabelText('conversation.creativeStudio.workspace.controls.spendCap')).toHaveValue(
+      '12.34'
+    );
+    expect(
+      within(briefDialog).queryByLabelText('conversation.creativeStudio.workspace.controls.rules')
+    ).not.toBeInTheDocument();
 
     let saved: { saved: boolean } | undefined;
     await act(async () => {
@@ -2541,18 +2989,8 @@ describe('StudioPage schema-2 cutover', () => {
     });
 
     expect(saved).toEqual({ saved: true });
-    expect(mocks.bridge.setRules.invoke).toHaveBeenCalledWith({
-      projectId: 'project_1',
-      expectedRevision: 3,
-      rules: [
-        {
-          id: 'rule_1',
-          text: 'Avoid every mark',
-          predicate: { kind: 'forbidden_terms', terms: ['logo', 'watermark'] },
-        },
-      ],
-    });
-    expect(screen.getByLabelText('conversation.creativeStudio.workspace.controls.spendCap')).toHaveValue('12.34');
+    expect(mocks.bridge.setRules.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
   });
 
   it('renders the unsupported prototype state without fabricating a project', async () => {

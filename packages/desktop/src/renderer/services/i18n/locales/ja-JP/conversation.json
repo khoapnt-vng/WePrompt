@@ -900,6 +900,11 @@
       "capacityMismatch": "有効な参照は {{count}} 件ありますが、この画像エンジンが対応するのは {{maximum}} 件です。参照を外すか、エンジンを変更または再検証するまで、新しい参照スチルは生成できません。",
       "importError": "参照を追加できませんでした。もう一度お試しください。"
     },
+    "workspace": {
+      "controls": {
+        "briefAndRulesTitle": "ブリーフとルール"
+      }
+    },
     "rules": {
       "open": "ルール",
       "title": "ルール",

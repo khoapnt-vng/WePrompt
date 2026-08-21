@@ -904,6 +904,11 @@
       "capacityMismatch": "{{count}} etkin referansınız var, ancak bu görüntü motoru {{maximum}} referansı destekliyor. Referansları kaldırana veya motoru değiştirip yeniden doğrulayana kadar yeni referans kareleri engellenir.",
       "importError": "Referans eklenemedi. Yeniden deneyin."
     },
+    "workspace": {
+      "controls": {
+        "briefAndRulesTitle": "Brief ve kurallar"
+      }
+    },
     "rules": {
       "open": "Kurallar",
       "title": "Kurallar",

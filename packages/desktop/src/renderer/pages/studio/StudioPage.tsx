@@ -5,12 +5,13 @@
  */
 
 import { Spin } from '@arco-design/web-react';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import { ipcBridge } from '@/common';
 import {
+  STUDIO_MAX_DIRTY_DRAFTS_REPORTED,
   STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION,
   STUDIO_MAX_MUTATION_OPERATIONS,
   type StudioBinItem,
@@ -30,11 +31,14 @@ import {
   handoffGateDraft,
   majorUnitsToMinorUnits,
   buildStudioBarStats,
+  countStoredStudioRuleDrafts,
+  countStoredWorkspaceDrafts,
   projectWorkspace,
   selectionGateDraft,
   useSpendGate,
   useWorkspaceDrafts,
   WorkspaceControls,
+  WorkspaceProjectMenu,
   WorkspaceShell,
   type BeatPanelActions,
   type BeatPanelBriefReferenceOption,
@@ -47,6 +51,7 @@ import {
   type CutImportResult,
   type WorkspaceDraftValue,
   type WorkspaceMutationCallbacks,
+  type WorkspaceShellHandle,
 } from './components/Workspace';
 import { useStudioProject } from './hooks/useStudioProject';
 import {
@@ -63,20 +68,20 @@ type StudioReferenceDecisionIntent =
   | { kind: 'generation_gate' }
   | { kind: 'imported_reference'; assetId: string };
 
-const StudioCloseResponse: React.FC<{ dirtyDraftCount: number; saveAll: () => Promise<boolean> }> = ({
-  dirtyDraftCount,
-  saveAll,
-}) => {
-  const dirtyCountRef = useRef(dirtyDraftCount);
-  const saveAllRef = useRef(saveAll);
-  dirtyCountRef.current = dirtyDraftCount;
-  saveAllRef.current = saveAll;
+type StudioCloseContract = {
+  dirtyDraftCount: number;
+  saveAll: () => Promise<boolean>;
+};
+
+const StudioCloseResponse: React.FC<{ resolve: () => StudioCloseContract }> = ({ resolve }) => {
+  const resolveRef = useRef(resolve);
+  resolveRef.current = resolve;
   useEffect(() => {
     const disposeHasUnsavedWork = ipcBridge.creativeStudio.hasUnsavedWork.provider(() => ({
-      dirtyDraftCount: dirtyCountRef.current,
+      dirtyDraftCount: Math.min(resolveRef.current().dirtyDraftCount, STUDIO_MAX_DIRTY_DRAFTS_REPORTED),
     }));
     const disposeFlushUnsavedWork = ipcBridge.creativeStudio.flushUnsavedWork.provider(async () => ({
-      saved: await saveAllRef.current(),
+      saved: await resolveRef.current().saveAll(),
     }));
     return () => {
       disposeHasUnsavedWork();
@@ -91,47 +96,18 @@ const minorUnitsDraft = (minorUnits: number): string => {
   return `${whole}.${String(minorUnits % 100).padStart(2, '0')}`;
 };
 
-const projectRuleDrafts = (project: StudioRendererProjectV2): StudioBriefRuleDraft[] =>
-  project.rules.map(({ id, text, predicate }) => ({
-    id,
-    text,
-    predicate: predicate === null ? null : { kind: 'forbidden_terms', terms: [...predicate.terms] },
-  }));
-
-const parseRuleDrafts = (value: unknown): StudioBriefRuleDraft[] | null => {
-  if (typeof value !== 'string') return null;
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!Array.isArray(parsed)) return null;
-    const result: StudioBriefRuleDraft[] = [];
-    for (const candidate of parsed) {
-      if (typeof candidate !== 'object' || candidate === null) return null;
-      const row = candidate as Record<string, unknown>;
-      if (typeof row.id !== 'string' || typeof row.text !== 'string') return null;
-      if (row.predicate === null) {
-        result.push({ id: row.id, text: row.text, predicate: null });
-        continue;
-      }
-      if (typeof row.predicate !== 'object' || row.predicate === null) return null;
-      const predicate = row.predicate as Record<string, unknown>;
-      if (
-        predicate.kind !== 'forbidden_terms' ||
-        !Array.isArray(predicate.terms) ||
-        !predicate.terms.every((term) => typeof term === 'string')
-      ) {
-        return null;
-      }
-      result.push({
-        id: row.id,
-        text: row.text,
-        predicate: { kind: 'forbidden_terms', terms: [...predicate.terms] as string[] },
-      });
-    }
-    return result;
-  } catch {
-    return null;
-  }
-};
+const hasAdoptedRuleDrafts = (project: StudioRendererProjectV2, drafts: readonly StudioBriefRuleDraft[]): boolean =>
+  project.rules.length === drafts.length &&
+  project.rules.every((rule, index) => {
+    const draft = drafts[index];
+    if (draft === undefined || rule.id !== draft.id || rule.text !== draft.text) return false;
+    if (rule.predicate === null || draft.predicate === null) return rule.predicate === draft.predicate;
+    return (
+      rule.predicate.kind === draft.predicate.kind &&
+      rule.predicate.terms.length === draft.predicate.terms.length &&
+      rule.predicate.terms.every((term, termIndex) => term === draft.predicate?.terms[termIndex])
+    );
+  });
 
 const beatDraftKey = (beatId: string, field: 'action' | 'look' | 'targetSeconds'): string => `beat.${beatId}.${field}`;
 
@@ -158,7 +134,6 @@ const projectDraftValues = (project: StudioRendererProjectV2): Record<string, Wo
     'brief.spendCurrency': project.spendPolicy?.currency ?? '',
     'brief.spendMajorUnits':
       project.spendPolicy === null ? '' : minorUnitsDraft(project.spendPolicy.maxPerBatchMinorUnits),
-    'brief.rules': JSON.stringify(projectRuleDrafts(project), null, 2),
     'gate.choices': '{}',
   };
   for (const beatId of project.beatOrder) {
@@ -179,7 +154,11 @@ const projectDraftValues = (project: StudioRendererProjectV2): Record<string, Wo
   return values;
 };
 
-const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | null }> = ({ projectId, routeView }) => {
+const StudioProjectPage: React.FC<{
+  projectId: string;
+  routeView: StudioView | null;
+  onCloseContractChange: (contract: StudioCloseContract | null) => void;
+}> = ({ projectId, routeView, onCloseContractChange }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const {
@@ -207,8 +186,33 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
     installExportCatalog,
   } = useStudioProject(projectId);
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
-  const [actionErrorMessageKey, setActionErrorMessageKey] = useState<string | null>(null);
+  const [actionErrorMessageKey, setActionErrorMessageKeyState] = useState<string | null>(null);
+  const actionErrorGenerationRef = useRef(0);
+  const ruleAdoptionErrorGenerationsRef = useRef(new Map<string, number>());
+  const setActionErrorMessageKey = useCallback((messageKey: string | null): void => {
+    actionErrorGenerationRef.current += 1;
+    setActionErrorMessageKeyState(messageKey);
+  }, []);
+  const reportRuleAdoptionUnconfirmed = useCallback(
+    (adoptionKey: string): void => {
+      setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+      ruleAdoptionErrorGenerationsRef.current.set(adoptionKey, actionErrorGenerationRef.current);
+    },
+    [setActionErrorMessageKey]
+  );
+  const acknowledgeRuleAdoption = useCallback(
+    (adoptionKey: string): void => {
+      const generation = ruleAdoptionErrorGenerationsRef.current.get(adoptionKey);
+      ruleAdoptionErrorGenerationsRef.current.delete(adoptionKey);
+      if (generation !== undefined && generation === actionErrorGenerationRef.current) setActionErrorMessageKey(null);
+    },
+    [setActionErrorMessageKey]
+  );
   const [workspacePending, setWorkspacePending] = useState(false);
+  const [ruleDraftDirtyCount, setRuleDraftDirtyCount] = useState(0);
+  const [activeRuleDraftDirtyCount, setActiveRuleDraftDirtyCount] = useState(0);
+  const inactiveWorkspaceDraftDirtyCount = countStoredWorkspaceDrafts(projectId);
+  const workspaceShellRef = useRef<WorkspaceShellHandle | null>(null);
   const workspacePendingRef = useRef(false);
   const projectRef = useRef<StudioRendererProjectV2 | null>(project);
   projectRef.current = project;
@@ -244,7 +248,8 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
   }, [refetchProject, refetchReferences, refetchWorkspace]);
   const spendGate = useSpendGate({ onConfirmed: afterPaidConfirm });
   const spendGateLocked = spendGate.state.phase === 'confirming' || spendGate.state.phase === 'quote_in_use';
-  const generationDraftsBlockReview = hasGenerationAffectingWorkspaceDrafts(drafts.dirtyKeys);
+  const generationDraftsBlockReview =
+    activeRuleDraftDirtyCount > 0 || hasGenerationAffectingWorkspaceDrafts(drafts.dirtyKeys);
   const statusBlocksReview = projection === null || !projection.workspaceStatusReady || !projection.chainStatusReady;
   const beatPanelReviewBlockedMessageKey = generationDraftsBlockReview
     ? 'conversation.creativeStudio.workspace.controls.saveBeforeReview'
@@ -334,7 +339,7 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
         setWorkspacePending(false);
       }
     },
-    [refetchProject, refetchWorkspace]
+    [refetchProject, refetchWorkspace, setActionErrorMessageKey]
   );
 
   const runWorkspaceCommit = useCallback(
@@ -351,21 +356,24 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
     [runWorkspaceCommitAtRevision]
   );
 
-  const runWorkspaceExclusive = useCallback(async <Result,>(action: () => Promise<Result>): Promise<Result | null> => {
-    if (workspacePendingRef.current) return null;
-    workspacePendingRef.current = true;
-    setWorkspacePending(true);
-    setActionErrorMessageKey(null);
-    try {
-      return await action();
-    } catch {
-      setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
-      return null;
-    } finally {
-      workspacePendingRef.current = false;
-      setWorkspacePending(false);
-    }
-  }, []);
+  const runWorkspaceExclusive = useCallback(
+    async <Result,>(action: () => Promise<Result>): Promise<Result | null> => {
+      if (workspacePendingRef.current) return null;
+      workspacePendingRef.current = true;
+      setWorkspacePending(true);
+      setActionErrorMessageKey(null);
+      try {
+        return await action();
+      } catch {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+        return null;
+      } finally {
+        workspacePendingRef.current = false;
+        setWorkspacePending(false);
+      }
+    },
+    [setActionErrorMessageKey]
+  );
 
   const mutations = useMemo<WorkspaceMutationCallbacks>(
     () => ({
@@ -385,14 +393,62 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
             operations,
           })
         ),
-      setRules: async (rules) =>
-        runWorkspaceCommit((current) =>
-          ipcBridge.creativeStudio.setRules.invoke({
-            projectId: current.id,
-            expectedRevision: current.revision,
-            rules,
-          })
-        ),
+      setRules: async (update, adoptionKey) =>
+        (await runWorkspaceExclusive(async () => {
+          ruleAdoptionErrorGenerationsRef.current.delete(adoptionKey);
+          const current = projectRef.current;
+          if (current === null) return false;
+          const rules = update(current.rules);
+          if (rules === null) {
+            setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.draftConflict');
+            return false;
+          }
+          if (hasAdoptedRuleDrafts(current, rules)) return true;
+          let result: Awaited<ReturnType<typeof ipcBridge.creativeStudio.setRules.invoke>>;
+          try {
+            result = await ipcBridge.creativeStudio.setRules.invoke({
+              projectId: current.id,
+              expectedRevision: current.revision,
+              rules,
+            });
+          } catch {
+            reportRuleAdoptionUnconfirmed(adoptionKey);
+            return false;
+          }
+          if (result.ok === false) {
+            setActionErrorMessageKey(result.error.messageKey);
+            return false;
+          }
+          let refreshed: StudioRendererProjectV2 | null;
+          try {
+            refreshed = await refetchProject();
+          } catch {
+            reportRuleAdoptionUnconfirmed(adoptionKey);
+            return false;
+          }
+          if (
+            refreshed === null ||
+            refreshed.id !== current.id ||
+            refreshed.revision !== result.data.projectRevision ||
+            !hasAdoptedRuleDrafts(refreshed, rules)
+          ) {
+            reportRuleAdoptionUnconfirmed(adoptionKey);
+            return false;
+          }
+          projectRef.current = refreshed;
+          try {
+            await refetchWorkspace();
+          } catch {
+            reportRuleAdoptionUnconfirmed(adoptionKey);
+            return false;
+          }
+          if (projectRef.current?.id !== current.id || projectRef.current.revision !== result.data.projectRevision) {
+            reportRuleAdoptionUnconfirmed(adoptionKey);
+            return false;
+          }
+          return true;
+        })) ?? false,
+      acknowledgeRuleAdoption,
       refreshRoutes: refetchRoutes,
       undo: async (entryId) =>
         runWorkspaceCommit((current) =>
@@ -439,19 +495,23 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
         );
       },
     }),
-    [refetchRoutes, runWorkspaceCommit]
+    [
+      acknowledgeRuleAdoption,
+      refetchProject,
+      refetchRoutes,
+      refetchWorkspace,
+      reportRuleAdoptionUnconfirmed,
+      runWorkspaceCommit,
+      runWorkspaceExclusive,
+      setActionErrorMessageKey,
+    ]
   );
 
   const focusDirectorForReviewedRequest = useCallback((): void => {
+    const revealed = workspaceShellRef.current?.revealDirector({ projectId, view: activeView }) ?? false;
+    if (!revealed) return;
     setActionErrorMessageKey('conversation.creativeStudio.workspace.beatPanel.directorRequestHint');
-    const focusDirector = (): void => {
-      const toggle = document.querySelector<HTMLElement>('[data-studio-director-toggle]');
-      if (toggle?.getAttribute('aria-expanded') === 'false') toggle.click();
-      toggle?.focus();
-    };
-    if (typeof window === 'undefined') return;
-    window.setTimeout(focusDirector, 0);
-  }, []);
+  }, [activeView, projectId, setActionErrorMessageKey]);
 
   const beatPanelActions = useMemo<BeatPanelActions>(
     () => ({
@@ -695,6 +755,7 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
       refetchWorkspace,
       routeCatalog,
       runWorkspaceCommit,
+      setActionErrorMessageKey,
       spendGate.open,
       spendGateLocked,
     ]
@@ -885,6 +946,7 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
       refetchWorkspace,
       runWorkspaceCommit,
       runWorkspaceExclusive,
+      setActionErrorMessageKey,
     ]
   );
 
@@ -1002,27 +1064,6 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
       authoringKeys.forEach((key) => drafts.resetIfValue(key, submittedAuthoring[key] as WorkspaceDraftValue));
     }
 
-    if (dirty.has('brief.rules')) {
-      const submittedRules = drafts.value('brief.rules');
-      const rules = parseRuleDrafts(submittedRules);
-      const current = currentForChain();
-      if (
-        rules === null ||
-        current === null ||
-        (JSON.stringify(rules) !== JSON.stringify(projectRuleDrafts(current)) &&
-          !(await runChainedCommit((authority) =>
-            ipcBridge.creativeStudio.setRules.invoke({
-              projectId: authority.id,
-              expectedRevision: authority.revision,
-              rules,
-            })
-          )))
-      ) {
-        return false;
-      }
-      drafts.resetIfValue('brief.rules', submittedRules as WorkspaceDraftValue);
-    }
-
     type SubmittedOperation = {
       operation: StudioRendererAuthoringOperationV2;
       values: [key: string, value: WorkspaceDraftValue][];
@@ -1109,6 +1150,22 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
     return !hasBlockedShapeDraft;
   }, [drafts, projection?.requestShapeLocked, runWorkspaceCommitAtRevision]);
 
+  const flushAllWorkspaceDrafts = useCallback(
+    async (): Promise<boolean> =>
+      ruleDraftDirtyCount === 0 && inactiveWorkspaceDraftDirtyCount === 0 && saveAllDrafts(),
+    [inactiveWorkspaceDraftDirtyCount, ruleDraftDirtyCount, saveAllDrafts]
+  );
+  const closeDirtyDraftCount = drafts.dirtyCount + ruleDraftDirtyCount + inactiveWorkspaceDraftDirtyCount;
+
+  useLayoutEffect(() => {
+    if (project === null) {
+      onCloseContractChange(null);
+      return;
+    }
+    onCloseContractChange({ dirtyDraftCount: closeDirtyDraftCount, saveAll: flushAllWorkspaceDrafts });
+    return () => onCloseContractChange(null);
+  }, [closeDirtyDraftCount, flushAllWorkspaceDrafts, onCloseContractChange, project]);
+
   const refreshProposalAuthority = useCallback(async (): Promise<void> => {
     const [projectOutcome] = await Promise.allSettled([refetchProject(), refetchProposals(), refetchWorkspace()]);
     if (projectOutcome.status === 'fulfilled' && projectOutcome.value !== null) {
@@ -1141,7 +1198,7 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
         setPendingActionId(null);
       }
     },
-    [drafts.dirtyCount, pendingActionId, projectId, proposals, refreshProposalAuthority]
+    [drafts.dirtyCount, pendingActionId, projectId, proposals, refreshProposalAuthority, setActionErrorMessageKey]
   );
 
   const rejectProposal = useCallback(
@@ -1162,7 +1219,7 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
         setPendingActionId(null);
       }
     },
-    [pendingActionId, projectId, refetchProposals]
+    [pendingActionId, projectId, refetchProposals, setActionErrorMessageKey]
   );
 
   const decideReferences = useCallback(
@@ -1188,7 +1245,7 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
         setPendingActionId(null);
       }
     },
-    [pendingActionId, project, projectId, refetchReferences]
+    [pendingActionId, project, projectId, refetchReferences, setActionErrorMessageKey]
   );
 
   const reviewHandoff = useCallback(
@@ -1218,7 +1275,14 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
       }
       spendGate.open(draft);
     },
-    [generationDraftsBlockReview, projection, routeCatalog, spendGate.open, statusBlocksReview]
+    [
+      generationDraftsBlockReview,
+      projection,
+      routeCatalog,
+      setActionErrorMessageKey,
+      spendGate.open,
+      statusBlocksReview,
+    ]
   );
 
   const dismissHandoff = useCallback(
@@ -1244,7 +1308,7 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
         setPendingActionId(null);
       }
     },
-    [pendingActionId, refetchReferences]
+    [pendingActionId, refetchReferences, setActionErrorMessageKey]
   );
 
   if (loadState === 'loading' || loadState === 'idle') {
@@ -1294,11 +1358,26 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
 
   return (
     <>
-      <StudioCloseResponse dirtyDraftCount={drafts.dirtyCount} saveAll={saveAllDrafts} />
       <WorkspaceShell
+        ref={workspaceShellRef}
         project={project}
         activeView={activeView}
         stats={projection === null ? undefined : buildStudioBarStats(projection)}
+        projectMenu={
+          projection === null ? undefined : (
+            <WorkspaceProjectMenu
+              project={project}
+              projection={projection}
+              routeCatalog={routeCatalog}
+              drafts={drafts}
+              pending={workspacePending}
+              errorMessageKey={actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey}
+              mutations={mutations}
+              onRuleDraftDirtyCountChange={setRuleDraftDirtyCount}
+              onActiveRuleDraftDirtyCountChange={setActiveRuleDraftDirtyCount}
+            />
+          )
+        }
         notice={
           actionErrorMessageKey === null && workspaceErrorMessageKey === null && routeErrorMessageKey === null
             ? undefined
@@ -1333,7 +1412,6 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
             cutActions={cutActions}
             project={project}
             projection={projection}
-            routeCatalog={routeCatalog}
             exportCatalog={exportCatalog}
             drafts={drafts}
             pending={workspacePending}
@@ -1362,10 +1440,34 @@ const StudioProjectPage: React.FC<{ projectId: string; routeView: StudioView | n
 const StudioPage: React.FC = () => {
   const { id, view } = useParams<{ id?: string; view?: string }>();
   const routeView = parseStudioView(view);
+  const projectCloseContractRef = useRef<StudioCloseContract | null>(null);
+  const updateProjectCloseContract = useCallback((contract: StudioCloseContract | null): void => {
+    projectCloseContractRef.current = contract;
+  }, []);
+  const resolveCloseContract = useCallback(
+    (): StudioCloseContract =>
+      projectCloseContractRef.current ?? {
+        dirtyDraftCount: countStoredStudioRuleDrafts() + countStoredWorkspaceDrafts(),
+        saveAll: async () => countStoredStudioRuleDrafts() + countStoredWorkspaceDrafts() === 0,
+      },
+    []
+  );
   return (
-    <div className={`${styles.page} ${id ? styles.pageProject : ''}`} data-studio-workspace>
-      {id ? <StudioProjectPage projectId={id} routeView={routeView} /> : <StudioLibrary />}
-    </div>
+    <>
+      <StudioCloseResponse resolve={resolveCloseContract} />
+      <div className={`${styles.page} ${id ? styles.pageProject : ''}`} data-studio-workspace>
+        {id ? (
+          <StudioProjectPage
+            key={id}
+            projectId={id}
+            routeView={routeView}
+            onCloseContractChange={updateProjectCloseContract}
+          />
+        ) : (
+          <StudioLibrary />
+        )}
+      </div>
+    </>
   );
 };
 

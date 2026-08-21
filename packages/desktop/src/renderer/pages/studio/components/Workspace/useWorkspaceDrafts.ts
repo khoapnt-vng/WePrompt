@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 export type WorkspaceDraftValue = string | number | boolean | null;
 
@@ -16,7 +16,6 @@ const GENERATION_AFFECTING_DRAFT_KEYS = new Set([
   'brief.videoRouteId',
   'brief.spendCurrency',
   'brief.spendMajorUnits',
-  'brief.rules',
 ]);
 
 export const hasGenerationAffectingWorkspaceDrafts = (keys: readonly string[]): boolean =>
@@ -77,14 +76,26 @@ const MAX_STRING_VALUE_LENGTH = 8_192;
 const MAX_SELECTION = 256;
 const MAX_PERSISTED_DRAFT_LENGTH = 1_048_576;
 const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+// Task 8's raw rule document was replaced by typed, revision-guarded rule commands. Never revive
+// that opaque scalar from an older session: it can exceed the scalar bound, conflict invisibly, and
+// overwrite rules added by the Director after the draft was captured.
+const RETIRED_DRAFT_KEYS = new Set(['brief.rules']);
+const WORKSPACE_DRAFT_STORAGE_PREFIX = 'aionui:creative-studio:v2:workspace-drafts:';
+
+type VolatileWorkspaceDrafts = {
+  drafts: PersistedWorkspaceDrafts | null;
+  storageBacked: boolean;
+};
+
+const volatileWorkspaceDrafts = new Map<string, VolatileWorkspaceDrafts>();
 
 const validKey = (key: string): boolean =>
-  key.length > 0 && key.length <= MAX_FIELD_KEY_LENGTH && !FORBIDDEN_KEYS.has(key);
+  key.length > 0 && key.length <= MAX_FIELD_KEY_LENGTH && !FORBIDDEN_KEYS.has(key) && !RETIRED_DRAFT_KEYS.has(key);
 
 const emptyEntries = (): Record<string, WorkspaceDraftEntry> =>
   Object.create(null) as Record<string, WorkspaceDraftEntry>;
 
-const storageKey = (projectId: string): string => `aionui:creative-studio:v2:workspace-drafts:${projectId}`;
+const storageKey = (projectId: string): string => `${WORKSPACE_DRAFT_STORAGE_PREFIX}${projectId}`;
 
 const resolveStorage = (storage?: Storage): Storage | null => {
   if (storage !== undefined) return storage;
@@ -104,6 +115,17 @@ const validValue = (value: unknown): value is WorkspaceDraftValue =>
     !Object.is(value, -0)) ||
   (typeof value === 'string' && value.length <= MAX_STRING_VALUE_LENGTH);
 
+const matchesCanonicalValueKind = (
+  key: string,
+  value: WorkspaceDraftValue,
+  canonical: WorkspaceDraftValue
+): boolean => {
+  if (key.startsWith('beat.') && key.endsWith('.targetSeconds')) {
+    return value === null || typeof value === 'number';
+  }
+  return canonical === null ? value === null : typeof value === typeof canonical;
+};
+
 const fitsPersistedDraftBound = (drafts: PersistedWorkspaceDrafts): boolean => {
   try {
     return JSON.stringify(drafts).length <= MAX_PERSISTED_DRAFT_LENGTH;
@@ -120,6 +142,16 @@ const emptyDrafts = (projectId: string, sourceRevision: number): PersistedWorksp
   selection: { selectedBeatId: null, selectedShotIds: [], anchorShotId: null },
 });
 
+const cloneDrafts = (drafts: PersistedWorkspaceDrafts): PersistedWorkspaceDrafts => {
+  const entries = emptyEntries();
+  for (const [key, entry] of Object.entries(drafts.entries)) entries[key] = { ...entry };
+  return {
+    ...drafts,
+    entries,
+    selection: { ...drafts.selection, selectedShotIds: [...drafts.selection.selectedShotIds] },
+  };
+};
+
 const readDrafts = (
   projectId: string,
   projectRevision: number,
@@ -127,11 +159,28 @@ const readDrafts = (
   activeShotIds: readonly string[],
   storage?: Storage
 ): PersistedWorkspaceDrafts => {
+  const volatile = storage === undefined ? volatileWorkspaceDrafts.get(projectId) : undefined;
+  let storageBacked = false;
   try {
-    const bytes = resolveStorage(storage)?.getItem(storageKey(projectId));
-    if (bytes === null || bytes === undefined || bytes.length > MAX_PERSISTED_DRAFT_LENGTH)
-      return emptyDrafts(projectId, projectRevision);
-    const decoded = JSON.parse(bytes) as Partial<PersistedWorkspaceDrafts>;
+    const target = resolveStorage(storage);
+    let decoded: Partial<PersistedWorkspaceDrafts>;
+    if (
+      volatile?.storageBacked === false ||
+      (target === null && volatile?.drafts !== null && volatile?.drafts !== undefined)
+    ) {
+      if (volatile.drafts === null) return emptyDrafts(projectId, projectRevision);
+      decoded = cloneDrafts(volatile.drafts);
+    } else {
+      if (target === null) return emptyDrafts(projectId, projectRevision);
+      const bytes = target.getItem(storageKey(projectId));
+      if (bytes === null) {
+        if (storage === undefined) volatileWorkspaceDrafts.delete(projectId);
+        return emptyDrafts(projectId, projectRevision);
+      }
+      if (bytes.length > MAX_PERSISTED_DRAFT_LENGTH) throw new Error('oversized workspace draft');
+      decoded = JSON.parse(bytes) as Partial<PersistedWorkspaceDrafts>;
+      storageBacked = true;
+    }
     if (
       decoded.version !== 2 ||
       decoded.projectId !== projectId ||
@@ -140,7 +189,7 @@ const readDrafts = (
       decoded.entries === null ||
       Array.isArray(decoded.entries)
     ) {
-      return emptyDrafts(projectId, projectRevision);
+      throw new Error('invalid workspace draft envelope');
     }
     const entries = emptyEntries();
     for (const [key, candidate] of Object.entries(decoded.entries).slice(0, MAX_DRAFT_FIELDS)) {
@@ -168,7 +217,7 @@ const readDrafts = (
     const selectedShotIds = activeShotOrder.filter((shotId) => requested.has(shotId)).slice(0, MAX_SELECTION);
     const requestedBeatId = decoded.selection?.selectedBeatId;
     const requestedAnchor = decoded.selection?.anchorShotId;
-    return {
+    const result: PersistedWorkspaceDrafts = {
       version: 2,
       projectId,
       sourceRevision: decoded.sourceRevision,
@@ -180,26 +229,166 @@ const readDrafts = (
         anchorShotId: typeof requestedAnchor === 'string' && activeShots.has(requestedAnchor) ? requestedAnchor : null,
       },
     };
+    if (storage === undefined) {
+      volatileWorkspaceDrafts.set(projectId, { drafts: cloneDrafts(result), storageBacked });
+    }
+    return result;
   } catch {
+    if (volatile?.drafts !== null && volatile?.drafts !== undefined) {
+      volatileWorkspaceDrafts.set(projectId, { drafts: cloneDrafts(volatile.drafts), storageBacked: false });
+      return cloneDrafts(volatile.drafts);
+    }
+    try {
+      resolveStorage(storage)?.removeItem(storageKey(projectId));
+    } catch {
+      // Invalid storage remains untrusted and is ignored.
+    }
     return emptyDrafts(projectId, projectRevision);
   }
 };
 
 const writeDrafts = (drafts: PersistedWorkspaceDrafts, storage?: Storage): void => {
+  const isEmpty =
+    Object.keys(drafts.entries).length === 0 &&
+    drafts.selection.selectedBeatId === null &&
+    drafts.selection.selectedShotIds.length === 0;
+  if (isEmpty) {
+    try {
+      resolveStorage(storage)?.removeItem(storageKey(drafts.projectId));
+      if (storage === undefined) volatileWorkspaceDrafts.delete(drafts.projectId);
+    } catch {
+      if (storage === undefined) {
+        volatileWorkspaceDrafts.set(drafts.projectId, { drafts: null, storageBacked: false });
+      }
+    }
+    return;
+  }
+  const snapshot = cloneDrafts(drafts);
+  let storageBacked = false;
   try {
     const target = resolveStorage(storage);
-    if (target === null || !fitsPersistedDraftBound(drafts)) return;
-    if (
-      Object.keys(drafts.entries).length === 0 &&
-      drafts.selection.selectedBeatId === null &&
-      drafts.selection.selectedShotIds.length === 0
-    ) {
-      target.removeItem(storageKey(drafts.projectId));
-      return;
+    if (target !== null && fitsPersistedDraftBound(snapshot)) {
+      target.setItem(storageKey(snapshot.projectId), JSON.stringify(snapshot));
+      storageBacked = true;
     }
-    target.setItem(storageKey(drafts.projectId), JSON.stringify(drafts));
   } catch {
-    // Draft persistence is best effort; the in-memory owner remains authoritative for this view.
+    // The bounded volatile fallback preserves navigation and close protection.
+  }
+  if (storage === undefined) {
+    volatileWorkspaceDrafts.set(drafts.projectId, { drafts: snapshot, storageBacked });
+  }
+};
+
+const storedWorkspaceDraftCount = (drafts: PersistedWorkspaceDrafts): number =>
+  Object.keys(drafts.entries).filter((key) => validKey(key) && !key.startsWith('gate.')).length;
+
+export const countStoredWorkspaceDrafts = (excludedProjectId: string | null = null): number => {
+  const projectIds = new Set(volatileWorkspaceDrafts.keys());
+  try {
+    const keys = Array.from({ length: window.sessionStorage.length }, (_value, index) =>
+      window.sessionStorage.key(index)
+    );
+    for (const key of keys) {
+      if (key === null || !key.startsWith(WORKSPACE_DRAFT_STORAGE_PREFIX)) continue;
+      const projectId = key.slice(WORKSPACE_DRAFT_STORAGE_PREFIX.length);
+      if (projectId.length === 0 || storageKey(projectId) !== key) continue;
+      projectIds.add(projectId);
+    }
+    let count = 0;
+    for (const projectId of projectIds) {
+      if (projectId === excludedProjectId) continue;
+      const volatile = volatileWorkspaceDrafts.get(projectId);
+      if (volatile?.storageBacked === false) {
+        if (volatile.drafts !== null) count += storedWorkspaceDraftCount(volatile.drafts);
+        continue;
+      }
+      let bytes: string | null;
+      try {
+        bytes = window.sessionStorage.getItem(storageKey(projectId));
+      } catch {
+        if (volatile?.drafts !== null && volatile?.drafts !== undefined) {
+          count += storedWorkspaceDraftCount(volatile.drafts);
+        }
+        continue;
+      }
+      if (bytes === null) {
+        volatileWorkspaceDrafts.delete(projectId);
+        continue;
+      }
+      try {
+        if (bytes.length > MAX_PERSISTED_DRAFT_LENGTH) throw new Error('oversized workspace draft');
+        const decoded = JSON.parse(bytes) as Partial<PersistedWorkspaceDrafts>;
+        if (
+          decoded.version !== 2 ||
+          decoded.projectId !== projectId ||
+          !Number.isSafeInteger(decoded.sourceRevision) ||
+          typeof decoded.entries !== 'object' ||
+          decoded.entries === null ||
+          Array.isArray(decoded.entries) ||
+          typeof decoded.selection !== 'object' ||
+          decoded.selection === null ||
+          !Array.isArray(decoded.selection.selectedShotIds)
+        ) {
+          throw new Error('invalid workspace draft envelope');
+        }
+        const entries = emptyEntries();
+        for (const [key, candidate] of Object.entries(decoded.entries).slice(0, MAX_DRAFT_FIELDS)) {
+          if (
+            validKey(key) &&
+            typeof candidate === 'object' &&
+            candidate !== null &&
+            validValue(candidate.baseValue) &&
+            validValue(candidate.value)
+          ) {
+            entries[key] = { baseValue: candidate.baseValue, value: candidate.value };
+          }
+        }
+        const selectedBeatId = decoded.selection.selectedBeatId;
+        const anchorShotId = decoded.selection.anchorShotId;
+        const persisted: PersistedWorkspaceDrafts = {
+          version: 2,
+          projectId,
+          sourceRevision: decoded.sourceRevision,
+          entries,
+          selection: {
+            selectedBeatId:
+              typeof selectedBeatId === 'string' && selectedBeatId.length <= MAX_FIELD_KEY_LENGTH
+                ? selectedBeatId
+                : null,
+            selectedShotIds: decoded.selection.selectedShotIds
+              .filter((shotId): shotId is string => typeof shotId === 'string' && shotId.length <= MAX_FIELD_KEY_LENGTH)
+              .slice(0, MAX_SELECTION),
+            anchorShotId:
+              typeof anchorShotId === 'string' && anchorShotId.length <= MAX_FIELD_KEY_LENGTH ? anchorShotId : null,
+          },
+        };
+        volatileWorkspaceDrafts.set(projectId, { drafts: cloneDrafts(persisted), storageBacked: true });
+        count += storedWorkspaceDraftCount(persisted);
+      } catch {
+        if (volatile?.drafts !== null && volatile?.drafts !== undefined) {
+          count += storedWorkspaceDraftCount(volatile.drafts);
+        }
+      }
+    }
+    return count;
+  } catch {
+    let count = 0;
+    for (const [projectId, volatile] of volatileWorkspaceDrafts) {
+      if (projectId !== excludedProjectId && volatile.drafts !== null) {
+        count += storedWorkspaceDraftCount(volatile.drafts);
+      }
+    }
+    return count;
+  }
+};
+
+export const purgeStoredWorkspaceDrafts = (projectId: string): void => {
+  volatileWorkspaceDrafts.set(projectId, { drafts: null, storageBacked: false });
+  try {
+    window.sessionStorage.removeItem(storageKey(projectId));
+    volatileWorkspaceDrafts.delete(projectId);
+  } catch {
+    // The volatile tombstone prevents a stale envelope from resurfacing in this renderer session.
   }
 };
 
@@ -258,11 +447,25 @@ export const useWorkspaceDrafts = ({
       ? readDrafts(projectId, projectRevision, activeBeatIds, activeShotIds, storage)
       : emptyDrafts(projectId, projectRevision)
   );
+  const draftsRef = useRef(drafts);
+  draftsRef.current = drafts;
+  const hydratedScopeRef = useRef<{ projectId: string; storage: Storage | undefined } | null>(
+    enabled ? { projectId, storage } : null
+  );
 
-  useEffect(() => {
-    if (!enabled) return;
-    setDrafts(readDrafts(projectId, projectRevision, activeBeatIds, activeShotIds, storage));
-  }, [enabled, projectId, storage]);
+  useLayoutEffect(() => {
+    if (!enabled) {
+      hydratedScopeRef.current = null;
+      return;
+    }
+    const hydrated = hydratedScopeRef.current;
+    if (hydrated === null || hydrated.projectId !== projectId || hydrated.storage !== storage) {
+      hydratedScopeRef.current = { projectId, storage };
+      setDrafts(readDrafts(projectId, projectRevision, activeBeatIds, activeShotIds, storage));
+      return;
+    }
+    writeDrafts(drafts, storage);
+  }, [activeBeatFingerprint, activeShotFingerprint, drafts, enabled, projectId, projectRevision, storage]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -273,6 +476,12 @@ export const useWorkspaceDrafts = ({
       for (const [key, entry] of Object.entries(current.entries)) {
         if (!validKey(key) || !Object.hasOwn(canonicalValues, key)) continue;
         const canonical = canonicalValues[key]!;
+        if (
+          !matchesCanonicalValueKind(key, entry.baseValue, canonical) ||
+          !matchesCanonicalValueKind(key, entry.value, canonical)
+        ) {
+          continue;
+        }
         if (entry.value === canonical) continue;
         if (entry.baseValue !== canonical) hasConflict = true;
         entries[key] = entry.baseValue === canonical ? entry : { ...entry };
@@ -304,16 +513,16 @@ export const useWorkspaceDrafts = ({
     });
   }, [activeBeatFingerprint, activeShotFingerprint, canonicalFingerprint, enabled, projectId, projectRevision]);
 
-  useEffect(() => {
-    if (enabled) writeDrafts(drafts, storage);
-  }, [drafts, enabled, storage]);
-
   const conflictKeys = useMemo(
     () =>
       Object.entries(drafts.entries)
         .filter(
           ([key, entry]) =>
-            validKey(key) && Object.hasOwn(canonicalValues, key) && entry.baseValue !== canonicalValues[key]
+            validKey(key) &&
+            Object.hasOwn(canonicalValues, key) &&
+            matchesCanonicalValueKind(key, entry.baseValue, canonicalValues[key]!) &&
+            matchesCanonicalValueKind(key, entry.value, canonicalValues[key]!) &&
+            entry.baseValue !== canonicalValues[key]
         )
         .map(([key]) => key)
         .toSorted(),
@@ -322,15 +531,24 @@ export const useWorkspaceDrafts = ({
   const dirtyKeys = useMemo(
     () =>
       Object.keys(drafts.entries)
-        .filter((key) => !key.startsWith('gate.'))
+        .filter((key) => {
+          if (key.startsWith('gate.') || !validKey(key) || !Object.hasOwn(canonicalValues, key)) return false;
+          const entry = drafts.entries[key]!;
+          const canonical = canonicalValues[key]!;
+          return (
+            matchesCanonicalValueKind(key, entry.baseValue, canonical) &&
+            matchesCanonicalValueKind(key, entry.value, canonical)
+          );
+        })
         .toSorted(),
-    [drafts.entries]
+    [canonicalFingerprint, drafts.entries]
   );
 
   const setValue = useCallback(
     (key: string, value: WorkspaceDraftValue): void => {
       if (!enabled || !validKey(key) || !validValue(value) || !Object.hasOwn(canonicalValues, key)) return;
       const canonical = canonicalValues[key]!;
+      if (!matchesCanonicalValueKind(key, value, canonical)) return;
       setDrafts((current) => {
         const entries = { ...current.entries };
         if (value === canonical) delete entries[key];
@@ -346,34 +564,53 @@ export const useWorkspaceDrafts = ({
     [canonicalFingerprint, enabled]
   );
 
-  const reset = useCallback((key: string): void => {
-    setDrafts((current) => {
-      if (!Object.hasOwn(current.entries, key)) return current;
+  const reset = useCallback(
+    (key: string): void => {
+      const current = draftsRef.current;
+      if (!Object.hasOwn(current.entries, key)) return;
       const entries = { ...current.entries };
       delete entries[key];
-      return { ...current, entries };
-    });
-  }, []);
+      const next = { ...current, entries };
+      draftsRef.current = next;
+      writeDrafts(next, storage);
+      setDrafts(next);
+    },
+    [storage]
+  );
 
-  const resetIfValue = useCallback((key: string, expectedValue: WorkspaceDraftValue): void => {
-    if (!validKey(key) || !validValue(expectedValue)) return;
-    setDrafts((current) => {
+  const resetIfValue = useCallback(
+    (key: string, expectedValue: WorkspaceDraftValue): void => {
+      if (!validKey(key) || !validValue(expectedValue)) return;
+      const current = draftsRef.current;
       const entry = Object.hasOwn(current.entries, key) ? current.entries[key] : undefined;
-      if (entry === undefined || entry.value !== expectedValue) return current;
+      if (entry === undefined || entry.value !== expectedValue) return;
       const entries = { ...current.entries };
       delete entries[key];
-      return { ...current, entries };
-    });
-  }, []);
+      const next = { ...current, entries };
+      draftsRef.current = next;
+      writeDrafts(next, storage);
+      setDrafts(next);
+    },
+    [storage]
+  );
 
   const resetAll = useCallback((): void => {
-    setDrafts((current) => ({ ...current, sourceRevision: projectRevision, entries: {} }));
-  }, [projectRevision]);
+    const next = { ...draftsRef.current, sourceRevision: projectRevision, entries: emptyEntries() };
+    draftsRef.current = next;
+    writeDrafts(next, storage);
+    setDrafts(next);
+  }, [projectRevision, storage]);
 
   const value = useCallback(
     (key: string): WorkspaceDraftValue | undefined => {
       if (!validKey(key) || !Object.hasOwn(canonicalValues, key)) return undefined;
-      return Object.hasOwn(drafts.entries, key) ? drafts.entries[key]!.value : canonicalValues[key];
+      const canonical = canonicalValues[key]!;
+      if (!Object.hasOwn(drafts.entries, key)) return canonical;
+      const entry = drafts.entries[key]!;
+      return matchesCanonicalValueKind(key, entry.baseValue, canonical) &&
+        matchesCanonicalValueKind(key, entry.value, canonical)
+        ? entry.value
+        : canonical;
     },
     [canonicalFingerprint, drafts.entries]
   );

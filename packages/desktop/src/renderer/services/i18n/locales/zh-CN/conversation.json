@@ -900,6 +900,11 @@
       "capacityMismatch": "你有 {{count}} 张启用的参考图，但此图像引擎仅支持 {{maximum}} 张。在移除参考图或更换、重新验证引擎之前，无法生成新的参考静帧。",
       "importError": "无法添加参考图，请重试。"
     },
+    "workspace": {
+      "controls": {
+        "briefAndRulesTitle": "简报与规则"
+      }
+    },
     "rules": {
       "open": "规则",
       "title": "规则",

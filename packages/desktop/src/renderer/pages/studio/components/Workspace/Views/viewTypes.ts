@@ -5,6 +5,7 @@
  */
 
 import type {
+  StudioBriefRule,
   StudioBriefRuleDraft,
   StudioCascadeProgressV2,
   StudioEditableProjectSettingsChanges,
@@ -23,7 +24,11 @@ import type { CutActions } from './Cut';
 export type WorkspaceMutationCallbacks = {
   editProject: (changes: StudioEditableProjectSettingsChanges) => Promise<boolean>;
   applyAuthoring: (operations: StudioRendererAuthoringOperationV2[]) => Promise<boolean>;
-  setRules: (rules: StudioBriefRuleDraft[]) => Promise<boolean>;
+  setRules: (
+    update: (latestRules: readonly StudioBriefRule[]) => StudioBriefRuleDraft[] | null,
+    adoptionKey: string
+  ) => Promise<boolean>;
+  acknowledgeRuleAdoption: (adoptionKey: string) => void;
   refreshRoutes: () => Promise<boolean>;
   undo: (entryId: string) => Promise<boolean>;
   retryConditioning: (dependentShotId: string) => Promise<boolean>;
@@ -35,7 +40,6 @@ export type WorkspaceControlsProps = {
   activeView: StudioView;
   project: StudioRendererProjectV2;
   projection: WorkspaceProjection;
-  routeCatalog: StudioRouteCatalogV2 | null;
   exportCatalog: StudioRendererExportCatalogV2 | null;
   drafts: UseWorkspaceDraftsResult;
   pending: boolean;
@@ -49,4 +53,15 @@ export type WorkspaceControlsProps = {
   beatPanelBriefReferenceOptions: readonly BeatPanelBriefReferenceOption[];
   beatPanelReviewGraphs: readonly BeatPanelReviewGraph[];
   beatPanelReviewBlockedMessageKey: string | null;
+};
+
+export type WorkspaceProjectMenuProps = Pick<
+  WorkspaceControlsProps,
+  'project' | 'projection' | 'drafts' | 'pending' | 'errorMessageKey' | 'mutations'
+> & {
+  routeCatalog: StudioRouteCatalogV2 | null;
+  onRuleDraftDirtyCountChange?: (count: number) => void;
+  onActiveRuleDraftDirtyCountChange?: (count: number) => void;
+  /** Injected so the locked layer remains directly testable while this release ships it empty. */
+  organisationRules?: readonly StudioBriefRule[];
 };

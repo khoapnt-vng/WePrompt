@@ -903,6 +903,11 @@
       "capacityMismatch": "Du hast {{count}} aktive Referenzen, diese Bild-Engine unterstützt jedoch {{maximum}}. Neue Referenzstills bleiben blockiert, bis du Referenzen entfernst oder die Engine wechselst bzw. erneut validierst.",
       "importError": "Die Referenz konnte nicht hinzugefügt werden. Versuche es erneut."
     },
+    "workspace": {
+      "controls": {
+        "briefAndRulesTitle": "Brief & Regeln"
+      }
+    },
     "rules": {
       "open": "Regeln",
       "title": "Regeln",

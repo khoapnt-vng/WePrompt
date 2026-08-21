@@ -905,6 +905,11 @@
       "capacityMismatch": "Tienes {{count}} referencias activas, pero este motor de imagen admite {{maximum}}. La generación de nuevas imágenes de referencia queda bloqueada hasta que quites referencias o cambies o vuelvas a validar el motor.",
       "importError": "No se pudo añadir la referencia. Inténtalo de nuevo."
     },
+    "workspace": {
+      "controls": {
+        "briefAndRulesTitle": "Brief y reglas"
+      }
+    },
     "rules": {
       "open": "Reglas",
       "title": "Reglas",

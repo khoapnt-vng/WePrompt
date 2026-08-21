@@ -28,9 +28,41 @@ const workspaceSelector = '[data-studio-workspace]';
 const projectHeaderSelector = '[data-studio-project-header]';
 const viewNavigationSelector = '[data-studio-view-navigation]';
 const activeViewSelector = '[data-studio-view]';
-const controlsSelector = '[data-studio-workspace-controls]';
+const projectSettingsTitle = 'Project settings';
+const briefAndRulesTitle = 'Brief & rules';
 const studioStorageDirectory = (userDataDirectory: string): string =>
   path.join(userDataDirectory, 'config', 'creative-studio');
+
+const expectProjectConfigurationOutsideActiveView = async (page: Page): Promise<void> => {
+  const activeView = page.locator(activeViewSelector);
+  await expect(activeView.getByLabel('Project name')).toHaveCount(0);
+  await expect(activeView.getByLabel('Project brief')).toHaveCount(0);
+  await expect(activeView.getByLabel('Image route')).toHaveCount(0);
+  await expect(activeView.getByLabel('Video route')).toHaveCount(0);
+  await expect(activeView.getByLabel('Policy currency')).toHaveCount(0);
+  await expect(activeView.getByLabel('Rule', { exact: true })).toHaveCount(0);
+  await expect(activeView.getByLabel('Project rule drafts (JSON)')).toHaveCount(0);
+};
+
+const openStudioProjectDialog = async (page: Page, title: string): Promise<Locator> => {
+  const appBar = page.locator('[data-studio-app-bar]');
+  const trigger = appBar.getByRole('button', { name: 'More', exact: true });
+  await expect(trigger).toHaveAttribute('aria-haspopup', 'menu');
+  await trigger.click();
+
+  const menu = page.getByRole('menu').filter({ has: page.getByRole('menuitem', { name: title, exact: true }) });
+  await expect(menu).toBeVisible();
+  await menu.getByRole('menuitem', { name: title, exact: true }).click();
+
+  const dialog = page.getByRole('dialog', { name: title, exact: true });
+  await expect(dialog).toBeVisible();
+  return dialog;
+};
+
+const closeStudioProjectDialog = async (dialog: Locator): Promise<void> => {
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(dialog).toBeHidden();
+};
 
 type StudioE2EProviderCallCounts = {
   validateConnection: number;
@@ -828,31 +860,50 @@ test.describe('Creative Studio workspace', () => {
     const navigation = page.locator(viewNavigationSelector);
     await expect(navigation.getByRole('link', { name: 'Table' })).toHaveAttribute('aria-current', 'page');
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'table');
-    const controls = page.locator(controlsSelector);
-    const nameDraft = controls.getByLabel('Project name');
+    await expectProjectConfigurationOutsideActiveView(page);
+
+    let settingsDialog = await openStudioProjectDialog(page, projectSettingsTitle);
+    const nameDraft = settingsDialog.getByLabel('Project name');
     await expect(nameDraft).toHaveValue(projectBrief);
     await nameDraft.fill(`${projectBrief} — local draft`);
+    await closeStudioProjectDialog(settingsDialog);
 
     await navigation.getByRole('link', { name: 'Board' }).click();
     await expect(page).toHaveURL(/#\/studio\/[^/]+\/board$/);
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'board');
-    await expect(controls.getByLabel('Project name')).toHaveValue(`${projectBrief} — local draft`);
+    await expectProjectConfigurationOutsideActiveView(page);
+    settingsDialog = await openStudioProjectDialog(page, projectSettingsTitle);
+    await expect(settingsDialog.getByLabel('Project name')).toHaveValue(`${projectBrief} — local draft`);
+    await closeStudioProjectDialog(settingsDialog);
 
     await navigation.getByRole('link', { name: 'Cut' }).click();
     await expect(page).toHaveURL(/#\/studio\/[^/]+\/cut$/);
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'cut');
-    await expect(controls.getByLabel('Project name')).toHaveValue(`${projectBrief} — local draft`);
+    await expectProjectConfigurationOutsideActiveView(page);
+    settingsDialog = await openStudioProjectDialog(page, projectSettingsTitle);
+    await expect(settingsDialog.getByLabel('Project name')).toHaveValue(`${projectBrief} — local draft`);
+    await closeStudioProjectDialog(settingsDialog);
 
     const cutUrl = page.url();
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(page).toHaveURL(cutUrl);
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'cut');
-    await expect(page.locator(controlsSelector).getByLabel('Project name')).toHaveValue(
-      `${projectBrief} — local draft`
-    );
+    await expectProjectConfigurationOutsideActiveView(page);
+    settingsDialog = await openStudioProjectDialog(page, projectSettingsTitle);
+    await expect(settingsDialog.getByLabel('Project name')).toHaveValue(`${projectBrief} — local draft`);
 
-    await page.locator(controlsSelector).getByRole('button', { name: 'Reset settings' }).click();
-    await expect(page.locator(controlsSelector).getByLabel('Project name')).toHaveValue(projectBrief);
+    await settingsDialog.getByRole('button', { name: 'Reset settings' }).click();
+    await expect(settingsDialog.getByLabel('Project name')).toHaveValue(projectBrief);
+    await closeStudioProjectDialog(settingsDialog);
+
+    const briefDialog = await openStudioProjectDialog(page, briefAndRulesTitle);
+    await expect(briefDialog.getByLabel('Project brief')).toHaveValue(projectBrief);
+    await expect(briefDialog.getByLabel('Image route')).toBeVisible();
+    await expect(briefDialog.getByLabel('Video route')).toBeVisible();
+    await expect(briefDialog.getByLabel('Policy currency')).toBeVisible();
+    await expect(briefDialog.getByLabel('Rule', { exact: true })).toBeVisible();
+    await expect(briefDialog.getByLabel('Project rule drafts (JSON)')).toHaveCount(0);
+    await closeStudioProjectDialog(briefDialog);
 
     // Merely loading, navigating, and restoring drafts cannot open or cross the paid boundary.
     await expect(page.locator('[data-testid="studio-spend-gate"]')).toHaveCount(0);
@@ -1353,6 +1404,9 @@ test.describe('Creative Studio workspace', () => {
 
       await page.reload({ waitUntil: 'domcontentloaded' });
       await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'table', { timeout: 30_000 });
+      const briefDialog = await openStudioProjectDialog(page, briefAndRulesTitle);
+      await expect(briefDialog.locator('small').filter({ hasText: 'Ready' })).toHaveCount(2);
+      await closeStudioProjectDialog(briefDialog);
       const renderedRow = page
         .getByRole('grid', { name: 'Beat table' })
         .getByRole('row')
@@ -1361,7 +1415,6 @@ test.describe('Creative Studio workspace', () => {
       await renderedRow.getByRole('gridcell').first().click();
       const panel = page.getByRole('dialog', { name: 'Beat panel — Landing' });
       await expect(panel).toBeVisible();
-      await expect(page.locator(controlsSelector).locator('small').filter({ hasText: 'Ready' })).toHaveCount(2);
       const playbackLane = panel.getByRole('group', { name: 'Playback coverage' });
       const planningLane = panel.getByRole('group', { name: 'Planning overlay' });
       await expect(playbackLane.locator(`[data-shot-id="${shotId}"]`)).toContainText('10s source');

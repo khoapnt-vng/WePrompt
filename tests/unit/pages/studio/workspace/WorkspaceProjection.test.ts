@@ -3,7 +3,7 @@
 import { readdirSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
   StudioAssetV2,
@@ -16,6 +16,7 @@ import type {
 import {
   hasGenerationAffectingWorkspaceDrafts,
   buildStudioBarStats,
+  countStoredWorkspaceDrafts,
   projectWorkspace,
   useWorkspaceDrafts,
 } from '@/renderer/pages/studio/components/Workspace';
@@ -995,7 +996,10 @@ describe('useWorkspaceDrafts', () => {
   });
 
   it('preserves intentional null values and a true null base through conflict detection', async () => {
-    let canonical = { target: 'asset_1' as string | null, nullableBase: null as string | null };
+    let canonical = {
+      'beat.beat_1.targetSeconds': 4 as number | null,
+      'beat.beat_2.targetSeconds': null as number | null,
+    };
     const view = renderHook(() =>
       useWorkspaceDrafts({
         projectId: 'project_1',
@@ -1006,14 +1010,14 @@ describe('useWorkspaceDrafts', () => {
       })
     );
     act(() => {
-      view.result.current.setValue('target', null);
-      view.result.current.setValue('nullableBase', 'draft');
+      view.result.current.setValue('beat.beat_1.targetSeconds', null);
+      view.result.current.setValue('beat.beat_2.targetSeconds', 6);
     });
-    expect(view.result.current.value('target')).toBeNull();
-    canonical = { target: 'asset_1', nullableBase: 'changed' };
+    expect(view.result.current.value('beat.beat_1.targetSeconds')).toBeNull();
+    canonical = { 'beat.beat_1.targetSeconds': 4, 'beat.beat_2.targetSeconds': 8 };
     view.rerender();
-    await waitFor(() => expect(view.result.current.conflictKeys).toEqual(['nullableBase']));
-    expect(view.result.current.entries.nullableBase).toEqual({ baseValue: null, value: 'draft' });
+    await waitFor(() => expect(view.result.current.conflictKeys).toEqual(['beat.beat_2.targetSeconds']));
+    expect(view.result.current.entries['beat.beat_2.targetSeconds']).toEqual({ baseValue: null, value: 6 });
   });
 
   it('uses session storage across remount and keeps gate preferences out of close dirty count', async () => {
@@ -1039,6 +1043,167 @@ describe('useWorkspaceDrafts', () => {
     expect(second.result.current.value('name')).toBe('Draft A');
     expect(second.result.current.selection.selectedBeatId).toBe('beat_1');
     expect(second.result.current.selection.selectedShotIds).toEqual(['shot_1']);
+  });
+
+  it('retains bounded drafts and global close count when session storage rejects a write', async () => {
+    const input = {
+      projectId: 'project_1',
+      projectRevision: 3,
+      canonicalValues: { name: 'A' },
+      activeBeatIds: [] as string[],
+      activeShotIds: [] as string[],
+    };
+    const originalSetItem = Storage.prototype.setItem;
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation((key, value) => {
+      if (key === storageKey) throw new DOMException('Quota', 'QuotaExceededError');
+      return Reflect.apply(originalSetItem, window.sessionStorage, [key, value]);
+    });
+    const first = renderHook(() => useWorkspaceDrafts(input));
+    act(() => first.result.current.setValue('name', 'Draft A'));
+    expect(first.result.current.dirtyCount).toBe(1);
+    expect(countStoredWorkspaceDrafts()).toBe(1);
+    expect(countStoredWorkspaceDrafts('project_1')).toBe(0);
+    expect(window.sessionStorage.getItem(storageKey)).toBeNull();
+
+    first.unmount();
+    const second = renderHook(() => useWorkspaceDrafts(input));
+    expect(second.result.current.value('name')).toBe('Draft A');
+    expect(second.result.current.dirtyCount).toBe(1);
+
+    setItem.mockRestore();
+    act(() => second.result.current.reset('name'));
+    await waitFor(() => expect(countStoredWorkspaceDrafts()).toBe(0));
+  });
+
+  it('caches a counted backing envelope before session storage becomes unreadable', async () => {
+    window.sessionStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        version: 2,
+        projectId: 'project_1',
+        sourceRevision: 3,
+        entries: { name: { baseValue: 'A', value: 'Draft A' } },
+        selection: {
+          selectedBeatId: 'beat_1',
+          selectedShotIds: ['shot_1', 42, 'x'.repeat(513)],
+          anchorShotId: 'shot_1',
+        },
+      })
+    );
+    expect(countStoredWorkspaceDrafts()).toBe(1);
+    const sessionStorage = vi.spyOn(window, 'sessionStorage', 'get').mockImplementation(() => {
+      throw new DOMException('Unavailable', 'SecurityError');
+    });
+    expect(countStoredWorkspaceDrafts()).toBe(1);
+
+    const view = renderHook(() =>
+      useWorkspaceDrafts({
+        projectId: 'project_1',
+        projectRevision: 3,
+        canonicalValues: { name: 'A' },
+        activeBeatIds: ['beat_1'],
+        activeShotIds: ['shot_1'],
+      })
+    );
+    expect(view.result.current.value('name')).toBe('Draft A');
+    expect(view.result.current.selection).toEqual({
+      selectedBeatId: 'beat_1',
+      selectedShotIds: ['shot_1'],
+      anchorShotId: 'shot_1',
+    });
+    sessionStorage.mockRestore();
+    act(() => view.result.current.reset('name'));
+    await waitFor(() => expect(countStoredWorkspaceDrafts()).toBe(0));
+  });
+
+  it('hydrates custom storage before its first enabled write', async () => {
+    const projectId = 'project_custom_storage';
+    const customStorageKey = `aionui:creative-studio:v2:workspace-drafts:${projectId}`;
+    window.localStorage.setItem(
+      customStorageKey,
+      JSON.stringify({
+        version: 2,
+        projectId,
+        sourceRevision: 3,
+        entries: { name: { baseValue: 'A', value: 'Stored draft' } },
+        selection: { selectedBeatId: null, selectedShotIds: [], anchorShotId: null },
+      })
+    );
+    let enabled = false;
+    const view = renderHook(() =>
+      useWorkspaceDrafts({
+        projectId,
+        projectRevision: 3,
+        canonicalValues: { name: 'A' },
+        activeBeatIds: [],
+        activeShotIds: [],
+        storage: window.localStorage,
+        enabled,
+      })
+    );
+
+    act(() => view.result.current.setValue('name', 'Ignored while disabled'));
+    expect(view.result.current.value('name')).toBe('A');
+    enabled = true;
+    view.rerender();
+
+    await waitFor(() => expect(view.result.current.value('name')).toBe('Stored draft'));
+    expect(window.localStorage.getItem(customStorageKey)).toContain('Stored draft');
+  });
+
+  it('recovers the last trusted draft when its backing envelope becomes malformed', async () => {
+    const projectId = 'project_corrupt_backing';
+    const corruptStorageKey = `aionui:creative-studio:v2:workspace-drafts:${projectId}`;
+    const input = {
+      projectId,
+      projectRevision: 3,
+      canonicalValues: { name: 'A' },
+      activeBeatIds: [] as string[],
+      activeShotIds: [] as string[],
+    };
+    const first = renderHook(() => useWorkspaceDrafts(input));
+    act(() => first.result.current.setValue('name', 'Trusted draft'));
+    await waitFor(() => expect(window.sessionStorage.getItem(corruptStorageKey)).toContain('Trusted draft'));
+    first.unmount();
+
+    window.sessionStorage.setItem(corruptStorageKey, '{not-json');
+    expect(countStoredWorkspaceDrafts()).toBe(1);
+    const restored = renderHook(() => useWorkspaceDrafts(input));
+    expect(restored.result.current.value('name')).toBe('Trusted draft');
+
+    act(() => restored.result.current.reset('name'));
+    await waitFor(() => expect(countStoredWorkspaceDrafts()).toBe(0));
+  });
+
+  it('rejects out-of-scope draft values and selection identities without creating phantom work', () => {
+    const view = renderHook(() =>
+      useWorkspaceDrafts({
+        projectId: 'project_guarded_inputs',
+        projectRevision: 3,
+        canonicalValues: { name: 'A' },
+        activeBeatIds: ['beat_1'],
+        activeShotIds: ['shot_1'],
+      })
+    );
+
+    act(() => {
+      view.result.current.setValue('__proto__', 'unsafe');
+      view.result.current.setValue('name', Number.POSITIVE_INFINITY);
+      view.result.current.setValue('unknown', 'draft');
+      view.result.current.reset('unknown');
+      view.result.current.resetIfValue('name', Number.POSITIVE_INFINITY);
+      view.result.current.resetIfValue('name', 'A');
+      view.result.current.selectBeat('beat_missing');
+      view.result.current.selectShot('shot_missing');
+    });
+
+    expect(view.result.current.entries).toEqual({});
+    expect(view.result.current.selection).toEqual({
+      selectedBeatId: null,
+      selectedShotIds: [],
+      anchorShotId: null,
+    });
+    expect(view.result.current.value('unknown')).toBeUndefined();
   });
 
   it('persists Beat-only selection without counting it as an unsaved draft', async () => {
@@ -1183,6 +1348,73 @@ describe('useWorkspaceDrafts', () => {
     expect(hasGenerationAffectingWorkspaceDrafts(['shot.shot_1.onScreenText'])).toBe(true);
     expect(hasGenerationAffectingWorkspaceDrafts(['settings.name', 'gate.choices'])).toBe(false);
   });
+
+  it.each([
+    ['valid', '[{"id":"rule_1","text":"Keep the subject centered"}]'],
+    ['malformed', '{not-json'],
+  ] as const)(
+    'synchronously discards a %s legacy Brief rules draft without contaminating current draft state',
+    async (_payloadKind, legacyRulesValue) => {
+      window.sessionStorage.setItem(
+        storageKey,
+        JSON.stringify({
+          version: 2,
+          projectId: 'project_1',
+          sourceRevision: 3,
+          entries: {
+            'brief.rules': {
+              baseValue: '[{"id":"old_rule","text":"Old rule"}]',
+              value: legacyRulesValue,
+            },
+            'settings.name': { baseValue: 'Launch film', value: 'Renamed film' },
+          },
+          selection: { selectedBeatId: null, selectedShotIds: [], anchorShotId: null },
+        })
+      );
+
+      const view = renderHook(() =>
+        useWorkspaceDrafts({
+          projectId: 'project_1',
+          projectRevision: 3,
+          canonicalValues: {
+            'brief.rules': '[]',
+            'settings.name': 'Launch film',
+          },
+          activeBeatIds: [],
+          activeShotIds: [],
+        })
+      );
+
+      expect({
+        entries: Object.fromEntries(Object.entries(view.result.current.entries)),
+        dirtyKeys: view.result.current.dirtyKeys,
+        dirtyCount: view.result.current.dirtyCount,
+        conflictKeys: view.result.current.conflictKeys,
+        staleRevision: view.result.current.staleRevision,
+        legacyGenerationAffecting: hasGenerationAffectingWorkspaceDrafts(['brief.rules']),
+        currentGenerationAffecting: hasGenerationAffectingWorkspaceDrafts(view.result.current.dirtyKeys),
+      }).toEqual({
+        entries: {
+          'settings.name': { baseValue: 'Launch film', value: 'Renamed film' },
+        },
+        dirtyKeys: ['settings.name'],
+        dirtyCount: 1,
+        conflictKeys: [],
+        staleRevision: false,
+        legacyGenerationAffecting: false,
+        currentGenerationAffecting: false,
+      });
+
+      await waitFor(() => {
+        const persisted = JSON.parse(window.sessionStorage.getItem(storageKey) ?? '{}') as {
+          entries?: Record<string, unknown>;
+        };
+        expect(persisted.entries).toEqual({
+          'settings.name': { baseValue: 'Launch film', value: 'Renamed film' },
+        });
+      });
+    }
+  );
 
   it('rejects stored prototype keys, deduplicates active order, and caps runtime selection', () => {
     window.sessionStorage.setItem(

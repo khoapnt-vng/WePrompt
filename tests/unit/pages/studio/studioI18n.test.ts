@@ -524,6 +524,7 @@ const expectedLeaves = [
   'controls.reset',
   'controls.saveSettings',
   'controls.briefTitle',
+  'controls.briefAndRulesTitle',
   'controls.brief',
   'controls.imageRoute',
   'controls.videoRoute',
@@ -531,10 +532,7 @@ const expectedLeaves = [
   'controls.spendCap',
   'controls.saveBrief',
   'controls.refreshRoutes',
-  'controls.rules',
-  'controls.saveRules',
   'controls.invalidSpendPolicy',
-  'controls.invalidRules',
   'controls.draftConflict',
   'controls.shotsTitle',
   'controls.noCoverage',
@@ -646,6 +644,21 @@ const expectedLeaves = [
 const placeholders = (value: string): string[] =>
   [...value.matchAll(/{{\s*([^},\s]+)(?:\s*,[^}]*)?\s*}}/g)].map((match) => match[1]!).sort();
 
+const briefAndRulesTitles: Record<string, string> = {
+  'de-DE': 'Brief & Regeln',
+  'en-US': 'Brief & rules',
+  'es-ES': 'Brief y reglas',
+  'fa-IR': 'بریف و قوانین',
+  'ja-JP': 'ブリーフとルール',
+  'ko-KR': '브리프 및 규칙',
+  'pt-BR': 'Brief e regras',
+  'ru-RU': 'Бриф и правила',
+  'tr-TR': 'Brief ve kurallar',
+  'uk-UA': 'Бриф і правила',
+  'zh-CN': '简报与规则',
+  'zh-TW': '簡報與規則',
+};
+
 describe('Creative Studio workspace translations', () => {
   const englishConversation = loadConversation(referenceLocale);
   const englishWorkspace = workspaceOf(englishConversation)!;
@@ -687,15 +700,23 @@ describe('Creative Studio workspace translations', () => {
     expect(cutInventory).not.toContain('auto duck');
   });
 
-  it('defers all 11 translations and falls each locale back to the complete en-US workspace', () => {
+  it('localizes Brief & rules and falls the rest of each locale back to the complete en-US workspace', () => {
     expect(deferredLocales).toHaveLength(11);
+    const englishLeaves = flattenLeaves(englishWorkspace);
 
     for (const locale of deferredLocales) {
       const localeConversation = loadConversation(locale);
-      expect(workspaceOf(localeConversation), locale).toBeUndefined();
+      const localizedTitle = briefAndRulesTitles[locale];
+      expect(localizedTitle, locale).toBeTypeOf('string');
+      expect(flattenLeaves(workspaceOf(localeConversation)!), locale).toEqual({
+        'controls.briefAndRulesTitle': localizedTitle,
+      });
 
       const merged = mergeWithFallback(englishConversation, localeConversation);
-      expect(workspaceOf(merged), locale).toEqual(englishWorkspace);
+      expect(flattenLeaves(workspaceOf(merged)!), locale).toEqual({
+        ...englishLeaves,
+        'controls.briefAndRulesTitle': localizedTitle,
+      });
     }
   });
 

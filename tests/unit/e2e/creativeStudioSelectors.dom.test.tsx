@@ -134,7 +134,12 @@ describe('Creative Studio E2E selectors', () => {
 
     await screen.findByRole('heading', { level: 1, name: 'Launch film' });
     const selectors = studioSpecSelectors();
-    expect(selectors).toHaveLength(5);
+    expect(selectors).toEqual([
+      '[data-studio-workspace]',
+      '[data-studio-project-header]',
+      '[data-studio-view-navigation]',
+      '[data-studio-view]',
+    ]);
 
     await waitFor(() => {
       expect(selectors.filter((selector) => document.querySelectorAll(selector).length !== 1)).toEqual([]);

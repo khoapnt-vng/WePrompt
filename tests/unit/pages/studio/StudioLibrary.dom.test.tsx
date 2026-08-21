@@ -94,6 +94,7 @@ const renderLibrary = () =>
 describe('StudioLibrary schema-2 cutover', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.sessionStorage.clear();
     mocks.bridge.listProjects.invoke.mockResolvedValue(
       ok({ projects: [summary()], unsupportedProjectIds: [], quarantinedProjectIds: [] })
     );
@@ -257,6 +258,8 @@ describe('StudioLibrary schema-2 cutover', () => {
   });
 
   it('loads the current revision before deletion and sends no job-derived authority', async () => {
+    window.sessionStorage.setItem('aionui:creative-studio:v2:workspace-drafts:project_1', '{"stale":true}');
+    window.sessionStorage.setItem('aionui:creative-studio:v2:rule-drafts:project_1', '{"stale":true}');
     renderLibrary();
     fireEvent.click(await screen.findByLabelText('conversation.creativeStudio.workspace.library.deleteProject'));
     await waitFor(() => expect(mocks.bridge.getProject.invoke).toHaveBeenCalledWith({ projectId: 'project_1' }));
@@ -267,6 +270,10 @@ describe('StudioLibrary schema-2 cutover', () => {
     await waitFor(() =>
       expect(mocks.bridge.deleteProject.invoke).toHaveBeenCalledWith({ projectId: 'project_1', expectedRevision: 7 })
     );
+    await waitFor(() => {
+      expect(window.sessionStorage.getItem('aionui:creative-studio:v2:workspace-drafts:project_1')).toBeNull();
+      expect(window.sessionStorage.getItem('aionui:creative-studio:v2:rule-drafts:project_1')).toBeNull();
+    });
   });
 
   it('uses the neutral managed-asset URL for a schema-2 poster', async () => {
