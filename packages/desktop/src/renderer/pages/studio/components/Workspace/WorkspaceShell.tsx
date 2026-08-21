@@ -77,6 +77,41 @@ const storeRailWidth = (width: number): void => {
   }
 };
 
+/**
+ * Where the Director is useful, per the division of labour: it acts before the picture exists and the
+ * human decides after it does. The Table is the pre-picture view and the rail opens there; the Board
+ * and the Cut are judgements about pixels and motion the Director cannot see, so it starts shut.
+ */
+export const railCollapsedDefaultForView = (view: StudioView): boolean => view !== 'table';
+
+/** One view of one project. Ids are opaque and may contain the separator, so the id is length-tagged. */
+export const railPreferenceKey = (projectId: string, view: StudioView): string =>
+  `aionui.studio.railCollapsed.${projectId.length}.${projectId}.${view}`;
+
+/**
+ * A choice outranks the default from then on, in both directions. This is what stops the default from
+ * re-opening a rail somebody shut — the named failure mode.
+ */
+export const railCollapsedForView = (view: StudioView, stored: boolean | null): boolean =>
+  stored ?? railCollapsedDefaultForView(view);
+
+const readStoredRailCollapsed = (projectId: string, view: StudioView): boolean | null => {
+  try {
+    const stored = window.localStorage.getItem(railPreferenceKey(projectId, view));
+    return stored === 'true' ? true : stored === 'false' ? false : null;
+  } catch {
+    return null;
+  }
+};
+
+const storeRailCollapsed = (projectId: string, view: StudioView, collapsed: boolean): void => {
+  try {
+    window.localStorage.setItem(railPreferenceKey(projectId, view), String(collapsed));
+  } catch {
+    // A preference that cannot be stored is not worth failing the workspace over.
+  }
+};
+
 const clock = (seconds: number | null | undefined): string | null => {
   if (seconds === null || seconds === undefined || !Number.isFinite(seconds) || seconds < 0) return null;
   const whole = Math.round(seconds);
@@ -100,7 +135,22 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
   const { t } = useTranslation();
   const viewHeadingId = `studio-${activeView}-heading`;
   const railContentId = useId();
-  const [railCollapsed, setRailCollapsed] = useState(false);
+  const [railCollapsed, setRailCollapsed] = useState(() =>
+    railCollapsedForView(activeView, readStoredRailCollapsed(project.id, activeView))
+  );
+
+  // The default follows the view, and a choice made in one view does not carry to another.
+  useEffect(() => {
+    setRailCollapsed(railCollapsedForView(activeView, readStoredRailCollapsed(project.id, activeView)));
+  }, [activeView, project.id]);
+
+  const toggleRail = useCallback((): void => {
+    setRailCollapsed((current) => {
+      const next = !current;
+      storeRailCollapsed(project.id, activeView, next);
+      return next;
+    });
+  }, [activeView, project.id]);
   const [railWidth, setRailWidth] = useState(readStoredRailWidth);
   const dragRef = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
   const railRef = useRef<HTMLDivElement | null>(null);
@@ -137,7 +187,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({
           aria-expanded={!railCollapsed}
           aria-label={toggleLabel}
           title={toggleLabel}
-          onClick={() => setRailCollapsed((current) => !current)}
+          onClick={toggleRail}
         />
         <span className={styles.projectDot} aria-hidden='true' />
         <h1 className={styles.projectTitle} title={project.name}>

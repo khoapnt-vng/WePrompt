@@ -316,11 +316,28 @@ A manual toggle sticks **per view, per project** and outranks the default from t
 re-expand a rail the user closed — that is the named failure mode. This is new behaviour rather than
 a fidelity fix, so it is filed as BUG-073.
 
-- [ ] **[BUG-073][P2][Creative Studio] The rail's default should follow the view, and a manual toggle should stick per view and per project** — filed 2026-08-21 from the designer's answer
+- [x] **[BUG-073][P2][Creative Studio] The rail's default should follow the view, and a manual toggle should stick per view and per project** — filed 2026-08-21 from the designer's answer
   - Today the rail is expanded everywhere with a single toggle and no persistence.
   - Required: Table defaults expanded, Board and Cut default collapsed. A manual toggle overrides the default and persists **per view, per project**. A rail the user closed is never re-expanded automatically.
   - The persistence scope is the part to get right: per project alone would make the Table's default fight the Board's, and a global preference would defeat the point of a per-view default.
   - New behaviour, not a fidelity fix. It is what makes the 1158px targets in BUG-071 and BUG-072 real — without it every view renders at 780px and the two collapsed-target views are wrong by default.
+
+  **Built 2026-08-21, and the design targets are now real rather than nominal.** Measured live with
+  nothing stored: the Table opens the rail and leaves the workspace **790px**, the Board and the Cut
+  shut it and leave **1177px**. The drawn targets are 780px and 1158px; the difference is this window
+  being a little wider than the 1492px the designer measured at.
+
+  A choice outranks the default from then on and is scoped to one view of one project. Opening the
+  rail in the Board keeps it open there on return, while the Cut keeps its own default and the Table
+  keeps its own — verified in that order, in the running app. That scoping is what stops the default
+  re-opening a rail somebody shut, which the designer named as the failure mode to avoid.
+
+  Both rules are mutation-proved: flattening the default to one global value fails the per-view test,
+  and letting the default outrank a stored choice fails the persistence test.
+
+  One consequence worth knowing. The preference persists, so a test that toggles the rail now decides
+  the starting state of every test after it. `StudioPage.dom.test.tsx` clears `localStorage` between
+  tests for that reason — it passed in isolation and failed in suite position until it did.
 
 - [x] **[BUG-074][P2][Creative Studio] The Table needs its 860px Look-folding rule** — filed 2026-08-21, **ruled by the designer the same day; unblocked**
   - The Table is the one view that defaults to an **expanded** rail, so 780px is its design target rather than a degraded state. At that width the designer measures `ACTION` at about 200px and `LOOK` at about 160px.

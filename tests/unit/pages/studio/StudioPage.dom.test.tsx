@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -473,6 +473,9 @@ describe('StudioPage schema-2 cutover', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.sessionStorage.clear();
+    // The rail's collapse choice and width persist per project and view, so a test that toggles the
+    // rail would otherwise decide the starting state of every test after it.
+    window.localStorage.clear();
     latestHookResult = null;
     mocks.beatPanelActions = null;
     mocks.beatPanelBriefReferenceOptions = null;
@@ -1990,6 +1993,47 @@ describe('StudioPage schema-2 cutover', () => {
       { assetId: 'ref_b', label: 'Alpha' },
       { assetId: 'ref_z', label: 'Zulu' },
     ]);
+  });
+
+  it('opens the rail in the Table and shuts it in the Board and the Cut', async () => {
+    // The Director acts before the picture exists; the Board and the Cut are judgements about pixels
+    // it cannot see. The rail's default follows the view rather than being one global preference.
+    renderStudio('/studio/project_1/table');
+    await screen.findByRole('heading', { name: 'Launch film' });
+    expect(document.querySelector('[data-studio-director-toggle]')).toHaveAttribute('aria-expanded', 'true');
+
+    cleanup();
+    renderStudio('/studio/project_1/board');
+    await screen.findByRole('heading', { name: 'Launch film' });
+    expect(document.querySelector('[data-studio-director-toggle]')).toHaveAttribute('aria-expanded', 'false');
+
+    cleanup();
+    renderStudio('/studio/project_1/cut');
+    await screen.findByRole('heading', { name: 'Launch film' });
+    expect(document.querySelector('[data-studio-director-toggle]')).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('remembers a rail choice for that view of that project, and nowhere else', async () => {
+    renderStudio('/studio/project_1/board');
+    await screen.findByRole('heading', { name: 'Launch film' });
+    const toggle = document.querySelector<HTMLButtonElement>('[data-studio-director-toggle]')!;
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+
+    // Open it in the Board, against that view's default.
+    fireEvent.click(toggle);
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-expanded', 'true'));
+
+    // Returning to the Board honours the choice rather than reapplying the default.
+    cleanup();
+    renderStudio('/studio/project_1/board');
+    await screen.findByRole('heading', { name: 'Launch film' });
+    expect(document.querySelector('[data-studio-director-toggle]')).toHaveAttribute('aria-expanded', 'true');
+
+    // The Cut is a different view and keeps its own default.
+    cleanup();
+    renderStudio('/studio/project_1/cut');
+    await screen.findByRole('heading', { name: 'Launch film' });
+    expect(document.querySelector('[data-studio-director-toggle]')).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('sizes the Director rail from the keyboard through an announced separator', async () => {
