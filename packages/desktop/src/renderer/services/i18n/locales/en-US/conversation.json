@@ -1132,7 +1132,10 @@
     },
     "conditioning": {
       "inputsTitle": "Inputs for this still",
-      "role": { "cast": "Cast", "look": "Look" },
+      "role": {
+        "cast": "Cast",
+        "look": "Look"
+      },
       "maximum": "This engine accepts up to {{count}} Brief references.",
       "unsupported": "This image engine cannot use active Brief references. Choose another image engine or remove them from the Brief.",
       "overflow": "This image engine accepts at most {{maximum}} Brief references, but {{count}} are active.",
@@ -1578,6 +1581,19 @@
           "createScript": "Create script.md",
           "created": "Export created and added to Assets.",
           "createFailed": "Export could not be created."
+        },
+        "film": {
+          "title": "The film",
+          "ofTarget": "of {{clock}} target",
+          "targetUnknown": "No target set",
+          "under": "{{seconds}}s under",
+          "over": "{{seconds}}s over",
+          "onTarget": "On target",
+          "counts": "{{beats}} Beats · {{shots}} Shots · {{slates}} Slates"
+        },
+        "slate": {
+          "label": "Beat {{label}}",
+          "warning": "No coverage. It exports as a {{seconds}}s slate."
         }
       },
       "assets": {

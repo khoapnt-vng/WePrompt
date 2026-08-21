@@ -708,3 +708,65 @@ describe('slate warnings', () => {
     expect(buildCutSlateWarnings({ beats: [wBeat('beat_1', 3, Number.NaN)] })).toEqual([]);
   });
 });
+
+describe('the Cut renders the film it is judging', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('shows the film clock, the target it is judged against, and the gap between them', () => {
+    renderCut({ cutProjection: cut({ filmDurationSeconds: 178, targetDurationSeconds: 180 }) });
+
+    const panel = document.querySelector('[data-cut-film]');
+    expect(panel).not.toBeNull();
+    expect(panel?.textContent).toContain('2:58');
+    expect(panel?.textContent).toContain('3:00');
+    expect(panel?.getAttribute('data-film-delta')).toBe('under');
+  });
+
+  it('marks a film that runs past its target', () => {
+    renderCut({ cutProjection: cut({ filmDurationSeconds: 200, targetDurationSeconds: 180 }) });
+    expect(document.querySelector('[data-cut-film]')?.getAttribute('data-film-delta')).toBe('over');
+  });
+
+  it('states no gap rather than an on-target one when the target is unknown', () => {
+    renderCut({ cutProjection: cut({ filmDurationSeconds: 178, targetDurationSeconds: null }) });
+    expect(document.querySelector('[data-cut-film]')?.getAttribute('data-film-delta')).toBe('unknown');
+  });
+
+  it('sizes each Beat in the rail in proportion to its length', () => {
+    renderCut({ cutProjection: cut({ filmDurationSeconds: 11, targetDurationSeconds: 12 }) });
+
+    const first = document.querySelector<HTMLElement>('[data-beat-id="beat_1"]');
+    const second = document.querySelector<HTMLElement>('[data-beat-id="beat_2"]');
+    // beat_1 runs 7s and beat_2 runs 4s, so the grow factors are the durations themselves.
+    expect(first?.style.flexGrow).toBe('7');
+    expect(second?.style.flexGrow).toBe('4');
+
+    // jsdom does not lay out, so the grow factor alone proves nothing: it is inert in a grid
+    // container, which is what the rail used to be. Assert the container it lands in is a flex one.
+    const css = readFileSync(
+      resolve(
+        process.cwd(),
+        'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/Cut/Cut.module.css'
+      ),
+      'utf8'
+    );
+    expect(css).toMatch(/\.rail\s*\{[^}]*display:\s*flex/);
+    expect(css).not.toMatch(/\.rail\s*\{[^}]*display:\s*grid/);
+  });
+
+  it('does not size the rail when any Beat has no length to occupy', () => {
+    const beats = cut().beats.map((beat, index) => (index === 1 ? { ...beat, durationSeconds: null } : beat));
+    renderCut({ cutProjection: cut({ beats, filmDurationSeconds: null }) });
+    expect(document.querySelector<HTMLElement>('[data-beat-id="beat_1"]')?.style.flexGrow).toBe('');
+  });
+
+  it('badges every uncovered Beat with its film position and the slate it will export', () => {
+    renderCut({ cutProjection: cut({ filmDurationSeconds: 11, targetDurationSeconds: 12 }) });
+
+    const slates = document.querySelectorAll('[data-cut-slate]');
+    // Only beat_2 is uncovered, and it is the second Beat in the film.
+    expect(slates).toHaveLength(1);
+    expect(slates[0]?.getAttribute('data-slate-beat-id')).toBe('beat_2');
+    expect(slates[0]?.textContent).toContain('02');
+  });
+});

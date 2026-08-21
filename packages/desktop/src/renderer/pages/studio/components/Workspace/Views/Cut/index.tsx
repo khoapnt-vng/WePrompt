@@ -11,6 +11,8 @@ import { useTranslation } from 'react-i18next';
 
 import type { StudioRendererExportCatalogV2 } from '@/common/types/project/creativeStudioTypes';
 import type { WorkspaceProjection } from '../../workspaceProjection';
+import { buildCutFilmSummary, buildCutSlateWarnings, formatCutClock } from './filmSummary';
+import { buildCutFilmstrip } from './filmstrip';
 import styles from './Cut.module.css';
 
 const CUT_ROOT = 'conversation.creativeStudio.workspace.cut';
@@ -199,6 +201,12 @@ export const CutView: React.FC<CutViewProps> = ({
   };
 
   const bedStatus = projection.cut.bed;
+  const film = buildCutFilmSummary(projection.cut);
+  const filmClock = formatCutClock(film.filmSeconds);
+  const targetClock = formatCutClock(film.targetSeconds);
+  const slates = buildCutSlateWarnings(projection.cut);
+  const filmstrip = buildCutFilmstrip(projection.cut);
+  const growByBeatId = new Map(filmstrip?.map((segment) => [segment.beatId, segment.growFactor]) ?? []);
 
   return (
     <section aria-label={t(`${CUT_ROOT}.ariaLabel`)} className={styles.root} data-studio-cut>
@@ -221,6 +229,51 @@ export const CutView: React.FC<CutViewProps> = ({
         </div>
       </header>
 
+      <div className={styles.film} data-cut-film data-film-delta={film.delta?.kind ?? 'unknown'}>
+        <span className={styles.filmHeading}>{t(`${CUT_ROOT}.film.title`)}</span>
+        {filmClock === null ? null : (
+          <span className={styles.filmClock}>
+            <bdi dir='auto'>{filmClock}</bdi>
+          </span>
+        )}
+        <span className={styles.filmTarget}>
+          <bdi dir='auto'>
+            {targetClock === null
+              ? t(`${CUT_ROOT}.film.targetUnknown`)
+              : t(`${CUT_ROOT}.film.ofTarget`, { clock: targetClock })}
+          </bdi>
+        </span>
+        {film.delta === null ? null : (
+          <span className={styles.filmDelta}>
+            <bdi dir='auto'>
+              {film.delta.kind === 'on_target'
+                ? t(`${CUT_ROOT}.film.onTarget`)
+                : t(`${CUT_ROOT}.film.${film.delta.kind}`, { seconds: film.delta.seconds })}
+            </bdi>
+          </span>
+        )}
+        <span className={styles.filmCounts}>
+          <bdi dir='auto'>
+            {t(`${CUT_ROOT}.film.counts`, { beats: film.beatCount, shots: film.shotCount, slates: film.slateCount })}
+          </bdi>
+        </span>
+      </div>
+
+      {slates.length === 0 ? null : (
+        <ul className={styles.slates}>
+          {slates.map((slate) => (
+            <li key={slate.beatId} className={styles.slate} data-cut-slate data-slate-beat-id={slate.beatId}>
+              <span className={styles.slateBadge}>
+                <bdi dir='auto'>{t(`${CUT_ROOT}.slate.label`, { label: slate.label })}</bdi>
+              </span>
+              <span className={styles.slateText}>
+                <bdi dir='auto'>{t(`${CUT_ROOT}.slate.warning`, { seconds: slate.durationSeconds })}</bdi>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
       {!canonicalOrderReady ? <Alert type='warning' content={t(`${CUT_ROOT}.orderUnavailable`)} /> : null}
 
       {projection.cut.beats.length === 0 ? (
@@ -235,6 +288,7 @@ export const CutView: React.FC<CutViewProps> = ({
                 key={beat.id}
                 className={styles.beat}
                 data-beat-id={beat.id}
+                style={growByBeatId.has(beat.id) ? { flexGrow: growByBeatId.get(beat.id) } : undefined}
                 onDragOver={(event) => {
                   if (draggedBeatIdRef.current !== null && draggedBeatIdRef.current !== beat.id) event.preventDefault();
                 }}
