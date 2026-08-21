@@ -604,6 +604,26 @@ renders a slate `target` seconds long, the only place an authored number reaches
 
 ## Verification notes
 
+### Verified live 2026-08-22 — the Table and Board round
+
+Codex's five closures measured in the running app, since all five are layout claims and jsdom applies
+no CSS.
+
+| Bug     | Claim                             | What the DOM reported                                                                                                  |
+| ------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| BUG-078 | folded Table fits, no 860px floor | folded grid **406px** total, `gridOverflow 0`, document overflow **0**; the header merges to `Action · Look` per §12.4 |
+| BUG-079 | LENGTH states one fact            | `14s`, `22s`, `31s`, `26s`, and `~24s target` — and the two forms differ, which is also §2.2's requirement             |
+| BUG-080 | titles neutral 13px               | `rgb(20, 24, 31)` = `#14181F`, `13px`, weight `600`                                                                    |
+| BUG-081 | one control per resting card      | 10 buttons for 9 Beats — one `Open <beat>` each plus a global undo; nothing destructive                                |
+| BUG-072 | no S/M/L control                  | absent; `grid-template-columns: 309.3px 309.3px 309.3px`, three equal columns                                          |
+
+**One false alarm of mine, recorded so it is not re-raised.** With the rail dragged to 721px on a
+1390px window the `STATE` header sits at x=1454, past the viewport, which looks exactly like BUG-078's
+symptom. It is not. The table has its own `overflow-x: auto` container scrollable by 128px and the
+document does not scroll at all — a 280px work column simply cannot show a 406px table, and scrolling
+inside the container while the body stays put is what the repo's own responsive rule asks for. The
+symptom was my extreme rail width, not the fix.
+
 ### Verified live 2026-08-21, after Codex's fixes
 
 Measured in the running app against the project that holds real generated media, because none of
