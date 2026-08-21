@@ -125,7 +125,6 @@ const expectedLeaves = [
   'board.liftSucceeded',
   'board.liftFailed',
   'cut.ariaLabel',
-  'cut.title',
   'cut.description',
   'cut.railLabel',
   'cut.orderUnavailable',

@@ -371,8 +371,10 @@ const captureCutViewportReference = async (page: Page, reference: StudioViewport
   await root.evaluate((element, direction) => element.setAttribute('dir', direction), reference.direction);
   await expect(root).toHaveAttribute('dir', reference.direction);
 
-  const cut = page.locator('[data-studio-cut]');
-  const cutHeading = cut.getByRole('heading', { name: 'Cut', exact: true });
+  const cutView = page.locator('main[data-studio-view="cut"]');
+  const cut = cutView.locator('[data-studio-cut]');
+  const cutHeading = cutView.getByRole('heading', { level: 2, name: 'Cut', exact: true });
+  await expect(cutHeading).toHaveCount(1);
   await expect(cutHeading).toBeVisible();
   await cutHeading.evaluate((element) => element.scrollIntoView({ block: 'start', inline: 'nearest' }));
   await expect(cut).toHaveCSS('direction', reference.direction);

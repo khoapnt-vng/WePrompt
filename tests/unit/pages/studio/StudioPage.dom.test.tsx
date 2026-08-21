@@ -572,6 +572,17 @@ describe('StudioPage schema-2 cutover', () => {
     expect(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.cut' })).toBeVisible();
   });
 
+  it('exposes exactly one level-two heading for the Cut view', async () => {
+    renderStudio('/studio/project_1/cut');
+
+    await screen.findByLabelText('conversation.creativeStudio.workspace.controls.name');
+    const cutView = document.querySelector<HTMLElement>('main[data-studio-view="cut"]');
+    expect(cutView).not.toBeNull();
+    const headings = within(cutView!).getAllByRole('heading', { level: 2 });
+    expect(headings).toHaveLength(1);
+    expect(headings[0]).toHaveAttribute('id', 'studio-cut-heading');
+  });
+
   it('omits the reviewed-output rail section when there are no cards or review errors', async () => {
     renderStudio();
 

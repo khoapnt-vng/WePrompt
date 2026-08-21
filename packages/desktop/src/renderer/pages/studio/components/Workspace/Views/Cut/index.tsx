@@ -217,7 +217,6 @@ export const CutView: React.FC<CutViewProps> = ({
     <section aria-label={t(`${CUT_ROOT}.ariaLabel`)} className={styles.root} data-studio-cut>
       <header className={styles.header}>
         <div>
-          <h2>{t(`${CUT_ROOT}.title`)}</h2>
           <p>{t(`${CUT_ROOT}.description`)}</p>
         </div>
         <div className={styles.headerActions}>

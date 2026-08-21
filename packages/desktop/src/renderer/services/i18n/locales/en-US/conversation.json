@@ -1515,7 +1515,6 @@
       },
       "cut": {
         "ariaLabel": "Film Cut",
-        "title": "Cut",
         "description": "Arrange the film, choose one imported audio bed and a prompt reference, then create editor-ready exports.",
         "railLabel": "Beats in film order",
         "orderUnavailable": "The current Beat order is incomplete or ambiguous. Refresh the project before rearranging it.",

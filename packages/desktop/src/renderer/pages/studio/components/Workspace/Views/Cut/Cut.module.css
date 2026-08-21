@@ -18,7 +18,6 @@
   flex-wrap: wrap;
 }
 
-.header h2,
 .panel h3,
 .exports h3,
 .drawerContent h3,
@@ -29,17 +28,17 @@
   overflow-wrap: anywhere;
 }
 
-.header h2 {
-  font-size: 22px;
-}
-
-.header p,
 .panelHeading p,
 .exportCard p,
 .drawerContent p,
 .empty,
 .status {
   margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.header p {
+  margin: 0;
   overflow-wrap: anywhere;
 }
 
