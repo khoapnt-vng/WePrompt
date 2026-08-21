@@ -315,6 +315,13 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - Honest framing: I reached this by restarting the dev app, not through normal use. It would still reach a packaged user after a downgrade, and the advice it gives them is wrong.
   - Dev workaround, no repo change: put the bundled binary first on PATH.
 
+- [ ] **[BUG-095][P2][Creative Studio] Severing the chain is a free toggle where the ruling makes it a gated, costed action** — found 2026-08-21 reconciling the designer's fifth round against the build
+  - §13.1 rules that `HARD CUT` is a permanent authored control, and that **severing is not free**: the shot becomes a chain head, so it needs a still on the image route, and its existing take was generated from a first frame it no longer starts from. It is to be gated in the render gate's shape — the third gate after render and chain — and re-joining is symmetrical and equally gated.
+  - The build dispatches it as an ordinary authoring mutation. `StudioPage.tsx:537` sends `{ kind: 'set_hard_cut', shotId, hardCut }` through `applyAuthoringBatch`, and `mutations/index.ts:1496` applies it with no quote, no confirmation and no still.
+  - **Partial credit where it is due.** The mutation calls `touchShot` on the shot, which reaches the projection's `dirtyShotIds` and renders the shot `stale` (`workspaceProjection.ts:746`). So the take is marked, not silently kept. And `hasBoundNonterminalJob` blocks the toggle while a job is in flight on that shot. What is missing is the money, not the bookkeeping.
+  - Missing against the ruling: the gate itself, the still cost quoted before the toggle, the still actually being produced on the image route, and the same treatment on re-join.
+  - One existing guard is worth keeping in view: `directorCommandContracts.ts:297` already classifies `set_hard_cut` as `proposal`, so the Director cannot sever a chain on its own. The gap is the human's click, not the Director's.
+
 ## Coverage and polish
 
 - [x] **[BUG-064][P2][Creative Studio] The video allowlist covers 6 of the 24 models OpenRouter serves, with no way to extend it** — found 2026-08-21, verified against the live catalogue
@@ -566,6 +573,34 @@ a fidelity fix, so it is filed as BUG-073.
   fold, so the folded form is not rendered and then undone on every mount. The empty-Look prompt was
   aligned with the drawing at the same time — it now keeps the warning colour the row's NO COVERAGE
   state uses, in both the folded and columnar forms, where it had been the muted text colour.
+
+## The designer's fifth round — what it settles, and what the build already satisfies
+
+`creative-studio-3-direction-and-answers.md` §12–13 arrived 2026-08-21 and answers the three Beat
+panel questions. Four of its rulings are checkable against the build today; three already hold.
+
+| Ruling                                            | Build                                                                                                |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| §13.5 the density tier's name must not be visible | holds — `CoverageDensity` is an internal type, and `WIDE · FULL DETAIL` exists only in the prototype |
+| §5 `AUTO-DUCKED` must come out                    | holds — absent                                                                                       |
+| §13.5 the 25-word Look cap is soft                | holds — `BeatPanel/index.tsx:1149` warns above 25 and never blocks                                   |
+| §13.1 severing the chain is gated and costed      | **does not hold — BUG-095**                                                                          |
+
+The answers also carry work the drawing does not yet show, listed in §13.4 and not filed as defects
+because nothing was built wrong: the state line splitting into `CONTINUES FROM 02` plus a permanent
+`HARD CUT` control, the detected continuity break moving to the alert row, `RENDERS AS` gaining
+per-part attribution and a staleness flag, and the join `+` gaining a conditional quote.
+
+Two of those carry a constraint worth keeping visible when they are built. `RENDERS AS` **must read
+from the same compose function the job uses** (§13.2) — a readout assembled separately for display is
+a lie the moment dispatch changes, and one that costs money to discover. And the join `+` quotes
+**only mid-beat** (§13.3); at the end of the beat nothing moves and it is free, because a cost hint on
+every marker is decoration, and decoration beside a price teaches people to stop reading prices.
+
+§13.3 also settles the question that reached furthest: **beat duration is a total that follows from
+the shots, not a target they must fit.** Inserting extends the beat; nothing redistributes. Every
+fit-to-target reading in the app is advisory, with one carved exception — a beat with no coverage
+renders a slate `target` seconds long, the only place an authored number reaches the renderer.
 
 ## Verification notes
 
