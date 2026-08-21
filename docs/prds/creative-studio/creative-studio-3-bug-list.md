@@ -181,6 +181,20 @@ REFERENCE_PENDING_DIR, ROUTE_CATALOG` — while the same object read back throug
   - Setup, for whoever picks this up: `bytedance/seedance-2.0` and `google/gemini-3-pro-image` are bound, both project routes are set by `choiceId`, the project holds nine Beats and sixteen Shots, no Takes exist, and every Beat reads `SEED PENDING`. `missing_conditioning` is the plausible code for `video_take` and does not explain `seed_still` failing the same way.
   - Third instance of one pattern today, after BUG-062 and BUG-077: a failure the code has already classified is delivered to the caller as a generic string. Worth treating as one systemic fix rather than three.
 
+  **Diagnosed 2026-08-21 by temporary instrumentation, since it cannot be diagnosed any other way.** It took three separate log lines in main to learn one answer, which is the measure of the defect:
+  1. Logging `error.message` in `toCommandError` gave `Invalid Studio submission: invalid_prepare_request` — the code the renderer never sees.
+  2. Logging `error.stack` there was useless: `invalid()` constructs a fresh error, so the stack starts at the rethrow and the twenty possible origins are all still in play.
+  3. Logging the _original_ error's stack inside `rethrowPricingFailure` finally named the thrower — `validateExactCascade`.
+  - **The cause, once visible, is an API contract nothing states.** `prepareSubmission` requires the caller to pre-compute `cascadeChoices` and supply them in the exact order the service derives, and refuses the whole request if the arrays differ by length or order. A `seed_still` on a shot implies a `video_take` **on that same shot** plus every downstream shot to the next hard cut. Sending `cascadeChoices: []` — the obvious reading of "just price one still" — is invalid. Supplying the derived pair moved the request past validation on the first try.
+  - So the caller must reimplement `deriveExpectedCascadePairs` to call the API at all, and gets one unnamed error if the reimplementation drifts. That is worth fixing alongside the message: either derive the cascade server-side, or return the expected set with the refusal.
+
+- [ ] **[BUG-083][P1][Creative Studio] Generation routes vanish after a restart, leaving both connections validated and unusable** — found 2026-08-21
+  - `listConnections` reports both media models bound and **validated**, with capabilities: `google/gemini-3-pro-image` at `2026-08-20T22:51:18Z` and `bytedance/seedance-2.0` at `2026-08-20T23:04:54Z`.
+  - `listRoutes` for the same project returns **no options at all** — empty image and video route objects — and `prepareSubmission` fails with `provider_error` thrown from `listGenerationRoutes`, immediately after a successful `GET /api/providers`.
+  - Earlier in the same session the same call returned one image option and one video option with full constraints, and the route `choiceId`s it produced were stored on the project. After restarting the app those ids no longer resolve, so a stored route cannot survive the process that created it.
+  - With no routes there is no rate card, so nothing can be priced and nothing can be generated. This sits underneath BUG-082: even with the payload contract satisfied, generation is unreachable.
+  - **A project's routes were cleared while establishing this.** Re-setting from a fresh `listRoutes` wrote nulls, because the fresh listing was empty. Anything that re-binds routes from a listing needs to refuse an empty one rather than persist the absence.
+
 ## Correctness and honesty of failures
 
 - [x] **[BUG-062][P2][Creative Studio] Three distinct Director failures all report "could not read or save this workspace"** — found 2026-08-21 while diagnosing BUG-061
