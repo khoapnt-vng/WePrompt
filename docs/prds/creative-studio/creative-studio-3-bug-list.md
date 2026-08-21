@@ -14,6 +14,42 @@
 > **Not in this list:** the `aria-current` gap on the view switch, which Task 13 closed — the switch is
 > now `<nav aria-label="Workspace views">` with `aria-current="page"` on the active link.
 
+## How this list is shared
+
+Two agents work this list — one finds and files, one fixes — plus whoever is reviewing. It is a
+single file on a single branch, so the rules below exist to keep that from turning into lost work.
+They are here rather than in a chat transcript because a protocol nobody can read is not a protocol.
+
+**Who writes what.**
+
+- **Filing** — new entries, evidence, priority, and reproduction steps. Owned by whoever ran the
+  thing and saw it break. Do not file an entry you have not reproduced.
+- **Closing** — flipping `- [ ]` to `- [x]` and appending one line reading **Fixed by `<sha>`** with
+  a sentence on what actually changed. Owned by whoever fixed it.
+
+These touch different lines of the same entry, which is what makes concurrent work survivable. The
+one place they collide is an entry being rewritten while it is being closed; if you are about to
+rewrite an entry, close-or-comment first so the other side sees it.
+
+**Id allocation.** Ids are global across the repository and are already inconsistent between branches
+— `main` stopped at 030, `sprint2` at 041, `sprint4` at 060 — so two branches allocating the same
+number is not hypothetical, it has happened. To keep it from happening here:
+
+- **`BUG-061` through `BUG-079` are reserved to this list.** Nothing outside Creative Studio 3 takes
+  a number in that range.
+- Anyone needing a new id here takes the next free number **inside** that range, and nowhere else.
+- Before this list merges into a live register, re-check the max there. `sprint4` was at `BUG-060`
+  when this range was chosen on 2026-08-21 and is still at `BUG-060`, but it is active, so verify
+  rather than assume.
+
+**Git discipline, because this file will be edited from two checkouts.**
+
+- Rebase before pushing: `git pull --rebase` then `just push`. Never `--force`.
+- Never amend a commit that has already been pushed. Amending is fine locally; once it is on the
+  remote it belongs to everyone.
+- Commit the list on its own. A documentation change riding along with a code fix makes the fix
+  harder to revert and the list harder to read.
+
 ## Blocking a first-run user
 
 - [ ] **[BUG-061][P1][Creative Studio] Every newly created project fails its first Director attach** — found 2026-08-21 by creating a project in the running app; **reproduced deterministically** on a second, clean project
