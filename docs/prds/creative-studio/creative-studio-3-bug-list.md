@@ -171,12 +171,34 @@ REFERENCE_PENDING_DIR, ROUTE_CATALOG` — while the same object read back throug
   Save Brief settings, Save rules. Two route pickers read "Selection required" with nothing selected.
   Raised again by the owner on the same day, looking at it: the settings and Brief are out of place.
 
+  **Where they belong, answered 2026-08-21 by driving the pinned prototype.** They are not stacked
+  under the view; they live behind the app bar's overflow. The `⋯` menu holds six items — **Rename**,
+  **Brief & rules**, **Assets** (with a count, 23 in the drawing), **Export…**, **Engines**, **Move
+  project…** — and _Brief & rules_ opens a modal panel rather than a form in the workspace. That also
+  gives BUG-068's unbuilt overflow a defined payload.
+
 - [ ] **[BUG-075][P2][Creative Studio] The Brief's rules are edited as raw JSON in a textarea** — found 2026-08-21 by driving the running app
   - The workspace renders a field labelled `Project rule drafts (JSON)` holding a textarea whose value is `[]`, beside a `Save rules` button. It is built at `StudioPage.tsx:161` as `JSON.stringify(projectRuleDrafts(project), null, 2)`, so the internal draft array is the user surface.
   - **The design has no JSON editing surface anywhere.** The prototype contains six occurrences of the string `json`, and all six are inside base64 image data rather than any label or control.
   - The plan does specify `set_rules` carrying `StudioBriefRuleDraft[]`, but that is the wire contract between renderer and reducer. Nothing in it asks for the array to be typed by hand.
   - What this costs a user: a malformed paste is a parse failure they have to debug with no schema to consult, and a rule is authored by writing an internal shape correctly rather than by saying what the rule is. It is the one place in the workspace where the product asks someone to be a programmer.
   - Distinct from BUG-067, which is about the settings forms being in the workspace at all. This entry stands even if those forms move: wherever rules are edited, they should not be edited as JSON.
+
+  **How rules are actually presented, measured in the prototype 2026-08-21.** Not a JSON array: a
+  stack of cards inside the Brief panel, under the heading `RULES · RUN AGAINST EVERY PROMPT BEFORE
+IT RENDERS` (IBM Plex Mono 9px, 0.9px tracking, `#8C7F6C`). Each card carries the rule in prose, a
+  scope badge on the leading edge — `ORG` or `PROJECT`, Plex Mono 8px, 0.48px tracking, `#6E6553` —
+  and a state on the trailing edge: `LOCKED` in `#A0937E` for an org rule the project cannot edit, or
+  `1 BREACH FIXED` in `#2E7D5B`, the same green the READY state uses.
+  So a rule has a scope and a lifecycle, and the textarea expresses neither. An org-locked rule is not
+  even editable, which a free-text JSON field cannot represent.
+
+- [ ] **[BUG-076][P2][Creative Studio] The Brief is a string in a JSON blob, not the hand-editable `brief.md` the design promises** — found 2026-08-21 by driving the pinned prototype against the build
+  - The designed Brief panel names the artefact **`brief.md`** (Manrope 700 15px), says it is `LOADED INTO EVERY DIRECTOR TURN`, and closes with `HAND-EDITABLE · THE APP READS IT, AN OUTSIDE EDIT IS RESPECTED`. That is a promise about a file on disk, not about a field.
+  - The build has no such file. `brief.md` appears nowhere in the source, the brief is a `string` on the project record, and a project directory on disk holds exactly `commands`, `project.json`, `proposals` and `reference-requests`.
+  - So the two halves of the promise are both missing: there is nothing for someone to open in an editor, and nothing to notice if they did. The brief can only be changed through the app.
+  - This is a product behaviour rather than a fidelity gap, which is why it is filed separately from BUG-067. Moving the Brief into the overflow panel satisfies 067 and leaves this untouched.
+  - Worth an owner decision before it is built: a hand-editable file that the app re-reads is a different persistence story from a field inside the CAS-guarded project record, and the two have to agree about who wins when both change.
 
 ## Visual fidelity against the design
 
@@ -220,6 +242,10 @@ REFERENCE_PENDING_DIR, ROUTE_CATALOG` — while the same object read back throug
   bar and the active chip were bothwhite — the same token — so the active view was marked with nothing.
   jsdom applies no CSS-module rules, so neither was visible to any test until an assertion was added
   for each: that the shell is a column, and that the chip's ground differs from the bar's.
+
+  **The overflow's payload is now known** (2026-08-21): Rename, Brief & rules, Assets with a count,
+  Export…, Engines, Move project…. It was left unbuilt because it had nothing to hold; it now has six
+  items, three of which — Brief & rules, Assets, Engines — already exist elsewhere in the build.
 
 - [x] **[BUG-069][P1][Creative Studio] The type scale is roughly double the design throughout** — found 2026-08-21, measured
   - Project title: design **Manrope 700 at 14.5px**; built **Manrope 700 at 29px** — exactly 2×.
