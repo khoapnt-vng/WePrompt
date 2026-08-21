@@ -166,15 +166,17 @@ REFERENCE_PENDING_DIR, ROUTE_CATALOG` — while the same object read back throug
   - The designer's ruling for the fold is explicit that the row keeps **one height class**. A permanent second line in LENGTH works against that on every row that has shots.
   - **Fixed by `8a56d1d67`.** LENGTH now renders exactly one coverage-authoritative fact: rounded actual duration for a Beat with Shots, otherwise its target duration or the matching pending state.
 
-- [ ] **[BUG-080][P2][Creative Studio] Board Beat titles are brand orange at 17px where the drawing has near-black at 13px** — found 2026-08-21 against a seeded project
+- [x] **[BUG-080][P2][Creative Studio] Board Beat titles are brand orange at 17px where the drawing has near-black at 13px** — found 2026-08-21 against a seeded project
   - Measured side by side. Drawing: `Manrope 600, 13px, #14181F`. Build: `Manrope 700, 17px, #F05A22`.
   - So the title is 1.3× the drawn size and rendered in the brand accent. Brand colour on a heading reads as an action, and every card carries one, so the Board's dominant signal becomes nine orange strings rather than nine pictures.
   - Same class as BUG-069, which fixed the workspace title and the view chips but not the Board card. Worth a sweep for other components still on the old scale rather than another single fix.
+  - **Fixed by `8c2aaad54`.** Board Beat titles now render as neutral Manrope 600 at 13px in #14181F across rest, hover, focus, and active states, with a separate whole-card focus ring.
 
-- [ ] **[BUG-081][P2][Creative Studio] Every Board card carries five controls the drawing has none of, including a destructive one** — found 2026-08-21 against a seeded project
+- [x] **[BUG-081][P2][Creative Studio] Every Board card carries five controls the drawing has none of, including a destructive one** — found 2026-08-21 against a seeded project
   - The drawn card is `01 · Cold open · action · look · 2 shots · 14s · READY` and **no buttons at all**. The built card exposes five: the title itself as a button, a drag handle, move-earlier, move-later, and **Lift Beat** styled as destructive.
   - Nine cards therefore show forty-five controls, with a destructive action permanently on the face of each. The drawing's Board is for looking — "picking takes is looking", in the designer's words for why the rail collapses there — and a wall of controls works against exactly that.
   - Reordering and lifting are real capabilities and are not in question. Where they surface is: the drawing puts none of them on the resting card.
+  - **Fixed by `8c2aaad54`.** Each resting Board card now exposes one neutral whole-card Open target and no reorder or destructive chrome; the selected card alone reveals a bounded action group that preserves exact reorder, Lift confirmation/refusal, announcements, and focus-to-Bin behavior.
 
 - [x] **[BUG-082][P1][Creative Studio] A generation quote refuses as `invalid_payload` and discards the reason the service already computed** — found 2026-08-21 trying to price one shot
   - `prepareSubmission` refuses every choice on a seeded project — both `seed_still` and `video_take`, identically — with `{ code: 'invalid_payload', messageKey: 'conversation.creativeStudio.errors.invalidPayload' }`. No generation can be priced, so none can be confirmed, so **nothing can be generated at all**.
@@ -417,10 +419,11 @@ IT RENDERS` (IBM Plex Mono 9px, 0.9px tracking, `#8C7F6C`). Each card carries th
   - The filmstrip and the transport are the two pieces with no counterpart at all in the build, and they are the ones that make the Cut a cut.
   - **Target width answered 2026-08-21: 1158px, not 780px.** The Cut defaults to a **collapsed** rail, because judging a cut is watching and the preview should be the largest thing on screen. So this is a straight build of the drawn Cut at full width — **it needs no redraw**, and the re-proportioning worry recorded earlier does not apply to it.
 
-- [ ] **[BUG-072][P3][Creative Studio] The Board's S/M/L density control is not in the design** — found 2026-08-21
+- [x] **[BUG-072][P3][Creative Studio] The Board's S/M/L density control is not in the design** — found 2026-08-21
   - The built Board carries an `S` / `M` / `L` toggle beside "Beat board". The prototype's Board has no density control — probed across the document, absent.
   - The design instead fixes a three-column grid of 16:9 image cards, each with a beat-number badge, title, description, a state pill, and a `2 SHOTS · 14s` footer. A no-coverage beat renders as a diagonal-striped placeholder rather than a photo.
   - **Resolved 2026-08-21, and it does not invert.** The Board defaults to a **collapsed** rail at **1158px**, where the designer confirms "three-up holds at 365px cards, so the Board needs no new column count". The density control was not a latent answer to a narrow column; there is no narrow column. Remove it unless it is wanted on its own merits.
+  - **Fixed by `8c2aaad54`.** Board now removes the S/M/L density control and holds three equal 16:9 columns at the collapsed-rail target, with deterministic two-column compact and one-column narrow fallbacks.
 
 ## Open — whether the bar should span the chat pane
 

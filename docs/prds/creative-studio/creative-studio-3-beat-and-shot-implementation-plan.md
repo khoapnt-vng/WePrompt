@@ -3645,7 +3645,10 @@ The core interaction of CS3, and the largest single task. Split it if it exceeds
 `Bin.tsx`.
 
 - [ ] Deterministic covers and the no-coverage placeholder.
-- [ ] Three card sizes rather than zoom.
+- [ ] One responsive Board layout rather than zoom or user-selected sizes: no S/M/L density control;
+      three equal columns at the 1158px collapsed-rail design target, with deterministic two-column
+      compact and one-column narrow fallbacks. This supersedes the earlier three-card-size requirement
+      under the designer's 2026-08-21 ruling.
 - [ ] The Bin: exactly three reference kinds, Beat, Shot, and Take. Beat/Take show lifted versus
       alternate; Shot is visibly lifted only. Each has deterministic restore behavior plus
       drag/keyboard reorder with kind-and-reason announcements. A Shot card shows its recorded owner
