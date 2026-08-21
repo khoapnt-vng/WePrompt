@@ -133,3 +133,38 @@ because BUG-070's placement of the view switch depends on the answer.
 - The unit suite is green on the files touched here — `studioI18n.test.ts` and `CutView.dom.test.tsx` pass, 17 tests. None of the seven bugs above is caught by a test, and BUG-061 is actively hidden by one.
 - The 11 non-`en-US` locales are missing the new Cut keys **by design**, pinned by `studioI18n.test.ts` — "defers all 11 translations and falls each locale back to the complete en-US workspace". Not a bug; recorded so it is not filed as one.
 - A project named `race repro probe` was left in the slot-2 Studio library by the BUG-061 reproduction.
+
+## Appendix — the designed app bar, measured
+
+Extracted from the hash-pinned prototype at a 1280px window on 2026-08-21. Every value is a computed
+style read off the rendered document, so these are the design's actual numbers rather than a reading
+of the picture. Recorded here because BUG-068, BUG-069 and BUG-070 are not implementable without them.
+
+**Container.** One `flex` row, `align-items: center`, `gap: 11px`, `padding: 11px 18px`, resolved
+height **54px**, background `rgb(251, 247, 240)`, `border-bottom: 1px solid rgb(228, 217, 198)`,
+spanning the full window (1272px of 1280px).
+
+**Children, in order** — a project dot, the title, the stat strip, a flexible spacer that absorbs all
+slack (464px at this width), then the view chips, the primary action, and the overflow:
+
+| Element             | Type          | Size   | Weight | Tracking | Colour                      | Box                               |
+| ------------------- | ------------- | ------ | ------ | -------- | --------------------------- | --------------------------------- |
+| Project dot         | —             | —      | —      | —        | `rgb(236, 99, 56)`          | 22×22, radius 6px                 |
+| Project title       | Manrope       | 14.5px | 700    | −0.145px | `rgb(20, 24, 31)`           | —                                 |
+| Stat strip          | IBM Plex Mono | 9.5px  | 400    | 0.57px   | `rgb(110, 101, 83)`         | —                                 |
+| View chip, inactive | IBM Plex Mono | 9.5px  | 400    | 0.76px   | `rgb(140, 127, 108)`        | transparent, radius 6px, pad 5×11 |
+| View chip, active   | IBM Plex Mono | 9.5px  | 400    | 0.76px   | `rgb(42, 48, 59)`           | white, radius 6px, pad 5×11       |
+| `Render…`           | Manrope       | 12px   | 700    | normal   | white on `rgb(201, 67, 26)` | radius 8px, pad 7×13              |
+| Overflow `⋯`        | IBM Plex Mono | 12px   | 400    | normal   | `rgb(110, 101, 83)`         | radius 8px, pad 5×9               |
+
+**Two notes for whoever implements it.**
+
+The uppercase in `TABLE` / `BOARD` / `CUT` and in the stat strip is **authored into the strings**, not
+applied by CSS — every one of these computes `text-transform: none`. Do not copy that. Casing baked
+into an `en-US` value is wrong for the eleven locales that fall back to it and wrong for any locale
+whose script has no case. Use `text-transform: uppercase` and leave the key in sentence case.
+
+The bar spans the full window in the prototype, which has no Director rail. With the rail kept, the
+spanning question in the Settled section above has to be answered before these numbers can be
+applied — the 464px spacer is what makes the layout work, and it is the first thing to go when the
+content column drops to 780px.
