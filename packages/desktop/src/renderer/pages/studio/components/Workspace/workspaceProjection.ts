@@ -199,6 +199,8 @@ export type WorkspaceCutProjection = {
   orderReady: boolean;
   beats: WorkspaceCutBeatProjection[];
   filmDurationSeconds: number | null;
+  /** The authored target the film is judged against. Null when the project's own target is unusable. */
+  targetDurationSeconds: number | null;
   audioImports: WorkspaceCutAudioImportProjection[];
   bed: WorkspaceCutBedProjection;
   matchCandidates: WorkspaceCutMatchCandidateProjection[];
@@ -569,6 +571,9 @@ const projectCut = (
   activeBeats: readonly WorkspaceBeatProjection[]
 ): WorkspaceCutProjection => {
   const activeBeatIds = activeBeats.map((beat) => beat.id);
+  const target = project.targetDurationSeconds;
+  const targetDurationSeconds =
+    Number.isFinite(target) && target > 0 && target <= Number.MAX_SAFE_INTEGER ? target : null;
   const orderReady =
     activeBeats.length === project.beatOrder.length &&
     new Set(activeBeatIds).size === activeBeatIds.length &&
@@ -695,6 +700,7 @@ const projectCut = (
     orderReady,
     beats,
     filmDurationSeconds,
+    targetDurationSeconds,
     audioImports,
     bed,
     matchCandidates,

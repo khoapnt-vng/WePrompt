@@ -896,6 +896,21 @@ describe('projectWorkspace', () => {
     expect(JSON.stringify(cut)).not.toContain('mimeType');
   });
 
+  it("carries the project's target duration so the Cut can show the film against it", () => {
+    const project = makeProject();
+    project.beats.beat_1!.shotOrder = [];
+    project.beats.beat_1!.targetSeconds = 7;
+    project.beats.beat_2!.shotOrder = [];
+    project.beats.beat_2!.targetSeconds = 4;
+
+    const cut = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).cut;
+
+    // The film runs 11s against a 12s target. Without the target beside it the Cut can render the
+    // clock but not the constraint, and the render gate is exactly that comparison.
+    expect(cut.filmDurationSeconds).toBe(11);
+    expect(cut.targetDurationSeconds).toBe(12);
+  });
+
   it('fails Cut bed, duration, order, classification, and Match To facts closed', () => {
     const project = makeProject();
     project.beats.beat_1!.shotOrder = [];

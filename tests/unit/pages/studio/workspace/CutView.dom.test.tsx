@@ -15,6 +15,10 @@ import type {
   WorkspaceCutProjection,
   WorkspaceProjection,
 } from '@/renderer/pages/studio/components/Workspace/workspaceProjection';
+import {
+  buildCutFilmSummary,
+  formatCutClock,
+} from '@/renderer/pages/studio/components/Workspace/Views/Cut/filmSummary';
 
 type ButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'type'> & {
   icon?: React.ReactNode;
@@ -518,5 +522,65 @@ describe('CutView', () => {
     expect(css).toContain('min-inline-size');
     expect(css).not.toMatch(/(?:margin|padding|border|inset)-(?:left|right)\b/);
     expect(css).not.toMatch(/text-align:\s*(?:left|right)/);
+  });
+});
+
+describe('the film summary', () => {
+  const beat = (shotCount: number, durationSeconds: number | null): WorkspaceCutProjection['beats'][number] => ({
+    id: `beat_${shotCount}_${String(durationSeconds)}`,
+    title: 'Beat',
+    shotCount,
+    durationKind: shotCount > 0 ? 'actual' : durationSeconds === null ? 'pending' : 'target',
+    durationSeconds,
+    coverAssetId: null,
+  });
+
+  it('counts the film against its target and treats an uncovered Beat as a slate', () => {
+    const summary = buildCutFilmSummary({
+      beats: [beat(2, 14), beat(3, 22), beat(0, 24)],
+      filmDurationSeconds: 60,
+      targetDurationSeconds: 62,
+    });
+
+    expect(summary).toEqual({
+      filmSeconds: 60,
+      targetSeconds: 62,
+      delta: { kind: 'under', seconds: 2 },
+      beatCount: 3,
+      shotCount: 5,
+      slateCount: 1,
+    });
+  });
+
+  it('reports a film that runs past its target', () => {
+    const summary = buildCutFilmSummary({ beats: [beat(1, 20)], filmDurationSeconds: 25, targetDurationSeconds: 18 });
+    expect(summary.delta).toEqual({ kind: 'over', seconds: 7 });
+  });
+
+  it('reports a film that lands exactly on its target', () => {
+    const summary = buildCutFilmSummary({ beats: [beat(1, 18)], filmDurationSeconds: 18, targetDurationSeconds: 18 });
+    expect(summary.delta).toEqual({ kind: 'on_target', seconds: 0 });
+  });
+
+  it('fails the delta closed when either side of the comparison is unknown', () => {
+    // The delta is the render gate's headline. An unknown film length must read as "no answer",
+    // never as "on target", which is what a 0 default would show.
+    expect(buildCutFilmSummary({ beats: [], filmDurationSeconds: null, targetDurationSeconds: 62 }).delta).toBeNull();
+    expect(buildCutFilmSummary({ beats: [], filmDurationSeconds: 60, targetDurationSeconds: null }).delta).toBeNull();
+  });
+
+  it('does not count a Beat with no coverage and no duration as a slate', () => {
+    // A pending Beat has no length to export, so it is not yet a slate.
+    expect(
+      buildCutFilmSummary({ beats: [beat(0, null)], filmDurationSeconds: null, targetDurationSeconds: 62 }).slateCount
+    ).toBe(0);
+  });
+
+  it('formats the clock as minutes and padded seconds', () => {
+    expect(formatCutClock(178)).toBe('2:58');
+    expect(formatCutClock(180)).toBe('3:00');
+    expect(formatCutClock(0)).toBe('0:00');
+    expect(formatCutClock(9)).toBe('0:09');
+    expect(formatCutClock(null)).toBeNull();
   });
 });
