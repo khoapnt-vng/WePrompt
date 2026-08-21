@@ -229,6 +229,18 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - The proportional sizing landed — all nine segments carry their flex-grow — but the segment itself is still the pre-existing reorder card, so the proportionality makes the cards narrow rather than making a filmstrip. Height and chrome are what remain.
   - Related to BUG-081 on the Board: the same reorder controls are on every card in both views, and the drawing has them on neither.
 
+- [ ] **[BUG-087][P2][Creative Studio] A trim handle renders on top of the Shot's duration label and splits the text** — found 2026-08-21 in the Beat panel, with a real Take
+  - The label `15.069002s source` occupies x=317–460. The slider labelled **`Trim in for Shot 1`** — 18px wide, 138px tall — sits at x=349–367, **inside that span**, so the text reads as `15.0` ⎸ `002s source` with a black bar through it.
+  - The handle is not mispositioned: `aria-valuenow` is 1, and one second of a fifteen-second track lands about where it is drawn. The fault is that the duration label and the trim track are laid out in the same space, so any non-zero trim-in crosses the text.
+  - It only appears once a Shot has a real source duration to label, which is why seeded data never showed it.
+  - The drawing keeps the label inside the segment's top-left and the handles at its edges, where they cannot meet.
+
+- [ ] **[BUG-088][P2][Creative Studio] The Beat panel is a stacked form modal where the drawing is a full-bleed editor** — found 2026-08-21
+  - Built: a centred modal of stacked fields — Action, Look, Beat target, Save/Reset/Ask Director, then Shot cards with Line, Narration, On-screen text, Planned duration, hard-cut checkbox, and generation count.
+  - Drawn: a full-bleed editor with the Action and Look side by side under labelled rules (`ACTION · THE ONE THING YOU WRITE`, `LOOK · EVERY SHOT INHERITS IT` with a live `11 / 25 WORDS` counter), a large preview with a transport (`0:00 / 0:14`, `JOIN ◂`, `LOOP OFF`, `JOIN ▸`), a Shot pane stating provenance (`DERIVED FROM THE ACTION`, `WRITTEN FROM THE ACTION · EDIT TO DETACH`, `HEAD OF THE CHAIN · STARTS FROM THE STILL`), a Takes row, and a coverage strip of the Beat's Shots with keyboard hints — `EDGE · TRIM · FREE`, `BOUNDARY · COSTS A RE-RENDER`, `SPACE · PLAY`.
+  - **The capabilities are largely present** — the panel already carries a `<video>`, a poster, per-Shot editing, trim sliders, hard cut, line detach and re-derive, and seed import. This is a presentation gap, not a missing feature set, and should not be rebuilt from scratch.
+  - The two pieces with no counterpart are the transport controls and the always-visible cost hints. `BOUNDARY · COSTS A RE-RENDER` is the drawing telling a user which drag spends money, and nothing in the built panel says so.
+
 ## Correctness and honesty of failures
 
 - [x] **[BUG-062][P2][Creative Studio] Three distinct Director failures all report "could not read or save this workspace"** — found 2026-08-21 while diagnosing BUG-061
