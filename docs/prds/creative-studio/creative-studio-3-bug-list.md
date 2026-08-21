@@ -104,20 +104,29 @@
   - The design instead fixes a three-column grid of 16:9 image cards, each with a beat-number badge, title, description, a state pill, and a `2 SHOTS · 14s` footer. A no-coverage beat renders as a diagonal-striped placeholder rather than a photo.
   - Low priority because an extra control is additive, but it should be a deliberate decision rather than drift.
 
-## Open question — not a bug
+## Settled — the Director rail stays
 
-**The Director rail is in the plan and absent from the design.** The built workspace dedicates roughly
-a third of the width to a permanent "Creative Director" rail. The prototype has no such rail on any
-screen — probed for the string across the whole document, absent.
+The built workspace dedicates roughly a third of the width to a permanent "Creative Director" rail.
+The prototype has no such rail on any screen — probed for the string across the whole document,
+absent. This was raised as a plan-versus-design conflict, because plan Task 9 is titled "Project
+shell and the collapsible Director rail" and instructs "Build **one docked collapsible Director
+rail** with a single persistent conversation owner."
 
-This is not an implementation defect: plan Task 9 is titled "Project shell and the collapsible
-Director rail" and explicitly instructs "Build **one docked collapsible Director rail** with a single
-persistent conversation owner." Codex built exactly what was specified.
+**Decided by the owner on 2026-08-21: the rail is needed and stays.** The plan wins; the prototype's
+railless layout does not. Do not file the rail's presence as a fidelity defect, and do not remove it
+while closing BUG-068 through BUG-072.
 
-So the plan and the design disagree about whether the Director is a permanent surface or is summoned.
-That is a product decision, and only the designer and owner can settle it. It is recorded here rather
-than filed because there is nothing for an engineer to fix until it is settled — and because it is the
-single largest visual difference between the two, so any fidelity work that ignores it will be redone.
+**Consequence for the fidelity work, and the reason this is recorded rather than deleted.** Measured
+in the running app at a 1492px window: the rail takes **431px (29%)** and the workspace content column
+is left with **780px** — a little over half the window. Every prototype screen lays out against the
+full window width. The app bar in BUG-068, the three-column
+Board grid, and the Cut's preview-plus-filmstrip composition in BUG-071 all assume that width. With
+the rail permanent, none of them can be transcribed from the prototype directly — they have to be
+re-proportioned against that 780px column, and the app bar has to resolve whether it spans the rail
+or starts beside it. The Board is the sharpest case: the design's three 16:9 cards sit near 430px
+each at full width, and the same three columns inside 780px fall to roughly 250px — small enough that
+three-up may stop being the right answer rather than simply shrinking. Whoever takes BUG-068 should settle that spanning question first,
+because BUG-070's placement of the view switch depends on the answer.
 
 ## Verification notes
 
