@@ -33,3 +33,4 @@ packages/desktop/src/renderer/services/i18n/locales/**/*.json merge=locale-json
 
 # Immutable generated Creative Studio 3 design fixture. Keep byte-for-byte authority.
 docs/prds/creative-studio/creative-studio-3-beat-and-shot-reference.html.txt binary
+docs/prds/creative-studio/creative-studio-3-app-bar-answer.html.txt binary

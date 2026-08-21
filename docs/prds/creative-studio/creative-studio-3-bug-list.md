@@ -118,6 +118,10 @@ number is not hypothetical, it has happened. To keep it from happening here:
   - Design: one compact bar carrying, in order — a project colour dot, the title, a stat strip `9 BEATS · 2:58 OF 3:00 · 5 READY`, a right-aligned `TABLE BOARD CUT` segmented control, a primary `Render…` button, and an overflow `⋯`.
   - Built: a large `H1` project title, a `0 beats · 0 shots` line beneath it, then a separate row of view links. No stat strip (probed: absent), no `Render…` control anywhere in the workspace (probed: zero buttons matching /render/), no overflow menu.
   - The stat strip is the only place the design surfaces **duration against target** (`2:58 OF 3:00`) and **readiness count**. Both are load-bearing for the costed render gate, and neither has a home in the built UI.
+  - **Unblocked 2026-08-21 by the designer's answer** (`creative-studio-3-app-bar-answer.html.txt`, sha256 `4a00962a…52b0d6`). The bar **spans the Studio surface above both panes** — measured at **1211px** on a 1492px window, which is the window less the 281px of application chrome outside the Studio. It does not sit inside the workspace column and it does not move when the rail toggles.
+  - The child order gains one element at the front: **the rail's collapse control is now the leftmost thing in the bar** (`⇤`), and **the rail loses its own header entirely**. Order is now: collapse control, project dot, title, stat strip, flexible spacer, view chips, `Render…`, overflow.
+  - Container is unchanged from the original prototype and re-measured on the answer: height **54px**, `padding: 11px 18px`, `gap: 11px`, background `rgb(251, 247, 240)`, `border-bottom: 1px solid rgb(228, 217, 198)`. The answer's prose says 56px; the computed value in both drawings is 54px. Treat 54px as authoritative and the prose as rounding.
+  - **Touches `DirectorRail/index.tsx`** to delete its `<header>` and relocate the toggle. That is the same file as BUG-061 and BUG-062. Different regions — the throw sites are near line 479, the header near line 999 — so git will usually merge cleanly, but sequence it after those two rather than alongside.
 
 - [ ] **[BUG-069][P1][Creative Studio] The type scale is roughly double the design throughout** — found 2026-08-21, measured
   - Project title: design **Manrope 700 at 14.5px**; built **Manrope 700 at 29px** — exactly 2×.
@@ -128,49 +132,84 @@ number is not hypothetical, it has happened. To keep it from happening here:
   - Design: `IBM Plex Mono`, **9.5px**, uppercase, `letter-spacing: 0.08em`, chips inside the app bar, right-aligned.
   - Built: `Source Sans 3`, **14.5px**, sentence case, `letter-spacing: normal`, pills on their own row below the title, left-aligned.
   - The underlying markup is sound — `<nav aria-label="Workspace views">` with `aria-current="page"`. This is styling and placement only.
+  - **Placement answered 2026-08-21: the chips live in the app bar**, right-aligned, before `Render…`. They only leave it at rung 5 of the yield ladder, below a **603px** bar — a width the product never reaches, since the bar spans 1211px. Build them in the bar and treat the ladder's rung 5 as a later concern.
+  - The capitals are authored into the prototype's strings, which compute `text-transform: none`. Do not copy that — use `text-transform: uppercase` and keep the key in sentence case, or the eleven fallback locales and every caseless script inherit English casing.
 
 - [ ] **[BUG-071][P1][Creative Studio] The Cut view is a settings form; the design is a playback editor** — found 2026-08-21
   - Design (dark surface): a large preview panel badged `BEAT 01 · Cold open`; a transport row with play, `0:00 / 2:58`, and `PICTURE ONLY — THE BED IS MUTED HERE`; a right `THE FILM` panel showing `2:58` against `OF 3:00 TARGET` with a `2s UNDER` pill and `9 BEATS · 16 SHOTS · 1 SLATE`; a `MATCH TO` panel with reference thumbnails and `03 · SHOT 01 IS THE REFERENCE`; an inline warning row `BEAT 05 — No coverage. It exports as a 24s slate.` with an `OPEN THE BEAT` action; a numbered filmstrip of every beat in play order with per-beat durations; and an audio-bed waveform strip labelled `bed-season4.wav · 3:04 · ONE BED · AUTO-DUCKED`.
   - Built (light surface): a card with a duplicated `Cut` heading, a `0s film` chip, and three stacked form panels — Audio bed, Match To, Exports — made of dropdowns and buttons.
   - Every concept in the design is represented in the build, so the data layer is not the problem. The presentation is a different artifact: the design lets you _watch_ the film and see the timeline; the build lets you _configure_ it.
   - The filmstrip and the transport are the two pieces with no counterpart at all in the build, and they are the ones that make the Cut a cut.
+  - **Target width answered 2026-08-21: 1158px, not 780px.** The Cut defaults to a **collapsed** rail, because judging a cut is watching and the preview should be the largest thing on screen. So this is a straight build of the drawn Cut at full width — **it needs no redraw**, and the re-proportioning worry recorded earlier does not apply to it.
 
 - [ ] **[BUG-072][P3][Creative Studio] The Board's S/M/L density control is not in the design** — found 2026-08-21
   - The built Board carries an `S` / `M` / `L` toggle beside "Beat board". The prototype's Board has no density control — probed across the document, absent.
   - The design instead fixes a three-column grid of 16:9 image cards, each with a beat-number badge, title, description, a state pill, and a `2 SHOTS · 14s` footer. A no-coverage beat renders as a diagonal-striped placeholder rather than a photo.
-  - Low priority because an extra control is additive, but it should be a deliberate decision rather than drift.
+  - **Resolved 2026-08-21, and it does not invert.** The Board defaults to a **collapsed** rail at **1158px**, where the designer confirms "three-up holds at 365px cards, so the Board needs no new column count". The density control was not a latent answer to a narrow column; there is no narrow column. Remove it unless it is wanted on its own merits.
 
-## Settled — the Director rail stays
+## Settled — the rail stays, and the bar heads the project
 
-The built workspace dedicates roughly a third of the width to a permanent "Creative Director" rail.
-The prototype has no such rail on any screen — probed for the string across the whole document,
-absent. This was raised as a plan-versus-design conflict, because plan Task 9 is titled "Project
-shell and the collapsible Director rail" and instructs "Build **one docked collapsible Director
-rail** with a single persistent conversation owner."
+**The rail stays.** Decided by the owner on 2026-08-21. Plan Task 9 mandates "one docked collapsible
+Director rail"; the prototype had no such rail on any screen. The plan wins. Do not file the rail's
+presence as a fidelity defect and do not remove it while closing BUG-068 through BUG-074.
 
-**Decided by the owner on 2026-08-21: the rail is needed and stays.** The plan wins; the prototype's
-railless layout does not. Do not file the rail's presence as a fidelity defect, and do not remove it
-while closing BUG-068 through BUG-072.
+**The bar spans, and the rail loses its header.** Answered by the designer on 2026-08-21 in
+`creative-studio-3-app-bar-answer.html.txt`, sha256 `4a00962a…52b0d6`. Everything the bar carries is
+film-scoped — the project's name, the film's clock, the film's render gate, the views of that film —
+so the bar is the project's header and both panes sit under it. The rail is one of the project's two
+panes, not a sibling of the project. The deciding argument is the toggle: a bar inside the column
+would reassemble itself across a 378px jump every time someone opened or closed a conversation panel,
+making a pane control read as an application-wide change.
 
-**Consequence for the fidelity work, and the reason this is recorded rather than deleted.** Measured
-in the running app at a 1492px window: the rail takes **431px (29%)** and the workspace content column
-is left with **780px** — a little over half the window. Every prototype screen lays out against the
-full window width. The app bar in BUG-068, the three-column
-Board grid, and the Cut's preview-plus-filmstrip composition in BUG-071 all assume that width. With
-the rail permanent, none of them can be transcribed from the prototype directly — they have to be
-re-proportioned against that 780px column, and the app bar has to resolve whether it spans the rail
-or starts beside it. The Board is the sharpest case: the design's three 16:9 cards sit near 430px
-each at full width, and the same three columns inside 780px fall to roughly 250px — small enough that
-three-up may stop being the right answer rather than simply shrinking. Whoever takes BUG-068 should settle that spanning question first, because BUG-070's placement of the
-view switch depends on the answer.
+**The 28px shortfall is resolved, and my arithmetic had a wrong input.** The earlier finding — that
+the bar needs 808px and the column offers 780px — was correct arithmetic on a fixed 206px title,
+because the prototype gave no truncation rule. There is one now: the title is a box, `flex: 0 1 auto`,
+**320px ceiling, 128px floor**, one line, tail ellipsis, verified against the drawing as
+`max-width: 320px; text-overflow: ellipsis; white-space: nowrap`. At a 780px bar the title is spared
+178px and yields; nothing else has to. Note the drawing carries the ceiling but not the floor — it
+renders at 1211px where nothing fires — so **the 128px floor has to be added in implementation**, or
+rung 2 below has no trigger.
 
-**BUG-068 is blocked on the designer, not on engineering.** The bar's own measurements give it a
-minimum width of 808px with its flexible spacer already collapsed to zero, and the workspace column
-is 780px with the rail expanded — it is 28px short before any title longer than the prototype's
-28-character example. With the rail collapsed the column is 1158px and the bar fits with room to
-spare. The question is put to the designer in
-[creative-studio-3-app-bar-design-question.md](./creative-studio-3-app-bar-design-question.md).
-BUG-069 has no such dependency and can start immediately.
+**The yield ladder, for when the bar is narrow.** Thresholds are the bar's own width. Shed what we
+derived before truncating what the user typed, and never change the bar's height.
+
+| Rung | Fires below | What yields                                                              | Minimum after      |
+| ---- | ----------- | ------------------------------------------------------------------------ | ------------------ |
+| 0    | —           | flexible spacer goes to zero                                             | 961px at title 320 |
+| 1    | 961px       | title shrinks inside its box, 320px to 128px                             | 769px at title 128 |
+| 2    | 769px       | stat strip drops `9 BEATS` — derived, and the Table shows it             | 699px              |
+| 3    | 699px       | stat strip drops `5 READY`; the clock stays, it is the film's constraint | 645px              |
+| 4    | 645px       | `Render…` loses its label and becomes the glyph                          | 603px              |
+| 5    | 603px       | view chips leave the bar and head the workspace column                   | 436px floor        |
+
+**At the width we build — 1211px — no rung fires.** Two alternatives were considered and rejected:
+putting the stat strip under the title, because it takes the bar from 54px to about 76px and moves
+every view's top edge and the Table's sticky header; and letting the overflow absorb `Render…`,
+because it is the one action in the bar that spends money and the one the bar exists to offer. It may
+lose its label; it may not become invisible.
+
+**The rail's default follows the view, and is not a global preference.**
+
+| View  | Rail default  | Design target | Why                                                                           |
+| ----- | ------------- | ------------- | ----------------------------------------------------------------------------- |
+| Table | **Expanded**  | 780px         | Pre-picture work. Writing coverage is a conversation.                         |
+| Board | **Collapsed** | 1158px        | Picking takes is looking.                                                     |
+| Cut   | **Collapsed** | 1158px        | Judging a cut is watching; the preview should be the largest thing on screen. |
+
+A manual toggle sticks **per view, per project** and outranks the default from then on. Never
+re-expand a rail the user closed — that is the named failure mode. This is new behaviour rather than
+a fidelity fix, so it is filed as BUG-073.
+
+- [ ] **[BUG-073][P2][Creative Studio] The rail's default should follow the view, and a manual toggle should stick per view and per project** — filed 2026-08-21 from the designer's answer
+  - Today the rail is expanded everywhere with a single toggle and no persistence.
+  - Required: Table defaults expanded, Board and Cut default collapsed. A manual toggle overrides the default and persists **per view, per project**. A rail the user closed is never re-expanded automatically.
+  - The persistence scope is the part to get right: per project alone would make the Table's default fight the Board's, and a global preference would defeat the point of a per-view default.
+  - New behaviour, not a fidelity fix. It is what makes the 1158px targets in BUG-071 and BUG-072 real — without it every view renders at 780px and the two collapsed-target views are wrong by default.
+
+- [ ] **[BUG-074][P2][Creative Studio] The Table needs a responsive column rule at its 780px target** — filed 2026-08-21 from the designer's answer
+  - The Table is the one view that defaults to an **expanded** rail, so 780px is its design target rather than a degraded state.
+  - At 780px the designer measures `ACTION` falling to about 200px and `LOOK` to about 160px. The proposed rule: **`LOOK` stops being a column below 860px and becomes a second line under the Action, in the same cell.**
+  - The designer has offered to draw this before the Table is built. **Take that offer** — this is the only view whose primary state is the narrow one, and it is the view the director is loudest in.
 
 ## Verification notes
 
