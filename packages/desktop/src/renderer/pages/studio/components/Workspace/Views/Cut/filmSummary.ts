@@ -69,3 +69,32 @@ export const formatCutClock = (seconds: number | null): string | null => {
   const minutes = Math.floor(whole / 60);
   return `${minutes}:${String(whole - minutes * 60).padStart(2, '0')}`;
 };
+
+export type CutSlateWarning = {
+  beatId: string;
+  /** 1-based play order across the whole film, not across the warnings. */
+  position: number;
+  label: string;
+  durationSeconds: number;
+};
+
+/**
+ * A Beat carrying no coverage still occupies its authored length in the film, exporting as a slate.
+ * The Cut names each one by where it sits in the film so the gap can be found, which is why the
+ * position is counted against every Beat rather than against the warnings alone.
+ */
+export const buildCutSlateWarnings = (cut: Pick<WorkspaceCutProjection, 'beats'>): CutSlateWarning[] => {
+  const warnings: CutSlateWarning[] = [];
+  for (const [index, beat] of cut.beats.entries()) {
+    if (Number.isSafeInteger(beat.shotCount) && beat.shotCount > 0) continue;
+    if (!usableSeconds(beat.durationSeconds)) continue;
+    const position = index + 1;
+    warnings.push({
+      beatId: beat.id,
+      position,
+      label: String(position).padStart(2, '0'),
+      durationSeconds: beat.durationSeconds,
+    });
+  }
+  return warnings;
+};

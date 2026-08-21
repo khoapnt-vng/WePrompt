@@ -17,6 +17,7 @@ import type {
 } from '@/renderer/pages/studio/components/Workspace/workspaceProjection';
 import {
   buildCutFilmSummary,
+  buildCutSlateWarnings,
   formatCutClock,
 } from '@/renderer/pages/studio/components/Workspace/Views/Cut/filmSummary';
 import {
@@ -665,5 +666,45 @@ describe('the filmstrip', () => {
     expect(filmstripShowsTitle(104)).toBe(false);
     expect(filmstripShowsTitle(63)).toBe(false);
     expect(filmstripShowsTitle(0)).toBe(false);
+  });
+});
+
+describe('slate warnings', () => {
+  const wBeat = (
+    id: string,
+    shotCount: number,
+    durationSeconds: number | null
+  ): WorkspaceCutProjection['beats'][number] => ({
+    id,
+    title: 'Beat',
+    shotCount,
+    durationKind: shotCount > 0 ? 'actual' : durationSeconds === null ? 'pending' : 'target',
+    durationSeconds,
+    coverAssetId: null,
+  });
+
+  it('names each uncovered Beat by its play position and the length it will export as', () => {
+    const warnings = buildCutSlateWarnings({
+      beats: [wBeat('beat_1', 2, 14), wBeat('beat_2', 0, 24), wBeat('beat_3', 1, 9), wBeat('beat_4', 0, 6)],
+    });
+
+    expect(warnings).toEqual([
+      { beatId: 'beat_2', position: 2, label: '02', durationSeconds: 24 },
+      { beatId: 'beat_4', position: 4, label: '04', durationSeconds: 6 },
+    ]);
+  });
+
+  it('keeps positions counted against the whole film, not against the warnings', () => {
+    // The badge reads BEAT 05 because it is the fifth Beat in the film, not the first warning.
+    const beats = [wBeat('a', 1, 5), wBeat('b', 1, 5), wBeat('c', 1, 5), wBeat('d', 1, 5), wBeat('e', 0, 24)];
+    expect(buildCutSlateWarnings({ beats })).toEqual([{ beatId: 'e', position: 5, label: '05', durationSeconds: 24 }]);
+  });
+
+  it('omits a Beat that has no length to export yet', () => {
+    expect(buildCutSlateWarnings({ beats: [wBeat('beat_1', 0, null)] })).toEqual([]);
+  });
+
+  it('omits a covered Beat even when its length is unusable', () => {
+    expect(buildCutSlateWarnings({ beats: [wBeat('beat_1', 3, Number.NaN)] })).toEqual([]);
   });
 });
