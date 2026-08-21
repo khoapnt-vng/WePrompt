@@ -718,7 +718,7 @@ describe('Creative Studio workspace translations', () => {
   });
 
   it.each([
-    ['table.actualDuration', 15.069002, '15s actual'],
+    ['table.actualDuration', 15.069002, '15s'],
     ['board.actualDuration', 15.069002, '15s actual'],
     ['cut.filmDuration', 178.069002, '178s film'],
     ['cut.filmstripDuration', 15.069002, '15s'],

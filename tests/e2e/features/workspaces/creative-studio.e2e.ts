@@ -693,6 +693,61 @@ const expectLocatorFitsViewport = async (
   expect(box.x + box.width).toBeLessThanOrEqual(reference.width + 1);
 };
 
+const expectFoldedTableFits = async (table: Locator): Promise<void> => {
+  await expect(table.getByRole('columnheader')).toHaveCount(6);
+  const geometry = await table.evaluate((element) => {
+    const scroll = element.closest<HTMLElement>('[data-studio-table-scroll]');
+    if (scroll === null) throw new Error('Table scrollport was unavailable');
+    const scrollRect = scroll.getBoundingClientRect();
+    const gridRect = element.getBoundingClientRect();
+    const stateFits = Array.from(
+      element.querySelectorAll<HTMLElement>(
+        '[role="columnheader"][data-grid-column-name="state"], [role="gridcell"][data-grid-column-name="state"]'
+      )
+    ).every((state) => {
+      const rect = state.getBoundingClientRect();
+      return rect.left >= scrollRect.left - 1 && rect.right <= scrollRect.right + 1;
+    });
+    const durationFits = Array.from(element.querySelectorAll<HTMLElement>('[data-duration-kind]')).every((fact) => {
+      const cell = fact.closest<HTMLElement>('[data-grid-column-name="length"]');
+      if (cell === null) return false;
+      const factRect = fact.getBoundingClientRect();
+      const cellRect = cell.getBoundingClientRect();
+      return factRect.left >= cellRect.left - 1 && factRect.right <= cellRect.right + 1;
+    });
+    const shotFactsFit = Array.from(
+      element.querySelectorAll<HTMLElement>('[role="gridcell"][data-grid-column-name="shots"] > *')
+    ).every((fact) => {
+      const cell = fact.closest<HTMLElement>('[data-grid-column-name="shots"]');
+      if (cell === null) return false;
+      const factRect = fact.getBoundingClientRect();
+      const cellRect = cell.getBoundingClientRect();
+      return factRect.left >= cellRect.left - 1 && factRect.right <= cellRect.right + 1;
+    });
+    return {
+      clientWidth: scroll.clientWidth,
+      scrollWidth: scroll.scrollWidth,
+      documentClientWidth: document.documentElement.clientWidth,
+      documentScrollWidth: document.documentElement.scrollWidth,
+      gridLeft: gridRect.left,
+      gridRight: gridRect.right,
+      scrollLeft: scrollRect.left,
+      scrollRight: scrollRect.right,
+      stateFits,
+      durationFits,
+      shotFactsFit,
+    };
+  });
+
+  expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
+  expect(geometry.documentScrollWidth).toBeLessThanOrEqual(geometry.documentClientWidth + 1);
+  expect(geometry.gridLeft).toBeGreaterThanOrEqual(geometry.scrollLeft - 1);
+  expect(geometry.gridRight).toBeLessThanOrEqual(geometry.scrollRight + 1);
+  expect(geometry.stateFits).toBe(true);
+  expect(geometry.durationFits).toBe(true);
+  expect(geometry.shotFactsFit).toBe(true);
+};
+
 const exerciseRenderedShotViewportLifecycle = async (page: Page, reference: StudioViewportReference): Promise<void> => {
   const state = requireRenderedShotLifecycleState();
   const { anchorShotId, beatId, projectId, retainedFrameExtractions, retainedProject, shotId, userDataDirectory } =
@@ -718,8 +773,9 @@ const exerciseRenderedShotViewportLifecycle = async (page: Page, reference: Stud
   const row = table.getByRole('row').filter({ hasText: 'Landing' });
   await expect(row).toBeVisible();
   await expect(row).toContainText('2 shots');
-  await expect(row).toContainText('18s actual');
-  await expect(row).toContainText('~16s target');
+  await expect(row.locator('[data-duration-kind]')).toHaveCount(1);
+  await expect(row.locator('[data-duration-kind="actual"]')).toHaveText('18s');
+  await expect(row.locator('[data-duration-kind="target"]')).toHaveCount(0);
   await row.evaluate((element) => element.scrollIntoView({ block: 'center', inline: 'nearest' }));
   await takeScreenshot(page, `creative-studio/gate-3/table-${reference.screenshotSuffix}.png`);
 
@@ -941,30 +997,88 @@ test.describe('Creative Studio workspace', () => {
     const projectId = projectIdFromStudioUrl(page);
     const initial = await readStudioProject(page, projectId);
     const beatIds = Array.from({ length: 24 }, (_, index) => `beat_table_${String(index + 1).padStart(2, '0')}`);
+    const maxDurationShotIds = Array.from(
+      { length: 8 },
+      (_, index) => `shot_table_max_${String(index + 1).padStart(2, '0')}`
+    );
     const authored = await invokeStudioBridge<StudioRendererProjectCommitResultV2>(page, 'apply-authoring-batch', {
       projectId,
       expectedRevision: initial.revision,
-      operations: beatIds.map((beatId, index) => ({
-        kind: 'add_beat',
-        beatId,
-        beat: {
-          title: `Table beat ${String(index + 1).padStart(2, '0')}`,
-          action: `Show story moment ${index + 1}.`,
-          look: index % 3 === 0 ? '' : `Visual direction ${index + 1}.`,
-          targetSeconds: index % 2 === 0 ? null : 7,
-        },
-        beforeBeatId: null,
-      })),
+      operations: [
+        ...beatIds.map((beatId, index) => ({
+          kind: 'add_beat' as const,
+          beatId,
+          beat: {
+            title: `Table beat ${String(index + 1).padStart(2, '0')}`,
+            action: `Show story moment ${index + 1}.`,
+            look: index % 3 === 0 ? '' : `Visual direction ${index + 1}.`,
+            targetSeconds: index === 23 ? 1_440 : index % 2 === 0 ? null : 7,
+          },
+          beforeBeatId: null,
+        })),
+        ...maxDurationShotIds.map((shotId, index) => ({
+          kind: 'add_shot' as const,
+          beatId: beatIds[0]!,
+          shotId,
+          shot: {
+            line: `Maximum-duration Shot ${index + 1}.`,
+            narration: '',
+            onScreenText: '',
+            durationSeconds: 15,
+          },
+          beforeShotId: null,
+        })),
+      ],
     });
     expect(authored.createdBeatIds).toEqual(beatIds);
+    expect(authored.createdShotIds).toEqual(maxDurationShotIds);
 
+    await page.setViewportSize({ width: 1_440, height: 900 });
     await page.reload({ waitUntil: 'domcontentloaded' });
     const grid = page.getByRole('grid', { name: 'Beat table' });
     await expect(grid).toBeVisible();
-    await expect(grid.getByRole('columnheader')).toHaveCount(7);
+    await expectFoldedTableFits(grid);
     await expect(grid.getByRole('row')).toHaveCount(25);
     const rows = grid.getByRole('row');
-    await expect(rows.nth(1).getByRole('gridcell')).toHaveCount(7);
+    await expect(rows.nth(1).getByRole('gridcell')).toHaveCount(6);
+    await expect(rows.nth(1).locator('[data-grid-column-name="shots"]')).toContainText('8 shots');
+    await expect(rows.nth(1).locator('[data-duration-kind="actual"]')).toHaveText('120s');
+    await expect(rows.nth(1).locator('[data-duration-kind]')).toHaveCount(1);
+    await expect(rows.nth(24).locator('[data-duration-kind="target"]')).toHaveText('~1440s target');
+    await expect(rows.nth(24).locator('[data-duration-kind]')).toHaveCount(1);
+
+    const directorToggle = page.locator('[data-studio-director-toggle]');
+    await expect(directorToggle).toHaveAttribute('aria-expanded', 'true');
+    await directorToggle.evaluate((element: HTMLElement) => element.click());
+    await expect(directorToggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(grid.getByRole('columnheader')).toHaveCount(7);
+
+    const firstStateCell = rows.nth(1).locator('[data-grid-column-name="state"]');
+    await firstStateCell.focus();
+    const firstStateHandle = await firstStateCell.elementHandle();
+    if (firstStateHandle === null) throw new Error('Table State cell was unavailable');
+    await directorToggle.evaluate((element: HTMLElement) => element.click());
+    await expect(directorToggle).toHaveAttribute('aria-expanded', 'true');
+    await expectFoldedTableFits(grid);
+    expect(await firstStateHandle.evaluate((element) => element === document.activeElement)).toBe(true);
+    await expect(firstStateCell).toBeFocused();
+    await expect(grid.locator('[role="gridcell"][tabindex="0"]')).toHaveCount(1);
+
+    await directorToggle.evaluate((element: HTMLElement) => element.click());
+    await expect(grid.getByRole('columnheader')).toHaveCount(7);
+    expect(await firstStateHandle.evaluate((element) => element === document.activeElement)).toBe(true);
+    const firstLookCell = rows.nth(1).locator('[data-grid-column-name="look"]');
+    await firstLookCell.focus();
+    await directorToggle.evaluate((element: HTMLElement) => element.click());
+    await expectFoldedTableFits(grid);
+    await expect(rows.nth(1).locator('[data-grid-column-name="action"]')).toBeFocused();
+
+    const root = page.locator('html');
+    await root.evaluate((element) => element.setAttribute('dir', 'rtl'));
+    await expect(root).toHaveAttribute('dir', 'rtl');
+    await expectFoldedTableFits(grid);
+    await root.evaluate((element) => element.setAttribute('dir', 'ltr'));
+    await expect(root).toHaveAttribute('dir', 'ltr');
 
     const firstCell = rows.nth(1).getByRole('gridcell').first();
     await firstCell.focus();
@@ -998,10 +1112,11 @@ test.describe('Creative Studio workspace', () => {
     await expect(beatPanel).toBeHidden();
     await expect(rows.nth(24)).toHaveAttribute('aria-selected', 'true');
 
-    await expect(rows.nth(1)).toContainText('Duration pending');
     await expect(rows.nth(1)).not.toContainText(/\b0s\b/);
     await expect(rows.nth(2)).toContainText('No coverage');
     await expect(rows.nth(2)).toContainText('~7s target');
+    await expect(rows.nth(3)).toContainText('Duration pending');
+    await expect(rows.nth(3)).toContainText('No target');
 
     const beforeNavigation = await readStudioProject(page, projectId);
     const userDataDirectory = await electronApp.evaluate(({ app }) => app.getPath('userData'));

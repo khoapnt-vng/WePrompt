@@ -21,7 +21,12 @@
   font-family: var(--font-body);
 }
 
+.gridFolded {
+  min-inline-size: 0;
+}
+
 .headerCell {
+  box-sizing: border-box;
   padding-block: 9px;
   padding-inline: 12px;
   border-block-end: 1px solid var(--color-border-2);
@@ -35,29 +40,12 @@
   text-transform: uppercase;
 }
 
-.headerCell:nth-child(1),
-.cell:nth-child(1) {
-  inline-size: 48px;
+.cell[data-grid-column-name='shots'] {
+  padding-inline: 6px;
 }
 
-.headerCell:nth-child(2),
-.cell:nth-child(2) {
-  inline-size: 150px;
-}
-
-.headerCell:nth-child(5),
-.cell:nth-child(5) {
-  inline-size: 86px;
-}
-
-.headerCell:nth-child(6),
-.cell:nth-child(6) {
-  inline-size: 142px;
-}
-
-.headerCell:nth-child(7),
-.cell:nth-child(7) {
-  inline-size: 122px;
+.cell[data-grid-column-name='length'] {
+  padding-inline: 0;
 }
 
 .row {
@@ -65,6 +53,7 @@
 }
 
 .cell {
+  box-sizing: border-box;
   padding-block: 11px;
   padding-inline: 12px;
   border-block-end: 1px solid var(--color-border-1);
@@ -98,7 +87,7 @@
 
 .position,
 .shotCount,
-.durationFacts,
+.durationFact,
 .state {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -125,10 +114,10 @@
   white-space: nowrap;
 }
 
-.durationFacts {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.durationFact {
+  display: block;
+  min-inline-size: 0;
+  font-size: 11px;
   white-space: nowrap;
 }
 

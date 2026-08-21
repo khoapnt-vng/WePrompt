@@ -1470,7 +1470,7 @@
         "shotCount_other": "{{count}} shots",
         "targetDuration": "~{{seconds}}s target",
         "targetPending": "No target",
-        "actualDuration": "{{seconds, number(maximumFractionDigits: 0; useGrouping: false)}}s actual",
+        "actualDuration": "{{seconds, number(maximumFractionDigits: 0; useGrouping: false)}}s",
         "actualPending": "No actual",
         "empty": "No active beats yet.",
         "state": {

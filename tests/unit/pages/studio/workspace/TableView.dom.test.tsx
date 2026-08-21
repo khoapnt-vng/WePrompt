@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import React, { useState } from 'react';
@@ -8,6 +11,11 @@ import type {
   WorkspaceShotProjection,
 } from '@/renderer/pages/studio/components/Workspace/workspaceProjection';
 import { tableFoldsLook } from '@/renderer/pages/studio/components/Workspace/Views/Table/lookFold';
+
+const tableCss = readFileSync(
+  join(process.cwd(), 'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/Table/Table.module.css'),
+  'utf8'
+);
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -44,7 +52,7 @@ vi.mock('react-i18next', () => ({
         return `~${String(values?.seconds)}s target`;
       }
       if (key === 'conversation.creativeStudio.workspace.table.actualDuration') {
-        return `${String(values?.seconds)}s actual`;
+        return `${String(Math.round(Number(values?.seconds)))}s`;
       }
       return copy[key] ?? key;
     },
@@ -132,6 +140,11 @@ describe('TableView', () => {
         .getAllByRole('columnheader')
         .map((cell) => cell.textContent)
     ).toEqual(['#', 'Beat', 'Action', 'Look', 'Shots', 'Length', 'State']);
+    expect(
+      within(rows[0]!)
+        .getAllByRole('columnheader')
+        .map((cell) => cell.dataset.gridColumnName)
+    ).toEqual(['position', 'beat', 'action', 'look', 'shots', 'length', 'state']);
     expect(rows.slice(1).map((row) => cellAt(row, 1).textContent)).toEqual(['Opening', 'Close']);
     expect(rows.slice(1).every((row) => within(row).getAllByRole('gridcell').length === 7)).toBe(true);
     expect(rowForBeat('opening')).toHaveTextContent('2 shots');
@@ -301,26 +314,25 @@ describe('TableView', () => {
     expect(rowForBeat('empty')).toHaveAttribute('aria-selected', 'true');
   });
 
-  it('renders equal target and actual numbers as separately styled intent and fact', () => {
+  it('renders one rounded actual fact for a covered Beat even when it also has a target', () => {
     render(
       <TableView
-        beats={[makeBeat('equal', { targetSeconds: 9, actualSeconds: 9 })]}
+        beats={[makeBeat('equal', { targetSeconds: 9, actualSeconds: 9.52 })]}
         selectedBeatId={null}
         onSelectBeat={vi.fn()}
       />
     );
     const length = cellAt(rowForBeat('equal'), 5);
-    const actual = length.querySelector<HTMLElement>('[data-duration-kind="actual"]');
-    const target = length.querySelector<HTMLElement>('[data-duration-kind="target"]');
-    if (actual === null || target === null) throw new Error('Missing separate actual and target duration facts');
+    const facts = length.querySelectorAll<HTMLElement>('[data-duration-kind]');
+    expect(facts).toHaveLength(1);
+    const actual = facts[0];
+    if (actual === undefined) throw new Error('Missing actual duration fact');
     expect(actual).toHaveAttribute('data-duration-kind', 'actual');
-    expect(target).toHaveAttribute('data-duration-kind', 'target');
-    expect(actual).toHaveTextContent('9s actual');
-    expect(target).toHaveTextContent('~9s target');
-    expect(actual.className).not.toBe(target.className);
+    expect(actual).toHaveTextContent('10s');
+    expect(length).not.toHaveTextContent('~9s target');
   });
 
-  it('preserves missing target and actual facts as pending text and never zero seconds', () => {
+  it('shows exactly one coverage-appropriate duration fact and never invents zero seconds', () => {
     render(
       <TableView
         beats={[
@@ -336,7 +348,14 @@ describe('TableView', () => {
             displayState: 'no_coverage',
             shots: [],
           }),
-          makeBeat('covered', { targetSeconds: null, actualSeconds: 8 }),
+          makeBeat('covered_pending', { targetSeconds: 7, actualSeconds: null }),
+          makeBeat('covered', { targetSeconds: 7, actualSeconds: 8 }),
+          makeBeat('max_target', {
+            targetSeconds: 1440,
+            actualSeconds: null,
+            displayState: 'no_coverage',
+            shots: [],
+          }),
         ]}
         selectedBeatId={null}
         onSelectBeat={vi.fn()}
@@ -344,15 +363,29 @@ describe('TableView', () => {
     );
     const pending = cellAt(rowForBeat('duration_pending'), 5);
     const uncovered = cellAt(rowForBeat('no_coverage'), 5);
+    const coveredPending = cellAt(rowForBeat('covered_pending'), 5);
     const covered = cellAt(rowForBeat('covered'), 5);
+    const maxTarget = cellAt(rowForBeat('max_target'), 5);
 
-    expect(pending).toHaveTextContent('No actual');
     expect(pending).toHaveTextContent('No target');
-    expect(pending).not.toHaveTextContent('0s');
-    expect(uncovered).toHaveTextContent('No actual');
+    expect(pending.querySelectorAll('[data-duration-kind]')).toHaveLength(1);
+    expect(pending.querySelector('[data-duration-kind]')).toHaveAttribute('data-duration-kind', 'target');
     expect(uncovered).toHaveTextContent('~7s target');
-    expect(covered).toHaveTextContent('8s actual');
-    expect(covered).toHaveTextContent('No target');
+    expect(uncovered.querySelectorAll('[data-duration-kind]')).toHaveLength(1);
+    expect(uncovered.querySelector('[data-duration-kind]')).toHaveAttribute('data-duration-kind', 'target');
+    expect(coveredPending).toHaveTextContent('No actual');
+    expect(coveredPending.querySelectorAll('[data-duration-kind]')).toHaveLength(1);
+    expect(coveredPending.querySelector('[data-duration-kind]')).toHaveAttribute('data-duration-kind', 'actual');
+    expect(covered).toHaveTextContent('8s');
+    expect(covered).not.toHaveTextContent('~7s target');
+    expect(covered.querySelectorAll('[data-duration-kind]')).toHaveLength(1);
+    expect(covered.querySelector('[data-duration-kind]')).toHaveAttribute('data-duration-kind', 'actual');
+    expect(maxTarget).toHaveTextContent('~1440s target');
+    expect(maxTarget.querySelectorAll('[data-duration-kind]')).toHaveLength(1);
+    expect(maxTarget.querySelector('[data-duration-kind]')).toHaveAttribute('data-duration-kind', 'target');
+    for (const length of [pending, uncovered, coveredPending, covered, maxTarget]) {
+      expect(length.textContent).not.toMatch(/^~?0s(?:\s|$)/);
+    }
   });
 
   it('names every Beat state in text rather than relying on color', () => {
@@ -405,8 +438,20 @@ describe('the Look fold threshold', () => {
   });
 });
 
+describe('the Table layout contract', () => {
+  it('keeps the 860px floor only on the unfolded grid and addresses columns semantically', () => {
+    expect(tableCss).toMatch(/\.grid\s*{[^}]*min-inline-size:\s*860px/s);
+    expect(tableCss).toMatch(/\.gridFolded\s*{[^}]*min-inline-size:\s*0/s);
+    expect(tableCss).not.toContain('nth-child');
+    const durationRule = tableCss.match(/\.durationFact\s*{([^}]*)}/s)?.[1] ?? '';
+    expect(durationRule).not.toContain('overflow: hidden');
+    expect(durationRule).not.toContain('text-overflow: ellipsis');
+  });
+});
+
 describe('folding the Look at the Table target width', () => {
   let resizeCallback: ResizeObserverCallback | null = null;
+  let measuredWidth = 0;
 
   class FoldResizeObserver implements ResizeObserver {
     constructor(callback: ResizeObserverCallback) {
@@ -418,21 +463,32 @@ describe('folding the Look at the Table target width', () => {
   }
 
   const renderAtWidth = (width: number) => {
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
-      bottom: 0,
-      height: 200,
-      left: 0,
-      right: width,
-      toJSON: () => ({}),
-      top: 0,
-      width,
-      x: 0,
-      y: 0,
-    } as DOMRect);
+    measuredWidth = width;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      () =>
+        ({
+          bottom: 0,
+          height: 200,
+          left: 0,
+          right: measuredWidth,
+          toJSON: () => ({}),
+          top: 0,
+          width: measuredWidth,
+          x: 0,
+          y: 0,
+        }) as DOMRect
+    );
     vi.stubGlobal('ResizeObserver', FoldResizeObserver);
     render(<TableView beats={[makeBeat('beat_1')]} selectedBeatId={null} onSelectBeat={vi.fn()} />);
     act(() => {
       resizeCallback?.([{ contentRect: { width } } as ResizeObserverEntry], {} as ResizeObserver);
+    });
+  };
+
+  const resizeToWidth = (width: number): void => {
+    measuredWidth = width;
+    act(() => {
+      resizeCallback?.([{ contentRect: { width: width - 2 } } as ResizeObserverEntry], {} as ResizeObserver);
     });
   };
 
@@ -462,6 +518,25 @@ describe('folding the Look at the Table target width', () => {
         .getAllByRole('columnheader')
         .map((cell) => cell.textContent)
     ).toEqual(['#', 'Beat', 'Action · Look', 'Shots', 'Length', 'State']);
+    expect(
+      within(rows[0]!)
+        .getAllByRole('columnheader')
+        .map((cell) => cell.dataset.gridColumnName)
+    ).toEqual(['position', 'beat', 'action', 'shots', 'length', 'state']);
+    const grid = screen.getByRole('grid', { name: 'Beat table' });
+    expect(grid).toHaveAttribute('data-look-folded', 'true');
+    const fixedColumns = Array.from(grid.querySelectorAll<HTMLTableColElement>('col[data-fixed-inline-size]'));
+    expect(fixedColumns.map((column) => column.dataset.gridColumnName)).toEqual([
+      'position',
+      'beat',
+      'shots',
+      'length',
+      'state',
+    ]);
+    const fixedWidth = fixedColumns.reduce((total, column) => total + Number(column.dataset.fixedInlineSize), 0);
+    expect(fixedWidth).toBe(406);
+    expect(780 - fixedWidth).toBe(374);
+    expect(document.querySelector('[data-studio-table-scroll]')).not.toBeNull();
 
     // The five fixed columns keep their places; only the Look leaves.
     const cells = within(rows[1]!).getAllByRole('gridcell');
@@ -477,5 +552,48 @@ describe('folding the Look at the Table target width', () => {
   it('keeps the grid own column count honest when folded', () => {
     renderAtWidth(780);
     expect(screen.getByRole('grid', { name: 'Beat table' })).toHaveAttribute('aria-colcount', '6');
+  });
+
+  it('uses the same rendered border box for the initial and observer fold measurements', () => {
+    renderAtWidth(861);
+    const grid = screen.getByRole('grid', { name: 'Beat table' });
+
+    act(() => {
+      resizeCallback?.([{ contentRect: { width: 859 } } as ResizeObserverEntry], {} as ResizeObserver);
+    });
+    expect(grid).toHaveAttribute('data-look-folded', 'false');
+
+    resizeToWidth(860);
+    expect(grid).toHaveAttribute('data-look-folded', 'true');
+  });
+
+  it('keeps the focused State cell and roving tab stop stable when the Look folds away', () => {
+    renderAtWidth(1158);
+    const stateCell = rowForBeat('beat_1').querySelector<HTMLElement>('[data-grid-column-name="state"]');
+    if (stateCell === null) throw new Error('Missing State cell before the Look fold');
+    act(() => stateCell.focus());
+
+    resizeToWidth(780);
+
+    const foldedStateCell = rowForBeat('beat_1').querySelector<HTMLElement>('[data-grid-column-name="state"]');
+    expect(foldedStateCell).toBe(stateCell);
+    expect(foldedStateCell).toHaveFocus();
+    expect(foldedStateCell).toHaveAttribute('tabindex', '0');
+    expect(
+      screen.getByRole('grid', { name: 'Beat table' }).querySelectorAll('[role="gridcell"][tabindex="0"]')
+    ).toHaveLength(1);
+  });
+
+  it('moves focus from the removed Look cell to the folded Action cell', () => {
+    renderAtWidth(1158);
+    const lookCell = rowForBeat('beat_1').querySelector<HTMLElement>('[data-grid-column-name="look"]');
+    if (lookCell === null) throw new Error('Missing Look cell before the fold');
+    act(() => lookCell.focus());
+
+    resizeToWidth(780);
+
+    const actionCell = rowForBeat('beat_1').querySelector<HTMLElement>('[data-grid-column-name="action"]');
+    expect(actionCell).toHaveFocus();
+    expect(actionCell).toHaveAttribute('tabindex', '0');
   });
 });
