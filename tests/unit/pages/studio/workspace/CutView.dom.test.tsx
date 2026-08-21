@@ -19,6 +19,10 @@ import {
   buildCutFilmSummary,
   formatCutClock,
 } from '@/renderer/pages/studio/components/Workspace/Views/Cut/filmSummary';
+import {
+  buildCutFilmstrip,
+  filmstripShowsTitle,
+} from '@/renderer/pages/studio/components/Workspace/Views/Cut/filmstrip';
 
 type ButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'type'> & {
   icon?: React.ReactNode;
@@ -582,5 +586,84 @@ describe('the film summary', () => {
     expect(formatCutClock(0)).toBe('0:00');
     expect(formatCutClock(9)).toBe('0:09');
     expect(formatCutClock(null)).toBeNull();
+  });
+});
+
+describe('the filmstrip', () => {
+  const stripBeat = (
+    id: string,
+    title: string,
+    durationSeconds: number | null
+  ): WorkspaceCutProjection['beats'][number] => ({
+    id,
+    title,
+    shotCount: durationSeconds === null ? 0 : 2,
+    durationKind: durationSeconds === null ? 'pending' : 'actual',
+    durationSeconds,
+    coverAssetId: null,
+  });
+
+  it('lays every Beat out in play order at a width proportional to its length', () => {
+    // The design gives each segment `flex: <seconds> 1 0%`, so the grow factor is the duration
+    // itself and the strip needs no pixel arithmetic to stay proportional.
+    const strip = buildCutFilmstrip({
+      beats: [
+        stripBeat('beat_1', 'Cold open', 14),
+        stripBeat('beat_2', 'Squad building', 22),
+        stripBeat('beat_3', 'Sign-off', 9),
+      ],
+    });
+
+    expect(strip).toEqual([
+      {
+        beatId: 'beat_1',
+        position: 1,
+        label: '01',
+        title: 'Cold open',
+        durationSeconds: 14,
+        growFactor: 14,
+        clock: '14s',
+      },
+      {
+        beatId: 'beat_2',
+        position: 2,
+        label: '02',
+        title: 'Squad building',
+        durationSeconds: 22,
+        growFactor: 22,
+        clock: '22s',
+      },
+      { beatId: 'beat_3', position: 3, label: '03', title: 'Sign-off', durationSeconds: 9, growFactor: 9, clock: '9s' },
+    ]);
+  });
+
+  it('pads the position past nine without truncating it past ninety-nine', () => {
+    const beats = Array.from({ length: 100 }, (_, index) => stripBeat(`beat_${index}`, 'Beat', 1));
+    const strip = buildCutFilmstrip({ beats });
+    expect(strip?.[8]?.label).toBe('09');
+    expect(strip?.[9]?.label).toBe('10');
+    expect(strip?.[99]?.label).toBe('100');
+  });
+
+  it('refuses to lay out a strip when any Beat has no length to occupy', () => {
+    // A proportional strip cannot place a Beat of unknown length. Rendering the rest would show a
+    // film shorter than it is, which is the one thing the Cut must not do.
+    expect(
+      buildCutFilmstrip({ beats: [stripBeat('beat_1', 'Cold open', 14), stripBeat('beat_2', 'Pending', null)] })
+    ).toBeNull();
+  });
+
+  it('refuses a Beat whose length is not a usable number', () => {
+    expect(buildCutFilmstrip({ beats: [stripBeat('beat_1', 'Cold open', Number.NaN)] })).toBeNull();
+    expect(buildCutFilmstrip({ beats: [stripBeat('beat_1', 'Cold open', -4)] })).toBeNull();
+  });
+
+  it('drops a segment title only when the segment is too narrow to carry one', () => {
+    // Measured off the drawing: titles are absent at 97px, 104px and 63px, and present from 124px up.
+    expect(filmstripShowsTitle(124)).toBe(true);
+    expect(filmstripShowsTitle(213)).toBe(true);
+    expect(filmstripShowsTitle(104)).toBe(false);
+    expect(filmstripShowsTitle(63)).toBe(false);
+    expect(filmstripShowsTitle(0)).toBe(false);
   });
 });
