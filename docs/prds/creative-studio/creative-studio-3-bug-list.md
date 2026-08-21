@@ -52,7 +52,7 @@ number is not hypothetical, it has happened. To keep it from happening here:
 
 ## Blocking a first-run user
 
-- [x] **[BUG-061][P1][Creative Studio] Every newly created project fails its first Director attach** — found 2026-08-21 by creating a project in the running app; **reproduced deterministically** on a second, clean project
+- [ ] **[BUG-061][P1][Creative Studio] Every newly created project fails its first Director attach** — **REOPENED 2026-08-21** — found 2026-08-21 by creating a project in the running app; **reproduced deterministically** on a second, clean project
   - Actual: immediately after "Create project", the Director rail shows "Director setup was interrupted before the conversation could be attached to this project." over "Creative Studio could not read or save this workspace." The project's `briefConversationId` stays `null` at revision 1. Clicking **Retry** fixes it every time.
   - Root cause: the renderer dictates the conversation id and then hard-asserts the result — `packages/desktop/src/renderer/pages/studio/components/Workspace/DirectorRail/index.tsx:444` builds `{ type: 'aionrs', id: input.conversationId, … }`, and line 479 throws `STORAGE_ERROR_KEY` when `conversation.id !== input.conversationId`. **aioncore does not honour the requested id.** It mints its own 8-hex short id, so the assertion can never hold on a fresh create.
   - Wire evidence, one project's creation: `GET /api/conversations/f8c487cf_eb02_4c96_ac44_4434206ddc24` → **404**, immediately followed by `POST /api/conversations` → **201** with `conversation_id=8a49d04b`. The requested id is a 36-char underscore-uuid; the assigned id is 8 hex characters.
@@ -70,6 +70,51 @@ number is not hypothetical, it has happened. To keep it from happening here:
   - Net effect: a user cannot configure video generation without reading `adapters/openRouterVideoAdapter.ts`. The six valid ids appear nowhere in the product.
   - Fix direction: when an integration declares a closed model set, the Model field should _be_ that set rather than free text over the wrong catalogue.
   - **Fixed by `ecc43f718`** — the main process now projects integration-scoped OpenRouter video candidates and the renderer enforces that closed set with a non-creatable selector.
+
+  **REOPENED 2026-08-21 after verifying the fix by running it.** The id-equality assertion is gone and
+  claimant recovery now keys on `extra.studio_project_id`, both of which were right. The symptom is
+  unchanged: a brand-new project still shows the interrupted rail with `briefConversationId: null` at
+  revision 1, reproduced twice on `d16bce78e`.
+
+  **The cause moved rather than closed, and it is one line.** `hasExactDirectorMcpSnapshot` ends with
+
+  ```ts
+  return JSON.stringify(persistedDescriptor?.transport) === JSON.stringify(descriptor.transport);
+  ```
+
+  `JSON.stringify` is key-order sensitive. The freshly built descriptor serialises its transport in
+  insertion order — `type, command, args, env`, with env in `PROJECT_ID, PROJECT_DIR, PENDING_DIR,
+REFERENCE_PENDING_DIR, ROUTE_CATALOG` — while the same object read back through the conversation
+  store comes out **alphabetically sorted**: `args, command, env, type`, with env in alphabetical
+  order too. Same data, different string.
+
+  **Measured against the live app**, both on the object the store returns and the one the descriptor
+  call builds:
+  - every top-level transport field: **identical** (`topLevelDiffs: []`)
+  - every env value: **identical** (`envValueDiffs: []`)
+  - key order: **different** (`envKeyOrderIdentical: false`)
+  - `JSON.stringify(fresh) === JSON.stringify(persisted)`: **false**
+  - the same comparison with keys sorted recursively: **true**
+
+  Calling the exported predicates directly against live data isolates it exactly:
+  `hasExactDirectorMcpSnapshot(conversation, projectId)` returns **true**,
+  `hasExactDirectorMcpSnapshot(conversation, projectId, descriptor)` returns **false**, and
+  `hasExactDirectorAuthoritySnapshot` returns **true**. Only the descriptor comparison fails, and the
+  authority check — which compares the same seven fields individually rather than by serialisation —
+  passes. That contrast is the whole diagnosis: field-by-field agrees, stringify does not.
+
+  A trace of every Studio bridge call during a project creation confirms the consequence:
+  `getBriefSessionServer` ok, `conversation.create` returns `de6cc5fb`, `getDirectorSessionAuthority`
+  ok, and then nothing — `bindDirectorConversation` is never reached.
+
+  **Fix direction:** compare the transport structurally, or canonicalise key order before serialising.
+  The authority check beside it already does the former and is unaffected. Do not reintroduce the id
+  assertion; that part of the fix was correct.
+
+  **Same family as the original, one level down.** The first version assumed the backend would honour
+  a supplied id; this one assumes the backend preserves key order through a round trip. Both are
+  assumptions about a wire contract that unit fixtures satisfy and the real store does not — a
+  fixture built in insertion order can never fail this comparison.
 
 ## Correctness and honesty of failures
 
