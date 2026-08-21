@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { IProvider, ISessionMcpServer, TChatConversation, TProviderWithModel } from '@/common/config/storage';
 import type { StudioRendererProjectV2 } from '@/common/types/project/creativeStudioTypes';
+import { DIRECTOR_PRESET_RULES } from '@/renderer/pages/studio/components/Workspace/DirectorRail/openingTurn';
 
 const harness = vi.hoisted(() => ({
   conversations: [] as TChatConversation[],
@@ -305,6 +306,7 @@ const deferred = <T,>() => {
 describe('DirectorRail', () => {
   beforeEach(() => {
     forgetDirectorConversationStart();
+    window.sessionStorage.clear();
     vi.clearAllMocks();
     harness.conversations = [];
     harness.hasLoaded = true;
@@ -582,7 +584,7 @@ describe('DirectorRail', () => {
     ).toBe(false);
   });
 
-  it('waits for history, then creates and binds one exact conversation without an initial message', async () => {
+  it('waits for history, then creates and binds one exact conversation without sending directly', async () => {
     harness.hasLoaded = false;
     const rendered = render(<DirectorRail project={project()} />);
     expect(harness.create).not.toHaveBeenCalled();
@@ -609,6 +611,43 @@ describe('DirectorRail', () => {
       conversationId: 'conversation_director',
     });
     expect(harness.send).not.toHaveBeenCalled();
+  });
+
+  it('seeds the composer brief as the Director opening turn on a fresh create', async () => {
+    // The one question the product asks a new user — "What do you want to make?" — used to be
+    // answered into a field the Director could not see, leaving an empty rail that reads as broken.
+    render(<DirectorRail project={project()} />);
+    await screen.findByRole('textbox', { name: 'Director composer' });
+
+    const seeded = window.sessionStorage.getItem('aionrs_initial_message_conversation_director');
+    expect(seeded).not.toBeNull();
+    expect(JSON.parse(seeded!)).toEqual({ input: 'A small launch film.' });
+  });
+
+  it('does not re-ask a conversation it recovered rather than created', async () => {
+    // A recovered claimant has already been briefed. Seeding it again would repeat the brief and
+    // spend a second Director turn every time an attach fell back to recovery.
+    const recovered = exactConversation('47b03580');
+    harness.create.mockRejectedValueOnce(new Error('response lost after commit'));
+    harness.listConversations
+      .mockResolvedValueOnce({ items: [], total: 0, has_more: false })
+      .mockResolvedValueOnce({ items: [recovered], total: 1, has_more: false });
+    render(<DirectorRail project={project()} />);
+
+    await screen.findByRole('textbox', { name: 'Director composer' });
+    expect(window.sessionStorage.getItem('aionrs_initial_message_47b03580')).toBeNull();
+  });
+
+  it('says nothing when the project has no brief to say', async () => {
+    render(<DirectorRail project={project({ brief: '   ' })} />);
+    await screen.findByRole('textbox', { name: 'Director composer' });
+    expect(window.sessionStorage.getItem('aionrs_initial_message_conversation_director')).toBeNull();
+  });
+
+  it('carries the ask-first rules into the conversation it creates', async () => {
+    render(<DirectorRail project={project()} />);
+    await screen.findByRole('textbox', { name: 'Director composer' });
+    expect(harness.create.mock.calls[0][0].extra.preset_rules).toBe(DIRECTOR_PRESET_RULES);
   });
 
   it('waits for a complete claimant catalogue before an automatic fresh create', async () => {

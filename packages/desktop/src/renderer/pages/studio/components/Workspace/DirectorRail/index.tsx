@@ -36,6 +36,7 @@ import AionrsChat from '@/renderer/pages/conversation/platforms/aionrs/AionrsCha
 import { useAionrsModelSelection } from '@/renderer/pages/conversation/platforms/aionrs/useAionrsModelSelection';
 import { useGuidModelSelection } from '@/renderer/pages/guid/hooks/useGuidModelSelection';
 import styles from './DirectorRail.module.css';
+import { DIRECTOR_PRESET_RULES, seedDirectorOpeningTurn } from './openingTurn';
 
 type DirectorConversation = Extract<TChatConversation, { type: 'aionrs' }>;
 
@@ -74,6 +75,8 @@ const retryPolicyForClaimantPolicy = (policy?: DirectorClaimantPolicy): Director
 type StartInput = {
   projectId: string;
   projectName: string;
+  /** The composer's sentence, sent as the conversation's opening turn on a fresh create. */
+  brief: string;
   model?: TProviderWithModel;
   candidate?: DirectorConversation;
   conversationId?: string;
@@ -555,6 +558,7 @@ const recoverDirectorClaimant = async (
 const createDirectorConversation = async (input: {
   projectId: string;
   projectName: string;
+  brief: string;
   model: TProviderWithModel;
   conversationId: string;
   claimantPolicy: DirectorClaimantPolicy;
@@ -580,6 +584,7 @@ const createDirectorConversation = async (input: {
     model: input.model,
     extra: {
       studio_project_id: input.projectId,
+      preset_rules: DIRECTOR_PRESET_RULES,
       workspace: '',
       custom_workspace: false,
       selected_mcp_server_ids: [],
@@ -587,6 +592,7 @@ const createDirectorConversation = async (input: {
     },
   };
   let conversation: unknown = null;
+  let created = false;
   if (input.claimantPolicy !== 'bypass') {
     const recovery = await recoverDirectorClaimant(input.projectId, descriptor);
     if (recovery.kind === 'trusted') conversation = recovery.conversation;
@@ -603,6 +609,7 @@ const createDirectorConversation = async (input: {
   if (conversation === null) {
     try {
       conversation = await ipcBridge.conversation.create.invoke(request);
+      created = true;
     } catch (error) {
       const recovery = await recoverDirectorClaimant(input.projectId, descriptor);
       if (recovery.kind === 'trusted') conversation = recovery.conversation;
@@ -631,6 +638,8 @@ const createDirectorConversation = async (input: {
   if (!hasExactDirectorMcpSnapshot(typedConversation, input.projectId, descriptor)) {
     throw new DirectorConversationStartError(DIRECTOR_SESSION_VERIFICATION_KEY, 'require-claimant');
   }
+  // After validation, so a conversation about to be rejected is never briefed.
+  if (created) seedDirectorOpeningTurn(typedConversation.id, input.brief);
   return typedConversation;
 };
 
@@ -685,6 +694,7 @@ const startDirectorConversation = async (input: StartInput): Promise<StartOutcom
       conversation = await createDirectorConversation({
         projectId: input.projectId,
         projectName: input.projectName,
+        brief: input.brief,
         model: input.model,
         conversationId: input.conversationId ?? uuid(36),
         claimantPolicy: input.claimantPolicy ?? 'scan-before-create',
@@ -1042,6 +1052,7 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({
       {
         projectId: project.id,
         projectName: project.name,
+        brief: project.brief,
         model: current_model,
         expectedPriorBinding: null,
         currentAuthority: () => {
@@ -1085,6 +1096,7 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({
         {
           projectId: project.id,
           projectName: project.name,
+          brief: project.brief,
           model: current_model,
           candidate,
           claimantPolicy,
