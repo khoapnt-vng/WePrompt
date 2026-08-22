@@ -96,7 +96,7 @@ import {
   type StudioGenerationRouteCatalog,
   type StudioProviderResolver,
 } from '../providerResolver';
-import { formatStudioJobLog } from '../jobManager';
+import { formatStudioJobLog, logStudioConditioningFrameFailure } from '../jobManager';
 import {
   CreativeStudioStoreError,
   StudioProjectConfirmationError,
@@ -1976,8 +1976,10 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
               });
               if (verification !== null) verifiedReadyExtractions.set(verification.extractionId, verification);
             }
-          } catch {
-            // The durable failed extraction and waiting jobs are the recoverable result.
+          } catch (error) {
+            // The durable failed extraction and waiting jobs are the recoverable result, but the
+            // reason for the failure lives only in the thrown error, so it is recorded here.
+            logStudioConditioningFrameFailure(committed.id, extractionId, error);
           }
         }
       }

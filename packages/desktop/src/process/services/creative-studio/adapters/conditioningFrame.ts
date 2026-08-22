@@ -34,12 +34,22 @@ export type StudioConditioningFrameFailureCode = 'decode_failed' | 'source_missi
 export class StudioConditioningFrameError extends Error {
   readonly code: StudioConditioningFrameFailureCode;
 
-  constructor(code: StudioConditioningFrameFailureCode) {
+  /**
+   * The decoder's own words, when the failing step produced any. `decode_failed` names the step but
+   * not the reason; ffmpeg's one line of stderr is usually the entire diagnosis.
+   */
+  readonly detail?: string;
+
+  constructor(code: StudioConditioningFrameFailureCode, detail?: string) {
     super(code);
     this.name = 'StudioConditioningFrameError';
     this.code = code;
+    if (detail !== undefined) this.detail = detail;
   }
 }
+
+/** Enough for ffmpeg's diagnosis, small enough that one failure stays one log line. */
+const DECODE_DIAGNOSIS_LIMIT = 512;
 
 export type StudioConditioningFrameSpawn = (command: string, args: string[], options: SpawnOptions) => ChildProcess;
 
@@ -271,12 +281,21 @@ const runLocalDecode = (
           'image2pipe',
           'pipe:4',
         ],
-        { windowsHide: true, stdio: ['ignore', 'ignore', 'ignore', source.handle.fd, destination.handle.fd] }
+        { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe', source.handle.fd, destination.handle.fd] }
       );
     } catch {
       reject(new StudioConditioningFrameError('decode_failed'));
       return;
     }
+
+    // Keep draining past the cap: an unread stderr pipe would eventually block the decoder itself.
+    // `close` fires only once the stdio streams are done, so the diagnosis is complete when it lands.
+    let diagnosis = '';
+    child.stderr?.on('data', (chunk: Buffer | string) => {
+      if (diagnosis.length >= DECODE_DIAGNOSIS_LIMIT) return;
+      diagnosis = (diagnosis + String(chunk)).slice(0, DECODE_DIAGNOSIS_LIMIT);
+    });
+    child.stderr?.on('error', () => undefined);
 
     let settled = false;
     const finish = (work: () => void): void => {
@@ -284,11 +303,13 @@ const runLocalDecode = (
       settled = true;
       work();
     };
-    child.once('error', () => finish(() => reject(new StudioConditioningFrameError('decode_failed'))));
+    const decodeFailed = (): StudioConditioningFrameError =>
+      new StudioConditioningFrameError('decode_failed', diagnosis.trim() || undefined);
+    child.once('error', () => finish(() => reject(decodeFailed())));
     child.once('close', (code, signal) =>
       finish(() => {
         if (code === 0 && signal === null) resolve();
-        else reject(new StudioConditioningFrameError('decode_failed'));
+        else reject(decodeFailed());
       })
     );
   });

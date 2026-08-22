@@ -7,6 +7,7 @@
 import type { ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import { writeSync } from 'node:fs';
 import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -50,6 +51,18 @@ const successfulSpawn = (bytes = 'decoded-frame'): StudioConditioningFrameSpawn 
     const child = makeChild();
     if (bytes.length > 0) writeSync(destinationFd(options), Buffer.from(bytes));
     queueMicrotask(() => child.emit('close', 0, null));
+    return child;
+  });
+
+const failingSpawn = (stderrText: string): StudioConditioningFrameSpawn =>
+  vi.fn(() => {
+    const child = makeChild();
+    const stderr = new PassThrough();
+    Object.assign(child, { stderr });
+    queueMicrotask(() => {
+      stderr.end(Buffer.from(stderrText));
+      child.emit('close', 1, null);
+    });
     return child;
   });
 
@@ -143,7 +156,31 @@ describe('conditioning frame extraction', () => {
       'pipe:4',
     ]);
     expect(options.windowsHide).toBe(true);
-    expect(options.stdio).toEqual(['ignore', 'ignore', 'ignore', expect.any(Number), expect.any(Number)]);
+    expect(options.stdio).toEqual(['ignore', 'ignore', 'pipe', expect.any(Number), expect.any(Number)]);
+  });
+
+  it("carries the decoder's own diagnosis on the failure it raises", async () => {
+    const directory = await makeDirectory();
+    const input = baseInput(directory, { allowProviderLastFrame: false });
+    await writeFile(input.sourcePath, 'video');
+    const spawnProcess = failingSpawn('stream 0, offset 0x54dc: partial file');
+
+    await expect(createStudioConditioningFrameExtractor({ spawnProcess })(input)).rejects.toMatchObject({
+      code: 'decode_failed',
+      detail: 'stream 0, offset 0x54dc: partial file',
+    });
+  });
+
+  it('bounds the diagnosis it carries, so a chatty decoder cannot flood the log', async () => {
+    const directory = await makeDirectory();
+    const input = baseInput(directory, { allowProviderLastFrame: false });
+    await writeFile(input.sourcePath, 'video');
+    const spawnProcess = failingSpawn('x'.repeat(10_000));
+
+    const failure = await createStudioConditioningFrameExtractor({ spawnProcess })(input).catch(
+      (error: unknown) => error
+    );
+    expect((failure as { detail?: string }).detail!.length).toBeLessThanOrEqual(512);
   });
 
   it("reads the source through a seekable descriptor, never ffmpeg's non-seekable pipe protocol", async () => {

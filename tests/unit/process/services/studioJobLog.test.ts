@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { formatStudioJobLog } from '@process/services/creative-studio/jobManager';
+import { formatStudioJobLog, logStudioConditioningFrameFailure } from '@process/services/creative-studio/jobManager';
+import { StudioConditioningFrameError } from '@process/services/creative-studio/adapters/conditioningFrame';
 
 describe('the studio job log line', () => {
   it('names the event and its identifiers', () => {
@@ -43,5 +44,47 @@ describe('the studio job log line', () => {
 
   it('renders an event with no fields without trailing space', () => {
     expect(formatStudioJobLog('drained', {})).toBe('[CreativeStudio] drained');
+  });
+});
+
+describe('conditioning frame failure logging', () => {
+  const warn = (): ReturnType<typeof vi.spyOn> => vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("names the extraction and repeats the decoder's own diagnosis", () => {
+    const spy = warn();
+
+    logStudioConditioningFrameFailure(
+      'project_1',
+      'frame_1',
+      new StudioConditioningFrameError('decode_failed', 'stream 0, offset 0x54dc: partial file')
+    );
+
+    expect(spy).toHaveBeenCalledWith(
+      '[CreativeStudio] conditioning_frame_failed projectId=project_1 extractionId=frame_1 code=decode_failed detail=stream 0, offset 0x54dc: partial file'
+    );
+  });
+
+  it('still names the extraction when the failure carries no diagnosis', () => {
+    const spy = warn();
+
+    logStudioConditioningFrameFailure('project_1', 'frame_1', new StudioConditioningFrameError('source_missing'));
+
+    expect(spy).toHaveBeenCalledWith(
+      '[CreativeStudio] conditioning_frame_failed projectId=project_1 extractionId=frame_1 code=source_missing'
+    );
+  });
+
+  it('reports an unrecognised throw rather than staying silent about it', () => {
+    const spy = warn();
+
+    logStudioConditioningFrameFailure('project_1', 'frame_1', 'not an error');
+
+    expect(spy).toHaveBeenCalledWith(
+      '[CreativeStudio] conditioning_frame_failed projectId=project_1 extractionId=frame_1 code=unknown'
+    );
   });
 });

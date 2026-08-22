@@ -74,6 +74,18 @@ export const formatStudioJobLog = (
   return body.length === 0 ? `[CreativeStudio] ${event}` : `[CreativeStudio] ${event} ${body}`;
 };
 
+/**
+ * A conditioning-frame failure stalls its entire chain, and it used to do so in silence: both call
+ * sites discard the error, and the persisted code names the step rather than the reason. The
+ * decoder's own line is usually the whole diagnosis, so it travels on the error and is repeated here.
+ */
+export const logStudioConditioningFrameFailure = (projectId: string, extractionId: string, error: unknown): void => {
+  const raw = error as { code?: unknown; detail?: unknown } | null;
+  const code = typeof raw?.code === 'string' ? raw.code : 'unknown';
+  const detail = typeof raw?.detail === 'string' ? raw.detail : undefined;
+  console.warn(formatStudioJobLog('conditioning_frame_failed', { projectId, extractionId, code, detail }));
+};
+
 const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'cancelled']);
 const POLL_BASE_DELAYS_MS = [2_000, 4_000, 8_000] as const;
 const MAX_POLL_DELAY_MS = 15_000;
@@ -1644,8 +1656,10 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
           const verification = await deps.mediaStore.verifyConditioningFrameV2({ projectId, extractionId });
           if (verification !== null) verifiedReadyExtractions.set(verification.extractionId, verification);
         }
-      } catch {
-        // The durable failed extraction remains visible to the explicit provider-free retry action.
+      } catch (error) {
+        // The durable failed extraction remains visible to the explicit provider-free retry action,
+        // but nothing else records why it failed, so the chain would otherwise stall unexplained.
+        logStudioConditioningFrameFailure(projectId, extractionId, error);
       }
     }
     if (verifiedReadyExtractions.size > 0 && !disposed) {
