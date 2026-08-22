@@ -380,6 +380,15 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **How a subject actually reaches a film:** a `video_take` request may not carry a Brief reference — `createStudioGenerationRequestTemplate` throws if it does. Only a `seed_still` can. So one Cast reference on a chain's head Shot propagates the subject through every Shot in that chain by conditioning, which is why the picker is per-Shot but the reference is per-project.
   - **Caught by an existing test, not by me:** the first wiring read `bound?.constraints.maxConditioningImages`, which guards the route but not its `constraints` — a field the catalogue can omit. Absent capacity is now unknown rather than zero, because zero would wrongly claim the engine refuses references outright.
   - **Not yet demonstrated:** Slice 5's acceptance is _two Shots in one Beat visibly sharing a subject_. The panel is live and its import reaches the real file dialog — verified in the running app, where clicking Add left the promise pending and both buttons correctly disabled — but choosing a file needs a native dialog that cannot be driven from here, so the generated half of the round trip is still unproven.
+- [ ] **[BUG-108][P2][Creative Studio] The Studio coverage gate is red, and nothing runs it** — measured 2026-08-22
+  - `bun run test:coverage:creative-studio` enforces per-file thresholds of 80% lines and 80% branches over a reviewed manifest of executable Studio files. It fails on three:
+    - `StudioPage.tsx` — branches **77.31%**
+    - `Views/WorkspaceControls.tsx` — lines **66.66%**
+    - `common/adapter/native/payloadSchemas.ts` — branches **76.66%**
+  - **Nothing invokes it.** Not `just push`, which runs lint → format → typecheck → i18n → test; not any workflow in `.github/workflows/`. It exists only as a package script someone has to remember. That is why it has been red without anyone finding out.
+  - **Whose it is, measured rather than assumed.** All three fail identically at `36f434918`, early on 2026-08-22 immediately after the inherited red branch was repaired, and again at `4029e54f7` before the Cut/Beat playback work landed. So it is inherited debt: neither the playback editors nor the MVP slices introduced it.
+  - One honest exception: `StudioPage.tsx` branches drifted **78.31% → 77.31%** across the day's work. Already failing, made a point worse.
+  - The two things worth deciding are separate. Whether to raise coverage on those three files is ordinary work. Whether a gate nobody runs should exist at all is the real question — an unrun gate is worse than no gate, because the manifest comment tells every later task to maintain a list whose failures nobody sees.
 
 ## Correctness and honesty of failures
 
