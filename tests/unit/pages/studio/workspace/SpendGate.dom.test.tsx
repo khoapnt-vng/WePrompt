@@ -50,6 +50,7 @@ import {
   majorUnitsToMinorUnits,
   projectWorkspace,
   selectedSpendGateQuote,
+  filmRenderBatchShotIds,
   selectionGateDraft,
   spendGateReducer,
   useWorkspaceDrafts,
@@ -431,6 +432,44 @@ const lockedWorkspaceStatus = (): StudioRendererWorkspaceStatusV2 => ({
       blockers: [{ shotId: 'shot_1', code: 'bound_nonterminal_request' }],
     },
   ],
+});
+
+describe('the largest legal render batch', () => {
+  it('takes one shot per chain segment, because the second cannot start before the first exists', () => {
+    // beat_1 chains shot_1 -> shot_2, beat_2 holds shot_3. Rendering shot_2 now would condition it
+    // on a last frame shot_1 has not produced yet, so the ceiling is one shot per segment.
+    const project = makeProject();
+    const batch = filmRenderBatchShotIds({
+      project,
+      projection: projectWorkspace(project, readyWorkspaceStatus(), readyChainStatus(3)),
+    });
+    expect(batch).toEqual(['shot_1', 'shot_3']);
+  });
+
+  it('honours the per-request shot cap', () => {
+    const project = makeProject();
+    const batch = filmRenderBatchShotIds({
+      project,
+      projection: projectWorkspace(project, readyWorkspaceStatus(), readyChainStatus(3)),
+      maxShots: 1,
+    });
+    expect(batch).toEqual(['shot_1']);
+  });
+
+  it('renders nothing until both revision-matched status snapshots are ready', () => {
+    // Same fail-closed rule the draft builder uses: an unready projection cannot be reasoned about.
+    const project = makeProject();
+    expect(filmRenderBatchShotIds({ project, projection: projectWorkspace(project, null, null) })).toEqual([]);
+  });
+
+  it('returns shots in film order, so the batch reads the way the film does', () => {
+    const project = makeProject();
+    const batch = filmRenderBatchShotIds({
+      project,
+      projection: projectWorkspace(project, readyWorkspaceStatus(), readyChainStatus(3)),
+    });
+    expect(batch).toEqual([...batch].sort((left, right) => (left < right ? -1 : 1)));
+  });
 });
 
 describe('spend gate draft graph', () => {

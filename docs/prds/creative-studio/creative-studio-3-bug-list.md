@@ -269,13 +269,17 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - The same change adds standing rules to the Director, at the owner's direction, telling it to ask before it builds rather than storyboard from one sentence.
   - **Verified live**, not just in tests: a new project seeded `A 20 second film about a courier who delivers a package to the wrong door`, the runtime cleared the seed key and set its processed marker, the Director read the project, and answered with three questions — who it is for, whether the wrong door plays as comedy or suspense, and what is in the package — instead of building. It also noticed the brief says 20 seconds while the project target is 18.
 
-- [ ] **[BUG-090][P2][Creative Studio] A new project's first Director action stops at a permission prompt** — found 2026-08-21 while verifying BUG-089 live
+- [x] **[BUG-090][P2][Creative Studio] A new project's first Director action stops at a permission prompt** — found 2026-08-21 while verifying BUG-089 live
   - With the opening turn now sent, the Director's first move is `read_storyboard`, and the rail immediately shows **"I'd like to run a command · MCP aionui-creative-studio/read_storyboard · Yes, allow once / Yes, allow always / No (esc)"**. The turn sits unanswered until someone clicks; observed blocked for over three minutes.
   - So the first thing a new user sees, on the first screen, is a consent dialog for a **read-only** tool on a **built-in** server they did not install.
   - This is not caused by the opening turn — it is uncovered by it. Before, the Director never acted unprompted on a fresh project, so nobody reached the prompt this early.
   - **What is not established:** whether `aionui-creative-studio` is supposed to be in AionCore's `AUTO_APPROVE_MCP_SERVERS`. `builtinCapabilities.ts:224` documents that list as matching on the bare server name and selecting AllowAlways without prompting, and reserves every built-in name — but it reserves them for two stated reasons, and being reserved does not prove being auto-approved. The running AionCore prompts. Either the list does not contain the Studio server, or the dev binary lags the pinned version. **Check against the pinned AionCore before treating either as the cause.**
   - Worth separating from the fix: if reads were auto-approved, the whole first exchange would be silent and immediate, which is what the design implies.
-  - **Root cause and unsafe shortcut ruled out 2026-08-22; BUG-090 remains open on the backend contract.** The Director is an Aionrs conversation, so AionCore's ACP-only `AUTO_APPROVE_MCP_SERVERS` is not on this path. Aionrs groups every MCP call under one `mcp` permission category, making “always allow” authorize mutating Studio tools too. Automating “allow once” in the renderer is also unsafe: the pinned confirmation endpoint resolves by `call_id`, does not atomically compare the expected message, server, tool and turn, and can accept a stale response after the pending call changes. Renderer-side server-name reservation is not an authority boundary because direct MCP registry writes bypass it. Correct closure needs structured trusted server/tool identity, an identity-bound atomic confirmation operation, exact read-only tool policy and defined restart recovery in AionCore/Aionrs, followed by a verified desktop pin bump; a text- or name-matched auto-click must not be shipped.
+  - **Root cause and unsafe shortcut ruled out 2026-08-22.** The Director is an Aionrs conversation, so AionCore's ACP-only `AUTO_APPROVE_MCP_SERVERS` is not on this path. Aionrs groups every MCP call under one `mcp` permission category, making “always allow” authorize mutating Studio tools too. Automating “allow once” in the renderer is also unsafe: the pinned confirmation endpoint resolves by `call_id`, does not atomically compare the expected message, server, tool and turn, and can accept a stale response after the pending call changes. Renderer-side server-name reservation is not an authority boundary because direct MCP registry writes bypass it. This rules out a text- or name-matched auto-click; if the accepted prompt is ever reopened, a robust silent path belongs in an identity-bound backend permission contract.
+  - **Investigated 2026-08-22, and there is no lever in this repo.** `ISessionMcpServer` is only `id | name | transport`, so a descriptor cannot carry approval. `ICreateConversationParams` has no permission field — `permission` exists solely on `assistant.conversation_overrides`, and the Director is created without an assistant. The desktop writes no aioncore config. "Allow always" is a `confirm_key` answer that aioncore persists on its own side, with nothing here to pre-seed.
+  - The 0.1.55 binary does expose `tools.auto_approve` and `tools.allow_list` under `ToolsConfig`, plus a `PermissionConfig` with `allow` and `deny`. So approval **is** configurable — just not from the desktop. None of the built-in server names appear as literals in the binary, so a hardcoded `AUTO_APPROVE_MCP_SERVERS` containing the Studio server does not exist in this build.
+  - **Closed 2026-08-22 as accepted, not fixed.** The owner's call: one click per project on a read-only tool is a security prompt doing its job, and the alternatives all cost more than they save. Pre-answering it from the rail would grant consent on the user's behalf, and the underlying mechanism keys on the bare server **name** — which a user can claim by importing a server under it, so such an allowlist would not really be Studio-scoped. Giving the Director an assistant record would work through a supported path but drags in model, skill and MCP override semantics that would then need pinning.
+  - Reopen if pilot users trip on it. The correct fix, when it is worth making, is in the AionCore fork's tools config, not here.
 
 ## Correctness and honesty of failures
 
@@ -329,6 +333,11 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - Missing against the ruling: the gate itself, the still cost quoted before the toggle, the still actually being produced on the image route, and the same treatment on re-join.
   - One existing guard is worth keeping in view: `directorCommandContracts.ts:297` already classifies `set_hard_cut` as `proposal`, so the Director cannot sever a chain on its own. The gap is the human's click, not the Director's.
   - **Bounded fail-closed containment fixed 2026-08-22; BUG-095 remains open for the atomic paid gate.** The Beat panel preserves the canonical checked or unchecked hard-cut state but now marks changes unavailable, with localized copy explaining that a reviewed estimate for replacement media must come first. The renderer no longer exposes a free `set_hard_cut` action, new Director commands cannot propose it, and the mutation authority rejects direct toggles, coverage-authored hard-cut transitions and exact undo reversals before persistence. A valid pre-fix pending proposal remains readable but cannot be accepted or publish decision/project bytes. This containment prevents another unquoted chain change; it does not supply the required still, replacement video, mandatory cascade, quote confirmation or re-join workflow, so the bug must not be closed.
+
+- [ ] **[BUG-096][P3][Creative Studio] The Brief's route pickers show an opaque choice id where a model name belongs** — found 2026-08-22 verifying Slice 1a
+  - With both routes bound, the pickers read `choice_000290ca7fd86013f59825d5` and `choice_442687563c09dd91be3844cb`. A person cannot tell which model their film will be rendered with, or whether the two are even the same provider.
+  - It matters more now than it did: before auto-binding, a user picked the route themselves and knew what they chose. A route bound on their behalf is only accountable if it says what it bound.
+  - The catalogue entry already carries `providerName` and `model` beside `choiceId`, so the label exists — it is the display that falls back to the id.
 
 ## Coverage and polish
 
@@ -612,6 +621,27 @@ fit-to-target reading in the app is advisory, with one carved exception — a be
 renders a slate `target` seconds long, the only place an authored number reaches the renderer.
 
 ## Verification notes
+
+### Verified live 2026-08-22 — Slice 1a, connection provisioning
+
+Driven in an instance that had exactly the failure it targets: one provider (OpenRouter) configured,
+no Studio connection bound, and both route pickers reading `Selection required` with zero options.
+
+Creating one project from the composer now produces:
+
+| Field                            | Before               | After                             |
+| -------------------------------- | -------------------- | --------------------------------- |
+| Image route                      | `Selection required` | `choice_000290ca7fd86013f59825d5` |
+| Video route                      | `Selection required` | `choice_442687563c09dd91be3844cb` |
+| `Selection required` occurrences | 2                    | **0**                             |
+
+Both cliffs are gone in one pass: the connection was provisioned and the routes were bound, without a
+visit to Settings.
+
+**Not verified:** that the chosen video route is first-frame-capable. The picker would not open its
+option list under automation, so the capability behind that choice id was not read. The unit tests
+prove the picker prefers `supportsFirstFrame` when more than one video route exists; whether more
+than one existed here is unknown.
 
 ### Verified live 2026-08-22 — the Table and Board round
 

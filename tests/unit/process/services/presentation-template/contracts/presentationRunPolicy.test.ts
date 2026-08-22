@@ -256,6 +256,15 @@ export const presentationRunFailureSchema = z.union([
     z.literal('grant_validation'),
     strictDetails.grantId
   ),
+  // A replayed grant carries one detail the rest of grant_validation does not: whether the queue
+  // was already unbound when the revoke landed. Mirrors PresentationRunFailure, which split this
+  // code out of the group for exactly that reason.
+  failureEnvelope(
+    z.literal('SOURCE_GRANT_REPLAYED'),
+    false,
+    z.literal('grant_validation'),
+    z.object({ grantId: z.string().optional(), queueUnboundAtRevoke: z.literal(true).optional() }).strict()
+  ),
   failureEnvelope(
     z.literal('SOURCE_GRANT_REPLAYED'),
     false,

@@ -4,8 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Spin } from '@arco-design/web-react';
+import { Button, Spin } from '@arco-design/web-react';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { pickDefaultRoutes } from '@/common/types/project/creativeStudioDefaultRoutes';
+import { planStudioConnections } from '@/common/types/project/creativeStudioConnectionPlan';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
@@ -34,6 +36,7 @@ import {
   countStoredStudioRuleDrafts,
   countStoredWorkspaceDrafts,
   projectWorkspace,
+  filmRenderBatchShotIds,
   selectionGateDraft,
   useSpendGate,
   useWorkspaceDrafts,
@@ -251,6 +254,27 @@ const StudioProjectPage: React.FC<{
   }, [refetchProject, refetchReferences, refetchWorkspace]);
   const spendGate = useSpendGate({ onConfirmed: afterPaidConfirm });
   const spendGateLocked = spendGate.state.phase === 'confirming' || spendGate.state.phase === 'quote_in_use';
+
+  /**
+   * The bar's Render action. Submits the largest batch the chain permits — one shot per segment —
+   * rather than the whole film, because a shot cannot be generated before the one it follows. It is
+   * pressed again as each wave lands, which is what makes the Beat the unit of parallelism.
+   */
+  const renderFilm = useCallback((): void => {
+    const current = projectRef.current;
+    if (current === null || projection === null || spendGateLocked) return;
+    const shotIds = filmRenderBatchShotIds({ project: current, projection });
+    if (shotIds.length === 0) {
+      setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.renderFilmEmpty');
+      return;
+    }
+    const draft = selectionGateDraft({ project: current, projection, orderedShotIds: shotIds });
+    if (draft === null) {
+      setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
+      return;
+    }
+    spendGate.open(draft);
+  }, [projection, setActionErrorMessageKey, spendGate.open, spendGateLocked]);
   const generationDraftsBlockReview =
     activeRuleDraftDirtyCount > 0 || hasGenerationAffectingWorkspaceDrafts(drafts.dirtyKeys);
   const statusBlocksReview = projection === null || !projection.workspaceStatusReady || !projection.chainStatusReady;
@@ -358,6 +382,100 @@ const StudioProjectPage: React.FC<{
     },
     [runWorkspaceCommitAtRevision]
   );
+
+  /**
+   * A project is created with both route ids null, so a finished script would otherwise meet a
+   * Render button that does nothing until someone finds the Brief form. Bind one route of each kind
+   * the first time this project has both a record and a catalogue.
+   *
+   * Once per project per session: if the commit fails we do not retry, because a loop that rewrites
+   * on every render is worse than a project the user binds by hand.
+   */
+  /**
+   * A Studio route needs a connection binding, not just a configured provider, and until one exists
+   * the catalogue is empty — so the effect below has nothing to bind and a finished script has
+   * nothing to render with. The only way through was a visit to Settings, which the product should
+   * not require of someone who has already configured a provider.
+   *
+   * Each attempt is a live validation probe, so the plan is budgeted and we stop as soon as a kind
+   * is satisfied. Runs once per session, and never reconsiders a binding someone chose.
+   */
+  const provisionedConnectionsRef = useRef(false);
+  useEffect(() => {
+    if (routeCatalog === null || provisionedConnectionsRef.current) return;
+    if (routeCatalog.image.options.length > 0 || routeCatalog.video.options.length > 0) return;
+    provisionedConnectionsRef.current = true;
+    void (async () => {
+      try {
+        await provisionStudioConnections();
+      } catch {
+        // Provisioning is a convenience over a catalogue that may not exist yet. A failure leaves
+        // the user exactly where they were — binding a model in Settings — and must never take the
+        // workspace down with it. Swallowed deliberately, but not silently inside the loop below:
+        // everything that can fail is inside this one boundary.
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.routeCatalogRequired');
+      }
+    })();
+
+    async function provisionStudioConnections(): Promise<void> {
+      const [candidates, inventory] = await Promise.all([
+        ipcBridge.creativeStudio.listConnectionCandidates.invoke(),
+        ipcBridge.creativeStudio.listConnections.invoke(),
+      ]);
+      if (candidates.ok === false || inventory.ok === false) return;
+      const plan = planStudioConnections({
+        candidates: candidates.data,
+        integrations: inventory.data.integrations,
+        existing: inventory.data.connections,
+      });
+      const satisfied = new Set<string>();
+      for (const attempt of plan) {
+        if (satisfied.has(attempt.kind)) continue;
+        const request = {
+          providerId: attempt.providerId,
+          integrationId: attempt.integrationId,
+          model: attempt.model,
+        };
+        const validation = await ipcBridge.creativeStudio.validateConnection.invoke(request);
+        if (validation.ok === false) continue;
+        const saved = await ipcBridge.creativeStudio.saveConnection.invoke(request);
+        if (saved.ok) satisfied.add(attempt.kind);
+      }
+      if (satisfied.size === 0) return;
+      // Bind from a freshly read catalogue rather than waiting for the shared one to refresh, so a
+      // project is generable on the same pass that made it possible.
+      const current = projectRef.current;
+      if (current === null) return;
+      const refreshed = await ipcBridge.creativeStudio.listRoutes.invoke({ projectId: current.id });
+      if (refreshed.ok === false) return;
+      const picked = pickDefaultRoutes([...refreshed.data.image.options, ...refreshed.data.video.options]);
+      if (picked.imageRouteId === null && picked.videoRouteId === null) return;
+      await runWorkspaceCommit((project) =>
+        ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+          projectId: project.id,
+          expectedRevision: project.revision,
+          operations: [{ kind: 'set_routes', imageRouteId: picked.imageRouteId, videoRouteId: picked.videoRouteId }],
+        })
+      );
+    }
+  }, [routeCatalog, runWorkspaceCommit]);
+
+  const autoBoundProjectRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (project === null || routeCatalog === null) return;
+    if (project.imageRouteId !== null || project.videoRouteId !== null) return;
+    if (autoBoundProjectRef.current === project.id) return;
+    const picked = pickDefaultRoutes([...routeCatalog.image.options, ...routeCatalog.video.options]);
+    if (picked.imageRouteId === null && picked.videoRouteId === null) return;
+    autoBoundProjectRef.current = project.id;
+    void runWorkspaceCommit((current) =>
+      ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+        projectId: current.id,
+        expectedRevision: current.revision,
+        operations: [{ kind: 'set_routes', imageRouteId: picked.imageRouteId, videoRouteId: picked.videoRouteId }],
+      })
+    );
+  }, [project, routeCatalog, runWorkspaceCommit]);
 
   const runWorkspaceExclusive = useCallback(
     async <Result,>(action: () => Promise<Result>): Promise<Result | null> => {
@@ -1363,6 +1481,11 @@ const StudioProjectPage: React.FC<{
         project={project}
         activeView={activeView}
         stats={projection === null ? undefined : buildStudioBarStats(projection)}
+        renderAction={
+          <Button type='primary' disabled={workspacePending || spendGateLocked} onClick={renderFilm}>
+            {t('conversation.creativeStudio.workspace.controls.renderFilm')}
+          </Button>
+        }
         projectMenu={
           projection === null ? undefined : (
             <WorkspaceProjectMenu

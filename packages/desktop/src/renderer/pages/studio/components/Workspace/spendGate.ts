@@ -301,6 +301,66 @@ const validGenerationChoice = (
   (choice.referenceAssetId === null ||
     (choice.purpose === 'seed_still' && /^[A-Za-z0-9_-]{1,256}$/.test(choice.referenceAssetId)));
 
+/**
+ * The largest batch that can legally be submitted at once.
+ *
+ * Rendering everything is impossible by construction: a shot conditions on the previous shot's last
+ * frame, so two shots in the same chain segment cannot be generated together — the second has
+ * nothing to start from until the first exists. One shot per segment is therefore the ceiling, which
+ * is what makes the Beat the unit of parallelism.
+ *
+ * A segment with work already in flight is skipped whole. Submitting its next shot would queue a
+ * generation against a first frame that is still being produced.
+ */
+export const filmRenderBatchShotIds = (input: {
+  project: StudioRendererProjectV2;
+  projection: WorkspaceProjection;
+  maxShots?: number;
+}): string[] => {
+  if (input.projection.projectId !== input.project.id || input.projection.projectRevision !== input.project.revision) {
+    return [];
+  }
+  if (!input.projection.workspaceStatusReady || !input.projection.chainStatusReady) return [];
+
+  const locations = activeShotLocations(input.project);
+  const projected = new Map(input.projection.activeBeats.flatMap((beat) => beat.shots.map((shot) => [shot.id, shot])));
+  const cap = input.maxShots ?? STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST;
+
+  const segments = new Map<
+    string,
+    { shotId: string; shotIndex: number; segmentHeadIndex: number; filmIndex: number }[]
+  >();
+  for (const [shotId, location] of locations) {
+    const key = `${location.beatId}\0${location.segmentHeadIndex}`;
+    const bucket = segments.get(key) ?? [];
+    bucket.push({ shotId, ...location });
+    segments.set(key, bucket);
+  }
+
+  const batch: { shotId: string; filmIndex: number }[] = [];
+  for (const bucket of segments.values()) {
+    const ordered = bucket.toSorted((left, right) => left.shotIndex - right.shotIndex);
+    if (
+      ordered.some(({ shotId }) => {
+        const shot = projected.get(shotId);
+        return shot !== undefined && (shot.videoGenerationInFlight || shot.seedGenerationInFlight);
+      })
+    ) {
+      continue;
+    }
+    const next = ordered.find(({ shotId, shotIndex, segmentHeadIndex }) => {
+      const choice = choiceForShot(input.project, input.projection, shotId, shotIndex === segmentHeadIndex);
+      return choice !== null && !(choice.purpose === 'seed_still' && shotIndex !== segmentHeadIndex);
+    });
+    if (next !== undefined) batch.push({ shotId: next.shotId, filmIndex: next.filmIndex });
+  }
+
+  return batch
+    .toSorted((left, right) => left.filmIndex - right.filmIndex)
+    .slice(0, cap)
+    .map(({ shotId }) => shotId);
+};
+
 export const selectionGateDraft = (input: {
   project: StudioRendererProjectV2;
   projection: WorkspaceProjection;
