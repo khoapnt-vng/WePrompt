@@ -208,6 +208,70 @@ describe('OpenRouter video generation adapter', () => {
     );
   });
 
+  it('surfaces an unrecognised provider tag when it is identifier-shaped, and still never the message', async () => {
+    const emitHttpErrorEvidence = vi.fn();
+    const fetch = vi.fn(async () =>
+      response(400, {
+        error: {
+          code: 'invalid_first_frame_dimensions',
+          message: 'prompt=private scarf text key=sk-or-secret url=https://private.example',
+          metadata: { error_type: 'first_frame_rejected', provider_code: 'seedance_bad_input' },
+        },
+      })
+    );
+    const adapter = createOpenRouterVideoAdapter({
+      fetch,
+      catalog: await admittedCatalog(),
+      emitHttpErrorEvidence,
+    });
+
+    await expect(adapter.submit(request, provider(), new AbortController().signal)).rejects.toMatchObject({
+      code: 'unknown',
+    });
+
+    await vi.waitFor(() => expect(emitHttpErrorEvidence).toHaveBeenCalledOnce());
+    expect(emitHttpErrorEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({
+        errorCode: 'invalid_first_frame_dimensions',
+        errorType: 'first_frame_rejected',
+        providerCode: 'seedance_bad_input',
+        messagePresent: true,
+      })
+    );
+    expect(JSON.stringify(emitHttpErrorEvidence.mock.calls)).not.toMatch(
+      /private scarf|sk-or-secret|private\.example/i
+    );
+  });
+
+  it('still drops any tag that is not identifier-shaped, because free text can carry the prompt', async () => {
+    const emitHttpErrorEvidence = vi.fn();
+    const fetch = vi.fn(async () =>
+      response(400, {
+        error: {
+          code: 'the prompt "private scarf text" was rejected',
+          metadata: {
+            error_type: 'https://private.example/why',
+            provider_code: 'data:image/png;base64,SECRET',
+          },
+        },
+      })
+    );
+    const adapter = createOpenRouterVideoAdapter({
+      fetch,
+      catalog: await admittedCatalog(),
+      emitHttpErrorEvidence,
+    });
+
+    await expect(adapter.submit(request, provider(), new AbortController().signal)).rejects.toMatchObject({
+      code: 'unknown',
+    });
+
+    await vi.waitFor(() => expect(emitHttpErrorEvidence).toHaveBeenCalledOnce());
+    expect(emitHttpErrorEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({ errorCode: null, errorType: null, providerCode: null })
+    );
+  });
+
   it('preserves the stable adapter failure when diagnostic emission fails', async () => {
     const adapter = createOpenRouterVideoAdapter({
       fetch: async () => response(400, { error: { message: 'private prompt' } }),

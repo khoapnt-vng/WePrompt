@@ -391,29 +391,23 @@ export const getDefaultOpenRouterVideoCatalog = (): OpenRouterVideoCatalog => de
 export const getOpenRouterVideoModelSpec = (model: string): OpenRouterVideoModelSpec | null =>
   defaultOpenRouterVideoCatalog.getModelSpec(model);
 
-const SAFE_HTTP_ERROR_TAGS = new Set([
-  'bad_request',
-  'content_policy',
-  'content_policy_violation',
-  'image_download_failed',
-  'image_too_large',
-  'image_too_small',
-  'invalid_image',
-  'invalid_image_url',
-  'invalid_request',
-  'invalid_request_error',
-  'moderation',
-  'payload_too_large',
-  'unprocessable_entity',
-  'unsupported_image_format',
-  'unsupported_value',
-]);
+/**
+ * Provider error tags are enum-like identifiers, and identifier shape is what makes them safe to
+ * log: no spaces, no punctuation, no scheme, so a prompt, a URL, an API key or a base64 payload
+ * cannot pass through. A fixed allowlist was stricter than that and cost more than it protected —
+ * a real 400 arrived on 2026-08-23 carrying tags nobody had enumerated, and both were discarded,
+ * leaving a blocked run with no stated reason.
+ *
+ * `error.message` remains fully redacted and must stay that way. It is free text, and the provider
+ * demonstrably echoes the prompt and request material into it; no length cap makes that safe.
+ */
+const IDENTIFIER_TAG = /^[a-z][a-z0-9_]{0,39}$/;
 
 const safeEvidenceTag = (value: unknown): string | null => {
   const normalized = typeof value === 'number' && Number.isInteger(value) ? String(value) : value;
   if (typeof normalized !== 'string') return null;
   if (/^[1-5][0-9]{2}$/.test(normalized)) return normalized;
-  return SAFE_HTTP_ERROR_TAGS.has(normalized) ? normalized : null;
+  return IDENTIFIER_TAG.test(normalized) ? normalized : null;
 };
 
 const httpErrorEvidence = async (

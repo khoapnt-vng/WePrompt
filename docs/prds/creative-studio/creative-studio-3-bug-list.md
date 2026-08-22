@@ -408,11 +408,12 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - Fix: map 4xx other than 429/401/403 to a definitive rejection code. `invalid_request` already exists in `StudioJobErrorCode` and is exactly this case.
   - **The billing invariant held throughout, which is the reassuring half.** Two $0.60 authorizations were confirmed and **nothing was billed** — the single spend receipt in the project is the seed still. That matches the proof behind BUG-109: the one site that writes a receipt fires on the transition into `running`, and a 400 never gets there.
 
-- [ ] **[BUG-111][P2][Creative Studio] The provider says why it rejected the request and we throw the sentence away** — measured 2026-08-23
-  - The OpenRouter video adapter logs a structured evidence object on an HTTP error: `operation`, `model`, `httpStatus`, `stableCode`, `errorCode`, `errorType`, `providerCode`, and **`messagePresent: true`** — the flag saying a human-readable message exists, without the message.
-  - So a run can be blocked by a 400 twice and leave no record of the reason. Diagnosing BUG-110 established _that_ the request was rejected and gave no way to learn _why_.
-  - The redaction is deliberate and the instinct is right — a provider message can carry request content. But a bounded, sanitised excerpt would be the difference between a diagnosable failure and a dead end, and the `detail` field added for conditioning frames (BUG-105) is the precedent for how to carry one safely.
-  - Same class as BUG-105: the failure is durable and visible, and the one fact that explains it is discarded before anyone can read it.
+- [x] **[BUG-111][P2][Creative Studio] A blocked run stated no reason, because provider tags were filtered by a fixed allowlist** — filed and fixed 2026-08-23
+  - A character-brief run stopped twice on an HTTP 400 whose evidence read `errorCode: '400'`, `errorType: null`, `providerCode: null`, `messagePresent: true`. Nothing said why, and two retries were spent on a rejection that would never succeed.
+  - **The fix I first proposed was wrong, and the existing test is what showed it.** `openRouterVideoAdapter.test.ts` feeds the provider message a prompt, an API key, a URL and a base64 data URI, then asserts none of it reaches the log. The redaction is deliberate and load-bearing: the provider echoes request material into `error.message`, so a bounded excerpt would have reintroduced a real leak. No length cap makes free text safe.
+  - **What was actually lost was the tags, not the message.** `error.code`, `metadata.error_type` and `metadata.provider_code` are enum-like identifiers, and they were being dropped by membership in a fixed `SAFE_HTTP_ERROR_TAGS` set. A provider that emits a tag nobody enumerated therefore explains nothing.
+  - **Fix:** gate on identifier _shape_ — `^[a-z][a-z0-9_]{0,39}$` — instead of a fixed list. No spaces, no punctuation, no scheme, so a prompt, URL, key or base64 payload cannot pass, while an unrecognised provider tag can. The allowlist is removed rather than left as dead code, and `error.message` stays fully redacted.
+  - Tests pin both directions: an identifier-shaped tag nobody enumerated is surfaced, and a tag carrying free text, a URL or a data URI is still dropped. The original leak test is untouched and still passes.
 
 ## Correctness and honesty of failures
 
