@@ -91,6 +91,7 @@ import {
   type StudioGenerationRouteCatalog,
   type StudioProviderResolver,
 } from '../providerResolver';
+import { formatStudioJobLog } from '../jobManager';
 import {
   CreativeStudioStoreError,
   StudioProjectConfirmationError,
@@ -1767,7 +1768,20 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     if (disposed || jobIds.length === 0) return;
     await deps.jobManager
       .dispatchAuthorizedJobsV2({ projectId, jobIds: [...jobIds] })
-      .catch((): undefined => undefined);
+      .catch((error: unknown): undefined => {
+        // Swallowing stays — a failed dispatch must not break the caller — but silence does not.
+        // Every job in this wave is left in queued_local, and nothing else would ever say so.
+        console.warn(
+          formatStudioJobLog('dispatch_failed', {
+            projectId,
+            count: jobIds.length,
+            // A bounded name, never a message: StudioJobManagerError's message is its enum code,
+            // but any other throw could carry provider text, a URL with a token, or prompt echoes.
+            reason: error instanceof Error ? error.name : 'unknown',
+          })
+        );
+        return undefined;
+      });
   };
 
   return {

@@ -338,6 +338,7 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **Fixed 2026-08-22.** Both suspected misses are now reproduced. A route-catalog failure on the second generation aborts the all-or-nothing preparation wave after leaving the first sibling in `queued_local`; a raw conditioning-media resolution exception aborts a video wave with every sibling still queued. Neither path calls the provider before preparation is complete.
   - The active backend-ready Studio runtime now owns one serialized five-second scan. It re-runs the existing durable recovery logic for the current supported project inventory, waits for each scan before scheduling the next, keeps the runtime active after a scan error, and aborts its wait during graph teardown. There is no renderer timer and no in-memory retry record.
   - `resumePendingJobsV2` now clears its single-flight promise after each scan instead of caching the first completed scan forever. Existing durable status, provider-job identity, controller and execution-reservation checks remain the duplicate-submission boundary: an active or already-remote job is polled or skipped, never blindly submitted again.
+  - The swallowed dispatch error is now reported too: `v2Service.ts` discarded every failure with `.catch((): undefined => undefined)`. It still swallows, because a failed dispatch must not break the caller, but it says so first — with the error's **name**, never its message, since only `StudioJobManagerError` has a bounded one.
 
 ## Correctness and honesty of failures
 

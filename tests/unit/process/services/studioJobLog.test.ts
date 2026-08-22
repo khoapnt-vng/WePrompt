@@ -11,7 +11,7 @@ import { formatStudioJobLog } from '@process/services/creative-studio/jobManager
 describe('the studio job log line', () => {
   it('names the event and its identifiers', () => {
     expect(formatStudioJobLog('dispatch', { jobId: 'job_1', shotId: 'shot_1', model: 'seedance-2.0' })).toBe(
-      '[studio] dispatch jobId=job_1 shotId=shot_1 model=seedance-2.0'
+      '[CreativeStudio] dispatch jobId=job_1 shotId=shot_1 model=seedance-2.0'
     );
   });
 
@@ -19,7 +19,7 @@ describe('the studio job log line', () => {
     // providerJobId is null until a submission is accepted, and "providerJobId=null" reads as a
     // value rather than as its absence.
     expect(formatStudioJobLog('submitting', { jobId: 'job_1', providerJobId: null, error: undefined })).toBe(
-      '[studio] submitting jobId=job_1'
+      '[CreativeStudio] submitting jobId=job_1'
     );
   });
 
@@ -32,7 +32,7 @@ describe('the studio job log line', () => {
   });
 
   it('strips newlines, so one job cannot forge a second log line', () => {
-    expect(formatStudioJobLog('x', { field: 'one\ntwo\rthree' })).toBe('[studio] x field=one two three');
+    expect(formatStudioJobLog('x', { field: 'one\ntwo\rthree' })).toBe('[CreativeStudio] x field=one two three');
   });
 
   it('keeps an error code, which is the whole point of the line', () => {
@@ -42,6 +42,6 @@ describe('the studio job log line', () => {
   });
 
   it('renders an event with no fields without trailing space', () => {
-    expect(formatStudioJobLog('drained', {})).toBe('[studio] drained');
+    expect(formatStudioJobLog('drained', {})).toBe('[CreativeStudio] drained');
   });
 });

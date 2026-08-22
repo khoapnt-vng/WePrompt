@@ -57,6 +57,7 @@ const STUDIO_LOG_VALUE_LIMIT = 80;
  * job record carries all of those, and the truncation below is a backstop for a caller's mistake,
  * not permission to rely on it.
  */
+/** Matches the thirty-two existing [CreativeStudio] sites: a split prefix defeats the grep. */
 export const formatStudioJobLog = (
   event: string,
   fields: Record<string, string | number | null | undefined>
@@ -70,7 +71,7 @@ export const formatStudioJobLog = (
       return `${key}=${capped}`;
     })
     .join(' ');
-  return body.length === 0 ? `[studio] ${event}` : `[studio] ${event} ${body}`;
+  return body.length === 0 ? `[CreativeStudio] ${event}` : `[CreativeStudio] ${event} ${body}`;
 };
 
 const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'cancelled']);
