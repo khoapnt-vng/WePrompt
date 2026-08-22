@@ -426,6 +426,9 @@ export const recoverablePresentationRunsRequestSchema = z
   .strict();
 
 describe('managed presentation schema type coupling', () => {
+  // This assertion creates and checks a second TypeScript program synchronously. It takes about one
+  // second in isolation but can exceed Vitest's 10-second default when the full instrumented suite
+  // contends for the compiler; the compiler still has a finite 30-second failure bound.
   it('keeps failure, public-run, and recovery schemas bidirectionally equivalent to production types', () => {
     const diagnostics = compilePolicyFixture(
       ({ policy, types }) => `
@@ -527,7 +530,7 @@ describe('managed presentation schema type coupling', () => {
     );
 
     expect(diagnostics).toBe('');
-  });
+  }, 30_000);
 });
 
 describe('managed presentation failure policy', () => {

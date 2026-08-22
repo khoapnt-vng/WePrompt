@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
   StudioAssetV2,
+  StudioBriefRuleDraft,
   StudioProposalV2,
   StudioReferenceRequestV2,
   StudioRendererExportCatalogV2,
@@ -951,6 +952,29 @@ describe('StudioPage schema-2 cutover', () => {
     expect(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.table' })).toBeVisible();
     expect(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.board' })).toBeVisible();
     expect(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.cut' })).toBeVisible();
+  });
+
+  it('explains when the app-bar Render action has no payable Shot', async () => {
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.renderFilm' }));
+
+    expect(await screen.findByText('conversation.creativeStudio.workspace.controls.renderFilmEmpty')).toBeVisible();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('opens one reviewed spend gate from the app-bar Render action without spending automatically', async () => {
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: projectWithDraftBatch(1) }));
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.renderFilm' }));
+
+    expect(await screen.findByTestId('studio-spend-gate')).toBeVisible();
+    expect(screen.getByText('conversation.creativeStudio.workspace.gate.reviewBeforeSpend')).toBeVisible();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
   });
 
   it('exposes exactly one level-two heading for the Cut view', async () => {
@@ -3175,6 +3199,125 @@ describe('StudioPage schema-2 cutover', () => {
     expect(saved).toEqual({ saved: false });
     expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
     expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 2 });
+  });
+
+  it('recognizes an exact canonical rule snapshot without issuing a duplicate native mutation', async () => {
+    const governed = project();
+    governed.rules = [
+      {
+        id: 'rule_prose',
+        scope: 'project',
+        text: 'Keep the launch clean.',
+        predicate: null,
+        createdAt: '2026-01-01T00:00:01.000Z',
+      },
+      {
+        id: 'rule_terms',
+        scope: 'project',
+        text: 'Avoid product marks.',
+        predicate: { kind: 'forbidden_terms', terms: ['logo', 'watermark'] },
+        createdAt: '2026-01-01T00:00:02.000Z',
+      },
+    ];
+    const exactDrafts: StudioBriefRuleDraft[] = governed.rules.map(({ id, text, predicate }) => ({
+      id,
+      text,
+      predicate,
+    }));
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: governed }));
+
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    let adopted = false;
+    await act(async () => {
+      adopted = await capturedWorkspaceMutations().setRules(() => exactDrafts, 'exact-rule-snapshot');
+    });
+
+    expect(adopted).toBe(true);
+    expect(mocks.bridge.setRules.invoke).not.toHaveBeenCalled();
+  });
+
+  it('does not mistake sparse or near-matching rule drafts for an adopted canonical snapshot', async () => {
+    const governed = project();
+    governed.rules = [
+      {
+        id: 'rule_prose',
+        scope: 'project',
+        text: 'Keep the launch clean.',
+        predicate: null,
+        createdAt: '2026-01-01T00:00:01.000Z',
+      },
+      {
+        id: 'rule_terms',
+        scope: 'project',
+        text: 'Avoid product marks.',
+        predicate: { kind: 'forbidden_terms', terms: ['logo', 'watermark'] },
+        createdAt: '2026-01-01T00:00:02.000Z',
+      },
+    ];
+    const exactDrafts: StudioBriefRuleDraft[] = governed.rules.map(({ id, text, predicate }) => ({
+      id,
+      text,
+      predicate,
+    }));
+    const sparseDrafts = Array<StudioBriefRuleDraft>(exactDrafts.length);
+    sparseDrafts[1] = exactDrafts[1]!;
+    const nearMatches: ReadonlyArray<readonly [string, StudioBriefRuleDraft[]]> = [
+      ['shorter', [exactDrafts[0]!]],
+      ['sparse', sparseDrafts],
+      ['different-id', [{ ...exactDrafts[0]!, id: 'rule_other' }, exactDrafts[1]!]],
+      ['different-text', [{ ...exactDrafts[0]!, text: 'Keep only one launch clean.' }, exactDrafts[1]!]],
+      [
+        'prose-became-executable',
+        [{ ...exactDrafts[0]!, predicate: { kind: 'forbidden_terms', terms: ['logo'] } }, exactDrafts[1]!],
+      ],
+      ['predicate-removed', [exactDrafts[0]!, { ...exactDrafts[1]!, predicate: null }]],
+      [
+        'future-predicate-kind',
+        [
+          exactDrafts[0]!,
+          {
+            ...exactDrafts[1]!,
+            predicate: { kind: 'future_rule', terms: ['logo', 'watermark'] } as unknown as NonNullable<
+              StudioBriefRuleDraft['predicate']
+            >,
+          },
+        ],
+      ],
+      [
+        'different-term-count',
+        [exactDrafts[0]!, { ...exactDrafts[1]!, predicate: { kind: 'forbidden_terms', terms: ['logo'] } }],
+      ],
+      [
+        'different-term',
+        [exactDrafts[0]!, { ...exactDrafts[1]!, predicate: { kind: 'forbidden_terms', terms: ['logo', 'brand'] } }],
+      ],
+    ];
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: governed }));
+    mocks.bridge.setRules.invoke.mockResolvedValue({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'native.ruleMismatch' },
+    });
+
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    const results: boolean[] = [];
+    const attemptNearMatch = async (index: number): Promise<void> => {
+      const attempt = nearMatches[index];
+      if (attempt === undefined) return;
+      const [label, drafts] = attempt;
+      results.push(await capturedWorkspaceMutations().setRules(() => drafts, `near-match-${label}`));
+      await attemptNearMatch(index + 1);
+    };
+    await act(async () => {
+      await attemptNearMatch(0);
+    });
+
+    expect(results).toEqual(nearMatches.map(() => false));
+    expect(mocks.bridge.setRules.invoke).toHaveBeenCalledTimes(nearMatches.length);
+    expect(mocks.bridge.setRules.invoke.mock.calls.map(([request]) => request.rules)).toEqual(
+      nearMatches.map(([, drafts]) => drafts)
+    );
   });
 
   it('keeps typed rule input and idempotently recognizes an ambiguously adopted rule on retry', async () => {

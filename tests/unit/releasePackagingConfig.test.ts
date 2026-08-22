@@ -642,6 +642,29 @@ describe('release packaging configuration', () => {
     expect(workflow).not.toContain('Contents/MacOS/Forge');
   });
 
+  it('blocks local pushes and sprint3 pull requests on reviewed Creative Studio coverage', () => {
+    const justfile = readProjectFile('justfile');
+    const workflow = readProjectFile('.github/workflows/sprint3-pr-gate.yml');
+    const pushDependencies = justfile.match(/^push \*ARGS: (.+)$/m)?.[1].split(/\s+/) ?? [];
+
+    expect({
+      localPushUsesCoverageGate: pushDependencies.includes('test-coverage-creative-studio'),
+      localPushStillRunsRedundantSuite: pushDependencies.includes('test'),
+      localGateRunsReviewedScript:
+        /^test-coverage-creative-studio:\s*\n\s+bun run test:coverage:creative-studio$/m.test(justfile),
+      pullRequestGateRunsReviewedScript: workflow.includes('if bun run test:coverage:creative-studio 2>&1'),
+      quarantineCanHideCoverageFailure: !workflow.includes(
+        '! grep -Eq \'Coverage for .* does not meet .*threshold\' "$clean"'
+      ),
+    }).toEqual({
+      localPushUsesCoverageGate: true,
+      localPushStillRunsRedundantSuite: false,
+      localGateRunsReviewedScript: true,
+      pullRequestGateRunsReviewedScript: true,
+      quarantineCanHideCoverageFailure: false,
+    });
+  });
+
   it('runs lineage recovery acceptance on architecture-matched native package runners', () => {
     const manualWorkflow = readProjectFile('.github/workflows/build-manual.yml');
     const releaseWorkflow = readProjectFile('.github/workflows/build-and-release.yml');

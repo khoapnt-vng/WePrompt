@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import React, { useRef } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -327,6 +327,22 @@ const readyWorkspaceStatus = (revision = 3): StudioRendererWorkspaceStatusV2 => 
   parkEligibility: [],
 });
 
+const parkableWorkspaceStatus = (projectId = 'project_1', revision = 3): StudioRendererWorkspaceStatusV2 => ({
+  ...readyWorkspaceStatus(revision),
+  projectId,
+  parkEligibility: [
+    {
+      subject: 'shot',
+      action: 'park',
+      beatId: 'beat_1',
+      shotId: 'shot_1',
+      assetId: null,
+      allowed: true,
+      blockers: [],
+    },
+  ],
+});
+
 const readyChainStatus = (revision = 3): StudioRendererChainStatusV2 => ({
   projectId: 'project_1',
   projectRevision: revision,
@@ -346,6 +362,7 @@ const ControlsHarness: React.FC<{
   pending?: boolean;
   gateLocked?: boolean;
   mutations?: WorkspaceMutationCallbacks;
+  beatActions?: BeatPanelActions;
   briefDialogRequest?: number;
   activeView?: 'table' | 'board' | 'cut';
 }> = ({
@@ -358,6 +375,7 @@ const ControlsHarness: React.FC<{
   pending = false,
   gateLocked = false,
   mutations = workspaceCallbacks(),
+  beatActions = beatPanelActions(),
   briefDialogRequest = 0,
   activeView = 'table',
 }) => {
@@ -427,7 +445,7 @@ const ControlsHarness: React.FC<{
         mutations={mutations}
         boardActions={boardActions()}
         cutActions={cutActions()}
-        beatPanelActions={beatPanelActions()}
+        beatPanelActions={beatActions}
         beatPanelBriefReferenceOptions={[]}
         beatPanelReviewGraphs={[]}
         beatPanelReviewBlockedMessageKey={null}
@@ -630,6 +648,27 @@ describe('spend gate draft graph', () => {
 describe('WorkspaceControls', () => {
   beforeEach(() => window.sessionStorage.clear());
 
+  const openFirstBeatPanel = (): HTMLElement => {
+    const table = screen.getByRole('grid', { name: 'conversation.creativeStudio.workspace.table.label' });
+    fireEvent.click(within(within(table).getAllByRole('row')[1]!).getAllByRole('gridcell')[1]!);
+    return screen.getByRole('dialog');
+  };
+
+  const confirmFirstShotLift = (): void => {
+    const shot = document.querySelector<HTMLElement>('article[data-shot-id="shot_1"]');
+    if (shot === null) throw new Error('Shot 1 was unavailable');
+    const lift = within(shot).getByRole('button', {
+      name: 'conversation.creativeStudio.workspace.beatPanel.lift.shot',
+    });
+    expect(lift).toBeEnabled();
+    fireEvent.click(lift);
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.beatPanel.lift.confirmShot',
+      })
+    );
+  };
+
   it('resets only settings while preserving a Brief draft', async () => {
     window.sessionStorage.setItem(
       'aionui:creative-studio:v2:workspace-drafts:project_1',
@@ -680,6 +719,87 @@ describe('WorkspaceControls', () => {
     rerender(<ControlsHarness routes={routeCatalog('ready', 'ready')} open={vi.fn()} project={restored} />);
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(within(screen.getByRole('grid')).getAllByRole('row')[1]).toHaveAttribute('aria-selected', 'false');
+  });
+
+  it('closes the panel and announces the exact Bin handoff only after a committed Shot park', async () => {
+    const actions = beatPanelActions();
+    vi.mocked(actions.parkShot).mockImplementation(async (_shotId, onCommitted) => {
+      onCommitted?.();
+      return true;
+    });
+    const { container } = render(
+      <ControlsHarness
+        routes={routeCatalog('ready', 'ready')}
+        open={vi.fn()}
+        status={parkableWorkspaceStatus()}
+        beatActions={actions}
+      />
+    );
+    openFirstBeatPanel();
+
+    confirmFirstShotLift();
+
+    await waitFor(() => expect(actions.parkShot).toHaveBeenCalledWith('shot_1', expect.any(Function)));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(container.querySelector('[data-studio-shot-lift-announcement]')).toHaveTextContent(
+      'conversation.creativeStudio.workspace.beatPanel.lift.shotSucceeded'
+    );
+  });
+
+  it('does not let a stale Shot-park completion close the newly opened project panel', async () => {
+    let releasePark: (() => void) | undefined;
+    let finishPark: (() => void) | undefined;
+    const parkGate = new Promise<void>((resolve) => {
+      releasePark = resolve;
+    });
+    const parkFinished = new Promise<void>((resolve) => {
+      finishPark = resolve;
+    });
+    const actions = beatPanelActions();
+    vi.mocked(actions.parkShot).mockImplementation(async (_shotId, onCommitted) => {
+      await parkGate;
+      onCommitted?.();
+      finishPark?.();
+      return true;
+    });
+    const routes = routeCatalog('ready', 'ready');
+    const projectOne = makeProject();
+    const projectTwo = { ...makeProject(), id: 'project_2' };
+    const projectTwoStatus = parkableWorkspaceStatus(projectTwo.id);
+    const projectTwoChain = { ...readyChainStatus(), projectId: projectTwo.id };
+    const result = render(
+      <ControlsHarness
+        routes={routes}
+        open={vi.fn()}
+        project={projectOne}
+        status={parkableWorkspaceStatus()}
+        beatActions={actions}
+      />
+    );
+    openFirstBeatPanel();
+    confirmFirstShotLift();
+    await waitFor(() => expect(actions.parkShot).toHaveBeenCalledWith('shot_1', expect.any(Function)));
+
+    result.rerender(
+      <ControlsHarness
+        routes={routes}
+        open={vi.fn()}
+        project={projectTwo}
+        status={projectTwoStatus}
+        chain={projectTwoChain}
+        beatActions={actions}
+      />
+    );
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    const projectTwoPanel = openFirstBeatPanel();
+
+    await act(async () => {
+      releasePark?.();
+      await parkFinished;
+    });
+
+    expect(projectTwoPanel).toBeVisible();
+    expect(screen.getByRole('dialog')).toBe(projectTwoPanel);
   });
 
   it('opens the exact Beat panel from the Cut and dismisses it when the workspace view changes', async () => {
@@ -784,6 +904,21 @@ describe('WorkspaceControls', () => {
     fireEvent.click(undo);
     expect(mutations.undo).not.toHaveBeenCalled();
     expect(screen.getByText('conversation.creativeStudio.workspace.beatPanel.blocker.unsavedDrafts')).toBeVisible();
+  });
+
+  it('sends an enabled structural undo through its exact durable entry identity', async () => {
+    const mutations = workspaceCallbacks();
+    const status: StudioRendererWorkspaceStatusV2 = {
+      ...readyWorkspaceStatus(),
+      undoTop: { entryId: 'undo_exact', label: 'edit_shot', sourceRevision: 2 },
+    };
+    render(
+      <ControlsHarness routes={routeCatalog('ready', 'ready')} open={vi.fn()} status={status} mutations={mutations} />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /conversation\.creativeStudio\.workspace\.controls\.undo/ }));
+
+    await waitFor(() => expect(mutations.undo).toHaveBeenCalledExactlyOnceWith('undo_exact'));
   });
 
   it('clears normalized no-op setting and spend drafts without issuing a commit', async () => {

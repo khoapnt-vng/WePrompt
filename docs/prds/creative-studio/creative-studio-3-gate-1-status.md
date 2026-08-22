@@ -114,33 +114,35 @@ not the same as having been read.
 ¹ The only diagnostics are worktree-setup artifacts: an unbuilt `@aionui/web-host` workspace package
 and the generated, untracked `i18n-keys.d.ts`. No studio source file reports an error.
 
-### Coverage — two gates exist, and the one that matters is unwired
+### Coverage — two gates exist, and the reviewed Studio gate is wired
 
 `bun run test:coverage` reports **70.27% statements / 67.45% branches / 66.83% functions / 72.01%
 lines** and exits 0. That looks like a failure against AGENTS.md's "≥ 80%" but is not: the enforced
 thresholds in `vitest.config.ts` are **54 / 50 / 50**. The 80% figure is a target, not a gate.
 
 A second config, `vitest.creative-studio-coverage.config.ts`, carries **real 80% thresholds** scoped
-to a studio runtime manifest. It had **no `package.json` script**, so it had never run in any
-pipeline, `just push` included; this commit adds `test:coverage:creative-studio`. Verified passing at
-this head — **exit code 0**, 671 files, 10,109 tests, no threshold violation reported.
+to a studio runtime manifest. `test:coverage:creative-studio` is now the single full-suite test
+dependency of `just push` and the blocking sprint3 workflow; neither path also runs the bare suite.
+Verified passing on 2026-08-23 — **exit code 0**, 652 files passed / 3 skipped, 9,414 tests passed /
+24 skipped, and no threshold violation reported.
 
 Note for whoever runs it: the coverage `include` scopes which files are **measured**, not which tests
 **execute**, so this script runs the whole suite. It is a second full-suite runner, not a cheap
 studio-only check — do not run it alongside `bun run test`, and read its **command** exit code rather
 than a pipeline's.
 
-Measured coverage over the studio manifest:
+Current exact coverage evidence:
 
-| Area                 | Statements |  Lines |
-| -------------------- | ---------: | -----: |
-| `service/schema2`    |     90.69% | 95.53% |
-| `schema2/generation` |     91.57% | 96.79% |
-| `schema2/pricing`    |     89.54% | 95.78% |
+| Scope                   | Branches |  Lines |
+| ----------------------- | -------: | -----: |
+| Reviewed manifest       |   84.54% | 91.13% |
+| `payloadSchemas.ts`     |   86.66% | 98.23% |
+| `StudioPage.tsx`        |   81.15% | 86.84% |
+| `WorkspaceControls.tsx` |   90.90% | 88.88% |
 
-`factories.ts`, `mutations/identity.ts`, `generation/index.ts` and `conditioningFrame.ts` are at
-100%. **The coverage is good; the gate protecting it is not connected.** Wiring a script is a
-one-line change and should land before Task 7, when the studio surface changes most.
+The reviewed gate protecting that coverage is connected locally and in blocking sprint3 CI. The
+known BUG-030 teardown quarantine also rejects coverage-threshold diagnostics, so it cannot turn a
+coverage failure green.
 
 ---
 

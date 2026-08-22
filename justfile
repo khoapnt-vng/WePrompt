@@ -332,9 +332,9 @@ i18n-check:
 # Run all checks (lint + format + typecheck + i18n) — mirrors CI code-quality job
 check: lint fmt-check typecheck i18n-check
 
-# Pre-push gate: lint + format check + typecheck + i18n + test, then push
+# Pre-push gate: lint + format check + typecheck + i18n + Creative Studio coverage, then push
 # Uses --quiet to suppress warnings (exit code is still non-zero on errors)
-push *ARGS: lint-strict fmt-check typecheck i18n-check test
+push *ARGS: lint-strict fmt-check typecheck i18n-check test-coverage-creative-studio
     git push {{ ARGS }}
 
 # Lint with only errors reported (for CI/push gates)
@@ -356,6 +356,10 @@ test-watch:
 # Run tests with coverage
 test-coverage:
     bun run test:coverage
+
+# Enforce the reviewed Creative Studio runtime manifest's per-file coverage thresholds
+test-coverage-creative-studio:
+    bun run test:coverage:creative-studio
 
 # Run contract tests
 test-contract:

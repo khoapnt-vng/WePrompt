@@ -1411,6 +1411,51 @@ describe('native bridge payload schemas', () => {
     expect(parseNativeBridgePayload('creative-studio.apply-authoring-batch', payload)).toEqual(payload);
   });
 
+  it('preserves the reviewed order of mixed beat, shot, and take bin entries', () => {
+    const payload = {
+      projectId: 'project_1',
+      expectedRevision: 3,
+      bin: [
+        { kind: 'beat' as const, beatId: 'beat_1', reason: 'alternate' as const },
+        { kind: 'shot' as const, beatId: 'beat_1', shotId: 'shot_1', reason: 'lifted' as const },
+        { kind: 'take' as const, assetId: 'asset_1', reason: 'alternate' as const },
+      ],
+    };
+
+    expect(parseNativeBridgePayload('creative-studio.reorder-bin', payload)).toEqual(payload);
+  });
+
+  it('rejects duplicate bin identities even when their disposition differs', () => {
+    const payload = {
+      projectId: 'project_1',
+      expectedRevision: 3,
+      bin: [
+        { kind: 'beat' as const, beatId: 'beat_1', reason: 'lifted' as const },
+        { kind: 'beat' as const, beatId: 'beat_1', reason: 'alternate' as const },
+      ],
+    };
+
+    expect(() => parseNativeBridgePayload('creative-studio.reorder-bin', payload)).toThrow(
+      INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+    );
+  });
+
+  it('distinguishes an ordinary zero trim from negative zero at the IPC boundary', () => {
+    const zeroTrimPayload = {
+      projectId: 'project_1',
+      expectedRevision: 3,
+      operations: [{ kind: 'trim_shot' as const, shotId: 'shot_1', trimInSeconds: 0, trimOutSeconds: null }],
+    };
+
+    expect(parseNativeBridgePayload('creative-studio.apply-authoring-batch', zeroTrimPayload)).toEqual(zeroTrimPayload);
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.apply-authoring-batch', {
+        ...zeroTrimPayload,
+        operations: [{ ...zeroTrimPayload.operations[0], trimInSeconds: -0 }],
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
   it.each(forbiddenAuthoringOperations)('rejects catalog-only authoring operation $kind', (operation) => {
     expect(() =>
       parseNativeBridgePayload('creative-studio.apply-authoring-batch', {
@@ -2122,6 +2167,13 @@ describe('native bridge payload schemas', () => {
       issues: [{ code: 'invalid_type', path: ['tokens'] }],
     });
     expect(JSON.stringify(getNativeBridgePayloadDiagnostic(thrown))).not.toContain(secretKey);
+  });
+
+  it('returns no native rejection diagnostic for unrelated errors or non-errors', () => {
+    expect([
+      getNativeBridgePayloadDiagnostic(new Error('unrelated')),
+      getNativeBridgePayloadDiagnostic(undefined),
+    ]).toEqual([null, null]);
   });
 
   it('bounds native rejection diagnostics without retaining Zod messages or received data', () => {
