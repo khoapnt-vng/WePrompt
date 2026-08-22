@@ -57,6 +57,10 @@ const mocks = vi.hoisted(() => {
       getWorkspaceStatus: { invoke: vi.fn() },
       getChainStatus: { invoke: vi.fn() },
       listRoutes: { invoke: vi.fn() },
+      listConnectionCandidates: { invoke: vi.fn() },
+      listConnections: { invoke: vi.fn() },
+      validateConnection: { invoke: vi.fn() },
+      saveConnection: { invoke: vi.fn() },
       importBedAudio: { invoke: vi.fn() },
       detachBedAudio: { invoke: vi.fn() },
       setBed: { invoke: vi.fn() },
@@ -611,6 +615,10 @@ describe('StudioPage schema-2 cutover', () => {
         catalogVersion: 'catalog_1',
       })
     );
+    mocks.bridge.listConnectionCandidates.invoke.mockResolvedValue(ok([]));
+    mocks.bridge.listConnections.invoke.mockResolvedValue(ok({ integrations: [], connections: [] }));
+    mocks.bridge.validateConnection.invoke.mockResolvedValue(ok({}));
+    mocks.bridge.saveConnection.invoke.mockResolvedValue(ok({}));
     mocks.bridge.listExports.invoke.mockResolvedValue(ok({ revision: 1, artifacts: [] }));
     mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue(commit(4));
     mocks.bridge.undoLast.invoke.mockResolvedValue(commit(4));
@@ -657,6 +665,85 @@ describe('StudioPage schema-2 cutover', () => {
         outcome: { kind: 'generation_gate', handoffId: 'handoff_open', shotIds: ['shot_1', 'shot_2'] },
       })
     );
+  });
+
+  it('binds a Studio media model when none exists, so the catalogue stops being empty', async () => {
+    // A route needs a connection binding, not just a configured provider. Without one the catalogue
+    // is empty, the project has nothing to bind, and the only way through is a visit to Settings.
+    mocks.bridge.listConnectionCandidates.invoke.mockResolvedValue(
+      ok([
+        {
+          providerId: 'p1',
+          providerName: 'OpenRouter',
+          models: [],
+          integrationModels: [
+            { integrationLabelKey: 'openRouterImage', models: [{ model: 'img-a', health: 'available' }] },
+          ],
+        },
+      ])
+    );
+    mocks.bridge.listConnections.invoke.mockResolvedValue(
+      ok({
+        integrations: [{ integrationId: 'int_img', kind: 'image', labelKey: 'openRouterImage' }],
+        connections: [],
+      })
+    );
+    mocks.bridge.listRoutes.invoke.mockResolvedValue(
+      ok({
+        image: {
+          status: 'ready',
+          selected: null,
+          selectedRoute: null,
+          selectionIssue: null,
+          options: [
+            { choiceId: 'img_1', kind: 'image', health: 'available', constraints: { supportsFirstFrame: false } },
+          ],
+        },
+        video: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+        catalogVersion: 'catalog_2',
+      })
+    );
+    mocks.bridge.listRoutes.invoke.mockResolvedValueOnce(
+      ok({
+        image: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+        video: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+        catalogVersion: 'catalog_1',
+      })
+    );
+    renderStudio();
+
+    await waitFor(() =>
+      expect(mocks.bridge.saveConnection.invoke).toHaveBeenCalledWith({
+        providerId: 'p1',
+        integrationId: 'int_img',
+        model: 'img-a',
+      })
+    );
+  });
+
+  it('never reconsiders a connection someone already chose', async () => {
+    mocks.bridge.listConnectionCandidates.invoke.mockResolvedValue(
+      ok([
+        {
+          providerId: 'p1',
+          providerName: 'OpenRouter',
+          models: [],
+          integrationModels: [
+            { integrationLabelKey: 'openRouterImage', models: [{ model: 'img-a', health: 'available' }] },
+          ],
+        },
+      ])
+    );
+    mocks.bridge.listConnections.invoke.mockResolvedValue(
+      ok({
+        integrations: [{ integrationId: 'int_img', kind: 'image', labelKey: 'openRouterImage' }],
+        connections: [{ integrationId: 'int_img' }],
+      })
+    );
+    renderStudio();
+
+    await waitFor(() => expect(mocks.bridge.listConnections.invoke).toHaveBeenCalled());
+    expect(mocks.bridge.saveConnection.invoke).not.toHaveBeenCalled();
   });
 
   it('binds a route of each kind on a project that has none, so Render is reachable', async () => {
