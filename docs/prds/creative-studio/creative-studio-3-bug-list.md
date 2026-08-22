@@ -414,6 +414,15 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **What was actually lost was the tags, not the message.** `error.code`, `metadata.error_type` and `metadata.provider_code` are enum-like identifiers, and they were being dropped by membership in a fixed `SAFE_HTTP_ERROR_TAGS` set. A provider that emits a tag nobody enumerated therefore explains nothing.
   - **Fix:** gate on identifier _shape_ — `^[a-z][a-z0-9_]{0,39}$` — instead of a fixed list. No spaces, no punctuation, no scheme, so a prompt, URL, key or base64 payload cannot pass, while an unrecognised provider tag can. The allowlist is removed rather than left as dead code, and `error.message` stays fully redacted.
   - Tests pin both directions: an identifier-shaped tag nobody enumerated is surfaced, and a tag carrying free text, a URL or a data URI is still dropped. The original leak test is untouched and still passes.
+- [ ] **[BUG-112][P1][Creative Studio] Whether a film renders depends on what image format the seed happened to come back as** — measured 2026-08-23
+  - Two runs, same video model (`bytedance/seedance-2.0`), same image model, same aspect, **same seed dimensions of 1376×768**. One rendered three videos; the other was rejected with HTTP 400 at submit, three attempts, every time.
+  - The only material difference is the seed still's encoding:
+    - lake film, **rendered** — `image/jpeg`, **616,540 bytes**
+    - harbour film, **400 every time** — `image/png`, **1,400,455 bytes**
+  - The first frame is submitted as whatever the image provider returned. Nothing normalises the encoding or the payload size, so a run's success turns on a provider's choice the user never sees and cannot influence.
+  - Circumstantial but pointed: the allowlist this adapter used to filter error tags contained both `unsupported_image_format` and `payload_too_large`. Someone has met this before; the knowledge sits in a list of strings rather than in the submission path.
+  - **Not confirmable from the logs**, and that is its own finding. OpenRouter returns this 400 with no `metadata`, no `error_type` and no `provider_code` — the reason exists only in `error.message`, which is redacted for good reason (see BUG-111). Confirming the cause needs the request replayed outside the app.
+  - Fix shape: normalise the conditioning frame before submission — re-encode to JPEG and bound the payload — rather than forwarding whatever arrives. The conditioning-frame extractor already writes PNG deliberately for fidelity, so the conversion belongs at the submission boundary, not in storage.
 
 ## Correctness and honesty of failures
 
