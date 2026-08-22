@@ -414,15 +414,16 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **What was actually lost was the tags, not the message.** `error.code`, `metadata.error_type` and `metadata.provider_code` are enum-like identifiers, and they were being dropped by membership in a fixed `SAFE_HTTP_ERROR_TAGS` set. A provider that emits a tag nobody enumerated therefore explains nothing.
   - **Fix:** gate on identifier _shape_ — `^[a-z][a-z0-9_]{0,39}$` — instead of a fixed list. No spaces, no punctuation, no scheme, so a prompt, URL, key or base64 payload cannot pass, while an unrecognised provider tag can. The allowlist is removed rather than left as dead code, and `error.message` stays fully redacted.
   - Tests pin both directions: an identifier-shaped tag nobody enumerated is surfaced, and a tag carrying free text, a URL or a data URI is still dropped. The original leak test is untouched and still passes.
-- [ ] **[BUG-112][P1][Creative Studio] Whether a film renders depends on what image format the seed happened to come back as** — measured 2026-08-23
-  - Two runs, same video model (`bytedance/seedance-2.0`), same image model, same aspect, **same seed dimensions of 1376×768**. One rendered three videos; the other was rejected with HTTP 400 at submit, three attempts, every time.
-  - The only material difference is the seed still's encoding:
-    - lake film, **rendered** — `image/jpeg`, **616,540 bytes**
-    - harbour film, **400 every time** — `image/png`, **1,400,455 bytes**
-  - The first frame is submitted as whatever the image provider returned. Nothing normalises the encoding or the payload size, so a run's success turns on a provider's choice the user never sees and cannot influence.
-  - Circumstantial but pointed: the allowlist this adapter used to filter error tags contained both `unsupported_image_format` and `payload_too_large`. Someone has met this before; the knowledge sits in a list of strings rather than in the submission path.
-  - **Not confirmable from the logs**, and that is its own finding. OpenRouter returns this 400 with no `metadata`, no `error_type` and no `provider_code` — the reason exists only in `error.message`, which is redacted for good reason (see BUG-111). Confirming the cause needs the request replayed outside the app.
-  - Fix shape: normalise the conditioning frame before submission — re-encode to JPEG and bound the payload — rather than forwarding whatever arrives. The conditioning-frame extractor already writes PNG deliberately for fidelity, so the conversion belongs at the submission boundary, not in storage.
+- [ ] **[BUG-112][P1][Creative Studio] Every video submission on one film is rejected with a bare HTTP 400** — 2026-08-23, cause still open
+  - Same video model, same image model, same aspect, same 1376×768 seed. The lake film rendered three videos; the harbour film has been rejected at submit on **five** separate attempts. No video has ever been produced for it.
+  - **The seed-encoding hypothesis is refuted, by experiment.** The original filing blamed the seed's format and payload — a 1.4MB PNG against the 616KB JPEG of the film that worked. The identical image was re-encoded to a **94,585-byte JPEG**, pinned as the seed, and re-rendered: **identical 400**. Format and payload are not the cause, and the transcode fix that filing proposed would have been built into a byte-integrity-checked path for nothing.
+  - **The open hypothesis is prompt length, and the product's own UI already flags it.** The composed prompt differs sharply between the two films:
+    - lake, rendered — **637, 639, 641 characters**
+    - harbour, rejected — **1028 characters**, on every attempt
+      The Beat panel displays **`55 / 25 WORDS`** against this Beat's Look. The guidance exists, the Director exceeded it by more than double, and nothing between that warning and the provider stops the submission or explains the rejection.
+  - **Not confirmable from inside the app.** OpenRouter returns this 400 with no `metadata`, no `error_type` and no `provider_code`; the reason exists only in `error.message`, which is redacted because the provider echoes prompt material into it (BUG-111). Confirming it means replaying the request against the provider and reading that message.
+  - Exact request shape for a replay: `POST https://openrouter.ai/api/v1/videos` with `{model, prompt, duration, aspect_ratio, resolution, generate_audio, frame_images:[{type:'image_url', image_url:{url:<data-url>}, frame_type:'first_frame'}]}`.
+  - If prompt length is confirmed, the fix is a bounded, enforced prompt at composition rather than a word count shown as advice — and a stated failure when the bound is exceeded, instead of a provider 400 the user cannot read.
 
 ## Correctness and honesty of failures
 
