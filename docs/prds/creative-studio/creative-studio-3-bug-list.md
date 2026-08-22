@@ -326,6 +326,11 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - Missing against the ruling: the gate itself, the still cost quoted before the toggle, the still actually being produced on the image route, and the same treatment on re-join.
   - One existing guard is worth keeping in view: `directorCommandContracts.ts:297` already classifies `set_hard_cut` as `proposal`, so the Director cannot sever a chain on its own. The gap is the human's click, not the Director's.
 
+- [ ] **[BUG-096][P3][Creative Studio] The Brief's route pickers show an opaque choice id where a model name belongs** — found 2026-08-22 verifying Slice 1a
+  - With both routes bound, the pickers read `choice_000290ca7fd86013f59825d5` and `choice_442687563c09dd91be3844cb`. A person cannot tell which model their film will be rendered with, or whether the two are even the same provider.
+  - It matters more now than it did: before auto-binding, a user picked the route themselves and knew what they chose. A route bound on their behalf is only accountable if it says what it bound.
+  - The catalogue entry already carries `providerName` and `model` beside `choiceId`, so the label exists — it is the display that falls back to the id.
+
 ## Coverage and polish
 
 - [x] **[BUG-064][P2][Creative Studio] The video allowlist covers 6 of the 24 models OpenRouter serves, with no way to extend it** — found 2026-08-21, verified against the live catalogue
@@ -607,6 +612,27 @@ fit-to-target reading in the app is advisory, with one carved exception — a be
 renders a slate `target` seconds long, the only place an authored number reaches the renderer.
 
 ## Verification notes
+
+### Verified live 2026-08-22 — Slice 1a, connection provisioning
+
+Driven in an instance that had exactly the failure it targets: one provider (OpenRouter) configured,
+no Studio connection bound, and both route pickers reading `Selection required` with zero options.
+
+Creating one project from the composer now produces:
+
+| Field                            | Before               | After                             |
+| -------------------------------- | -------------------- | --------------------------------- |
+| Image route                      | `Selection required` | `choice_000290ca7fd86013f59825d5` |
+| Video route                      | `Selection required` | `choice_442687563c09dd91be3844cb` |
+| `Selection required` occurrences | 2                    | **0**                             |
+
+Both cliffs are gone in one pass: the connection was provisioned and the routes were bound, without a
+visit to Settings.
+
+**Not verified:** that the chosen video route is first-frame-capable. The picker would not open its
+option list under automation, so the capability behind that choice id was not read. The unit tests
+prove the picker prefers `supportsFirstFrame` when more than one video route exists; whether more
+than one existed here is unknown.
 
 ### Verified live 2026-08-22 — the Table and Board round
 
