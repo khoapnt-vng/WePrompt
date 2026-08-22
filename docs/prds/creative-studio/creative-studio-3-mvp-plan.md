@@ -67,6 +67,29 @@ One project, roughly $1–2, an hour.
 _Done when:_ a written list of what actually broke, with the failures reproduced. If it contradicts
 this plan, the plan changes — that is the point of doing it first.
 
+### Slice 1a — bind Studio media models, which is the cliff above the cliff
+
+**Found 2026-08-22 by verifying Slice 1 in the running app, and it changes the plan.**
+
+A Studio route needs a `StudioConnectionBinding`, not just a configured provider. Measured in a live
+instance: one provider (OpenRouter) with an image-capable model available, and the project's Image
+and Video pickers both offering **zero options** and reading `Selection required`.
+
+So the first-run path is longer than section 2 claimed:
+
+1. configure a provider — Settings
+2. **bind Studio media models — Settings → Models → Studio media** ← the real cliff
+3. create a project
+4. routes bind themselves — Slice 1
+5. render
+
+Step 2 is a settings visit, which the MVP sentence says a user should never need. Slice 1 is
+necessary and not sufficient: it removes the friction at step 4 and is inert until step 2 has
+happened. Options, in preference order: bind a connection automatically from provider models that
+already qualify; or fold the binding into first-run rather than leaving it in Settings.
+
+_Done when:_ a user who has configured one provider reaches a render gate without opening Settings.
+
 ### Slice 1 — a project is generable from birth
 
 Bind both routes at creation from `listGenerationRoutes()`, choosing the video route on
