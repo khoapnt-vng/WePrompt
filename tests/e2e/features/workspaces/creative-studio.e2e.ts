@@ -397,7 +397,16 @@ const studioViewportReferences = [
   },
 ] as const satisfies readonly StudioViewportReference[];
 
-const captureCutViewportReference = async (page: Page, reference: StudioViewportReference): Promise<void> => {
+type CutManagedVideoReference = {
+  projectId: string;
+  assetId: string;
+};
+
+const captureCutViewportReference = async (
+  page: Page,
+  reference: StudioViewportReference,
+  managedVideo: CutManagedVideoReference
+): Promise<void> => {
   await page.setViewportSize({ width: reference.width, height: reference.height });
   const root = page.locator('html');
   await root.evaluate((element, direction) => element.setAttribute('dir', direction), reference.direction);
@@ -414,6 +423,104 @@ const captureCutViewportReference = async (page: Page, reference: StudioViewport
   await expect(cut).toContainText('18s source · fade from 8s to 10s');
   await expect(cut).toContainText('Applying the look requires a separately reviewed, costed re-render');
   await expect(cut).not.toContainText(/stitched|auto-duck|density/i);
+
+  const hero = cut.locator('[data-cut-hero]');
+  const preview = hero.locator('[data-cut-preview]');
+  const media = preview.locator('video[data-cut-preview-media][data-media-kind="video"]');
+  const transport = hero.locator('[data-cut-transport]');
+  const summary = hero.locator(':scope > [data-cut-summary]');
+  await expect(hero).toBeVisible();
+  await expect(preview).toBeVisible();
+  await expect(media).toHaveCount(1);
+  await expect(transport).toHaveAttribute('role', 'group');
+  await expect(transport).toHaveAccessibleName('Film transport');
+  await expect(summary).toBeVisible();
+  await expect(summary.locator('[data-cut-film]')).toHaveCount(1);
+  await expect(transport.locator('[data-cut-play]')).toHaveAccessibleName('Play film');
+  await expect(transport.locator('[data-cut-play]')).toHaveAttribute('aria-pressed', 'false');
+  await expect(transport.locator('[data-cut-time]')).toHaveText('0:00 / 0:10');
+  await expect(transport.getByText('Picture only — the bed is muted here', { exact: true })).toBeVisible();
+  await expect(cut.locator('audio')).toHaveCount(0);
+
+  const managedVideoUrl = `weprompt-studio://asset/${managedVideo.projectId}/${managedVideo.assetId}`;
+  await expect
+    .poll(
+      async () =>
+        media.evaluate((element: HTMLVideoElement) => ({
+          controls: element.controls,
+          currentSrc: element.currentSrc,
+          duration: element.duration,
+          muted: element.muted,
+          playsInline: element.playsInline,
+          ready: element.readyState >= HTMLMediaElement.HAVE_METADATA,
+          videoHeight: element.videoHeight,
+          videoWidth: element.videoWidth,
+        })),
+      { timeout: 10_000 }
+    )
+    .toMatchObject({
+      controls: false,
+      currentSrc: managedVideoUrl,
+      duration: 10,
+      muted: true,
+      playsInline: true,
+      ready: true,
+      videoHeight: 16,
+      videoWidth: 16,
+    });
+  await expect(media).toHaveAccessibleName('Beat 01 · Cut export Beat · Shot 01 · The airplane settles into frame.');
+
+  const heroGeometry = await hero.evaluate((element) => {
+    const box = (selector: string) => {
+      const target = element.querySelector<HTMLElement>(selector);
+      if (target === null) throw new Error(`Cut hero geometry target was unavailable: ${selector}`);
+      const { bottom, height, left, right, top, width } = target.getBoundingClientRect();
+      return { bottom, height, left, right, top, width };
+    };
+    const cutContainer = element.closest<HTMLElement>('[data-studio-cut]');
+    if (cutContainer === null) throw new Error('Cut hero container was unavailable');
+    const heroRect = element.getBoundingClientRect();
+    return {
+      containerWidth: cutContainer.getBoundingClientRect().width,
+      hero: {
+        bottom: heroRect.bottom,
+        left: heroRect.left,
+        right: heroRect.right,
+        top: heroRect.top,
+        width: heroRect.width,
+      },
+      heroClientWidth: element.clientWidth,
+      heroScrollWidth: element.scrollWidth,
+      preview: box('[data-cut-preview]'),
+      transport: box('[data-cut-transport]'),
+      summary: box('[data-cut-summary]'),
+    };
+  });
+  expect(heroGeometry.heroScrollWidth).toBeLessThanOrEqual(heroGeometry.heroClientWidth + 1);
+  expect(heroGeometry.preview.width / heroGeometry.preview.height).toBeCloseTo(16 / 9, 2);
+  expect(Math.abs(heroGeometry.preview.left - heroGeometry.transport.left)).toBeLessThanOrEqual(1);
+  expect(Math.abs(heroGeometry.preview.right - heroGeometry.transport.right)).toBeLessThanOrEqual(1);
+  expect(heroGeometry.preview.bottom).toBeLessThanOrEqual(heroGeometry.transport.top - 6);
+  for (const child of [heroGeometry.preview, heroGeometry.transport, heroGeometry.summary]) {
+    expect(child.left).toBeGreaterThanOrEqual(heroGeometry.hero.left - 1);
+    expect(child.right).toBeLessThanOrEqual(heroGeometry.hero.right + 1);
+  }
+
+  const wide = heroGeometry.containerWidth >= 860;
+  if (wide) {
+    expect(Math.abs(heroGeometry.preview.top - heroGeometry.summary.top)).toBeLessThanOrEqual(1);
+    expect(heroGeometry.preview.width / heroGeometry.summary.width).toBeCloseTo(2, 1);
+    const [inlineStart, inlineEnd] = [heroGeometry.preview, heroGeometry.summary].toSorted(
+      (left, right) => left.left - right.left
+    );
+    const inlineGap = inlineEnd!.left - inlineStart!.right;
+    expect(inlineGap).toBeGreaterThanOrEqual(12);
+    expect(inlineGap).toBeLessThanOrEqual(14);
+  } else {
+    expect(heroGeometry.transport.bottom).toBeLessThanOrEqual(heroGeometry.summary.top - 12);
+    expect(Math.abs(heroGeometry.preview.left - heroGeometry.summary.left)).toBeLessThanOrEqual(1);
+    expect(Math.abs(heroGeometry.preview.right - heroGeometry.summary.right)).toBeLessThanOrEqual(1);
+  }
 
   const filmstrip = cut.getByRole('list', { name: 'Beats in film order' });
   await expect(filmstrip).toHaveAttribute('data-cut-filmstrip', 'true');
@@ -472,13 +579,14 @@ const captureCutViewportReference = async (page: Page, reference: StudioViewport
     expect(box.x + box.width).toBeLessThanOrEqual(reference.width + 1);
   }
 
-  if (reference.layout === 'columns') {
+  if (metrics.clientWidth > 599) {
     expect(Math.abs(audioBox.y - matchBox.y)).toBeLessThanOrEqual(1);
     expect(Math.abs(editorBox.y - stillBox.y)).toBeLessThanOrEqual(1);
     expect(Math.abs(stillBox.y - scriptBox.y)).toBeLessThanOrEqual(1);
-    expect(audioBox.x).toBeLessThan(matchBox.x);
-    expect(editorBox.x).toBeLessThan(stillBox.x);
-    expect(stillBox.x).toBeLessThan(scriptBox.x);
+    const inlineDirection = reference.direction === 'ltr' ? 1 : -1;
+    expect((matchBox.x - audioBox.x) * inlineDirection).toBeGreaterThan(0);
+    expect((stillBox.x - editorBox.x) * inlineDirection).toBeGreaterThan(0);
+    expect((scriptBox.x - stillBox.x) * inlineDirection).toBeGreaterThan(0);
   } else {
     expect(matchBox.y).toBeGreaterThanOrEqual(audioBox.y + audioBox.height - 1);
     expect(stillBox.y).toBeGreaterThanOrEqual(editorBox.y + editorBox.height - 1);
@@ -497,6 +605,36 @@ const captureCutViewportReference = async (page: Page, reference: StudioViewport
   else expect(tableLinkBox.x).toBeGreaterThan(cutLinkBox.x);
 
   await takeScreenshot(page, reference.screenshotName);
+};
+
+const exerciseCutPreviewTransport = async (
+  page: Page,
+  cut: Locator,
+  managedVideo: CutManagedVideoReference
+): Promise<void> => {
+  const media = cut.locator('[data-cut-preview] video[data-cut-preview-media][data-media-kind="video"]');
+  const play = cut.locator('[data-cut-transport] [data-cut-play]');
+  const expectedUrl = `weprompt-studio://asset/${managedVideo.projectId}/${managedVideo.assetId}`;
+  await expect(media).toHaveCount(1);
+  await expect.poll(async () => media.evaluate((element: HTMLVideoElement) => element.currentSrc)).toBe(expectedUrl);
+  const initialTime = await media.evaluate((element: HTMLVideoElement) => element.currentTime);
+
+  await play.click();
+  await expect(play).toHaveAccessibleName('Pause film');
+  await expect(play).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(async () => media.evaluate((element: HTMLVideoElement) => element.paused)).toBe(false);
+  await expect
+    .poll(async () => media.evaluate((element: HTMLVideoElement) => element.currentTime), { timeout: 4_000 })
+    .toBeGreaterThan(initialTime + 0.1);
+
+  await play.click();
+  await expect(play).toHaveAccessibleName('Play film');
+  await expect(play).toHaveAttribute('aria-pressed', 'false');
+  await expect.poll(async () => media.evaluate((element: HTMLVideoElement) => element.paused)).toBe(true);
+  const pausedAt = await media.evaluate((element: HTMLVideoElement) => element.currentTime);
+  await page.waitForTimeout(300);
+  const afterPause = await media.evaluate((element: HTMLVideoElement) => element.currentTime);
+  expect(Math.abs(afterPause - pausedAt)).toBeLessThanOrEqual(0.05);
 };
 
 type RenderedCutFixture = {
@@ -693,6 +831,125 @@ const expectLocatorFitsViewport = async (
   expect(box.x + box.width).toBeLessThanOrEqual(reference.width + 1);
 };
 
+const expectBeatAuthoringBandGeometry = async (panel: Locator, reference: StudioViewportReference): Promise<void> => {
+  await expect
+    .poll(async () =>
+      panel.evaluate((element) => {
+        const transform = getComputedStyle(element).transform;
+        if (transform === 'none') return true;
+        const matrix = new DOMMatrixReadOnly(transform);
+        return Math.abs(matrix.a - 1) <= 0.001 && Math.abs(matrix.d - 1) <= 0.001;
+      })
+    )
+    .toBe(true);
+
+  const fields = panel.locator('section[aria-label="Beat action, look, and target"]');
+  const actionField = fields.locator('[data-beat-field="action"]');
+  const lookField = fields.locator('[data-beat-field="look"]');
+
+  const actionGuidance = actionField.getByText('Action · The one thing you write', { exact: true });
+  const lookGuidance = lookField.getByText('Look · Every Shot inherits it', { exact: true });
+  const lookCounter = lookField.getByRole('status');
+  await expect(actionGuidance).toBeVisible();
+  await expect(lookGuidance).toBeVisible();
+  await expect(lookCounter).toHaveText(/^[0-9]+ \/ 25 words$/);
+  for (const label of [actionGuidance, lookGuidance, lookCounter]) {
+    // eslint-disable-next-line no-await-in-loop -- each visible copy has its own computed typography authority
+    await expect(label).toHaveCSS('text-transform', 'uppercase');
+  }
+
+  const geometry = await panel.evaluate((panelElement) => {
+    const element = panelElement.querySelector<HTMLElement>('section[aria-label="Beat action, look, and target"]');
+    if (element === null) throw new Error('Beat authoring section was unavailable');
+    const box = (selector: string) => {
+      const target = element.querySelector<HTMLElement>(selector);
+      if (target === null) throw new Error(`Beat authoring geometry target was unavailable: ${selector}`);
+      const { bottom, left, right, top, width } = target.getBoundingClientRect();
+      return { bottom, left, right, top, width };
+    };
+    const panelRect = panelElement.getBoundingClientRect();
+    const panelStyle = getComputedStyle(panelElement);
+    const { bottom, left, right, top, width } = element.getBoundingClientRect();
+    const documentElement = element.ownerDocument.documentElement;
+    return {
+      panel: {
+        rect: {
+          bottom: panelRect.bottom,
+          left: panelRect.left,
+          right: panelRect.right,
+          top: panelRect.top,
+          width: panelRect.width,
+        },
+        clientWidth: panelElement.clientWidth,
+        scrollWidth: panelElement.scrollWidth,
+        computedWidth: panelStyle.width,
+        computedInlineSize: panelStyle.inlineSize,
+        computedMaxInlineSize: panelStyle.maxInlineSize,
+      },
+      viewport: {
+        innerWidth: window.innerWidth,
+        devicePixelRatio: window.devicePixelRatio,
+        visualScale: window.visualViewport?.scale ?? null,
+      },
+      section: { bottom, left, right, top, width },
+      sectionClientWidth: element.clientWidth,
+      sectionScrollWidth: element.scrollWidth,
+      documentClientWidth: documentElement.clientWidth,
+      documentScrollWidth: documentElement.scrollWidth,
+      action: box('[data-beat-field="action"]'),
+      look: box('[data-beat-field="look"]'),
+      target: box('[data-beat-field="target"]'),
+      meta: box('[data-beat-meta-row]'),
+      actions: box('[data-beat-editor-actions]'),
+    };
+  });
+  const computedPanelWidth = Number.parseFloat(geometry.panel.computedWidth);
+  const computedPanelInlineSize = Number.parseFloat(geometry.panel.computedInlineSize);
+  const computedPanelMaxInlineSize = Number.parseFloat(geometry.panel.computedMaxInlineSize);
+  expect(computedPanelWidth).toBeLessThanOrEqual(854);
+  expect(computedPanelInlineSize).toBeLessThanOrEqual(854);
+  expect(computedPanelMaxInlineSize).toBe(852);
+  expect(geometry.panel.clientWidth).toBeLessThanOrEqual(854);
+  expect(geometry.panel.scrollWidth).toBeLessThanOrEqual(geometry.panel.clientWidth + 1);
+  expect(geometry.section.left).toBeGreaterThanOrEqual(geometry.panel.rect.left - 1);
+  expect(geometry.section.right).toBeLessThanOrEqual(geometry.panel.rect.right + 1);
+  expect(geometry.sectionScrollWidth).toBeLessThanOrEqual(geometry.sectionClientWidth + 1);
+  expect(geometry.documentScrollWidth).toBeLessThanOrEqual(geometry.documentClientWidth + 1);
+
+  if (reference.width > 760) {
+    expect(computedPanelWidth).toBeGreaterThanOrEqual(848);
+    expect(computedPanelInlineSize).toBeGreaterThanOrEqual(848);
+    expect(geometry.panel.clientWidth).toBeGreaterThanOrEqual(848);
+    expect(Math.abs(geometry.action.top - geometry.look.top)).toBeLessThanOrEqual(1);
+    expect(geometry.action.width / geometry.look.width).toBeCloseTo(1.25, 1);
+    const inlineGap =
+      reference.direction === 'rtl'
+        ? geometry.action.left - geometry.look.right
+        : geometry.look.left - geometry.action.right;
+    expect(inlineGap).toBeGreaterThanOrEqual(12);
+    expect(inlineGap).toBeLessThanOrEqual(14);
+    expect(geometry.meta.top).toBeGreaterThanOrEqual(Math.max(geometry.action.bottom, geometry.look.bottom) + 12);
+    expect(Math.abs(geometry.meta.left - Math.min(geometry.action.left, geometry.look.left))).toBeLessThanOrEqual(1);
+    expect(Math.abs(geometry.meta.right - Math.max(geometry.action.right, geometry.look.right))).toBeLessThanOrEqual(1);
+    expect(Math.min(geometry.target.bottom, geometry.actions.bottom)).toBeGreaterThan(
+      Math.max(geometry.target.top, geometry.actions.top)
+    );
+    return;
+  }
+
+  expect(geometry.action.bottom).toBeLessThanOrEqual(geometry.look.top - 12);
+  expect(geometry.look.bottom).toBeLessThanOrEqual(geometry.target.top - 12);
+  expect(geometry.target.bottom).toBeLessThanOrEqual(geometry.actions.top + 1);
+  expect(Math.abs(geometry.action.left - geometry.look.left)).toBeLessThanOrEqual(1);
+  expect(Math.abs(geometry.action.right - geometry.look.right)).toBeLessThanOrEqual(1);
+  for (const child of [geometry.action, geometry.look, geometry.target, geometry.actions]) {
+    expect(child.left).toBeGreaterThanOrEqual(geometry.section.left - 1);
+    expect(child.right).toBeLessThanOrEqual(geometry.section.right + 1);
+    expect(child.top).toBeGreaterThanOrEqual(geometry.section.top - 1);
+    expect(child.bottom).toBeLessThanOrEqual(geometry.section.bottom + 1);
+  }
+};
+
 const expectFoldedTableFits = async (table: Locator): Promise<void> => {
   await expect(table.getByRole('columnheader')).toHaveCount(6);
   const geometry = await table.evaluate((element) => {
@@ -792,10 +1049,37 @@ const exerciseRenderedShotViewportLifecycle = async (page: Page, reference: Stud
   const panel = page.getByRole('dialog', { name: 'Beat panel — Landing' });
   await expect(panel).toBeVisible();
   await expect(panel.locator('article[data-shot-id]')).toHaveCount(2);
+  await expectBeatAuthoringBandGeometry(panel, reference);
   const shotCard = panel.locator(`article[data-shot-id="${shotId}"]`);
   const anchorShotCard = panel.locator(`article[data-shot-id="${anchorShotId}"]`);
   await expect(shotCard).toContainText('The plane lands.');
   await expect(anchorShotCard).toContainText('The desk remains in view.');
+  expect(projectBeforeLift.shots[shotId]?.derivation).toBe('derived');
+  expect(projectBeforeLift.shots[anchorShotId]?.derivation).toBe('derived');
+  const headState = shotCard.locator('[data-chain-state="segment_head"]');
+  const continuousState = anchorShotCard.locator('[data-chain-state="continuous"]');
+  await expect(headState).toHaveText('Head of the chain · Starts from the still');
+  await expect(continuousState).toHaveText('Continues from Shot 01’s last frame');
+  await expect(headState.locator('[data-hard-cut-contained]')).toHaveCount(0);
+  await expect(continuousState.locator('[data-hard-cut-contained]')).toHaveCount(0);
+  const firstLine = shotCard.getByRole('textbox', { name: 'Line for Shot 1', exact: true });
+  const secondLine = anchorShotCard.getByRole('textbox', { name: 'Line for Shot 2', exact: true });
+  await expect(firstLine).toHaveAccessibleDescription('Written from the action · Edit to detach');
+  await expect(secondLine).toHaveAccessibleDescription('Written from the action · Edit to detach');
+  const hardCutGroup = shotCard.locator('[data-hard-cut-contained]');
+  await expect(hardCutGroup).toHaveAccessibleName('Start with a hard cut');
+  await expect(hardCutGroup).toHaveAccessibleDescription(
+    'Hard-cut changes are temporarily unavailable. A reviewed estimate for the required replacement media must come first.'
+  );
+  const hardCutControl = hardCutGroup.getByRole('checkbox', { name: 'Start with a hard cut' });
+  await expect(hardCutControl).toBeDisabled();
+  if (projectBeforeLift.shots[shotId]?.chainBreak === 'hard_cut') {
+    await expect(hardCutControl).toBeChecked();
+  } else {
+    await expect(hardCutControl).not.toBeChecked();
+  }
+  await hardCutControl.evaluate((element: HTMLInputElement) => element.click());
+  expect(await readStudioProject(page, projectId)).toEqual(projectBeforeLift);
   const playbackLane = panel.getByRole('group', { name: 'Playback coverage' });
   const planningLane = panel.getByRole('group', { name: 'Planning overlay' });
   const renderedPlaybackSegment = playbackLane.locator(`[data-shot-id="${shotId}"]`);
@@ -1718,7 +2002,18 @@ test.describe('Creative Studio workspace', () => {
       await expect.poll(async () => (await readStudioProject(page, projectId)).shots[shotId]?.trimOutSeconds).toBe(2);
       await expect(tailTrim).toHaveAttribute('aria-valuenow', '2');
       await expect(panel.getByText('Tail trim breaks downstream continuity.')).toBeVisible();
-      await expect(panel.locator(`article[data-shot-id="${anchorShotId}"]`)).toContainText('Continuity is out of date');
+      const staleAnchorShotCard = panel.locator(`article[data-shot-id="${anchorShotId}"]`);
+      const continuityWarning = staleAnchorShotCard.getByText('Continuity is out of date', { exact: true });
+      await expect(continuityWarning).toBeVisible();
+      await expect(staleAnchorShotCard.locator('[data-chain-state="continuous"]')).toHaveText(
+        'Continues from Shot 01’s last frame'
+      );
+      await expect(
+        staleAnchorShotCard.locator('[data-chain-state]').getByText('Continuity is out of date', { exact: true })
+      ).toHaveCount(0);
+      await expect(
+        staleAnchorShotCard.locator('[data-hard-cut-contained]').getByText('Continuity is out of date', { exact: true })
+      ).toHaveCount(0);
 
       const trimmed = await readStudioProject(page, projectId);
       expect(trimmed.shots[shotId]).toEqual({ ...terminal.shots[shotId], trimOutSeconds: 2 });
@@ -2099,12 +2394,16 @@ test.describe('Creative Studio workspace', () => {
       expect(matched.revision).toBe(replaced.revision + 1);
       expect(matched.jobs).toEqual(replaced.jobs);
 
-      await captureCutViewportReference(page, studioViewportReferences[0]);
-      await captureCutViewportReference(page, studioViewportReferences[1]);
-      await captureCutViewportReference(page, studioViewportReferences[2]);
-      await captureCutViewportReference(page, studioViewportReferences[3]);
+      const managedVideo = { projectId: rendered.projectId, assetId: rendered.videoAssetId };
+      await captureCutViewportReference(page, studioViewportReferences[0], managedVideo);
+      await captureCutViewportReference(page, studioViewportReferences[1], managedVideo);
+      await captureCutViewportReference(page, studioViewportReferences[2], managedVideo);
+      await captureCutViewportReference(page, studioViewportReferences[3], managedVideo);
       await page.locator('html').evaluate((element) => element.setAttribute('dir', 'ltr'));
       await page.setViewportSize({ width: 1440, height: 900 });
+      const providerCallsBeforePlayback = await readStudioE2EProviderCallCounts(userDataDirectory);
+      await exerciseCutPreviewTransport(page, cut, managedVideo);
+      expect(await readStudioE2EProviderCallCounts(userDataDirectory)).toEqual(providerCallsBeforePlayback);
 
       const createAndReadCatalog = async (buttonName: string, expectedShapes: string[]) => {
         await cut.getByRole('button', { name: buttonName }).click();

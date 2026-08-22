@@ -6,6 +6,7 @@
  * @vitest-environment node
  */
 
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   STUDIO_MAX_BEATS,
@@ -48,6 +49,24 @@ const timestamp = '2026-08-17T00:00:00.000Z';
 const laterTimestamp = '2026-08-17T00:00:01.000Z';
 const digest = 'a'.repeat(64);
 const provider = { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'model_1' } as const;
+
+const canonicalJson = (value: unknown): string => {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .toSorted()
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+    .join(',')}}`;
+};
+
+const authoredDigest = (value: unknown): string =>
+  createHash('sha256').update(canonicalJson(value), 'utf8').digest('hex');
+
+const authoredShot = (shot: StudioShot): Omit<StudioShot, 'assetIds' | 'jobIds'> => {
+  const { assetIds: _assetIds, jobIds: _jobIds, ...authored } = shot;
+  return structuredClone(authored);
+};
 
 const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot => ({
   id,
@@ -595,7 +614,7 @@ describe('applyStudioMutationBatchV2 final operation contract', () => {
     expect(restored.project.bin).toEqual([]);
   });
 
-  it('applies ordered Shot creation, editing, reorder, hard-cut, and dependency-free deletion', () => {
+  it('applies ordered Shot creation, editing, reorder, and dependency-free deletion', () => {
     const result = apply(makeProject(), [
       {
         kind: 'add_shot',
@@ -606,7 +625,6 @@ describe('applyStudioMutationBatchV2 final operation contract', () => {
       },
       { kind: 'edit_shot', shotId: 'shot_3', changes: { narration: 'Voice' } },
       { kind: 'reorder_shots', beatId: 'beat_1', shotOrder: ['shot_2', 'shot_1', 'shot_3'] },
-      { kind: 'set_hard_cut', shotId: 'shot_3', hardCut: true },
       { kind: 'delete_shot', shotId: 'shot_2' },
     ]);
 
@@ -616,9 +634,24 @@ describe('applyStudioMutationBatchV2 final operation contract', () => {
     expect(result.project.shots.shot_3).toMatchObject({
       line: 'New shot',
       narration: 'Voice',
-      chainBreak: 'hard_cut',
+      chainBreak: 'none',
       derivation: 'derived',
     });
+  });
+
+  it.each([
+    { label: 'sever', chainBreak: 'none' as const, hardCut: true },
+    { label: 'rejoin', chainBreak: 'hard_cut' as const, hardCut: false },
+  ])('refuses a free $label transition byte-for-byte', ({ chainBreak, hardCut }) => {
+    const project = makeProject();
+    project.shots.shot_2!.chainBreak = chainBreak;
+
+    expectReason(
+      project,
+      [{ kind: 'set_hard_cut', shotId: 'shot_2', hardCut }],
+      'invalid_operation',
+      `mutation_refuse_${hardCut ? 'sever' : 'rejoin'}`
+    );
   });
 
   it('parks and restores a Shot only through its persisted original owner', () => {
@@ -715,6 +748,78 @@ describe('applyStudioMutationBatchV2 coverage and fixed shots', () => {
     onScreenText: shot.onScreenText,
     durationSeconds: shot.durationSeconds,
     chainBreak: shot.chainBreak,
+  });
+
+  it('refuses coverage that introduces a new hard-cut head byte-for-byte', () => {
+    const project = makeProject();
+
+    expectReason(
+      project,
+      [
+        {
+          kind: 'apply_coverage',
+          beatId: 'beat_1',
+          shots: [
+            proposed(project.shots.shot_1!),
+            {
+              shotId: 'shot_3',
+              line: 'New segment',
+              narration: '',
+              onScreenText: '',
+              durationSeconds: 5,
+              chainBreak: 'hard_cut',
+            },
+          ],
+          fixedShots: [],
+        },
+      ],
+      'invalid_operation',
+      'mutation_refuse_new_hard_cut'
+    );
+  });
+
+  it.each([
+    { label: 'sever', before: 'none' as const, after: 'hard_cut' as const },
+    { label: 'rejoin', before: 'hard_cut' as const, after: 'none' as const },
+  ])('refuses coverage that would $label an existing Shot byte-for-byte', ({ before, after }) => {
+    const project = makeProject();
+    project.shots.shot_2!.chainBreak = before;
+
+    expectReason(
+      project,
+      [
+        {
+          kind: 'apply_coverage',
+          beatId: 'beat_1',
+          shots: [proposed(project.shots.shot_1!), { ...proposed(project.shots.shot_2!), chainBreak: after }],
+          fixedShots: [],
+        },
+      ],
+      'invalid_operation',
+      `mutation_refuse_coverage_${before}_${after}`
+    );
+  });
+
+  it('retains canonical hard-cut data while applying non-chain coverage edits', () => {
+    const project = makeProject();
+    project.shots.shot_2!.chainBreak = 'hard_cut';
+
+    const result = apply(project, [
+      {
+        kind: 'apply_coverage',
+        beatId: 'beat_1',
+        shots: [
+          proposed(project.shots.shot_1!),
+          { ...proposed(project.shots.shot_2!), line: 'Revised without changing continuity' },
+        ],
+        fixedShots: [],
+      },
+    ]);
+
+    expect(result.project.shots.shot_2).toMatchObject({
+      line: 'Revised without changing continuity',
+      chainBreak: 'hard_cut',
+    });
   });
 
   it('replaces dependency-free coverage while preserving every exact fixed row and boundary', () => {
@@ -1159,6 +1264,37 @@ describe('applyStudioMutationBatchV2 line history and unified undo', () => {
       [{ kind: 'undo_last', entryId: 'mutation_conflict' }],
       'undo_conflict',
       'mutation_undo_conflict'
+    );
+  });
+
+  it('refuses a legacy exact undo patch that would rejoin a hard-cut Shot', () => {
+    const project = makeProject();
+    const current = project.shots.shot_2!;
+    current.chainBreak = 'hard_cut';
+    project.undoHistory = [
+      {
+        id: 'legacy_hard_cut_undo',
+        sourceRevision: project.revision,
+        label: 'set_hard_cut',
+        patches: [
+          {
+            kind: 'shot_fields',
+            shotId: current.id,
+            before: { ...authoredShot(current), chainBreak: 'none' },
+            beforeBeatId: 'beat_1',
+            beforeIndex: 1,
+            afterDigest: authoredDigest({ value: authoredShot(current), beatId: 'beat_1', index: 1 }),
+          },
+        ],
+      },
+    ];
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    expectReason(
+      project,
+      [{ kind: 'undo_last', entryId: 'legacy_hard_cut_undo' }],
+      'undo_conflict',
+      'mutation_refuse_legacy_hard_cut_undo'
     );
   });
 

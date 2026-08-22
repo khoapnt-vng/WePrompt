@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { readFileSync } from 'node:fs';
+import { resolve as resolvePath } from 'node:path';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -117,10 +119,14 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.blocker.statusUnavailable': 'Status unavailable',
         'conversation.creativeStudio.workspace.beatPanel.blocker.unsavedDrafts': 'Save or reset local edits first',
         'conversation.creativeStudio.workspace.beatPanel.chain.authorHardCut': 'Author hard cut',
-        'conversation.creativeStudio.workspace.beatPanel.chain.continuous': 'Continuous',
+        'conversation.creativeStudio.workspace.beatPanel.chain.continuous':
+          'Continues from Shot {{position}}’s last frame',
         'conversation.creativeStudio.workspace.beatPanel.chain.hardCut': 'Hard cut',
+        'conversation.creativeStudio.workspace.beatPanel.chain.hardCutUnavailable':
+          'Hard-cut changes are temporarily unavailable. A reviewed estimate for the required replacement media must come first.',
         'conversation.creativeStudio.workspace.beatPanel.chain.generationOutOfDate': 'Generated work is out of date',
-        'conversation.creativeStudio.workspace.beatPanel.chain.segmentHead': 'Segment head',
+        'conversation.creativeStudio.workspace.beatPanel.chain.segmentHead':
+          'Head of the chain · Starts from the still',
         'conversation.creativeStudio.workspace.beatPanel.chain.systemContinuityStale': 'System continuity is stale',
         'conversation.creativeStudio.workspace.beatPanel.common.cancel': 'Cancel',
         'conversation.creativeStudio.workspace.beatPanel.common.keepWaiting': 'Keep waiting',
@@ -129,8 +135,12 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.common.saveBeat': 'Save Beat',
         'conversation.creativeStudio.workspace.beatPanel.common.saveShot': 'Save Shot',
         'conversation.creativeStudio.workspace.beatPanel.coverage.reviewResplit': 'Review re-split',
-        'conversation.creativeStudio.workspace.beatPanel.derivation.derived': 'Derived',
-        'conversation.creativeStudio.workspace.beatPanel.derivation.detached': 'Detached',
+        'conversation.creativeStudio.workspace.beatPanel.derivation.derived': 'Derived from the action',
+        'conversation.creativeStudio.workspace.beatPanel.derivation.detached': 'Detached · Yours',
+        'conversation.creativeStudio.workspace.beatPanel.derivation.attachedLineGuidance':
+          'Written from the action · Edit to detach',
+        'conversation.creativeStudio.workspace.beatPanel.derivation.detachedLineGuidance':
+          'Your words · No longer follows the action',
         'conversation.creativeStudio.workspace.beatPanel.derivation.detach': 'Detach line',
         'conversation.creativeStudio.workspace.beatPanel.derivation.rederiveReviewed': 'Review re-derive',
         'conversation.creativeStudio.workspace.beatPanel.derivation.restoreHistory': 'Restore history line',
@@ -204,6 +214,8 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.coverage.unavailable': 'Coverage unavailable',
         'conversation.creativeStudio.workspace.beatPanel.coverage.playbackLane': 'Playback lane',
         'conversation.creativeStudio.workspace.beatPanel.coverage.planningLane': 'Planning lane',
+        'conversation.creativeStudio.workspace.beatPanel.fieldGuidance.action': 'Action · The one thing you write',
+        'conversation.creativeStudio.workspace.beatPanel.fieldGuidance.look': 'Look · Every Shot inherits it',
       };
       if (key.endsWith('.title') && key.includes('.beatPanel.title')) return `Edit ${String(values?.title)}`;
       if (key.endsWith('.label') && key.includes('.beatPanel.label')) return `Beat panel ${String(values?.title)}`;
@@ -213,8 +225,12 @@ vi.mock('react-i18next', () => ({
       if (key.endsWith('.shots.position')) {
         return `Beat ${String(values?.beatIndex)}, Shot ${String(values?.shotIndex)}`;
       }
+      if (key.endsWith('.chain.continuous')) {
+        return `Continues from Shot ${String(values?.position)}’s last frame`;
+      }
+      if (key.endsWith('.fields.lineFor')) return `Line for Shot ${String(values?.index)}`;
       if (key.endsWith('For')) return `${key.split('.').at(-1)?.replace('For', '')} Shot ${String(values?.index)}`;
-      if (key.endsWith('.lookCounter')) return `${String(values?.count)} words; 25 recommended`;
+      if (key.endsWith('.lookCounter')) return `${String(values?.count)} / 25 words`;
       if (key.endsWith('.reorder.previous')) return `Move Shot ${String(values?.index)} up`;
       if (key.endsWith('.reorder.next')) return `Move Shot ${String(values?.index)} down`;
       if (key.endsWith('.reorder.announcement')) {
@@ -434,7 +450,6 @@ const makeDrafts = (
 const makeActions = (overrides: Partial<BeatPanelActions> = {}) => ({
   saveBeat: vi.fn().mockResolvedValue(true),
   saveShot: vi.fn().mockResolvedValue(true),
-  setHardCut: vi.fn().mockResolvedValue(true),
   setSeedStill: vi.fn().mockResolvedValue(true),
   trimShot: vi.fn().mockResolvedValue(true),
   reorderShots: vi.fn().mockResolvedValue(true),
@@ -504,35 +519,188 @@ const takeCard = (container: HTMLElement, assetId: string): HTMLElement => {
   return card;
 };
 
+const cssRuleBody = (source: string, selector: string): string => {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?:^|\\n)\\s*${escaped}\\s*\\{([^}]*)\\}`).exec(source)?.[1] ?? '';
+};
+
 describe('BeatPanel', () => {
   beforeEach(() => {
     vi.stubGlobal('ResizeObserver', NoopResizeObserver);
   });
 
-  it('distinguishes the natural head, authored hard cut, and system continuity staleness without visible IDs', () => {
+  it('states Shot chain and Line provenance without merging authored controls or continuity warnings', () => {
     const image = makeTake('asset_private_image', 'image', { effectiveSeed: true });
     const video = makeTake('asset_private_video', 'video');
     const beat = makeBeat('beat_private', [
       makeShot('shot_private_1', 0, { imageTakes: [image], segmentHead: true }),
       makeShot('shot_private_2', 1, {
-        chainBreak: 'hard_cut',
         dirtyCauses: ['continuity_stale', 'generation_out_of_date'],
-        segmentHead: true,
+        segmentHead: false,
         videoTakes: [video],
+      }),
+      makeShot('shot_private_3', 2, {
+        derivation: 'detached',
+        segmentHead: true,
+      }),
+      makeShot('shot_private_4', 3, {
+        chainBreak: 'hard_cut',
+        derivation: 'detached',
+        segmentHead: true,
+      }),
+      makeShot('shot_private_5', 4, {
+        chainBreak: 'hard_cut',
+        segmentHead: false,
       }),
     ]);
     const projection = makeProjection([beat]);
     const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), makeActions(), projection)} />);
 
-    expect(within(shotCard(container, 'shot_private_1')).getByText('Segment head')).toBeInTheDocument();
-    expect(within(shotCard(container, 'shot_private_2')).getByText('Hard cut')).toBeInTheDocument();
-    expect(within(shotCard(container, 'shot_private_2')).queryByText('System continuity is stale')).toBeNull();
-    expect(within(shotCard(container, 'shot_private_2')).getByText('Generated work is out of date')).toBeVisible();
+    const naturalHead = shotCard(container, 'shot_private_1');
+    const continuation = shotCard(container, 'shot_private_2');
+    const laterNaturalHead = shotCard(container, 'shot_private_3');
+    const authoredHead = shotCard(container, 'shot_private_4');
+    const defensiveContinuation = shotCard(container, 'shot_private_5');
+    const headCopy = 'Head of the chain · Starts from the still';
+
+    expect(naturalHead.querySelector('[data-chain-state="segment_head"]')).toHaveTextContent(headCopy);
+    expect(continuation.querySelector('[data-chain-state="continuous"]')).toHaveTextContent(
+      'Continues from Shot 01’s last frame'
+    );
+    expect(laterNaturalHead.querySelector('[data-chain-state="segment_head"]')).toHaveTextContent(headCopy);
+    expect(authoredHead.querySelector('[data-chain-state="hard_cut"]')).toHaveTextContent(headCopy);
+    expect(defensiveContinuation.querySelector('[data-chain-state="continuous"]')).toHaveTextContent(
+      'Continues from Shot 04’s last frame'
+    );
+
+    const continuityWarning = within(continuation).getByText('System continuity is stale');
+    const continuationState = continuation.querySelector<HTMLElement>('[data-chain-state="continuous"]');
+    const hardCutGroup = within(continuation).getByRole('group', { name: 'Author hard cut' });
+    expect(continuityWarning).toBeVisible();
+    expect(continuationState).not.toContainElement(continuityWarning);
+    expect(hardCutGroup).not.toContainElement(continuityWarning);
+    expect(within(continuation).getByText('Generated work is out of date')).toBeVisible();
+
+    const derivedGuidance = naturalHead.querySelector<HTMLElement>('[data-line-derivation="derived"]');
+    const detachedGuidance = laterNaturalHead.querySelector<HTMLElement>('[data-line-derivation="detached"]');
+    expect(derivedGuidance).toHaveTextContent('Written from the action · Edit to detach');
+    expect(detachedGuidance).toHaveTextContent('Your words · No longer follows the action');
+    const derivedLine = within(naturalHead).getByRole('textbox', { name: 'Line for Shot 1' });
+    const detachedLine = within(laterNaturalHead).getByRole('textbox', { name: 'Line for Shot 3' });
+    expect(derivedLine).toHaveAttribute('aria-describedby', derivedGuidance?.id);
+    expect(derivedLine).toHaveAccessibleDescription('Written from the action · Edit to detach');
+    expect(detachedLine).toHaveAttribute('aria-describedby', detachedGuidance?.id);
+    expect(detachedLine).toHaveAccessibleDescription('Your words · No longer follows the action');
+
+    expect(within(naturalHead).getByText('Derived from the action')).toBeVisible();
+    expect(within(laterNaturalHead).getByText('Detached · Yours')).toBeVisible();
+    expect(within(authoredHead).getByRole('checkbox', { name: 'Author hard cut' })).toBeChecked();
+    expect(within(defensiveContinuation).getByRole('checkbox', { name: 'Author hard cut' })).toBeChecked();
     expect(container.querySelector('video')).toHaveProperty('controls', true);
     expect(container).toHaveTextContent('Shot 1 image 1');
     expect(container).toHaveTextContent('Shot 2 take 1');
     expect(container.textContent).not.toContain('asset_private');
     expect(container.textContent).not.toContain('shot_private');
+  });
+
+  it('retains canonical hard-cut state while containing every unavailable change attempt', () => {
+    const actions = makeActions();
+    const beat = makeBeat('beat_1', [
+      makeShot('shot_continuous', 0, { chainBreak: 'none' }),
+      makeShot('shot_hard_cut', 1, { chainBreak: 'hard_cut', segmentHead: true }),
+    ]);
+    const props = panelProps(beat, makeDrafts(), actions, makeProjection([beat]));
+    const { container, rerender } = render(<BeatPanel {...props} />);
+    const continuousGroup = within(shotCard(container, 'shot_continuous')).getByRole('group', {
+      name: 'Author hard cut',
+    });
+    const hardCutGroup = within(shotCard(container, 'shot_hard_cut')).getByRole('group', {
+      name: 'Author hard cut',
+    });
+    const continuousControl = within(continuousGroup).getByRole('checkbox', { name: 'Author hard cut' });
+    const hardCutControl = within(hardCutGroup).getByRole('checkbox', { name: 'Author hard cut' });
+
+    expect(continuousControl).not.toBeChecked();
+    expect(hardCutControl).toBeChecked();
+    for (const [group, control] of [
+      [continuousGroup, continuousControl],
+      [hardCutGroup, hardCutControl],
+    ]) {
+      expect(control).toBeDisabled();
+      const descriptionId = group.getAttribute('aria-describedby');
+      expect(descriptionId).not.toBeNull();
+      expect(document.getElementById(descriptionId!)).toHaveTextContent(
+        'Hard-cut changes are temporarily unavailable. A reviewed estimate for the required replacement media must come first.'
+      );
+      fireEvent.click(control);
+      fireEvent.keyDown(control, { key: ' ' });
+      fireEvent.change(control, { target: { checked: !control.hasAttribute('checked') } });
+    }
+
+    rerender(<BeatPanel {...props} />);
+    expect(continuousControl).not.toBeChecked();
+    expect(hardCutControl).toBeChecked();
+    for (const action of Object.values(actions)) expect(action).not.toHaveBeenCalled();
+    expect(actions).not.toHaveProperty('setHardCut');
+  });
+
+  it('keeps Action and Look as adjacent semantic groups above the target and actions band', () => {
+    render(<BeatPanel {...panelProps(makeBeat(), makeDrafts(), makeActions())} />);
+
+    const fields = screen.getByRole('region', { name: 'Beat fields' });
+    const actionField = fields.querySelector<HTMLElement>('[data-beat-field="action"]');
+    const lookField = fields.querySelector<HTMLElement>('[data-beat-field="look"]');
+    const targetField = fields.querySelector<HTMLElement>('[data-beat-field="target"]');
+    const metaRow = fields.querySelector<HTMLElement>('[data-beat-meta-row]');
+    const editorActions = fields.querySelector<HTMLElement>('[data-beat-editor-actions]');
+    if (
+      actionField === null ||
+      lookField === null ||
+      targetField === null ||
+      metaRow === null ||
+      editorActions === null
+    ) {
+      throw new Error('Beat authoring field hooks are incomplete');
+    }
+
+    expect(actionField.tagName).toBe('LABEL');
+    expect(within(actionField).getByRole('textbox', { name: 'Action' })).toBeVisible();
+    expect(within(actionField).getByText('Action · The one thing you write', { exact: true })).toBeVisible();
+    expect(actionField.nextElementSibling).toBe(lookField);
+    expect(lookField.tagName).toBe('LABEL');
+    expect(within(lookField).getByRole('textbox', { name: 'Look' })).toBeVisible();
+    expect(within(lookField).getByText('Look · Every Shot inherits it', { exact: true })).toBeVisible();
+    expect(lookField.nextElementSibling).toBe(metaRow);
+    expect(metaRow).toContainElement(targetField);
+    expect(metaRow).toContainElement(editorActions);
+    expect(targetField.compareDocumentPosition(editorActions) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+  });
+
+  it('pins the authoring band to the prototype grid without widening the existing modal', () => {
+    const css = readFileSync(
+      resolvePath(
+        process.cwd(),
+        'packages/desktop/src/renderer/pages/studio/components/Workspace/BeatPanel/BeatPanel.module.css'
+      ),
+      'utf8'
+    );
+
+    const modalRule = cssRuleBody(css, '.modal');
+    expect(modalRule).toMatch(/inline-size:\s*min\(852px,\s*calc\(100vw\s*-\s*32px\)\)/);
+    expect(modalRule).toMatch(/max-inline-size:\s*852px/);
+
+    const wideRule = cssRuleBody(css, '.beatEditor');
+    expect(wideRule).toMatch(/grid-template-columns:\s*minmax\(0,\s*1\.25fr\)\s+minmax\(0,\s*1fr\)/);
+    expect(wideRule).toMatch(/gap:\s*13px/);
+    expect(cssRuleBody(css, '.beatMetaRow')).toMatch(/grid-column:\s*1\s*\/\s*-1/);
+    expect(cssRuleBody(css, '.fieldGuidance')).toMatch(/text-transform:\s*uppercase/);
+    expect(cssRuleBody(css, '.chainState')).toMatch(/text-transform:\s*uppercase/);
+    expect(cssRuleBody(css, '.lineGuidance')).toMatch(/text-transform:\s*uppercase/);
+
+    const compactStart = css.search(/@media\s*\(max-width:\s*760px\)/);
+    expect(compactStart).toBeGreaterThanOrEqual(0);
+    const compactRule = compactStart < 0 ? '' : cssRuleBody(css.slice(compactStart), '.beatEditor');
+    expect(compactRule).toMatch(/grid-template-columns:\s*(?:minmax\(0,\s*1fr\)|1fr)/);
   });
 
   it('keeps the 25-word Look warning soft and saves only changed Beat fields', async () => {
@@ -542,7 +710,7 @@ describe('BeatPanel', () => {
     const actions = makeActions();
     render(<BeatPanel {...panelProps(beat, drafts, actions)} />);
 
-    expect(screen.getByText('26 words; 25 recommended')).toHaveAttribute('data-look-warning', 'true');
+    expect(screen.getByText('26 / 25 words')).toHaveAttribute('data-look-warning', 'true');
     const save = screen.getByRole('button', { name: 'Save Beat' });
     expect(save).toBeEnabled();
     fireEvent.click(save);

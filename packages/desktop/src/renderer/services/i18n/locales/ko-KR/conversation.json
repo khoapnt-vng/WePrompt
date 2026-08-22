@@ -901,7 +901,48 @@
       "importError": "참조를 추가하지 못했습니다. 다시 시도하세요."
     },
     "workspace": {
+      "cut": {
+        "preview": {
+          "label": "필름 미리보기",
+          "beatBadge": "비트 {{position}} · {{title}}",
+          "slate": "슬레이트 · 커버리지 없음",
+          "slateHold": "컷에서 {{clock}} 동안 유지",
+          "videoLabel": "비트 {{beatPosition}} · {{beatTitle}} · 숏 {{shotPosition}} · {{shotTitle}}",
+          "slateLabel": "비트 {{beatPosition}} · {{beatTitle}} · 슬레이트 · 커버리지 없음",
+          "noMedia": "사용할 수 있는 필름 미리보기가 없습니다.",
+          "mediaError": "이 미리보기를 불러올 수 없습니다.",
+          "play": "필름 재생",
+          "pause": "필름 일시 정지",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "영상만 — 여기에서는 오디오 베드가 음소거됩니다",
+          "controlsLabel": "필름 재생 컨트롤"
+        }
+      },
       "beatPanel": {
+        "beatFieldsLabel": "비트의 액션, 룩 및 목표 시간",
+        "fieldGuidance": {
+          "action": "액션 · 직접 작성하는 단 하나의 내용",
+          "look": "룩 · 모든 숏이 이 설정을 따릅니다"
+        },
+        "fields": {
+          "action": "액션",
+          "look": "룩",
+          "targetSeconds": "목표 시간(초)"
+        },
+        "lookCounter": "{{count}} / {{limit}}단어",
+        "lookCounter_one": "{{count}} / {{limit}}단어",
+        "lookCounter_other": "{{count}} / {{limit}}단어",
+        "chain": {
+          "hardCutUnavailable": "하드 컷은 일시적으로 변경할 수 없습니다. 필요한 교체용 미디어의 견적을 먼저 검토해야 합니다.",
+          "segmentHead": "체인의 시작 · 스틸 이미지에서 시작",
+          "continuous": "샷 {{position}}의 마지막 프레임에서 이어짐"
+        },
+        "derivation": {
+          "derived": "액션에서 파생됨",
+          "detached": "분리됨 · 내 문장",
+          "attachedLineGuidance": "액션에서 작성됨 · 편집하면 분리",
+          "detachedLineGuidance": "내 문장 · 더 이상 액션을 따르지 않음"
+        },
         "coverage": {
           "trimGuidance": "가장자리 · 트리밍 · 무료",
           "boundaryGuidance": "경계 · 다시 렌더링해야 함"

@@ -268,7 +268,6 @@ const workspaceCallbacks = (): WorkspaceMutationCallbacks => ({
 const beatPanelActions = (): BeatPanelActions => ({
   saveBeat: vi.fn(async () => true),
   saveShot: vi.fn(async () => true),
-  setHardCut: vi.fn(async () => true),
   setSeedStill: vi.fn(async () => true),
   trimShot: vi.fn(async () => true),
   reorderShots: vi.fn(async () => true),

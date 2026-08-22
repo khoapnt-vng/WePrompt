@@ -907,7 +907,48 @@
       "importError": "Не вдалося додати референс. Спробуйте ще раз."
     },
     "workspace": {
+      "cut": {
+        "preview": {
+          "label": "Попередній перегляд фільму",
+          "beatBadge": "Біт {{position}} · {{title}}",
+          "slate": "Заставка · Немає матеріалу",
+          "slateHold": "Залишається в монтажі на {{clock}}",
+          "videoLabel": "Біт {{beatPosition}} · {{beatTitle}} · Шот {{shotPosition}} · {{shotTitle}}",
+          "slateLabel": "Біт {{beatPosition}} · {{beatTitle}} · Заставка · Немає матеріалу",
+          "noMedia": "Попередній перегляд фільму недоступний.",
+          "mediaError": "Не вдалося завантажити цей попередній перегляд.",
+          "play": "Відтворити фільм",
+          "pause": "Призупинити фільм",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "Лише зображення — аудіодоріжку тут вимкнено",
+          "controlsLabel": "Керування відтворенням фільму"
+        }
+      },
       "beatPanel": {
+        "beatFieldsLabel": "Дія, образ і цільова тривалість біта",
+        "fieldGuidance": {
+          "action": "Дія · Єдине, що ви пишете",
+          "look": "Образ · Кожен кадр його успадковує"
+        },
+        "fields": {
+          "action": "Дія",
+          "look": "Образ",
+          "targetSeconds": "Цільова тривалість у секундах"
+        },
+        "lookCounter": "{{count}} / {{limit}} слів",
+        "lookCounter_one": "{{count}} / {{limit}} слів",
+        "lookCounter_other": "{{count}} / {{limit}} слів",
+        "chain": {
+          "hardCutUnavailable": "Зміна жорсткої склейки тимчасово недоступна. Спочатку необхідно перевірити розрахунок потрібної заміни медіафайлів.",
+          "segmentHead": "Початок ланцюжка · Починається зі статичного кадру",
+          "continuous": "Продовжується з останнього кадру шоту {{position}}"
+        },
+        "derivation": {
+          "derived": "Похідна від дії",
+          "detached": "Від’єднана · Ваш текст",
+          "attachedLineGuidance": "Створена з дії · Відредагуйте, щоб від’єднати",
+          "detachedLineGuidance": "Ваші слова · Більше не дотримується дії"
+        },
         "coverage": {
           "trimGuidance": "Край · Обрізання · Безкоштовно",
           "boundaryGuidance": "Межа · Потребує повторного рендерингу"

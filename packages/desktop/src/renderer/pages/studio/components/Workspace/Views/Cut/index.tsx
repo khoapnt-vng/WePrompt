@@ -5,11 +5,12 @@
  */
 
 import { Alert, Button, Drawer, Popconfirm, Select } from '@arco-design/web-react';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { StudioRendererExportCatalogV2 } from '@/common/types/project/creativeStudioTypes';
 import type { WorkspaceBeatProjection, WorkspaceProjection } from '../../workspaceProjection';
+import { CutPlayer } from './CutPlayer';
 import { buildCutFilmSummary, buildCutSlateWarnings, formatCutClock } from './filmSummary';
 import { buildCutFilmstrip } from './filmstrip';
 import { buildCutMatchReference } from './matchReference';
@@ -95,6 +96,7 @@ export const CutView: React.FC<CutViewProps> = ({
   const [reorderFocusId, setReorderFocusId] = useState<string | null>(null);
   const [selectedBeatId, setSelectedBeatId] = useState<string | null>(() => projection.cut.beats[0]?.id ?? null);
   const [stillShotId, setStillShotId] = useState<string | null>(null);
+  const summaryTitleId = useId();
   const actionPendingRef = useRef(false);
   const draggedBeatIdRef = useRef<string | null>(null);
   const segmentRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -264,60 +266,69 @@ export const CutView: React.FC<CutViewProps> = ({
         </div>
       </header>
 
-      <div className={styles.film} data-cut-film data-film-delta={film.delta?.kind ?? 'unknown'}>
-        <span className={styles.filmHeading}>{t(`${CUT_ROOT}.film.title`)}</span>
-        {filmClock === null ? null : (
-          <span className={styles.filmClock}>
-            <bdi dir='auto'>{filmClock}</bdi>
-          </span>
-        )}
-        <span className={styles.filmTarget}>
-          <bdi dir='auto'>
-            {targetClock === null
-              ? t(`${CUT_ROOT}.film.targetUnknown`)
-              : t(`${CUT_ROOT}.film.ofTarget`, { clock: targetClock })}
-          </bdi>
-        </span>
-        {film.delta === null ? null : (
-          <span className={styles.filmDelta}>
-            <bdi dir='auto'>
-              {film.delta.kind === 'on_target'
-                ? t(`${CUT_ROOT}.film.onTarget`)
-                : t(`${CUT_ROOT}.film.${film.delta.kind}`, { seconds: film.delta.seconds })}
-            </bdi>
-          </span>
-        )}
-        <span className={styles.filmCounts}>
-          <bdi dir='auto'>
-            {t(`${CUT_ROOT}.film.counts`, {
-              beats: t(englishFallbackPluralKey(`${CUT_ROOT}.film.beatCount`, film.beatCount), {
-                count: film.beatCount,
-              }),
-              shots: t(englishFallbackPluralKey(`${CUT_ROOT}.shotCount`, film.shotCount), {
-                count: film.shotCount,
-              }),
-              slates: t(englishFallbackPluralKey(`${CUT_ROOT}.film.slateCount`, film.slateCount), {
-                count: film.slateCount,
-              }),
-            })}
-          </bdi>
-        </span>
-      </div>
+      <div className={styles.hero} data-cut-hero>
+        <div className={styles.playerColumn}>
+          <CutPlayer pending={pending || busyKey !== null} projectId={projectId} projection={projection} />
+        </div>
+        <aside aria-labelledby={summaryTitleId} className={styles.summary} data-cut-summary>
+          <div className={styles.film} data-cut-film data-film-delta={film.delta?.kind ?? 'unknown'}>
+            <span className={styles.filmHeading} id={summaryTitleId}>
+              {t(`${CUT_ROOT}.film.title`)}
+            </span>
+            {filmClock === null ? null : (
+              <span className={styles.filmClock}>
+                <bdi dir='auto'>{filmClock}</bdi>
+              </span>
+            )}
+            <span className={styles.filmTarget}>
+              <bdi dir='auto'>
+                {targetClock === null
+                  ? t(`${CUT_ROOT}.film.targetUnknown`)
+                  : t(`${CUT_ROOT}.film.ofTarget`, { clock: targetClock })}
+              </bdi>
+            </span>
+            {film.delta === null ? null : (
+              <span className={styles.filmDelta}>
+                <bdi dir='auto'>
+                  {film.delta.kind === 'on_target'
+                    ? t(`${CUT_ROOT}.film.onTarget`)
+                    : t(`${CUT_ROOT}.film.${film.delta.kind}`, { seconds: film.delta.seconds })}
+                </bdi>
+              </span>
+            )}
+            <span className={styles.filmCounts}>
+              <bdi dir='auto'>
+                {t(`${CUT_ROOT}.film.counts`, {
+                  beats: t(englishFallbackPluralKey(`${CUT_ROOT}.film.beatCount`, film.beatCount), {
+                    count: film.beatCount,
+                  }),
+                  shots: t(englishFallbackPluralKey(`${CUT_ROOT}.shotCount`, film.shotCount), {
+                    count: film.shotCount,
+                  }),
+                  slates: t(englishFallbackPluralKey(`${CUT_ROOT}.film.slateCount`, film.slateCount), {
+                    count: film.slateCount,
+                  }),
+                })}
+              </bdi>
+            </span>
+          </div>
 
-      {slates.length === 0 ? null : (
-        <ul className={styles.slates}>
-          {slates.map((slate) => (
-            <li key={slate.beatId} className={styles.slate} data-cut-slate data-slate-beat-id={slate.beatId}>
-              <span className={styles.slateBadge}>
-                <bdi dir='auto'>{t(`${CUT_ROOT}.slate.label`, { label: slate.label })}</bdi>
-              </span>
-              <span className={styles.slateText}>
-                <bdi dir='auto'>{t(`${CUT_ROOT}.slate.warning`, { seconds: slate.durationSeconds })}</bdi>
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
+          {slates.length === 0 ? null : (
+            <ul className={styles.slates}>
+              {slates.map((slate) => (
+                <li key={slate.beatId} className={styles.slate} data-cut-slate data-slate-beat-id={slate.beatId}>
+                  <span className={styles.slateBadge}>
+                    <bdi dir='auto'>{t(`${CUT_ROOT}.slate.label`, { label: slate.label })}</bdi>
+                  </span>
+                  <span className={styles.slateText}>
+                    <bdi dir='auto'>{t(`${CUT_ROOT}.slate.warning`, { seconds: slate.durationSeconds })}</bdi>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </aside>
+      </div>
 
       {!canonicalOrderReady ? <Alert type='warning' content={t(`${CUT_ROOT}.orderUnavailable`)} /> : null}
 

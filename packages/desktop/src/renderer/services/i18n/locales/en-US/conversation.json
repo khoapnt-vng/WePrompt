@@ -1527,6 +1527,21 @@
         "actualDuration": "{{seconds, number(maximumFractionDigits: 0; useGrouping: false)}}s actual",
         "targetDuration": "{{seconds, number(maximumFractionDigits: 0; useGrouping: false)}}s target slate",
         "beatDurationPending": "Duration pending",
+        "preview": {
+          "label": "Film preview",
+          "beatBadge": "Beat {{position}} · {{title}}",
+          "slate": "Slate · No coverage",
+          "slateHold": "Holds {{clock}} in the Cut",
+          "videoLabel": "Beat {{beatPosition}} · {{beatTitle}} · Shot {{shotPosition}} · {{shotTitle}}",
+          "slateLabel": "Beat {{beatPosition}} · {{beatTitle}} · Slate · No coverage",
+          "noMedia": "No film preview is available.",
+          "mediaError": "This preview could not be loaded.",
+          "play": "Play film",
+          "pause": "Pause film",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "Picture only — the bed is muted here",
+          "controlsLabel": "Film transport"
+        },
         "dragHandle": "Reorder {{title}} at position {{position}}",
         "moveEarlier": "Move {{title}} earlier",
         "moveLater": "Move {{title}} later",
@@ -1698,9 +1713,13 @@
         "nextBeat": "Next Beat",
         "nextBeatShort": "Next",
         "beatFieldsLabel": "Beat action, look, and target",
-        "lookCounter": "{{count}} words · 25-word guidance only",
-        "lookCounter_one": "{{count}} word · 25-word guidance only",
-        "lookCounter_other": "{{count}} words · 25-word guidance only",
+        "fieldGuidance": {
+          "action": "Action · The one thing you write",
+          "look": "Look · Every Shot inherits it"
+        },
+        "lookCounter": "{{count}} / {{limit}} words",
+        "lookCounter_one": "{{count}} / {{limit}} words",
+        "lookCounter_other": "{{count}} / {{limit}} words",
         "directorRequestHint": "Ask the Creative Director for a reviewed re-derive or re-split proposal.",
         "common": {
           "cancel": "Cancel",
@@ -1726,8 +1745,9 @@
         "chain": {
           "authorHardCut": "Start with a hard cut",
           "hardCut": "Hard cut",
-          "segmentHead": "Segment head",
-          "continuous": "Continuous",
+          "hardCutUnavailable": "Hard-cut changes are temporarily unavailable. A reviewed estimate for the required replacement media must come first.",
+          "segmentHead": "Head of the chain · Starts from the still",
+          "continuous": "Continues from Shot {{position}}’s last frame",
           "systemContinuityStale": "Continuity is out of date",
           "generationOutOfDate": "Generated work is out of date"
         },
@@ -1768,8 +1788,10 @@
         "derivation": {
           "label": "Line derivation for Shot {{index}}",
           "title": "Line derivation",
-          "derived": "Derived from the Beat action",
-          "detached": "Handwritten line",
+          "derived": "Derived from the action",
+          "detached": "Detached · Yours",
+          "attachedLineGuidance": "Written from the action · Edit to detach",
+          "detachedLineGuidance": "Your words · No longer follows the action",
           "stale": "The Beat action changed after this line was derived.",
           "detach": "Detach line",
           "rederiveReviewed": "Ask Director to re-derive",

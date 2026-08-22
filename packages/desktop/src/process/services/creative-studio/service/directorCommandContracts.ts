@@ -294,7 +294,7 @@ export const STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2 = Object.freeze({
   restore_shot: 'operation_not_permitted',
   reorder_shots: 'direct',
   apply_coverage: 'proposal',
-  set_hard_cut: 'proposal',
+  set_hard_cut: 'operation_not_permitted',
   set_seed_still: 'operation_not_permitted',
   trim_shot: 'operation_not_permitted',
   redetach_line: 'proposal',
@@ -611,7 +611,10 @@ const validateProposalPayloadV2 = (value: unknown): boolean => {
       hasExactKeysV2(value, V2_PROPOSAL_MUTATION_PAYLOAD_KEYS) &&
       validateOperationListV2(value.operations) &&
       value.operations.every(
-        (operation) => classifyStudioDirectorOperationV2(operation.kind) !== 'operation_not_permitted'
+        (operation) =>
+          // Pre-containment pending proposals must remain readable so acceptance can reject them in the reducer.
+          operation.kind === 'set_hard_cut' ||
+          classifyStudioDirectorOperationV2(operation.kind) !== 'operation_not_permitted'
       )
     );
   }

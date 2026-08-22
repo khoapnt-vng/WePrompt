@@ -164,6 +164,9 @@ export const PRESENTATION_RUN_FAILURE_POLICY = {
 const strictDetails = {
   runId: z.object({ runId: z.string() }).strict(),
   grantId: z.object({ grantId: z.string().optional() }).strict(),
+  replayedGrant: z
+    .object({ grantId: z.string().optional(), queueUnboundAtRevoke: z.literal(true).optional() })
+    .strict(),
 };
 
 const failureEnvelope = <
@@ -245,7 +248,6 @@ export const presentationRunFailureSchema = z.union([
     z.enum([
       'SOURCE_GRANT_INVALID',
       'SOURCE_GRANT_FOREIGN',
-      'SOURCE_GRANT_REPLAYED',
       'SOURCE_TAMPERED',
       'SOURCE_LIMIT_EXCEEDED',
       'SOURCE_FORMAT_UNSUPPORTED',
@@ -253,6 +255,12 @@ export const presentationRunFailureSchema = z.union([
     false,
     z.literal('grant_validation'),
     strictDetails.grantId
+  ),
+  failureEnvelope(
+    z.literal('SOURCE_GRANT_REPLAYED'),
+    false,
+    z.literal('grant_validation'),
+    strictDetails.replayedGrant
   ),
   failureEnvelope(
     z.literal('SOURCE_GRANT_EXPIRED'),

@@ -945,11 +945,21 @@ const verifyUndoDigest = (project: StudioProjectV2, patch: StudioUndoPatch): boo
   }
 };
 
+const undoPatchChangesChainBreak = (project: StudioProjectV2, patch: StudioUndoPatch): boolean => {
+  if (patch.kind !== 'shot_fields') return false;
+  const currentChainBreak = ownValue(project.shots, patch.shotId)?.chainBreak;
+  const restoredChainBreak = patch.before?.chainBreak;
+  return (
+    currentChainBreak !== restoredChainBreak && (currentChainBreak === 'hard_cut' || restoredChainBreak === 'hard_cut')
+  );
+};
+
 const applyUndoEntry = (project: StudioProjectV2, entryId: string): StudioProjectV2 => {
   const entry = project.undoHistory.at(-1);
   if (entry === undefined || entry.id !== entryId || entry.patches.some((patch) => !verifyUndoDigest(project, patch))) {
     return fail('undo_conflict');
   }
+  if (entry.patches.some((patch) => undoPatchChangesChainBreak(project, patch))) fail('undo_conflict');
 
   const draft = structuredClone(project);
   for (const patch of entry.patches.toReversed()) {
@@ -1375,6 +1385,15 @@ export const applyStudioMutationBatchV2 = (
         const proposedIds = operation.shots.map((shot) => shot.shotId);
         if (new Set(proposedIds).size !== proposedIds.length) fail('invalid_operation');
         const currentIds = new Set(beat.shotOrder);
+        for (const proposed of operation.shots) {
+          const existing = ownValue(draft.shots, proposed.shotId);
+          if (
+            (existing === undefined && proposed.chainBreak === 'hard_cut') ||
+            (existing !== undefined && currentIds.has(existing.id) && existing.chainBreak !== proposed.chainBreak)
+          ) {
+            fail('invalid_operation');
+          }
+        }
         const expectedFixed = beat.shotOrder.flatMap((shotId) => {
           const shot = ownValue(draft.shots, shotId);
           if (shot === undefined) return [];
@@ -1494,14 +1513,7 @@ export const applyStudioMutationBatchV2 = (
       }
 
       case 'set_hard_cut': {
-        const shot = ownValue(draft.shots, operation.shotId);
-        if (shot === undefined || findActiveShotOwner(draft, shot.id) === undefined) fail('invalid_operation');
-        const chainBreak = operation.hardCut ? 'hard_cut' : 'none';
-        if (shot.chainBreak === chainBreak) fail('invalid_operation');
-        if (hasBoundNonterminalJob(draft, (job) => job.shotId === shot.id)) fail('dependency_blocked');
-        touchShot(tracker, draft, shot.id);
-        defineOwn(draft.shots, shot.id, { ...shot, chainBreak });
-        break;
+        return fail('invalid_operation');
       }
 
       case 'set_seed_still': {

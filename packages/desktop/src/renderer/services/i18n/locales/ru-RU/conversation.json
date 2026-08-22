@@ -907,7 +907,48 @@
       "importError": "Не удалось добавить референс. Повторите попытку."
     },
     "workspace": {
+      "cut": {
+        "preview": {
+          "label": "Предпросмотр фильма",
+          "beatBadge": "Бит {{position}} · {{title}}",
+          "slate": "Заставка · Нет материала",
+          "slateHold": "Остаётся в монтаже на {{clock}}",
+          "videoLabel": "Бит {{beatPosition}} · {{beatTitle}} · Шот {{shotPosition}} · {{shotTitle}}",
+          "slateLabel": "Бит {{beatPosition}} · {{beatTitle}} · Заставка · Нет материала",
+          "noMedia": "Предпросмотр фильма недоступен.",
+          "mediaError": "Не удалось загрузить этот предпросмотр.",
+          "play": "Воспроизвести фильм",
+          "pause": "Приостановить фильм",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "Только изображение — аудиодорожка здесь отключена",
+          "controlsLabel": "Управление воспроизведением фильма"
+        }
+      },
       "beatPanel": {
+        "beatFieldsLabel": "Действие, образ и целевая длительность бита",
+        "fieldGuidance": {
+          "action": "Действие · Единственное, что вы пишете",
+          "look": "Образ · Каждый кадр его наследует"
+        },
+        "fields": {
+          "action": "Действие",
+          "look": "Образ",
+          "targetSeconds": "Целевая длительность в секундах"
+        },
+        "lookCounter": "{{count}} / {{limit}} слов",
+        "lookCounter_one": "{{count}} / {{limit}} слов",
+        "lookCounter_other": "{{count}} / {{limit}} слов",
+        "chain": {
+          "hardCutUnavailable": "Изменение жёсткой склейки временно недоступно. Сначала необходимо проверить расчёт требуемой замены медиафайлов.",
+          "segmentHead": "Начало цепочки · Начинается со статичного кадра",
+          "continuous": "Продолжается с последнего кадра шота {{position}}"
+        },
+        "derivation": {
+          "derived": "Производная от действия",
+          "detached": "Отсоединена · Ваш текст",
+          "attachedLineGuidance": "Создана из действия · Измените, чтобы отсоединить",
+          "detachedLineGuidance": "Ваши слова · Больше не следует за действием"
+        },
         "coverage": {
           "trimGuidance": "Край · Обрезка · Бесплатно",
           "boundaryGuidance": "Граница · Требует повторного рендера"

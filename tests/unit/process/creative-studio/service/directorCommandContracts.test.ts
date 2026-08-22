@@ -202,7 +202,7 @@ describe('Studio Director V2 command contracts', () => {
       restore_shot: 'operation_not_permitted',
       reorder_shots: 'direct',
       apply_coverage: 'proposal',
-      set_hard_cut: 'proposal',
+      set_hard_cut: 'operation_not_permitted',
       set_seed_still: 'operation_not_permitted',
       trim_shot: 'operation_not_permitted',
       redetach_line: 'proposal',
@@ -682,7 +682,15 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
     reservedAt: NOW,
   };
 
-  it('accepts exact mutation-batch and pin-rule proposals plus their decision and slot', () => {
+  it('accepts exact mutation-batch, legacy hard-cut, and pin-rule proposals plus their decision and slot', () => {
+    const legacyHardCut: StudioProposalRecordV2 = {
+      ...mutationProposal,
+      id: 'proposal_hard_cut',
+      payload: {
+        kind: 'mutation_batch',
+        operations: [{ kind: 'set_hard_cut', shotId: 'shot_2', hardCut: true }],
+      },
+    };
     const pinRule: StudioProposalRecordV2 = {
       ...mutationProposal,
       id: 'proposal_rule',
@@ -695,6 +703,13 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
     expect(
       parseStudioProposalRecordV2({ projectId: 'project_1', proposalId: 'proposal_1', value: mutationProposal })
     ).toEqual({ status: 'valid', record: mutationProposal });
+    expect(
+      parseStudioProposalRecordV2({
+        projectId: 'project_1',
+        proposalId: 'proposal_hard_cut',
+        value: legacyHardCut,
+      })
+    ).toEqual({ status: 'valid', record: legacyHardCut });
     expect(
       parseStudioProposalRecordV2({ projectId: 'project_1', proposalId: 'proposal_rule', value: pinRule })
     ).toEqual({ status: 'valid', record: pinRule });

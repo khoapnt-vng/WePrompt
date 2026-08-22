@@ -5,10 +5,11 @@
  */
 
 import { Alert, Button, Checkbox, Input, InputNumber, Modal, Popconfirm, Select } from '@arco-design/web-react';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
+  STUDIO_LOOK_SOFT_WORD_LIMIT,
   STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION,
   type StudioCascadeProgressV2,
   type StudioEditableBeatChanges,
@@ -66,7 +67,6 @@ export type BeatPanelShotSave = {
 export type BeatPanelActions = {
   saveBeat: (beatId: string, changes: StudioEditableBeatChanges) => Promise<boolean>;
   saveShot: (updates: readonly [BeatPanelShotSave, ...BeatPanelShotSave[]]) => Promise<boolean>;
-  setHardCut: (shotId: string, hardCut: boolean) => Promise<boolean>;
   setSeedStill: (shotId: string, assetId: string | null) => Promise<boolean>;
   trimShot: (shotId: string, trimInSeconds: number | null, trimOutSeconds: number | null) => Promise<boolean>;
   reorderShots: (beatId: string, shotOrder: readonly string[]) => Promise<boolean>;
@@ -558,6 +558,8 @@ const ShotCard: React.FC<ShotCardProps> = ({
   const [importing, setImporting] = useState(false);
   const [lifting, setLifting] = useState(false);
   const [restoreLiftFocus, setRestoreLiftFocus] = useState(false);
+  const hardCutUnavailableId = useId();
+  const lineGuidanceId = useId();
   const liftButtonRef = useRef<HTMLButtonElement | null>(null);
   const lineKey = shotDraftKey(shot.id, 'line');
   const narrationKey = shotDraftKey(shot.id, 'narration');
@@ -676,15 +678,15 @@ const ShotCard: React.FC<ShotCardProps> = ({
           <h3>{t(`${KEY_ROOT}.shots.heading`, { index: index + 1 })}</h3>
           <p
             className={styles.chainState}
-            data-chain-state={shot.chainBreak === 'hard_cut' ? 'hard_cut' : index === 0 ? 'segment_head' : 'continuous'}
+            data-chain-state={
+              shot.segmentHead ? (shot.chainBreak === 'hard_cut' ? 'hard_cut' : 'segment_head') : 'continuous'
+            }
           >
-            {t(
-              shot.chainBreak === 'hard_cut'
-                ? `${KEY_ROOT}.chain.hardCut`
-                : index === 0
-                  ? `${KEY_ROOT}.chain.segmentHead`
-                  : `${KEY_ROOT}.chain.continuous`
-            )}
+            <bdi dir='auto'>
+              {shot.segmentHead
+                ? t(`${KEY_ROOT}.chain.segmentHead`)
+                : t(`${KEY_ROOT}.chain.continuous`, { position: String(index).padStart(2, '0') })}
+            </bdi>
           </p>
           {shot.dirtyCauses.includes('continuity_stale') && shot.chainBreak !== 'hard_cut' ? (
             <p className={styles.warning}>{t(`${KEY_ROOT}.chain.systemContinuityStale`)}</p>
@@ -714,9 +716,15 @@ const ShotCard: React.FC<ShotCardProps> = ({
       </header>
 
       <div className={styles.editorGrid}>
-        <label>
+        <label data-shot-field='line'>
           <span>{t(`${KEY_ROOT}.fields.line`)}</span>
+          <span id={lineGuidanceId} className={styles.lineGuidance} data-line-derivation={shot.derivation}>
+            {t(
+              `${KEY_ROOT}.derivation.${shot.derivation === 'derived' ? 'attachedLineGuidance' : 'detachedLineGuidance'}`
+            )}
+          </span>
           <Input.TextArea
+            aria-describedby={lineGuidanceId}
             aria-label={t(`${KEY_ROOT}.fields.lineFor`, { index: index + 1 })}
             autoSize={{ minRows: 2, maxRows: 6 }}
             disabled={disabled}
@@ -771,18 +779,23 @@ const ShotCard: React.FC<ShotCardProps> = ({
         <Button disabled={disabled || saving || !dirty} onClick={reset}>
           {t(`${KEY_ROOT}.common.resetShot`)}
         </Button>
-        <Checkbox
-          checked={shot.chainBreak === 'hard_cut'}
-          disabled={disabled}
-          onChange={(checked) => void actions.setHardCut(shot.id, checked)}
+        <div
+          aria-describedby={hardCutUnavailableId}
+          aria-labelledby={`${hardCutUnavailableId}-label`}
+          className={styles.hardCutControl}
+          data-hard-cut-contained
+          role='group'
         >
-          {t(`${KEY_ROOT}.chain.authorHardCut`)}
-        </Checkbox>
+          <Checkbox checked={shot.chainBreak === 'hard_cut'} disabled>
+            <span id={`${hardCutUnavailableId}-label`}>{t(`${KEY_ROOT}.chain.authorHardCut`)}</span>
+          </Checkbox>
+          <p id={hardCutUnavailableId}>{t(`${KEY_ROOT}.chain.hardCutUnavailable`)}</p>
+        </div>
       </div>
 
       <section aria-label={t(`${KEY_ROOT}.derivation.label`, { index: index + 1 })} className={styles.subsection}>
         <h4>{t(`${KEY_ROOT}.derivation.title`)}</h4>
-        <p>
+        <p data-line-derivation-state={shot.derivation}>
           {t(`${KEY_ROOT}.derivation.${shot.derivation}`)}
           {shot.derivationStale ? ` ${t(`${KEY_ROOT}.derivation.stale`)}` : null}
         </p>
@@ -1146,7 +1159,7 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
     [briefReferenceOptions]
   );
   const lookWords = wordCount(look);
-  const lookWarns = lookWords > 25;
+  const lookWarns = lookWords > STUDIO_LOOK_SOFT_WORD_LIMIT;
   const safeBeatIndex = beatIds[beatIndex] === beat.id ? beatIndex : beatIds.indexOf(beat.id);
   const previousBeatId = safeBeatIndex > 0 ? (beatIds[safeBeatIndex - 1] ?? null) : null;
   const nextBeatId = safeBeatIndex >= 0 ? (beatIds[safeBeatIndex + 1] ?? null) : null;
@@ -1291,8 +1304,10 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
         {errorMessageKey === null ? null : <Alert content={t(errorMessageKey)} type='error' />}
 
         <section aria-label={t(`${KEY_ROOT}.beatFieldsLabel`)} className={styles.beatEditor}>
-          <label>
-            <span>{t(`${KEY_ROOT}.fields.action`)}</span>
+          <label className={styles.beatField} data-beat-field='action'>
+            <span className={styles.beatFieldHeading}>
+              <span className={styles.fieldGuidance}>{t(`${KEY_ROOT}.fieldGuidance.action`)}</span>
+            </span>
             <Input.TextArea
               aria-label={t(`${KEY_ROOT}.fields.action`)}
               autoSize={{ minRows: 3, maxRows: 8 }}
@@ -1301,8 +1316,19 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
               value={action}
             />
           </label>
-          <label>
-            <span>{t(`${KEY_ROOT}.fields.look`)}</span>
+          <label className={styles.beatField} data-beat-field='look'>
+            <span className={styles.beatFieldHeading}>
+              <span className={styles.fieldGuidance}>{t(`${KEY_ROOT}.fieldGuidance.look`)}</span>
+              <bdi
+                aria-atomic='true'
+                className={`${styles.fieldGuidance} ${lookWarns ? styles.warning : styles.muted}`}
+                data-look-warning={lookWarns}
+                dir='auto'
+                role='status'
+              >
+                {t(`${KEY_ROOT}.lookCounter`, { count: lookWords, limit: STUDIO_LOOK_SOFT_WORD_LIMIT })}
+              </bdi>
+            </span>
             <Input.TextArea
               aria-label={t(`${KEY_ROOT}.fields.look`)}
               autoSize={{ minRows: 3, maxRows: 8 }}
@@ -1310,39 +1336,38 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
               onChange={(value) => drafts.setValue(lookKey, value)}
               value={look}
             />
-            <span className={lookWarns ? styles.warning : styles.muted} data-look-warning={lookWarns} role='status'>
-              {t(`${KEY_ROOT}.lookCounter`, { count: lookWords })}
-            </span>
           </label>
-          <label>
-            <span>{t(`${KEY_ROOT}.fields.targetSeconds`)}</span>
-            <InputNumber
-              aria-label={t(`${KEY_ROOT}.fields.targetSeconds`)}
-              disabled={mutationLocked}
-              min={1}
-              onChange={(value) => drafts.setValue(targetKey, typeof value === 'number' ? value : null)}
-              precision={0}
-              value={targetSeconds ?? undefined}
-            />
-          </label>
-          <div className={styles.editorActions}>
-            <Button
-              disabled={mutationLocked || drafts.staleRevision || savingBeat || !beatDirty}
-              loading={savingBeat}
-              onClick={() => void saveBeat()}
-              type='primary'
-            >
-              {t(`${KEY_ROOT}.common.saveBeat`)}
-            </Button>
-            <Button
-              disabled={mutationLocked || savingBeat || !beatDirty}
-              onClick={() => beatDraftKeys.forEach(drafts.reset)}
-            >
-              {t(`${KEY_ROOT}.common.resetBeat`)}
-            </Button>
-            <Button disabled={mutationLocked} onClick={() => actions.requestResplit(beat.id)}>
-              {t(`${KEY_ROOT}.coverage.reviewResplit`)}
-            </Button>
+          <div className={styles.beatMetaRow} data-beat-meta-row>
+            <label className={styles.beatTargetField} data-beat-field='target'>
+              <span>{t(`${KEY_ROOT}.fields.targetSeconds`)}</span>
+              <InputNumber
+                aria-label={t(`${KEY_ROOT}.fields.targetSeconds`)}
+                disabled={mutationLocked}
+                min={1}
+                onChange={(value) => drafts.setValue(targetKey, typeof value === 'number' ? value : null)}
+                precision={0}
+                value={targetSeconds ?? undefined}
+              />
+            </label>
+            <div className={styles.editorActions} data-beat-editor-actions>
+              <Button
+                disabled={mutationLocked || drafts.staleRevision || savingBeat || !beatDirty}
+                loading={savingBeat}
+                onClick={() => void saveBeat()}
+                type='primary'
+              >
+                {t(`${KEY_ROOT}.common.saveBeat`)}
+              </Button>
+              <Button
+                disabled={mutationLocked || savingBeat || !beatDirty}
+                onClick={() => beatDraftKeys.forEach(drafts.reset)}
+              >
+                {t(`${KEY_ROOT}.common.resetBeat`)}
+              </Button>
+              <Button disabled={mutationLocked} onClick={() => actions.requestResplit(beat.id)}>
+                {t(`${KEY_ROOT}.coverage.reviewResplit`)}
+              </Button>
+            </div>
           </div>
         </section>
 

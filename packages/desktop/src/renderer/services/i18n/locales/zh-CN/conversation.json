@@ -901,7 +901,48 @@
       "importError": "无法添加参考图，请重试。"
     },
     "workspace": {
+      "cut": {
+        "preview": {
+          "label": "影片预览",
+          "beatBadge": "节拍 {{position}} · {{title}}",
+          "slate": "场记卡 · 无镜头素材",
+          "slateHold": "在剪辑中保留 {{clock}}",
+          "videoLabel": "节拍 {{beatPosition}} · {{beatTitle}} · 镜头 {{shotPosition}} · {{shotTitle}}",
+          "slateLabel": "节拍 {{beatPosition}} · {{beatTitle}} · 场记卡 · 无镜头素材",
+          "noMedia": "暂无影片预览。",
+          "mediaError": "无法加载此预览。",
+          "play": "播放影片",
+          "pause": "暂停影片",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "仅画面 — 此处音轨已静音",
+          "controlsLabel": "影片播放控制"
+        }
+      },
       "beatPanel": {
+        "beatFieldsLabel": "节拍动作、视觉风格和目标时长",
+        "fieldGuidance": {
+          "action": "动作 · 你唯一需要写的内容",
+          "look": "视觉风格 · 每个镜头都沿用它"
+        },
+        "fields": {
+          "action": "动作",
+          "look": "视觉风格",
+          "targetSeconds": "目标秒数"
+        },
+        "lookCounter": "{{count}} / {{limit}} 个词",
+        "lookCounter_one": "{{count}} / {{limit}} 个词",
+        "lookCounter_other": "{{count}} / {{limit}} 个词",
+        "chain": {
+          "hardCutUnavailable": "暂时无法更改硬切。必须先审阅所需替换媒体的报价。",
+          "segmentHead": "链首 · 从静帧开始",
+          "continuous": "承接镜头 {{position}} 的最后一帧"
+        },
+        "derivation": {
+          "derived": "由动作派生",
+          "detached": "已分离 · 你的文字",
+          "attachedLineGuidance": "根据动作编写 · 编辑即分离",
+          "detachedLineGuidance": "你的文字 · 不再跟随动作"
+        },
         "coverage": {
           "trimGuidance": "边缘 · 修剪 · 免费",
           "boundaryGuidance": "边界 · 需要重新渲染"

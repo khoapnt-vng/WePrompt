@@ -6,14 +6,17 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { StudioRendererExportCatalogV2 } from '@/common/types/project/creativeStudioTypes';
 import type {
+  WorkspaceBeatProjection,
   WorkspaceCutProjection,
   WorkspaceProjection,
+  WorkspaceShotProjection,
+  WorkspaceTakeProjection,
 } from '@/renderer/pages/studio/components/Workspace/workspaceProjection';
 import {
   buildCutFilmSummary,
@@ -22,6 +25,11 @@ import {
 } from '@/renderer/pages/studio/components/Workspace/Views/Cut/filmSummary';
 import { buildCutFilmstrip } from '@/renderer/pages/studio/components/Workspace/Views/Cut/filmstrip';
 import { buildCutMatchReference } from '@/renderer/pages/studio/components/Workspace/Views/Cut/matchReference';
+import {
+  buildCutPlaybackSequence,
+  formatCutPlaybackClock,
+  type CutPlaybackSequence,
+} from '@/renderer/pages/studio/components/Workspace/Views/Cut/playbackSequence';
 
 type ButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'type'> & {
   icon?: React.ReactNode;
@@ -146,13 +154,36 @@ vi.mock('react-i18next', () => ({
       if (key.endsWith('.film.slateCount_one')) return `${values?.count} Slate`;
       if (key.endsWith('.film.slateCount_other')) return `${values?.count} Slates`;
       if (key.endsWith('.film.counts')) return `${values?.beats} · ${values?.shots} · ${values?.slates}`;
+      if (key.endsWith('.film.title')) return 'The film';
       if (key.endsWith('.filmstripDuration')) return `${values?.seconds}s`;
+      if (key.endsWith('.preview.play')) return 'Play film';
+      if (key.endsWith('.preview.pause')) return 'Pause film';
+      if (key.endsWith('.preview.controlsLabel')) return 'Film transport';
+      if (key.endsWith('.preview.position')) return `${String(values?.current)} / ${String(values?.total)}`;
+      if (key.endsWith('.preview.pictureOnly')) return 'Picture only — the bed is muted here';
+      if (key.endsWith('.preview.noMedia')) return 'No film preview is available.';
+      if (key.endsWith('.preview.mediaError')) return 'This preview could not be loaded.';
+      if (key.endsWith('.preview.label')) return 'Film preview';
+      if (key.endsWith('.preview.beatBadge')) {
+        return `Beat ${String(values?.position)} · ${String(values?.title)}`;
+      }
+      if (key.endsWith('.preview.videoLabel')) {
+        return `Beat ${String(values?.beatPosition)} · ${String(values?.beatTitle)} · Shot ${String(
+          values?.shotPosition
+        )} · ${String(values?.shotTitle)}`;
+      }
+      if (key.endsWith('.preview.slateLabel')) {
+        return `Beat ${String(values?.beatPosition)} · ${String(values?.beatTitle)} · Slate · No coverage`;
+      }
+      if (key.endsWith('.preview.slate')) return 'Slate · No coverage';
+      if (key.endsWith('.preview.slateHold')) return `Holds ${String(values?.clock)} in the Cut`;
       return values === undefined ? key : `${key}:${JSON.stringify(values)}`;
     },
   }),
 }));
 
 import { CutView, type CutActions } from '@/renderer/pages/studio/components/Workspace/Views/Cut';
+import { CutPlayer } from '@/renderer/pages/studio/components/Workspace/Views/Cut/CutPlayer';
 
 const cut = (overrides: Partial<WorkspaceCutProjection> = {}): WorkspaceCutProjection => ({
   orderReady: true,
@@ -226,6 +257,1086 @@ const projection = (cutProjection = cut(), activeBeats: WorkspaceProjection['act
     parkEligibility: [],
     conditioningFailures: [],
   }) as WorkspaceProjection;
+
+const playbackTake = (
+  assetId: string,
+  sourceDurationSeconds: number,
+  overrides: Partial<WorkspaceTakeProjection> = {}
+): WorkspaceTakeProjection => ({
+  assetId,
+  mediaKind: 'video',
+  createdAt: '2026-08-19T00:00:00.000Z',
+  selected: true,
+  explicitSeed: false,
+  effectiveSeed: false,
+  binReason: null,
+  sourceDurationSeconds,
+  posterAssetId: `${assetId}_poster`,
+  ...overrides,
+});
+
+const playbackShot = (
+  id: string,
+  assetId: string,
+  sourceDurationSeconds: number,
+  trimInSeconds: number | null,
+  trimOutSeconds: number | null,
+  overrides: Partial<WorkspaceShotProjection> = {}
+): WorkspaceShotProjection => {
+  const playedDurationSeconds = sourceDurationSeconds - (trimInSeconds ?? 0) - (trimOutSeconds ?? 0);
+  return {
+    id,
+    line: `Line ${id}`,
+    narration: '',
+    onScreenText: '',
+    durationSeconds: Math.max(1, Math.round(playedDurationSeconds)),
+    chainBreak: 'none',
+    derivation: 'derived',
+    derivedFromActionRevision: 1,
+    derivationStale: false,
+    trimInSeconds,
+    trimOutSeconds,
+    selectedTakeId: assetId,
+    selectedTakeSourceDurationSeconds: sourceDurationSeconds,
+    playedDurationSeconds,
+    explicitSeedAssetId: null,
+    effectiveSeedAssetId: null,
+    segmentHead: false,
+    planningBoundary: null,
+    dirtyCauses: [],
+    downstreamShotIds: [],
+    imageTakes: [],
+    videoTakes: [playbackTake(assetId, sourceDurationSeconds)],
+    coverAssetId: `${assetId}_poster`,
+    takeCount: 1,
+    displayState: 'selected_take',
+    retainedWork: true,
+    videoGenerationInFlight: false,
+    seedGenerationInFlight: false,
+    hasEffectiveSeed: false,
+    ...overrides,
+  };
+};
+
+const playbackBeat = (
+  id: string,
+  title: string,
+  shots: WorkspaceShotProjection[],
+  targetSeconds: number | null = null,
+  overrides: Partial<WorkspaceBeatProjection> = {}
+): WorkspaceBeatProjection => ({
+  id,
+  title,
+  action: `Action ${id}`,
+  look: `Look ${id}`,
+  actionRevision: 1,
+  lineHistory: [],
+  targetSeconds,
+  actualSeconds:
+    shots.length === 0
+      ? null
+      : shots.reduce<number | null>(
+          (total, shot) =>
+            total === null || shot.playedDurationSeconds === null ? null : total + shot.playedDurationSeconds,
+          0
+        ),
+  displayState: shots.length === 0 ? 'no_coverage' : 'ready',
+  shots,
+  coverAssetId: shots[0]?.coverAssetId ?? null,
+  retainedWork: shots.length > 0,
+  ...overrides,
+});
+
+const playableProjection = (): WorkspaceProjection => {
+  const beatOne = playbackBeat('beat_1', 'Opening', [
+    playbackShot('shot_1', 'take_1', 10, 1, 2),
+    playbackShot('shot_2', 'take_2', 4, null, null),
+  ]);
+  const beatTwo = playbackBeat('beat_2', 'Missing middle', [], 5);
+  const beatThree = playbackBeat('beat_3', 'Close', [playbackShot('shot_3', 'take_3', 8, 0.5, 0.5)]);
+  const activeBeats = [beatOne, beatTwo, beatThree];
+  const cutProjection = cut({
+    beats: [
+      {
+        id: beatOne.id,
+        title: beatOne.title,
+        shotCount: 2,
+        durationKind: 'actual',
+        durationSeconds: 11,
+        coverAssetId: beatOne.coverAssetId,
+      },
+      {
+        id: beatTwo.id,
+        title: beatTwo.title,
+        shotCount: 0,
+        durationKind: 'target',
+        durationSeconds: 5,
+        coverAssetId: null,
+      },
+      {
+        id: beatThree.id,
+        title: beatThree.title,
+        shotCount: 1,
+        durationKind: 'actual',
+        durationSeconds: 7,
+        coverAssetId: beatThree.coverAssetId,
+      },
+    ],
+    filmDurationSeconds: 23,
+    targetDurationSeconds: 24,
+    matchCandidates: [],
+    selectedMatchShotId: null,
+  });
+  return {
+    ...projection(cutProjection, activeBeats),
+    activeBeatIds: activeBeats.map((beat) => beat.id),
+    activeShotIds: activeBeats.flatMap((beat) => beat.shots.map((shot) => shot.id)),
+  };
+};
+
+describe('the truthful Cut playback sequence', () => {
+  it('projects selected video Takes and a zero-Shot slate in exact film order with source and film intervals', () => {
+    const expected: CutPlaybackSequence = {
+      projectId: 'project_1',
+      projectRevision: 7,
+      durationSeconds: 23,
+      segments: [
+        {
+          kind: 'video',
+          beatId: 'beat_1',
+          beatPosition: 1,
+          beatTitle: 'Opening',
+          shotId: 'shot_1',
+          shotPosition: 1,
+          shotTitle: 'Line shot_1',
+          assetId: 'take_1',
+          posterAssetId: 'take_1_poster',
+          sourceDurationSeconds: 10,
+          sourceInSeconds: 1,
+          sourceOutSeconds: 8,
+          durationSeconds: 7,
+          filmStartSeconds: 0,
+          filmEndSeconds: 7,
+        },
+        {
+          kind: 'video',
+          beatId: 'beat_1',
+          beatPosition: 1,
+          beatTitle: 'Opening',
+          shotId: 'shot_2',
+          shotPosition: 2,
+          shotTitle: 'Line shot_2',
+          assetId: 'take_2',
+          posterAssetId: 'take_2_poster',
+          sourceDurationSeconds: 4,
+          sourceInSeconds: 0,
+          sourceOutSeconds: 4,
+          durationSeconds: 4,
+          filmStartSeconds: 7,
+          filmEndSeconds: 11,
+        },
+        {
+          kind: 'slate',
+          beatId: 'beat_2',
+          beatPosition: 2,
+          beatTitle: 'Missing middle',
+          durationSeconds: 5,
+          filmStartSeconds: 11,
+          filmEndSeconds: 16,
+        },
+        {
+          kind: 'video',
+          beatId: 'beat_3',
+          beatPosition: 3,
+          beatTitle: 'Close',
+          shotId: 'shot_3',
+          shotPosition: 1,
+          shotTitle: 'Line shot_3',
+          assetId: 'take_3',
+          posterAssetId: 'take_3_poster',
+          sourceDurationSeconds: 8,
+          sourceInSeconds: 0.5,
+          sourceOutSeconds: 7.5,
+          durationSeconds: 7,
+          filmStartSeconds: 16,
+          filmEndSeconds: 23,
+        },
+      ],
+    };
+
+    expect(buildCutPlaybackSequence(playableProjection())).toEqual(expected);
+  });
+
+  it('matches projection grouped duration arithmetic for fractional Shots across Beats', () => {
+    const firstBeat = playbackBeat('beat_fraction_1', 'One', [
+      playbackShot('shot_fraction_1', 'take_fraction_1', 0.001, null, null),
+      playbackShot('shot_fraction_2', 'take_fraction_2', 0.001, null, null),
+    ]);
+    const secondBeat = playbackBeat('beat_fraction_2', 'Two', [
+      playbackShot('shot_fraction_3', 'take_fraction_3', 0.001, null, null),
+      playbackShot('shot_fraction_4', 'take_fraction_4', 2.035, null, null),
+    ]);
+    const cutProjection = cut({
+      beats: [
+        {
+          id: firstBeat.id,
+          title: firstBeat.title,
+          shotCount: 2,
+          durationKind: 'actual',
+          durationSeconds: 0.002,
+          coverAssetId: firstBeat.coverAssetId,
+        },
+        {
+          id: secondBeat.id,
+          title: secondBeat.title,
+          shotCount: 2,
+          durationKind: 'actual',
+          durationSeconds: 2.036,
+          coverAssetId: secondBeat.coverAssetId,
+        },
+      ],
+      filmDurationSeconds: 2.038,
+      matchCandidates: [],
+      selectedMatchShotId: null,
+    });
+    const current = {
+      ...projection(cutProjection, [firstBeat, secondBeat]),
+      activeBeatIds: [firstBeat.id, secondBeat.id],
+      activeShotIds: [...firstBeat.shots, ...secondBeat.shots].map((shot) => shot.id),
+    };
+
+    expect(buildCutPlaybackSequence(current)).toMatchObject({
+      durationSeconds: 2.038,
+      segments: [
+        { filmStartSeconds: 0, filmEndSeconds: 0.001 },
+        { filmStartSeconds: 0.001, filmEndSeconds: 0.002 },
+        { filmStartSeconds: 0.002, filmEndSeconds: 0.003 },
+        { filmStartSeconds: 0.003, filmEndSeconds: 2.038 },
+      ],
+    });
+  });
+
+  it('matches the authoritative source-minus-trim-in-minus-trim-out decimal operation order', () => {
+    const shot = playbackShot('shot_decimal', 'take_decimal', 0.2, 0.01, 0.1);
+    const beat = playbackBeat('beat_decimal', 'Decimal trim', [shot]);
+    const cutProjection = cut({
+      beats: [
+        {
+          id: beat.id,
+          title: beat.title,
+          shotCount: 1,
+          durationKind: 'actual',
+          durationSeconds: 0.09,
+          coverAssetId: beat.coverAssetId,
+        },
+      ],
+      filmDurationSeconds: 0.09,
+      matchCandidates: [],
+      selectedMatchShotId: null,
+    });
+    const current = {
+      ...projection(cutProjection, [beat]),
+      activeBeatIds: [beat.id],
+      activeShotIds: [shot.id],
+    };
+
+    expect(buildCutPlaybackSequence(current)).toMatchObject({
+      durationSeconds: 0.09,
+      segments: [{ sourceOutSeconds: 0.1, durationSeconds: 0.09, filmEndSeconds: 0.09 }],
+    });
+  });
+
+  it.each([
+    ['a rounded-away positive segment', Number.MAX_SAFE_INTEGER - 1, 0.5, Number.MAX_SAFE_INTEGER - 1],
+    ['a film total beyond the safe range', Number.MAX_SAFE_INTEGER, 1, Number.MAX_SAFE_INTEGER + 1],
+  ] as const)('rejects %s instead of emitting a zero-width or unsafe segment', (_label, first, second, total) => {
+    const firstBeat = playbackBeat('beat_large_1', 'Large one', [], first);
+    const secondBeat = playbackBeat('beat_large_2', 'Large two', [], second);
+    const cutProjection = cut({
+      beats: [
+        {
+          id: firstBeat.id,
+          title: firstBeat.title,
+          shotCount: 0,
+          durationKind: 'target',
+          durationSeconds: first,
+          coverAssetId: null,
+        },
+        {
+          id: secondBeat.id,
+          title: secondBeat.title,
+          shotCount: 0,
+          durationKind: 'target',
+          durationSeconds: second,
+          coverAssetId: null,
+        },
+      ],
+      filmDurationSeconds: total,
+      matchCandidates: [],
+      selectedMatchShotId: null,
+    });
+    const current = {
+      ...projection(cutProjection, [firstBeat, secondBeat]),
+      activeBeatIds: [firstBeat.id, secondBeat.id],
+      activeShotIds: [],
+    };
+
+    expect(buildCutPlaybackSequence(current)).toBeNull();
+  });
+
+  it('rejects a later Shot whose absolute bounds round to the same safe integer', () => {
+    const firstBeat = playbackBeat('beat_large_lead', 'Large lead', [], Number.MAX_SAFE_INTEGER - 1);
+    const secondBeat = playbackBeat('beat_fraction_tail', 'Fraction tail', [
+      playbackShot('shot_fraction_tail_1', 'take_fraction_tail_1', 0.6, null, null),
+      playbackShot('shot_fraction_tail_2', 'take_fraction_tail_2', 0.1, null, null),
+    ]);
+    const cutProjection = cut({
+      beats: [
+        {
+          id: firstBeat.id,
+          title: firstBeat.title,
+          shotCount: 0,
+          durationKind: 'target',
+          durationSeconds: Number.MAX_SAFE_INTEGER - 1,
+          coverAssetId: null,
+        },
+        {
+          id: secondBeat.id,
+          title: secondBeat.title,
+          shotCount: 2,
+          durationKind: 'actual',
+          durationSeconds: 0.7,
+          coverAssetId: secondBeat.coverAssetId,
+        },
+      ],
+      filmDurationSeconds: Number.MAX_SAFE_INTEGER,
+      matchCandidates: [],
+      selectedMatchShotId: null,
+    });
+    const current = {
+      ...projection(cutProjection, [firstBeat, secondBeat]),
+      activeBeatIds: [firstBeat.id, secondBeat.id],
+      activeShotIds: secondBeat.shots.map((shot) => shot.id),
+    };
+
+    expect(buildCutPlaybackSequence(current)).toBeNull();
+  });
+
+  it('uses only selected-media and timing authority, not freshness or generation display state', () => {
+    const current = playableProjection();
+    current.workspaceStatusReady = false;
+    current.chainStatusReady = false;
+    current.activeBeats[0]!.displayState = 'stale';
+    current.activeBeats[0]!.shots[0]!.displayState = 'selected_take';
+    current.activeBeats[0]!.shots[0]!.dirtyCauses = ['generation_out_of_date'];
+    current.activeBeats[0]!.shots[0]!.videoGenerationInFlight = true;
+
+    expect(buildCutPlaybackSequence(current)).toEqual(buildCutPlaybackSequence(playableProjection()));
+  });
+
+  const malformedCases: ReadonlyArray<[string, (value: WorkspaceProjection) => void]> = [
+    ['an unsafe project id', (value) => void (value.projectId = '../private')],
+    ['an unsafe project revision', (value) => void (value.projectRevision = Number.MAX_SAFE_INTEGER + 1)],
+    ['an unavailable canonical order', (value) => void (value.cut.orderReady = false)],
+    [
+      'a reordered active Beat index',
+      (value) =>
+        void ([value.activeBeatIds[0], value.activeBeatIds[1]] = [value.activeBeatIds[1]!, value.activeBeatIds[0]!]),
+    ],
+    ['a duplicate active Beat', (value) => void (value.activeBeats[1]!.id = value.activeBeats[0]!.id)],
+    [
+      'a reordered global Shot index',
+      (value) =>
+        void ([value.activeShotIds[0], value.activeShotIds[1]] = [value.activeShotIds[1]!, value.activeShotIds[0]!]),
+    ],
+    ['a duplicate Shot id', (value) => void (value.activeBeats[2]!.shots[0]!.id = 'shot_1')],
+    ['a Cut Beat identity mismatch', (value) => void (value.cut.beats[1]!.id = 'beat_elsewhere')],
+    ['a Cut Shot count mismatch', (value) => void (value.cut.beats[0]!.shotCount = 1)],
+    ['a covered Beat classified as a target slate', (value) => void (value.cut.beats[0]!.durationKind = 'target')],
+    ['a covered Beat aggregate mismatch', (value) => void (value.cut.beats[0]!.durationSeconds = 12)],
+    ['an active Beat aggregate mismatch', (value) => void (value.activeBeats[0]!.actualSeconds = 12)],
+    ['a film aggregate mismatch', (value) => void (value.cut.filmDurationSeconds = 24)],
+    ['a non-finite film total', (value) => void (value.cut.filmDurationSeconds = Number.POSITIVE_INFINITY)],
+    ['a covered Shot without a selected Take', (value) => void (value.activeBeats[0]!.shots[0]!.selectedTakeId = null)],
+    ['a selected Take absent from its video rows', (value) => void (value.activeBeats[0]!.shots[0]!.videoTakes = [])],
+    [
+      'a selected row not marked selected',
+      (value) => void (value.activeBeats[0]!.shots[0]!.videoTakes[0]!.selected = false),
+    ],
+    [
+      'a selected row parked in the Bin',
+      (value) => void (value.activeBeats[0]!.shots[0]!.videoTakes[0]!.binReason = 'lifted'),
+    ],
+    [
+      'a selected row with the wrong media kind',
+      (value) => void (value.activeBeats[0]!.shots[0]!.videoTakes[0]!.mediaKind = 'image'),
+    ],
+    ['an unsafe selected asset id', (value) => void (value.activeBeats[0]!.shots[0]!.selectedTakeId = '../take_1')],
+    [
+      'an unsafe selected poster id',
+      (value) => void (value.activeBeats[0]!.shots[0]!.videoTakes[0]!.posterAssetId = '../poster'),
+    ],
+    [
+      'duplicate selected video authority',
+      (value) =>
+        void value.activeBeats[0]!.shots[0]!.videoTakes.push({
+          ...value.activeBeats[0]!.shots[0]!.videoTakes[0]!,
+        }),
+    ],
+    [
+      'a concurrently selected image row',
+      (value) =>
+        void value.activeBeats[0]!.shots[0]!.imageTakes.push(
+          playbackTake('image_selected_too', 10, { mediaKind: 'image', selected: true })
+        ),
+    ],
+    [
+      'a truthy non-boolean selected flag',
+      (value) =>
+        void Object.assign(value.activeBeats[0]!.shots[0]!.videoTakes[0]! as unknown as { selected: unknown }, {
+          selected: 'yes',
+        }),
+    ],
+    [
+      'a selected source-duration mismatch',
+      (value) => void (value.activeBeats[0]!.shots[0]!.videoTakes[0]!.sourceDurationSeconds = 9),
+    ],
+    [
+      'a non-finite selected source duration',
+      (value) => void (value.activeBeats[0]!.shots[0]!.selectedTakeSourceDurationSeconds = Number.NaN),
+    ],
+    ['a negative-zero trim', (value) => void (value.activeBeats[0]!.shots[0]!.trimInSeconds = -0)],
+    ['trims that consume the source', (value) => void (value.activeBeats[0]!.shots[0]!.trimOutSeconds = 9)],
+    ['a played-duration mismatch', (value) => void (value.activeBeats[0]!.shots[0]!.playedDurationSeconds = 6)],
+    ['a zero-Shot Beat without a target', (value) => void (value.activeBeats[1]!.targetSeconds = null)],
+    ['a zero-Shot Beat with a zero target', (value) => void (value.activeBeats[1]!.targetSeconds = 0)],
+    ['a zero-Shot Beat target mismatch', (value) => void (value.activeBeats[1]!.targetSeconds = 6)],
+    ['a zero-Shot Beat classified as actual', (value) => void (value.cut.beats[1]!.durationKind = 'actual')],
+  ];
+
+  it.each(malformedCases)('fails the whole sequence closed for %s', (_label, mutate) => {
+    const current = structuredClone(playableProjection());
+    mutate(current);
+    expect(buildCutPlaybackSequence(current)).toBeNull();
+  });
+
+  it('floors and clamps the live playback clock independently of rounded summary copy', () => {
+    expect(formatCutPlaybackClock(7.999, 23)).toBe('0:07');
+    expect(formatCutPlaybackClock(-2, 23)).toBe('0:00');
+    expect(formatCutPlaybackClock(24, 23)).toBe('0:23');
+    expect(formatCutPlaybackClock(61.9, 120)).toBe('1:01');
+    expect(formatCutPlaybackClock(Number.NaN, 23)).toBeNull();
+    expect(formatCutPlaybackClock(2, Number.POSITIVE_INFINITY)).toBeNull();
+  });
+});
+
+const renderCutPlayer = (
+  current: WorkspaceProjection = playableProjection(),
+  input: { pending?: boolean; projectId?: string } = {}
+) =>
+  render(
+    <CutPlayer pending={input.pending ?? false} projectId={input.projectId ?? current.projectId} projection={current} />
+  );
+
+const mediaElement = (): HTMLVideoElement => {
+  const media = document.querySelector<HTMLVideoElement>('[data-cut-preview-media][data-media-kind="video"]');
+  if (media === null) throw new Error('Expected the selected video Take in the Cut preview');
+  return media;
+};
+
+const setMediaNumber = (media: HTMLMediaElement, key: 'currentTime' | 'duration', value: number): void => {
+  Object.defineProperty(media, key, { configurable: true, value, writable: true });
+};
+
+const slateFirstProjection = (): WorkspaceProjection => {
+  const current = playableProjection();
+  current.activeBeats = [current.activeBeats[1]!, current.activeBeats[0]!, current.activeBeats[2]!];
+  current.activeBeatIds = current.activeBeats.map((beat) => beat.id);
+  current.activeShotIds = current.activeBeats.flatMap((beat) => beat.shots.map((shot) => shot.id));
+  current.cut.beats = [current.cut.beats[1]!, current.cut.beats[0]!, current.cut.beats[2]!];
+  return current;
+};
+
+describe('the truthful Cut player and transport', () => {
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  const mockMedia = () => ({
+    pause: vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined),
+    play: vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined),
+  });
+
+  it('renders the first selected Take through the managed protocol with a custom muted transport', () => {
+    renderCutPlayer();
+
+    const preview = document.querySelector<HTMLElement>('[data-cut-preview]');
+    const video = mediaElement();
+    const transport = screen.getByRole('group', { name: 'Film transport' });
+    expect(preview).toHaveAccessibleName('Film preview');
+    expect(preview).toHaveAttribute('data-playback-kind', 'video');
+    expect(document.querySelector('[data-cut-preview-badge]')).toHaveTextContent('Beat 01 · Opening');
+    expect(video).toHaveAttribute('src', 'weprompt-studio://asset/project_1/take_1');
+    expect(video).toHaveAttribute('poster', 'weprompt-studio://asset/project_1/take_1_poster');
+    expect(video).toHaveAccessibleName('Beat 01 · Opening · Shot 01 · Line shot_1');
+    expect(video).toHaveAttribute('playsinline');
+    expect(video.muted).toBe(true);
+    expect(video.controls).toBe(false);
+    expect(video).toHaveAttribute('preload', 'metadata');
+    const play = within(transport).getByRole('button', { name: 'Play film' });
+    expect(play).toHaveAttribute('data-cut-play');
+    expect(play).toHaveAttribute('aria-pressed', 'false');
+    const time = transport.querySelector('output[data-cut-time]');
+    expect(time).toHaveTextContent('0:00 / 0:23');
+    expect(time).toHaveAttribute('aria-live', 'off');
+    expect(time).toHaveAttribute('role', 'timer');
+    expect(time?.querySelector('bdi')).toHaveAttribute('dir', 'auto');
+    expect(within(transport).getByText('Picture only — the bed is muted here')).toBeVisible();
+    expect(document.querySelector('audio')).toBeNull();
+  });
+
+  it('waits for an exact asynchronous trim-in seek before playing a pre-metadata Play request', async () => {
+    const media = mockMedia();
+    renderCutPlayer();
+    const video = mediaElement();
+    let currentTime = 0;
+    let seeking = false;
+    Object.defineProperty(video, 'currentTime', {
+      configurable: true,
+      get: () => currentTime,
+      set: (value: number) => {
+        currentTime = value;
+        seeking = true;
+      },
+    });
+    Object.defineProperty(video, 'seeking', { configurable: true, get: () => seeking });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play film' }));
+    setMediaNumber(video, 'duration', 10);
+    fireEvent.loadedMetadata(video);
+    expect(currentTime).toBe(1);
+    expect(media.play).not.toHaveBeenCalled();
+
+    seeking = false;
+    fireEvent.seeked(video);
+    await act(async () => Promise.resolve());
+    expect(media.play).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Pause film' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('advances [source-in, source-out) videos and the authored slate timer without moving transport focus', async () => {
+    vi.useFakeTimers();
+    const media = mockMedia();
+    renderCutPlayer();
+    const play = screen.getByRole('button', { name: 'Play film' });
+    play.focus();
+
+    const first = mediaElement();
+    setMediaNumber(first, 'duration', 10);
+    fireEvent.loadedMetadata(first);
+    expect(first.currentTime).toBe(1);
+    await act(async () => {
+      fireEvent.click(play);
+      await Promise.resolve();
+    });
+    expect(media.play).toHaveBeenCalledTimes(1);
+    expect(play).toHaveAccessibleName('Pause film');
+    expect(play).toHaveAttribute('aria-pressed', 'true');
+    expect(play).toHaveFocus();
+
+    setMediaNumber(first, 'currentTime', 7.999);
+    fireEvent.timeUpdate(first);
+    expect(mediaElement()).toBe(first);
+    expect(screen.getByText('0:06 / 0:23')).toBeVisible();
+    setMediaNumber(first, 'currentTime', 8);
+    fireEvent.timeUpdate(first);
+
+    const second = mediaElement();
+    expect(second).not.toBe(first);
+    expect(second).toHaveAttribute('src', 'weprompt-studio://asset/project_1/take_2');
+    setMediaNumber(second, 'duration', 4);
+    fireEvent.loadedMetadata(second);
+    await act(async () => Promise.resolve());
+    expect(media.play).toHaveBeenCalledTimes(2);
+    setMediaNumber(second, 'currentTime', 4);
+    fireEvent.timeUpdate(second);
+
+    const slate = document.querySelector<HTMLElement>('[data-cut-preview-media][data-media-kind="slate"]');
+    expect(slate).not.toBeNull();
+    expect(slate).toHaveAccessibleName('Beat 02 · Missing middle · Slate · No coverage');
+    expect(slate).toHaveTextContent('Slate · No coverage');
+    expect(slate).toHaveTextContent('Holds 0:05 in the Cut');
+    expect(screen.getByRole('status')).toHaveTextContent('Beat 02 · Missing middle · Slate · No coverage');
+    expect(play).toHaveFocus();
+    act(() => vi.advanceTimersByTime(5_000));
+
+    const finalVideo = mediaElement();
+    expect(finalVideo).toHaveAttribute('src', 'weprompt-studio://asset/project_1/take_3');
+    setMediaNumber(finalVideo, 'duration', 8);
+    fireEvent.loadedMetadata(finalVideo);
+    await act(async () => Promise.resolve());
+    setMediaNumber(finalVideo, 'currentTime', 7.5);
+    fireEvent.timeUpdate(finalVideo);
+    expect(play).toHaveAccessibleName('Play film');
+    expect(play).toHaveAttribute('aria-pressed', 'false');
+    expect(play).toHaveFocus();
+    expect(screen.getByText('0:23 / 0:23')).toBeVisible();
+
+    fireEvent.click(play);
+    const restartedVideo = mediaElement();
+    expect(restartedVideo).toHaveAttribute('src', 'weprompt-studio://asset/project_1/take_1');
+    setMediaNumber(restartedVideo, 'duration', 10);
+    fireEvent.loadedMetadata(restartedVideo);
+    await act(async () => Promise.resolve());
+    expect(restartedVideo.currentTime).toBe(1);
+    expect(play).toHaveAccessibleName('Pause film');
+    expect(play).toHaveFocus();
+  });
+
+  it('ignores a rejected stale play request after pause and a newer resume attempt', async () => {
+    const media = mockMedia();
+    let rejectFirst!: (reason?: unknown) => void;
+    let resolveSecond!: () => void;
+    const firstRequest = new Promise<void>((_resolve, reject) => {
+      rejectFirst = reject;
+    });
+    const secondRequest = new Promise<void>((complete) => {
+      resolveSecond = complete;
+    });
+    media.play.mockReset().mockReturnValueOnce(firstRequest).mockReturnValueOnce(secondRequest);
+    renderCutPlayer();
+    const video = mediaElement();
+    setMediaNumber(video, 'duration', 10);
+    fireEvent.loadedMetadata(video);
+    const play = screen.getByRole('button', { name: 'Play film' });
+    fireEvent.click(play);
+    fireEvent.click(play);
+    fireEvent.click(play);
+
+    await act(async () => {
+      rejectFirst(new Error('stale AbortError'));
+      await Promise.resolve();
+    });
+    expect(play).toHaveAccessibleName('Pause film');
+    expect(play).not.toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('status')).not.toHaveTextContent('This preview could not be loaded.');
+
+    await act(async () => {
+      resolveSecond();
+      await Promise.resolve();
+    });
+  });
+
+  it('ignores a queued ended event after the user has paused the current Take', async () => {
+    mockMedia();
+    renderCutPlayer();
+    const video = mediaElement();
+    setMediaNumber(video, 'duration', 10);
+    fireEvent.loadedMetadata(video);
+    const play = screen.getByRole('button', { name: 'Play film' });
+    fireEvent.click(play);
+    await act(async () => Promise.resolve());
+    fireEvent.click(play);
+    setMediaNumber(video, 'currentTime', 5);
+    fireEvent.ended(video);
+
+    expect(mediaElement()).toBe(video);
+    expect(play).toHaveAccessibleName('Play film');
+    expect(screen.getByRole('status')).not.toHaveTextContent('This preview could not be loaded.');
+  });
+
+  it('remounts a single-video media epoch on replay and ignores prior-cycle native events', async () => {
+    mockMedia();
+    const current = playableProjection();
+    const shot = current.activeBeats[0]!.shots[0]!;
+    const beat = {
+      ...current.activeBeats[0]!,
+      actualSeconds: 7,
+      shots: [shot],
+    };
+    current.activeBeats = [beat];
+    current.activeBeatIds = [beat.id];
+    current.activeShotIds = [shot.id];
+    current.cut.beats = [
+      {
+        ...current.cut.beats[0]!,
+        shotCount: 1,
+        durationSeconds: 7,
+      },
+    ];
+    current.cut.filmDurationSeconds = 7;
+    renderCutPlayer(current);
+
+    const priorCycle = mediaElement();
+    setMediaNumber(priorCycle, 'duration', 10);
+    fireEvent.loadedMetadata(priorCycle);
+    const play = screen.getByRole('button', { name: 'Play film' });
+    fireEvent.click(play);
+    await act(async () => Promise.resolve());
+    setMediaNumber(priorCycle, 'currentTime', 8);
+    fireEvent.timeUpdate(priorCycle);
+    expect(screen.getByText('0:07 / 0:07')).toBeVisible();
+
+    fireEvent.click(play);
+    const nextCycle = mediaElement();
+    expect(nextCycle).not.toBe(priorCycle);
+    fireEvent.error(priorCycle);
+    fireEvent.ended(priorCycle);
+    expect(play).toHaveAccessibleName('Pause film');
+    expect(screen.getByRole('status')).not.toHaveTextContent('This preview could not be loaded.');
+
+    setMediaNumber(nextCycle, 'duration', 10);
+    fireEvent.loadedMetadata(nextCycle);
+    await act(async () => Promise.resolve());
+    expect(nextCycle.currentTime).toBe(1);
+  });
+
+  it('pauses and resumes only the remaining authored slate duration', async () => {
+    vi.useFakeTimers();
+    mockMedia();
+    renderCutPlayer(slateFirstProjection());
+    const play = screen.getByRole('button', { name: 'Play film' });
+    fireEvent.click(play);
+    act(() => vi.advanceTimersByTime(2_000));
+    expect(screen.getByText('0:02 / 0:23')).toBeVisible();
+    fireEvent.click(play);
+    expect(play).toHaveAccessibleName('Play film');
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(document.querySelector('[data-media-kind="slate"]')).not.toBeNull();
+    expect(screen.getByText('0:02 / 0:23')).toBeVisible();
+
+    fireEvent.click(play);
+    act(() => vi.advanceTimersByTime(2_999));
+    expect(document.querySelector('[data-media-kind="slate"]')).not.toBeNull();
+    act(() => vi.advanceTimersByTime(1));
+    expect(mediaElement()).toHaveAttribute('src', 'weprompt-studio://asset/project_1/take_1');
+  });
+
+  it('ignores a slate timer callback that was already queued when Pause froze the clock', () => {
+    vi.useFakeTimers();
+    mockMedia();
+    const queuedTicks: Array<() => void> = [];
+    vi.spyOn(window, 'setInterval').mockImplementation((handler: TimerHandler) => {
+      if (typeof handler !== 'function') throw new TypeError('Expected a slate timer callback');
+      queuedTicks.push(handler);
+      return queuedTicks.length;
+    });
+    renderCutPlayer(slateFirstProjection());
+    const play = screen.getByRole('button', { name: 'Play film' });
+
+    fireEvent.click(play);
+    expect(queuedTicks).toHaveLength(1);
+    act(() => vi.advanceTimersByTime(2_000));
+    fireEvent.click(play);
+    expect(screen.getByText('0:02 / 0:23')).toBeVisible();
+
+    act(() => vi.advanceTimersByTime(1_000));
+    act(() => queuedTicks[0]!());
+    expect(screen.getByText('0:02 / 0:23')).toBeVisible();
+    expect(document.querySelector('[data-media-kind="slate"]')).not.toBeNull();
+  });
+
+  it('takes live video progress from currentTime, freezes it while waiting, and floors the visible clock', async () => {
+    mockMedia();
+    renderCutPlayer();
+    const video = mediaElement();
+    setMediaNumber(video, 'duration', 10);
+    fireEvent.loadedMetadata(video);
+    fireEvent.click(screen.getByRole('button', { name: 'Play film' }));
+    await act(async () => Promise.resolve());
+
+    setMediaNumber(video, 'currentTime', 2.999);
+    fireEvent.timeUpdate(video);
+    expect(screen.getByText('0:01 / 0:23')).toBeVisible();
+    fireEvent.waiting(video);
+    setMediaNumber(video, 'currentTime', 5.9);
+    fireEvent.timeUpdate(video);
+    expect(screen.getByText('0:01 / 0:23')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Pause film' }));
+    expect(screen.getByText('0:01 / 0:23')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Play film' }));
+    await act(async () => Promise.resolve());
+    fireEvent.playing(video);
+    fireEvent.timeUpdate(video);
+    expect(screen.getByText('0:04 / 0:23')).toBeVisible();
+  });
+
+  it('does not let a canceled old frame callback stop the current boundary watcher', async () => {
+    const callbacks = new Map<number, Parameters<HTMLVideoElement['requestVideoFrameCallback']>[0]>();
+    let nextCallbackId = 0;
+    const prototype = HTMLVideoElement.prototype;
+    const requestDescriptor = Object.getOwnPropertyDescriptor(prototype, 'requestVideoFrameCallback');
+    const cancelDescriptor = Object.getOwnPropertyDescriptor(prototype, 'cancelVideoFrameCallback');
+    Object.defineProperty(prototype, 'requestVideoFrameCallback', {
+      configurable: true,
+      value: vi.fn((callback: Parameters<HTMLVideoElement['requestVideoFrameCallback']>[0]) => {
+        nextCallbackId += 1;
+        callbacks.set(nextCallbackId, callback);
+        return nextCallbackId;
+      }),
+    });
+    Object.defineProperty(prototype, 'cancelVideoFrameCallback', {
+      configurable: true,
+      value: vi.fn((callbackId: number) => {
+        callbacks.delete(callbackId);
+      }),
+    });
+
+    try {
+      mockMedia();
+      renderCutPlayer();
+      const first = mediaElement();
+      setMediaNumber(first, 'duration', 10);
+      fireEvent.loadedMetadata(first);
+      fireEvent.click(screen.getByRole('button', { name: 'Play film' }));
+      await act(async () => Promise.resolve());
+      fireEvent.playing(first);
+      const staleCallback = callbacks.values().next().value;
+      if (staleCallback === undefined) throw new Error('Expected the first video-frame boundary callback');
+
+      fireEvent.rateChange(first);
+      expect(callbacks).toHaveLength(1);
+      act(() => staleCallback(performance.now(), { mediaTime: 2 } as VideoFrameCallbackMetadata));
+
+      const [currentCallbackId, currentCallback] = callbacks.entries().next().value ?? [];
+      if (currentCallbackId === undefined || currentCallback === undefined) {
+        throw new Error('Expected the replacement video-frame boundary callback');
+      }
+      callbacks.delete(currentCallbackId);
+      act(() => currentCallback(performance.now(), { mediaTime: 8 } as VideoFrameCallbackMetadata));
+      expect(mediaElement()).not.toBe(first);
+      expect(mediaElement()).toHaveAttribute('src', 'weprompt-studio://asset/project_1/take_2');
+    } finally {
+      if (requestDescriptor === undefined) delete prototype.requestVideoFrameCallback;
+      else Object.defineProperty(prototype, 'requestVideoFrameCallback', requestDescriptor);
+      if (cancelDescriptor === undefined) delete prototype.cancelVideoFrameCallback;
+      else Object.defineProperty(prototype, 'cancelVideoFrameCallback', cancelDescriptor);
+    }
+  });
+
+  it('stops at the exclusive trim boundary from the current video-frame callback without waiting for timeupdate', async () => {
+    const callbacks = new Map<number, Parameters<HTMLVideoElement['requestVideoFrameCallback']>[0]>();
+    let nextCallbackId = 0;
+    const prototype = HTMLVideoElement.prototype;
+    const requestDescriptor = Object.getOwnPropertyDescriptor(prototype, 'requestVideoFrameCallback');
+    const cancelDescriptor = Object.getOwnPropertyDescriptor(prototype, 'cancelVideoFrameCallback');
+    Object.defineProperty(prototype, 'requestVideoFrameCallback', {
+      configurable: true,
+      value: vi.fn((callback: Parameters<HTMLVideoElement['requestVideoFrameCallback']>[0]) => {
+        nextCallbackId += 1;
+        callbacks.set(nextCallbackId, callback);
+        return nextCallbackId;
+      }),
+    });
+    Object.defineProperty(prototype, 'cancelVideoFrameCallback', {
+      configurable: true,
+      value: vi.fn((callbackId: number) => {
+        callbacks.delete(callbackId);
+      }),
+    });
+
+    try {
+      const media = mockMedia();
+      renderCutPlayer();
+      const first = mediaElement();
+      setMediaNumber(first, 'duration', 10);
+      fireEvent.loadedMetadata(first);
+      fireEvent.click(screen.getByRole('button', { name: 'Play film' }));
+      await act(async () => Promise.resolve());
+      fireEvent.playing(first);
+      const [callbackId, callback] = callbacks.entries().next().value ?? [];
+      if (callbackId === undefined || callback === undefined)
+        throw new Error('Expected a video-frame boundary callback');
+      callbacks.delete(callbackId);
+
+      act(() => {
+        callback(performance.now(), { mediaTime: 8 } as VideoFrameCallbackMetadata);
+      });
+      expect(media.pause).toHaveBeenCalled();
+      expect(mediaElement()).not.toBe(first);
+      expect(mediaElement()).toHaveAttribute('src', 'weprompt-studio://asset/project_1/take_2');
+    } finally {
+      if (requestDescriptor === undefined) delete prototype.requestVideoFrameCallback;
+      else Object.defineProperty(prototype, 'requestVideoFrameCallback', requestDescriptor);
+      if (cancelDescriptor === undefined) delete prototype.cancelVideoFrameCallback;
+      else Object.defineProperty(prototype, 'cancelVideoFrameCallback', cancelDescriptor);
+    }
+  });
+
+  it('uses a cancellable timer boundary fallback when video-frame callbacks are unavailable', async () => {
+    vi.useFakeTimers();
+    const prototype = HTMLVideoElement.prototype;
+    const requestDescriptor = Object.getOwnPropertyDescriptor(prototype, 'requestVideoFrameCallback');
+    Object.defineProperty(prototype, 'requestVideoFrameCallback', { configurable: true, value: undefined });
+
+    try {
+      mockMedia();
+      renderCutPlayer();
+      const first = mediaElement();
+      setMediaNumber(first, 'duration', 10);
+      fireEvent.loadedMetadata(first);
+      fireEvent.click(screen.getByRole('button', { name: 'Play film' }));
+      await act(async () => Promise.resolve());
+      fireEvent.playing(first);
+      setMediaNumber(first, 'currentTime', 8);
+
+      act(() => vi.advanceTimersByTime(16));
+      expect(mediaElement()).not.toBe(first);
+      expect(mediaElement()).toHaveAttribute('src', 'weprompt-studio://asset/project_1/take_2');
+    } finally {
+      if (requestDescriptor === undefined) delete prototype.requestVideoFrameCallback;
+      else Object.defineProperty(prototype, 'requestVideoFrameCallback', requestDescriptor);
+    }
+  });
+
+  it.each(['rejected play', 'short metadata', 'early ended', 'seek failure', 'native media error'] as const)(
+    'stops without skipping on %s and leaves a guarded focusable retry',
+    async (failure) => {
+      const media = mockMedia();
+      if (failure === 'rejected play') media.play.mockRejectedValueOnce(new Error('closed'));
+      renderCutPlayer();
+      const play = screen.getByRole('button', { name: 'Play film' });
+      play.focus();
+      const first = mediaElement();
+      if (failure === 'seek failure') {
+        Object.defineProperty(first, 'currentTime', {
+          configurable: true,
+          get: () => 0,
+          set: () => {
+            throw new Error('seek failed');
+          },
+        });
+        setMediaNumber(first, 'duration', 10);
+        fireEvent.loadedMetadata(first);
+      } else if (failure === 'short metadata') {
+        setMediaNumber(first, 'duration', 7.5);
+        fireEvent.loadedMetadata(first);
+      } else {
+        setMediaNumber(first, 'duration', 10);
+        fireEvent.loadedMetadata(first);
+        if (failure === 'early ended') {
+          fireEvent.click(play);
+          await act(async () => Promise.resolve());
+          setMediaNumber(first, 'currentTime', 5);
+          fireEvent.ended(first);
+        } else if (failure === 'native media error') {
+          fireEvent.error(first);
+        } else {
+          fireEvent.click(play);
+          await act(async () => Promise.resolve());
+        }
+      }
+
+      expect(await screen.findByRole('status')).toHaveTextContent('This preview could not be loaded.');
+      expect(mediaElement()).toBe(first);
+      if (failure === 'native media error') {
+        setMediaNumber(first, 'currentTime', 8);
+        fireEvent.ended(first);
+        fireEvent.timeUpdate(first);
+        expect(mediaElement()).toBe(first);
+        expect(screen.getByRole('status')).toHaveTextContent('This preview could not be loaded.');
+      }
+      expect(play).not.toBeDisabled();
+      expect(play).toHaveAttribute('aria-disabled', 'true');
+      expect(play).toHaveFocus();
+      fireEvent.click(play);
+      expect(media.play).toHaveBeenCalledTimes(failure === 'rejected play' || failure === 'early ended' ? 1 : 0);
+    }
+  );
+
+  it('resets and pauses for pending work, project mismatch, revision change, or order change and ignores stale events', async () => {
+    const media = mockMedia();
+    const current = playableProjection();
+    const view = renderCutPlayer(current);
+    const play = screen.getByRole('button', { name: 'Play film' });
+    const staleVideo = mediaElement();
+    setMediaNumber(staleVideo, 'duration', 10);
+    fireEvent.loadedMetadata(staleVideo);
+    fireEvent.click(play);
+    await act(async () => Promise.resolve());
+    setMediaNumber(staleVideo, 'currentTime', 4);
+    fireEvent.timeUpdate(staleVideo);
+    expect(screen.getByText('0:03 / 0:23')).toBeVisible();
+
+    view.rerender(<CutPlayer pending projectId='project_1' projection={current} />);
+    expect(media.pause).toHaveBeenCalled();
+    expect(screen.getByText('0:00 / 0:23')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Play film' })).toBeDisabled();
+    fireEvent.timeUpdate(staleVideo);
+    fireEvent.ended(staleVideo);
+    expect(screen.getByText('0:00 / 0:23')).toBeVisible();
+
+    view.rerender(<CutPlayer pending={false} projectId='different_project' projection={current} />);
+    const unavailable = screen.getByText('No film preview is available.');
+    expect(unavailable).toBeVisible();
+    const disabledPlay = screen.getByRole('button', { name: 'Play film' });
+    expect(disabledPlay).toBeDisabled();
+    fireEvent.click(disabledPlay);
+    expect(media.play).toHaveBeenCalledTimes(1);
+
+    const revised = structuredClone(current);
+    revised.projectRevision += 1;
+    view.rerender(<CutPlayer pending={false} projectId='project_1' projection={revised} />);
+    expect(screen.getByText('0:00 / 0:23')).toBeVisible();
+    const reordered = slateFirstProjection();
+    reordered.projectRevision = revised.projectRevision;
+    view.rerender(<CutPlayer pending={false} projectId='project_1' projection={reordered} />);
+    expect(screen.getByText('0:00 / 0:23')).toBeVisible();
+    expect(document.querySelector('[data-media-kind="slate"]')).not.toBeNull();
+  });
+
+  it('integrates a 2:1 preview-first hero whose transport and summary remain semantic siblings', () => {
+    const current = playableProjection();
+    renderCut({ cutProjection: current.cut, activeBeats: current.activeBeats });
+    const hero = document.querySelector<HTMLElement>('[data-cut-hero]');
+    const preview = document.querySelector<HTMLElement>('[data-cut-preview]');
+    const transport = document.querySelector<HTMLElement>('[data-cut-transport]');
+    const summary = document.querySelector<HTMLElement>('[data-cut-summary]');
+    expect(hero).not.toBeNull();
+    expect(preview).not.toBeNull();
+    expect(transport).not.toBeNull();
+    expect(summary?.tagName).toBe('ASIDE');
+    expect(summary).toHaveAccessibleName('The film');
+    expect(summary).toContainElement(document.querySelector('[data-cut-film]'));
+    expect(preview?.parentElement).toBe(transport?.parentElement);
+    expect(preview?.parentElement?.parentElement).toBe(hero);
+    expect(summary?.parentElement).toBe(hero);
+    expect(Array.from(hero?.children ?? [])).toEqual([preview?.parentElement, summary]);
+  });
+
+  it('pins the preview geometry, media containment, and wide-to-compact hero switch to the drawn contract', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/Cut/CutPlayer.tsx'),
+      'utf8'
+    );
+    const css = readFileSync(
+      resolve(
+        process.cwd(),
+        'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/Cut/Cut.module.css'
+      ),
+      'utf8'
+    );
+
+    expect(source).toContain('data-cut-preview');
+    expect(source).toContain('data-cut-preview-media');
+    expect(source).toContain('data-cut-preview-badge');
+    expect(source).toContain('data-cut-transport');
+    expect(source).toContain('data-cut-play');
+    expect(source).toContain('data-cut-time');
+    expect(source).toMatch(/<video[\s\S]*\bmuted\b[\s\S]*\bplaysInline\b/);
+    expect(source).not.toMatch(/<video[\s\S]*\bcontrols\s*=/);
+    expect(source).not.toMatch(/<audio\b/);
+    expect(css).toMatch(/\.hero\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*2fr\)\s+minmax\(0,\s*1fr\)/s);
+    expect(css).toMatch(/\.hero\s*\{[^}]*gap:\s*13px/s);
+    expect(css).toMatch(/\.preview\s*\{[^}]*aspect-ratio:\s*16\s*\/\s*9/s);
+    expect(css).toMatch(/\.previewMedia\s*\{[^}]*object-fit:\s*contain/s);
+    expect(css).toMatch(
+      /@container\s*\(max-width:\s*859px\)[\s\S]*?\.hero\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s
+    );
+  });
+});
 
 const catalog = (): StudioRendererExportCatalogV2 => ({
   revision: 4,

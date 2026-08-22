@@ -906,7 +906,48 @@
       "importError": "No se pudo añadir la referencia. Inténtalo de nuevo."
     },
     "workspace": {
+      "cut": {
+        "preview": {
+          "label": "Vista previa de la película",
+          "beatBadge": "Beat {{position}} · {{title}}",
+          "slate": "Claqueta · Sin cobertura",
+          "slateHold": "Se mantiene durante {{clock}} en el montaje",
+          "videoLabel": "Beat {{beatPosition}} · {{beatTitle}} · Plano {{shotPosition}} · {{shotTitle}}",
+          "slateLabel": "Beat {{beatPosition}} · {{beatTitle}} · Claqueta · Sin cobertura",
+          "noMedia": "No hay ninguna vista previa de la película disponible.",
+          "mediaError": "No se pudo cargar esta vista previa.",
+          "play": "Reproducir película",
+          "pause": "Pausar película",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "Solo imagen — aquí la pista de audio está silenciada",
+          "controlsLabel": "Controles de reproducción de la película"
+        }
+      },
       "beatPanel": {
+        "beatFieldsLabel": "Acción, estilo y duración objetivo del beat",
+        "fieldGuidance": {
+          "action": "Acción · Lo único que escribes",
+          "look": "Estilo · Cada plano lo hereda"
+        },
+        "fields": {
+          "action": "Acción",
+          "look": "Estilo",
+          "targetSeconds": "Duración objetivo en segundos"
+        },
+        "lookCounter": "{{count}} / {{limit}} palabras",
+        "lookCounter_one": "{{count}} / {{limit}} palabras",
+        "lookCounter_other": "{{count}} / {{limit}} palabras",
+        "chain": {
+          "hardCutUnavailable": "Temporalmente no se pueden hacer cambios en el corte directo. Primero debe revisarse la estimación del material multimedia de sustitución necesario.",
+          "segmentHead": "Inicio de la cadena · Empieza desde la imagen fija",
+          "continuous": "Continúa desde el último fotograma del plano {{position}}"
+        },
+        "derivation": {
+          "derived": "Derivada de la acción",
+          "detached": "Separada · Tuya",
+          "attachedLineGuidance": "Escrita desde la acción · Edita para separar",
+          "detachedLineGuidance": "Tus palabras · Ya no sigue la acción"
+        },
         "coverage": {
           "trimGuidance": "Borde · Recorte · Gratis",
           "boundaryGuidance": "Límite · Requiere volver a renderizar"

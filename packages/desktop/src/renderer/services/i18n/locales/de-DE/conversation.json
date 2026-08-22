@@ -904,7 +904,48 @@
       "importError": "Die Referenz konnte nicht hinzugefügt werden. Versuche es erneut."
     },
     "workspace": {
+      "cut": {
+        "preview": {
+          "label": "Filmvorschau",
+          "beatBadge": "Beat {{position}} · {{title}}",
+          "slate": "Platzhalter · Keine Abdeckung",
+          "slateHold": "Bleibt für {{clock}} im Schnitt",
+          "videoLabel": "Beat {{beatPosition}} · {{beatTitle}} · Shot {{shotPosition}} · {{shotTitle}}",
+          "slateLabel": "Beat {{beatPosition}} · {{beatTitle}} · Platzhalter · Keine Abdeckung",
+          "noMedia": "Keine Filmvorschau verfügbar.",
+          "mediaError": "Diese Vorschau konnte nicht geladen werden.",
+          "play": "Film abspielen",
+          "pause": "Film pausieren",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "Nur Bild — das Audiobett ist hier stummgeschaltet",
+          "controlsLabel": "Filmsteuerung"
+        }
+      },
       "beatPanel": {
+        "beatFieldsLabel": "Handlung, Look und Zieldauer des Beats",
+        "fieldGuidance": {
+          "action": "Handlung · Das Einzige, was du schreibst",
+          "look": "Look · Jede Einstellung übernimmt diesen Look"
+        },
+        "fields": {
+          "action": "Handlung",
+          "look": "Look",
+          "targetSeconds": "Zieldauer in Sekunden"
+        },
+        "lookCounter": "{{count}} / {{limit}} Wörter",
+        "lookCounter_one": "{{count}} / {{limit}} Wörter",
+        "lookCounter_other": "{{count}} / {{limit}} Wörter",
+        "chain": {
+          "hardCutUnavailable": "Änderungen am harten Schnitt sind vorübergehend nicht verfügbar. Zuerst muss die Schätzung für die erforderlichen Ersatzmedien geprüft werden.",
+          "segmentHead": "Kettenanfang · Beginnt mit dem Standbild",
+          "continuous": "Setzt das letzte Bild von Shot {{position}} fort"
+        },
+        "derivation": {
+          "derived": "Aus der Handlung abgeleitet",
+          "detached": "Abgelöst · Dein Text",
+          "attachedLineGuidance": "Aus der Handlung geschrieben · Zum Ablösen bearbeiten",
+          "detachedLineGuidance": "Deine Worte · Folgen der Handlung nicht mehr"
+        },
         "coverage": {
           "trimGuidance": "Kante · Trimmen · Kostenlos",
           "boundaryGuidance": "Grenze · Erfordert neues Rendern"

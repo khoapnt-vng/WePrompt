@@ -137,6 +137,19 @@ const expectedLeaves = [
   'cut.actualDuration',
   'cut.targetDuration',
   'cut.beatDurationPending',
+  'cut.preview.label',
+  'cut.preview.beatBadge',
+  'cut.preview.slate',
+  'cut.preview.slateHold',
+  'cut.preview.videoLabel',
+  'cut.preview.slateLabel',
+  'cut.preview.noMedia',
+  'cut.preview.mediaError',
+  'cut.preview.play',
+  'cut.preview.pause',
+  'cut.preview.position',
+  'cut.preview.pictureOnly',
+  'cut.preview.controlsLabel',
   'cut.film.title',
   'cut.film.ofTarget',
   'cut.film.targetUnknown',
@@ -280,6 +293,8 @@ const expectedLeaves = [
   'beatPanel.nextBeat',
   'beatPanel.nextBeatShort',
   'beatPanel.beatFieldsLabel',
+  'beatPanel.fieldGuidance.action',
+  'beatPanel.fieldGuidance.look',
   'beatPanel.lookCounter',
   'beatPanel.lookCounter_one',
   'beatPanel.lookCounter_other',
@@ -303,6 +318,7 @@ const expectedLeaves = [
   'beatPanel.fields.durationFor',
   'beatPanel.chain.authorHardCut',
   'beatPanel.chain.hardCut',
+  'beatPanel.chain.hardCutUnavailable',
   'beatPanel.chain.generationOutOfDate',
   'beatPanel.chain.segmentHead',
   'beatPanel.chain.continuous',
@@ -318,10 +334,12 @@ const expectedLeaves = [
   'beatPanel.coverage.boundaryLabel',
   'beatPanel.coverage.boundaryValue',
   'beatPanel.coverage.boundaryAnnouncement',
+  'beatPanel.coverage.boundaryGuidance',
   'beatPanel.coverage.trimInLabel',
   'beatPanel.coverage.trimOutLabel',
   'beatPanel.coverage.trimValue',
   'beatPanel.coverage.trimAnnouncement',
+  'beatPanel.coverage.trimGuidance',
   'beatPanel.coverage.tailTrimWarning',
   'beatPanel.coverage.reviewResplit',
   'beatPanel.shots.label',
@@ -337,6 +355,8 @@ const expectedLeaves = [
   'beatPanel.derivation.title',
   'beatPanel.derivation.derived',
   'beatPanel.derivation.detached',
+  'beatPanel.derivation.attachedLineGuidance',
+  'beatPanel.derivation.detachedLineGuidance',
   'beatPanel.derivation.stale',
   'beatPanel.derivation.detach',
   'beatPanel.derivation.rederiveReviewed',
@@ -673,7 +693,42 @@ const briefAndRulesTitles: Record<string, string> = {
   'zh-TW': '簡報與規則',
 };
 
+const localizedCutPreviewKeys = [
+  'cut.preview.label',
+  'cut.preview.beatBadge',
+  'cut.preview.slate',
+  'cut.preview.slateHold',
+  'cut.preview.videoLabel',
+  'cut.preview.slateLabel',
+  'cut.preview.noMedia',
+  'cut.preview.mediaError',
+  'cut.preview.play',
+  'cut.preview.pause',
+  'cut.preview.position',
+  'cut.preview.pictureOnly',
+  'cut.preview.controlsLabel',
+] as const;
+
 const localizedWorkspaceKeys = [
+  'beatPanel.beatFieldsLabel',
+  'beatPanel.chain.continuous',
+  'beatPanel.chain.hardCutUnavailable',
+  'beatPanel.chain.segmentHead',
+  'beatPanel.coverage.boundaryGuidance',
+  'beatPanel.coverage.trimGuidance',
+  'beatPanel.derivation.attachedLineGuidance',
+  'beatPanel.derivation.derived',
+  'beatPanel.derivation.detached',
+  'beatPanel.derivation.detachedLineGuidance',
+  'beatPanel.fieldGuidance.action',
+  'beatPanel.fieldGuidance.look',
+  'beatPanel.fields.action',
+  'beatPanel.fields.look',
+  'beatPanel.fields.targetSeconds',
+  'beatPanel.lookCounter',
+  'beatPanel.lookCounter_one',
+  'beatPanel.lookCounter_other',
+  ...localizedCutPreviewKeys,
   'controls.briefAndRulesTitle',
   'gate.errors.pricing.invalidQuote',
   'gate.errors.pricing.inactiveShot',
@@ -699,6 +754,48 @@ describe('Creative Studio workspace translations', () => {
     for (const [key, value] of Object.entries(leaves)) {
       expect(value.trim(), key).not.toBe('');
     }
+  });
+
+  it('keeps Cut preview labels and transport copy as complete en-US phrases', () => {
+    const leaves = flattenLeaves(englishWorkspace);
+
+    expect(leaves).toMatchObject({
+      'cut.preview.label': 'Film preview',
+      'cut.preview.beatBadge': 'Beat {{position}} · {{title}}',
+      'cut.preview.slate': 'Slate · No coverage',
+      'cut.preview.slateHold': 'Holds {{clock}} in the Cut',
+      'cut.preview.videoLabel': 'Beat {{beatPosition}} · {{beatTitle}} · Shot {{shotPosition}} · {{shotTitle}}',
+      'cut.preview.slateLabel': 'Beat {{beatPosition}} · {{beatTitle}} · Slate · No coverage',
+      'cut.preview.noMedia': 'No film preview is available.',
+      'cut.preview.mediaError': 'This preview could not be loaded.',
+      'cut.preview.play': 'Play film',
+      'cut.preview.pause': 'Pause film',
+      'cut.preview.position': '{{current}} / {{total}}',
+      'cut.preview.pictureOnly': 'Picture only — the bed is muted here',
+      'cut.preview.controlsLabel': 'Film transport',
+    });
+  });
+
+  it('explains the contained hard-cut control without implying that a free mutation occurred', () => {
+    const leaves = flattenLeaves(englishWorkspace);
+
+    expect(leaves['beatPanel.chain.hardCutUnavailable']).toBe(
+      'Hard-cut changes are temporarily unavailable. A reviewed estimate for the required replacement media must come first.'
+    );
+  });
+
+  it('keeps Shot and Line provenance as complete sentence-case en-US phrases', () => {
+    const leaves = flattenLeaves(englishWorkspace);
+
+    expect(leaves).toMatchObject({
+      'beatPanel.chain.segmentHead': 'Head of the chain · Starts from the still',
+      'beatPanel.chain.continuous': 'Continues from Shot {{position}}’s last frame',
+      'beatPanel.derivation.attachedLineGuidance': 'Written from the action · Edit to detach',
+      'beatPanel.derivation.detachedLineGuidance': 'Your words · No longer follows the action',
+      'beatPanel.derivation.derived': 'Derived from the action',
+      'beatPanel.derivation.detached': 'Detached · Yours',
+    });
+    expect(placeholders(leaves['beatPanel.chain.continuous']!)).toEqual(['position']);
   });
 
   it('keeps one/other variants paired with identical interpolation parameters', () => {
@@ -842,6 +939,19 @@ describe('Creative Studio workspace translations', () => {
       expect(localizedTitle, locale).toBeTypeOf('string');
       expect(Object.keys(localizedLeaves).toSorted(), locale).toEqual(localizedWorkspaceKeys.toSorted());
       expect(localizedLeaves['controls.briefAndRulesTitle'], locale).toBe(localizedTitle);
+      for (const field of ['action', 'look'] as const) {
+        const conciseName = localizedLeaves[`beatPanel.fields.${field}`];
+        const guidance = localizedLeaves[`beatPanel.fieldGuidance.${field}`];
+        expect(guidance?.startsWith(`${conciseName} · `), `${locale}:${field}`).toBe(true);
+      }
+      for (const key of localizedCutPreviewKeys) {
+        const englishCopy = englishLeaves[key];
+        const localizedCopy = localizedLeaves[key];
+        expect(localizedCopy?.trim(), `${locale}:${key}`).not.toBe('');
+        expect(placeholders(localizedCopy!), `${locale}:${key}:localized placeholders`).toEqual(
+          placeholders(englishCopy!)
+        );
+      }
       for (const key of localizedWorkspaceKeys.filter((candidate) => candidate.startsWith('gate.errors.pricing.'))) {
         expect(localizedLeaves[key]?.trim(), `${locale}:${key}`).not.toBe('');
       }

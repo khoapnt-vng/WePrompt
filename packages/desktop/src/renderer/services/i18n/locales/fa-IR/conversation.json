@@ -903,7 +903,48 @@
       "importError": "مرجع افزوده نشد. دوباره تلاش کنید."
     },
     "workspace": {
+      "cut": {
+        "preview": {
+          "label": "پیش‌نمایش فیلم",
+          "beatBadge": "ضرب‌آهنگ {{position}} · {{title}}",
+          "slate": "اسلیت · بدون پوشش",
+          "slateHold": "در تدوین به‌مدت {{clock}} باقی می‌ماند",
+          "videoLabel": "ضرب‌آهنگ {{beatPosition}} · {{beatTitle}} · نمای {{shotPosition}} · {{shotTitle}}",
+          "slateLabel": "ضرب‌آهنگ {{beatPosition}} · {{beatTitle}} · اسلیت · بدون پوشش",
+          "noMedia": "پیش‌نمایشی از فیلم در دسترس نیست.",
+          "mediaError": "این پیش‌نمایش بارگیری نشد.",
+          "play": "پخش فیلم",
+          "pause": "توقف موقت فیلم",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "فقط تصویر — بستر صوتی در اینجا بی‌صدا است",
+          "controlsLabel": "کنترل‌های پخش فیلم"
+        }
+      },
       "beatPanel": {
+        "beatFieldsLabel": "کنش، ظاهر و زمان هدف ضرب‌آهنگ",
+        "fieldGuidance": {
+          "action": "کنش · تنها چیزی که می‌نویسید",
+          "look": "ظاهر · هر نما آن را به ارث می‌برد"
+        },
+        "fields": {
+          "action": "کنش",
+          "look": "ظاهر",
+          "targetSeconds": "زمان هدف به ثانیه"
+        },
+        "lookCounter": "{{count}} / {{limit}} واژه",
+        "lookCounter_one": "{{count}} / {{limit}} واژه",
+        "lookCounter_other": "{{count}} / {{limit}} واژه",
+        "chain": {
+          "hardCutUnavailable": "تغییر هارد کات موقتاً امکان‌پذیر نیست. ابتدا باید برآورد رسانهٔ جایگزینِ موردنیاز بازبینی شود.",
+          "segmentHead": "سر زنجیره · از تصویر ثابت شروع می‌شود",
+          "continuous": "از آخرین فریم نمای {{position}} ادامه می‌یابد"
+        },
+        "derivation": {
+          "derived": "برگرفته از کنش",
+          "detached": "جداشده · متن شما",
+          "attachedLineGuidance": "نوشته‌شده از کنش · برای جدا کردن ویرایش کنید",
+          "detachedLineGuidance": "واژه‌های شما · دیگر از کنش پیروی نمی‌کند"
+        },
         "coverage": {
           "trimGuidance": "لبه · برش · رایگان",
           "boundaryGuidance": "مرز · نیازمند رندر مجدد"

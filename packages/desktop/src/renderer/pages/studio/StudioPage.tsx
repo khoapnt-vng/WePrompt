@@ -114,6 +114,9 @@ const beatDraftKey = (beatId: string, field: 'action' | 'look' | 'targetSeconds'
 const shotDraftKey = (shotId: string, field: 'line' | 'narration' | 'onScreenText' | 'durationSeconds'): string =>
   `shot.${shotId}.${field}`;
 
+const containsUnavailableHardCutOperation = (operations: readonly StudioRendererAuthoringOperationV2[]): boolean =>
+  operations.some((operation) => operation.kind === 'set_hard_cut');
+
 const cloneBinItem = (item: StudioBinItem): StudioBinItem => {
   if (item.kind === 'beat') return { kind: 'beat', beatId: item.beatId, reason: item.reason };
   if (item.kind === 'shot') {
@@ -385,14 +388,19 @@ const StudioProjectPage: React.FC<{
             changes,
           })
         ),
-      applyAuthoring: async (operations) =>
-        runWorkspaceCommit((current) =>
+      applyAuthoring: async (operations) => {
+        if (containsUnavailableHardCutOperation(operations)) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.beatPanel.chain.hardCutUnavailable');
+          return false;
+        }
+        return runWorkspaceCommit((current) =>
           ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
             projectId: current.id,
             expectedRevision: current.revision,
             operations,
           })
-        ),
+        );
+      },
       setRules: async (update, adoptionKey) =>
         (await runWorkspaceExclusive(async () => {
           ruleAdoptionErrorGenerationsRef.current.delete(adoptionKey);
@@ -534,14 +542,6 @@ const StudioProjectPage: React.FC<{
           })
         );
       },
-      setHardCut: async (shotId, hardCut) =>
-        runWorkspaceCommit((current) =>
-          ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
-            projectId: current.id,
-            expectedRevision: current.revision,
-            operations: [{ kind: 'set_hard_cut', shotId, hardCut }],
-          })
-        ),
       setSeedStill: async (shotId, assetId) =>
         runWorkspaceCommit((current) =>
           ipcBridge.creativeStudio.applyAuthoringBatch.invoke({

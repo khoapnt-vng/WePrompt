@@ -901,7 +901,48 @@
       "importError": "参照を追加できませんでした。もう一度お試しください。"
     },
     "workspace": {
+      "cut": {
+        "preview": {
+          "label": "フィルムプレビュー",
+          "beatBadge": "ビート{{position}} · {{title}}",
+          "slate": "スレート · カバレッジなし",
+          "slateHold": "カット内で{{clock}}保持",
+          "videoLabel": "ビート{{beatPosition}} · {{beatTitle}} · ショット{{shotPosition}} · {{shotTitle}}",
+          "slateLabel": "ビート{{beatPosition}} · {{beatTitle}} · スレート · カバレッジなし",
+          "noMedia": "フィルムプレビューはありません。",
+          "mediaError": "このプレビューを読み込めませんでした。",
+          "play": "フィルムを再生",
+          "pause": "フィルムを一時停止",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "映像のみ — ここではオーディオベッドはミュートされています",
+          "controlsLabel": "フィルム再生コントロール"
+        }
+      },
       "beatPanel": {
+        "beatFieldsLabel": "ビートのアクション、ルック、目標時間",
+        "fieldGuidance": {
+          "action": "アクション · あなたが書く唯一の内容",
+          "look": "ルック · すべてのショットに継承"
+        },
+        "fields": {
+          "action": "アクション",
+          "look": "ルック",
+          "targetSeconds": "目標時間（秒）"
+        },
+        "lookCounter": "{{count}} / {{limit}}語",
+        "lookCounter_one": "{{count}} / {{limit}}語",
+        "lookCounter_other": "{{count}} / {{limit}}語",
+        "chain": {
+          "hardCutUnavailable": "ハードカットは一時的に変更できません。必要な差し替えメディアの見積もりを先に確認する必要があります。",
+          "segmentHead": "チェーンの先頭 · 静止画から開始",
+          "continuous": "ショット{{position}}の最終フレームから続く"
+        },
+        "derivation": {
+          "derived": "アクションから派生",
+          "detached": "切り離し済み · あなたの文",
+          "attachedLineGuidance": "アクションから作成 · 編集すると切り離し",
+          "detachedLineGuidance": "あなたの言葉 · アクションには追従しません"
+        },
         "coverage": {
           "trimGuidance": "エッジ · トリミング · 無料",
           "boundaryGuidance": "境界 · 再レンダリングが必要"

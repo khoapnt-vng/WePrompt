@@ -21,9 +21,11 @@ import type { BeatPanelActions, BeatPanelBriefReferenceOption, BeatPanelReviewGr
 import type { BoardActions } from './Board';
 import type { CutActions } from './Cut';
 
+export type WorkspaceAuthoringOperationV2 = Exclude<StudioRendererAuthoringOperationV2, { kind: 'set_hard_cut' }>;
+
 export type WorkspaceMutationCallbacks = {
   editProject: (changes: StudioEditableProjectSettingsChanges) => Promise<boolean>;
-  applyAuthoring: (operations: StudioRendererAuthoringOperationV2[]) => Promise<boolean>;
+  applyAuthoring: (operations: WorkspaceAuthoringOperationV2[]) => Promise<boolean>;
   setRules: (
     update: (latestRules: readonly StudioBriefRule[]) => StudioBriefRuleDraft[] | null,
     adoptionKey: string

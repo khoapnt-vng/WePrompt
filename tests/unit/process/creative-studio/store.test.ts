@@ -3709,6 +3709,53 @@ describe('schema-2 creative studio project store', () => {
     expect(retry.project.undoHistory.filter((entry) => entry.id === proposal.id)).toHaveLength(1);
   });
 
+  it('refuses a legacy pending hard-cut proposal without publishing project or decision bytes', async () => {
+    const { store } = createStoreV2({
+      createId: () => 'legacy_hard_cut_proposal_project',
+      now: () => '2026-08-17T12:00:01.000Z',
+    });
+    const created = await store.createProjectV2(inputV2);
+    const authored = await store.applyMutationBatchV2(
+      makeStudioMutationBatchV2(created, [
+        {
+          kind: 'add_beat',
+          beatId: 'beat_1',
+          beat: { title: 'Opening', action: '', look: '', targetSeconds: null },
+          beforeBeatId: null,
+        },
+        {
+          kind: 'add_shot',
+          beatId: 'beat_1',
+          shotId: 'shot_1',
+          shot: { line: '', narration: '', onScreenText: '', durationSeconds: 5 },
+          beforeShotId: null,
+        },
+        {
+          kind: 'add_shot',
+          beatId: 'beat_1',
+          shotId: 'shot_2',
+          shot: { line: '', narration: '', onScreenText: '', durationSeconds: 5 },
+          beforeShotId: null,
+        },
+      ]),
+      makeMutationContextV2({ mutationId: 'author_legacy_hard_cut_proposal' })
+    );
+    const seeded = await seedProposalV2(store, authored.project, {
+      proposalId: 'legacy_hard_cut_proposal',
+      payload: {
+        kind: 'mutation_batch',
+        operations: [{ kind: 'set_hard_cut', shotId: 'shot_2', hardCut: true }],
+      },
+    });
+    const projectDir = realpathSync(path.join(rootDir, authored.project.id));
+    const before = snapshotTreeV2(projectDir);
+
+    await expect(store.acceptProposalV2(authored.project.id, seeded.proposal.id)).rejects.toMatchObject({
+      reasonCode: 'invalid_operation',
+    });
+    expect(snapshotTreeV2(projectDir)).toEqual(before);
+  });
+
   it('accepts pin_rule by applying one deterministic set_rules reducer operation', async () => {
     const ids = ['pin_project_v2', 'pinned_rule_v2'];
     const { store } = createStoreV2({

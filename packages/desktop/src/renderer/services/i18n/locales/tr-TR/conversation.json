@@ -905,7 +905,48 @@
       "importError": "Referans eklenemedi. Yeniden deneyin."
     },
     "workspace": {
+      "cut": {
+        "preview": {
+          "label": "Film önizlemesi",
+          "beatBadge": "Beat {{position}} · {{title}}",
+          "slate": "Slayt · Çekim yok",
+          "slateHold": "Kurguda {{clock}} boyunca kalır",
+          "videoLabel": "Beat {{beatPosition}} · {{beatTitle}} · Çekim {{shotPosition}} · {{shotTitle}}",
+          "slateLabel": "Beat {{beatPosition}} · {{beatTitle}} · Slayt · Çekim yok",
+          "noMedia": "Kullanılabilir film önizlemesi yok.",
+          "mediaError": "Bu önizleme yüklenemedi.",
+          "play": "Filmi oynat",
+          "pause": "Filmi duraklat",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "Yalnızca görüntü — ses parçası burada sessize alınır",
+          "controlsLabel": "Film oynatma kontrolleri"
+        }
+      },
       "beatPanel": {
+        "beatFieldsLabel": "Beat aksiyonu, görünümü ve hedef süresi",
+        "fieldGuidance": {
+          "action": "Aksiyon · Yazdığınız tek şey",
+          "look": "Görünüm · Her çekim bunu devralır"
+        },
+        "fields": {
+          "action": "Aksiyon",
+          "look": "Görünüm",
+          "targetSeconds": "Saniye cinsinden hedef süre"
+        },
+        "lookCounter": "{{count}} / {{limit}} kelime",
+        "lookCounter_one": "{{count}} / {{limit}} kelime",
+        "lookCounter_other": "{{count}} / {{limit}} kelime",
+        "chain": {
+          "hardCutUnavailable": "Sert kesmede geçici olarak değişiklik yapılamıyor. Önce gerekli ikame medya için hazırlanan tahminin incelenmesi gerekiyor.",
+          "segmentHead": "Zincirin başı · Sabit görüntüden başlar",
+          "continuous": "{{position}}. çekimin son karesinden devam eder"
+        },
+        "derivation": {
+          "derived": "Aksiyondan türetildi",
+          "detached": "Ayrıldı · Size ait",
+          "attachedLineGuidance": "Aksiyondan yazıldı · Ayırmak için düzenleyin",
+          "detachedLineGuidance": "Sizin sözleriniz · Artık aksiyonu takip etmez"
+        },
         "coverage": {
           "trimGuidance": "Kenar · Kırpma · Ücretsiz",
           "boundaryGuidance": "Sınır · Yeniden oluşturma gerektirir"
