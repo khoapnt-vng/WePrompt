@@ -21,10 +21,22 @@ const HEALTH_ORDER = { available: 0, unknown: 1 } as const;
 /** Attempts per kind. Each one is a network round trip, so this is a budget, not a limit to raise. */
 export const STUDIO_CONNECTION_ATTEMPT_BUDGET = 3;
 
+/**
+ * Integrations that publish their own model list, which is then authoritative.
+ *
+ * Everything else draws from the provider's own models — only `openRouterVideo` ships a catalogue,
+ * so it is the only integration whose absent group means "none" rather than "ask the provider".
+ * Exported so the Settings editor and this planner cannot drift: they disagreeing is precisely how
+ * provisioning came to plan nothing at all.
+ */
+export const CLOSED_CANDIDATE_MODEL_LABEL_KEYS: ReadonlySet<string> = new Set(['openRouterVideo']);
+
 type CandidateModel = { model: string; health: 'available' | 'unknown' | 'unavailable' };
 
 type Candidate = {
   providerId: string;
+  /** The provider's own models. Every integration without a group of its own draws from here. */
+  models: readonly CandidateModel[];
   integrationModels: readonly { integrationLabelKey: string; models: readonly CandidateModel[] }[];
 };
 
@@ -62,12 +74,17 @@ export const planStudioConnections = (input: {
     if (connectedKinds.has(kind)) continue;
     const forKind: (StudioConnectionAttempt & { health: 'available' | 'unknown' })[] = [];
     for (const candidate of input.candidates) {
-      for (const group of candidate.integrationModels) {
-        // The label key is the only join between a candidate group and an integration id. A group
-        // this build does not recognise has no id to send, so it cannot become an attempt.
-        const integration = input.integrations.find((one) => one.labelKey === group.integrationLabelKey);
-        if (integration === undefined || integration.kind !== kind) continue;
-        for (const model of group.models) {
+      for (const integration of input.integrations) {
+        if (integration.kind !== kind) continue;
+        // An integration uses its own group when it has one, and otherwise the provider's models.
+        // Only a closed integration treats an absent group as "none" — mirroring the Settings editor,
+        // which is the surface a person uses to do this by hand.
+        const group = candidate.integrationModels.find(
+          (candidateGroup) => candidateGroup.integrationLabelKey === integration.labelKey
+        );
+        const models =
+          group?.models ?? (CLOSED_CANDIDATE_MODEL_LABEL_KEYS.has(integration.labelKey) ? [] : candidate.models);
+        for (const model of models) {
           if (model.health === 'unavailable') continue;
           forKind.push({
             providerId: candidate.providerId,

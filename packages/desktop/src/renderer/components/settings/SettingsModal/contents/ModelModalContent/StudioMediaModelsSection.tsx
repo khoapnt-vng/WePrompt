@@ -21,6 +21,8 @@ import type {
 import { Alert, AutoComplete, Button, Modal, Popconfirm, Select, Spin, Tag } from '@arco-design/web-react';
 import { Plus, Refresh } from '@icon-park/react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
+import { CLOSED_CANDIDATE_MODEL_LABEL_KEYS } from '@/common/types/project/creativeStudioConnectionPlan';
 import { useTranslation } from 'react-i18next';
 
 type SafeCandidate = Pick<StudioConnectionCandidate, 'providerId' | 'providerName' | 'models' | 'integrationModels'>;
@@ -100,9 +102,7 @@ const CONNECTION_INTEGRATION_LABEL_KEYS = [
   'openRouterVideo',
 ] as const satisfies readonly StudioConnectionIntegrationLabelKey[];
 const CONNECTION_INTEGRATION_LABEL_KEY_SET: ReadonlySet<string> = new Set(CONNECTION_INTEGRATION_LABEL_KEYS);
-const CLOSED_CANDIDATE_MODEL_LABEL_KEY_SET: ReadonlySet<StudioConnectionIntegrationLabelKey> = new Set([
-  'openRouterVideo',
-]);
+
 const CANDIDATE_MODEL_HEALTH_PRIORITY: Record<StudioConnectionCandidateModel['health'], number> = {
   available: 0,
   unknown: 1,
@@ -283,7 +283,7 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
     (models) => models.integrationLabelKey === selectedIntegration?.labelKey
   );
   const usesClosedCandidateModelSet =
-    selectedIntegration !== undefined && CLOSED_CANDIDATE_MODEL_LABEL_KEY_SET.has(selectedIntegration.labelKey);
+    selectedIntegration !== undefined && CLOSED_CANDIDATE_MODEL_LABEL_KEYS.has(selectedIntegration.labelKey);
   const candidateModels =
     selectedCandidate && selectedIntegration
       ? (integrationModels?.models ?? (usesClosedCandidateModelSet ? [] : selectedCandidate.models))

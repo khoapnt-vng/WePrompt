@@ -298,11 +298,15 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - The information exists: the Brief modal shows `Unavailable` against both routes at the same moment. The gate simply does not say it.
   - Minimum useful behaviour: when a quote fails because a bound route is missing or unavailable, say which route and offer the Brief's picker, rather than reporting a generic estimate failure.
 
-- [ ] **[BUG-099][P1][Creative Studio] Connection provisioning never offers a video model, though twenty-one are available** — found 2026-08-22 completing the end-to-end run
+- [x] **[BUG-099][P1][Creative Studio] Connection provisioning never offers a video model, though twenty-one are available** — found 2026-08-22 completing the end-to-end run
   - Driving Settings → Add media model by hand, with Output type **Video** and Integration **OpenRouter video**, offers **21 models** on the same provider — `bytedance/seedance-2.0`, `google/veo-3.1`, `kwaivgi/kling-v3.0-pro`, `openai/sora-2-pro` and more. `bytedance/seedance-2.0` validated first time: _"Connection validated."_
   - So the models were reachable all along. The Slice 1a provisioning bound image and silently skipped video, and BUG-097 only made that visible — it did not make it work.
   - **Likely cause, not yet proven.** `planStudioConnections` joins a candidate group to an integration by `integrationLabelKey`. Video models come from a live `/videos/models` fetch rather than the provider's `models` list, so if `listConnectionCandidates` has not resolved that catalogue at the moment provisioning runs, there is no video group to plan against and the planner correctly produces nothing. That would make it a timing defect, not a logic one — worth confirming before fixing, because the two need different remedies.
   - Until it is fixed, a first-run user still needs one visit to Settings to bind a video model, which is the cliff Slice 1a existed to remove.
+  - **Root-caused and fixed 2026-08-22, and the guessed cause was wrong.** There is no timing race: `listConnectionCandidates` awaits `refreshOpenRouterCatalog` before it builds anything. The fault is the shape of what it returns.
+  - A candidate carries **two** model sources. `integrationModels` holds exactly one group — `openRouterVideo` — and every other integration draws from the candidate's own `models`. The Settings editor gets this right at `StudioMediaModelsSection.tsx:289`: `integrationModels?.models ?? (usesClosedCandidateModelSet ? [] : selectedCandidate.models)`.
+  - `planStudioConnections` read **only** `integrationModels`. So it planned nothing for image — there is no image group to find — and nothing for video whenever that group came back empty. It was not "video was skipped": **provisioning planned neither kind**, and the image route that appeared to work was a binding left over from earlier in the session.
+  - The planner now mirrors the editor: a group when the integration has one, the provider's models otherwise, and never a fallback for a closed integration whose own catalogue is authoritative. `CLOSED_CANDIDATE_MODEL_LABEL_KEYS` is now defined once and imported by both, because the two disagreeing is exactly how this happened.
 
 ## Correctness and honesty of failures
 
