@@ -78,6 +78,7 @@ const creativeStudioRuntimeManifest = [
   'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/Cut/filmstrip.ts',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/Cut/index.tsx',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/Cut/playbackSequence.ts',
+  'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/ProjectReferences.tsx',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/Table/index.tsx',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/WorkspaceControls.tsx',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/WorkspaceProjectMenu.tsx',
