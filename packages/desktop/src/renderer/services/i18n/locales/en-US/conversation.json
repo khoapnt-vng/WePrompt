@@ -2089,7 +2089,9 @@
         "chooseAsset": "Choose {{assetId}}",
         "retryConditioning": "Retry frame for free",
         "cancelWaiting": "Cancel waiting item",
-        "retryConditioningFor": "Retry conditioning for {{shotId}}"
+        "retryConditioningFor": "Retry conditioning for {{shotId}}",
+        "renderFilm": "Render…",
+        "renderFilmEmpty": "Nothing is ready to render yet"
       },
       "gate": {
         "title": "Review generation",

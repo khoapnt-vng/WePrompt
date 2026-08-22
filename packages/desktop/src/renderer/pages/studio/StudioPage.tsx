@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Spin } from '@arco-design/web-react';
+import { Button, Spin } from '@arco-design/web-react';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { pickDefaultRoutes } from '@/common/types/project/creativeStudioDefaultRoutes';
 import { planStudioConnections } from '@/common/types/project/creativeStudioConnectionPlan';
@@ -36,6 +36,7 @@ import {
   countStoredStudioRuleDrafts,
   countStoredWorkspaceDrafts,
   projectWorkspace,
+  filmRenderBatchShotIds,
   selectionGateDraft,
   useSpendGate,
   useWorkspaceDrafts,
@@ -250,6 +251,27 @@ const StudioProjectPage: React.FC<{
   }, [refetchProject, refetchReferences, refetchWorkspace]);
   const spendGate = useSpendGate({ onConfirmed: afterPaidConfirm });
   const spendGateLocked = spendGate.state.phase === 'confirming' || spendGate.state.phase === 'quote_in_use';
+
+  /**
+   * The bar's Render action. Submits the largest batch the chain permits — one shot per segment —
+   * rather than the whole film, because a shot cannot be generated before the one it follows. It is
+   * pressed again as each wave lands, which is what makes the Beat the unit of parallelism.
+   */
+  const renderFilm = useCallback((): void => {
+    const current = projectRef.current;
+    if (current === null || projection === null || spendGateLocked) return;
+    const shotIds = filmRenderBatchShotIds({ project: current, projection });
+    if (shotIds.length === 0) {
+      setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.renderFilmEmpty');
+      return;
+    }
+    const draft = selectionGateDraft({ project: current, projection, orderedShotIds: shotIds });
+    if (draft === null) {
+      setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
+      return;
+    }
+    spendGate.open(draft);
+  }, [projection, setActionErrorMessageKey, spendGate.open, spendGateLocked]);
   const generationDraftsBlockReview =
     activeRuleDraftDirtyCount > 0 || hasGenerationAffectingWorkspaceDrafts(drafts.dirtyKeys);
   const statusBlocksReview = projection === null || !projection.workspaceStatusReady || !projection.chainStatusReady;
@@ -1459,6 +1481,11 @@ const StudioProjectPage: React.FC<{
         project={project}
         activeView={activeView}
         stats={projection === null ? undefined : buildStudioBarStats(projection)}
+        renderAction={
+          <Button type='primary' disabled={workspacePending || spendGateLocked} onClick={renderFilm}>
+            {t('conversation.creativeStudio.workspace.controls.renderFilm')}
+          </Button>
+        }
         projectMenu={
           projection === null ? undefined : (
             <WorkspaceProjectMenu

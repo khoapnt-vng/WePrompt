@@ -206,3 +206,12 @@
   outline: 2px solid var(--color-primary-6, var(--text-secondary));
   outline-offset: -2px;
 }
+
+/* The bar's primary action. Sits after the view chips: the designer's ladder sheds the chips first
+   because they have somewhere honest to go, while Render spends money and must stay visible. */
+.barAction {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  margin-inline-start: 8px;
+}

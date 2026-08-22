@@ -19,6 +19,7 @@ export {
   initialSpendGateState,
   majorUnitsToMinorUnits,
   selectedSpendGateQuote,
+  filmRenderBatchShotIds,
   selectionGateDraft,
   spendGateReducer,
   summarizeQuote,

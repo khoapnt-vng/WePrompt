@@ -21,6 +21,8 @@ export type WorkspaceShellProps = {
   activeView: StudioView;
   stats?: StudioBarStats;
   reviewedOutput?: React.ReactNode;
+  /** The bar's primary action. It spends money, so it is the control that never leaves the bar. */
+  renderAction?: React.ReactNode;
   notice?: React.ReactNode;
   projectMenu?: React.ReactNode;
   children: React.ReactNode;
@@ -136,7 +138,7 @@ const clock = (seconds: number | null | undefined): string | null => {
  * rail therefore has no header of its own and its collapse control is the leftmost thing in the bar.
  */
 export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceShellProps>(function WorkspaceShell(
-  { project, activeView, stats, reviewedOutput, notice, projectMenu, children },
+  { project, activeView, stats, reviewedOutput, renderAction, notice, projectMenu, children },
   ref
 ) {
   const { t } = useTranslation();
@@ -268,6 +270,7 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
             </Link>
           ))}
         </nav>
+        {renderAction === undefined ? null : <span className={styles.barAction}>{renderAction}</span>}
         {projectMenu}
       </header>
       <div className={styles.panes} data-studio-panes>

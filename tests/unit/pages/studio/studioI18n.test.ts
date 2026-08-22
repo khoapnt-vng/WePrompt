@@ -318,6 +318,8 @@ const expectedLeaves = [
   'beatPanel.coverage.boundaryLabel',
   'beatPanel.coverage.boundaryValue',
   'beatPanel.coverage.boundaryAnnouncement',
+  'controls.renderFilm',
+  'controls.renderFilmEmpty',
   'beatPanel.coverage.trimGuidance',
   'beatPanel.coverage.boundaryGuidance',
   'beatPanel.coverage.trimInLabel',
