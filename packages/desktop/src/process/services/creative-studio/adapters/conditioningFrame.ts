@@ -249,8 +249,15 @@ const runLocalDecode = (
           '-loglevel',
           'error',
           '-nostdin',
+          // The source is handed over as the inherited descriptor 3, never as `pipe:3`: ffmpeg's
+          // pipe protocol is unconditionally non-seekable, and an MP4 whose `moov` atom follows its
+          // `mdat` — which is what the video provider returns — needs a seek back to the sample data
+          // after the header is parsed. Through a pipe that seek fails and the demuxer reports a
+          // partial file. `fd:` keeps the exact verified descriptor while allowing the seek.
+          '-fd',
+          '3',
           '-i',
-          'pipe:3',
+          'fd:',
           '-map',
           '0:v:0',
           '-vf',

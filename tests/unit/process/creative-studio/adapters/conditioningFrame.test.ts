@@ -125,8 +125,10 @@ describe('conditioning frame extraction', () => {
       '-loglevel',
       'error',
       '-nostdin',
+      '-fd',
+      '3',
       '-i',
-      'pipe:3',
+      'fd:',
       '-map',
       '0:v:0',
       '-vf',
@@ -142,6 +144,20 @@ describe('conditioning frame extraction', () => {
     ]);
     expect(options.windowsHide).toBe(true);
     expect(options.stdio).toEqual(['ignore', 'ignore', 'ignore', expect.any(Number), expect.any(Number)]);
+  });
+
+  it("reads the source through a seekable descriptor, never ffmpeg's non-seekable pipe protocol", async () => {
+    const directory = await makeDirectory();
+    const input = baseInput(directory, { allowProviderLastFrame: false });
+    await writeFile(input.sourcePath, 'video');
+    const spawnProcess = successfulSpawn();
+
+    await createStudioConditioningFrameExtractor({ spawnProcess })(input);
+
+    const args = vi.mocked(spawnProcess).mock.calls[0]![1];
+    // `pipe:` is unconditionally non-seekable in ffmpeg, so an MP4 whose `moov` atom follows its
+    // `mdat` — what the video provider returns — cannot be demuxed through it.
+    expect(args[args.indexOf('-i') + 1]).not.toMatch(/^pipe:/);
   });
 
   it('locally decodes the final available frame at an untrimmed endpoint when adoption is not authorized', async () => {
