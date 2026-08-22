@@ -281,6 +281,19 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **Closed 2026-08-22 as accepted, not fixed.** The owner's call: one click per project on a read-only tool is a security prompt doing its job, and the alternatives all cost more than they save. Pre-answering it from the rail would grant consent on the user's behalf, and the underlying mechanism keys on the bare server **name** — which a user can claim by importing a server under it, so such an allowlist would not really be Studio-scoped. Giving the Director an assistant record would work through a supported path but drags in model, skill and MCP override semantics that would then need pinning.
   - Reopen if pilot users trip on it. The correct fix, when it is worth making, is in the AionCore fork's tools config, not here.
 
+- [ ] **[BUG-097][P1][Creative Studio] Auto-provisioning binds a video route the provider cannot serve, and the film stops dead at the video wave** — found 2026-08-22 in the end-to-end run
+  - The run got all the way to real media: 3 Beats, 3 Shots, 0:12, three seed stills generated for $0.09. The second wave — the video takes — fails with **"The estimate could not be prepared or confirmed."**
+  - Brief & rules then reads **Image route: `choice_000290ca…` Unavailable** and **Video route: (blank) Unavailable**. The image route worked minutes earlier for the stills.
+  - The provider carries exactly three models — `openai/gpt-5.6-terra`, `~openai/gpt-mini-latest`, `google/gemini-3-pro-image`. **None of them is a video model.** A video route was bound anyway.
+  - This is a defect in the connection provisioning I added for Slice 1a. `saveConnection` only runs after `validateConnection` returns ok, so either the probe passed for a model that cannot serve video, or the route was live at bind time and has since gone unavailable with nothing re-checking it. Both readings need the same remedy: a bound route must be re-validated before it is priced, or its loss must be reported as itself rather than as a failed estimate.
+  - **Fixing the message is not enough.** `createConfiguredStudioRateCardV2` builds entries only for routes present in the catalogue snapshot, so a vanished route yields a pricing failure with no route named — an instance of BUG-093's class, one layer up.
+  - Severity is P1 because it is terminal for the MVP: a user gets a script, pays for stills, and can never reach a film.
+
+- [ ] **[BUG-098][P2][Creative Studio] A failed estimate names neither the route nor the reason** — found 2026-08-22 alongside BUG-097
+  - The gate says only "The estimate could not be prepared or confirmed. Nothing was retried automatically." Nothing in the renderer console, nothing naming the route, no hint that a binding went unavailable.
+  - The information exists: the Brief modal shows `Unavailable` against both routes at the same moment. The gate simply does not say it.
+  - Minimum useful behaviour: when a quote fails because a bound route is missing or unavailable, say which route and offer the Brief's picker, rather than reporting a generic estimate failure.
+
 ## Correctness and honesty of failures
 
 - [x] **[BUG-062][P2][Creative Studio] Three distinct Director failures all report "could not read or save this workspace"** — found 2026-08-21 while diagnosing BUG-061
