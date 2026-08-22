@@ -489,3 +489,222 @@ Seedance returns `last_frame_url`, and the adapter already exposes it as an opti
 That output may satisfy the conditioning-frame lifecycle only for the exact untrimmed take. The
 design still requires local main-process decoding for trimmed endpoints and routes without that
 output, so provider behavior is an optimization rather than an invariant.
+
+---
+
+## 12. Fourth round — the app bar in two panes (BUG-068)
+
+Drawn answer: `Creative Studio 3 - App Bar in Two Panes.dc.html`. The arithmetic in the
+question was right and one of its inputs was wrong — the title was measured as a fixed 206px
+because §9 never gave a truncation rule. Answer 12.3 is therefore the load-bearing one.
+
+### 12.1 The bar spans the Studio surface, above both panes
+
+Everything in the bar is film-scoped: the project's name, the film's clock, the film's render
+gate, the views of that film. Nothing in it is application-scoped, so it is the project's
+header at any width. The rail is one of the project's two panes, not a sibling of the project.
+
+The deciding reason is the toggle, not the fit. A bar inside the column reassembles itself on
+a 378px jump every time someone opens or closes a conversation panel — title regrows, counts
+return, Render label comes back. That makes a pane control read as an application-wide
+change. **The bar must not move when the rail does.**
+
+"Full width" means the **1211px Studio surface** (431 + 780 = 53 + 1158), not the 1492px
+window; the 281px outside it is application chrome and stays outside.
+
+**The rail gets no header.** Its collapse control is the leftmost element in the bar, aligned
+to the rail's own left edge. That is the whole answer to "the rail gets a second header
+beneath it": there is one header in the app.
+
+### 12.2 The order, as bar width decreases
+
+Principle: **shed what we derived before truncating what the user typed, and never change the
+bar's height.** Thresholds are the bar's own width, so the ladder holds whether the bar spans
+the surface or ever sits in a column. Rail toggle 28 + dot 22 + chips 156 + overflow 27 +
+gaps 77 + padding 36 = 346 fixed.
+
+| Rung | Fires below | Yields                                              | Minimum after        |
+| ---- | ----------- | --------------------------------------------------- | -------------------- |
+| 0    | —           | spacer to zero                                      | 961px (title at 320) |
+| 1    | 961px       | title shrinks in its box, 320 → 128                 | 769px                |
+| 2    | 769px       | stat strip drops `9 BEATS`                          | 699px                |
+| 3    | 699px       | stat strip drops `5 READY`                          | 645px                |
+| 4    | 645px       | `Render…` → glyph, still a visible button           | 603px                |
+| 5    | 603px       | view chips leave the bar, head the workspace column | 436px floor          |
+
+Never lost: rail toggle, project dot, title at 128px, the clock, the overflow.
+
+At the widths being built, **no rung fires** — 1211 ≥ 961. The ladder is a floor spec.
+
+Two candidates rejected, with reasons:
+
+- **Stat strip under the title.** Takes the bar 56px → ~76px. Every view's top edge moves and
+  the Table's sticky header moves with it, in both directions. Height stability beats two
+  derived counts we can simply drop.
+- **Overflow absorbs `Render…`.** Render spends money and is the reason the bar has a primary
+  action. It may lose its label; it may not become invisible. The chips leave first, because
+  they have somewhere honest to go.
+
+### 12.3 Title truncation: a box, not a length
+
+`flex: 0 1 auto`, **max 320px, min 128px**, one line, **tail ellipsis**. It fills what the bar
+can spare and truncates past 320px however short the title is. The 128px floor is what makes
+rung 2 exist.
+
+- Full title always reachable without a click: the element's tooltip.
+- Full title always readable in full as the **first row of the overflow menu**, where renaming
+  already lives.
+- **Tail only.** The identifying words in a user-typed title are at the front; middle
+  truncation destroys the thing the rule protects.
+
+Consequence for the original arithmetic: at 780px the box gets 178px and **the column bar
+fits** — the title is the only thing that yields. The recommendation for 12.1 stands anyway,
+on the reassembly argument rather than on 28px.
+
+### 12.4 Expanded is a working state in the Table, a consulting state in the Board and the Cut
+
+This follows from §1's division of labour: the director acts before the picture exists, the
+human decides after it does. The Table is the pre-picture view — spine, coverage, actions,
+looks, prompts — and that is where the rail is loud. The Board and the Cut are judgements
+about pixels and motion, which the director cannot see.
+
+So the rail's default **follows the view**, and is not a global preference:
+
+| View  | Rail default | Design target |
+| ----- | ------------ | ------------- |
+| Table | expanded     | **780px**     |
+| Board | collapsed    | **1158px**    |
+| Cut   | collapsed    | **1158px**    |
+
+A manual toggle **sticks per view, per project** and outranks the default from then on. Never
+re-expand a rail the user closed.
+
+Consequences for the two views in the question:
+
+- **The Board does not need redrawing.** At 1158px, three-up gives 365px cards. Three is still
+  the right answer; 250px was an artefact of designing the Board against the wrong target.
+- **The Cut does not need redrawing.** It composes against 1158px, and preview versus side
+  panel is not a real competition at that width.
+- **The Table does need a rule, and it is drawn.** At 780px `ACTION` falls to ~200px and `LOOK`
+  to ~160px — two narrow prose columns breaking at different points, with row height set by
+  whichever wrapped worse. Ruling: **at 860px of column width and below, `LOOK` stops being a
+  column and becomes a second line inside the `ACTION` cell.** The five fixed columns keep
+  their widths; at 780px the merged cell is 374px.
+  - Look line: Source Sans 3 12.5px, `#6E6553`, 3px under the Action, clamped to two lines
+    with tail ellipsis. An empty look keeps its `#B4380F` prompt.
+  - Header reads `ACTION · LOOK`. Both stay sortable. The beat panel is unaffected.
+  - Threshold is measured the same way the coverage bar's density tiers are (§4).
+  - Rationale: the Action is what the beat does, the Look is how it is conditioned. You read
+    Actions in sequence and consult a Look only for the beat you are about to open. A
+    subordinate line states that relationship; two columns pretend they are peers.
+
+---
+
+## 13. Fifth round — the three marks the Beat panel does not settle
+
+Answers to the 2026-08-21 reading of `BEAT 03`. Sections 1–3 of that document are accepted as
+written. Of the three forks, two are decided by rulings already in this document and are
+restated here only because the drawing does not show them; 13.2 is new. This round is answers
+only — the panel is not redrawn yet, and 13.4 lists what redrawing owes.
+
+### 13.1 The line is state plus control — but the control is `HARD CUT`, not `CONTINUITY BREAK`
+
+**Always present, always clickable, sets `chainBreak: 'hard_cut'`.** Cutting on a change is
+legitimate authoring, not an exception; an affordance that appears only when the system
+noticed something cannot be found when a person wants it; and a permanent control needs no
+detector in order to ship.
+
+But §3 already spent that word. Continuity break is **system-detected** — the frame a shot was
+generated from no longer exists. A hard cut is **authored**. One line cannot be both, so the
+line splits:
+
+- **`CONTINUES FROM 02`** is state, and it stays state.
+- **`HARD CUT`** is the control beside it: permanent, clickable, toggling. Once set, the state
+  half must tell the truth about what it did — the shot is no longer downstream of anything,
+  so it reads as a chain head and **starts from its own still**.
+- **A detected continuity break is a different mark in a different place**: the conditional
+  alert row that already carries the tail-trim warning, where a detected problem belongs. It
+  never occupies the state line, and it is never a control.
+
+The consequence worth naming, because the drawing hides it: **severing is not free.** A shot
+promoted to chain head needs a still on the image route (§3, `STARTS FROM THE STILL`), and its
+existing take was generated from a first frame it no longer starts from. So `HARD CUT` is a
+**gated** action in the render gate's shape — the third gate, after render and chain — not a
+toggle that flips silently and bills later. Re-joining the chain is symmetrical and equally
+gated.
+
+### 13.2 `▸ RENDERS AS` is a read-only readout
+
+**Read-only.** Three authoring surfaces stay three: Action, Look, Line. This is the whole
+reason the answer is worth having — an editable resolved prompt would need a fourth detach
+rule, and the follow-up the question correctly identified (does re-deriving overwrite a
+hand-edited resolved prompt?) has no good answer. It does not arise if the composition is
+never authored.
+
+What it shows: the text actually sent to the route — Action, Look, Line, cast, references,
+model binding, in dispatch order — with each part **attributed to the surface that owns it**.
+That attribution is the feature. The readout answers "why did it render that", and then points
+at the field to change. It is a debugging surface, not an authoring one.
+
+Two constraints follow:
+
+- **It must read from the same compose function the job uses.** A readout assembled
+  separately for display is a lie the moment dispatch changes, and it is a lie that costs
+  money to discover.
+- **It carries the derived line's staleness flag** (§4). A composition built against an older
+  Action revision must say so on its face, or it teaches the wrong lesson.
+
+If a prompt ever needs to say something the three surfaces cannot express, that belongs on the
+**Line**, which already detaches and already has a defined history (§10.3, §11.4). Do not add a
+second detach mechanism.
+
+### 13.3 Inserting a shot extends the beat, and the `+` carries a price
+
+**Extend.** §2.2 settles it: `actual` is derived from the shots, `target` is nullable authored
+intent that never constrains. Insert a fourth shot into a 31s beat and the beat is 35s. The
+target, if one was ever set, stays exactly where it was, and the widened gap between intent and
+fact is the director's cue — the same cue a re-split produces. Nothing redistributes, because
+nothing was ever a budget.
+
+That answers the larger question the drawing was really asking: **beat duration is a total that
+follows from the shots, not a target they must fit.** Every fit-to-target reading in the app is
+advisory — the Table's `2s UNDER`, the film total in the Cut, the director's coverage
+proposals. No engine anywhere solves for it. The single carved exception stands: a beat with no
+coverage renders a slate `target` seconds long, the one place an authored number reaches the
+renderer.
+
+**And the `+` quotes before it acts** — but conditionally, because position decides:
+
+| Insert at           | What moves                                                           | Cost                                                                                   |
+| ------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| A join, mid-beat    | the boundary on both sides; the following shot's first frame changes | quoted, with the §3 cascade range — base if nothing downstream goes, higher if it does |
+| The end of the beat | nothing; the new shot chains off an unchanged last frame             | free, a fresh slate                                                                    |
+
+So a mid-beat `+` shows a cost hint and opens the gate; the trailing `+` does not. A hint on
+every marker regardless of position is decoration, and decoration next to a price teaches
+people to stop reading prices.
+
+### 13.4 What the redraw owes
+
+Carried as work, not as open questions:
+
+1. The state line splits — `CONTINUES FROM 02` as state, `HARD CUT` as a permanent gated
+   control, the detected break relocated to the alert row.
+2. The hard-cut gate itself: still cost, invalidated take, symmetrical re-join.
+3. `RENDERS AS` gains per-part attribution and a staleness flag.
+4. The join `+` gains a conditional quote.
+
+### 13.5 Two of the ungrounded claims, grounded
+
+From the reading's own list of claims with no code behind them:
+
+- **The 25-word Look ceiling is soft** and already ruled so in §7 — the counter warns, word 26
+  is allowed. The drawing's `10 / 25 WORDS` is guidance, not a predicate, and the redraw should
+  not let it look like a limit.
+- **The coverage strip's density tiers** are §4's measured tiers, computed from the bar's pixel
+  width, nothing to persist and nothing to choose — and per §10.5 the tier's name should not be
+  visible at all. If `WIDE · FULL DETAIL` is still in the build, that is the bug, not the tier.
+
+The **Beat-scoped transport** stays a drawing-only claim, and it should: `0:20 / 0:31` against a
+31s beat is right, and `JOIN ◂ / JOIN ▸` is the correct unit for judging whether two clips
+actually join. It has no code behind it because nothing has been built there yet.
