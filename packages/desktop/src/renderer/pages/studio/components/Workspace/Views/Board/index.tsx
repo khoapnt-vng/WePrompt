@@ -28,6 +28,7 @@ const STATE_KEYS = {
   no_coverage: 'conversation.creativeStudio.workspace.table.state.noCoverage',
   seed_pending: 'conversation.creativeStudio.workspace.table.state.seedPending',
   part_done: 'conversation.creativeStudio.workspace.table.state.partDone',
+  needs_attention: 'conversation.creativeStudio.workspace.table.state.needsAttention',
   rendering: 'conversation.creativeStudio.workspace.table.state.rendering',
   stale: 'conversation.creativeStudio.workspace.table.state.stale',
   status_pending: 'conversation.creativeStudio.workspace.table.state.statusPending',

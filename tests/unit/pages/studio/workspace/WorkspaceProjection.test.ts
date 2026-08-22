@@ -815,6 +815,33 @@ describe('projectWorkspace', () => {
     }
   );
 
+  it('projects a job needing attention as needing attention, not as rendering', () => {
+    // A needs_attention job has already failed — one of these carried
+    // error.code 'provider_unavailable' with a real providerJobId. Counting it as work in flight
+    // showed "Rendering" for thirty-five minutes on a render that was over in nine.
+    const project = makeProject();
+    project.beatOrder = ['beat_1'];
+    project.shots.shot_1!.jobIds.push('job_attention');
+    project.jobs.job_attention = makeJob('job_attention', 'shot_1', { status: 'needs_attention' });
+
+    expect(projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!.displayState).toBe(
+      'needs_attention'
+    );
+  });
+
+  it('still treats a job needing attention as blocking a fresh submission', () => {
+    // Displaying it correctly must not make it re-submittable: the job may already have been
+    // charged, which is why the record carries duplicateChargeAcknowledged at all.
+    const project = makeProject();
+    project.beatOrder = ['beat_1'];
+    project.shots.shot_1!.jobIds.push('job_attention');
+    project.jobs.job_attention = makeJob('job_attention', 'shot_1', { status: 'needs_attention' });
+
+    const shot = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!.shots[0]!;
+    expect(shot.videoGenerationBlocked).toBe(true);
+    expect(shot.videoGenerationInFlight).toBe(false);
+  });
+
   it('projects owned generation activity as rendering ahead of stale and seed-pending states', () => {
     const project = makeProject();
     project.beatOrder = ['beat_1'];

@@ -1482,7 +1482,8 @@
           "stale": "Stale",
           "statusPending": "Status pending",
           "ready": "Ready",
-          "draft": "Draft"
+          "draft": "Draft",
+          "needsAttention": "Needs attention"
         }
       },
       "board": {

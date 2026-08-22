@@ -93,6 +93,7 @@ const expectedLeaves = [
   'table.state.noCoverage',
   'table.state.seedPending',
   'table.state.partDone',
+  'table.state.needsAttention',
   'table.state.rendering',
   'table.state.stale',
   'table.state.statusPending',

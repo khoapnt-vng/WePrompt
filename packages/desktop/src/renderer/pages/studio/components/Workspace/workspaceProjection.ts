@@ -33,6 +33,7 @@ export type WorkspaceBeatDisplayState =
   | 'duration_pending'
   | 'no_coverage'
   | 'part_done'
+  | 'needs_attention'
   | 'rendering'
   | 'stale'
   | 'seed_pending'
@@ -81,6 +82,9 @@ export type WorkspaceShotProjection = {
   retainedWork: boolean;
   videoGenerationInFlight: boolean;
   seedGenerationInFlight: boolean;
+  /** True while a job blocks a fresh submission, including one that failed and needs the user. */
+  videoGenerationBlocked: boolean;
+  seedGenerationBlocked: boolean;
   hasEffectiveSeed: boolean;
 };
 
@@ -413,19 +417,36 @@ const hasOwnedJob = (project: StudioRendererProjectV2, shot: StudioShot): boolea
     return job?.id === jobId && job.projectId === project.id && job.shotId === shot.id;
   });
 
-const hasOwnedGenerationInFlight = (
+/**
+ * Statuses where work is genuinely still happening.
+ *
+ * `needs_attention` is deliberately absent: such a job has already finished and failed — one was
+ * observed carrying `provider_unavailable` against a real `providerJobId` — so counting it here
+ * showed a Beat as "Rendering" for thirty-five minutes on a render that ended after nine.
+ */
+const GENERATION_IN_FLIGHT_STATUSES = new Set([
+  'waiting_for_conditioning',
+  'queued_local',
+  'submitting',
+  'queued_remote',
+  'running',
+]);
+
+/**
+ * Statuses that must stop a fresh submission for the same shot.
+ *
+ * A job needing attention may already have been charged — the record carries
+ * `duplicateChargeAcknowledged` for exactly that reason — so it blocks even though it is not
+ * running. Showing it honestly must not make it silently re-submittable.
+ */
+const GENERATION_BLOCKING_STATUSES = new Set([...GENERATION_IN_FLIGHT_STATUSES, 'needs_attention']);
+
+const hasOwnedGenerationWithStatus = (
   project: StudioRendererProjectV2,
   shot: StudioShot,
-  purpose: 'seed_still' | 'video_take'
+  purpose: 'seed_still' | 'video_take',
+  statuses: ReadonlySet<string>
 ): boolean => {
-  const statuses = new Set([
-    'waiting_for_conditioning',
-    'queued_local',
-    'submitting',
-    'queued_remote',
-    'running',
-    'needs_attention',
-  ]);
   return shot.jobIds.some((jobId) => {
     const job = ownValue(project.jobs, jobId);
     return (
@@ -502,8 +523,10 @@ const projectShot = (
     takeCount: activeTakeCount,
     displayState,
     retainedWork: imageTakes.length + videoTakes.length > 0 || hasOwnedJob(project, shot),
-    videoGenerationInFlight: hasOwnedGenerationInFlight(project, shot, 'video_take'),
-    seedGenerationInFlight: hasOwnedGenerationInFlight(project, shot, 'seed_still'),
+    videoGenerationInFlight: hasOwnedGenerationWithStatus(project, shot, 'video_take', GENERATION_IN_FLIGHT_STATUSES),
+    seedGenerationInFlight: hasOwnedGenerationWithStatus(project, shot, 'seed_still', GENERATION_IN_FLIGHT_STATUSES),
+    videoGenerationBlocked: hasOwnedGenerationWithStatus(project, shot, 'video_take', GENERATION_BLOCKING_STATUSES),
+    seedGenerationBlocked: hasOwnedGenerationWithStatus(project, shot, 'seed_still', GENERATION_BLOCKING_STATUSES),
     hasEffectiveSeed: effectiveSeedAssetId !== null,
   };
 };
@@ -736,6 +759,15 @@ const projectBeatDisplayState = (input: {
 
   const activeShotIds = new Set(shots.map((shot) => shot.id));
   if (shots.some((shot) => input.partDoneShotIds.has(shot.id))) return 'part_done';
+  if (
+    shots.some(
+      (shot) =>
+        (shot.videoGenerationBlocked && !shot.videoGenerationInFlight) ||
+        (shot.seedGenerationBlocked && !shot.seedGenerationInFlight)
+    )
+  ) {
+    return 'needs_attention';
+  }
   if (
     shots.some(
       (shot) => input.renderingShotIds.has(shot.id) || shot.videoGenerationInFlight || shot.seedGenerationInFlight
