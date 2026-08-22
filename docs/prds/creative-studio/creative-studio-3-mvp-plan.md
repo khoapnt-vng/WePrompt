@@ -99,13 +99,20 @@ _Done when:_ a project created from the composer can reach the render gate with 
 settings surface, and its video route is first-frame-capable. Verified in the running app, not by a
 test that renders into jsdom.
 
-### Slice 2 — remove the first-run consent wall
+### Slice 2 — the first-run consent wall — **closed 2026-08-22 by decision, no code**
 
-Resolve BUG-090. Establish first whether `aionui-creative-studio` is meant to be in AionCore's
-`AUTO_APPROVE_MCP_SERVERS` — the answer decides whether this is a one-line list entry or a real
-design question about built-in server trust.
+The question this slice existed to answer has one: it is the design question, not the one-line list
+entry. There is no per-server lever in the desktop repo — no approval field on the session
+descriptor, no permission field on conversation creation, no aioncore config written from here. The
+0.1.55 binary exposes `tools.auto_approve` and `allow_list`, so the decision is configurable, but
+only on AionCore's side.
 
-_Done when:_ a new project's first Director turn completes with no dialog.
+**Owner's call: accept one click per project.** It is a security prompt doing its job, once, on a
+read-only tool. Pre-answering it from the rail would grant consent on the user's behalf through a
+mechanism that keys on the bare server name — which a user can claim by importing a server under it.
+
+Reopen if pilot users trip on it; the fix belongs in the AionCore fork's tools config. BUG-090 holds
+the full investigation.
 
 ### Slice 3 — render straight from the Director's script
 
