@@ -6,6 +6,7 @@
 
 import { Spin } from '@arco-design/web-react';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { pickDefaultRoutes } from '@/common/types/project/creativeStudioDefaultRoutes';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
@@ -355,6 +356,31 @@ const StudioProjectPage: React.FC<{
     },
     [runWorkspaceCommitAtRevision]
   );
+
+  /**
+   * A project is created with both route ids null, so a finished script would otherwise meet a
+   * Render button that does nothing until someone finds the Brief form. Bind one route of each kind
+   * the first time this project has both a record and a catalogue.
+   *
+   * Once per project per session: if the commit fails we do not retry, because a loop that rewrites
+   * on every render is worse than a project the user binds by hand.
+   */
+  const autoBoundProjectRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (project === null || routeCatalog === null) return;
+    if (project.imageRouteId !== null || project.videoRouteId !== null) return;
+    if (autoBoundProjectRef.current === project.id) return;
+    const picked = pickDefaultRoutes([...routeCatalog.image.options, ...routeCatalog.video.options]);
+    if (picked.imageRouteId === null && picked.videoRouteId === null) return;
+    autoBoundProjectRef.current = project.id;
+    void runWorkspaceCommit((current) =>
+      ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+        projectId: current.id,
+        expectedRevision: current.revision,
+        operations: [{ kind: 'set_routes', imageRouteId: picked.imageRouteId, videoRouteId: picked.videoRouteId }],
+      })
+    );
+  }, [project, routeCatalog, runWorkspaceCommit]);
 
   const runWorkspaceExclusive = useCallback(
     async <Result,>(action: () => Promise<Result>): Promise<Result | null> => {

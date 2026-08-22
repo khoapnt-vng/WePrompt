@@ -659,6 +659,68 @@ describe('StudioPage schema-2 cutover', () => {
     );
   });
 
+  it('binds a route of each kind on a project that has none, so Render is reachable', async () => {
+    // Projects are created with both ids null. Without this a finished script meets a Render button
+    // that does nothing until the user finds the Brief form.
+    mocks.bridge.listRoutes.invoke.mockResolvedValue(
+      ok({
+        image: {
+          status: 'ready',
+          selected: null,
+          selectedRoute: null,
+          selectionIssue: null,
+          options: [
+            { choiceId: 'img_1', kind: 'image', health: 'available', constraints: { supportsFirstFrame: false } },
+          ],
+        },
+        video: {
+          status: 'ready',
+          selected: null,
+          selectedRoute: null,
+          selectionIssue: null,
+          options: [
+            { choiceId: 'vid_plain', kind: 'video', health: 'available', constraints: { supportsFirstFrame: false } },
+            { choiceId: 'vid_chain', kind: 'video', health: 'available', constraints: { supportsFirstFrame: true } },
+          ],
+        },
+        catalogVersion: 'catalog_1',
+      })
+    );
+    renderStudio();
+
+    await waitFor(() => expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalled());
+    const batch = mocks.bridge.applyAuthoringBatch.invoke.mock.calls[0][0];
+    // The chaining route wins even though the plain one comes first: shots condition on the previous
+    // shot's last frame, and a route without that produces a film with no continuity rather than an
+    // error.
+    expect(batch.operations).toEqual([{ kind: 'set_routes', imageRouteId: 'img_1', videoRouteId: 'vid_chain' }]);
+  });
+
+  it('leaves a project that already has a route alone', async () => {
+    mocks.bridge.getProject.invoke.mockResolvedValue(
+      ok({ status: 'supported', project: { ...project(), imageRouteId: 'chosen_by_hand' } })
+    );
+    mocks.bridge.listRoutes.invoke.mockResolvedValue(
+      ok({
+        image: {
+          status: 'ready',
+          selected: null,
+          selectedRoute: null,
+          selectionIssue: null,
+          options: [
+            { choiceId: 'img_1', kind: 'image', health: 'available', constraints: { supportsFirstFrame: false } },
+          ],
+        },
+        video: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+        catalogVersion: 'catalog_1',
+      })
+    );
+    renderStudio();
+
+    await waitFor(() => expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalled());
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+  });
+
   it('canonicalizes a retired route and keeps the shared Table, Board, and Cut views', async () => {
     renderStudio('/studio/project_1/write');
 
