@@ -153,6 +153,12 @@ const expectedLeaves = [
   'cut.preview.position',
   'cut.preview.pictureOnly',
   'cut.preview.controlsLabel',
+  'cut.preview.seekLabel',
+  'cut.preview.previousJoin',
+  'cut.preview.nextJoin',
+  'cut.preview.loopJoin',
+  'cut.preview.buffering',
+  'cut.openBeat',
   'cut.film.title',
   'cut.film.ofTarget',
   'cut.film.targetUnknown',
@@ -168,6 +174,7 @@ const expectedLeaves = [
   'cut.film.slateCount_other',
   'cut.slate.label',
   'cut.slate.warning',
+  'cut.slate.openBeat',
   'cut.match.reference',
   'cut.dragHandle',
   'cut.moveEarlier',
@@ -192,6 +199,8 @@ const expectedLeaves = [
   'cut.bed.tooShort',
   'cut.bed.durationPending',
   'cut.bed.invalid',
+  'cut.bed.silentPreview',
+  'cut.bed.extent',
   'cut.match.title',
   'cut.match.description',
   'cut.match.label',
@@ -341,12 +350,31 @@ const expectedLeaves = [
   'controls.renderFilmEmpty',
   'beatPanel.coverage.trimGuidance',
   'beatPanel.coverage.boundaryGuidance',
+  'beatPanel.coverage.seekGuidance',
+  'beatPanel.coverage.seekLane',
+  'beatPanel.coverage.seekValue',
   'beatPanel.coverage.trimInLabel',
   'beatPanel.coverage.trimOutLabel',
   'beatPanel.coverage.trimValue',
   'beatPanel.coverage.trimAnnouncement',
   'beatPanel.coverage.tailTrimWarning',
   'beatPanel.coverage.reviewResplit',
+  'beatPanel.preview.label',
+  'beatPanel.preview.noMedia',
+  'beatPanel.preview.mediaError',
+  'beatPanel.preview.videoLabel',
+  'beatPanel.preview.slateLabel',
+  'beatPanel.preview.slate',
+  'beatPanel.preview.slateHold',
+  'beatPanel.preview.play',
+  'beatPanel.preview.pause',
+  'beatPanel.preview.position',
+  'beatPanel.preview.pictureOnly',
+  'beatPanel.preview.controlsLabel',
+  'beatPanel.preview.previousJoin',
+  'beatPanel.preview.nextJoin',
+  'beatPanel.preview.loopJoin',
+  'beatPanel.preview.keyboardGuidance',
   'beatPanel.shots.label',
   'beatPanel.shots.heading',
   'beatPanel.shots.position',
@@ -715,6 +743,40 @@ const localizedCutPreviewKeys = [
   'cut.preview.position',
   'cut.preview.pictureOnly',
   'cut.preview.controlsLabel',
+  'cut.preview.seekLabel',
+  'cut.preview.previousJoin',
+  'cut.preview.nextJoin',
+  'cut.preview.loopJoin',
+  'cut.preview.buffering',
+] as const;
+
+const localizedCutCompositionKeys = [
+  'cut.openBeat',
+  'cut.slate.openBeat',
+  'cut.bed.silentPreview',
+  'cut.bed.extent',
+] as const;
+
+const localizedBeatPlaybackKeys = [
+  'beatPanel.coverage.seekGuidance',
+  'beatPanel.coverage.seekLane',
+  'beatPanel.coverage.seekValue',
+  'beatPanel.preview.label',
+  'beatPanel.preview.noMedia',
+  'beatPanel.preview.mediaError',
+  'beatPanel.preview.videoLabel',
+  'beatPanel.preview.slateLabel',
+  'beatPanel.preview.slate',
+  'beatPanel.preview.slateHold',
+  'beatPanel.preview.play',
+  'beatPanel.preview.pause',
+  'beatPanel.preview.position',
+  'beatPanel.preview.pictureOnly',
+  'beatPanel.preview.controlsLabel',
+  'beatPanel.preview.previousJoin',
+  'beatPanel.preview.nextJoin',
+  'beatPanel.preview.loopJoin',
+  'beatPanel.preview.keyboardGuidance',
 ] as const;
 
 const localizedCutFilmDeltaKeys = ['cut.film.under', 'cut.film.over'] as const;
@@ -739,6 +801,8 @@ const localizedWorkspaceKeys = [
   'beatPanel.lookCounter_one',
   'beatPanel.lookCounter_other',
   ...localizedCutPreviewKeys,
+  ...localizedCutCompositionKeys,
+  ...localizedBeatPlaybackKeys,
   ...localizedCutFilmDeltaKeys,
   'controls.briefAndRulesTitle',
   'gate.errors.routesUnavailable',
@@ -785,6 +849,49 @@ describe('Creative Studio workspace translations', () => {
       'cut.preview.position': '{{current}} / {{total}}',
       'cut.preview.pictureOnly': 'Picture only — the bed is muted here',
       'cut.preview.controlsLabel': 'Film transport',
+      'cut.preview.seekLabel': 'Film seek rail',
+      'cut.preview.previousJoin': 'Previous join',
+      'cut.preview.nextJoin': 'Next join',
+      'cut.preview.loopJoin': 'Loop join',
+      'cut.preview.buffering': 'Loading preview frame',
+    });
+  });
+
+  it('keeps Cut navigation and stored-bed truth as complete en-US phrases', () => {
+    const leaves = flattenLeaves(englishWorkspace);
+
+    expect(leaves).toMatchObject({
+      'cut.openBeat': 'Open Beat',
+      'cut.slate.openBeat': 'Open uncovered Beat',
+      'cut.bed.silentPreview': 'Silent in preview · applied on export',
+      'cut.bed.extent': 'From 0:00 · {{seconds}}s extent',
+    });
+    expect(placeholders(leaves['cut.bed.extent']!)).toEqual(['seconds']);
+  });
+
+  it('keeps Beat preview, transport, and free-seek copy as complete en-US phrases', () => {
+    const leaves = flattenLeaves(englishWorkspace);
+
+    expect(leaves).toMatchObject({
+      'beatPanel.coverage.seekGuidance': 'Rail · Seek · Free',
+      'beatPanel.coverage.seekLane': 'Beat seek rail',
+      'beatPanel.coverage.seekValue': '{{current}} of {{total}}',
+      'beatPanel.preview.label': 'Beat preview',
+      'beatPanel.preview.noMedia': 'Beat preview unavailable',
+      'beatPanel.preview.mediaError': 'The selected Take could not be previewed.',
+      'beatPanel.preview.videoLabel': 'Shot {{position}} video · {{line}}',
+      'beatPanel.preview.slateLabel': 'Shot {{position}} planning slate · {{line}}',
+      'beatPanel.preview.slate': 'Planning slate',
+      'beatPanel.preview.slateHold': 'Hold {{clock}}',
+      'beatPanel.preview.play': 'Play Beat',
+      'beatPanel.preview.pause': 'Pause Beat',
+      'beatPanel.preview.position': '{{current}} / {{total}}',
+      'beatPanel.preview.pictureOnly': 'Picture only',
+      'beatPanel.preview.controlsLabel': 'Beat transport',
+      'beatPanel.preview.previousJoin': 'Previous join',
+      'beatPanel.preview.nextJoin': 'Next join',
+      'beatPanel.preview.loopJoin': 'Loop nearest join',
+      'beatPanel.preview.keyboardGuidance': 'Space play · Arrows seek · [ ] joins · L loop',
     });
   });
 
@@ -972,6 +1079,14 @@ describe('Creative Studio workspace translations', () => {
         expect(guidance?.startsWith(`${conciseName} · `), `${locale}:${field}`).toBe(true);
       }
       for (const key of localizedCutPreviewKeys) {
+        const englishCopy = englishLeaves[key];
+        const localizedCopy = localizedLeaves[key];
+        expect(localizedCopy?.trim(), `${locale}:${key}`).not.toBe('');
+        expect(placeholders(localizedCopy!), `${locale}:${key}:localized placeholders`).toEqual(
+          placeholders(englishCopy!)
+        );
+      }
+      for (const key of [...localizedCutCompositionKeys, ...localizedBeatPlaybackKeys]) {
         const englishCopy = englishLeaves[key];
         const localizedCopy = localizedLeaves[key];
         expect(localizedCopy?.trim(), `${locale}:${key}`).not.toBe('');

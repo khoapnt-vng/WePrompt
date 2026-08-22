@@ -464,6 +464,12 @@ const captureCutViewportReference = async (
   await expect(transport.locator('[data-cut-play]')).toHaveAttribute('aria-pressed', 'false');
   await expect(transport.locator('[data-cut-time]')).toHaveText('0:00 / 0:10');
   await expect(transport.getByText('Picture only — the bed is muted here', { exact: true })).toBeVisible();
+  await expect(cut.getByRole('slider', { name: 'Film seek rail' })).toHaveCount(1);
+  await expect(cut.locator('[data-cut-seek]')).not.toHaveAttribute('aria-label');
+  await expect(cut.locator('[data-cut-previous-join]')).toBeDisabled();
+  await expect(cut.locator('[data-cut-next-join]')).toBeDisabled();
+  await expect(cut.locator('[data-cut-loop-join]')).toHaveAttribute('aria-pressed', 'false');
+  await expect(cut.getByRole('button', { name: 'Open Beat', exact: true })).toBeVisible();
   await expect(cut.locator('audio')).toHaveCount(0);
 
   const managedVideoUrl = `weprompt-studio://asset/${managedVideo.projectId}/${managedVideo.assetId}`;
@@ -558,6 +564,38 @@ const captureCutViewportReference = async (
   expect(filmstripGeometry.height).toBeGreaterThanOrEqual(63);
   expect(filmstripGeometry.height).toBeLessThanOrEqual(65);
   expect(filmstripGeometry.scrollWidth).toBeLessThanOrEqual(filmstripGeometry.clientWidth + 1);
+  const seekRailGeometry = await cut.locator('[data-cut-seek-rail]').evaluate((element) => {
+    const shell = element.parentElement;
+    const strip = element.previousElementSibling;
+    if (!(shell instanceof HTMLElement) || !(strip instanceof HTMLElement)) {
+      throw new Error('Fused Cut seek geometry was unavailable');
+    }
+    const railRect = element.getBoundingClientRect();
+    const shellRect = shell.getBoundingClientRect();
+    const stripRect = strip.getBoundingClientRect();
+    return {
+      rail: { height: railRect.height, left: railRect.left, right: railRect.right, top: railRect.top },
+      shell: { left: shellRect.left, right: shellRect.right },
+      strip: { bottom: stripRect.bottom, left: stripRect.left, right: stripRect.right },
+    };
+  });
+  expect(seekRailGeometry.rail.height).toBeGreaterThanOrEqual(17);
+  expect(seekRailGeometry.rail.height).toBeLessThanOrEqual(19);
+  expect(Math.abs(seekRailGeometry.rail.top - seekRailGeometry.strip.bottom)).toBeLessThanOrEqual(1);
+  expect(Math.abs(seekRailGeometry.rail.left - seekRailGeometry.strip.left)).toBeLessThanOrEqual(1);
+  expect(Math.abs(seekRailGeometry.rail.right - seekRailGeometry.strip.right)).toBeLessThanOrEqual(1);
+  expect(seekRailGeometry.rail.left).toBeGreaterThanOrEqual(seekRailGeometry.shell.left - 1);
+  expect(seekRailGeometry.rail.right).toBeLessThanOrEqual(seekRailGeometry.shell.right + 1);
+
+  const matchThumbnails = cut.locator('[data-cut-match-thumbnails]');
+  await expect(matchThumbnails.getByRole('button')).toHaveCount(1);
+  await expect(matchThumbnails.getByRole('button')).toHaveAttribute('aria-pressed', 'true');
+  await expect(matchThumbnails.locator('img')).toHaveCount(1);
+  const bedExtent = cut.locator('[data-cut-bed-extent]');
+  await expect(bedExtent).toHaveAttribute('data-source-seconds', '18');
+  await expect(bedExtent).toHaveAttribute('data-film-seconds', '10');
+  await expect(bedExtent).toContainText('From 0:00 · 18s extent');
+  await expect(bedExtent).toContainText('Silent in preview · applied on export');
 
   const metrics = await cut.evaluate((element) => ({
     clientWidth: element.clientWidth,
@@ -641,6 +679,13 @@ const exerciseCutPreviewTransport = async (
   const expectedUrl = `weprompt-studio://asset/${managedVideo.projectId}/${managedVideo.assetId}`;
   await expect(media).toHaveCount(1);
   await expect.poll(async () => media.evaluate((element: HTMLVideoElement) => element.currentSrc)).toBe(expectedUrl);
+  await cut.focus();
+  await expect(cut).toBeFocused();
+  await cut.press('ArrowRight');
+  await expect(cut.locator('[data-cut-transport] [data-cut-time]')).toHaveText('0:01 / 0:10');
+  await expect
+    .poll(async () => media.evaluate((element: HTMLVideoElement) => element.currentTime))
+    .toBeGreaterThanOrEqual(0.9);
   const initialTime = await media.evaluate((element: HTMLVideoElement) => element.currentTime);
 
   await play.click();
@@ -1998,6 +2043,39 @@ test.describe('Creative Studio workspace', () => {
       await renderedRow.getByRole('gridcell').first().click();
       const panel = page.getByRole('dialog', { name: 'Beat panel — Landing' });
       await expect(panel).toBeVisible();
+      const beatPreview = panel.locator('[data-beat-preview]');
+      const beatMedia = beatPreview.locator('video[data-beat-preview-media][data-media-kind="video"]');
+      const beatTransport = panel.locator('[data-beat-transport]');
+      await expect(beatPreview).toHaveAccessibleName('Beat preview');
+      await expect(beatMedia).toHaveAccessibleName('Shot 01 video · The plane lands.');
+      await expect(beatTransport).toHaveAccessibleName('Beat transport');
+      await expect(beatTransport.locator('[data-beat-play]')).toHaveAccessibleName('Play Beat');
+      await expect(beatTransport.locator('[data-beat-time]')).toHaveText('0:00 / 0:20');
+      await expect(beatTransport.locator('[data-beat-next-join]')).toBeEnabled();
+      await expect(beatTransport.locator('[data-beat-loop]')).toHaveAttribute('aria-pressed', 'false');
+      await expect(panel.getByText('Rail · Seek · Free', { exact: true })).toBeVisible();
+      const beatSeek = panel.getByRole('slider', { name: 'Beat seek rail' });
+      await expect(beatSeek).toHaveAttribute('aria-valuemin', '0');
+      await expect(beatSeek).toHaveAttribute('aria-valuemax', '20');
+      await expect
+        .poll(async () => beatMedia.evaluate((element: HTMLVideoElement) => element.currentSrc))
+        .toBe(`weprompt-studio://asset/${projectId}/${videoAssetId}`);
+      await expect(beatMedia).toHaveJSProperty('muted', true);
+      await expect(beatMedia).toHaveJSProperty('playsInline', true);
+      await expect(beatMedia).toHaveJSProperty('controls', false);
+      await expect(panel.locator('audio')).toHaveCount(0);
+      await beatTransport.locator('[data-beat-next-join]').click();
+      await expect(beatTransport.locator('[data-beat-time]')).toHaveText('0:08 / 0:20');
+      await beatSeek.focus();
+      await beatSeek.press('Home');
+      await expect(beatTransport.locator('[data-beat-time]')).toHaveText('0:00 / 0:20');
+      await beatTransport.locator('[data-beat-loop]').click();
+      await expect(beatTransport.locator('[data-beat-loop]')).toHaveAttribute('aria-pressed', 'true');
+      await expect(beatTransport.locator('[data-beat-time]')).toHaveText('0:08 / 0:20');
+      await beatTransport.locator('[data-beat-loop]').click();
+      await expect(beatTransport.locator('[data-beat-loop]')).toHaveAttribute('aria-pressed', 'false');
+      await beatSeek.focus();
+      await beatSeek.press('Home');
       const playbackLane = panel.getByRole('group', { name: 'Playback coverage' });
       const planningLane = panel.getByRole('group', { name: 'Planning overlay' });
       await expect(playbackLane.locator(`[data-shot-id="${shotId}"]`)).toContainText('10s source');
@@ -2023,6 +2101,8 @@ test.describe('Creative Studio workspace', () => {
       await tailTrim.press('ArrowRight');
       await expect.poll(async () => (await readStudioProject(page, projectId)).shots[shotId]?.trimOutSeconds).toBe(2);
       await expect(tailTrim).toHaveAttribute('aria-valuenow', '2');
+      await expect(beatTransport.locator('[data-beat-time]')).toHaveText('0:00 / 0:18');
+      await expect(beatSeek).toHaveAttribute('aria-valuemax', '18');
       await expect(panel.getByText('Tail trim breaks downstream continuity.')).toBeVisible();
       const staleAnchorShotCard = panel.locator(`article[data-shot-id="${anchorShotId}"]`);
       const continuityWarning = staleAnchorShotCard.getByText('Continuity is out of date', { exact: true });
@@ -2425,6 +2505,27 @@ test.describe('Creative Studio workspace', () => {
       await page.setViewportSize({ width: 1440, height: 900 });
       const providerCallsBeforePlayback = await readStudioE2EProviderCallCounts(userDataDirectory);
       await exerciseCutPreviewTransport(page, cut, managedVideo);
+      expect(await readStudioE2EProviderCallCounts(userDataDirectory)).toEqual(providerCallsBeforePlayback);
+
+      const projectBeforeOpenBeat = await readStudioProject(page, rendered.projectId);
+      await cut
+        .locator('[data-cut-filmstrip-selection]')
+        .getByRole('button', { name: 'Open Beat', exact: true })
+        .click();
+      await expect(page).toHaveURL(new RegExp(`#/studio/${rendered.projectId}/cut$`));
+      const cutBeatPanel = page.getByRole('dialog', { name: 'Beat panel — Cut export Beat' });
+      await expect(cutBeatPanel).toBeVisible();
+      await expect(cutBeatPanel.locator('[data-beat-player]')).toBeVisible();
+      await expect
+        .poll(() =>
+          cutBeatPanel
+            .locator('video[data-beat-preview-media][data-media-kind="video"]')
+            .evaluate((element: HTMLVideoElement) => element.currentSrc)
+        )
+        .toBe(`weprompt-studio://asset/${rendered.projectId}/${rendered.videoAssetId}`);
+      await cutBeatPanel.getByRole('button', { name: 'Close', exact: true }).click();
+      await expect(cutBeatPanel).toBeHidden();
+      expect(await readStudioProject(page, rendered.projectId)).toEqual(projectBeforeOpenBeat);
       expect(await readStudioE2EProviderCallCounts(userDataDirectory)).toEqual(providerCallsBeforePlayback);
 
       const createAndReadCatalog = async (buttonName: string, expectedShapes: string[]) => {

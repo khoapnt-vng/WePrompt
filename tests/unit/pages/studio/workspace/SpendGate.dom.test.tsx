@@ -59,6 +59,7 @@ import {
   useSpendGate,
   type BeatPanelActions,
   type BoardActions,
+  type CutActions,
   type WorkspaceDraftValue,
   type WorkspaceMutationCallbacks,
 } from '@/renderer/pages/studio/components/Workspace';
@@ -288,6 +289,8 @@ const beatPanelActions = (): BeatPanelActions => ({
   parkBeat: vi.fn(async () => true),
   reviewShot: vi.fn(),
   chooseCascadeAsset: vi.fn(async () => true),
+  retryGenerationJob: vi.fn(async () => true),
+  cancelGenerationJob: vi.fn(async () => true),
   retryConditioning: vi.fn(async () => true),
   cancelWaiting: vi.fn(async () => true),
   requestReviewedRederive: vi.fn(),
@@ -301,6 +304,18 @@ const boardActions = (): BoardActions => ({
   restoreShot: vi.fn(async () => true),
   restoreTake: vi.fn(async () => true),
   reorderBin: vi.fn(async () => true),
+});
+
+const cutActions = (): CutActions => ({
+  reorderBeats: vi.fn(async () => true),
+  importBedAudio: vi.fn(async () => 'cancelled'),
+  setBed: vi.fn(async () => true),
+  detachBedAudio: vi.fn(async () => true),
+  setMatchTo: vi.fn(async () => true),
+  createExport: vi.fn(async () => true),
+  refreshExports: vi.fn(async () => true),
+  copyExport: vi.fn(async () => 'cancelled'),
+  revealExport: vi.fn(async () => true),
 });
 
 const readyWorkspaceStatus = (revision = 3): StudioRendererWorkspaceStatusV2 => ({
@@ -332,6 +347,7 @@ const ControlsHarness: React.FC<{
   gateLocked?: boolean;
   mutations?: WorkspaceMutationCallbacks;
   briefDialogRequest?: number;
+  activeView?: 'table' | 'board' | 'cut';
 }> = ({
   routes,
   open: _open,
@@ -343,6 +359,7 @@ const ControlsHarness: React.FC<{
   gateLocked = false,
   mutations = workspaceCallbacks(),
   briefDialogRequest = 0,
+  activeView = 'table',
 }) => {
   const project = projectOverride === undefined ? makeProject() : { ...projectOverride };
   if (spendPolicy) project.spendPolicy = { currency: 'USD', maxPerBatchMinorUnits: 1_000 };
@@ -398,15 +415,18 @@ const ControlsHarness: React.FC<{
         briefDialogRequest={briefDialogRequest}
       />
       <WorkspaceControls
-        activeView='table'
+        activeView={activeView}
         project={project}
         projection={projection}
+        exportCatalog={null}
         drafts={drafts}
         pending={pending}
         gateLocked={gateLocked}
         errorMessageKey={null}
+        exportErrorMessageKey={null}
         mutations={mutations}
         boardActions={boardActions()}
+        cutActions={cutActions()}
         beatPanelActions={beatPanelActions()}
         beatPanelBriefReferenceOptions={[]}
         beatPanelReviewGraphs={[]}
@@ -660,6 +680,27 @@ describe('WorkspaceControls', () => {
     rerender(<ControlsHarness routes={routeCatalog('ready', 'ready')} open={vi.fn()} project={restored} />);
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(within(screen.getByRole('grid')).getAllByRole('row')[1]).toHaveAttribute('aria-selected', 'false');
+  });
+
+  it('opens the exact Beat panel from the Cut and dismisses it when the workspace view changes', async () => {
+    const { rerender } = render(
+      <ControlsHarness activeView='cut' routes={routeCatalog('ready', 'ready')} open={vi.fn()} />
+    );
+
+    const secondBeat = document.querySelector<HTMLButtonElement>('[data-cut-filmstrip] [data-beat-id="beat_2"] button');
+    if (secondBeat === null) throw new Error('Second Cut Beat was unavailable');
+    fireEvent.click(secondBeat);
+    fireEvent.click(screen.getByRole('button', { name: /conversation\.creativeStudio\.workspace\.cut\.openBeat/ }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toBeVisible();
+    expect(within(dialog).getByRole('heading', { name: 'Close' })).toBeVisible();
+    expect(
+      within(dialog).getByRole('region', { name: /conversation\.creativeStudio\.workspace\.beatPanel\.label/ })
+    ).toBeVisible();
+
+    rerender(<ControlsHarness activeView='table' routes={routeCatalog('ready', 'ready')} open={vi.fn()} />);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
   it('saves unlocked settings while preserving a pre-lock request-shape draft', async () => {

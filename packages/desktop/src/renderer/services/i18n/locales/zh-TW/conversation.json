@@ -917,11 +917,24 @@
           "pause": "暫停影片",
           "position": "{{current}} / {{total}}",
           "pictureOnly": "僅畫面 — 此處音軌已靜音",
-          "controlsLabel": "影片播放控制"
+          "controlsLabel": "影片播放控制",
+          "seekLabel": "影片定位軌",
+          "previousJoin": "上一個接點",
+          "nextJoin": "下一個接點",
+          "loopJoin": "循環接點",
+          "buffering": "正在載入預覽畫面"
         },
         "film": {
           "under": "少 {{clock}}",
           "over": "超出 {{clock}}"
+        },
+        "openBeat": "開啟節拍",
+        "bed": {
+          "silentPreview": "預覽時靜音 · 匯出時套用",
+          "extent": "從 0:00 開始 · 範圍 {{seconds}} 秒"
+        },
+        "slate": {
+          "openBeat": "開啟無鏡頭素材的節拍"
         }
       },
       "beatPanel": {
@@ -951,7 +964,28 @@
         },
         "coverage": {
           "trimGuidance": "邊緣 · 修剪 · 免費",
-          "boundaryGuidance": "邊界 · 需要重新渲染"
+          "boundaryGuidance": "邊界 · 需要重新渲染",
+          "seekGuidance": "軌道 · 定位 · 免費",
+          "seekLane": "節拍定位軌",
+          "seekValue": "{{current}} / {{total}}"
+        },
+        "preview": {
+          "label": "節拍預覽",
+          "noMedia": "節拍預覽無法使用",
+          "mediaError": "無法預覽所選成片。",
+          "videoLabel": "鏡頭 {{position}} 影片 · {{line}}",
+          "slateLabel": "鏡頭 {{position}} 規劃場記卡 · {{line}}",
+          "slate": "規劃場記卡",
+          "slateHold": "保留 {{clock}}",
+          "play": "播放節拍",
+          "pause": "暫停節拍",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "僅畫面",
+          "controlsLabel": "節拍播放控制",
+          "previousJoin": "上一個接點",
+          "nextJoin": "下一個接點",
+          "loopJoin": "循環最近接點",
+          "keyboardGuidance": "空白鍵播放 · 方向鍵定位 · [ ] 切換接點 · L 循環"
         }
       },
       "controls": {

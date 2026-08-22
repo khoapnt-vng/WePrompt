@@ -927,11 +927,24 @@
           "pause": "Pausar filme",
           "position": "{{current}} / {{total}}",
           "pictureOnly": "Somente imagem — a trilha de áudio está silenciada aqui",
-          "controlsLabel": "Controles de reprodução do filme"
+          "controlsLabel": "Controles de reprodução do filme",
+          "seekLabel": "Trilho de busca do filme",
+          "previousJoin": "Junção anterior",
+          "nextJoin": "Próxima junção",
+          "loopJoin": "Repetir junção",
+          "buffering": "Carregando quadro da prévia"
         },
         "film": {
           "under": "{{clock}} abaixo",
           "over": "{{clock}} acima"
+        },
+        "openBeat": "Abrir beat",
+        "bed": {
+          "silentPreview": "Sem som na prévia · aplicado na exportação",
+          "extent": "A partir de 0:00 · extensão de {{seconds}}s"
+        },
+        "slate": {
+          "openBeat": "Abrir beat sem cobertura"
         }
       },
       "beatPanel": {
@@ -961,7 +974,28 @@
         },
         "coverage": {
           "trimGuidance": "Borda · Corte · Grátis",
-          "boundaryGuidance": "Limite · Exige nova renderização"
+          "boundaryGuidance": "Limite · Exige nova renderização",
+          "seekGuidance": "Trilho · Busca · Grátis",
+          "seekLane": "Trilho de busca do beat",
+          "seekValue": "{{current}} de {{total}}"
+        },
+        "preview": {
+          "label": "Prévia do beat",
+          "noMedia": "Prévia do beat indisponível",
+          "mediaError": "Não foi possível visualizar a tomada selecionada.",
+          "videoLabel": "Vídeo do plano {{position}} · {{line}}",
+          "slateLabel": "Cartela de planejamento do plano {{position}} · {{line}}",
+          "slate": "Cartela de planejamento",
+          "slateHold": "Manter por {{clock}}",
+          "play": "Reproduzir beat",
+          "pause": "Pausar beat",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "Somente imagem",
+          "controlsLabel": "Controles de reprodução do beat",
+          "previousJoin": "Junção anterior",
+          "nextJoin": "Próxima junção",
+          "loopJoin": "Repetir a junção mais próxima",
+          "keyboardGuidance": "Espaço reproduz · Setas buscam · [ ] junções · L repete"
         }
       },
       "controls": {

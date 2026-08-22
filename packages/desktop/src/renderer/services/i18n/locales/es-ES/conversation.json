@@ -922,11 +922,24 @@
           "pause": "Pausar película",
           "position": "{{current}} / {{total}}",
           "pictureOnly": "Solo imagen — aquí la pista de audio está silenciada",
-          "controlsLabel": "Controles de reproducción de la película"
+          "controlsLabel": "Controles de reproducción de la película",
+          "seekLabel": "Barra de búsqueda de la película",
+          "previousJoin": "Unión anterior",
+          "nextJoin": "Siguiente unión",
+          "loopJoin": "Repetir unión",
+          "buffering": "Cargando fotograma de vista previa"
         },
         "film": {
           "under": "{{clock}} por debajo",
           "over": "{{clock}} por encima"
+        },
+        "openBeat": "Abrir beat",
+        "bed": {
+          "silentPreview": "Sin sonido en la vista previa · se aplica al exportar",
+          "extent": "Desde 0:00 · extensión de {{seconds}} s"
+        },
+        "slate": {
+          "openBeat": "Abrir beat sin cobertura"
         }
       },
       "beatPanel": {
@@ -956,7 +969,28 @@
         },
         "coverage": {
           "trimGuidance": "Borde · Recorte · Gratis",
-          "boundaryGuidance": "Límite · Requiere volver a renderizar"
+          "boundaryGuidance": "Límite · Requiere volver a renderizar",
+          "seekGuidance": "Barra · Buscar · Gratis",
+          "seekLane": "Barra de búsqueda del beat",
+          "seekValue": "{{current}} de {{total}}"
+        },
+        "preview": {
+          "label": "Vista previa del beat",
+          "noMedia": "Vista previa del beat no disponible",
+          "mediaError": "No se pudo mostrar la toma seleccionada.",
+          "videoLabel": "Vídeo del plano {{position}} · {{line}}",
+          "slateLabel": "Claqueta de planificación del plano {{position}} · {{line}}",
+          "slate": "Claqueta de planificación",
+          "slateHold": "Mantener durante {{clock}}",
+          "play": "Reproducir beat",
+          "pause": "Pausar beat",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "Solo imagen",
+          "controlsLabel": "Controles de reproducción del beat",
+          "previousJoin": "Unión anterior",
+          "nextJoin": "Siguiente unión",
+          "loopJoin": "Repetir la unión más cercana",
+          "keyboardGuidance": "Espacio reproduce · Flechas buscan · [ ] uniones · L repite"
         }
       },
       "controls": {

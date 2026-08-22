@@ -208,6 +208,115 @@ export const coveragePointerDeltaSeconds = (input: {
   return ((input.clientX - input.startClientX) * input.trackSeconds * direction) / input.trackWidthPixels;
 };
 
+/** Maps an absolute pointer coordinate to a clamped logical rail position, including RTL. */
+export const coveragePointerPositionSeconds = (input: {
+  clientX: number;
+  trackLeftPixels: number;
+  trackWidthPixels: number;
+  durationSeconds: number;
+  rtl: boolean;
+}): number | null => {
+  if (
+    !Number.isFinite(input.clientX) ||
+    !Number.isFinite(input.trackLeftPixels) ||
+    !finitePositive(input.trackWidthPixels) ||
+    !finitePositive(input.durationSeconds)
+  ) {
+    return null;
+  }
+  const physicalRatio = Math.max(0, Math.min(1, (input.clientX - input.trackLeftPixels) / input.trackWidthPixels));
+  return (input.rtl ? 1 - physicalRatio : physicalRatio) * input.durationSeconds;
+};
+
+type CoverageSeekMetrics = {
+  laneTotalSeconds: number;
+  playedTotalSeconds: number;
+};
+
+const finiteSafeSeekOffset = (value: number): boolean =>
+  Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER && !Object.is(value, -0);
+
+const coverageSeekMetrics = (geometry: CoverageGeometry): CoverageSeekMetrics | null => {
+  if (geometry.segments.length === 0) return null;
+  let laneTotalSeconds = 0;
+  let playedTotalSeconds = 0;
+  for (const segment of geometry.segments) {
+    if (
+      !finitePositive(segment.playbackWidthSeconds) ||
+      !finiteSafeSeekOffset(segment.playedStartSeconds) ||
+      !finiteSafeSeekOffset(segment.playedEndSeconds) ||
+      segment.playedStartSeconds >= segment.playedEndSeconds ||
+      segment.playedEndSeconds > segment.playbackWidthSeconds ||
+      segment.playedDurationSeconds !== segment.playedEndSeconds - segment.playedStartSeconds
+    ) {
+      return null;
+    }
+    laneTotalSeconds += segment.playbackWidthSeconds;
+    playedTotalSeconds += segment.playedDurationSeconds;
+    if (!finitePositive(laneTotalSeconds) || !finitePositive(playedTotalSeconds)) return null;
+  }
+  if (geometry.playbackTotalSeconds !== laneTotalSeconds) return null;
+  return { laneTotalSeconds, playedTotalSeconds };
+};
+
+/** Maps assembled played time to its truthful position inside the source-width coverage lane. */
+export const coverageSeekLaneRatio = (geometry: CoverageGeometry, requestedSeconds: number): number | null => {
+  const metrics = coverageSeekMetrics(geometry);
+  if (metrics === null || !Number.isFinite(requestedSeconds)) return null;
+  const positionSeconds = Math.min(metrics.playedTotalSeconds, Math.max(0, requestedSeconds));
+  let laneCursor = 0;
+  let playedCursor = 0;
+  for (let index = 0; index < geometry.segments.length; index += 1) {
+    const segment = geometry.segments[index]!;
+    const playedEnd = playedCursor + segment.playedDurationSeconds;
+    if (positionSeconds < playedEnd || index === geometry.segments.length - 1) {
+      const localPlayed = Math.min(segment.playedDurationSeconds, Math.max(0, positionSeconds - playedCursor));
+      return (laneCursor + segment.playedStartSeconds + localPlayed) / metrics.laneTotalSeconds;
+    }
+    laneCursor += segment.playbackWidthSeconds;
+    playedCursor = playedEnd;
+  }
+  return null;
+};
+
+/** Maps a physical coverage-lane pointer through trimmed source gaps onto assembled Beat time. */
+export const coverageSeekPositionSeconds = (input: {
+  clientX: number;
+  trackLeftPixels: number;
+  trackWidthPixels: number;
+  geometry: CoverageGeometry;
+  rtl: boolean;
+}): number | null => {
+  const metrics = coverageSeekMetrics(input.geometry);
+  if (
+    metrics === null ||
+    !Number.isFinite(input.clientX) ||
+    !Number.isFinite(input.trackLeftPixels) ||
+    !finitePositive(input.trackWidthPixels)
+  ) {
+    return null;
+  }
+  const physicalRatio = Math.max(0, Math.min(1, (input.clientX - input.trackLeftPixels) / input.trackWidthPixels));
+  const lanePosition = (input.rtl ? 1 - physicalRatio : physicalRatio) * metrics.laneTotalSeconds;
+  let laneCursor = 0;
+  let playedCursor = 0;
+  for (let index = 0; index < input.geometry.segments.length; index += 1) {
+    const segment = input.geometry.segments[index]!;
+    const laneEnd = laneCursor + segment.playbackWidthSeconds;
+    if (lanePosition < laneEnd || index === input.geometry.segments.length - 1) {
+      const localSource = Math.min(segment.playbackWidthSeconds, Math.max(0, lanePosition - laneCursor));
+      const localPlayed = Math.min(
+        segment.playedDurationSeconds,
+        Math.max(0, localSource - segment.playedStartSeconds)
+      );
+      return playedCursor + localPlayed;
+    }
+    laneCursor = laneEnd;
+    playedCursor += segment.playedDurationSeconds;
+  }
+  return null;
+};
+
 /** The whole bar adopts the tier of its narrowest playback segment. */
 export const coverageDensityForWidth = (
   barWidthPixels: number,

@@ -17,18 +17,29 @@ import {
   coverageDensityForWidth,
   coveragePlanningPairBounds,
   coveragePointerDeltaSeconds,
+  coverageSeekLaneRatio,
+  coverageSeekPositionSeconds,
   maximumCoverageTrim,
   resizeCoveragePlanningPair,
   type CoveragePlanningPairChange,
 } from './coverageGeometry';
+import { formatBeatPlaybackClock } from './beatPlaybackSequence';
 
 const COVERAGE_KEY_ROOT = 'conversation.creativeStudio.workspace.beatPanel.coverage';
 
 export type CoverageBarProps = {
   shots: readonly WorkspaceShotProjection[];
   disabled: boolean;
+  playback?: CoveragePlayback;
   onCommitPlanningDurations: (changes: CoveragePlanningPairChange) => Promise<boolean>;
   onCommitTrim: (shotId: string, trimInSeconds: number | null, trimOutSeconds: number | null) => Promise<boolean>;
+};
+
+export type CoveragePlayback = {
+  available: boolean;
+  durationSeconds: number;
+  positionSeconds: number;
+  onSeek: (positionSeconds: number) => void;
 };
 
 type PlanningPreview = Record<string, number>;
@@ -66,9 +77,14 @@ type TrimDrag = {
 
 type CoverageDrag = BoundaryDrag | TrimDrag;
 
+type SeekDrag = {
+  pointerId: number;
+  target: HTMLButtonElement;
+};
+
 const asNullableTrim = (value: number): number | null => (value === 0 ? null : value);
 
-const releasePointer = (drag: CoverageDrag): void => {
+const releasePointer = (drag: Pick<CoverageDrag, 'pointerId' | 'target'>): void => {
   try {
     if (drag.target.hasPointerCapture?.(drag.pointerId)) drag.target.releasePointerCapture?.(drag.pointerId);
   } catch {
@@ -83,6 +99,7 @@ const isRtl = (element: Element | null): boolean =>
 export const CoverageBar: React.FC<CoverageBarProps> = ({
   shots,
   disabled,
+  playback,
   onCommitPlanningDurations,
   onCommitTrim,
 }) => {
@@ -90,9 +107,11 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
   const guidanceId = useId();
   const trimGuidanceId = `${guidanceId}-trim`;
   const boundaryGuidanceId = `${guidanceId}-boundary`;
+  const seekGuidanceId = `${guidanceId}-seek`;
   const playbackTrackRef = useRef<HTMLDivElement | null>(null);
   const planningTrackRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<CoverageDrag | null>(null);
+  const seekDragRef = useRef<SeekDrag | null>(null);
   const [barWidthPixels, setBarWidthPixels] = useState(0);
   const [planningPreview, setPlanningPreview] = useState<PlanningPreview | null>(null);
   const [trimPreview, setTrimPreview] = useState<TrimPreview | null>(null);
@@ -135,6 +154,12 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
     setPlanningPreview(null);
     setTrimPreview(null);
   }, [shotFingerprint]);
+
+  useEffect(() => {
+    const drag = seekDragRef.current;
+    if (drag !== null) releasePointer(drag);
+    seekDragRef.current = null;
+  }, [playback?.available, playback?.durationSeconds]);
 
   if (shots.length === 0) {
     return (
@@ -393,6 +418,74 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
     });
   };
 
+  const seekAvailable =
+    playback?.available === true &&
+    Number.isFinite(playback.durationSeconds) &&
+    playback.durationSeconds > 0 &&
+    Number.isFinite(playback.positionSeconds) &&
+    Math.abs(
+      playback.durationSeconds - geometry.segments.reduce((sum, segment) => sum + segment.playedDurationSeconds, 0)
+    ) <=
+      Number.EPSILON * 8 * Math.max(1, playback.durationSeconds);
+  const seekPositionSeconds = seekAvailable
+    ? Math.min(playback.durationSeconds, Math.max(0, playback.positionSeconds))
+    : 0;
+  const seekFromPointer = (event: React.PointerEvent<HTMLButtonElement>): void => {
+    if (!seekAvailable || playback === undefined) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const position = coverageSeekPositionSeconds({
+      clientX: event.clientX,
+      trackLeftPixels: rect.left,
+      trackWidthPixels: rect.width,
+      geometry,
+      rtl: isRtl(event.currentTarget),
+    });
+    if (position !== null) playback.onSeek(position);
+  };
+  const beginSeek = (event: React.PointerEvent<HTMLButtonElement>): void => {
+    if (!seekAvailable) return;
+    event.preventDefault();
+    try {
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    } catch {
+      // The initial seek is still authoritative when pointer capture is unavailable.
+    }
+    seekDragRef.current = { pointerId: event.pointerId, target: event.currentTarget };
+    seekFromPointer(event);
+  };
+  const moveSeek = (event: React.PointerEvent<HTMLButtonElement>): void => {
+    if (seekDragRef.current?.pointerId !== event.pointerId) return;
+    seekFromPointer(event);
+  };
+  const finishSeek = (event: React.PointerEvent<HTMLButtonElement>, commit: boolean): void => {
+    const drag = seekDragRef.current;
+    if (drag?.pointerId !== event.pointerId) return;
+    seekDragRef.current = null;
+    releasePointer(drag);
+    if (commit) seekFromPointer(event);
+  };
+  const seekKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>): void => {
+    if (!seekAvailable || playback === undefined) return;
+    const step = event.shiftKey ? 0.2 : 1;
+    const rtl = isRtl(event.currentTarget);
+    let next: number;
+    if (event.key === 'ArrowRight') next = seekPositionSeconds + (rtl ? -step : step);
+    else if (event.key === 'ArrowLeft') next = seekPositionSeconds + (rtl ? step : -step);
+    else if (event.key === 'ArrowUp') next = seekPositionSeconds + step;
+    else if (event.key === 'ArrowDown') next = seekPositionSeconds - step;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = playback.durationSeconds;
+    else return;
+    event.preventDefault();
+    event.stopPropagation();
+    playback.onSeek(Math.min(playback.durationSeconds, Math.max(0, next)));
+  };
+
+  const seekCurrentClock = formatBeatPlaybackClock(seekPositionSeconds, playback?.durationSeconds ?? 0) ?? '0:00';
+  const seekTotalClock =
+    formatBeatPlaybackClock(playback?.durationSeconds ?? 0, playback?.durationSeconds ?? 0) ?? '0:00';
+  const seekLaneRatio = coverageSeekLaneRatio(geometry, seekPositionSeconds) ?? 0;
+
   return (
     <section aria-label={t(`${COVERAGE_KEY_ROOT}.label`)} className={styles.coverageRoot}>
       <div className={styles.coverageGuidance}>
@@ -402,115 +495,145 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
         <span className={styles.boundaryGuidance} id={boundaryGuidanceId}>
           {t(`${COVERAGE_KEY_ROOT}.boundaryGuidance`)}
         </span>
+        <span className={styles.seekGuidance} id={seekGuidanceId}>
+          {t(`${COVERAGE_KEY_ROOT}.seekGuidance`)}
+        </span>
       </div>
-      <div
-        ref={playbackTrackRef}
-        aria-label={t(`${COVERAGE_KEY_ROOT}.playbackLane`)}
-        className={styles.playbackTrack}
-        data-density={density}
-        data-testid='studio-coverage-playback'
-        role='group'
-      >
-        {geometry.segments.map((segment, index) => {
-          const shot = shots[index]!;
-          const widthSeconds = displayPlaybackWidths[index]!;
-          const preview = trimPreview?.shotId === shot.id ? trimPreview : null;
-          const trimInSeconds = preview?.trimInSeconds ?? shot.trimInSeconds ?? 0;
-          const trimOutSeconds = preview?.trimOutSeconds ?? shot.trimOutSeconds ?? 0;
-          const sourceDurationSeconds = segment.playbackWidthSeconds;
-          const playedEndSeconds = sourceDurationSeconds - trimOutSeconds;
-          const hasContinuitySuccessor = shots[index + 1] !== undefined && shots[index + 1]!.segmentHead === false;
-          const tailWarning = segment.selectedTake && hasContinuitySuccessor && trimOutSeconds > 0;
-          const maximumIn = maximumCoverageTrim(sourceDurationSeconds, trimOutSeconds) ?? 0;
-          const maximumOut = maximumCoverageTrim(sourceDurationSeconds, trimInSeconds) ?? 0;
-          return (
-            <div
-              key={segment.shotId}
-              className={styles.playbackSegment}
-              data-selected-take={segment.selectedTake}
-              data-shot-id={segment.shotId}
-              style={{ flexBasis: 0, flexGrow: widthSeconds / playbackTotal }}
-            >
-              <span className={styles.segmentLabel}>{t(`${COVERAGE_KEY_ROOT}.shotLabel`, { index: index + 1 })}</span>
-              <span className={styles.segmentDuration}>
-                <bdi>
-                  {t(
-                    segment.selectedTake
-                      ? `${COVERAGE_KEY_ROOT}.sourceDuration`
-                      : `${COVERAGE_KEY_ROOT}.planningDuration`,
-                    { seconds: widthSeconds }
-                  )}
-                </bdi>
-              </span>
-              {segment.selectedTake ? (
-                <>
-                  {tailWarning ? (
-                    <span className={styles.trimWarning} role='status'>
-                      {t(`${COVERAGE_KEY_ROOT}.tailTrimWarning`)}
-                    </span>
-                  ) : null}
-                  <div className={styles.trimLane} data-coverage-trim-lane>
-                    <span
-                      aria-hidden='true'
-                      className={styles.playedRange}
-                      style={{
-                        insetInlineStart: `${(trimInSeconds / sourceDurationSeconds) * 100}%`,
-                        inlineSize: `${((playedEndSeconds - trimInSeconds) / sourceDurationSeconds) * 100}%`,
-                      }}
-                    />
-                    <Button
-                      aria-describedby={trimGuidanceId}
-                      aria-disabled={disabled}
-                      aria-label={t(`${COVERAGE_KEY_ROOT}.trimInLabel`, { index: index + 1 })}
-                      aria-orientation='horizontal'
-                      aria-valuemax={maximumIn}
-                      aria-valuemin={0}
-                      aria-valuenow={trimInSeconds}
-                      aria-valuetext={t(`${COVERAGE_KEY_ROOT}.trimValue`, {
-                        seconds: trimInSeconds,
-                      })}
-                      className={`${styles.trimHandle} ${styles.trimInHandle}`}
-                      disabled={disabled}
-                      onKeyDown={(event) => trimKeyDown(event, shot, 'in')}
-                      onLostPointerCapture={(event) => finishTrimDrag(event, false)}
-                      onPointerCancel={(event) => finishTrimDrag(event, false)}
-                      onPointerDown={(event) => beginTrimDrag(event, shot, 'in')}
-                      onPointerMove={moveTrimDrag}
-                      onPointerUp={(event) => finishTrimDrag(event, true)}
-                      role='slider'
-                      style={{ insetInlineStart: `${(trimInSeconds / sourceDurationSeconds) * 100}%` }}
-                      tabIndex={disabled ? -1 : 0}
-                    />
-                    <Button
-                      aria-describedby={trimGuidanceId}
-                      aria-disabled={disabled}
-                      aria-label={t(`${COVERAGE_KEY_ROOT}.trimOutLabel`, { index: index + 1 })}
-                      aria-orientation='horizontal'
-                      aria-valuemax={maximumOut}
-                      aria-valuemin={0}
-                      aria-valuenow={trimOutSeconds}
-                      aria-valuetext={t(`${COVERAGE_KEY_ROOT}.trimValue`, {
-                        seconds: trimOutSeconds,
-                      })}
-                      className={`${styles.trimHandle} ${styles.trimOutHandle}`}
-                      data-continuity-warning={tailWarning}
-                      disabled={disabled}
-                      onKeyDown={(event) => trimKeyDown(event, shot, 'out')}
-                      onLostPointerCapture={(event) => finishTrimDrag(event, false)}
-                      onPointerCancel={(event) => finishTrimDrag(event, false)}
-                      onPointerDown={(event) => beginTrimDrag(event, shot, 'out')}
-                      onPointerMove={moveTrimDrag}
-                      onPointerUp={(event) => finishTrimDrag(event, true)}
-                      role='slider'
-                      style={{ insetInlineStart: `${(playedEndSeconds / sourceDurationSeconds) * 100}%` }}
-                      tabIndex={disabled ? -1 : 0}
-                    />
-                  </div>
-                </>
-              ) : null}
-            </div>
-          );
-        })}
+      <div className={styles.playbackSurface}>
+        <div
+          ref={playbackTrackRef}
+          aria-label={t(`${COVERAGE_KEY_ROOT}.playbackLane`)}
+          className={styles.playbackTrack}
+          data-density={density}
+          data-testid='studio-coverage-playback'
+          role='group'
+        >
+          {geometry.segments.map((segment, index) => {
+            const shot = shots[index]!;
+            const widthSeconds = displayPlaybackWidths[index]!;
+            const preview = trimPreview?.shotId === shot.id ? trimPreview : null;
+            const trimInSeconds = preview?.trimInSeconds ?? shot.trimInSeconds ?? 0;
+            const trimOutSeconds = preview?.trimOutSeconds ?? shot.trimOutSeconds ?? 0;
+            const sourceDurationSeconds = segment.playbackWidthSeconds;
+            const playedEndSeconds = sourceDurationSeconds - trimOutSeconds;
+            const hasContinuitySuccessor = shots[index + 1] !== undefined && shots[index + 1]!.segmentHead === false;
+            const tailWarning = segment.selectedTake && hasContinuitySuccessor && trimOutSeconds > 0;
+            const maximumIn = maximumCoverageTrim(sourceDurationSeconds, trimOutSeconds) ?? 0;
+            const maximumOut = maximumCoverageTrim(sourceDurationSeconds, trimInSeconds) ?? 0;
+            return (
+              <div
+                key={segment.shotId}
+                className={styles.playbackSegment}
+                data-selected-take={segment.selectedTake}
+                data-shot-id={segment.shotId}
+                style={{ flexBasis: 0, flexGrow: widthSeconds / playbackTotal }}
+              >
+                <span className={styles.segmentLabel}>{t(`${COVERAGE_KEY_ROOT}.shotLabel`, { index: index + 1 })}</span>
+                <span className={styles.segmentDuration}>
+                  <bdi>
+                    {t(
+                      segment.selectedTake
+                        ? `${COVERAGE_KEY_ROOT}.sourceDuration`
+                        : `${COVERAGE_KEY_ROOT}.planningDuration`,
+                      { seconds: widthSeconds }
+                    )}
+                  </bdi>
+                </span>
+                {segment.selectedTake ? (
+                  <>
+                    {tailWarning ? (
+                      <span className={styles.trimWarning} role='status'>
+                        {t(`${COVERAGE_KEY_ROOT}.tailTrimWarning`)}
+                      </span>
+                    ) : null}
+                    <div className={styles.trimLane} data-coverage-trim-lane>
+                      <span
+                        aria-hidden='true'
+                        className={styles.playedRange}
+                        style={{
+                          insetInlineStart: `${(trimInSeconds / sourceDurationSeconds) * 100}%`,
+                          inlineSize: `${((playedEndSeconds - trimInSeconds) / sourceDurationSeconds) * 100}%`,
+                        }}
+                      />
+                      <Button
+                        aria-describedby={trimGuidanceId}
+                        aria-disabled={disabled}
+                        aria-label={t(`${COVERAGE_KEY_ROOT}.trimInLabel`, { index: index + 1 })}
+                        aria-orientation='horizontal'
+                        aria-valuemax={maximumIn}
+                        aria-valuemin={0}
+                        aria-valuenow={trimInSeconds}
+                        aria-valuetext={t(`${COVERAGE_KEY_ROOT}.trimValue`, {
+                          seconds: trimInSeconds,
+                        })}
+                        className={`${styles.trimHandle} ${styles.trimInHandle}`}
+                        disabled={disabled}
+                        onKeyDown={(event) => trimKeyDown(event, shot, 'in')}
+                        onLostPointerCapture={(event) => finishTrimDrag(event, false)}
+                        onPointerCancel={(event) => finishTrimDrag(event, false)}
+                        onPointerDown={(event) => beginTrimDrag(event, shot, 'in')}
+                        onPointerMove={moveTrimDrag}
+                        onPointerUp={(event) => finishTrimDrag(event, true)}
+                        role='slider'
+                        style={{ insetInlineStart: `${(trimInSeconds / sourceDurationSeconds) * 100}%` }}
+                        tabIndex={disabled ? -1 : 0}
+                      />
+                      <Button
+                        aria-describedby={trimGuidanceId}
+                        aria-disabled={disabled}
+                        aria-label={t(`${COVERAGE_KEY_ROOT}.trimOutLabel`, { index: index + 1 })}
+                        aria-orientation='horizontal'
+                        aria-valuemax={maximumOut}
+                        aria-valuemin={0}
+                        aria-valuenow={trimOutSeconds}
+                        aria-valuetext={t(`${COVERAGE_KEY_ROOT}.trimValue`, {
+                          seconds: trimOutSeconds,
+                        })}
+                        className={`${styles.trimHandle} ${styles.trimOutHandle}`}
+                        data-continuity-warning={tailWarning}
+                        disabled={disabled}
+                        onKeyDown={(event) => trimKeyDown(event, shot, 'out')}
+                        onLostPointerCapture={(event) => finishTrimDrag(event, false)}
+                        onPointerCancel={(event) => finishTrimDrag(event, false)}
+                        onPointerDown={(event) => beginTrimDrag(event, shot, 'out')}
+                        onPointerMove={moveTrimDrag}
+                        onPointerUp={(event) => finishTrimDrag(event, true)}
+                        role='slider'
+                        style={{ insetInlineStart: `${(playedEndSeconds / sourceDurationSeconds) * 100}%` }}
+                        tabIndex={disabled ? -1 : 0}
+                      />
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+        <Button
+          aria-describedby={seekGuidanceId}
+          aria-disabled={!seekAvailable}
+          aria-label={t(`${COVERAGE_KEY_ROOT}.seekLane`)}
+          aria-orientation='horizontal'
+          aria-valuemax={playback?.durationSeconds ?? 0}
+          aria-valuemin={0}
+          aria-valuenow={seekPositionSeconds}
+          aria-valuetext={t(`${COVERAGE_KEY_ROOT}.seekValue`, {
+            current: seekCurrentClock,
+            total: seekTotalClock,
+          })}
+          className={styles.seekRail}
+          data-studio-coverage-seek
+          disabled={!seekAvailable}
+          onKeyDown={seekKeyDown}
+          onLostPointerCapture={(event) => finishSeek(event, false)}
+          onPointerCancel={(event) => finishSeek(event, false)}
+          onPointerDown={beginSeek}
+          onPointerMove={moveSeek}
+          onPointerUp={(event) => finishSeek(event, true)}
+          role='slider'
+          style={{ '--seek-position': `${seekLaneRatio * 100}%` } as React.CSSProperties}
+          tabIndex={seekAvailable ? 0 : -1}
+        />
       </div>
 
       <div

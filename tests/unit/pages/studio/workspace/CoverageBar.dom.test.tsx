@@ -23,6 +23,8 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.coverage.planningLane': 'Planning lane',
         'conversation.creativeStudio.workspace.beatPanel.coverage.trimGuidance': 'Edge · Trim · Free',
         'conversation.creativeStudio.workspace.beatPanel.coverage.boundaryGuidance': 'Boundary · Costs a re-render',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.seekGuidance': 'Rail · Seek · Free',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.seekLane': 'Beat seek rail',
         'conversation.creativeStudio.workspace.beatPanel.coverage.tailTrimWarning':
           'Tail trim makes the next Shot stale',
       };
@@ -32,6 +34,7 @@ vi.mock('react-i18next', () => ({
       if (key.endsWith('.trimInLabel')) return `Trim in Shot ${String(values?.index)}`;
       if (key.endsWith('.trimOutLabel')) return `Trim out Shot ${String(values?.index)}`;
       if (key.endsWith('.trimValue')) return `${String(values?.seconds)}s trimmed`;
+      if (key.endsWith('.seekValue')) return `${String(values?.current)} of ${String(values?.total)}`;
       if (key.endsWith('.boundaryLabel')) return `Boundary after Shot ${String(values?.index)}`;
       if (key.endsWith('.boundaryValue')) return `${String(values?.seconds)}s left`;
       if (key.endsWith('.boundaryAnnouncement')) {
@@ -52,6 +55,9 @@ import {
   coverageDensityForWidth,
   coveragePlanningPairBounds,
   coveragePointerDeltaSeconds,
+  coveragePointerPositionSeconds,
+  coverageSeekLaneRatio,
+  coverageSeekPositionSeconds,
   maximumCoverageTrim,
   resizeCoveragePlanningPair,
 } from '@/renderer/pages/studio/components/Workspace/BeatPanel';
@@ -81,6 +87,11 @@ const rectangle = (width: number): DOMRect =>
     y: 0,
     toJSON: () => ({}),
   }) as DOMRect;
+
+const cssRuleBody = (source: string, selector: string): string => {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?:^|\\n)\\s*${escaped}\\s*\\{([^}]*)\\}`).exec(source)?.[1] ?? '';
+};
 
 const mockDirection = (direction: 'ltr' | 'rtl') => {
   const originalGetComputedStyle = window.getComputedStyle.bind(window);
@@ -158,6 +169,7 @@ const renderCoverage = (
     disabled?: boolean;
     onCommitPlanningDurations?: ReturnType<typeof vi.fn>;
     onCommitTrim?: ReturnType<typeof vi.fn>;
+    playback?: React.ComponentProps<typeof CoverageBar>['playback'];
   } = {}
 ) => {
   const onCommitPlanningDurations = options.onCommitPlanningDurations ?? vi.fn().mockResolvedValue(true);
@@ -167,6 +179,7 @@ const renderCoverage = (
       disabled={options.disabled ?? false}
       onCommitPlanningDurations={onCommitPlanningDurations}
       onCommitTrim={onCommitTrim}
+      playback={options.playback}
       shots={shots}
     />
   );
@@ -315,6 +328,33 @@ describe('coverage geometry', () => {
         rtl: false,
       })
     ).toBeNull();
+    expect(
+      coveragePointerPositionSeconds({
+        clientX: 75,
+        trackLeftPixels: 25,
+        trackWidthPixels: 100,
+        durationSeconds: 20,
+        rtl: false,
+      })
+    ).toBe(10);
+    expect(
+      coveragePointerPositionSeconds({
+        clientX: 75,
+        trackLeftPixels: 25,
+        trackWidthPixels: 100,
+        durationSeconds: 20,
+        rtl: true,
+      })
+    ).toBe(10);
+    expect(
+      coveragePointerPositionSeconds({
+        clientX: 200,
+        trackLeftPixels: 25,
+        trackWidthPixels: 100,
+        durationSeconds: 20,
+        rtl: false,
+      })
+    ).toBe(20);
   });
 
   it('uses the narrowest measured segment for exact density thresholds without a presentation label', () => {
@@ -324,6 +364,50 @@ describe('coverage geometry', () => {
     expect(coverageDensityForWidth(151, [1])).toBe('wide');
     expect(coverageDensityForWidth(400, [3, 1])).toBe('medium');
     expect(coverageDensityForWidth(0, [1])).toBe('narrow');
+  });
+
+  it('maps Beat time piecewise through trims so the seek head and pointer align with source-width segments', () => {
+    const geometry = buildCoverageGeometry([
+      makeShot('shot_1', 8, 0, {
+        selectedTakeId: 'take_1',
+        selectedTakeSourceDurationSeconds: 10,
+        trimInSeconds: 4,
+        trimOutSeconds: 4,
+        playedDurationSeconds: 2,
+      }),
+      makeShot('shot_2', 10, 8),
+    ])!;
+
+    expect(coverageSeekLaneRatio(geometry, 1)).toBe(0.25);
+    expect(coverageSeekLaneRatio(geometry, 2)).toBe(0.5);
+    expect(coverageSeekLaneRatio(geometry, 7)).toBe(0.75);
+    expect(
+      coverageSeekPositionSeconds({
+        clientX: 25,
+        trackLeftPixels: 0,
+        trackWidthPixels: 100,
+        geometry,
+        rtl: false,
+      })
+    ).toBe(1);
+    expect(
+      coverageSeekPositionSeconds({
+        clientX: 40,
+        trackLeftPixels: 0,
+        trackWidthPixels: 100,
+        geometry,
+        rtl: false,
+      })
+    ).toBe(2);
+    expect(
+      coverageSeekPositionSeconds({
+        clientX: 25,
+        trackLeftPixels: 0,
+        trackWidthPixels: 100,
+        geometry,
+        rtl: true,
+      })
+    ).toBe(7);
   });
 });
 
@@ -406,6 +490,68 @@ describe('CoverageBar', () => {
     expect(trimGuidance.parentElement).toBe(boundaryGuidance.parentElement);
   });
 
+  it('fuses a controlled free seek rail to coverage even while mutations are locked', () => {
+    const onSeek = vi.fn();
+    renderCoverage([makeShot('shot_1', 8, 0)], {
+      disabled: true,
+      playback: { available: true, durationSeconds: 8, positionSeconds: 2, onSeek },
+    });
+
+    const guidance = screen.getByText('Rail · Seek · Free');
+    const rail = screen.getByRole('slider', { name: 'Beat seek rail' });
+    expect(rail).toBeEnabled();
+    expect(rail).toHaveAttribute('aria-describedby', guidance.id);
+    expect(rail).toHaveAttribute('aria-valuemin', '0');
+    expect(rail).toHaveAttribute('aria-valuemax', '8');
+    expect(rail).toHaveAttribute('aria-valuenow', '2');
+    expect(rail).toHaveAttribute('aria-valuetext', '0:02 of 0:08');
+
+    vi.spyOn(rail, 'getBoundingClientRect').mockReturnValue(rectangle(100));
+    installPointerCapture(rail);
+    fireEvent.pointerDown(rail, { clientX: 75, pointerId: 4 });
+    fireEvent.pointerUp(rail, { clientX: 75, pointerId: 4 });
+    expect(onSeek).toHaveBeenLastCalledWith(6);
+
+    fireEvent.keyDown(rail, { key: 'ArrowLeft', shiftKey: true });
+    expect(onSeek).toHaveBeenLastCalledWith(1.8);
+
+    const direction = mockDirection('rtl');
+    fireEvent.keyDown(rail, { key: 'ArrowRight' });
+    expect(onSeek).toHaveBeenLastCalledWith(1);
+    direction.mockRestore();
+  });
+
+  it('places and drives the fused rail through trimmed multi-Shot source geometry in LTR and RTL', () => {
+    const onSeek = vi.fn();
+    renderCoverage(
+      [
+        makeShot('shot_1', 8, 0, {
+          selectedTakeId: 'take_1',
+          selectedTakeSourceDurationSeconds: 10,
+          trimInSeconds: 4,
+          trimOutSeconds: 4,
+          playedDurationSeconds: 2,
+        }),
+        makeShot('shot_2', 10, 8),
+      ],
+      { playback: { available: true, durationSeconds: 12, positionSeconds: 2, onSeek } }
+    );
+    const rail = screen.getByRole('slider', { name: 'Beat seek rail' });
+    expect(rail).toHaveStyle({ '--seek-position': '50%' });
+    vi.spyOn(rail, 'getBoundingClientRect').mockReturnValue(rectangle(100));
+    installPointerCapture(rail);
+
+    fireEvent.pointerDown(rail, { clientX: 25, pointerId: 5 });
+    fireEvent.pointerUp(rail, { clientX: 25, pointerId: 5 });
+    expect(onSeek).toHaveBeenLastCalledWith(1);
+
+    const direction = mockDirection('rtl');
+    fireEvent.pointerDown(rail, { clientX: 25, pointerId: 6 });
+    fireEvent.pointerUp(rail, { clientX: 25, pointerId: 6 });
+    expect(onSeek).toHaveBeenLastCalledWith(7);
+    direction.mockRestore();
+  });
+
   it('describes each slider with the matching stable consequence across rerenders', () => {
     const first = makeSelectedShot();
     const second = makeShot('shot_2', 8, 8, {
@@ -456,6 +602,9 @@ describe('CoverageBar', () => {
     expect(css).toMatch(/\.trimLane\s*\{[^}]*position:\s*relative[^}]*grid-row:\s*4/s);
     expect(css).toMatch(/\.trimHandle\s*\{[^}]*inset-block:\s*2px/s);
     expect(css).not.toMatch(/\.trimLane\s*\{[^}]*position:\s*absolute/s);
+    expect(cssRuleBody(css, '.playbackSurface')).toContain('position: relative');
+    expect(cssRuleBody(css, '.seekRail')).toContain('block-size: 18px !important');
+    expect(cssRuleBody(css, '.seekRail')).toContain('position: absolute !important');
   });
 
   it('ignores missing or invalid measurements and disconnects an installed observer', () => {

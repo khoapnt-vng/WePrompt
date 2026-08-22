@@ -383,6 +383,133 @@
   overflow-wrap: anywhere;
 }
 
+.beatPlayer {
+  display: grid;
+  min-inline-size: 0;
+  gap: 10px;
+  border-radius: 12px;
+}
+
+.beatPlayer:focus-visible {
+  outline: 2px solid var(--color-primary-6);
+  outline-offset: 3px;
+}
+
+.beatPreview {
+  position: relative;
+  display: grid;
+  min-inline-size: 0;
+  aspect-ratio: 16 / 9;
+  place-items: stretch;
+  overflow: hidden;
+  border: 1px solid var(--color-border-2);
+  border-radius: 12px;
+  background: var(--color-fill-2);
+}
+
+.previewFrame {
+  position: relative;
+  display: grid;
+  min-inline-size: 0;
+  min-block-size: 0;
+}
+
+.previewMedia,
+.previewSeekPoster,
+.previewSeekFallback {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+}
+
+.previewMedia {
+  min-inline-size: 0;
+  min-block-size: 0;
+  object-fit: contain;
+  background: var(--color-fill-3);
+}
+
+div.previewMedia {
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  padding: 24px;
+  color: var(--color-text-2);
+  text-align: center;
+}
+
+div.previewMedia strong {
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 24px;
+}
+
+.previewSeekPoster,
+.previewSeekFallback {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  object-fit: contain;
+  background: var(--color-fill-3);
+  pointer-events: none;
+}
+
+.previewSeekFallback::after {
+  content: '';
+  position: absolute;
+  inset: 20%;
+  border: 1px solid var(--color-border-3);
+  border-radius: 12px;
+  background: var(--color-fill-2);
+}
+
+.previewUnavailable {
+  display: grid;
+  margin: 0;
+  place-content: center;
+  padding: 24px;
+  color: var(--color-text-3);
+  text-align: center;
+}
+
+.beatTransport {
+  display: flex;
+  min-inline-size: 0;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.transportTime {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pictureOnly,
+.keyboardGuidance {
+  color: var(--color-text-3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.pictureOnly {
+  margin-inline-end: auto;
+  text-transform: uppercase;
+}
+
+.keyboardGuidance {
+  overflow-wrap: anywhere;
+}
+
+.previewError {
+  margin: 0;
+  color: var(--color-danger-6);
+  overflow-wrap: anywhere;
+}
+
 .coverageRoot {
   display: grid;
   min-inline-size: 0;
@@ -407,12 +534,23 @@
 }
 
 .trimGuidance,
-.boundaryGuidance {
+.boundaryGuidance,
+.seekGuidance {
   overflow-wrap: anywhere;
 }
 
 .boundaryGuidance {
   color: var(--color-warning-6);
+}
+
+.seekGuidance {
+  color: var(--color-primary-6);
+}
+
+.playbackSurface {
+  position: relative;
+  min-inline-size: 620px;
+  padding-block-end: 9px;
 }
 
 .playbackTrack,
@@ -430,6 +568,65 @@
   border: 1px solid var(--color-border-2);
   border-radius: 10px;
   background: var(--color-fill-1);
+}
+
+.seekRail {
+  --seek-position: 0%;
+
+  position: absolute !important;
+  z-index: 6;
+  inset-inline: 0;
+  inset-block-end: 0;
+  display: block !important;
+  inline-size: 100% !important;
+  min-inline-size: 0 !important;
+  block-size: 18px !important;
+  min-block-size: 18px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 999px !important;
+  background: transparent !important;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.seekRail::before {
+  content: '';
+  position: absolute;
+  inset-inline: 8px;
+  inset-block-start: 7px;
+  block-size: 4px;
+  border: 1px solid var(--color-border-3);
+  border-radius: 999px;
+  background: var(--color-bg-1);
+}
+
+.seekRail::after {
+  content: '';
+  position: absolute;
+  inset-block-start: 2px;
+  inset-inline-start: var(--seek-position);
+  inline-size: 10px;
+  block-size: 14px;
+  border: 2px solid var(--color-bg-1);
+  border-radius: 999px;
+  background: var(--color-primary-6);
+  box-shadow: var(--ring-focus);
+  transform: translateX(-50%);
+}
+
+[dir='rtl'] .seekRail::after {
+  transform: translateX(50%);
+}
+
+.seekRail:focus-visible {
+  outline: 2px solid var(--color-primary-6);
+  outline-offset: 2px;
+}
+
+.seekRail:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .playbackSegment {

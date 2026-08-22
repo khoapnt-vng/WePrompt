@@ -47,6 +47,12 @@ export type CutPlaybackSequence = {
   segments: CutPlaybackSegment[];
 };
 
+export type CutPlaybackLocation = {
+  segmentIndex: number;
+  positionSeconds: number;
+  sourceTimeSeconds: number | null;
+};
+
 const safeId = (value: unknown): value is string => typeof value === 'string' && SAFE_STUDIO_ID.test(value);
 
 const finiteSafeNonnegative = (value: unknown): value is number =>
@@ -296,4 +302,40 @@ export const formatCutPlaybackClock = (seconds: number, maximumSeconds: number):
   const whole = Math.floor(Math.min(maximumSeconds, Math.max(0, seconds)));
   const minutes = Math.floor(whole / 60);
   return `${minutes}:${String(whole - minutes * 60).padStart(2, '0')}`;
+};
+
+/** Resolves one film position against the exact sequence; Beat/Shot selection is never involved. */
+export const resolveCutPlaybackLocation = (
+  sequence: CutPlaybackSequence,
+  requestedSeconds: number
+): CutPlaybackLocation | null => {
+  if (!Number.isFinite(requestedSeconds) || sequence.segments.length === 0) return null;
+  const positionSeconds = Math.min(sequence.durationSeconds, Math.max(0, requestedSeconds));
+  const segmentIndex =
+    positionSeconds >= sequence.durationSeconds
+      ? sequence.segments.length - 1
+      : sequence.segments.findIndex((segment) => positionSeconds < segment.filmEndSeconds);
+  const segment = sequence.segments[segmentIndex];
+  if (segment === undefined) return null;
+  return {
+    segmentIndex,
+    positionSeconds,
+    sourceTimeSeconds:
+      segment.kind === 'video'
+        ? Math.min(
+            segment.sourceOutSeconds,
+            segment.sourceInSeconds + Math.max(0, positionSeconds - segment.filmStartSeconds)
+          )
+        : null,
+  };
+};
+
+/** Beat joins are the film positions at which the next authored Beat begins. */
+export const cutPlaybackBeatJoins = (sequence: CutPlaybackSequence): number[] => {
+  const joins: number[] = [];
+  for (let index = 1; index < sequence.segments.length; index += 1) {
+    const segment = sequence.segments[index]!;
+    if (segment.beatId !== sequence.segments[index - 1]!.beatId) joins.push(segment.filmStartSeconds);
+  }
+  return joins;
 };

@@ -921,11 +921,24 @@
           "pause": "Filmi duraklat",
           "position": "{{current}} / {{total}}",
           "pictureOnly": "Yalnızca görüntü — ses parçası burada sessize alınır",
-          "controlsLabel": "Film oynatma kontrolleri"
+          "controlsLabel": "Film oynatma kontrolleri",
+          "seekLabel": "Film arama rayı",
+          "previousJoin": "Önceki birleşim",
+          "nextJoin": "Sonraki birleşim",
+          "loopJoin": "Birleşimi döngüye al",
+          "buffering": "Önizleme karesi yükleniyor"
         },
         "film": {
           "under": "{{clock}} altında",
           "over": "{{clock}} üzerinde"
+        },
+        "openBeat": "Beat'i aç",
+        "bed": {
+          "silentPreview": "Önizlemede sessiz · dışa aktarmada uygulanır",
+          "extent": "0:00'dan · {{seconds}} sn kapsam"
+        },
+        "slate": {
+          "openBeat": "Çekimsiz Beat'i aç"
         }
       },
       "beatPanel": {
@@ -955,7 +968,28 @@
         },
         "coverage": {
           "trimGuidance": "Kenar · Kırpma · Ücretsiz",
-          "boundaryGuidance": "Sınır · Yeniden oluşturma gerektirir"
+          "boundaryGuidance": "Sınır · Yeniden oluşturma gerektirir",
+          "seekGuidance": "Ray · Arama · Ücretsiz",
+          "seekLane": "Beat arama rayı",
+          "seekValue": "{{total}} içinde {{current}}"
+        },
+        "preview": {
+          "label": "Beat önizlemesi",
+          "noMedia": "Beat önizlemesi kullanılamıyor",
+          "mediaError": "Seçili çekimin önizlemesi gösterilemedi.",
+          "videoLabel": "Çekim {{position}} videosu · {{line}}",
+          "slateLabel": "Çekim {{position}} planlama slaytı · {{line}}",
+          "slate": "Planlama slaytı",
+          "slateHold": "{{clock}} boyunca tut",
+          "play": "Beat'i oynat",
+          "pause": "Beat'i duraklat",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "Yalnızca görüntü",
+          "controlsLabel": "Beat oynatma kontrolleri",
+          "previousJoin": "Önceki birleşim",
+          "nextJoin": "Sonraki birleşim",
+          "loopJoin": "En yakın birleşimi döngüye al",
+          "keyboardGuidance": "Boşluk oynatır · Oklar arar · [ ] birleşimler · L döngü"
         }
       },
       "controls": {

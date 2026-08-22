@@ -214,6 +214,22 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.coverage.unavailable': 'Coverage unavailable',
         'conversation.creativeStudio.workspace.beatPanel.coverage.playbackLane': 'Playback lane',
         'conversation.creativeStudio.workspace.beatPanel.coverage.planningLane': 'Planning lane',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.seekGuidance': 'Rail · Seek · Free',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.seekLane': 'Beat seek rail',
+        'conversation.creativeStudio.workspace.beatPanel.preview.label': 'Beat preview',
+        'conversation.creativeStudio.workspace.beatPanel.preview.noMedia': 'Beat preview unavailable',
+        'conversation.creativeStudio.workspace.beatPanel.preview.mediaError':
+          'The selected Take could not be previewed.',
+        'conversation.creativeStudio.workspace.beatPanel.preview.slate': 'Planning slate',
+        'conversation.creativeStudio.workspace.beatPanel.preview.play': 'Play Beat',
+        'conversation.creativeStudio.workspace.beatPanel.preview.pause': 'Pause Beat',
+        'conversation.creativeStudio.workspace.beatPanel.preview.pictureOnly': 'Picture only',
+        'conversation.creativeStudio.workspace.beatPanel.preview.controlsLabel': 'Beat transport',
+        'conversation.creativeStudio.workspace.beatPanel.preview.previousJoin': 'Previous join',
+        'conversation.creativeStudio.workspace.beatPanel.preview.nextJoin': 'Next join',
+        'conversation.creativeStudio.workspace.beatPanel.preview.loopJoin': 'Loop nearest join',
+        'conversation.creativeStudio.workspace.beatPanel.preview.keyboardGuidance':
+          'Space play · Arrows seek · [ ] joins · L loop',
         'conversation.creativeStudio.workspace.beatPanel.fieldGuidance.action': 'Action · The one thing you write',
         'conversation.creativeStudio.workspace.beatPanel.fieldGuidance.look': 'Look · Every Shot inherits it',
       };
@@ -247,6 +263,17 @@ vi.mock('react-i18next', () => ({
       }
       if (key.endsWith('.takes.previewAlt')) return `Preview ${String(values?.label)}`;
       if (key.endsWith('.takes.videoPreview')) return `Player ${String(values?.label)}`;
+      if (key.endsWith('.preview.position')) return `${String(values?.current)} / ${String(values?.total)}`;
+      if (key.endsWith('.preview.videoLabel')) {
+        return `Shot ${String(values?.position)} video · ${String(values?.line)}`;
+      }
+      if (key.endsWith('.preview.slateLabel')) {
+        return `Shot ${String(values?.position)} planning slate · ${String(values?.line)}`;
+      }
+      if (key.endsWith('.preview.slateHold')) return `Hold ${String(values?.clock)}`;
+      if (key.endsWith('.coverage.seekValue')) {
+        return `${String(values?.current)} of ${String(values?.total)}`;
+      }
       if (key.endsWith('.takes.sourceDuration')) return `${String(values?.seconds)} seconds source`;
       if (key.endsWith('.generation.choiceLabel')) {
         return `Beat ${String(values?.beatIndex)} Shot ${String(values?.shotIndex)} ${String(values?.purpose)}`;
@@ -282,7 +309,12 @@ vi.mock('react-i18next', () => ({
 }));
 
 import {
+  BeatPlayer,
   BeatPanel,
+  beatPlaybackJoins,
+  buildBeatPlaybackSequence,
+  formatBeatPlaybackClock,
+  resolveBeatPlaybackLocation,
   type BeatPanelActions,
   type BeatPanelProps,
   type BeatPanelReviewGraph,
@@ -578,6 +610,555 @@ const cssRuleBody = (source: string, selector: string): string => {
   return new RegExp(`(?:^|\\n)\\s*${escaped}\\s*\\{([^}]*)\\}`).exec(source)?.[1] ?? '';
 };
 
+const previewVideo = (): HTMLVideoElement => {
+  const video = document.querySelector<HTMLVideoElement>('[data-beat-preview-media][data-media-kind="video"]');
+  if (video === null) throw new Error('Expected Beat preview video');
+  return video;
+};
+
+const installMediaFacts = (
+  video: HTMLVideoElement,
+  input: { currentTime?: number; duration?: number; seeking?: boolean } = {}
+) => {
+  let currentTime = input.currentTime ?? 0;
+  let seeking = input.seeking ?? false;
+  Object.defineProperty(video, 'duration', { configurable: true, value: input.duration ?? 10 });
+  Object.defineProperty(video, 'currentTime', {
+    configurable: true,
+    get: () => currentTime,
+    set: (value: number) => {
+      currentTime = value;
+    },
+  });
+  Object.defineProperty(video, 'seeking', { configurable: true, get: () => seeking });
+  return {
+    currentTime: () => currentTime,
+    setCurrentTime: (value: number) => {
+      currentTime = value;
+    },
+    setSeeking: (value: boolean) => {
+      seeking = value;
+    },
+  };
+};
+
+describe('Beat playback sequence', () => {
+  it('maps one exact selected Take and one explicit no-Take slate onto the Beat clock', () => {
+    const selected = makeTake('take_1', 'video', {
+      selected: true,
+      posterAssetId: 'poster_1',
+      sourceDurationSeconds: 10,
+    });
+    const first = makeShot('shot_1', 0, {
+      playedDurationSeconds: 8,
+      selectedTakeId: 'take_1',
+      selectedTakeSourceDurationSeconds: 10,
+      trimInSeconds: 1,
+      trimOutSeconds: 1,
+      videoTakes: [selected],
+    });
+    const second = makeShot('shot_2', 1, {
+      durationSeconds: 6,
+      playedDurationSeconds: 6,
+      planningBoundary: { shotId: 'shot_2', startSeconds: 8, endSeconds: 14 },
+    });
+    const beat = makeBeat('beat_1', [first, second], { actualSeconds: 14 });
+
+    expect(buildBeatPlaybackSequence('project_1', beat, makeProjection([beat]))).toEqual({
+      projectId: 'project_1',
+      projectRevision: 3,
+      beatId: 'beat_1',
+      durationSeconds: 14,
+      segments: [
+        {
+          kind: 'video',
+          shotId: 'shot_1',
+          shotPosition: 1,
+          shotLine: 'Canonical line 1',
+          assetId: 'take_1',
+          posterAssetId: 'poster_1',
+          sourceDurationSeconds: 10,
+          sourceInSeconds: 1,
+          sourceOutSeconds: 9,
+          durationSeconds: 8,
+          beatStartSeconds: 0,
+          beatEndSeconds: 8,
+        },
+        {
+          kind: 'slate',
+          shotId: 'shot_2',
+          shotPosition: 2,
+          shotLine: 'Canonical line 2',
+          durationSeconds: 6,
+          beatStartSeconds: 8,
+          beatEndSeconds: 14,
+        },
+      ],
+    });
+  });
+
+  it('fails the whole preview closed instead of degrading malformed selected authority to a slate', () => {
+    const shot = makeShot('shot_1', 0, {
+      selectedTakeId: 'take_1',
+      selectedTakeSourceDurationSeconds: 8,
+      videoTakes: [makeTake('take_1', 'video', { selected: false })],
+    });
+    const beat = makeBeat('beat_1', [shot]);
+
+    expect(buildBeatPlaybackSequence('project_1', beat, makeProjection([beat]))).toBeNull();
+  });
+
+  it('maps Beat seeks to trim-relative source time and exposes only authored Shot joins', () => {
+    const selected = makeTake('take_1', 'video', { selected: true, sourceDurationSeconds: 10 });
+    const first = makeShot('shot_1', 0, {
+      playedDurationSeconds: 8,
+      selectedTakeId: 'take_1',
+      selectedTakeSourceDurationSeconds: 10,
+      trimInSeconds: 1,
+      trimOutSeconds: 1,
+      videoTakes: [selected],
+    });
+    const second = makeShot('shot_2', 1);
+    const beat = makeBeat('beat_1', [first, second]);
+    const sequence = buildBeatPlaybackSequence('project_1', beat, makeProjection([beat]))!;
+
+    expect(resolveBeatPlaybackLocation(sequence, 6.5)).toEqual({
+      segmentIndex: 0,
+      positionSeconds: 6.5,
+      sourceTimeSeconds: 7.5,
+    });
+    expect(resolveBeatPlaybackLocation(sequence, 8)).toEqual({
+      segmentIndex: 1,
+      positionSeconds: 8,
+      sourceTimeSeconds: null,
+    });
+    expect(beatPlaybackJoins(sequence)).toEqual([8]);
+    expect(formatBeatPlaybackClock(65.9, 80)).toBe('1:05');
+  });
+
+  it('rejects duplicate active Shot identity and non-boolean slate selection authority', () => {
+    const first = makeBeat('beat_1', [makeShot('shot_duplicate', 0)]);
+    const second = makeBeat('beat_2', [makeShot('shot_duplicate', 0)]);
+    expect(buildBeatPlaybackSequence('project_1', first, makeProjection([first, second]))).toBeNull();
+
+    const malformedSlate = makeShot('shot_1', 0, {
+      imageTakes: [makeTake('image_1', 'image', { selected: 0 as unknown as boolean })],
+    });
+    const beat = makeBeat('beat_1', [malformedSlate]);
+    expect(buildBeatPlaybackSequence('project_1', beat, makeProjection([beat]))).toBeNull();
+
+    const selected = makeTake('take_1', 'video', { selected: true });
+    const invalidPlan = makeShot('shot_1', 0, {
+      durationSeconds: 2,
+      planningBoundary: { shotId: 'shot_1', startSeconds: 0, endSeconds: 2 },
+      selectedTakeId: 'take_1',
+      selectedTakeSourceDurationSeconds: 8,
+      videoTakes: [selected],
+    });
+    const invalidPlanBeat = makeBeat('beat_1', [invalidPlan], { actualSeconds: 8 });
+    expect(buildBeatPlaybackSequence('project_1', invalidPlanBeat, makeProjection([invalidPlanBeat]))).toBeNull();
+  });
+});
+
+describe('BeatPlayer', () => {
+  const playableBeat = (): WorkspaceBeatProjection => {
+    const selected = makeTake('take_1', 'video', {
+      selected: true,
+      posterAssetId: 'poster_1',
+      sourceDurationSeconds: 10,
+    });
+    return makeBeat(
+      'beat_1',
+      [
+        makeShot('shot_1', 0, {
+          playedDurationSeconds: 8,
+          selectedTakeId: 'take_1',
+          selectedTakeSourceDurationSeconds: 10,
+          trimInSeconds: 1,
+          trimOutSeconds: 1,
+          videoTakes: [selected],
+        }),
+        makeShot('shot_2', 1, {
+          durationSeconds: 6,
+          playedDurationSeconds: 6,
+          planningBoundary: { shotId: 'shot_2', startSeconds: 8, endSeconds: 14 },
+        }),
+      ],
+      { actualSeconds: 14 }
+    );
+  };
+
+  it('plays only the exact selected trim, shows its poster during seek, and crosses into the planned slate', () => {
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    const beat = playableBeat();
+    const projection = makeProjection([beat]);
+    const result = render(
+      <BeatPlayer beat={beat} projectId='project_1' projection={projection}>
+        {(playback) => <output data-testid='beat-position'>{playback.positionSeconds}</output>}
+      </BeatPlayer>
+    );
+
+    const initial = screen.getByRole('region', { name: 'Beat preview' }).querySelector<HTMLVideoElement>('video')!;
+    expect(initial).toHaveAttribute('src', 'weprompt-studio://asset/project_1/take_1');
+    expect(initial).toHaveAttribute('poster', 'weprompt-studio://asset/project_1/poster_1');
+    expect(initial).toHaveProperty('muted', true);
+    expect(initial).toHaveProperty('controls', false);
+    expect(screen.getByRole('timer')).toHaveTextContent('0:00 / 0:14');
+
+    let currentTime = 0;
+    Object.defineProperty(initial, 'duration', { configurable: true, value: 10 });
+    Object.defineProperty(initial, 'currentTime', {
+      configurable: true,
+      get: () => currentTime,
+      set: (value: number) => {
+        currentTime = value;
+      },
+    });
+    fireEvent.loadedMetadata(initial);
+    expect(currentTime).toBe(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play Beat' }));
+    fireEvent.playing(initial);
+    currentTime = 2;
+    fireEvent.timeUpdate(initial);
+    expect(screen.getByTestId('beat-position')).toHaveTextContent('1');
+    fireEvent.waiting(initial);
+    currentTime = 5;
+    fireEvent.click(screen.getByRole('button', { name: 'Pause Beat' }));
+    expect(screen.getByTestId('beat-position')).toHaveTextContent('1');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next join' }));
+    expect(screen.getByTestId('beat-position')).toHaveTextContent('6.5');
+    expect(document.querySelector('[data-beat-seek-poster]')).toHaveAttribute(
+      'src',
+      'weprompt-studio://asset/project_1/poster_1'
+    );
+
+    const sought = screen.getByRole('region', { name: 'Beat preview' }).querySelector<HTMLVideoElement>('video')!;
+    let soughtCurrentTime = 0;
+    Object.defineProperty(sought, 'duration', { configurable: true, value: 10 });
+    Object.defineProperty(sought, 'currentTime', {
+      configurable: true,
+      get: () => soughtCurrentTime,
+      set: (value: number) => {
+        soughtCurrentTime = value;
+      },
+    });
+    fireEvent.loadedMetadata(sought);
+    expect(soughtCurrentTime).toBe(7.5);
+    expect(document.querySelector('[data-beat-seek-poster]')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play Beat' }));
+    fireEvent.playing(sought);
+    soughtCurrentTime = 9;
+    fireEvent.timeUpdate(sought);
+    expect(screen.getByRole('img', { name: /Shot 02 planning slate/ })).toBeInTheDocument();
+    expect(screen.getByTestId('beat-position')).toHaveTextContent('8');
+    expect(play).toHaveBeenCalled();
+
+    result.unmount();
+    pause.mockRestore();
+    play.mockRestore();
+  });
+
+  it('keeps shortcuts scoped, seeks in coarse/fine steps, lands before joins, and arms the ±2 second loop', () => {
+    const beat = makeBeat();
+    const projection = makeProjection([beat]);
+    render(
+      <BeatPlayer beat={beat} projectId='project_1' projection={projection}>
+        {(playback) => (
+          <>
+            <input aria-label='Nested editor' />
+            <button aria-label='Nested slider' role='slider' type='button' />
+            <button onClick={() => playback.onSeek(0)} type='button'>
+              Reset position
+            </button>
+            <output data-position={playback.positionSeconds} data-testid='keyboard-position' />
+          </>
+        )}
+      </BeatPlayer>
+    );
+    const player = document.querySelector<HTMLElement>('[data-beat-player]')!;
+
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Nested editor' }), { key: ' ' });
+    fireEvent.keyDown(screen.getByRole('slider', { name: 'Nested slider' }), { key: ' ' });
+    expect(screen.getByRole('button', { name: 'Play Beat' })).toBeInTheDocument();
+
+    fireEvent.keyDown(player, { code: 'Space', key: ' ' });
+    expect(screen.getByRole('button', { name: 'Pause Beat' })).toBeInTheDocument();
+    fireEvent.keyDown(player, { code: 'Space', key: ' ' });
+    fireEvent.click(screen.getByRole('button', { name: 'Reset position' }));
+
+    fireEvent.keyDown(player, { key: 'ArrowRight' });
+    expect(screen.getByTestId('keyboard-position')).toHaveAttribute('data-position', '1');
+    fireEvent.keyDown(player, { key: 'ArrowRight', shiftKey: true });
+    expect(screen.getByTestId('keyboard-position')).toHaveAttribute('data-position', '1.2');
+    fireEvent.keyDown(player, { code: 'BracketRight', key: ']' });
+    expect(screen.getByTestId('keyboard-position')).toHaveAttribute('data-position', '6.5');
+    fireEvent.keyDown(player, { key: 'l' });
+    expect(screen.getByTestId('keyboard-position')).toHaveAttribute('data-position', '6');
+    expect(screen.getByRole('button', { name: 'Loop nearest join' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('loops the exact four-second join window across adjacent slate segments', () => {
+    vi.useFakeTimers();
+    try {
+      const beat = makeBeat();
+      render(
+        <BeatPlayer beat={beat} projectId='project_1' projection={makeProjection([beat])}>
+          {(playback) => <output data-position={playback.positionSeconds} data-testid='loop-position' />}
+        </BeatPlayer>
+      );
+      const player = document.querySelector<HTMLElement>('[data-beat-player]')!;
+      fireEvent.keyDown(player, { key: 'l' });
+      expect(screen.getByTestId('loop-position')).toHaveAttribute('data-position', '6');
+      fireEvent.click(screen.getByRole('button', { name: 'Play Beat' }));
+
+      act(() => vi.advanceTimersByTime(2_000));
+      expect(Number(screen.getByTestId('loop-position').getAttribute('data-position'))).toBeGreaterThanOrEqual(8);
+      act(() => vi.advanceTimersByTime(2_000));
+      expect(screen.getByTestId('loop-position')).toHaveAttribute('data-position', '6');
+      expect(screen.getByRole('button', { name: 'Loop nearest join' })).toHaveAttribute('aria-pressed', 'true');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('restarts the active slate clock after a same-segment keyboard seek', () => {
+    vi.useFakeTimers();
+    try {
+      const beat = makeBeat('beat_1', [makeShot('shot_1', 0)]);
+      render(
+        <BeatPlayer beat={beat} projectId='project_1' projection={makeProjection([beat])}>
+          {(playback) => <output data-position={playback.positionSeconds} data-testid='slate-seek-position' />}
+        </BeatPlayer>
+      );
+      const player = document.querySelector<HTMLElement>('[data-beat-player]')!;
+      fireEvent.click(screen.getByRole('button', { name: 'Play Beat' }));
+      act(() => vi.advanceTimersByTime(1_000));
+      expect(screen.getByTestId('slate-seek-position')).toHaveAttribute('data-position', '1');
+
+      fireEvent.keyDown(player, { key: 'ArrowRight' });
+      expect(screen.getByTestId('slate-seek-position')).toHaveAttribute('data-position', '2');
+      act(() => vi.advanceTimersByTime(1_000));
+      expect(screen.getByTestId('slate-seek-position')).toHaveAttribute('data-position', '3');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('resets on Beat/revision/order identity and ignores events from the detached video', () => {
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+    const first = playableBeat();
+    const result = render(
+      <BeatPlayer beat={first} projectId='project_1' projection={makeProjection([first])}>
+        {(playback) => <output data-testid='reset-position'>{playback.positionSeconds}</output>}
+      </BeatPlayer>
+    );
+    const staleVideo = document.querySelector<HTMLVideoElement>('[data-beat-preview-media][data-media-kind="video"]')!;
+
+    const replacement = makeBeat('beat_2', [makeShot('shot_new', 0)]);
+    result.rerender(
+      <BeatPlayer beat={replacement} projectId='project_1' projection={makeProjection([replacement])}>
+        {(playback) => <output data-testid='reset-position'>{playback.positionSeconds}</output>}
+      </BeatPlayer>
+    );
+    expect(screen.getByTestId('reset-position')).toHaveTextContent('0');
+    expect(document.querySelector('[data-beat-preview-media][data-media-kind="slate"]')).toBeInTheDocument();
+    fireEvent.error(staleVideo);
+    expect(screen.queryByText('The selected Take could not be previewed.')).toBeNull();
+    pause.mockRestore();
+  });
+
+  it('fails malformed selected authority closed instead of silently showing a planning slate', () => {
+    const shot = makeShot('shot_1', 0, {
+      selectedTakeId: 'take_1',
+      selectedTakeSourceDurationSeconds: 8,
+      videoTakes: [makeTake('take_1', 'video', { selected: false })],
+    });
+    const beat = makeBeat('beat_1', [shot]);
+    render(
+      <BeatPlayer beat={beat} projectId='project_1' projection={makeProjection([beat])}>
+        {(playback) => <output data-available={playback.available} data-testid='malformed-available' />}
+      </BeatPlayer>
+    );
+
+    expect(document.querySelector('[data-beat-preview-media][data-media-kind="empty"]')).toHaveTextContent(
+      'Beat preview unavailable'
+    );
+    expect(screen.getByRole('button', { name: 'Play Beat' })).toBeDisabled();
+    expect(screen.getByTestId('malformed-available')).toHaveAttribute('data-available', 'false');
+  });
+
+  it('completes an asynchronous trim seek, watches exact frames, cancels on waiting, and contains play rejection', async () => {
+    let rejectPlay: ((reason?: unknown) => void) | null = null;
+    const playRequest = new Promise<void>((_resolve, reject) => {
+      rejectPlay = reject;
+    });
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockReturnValue(playRequest);
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+    const beat = playableBeat();
+    const result = render(
+      <BeatPlayer beat={beat} projectId='project_1' projection={makeProjection([beat])}>
+        {(playback) => <output data-position={playback.positionSeconds} data-testid='async-seek-position' />}
+      </BeatPlayer>
+    );
+    const video = previewVideo();
+    const media = installMediaFacts(video, { seeking: true });
+    let frameCallback: Parameters<HTMLVideoElement['requestVideoFrameCallback']>[0] | null = null;
+    const requestVideoFrameCallback = vi.fn(
+      (callback: Parameters<HTMLVideoElement['requestVideoFrameCallback']>[0]) => {
+        frameCallback = callback;
+        return requestVideoFrameCallback.mock.calls.length;
+      }
+    );
+    const cancelVideoFrameCallback = vi.fn();
+    Object.assign(video, { cancelVideoFrameCallback, requestVideoFrameCallback });
+
+    fireEvent.loadedMetadata(video);
+    expect(media.currentTime()).toBe(1);
+    expect(document.querySelector('[data-beat-seek-poster]')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Play Beat' }));
+    fireEvent.seeked(video);
+    expect(play).not.toHaveBeenCalled();
+
+    media.setSeeking(false);
+    fireEvent.seeked(video);
+    expect(play).toHaveBeenCalledTimes(1);
+    fireEvent.playing(video);
+    expect(requestVideoFrameCallback).toHaveBeenCalledTimes(1);
+    act(() => frameCallback?.(0, { mediaTime: 2 } as VideoFrameCallbackMetadata));
+    expect(screen.getByTestId('async-seek-position')).toHaveAttribute('data-position', '1');
+    expect(requestVideoFrameCallback).toHaveBeenCalledTimes(2);
+
+    fireEvent.rateChange(video);
+    expect(cancelVideoFrameCallback).toHaveBeenCalled();
+    fireEvent.waiting(video);
+    const frozenPosition = screen.getByTestId('async-seek-position').getAttribute('data-position');
+    media.setCurrentTime(5);
+    fireEvent.timeUpdate(video);
+    expect(screen.getByTestId('async-seek-position')).toHaveAttribute('data-position', frozenPosition!);
+
+    await act(async () => {
+      rejectPlay?.(new Error('decoder refused playback'));
+      await playRequest.catch(() => undefined);
+    });
+    expect(screen.getByText('The selected Take could not be previewed.')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Play Beat' })).toBeDisabled();
+
+    result.unmount();
+    pause.mockRestore();
+    play.mockRestore();
+  });
+
+  it('fails a premature native end and accepts an exact trim-out as terminal completion', () => {
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    const beat = makeBeat('beat_1', [playableBeat().shots[0]!], { actualSeconds: 8, targetSeconds: 8 });
+    const first = render(
+      <BeatPlayer beat={beat} projectId='project_1' projection={makeProjection([beat])}>
+        {(playback) => <output data-position={playback.positionSeconds} data-testid='ended-position' />}
+      </BeatPlayer>
+    );
+    const earlyVideo = previewVideo();
+    const early = installMediaFacts(earlyVideo);
+    fireEvent.loadedMetadata(earlyVideo);
+    fireEvent.click(screen.getByRole('button', { name: 'Play Beat' }));
+    early.setCurrentTime(5);
+    fireEvent.ended(earlyVideo);
+    expect(screen.getByText('The selected Take could not be previewed.')).toBeVisible();
+    first.unmount();
+
+    const exactResult = render(
+      <BeatPlayer beat={beat} projectId='project_1' projection={makeProjection([beat])}>
+        {(playback) => <output data-position={playback.positionSeconds} data-testid='ended-position' />}
+      </BeatPlayer>
+    );
+    const exactVideo = previewVideo();
+    const exact = installMediaFacts(exactVideo);
+    fireEvent.loadedMetadata(exactVideo);
+    fireEvent.click(screen.getByRole('button', { name: 'Play Beat' }));
+    exact.setCurrentTime(9);
+    fireEvent.ended(exactVideo);
+    expect(screen.getByTestId('ended-position')).toHaveAttribute('data-position', '8');
+    expect(screen.getByRole('button', { name: 'Play Beat' })).toBeEnabled();
+
+    exactResult.unmount();
+    pause.mockRestore();
+    play.mockRestore();
+  });
+
+  it('restarts from the end, navigates joins both ways, toggles looping off, and ignores modified keys', () => {
+    const beat = makeBeat('beat_1', [makeShot('shot_1', 0), makeShot('shot_2', 1), makeShot('shot_3', 2)]);
+    const result = render(
+      <BeatPlayer beat={beat} projectId='project_1' projection={makeProjection([beat])}>
+        {(playback) => (
+          <>
+            <button onClick={() => playback.onSeek(15)} type='button'>
+              Seek middle
+            </button>
+            <button onClick={() => playback.onSeek(playback.durationSeconds)} type='button'>
+              Seek end
+            </button>
+            <output data-position={playback.positionSeconds} data-testid='join-position' />
+          </>
+        )}
+      </BeatPlayer>
+    );
+    const player = document.querySelector<HTMLElement>('[data-beat-player]')!;
+
+    fireEvent.keyDown(player, { altKey: true, key: 'ArrowRight' });
+    fireEvent.keyDown(player, { ctrlKey: true, key: 'ArrowRight' });
+    fireEvent.keyDown(player, { key: 'Escape' });
+    expect(screen.getByTestId('join-position')).toHaveAttribute('data-position', '0');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Seek middle' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Previous join' }));
+    expect(screen.getByTestId('join-position')).toHaveAttribute('data-position', '6.5');
+    fireEvent.click(screen.getByRole('button', { name: 'Next join' }));
+    expect(screen.getByTestId('join-position')).toHaveAttribute('data-position', '14.5');
+    fireEvent.click(screen.getByRole('button', { name: 'Loop nearest join' }));
+    expect(screen.getByRole('button', { name: 'Loop nearest join' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Loop nearest join' }));
+    expect(screen.getByRole('button', { name: 'Loop nearest join' })).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Seek end' }));
+    expect(screen.getByTestId('join-position')).toHaveAttribute('data-position', '24');
+    fireEvent.click(screen.getByRole('button', { name: 'Play Beat' }));
+    expect(screen.getByTestId('join-position')).toHaveAttribute('data-position', '0');
+    expect(screen.getByRole('button', { name: 'Pause Beat' })).toBeInTheDocument();
+    result.unmount();
+  });
+
+  it('shows the fallback seek cover and contains an active video error', () => {
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+    const selected = makeTake('take_no_poster', 'video', { selected: true, sourceDurationSeconds: 8 });
+    const shot = makeShot('shot_1', 0, {
+      selectedTakeId: selected.assetId,
+      selectedTakeSourceDurationSeconds: 8,
+      videoTakes: [selected],
+    });
+    const beat = makeBeat('beat_1', [shot]);
+    const result = render(
+      <BeatPlayer beat={beat} projectId='project_1' projection={makeProjection([beat])}>
+        {(playback) => (
+          <button onClick={() => playback.onSeek(2)} type='button'>
+            Seek video
+          </button>
+        )}
+      </BeatPlayer>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Seek video' }));
+    expect(document.querySelector('[data-beat-seek-poster]')).toBeInTheDocument();
+    expect(document.querySelector('[data-beat-seek-poster]')).not.toHaveAttribute('src');
+    fireEvent.error(previewVideo());
+    expect(screen.getByText('The selected Take could not be previewed.')).toBeVisible();
+    result.unmount();
+    pause.mockRestore();
+  });
+});
+
 describe('BeatPanel', () => {
   beforeEach(() => {
     vi.stubGlobal('ResizeObserver', NoopResizeObserver);
@@ -831,6 +1412,8 @@ describe('BeatPanel', () => {
       within(shotCard(stale.container, 'shot_1')).getByRole('checkbox', { name: 'Author hard cut' })
     ).toBeDisabled();
     expect(screen.getByRole('slider', { name: 'Boundary after Shot 1' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Play Beat' })).toBeEnabled();
+    expect(screen.getByRole('slider', { name: 'Beat seek rail' })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: 'Review re-split' }));
     expect(actions.requestResplit).not.toHaveBeenCalled();
   });

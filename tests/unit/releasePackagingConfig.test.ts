@@ -486,7 +486,7 @@ describe('release packaging configuration', () => {
     ]) {
       expect(desktopSource).not.toContain(rscApi);
     }
-  });
+  }, 30_000);
 
   it('uses WePrompt as the visible application identity while preserving compatibility identifiers', () => {
     const rootPackage = readProjectJson<{

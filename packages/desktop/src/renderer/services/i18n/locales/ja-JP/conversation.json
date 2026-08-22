@@ -917,11 +917,24 @@
           "pause": "フィルムを一時停止",
           "position": "{{current}} / {{total}}",
           "pictureOnly": "映像のみ — ここではオーディオベッドはミュートされています",
-          "controlsLabel": "フィルム再生コントロール"
+          "controlsLabel": "フィルム再生コントロール",
+          "seekLabel": "フィルムシークレール",
+          "previousJoin": "前のつなぎ目",
+          "nextJoin": "次のつなぎ目",
+          "loopJoin": "つなぎ目をループ",
+          "buffering": "プレビュー画面を読み込み中"
         },
         "film": {
           "under": "{{clock}} 短い",
           "over": "{{clock}} 超過"
+        },
+        "openBeat": "ビートを開く",
+        "bed": {
+          "silentPreview": "プレビューでは無音 · 書き出し時に適用",
+          "extent": "0:00から · 長さ{{seconds}}秒"
+        },
+        "slate": {
+          "openBeat": "カバレッジのないビートを開く"
         }
       },
       "beatPanel": {
@@ -951,7 +964,28 @@
         },
         "coverage": {
           "trimGuidance": "エッジ · トリミング · 無料",
-          "boundaryGuidance": "境界 · 再レンダリングが必要"
+          "boundaryGuidance": "境界 · 再レンダリングが必要",
+          "seekGuidance": "レール · シーク · 無料",
+          "seekLane": "ビートシークレール",
+          "seekValue": "{{total}} 中 {{current}}"
+        },
+        "preview": {
+          "label": "ビートプレビュー",
+          "noMedia": "ビートプレビューは利用できません",
+          "mediaError": "選択したテイクをプレビューできませんでした。",
+          "videoLabel": "ショット{{position}}の映像 · {{line}}",
+          "slateLabel": "ショット{{position}}の計画スレート · {{line}}",
+          "slate": "計画スレート",
+          "slateHold": "{{clock}}保持",
+          "play": "ビートを再生",
+          "pause": "ビートを一時停止",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "映像のみ",
+          "controlsLabel": "ビート再生コントロール",
+          "previousJoin": "前のつなぎ目",
+          "nextJoin": "次のつなぎ目",
+          "loopJoin": "最寄りのつなぎ目をループ",
+          "keyboardGuidance": "スペースで再生 · 矢印でシーク · [ ] でつなぎ目 · L でループ"
         }
       },
       "controls": {

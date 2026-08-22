@@ -917,11 +917,24 @@
           "pause": "필름 일시 정지",
           "position": "{{current}} / {{total}}",
           "pictureOnly": "영상만 — 여기에서는 오디오 베드가 음소거됩니다",
-          "controlsLabel": "필름 재생 컨트롤"
+          "controlsLabel": "필름 재생 컨트롤",
+          "seekLabel": "필름 탐색 레일",
+          "previousJoin": "이전 연결점",
+          "nextJoin": "다음 연결점",
+          "loopJoin": "연결점 반복",
+          "buffering": "미리보기 프레임 불러오는 중"
         },
         "film": {
           "under": "{{clock}} 미달",
           "over": "{{clock}} 초과"
+        },
+        "openBeat": "비트 열기",
+        "bed": {
+          "silentPreview": "미리보기에서는 음소거 · 내보낼 때 적용",
+          "extent": "0:00부터 · 범위 {{seconds}}초"
+        },
+        "slate": {
+          "openBeat": "커버리지 없는 비트 열기"
         }
       },
       "beatPanel": {
@@ -951,7 +964,28 @@
         },
         "coverage": {
           "trimGuidance": "가장자리 · 트리밍 · 무료",
-          "boundaryGuidance": "경계 · 다시 렌더링해야 함"
+          "boundaryGuidance": "경계 · 다시 렌더링해야 함",
+          "seekGuidance": "레일 · 탐색 · 무료",
+          "seekLane": "비트 탐색 레일",
+          "seekValue": "{{total}} 중 {{current}}"
+        },
+        "preview": {
+          "label": "비트 미리보기",
+          "noMedia": "비트 미리보기를 사용할 수 없음",
+          "mediaError": "선택한 테이크를 미리 볼 수 없습니다.",
+          "videoLabel": "숏 {{position}} 영상 · {{line}}",
+          "slateLabel": "숏 {{position}} 계획 슬레이트 · {{line}}",
+          "slate": "계획 슬레이트",
+          "slateHold": "{{clock}} 동안 유지",
+          "play": "비트 재생",
+          "pause": "비트 일시 정지",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "영상만",
+          "controlsLabel": "비트 재생 컨트롤",
+          "previousJoin": "이전 연결점",
+          "nextJoin": "다음 연결점",
+          "loopJoin": "가장 가까운 연결점 반복",
+          "keyboardGuidance": "스페이스바 재생 · 화살표 탐색 · [ ] 연결점 · L 반복"
         }
       },
       "controls": {

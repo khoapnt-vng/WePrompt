@@ -27,6 +27,7 @@ import type {
   WorkspaceTakeProjection,
 } from '../workspaceProjection';
 import styles from './BeatPanel.module.css';
+import { BeatPlayer } from './BeatPlayer';
 import { CoverageBar } from './CoverageBar';
 import { COVERAGE_MIN_PLAYED_SECONDS, type CoveragePlanningPairChange } from './coverageGeometry';
 
@@ -1476,12 +1477,17 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
           </div>
         </section>
 
-        <CoverageBar
-          disabled={coverageDisabled}
-          onCommitPlanningDurations={commitPlanningDurations}
-          onCommitTrim={commitTrim}
-          shots={beat.shots}
-        />
+        <BeatPlayer beat={beat} projectId={projectId} projection={projection}>
+          {(playback) => (
+            <CoverageBar
+              disabled={coverageDisabled}
+              onCommitPlanningDurations={commitPlanningDurations}
+              onCommitTrim={commitTrim}
+              playback={playback}
+              shots={beat.shots}
+            />
+          )}
+        </BeatPlayer>
 
         {reviewBlockedMessageKey !== null || gateLocked ? (
           <p className={styles.warning} role='status'>
@@ -1566,13 +1572,18 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
 };
 
 export { CoverageBar } from './CoverageBar';
-export type { CoverageBarProps } from './CoverageBar';
+export type { CoverageBarProps, CoveragePlayback } from './CoverageBar';
+export { BeatPlayer } from './BeatPlayer';
+export type { BeatPlaybackControl, BeatPlayerProps } from './BeatPlayer';
 export {
   buildCoverageGeometry,
   clampCoverageTrim,
   coverageDensityForWidth,
   coveragePlanningPairBounds,
   coveragePointerDeltaSeconds,
+  coveragePointerPositionSeconds,
+  coverageSeekLaneRatio,
+  coverageSeekPositionSeconds,
   maximumCoverageTrim,
   resizeCoveragePlanningPair,
 } from './coverageGeometry';
@@ -1584,3 +1595,16 @@ export type {
   CoveragePlanningPairChange,
   CoverageSegmentGeometry,
 } from './coverageGeometry';
+export {
+  beatPlaybackJoins,
+  buildBeatPlaybackSequence,
+  formatBeatPlaybackClock,
+  resolveBeatPlaybackLocation,
+} from './beatPlaybackSequence';
+export type {
+  BeatPlaybackLocation,
+  BeatPlaybackSegment,
+  BeatPlaybackSequence,
+  BeatPlaybackSlateSegment,
+  BeatPlaybackVideoSegment,
+} from './beatPlaybackSequence';

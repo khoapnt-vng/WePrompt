@@ -5,14 +5,25 @@
  */
 
 import { Button } from '@arco-design/web-react';
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
 import type { WorkspaceProjection } from '../../workspaceProjection';
 import {
   buildCutPlaybackSequence,
+  cutPlaybackBeatJoins,
   formatCutPlaybackClock,
+  resolveCutPlaybackLocation,
   type CutPlaybackSegment,
   type CutPlaybackSequence,
   type CutPlaybackVideoSegment,
@@ -25,9 +36,50 @@ const MEDIA_DURATION_EPSILON_SECONDS = 0.001;
 const SLATE_CLOCK_INTERVAL_MS = 100;
 
 export type CutPlayerProps = {
+  onNavigationChange?: (navigation: CutPlaybackNavigation) => void;
   pending: boolean;
   projectId: string;
   projection: WorkspaceProjection;
+};
+
+export type CutPlaybackNavigation = {
+  available: boolean;
+  beatId: string | null;
+  beatPosition: number | null;
+  beatTitle: string | null;
+  buffering: boolean;
+  canStepNextJoin: boolean;
+  canStepPreviousJoin: boolean;
+  durationSeconds: number;
+  failed: boolean;
+  joinCount: number;
+  loopJoinIndex: number | null;
+  playing: boolean;
+  positionSeconds: number;
+};
+
+export type CutPlayerHandle = {
+  nudge: (deltaSeconds: number) => void;
+  seek: (positionSeconds: number) => void;
+  stepJoin: (direction: -1 | 1) => void;
+  toggleJoinLoop: () => void;
+  togglePlayback: () => void;
+};
+
+export const EMPTY_CUT_PLAYBACK_NAVIGATION: CutPlaybackNavigation = {
+  available: false,
+  beatId: null,
+  beatPosition: null,
+  beatTitle: null,
+  buffering: false,
+  canStepNextJoin: false,
+  canStepPreviousJoin: false,
+  durationSeconds: 0,
+  failed: false,
+  joinCount: 0,
+  loopJoinIndex: null,
+  playing: false,
+  positionSeconds: 0,
 };
 
 type TransportState = {
@@ -38,6 +90,8 @@ type TransportState = {
   playing: boolean;
   buffering: boolean;
   failed: boolean;
+  loopJoinIndex: number | null;
+  slateEpoch: number;
 };
 
 type ReadyMedia = {
@@ -47,7 +101,7 @@ type ReadyMedia = {
 };
 
 type PendingMediaSeek = ReadyMedia & {
-  sourceInSeconds: number;
+  sourceTimeSeconds: number;
 };
 
 type SlateClock = {
@@ -80,6 +134,8 @@ const initialTransportState = (token: string): TransportState => ({
   playing: false,
   buffering: false,
   failed: false,
+  loopJoinIndex: null,
+  slateEpoch: 0,
 });
 
 const pauseMedia = (media: HTMLMediaElement | null): void => {
@@ -95,8 +151,25 @@ const paddedPosition = (position: number): string => String(position).padStart(2
 
 const beatTitle = (segment: CutPlaybackSegment): string => segment.beatTitle.trim() || segment.beatId;
 
+const cutJoinLandingIndexes = (
+  joins: readonly number[],
+  positionSeconds: number
+): { next: number | null; previous: number | null } => {
+  let previous: number | null = null;
+  let next: number | null = null;
+  for (let index = 0; index < joins.length; index += 1) {
+    const landingSeconds = Math.max(0, joins[index]! - 1.5);
+    if (landingSeconds < positionSeconds - MEDIA_DURATION_EPSILON_SECONDS) previous = index;
+    else if (next === null && landingSeconds > positionSeconds + MEDIA_DURATION_EPSILON_SECONDS) next = index;
+  }
+  return { next, previous };
+};
+
 /** A truthful picture-only preview of the exact selected-Take/slate sequence. */
-export const CutPlayer: React.FC<CutPlayerProps> = ({ pending, projectId, projection }) => {
+export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function CutPlayer(
+  { onNavigationChange, pending, projectId, projection },
+  ref
+) {
   const { t } = useTranslation();
   const candidate = useMemo(() => buildCutPlaybackSequence(projection), [projection]);
   const sequence = candidate !== null && candidate.projectId === projectId ? candidate : null;
@@ -117,6 +190,7 @@ export const CutPlayer: React.FC<CutPlayerProps> = ({ pending, projectId, projec
   const appliedPlanTokenRef = useRef(planToken);
 
   const segment = sequence?.segments[state.segmentIndex] ?? null;
+  const beatJoins = useMemo(() => (sequence === null ? [] : cutPlaybackBeatJoins(sequence)), [sequence]);
 
   useLayoutEffect(() => {
     activeTokenRef.current = planToken;
@@ -148,6 +222,18 @@ export const CutPlayer: React.FC<CutPlayerProps> = ({ pending, projectId, projec
         if (activeTokenRef.current !== token || previous.token !== token || previous.segmentIndex !== segmentIndex) {
           return previous;
         }
+        const next = update(previous);
+        stateRef.current = next;
+        return next;
+      });
+    },
+    []
+  );
+
+  const replaceCurrentState = useCallback(
+    (token: string, update: (current: TransportState) => TransportState): void => {
+      setStoredState((previous) => {
+        if (activeTokenRef.current !== token || previous.token !== token) return previous;
         const next = update(previous);
         stateRef.current = next;
         return next;
@@ -247,6 +333,58 @@ export const CutPlayer: React.FC<CutPlayerProps> = ({ pending, projectId, projec
     [failMedia, isCurrentMedia]
   );
 
+  const seekTo = useCallback(
+    (requestedSeconds: number, loopJoinIndex?: number | null): void => {
+      const currentSequence = sequence;
+      const activeState = stateRef.current;
+      if (
+        currentSequence === null ||
+        pending ||
+        activeState.failed ||
+        activeState.token !== planToken ||
+        activeTokenRef.current !== planToken
+      ) {
+        return;
+      }
+      const location = resolveCutPlaybackLocation(currentSequence, requestedSeconds);
+      if (location === null) return;
+      const target = currentSequence.segments[location.segmentIndex];
+      if (target === undefined) return;
+
+      stopMediaBoundaryWatch();
+      invalidatePlayAttempt();
+      pauseMedia(videoRef.current);
+      playingMediaRef.current = null;
+      readyMediaRef.current = null;
+      pendingMediaSeekRef.current = null;
+      slateClockRef.current = null;
+      replaceCurrentState(planToken, (current) => ({
+        ...current,
+        buffering: target.kind === 'video',
+        loopJoinIndex: loopJoinIndex === undefined ? current.loopJoinIndex : loopJoinIndex,
+        mediaEpoch: current.mediaEpoch + (target.kind === 'video' ? 1 : 0),
+        playing: location.positionSeconds < currentSequence.durationSeconds && current.playing,
+        positionSeconds: location.positionSeconds,
+        segmentIndex: location.segmentIndex,
+        slateEpoch: current.slateEpoch + 1,
+      }));
+    },
+    [invalidatePlayAttempt, pending, planToken, replaceCurrentState, sequence, stopMediaBoundaryWatch]
+  );
+
+  const loopRange = useCallback(
+    (current: TransportState): { endSeconds: number; startSeconds: number } | null => {
+      if (sequence === null || current.loopJoinIndex === null) return null;
+      const join = beatJoins[current.loopJoinIndex];
+      if (join === undefined) return null;
+      return {
+        startSeconds: Math.max(0, join - 2),
+        endSeconds: Math.min(sequence.durationSeconds, join + 2),
+      };
+    },
+    [beatJoins, sequence]
+  );
+
   const advanceSegment = useCallback(
     (token: string, segmentIndex: number, currentSequence: CutPlaybackSequence): void => {
       const activeState = stateRef.current;
@@ -261,8 +399,13 @@ export const CutPlayer: React.FC<CutPlayerProps> = ({ pending, projectId, projec
       }
       stopMediaBoundaryWatch();
       invalidatePlayAttempt();
+      const completed = currentSequence.segments[segmentIndex];
+      const activeLoop = loopRange(activeState);
+      if (completed !== undefined && activeLoop !== null && completed.filmEndSeconds >= activeLoop.endSeconds) {
+        seekTo(activeLoop.startSeconds);
+        return;
+      }
       updateCurrentState(token, segmentIndex, (current) => {
-        const completed = currentSequence.segments[segmentIndex];
         if (completed === undefined) return current;
         const nextIndex = segmentIndex + 1;
         if (nextIndex >= currentSequence.segments.length) {
@@ -283,7 +426,7 @@ export const CutPlayer: React.FC<CutPlayerProps> = ({ pending, projectId, projec
         };
       });
     },
-    [invalidatePlayAttempt, stopMediaBoundaryWatch, updateCurrentState]
+    [invalidatePlayAttempt, loopRange, seekTo, stopMediaBoundaryWatch, updateCurrentState]
   );
 
   const startMediaBoundaryWatch = useCallback(
@@ -352,17 +495,21 @@ export const CutPlayer: React.FC<CutPlayerProps> = ({ pending, projectId, projec
         }
         const segmentProgress = Math.max(0, observedTime - videoSegment.sourceInSeconds);
         const nextPosition = Math.min(videoSegment.filmEndSeconds, videoSegment.filmStartSeconds + segmentProgress);
-        updateCurrentState(token, segmentIndex, (latest) =>
-          Math.floor(latest.positionSeconds) === Math.floor(nextPosition)
-            ? latest
-            : { ...latest, positionSeconds: nextPosition }
-        );
+        const activeLoop = loopRange(current);
+        if (activeLoop !== null && nextPosition >= activeLoop.endSeconds) {
+          stopMediaBoundaryWatch();
+          pauseMedia(media);
+          if (playingMediaRef.current === media) playingMediaRef.current = null;
+          seekTo(activeLoop.startSeconds);
+          return;
+        }
+        updateCurrentState(token, segmentIndex, (latest) => ({ ...latest, positionSeconds: nextPosition }));
         schedule();
       };
 
       schedule();
     },
-    [advanceSegment, failMedia, isCurrentMedia, stopMediaBoundaryWatch, updateCurrentState]
+    [advanceSegment, failMedia, isCurrentMedia, loopRange, seekTo, stopMediaBoundaryWatch, updateCurrentState]
   );
 
   useLayoutEffect(() => {
@@ -415,6 +562,13 @@ export const CutPlayer: React.FC<CutPlayerProps> = ({ pending, projectId, projec
       }
       const elapsedSeconds = Math.max(0, (performance.now() - startedAt) / 1_000);
       const nextPosition = Math.min(segment.filmEndSeconds, startPosition + elapsedSeconds);
+      const activeLoop = loopRange(activeState);
+      if (activeLoop !== null && nextPosition >= activeLoop.endSeconds) {
+        window.clearInterval(timer);
+        if (slateClockRef.current === slateClock) slateClockRef.current = null;
+        seekTo(activeLoop.startSeconds);
+        return;
+      }
       if (nextPosition >= segment.filmEndSeconds) {
         window.clearInterval(timer);
         if (slateClockRef.current === slateClock) slateClockRef.current = null;
@@ -434,12 +588,15 @@ export const CutPlayer: React.FC<CutPlayerProps> = ({ pending, projectId, projec
     advanceSegment,
     pending,
     planToken,
+    loopRange,
+    seekTo,
     segment,
     sequence,
     state.buffering,
     state.failed,
     state.playing,
     state.segmentIndex,
+    state.slateEpoch,
     updateCurrentState,
   ]);
 
@@ -457,8 +614,13 @@ export const CutPlayer: React.FC<CutPlayerProps> = ({ pending, projectId, projec
     }
     readyMediaRef.current = null;
     pendingMediaSeekRef.current = null;
+    const activeState = stateRef.current;
+    const sourceTimeSeconds = Math.min(
+      videoSegment.sourceOutSeconds,
+      videoSegment.sourceInSeconds + Math.max(0, activeState.positionSeconds - videoSegment.filmStartSeconds)
+    );
     try {
-      media.currentTime = videoSegment.sourceInSeconds;
+      media.currentTime = sourceTimeSeconds;
     } catch {
       failMedia(token, segmentIndex, media);
       return;
@@ -467,19 +629,20 @@ export const CutPlayer: React.FC<CutPlayerProps> = ({ pending, projectId, projec
       token,
       segmentIndex,
       media,
-      sourceInSeconds: videoSegment.sourceInSeconds,
+      sourceTimeSeconds,
     };
     pendingMediaSeekRef.current = pendingSeek;
     if (!media.seeking) {
       if (
         !Number.isFinite(media.currentTime) ||
-        Math.abs(media.currentTime - videoSegment.sourceInSeconds) > MEDIA_DURATION_EPSILON_SECONDS
+        Math.abs(media.currentTime - sourceTimeSeconds) > MEDIA_DURATION_EPSILON_SECONDS
       ) {
         failMedia(token, segmentIndex, media);
         return;
       }
       pendingMediaSeekRef.current = null;
       readyMediaRef.current = { token, segmentIndex, media };
+      updateCurrentState(token, segmentIndex, (current) => ({ ...current, buffering: false }));
       if (stateRef.current.playing) playMedia(token, segmentIndex, media);
     }
   };
@@ -497,7 +660,7 @@ export const CutPlayer: React.FC<CutPlayerProps> = ({ pending, projectId, projec
     }
     if (
       !Number.isFinite(media.currentTime) ||
-      Math.abs(media.currentTime - pendingSeek.sourceInSeconds) > MEDIA_DURATION_EPSILON_SECONDS
+      Math.abs(media.currentTime - pendingSeek.sourceTimeSeconds) > MEDIA_DURATION_EPSILON_SECONDS
     ) {
       failMedia(pendingSeek.token, pendingSeek.segmentIndex, media);
       return;
@@ -508,6 +671,7 @@ export const CutPlayer: React.FC<CutPlayerProps> = ({ pending, projectId, projec
       segmentIndex: pendingSeek.segmentIndex,
       media,
     };
+    updateCurrentState(pendingSeek.token, pendingSeek.segmentIndex, (current) => ({ ...current, buffering: false }));
     if (stateRef.current.playing) playMedia(pendingSeek.token, pendingSeek.segmentIndex, media);
   };
 
@@ -535,9 +699,18 @@ export const CutPlayer: React.FC<CutPlayerProps> = ({ pending, projectId, projec
       return;
     }
     const segmentProgress = Math.max(0, media.currentTime - videoSegment.sourceInSeconds);
+    const nextPosition = Math.min(videoSegment.filmEndSeconds, videoSegment.filmStartSeconds + segmentProgress);
+    const activeLoop = loopRange(current);
+    if (activeLoop !== null && nextPosition >= activeLoop.endSeconds) {
+      stopMediaBoundaryWatch();
+      pauseMedia(media);
+      if (playingMediaRef.current === media) playingMediaRef.current = null;
+      seekTo(activeLoop.startSeconds);
+      return;
+    }
     updateCurrentState(token, segmentIndex, (latest) => ({
       ...latest,
-      positionSeconds: Math.min(videoSegment.filmEndSeconds, videoSegment.filmStartSeconds + segmentProgress),
+      positionSeconds: nextPosition,
     }));
   };
 
@@ -615,7 +788,7 @@ export const CutPlayer: React.FC<CutPlayerProps> = ({ pending, projectId, projec
     updateCurrentState(token, segmentIndex, (current) => ({
       ...current,
       playing: true,
-      buffering: false,
+      buffering: current.buffering,
     }));
     const ready = readyMediaRef.current;
     if (
@@ -627,6 +800,67 @@ export const CutPlayer: React.FC<CutPlayerProps> = ({ pending, projectId, projec
       playMedia(token, segmentIndex, ready.media);
     }
   };
+
+  const nudge = (deltaSeconds: number): void => {
+    if (!Number.isFinite(deltaSeconds)) return;
+    seekTo(stateRef.current.positionSeconds + deltaSeconds);
+  };
+
+  const stepJoin = (direction: -1 | 1): void => {
+    if (beatJoins.length === 0) return;
+    const indexes = cutJoinLandingIndexes(beatJoins, stateRef.current.positionSeconds);
+    const targetIndex = direction > 0 ? indexes.next : indexes.previous;
+    if (targetIndex === null) return;
+    const join = beatJoins[targetIndex];
+    if (join === undefined) return;
+    seekTo(Math.max(0, join - 1.5), stateRef.current.loopJoinIndex === null ? undefined : targetIndex);
+  };
+
+  const toggleJoinLoop = (): void => {
+    if (beatJoins.length === 0) return;
+    const current = stateRef.current;
+    if (current.loopJoinIndex !== null) {
+      replaceCurrentState(planToken, (latest) => ({ ...latest, loopJoinIndex: null }));
+      return;
+    }
+    let nearestIndex = 0;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    for (let index = 0; index < beatJoins.length; index += 1) {
+      const distance = Math.abs(beatJoins[index]! - current.positionSeconds);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestIndex = index;
+      }
+    }
+    seekTo(Math.max(0, beatJoins[nearestIndex]! - 2), nearestIndex);
+  };
+
+  useImperativeHandle(ref, () => ({
+    nudge,
+    seek: seekTo,
+    stepJoin,
+    toggleJoinLoop,
+    togglePlayback,
+  }));
+
+  useEffect(() => {
+    const joinLandingIndexes = cutJoinLandingIndexes(beatJoins, state.positionSeconds);
+    onNavigationChange?.({
+      available: sequence !== null && segment !== null && !pending,
+      beatId: segment?.beatId ?? null,
+      beatPosition: segment?.beatPosition ?? null,
+      beatTitle: segment === null ? null : beatTitle(segment),
+      buffering: state.buffering,
+      canStepNextJoin: joinLandingIndexes.next !== null,
+      canStepPreviousJoin: joinLandingIndexes.previous !== null,
+      durationSeconds: sequence?.durationSeconds ?? 0,
+      failed: state.failed,
+      joinCount: beatJoins.length,
+      loopJoinIndex: state.loopJoinIndex,
+      playing: state.playing,
+      positionSeconds: state.positionSeconds,
+    });
+  }, [beatJoins.length, onNavigationChange, pending, segment, sequence, state]);
 
   const totalClock = formatCutPlaybackClock(sequence?.durationSeconds ?? 0, sequence?.durationSeconds ?? 0) ?? '0:00';
   const currentClock = formatCutPlaybackClock(state.positionSeconds, sequence?.durationSeconds ?? 0) ?? '0:00';
@@ -694,72 +928,80 @@ export const CutPlayer: React.FC<CutPlayerProps> = ({ pending, projectId, projec
               </bdi>
             </span>
             {segment.kind === 'video' ? (
-              <video
-                key={`${planToken}:${state.segmentIndex}:${state.mediaEpoch}:${segment.assetId}`}
-                ref={setVideoNode}
-                aria-label={segmentCopy}
-                className={styles.previewMedia}
-                data-cut-preview-media
-                data-media-kind='video'
-                muted
-                playsInline
-                poster={posterSource ?? undefined}
-                preload='metadata'
-                src={mediaSource ?? undefined}
-                tabIndex={-1}
-                onEnded={(event) => onEnded(event.currentTarget, segment)}
-                onError={(event) => failMedia(planToken, state.segmentIndex, event.currentTarget)}
-                onLoadedMetadata={(event) => onLoadedMetadata(event.currentTarget, segment)}
-                onPlaying={(event) => {
-                  const media = event.currentTarget;
-                  const token = planToken;
-                  const segmentIndex = state.segmentIndex;
-                  const current = stateRef.current;
-                  const ready = readyMediaRef.current;
-                  if (!isCurrentMedia(token, segmentIndex, media)) return;
-                  if (
-                    !current.playing ||
-                    current.failed ||
-                    ready?.token !== token ||
-                    ready.segmentIndex !== segmentIndex ||
-                    ready.media !== media
-                  ) {
+              <>
+                <video
+                  key={`${planToken}:${state.segmentIndex}:${state.mediaEpoch}:${segment.assetId}`}
+                  ref={setVideoNode}
+                  aria-label={segmentCopy}
+                  className={styles.previewMedia}
+                  data-cut-preview-media
+                  data-media-kind='video'
+                  muted
+                  playsInline
+                  poster={posterSource ?? undefined}
+                  preload='metadata'
+                  src={mediaSource ?? undefined}
+                  tabIndex={-1}
+                  onEnded={(event) => onEnded(event.currentTarget, segment)}
+                  onError={(event) => failMedia(planToken, state.segmentIndex, event.currentTarget)}
+                  onLoadedMetadata={(event) => onLoadedMetadata(event.currentTarget, segment)}
+                  onPlaying={(event) => {
+                    const media = event.currentTarget;
+                    const token = planToken;
+                    const segmentIndex = state.segmentIndex;
+                    const current = stateRef.current;
+                    const ready = readyMediaRef.current;
+                    if (!isCurrentMedia(token, segmentIndex, media)) return;
+                    if (
+                      !current.playing ||
+                      current.failed ||
+                      ready?.token !== token ||
+                      ready.segmentIndex !== segmentIndex ||
+                      ready.media !== media
+                    ) {
+                      stopMediaBoundaryWatch();
+                      pauseMedia(media);
+                      if (playingMediaRef.current === media) playingMediaRef.current = null;
+                      return;
+                    }
+                    updateCurrentState(token, segmentIndex, (latest) => ({ ...latest, buffering: false }));
+                    if (sequence !== null) startMediaBoundaryWatch(token, segmentIndex, media, segment, sequence);
+                  }}
+                  onRateChange={(event) => {
+                    const media = event.currentTarget;
+                    const token = planToken;
+                    const segmentIndex = state.segmentIndex;
+                    const current = stateRef.current;
+                    if (
+                      sequence !== null &&
+                      isCurrentMedia(token, segmentIndex, media) &&
+                      current.playing &&
+                      !current.buffering &&
+                      !current.failed
+                    ) {
+                      startMediaBoundaryWatch(token, segmentIndex, media, segment, sequence);
+                    }
+                  }}
+                  onSeeked={(event) => onSeeked(event.currentTarget)}
+                  onTimeUpdate={(event) => onTimeUpdate(event.currentTarget, segment)}
+                  onWaiting={(event) => {
+                    const media = event.currentTarget;
+                    const token = planToken;
+                    const segmentIndex = state.segmentIndex;
+                    const current = stateRef.current;
+                    if (!isCurrentMedia(token, segmentIndex, media)) return;
                     stopMediaBoundaryWatch();
-                    pauseMedia(media);
-                    if (playingMediaRef.current === media) playingMediaRef.current = null;
-                    return;
-                  }
-                  updateCurrentState(token, segmentIndex, (latest) => ({ ...latest, buffering: false }));
-                  if (sequence !== null) startMediaBoundaryWatch(token, segmentIndex, media, segment, sequence);
-                }}
-                onRateChange={(event) => {
-                  const media = event.currentTarget;
-                  const token = planToken;
-                  const segmentIndex = state.segmentIndex;
-                  const current = stateRef.current;
-                  if (
-                    sequence !== null &&
-                    isCurrentMedia(token, segmentIndex, media) &&
-                    current.playing &&
-                    !current.buffering &&
-                    !current.failed
-                  ) {
-                    startMediaBoundaryWatch(token, segmentIndex, media, segment, sequence);
-                  }
-                }}
-                onSeeked={(event) => onSeeked(event.currentTarget)}
-                onTimeUpdate={(event) => onTimeUpdate(event.currentTarget, segment)}
-                onWaiting={(event) => {
-                  const media = event.currentTarget;
-                  const token = planToken;
-                  const segmentIndex = state.segmentIndex;
-                  const current = stateRef.current;
-                  if (!isCurrentMedia(token, segmentIndex, media)) return;
-                  stopMediaBoundaryWatch();
-                  if (!current.playing || current.failed) return;
-                  updateCurrentState(token, segmentIndex, (latest) => ({ ...latest, buffering: true }));
-                }}
-              />
+                    if (!current.playing || current.failed) return;
+                    updateCurrentState(token, segmentIndex, (latest) => ({ ...latest, buffering: true }));
+                  }}
+                />
+                {state.buffering ? (
+                  <div className={styles.previewBuffering} data-cut-buffering role='status'>
+                    {posterSource === null ? null : <img alt='' aria-hidden='true' src={posterSource} />}
+                    <span>{t(`${PREVIEW_ROOT}.buffering`)}</span>
+                  </div>
+                ) : null}
+              </>
             ) : (
               <div
                 aria-label={segmentCopy}
@@ -809,4 +1051,4 @@ export const CutPlayer: React.FC<CutPlayerProps> = ({ pending, projectId, projec
       </p>
     </>
   );
-};
+});

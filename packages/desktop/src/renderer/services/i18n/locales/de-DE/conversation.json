@@ -920,11 +920,24 @@
           "pause": "Film pausieren",
           "position": "{{current}} / {{total}}",
           "pictureOnly": "Nur Bild — das Audiobett ist hier stummgeschaltet",
-          "controlsLabel": "Filmsteuerung"
+          "controlsLabel": "Filmsteuerung",
+          "seekLabel": "Film-Suchleiste",
+          "previousJoin": "Vorheriger Schnitt",
+          "nextJoin": "Nächster Schnitt",
+          "loopJoin": "Schnitt wiederholen",
+          "buffering": "Vorschaubild wird geladen"
         },
         "film": {
           "under": "{{clock}} unter Ziel",
           "over": "{{clock}} über Ziel"
+        },
+        "openBeat": "Beat öffnen",
+        "bed": {
+          "silentPreview": "In der Vorschau stumm · beim Export angewendet",
+          "extent": "Ab 0:00 · Umfang {{seconds}} s"
+        },
+        "slate": {
+          "openBeat": "Beat ohne Abdeckung öffnen"
         }
       },
       "beatPanel": {
@@ -954,7 +967,28 @@
         },
         "coverage": {
           "trimGuidance": "Kante · Trimmen · Kostenlos",
-          "boundaryGuidance": "Grenze · Erfordert neues Rendern"
+          "boundaryGuidance": "Grenze · Erfordert neues Rendern",
+          "seekGuidance": "Leiste · Suchen · Kostenlos",
+          "seekLane": "Beat-Suchleiste",
+          "seekValue": "{{current}} von {{total}}"
+        },
+        "preview": {
+          "label": "Beat-Vorschau",
+          "noMedia": "Beat-Vorschau nicht verfügbar",
+          "mediaError": "Der ausgewählte Take konnte nicht angezeigt werden.",
+          "videoLabel": "Video von Shot {{position}} · {{line}}",
+          "slateLabel": "Planungsplatzhalter von Shot {{position}} · {{line}}",
+          "slate": "Planungsplatzhalter",
+          "slateHold": "Dauer {{clock}}",
+          "play": "Beat abspielen",
+          "pause": "Beat pausieren",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "Nur Bild",
+          "controlsLabel": "Beat-Wiedergabesteuerung",
+          "previousJoin": "Vorheriger Schnitt",
+          "nextJoin": "Nächster Schnitt",
+          "loopJoin": "Nächstgelegenen Schnitt wiederholen",
+          "keyboardGuidance": "Leertaste spielt · Pfeile suchen · [ ] Schnitte · L wiederholt"
         }
       },
       "controls": {

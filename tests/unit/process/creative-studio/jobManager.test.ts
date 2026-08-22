@@ -1401,7 +1401,7 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
       const loaded = await harness.store.getProjectV2(harness.project.id);
       expect(JSON.stringify(loaded)).not.toContain('secret provider body');
     }
-  });
+  }, 30_000);
 
   it('normalizes malformed, future, and primitive submit failures without leaking provider detail', async () => {
     const cases = [

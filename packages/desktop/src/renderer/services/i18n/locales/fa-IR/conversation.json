@@ -919,11 +919,24 @@
           "pause": "توقف موقت فیلم",
           "position": "{{current}} / {{total}}",
           "pictureOnly": "فقط تصویر — بستر صوتی در اینجا بی‌صدا است",
-          "controlsLabel": "کنترل‌های پخش فیلم"
+          "controlsLabel": "کنترل‌های پخش فیلم",
+          "seekLabel": "نوار پیمایش فیلم",
+          "previousJoin": "اتصال قبلی",
+          "nextJoin": "اتصال بعدی",
+          "loopJoin": "تکرار اتصال",
+          "buffering": "در حال بارگیری فریم پیش‌نمایش"
         },
         "film": {
           "under": "{{clock}} کمتر",
           "over": "{{clock}} بیشتر"
+        },
+        "openBeat": "باز کردن ضرب‌آهنگ",
+        "bed": {
+          "silentPreview": "در پیش‌نمایش بی‌صدا · هنگام خروجی اعمال می‌شود",
+          "extent": "از 0:00 · گسترهٔ {{seconds}} ثانیه"
+        },
+        "slate": {
+          "openBeat": "باز کردن ضرب‌آهنگ بدون پوشش"
         }
       },
       "beatPanel": {
@@ -953,7 +966,28 @@
         },
         "coverage": {
           "trimGuidance": "لبه · برش · رایگان",
-          "boundaryGuidance": "مرز · نیازمند رندر مجدد"
+          "boundaryGuidance": "مرز · نیازمند رندر مجدد",
+          "seekGuidance": "نوار · پیمایش · رایگان",
+          "seekLane": "نوار پیمایش ضرب‌آهنگ",
+          "seekValue": "{{current}} از {{total}}"
+        },
+        "preview": {
+          "label": "پیش‌نمایش ضرب‌آهنگ",
+          "noMedia": "پیش‌نمایش ضرب‌آهنگ در دسترس نیست",
+          "mediaError": "پیش‌نمایش برداشت انتخاب‌شده ممکن نشد.",
+          "videoLabel": "ویدیوی نمای {{position}} · {{line}}",
+          "slateLabel": "اسلیت برنامه‌ریزی نمای {{position}} · {{line}}",
+          "slate": "اسلیت برنامه‌ریزی",
+          "slateHold": "نمایش به‌مدت {{clock}}",
+          "play": "پخش ضرب‌آهنگ",
+          "pause": "توقف موقت ضرب‌آهنگ",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "فقط تصویر",
+          "controlsLabel": "کنترل‌های پخش ضرب‌آهنگ",
+          "previousJoin": "اتصال قبلی",
+          "nextJoin": "اتصال بعدی",
+          "loopJoin": "تکرار نزدیک‌ترین اتصال",
+          "keyboardGuidance": "فاصله: پخش · پیکان‌ها: پیمایش · [ ]: اتصال‌ها · L: تکرار"
         }
       },
       "controls": {

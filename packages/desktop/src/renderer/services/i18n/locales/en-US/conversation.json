@@ -1543,7 +1543,12 @@
           "pause": "Pause film",
           "position": "{{current}} / {{total}}",
           "pictureOnly": "Picture only — the bed is muted here",
-          "controlsLabel": "Film transport"
+          "controlsLabel": "Film transport",
+          "seekLabel": "Film seek rail",
+          "previousJoin": "Previous join",
+          "nextJoin": "Next join",
+          "loopJoin": "Loop join",
+          "buffering": "Loading preview frame"
         },
         "dragHandle": "Reorder {{title}} at position {{position}}",
         "moveEarlier": "Move {{title}} earlier",
@@ -1568,7 +1573,9 @@
           "fade": "{{sourceSeconds, number(maximumFractionDigits: 0; useGrouping: false)}}s source · fade from {{startSeconds, number(maximumFractionDigits: 0; useGrouping: false)}}s to {{endSeconds, number(maximumFractionDigits: 0; useGrouping: false)}}s",
           "tooShort": "This audio is {{sourceSeconds, number(maximumFractionDigits: 0; useGrouping: false)}}s, shorter than the {{requiredSeconds, number(maximumFractionDigits: 0; useGrouping: false)}}s film. Choose a longer bed or shorten the film.",
           "durationPending": "Finish every Beat duration before this bed can be validated.",
-          "invalid": "The selected bed is not an available project audio import. Clear it or choose another bed."
+          "invalid": "The selected bed is not an available project audio import. Clear it or choose another bed.",
+          "silentPreview": "Silent in preview · applied on export",
+          "extent": "From 0:00 · {{seconds}}s extent"
         },
         "match": {
           "title": "Match To",
@@ -1620,8 +1627,10 @@
         },
         "slate": {
           "label": "Beat {{label}}",
-          "warning": "No coverage. It exports as a {{seconds}}s slate."
-        }
+          "warning": "No coverage. It exports as a {{seconds}}s slate.",
+          "openBeat": "Open uncovered Beat"
+        },
+        "openBeat": "Open Beat"
       },
       "assets": {
         "show": "Assets",
@@ -1773,7 +1782,10 @@
           "trimValue": "{{seconds}}s trimmed",
           "trimAnnouncement": "Trim updated: {{trimInSeconds}}s from the start and {{trimOutSeconds}}s from the end.",
           "tailTrimWarning": "Tail trim breaks downstream continuity.",
-          "reviewResplit": "Ask Director to re-split"
+          "reviewResplit": "Ask Director to re-split",
+          "seekGuidance": "Rail · Seek · Free",
+          "seekLane": "Beat seek rail",
+          "seekValue": "{{current}} of {{total}}"
         },
         "shots": {
           "label": "Shots in this Beat",
@@ -1905,6 +1917,24 @@
           "cancelBody": "Only this waiting item is cancelled. Existing completed work and authorization records remain.",
           "cancelConfirm": "Cancel waiting item",
           "localConditioningFailure": "The local continuity-frame step failed."
+        },
+        "preview": {
+          "label": "Beat preview",
+          "noMedia": "Beat preview unavailable",
+          "mediaError": "The selected Take could not be previewed.",
+          "videoLabel": "Shot {{position}} video · {{line}}",
+          "slateLabel": "Shot {{position}} planning slate · {{line}}",
+          "slate": "Planning slate",
+          "slateHold": "Hold {{clock}}",
+          "play": "Play Beat",
+          "pause": "Pause Beat",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "Picture only",
+          "controlsLabel": "Beat transport",
+          "previousJoin": "Previous join",
+          "nextJoin": "Next join",
+          "loopJoin": "Loop nearest join",
+          "keyboardGuidance": "Space play · Arrows seek · [ ] joins · L loop"
         }
       },
       "library": {

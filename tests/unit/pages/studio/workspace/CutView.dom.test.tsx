@@ -52,6 +52,16 @@ type SelectProps = {
 
 type OptionProps = { children?: React.ReactNode; value: string };
 
+type SliderProps = {
+  'data-cut-seek'?: boolean;
+  disabled?: boolean;
+  max?: number;
+  min?: number;
+  onChange?: (value: number) => void;
+  step?: number;
+  value?: number;
+};
+
 const optionText = (value: React.ReactNode): string => {
   if (typeof value === 'string' || typeof value === 'number') return String(value);
   if (Array.isArray(value)) return value.map(optionText).join('');
@@ -95,6 +105,21 @@ vi.mock('@arco-design/web-react', async () => {
     </select>
   );
   Object.assign(Select, { Option });
+  // eslint-disable-next-line unicorn/consistent-function-scoping -- Vitest requires this component to stay inside the hoisted mock factory.
+  const Slider = ReactModule.forwardRef<HTMLDivElement, SliderProps>(({ onChange, ...props }, ref) => (
+    <div ref={ref} data-cut-seek={props['data-cut-seek']}>
+      <input
+        disabled={props.disabled}
+        max={props.max}
+        min={props.min}
+        onChange={(event) => onChange?.(Number(event.target.value))}
+        role='slider'
+        step={props.step}
+        type='range'
+        value={props.value}
+      />
+    </div>
+  ));
   const Popconfirm = ({ children, content, disabled, okText, onOk, title }: PopconfirmProps) => {
     const [open, setOpen] = ReactModule.useState(false);
     return (
@@ -142,6 +167,7 @@ vi.mock('@arco-design/web-react', async () => {
       ) : null,
     Popconfirm,
     Select,
+    Slider,
   };
 });
 
@@ -186,6 +212,12 @@ vi.mock('react-i18next', () => ({
       }
       if (key.endsWith('.preview.slate')) return 'Slate · No coverage';
       if (key.endsWith('.preview.slateHold')) return `Holds ${String(values?.clock)} in the Cut`;
+      if (key.endsWith('.preview.seekLabel')) return 'Film seek rail';
+      if (key.endsWith('.preview.previousJoin')) return 'Previous join';
+      if (key.endsWith('.preview.nextJoin')) return 'Next join';
+      if (key.endsWith('.preview.loopJoin')) return 'Loop join';
+      if (key.endsWith('.preview.buffering')) return 'Loading preview frame';
+      if (key.endsWith('.bed.extent')) return `From 0:00 · ${String(values?.seconds)}s extent`;
       return values === undefined ? key : `${key}:${JSON.stringify(values)}`;
     },
   }),
@@ -253,7 +285,7 @@ const projection = (cutProjection = cut(), activeBeats: WorkspaceProjection['act
     projectRevision: 7,
     activeBeats,
     activeBeatIds: cutProjection.beats.map((beat) => beat.id),
-    activeShotIds: cutProjection.matchCandidates.map((shot) => shot.shotId),
+    activeShotIds: activeBeats.flatMap((beat) => beat.shots.map((shot) => shot.id)),
     coverageGapBeatIds: ['beat_2'],
     workspaceStatusReady: true,
     chainStatusReady: true,
@@ -1445,9 +1477,11 @@ const renderCut = (
     exportErrorMessageKey?: string | null;
     pending?: boolean;
     activeBeats?: WorkspaceProjection['activeBeats'];
+    onOpenBeat?: (beatId: string) => void;
   } = {}
 ) => {
   const cutActions = input.actions ?? actions();
+  const onOpenBeat = input.onOpenBeat ?? vi.fn();
   render(
     <CutView
       actions={cutActions}
@@ -1456,13 +1490,18 @@ const renderCut = (
       pending={input.pending ?? false}
       projectId='project_1'
       projection={projection(input.cutProjection, input.activeBeats)}
+      onOpenBeat={onOpenBeat}
     />
   );
-  return cutActions;
+  return Object.assign(cutActions, { onOpenBeat });
 };
 
 describe('CutView', () => {
   beforeEach(() => vi.clearAllMocks());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
 
   it('renders one film-level rail, honest bed and Match To copy, and exactly three export shapes', () => {
     renderCut();
@@ -1477,7 +1516,9 @@ describe('CutView', () => {
     expect(document.body.textContent?.toLowerCase()).not.toContain('auto-duck');
     expect(document.querySelector('audio')).toBeNull();
     expect(screen.getAllByText('Opening')).toHaveLength(2);
-    expect(screen.queryByLabelText(/workspace\.cut\.openBeat/)).toBeNull();
+    expect(
+      screen.getAllByRole('button', { name: /workspace\.cut\.(?:openBeat|slate\.openBeat)/ }).length
+    ).toBeGreaterThan(0);
   });
 
   it('renders a compact selectable filmstrip and keeps reorder controls out of its segments', () => {
@@ -1507,7 +1548,7 @@ describe('CutView', () => {
     expect(selection).not.toBeNull();
     expect(selection).toHaveTextContent('Opening');
     expect(selection).toHaveTextContent('1 Shot');
-    expect(within(selection!).getAllByRole('button')).toHaveLength(2);
+    expect(within(selection!).getAllByRole('button')).toHaveLength(3);
   });
 
   it('keeps a populated nine-Beat film in one proportional strip', () => {
@@ -1528,7 +1569,8 @@ describe('CutView', () => {
     expect(within(rail).getAllByRole('button')).toHaveLength(9);
   });
 
-  it('pins the Cut rail to one flat 64px strip with non-wrapping titles', () => {
+  it('fuses the compact 64px structure strip to an 18px authoritative seek rail', () => {
+    renderCut();
     const css = readFileSync(
       resolve(
         process.cwd(),
@@ -1538,9 +1580,229 @@ describe('CutView', () => {
     );
 
     expect(css).toMatch(/\.rail\s*\{[^}]*box-sizing:\s*border-box[^}]*block-size:\s*64px/s);
+    expect(css).toMatch(/\.seekRail\s*\{[^}]*block-size:\s*18px/s);
+    expect(document.querySelector('[data-cut-filmstrip]')).not.toBeNull();
+    expect(document.querySelector('[data-cut-seek-rail]')).not.toBeNull();
+    const sliderRoot = document.querySelector('[data-cut-seek]');
+    const sliderHandle = screen.getByRole('slider', { name: 'Film seek rail' });
+    expect(sliderRoot).not.toHaveAttribute('aria-label');
+    expect(sliderRoot).toContainElement(sliderHandle);
     expect(css).toMatch(/\.rail\s*\{[^}]*gap:\s*0/s);
     expect(css).toMatch(/\.beatTitle\s*\{[^}]*white-space:\s*nowrap/s);
     expect(css).not.toMatch(/\.beatTitle\s*\{[^}]*overflow-wrap:\s*anywhere/s);
+  });
+
+  it('seeks video and slate time from the fused rail while Beat-body selection never seeks', () => {
+    const current = playableProjection();
+    renderCut({ cutProjection: current.cut, activeBeats: current.activeBeats });
+    const seek = screen.getByRole('slider', { name: 'Film seek rail' });
+    const firstVideo = mediaElement();
+
+    fireEvent.click(within(document.querySelector('[data-beat-id="beat_3"]')!).getByRole('button'));
+    expect(seek).toHaveValue('0');
+    expect(mediaElement()).toBe(firstVideo);
+
+    fireEvent.change(seek, { target: { value: '12' } });
+    expect(document.querySelector('[data-media-kind="slate"]')).not.toBeNull();
+    expect(screen.getByText('0:12 / 0:23')).toBeVisible();
+
+    fireEvent.change(seek, { target: { value: '18' } });
+    const soughtVideo = mediaElement();
+    expect(soughtVideo).not.toBe(firstVideo);
+    expect(soughtVideo).toHaveAttribute('src', 'weprompt-studio://asset/project_1/take_3');
+    expect(screen.getByText('Loading preview frame')).toBeVisible();
+    setMediaNumber(soughtVideo, 'duration', 8);
+    fireEvent.loadedMetadata(soughtVideo);
+    expect(soughtVideo.currentTime).toBe(2.5);
+    fireEvent.seeked(soughtVideo);
+    expect(screen.queryByText('Loading preview frame')).toBeNull();
+  });
+
+  it('preserves play through slate and video seeks and ignores native events from the displaced media epoch', async () => {
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    const current = playableProjection();
+    renderCut({ cutProjection: current.cut, activeBeats: current.activeBeats });
+    const seek = screen.getByRole('slider', { name: 'Film seek rail' });
+    const firstVideo = mediaElement();
+    setMediaNumber(firstVideo, 'duration', 10);
+    fireEvent.loadedMetadata(firstVideo);
+    fireEvent.click(screen.getByRole('button', { name: 'Play film' }));
+    await act(async () => Promise.resolve());
+
+    fireEvent.change(seek, { target: { value: '12' } });
+    expect(screen.getByRole('button', { name: 'Pause film' })).toHaveAttribute('aria-pressed', 'true');
+    expect(document.querySelector('[data-media-kind="slate"]')).not.toBeNull();
+    fireEvent.error(firstVideo);
+    expect(document.querySelector('[data-media-kind="slate"]')).not.toBeNull();
+    expect(screen.getByRole('status')).not.toHaveTextContent('This preview could not be loaded.');
+
+    fireEvent.change(seek, { target: { value: '18' } });
+    const soughtVideo = mediaElement();
+    let currentTime = 0;
+    let seeking = false;
+    Object.defineProperty(soughtVideo, 'currentTime', {
+      configurable: true,
+      get: () => currentTime,
+      set: (value: number) => {
+        currentTime = value;
+        seeking = true;
+      },
+    });
+    Object.defineProperty(soughtVideo, 'seeking', { configurable: true, get: () => seeking });
+    setMediaNumber(soughtVideo, 'duration', 8);
+    fireEvent.loadedMetadata(soughtVideo);
+    expect(currentTime).toBe(2.5);
+    expect(play).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('Loading preview frame')).toBeVisible();
+
+    seeking = false;
+    fireEvent.seeked(soughtVideo);
+    await act(async () => Promise.resolve());
+    expect(play).toHaveBeenCalledTimes(2);
+    expect(pause).toHaveBeenCalled();
+    expect(screen.queryByText('Loading preview frame')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Pause film' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('lands join navigation 1.5 seconds before Beat boundaries, loops plus or minus two seconds, and scopes shortcuts', () => {
+    const current = playableProjection();
+    renderCut({ cutProjection: current.cut, activeBeats: current.activeBeats });
+    const root = screen.getByRole('region', { name: 'conversation.creativeStudio.workspace.cut.ariaLabel' });
+    const seek = screen.getByRole('slider', { name: 'Film seek rail' });
+
+    fireEvent.keyDown(root, { key: ' ' });
+    expect(screen.getByRole('button', { name: 'Pause film' })).toBeVisible();
+    fireEvent.keyDown(root, { key: ' ' });
+    expect(screen.getByRole('button', { name: 'Play film' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Next join' }));
+    expect(seek).toHaveValue('9.5');
+    fireEvent.click(screen.getByRole('button', { name: 'Loop join' }));
+    expect(seek).toHaveValue('9');
+    expect(screen.getByRole('button', { name: 'Loop join' })).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.keyDown(root, { key: 'ArrowRight' });
+    expect(seek).toHaveValue('10');
+    fireEvent.keyDown(root, { key: 'ArrowRight', shiftKey: true });
+    expect(seek).toHaveValue('10.2');
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Next join' }), { key: 'ArrowRight' });
+    expect(seek).toHaveValue('10.2');
+  });
+
+  it('disables and no-ops join navigation at the first and final landing', () => {
+    const current = playableProjection();
+    renderCut({ cutProjection: current.cut, activeBeats: current.activeBeats });
+    const seek = screen.getByRole('slider', { name: 'Film seek rail' });
+    const previous = screen.getByRole('button', { name: 'Previous join' });
+    const next = screen.getByRole('button', { name: 'Next join' });
+
+    expect(previous).toBeDisabled();
+    expect(next).toBeEnabled();
+    fireEvent.click(previous);
+    expect(seek).toHaveValue('0');
+
+    fireEvent.click(next);
+    expect(seek).toHaveValue('9.5');
+    expect(previous).toBeDisabled();
+    expect(next).toBeEnabled();
+    fireEvent.click(next);
+    expect(seek).toHaveValue('14.5');
+    expect(previous).toBeEnabled();
+    expect(next).toBeDisabled();
+    fireEvent.click(next);
+    expect(seek).toHaveValue('14.5');
+
+    fireEvent.click(previous);
+    expect(seek).toHaveValue('9.5');
+    expect(previous).toBeDisabled();
+  });
+
+  it('wraps a playing slate-only Cut at the plus-two side of the selected Beat join', () => {
+    vi.useFakeTimers();
+    const activeBeats = [
+      playbackBeat('beat_a', 'A', [], 5),
+      playbackBeat('beat_b', 'B', [], 5),
+      playbackBeat('beat_c', 'C', [], 5),
+    ];
+    const cutProjection = cut({
+      beats: activeBeats.map((beat) => ({
+        id: beat.id,
+        title: beat.title,
+        shotCount: 0,
+        durationKind: 'target' as const,
+        durationSeconds: 5,
+        coverAssetId: null,
+      })),
+      filmDurationSeconds: 15,
+      matchCandidates: [],
+      selectedMatchShotId: null,
+    });
+    renderCut({ activeBeats, cutProjection });
+    const seek = screen.getByRole('slider', { name: 'Film seek rail' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Loop join' }));
+    expect(seek).toHaveValue('3');
+    fireEvent.click(screen.getByRole('button', { name: 'Play film' }));
+    act(() => vi.advanceTimersByTime(2_000));
+    act(() => vi.advanceTimersByTime(2_100));
+    expect(Number((seek as HTMLInputElement).value)).toBeLessThanOrEqual(3.2);
+    expect(screen.getByRole('button', { name: 'Loop join' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('restarts a playing slate clock after a same-slate seek', () => {
+    vi.useFakeTimers();
+    const activeBeats = [playbackBeat('beat_a', 'A', [], 10)];
+    const cutProjection = cut({
+      beats: [
+        {
+          id: 'beat_a',
+          title: 'A',
+          shotCount: 0,
+          durationKind: 'target',
+          durationSeconds: 10,
+          coverAssetId: null,
+        },
+      ],
+      filmDurationSeconds: 10,
+      matchCandidates: [],
+      selectedMatchShotId: null,
+    });
+    renderCut({ activeBeats, cutProjection });
+    const root = screen.getByRole('region', { name: 'conversation.creativeStudio.workspace.cut.ariaLabel' });
+    const seek = screen.getByRole('slider', { name: 'Film seek rail' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play film' }));
+    act(() => vi.advanceTimersByTime(1_000));
+    expect(seek).toHaveValue('1');
+    fireEvent.keyDown(root, { key: 'ArrowRight' });
+    expect(seek).toHaveValue('2');
+    act(() => vi.advanceTimersByTime(1_000));
+    expect(seek).toHaveValue('3');
+  });
+
+  it('uses actionable Match thumbnails and opens both the selected and uncovered Beat', async () => {
+    const onOpenBeat = vi.fn();
+    const cutActions = renderCut({ onOpenBeat });
+    const thumbnails = screen.getByRole('group', { name: 'conversation.creativeStudio.workspace.cut.match.title' });
+    expect(thumbnails.querySelector('img')).toHaveAttribute('src', 'weprompt-studio://asset/project_1/cover_1');
+    fireEvent.click(within(thumbnails).getByRole('button', { name: /Detail/ }));
+    await waitFor(() => expect(cutActions.setMatchTo).toHaveBeenCalledWith('shot_2'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.cut.openBeat' }));
+    expect(onOpenBeat).toHaveBeenCalledWith('beat_1');
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.cut.slate.openBeat' }));
+    expect(onOpenBeat).toHaveBeenCalledWith('beat_2');
+  });
+
+  it('draws the selected bed as a silent extent against the authoritative film duration', () => {
+    renderCut();
+    const extent = document.querySelector('[data-cut-bed-extent]');
+    expect(extent).toHaveAttribute('data-source-seconds', '14');
+    expect(extent).toHaveAttribute('data-film-seconds', '11');
+    expect(extent).toHaveTextContent('From 0:00 · 14s extent');
+    expect(extent).toHaveTextContent('conversation.creativeStudio.workspace.cut.bed.silentPreview');
+    expect(extent?.querySelector('[data-bed-film-extent]')).not.toBeNull();
+    expect(document.querySelector('audio')).toBeNull();
   });
 
   it('reorders by keyboard, contextual controls, and drag with exact serialization and repeat focus', async () => {
@@ -1781,8 +2043,8 @@ describe('CutView', () => {
 
     expect(source).not.toMatch(/<(?:button|select|input|audio)\b/);
     expect(source).not.toMatch(/\bcontrols\s*=/);
-    expect(source).not.toContain('onOpenBeat');
-    expect(source).not.toContain('.openBeat');
+    expect(source).toContain('onOpenBeat');
+    expect(source).toContain('.openBeat');
     expect(source).toContain("dir='auto'");
     expect(source).toContain('<bdi>');
     expect(css).toContain('@container');

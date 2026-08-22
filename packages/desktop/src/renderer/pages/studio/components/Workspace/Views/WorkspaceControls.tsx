@@ -34,12 +34,16 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
   beatPanelReviewBlockedMessageKey,
 }) => {
   const { t } = useTranslation();
-  const [openPanel, setOpenPanel] = useState<{ projectId: string; beatId: string } | null>(null);
+  const [openPanel, setOpenPanel] = useState<{
+    projectId: string;
+    beatId: string;
+    view: WorkspaceControlsProps['activeView'];
+  } | null>(null);
   const [binFocusIntent, setBinFocusIntent] = useState<{ projectId: string; itemKey: string } | null>(null);
   const [shotLiftAnnouncement, setShotLiftAnnouncement] = useState('');
   const currentProjectId = useRef(project.id);
   currentProjectId.current = project.id;
-  const openBeatId = activeView !== 'cut' && openPanel?.projectId === project.id ? openPanel.beatId : null;
+  const openBeatId = openPanel?.projectId === project.id && openPanel.view === activeView ? openPanel.beatId : null;
   const openBeatIndex = openBeatId === null ? -1 : projection.activeBeats.findIndex((beat) => beat.id === openBeatId);
   const openBeat = openBeatIndex < 0 ? null : (projection.activeBeats[openBeatIndex] ?? null);
   const dirtyBeatIds = useMemo(() => {
@@ -63,7 +67,7 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
   useEffect(() => {
     if (
       openPanel !== null &&
-      (activeView === 'cut' ||
+      (openPanel.view !== activeView ||
         openPanel.projectId !== project.id ||
         !projection.activeBeatIds.includes(openPanel.beatId))
     ) {
@@ -79,7 +83,7 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
   const selectAndOpenBeat = (beatId: string): void => {
     drafts.selectBeat(beatId);
     setShotLiftAnnouncement('');
-    setOpenPanel({ projectId: project.id, beatId });
+    setOpenPanel({ projectId: project.id, beatId, view: activeView });
   };
   const completeShotPark = (shotId: string, beatId: string, expectedProjectId: string): void => {
     if (currentProjectId.current !== expectedProjectId) return;
@@ -139,6 +143,7 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
           pending={pending}
           projectId={project.id}
           projection={projection}
+          onOpenBeat={selectAndOpenBeat}
         />
       ) : null}
       {openBeat === null ? null : (

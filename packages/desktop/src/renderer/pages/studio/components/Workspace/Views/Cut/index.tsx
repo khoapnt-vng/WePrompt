@@ -4,13 +4,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Alert, Button, Drawer, Popconfirm, Select } from '@arco-design/web-react';
-import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Alert, Button, Drawer, Popconfirm, Select, Slider } from '@arco-design/web-react';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { StudioRendererExportCatalogV2 } from '@/common/types/project/creativeStudioTypes';
+import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
 import type { WorkspaceBeatProjection, WorkspaceProjection } from '../../workspaceProjection';
-import { CutPlayer } from './CutPlayer';
+import {
+  CutPlayer,
+  EMPTY_CUT_PLAYBACK_NAVIGATION,
+  type CutPlaybackNavigation,
+  type CutPlayerHandle,
+} from './CutPlayer';
 import { buildCutFilmSummary, buildCutSlateWarnings, formatCutClock } from './filmSummary';
 import { buildCutFilmstrip } from './filmstrip';
 import { buildCutMatchReference } from './matchReference';
@@ -64,6 +70,7 @@ export type CutViewProps = {
   pending: boolean;
   exportErrorMessageKey: string | null;
   actions: CutActions;
+  onOpenBeat: (beatId: string) => void;
 };
 
 const moveOrder = (order: readonly string[], from: number, to: number): string[] | null => {
@@ -89,6 +96,7 @@ export const CutView: React.FC<CutViewProps> = ({
   pending,
   exportErrorMessageKey,
   actions,
+  onOpenBeat,
 }) => {
   const { t } = useTranslation();
   const [announcement, setAnnouncement] = useState('');
@@ -97,10 +105,17 @@ export const CutView: React.FC<CutViewProps> = ({
   const [reorderFocusId, setReorderFocusId] = useState<string | null>(null);
   const [selectedBeatId, setSelectedBeatId] = useState<string | null>(() => projection.cut.beats[0]?.id ?? null);
   const [stillShotId, setStillShotId] = useState<string | null>(null);
+  const [playback, setPlayback] = useState<CutPlaybackNavigation>(EMPTY_CUT_PLAYBACK_NAVIGATION);
   const summaryTitleId = useId();
   const actionPendingRef = useRef(false);
   const draggedBeatIdRef = useRef<string | null>(null);
   const segmentRefs = useRef(new Map<string, HTMLButtonElement>());
+  const playerRef = useRef<CutPlayerHandle>(null);
+  const seekSliderRootRef = useRef<HTMLDivElement | null>(null);
+  const seekRailLabel = t(`${CUT_ROOT}.preview.seekLabel`);
+  const setSeekSliderRoot = useCallback((node: unknown): void => {
+    seekSliderRootRef.current = node instanceof HTMLDivElement ? node : null;
+  }, []);
 
   const beatOrder = projection.cut.beats.map((beat) => beat.id);
   const canonicalOrderReady =
@@ -110,6 +125,7 @@ export const CutView: React.FC<CutViewProps> = ({
     beatOrder.every((beatId, index) => beatId === projection.activeBeatIds[index]);
   const locked = pending || actionPendingRef.current || projectId !== projection.projectId;
   const currentBedId = selectedBedId(projection);
+  const currentBed = projection.cut.audioImports.find((asset) => asset.assetId === currentBedId) ?? null;
   const stillCandidates = useMemo(
     () => projection.cut.matchCandidates.filter((candidate) => candidate.coverAssetId !== null),
     [projection.cut.matchCandidates]
@@ -140,6 +156,13 @@ export const CutView: React.FC<CutViewProps> = ({
         : (projection.cut.beats[0]?.id ?? null)
     );
   }, [projection.cut.beats]);
+
+  useLayoutEffect(() => {
+    const handle = seekSliderRootRef.current?.querySelector<HTMLElement>('[role="slider"]') ?? null;
+    if (handle === null) return;
+    handle.setAttribute('aria-label', seekRailLabel);
+    return () => handle.removeAttribute('aria-label');
+  }, [playback.available, projection.cut.beats.length, seekRailLabel]);
 
   const runAction = async <Result,>(key: string, action: () => Promise<Result>): Promise<Result | null> => {
     if (locked || actionPendingRef.current) return null;
@@ -237,6 +260,11 @@ export const CutView: React.FC<CutViewProps> = ({
   const slates = buildCutSlateWarnings(projection.cut);
   const filmstrip = buildCutFilmstrip(projection.cut);
   const filmstripByBeatId = new Map(filmstrip?.map((segment) => [segment.beatId, segment]) ?? []);
+  let filmstripCursor = 0;
+  const filmstripJoinMarks = (filmstrip ?? []).slice(0, -1).map((filmstripSegment) => {
+    filmstripCursor += filmstripSegment.durationSeconds;
+    return filmstripCursor;
+  });
   const displayStateByBeatId = new Map(projection.activeBeats.map((beat) => [beat.id, beat.displayState]));
   const selectedBeatIndex = Math.max(
     0,
@@ -247,9 +275,34 @@ export const CutView: React.FC<CutViewProps> = ({
     activeBeats: projection.activeBeats,
     selectedMatchShotId: projection.cut.selectedMatchShotId,
   });
+  const bedScaleSeconds = Math.max(currentBed?.durationSeconds ?? 0, projection.cut.filmDurationSeconds ?? 0);
+  const bedFilmPercent =
+    bedScaleSeconds > 0 && projection.cut.filmDurationSeconds !== null
+      ? (projection.cut.filmDurationSeconds / bedScaleSeconds) * 100
+      : 0;
+  const bedSourcePercent =
+    bedScaleSeconds > 0 && currentBed !== null ? (currentBed.durationSeconds / bedScaleSeconds) * 100 : 0;
+
+  const onCutKeyDown = (event: React.KeyboardEvent<HTMLElement>): void => {
+    if (event.target !== event.currentTarget || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (event.key === ' ') playerRef.current?.togglePlayback();
+    else if (event.key === 'ArrowLeft') playerRef.current?.nudge(event.shiftKey ? -0.2 : -1);
+    else if (event.key === 'ArrowRight') playerRef.current?.nudge(event.shiftKey ? 0.2 : 1);
+    else if (event.key === '[') playerRef.current?.stepJoin(-1);
+    else if (event.key === ']') playerRef.current?.stepJoin(1);
+    else if (event.key.toLowerCase() === 'l') playerRef.current?.toggleJoinLoop();
+    else return;
+    event.preventDefault();
+  };
 
   return (
-    <section aria-label={t(`${CUT_ROOT}.ariaLabel`)} className={styles.root} data-studio-cut>
+    <section
+      aria-label={t(`${CUT_ROOT}.ariaLabel`)}
+      className={styles.root}
+      data-studio-cut
+      onKeyDown={onCutKeyDown}
+      tabIndex={0}
+    >
       <header className={styles.header}>
         <div>
           <p>{t(`${CUT_ROOT}.description`)}</p>
@@ -270,7 +323,13 @@ export const CutView: React.FC<CutViewProps> = ({
 
       <div className={styles.hero} data-cut-hero>
         <div className={styles.playerColumn}>
-          <CutPlayer pending={pending || busyKey !== null} projectId={projectId} projection={projection} />
+          <CutPlayer
+            ref={playerRef}
+            onNavigationChange={setPlayback}
+            pending={pending || busyKey !== null}
+            projectId={projectId}
+            projection={projection}
+          />
         </div>
         <aside aria-labelledby={summaryTitleId} className={styles.summary} data-cut-summary>
           <div className={styles.film} data-cut-film data-film-delta={film.delta?.kind ?? 'unknown'}>
@@ -315,6 +374,40 @@ export const CutView: React.FC<CutViewProps> = ({
             </span>
           </div>
 
+          <div className={styles.joinControls} data-cut-join-controls role='group'>
+            <Button
+              aria-label={t(`${CUT_ROOT}.preview.previousJoin`)}
+              data-cut-previous-join
+              disabled={
+                !playback.available || playback.joinCount === 0 || !playback.canStepPreviousJoin || playback.failed
+              }
+              onClick={() => playerRef.current?.stepJoin(-1)}
+              size='small'
+            >
+              {t(`${CUT_ROOT}.preview.previousJoin`)}
+            </Button>
+            <Button
+              aria-label={t(`${CUT_ROOT}.preview.nextJoin`)}
+              data-cut-next-join
+              disabled={!playback.available || playback.joinCount === 0 || !playback.canStepNextJoin || playback.failed}
+              onClick={() => playerRef.current?.stepJoin(1)}
+              size='small'
+            >
+              {t(`${CUT_ROOT}.preview.nextJoin`)}
+            </Button>
+            <Button
+              aria-label={t(`${CUT_ROOT}.preview.loopJoin`)}
+              aria-pressed={playback.loopJoinIndex !== null}
+              data-cut-loop-join
+              disabled={!playback.available || playback.joinCount === 0 || playback.failed}
+              onClick={() => playerRef.current?.toggleJoinLoop()}
+              size='small'
+              type={playback.loopJoinIndex === null ? 'secondary' : 'primary'}
+            >
+              {t(`${CUT_ROOT}.preview.loopJoin`)}
+            </Button>
+          </div>
+
           {slates.length === 0 ? null : (
             <ul className={styles.slates}>
               {slates.map((slate) => (
@@ -325,6 +418,13 @@ export const CutView: React.FC<CutViewProps> = ({
                   <span className={styles.slateText}>
                     <bdi dir='auto'>{t(`${CUT_ROOT}.slate.warning`, { seconds: slate.durationSeconds })}</bdi>
                   </span>
+                  <Button
+                    aria-label={t(`${CUT_ROOT}.slate.openBeat`)}
+                    onClick={() => onOpenBeat(slate.beatId)}
+                    size='mini'
+                  >
+                    {t(`${CUT_ROOT}.slate.openBeat`)}
+                  </Button>
                 </li>
               ))}
             </ul>
@@ -338,93 +438,119 @@ export const CutView: React.FC<CutViewProps> = ({
         <p className={styles.empty}>{t(`${CUT_ROOT}.empty`)}</p>
       ) : (
         <>
-          <ol aria-label={t(`${CUT_ROOT}.railLabel`)} className={styles.rail} data-cut-filmstrip>
-            {projection.cut.beats.map((beat, index) => {
-              const title = beat.title.trim() || beat.id;
-              const filmstripSegment = filmstripByBeatId.get(beat.id);
-              const mutationLocked = locked || !canonicalOrderReady;
-              const displayState =
-                displayStateByBeatId.get(beat.id) ??
-                (beat.durationKind === 'actual'
-                  ? 'ready'
-                  : beat.durationKind === 'target'
-                    ? 'no_coverage'
-                    : 'duration_pending');
-              return (
-                <li
-                  key={beat.id}
-                  className={styles.beat}
-                  data-beat-id={beat.id}
-                  data-duration-kind={beat.durationKind}
-                  data-selected={beat.id === selectedBeat?.id}
-                  data-state={displayState}
-                  style={filmstripSegment === undefined ? undefined : { flexGrow: filmstripSegment.growFactor }}
-                  onDragOver={(event) => {
-                    if (draggedBeatIdRef.current !== null && draggedBeatIdRef.current !== beat.id)
-                      event.preventDefault();
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    const draggedBeatId = draggedBeatIdRef.current;
-                    draggedBeatIdRef.current = null;
-                    if (draggedBeatId !== null) void reorderBeat(draggedBeatId, index);
-                  }}
-                >
-                  <Button
-                    ref={(node) => {
-                      if (node === null) segmentRefs.current.delete(beat.id);
-                      else if (node instanceof HTMLButtonElement) segmentRefs.current.set(beat.id, node);
+          <div className={styles.filmstripShell}>
+            <ol aria-label={t(`${CUT_ROOT}.railLabel`)} className={styles.rail} data-cut-filmstrip>
+              {projection.cut.beats.map((beat, index) => {
+                const title = beat.title.trim() || beat.id;
+                const filmstripSegment = filmstripByBeatId.get(beat.id);
+                const mutationLocked = locked || !canonicalOrderReady;
+                const displayState =
+                  displayStateByBeatId.get(beat.id) ??
+                  (beat.durationKind === 'actual'
+                    ? 'ready'
+                    : beat.durationKind === 'target'
+                      ? 'no_coverage'
+                      : 'duration_pending');
+                return (
+                  <li
+                    key={beat.id}
+                    className={styles.beat}
+                    data-beat-id={beat.id}
+                    data-duration-kind={beat.durationKind}
+                    data-selected={beat.id === selectedBeat?.id}
+                    data-state={displayState}
+                    style={filmstripSegment === undefined ? undefined : { flexGrow: filmstripSegment.growFactor }}
+                    onDragOver={(event) => {
+                      if (draggedBeatIdRef.current !== null && draggedBeatIdRef.current !== beat.id)
+                        event.preventDefault();
                     }}
-                    aria-pressed={beat.id === selectedBeat?.id}
-                    className={styles.segmentButton}
-                    draggable={!mutationLocked}
-                    onClick={() => setSelectedBeatId(beat.id)}
-                    onDragEnd={() => {
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      const draggedBeatId = draggedBeatIdRef.current;
                       draggedBeatIdRef.current = null;
-                    }}
-                    onDragStart={(event) => {
-                      draggedBeatIdRef.current = beat.id;
-                      event.dataTransfer.effectAllowed = 'move';
-                      event.dataTransfer.setData('text/plain', beat.id);
-                    }}
-                    onKeyDown={(event) => {
-                      let destination: number | null = null;
-                      if (event.key === 'ArrowUp') destination = index - 1;
-                      else if (event.key === 'ArrowDown') destination = index + 1;
-                      else if (event.key === 'Home') destination = 0;
-                      else if (event.key === 'End') destination = beatOrder.length - 1;
-                      if (destination === null) return;
-                      event.preventDefault();
-                      void reorderBeat(beat.id, destination);
+                      if (draggedBeatId !== null) void reorderBeat(draggedBeatId, index);
                     }}
                   >
-                    <span className={styles.segmentHeader}>
-                      <span className={styles.ordinal} aria-hidden='true'>
-                        <bdi>{filmstripSegment?.label ?? String(index + 1).padStart(2, '0')}</bdi>
+                    <Button
+                      ref={(node) => {
+                        if (node === null) segmentRefs.current.delete(beat.id);
+                        else if (node instanceof HTMLButtonElement) segmentRefs.current.set(beat.id, node);
+                      }}
+                      aria-pressed={beat.id === selectedBeat?.id}
+                      className={styles.segmentButton}
+                      draggable={!mutationLocked}
+                      onClick={() => setSelectedBeatId(beat.id)}
+                      onDragEnd={() => {
+                        draggedBeatIdRef.current = null;
+                      }}
+                      onDragStart={(event) => {
+                        draggedBeatIdRef.current = beat.id;
+                        event.dataTransfer.effectAllowed = 'move';
+                        event.dataTransfer.setData('text/plain', beat.id);
+                      }}
+                      onKeyDown={(event) => {
+                        let destination: number | null = null;
+                        if (event.key === 'ArrowUp') destination = index - 1;
+                        else if (event.key === 'ArrowDown') destination = index + 1;
+                        else if (event.key === 'Home') destination = 0;
+                        else if (event.key === 'End') destination = beatOrder.length - 1;
+                        if (destination === null) return;
+                        event.preventDefault();
+                        void reorderBeat(beat.id, destination);
+                      }}
+                    >
+                      <span className={styles.segmentHeader}>
+                        <span className={styles.ordinal} aria-hidden='true'>
+                          <bdi>{filmstripSegment?.label ?? String(index + 1).padStart(2, '0')}</bdi>
+                        </span>
+                        <span className={styles.stateDot} aria-hidden='true' />
                       </span>
-                      <span className={styles.stateDot} aria-hidden='true' />
-                    </span>
-                    <span className={styles.beatTitle} dir='auto'>
-                      {title}
-                    </span>
-                    <span className={styles.segmentDuration} data-duration-kind={beat.durationKind}>
-                      <bdi>
-                        {beat.durationSeconds === null
-                          ? t(`${CUT_ROOT}.beatDurationPending`)
-                          : t(`${CUT_ROOT}.filmstripDuration`, {
-                              seconds: beat.durationSeconds,
-                            })}
-                      </bdi>
-                    </span>
-                    <span className={styles.srOnly}>
-                      {t(`${CUT_ROOT}.beatPosition`, { position: index + 1, total: beatOrder.length })}
-                    </span>
-                    <span className={styles.srOnly}>{t(CUT_STATE_KEYS[displayState])}</span>
-                  </Button>
-                </li>
-              );
-            })}
-          </ol>
+                      <span className={styles.beatTitle} dir='auto'>
+                        {title}
+                      </span>
+                      <span className={styles.segmentDuration} data-duration-kind={beat.durationKind}>
+                        <bdi>
+                          {beat.durationSeconds === null
+                            ? t(`${CUT_ROOT}.beatDurationPending`)
+                            : t(`${CUT_ROOT}.filmstripDuration`, {
+                                seconds: beat.durationSeconds,
+                              })}
+                        </bdi>
+                      </span>
+                      <span className={styles.srOnly}>
+                        {t(`${CUT_ROOT}.beatPosition`, { position: index + 1, total: beatOrder.length })}
+                      </span>
+                      <span className={styles.srOnly}>{t(CUT_STATE_KEYS[displayState])}</span>
+                    </Button>
+                  </li>
+                );
+              })}
+            </ol>
+            <div className={styles.seekRail} data-cut-seek-rail>
+              <Slider
+                ref={setSeekSliderRoot}
+                data-cut-seek
+                disabled={!playback.available || playback.failed}
+                max={playback.durationSeconds > 0 ? playback.durationSeconds : 1}
+                min={0}
+                onChange={(value) => {
+                  if (typeof value === 'number') playerRef.current?.seek(value);
+                }}
+                step={0.1}
+                value={playback.positionSeconds}
+              />
+              <span aria-hidden='true' className={styles.seekTicks}>
+                {filmstripJoinMarks.map((join) => (
+                  <span
+                    key={join}
+                    style={{
+                      insetInlineStart: `${playback.durationSeconds > 0 ? (join / playback.durationSeconds) * 100 : 0}%`,
+                    }}
+                  />
+                ))}
+              </span>
+            </div>
+          </div>
           {selectedBeat === null ? null : (
             <div className={styles.filmstripSelection} data-cut-filmstrip-selection>
               <div className={styles.selectionIdentity}>
@@ -446,6 +572,9 @@ export const CutView: React.FC<CutViewProps> = ({
                 </span>
               </div>
               <div className={styles.selectionActions}>
+                <Button onClick={() => onOpenBeat(selectedBeat.id)} size='small' type='primary'>
+                  {t(`${CUT_ROOT}.openBeat`)}
+                </Button>
                 <Button
                   aria-label={t(`${CUT_ROOT}.moveEarlier`, { title: selectedBeat.title.trim() || selectedBeat.id })}
                   disabled={locked || !canonicalOrderReady || selectedBeatIndex === 0}
@@ -481,6 +610,41 @@ export const CutView: React.FC<CutViewProps> = ({
               {t(`${CUT_ROOT}.bed.import`)}
             </Button>
           </div>
+          {currentBed === null || projection.cut.filmDurationSeconds === null ? null : (
+            <div
+              className={styles.bedExtent}
+              data-cut-bed-extent
+              data-film-seconds={projection.cut.filmDurationSeconds}
+              data-source-seconds={currentBed.durationSeconds}
+            >
+              <div className={styles.bedExtentCopy}>
+                <strong>
+                  <bdi>
+                    {t(`${CUT_ROOT}.bed.option`, {
+                      position: currentBed.position,
+                      seconds: currentBed.durationSeconds,
+                    })}
+                  </bdi>
+                </strong>
+                <span>
+                  <bdi>{t(`${CUT_ROOT}.bed.extent`, { seconds: currentBed.durationSeconds })}</bdi>
+                </span>
+                <span>{t(`${CUT_ROOT}.bed.silentPreview`)}</span>
+              </div>
+              <div aria-hidden='true' className={styles.bedExtentTrack}>
+                <span
+                  className={styles.bedSourceExtent}
+                  data-bed-source-extent
+                  style={{ inlineSize: `${bedSourcePercent}%` }}
+                />
+                <span
+                  className={styles.bedFilmExtent}
+                  data-bed-film-extent
+                  style={{ inlineSize: `${bedFilmPercent}%` }}
+                />
+              </div>
+            </div>
+          )}
           <label>
             <span>{t(`${CUT_ROOT}.bed.label`)}</span>
             <Select
@@ -536,6 +700,39 @@ export const CutView: React.FC<CutViewProps> = ({
               <h3>{t(`${CUT_ROOT}.match.title`)}</h3>
               <p>{t(`${CUT_ROOT}.match.description`)}</p>
             </div>
+          </div>
+          <div
+            aria-label={t(`${CUT_ROOT}.match.title`)}
+            className={styles.matchThumbnails}
+            data-cut-match-thumbnails
+            role='group'
+          >
+            {projection.cut.matchCandidates.map((candidate) => {
+              const thumbnailSource =
+                candidate.coverAssetId === null ? null : createManagedStudioAssetUrl(projectId, candidate.coverAssetId);
+              const label = t(`${CUT_ROOT}.match.option`, {
+                beatTitle: candidate.beatTitle,
+                line: candidate.line,
+              });
+              return (
+                <Button
+                  key={candidate.shotId}
+                  aria-label={label}
+                  aria-pressed={candidate.shotId === projection.cut.selectedMatchShotId}
+                  className={styles.matchThumbnail}
+                  data-match-shot-id={candidate.shotId}
+                  disabled={locked}
+                  onClick={() => void chooseMatch(candidate.shotId)}
+                >
+                  {thumbnailSource === null ? (
+                    <span aria-hidden='true' className={styles.matchThumbnailPlaceholder} />
+                  ) : (
+                    <img alt='' aria-hidden='true' src={thumbnailSource} />
+                  )}
+                  <span dir='auto'>{candidate.line || candidate.shotId}</span>
+                </Button>
+              );
+            })}
           </div>
           <label>
             <span>{t(`${CUT_ROOT}.match.label`)}</span>

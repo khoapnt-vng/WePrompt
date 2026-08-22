@@ -59,6 +59,14 @@
   font-weight: var(--fw-bold);
 }
 
+.filmstripShell {
+  min-inline-size: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border-2);
+  border-radius: 10px;
+  background: var(--color-fill-1);
+}
+
 .rail {
   box-sizing: border-box;
   display: flex;
@@ -68,11 +76,45 @@
   margin: 0;
   padding: 0;
   overflow: hidden;
-  border: 1px solid var(--color-border-2);
-  border-radius: 10px;
+  border: 0;
+  border-block-end: 1px solid var(--color-border-2);
   background: var(--color-fill-1);
   list-style: none;
   user-select: none;
+}
+
+.seekRail {
+  position: relative;
+  box-sizing: border-box;
+  block-size: 18px;
+  min-inline-size: 0;
+  padding-inline: 5px;
+  background: var(--color-bg-2);
+}
+
+.seekRail :global(.arco-slider) {
+  position: relative;
+  z-index: 2;
+  block-size: 18px;
+  margin: 0;
+}
+
+.seekRail :global(.arco-slider-road) {
+  background: var(--color-fill-3);
+}
+
+.seekTicks {
+  position: absolute;
+  z-index: 1;
+  inset: 0 5px;
+  pointer-events: none;
+}
+
+.seekTicks > span {
+  position: absolute;
+  inset-block: 3px;
+  inline-size: 1px;
+  background: var(--color-border-3);
 }
 
 .panel,
@@ -251,6 +293,13 @@
   gap: 9px;
 }
 
+.joinControls {
+  display: flex;
+  min-inline-size: 0;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .preview {
   position: relative;
   display: grid;
@@ -289,6 +338,38 @@
   color: var(--text-white);
   font-family: var(--font-display);
   font-size: 18px;
+}
+
+.previewBuffering {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  inset: 0;
+  place-items: center;
+  overflow: hidden;
+  color: var(--text-white);
+  background: var(--color-mask-bg);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.previewBuffering img {
+  position: absolute;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: contain;
+  opacity: 0.6;
+}
+
+.previewBuffering span {
+  position: relative;
+  z-index: 1;
+  padding-block: 4px;
+  padding-inline: 7px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--color-mask-bg) 76%, transparent);
 }
 
 .previewBadge {
@@ -601,6 +682,7 @@
 .slate {
   display: flex;
   align-items: baseline;
+  justify-content: space-between;
   gap: 8px;
   min-inline-size: 0;
   padding-block: 6px;
@@ -642,4 +724,109 @@
   margin: 0;
   min-inline-size: 0;
   text-transform: uppercase;
+}
+
+.matchThumbnails {
+  display: grid;
+  min-inline-size: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.matchThumbnail {
+  display: grid !important;
+  block-size: auto !important;
+  min-inline-size: 0;
+  padding: 4px !important;
+  gap: 5px;
+  overflow: hidden;
+  text-align: start;
+}
+
+.matchThumbnail[aria-pressed='true'] {
+  box-shadow: inset 0 0 0 2px var(--color-primary-6);
+}
+
+.matchThumbnail img,
+.matchThumbnailPlaceholder {
+  display: block;
+  inline-size: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 4px;
+  object-fit: cover;
+  background: var(--color-fill-3);
+}
+
+.matchThumbnailPlaceholder {
+  background-image: linear-gradient(
+    135deg,
+    transparent 45%,
+    var(--color-border-3) 46%,
+    var(--color-border-3) 54%,
+    transparent 55%
+  );
+}
+
+.matchThumbnail > span:last-child {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bedExtent {
+  display: grid;
+  min-inline-size: 0;
+  gap: 7px;
+  padding-block: 9px;
+  padding-inline: 10px;
+  border: 1px solid var(--color-border-2);
+  border-radius: 8px;
+  background: var(--color-fill-1);
+}
+
+.bedExtentCopy {
+  display: flex;
+  min-inline-size: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.bedExtentCopy strong {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.bedExtentCopy span {
+  color: var(--color-text-3);
+  font-size: 10px;
+}
+
+.bedExtentTrack {
+  position: relative;
+  block-size: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--color-fill-3);
+}
+
+.bedSourceExtent,
+.bedFilmExtent {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+}
+
+.bedSourceExtent {
+  inline-size: 100%;
+  background: var(--color-primary-light-2);
+}
+
+.bedFilmExtent {
+  border-inline-end: 2px solid var(--color-primary-6);
+  background: color-mix(in srgb, var(--color-primary-6) 35%, transparent);
 }
