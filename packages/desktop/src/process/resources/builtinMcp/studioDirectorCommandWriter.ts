@@ -30,10 +30,12 @@ import {
   parseStudioDirectorCommandSlotV2,
   parseStudioDirectorPendingRecordV2,
 } from '@process/services/creative-studio/service/directorCommandContracts';
+import { validateStudioMutationOperationV2 } from '@process/services/creative-studio/service/schema2';
 import {
-  validateStudioMutationOperationV2,
-  validateStudioProjectV2,
-} from '@process/services/creative-studio/service/schema2';
+  decodeStudioProjectManifestV2,
+  STUDIO_BRIEF_FILE_MAX_BYTES,
+  STUDIO_BRIEF_FILE_NAME,
+} from '@process/services/creative-studio/service/briefFile';
 import {
   RecordIoError,
   type RecordIoFileSystem,
@@ -153,6 +155,8 @@ type ProjectAuthorityV2 = {
   rootIdentity: { dev: number; ino: number };
   bytes: string;
   identity: { dev: number; ino: number };
+  briefBytes: string | null;
+  briefIdentity: { dev: number; ino: number } | null;
   project: StudioProjectV2;
 };
 
@@ -211,6 +215,12 @@ const captureProjectAuthorityV2 = async (
       maxBytes: STUDIO_PROJECT_V2_MAX_RECORD_BYTES,
     });
     if (record === null) return { status: 'invalid' };
+    const briefRecord = await readBoundedRegularFileWithIdentity({
+      fs,
+      canonicalRoot,
+      file: path.join(canonicalRoot, STUDIO_BRIEF_FILE_NAME),
+      maxBytes: STUDIO_BRIEF_FILE_MAX_BYTES,
+    });
     const value = parseJson(record.bytes);
     if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
       const descriptor = Object.getOwnPropertyDescriptor(value, 'schemaVersion');
@@ -218,10 +228,14 @@ const captureProjectAuthorityV2 = async (
         return { status: 'unsupported_prototype_schema' };
       }
     }
-    if (!validateStudioProjectV2(value) || value.schemaVersion !== STUDIO_PROJECT_SCHEMA_VERSION) {
+    const decoded = decodeStudioProjectManifestV2(value, briefRecord?.bytes ?? null);
+    if (
+      decoded === null ||
+      (decoded.kind === 'brief_file' && !decoded.synchronized) ||
+      decoded.project.schemaVersion !== STUDIO_PROJECT_SCHEMA_VERSION
+    )
       return { status: 'invalid' };
-    }
-    if (value.id !== config.projectId) return { status: 'invalid' };
+    if (decoded.project.id !== config.projectId) return { status: 'invalid' };
     return {
       status: 'valid',
       authority: {
@@ -229,7 +243,9 @@ const captureProjectAuthorityV2 = async (
         rootIdentity: { dev: canonicalStats.dev, ino: canonicalStats.ino },
         bytes: record.bytes,
         identity: record.identity,
-        project: value,
+        briefBytes: briefRecord?.bytes ?? null,
+        briefIdentity: briefRecord?.identity ?? null,
+        project: decoded.project,
       },
     };
   } catch (error) {
@@ -255,7 +271,13 @@ const projectAuthorityStatusV2 = async (
     if (
       current.authority.identity.dev === authority.identity.dev &&
       current.authority.identity.ino === authority.identity.ino &&
-      current.authority.bytes === authority.bytes
+      current.authority.bytes === authority.bytes &&
+      ((current.authority.briefIdentity === null && authority.briefIdentity === null) ||
+        (current.authority.briefIdentity !== null &&
+          authority.briefIdentity !== null &&
+          current.authority.briefIdentity.dev === authority.briefIdentity.dev &&
+          current.authority.briefIdentity.ino === authority.briefIdentity.ino)) &&
+      current.authority.briefBytes === authority.briefBytes
     ) {
       return 'valid';
     }

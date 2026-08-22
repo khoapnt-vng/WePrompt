@@ -155,6 +155,8 @@ vi.mock('react-i18next', () => ({
       if (key.endsWith('.film.slateCount_other')) return `${values?.count} Slates`;
       if (key.endsWith('.film.counts')) return `${values?.beats} · ${values?.shots} · ${values?.slates}`;
       if (key.endsWith('.film.title')) return 'The film';
+      if (key.endsWith('.film.under')) return `${String(values?.clock)} under`;
+      if (key.endsWith('.film.over')) return `${String(values?.clock)} over`;
       if (key.endsWith('.filmstripDuration')) return `${values?.seconds}s`;
       if (key.endsWith('.preview.play')) return 'Play film';
       if (key.endsWith('.preview.pause')) return 'Pause film';
@@ -1908,6 +1910,7 @@ describe('the Cut renders the film it is judging', () => {
     expect(panel).not.toBeNull();
     expect(panel?.textContent).toContain('2:58');
     expect(panel?.textContent).toContain('3:00');
+    expect(panel?.textContent).toContain('0:02 under');
     expect(panel?.getAttribute('data-film-delta')).toBe('under');
   });
 
@@ -1919,7 +1922,9 @@ describe('the Cut renders the film it is judging', () => {
 
   it('marks a film that runs past its target', () => {
     renderCut({ cutProjection: cut({ filmDurationSeconds: 200, targetDurationSeconds: 180 }) });
-    expect(document.querySelector('[data-cut-film]')?.getAttribute('data-film-delta')).toBe('over');
+    const panel = document.querySelector('[data-cut-film]');
+    expect(panel).toHaveTextContent('0:20 over');
+    expect(panel?.getAttribute('data-film-delta')).toBe('over');
   });
 
   it('states no gap rather than an on-target one when the target is unknown', () => {

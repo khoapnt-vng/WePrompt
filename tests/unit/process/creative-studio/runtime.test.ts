@@ -122,6 +122,7 @@ const createHarness = (
     calls.push('dispose-reference-watch');
     failDispose('reference');
   });
+  const watchBriefsV2 = vi.fn(async () => async () => undefined);
   const store = {
     inspectProjectsV2,
     getProjectV2: vi.fn(async (projectId: string) =>
@@ -155,6 +156,7 @@ const createHarness = (
       calls.push('reap-references');
       await holdActivation('reap-references');
     }),
+    watchBriefsV2,
     watchProposalsV2: vi.fn(async () => {
       calls.push('watch-proposals');
       await holdActivation('watch-proposals');
@@ -355,6 +357,7 @@ const createHarness = (
     calls,
     factoryCalls,
     inspectProjectsV2,
+    watchBriefsV2,
     proposalDisposer,
     referenceDisposer,
     getResolverDependencies: () => resolverDependencies,
@@ -440,6 +443,7 @@ describe('Creative Studio schema-2 runtime activation', () => {
     ]);
     expect(harness.mediaStore.resumeConditioningFramesV2).toHaveBeenCalledWith(['project_a', 'project_b']);
     expect(harness.jobManager.resumePendingJobsV2).toHaveBeenCalledWith(['project_a', 'project_b']);
+    expect(harness.watchBriefsV2).toHaveBeenCalledOnce();
     expect(harness.calls).toEqual([
       'cleanup-parts',
       'reap-proposals',

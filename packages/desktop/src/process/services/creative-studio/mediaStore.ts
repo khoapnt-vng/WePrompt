@@ -32,11 +32,12 @@ import {
   isStudioBriefReferenceLabel,
   isStudioReferenceImageMimeType,
 } from '@/common/types/project/creativeStudioManagedAssetCollections';
+import { applyStudioMutationBatchV2, type StudioVerifiedConditioningFrameV2 } from './service/schema2';
 import {
-  applyStudioMutationBatchV2,
-  validateStudioProjectV2,
-  type StudioVerifiedConditioningFrameV2,
-} from './service/schema2';
+  decodeStudioProjectManifestV2,
+  STUDIO_BRIEF_FILE_MAX_BYTES,
+  STUDIO_BRIEF_FILE_NAME,
+} from './service/briefFile';
 import {
   CreativeStudioStoreError,
   STUDIO_PROJECT_V2_MAX_RECORD_BYTES,
@@ -474,6 +475,10 @@ type StudioProjectPathAuthorityV2 = {
   manifestIdentity: FileIdentity;
   manifestByteLength: number;
   manifestSha256: string;
+  briefPath: string;
+  briefIdentity: FileIdentity;
+  briefByteLength: number;
+  briefSha256: string;
 };
 
 type ManagedPathCleanupOutcomeV2 = 'completed' | 'authority_changed';
@@ -511,6 +516,7 @@ const captureStudioProjectPathAuthorityV2 = async (
   projectDir: string
 ): Promise<CapturedStudioProjectPathAuthorityV2> => {
   let handle: Awaited<ReturnType<typeof fs.open>> | null = null;
+  let briefHandle: Awaited<ReturnType<typeof fs.open>> | null = null;
   try {
     const directoryStats = await fs.lstat(projectDir);
     if (
@@ -531,6 +537,13 @@ const captureStudioProjectPathAuthorityV2 = async (
       throw new CreativeStudioMediaError('storage_error');
     }
     const manifestIdentity = fileIdentity(manifestStats);
+    const briefPath = path.join(projectDir, STUDIO_BRIEF_FILE_NAME);
+    if (path.dirname(briefPath) !== projectDir) throw new CreativeStudioMediaError('storage_error');
+    const briefStats = await fs.lstat(briefPath);
+    if (!briefStats.isFile() || briefStats.isSymbolicLink() || (await fs.realpath(briefPath)) !== briefPath) {
+      throw new CreativeStudioMediaError('storage_error');
+    }
+    const briefIdentity = fileIdentity(briefStats);
     handle = await fs.open(
       manifestPath,
       fsConstants.O_RDONLY | (typeof fsConstants.O_NOFOLLOW === 'number' ? fsConstants.O_NOFOLLOW : 0)
@@ -547,7 +560,25 @@ const captureStudioProjectPathAuthorityV2 = async (
       throw new CreativeStudioMediaError('storage_error');
     }
     const bytes = await handle.readFile();
-    const parsed = JSON.parse(bytes.toString('utf8')) as unknown;
+    const parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown;
+    briefHandle = await fs.open(
+      briefPath,
+      fsConstants.O_RDONLY | (typeof fsConstants.O_NOFOLLOW === 'number' ? fsConstants.O_NOFOLLOW : 0)
+    );
+    const briefBefore = await briefHandle.stat();
+    const briefBeforeIdentity = fileIdentity(briefBefore);
+    if (
+      !briefBefore.isFile() ||
+      briefBeforeIdentity.dev !== briefIdentity.dev ||
+      briefBeforeIdentity.ino !== briefIdentity.ino ||
+      briefBefore.size > STUDIO_BRIEF_FILE_MAX_BYTES
+    ) {
+      throw new CreativeStudioMediaError('storage_error');
+    }
+    const briefBytes = await briefHandle.readFile();
+    const briefAfter = await briefHandle.stat();
+    const briefAfterIdentity = fileIdentity(briefAfter);
+    const decoded = decodeStudioProjectManifestV2(parsed, new TextDecoder('utf-8', { fatal: true }).decode(briefBytes));
     const after = await handle.stat();
     const afterIdentity = fileIdentity(after);
     if (
@@ -556,16 +587,24 @@ const captureStudioProjectPathAuthorityV2 = async (
       bytes.length !== before.size ||
       after.size !== before.size ||
       after.mtimeMs !== before.mtimeMs ||
-      !validateStudioProjectV2(parsed) ||
-      parsed.schemaVersion !== 2 ||
-      parsed.id !== projectId
+      briefAfterIdentity.dev !== briefBeforeIdentity.dev ||
+      briefAfterIdentity.ino !== briefBeforeIdentity.ino ||
+      briefBytes.length !== briefBefore.size ||
+      briefAfter.size !== briefBefore.size ||
+      briefAfter.mtimeMs !== briefBefore.mtimeMs ||
+      decoded === null ||
+      !decoded.synchronized ||
+      decoded.project.schemaVersion !== 2 ||
+      decoded.project.id !== projectId
     ) {
       throw new CreativeStudioMediaError('storage_error');
     }
     const finalDirectoryStats = await fs.lstat(projectDir);
     const finalManifestStats = await fs.lstat(manifestPath);
+    const finalBriefStats = await fs.lstat(briefPath);
     const finalDirectoryIdentity = fileIdentity(finalDirectoryStats);
     const finalManifestIdentity = fileIdentity(finalManifestStats);
+    const finalBriefIdentity = fileIdentity(finalBriefStats);
     if (
       !finalDirectoryStats.isDirectory() ||
       finalDirectoryStats.isSymbolicLink() ||
@@ -576,7 +615,13 @@ const captureStudioProjectPathAuthorityV2 = async (
       finalManifestIdentity.dev !== manifestIdentity.dev ||
       finalManifestIdentity.ino !== manifestIdentity.ino ||
       finalManifestStats.size !== before.size ||
-      finalManifestStats.mtimeMs !== before.mtimeMs
+      finalManifestStats.mtimeMs !== before.mtimeMs ||
+      !finalBriefStats.isFile() ||
+      finalBriefStats.isSymbolicLink() ||
+      finalBriefIdentity.dev !== briefIdentity.dev ||
+      finalBriefIdentity.ino !== briefIdentity.ino ||
+      finalBriefStats.size !== briefBefore.size ||
+      finalBriefStats.mtimeMs !== briefBefore.mtimeMs
     ) {
       throw new CreativeStudioMediaError('storage_error');
     }
@@ -589,14 +634,19 @@ const captureStudioProjectPathAuthorityV2 = async (
         manifestIdentity,
         manifestByteLength: bytes.length,
         manifestSha256: createHash('sha256').update(bytes).digest('hex'),
+        briefPath,
+        briefIdentity,
+        briefByteLength: briefBytes.length,
+        briefSha256: createHash('sha256').update(briefBytes).digest('hex'),
       },
-      project: parsed,
+      project: decoded.project,
     };
   } catch (error) {
     if (error instanceof CreativeStudioMediaError) throw error;
     throw new CreativeStudioMediaError('storage_error');
   } finally {
     await handle?.close().catch((): undefined => undefined);
+    await briefHandle?.close().catch((): undefined => undefined);
   }
 };
 
@@ -609,7 +659,12 @@ const assertStudioProjectPathAuthorityV2 = async (authority: StudioProjectPathAu
     current.manifestIdentity.dev !== authority.manifestIdentity.dev ||
     current.manifestIdentity.ino !== authority.manifestIdentity.ino ||
     current.manifestByteLength !== authority.manifestByteLength ||
-    current.manifestSha256 !== authority.manifestSha256
+    current.manifestSha256 !== authority.manifestSha256 ||
+    current.briefPath !== authority.briefPath ||
+    current.briefIdentity.dev !== authority.briefIdentity.dev ||
+    current.briefIdentity.ino !== authority.briefIdentity.ino ||
+    current.briefByteLength !== authority.briefByteLength ||
+    current.briefSha256 !== authority.briefSha256
   ) {
     throw new CreativeStudioMediaError('storage_error');
   }

@@ -921,6 +921,10 @@
           "position": "{{current}} / {{total}}",
           "pictureOnly": "Solo imagen — aquí la pista de audio está silenciada",
           "controlsLabel": "Controles de reproducción de la película"
+        },
+        "film": {
+          "under": "{{clock}} por debajo",
+          "over": "{{clock}} por encima"
         }
       },
       "beatPanel": {

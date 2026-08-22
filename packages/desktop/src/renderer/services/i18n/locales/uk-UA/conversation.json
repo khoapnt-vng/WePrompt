@@ -922,6 +922,10 @@
           "position": "{{current}} / {{total}}",
           "pictureOnly": "Лише зображення — аудіодоріжку тут вимкнено",
           "controlsLabel": "Керування відтворенням фільму"
+        },
+        "film": {
+          "under": "на {{clock}} менше",
+          "over": "на {{clock}} більше"
         }
       },
       "beatPanel": {

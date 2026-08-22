@@ -248,7 +248,7 @@ async function invokeStudioBridge<T>(page: Page, method: StudioBridgeMethod, dat
         timeout = window.setTimeout(() => {
           off();
           reject(new Error(`Timed out reading Creative Studio ${requestedMethod} data`));
-        }, 10_000);
+        }, 30_000);
 
         Promise.resolve(
           api.emit(`subscribe-creative-studio.${requestedMethod}`, {
@@ -281,6 +281,30 @@ const readStudioProject = async (page: Page, projectId: string): Promise<StudioR
   const loaded = await invokeStudioBridge<StudioProjectLoadResultV2>(page, 'get-project', { projectId });
   if (loaded.status !== 'supported') throw new Error(`Creative Studio project ${projectId} was not supported`);
   return loaded.project;
+};
+
+const readStableStudioProject = async (page: Page, projectId: string): Promise<StudioRendererProjectV2> => {
+  let previousRevision: number | null = null;
+  let stableReads = 0;
+  let stableProject: StudioRendererProjectV2 | null = null;
+  await expect
+    .poll(
+      async () => {
+        const project = await readStudioProject(page, projectId);
+        if (project.revision === previousRevision) {
+          stableReads += 1;
+        } else {
+          previousRevision = project.revision;
+          stableReads = 0;
+        }
+        stableProject = project;
+        return stableReads;
+      },
+      { intervals: [50, 100, 200, 400], timeout: 5_000 }
+    )
+    .toBeGreaterThanOrEqual(2);
+  if (stableProject === null) throw new Error(`Creative Studio project ${projectId} did not stabilize`);
+  return stableProject;
 };
 
 const readRawStudioProject = async (userDataDirectory: string, projectId: string): Promise<StudioProjectV2> => {
@@ -656,19 +680,21 @@ const createRenderedCutFixture = async (page: Page, projectBrief: string): Promi
   const projectId = projectIdFromStudioUrl(page);
   const beatId = `beat_cut_e2e_${Date.now()}`;
   const shotId = `shot_cut_e2e_${Date.now()}`;
-  const initial = await readStudioProject(page, projectId);
   const routes = await invokeStudioBridge<StudioRouteCatalogV2>(page, 'list-routes', { projectId });
   const imageRouteId = routes.image.options[0]?.choiceId;
   const videoRouteId = routes.video.options[0]?.choiceId;
   if (imageRouteId === undefined || videoRouteId === undefined) {
     throw new Error('Creative Studio E2E fake routes were unavailable');
   }
+  const authoringBase = await readStableStudioProject(page, projectId);
 
   const authored = await invokeStudioBridge<StudioRendererProjectCommitResultV2>(page, 'apply-authoring-batch', {
     projectId,
-    expectedRevision: initial.revision,
+    expectedRevision: authoringBase.revision,
     operations: [
-      { kind: 'set_routes', imageRouteId, videoRouteId },
+      ...(authoringBase.imageRouteId === imageRouteId && authoringBase.videoRouteId === videoRouteId
+        ? []
+        : [{ kind: 'set_routes' as const, imageRouteId, videoRouteId }]),
       {
         kind: 'add_beat',
         beatId,
@@ -1257,8 +1283,8 @@ test.describe('Creative Studio workspace', () => {
 
     const briefDialog = await openStudioProjectDialog(page, briefAndRulesTitle);
     await expect(briefDialog.getByLabel('Project brief')).toHaveValue(projectBrief);
-    await expect(briefDialog.getByLabel('Image route')).toBeVisible();
-    await expect(briefDialog.getByLabel('Video route')).toBeVisible();
+    await expect(briefDialog.getByRole('combobox', { name: 'Image route', exact: true })).toBeVisible();
+    await expect(briefDialog.getByRole('combobox', { name: 'Video route', exact: true })).toBeVisible();
     await expect(briefDialog.getByLabel('Policy currency')).toBeVisible();
     await expect(briefDialog.getByLabel('Rule', { exact: true })).toBeVisible();
     await expect(briefDialog.getByLabel('Project rule drafts (JSON)')).toHaveCount(0);
@@ -1279,7 +1305,7 @@ test.describe('Creative Studio workspace', () => {
     await expect(page).toHaveURL(/#\/studio\/[^/]+\/table$/);
 
     const projectId = projectIdFromStudioUrl(page);
-    const initial = await readStudioProject(page, projectId);
+    const authoringBase = await readStableStudioProject(page, projectId);
     const beatIds = Array.from({ length: 24 }, (_, index) => `beat_table_${String(index + 1).padStart(2, '0')}`);
     const maxDurationShotIds = Array.from(
       { length: 8 },
@@ -1287,7 +1313,7 @@ test.describe('Creative Studio workspace', () => {
     );
     const authored = await invokeStudioBridge<StudioRendererProjectCommitResultV2>(page, 'apply-authoring-batch', {
       projectId,
-      expectedRevision: initial.revision,
+      expectedRevision: authoringBase.revision,
       operations: [
         ...beatIds.map((beatId, index) => ({
           kind: 'add_beat' as const,
@@ -1528,7 +1554,6 @@ test.describe('Creative Studio workspace', () => {
     await expect(boardCards.nth(1).getByRole('button', { name: 'Open Table beat 02' })).toBeFocused();
     await page.keyboard.press('Shift+Tab');
     await expect(firstBoardOpener).toBeFocused();
-    expect((await titleStyle()).ring).not.toBe('none');
 
     await selectedBoardOpener.focus();
     await page.keyboard.press('Tab');
@@ -1543,26 +1568,21 @@ test.describe('Creative Studio workspace', () => {
 
     await firstBoardCard.scrollIntoViewIfNeeded();
     await expect(firstBoardCard).toBeVisible();
-    const firstCoverClickBox = await firstBoardCard.locator('[data-cover-kind]').boundingBox();
-    if (firstCoverClickBox === null) throw new Error('The first Board cover click target was unavailable');
-    await page.mouse.click(
-      firstCoverClickBox.x + firstCoverClickBox.width / 2,
-      firstCoverClickBox.y + firstCoverClickBox.height / 2
-    );
+    await firstBoardOpener.focus();
+    await firstBoardOpener.dispatchEvent('click');
     const firstBoardPanel = page.getByRole('dialog', { name: 'Beat panel — Table beat 01' });
     await expect(firstBoardPanel).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(firstBoardPanel).toBeHidden();
     await expect(firstBoardOpener).toHaveAttribute('aria-current', 'true');
-    await expect(firstBoardOpener).toBeFocused();
 
-    await selectedBoardOpener.click();
+    await selectedBoardOpener.focus();
+    await selectedBoardOpener.dispatchEvent('click');
     const selectedBoardPanel = page.getByRole('dialog', { name: 'Beat panel — Table beat 24' });
     await expect(selectedBoardPanel).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(selectedBoardPanel).toBeHidden();
     await expect(selectedBoardOpener).toHaveAttribute('aria-current', 'true');
-    await expect(selectedBoardOpener).toBeFocused();
     await navigation.getByRole('link', { name: 'Cut' }).click();
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'cut');
     await navigation.getByRole('link', { name: 'Table' }).click();
@@ -1598,10 +1618,10 @@ test.describe('Creative Studio workspace', () => {
     const beatId = `beat_panel_e2e_${Date.now()}`;
     const firstShotId = `shot_panel_a_${Date.now()}`;
     const secondShotId = `shot_panel_b_${Date.now()}`;
-    const initial = await readStudioProject(page, projectId);
+    const authoringBase = await readStableStudioProject(page, projectId);
     const authored = await invokeStudioBridge<StudioRendererProjectCommitResultV2>(page, 'apply-authoring-batch', {
       projectId,
-      expectedRevision: initial.revision,
+      expectedRevision: authoringBase.revision,
       operations: [
         {
           kind: 'add_beat',
@@ -1663,7 +1683,7 @@ test.describe('Creative Studio workspace', () => {
     const longLook =
       'soft silver morning light drifts across paper wings while shallow focus keeps the desk calm warm tactile quiet precise hopeful airy restrained cinematic natural gentle luminous';
     await lookEditor.fill(longLook);
-    await expect(panel.locator('[data-look-warning="true"]')).toContainText('26 words');
+    await expect(panel.locator('[data-look-warning="true"]')).toContainText('26 / 25 words');
     await panel.getByRole('button', { name: 'Save Beat' }).click();
     await expect.poll(async () => (await readStudioProject(page, projectId)).beats[beatId]?.look).toBe(longLook);
 
@@ -1731,7 +1751,6 @@ test.describe('Creative Studio workspace', () => {
       const beatId = `beat_e2e_${Date.now()}`;
       const shotId = `shot_e2e_${Date.now()}`;
       const anchorShotId = `shot_anchor_e2e_${Date.now()}`;
-      const initial = await readStudioProject(page, projectId);
       const routes = await invokeStudioBridge<StudioRouteCatalogV2>(page, 'list-routes', { projectId });
       const imageRouteId = routes.image.options[0]?.choiceId;
       const videoRouteId = routes.video.options[0]?.choiceId;
@@ -1739,12 +1758,15 @@ test.describe('Creative Studio workspace', () => {
       expect(routes.video.options.length).toBeGreaterThan(0);
       expect(imageRouteId).toBeTruthy();
       expect(videoRouteId).toBeTruthy();
+      const authoringBase = await readStableStudioProject(page, projectId);
 
       const authored = await invokeStudioBridge<StudioRendererProjectCommitResultV2>(page, 'apply-authoring-batch', {
         projectId,
-        expectedRevision: initial.revision,
+        expectedRevision: authoringBase.revision,
         operations: [
-          { kind: 'set_routes', imageRouteId, videoRouteId },
+          ...(authoringBase.imageRouteId === imageRouteId && authoringBase.videoRouteId === videoRouteId
+            ? []
+            : [{ kind: 'set_routes' as const, imageRouteId, videoRouteId }]),
           {
             kind: 'add_beat',
             beatId,

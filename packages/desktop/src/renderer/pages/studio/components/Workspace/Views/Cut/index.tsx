@@ -232,6 +232,7 @@ export const CutView: React.FC<CutViewProps> = ({
   const film = buildCutFilmSummary(projection.cut);
   const filmClock = formatCutClock(film.filmSeconds);
   const targetClock = formatCutClock(film.targetSeconds);
+  const deltaClock = formatCutClock(film.delta?.seconds ?? null);
   const slates = buildCutSlateWarnings(projection.cut);
   const filmstrip = buildCutFilmstrip(projection.cut);
   const filmstripByBeatId = new Map(filmstrip?.map((segment) => [segment.beatId, segment]) ?? []);
@@ -292,7 +293,7 @@ export const CutView: React.FC<CutViewProps> = ({
                 <bdi dir='auto'>
                   {film.delta.kind === 'on_target'
                     ? t(`${CUT_ROOT}.film.onTarget`)
-                    : t(`${CUT_ROOT}.film.${film.delta.kind}`, { seconds: film.delta.seconds })}
+                    : t(`${CUT_ROOT}.film.${film.delta.kind}`, { clock: deltaClock })}
                 </bdi>
               </span>
             )}

@@ -296,11 +296,12 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - Same anti-pattern as BUG-062: a distinct failure wearing a generic label. Two independent instances of it in one session.
   - **Fixed by `b01c565ee`** — validation now carries a seven-value, body-free failure reason through the service and IPC boundary to localized dialog and row-level messages.
 
-- [ ] **[BUG-091][P3][Creative Studio] The Cut states the film, the target and the gap between them in two different formats** — found 2026-08-21 while verifying BUG-084
+- [x] **[BUG-091][P3][Creative Studio] The Cut states the film, the target and the gap between them in two different formats** — found 2026-08-21 while verifying BUG-084
   - The film summary reads **`The film · 2:57 · of 0:18 target · 159s over`**. The total and the target are clocks; the difference between those same two numbers is raw seconds. A reader has to convert in their head to check that the third number follows from the first two.
   - Source: `Cut/index.tsx:269-286` renders `filmClock` and `ofTarget` through `formatCutClock`, then renders the delta through `cut.film.over` / `cut.film.under`, whose strings end in a literal `s`.
   - **Not a Codex regression, and not new.** The `{{seconds}}s` strings predate their change — they only added the rounding that BUG-084 asked for. The mixed format came in with the film summary I wrote, so this is mine.
   - The app bar already sets the house format for film-level durations: `{{film}} of {{target}} target` rendered as clocks. Making the delta a clock too would match it. The counter-argument is that `2:39 over` reads worse than `159s over` for a small gap — so this is a judgement call, not an obvious correction.
+  - **Owner decision and fix, 2026-08-22:** film-level totals, targets and deltas all use the same `m:ss` clock (`2:57 · of 0:18 target · 2:39 over`). Raw seconds remain appropriate for Shot-level trims and timing controls. The two delta phrases are localized with a `{{clock}}` placeholder in every configured locale.
 
 - [x] **[BUG-092][P2][Platform] Presentation-run recovery can never work: the IPC schema demands a UUID, conversation ids are eight characters** — found 2026-08-21, root-caused with a probe in a restarted dev build
   - Every project creation throws an unhandled page error. The rejected call is **`presentation-runs.list-recoverable`**, and the failing field is `conversation_id`:
@@ -385,12 +386,13 @@ IT RENDERS` (IBM Plex Mono 9px, 0.9px tracking, `#8C7F6C`). Each card carries th
     and focus recovery. Legacy `brief.rules` JSON drafts are retired without overwriting authority;
     bounded project-scoped draft persistence and close protection preserve unfinished human input.
 
-- [ ] **[BUG-076][P2][Creative Studio] The Brief is a string in a JSON blob, not the hand-editable `brief.md` the design promises** — found 2026-08-21 by driving the pinned prototype against the build
+- [x] **[BUG-076][P2][Creative Studio] The Brief is a string in a JSON blob, not the hand-editable `brief.md` the design promises** — found 2026-08-21 by driving the pinned prototype against the build
   - The designed Brief panel names the artefact **`brief.md`** (Manrope 700 15px), says it is `LOADED INTO EVERY DIRECTOR TURN`, and closes with `HAND-EDITABLE · THE APP READS IT, AN OUTSIDE EDIT IS RESPECTED`. That is a promise about a file on disk, not about a field.
   - The build has no such file. `brief.md` appears nowhere in the source, the brief is a `string` on the project record, and a project directory on disk holds exactly `commands`, `project.json`, `proposals` and `reference-requests`.
   - So the two halves of the promise are both missing: there is nothing for someone to open in an editor, and nothing to notice if they did. The brief can only be changed through the app.
   - This is a product behaviour rather than a fidelity gap, which is why it is filed separately from BUG-067. Moving the Brief into the overflow panel satisfies 067 and leaves this untouched.
   - Worth an owner decision before it is built: a hand-editable file that the app re-reads is a different persistence story from a field inside the CAS-guarded project record, and the two have to agree about who wins when both change.
+  - **Owner decision and fix, 2026-08-22:** `brief.md` is now the sole prose authority. The serialized project manifest retains only revision/digest metadata; runtime `project.brief` is hydrated from the file, and legacy inline manifests migrate without changing their revision. App writes use exact manifest-and-file CAS plus a durable bounded transaction receipt, so restart recovery completes an interrupted pair without dropping sibling mutations. A clean outside edit advances the project revision and notifies the renderer; an outside edit that races an unsaved app draft hits the existing explicit draft-conflict state and blocks saving. Concurrent file edits win without silent overwrite or auto-merge. The Director, MCP storyboard and media authority readers all validate the same file-backed project generation, while unsafe, missing, oversized or malformed current files fail closed.
 
 ## Visual fidelity against the design
 

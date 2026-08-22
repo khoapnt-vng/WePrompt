@@ -174,6 +174,7 @@ type ActivationGraph = {
   directorCommandService: StudioDirectorCommandServiceV2;
   directorCommandProcessor: StudioDirectorCommandProcessorV2;
   fakeBundle: StudioE2EFakeBundle | null;
+  briefWatcher: (() => Promise<void>) | null;
   proposalWatcher: (() => Promise<void>) | null;
   referenceWatcher: (() => Promise<void>) | null;
   processorStartAttempted: boolean;
@@ -344,6 +345,14 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
         }
         graph.proposalWatcher = null;
       }
+      if (graph.briefWatcher !== null) {
+        try {
+          await graph.briefWatcher();
+        } catch (error) {
+          errors.push(error);
+        }
+        graph.briefWatcher = null;
+      }
       try {
         await graph.jobManager.dispose();
       } catch (error) {
@@ -440,6 +449,7 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
       directorCommandService,
       directorCommandProcessor,
       fakeBundle,
+      briefWatcher: null,
       proposalWatcher: null,
       referenceWatcher: null,
       processorStartAttempted: false,
@@ -455,6 +465,8 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
       await store.reapAbandonedProposalsV2();
       if (disposed) throw new Error('Creative Studio runtime was disposed during activation');
       await store.reapAbandonedReferenceRequestsV2();
+      if (disposed) throw new Error('Creative Studio runtime was disposed during activation');
+      graph.briefWatcher = await store.watchBriefsV2(deps.onProjectUpdated);
       if (disposed) throw new Error('Creative Studio runtime was disposed during activation');
       graph.proposalWatcher = await store.watchProposalsV2(deps.onProposalUpdated);
       if (disposed) throw new Error('Creative Studio runtime was disposed during activation');

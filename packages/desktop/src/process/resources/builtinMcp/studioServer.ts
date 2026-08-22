@@ -61,7 +61,11 @@ import {
   type StudioDirectorCommandWriterDeps,
   type StudioGetCommandStatusInput,
 } from '@process/resources/builtinMcp/studioDirectorCommandWriter';
-import { validateStudioProjectV2 } from '@process/services/creative-studio/service/schema2';
+import {
+  decodeStudioProjectManifestV2,
+  STUDIO_BRIEF_FILE_MAX_BYTES,
+  STUDIO_BRIEF_FILE_NAME,
+} from '@process/services/creative-studio/service/briefFile';
 import {
   classifyStudioDirectorOperationV2,
   type StudioDirectorOperationDispositionV2,
@@ -676,6 +680,8 @@ type StudioProjectSnapshotV2 = {
   rootIdentity: { dev: number; ino: number };
   fileIdentity: { dev: number; ino: number };
   bytes: string;
+  briefFileIdentity: { dev: number; ino: number } | null;
+  briefBytes: string | null;
 };
 
 const pendingProjectAuthorityV2 = (snapshot: StudioProjectSnapshotV2): StudioPendingProjectAuthorityV2 => ({
@@ -709,6 +715,12 @@ const readProjectSnapshotV2 = async (config: StudioServerEnv): Promise<StudioPro
       maxBytes: STUDIO_PROJECT_V2_MAX_RECORD_BYTES,
     });
     if (record === null) throw new StudioProjectReadErrorV2('storage');
+    const briefRecord = await readBoundedRegularFileWithIdentity({
+      fs: recordFs,
+      canonicalRoot,
+      file: path.join(canonicalRoot, STUDIO_BRIEF_FILE_NAME),
+      maxBytes: STUDIO_BRIEF_FILE_MAX_BYTES,
+    });
     const finalRootStats = await recordFs.lstat(canonicalRoot);
     if (
       !finalRootStats.isDirectory() ||
@@ -730,15 +742,22 @@ const readProjectSnapshotV2 = async (config: StudioServerEnv): Promise<StudioPro
         throw new StudioProjectReadErrorV2('unsupported_prototype_schema');
       }
     }
-    if (!validateStudioProjectV2(raw) || raw.id !== config.projectId) {
+    const decoded = decodeStudioProjectManifestV2(raw, briefRecord?.bytes ?? null);
+    if (
+      decoded === null ||
+      (decoded.kind === 'brief_file' && !decoded.synchronized) ||
+      decoded.project.id !== config.projectId
+    ) {
       throw new StudioProjectReadErrorV2('invalid');
     }
     return {
-      project: raw,
+      project: decoded.project,
       canonicalRoot,
       rootIdentity: { dev: rootStats.dev, ino: rootStats.ino },
       fileIdentity: record.identity,
       bytes: record.bytes,
+      briefFileIdentity: briefRecord?.identity ?? null,
+      briefBytes: briefRecord?.bytes ?? null,
     };
   } catch (error) {
     if (error instanceof StudioProjectReadErrorV2) throw error;
@@ -775,11 +794,25 @@ const reassertProjectSnapshotV2 = async (config: StudioServerEnv, snapshot: Stud
       file: path.join(snapshot.canonicalRoot, 'project.json'),
       maxBytes: STUDIO_PROJECT_V2_MAX_RECORD_BYTES,
     });
+    const briefRecord = await readBoundedRegularFileWithIdentity({
+      fs: recordFs,
+      canonicalRoot: snapshot.canonicalRoot,
+      file: path.join(snapshot.canonicalRoot, STUDIO_BRIEF_FILE_NAME),
+      maxBytes: STUDIO_BRIEF_FILE_MAX_BYTES,
+    });
     if (
       record === null ||
       record.identity.dev !== snapshot.fileIdentity.dev ||
       record.identity.ino !== snapshot.fileIdentity.ino ||
-      record.bytes !== snapshot.bytes
+      record.bytes !== snapshot.bytes ||
+      !(
+        (briefRecord === null && snapshot.briefFileIdentity === null && snapshot.briefBytes === null) ||
+        (briefRecord !== null &&
+          snapshot.briefFileIdentity !== null &&
+          briefRecord.identity.dev === snapshot.briefFileIdentity.dev &&
+          briefRecord.identity.ino === snapshot.briefFileIdentity.ino &&
+          briefRecord.bytes === snapshot.briefBytes)
+      )
     ) {
       throw new StudioProjectReadErrorV2('storage');
     }

@@ -520,7 +520,7 @@ export async function readBoundedRegularFileWithIdentity(input: {
     }
     await assertNoUnconfirmedPublication(input.fs, file);
     return {
-      bytes: bytes.subarray(0, offset).toString('utf8'),
+      bytes: new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, offset)),
       identity: { dev: stats.dev, ino: stats.ino },
     };
   } catch (error) {

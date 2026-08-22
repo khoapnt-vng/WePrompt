@@ -711,6 +711,8 @@ const localizedCutPreviewKeys = [
   'cut.preview.controlsLabel',
 ] as const;
 
+const localizedCutFilmDeltaKeys = ['cut.film.under', 'cut.film.over'] as const;
+
 const localizedWorkspaceKeys = [
   'beatPanel.beatFieldsLabel',
   'beatPanel.chain.continuous',
@@ -731,6 +733,7 @@ const localizedWorkspaceKeys = [
   'beatPanel.lookCounter_one',
   'beatPanel.lookCounter_other',
   ...localizedCutPreviewKeys,
+  ...localizedCutFilmDeltaKeys,
   'controls.briefAndRulesTitle',
   'gate.errors.pricing.invalidQuote',
   'gate.errors.pricing.inactiveShot',
@@ -822,8 +825,6 @@ describe('Creative Studio workspace translations', () => {
     ['cut.actualDuration', 15.5, '16s actual'],
     ['cut.actualDuration', 1440, '1440s actual'],
     ['cut.targetDuration', 15.6, '16s target slate'],
-    ['cut.film.over', 160.069002, '160s over'],
-    ['cut.film.under', 1.6, '2s under'],
     ['beatPanel.coverage.sourceDuration', 15.069002, '15s source'],
     ['beatPanel.takes.sourceDuration', 15.069002, '15s source'],
   ])(
@@ -840,6 +841,15 @@ describe('Creative Studio workspace translations', () => {
       expect(i18n.t(`conversation.creativeStudio.workspace.${key}`, { seconds })).toBe(expected);
     }
   );
+
+  it('keeps film-level gaps in the same clock format as the film and target', () => {
+    const leaves = flattenLeaves(englishWorkspace);
+
+    expect(leaves['cut.film.over']).toBe('{{clock}} over');
+    expect(leaves['cut.film.under']).toBe('{{clock}} under');
+    expect(placeholders(leaves['cut.film.over']!)).toEqual(['clock']);
+    expect(placeholders(leaves['cut.film.under']!)).toEqual(['clock']);
+  });
 
   it.each([
     ['cut.bed.option', { position: 1, seconds: 14.6 }, 'Imported bed 1 · 15s'],
@@ -947,6 +957,14 @@ describe('Creative Studio workspace translations', () => {
         expect(guidance?.startsWith(`${conciseName} · `), `${locale}:${field}`).toBe(true);
       }
       for (const key of localizedCutPreviewKeys) {
+        const englishCopy = englishLeaves[key];
+        const localizedCopy = localizedLeaves[key];
+        expect(localizedCopy?.trim(), `${locale}:${key}`).not.toBe('');
+        expect(placeholders(localizedCopy!), `${locale}:${key}:localized placeholders`).toEqual(
+          placeholders(englishCopy!)
+        );
+      }
+      for (const key of localizedCutFilmDeltaKeys) {
         const englishCopy = englishLeaves[key];
         const localizedCopy = localizedLeaves[key];
         expect(localizedCopy?.trim(), `${locale}:${key}`).not.toBe('');

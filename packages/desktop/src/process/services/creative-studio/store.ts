@@ -57,6 +57,12 @@ import {
   validateStudioProjectV2,
   type StudioMutationApplyResultV2,
 } from './service/schema2';
+import {
+  createStudioProjectManifestV2,
+  decodeStudioProjectManifestV2,
+  STUDIO_BRIEF_FILE_MAX_BYTES,
+  STUDIO_BRIEF_FILE_NAME,
+} from './service/briefFile';
 
 const SAFE_ID = /^[A-Za-z0-9_-]+$/;
 const STUDIO_PROJECT_V2_MAX_ID_LENGTH = 256;
@@ -80,6 +86,20 @@ const CONNECTION_BINDING_KEYS = new Set([
   'capabilities',
   'validatedAt',
 ]);
+const STUDIO_BRIEF_TRANSACTION_FILE_NAME = '.brief-transaction.json';
+const STUDIO_BRIEF_TRANSACTION_SCHEMA_VERSION = 1 as const;
+// JSON escaping can expand a valid 64 KiB Brief by up to six bytes per source byte.
+const STUDIO_BRIEF_TRANSACTION_MAX_BYTES = 512 * 1024;
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+
+type StudioBriefTransactionV2 = {
+  schemaVersion: typeof STUDIO_BRIEF_TRANSACTION_SCHEMA_VERSION;
+  projectId: string;
+  baseManifestSha256: string;
+  baseBriefSha256: string | null;
+  candidateManifestSha256: string;
+  candidateBrief: string;
+};
 const CONNECTION_MANIFEST_KEYS = new Set(['schemaVersion', 'connections']);
 const CONNECTION_CAPABILITY_KEYS = new Set([
   'mediaKinds',
@@ -344,6 +364,7 @@ export type CreativeStudioStore = {
   rejectProposalV2(projectId: string, proposalId: string): Promise<StudioProposalV2>;
   reapAbandonedProposalsV2(): Promise<void>;
   watchProposalsV2(listener: (projectId: string, proposalId: string) => void): Promise<() => Promise<void>>;
+  watchBriefsV2(listener: (projectId: string) => void): Promise<() => Promise<void>>;
   resolveProposalPathsV2(projectId: string): Promise<{ projectDir: string; pendingDir: string }>;
   listReferenceRequestsV2(projectId: string): Promise<StudioReferenceRequestLedgerEntryV2[]>;
   decideReferenceRequestV2(input: StudioDecideReferenceRequestInputV2): Promise<StudioReferenceRequestLedgerEntryV2>;
@@ -392,6 +413,9 @@ type ProjectFileInspectionV2 =
       bytes: string;
       identity: FileIdentityV2;
       directory: DirectoryAuthorityV2;
+      briefFile: { status: 'missing' } | { status: 'present'; bytes: string; identity: FileIdentityV2 };
+      briefManifestKind: 'legacy' | 'brief_file';
+      briefSynchronized: boolean;
     }
   | { status: 'unsupported_prototype_schema'; projectId: string }
   | { status: 'not_found'; projectId: string }
@@ -510,6 +534,29 @@ type ReferenceRequestLedgerV2 = {
 
 const isRecord = (value: unknown): value is JsonRecord =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const parseStudioBriefTransactionV2 = (value: unknown): StudioBriefTransactionV2 | null => {
+  if (
+    !isRecord(value) ||
+    Reflect.ownKeys(value).length !== 6 ||
+    value.schemaVersion !== STUDIO_BRIEF_TRANSACTION_SCHEMA_VERSION ||
+    typeof value.projectId !== 'string' ||
+    !isSafeIdV2(value.projectId) ||
+    typeof value.baseManifestSha256 !== 'string' ||
+    !SHA256_HEX.test(value.baseManifestSha256) ||
+    !(
+      value.baseBriefSha256 === null ||
+      (typeof value.baseBriefSha256 === 'string' && SHA256_HEX.test(value.baseBriefSha256))
+    ) ||
+    typeof value.candidateManifestSha256 !== 'string' ||
+    !SHA256_HEX.test(value.candidateManifestSha256) ||
+    typeof value.candidateBrief !== 'string' ||
+    Buffer.byteLength(value.candidateBrief, 'utf8') > STUDIO_BRIEF_FILE_MAX_BYTES
+  ) {
+    return null;
+  }
+  return value as StudioBriefTransactionV2;
+};
 
 const normalizeConnectionFieldKey = (key: string): string =>
   key
@@ -2771,7 +2818,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     writeBytesAtomic(root, file, serializeJsonExact(value));
 
   const serializeProjectV2ForWrite = (project: StudioProjectV2, label: string): string => {
-    const bytes = serializeJsonExact(project);
+    const bytes = serializeJsonExact(createStudioProjectManifestV2(project));
     if (Buffer.byteLength(bytes, 'utf8') > STUDIO_PROJECT_V2_MAX_RECORD_BYTES) {
       throw new CreativeStudioStoreError('invalid_payload', `${label} is too large`);
     }
@@ -3105,10 +3152,17 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       } catch {
         throw new CreativeStudioStoreError('storage_error', 'Studio project deletion quarantine manifest is malformed');
       }
+      const quarantinedBrief = await readBoundedRegularFileWithIdentity({
+        fs,
+        canonicalRoot: root,
+        file: path.join(quarantineDirectory, STUDIO_BRIEF_FILE_NAME),
+        maxBytes: STUDIO_BRIEF_FILE_MAX_BYTES,
+      });
+      const decodedQuarantined = decodeStudioProjectManifestV2(quarantinedProject, quarantinedBrief?.bytes ?? null);
       if (
-        !validateStudioProjectV2(quarantinedProject) ||
-        quarantinedProject.id !== marker.record.projectId ||
-        quarantinedProject.revision !== marker.record.expectedRevision
+        decodedQuarantined === null ||
+        decodedQuarantined.project.id !== marker.record.projectId ||
+        decodedQuarantined.project.revision !== marker.record.expectedRevision
       ) {
         throw new CreativeStudioStoreError('storage_error', 'Studio project deletion quarantine manifest changed');
       }
@@ -3270,10 +3324,176 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     return next;
   };
 
+  const recoverBriefTransactionV2 = async (root: string, directory: DirectoryAuthorityV2): Promise<void> => {
+    const transactionFile = resolveRootChild(directory.path, STUDIO_BRIEF_TRANSACTION_FILE_NAME);
+    let transactionRecord: Awaited<ReturnType<typeof readBoundedRegularFileWithIdentity>>;
+    try {
+      transactionRecord = await readBoundedRegularFileWithIdentity({
+        fs,
+        canonicalRoot: root,
+        file: transactionFile,
+        maxBytes: STUDIO_BRIEF_TRANSACTION_MAX_BYTES,
+      });
+    } catch (error) {
+      throw storageError(error, 'Schema-2 Studio Brief transaction could not be read');
+    }
+    if (transactionRecord === null) return;
+    let transaction: StudioBriefTransactionV2 | null = null;
+    try {
+      transaction = parseStudioBriefTransactionV2(JSON.parse(transactionRecord.bytes) as unknown);
+    } catch {
+      // The exact fixed-name transaction is store-owned; malformed bytes are never guessed or removed.
+    }
+    if (transaction === null || transaction.projectId !== path.basename(directory.path)) {
+      throw new CreativeStudioStoreError('storage_error', 'Malformed schema-2 Studio Brief transaction');
+    }
+    const projectFile = resolveRootChild(directory.path, 'project.json');
+    const briefFile = resolveRootChild(directory.path, STUDIO_BRIEF_FILE_NAME);
+    const readManifest = async (): Promise<
+      NonNullable<Awaited<ReturnType<typeof readBoundedRegularFileWithIdentity>>>
+    > => {
+      const current = await readBoundedRegularFileWithIdentity({
+        fs,
+        canonicalRoot: root,
+        file: projectFile,
+        maxBytes: STUDIO_PROJECT_V2_MAX_RECORD_BYTES,
+      });
+      if (current === null) throw new CreativeStudioStoreError('storage_error', 'Studio project manifest is missing');
+      return current;
+    };
+    const readBrief = (): Promise<Awaited<ReturnType<typeof readBoundedRegularFileWithIdentity>>> =>
+      readBoundedRegularFileWithIdentity({
+        fs,
+        canonicalRoot: root,
+        file: briefFile,
+        maxBytes: STUDIO_BRIEF_FILE_MAX_BYTES,
+      });
+    const assertTransactionCurrent = async (): Promise<void> => {
+      const current = await readBoundedRegularFileWithIdentity({
+        fs,
+        canonicalRoot: root,
+        file: transactionFile,
+        maxBytes: STUDIO_BRIEF_TRANSACTION_MAX_BYTES,
+      });
+      if (
+        current === null ||
+        current.bytes !== transactionRecord.bytes ||
+        !sameIdentityV2(current.identity, transactionRecord.identity)
+      ) {
+        throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio Brief transaction authority changed');
+      }
+      await assertDirectoryAuthorityV2(directory);
+    };
+    const removeTransaction = async (): Promise<void> => {
+      await assertTransactionCurrent();
+      try {
+        await fs.rm(transactionFile);
+      } catch (error) {
+        throw storageError(error, 'Schema-2 Studio Brief transaction cleanup failed');
+      }
+      await syncDirectoryAuthorityV2(directory);
+    };
+
+    const manifest = await readManifest();
+    const brief = await readBrief();
+    const manifestSha256 = sha256Utf8(manifest.bytes);
+    const briefSha256 = brief === null ? null : sha256Utf8(brief.bytes);
+    if (manifestSha256 === transaction.baseManifestSha256) {
+      // No candidate manifest was committed. Any external Brief edit remains authoritative.
+      await removeTransaction();
+      return;
+    }
+    if (manifestSha256 !== transaction.candidateManifestSha256) {
+      if (brief === null) {
+        throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio Brief transaction diverged');
+      }
+      let replacement: unknown;
+      try {
+        replacement = JSON.parse(manifest.bytes) as unknown;
+      } catch {
+        throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio Brief transaction diverged');
+      }
+      const decodedReplacement = decodeStudioProjectManifestV2(replacement, brief.bytes);
+      if (
+        decodedReplacement === null ||
+        decodedReplacement.project.id !== transaction.projectId ||
+        !decodedReplacement.synchronized
+      ) {
+        throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio Brief transaction diverged');
+      }
+      // A complete same-project replacement won after the transaction was published. Preserve it.
+      await removeTransaction();
+      return;
+    }
+    const candidateBriefSha256 = sha256Utf8(transaction.candidateBrief);
+    if (briefSha256 === candidateBriefSha256) {
+      await removeTransaction();
+      return;
+    }
+    if (briefSha256 === transaction.baseBriefSha256) {
+      await writeBytesAtomic(root, briefFile, transaction.candidateBrief, async () => {
+        await assertTransactionCurrent();
+        const currentManifest = await readManifest();
+        const currentBrief = await readBrief();
+        if (
+          sha256Utf8(currentManifest.bytes) !== transaction.candidateManifestSha256 ||
+          (currentBrief === null ? null : sha256Utf8(currentBrief.bytes)) !== transaction.baseBriefSha256
+        ) {
+          throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio Brief transaction authority changed');
+        }
+      });
+      await removeTransaction();
+      return;
+    }
+    if (brief === null) {
+      throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio Brief transaction lost its authority');
+    }
+    let parsedManifest: unknown;
+    try {
+      parsedManifest = JSON.parse(manifest.bytes) as unknown;
+    } catch {
+      throw new CreativeStudioStoreError('storage_error', 'Malformed schema-2 Studio project manifest');
+    }
+    const decoded = decodeStudioProjectManifestV2(parsedManifest, brief.bytes);
+    if (decoded === null || decoded.project.id !== transaction.projectId) {
+      throw new CreativeStudioStoreError('storage_error', 'Malformed schema-2 Studio project manifest');
+    }
+    const synchronizedProject: StudioProjectV2 = {
+      ...decoded.project,
+      revision: decoded.project.revision + 1,
+      updatedAt: now(),
+    };
+    const synchronizedBytes = serializeProjectV2ForWrite(synchronizedProject, 'Schema-2 Studio Brief recovery project');
+    await writeBytesAtomic(root, projectFile, synchronizedBytes, async () => {
+      await assertTransactionCurrent();
+      const currentManifest = await readManifest();
+      const currentBrief = await readBrief();
+      if (
+        currentBrief === null ||
+        sha256Utf8(currentManifest.bytes) !== transaction.candidateManifestSha256 ||
+        currentBrief.bytes !== brief.bytes ||
+        !sameIdentityV2(currentBrief.identity, brief.identity)
+      ) {
+        throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio Brief transaction authority changed');
+      }
+    });
+    observeProjectCommit(
+      Object.freeze({
+        projectId: transaction.projectId,
+        previousRevision: decoded.project.revision,
+        committedRevision: synchronizedProject.revision,
+        committedAt: synchronizedProject.updatedAt,
+        commitTag: 'brief:file-sync',
+      })
+    );
+    await removeTransaction();
+  };
+
   const inspectProjectFileV2 = async (root: string, projectId: string): Promise<ProjectFileInspectionV2> => {
     const directoryPath = await projectDirectory(root, projectId, false);
     if (directoryPath === null) return { status: 'not_found', projectId };
     const directory = await captureDirectoryAuthorityV2(directoryPath);
+    await recoverBriefTransactionV2(root, directory);
     const file = resolveRootChild(directory.path, 'project.json');
     await assertRegularFileOrMissing(file);
     const record = await readBoundedStudioV2File(root, file);
@@ -3295,12 +3515,24 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     if (isRecord(parsed) && parsed.schemaVersion === 1) {
       return { status: 'unsupported_prototype_schema', projectId };
     }
-    if (
-      !isRecord(parsed) ||
-      parsed.schemaVersion !== 2 ||
-      !validateStudioProjectV2(parsed) ||
-      parsed.id !== projectId
-    ) {
+    let briefFile: Extract<ProjectFileInspectionV2, { status: 'supported' }>['briefFile'];
+    try {
+      const briefRecord = await readBoundedRegularFileWithIdentity({
+        fs,
+        canonicalRoot: root,
+        file: resolveRootChild(directory.path, STUDIO_BRIEF_FILE_NAME),
+        maxBytes: STUDIO_BRIEF_FILE_MAX_BYTES,
+      });
+      briefFile = briefRecord === null ? { status: 'missing' } : { status: 'present', ...briefRecord };
+    } catch (error) {
+      return {
+        status: 'malformed_v2',
+        projectId,
+        error: storageError(error, 'Schema-2 Studio Brief could not be read'),
+      };
+    }
+    const decoded = decodeStudioProjectManifestV2(parsed, briefFile.status === 'present' ? briefFile.bytes : null);
+    if (!isRecord(parsed) || parsed.schemaVersion !== 2 || decoded === null || decoded.project.id !== projectId) {
       return {
         status: 'malformed_v2',
         projectId,
@@ -3308,7 +3540,45 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       };
     }
     await assertDirectoryAuthorityV2(directory);
-    return { status: 'supported', project: parsed, bytes: record.bytes, identity: record.identity, directory };
+    return {
+      status: 'supported',
+      project: decoded.project,
+      bytes: record.bytes,
+      identity: record.identity,
+      directory,
+      briefFile,
+      briefManifestKind: decoded.kind,
+      briefSynchronized: decoded.synchronized,
+    };
+  };
+
+  const synchronizeBriefFileV2InsideQueue = async (
+    root: string,
+    snapshot: Extract<ProjectFileInspectionV2, { status: 'supported' }>
+  ): Promise<Extract<ProjectFileInspectionV2, { status: 'supported' }>> => {
+    if (snapshot.briefManifestKind === 'brief_file' && snapshot.briefSynchronized) return snapshot;
+    const contentChanged = snapshot.briefFile.status === 'present' && !snapshot.briefSynchronized;
+    const project: StudioProjectV2 = contentChanged
+      ? { ...snapshot.project, revision: snapshot.project.revision + 1, updatedAt: now() }
+      : snapshot.project;
+    const projectBytes = serializeProjectV2ForWrite(project, 'Schema-2 Studio Brief synchronization project');
+    await writeProjectFilesV2({ root, snapshot, project, projectBytes });
+    if (contentChanged) {
+      observeProjectCommit(
+        Object.freeze({
+          projectId: project.id,
+          previousRevision: snapshot.project.revision,
+          committedRevision: project.revision,
+          committedAt: project.updatedAt,
+          commitTag: 'brief:file-sync',
+        })
+      );
+    }
+    const synchronized = requireSupportedProjectInspectionV2(await inspectProjectFileV2(root, project.id));
+    if (synchronized.briefManifestKind !== 'brief_file' || !synchronized.briefSynchronized) {
+      throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio Brief synchronization did not settle');
+    }
+    return synchronized;
   };
 
   const readStableDirectoryEntriesV2 = async (authority: DirectoryAuthorityV2): Promise<import('node:fs').Dirent[]> => {
@@ -5235,7 +5505,146 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     ) {
       throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio project authority changed');
     }
+    let currentBrief: Awaited<ReturnType<typeof readBoundedRegularFileWithIdentity>>;
+    try {
+      currentBrief = await readBoundedRegularFileWithIdentity({
+        fs,
+        canonicalRoot: input.root,
+        file: resolveRootChild(input.snapshot.directory.path, STUDIO_BRIEF_FILE_NAME),
+        maxBytes: STUDIO_BRIEF_FILE_MAX_BYTES,
+      });
+    } catch (error) {
+      throw storageError(error, 'Schema-2 Studio Brief authority changed');
+    }
+    if (
+      (input.snapshot.briefFile.status === 'missing' && currentBrief !== null) ||
+      (input.snapshot.briefFile.status === 'present' &&
+        (currentBrief === null ||
+          currentBrief.bytes !== input.snapshot.briefFile.bytes ||
+          !sameIdentityV2(currentBrief.identity, input.snapshot.briefFile.identity)))
+    ) {
+      throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio Brief authority changed');
+    }
     await assertDirectoryAuthorityV2(input.snapshot.directory);
+  };
+
+  const writeProjectFilesV2 = async (input: {
+    root: string;
+    snapshot: Extract<ProjectFileInspectionV2, { status: 'supported' }>;
+    project: StudioProjectV2;
+    projectBytes: string;
+    authorizeBeforeReplace?: () => void | Promise<void>;
+  }): Promise<void> => {
+    const projectFile = resolveRootChild(input.snapshot.directory.path, 'project.json');
+    if (input.project.brief === input.snapshot.project.brief && input.snapshot.briefFile.status === 'present') {
+      await writeBytesAtomic(input.root, projectFile, input.projectBytes, async () => {
+        await input.authorizeBeforeReplace?.();
+        await assertProjectSnapshotCurrentV2({ root: input.root, snapshot: input.snapshot });
+        await input.authorizeBeforeReplace?.();
+      });
+      return;
+    }
+    if (Buffer.byteLength(input.project.brief, 'utf8') > STUDIO_BRIEF_FILE_MAX_BYTES) {
+      throw new CreativeStudioStoreError('invalid_payload', 'Schema-2 Studio Brief is too large');
+    }
+    const briefFile = resolveRootChild(input.snapshot.directory.path, STUDIO_BRIEF_FILE_NAME);
+    const transactionFile = resolveRootChild(input.snapshot.directory.path, STUDIO_BRIEF_TRANSACTION_FILE_NAME);
+    const transaction: StudioBriefTransactionV2 = {
+      schemaVersion: STUDIO_BRIEF_TRANSACTION_SCHEMA_VERSION,
+      projectId: input.project.id,
+      baseManifestSha256: sha256Utf8(input.snapshot.bytes),
+      baseBriefSha256:
+        input.snapshot.briefFile.status === 'missing' ? null : sha256Utf8(input.snapshot.briefFile.bytes),
+      candidateManifestSha256: sha256Utf8(input.projectBytes),
+      candidateBrief: input.project.brief,
+    };
+    const transactionBytes = serializeJsonExact(transaction);
+    if (Buffer.byteLength(transactionBytes, 'utf8') > STUDIO_BRIEF_TRANSACTION_MAX_BYTES) {
+      throw new CreativeStudioStoreError('invalid_payload', 'Schema-2 Studio Brief transaction is too large');
+    }
+    await writeBytesAtomic(input.root, transactionFile, transactionBytes, async () => {
+      await input.authorizeBeforeReplace?.();
+      await assertPathAbsentV2(transactionFile);
+      await assertProjectSnapshotCurrentV2({ root: input.root, snapshot: input.snapshot });
+      await input.authorizeBeforeReplace?.();
+    });
+    const transactionRecord = await readBoundedRegularFileWithIdentity({
+      fs,
+      canonicalRoot: input.root,
+      file: transactionFile,
+      maxBytes: STUDIO_BRIEF_TRANSACTION_MAX_BYTES,
+    });
+    if (transactionRecord === null || transactionRecord.bytes !== transactionBytes) {
+      throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio Brief transaction was not published');
+    }
+    const assertTransactionCurrent = async (): Promise<void> => {
+      const current = await readBoundedRegularFileWithIdentity({
+        fs,
+        canonicalRoot: input.root,
+        file: transactionFile,
+        maxBytes: STUDIO_BRIEF_TRANSACTION_MAX_BYTES,
+      });
+      if (
+        current === null ||
+        current.bytes !== transactionRecord.bytes ||
+        !sameIdentityV2(current.identity, transactionRecord.identity)
+      ) {
+        throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio Brief transaction authority changed');
+      }
+    };
+    await writeBytesAtomic(input.root, projectFile, input.projectBytes, async () => {
+      await input.authorizeBeforeReplace?.();
+      await assertTransactionCurrent();
+      await assertProjectSnapshotCurrentV2({ root: input.root, snapshot: input.snapshot });
+      await input.authorizeBeforeReplace?.();
+    });
+    const candidateManifest = await readBoundedRegularFileWithIdentity({
+      fs,
+      canonicalRoot: input.root,
+      file: projectFile,
+      maxBytes: STUDIO_PROJECT_V2_MAX_RECORD_BYTES,
+    });
+    if (candidateManifest === null || candidateManifest.bytes !== input.projectBytes) {
+      throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio project was not published');
+    }
+    await writeBytesAtomic(input.root, briefFile, input.project.brief, async () => {
+      await assertTransactionCurrent();
+      const currentManifest = await readBoundedRegularFileWithIdentity({
+        fs,
+        canonicalRoot: input.root,
+        file: projectFile,
+        maxBytes: STUDIO_PROJECT_V2_MAX_RECORD_BYTES,
+      });
+      if (
+        currentManifest === null ||
+        currentManifest.bytes !== candidateManifest.bytes ||
+        !sameIdentityV2(currentManifest.identity, candidateManifest.identity)
+      ) {
+        throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio project authority changed');
+      }
+      const currentBrief = await readBoundedRegularFileWithIdentity({
+        fs,
+        canonicalRoot: input.root,
+        file: briefFile,
+        maxBytes: STUDIO_BRIEF_FILE_MAX_BYTES,
+      });
+      if (
+        (input.snapshot.briefFile.status === 'missing' && currentBrief !== null) ||
+        (input.snapshot.briefFile.status === 'present' &&
+          (currentBrief === null ||
+            currentBrief.bytes !== input.snapshot.briefFile.bytes ||
+            !sameIdentityV2(currentBrief.identity, input.snapshot.briefFile.identity)))
+      ) {
+        throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio Brief authority changed');
+      }
+    });
+    await assertTransactionCurrent();
+    try {
+      await fs.rm(transactionFile);
+    } catch (error) {
+      throw storageError(error, 'Schema-2 Studio Brief transaction cleanup failed');
+    }
+    await syncDirectoryAuthorityV2(input.snapshot.directory);
   };
 
   const quarantineRemoveIdentifiedRecordV2 = async <RecordType>(input: {
@@ -6262,7 +6671,12 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     const inspected = await inspectProjectFileV2(root, projectId);
     if (inspected.status !== 'supported') return inspected;
     const proposalResolved = await resolveProposalAttributionV2InsideQueue({ root, projectId, snapshot: inspected });
-    return resolveReferenceAuthorizationReceiptsV2InsideQueue({ root, projectId, snapshot: proposalResolved });
+    const referenceResolved = await resolveReferenceAuthorizationReceiptsV2InsideQueue({
+      root,
+      projectId,
+      snapshot: proposalResolved,
+    });
+    return synchronizeBriefFileV2InsideQueue(root, referenceResolved);
   };
 
   const inspectProjectThroughAttributionFenceV2 = (root: string, projectId: string): Promise<ProjectFileInspectionV2> =>
@@ -7288,10 +7702,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     if (!validateStudioProjectV2(candidate)) {
       throw new CreativeStudioStoreError('invalid_payload', 'Invalid schema-2 Studio proposal result');
     }
-    const candidateBytes = serializeJsonExact(candidate);
-    if (Buffer.byteLength(candidateBytes, 'utf8') > STUDIO_PROJECT_V2_MAX_RECORD_BYTES) {
-      throw new CreativeStudioStoreError('invalid_payload', 'Schema-2 Studio proposal result is too large');
-    }
+    const candidateBytes = serializeProjectV2ForWrite(candidate, 'Schema-2 Studio proposal result');
     const attribution: StudioProposalCommitAttributionV2 = {
       schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       proposalId: proposal.record.id,
@@ -7368,26 +7779,29 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       assertIdentifiedRecordCurrentV2({ root: input.root, authority: ledger.directories.slots, identified: slot }),
       assertPathAbsentV2(path.join(ledger.directories.decisions.path, `${proposal.record.id}.json`)),
     ]);
-    const projectFilePath = resolveRootChild(input.snapshot.directory.path, 'project.json');
-    await writeBytesAtomic(input.root, projectFilePath, candidateBytes, async () => {
-      await assertProjectSnapshotCurrentV2({ root: input.root, snapshot: input.snapshot });
-      await assertProposalLedgerEntrySetCurrentV2(attributedLedger);
-      await assertProposalDirectoryAuthoritiesV2(ledger.directories);
-      await Promise.all([
-        assertIdentifiedRecordCurrentV2({
-          root: input.root,
-          authority: ledger.directories.commits,
-          identified: identifiedAttribution,
-        }),
-        assertIdentifiedRecordCurrentV2({
-          root: input.root,
-          authority: ledger.directories.pending,
-          identified: proposal,
-        }),
-        assertIdentifiedRecordCurrentV2({ root: input.root, authority: ledger.directories.slots, identified: slot }),
-        assertPathAbsentV2(path.join(ledger.directories.decisions.path, `${proposal.record.id}.json`)),
-      ]);
-      await assertProjectSnapshotCurrentV2({ root: input.root, snapshot: input.snapshot });
+    await writeProjectFilesV2({
+      root: input.root,
+      snapshot: input.snapshot,
+      project: candidate,
+      projectBytes: candidateBytes,
+      authorizeBeforeReplace: async () => {
+        await assertProposalLedgerEntrySetCurrentV2(attributedLedger);
+        await assertProposalDirectoryAuthoritiesV2(ledger.directories);
+        await Promise.all([
+          assertIdentifiedRecordCurrentV2({
+            root: input.root,
+            authority: ledger.directories.commits,
+            identified: identifiedAttribution,
+          }),
+          assertIdentifiedRecordCurrentV2({
+            root: input.root,
+            authority: ledger.directories.pending,
+            identified: proposal,
+          }),
+          assertIdentifiedRecordCurrentV2({ root: input.root, authority: ledger.directories.slots, identified: slot }),
+          assertPathAbsentV2(path.join(ledger.directories.decisions.path, `${proposal.record.id}.json`)),
+        ]);
+      },
     });
     const committed = requireSupportedProjectInspectionV2(await inspectProjectFileV2(input.root, input.projectId));
     if (
@@ -7653,12 +8067,13 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     if (!validateStudioProjectV2(next)) {
       throw new CreativeStudioStoreError('invalid_payload', 'Invalid schema-2 Studio project payload');
     }
-    const file = resolveRootChild(inspected.directory.path, 'project.json');
     const bytes = serializeProjectV2ForWrite(next, 'Schema-2 Studio project');
-    await writeBytesAtomic(root, file, bytes, async () => {
-      await authorizeBeforeReplace?.();
-      await assertProjectSnapshotCurrentV2({ root, snapshot: inspected });
-      await authorizeBeforeReplace?.();
+    await writeProjectFilesV2({
+      root,
+      snapshot: inspected,
+      project: next,
+      projectBytes: bytes,
+      authorizeBeforeReplace,
     });
     observeProjectCommit(
       Object.freeze({
@@ -7684,7 +8099,6 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     }
 
     await summariesFileV2(root);
-    const file = resolveRootChild(inspected.directory.path, 'project.json');
 
     const snapshot = cloneAndFreezeConfirmationValue(current, 'Studio confirmation project snapshot');
     const rawRevalidation = await input.revalidate(snapshot);
@@ -7746,12 +8160,15 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       await authorizeBeforePersistence(authorizedProject as StudioProjectV2);
     }
     const bytes = serializeProjectV2ForWrite(next, 'Schema-2 Studio confirmation project');
-    await writeBytesAtomic(root, file, bytes, async () => {
-      if (authorizeBeforePersistence === undefined) {
-        await assertProjectSnapshotCurrentV2({ root, snapshot: inspected });
-      } else {
-        await authorizeBeforePersistence(authorizedProject as StudioProjectV2);
-      }
+    await writeProjectFilesV2({
+      root,
+      snapshot: inspected,
+      project: next,
+      projectBytes: bytes,
+      authorizeBeforeReplace:
+        authorizeBeforePersistence === undefined
+          ? undefined
+          : () => authorizeBeforePersistence(authorizedProject as StudioProjectV2),
     });
     observeProjectCommit(
       Object.freeze({
@@ -7804,7 +8221,16 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
         const directory = await createProjectDirectoryV2(root, projectId);
         const file = resolveRootChild(directory, 'project.json');
         await assertRegularFileOrMissing(file);
+        // Publish the legacy-compatible manifest first so an interruption can always be migrated;
+        // the authoritative Brief and digest-backed manifest then settle under exact file CAS.
         await writeJsonAtomic(root, file, candidate);
+        const snapshot = requireSupportedProjectInspectionV2(await inspectProjectFileV2(root, projectId));
+        await writeProjectFilesV2({
+          root,
+          snapshot,
+          project: candidate,
+          projectBytes: serializeProjectV2ForWrite(candidate, 'Schema-2 Studio creation project'),
+        });
         return candidate;
       });
       await repairSummaryV2AfterCommit();
@@ -7864,9 +8290,13 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
         if (!validateStudioProjectV2(committed)) {
           throw new CreativeStudioStoreError('invalid_payload', 'Invalid schema-2 Studio project payload');
         }
-        const file = resolveRootChild(inspected.directory.path, 'project.json');
         const bytes = serializeProjectV2ForWrite(committed, 'Schema-2 Studio mutation project');
-        await writeBytesAtomic(root, file, bytes, () => assertProjectSnapshotCurrentV2({ root, snapshot: inspected }));
+        await writeProjectFilesV2({
+          root,
+          snapshot: inspected,
+          project: committed,
+          projectBytes: bytes,
+        });
         observeProjectCommit(
           Object.freeze({
             projectId: current.id,
@@ -8521,6 +8951,53 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
         if (closed) return;
         closed = true;
         watcher.close();
+      };
+    },
+
+    async watchBriefsV2(listener: (projectId: string) => void): Promise<() => Promise<void>> {
+      const root = await writableCanonicalRootV2();
+      let closed = false;
+      const pending = new Map<string, Promise<void>>();
+      const validateAndNotify = (relativeFile: string): void => {
+        const segments = path.normalize(relativeFile).split(path.sep);
+        if (segments.length !== 2 || !isSafeIdV2(segments[0]) || segments[1] !== STUDIO_BRIEF_FILE_NAME) return;
+        const projectId = segments[0];
+        const previous = pending.get(projectId) ?? Promise.resolve();
+        const current = previous
+          .catch((): undefined => undefined)
+          .then(async () => {
+            if (closed) return;
+            const result = await inspectProjectThroughAttributionFenceV2(root, projectId);
+            if (result.status === 'malformed_v2') throw result.error;
+            if (!closed && result.status === 'supported') listener(projectId);
+          })
+          .catch((error: unknown) => {
+            if (!closed) safeLogError('[CreativeStudio] Schema-2 Brief watcher ignored an invalid file', error);
+          })
+          .finally(() => {
+            if (pending.get(projectId) === current) pending.delete(projectId);
+          });
+        pending.set(projectId, current);
+      };
+      let watcher: { close(): void };
+      try {
+        watcher = watchProposalTree({
+          rootDir: root,
+          onChange: (relativeFile) => {
+            if (!closed) validateAndNotify(relativeFile);
+          },
+          onError: (error) => {
+            if (!closed) safeLogError('[CreativeStudio] Schema-2 Brief watcher failed', error);
+          },
+        });
+      } catch (error) {
+        throw storageError(error, 'Schema-2 Studio Brief watcher could not start');
+      }
+      return async (): Promise<void> => {
+        if (closed) return;
+        closed = true;
+        watcher.close();
+        await Promise.allSettled(pending.values());
       };
     },
 

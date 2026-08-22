@@ -916,6 +916,10 @@
           "position": "{{current}} / {{total}}",
           "pictureOnly": "영상만 — 여기에서는 오디오 베드가 음소거됩니다",
           "controlsLabel": "필름 재생 컨트롤"
+        },
+        "film": {
+          "under": "{{clock}} 미달",
+          "over": "{{clock}} 초과"
         }
       },
       "beatPanel": {

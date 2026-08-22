@@ -29,6 +29,7 @@ import {
 } from '@process/resources/builtinMcp/studioDirectorCommandWriter';
 import { writePendingRecordV2 } from '@process/resources/builtinMcp/studioPendingRecordWriter';
 import { createEmptyStudioProjectV2 } from '@process/services/creative-studio/service/schema2';
+import { createStudioProjectManifestV2 } from '@process/services/creative-studio/service/briefFile';
 
 const PROJECT_ID = 'project_1';
 const START_MS = Date.parse('2026-08-17T01:02:03.000Z');
@@ -252,6 +253,27 @@ describe('Studio Director subprocess command writer', () => {
     );
     expect(source).not.toMatch(/export const createStudioDirectorCommandWriter\s*=/u);
     expect(source).not.toMatch(/export type StudioApplyEditsInput\s*=/u);
+  });
+
+  it('authorizes commands against a digest-backed manifest and its exact Brief file', async () => {
+    const project = createEmptyStudioProjectV2(
+      {
+        name: 'Writer fixture',
+        brief: 'External Brief authority',
+        aspectRatio: '16:9',
+        targetDurationSeconds: 30,
+        resolution: '1080p',
+      },
+      PROJECT_ID,
+      new Date(START_MS).toISOString()
+    );
+    await writeFile(path.join(projectDir, 'project.json'), JSON.stringify(createStudioProjectManifestV2(project)));
+    await writeFile(path.join(projectDir, 'brief.md'), project.brief);
+    const writer = writerWithIdsV2(['command_brief_file', 'lease_brief_file']);
+
+    await expect(
+      writer.apply({ expectedRevision: project.revision, operations: [{ kind: 'set_brief', brief: 'Queued edit' }] })
+    ).resolves.toEqual({ status: 'unconfirmed', commandId: 'command_brief_file' });
   });
 
   it('preserves caller-authored schema-2 beat and shot identities in canonical operation order', async () => {

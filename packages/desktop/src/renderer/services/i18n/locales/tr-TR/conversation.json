@@ -920,6 +920,10 @@
           "position": "{{current}} / {{total}}",
           "pictureOnly": "Yalnızca görüntü — ses parçası burada sessize alınır",
           "controlsLabel": "Film oynatma kontrolleri"
+        },
+        "film": {
+          "under": "{{clock}} altında",
+          "over": "{{clock}} üzerinde"
         }
       },
       "beatPanel": {

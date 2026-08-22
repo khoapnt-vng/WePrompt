@@ -919,6 +919,10 @@
           "position": "{{current}} / {{total}}",
           "pictureOnly": "Nur Bild — das Audiobett ist hier stummgeschaltet",
           "controlsLabel": "Filmsteuerung"
+        },
+        "film": {
+          "under": "{{clock}} unter Ziel",
+          "over": "{{clock}} über Ziel"
         }
       },
       "beatPanel": {

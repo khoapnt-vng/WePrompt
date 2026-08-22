@@ -63,6 +63,7 @@ import {
   createEmptyStudioProjectV2,
   type StudioMutationApplyResultV2,
 } from '@process/services/creative-studio/service/schema2';
+import { createStudioProjectManifestV2 } from '@process/services/creative-studio/service/briefFile';
 import {
   calculateStudioQuoteTotals,
   createStudioQuotedGenerationId,
@@ -166,6 +167,12 @@ describe('schema-2 creative studio project store', () => {
     const directory = path.join(rootDir, project.id);
     mkdirSync(directory);
     writeFileSync(path.join(directory, 'project.json'), JSON.stringify(project, null, 2));
+  };
+
+  const expectPersistedProjectV2 = (project: StudioProjectV2): void => {
+    const directory = path.join(rootDir, project.id);
+    expect(readJson(path.join(directory, 'project.json'))).toEqual(createStudioProjectManifestV2(project));
+    expect(readFileSync(path.join(directory, 'brief.md'), 'utf8')).toBe(project.brief);
   };
 
   const seedProposalV2 = async (
@@ -1324,7 +1331,7 @@ describe('schema-2 creative studio project store', () => {
       createdAt: winner.createdAt,
       updatedAt: winner.updatedAt,
     };
-    expect(readJson<StudioProjectV2>(path.join(rootDir, projectId, 'project.json'))).toEqual(winner);
+    expectPersistedProjectV2(winner);
     expect(readJson(path.join(rootDir, 'projects-v2.json'))).toEqual({ schemaVersion: 2, projects: [summary] });
     const restarted = createStoreV2().store;
     await expect(restarted.getProjectV2(projectId)).resolves.toEqual({ status: 'supported', project: winner });
@@ -2613,7 +2620,8 @@ describe('schema-2 creative studio project store', () => {
 
     await expect(store.deleteProjectV2(project.id, project.revision + 1)).rejects.toMatchObject({ code: 'busy' });
 
-    expect(readFileSync(manifestFile)).toEqual(manifestBefore);
+    expect(readFileSync(manifestFile)).not.toEqual(manifestBefore);
+    expectPersistedProjectV2(project);
     expect(existsSync(path.join(rootDir, 'projects-v2.json'))).toBe(false);
     expect(prototypeIndexAccesses).toEqual([]);
   });
@@ -3018,7 +3026,7 @@ describe('schema-2 creative studio project store', () => {
       updatedAt: confirmedAt,
       brief: `Confirmed at ${confirmedAt}`,
     });
-    expect(readJson<StudioProjectV2>(path.join(rootDir, project.id, 'project.json'))).toEqual(result.project);
+    expectPersistedProjectV2(result.project);
     expect(assertActive).toHaveBeenCalledTimes(2);
     expect(facts).toEqual([
       {
@@ -3472,7 +3480,7 @@ describe('schema-2 creative studio project store', () => {
     });
     expect(updated.updatedAt).not.toBe(project.updatedAt);
     expect(project).toMatchObject({ name: inputV2.name, brief: inputV2.brief, revision: 1 });
-    expect(readJson<StudioProjectV2>(path.join(rootDir, project.id, 'project.json'))).toEqual(updated);
+    expectPersistedProjectV2(updated);
     expect(readJson(path.join(rootDir, 'projects-v2.json'))).toEqual({
       schemaVersion: 2,
       projects: [
@@ -3504,6 +3512,188 @@ describe('schema-2 creative studio project store', () => {
     expect(readFileSync(prototypeIndexFile)).toEqual(prototypeIndexBefore);
     expect(prototypeIndexAccesses).toEqual([]);
   });
+
+  it('treats an external Brief edit as authoritative, advances the revision, and rejects a stale save', async () => {
+    const facts: Parameters<StudioProjectCommitObserver>[0][] = [];
+    const { store } = createStoreV2({
+      createId: () => 'external_brief_v2',
+      now: vi.fn().mockReturnValueOnce(timestamp).mockReturnValue('2026-08-17T12:00:01.000Z'),
+      onProjectCommitted: (fact) => facts.push(fact),
+    });
+    const project = await store.createProjectV2(inputV2);
+    const briefFile = path.join(rootDir, project.id, 'brief.md');
+    writeFileSync(briefFile, 'Edited outside WePrompt');
+
+    const loaded = await store.getProjectV2(project.id);
+
+    expect(loaded).toEqual({
+      status: 'supported',
+      project: expect.objectContaining({
+        id: project.id,
+        brief: 'Edited outside WePrompt',
+        revision: project.revision + 1,
+      }),
+    });
+    const synchronized = loaded.status === 'supported' ? loaded.project : project;
+    expectPersistedProjectV2(synchronized);
+    expect(facts).toEqual([
+      {
+        projectId: project.id,
+        previousRevision: project.revision,
+        committedRevision: project.revision + 1,
+        committedAt: '2026-08-17T12:00:01.000Z',
+        commitTag: 'brief:file-sync',
+      },
+    ]);
+    await expect(
+      store.applyMutationBatchV2(
+        makeStudioMutationBatchV2(project, [{ kind: 'set_brief', brief: 'Stale editor save' }]),
+        makeMutationContextV2({ mutationId: 'stale_external_brief' })
+      )
+    ).rejects.toMatchObject({ code: 'stale_project' });
+    expect(readFileSync(briefFile, 'utf8')).toBe('Edited outside WePrompt');
+  });
+
+  it('migrates a legacy inline Brief without changing its project revision', async () => {
+    const project = createEmptyStudioProjectV2(inputV2, 'legacy_brief_migration_v2', timestamp);
+    seedProjectV2(project);
+    const { store } = createStoreV2({ now: () => '2026-08-17T12:00:01.000Z' });
+
+    await expect(store.getProjectV2(project.id)).resolves.toEqual({ status: 'supported', project });
+
+    expectPersistedProjectV2(project);
+    expect(readJson(path.join(rootDir, project.id, 'project.json'))).not.toHaveProperty('brief');
+  });
+
+  it('recovers a committed manifest after interruption before Brief publication', async () => {
+    const projectId = 'brief_transaction_recovery_v2';
+    const briefFile = path.join(realpathSync(rootDir), projectId, 'brief.md');
+    let armed = false;
+    let interrupted = false;
+    const interruptingFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver) as unknown;
+        if (property !== 'rename' || typeof value !== 'function') return value;
+        return async (...args: Parameters<typeof nodeFs.rename>) => {
+          if (armed && !interrupted && String(args[1]) === briefFile) {
+            interrupted = true;
+            throw new Error('simulated process interruption before Brief publication');
+          }
+          return Reflect.apply(value, target, args) as Promise<void>;
+        };
+      },
+    }) as typeof nodeFs;
+    const store = createCreativeStudioStore({
+      rootDir,
+      fs: interruptingFs,
+      createId: () => projectId,
+      now: () => timestamp,
+      logError: () => undefined,
+    });
+    const project = await store.createProjectV2(inputV2);
+    armed = true;
+
+    await expect(
+      store.updateProjectV2(
+        project.id,
+        (candidate) => ({ ...candidate, name: 'Recovered title', brief: 'Recovered Brief' }),
+        project.revision
+      )
+    ).rejects.toMatchObject({ code: 'storage_error' });
+    expect(interrupted).toBe(true);
+    expect(existsSync(path.join(rootDir, project.id, '.brief-transaction.json'))).toBe(true);
+
+    const restarted = createStoreV2().store;
+    const recovered = await restarted.getProjectV2(project.id);
+    expect(recovered).toEqual({
+      status: 'supported',
+      project: expect.objectContaining({
+        name: 'Recovered title',
+        brief: 'Recovered Brief',
+        revision: project.revision + 1,
+      }),
+    });
+    expect(existsSync(path.join(rootDir, project.id, '.brief-transaction.json'))).toBe(false);
+    if (recovered.status === 'supported') expectPersistedProjectV2(recovered.project);
+  });
+
+  it('preserves a concurrent external Brief edit after manifest publication', async () => {
+    const projectId = 'brief_external_race_v2';
+    const briefFile = path.join(realpathSync(rootDir), projectId, 'brief.md');
+    let armed = false;
+    let replaced = false;
+    const racingFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver) as unknown;
+        if (property !== 'open' || typeof value !== 'function') return value;
+        return async (...args: Parameters<typeof nodeFs.open>) => {
+          const opened = String(args[0]);
+          if (armed && !replaced && opened.startsWith(`${briefFile}.`) && opened.endsWith('.tmp')) {
+            const replacement = `${briefFile}.external`;
+            writeFileSync(replacement, 'External editor wins');
+            renameSync(replacement, briefFile);
+            replaced = true;
+          }
+          return Reflect.apply(value, target, args) as ReturnType<typeof nodeFs.open>;
+        };
+      },
+    }) as typeof nodeFs;
+    const store = createCreativeStudioStore({
+      rootDir,
+      fs: racingFs,
+      createId: () => projectId,
+      now: vi
+        .fn()
+        .mockReturnValueOnce(timestamp)
+        .mockReturnValueOnce('2026-08-17T12:00:01.000Z')
+        .mockReturnValue('2026-08-17T12:00:02.000Z'),
+      logError: () => undefined,
+    });
+    const project = await store.createProjectV2(inputV2);
+    armed = true;
+
+    await expect(
+      store.updateProjectV2(
+        project.id,
+        (candidate) => ({ ...candidate, name: 'Candidate title', brief: 'Candidate Brief' }),
+        project.revision
+      )
+    ).rejects.toMatchObject({ code: 'storage_error' });
+    expect(replaced).toBe(true);
+
+    const recovered = await createStoreV2({ now: () => '2026-08-17T12:00:02.000Z' }).store.getProjectV2(project.id);
+    expect(recovered).toEqual({
+      status: 'supported',
+      project: expect.objectContaining({
+        name: 'Candidate title',
+        brief: 'External editor wins',
+        revision: project.revision + 2,
+      }),
+    });
+    if (recovered.status === 'supported') expectPersistedProjectV2(recovered.project);
+  });
+
+  it.each(['symlink', 'oversize', 'invalid_utf8'] as const)(
+    'fails closed for an unsafe %s Brief file',
+    async (kind) => {
+      const projectId = `unsafe_brief_${kind}_v2`;
+      const { store } = createStoreV2({ createId: () => projectId, now: () => timestamp });
+      const project = await store.createProjectV2(inputV2);
+      const briefFile = path.join(rootDir, project.id, 'brief.md');
+      if (kind === 'symlink') {
+        const outside = path.join(rootDir, 'outside-brief.md');
+        writeFileSync(outside, 'outside authority');
+        rmSync(briefFile);
+        symlinkSync(outside, briefFile);
+      } else if (kind === 'oversize') {
+        writeFileSync(briefFile, 'x'.repeat(64 * 1024 + 1));
+      } else {
+        writeFileSync(briefFile, Buffer.from([0xff]));
+      }
+
+      await expect(store.getProjectV2(project.id)).rejects.toMatchObject({ code: 'storage_error' });
+    }
+  );
 
   it('rejects stale schema-2 update authority before invoking the callback or writing', async () => {
     const onProjectCommitted = vi.fn<StudioProjectCommitObserver>();
@@ -4096,6 +4286,31 @@ describe('schema-2 creative studio project store', () => {
 
     notifyChange?.(`${project.id}/proposals/pending/${seeded.proposal.id}.json`);
     await vi.waitFor(() => expect(listener).toHaveBeenCalledWith(project.id, seeded.proposal.id));
+    await stop();
+  });
+
+  it('synchronizes and announces a valid external Brief edit through the watcher', async () => {
+    let notifyChange: ((relativeFile: string) => void) | undefined;
+    const listener = vi.fn();
+    const { store } = createStoreV2({
+      createId: () => 'brief_watch_v2',
+      now: vi.fn().mockReturnValueOnce(timestamp).mockReturnValue('2026-08-17T12:00:01.000Z'),
+      watchProposalTree: ({ onChange }) => {
+        notifyChange = onChange;
+        return { close: vi.fn() };
+      },
+    });
+    const project = await store.createProjectV2(inputV2);
+    const stop = await store.watchBriefsV2(listener);
+    writeFileSync(path.join(rootDir, project.id, 'brief.md'), 'Watched external Brief');
+
+    notifyChange?.(`${project.id}/brief.md`);
+
+    await vi.waitFor(() => expect(listener).toHaveBeenCalledExactlyOnceWith(project.id));
+    await expect(store.getProjectV2(project.id)).resolves.toEqual({
+      status: 'supported',
+      project: expect.objectContaining({ brief: 'Watched external Brief', revision: project.revision + 1 }),
+    });
     await stop();
   });
 

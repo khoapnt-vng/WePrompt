@@ -918,6 +918,10 @@
           "position": "{{current}} / {{total}}",
           "pictureOnly": "فقط تصویر — بستر صوتی در اینجا بی‌صدا است",
           "controlsLabel": "کنترل‌های پخش فیلم"
+        },
+        "film": {
+          "under": "{{clock}} کمتر",
+          "over": "{{clock}} بیشتر"
         }
       },
       "beatPanel": {

@@ -916,6 +916,10 @@
           "position": "{{current}} / {{total}}",
           "pictureOnly": "僅畫面 — 此處音軌已靜音",
           "controlsLabel": "影片播放控制"
+        },
+        "film": {
+          "under": "少 {{clock}}",
+          "over": "超出 {{clock}}"
         }
       },
       "beatPanel": {

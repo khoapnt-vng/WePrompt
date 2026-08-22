@@ -916,6 +916,10 @@
           "position": "{{current}} / {{total}}",
           "pictureOnly": "映像のみ — ここではオーディオベッドはミュートされています",
           "controlsLabel": "フィルム再生コントロール"
+        },
+        "film": {
+          "under": "{{clock}} 短い",
+          "over": "{{clock}} 超過"
         }
       },
       "beatPanel": {

@@ -20,7 +20,7 @@ Phase 1 enforces rules against `project.json` only. There is **no** `brief.md` s
 
 **What changes when the folder lands:**
 
-- `project.json` stops being the source of truth for _prose_. `brief.md` becomes the source; `project.brief` becomes a derived cache. `rules` stay in `project.json` because they are structured, validated, and CAS-guarded — a hand-edited rules file cannot be validated before it is read, and an unreadable rules file silently disarms the money gate.
+- `project.json` stops carrying the Brief prose. `brief.md` becomes the sole source; runtime `project.brief` is hydrated from it, while the manifest retains only Brief revision/digest metadata. `rules` stay in `project.json` because they are structured, validated, and CAS-guarded — a hand-edited rules file cannot be validated before it is read, and an unreadable rules file silently disarms the money gate. An outside Brief edit reloads only over a clean app state; if an app draft is dirty, digest mismatch is an explicit conflict and neither side is overwritten or auto-merged.
 - `read_storyboard` (`studioServer.ts:111`) reads `<projectDir>/project.json` directly. When the folder lands it must additionally read `brief.md`, or the Director sees a stale brief. **Nothing else in Phase 1 moves.**
 - The pin builder (Task 5) reads `brief` off the renderer project; it would read the folder-backed brief instead. Signature unchanged.
 

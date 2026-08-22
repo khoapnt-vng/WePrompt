@@ -922,6 +922,10 @@
           "position": "{{current}} / {{total}}",
           "pictureOnly": "Только изображение — аудиодорожка здесь отключена",
           "controlsLabel": "Управление воспроизведением фильма"
+        },
+        "film": {
+          "under": "на {{clock}} меньше",
+          "over": "на {{clock}} больше"
         }
       },
       "beatPanel": {

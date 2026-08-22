@@ -54,6 +54,7 @@ import {
   validateStudioMutationOperationV2,
   validateStudioProjectV2,
 } from '@process/services/creative-studio/service/schema2';
+import { createStudioProjectManifestV2 } from '@process/services/creative-studio/service/briefFile';
 import {
   createStudioMediaChoiceId,
   type StudioGenerationRouteCatalog,
@@ -5081,6 +5082,39 @@ describe('Studio MCP schema-2 server', () => {
     expect(view).not.toHaveProperty('sceneOrder');
     expect(view).not.toHaveProperty('scenes');
     await rm(projectDir, { recursive: true, force: true });
+  });
+
+  it('hydrates the storyboard Brief only from the digest-backed Brief file', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-brief-file-'));
+    const project = makeSchema2ServiceProject();
+    const externalBrief = 'The authoritative prose from brief.md';
+    const manifest = createStudioProjectManifestV2({ ...project, brief: externalBrief });
+    await writeFile(path.join(projectDir, 'project.json'), JSON.stringify(manifest));
+    await writeFile(path.join(projectDir, 'brief.md'), externalBrief);
+
+    try {
+      const result = await createReadStoryboardHandlerV2({
+        projectId: project.id,
+        projectDir,
+        pendingDir: '',
+        referencePendingDir: '',
+      })({});
+
+      expect(result.isError).toBeUndefined();
+      expect(JSON.parse(result.content[0].text)).toMatchObject({ brief: externalBrief });
+      expect(JSON.parse(await readFile(path.join(projectDir, 'project.json'), 'utf8'))).not.toHaveProperty('brief');
+      await writeFile(path.join(projectDir, 'brief.md'), 'Changed before main-process synchronization');
+      await expect(
+        createReadStoryboardHandlerV2({
+          projectId: project.id,
+          projectDir,
+          pendingDir: '',
+          referencePendingDir: '',
+        })({})
+      ).resolves.toMatchObject({ isError: true });
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
   });
 
   it('counts a parked beat against the schema-2 beat capacity', async () => {
