@@ -362,10 +362,11 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - One existing guard is worth keeping in view: `directorCommandContracts.ts:297` already classifies `set_hard_cut` as `proposal`, so the Director cannot sever a chain on its own. The gap is the human's click, not the Director's.
   - **Bounded fail-closed containment fixed 2026-08-22; BUG-095 remains open for the atomic paid gate.** The Beat panel preserves the canonical checked or unchecked hard-cut state but now marks changes unavailable, with localized copy explaining that a reviewed estimate for replacement media must come first. The renderer no longer exposes a free `set_hard_cut` action, new Director commands cannot propose it, and the mutation authority rejects direct toggles, coverage-authored hard-cut transitions and exact undo reversals before persistence. A valid pre-fix pending proposal remains readable but cannot be accepted or publish decision/project bytes. This containment prevents another unquoted chain change; it does not supply the required still, replacement video, mandatory cascade, quote confirmation or re-join workflow, so the bug must not be closed.
 
-- [ ] **[BUG-096][P3][Creative Studio] The Brief's route pickers show an opaque choice id where a model name belongs** — found 2026-08-22 verifying Slice 1a
+- [x] **[BUG-096][P3][Creative Studio] The Brief's route pickers show an opaque choice id where a model name belongs** — found 2026-08-22 verifying Slice 1a
   - With both routes bound, the pickers read `choice_000290ca7fd86013f59825d5` and `choice_442687563c09dd91be3844cb`. A person cannot tell which model their film will be rendered with, or whether the two are even the same provider.
   - It matters more now than it did: before auto-binding, a user picked the route themselves and knew what they chose. A route bound on their behalf is only accountable if it says what it bound.
   - The catalogue entry already carries `providerName` and `model` beside `choiceId`, so the label exists — it is the display that falls back to the id.
+  - **Not a labelling defect at all. Closed 2026-08-22 with BUG-097.** The raw id is what the picker shows when a bound route resolves to nothing in the catalogue. With the catalogue refreshed after binding, the same picker reads `OpenRouter · google/gemini-3-pro-image`. No display change was needed.
 
 ## Coverage and polish
 
@@ -650,6 +651,23 @@ fit-to-target reading in the app is advisory, with one carved exception — a be
 renders a slate `target` seconds long, the only place an authored number reaches the renderer.
 
 ## Verification notes
+
+### Verified live 2026-08-22 — a new project is generable from birth
+
+After BUG-097 and BUG-099, a project created from the composer, on a machine with one provider and
+no Studio connections, ends up with:
+
+| Route | Reads                                                |
+| ----- | ---------------------------------------------------- |
+| Image | `OpenRouter · google/gemini-3-pro-image` — **Ready** |
+| Video | `OpenRouter · bytedance/seedance-2.0` — **Ready**    |
+
+No visit to Settings, and no "Unavailable". The video route is `seedance-2.0` specifically — the only
+model in `MANAGED_FIRST_FRAME_MODELS` — so the picker's `supportsFirstFrame` preference is doing its
+job against a real catalogue rather than only against fixtures.
+
+That is Slices 1 and 1a complete, and it took three live runs to get there: the first bound nothing
+and looked like it bound image, the second bound image but not video, the third binds both.
 
 ### Verified live 2026-08-22 — Slice 1a, connection provisioning
 
