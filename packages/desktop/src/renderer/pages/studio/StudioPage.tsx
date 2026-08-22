@@ -480,17 +480,29 @@ const StudioProjectPage: React.FC<{
     if (project.briefConversationId == null) return;
     if (project.imageRouteId !== null || project.videoRouteId !== null) return;
     if (autoBoundProjectRef.current === project.id) return;
-    const picked = pickDefaultRoutes([...routeCatalog.image.options, ...routeCatalog.video.options]);
-    if (picked.imageRouteId === null && picked.videoRouteId === null) return;
     autoBoundProjectRef.current = project.id;
-    void runWorkspaceCommit((current) =>
-      ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
-        projectId: current.id,
-        expectedRevision: current.revision,
-        operations: [{ kind: 'set_routes', imageRouteId: picked.imageRouteId, videoRouteId: picked.videoRouteId }],
-      })
-    );
-  }, [project, routeCatalog, runWorkspaceCommit]);
+    void (async () => {
+      // Read the catalogue fresh rather than trusting the workspace's snapshot. The snapshot can
+      // predate a connection saved moments earlier, and binding from it silently drops a whole kind
+      // — which is how a project ended up with an image route and no video one.
+      const current = projectRef.current;
+      if (current === null) return;
+      const refreshed = await ipcBridge.creativeStudio.listRoutes.invoke({ projectId: current.id });
+      if (refreshed.ok === false) return;
+      const picked = pickDefaultRoutes([...refreshed.data.image.options, ...refreshed.data.video.options]);
+      if (picked.imageRouteId === null && picked.videoRouteId === null) return;
+      await runWorkspaceCommit((project) =>
+        ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+          projectId: project.id,
+          expectedRevision: project.revision,
+          operations: [{ kind: 'set_routes', imageRouteId: picked.imageRouteId, videoRouteId: picked.videoRouteId }],
+        })
+      );
+      // And refresh the shared catalogue, or the Brief reports the route it just bound as
+      // "Unavailable" until the user finds Refresh routes for themselves.
+      await refetchRoutes();
+    })();
+  }, [project, refetchRoutes, routeCatalog, runWorkspaceCommit]);
 
   const runWorkspaceExclusive = useCallback(
     async <Result,>(action: () => Promise<Result>): Promise<Result | null> => {
