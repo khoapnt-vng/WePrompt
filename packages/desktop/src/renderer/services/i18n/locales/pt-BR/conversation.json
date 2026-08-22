@@ -920,6 +920,8 @@
           "videoLabel": "Beat {{beatPosition}} · {{beatTitle}} · Plano {{shotPosition}} · {{shotTitle}}",
           "slateLabel": "Beat {{beatPosition}} · {{beatTitle}} · Cartela · Sem cobertura",
           "noMedia": "Nenhuma prévia do filme está disponível.",
+          "awaitingTakeOne": "Escolha uma tomada para o Beat {{beatPosition}} · Plano {{shotPosition}} antes de reproduzir o filme.",
+          "awaitingTakeMany": "Escolha uma tomada para {{count}} planos antes de reproduzir o filme.",
           "mediaError": "Não foi possível carregar esta prévia.",
           "play": "Reproduzir filme",
           "pause": "Pausar filme",
@@ -1384,7 +1386,10 @@
     },
     "conditioning": {
       "inputsTitle": "Entradas para esta imagem estática",
-      "role": { "cast": "Elenco", "look": "Visual" },
+      "role": {
+        "cast": "Elenco",
+        "look": "Visual"
+      },
       "maximum": "Este mecanismo aceita até {{count}} referências do briefing.",
       "unsupported": "Este mecanismo de imagem não pode usar referências ativas do briefing. Escolha outro mecanismo ou remova-as do briefing.",
       "overflow": "Este mecanismo de imagem aceita no máximo {{maximum}} referências do briefing, mas há {{count}} ativas.",

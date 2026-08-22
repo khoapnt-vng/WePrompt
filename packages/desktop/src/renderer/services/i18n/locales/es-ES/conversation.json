@@ -915,6 +915,8 @@
           "videoLabel": "Beat {{beatPosition}} · {{beatTitle}} · Plano {{shotPosition}} · {{shotTitle}}",
           "slateLabel": "Beat {{beatPosition}} · {{beatTitle}} · Claqueta · Sin cobertura",
           "noMedia": "No hay ninguna vista previa de la película disponible.",
+          "awaitingTakeOne": "Elige una toma para el Beat {{beatPosition}} · Plano {{shotPosition}} antes de reproducir la película.",
+          "awaitingTakeMany": "Elige una toma para {{count}} planos antes de reproducir la película.",
           "mediaError": "No se pudo cargar esta vista previa.",
           "play": "Reproducir película",
           "pause": "Pausar película",
@@ -1379,7 +1381,10 @@
     },
     "conditioning": {
       "inputsTitle": "Entradas para esta imagen fija",
-      "role": { "cast": "Reparto", "look": "Estilo" },
+      "role": {
+        "cast": "Reparto",
+        "look": "Estilo"
+      },
       "maximum": "Este motor acepta hasta {{count}} referencias del briefing.",
       "unsupported": "Este motor de imagen no puede usar referencias activas del briefing. Elige otro motor de imagen o elimínalas del briefing.",
       "overflow": "Este motor de imagen acepta como máximo {{maximum}} referencias del briefing, pero hay {{count}} activas.",

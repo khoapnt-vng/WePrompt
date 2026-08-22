@@ -1536,6 +1536,8 @@
           "videoLabel": "Beat {{beatPosition}} · {{beatTitle}} · Shot {{shotPosition}} · {{shotTitle}}",
           "slateLabel": "Beat {{beatPosition}} · {{beatTitle}} · Slate · No coverage",
           "noMedia": "No film preview is available.",
+          "awaitingTakeOne": "Beat {{beatPosition}} · Shot {{shotPosition}} needs a Take chosen before the film can play.",
+          "awaitingTakeMany": "{{count}} Shots need a Take chosen before the film can play.",
           "mediaError": "This preview could not be loaded.",
           "play": "Play film",
           "pause": "Pause film",

@@ -27,6 +27,7 @@ import { buildCutFilmstrip } from '@/renderer/pages/studio/components/Workspace/
 import { buildCutMatchReference } from '@/renderer/pages/studio/components/Workspace/Views/Cut/matchReference';
 import {
   buildCutPlaybackSequence,
+  cutPlaybackShotsAwaitingTake,
   formatCutPlaybackClock,
   type CutPlaybackSequence,
 } from '@/renderer/pages/studio/components/Workspace/Views/Cut/playbackSequence';
@@ -164,6 +165,12 @@ vi.mock('react-i18next', () => ({
       if (key.endsWith('.preview.position')) return `${String(values?.current)} / ${String(values?.total)}`;
       if (key.endsWith('.preview.pictureOnly')) return 'Picture only — the bed is muted here';
       if (key.endsWith('.preview.noMedia')) return 'No film preview is available.';
+      if (key.endsWith('.preview.awaitingTakeOne')) {
+        return `Beat ${String(values?.beatPosition)} · Shot ${String(values?.shotPosition)} needs a Take chosen before the film can play.`;
+      }
+      if (key.endsWith('.preview.awaitingTakeMany')) {
+        return `${String(values?.count)} Shots need a Take chosen before the film can play.`;
+      }
       if (key.endsWith('.preview.mediaError')) return 'This preview could not be loaded.';
       if (key.endsWith('.preview.label')) return 'Film preview';
       if (key.endsWith('.preview.beatBadge')) {
@@ -722,6 +729,40 @@ describe('the truthful Cut playback sequence', () => {
     expect(buildCutPlaybackSequence(current)).toBeNull();
   });
 
+  it('names nothing while every covered Shot already has its Take', () => {
+    expect(cutPlaybackShotsAwaitingTake(playableProjection())).toEqual([]);
+  });
+
+  it('names the Shot whose Take was never chosen, which is the one refusal a director can act on', () => {
+    const current = playableProjection();
+    current.activeBeats[0]!.shots[0]!.selectedTakeId = null;
+
+    expect(cutPlaybackShotsAwaitingTake(current)).toEqual([
+      { beatPosition: 1, shotPosition: 1, shotId: current.activeBeats[0]!.shots[0]!.id },
+    ]);
+  });
+
+  it.each([
+    [
+      'a selected Take absent from its video rows',
+      (v: WorkspaceProjection) => void (v.activeBeats[0]!.shots[0]!.videoTakes = []),
+    ],
+    [
+      'an unsafe selected asset id',
+      (v: WorkspaceProjection) => void (v.activeBeats[0]!.shots[0]!.selectedTakeId = '../take_1'),
+    ],
+    [
+      'a played-duration mismatch',
+      (v: WorkspaceProjection) => void (v.activeBeats[0]!.shots[0]!.playedDurationSeconds = 6),
+    ],
+  ])('stays silent for %s, which is a projection fault and not a missing choice', (_label, mutate) => {
+    const current = playableProjection();
+    mutate(current);
+
+    expect(buildCutPlaybackSequence(current)).toBeNull();
+    expect(cutPlaybackShotsAwaitingTake(current)).toEqual([]);
+  });
+
   it('floors and clamps the live playback clock independently of rounded summary copy', () => {
     expect(formatCutPlaybackClock(7.999, 23)).toBe('0:07');
     expect(formatCutPlaybackClock(-2, 23)).toBe('0:00');
@@ -760,6 +801,36 @@ const slateFirstProjection = (): WorkspaceProjection => {
 };
 
 describe('the truthful Cut player and transport', () => {
+  it('says which Shot still needs a Take instead of refusing without a reason', () => {
+    const current = playableProjection();
+    current.activeBeats[0]!.shots[0]!.selectedTakeId = null;
+
+    renderCutPlayer(current);
+
+    expect(screen.getByText('Beat 1 · Shot 1 needs a Take chosen before the film can play.')).toBeVisible();
+    expect(screen.queryByText('No film preview is available.')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Play film' })).toBeDisabled();
+  });
+
+  it('counts the Shots when more than one is still waiting to be chosen', () => {
+    const current = playableProjection();
+    current.activeBeats[0]!.shots[0]!.selectedTakeId = null;
+    current.activeBeats[2]!.shots[0]!.selectedTakeId = null;
+
+    renderCutPlayer(current);
+
+    expect(screen.getByText('2 Shots need a Take chosen before the film can play.')).toBeVisible();
+  });
+
+  it('keeps the reasonless refusal for a fault that choosing a Take would not fix', () => {
+    const current = playableProjection();
+    current.activeBeats[0]!.shots[0]!.playedDurationSeconds = 6;
+
+    renderCutPlayer(current);
+
+    expect(screen.getByText('No film preview is available.')).toBeVisible();
+  });
+
   afterEach(() => {
     cleanup();
     vi.useRealTimers();

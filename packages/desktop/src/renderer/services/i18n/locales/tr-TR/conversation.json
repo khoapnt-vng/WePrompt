@@ -914,6 +914,8 @@
           "videoLabel": "Beat {{beatPosition}} · {{beatTitle}} · Çekim {{shotPosition}} · {{shotTitle}}",
           "slateLabel": "Beat {{beatPosition}} · {{beatTitle}} · Slayt · Çekim yok",
           "noMedia": "Kullanılabilir film önizlemesi yok.",
+          "awaitingTakeOne": "Filmi oynatmadan önce Beat {{beatPosition}} · Çekim {{shotPosition}} için bir çekim seçin.",
+          "awaitingTakeMany": "Filmi oynatmadan önce {{count}} çekim için seçim yapın.",
           "mediaError": "Bu önizleme yüklenemedi.",
           "play": "Filmi oynat",
           "pause": "Filmi duraklat",
@@ -1367,7 +1369,10 @@
     },
     "conditioning": {
       "inputsTitle": "Bu sabit görüntünün girdileri",
-      "role": { "cast": "Oyuncular", "look": "Görünüm" },
+      "role": {
+        "cast": "Oyuncular",
+        "look": "Görünüm"
+      },
       "maximum": "Bu motor en fazla {{count}} brief referansı kabul eder.",
       "unsupported": "Bu görüntü motoru etkin brief referanslarını kullanamaz. Başka bir görüntü motoru seçin veya bunları brief'ten kaldırın.",
       "overflow": "Bu görüntü motoru en fazla {{maximum}} brief referansı kabul eder, ancak {{count}} referans etkin.",

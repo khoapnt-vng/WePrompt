@@ -121,11 +121,18 @@ readable, ranges, or the rate card — §7's range rule is deferred with the res
 
 _Done when:_ brief → questions → script → Render → real media, with no manual step between.
 
-### Slice 4 — the Cut plays the film
+### Slice 4 — the Cut plays the film — **done 2026-08-22, verified in the running app**
 
-Take selection and playback of the assembled film in-app.
+Driven rather than planned, and the Cut turned out to be built: pressing Play ran a real three-Shot
+film from `0:00` to `0:12`, auto-advancing across three separate sources without a click.
 
-_Done when:_ a pilot user watches their film end to end without leaving the app.
+One thing stood between a pilot user and that: the last Shot's Take had never been chosen, and the
+Cut would not say so — a disabled button and "No film preview is available." Choosing a Take is what
+releases the next Shot's conditioning, so every earlier Shot is chosen on the way through the chain
+and the last one is never asked about. BUG-106 has the fix and why the Take is named rather than
+chosen automatically.
+
+_Done when:_ a pilot user watches their film end to end without leaving the app. **Met.**
 
 ### Slice 5 — cast and look references
 

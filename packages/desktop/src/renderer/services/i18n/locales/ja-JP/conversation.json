@@ -910,6 +910,8 @@
           "videoLabel": "ビート{{beatPosition}} · {{beatTitle}} · ショット{{shotPosition}} · {{shotTitle}}",
           "slateLabel": "ビート{{beatPosition}} · {{beatTitle}} · スレート · カバレッジなし",
           "noMedia": "フィルムプレビューはありません。",
+          "awaitingTakeOne": "フィルムを再生するには、ビート{{beatPosition}} · ショット{{shotPosition}}のテイクを選択してください。",
+          "awaitingTakeMany": "フィルムを再生するには、{{count}}件のショットのテイクを選択してください。",
           "mediaError": "このプレビューを読み込めませんでした。",
           "play": "フィルムを再生",
           "pause": "フィルムを一時停止",
@@ -1352,7 +1354,10 @@
     },
     "conditioning": {
       "inputsTitle": "この静止画の入力",
-      "role": { "cast": "キャスト", "look": "ルック" },
+      "role": {
+        "cast": "キャスト",
+        "look": "ルック"
+      },
       "maximum": "このエンジンは最大{{count}}件のブリーフ参照を受け付けます。",
       "unsupported": "この画像エンジンでは有効なブリーフ参照を使用できません。別の画像エンジンを選ぶか、ブリーフから削除してください。",
       "overflow": "この画像エンジンで使用できるブリーフ参照は最大{{maximum}}件ですが、{{count}}件が有効です。",

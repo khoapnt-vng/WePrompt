@@ -910,6 +910,8 @@
           "videoLabel": "节拍 {{beatPosition}} · {{beatTitle}} · 镜头 {{shotPosition}} · {{shotTitle}}",
           "slateLabel": "节拍 {{beatPosition}} · {{beatTitle}} · 场记卡 · 无镜头素材",
           "noMedia": "暂无影片预览。",
+          "awaitingTakeOne": "播放影片前，请为节拍 {{beatPosition}} · 镜头 {{shotPosition}} 选择镜次。",
+          "awaitingTakeMany": "播放影片前，请为 {{count}} 个镜头选择镜次。",
           "mediaError": "无法加载此预览。",
           "play": "播放影片",
           "pause": "暂停影片",
@@ -1352,7 +1354,10 @@
     },
     "conditioning": {
       "inputsTitle": "此静帧的输入",
-      "role": { "cast": "角色", "look": "风格" },
+      "role": {
+        "cast": "角色",
+        "look": "风格"
+      },
       "maximum": "此引擎最多接受 {{count}} 个简报参考。",
       "unsupported": "此图像引擎无法使用有效的简报参考。请选择其他图像引擎，或从简报中移除这些参考。",
       "overflow": "此图像引擎最多接受 {{maximum}} 个简报参考，但当前有 {{count}} 个有效参考。",

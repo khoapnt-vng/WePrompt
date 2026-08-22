@@ -16,6 +16,7 @@ import {
   type CutPlaybackSegment,
   type CutPlaybackSequence,
   type CutPlaybackVideoSegment,
+  cutPlaybackShotsAwaitingTake,
 } from './playbackSequence';
 import styles from './Cut.module.css';
 
@@ -656,6 +657,18 @@ export const CutPlayer: React.FC<CutPlayerProps> = ({ pending, projectId, projec
       : null;
   const unavailable = sequence === null || segment === null || (segment.kind === 'video' && mediaSource === null);
   const buttonLabel = state.playing ? t(`${PREVIEW_ROOT}.pause`) : t(`${PREVIEW_ROOT}.play`);
+  // A refusal with no stated reason is the same dead end whether the cause is a fault or a choice
+  // nobody was asked to make. Only the latter is actionable, so only the latter is named.
+  const awaitingTake = unavailable ? cutPlaybackShotsAwaitingTake(projection) : [];
+  const unavailableReason =
+    awaitingTake.length === 1
+      ? t(`${PREVIEW_ROOT}.awaitingTakeOne`, {
+          beatPosition: awaitingTake[0]!.beatPosition,
+          shotPosition: awaitingTake[0]!.shotPosition,
+        })
+      : awaitingTake.length > 1
+        ? t(`${PREVIEW_ROOT}.awaitingTakeMany`, { count: awaitingTake.length })
+        : t(`${PREVIEW_ROOT}.noMedia`);
 
   return (
     <>
@@ -668,7 +681,7 @@ export const CutPlayer: React.FC<CutPlayerProps> = ({ pending, projectId, projec
       >
         {unavailable ? (
           <p className={styles.previewUnavailable} data-cut-preview-media data-media-kind='empty'>
-            {t(`${PREVIEW_ROOT}.noMedia`)}
+            {unavailableReason}
           </p>
         ) : (
           <>

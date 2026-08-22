@@ -142,6 +142,32 @@ const exactSelectedVideo = (
  * order, identity, duration, or aggregate refuses the complete sequence rather than drawing a
  * shorter film.
  */
+export type CutShotAwaitingTake = { beatPosition: number; shotPosition: number; shotId: string };
+
+/**
+ * The one reason a finished film refuses to play that a director can act on: a covered Shot with
+ * Takes but no chosen one. Every other refusal in `buildCutPlaybackSequence` is a projection fault,
+ * and reporting those as a missing choice would send someone looking for a button that cannot help.
+ *
+ * It is the last Shot of a chain this reliably catches. Choosing a Take is what releases the next
+ * Shot's conditioning, so every earlier Shot gets chosen on the way through; the last one has
+ * nothing downstream to ask for it, and the film then refuses to play with no stated reason.
+ */
+export const cutPlaybackShotsAwaitingTake = (projection: WorkspaceProjection): readonly CutShotAwaitingTake[] => {
+  const awaiting: CutShotAwaitingTake[] = [];
+  if (!Array.isArray(projection?.activeBeats)) return awaiting;
+  projection.activeBeats.forEach((beat, beatIndex) => {
+    if (!Array.isArray(beat?.shots)) return;
+    beat.shots.forEach((shot, shotIndex) => {
+      const chosen = shot?.selectedTakeId;
+      if (chosen !== null && chosen !== undefined) return;
+      if (!Array.isArray(shot?.videoTakes) || shot.videoTakes.length === 0 || !safeId(shot.id)) return;
+      awaiting.push({ beatPosition: beatIndex + 1, shotPosition: shotIndex + 1, shotId: shot.id });
+    });
+  });
+  return awaiting;
+};
+
 export const buildCutPlaybackSequence = (projection: WorkspaceProjection): CutPlaybackSequence | null => {
   if (
     !safeId(projection.projectId) ||

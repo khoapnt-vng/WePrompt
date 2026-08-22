@@ -913,6 +913,8 @@
           "videoLabel": "Beat {{beatPosition}} · {{beatTitle}} · Shot {{shotPosition}} · {{shotTitle}}",
           "slateLabel": "Beat {{beatPosition}} · {{beatTitle}} · Platzhalter · Keine Abdeckung",
           "noMedia": "Keine Filmvorschau verfügbar.",
+          "awaitingTakeOne": "Für Beat {{beatPosition}} · Shot {{shotPosition}} muss ein Take gewählt werden, bevor der Film abgespielt werden kann.",
+          "awaitingTakeMany": "Für {{count}} Shots muss ein Take gewählt werden, bevor der Film abgespielt werden kann.",
           "mediaError": "Diese Vorschau konnte nicht geladen werden.",
           "play": "Film abspielen",
           "pause": "Film pausieren",
@@ -1366,7 +1368,10 @@
     },
     "conditioning": {
       "inputsTitle": "Eingaben für dieses Standbild",
-      "role": { "cast": "Besetzung", "look": "Look" },
+      "role": {
+        "cast": "Besetzung",
+        "look": "Look"
+      },
       "maximum": "Diese Engine akzeptiert bis zu {{count}} Briefing-Referenzen.",
       "unsupported": "Diese Bild-Engine kann keine aktiven Briefing-Referenzen verwenden. Wähle eine andere Bild-Engine oder entferne sie aus dem Briefing.",
       "overflow": "Diese Bild-Engine akzeptiert höchstens {{maximum}} Briefing-Referenzen, aber {{count}} sind aktiv.",

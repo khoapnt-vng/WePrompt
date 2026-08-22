@@ -910,6 +910,8 @@
           "videoLabel": "節拍 {{beatPosition}} · {{beatTitle}} · 鏡頭 {{shotPosition}} · {{shotTitle}}",
           "slateLabel": "節拍 {{beatPosition}} · {{beatTitle}} · 場記卡 · 無鏡頭素材",
           "noMedia": "暫無影片預覽。",
+          "awaitingTakeOne": "播放影片前，請為節拍 {{beatPosition}} · 鏡頭 {{shotPosition}} 選擇鏡次。",
+          "awaitingTakeMany": "播放影片前，請為 {{count}} 個鏡頭選擇鏡次。",
           "mediaError": "無法載入此預覽。",
           "play": "播放影片",
           "pause": "暫停影片",
@@ -1352,7 +1354,10 @@
     },
     "conditioning": {
       "inputsTitle": "此靜幀的輸入",
-      "role": { "cast": "角色", "look": "風格" },
+      "role": {
+        "cast": "角色",
+        "look": "風格"
+      },
       "maximum": "此引擎最多接受 {{count}} 個簡報參考。",
       "unsupported": "此圖像引擎無法使用有效的簡報參考。請選擇其他圖像引擎，或從簡報中移除這些參考。",
       "overflow": "此圖像引擎最多接受 {{maximum}} 個簡報參考，但目前有 {{count}} 個有效參考。",
