@@ -691,6 +691,45 @@ the shots, not a target they must fit.** Inserting extends the beat; nothing red
 fit-to-target reading in the app is advisory, with one carved exception — a beat with no coverage
 renders a slate `target` seconds long, the only place an authored number reaches the renderer.
 
+## Answered — the navigation and judgement commission
+
+The designer replied 2026-08-22 with `creative-studio-3-navigation-and-judgement.html.txt`
+(sha256 `e04987cc5f7e7371…`), an interactive drawing covering BUG-071 and BUG-088 together. **Written
+answers are promised as §14 of the direction document and have not arrived yet** — the drawing
+forward-references them. Everything below is read from the drawing itself.
+
+**The seek answer, and it dissolves the conflict.** _"A strip's body owns structure. A rail under it
+owns time."_ There is **no separate scrubber**: the filmstrip gains an **18px rail fused inside its own
+border**, ticked at every Beat boundary. The body keeps select-and-reorder; the rail seeks. So §12.4 is
+not reversed — the Cut still does not need redrawing, it needs a rail — and the filmstrip stops being
+a control that pretends not to be a timeline.
+
+**Seek is free, and says so.** The price list gains a third row: `▭ RAIL · SEEK · FREE` beside
+`↔ EDGE · TRIM · FREE` and `↔ BOUNDARY · COSTS A RE-RENDER`. _"Seek is free at every scale."_
+
+**The audio row was redrawn to what we store, not what was wished for.** Every constraint accepted:
+_"an asset, a position, a duration. No filename, no waveform, no ducking, and no lane inside the
+timeline."_ The bed moves **below** the film rather than into it, because _"the bed is a property of
+the export"_. It reads `ASSET 4C1F · 3:04 · FROM 0:00`, `SILENT IN PREVIEW`,
+`EXTENT AND POSITION ONLY · APPLIED ON EXPORT · FADES OUT AT THE CUT'S END`. A `bedRow` prop offers
+three densities — `extent | line | none`.
+
+**The Beat transport is Beat-scoped, and the seam problem is answered.** _"Three files, one clock — a
+seek inside a Beat resolves to a shot and an offset into its take. The transport is Beat-scoped because
+the chain is."_
+
+**Joins get buttons, and that is the judgement act.** _"Scrubbing finds a moment; a join is a place you
+return to."_ `◂ JOIN` lands 1.5s before a join; `L` loops ±2s across it. The drawing labels this
+_"the judgement state… this is what the human is for"_ — §1's division of labour made operable.
+
+**Both bad landings are drawn**, which is what makes this buildable: a seek into a still-decoding clip
+holds a **poster** (_"the clock is already right… never a blank frame and never a rewind"_), and a seek
+into an uncovered Beat lands instantly on the slate, which counts its own time.
+
+**Keyboard:** `SPACE` play · `← →` 1s · `⇧ ← →` 0.2s · `[ ]` join · `L` loop.
+
+Neither bug is closed by a drawing. Both now have one.
+
 ## Verification notes
 
 ### Verified live 2026-08-22 — a new project is generable from birth
