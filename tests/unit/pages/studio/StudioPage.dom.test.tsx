@@ -678,6 +678,60 @@ describe('StudioPage schema-2 cutover', () => {
     );
   });
 
+  it('refreshes the shared catalogue after provisioning, so a bound route stops reading Unavailable', async () => {
+    // Binding from our own read is not enough: the workspace keeps its pre-provisioning snapshot,
+    // the bound choice id resolves to no route, and the Brief reports a working route as
+    // "Unavailable" until the user finds Refresh routes. Observed live before this call existed.
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: attachedProject() }));
+    mocks.bridge.listConnectionCandidates.invoke.mockResolvedValue(
+      ok([
+        {
+          providerId: 'p1',
+          providerName: 'OpenRouter',
+          models: [],
+          integrationModels: [
+            { integrationLabelKey: 'openRouterImage', models: [{ model: 'img-a', health: 'available' }] },
+          ],
+        },
+      ])
+    );
+    mocks.bridge.listConnections.invoke.mockResolvedValue(
+      ok({
+        integrations: [{ integrationId: 'int_img', kind: 'image', labelKey: 'openRouterImage' }],
+        connections: [],
+      })
+    );
+    // Empty first, so provisioning fires; populated afterwards, as it would be once a model binds.
+    mocks.bridge.listRoutes.invoke
+      .mockResolvedValueOnce(
+        ok({
+          image: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+          video: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+          catalogVersion: 'catalog_1',
+        })
+      )
+      .mockResolvedValue(
+        ok({
+          image: {
+            status: 'ready',
+            selected: null,
+            selectedRoute: null,
+            selectionIssue: null,
+            options: [
+              { choiceId: 'img_1', kind: 'image', health: 'available', constraints: { supportsFirstFrame: false } },
+            ],
+          },
+          video: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+          catalogVersion: 'catalog_2',
+        })
+      );
+    renderStudio();
+
+    await waitFor(() => expect(mocks.bridge.saveConnection.invoke).toHaveBeenCalled());
+    // One read for the workspace's own catalogue, one inside provisioning, and one refresh after it.
+    await waitFor(() => expect(mocks.bridge.listRoutes.invoke.mock.calls.length).toBeGreaterThanOrEqual(3));
+  });
+
   it('writes nothing until the Director has attached, so the bind is not invalidated', async () => {
     // The Director's bind carries an expected revision. A set_routes landing in between fails it as
     // "the project changed elsewhere" and the rail reports Director setup as interrupted — which is

@@ -443,6 +443,16 @@ const StudioProjectPage: React.FC<{
         const saved = await ipcBridge.creativeStudio.saveConnection.invoke(request);
         if (saved.ok) satisfied.add(attempt.kind);
       }
+      // Refresh the shared catalogue, not just our own read. Without this the workspace keeps its
+      // pre-provisioning snapshot, a bound route resolves to nothing, and the Brief reports a
+      // working route as "Unavailable" until the user finds Refresh routes for themselves.
+      await refetchRoutes();
+      if (!satisfied.has('video')) {
+        // Partial success is the dangerous case: seed stills render, the film never can, and
+        // without this the user only finds out at the gate as "the estimate could not be
+        // prepared" — with nothing naming the route.
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.videoRouteBlocked');
+      }
       if (satisfied.size === 0) return;
       // Bind from a freshly read catalogue rather than waiting for the shared one to refresh, so a
       // project is generable on the same pass that made it possible.
@@ -460,7 +470,7 @@ const StudioProjectPage: React.FC<{
         })
       );
     }
-  }, [project, routeCatalog, runWorkspaceCommit]);
+  }, [project, refetchRoutes, routeCatalog, runWorkspaceCommit, setActionErrorMessageKey]);
 
   const autoBoundProjectRef = useRef<string | null>(null);
   useEffect(() => {
