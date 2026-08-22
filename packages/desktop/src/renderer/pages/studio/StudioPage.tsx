@@ -403,6 +403,8 @@ const StudioProjectPage: React.FC<{
   const provisionedConnectionsRef = useRef(false);
   useEffect(() => {
     if (routeCatalog === null || provisionedConnectionsRef.current) return;
+    // Same reason: the pass ends in a set_routes, so it must not race the attach either.
+    if (project === null || project.briefConversationId == null) return;
     if (routeCatalog.image.options.length > 0 || routeCatalog.video.options.length > 0) return;
     provisionedConnectionsRef.current = true;
     void (async () => {
@@ -458,11 +460,14 @@ const StudioProjectPage: React.FC<{
         })
       );
     }
-  }, [routeCatalog, runWorkspaceCommit]);
+  }, [project, routeCatalog, runWorkspaceCommit]);
 
   const autoBoundProjectRef = useRef<string | null>(null);
   useEffect(() => {
     if (project === null || routeCatalog === null) return;
+    // Never write while the Director is binding: its bind carries an expected revision, and a
+    // set_routes landing in between fails it as "the project changed elsewhere".
+    if (project.briefConversationId == null) return;
     if (project.imageRouteId !== null || project.videoRouteId !== null) return;
     if (autoBoundProjectRef.current === project.id) return;
     const picked = pickDefaultRoutes([...routeCatalog.image.options, ...routeCatalog.video.options]);

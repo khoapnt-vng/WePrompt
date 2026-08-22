@@ -439,6 +439,8 @@ const HookProbe: React.FC<{ projectId?: string }> = ({ projectId }) => {
   return <output data-testid='hook-state'>{latestHookResult.loadState}</output>;
 };
 
+const attachedProject = () => ({ ...project(), briefConversationId: 'conversation_director' });
+
 const renderStudio = (path = '/studio/project_1/table') =>
   render(
     <MemoryRouter initialEntries={[path]}>
@@ -676,7 +678,37 @@ describe('StudioPage schema-2 cutover', () => {
     );
   });
 
+  it('writes nothing until the Director has attached, so the bind is not invalidated', async () => {
+    // The Director's bind carries an expected revision. A set_routes landing in between fails it as
+    // "the project changed elsewhere" and the rail reports Director setup as interrupted — which is
+    // exactly what shipping this convenience without the guard did.
+    mocks.bridge.getProject.invoke.mockResolvedValue(
+      ok({ status: 'supported', project: { ...project(), briefConversationId: null } })
+    );
+    mocks.bridge.listRoutes.invoke.mockResolvedValue(
+      ok({
+        image: {
+          status: 'ready',
+          selected: null,
+          selectedRoute: null,
+          selectionIssue: null,
+          options: [
+            { choiceId: 'img_1', kind: 'image', health: 'available', constraints: { supportsFirstFrame: false } },
+          ],
+        },
+        video: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+        catalogVersion: 'catalog_1',
+      })
+    );
+    renderStudio();
+
+    await waitFor(() => expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalled());
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.saveConnection.invoke).not.toHaveBeenCalled();
+  });
+
   it('binds a Studio media model when none exists, so the catalogue stops being empty', async () => {
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: attachedProject() }));
     // A route needs a connection binding, not just a configured provider. Without one the catalogue
     // is empty, the project has nothing to bind, and the only way through is a visit to Settings.
     mocks.bridge.listConnectionCandidates.invoke.mockResolvedValue(
@@ -731,6 +763,7 @@ describe('StudioPage schema-2 cutover', () => {
   });
 
   it('never reconsiders a connection someone already chose', async () => {
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: attachedProject() }));
     mocks.bridge.listConnectionCandidates.invoke.mockResolvedValue(
       ok([
         {
@@ -756,6 +789,7 @@ describe('StudioPage schema-2 cutover', () => {
   });
 
   it('binds a route of each kind on a project that has none, so Render is reachable', async () => {
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: attachedProject() }));
     // Projects are created with both ids null. Without this a finished script meets a Render button
     // that does nothing until the user finds the Brief form.
     mocks.bridge.listRoutes.invoke.mockResolvedValue(
@@ -794,7 +828,7 @@ describe('StudioPage schema-2 cutover', () => {
 
   it('leaves a project that already has a route alone', async () => {
     mocks.bridge.getProject.invoke.mockResolvedValue(
-      ok({ status: 'supported', project: { ...project(), imageRouteId: 'chosen_by_hand' } })
+      ok({ status: 'supported', project: { ...attachedProject(), imageRouteId: 'chosen_by_hand' } })
     );
     mocks.bridge.listRoutes.invoke.mockResolvedValue(
       ok({
