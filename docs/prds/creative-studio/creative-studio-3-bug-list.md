@@ -308,6 +308,14 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - `planStudioConnections` read **only** `integrationModels`. So it planned nothing for image — there is no image group to find — and nothing for video whenever that group came back empty. It was not "video was skipped": **provisioning planned neither kind**, and the image route that appeared to work was a binding left over from earlier in the session.
   - The planner now mirrors the editor: a group when the integration has one, the provider's models otherwise, and never a fallback for a closed integration whose own catalogue is authoritative. `CLOSED_CANDIDATE_MODEL_LABEL_KEYS` is now defined once and imported by both, because the two disagreeing is exactly how this happened.
 
+- [ ] **[BUG-100][P1][Creative Studio] A paid video render stalls forever: no work, no error, no log line** — found 2026-08-22 attempting to finish the film
+  - Confirmed **3 video takes on `bytedance/seedance-2.0`, $0.60**, 4 seconds each. All three Shots went to `Rendering` immediately and were **still `Rendering` 35 minutes later**. The Board states _"This item has generation work in progress. This item belongs to a generation request that is still active."_
+  - **Nothing is happening.** `lsof` sampled every 5 seconds for 3 minutes — **0 of 36 samples** showed a single outbound TCP connection from Electron or aioncore. Every connection is to localhost. An earlier 40-second sample found the same.
+  - **The subsystem logs nothing.** Zero lines in the dev log match studio jobs, the job manager, or submission — the log's last entry is Director traffic from 38 minutes earlier. There is no dispatch record, no poll record, no failure, and no timeout.
+  - **The control rules out the pipeline as a whole**: the seed-still wave on this same project, same session, completed in about 45 seconds. Image generation works. This is specific to the video path.
+  - So the money is committed and the film cannot finish, and nothing anywhere says why. Whether the request ever reached the provider is unknown from the outside, which is the first thing the fix has to make knowable.
+  - Sibling of BUG-098 one stage later: that one is a quote that fails without naming a reason, this is a job that never resolves without naming one. A generation subsystem that spends money needs a dispatch log, a poll log, and a timeout that fails loudly.
+
 ## Correctness and honesty of failures
 
 - [x] **[BUG-062][P2][Creative Studio] Three distinct Director failures all report "could not read or save this workspace"** — found 2026-08-21 while diagnosing BUG-061
