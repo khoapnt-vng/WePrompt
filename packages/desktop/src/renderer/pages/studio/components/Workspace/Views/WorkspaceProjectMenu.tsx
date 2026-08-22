@@ -32,6 +32,7 @@ import {
 import { majorUnitsToMinorUnits } from '../spendGate';
 import type { WorkspaceDraftValue } from '../useWorkspaceDrafts';
 import styles from './WorkspaceControls.module.css';
+import { ProjectReferences, type ProjectReferenceItem } from './ProjectReferences';
 import type { WorkspaceProjectMenuProps } from './viewTypes';
 
 type ProjectDialog = 'settings' | 'brief' | null;
@@ -765,6 +766,30 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
   const { t } = useTranslation();
   const [initialStoredRuleDrafts] = useState(() => loadStoredRuleDrafts(project.id));
   const acknowledgeRuleAdoption = mutations.acknowledgeRuleAdoption;
+
+  const projectReferences = useMemo<ProjectReferenceItem[]>(
+    () =>
+      Object.values(project.assets).flatMap((asset) =>
+        asset?.projectId === project.id &&
+        asset.shotId === null &&
+        asset.mediaKind === 'image' &&
+        asset.managedAsset.collection === 'imports' &&
+        (asset.briefReferenceRole === 'cast' || asset.briefReferenceRole === 'look') &&
+        typeof asset.briefReferenceLabel === 'string'
+          ? [{ assetId: asset.id, label: asset.briefReferenceLabel, role: asset.briefReferenceRole }]
+          : []
+      ),
+    [project]
+  );
+
+  // The bound image engine decides how many references a seed still may carry, so the panel reports
+  // its capacity rather than the project limit alone. Null while nothing is bound yet.
+  const imageEngineReferenceCapacity = useMemo<number | null>(() => {
+    const bound = routeCatalog?.image.options.find((option) => option.choiceId === project.imageRouteId);
+    // `constraints` can be absent on a route the catalogue has not fully described yet, and an
+    // absent capacity is unknown rather than zero — zero would wrongly claim the engine refuses them.
+    return bound?.constraints?.maxConditioningImages ?? null;
+  }, [project.imageRouteId, routeCatalog]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [dialog, setDialog] = useState<ProjectDialog>(null);
   const [briefErrorKey, setBriefErrorKey] = useState<string | null>(null);
@@ -1345,6 +1370,15 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
               </Button>
             </div>
           </section>
+
+          <ProjectReferences
+            className={styles.modalSection}
+            disabled={pending}
+            maxConditioningImages={imageEngineReferenceCapacity}
+            projectId={project.id}
+            projectRevision={project.revision}
+            references={projectReferences}
+          />
 
           <section className={styles.modalSection}>
             <h3>{t('conversation.creativeStudio.rules.title')}</h3>

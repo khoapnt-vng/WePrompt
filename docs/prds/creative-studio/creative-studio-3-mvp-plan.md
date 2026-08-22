@@ -134,12 +134,20 @@ chosen automatically.
 
 _Done when:_ a pilot user watches their film end to end without leaving the app. **Met.**
 
-### Slice 5 — cast and look references
+### Slice 5 — cast and look references — **surface built 2026-08-22; round trip not yet demonstrated**
 
-The round trip: the Director requests, the user approves, images generate on the image route and land
-tagged `cast` or `look`. Built against a chain that already works, which is why it is last.
+The plan assumed this slice was a round trip to verify. It was a missing screen. Every other part —
+both IPCs, the Beat panel's per-Shot picker, twelve locales of authored copy — already existed, and
+nothing in the renderer called any of it, so no project could ever hold a reference. BUG-107 has the
+detail and the fix.
 
-_Done when:_ two shots in one Beat visibly share a subject.
+Two corrections the code forced on this plan's §1. `studio_request_reference_images` takes only shot
+ids: it carries no role and no subject, so it never produced a `cast` or `look` tag — that tag comes
+from importing a file. And a `video_take` request may not carry a Brief reference at all, so a
+subject reaches a chain through its head Shot's **seed still**, not through each Shot.
+
+_Done when:_ two shots in one Beat visibly share a subject. **Not met** — importing needs a native
+file dialog that cannot be driven headlessly, so the generated half is still unproven.
 
 ## 4. Explicitly out, and why
 
