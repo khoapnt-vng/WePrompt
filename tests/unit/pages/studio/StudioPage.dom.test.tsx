@@ -1273,6 +1273,12 @@ describe('StudioPage schema-2 cutover', () => {
         ],
       })
     );
+    expect(await screen.findByText('conversation.creativeStudio.workspace.controls.videoRouteBlocked')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: BRIEF_RULES_TITLE }));
+    const brief = await screen.findByRole('dialog', { name: BRIEF_RULES_TITLE });
+    expect(within(brief).getByLabelText('conversation.creativeStudio.workspace.controls.imageRoute')).toBeVisible();
+    expect(within(brief).getByLabelText('conversation.creativeStudio.workspace.controls.videoRoute')).toBeVisible();
+    await waitFor(() => expect(mocks.bridge.listRoutes.invoke.mock.calls.length).toBeGreaterThanOrEqual(3));
     expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
   });
 

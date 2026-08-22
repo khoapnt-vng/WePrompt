@@ -666,6 +666,7 @@ const expectedLeaves = [
   'gate.confirm',
   'gate.close',
   'gate.errors.generic',
+  'gate.errors.routesUnavailable',
   'gate.errors.pricing.invalidQuote',
   'gate.errors.pricing.inactiveShot',
   'gate.errors.pricing.inFlight',
@@ -736,6 +737,7 @@ const localizedWorkspaceKeys = [
   ...localizedCutPreviewKeys,
   ...localizedCutFilmDeltaKeys,
   'controls.briefAndRulesTitle',
+  'gate.errors.routesUnavailable',
   'gate.errors.pricing.invalidQuote',
   'gate.errors.pricing.inactiveShot',
   'gate.errors.pricing.inFlight',
@@ -787,6 +789,14 @@ describe('Creative Studio workspace translations', () => {
 
     expect(leaves['beatPanel.chain.hardCutUnavailable']).toBe(
       'Hard-cut changes are temporarily unavailable. A reviewed estimate for the required replacement media must come first.'
+    );
+  });
+
+  it('names both unavailable estimate routes and directs recovery to Brief and rules', () => {
+    const leaves = flattenLeaves(englishWorkspace);
+
+    expect(leaves['gate.errors.routesUnavailable']).toBe(
+      'Choose ready image and video routes in Brief & rules before preparing this estimate.'
     );
   });
 

@@ -957,6 +957,7 @@
       },
       "gate": {
         "errors": {
+          "routesUnavailable": "準備此估算前，請在「簡報與規則」中選擇可用的圖片與影片路線。",
           "pricing": {
             "invalidQuote": "估價資料內部不一致。未提交任何內容。",
             "inactiveShot": "一個已選鏡頭已不再處於啟用狀態。請重新整理專案後再次準備估價。",

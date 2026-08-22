@@ -960,6 +960,7 @@
       },
       "gate": {
         "errors": {
+          "routesUnavailable": "Wähle unter Brief & Regeln einsatzbereite Bild- und Videorouten aus, bevor du diesen Kostenvoranschlag vorbereitest.",
           "pricing": {
             "invalidQuote": "Die Schätzungsdaten waren intern inkonsistent. Es wurde nichts übermittelt.",
             "inactiveShot": "Eine ausgewählte Einstellung ist nicht mehr aktiv. Aktualisieren Sie das Projekt und bereiten Sie erneut vor.",

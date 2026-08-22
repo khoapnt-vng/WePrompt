@@ -757,6 +757,7 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
   pending,
   errorMessageKey,
   mutations,
+  briefDialogRequest = 0,
   onRuleDraftDirtyCountChange,
   onActiveRuleDraftDirtyCountChange,
   organisationRules = ORGANISATION_STUDIO_RULES,
@@ -793,6 +794,12 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
     targetId: string | null;
     adoptionKey: string;
   } | null>(null);
+
+  useEffect(() => {
+    if (briefDialogRequest <= 0) return;
+    setMenuOpen(false);
+    setDialog('brief');
+  }, [briefDialogRequest]);
   type AddAttempt = {
     projectId: string;
     draft: StudioBriefRuleDraft;

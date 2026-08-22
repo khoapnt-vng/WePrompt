@@ -2157,6 +2157,7 @@
         "close": "Close — spend nothing",
         "errors": {
           "generic": "The estimate could not be prepared or confirmed. Nothing was retried automatically.",
+          "routesUnavailable": "Choose ready image and video routes in Brief & rules before preparing this estimate.",
           "pricing": {
             "invalidQuote": "The estimate data was not internally consistent. Nothing was submitted.",
             "inactiveShot": "One selected shot is no longer active. Refresh the project and prepare again.",

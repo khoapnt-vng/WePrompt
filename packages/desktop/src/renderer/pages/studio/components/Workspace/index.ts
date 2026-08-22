@@ -28,6 +28,7 @@ export type {
   SpendGateDraft,
   SpendGatePhase,
   SpendGateQuoteSummary,
+  SpendGateRouteIssue,
   SpendGateSelectedOption,
   SpendGateState,
 } from './spendGate';

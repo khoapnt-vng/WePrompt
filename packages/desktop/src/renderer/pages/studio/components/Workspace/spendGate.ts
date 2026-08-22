@@ -12,6 +12,7 @@ import type {
   StudioRendererProjectV2,
   StudioRendererQuotedGenerationV2,
   StudioRendererReferenceGenerationHandoffV2,
+  StudioRouteCatalogV2,
   StudioRendererSubmissionQuoteV2,
   StudioSubmissionCacheErrorCodeV2,
 } from '@/common/types/project/creativeStudioTypes';
@@ -26,6 +27,8 @@ import type { WorkspaceProjection } from './workspaceProjection';
 export type SpendGateDraft = StudioPrepareSubmissionRequestV2;
 
 export type SpendGateSelectedOption = 'baseOnly' | 'withCascade';
+
+export type SpendGateRouteIssue = 'image' | 'video' | 'image_and_video';
 
 export type SpendGatePhase =
   | 'closed'
@@ -47,9 +50,10 @@ export type SpendGateState = {
   selectedOption: SpendGateSelectedOption;
   errorCode: string | null;
   pricingRefusalReason: StudioPricingRefusalReasonV2 | null;
+  routeIssue: SpendGateRouteIssue | null;
 };
 
-type SpendGateFailure = { code: string; reason?: unknown };
+type SpendGateFailure = { code: string; reason?: unknown; routeIssue?: SpendGateRouteIssue };
 
 export type SpendGateAction =
   | { type: 'open'; draft: SpendGateDraft }
@@ -69,6 +73,7 @@ export const initialSpendGateState = (): SpendGateState => ({
   selectedOption: 'baseOnly',
   errorCode: null,
   pricingRefusalReason: null,
+  routeIssue: null,
 });
 
 const cacheFailurePhase = (code: string): SpendGatePhase => {
@@ -90,6 +95,7 @@ export const spendGateReducer = (state: SpendGateState, action: SpendGateAction)
       selectedOption: 'baseOnly',
       errorCode: null,
       pricingRefusalReason: null,
+      routeIssue: null,
     };
   }
   if (action.type === 'close') return initialSpendGateState();
@@ -103,6 +109,7 @@ export const spendGateReducer = (state: SpendGateState, action: SpendGateAction)
           selectedOption: 'baseOnly',
           errorCode: null,
           pricingRefusalReason: null,
+          routeIssue: null,
         };
   }
   if (action.type === 'prepare_succeeded') {
@@ -115,6 +122,7 @@ export const spendGateReducer = (state: SpendGateState, action: SpendGateAction)
           selectedOption: 'baseOnly',
           errorCode: null,
           pricingRefusalReason: null,
+          routeIssue: null,
         };
   }
   if (action.type === 'select_option') {
@@ -124,12 +132,12 @@ export const spendGateReducer = (state: SpendGateState, action: SpendGateAction)
   if (action.type === 'confirm_started') {
     return state.options === null
       ? state
-      : { ...state, phase: 'confirming', errorCode: null, pricingRefusalReason: null };
+      : { ...state, phase: 'confirming', errorCode: null, pricingRefusalReason: null, routeIssue: null };
   }
   if (action.type === 'confirmed') {
     return state.options === null
       ? state
-      : { ...state, phase: 'confirmed', errorCode: null, pricingRefusalReason: null };
+      : { ...state, phase: 'confirmed', errorCode: null, pricingRefusalReason: null, routeIssue: null };
   }
   if (action.type === 'prepare_failed' || action.type === 'confirm_failed') {
     const pricingRefusalReason =
@@ -146,9 +154,26 @@ export const spendGateReducer = (state: SpendGateState, action: SpendGateAction)
       options: phase === 'quote_in_use' ? state.options : null,
       errorCode,
       pricingRefusalReason,
+      routeIssue: action.type === 'prepare_failed' ? (action.error.routeIssue ?? null) : null,
     };
   }
   return state;
+};
+
+/** Names the exact media route required by this immutable estimate draft that is not currently ready. */
+export const spendGateRouteIssue = (
+  catalog: StudioRouteCatalogV2,
+  draft: SpendGateDraft
+): SpendGateRouteIssue | null => {
+  const choices = [...draft.baseChoices, ...draft.cascadeChoices];
+  const needsImage = choices.some((choice) => choice.purpose === 'seed_still');
+  const needsVideo = choices.some((choice) => choice.purpose === 'video_take');
+  const imageUnavailable = needsImage && catalog.image.status !== 'ready';
+  const videoUnavailable = needsVideo && catalog.video.status !== 'ready';
+  if (imageUnavailable && videoUnavailable) return 'image_and_video';
+  if (imageUnavailable) return 'image';
+  if (videoUnavailable) return 'video';
+  return null;
 };
 
 export const selectedSpendGateQuote = (state: SpendGateState): StudioRendererSubmissionQuoteV2 | null => {

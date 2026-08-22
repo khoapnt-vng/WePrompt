@@ -52,6 +52,7 @@ import {
   type CutActions,
   type CutCopyResult,
   type CutImportResult,
+  type SpendGateRouteIssue,
   type WorkspaceDraftValue,
   type WorkspaceMutationCallbacks,
   type WorkspaceShellHandle,
@@ -217,6 +218,7 @@ const StudioProjectPage: React.FC<{
   const [workspacePending, setWorkspacePending] = useState(false);
   const [ruleDraftDirtyCount, setRuleDraftDirtyCount] = useState(0);
   const [activeRuleDraftDirtyCount, setActiveRuleDraftDirtyCount] = useState(0);
+  const [briefDialogRequest, setBriefDialogRequest] = useState(0);
   const inactiveWorkspaceDraftDirtyCount = countStoredWorkspaceDrafts(projectId);
   const workspaceShellRef = useRef<WorkspaceShellHandle | null>(null);
   const workspacePendingRef = useRef(false);
@@ -254,6 +256,13 @@ const StudioProjectPage: React.FC<{
   }, [refetchProject, refetchReferences, refetchWorkspace]);
   const spendGate = useSpendGate({ onConfirmed: afterPaidConfirm });
   const spendGateLocked = spendGate.state.phase === 'confirming' || spendGate.state.phase === 'quote_in_use';
+  const editSpendGateRoutes = useCallback(
+    (_issue: SpendGateRouteIssue): void => {
+      setBriefDialogRequest((request) => request + 1);
+      void refetchRoutes();
+    },
+    [refetchRoutes]
+  );
 
   /**
    * The bar's Render action. Submits the largest batch the chain permits — one shot per segment —
@@ -1523,6 +1532,7 @@ const StudioProjectPage: React.FC<{
               pending={workspacePending}
               errorMessageKey={actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey}
               mutations={mutations}
+              briefDialogRequest={briefDialogRequest}
               onRuleDraftDirtyCountChange={setRuleDraftDirtyCount}
               onActiveRuleDraftDirtyCountChange={setActiveRuleDraftDirtyCount}
             />
@@ -1582,6 +1592,7 @@ const StudioProjectPage: React.FC<{
         prepare={spendGate.prepare}
         selectOption={spendGate.selectOption}
         confirm={spendGate.confirm}
+        onEditRoutes={editSpendGateRoutes}
       />
     </>
   );

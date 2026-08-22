@@ -14,6 +14,7 @@ import type {
 } from '@/common/types/project/creativeStudioTypes';
 
 const mocks = vi.hoisted(() => ({
+  listRoutes: vi.fn(),
   prepare: vi.fn(),
   confirm: vi.fn(),
 }));
@@ -21,6 +22,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/common', () => ({
   ipcBridge: {
     creativeStudio: {
+      listRoutes: { invoke: mocks.listRoutes },
       prepareSubmission: { invoke: mocks.prepare },
       confirmSubmission: { invoke: mocks.confirm },
     },
@@ -224,10 +226,12 @@ const draft = {
   cascadeChoices: [{ shotId: 'shot_1', purpose: 'video_take' as const, generationCount: 1, referenceAssetId: null }],
 };
 
-const Harness: React.FC<{ reenterOnConfirmed?: boolean; rejectOnConfirmed?: boolean }> = ({
-  reenterOnConfirmed = false,
-  rejectOnConfirmed = false,
-}) => {
+const Harness: React.FC<{
+  gateDraft?: typeof draft;
+  onEditRoutes?: ReturnType<typeof vi.fn>;
+  reenterOnConfirmed?: boolean;
+  rejectOnConfirmed?: boolean;
+}> = ({ gateDraft = draft, onEditRoutes = vi.fn(), reenterOnConfirmed = false, rejectOnConfirmed = false }) => {
   const gateRef = useRef<ReturnType<typeof useSpendGate> | null>(null);
   const gate = useSpendGate({
     onConfirmed: async () => {
@@ -238,9 +242,9 @@ const Harness: React.FC<{ reenterOnConfirmed?: boolean; rejectOnConfirmed?: bool
   gateRef.current = gate;
   return (
     <>
-      <button onClick={() => gate.open(draft)}>Open review</button>
+      <button onClick={() => gate.open(gateDraft)}>Open review</button>
       <button onClick={() => void gate.confirm()}>Invoke confirm directly</button>
-      <SpendGateModal {...gate} />
+      <SpendGateModal {...gate} onEditRoutes={onEditRoutes} />
     </>
   );
 };
@@ -326,6 +330,7 @@ const ControlsHarness: React.FC<{
   pending?: boolean;
   gateLocked?: boolean;
   mutations?: WorkspaceMutationCallbacks;
+  briefDialogRequest?: number;
 }> = ({
   routes,
   open: _open,
@@ -336,6 +341,7 @@ const ControlsHarness: React.FC<{
   pending = false,
   gateLocked = false,
   mutations = workspaceCallbacks(),
+  briefDialogRequest = 0,
 }) => {
   const project = projectOverride === undefined ? makeProject() : { ...projectOverride };
   if (spendPolicy) project.spendPolicy = { currency: 'USD', maxPerBatchMinorUnits: 1_000 };
@@ -388,6 +394,7 @@ const ControlsHarness: React.FC<{
         pending={pending}
         errorMessageKey={null}
         mutations={mutations}
+        briefDialogRequest={briefDialogRequest}
       />
       <WorkspaceControls
         activeView='table'
@@ -801,11 +808,31 @@ describe('WorkspaceControls', () => {
     );
     expect(screen.queryByText('conversation.creativeStudio.workspace.controls.invalidSpendPolicy')).toBeNull();
   });
+
+  it('opens Brief and rules directly when the spend gate requests route recovery', async () => {
+    const view = render(
+      <ControlsHarness routes={routeCatalog('selection_required', 'ready')} open={vi.fn()} briefDialogRequest={0} />
+    );
+    expect(
+      screen.queryByRole('dialog', { name: 'conversation.creativeStudio.workspace.controls.briefAndRulesTitle' })
+    ).toBeNull();
+
+    view.rerender(
+      <ControlsHarness routes={routeCatalog('selection_required', 'ready')} open={vi.fn()} briefDialogRequest={1} />
+    );
+
+    const dialog = await screen.findByRole('dialog', {
+      name: 'conversation.creativeStudio.workspace.controls.briefAndRulesTitle',
+    });
+    expect(within(dialog).getByLabelText('conversation.creativeStudio.workspace.controls.imageRoute')).toBeVisible();
+    expect(within(dialog).getByLabelText('conversation.creativeStudio.workspace.controls.videoRoute')).toBeVisible();
+  });
 });
 
 describe('SpendGateModal', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
+    mocks.listRoutes.mockResolvedValue({ ok: true, data: routeCatalog('ready', 'ready') });
     mocks.prepare.mockResolvedValue({ ok: true, data: options() });
     mocks.confirm.mockResolvedValue({ ok: true, data: { projectId: 'project_1', projectRevision: 4 } });
   });
@@ -819,6 +846,60 @@ describe('SpendGateModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.close' }));
     expect(mocks.prepare).not.toHaveBeenCalled();
     expect(mocks.confirm).not.toHaveBeenCalled();
+  });
+
+  it('names the unavailable image route before estimating and offers the Brief route picker', async () => {
+    const onEditRoutes = vi.fn();
+    mocks.listRoutes.mockResolvedValue({ ok: true, data: routeCatalog('selection_required', 'ready') });
+    mocks.prepare.mockResolvedValue({ ok: false, error: { code: 'invalid_route' } });
+    const imageOnlyDraft = { ...draft, cascadeChoices: [] };
+    render(<Harness gateDraft={imageOnlyDraft} onEditRoutes={onEditRoutes} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
+
+    expect(await screen.findByText('conversation.creativeStudio.workspace.controls.imageRouteBlocked')).toBeVisible();
+    expect(mocks.prepare).toHaveBeenCalledTimes(1);
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.briefAndRulesTitle' })
+    );
+    expect(onEditRoutes).toHaveBeenCalledWith('image');
+  });
+
+  it('names both unavailable routes instead of presenting two contradictory partial-route messages', async () => {
+    mocks.listRoutes.mockResolvedValue({ ok: true, data: routeCatalog('setup_required', 'unavailable') });
+    mocks.prepare.mockResolvedValue({ ok: false, error: { code: 'invalid_route' } });
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
+
+    expect(
+      await screen.findByText('conversation.creativeStudio.workspace.gate.errors.routesUnavailable')
+    ).toBeVisible();
+    expect(mocks.prepare).toHaveBeenCalledTimes(1);
+  });
+
+  it('checks routes after a failed estimate and replaces the generic error with the exact route', async () => {
+    mocks.listRoutes.mockResolvedValue({ ok: true, data: routeCatalog('ready', 'unavailable') });
+    mocks.prepare.mockResolvedValue({ ok: false, error: { code: 'invalid_route' } });
+    const videoOnlyDraft = { ...draft, baseChoices: [], cascadeChoices: draft.cascadeChoices };
+    render(<Harness gateDraft={videoOnlyDraft} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
+
+    expect(await screen.findByText('conversation.creativeStudio.workspace.controls.videoRouteBlocked')).toBeVisible();
+    expect(mocks.prepare).toHaveBeenCalledTimes(1);
+    expect(mocks.listRoutes).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the original estimate failure without waiting for a stalled read-only route diagnosis', async () => {
+    mocks.listRoutes.mockReturnValue(new Promise(() => undefined));
+    mocks.prepare.mockResolvedValue({ ok: false, error: { code: 'invalid_route' } });
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
+
+    expect(await screen.findByText('conversation.creativeStudio.workspace.gate.errors.generic')).toBeVisible();
+    expect(mocks.prepare).toHaveBeenCalledTimes(1);
   });
 
   it('freezes duplicate prepare, renders every safe row fact, and confirms only the selected opaque quote', async () => {

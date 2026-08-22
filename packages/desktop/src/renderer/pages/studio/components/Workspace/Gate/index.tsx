@@ -18,10 +18,12 @@ import {
   formatMinorUnits,
   selectedSpendGateQuote,
   spendGateReducer,
+  spendGateRouteIssue,
   summarizeQuote,
   type SpendGateDraft,
   type SpendGateSelectedOption,
   type SpendGateState,
+  type SpendGateRouteIssue,
 } from '../spendGate';
 import styles from './SpendGateModal.module.css';
 
@@ -77,17 +79,32 @@ export const useSpendGate = ({ onConfirmed }: UseSpendGateInput): UseSpendGateRe
     const operation = ++prepareOperationRef.current;
     const draft = current.draft;
     dispatch({ type: 'prepare_started' });
+    const fail = (error: { code: string; reason?: unknown }): void => {
+      dispatch({ type: 'prepare_failed', error });
+      void (async (): Promise<void> => {
+        try {
+          const routes = await ipcBridge.creativeStudio.listRoutes.invoke({ projectId: draft.projectId });
+          if (gateGenerationRef.current !== generation || prepareOperationRef.current !== operation || !routes.ok) {
+            return;
+          }
+          const routeIssue = spendGateRouteIssue(routes.data, draft);
+          if (routeIssue !== null) dispatch({ type: 'prepare_failed', error: { ...error, routeIssue } });
+        } catch {
+          // Route diagnosis is read-only assistance. Preserve the original estimate failure if it is unavailable.
+        }
+      })();
+    };
     try {
       const result = await ipcBridge.creativeStudio.prepareSubmission.invoke(draft);
       if (gateGenerationRef.current !== generation || prepareOperationRef.current !== operation) return;
       if (result.ok === false) {
-        dispatch({ type: 'prepare_failed', error: result.error });
+        fail(result.error);
         return;
       }
       dispatch({ type: 'prepare_succeeded', options: result.data });
     } catch {
       if (gateGenerationRef.current === generation && prepareOperationRef.current === operation) {
-        dispatch({ type: 'prepare_failed', error: { code: 'storage_error' } });
+        fail({ code: 'storage_error' });
       }
     } finally {
       if (prepareOperationRef.current === operation) preparingRef.current = false;
@@ -144,7 +161,12 @@ export const useSpendGate = ({ onConfirmed }: UseSpendGateInput): UseSpendGateRe
   return { state, open, close, prepare, selectOption, confirm };
 };
 
-export type SpendGateModalProps = Pick<UseSpendGateResult, 'state' | 'close' | 'prepare' | 'selectOption' | 'confirm'>;
+export type SpendGateModalProps = Pick<
+  UseSpendGateResult,
+  'state' | 'close' | 'prepare' | 'selectOption' | 'confirm'
+> & {
+  onEditRoutes: (issue: SpendGateRouteIssue) => void;
+};
 
 const pricingRefusalMessageKeys: Record<StudioPricingRefusalReasonV2, string> = {
   invalid_quote: 'conversation.creativeStudio.workspace.gate.errors.pricing.invalidQuote',
@@ -166,11 +188,27 @@ const errorMessageKey = (state: SpendGateState): string | null => {
   if (state.phase === 'error' && state.pricingRefusalReason !== null) {
     return pricingRefusalMessageKeys[state.pricingRefusalReason];
   }
+  if (state.phase === 'error' && state.routeIssue === 'image') {
+    return 'conversation.creativeStudio.workspace.controls.imageRouteBlocked';
+  }
+  if (state.phase === 'error' && state.routeIssue === 'video') {
+    return 'conversation.creativeStudio.workspace.controls.videoRouteBlocked';
+  }
+  if (state.phase === 'error' && state.routeIssue === 'image_and_video') {
+    return 'conversation.creativeStudio.workspace.gate.errors.routesUnavailable';
+  }
   if (state.phase === 'error') return 'conversation.creativeStudio.workspace.gate.errors.generic';
   return null;
 };
 
-export const SpendGateModal: React.FC<SpendGateModalProps> = ({ state, close, prepare, selectOption, confirm }) => {
+export const SpendGateModal: React.FC<SpendGateModalProps> = ({
+  state,
+  close,
+  prepare,
+  selectOption,
+  confirm,
+  onEditRoutes,
+}) => {
   const { t, i18n } = useTranslation();
   const quote = selectedSpendGateQuote(state);
   const summary = useMemo(() => (quote === null ? null : summarizeQuote(quote)), [quote]);
@@ -295,6 +333,18 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({ state, close, pr
         ) : null}
 
         <div className={styles.actions}>
+          {state.phase === 'error' && state.routeIssue !== null ? (
+            <Button
+              type='primary'
+              onClick={() => {
+                const issue = state.routeIssue;
+                close();
+                onEditRoutes(issue);
+              }}
+            >
+              {t('conversation.creativeStudio.workspace.controls.briefAndRulesTitle')}
+            </Button>
+          ) : null}
           {state.phase === 'choices' || state.phase === 'refresh_required' || state.phase === 'quote_cache_full' ? (
             <Button type='primary' onClick={() => void prepare()}>
               {t(

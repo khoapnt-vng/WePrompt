@@ -967,6 +967,7 @@
       },
       "gate": {
         "errors": {
+          "routesUnavailable": "Escolha rotas de imagem e vídeo prontas em Brief e regras antes de preparar esta estimativa.",
           "pricing": {
             "invalidQuote": "Os dados da estimativa estavam internamente inconsistentes. Nada foi enviado.",
             "inactiveShot": "Uma tomada selecionada não está mais ativa. Atualize o projeto e prepare novamente.",

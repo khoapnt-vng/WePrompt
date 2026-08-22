@@ -961,6 +961,7 @@
       },
       "gate": {
         "errors": {
+          "routesUnavailable": "Bu tahmini hazırlamadan önce Brief ve kurallar bölümünde hazır görsel ve video rotalarını seçin.",
           "pricing": {
             "invalidQuote": "Tahmin verileri kendi içinde tutarlı değildi. Hiçbir şey gönderilmedi.",
             "inactiveShot": "Seçili çekimlerden biri artık etkin değil. Projeyi yenileyip yeniden hazırlayın.",

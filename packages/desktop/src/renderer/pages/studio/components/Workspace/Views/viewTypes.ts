@@ -62,6 +62,7 @@ export type WorkspaceProjectMenuProps = Pick<
   'project' | 'projection' | 'drafts' | 'pending' | 'errorMessageKey' | 'mutations'
 > & {
   routeCatalog: StudioRouteCatalogV2 | null;
+  briefDialogRequest?: number;
   onRuleDraftDirtyCountChange?: (count: number) => void;
   onActiveRuleDraftDirtyCountChange?: (count: number) => void;
   /** Injected so the locked layer remains directly testable while this release ships it empty. */
