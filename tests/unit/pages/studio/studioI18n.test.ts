@@ -318,6 +318,8 @@ const expectedLeaves = [
   'beatPanel.coverage.boundaryLabel',
   'beatPanel.coverage.boundaryValue',
   'beatPanel.coverage.boundaryAnnouncement',
+  'beatPanel.coverage.trimGuidance',
+  'beatPanel.coverage.boundaryGuidance',
   'beatPanel.coverage.trimInLabel',
   'beatPanel.coverage.trimOutLabel',
   'beatPanel.coverage.trimValue',
@@ -675,6 +677,8 @@ const briefAndRulesTitles: Record<string, string> = {
 
 const localizedWorkspaceKeys = [
   'controls.briefAndRulesTitle',
+  'beatPanel.coverage.trimGuidance',
+  'beatPanel.coverage.boundaryGuidance',
   'gate.errors.pricing.invalidQuote',
   'gate.errors.pricing.inactiveShot',
   'gate.errors.pricing.inFlight',
