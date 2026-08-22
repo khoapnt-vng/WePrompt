@@ -400,6 +400,19 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - The bookkeeping is not wrong — chains genuinely are Beat-scoped and the dependency line is real. What is wrong is that Beats being the unit of parallelism buys nothing in throughput while the global video cap is one.
   - **The question to answer before anyone estimates that panel:** is `FifoSemaphore(1)` a deliberate cost or provider-rate-limit guard, or a default nobody has revisited? If deliberate, the drawing must reflect it and the film-scale promise has to change. If not, this is the single highest-leverage number in the product.
   - Reviewed in full at [chain handoff review](../../design/creative-studio-3-chain-handoff-review.md).
+- [ ] **[BUG-110][P1][Creative Studio] A definitive HTTP 400 is reported as an ambiguous submission, so the user is asked to risk a duplicate charge for a request that certainly never ran** — measured 2026-08-23
+  - `mapStatusError` in `openRouterVideoAdapter.ts` handles 401/403 as `auth`, 429 as `rate_limited` and 5xx as `provider_unavailable`, then falls through: **every 4xx becomes `unknown`**. `jobManager.ts:1107` turns an `unknown` submit failure into `needs_attention` with code `submission_unknown`.
+  - A 400 is the provider stating plainly that it rejected the request. It is the _least_ ambiguous outcome there is, and it is the one the product describes as unknown.
+  - **What that costs the user.** The Shot lands in `needs_attention`, the only way forward is **Retry generation → Acknowledge and review estimate**, and that acknowledgement exists to accept the risk of paying twice. For a 400 there is no such risk. Observed live: two full retry cycles, both 400, both presented as possibly-submitted.
+  - It also makes a permanent failure look transient. A 400 will fail identically every time, so the honest response is to stop and say why, not to offer a retry that cannot succeed.
+  - Fix: map 4xx other than 429/401/403 to a definitive rejection code. `invalid_request` already exists in `StudioJobErrorCode` and is exactly this case.
+  - **The billing invariant held throughout, which is the reassuring half.** Two $0.60 authorizations were confirmed and **nothing was billed** — the single spend receipt in the project is the seed still. That matches the proof behind BUG-109: the one site that writes a receipt fires on the transition into `running`, and a 400 never gets there.
+
+- [ ] **[BUG-111][P2][Creative Studio] The provider says why it rejected the request and we throw the sentence away** — measured 2026-08-23
+  - The OpenRouter video adapter logs a structured evidence object on an HTTP error: `operation`, `model`, `httpStatus`, `stableCode`, `errorCode`, `errorType`, `providerCode`, and **`messagePresent: true`** — the flag saying a human-readable message exists, without the message.
+  - So a run can be blocked by a 400 twice and leave no record of the reason. Diagnosing BUG-110 established _that_ the request was rejected and gave no way to learn _why_.
+  - The redaction is deliberate and the instinct is right — a provider message can carry request content. But a bounded, sanitised excerpt would be the difference between a diagnosable failure and a dead end, and the `detail` field added for conditioning frames (BUG-105) is the precedent for how to carry one safely.
+  - Same class as BUG-105: the failure is durable and visible, and the one fact that explains it is discarded before anyone can read it.
 
 ## Correctness and honesty of failures
 
