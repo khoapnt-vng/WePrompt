@@ -8,6 +8,12 @@ questions, and watches a film — without ever opening a settings form.
 Out of that sentence: no one-file export, no narration, no hand-tuning of models. References and cast
 land after the spine runs, not before.
 
+**Narrowed further 2026-08-22, on the owner's instruction: make it work first.** Cost legibility and
+duration fitting are out of the MVP — no rate-card display, no estimate ranges, no solving shot
+lengths against a Beat target. Whatever the models return is the length. The one thing kept is the
+existing `prepareSubmission` → `confirmSubmission` gate, because it already exists and it is what
+stops a stray click billing the user; leaving it in costs nothing.
+
 ---
 
 ## 1. What already works, so nobody rebuilds it
@@ -80,8 +86,8 @@ _Done when:_ a new project's first Director turn completes with no dialog.
 
 ### Slice 3 — render straight from the Director's script
 
-The spend gate reachable from what the Director just wrote, with a cost the user can read. §7 requires
-the estimate to be a **range**, not a point, once takes are in play.
+The existing gate reachable from what the Director just wrote. **Not** in this slice: making the cost
+readable, ranges, or the rate card — §7's range rule is deferred with the rest of pricing.
 
 _Done when:_ brief → questions → script → Render → real media, with no manual step between.
 
@@ -119,6 +125,7 @@ behaviour and it produces better scripts, but it puts conversation between a pil
 first visible result. Worth watching in Slice 0: if the questions feel like an interrogation rather
 than a conversation, the fix is the wording of the rules, not the policy.
 
-**Money is real from Slice 3 onward.** Every run of the chain bills. Estimates should be treated as
-ranges throughout, per §7, and §11.3's per-batch budget cap is the honest answer to "what will this
-cost me" if pilot users start asking.
+**Money is real from Slice 3 onward, and the MVP will not tell anyone what it costs.** That is the
+accepted trade for speed. It is safe only because the confirm gate remains; it stops being safe the
+moment anything renders without one, so that is the line to hold while everything else relaxes.
+§7's ranges and §11.3's budget cap are the answer when pilot users start asking, and they will.
