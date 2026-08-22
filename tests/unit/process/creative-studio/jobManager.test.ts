@@ -932,6 +932,72 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     ]);
   });
 
+  it('recovers a valid sibling after a route failure aborts its original dispatch wave', async () => {
+    const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
+    const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit }), {
+      generationCount: 2,
+    });
+    const catalog = {
+      routes: [harness.route],
+      diagnostics: [],
+      generationCatalogVersion: 'catalog_v2',
+    };
+    const listGenerationRoutes = vi
+      .spyOn(harness.providerResolver, 'listGenerationRoutes')
+      .mockResolvedValueOnce(catalog)
+      .mockRejectedValueOnce(new Error('catalog temporarily unavailable'));
+
+    await expect(dispatchV2(harness)).rejects.toMatchObject({ code: 'provider_error' });
+    await expectV2Job(harness, { status: 'queued_local', providerJobId: null }, 'job_v2_1');
+    await expectV2Job(
+      harness,
+      { status: 'needs_attention', providerJobId: null, error: { code: 'provider_unavailable' } },
+      'job_v2_2'
+    );
+    expect(submit).not.toHaveBeenCalled();
+
+    listGenerationRoutes.mockResolvedValue(catalog);
+    await harness.manager.resumePendingJobsV2([harness.project.id]);
+
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({ idempotencyKey: 'key_v2_1' }),
+      expect.objectContaining({ id: provider.id }),
+      expect.anything()
+    );
+  });
+
+  it('recovers a video wave after a raw conditioning-media resolution failure aborts preparation', async () => {
+    const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
+    let resolutionCount = 0;
+    let failSecondResolution = true;
+    const harness = await createV2Harness(controllableAdapter('weprompt-media-gateway-v1', { submit }), {
+      purpose: 'video_take',
+      generationCount: 2,
+      decorateMediaStore: (mediaStore) => ({
+        ...mediaStore,
+        resolveProviderInputV2: async (...args) => {
+          resolutionCount += 1;
+          if (failSecondResolution && resolutionCount === 2) throw new Error('media resolution failed');
+          return mediaStore.resolveProviderInputV2(...args);
+        },
+      }),
+    });
+
+    await expect(dispatchV2(harness)).rejects.toThrow('media resolution failed');
+    const interrupted = await harness.store.getProjectV2(harness.project.id);
+    expect(
+      interrupted.status === 'supported' ? Object.values(interrupted.project.jobs).map((job) => job.status) : null
+    ).toEqual(['queued_local', 'queued_local']);
+    expect(submit).not.toHaveBeenCalled();
+
+    failSecondResolution = false;
+    await harness.manager.resumePendingJobsV2([harness.project.id]);
+
+    await waitFor(() => expect(submit).toHaveBeenCalledTimes(2));
+    expect(submit.mock.calls.map(([request]) => request.idempotencyKey)).toEqual(['key_v2_1', 'key_v2_2']);
+  });
+
   it('persists a fresh V2 remote identity, queued/running progress, and one billable terminal receipt', async () => {
     let pollCount = 0;
     const submit = vi.fn(async () => ({ kind: 'remote' as const, providerJobId: 'remote_fresh_v2' }));
@@ -2084,6 +2150,30 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     });
     await missingBinding.manager.resumePendingJobsV2([missingBinding.project.id]);
     await expectV2Job(missingBinding, { status: 'needs_attention', error: { code: 'provider_unavailable' } });
+  });
+
+  it('runs a later recovery scan for work that became queued after the first scan finished', async () => {
+    const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
+    const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit }));
+    await harness.store.updateProjectV2(harness.project.id, (project) => {
+      const job = project.jobs.job_v2_1!;
+      job.status = 'failed';
+      job.error = { code: 'provider_unavailable', messageKey: 'providerUnavailable' };
+      return project;
+    });
+
+    await harness.manager.resumePendingJobsV2([harness.project.id]);
+    expect(submit).not.toHaveBeenCalled();
+
+    await harness.store.updateProjectV2(harness.project.id, (project) => {
+      const job = project.jobs.job_v2_1!;
+      job.status = 'queued_local';
+      job.error = null;
+      return project;
+    });
+    await harness.manager.resumePendingJobsV2([harness.project.id]);
+
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
   });
 
   it('reclaims only the same durable remote job on retry and never creates another paid submission', async () => {

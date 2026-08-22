@@ -1735,7 +1735,9 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
           }
         }
       }
-    })();
+    })().finally(() => {
+      recoveryPromiseV2 = null;
+    });
     return recoveryPromiseV2;
   };
 

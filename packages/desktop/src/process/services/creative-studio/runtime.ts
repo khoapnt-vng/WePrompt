@@ -66,6 +66,27 @@ type RuntimeEnvironment = {
   AIONUI_E2E_STUDIO_FAKE?: string;
 };
 
+const STUDIO_JOB_RUN_LOOP_INTERVAL_MS = 5_000;
+
+const sleepForStudioRunLoop = (delayMs: number, signal: AbortSignal): Promise<void> =>
+  new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    let settled = false;
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal.removeEventListener('abort', finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, delayMs);
+    timer.unref?.();
+    signal.addEventListener('abort', finish, { once: true });
+  });
+
 export type CreativeStudioRuntimeActivationState = 'inactive' | 'activating' | 'active' | 'degraded' | 'disposed';
 
 export type CreativeStudioRuntimeProtocol = {
@@ -108,6 +129,7 @@ export type CreativeStudioRuntimeDeps = {
   onReferenceUpdated(projectId: string, requestId: string): void;
   protocol: CreativeStudioRuntimeProtocol;
   logError?: (message: string, errorName: string) => void;
+  runLoopSleep?: (delayMs: number, signal: AbortSignal) => Promise<void>;
 };
 
 export type CreativeStudioRuntime = {
@@ -182,6 +204,8 @@ type ActivationGraph = {
   protocolInstallation: CreativeStudioProtocolInstallation | null;
   recoverySignature: string | null;
   recoveryPromise: Promise<void> | null;
+  runLoopController: AbortController | null;
+  runLoopPromise: Promise<void> | null;
   disposePromise: Promise<void> | null;
 };
 
@@ -191,6 +215,7 @@ const errorName = (error: unknown): string => (error instanceof Error ? error.na
 export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): CreativeStudioRuntime => {
   const factories = deps.factories ?? defaultFactories;
   const logError = deps.logError ?? ((message: string, name: string): void => console.error(message, name));
+  const runLoopSleep = deps.runLoopSleep ?? sleepForStudioRunLoop;
   let activationState: CreativeStudioRuntimeActivationState = 'inactive';
   let supportedProjectIds: string[] = [];
   let activeGraph: ActivationGraph | null = null;
@@ -299,9 +324,41 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
     return graph.recoveryPromise;
   };
 
+  const startRunLoop = (graph: ActivationGraph): void => {
+    if (!backendReady || disposed || activeGraph !== graph || graph.runLoopPromise !== null) return;
+    const controller = new AbortController();
+    graph.runLoopController = controller;
+    const runNextScan = async (): Promise<void> => {
+      await runLoopSleep(STUDIO_JOB_RUN_LOOP_INTERVAL_MS, controller.signal);
+      if (controller.signal.aborted || disposed || activeGraph !== graph) return;
+      const projectIds = [...supportedProjectIds];
+      if (projectIds.length > 0) {
+        try {
+          await graph.jobManager.resumePendingJobsV2(projectIds);
+        } catch (error) {
+          report('[CreativeStudio] Paid-job run loop scan failed:', error);
+        }
+      }
+      return runNextScan();
+    };
+    const operation = runNextScan().finally(() => {
+      if (graph.runLoopController === controller) graph.runLoopController = null;
+      if (graph.runLoopPromise === operation) graph.runLoopPromise = null;
+    });
+    graph.runLoopPromise = operation;
+  };
+
   const disposeGraph = (graph: ActivationGraph): Promise<void> => {
     graph.disposePromise ??= (async () => {
       const errors: unknown[] = [];
+      graph.runLoopController?.abort();
+      if (graph.runLoopPromise !== null) {
+        try {
+          await graph.runLoopPromise;
+        } catch (error) {
+          errors.push(error);
+        }
+      }
       if (graph.recoveryPromise !== null) {
         try {
           await graph.recoveryPromise;
@@ -457,6 +514,8 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
       protocolInstallation: null,
       recoverySignature: null,
       recoveryPromise: null,
+      runLoopController: null,
+      runLoopPromise: null,
       disposePromise: null,
     };
     try {
@@ -505,7 +564,10 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
         }
         activeGraph = graph;
         await recoverGraph(graph);
-        if (!disposed && activeGraph === graph) activationState = 'active';
+        if (!disposed && activeGraph === graph) {
+          activationState = 'active';
+          startRunLoop(graph);
+        }
       } catch (error) {
         if (!disposed && graph !== null && activeGraph === graph) {
           await degradeInstalledGraph(graph, error);
@@ -577,6 +639,7 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
       if (graph === null || disposed) return;
       try {
         await recoverGraph(graph);
+        startRunLoop(graph);
       } catch (error) {
         await degradeInstalledGraph(graph, error);
       }

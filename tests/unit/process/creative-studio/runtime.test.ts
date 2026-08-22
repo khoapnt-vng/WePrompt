@@ -63,6 +63,7 @@ const createHarness = (
     service?: Partial<CreativeStudioServiceV2>;
     realService?: { project: StudioProjectV2; generationCatalog: StudioGenerationRouteCatalog };
     environment?: Record<string, string | undefined>;
+    useRuntimeTimers?: boolean;
     disposeFailures?: readonly string[];
     holdActivationAt?:
       | 'reap-proposals'
@@ -87,6 +88,12 @@ const createHarness = (
   });
   let remainingProcessorFailures = input.failProcessorStarts ?? 0;
   let remainingRecoveryFailures = input.failRecoveryResumes ?? 0;
+  let holdNextRecovery = false;
+  let releaseRecovery: (() => void) | undefined;
+  let markRecoveryHeld: (() => void) | undefined;
+  const recoveryHeld = new Promise<void>((resolve) => {
+    markRecoveryHeld = resolve;
+  });
   let releaseInventory: (() => void) | undefined;
   let markInventoryCaptured: (() => void) | undefined;
   let holdNextInventory = input.holdFirstInventory ?? false;
@@ -97,6 +104,7 @@ const createHarness = (
     markInventoryCaptured = resolve;
   });
   const calls: string[] = [];
+  const logError = vi.fn();
   const failDispose = (boundary: string): void => {
     if (input.disposeFailures?.includes(boundary) === true) throw new Error(`dispose-${boundary}-failed`);
   };
@@ -200,6 +208,11 @@ const createHarness = (
       if (remainingRecoveryFailures > 0) {
         remainingRecoveryFailures -= 1;
         throw new Error('job-recovery-failed');
+      }
+      if (holdNextRecovery) {
+        holdNextRecovery = false;
+        markRecoveryHeld?.();
+        await new Promise<void>((resolve) => (releaseRecovery = resolve));
       }
     }),
     dispose: vi.fn(async () => {
@@ -331,6 +344,7 @@ const createHarness = (
     onProjectUpdated: vi.fn(),
     onProposalUpdated: vi.fn(),
     onReferenceUpdated: vi.fn(),
+    logError,
     protocol: {
       install: vi.fn(async () => {
         calls.push('install-protocol');
@@ -343,6 +357,18 @@ const createHarness = (
         failDispose('protocol');
       }),
     },
+    ...(input.useRuntimeTimers === true
+      ? {}
+      : {
+          runLoopSleep: (_delayMs: number, signal: AbortSignal) =>
+            new Promise<void>((resolve) => {
+              if (signal.aborted) {
+                resolve();
+                return;
+              }
+              signal.addEventListener('abort', () => resolve(), { once: true });
+            }),
+        }),
   });
 
   return {
@@ -355,6 +381,7 @@ const createHarness = (
     processor,
     service,
     calls,
+    logError,
     factoryCalls,
     inspectProjectsV2,
     watchBriefsV2,
@@ -365,14 +392,19 @@ const createHarness = (
     inventoryCaptured,
     cleanupStarted,
     activationHeld,
+    recoveryHeld,
     releaseInventory: () => releaseInventory?.(),
     releaseCleanup: () => releaseCleanup?.(),
     releaseActivation: () => releaseActivation?.(),
+    releaseRecovery: () => releaseRecovery?.(),
     setInventory: (next: StudioProjectInventoryV2) => {
       currentInventory = structuredClone(next);
     },
     failNextRecovery: () => {
       remainingRecoveryFailures += 1;
+    },
+    holdNextRecovery: () => {
+      holdNextRecovery = true;
     },
     commit: () =>
       commitObserver?.({
@@ -455,6 +487,84 @@ describe('Creative Studio schema-2 runtime activation', () => {
       'resume-frames:project_a,project_b',
       'resume-jobs:project_a,project_b',
     ]);
+  });
+
+  it('keeps scanning for paid jobs that miss the startup dispatch', async () => {
+    vi.useFakeTimers();
+    const harness = createHarness({ initialInventory: inventory(['project_v2']), useRuntimeTimers: true });
+    try {
+      await harness.runtime.onBackendReady();
+      expect(harness.jobManager.resumePendingJobsV2).toHaveBeenCalledOnce();
+
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(harness.jobManager.resumePendingJobsV2.mock.calls.length).toBeGreaterThan(1);
+    } finally {
+      await harness.runtime.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops the paid-job scan when the runtime is disposed', async () => {
+    vi.useFakeTimers();
+    const harness = createHarness({ initialInventory: inventory(['project_v2']), useRuntimeTimers: true });
+    try {
+      await harness.runtime.onBackendReady();
+      await vi.advanceTimersByTimeAsync(60_000);
+      const scansBeforeDispose = harness.jobManager.resumePendingJobsV2.mock.calls.length;
+
+      await harness.runtime.dispose();
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(harness.jobManager.resumePendingJobsV2).toHaveBeenCalledTimes(scansBeforeDispose);
+    } finally {
+      await harness.runtime.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not overlap paid-job scans when one scan is still running', async () => {
+    vi.useFakeTimers();
+    const harness = createHarness({ initialInventory: inventory(['project_v2']), useRuntimeTimers: true });
+    try {
+      await harness.runtime.onBackendReady();
+      harness.holdNextRecovery();
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      await harness.recoveryHeld;
+      expect(harness.jobManager.resumePendingJobsV2).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(harness.jobManager.resumePendingJobsV2).toHaveBeenCalledTimes(2);
+
+      harness.releaseRecovery();
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(harness.jobManager.resumePendingJobsV2).toHaveBeenCalledTimes(3);
+    } finally {
+      harness.releaseRecovery();
+      await harness.runtime.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the active runtime and retries after one paid-job scan fails', async () => {
+    vi.useFakeTimers();
+    const harness = createHarness({ initialInventory: inventory(['project_v2']), useRuntimeTimers: true });
+    try {
+      await harness.runtime.onBackendReady();
+      harness.failNextRecovery();
+
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(harness.runtime.activationState).toBe('active');
+      expect(harness.logError).toHaveBeenCalledWith('[CreativeStudio] Paid-job run loop scan failed:', 'Error');
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(harness.jobManager.resumePendingJobsV2).toHaveBeenCalledTimes(3);
+    } finally {
+      await harness.runtime.dispose();
+      vi.useRealTimers();
+    }
   });
 
   it('authorizes the installed graph while backend-ready startup recovery is still activating', async () => {
