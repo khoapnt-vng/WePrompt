@@ -92,6 +92,23 @@ const MAX_POLL_DELAY_MS = 15_000;
 const SUBMISSION_DEADLINE_MS = 5 * 60_000;
 const REMOTE_POLL_ATTEMPT_TIMEOUT_MS = 60_000;
 const REMOTE_POLL_DEADLINE_MS = 30 * 60_000;
+/**
+ * Paid generations that may be with the provider at once, per media kind, across the whole
+ * application — this manager is a single runtime-owned instance, so these are global.
+ *
+ * Video was 1 until 2026-08-23, and that serialised every film: a Beat's chain is a real dependency
+ * line, but capping video at one meant Beats being the unit of parallelism bought nothing, and the
+ * worst case was every generation added up rather than the longest chain. One measured video took
+ * about thirty-two minutes, so a nine-Beat film ran to roughly five hours.
+ *
+ * Nothing justified the 1 — no comment, no design note, and the neighbouring per-project cap was a
+ * named constant while this was a bare literal. Provider rate limiting is handled independently, by
+ * mapping HTTP 429 to `rate_limited`, and a submission that never reaches `running` never writes a
+ * spend receipt. Exceeding a provider's limit therefore costs a retry rather than money, which is
+ * what makes raising this safe to do before knowing each provider's exact ceiling.
+ */
+export const STUDIO_MAX_CONCURRENT_GENERATIONS = { image: 2, video: 2 } as const;
+
 const MAX_IN_FLIGHT_PAID_JOBS_PER_PROJECT = 2;
 const DISPATCH_AUTHORIZED_JOBS_KEYS_V2 = new Set(['projectId', 'jobIds']);
 
@@ -452,7 +469,10 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
   const sleep = deps.sleep ?? defaultSleep;
   const jitterMs = deps.jitterMs ?? defaultJitter;
   const outputDownloader = deps.outputDownloader ?? defaultOutputDownloader;
-  const semaphores = { image: new FifoSemaphore(2), video: new FifoSemaphore(1) };
+  const semaphores = {
+    image: new FifoSemaphore(STUDIO_MAX_CONCURRENT_GENERATIONS.image),
+    video: new FifoSemaphore(STUDIO_MAX_CONCURRENT_GENERATIONS.video),
+  };
   const projectSemaphores = new Map<string, FifoSemaphore>();
   const controllers = new Map<string, AbortController>();
   const executionReservations = new Set<string>();

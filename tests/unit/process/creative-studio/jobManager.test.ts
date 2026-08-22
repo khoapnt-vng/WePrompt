@@ -1026,6 +1026,33 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     );
   });
 
+  it('lets two video generations reach the provider at once, because serialising them serialises every film', async () => {
+    let live = 0;
+    let peak = 0;
+    const releases: Array<() => void> = [];
+    const submit = vi.fn(async () => {
+      live += 1;
+      peak = Math.max(peak, live);
+      await new Promise<void>((resolve) => releases.push(resolve));
+      live -= 1;
+      return { kind: 'complete' as const, outputs: [] };
+    });
+    const harness = await createV2Harness(controllableAdapter('weprompt-media-gateway-v1', { submit }), {
+      purpose: 'video_take',
+      generationCount: 2,
+    });
+
+    const dispatched = dispatchV2(harness);
+    try {
+      await waitFor(() => expect(submit).toHaveBeenCalledTimes(2));
+    } finally {
+      for (const release of releases) release();
+      await dispatched.catch(() => undefined);
+    }
+
+    expect(peak).toBe(2);
+  });
+
   it('recovers a video wave after a raw conditioning-media resolution failure aborts preparation', async () => {
     const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
     let resolutionCount = 0;
