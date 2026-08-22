@@ -43,6 +43,36 @@ import {
 } from './service/schema2/lifecycle';
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
+/** Longest value this log will print. A cap costs a truncated line; the alternative costs a leak. */
+const STUDIO_LOG_VALUE_LIMIT = 80;
+
+/**
+ * One durable, secret-free line about a generation job.
+ *
+ * `console.*` in the main process is redirected into electron-log, so this reaches the log file the
+ * user can send with feedback. That is the point: three paid jobs once failed with real provider
+ * error codes and the only way to find out was reading project.json off disk.
+ *
+ * Pass ids, codes and model names. Never pass a request, a snapshot, a prompt or a credential — the
+ * job record carries all of those, and the truncation below is a backstop for a caller's mistake,
+ * not permission to rely on it.
+ */
+export const formatStudioJobLog = (
+  event: string,
+  fields: Record<string, string | number | null | undefined>
+): string => {
+  const body = Object.entries(fields)
+    .filter(([, value]) => value !== null && value !== undefined)
+    .map(([key, value]) => {
+      // Newlines would let one value forge a second, plausible-looking log line.
+      const flat = String(value).replaceAll(/[\r\n]+/gu, ' ');
+      const capped = flat.length > STUDIO_LOG_VALUE_LIMIT ? `${flat.slice(0, STUDIO_LOG_VALUE_LIMIT)}…` : flat;
+      return `${key}=${capped}`;
+    })
+    .join(' ');
+  return body.length === 0 ? `[studio] ${event}` : `[studio] ${event} ${body}`;
+};
+
 const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'cancelled']);
 const POLL_BASE_DELAYS_MS = [2_000, 4_000, 8_000] as const;
 const MAX_POLL_DELAY_MS = 15_000;
@@ -518,14 +548,29 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     jobId: string,
     status: 'failed' | 'needs_attention',
     code: StudioJobErrorCode
-  ): Promise<StudioJobV2> =>
-    mutateJobV2(projectId, jobId, (_project, job) => {
+  ): Promise<StudioJobV2> => {
+    const job = await mutateJobV2(projectId, jobId, (_project, job) => {
       if (TERMINAL_STATUSES.has(job.status)) return false;
       job.status = status;
       job.error = jobError(code);
       delete job.progress;
       return true;
     });
+    // Only when the transition actually took: a refused mutate returns the job unchanged, and a
+    // line for that would report a failure that never happened.
+    if (job.status === status && job.error?.code === code) {
+      console.warn(
+        formatStudioJobLog(status, {
+          jobId,
+          projectId,
+          purpose: job.purpose,
+          code,
+          providerJobId: job.providerJobId,
+        })
+      );
+    }
+    return job;
+  };
 
   const transitionRemoteFailureV2 = async (
     projectId: string,
@@ -533,8 +578,8 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     providerJobId: string,
     status: 'failed' | 'needs_attention',
     code: StudioJobErrorCode
-  ): Promise<StudioJobV2> =>
-    mutateJobV2(projectId, jobId, (_project, job) => {
+  ): Promise<StudioJobV2> => {
+    const job = await mutateJobV2(projectId, jobId, (_project, job) => {
       if (job.providerJobId !== providerJobId || (job.status !== 'queued_remote' && job.status !== 'running')) {
         return false;
       }
@@ -543,6 +588,11 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       delete job.progress;
       return true;
     });
+    if (job.status === status && job.error?.code === code) {
+      console.warn(formatStudioJobLog(status, { jobId, projectId, purpose: job.purpose, code, providerJobId }));
+    }
+    return job;
+  };
 
   const transitionPollDeadlineV2 = (projectId: string, jobId: string, providerJobId: string): Promise<StudioJobV2> =>
     transitionRemoteFailureV2(projectId, jobId, providerJobId, 'needs_attention', 'poll_deadline');
@@ -1053,6 +1103,15 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
         return true;
       });
       if (submitting.status !== 'submitting' || signal.aborted) return;
+      console.info(
+        formatStudioJobLog('submit', {
+          jobId: prepared.jobId,
+          projectId: prepared.projectId,
+          purpose: submitting.purpose,
+          kind: prepared.mediaKind,
+          model: prepared.provider.use_model,
+        })
+      );
       let result;
       try {
         result = await runWithProviderDeadline(signal, SUBMISSION_DEADLINE_MS, (submissionSignal) =>
@@ -1267,6 +1326,16 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
         },
         input.expectedRevision
       );
+      if (uncertain.status === 'needs_attention' && uncertain.error?.code === 'submission_unknown') {
+        console.warn(
+          formatStudioJobLog('submission_unknown', {
+            jobId: current.id,
+            projectId: project.id,
+            purpose: current.purpose,
+            note: 'aborted while submitting, provider outcome unknown',
+          })
+        );
+      }
       if (uncertain.status !== 'needs_attention' || uncertain.error?.code !== 'submission_unknown') {
         throw new StudioJobManagerError('cancellation_refused');
       }
