@@ -254,6 +254,7 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - Verified absent, by text probe of the open panel: any transport (no `0:00 / 0:14` clock, no `LOOP`, no `JOIN`, no play control), the cost hint `BOUNDARY · COSTS A RE-RENDER`, the keyboard hints (`SPACE`, `EDGE`, `BOUNDARY`), and the proportional coverage strip. The Shot provenance is partial — `derived from` is there, `HEAD OF THE CHAIN` and `EDIT TO DETACH` are not.
   - Action and Look are **stacked**, at y=240 and y=358, where the drawing sets them side by side under their two labelled rules.
   - The cost hint is the one absence that is not cosmetic: `BOUNDARY · COSTS A RE-RENDER` is the drawing telling a user which drag spends money, and nothing in the built panel says so. A user dragging a boundary today has no way to know it bills.
+  - **Bounded cost-disclosure slice fixed 2026-08-22; BUG-088 remains open for the full-bleed editor and transport redesign.** The coverage editor now keeps `EDGE · TRIM · FREE` and `BOUNDARY · COSTS A RE-RENDER` visible beside the lanes, and every trim or boundary slider is described by the matching stable guidance. Existing pointer, keyboard, focus, and RTL mechanics are unchanged.
 
 - [x] **[BUG-089][P1][Creative Studio] The composer asks what you want to make, then never tells the Director** — found 2026-08-21 by the owner, traced through the code
   - Type an intent into "What do you want to make?", press **Create project**, and you land on the Table with an **empty Director conversation and 0 beats / 0 shots**. The sentence you just wrote has to be typed a second time, into the rail, before anything happens.
@@ -294,26 +295,29 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **Not a Codex regression, and not new.** The `{{seconds}}s` strings predate their change — they only added the rounding that BUG-084 asked for. The mixed format came in with the film summary I wrote, so this is mine.
   - The app bar already sets the house format for film-level durations: `{{film}} of {{target}} target` rendered as clocks. Making the delta a clock too would match it. The counter-argument is that `2:39 over` reads worse than `159s over` for a small gap — so this is a judgement call, not an obvious correction.
 
-- [ ] **[BUG-092][P2][Platform] Presentation-run recovery can never work: the IPC schema demands a UUID, conversation ids are eight characters** — found 2026-08-21, root-caused with a probe in a restarted dev build
+- [x] **[BUG-092][P2][Platform] Presentation-run recovery can never work: the IPC schema demands a UUID, conversation ids are eight characters** — found 2026-08-21, root-caused with a probe in a restarted dev build
   - Every project creation throws an unhandled page error. The rejected call is **`presentation-runs.list-recoverable`**, and the failing field is `conversation_id`:
     `issues=[{"validation":"regex","code":"invalid_string","path":["conversation_id"]}]`
   - `payloadSchemas.ts:185-187` requires a strict RFC-4122 UUID: `/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i`. Read straight from the running backend, the six most recent conversation ids are `d0921953`, `a4aad241`, `b27504a8`, `7c5d6c3b`, `1b6c08c2`, `3adcd3af` — **eight hex characters, none of them a UUID**.
   - So this is not an edge case with a bad id. **No conversation can ever satisfy the schema**, and the call fails 100% of the time. Recovering an interrupted presentation run is dead: `usePresentationTemplates.ts:234` catches the rejection and shows `recovery.loadError`, or nothing when `showFailure` is false.
   - The renderer mints `uuid(36)` when it _asks_ for a conversation; aioncore mints its own short id and that is what is stored. The schema was written against the request, not against the record.
   - **Fourth recurrence of the UUID-vs-short-id class** in this codebase. Loosening this one regex fixes this call and leaves the class intact — worth deciding on a canonical id type rather than patching the fourth site.
+  - **Fixed by `fa777eb6b`.** Presentation conversation ids now accept canonical eight-hex backend ids and legacy UUIDs across IPC, storage, and renderer recovery, while server-assigned Guid conversations use crash-safe claimant and revoke-proof recovery without weakening strict non-conversation ids.
 
-- [ ] **[BUG-093][P2][Platform] The IPC payload rejection names neither the operation nor the field** — found 2026-08-21
+- [x] **[BUG-093][P2][Platform] The IPC payload rejection names neither the operation nor the field** — found 2026-08-21
   - `[adapter] Native IPC request rejected: invalid operation payload`, and nothing else. Eight occurrences in one dev log with no way to tell them apart.
   - `parseNativeBridgePayload` (`payloadSchemas.ts:905-911`) has **both** `providerKey` and `result.error.issues` in scope and throws them away.
   - The cost is concrete: identifying BUG-092 needed a temporary probe, an app restart, and a rebuild, because nothing in the message, the log or the renderer console said which of the 140 operations had failed. Adding the operation name and the zod issue path would have made it a ten-second read.
   - Renderer-facing text should stay generic — this is main-process logging, not a user message.
+  - **Fixed by `fa777eb6b`.** Native IPC payload rejection now logs the provider key plus bounded schema issue codes and paths through a value-free side channel while preserving the generic renderer error.
 
-- [ ] **[BUG-094][P3][Platform] A version-skewed backend binary is reported to the user as a missing-files installation problem** — found 2026-08-21, hit while restarting the dev app
+- [x] **[BUG-094][P3][Platform] A version-skewed backend binary is reported to the user as a missing-files installation problem** — found 2026-08-21, hit while restarting the dev app
   - `~/.cargo/bin/aioncore` is **0.1.44**; the bundled binary is **0.1.55**. The dev Electron's `Resources` has no `bundled-aioncore`, so `resolveBinaryPath` falls through to the system PATH and picks the older one, which cannot open a database migrated by the newer one — `BOOTSTRAP_DATA_INIT_FAILED stage="database.open"`.
   - The window then reads **"WePrompt installation is incomplete — this installation is missing required local resources"** and advises a reinstall. Nothing was missing; a binary was too old. A reinstall would not have fixed it.
   - `backendStartupFailure.ts` classifies carefully — architecture mismatch, incomplete installation, database lineage, recoverable corruption — but `stage="database.open"` matches none of them and lands in a bucket whose copy asserts missing files. `classifyIncompleteInstallation` even guards on `isPackaged === true`, so in dev it cannot be the intended classification.
   - Honest framing: I reached this by restarting the dev app, not through normal use. It would still reach a packaged user after a downgrade, and the advice it gives them is wrong.
   - Dev workaround, no repo change: put the bundled binary first on PATH.
+  - **Fixed by `fa777eb6b`.** Unclassified backend startup and database-open failures now use neutral localized startup copy and diagnostics instead of asserting an incomplete installation, while proven missing-resource failures retain their specific guidance.
 
 ## Coverage and polish
 
