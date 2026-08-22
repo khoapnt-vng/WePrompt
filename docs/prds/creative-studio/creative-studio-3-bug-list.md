@@ -340,6 +340,14 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - `resumePendingJobsV2` now clears its single-flight promise after each scan instead of caching the first completed scan forever. Existing durable status, provider-job identity, controller and execution-reservation checks remain the duplicate-submission boundary: an active or already-remote job is polled or skipped, never blindly submitted again.
   - The swallowed dispatch error is now reported too: `v2Service.ts` discarded every failure with `.catch((): undefined => undefined)`. It still swallows, because a failed dispatch must not break the caller, but it says so first — with the error's **name**, never its message, since only `StudioJobManagerError` has a bounded one.
 
+- [ ] **[BUG-103][P1][Creative Studio] A failed render is unrecoverable: retry and cancel are built but reach no UI** — found 2026-08-22 by trying to render the failed shots again
+  - The three video jobs from BUG-100 sit in `needs_attention`. Opening the Beat panel and pressing **Review video generation** opens the gate, and preparing the estimate refuses with: **"One selected generation is already in progress. Wait for it to finish or change the selection."**
+  - It will never finish. `hasInFlightItem` (`pricing/estimate.ts:746-753`) tests `NONTERMINAL_STATUSES`, which contains `needs_attention`, so pricing raises `in_flight` and the shot cannot be re-quoted. The message asks the user to wait for a job that ended forty minutes earlier.
+  - **The recovery exists and is simply not wired.** `cancelJob` and `retryJob` are on the service interface (`v2Service.ts:295-296`, implemented at `:2601`), backed by `cancelJobV2` / `retryJobV2` in the job manager (`jobManager.ts:109-110`). Neither appears on the renderer bridge, and neither is called anywhere under `pages/studio`. The job record even carries `duplicateChargeAcknowledged` for the confirmation this flow was meant to have, and `jobs.retry`, `jobs.retryConfirmationTitle` and `jobs.retryChargeTitle` are already translated into twelve locales.
+  - So a shot whose render failed is permanently unrenderable, and the money spent on it is unrecoverable. There is no cancel, no retry, and no way to price a replacement.
+  - Sequel to BUG-100, and the more serious half. That one made the failure _visible_; this one is why seeing it does not help. The fix is to expose what is already built, not to build it.
+  - Note the blocking itself is defensible for `provider_unavailable`, where a remote job may still land — one of the three carried `providerJobId=tpJGBDz8i1nfOj1tox6E`. What is missing is the acknowledged escape, not the guard.
+
 ## Correctness and honesty of failures
 
 - [x] **[BUG-062][P2][Creative Studio] Three distinct Director failures all report "could not read or save this workspace"** — found 2026-08-21 while diagnosing BUG-061
