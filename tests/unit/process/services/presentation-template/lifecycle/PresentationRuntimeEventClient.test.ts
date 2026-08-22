@@ -15,6 +15,7 @@ import {
 } from '@/process/services/presentation-template/run/service/PresentationRuntimeEventClient';
 
 const CONVERSATION_ID = '11111111-1111-4111-8111-111111111111';
+const SHORT_CONVERSATION_ID = 'd0921953';
 const TURN_ID = '22222222-2222-4222-8222-222222222222';
 const TOKEN = 'backend-secret-token';
 
@@ -172,6 +173,28 @@ describe('PresentationRuntimeEventClient', () => {
       })
     );
     harness.sockets[0]!.message(frame({ turn_id: '88888888-8888-4888-8888-888888888888' }));
+    await settle();
+
+    expect(observed).toHaveLength(1);
+    expect(harness.sockets[0]!.terminate).toHaveBeenCalledTimes(1);
+  });
+
+  it('normalizes a backend short session id without widening unsafe session ids', async () => {
+    const observed: PresentationRuntimeTerminalEvent[] = [];
+    const harness = createHarness(async (event) => {
+      observed.push(event);
+      return 'handled';
+    });
+    harness.client.connect({ port: 43123, token: TOKEN });
+    harness.sockets[0]!.open();
+
+    harness.sockets[0]!.message(frame({ session_id: SHORT_CONVERSATION_ID.toUpperCase() }));
+    await settle();
+
+    expect(observed).toEqual([expect.objectContaining({ conversationId: SHORT_CONVERSATION_ID, turnId: TURN_ID })]);
+    expect(harness.sockets[0]!.terminate).not.toHaveBeenCalled();
+
+    harness.sockets[0]!.message(frame({ session_id: '../private', turn_id: '88888888-8888-4888-8888-888888888888' }));
     await settle();
 
     expect(observed).toHaveLength(1);

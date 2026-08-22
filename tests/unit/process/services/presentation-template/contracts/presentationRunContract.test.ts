@@ -272,6 +272,7 @@ describe('managed presentation public contract', () => {
           grantId: descriptor.grantId,
           ownerRevision: 4,
           revokedAt: publicBase.updatedAt,
+          queueUnboundAtRevoke: true,
         } satisfies RevokePresentationSourceResult;
         const revokeExisting = {
           ...revokeResult,
@@ -715,6 +716,7 @@ describe('managed presentation public contract', () => {
           grantId: string;
           ownerRevision: number;
           revokedAt: string;
+          queueUnboundAtRevoke: boolean;
         }>>;
         type DropSuccessGuard = Assert<Equal<Success<GrantPresentationExternalDropResult>, {
           ok: true;
@@ -774,7 +776,7 @@ describe('managed presentation public contract', () => {
         type BindKeys = Assert<Equal<KeysOfUnion<Success<BindPresentationDraftResult>>, 'ok' | 'status' | 'draftId' | 'conversationId' | 'revision' | 'boundAt'>>;
         type PickKeys = Assert<Equal<KeysOfUnion<Success<PickPresentationSourcesResult>>, 'ok' | 'status' | 'grants' | 'ownerRevision'>>;
         type WorkspaceKeys = Assert<Equal<KeysOfUnion<Success<GrantPresentationWorkspaceSourceResult>>, 'ok' | 'status' | 'grant' | 'ownerRevision'>>;
-        type RevokeKeys = Assert<Equal<KeysOfUnion<Success<RevokePresentationSourceResult>>, 'ok' | 'status' | 'grantId' | 'ownerRevision' | 'revokedAt'>>;
+        type RevokeKeys = Assert<Equal<KeysOfUnion<Success<RevokePresentationSourceResult>>, 'ok' | 'status' | 'grantId' | 'ownerRevision' | 'revokedAt' | 'queueUnboundAtRevoke'>>;
         type DropKeys = Assert<Equal<KeysOfUnion<Success<GrantPresentationExternalDropResult>>, 'ok' | 'status' | 'grants' | 'ownerRevision'>>;
         type ClaimKeys = Assert<Equal<KeysOfUnion<Success<ClaimInitialPresentationDispatchResult>>, 'ok' | 'status' | 'runId' | 'leaseToken' | 'revision' | 'expiresAt' | 'renewAfterMs'>>;
         type RenewKeys = Assert<Equal<KeysOfUnion<Success<RenewInitialPresentationDispatchResult>>, 'ok' | 'status' | 'runId' | 'revision' | 'expiresAt' | 'renewAfterMs'>>;
@@ -797,7 +799,7 @@ describe('managed presentation public contract', () => {
         type FailureDetailKeys = Assert<Equal<KeysOfUnion<PresentationRunFailure['details']>,
           | 'existingRunId' | 'runId' | 'dispatchStatus' | 'draftId'
           | 'conversationId' | 'grantId' | 'leaseExpiresAt' | 'reclaimAllowed'
-          | 'retryAfterMs' | 'postInvoked' | 'queryRequired'
+          | 'retryAfterMs' | 'postInvoked' | 'queryRequired' | 'queueUnboundAtRevoke'
         >>;
 
         type PublicRunKeys = Assert<Equal<KeysOfUnion<PresentationRunPublicDto>,

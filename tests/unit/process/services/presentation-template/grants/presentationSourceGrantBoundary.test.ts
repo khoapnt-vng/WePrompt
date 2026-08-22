@@ -301,6 +301,26 @@ describe('presentation source external-drop preload boundary', () => {
     expect(JSON.stringify(result)).not.toContain('/private/native');
   });
 
+  it('accepts and canonicalizes a short uppercase conversation owner before private IPC', async () => {
+    const file = new File(['one'], 'one.pdf');
+    mocks.getPathForFile.mockReturnValue('/private/native/one.pdf');
+    await import('@/preload/main');
+    const electronApi = getExposedElectronApi() as {
+      presentationSources: { grantExternalDrop: (request: ReturnType<typeof dropRequest>) => Promise<unknown> };
+    };
+
+    await electronApi.presentationSources.grantExternalDrop({
+      ...dropRequest([file]),
+      owner: { owner_type: 'conversation', conversation_id: 'D0921953' },
+    });
+
+    expect(mocks.ipcInvoke).toHaveBeenCalledWith(HIDDEN_CHANNEL, {
+      owner: { owner_type: 'conversation', conversation_id: 'd0921953' },
+      native_paths: ['/private/native/one.pdf'],
+      expected_owner_revision: 0,
+    });
+  });
+
   it.each([
     ['empty native path', ''],
     ['non-string native path', 17],
@@ -370,6 +390,27 @@ describe('presentation source external-drop preload boundary', () => {
 });
 
 describe('presentation source main-process boundary', () => {
+  it('accepts a legacy uppercase UUID owner and dispatches its canonical lowercase identity', async () => {
+    const window = createWindow();
+    const { handler, setPresentationSourceMainWindow } = await loadMainBoundary();
+    setPresentationSourceMainWindow(window as never);
+
+    await handler(
+      { sender: window.webContents, senderFrame: window.webContents.mainFrame },
+      {
+        owner: { owner_type: 'conversation', conversation_id: CONVERSATION_ID.toUpperCase() },
+        native_paths: ['/private/native/source.pdf'],
+        expected_owner_revision: 0,
+      }
+    );
+
+    expect(mocks.sourceService.grantExternalDropPaths).toHaveBeenCalledWith({
+      owner: { owner_type: 'conversation', conversation_id: CONVERSATION_ID },
+      native_paths: ['/private/native/source.pdf'],
+      expected_owner_revision: 0,
+    });
+  });
+
   it.each([
     ['FEATURE_DISABLED', () => (mocks.featureEnabled = false)],
     ['DESKTOP_REQUIRED', () => setProcessType('renderer')],

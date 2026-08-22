@@ -905,6 +905,12 @@
       "importError": "Referans eklenemedi. Yeniden deneyin."
     },
     "workspace": {
+      "beatPanel": {
+        "coverage": {
+          "trimGuidance": "Kenar · Kırpma · Ücretsiz",
+          "boundaryGuidance": "Sınır · Yeniden oluşturma gerektirir"
+        }
+      },
       "controls": {
         "briefAndRulesTitle": "Brief ve kurallar"
       },

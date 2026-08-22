@@ -37,6 +37,7 @@ const {
   handleFilesAddedMock,
   clearSelectionMock,
   composeSendMock,
+  createPresentationControllerMock,
   draftMutateMock,
   draftState,
   featureEnabledState,
@@ -109,6 +110,7 @@ const {
   handleFilesAddedMock: vi.fn(),
   clearSelectionMock: vi.fn(),
   composeSendMock: vi.fn((input: string, files: string[]) => ({ input, files, injectSkills: [] })),
+  createPresentationControllerMock: vi.fn(),
   draftMutateMock: vi.fn(),
   draftState: {
     current: {
@@ -120,7 +122,7 @@ const {
   featureEnabledState: { current: false },
   hydrateSourceOwnerMock: vi.fn().mockResolvedValue({
     ok: true,
-    owner: { owner_type: 'conversation', conversation_id: 'conv-1' },
+    owner: { owner_type: 'conversation', conversation_id: 'd0921953' },
     ownerRevision: 0,
     grants: [],
   }),
@@ -348,7 +350,7 @@ vi.mock('@/renderer/hooks/chat/useAutoTitle', () => ({
 vi.mock('@/renderer/hooks/context/ConversationContext', () => ({
   useConversationContextSafe: () => ({
     conversation: {
-      id: 'conv-1',
+      id: 'd0921953',
       name: 'ACP budget fixture',
       type: 'acp',
       created_at: 1,
@@ -400,7 +402,10 @@ vi.mock('@/renderer/pages/conversation/Messages/hooks', () => ({
   useMessageList: () => [],
 }));
 vi.mock('@/renderer/pages/conversation/platforms/useConversationCommandQueue', () => ({
-  createPresentationCommandQueueController: () => presentationControllerMock,
+  createPresentationCommandQueueController: (options: unknown) => {
+    createPresentationControllerMock(options);
+    return presentationControllerMock;
+  },
   shouldEnqueueConversationCommand: () => false,
   useConversationCommandQueue: () => ({
     items: [],
@@ -506,7 +511,7 @@ const sourceDescriptor: PresentationSourceDescriptor = {
 
 const currentConversationOwner: PresentationGrantOwner = {
   owner_type: 'conversation',
-  conversation_id: 'conv-1',
+  conversation_id: 'd0921953',
 };
 
 const hydratedOwnerResult: GetPresentationSourceOwnerResult = {
@@ -605,7 +610,7 @@ describe('AcpSendBox', () => {
     presentationQueueItemsState.current = [];
     presentationControllerMock.read.mockImplementation(() => ({
       version: 2,
-      conversationId: 'conv-1',
+      conversationId: 'd0921953',
       revision: 1,
       items: presentationQueueItemsState.current,
     }));
@@ -640,7 +645,7 @@ describe('AcpSendBox', () => {
       async (_queueItemId: string, start: (request: Record<string, unknown>) => Promise<Record<string, unknown>>) => {
         const item = presentationQueueItemsState.current[0];
         const result = await start({
-          conversation_id: 'conv-1',
+          conversation_id: 'd0921953',
           client_request_id: item.clientRequestId,
           input: item.input,
           selected_template_id: item.selectedTemplateId,
@@ -686,7 +691,7 @@ describe('AcpSendBox', () => {
       ok: true,
       status: 'bound',
       runId: '33333333-3333-4333-8333-333333333333',
-      conversationId: 'conv-1',
+      conversationId: 'd0921953',
       revision: 6,
       dispatchStatus: 'bound',
     });
@@ -724,6 +729,24 @@ describe('AcpSendBox', () => {
     });
   });
 
+  it('canonicalizes an uppercase short presentation identity without changing the ordinary route identity', async () => {
+    featureEnabledState.current = true;
+    selectedTemplateState.current = pptxTemplate;
+    sourceOwnerState.current = currentConversationOwner;
+    sourceOwnerRevisionState.current = 0;
+
+    render(<AcpSendBox conversation_id='D0921953' backend='codex' messageState={makeMessageState()} />);
+
+    await waitFor(() =>
+      expect(hydrateSourceOwnerMock).toHaveBeenCalledWith({
+        owner_type: 'conversation',
+        conversation_id: 'd0921953',
+      })
+    );
+    expect(createPresentationControllerMock).toHaveBeenCalledWith({ conversationId: 'd0921953' });
+    expect(sendBoxProps.current?.managedPresentationSubmission).toBeDefined();
+  });
+
   it('blocks managed preparation for a legacy attachment while preserving the submitted draft', async () => {
     featureEnabledState.current = true;
     selectedTemplateState.current = pptxTemplate;
@@ -731,7 +754,7 @@ describe('AcpSendBox', () => {
 
     render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}
@@ -785,7 +808,7 @@ describe('AcpSendBox', () => {
 
     render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}
@@ -813,7 +836,7 @@ describe('AcpSendBox', () => {
     sourcePendingState.current = true;
 
     const { rerender } = render(
-      <AcpSendBox conversation_id='conv-1' backend='codex' messageState={makeMessageState()} />
+      <AcpSendBox conversation_id='d0921953' backend='codex' messageState={makeMessageState()} />
     );
     await act(async () => {
       screen.getByRole('button', { name: 'send' }).click();
@@ -823,7 +846,7 @@ describe('AcpSendBox', () => {
     sourcePendingState.current = false;
     sourceOwnerState.current = currentConversationOwner;
     sourceOwnerRevisionState.current = 0;
-    rerender(<AcpSendBox conversation_id='conv-1' backend='codex' messageState={makeMessageState()} />);
+    rerender(<AcpSendBox conversation_id='d0921953' backend='codex' messageState={makeMessageState()} />);
     await act(async () => {
       screen.getByRole('button', { name: 'send' }).click();
     });
@@ -841,7 +864,7 @@ describe('AcpSendBox', () => {
 
     render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}
@@ -875,7 +898,7 @@ describe('AcpSendBox', () => {
 
     render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}
@@ -903,7 +926,7 @@ describe('AcpSendBox', () => {
 
     render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}
@@ -925,14 +948,14 @@ describe('AcpSendBox', () => {
     });
     expect(presentationControllerMock.claimHead).toHaveBeenCalledWith('11111111-1111-4111-8111-111111111111');
     expect(presentationStartInvokeMock).toHaveBeenCalledWith({
-      conversation_id: 'conv-1',
+      conversation_id: 'd0921953',
       client_request_id: '22222222-2222-4222-8222-222222222222',
       input: 'Hello',
       selected_template_id: 'business-review',
       sources: [],
     });
     expect(presentationClaimInvokeMock).toHaveBeenCalledWith({
-      conversation_id: 'conv-1',
+      conversation_id: 'd0921953',
       run_id: '33333333-3333-4333-8333-333333333333',
       holder_id: '11111111-1111-4111-8111-111111111111',
       expected_revision: 4,
@@ -955,7 +978,7 @@ describe('AcpSendBox', () => {
     ];
     presentationControllerMock.enqueue.mockRejectedValueOnce(new Error('localStorage quota'));
 
-    render(<AcpSendBox conversation_id='conv-1' backend='codex' messageState={makeMessageState()} />);
+    render(<AcpSendBox conversation_id='d0921953' backend='codex' messageState={makeMessageState()} />);
     const managed = sendBoxProps.current?.managedPresentationSubmission;
     expect(managed).toBeDefined();
     await expect(
@@ -996,7 +1019,7 @@ describe('AcpSendBox', () => {
     };
 
     const { rerender } = render(
-      <AcpSendBox conversation_id='conv-1' backend='codex' messageState={makeMessageState()} />
+      <AcpSendBox conversation_id='d0921953' backend='codex' messageState={makeMessageState()} />
     );
     await act(async () => {
       screen.getByRole('button', { name: 'send' }).click();
@@ -1012,7 +1035,7 @@ describe('AcpSendBox', () => {
       isProcessing: false,
       state: 'idle',
     };
-    rerender(<AcpSendBox conversation_id='conv-1' backend='codex' messageState={makeMessageState()} />);
+    rerender(<AcpSendBox conversation_id='d0921953' backend='codex' messageState={makeMessageState()} />);
     await waitFor(() => expect(presentationDispatchInvokeMock).toHaveBeenCalledTimes(1));
     expect(sendMessageInvokeMock).not.toHaveBeenCalled();
   });
@@ -1025,7 +1048,7 @@ describe('AcpSendBox', () => {
     presentationControllerMock.allocateClaimed.mockImplementationOnce(
       async (_queueItemId: string, start: (request: Record<string, unknown>) => Promise<unknown>) => {
         await start({
-          conversation_id: 'conv-1',
+          conversation_id: 'd0921953',
           client_request_id: '22222222-2222-4222-8222-222222222222',
           input: 'Hello',
           selected_template_id: 'business-review',
@@ -1040,7 +1063,7 @@ describe('AcpSendBox', () => {
       run: {
         runId: '33333333-3333-4333-8333-333333333333',
         clientRequestId: '22222222-2222-4222-8222-222222222222',
-        conversationId: 'conv-1',
+        conversationId: 'd0921953',
         selectedTemplateId: 'business-review',
         revision: 4,
         dispatchStatus: 'committed',
@@ -1053,14 +1076,14 @@ describe('AcpSendBox', () => {
       },
     });
 
-    render(<AcpSendBox conversation_id='conv-1' backend='codex' messageState={makeMessageState()} />);
+    render(<AcpSendBox conversation_id='d0921953' backend='codex' messageState={makeMessageState()} />);
     await act(async () => {
       screen.getByRole('button', { name: 'send' }).click();
     });
 
     await waitFor(() => expect(presentationGetInvokeMock).toHaveBeenCalledTimes(1));
     expect(presentationGetInvokeMock).toHaveBeenCalledWith({
-      conversation_id: 'conv-1',
+      conversation_id: 'd0921953',
       client_request_id: '22222222-2222-4222-8222-222222222222',
     });
     expect(presentationControllerMock.transition).toHaveBeenCalledWith('11111111-1111-4111-8111-111111111111', {
@@ -1088,7 +1111,7 @@ describe('AcpSendBox', () => {
       },
     });
 
-    const first = render(<AcpSendBox conversation_id='conv-1' backend='codex' messageState={makeMessageState()} />);
+    const first = render(<AcpSendBox conversation_id='d0921953' backend='codex' messageState={makeMessageState()} />);
     await act(async () => {
       screen.getByRole('button', { name: 'send' }).click();
     });
@@ -1109,7 +1132,7 @@ describe('AcpSendBox', () => {
       run: {
         runId: '33333333-3333-4333-8333-333333333333',
         clientRequestId: '22222222-2222-4222-8222-222222222222',
-        conversationId: 'conv-1',
+        conversationId: 'd0921953',
         selectedTemplateId: 'business-review',
         revision: 4,
         dispatchStatus: 'committed',
@@ -1121,7 +1144,7 @@ describe('AcpSendBox', () => {
         updatedAt: '2026-08-05T00:00:01.000Z',
       },
     });
-    render(<AcpSendBox conversation_id='conv-1' backend='codex' messageState={makeMessageState()} />);
+    render(<AcpSendBox conversation_id='d0921953' backend='codex' messageState={makeMessageState()} />);
 
     await waitFor(() => expect(presentationDispatchInvokeMock).toHaveBeenCalledTimes(1));
     expect(presentationStartInvokeMock).toHaveBeenCalledTimes(1);
@@ -1143,7 +1166,7 @@ describe('AcpSendBox', () => {
       run: {
         runId: '33333333-3333-4333-8333-333333333333',
         clientRequestId: '22222222-2222-4222-8222-222222222222',
-        conversationId: 'conv-1',
+        conversationId: 'd0921953',
         selectedTemplateId: 'business-review',
         revision: 5,
         dispatchStatus: 'dispatching',
@@ -1156,7 +1179,7 @@ describe('AcpSendBox', () => {
       },
     });
 
-    render(<AcpSendBox conversation_id='conv-1' backend='codex' messageState={makeMessageState()} />);
+    render(<AcpSendBox conversation_id='d0921953' backend='codex' messageState={makeMessageState()} />);
 
     await waitFor(() => expect(presentationGetInvokeMock).toHaveBeenCalledTimes(1));
     expect(presentationClaimInvokeMock).not.toHaveBeenCalled();
@@ -1178,7 +1201,7 @@ describe('AcpSendBox', () => {
       run: {
         runId: '33333333-3333-4333-8333-333333333333',
         clientRequestId: '22222222-2222-4222-8222-222222222222',
-        conversationId: 'conv-1',
+        conversationId: 'd0921953',
         selectedTemplateId: 'business-review',
         revision: 6,
         dispatchStatus: status,
@@ -1191,7 +1214,7 @@ describe('AcpSendBox', () => {
       },
     });
 
-    render(<AcpSendBox conversation_id='conv-1' backend='codex' messageState={makeMessageState()} />);
+    render(<AcpSendBox conversation_id='d0921953' backend='codex' messageState={makeMessageState()} />);
     await act(async () => {
       screen.getByRole('button', { name: 'send' }).click();
     });
@@ -1227,7 +1250,7 @@ describe('AcpSendBox', () => {
     });
 
     const { unmount } = render(
-      <AcpSendBox conversation_id='conv-1' backend='codex' messageState={makeMessageState()} />
+      <AcpSendBox conversation_id='d0921953' backend='codex' messageState={makeMessageState()} />
     );
     await act(async () => {
       screen.getByRole('button', { name: 'send' }).click();
@@ -1237,7 +1260,7 @@ describe('AcpSendBox', () => {
     );
     unmount();
 
-    render(<AcpSendBox conversation_id='conv-1' backend='codex' messageState={makeMessageState()} />);
+    render(<AcpSendBox conversation_id='d0921953' backend='codex' messageState={makeMessageState()} />);
     await waitFor(() => expect(presentationGetInvokeMock).toHaveBeenCalledTimes(1));
     expect(presentationDispatchInvokeMock).toHaveBeenCalledTimes(1);
     expect(sendMessageInvokeMock).not.toHaveBeenCalled();
@@ -1280,12 +1303,12 @@ describe('AcpSendBox', () => {
       ok: true,
       status: 'bound',
       runId: request.run_id,
-      conversationId: 'conv-1',
+      conversationId: 'd0921953',
       revision: 6,
       dispatchStatus: 'bound',
     }));
 
-    render(<AcpSendBox conversation_id='conv-1' backend='codex' messageState={makeMessageState()} />);
+    render(<AcpSendBox conversation_id='d0921953' backend='codex' messageState={makeMessageState()} />);
 
     await waitFor(() => expect(presentationQueueItemsState.current).toEqual([]));
     expect(presentationControllerMock.claimHead.mock.calls.map(([queueItemId]) => queueItemId)).toEqual([
@@ -1306,7 +1329,7 @@ describe('AcpSendBox', () => {
     };
     const queueItemId = '11111111-1111-4111-8111-111111111111';
     const clientRequestId = '22222222-2222-4222-8222-222222222222';
-    const storageKey = 'acp_initial_message_conv-1';
+    const storageKey = 'acp_initial_message_d0921953';
     const serialized = JSON.stringify({
       input: 'Create a presentation from the request below. Managed rules.\n\nInitial deck',
       files: [
@@ -1343,12 +1366,12 @@ describe('AcpSendBox', () => {
     sendMessageInvokeMock.mockResolvedValue({ turn_id: 'legacy-turn', runtime: null, msg_id: 'legacy-msg' });
     sessionStorage.setItem(storageKey, serialized);
 
-    render(<AcpSendBox conversation_id='conv-1' backend='codex' messageState={makeMessageState()} />);
+    render(<AcpSendBox conversation_id='d0921953' backend='codex' messageState={makeMessageState()} />);
 
     await waitFor(() =>
       expect(hydrateSourceOwnerMock).toHaveBeenCalledWith({
         owner_type: 'conversation',
-        conversation_id: 'conv-1',
+        conversation_id: 'd0921953',
       })
     );
     await waitFor(() => expect(presentationControllerMock.enqueue).toHaveBeenCalledTimes(1));
@@ -1395,7 +1418,7 @@ describe('AcpSendBox', () => {
 
     render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}
@@ -1408,7 +1431,7 @@ describe('AcpSendBox', () => {
     await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalledTimes(1));
     expect(sendMessageInvokeMock).toHaveBeenCalledWith({
       input: 'legacy directive\n\nHello',
-      conversation_id: 'conv-1',
+      conversation_id: 'd0921953',
       files: ['/private/legacy.xlsx', '/private/template/SKILL.md', '/private/template/reference.pptx'],
     });
     expect(sendBoxProps.current?.managedPresentationSubmission).toBeUndefined();
@@ -1423,7 +1446,7 @@ describe('AcpSendBox', () => {
 
     render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}
@@ -1433,7 +1456,7 @@ describe('AcpSendBox', () => {
     await waitFor(() =>
       expect(hydrateSourceOwnerMock).toHaveBeenCalledWith({
         owner_type: 'conversation',
-        conversation_id: 'conv-1',
+        conversation_id: 'd0921953',
       })
     );
     await act(async () => {
@@ -1457,7 +1480,7 @@ describe('AcpSendBox', () => {
 
     render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}
@@ -1485,7 +1508,7 @@ describe('AcpSendBox', () => {
 
     render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}
@@ -1514,7 +1537,7 @@ describe('AcpSendBox', () => {
 
     const { rerender } = render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}
@@ -1528,7 +1551,7 @@ describe('AcpSendBox', () => {
     featureEnabledState.current = false;
     rerender(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}
@@ -1550,7 +1573,7 @@ describe('AcpSendBox', () => {
 
     render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}
@@ -1573,7 +1596,7 @@ describe('AcpSendBox', () => {
 
     render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}
@@ -1609,7 +1632,7 @@ describe('AcpSendBox', () => {
 
     render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}
@@ -1641,7 +1664,7 @@ describe('AcpSendBox', () => {
 
     const { rerender } = render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}
@@ -1658,7 +1681,7 @@ describe('AcpSendBox', () => {
 
     rerender(
       <AcpSendBox
-        conversation_id='conv-2'
+        conversation_id='d0921954'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}
@@ -1689,7 +1712,7 @@ describe('AcpSendBox', () => {
 
     const { rerender } = render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}
@@ -1701,7 +1724,7 @@ describe('AcpSendBox', () => {
     featureEnabledState.current = false;
     rerender(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}
@@ -1718,7 +1741,7 @@ describe('AcpSendBox', () => {
     sendMessageInvokeMock.mockRejectedValue(
       new BackendHttpError({
         method: 'POST',
-        path: '/api/conversations/conv-1/messages',
+        path: '/api/conversations/d0921953/messages',
         status: 400,
         body: {
           success: false,
@@ -1731,7 +1754,7 @@ describe('AcpSendBox', () => {
 
     render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='claude'
         workspacePath='/tmp/missing'
         messageState={makeMessageState()}
@@ -1751,19 +1774,19 @@ describe('AcpSendBox', () => {
     sendMessageInvokeMock.mockRejectedValue(
       new BackendHttpError({
         method: 'POST',
-        path: '/api/conversations/conv-1/messages',
+        path: '/api/conversations/d0921953/messages',
         status: 409,
         body: {
           success: false,
           code: 'CONFLICT',
-          error: 'conversation conv-1 is already running',
+          error: 'conversation d0921953 is already running',
         },
       })
     );
 
     render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}
@@ -1784,7 +1807,7 @@ describe('AcpSendBox', () => {
   it('uses container-responsive fluid width instead of a fixed max width', () => {
     render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}
@@ -1802,15 +1825,15 @@ describe('AcpSendBox', () => {
     useTeamPermissionMock.mockReturnValue({
       isTeamMode: true,
       isLeaderAgent: true,
-      leaderConversationId: 'conv-1',
-      allConversationIds: ['conv-1'],
+      leaderConversationId: 'd0921953',
+      allConversationIds: ['d0921953'],
       propagateMode: vi.fn(),
       warmupSession: vi.fn().mockResolvedValue(undefined),
     });
 
     render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}
@@ -1829,15 +1852,15 @@ describe('AcpSendBox', () => {
     useTeamPermissionMock.mockReturnValue({
       isTeamMode: true,
       isLeaderAgent: true,
-      leaderConversationId: 'conv-1',
-      allConversationIds: ['conv-1'],
+      leaderConversationId: 'd0921953',
+      allConversationIds: ['d0921953'],
       propagateMode: vi.fn(),
       warmupSession,
     });
 
     render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}
@@ -1858,15 +1881,15 @@ describe('AcpSendBox', () => {
     useTeamPermissionMock.mockReturnValue({
       isTeamMode: true,
       isLeaderAgent: true,
-      leaderConversationId: 'conv-1',
-      allConversationIds: ['conv-1'],
+      leaderConversationId: 'd0921953',
+      allConversationIds: ['d0921953'],
       propagateMode: vi.fn(),
       warmupSession,
     });
 
     render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}
@@ -1887,15 +1910,15 @@ describe('AcpSendBox', () => {
     useTeamPermissionMock.mockReturnValue({
       isTeamMode: true,
       isLeaderAgent: true,
-      leaderConversationId: 'conv-1',
-      allConversationIds: ['conv-1'],
+      leaderConversationId: 'd0921953',
+      allConversationIds: ['d0921953'],
       propagateMode: vi.fn(),
       warmupSession,
     });
 
     render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}
@@ -1928,7 +1951,7 @@ describe('AcpSendBox', () => {
 
     render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}
@@ -1942,7 +1965,7 @@ describe('AcpSendBox', () => {
   it('renders model and permission controls in the composer action row', () => {
     render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}
@@ -1957,7 +1980,7 @@ describe('AcpSendBox', () => {
   it('renders the context usage meter in right tools with ACP usage data', () => {
     render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         messageState={makeMessageState({
           tokenUsage: { total_tokens: 12_000 },
@@ -1986,7 +2009,7 @@ describe('AcpSendBox', () => {
   it('does not invent a context limit when ACP reports zero', () => {
     render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         messageState={makeMessageState({
           tokenUsage: { total_tokens: 12_000 },
@@ -2008,7 +2031,7 @@ describe('AcpSendBox', () => {
   });
 
   it('keeps an unknown-state context usage meter when ACP capacity is unavailable', () => {
-    render(<AcpSendBox conversation_id='conv-1' backend='codex' messageState={makeMessageState()} />);
+    render(<AcpSendBox conversation_id='d0921953' backend='codex' messageState={makeMessageState()} />);
 
     expect(screen.getByTestId('context-usage-indicator')).toBeInTheDocument();
     expect(contextUsageIndicatorProps.current?.budget.source).toBe('estimated');
@@ -2040,7 +2063,7 @@ describe('AcpSendBox', () => {
 
     render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}
@@ -2079,7 +2102,7 @@ describe('AcpSendBox', () => {
 
     render(
       <AcpSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         backend='codex'
         workspacePath='/tmp/workspace'
         messageState={makeMessageState()}

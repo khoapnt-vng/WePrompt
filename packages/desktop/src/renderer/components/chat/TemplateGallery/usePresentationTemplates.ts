@@ -19,6 +19,7 @@ import { composeAssistantSend } from './directive';
 import { useAddEventListener } from '@/renderer/utils/emitter';
 import { parseTemplatedSend } from '@/renderer/utils/chat/templatedSendParser';
 import { PRESENTATION_RUN_DIRECTIVE_PREFIX } from '@/common/config/constants';
+import { normalizePresentationConversationId } from '@/common/types/office/presentationConversationId';
 
 export type PresentationRunEligibilityInput = {
   featureEnabled: boolean;
@@ -111,6 +112,7 @@ export function useTemplateLabels() {
  */
 export function usePresentationTemplates(conversationId?: string) {
   const { t } = useTranslation();
+  const presentationConversationId = normalizePresentationConversationId(conversationId);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<PresentationTemplateSummary | null>(null);
   const [recoverableRuns, setRecoverableRuns] = useState<PresentationRunPublicDto[]>([]);
@@ -118,10 +120,10 @@ export function usePresentationTemplates(conversationId?: string) {
   const recoveryMessageCloseByIdRef = useRef(new Map<string, () => void>());
   const recoveryRequestRef = useRef(0);
   const recoveryLifecycleEpochRef = useRef(0);
-  const currentConversationIdRef = useRef(conversationId);
-  const recoveryConversationIdRef = useRef(conversationId);
+  const currentConversationIdRef = useRef(presentationConversationId);
+  const recoveryConversationIdRef = useRef(presentationConversationId);
   const recoveryTranslationRef = useRef(t);
-  currentConversationIdRef.current = conversationId;
+  currentConversationIdRef.current = presentationConversationId;
   recoveryTranslationRef.current = t;
 
   const {
@@ -180,12 +182,20 @@ export function usePresentationTemplates(conversationId?: string) {
 
   const prepareScratch = useCallback(
     async (targetConversationId: string): Promise<ArtifactScratchAllocation | undefined> => {
+      const canonicalTargetConversationId = normalizePresentationConversationId(targetConversationId);
       if (!selectedTemplate?.referencePath || !['pptx', 'docx'].includes(selectedTemplate.manifest.format)) {
+        return undefined;
+      }
+      if (
+        canonicalTargetConversationId === null ||
+        presentationConversationId === null ||
+        canonicalTargetConversationId !== presentationConversationId
+      ) {
         return undefined;
       }
       try {
         return await ipcBridge.presentationTemplates.allocateScratch.invoke({
-          conversation_id: targetConversationId,
+          conversation_id: canonicalTargetConversationId,
           template_id: selectedTemplate.manifest.id,
         });
       } catch (error) {
@@ -193,7 +203,7 @@ export function usePresentationTemplates(conversationId?: string) {
         throw error;
       }
     },
-    [selectedTemplate, t]
+    [presentationConversationId, selectedTemplate, t]
   );
 
   const composeSend = useCallback(
@@ -225,14 +235,14 @@ export function usePresentationTemplates(conversationId?: string) {
     async (showFailure = true, action?: { conversationId: string; lifecycleEpoch: number }): Promise<boolean> => {
       if (action && !isRecoveryActionCurrent(action)) return false;
       const requestId = ++recoveryRequestRef.current;
-      if (!conversationId) {
+      if (presentationConversationId === null) {
         setRecoverableRuns([]);
         return true;
       }
 
       try {
         const result = await ipcBridge.presentationRuns.listRecoverable.invoke({
-          conversation_id: conversationId,
+          conversation_id: presentationConversationId,
           limit: 20,
         });
         if (action && !isRecoveryActionCurrent(action)) return false;
@@ -248,18 +258,22 @@ export function usePresentationTemplates(conversationId?: string) {
           return false;
         }
 
-        const hasForeignOrUnsupportedRun = result.items.some(
-          (run) =>
-            run.conversationId !== conversationId ||
+        const canonicalItems: PresentationRunPublicDto[] = [];
+        for (const run of result.items) {
+          const runConversationId = normalizePresentationConversationId(run.conversationId);
+          if (
+            runConversationId !== presentationConversationId ||
             !['retained', 'failed_retained', 'dispatch_uncertain'].includes(run.dispatchStatus)
-        );
-        if (hasForeignOrUnsupportedRun) {
-          setRecoverableRuns([]);
-          Message.error(recoveryTranslationRef.current('conversation.presentationTemplates.recovery.invalidResponse'));
-          return false;
+          ) {
+            setRecoverableRuns([]);
+            Message.error(
+              recoveryTranslationRef.current('conversation.presentationTemplates.recovery.invalidResponse')
+            );
+            return false;
+          }
+          canonicalItems.push({ ...run, conversationId: runConversationId });
         }
-
-        setRecoverableRuns(result.items.slice(0, 20));
+        setRecoverableRuns(canonicalItems.slice(0, 20));
         return true;
       } catch {
         if (requestId === recoveryRequestRef.current && (!action || isRecoveryActionCurrent(action)) && showFailure) {
@@ -268,16 +282,16 @@ export function usePresentationTemplates(conversationId?: string) {
         return false;
       }
     },
-    [conversationId, isRecoveryActionCurrent]
+    [isRecoveryActionCurrent, presentationConversationId]
   );
 
   const openRecovery = useCallback(
     async (run: PresentationRunPublicDto): Promise<void> => {
       const sha256 = run.retainedCandidate?.sha256;
       if (
-        !conversationId ||
-        currentConversationIdRef.current !== conversationId ||
-        run.conversationId !== conversationId ||
+        presentationConversationId === null ||
+        currentConversationIdRef.current !== presentationConversationId ||
+        normalizePresentationConversationId(run.conversationId) !== presentationConversationId ||
         run.dispatchStatus === 'dispatch_uncertain' ||
         !run.actions.openAllowed ||
         !sha256
@@ -285,13 +299,13 @@ export function usePresentationTemplates(conversationId?: string) {
         return;
       }
       const action = {
-        conversationId,
+        conversationId: presentationConversationId,
         lifecycleEpoch: recoveryLifecycleEpochRef.current,
       };
 
       try {
         const result = await ipcBridge.presentationRuns.openRecovery.invoke({
-          conversation_id: conversationId,
+          conversation_id: presentationConversationId,
           run_id: run.runId,
           expected_sha256: sha256,
         });
@@ -305,28 +319,28 @@ export function usePresentationTemplates(conversationId?: string) {
       Message.error(recoveryTranslationRef.current('conversation.presentationTemplates.recovery.openError'));
       await refreshRecoverableRuns(false, action);
     },
-    [conversationId, isRecoveryActionCurrent, refreshRecoverableRuns]
+    [isRecoveryActionCurrent, presentationConversationId, refreshRecoverableRuns]
   );
 
   const discardRecovery = useCallback(
     async (run: PresentationRunPublicDto): Promise<void> => {
       if (
-        !conversationId ||
-        currentConversationIdRef.current !== conversationId ||
-        run.conversationId !== conversationId ||
+        presentationConversationId === null ||
+        currentConversationIdRef.current !== presentationConversationId ||
+        normalizePresentationConversationId(run.conversationId) !== presentationConversationId ||
         run.dispatchStatus === 'dispatch_uncertain' ||
         !run.actions.discardAllowed
       ) {
         return;
       }
       const action = {
-        conversationId,
+        conversationId: presentationConversationId,
         lifecycleEpoch: recoveryLifecycleEpochRef.current,
       };
 
       try {
         const result = await ipcBridge.presentationRuns.discard.invoke({
-          conversation_id: conversationId,
+          conversation_id: presentationConversationId,
           run_id: run.runId,
           expected_revision: run.revision,
         });
@@ -343,19 +357,19 @@ export function usePresentationTemplates(conversationId?: string) {
       Message.error(recoveryTranslationRef.current('conversation.presentationTemplates.recovery.discardError'));
       await refreshRecoverableRuns(false, action);
     },
-    [conversationId, isRecoveryActionCurrent, refreshRecoverableRuns]
+    [isRecoveryActionCurrent, presentationConversationId, refreshRecoverableRuns]
   );
 
   useLayoutEffect(() => {
     recoveryLifecycleEpochRef.current += 1;
-    if (recoveryConversationIdRef.current !== conversationId) {
-      recoveryConversationIdRef.current = conversationId;
+    if (recoveryConversationIdRef.current !== presentationConversationId) {
+      recoveryConversationIdRef.current = presentationConversationId;
       setRecoverableRuns([]);
     }
     return () => {
       recoveryLifecycleEpochRef.current += 1;
     };
-  }, [conversationId]);
+  }, [presentationConversationId]);
 
   useEffect(() => {
     const closeById = recoveryMessageCloseByIdRef.current;
@@ -363,7 +377,7 @@ export function usePresentationTemplates(conversationId?: string) {
       for (const closeMessage of closeById.values()) closeMessage();
       closeById.clear();
     };
-  }, [conversationId]);
+  }, [presentationConversationId]);
 
   useEffect(() => {
     void refreshRecoverableRuns();
@@ -376,8 +390,8 @@ export function usePresentationTemplates(conversationId?: string) {
     const translate = recoveryTranslationRef.current;
     const closeById = recoveryMessageCloseByIdRef.current;
     const nextMessageIds = new Set<string>();
-    for (const run of recoverableRuns.filter((candidate) => candidate.conversationId === conversationId)) {
-      const messageId = `presentation-recovery-${conversationId}-${run.runId}`;
+    for (const run of recoverableRuns.filter((candidate) => candidate.conversationId === presentationConversationId)) {
+      const messageId = `presentation-recovery-${presentationConversationId}-${run.runId}`;
       nextMessageIds.add(messageId);
       const isUncertain = run.dispatchStatus === 'dispatch_uncertain';
       const statusKey = isUncertain
@@ -443,7 +457,7 @@ export function usePresentationTemplates(conversationId?: string) {
       closeMessage();
       closeById.delete(messageId);
     }
-  }, [conversationId, discardRecovery, openRecovery, recoverableRuns]);
+  }, [discardRecovery, openRecovery, presentationConversationId, recoverableRuns]);
 
   const showRetainedScratch = useCallback(
     (runId: string, directory: string): void => {
@@ -516,10 +530,15 @@ export function usePresentationTemplates(conversationId?: string) {
   useAddEventListener(
     'artifact.scratch.terminal',
     (event) => {
-      if (event.conversationId !== conversationId) return;
+      if (
+        presentationConversationId === null ||
+        normalizePresentationConversationId(event.conversationId) !== presentationConversationId
+      ) {
+        return;
+      }
       void handleScratchTerminal(event);
     },
-    [conversationId, handleScratchTerminal]
+    [handleScratchTerminal, presentationConversationId]
   );
 
   return {
@@ -541,7 +560,7 @@ export function usePresentationTemplates(conversationId?: string) {
     handleScratchTerminal,
     interruptScratchTurn,
     discardScratch,
-    recoverableRuns: recoverableRuns.filter((run) => run.conversationId === conversationId),
+    recoverableRuns: recoverableRuns.filter((run) => run.conversationId === presentationConversationId),
     refreshRecoverableRuns,
   };
 }

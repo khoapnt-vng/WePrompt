@@ -258,7 +258,7 @@ describe('PresentationRunStore', () => {
   });
 
   it.each(['toString', 'constructor', '__proto__'])(
-    'allocates and restarts safely for the prototype-named conversation ID %s',
+    'rejects the unsafe prototype-named conversation ID %s before persistence',
     async (conversationId) => {
       const input = {
         conversationId,
@@ -268,28 +268,12 @@ describe('PresentationRunStore', () => {
         grantClaims: [],
       };
 
-      await expect(store.allocateRun(input)).resolves.toMatchObject({
-        ok: true,
-        status: 'created',
-        run: { runId: RUN_ID, conversationId },
-      });
-
-      const restarted = new PresentationRunStore({
-        files,
-        journal,
-        now: () => CREATED_AT,
-        randomUUID: () => RUN_B,
-        getFreeDiskBytes: async () => 8 * 1_024 * 1_024 * 1_024,
-      });
-      await expect(restarted.allocateRun(input)).resolves.toMatchObject({
-        ok: true,
-        status: 'existing',
-        run: { runId: RUN_ID, conversationId },
-      });
+      await expect(store.allocateRun(input)).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+      await expect(journal.readCanonical('run', RUN_ID)).resolves.toBeNull();
     }
   );
 
-  it('keeps distinct request tuples separate when identifiers contain the old delimiter', async () => {
+  it('keeps valid conversation request tuples separate when client identifiers contain the old delimiter', async () => {
     const runIds = [RUN_ID, RUN_B];
     const collisionStore = new PresentationRunStore({
       files,
@@ -299,14 +283,14 @@ describe('PresentationRunStore', () => {
       getFreeDiskBytes: async () => 8 * 1_024 * 1_024 * 1_024,
     });
     const firstInput = {
-      conversationId: 'a',
+      conversationId: CONVERSATION_ID,
       clientRequestId: 'b\u0000c',
       selectedTemplateId: 'business-review',
       requestFingerprint: 'a'.repeat(64),
       grantClaims: [],
     };
     const secondInput = {
-      conversationId: 'a\u0000b',
+      conversationId: CONVERSATION_B,
       clientRequestId: 'c',
       selectedTemplateId: 'business-review',
       requestFingerprint: 'b'.repeat(64),
@@ -1400,6 +1384,38 @@ describe('PresentationRunStore', () => {
     });
   });
 
+  it('rebuilds an uppercase legacy turn binding for a lowercase runtime-event lookup after restart', async () => {
+    const legacyConversationId = CONVERSATION_ID.toUpperCase();
+    const legacyRun = storedRun(RUN_ID, 'bound', {
+      conversationId: legacyConversationId,
+      revision: 0,
+      postInvoked: true,
+      binding: {
+        conversationId: legacyConversationId,
+        turnId: RUN_C,
+        runtime: 'aionrs',
+        boundAt: CREATED_AT.toISOString(),
+      },
+    });
+    await journal.transaction({
+      mutations: [{ entityKind: 'run', entityId: RUN_ID, expectedRevision: null, nextManifest: legacyRun }],
+    });
+
+    const restarted = new PresentationRunStore({
+      files,
+      journal: new PresentationRunJournal({ files, now: () => CREATED_AT }),
+      now: () => CREATED_AT,
+      randomUUID: () => RUN_B,
+      getFreeDiskBytes: async () => 8 * 1_024 * 1_024 * 1_024,
+    });
+
+    await expect(restarted.getRunByTurn(CONVERSATION_ID, RUN_C)).resolves.toMatchObject({
+      runId: RUN_ID,
+      conversationId: legacyConversationId,
+      binding: { conversationId: legacyConversationId, turnId: RUN_C, runtime: 'aionrs' },
+    });
+  });
+
   it('rejects null binding runtime as current terminal authority while preserving the readable legacy fallback', async () => {
     const current = storedRun(RUN_ID, 'terminal_verified', {
       ...exactTerminalLifecycle(),
@@ -1759,10 +1775,10 @@ describe('PresentationRunStore', () => {
     );
   });
 
-  it('keeps distinct turn tuples separate when identifiers contain the old delimiter', async () => {
+  it('keeps valid conversation turn tuples separate when turn identifiers contain the old delimiter', async () => {
     const dispatching = [
-      storedRun(RUN_ID, 'dispatching', { conversationId: 'a', postInvoked: true }),
-      storedRun(RUN_B, 'dispatching', { conversationId: 'a\u0000b', postInvoked: true }),
+      storedRun(RUN_ID, 'dispatching', { conversationId: CONVERSATION_ID, postInvoked: true }),
+      storedRun(RUN_B, 'dispatching', { conversationId: CONVERSATION_B, postInvoked: true }),
     ];
     await journal.transaction({
       mutations: dispatching.map((run) => ({
@@ -1777,7 +1793,7 @@ describe('PresentationRunStore', () => {
     await expect(
       store.bindRunTurn(RUN_ID, {
         expectedRevision: 0,
-        conversationId: 'a',
+        conversationId: CONVERSATION_ID,
         turnId: 'b\u0000c',
         runtime: 'aionrs',
         now: '2026-08-04T00:00:01.000Z',
@@ -1786,7 +1802,7 @@ describe('PresentationRunStore', () => {
     await expect(
       store.bindRunTurn(RUN_B, {
         expectedRevision: 0,
-        conversationId: 'a\u0000b',
+        conversationId: CONVERSATION_B,
         turnId: 'c',
         runtime: 'aionrs',
         now: '2026-08-04T00:00:01.000Z',

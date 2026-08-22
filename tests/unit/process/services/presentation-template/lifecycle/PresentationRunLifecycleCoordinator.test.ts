@@ -34,6 +34,8 @@ import {
 
 const RUN_ID = '11111111-1111-4111-8111-111111111111';
 const CONVERSATION_ID = '22222222-2222-4222-8222-222222222222';
+const LEGACY_UPPER_CONVERSATION_ID = 'A2222222-B222-4222-8222-C22222222222';
+const LEGACY_CONVERSATION_ID = LEGACY_UPPER_CONVERSATION_ID.toLowerCase();
 const TURN_ID = '33333333-3333-4333-8333-333333333333';
 const HOLDER_ID = '44444444-4444-4444-8444-444444444444';
 const LEASE_TOKEN = 'opaque_lease_token_abcdefghijklmnopqrstuvwxyz123456';
@@ -236,21 +238,23 @@ function createHarness(
       current = run('bound');
       return { status: 'bound' as const, manifest: current };
     }),
-    recordTerminalProof: vi.fn(async () => {
-      order.push('terminal-durable');
-      current = run('terminal_verified', {
-        revision: current.revision + 1,
-        sourceGrants: current.sourceGrants,
-        terminalEvidence: {
-          conversationId: CONVERSATION_ID,
-          turnId: TURN_ID,
-          eventObservedAt: NOW,
-          runtimeObservedAt: NOW,
-          runtime: releasedRuntime,
-        },
-      } as Partial<StoredPresentationRunManifest>);
-      return current;
-    }),
+    recordTerminalProof: vi.fn(
+      async (
+        _runId: string,
+        _revision: number,
+        terminalEvidence: NonNullable<StoredPresentationRunManifest['terminalEvidence']>
+      ) => {
+        order.push('terminal-durable');
+        current = run('terminal_verified', {
+          revision: current.revision + 1,
+          conversationId: current.conversationId,
+          sourceGrants: current.sourceGrants,
+          binding: current.binding,
+          terminalEvidence,
+        } as Partial<StoredPresentationRunManifest>);
+        return current;
+      }
+    ),
     recordRuntimeReleaseObservation: vi.fn(async () => ({ status: 'observed' as const, manifest: current })),
     retainCandidate: vi.fn(async () => {
       order.push('retention-durable');
@@ -733,6 +737,43 @@ describe('PresentationRunLifecycleCoordinator', () => {
     expect(harness.postInitialMessage).not.toHaveBeenCalled();
   });
 
+  it('accepts a canonical replay and terminal event for a legacy uppercase durable binding', async () => {
+    const harness = createHarness();
+    harness.setCurrent(
+      run('bound', {
+        conversationId: LEGACY_UPPER_CONVERSATION_ID,
+        binding: {
+          conversationId: LEGACY_UPPER_CONVERSATION_ID,
+          turnId: TURN_ID,
+          runtime: 'aionrs',
+          boundAt: NOW,
+        },
+      })
+    );
+    await harness.coordinator.backendReady({ port: 43123, token: 'secret' });
+
+    await expect(
+      harness.coordinator.dispatch({ ...dispatchRequest(), conversation_id: LEGACY_CONVERSATION_ID }, 'aionrs')
+    ).resolves.toMatchObject({
+      ok: true,
+      status: 'already_bound',
+      conversationId: LEGACY_CONVERSATION_ID,
+    });
+    await expect(
+      harness.coordinator.handleTerminalEvent(
+        terminalEvent({ conversationId: LEGACY_CONVERSATION_ID }),
+        terminalAuthority()
+      )
+    ).resolves.toBe('handled');
+
+    expect(harness.observeRuntime).toHaveBeenCalledWith(expect.any(Object), LEGACY_CONVERSATION_ID, expect.any(Object));
+    expect(harness.store.recordTerminalProof).toHaveBeenCalledWith(
+      RUN_ID,
+      expect.any(Number),
+      expect.objectContaining({ conversationId: LEGACY_CONVERSATION_ID, turnId: TURN_ID })
+    );
+  });
+
   it('rejects an already-bound replay when current runtime authority conflicts', async () => {
     const harness = createHarness();
     harness.setCurrent(run('bound'));
@@ -1054,6 +1095,27 @@ describe('PresentationRunLifecycleCoordinator', () => {
     expect(harness.inspectReadiness).not.toHaveBeenCalled();
     expect(harness.store.recordTerminalProof).not.toHaveBeenCalled();
     vi.useRealTimers();
+  });
+
+  it('observes a restarted legacy uppercase run through its canonical conversation id', async () => {
+    const harness = createHarness();
+    harness.setCurrent(
+      run('bound', {
+        conversationId: LEGACY_UPPER_CONVERSATION_ID,
+        binding: {
+          conversationId: LEGACY_UPPER_CONVERSATION_ID,
+          turnId: TURN_ID,
+          runtime: 'aionrs',
+          boundAt: NOW,
+        },
+      })
+    );
+    harness.store.listDispatchReconciliation.mockResolvedValue([harness.current]);
+
+    await harness.coordinator.backendReady({ port: 43123, token: 'secret' });
+
+    expect(harness.observeRuntime).toHaveBeenCalledWith(expect.any(Object), LEGACY_CONVERSATION_ID);
+    await harness.coordinator.dispose();
   });
 
   it('durably settles a restarted exact legacy null-runtime binding after two real-store observations', async () => {

@@ -14,10 +14,15 @@ import type {
   GetPresentationSourceOwnerResult,
   PresentationSourceRef,
 } from '@/common/types/office/presentationRun';
-import { useGuidSend, type GuidSendDeps } from '@/renderer/pages/guid/hooks/useGuidSend';
+import {
+  readGuidManagedPresentationRecovery,
+  useGuidSend,
+  type GuidSendDeps,
+} from '@/renderer/pages/guid/hooks/useGuidSend';
 
 const createConversationInvokeMock = vi.fn();
 const getConversationInvokeMock = vi.fn();
+const listConversationsInvokeMock = vi.fn();
 const removeConversationInvokeMock = vi.fn();
 const confirmQueuedSourcesInvokeMock = vi.fn();
 const startPresentationRunInvokeMock = vi.fn();
@@ -42,6 +47,11 @@ vi.mock('@/common', () => ({
       },
       remove: {
         invoke: (...args: unknown[]) => removeConversationInvokeMock(...args),
+      },
+    },
+    database: {
+      getUserConversations: {
+        invoke: (...args: unknown[]) => listConversationsInvokeMock(...args),
       },
     },
     presentationSources: {
@@ -184,6 +194,50 @@ const BOUND_DRAFT_RESULT: BindPresentationDraftResult = {
   boundAt: '2026-08-05T10:01:00.000Z',
 };
 
+const CASEFUL_MANAGED_CONVERSATION_ID = '2be7b8fc-6af5-42b8-aed5-03644735c730';
+const SERVER_ASSIGNED_CONVERSATION_ID = 'd0921953';
+const GUID_HANDOFF_CLAIM_KEY = 'weprompt_presentation_handoff';
+const GUID_PENDING_STORAGE_KEY = 'guid_presentation_submission_v2';
+
+const readGuidPendingRaw = (): string | null =>
+  localStorage.getItem(GUID_PENDING_STORAGE_KEY) ?? sessionStorage.getItem(GUID_PENDING_STORAGE_KEY);
+
+const claimedConversation = (queueItemId: string, overrides: Record<string, unknown> = {}) => ({
+  id: SERVER_ASSIGNED_CONVERSATION_ID,
+  type: 'acp',
+  extra: {
+    [GUID_HANDOFF_CLAIM_KEY]: { version: 1, queue_item_id: queueItemId },
+  },
+  ...overrides,
+});
+
+const claimedConversationFromRequest = (
+  request: { extra?: Record<string, unknown> },
+  overrides: Record<string, unknown> = {}
+) => {
+  const claim = request.extra?.[GUID_HANDOFF_CLAIM_KEY] as { queue_item_id?: unknown } | undefined;
+  if (typeof claim?.queue_item_id !== 'string') throw new Error('missing Guid handoff claim');
+  return claimedConversation(claim.queue_item_id, overrides);
+};
+
+const claimedConversationForPending = (conversationId: string, overrides: Record<string, unknown> = {}) => {
+  const raw = readGuidPendingRaw();
+  if (raw === null) throw new Error('missing Guid handoff snapshot');
+  const attempt = JSON.parse(raw) as { queueItemId?: unknown };
+  if (typeof attempt.queueItemId !== 'string') throw new Error('missing Guid queue item id');
+  return claimedConversation(attempt.queueItemId, { id: conversationId, ...overrides });
+};
+
+const deferred = <T>() => {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, reject, resolve };
+};
+
 const attachManagedPresentation = (
   deps: GuidSendDeps,
   overrides: Partial<NonNullable<GuidSendDeps['managedPresentation']>> = {}
@@ -213,8 +267,11 @@ describe('useGuidSend', () => {
     localStorage.clear();
     sessionStorage.clear();
     createConversationInvokeMock.mockReset();
-    createConversationInvokeMock.mockResolvedValue({ id: 'conv-1' });
+    createConversationInvokeMock.mockImplementation(async (request: { extra?: Record<string, unknown> }) =>
+      request.extra?.[GUID_HANDOFF_CLAIM_KEY] ? claimedConversationFromRequest(request) : { id: 'conv-1' }
+    );
     getConversationInvokeMock.mockReset().mockResolvedValue(null);
+    listConversationsInvokeMock.mockReset().mockResolvedValue({ items: [], total: 0, has_more: false });
     removeConversationInvokeMock.mockReset();
     confirmQueuedSourcesInvokeMock.mockReset().mockResolvedValue({
       ok: true,
@@ -662,7 +719,7 @@ describe('useGuidSend', () => {
       input: composed.input,
       files: composed.files,
     });
-    expect(sessionStorage.getItem('guid_presentation_submission_v2')).toBeNull();
+    expect(readGuidPendingRaw()).toBeNull();
     expect(Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))).not.toContainEqual(
       expect.stringMatching(/^presentation-command-queue\/v2\//)
     );
@@ -680,6 +737,976 @@ describe('useGuidSend', () => {
       return JSON.parse(localStorage.getItem(key!)!) as Record<string, unknown>;
     };
 
+    it('resolves a server-assigned short id from an exact durable claim before binding or queueing', async () => {
+      const deps = createDeps();
+      const managed = attachManagedPresentation(deps);
+      createConversationInvokeMock.mockImplementation(
+        async (request: { id?: string; extra: Record<string, unknown> }) => {
+          expect(request).not.toHaveProperty('id');
+          const claim = request.extra[GUID_HANDOFF_CLAIM_KEY] as { version: number; queue_item_id: string };
+          expect(claim).toEqual({ version: 1, queue_item_id: expect.any(String) });
+          const pending = JSON.parse(readGuidPendingRaw()!) as Record<string, unknown>;
+          expect(pending).toMatchObject({
+            version: 3,
+            claimMode: 'marker_v1',
+            createPhase: 'uncertain',
+            conversationId: null,
+            queueItemId: claim.queue_item_id,
+          });
+          return claimedConversation(claim.queue_item_id, { id: SERVER_ASSIGNED_CONVERSATION_ID.toUpperCase() });
+        }
+      );
+      managed.bindDraft.mockImplementation(async (conversationId) => {
+        expect(JSON.parse(readGuidPendingRaw()!)).toMatchObject({
+          version: 3,
+          claimMode: 'marker_v1',
+          createPhase: 'resolved',
+          conversationId: SERVER_ASSIGNED_CONVERSATION_ID,
+        });
+        return { ...BOUND_DRAFT_RESULT, conversationId };
+      });
+
+      const { result } = renderHook(() => useGuidSend(deps));
+      await act(async () => result.current.handleSend());
+
+      expect(managed.bindDraft).toHaveBeenCalledWith(SERVER_ASSIGNED_CONVERSATION_ID);
+      expect(startPresentationRunInvokeMock).toHaveBeenCalledWith(
+        expect.objectContaining({ conversation_id: SERVER_ASSIGNED_CONVERSATION_ID })
+      );
+      expect(deps.navigate).toHaveBeenCalledWith(`/conversation/${SERVER_ASSIGNED_CONVERSATION_ID}`);
+      expect(readGuidPendingRaw()).toBeNull();
+    });
+
+    it('recovers a lost create reply by one exact catalogue claimant without posting twice', async () => {
+      const deps = createDeps();
+      const managed = attachManagedPresentation(deps);
+      let queueItemId = '';
+      listConversationsInvokeMock
+        .mockResolvedValueOnce({ items: [], total: 0, has_more: false })
+        .mockImplementationOnce(async () => ({
+          items: [claimedConversation(queueItemId)],
+          total: 1,
+          has_more: false,
+        }));
+      createConversationInvokeMock.mockImplementation(async (request: { extra: Record<string, unknown> }) => {
+        queueItemId = (request.extra[GUID_HANDOFF_CLAIM_KEY] as { queue_item_id: string }).queue_item_id;
+        throw new Error('create reply lost');
+      });
+
+      const { result } = renderHook(() => useGuidSend(deps));
+      await act(async () => result.current.handleSend());
+
+      expect(listConversationsInvokeMock).toHaveBeenCalledTimes(2);
+      expect(createConversationInvokeMock).toHaveBeenCalledTimes(1);
+      expect(managed.bindDraft).toHaveBeenCalledWith(SERVER_ASSIGNED_CONVERSATION_ID);
+      expect(deps.navigate).toHaveBeenCalledWith(`/conversation/${SERVER_ASSIGNED_CONVERSATION_ID}`);
+    });
+
+    it('recovers an uncertain claimant across a real hook unmount without a second POST', async () => {
+      const deps = createDeps();
+      const managed = attachManagedPresentation(deps);
+      const createReply = deferred<ReturnType<typeof claimedConversation>>();
+      let queueItemId = '';
+      listConversationsInvokeMock.mockImplementation(async () =>
+        queueItemId === ''
+          ? { items: [], total: 0, has_more: false }
+          : { items: [claimedConversation(queueItemId)], total: 1, has_more: false }
+      );
+      createConversationInvokeMock.mockImplementation((request: { extra: Record<string, unknown> }) => {
+        queueItemId = (request.extra[GUID_HANDOFF_CLAIM_KEY] as { queue_item_id: string }).queue_item_id;
+        return createReply.promise;
+      });
+      const first = renderHook(() => useGuidSend(deps));
+      let firstSend!: Promise<void>;
+      act(() => {
+        firstSend = first.result.current.handleSend().catch(() => undefined);
+      });
+      await waitFor(() => expect(createConversationInvokeMock).toHaveBeenCalledOnce());
+      expect(readGuidPendingRaw()).toContain('"createPhase":"uncertain"');
+      first.unmount();
+
+      const second = renderHook(() => useGuidSend(deps));
+      await act(async () => second.result.current.handleSend());
+
+      expect(createConversationInvokeMock).toHaveBeenCalledOnce();
+      expect(managed.bindDraft).toHaveBeenCalledOnce();
+      expect(deps.navigate).toHaveBeenCalledWith(`/conversation/${SERVER_ASSIGNED_CONVERSATION_ID}`);
+
+      createReply.resolve(claimedConversation(queueItemId));
+      await act(async () => firstSend);
+    });
+
+    it('recovers an uncertain claimant after session state is lost but durable app state remains', async () => {
+      const deps = createDeps();
+      const managed = attachManagedPresentation(deps);
+      const firstCreateReply = deferred<ReturnType<typeof claimedConversation>>();
+      let firstQueueItemId = '';
+      listConversationsInvokeMock.mockImplementation(async () =>
+        firstQueueItemId === ''
+          ? { items: [], total: 0, has_more: false }
+          : { items: [claimedConversation(firstQueueItemId)], total: 1, has_more: false }
+      );
+      createConversationInvokeMock.mockImplementation((request: { extra: Record<string, unknown> }) => {
+        const queueItemId = (request.extra[GUID_HANDOFF_CLAIM_KEY] as { queue_item_id: string }).queue_item_id;
+        if (firstQueueItemId === '') {
+          firstQueueItemId = queueItemId;
+          return firstCreateReply.promise;
+        }
+        return Promise.resolve(claimedConversation(queueItemId));
+      });
+      const first = renderHook(() => useGuidSend(deps));
+      let firstSend!: Promise<void>;
+      act(() => {
+        firstSend = first.result.current.handleSend().catch(() => undefined);
+      });
+      await waitFor(() => expect(createConversationInvokeMock).toHaveBeenCalledOnce());
+      const durableBeforeRestart = localStorage.getItem(GUID_PENDING_STORAGE_KEY);
+      sessionStorage.clear();
+      first.unmount();
+
+      const second = renderHook(() => useGuidSend(deps));
+      await act(async () => second.result.current.handleSend());
+      firstCreateReply.resolve(claimedConversation(firstQueueItemId));
+      await act(async () => firstSend);
+
+      expect(durableBeforeRestart).toContain('"createPhase":"uncertain"');
+      expect(createConversationInvokeMock).toHaveBeenCalledOnce();
+      expect(managed.bindDraft).toHaveBeenCalledOnce();
+      expect(deps.navigate).toHaveBeenCalledWith(`/conversation/${SERVER_ASSIGNED_CONVERSATION_ID}`);
+    });
+
+    it('fails closed when durable and legacy pending stores contain different attempts', async () => {
+      const durable = {
+        version: 3,
+        claimMode: 'marker_v1',
+        createPhase: 'uncertain',
+        conversationId: null,
+        queueItemId: '77777777-7777-4777-8777-777777777777',
+        clientRequestId: '66666666-6666-4666-8666-666666666666',
+        draftClientRequestId: '44444444-4444-4444-8444-444444444444',
+        input: 'hello',
+        selectedTemplateId: 'finance-review',
+        sources: [SOURCE_REF],
+        runtime: 'acp',
+        capturedAt: '2026-08-05T10:00:00.000Z',
+      };
+      localStorage.setItem(GUID_PENDING_STORAGE_KEY, JSON.stringify(durable));
+      sessionStorage.setItem(
+        GUID_PENDING_STORAGE_KEY,
+        JSON.stringify({
+          version: 2,
+          conversationId: '33333333-3333-4333-8333-333333333333',
+          queueItemId: '88888888-8888-4888-8888-888888888888',
+          clientRequestId: durable.clientRequestId,
+          draftClientRequestId: durable.draftClientRequestId,
+          input: durable.input,
+          selectedTemplateId: durable.selectedTemplateId,
+          sources: durable.sources,
+          runtime: durable.runtime,
+          capturedAt: durable.capturedAt,
+        })
+      );
+      const deps = createDeps();
+      attachManagedPresentation(deps);
+
+      expect(readGuidManagedPresentationRecovery()).toBeNull();
+      const { result } = renderHook(() => useGuidSend(deps));
+      await act(async () => {
+        await result.current.handleSend().catch(() => undefined);
+      });
+
+      expect(createConversationInvokeMock).not.toHaveBeenCalled();
+      expect(localStorage.getItem(GUID_PENDING_STORAGE_KEY)).toBe(JSON.stringify(durable));
+      expect(sessionStorage.getItem(GUID_PENDING_STORAGE_KEY)).not.toBeNull();
+    });
+
+    it('byte-migrates an exact session-v3 snapshot into durable storage', () => {
+      const raw = JSON.stringify({
+        version: 3,
+        claimMode: 'marker_v1',
+        createPhase: 'uncertain',
+        conversationId: null,
+        queueItemId: '77777777-7777-4777-8777-777777777777',
+        clientRequestId: '66666666-6666-4666-8666-666666666666',
+        draftClientRequestId: '44444444-4444-4444-8444-444444444444',
+        input: 'hello',
+        selectedTemplateId: 'finance-review',
+        sources: [SOURCE_REF],
+        runtime: 'acp',
+        capturedAt: '2026-08-05T10:00:00.000Z',
+      });
+      sessionStorage.setItem(GUID_PENDING_STORAGE_KEY, raw);
+
+      expect(readGuidManagedPresentationRecovery()).toMatchObject({ input: 'hello', runtime: 'acp' });
+      expect(localStorage.getItem(GUID_PENDING_STORAGE_KEY)).toBe(raw);
+      expect(sessionStorage.getItem(GUID_PENDING_STORAGE_KEY)).toBeNull();
+    });
+
+    it('cleans an equal-byte dual-v3 crash residue without changing durable authority', () => {
+      const raw = JSON.stringify({
+        version: 3,
+        claimMode: 'marker_v1',
+        createPhase: 'uncertain',
+        conversationId: null,
+        queueItemId: '77777777-7777-4777-8777-777777777777',
+        clientRequestId: '66666666-6666-4666-8666-666666666666',
+        draftClientRequestId: '44444444-4444-4444-8444-444444444444',
+        input: 'hello',
+        selectedTemplateId: 'finance-review',
+        sources: [SOURCE_REF],
+        runtime: 'acp',
+        capturedAt: '2026-08-05T10:00:00.000Z',
+      });
+      localStorage.setItem(GUID_PENDING_STORAGE_KEY, raw);
+      sessionStorage.setItem(GUID_PENDING_STORAGE_KEY, raw);
+
+      expect(readGuidManagedPresentationRecovery()).toMatchObject({ input: 'hello', runtime: 'acp' });
+      expect(localStorage.getItem(GUID_PENDING_STORAGE_KEY)).toBe(raw);
+      expect(sessionStorage.getItem(GUID_PENDING_STORAGE_KEY)).toBeNull();
+    });
+
+    it('blocks POST when session-v3 cleanup is not read back and remains recoverable', async () => {
+      const raw = JSON.stringify({
+        version: 3,
+        claimMode: 'marker_v1',
+        createPhase: 'uncertain',
+        conversationId: null,
+        queueItemId: '77777777-7777-4777-8777-777777777777',
+        clientRequestId: '66666666-6666-4666-8666-666666666666',
+        draftClientRequestId: '44444444-4444-4444-8444-444444444444',
+        input: 'hello',
+        selectedTemplateId: 'finance-review',
+        sources: [SOURCE_REF],
+        runtime: 'acp',
+        capturedAt: '2026-08-05T10:00:00.000Z',
+      });
+      sessionStorage.setItem(GUID_PENDING_STORAGE_KEY, raw);
+      const originalRemoveItem = Storage.prototype.removeItem;
+      const removeItem = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (key) {
+        if (this === sessionStorage && key === GUID_PENDING_STORAGE_KEY) return;
+        return originalRemoveItem.call(this, key);
+      });
+      const deps = createDeps();
+      attachManagedPresentation(deps);
+      try {
+        expect(readGuidManagedPresentationRecovery()).toBeNull();
+        const { result } = renderHook(() => useGuidSend(deps));
+        await act(async () => {
+          await result.current.handleSend().catch(() => undefined);
+        });
+        expect(createConversationInvokeMock).not.toHaveBeenCalled();
+        expect(localStorage.getItem(GUID_PENDING_STORAGE_KEY)).toBe(raw);
+        expect(sessionStorage.getItem(GUID_PENDING_STORAGE_KEY)).toBe(raw);
+      } finally {
+        removeItem.mockRestore();
+      }
+
+      expect(readGuidManagedPresentationRecovery()).toMatchObject({ input: 'hello' });
+      expect(sessionStorage.getItem(GUID_PENDING_STORAGE_KEY)).toBeNull();
+    });
+
+    it('cleans only the deterministic legacy-v2 to exact-get-v3 crash residue before exact authority proof', async () => {
+      const legacy = {
+        version: 2,
+        conversationId: '33333333-3333-4333-8333-333333333333',
+        queueItemId: '77777777-7777-4777-8777-777777777777',
+        clientRequestId: '66666666-6666-4666-8666-666666666666',
+        draftClientRequestId: '44444444-4444-4444-8444-444444444444',
+        input: 'hello',
+        selectedTemplateId: 'finance-review',
+        sources: [SOURCE_REF],
+        runtime: 'acp',
+        capturedAt: '2026-08-05T10:00:00.000Z',
+      };
+      const upgraded = {
+        version: 3,
+        claimMode: 'exact_get',
+        createPhase: 'resolved',
+        conversationId: legacy.conversationId,
+        queueItemId: legacy.queueItemId,
+        clientRequestId: legacy.clientRequestId,
+        draftClientRequestId: legacy.draftClientRequestId,
+        input: legacy.input,
+        selectedTemplateId: legacy.selectedTemplateId,
+        sources: legacy.sources,
+        runtime: legacy.runtime,
+        capturedAt: legacy.capturedAt,
+      };
+      const durableRaw = JSON.stringify(upgraded);
+      localStorage.setItem(GUID_PENDING_STORAGE_KEY, durableRaw);
+      sessionStorage.setItem(GUID_PENDING_STORAGE_KEY, JSON.stringify(legacy));
+
+      expect(readGuidManagedPresentationRecovery()).toMatchObject({ conversationId: legacy.conversationId });
+      expect(localStorage.getItem(GUID_PENDING_STORAGE_KEY)).toBe(durableRaw);
+      expect(sessionStorage.getItem(GUID_PENDING_STORAGE_KEY)).toBeNull();
+      getConversationInvokeMock.mockResolvedValue({ id: legacy.conversationId, type: 'acp', extra: {} });
+      const deps = createDeps();
+      attachManagedPresentation(deps, { conversationId: legacy.conversationId });
+
+      const { result } = renderHook(() => useGuidSend(deps));
+      await act(async () => result.current.handleSend());
+
+      expect(getConversationInvokeMock).toHaveBeenCalledWith({ id: legacy.conversationId });
+      expect(createConversationInvokeMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects a noncanonical legacy-v2 dual-store residue without changing either store', async () => {
+      const legacyRaw = JSON.stringify({
+        version: 2,
+        conversationId: 'A3333333-B333-4333-8333-C33333333333',
+        queueItemId: '77777777-7777-4777-8777-777777777777',
+        clientRequestId: '66666666-6666-4666-8666-666666666666',
+        draftClientRequestId: '44444444-4444-4444-8444-444444444444',
+        input: 'hello',
+        selectedTemplateId: 'finance-review',
+        sources: [SOURCE_REF],
+        runtime: 'acp',
+        capturedAt: '2026-08-05T10:00:00.000Z',
+      });
+      const durableRaw = JSON.stringify({
+        version: 3,
+        claimMode: 'exact_get',
+        createPhase: 'resolved',
+        conversationId: 'a3333333-b333-4333-8333-c33333333333',
+        queueItemId: '77777777-7777-4777-8777-777777777777',
+        clientRequestId: '66666666-6666-4666-8666-666666666666',
+        draftClientRequestId: '44444444-4444-4444-8444-444444444444',
+        input: 'hello',
+        selectedTemplateId: 'finance-review',
+        sources: [SOURCE_REF],
+        runtime: 'acp',
+        capturedAt: '2026-08-05T10:00:00.000Z',
+      });
+      localStorage.setItem(GUID_PENDING_STORAGE_KEY, durableRaw);
+      sessionStorage.setItem(GUID_PENDING_STORAGE_KEY, legacyRaw);
+      const deps = createDeps();
+      attachManagedPresentation(deps, {
+        conversationId: 'a3333333-b333-4333-8333-c33333333333',
+      });
+
+      expect(readGuidManagedPresentationRecovery()).toBeNull();
+      const { result } = renderHook(() => useGuidSend(deps));
+      await act(async () => {
+        await result.current.handleSend().catch(() => undefined);
+      });
+
+      expect(createConversationInvokeMock).not.toHaveBeenCalled();
+      expect(localStorage.getItem(GUID_PENDING_STORAGE_KEY)).toBe(durableRaw);
+      expect(sessionStorage.getItem(GUID_PENDING_STORAGE_KEY)).toBe(legacyRaw);
+    });
+
+    it('fails closed when durable pending storage is corrupt or unavailable', async () => {
+      localStorage.setItem(GUID_PENDING_STORAGE_KEY, '{corrupt');
+      const deps = createDeps();
+      attachManagedPresentation(deps);
+      expect(readGuidManagedPresentationRecovery()).toBeNull();
+      const first = renderHook(() => useGuidSend(deps));
+      await act(async () => {
+        await first.result.current.handleSend().catch(() => undefined);
+      });
+      expect(createConversationInvokeMock).not.toHaveBeenCalled();
+
+      localStorage.removeItem(GUID_PENDING_STORAGE_KEY);
+      const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (key) {
+        if (this === localStorage && key === GUID_PENDING_STORAGE_KEY)
+          throw new DOMException('blocked', 'SecurityError');
+        return null;
+      });
+      try {
+        expect(readGuidManagedPresentationRecovery()).toBeNull();
+        const second = renderHook(() => useGuidSend(deps));
+        await act(async () => {
+          await second.result.current.handleSend().catch(() => undefined);
+        });
+        expect(createConversationInvokeMock).not.toHaveBeenCalled();
+      } finally {
+        getItem.mockRestore();
+      }
+    });
+
+    it('fails before POST when a fresh durable snapshot cannot be read back', async () => {
+      const deps = createDeps();
+      attachManagedPresentation(deps);
+      const originalSetItem = Storage.prototype.setItem;
+      const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
+        if (this === localStorage && key === GUID_PENDING_STORAGE_KEY) return;
+        return originalSetItem.call(this, key, value);
+      });
+      try {
+        const { result } = renderHook(() => useGuidSend(deps));
+        await act(async () => {
+          await result.current.handleSend().catch(() => undefined);
+        });
+
+        expect(createConversationInvokeMock).not.toHaveBeenCalled();
+        expect(localStorage.getItem(GUID_PENDING_STORAGE_KEY)).toBeNull();
+      } finally {
+        setItem.mockRestore();
+      }
+    });
+
+    it('allows only one concurrent sender to win the not_started to uncertain CAS and POST', async () => {
+      const deps = createDeps();
+      attachManagedPresentation(deps);
+      const catalogue = deferred<{ items: []; total: 0; has_more: false }>();
+      listConversationsInvokeMock.mockReturnValue(catalogue.promise);
+      createConversationInvokeMock.mockImplementation(async (request: { extra: Record<string, unknown> }) => {
+        const queueItemId = (request.extra[GUID_HANDOFF_CLAIM_KEY] as { queue_item_id: string }).queue_item_id;
+        return claimedConversation(queueItemId);
+      });
+      const first = renderHook(() => useGuidSend(deps));
+      const second = renderHook(() => useGuidSend(deps));
+      let firstSend!: Promise<void>;
+      let secondSend!: Promise<void>;
+      act(() => {
+        firstSend = first.result.current.handleSend();
+        secondSend = second.result.current.handleSend();
+      });
+      await waitFor(() => expect(listConversationsInvokeMock).toHaveBeenCalledTimes(2));
+
+      catalogue.resolve({ items: [], total: 0, has_more: false });
+      let outcomes!: PromiseSettledResult<void>[];
+      await act(async () => {
+        outcomes = await Promise.allSettled([firstSend, secondSend]);
+      });
+
+      expect(createConversationInvokeMock).toHaveBeenCalledOnce();
+      expect(outcomes.filter(({ status }) => status === 'fulfilled')).toHaveLength(1);
+      expect(outcomes.filter(({ status }) => status === 'rejected')).toHaveLength(1);
+      expect(deps.navigate).toHaveBeenCalledOnce();
+    });
+
+    it('fails before POST when the uncertain phase write cannot be read back', async () => {
+      const deps = createDeps();
+      attachManagedPresentation(deps);
+      const originalSetItem = Storage.prototype.setItem;
+      const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
+        if (key === 'guid_presentation_submission_v2' && value.includes('"createPhase":"uncertain"')) return;
+        return originalSetItem.call(this, key, value);
+      });
+
+      try {
+        const { result } = renderHook(() => useGuidSend(deps));
+        await act(async () => {
+          await result.current.handleSend().catch(() => undefined);
+        });
+
+        expect(listConversationsInvokeMock).toHaveBeenCalledOnce();
+        expect(createConversationInvokeMock).not.toHaveBeenCalled();
+        expect(readGuidPendingRaw()).toContain('"createPhase":"not_started"');
+      } finally {
+        setItem.mockRestore();
+      }
+    });
+
+    it('never posts again when an uncertain create has no complete-catalogue claimant', async () => {
+      const queueItemId = '77777777-7777-4777-8777-777777777777';
+      sessionStorage.setItem(
+        'guid_presentation_submission_v2',
+        JSON.stringify({
+          version: 3,
+          claimMode: 'marker_v1',
+          createPhase: 'uncertain',
+          conversationId: null,
+          queueItemId,
+          clientRequestId: '66666666-6666-4666-8666-666666666666',
+          draftClientRequestId: '44444444-4444-4444-8444-444444444444',
+          input: 'hello',
+          selectedTemplateId: 'finance-review',
+          sources: [SOURCE_REF],
+          runtime: 'acp',
+          capturedAt: '2026-08-05T10:00:00.000Z',
+        })
+      );
+      const deps = createDeps();
+      attachManagedPresentation(deps);
+
+      const { result } = renderHook(() => useGuidSend(deps));
+      await act(async () => {
+        await result.current.handleSend().catch(() => undefined);
+      });
+
+      expect(listConversationsInvokeMock).toHaveBeenCalledOnce();
+      expect(createConversationInvokeMock).not.toHaveBeenCalled();
+      expect(startPresentationRunInvokeMock).not.toHaveBeenCalled();
+      expect(deps.navigate).not.toHaveBeenCalled();
+      expect(readGuidPendingRaw()).toContain('"createPhase":"uncertain"');
+    });
+
+    it.each([
+      {
+        label: 'an incomplete catalogue',
+        catalogue: { items: [], total: 1, has_more: true },
+      },
+      {
+        label: 'an oversized catalogue response',
+        catalogue: { items: [], total: 10_001, has_more: false },
+      },
+      {
+        label: 'duplicate claimants',
+        catalogue: {
+          items: [
+            claimedConversation('77777777-7777-4777-8777-777777777777'),
+            claimedConversation('77777777-7777-4777-8777-777777777777', { id: 'd0921954' }),
+          ],
+          total: 2,
+          has_more: false,
+        },
+      },
+    ])('fails closed for $label while resolving an uncertain create', async ({ catalogue }) => {
+      sessionStorage.setItem(
+        'guid_presentation_submission_v2',
+        JSON.stringify({
+          version: 3,
+          claimMode: 'marker_v1',
+          createPhase: 'uncertain',
+          conversationId: null,
+          queueItemId: '77777777-7777-4777-8777-777777777777',
+          clientRequestId: '66666666-6666-4666-8666-666666666666',
+          draftClientRequestId: '44444444-4444-4444-8444-444444444444',
+          input: 'hello',
+          selectedTemplateId: 'finance-review',
+          sources: [SOURCE_REF],
+          runtime: 'acp',
+          capturedAt: '2026-08-05T10:00:00.000Z',
+        })
+      );
+      listConversationsInvokeMock.mockResolvedValue(catalogue);
+      const deps = createDeps();
+      attachManagedPresentation(deps);
+
+      const { result } = renderHook(() => useGuidSend(deps));
+      await act(async () => {
+        await result.current.handleSend().catch(() => undefined);
+      });
+
+      expect(listConversationsInvokeMock).toHaveBeenCalledOnce();
+      expect(createConversationInvokeMock).not.toHaveBeenCalled();
+      expect(startPresentationRunInvokeMock).not.toHaveBeenCalled();
+      expect(deps.navigate).not.toHaveBeenCalled();
+    });
+
+    it.each(['unsafe-id', 'wrong-runtime', 'wrong-claim'] as const)(
+      'rejects a create DTO with %s before resolving or binding',
+      async (fault) => {
+        const deps = createDeps();
+        const managed = attachManagedPresentation(deps);
+        createConversationInvokeMock.mockImplementation(async (request: { extra: Record<string, unknown> }) => {
+          const queueItemId = (request.extra[GUID_HANDOFF_CLAIM_KEY] as { queue_item_id: string }).queue_item_id;
+          if (fault === 'unsafe-id') return claimedConversation(queueItemId, { id: '../unsafe' });
+          if (fault === 'wrong-runtime') return claimedConversation(queueItemId, { type: 'aionrs' });
+          return claimedConversation(queueItemId, {
+            extra: {
+              [GUID_HANDOFF_CLAIM_KEY]: {
+                version: 1,
+                queue_item_id: '88888888-8888-4888-8888-888888888888',
+              },
+            },
+          });
+        });
+
+        const { result } = renderHook(() => useGuidSend(deps));
+        await act(async () => {
+          await result.current.handleSend().catch(() => undefined);
+        });
+
+        expect(createConversationInvokeMock).toHaveBeenCalledOnce();
+        expect(managed.bindDraft).not.toHaveBeenCalled();
+        expect(startPresentationRunInvokeMock).not.toHaveBeenCalled();
+        expect(deps.navigate).not.toHaveBeenCalled();
+        expect(readGuidPendingRaw()).toContain('"createPhase":"uncertain"');
+      }
+    );
+
+    it('does not guess or create for a markerless legacy attempt whose exact conversation id is missing', async () => {
+      const conversationId = '33333333-3333-4333-8333-333333333333';
+      sessionStorage.setItem(
+        'guid_presentation_submission_v2',
+        JSON.stringify({
+          version: 2,
+          conversationId,
+          queueItemId: '77777777-7777-4777-8777-777777777777',
+          clientRequestId: '66666666-6666-4666-8666-666666666666',
+          draftClientRequestId: '44444444-4444-4444-8444-444444444444',
+          input: 'hello',
+          selectedTemplateId: 'finance-review',
+          sources: [SOURCE_REF],
+          runtime: 'acp',
+          capturedAt: '2026-08-05T10:00:00.000Z',
+        })
+      );
+      const deps = createDeps();
+      attachManagedPresentation(deps, { conversationId });
+
+      const { result } = renderHook(() => useGuidSend(deps));
+      await act(async () => {
+        await result.current.handleSend().catch(() => undefined);
+      });
+
+      expect(getConversationInvokeMock).toHaveBeenCalledWith({ id: conversationId });
+      expect(listConversationsInvokeMock).not.toHaveBeenCalled();
+      expect(createConversationInvokeMock).not.toHaveBeenCalled();
+      expect(startPresentationRunInvokeMock).not.toHaveBeenCalled();
+      expect(deps.navigate).not.toHaveBeenCalled();
+    });
+
+    it('rejects a legacy v2 exact-id conversation that already carries any claimant field', async () => {
+      const conversationId = '33333333-3333-4333-8333-333333333333';
+      const queueItemId = '77777777-7777-4777-8777-777777777777';
+      sessionStorage.setItem(
+        'guid_presentation_submission_v2',
+        JSON.stringify({
+          version: 2,
+          conversationId,
+          queueItemId,
+          clientRequestId: '66666666-6666-4666-8666-666666666666',
+          draftClientRequestId: '44444444-4444-4444-8444-444444444444',
+          input: 'hello',
+          selectedTemplateId: 'finance-review',
+          sources: [SOURCE_REF],
+          runtime: 'acp',
+          capturedAt: '2026-08-05T10:00:00.000Z',
+        })
+      );
+      getConversationInvokeMock.mockResolvedValue(claimedConversation(queueItemId, { id: conversationId }));
+      const deps = createDeps();
+      attachManagedPresentation(deps, { conversationId });
+
+      const { result } = renderHook(() => useGuidSend(deps));
+      await act(async () => {
+        await result.current.handleSend().catch(() => undefined);
+      });
+
+      expect(createConversationInvokeMock).not.toHaveBeenCalled();
+      expect(startPresentationRunInvokeMock).not.toHaveBeenCalled();
+      expect(deps.navigate).not.toHaveBeenCalled();
+      expect(JSON.parse(readGuidPendingRaw()!)).toMatchObject({ version: 2 });
+    });
+
+    it('rejects an exact-get v3 conversation that carries any claimant field', async () => {
+      const conversationId = SERVER_ASSIGNED_CONVERSATION_ID;
+      const deps = createDeps();
+      attachManagedPresentation(deps, { conversationId });
+      getConversationInvokeMock.mockResolvedValue(
+        claimedConversation('77777777-7777-4777-8777-777777777777', { id: conversationId })
+      );
+
+      const { result } = renderHook(() => useGuidSend(deps));
+      await act(async () => {
+        await result.current.handleSend().catch(() => undefined);
+      });
+
+      expect(createConversationInvokeMock).not.toHaveBeenCalled();
+      expect(startPresentationRunInvokeMock).not.toHaveBeenCalled();
+      expect(deps.navigate).not.toHaveBeenCalled();
+      expect(JSON.parse(readGuidPendingRaw()!)).toMatchObject({
+        version: 3,
+        claimMode: 'exact_get',
+        createPhase: 'resolved',
+        conversationId,
+      });
+    });
+
+    it('rejects a resolved v3 restart whose persisted conversation claimant no longer matches', async () => {
+      const conversationId = SERVER_ASSIGNED_CONVERSATION_ID;
+      sessionStorage.setItem(
+        'guid_presentation_submission_v2',
+        JSON.stringify({
+          version: 3,
+          claimMode: 'marker_v1',
+          createPhase: 'resolved',
+          conversationId,
+          queueItemId: '77777777-7777-4777-8777-777777777777',
+          clientRequestId: '66666666-6666-4666-8666-666666666666',
+          draftClientRequestId: '44444444-4444-4444-8444-444444444444',
+          input: 'hello',
+          selectedTemplateId: 'finance-review',
+          sources: [SOURCE_REF],
+          runtime: 'acp',
+          capturedAt: '2026-08-05T10:00:00.000Z',
+        })
+      );
+      getConversationInvokeMock.mockResolvedValue(
+        claimedConversation('88888888-8888-4888-8888-888888888888', { id: conversationId })
+      );
+      const deps = createDeps();
+      attachManagedPresentation(deps, { conversationId });
+
+      const { result } = renderHook(() => useGuidSend(deps));
+      await act(async () => {
+        await result.current.handleSend().catch(() => undefined);
+      });
+
+      expect(createConversationInvokeMock).not.toHaveBeenCalled();
+      expect(startPresentationRunInvokeMock).not.toHaveBeenCalled();
+      expect(deps.navigate).not.toHaveBeenCalled();
+    });
+
+    it('verifies a marker-v1 conversation before accepting a preexisting committed queue item', async () => {
+      const deps = createDeps();
+      attachManagedPresentation(deps);
+      const navigate = vi.fn().mockRejectedValueOnce(new Error('navigation reply lost')).mockResolvedValue(undefined);
+      deps.navigate = navigate as never;
+      const first = renderHook(() => useGuidSend(deps));
+      await act(async () => first.result.current.sendMessageHandler());
+      await waitFor(() => expect(deps.setLoading).toHaveBeenLastCalledWith(false));
+      const pending = JSON.parse(readGuidPendingRaw()!) as {
+        conversationId: string;
+        queueItemId: string;
+      };
+      expect(readManagedQueue()).toMatchObject({
+        conversationId: pending.conversationId,
+        items: [{ queueItemId: pending.queueItemId, execution: { state: 'committed' } }],
+      });
+      first.unmount();
+      getConversationInvokeMock.mockResolvedValue(
+        claimedConversation('88888888-8888-4888-8888-888888888888', { id: pending.conversationId })
+      );
+
+      const second = renderHook(() => useGuidSend(deps));
+      await act(async () => {
+        await second.result.current.handleSend().catch(() => undefined);
+      });
+
+      expect(getConversationInvokeMock).toHaveBeenCalledWith({ id: pending.conversationId });
+      expect(getPresentationRunInvokeMock).not.toHaveBeenCalled();
+      expect(startPresentationRunInvokeMock).toHaveBeenCalledOnce();
+      expect(navigate).toHaveBeenCalledOnce();
+      expect(readGuidPendingRaw()).toContain(pending.queueItemId);
+    });
+
+    it('migrates an uppercase legacy pending conversation id and matches canonical recovery identity', async () => {
+      const conversationId = '33333333-3333-4333-8333-333333333333';
+      const legacyConversationId = conversationId.toUpperCase();
+      const queueItemId = '77777777-7777-4777-8777-777777777777';
+      const clientRequestId = '66666666-6666-4666-8666-666666666666';
+      sessionStorage.setItem(
+        'guid_presentation_submission_v2',
+        JSON.stringify({
+          version: 2,
+          conversationId: legacyConversationId,
+          queueItemId,
+          clientRequestId,
+          draftClientRequestId: '44444444-4444-4444-8444-444444444444',
+          input: 'hello',
+          selectedTemplateId: 'finance-review',
+          sources: [SOURCE_REF],
+          runtime: 'acp',
+          capturedAt: '2026-08-05T10:00:00.000Z',
+        })
+      );
+      const deps = createDeps();
+      const managed = attachManagedPresentation(deps, { conversationId: legacyConversationId });
+      getConversationInvokeMock.mockResolvedValue({ id: conversationId, type: 'acp' });
+
+      expect(readGuidManagedPresentationRecovery()).toMatchObject({ conversationId });
+      expect(JSON.parse(readGuidPendingRaw()!)).toMatchObject({
+        conversationId,
+        queueItemId,
+        clientRequestId,
+      });
+
+      const { result } = renderHook(() => useGuidSend(deps));
+      await act(async () => result.current.handleSend());
+
+      expect(managed.prepareSourceOwner).toHaveBeenCalledWith(conversationId);
+      expect(createConversationInvokeMock).not.toHaveBeenCalled();
+      expect(startPresentationRunInvokeMock).toHaveBeenCalledWith(
+        expect.objectContaining({ conversation_id: conversationId, client_request_id: clientRequestId })
+      );
+      expect(deps.navigate).toHaveBeenCalledWith(`/conversation/${conversationId}`);
+      expect(readGuidPendingRaw()).toBeNull();
+    });
+
+    it('keeps exact-get provenance across a legacy-v2 navigation crash and remount', async () => {
+      const conversationId = '33333333-3333-4333-8333-333333333333';
+      const legacyConversationId = conversationId.toUpperCase();
+      const queueItemId = '77777777-7777-4777-8777-777777777777';
+      const clientRequestId = '66666666-6666-4666-8666-666666666666';
+      sessionStorage.setItem(
+        'guid_presentation_submission_v2',
+        JSON.stringify({
+          version: 2,
+          conversationId: legacyConversationId,
+          queueItemId,
+          clientRequestId,
+          draftClientRequestId: '44444444-4444-4444-8444-444444444444',
+          input: 'hello',
+          selectedTemplateId: 'finance-review',
+          sources: [SOURCE_REF],
+          runtime: 'acp',
+          capturedAt: '2026-08-05T10:00:00.000Z',
+        })
+      );
+      const deps = createDeps();
+      attachManagedPresentation(deps, { conversationId: legacyConversationId });
+      getConversationInvokeMock.mockResolvedValue({ id: legacyConversationId, type: 'acp', extra: {} });
+      const navigate = vi.fn().mockRejectedValueOnce(new Error('navigation reply lost')).mockResolvedValue(undefined);
+      deps.navigate = navigate as never;
+      const first = renderHook(() => useGuidSend(deps));
+      await act(async () => {
+        await first.result.current.handleSend().catch(() => undefined);
+      });
+      const committed = (
+        readManagedQueue() as {
+          items: Array<{
+            clientRequestId: string;
+            selectedTemplateId: string;
+            execution: { state: 'committed'; runId: string; revision: number };
+          }>;
+        }
+      ).items[0];
+      expect(JSON.parse(readGuidPendingRaw()!)).toMatchObject({
+        version: 3,
+        claimMode: 'exact_get',
+        createPhase: 'resolved',
+        conversationId,
+        queueItemId,
+      });
+      first.unmount();
+      getPresentationRunInvokeMock.mockResolvedValue({
+        ok: true,
+        run: {
+          runId: committed.execution.runId,
+          clientRequestId: committed.clientRequestId,
+          conversationId: legacyConversationId,
+          selectedTemplateId: committed.selectedTemplateId,
+          revision: committed.execution.revision,
+          createdAt: '2026-08-05T10:02:00.000Z',
+          updatedAt: '2026-08-05T10:02:00.000Z',
+          dispatchStatus: 'committed',
+          artifactPhase: 'sources_snapshotted',
+          disposition: null,
+          retainedCandidate: null,
+          actions: { openAllowed: false, discardAllowed: true },
+        },
+      });
+
+      const second = renderHook(() => useGuidSend(deps));
+      await act(async () => second.result.current.handleSend());
+
+      expect(createConversationInvokeMock).not.toHaveBeenCalled();
+      expect(startPresentationRunInvokeMock).toHaveBeenCalledOnce();
+      expect(getConversationInvokeMock).toHaveBeenCalledTimes(3);
+      expect(getPresentationRunInvokeMock).toHaveBeenCalledWith({
+        conversation_id: conversationId,
+        client_request_id: clientRequestId,
+      });
+      expect(navigate).toHaveBeenCalledTimes(2);
+      expect(readGuidPendingRaw()).toBeNull();
+    });
+
+    it('preserves and recovers the exact durable claimant when post-navigation clear is not read back', async () => {
+      const deps = createDeps();
+      attachManagedPresentation(deps);
+      const originalRemoveItem = Storage.prototype.removeItem;
+      const removeItem = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (key) {
+        if (this === localStorage && key === GUID_PENDING_STORAGE_KEY) return;
+        return originalRemoveItem.call(this, key);
+      });
+      const first = renderHook(() => useGuidSend(deps));
+      try {
+        await act(async () => {
+          await first.result.current.handleSend().catch(() => undefined);
+        });
+      } finally {
+        removeItem.mockRestore();
+      }
+      const pendingRaw = readGuidPendingRaw();
+      const pending = JSON.parse(pendingRaw!) as {
+        clientRequestId: string;
+        conversationId: string;
+        queueItemId: string;
+      };
+      const committed = (
+        readManagedQueue() as {
+          items: Array<{
+            clientRequestId: string;
+            selectedTemplateId: string;
+            execution: { state: 'committed'; runId: string; revision: number };
+          }>;
+        }
+      ).items[0];
+      expect(deps.navigate).toHaveBeenCalledOnce();
+      expect(readGuidPendingRaw()).toBe(pendingRaw);
+      first.unmount();
+      getConversationInvokeMock.mockResolvedValue(
+        claimedConversation(pending.queueItemId, { id: pending.conversationId })
+      );
+      getPresentationRunInvokeMock.mockResolvedValue({
+        ok: true,
+        run: {
+          runId: committed.execution.runId,
+          clientRequestId: committed.clientRequestId,
+          conversationId: pending.conversationId,
+          selectedTemplateId: committed.selectedTemplateId,
+          revision: committed.execution.revision,
+          createdAt: '2026-08-05T10:02:00.000Z',
+          updatedAt: '2026-08-05T10:02:00.000Z',
+          dispatchStatus: 'committed',
+          artifactPhase: 'sources_snapshotted',
+          disposition: null,
+          retainedCandidate: null,
+          actions: { openAllowed: false, discardAllowed: true },
+        },
+      });
+
+      const second = renderHook(() => useGuidSend(deps));
+      await act(async () => second.result.current.handleSend());
+
+      expect(createConversationInvokeMock).toHaveBeenCalledOnce();
+      expect(startPresentationRunInvokeMock).toHaveBeenCalledOnce();
+      expect(getPresentationRunInvokeMock).toHaveBeenCalledWith({
+        conversation_id: pending.conversationId,
+        client_request_id: pending.clientRequestId,
+      });
+      expect(deps.navigate).toHaveBeenCalledTimes(2);
+      expect(readGuidPendingRaw()).toBeNull();
+    });
+
+    it('canonicalizes uppercase conversation and bind DTO identities before managed handoff', async () => {
+      const deps = createDeps();
+      const managed = attachManagedPresentation(deps, { conversationId: CASEFUL_MANAGED_CONVERSATION_ID });
+      const canonicalConversationId = CASEFUL_MANAGED_CONVERSATION_ID;
+      getConversationInvokeMock.mockResolvedValue({
+        id: canonicalConversationId.toUpperCase(),
+        type: 'acp',
+        extra: {},
+      });
+      managed.bindDraft.mockImplementation(async (conversationId) => ({
+        ...BOUND_DRAFT_RESULT,
+        conversationId: conversationId.toUpperCase(),
+      }));
+
+      const { result } = renderHook(() => useGuidSend(deps));
+      await act(async () => result.current.handleSend());
+
+      expect(managed.bindDraft).toHaveBeenCalledWith(canonicalConversationId);
+      expect(startPresentationRunInvokeMock).toHaveBeenCalledWith(
+        expect.objectContaining({ conversation_id: canonicalConversationId })
+      );
+      expect(deps.navigate).toHaveBeenCalledWith(`/conversation/${canonicalConversationId}`);
+      expect(managed.onHandoffAccepted).toHaveBeenCalledOnce();
+      expect(createConversationInvokeMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unsafe managed conversation DTO identity without navigating', async () => {
+      const deps = createDeps();
+      attachManagedPresentation(deps);
+      createConversationInvokeMock.mockImplementation(async (request: { extra?: Record<string, unknown> }) =>
+        claimedConversationFromRequest(request, { id: '../unsafe' })
+      );
+
+      const { result } = renderHook(() => useGuidSend(deps));
+      await act(async () => {
+        await result.current.handleSend().catch(() => undefined);
+      });
+
+      expect(startPresentationRunInvokeMock).not.toHaveBeenCalled();
+      expect(deps.navigate).not.toHaveBeenCalled();
+      expect(readGuidPendingRaw()).toContain('hello');
+    });
+
     it('orders draft grants, durable conversation, one bind, start, committed handoff, and navigation', async () => {
       const events: string[] = [];
       const deps = createDeps();
@@ -689,13 +1716,11 @@ describe('useGuidSend', () => {
         events.push('draft-and-grants');
         return SOURCE_OWNER_RESULT;
       });
-      createConversationInvokeMock.mockImplementation(
-        async (request: { id: string; extra: { default_files: string[] } }) => {
-          events.push('conversation');
-          expect(request.extra.default_files).toEqual([]);
-          return { id: request.id };
-        }
-      );
+      createConversationInvokeMock.mockImplementation(async (request: { extra: { default_files: string[] } }) => {
+        events.push('conversation');
+        expect(request.extra.default_files).toEqual([]);
+        return claimedConversationFromRequest(request);
+      });
       managed.bindDraft.mockImplementation(async (conversationId) => {
         events.push('bind');
         return { ...BOUND_DRAFT_RESULT, conversationId };
@@ -771,7 +1796,6 @@ describe('useGuidSend', () => {
       };
       const managed = attachManagedPresentation(deps, { sourceRefs: [] });
       managed.prepareSourceOwner.mockResolvedValue(promptOnlyOwner);
-      createConversationInvokeMock.mockImplementation(async ({ id }: { id: string }) => ({ id }));
 
       const { result } = renderHook(() => useGuidSend(deps));
       await act(async () => result.current.handleSend());
@@ -794,7 +1818,6 @@ describe('useGuidSend', () => {
         grants: [],
       });
       managed.bindDraft.mockResolvedValue(null);
-      createConversationInvokeMock.mockImplementation(async ({ id }: { id: string }) => ({ id }));
 
       const { result } = renderHook(() => useGuidSend(deps));
       await act(async () => {
@@ -804,7 +1827,7 @@ describe('useGuidSend', () => {
       expect(managed.bindDraft).toHaveBeenCalledTimes(1);
       expect(startPresentationRunInvokeMock).not.toHaveBeenCalled();
       expect(deps.navigate).not.toHaveBeenCalled();
-      expect(sessionStorage.getItem('guid_presentation_submission_v2')).toContain('hello');
+      expect(readGuidPendingRaw()).toContain('hello');
     });
 
     it('does not treat an empty revision-zero conversation owner as proof of prompt-only draft binding', async () => {
@@ -820,7 +1843,7 @@ describe('useGuidSend', () => {
         ownerRevision: 0,
         grants: [],
       });
-      getConversationInvokeMock.mockResolvedValue({ id: conversationId });
+      getConversationInvokeMock.mockResolvedValue({ id: conversationId, type: 'acp', extra: {} });
 
       const { result } = renderHook(() => useGuidSend(deps));
       await act(async () => {
@@ -830,7 +1853,7 @@ describe('useGuidSend', () => {
       expect(managed.bindDraft).not.toHaveBeenCalled();
       expect(startPresentationRunInvokeMock).not.toHaveBeenCalled();
       expect(deps.navigate).not.toHaveBeenCalled();
-      expect(sessionStorage.getItem('guid_presentation_submission_v2')).toContain(conversationId);
+      expect(readGuidPendingRaw()).toContain(conversationId);
     });
 
     it('blocks an expired draft before conversation creation and keeps one stable pending snapshot', async () => {
@@ -849,23 +1872,13 @@ describe('useGuidSend', () => {
       const { result } = renderHook(() => useGuidSend(deps));
       await act(async () => result.current.sendMessageHandler());
       await waitFor(() => expect(deps.setLoading).toHaveBeenLastCalledWith(false));
-      const stableSnapshot = Array.from({ length: sessionStorage.length }, (_, index) =>
-        sessionStorage.getItem(sessionStorage.key(index)!)
-      ).find((value) => value?.includes('finance-review'));
+      const stableSnapshot = readGuidPendingRaw();
 
       expect(stableSnapshot).toContain('hello');
-      await act(async () => result.current.retireManagedPresentationAttemptAfterSourceChange(false));
-      expect(
-        Array.from({ length: sessionStorage.length }, (_, index) =>
-          sessionStorage.getItem(sessionStorage.key(index)!)
-        ).find((value) => value?.includes('finance-review'))
-      ).toBe(stableSnapshot);
-      await act(async () => result.current.retireManagedPresentationAttemptAfterSourceChange(true));
-      expect(
-        Array.from({ length: sessionStorage.length }, (_, index) =>
-          sessionStorage.getItem(sessionStorage.key(index)!)
-        ).find((value) => value?.includes('finance-review'))
-      ).toBeUndefined();
+      await act(async () => result.current.retireManagedPresentationAttemptAfterSourceChange(null));
+      expect(readGuidPendingRaw()).toBe(stableSnapshot);
+      await act(async () => result.current.retireManagedPresentationAttemptAfterSourceChange({ kind: 'added' }));
+      expect(readGuidPendingRaw()).toBeNull();
       expect(createConversationInvokeMock).not.toHaveBeenCalled();
       expect(startPresentationRunInvokeMock).not.toHaveBeenCalled();
       expect(deps.navigate).not.toHaveBeenCalled();
@@ -874,11 +1887,10 @@ describe('useGuidSend', () => {
       ).toEqual([0, 0, 0]);
     });
 
-    it('does not start or delete the newly created conversation when draft binding conflicts', async () => {
+    it('reuses the claimed conversation after a bind conflict and safe source rebase', async () => {
       const deps = createDeps();
       deps.onPresentationTemplateConsumed = vi.fn();
       const managed = attachManagedPresentation(deps);
-      createConversationInvokeMock.mockImplementation(async ({ id }: { id: string }) => ({ id }));
       managed.bindDraft.mockResolvedValue({
         ok: false,
         code: 'DRAFT_ALREADY_BOUND',
@@ -900,13 +1912,78 @@ describe('useGuidSend', () => {
       expect(removeConversationInvokeMock).not.toHaveBeenCalled();
       expect(deps.navigate).not.toHaveBeenCalled();
       expect(deps.onPresentationTemplateConsumed).not.toHaveBeenCalled();
+
+      const pending = JSON.parse(readGuidPendingRaw()!) as {
+        clientRequestId: string;
+        conversationId: string;
+        queueItemId: string;
+      };
+      expect(
+        Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index)).find((candidate) =>
+          candidate?.startsWith('presentation-command-queue/v2/')
+        )
+      ).toBeUndefined();
+      const replacementSource: PresentationSourceRef = {
+        grantId: '99999999-9999-4999-8999-999999999999',
+        expectedByteLength: 4096,
+        expectedSha256: 'b'.repeat(64),
+      };
+      Object.assign(deps.managedPresentation!, {
+        draftClientRequestId: '88888888-8888-4888-8888-888888888888',
+        sourceRefs: [replacementSource],
+      });
+      managed.prepareSourceOwner.mockResolvedValue({
+        ok: true,
+        owner: { owner_type: 'draft', draft_id: '99999999-9999-4999-8999-999999999998' },
+        ownerRevision: 1,
+        grants: [
+          {
+            grantId: replacementSource.grantId,
+            displayName: 'Replacement.xlsx',
+            format: 'xlsx',
+            sourceKind: 'native-picker',
+            byteLength: replacementSource.expectedByteLength,
+            sha256: replacementSource.expectedSha256,
+            expiresAt: '2026-08-06T11:00:00.000Z',
+          },
+        ],
+      });
+      managed.bindDraft.mockImplementation(async (conversationId) => ({
+        ...BOUND_DRAFT_RESULT,
+        draftId: '99999999-9999-4999-8999-999999999998',
+        conversationId,
+      }));
+      getConversationInvokeMock.mockResolvedValue(
+        claimedConversation(pending.queueItemId, { id: pending.conversationId })
+      );
+      getPresentationRunInvokeMock.mockResolvedValue({
+        ok: false,
+        code: 'RUN_NOT_FOUND',
+        messageKey: 'conversation.presentationRun.errors.RUN_NOT_FOUND',
+        retryable: false,
+        state: 'lookup',
+        details: null,
+      });
+
+      await act(async () => result.current.handleSend());
+
+      expect(createConversationInvokeMock).toHaveBeenCalledOnce();
+      expect(managed.bindDraft).toHaveBeenCalledTimes(2);
+      expect(startPresentationRunInvokeMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          client_request_id: pending.clientRequestId,
+          conversation_id: pending.conversationId,
+          sources: [replacementSource],
+        })
+      );
+      expect(deps.navigate).toHaveBeenCalledWith(`/conversation/${pending.conversationId}`);
+      expect(readGuidPendingRaw()).toBeNull();
     });
 
-    it('retains the raw submission when source confirmation blocks after durable conversation creation', async () => {
+    it('retires a definitively rejected persisting item and reuses its claimed conversation', async () => {
       const deps = createDeps();
       deps.onPresentationTemplateConsumed = vi.fn();
       const managed = attachManagedPresentation(deps);
-      createConversationInvokeMock.mockImplementation(async ({ id }: { id: string }) => ({ id }));
       confirmQueuedSourcesInvokeMock.mockResolvedValue({
         ok: false,
         code: 'SOURCE_TAMPERED',
@@ -929,15 +2006,697 @@ describe('useGuidSend', () => {
       expect(
         [deps.setInput, deps.setFiles, deps.onPresentationTemplateConsumed].map((spy) => spy.mock.calls.length)
       ).toEqual([0, 0, 0]);
-      expect(sessionStorage.getItem('guid_presentation_submission_v2')).toContain('hello');
+      expect(readGuidPendingRaw()).toContain('hello');
       expect(JSON.stringify(readManagedQueue())).toContain(SOURCE_REF.grantId);
+
+      const pending = JSON.parse(readGuidPendingRaw()!) as {
+        clientRequestId: string;
+        conversationId: string;
+        queueItemId: string;
+      };
+      const pendingRaw = readGuidPendingRaw();
+      getConversationInvokeMock.mockResolvedValue(
+        claimedConversation(pending.queueItemId, { id: pending.conversationId })
+      );
+      await act(async () => result.current.retireManagedPresentationAttemptAfterSourceChange({ kind: 'added' }));
+      expect(readGuidPendingRaw()).toBe(pendingRaw);
+      expect(
+        Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index)).find((candidate) =>
+          candidate?.startsWith('presentation-command-queue/v2/')
+        )
+      ).toBeUndefined();
+
+      const replacementSource: PresentationSourceRef = {
+        grantId: '99999999-9999-4999-8999-999999999999',
+        expectedByteLength: 4096,
+        expectedSha256: 'c'.repeat(64),
+      };
+      Object.assign(deps.managedPresentation!, {
+        draftClientRequestId: '88888888-8888-4888-8888-888888888888',
+        sourceRefs: [replacementSource],
+      });
+      managed.prepareSourceOwner.mockResolvedValue({
+        ok: true,
+        owner: { owner_type: 'conversation', conversation_id: pending.conversationId },
+        ownerRevision: 6,
+        grants: [
+          {
+            grantId: replacementSource.grantId,
+            displayName: 'Replacement.xlsx',
+            format: 'xlsx',
+            sourceKind: 'native-picker',
+            byteLength: replacementSource.expectedByteLength,
+            sha256: replacementSource.expectedSha256,
+            expiresAt: '2026-08-06T11:00:00.000Z',
+          },
+        ],
+      });
+      confirmQueuedSourcesInvokeMock.mockResolvedValue({
+        ok: true,
+        status: 'confirmed',
+        ownerRevision: 7,
+        expiresAt: '2026-08-06T12:00:00.000Z',
+      });
+      getPresentationRunInvokeMock.mockResolvedValue({
+        ok: false,
+        code: 'RUN_NOT_FOUND',
+        messageKey: 'conversation.presentationRun.errors.RUN_NOT_FOUND',
+        retryable: false,
+        state: 'lookup',
+        details: null,
+      });
+
+      await act(async () => result.current.handleSend());
+
+      expect(createConversationInvokeMock).toHaveBeenCalledOnce();
+      expect(managed.bindDraft).toHaveBeenCalledOnce();
+      expect(startPresentationRunInvokeMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          client_request_id: pending.clientRequestId,
+          conversation_id: pending.conversationId,
+          sources: [replacementSource],
+        })
+      );
+      expect(deps.navigate).toHaveBeenCalledWith(`/conversation/${pending.conversationId}`);
+    });
+
+    it('uses successful frozen-grant revoke proof to remove a never-confirmed item before claimant rebase', async () => {
+      const deps = createDeps();
+      const managed = attachManagedPresentation(deps);
+      confirmQueuedSourcesInvokeMock.mockRejectedValueOnce(new Error('confirmation reply lost'));
+      const first = renderHook(() => useGuidSend(deps));
+      await act(async () => {
+        await first.result.current.handleSend().catch(() => undefined);
+      });
+      const pendingRaw = readGuidPendingRaw();
+      const pending = JSON.parse(pendingRaw!) as {
+        clientRequestId: string;
+        conversationId: string;
+        queueItemId: string;
+      };
+      getConversationInvokeMock.mockResolvedValue(
+        claimedConversation(pending.queueItemId, { id: pending.conversationId })
+      );
+
+      await act(async () =>
+        first.result.current.retireManagedPresentationAttemptAfterSourceChange({
+          kind: 'revoked',
+          grantId: SOURCE_REF.grantId,
+          queueUnboundAtRevoke: true,
+        })
+      );
+      expect(readGuidPendingRaw()).toBe(pendingRaw);
+      expect(
+        Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index)).find((candidate) =>
+          candidate?.startsWith('presentation-command-queue/v2/')
+        )
+      ).toBeUndefined();
+      expect(confirmQueuedSourcesInvokeMock).toHaveBeenCalledOnce();
+      first.unmount();
+
+      const replacementSource: PresentationSourceRef = {
+        grantId: '99999999-9999-4999-8999-999999999999',
+        expectedByteLength: 8192,
+        expectedSha256: 'f'.repeat(64),
+      };
+      Object.assign(deps.managedPresentation!, {
+        draftClientRequestId: '88888888-8888-4888-8888-888888888888',
+        sourceRefs: [replacementSource],
+      });
+      managed.prepareSourceOwner.mockResolvedValue({
+        ok: true,
+        owner: { owner_type: 'conversation', conversation_id: pending.conversationId },
+        ownerRevision: 6,
+        grants: [
+          {
+            grantId: replacementSource.grantId,
+            displayName: 'Replacement.xlsx',
+            format: 'xlsx',
+            sourceKind: 'native-picker',
+            byteLength: replacementSource.expectedByteLength,
+            sha256: replacementSource.expectedSha256,
+            expiresAt: '2026-08-06T11:00:00.000Z',
+          },
+        ],
+      });
+      getPresentationRunInvokeMock.mockResolvedValue({
+        ok: false,
+        code: 'RUN_NOT_FOUND',
+        messageKey: 'conversation.presentationRun.errors.RUN_NOT_FOUND',
+        retryable: false,
+        state: 'lookup',
+        details: null,
+      });
+
+      const second = renderHook(() => useGuidSend(deps));
+      await act(async () => second.result.current.handleSend());
+
+      expect(createConversationInvokeMock).toHaveBeenCalledOnce();
+      expect(managed.bindDraft).toHaveBeenCalledOnce();
+      expect(confirmQueuedSourcesInvokeMock).toHaveBeenCalledTimes(2);
+      expect(startPresentationRunInvokeMock).toHaveBeenCalledOnce();
+      expect(startPresentationRunInvokeMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          client_request_id: pending.clientRequestId,
+          conversation_id: pending.conversationId,
+          sources: [replacementSource],
+        })
+      );
+      expect(readManagedQueue()).toMatchObject({
+        conversationId: pending.conversationId,
+        items: [
+          {
+            queueItemId: pending.queueItemId,
+            sources: [replacementSource],
+            execution: { state: 'committed' },
+          },
+        ],
+      });
+      expect(readGuidPendingRaw()).toBeNull();
+    });
+
+    it('uses durable queued-confirmation revoke proof on Send after remount to remove and rebase', async () => {
+      const deps = createDeps();
+      const managed = attachManagedPresentation(deps);
+      confirmQueuedSourcesInvokeMock.mockRejectedValueOnce(new Error('confirmation reply lost')).mockResolvedValueOnce({
+        ok: false,
+        code: 'SOURCE_GRANT_REPLAYED',
+        messageKey: 'conversation.presentationRun.errors.SOURCE_GRANT_REPLAYED',
+        retryable: false,
+        state: 'grant_validation',
+        details: { grantId: SOURCE_REF.grantId, queueUnboundAtRevoke: true },
+      });
+      const first = renderHook(() => useGuidSend(deps));
+      await act(async () => {
+        await first.result.current.handleSend().catch(() => undefined);
+      });
+      const pendingRaw = readGuidPendingRaw();
+      const pending = JSON.parse(pendingRaw!) as {
+        clientRequestId: string;
+        conversationId: string;
+        queueItemId: string;
+      };
+      first.unmount();
+
+      const replacementSource: PresentationSourceRef = {
+        grantId: '99999999-9999-4999-8999-999999999999',
+        expectedByteLength: 10_240,
+        expectedSha256: '7'.repeat(64),
+      };
+      Object.assign(deps.managedPresentation!, {
+        draftClientRequestId: '88888888-8888-4888-8888-888888888888',
+        sourceRefs: [replacementSource],
+      });
+      managed.prepareSourceOwner.mockResolvedValue({
+        ok: true,
+        owner: { owner_type: 'conversation', conversation_id: pending.conversationId },
+        ownerRevision: 7,
+        grants: [
+          {
+            grantId: replacementSource.grantId,
+            displayName: 'Replacement after revoke replay.xlsx',
+            format: 'xlsx',
+            sourceKind: 'native-picker',
+            byteLength: replacementSource.expectedByteLength,
+            sha256: replacementSource.expectedSha256,
+            expiresAt: '2026-08-06T11:00:00.000Z',
+          },
+        ],
+      });
+      getConversationInvokeMock.mockResolvedValue(
+        claimedConversation(pending.queueItemId, { id: pending.conversationId })
+      );
+      getPresentationRunInvokeMock.mockResolvedValue({
+        ok: false,
+        code: 'RUN_NOT_FOUND',
+        messageKey: 'conversation.presentationRun.errors.RUN_NOT_FOUND',
+        retryable: false,
+        state: 'lookup',
+        details: null,
+      });
+      const second = renderHook(() => useGuidSend(deps));
+      await act(async () => second.result.current.handleSend());
+
+      expect(createConversationInvokeMock).toHaveBeenCalledOnce();
+      expect(confirmQueuedSourcesInvokeMock).toHaveBeenCalledTimes(3);
+      expect(managed.bindDraft).toHaveBeenCalledOnce();
+      expect(startPresentationRunInvokeMock).toHaveBeenCalledOnce();
+      expect(startPresentationRunInvokeMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          client_request_id: pending.clientRequestId,
+          conversation_id: pending.conversationId,
+          sources: [replacementSource],
+        })
+      );
+      expect(readGuidPendingRaw()).not.toBe(pendingRaw);
+      expect(readGuidPendingRaw()).toBeNull();
+    });
+
+    it('retires a mismatched persisting item after picker commit survives a renderer crash without its callback', async () => {
+      const deps = createDeps();
+      const managed = attachManagedPresentation(deps);
+      confirmQueuedSourcesInvokeMock.mockRejectedValueOnce(new Error('confirmation reply lost')).mockResolvedValueOnce({
+        ok: false,
+        code: 'INVALID_REQUEST',
+        messageKey: 'conversation.presentationRun.errors.INVALID_REQUEST',
+        retryable: false,
+        state: 'preflight',
+        details: null,
+      });
+      const first = renderHook(() => useGuidSend(deps));
+      await act(async () => {
+        await first.result.current.handleSend().catch(() => undefined);
+      });
+      const pending = JSON.parse(readGuidPendingRaw()!) as {
+        clientRequestId: string;
+        conversationId: string;
+        queueItemId: string;
+      };
+      first.unmount();
+
+      const replacementSource: PresentationSourceRef = {
+        grantId: '99999999-9999-4999-8999-999999999999',
+        expectedByteLength: 12_288,
+        expectedSha256: '9'.repeat(64),
+      };
+      Object.assign(deps.managedPresentation!, {
+        draftClientRequestId: '88888888-8888-4888-8888-888888888888',
+        sourceRefs: [replacementSource],
+      });
+      managed.prepareSourceOwner.mockResolvedValue({
+        ok: true,
+        owner: { owner_type: 'conversation', conversation_id: pending.conversationId },
+        ownerRevision: 7,
+        grants: [
+          {
+            grantId: replacementSource.grantId,
+            displayName: 'Replacement after crash.xlsx',
+            format: 'xlsx',
+            sourceKind: 'native-picker',
+            byteLength: replacementSource.expectedByteLength,
+            sha256: replacementSource.expectedSha256,
+            expiresAt: '2026-08-06T11:00:00.000Z',
+          },
+        ],
+      });
+      getConversationInvokeMock.mockResolvedValue(
+        claimedConversation(pending.queueItemId, { id: pending.conversationId })
+      );
+      getPresentationRunInvokeMock.mockResolvedValue({
+        ok: false,
+        code: 'RUN_NOT_FOUND',
+        messageKey: 'conversation.presentationRun.errors.RUN_NOT_FOUND',
+        retryable: false,
+        state: 'lookup',
+        details: null,
+      });
+
+      const second = renderHook(() => useGuidSend(deps));
+      await act(async () => second.result.current.handleSend());
+
+      expect(createConversationInvokeMock).toHaveBeenCalledOnce();
+      expect(confirmQueuedSourcesInvokeMock).toHaveBeenCalledTimes(3);
+      expect(managed.bindDraft).toHaveBeenCalledOnce();
+      expect(startPresentationRunInvokeMock).toHaveBeenCalledOnce();
+      expect(startPresentationRunInvokeMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          client_request_id: pending.clientRequestId,
+          conversation_id: pending.conversationId,
+          sources: [replacementSource],
+        })
+      );
+      expect(readManagedQueue()).toMatchObject({
+        conversationId: pending.conversationId,
+        items: [
+          {
+            queueItemId: pending.queueItemId,
+            sources: [replacementSource],
+            execution: { state: 'committed' },
+          },
+        ],
+      });
+      expect(deps.navigate).toHaveBeenCalledWith(`/conversation/${pending.conversationId}`);
+      expect(readGuidPendingRaw()).toBeNull();
+    });
+
+    it('retires a mismatched preflight item after picker commit survives a renderer crash without its callback', async () => {
+      const deps = createDeps();
+      const managed = attachManagedPresentation(deps);
+      startPresentationRunInvokeMock.mockResolvedValueOnce({
+        ok: false,
+        code: 'RATE_LIMITED',
+        messageKey: 'conversation.presentationRun.errors.RATE_LIMITED',
+        retryable: true,
+        state: 'preflight',
+        details: { retryAfterMs: 5000, postInvoked: false },
+      });
+      const first = renderHook(() => useGuidSend(deps));
+      await act(async () => {
+        await first.result.current.handleSend().catch(() => undefined);
+      });
+      const pending = JSON.parse(readGuidPendingRaw()!) as {
+        clientRequestId: string;
+        conversationId: string;
+        queueItemId: string;
+      };
+      expect(readManagedQueue()).toMatchObject({
+        conversationId: pending.conversationId,
+        items: [{ queueItemId: pending.queueItemId, execution: { state: 'preflight_failed' } }],
+      });
+      first.unmount();
+
+      const replacementSource: PresentationSourceRef = {
+        grantId: '99999999-9999-4999-8999-999999999999',
+        expectedByteLength: 16_384,
+        expectedSha256: '8'.repeat(64),
+      };
+      Object.assign(deps.managedPresentation!, {
+        draftClientRequestId: '88888888-8888-4888-8888-888888888888',
+        sourceRefs: [replacementSource],
+      });
+      managed.prepareSourceOwner.mockResolvedValue({
+        ok: true,
+        owner: { owner_type: 'conversation', conversation_id: pending.conversationId },
+        ownerRevision: 7,
+        grants: [
+          {
+            grantId: replacementSource.grantId,
+            displayName: 'Replacement after preflight crash.xlsx',
+            format: 'xlsx',
+            sourceKind: 'native-picker',
+            byteLength: replacementSource.expectedByteLength,
+            sha256: replacementSource.expectedSha256,
+            expiresAt: '2026-08-06T11:00:00.000Z',
+          },
+        ],
+      });
+      getConversationInvokeMock.mockResolvedValue(
+        claimedConversation(pending.queueItemId, { id: pending.conversationId })
+      );
+      getPresentationRunInvokeMock.mockResolvedValue({
+        ok: false,
+        code: 'RUN_NOT_FOUND',
+        messageKey: 'conversation.presentationRun.errors.RUN_NOT_FOUND',
+        retryable: false,
+        state: 'lookup',
+        details: null,
+      });
+
+      const second = renderHook(() => useGuidSend(deps));
+      await act(async () => second.result.current.handleSend());
+
+      expect(createConversationInvokeMock).toHaveBeenCalledOnce();
+      expect(confirmQueuedSourcesInvokeMock).toHaveBeenCalledTimes(2);
+      expect(managed.bindDraft).toHaveBeenCalledOnce();
+      expect(startPresentationRunInvokeMock).toHaveBeenCalledTimes(2);
+      expect(startPresentationRunInvokeMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          client_request_id: pending.clientRequestId,
+          conversation_id: pending.conversationId,
+          sources: [replacementSource],
+        })
+      );
+      expect(readManagedQueue()).toMatchObject({
+        conversationId: pending.conversationId,
+        items: [
+          {
+            queueItemId: pending.queueItemId,
+            sources: [replacementSource],
+            execution: { state: 'committed' },
+          },
+        ],
+      });
+      expect(deps.navigate).toHaveBeenCalledWith(`/conversation/${pending.conversationId}`);
+      expect(readGuidPendingRaw()).toBeNull();
+    });
+
+    it.each([
+      ['confirmation success', 'success', 'queued'],
+      ['transport uncertainty', 'transport', 'persisting'],
+      ['persistence uncertainty', 'PERSISTENCE_FAILED', 'persisting'],
+      ['internal uncertainty', 'INTERNAL_ERROR', 'persisting'],
+    ] as const)('preserves the exact durable marker on persisting retirement %s', async (_label, outcome, state) => {
+      const deps = createDeps();
+      attachManagedPresentation(deps);
+      confirmQueuedSourcesInvokeMock.mockRejectedValueOnce(new Error('initial confirmation reply lost'));
+      const { result } = renderHook(() => useGuidSend(deps));
+      await act(async () => result.current.sendMessageHandler());
+      await waitFor(() => expect(deps.setLoading).toHaveBeenLastCalledWith(false));
+      const pendingRaw = readGuidPendingRaw();
+      const pending = JSON.parse(pendingRaw!) as { conversationId: string; queueItemId: string };
+      getConversationInvokeMock.mockResolvedValue(
+        claimedConversation(pending.queueItemId, { id: pending.conversationId })
+      );
+      if (outcome === 'success') {
+        confirmQueuedSourcesInvokeMock.mockResolvedValueOnce({
+          ok: true,
+          status: 'already_confirmed',
+          ownerRevision: 6,
+          expiresAt: '2026-08-06T12:00:00.000Z',
+        });
+      } else if (outcome === 'transport') {
+        confirmQueuedSourcesInvokeMock.mockRejectedValueOnce(new Error('transport unavailable'));
+      } else {
+        confirmQueuedSourcesInvokeMock.mockResolvedValueOnce({
+          ok: false,
+          code: outcome,
+          messageKey: `conversation.presentationRun.errors.${outcome}`,
+          retryable: false,
+          state: 'persistence',
+          details: null,
+        });
+      }
+
+      await act(async () => result.current.retireManagedPresentationAttemptAfterSourceChange({ kind: 'added' }));
+
+      expect(readGuidPendingRaw()).toBe(pendingRaw);
+      expect(readManagedQueue()).toMatchObject({
+        conversationId: pending.conversationId,
+        items: [{ queueItemId: pending.queueItemId, execution: { state } }],
+      });
+      expect(createConversationInvokeMock).toHaveBeenCalledOnce();
+      expect(startPresentationRunInvokeMock).not.toHaveBeenCalled();
+    });
+
+    it('resumes the frozen queued item after a lost confirmation reply and source change', async () => {
+      const deps = createDeps();
+      const managed = attachManagedPresentation(deps);
+      confirmQueuedSourcesInvokeMock.mockRejectedValueOnce(new Error('confirmation reply lost'));
+      const first = renderHook(() => useGuidSend(deps));
+      await act(async () => {
+        await first.result.current.handleSend().catch(() => undefined);
+      });
+      const pendingRaw = readGuidPendingRaw();
+      const pending = JSON.parse(pendingRaw!) as {
+        clientRequestId: string;
+        conversationId: string;
+        queueItemId: string;
+      };
+      getConversationInvokeMock.mockResolvedValue(
+        claimedConversation(pending.queueItemId, { id: pending.conversationId })
+      );
+      confirmQueuedSourcesInvokeMock.mockResolvedValueOnce({
+        ok: true,
+        status: 'already_confirmed',
+        ownerRevision: 6,
+        expiresAt: '2026-08-06T12:00:00.000Z',
+      });
+
+      await act(async () => first.result.current.retireManagedPresentationAttemptAfterSourceChange({ kind: 'added' }));
+      expect(readManagedQueue()).toMatchObject({
+        conversationId: pending.conversationId,
+        items: [{ queueItemId: pending.queueItemId, execution: { state: 'queued' } }],
+      });
+      first.unmount();
+
+      const addedSource: PresentationSourceRef = {
+        grantId: '99999999-9999-4999-8999-999999999999',
+        expectedByteLength: 4096,
+        expectedSha256: 'd'.repeat(64),
+      };
+      Object.assign(deps.managedPresentation!, {
+        draftClientRequestId: '88888888-8888-4888-8888-888888888888',
+        sourceRefs: [SOURCE_REF, addedSource],
+      });
+      const second = renderHook(() => useGuidSend(deps));
+      await act(async () => second.result.current.handleSend());
+
+      expect(createConversationInvokeMock).toHaveBeenCalledOnce();
+      expect(confirmQueuedSourcesInvokeMock).toHaveBeenCalledTimes(2);
+      expect(managed.prepareSourceOwner).toHaveBeenCalledOnce();
+      expect(managed.bindDraft).toHaveBeenCalledOnce();
+      expect(startPresentationRunInvokeMock).toHaveBeenCalledOnce();
+      expect(startPresentationRunInvokeMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          client_request_id: pending.clientRequestId,
+          conversation_id: pending.conversationId,
+          sources: [SOURCE_REF],
+        })
+      );
+      expect(readManagedQueue()).toMatchObject({
+        conversationId: pending.conversationId,
+        items: [
+          {
+            queueItemId: pending.queueItemId,
+            clientRequestId: pending.clientRequestId,
+            sources: [SOURCE_REF],
+            execution: { state: 'committed' },
+          },
+        ],
+      });
+      expect(deps.navigate).toHaveBeenCalledWith(`/conversation/${pending.conversationId}`);
+      expect(readGuidPendingRaw()).toBeNull();
+    });
+
+    it.each([
+      [
+        'input',
+        (deps: GuidSendDeps): void => {
+          deps.input = 'a different presentation request';
+        },
+      ],
+      [
+        'template',
+        (deps: GuidSendDeps): void => {
+          Object.assign(deps.managedPresentation!, { selectedTemplateId: 'another-template' });
+        },
+      ],
+      [
+        'runtime',
+        (deps: GuidSendDeps): void => {
+          deps.selectedAssistantBackend = 'aionrs';
+        },
+      ],
+    ] as const)(
+      'does not resume a frozen queued item after its %s identity changes',
+      async (_label, changeIdentity) => {
+        const deps = createDeps();
+        attachManagedPresentation(deps);
+        confirmQueuedSourcesInvokeMock.mockRejectedValueOnce(new Error('confirmation reply lost'));
+        const first = renderHook(() => useGuidSend(deps));
+        await act(async () => {
+          await first.result.current.handleSend().catch(() => undefined);
+        });
+        const pendingRaw = readGuidPendingRaw();
+        const pending = JSON.parse(pendingRaw!) as { conversationId: string; queueItemId: string };
+        getConversationInvokeMock.mockResolvedValue(
+          claimedConversation(pending.queueItemId, { id: pending.conversationId })
+        );
+        confirmQueuedSourcesInvokeMock.mockResolvedValueOnce({
+          ok: true,
+          status: 'already_confirmed',
+          ownerRevision: 6,
+          expiresAt: '2026-08-06T12:00:00.000Z',
+        });
+        await act(async () =>
+          first.result.current.retireManagedPresentationAttemptAfterSourceChange({ kind: 'added' })
+        );
+        first.unmount();
+        changeIdentity(deps);
+
+        const second = renderHook(() => useGuidSend(deps));
+        await expect(act(async () => second.result.current.handleSend())).rejects.toThrow(/another submission/i);
+
+        expect(createConversationInvokeMock).toHaveBeenCalledOnce();
+        expect(startPresentationRunInvokeMock).not.toHaveBeenCalled();
+        expect(deps.navigate).not.toHaveBeenCalled();
+        expect(readGuidPendingRaw()).toBe(pendingRaw);
+        expect(readManagedQueue()).toMatchObject({
+          conversationId: pending.conversationId,
+          items: [{ queueItemId: pending.queueItemId, execution: { state: 'queued' } }],
+        });
+      }
+    );
+
+    it('rescans an uncertain claimant before rebasing sources after restart', async () => {
+      const deps = createDeps();
+      const managed = attachManagedPresentation(deps);
+      let queueItemId = '';
+      listConversationsInvokeMock
+        .mockResolvedValueOnce({ items: [], total: 0, has_more: false })
+        .mockResolvedValueOnce({ items: [], total: 0, has_more: false })
+        .mockImplementation(async () => ({
+          items: [claimedConversation(queueItemId)],
+          total: 1,
+          has_more: false,
+        }));
+      createConversationInvokeMock.mockImplementationOnce(async (request: { extra: Record<string, unknown> }) => {
+        queueItemId = (request.extra[GUID_HANDOFF_CLAIM_KEY] as { queue_item_id: string }).queue_item_id;
+        throw new Error('create reply lost before catalogue visibility');
+      });
+      const first = renderHook(() => useGuidSend(deps));
+      await act(async () => {
+        await first.result.current.handleSend().catch(() => undefined);
+      });
+      const uncertainRaw = readGuidPendingRaw();
+      const uncertain = JSON.parse(uncertainRaw!) as {
+        clientRequestId: string;
+        createPhase: string;
+        queueItemId: string;
+      };
+      expect(uncertain).toMatchObject({ createPhase: 'uncertain', queueItemId });
+      first.unmount();
+
+      const replacementSource: PresentationSourceRef = {
+        grantId: '99999999-9999-4999-8999-999999999999',
+        expectedByteLength: 8192,
+        expectedSha256: 'e'.repeat(64),
+      };
+      Object.assign(deps.managedPresentation!, {
+        draftClientRequestId: '88888888-8888-4888-8888-888888888888',
+        sourceRefs: [replacementSource],
+      });
+      managed.prepareSourceOwner.mockResolvedValue({
+        ok: true,
+        owner: { owner_type: 'draft', draft_id: '99999999-9999-4999-8999-999999999998' },
+        ownerRevision: 1,
+        grants: [
+          {
+            grantId: replacementSource.grantId,
+            displayName: 'Replacement.xlsx',
+            format: 'xlsx',
+            sourceKind: 'native-picker',
+            byteLength: replacementSource.expectedByteLength,
+            sha256: replacementSource.expectedSha256,
+            expiresAt: '2026-08-06T11:00:00.000Z',
+          },
+        ],
+      });
+      managed.bindDraft.mockImplementation(async (conversationId) => ({
+        ...BOUND_DRAFT_RESULT,
+        draftId: '99999999-9999-4999-8999-999999999998',
+        conversationId,
+      }));
+      getPresentationRunInvokeMock.mockResolvedValue({
+        ok: false,
+        code: 'RUN_NOT_FOUND',
+        messageKey: 'conversation.presentationRun.errors.RUN_NOT_FOUND',
+        retryable: false,
+        state: 'lookup',
+        details: null,
+      });
+
+      const second = renderHook(() => useGuidSend(deps));
+      await act(async () => second.result.current.handleSend());
+
+      expect(listConversationsInvokeMock).toHaveBeenCalledTimes(3);
+      expect(createConversationInvokeMock).toHaveBeenCalledOnce();
+      expect(startPresentationRunInvokeMock).toHaveBeenCalledOnce();
+      expect(startPresentationRunInvokeMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          client_request_id: uncertain.clientRequestId,
+          conversation_id: SERVER_ASSIGNED_CONVERSATION_ID,
+          sources: [replacementSource],
+        })
+      );
+      expect(deps.navigate).toHaveBeenCalledWith(`/conversation/${SERVER_ASSIGNED_CONVERSATION_ID}`);
+      expect(readGuidPendingRaw()).toBeNull();
     });
 
     it('retains the raw submission when main start returns a definitive preflight block', async () => {
       const deps = createDeps();
       deps.onPresentationTemplateConsumed = vi.fn();
       const managed = attachManagedPresentation(deps);
-      createConversationInvokeMock.mockImplementation(async ({ id }: { id: string }) => ({ id }));
       startPresentationRunInvokeMock.mockResolvedValueOnce({
         ok: false,
         code: 'RATE_LIMITED',
@@ -957,14 +2716,22 @@ describe('useGuidSend', () => {
       expect(
         [deps.setInput, deps.setFiles, deps.onPresentationTemplateConsumed].map((spy) => spy.mock.calls.length)
       ).toEqual([0, 0, 0]);
-      expect(sessionStorage.getItem('guid_presentation_submission_v2')).toContain('hello');
+      expect(readGuidPendingRaw()).toContain('hello');
       expect(readManagedQueue()).toMatchObject({
         items: [{ input: 'hello', selectedTemplateId: 'finance-review', execution: { state: 'preflight_failed' } }],
       });
 
-      const firstConversationId = createConversationInvokeMock.mock.calls[0][0].id as string;
-      await act(async () => result.current.retireManagedPresentationAttemptAfterSourceChange(true));
-      expect(sessionStorage.getItem('guid_presentation_submission_v2')).toBeNull();
+      const firstConversationId = startPresentationRunInvokeMock.mock.calls[0][0].conversation_id as string;
+      const pending = JSON.parse(readGuidPendingRaw()!) as {
+        clientRequestId: string;
+        queueItemId: string;
+      };
+      const pendingRaw = readGuidPendingRaw();
+      getConversationInvokeMock.mockResolvedValue(
+        claimedConversation(pending.queueItemId, { id: firstConversationId })
+      );
+      await act(async () => result.current.retireManagedPresentationAttemptAfterSourceChange({ kind: 'added' }));
+      expect(readGuidPendingRaw()).toBe(pendingRaw);
       expect(
         Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index)).find((candidate) =>
           candidate?.startsWith('presentation-command-queue/v2/')
@@ -978,6 +2745,7 @@ describe('useGuidSend', () => {
       };
       Object.assign(deps.managedPresentation!, {
         conversationId: firstConversationId,
+        draftClientRequestId: '88888888-8888-4888-8888-888888888888',
         sourceRefs: [replacementSource],
       });
       managed.prepareSourceOwner.mockResolvedValue({
@@ -996,7 +2764,14 @@ describe('useGuidSend', () => {
           },
         ],
       });
-      getConversationInvokeMock.mockResolvedValue({ id: firstConversationId });
+      getPresentationRunInvokeMock.mockResolvedValue({
+        ok: false,
+        code: 'RUN_NOT_FOUND',
+        messageKey: 'conversation.presentationRun.errors.RUN_NOT_FOUND',
+        retryable: false,
+        state: 'lookup',
+        details: null,
+      });
 
       await act(async () => result.current.handleSend());
 
@@ -1004,20 +2779,65 @@ describe('useGuidSend', () => {
       expect(managed.bindDraft).toHaveBeenCalledTimes(1);
       expect(startPresentationRunInvokeMock).toHaveBeenCalledTimes(2);
       expect(startPresentationRunInvokeMock).toHaveBeenLastCalledWith(
-        expect.objectContaining({ conversation_id: firstConversationId, sources: [replacementSource] })
+        expect.objectContaining({
+          conversation_id: firstConversationId,
+          client_request_id: pending.clientRequestId,
+          sources: [replacementSource],
+        })
       );
       expect(deps.navigate).toHaveBeenCalledWith(`/conversation/${firstConversationId}`);
+      expect(readGuidPendingRaw()).toBeNull();
+    });
+
+    it('retires a legacy-v2 markerless attempt only after exact-get proof and preflight removal', async () => {
+      const conversationId = '33333333-3333-4333-8333-333333333333';
+      const deps = createDeps();
+      attachManagedPresentation(deps, { conversationId });
+      getConversationInvokeMock.mockResolvedValue({ id: conversationId, type: 'acp', extra: {} });
+      startPresentationRunInvokeMock.mockResolvedValue({
+        ok: false,
+        code: 'RATE_LIMITED',
+        messageKey: 'conversation.presentationRun.errors.RATE_LIMITED',
+        retryable: true,
+        state: 'preflight',
+        details: { retryAfterMs: 5000, postInvoked: false },
+      });
+      const { result } = renderHook(() => useGuidSend(deps));
+      await act(async () => result.current.sendMessageHandler());
+      await waitFor(() => expect(deps.setLoading).toHaveBeenLastCalledWith(false));
+      const current = JSON.parse(readGuidPendingRaw()!) as Record<string, unknown>;
+      const { claimMode: _claimMode, createPhase: _createPhase, ...legacyFields } = current;
+      localStorage.removeItem(GUID_PENDING_STORAGE_KEY);
+      sessionStorage.setItem('guid_presentation_submission_v2', JSON.stringify({ ...legacyFields, version: 2 }));
+
+      await act(async () => result.current.retireManagedPresentationAttemptAfterSourceChange({ kind: 'added' }));
+
+      expect(createConversationInvokeMock).not.toHaveBeenCalled();
+      expect(getConversationInvokeMock).toHaveBeenCalledTimes(2);
+      expect(readGuidPendingRaw()).toBeNull();
+      expect(
+        Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index)).find((candidate) =>
+          candidate?.startsWith('presentation-command-queue/v2/')
+        )
+      ).toBeUndefined();
     });
 
     it('reconciles lost create, bind, and start replies by stable IDs without repeating their mutations', async () => {
       const deps = createDeps();
       const managed = attachManagedPresentation(deps);
-      let conversationId = '';
-      createConversationInvokeMock.mockImplementation(async ({ id }: { id: string }) => {
-        conversationId = id;
+      const conversationId = SERVER_ASSIGNED_CONVERSATION_ID;
+      let queueItemId = '';
+      listConversationsInvokeMock
+        .mockResolvedValueOnce({ items: [], total: 0, has_more: false })
+        .mockImplementationOnce(async () => ({
+          items: [claimedConversation(queueItemId, { id: conversationId })],
+          total: 1,
+          has_more: false,
+        }));
+      createConversationInvokeMock.mockImplementation(async (request: { extra: Record<string, unknown> }) => {
+        queueItemId = (request.extra[GUID_HANDOFF_CLAIM_KEY] as { queue_item_id: string }).queue_item_id;
         throw new Error('create reply lost');
       });
-      getConversationInvokeMock.mockImplementation(async ({ id }: { id: string }) => ({ id }));
       managed.bindDraft.mockRejectedValue(new Error('bind reply lost'));
       managed.prepareSourceOwner
         .mockResolvedValueOnce(SOURCE_OWNER_RESULT)
@@ -1051,7 +2871,7 @@ describe('useGuidSend', () => {
       await act(async () => result.current.handleSend());
 
       expect(createConversationInvokeMock).toHaveBeenCalledTimes(1);
-      expect(getConversationInvokeMock).toHaveBeenCalledWith({ id: conversationId });
+      expect(listConversationsInvokeMock).toHaveBeenCalledTimes(2);
       expect(managed.bindDraft).toHaveBeenCalledTimes(1);
       expect(managed.prepareSourceOwner).toHaveBeenLastCalledWith(conversationId);
       expect(startPresentationRunInvokeMock).toHaveBeenCalledTimes(1);
@@ -1070,7 +2890,6 @@ describe('useGuidSend', () => {
       });
       const managed = attachManagedPresentation(deps);
       managed.prepareSourceOwner.mockReturnValue(draft);
-      createConversationInvokeMock.mockImplementation(async ({ id }: { id: string }) => ({ id }));
       const { result } = renderHook(() => useGuidSend(deps));
 
       act(() => {
@@ -1087,16 +2906,26 @@ describe('useGuidSend', () => {
       expect(startPresentationRunInvokeMock).toHaveBeenCalledTimes(1);
     });
 
-    it('keeps the same queue and request identity across remount after navigation loses its reply', async () => {
+    it('keeps the same queue and request identity across remount when backend DTO ids are uppercase', async () => {
       const deps = createDeps();
-      const managed = attachManagedPresentation(deps);
-      createConversationInvokeMock.mockImplementation(async ({ id }: { id: string }) => ({ id }));
+      const managed = attachManagedPresentation(deps, { conversationId: CASEFUL_MANAGED_CONVERSATION_ID });
+      getConversationInvokeMock.mockResolvedValue({
+        id: CASEFUL_MANAGED_CONVERSATION_ID.toUpperCase(),
+        type: 'acp',
+        extra: {},
+      });
       const navigate = vi.fn().mockRejectedValueOnce(new Error('navigation reply lost')).mockResolvedValue(undefined);
       deps.navigate = navigate as never;
       const first = renderHook(() => useGuidSend(deps));
       await act(async () => first.result.current.sendMessageHandler());
       await waitFor(() => expect(deps.setLoading).toHaveBeenLastCalledWith(false));
       const firstStartRequest = startPresentationRunInvokeMock.mock.calls[0][0];
+      expect(JSON.parse(readGuidPendingRaw()!)).toMatchObject({
+        version: 3,
+        claimMode: 'exact_get',
+        createPhase: 'resolved',
+        conversationId: CASEFUL_MANAGED_CONVERSATION_ID,
+      });
       const queueBeforeRemount = readManagedQueue() as {
         items: Array<{
           clientRequestId: string;
@@ -1105,7 +2934,7 @@ describe('useGuidSend', () => {
         }>;
       };
       const committed = queueBeforeRemount.items[0];
-      await act(async () => first.result.current.retireManagedPresentationAttemptAfterSourceChange(true));
+      await act(async () => first.result.current.retireManagedPresentationAttemptAfterSourceChange({ kind: 'added' }));
       deps.managedPresentation!.sourceRefs = [
         {
           grantId: '77777777-7777-4777-8777-777777777777',
@@ -1113,14 +2942,18 @@ describe('useGuidSend', () => {
           expectedSha256: 'b'.repeat(64),
         },
       ];
-      expect(sessionStorage.getItem('guid_presentation_submission_v2')).toContain(SOURCE_REF.grantId);
-      getConversationInvokeMock.mockResolvedValue({ id: firstStartRequest.conversation_id });
+      expect(readGuidPendingRaw()).toContain(SOURCE_REF.grantId);
+      getConversationInvokeMock.mockResolvedValue({
+        id: firstStartRequest.conversation_id.toUpperCase(),
+        type: 'acp',
+        extra: {},
+      });
       getPresentationRunInvokeMock.mockResolvedValue({
         ok: true,
         run: {
           runId: committed.execution.runId,
           clientRequestId: committed.clientRequestId,
-          conversationId: firstStartRequest.conversation_id,
+          conversationId: firstStartRequest.conversation_id.toUpperCase(),
           selectedTemplateId: committed.selectedTemplateId,
           revision: committed.execution.revision,
           createdAt: '2026-08-05T10:02:00.000Z',
@@ -1139,7 +2972,7 @@ describe('useGuidSend', () => {
 
       expect(startPresentationRunInvokeMock).toHaveBeenCalledTimes(1);
       expect(managed.bindDraft).toHaveBeenCalledTimes(1);
-      expect(createConversationInvokeMock).toHaveBeenCalledTimes(1);
+      expect(createConversationInvokeMock).not.toHaveBeenCalled();
       expect(getConversationInvokeMock).toHaveBeenCalledWith({ id: firstStartRequest.conversation_id });
       expect(getPresentationRunInvokeMock).toHaveBeenCalledWith({
         conversation_id: firstStartRequest.conversation_id,
@@ -1158,7 +2991,6 @@ describe('useGuidSend', () => {
     it('fails closed on a forged committed queue item when main cannot prove the conversation and run', async () => {
       const deps = createDeps();
       attachManagedPresentation(deps);
-      createConversationInvokeMock.mockImplementation(async ({ id }: { id: string }) => ({ id }));
       const navigate = vi.fn().mockRejectedValueOnce(new Error('navigation reply lost')).mockResolvedValue(undefined);
       deps.navigate = navigate as never;
       const first = renderHook(() => useGuidSend(deps));
@@ -1184,11 +3016,7 @@ describe('useGuidSend', () => {
       expect(getPresentationRunInvokeMock).not.toHaveBeenCalled();
       expect(navigate).toHaveBeenCalledTimes(1);
       expect(startPresentationRunInvokeMock).toHaveBeenCalledTimes(1);
-      expect(
-        Array.from({ length: sessionStorage.length }, (_, index) =>
-          sessionStorage.getItem(sessionStorage.key(index)!)
-        ).some((value) => value?.includes('finance-review'))
-      ).toBe(true);
+      expect(readGuidPendingRaw()).toContain('finance-review');
     });
 
     it.each(['dispatching', 'bound', 'dispatch_uncertain'] as const)(
@@ -1196,7 +3024,6 @@ describe('useGuidSend', () => {
       async (dispatchStatus) => {
         const deps = createDeps();
         attachManagedPresentation(deps);
-        createConversationInvokeMock.mockImplementation(async ({ id }: { id: string }) => ({ id }));
         const navigate = vi.fn().mockRejectedValueOnce(new Error('navigation reply lost')).mockResolvedValue(undefined);
         deps.navigate = navigate as never;
         const first = renderHook(() => useGuidSend(deps));
@@ -1215,7 +3042,7 @@ describe('useGuidSend', () => {
         };
         const item = queue.items[0];
         expect(item.execution.state).toBe('committed');
-        getConversationInvokeMock.mockResolvedValue({ id: queue.conversationId });
+        getConversationInvokeMock.mockImplementation(async () => claimedConversationForPending(queue.conversationId));
         getPresentationRunInvokeMock.mockResolvedValue({
           ok: true,
           run: {
@@ -1263,7 +3090,6 @@ describe('useGuidSend', () => {
       async (localState, dispatchStatus) => {
         const deps = createDeps();
         attachManagedPresentation(deps);
-        createConversationInvokeMock.mockImplementation(async ({ id }: { id: string }) => ({ id }));
         const navigate = vi.fn().mockRejectedValueOnce(new Error('navigation reply lost')).mockResolvedValue(undefined);
         deps.navigate = navigate as never;
         const first = renderHook(() => useGuidSend(deps));
@@ -1289,7 +3115,7 @@ describe('useGuidSend', () => {
           };
           localStorage.setItem(key, JSON.stringify(queue));
         }
-        getConversationInvokeMock.mockResolvedValue({ id: queue.conversationId });
+        getConversationInvokeMock.mockImplementation(async () => claimedConversationForPending(queue.conversationId));
         getPresentationRunInvokeMock.mockResolvedValue({
           ok: true,
           run: {
@@ -1323,14 +3149,13 @@ describe('useGuidSend', () => {
         expect(renewInitialDispatchInvokeMock).not.toHaveBeenCalled();
         expect(dispatchPresentationRunInvokeMock).not.toHaveBeenCalled();
         expect(navigate).toHaveBeenCalledTimes(1);
-        expect(sessionStorage.getItem('guid_presentation_submission_v2')).toContain(item.clientRequestId);
+        expect(readGuidPendingRaw()).toContain(item.clientRequestId);
       }
     );
 
     it('observes an authoritative terminal run that advanced beyond a locally bound handoff', async () => {
       const deps = createDeps();
       attachManagedPresentation(deps);
-      createConversationInvokeMock.mockImplementation(async ({ id }: { id: string }) => ({ id }));
       const navigate = vi.fn().mockRejectedValueOnce(new Error('navigation reply lost')).mockResolvedValue(undefined);
       deps.navigate = navigate as never;
       const first = renderHook(() => useGuidSend(deps));
@@ -1354,7 +3179,7 @@ describe('useGuidSend', () => {
         revision: item.execution.revision + 1,
       };
       localStorage.setItem(key, JSON.stringify(queue));
-      getConversationInvokeMock.mockResolvedValue({ id: queue.conversationId });
+      getConversationInvokeMock.mockImplementation(async () => claimedConversationForPending(queue.conversationId));
       getPresentationRunInvokeMock.mockResolvedValue({
         ok: true,
         run: {
@@ -1388,11 +3213,10 @@ describe('useGuidSend', () => {
       expect(navigate).toHaveBeenCalledTimes(2);
     });
 
-    it('stops at confirmed queue persistence failure and leaves the raw draft and template intact', async () => {
+    it('reuses the claimed conversation after queue persistence failure and safe source rebase', async () => {
       const deps = createDeps();
       deps.onPresentationTemplateConsumed = vi.fn();
-      attachManagedPresentation(deps);
-      createConversationInvokeMock.mockImplementation(async ({ id }: { id: string }) => ({ id }));
+      const managed = attachManagedPresentation(deps);
       const originalSetItem = Storage.prototype.setItem;
       const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
         if (key.startsWith('presentation-command-queue/v2/')) throw new DOMException('quota', 'QuotaExceededError');
@@ -1410,6 +3234,62 @@ describe('useGuidSend', () => {
         [deps.setInput, deps.setFiles, deps.onPresentationTemplateConsumed].map((spy) => spy.mock.calls.length)
       ).toEqual([0, 0, 0]);
       setItem.mockRestore();
+
+      const pending = JSON.parse(readGuidPendingRaw()!) as {
+        clientRequestId: string;
+        conversationId: string;
+        queueItemId: string;
+      };
+      const replacementSource: PresentationSourceRef = {
+        grantId: '99999999-9999-4999-8999-999999999999',
+        expectedByteLength: 8192,
+        expectedSha256: 'c'.repeat(64),
+      };
+      Object.assign(deps.managedPresentation!, {
+        draftClientRequestId: '88888888-8888-4888-8888-888888888888',
+        sourceRefs: [replacementSource],
+      });
+      managed.prepareSourceOwner.mockResolvedValue({
+        ok: true,
+        owner: { owner_type: 'conversation', conversation_id: pending.conversationId },
+        ownerRevision: 6,
+        grants: [
+          {
+            grantId: replacementSource.grantId,
+            displayName: 'Replacement.xlsx',
+            format: 'xlsx',
+            sourceKind: 'native-picker',
+            byteLength: replacementSource.expectedByteLength,
+            sha256: replacementSource.expectedSha256,
+            expiresAt: '2026-08-06T11:00:00.000Z',
+          },
+        ],
+      });
+      getConversationInvokeMock.mockResolvedValue(
+        claimedConversation(pending.queueItemId, { id: pending.conversationId })
+      );
+      getPresentationRunInvokeMock.mockResolvedValue({
+        ok: false,
+        code: 'RUN_NOT_FOUND',
+        messageKey: 'conversation.presentationRun.errors.RUN_NOT_FOUND',
+        retryable: false,
+        state: 'lookup',
+        details: null,
+      });
+
+      await act(async () => result.current.handleSend());
+
+      expect(createConversationInvokeMock).toHaveBeenCalledOnce();
+      expect(managed.bindDraft).toHaveBeenCalledOnce();
+      expect(startPresentationRunInvokeMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          client_request_id: pending.clientRequestId,
+          conversation_id: pending.conversationId,
+          sources: [replacementSource],
+        })
+      );
+      expect(deps.navigate).toHaveBeenCalledWith(`/conversation/${pending.conversationId}`);
+      expect(readGuidPendingRaw()).toBeNull();
     });
   });
 
@@ -1534,7 +3414,7 @@ describe('useGuidSend', () => {
     const originalElectronAPI = window.electronAPI;
     Object.defineProperty(window, 'electronAPI', { configurable: true, value: {} });
     const navigate = vi.fn().mockResolvedValue(undefined);
-    const conversationId = '33333333-3333-4333-8333-333333333333';
+    const conversationId = 'd0921953';
     const queueItemId = '77777777-7777-4777-8777-777777777777';
     const clientRequestId = '66666666-6666-4666-8666-666666666666';
     const draftClientRequestId = '44444444-4444-4444-8444-444444444444';
@@ -1553,10 +3433,12 @@ describe('useGuidSend', () => {
     const hydrate = vi.fn();
     const bindDraft = vi.fn();
 
-    sessionStorage.setItem(
-      'guid_presentation_submission_v2',
+    localStorage.setItem(
+      GUID_PENDING_STORAGE_KEY,
       JSON.stringify({
-        version: 2,
+        version: 3,
+        claimMode: 'exact_get',
+        createPhase: 'resolved',
         conversationId,
         queueItemId,
         clientRequestId,
@@ -1568,8 +3450,9 @@ describe('useGuidSend', () => {
         capturedAt: '2026-08-05T10:00:00.000Z',
       })
     );
+    sessionStorage.removeItem(GUID_PENDING_STORAGE_KEY);
     sessionStorage.removeItem('guid_presentation_draft_request_v2');
-    getConversationInvokeMock.mockResolvedValue({ id: conversationId });
+    getConversationInvokeMock.mockResolvedValue({ id: conversationId, type: 'acp', extra: {} });
     startPresentationRunInvokeMock.mockImplementation(
       async (request: { client_request_id: string; conversation_id: string; selected_template_id: string }) => ({
         ok: true,
@@ -1874,7 +3757,7 @@ describe('useGuidSend', () => {
       })
     );
     expect(JSON.stringify(startPresentationRunInvokeMock.mock.calls)).not.toContain('/');
-    expect(sessionStorage.getItem('guid_presentation_submission_v2')).toBeNull();
+    expect(readGuidPendingRaw()).toBeNull();
     Object.defineProperty(window, 'electronAPI', { configurable: true, value: originalElectronAPI });
   });
 });

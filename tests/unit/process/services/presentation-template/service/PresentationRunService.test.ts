@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -39,6 +39,9 @@ import {
 
 const RUN_ID = '11111111-1111-4111-8111-111111111111';
 const CONVERSATION_ID = '22222222-2222-4222-8222-222222222222';
+const SHORT_CONVERSATION_ID = 'd0921953';
+const LEGACY_UPPER_CONVERSATION_ID = 'A2222222-B222-4222-8222-C22222222222';
+const LEGACY_CONVERSATION_ID = LEGACY_UPPER_CONVERSATION_ID.toLowerCase();
 const REQUEST_ID = '33333333-3333-4333-8333-333333333333';
 const GRANT_ID = '44444444-4444-4444-8444-444444444444';
 const FOREIGN_CONVERSATION_ID = '55555555-5555-4555-8555-555555555555';
@@ -380,6 +383,62 @@ function createHarness() {
 
 describe('PresentationRunService', () => {
   beforeEach(() => vi.restoreAllMocks());
+
+  it.each([
+    ['start', (service: PresentationRunService) => service.start({ ...request(), conversation_id: 'D0921953' })],
+    ['get', (service: PresentationRunService) => service.get({ conversation_id: 'D0921953', run_id: RUN_ID })],
+    ['list recovery', (service: PresentationRunService) => service.listRecoverable({ conversation_id: 'D0921953' })],
+    [
+      'open recovery',
+      (service: PresentationRunService) =>
+        service.openRecovery({
+          conversation_id: 'D0921953',
+          run_id: RUN_ID,
+          expected_sha256: CANDIDATE_SHA256,
+        }),
+    ],
+    [
+      'discard',
+      (service: PresentationRunService) =>
+        service.discard({ conversation_id: 'D0921953', run_id: RUN_ID, expected_revision: 5 }),
+    ],
+    [
+      'claim',
+      (service: PresentationRunService) =>
+        service.claimInitialDispatch({
+          conversation_id: 'D0921953',
+          run_id: RUN_ID,
+          holder_id: HOLDER_ID,
+          expected_revision: 2,
+        }),
+    ],
+    [
+      'renew',
+      (service: PresentationRunService) =>
+        service.renewInitialDispatch({
+          conversation_id: 'D0921953',
+          run_id: RUN_ID,
+          lease_token: LEASE_TOKEN,
+          expected_revision: 3,
+        }),
+    ],
+    [
+      'dispatch',
+      (service: PresentationRunService) =>
+        service.dispatch({
+          conversation_id: 'D0921953',
+          run_id: RUN_ID,
+          lease_token: LEASE_TOKEN,
+          expected_revision: 3,
+        }),
+    ],
+  ] as const)('accepts and canonicalizes a backend conversation id before %s authority', async (_operation, invoke) => {
+    const harness = createHarness();
+
+    await invoke(harness.service);
+
+    expect(harness.resolveAuthority).toHaveBeenCalledWith({ conversationId: SHORT_CONVERSATION_ID });
+  });
 
   it('strictly validates and authorizes direct claim, renewal, and dispatch before lifecycle mutation', async () => {
     const claim: ClaimInitialPresentationDispatchRequest = {
@@ -1035,6 +1094,24 @@ describe('PresentationRunService', () => {
     expect(harness.store.getByRequest).toHaveBeenCalledWith(CONVERSATION_ID, REQUEST_ID);
   });
 
+  it('projects legacy uppercase durable runs through their canonical conversation authority', async () => {
+    const harness = createHarness();
+    const retained = recoveryManifest({ conversationId: LEGACY_UPPER_CONVERSATION_ID });
+    harness.store.getRun.mockResolvedValue(retained);
+    harness.store.listPublicRecoverable.mockResolvedValue([retained]);
+
+    await expect(
+      harness.service.get({ conversation_id: LEGACY_CONVERSATION_ID, run_id: RUN_ID })
+    ).resolves.toMatchObject({
+      ok: true,
+      run: { conversationId: LEGACY_CONVERSATION_ID },
+    });
+    await expect(harness.service.listRecoverable({ conversation_id: LEGACY_CONVERSATION_ID })).resolves.toMatchObject({
+      ok: true,
+      items: [{ conversationId: LEGACY_CONVERSATION_ID }],
+    });
+  });
+
   it('makes foreign and absent run IDs indistinguishable on get', async () => {
     const foreignHarness = createHarness();
     foreignHarness.store.getRun.mockResolvedValue(recoveryManifest());
@@ -1118,6 +1195,42 @@ describe('PresentationRunService', () => {
       harness.service.listRecoverable({ conversation_id: CONVERSATION_ID, limit: 1, cursor: tampered })
     ).resolves.toMatchObject({ ok: false, code: 'INVALID_REQUEST' });
     expect(harness.store.listPublicRecoverable).toHaveBeenCalledTimes(callsBeforeTamper);
+  });
+
+  it('verifies an already-signed legacy uppercase cursor before canonical comparison', async () => {
+    const harness = createHarness();
+    const first = recoveryManifest({
+      conversationId: LEGACY_UPPER_CONVERSATION_ID,
+      updatedAt: '2026-08-04T00:00:02.000Z',
+    });
+    const second = recoveryManifest({
+      runId: SECOND_RUN_ID,
+      clientRequestId: '77777777-7777-4777-8777-777777777777',
+      conversationId: LEGACY_UPPER_CONVERSATION_ID,
+      updatedAt: '2026-08-04T00:00:01.000Z',
+    });
+    harness.store.listPublicRecoverable.mockResolvedValue([first, second]);
+    const payload = Buffer.from(
+      JSON.stringify({
+        version: 1,
+        conversationId: LEGACY_UPPER_CONVERSATION_ID,
+        updatedAt: first.updatedAt,
+        runId: first.runId,
+      })
+    ).toString('base64url');
+    const signature = createHmac('sha256', Buffer.alloc(32, 7)).update(payload).digest('base64url');
+
+    await expect(
+      harness.service.listRecoverable({
+        conversation_id: LEGACY_CONVERSATION_ID,
+        cursor: `${payload}.${signature}`,
+        limit: 1,
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      items: [{ runId: SECOND_RUN_ID, conversationId: LEGACY_CONVERSATION_ID }],
+      nextCursor: null,
+    });
   });
 
   it('rejects a valid cursor whose durable sort tuple no longer resolves', async () => {
@@ -1483,6 +1596,35 @@ describe('PresentationRunService', () => {
       tombstoneHarness.service.discard({ conversation_id: CONVERSATION_ID, run_id: RUN_ID, expected_revision: 5 })
     ).resolves.toMatchObject({ ok: true, alreadyDiscarded: true });
     expect(tombstoneHarness.store.discardRun).toHaveBeenCalledWith(RUN_ID, 5);
+  });
+
+  it('accepts a canonical discard request for a legacy uppercase run and tombstone', async () => {
+    const harness = createHarness();
+    const retained = recoveryManifest({ conversationId: LEGACY_UPPER_CONVERSATION_ID });
+    const tombstone = recoveryManifest({
+      conversationId: LEGACY_UPPER_CONVERSATION_ID,
+      revision: 6,
+      updatedAt: '2026-08-04T00:01:00.000Z',
+      dispatchStatus: 'discarded',
+      artifactPhase: null,
+      disposition: null,
+      retainedCandidate: null,
+    });
+    harness.store.getRun.mockResolvedValue(retained);
+    harness.store.discardRun.mockResolvedValue(tombstone);
+
+    await expect(
+      harness.service.discard({
+        conversation_id: LEGACY_CONVERSATION_ID,
+        run_id: RUN_ID,
+        expected_revision: retained.revision,
+      })
+    ).resolves.toEqual({
+      ok: true,
+      runId: RUN_ID,
+      discardedAt: '2026-08-04T00:01:00.000Z',
+      alreadyDiscarded: false,
+    });
   });
 
   it('does not report a tombstone replay as successful when retained-file cleanup still fails', async () => {

@@ -10,6 +10,8 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ArtifactScratchService } from '@/process/services/presentation-template/run/ArtifactScratchService';
 
+const CONVERSATION_ID = 'd0921953';
+
 const exists = async (filePath: string): Promise<boolean> => {
   try {
     await access(filePath);
@@ -47,7 +49,7 @@ describe('ArtifactScratchService', () => {
       writeFile(recoveryPath, 'recovery'),
     ]);
 
-    const run = await service.allocate({ conversationId: 'conversation-1', templateId: 'business-review' });
+    const run = await service.allocate({ conversationId: CONVERSATION_ID, templateId: 'business-review' });
     await writeFile(path.join(run.directory, 'slide_01.png'), 'scratch');
     await writeFile(run.readyMarker, 'delivery gates passed\n');
 
@@ -57,7 +59,7 @@ describe('ArtifactScratchService', () => {
   });
 
   it('retains failed and interrupted runs without a ready marker', async () => {
-    const failed = await service.allocate({ conversationId: 'conversation-1', templateId: 'business-review' });
+    const failed = await service.allocate({ conversationId: CONVERSATION_ID, templateId: 'business-review' });
     await writeFile(path.join(failed.directory, 'repair.ts'), 'scratch');
 
     await expect(service.complete(failed.runId)).resolves.toEqual({
@@ -79,8 +81,8 @@ describe('ArtifactScratchService', () => {
   });
 
   it('keeps retried runs isolated and supports explicit cleanup of a retained run', async () => {
-    const first = await service.allocate({ conversationId: 'conversation-1', templateId: 'business-review' });
-    const retry = await service.allocate({ conversationId: 'conversation-1', templateId: 'business-review' });
+    const first = await service.allocate({ conversationId: CONVERSATION_ID, templateId: 'business-review' });
+    const retry = await service.allocate({ conversationId: CONVERSATION_ID, templateId: 'business-review' });
     expect(retry.runId).not.toBe(first.runId);
     expect(retry.directory).not.toBe(first.directory);
 
@@ -98,12 +100,24 @@ describe('ArtifactScratchService', () => {
     await expect(exists(customWorkspace)).resolves.toBe(true);
   });
 
+  it('persists a canonical lowercase conversation id without trimming or coercion', async () => {
+    const allocation = await service.allocate({ conversationId: 'D0921953', templateId: 'business-review' });
+    const manifest = JSON.parse(await readFile(path.join(allocation.directory, 'manifest.json'), 'utf8')) as {
+      conversationId: string;
+    };
+
+    expect(manifest.conversationId).toBe(CONVERSATION_ID);
+    await expect(
+      service.allocate({ conversationId: ` ${CONVERSATION_ID}`, templateId: 'business-review' })
+    ).rejects.toThrow('Invalid artifact scratch conversation id');
+  });
+
   it('refuses a scratch root redirected through a symbolic link', async () => {
     const redirectedRoot = path.join(fixtureRoot, 'redirected-root');
     await mkdir(redirectedRoot);
     await symlink(redirectedRoot, scratchRoot);
 
-    await expect(service.allocate({ conversationId: 'conversation-1', templateId: 'business-review' })).rejects.toThrow(
+    await expect(service.allocate({ conversationId: CONVERSATION_ID, templateId: 'business-review' })).rejects.toThrow(
       'Artifact scratch root must be a real directory'
     );
     await expect(exists(redirectedRoot)).resolves.toBe(true);

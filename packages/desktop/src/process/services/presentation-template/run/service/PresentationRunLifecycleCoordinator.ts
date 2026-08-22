@@ -18,6 +18,7 @@ import type {
   RenewInitialPresentationDispatchResult,
 } from '@/common/types/office/presentationRun';
 import type { PresentationReadinessEvidence } from '@/common/types/office/artifactReadiness';
+import { normalizePresentationConversationId } from '@/common/types/office/presentationConversationId';
 import type { DeferredPresentationInspectionWorkspace, PresentationRunFiles } from '../storage/presentationRunFiles';
 import {
   PresentationRunStoreError,
@@ -37,6 +38,14 @@ import type {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const RUNTIME_RELEASE_RECHECK_MS = 30_000;
+
+const isSamePresentationConversation = (left: unknown, right: unknown): boolean => {
+  const normalizedLeft = normalizePresentationConversationId(left);
+  return normalizedLeft !== null && normalizedLeft === normalizePresentationConversationId(right);
+};
+
+const canonicalPresentationConversationId = (value: string): string =>
+  normalizePresentationConversationId(value) ?? value;
 
 export type PresentationBackendCredentials = { port: number; token: string };
 
@@ -188,7 +197,7 @@ async function leaseFailure<Result extends PresentationRunFailure>(
     } catch {
       return failure('PERSISTENCE_FAILED', 'committed', { postInvoked: false }) as Result;
     }
-    if (current === null || current.conversationId !== conversationId) {
+    if (current === null || !isSamePresentationConversation(current.conversationId, conversationId)) {
       return failure('RUN_NOT_FOUND', 'lookup') as Result;
     }
     if (error.code === 'LEASE_CONFLICT') {
@@ -332,7 +341,7 @@ function boundResult(
     ok: true,
     status,
     runId: run.runId,
-    conversationId: run.conversationId,
+    conversationId: canonicalPresentationConversationId(run.conversationId),
     revision: run.revision,
     dispatchStatus: 'bound',
   };
@@ -354,7 +363,7 @@ function hasExactPreservedBinding(
   return (
     run !== null &&
     BINDING_PRESERVING_STATUSES.has(run.dispatchStatus) &&
-    run.binding?.conversationId === conversationId &&
+    isSamePresentationConversation(run.binding?.conversationId, conversationId) &&
     run.binding.runtime === runtime &&
     (turnId === undefined || run.binding.turnId === turnId)
   );
@@ -375,7 +384,7 @@ function hasExactEventTerminalProof(
 ): boolean {
   return (
     hasExactPresentationTerminalEvidence(run) &&
-    run.terminalEvidence?.conversationId === event.conversationId &&
+    isSamePresentationConversation(run.terminalEvidence?.conversationId, event.conversationId) &&
     run.terminalEvidence.turnId === event.turnId
   );
 }
@@ -468,7 +477,7 @@ export class PresentationRunLifecycleCoordinator {
     } catch {
       return dispatchFailure('PERSISTENCE_FAILED', 'committed', { postInvoked: false });
     }
-    if (current === null || current.conversationId !== request.conversation_id) {
+    if (current === null || !isSamePresentationConversation(current.conversationId, request.conversation_id)) {
       return dispatchFailure('RUN_NOT_FOUND', 'lookup');
     }
     const leaseInput = {
@@ -680,12 +689,14 @@ export class PresentationRunLifecycleCoordinator {
         dispatching.find(
           (candidate) =>
             candidate.dispatchStatus === 'bound' &&
-            candidate.binding?.conversationId === event.conversationId &&
+            isSamePresentationConversation(candidate.binding?.conversationId, event.conversationId) &&
             candidate.binding.turnId === event.turnId
         ) ?? null;
       if (run === null) {
         return dispatching.some(
-          (candidate) => candidate.conversationId === event.conversationId && candidate.dispatchStatus === 'dispatching'
+          (candidate) =>
+            isSamePresentationConversation(candidate.conversationId, event.conversationId) &&
+            candidate.dispatchStatus === 'dispatching'
         )
           ? 'pending'
           : 'forged';
@@ -699,7 +710,7 @@ export class PresentationRunLifecycleCoordinator {
     }
     if (
       run.dispatchStatus !== 'bound' ||
-      run.binding?.conversationId !== event.conversationId ||
+      !isSamePresentationConversation(run.binding?.conversationId, event.conversationId) ||
       run.binding.turnId !== event.turnId
     ) {
       return 'forged';
@@ -749,7 +760,9 @@ export class PresentationRunLifecycleCoordinator {
     const credentials = this.credentials;
     if (credentials === null) return;
     const runtime = releasedRuntime(
-      await this.options.observeRuntime(credentials, run.conversationId).catch((): null => null)
+      await this.options
+        .observeRuntime(credentials, canonicalPresentationConversationId(run.conversationId))
+        .catch((): null => null)
     );
     if (runtime === null) return;
     const first = await this.options.store
@@ -769,7 +782,9 @@ export class PresentationRunLifecycleCoordinator {
     const credentials = this.credentials;
     if (credentials === null) return;
     const runtime = releasedRuntime(
-      await this.options.observeRuntime(credentials, run.conversationId).catch((): null => null)
+      await this.options
+        .observeRuntime(credentials, canonicalPresentationConversationId(run.conversationId))
+        .catch((): null => null)
     );
     if (runtime === null) return;
     const result = await this.options.store

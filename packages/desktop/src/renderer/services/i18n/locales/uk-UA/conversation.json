@@ -907,6 +907,12 @@
       "importError": "Не вдалося додати референс. Спробуйте ще раз."
     },
     "workspace": {
+      "beatPanel": {
+        "coverage": {
+          "trimGuidance": "Край · Обрізання · Безкоштовно",
+          "boundaryGuidance": "Межа · Потребує повторного рендерингу"
+        }
+      },
       "controls": {
         "briefAndRulesTitle": "Бриф і правила"
       },

@@ -102,8 +102,8 @@ import {
   InstallationIntegrityModalHost,
   PackageArchitectureMismatchFooter,
   type InstallationIntegrityDiagnostics,
-  getBackendStartupInstallationDescription,
   getRuntimeComponentInstallationDescription,
+  resolveBackendStartupIntegrityPresentation,
   showInstallationIntegrityModal,
 } from './components/layout/InstallationIntegrityDialog';
 
@@ -312,12 +312,6 @@ const BackendStartupFailureDialog: React.FC<{ failure: BackendStartupFailureInfo
 
   const isIncompatibleRuntime = failure.reason === 'backend_incompatible_runtime';
   const isPackageArchitectureMismatch = failure.reason === 'backend_package_architecture_mismatch';
-  const isDatabaseLineageFailure = failure.reason === 'backend_database_lineage_incompatible';
-  const isDataMigrationFailure = failure.reason === 'backend_data_migration_failed';
-  const isLocalDataRepairFailure = failure.reason === 'backend_local_data_repair_failed';
-  const isRecoverableDatabaseCorruption = failure.reason === 'backend_recoverable_database_corruption';
-  const isTransientConcurrentStartup = failure.reason === 'backend_transient_concurrent_startup';
-  const isStartupDirectoryFailure = failure.reason === 'backend_startup_directory_unavailable';
   const title = t('common.backendStartup.incompatibleRuntime.title');
   const description = isIncompatibleRuntime
     ? t('common.backendStartup.incompatibleRuntime.description')
@@ -327,49 +321,21 @@ const BackendStartupFailureDialog: React.FC<{ failure: BackendStartupFailureInfo
           deviceArch: failure.deviceArch ?? 'arm64',
           expectedArch: failure.expectedDownloadArch ?? 'arm64',
         })
-      : isDataMigrationFailure
-        ? t('common.backendStartup.dataMigration.description')
-        : isDatabaseLineageFailure
-          ? t('common.backendStartup.databaseLineage.description', {
-              appliedVersion: failure.appliedVersion ?? t('common.backendStartup.databaseLineage.unknownVersion'),
-              floorVersion: failure.floorVersion ?? t('common.backendStartup.databaseLineage.unknownVersion'),
-              latestVersion: failure.latestVersion ?? t('common.backendStartup.databaseLineage.unknownVersion'),
-              reason: failure.lineageReason ?? t('common.backendStartup.databaseLineage.unknownReason'),
-            })
-          : isLocalDataRepairFailure
-            ? t('common.backendStartup.localDataRepair.description')
-            : isTransientConcurrentStartup
-              ? t('common.backendStartup.transientConcurrentStartup.description')
-              : isStartupDirectoryFailure
-                ? t('common.backendStartup.startupDirectory.description')
-                : isRecoverableDatabaseCorruption
-                  ? t('common.backendStartup.recoverableDatabaseCorruption.description')
-                  : getBackendStartupInstallationDescription(t);
+      : null;
   const requiredVersions = failure.requiredVersions?.map((version) => `GLIBC_${version}`).join(', ');
 
   if (!isIncompatibleRuntime && !isPackageArchitectureMismatch) {
+    const presentation = resolveBackendStartupIntegrityPresentation(t, failure);
+    if (presentation === null) return null;
+
     return (
       <div className='min-h-screen bg-1'>
         <InstallationIntegrityModalHost
-          description={description}
-          diagnosticsKind={
-            isTransientConcurrentStartup
-              ? 'transient_concurrent_startup'
-              : isRecoverableDatabaseCorruption
-                ? 'recoverable_database_corruption'
-                : isStartupDirectoryFailure
-                  ? 'startup_directory'
-                  : isLocalDataRepairFailure
-                    ? 'local_data_repair'
-                    : isDatabaseLineageFailure
-                      ? 'database_lineage'
-                      : isDataMigrationFailure
-                        ? 'data_migration'
-                        : 'incomplete_installation'
-          }
+          description={presentation.description}
+          diagnosticsKind={presentation.diagnosticsKind}
           diagnostics={{
             source: 'backend_startup_failure',
-            description,
+            description: presentation.description,
             backendStartupFailure: failure as unknown as Record<string, unknown>,
           }}
         />
@@ -387,7 +353,7 @@ const BackendStartupFailureDialog: React.FC<{ failure: BackendStartupFailureInfo
           footer={<PackageArchitectureMismatchFooter />}
           title={t('common.backendStartup.packageArchitectureMismatch.title')}
         >
-          <InstallationIntegrityContent description={description} />
+          <InstallationIntegrityContent description={description ?? ''} />
         </Modal>
       </div>
     );
@@ -397,7 +363,7 @@ const BackendStartupFailureDialog: React.FC<{ failure: BackendStartupFailureInfo
     <div className='min-h-screen bg-1'>
       <Modal visible closable={false} maskClosable={false} footer={null} title={title}>
         <div className='text-t-1'>
-          <Typography.Paragraph className='mb-0 text-t-secondary'>{description}</Typography.Paragraph>
+          <Typography.Paragraph className='mb-0 text-t-secondary'>{description ?? ''}</Typography.Paragraph>
           {requiredVersions ? (
             <Typography.Paragraph className='mt-12px mb-0 text-12px text-t-tertiary'>
               {t('common.backendStartup.incompatibleRuntime.requiredVersions', { versions: requiredVersions })}
@@ -422,6 +388,7 @@ const shouldShowBackendStartupFailureDialog =
   backendStartupFailure?.reason === 'backend_local_data_repair_failed' ||
   backendStartupFailure?.reason === 'backend_recoverable_database_corruption' ||
   backendStartupFailure?.reason === 'backend_transient_concurrent_startup' ||
+  backendStartupFailure?.reason === 'backend_startup_directory_unavailable' ||
   backendStartupFailure?.reason === 'backend_startup_failed';
 if (backendStartupFailure && shouldShowBackendStartupFailureDialog) {
   root.render(

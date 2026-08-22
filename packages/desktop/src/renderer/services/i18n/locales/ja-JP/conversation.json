@@ -901,6 +901,12 @@
       "importError": "参照を追加できませんでした。もう一度お試しください。"
     },
     "workspace": {
+      "beatPanel": {
+        "coverage": {
+          "trimGuidance": "エッジ · トリミング · 無料",
+          "boundaryGuidance": "境界 · 再レンダリングが必要"
+        }
+      },
       "controls": {
         "briefAndRulesTitle": "ブリーフとルール"
       },

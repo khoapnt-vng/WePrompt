@@ -92,6 +92,14 @@
       "diagnosticsReportFailed": "无法保存诊断包",
       "runtimeComponentDescription": "当前安装缺少必要的内置运行组件，{{resource}} 无法启动。请重新安装最新版 WePrompt；如果重新安装后仍然出现，请检查系统安全软件或杀毒软件是否隔离了 WePrompt 组件。"
     },
+    "genericFailure": {
+      "title": "本地后端无法启动",
+      "description": "WePrompt 无法完成本地启动。请重启 WePrompt。如果问题仍然存在，请保存诊断包以便获得支持。",
+      "sendDiagnostics": "保存诊断信息",
+      "diagnosticsSent": "诊断信息已保存",
+      "diagnosticsReportSuccess": "诊断包已保存",
+      "diagnosticsReportFailed": "无法保存诊断包"
+    },
     "packageArchitectureMismatch": {
       "title": "WePrompt 安装包架构不匹配",
       "description": "当前 WePrompt 安装包是 {{packageArch}}，但这台 Mac 是 {{deviceArch}}。请从获批的内部分发渠道获取 {{expectedArch}} 安装包，关闭 WePrompt 后再安装该版本。",

@@ -17,6 +17,10 @@ import {
   PRESENTATION_RUN_DISPATCH_STATUSES,
   PRESENTATION_RUN_LIMITS as LEGACY_PRESENTATION_RUN_LIMITS,
 } from '@/common/config/constants';
+import {
+  PRESENTATION_CONVERSATION_ID_PATTERN,
+  normalizePresentationConversationId,
+} from '@/common/types/office/presentationConversationId';
 import { PRESENTATION_RUN_LIMITS } from '@/common/types/office/presentationRunPolicy';
 import type { PresentationRunFailure, PresentationRunFailureCode } from '@/common/types/office/presentationRun';
 
@@ -32,6 +36,11 @@ const presentationRunPolicyFile = resolve(
   process.cwd(),
   'tests/unit/process/services/presentation-template/contracts/presentationRunPolicy.test.ts'
 );
+
+const presentationConversationIdSchema = z
+  .string()
+  .regex(PRESENTATION_CONVERSATION_ID_PATTERN)
+  .transform((value): string => normalizePresentationConversationId(value)!);
 
 const compilePolicyFixture = (source: (moduleSpecifiers: { policy: string; types: string }) => string): string => {
   const fixtureDirectory = mkdtempSync(join(tmpdir(), 'presentation-run-policy-'));
@@ -388,7 +397,7 @@ export const presentationRunPublicSchema = z.union([
 
 export const recoverablePresentationRunsRequestSchema = z
   .object({
-    conversation_id: z.string().uuid(),
+    conversation_id: presentationConversationIdSchema,
     cursor: z.string().min(1).optional(),
     limit: z
       .number()
@@ -801,7 +810,7 @@ describe('managed presentation recovery contract', () => {
   const cursorPayloadSchema = z
     .object({
       version: z.literal(1),
-      conversationId: z.string().uuid(),
+      conversationId: presentationConversationIdSchema,
       updatedAt: z.string().datetime(),
       runId: z.string().uuid(),
     })
@@ -903,6 +912,9 @@ describe('managed presentation recovery contract', () => {
   });
 
   it('defaults the limit to 20 and accepts the exact 1 and 20 boundaries', () => {
+    expect(recoverablePresentationRunsRequestSchema.parse({ conversation_id: 'D0921953' })).toMatchObject({
+      conversation_id: 'd0921953',
+    });
     expect(recoverablePresentationRunsRequestSchema.parse({ conversation_id: CONVERSATION_ID }).limit).toBe(20);
     expect(
       recoverablePresentationRunsRequestSchema.safeParse({ conversation_id: CONVERSATION_ID, limit: 1 }).success

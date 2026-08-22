@@ -21,6 +21,8 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.coverage.unavailable': 'Coverage unavailable',
         'conversation.creativeStudio.workspace.beatPanel.coverage.playbackLane': 'Playback lane',
         'conversation.creativeStudio.workspace.beatPanel.coverage.planningLane': 'Planning lane',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.trimGuidance': 'Edge · Trim · Free',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.boundaryGuidance': 'Boundary · Costs a re-render',
         'conversation.creativeStudio.workspace.beatPanel.coverage.tailTrimWarning':
           'Tail trim makes the next Shot stale',
       };
@@ -391,6 +393,54 @@ describe('CoverageBar', () => {
     expect(trimIn).toHaveAttribute('aria-valuenow', '1');
     expect(trimIn).toHaveAttribute('aria-valuetext', '1s trimmed');
     expect(trimIn).toHaveAttribute('tabindex', '0');
+  });
+
+  it('keeps trim and boundary consequences visible beside the coverage controls', () => {
+    renderCoverage([makeSelectedShot(), makeShot('shot_2', 8, 8)]);
+
+    const trimGuidance = screen.getByText('Edge · Trim · Free');
+    const boundaryGuidance = screen.getByText('Boundary · Costs a re-render');
+
+    expect(trimGuidance).toBeVisible();
+    expect(boundaryGuidance).toBeVisible();
+    expect(trimGuidance.parentElement).toBe(boundaryGuidance.parentElement);
+  });
+
+  it('describes each slider with the matching stable consequence across rerenders', () => {
+    const first = makeSelectedShot();
+    const second = makeShot('shot_2', 8, 8, {
+      selectedTakeId: 'take_2',
+      selectedTakeSourceDurationSeconds: 10,
+      trimInSeconds: 1,
+      trimOutSeconds: 1,
+      playedDurationSeconds: 8,
+    });
+    const third = makeShot('shot_3', 8, 16);
+    const result = renderCoverage([first, second, third]);
+    const trimGuidance = screen.getByText('Edge · Trim · Free');
+    const boundaryGuidance = screen.getByText('Boundary · Costs a re-render');
+    const trimGuidanceId = trimGuidance.id;
+    const boundaryGuidanceId = boundaryGuidance.id;
+
+    expect(trimGuidanceId).not.toBe('');
+    expect(boundaryGuidanceId).not.toBe(trimGuidanceId);
+    for (const slider of screen.getAllByRole('slider', { name: /Trim (?:in|out) Shot/ })) {
+      expect(slider).toHaveAttribute('aria-describedby', trimGuidanceId);
+    }
+    for (const slider of screen.getAllByRole('slider', { name: /Boundary after Shot/ })) {
+      expect(slider).toHaveAttribute('aria-describedby', boundaryGuidanceId);
+    }
+
+    result.rerender(
+      <CoverageBar
+        disabled={false}
+        onCommitPlanningDurations={result.onCommitPlanningDurations}
+        onCommitTrim={result.onCommitTrim}
+        shots={[{ ...first, trimInSeconds: 2, playedDurationSeconds: 7 }, second, third]}
+      />
+    );
+    expect(screen.getByText('Edge · Trim · Free')).toHaveAttribute('id', trimGuidanceId);
+    expect(screen.getByText('Boundary · Costs a re-render')).toHaveAttribute('id', boundaryGuidanceId);
   });
 
   it('reserves a normal-flow bottom row for trim chrome', () => {

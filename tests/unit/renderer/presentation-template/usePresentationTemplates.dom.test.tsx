@@ -126,7 +126,7 @@ const allocation = {
 
 const recoveryBase = {
   clientRequestId: '52f128ab-8845-4100-bca2-bc0a85433214',
-  conversationId: 'conversation-1',
+  conversationId: 'd0921953',
   selectedTemplateId: 'business-review',
   revision: 7,
   createdAt: '2026-08-01T00:00:00.000Z',
@@ -299,7 +299,7 @@ describe('resolveManagedPresentationInitialSend', () => {
 
 describe('usePresentationTemplates send composition', () => {
   it('adds the creation contract when no gallery template is selected', async () => {
-    const { result, unmount } = renderHook(() => usePresentationTemplates('conversation-1'));
+    const { result, unmount } = renderHook(() => usePresentationTemplates('d0921953'));
     await waitFor(() => expect(listRecoverableInvokeMock).toHaveBeenCalled());
 
     expect(result.current.composeSend('Save this look as a reusable template', []).input).toContain(
@@ -309,7 +309,7 @@ describe('usePresentationTemplates send composition', () => {
   });
 
   it('does not add the creation contract to an ordinary send', async () => {
-    const { result, unmount } = renderHook(() => usePresentationTemplates('conversation-1'));
+    const { result, unmount } = renderHook(() => usePresentationTemplates('d0921953'));
     await waitFor(() => expect(listRecoverableInvokeMock).toHaveBeenCalled());
 
     expect(result.current.composeSend('Summarize this report', ['/workspace/report.csv'])).toEqual({
@@ -321,7 +321,7 @@ describe('usePresentationTemplates send composition', () => {
   });
 
   it('adds the creation contract for Vietnamese template-creation intent', async () => {
-    const { result, unmount } = renderHook(() => usePresentationTemplates('conversation-1'));
+    const { result, unmount } = renderHook(() => usePresentationTemplates('d0921953'));
     await waitFor(() => expect(listRecoverableInvokeMock).toHaveBeenCalled());
 
     expect(result.current.composeSend('Lưu giao diện này thành template', []).input).toContain(
@@ -332,23 +332,49 @@ describe('usePresentationTemplates send composition', () => {
 });
 
 describe('usePresentationTemplates managed run recovery', () => {
-  it('discovers the current conversation again after a remount', async () => {
-    const first = renderHook(() => usePresentationTemplates('conversation-1'));
+  it('discovers the canonical short conversation again after a remount', async () => {
+    const first = renderHook(() => usePresentationTemplates('d0921953'));
     await waitFor(() => expect(listRecoverableInvokeMock).toHaveBeenCalledTimes(1));
     first.unmount();
 
-    const second = renderHook(() => usePresentationTemplates('conversation-1'));
+    const second = renderHook(() => usePresentationTemplates('d0921953'));
     await waitFor(() => expect(listRecoverableInvokeMock).toHaveBeenCalledTimes(2));
     second.unmount();
 
     expect(listRecoverableInvokeMock).toHaveBeenNthCalledWith(1, {
-      conversation_id: 'conversation-1',
+      conversation_id: 'd0921953',
       limit: 20,
     });
     expect(listRecoverableInvokeMock).toHaveBeenNthCalledWith(2, {
-      conversation_id: 'conversation-1',
+      conversation_id: 'd0921953',
       limit: 20,
     });
+  });
+
+  it('canonicalizes uppercase ingress and an uppercase backend recovery DTO', async () => {
+    listRecoverableInvokeMock.mockResolvedValue(
+      successfulRecoveryList([makeReviewRun({ conversationId: 'D0921953' })])
+    );
+
+    const { result } = renderHook(() => usePresentationTemplates('D0921953'));
+
+    await waitFor(() => expect(result.current.recoverableRuns).toHaveLength(1));
+    expect(listRecoverableInvokeMock).toHaveBeenCalledWith({ conversation_id: 'd0921953', limit: 20 });
+    expect(result.current.recoverableRuns[0]?.conversationId).toBe('d0921953');
+    expect(messageWarningMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: expect.stringContaining('presentation-recovery-d0921953-') })
+    );
+  });
+
+  it('disables recovery safely for an invalid presentation conversation identity', async () => {
+    const { result } = renderHook(() => usePresentationTemplates('../private'));
+
+    await act(async () => {
+      expect(await result.current.refreshRecoverableRuns()).toBe(true);
+    });
+    expect(result.current.recoverableRuns).toEqual([]);
+    expect(listRecoverableInvokeMock).not.toHaveBeenCalled();
+    expect(messageErrorMock).not.toHaveBeenCalled();
   });
 
   it('renders only the first bounded page in main order without following its cursor', async () => {
@@ -357,12 +383,12 @@ describe('usePresentationTemplates managed run recovery', () => {
     );
     listRecoverableInvokeMock.mockResolvedValue(successfulRecoveryList(runs, 'opaque-next-cursor'));
 
-    renderHook(() => usePresentationTemplates('conversation-1'));
+    renderHook(() => usePresentationTemplates('d0921953'));
 
     await waitFor(() => expect(messageWarningMock).toHaveBeenCalledTimes(20));
     expect(listRecoverableInvokeMock).toHaveBeenCalledTimes(1);
     expect(messageWarningMock.mock.calls.map(([config]) => (config as { id: string }).id)).toEqual(
-      runs.slice(0, 20).map((run) => `presentation-recovery-conversation-1-${run.runId}`)
+      runs.slice(0, 20).map((run) => `presentation-recovery-d0921953-${run.runId}`)
     );
   });
 
@@ -372,12 +398,12 @@ describe('usePresentationTemplates managed run recovery', () => {
         makeReviewRun(),
         makeReviewRun({
           runId: 'ee260e85-00c2-41f8-9c4b-a03f47e469cb',
-          conversationId: 'conversation-2',
+          conversationId: 'd0921954',
         }),
       ])
     );
 
-    const { result } = renderHook(() => usePresentationTemplates('conversation-1'));
+    const { result } = renderHook(() => usePresentationTemplates('d0921953'));
 
     await waitFor(() => expect(messageErrorMock).toHaveBeenCalled());
     expect(messageWarningMock).not.toHaveBeenCalled();
@@ -386,17 +412,17 @@ describe('usePresentationTemplates managed run recovery', () => {
 
   it('clears stale recovery state and blocks queued actions when the conversation changes', async () => {
     listRecoverableInvokeMock.mockImplementation(({ conversation_id }: { conversation_id: string }) =>
-      conversation_id === 'conversation-1'
+      conversation_id === 'd0921953'
         ? Promise.resolve(successfulRecoveryList([makeReviewRun()]))
         : new Promise(() => undefined)
     );
     const { result, rerender, unmount } = renderHook(({ conversationId }) => usePresentationTemplates(conversationId), {
-      initialProps: { conversationId: 'conversation-1' },
+      initialProps: { conversationId: 'd0921953' },
     });
     await waitFor(() => expect(result.current.recoverableRuns).toHaveLength(1));
     const staleMessage = renderRecoveryMessage();
 
-    rerender({ conversationId: 'conversation-2' });
+    rerender({ conversationId: 'd0921954' });
 
     expect(result.current.recoverableRuns).toEqual([]);
     staleMessage.getByRole('button', { name: 'conversation.presentationTemplates.recovery.actions.open' }).click();
@@ -430,13 +456,13 @@ describe('usePresentationTemplates managed run recovery', () => {
     const openReply = createDeferred<OpenPresentationRunResult>();
     const conversationBDiscovery = createDeferred<ListRecoverablePresentationRunsResult>();
     listRecoverableInvokeMock.mockImplementation(({ conversation_id }: { conversation_id: string }) =>
-      conversation_id === 'conversation-1'
+      conversation_id === 'd0921953'
         ? Promise.resolve(successfulRecoveryList([makeReviewRun()]))
         : conversationBDiscovery.promise
     );
     openRecoveryInvokeMock.mockReturnValue(openReply.promise);
     const hook = renderHook(({ conversationId }) => usePresentationTemplates(conversationId), {
-      initialProps: { conversationId: 'conversation-1' },
+      initialProps: { conversationId: 'd0921953' },
     });
     await waitFor(() => expect(hook.result.current.recoverableRuns).toHaveLength(1));
     renderRecoveryMessage()
@@ -444,9 +470,9 @@ describe('usePresentationTemplates managed run recovery', () => {
       .click();
     await waitFor(() => expect(openRecoveryInvokeMock).toHaveBeenCalledOnce());
 
-    hook.rerender({ conversationId: 'conversation-2' });
+    hook.rerender({ conversationId: 'd0921954' });
     await waitFor(() =>
-      expect(listRecoverableInvokeMock).toHaveBeenCalledWith({ conversation_id: 'conversation-2', limit: 20 })
+      expect(listRecoverableInvokeMock).toHaveBeenCalledWith({ conversation_id: 'd0921954', limit: 20 })
     );
     await act(async () => {
       openReply.resolve(reply);
@@ -457,7 +483,7 @@ describe('usePresentationTemplates managed run recovery', () => {
     expect(listRecoverableInvokeMock).toHaveBeenCalledTimes(2);
 
     const conversationBRun = makeReviewRun({
-      conversationId: 'conversation-2',
+      conversationId: 'd0921954',
       runId: 'a0adaf59-782b-48cf-8cd8-ddceaa926102',
     });
     await act(async () => {
@@ -499,13 +525,13 @@ describe('usePresentationTemplates managed run recovery', () => {
     const discardReply = createDeferred<DiscardPresentationRunResult>();
     const conversationBDiscovery = createDeferred<ListRecoverablePresentationRunsResult>();
     listRecoverableInvokeMock.mockImplementation(({ conversation_id }: { conversation_id: string }) =>
-      conversation_id === 'conversation-1'
+      conversation_id === 'd0921953'
         ? Promise.resolve(successfulRecoveryList([makeReviewRun()]))
         : conversationBDiscovery.promise
     );
     discardPresentationRunInvokeMock.mockReturnValue(discardReply.promise);
     const hook = renderHook(({ conversationId }) => usePresentationTemplates(conversationId), {
-      initialProps: { conversationId: 'conversation-1' },
+      initialProps: { conversationId: 'd0921953' },
     });
     await waitFor(() => expect(hook.result.current.recoverableRuns).toHaveLength(1));
     renderRecoveryMessage()
@@ -513,9 +539,9 @@ describe('usePresentationTemplates managed run recovery', () => {
       .click();
     await waitFor(() => expect(discardPresentationRunInvokeMock).toHaveBeenCalledOnce());
 
-    hook.rerender({ conversationId: 'conversation-2' });
+    hook.rerender({ conversationId: 'd0921954' });
     await waitFor(() =>
-      expect(listRecoverableInvokeMock).toHaveBeenCalledWith({ conversation_id: 'conversation-2', limit: 20 })
+      expect(listRecoverableInvokeMock).toHaveBeenCalledWith({ conversation_id: 'd0921954', limit: 20 })
     );
     await act(async () => {
       settle(discardReply);
@@ -526,7 +552,7 @@ describe('usePresentationTemplates managed run recovery', () => {
     expect(listRecoverableInvokeMock).toHaveBeenCalledTimes(2);
 
     const conversationBRun = makeReviewRun({
-      conversationId: 'conversation-2',
+      conversationId: 'd0921954',
       runId: '71e930d6-6a19-4e6a-8b05-8e5aa20bef24',
     });
     await act(async () => {
@@ -540,7 +566,7 @@ describe('usePresentationTemplates managed run recovery', () => {
     const openReply = createDeferred<OpenPresentationRunResult>();
     listRecoverableInvokeMock.mockResolvedValue(successfulRecoveryList([makeReviewRun()]));
     openRecoveryInvokeMock.mockReturnValue(openReply.promise);
-    const hook = renderHook(() => usePresentationTemplates('conversation-1'));
+    const hook = renderHook(() => usePresentationTemplates('d0921953'));
     await waitFor(() => expect(hook.result.current.recoverableRuns).toHaveLength(1));
     renderRecoveryMessage()
       .getByRole('button', { name: 'conversation.presentationTemplates.recovery.actions.open' })
@@ -562,7 +588,7 @@ describe('usePresentationTemplates managed run recovery', () => {
     async (code) => {
       const listReply = createDeferred<ListRecoverablePresentationRunsResult>();
       listRecoverableInvokeMock.mockReturnValue(listReply.promise);
-      const { result } = renderHook(() => usePresentationTemplates('conversation-1'));
+      const { result } = renderHook(() => usePresentationTemplates('d0921953'));
 
       await act(async () => {
         listReply.resolve({
@@ -584,7 +610,7 @@ describe('usePresentationTemplates managed run recovery', () => {
   it('keeps a supported-context recovery failure visible', async () => {
     const listReply = createDeferred<ListRecoverablePresentationRunsResult>();
     listRecoverableInvokeMock.mockReturnValue(listReply.promise);
-    renderHook(() => usePresentationTemplates('conversation-1'));
+    renderHook(() => usePresentationTemplates('d0921953'));
 
     await act(async () => {
       listReply.resolve({
@@ -603,7 +629,7 @@ describe('usePresentationTemplates managed run recovery', () => {
 
   it('shows the review-required status, exact hash, and only main-authorized actions', async () => {
     listRecoverableInvokeMock.mockResolvedValue(successfulRecoveryList([makeReviewRun()]));
-    renderHook(() => usePresentationTemplates('conversation-1'));
+    renderHook(() => usePresentationTemplates('d0921953'));
 
     await waitFor(() => expect(messageWarningMock).toHaveBeenCalledTimes(1));
     const view = renderRecoveryMessage();
@@ -648,7 +674,7 @@ describe('usePresentationTemplates managed run recovery', () => {
     },
   ])('renders exact main status and action authority for a $name', async ({ run, statusKey, open, discard }) => {
     listRecoverableInvokeMock.mockResolvedValue(successfulRecoveryList([run]));
-    renderHook(() => usePresentationTemplates('conversation-1'));
+    renderHook(() => usePresentationTemplates('d0921953'));
 
     await waitFor(() => expect(messageWarningMock).toHaveBeenCalledTimes(1));
     const view = renderRecoveryMessage();
@@ -674,7 +700,7 @@ describe('usePresentationTemplates managed run recovery', () => {
           }),
         ])
       );
-      renderHook(() => usePresentationTemplates('conversation-1'));
+      renderHook(() => usePresentationTemplates('d0921953'));
 
       await waitFor(() => expect(messageWarningMock).toHaveBeenCalledTimes(1));
       const view = renderRecoveryMessage();
@@ -689,7 +715,7 @@ describe('usePresentationTemplates managed run recovery', () => {
 
   it('opens only the exact displayed durable hash for the current conversation', async () => {
     listRecoverableInvokeMock.mockResolvedValue(successfulRecoveryList([makeReviewRun()]));
-    renderHook(() => usePresentationTemplates('conversation-1'));
+    renderHook(() => usePresentationTemplates('d0921953'));
     await waitFor(() => expect(messageWarningMock).toHaveBeenCalledTimes(1));
 
     const view = renderRecoveryMessage();
@@ -702,7 +728,7 @@ describe('usePresentationTemplates managed run recovery', () => {
 
     await waitFor(() =>
       expect(openRecoveryInvokeMock).toHaveBeenCalledWith({
-        conversation_id: 'conversation-1',
+        conversation_id: 'd0921953',
         run_id: '4a9b4520-84b6-4a1e-8530-8af7641116d0',
         expected_sha256: 'a'.repeat(64),
       })
@@ -721,7 +747,7 @@ describe('usePresentationTemplates managed run recovery', () => {
       state: 'retained',
       details: { runId: '4a9b4520-84b6-4a1e-8530-8af7641116d0' },
     });
-    renderHook(() => usePresentationTemplates('conversation-1'));
+    renderHook(() => usePresentationTemplates('d0921953'));
     await waitFor(() => expect(messageWarningMock).toHaveBeenCalledTimes(1));
 
     renderRecoveryMessage()
@@ -738,7 +764,7 @@ describe('usePresentationTemplates managed run recovery', () => {
     'keeps an unchanged authoritative recovery notice visible after %s',
     async (refreshReason) => {
       const run = makeReviewRun();
-      const noticeId = `presentation-recovery-conversation-1-${run.runId}`;
+      const noticeId = `presentation-recovery-d0921953-${run.runId}`;
       listRecoverableInvokeMock
         .mockResolvedValueOnce(successfulRecoveryList([run]))
         .mockResolvedValueOnce(successfulRecoveryList([run]));
@@ -755,7 +781,7 @@ describe('usePresentationTemplates managed run recovery', () => {
         discardPresentationRunInvokeMock.mockRejectedValue(new Error('reply lost'));
       }
 
-      const hook = renderHook(() => usePresentationTemplates('conversation-1'));
+      const hook = renderHook(() => usePresentationTemplates('d0921953'));
       await waitFor(() => expect(messageWarningMock).toHaveBeenCalledTimes(1));
       expect(activeRecoveryNoticeIds).toContain(noticeId);
 
@@ -787,7 +813,7 @@ describe('usePresentationTemplates managed run recovery', () => {
       .mockResolvedValueOnce(successfulRecoveryList([makeReviewRun()]))
       .mockResolvedValueOnce(successfulRecoveryList([makeReviewRun()]));
     openRecoveryInvokeMock.mockRejectedValue(new Error('reply lost'));
-    renderHook(() => usePresentationTemplates('conversation-1'));
+    renderHook(() => usePresentationTemplates('d0921953'));
     await waitFor(() => expect(messageWarningMock).toHaveBeenCalledTimes(1));
 
     renderRecoveryMessage()
@@ -809,7 +835,7 @@ describe('usePresentationTemplates managed run recovery', () => {
       discardedAt: '2026-08-03T00:00:00.000Z',
       alreadyDiscarded: true,
     });
-    const { result } = renderHook(() => usePresentationTemplates('conversation-1'));
+    const { result } = renderHook(() => usePresentationTemplates('d0921953'));
     await waitFor(() => expect(messageWarningMock).toHaveBeenCalledTimes(1));
 
     renderRecoveryMessage()
@@ -818,7 +844,7 @@ describe('usePresentationTemplates managed run recovery', () => {
 
     await waitFor(() => expect(result.current.recoverableRuns).toEqual([]));
     expect(discardPresentationRunInvokeMock).toHaveBeenCalledWith({
-      conversation_id: 'conversation-1',
+      conversation_id: 'd0921953',
       run_id: '4a9b4520-84b6-4a1e-8530-8af7641116d0',
       expected_revision: 7,
     });
@@ -847,7 +873,7 @@ describe('usePresentationTemplates managed run recovery', () => {
     } else {
       discardPresentationRunInvokeMock.mockResolvedValue(reply);
     }
-    const { result } = renderHook(() => usePresentationTemplates('conversation-1'));
+    const { result } = renderHook(() => usePresentationTemplates('d0921953'));
     await waitFor(() => expect(result.current.recoverableRuns).toHaveLength(1));
 
     renderRecoveryMessage()
@@ -864,7 +890,7 @@ describe('usePresentationTemplates managed run recovery', () => {
     listRecoverableInvokeMock.mockResolvedValue(
       successfulRecoveryList([makeReviewRun({ selectedTemplateId: '/private/candidate/location.pptx' })])
     );
-    renderHook(() => usePresentationTemplates('conversation-1'));
+    renderHook(() => usePresentationTemplates('d0921953'));
     await waitFor(() => expect(messageWarningMock).toHaveBeenCalledTimes(1));
 
     const view = renderRecoveryMessage();
@@ -886,13 +912,30 @@ describe('usePresentationTemplates artifact scratch lifecycle', () => {
     discardScratchInvokeMock.mockResolvedValue({ status: 'cleaned' });
   });
 
+  it('ignores an invalid terminal identity while the presentation route identity is invalid', async () => {
+    const { result } = renderHook(() => usePresentationTemplates('../route'));
+    act(() => result.current.registerScratchTurn('turn-1', allocation.runId));
+
+    act(() => {
+      emitter.emit('artifact.scratch.terminal', {
+        conversationId: '../event',
+        turnId: 'turn-1',
+        outcome: 'completed',
+      });
+    });
+
+    await act(async () => Promise.resolve());
+    expect(completeScratchInvokeMock).not.toHaveBeenCalled();
+    expect(retainScratchInvokeMock).not.toHaveBeenCalled();
+  });
+
   it('allocates an owned path and cleans the matching run only after a completed terminal', async () => {
-    const { result } = renderHook(() => usePresentationTemplates('conversation-1'));
+    const { result } = renderHook(() => usePresentationTemplates('d0921953'));
     act(() => result.current.selectTemplate(template));
 
-    const scratch = await result.current.prepareScratch('conversation-1');
+    const scratch = await result.current.prepareScratch('D0921953');
     expect(allocateScratchInvokeMock).toHaveBeenCalledWith({
-      conversation_id: 'conversation-1',
+      conversation_id: 'd0921953',
       template_id: 'business-review',
     });
     const composed = result.current.composeSend('Build the review', [], scratch);
@@ -901,7 +944,7 @@ describe('usePresentationTemplates artifact scratch lifecycle', () => {
     act(() => result.current.registerScratchTurn('turn-1', allocation.runId));
     act(() => {
       emitter.emit('artifact.scratch.terminal', {
-        conversationId: 'conversation-1',
+        conversationId: 'd0921953',
         turnId: 'turn-1',
         outcome: 'completed',
       });
@@ -914,12 +957,12 @@ describe('usePresentationTemplates artifact scratch lifecycle', () => {
   });
 
   it('retains the matching run on failure and ignores terminals from other conversations', async () => {
-    const { result } = renderHook(() => usePresentationTemplates('conversation-1'));
+    const { result } = renderHook(() => usePresentationTemplates('d0921953'));
     act(() => result.current.registerScratchTurn('turn-1', allocation.runId));
 
     act(() => {
       emitter.emit('artifact.scratch.terminal', {
-        conversationId: 'conversation-2',
+        conversationId: 'd0921954',
         turnId: 'turn-1',
         outcome: 'failed',
       });
@@ -928,7 +971,7 @@ describe('usePresentationTemplates artifact scratch lifecycle', () => {
 
     act(() => {
       emitter.emit('artifact.scratch.terminal', {
-        conversationId: 'conversation-1',
+        conversationId: 'd0921953',
         turnId: 'turn-1',
         outcome: 'failed',
       });

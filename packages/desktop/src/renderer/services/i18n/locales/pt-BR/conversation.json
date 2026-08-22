@@ -911,6 +911,12 @@
       "importError": "Não foi possível adicionar a referência. Tente novamente."
     },
     "workspace": {
+      "beatPanel": {
+        "coverage": {
+          "trimGuidance": "Borda · Corte · Grátis",
+          "boundaryGuidance": "Limite · Exige nova renderização"
+        }
+      },
       "controls": {
         "briefAndRulesTitle": "Brief e regras"
       },

@@ -1,3 +1,4 @@
+import type { TFunction } from 'i18next';
 import { describe, expect, it, vi } from 'vitest';
 
 const bridgeMocks = vi.hoisted(() => ({ quitInvoke: vi.fn() }));
@@ -8,7 +9,14 @@ vi.mock('@/common', () => ({
 
 import { classifyBackendStartupFailure } from '@/process/startup/backendStartupFailure';
 import { detectStartupArchitectureMismatch } from '@/process/startup/architectureCompatibility';
-import { getInstallationIntegrityModalActions } from '@/renderer/components/layout/InstallationIntegrityDialog';
+import commonEnUS from '@/renderer/services/i18n/locales/en-US/common.json';
+import {
+  getBackendStartupFailureDescription,
+  getBackendStartupIntegrityDialogKind,
+  getInstallationIntegrityModalActions,
+  getInstallationIntegrityTitle,
+  resolveBackendStartupIntegrityPresentation,
+} from '@/renderer/components/layout/InstallationIntegrityDialog';
 
 describe('classifyBackendStartupFailure', () => {
   it('classifies missing GLIBC symbols as an incompatible backend runtime', () => {
@@ -423,6 +431,41 @@ describe('detectStartupArchitectureMismatch', () => {
 });
 
 describe('getInstallationIntegrityModalActions', () => {
+  it('uses neutral startup copy for unclassified backend failures', () => {
+    const tMock = vi.fn((key: string) => key);
+    const t = tMock as unknown as TFunction;
+
+    expect(getInstallationIntegrityTitle(t, 'startup_failure')).toBe('common.backendStartup.genericFailure.title');
+    expect(getBackendStartupFailureDescription(t)).toBe('common.backendStartup.genericFailure.description');
+    expect(getBackendStartupIntegrityDialogKind('backend_startup_failed')).toBe('startup_failure');
+    expect(getBackendStartupIntegrityDialogKind('backend_incomplete_installation')).toBe('incomplete_installation');
+
+    const databaseOpenError = new Error('aioncore exited before health check passed') as Error & {
+      details?: Record<string, unknown>;
+    };
+    databaseOpenError.details = {
+      stage: 'early_exit',
+      backendBoundaryCode: 'BOOTSTRAP_DATA_INIT_FAILED',
+      backendBoundaryStage: 'database.open',
+    };
+    const classified = classifyBackendStartupFailure(databaseOpenError);
+    expect(resolveBackendStartupIntegrityPresentation(t, classified)).toEqual({
+      description: 'common.backendStartup.genericFailure.description',
+      diagnosticsKind: 'startup_failure',
+    });
+
+    const actions = getInstallationIntegrityModalActions(t, {
+      diagnosticsKind: 'startup_failure',
+    });
+
+    expect(actions.reportText).toBe('common.backendStartup.genericFailure.sendDiagnostics');
+    expect(tMock).not.toHaveBeenCalledWith(expect.stringContaining('incompleteInstallation'));
+    expect(commonEnUS.backendStartup.genericFailure.description).toContain('Restart WePrompt');
+    expect(commonEnUS.backendStartup.genericFailure.description).not.toMatch(
+      /missing|required resources|reinstall|quarantin/i
+    );
+  });
+
   it('exposes diagnostics-only recovery for blocking dialogs', () => {
     const t = (key: string) => key;
     const onReportDiagnostics = vi.fn();

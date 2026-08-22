@@ -239,9 +239,16 @@ export type TContextHandoffExtra = {
 
 export type TConversationContextHandoffExtra = TContextHandoffExtra;
 
+export type GuidPresentationHandoffClaim = {
+  version: 1;
+  queue_item_id: string;
+};
+
 type StudioConversationBindingExtra = {
   /** Back-reference validated against the Studio project's authoritative Brief conversation id. */
   studio_project_id?: string;
+  /** Durable renderer-to-backend claimant for a crash-safe Guid presentation handoff. */
+  weprompt_presentation_handoff?: GuidPresentationHandoffClaim;
 };
 
 export type TChatConversation =

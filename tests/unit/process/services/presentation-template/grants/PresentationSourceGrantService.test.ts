@@ -21,6 +21,7 @@ import {
 
 const CONVERSATION_ID = '745b7d43-a0aa-4bb7-b0cc-283f2db4873d';
 const SECOND_CONVERSATION_ID = '8a3bbfb3-141e-4cf3-8a45-a8b61585385c';
+const SHORT_CONVERSATION_ID = 'd0921953';
 const PRINCIPAL_ID = 'local-user';
 const CLIENT_REQUEST_ID = '326ce889-fbba-462b-82f1-fe8b7bc594b0';
 const QUEUE_ITEM_ID = '37f0a614-3e7f-41b5-87fd-49076fcf078d';
@@ -35,12 +36,13 @@ function createService(
     teamScope?: boolean;
     fileFailureInjector?: (point: PresentationRunFileFailurePoint) => void | Promise<void>;
     now?: () => Date;
+    root?: string;
   } = {}
 ) {
-  const root = mkdtempSync(path.join(tmpdir(), 'presentation-grant-service-'));
+  const root = overrides.root ?? mkdtempSync(path.join(tmpdir(), 'presentation-grant-service-'));
   const workspace = path.join(root, 'workspace');
-  mkdirSync(workspace);
-  fixtureRoots.push(root);
+  mkdirSync(workspace, { recursive: true });
+  if (!fixtureRoots.includes(root)) fixtureRoots.push(root);
   const files = new PresentationRunFiles({
     userDataDir: root,
     tempDir: root,
@@ -182,6 +184,30 @@ describe('PresentationSourceGrantService preflight', () => {
 });
 
 describe('PresentationSourceGrantService grants', () => {
+  it('canonicalizes a backend conversation owner before authority and durable draft binding', async () => {
+    const fixture = createService();
+    const owner = { owner_type: 'conversation' as const, conversation_id: SHORT_CONVERSATION_ID.toUpperCase() };
+
+    await expect(fixture.service.getSourceOwner({ owner })).resolves.toMatchObject({
+      ok: true,
+      owner: { owner_type: 'conversation', conversation_id: SHORT_CONVERSATION_ID },
+    });
+    expect(fixture.resolveConversationOwner).toHaveBeenCalledWith({
+      conversationId: SHORT_CONVERSATION_ID,
+      principalId: PRINCIPAL_ID,
+    });
+
+    const created = await fixture.service.createDraft({ client_request_id: CLIENT_REQUEST_ID });
+    if (!created.ok) throw new Error('Expected a presentation source draft');
+    await expect(
+      fixture.service.bindDraft({
+        draft_id: created.draft.draftId,
+        conversation_id: SHORT_CONVERSATION_ID.toUpperCase(),
+        expected_revision: 0,
+      })
+    ).resolves.toMatchObject({ ok: true, status: 'bound', conversationId: SHORT_CONVERSATION_ID });
+  });
+
   it('creates and idempotently replays a draft request', async () => {
     const fixture = createService();
 
@@ -272,6 +298,53 @@ describe('PresentationSourceGrantService grants', () => {
     expect(replayed).toEqual({
       ...(confirmed as Extract<typeof confirmed, { ok: true }>),
       status: 'already_confirmed',
+    });
+  });
+
+  it('rejects revoking one source from a confirmed multi-source queue without breaking exact replay', async () => {
+    const fixture = createService();
+    const firstPath = path.join(fixture.root, 'queued-first.txt');
+    const secondPath = path.join(fixture.root, 'queued-second.txt');
+    await Promise.all([
+      writeFile(firstPath, 'First queued source\n', { mode: 0o600 }),
+      writeFile(secondPath, 'Second queued source\n', { mode: 0o600 }),
+    ]);
+    fixture.pickNativeSourcePaths.mockResolvedValue([firstPath, secondPath]);
+    const owner = { owner_type: 'conversation' as const, conversation_id: CONVERSATION_ID };
+    const selected = await fixture.service.pickSources({ owner, expected_owner_revision: 0 });
+    if (!selected.ok || selected.status !== 'selected' || selected.grants.length !== 2) {
+      throw new Error('Expected two selected sources');
+    }
+    const request = {
+      owner,
+      queue_item_id: QUEUE_ITEM_ID,
+      sources: selected.grants.map((grant) => ({
+        grantId: grant.grantId,
+        expectedByteLength: grant.byteLength,
+        expectedSha256: grant.sha256,
+      })),
+      expected_owner_revision: selected.ownerRevision,
+    };
+    const confirmed = await fixture.service.confirmQueued(request);
+    if (!confirmed.ok) throw new Error('Expected queued sources to be confirmed');
+    const ownerBeforeRevoke = await fixture.service.getSourceOwner({ owner });
+
+    await expect(
+      fixture.service.revoke({
+        owner,
+        grant_id: selected.grants[0]!.grantId,
+        expected_owner_revision: confirmed.ownerRevision,
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      code: 'SOURCE_GRANT_REPLAYED',
+      details: { grantId: selected.grants[0]!.grantId },
+    });
+    await expect(fixture.service.getSourceOwner({ owner })).resolves.toEqual(ownerBeforeRevoke);
+    await expect(fixture.service.confirmQueued(request)).resolves.toMatchObject({
+      ok: true,
+      status: 'already_confirmed',
+      ownerRevision: confirmed.ownerRevision,
     });
   });
 
@@ -647,7 +720,7 @@ describe('PresentationSourceGrantService grants', () => {
     ).resolves.toMatchObject({ ok: false, code: 'SOURCE_TAMPERED' });
   });
 
-  it('revokes idempotently and rejects a foreign owner', async () => {
+  it('recovers durable queue-unbound revoke proof after a lost reply and service restart', async () => {
     const fixture = createService();
     const sourcePath = path.join(fixture.root, 'revoke.txt');
     await writeFile(sourcePath, 'revoke me\n', { mode: 0o600 });
@@ -666,18 +739,40 @@ describe('PresentationSourceGrantService grants', () => {
       expected_owner_revision: 1,
     };
 
-    await expect(fixture.service.revoke(revokeRequest)).resolves.toMatchObject({
+    const first = await fixture.service.revoke(revokeRequest);
+    expect(first).toMatchObject({
       ok: true,
       status: 'revoked',
       ownerRevision: 2,
+      queueUnboundAtRevoke: true,
     });
-    await expect(fixture.service.revoke(revokeRequest)).resolves.toMatchObject({
+    const restarted = createService({ root: fixture.root });
+    await expect(
+      restarted.service.confirmQueued({
+        owner: revokeRequest.owner,
+        queue_item_id: QUEUE_ITEM_ID,
+        sources: [
+          {
+            grantId,
+            expectedByteLength: selected.grants[0]!.byteLength,
+            expectedSha256: selected.grants[0]!.sha256,
+          },
+        ],
+        expected_owner_revision: revokeRequest.expected_owner_revision,
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      code: 'SOURCE_GRANT_REPLAYED',
+      details: { grantId, queueUnboundAtRevoke: true },
+    });
+    await expect(restarted.service.revoke(revokeRequest)).resolves.toMatchObject({
       ok: true,
       status: 'already_revoked',
       ownerRevision: 2,
+      queueUnboundAtRevoke: true,
     });
     await expect(
-      fixture.service.revoke({
+      restarted.service.revoke({
         owner: { owner_type: 'conversation', conversation_id: SECOND_CONVERSATION_ID },
         grant_id: grantId,
         expected_owner_revision: 0,

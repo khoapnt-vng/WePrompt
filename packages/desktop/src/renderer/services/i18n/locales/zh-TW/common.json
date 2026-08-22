@@ -92,6 +92,14 @@
       "diagnosticsReportFailed": "無法儲存診斷套件",
       "runtimeComponentDescription": "目前安裝缺少必要的內建執行元件，{{resource}} 無法啟動。請重新安裝最新版 WePrompt；如果重新安裝後仍然出現，請檢查系統安全軟體或防毒軟體是否隔離了 WePrompt 元件。"
     },
+    "genericFailure": {
+      "title": "本機後端無法啟動",
+      "description": "WePrompt 無法完成本機啟動。請重新啟動 WePrompt。如果問題持續發生，請儲存診斷套件以便取得支援。",
+      "sendDiagnostics": "儲存診斷資訊",
+      "diagnosticsSent": "診斷資訊已儲存",
+      "diagnosticsReportSuccess": "診斷套件已儲存",
+      "diagnosticsReportFailed": "無法儲存診斷套件"
+    },
     "packageArchitectureMismatch": {
       "title": "WePrompt 安裝包架構不相符",
       "description": "目前 WePrompt 安裝包是 {{packageArch}}，但這台 Mac 是 {{deviceArch}}。請從核准的內部分發管道取得 {{expectedArch}} 安裝包，關閉 WePrompt 後再安裝該版本。",

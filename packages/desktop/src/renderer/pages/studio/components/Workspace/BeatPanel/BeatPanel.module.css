@@ -286,6 +286,30 @@
   overflow-x: auto;
 }
 
+.coverageGuidance {
+  display: flex;
+  min-inline-size: 620px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+  color: var(--color-text-3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.trimGuidance,
+.boundaryGuidance {
+  overflow-wrap: anywhere;
+}
+
+.boundaryGuidance {
+  color: var(--color-warning-6);
+}
+
 .playbackTrack,
 .planningTrack {
   display: flex;

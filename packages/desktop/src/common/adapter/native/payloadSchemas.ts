@@ -9,6 +9,11 @@ import {
   OFFICE_ARTIFACT_MAX_SELECTED_CELLS,
   OFFICE_ARTIFACT_MAX_SELECTION_MESSAGE_BYTES,
 } from '../../types/office/artifactEditor';
+import {
+  PRESENTATION_CONVERSATION_ID_PATTERN,
+  normalizePresentationConversationId,
+  type PresentationConversationId,
+} from '../../types/office/presentationConversationId';
 import { PRESENTATION_RUN_LIMITS } from '../../types/office/presentationRunPolicy';
 import { hasRuleToken, STUDIO_RULE_LIMITS } from '../../types/project/creativeStudioRules';
 import {
@@ -39,6 +44,10 @@ const MAX_CONTEXT_PINS = 20;
 const MAX_CONTEXT_PIN_LENGTH = 2_000;
 const MAX_CONTEXT_SNAPSHOT_ITEMS = 256;
 const MAX_PROJECT_KB_FILE_PATHS = 100;
+const MAX_NATIVE_BRIDGE_DIAGNOSTIC_ISSUES = 8;
+const MAX_NATIVE_BRIDGE_DIAGNOSTIC_PATH_SEGMENTS = 8;
+const MAX_NATIVE_BRIDGE_DIAGNOSTIC_PATH_JSON_LENGTH = 256;
+const MAX_NATIVE_BRIDGE_DIAGNOSTIC_PATH_SEGMENT_LENGTH = 64;
 
 const voidPayloadSchema = z.undefined();
 const pathSchema = z.string().min(1).max(MAX_PATH_LENGTH);
@@ -185,6 +194,13 @@ const projectKnowledgeFolderSchema = z.object({ projectId: safeIdSchema, workspa
 const presentationUuidSchema = z
   .string()
   .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+const presentationScratchRunIdSchema = z
+  .string()
+  .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+const presentationConversationIdSchema = z
+  .string()
+  .regex(PRESENTATION_CONVERSATION_ID_PATTERN)
+  .transform((value) => normalizePresentationConversationId(value) as PresentationConversationId);
 const presentationRevisionSchema = z
   .number()
   .finite()
@@ -193,7 +209,7 @@ const presentationRevisionSchema = z
   .refine((value) => Number.isSafeInteger(value));
 const presentationGrantOwnerSchema = z.discriminatedUnion('owner_type', [
   z.object({ owner_type: z.literal('draft'), draft_id: presentationUuidSchema }).strict(),
-  z.object({ owner_type: z.literal('conversation'), conversation_id: presentationUuidSchema }).strict(),
+  z.object({ owner_type: z.literal('conversation'), conversation_id: presentationConversationIdSchema }).strict(),
 ]);
 const presentationRelativePathSchema = z
   .string()
@@ -240,7 +256,7 @@ const presentationQueuedSourceRefsSchema = z
   });
 const startPresentationRunSchema = z
   .object({
-    conversation_id: presentationUuidSchema,
+    conversation_id: presentationConversationIdSchema,
     client_request_id: presentationUuidSchema,
     input: z
       .string()
@@ -261,8 +277,8 @@ const startPresentationRunSchema = z
     }
   });
 const getPresentationRunSchema = z.union([
-  z.object({ conversation_id: presentationUuidSchema, run_id: presentationUuidSchema }).strict(),
-  z.object({ conversation_id: presentationUuidSchema, client_request_id: presentationUuidSchema }).strict(),
+  z.object({ conversation_id: presentationConversationIdSchema, run_id: presentationUuidSchema }).strict(),
+  z.object({ conversation_id: presentationConversationIdSchema, client_request_id: presentationUuidSchema }).strict(),
 ]);
 const presentationRecoveryCursorSchema = z
   .string()
@@ -534,6 +550,61 @@ export const INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE = '[adapter] Native IPC reque
 export const INVALID_RENDERER_BRIDGE_QUERY_PAYLOAD_MESSAGE =
   '[adapter] Renderer IPC query rejected: invalid operation payload';
 
+export type NativeBridgePayloadDiagnostic = Readonly<{
+  providerKey: NativeBridgeProviderKey;
+  issues: readonly Readonly<{ code: string; path: readonly (string | number)[] }>[];
+}>;
+
+const nativeBridgePayloadDiagnostics = new WeakMap<Error, NativeBridgePayloadDiagnostic>();
+
+const sanitizeDiagnosticRootField = (field: string): string =>
+  Array.from(field.slice(0, MAX_NATIVE_BRIDGE_DIAGNOSTIC_PATH_SEGMENT_LENGTH), (character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint < 32 || codePoint === 127 ? '?' : character;
+  }).join('');
+
+const boundedDiagnosticPath = (path: readonly PropertyKey[]): readonly (string | number)[] => {
+  const bounded: (string | number)[] = [];
+  const [rootField, ...nestedPath] = path;
+  if (typeof rootField === 'string') {
+    bounded.push(sanitizeDiagnosticRootField(rootField));
+  } else if (typeof rootField === 'number' && Number.isSafeInteger(rootField)) {
+    bounded.push(rootField);
+  }
+  // Native payload schemas have fixed top-level fields, while nested records can
+  // contribute payload-controlled string keys to Zod paths. Retain only numeric
+  // array indexes below the root so diagnostic paths cannot copy those keys.
+  for (const segment of nestedPath) {
+    if (typeof segment !== 'number' || !Number.isSafeInteger(segment)) continue;
+    if (bounded.length >= MAX_NATIVE_BRIDGE_DIAGNOSTIC_PATH_SEGMENTS) break;
+    const candidate = [...bounded, segment];
+    if (JSON.stringify(candidate).length > MAX_NATIVE_BRIDGE_DIAGNOSTIC_PATH_JSON_LENGTH) break;
+    bounded.push(segment);
+  }
+  return Object.freeze(bounded);
+};
+
+const buildNativeBridgePayloadDiagnostic = (
+  providerKey: NativeBridgeProviderKey,
+  issues: readonly z.ZodIssue[]
+): NativeBridgePayloadDiagnostic =>
+  Object.freeze({
+    providerKey,
+    issues: Object.freeze(
+      issues.slice(0, MAX_NATIVE_BRIDGE_DIAGNOSTIC_ISSUES).map((issue) =>
+        Object.freeze({
+          code: String(issue.code),
+          path: boundedDiagnosticPath(issue.path),
+        })
+      )
+    ),
+  });
+
+/** Returns only the bounded, payload-free diagnostic attached to a native payload rejection. */
+export function getNativeBridgePayloadDiagnostic(error: unknown): NativeBridgePayloadDiagnostic | null {
+  return error instanceof Error ? (nativeBridgePayloadDiagnostics.get(error) ?? null) : null;
+}
+
 export const rendererBridgeQuerySchemas = {
   'creative-studio.has-unsaved-work': {
     request: voidPayloadSchema,
@@ -607,30 +678,30 @@ export const nativeBridgePayloadSchemas = {
   'presentation-templates.list': voidPayloadSchema,
   'presentation-templates.import-spec': z.object({ file_path: pathSchema }).strict(),
   'presentation-templates.describe-spec': z
-    .object({ conversation_id: presentationUuidSchema, file_path: pathSchema })
+    .object({ conversation_id: presentationConversationIdSchema, file_path: pathSchema })
     .strict(),
   'presentation-templates.import-spec-bound': z
     .object({
-      conversation_id: presentationUuidSchema,
+      conversation_id: presentationConversationIdSchema,
       file_path: pathSchema,
       expected_sha256: presentationSha256Schema,
     })
     .strict(),
   'presentation-templates.remove': z.object({ id: identifierSchema }).strict(),
   'presentation-templates.scratch.allocate': z
-    .object({ conversation_id: identifierSchema, template_id: identifierSchema })
+    .object({ conversation_id: presentationConversationIdSchema, template_id: identifierSchema })
     .strict(),
-  'presentation-templates.scratch.complete': z.object({ run_id: z.string().uuid() }).strict(),
+  'presentation-templates.scratch.complete': z.object({ run_id: presentationScratchRunIdSchema }).strict(),
   'presentation-templates.scratch.retain': z
-    .object({ run_id: z.string().uuid(), reason: z.enum(['failed', 'interrupted']) })
+    .object({ run_id: presentationScratchRunIdSchema, reason: z.enum(['failed', 'interrupted']) })
     .strict(),
-  'presentation-templates.scratch.discard': z.object({ run_id: z.string().uuid() }).strict(),
+  'presentation-templates.scratch.discard': z.object({ run_id: presentationScratchRunIdSchema }).strict(),
   'presentation-sources.get-source-owner': z.object({ owner: presentationGrantOwnerSchema }).strict(),
   'presentation-sources.create-draft': z.object({ client_request_id: presentationUuidSchema }).strict(),
   'presentation-sources.bind-draft': z
     .object({
       draft_id: presentationUuidSchema,
-      conversation_id: presentationUuidSchema,
+      conversation_id: presentationConversationIdSchema,
       expected_revision: presentationRevisionSchema,
     })
     .strict(),
@@ -639,7 +710,7 @@ export const nativeBridgePayloadSchemas = {
     .strict(),
   'presentation-sources.grant-workspace-source': z
     .object({
-      conversation_id: presentationUuidSchema,
+      conversation_id: presentationConversationIdSchema,
       relative_path: presentationRelativePathSchema,
       expected_owner_revision: presentationRevisionSchema,
     })
@@ -663,7 +734,7 @@ export const nativeBridgePayloadSchemas = {
   'presentation-runs.get': getPresentationRunSchema,
   'presentation-runs.list-recoverable': z
     .object({
-      conversation_id: presentationUuidSchema,
+      conversation_id: presentationConversationIdSchema,
       cursor: presentationRecoveryCursorSchema.optional(),
       limit: z
         .number()
@@ -676,21 +747,21 @@ export const nativeBridgePayloadSchemas = {
     .strict(),
   'presentation-runs.open-recovery': z
     .object({
-      conversation_id: presentationUuidSchema,
+      conversation_id: presentationConversationIdSchema,
       run_id: presentationUuidSchema,
       expected_sha256: presentationSha256Schema,
     })
     .strict(),
   'presentation-runs.discard': z
     .object({
-      conversation_id: presentationUuidSchema,
+      conversation_id: presentationConversationIdSchema,
       run_id: presentationUuidSchema,
       expected_revision: presentationRevisionSchema,
     })
     .strict(),
   'presentation-runs.claim-initial-dispatch': z
     .object({
-      conversation_id: presentationUuidSchema,
+      conversation_id: presentationConversationIdSchema,
       run_id: presentationUuidSchema,
       holder_id: presentationUuidSchema,
       expected_revision: presentationRevisionSchema,
@@ -698,7 +769,7 @@ export const nativeBridgePayloadSchemas = {
     .strict(),
   'presentation-runs.renew-initial-dispatch': z
     .object({
-      conversation_id: presentationUuidSchema,
+      conversation_id: presentationConversationIdSchema,
       run_id: presentationUuidSchema,
       lease_token: z
         .string()
@@ -710,7 +781,7 @@ export const nativeBridgePayloadSchemas = {
     .strict(),
   'presentation-runs.dispatch': z
     .object({
-      conversation_id: presentationUuidSchema,
+      conversation_id: presentationConversationIdSchema,
       run_id: presentationUuidSchema,
       lease_token: z
         .string()
@@ -905,7 +976,13 @@ export const nativeBridgePayloadSchemas = {
 export function parseNativeBridgePayload(providerKey: NativeBridgeProviderKey, payload: unknown): unknown {
   const result = nativeBridgePayloadSchemas[providerKey].safeParse(payload);
   if (!result.success) {
-    throw new Error(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+    const error = new Error(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+    try {
+      nativeBridgePayloadDiagnostics.set(error, buildNativeBridgePayloadDiagnostic(providerKey, result.error.issues));
+    } catch {
+      // Diagnostic construction must never replace the generic IPC rejection.
+    }
+    throw error;
   }
   return result.data;
 }

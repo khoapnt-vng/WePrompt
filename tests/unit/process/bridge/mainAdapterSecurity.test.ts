@@ -8,6 +8,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ADAPTER_BRIDGE_EVENT_KEY, type RendererBridgeQueryKey } from '@/common/adapter/native/constants';
+import { INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE } from '@/common/adapter/native/payloadSchemas';
 import { initMainAdapterWithWindow } from '@/common/adapter/main';
 
 type FakeWebContents = {
@@ -90,12 +91,14 @@ function createRendererQueryResponse(key: RendererBridgeQueryKey, data: unknown,
 }
 
 beforeEach(() => {
+  vi.spyOn(console, 'error').mockImplementation(() => undefined);
   mocks.bridgeEmitter.emit.mockReset();
   mocks.hasListener.mockReset();
   mocks.hasListener.mockReturnValue(false);
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   while (registeredWindowDisposers.length > 0) {
     registeredWindowDisposers.pop()?.();
   }
@@ -472,5 +475,46 @@ describe('main adapter IPC security boundary', () => {
     expect(String(thrown)).toContain('invalid operation payload');
     expect(String(thrown)).not.toContain(secret);
     expect(mocks.bridgeEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('logs the rejected operation and safe issue path while keeping the renderer error generic', async () => {
+    const sender = createRegisteredSender();
+    const secret = '/private/secret-conversation-value';
+    const diagnosticLog = vi.mocked(console.error);
+    diagnosticLog.mockClear();
+    let thrown: unknown;
+
+    try {
+      await getInvokeHandler()(
+        { sender },
+        createRequest('subscribe-presentation-runs.list-recoverable', { conversation_id: secret, limit: 20 })
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toEqual(new Error(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE));
+    expect(diagnosticLog).toHaveBeenCalledWith(
+      '[adapter] Native IPC payload validation failed ' +
+        '{"providerKey":"presentation-runs.list-recoverable","issues":[{"code":"invalid_string","path":["conversation_id"]}]}'
+    );
+    expect(JSON.stringify(diagnosticLog.mock.calls)).not.toContain(secret);
+  });
+
+  it('keeps the generic rejection when diagnostic logging fails', async () => {
+    const sender = createRegisteredSender();
+    vi.mocked(console.error).mockImplementation(() => {
+      throw new Error('diagnostic sink failed');
+    });
+
+    await expect(
+      getInvokeHandler()(
+        { sender },
+        createRequest('subscribe-presentation-runs.list-recoverable', {
+          conversation_id: '/private/invalid-conversation',
+          limit: 20,
+        })
+      )
+    ).rejects.toEqual(new Error(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE));
   });
 });

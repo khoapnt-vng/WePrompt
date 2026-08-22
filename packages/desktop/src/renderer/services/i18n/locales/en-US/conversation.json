@@ -1737,6 +1737,8 @@
           "unavailable": "Coverage controls are unavailable because duration facts are incomplete.",
           "playbackLane": "Playback coverage",
           "planningLane": "Planning overlay",
+          "trimGuidance": "Edge · Trim · Free",
+          "boundaryGuidance": "Boundary · Costs a re-render",
           "shotLabel": "Shot {{index}}",
           "sourceDuration": "{{seconds, number(maximumFractionDigits: 0; useGrouping: false)}}s source",
           "planningDuration": "{{seconds}}s plan",

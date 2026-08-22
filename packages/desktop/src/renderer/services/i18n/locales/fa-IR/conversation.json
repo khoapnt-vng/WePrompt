@@ -903,6 +903,12 @@
       "importError": "مرجع افزوده نشد. دوباره تلاش کنید."
     },
     "workspace": {
+      "beatPanel": {
+        "coverage": {
+          "trimGuidance": "لبه · برش · رایگان",
+          "boundaryGuidance": "مرز · نیازمند رندر مجدد"
+        }
+      },
       "controls": {
         "briefAndRulesTitle": "بریف و قوانین"
       },

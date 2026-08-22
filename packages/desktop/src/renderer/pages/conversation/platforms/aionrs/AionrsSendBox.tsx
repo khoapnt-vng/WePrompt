@@ -14,6 +14,7 @@ import type {
   PresentationSourceDescriptor,
   PresentationSourceRef,
 } from '@/common/types/office/presentationRun';
+import { normalizePresentationConversationId } from '@/common/types/office/presentationConversationId';
 import type { PresentationCommandQueueItem } from '@/common/types/platform/presentationCommandQueue';
 import type {
   ManagedPresentationSubmission,
@@ -244,22 +245,27 @@ const AionrsSendBox: React.FC<{
   const { markSendStarted, markSendAccepted, markSendFailed } = runtimeView;
 
   const { atPath, uploadFile, setAtPath, setUploadFile, content, setContent } = useSendBoxDraft(conversation_id);
-  const presentationTemplates = usePresentationTemplates(conversation_id);
+  const presentationConversationId = normalizePresentationConversationId(conversation_id);
+  const presentationTemplates = usePresentationTemplates(presentationConversationId ?? undefined);
   const presentationSourceDraft = usePresentationSourceDraft();
-  const managedPresentationEligible = getPresentationRunEligibility({
-    featureEnabled: PRESENTATION_RUN_V2_ENABLED,
-    isDesktop: isElectronDesktop(),
-    scope: teamSendMessage ? 'team' : 'individual',
-    runtime: 'aionrs',
-    templateFormat: presentationTemplates.selectedTemplate?.manifest.format ?? null,
-  });
-  const managedPresentationPlatformEligible = getPresentationRunEligibility({
-    featureEnabled: PRESENTATION_RUN_V2_ENABLED,
-    isDesktop: isElectronDesktop(),
-    scope: teamSendMessage ? 'team' : 'individual',
-    runtime: 'aionrs',
-    templateFormat: 'pptx',
-  });
+  const managedPresentationEligible =
+    presentationConversationId !== null &&
+    getPresentationRunEligibility({
+      featureEnabled: PRESENTATION_RUN_V2_ENABLED,
+      isDesktop: isElectronDesktop(),
+      scope: teamSendMessage ? 'team' : 'individual',
+      runtime: 'aionrs',
+      templateFormat: presentationTemplates.selectedTemplate?.manifest.format ?? null,
+    });
+  const managedPresentationPlatformEligible =
+    presentationConversationId !== null &&
+    getPresentationRunEligibility({
+      featureEnabled: PRESENTATION_RUN_V2_ENABLED,
+      isDesktop: isElectronDesktop(),
+      scope: teamSendMessage ? 'team' : 'individual',
+      runtime: 'aionrs',
+      templateFormat: 'pptx',
+    });
   const hasLegacyPresentationAttachments = uploadFile.length > 0 || atPath.length > 0;
   const [showPresentationSourceReselect, setShowPresentationSourceReselect] = useState(false);
   const [managedPresentationProgress, setManagedPresentationProgress] =
@@ -270,28 +276,42 @@ const AionrsSendBox: React.FC<{
   } | null>(null);
   const managedPresentationDrainRef = useRef(false);
   const managedInitialSubmissionRef = useRef<string | null>(null);
-  const presentationConversationIdRef = useLatestRef(conversation_id);
+  const presentationConversationIdRef = useLatestRef(presentationConversationId);
   const managedPresentationEligibleRef = useLatestRef(managedPresentationEligible);
 
-  const getManagedPresentationController = useCallback((): PresentationCommandQueueController => {
+  const getManagedPresentationController = useCallback((conversationId: string): PresentationCommandQueueController => {
+    if (
+      normalizePresentationConversationId(conversationId) !== conversationId ||
+      presentationConversationIdRef.current !== conversationId
+    ) {
+      throw new Error('Invalid managed presentation conversation id');
+    }
     const current = managedPresentationControllerRef.current;
-    if (current?.conversationId === conversation_id) return current.controller;
-    const controller = createPresentationCommandQueueController({ conversationId: conversation_id });
-    managedPresentationControllerRef.current = { conversationId: conversation_id, controller };
+    if (current?.conversationId === conversationId) return current.controller;
+    const controller = createPresentationCommandQueueController({ conversationId });
+    managedPresentationControllerRef.current = { conversationId, controller };
     return controller;
-  }, [conversation_id]);
+  }, []);
 
   useEffect(() => {
-    if (!managedPresentationEligible) return;
-    void presentationSourceDraft.hydrate({ owner_type: 'conversation', conversation_id });
+    if (!managedPresentationEligible || presentationConversationId === null) return;
+    void presentationSourceDraft.hydrate({
+      owner_type: 'conversation',
+      conversation_id: presentationConversationId,
+    });
     return () => presentationSourceDraft.reset();
-  }, [conversation_id, managedPresentationEligible, presentationSourceDraft.hydrate, presentationSourceDraft.reset]);
+  }, [
+    managedPresentationEligible,
+    presentationConversationId,
+    presentationSourceDraft.hydrate,
+    presentationSourceDraft.reset,
+  ]);
 
   useEffect(() => {
     setShowPresentationSourceReselect(false);
     setManagedPresentationProgress(null);
     managedPresentationControllerRef.current = null;
-  }, [conversation_id]);
+  }, [presentationConversationId]);
 
   useEffect(() => {
     if (!managedPresentationEligible || !hasLegacyPresentationAttachments) {
@@ -382,25 +402,32 @@ const AionrsSendBox: React.FC<{
       controller: PresentationCommandQueueController,
       item: PresentationCommandQueueItem
     ): Promise<PresentationCommandQueueItem> => {
+      if (presentationConversationId === null) return item;
+      const requestedConversationId = presentationConversationId;
+      const requestIsCurrent = () => presentationConversationIdRef.current === requestedConversationId;
+      if (!requestIsCurrent()) return item;
       let lookup;
       try {
         lookup = await ipcBridge.presentationRuns.get.invoke({
-          conversation_id,
+          conversation_id: requestedConversationId,
           client_request_id: item.clientRequestId,
         });
       } catch {
-        publishManagedPresentationProgress(item);
+        if (requestIsCurrent()) publishManagedPresentationProgress(item);
         return item;
       }
+      if (!requestIsCurrent()) return item;
       if ('code' in lookup) {
         if (lookup.code !== 'RUN_NOT_FOUND') {
           publishManagedPresentationProgress(item);
           return item;
         }
         try {
-          const committed = await controller.allocateClaimed(item.queueItemId, (request) =>
-            ipcBridge.presentationRuns.start.invoke(request)
-          );
+          const committed = await controller.allocateClaimed(item.queueItemId, (request) => {
+            if (!requestIsCurrent()) throw new Error('Managed presentation route changed');
+            return ipcBridge.presentationRuns.start.invoke(request);
+          });
+          if (!requestIsCurrent()) return item;
           publishManagedPresentationProgress(committed);
           return committed;
         } catch {
@@ -410,6 +437,7 @@ const AionrsSendBox: React.FC<{
         }
       }
 
+      if (!requestIsCurrent()) return item;
       const { run } = lookup;
       let recovered = await controller.transition(item.queueItemId, {
         state: 'committed',
@@ -445,7 +473,7 @@ const AionrsSendBox: React.FC<{
       publishManagedPresentationProgress(recovered);
       return recovered;
     },
-    [conversation_id, publishManagedPresentationProgress]
+    [presentationConversationId, publishManagedPresentationProgress]
   );
 
   const observeManagedPresentation = useCallback(
@@ -455,15 +483,20 @@ const AionrsSendBox: React.FC<{
     ): Promise<PresentationCommandQueueItem> => {
       publishManagedPresentationProgress(item);
       if (item.execution.state !== 'dispatching' && item.execution.state !== 'dispatch_uncertain') return item;
+      if (presentationConversationId === null) return item;
+      const requestedConversationId = presentationConversationId;
+      const requestIsCurrent = () => presentationConversationIdRef.current === requestedConversationId;
+      if (!requestIsCurrent()) return item;
       let lookup;
       try {
         lookup = await ipcBridge.presentationRuns.get.invoke({
-          conversation_id,
+          conversation_id: requestedConversationId,
           run_id: item.execution.runId,
         });
       } catch {
         return item;
       }
+      if (!requestIsCurrent()) return item;
       if (item.execution.state === 'dispatch_uncertain') return item;
       if ('code' in lookup) return item;
       if (lookup.run.dispatchStatus === 'dispatch_uncertain') {
@@ -491,7 +524,7 @@ const AionrsSendBox: React.FC<{
       await controller.removeBound(item.queueItemId);
       return bound;
     },
-    [conversation_id, publishManagedPresentationProgress]
+    [presentationConversationId, publishManagedPresentationProgress]
   );
 
   const markManagedPresentationUncertain = useCallback(
@@ -541,17 +574,22 @@ const AionrsSendBox: React.FC<{
       verifyMainAuthority: boolean
     ): Promise<PresentationCommandQueueItem> => {
       if (item.execution.state !== 'committed') return item;
+      if (presentationConversationId === null) return item;
+      const requestedConversationId = presentationConversationId;
+      const requestIsCurrent = () => presentationConversationIdRef.current === requestedConversationId;
+      if (!requestIsCurrent()) return item;
       let expectedRevision = item.execution.revision;
       if (verifyMainAuthority) {
         let lookup;
         try {
           lookup = await ipcBridge.presentationRuns.get.invoke({
-            conversation_id,
+            conversation_id: requestedConversationId,
             run_id: item.execution.runId,
           });
         } catch {
           return item;
         }
+        if (!requestIsCurrent()) return item;
         if ('code' in lookup) return item;
         if (lookup.run.dispatchStatus === 'dispatch_uncertain') {
           return markManagedPresentationUncertain(controller, item, lookup.run.runId, lookup.run.revision);
@@ -576,9 +614,10 @@ const AionrsSendBox: React.FC<{
       }
 
       let claimed;
+      if (!requestIsCurrent()) return item;
       try {
         claimed = await ipcBridge.presentationRuns.claimInitialDispatch.invoke({
-          conversation_id,
+          conversation_id: requestedConversationId,
           run_id: item.execution.runId,
           holder_id: item.queueItemId,
           expected_revision: expectedRevision,
@@ -586,26 +625,30 @@ const AionrsSendBox: React.FC<{
       } catch {
         return item;
       }
+      if (!requestIsCurrent()) return item;
       if ('code' in claimed) return item;
 
       try {
         const dispatched = await ipcBridge.presentationRuns.dispatch.invoke({
-          conversation_id,
+          conversation_id: requestedConversationId,
           run_id: claimed.runId,
           lease_token: claimed.leaseToken,
           expected_revision: claimed.revision,
         });
+        if (!requestIsCurrent()) return item;
         return settleManagedPresentationDispatch(controller, item, dispatched);
       } catch {
+        if (!requestIsCurrent()) return item;
         let lookup;
         try {
           lookup = await ipcBridge.presentationRuns.get.invoke({
-            conversation_id,
+            conversation_id: requestedConversationId,
             run_id: item.execution.runId,
           });
         } catch {
           return item;
         }
+        if (!requestIsCurrent()) return item;
         if ('code' in lookup) return item;
         if (lookup.run.dispatchStatus === 'dispatch_uncertain') {
           return markManagedPresentationUncertain(controller, item, lookup.run.runId, lookup.run.revision);
@@ -628,7 +671,7 @@ const AionrsSendBox: React.FC<{
       }
     },
     [
-      conversation_id,
+      presentationConversationId,
       markManagedPresentationUncertain,
       publishManagedPresentationProgress,
       settleManagedPresentationDispatch,
@@ -637,8 +680,16 @@ const AionrsSendBox: React.FC<{
 
   const drainManagedPresentationQueue = useCallback(
     async (targetQueueItemId?: string): Promise<PresentationCommandQueueItem | null> => {
-      if (!managedPresentationPlatformEligible) return null;
-      const controller = getManagedPresentationController();
+      const requestedConversationId = presentationConversationId;
+      if (
+        !managedPresentationPlatformEligible ||
+        requestedConversationId === null ||
+        presentationConversationIdRef.current !== requestedConversationId
+      ) {
+        return null;
+      }
+      const requestIsCurrent = () => presentationConversationIdRef.current === requestedConversationId;
+      const controller = getManagedPresentationController(requestedConversationId);
       if (controller.read().items.length === 0 || managedPresentationDrainRef.current) return null;
       managedPresentationDrainRef.current = true;
       try {
@@ -646,6 +697,7 @@ const AionrsSendBox: React.FC<{
         let targetResult: PresentationCommandQueueItem | null = null;
         let latestResult: PresentationCommandQueueItem | null = null;
         const drainNext = async (): Promise<PresentationCommandQueueItem | null> => {
+          if (!requestIsCurrent()) return targetResult ?? latestResult;
           let item = controller.read().items[0];
           if (item === undefined) return targetResult ?? latestResult;
           let freshlyCommitted = false;
@@ -662,12 +714,16 @@ const AionrsSendBox: React.FC<{
             ) {
               return targetResult ?? item;
             }
+            if (!requestIsCurrent()) return targetResult ?? item;
             item = await controller.claimHead(item.queueItemId);
+            if (!requestIsCurrent()) return targetResult ?? item;
             publishManagedPresentationProgress(item);
             try {
-              item = await controller.allocateClaimed(item.queueItemId, (request) =>
-                ipcBridge.presentationRuns.start.invoke(request)
-              );
+              item = await controller.allocateClaimed(item.queueItemId, (request) => {
+                if (!requestIsCurrent()) throw new Error('Managed presentation route changed');
+                return ipcBridge.presentationRuns.start.invoke(request);
+              });
+              if (!requestIsCurrent()) return targetResult ?? item;
               freshlyCommitted = item.execution.state === 'committed';
               publishManagedPresentationProgress(item);
             } catch {
@@ -712,6 +768,7 @@ const AionrsSendBox: React.FC<{
       getManagedPresentationController,
       managedPresentationPlatformEligible,
       observeManagedPresentation,
+      presentationConversationId,
       publishManagedPresentationProgress,
       recoverClaimedManagedPresentation,
     ]
@@ -724,7 +781,12 @@ const AionrsSendBox: React.FC<{
       expectedOwnerRevision: number | null,
       consumeSelection = true
     ): Promise<PresentationSubmissionProgress> => {
-      const controller = getManagedPresentationController();
+      const requestedConversationId = presentationConversationId;
+      if (requestedConversationId === null || presentationConversationIdRef.current !== requestedConversationId) {
+        throw new Error('Invalid managed presentation conversation id');
+      }
+      const requestIsCurrent = () => presentationConversationIdRef.current === requestedConversationId;
+      const controller = getManagedPresentationController(requestedConversationId);
       const queued = await controller.enqueue({
         queueItemId: snapshot.queueItemId,
         clientRequestId: snapshot.clientRequestId,
@@ -734,6 +796,7 @@ const AionrsSendBox: React.FC<{
         sourceOwner,
         expectedOwnerRevision,
       });
+      if (!requestIsCurrent()) return toPresentationSubmissionProgress(queued);
       publishManagedPresentationProgress(queued);
       const current = (await drainManagedPresentationQueue(snapshot.queueItemId)) ?? queued;
       const progress = toPresentationSubmissionProgress(current);
@@ -748,6 +811,7 @@ const AionrsSendBox: React.FC<{
     [
       drainManagedPresentationQueue,
       getManagedPresentationController,
+      presentationConversationId,
       presentationTemplates,
       publishManagedPresentationProgress,
     ]
@@ -769,7 +833,7 @@ const AionrsSendBox: React.FC<{
     if (
       presentationSourceDraft.pending ||
       sourceOwner?.owner_type !== 'conversation' ||
-      sourceOwner.conversation_id !== conversation_id ||
+      sourceOwner.conversation_id !== presentationConversationId ||
       expectedOwnerRevision === null
     ) {
       return undefined;
@@ -784,13 +848,19 @@ const AionrsSendBox: React.FC<{
           sources.length > 0 ? expectedOwnerRevision : null
         ),
       onRestore: async (snapshot) => {
-        await getManagedPresentationController().removePreflightFailed(snapshot.queueItemId);
+        if (
+          presentationConversationId === null ||
+          presentationConversationIdRef.current !== presentationConversationId
+        ) {
+          return;
+        }
+        await getManagedPresentationController(presentationConversationId).removePreflightFailed(snapshot.queueItemId);
         setManagedPresentationProgress(null);
       },
       progress: managedPresentationProgress,
     };
   }, [
-    conversation_id,
+    presentationConversationId,
     enqueueManagedPresentation,
     getManagedPresentationController,
     hasLegacyPresentationAttachments,
@@ -831,7 +901,8 @@ const AionrsSendBox: React.FC<{
   });
 
   const pickPresentationSources = useCallback(async () => {
-    const requestedConversationId = conversation_id;
+    const requestedConversationId = presentationConversationId;
+    if (requestedConversationId === null) return null;
     const requestIsCurrent = () =>
       managedPresentationEligibleRef.current && presentationConversationIdRef.current === requestedConversationId;
     const hasCurrentOwner =
@@ -858,7 +929,7 @@ const AionrsSendBox: React.FC<{
     return result;
   }, [
     clearFiles,
-    conversation_id,
+    presentationConversationId,
     hasLegacyPresentationAttachments,
     presentationSourceDraft.hydrate,
     presentationSourceDraft.owner,
@@ -868,7 +939,8 @@ const AionrsSendBox: React.FC<{
 
   const grantDroppedPresentationSources = useCallback(
     async (files: readonly File[]): Promise<void> => {
-      const requestedConversationId = conversation_id;
+      const requestedConversationId = presentationConversationId;
+      if (requestedConversationId === null) return;
       const requestIsCurrent = () =>
         managedPresentationEligibleRef.current && presentationConversationIdRef.current === requestedConversationId;
       const hasCurrentOwner =
@@ -895,7 +967,7 @@ const AionrsSendBox: React.FC<{
     },
     [
       clearFiles,
-      conversation_id,
+      presentationConversationId,
       hasLegacyPresentationAttachments,
       presentationSourceDraft.grantExternalDrop,
       presentationSourceDraft.hydrate,
@@ -1023,7 +1095,11 @@ const AionrsSendBox: React.FC<{
       const storedMessage = sessionStorage.getItem(storageKey);
       if (!storedMessage) return;
 
-      if (managedPresentationPlatformEligible) {
+      const requestedPresentationConversationId = presentationConversationId;
+      const presentationRequestIsCurrent = () =>
+        requestedPresentationConversationId !== null &&
+        presentationConversationIdRef.current === requestedPresentationConversationId;
+      if (managedPresentationPlatformEligible && requestedPresentationConversationId !== null) {
         let parsed: unknown;
         try {
           parsed = JSON.parse(storedMessage) as unknown;
@@ -1047,11 +1123,12 @@ const AionrsSendBox: React.FC<{
               typeof candidate.clientRequestId === 'string' ? candidate.clientRequestId : crypto.randomUUID();
             sessionStorage.setItem(storageKey, JSON.stringify({ ...candidate, queueItemId, clientRequestId }));
             try {
+              if (!presentationRequestIsCurrent()) return;
               const sourceState = await presentationSourceDraft.hydrate({
                 owner_type: 'conversation',
-                conversation_id,
+                conversation_id: requestedPresentationConversationId,
               });
-              if (!sourceState.ok) return;
+              if (!sourceState.ok || !presentationRequestIsCurrent()) return;
               const sources = toPresentationSourceRefs(sourceState.grants);
               const snapshot: PresentationSubmissionSnapshot = Object.freeze({
                 queueItemId,
@@ -1067,6 +1144,7 @@ const AionrsSendBox: React.FC<{
                 sources.length > 0 ? sourceState.ownerRevision : null,
                 false
               );
+              if (!presentationRequestIsCurrent()) return;
               sessionStorage.setItem(processedKey, '1');
               sessionStorage.removeItem(storageKey);
               return;
@@ -1116,6 +1194,7 @@ const AionrsSendBox: React.FC<{
     enqueueManagedPresentation,
     executeCommand,
     managedPresentationPlatformEligible,
+    presentationConversationId,
     presentationSourceDraft.hydrate,
   ]);
 
@@ -1143,7 +1222,10 @@ const AionrsSendBox: React.FC<{
     clearFiles();
     emitter.emit('aionrs.selected.file.clear');
 
-    const scratch = teamSendMessage ? undefined : await presentationTemplates.prepareScratch(conversation_id);
+    const scratch =
+      teamSendMessage || presentationConversationId === null
+        ? undefined
+        : await presentationTemplates.prepareScratch(presentationConversationId);
     const composed = presentationTemplates.composeSend(message, filesToSend, scratch);
 
     if (

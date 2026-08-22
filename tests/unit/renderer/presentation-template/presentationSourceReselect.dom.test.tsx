@@ -96,6 +96,7 @@ const {
       handleSend: vi.fn(),
       sendMessageHandler: vi.fn(),
       isButtonDisabled: false,
+      retireManagedPresentationAttemptAfterSourceChange: vi.fn(),
     },
     onSlashBuiltinCommandMock: vi.fn(),
   };
@@ -321,6 +322,7 @@ describe('Guid presentation source re-selection', () => {
       grantId: 'grant-1',
       ownerRevision: 2,
       revokedAt: '2026-08-04T12:01:00.000Z',
+      queueUnboundAtRevoke: true,
     });
   });
 
@@ -350,6 +352,7 @@ describe('Guid presentation source re-selection', () => {
       expect(pickSourcesMock).toHaveBeenCalledTimes(1);
       expect(guidInputMock.setFiles).toHaveBeenCalledWith([]);
     });
+    expect(sendMock.retireManagedPresentationAttemptAfterSourceChange).toHaveBeenCalledWith({ kind: 'added' });
     expect(sendMock.sendMessageHandler).not.toHaveBeenCalled();
   });
 
@@ -385,8 +388,68 @@ describe('Guid presentation source re-selection', () => {
 
     expect(createDraftMock).toHaveBeenCalledWith('11111111-1111-4111-8111-111111111111');
     expect(grantExternalDropMock).toHaveBeenCalledWith([source]);
+    expect(sendMock.retireManagedPresentationAttemptAfterSourceChange).toHaveBeenCalledWith({ kind: 'added' });
     expect(guidInputMock.setFiles).toHaveBeenCalledWith([]);
     expect(sendMock.sendMessageHandler).not.toHaveBeenCalled();
+  });
+
+  it('passes exact successful revoke proof and never retires after a rejected revoke', async () => {
+    presentationSourceDraftMock.descriptors = [selectedGrant];
+    render(<GuidPage />);
+    const onRevokePresentationSource = capturedGuidInputCardProps.at(-1)?.onRevokePresentationSource;
+    expect(onRevokePresentationSource).toBeTypeOf('function');
+
+    act(() => {
+      (onRevokePresentationSource as (grantId: string) => void)(selectedGrant.grantId);
+    });
+    await waitFor(() =>
+      expect(sendMock.retireManagedPresentationAttemptAfterSourceChange).toHaveBeenCalledWith({
+        kind: 'revoked',
+        grantId: selectedGrant.grantId,
+        queueUnboundAtRevoke: true,
+      })
+    );
+
+    sendMock.retireManagedPresentationAttemptAfterSourceChange.mockClear();
+    revokeMock.mockResolvedValueOnce({ ok: false, code: 'SOURCE_GRANT_REPLAYED' });
+    act(() => {
+      (onRevokePresentationSource as (grantId: string) => void)(selectedGrant.grantId);
+    });
+    await waitFor(() => expect(revokeMock).toHaveBeenCalledTimes(2));
+    expect(sendMock.retireManagedPresentationAttemptAfterSourceChange).not.toHaveBeenCalled();
+
+    revokeMock.mockResolvedValueOnce({
+      ok: true,
+      status: 'already_revoked',
+      grantId: selectedGrant.grantId,
+      ownerRevision: 2,
+      revokedAt: '2026-08-04T12:01:00.000Z',
+      queueUnboundAtRevoke: true,
+    });
+    act(() => {
+      (onRevokePresentationSource as (grantId: string) => void)(selectedGrant.grantId);
+    });
+    await waitFor(() => expect(revokeMock).toHaveBeenCalledTimes(3));
+    expect(sendMock.retireManagedPresentationAttemptAfterSourceChange).toHaveBeenCalledWith({
+      kind: 'revoked',
+      grantId: selectedGrant.grantId,
+      queueUnboundAtRevoke: true,
+    });
+
+    sendMock.retireManagedPresentationAttemptAfterSourceChange.mockClear();
+    revokeMock.mockResolvedValueOnce({
+      ok: true,
+      status: 'already_revoked',
+      grantId: selectedGrant.grantId,
+      ownerRevision: 2,
+      revokedAt: '2026-08-04T12:01:00.000Z',
+      queueUnboundAtRevoke: false,
+    });
+    act(() => {
+      (onRevokePresentationSource as (grantId: string) => void)(selectedGrant.grantId);
+    });
+    await waitFor(() => expect(revokeMock).toHaveBeenCalledTimes(4));
+    expect(sendMock.retireManagedPresentationAttemptAfterSourceChange).not.toHaveBeenCalled();
   });
 
   it('routes the eligible /open command through the managed picker without calling the legacy selector', async () => {

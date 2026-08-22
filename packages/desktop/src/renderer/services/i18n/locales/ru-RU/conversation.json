@@ -907,6 +907,12 @@
       "importError": "Не удалось добавить референс. Повторите попытку."
     },
     "workspace": {
+      "beatPanel": {
+        "coverage": {
+          "trimGuidance": "Край · Обрезка · Бесплатно",
+          "boundaryGuidance": "Граница · Требует повторного рендера"
+        }
+      },
       "controls": {
         "briefAndRulesTitle": "Бриф и правила"
       },

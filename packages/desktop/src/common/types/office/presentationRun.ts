@@ -120,13 +120,18 @@ export type PresentationRunFailure =
   | PresentationFailure<
       | 'SOURCE_GRANT_INVALID'
       | 'SOURCE_GRANT_FOREIGN'
-      | 'SOURCE_GRANT_REPLAYED'
       | 'SOURCE_TAMPERED'
       | 'SOURCE_LIMIT_EXCEEDED'
       | 'SOURCE_FORMAT_UNSUPPORTED',
       false,
       'grant_validation',
       { grantId?: string }
+    >
+  | PresentationFailure<
+      'SOURCE_GRANT_REPLAYED',
+      false,
+      'grant_validation',
+      { grantId?: string; queueUnboundAtRevoke?: true }
     >
   | PresentationFailure<'SOURCE_GRANT_EXPIRED', false, 'grant_expired', { grantId: string }>
   | PresentationFailure<'LEASE_CONFLICT', false, 'committed', { runId: string; leaseExpiresAt: string }>
@@ -445,6 +450,7 @@ export type RevokePresentationSourceResult =
       grantId: string;
       ownerRevision: number;
       revokedAt: string;
+      queueUnboundAtRevoke: boolean;
     }
   | FailureFor<
       | 'FEATURE_DISABLED'

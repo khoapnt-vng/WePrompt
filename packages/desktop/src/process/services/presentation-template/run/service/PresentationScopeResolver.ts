@@ -6,7 +6,8 @@
 
 import path from 'node:path';
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+import { normalizePresentationConversationId } from '@/common/types/office/presentationConversationId';
+
 const MAX_PRINCIPAL_LENGTH = 256;
 const MAX_RUNTIME_LENGTH = 64;
 const MAX_WORKSPACE_LENGTH = 4096;
@@ -46,9 +47,10 @@ function isBoundedIdentifier(value: unknown, maximum: number): value is string {
 }
 
 function parseConversation(value: unknown, conversationId: string): ConversationRecord | null {
+  const recordConversationId = isRecord(value) ? normalizePresentationConversationId(value.id) : null;
   if (
     !isRecord(value) ||
-    value.id !== conversationId ||
+    recordConversationId !== conversationId ||
     !isBoundedIdentifier(value.type, MAX_RUNTIME_LENGTH) ||
     !isRecord(value.extra)
   ) {
@@ -82,8 +84,8 @@ function resolveTeamScope(value: unknown, conversationId: string, teamUserId: st
     if (!Array.isArray(assistants)) return null;
     for (const assistant of assistants) {
       if (!isRecord(assistant) || typeof assistant.conversation_id !== 'string') return null;
-      const normalizedConversationId = assistant.conversation_id.toLowerCase();
-      if (!UUID_RE.test(normalizedConversationId) || seenConversationIds.has(normalizedConversationId)) return null;
+      const normalizedConversationId = normalizePresentationConversationId(assistant.conversation_id);
+      if (normalizedConversationId === null || seenConversationIds.has(normalizedConversationId)) return null;
       seenConversationIds.add(normalizedConversationId);
       if (normalizedConversationId === conversationId) membershipCount += 1;
     }
@@ -102,9 +104,9 @@ export class PresentationScopeResolver {
 
   /** Fails closed whenever conversation ownership or complete team enumeration cannot be proven. */
   async resolve(input: { conversationId: string; principalId: string }): Promise<PresentationScopeResolution> {
-    const conversationId = input.conversationId.toLowerCase();
+    const conversationId = normalizePresentationConversationId(input.conversationId);
     if (
-      !UUID_RE.test(conversationId) ||
+      conversationId === null ||
       !isBoundedIdentifier(input.principalId, MAX_PRINCIPAL_LENGTH) ||
       !isBoundedIdentifier(this.options.teamUserId, MAX_PRINCIPAL_LENGTH)
     ) {

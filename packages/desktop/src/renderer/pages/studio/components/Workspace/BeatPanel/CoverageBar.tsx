@@ -5,7 +5,7 @@
  */
 
 import { Button } from '@arco-design/web-react';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { WorkspaceShotProjection } from '../workspaceProjection';
@@ -87,6 +87,9 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
   onCommitTrim,
 }) => {
   const { t } = useTranslation();
+  const guidanceId = useId();
+  const trimGuidanceId = `${guidanceId}-trim`;
+  const boundaryGuidanceId = `${guidanceId}-boundary`;
   const playbackTrackRef = useRef<HTMLDivElement | null>(null);
   const planningTrackRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<CoverageDrag | null>(null);
@@ -392,6 +395,14 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
 
   return (
     <section aria-label={t(`${COVERAGE_KEY_ROOT}.label`)} className={styles.coverageRoot}>
+      <div className={styles.coverageGuidance}>
+        <span className={styles.trimGuidance} id={trimGuidanceId}>
+          {t(`${COVERAGE_KEY_ROOT}.trimGuidance`)}
+        </span>
+        <span className={styles.boundaryGuidance} id={boundaryGuidanceId}>
+          {t(`${COVERAGE_KEY_ROOT}.boundaryGuidance`)}
+        </span>
+      </div>
       <div
         ref={playbackTrackRef}
         aria-label={t(`${COVERAGE_KEY_ROOT}.playbackLane`)}
@@ -448,6 +459,7 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
                       }}
                     />
                     <Button
+                      aria-describedby={trimGuidanceId}
                       aria-disabled={disabled}
                       aria-label={t(`${COVERAGE_KEY_ROOT}.trimInLabel`, { index: index + 1 })}
                       aria-orientation='horizontal'
@@ -470,6 +482,7 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
                       tabIndex={disabled ? -1 : 0}
                     />
                     <Button
+                      aria-describedby={trimGuidanceId}
                       aria-disabled={disabled}
                       aria-label={t(`${COVERAGE_KEY_ROOT}.trimOutLabel`, { index: index + 1 })}
                       aria-orientation='horizontal'
@@ -528,6 +541,7 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
               <bdi>{t(`${COVERAGE_KEY_ROOT}.planningDuration`, { seconds: durationSeconds })}</bdi>
               {next !== undefined ? (
                 <Button
+                  aria-describedby={boundaryGuidanceId}
                   aria-disabled={disabled}
                   aria-label={t(`${COVERAGE_KEY_ROOT}.boundaryLabel`, { index: index + 1 })}
                   aria-orientation='horizontal'

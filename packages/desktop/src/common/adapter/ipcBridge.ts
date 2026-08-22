@@ -18,6 +18,7 @@ import { bridge } from '@/common/platform/bridge';
 import type { OpenDialogOptions } from 'electron';
 import type {
   ICssTheme,
+  GuidPresentationHandoffClaim,
   IMcpServer,
   IProvider,
   ISessionMcpServer,
@@ -2120,6 +2121,8 @@ export interface ICreateConversationParams {
     remote_agent_id?: string;
     extra_skill_paths?: string[];
     team_id?: string;
+    /** Durable claimant used to recover a server-assigned presentation conversation id. */
+    weprompt_presentation_handoff?: GuidPresentationHandoffClaim;
   };
 }
 

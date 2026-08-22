@@ -5,6 +5,7 @@
  */
 
 import { ipcBridge } from '@/common';
+import { normalizePresentationConversationId } from '@/common/types/office/presentationConversationId';
 import type {
   BindPresentationDraftResult,
   CreatePresentationDraftResult,
@@ -35,10 +36,27 @@ export type PresentationSourceDraftResult = {
   reset: () => void;
 };
 
-const copyOwner = (owner: PresentationGrantOwner): PresentationGrantOwner =>
-  owner.owner_type === 'draft'
-    ? { owner_type: 'draft', draft_id: owner.draft_id }
-    : { owner_type: 'conversation', conversation_id: owner.conversation_id };
+const normalizeOwner = (owner: PresentationGrantOwner): PresentationGrantOwner | null => {
+  if (owner.owner_type === 'draft') return { owner_type: 'draft', draft_id: owner.draft_id };
+  const conversationId = normalizePresentationConversationId(owner.conversation_id);
+  if (conversationId === null) return null;
+  return { owner_type: 'conversation', conversation_id: conversationId };
+};
+
+const copyOwner = (owner: PresentationGrantOwner): PresentationGrantOwner => {
+  const normalized = normalizeOwner(owner);
+  if (normalized === null) throw new Error('Invalid presentation source owner conversation id');
+  return normalized;
+};
+
+const invalidSourceAuthority = (): Extract<GetPresentationSourceOwnerResult, { ok: false }> => ({
+  ok: false,
+  code: 'INVALID_REQUEST',
+  messageKey: 'conversation.presentationRun.INVALID_REQUEST',
+  retryable: false,
+  state: 'preflight',
+  details: null,
+});
 
 const copyDescriptor = (descriptor: PresentationSourceDescriptor): PresentationSourceDescriptor => ({
   grantId: descriptor.grantId,
@@ -59,7 +77,9 @@ const isSameOwner = (left: PresentationGrantOwner | null, right: PresentationGra
     return left.draft_id === right.draft_id;
   }
   if (left.owner_type === 'conversation' && right.owner_type === 'conversation') {
-    return left.conversation_id === right.conversation_id;
+    const leftConversationId = normalizePresentationConversationId(left.conversation_id);
+    const rightConversationId = normalizePresentationConversationId(right.conversation_id);
+    return leftConversationId !== null && leftConversationId === rightConversationId;
   }
   return false;
 };
@@ -159,18 +179,21 @@ export function usePresentationSourceDraft(): PresentationSourceDraftResult {
       }
       return runPending(async () => {
         const result = await ipcBridge.presentationSources.getSourceOwner.invoke({ owner: requestOwner });
+        if (!result.ok) return result;
+        const resultOwner = normalizeOwner(result.owner);
         const ownerStateIsCurrent = isSameOwnerRefresh
           ? isSameOwner(ownerRef.current, requestOwner) && ownerRevisionRef.current === currentRevision
           : ownerRef.current === null && ownerRevisionRef.current === null;
         if (
-          result.ok &&
-          intent === ownerIntentRef.current &&
-          ownerStateIsCurrent &&
-          isSameOwner(result.owner, requestOwner)
+          resultOwner === null ||
+          intent !== ownerIntentRef.current ||
+          !ownerStateIsCurrent ||
+          !isSameOwner(resultOwner, requestOwner)
         ) {
-          commit(result.owner, result.ownerRevision, result.grants);
+          return invalidSourceAuthority();
         }
-        return result;
+        commit(resultOwner, result.ownerRevision, result.grants);
+        return { ...result, owner: resultOwner };
       });
     },
     [beginOwnerIntent, commit, detach, runPending]
@@ -319,6 +342,8 @@ export function usePresentationSourceDraft(): PresentationSourceDraftResult {
 
   const bindDraft = useCallback(
     async (conversationId: string): Promise<BindPresentationDraftResult | null> => {
+      const canonicalConversationId = normalizePresentationConversationId(conversationId);
+      if (canonicalConversationId === null) return null;
       const captured = captureOwnerState();
       if (captured === null) return null;
       const capturedOwner = captured.owner;
@@ -326,22 +351,24 @@ export function usePresentationSourceDraft(): PresentationSourceDraftResult {
       return runPending(async () => {
         const result = await ipcBridge.presentationSources.bindDraft.invoke({
           draft_id: capturedOwner.draft_id,
-          conversation_id: conversationId,
+          conversation_id: canonicalConversationId,
           expected_revision: captured.ownerRevision,
         });
+        if (!result.ok) return result;
+        const resultConversationId = normalizePresentationConversationId(result.conversationId);
         if (
-          result.ok &&
-          result.draftId === capturedOwner.draft_id &&
-          result.conversationId === conversationId &&
-          isCurrentOwnerState(captured)
+          result.draftId !== capturedOwner.draft_id ||
+          resultConversationId !== canonicalConversationId ||
+          !isCurrentOwnerState(captured)
         ) {
-          commit(
-            { owner_type: 'conversation', conversation_id: result.conversationId },
-            result.revision,
-            captured.descriptors
-          );
+          return null;
         }
-        return result;
+        commit(
+          { owner_type: 'conversation', conversation_id: canonicalConversationId },
+          result.revision,
+          captured.descriptors
+        );
+        return { ...result, conversationId: canonicalConversationId };
       });
     },
     [captureOwnerState, commit, isCurrentOwnerState, runPending]

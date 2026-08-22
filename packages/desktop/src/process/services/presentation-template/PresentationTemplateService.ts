@@ -10,6 +10,7 @@ import { lstat, mkdir, mkdtemp, open, readdir, readFile, rename, rm, writeFile }
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
 import { PRESENTATION_RUN_LIMITS } from '@/common/config/constants';
+import { normalizePresentationConversationId } from '@/common/types/office/presentationConversationId';
 import type {
   PresentationTemplateCandidateDescription,
   PresentationTemplateCandidateFailureCode,
@@ -32,7 +33,6 @@ const NO_FOLLOW = constants.O_NOFOLLOW ?? 0;
 const DIRECTORY_ONLY = constants.O_DIRECTORY ?? 0;
 const STRICT_UTF8 = new TextDecoder('utf-8', { fatal: true });
 const SHA256_RE = /^[0-9a-f]{64}$/;
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type WorkspaceSourceAuthorizer = {
   authorizeWorkspaceSourcePath: (
@@ -600,7 +600,7 @@ export class PresentationTemplateService {
 
   private candidateRelativePath(input: CandidateInput): string {
     if (
-      !UUID_RE.test(input.conversationId) ||
+      normalizePresentationConversationId(input.conversationId) !== input.conversationId ||
       !path.isAbsolute(input.workspaceRoot) ||
       path.resolve(input.workspaceRoot) !== input.workspaceRoot ||
       !path.isAbsolute(input.filePath) ||
@@ -672,7 +672,10 @@ export class PresentationTemplateService {
 
   /** Reads and previews one authorized workspace theme while minting its content confirmation. */
   async describeThemeSpec(input: CandidateInput): Promise<PresentationTemplateCandidateDescription> {
-    const { file, authorization } = await this.readCandidate(input);
+    const conversationId = normalizePresentationConversationId(input.conversationId);
+    if (conversationId === null) throw new PresentationTemplateCandidateError('CANDIDATE_OUTSIDE_WORKSPACE');
+    const normalizedInput = { ...input, conversationId };
+    const { file, authorization } = await this.readCandidate(normalizedInput);
     if (file.byteLength === 0) throw new PresentationTemplateCandidateError('CANDIDATE_UNSUPPORTED');
     let themeMd: string;
     try {
@@ -684,7 +687,7 @@ export class PresentationTemplateService {
     if (name.length === 0) throw new PresentationTemplateCandidateError('CANDIDATE_UNSUPPORTED');
     const tokens = parseThemeTokens(themeMd);
     const confirmation: CandidateConfirmation = {
-      conversationId: input.conversationId,
+      conversationId,
       workspaceRoot: authorization.allowedRootPath,
       canonicalFilePath: authorization.canonicalSourcePath,
       sha256: file.sha256,
@@ -706,12 +709,14 @@ export class PresentationTemplateService {
     if (!SHA256_RE.test(input.expectedSha256)) {
       throw new PresentationTemplateCandidateError('CONFIRMATION_NOT_MINTED');
     }
-    const { file, authorization } = await this.readCandidate(input);
+    const conversationId = normalizePresentationConversationId(input.conversationId);
+    if (conversationId === null) throw new PresentationTemplateCandidateError('CANDIDATE_OUTSIDE_WORKSPACE');
+    const { file, authorization } = await this.readCandidate({ ...input, conversationId });
     if (file.sha256 !== input.expectedSha256) {
       throw new PresentationTemplateCandidateError('CANDIDATE_CHANGED');
     }
     const key = this.confirmationKey({
-      conversationId: input.conversationId,
+      conversationId,
       canonicalFilePath: authorization.canonicalSourcePath,
       sha256: input.expectedSha256,
     });

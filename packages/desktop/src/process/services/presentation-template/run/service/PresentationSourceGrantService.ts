@@ -7,6 +7,7 @@
 import { randomUUID as createRandomUUID } from 'node:crypto';
 import path from 'node:path';
 import { PRESENTATION_RUN_LIMITS } from '@/common/config/constants';
+import { normalizePresentationConversationId } from '@/common/types/office/presentationConversationId';
 import type {
   BindPresentationDraftRequest,
   BindPresentationDraftResult,
@@ -238,6 +239,7 @@ export type GrantPresentationExternalDropPathRequest = {
 };
 
 type AuthorizedOwner = {
+  owner: PresentationGrantOwner;
   principalId: string;
   workspace: string | null;
 };
@@ -312,12 +314,21 @@ function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): 
 }
 
 function isOwner(value: unknown): value is PresentationGrantOwner {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  return normalizeOwner(value) !== null;
+}
+
+function normalizeOwner(value: unknown): PresentationGrantOwner | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   if (record.owner_type === 'draft') {
-    return Object.keys(record).length === 2 && isUuid(record.draft_id);
+    return Object.keys(record).length === 2 && isUuid(record.draft_id)
+      ? { owner_type: 'draft', draft_id: record.draft_id }
+      : null;
   }
-  return record.owner_type === 'conversation' && Object.keys(record).length === 2 && isUuid(record.conversation_id);
+  const conversationId = normalizePresentationConversationId(record.conversation_id);
+  return record.owner_type === 'conversation' && Object.keys(record).length === 2 && conversationId !== null
+    ? { owner_type: 'conversation', conversation_id: conversationId }
+    : null;
 }
 
 function isSourceRef(value: unknown): value is PresentationSourceRef {
@@ -432,7 +443,10 @@ export class PresentationSourceGrantService {
     }
     try {
       await this.ensureStorage();
-      const owner = await this.store.getPresentationSourceOwner(request.owner, authorization.value.principalId);
+      const owner = await this.store.getPresentationSourceOwner(
+        authorization.value.owner,
+        authorization.value.principalId
+      );
       return {
         ok: true,
         owner: owner.owner,
@@ -475,12 +489,13 @@ export class PresentationSourceGrantService {
   async bindDraft(request: BindPresentationDraftRequest): Promise<BindPresentationDraftResult> {
     const gate = this.baseGate();
     if (gate !== null) return constrainSourceFailure('bindDraft', gate) as BindPresentationDraftResult;
-    if (!isUuid(request?.draft_id) || !isUuid(request?.conversation_id) || !isRevision(request?.expected_revision)) {
+    const conversationId = normalizePresentationConversationId(request?.conversation_id);
+    if (!isUuid(request?.draft_id) || conversationId === null || !isRevision(request?.expected_revision)) {
       return constrainSourceFailure('bindDraft', sourceFailure('INVALID_REQUEST')) as BindPresentationDraftResult;
     }
     const authorization = await this.authorizeOwner({
       owner_type: 'conversation',
-      conversation_id: request.conversation_id,
+      conversation_id: conversationId,
     });
     if ('failure' in authorization) {
       return constrainSourceFailure('bindDraft', authorization.failure) as BindPresentationDraftResult;
@@ -489,7 +504,7 @@ export class PresentationSourceGrantService {
       await this.ensureStorage();
       const result = await this.store.bindPresentationSourceDraft({
         draftId: request.draft_id,
-        conversationId: request.conversation_id,
+        conversationId,
         principalId: authorization.value.principalId,
         expectedRevision: request.expected_revision,
       });
@@ -510,7 +525,7 @@ export class PresentationSourceGrantService {
         return { ok: true, status: 'cancelled', grants: [], ownerRevision: authorization.owner.ownerRevision };
       }
       const created = await this.createGrantsFromPaths({
-        owner: request.owner,
+        owner: authorization.value.owner,
         expectedOwnerRevision: request.expected_owner_revision,
         principalId: authorization.value.principalId,
         paths,
@@ -545,7 +560,7 @@ export class PresentationSourceGrantService {
       ) as GrantPresentationExternalDropResult;
     }
     const created = await this.createGrantsFromPaths({
-      owner: request.owner,
+      owner: authorization.value.owner,
       expectedOwnerRevision: request.expected_owner_revision,
       principalId: authorization.value.principalId,
       paths: request.native_paths,
@@ -570,8 +585,9 @@ export class PresentationSourceGrantService {
     if (gate !== null) {
       return constrainSourceFailure('grantWorkspaceSource', gate) as GrantPresentationWorkspaceSourceResult;
     }
+    const conversationId = normalizePresentationConversationId(request?.conversation_id);
     if (
-      !isUuid(request?.conversation_id) ||
+      conversationId === null ||
       !isStrictRelativePath(request?.relative_path) ||
       !isRevision(request?.expected_owner_revision)
     ) {
@@ -582,7 +598,7 @@ export class PresentationSourceGrantService {
     }
     const owner: PresentationGrantOwner = {
       owner_type: 'conversation',
-      conversation_id: request.conversation_id,
+      conversation_id: conversationId,
     };
     const authorization = await this.authorizeGrantMutation(owner, request.expected_owner_revision);
     if ('failure' in authorization) {
@@ -644,7 +660,7 @@ export class PresentationSourceGrantService {
     try {
       await this.ensureStorage();
       const result = await this.store.revokePresentationSourceGrant({
-        owner: request.owner,
+        owner: authorization.value.owner,
         principalId: authorization.value.principalId,
         grantId: request.grant_id,
         expectedOwnerRevision: request.expected_owner_revision,
@@ -675,7 +691,7 @@ export class PresentationSourceGrantService {
     try {
       await this.ensureStorage();
       const result = await this.store.extendPresentationSourceGrantsForQueue({
-        owner: request.owner,
+        owner: authorization.value.owner,
         principalId: authorization.value.principalId,
         sources: request.sources,
         queueItemId: request.queue_item_id,
@@ -715,16 +731,17 @@ export class PresentationSourceGrantService {
   ): Promise<{ ok: true; value: AuthorizedOwner } | { ok: false; failure: SourceFailure }> {
     const gate = this.baseGate();
     if (gate !== null) return { ok: false, failure: gate };
-    if (!isOwner(owner)) return { ok: false, failure: sourceFailure('INVALID_REQUEST') };
+    const normalizedOwner = normalizeOwner(owner);
+    if (normalizedOwner === null) return { ok: false, failure: sourceFailure('INVALID_REQUEST') };
     const principal = await this.resolvePrincipal();
     if ('failure' in principal) return principal;
-    if (owner.owner_type === 'draft') {
-      return { ok: true, value: { principalId: principal.value, workspace: null } };
+    if (normalizedOwner.owner_type === 'draft') {
+      return { ok: true, value: { owner: normalizedOwner, principalId: principal.value, workspace: null } };
     }
     let resolution: PresentationConversationOwnerResolution;
     try {
       resolution = await this.options.resolveConversationOwner({
-        conversationId: owner.conversation_id,
+        conversationId: normalizedOwner.conversation_id,
         principalId: principal.value,
       });
     } catch {
@@ -735,14 +752,17 @@ export class PresentationSourceGrantService {
       return { ok: false, failure: sourceFailure('TEAM_SCOPE_UNSUPPORTED') };
     }
     if (
-      resolution.conversationId !== owner.conversation_id ||
+      normalizePresentationConversationId(resolution.conversationId) !== normalizedOwner.conversation_id ||
       resolution.principalId !== principal.value ||
       !path.isAbsolute(resolution.workspace) ||
       resolution.workspace.includes('\0')
     ) {
       return { ok: false, failure: sourceFailure('SCOPE_UNAVAILABLE') };
     }
-    return { ok: true, value: { principalId: principal.value, workspace: resolution.workspace } };
+    return {
+      ok: true,
+      value: { owner: normalizedOwner, principalId: principal.value, workspace: resolution.workspace },
+    };
   }
 
   private async authorizeGrantMutation(
@@ -759,7 +779,7 @@ export class PresentationSourceGrantService {
     try {
       await this.ensureStorage();
       const snapshot = await this.store.getPresentationSourceOwner(
-        owner as PresentationGrantOwner,
+        authorization.value.owner,
         authorization.value.principalId
       );
       if (snapshot.ownerRevision !== expectedRevision) {
@@ -880,9 +900,12 @@ export class PresentationSourceGrantService {
           : error.code === 'DRAFT_ALREADY_BOUND'
             ? { draftId: error.details.draftId ?? '', conversationId: error.details.conversationId ?? '' }
             : error.code.startsWith('SOURCE_')
-              ? error.details.grantId === undefined
-                ? {}
-                : { grantId: error.details.grantId }
+              ? {
+                  ...(error.details.grantId === undefined ? {} : { grantId: error.details.grantId }),
+                  ...(error.code === 'SOURCE_GRANT_REPLAYED' && error.details.queueUnboundAtRevoke === true
+                    ? { queueUnboundAtRevoke: true as const }
+                    : {}),
+                }
               : null;
       return sourceFailure(error.code, details);
     }

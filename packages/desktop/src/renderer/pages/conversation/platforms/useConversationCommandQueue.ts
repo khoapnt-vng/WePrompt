@@ -1,5 +1,9 @@
 import { ipcBridge } from '@/common';
 import { PRESENTATION_RUN_LIMITS } from '@/common/config/constants';
+import {
+  isPresentationConversationId,
+  normalizePresentationConversationId,
+} from '@/common/types/office/presentationConversationId';
 import type {
   ConfirmQueuedPresentationSourcesResult,
   PresentationGrantOwner,
@@ -1227,6 +1231,8 @@ export type PresentationCommandQueueController = {
   read: () => PresentationCommandQueueState;
   enqueue: (input: EnqueuePresentationCommandInput) => Promise<PresentationCommandQueueItem>;
   recoverPersisting: () => Promise<void>;
+  retirePersisting: (queueItemId: string) => Promise<'confirmed' | 'removed'>;
+  removePersistingAfterConfirmedGrantRevocation: (queueItemId: string, grantId: string) => Promise<void>;
   editQueued: (queueItemId: string, updates: { input: string }) => Promise<PresentationCommandQueueItem>;
   removeQueued: (queueItemId: string) => Promise<void>;
   claimHead: (queueItemId: string) => Promise<PresentationCommandQueueItem>;
@@ -1263,8 +1269,13 @@ export class PresentationCommandQueueError extends Error {
 
 const presentationCommandQueueRecords = new Map<string, PresentationCommandQueueRecord>();
 
-export const getPresentationCommandQueueStorageKey = (conversationId: string): string =>
-  `presentation-command-queue/v2/${conversationId}`;
+export const getPresentationCommandQueueStorageKey = (conversationId: string): string => {
+  const canonicalConversationId = normalizePresentationConversationId(conversationId);
+  if (canonicalConversationId === null) {
+    throw new PresentationCommandQueueError('Invalid managed presentation queue conversation id', 'INVALID_STATE');
+  }
+  return `presentation-command-queue/v2/${canonicalConversationId}`;
+};
 
 const createEmptyPresentationQueueState = (conversationId: string): PresentationCommandQueueState => ({
   version: PRESENTATION_COMMAND_QUEUE_VERSION,
@@ -1306,8 +1317,7 @@ const decodePresentationQueueOwner = (value: unknown): PresentationGrantOwner | 
   if (
     value.owner_type === 'conversation' &&
     hasPresentationQueueKeys(value, ['owner_type', 'conversation_id']) &&
-    typeof value.conversation_id === 'string' &&
-    PRESENTATION_QUEUE_UUID_RE.test(value.conversation_id)
+    isPresentationConversationId(value.conversation_id)
   ) {
     return { owner_type: 'conversation', conversation_id: value.conversation_id };
   }
@@ -1488,8 +1498,7 @@ export const decodePresentationCommandQueueState = (
     !isPresentationQueueRecord(value) ||
     !hasPresentationQueueKeys(value, ['version', 'conversationId', 'revision', 'items']) ||
     value.version !== PRESENTATION_COMMAND_QUEUE_VERSION ||
-    typeof value.conversationId !== 'string' ||
-    !PRESENTATION_QUEUE_UUID_RE.test(value.conversationId) ||
+    !isPresentationConversationId(value.conversationId) ||
     (expectedConversationId !== undefined && value.conversationId !== expectedConversationId) ||
     !isPresentationQueueRevision(value.revision) ||
     !Array.isArray(value.items) ||
@@ -1524,6 +1533,132 @@ export const decodePresentationCommandQueueState = (
 };
 
 const presentationQueueBytes = (value: string): number => new TextEncoder().encode(value).length;
+
+const decodeLegacyPresentationQueueState = (
+  raw: string,
+  legacyConversationId: string,
+  canonicalConversationId: string
+): PresentationCommandQueueState => {
+  if (presentationQueueBytes(raw) > PRESENTATION_COMMAND_QUEUE_MAX_STATE_BYTES) {
+    throw new PresentationCommandQueueError('Invalid managed presentation queue state size', 'INVALID_STATE');
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    throw new PresentationCommandQueueError('Invalid managed presentation queue JSON', 'INVALID_STATE');
+  }
+  if (
+    !isPresentationQueueRecord(parsed) ||
+    parsed.conversationId !== legacyConversationId ||
+    !Array.isArray(parsed.items) ||
+    JSON.stringify(parsed) !== raw
+  ) {
+    throw new PresentationCommandQueueError('Invalid legacy managed presentation queue state', 'INVALID_STATE');
+  }
+  const items = parsed.items.map((item) => {
+    if (!isPresentationQueueRecord(item) || !isPresentationQueueRecord(item.sourceOwner)) return item;
+    if (item.sourceOwner.owner_type !== 'conversation' || item.sourceOwner.conversation_id !== legacyConversationId) {
+      return item;
+    }
+    return {
+      ...item,
+      sourceOwner: { ...item.sourceOwner, conversation_id: canonicalConversationId },
+    };
+  });
+  return decodePresentationCommandQueueState(
+    { ...parsed, conversationId: canonicalConversationId, items },
+    canonicalConversationId
+  );
+};
+
+const migrateLegacyPresentationQueueKey = (
+  storage: PresentationCommandQueueStorage,
+  legacyConversationId: string,
+  canonicalConversationId: string
+): void => {
+  if (legacyConversationId === canonicalConversationId || !PRESENTATION_QUEUE_UUID_RE.test(legacyConversationId)) {
+    return;
+  }
+  const legacyKey = `presentation-command-queue/v2/${legacyConversationId}`;
+  const canonicalKey = getPresentationCommandQueueStorageKey(canonicalConversationId);
+  let legacyRaw: string | null;
+  let canonicalRaw: string | null;
+  try {
+    legacyRaw = storage.getItem(legacyKey);
+    if (legacyRaw === null) return;
+    canonicalRaw = storage.getItem(canonicalKey);
+  } catch (error) {
+    throw new PresentationCommandQueueError(
+      `Managed presentation queue migration read failed: ${error instanceof Error ? error.message : String(error)}`,
+      'PERSISTENCE_FAILED'
+    );
+  }
+  const migratedRaw = JSON.stringify(
+    decodeLegacyPresentationQueueState(legacyRaw, legacyConversationId, canonicalConversationId)
+  );
+  if (canonicalRaw !== null && canonicalRaw !== migratedRaw) {
+    throw new PresentationCommandQueueError('Managed presentation queue migration conflict', 'STATE_CONFLICT');
+  }
+  if (canonicalRaw === null) {
+    try {
+      storage.setItem(canonicalKey, migratedRaw);
+      if (storage.getItem(canonicalKey) !== migratedRaw) {
+        throw new PresentationCommandQueueError(
+          'Managed presentation queue migration readback mismatch',
+          'READBACK_MISMATCH'
+        );
+      }
+    } catch (error) {
+      if (error instanceof PresentationCommandQueueError) throw error;
+      throw new PresentationCommandQueueError(
+        `Managed presentation queue migration write failed: ${error instanceof Error ? error.message : String(error)}`,
+        'PERSISTENCE_FAILED'
+      );
+    }
+  }
+  try {
+    if (storage.getItem(canonicalKey) !== migratedRaw) {
+      throw new PresentationCommandQueueError(
+        'Managed presentation queue migration readback mismatch',
+        'READBACK_MISMATCH'
+      );
+    }
+    storage.removeItem(legacyKey);
+    if (storage.getItem(legacyKey) !== null) {
+      throw new PresentationCommandQueueError(
+        'Managed presentation queue migration delete readback mismatch',
+        'READBACK_MISMATCH'
+      );
+    }
+  } catch (error) {
+    if (error instanceof PresentationCommandQueueError) throw error;
+    throw new PresentationCommandQueueError(
+      `Managed presentation queue migration delete failed: ${error instanceof Error ? error.message : String(error)}`,
+      'PERSISTENCE_FAILED'
+    );
+  }
+};
+
+const migrateLegacyPresentationQueueState = (
+  storage: PresentationCommandQueueStorage,
+  inputConversationId: string,
+  canonicalConversationId: string
+): void => {
+  const legacyConversationIds = new Set<string>();
+  if (PRESENTATION_QUEUE_UUID_RE.test(inputConversationId) && inputConversationId !== canonicalConversationId) {
+    legacyConversationIds.add(inputConversationId);
+  }
+  if (PRESENTATION_QUEUE_UUID_RE.test(canonicalConversationId)) {
+    const uppercaseConversationId = canonicalConversationId.toUpperCase();
+    if (uppercaseConversationId !== canonicalConversationId) {
+      legacyConversationIds.add(uppercaseConversationId);
+    }
+  }
+  for (const legacyConversationId of legacyConversationIds) {
+    migrateLegacyPresentationQueueKey(storage, legacyConversationId, canonicalConversationId);
+  }
+};
 
 const readPresentationQueueState = (
   record: PresentationCommandQueueRecord,
@@ -1735,6 +1870,27 @@ const PRESENTATION_START_FAILURES_PROVING_NO_RUN = new Set<PresentationRunFailur
   'RATE_LIMITED',
 ]);
 
+const PRESENTATION_CONFIRMATION_FAILURES_PROVING_NO_COMMIT = new Set<PresentationRunFailureCode>([
+  'INVALID_REQUEST',
+  'SOURCE_TAMPERED',
+  'SOURCE_LIMIT_EXCEEDED',
+]);
+
+const hasDurableUnboundGrantRevocationProof = (
+  result: ConfirmQueuedPresentationSourcesResult,
+  pending: PresentationCommandQueueItem
+): boolean => {
+  if (!('code' in result) || result.code !== 'SOURCE_GRANT_REPLAYED') return false;
+  const { details } = result;
+  return (
+    isPresentationQueueRecord(details) &&
+    hasPresentationQueueKeys(details, ['grantId', 'queueUnboundAtRevoke']) &&
+    typeof details.grantId === 'string' &&
+    details.queueUnboundAtRevoke === true &&
+    pending.sources.some(({ grantId }) => grantId === details.grantId)
+  );
+};
+
 const isRestorablePresentationStartFailure = (result: StartPresentationRunResult): boolean => {
   if (!('code' in result)) return false;
   return result.state === 'preflight' && PRESENTATION_START_FAILURES_PROVING_NO_RUN.has(result.code);
@@ -1779,13 +1935,15 @@ const defaultPresentationQueueStorage = (): PresentationCommandQueueStorage => {
 export const createPresentationCommandQueueController = (
   options: PresentationCommandQueueControllerOptions
 ): PresentationCommandQueueController => {
-  if (!PRESENTATION_QUEUE_UUID_RE.test(options.conversationId)) {
+  const conversationId = normalizePresentationConversationId(options.conversationId);
+  if (conversationId === null) {
     throw new PresentationCommandQueueError('Invalid managed presentation queue conversation id', 'INVALID_STATE');
   }
   const storage = options.storage ?? defaultPresentationQueueStorage();
+  migrateLegacyPresentationQueueState(storage, options.conversationId, conversationId);
   const confirmQueuedSources =
     options.confirmQueuedSources ?? ((request) => ipcBridge.presentationSources.confirmQueued.invoke(request));
-  const existing = presentationCommandQueueRecords.get(options.conversationId);
+  const existing = presentationCommandQueueRecords.get(conversationId);
   const record: PresentationCommandQueueRecord = existing ?? {
     storage,
     confirmQueuedSources,
@@ -1798,10 +1956,10 @@ export const createPresentationCommandQueueController = (
   record.storage = storage;
   record.confirmQueuedSources = confirmQueuedSources;
   record.now = options.now ?? (() => new Date());
-  presentationCommandQueueRecords.set(options.conversationId, record);
+  presentationCommandQueueRecords.set(conversationId, record);
 
   const read = (): PresentationCommandQueueState =>
-    structuredClone(readPresentationQueueState(record, options.conversationId).state);
+    structuredClone(readPresentationQueueState(record, conversationId).state);
 
   const persistReplacement = (
     current: PresentationCommandQueueState,
@@ -1818,7 +1976,7 @@ export const createPresentationCommandQueueController = (
 
   const enqueue = (input: EnqueuePresentationCommandInput): Promise<PresentationCommandQueueItem> =>
     runPresentationQueueMutation(record, async () => {
-      const { state: current, raw } = readPresentationQueueState(record, options.conversationId);
+      const { state: current, raw } = readPresentationQueueState(record, conversationId);
       if (current.items.length >= PRESENTATION_COMMAND_QUEUE_MAX_ITEMS) {
         throw new PresentationCommandQueueError('Managed presentation queue is full', 'INVALID_STATE');
       }
@@ -1849,7 +2007,7 @@ export const createPresentationCommandQueueController = (
       persistPresentationQueueState(record, raw, persistingState);
 
       const confirmedOwnerRevision = await confirmPresentationQueueItem(record, persisting);
-      const { state: confirmedCurrent, raw: confirmedRaw } = readPresentationQueueState(record, options.conversationId);
+      const { state: confirmedCurrent, raw: confirmedRaw } = readPresentationQueueState(record, conversationId);
       const durablePersisting = requirePresentationQueueItem(confirmedCurrent, persisting.queueItemId);
       if (durablePersisting.execution.state !== 'persisting') {
         throw new PresentationCommandQueueError(
@@ -1868,7 +2026,7 @@ export const createPresentationCommandQueueController = (
 
   const recoverPersisting = (): Promise<void> =>
     runPresentationQueueMutation(record, async () => {
-      let persisted = readPresentationQueueState(record, options.conversationId);
+      let persisted = readPresentationQueueState(record, conversationId);
       const pendingIds = persisted.state.items
         .filter(({ execution }) => execution.state === 'persisting')
         .map(({ queueItemId }) => queueItemId);
@@ -1882,13 +2040,126 @@ export const createPresentationCommandQueueController = (
           execution: { state: 'queued' },
         };
         persistReplacement(persisted.state, persisted.raw, queued);
-        persisted = readPresentationQueueState(record, options.conversationId);
+        persisted = readPresentationQueueState(record, conversationId);
       }
+    });
+
+  const retirePersisting = (queueItemId: string): Promise<'confirmed' | 'removed'> =>
+    runPresentationQueueMutation(record, async () => {
+      const persisted = readPresentationQueueState(record, conversationId);
+      const pending = requirePresentationQueueItem(persisted.state, queueItemId);
+      if (pending.execution.state !== 'persisting') {
+        throw new PresentationCommandQueueError(
+          'Managed presentation queue item is not awaiting confirmation',
+          'STATE_CONFLICT'
+        );
+      }
+
+      let confirmedOwnerRevision: number | null = null;
+      let definitivelyRejected = false;
+      if (pending.sources.length > 0) {
+        if (pending.sourceOwner === null || pending.expectedOwnerRevision === null) {
+          throw new PresentationCommandQueueError(
+            'Managed presentation queue source confirmation is invalid',
+            'INVALID_STATE'
+          );
+        }
+        const result = await record.confirmQueuedSources({
+          owner: pending.sourceOwner,
+          queue_item_id: pending.queueItemId,
+          sources: structuredClone(pending.sources),
+          expected_owner_revision: pending.expectedOwnerRevision,
+        });
+        if ('code' in result) {
+          if (
+            !PRESENTATION_CONFIRMATION_FAILURES_PROVING_NO_COMMIT.has(result.code) &&
+            !hasDurableUnboundGrantRevocationProof(result, pending)
+          ) {
+            throw new PresentationCommandQueueError(
+              `Managed presentation queue confirmation outcome is uncertain: ${result.code}`,
+              'CONFIRMATION_FAILED'
+            );
+          }
+          definitivelyRejected = true;
+        } else confirmedOwnerRevision = result.ownerRevision;
+      }
+
+      const current = readPresentationQueueState(record, conversationId);
+      const durablePending = requirePresentationQueueItem(current.state, queueItemId);
+      if (
+        durablePending.execution.state !== 'persisting' ||
+        JSON.stringify(durablePending) !== JSON.stringify(pending)
+      ) {
+        throw new PresentationCommandQueueError(
+          'Managed presentation queue confirmation state conflict',
+          'STATE_CONFLICT'
+        );
+      }
+      if (!definitivelyRejected) {
+        const queued: PresentationCommandQueueItem = {
+          ...durablePending,
+          confirmedOwnerRevision,
+          updatedAt: record.now().toISOString(),
+          execution: { state: 'queued' },
+        };
+        persistReplacement(current.state, current.raw, queued);
+        return 'confirmed';
+      }
+
+      const items = current.state.items.filter((candidate) => candidate.queueItemId !== queueItemId);
+      if (items.length === 0) {
+        if (current.raw === null) {
+          throw new PresentationCommandQueueError(
+            'Managed presentation queue confirmation state is not durable',
+            'STATE_CONFLICT'
+          );
+        }
+        removePresentationQueueState(record, conversationId, current.raw);
+      } else {
+        persistPresentationQueueState(record, current.raw, nextPresentationQueueState(current.state, items));
+      }
+      return 'removed';
+    });
+
+  const removePersistingAfterConfirmedGrantRevocation = (queueItemId: string, grantId: string): Promise<void> =>
+    runPresentationQueueMutation(record, async () => {
+      if (!PRESENTATION_QUEUE_UUID_RE.test(grantId)) {
+        throw new PresentationCommandQueueError(
+          'Managed presentation queue revoked grant proof is invalid',
+          'INVALID_STATE'
+        );
+      }
+      const current = readPresentationQueueState(record, conversationId);
+      const pending = requirePresentationQueueItem(current.state, queueItemId);
+      if (pending.execution.state !== 'persisting') {
+        throw new PresentationCommandQueueError(
+          'Managed presentation queue item is not in persisting state',
+          'STATE_CONFLICT'
+        );
+      }
+      if (!pending.sources.some((source) => source.grantId === grantId)) {
+        throw new PresentationCommandQueueError(
+          'Managed presentation queue revoked grant is not in the frozen source set',
+          'STATE_CONFLICT'
+        );
+      }
+      const items = current.state.items.filter((candidate) => candidate.queueItemId !== queueItemId);
+      if (items.length === 0) {
+        if (current.raw === null) {
+          throw new PresentationCommandQueueError(
+            'Managed presentation queue revoked-grant state is not durable',
+            'STATE_CONFLICT'
+          );
+        }
+        removePresentationQueueState(record, conversationId, current.raw);
+        return;
+      }
+      persistPresentationQueueState(record, current.raw, nextPresentationQueueState(current.state, items));
     });
 
   const editQueued = (queueItemId: string, updates: { input: string }): Promise<PresentationCommandQueueItem> =>
     runPresentationQueueMutation(record, async () => {
-      const persisted = readPresentationQueueState(record, options.conversationId);
+      const persisted = readPresentationQueueState(record, conversationId);
       const item = requirePresentationQueueItem(persisted.state, queueItemId);
       if (item.execution.state !== 'queued') {
         throw new PresentationCommandQueueError(
@@ -1906,7 +2177,7 @@ export const createPresentationCommandQueueController = (
 
   const removeQueued = (queueItemId: string): Promise<void> =>
     runPresentationQueueMutation(record, async () => {
-      const persisted = readPresentationQueueState(record, options.conversationId);
+      const persisted = readPresentationQueueState(record, conversationId);
       const item = requirePresentationQueueItem(persisted.state, queueItemId);
       if (item.execution.state !== 'queued') {
         throw new PresentationCommandQueueError(
@@ -1916,7 +2187,7 @@ export const createPresentationCommandQueueController = (
       }
       const items = persisted.state.items.filter((candidate) => candidate.queueItemId !== queueItemId);
       if (items.length === 0 && persisted.raw !== null) {
-        removePresentationQueueState(record, options.conversationId, persisted.raw);
+        removePresentationQueueState(record, conversationId, persisted.raw);
         return;
       }
       persistPresentationQueueState(record, persisted.raw, nextPresentationQueueState(persisted.state, items));
@@ -1924,7 +2195,7 @@ export const createPresentationCommandQueueController = (
 
   const claimHead = (queueItemId: string): Promise<PresentationCommandQueueItem> =>
     runPresentationQueueMutation(record, async () => {
-      const persisted = readPresentationQueueState(record, options.conversationId);
+      const persisted = readPresentationQueueState(record, conversationId);
       const head = persisted.state.items[0];
       if (head?.queueItemId !== queueItemId) {
         throw new PresentationCommandQueueError(
@@ -1957,7 +2228,7 @@ export const createPresentationCommandQueueController = (
           'STATE_CONFLICT'
         );
       }
-      const persisted = readPresentationQueueState(record, options.conversationId);
+      const persisted = readPresentationQueueState(record, conversationId);
       const head = persisted.state.items[0];
       if (head?.queueItemId !== queueItemId) {
         throw new PresentationCommandQueueError(
@@ -1972,7 +2243,7 @@ export const createPresentationCommandQueueController = (
       let result: StartPresentationRunResult;
       try {
         result = await start({
-          conversation_id: options.conversationId,
+          conversation_id: conversationId,
           client_request_id: head.clientRequestId,
           input: head.input,
           selected_template_id: head.selectedTemplateId,
@@ -1981,7 +2252,7 @@ export const createPresentationCommandQueueController = (
       } finally {
         record.allocating = false;
       }
-      const afterStart = readPresentationQueueState(record, options.conversationId);
+      const afterStart = readPresentationQueueState(record, conversationId);
       const durableClaim = requirePresentationQueueItem(afterStart.state, queueItemId);
       if (durableClaim.execution.state !== 'claimed') {
         throw new PresentationCommandQueueError(
@@ -2021,7 +2292,7 @@ export const createPresentationCommandQueueController = (
     execution: PresentationCommandQueueExecution
   ): Promise<PresentationCommandQueueItem> =>
     runPresentationQueueMutation(record, async () => {
-      const persisted = readPresentationQueueState(record, options.conversationId);
+      const persisted = readPresentationQueueState(record, conversationId);
       const item = requirePresentationQueueItem(persisted.state, queueItemId);
       const decodedExecution = decodePresentationQueueExecution(execution);
       validatePresentationQueueTransition(item.execution, decodedExecution);
@@ -2035,7 +2306,7 @@ export const createPresentationCommandQueueController = (
 
   const removePreflightFailed = (queueItemId: string): Promise<void> =>
     runPresentationQueueMutation(record, async () => {
-      const persisted = readPresentationQueueState(record, options.conversationId);
+      const persisted = readPresentationQueueState(record, conversationId);
       const head = persisted.state.items[0];
       if (head?.queueItemId !== queueItemId) {
         throw new PresentationCommandQueueError(
@@ -2057,7 +2328,7 @@ export const createPresentationCommandQueueController = (
             'STATE_CONFLICT'
           );
         }
-        removePresentationQueueState(record, options.conversationId, persisted.raw);
+        removePresentationQueueState(record, conversationId, persisted.raw);
         return;
       }
       persistPresentationQueueState(record, persisted.raw, nextPresentationQueueState(persisted.state, items));
@@ -2065,7 +2336,7 @@ export const createPresentationCommandQueueController = (
 
   const removeBound = (queueItemId: string): Promise<void> =>
     runPresentationQueueMutation(record, async () => {
-      const persisted = readPresentationQueueState(record, options.conversationId);
+      const persisted = readPresentationQueueState(record, conversationId);
       const item = requirePresentationQueueItem(persisted.state, queueItemId);
       if (item.execution.state !== 'bound') {
         throw new PresentationCommandQueueError('Managed presentation queue item is not bound', 'STATE_CONFLICT');
@@ -2078,7 +2349,7 @@ export const createPresentationCommandQueueController = (
             'STATE_CONFLICT'
           );
         }
-        removePresentationQueueState(record, options.conversationId, persisted.raw);
+        removePresentationQueueState(record, conversationId, persisted.raw);
         return;
       }
       persistPresentationQueueState(record, persisted.raw, nextPresentationQueueState(persisted.state, items));
@@ -2088,13 +2359,13 @@ export const createPresentationCommandQueueController = (
     execute: (item: PresentationCommandQueueItem) => Promise<void>
   ): Promise<'executed' | 'busy' | 'not_runnable'> => {
     if (record.draining) return 'busy';
-    const state = readPresentationQueueState(record, options.conversationId).state;
+    const state = readPresentationQueueState(record, conversationId).state;
     const head = state.items[0];
     if (head === undefined || !isPresentationCommandExecutionRunnable(head.execution)) return 'not_runnable';
     record.draining = true;
     try {
       const dispatching = await runPresentationQueueMutation(record, async () => {
-        const persisted = readPresentationQueueState(record, options.conversationId);
+        const persisted = readPresentationQueueState(record, conversationId);
         const durableHead = persisted.state.items[0];
         if (durableHead === undefined || !isPresentationCommandExecutionRunnable(durableHead.execution)) {
           return null;
@@ -2123,6 +2394,8 @@ export const createPresentationCommandQueueController = (
     read,
     enqueue,
     recoverPersisting,
+    retirePersisting,
+    removePersistingAfterConfirmedGrantRevocation,
     editQueued,
     removeQueued,
     claimHead,

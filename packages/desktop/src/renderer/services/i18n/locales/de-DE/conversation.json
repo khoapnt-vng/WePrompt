@@ -904,6 +904,12 @@
       "importError": "Die Referenz konnte nicht hinzugefügt werden. Versuche es erneut."
     },
     "workspace": {
+      "beatPanel": {
+        "coverage": {
+          "trimGuidance": "Kante · Trimmen · Kostenlos",
+          "boundaryGuidance": "Grenze · Erfordert neues Rendern"
+        }
+      },
       "controls": {
         "briefAndRulesTitle": "Brief & Regeln"
       },

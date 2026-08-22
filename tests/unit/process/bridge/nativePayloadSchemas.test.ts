@@ -19,6 +19,7 @@ import {
 import {
   INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE,
   INVALID_RENDERER_BRIDGE_QUERY_PAYLOAD_MESSAGE,
+  getNativeBridgePayloadDiagnostic,
   nativeBridgePayloadSchemas,
   parseNativeBridgePayload,
   parseRendererBridgeQueryRequest,
@@ -105,7 +106,7 @@ const VALID_PAYLOADS = {
   },
   'presentation-templates.remove': { id: 'template-1' },
   'presentation-templates.scratch.allocate': {
-    conversation_id: 'conversation-1',
+    conversation_id: 'd0921953',
     template_id: 'business-review',
   },
   'presentation-templates.scratch.complete': { run_id: '5a68fccc-7b90-49b4-88f9-d78bb88255ed' },
@@ -1774,6 +1775,142 @@ describe('native bridge payload schemas', () => {
     }
   );
 
+  it.each([
+    'presentation-templates.describe-spec',
+    'presentation-templates.import-spec-bound',
+    'presentation-templates.scratch.allocate',
+    'presentation-sources.bind-draft',
+    'presentation-sources.grant-workspace-source',
+    'presentation-runs.start',
+    'presentation-runs.get',
+    'presentation-runs.list-recoverable',
+    'presentation-runs.open-recovery',
+    'presentation-runs.discard',
+    'presentation-runs.claim-initial-dispatch',
+    'presentation-runs.renew-initial-dispatch',
+    'presentation-runs.dispatch',
+  ] as const)('accepts and canonicalizes a backend conversation id for %s', (providerKey) => {
+    const payload = { ...VALID_PAYLOADS[providerKey], conversation_id: 'D0921953' };
+
+    expect(parseNativeBridgePayload(providerKey, payload)).toEqual({ ...payload, conversation_id: 'd0921953' });
+  });
+
+  it.each([
+    'presentation-sources.get-source-owner',
+    'presentation-sources.pick-sources',
+    'presentation-sources.revoke',
+    'presentation-sources.confirm-queued',
+  ] as const)('accepts and canonicalizes a backend conversation owner for %s', (providerKey) => {
+    const payload = {
+      ...VALID_PAYLOADS[providerKey],
+      owner: { owner_type: 'conversation' as const, conversation_id: 'D0921953' },
+    };
+
+    expect(parseNativeBridgePayload(providerKey, payload)).toEqual({
+      ...payload,
+      owner: { owner_type: 'conversation', conversation_id: 'd0921953' },
+    });
+  });
+
+  it('keeps legacy conversation UUIDs compatible while canonicalizing their case', () => {
+    const payload = {
+      ...VALID_PAYLOADS['presentation-runs.list-recoverable'],
+      conversation_id: '2BE7B8FC-6AF5-42B8-AED5-03644735C730',
+    };
+
+    expect(parseNativeBridgePayload('presentation-runs.list-recoverable', payload)).toEqual({
+      ...payload,
+      conversation_id: '2be7b8fc-6af5-42b8-aed5-03644735c730',
+    });
+  });
+
+  it.each([
+    'presentation-templates.describe-spec',
+    'presentation-templates.import-spec-bound',
+    'presentation-templates.scratch.allocate',
+    'presentation-sources.bind-draft',
+    'presentation-sources.grant-workspace-source',
+    'presentation-runs.start',
+    'presentation-runs.get',
+    'presentation-runs.list-recoverable',
+    'presentation-runs.open-recovery',
+    'presentation-runs.discard',
+    'presentation-runs.claim-initial-dispatch',
+    'presentation-runs.renew-initial-dispatch',
+    'presentation-runs.dispatch',
+  ] as const)('rejects an unsafe presentation conversation id for %s', (providerKey) => {
+    expect(() =>
+      parseNativeBridgePayload(providerKey, {
+        ...VALID_PAYLOADS[providerKey],
+        conversation_id: '../private',
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
+  it.each([
+    'presentation-sources.get-source-owner',
+    'presentation-sources.pick-sources',
+    'presentation-sources.revoke',
+    'presentation-sources.confirm-queued',
+  ] as const)('rejects an unsafe presentation conversation owner for %s', (providerKey) => {
+    expect(() =>
+      parseNativeBridgePayload(providerKey, {
+        ...VALID_PAYLOADS[providerKey],
+        owner: { owner_type: 'conversation', conversation_id: '../private' },
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
+  it.each([
+    [
+      'presentation-templates.scratch.complete',
+      { ...VALID_PAYLOADS['presentation-templates.scratch.complete'], run_id: 'd0921953' },
+    ],
+    [
+      'presentation-sources.create-draft',
+      { ...VALID_PAYLOADS['presentation-sources.create-draft'], client_request_id: 'd0921953' },
+    ],
+    ['presentation-sources.bind-draft', { ...VALID_PAYLOADS['presentation-sources.bind-draft'], draft_id: 'd0921953' }],
+    ['presentation-sources.revoke', { ...VALID_PAYLOADS['presentation-sources.revoke'], grant_id: 'd0921953' }],
+    [
+      'presentation-sources.confirm-queued',
+      { ...VALID_PAYLOADS['presentation-sources.confirm-queued'], queue_item_id: 'd0921953' },
+    ],
+    ['presentation-runs.get', { ...VALID_PAYLOADS['presentation-runs.get'], run_id: 'd0921953' }],
+    [
+      'presentation-runs.claim-initial-dispatch',
+      { ...VALID_PAYLOADS['presentation-runs.claim-initial-dispatch'], holder_id: 'd0921953' },
+    ],
+  ] as const satisfies ReadonlyArray<readonly [NativeBridgeProviderKey, unknown]>)(
+    'does not widen a non-conversation presentation id for %s',
+    (providerKey, payload) => {
+      expect(() => parseNativeBridgePayload(providerKey, payload)).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+    }
+  );
+
+  it.each(
+    (
+      [
+        'presentation-templates.scratch.complete',
+        'presentation-templates.scratch.retain',
+        'presentation-templates.scratch.discard',
+      ] as const
+    ).flatMap((providerKey) =>
+      [
+        ['nil', '00000000-0000-0000-0000-000000000000'],
+        ['v6', '5a68fccc-7b90-69b4-88f9-d78bb88255ed'],
+        ['bad variant', '5a68fccc-7b90-49b4-78f9-d78bb88255ed'],
+      ].map(([kind, runId]) => [providerKey, kind, runId] as const)
+    )
+  )('rejects a %s scratch run id classified as %s', (providerKey, _kind, runId) => {
+    expect(() =>
+      parseNativeBridgePayload(providerKey, {
+        ...VALID_PAYLOADS[providerKey],
+        run_id: runId,
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
   it('has exactly one request and response schema for every renderer-owned query', () => {
     expect(Object.keys(rendererBridgeQuerySchemas)).toEqual(RENDERER_BRIDGE_QUERY_KEYS);
     expect(
@@ -1953,5 +2090,62 @@ describe('native bridge payload schemas', () => {
 
     expect(thrown).toEqual(new Error(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE));
     expect(String(thrown)).not.toContain(secret);
+  });
+
+  it('does not retain payload-controlled record keys in native rejection diagnostics', () => {
+    const secretKey = 'customer-secret-token-name';
+    let thrown: unknown;
+    try {
+      parseNativeBridgePayload('theme:set-active', {
+        ...VALID_PAYLOADS['theme:set-active'],
+        tokens: { [secretKey]: 42 },
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(getNativeBridgePayloadDiagnostic(thrown)).toEqual({
+      providerKey: 'theme:set-active',
+      issues: [{ code: 'invalid_type', path: ['tokens'] }],
+    });
+    expect(JSON.stringify(getNativeBridgePayloadDiagnostic(thrown))).not.toContain(secretKey);
+  });
+
+  it('bounds native rejection diagnostics without retaining Zod messages or received data', () => {
+    const secret = 'secret-diagnostic-value';
+    const oversizedPath = Array.from({ length: 12 }, (_, index) => `${'field'.repeat(40)}-${index}`);
+    const safeParse = vi.spyOn(nativeBridgePayloadSchemas['webui.start'], 'safeParse').mockReturnValue({
+      success: false,
+      error: {
+        issues: Array.from({ length: 12 }, () => ({
+          code: 'custom',
+          path: oversizedPath,
+          message: secret,
+          received: secret,
+        })),
+      },
+    } as never);
+
+    let thrown: unknown;
+    try {
+      parseNativeBridgePayload('webui.start', { port: secret });
+    } catch (error) {
+      thrown = error;
+    } finally {
+      safeParse.mockRestore();
+    }
+
+    const diagnostic = getNativeBridgePayloadDiagnostic(thrown);
+    expect({
+      issueCount: diagnostic?.issues.length,
+      issueShapeIsSafe: diagnostic?.issues.every(
+        (issue) =>
+          Object.keys(issue).toSorted().join(',') === 'code,path' &&
+          issue.path.length <= 8 &&
+          JSON.stringify(issue.path).length <= 256
+      ),
+      topLevelShapeIsSafe: diagnostic && Object.keys(diagnostic).toSorted().join(',') === 'issues,providerKey',
+    }).toEqual({ issueCount: 8, issueShapeIsSafe: true, topLevelShapeIsSafe: true });
+    expect(JSON.stringify(diagnostic)).not.toContain(secret);
   });
 });

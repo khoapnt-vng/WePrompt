@@ -901,6 +901,12 @@
       "importError": "无法添加参考图，请重试。"
     },
     "workspace": {
+      "beatPanel": {
+        "coverage": {
+          "trimGuidance": "边缘 · 修剪 · 免费",
+          "boundaryGuidance": "边界 · 需要重新渲染"
+        }
+      },
       "controls": {
         "briefAndRulesTitle": "简报与规则"
       },

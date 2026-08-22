@@ -7,6 +7,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 import { PRESENTATION_RUN_LIMITS } from '@/common/config/constants';
+import { normalizePresentationConversationId } from '@/common/types/office/presentationConversationId';
 import type {
   ClaimInitialPresentationDispatchRequest,
   ClaimInitialPresentationDispatchResult,
@@ -66,6 +67,14 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 const SHA256_RE = /^[0-9a-f]{64}$/;
 const LEASE_TOKEN_RE = /^[A-Za-z0-9_-]{32,256}$/;
 
+const isSamePresentationConversation = (left: unknown, right: unknown): boolean => {
+  const normalizedLeft = normalizePresentationConversationId(left);
+  return normalizedLeft !== null && normalizedLeft === normalizePresentationConversationId(right);
+};
+
+const canonicalPresentationConversationId = (value: string): string =>
+  normalizePresentationConversationId(value) ?? value;
+
 export type PresentationRunAuthorityResolution =
   | {
       ok: true;
@@ -113,6 +122,7 @@ export type PreparedPresentationRunDispatch = {
 };
 
 type NormalizedStartRequest = StartPresentationRunRequest;
+type NormalizedLeaseRequest = RenewInitialPresentationDispatchRequest;
 
 type AuthorizedPresentationConversation = Extract<PresentationRunAuthorityResolution, { ok: true }>;
 
@@ -198,11 +208,11 @@ function stateConflict(run: StoredPresentationRunManifest): PresentationRunFailu
 }
 
 function normalizeRequest(value: unknown): NormalizedStartRequest | null {
+  const conversationId = isPlainRecord(value) ? normalizePresentationConversationId(value.conversation_id) : null;
   if (
     !isPlainRecord(value) ||
     !hasExactKeys(value, ['conversation_id', 'client_request_id', 'input', 'selected_template_id', 'sources']) ||
-    typeof value.conversation_id !== 'string' ||
-    !UUID_RE.test(value.conversation_id) ||
+    conversationId === null ||
     typeof value.client_request_id !== 'string' ||
     !UUID_RE.test(value.client_request_id) ||
     typeof value.input !== 'string' ||
@@ -246,7 +256,7 @@ function normalizeRequest(value: unknown): NormalizedStartRequest | null {
   }
 
   return {
-    conversation_id: value.conversation_id.toLowerCase(),
+    conversation_id: conversationId,
     client_request_id: value.client_request_id.toLowerCase(),
     input: value.input,
     selected_template_id: value.selected_template_id,
@@ -259,15 +269,14 @@ function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): b
 }
 
 function normalizeGetRequest(value: unknown): GetPresentationRunRequest | null {
-  if (!isPlainRecord(value) || typeof value.conversation_id !== 'string' || !UUID_RE.test(value.conversation_id)) {
-    return null;
-  }
+  const conversationId = isPlainRecord(value) ? normalizePresentationConversationId(value.conversation_id) : null;
+  if (!isPlainRecord(value) || conversationId === null) return null;
   if (
     hasExactKeys(value, ['conversation_id', 'run_id']) &&
     typeof value.run_id === 'string' &&
     UUID_RE.test(value.run_id)
   ) {
-    return { conversation_id: value.conversation_id.toLowerCase(), run_id: value.run_id.toLowerCase() };
+    return { conversation_id: conversationId, run_id: value.run_id.toLowerCase() };
   }
   if (
     hasExactKeys(value, ['conversation_id', 'client_request_id']) &&
@@ -275,7 +284,7 @@ function normalizeGetRequest(value: unknown): GetPresentationRunRequest | null {
     UUID_RE.test(value.client_request_id)
   ) {
     return {
-      conversation_id: value.conversation_id.toLowerCase(),
+      conversation_id: conversationId,
       client_request_id: value.client_request_id.toLowerCase(),
     };
   }
@@ -283,11 +292,11 @@ function normalizeGetRequest(value: unknown): GetPresentationRunRequest | null {
 }
 
 function normalizeListRequest(value: unknown): ListRecoverablePresentationRunsRequest | null {
+  const conversationId = isPlainRecord(value) ? normalizePresentationConversationId(value.conversation_id) : null;
   if (
     !isPlainRecord(value) ||
     !hasOnlyKeys(value, ['conversation_id', 'cursor', 'limit']) ||
-    typeof value.conversation_id !== 'string' ||
-    !UUID_RE.test(value.conversation_id) ||
+    conversationId === null ||
     (value.cursor !== undefined &&
       (typeof value.cursor !== 'string' ||
         value.cursor.length < 3 ||
@@ -301,18 +310,18 @@ function normalizeListRequest(value: unknown): ListRecoverablePresentationRunsRe
     return null;
   }
   return {
-    conversation_id: value.conversation_id.toLowerCase(),
+    conversation_id: conversationId,
     ...(value.cursor === undefined ? {} : { cursor: value.cursor as string }),
     ...(value.limit === undefined ? {} : { limit: value.limit as number }),
   };
 }
 
 function normalizeOpenRequest(value: unknown): OpenPresentationRunRequest | null {
+  const conversationId = isPlainRecord(value) ? normalizePresentationConversationId(value.conversation_id) : null;
   if (
     !isPlainRecord(value) ||
     !hasExactKeys(value, ['conversation_id', 'run_id', 'expected_sha256']) ||
-    typeof value.conversation_id !== 'string' ||
-    !UUID_RE.test(value.conversation_id) ||
+    conversationId === null ||
     typeof value.run_id !== 'string' ||
     !UUID_RE.test(value.run_id) ||
     typeof value.expected_sha256 !== 'string' ||
@@ -321,18 +330,18 @@ function normalizeOpenRequest(value: unknown): OpenPresentationRunRequest | null
     return null;
   }
   return {
-    conversation_id: value.conversation_id.toLowerCase(),
+    conversation_id: conversationId,
     run_id: value.run_id.toLowerCase(),
     expected_sha256: value.expected_sha256,
   };
 }
 
 function normalizeDiscardRequest(value: unknown): DiscardPresentationRunRequest | null {
+  const conversationId = isPlainRecord(value) ? normalizePresentationConversationId(value.conversation_id) : null;
   if (
     !isPlainRecord(value) ||
     !hasExactKeys(value, ['conversation_id', 'run_id', 'expected_revision']) ||
-    typeof value.conversation_id !== 'string' ||
-    !UUID_RE.test(value.conversation_id) ||
+    conversationId === null ||
     typeof value.run_id !== 'string' ||
     !UUID_RE.test(value.run_id) ||
     !Number.isSafeInteger(value.expected_revision) ||
@@ -341,18 +350,18 @@ function normalizeDiscardRequest(value: unknown): DiscardPresentationRunRequest 
     return null;
   }
   return {
-    conversation_id: value.conversation_id.toLowerCase(),
+    conversation_id: conversationId,
     run_id: value.run_id.toLowerCase(),
     expected_revision: value.expected_revision as number,
   };
 }
 
 function normalizeClaimRequest(value: unknown): ClaimInitialPresentationDispatchRequest | null {
+  const conversationId = isPlainRecord(value) ? normalizePresentationConversationId(value.conversation_id) : null;
   if (
     !isPlainRecord(value) ||
     !hasExactKeys(value, ['conversation_id', 'run_id', 'holder_id', 'expected_revision']) ||
-    typeof value.conversation_id !== 'string' ||
-    !UUID_RE.test(value.conversation_id) ||
+    conversationId === null ||
     typeof value.run_id !== 'string' ||
     !UUID_RE.test(value.run_id) ||
     typeof value.holder_id !== 'string' ||
@@ -363,21 +372,19 @@ function normalizeClaimRequest(value: unknown): ClaimInitialPresentationDispatch
     return null;
   }
   return {
-    conversation_id: value.conversation_id.toLowerCase(),
+    conversation_id: conversationId,
     run_id: value.run_id.toLowerCase(),
     holder_id: value.holder_id.toLowerCase(),
     expected_revision: value.expected_revision as number,
   };
 }
 
-function normalizeLeaseRequest<
-  T extends RenewInitialPresentationDispatchRequest | DispatchInitialPresentationRunRequest,
->(value: unknown): T | null {
+function normalizeLeaseRequest(value: unknown): NormalizedLeaseRequest | null {
+  const conversationId = isPlainRecord(value) ? normalizePresentationConversationId(value.conversation_id) : null;
   if (
     !isPlainRecord(value) ||
     !hasExactKeys(value, ['conversation_id', 'run_id', 'lease_token', 'expected_revision']) ||
-    typeof value.conversation_id !== 'string' ||
-    !UUID_RE.test(value.conversation_id) ||
+    conversationId === null ||
     typeof value.run_id !== 'string' ||
     !UUID_RE.test(value.run_id) ||
     typeof value.lease_token !== 'string' ||
@@ -388,11 +395,11 @@ function normalizeLeaseRequest<
     return null;
   }
   return {
-    conversation_id: value.conversation_id.toLowerCase(),
+    conversation_id: conversationId,
     run_id: value.run_id.toLowerCase(),
     lease_token: value.lease_token,
     expected_revision: value.expected_revision as number,
-  } as T;
+  };
 }
 
 function isDiscardQualified(run: StoredPresentationRunManifest): boolean {
@@ -422,7 +429,7 @@ function toPublicRun(run: StoredPresentationRunManifest): PresentationRunPublicD
   const base = {
     runId: run.runId,
     clientRequestId: run.clientRequestId,
-    conversationId: run.conversationId,
+    conversationId: canonicalPresentationConversationId(run.conversationId),
     selectedTemplateId: run.selectedTemplateId,
     revision: run.revision,
     createdAt: run.createdAt,
@@ -533,7 +540,7 @@ function parseRecoveryCursor(value: string, conversationId: string, secret: Buff
     !isPlainRecord(decoded) ||
     !hasExactKeys(decoded, ['version', 'conversationId', 'updatedAt', 'runId']) ||
     decoded.version !== 1 ||
-    decoded.conversationId !== conversationId ||
+    !isSamePresentationConversation(decoded.conversationId, conversationId) ||
     typeof decoded.updatedAt !== 'string' ||
     !Number.isFinite(Date.parse(decoded.updatedAt)) ||
     typeof decoded.runId !== 'string' ||
@@ -572,7 +579,7 @@ function startSuccess(run: StoredPresentationRunManifest): StartPresentationRunR
     run: {
       runId: run.runId,
       clientRequestId: run.clientRequestId,
-      conversationId: run.conversationId,
+      conversationId: canonicalPresentationConversationId(run.conversationId),
       selectedTemplateId: run.selectedTemplateId,
       revision: run.revision,
       createdAt: run.createdAt,
@@ -723,7 +730,7 @@ export class PresentationRunService {
       return runFailure('FEATURE_DISABLED') as RenewInitialPresentationDispatchResult;
     if (!this.options.isDesktopRuntime())
       return runFailure('DESKTOP_REQUIRED') as RenewInitialPresentationDispatchResult;
-    const request = normalizeLeaseRequest<RenewInitialPresentationDispatchRequest>(unsafeRequest);
+    const request = normalizeLeaseRequest(unsafeRequest);
     if (request === null) return runFailure('INVALID_REQUEST') as RenewInitialPresentationDispatchResult;
     const authorization = await this.authorizeConversation(request.conversation_id);
     if ('failure' in authorization) return authorization.failure as RenewInitialPresentationDispatchResult;
@@ -733,7 +740,7 @@ export class PresentationRunService {
   async dispatch(unsafeRequest: DispatchInitialPresentationRunRequest): Promise<DispatchInitialPresentationRunResult> {
     if (!this.options.isFeatureEnabled()) return runFailure('FEATURE_DISABLED') as DispatchInitialPresentationRunResult;
     if (!this.options.isDesktopRuntime()) return runFailure('DESKTOP_REQUIRED') as DispatchInitialPresentationRunResult;
-    const request = normalizeLeaseRequest<DispatchInitialPresentationRunRequest>(unsafeRequest);
+    const request = normalizeLeaseRequest(unsafeRequest);
     if (request === null) return runFailure('INVALID_REQUEST') as DispatchInitialPresentationRunResult;
     const authorization = await this.authorizeConversation(request.conversation_id);
     if ('failure' in authorization) return authorization.failure as DispatchInitialPresentationRunResult;
@@ -755,7 +762,9 @@ export class PresentationRunService {
     } catch {
       return runFailure('PERSISTENCE_FAILED');
     }
-    if (run === null || run.conversationId !== request.conversation_id) return runFailure('RUN_NOT_FOUND');
+    if (run === null || !isSamePresentationConversation(run.conversationId, request.conversation_id)) {
+      return runFailure('RUN_NOT_FOUND');
+    }
     try {
       return { ok: true, run: toPublicRun(run) };
     } catch {
@@ -783,7 +792,9 @@ export class PresentationRunService {
     } catch {
       return runFailure('PERSISTENCE_FAILED');
     }
-    if (runs.some((run) => run.conversationId !== request.conversation_id)) return runFailure('PERSISTENCE_FAILED');
+    if (runs.some((run) => !isSamePresentationConversation(run.conversationId, request.conversation_id))) {
+      return runFailure('PERSISTENCE_FAILED');
+    }
 
     let offset = 0;
     if (cursor !== null) {
@@ -821,7 +832,9 @@ export class PresentationRunService {
     } catch {
       return runFailure('PERSISTENCE_FAILED');
     }
-    if (run === null || run.conversationId !== request.conversation_id) return runFailure('RUN_NOT_FOUND');
+    if (run === null || !isSamePresentationConversation(run.conversationId, request.conversation_id)) {
+      return runFailure('RUN_NOT_FOUND');
+    }
     const candidate = run.retainedCandidate;
     if (candidate === null || candidate.sha256 !== request.expected_sha256 || !canOpenRecovery(run)) {
       return recoveryDenialFailure('UNSAFE_TO_OPEN', run.runId, run.dispatchStatus);
@@ -841,7 +854,9 @@ export class PresentationRunService {
     } catch {
       return runFailure('PERSISTENCE_FAILED');
     }
-    if (run === null || run.conversationId !== request.conversation_id) return runFailure('RUN_NOT_FOUND');
+    if (run === null || !isSamePresentationConversation(run.conversationId, request.conversation_id)) {
+      return runFailure('RUN_NOT_FOUND');
+    }
     if (run.dispatchStatus === 'discarded') {
       let completedTombstone: StoredPresentationRunManifest;
       try {
@@ -850,7 +865,7 @@ export class PresentationRunService {
         return runFailure('PERSISTENCE_FAILED');
       }
       if (
-        completedTombstone.conversationId !== request.conversation_id ||
+        !isSamePresentationConversation(completedTombstone.conversationId, request.conversation_id) ||
         completedTombstone.dispatchStatus !== 'discarded'
       ) {
         return runFailure('PERSISTENCE_FAILED');
@@ -877,14 +892,19 @@ export class PresentationRunService {
       } catch {
         return runFailure('PERSISTENCE_FAILED');
       }
-      if (current?.conversationId !== request.conversation_id) return runFailure('PERSISTENCE_FAILED');
+      if (!isSamePresentationConversation(current?.conversationId, request.conversation_id)) {
+        return runFailure('PERSISTENCE_FAILED');
+      }
       if (current.dispatchStatus === 'discarded') {
         try {
           discarded = await this.options.store.discardRun(current.runId, request.expected_revision);
         } catch {
           return runFailure('PERSISTENCE_FAILED');
         }
-        if (discarded.conversationId !== request.conversation_id || discarded.dispatchStatus !== 'discarded') {
+        if (
+          !isSamePresentationConversation(discarded.conversationId, request.conversation_id) ||
+          discarded.dispatchStatus !== 'discarded'
+        ) {
           return runFailure('PERSISTENCE_FAILED');
         }
         return { ok: true, runId: discarded.runId, discardedAt: discarded.updatedAt, alreadyDiscarded: false };
@@ -892,7 +912,10 @@ export class PresentationRunService {
       if (current.revision !== request.expected_revision) return runStateFailure(current);
       return runFailure('PERSISTENCE_FAILED');
     }
-    if (discarded.conversationId !== request.conversation_id || discarded.dispatchStatus !== 'discarded') {
+    if (
+      !isSamePresentationConversation(discarded.conversationId, request.conversation_id) ||
+      discarded.dispatchStatus !== 'discarded'
+    ) {
       return runFailure('PERSISTENCE_FAILED');
     }
     return { ok: true, runId: discarded.runId, discardedAt: discarded.updatedAt, alreadyDiscarded: false };

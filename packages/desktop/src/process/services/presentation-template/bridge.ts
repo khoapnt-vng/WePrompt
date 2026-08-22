@@ -11,6 +11,7 @@ import { app, dialog, ipcMain, type BrowserWindow, type IpcMainInvokeEvent, type
 import { ipcBridge } from '@/common';
 import { httpRequest, isBackendHttpError } from '@/common/adapter/httpBridge';
 import { PRESENTATION_RUN_V2_ENABLED } from '@/common/config/constants';
+import { normalizePresentationConversationId } from '@/common/types/office/presentationConversationId';
 import type {
   ClaimInitialPresentationDispatchRequest,
   ClaimInitialPresentationDispatchResult,
@@ -48,7 +49,7 @@ import * as presentationRunModule from './run';
 const PRESENTATION_EXTERNAL_DROP_CHANNEL = 'presentation-sources:grant-external-drop';
 const PRESENTATION_PRINCIPAL_ID = 'desktop-local-principal';
 const PRESENTATION_TEAM_USER_ID = 'system_default_user';
-const UUID_PATTERN = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const isPresentationDesktopRuntime = (): boolean => process.type === 'browser';
 
 type PresentationExternalDropPathRequest = {
@@ -428,28 +429,28 @@ const hasExactKeys = (value: Record<string, unknown>, keys: readonly string[]): 
   return actualKeys.length === keys.length && actualKeys.every((key) => keys.includes(key));
 };
 
-const isPresentationGrantOwner = (value: unknown): value is PresentationGrantOwner => {
-  if (!isRecord(value) || typeof value.owner_type !== 'string') return false;
+const parsePresentationGrantOwner = (value: unknown): PresentationGrantOwner | null => {
+  if (!isRecord(value) || typeof value.owner_type !== 'string') return null;
   if (value.owner_type === 'draft') {
-    return (
-      hasExactKeys(value, ['owner_type', 'draft_id']) &&
+    return hasExactKeys(value, ['owner_type', 'draft_id']) &&
       typeof value.draft_id === 'string' &&
       UUID_PATTERN.test(value.draft_id)
-    );
+      ? { owner_type: 'draft', draft_id: value.draft_id }
+      : null;
   }
-  return (
-    value.owner_type === 'conversation' &&
-    hasExactKeys(value, ['owner_type', 'conversation_id']) &&
-    typeof value.conversation_id === 'string' &&
-    UUID_PATTERN.test(value.conversation_id)
-  );
+  if (value.owner_type !== 'conversation' || !hasExactKeys(value, ['owner_type', 'conversation_id'])) return null;
+  const conversationId = normalizePresentationConversationId(value.conversation_id);
+  return conversationId === null
+    ? null
+    : ({ owner_type: 'conversation', conversation_id: conversationId } satisfies PresentationGrantOwner);
 };
 
 const parsePresentationExternalDropPathRequest = (value: unknown): PresentationExternalDropPathRequest | null => {
+  const owner = isRecord(value) ? parsePresentationGrantOwner(value.owner) : null;
   if (
     !isRecord(value) ||
     !hasExactKeys(value, ['owner', 'native_paths', 'expected_owner_revision']) ||
-    !isPresentationGrantOwner(value.owner) ||
+    owner === null ||
     !Number.isSafeInteger(value.expected_owner_revision) ||
     (value.expected_owner_revision as number) < 0 ||
     !Array.isArray(value.native_paths) ||
@@ -475,7 +476,7 @@ const parsePresentationExternalDropPathRequest = (value: unknown): PresentationE
   }
 
   return {
-    owner: value.owner,
+    owner,
     native_paths: nativePaths,
     expected_owner_revision: value.expected_owner_revision as number,
   };
